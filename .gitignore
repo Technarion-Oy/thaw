@@ -1,0 +1,33 @@
+# ── Go ────────────────────────────────────────────────────────────────────────
+build/bin/
+*.exe
+*.test
+*.out
+coverage.out
+*.tmp          # atomic-write temp files produced by the DDL exporter
+
+# ── Wails build artefacts ─────────────────────────────────────────────────────
+/build/darwin/thaw.app
+/build/windows/thaw.exe
+
+# ── Frontend ──────────────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+
+# ── Credentials / environment ─────────────────────────────────────────────────
+.env
+.env.*
+!.env.example    # allow a committed example file
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── IDE / tooling ─────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── Claude Code (local session state — not project files) ─────────────────────
+.claude/
