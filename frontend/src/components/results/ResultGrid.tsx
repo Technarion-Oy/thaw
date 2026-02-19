@@ -2,10 +2,7 @@ import { useMemo } from "react";
 import { AgGridReact } from "ag-grid-react";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
-import { ModuleRegistry, AllCommunityModule } from "ag-grid-community";
 import type { QueryResult } from "../../store/queryStore";
-
-ModuleRegistry.registerModules([AllCommunityModule]);
 
 interface Props {
   result: QueryResult;

@@ -9,7 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@wailsapp/runtime": "^2.0.0",
     "antd": "^5.22.0",
     "@ant-design/icons": "^5.5.0",
     "@monaco-editor/react": "^4.6.0",

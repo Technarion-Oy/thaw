@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Modal, Form, Input, Button, Alert, Space, Typography } from "antd";
-import { SnowflakeOutlined } from "@ant-design/icons";
+import { Form, Input, Button, Alert, Space, Typography } from "antd";
+import { CloudServerOutlined } from "@ant-design/icons";
 import { Connect } from "../../../wailsjs/go/main/App";
 import { useConnectionStore, type ConnectionParams } from "../../store/connectionStore";
 
@@ -38,7 +38,7 @@ export default function ConnectModal() {
       <div style={{ width: 420 }}>
         <Space direction="vertical" size={24} style={{ width: "100%" }}>
           <Space align="center">
-            <SnowflakeOutlined style={{ fontSize: 28, color: "#29B6F6" }} />
+            <CloudServerOutlined style={{ fontSize: 28, color: "#29B6F6" }} />
             <Title level={3} style={{ margin: 0, color: "#e6edf3" }}>
               Connect to Snowflake
             </Title>

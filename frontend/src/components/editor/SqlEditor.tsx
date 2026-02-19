@@ -18,7 +18,7 @@ export default function SqlEditor() {
   const handleMount: OnMount = (editor, monaco) => {
     // Register Snowflake keyword completions
     monaco.languages.registerCompletionItemProvider("sql", {
-      provideCompletionItems: (model, position) => {
+      provideCompletionItems: (model: any, position: any) => {
         const word = model.getWordUntilPosition(position);
         const range = {
           startLineNumber: position.lineNumber,
