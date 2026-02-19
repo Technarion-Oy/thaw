@@ -6,6 +6,18 @@ export function CancelConnect() {
   return window['go']['main']['App']['CancelConnect']();
 }
 
+export function GitCommitAndPush(arg1) {
+  return window['go']['main']['App']['GitCommitAndPush'](arg1);
+}
+
+export function GitStatus(arg1) {
+  return window['go']['main']['App']['GitStatus'](arg1);
+}
+
+export function PickDirectory() {
+  return window['go']['main']['App']['PickDirectory']();
+}
+
 export function Connect(arg1) {
   return window['go']['main']['App']['Connect'](arg1);
 }

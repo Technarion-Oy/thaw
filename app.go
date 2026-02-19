@@ -7,6 +7,7 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"thaw/internal/ddl"
+	"thaw/internal/gitrepo"
 	"thaw/internal/snowflake"
 )
 
@@ -57,6 +58,32 @@ func (a *App) CancelConnect() {
 	if a.cancelConnect != nil {
 		a.cancelConnect()
 	}
+}
+
+// ─── Git integration ──────────────────────────────────────────────────────────
+
+// GitStatus returns the git status for the given directory.
+// Safe to call on any directory — non-repos return IsRepo=false without error.
+func (a *App) GitStatus(dir string) (gitrepo.RepoStatus, error) {
+	return gitrepo.GetStatus(dir)
+}
+
+// GitCommitAndPush stages all changes, commits, and pushes to the remote.
+// The Token field is used only in-memory for the push URL and is never persisted.
+func (a *App) GitCommitAndPush(params gitrepo.PushParams) error {
+	return gitrepo.CommitAndPush(a.ctx, params)
+}
+
+// PickDirectory opens a native folder-picker dialog and returns the selected path.
+// Returns an empty string if the user cancels.
+func (a *App) PickDirectory() string {
+	path, err := wailsruntime.OpenDirectoryDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title: "Select repository directory",
+	})
+	if err != nil {
+		return ""
+	}
+	return path
 }
 
 // Disconnect closes the active Snowflake connection.

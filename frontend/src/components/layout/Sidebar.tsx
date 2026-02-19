@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Tree, Typography, Spin, Empty } from "antd";
+import { Tree, Typography, Spin, Empty, Divider } from "antd";
 import { DatabaseOutlined, TableOutlined, EyeOutlined } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
 import { ListDatabases, ListSchemas, ListObjects } from "../../../wailsjs/go/main/App";
+import GitPanel from "../git/GitPanel";
 
 const { Text } = Typography;
 
@@ -100,6 +101,9 @@ export default function Sidebar() {
           style={{ background: "transparent", color: "#e6edf3" }}
         />
       )}
+
+      <Divider style={{ borderColor: "#30363d", margin: "8px 0 0" }} />
+      <GitPanel />
     </div>
   );
 }
