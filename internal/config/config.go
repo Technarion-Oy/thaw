@@ -17,9 +17,20 @@ type Connection struct {
 	Schema    string `json:"schema"`
 }
 
+// GitConfig holds the persisted git / export settings.
+// Token is intentionally excluded — it must not be written to disk.
+type GitConfig struct {
+	ExportDir   string `json:"exportDir"`
+	RemoteURL   string `json:"remoteURL"`
+	Branch      string `json:"branch"`
+	AuthorName  string `json:"authorName"`
+	AuthorEmail string `json:"authorEmail"`
+}
+
 // AppConfig is the on-disk configuration for Thaw.
 type AppConfig struct {
 	Connections []Connection `json:"connections"`
+	Git         GitConfig    `json:"git"`
 }
 
 func configPath() (string, error) {

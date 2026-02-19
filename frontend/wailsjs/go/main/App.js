@@ -6,18 +6,6 @@ export function CancelConnect() {
   return window['go']['main']['App']['CancelConnect']();
 }
 
-export function GitCommitAndPush(arg1) {
-  return window['go']['main']['App']['GitCommitAndPush'](arg1);
-}
-
-export function GitStatus(arg1) {
-  return window['go']['main']['App']['GitStatus'](arg1);
-}
-
-export function PickDirectory() {
-  return window['go']['main']['App']['PickDirectory']();
-}
-
 export function Connect(arg1) {
   return window['go']['main']['App']['Connect'](arg1);
 }
@@ -38,6 +26,18 @@ export function ExportDatabaseDDL(arg1, arg2) {
   return window['go']['main']['App']['ExportDatabaseDDL'](arg1, arg2);
 }
 
+export function GetGitConfig() {
+  return window['go']['main']['App']['GetGitConfig']();
+}
+
+export function GitCommitAndPush(arg1) {
+  return window['go']['main']['App']['GitCommitAndPush'](arg1);
+}
+
+export function GitStatus(arg1) {
+  return window['go']['main']['App']['GitStatus'](arg1);
+}
+
 export function IsConnected() {
   return window['go']['main']['App']['IsConnected']();
 }
@@ -52,4 +52,12 @@ export function ListObjects(arg1, arg2) {
 
 export function ListSchemas(arg1) {
   return window['go']['main']['App']['ListSchemas'](arg1);
+}
+
+export function PickDirectory() {
+  return window['go']['main']['App']['PickDirectory']();
+}
+
+export function SaveGitConfig(arg1) {
+  return window['go']['main']['App']['SaveGitConfig'](arg1);
 }

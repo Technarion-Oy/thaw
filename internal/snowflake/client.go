@@ -203,10 +203,10 @@ func (c *Client) ListSchemas(ctx context.Context, database string) ([]string, er
 	return c.queryStringSlice(ctx, fmt.Sprintf("SHOW SCHEMAS IN DATABASE %s", database), 1)
 }
 
-// ListObjects returns tables and views inside a schema.
+// ListObjects returns tables, views, functions, etc. inside a schema.
 func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
 	rows, err := c.db.QueryContext(ctx,
-		fmt.Sprintf("SHOW OBJECTS IN SCHEMA %s.%s", database, schema))
+		fmt.Sprintf("SHOW TERSE OBJECTS IN SCHEMA %s.%s", database, schema))
 	if err != nil {
 		return nil, err
 	}
@@ -223,9 +223,9 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 		if err := rows.Scan(ptrs...); err != nil {
 			return nil, err
 		}
-		// SHOW OBJECTS columns: created_on, name, database_name, schema_name, kind, ...
+		// SHOW TERSE OBJECTS columns: created_on, name, kind, database_name, schema_name
 		name := fmt.Sprintf("%v", vals[1])
-		kind := fmt.Sprintf("%v", vals[4])
+		kind := fmt.Sprintf("%v", vals[2])
 		objects = append(objects, SnowflakeObject{Name: name, Kind: kind, Schema: schema})
 	}
 	return objects, rows.Err()

@@ -6,6 +6,7 @@ import (
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"thaw/internal/config"
 	"thaw/internal/ddl"
 	"thaw/internal/gitrepo"
 	"thaw/internal/snowflake"
@@ -58,6 +59,28 @@ func (a *App) CancelConnect() {
 	if a.cancelConnect != nil {
 		a.cancelConnect()
 	}
+}
+
+// ─── Git / export configuration ──────────────────────────────────────────────
+
+// GetGitConfig returns the persisted git / export settings.
+func (a *App) GetGitConfig() (config.GitConfig, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return config.GitConfig{}, err
+	}
+	return cfg.Git, nil
+}
+
+// SaveGitConfig persists git / export settings to disk.
+// The token field is intentionally absent — it must never be written.
+func (a *App) SaveGitConfig(gitCfg config.GitConfig) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	cfg.Git = gitCfg
+	return config.Save(cfg)
 }
 
 // ─── Git integration ──────────────────────────────────────────────────────────

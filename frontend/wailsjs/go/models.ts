@@ -1,3 +1,28 @@
+export namespace config {
+	
+	export class GitConfig {
+	    exportDir: string;
+	    remoteURL: string;
+	    branch: string;
+	    authorName: string;
+	    authorEmail: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GitConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.exportDir = source["exportDir"];
+	        this.remoteURL = source["remoteURL"];
+	        this.branch = source["branch"];
+	        this.authorName = source["authorName"];
+	        this.authorEmail = source["authorEmail"];
+	    }
+	}
+
+}
+
 export namespace ddl {
 	
 	export class ExportResult {
@@ -22,7 +47,31 @@ export namespace ddl {
 }
 
 export namespace gitrepo {
-
+	
+	export class PushParams {
+	    dir: string;
+	    remoteURL: string;
+	    branch: string;
+	    token: string;
+	    message: string;
+	    authorName: string;
+	    authorEmail: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PushParams(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.dir = source["dir"];
+	        this.remoteURL = source["remoteURL"];
+	        this.branch = source["branch"];
+	        this.token = source["token"];
+	        this.message = source["message"];
+	        this.authorName = source["authorName"];
+	        this.authorEmail = source["authorEmail"];
+	    }
+	}
 	export class RepoStatus {
 	    isRepo: boolean;
 	    branch: string;
@@ -32,8 +81,11 @@ export namespace gitrepo {
 	    hasRemote: boolean;
 	    remoteURL: string;
 	    ahead: number;
-
-	    static createFrom(source: any = {}) { return new RepoStatus(source); }
+	
+	    static createFrom(source: any = {}) {
+	        return new RepoStatus(source);
+	    }
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.isRepo = source["isRepo"];
@@ -44,27 +96,6 @@ export namespace gitrepo {
 	        this.hasRemote = source["hasRemote"];
 	        this.remoteURL = source["remoteURL"];
 	        this.ahead = source["ahead"];
-	    }
-	}
-	export class PushParams {
-	    dir: string;
-	    remoteURL: string;
-	    branch: string;
-	    token: string;
-	    message: string;
-	    authorName: string;
-	    authorEmail: string;
-
-	    static createFrom(source: any = {}) { return new PushParams(source); }
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.dir = source["dir"];
-	        this.remoteURL = source["remoteURL"];
-	        this.branch = source["branch"];
-	        this.token = source["token"];
-	        this.message = source["message"];
-	        this.authorName = source["authorName"];
-	        this.authorEmail = source["authorEmail"];
 	    }
 	}
 

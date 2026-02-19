@@ -1,59 +1,118 @@
 import { create } from "zustand";
-import { GitStatus, GitCommitAndPush, PickDirectory } from "../../wailsjs/go/main/App";
+import { GitStatus, GitCommitAndPush, PickDirectory, GetGitConfig, SaveGitConfig } from "../../wailsjs/go/main/App";
 import type { gitrepo } from "../../wailsjs/go/models";
 
 export type RepoStatus = gitrepo.RepoStatus;
 export type PushParams = gitrepo.PushParams;
 
 interface GitState {
-  dir: string;
+  // Persistent config (saved to disk, excluding token)
+  exportDir: string;
+  remoteURL: string;
+  branch: string;
+  authorName: string;
+  authorEmail: string;
+  configLoaded: boolean;
+
+  // Runtime state
   status: RepoStatus | null;
   loading: boolean;
   pushing: boolean;
   error: string | null;
 
-  setDir: (dir: string) => void;
-  pickDir: () => Promise<void>;
+  // Actions
+  loadConfig: () => Promise<void>;
+  saveConfig: (patch: Partial<{
+    exportDir: string;
+    remoteURL: string;
+    branch: string;
+    authorName: string;
+    authorEmail: string;
+  }>) => Promise<void>;
+  pickExportDir: () => Promise<void>;
   refreshStatus: () => Promise<void>;
-  push: (params: Omit<PushParams, "dir">) => Promise<void>;
+  push: (params: { token: string; message: string }) => Promise<void>;
   clearError: () => void;
 }
 
 export const useGitStore = create<GitState>((set, get) => ({
-  dir: "",
+  exportDir: "",
+  remoteURL: "",
+  branch: "main",
+  authorName: "",
+  authorEmail: "",
+  configLoaded: false,
+
   status: null,
   loading: false,
   pushing: false,
   error: null,
 
-  setDir: (dir) => set({ dir, status: null, error: null }),
+  loadConfig: async () => {
+    try {
+      const cfg = await GetGitConfig();
+      set({
+        exportDir:   cfg.exportDir   || "",
+        remoteURL:   cfg.remoteURL   || "",
+        branch:      cfg.branch      || "main",
+        authorName:  cfg.authorName  || "",
+        authorEmail: cfg.authorEmail || "",
+        configLoaded: true,
+      });
+      // Auto-refresh git status if we have a saved directory
+      if (cfg.exportDir) {
+        await get().refreshStatus();
+      }
+    } catch {
+      set({ configLoaded: true });
+    }
+  },
 
-  pickDir: async () => {
+  saveConfig: async (patch) => {
+    const { exportDir, remoteURL, branch, authorName, authorEmail } = get();
+    const merged = { exportDir, remoteURL, branch, authorName, authorEmail, ...patch };
+    set(merged);
+    try {
+      await SaveGitConfig(merged);
+    } catch {
+      // non-fatal — in-memory state is still updated
+    }
+  },
+
+  pickExportDir: async () => {
     const dir = await PickDirectory();
     if (!dir) return;
-    set({ dir, status: null, error: null });
+    await get().saveConfig({ exportDir: dir });
     await get().refreshStatus();
   },
 
   refreshStatus: async () => {
-    const { dir } = get();
-    if (!dir) return;
+    const { exportDir } = get();
+    if (!exportDir) return;
     set({ loading: true, error: null });
     try {
-      const status = await GitStatus(dir);
+      const status = await GitStatus(exportDir);
       set({ status, loading: false });
     } catch (e) {
       set({ error: String(e), loading: false });
     }
   },
 
-  push: async (params) => {
-    const { dir, refreshStatus } = get();
-    if (!dir) return;
+  push: async ({ token, message }) => {
+    const { exportDir, remoteURL, branch, authorName, authorEmail } = get();
+    if (!exportDir) return;
     set({ pushing: true, error: null });
     try {
-      await GitCommitAndPush({ ...params, dir });
-      await refreshStatus();
+      await GitCommitAndPush({
+        dir:         exportDir,
+        remoteURL:   remoteURL,
+        branch:      branch || "main",
+        token,
+        message:     message || "chore: export Snowflake DDL",
+        authorName,
+        authorEmail,
+      });
+      await get().refreshStatus();
     } catch (e) {
       set({ error: String(e) });
     } finally {

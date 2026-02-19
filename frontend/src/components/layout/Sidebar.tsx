@@ -1,16 +1,59 @@
 import { useState } from "react";
 import { Tree, Typography, Spin, Empty, Divider } from "antd";
-import { DatabaseOutlined, TableOutlined, EyeOutlined } from "@ant-design/icons";
+import {
+  DatabaseOutlined,
+  TableOutlined,
+  EyeOutlined,
+  FunctionOutlined,
+  CodeOutlined,
+  OrderedListOutlined,
+  InboxOutlined,
+  ApiOutlined,
+  ClockCircleOutlined,
+  FileOutlined,
+  FolderOutlined,
+} from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
 import { ListDatabases, ListSchemas, ListObjects } from "../../../wailsjs/go/main/App";
 import GitPanel from "../git/GitPanel";
 
 const { Text } = Typography;
 
+const KIND_LABEL: Record<string, string> = {
+  TABLE:        "Tables",
+  VIEW:         "Views",
+  FUNCTION:     "Functions",
+  PROCEDURE:    "Procedures",
+  SEQUENCE:     "Sequences",
+  STAGE:        "Stages",
+  STREAM:       "Streams",
+  TASK:         "Tasks",
+  "FILE FORMAT":"File Formats",
+  PIPE:         "Pipes",
+};
+
+const KIND_ORDER = ["TABLE", "VIEW", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "FILE FORMAT", "PIPE"];
+
+function kindIcon(kind: string) {
+  switch (kind) {
+    case "TABLE":       return <TableOutlined />;
+    case "VIEW":        return <EyeOutlined />;
+    case "FUNCTION":    return <FunctionOutlined />;
+    case "PROCEDURE":   return <CodeOutlined />;
+    case "SEQUENCE":    return <OrderedListOutlined />;
+    case "STAGE":       return <InboxOutlined />;
+    case "STREAM":      return <ApiOutlined />;
+    case "TASK":        return <ClockCircleOutlined />;
+    case "FILE FORMAT": return <FileOutlined />;
+    case "PIPE":        return <ApiOutlined />;
+    default:            return <FileOutlined />;
+  }
+}
+
 export default function Sidebar() {
   const [treeData, setTreeData] = useState<DataNode[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  const [loading, setLoading]   = useState(false);
+  const [loaded, setLoaded]     = useState(false);
 
   const loadDatabases = async () => {
     if (loaded) return;
@@ -44,20 +87,42 @@ export default function Sidebar() {
         updateNode(prev, String(key), schemas.map((s) => ({
           title: s,
           key: `schema:${db}:${s}`,
+          icon: <FolderOutlined />,
           isLeaf: false,
         })))
       );
     } else if (parts[0] === "schema") {
       const [, db, schema] = parts;
       const objects = await ListObjects(db, schema);
-      setTreeData((prev) =>
-        updateNode(prev, String(key), objects.map((o) => ({
+
+      // Group by kind
+      const groups: Record<string, typeof objects> = {};
+      for (const obj of objects) {
+        const k = (obj.kind || "OTHER").toUpperCase();
+        if (!groups[k]) groups[k] = [];
+        groups[k].push(obj);
+      }
+
+      // Sort kinds by canonical order, then alphabetically for unknowns
+      const sortedKinds = [
+        ...KIND_ORDER.filter((k) => groups[k]),
+        ...Object.keys(groups).filter((k) => !KIND_ORDER.includes(k)).sort(),
+      ];
+
+      const typeNodes: DataNode[] = sortedKinds.map((kind) => ({
+        title: KIND_LABEL[kind] ?? kind,
+        key: `type:${db}:${schema}:${kind}`,
+        icon: <FolderOutlined style={{ color: "#8b949e" }} />,
+        // Pre-populate children so loadData is never called for these nodes
+        children: groups[kind].map((o) => ({
           title: o.name,
-          key: `obj:${db}:${schema}:${o.name}`,
-          icon: o.kind === "VIEW" ? <EyeOutlined /> : <TableOutlined />,
+          key: `obj:${db}:${schema}:${kind}:${o.name}`,
+          icon: kindIcon(kind),
           isLeaf: true,
-        })))
-      );
+        })),
+      }));
+
+      setTreeData((prev) => updateNode(prev, String(key), typeNodes));
     }
   };
 
