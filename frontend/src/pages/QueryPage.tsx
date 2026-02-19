@@ -10,13 +10,15 @@ import { useConnectionStore } from "../store/connectionStore";
 const { Text } = Typography;
 
 export default function QueryPage() {
-  const { sql, result, isRunning, error, setResult, setRunning, setError } = useQueryStore();
+  const { sql, selectedSql, result, isRunning, error, setResult, setRunning, setError } = useQueryStore();
   const { params, disconnect } = useConnectionStore();
 
   const runQuery = async () => {
+    const query = selectedSql.trim() || sql.trim();
+    if (!query) return;
     setRunning(true);
     try {
-      const res = await ExecuteQuery(sql);
+      const res = await ExecuteQuery(query);
       setResult(res);
     } catch (e) {
       setError(String(e));
@@ -61,7 +63,7 @@ export default function QueryPage() {
             Run
           </Button>
           <Text type="secondary" style={{ fontSize: 11 }}>
-            ⌘↵ to run
+            {selectedSql.trim() ? "⌘↵ · running selection" : "⌘↵ to run"}
           </Text>
         </Space>
 

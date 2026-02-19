@@ -148,35 +148,49 @@ func (c *Client) Close() error {
 	return c.db.Close()
 }
 
-// Execute runs an arbitrary SQL statement and returns a QueryResult.
+// Execute runs one or more semicolon-separated SQL statements and returns the
+// last result set. Using sf.WithMultiStatement(ctx, 0) tells the driver to
+// accept any number of statements in a single call.
 func (c *Client) Execute(ctx context.Context, query string) (*QueryResult, error) {
-	rows, err := c.db.QueryContext(ctx, query)
+	multiCtx, err := sf.WithMultiStatement(ctx, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := c.db.QueryContext(multiCtx, query)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	cols, err := rows.Columns()
-	if err != nil {
-		return nil, err
-	}
-
-	var result QueryResult
-	result.Columns = cols
-
-	for rows.Next() {
-		vals := make([]interface{}, len(cols))
-		ptrs := make([]interface{}, len(cols))
-		for i := range vals {
-			ptrs[i] = &vals[i]
-		}
-		if err := rows.Scan(ptrs...); err != nil {
+	var last QueryResult
+	for {
+		cols, err := rows.Columns()
+		if err != nil {
 			return nil, err
 		}
-		result.Rows = append(result.Rows, vals)
+		last = QueryResult{Columns: cols}
+
+		for rows.Next() {
+			vals := make([]interface{}, len(cols))
+			ptrs := make([]interface{}, len(cols))
+			for i := range vals {
+				ptrs[i] = &vals[i]
+			}
+			if err := rows.Scan(ptrs...); err != nil {
+				return nil, err
+			}
+			last.Rows = append(last.Rows, vals)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		if !rows.NextResultSet() {
+			break
+		}
 	}
 
-	return &result, rows.Err()
+	return &last, nil
 }
 
 // ListDatabases returns all databases the user can see.

@@ -13,7 +13,7 @@ const SNOWFLAKE_KEYWORDS = [
 ];
 
 export default function SqlEditor() {
-  const { sql, setSql } = useQueryStore();
+  const { sql, setSql, setSelectedSql } = useQueryStore();
 
   const handleMount: OnMount = (editor, monaco) => {
     // Register Snowflake keyword completions
@@ -35,6 +35,15 @@ export default function SqlEditor() {
           })),
         };
       },
+    });
+
+    // Track selection so QueryPage knows what to run
+    editor.onDidChangeCursorSelection(() => {
+      const selection = editor.getSelection();
+      const selected = selection && !selection.isEmpty()
+        ? editor.getModel()?.getValueInRange(selection) ?? ""
+        : "";
+      setSelectedSql(selected);
     });
 
     // Cmd+Enter / Ctrl+Enter → run query (bubbles up via custom event)
