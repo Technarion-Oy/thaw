@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -11,8 +12,9 @@ import (
 
 // App is the main application struct. Methods bound here are callable from the frontend.
 type App struct {
-	ctx    context.Context
-	client *snowflake.Client
+	ctx           context.Context
+	client        *snowflake.Client
+	cancelConnect context.CancelFunc
 }
 
 func NewApp() *App {
@@ -29,14 +31,32 @@ func (a *App) shutdown(ctx context.Context) {
 	}
 }
 
-// Connect opens a Snowflake connection with the provided DSN parameters.
+// Connect opens a Snowflake connection with the provided parameters.
+// It can be interrupted by calling CancelConnect.
 func (a *App) Connect(params snowflake.ConnectParams) error {
-	client, err := snowflake.NewClient(params)
+	ctx, cancel := context.WithCancel(a.ctx)
+	a.cancelConnect = cancel
+	defer func() {
+		cancel()
+		a.cancelConnect = nil
+	}()
+
+	client, err := snowflake.NewClient(ctx, params)
 	if err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("connection cancelled")
+		}
 		return err
 	}
 	a.client = client
 	return nil
+}
+
+// CancelConnect aborts an in-progress Connect call.
+func (a *App) CancelConnect() {
+	if a.cancelConnect != nil {
+		a.cancelConnect()
+	}
 }
 
 // Disconnect closes the active Snowflake connection.

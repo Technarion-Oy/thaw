@@ -8,6 +8,11 @@ export interface ConnectionParams {
   warehouse: string;
   database: string;
   schema: string;
+  authenticator: string;
+  passcode: string;
+  oktaUrl: string;
+  privateKeyPath: string;
+  privateKeyPassphrase: string;
 }
 
 interface ConnectionState {

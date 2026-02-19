@@ -1,5 +1,7 @@
 # ── Go ────────────────────────────────────────────────────────────────────────
 build/bin/
+frontend/package.json.md5
+temp.txt
 *.exe
 *.test
 *.out

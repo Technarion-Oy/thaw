@@ -3,6 +3,8 @@
 import {snowflake} from '../models';
 import {ddl} from '../models';
 
+export function CancelConnect():Promise<void>;
+
 export function Connect(arg1:snowflake.ConnectParams):Promise<void>;
 
 export function Disconnect():Promise<void>;

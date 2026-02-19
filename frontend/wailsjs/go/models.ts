@@ -31,6 +31,11 @@ export namespace snowflake {
 	    warehouse: string;
 	    database: string;
 	    schema: string;
+	    authenticator: string;
+	    passcode: string;
+	    oktaUrl: string;
+	    privateKeyPath: string;
+	    privateKeyPassphrase: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ConnectParams(source);
@@ -45,6 +50,11 @@ export namespace snowflake {
 	        this.warehouse = source["warehouse"];
 	        this.database = source["database"];
 	        this.schema = source["schema"];
+	        this.authenticator = source["authenticator"];
+	        this.passcode = source["passcode"];
+	        this.oktaUrl = source["oktaUrl"];
+	        this.privateKeyPath = source["privateKeyPath"];
+	        this.privateKeyPassphrase = source["privateKeyPassphrase"];
 	    }
 	}
 	export class QueryResult {
