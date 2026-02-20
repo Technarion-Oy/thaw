@@ -156,6 +156,16 @@ func (a *App) ListObjects(database, schema string) ([]snowflake.SnowflakeObject,
 	return a.client.ListObjects(a.ctx, database, schema)
 }
 
+// GetObjectDDL returns the definition of a single schema object using
+// Snowflake's GET_DDL function. kind should be one of: TABLE, VIEW, FUNCTION,
+// PROCEDURE, SEQUENCE, STAGE, STREAM, TASK, FILE FORMAT, PIPE.
+func (a *App) GetObjectDDL(database, schema, kind, name string) (string, error) {
+	if a.client == nil {
+		return "", ErrNotConnected
+	}
+	return a.client.GetObjectDDL(a.ctx, database, schema, kind, name)
+}
+
 // ─── DDL export ───────────────────────────────────────────────────────────────
 
 // ddlProgressEvent is the Wails event name emitted during export.

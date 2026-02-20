@@ -19,6 +19,7 @@ interface ConnectionState {
   isConnected: boolean;
   params: ConnectionParams | null;
   setConnected: (params: ConnectionParams) => void;
+  setIsConnected: (v: boolean) => void;
   disconnect: () => void;
 }
 
@@ -26,5 +27,6 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
   isConnected: false,
   params: null,
   setConnected: (params) => set({ isConnected: true, params }),
+  setIsConnected: (v) => set({ isConnected: v }),
   disconnect: () => set({ isConnected: false, params: null }),
 }));

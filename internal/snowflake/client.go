@@ -231,6 +231,23 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 	return objects, rows.Err()
 }
 
+// GetObjectDDL returns the definition of a single schema object using
+// GET_DDL('<kind>', '<db>.<schema>.<name>'). The name components are
+// double-quote escaped to handle mixed-case and special characters.
+func (c *Client) GetObjectDDL(ctx context.Context, database, schema, kind, name string) (string, error) {
+	escapeIdent := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	qualified := fmt.Sprintf(`"%s"."%s"."%s"`, escapeIdent(database), escapeIdent(schema), escapeIdent(name))
+	escapedKind := strings.ReplaceAll(kind, "'", "''")
+	query := fmt.Sprintf("SELECT GET_DDL('%s', '%s')", escapedKind, strings.ReplaceAll(qualified, "'", "''"))
+
+	row := c.db.QueryRowContext(ctx, query)
+	var src string
+	if err := row.Scan(&src); err != nil {
+		return "", fmt.Errorf("GET_DDL(%s %s): %w", kind, qualified, err)
+	}
+	return src, nil
+}
+
 // GetDatabaseDDL returns the complete DDL for a database using Snowflake's
 // GET_DDL function.  The result is a single SQL string containing CREATE
 // statements for every object in the database (schemas, tables, views,

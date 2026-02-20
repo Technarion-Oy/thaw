@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Tree, Typography, Spin, Empty, Divider } from "antd";
+import { useState, useEffect, useRef } from "react";
+import { Tree, Typography, Spin, Empty, Divider, Modal } from "antd";
 import {
   DatabaseOutlined,
   TableOutlined,
@@ -14,22 +14,22 @@ import {
   FolderOutlined,
 } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
-import { ListDatabases, ListSchemas, ListObjects } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL } from "../../../wailsjs/go/main/App";
 import GitPanel from "../git/GitPanel";
 
 const { Text } = Typography;
 
 const KIND_LABEL: Record<string, string> = {
-  TABLE:        "Tables",
-  VIEW:         "Views",
-  FUNCTION:     "Functions",
-  PROCEDURE:    "Procedures",
-  SEQUENCE:     "Sequences",
-  STAGE:        "Stages",
-  STREAM:       "Streams",
-  TASK:         "Tasks",
-  "FILE FORMAT":"File Formats",
-  PIPE:         "Pipes",
+  TABLE:         "Tables",
+  VIEW:          "Views",
+  FUNCTION:      "Functions",
+  PROCEDURE:     "Procedures",
+  SEQUENCE:      "Sequences",
+  STAGE:         "Stages",
+  STREAM:        "Streams",
+  TASK:          "Tasks",
+  "FILE FORMAT": "File Formats",
+  PIPE:          "Pipes",
 };
 
 const KIND_ORDER = ["TABLE", "VIEW", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "FILE FORMAT", "PIPE"];
@@ -50,10 +50,35 @@ function kindIcon(kind: string) {
   }
 }
 
+interface ContextMenu {
+  x: number;
+  y: number;
+  nodeKey: string; // "obj:db:schema:kind:name"
+}
+
+interface ObjectDDL {
+  title: string;
+  src: string;
+  loading: boolean;
+  error: string | null;
+}
+
 export default function Sidebar() {
   const [treeData, setTreeData] = useState<DataNode[]>([]);
   const [loading, setLoading]   = useState(false);
   const [loaded, setLoaded]     = useState(false);
+
+  const [ctxMenu, setCtxMenu]   = useState<ContextMenu | null>(null);
+  const [ddlModal, setDdlModal] = useState<ObjectDDL | null>(null);
+  const ctxRef = useRef<HTMLDivElement>(null);
+
+  // Close context menu when clicking outside
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [ctxMenu]);
 
   const loadDatabases = async () => {
     if (loaded) return;
@@ -103,7 +128,6 @@ export default function Sidebar() {
         groups[k].push(obj);
       }
 
-      // Sort kinds by canonical order, then alphabetically for unknowns
       const sortedKinds = [
         ...KIND_ORDER.filter((k) => groups[k]),
         ...Object.keys(groups).filter((k) => !KIND_ORDER.includes(k)).sort(),
@@ -113,7 +137,6 @@ export default function Sidebar() {
         title: KIND_LABEL[kind] ?? kind,
         key: `type:${db}:${schema}:${kind}`,
         icon: <FolderOutlined style={{ color: "#8b949e" }} />,
-        // Pre-populate children so loadData is never called for these nodes
         children: groups[kind].map((o) => ({
           title: o.name,
           key: `obj:${db}:${schema}:${kind}:${o.name}`,
@@ -126,7 +149,6 @@ export default function Sidebar() {
     }
   };
 
-  // Recursively update a node's children in the tree.
   function updateNode(nodes: DataNode[], targetKey: string, children: DataNode[]): DataNode[] {
     return nodes.map((node) => {
       if (node.key === targetKey) return { ...node, children };
@@ -134,6 +156,30 @@ export default function Sidebar() {
       return node;
     });
   }
+
+  const onRightClick = ({ event, node }: { event: React.MouseEvent; node: DataNode }) => {
+    event.preventDefault();
+    const key = String(node.key);
+    if (!key.startsWith("obj:")) return; // only leaf objects have a definition
+    setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key });
+  };
+
+  const viewDefinition = async () => {
+    if (!ctxMenu) return;
+    setCtxMenu(null);
+
+    // key format: obj:db:schema:kind:name
+    const [, db, schema, kind, ...nameParts] = ctxMenu.nodeKey.split(":");
+    const name = nameParts.join(":"); // name might theoretically contain colons
+
+    setDdlModal({ title: `${kind}: ${db}.${schema}.${name}`, src: "", loading: true, error: null });
+    try {
+      const src = await GetObjectDDL(db, schema, kind, name);
+      setDdlModal((prev) => prev ? { ...prev, src, loading: false } : null);
+    } catch (e) {
+      setDdlModal((prev) => prev ? { ...prev, error: String(e), loading: false } : null);
+    }
+  };
 
   return (
     <div style={{ padding: "8px 4px" }}>
@@ -161,11 +207,80 @@ export default function Sidebar() {
         <Tree
           treeData={treeData}
           loadData={onLoadData as (node: DataNode) => Promise<void>}
+          onRightClick={onRightClick as any}
           showIcon
           blockNode
           style={{ background: "transparent", color: "#e6edf3" }}
         />
       )}
+
+      {/* Context menu */}
+      {ctxMenu && (
+        <div
+          ref={ctxRef}
+          style={{
+            position: "fixed",
+            top: ctxMenu.y,
+            left: ctxMenu.x,
+            zIndex: 9999,
+            background: "#1c2128",
+            border: "1px solid #30363d",
+            borderRadius: 6,
+            boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
+            minWidth: 160,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div
+            style={{ padding: "6px 14px", fontSize: 13, cursor: "pointer", color: "#e6edf3" }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "#30363d")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+            onClick={viewDefinition}
+          >
+            View Definition
+          </div>
+        </div>
+      )}
+
+      {/* Definition modal */}
+      <Modal
+        open={ddlModal !== null}
+        title={ddlModal?.title}
+        onCancel={() => setDdlModal(null)}
+        footer={null}
+        width={780}
+        styles={{ body: { padding: 0 } }}
+      >
+        {ddlModal?.loading && (
+          <div style={{ padding: 32, textAlign: "center" }}>
+            <Spin />
+          </div>
+        )}
+        {ddlModal?.error && (
+          <div style={{ padding: 16, color: "#f85149", fontFamily: "monospace", fontSize: 12 }}>
+            {ddlModal.error}
+          </div>
+        )}
+        {!ddlModal?.loading && !ddlModal?.error && ddlModal?.src && (
+          <pre
+            style={{
+              margin: 0,
+              padding: 16,
+              background: "#0d1117",
+              color: "#e6edf3",
+              fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace",
+              fontSize: 12,
+              lineHeight: 1.6,
+              overflowX: "auto",
+              maxHeight: "60vh",
+              overflowY: "auto",
+              borderRadius: "0 0 6px 6px",
+            }}
+          >
+            {ddlModal.src}
+          </pre>
+        )}
+      </Modal>
 
       <Divider style={{ borderColor: "#30363d", margin: "8px 0 0" }} />
       <GitPanel />
