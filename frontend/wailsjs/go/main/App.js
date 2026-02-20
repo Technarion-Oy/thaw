@@ -42,6 +42,10 @@ export function GitStatus(arg1) {
   return window['go']['main']['App']['GitStatus'](arg1);
 }
 
+export function GetSessionContext() {
+  return window['go']['main']['App']['GetSessionContext']();
+}
+
 export function IsConnected() {
   return window['go']['main']['App']['IsConnected']();
 }
@@ -54,8 +58,24 @@ export function ListObjects(arg1, arg2) {
   return window['go']['main']['App']['ListObjects'](arg1, arg2);
 }
 
+export function ListRoles() {
+  return window['go']['main']['App']['ListRoles']();
+}
+
 export function ListSchemas(arg1) {
   return window['go']['main']['App']['ListSchemas'](arg1);
+}
+
+export function ListWarehouses() {
+  return window['go']['main']['App']['ListWarehouses']();
+}
+
+export function UseRole(arg1) {
+  return window['go']['main']['App']['UseRole'](arg1);
+}
+
+export function UseWarehouse(arg1) {
+  return window['go']['main']['App']['UseWarehouse'](arg1);
 }
 
 export function LoadSnowflakeCLIConfig() {

@@ -1,17 +1,31 @@
 import { useEffect } from "react";
-import { Button, Space, Typography, Alert, Spin, Tag } from "antd";
+import { Button, Space, Typography, Alert, Spin, Tag, Select, Tooltip } from "antd";
 import { PlayCircleOutlined, DisconnectOutlined } from "@ant-design/icons";
 import { ExecuteQuery, Disconnect } from "../../wailsjs/go/main/App";
 import SqlEditor from "../components/editor/SqlEditor";
 import ResultGrid from "../components/results/ResultGrid";
 import { useQueryStore } from "../store/queryStore";
 import { useConnectionStore } from "../store/connectionStore";
+import { useSessionStore } from "../store/sessionStore";
 
 const { Text } = Typography;
 
 export default function QueryPage() {
   const { sql, selectedSql, result, isRunning, error, setResult, setRunning, setError } = useQueryStore();
   const { params, disconnect } = useConnectionStore();
+  const {
+    role, warehouse, roles, warehouses,
+    loadingContext, loadingRoles, loadingWarehouses,
+    switchingRole, switchingWarehouse,
+    error: sessionError,
+    loadContext, loadRoles, loadWarehouses,
+    switchRole, switchWarehouse, clearError,
+  } = useSessionStore();
+
+  // Load current role/warehouse on mount
+  useEffect(() => {
+    loadContext();
+  }, []);
 
   const runQuery = async () => {
     const query = selectedSql.trim() || sql.trim();
@@ -38,6 +52,8 @@ export default function QueryPage() {
     window.addEventListener("run-query", handler);
     return () => window.removeEventListener("run-query", handler);
   });
+
+  const selectStyle = { fontSize: 12, minWidth: 130 };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#0d1117" }}>
@@ -67,9 +83,43 @@ export default function QueryPage() {
           </Text>
         </Space>
 
-        <Space>
+        <Space size={6}>
+          {/* ── Role selector ─────────────────────────────────── */}
+          <Tooltip title="Active role">
+            <Select
+              size="small"
+              style={selectStyle}
+              value={role || undefined}
+              placeholder={loadingContext ? "…" : "Role"}
+              loading={loadingRoles || switchingRole}
+              showSearch
+              optionFilterProp="label"
+              onChange={switchRole}
+              onDropdownVisibleChange={(open) => { if (open) loadRoles(); }}
+              options={roles.map((r) => ({ value: r, label: r }))}
+              dropdownStyle={{ minWidth: 200 }}
+            />
+          </Tooltip>
+
+          {/* ── Warehouse selector ────────────────────────────── */}
+          <Tooltip title="Active warehouse">
+            <Select
+              size="small"
+              style={selectStyle}
+              value={warehouse || undefined}
+              placeholder={loadingContext ? "…" : "Warehouse"}
+              loading={loadingWarehouses || switchingWarehouse}
+              showSearch
+              optionFilterProp="label"
+              onChange={switchWarehouse}
+              onDropdownVisibleChange={(open) => { if (open) loadWarehouses(); }}
+              options={warehouses.map((w) => ({ value: w, label: w }))}
+              dropdownStyle={{ minWidth: 200 }}
+            />
+          </Tooltip>
+
           {params && (
-            <Tag color="blue" style={{ fontSize: 11 }}>
+            <Tag color="blue" style={{ fontSize: 11, margin: 0 }}>
               {params.account} · {params.user}
             </Tag>
           )}
@@ -83,6 +133,18 @@ export default function QueryPage() {
           </Button>
         </Space>
       </div>
+
+      {/* Session error banner (role/warehouse switch failures) */}
+      {sessionError && (
+        <Alert
+          type="error"
+          message={sessionError}
+          showIcon
+          closable
+          onClose={clearError}
+          style={{ margin: "8px 12px 0", fontSize: 12 }}
+        />
+      )}
 
       {/* SQL Editor — top half */}
       <div style={{ flex: "0 0 40%", borderBottom: "1px solid #30363d" }}>

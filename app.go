@@ -144,6 +144,46 @@ func (a *App) ExecuteQuery(sql string) (*snowflake.QueryResult, error) {
 	return a.client.Execute(a.ctx, sql)
 }
 
+// GetSessionContext returns the currently active role, warehouse, database and schema.
+func (a *App) GetSessionContext() (snowflake.SessionContext, error) {
+	if a.client == nil {
+		return snowflake.SessionContext{}, ErrNotConnected
+	}
+	return a.client.GetSessionContext(a.ctx)
+}
+
+// ListRoles returns all roles available to the current user.
+func (a *App) ListRoles() ([]string, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListRoles(a.ctx)
+}
+
+// ListWarehouses returns all warehouses visible to the current role.
+func (a *App) ListWarehouses() ([]string, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListWarehouses(a.ctx)
+}
+
+// UseRole switches the session to the given role.
+func (a *App) UseRole(role string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	return a.client.UseRole(a.ctx, role)
+}
+
+// UseWarehouse switches the session to the given warehouse.
+func (a *App) UseWarehouse(warehouse string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	return a.client.UseWarehouse(a.ctx, warehouse)
+}
+
 // ListDatabases returns all databases visible to the current role.
 func (a *App) ListDatabases() ([]string, error) {
 	if a.client == nil {

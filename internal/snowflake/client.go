@@ -193,6 +193,51 @@ func (c *Client) Execute(ctx context.Context, query string) (*QueryResult, error
 	return &last, nil
 }
 
+// SessionContext holds the current session's active role, warehouse, database and schema.
+type SessionContext struct {
+	Role      string `json:"role"`
+	Warehouse string `json:"warehouse"`
+	Database  string `json:"database"`
+	Schema    string `json:"schema"`
+}
+
+// GetSessionContext returns the currently active role, warehouse, database, and schema.
+func (c *Client) GetSessionContext(ctx context.Context) (SessionContext, error) {
+	row := c.db.QueryRowContext(ctx,
+		"SELECT CURRENT_ROLE(), CURRENT_WAREHOUSE(), CURRENT_DATABASE(), CURRENT_SCHEMA()")
+	var sc SessionContext
+	if err := row.Scan(&sc.Role, &sc.Warehouse, &sc.Database, &sc.Schema); err != nil {
+		return SessionContext{}, err
+	}
+	return sc, nil
+}
+
+// ListRoles returns the names of all roles available to the current user.
+func (c *Client) ListRoles(ctx context.Context) ([]string, error) {
+	// SHOW ROLES columns: created_on, name, ...
+	return c.queryStringSlice(ctx, "SHOW ROLES", 1)
+}
+
+// ListWarehouses returns the names of all warehouses visible to the current role.
+func (c *Client) ListWarehouses(ctx context.Context) ([]string, error) {
+	// SHOW WAREHOUSES columns: name, state, ...
+	return c.queryStringSlice(ctx, "SHOW WAREHOUSES", 0)
+}
+
+// UseRole switches the active role for the current session.
+func (c *Client) UseRole(ctx context.Context, role string) error {
+	escaped := strings.ReplaceAll(role, `"`, `""`)
+	_, err := c.db.ExecContext(ctx, fmt.Sprintf(`USE ROLE "%s"`, escaped))
+	return err
+}
+
+// UseWarehouse switches the active warehouse for the current session.
+func (c *Client) UseWarehouse(ctx context.Context, warehouse string) error {
+	escaped := strings.ReplaceAll(warehouse, `"`, `""`)
+	_, err := c.db.ExecContext(ctx, fmt.Sprintf(`USE WAREHOUSE "%s"`, escaped))
+	return err
+}
+
 // ListDatabases returns all databases the user can see.
 func (c *Client) ListDatabases(ctx context.Context) ([]string, error) {
 	return c.queryStringSlice(ctx, "SHOW DATABASES", 1)

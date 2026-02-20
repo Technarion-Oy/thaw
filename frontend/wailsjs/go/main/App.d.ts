@@ -20,6 +20,8 @@ export function ExportDatabaseDDL(arg1:string,arg2:string):Promise<ddl.ExportRes
 
 export function GetGitConfig():Promise<config.GitConfig>;
 
+export function GetSessionContext():Promise<snowflake.SessionContext>;
+
 export function GetObjectDDL(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
 
 export function GitCommitAndPush(arg1:gitrepo.PushParams):Promise<void>;
@@ -32,10 +34,18 @@ export function ListDatabases():Promise<Array<string>>;
 
 export function ListObjects(arg1:string,arg2:string):Promise<Array<snowflake.SnowflakeObject>>;
 
+export function ListRoles():Promise<Array<string>>;
+
 export function ListSchemas(arg1:string):Promise<Array<string>>;
+
+export function ListWarehouses():Promise<Array<string>>;
 
 export function LoadSnowflakeCLIConfig():Promise<sfconfig.Config>;
 
 export function PickDirectory():Promise<string>;
 
 export function SaveGitConfig(arg1:config.GitConfig):Promise<void>;
+
+export function UseRole(arg1:string):Promise<void>;
+
+export function UseWarehouse(arg1:string):Promise<void>;

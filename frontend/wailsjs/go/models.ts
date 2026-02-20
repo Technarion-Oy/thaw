@@ -226,15 +226,33 @@ export namespace snowflake {
 	        this.rowsAffected = source["rowsAffected"];
 	    }
 	}
+	export class SessionContext {
+	    role: string;
+	    warehouse: string;
+	    database: string;
+	    schema: string;
+
+	    static createFrom(source: any = {}) {
+	        return new SessionContext(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.role = source["role"];
+	        this.warehouse = source["warehouse"];
+	        this.database = source["database"];
+	        this.schema = source["schema"];
+	    }
+	}
 	export class SnowflakeObject {
 	    name: string;
 	    kind: string;
 	    schema: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SnowflakeObject(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
