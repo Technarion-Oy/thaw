@@ -12,8 +12,10 @@ import {
   ClockCircleOutlined,
   FileOutlined,
   FolderOutlined,
+  ReloadOutlined,
 } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
+import type { Key } from "rc-tree/lib/interface";
 import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL } from "../../../wailsjs/go/main/App";
 import GitPanel from "../git/GitPanel";
 
@@ -53,7 +55,8 @@ function kindIcon(kind: string) {
 interface ContextMenu {
   x: number;
   y: number;
-  nodeKey: string; // "obj:db:schema:kind:name"
+  nodeKey: string;
+  nodeType: "db" | "obj";
 }
 
 interface ObjectDDL {
@@ -63,16 +66,31 @@ interface ObjectDDL {
   error: string | null;
 }
 
+// Strip all children from a node so Tree will re-call loadData on next expand.
+function clearNodeChildren(nodes: DataNode[], targetKey: string): DataNode[] {
+  return nodes.map((node) => {
+    if (node.key === targetKey) {
+      const { children: _removed, ...rest } = node as DataNode & { children?: DataNode[] };
+      return rest;
+    }
+    if ((node as any).children) {
+      return { ...node, children: clearNodeChildren((node as any).children, targetKey) };
+    }
+    return node;
+  });
+}
+
 export default function Sidebar() {
-  const [treeData, setTreeData] = useState<DataNode[]>([]);
-  const [loading, setLoading]   = useState(false);
-  const [loaded, setLoaded]     = useState(false);
+  const [treeData, setTreeData]     = useState<DataNode[]>([]);
+  const [loadedKeys, setLoadedKeys] = useState<Key[]>([]);
+  const [loading, setLoading]       = useState(false);
+  const [loaded, setLoaded]         = useState(false);
 
   const [ctxMenu, setCtxMenu]   = useState<ContextMenu | null>(null);
   const [ddlModal, setDdlModal] = useState<ObjectDDL | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
 
-  // Close context menu when clicking outside
+  // Close context menu on outside click
   useEffect(() => {
     if (!ctxMenu) return;
     const close = () => setCtxMenu(null);
@@ -101,26 +119,26 @@ export default function Sidebar() {
     }
   };
 
-  const onLoadData = async ({ key, children }: DataNode & { children?: DataNode[] }) => {
-    if (children) return;
-    const parts = String(key).split(":");
+  const onLoadData = async (node: DataNode & { children?: DataNode[] }) => {
+    if (node.children) return;
+    const key   = String(node.key);
+    const parts = key.split(":");
 
     if (parts[0] === "db") {
-      const db = parts[1];
+      const db      = parts[1];
       const schemas = await ListSchemas(db);
       setTreeData((prev) =>
-        updateNode(prev, String(key), schemas.map((s) => ({
-          title: s,
-          key: `schema:${db}:${s}`,
-          icon: <FolderOutlined />,
+        updateNode(prev, key, schemas.map((s) => ({
+          title:  s,
+          key:    `schema:${db}:${s}`,
+          icon:   <FolderOutlined />,
           isLeaf: false,
         })))
       );
     } else if (parts[0] === "schema") {
       const [, db, schema] = parts;
-      const objects = await ListObjects(db, schema);
+      const objects        = await ListObjects(db, schema);
 
-      // Group by kind
       const groups: Record<string, typeof objects> = {};
       for (const obj of objects) {
         const k = (obj.kind || "OTHER").toUpperCase();
@@ -134,34 +152,53 @@ export default function Sidebar() {
       ];
 
       const typeNodes: DataNode[] = sortedKinds.map((kind) => ({
-        title: KIND_LABEL[kind] ?? kind,
-        key: `type:${db}:${schema}:${kind}`,
-        icon: <FolderOutlined style={{ color: "#8b949e" }} />,
+        title:    KIND_LABEL[kind] ?? kind,
+        key:      `type:${db}:${schema}:${kind}`,
+        icon:     <FolderOutlined style={{ color: "#8b949e" }} />,
         children: groups[kind].map((o) => ({
-          title: o.name,
-          key: `obj:${db}:${schema}:${kind}:${o.name}`,
-          icon: kindIcon(kind),
+          title:  o.name,
+          key:    `obj:${db}:${schema}:${kind}:${o.name}`,
+          icon:   kindIcon(kind),
           isLeaf: true,
         })),
       }));
 
-      setTreeData((prev) => updateNode(prev, String(key), typeNodes));
+      setTreeData((prev) => updateNode(prev, key, typeNodes));
     }
   };
 
   function updateNode(nodes: DataNode[], targetKey: string, children: DataNode[]): DataNode[] {
     return nodes.map((node) => {
       if (node.key === targetKey) return { ...node, children };
-      if (node.children) return { ...node, children: updateNode(node.children, targetKey, children) };
+      if ((node as any).children) return { ...node, children: updateNode((node as any).children, targetKey, children) };
       return node;
     });
   }
 
+  // ── Context menu ────────────────────────────────────────────────────────────
+
   const onRightClick = ({ event, node }: { event: React.MouseEvent; node: DataNode }) => {
     event.preventDefault();
     const key = String(node.key);
-    if (!key.startsWith("obj:")) return; // only leaf objects have a definition
-    setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key });
+    if (key.startsWith("db:")) {
+      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "db" });
+    } else if (key.startsWith("obj:")) {
+      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "obj" });
+    }
+  };
+
+  const refreshDatabase = () => {
+    if (!ctxMenu) return;
+    const dbKey = ctxMenu.nodeKey; // "db:DBNAME"
+    setCtxMenu(null);
+
+    // Remove the db key and all its descendants from the loaded-keys set so
+    // Tree will call loadData again when the node is next expanded.
+    setLoadedKeys((prev) => prev.filter((k) => !String(k).startsWith(dbKey)));
+
+    // Strip children from treeData — Tree won't reload a node that still has
+    // a children array even if its key is absent from loadedKeys.
+    setTreeData((prev) => clearNodeChildren(prev, dbKey));
   };
 
   const viewDefinition = async () => {
@@ -170,16 +207,30 @@ export default function Sidebar() {
 
     // key format: obj:db:schema:kind:name
     const [, db, schema, kind, ...nameParts] = ctxMenu.nodeKey.split(":");
-    const name = nameParts.join(":"); // name might theoretically contain colons
+    const name = nameParts.join(":");
 
     setDdlModal({ title: `${kind}: ${db}.${schema}.${name}`, src: "", loading: true, error: null });
     try {
       const src = await GetObjectDDL(db, schema, kind, name);
-      setDdlModal((prev) => prev ? { ...prev, src, loading: false } : null);
+      setDdlModal((prev) => (prev ? { ...prev, src, loading: false } : null));
     } catch (e) {
-      setDdlModal((prev) => prev ? { ...prev, error: String(e), loading: false } : null);
+      setDdlModal((prev) => (prev ? { ...prev, error: String(e), loading: false } : null));
     }
   };
+
+  // ── Render ──────────────────────────────────────────────────────────────────
+
+  const menuItem = (label: string, icon: React.ReactNode, onClick: () => void) => (
+    <div
+      style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", fontSize: 13, cursor: "pointer", color: "#e6edf3" }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = "#30363d")}
+      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+      onClick={onClick}
+    >
+      {icon}
+      {label}
+    </div>
+  );
 
   return (
     <div style={{ padding: "8px 4px" }}>
@@ -191,11 +242,7 @@ export default function Sidebar() {
 
       {!loaded && !loading && (
         <div style={{ padding: "16px 12px" }}>
-          <Text
-            type="secondary"
-            style={{ cursor: "pointer", fontSize: 12 }}
-            onClick={loadDatabases}
-          >
+          <Text type="secondary" style={{ cursor: "pointer", fontSize: 12 }} onClick={loadDatabases}>
             Click to load databases
           </Text>
         </div>
@@ -206,6 +253,8 @@ export default function Sidebar() {
       {treeData.length > 0 && (
         <Tree
           treeData={treeData}
+          loadedKeys={loadedKeys}
+          onLoad={(keys) => setLoadedKeys(keys)}
           loadData={onLoadData as (node: DataNode) => Promise<void>}
           onRightClick={onRightClick as any}
           showIcon
@@ -231,14 +280,8 @@ export default function Sidebar() {
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div
-            style={{ padding: "6px 14px", fontSize: 13, cursor: "pointer", color: "#e6edf3" }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "#30363d")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-            onClick={viewDefinition}
-          >
-            View Definition
-          </div>
+          {ctxMenu.nodeType === "db" && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshDatabase)}
+          {ctxMenu.nodeType === "obj" && menuItem("View Definition", null, viewDefinition)}
         </div>
       )}
 
