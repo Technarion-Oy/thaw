@@ -30,6 +30,10 @@ export function GetGitConfig() {
   return window['go']['main']['App']['GetGitConfig']();
 }
 
+export function GetObjectDDL(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['GetObjectDDL'](arg1, arg2, arg3, arg4);
+}
+
 export function GitCommitAndPush(arg1) {
   return window['go']['main']['App']['GitCommitAndPush'](arg1);
 }

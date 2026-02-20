@@ -19,6 +19,8 @@ export function ExportDatabaseDDL(arg1:string,arg2:string):Promise<ddl.ExportRes
 
 export function GetGitConfig():Promise<config.GitConfig>;
 
+export function GetObjectDDL(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
+
 export function GitCommitAndPush(arg1:gitrepo.PushParams):Promise<void>;
 
 export function GitStatus(arg1:string):Promise<gitrepo.RepoStatus>;
