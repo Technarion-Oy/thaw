@@ -46,10 +46,6 @@ export function IsConnected() {
   return window['go']['main']['App']['IsConnected']();
 }
 
-export function LoadSnowflakeCLIConfig() {
-  return window['go']['main']['App']['LoadSnowflakeCLIConfig']();
-}
-
 export function ListDatabases() {
   return window['go']['main']['App']['ListDatabases']();
 }
@@ -60,6 +56,10 @@ export function ListObjects(arg1, arg2) {
 
 export function ListSchemas(arg1) {
   return window['go']['main']['App']['ListSchemas'](arg1);
+}
+
+export function LoadSnowflakeCLIConfig() {
+  return window['go']['main']['App']['LoadSnowflakeCLIConfig']();
 }
 
 export function PickDirectory() {
