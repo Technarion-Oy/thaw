@@ -17,6 +17,7 @@ import {
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
 import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL } from "../../../wailsjs/go/main/App";
+import { useQueryStore } from "../../store/queryStore";
 import GitPanel from "../git/GitPanel";
 
 const { Text } = Typography;
@@ -57,6 +58,7 @@ interface ContextMenu {
   y: number;
   nodeKey: string;
   nodeType: "db" | "obj";
+  objKind?: string; // set for nodeType === "obj"
 }
 
 interface ObjectDDL {
@@ -183,7 +185,9 @@ export default function Sidebar() {
     if (key.startsWith("db:")) {
       setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "db" });
     } else if (key.startsWith("obj:")) {
-      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "obj" });
+      // key format: obj:DB:SCHEMA:KIND:NAME
+      const objKind = key.split(":")[3];
+      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "obj", objKind });
     }
   };
 
@@ -207,6 +211,18 @@ export default function Sidebar() {
     // Strip children from treeData — Tree won't call loadData for a node
     // that still has a children array even if its key left loadedKeys.
     setTreeData((prev) => clearNodeChildren(prev, dbKey));
+  };
+
+  const selectTop1000 = () => {
+    if (!ctxMenu) return;
+    setCtxMenu(null);
+
+    // key format: obj:DB:SCHEMA:KIND:NAME
+    const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
+    const name = nameParts.join(":");
+    const sql = `SELECT * FROM "${db}"."${schema}"."${name}" LIMIT 1000;`;
+
+    useQueryStore.getState().executeWith(sql);
   };
 
   const viewDefinition = async () => {
@@ -289,6 +305,8 @@ export default function Sidebar() {
           onClick={(e) => e.stopPropagation()}
         >
           {ctxMenu.nodeType === "db" && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshDatabase)}
+          {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
+            menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
           {ctxMenu.nodeType === "obj" && menuItem("View Definition", null, viewDefinition)}
         </div>
       )}
