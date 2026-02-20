@@ -9,6 +9,7 @@ import (
 	"thaw/internal/config"
 	"thaw/internal/ddl"
 	"thaw/internal/gitrepo"
+	"thaw/internal/sfconfig"
 	"thaw/internal/snowflake"
 )
 
@@ -59,6 +60,17 @@ func (a *App) CancelConnect() {
 	if a.cancelConnect != nil {
 		a.cancelConnect()
 	}
+}
+
+// LoadSnowflakeCLIConfig reads ~/.snowflake/config.toml and returns all
+// named connection profiles together with the configured default.
+// Returns an empty config (not an error) when the file does not exist.
+func (a *App) LoadSnowflakeCLIConfig() (sfconfig.Config, error) {
+	cfg, err := sfconfig.Load()
+	if err != nil {
+		return sfconfig.Config{}, err
+	}
+	return *cfg, nil
 }
 
 // ─── Git / export configuration ──────────────────────────────────────────────

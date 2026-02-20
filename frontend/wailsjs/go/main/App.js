@@ -46,6 +46,10 @@ export function IsConnected() {
   return window['go']['main']['App']['IsConnected']();
 }
 
+export function LoadSnowflakeCLIConfig() {
+  return window['go']['main']['App']['LoadSnowflakeCLIConfig']();
+}
+
 export function ListDatabases() {
   return window['go']['main']['App']['ListDatabases']();
 }

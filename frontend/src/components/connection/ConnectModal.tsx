@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Form, Input, Button, Alert, Space, Typography, Select, Divider } from "antd";
 import { CloudServerOutlined } from "@ant-design/icons";
-import { Connect, CancelConnect } from "../../../wailsjs/go/main/App";
+import { Connect, CancelConnect, LoadSnowflakeCLIConfig } from "../../../wailsjs/go/main/App";
 import { useConnectionStore, type ConnectionParams } from "../../store/connectionStore";
+import type { sfconfig } from "../../../wailsjs/go/models";
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
 
 const AUTH_OPTIONS = [
   {
@@ -39,10 +40,44 @@ const needsPassword = (auth: string) =>
 
 export default function ConnectModal() {
   const [form] = Form.useForm<ConnectionParams>();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [auth, setAuth] = useState("username_password_mfa");
-  const setConnected = useConnectionStore((s) => s.setConnected);
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState<string | null>(null);
+  const [auth, setAuth]         = useState("username_password_mfa");
+  const setConnected            = useConnectionStore((s) => s.setConnected);
+
+  const [cliConfig, setCliConfig] = useState<sfconfig.Config | null>(null);
+
+  // Load Snowflake CLI connections once on mount — silently ignored if not found.
+  useEffect(() => {
+    LoadSnowflakeCLIConfig()
+      .then((cfg) => {
+        if (cfg.connections?.length) setCliConfig(cfg);
+      })
+      .catch(() => {}); // missing file is not an error in the UI
+  }, []);
+
+  const applyCliConnection = (name: string) => {
+    const conn = cliConfig?.connections?.find((c) => c.name === name);
+    if (!conn) return;
+
+    const authValue = conn.authenticator || "username_password_mfa";
+    setAuth(authValue);
+
+    form.setFieldsValue({
+      account:              conn.account,
+      user:                 conn.user,
+      password:             conn.password,
+      role:                 conn.role,
+      warehouse:            conn.warehouse,
+      database:             conn.database,
+      schema:               conn.schema,
+      authenticator:        authValue,
+      passcode:             conn.passcode,
+      oktaUrl:              conn.oktaUrl,
+      privateKeyPath:       conn.privateKeyPath,
+      privateKeyPassphrase: conn.privateKeyPassphrase,
+    });
+  };
 
   const onFinish = async (values: ConnectionParams) => {
     setLoading(true);
@@ -75,6 +110,26 @@ export default function ConnectModal() {
               Connect to Snowflake
             </Title>
           </Space>
+
+          {/* ── Snowflake CLI profiles ──────────────────────────────────── */}
+          {cliConfig && cliConfig.connections?.length > 0 && (
+            <div>
+              <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 6 }}>
+                Load from Snowflake CLI (~/.snowflake/config.toml)
+              </Text>
+              <Select
+                style={{ width: "100%" }}
+                placeholder="Select a connection profile…"
+                onChange={applyCliConnection}
+                defaultValue={cliConfig.defaultConnection || undefined}
+                options={cliConfig.connections.map((c) => ({
+                  value: c.name,
+                  label: cliConfig.defaultConnection === c.name ? `${c.name} (default)` : c.name,
+                }))}
+              />
+              <Divider style={{ borderColor: "#30363d", margin: "16px 0 4px" }} />
+            </div>
+          )}
 
           {error && <Alert type="error" message={error} showIcon />}
 

@@ -23,6 +23,62 @@ export namespace config {
 
 }
 
+export namespace sfconfig {
+
+	export class Connection {
+	    name: string;
+	    account: string;
+	    user: string;
+	    password: string;
+	    role: string;
+	    warehouse: string;
+	    database: string;
+	    schema: string;
+	    authenticator: string;
+	    passcode: string;
+	    oktaUrl: string;
+	    privateKeyPath: string;
+	    privateKeyPassphrase: string;
+
+	    static createFrom(source: any = {}) {
+	        return new Connection(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.account = source["account"];
+	        this.user = source["user"];
+	        this.password = source["password"];
+	        this.role = source["role"];
+	        this.warehouse = source["warehouse"];
+	        this.database = source["database"];
+	        this.schema = source["schema"];
+	        this.authenticator = source["authenticator"];
+	        this.passcode = source["passcode"];
+	        this.oktaUrl = source["oktaUrl"];
+	        this.privateKeyPath = source["privateKeyPath"];
+	        this.privateKeyPassphrase = source["privateKeyPassphrase"];
+	    }
+	}
+
+	export class Config {
+	    defaultConnection: string;
+	    connections: Connection[];
+
+	    static createFrom(source: any = {}) {
+	        return new Config(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.defaultConnection = source["defaultConnection"];
+	        this.connections = source["connections"];
+	    }
+	}
+
+}
+
 export namespace ddl {
 	
 	export class ExportResult {
