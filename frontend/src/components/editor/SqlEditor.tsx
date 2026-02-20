@@ -118,6 +118,14 @@ export default function SqlEditor() {
           range,
         }));
 
+        const schemaSuggestions = schemas.map((s) => ({
+          label:      s.name,
+          kind:       monaco.languages.CompletionItemKind.Module,
+          insertText: s.name,
+          detail:     `SCHEMA · ${s.db}`,
+          range,
+        }));
+
         const objectSuggestions = objects.map((o) => ({
           label:      o.name,
           kind:       monacoKind(monaco, o.kind),
@@ -126,7 +134,7 @@ export default function SqlEditor() {
           range,
         }));
 
-        return { suggestions: [...keywordSuggestions, ...dbSuggestions, ...objectSuggestions] };
+        return { suggestions: [...keywordSuggestions, ...dbSuggestions, ...schemaSuggestions, ...objectSuggestions] };
       },
     });
 
