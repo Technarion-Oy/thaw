@@ -206,13 +206,29 @@ func (c *Client) ListSchemas(ctx context.Context, database string) ([]string, er
 // ListObjects returns tables, views, functions, etc. inside a schema.
 func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
 	rows, err := c.db.QueryContext(ctx,
-		fmt.Sprintf("SHOW TERSE OBJECTS IN SCHEMA %s.%s", database, schema))
+		fmt.Sprintf("SHOW OBJECTS IN SCHEMA %s.%s", database, schema))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
 	cols, _ := rows.Columns()
+
+	// Locate name and kind columns by name so we are immune to column-order
+	// differences across Snowflake versions / TERSE vs non-TERSE variants.
+	nameIdx, kindIdx := -1, -1
+	for i, col := range cols {
+		switch strings.ToLower(col) {
+		case "name":
+			nameIdx = i
+		case "kind":
+			kindIdx = i
+		}
+	}
+	if nameIdx < 0 || kindIdx < 0 {
+		return nil, fmt.Errorf("unexpected SHOW OBJECTS columns: %v", cols)
+	}
+
 	var objects []SnowflakeObject
 	for rows.Next() {
 		vals := make([]interface{}, len(cols))
@@ -223,9 +239,8 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 		if err := rows.Scan(ptrs...); err != nil {
 			return nil, err
 		}
-		// SHOW TERSE OBJECTS columns: created_on, name, kind, database_name, schema_name
-		name := fmt.Sprintf("%v", vals[1])
-		kind := fmt.Sprintf("%v", vals[2])
+		name := fmt.Sprintf("%v", vals[nameIdx])
+		kind := fmt.Sprintf("%v", vals[kindIdx])
 		objects = append(objects, SnowflakeObject{Name: name, Kind: kind, Schema: schema})
 	}
 	return objects, rows.Err()

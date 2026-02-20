@@ -189,15 +189,23 @@ export default function Sidebar() {
 
   const refreshDatabase = () => {
     if (!ctxMenu) return;
-    const dbKey = ctxMenu.nodeKey; // "db:DBNAME"
+    const dbKey = ctxMenu.nodeKey;        // "db:DBNAME"
+    const db    = dbKey.slice("db:".length); // "DBNAME"
     setCtxMenu(null);
 
-    // Remove the db key and all its descendants from the loaded-keys set so
-    // Tree will call loadData again when the node is next expanded.
-    setLoadedKeys((prev) => prev.filter((k) => !String(k).startsWith(dbKey)));
+    // Remove every key that belongs to this database from loadedKeys.
+    // Schema keys look like "schema:DBNAME:SCHEMANAME" — a different prefix
+    // from "db:DBNAME" — so they must be evicted separately; otherwise Tree
+    // sees them as already-loaded and never calls loadData for them again.
+    setLoadedKeys((prev) =>
+      prev.filter((k) => {
+        const s = String(k);
+        return !s.startsWith(dbKey) && !s.startsWith(`schema:${db}:`);
+      })
+    );
 
-    // Strip children from treeData — Tree won't reload a node that still has
-    // a children array even if its key is absent from loadedKeys.
+    // Strip children from treeData — Tree won't call loadData for a node
+    // that still has a children array even if its key left loadedKeys.
     setTreeData((prev) => clearNodeChildren(prev, dbKey));
   };
 
