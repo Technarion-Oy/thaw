@@ -1,5 +1,6 @@
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { useQueryStore } from "../../store/queryStore";
+import { useObjectStore } from "../../store/objectStore";
 
 const SNOWFLAKE_KEYWORDS = [
   "SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER",
@@ -12,41 +13,133 @@ const SNOWFLAKE_KEYWORDS = [
   "PRECEDING", "FOLLOWING", "CURRENT ROW", "FLATTEN", "LATERAL",
 ];
 
+// Map Snowflake object kinds to Monaco completion item kinds.
+function monacoKind(monaco: any, kind: string): number {
+  const K = monaco.languages.CompletionItemKind;
+  switch (kind) {
+    case "TABLE":     return K.Class;
+    case "VIEW":      return K.Interface;
+    case "FUNCTION":  return K.Function;
+    case "PROCEDURE": return K.Function;
+    case "SEQUENCE":  return K.Constant;
+    default:          return K.Value;
+  }
+}
+
 export default function SqlEditor() {
   const { sql, setSql, setSelectedSql } = useQueryStore();
 
   const handleMount: OnMount = (editor, monaco) => {
-    // Register Snowflake keyword completions
     monaco.languages.registerCompletionItemProvider("sql", {
+      triggerCharacters: ["."],
       provideCompletionItems: (model: any, position: any) => {
         const word = model.getWordUntilPosition(position);
         const range = {
           startLineNumber: position.lineNumber,
-          endLineNumber: position.lineNumber,
-          startColumn: word.startColumn,
-          endColumn: word.endColumn,
+          endLineNumber:   position.lineNumber,
+          startColumn:     word.startColumn,
+          endColumn:       word.endColumn,
         };
-        return {
-          suggestions: SNOWFLAKE_KEYWORDS.map((kw) => ({
-            label: kw,
-            kind: monaco.languages.CompletionItemKind.Keyword,
-            insertText: kw,
-            range,
-          })),
-        };
+
+        // Text on the current line up to (but not including) the current word —
+        // used to detect whether the user is typing after a dot qualifier.
+        const lineUpToWord = model
+          .getLineContent(position.lineNumber)
+          .substring(0, word.startColumn - 1);
+
+        const { databases, schemas, objects } = useObjectStore.getState();
+
+        // ── db.schema. → suggest objects in that schema ──────────────────
+        const twoPartMatch = lineUpToWord.match(/\b(\w+)\.(\w+)\.\s*$/i);
+        if (twoPartMatch) {
+          const [, db, schema] = twoPartMatch;
+          const UC = (s: string) => s.toUpperCase();
+          return {
+            suggestions: objects
+              .filter((o) => UC(o.db) === UC(db) && UC(o.schema) === UC(schema))
+              .map((o) => ({
+                label:      o.name,
+                kind:       monacoKind(monaco, o.kind),
+                insertText: o.name,
+                detail:     o.kind,
+                range,
+              })),
+          };
+        }
+
+        // ── db. → suggest schemas of that database ────────────────────────
+        const onePartMatch = lineUpToWord.match(/\b(\w+)\.\s*$/i);
+        if (onePartMatch) {
+          const [, qualifier] = onePartMatch;
+          const UC = (s: string) => s.toUpperCase();
+
+          // Is the qualifier a known database?
+          const dbSchemas = schemas.filter((s) => UC(s.db) === UC(qualifier));
+          if (dbSchemas.length > 0) {
+            return {
+              suggestions: dbSchemas.map((s) => ({
+                label:      s.name,
+                kind:       monaco.languages.CompletionItemKind.Module,
+                insertText: s.name,
+                detail:     "SCHEMA",
+                range,
+              })),
+            };
+          }
+
+          // Is the qualifier a known schema? → suggest its objects
+          const schemaObjs = objects.filter((o) => UC(o.schema) === UC(qualifier));
+          if (schemaObjs.length > 0) {
+            return {
+              suggestions: schemaObjs.map((o) => ({
+                label:      o.name,
+                kind:       monacoKind(monaco, o.kind),
+                insertText: o.name,
+                detail:     o.kind,
+                range,
+              })),
+            };
+          }
+        }
+
+        // ── No qualifier → keywords + databases + all object names ────────
+        const keywordSuggestions = SNOWFLAKE_KEYWORDS.map((kw) => ({
+          label:      kw,
+          kind:       monaco.languages.CompletionItemKind.Keyword,
+          insertText: kw,
+          range,
+        }));
+
+        const dbSuggestions = databases.map((db) => ({
+          label:      db,
+          kind:       monaco.languages.CompletionItemKind.Module,
+          insertText: db,
+          detail:     "DATABASE",
+          range,
+        }));
+
+        const objectSuggestions = objects.map((o) => ({
+          label:      o.name,
+          kind:       monacoKind(monaco, o.kind),
+          insertText: o.name,
+          detail:     `${o.kind} · ${o.db}.${o.schema}`,
+          range,
+        }));
+
+        return { suggestions: [...keywordSuggestions, ...dbSuggestions, ...objectSuggestions] };
       },
     });
 
     // Track selection so QueryPage knows what to run
     editor.onDidChangeCursorSelection(() => {
       const selection = editor.getSelection();
-      const selected = selection && !selection.isEmpty()
+      const selected  = selection && !selection.isEmpty()
         ? editor.getModel()?.getValueInRange(selection) ?? ""
         : "";
       setSelectedSql(selected);
     });
 
-    // Cmd+Enter / Ctrl+Enter → run query (bubbles up via custom event)
+    // Cmd+Enter / Ctrl+Enter → run query
     editor.addCommand(
       monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
       () => window.dispatchEvent(new CustomEvent("run-query"))

@@ -18,6 +18,7 @@ import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
 import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL } from "../../../wailsjs/go/main/App";
 import { useQueryStore } from "../../store/queryStore";
+import { useObjectStore } from "../../store/objectStore";
 import GitPanel from "../git/GitPanel";
 
 const { Text } = Typography;
@@ -113,6 +114,7 @@ export default function Sidebar() {
           isLeaf: false,
         }))
       );
+      useObjectStore.getState().setDatabases(dbs);
       setLoaded(true);
     } catch (e) {
       console.error(e);
@@ -137,6 +139,7 @@ export default function Sidebar() {
           isLeaf: false,
         })))
       );
+      useObjectStore.getState().addSchemas(db, schemas);
     } else if (parts[0] === "schema") {
       const [, db, schema] = parts;
       const objects        = await ListObjects(db, schema);
@@ -166,6 +169,7 @@ export default function Sidebar() {
       }));
 
       setTreeData((prev) => updateNode(prev, key, typeNodes));
+      useObjectStore.getState().addObjects(db, schema, objects.map((o) => ({ name: o.name, kind: (o.kind || "OTHER").toUpperCase() })));
     }
   };
 
@@ -196,6 +200,7 @@ export default function Sidebar() {
     const dbKey = ctxMenu.nodeKey;        // "db:DBNAME"
     const db    = dbKey.slice("db:".length); // "DBNAME"
     setCtxMenu(null);
+    useObjectStore.getState().clearDatabase(db);
 
     // Remove every key that belongs to this database from loadedKeys.
     // Schema keys look like "schema:DBNAME:SCHEMANAME" — a different prefix
