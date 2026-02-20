@@ -34,16 +34,16 @@ export function GetObjectDDL(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['GetObjectDDL'](arg1, arg2, arg3, arg4);
 }
 
+export function GetSessionContext() {
+  return window['go']['main']['App']['GetSessionContext']();
+}
+
 export function GitCommitAndPush(arg1) {
   return window['go']['main']['App']['GitCommitAndPush'](arg1);
 }
 
 export function GitStatus(arg1) {
   return window['go']['main']['App']['GitStatus'](arg1);
-}
-
-export function GetSessionContext() {
-  return window['go']['main']['App']['GetSessionContext']();
 }
 
 export function IsConnected() {
@@ -70,14 +70,6 @@ export function ListWarehouses() {
   return window['go']['main']['App']['ListWarehouses']();
 }
 
-export function UseRole(arg1) {
-  return window['go']['main']['App']['UseRole'](arg1);
-}
-
-export function UseWarehouse(arg1) {
-  return window['go']['main']['App']['UseWarehouse'](arg1);
-}
-
 export function LoadSnowflakeCLIConfig() {
   return window['go']['main']['App']['LoadSnowflakeCLIConfig']();
 }
@@ -88,4 +80,12 @@ export function PickDirectory() {
 
 export function SaveGitConfig(arg1) {
   return window['go']['main']['App']['SaveGitConfig'](arg1);
+}
+
+export function UseRole(arg1) {
+  return window['go']['main']['App']['UseRole'](arg1);
+}
+
+export function UseWarehouse(arg1) {
+  return window['go']['main']['App']['UseWarehouse'](arg1);
 }

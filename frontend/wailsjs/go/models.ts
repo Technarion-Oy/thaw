@@ -231,11 +231,11 @@ export namespace snowflake {
 	    warehouse: string;
 	    database: string;
 	    schema: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new SessionContext(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.role = source["role"];
@@ -248,11 +248,11 @@ export namespace snowflake {
 	    name: string;
 	    kind: string;
 	    schema: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new SnowflakeObject(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
