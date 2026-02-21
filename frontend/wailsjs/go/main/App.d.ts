@@ -3,6 +3,7 @@
 import {snowflake} from '../models';
 import {ddl} from '../models';
 import {config} from '../models';
+import {filesystem} from '../models';
 import {gitrepo} from '../models';
 import {sfconfig} from '../models';
 
@@ -33,6 +34,8 @@ export function GitStatus(arg1:string):Promise<gitrepo.RepoStatus>;
 export function IsConnected():Promise<boolean>;
 
 export function ListDatabases():Promise<Array<string>>;
+
+export function ListDirectory(arg1:string):Promise<Array<filesystem.FileEntry>>;
 
 export function ListObjects(arg1:string,arg2:string):Promise<Array<snowflake.SnowflakeObject>>;
 

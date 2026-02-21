@@ -8,6 +8,7 @@ import (
 
 	"thaw/internal/config"
 	"thaw/internal/ddl"
+	"thaw/internal/filesystem"
 	"thaw/internal/gitrepo"
 	"thaw/internal/sfconfig"
 	"thaw/internal/snowflake"
@@ -113,6 +114,11 @@ func (a *App) GitCommitAndPush(params gitrepo.PushParams) error {
 // The Token field is used only in-memory for the pull URL and is never persisted.
 func (a *App) GitPull(params gitrepo.PullParams) error {
 	return gitrepo.Pull(a.ctx, params)
+}
+
+// ListDirectory returns the direct children of path (dirs first, then files).
+func (a *App) ListDirectory(path string) ([]filesystem.FileEntry, error) {
+	return filesystem.ListDir(path)
 }
 
 // PickDirectory opens a native folder-picker dialog and returns the selected path.

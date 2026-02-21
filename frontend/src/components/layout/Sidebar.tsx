@@ -24,6 +24,7 @@ import { useObjectStore } from "../../store/objectStore";
 import { useGitStore } from "../../store/gitStore";
 import GitPanel from "../git/GitPanel";
 import ExportPanel from "../export/ExportPanel";
+import FileBrowser from "../files/FileBrowser";
 import CallProcedureModal from "../procedure/CallProcedureModal";
 
 const { Text } = Typography;
@@ -406,7 +407,7 @@ export default function Sidebar() {
 
       <Divider style={{ borderColor: "#30363d", margin: "8px 0 0" }} />
       <ExportPanel />
-      <Divider style={{ borderColor: "#30363d", margin: "0" }} />
+      <FileBrowser />
       <GitPanel />
 
       {/* Call Procedure modal */}

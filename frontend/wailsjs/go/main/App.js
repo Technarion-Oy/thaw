@@ -58,6 +58,10 @@ export function ListDatabases() {
   return window['go']['main']['App']['ListDatabases']();
 }
 
+export function ListDirectory(arg1) {
+  return window['go']['main']['App']['ListDirectory'](arg1);
+}
+
 export function ListObjects(arg1, arg2) {
   return window['go']['main']['App']['ListObjects'](arg1, arg2);
 }
