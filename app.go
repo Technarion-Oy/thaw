@@ -275,7 +275,7 @@ func (a *App) ExportAllDatabasesDDL(outputDir string) ([]ddl.ExportResult, error
 		return nil, ErrNotConnected
 	}
 
-	databases, err := a.client.ListDatabases(a.ctx)
+	databases, err := a.client.ListExportableDatabases(a.ctx)
 	if err != nil {
 		return nil, err
 	}

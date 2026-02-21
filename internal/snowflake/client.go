@@ -247,6 +247,46 @@ func (c *Client) ListDatabases(ctx context.Context) ([]string, error) {
 	return c.queryStringSlice(ctx, "SHOW DATABASES", 1)
 }
 
+// ListExportableDatabases returns only databases that are owned by the account
+// (origin column is empty). Shared / imported databases such as
+// SNOWFLAKE_SAMPLE_DATA are excluded because GET_DDL is not supported on them.
+func (c *Client) ListExportableDatabases(ctx context.Context) ([]string, error) {
+	rows, err := c.db.QueryContext(ctx, "SHOW DATABASES")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cols, _ := rows.Columns()
+	// Locate the "name" and "origin" columns by header name.
+	nameIdx, originIdx := 1, 4
+	for i, col := range cols {
+		switch strings.ToLower(col) {
+		case "name":
+			nameIdx = i
+		case "origin":
+			originIdx = i
+		}
+	}
+
+	var result []string
+	for rows.Next() {
+		vals := make([]interface{}, len(cols))
+		ptrs := make([]interface{}, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, err
+		}
+		origin := strings.TrimSpace(fmt.Sprintf("%v", vals[originIdx]))
+		if origin == "" || origin == "<nil>" {
+			result = append(result, fmt.Sprintf("%v", vals[nameIdx]))
+		}
+	}
+	return result, rows.Err()
+}
+
 // ListSchemas returns schemas inside a database.
 func (c *Client) ListSchemas(ctx context.Context, database string) ([]string, error) {
 	return c.queryStringSlice(ctx, fmt.Sprintf("SHOW SCHEMAS IN DATABASE %s", database), 1)
