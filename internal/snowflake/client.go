@@ -544,7 +544,7 @@ func (c *Client) GetDatabaseDDL(ctx context.Context, database string) (string, e
 	// GET_DDL does not support bind parameters for its object-name argument, so
 	// we must interpolate it directly — escaping single quotes by doubling them.
 	escaped := strings.ReplaceAll(database, "'", "''")
-	query := fmt.Sprintf("SELECT GET_DDL('DATABASE', '%s')", escaped)
+	query := fmt.Sprintf("SELECT GET_DDL('DATABASE', '%s', true)", escaped)
 
 	row := c.db.QueryRowContext(ctx, query)
 	var ddl string
