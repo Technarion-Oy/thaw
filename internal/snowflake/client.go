@@ -412,6 +412,87 @@ func (c *Client) GetObjectDDL(ctx context.Context, database, schema, kind, name,
 	return src, nil
 }
 
+// GetCompleteDatabaseDDL returns DDL for all objects in a database.
+//
+// It combines two sources:
+//  1. GET_DDL('DATABASE', ...) — fast single-call coverage for schemas,
+//     tables, views, sequences, functions, and procedures.
+//  2. Per-schema SHOW + individual GET_DDL for object types that the
+//     database-level GET_DDL does not reliably include: stages, streams,
+//     tasks, file formats, and pipes.
+//
+// The extra calls run concurrently across all schemas. Individual GET_DDL
+// failures (e.g. permission denied on a specific object) are silently skipped
+// so that one inaccessible object does not abort the whole database export.
+func (c *Client) GetCompleteDatabaseDDL(ctx context.Context, database string) (string, error) {
+	mainDDL, err := c.GetDatabaseDDL(ctx, database)
+	if err != nil {
+		return "", err
+	}
+
+	schemas, err := c.ListSchemas(ctx, database)
+	if err != nil {
+		// Cannot list schemas — return what we have from database-level GET_DDL.
+		return mainDDL, nil
+	}
+
+	type extraKind struct {
+		verb string // SHOW <verb> IN SCHEMA …
+		kind string // GET_DDL('<kind>', …)
+	}
+	extras := []extraKind{
+		{"STAGES", "STAGE"},
+		{"STREAMS", "STREAM"},
+		{"TASKS", "TASK"},
+		{"FILE FORMATS", "FILE FORMAT"},
+		{"PIPES", "PIPE"},
+	}
+
+	var (
+		mu       sync.Mutex
+		extraDDL []string
+		wg       sync.WaitGroup
+	)
+
+	for _, schema := range schemas {
+		for _, ek := range extras {
+			wg.Add(1)
+			go func(schema string, ek extraKind) {
+				defer wg.Done()
+				q := fmt.Sprintf("SHOW %s IN SCHEMA %s.%s", ek.verb, database, schema)
+				objs, err := c.showInSchema(ctx, q, ek.kind, schema)
+				if err != nil {
+					return
+				}
+				for _, obj := range objs {
+					src, err := c.GetObjectDDL(ctx, database, schema, ek.kind, obj.Name, "")
+					if err != nil {
+						continue // skip inaccessible objects
+					}
+					d := strings.TrimRight(src, ";\n ")
+					mu.Lock()
+					extraDDL = append(extraDDL, d)
+					mu.Unlock()
+				}
+			}(schema, ek)
+		}
+	}
+	wg.Wait()
+
+	if len(extraDDL) == 0 {
+		return mainDDL, nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString(mainDDL)
+	for _, d := range extraDDL {
+		sb.WriteString("\n")
+		sb.WriteString(d)
+		sb.WriteString(";\n")
+	}
+	return sb.String(), nil
+}
+
 // GetDatabaseDDL returns the complete DDL for a database using Snowflake's
 // GET_DDL function.  The result is a single SQL string containing CREATE
 // statements for every object in the database (schemas, tables, views,

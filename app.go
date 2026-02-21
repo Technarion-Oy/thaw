@@ -250,7 +250,7 @@ func (a *App) ExportDatabaseDDL(database, outputDir string) (ddl.ExportResult, e
 	ddl.ExportDatabases(
 		a.ctx,
 		[]string{database},
-		a.client.GetDatabaseDDL,
+		a.client.GetCompleteDatabaseDDL,
 		opts,
 		func(done, total int, res ddl.ExportResult) {
 			result = res
@@ -285,7 +285,7 @@ func (a *App) ExportAllDatabasesDDL(outputDir string) ([]ddl.ExportResult, error
 	results := ddl.ExportDatabases(
 		a.ctx,
 		databases,
-		a.client.GetDatabaseDDL,
+		a.client.GetCompleteDatabaseDDL,
 		opts,
 		func(done, total int, res ddl.ExportResult) {
 			wailsruntime.EventsEmit(a.ctx, ddlProgressEvent, DDLProgressPayload{

@@ -14,14 +14,18 @@ import {
   FolderOutlined,
   ReloadOutlined,
   PlayCircleOutlined,
+  CloudUploadOutlined,
 } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, ExportDatabaseDDL } from "../../../wailsjs/go/main/App";
 import { useQueryStore } from "../../store/queryStore";
 import { useObjectStore } from "../../store/objectStore";
+import { useGitStore } from "../../store/gitStore";
 import GitPanel from "../git/GitPanel";
+import ExportPanel from "../export/ExportPanel";
 import CallProcedureModal from "../procedure/CallProcedureModal";
+import { message } from "antd";
 
 const { Text } = Typography;
 
@@ -246,6 +250,31 @@ export default function Sidebar() {
     setCallModal({ db, schema, name, rawArgs: objArgs });
   };
 
+  const exportDatabase = async () => {
+    if (!ctxMenu) return;
+    const db = ctxMenu.nodeKey.slice("db:".length);
+    setCtxMenu(null);
+    const exportDir = useGitStore.getState().exportDir;
+    if (!exportDir) {
+      message.warning("Set a working directory in the Git panel first.");
+      return;
+    }
+    const hide = message.loading(`Exporting ${db}…`, 0);
+    try {
+      const result = await ExportDatabaseDDL(db, exportDir);
+      hide();
+      const errs = result.errors?.length ?? 0;
+      if (errs > 0) {
+        message.warning(`${db}: ${result.files} files, ${errs} error(s)`);
+      } else {
+        message.success(`${db}: ${result.files} files written`);
+      }
+    } catch (e) {
+      hide();
+      message.error(String(e));
+    }
+  };
+
   const viewDefinition = async () => {
     if (!ctxMenu) return;
     const { nodeKey, objArgs = "" } = ctxMenu;
@@ -327,6 +356,7 @@ export default function Sidebar() {
           onClick={(e) => e.stopPropagation()}
         >
           {ctxMenu.nodeType === "db" && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshDatabase)}
+          {ctxMenu.nodeType === "db" && menuItem("Export DDL", <CloudUploadOutlined style={{ fontSize: 12 }} />, exportDatabase)}
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PROCEDURE" &&
@@ -376,6 +406,8 @@ export default function Sidebar() {
       </Modal>
 
       <Divider style={{ borderColor: "#30363d", margin: "8px 0 0" }} />
+      <ExportPanel />
+      <Divider style={{ borderColor: "#30363d", margin: "0" }} />
       <GitPanel />
 
       {/* Call Procedure modal */}
