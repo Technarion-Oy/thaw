@@ -26,6 +26,8 @@ export function GetSessionContext():Promise<snowflake.SessionContext>;
 
 export function GitCommitAndPush(arg1:gitrepo.PushParams):Promise<void>;
 
+export function GitPull(arg1:gitrepo.PullParams):Promise<void>;
+
 export function GitStatus(arg1:string):Promise<gitrepo.RepoStatus>;
 
 export function IsConnected():Promise<boolean>;

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { GitStatus, GitCommitAndPush, PickDirectory, GetGitConfig, SaveGitConfig } from "../../wailsjs/go/main/App";
+import { GitStatus, GitCommitAndPush, GitPull, PickDirectory, GetGitConfig, SaveGitConfig } from "../../wailsjs/go/main/App";
 import type { gitrepo } from "../../wailsjs/go/models";
 
 export type RepoStatus = gitrepo.RepoStatus;
@@ -18,6 +18,7 @@ interface GitState {
   status: RepoStatus | null;
   loading: boolean;
   pushing: boolean;
+  pulling: boolean;
   error: string | null;
 
   // Actions
@@ -31,7 +32,8 @@ interface GitState {
   }>) => Promise<void>;
   pickExportDir: () => Promise<void>;
   refreshStatus: () => Promise<void>;
-  push: (params: { token: string; message: string }) => Promise<void>;
+  push: (params: { token: string; message: string; files?: string[] }) => Promise<void>;
+  pull: (params: { token: string }) => Promise<void>;
   clearError: () => void;
 }
 
@@ -46,6 +48,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   status: null,
   loading: false,
   pushing: false,
+  pulling: false,
   error: null,
 
   loadConfig: async () => {
@@ -98,7 +101,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
-  push: async ({ token, message }) => {
+  push: async ({ token, message, files }) => {
     const { exportDir, remoteURL, branch, authorName, authorEmail } = get();
     if (!exportDir) return;
     set({ pushing: true, error: null });
@@ -111,12 +114,32 @@ export const useGitStore = create<GitState>((set, get) => ({
         message:     message || "chore: export Snowflake DDL",
         authorName,
         authorEmail,
+        files:       files ?? [],
       });
       await get().refreshStatus();
     } catch (e) {
       set({ error: String(e) });
     } finally {
       set({ pushing: false });
+    }
+  },
+
+  pull: async ({ token }) => {
+    const { exportDir, remoteURL, branch } = get();
+    if (!exportDir) return;
+    set({ pulling: true, error: null });
+    try {
+      await GitPull({
+        dir:       exportDir,
+        remoteURL: remoteURL,
+        branch:    branch || "main",
+        token,
+      });
+      await get().refreshStatus();
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      set({ pulling: false });
     }
   },
 

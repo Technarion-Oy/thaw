@@ -109,6 +109,12 @@ func (a *App) GitCommitAndPush(params gitrepo.PushParams) error {
 	return gitrepo.CommitAndPush(a.ctx, params)
 }
 
+// GitPull fetches and merges changes from the remote branch.
+// The Token field is used only in-memory for the pull URL and is never persisted.
+func (a *App) GitPull(params gitrepo.PullParams) error {
+	return gitrepo.Pull(a.ctx, params)
+}
+
 // PickDirectory opens a native folder-picker dialog and returns the selected path.
 // Returns an empty string if the user cancels.
 func (a *App) PickDirectory() string {

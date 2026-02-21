@@ -48,6 +48,24 @@ export namespace ddl {
 
 export namespace gitrepo {
 	
+	export class PullParams {
+	    dir: string;
+	    remoteURL: string;
+	    branch: string;
+	    token: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PullParams(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.dir = source["dir"];
+	        this.remoteURL = source["remoteURL"];
+	        this.branch = source["branch"];
+	        this.token = source["token"];
+	    }
+	}
 	export class PushParams {
 	    dir: string;
 	    remoteURL: string;
@@ -56,6 +74,7 @@ export namespace gitrepo {
 	    message: string;
 	    authorName: string;
 	    authorEmail: string;
+	    files: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new PushParams(source);
@@ -70,6 +89,7 @@ export namespace gitrepo {
 	        this.message = source["message"];
 	        this.authorName = source["authorName"];
 	        this.authorEmail = source["authorEmail"];
+	        this.files = source["files"];
 	    }
 	}
 	export class RepoStatus {

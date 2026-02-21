@@ -5,11 +5,12 @@ import {
   ReloadOutlined,
   BranchesOutlined,
   CloudUploadOutlined,
+  CloudDownloadOutlined,
 } from "@ant-design/icons";
 import { useGitStore } from "../../store/gitStore";
+import CommitModal from "./CommitModal";
 
 const { Text } = Typography;
-const { TextArea } = Input;
 
 const CLR_BORDER    = "#30363d";
 const CLR_SECONDARY = "#8b949e";
@@ -20,15 +21,14 @@ const CLR_DELETED   = "#f85149";
 export default function GitPanel() {
   const {
     exportDir, remoteURL, branch, authorName, authorEmail,
-    configLoaded, status, loading, pushing, error,
-    loadConfig, saveConfig, pickExportDir, refreshStatus, push, clearError,
+    configLoaded, status, loading, pushing, pulling, error,
+    loadConfig, saveConfig, pickExportDir, refreshStatus, push, pull, clearError,
   } = useGitStore();
 
-  // Token and message are ephemeral — never persisted
-  const [token,   setToken]   = useState("");
-  const [message, setMessage] = useState("");
+  // Token is ephemeral — shared between pull and the commit modal
+  const [token, setToken] = useState("");
+  const [commitOpen, setCommitOpen] = useState(false);
 
-  // Load saved config once on mount
   useEffect(() => {
     if (!configLoaded) {
       loadConfig();
@@ -40,11 +40,14 @@ export default function GitPanel() {
     (status?.added?.length   ?? 0) +
     (status?.deleted?.length ?? 0);
 
-  const handlePush = async () => {
-    await push({ token, message });
+  const handlePull = async () => {
+    await pull({ token });
+  };
+
+  const handleCommit = async (files: string[], message: string, commitToken: string) => {
+    await push({ token: commitToken, message, files });
     if (!useGitStore.getState().error) {
-      setMessage("");
-      setToken("");
+      setCommitOpen(false);
     }
   };
 
@@ -202,26 +205,30 @@ export default function GitPanel() {
                     }]}
                   />
 
-                  <TextArea
-                    size="small"
-                    rows={2}
-                    placeholder="Commit message (default: chore: export Snowflake DDL)"
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                    style={{ fontSize: 12, resize: "none" }}
-                  />
-
-                  <Button
-                    type="primary"
-                    size="small"
-                    block
-                    icon={<CloudUploadOutlined />}
-                    loading={pushing}
-                    disabled={loading}
-                    onClick={handlePush}
-                  >
-                    {pushing ? "Pushing…" : "Commit & Push"}
-                  </Button>
+                  {/* ── Action buttons ──────────────────────────── */}
+                  <Space.Compact block>
+                    <Button
+                      size="small"
+                      icon={<CloudDownloadOutlined />}
+                      loading={pulling}
+                      disabled={loading || pushing || !status?.isRepo}
+                      onClick={handlePull}
+                      style={{ width: "40%" }}
+                    >
+                      {pulling ? "Pulling…" : "Pull"}
+                    </Button>
+                    <Button
+                      type="primary"
+                      size="small"
+                      icon={<CloudUploadOutlined />}
+                      loading={pushing}
+                      disabled={loading || pulling}
+                      onClick={() => setCommitOpen(true)}
+                      style={{ width: "60%" }}
+                    >
+                      {pushing ? "Pushing…" : "Commit & Push"}
+                    </Button>
+                  </Space.Compact>
                 </>
               )}
 
@@ -240,6 +247,16 @@ export default function GitPanel() {
           ),
         }]}
       />
+
+      {/* ── Commit modal ───────────────────────────────────────── */}
+      {commitOpen && status && (
+        <CommitModal
+          status={status}
+          pushing={pushing}
+          onClose={() => setCommitOpen(false)}
+          onCommit={handleCommit}
+        />
+      )}
     </div>
   );
 }

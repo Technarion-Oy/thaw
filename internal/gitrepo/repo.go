@@ -22,13 +22,22 @@ type RepoStatus struct {
 
 // PushParams holds all parameters needed for a commit-and-push operation.
 type PushParams struct {
-	Dir         string `json:"dir"`
-	RemoteURL   string `json:"remoteURL"`
-	Branch      string `json:"branch"`
-	Token       string `json:"token"`
-	Message     string `json:"message"`
-	AuthorName  string `json:"authorName"`
-	AuthorEmail string `json:"authorEmail"`
+	Dir         string   `json:"dir"`
+	RemoteURL   string   `json:"remoteURL"`
+	Branch      string   `json:"branch"`
+	Token       string   `json:"token"`
+	Message     string   `json:"message"`
+	AuthorName  string   `json:"authorName"`
+	AuthorEmail string   `json:"authorEmail"`
+	Files       []string `json:"files"` // if empty, stages all changes
+}
+
+// PullParams holds parameters needed for a git pull operation.
+type PullParams struct {
+	Dir       string `json:"dir"`
+	RemoteURL string `json:"remoteURL"`
+	Branch    string `json:"branch"`
+	Token     string `json:"token"`
 }
 
 // run executes a git command in dir and returns trimmed stdout.
@@ -135,9 +144,16 @@ func CommitAndPush(ctx context.Context, p PushParams) error {
 		}
 	}
 
-	// Stage everything
-	if _, err := run(ctx, p.Dir, "add", "-A"); err != nil {
-		return fmt.Errorf("git add: %w", err)
+	// Stage specified files or everything
+	if len(p.Files) > 0 {
+		addArgs := append([]string{"add", "--"}, p.Files...)
+		if _, err := run(ctx, p.Dir, addArgs...); err != nil {
+			return fmt.Errorf("git add: %w", err)
+		}
+	} else {
+		if _, err := run(ctx, p.Dir, "add", "-A"); err != nil {
+			return fmt.Errorf("git add: %w", err)
+		}
 	}
 
 	// Commit
@@ -166,6 +182,25 @@ func CommitAndPush(ctx context.Context, p PushParams) error {
 	pushURL := injectToken(p.RemoteURL, p.Token)
 	if _, err := run(ctx, p.Dir, "push", "-u", pushURL, branch); err != nil {
 		return fmt.Errorf("git push: %w", err)
+	}
+
+	return nil
+}
+
+// Pull fetches and merges changes from the remote branch.
+func Pull(ctx context.Context, p PullParams) error {
+	if _, err := run(ctx, p.Dir, "rev-parse", "--git-dir"); err != nil {
+		return fmt.Errorf("not a git repository")
+	}
+
+	branch := p.Branch
+	if branch == "" {
+		branch = "main"
+	}
+
+	pullURL := injectToken(p.RemoteURL, p.Token)
+	if _, err := run(ctx, p.Dir, "pull", pullURL, branch); err != nil {
+		return fmt.Errorf("git pull: %w", err)
 	}
 
 	return nil

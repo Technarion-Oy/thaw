@@ -42,6 +42,10 @@ export function GitCommitAndPush(arg1) {
   return window['go']['main']['App']['GitCommitAndPush'](arg1);
 }
 
+export function GitPull(arg1) {
+  return window['go']['main']['App']['GitPull'](arg1);
+}
+
 export function GitStatus(arg1) {
   return window['go']['main']['App']['GitStatus'](arg1);
 }
