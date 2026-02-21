@@ -3,8 +3,8 @@
 import {snowflake} from '../models';
 import {ddl} from '../models';
 import {config} from '../models';
-import {filesystem} from '../models';
 import {gitrepo} from '../models';
+import {filesystem} from '../models';
 import {sfconfig} from '../models';
 
 export function CancelConnect():Promise<void>;
@@ -48,6 +48,8 @@ export function ListWarehouses():Promise<Array<string>>;
 export function LoadSnowflakeCLIConfig():Promise<sfconfig.Config>;
 
 export function PickDirectory():Promise<string>;
+
+export function ReadFile(arg1:string):Promise<string>;
 
 export function SaveGitConfig(arg1:config.GitConfig):Promise<void>;
 

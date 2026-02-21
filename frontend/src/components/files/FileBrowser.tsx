@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Tree, Typography, Spin, Collapse, Space, Button } from "antd";
+import { Tree, Typography, Spin, Collapse, Space, Button, message } from "antd";
 import {
   FolderOutlined,
   FolderOpenOutlined,
@@ -8,8 +8,9 @@ import {
 } from "@ant-design/icons";
 import type { DataNode, EventDataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDirectory } from "../../../wailsjs/go/main/App";
+import { ListDirectory, ReadFile } from "../../../wailsjs/go/main/App";
 import { useGitStore } from "../../store/gitStore";
+import { useQueryStore } from "../../store/queryStore";
 import type { filesystem } from "../../../wailsjs/go/models";
 
 type FileEntry = filesystem.FileEntry;
@@ -41,19 +42,28 @@ function updateNode(nodes: DataNode[], targetKey: string, children: DataNode[]):
 }
 
 export default function FileBrowser() {
-  const exportDir = useGitStore((s) => s.exportDir);
+  const exportDir  = useGitStore((s) => s.exportDir);
+  const openFile   = useQueryStore((s) => s.openFile);
+  const currentFile = useQueryStore((s) => s.currentFile);
 
-  const [treeData,   setTreeData]   = useState<DataNode[]>([]);
-  const [loadedKeys, setLoadedKeys] = useState<Key[]>([]);
-  const [loading,    setLoading]    = useState(false);
-  const [loaded,     setLoaded]     = useState(false);
+  const [treeData,    setTreeData]    = useState<DataNode[]>([]);
+  const [loadedKeys,  setLoadedKeys]  = useState<Key[]>([]);
+  const [selectedKey, setSelectedKey] = useState<Key | null>(null);
+  const [loading,     setLoading]     = useState(false);
+  const [loaded,      setLoaded]      = useState(false);
 
   // Reset tree when the working directory changes
   useEffect(() => {
     setLoaded(false);
     setTreeData([]);
     setLoadedKeys([]);
+    setSelectedKey(null);
   }, [exportDir]);
+
+  // Keep selected key in sync when file is opened from elsewhere (e.g. DDL view)
+  useEffect(() => {
+    if (!currentFile) setSelectedKey(null);
+  }, [currentFile]);
 
   const loadRoot = async () => {
     if (!exportDir || loading || loaded) return;
@@ -73,6 +83,7 @@ export default function FileBrowser() {
     setLoaded(false);
     setTreeData([]);
     setLoadedKeys([]);
+    setSelectedKey(null);
     setLoading(true);
     try {
       const entries = await ListDirectory(exportDir);
@@ -93,6 +104,20 @@ export default function FileBrowser() {
       setTreeData((prev) => updateNode(prev, path, entriesToNodes(entries)));
     } catch {
       // non-fatal
+    }
+  };
+
+  const onSelect = async (_keys: Key[], info: { node: DataNode }) => {
+    const node = info.node;
+    if ((node as any).isLeaf === false) return; // directory — let Tree handle expand
+    const path = String(node.key);
+    setSelectedKey(path);
+    try {
+      const content = await ReadFile(path);
+      openFile(path, content);
+    } catch (e) {
+      message.error(`Could not open file: ${String(e)}`);
+      setSelectedKey(null);
     }
   };
 
@@ -150,8 +175,10 @@ export default function FileBrowser() {
                 <Tree
                   treeData={treeData}
                   loadedKeys={loadedKeys}
+                  selectedKeys={selectedKey ? [selectedKey] : []}
                   onLoad={(keys) => setLoadedKeys(keys)}
                   loadData={onLoadData as any}
+                  onSelect={onSelect as any}
                   showIcon
                   blockNode
                   style={{ background: "transparent", color: "#e6edf3", fontSize: 12 }}

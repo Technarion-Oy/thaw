@@ -11,7 +11,7 @@ import { useSessionStore } from "../store/sessionStore";
 const { Text } = Typography;
 
 export default function QueryPage() {
-  const { sql, selectedSql, result, isRunning, error, setResult, setRunning, setError } = useQueryStore();
+  const { sql, selectedSql, currentFile, result, isRunning, error, setResult, setRunning, setError } = useQueryStore();
   const { params, disconnect } = useConnectionStore();
   const {
     role, warehouse, roles, warehouses,
@@ -81,6 +81,13 @@ export default function QueryPage() {
           <Text type="secondary" style={{ fontSize: 11 }}>
             {selectedSql.trim() ? "⌘↵ · running selection" : "⌘↵ to run"}
           </Text>
+          {currentFile && (
+            <Tag style={{ fontSize: 11, margin: 0, fontFamily: "monospace", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis" }}
+              title={currentFile}
+            >
+              {currentFile.split("/").pop()}
+            </Tag>
+          )}
         </Space>
 
         <Space size={6}>

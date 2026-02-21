@@ -13,6 +13,15 @@ type FileEntry struct {
 	Size  int64  `json:"size"`
 }
 
+// ReadFile returns the full text content of the file at path.
+func ReadFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
 // ListDir returns the direct children of dir, directories first then files,
 // both groups sorted alphabetically.
 func ListDir(dir string) ([]FileEntry, error) {

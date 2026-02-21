@@ -86,6 +86,10 @@ export function PickDirectory() {
   return window['go']['main']['App']['PickDirectory']();
 }
 
+export function ReadFile(arg1) {
+  return window['go']['main']['App']['ReadFile'](arg1);
+}
+
 export function SaveGitConfig(arg1) {
   return window['go']['main']['App']['SaveGitConfig'](arg1);
 }

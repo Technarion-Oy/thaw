@@ -121,6 +121,11 @@ func (a *App) ListDirectory(path string) ([]filesystem.FileEntry, error) {
 	return filesystem.ListDir(path)
 }
 
+// ReadFile returns the text content of the file at path.
+func (a *App) ReadFile(path string) (string, error) {
+	return filesystem.ReadFile(path)
+}
+
 // PickDirectory opens a native folder-picker dialog and returns the selected path.
 // Returns an empty string if the user cancels.
 func (a *App) PickDirectory() string {
