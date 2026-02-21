@@ -13,6 +13,7 @@ import {
   FileOutlined,
   FolderOutlined,
   ReloadOutlined,
+  PlayCircleOutlined,
 } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
@@ -20,6 +21,7 @@ import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL } from "../../../
 import { useQueryStore } from "../../store/queryStore";
 import { useObjectStore } from "../../store/objectStore";
 import GitPanel from "../git/GitPanel";
+import CallProcedureModal from "../procedure/CallProcedureModal";
 
 const { Text } = Typography;
 
@@ -92,6 +94,7 @@ export default function Sidebar() {
 
   const [ctxMenu, setCtxMenu]   = useState<ContextMenu | null>(null);
   const [ddlModal, setDdlModal] = useState<ObjectDDL | null>(null);
+  const [callModal, setCallModal] = useState<{ db: string; schema: string; name: string; rawArgs: string } | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
 
   // Close context menu on outside click
@@ -233,6 +236,16 @@ export default function Sidebar() {
     useQueryStore.getState().executeWith(sql);
   };
 
+  const callProcedure = () => {
+    if (!ctxMenu) return;
+    const { nodeKey, objArgs = "" } = ctxMenu;
+    setCtxMenu(null);
+    // key format: obj:DB:SCHEMA:KIND:NAME
+    const [, db, schema, , ...nameParts] = nodeKey.split(":");
+    const name = nameParts.join(":");
+    setCallModal({ db, schema, name, rawArgs: objArgs });
+  };
+
   const viewDefinition = async () => {
     if (!ctxMenu) return;
     const { nodeKey, objArgs = "" } = ctxMenu;
@@ -316,6 +329,8 @@ export default function Sidebar() {
           {ctxMenu.nodeType === "db" && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshDatabase)}
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PROCEDURE" &&
+            menuItem("Call Procedure", <PlayCircleOutlined style={{ fontSize: 12 }} />, callProcedure)}
           {ctxMenu.nodeType === "obj" && menuItem("View Definition", null, viewDefinition)}
         </div>
       )}
@@ -362,6 +377,17 @@ export default function Sidebar() {
 
       <Divider style={{ borderColor: "#30363d", margin: "8px 0 0" }} />
       <GitPanel />
+
+      {/* Call Procedure modal */}
+      {callModal && (
+        <CallProcedureModal
+          db={callModal.db}
+          schema={callModal.schema}
+          name={callModal.name}
+          rawArgs={callModal.rawArgs}
+          onClose={() => setCallModal(null)}
+        />
+      )}
     </div>
   );
 }
