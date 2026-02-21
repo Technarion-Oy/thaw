@@ -59,7 +59,8 @@ interface ContextMenu {
   y: number;
   nodeKey: string;
   nodeType: "db" | "obj";
-  objKind?: string; // set for nodeType === "obj"
+  objKind?: string;  // set for nodeType === "obj"
+  objArgs?: string;  // parameter type list for PROCEDURE / FUNCTION
 }
 
 interface ObjectDDL {
@@ -161,10 +162,11 @@ export default function Sidebar() {
         key:      `type:${db}:${schema}:${kind}`,
         icon:     <FolderOutlined style={{ color: "#8b949e" }} />,
         children: groups[kind].map((o) => ({
-          title:  o.name,
-          key:    `obj:${db}:${schema}:${kind}:${o.name}`,
-          icon:   kindIcon(kind),
-          isLeaf: true,
+          title:     o.name,
+          key:       `obj:${db}:${schema}:${kind}:${o.name}`,
+          icon:      kindIcon(kind),
+          isLeaf:    true,
+          arguments: o.arguments ?? "",
         })),
       }));
 
@@ -191,7 +193,8 @@ export default function Sidebar() {
     } else if (key.startsWith("obj:")) {
       // key format: obj:DB:SCHEMA:KIND:NAME
       const objKind = key.split(":")[3];
-      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "obj", objKind });
+      const objArgs = (node as any).arguments ?? "";
+      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "obj", objKind, objArgs });
     }
   };
 
@@ -232,15 +235,16 @@ export default function Sidebar() {
 
   const viewDefinition = async () => {
     if (!ctxMenu) return;
+    const { nodeKey, objArgs = "" } = ctxMenu;
     setCtxMenu(null);
 
     // key format: obj:db:schema:kind:name
-    const [, db, schema, kind, ...nameParts] = ctxMenu.nodeKey.split(":");
+    const [, db, schema, kind, ...nameParts] = nodeKey.split(":");
     const name = nameParts.join(":");
 
     setDdlModal({ title: `${kind}: ${db}.${schema}.${name}`, src: "", loading: true, error: null });
     try {
-      const src = await GetObjectDDL(db, schema, kind, name);
+      const src = await GetObjectDDL(db, schema, kind, name, objArgs);
       setDdlModal((prev) => (prev ? { ...prev, src, loading: false } : null));
     } catch (e) {
       setDdlModal((prev) => (prev ? { ...prev, error: String(e), loading: false } : null));

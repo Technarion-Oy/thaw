@@ -248,6 +248,7 @@ export namespace snowflake {
 	    name: string;
 	    kind: string;
 	    schema: string;
+	    arguments: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SnowflakeObject(source);
@@ -258,6 +259,7 @@ export namespace snowflake {
 	        this.name = source["name"];
 	        this.kind = source["kind"];
 	        this.schema = source["schema"];
+	        this.arguments = source["arguments"];
 	    }
 	}
 

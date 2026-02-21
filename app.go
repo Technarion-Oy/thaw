@@ -211,11 +211,14 @@ func (a *App) ListObjects(database, schema string) ([]snowflake.SnowflakeObject,
 // GetObjectDDL returns the definition of a single schema object using
 // Snowflake's GET_DDL function. kind should be one of: TABLE, VIEW, FUNCTION,
 // PROCEDURE, SEQUENCE, STAGE, STREAM, TASK, FILE FORMAT, PIPE.
-func (a *App) GetObjectDDL(database, schema, kind, name string) (string, error) {
+// For procedures and functions, arguments must be the parameter type list
+// (e.g. "NUMBER, VARCHAR") so Snowflake can resolve the correct overload.
+// Pass an empty string for all other object kinds.
+func (a *App) GetObjectDDL(database, schema, kind, name, arguments string) (string, error) {
 	if a.client == nil {
 		return "", ErrNotConnected
 	}
-	return a.client.GetObjectDDL(a.ctx, database, schema, kind, name)
+	return a.client.GetObjectDDL(a.ctx, database, schema, kind, name, arguments)
 }
 
 // ─── DDL export ───────────────────────────────────────────────────────────────

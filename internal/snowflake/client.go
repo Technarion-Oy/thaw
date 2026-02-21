@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	sf "github.com/snowflakedb/gosnowflake"
@@ -43,9 +44,12 @@ type ConnectParams struct {
 
 // SnowflakeObject represents a database object (table, view, etc.).
 type SnowflakeObject struct {
-	Name   string `json:"name"`
-	Kind   string `json:"kind"`
-	Schema string `json:"schema"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	Schema    string `json:"schema"`
+	// Arguments holds the parameter type list for procedures and functions,
+	// e.g. "NUMBER, VARCHAR". Empty for all other object kinds.
+	Arguments string `json:"arguments"`
 }
 
 // QueryResult is the serialisable result of a SQL query.
@@ -248,31 +252,56 @@ func (c *Client) ListSchemas(ctx context.Context, database string) ([]string, er
 	return c.queryStringSlice(ctx, fmt.Sprintf("SHOW SCHEMAS IN DATABASE %s", database), 1)
 }
 
-// ListObjects returns tables, views, functions, etc. inside a schema.
-func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
-	rows, err := c.db.QueryContext(ctx,
-		fmt.Sprintf("SHOW OBJECTS IN SCHEMA %s.%s", database, schema))
+// extractArgTypes parses the "arguments" column returned by SHOW PROCEDURES /
+// SHOW FUNCTIONS. The format is "<name>(<types>) RETURN <return_type>", e.g.
+// "GET_EMPLOYEE_STATUS(NUMBER) RETURN VARIANT". Returns just the types string,
+// e.g. "NUMBER", or an empty string when there are no parameters.
+func extractArgTypes(arguments string) string {
+	start := strings.Index(arguments, "(")
+	if start < 0 {
+		return ""
+	}
+	end := strings.Index(arguments[start:], ")")
+	if end < 0 {
+		return ""
+	}
+	return strings.TrimSpace(arguments[start+1 : start+end])
+}
+
+// showInSchema runs a SHOW command and collects results as SnowflakeObjects.
+// If fixedKind is non-empty it is used as the Kind for every row; otherwise
+// the "kind" column in the result set is read (as in SHOW OBJECTS).
+// For PROCEDURE and FUNCTION kinds the "arguments" column is also captured so
+// that GET_DDL can be called with the correct overload signature.
+func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema string) ([]SnowflakeObject, error) {
+	rows, err := c.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
 	cols, _ := rows.Columns()
-
-	// Locate name and kind columns by name so we are immune to column-order
-	// differences across Snowflake versions / TERSE vs non-TERSE variants.
-	nameIdx, kindIdx := -1, -1
+	nameIdx, kindIdx, argsIdx, builtinIdx := -1, -1, -1, -1
 	for i, col := range cols {
 		switch strings.ToLower(col) {
 		case "name":
 			nameIdx = i
 		case "kind":
 			kindIdx = i
+		case "arguments":
+			argsIdx = i
+		case "is_builtin":
+			builtinIdx = i
 		}
 	}
-	if nameIdx < 0 || kindIdx < 0 {
-		return nil, fmt.Errorf("unexpected SHOW OBJECTS columns: %v", cols)
+	if nameIdx < 0 {
+		return nil, fmt.Errorf("no 'name' column in: %s cols=%v", query, cols)
 	}
+	if fixedKind == "" && kindIdx < 0 {
+		return nil, fmt.Errorf("no 'kind' column in: %s cols=%v", query, cols)
+	}
+
+	captureArgs := fixedKind == "PROCEDURE" || fixedKind == "FUNCTION"
 
 	var objects []SnowflakeObject
 	for rows.Next() {
@@ -285,18 +314,93 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 			return nil, err
 		}
 		name := fmt.Sprintf("%v", vals[nameIdx])
-		kind := fmt.Sprintf("%v", vals[kindIdx])
-		objects = append(objects, SnowflakeObject{Name: name, Kind: kind, Schema: schema})
+		// Skip Snowflake-internal procedures/functions. These show up in SHOW
+		// PROCEDURES / SHOW FUNCTIONS with is_builtin=Y (e.g. EXECUTE_AI_EVALUATION,
+		// COMPUTE_AI_OBSERVABILITY_METRICS) or with the SYSTEM$ prefix, and are
+		// not accessible to users via GET_DDL.
+		if strings.HasPrefix(name, "SYSTEM$") {
+			continue
+		}
+		if builtinIdx >= 0 && strings.EqualFold(fmt.Sprintf("%v", vals[builtinIdx]), "Y") {
+			continue
+		}
+		kind := fixedKind
+		if kind == "" {
+			kind = fmt.Sprintf("%v", vals[kindIdx])
+		}
+		var argTypes string
+		if captureArgs && argsIdx >= 0 {
+			argTypes = extractArgTypes(fmt.Sprintf("%v", vals[argsIdx]))
+		}
+		objects = append(objects, SnowflakeObject{Name: name, Kind: kind, Schema: schema, Arguments: argTypes})
 	}
 	return objects, rows.Err()
+}
+
+// ListObjects returns all objects inside a schema by running multiple SHOW
+// commands concurrently. Individual commands that fail (e.g. due to missing
+// privileges on a particular object type) are silently skipped so that the
+// rest still appear.
+func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
+	q := fmt.Sprintf("%s.%s", database, schema)
+
+	type showCmd struct {
+		query string
+		kind  string // empty → read from result's "kind" column
+	}
+	commands := []showCmd{
+		{fmt.Sprintf("SHOW OBJECTS IN SCHEMA %s", q), ""},
+		{fmt.Sprintf("SHOW PROCEDURES IN SCHEMA %s", q), "PROCEDURE"},
+		{fmt.Sprintf("SHOW FUNCTIONS IN SCHEMA %s", q), "FUNCTION"},
+		{fmt.Sprintf("SHOW TASKS IN SCHEMA %s", q), "TASK"},
+		{fmt.Sprintf("SHOW STREAMS IN SCHEMA %s", q), "STREAM"},
+		{fmt.Sprintf("SHOW STAGES IN SCHEMA %s", q), "STAGE"},
+		{fmt.Sprintf("SHOW FILE FORMATS IN SCHEMA %s", q), "FILE FORMAT"},
+		{fmt.Sprintf("SHOW PIPES IN SCHEMA %s", q), "PIPE"},
+	}
+
+	type result struct {
+		objs []SnowflakeObject
+		err  error
+	}
+	results := make([]result, len(commands))
+
+	var wg sync.WaitGroup
+	for i, cmd := range commands {
+		wg.Add(1)
+		go func(i int, cmd showCmd) {
+			defer wg.Done()
+			results[i].objs, results[i].err = c.showInSchema(ctx, cmd.query, cmd.kind, schema)
+		}(i, cmd)
+	}
+	wg.Wait()
+
+	var all []SnowflakeObject
+	for _, r := range results {
+		if r.err != nil {
+			continue // skip types we can't access
+		}
+		all = append(all, r.objs...)
+	}
+	return all, nil
 }
 
 // GetObjectDDL returns the definition of a single schema object using
 // GET_DDL('<kind>', '<db>.<schema>.<name>'). The name components are
 // double-quote escaped to handle mixed-case and special characters.
-func (c *Client) GetObjectDDL(ctx context.Context, database, schema, kind, name string) (string, error) {
+//
+// For procedures and functions the arguments parameter must contain the
+// parameter type list (e.g. "NUMBER, VARCHAR") so that Snowflake can resolve
+// the correct overload. Pass an empty string for all other object kinds.
+func (c *Client) GetObjectDDL(ctx context.Context, database, schema, kind, name, arguments string) (string, error) {
 	escapeIdent := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
 	qualified := fmt.Sprintf(`"%s"."%s"."%s"`, escapeIdent(database), escapeIdent(schema), escapeIdent(name))
+	// Procedures and functions require the argument type list appended to the
+	// qualified name so Snowflake can resolve the right overload.
+	upperKind := strings.ToUpper(kind)
+	if (upperKind == "PROCEDURE" || upperKind == "FUNCTION") && arguments != "" {
+		qualified += fmt.Sprintf("(%s)", arguments)
+	}
 	escapedKind := strings.ReplaceAll(kind, "'", "''")
 	query := fmt.Sprintf("SELECT GET_DDL('%s', '%s')", escapedKind, strings.ReplaceAll(qualified, "'", "''"))
 
