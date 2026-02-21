@@ -23,29 +23,6 @@ export namespace config {
 
 }
 
-export namespace filesystem {
-
-	export class FileEntry {
-	    name: string;
-	    path: string;
-	    isDir: boolean;
-	    size: number;
-
-	    static createFrom(source: any = {}) {
-	        return new FileEntry(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.path = source["path"];
-	        this.isDir = source["isDir"];
-	        this.size = source["size"];
-	    }
-	}
-
-}
-
 export namespace ddl {
 	
 	export class ExportResult {
@@ -64,6 +41,29 @@ export namespace ddl {
 	        this.files = source["files"];
 	        this.skipped = source["skipped"];
 	        this.errors = source["errors"];
+	    }
+	}
+
+}
+
+export namespace filesystem {
+	
+	export class FileEntry {
+	    name: string;
+	    path: string;
+	    isDir: boolean;
+	    size: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.isDir = source["isDir"];
+	        this.size = source["size"];
 	    }
 	}
 

@@ -179,6 +179,16 @@ func exportOne(ctx context.Context, database string, fetch FetchDDL, opts Export
 
 	writeWg.Wait()
 	res.Files = int(fileCount.Load())
+
+	// Remove the legacy "_root/" directory that was created by exports before
+	// fully-qualified-name support was added (GET_DDL(..., true)).  Now that all
+	// objects use three-part names the directory is never written to, but old
+	// runs may have left files there that would confuse users.
+	rootDir := filepath.Join(dbDir, "_root")
+	if _, statErr := os.Stat(rootDir); statErr == nil {
+		_ = os.RemoveAll(rootDir)
+	}
+
 	return res
 }
 

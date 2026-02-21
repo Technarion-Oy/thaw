@@ -96,6 +96,14 @@ export default function FileBrowser() {
     }
   };
 
+  // Refresh the tree automatically when an export finishes
+  useEffect(() => {
+    const handler = () => { if (loaded) refresh(); };
+    window.addEventListener("thaw:export-complete", handler);
+    return () => window.removeEventListener("thaw:export-complete", handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, exportDir]);
+
   const onLoadData = async (node: EventDataNode<DataNode>) => {
     if ((node as any).children) return;
     const path = String(node.key);

@@ -51,6 +51,7 @@ export default function ExportPanel() {
       off();
       setRunning(false);
       setFinished(true);
+      window.dispatchEvent(new CustomEvent("thaw:export-complete"));
     }
   };
 

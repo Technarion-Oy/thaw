@@ -1,8 +1,72 @@
 # Thaw — Snowflake Manager
 
-A desktop application for Snowflake management: browsing objects, running SQL queries, and CI/CD workflows.
+A desktop application for Snowflake management: browsing objects, running SQL queries, exporting DDL to a git repository, and pushing changes via CI/CD workflows.
 
 **Stack:** Go · Wails v2 · React · Ant Design · Monaco Editor · Ag-Grid
+
+---
+
+## Features
+
+### Snowflake connectivity
+- Connect with account / user / password / warehouse / role
+- Auto-fill connection form from `~/.snowflake/config.toml` (Snowflake CLI profiles)
+- Cancel an in-progress connection attempt
+- Switch role or warehouse from the query toolbar without reconnecting
+
+### SQL editor
+- Monaco editor with full SQL syntax highlighting
+- Run the full query or just the selected text (`⌘ Enter` / `Ctrl Enter`)
+- Open `.sql` files from the file browser and run them directly
+- Results displayed in a virtualised Ag-Grid table
+
+### Object browser (sidebar)
+- Browse databases → schemas → objects (tables, views, functions, procedures, …)
+- View the DDL of any object inline
+- Call stored procedures from the UI
+
+### DDL export
+- Export DDL for every database (or a single one) with one file per object
+- Fully qualified names (`db.schema.object`) in every CREATE statement
+- Shared / imported databases (e.g. `SNOWFLAKE_SAMPLE_DATA`) are automatically skipped
+- Files are organised on disk by schema and object type:
+  ```
+  <outputDir>/<DATABASE>/
+      _database.sql
+      schemas/<SCHEMA>.sql
+      <SCHEMA>/
+          tables/
+          views/
+          functions/
+          procedures/
+          sequences/
+          stages/
+          streams/
+          tasks/
+          file_formats/
+          pipes/
+  ```
+- Parallel fetch (up to 8 databases concurrently) and parallel atomic writes
+- Live progress bar driven by Wails events from the Go backend
+
+### File browser
+- Browse the export working directory in the sidebar
+- Lazy-loads subdirectories on demand
+- Click any file to open it in the Monaco editor
+- Auto-refreshes after a DDL export completes
+
+### Git integration
+- View git status for the working directory (staged / unstaged files)
+- **Pull** — fetch and merge from the configured remote branch
+- **Commit & Push** — opens a modal where you can:
+  - Select individual files to stage (with Select All / None buttons)
+  - Filter files by extension (`.sql`, `.json`, …)
+  - Enter a commit message and a personal-access token
+- Git credentials are **never persisted to disk** — the token is used in-memory only
+
+### UI
+- Resizable sidebar — drag the divider to any width between 160 px and 600 px
+- Dark theme throughout
 
 ---
 
@@ -73,16 +137,19 @@ thaw/
 │   ├── darwin/                    # macOS app icons
 │   └── windows/                   # Windows resources
 ├── internal/
+│   ├── config/config.go           # Saved git / export settings
 │   ├── ddl/
 │   │   ├── parser.go              # SQL statement splitter (state machine)
 │   │   ├── object.go              # Metadata extraction + file-path generation
 │   │   ├── exporter.go            # Parallel DDL export orchestration
 │   │   ├── parser_test.go
 │   │   └── object_test.go
+│   ├── filesystem/fs.go           # Directory listing and file reading
+│   ├── gitrepo/repo.go            # Git status, commit/push, pull
 │   ├── integration/
 │   │   └── export_test.go         # End-to-end tests (require live Snowflake account)
-│   ├── snowflake/client.go        # Snowflake driver wrapper
-│   └── config/config.go           # Saved connection profiles
+│   ├── sfconfig/reader.go         # Snowflake CLI config (~/.snowflake/config.toml)
+│   └── snowflake/client.go        # Snowflake driver wrapper
 └── frontend/
     ├── index.html
     ├── vite.config.ts
@@ -93,15 +160,24 @@ thaw/
     │   ├── styles/global.css
     │   ├── store/
     │   │   ├── connectionStore.ts # Connection state (Zustand)
-    │   │   └── queryStore.ts      # Query / result state (Zustand)
+    │   │   ├── gitStore.ts        # Git / export directory state (Zustand)
+    │   │   ├── objectStore.ts     # Object browser state (Zustand)
+    │   │   ├── queryStore.ts      # Query / result / open-file state (Zustand)
+    │   │   └── sessionStore.ts    # Active role & warehouse (Zustand)
     │   ├── pages/
     │   │   └── QueryPage.tsx      # Main query workspace
     │   └── components/
     │       ├── connection/ConnectModal.tsx
     │       ├── editor/SqlEditor.tsx
+    │       ├── export/ExportPanel.tsx
+    │       ├── files/FileBrowser.tsx
+    │       ├── git/
+    │       │   ├── GitPanel.tsx
+    │       │   └── CommitModal.tsx
+    │       ├── procedure/CallProcedureModal.tsx
     │       ├── results/ResultGrid.tsx
     │       └── layout/
-    │           ├── AppLayout.tsx
+    │           ├── AppLayout.tsx  # Resizable sidebar
     │           └── Sidebar.tsx
     └── wailsjs/                   # Auto-generated Go→JS bridge (do not edit)
 ```
@@ -146,7 +222,7 @@ go test -race ./...
 ```
 
 The race detector is particularly useful for `TestNameTracker_ConcurrentSafety`,
-which exercises the collector-resolver under concurrent load.
+which exercises the collision resolver under concurrent load.
 
 ### Coverage report
 
@@ -247,14 +323,20 @@ granted to the owner of the database created by the test.
 
 | Shortcut | Action |
 |----------|--------|
-| `⌘ Enter` / `Ctrl Enter` | Run the current SQL query |
+| `⌘ Enter` / `Ctrl Enter` | Run the current SQL query (or selected text) |
 
 ---
 
 ## Configuration
 
-Connection profiles are stored at:
+Git and export settings are stored at:
 
 - **macOS** — `~/Library/Application Support/thaw/config.json`
 - **Linux** — `~/.config/thaw/config.json`
 - **Windows** — `%APPDATA%\thaw\config.json`
+
+The file stores the remote URL, branch, export directory, and author info.
+**Git tokens are never written to disk.**
+
+Snowflake CLI connection profiles are read from `~/.snowflake/config.toml` and
+pre-fill the connection form, but are never modified by Thaw.
