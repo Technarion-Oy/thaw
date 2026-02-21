@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Tree, Typography, Spin, Empty, Divider, Modal } from "antd";
+import { Tree, Typography, Spin, Empty, Divider, Modal, message } from "antd";
 import {
   DatabaseOutlined,
   TableOutlined,
@@ -25,7 +25,6 @@ import { useGitStore } from "../../store/gitStore";
 import GitPanel from "../git/GitPanel";
 import ExportPanel from "../export/ExportPanel";
 import CallProcedureModal from "../procedure/CallProcedureModal";
-import { message } from "antd";
 
 const { Text } = Typography;
 

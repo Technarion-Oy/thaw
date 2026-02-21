@@ -22,7 +22,7 @@ interface ProgressEvent {
 const { Text } = Typography;
 
 export default function ExportPanel() {
-  const { exportDir } = useGitStore((s) => ({ exportDir: s.exportDir }));
+  const exportDir = useGitStore((s) => s.exportDir);
 
   const [running, setRunning]     = useState(false);
   const [progress, setProgress]   = useState({ done: 0, total: 0 });
