@@ -402,7 +402,7 @@ func (c *Client) GetObjectDDL(ctx context.Context, database, schema, kind, name,
 		qualified += fmt.Sprintf("(%s)", arguments)
 	}
 	escapedKind := strings.ReplaceAll(kind, "'", "''")
-	query := fmt.Sprintf("SELECT GET_DDL('%s', '%s')", escapedKind, strings.ReplaceAll(qualified, "'", "''"))
+	query := fmt.Sprintf("SELECT GET_DDL('%s', '%s', true)", escapedKind, strings.ReplaceAll(qualified, "'", "''"))
 
 	row := c.db.QueryRowContext(ctx, query)
 	var src string
