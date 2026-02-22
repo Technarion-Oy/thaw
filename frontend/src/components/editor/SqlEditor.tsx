@@ -11,6 +11,7 @@
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { useQueryStore } from "../../store/queryStore";
 import { useObjectStore } from "../../store/objectStore";
+import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 
 const SNOWFLAKE_KEYWORDS = [
   "SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER",
@@ -40,6 +41,63 @@ export default function SqlEditor() {
   const { sql, setSql, setSelectedSql } = useQueryStore();
 
   const handleMount: OnMount = (editor, monaco) => {
+    // ── Clipboard (WKWebView fix) ─────────────────────────────────────────
+    // WKWebView blocks navigator.clipboard.readText/writeText (async Clipboard
+    // API), so Monaco's built-in copy/paste silently fails.
+    // Override the three clipboard keybindings inside Monaco's own command
+    // system so Monaco never reaches its async clipboard code.
+
+    // Shared implementations used by both keyboard and context-menu paths.
+    const doPaste = async () => {
+      const text = await ClipboardGetText();
+      if (!text) return;
+      const selection = editor.getSelection();
+      if (!selection) return;
+      editor.executeEdits("clipboard-paste", [{ range: selection, text, forceMoveMarkers: true }]);
+      editor.pushUndoStop();
+    };
+
+    const doCopy = async () => {
+      const selection = editor.getSelection();
+      const model = editor.getModel();
+      if (!selection || !model) return;
+      const text = model.getValueInRange(selection);
+      if (text) await ClipboardSetText(text);
+    };
+
+    const doCut = async () => {
+      const selection = editor.getSelection();
+      const model = editor.getModel();
+      if (!selection || !model) return;
+      const text = model.getValueInRange(selection);
+      if (!text) return;
+      await ClipboardSetText(text);
+      editor.executeEdits("clipboard-cut", [{ range: selection, text: "", forceMoveMarkers: true }]);
+      editor.pushUndoStop();
+    };
+
+    // Keyboard shortcut overrides (addCommand).
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyV, doPaste);
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyC, doCopy);
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyX, doCut);
+
+    // Context-menu paste: Monaco's context menu calls commandService.executeCommand()
+    // directly, bypassing addCommand keybindings. Patch the editor's internal
+    // command service so paste/copy/cut from the context menu also use the
+    // Wails native clipboard instead of the blocked navigator.clipboard API.
+    const cs = (editor as any)._commandService;
+    if (cs && typeof cs.executeCommand === "function") {
+      const origExec = cs.executeCommand.bind(cs);
+      cs.executeCommand = (commandId: string, ...args: any[]): Promise<any> => {
+        switch (commandId) {
+          case "editor.action.clipboardPasteAction": doPaste(); return Promise.resolve();
+          case "editor.action.clipboardCopyAction":  doCopy();  return Promise.resolve();
+          case "editor.action.clipboardCutAction":   doCut();   return Promise.resolve();
+          default: return origExec(commandId, ...args);
+        }
+      };
+    }
+
     monaco.languages.registerCompletionItemProvider("sql", {
       triggerCharacters: ["."],
       provideCompletionItems: (model: any, position: any) => {
