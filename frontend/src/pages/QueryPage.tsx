@@ -13,6 +13,7 @@ import { Button, Space, Typography, Alert, Spin, Tag, Select, Tooltip } from "an
 import { PlayCircleOutlined, DisconnectOutlined } from "@ant-design/icons";
 import { ExecuteQuery, Disconnect } from "../../wailsjs/go/main/App";
 import SqlEditor from "../components/editor/SqlEditor";
+import TabBar from "../components/editor/TabBar";
 import ResultGrid from "../components/results/ResultGrid";
 import { useQueryStore } from "../store/queryStore";
 import { useConnectionStore } from "../store/connectionStore";
@@ -21,7 +22,7 @@ import { useSessionStore } from "../store/sessionStore";
 const { Text } = Typography;
 
 export default function QueryPage() {
-  const { sql, selectedSql, currentFile, result, isRunning, error, setResult, setRunning, setError } = useQueryStore();
+  const { sql, selectedSql, result, isRunning, error, setResult, setRunning, setError } = useQueryStore();
   const { params, disconnect } = useConnectionStore();
   const {
     role, warehouse, roles, warehouses,
@@ -91,13 +92,6 @@ export default function QueryPage() {
           <Text type="secondary" style={{ fontSize: 11 }}>
             {selectedSql.trim() ? "⌘↵ · running selection" : "⌘↵ to run"}
           </Text>
-          {currentFile && (
-            <Tag style={{ fontSize: 11, margin: 0, fontFamily: "monospace", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis" }}
-              title={currentFile}
-            >
-              {currentFile.split("/").pop()}
-            </Tag>
-          )}
         </Space>
 
         <Space size={6}>
@@ -162,6 +156,9 @@ export default function QueryPage() {
           style={{ margin: "8px 12px 0", fontSize: 12 }}
         />
       )}
+
+      {/* Tab bar */}
+      <TabBar />
 
       {/* SQL Editor — top half */}
       <div style={{ flex: "0 0 40%", borderBottom: "1px solid #30363d" }}>

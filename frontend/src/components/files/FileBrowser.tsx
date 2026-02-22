@@ -70,9 +70,9 @@ export default function FileBrowser() {
     setSelectedKey(null);
   }, [exportDir]);
 
-  // Keep selected key in sync when file is opened from elsewhere (e.g. DDL view)
+  // Keep selected key in sync with the active tab (including tab switches)
   useEffect(() => {
-    if (!currentFile) setSelectedKey(null);
+    setSelectedKey(currentFile);
   }, [currentFile]);
 
   const loadRoot = async () => {
