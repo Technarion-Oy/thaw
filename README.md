@@ -16,9 +16,18 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 
 ### SQL editor
 - Monaco editor with full SQL syntax highlighting
+- Multi-tab editing — each open file gets its own tab; tabs restore their SQL, results and error state when switched back to
+- Unsaved changes shown with a `•` prefix in the tab title
 - Run the full query or just the selected text (`⌘ Enter` / `Ctrl Enter`)
-- Open `.sql` files from the file browser and run them directly
+- **Selection highlight** — selecting any text highlights every other occurrence in the document with a blue background; overview-ruler markers make occurrences visible in long files
+- Word-under-cursor highlight when nothing is selected
 - Results displayed in a virtualised Ag-Grid table
+
+### File management
+- **Save** (`⌘S` / `Ctrl+S`) — writes back to the file's original path
+- **Save As…** (`⌘⇧S` / `Ctrl+Shift+S`) — native OS save dialog with `.sql` filter; also promotes a scratch tab to a named file tab
+- **New Tab** (`⌘T` / `Ctrl+T`) — opens a blank scratch tab
+- All three actions are available in the **File** menu in the macOS/Windows menu bar as well as in the toolbar
 
 ### Object browser (sidebar)
 - Browse databases → schemas → objects (tables, views, functions, procedures, …)
@@ -52,8 +61,9 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 ### File browser
 - Browse the export working directory in the sidebar
 - Lazy-loads subdirectories on demand
-- Click any file to open it in the Monaco editor
+- Click any file to open it in a new editor tab
 - Auto-refreshes after a DDL export completes
+- Highlights the file that matches the currently active tab
 
 ### Git integration
 - View git status for the working directory (staged / unstaged files)
@@ -67,6 +77,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 ### UI
 - Resizable sidebar — drag the divider to any width between 160 px and 600 px
 - Dark theme throughout
+- Native application menu bar (File menu) with keyboard shortcuts
 
 ---
 
@@ -128,7 +139,7 @@ The output binary is placed in `build/bin/`.
 
 ```
 thaw/
-├── main.go                        # Wails entry point, window configuration
+├── main.go                        # Wails entry point, window config, native menu
 ├── app.go                         # Methods bound to the frontend (Connect, ExecuteQuery, …)
 ├── errors.go                      # Sentinel errors
 ├── go.mod
@@ -144,7 +155,7 @@ thaw/
 │   │   ├── exporter.go            # Parallel DDL export orchestration
 │   │   ├── parser_test.go
 │   │   └── object_test.go
-│   ├── filesystem/fs.go           # Directory listing and file reading
+│   ├── filesystem/fs.go           # Directory listing, file reading and writing
 │   ├── gitrepo/repo.go            # Git status, commit/push, pull
 │   ├── integration/
 │   │   └── export_test.go         # End-to-end tests (require live Snowflake account)
@@ -156,19 +167,21 @@ thaw/
     ├── package.json
     ├── src/
     │   ├── App.tsx                # Root component, Ant Design dark theme
-    │   ├── main.tsx
-    │   ├── styles/global.css
+    │   ├── main.tsx               # React entry point; suppresses WebView context menu
+    │   ├── styles/global.css      # Global styles incl. Monaco occurrence-highlight class
     │   ├── store/
     │   │   ├── connectionStore.ts # Connection state (Zustand)
     │   │   ├── gitStore.ts        # Git / export directory state (Zustand)
     │   │   ├── objectStore.ts     # Object browser state (Zustand)
-    │   │   ├── queryStore.ts      # Query / result / open-file state (Zustand)
+    │   │   ├── queryStore.ts      # Multi-tab editor state (Zustand)
     │   │   └── sessionStore.ts    # Active role & warehouse (Zustand)
     │   ├── pages/
-    │   │   └── QueryPage.tsx      # Main query workspace
+    │   │   └── QueryPage.tsx      # Main query workspace; save handlers; menu event wiring
     │   └── components/
     │       ├── connection/ConnectModal.tsx
-    │       ├── editor/SqlEditor.tsx
+    │       ├── editor/
+    │       │   ├── SqlEditor.tsx  # Monaco editor with completions, selection highlight
+    │       │   └── TabBar.tsx     # File/scratch tab strip with dirty indicator
     │       ├── export/ExportPanel.tsx
     │       ├── files/FileBrowser.tsx
     │       ├── git/
@@ -316,6 +329,7 @@ granted to the owner of the database created by the test.
 - **Frontend changes** — edit files under `frontend/src/`; Vite HMR updates the UI instantly.
 - **Adding a new backend method** — add the method to `app.go`, then run `wails generate module` to regenerate the JS bindings in `frontend/wailsjs/`.
 - **Adding a new Go package** — place it under `internal/` and import it from `app.go`.
+- **Adding a native menu item** — extend `buildMenu` in `main.go`; emit a Wails event from the callback and listen with `EventsOn` in the relevant frontend component.
 
 ---
 
@@ -323,7 +337,10 @@ granted to the owner of the database created by the test.
 
 | Shortcut | Action |
 |----------|--------|
-| `⌘ Enter` / `Ctrl Enter` | Run the current SQL query (or selected text) |
+| `⌘ Enter` / `Ctrl+Enter` | Run the current query (or selected text) |
+| `⌘S` / `Ctrl+S` | Save the active file |
+| `⌘⇧S` / `Ctrl+Shift+S` | Save As… (always opens a dialog) |
+| `⌘T` / `Ctrl+T` | New scratch tab |
 
 ---
 
@@ -340,3 +357,14 @@ The file stores the remote URL, branch, export directory, and author info.
 
 Snowflake CLI connection profiles are read from `~/.snowflake/config.toml` and
 pre-fill the connection form, but are never modified by Thaw.
+
+---
+
+## License
+
+Copyright © 2026 Technarion Oy. All rights reserved.
+
+This software is proprietary and confidential. Unauthorized copying, distribution,
+modification, or use — in whole or in part — is strictly prohibited without prior
+written permission from Technarion Oy. Commercial use is restricted to parties
+holding a valid license agreement with Technarion Oy.
