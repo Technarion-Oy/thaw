@@ -80,7 +80,7 @@ const initialTab = makeTab({
   sql: "SELECT CURRENT_USER(), CURRENT_WAREHOUSE(), CURRENT_DATABASE();",
 });
 
-export const useQueryStore = create<QueryState>((set, get) => ({
+export const useQueryStore = create<QueryState>((set) => ({
   tabs: [initialTab],
   activeTabId: initialTab.id,
 
