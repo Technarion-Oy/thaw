@@ -14,9 +14,12 @@ import (
 	"embed"
 
 	"github.com/wailsapp/wails/v2"
+	"github.com/wailsapp/wails/v2/pkg/menu"
+	"github.com/wailsapp/wails/v2/pkg/menu/keys"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 //go:embed all:frontend/dist
@@ -24,6 +27,8 @@ var assets embed.FS
 
 func main() {
 	app := NewApp()
+
+	appMenu := buildMenu(app)
 
 	err := wails.Run(&options.App{
 		Title:  "Thaw — Snowflake Manager",
@@ -38,6 +43,7 @@ func main() {
 		Bind: []interface{}{
 			app,
 		},
+		Menu: appMenu,
 		Mac: &mac.Options{
 			TitleBar: mac.TitleBarHiddenInset(),
 		},
@@ -45,4 +51,30 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+// buildMenu constructs the native application menu bar.
+// Menu item callbacks emit Wails events so the frontend can react without
+// requiring additional bound methods.
+func buildMenu(app *App) *menu.Menu {
+	appMenu := menu.NewMenu()
+
+	// ── File ─────────────────────────────────────────────────────────────────
+	fileMenu := appMenu.AddSubmenu("File")
+
+	fileMenu.AddText("New Tab", keys.CmdOrCtrl("t"), func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:new-tab")
+	})
+
+	fileMenu.AddSeparator()
+
+	fileMenu.AddText("Save", keys.CmdOrCtrl("s"), func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:save")
+	})
+
+	fileMenu.AddText("Save As…", keys.Combo("s", keys.CmdOrCtrlKey, keys.ShiftKey), func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:save-as")
+	})
+
+	return appMenu
 }

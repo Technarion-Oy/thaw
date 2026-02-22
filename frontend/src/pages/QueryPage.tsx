@@ -12,6 +12,7 @@ import { useEffect } from "react";
 import { Button, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message } from "antd";
 import { PlayCircleOutlined, DisconnectOutlined, SaveOutlined } from "@ant-design/icons";
 import { ExecuteQuery, Disconnect, SaveFile, PickSaveFile } from "../../wailsjs/go/main/App";
+import { EventsOn } from "../../wailsjs/runtime/runtime";
 import SqlEditor from "../components/editor/SqlEditor";
 import TabBar from "../components/editor/TabBar";
 import ResultGrid from "../components/results/ResultGrid";
@@ -22,7 +23,7 @@ import { useSessionStore } from "../store/sessionStore";
 const { Text } = Typography;
 
 export default function QueryPage() {
-  const { sql, selectedSql, result, isRunning, error, setResult, setRunning, setError, markSaved } = useQueryStore();
+  const { sql, selectedSql, result, isRunning, error, setResult, setRunning, setError, markSaved, openScratch } = useQueryStore();
   const { params, disconnect } = useConnectionStore();
   const {
     role, warehouse, roles, warehouses,
@@ -57,6 +58,7 @@ export default function QueryPage() {
     disconnect();
   };
 
+  // Save to the tab's existing path, or open a Save As dialog if it has none.
   const handleSave = async () => {
     const { tabs, activeTabId, sql: currentSql } = useQueryStore.getState();
     const tab = tabs.find((t) => t.id === activeTabId);
@@ -66,9 +68,8 @@ export default function QueryPage() {
     let saveTitle = tab.title;
 
     if (!savePath) {
-      // No path yet — ask user where to save
       savePath = await PickSaveFile(tab.title === "SQL" ? "untitled.sql" : tab.title);
-      if (!savePath) return; // cancelled
+      if (!savePath) return;
       saveTitle = savePath.split("/").pop() ?? savePath;
     }
 
@@ -80,7 +81,29 @@ export default function QueryPage() {
     }
   };
 
-  // Listen for Cmd+Enter / Cmd+S from the editor
+  // Always open a Save As dialog, regardless of whether the tab has a path.
+  const handleSaveAs = async () => {
+    const { tabs, activeTabId, sql: currentSql } = useQueryStore.getState();
+    const tab = tabs.find((t) => t.id === activeTabId);
+    if (!tab) return;
+
+    const defaultName = tab.path
+      ? (tab.path.split("/").pop() ?? "untitled.sql")
+      : (tab.title === "SQL" ? "untitled.sql" : tab.title);
+
+    const savePath = await PickSaveFile(defaultName);
+    if (!savePath) return;
+    const saveTitle = savePath.split("/").pop() ?? savePath;
+
+    try {
+      await SaveFile(savePath, currentSql);
+      markSaved(activeTabId, savePath, saveTitle);
+    } catch (e) {
+      message.error(`Save failed: ${String(e)}`);
+    }
+  };
+
+  // Browser events — dispatched by Monaco keyboard bindings and the Save button.
   useEffect(() => {
     const handler = () => runQuery();
     window.addEventListener("run-query", handler);
@@ -92,6 +115,14 @@ export default function QueryPage() {
     window.addEventListener("save-file", handler);
     return () => window.removeEventListener("save-file", handler);
   });
+
+  // Wails events — dispatched by the native application menu.
+  useEffect(() => {
+    const offNewTab  = EventsOn("menu:new-tab",  () => openScratch());
+    const offSave    = EventsOn("menu:save",     () => handleSave());
+    const offSaveAs  = EventsOn("menu:save-as",  () => handleSaveAs());
+    return () => { offNewTab(); offSave(); offSaveAs(); };
+  }, []);
 
   const selectStyle = { fontSize: 12, minWidth: 130 };
 
@@ -124,6 +155,13 @@ export default function QueryPage() {
             size="small"
           >
             Save
+          </Button>
+          <Button
+            icon={<SaveOutlined />}
+            onClick={handleSaveAs}
+            size="small"
+          >
+            Save As…
           </Button>
           <Text type="secondary" style={{ fontSize: 11 }}>
             {selectedSql.trim() ? "⌘↵ · running selection" : "⌘↵ to run"}
