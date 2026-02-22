@@ -148,13 +148,62 @@ export default function SqlEditor() {
       },
     });
 
-    // Track selection so QueryPage knows what to run
+    // ── Selection highlight ───────────────────────────────────────────────
+    // When text is selected, find every other occurrence in the document and
+    // decorate it with a coloured background so they are easy to spot.
+    const occurrences = editor.createDecorationsCollection([]);
+
+    const refreshOccurrences = () => {
+      const selection = editor.getSelection();
+      const model     = editor.getModel();
+
+      if (!model || !selection || selection.isEmpty()) {
+        occurrences.clear();
+        return;
+      }
+
+      const selectedText = model.getValueInRange(selection);
+
+      // Ignore whitespace-only or single-character selections.
+      if (selectedText.trim().length < 2) {
+        occurrences.clear();
+        return;
+      }
+
+      const matches = model.findMatches(
+        selectedText,
+        true,   // searchOnlyEditableRange
+        false,  // isRegex
+        true,   // matchCase
+        null,   // wordSeparators (null = substring, no word boundary)
+        false,  // captureMatches
+      );
+
+      occurrences.set(
+        matches
+          // Exclude the range the user has actively selected.
+          .filter((m) => !selection.equalsRange(m.range))
+          .map((m) => ({
+            range: m.range,
+            options: {
+              inlineClassName: "sql-occurrence-highlight",
+              overviewRuler: {
+                color: "rgba(173, 214, 255, 0.5)",
+                position: monaco.editor.OverviewRulerLane.Center,
+              },
+            },
+          })),
+      );
+    };
+
+    // Track selection so QueryPage knows what to run, and refresh highlights.
     editor.onDidChangeCursorSelection(() => {
       const selection = editor.getSelection();
       const selected  = selection && !selection.isEmpty()
         ? editor.getModel()?.getValueInRange(selection) ?? ""
         : "";
       setSelectedSql(selected);
+      refreshOccurrences();
     });
 
     // Cmd+Enter / Ctrl+Enter → run query
@@ -188,6 +237,11 @@ export default function SqlEditor() {
         wordWrap: "on",
         tabSize: 2,
         automaticLayout: true,
+        // Disable Monaco's built-in outline-only selection highlight; we use
+        // our own filled-background decorations via refreshOccurrences().
+        selectionHighlight: false,
+        // Keep Monaco's word-under-cursor highlight for single clicks.
+        occurrencesHighlight: "singleFile",
       }}
     />
   );

@@ -39,3 +39,11 @@ body,
 ::-webkit-scrollbar-thumb:hover {
   background: #484f58;
 }
+
+/* Monaco editor — custom selection occurrence highlights.
+   Applied to every match of the selected text that is not the selection itself. */
+.sql-occurrence-highlight {
+  background: rgba(173, 214, 255, 0.15);
+  border: 1px solid rgba(173, 214, 255, 0.4);
+  border-radius: 2px;
+}
