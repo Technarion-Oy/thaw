@@ -22,6 +22,7 @@ export interface Tab {
   path: string | null;   // null = unsaved scratch tab
   title: string;
   sql: string;
+  savedSql: string;      // content at last open/save; compare to sql to derive isDirty
   result: QueryResult | null;
   error: string | null;
 }
@@ -34,6 +35,7 @@ function makeTab(overrides?: Partial<Tab>): Tab {
     path: null,
     title: "SQL",
     sql: "",
+    savedSql: "",
     result: null,
     error: null,
     ...overrides,
@@ -64,6 +66,8 @@ interface QueryState {
   openFile: (path: string, content: string) => void;
   openScratch: () => void;
   closeTab: (id: string) => void;
+  // Called after a successful save to update the tab's path/title and clear dirty state.
+  markSaved: (id: string, path: string, title: string) => void;
 
   // Active-tab mutations (also kept in the tabs array for restoration on switch)
   setSql: (sql: string) => void;
@@ -76,9 +80,9 @@ interface QueryState {
 
 // ── store ─────────────────────────────────────────────────────────────────────
 
-const initialTab = makeTab({
-  sql: "SELECT CURRENT_USER(), CURRENT_WAREHOUSE(), CURRENT_DATABASE();",
-});
+const INITIAL_SQL = "SELECT CURRENT_USER(), CURRENT_WAREHOUSE(), CURRENT_DATABASE();";
+
+const initialTab = makeTab({ sql: INITIAL_SQL, savedSql: INITIAL_SQL });
 
 export const useQueryStore = create<QueryState>((set) => ({
   tabs: [initialTab],
@@ -129,6 +133,7 @@ export const useQueryStore = create<QueryState>((set) => ({
         path,
         title: path.split("/").pop() ?? path,
         sql: content,
+        savedSql: content,
       });
       return {
         tabs: [...state.tabs, newTab],
@@ -175,6 +180,18 @@ export const useQueryStore = create<QueryState>((set) => ({
         currentFile: next.path,
         result: next.result,
         error: next.error,
+      };
+    }),
+
+  markSaved: (id, path, title) =>
+    set((state) => {
+      const tab = state.tabs.find((t) => t.id === id);
+      const savedSql = tab?.sql ?? "";
+      const updatedTabs = patchTab(state.tabs, id, { path, title, savedSql });
+      const isActive = state.activeTabId === id;
+      return {
+        tabs: updatedTabs,
+        ...(isActive ? { currentFile: path } : {}),
       };
     }),
 

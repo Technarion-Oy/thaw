@@ -49,7 +49,11 @@ export function LoadSnowflakeCLIConfig():Promise<sfconfig.Config>;
 
 export function PickDirectory():Promise<string>;
 
+export function PickSaveFile(arg1:string):Promise<string>;
+
 export function ReadFile(arg1:string):Promise<string>;
+
+export function SaveFile(arg1:string,arg2:string):Promise<void>;
 
 export function SaveGitConfig(arg1:config.GitConfig):Promise<void>;
 

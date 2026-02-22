@@ -136,6 +136,28 @@ func (a *App) ReadFile(path string) (string, error) {
 	return filesystem.ReadFile(path)
 }
 
+// SaveFile writes content to path, creating parent directories as needed.
+func (a *App) SaveFile(path, content string) error {
+	return filesystem.WriteFile(path, content)
+}
+
+// PickSaveFile opens a native save-file dialog pre-populated with defaultName
+// and returns the chosen path, or an empty string if the user cancels.
+func (a *App) PickSaveFile(defaultName string) string {
+	path, err := wailsruntime.SaveFileDialog(a.ctx, wailsruntime.SaveDialogOptions{
+		Title:           "Save SQL file",
+		DefaultFilename: defaultName,
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "SQL Files (*.sql)", Pattern: "*.sql"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		},
+	})
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
 // PickDirectory opens a native folder-picker dialog and returns the selected path.
 // Returns an empty string if the user cancels.
 func (a *App) PickDirectory() string {

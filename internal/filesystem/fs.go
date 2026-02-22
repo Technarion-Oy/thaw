@@ -32,6 +32,15 @@ func ReadFile(path string) (string, error) {
 	return string(data), nil
 }
 
+// WriteFile creates or overwrites the file at path with content.
+// Parent directories are created if they do not exist.
+func WriteFile(path, content string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
 // ListDir returns the direct children of dir, directories first then files,
 // both groups sorted alphabetically.
 func ListDir(dir string) ([]FileEntry, error) {

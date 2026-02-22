@@ -162,6 +162,12 @@ export default function SqlEditor() {
       monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
       () => window.dispatchEvent(new CustomEvent("run-query"))
     );
+
+    // Cmd+S / Ctrl+S → save file
+    editor.addCommand(
+      monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
+      () => window.dispatchEvent(new CustomEvent("save-file"))
+    );
   };
 
   return (

@@ -9,9 +9,9 @@
 // license agreement with Technarion Oy.
 
 import { useEffect } from "react";
-import { Button, Space, Typography, Alert, Spin, Tag, Select, Tooltip } from "antd";
-import { PlayCircleOutlined, DisconnectOutlined } from "@ant-design/icons";
-import { ExecuteQuery, Disconnect } from "../../wailsjs/go/main/App";
+import { Button, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message } from "antd";
+import { PlayCircleOutlined, DisconnectOutlined, SaveOutlined } from "@ant-design/icons";
+import { ExecuteQuery, Disconnect, SaveFile, PickSaveFile } from "../../wailsjs/go/main/App";
 import SqlEditor from "../components/editor/SqlEditor";
 import TabBar from "../components/editor/TabBar";
 import ResultGrid from "../components/results/ResultGrid";
@@ -22,7 +22,7 @@ import { useSessionStore } from "../store/sessionStore";
 const { Text } = Typography;
 
 export default function QueryPage() {
-  const { sql, selectedSql, result, isRunning, error, setResult, setRunning, setError } = useQueryStore();
+  const { sql, selectedSql, result, isRunning, error, setResult, setRunning, setError, markSaved } = useQueryStore();
   const { params, disconnect } = useConnectionStore();
   const {
     role, warehouse, roles, warehouses,
@@ -57,11 +57,40 @@ export default function QueryPage() {
     disconnect();
   };
 
-  // Listen for Cmd+Enter from the editor
+  const handleSave = async () => {
+    const { tabs, activeTabId, sql: currentSql } = useQueryStore.getState();
+    const tab = tabs.find((t) => t.id === activeTabId);
+    if (!tab) return;
+
+    let savePath = tab.path;
+    let saveTitle = tab.title;
+
+    if (!savePath) {
+      // No path yet — ask user where to save
+      savePath = await PickSaveFile(tab.title === "SQL" ? "untitled.sql" : tab.title);
+      if (!savePath) return; // cancelled
+      saveTitle = savePath.split("/").pop() ?? savePath;
+    }
+
+    try {
+      await SaveFile(savePath, currentSql);
+      markSaved(activeTabId, savePath, saveTitle);
+    } catch (e) {
+      message.error(`Save failed: ${String(e)}`);
+    }
+  };
+
+  // Listen for Cmd+Enter / Cmd+S from the editor
   useEffect(() => {
     const handler = () => runQuery();
     window.addEventListener("run-query", handler);
     return () => window.removeEventListener("run-query", handler);
+  });
+
+  useEffect(() => {
+    const handler = () => handleSave();
+    window.addEventListener("save-file", handler);
+    return () => window.removeEventListener("save-file", handler);
   });
 
   const selectStyle = { fontSize: 12, minWidth: 130 };
@@ -88,6 +117,13 @@ export default function QueryPage() {
             size="small"
           >
             Run
+          </Button>
+          <Button
+            icon={<SaveOutlined />}
+            onClick={handleSave}
+            size="small"
+          >
+            Save
           </Button>
           <Text type="secondary" style={{ fontSize: 11 }}>
             {selectedSql.trim() ? "⌘↵ · running selection" : "⌘↵ to run"}
