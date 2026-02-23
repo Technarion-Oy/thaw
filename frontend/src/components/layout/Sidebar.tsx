@@ -35,6 +35,7 @@ import { useGitStore } from "../../store/gitStore";
 import GitPanel from "../git/GitPanel";
 import ExportPanel from "../export/ExportPanel";
 import FileBrowser from "../files/FileBrowser";
+import AccountPanel from "../account/AccountPanel";
 import CallProcedureModal from "../procedure/CallProcedureModal";
 
 const { Text } = Typography;
@@ -416,6 +417,7 @@ export default function Sidebar() {
       </Modal>
 
       <Divider style={{ borderColor: "#30363d", margin: "8px 0 0" }} />
+      <AccountPanel />
       <ExportPanel />
       <FileBrowser />
       <GitPanel />

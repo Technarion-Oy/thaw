@@ -238,6 +238,147 @@ func (c *Client) ListWarehouses(ctx context.Context) ([]string, error) {
 	return c.queryStringSlice(ctx, "SHOW WAREHOUSES", 0)
 }
 
+// GetRoleDDL constructs the DDL for a single role from SHOW commands.
+// Snowflake does not support GET_DDL for roles, so we build the output from:
+//   - SHOW ROLES LIKE '<name>'       → CREATE ROLE with optional comment
+//   - SHOW GRANTS TO ROLE "<name>"   → GRANT <priv> ON … TO ROLE statements
+//   - SHOW GRANTS ON ROLE "<name>"   → GRANT ROLE … TO ROLE/USER statements
+func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
+	escapedLike  := strings.ReplaceAll(name, "'", "''")
+	escapedIdent := strings.ReplaceAll(name, `"`, `""`)
+
+	// ── Comment from SHOW ROLES LIKE ────────────────────────────────────────
+	var comment string
+	if rows, err := c.db.QueryContext(ctx,
+		fmt.Sprintf("SHOW ROLES LIKE '%s'", escapedLike)); err == nil {
+		cols, _ := rows.Columns()
+		idxs := colIndexMap(cols, "comment")
+		for rows.Next() {
+			vals, ptrs := makeValPtrs(len(cols))
+			if rows.Scan(ptrs...) == nil {
+				v := strVal(vals, idxs["comment"])
+				if v != "" {
+					comment = v
+				}
+				break
+			}
+		}
+		rows.Close()
+	}
+
+	// ── CREATE ROLE ──────────────────────────────────────────────────────────
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("CREATE ROLE IF NOT EXISTS \"%s\"", escapedIdent))
+	if comment != "" {
+		sb.WriteString(fmt.Sprintf("\n  COMMENT = '%s'",
+			strings.ReplaceAll(comment, "'", "''")))
+	}
+	sb.WriteString(";\n")
+
+	// ── SHOW GRANTS TO ROLE → privileges granted to this role ────────────────
+	if rows, err := c.db.QueryContext(ctx,
+		fmt.Sprintf(`SHOW GRANTS TO ROLE "%s"`, escapedIdent)); err == nil {
+		cols, _ := rows.Columns()
+		idxs := colIndexMap(cols, "privilege", "granted_on", "name", "grant_option")
+		for rows.Next() {
+			vals, ptrs := makeValPtrs(len(cols))
+			if rows.Scan(ptrs...) != nil {
+				continue
+			}
+			priv   := strVal(vals, idxs["privilege"])
+			onType := strVal(vals, idxs["granted_on"])
+			obj    := strVal(vals, idxs["name"])
+			opt    := strings.EqualFold(strVal(vals, idxs["grant_option"]), "true")
+			if priv == "" || onType == "" {
+				continue
+			}
+			stmt := fmt.Sprintf("GRANT %s ON %s %s TO ROLE \"%s\"",
+				priv, onType, obj, escapedIdent)
+			if opt {
+				stmt += " WITH GRANT OPTION"
+			}
+			sb.WriteString(stmt + ";\n")
+		}
+		rows.Close()
+	}
+
+	// ── SHOW GRANTS ON ROLE → who this role is granted to ────────────────────
+	if rows, err := c.db.QueryContext(ctx,
+		fmt.Sprintf(`SHOW GRANTS ON ROLE "%s"`, escapedIdent)); err == nil {
+		cols, _ := rows.Columns()
+		idxs := colIndexMap(cols, "granted_to", "grantee_name")
+		for rows.Next() {
+			vals, ptrs := makeValPtrs(len(cols))
+			if rows.Scan(ptrs...) != nil {
+				continue
+			}
+			grantedTo := strVal(vals, idxs["granted_to"])
+			grantee   := strVal(vals, idxs["grantee_name"])
+			if grantedTo == "" || grantee == "" {
+				continue
+			}
+			sb.WriteString(fmt.Sprintf("GRANT ROLE \"%s\" TO %s \"%s\";\n",
+				escapedIdent, grantedTo,
+				strings.ReplaceAll(grantee, `"`, `""`)))
+		}
+		rows.Close()
+	}
+
+	return sb.String(), nil
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+// colIndexMap returns a map of (lowercase column name → column index)
+// for the requested column names. Unknown columns map to -1.
+func colIndexMap(cols []string, names ...string) map[string]int {
+	result := make(map[string]int, len(names))
+	for _, n := range names {
+		result[n] = -1
+	}
+	for i, col := range cols {
+		lower := strings.ToLower(col)
+		if _, ok := result[lower]; ok {
+			result[lower] = i
+		}
+	}
+	return result
+}
+
+// makeValPtrs allocates n interface{} values and returns both the values
+// slice and a parallel slice of pointers suitable for rows.Scan.
+func makeValPtrs(n int) ([]interface{}, []interface{}) {
+	vals := make([]interface{}, n)
+	ptrs := make([]interface{}, n)
+	for i := range vals {
+		ptrs[i] = &vals[i]
+	}
+	return vals, ptrs
+}
+
+// strVal returns the string representation of vals[i], or "" if i < 0 or nil.
+func strVal(vals []interface{}, i int) string {
+	if i < 0 || i >= len(vals) {
+		return ""
+	}
+	s := fmt.Sprintf("%v", vals[i])
+	if s == "<nil>" {
+		return ""
+	}
+	return strings.TrimSpace(s)
+}
+
+// GetWarehouseDDL returns the DDL for a single warehouse using Snowflake's GET_DDL function.
+func (c *Client) GetWarehouseDDL(ctx context.Context, name string) (string, error) {
+	escaped := strings.ReplaceAll(name, "'", "''")
+	row := c.db.QueryRowContext(ctx, fmt.Sprintf("SELECT GET_DDL('WAREHOUSE', '%s')", escaped))
+	var src string
+	if err := row.Scan(&src); err != nil {
+		return "", fmt.Errorf("GET_DDL(WAREHOUSE %s): %w", name, err)
+	}
+	return src, nil
+}
+
 // UseRole switches the active role for the current session.
 func (c *Client) UseRole(ctx context.Context, role string) error {
 	escaped := strings.ReplaceAll(role, `"`, `""`)

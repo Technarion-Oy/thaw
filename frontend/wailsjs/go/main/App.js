@@ -18,6 +18,10 @@ export function ExecuteQuery(arg1) {
   return window['go']['main']['App']['ExecuteQuery'](arg1);
 }
 
+export function ExportAccountObjectsDDL(arg1) {
+  return window['go']['main']['App']['ExportAccountObjectsDDL'](arg1);
+}
+
 export function ExportAllDatabasesDDL(arg1) {
   return window['go']['main']['App']['ExportAllDatabasesDDL'](arg1);
 }
@@ -34,8 +38,16 @@ export function GetObjectDDL(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['GetObjectDDL'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function GetRoleDDL(arg1) {
+  return window['go']['main']['App']['GetRoleDDL'](arg1);
+}
+
 export function GetSessionContext() {
   return window['go']['main']['App']['GetSessionContext']();
+}
+
+export function GetWarehouseDDL(arg1) {
+  return window['go']['main']['App']['GetWarehouseDDL'](arg1);
 }
 
 export function GitCommitAndPush(arg1) {

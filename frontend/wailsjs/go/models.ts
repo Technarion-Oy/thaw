@@ -164,6 +164,27 @@ export namespace gitrepo {
 
 }
 
+export namespace main {
+	
+	export class AccountExportResult {
+	    roles: number;
+	    warehouses: number;
+	    errors?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new AccountExportResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.roles = source["roles"];
+	        this.warehouses = source["warehouses"];
+	        this.errors = source["errors"];
+	    }
+	}
+
+}
+
 export namespace sfconfig {
 	
 	export class Connection {
