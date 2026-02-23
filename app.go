@@ -141,6 +141,13 @@ func (a *App) SaveFile(path, content string) error {
 	return filesystem.WriteFile(path, content)
 }
 
+// SearchFiles walks dir recursively and returns lines matching query.
+// If useRegex is true, query is treated as a regular expression;
+// otherwise a case-insensitive substring search is performed.
+func (a *App) SearchFiles(dir, query string, useRegex bool) ([]filesystem.SearchMatch, error) {
+	return filesystem.SearchFiles(dir, query, useRegex)
+}
+
 // PickSaveFile opens a native save-file dialog pre-populated with defaultName
 // and returns the chosen path, or an empty string if the user cancels.
 func (a *App) PickSaveFile(defaultName string) string {

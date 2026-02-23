@@ -102,6 +102,10 @@ export function SaveGitConfig(arg1) {
   return window['go']['main']['App']['SaveGitConfig'](arg1);
 }
 
+export function SearchFiles(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SearchFiles'](arg1, arg2, arg3);
+}
+
 export function UseRole(arg1) {
   return window['go']['main']['App']['UseRole'](arg1);
 }

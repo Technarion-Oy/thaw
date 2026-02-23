@@ -275,6 +275,26 @@ export default function SqlEditor() {
       monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
       () => window.dispatchEvent(new CustomEvent("save-file"))
     );
+
+    // thaw:scroll-to-line → jump to a specific line and highlight the match (used by file search)
+    const handleScrollToLine = (e: Event) => {
+      const { line, matchStart, matchEnd } =
+        (e as CustomEvent<{ line: number; matchStart?: number; matchEnd?: number }>).detail;
+      if (typeof line !== "number") return;
+      editor.revealLineInCenter(line);
+      if (typeof matchStart === "number" && typeof matchEnd === "number") {
+        // Monaco columns are 1-based; matchStart/matchEnd are 0-based byte offsets.
+        editor.setSelection({
+          startLineNumber: line,
+          startColumn:     matchStart + 1,
+          endLineNumber:   line,
+          endColumn:       matchEnd + 1,
+        });
+      } else {
+        editor.setPosition({ lineNumber: line, column: 1 });
+      }
+    };
+    window.addEventListener("thaw:scroll-to-line", handleScrollToLine);
   };
 
   return (

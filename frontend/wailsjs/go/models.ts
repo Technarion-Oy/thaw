@@ -66,6 +66,26 @@ export namespace filesystem {
 	        this.size = source["size"];
 	    }
 	}
+	export class SearchMatch {
+	    path: string;
+	    lineNumber: number;
+	    lineContent: string;
+	    matchStart: number;
+	    matchEnd: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SearchMatch(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.lineNumber = source["lineNumber"];
+	        this.lineContent = source["lineContent"];
+	        this.matchStart = source["matchStart"];
+	        this.matchEnd = source["matchEnd"];
+	    }
+	}
 
 }
 
