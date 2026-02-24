@@ -15,7 +15,9 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 
+	sf "github.com/snowflakedb/gosnowflake"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"thaw/internal/config"
@@ -31,6 +33,13 @@ type App struct {
 	ctx           context.Context
 	client        *snowflake.Client
 	cancelConnect context.CancelFunc
+
+	// Two-phase query execution (StartQuery / WaitForQueryResult).
+	queryMu     sync.Mutex
+	queryID     string
+	queryDone   chan struct{}
+	queryResult *snowflake.QueryResult
+	queryErr    error
 }
 
 func NewApp() *App {
@@ -289,11 +298,99 @@ func (a *App) IsConnected() bool {
 }
 
 // ExecuteQuery runs a SQL statement and returns the result set.
+// Used by context-menu shortcuts (e.g. "Select Top 1000"). For the main editor
+// flow use StartQuery + WaitForQueryResult to surface the query ID early.
 func (a *App) ExecuteQuery(sql string) (*snowflake.QueryResult, error) {
 	if a.client == nil {
 		return nil, ErrNotConnected
 	}
-	return a.client.Execute(a.ctx, sql)
+	qidChan := make(chan string, 1)
+	ctx := sf.WithQueryIDChan(a.ctx, qidChan)
+
+	result, err := a.client.Execute(ctx, sql)
+	if result != nil {
+		select {
+		case qid := <-qidChan:
+			result.QueryID = qid
+		default:
+		}
+	}
+	return result, err
+}
+
+// StartQuery submits a SQL statement and returns the Snowflake query ID as
+// soon as Snowflake assigns one.  For queries that need more than one HTTP
+// round-trip (slow queries) this returns while execution is still in progress,
+// giving the frontend a chance to display the query ID in the loading spinner.
+// Call WaitForQueryResult afterwards to obtain the actual rows.
+func (a *App) StartQuery(sql string) (string, error) {
+	if a.client == nil {
+		return "", ErrNotConnected
+	}
+
+	qidChan := make(chan string, 1)
+	ctx := sf.WithQueryIDChan(a.ctx, qidChan)
+	ctx = sf.WithAsyncMode(ctx) // ask Snowflake to return query ID immediately, before results are ready
+	done := make(chan struct{})
+
+	// Execute the query in a background goroutine so this method can return
+	// as soon as the query ID arrives (before results are ready).
+	go func() {
+		result, err := a.client.Execute(ctx, sql)
+		a.queryMu.Lock()
+		a.queryResult = result
+		a.queryErr = err
+		a.queryMu.Unlock()
+		close(done)
+	}()
+
+	// Block until the driver assigns a query ID (arrives with the first HTTP
+	// response) or until the background goroutine finishes (fast query).
+	var queryID string
+	select {
+	case qid := <-qidChan:
+		queryID = qid
+	case <-done:
+		// Fast query: results arrived before our select ran. Drain the channel.
+		select {
+		case qid := <-qidChan:
+			queryID = qid
+		default:
+		}
+	case <-a.ctx.Done():
+		return "", a.ctx.Err()
+	}
+
+	a.queryMu.Lock()
+	a.queryID = queryID
+	a.queryDone = done
+	a.queryMu.Unlock()
+
+	return queryID, nil
+}
+
+// WaitForQueryResult blocks until the query submitted by StartQuery completes
+// and returns the result set with the query ID embedded.
+func (a *App) WaitForQueryResult() (*snowflake.QueryResult, error) {
+	a.queryMu.Lock()
+	done := a.queryDone
+	queryID := a.queryID
+	a.queryMu.Unlock()
+
+	if done == nil {
+		return nil, fmt.Errorf("no query in progress")
+	}
+	<-done
+
+	a.queryMu.Lock()
+	result := a.queryResult
+	err := a.queryErr
+	a.queryMu.Unlock()
+
+	if result != nil && queryID != "" {
+		result.QueryID = queryID
+	}
+	return result, err
 }
 
 // GetSessionContext returns the currently active role, warehouse, database and schema.

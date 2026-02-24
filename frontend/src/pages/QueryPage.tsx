@@ -8,10 +8,12 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { flushSync } from "react-dom";
 import { Button, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message } from "antd";
-import { PlayCircleOutlined, DisconnectOutlined, SaveOutlined } from "@ant-design/icons";
-import { ExecuteQuery, Disconnect, SaveFile, PickSaveFile } from "../../wailsjs/go/main/App";
+import { PlayCircleOutlined, DisconnectOutlined, SaveOutlined, CopyOutlined } from "@ant-design/icons";
+import { ClipboardSetText } from "../../wailsjs/runtime/runtime";
+import { StartQuery, WaitForQueryResult, Disconnect, SaveFile, PickSaveFile } from "../../wailsjs/go/main/App";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import SqlEditor from "../components/editor/SqlEditor";
 import TabBar from "../components/editor/TabBar";
@@ -24,6 +26,7 @@ const { Text } = Typography;
 
 export default function QueryPage() {
   const { sql, selectedSql, result, isRunning, error, setResult, setRunning, setError, markSaved, openScratch } = useQueryStore();
+  const [runningQueryId, setRunningQueryId] = useState<string | null>(null);
   const { params, disconnect } = useConnectionStore();
   const {
     role, warehouse, roles, warehouses,
@@ -42,9 +45,18 @@ export default function QueryPage() {
   const runQuery = async () => {
     const query = selectedSql.trim() || sql.trim();
     if (!query) return;
+    setRunningQueryId(null);
     setRunning(true);
     try {
-      const res = await ExecuteQuery(query);
+      // Phase 1: submit and get query ID.
+      const qid = await StartQuery(query);
+      // Force React to commit the query ID to the DOM synchronously, then wait
+      // for a browser paint before fetching results. This guarantees the spinner
+      // shows the query ID for at least one frame before the results arrive.
+      flushSync(() => setRunningQueryId(qid));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      // Phase 2: block until results are ready.
+      const res = await WaitForQueryResult();
       setResult(res);
     } catch (e) {
       setError(String(e));
@@ -123,6 +135,7 @@ export default function QueryPage() {
     const offSaveAs  = EventsOn("menu:save-as",  () => handleSaveAs());
     return () => { offNewTab(); offSave(); offSaveAs(); };
   }, []);
+
 
   const selectStyle = { fontSize: 12, minWidth: 130 };
 
@@ -242,8 +255,22 @@ export default function QueryPage() {
       {/* Results — bottom half */}
       <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
         {isRunning && (
-          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10, background: "rgba(0,0,0,0.4)" }}>
+          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, zIndex: 10, background: "rgba(0,0,0,0.4)" }}>
             <Spin size="large" />
+            {runningQueryId && (
+              <Space size={4}>
+                <Text style={{ fontFamily: "monospace", fontSize: 11, color: "#8b949e" }}>
+                  {runningQueryId}
+                </Text>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<CopyOutlined style={{ fontSize: 10, color: "#8b949e" }} />}
+                  style={{ height: 16, padding: "0 2px", minWidth: 0 }}
+                  onClick={async () => { await ClipboardSetText(runningQueryId); message.success("Query ID copied"); }}
+                />
+              </Space>
+            )}
           </div>
         )}
 
@@ -257,7 +284,32 @@ export default function QueryPage() {
           />
         )}
 
-        {result && !error && <ResultGrid result={result} />}
+        {result && !error && (
+          <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "3px 12px", background: "#161b22", borderBottom: "1px solid #30363d", flexShrink: 0 }}>
+              {result.queryID && (
+                <Space size={4}>
+                  <Text style={{ fontFamily: "monospace", fontSize: 11, color: "#8b949e" }}>
+                    {result.queryID}
+                  </Text>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<CopyOutlined style={{ fontSize: 10, color: "#8b949e" }} />}
+                    style={{ height: 16, padding: "0 2px", minWidth: 0 }}
+                    onClick={async () => { await ClipboardSetText(result.queryID!); message.success("Query ID copied"); }}
+                  />
+                </Space>
+              )}
+              <Text style={{ fontSize: 11, color: "#484f58" }}>
+                {result.rows.length} row{result.rows.length !== 1 ? "s" : ""}
+              </Text>
+            </div>
+            <div style={{ flex: 1, overflow: "hidden" }}>
+              <ResultGrid result={result} />
+            </div>
+          </div>
+        )}
 
         {!result && !error && !isRunning && (
           <div style={{ padding: 24, color: "#484f58", fontSize: 13 }}>

@@ -15,6 +15,7 @@ export interface QueryResult {
   columns: string[];
   rows: unknown[][];
   rowsAffected: number;
+  queryID?: string;
 }
 
 export interface Tab {

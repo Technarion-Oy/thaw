@@ -19,6 +19,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - Multi-tab editing — each open file gets its own tab; tabs restore their SQL, results and error state when switched back to
 - Unsaved changes shown with a `•` prefix in the tab title
 - Run the full query or just the selected text (`⌘ Enter` / `Ctrl Enter`)
+- **Query ID** — the Snowflake query ID is shown in the loading spinner while the query runs and in the results status bar after it completes; click the copy icon to copy it to the clipboard
 - **Selection highlight** — selecting any text highlights every other occurrence in the document with a blue background; overview-ruler markers make occurrences visible in long files
 - Word-under-cursor highlight when nothing is selected
 - Results displayed in a virtualised Ag-Grid table

@@ -298,6 +298,7 @@ export namespace snowflake {
 	    columns: string[];
 	    rows: any[][];
 	    rowsAffected: number;
+	    queryID: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new QueryResult(source);
@@ -308,6 +309,7 @@ export namespace snowflake {
 	        this.columns = source["columns"];
 	        this.rows = source["rows"];
 	        this.rowsAffected = source["rowsAffected"];
+	        this.queryID = source["queryID"];
 	    }
 	}
 	export class SessionContext {

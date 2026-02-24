@@ -66,6 +66,10 @@ export function SaveGitConfig(arg1:config.GitConfig):Promise<void>;
 
 export function SearchFiles(arg1:string,arg2:string,arg3:boolean):Promise<Array<filesystem.SearchMatch>>;
 
+export function StartQuery(arg1:string):Promise<string>;
+
 export function UseRole(arg1:string):Promise<void>;
 
 export function UseWarehouse(arg1:string):Promise<void>;
+
+export function WaitForQueryResult():Promise<snowflake.QueryResult>;

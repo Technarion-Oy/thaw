@@ -64,9 +64,10 @@ type SnowflakeObject struct {
 
 // QueryResult is the serialisable result of a SQL query.
 type QueryResult struct {
-	Columns []string        `json:"columns"`
-	Rows    [][]interface{} `json:"rows"`
-	RowsAffected int64     `json:"rowsAffected"`
+	Columns      []string        `json:"columns"`
+	Rows         [][]interface{} `json:"rows"`
+	RowsAffected int64           `json:"rowsAffected"`
+	QueryID      string          `json:"queryID"`
 }
 
 // Client wraps a *sql.DB with Snowflake-specific helpers.

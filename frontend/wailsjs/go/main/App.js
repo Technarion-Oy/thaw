@@ -118,10 +118,18 @@ export function SearchFiles(arg1, arg2, arg3) {
   return window['go']['main']['App']['SearchFiles'](arg1, arg2, arg3);
 }
 
+export function StartQuery(arg1) {
+  return window['go']['main']['App']['StartQuery'](arg1);
+}
+
 export function UseRole(arg1) {
   return window['go']['main']['App']['UseRole'](arg1);
 }
 
 export function UseWarehouse(arg1) {
   return window['go']['main']['App']['UseWarehouse'](arg1);
+}
+
+export function WaitForQueryResult() {
+  return window['go']['main']['App']['WaitForQueryResult']();
 }
