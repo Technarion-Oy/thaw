@@ -38,6 +38,10 @@ export function GetObjectDDL(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['GetObjectDDL'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function GetProcedureParams(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['GetProcedureParams'](arg1, arg2, arg3, arg4);
+}
+
 export function GetRoleDDL(arg1) {
   return window['go']['main']['App']['GetRoleDDL'](arg1);
 }

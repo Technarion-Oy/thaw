@@ -26,6 +26,8 @@ export function GetGitConfig():Promise<config.GitConfig>;
 
 export function GetObjectDDL(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
 
+export function GetProcedureParams(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.ProcParam>>;
+
 export function GetRoleDDL(arg1:string):Promise<string>;
 
 export function GetSessionContext():Promise<snowflake.SessionContext>;

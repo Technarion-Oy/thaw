@@ -460,6 +460,110 @@ func extractArgTypes(arguments string) string {
 	return strings.TrimSpace(arguments[start+1 : start+end])
 }
 
+// ProcParam describes a single parameter of a stored procedure.
+type ProcParam struct {
+	Name     string `json:"name"`
+	DataType string `json:"dataType"`
+}
+
+// splitByTopLevelComma splits s at commas that are not nested inside parentheses,
+// so that types like NUMBER(38,0) are kept intact.
+func splitByTopLevelComma(s string) []string {
+	var parts []string
+	depth, start := 0, 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				parts = append(parts, strings.TrimSpace(s[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	if rest := strings.TrimSpace(s[start:]); rest != "" {
+		parts = append(parts, rest)
+	}
+	return parts
+}
+
+// parseProcedureDDL extracts the parameter list from a CREATE PROCEDURE DDL
+// string. It finds the opening parenthesis of the parameter list, locates its
+// matching close, then splits the content into name/type pairs.
+//
+// Snowflake DDL format (simplified):
+//
+//	CREATE OR REPLACE PROCEDURE "DB"."SCHEMA"."NAME"(param1 TYPE, param2 TYPE)
+//	RETURNS ... LANGUAGE ... AS '...';
+func parseProcedureDDL(ddl string) []ProcParam {
+	start := strings.Index(ddl, "(")
+	if start < 0 {
+		return nil
+	}
+	// Walk forward to find the matching closing paren.
+	depth, end := 0, -1
+	for i := start; i < len(ddl); i++ {
+		switch ddl[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				end = i
+			}
+		}
+		if end >= 0 {
+			break
+		}
+	}
+	if end < 0 {
+		return nil
+	}
+	paramStr := strings.TrimSpace(ddl[start+1 : end])
+	if paramStr == "" {
+		return nil
+	}
+
+	var params []ProcParam
+	for _, part := range splitByTopLevelComma(paramStr) {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		// Remove any DEFAULT clause (e.g. "amount NUMBER DEFAULT 0").
+		if i := strings.Index(strings.ToUpper(part), " DEFAULT "); i >= 0 {
+			part = strings.TrimSpace(part[:i])
+		}
+		// First whitespace-separated token is the parameter name; the rest is the type.
+		spaceIdx := strings.IndexAny(part, " \t")
+		if spaceIdx < 0 {
+			// Only a bare type with no name — use a placeholder.
+			params = append(params, ProcParam{Name: "param", DataType: part})
+			continue
+		}
+		params = append(params, ProcParam{
+			Name:     part[:spaceIdx],
+			DataType: strings.TrimSpace(part[spaceIdx+1:]),
+		})
+	}
+	return params
+}
+
+// GetProcedureParams fetches the DDL for a stored procedure and returns its
+// parameter list with the real parameter names. argTypes must be the types
+// string stored in SnowflakeObject.Arguments (e.g. "NUMBER, VARCHAR") so
+// Snowflake can resolve the correct overload.
+func (c *Client) GetProcedureParams(ctx context.Context, database, schema, name, argTypes string) ([]ProcParam, error) {
+	ddl, err := c.GetObjectDDL(ctx, database, schema, "PROCEDURE", name, argTypes)
+	if err != nil {
+		return nil, err
+	}
+	return parseProcedureDDL(ddl), nil
+}
+
 // showInSchema runs a SHOW command and collects results as SnowflakeObjects.
 // If fixedKind is non-empty it is used as the Kind for every row; otherwise
 // the "kind" column in the result set is read (as in SHOW OBJECTS).

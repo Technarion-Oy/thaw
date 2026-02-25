@@ -457,6 +457,15 @@ func (a *App) ListObjects(database, schema string) ([]snowflake.SnowflakeObject,
 	return a.client.ListObjects(a.ctx, database, schema)
 }
 
+// GetProcedureParams fetches the DDL for a stored procedure and returns its
+// parameter list with real parameter names parsed from the DDL.
+func (a *App) GetProcedureParams(database, schema, name, argTypes string) ([]snowflake.ProcParam, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.GetProcedureParams(a.ctx, database, schema, name, argTypes)
+}
+
 // GetObjectDDL returns the definition of a single schema object using
 // Snowflake's GET_DDL function. kind should be one of: TABLE, VIEW, FUNCTION,
 // PROCEDURE, SEQUENCE, STAGE, STREAM, TASK, FILE FORMAT, PIPE.
