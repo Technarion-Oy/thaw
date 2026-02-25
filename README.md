@@ -25,15 +25,16 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - Results displayed in a virtualised Ag-Grid table
 
 ### File management
+- **Open…** (`⌘O` / `Ctrl+O`) — native OS open-file dialog filtered to `.sql`; re-activates an existing tab if the file is already open
 - **Save** (`⌘S` / `Ctrl+S`) — writes back to the file's original path
 - **Save As…** (`⌘⇧S` / `Ctrl+Shift+S`) — native OS save dialog with `.sql` filter; also promotes a scratch tab to a named file tab
 - **New Tab** (`⌘T` / `Ctrl+T`) — opens a blank scratch tab
-- All three actions are available in the **File** menu in the macOS/Windows menu bar as well as in the toolbar
+- All four actions are available in the **File** menu in the macOS/Windows menu bar as well as in the toolbar
 
 ### Object browser (sidebar)
 - Browse databases → schemas → objects (tables, views, functions, procedures, …)
 - View the DDL of any object inline
-- Call stored procedures from the UI
+- Call stored procedures from the UI — parameter fields use the real parameter names parsed from the procedure DDL
 
 ### DDL export
 - Export DDL for every database (or a single one) with one file per object
@@ -58,6 +59,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
   ```
 - Parallel fetch (up to 8 databases concurrently) and parallel atomic writes
 - Live progress bar driven by Wails events from the Go backend
+- Export directory can be changed directly from the Export DDL panel without opening the Git section
 
 ### File browser
 - Browse the export working directory in the sidebar
@@ -339,6 +341,7 @@ granted to the owner of the database created by the test.
 | Shortcut | Action |
 |----------|--------|
 | `⌘ Enter` / `Ctrl+Enter` | Run the current query (or selected text) |
+| `⌘O` / `Ctrl+O` | Open a SQL file |
 | `⌘S` / `Ctrl+S` | Save the active file |
 | `⌘⇧S` / `Ctrl+Shift+S` | Save As… (always opens a dialog) |
 | `⌘T` / `Ctrl+T` | New scratch tab |
