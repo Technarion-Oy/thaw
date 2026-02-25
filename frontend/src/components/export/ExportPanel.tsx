@@ -9,12 +9,13 @@
 // license agreement with Technarion Oy.
 
 import { useState } from "react";
-import { Button, Progress, Typography, Space, Tag, Collapse, Alert } from "antd";
+import { Button, Progress, Typography, Space, Tag, Collapse, Alert, Tooltip } from "antd";
 import {
   CloudUploadOutlined,
   DatabaseOutlined,
   CheckCircleOutlined,
   WarningOutlined,
+  FolderOpenOutlined,
 } from "@ant-design/icons";
 import { EventsOn } from "../../../wailsjs/runtime/runtime";
 import { ExportAllDatabasesDDL } from "../../../wailsjs/go/main/App";
@@ -32,7 +33,7 @@ interface ProgressEvent {
 const { Text } = Typography;
 
 export default function ExportPanel() {
-  const exportDir = useGitStore((s) => s.exportDir);
+  const { exportDir, pickExportDir } = useGitStore();
 
   const [running, setRunning]     = useState(false);
   const [progress, setProgress]   = useState({ done: 0, total: 0 });
@@ -88,17 +89,22 @@ export default function ExportPanel() {
         Export DDL
       </Text>
 
-      {!exportDir && (
-        <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 8 }}>
-          Set a working directory in the Git section below.
+      {/* Directory picker row */}
+      <div style={{ display: "flex", gap: 4, alignItems: "center", marginBottom: 8 }}>
+        <Text
+          style={{
+            flex: 1, fontSize: 11, fontFamily: "monospace",
+            color: exportDir ? "#e6edf3" : "#8b949e",
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}
+          title={exportDir}
+        >
+          {exportDir || "No directory selected"}
         </Text>
-      )}
-
-      {exportDir && (
-        <div style={{ marginBottom: 8, fontSize: 11, color: "#8b949e", wordBreak: "break-all" }}>
-          {exportDir}
-        </div>
-      )}
+        <Tooltip title="Change directory">
+          <Button size="small" icon={<FolderOpenOutlined />} onClick={pickExportDir} disabled={running} />
+        </Tooltip>
+      </div>
 
       <Button
         size="small"
