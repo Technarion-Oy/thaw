@@ -102,6 +102,10 @@ export function PickDirectory() {
   return window['go']['main']['App']['PickDirectory']();
 }
 
+export function PickOpenFile() {
+  return window['go']['main']['App']['PickOpenFile']();
+}
+
 export function PickSaveFile(arg1) {
   return window['go']['main']['App']['PickSaveFile'](arg1);
 }

@@ -68,6 +68,12 @@ func buildMenu(app *App) *menu.Menu {
 
 	fileMenu.AddSeparator()
 
+	fileMenu.AddText("Open…", keys.CmdOrCtrl("o"), func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:open")
+	})
+
+	fileMenu.AddSeparator()
+
 	fileMenu.AddText("Save", keys.CmdOrCtrl("s"), func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:save")
 	})

@@ -253,6 +253,22 @@ func sanitizeAccountFilename(name string) string {
 	return b.String()
 }
 
+// PickOpenFile opens a native open-file dialog filtered to SQL files and
+// returns the chosen path, or an empty string if the user cancels.
+func (a *App) PickOpenFile() string {
+	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title: "Open SQL file",
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "SQL Files (*.sql)", Pattern: "*.sql"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		},
+	})
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
 // PickSaveFile opens a native save-file dialog pre-populated with defaultName
 // and returns the chosen path, or an empty string if the user cancels.
 func (a *App) PickSaveFile(defaultName string) string {

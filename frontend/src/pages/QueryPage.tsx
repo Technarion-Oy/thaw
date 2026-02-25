@@ -11,9 +11,9 @@
 import { useEffect, useState } from "react";
 import { flushSync } from "react-dom";
 import { Button, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message } from "antd";
-import { PlayCircleOutlined, DisconnectOutlined, SaveOutlined, CopyOutlined } from "@ant-design/icons";
+import { PlayCircleOutlined, DisconnectOutlined, SaveOutlined, CopyOutlined, FolderOpenOutlined } from "@ant-design/icons";
 import { ClipboardSetText } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, Disconnect, SaveFile, PickSaveFile } from "../../wailsjs/go/main/App";
+import { StartQuery, WaitForQueryResult, Disconnect, SaveFile, PickSaveFile, PickOpenFile, ReadFile } from "../../wailsjs/go/main/App";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import SqlEditor from "../components/editor/SqlEditor";
 import TabBar from "../components/editor/TabBar";
@@ -25,7 +25,7 @@ import { useSessionStore } from "../store/sessionStore";
 const { Text } = Typography;
 
 export default function QueryPage() {
-  const { sql, selectedSql, result, isRunning, error, setResult, setRunning, setError, markSaved, openScratch } = useQueryStore();
+  const { sql, selectedSql, result, isRunning, error, setResult, setRunning, setError, markSaved, openScratch, openFile } = useQueryStore();
   const [runningQueryId, setRunningQueryId] = useState<string | null>(null);
   const { params, disconnect } = useConnectionStore();
   const {
@@ -115,6 +115,17 @@ export default function QueryPage() {
     }
   };
 
+  const handleOpen = async () => {
+    const filePath = await PickOpenFile();
+    if (!filePath) return;
+    try {
+      const content = await ReadFile(filePath);
+      openFile(filePath, content);
+    } catch (e) {
+      message.error(`Open failed: ${String(e)}`);
+    }
+  };
+
   // Browser events — dispatched by Monaco keyboard bindings and the Save button.
   useEffect(() => {
     const handler = () => runQuery();
@@ -131,9 +142,10 @@ export default function QueryPage() {
   // Wails events — dispatched by the native application menu.
   useEffect(() => {
     const offNewTab  = EventsOn("menu:new-tab",  () => openScratch());
+    const offOpen    = EventsOn("menu:open",     () => handleOpen());
     const offSave    = EventsOn("menu:save",     () => handleSave());
     const offSaveAs  = EventsOn("menu:save-as",  () => handleSaveAs());
-    return () => { offNewTab(); offSave(); offSaveAs(); };
+    return () => { offNewTab(); offOpen(); offSave(); offSaveAs(); };
   }, []);
 
 
@@ -161,6 +173,13 @@ export default function QueryPage() {
             size="small"
           >
             Run
+          </Button>
+          <Button
+            icon={<FolderOpenOutlined />}
+            onClick={handleOpen}
+            size="small"
+          >
+            Open…
           </Button>
           <Button
             icon={<SaveOutlined />}
