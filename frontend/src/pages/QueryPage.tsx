@@ -11,7 +11,7 @@
 import { useEffect, useState } from "react";
 import { flushSync } from "react-dom";
 import { Button, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message } from "antd";
-import { PlayCircleOutlined, DisconnectOutlined, SaveOutlined, CopyOutlined, FolderOpenOutlined } from "@ant-design/icons";
+import { PlayCircleOutlined, DisconnectOutlined, CopyOutlined } from "@ant-design/icons";
 import { ClipboardSetText } from "../../wailsjs/runtime/runtime";
 import { StartQuery, WaitForQueryResult, Disconnect, SaveFile, PickSaveFile, PickOpenFile, ReadFile } from "../../wailsjs/go/main/App";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
@@ -173,27 +173,6 @@ export default function QueryPage() {
             size="small"
           >
             Run
-          </Button>
-          <Button
-            icon={<FolderOpenOutlined />}
-            onClick={handleOpen}
-            size="small"
-          >
-            Open…
-          </Button>
-          <Button
-            icon={<SaveOutlined />}
-            onClick={handleSave}
-            size="small"
-          >
-            Save
-          </Button>
-          <Button
-            icon={<SaveOutlined />}
-            onClick={handleSaveAs}
-            size="small"
-          >
-            Save As…
           </Button>
           <Text type="secondary" style={{ fontSize: 11 }}>
             {selectedSql.trim() ? "⌘↵ · running selection" : "⌘↵ to run"}
