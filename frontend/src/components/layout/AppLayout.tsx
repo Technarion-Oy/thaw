@@ -39,7 +39,8 @@ export default function AppLayout() {
     document.body.style.userSelect = "none";
 
     const onMove = (e: MouseEvent) => {
-      const w = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth.current + e.clientX - startX.current));
+      // Right sidebar: dragging the handle left widens it, right narrows it.
+      const w = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth.current - (e.clientX - startX.current)));
       setSidebarWidth(w);
     };
     const onUp = () => setResizing(false);
@@ -62,20 +63,12 @@ export default function AppLayout() {
         style={{ height: 28, background: "#161b22", position: "fixed", top: 0, left: 0, right: 0, zIndex: 100 }}
       />
 
-      {/* Sidebar */}
-      <div
-        style={{
-          width:     sidebarWidth,
-          minWidth:  sidebarWidth,
-          maxWidth:  sidebarWidth,
-          background: "#161b22",
-          paddingTop: 28,
-          overflow:  "auto",
-          flexShrink: 0,
-        }}
+      {/* Content */}
+      <Content
+        style={{ paddingTop: 28, overflow: "hidden", display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}
       >
-        <Sidebar />
-      </div>
+        <QueryPage />
+      </Content>
 
       {/* Resize handle */}
       <div
@@ -93,12 +86,20 @@ export default function AppLayout() {
         onMouseLeave={(e) => { if (!resizing) e.currentTarget.style.background = "transparent"; }}
       />
 
-      {/* Content */}
-      <Content
-        style={{ paddingTop: 28, overflow: "hidden", display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}
+      {/* Right sidebar */}
+      <div
+        style={{
+          width:     sidebarWidth,
+          minWidth:  sidebarWidth,
+          maxWidth:  sidebarWidth,
+          background: "#161b22",
+          paddingTop: 28,
+          overflow:  "auto",
+          flexShrink: 0,
+        }}
       >
-        <QueryPage />
-      </Content>
+        <Sidebar />
+      </div>
     </Layout>
   );
 }
