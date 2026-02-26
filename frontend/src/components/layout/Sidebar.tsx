@@ -32,7 +32,6 @@ import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, ExportDatabaseDD
 import { useQueryStore } from "../../store/queryStore";
 import { useObjectStore } from "../../store/objectStore";
 import { useGitStore } from "../../store/gitStore";
-import ExportPanel from "../export/ExportPanel";
 import AccountPanel from "../account/AccountPanel";
 import CallProcedureModal from "../procedure/CallProcedureModal";
 
@@ -416,7 +415,6 @@ export default function Sidebar() {
 
       <Divider style={{ borderColor: "#30363d", margin: "8px 0 0" }} />
       <AccountPanel />
-      <ExportPanel />
 
       {/* Call Procedure modal */}
       {callModal && (

@@ -8,12 +8,14 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
+import ExportPanel from "../export/ExportPanel";
 import FileBrowser from "../files/FileBrowser";
 import GitPanel from "../git/GitPanel";
 
 export default function LeftPanel() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <ExportPanel />
       <FileBrowser />
       <GitPanel />
     </div>
