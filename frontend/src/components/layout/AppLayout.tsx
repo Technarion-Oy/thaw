@@ -9,12 +9,10 @@
 // license agreement with Technarion Oy.
 
 import { useState, useRef, useEffect } from "react";
-import { Layout, Dropdown } from "antd";
-import type { MenuProps } from "antd";
+import { Layout } from "antd";
 import LeftPanel from "./LeftPanel";
 import Sidebar from "./Sidebar";
 import QueryPage from "../../pages/QueryPage";
-import { EventsEmit } from "../../../wailsjs/runtime/runtime";
 
 const { Content } = Layout;
 
@@ -84,59 +82,19 @@ function ResizeHandle({ resizing, onMouseDown }: { resizing: boolean; onMouseDow
   );
 }
 
-const FILE_MENU_ITEMS: MenuProps["items"] = [
-  { key: "new-tab",  label: "New Tab",  extra: "⌘T" },
-  { type: "divider" },
-  { key: "open",     label: "Open…",    extra: "⌘O" },
-  { type: "divider" },
-  { key: "save",     label: "Save",     extra: "⌘S" },
-  { key: "save-as",  label: "Save As…", extra: "⌘⇧S" },
-];
-
 export default function AppLayout() {
   const left  = useResize(DEFAULT_LEFT,  "left");
   const right = useResize(DEFAULT_RIGHT, "right");
 
   const anyResizing = left.resizing || right.resizing;
 
-  const onFileMenuClick: MenuProps["onClick"] = ({ key }) => {
-    EventsEmit(`menu:${key}`);
-  };
-
   return (
     <Layout style={{ height: "100vh", flexDirection: "row" }}>
-      {/* macOS traffic-light drag area — full-width drag region */}
+      {/* macOS traffic-light drag area */}
       <div
         className="titlebar-drag"
         style={{ height: 28, background: "#161b22", position: "fixed", top: 0, left: 0, right: 0, zIndex: 100 }}
-      >
-        {/* File menu button — sits inside the drag area but is itself non-draggable */}
-        <Dropdown
-          menu={{ items: FILE_MENU_ITEMS, onClick: onFileMenuClick }}
-          trigger={["click"]}
-        >
-          <button
-            style={{
-              WebkitAppRegion: "no-drag",
-              position: "absolute",
-              left: 76,
-              top: 0,
-              height: 28,
-              padding: "0 8px",
-              background: "transparent",
-              border: "none",
-              color: "#cdd9e5",
-              fontSize: 13,
-              cursor: "default",
-              borderRadius: 4,
-            } as React.CSSProperties}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "#30363d")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-          >
-            File
-          </button>
-        </Dropdown>
-      </div>
+      />
 
       {/* Left panel — file browser + git */}
       <div

@@ -59,6 +59,10 @@ func main() {
 func buildMenu(app *App) *menu.Menu {
 	appMenu := menu.NewMenu()
 
+	// Standard macOS application menu (About, Services, Hide, Quit, …).
+	// This must come first so that macOS renders subsequent submenus correctly.
+	appMenu.Append(menu.AppMenu())
+
 	// ── File ─────────────────────────────────────────────────────────────────
 	fileMenu := appMenu.AddSubmenu("File")
 
