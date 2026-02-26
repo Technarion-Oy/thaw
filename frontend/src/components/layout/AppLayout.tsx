@@ -10,38 +10,43 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Layout } from "antd";
+import LeftPanel from "./LeftPanel";
 import Sidebar from "./Sidebar";
 import QueryPage from "../../pages/QueryPage";
 
 const { Content } = Layout;
 
-const MIN_WIDTH     = 160;
-const MAX_WIDTH     = 600;
-const DEFAULT_WIDTH = 240;
+const MIN_WIDTH      = 160;
+const MAX_WIDTH      = 600;
+const DEFAULT_LEFT   = 220;
+const DEFAULT_RIGHT  = 260;
 
-export default function AppLayout() {
-  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_WIDTH);
-  const [resizing, setResizing]         = useState(false);
+// Generic hook for a resizable panel. direction controls whether dragging
+// right increases ("left" panel) or decreases ("right" panel) the width.
+function useResize(initial: number, direction: "left" | "right") {
+  const [width, setWidth]     = useState(initial);
+  const [resizing, setResizing] = useState(false);
   const startX     = useRef(0);
   const startWidth = useRef(0);
 
-  const onHandleMouseDown = (e: React.MouseEvent) => {
+  const onMouseDown = (e: React.MouseEvent) => {
     startX.current     = e.clientX;
-    startWidth.current = sidebarWidth;
+    startWidth.current = width;
     setResizing(true);
     e.preventDefault();
   };
 
   useEffect(() => {
     if (!resizing) return;
-
     document.body.style.cursor     = "col-resize";
     document.body.style.userSelect = "none";
 
     const onMove = (e: MouseEvent) => {
-      // Right sidebar: dragging the handle left widens it, right narrows it.
-      const w = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth.current - (e.clientX - startX.current)));
-      setSidebarWidth(w);
+      const delta = e.clientX - startX.current;
+      const w = direction === "left"
+        ? startWidth.current + delta          // left panel grows rightward
+        : startWidth.current - delta;         // right panel grows leftward
+      setWidth(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, w)));
     };
     const onUp = () => setResizing(false);
 
@@ -55,6 +60,34 @@ export default function AppLayout() {
     };
   }, [resizing]);
 
+  return { width, resizing, onMouseDown };
+}
+
+function ResizeHandle({ resizing, onMouseDown }: { resizing: boolean; onMouseDown: (e: React.MouseEvent) => void }) {
+  return (
+    <div
+      onMouseDown={onMouseDown}
+      style={{
+        width:      5,
+        flexShrink: 0,
+        cursor:     "col-resize",
+        background: resizing ? "#388bfd" : "transparent",
+        borderLeft: "1px solid #30363d",
+        transition: resizing ? "none" : "background 0.15s",
+        zIndex:     10,
+      }}
+      onMouseEnter={(e) => { if (!resizing) e.currentTarget.style.background = "#388bfd44"; }}
+      onMouseLeave={(e) => { if (!resizing) e.currentTarget.style.background = "transparent"; }}
+    />
+  );
+}
+
+export default function AppLayout() {
+  const left  = useResize(DEFAULT_LEFT,  "left");
+  const right = useResize(DEFAULT_RIGHT, "right");
+
+  const anyResizing = left.resizing || right.resizing;
+
   return (
     <Layout style={{ height: "100vh", flexDirection: "row" }}>
       {/* macOS traffic-light drag area */}
@@ -63,38 +96,50 @@ export default function AppLayout() {
         style={{ height: 28, background: "#161b22", position: "fixed", top: 0, left: 0, right: 0, zIndex: 100 }}
       />
 
+      {/* Left panel — file browser + git */}
+      <div
+        style={{
+          width:      left.width,
+          minWidth:   left.width,
+          maxWidth:   left.width,
+          background: "#161b22",
+          paddingTop: 28,
+          overflow:   "auto",
+          flexShrink: 0,
+        }}
+      >
+        <LeftPanel />
+      </div>
+
+      <ResizeHandle resizing={left.resizing} onMouseDown={left.onMouseDown} />
+
       {/* Content */}
       <Content
-        style={{ paddingTop: 28, overflow: "hidden", display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}
+        style={{
+          paddingTop: 28,
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          flex: 1,
+          minWidth: 0,
+          // Prevent text selection bleed during either resize
+          userSelect: anyResizing ? "none" : undefined,
+        }}
       >
         <QueryPage />
       </Content>
 
-      {/* Resize handle */}
-      <div
-        onMouseDown={onHandleMouseDown}
-        style={{
-          width:      5,
-          flexShrink: 0,
-          cursor:     "col-resize",
-          background: resizing ? "#388bfd" : "transparent",
-          borderLeft: "1px solid #30363d",
-          transition: resizing ? "none" : "background 0.15s",
-          zIndex:     10,
-        }}
-        onMouseEnter={(e) => { if (!resizing) e.currentTarget.style.background = "#388bfd44"; }}
-        onMouseLeave={(e) => { if (!resizing) e.currentTarget.style.background = "transparent"; }}
-      />
+      <ResizeHandle resizing={right.resizing} onMouseDown={right.onMouseDown} />
 
-      {/* Right sidebar */}
+      {/* Right sidebar — database explorer + account objects + export */}
       <div
         style={{
-          width:     sidebarWidth,
-          minWidth:  sidebarWidth,
-          maxWidth:  sidebarWidth,
+          width:      right.width,
+          minWidth:   right.width,
+          maxWidth:   right.width,
           background: "#161b22",
           paddingTop: 28,
-          overflow:  "auto",
+          overflow:   "auto",
           flexShrink: 0,
         }}
       >
