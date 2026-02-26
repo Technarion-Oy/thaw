@@ -12,12 +12,12 @@ import { useState } from "react";
 import { FileOutlined, CodeOutlined, PlusOutlined, CloseOutlined } from "@ant-design/icons";
 import { useQueryStore } from "../../store/queryStore";
 
-const CLR_BORDER       = "#30363d";
-const CLR_BG           = "#0d1117";
-const CLR_BG_ACTIVE    = "#161b22";
-const CLR_TEXT         = "#8b949e";
-const CLR_TEXT_ACTIVE  = "#e6edf3";
-const CLR_ACCENT       = "#388bfd";
+const CLR_BORDER       = "var(--border)";
+const CLR_BG           = "var(--bg)";
+const CLR_BG_ACTIVE    = "var(--bg-raised)";
+const CLR_TEXT         = "var(--text-muted)";
+const CLR_TEXT_ACTIVE  = "var(--text)";
+const CLR_ACCENT       = "var(--accent)";
 
 export default function TabBar() {
   const tabs        = useQueryStore((s) => s.tabs);
@@ -61,7 +61,7 @@ export default function TabBar() {
               cursor: "pointer",
               borderRight: `1px solid ${CLR_BORDER}`,
               borderBottom: active ? `2px solid ${CLR_ACCENT}` : "2px solid transparent",
-              background: active ? CLR_BG_ACTIVE : hovered ? "#ffffff08" : CLR_BG,
+              background: active ? CLR_BG_ACTIVE : hovered ? "color-mix(in srgb, var(--text) 5%, transparent)" : CLR_BG,
               color: active ? CLR_TEXT_ACTIVE : CLR_TEXT,
               fontSize: 12,
               userSelect: "none",
@@ -123,7 +123,7 @@ export default function TabBar() {
           color: CLR_TEXT,
           fontSize: 12,
           flexShrink: 0,
-          background: hoveredId === "__plus__" ? "#ffffff08" : "transparent",
+          background: hoveredId === "__plus__" ? "color-mix(in srgb, var(--text) 5%, transparent)" : "transparent",
         }}
       >
         <PlusOutlined style={{ fontSize: 11 }} />

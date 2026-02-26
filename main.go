@@ -86,5 +86,31 @@ func buildMenu(app *App) *menu.Menu {
 		wailsruntime.EventsEmit(app.ctx, "menu:save-as")
 	})
 
+	// ── View ──────────────────────────────────────────────────────────────────
+	viewMenu := appMenu.AddSubmenu("View")
+
+	appearanceMenu := viewMenu.AddSubmenu("Appearance")
+
+	// Declare items first so the closures can reference all three.
+	var systemItem, lightItem, darkItem *menu.MenuItem
+
+	setAppearance := func(selected *menu.MenuItem, value string) {
+		systemItem.Checked = selected == systemItem
+		lightItem.Checked = selected == lightItem
+		darkItem.Checked = selected == darkItem
+		wailsruntime.MenuUpdateApplicationMenu(app.ctx)
+		wailsruntime.EventsEmit(app.ctx, "menu:theme", value)
+	}
+
+	systemItem = appearanceMenu.AddRadio("System", true, nil, func(_ *menu.CallbackData) {
+		setAppearance(systemItem, "system")
+	})
+	lightItem = appearanceMenu.AddRadio("Light", false, nil, func(_ *menu.CallbackData) {
+		setAppearance(lightItem, "light")
+	})
+	darkItem = appearanceMenu.AddRadio("Dark", false, nil, func(_ *menu.CallbackData) {
+		setAppearance(darkItem, "dark")
+	})
+
 	return appMenu
 }

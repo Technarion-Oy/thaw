@@ -14,10 +14,15 @@ import AppLayout from "./components/layout/AppLayout";
 import { useConnectionStore } from "./store/connectionStore";
 import ConnectModal from "./components/connection/ConnectModal";
 import { IsConnected } from "../wailsjs/go/main/App";
+import { EventsOn } from "../wailsjs/runtime/runtime";
+import { useThemeStore, type ThemePreference } from "./store/themeStore";
 
 export default function App() {
-  const isConnected  = useConnectionStore((s) => s.isConnected);
+  const isConnected    = useConnectionStore((s) => s.isConnected);
   const setIsConnected = useConnectionStore((s) => s.setIsConnected);
+  const resolved       = useThemeStore((s) => s.resolved);
+  const syncSystem     = useThemeStore((s) => s.syncSystem);
+  const setPreference  = useThemeStore((s) => s.setPreference);
 
   // After a frontend reload the Go backend keeps the connection alive.
   // Restore the connected state so the user isn't kicked to the login screen.
@@ -27,12 +32,29 @@ export default function App() {
     });
   }, []);
 
+  // Listen for system-level color-scheme changes and update the resolved theme.
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    mq.addEventListener("change", syncSystem);
+    return () => mq.removeEventListener("change", syncSystem);
+  }, [syncSystem]);
+
+  // Listen for View > Appearance menu events from the native menu bar.
+  useEffect(() => {
+    const off = EventsOn("menu:theme", (value: string) => {
+      setPreference(value as ThemePreference);
+    });
+    return () => off();
+  }, [setPreference]);
+
+  const antdAlgorithm = resolved === "dark" ? theme.darkAlgorithm : theme.defaultAlgorithm;
+
   return (
     <ConfigProvider
       theme={{
-        algorithm: theme.darkAlgorithm,
+        algorithm: antdAlgorithm,
         token: {
-          colorPrimary: "#29B6F6",
+          colorPrimary: resolved === "dark" ? "#29B6F6" : "#0969da",
           borderRadius: 6,
           fontFamily: "'Inter', 'SF Pro Text', system-ui, sans-serif",
         },

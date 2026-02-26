@@ -28,8 +28,8 @@ type FileEntry    = filesystem.FileEntry;
 type SearchMatch  = filesystem.SearchMatch;
 
 const { Text } = Typography;
-const CLR_BORDER    = "#30363d";
-const CLR_SECONDARY = "#8b949e";
+const CLR_BORDER    = "var(--border)";
+const CLR_SECONDARY = "var(--text-muted)";
 
 function entriesToNodes(entries: FileEntry[]): DataNode[] {
   return entries.map((e) => ({
@@ -277,7 +277,7 @@ export default function FileBrowser() {
                 type="text"
                 icon={
                   <SearchOutlined
-                    style={{ fontSize: 11, color: searchOpen ? "#58a6ff" : CLR_SECONDARY }}
+                    style={{ fontSize: 11, color: searchOpen ? "var(--link)" : CLR_SECONDARY }}
                   />
                 }
                 onClick={toggleSearch}
@@ -323,7 +323,7 @@ export default function FileBrowser() {
                       onChange={setUseRegex}
                       title="Regular expression"
                     />
-                    <Text style={{ fontSize: 10, color: useRegex ? "#58a6ff" : CLR_SECONDARY, userSelect: "none" }}>
+                    <Text style={{ fontSize: 10, color: useRegex ? "var(--link)" : CLR_SECONDARY, userSelect: "none" }}>
                       .*
                     </Text>
                   </div>
@@ -356,7 +356,7 @@ export default function FileBrowser() {
                               title={path}
                               style={{
                                 fontSize: 11,
-                                color: "#58a6ff",
+                                color: "var(--link)",
                                 fontWeight: 500,
                                 marginBottom: 2,
                                 overflow: "hidden",
@@ -383,7 +383,7 @@ export default function FileBrowser() {
                                     borderRadius: 3,
                                     overflow: "hidden",
                                   }}
-                                  onMouseEnter={(e) => (e.currentTarget.style.background = "#30363d")}
+                                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
                                   onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                                 >
                                   <span style={{ color: CLR_SECONDARY, fontSize: 10, flexShrink: 0, fontFamily: "monospace" }}>
@@ -393,7 +393,7 @@ export default function FileBrowser() {
                                     style={{
                                       fontFamily: "monospace",
                                       fontSize: 11,
-                                      color: "#e6edf3",
+                                      color: "var(--text)",
                                       overflow: "hidden",
                                       whiteSpace: "nowrap",
                                       textOverflow: "ellipsis",
@@ -434,17 +434,19 @@ export default function FileBrowser() {
               )}
 
               {!searchOpen && loaded && treeData.length > 0 && (
-                <Tree
-                  treeData={treeData}
-                  loadedKeys={loadedKeys}
-                  selectedKeys={selectedKey ? [selectedKey] : []}
-                  onLoad={(keys) => setLoadedKeys(keys)}
-                  loadData={onLoadData as any}
-                  onSelect={onSelect as any}
-                  showIcon
-                  blockNode
-                  style={{ background: "transparent", color: "#e6edf3", fontSize: 12 }}
-                />
+                <div style={{ overflow: "hidden" }}>
+                  <Tree
+                    treeData={treeData}
+                    loadedKeys={loadedKeys}
+                    selectedKeys={selectedKey ? [selectedKey] : []}
+                    onLoad={(keys) => setLoadedKeys(keys)}
+                    loadData={onLoadData as any}
+                    onSelect={onSelect as any}
+                    showIcon
+                    blockNode
+                    style={{ background: "transparent", color: "var(--text)", fontSize: 12 }}
+                  />
+                </div>
               )}
             </div>
           ),

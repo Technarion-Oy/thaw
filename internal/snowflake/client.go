@@ -184,7 +184,7 @@ func (c *Client) Execute(ctx context.Context, query string) (*QueryResult, error
 		if err != nil {
 			return nil, err
 		}
-		last = QueryResult{Columns: cols}
+		last = QueryResult{Columns: cols, Rows: [][]interface{}{}}
 
 		for rows.Next() {
 			vals := make([]interface{}, len(cols))
@@ -458,6 +458,50 @@ func extractArgTypes(arguments string) string {
 		return ""
 	}
 	return strings.TrimSpace(arguments[start+1 : start+end])
+}
+
+// DroppedTable represents a table that has been dropped but is still within
+// the Snowflake Time Travel retention window and can be recovered with UNDROP.
+type DroppedTable struct {
+	Name      string `json:"name"`
+	DroppedOn string `json:"droppedOn"`
+}
+
+// ListDroppedTables returns tables in the given schema that have been dropped
+// but are still recoverable via Time Travel. It runs SHOW TABLES HISTORY and
+// returns only rows where dropped_on is non-empty.
+func (c *Client) ListDroppedTables(ctx context.Context, database, schema string) ([]DroppedTable, error) {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	query := fmt.Sprintf(`SHOW TABLES HISTORY IN SCHEMA "%s"."%s"`, esc(database), esc(schema))
+
+	rows, err := c.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cols, _ := rows.Columns()
+	idxs := colIndexMap(cols, "name", "dropped_on")
+	if idxs["name"] < 0 {
+		return nil, fmt.Errorf("no 'name' column in SHOW TABLES HISTORY result")
+	}
+
+	var result []DroppedTable
+	for rows.Next() {
+		vals, ptrs := makeValPtrs(len(cols))
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, err
+		}
+		droppedOn := strVal(vals, idxs["dropped_on"])
+		if droppedOn == "" {
+			continue // table is still alive
+		}
+		result = append(result, DroppedTable{
+			Name:      strVal(vals, idxs["name"]),
+			DroppedOn: droppedOn,
+		})
+	}
+	return result, rows.Err()
 }
 
 // ProcParam describes a single parameter of a stored procedure.

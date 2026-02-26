@@ -94,7 +94,7 @@ export default function ExportPanel() {
         <Text
           style={{
             flex: 1, fontSize: 11, fontFamily: "monospace",
-            color: exportDir ? "#e6edf3" : "#8b949e",
+            color: exportDir ? "var(--text)" : "var(--text-muted)",
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
           }}
           title={exportDir}

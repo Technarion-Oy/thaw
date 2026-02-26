@@ -259,22 +259,7 @@ export namespace sfconfig {
 }
 
 export namespace snowflake {
-
-	export class ProcParam {
-	    name: string;
-	    dataType: string;
-
-	    static createFrom(source: any = {}) {
-	        return new ProcParam(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.dataType = source["dataType"];
-	    }
-	}
-
+	
 	export class ConnectParams {
 	    account: string;
 	    user: string;
@@ -307,6 +292,20 @@ export namespace snowflake {
 	        this.oktaUrl = source["oktaUrl"];
 	        this.privateKeyPath = source["privateKeyPath"];
 	        this.privateKeyPassphrase = source["privateKeyPassphrase"];
+	    }
+	}
+	export class DroppedTable {
+	    name: string;
+	    droppedOn: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DroppedTable(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.droppedOn = source["droppedOn"];
 	    }
 	}
 	export class ProcParam {

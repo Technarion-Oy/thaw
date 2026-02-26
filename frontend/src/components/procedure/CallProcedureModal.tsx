@@ -92,7 +92,7 @@ export default function CallProcedureModal({ db, schema, name, rawArgs, onClose 
       open
       title={
         <Space size={6}>
-          <PlayCircleOutlined style={{ color: "#58a6ff" }} />
+          <PlayCircleOutlined style={{ color: "var(--link)" }} />
           <span>Call procedure</span>
           <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
             {db}.{schema}.{name}
@@ -160,9 +160,9 @@ export default function CallProcedureModal({ db, schema, name, rawArgs, onClose 
           style={{
             marginTop: 8,
             padding: "10px 12px",
-            background: "#0d1117",
+            background: "var(--bg)",
             borderRadius: 6,
-            border: "1px solid #30363d",
+            border: "1px solid var(--border)",
           }}
         >
           <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>
@@ -171,7 +171,7 @@ export default function CallProcedureModal({ db, schema, name, rawArgs, onClose 
           <pre
             style={{
               margin: 0,
-              color: "#e6edf3",
+              color: "var(--text)",
               fontSize: 12,
               fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace",
               whiteSpace: "pre-wrap",

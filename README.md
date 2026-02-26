@@ -33,8 +33,15 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 
 ### Object browser (sidebar)
 - Browse databases → schemas → objects (tables, views, functions, procedures, …)
-- View the DDL of any object inline
-- Call stored procedures from the UI — parameter fields use the real parameter names parsed from the procedure DDL
+- Right-click a **database** to refresh or export its DDL
+- Right-click a **schema** to browse dropped tables recoverable via Snowflake Time Travel
+- Right-click an **object** to:
+  - Select the top 1 000 rows (tables and views)
+  - Call the procedure with auto-generated parameter fields (procedures)
+  - View the DDL definition inline
+  - **Rename** the object (`ALTER … RENAME TO`) — available for tables, views, sequences, stages, streams, tasks, file formats, and pipes
+  - **Delete** the object (`DROP …`) — with a confirmation dialog
+- Tree automatically refreshes the affected database after any rename, drop, or undrop operation
 
 ### DDL export
 - Export DDL for every database (or a single one) with one file per object
@@ -79,8 +86,8 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 
 ### UI
 - Resizable sidebar — drag the divider to any width between 160 px and 600 px
-- Dark theme throughout
-- Native application menu bar (File menu) with keyboard shortcuts
+- **Theming** — light, dark, and system-default themes; switch via **View → Appearance** in the native menu bar; preference is persisted across sessions
+- Native application menu bar with **File** (open / save / new tab) and **View → Appearance** (System / Light / Dark) menus
 
 ---
 
@@ -177,7 +184,8 @@ thaw/
     │   │   ├── gitStore.ts        # Git / export directory state (Zustand)
     │   │   ├── objectStore.ts     # Object browser state (Zustand)
     │   │   ├── queryStore.ts      # Multi-tab editor state (Zustand)
-    │   │   └── sessionStore.ts    # Active role & warehouse (Zustand)
+    │   │   ├── sessionStore.ts    # Active role & warehouse (Zustand)
+    │   │   └── themeStore.ts      # Light/dark/system theme preference (Zustand, persisted)
     │   ├── pages/
     │   │   └── QueryPage.tsx      # Main query workspace; save handlers; menu event wiring
     │   └── components/
@@ -194,7 +202,7 @@ thaw/
     │       ├── results/ResultGrid.tsx
     │       └── layout/
     │           ├── AppLayout.tsx  # Resizable sidebar
-    │           └── Sidebar.tsx
+    │           └── Sidebar.tsx    # Object browser: lazy tree, right-click actions (rename, drop, undrop, DDL)
     └── wailsjs/                   # Auto-generated Go→JS bridge (do not edit)
 ```
 

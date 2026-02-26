@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useRef } from "react";
-import { Tree, Typography, Spin, Empty, Divider, Modal, message } from "antd";
+import { Tree, Typography, Spin, Empty, Divider, Modal, Button, Input, message } from "antd";
 import {
   DatabaseOutlined,
   TableOutlined,
@@ -25,10 +25,14 @@ import {
   ReloadOutlined,
   PlayCircleOutlined,
   CloudUploadOutlined,
+  DeleteOutlined,
+  RollbackOutlined,
+  EditOutlined,
 } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, ExportDatabaseDDL } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, ExportDatabaseDDL, ListDroppedTables } from "../../../wailsjs/go/main/App";
+import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
 import { useObjectStore } from "../../store/objectStore";
 import { useGitStore } from "../../store/gitStore";
@@ -72,9 +76,24 @@ interface ContextMenu {
   x: number;
   y: number;
   nodeKey: string;
-  nodeType: "db" | "obj";
+  nodeType: "db" | "schema" | "obj";
   objKind?: string;  // set for nodeType === "obj"
   objArgs?: string;  // parameter type list for PROCEDURE / FUNCTION
+}
+
+interface UndropModal {
+  db: string;
+  schema: string;
+  tables: snowflake.DroppedTable[] | null; // null = loading
+  error: string | null;
+}
+
+interface RenameModal {
+  db: string;
+  schema: string;
+  kind: string;
+  oldName: string;
+  newName: string;
 }
 
 interface ObjectDDL {
@@ -104,9 +123,11 @@ export default function Sidebar() {
   const [loading, setLoading]       = useState(false);
   const [loaded, setLoaded]         = useState(false);
 
-  const [ctxMenu, setCtxMenu]   = useState<ContextMenu | null>(null);
-  const [ddlModal, setDdlModal] = useState<ObjectDDL | null>(null);
+  const [ctxMenu, setCtxMenu]     = useState<ContextMenu | null>(null);
+  const [ddlModal, setDdlModal]   = useState<ObjectDDL | null>(null);
   const [callModal, setCallModal] = useState<{ db: string; schema: string; name: string; rawArgs: string } | null>(null);
+  const [undropModal, setUndropModal] = useState<UndropModal | null>(null);
+  const [renameModal, setRenameModal] = useState<RenameModal | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
 
   // Close context menu on outside click
@@ -175,7 +196,7 @@ export default function Sidebar() {
       const typeNodes: DataNode[] = sortedKinds.map((kind) => ({
         title:    KIND_LABEL[kind] ?? kind,
         key:      `type:${db}:${schema}:${kind}`,
-        icon:     <FolderOutlined style={{ color: "#8b949e" }} />,
+        icon:     <FolderOutlined style={{ color: "var(--text-muted)" }} />,
         children: groups[kind].map((o) => ({
           title:     o.name,
           key:       `obj:${db}:${schema}:${kind}:${o.name}`,
@@ -205,6 +226,8 @@ export default function Sidebar() {
     const key = String(node.key);
     if (key.startsWith("db:")) {
       setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "db" });
+    } else if (key.startsWith("schema:")) {
+      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "schema" });
     } else if (key.startsWith("obj:")) {
       // key format: obj:DB:SCHEMA:KIND:NAME
       const objKind = key.split(":")[3];
@@ -213,13 +236,9 @@ export default function Sidebar() {
     }
   };
 
-  const refreshDatabase = () => {
-    if (!ctxMenu) return;
-    const dbKey = ctxMenu.nodeKey;        // "db:DBNAME"
-    const db    = dbKey.slice("db:".length); // "DBNAME"
-    setCtxMenu(null);
+  const refreshDatabaseByName = (db: string) => {
+    const dbKey = `db:${db}`;
     useObjectStore.getState().clearDatabase(db);
-
     // Remove every key that belongs to this database from loadedKeys.
     // Schema keys look like "schema:DBNAME:SCHEMANAME" — a different prefix
     // from "db:DBNAME" — so they must be evicted separately; otherwise Tree
@@ -230,10 +249,38 @@ export default function Sidebar() {
         return !s.startsWith(dbKey) && !s.startsWith(`schema:${db}:`);
       })
     );
-
     // Strip children from treeData — Tree won't call loadData for a node
     // that still has a children array even if its key left loadedKeys.
     setTreeData((prev) => clearNodeChildren(prev, dbKey));
+  };
+
+  const refreshDatabase = () => {
+    if (!ctxMenu) return;
+    const db = ctxMenu.nodeKey.slice("db:".length);
+    setCtxMenu(null);
+    refreshDatabaseByName(db);
+  };
+
+  const showDroppedTables = async () => {
+    if (!ctxMenu) return;
+    // key format: schema:DB:SCHEMA
+    const [, db, schema] = ctxMenu.nodeKey.split(":");
+    setCtxMenu(null);
+    setUndropModal({ db, schema, tables: null, error: null });
+    try {
+      const tables = await ListDroppedTables(db, schema);
+      setUndropModal((prev) => prev ? { ...prev, tables: tables ?? [] } : null);
+    } catch (e) {
+      setUndropModal((prev) => prev ? { ...prev, tables: [], error: String(e) } : null);
+    }
+  };
+
+  const undropTable = async (db: string, schema: string, name: string) => {
+    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const sql = `UNDROP TABLE ${q(db)}.${q(schema)}.${q(name)};`;
+    setUndropModal(null);
+    await useQueryStore.getState().executeWith(sql);
+    refreshDatabaseByName(db);
   };
 
   const selectTop1000 = () => {
@@ -283,6 +330,86 @@ export default function Sidebar() {
     }
   };
 
+  const deleteObject = () => {
+    if (!ctxMenu) return;
+    const { nodeKey, objKind = "", objArgs = "" } = ctxMenu;
+    setCtxMenu(null);
+
+    // key format: obj:DB:SCHEMA:KIND:NAME
+    const [, db, schema, , ...nameParts] = nodeKey.split(":");
+    const name = nameParts.join(":");
+
+    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const fullName = `${q(db)}.${q(schema)}.${q(name)}`;
+
+    let sql: string;
+    switch (objKind) {
+      case "TABLE":       sql = `DROP TABLE ${fullName};`; break;
+      case "VIEW":        sql = `DROP VIEW ${fullName};`; break;
+      case "SEQUENCE":    sql = `DROP SEQUENCE ${fullName};`; break;
+      case "STAGE":       sql = `DROP STAGE ${fullName};`; break;
+      case "STREAM":      sql = `DROP STREAM ${fullName};`; break;
+      case "TASK":        sql = `DROP TASK ${fullName};`; break;
+      case "FILE FORMAT": sql = `DROP FILE FORMAT ${fullName};`; break;
+      case "PIPE":        sql = `DROP PIPE ${fullName};`; break;
+      case "FUNCTION":    sql = `DROP FUNCTION ${fullName}(${objArgs});`; break;
+      case "PROCEDURE":   sql = `DROP PROCEDURE ${fullName}(${objArgs});`; break;
+      default:            sql = `DROP ${objKind} ${fullName};`;
+    }
+
+    Modal.confirm({
+      title: `Drop ${objKind.toLowerCase()} "${name}"?`,
+      content: `This will permanently delete ${db}.${schema}.${name}. This action cannot be undone.`,
+      okText: "Drop",
+      okType: "danger",
+      cancelText: "Cancel",
+      onOk: async () => {
+        await useQueryStore.getState().executeWith(sql);
+        refreshDatabaseByName(db);
+      },
+    });
+  };
+
+  const renameObject = () => {
+    if (!ctxMenu) return;
+    const { nodeKey, objKind = "" } = ctxMenu;
+    setCtxMenu(null);
+    // key format: obj:DB:SCHEMA:KIND:NAME
+    const [, db, schema, , ...nameParts] = nodeKey.split(":");
+    const oldName = nameParts.join(":");
+    setRenameModal({ db, schema, kind: objKind, oldName, newName: oldName });
+  };
+
+  const executeRename = async () => {
+    if (!renameModal) return;
+    const { db, schema, kind, oldName, newName } = renameModal;
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName) {
+      setRenameModal(null);
+      return;
+    }
+    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const fullOld = `${q(db)}.${q(schema)}.${q(oldName)}`;
+    const fullNew = `${q(db)}.${q(schema)}.${q(trimmed)}`;
+
+    let sql: string;
+    switch (kind) {
+      case "TABLE":       sql = `ALTER TABLE ${fullOld} RENAME TO ${fullNew};`; break;
+      case "VIEW":        sql = `ALTER VIEW ${fullOld} RENAME TO ${fullNew};`; break;
+      case "SEQUENCE":    sql = `ALTER SEQUENCE ${fullOld} RENAME TO ${fullNew};`; break;
+      case "STAGE":       sql = `ALTER STAGE ${fullOld} RENAME TO ${fullNew};`; break;
+      case "STREAM":      sql = `ALTER STREAM ${fullOld} RENAME TO ${fullNew};`; break;
+      case "TASK":        sql = `ALTER TASK ${fullOld} RENAME TO ${fullNew};`; break;
+      case "FILE FORMAT": sql = `ALTER FILE FORMAT ${fullOld} RENAME TO ${fullNew};`; break;
+      case "PIPE":        sql = `ALTER PIPE ${fullOld} RENAME TO ${fullNew};`; break;
+      default:            sql = `ALTER ${kind} ${fullOld} RENAME TO ${fullNew};`;
+    }
+
+    setRenameModal(null);
+    await useQueryStore.getState().executeWith(sql);
+    refreshDatabaseByName(db);
+  };
+
   const viewDefinition = async () => {
     if (!ctxMenu) return;
     const { nodeKey, objArgs = "" } = ctxMenu;
@@ -303,10 +430,10 @@ export default function Sidebar() {
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
-  const menuItem = (label: string, icon: React.ReactNode, onClick: () => void) => (
+  const menuItem = (label: string, icon: React.ReactNode, onClick: () => void, color?: string) => (
     <div
-      style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", fontSize: 13, cursor: "pointer", color: "#e6edf3" }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = "#30363d")}
+      style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", fontSize: 13, cursor: "pointer", color: color ?? "var(--text)" }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
       onClick={onClick}
     >
@@ -342,7 +469,7 @@ export default function Sidebar() {
           onRightClick={onRightClick as any}
           showIcon
           blockNode
-          style={{ background: "transparent", color: "#e6edf3" }}
+          style={{ background: "transparent", color: "var(--text)" }}
         />
       )}
 
@@ -355,8 +482,8 @@ export default function Sidebar() {
             top: ctxMenu.y,
             left: ctxMenu.x,
             zIndex: 9999,
-            background: "#1c2128",
-            border: "1px solid #30363d",
+            background: "var(--bg-overlay)",
+            border: "1px solid var(--border)",
             borderRadius: 6,
             boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
             minWidth: 160,
@@ -365,11 +492,16 @@ export default function Sidebar() {
         >
           {ctxMenu.nodeType === "db" && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshDatabase)}
           {ctxMenu.nodeType === "db" && menuItem("Export DDL", <CloudUploadOutlined style={{ fontSize: 12 }} />, exportDatabase)}
+          {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PROCEDURE" &&
             menuItem("Call Procedure", <PlayCircleOutlined style={{ fontSize: 12 }} />, callProcedure)}
           {ctxMenu.nodeType === "obj" && menuItem("View Definition", null, viewDefinition)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "PROCEDURE" &&
+            menuItem("Rename…", <EditOutlined style={{ fontSize: 12 }} />, renameObject)}
+          {ctxMenu.nodeType === "obj" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
+          {ctxMenu.nodeType === "obj" && menuItem("Delete…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, deleteObject, "#f85149")}
         </div>
       )}
 
@@ -397,8 +529,8 @@ export default function Sidebar() {
             style={{
               margin: 0,
               padding: 16,
-              background: "#0d1117",
-              color: "#e6edf3",
+              background: "var(--bg)",
+              color: "var(--text)",
               fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace",
               fontSize: 12,
               lineHeight: 1.6,
@@ -413,7 +545,7 @@ export default function Sidebar() {
         )}
       </Modal>
 
-      <Divider style={{ borderColor: "#30363d", margin: "8px 0 0" }} />
+      <Divider style={{ borderColor: "var(--border)", margin: "8px 0 0" }} />
       <AccountPanel />
 
       {/* Call Procedure modal */}
@@ -426,6 +558,78 @@ export default function Sidebar() {
           onClose={() => setCallModal(null)}
         />
       )}
+
+      {/* Undrop Tables modal */}
+      <Modal
+        open={undropModal !== null}
+        title={undropModal ? `Dropped tables — ${undropModal.db}.${undropModal.schema}` : ""}
+        onCancel={() => setUndropModal(null)}
+        footer={null}
+        width={560}
+      >
+        {undropModal?.tables === null && !undropModal?.error && (
+          <div style={{ textAlign: "center", padding: "24px 0" }}>
+            <Spin />
+          </div>
+        )}
+        {undropModal?.error && (
+          <div style={{ color: "#f85149", fontFamily: "monospace", fontSize: 12, padding: 8 }}>
+            {undropModal.error}
+          </div>
+        )}
+        {undropModal?.tables !== null && !undropModal?.error && undropModal?.tables?.length === 0 && (
+          <div style={{ color: "var(--text-muted)", fontSize: 13, padding: "12px 0" }}>
+            No dropped tables found within the Time Travel retention window.
+          </div>
+        )}
+        {undropModal?.tables !== null && !undropModal?.error && (undropModal?.tables?.length ?? 0) > 0 && (
+          <div>
+            {undropModal!.tables!.map((t) => (
+              <div
+                key={t.name}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "8px 4px",
+                  borderBottom: "1px solid var(--border)",
+                }}
+              >
+                <div>
+                  <div style={{ fontFamily: "monospace", fontSize: 13, color: "var(--text)" }}>{t.name}</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>Dropped: {t.droppedOn}</div>
+                </div>
+                <Button
+                  size="small"
+                  icon={<RollbackOutlined />}
+                  onClick={() => undropTable(undropModal!.db, undropModal!.schema, t.name)}
+                >
+                  Undrop
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
+      {/* Rename modal */}
+      <Modal
+        open={renameModal !== null}
+        title={renameModal ? `Rename ${renameModal.kind.toLowerCase()} "${renameModal.oldName}"` : ""}
+        onOk={executeRename}
+        onCancel={() => setRenameModal(null)}
+        okText="Rename"
+        width={420}
+      >
+        <div style={{ padding: "8px 0" }}>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>New name</div>
+          <Input
+            value={renameModal?.newName ?? ""}
+            onChange={(e) => setRenameModal((prev) => prev ? { ...prev, newName: e.target.value } : null)}
+            onPressEnter={executeRename}
+            autoFocus
+          />
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -22,8 +22,8 @@ import CommitModal from "./CommitModal";
 
 const { Text } = Typography;
 
-const CLR_BORDER    = "#30363d";
-const CLR_SECONDARY = "#8b949e";
+const CLR_BORDER    = "var(--border)";
+const CLR_SECONDARY = "var(--text-muted)";
 const CLR_ADDED     = "#3fb950";
 const CLR_MODIFIED  = "#d29922";
 const CLR_DELETED   = "#f85149";
@@ -100,7 +100,7 @@ export default function GitPanel() {
                 <Text
                   style={{
                     flex: 1, fontSize: 11, fontFamily: "monospace",
-                    color: exportDir ? "#e6edf3" : CLR_SECONDARY,
+                    color: exportDir ? "var(--text)" : CLR_SECONDARY,
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                   }}
                   title={exportDir}

@@ -71,12 +71,12 @@ function ResizeHandle({ resizing, onMouseDown }: { resizing: boolean; onMouseDow
         width:      5,
         flexShrink: 0,
         cursor:     "col-resize",
-        background: resizing ? "#388bfd" : "transparent",
-        borderLeft: "1px solid #30363d",
+        background: resizing ? "var(--accent)" : "transparent",
+        borderLeft: "1px solid var(--border)",
         transition: resizing ? "none" : "background 0.15s",
         zIndex:     10,
       }}
-      onMouseEnter={(e) => { if (!resizing) e.currentTarget.style.background = "#388bfd44"; }}
+      onMouseEnter={(e) => { if (!resizing) e.currentTarget.style.background = "color-mix(in srgb, var(--accent) 26%, transparent)"; }}
       onMouseLeave={(e) => { if (!resizing) e.currentTarget.style.background = "transparent"; }}
     />
   );
@@ -93,7 +93,7 @@ export default function AppLayout() {
       {/* macOS traffic-light drag area */}
       <div
         className="titlebar-drag"
-        style={{ height: 28, background: "#161b22", position: "fixed", top: 0, left: 0, right: 0, zIndex: 100 }}
+        style={{ height: 28, background: "var(--bg-raised)", position: "fixed", top: 0, left: 0, right: 0, zIndex: 100 }}
       />
 
       {/* Left panel — file browser + git */}
@@ -102,7 +102,7 @@ export default function AppLayout() {
           width:      left.width,
           minWidth:   left.width,
           maxWidth:   left.width,
-          background: "#161b22",
+          background: "var(--bg-raised)",
           paddingTop: 28,
           overflow:   "auto",
           flexShrink: 0,
@@ -137,7 +137,7 @@ export default function AppLayout() {
           width:      right.width,
           minWidth:   right.width,
           maxWidth:   right.width,
-          background: "#161b22",
+          background: "var(--bg-raised)",
           paddingTop: 28,
           overflow:   "auto",
           flexShrink: 0,

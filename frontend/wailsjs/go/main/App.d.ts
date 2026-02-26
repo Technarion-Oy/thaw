@@ -46,6 +46,8 @@ export function ListDatabases():Promise<Array<string>>;
 
 export function ListDirectory(arg1:string):Promise<Array<filesystem.FileEntry>>;
 
+export function ListDroppedTables(arg1:string,arg2:string):Promise<Array<snowflake.DroppedTable>>;
+
 export function ListObjects(arg1:string,arg2:string):Promise<Array<snowflake.SnowflakeObject>>;
 
 export function ListRoles():Promise<Array<string>>;

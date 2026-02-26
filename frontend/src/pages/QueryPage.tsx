@@ -152,16 +152,16 @@ export default function QueryPage() {
   const selectStyle = { fontSize: 12, minWidth: 130 };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#0d1117" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg)" }}>
       {/* Toolbar */}
       <div
         style={{
           padding: "6px 12px",
-          borderBottom: "1px solid #30363d",
+          borderBottom: "1px solid var(--border)",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          background: "#161b22",
+          background: "var(--bg-raised)",
         }}
       >
         <Space>
@@ -246,7 +246,7 @@ export default function QueryPage() {
       <TabBar />
 
       {/* SQL Editor — top half */}
-      <div style={{ flex: "0 0 40%", borderBottom: "1px solid #30363d" }}>
+      <div style={{ flex: "0 0 40%", borderBottom: "1px solid var(--border)" }}>
         <SqlEditor />
       </div>
 
@@ -257,13 +257,13 @@ export default function QueryPage() {
             <Spin size="large" />
             {runningQueryId && (
               <Space size={4}>
-                <Text style={{ fontFamily: "monospace", fontSize: 11, color: "#8b949e" }}>
+                <Text style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)" }}>
                   {runningQueryId}
                 </Text>
                 <Button
                   type="text"
                   size="small"
-                  icon={<CopyOutlined style={{ fontSize: 10, color: "#8b949e" }} />}
+                  icon={<CopyOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
                   style={{ height: 16, padding: "0 2px", minWidth: 0 }}
                   onClick={async () => { await ClipboardSetText(runningQueryId); message.success("Query ID copied"); }}
                 />
@@ -284,22 +284,22 @@ export default function QueryPage() {
 
         {result && !error && (
           <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "3px 12px", background: "#161b22", borderBottom: "1px solid #30363d", flexShrink: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "3px 12px", background: "var(--bg-raised)", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
               {result.queryID && (
                 <Space size={4}>
-                  <Text style={{ fontFamily: "monospace", fontSize: 11, color: "#8b949e" }}>
+                  <Text style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)" }}>
                     {result.queryID}
                   </Text>
                   <Button
                     type="text"
                     size="small"
-                    icon={<CopyOutlined style={{ fontSize: 10, color: "#8b949e" }} />}
+                    icon={<CopyOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
                     style={{ height: 16, padding: "0 2px", minWidth: 0 }}
                     onClick={async () => { await ClipboardSetText(result.queryID!); message.success("Query ID copied"); }}
                   />
                 </Space>
               )}
-              <Text style={{ fontSize: 11, color: "#484f58" }}>
+              <Text style={{ fontSize: 11, color: "var(--text-faint)" }}>
                 {result.rows.length} row{result.rows.length !== 1 ? "s" : ""}
               </Text>
             </div>
@@ -310,7 +310,7 @@ export default function QueryPage() {
         )}
 
         {!result && !error && !isRunning && (
-          <div style={{ padding: 24, color: "#484f58", fontSize: 13 }}>
+          <div style={{ padding: 24, color: "var(--text-faint)", fontSize: 13 }}>
             Run a query to see results here.
           </div>
         )}

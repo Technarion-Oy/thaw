@@ -109,14 +109,14 @@ export default function ConnectModal() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "#0d1117",
+        background: "var(--bg)",
       }}
     >
       <div style={{ width: 460 }}>
         <Space direction="vertical" size={24} style={{ width: "100%" }}>
           <Space align="center">
             <CloudServerOutlined style={{ fontSize: 28, color: "#29B6F6" }} />
-            <Title level={3} style={{ margin: 0, color: "#e6edf3" }}>
+            <Title level={3} style={{ margin: 0, color: "var(--text)" }}>
               Connect to Snowflake
             </Title>
           </Space>
@@ -137,7 +137,7 @@ export default function ConnectModal() {
                   label: cliConfig.defaultConnection === c.name ? `${c.name} (default)` : c.name,
                 }))}
               />
-              <Divider style={{ borderColor: "#30363d", margin: "16px 0 4px" }} />
+              <Divider style={{ borderColor: "var(--border)", margin: "16px 0 4px" }} />
             </div>
           )}
 
@@ -173,7 +173,7 @@ export default function ConnectModal() {
               </Form.Item>
             </Space.Compact>
 
-            <Divider style={{ borderColor: "#30363d", margin: "4px 0 16px" }} />
+            <Divider style={{ borderColor: "var(--border)", margin: "4px 0 16px" }} />
 
             {/* ── Authentication ─────────────────────────────────────── */}
             <Form.Item name="authenticator" label="Authentication method">
@@ -188,7 +188,7 @@ export default function ConnectModal() {
                   return (
                     <div>
                       <div>{o.label}</div>
-                      <div style={{ fontSize: 11, color: "#8b949e", marginTop: 2 }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
                         {o.description}
                       </div>
                     </div>

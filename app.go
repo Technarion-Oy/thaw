@@ -473,6 +473,15 @@ func (a *App) ListObjects(database, schema string) ([]snowflake.SnowflakeObject,
 	return a.client.ListObjects(a.ctx, database, schema)
 }
 
+// ListDroppedTables returns tables in the schema that are within the Time Travel
+// retention window and can be recovered with UNDROP TABLE.
+func (a *App) ListDroppedTables(database, schema string) ([]snowflake.DroppedTable, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListDroppedTables(a.ctx, database, schema)
+}
+
 // GetProcedureParams fetches the DDL for a stored procedure and returns its
 // parameter list with real parameter names parsed from the DDL.
 func (a *App) GetProcedureParams(database, schema, name, argTypes string) ([]snowflake.ProcParam, error) {

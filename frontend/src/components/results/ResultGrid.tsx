@@ -13,12 +13,14 @@ import { AgGridReact } from "ag-grid-react";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
 import type { QueryResult } from "../../store/queryStore";
+import { useThemeStore } from "../../store/themeStore";
 
 interface Props {
   result: QueryResult;
 }
 
 export default function ResultGrid({ result }: Props) {
+  const resolved = useThemeStore((s) => s.resolved);
   const columnDefs = useMemo(
     () =>
       result.columns.map((col) => ({
@@ -41,7 +43,7 @@ export default function ResultGrid({ result }: Props) {
   );
 
   return (
-    <div className="ag-theme-alpine-dark" style={{ height: "100%", width: "100%" }}>
+    <div className={resolved === "dark" ? "ag-theme-alpine-dark" : "ag-theme-alpine"} style={{ height: "100%", width: "100%" }}>
       <AgGridReact
         columnDefs={columnDefs}
         rowData={rowData}

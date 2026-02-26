@@ -11,6 +11,7 @@
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { useQueryStore } from "../../store/queryStore";
 import { useObjectStore } from "../../store/objectStore";
+import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 
 const SNOWFLAKE_KEYWORDS = [
@@ -39,6 +40,7 @@ function monacoKind(monaco: any, kind: string): number {
 
 export default function SqlEditor() {
   const { sql, setSql, setSelectedSql } = useQueryStore();
+  const resolved = useThemeStore((s) => s.resolved);
 
   const handleMount: OnMount = (editor, monaco) => {
     // ── Clipboard (WKWebView fix) ─────────────────────────────────────────
@@ -301,7 +303,7 @@ export default function SqlEditor() {
     <Editor
       height="100%"
       defaultLanguage="sql"
-      theme="vs-dark"
+      theme={resolved === "dark" ? "vs-dark" : "vs"}
       value={sql}
       onChange={(v) => setSql(v ?? "")}
       onMount={handleMount}

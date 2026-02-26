@@ -30,8 +30,8 @@ import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { useGitStore } from "../../store/gitStore";
 
 const { Text } = Typography;
-const CLR_BORDER    = "#30363d";
-const CLR_SECONDARY = "#8b949e";
+const CLR_BORDER    = "var(--border)";
+const CLR_SECONDARY = "var(--text-muted)";
 
 interface DdlModal {
   title: string;
@@ -217,14 +217,16 @@ export default function AccountPanel() {
               )}
 
               {!loading && loaded && (
-                <Tree
-                  treeData={treeData}
-                  onSelect={onSelect as any}
-                  defaultExpandAll
-                  showIcon
-                  blockNode
-                  style={{ background: "transparent", color: "#e6edf3", fontSize: 12 }}
-                />
+                <div style={{ overflow: "hidden" }}>
+                  <Tree
+                    treeData={treeData}
+                    onSelect={onSelect as any}
+                    defaultExpandAll
+                    showIcon
+                    blockNode
+                    style={{ background: "transparent", color: "var(--text)", fontSize: 12 }}
+                  />
+                </div>
               )}
             </div>
           ),
@@ -262,9 +264,9 @@ export default function AccountPanel() {
                 top: 10,
                 right: 10,
                 zIndex: 1,
-                background: "#30363d",
-                border: "1px solid #484f58",
-                color: "#e6edf3",
+                background: "var(--border)",
+                border: "1px solid var(--text-faint)",
+                color: "var(--text)",
               }}
               onClick={async () => {
                 await ClipboardSetText(ddlModal.src);
@@ -276,8 +278,8 @@ export default function AccountPanel() {
               style={{
                 margin: 0,
                 padding: 16,
-                background: "#0d1117",
-                color: "#e6edf3",
+                background: "var(--bg)",
+                color: "var(--text)",
                 fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace",
                 fontSize: 12,
                 lineHeight: 1.6,

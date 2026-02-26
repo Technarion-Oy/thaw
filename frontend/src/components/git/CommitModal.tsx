@@ -116,7 +116,7 @@ export default function CommitModal({ status, pushing, onClose, onCommit }: Prop
         </Button>
         {extensions.length > 1 && (
           <>
-            <Divider type="vertical" style={{ borderColor: "#30363d" }} />
+            <Divider type="vertical" style={{ borderColor: "var(--border)" }} />
             {extensions.map((ext) => (
               <Tag
                 key={ext}
@@ -135,15 +135,15 @@ export default function CommitModal({ status, pushing, onClose, onCommit }: Prop
         style={{
           maxHeight: 280,
           overflowY: "auto",
-          border: "1px solid #30363d",
+          border: "1px solid var(--border)",
           borderRadius: 6,
           padding: "4px 0",
-          background: "#0d1117",
+          background: "var(--bg)",
           marginBottom: 12,
         }}
       >
         {allFiles.length === 0 && (
-          <Text style={{ display: "block", padding: "12px 16px", color: "#8b949e", fontSize: 12 }}>
+          <Text style={{ display: "block", padding: "12px 16px", color: "var(--text-muted)", fontSize: 12 }}>
             No changes detected.
           </Text>
         )}
@@ -161,7 +161,7 @@ export default function CommitModal({ status, pushing, onClose, onCommit }: Prop
         ))}
       </div>
 
-      <Divider style={{ borderColor: "#30363d", margin: "0 0 10px" }} />
+      <Divider style={{ borderColor: "var(--border)", margin: "0 0 10px" }} />
 
       {/* ── Commit message ─────────────────────────────────── */}
       <TextArea
