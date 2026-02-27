@@ -473,6 +473,15 @@ func (a *App) ListObjects(database, schema string) ([]snowflake.SnowflakeObject,
 	return a.client.ListObjects(a.ctx, database, schema)
 }
 
+// GetTableRetentionDays returns the Time Travel data retention period in days
+// for the given table. Returns 1 if the value cannot be determined.
+func (a *App) GetTableRetentionDays(database, schema, name string) (int, error) {
+	if a.client == nil {
+		return 0, ErrNotConnected
+	}
+	return a.client.GetTableRetentionDays(a.ctx, database, schema, name)
+}
+
 // ListDroppedTables returns tables in the schema that are within the Time Travel
 // retention window and can be recovered with UNDROP TABLE.
 func (a *App) ListDroppedTables(database, schema string) ([]snowflake.DroppedTable, error) {

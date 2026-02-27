@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -502,6 +503,38 @@ func (c *Client) ListDroppedTables(ctx context.Context, database, schema string)
 		})
 	}
 	return result, rows.Err()
+}
+
+// GetTableRetentionDays returns the Time Travel data-retention period in days
+// for a single table. It runs SHOW TABLES LIKE and reads the retention_time
+// column. Returns 1 (Snowflake's Standard-edition default) when the value
+// cannot be determined.
+func (c *Client) GetTableRetentionDays(ctx context.Context, database, schema, name string) (int, error) {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	query := fmt.Sprintf(`SHOW TABLES LIKE '%s' IN SCHEMA "%s"."%s"`,
+		strings.ReplaceAll(name, "'", "''"), esc(database), esc(schema))
+
+	rows, err := c.db.QueryContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	cols, _ := rows.Columns()
+	idxs := colIndexMap(cols, "retention_time")
+
+	if rows.Next() {
+		vals, ptrs := makeValPtrs(len(cols))
+		if err := rows.Scan(ptrs...); err != nil {
+			return 0, err
+		}
+		if s := strVal(vals, idxs["retention_time"]); s != "" {
+			if n, err := strconv.Atoi(s); err == nil {
+				return n, nil
+			}
+		}
+	}
+	return 1, nil // default: 1 day
 }
 
 // ProcParam describes a single parameter of a stored procedure.

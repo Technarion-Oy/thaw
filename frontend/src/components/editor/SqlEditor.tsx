@@ -13,12 +13,17 @@ import { useQueryStore } from "../../store/queryStore";
 import { useObjectStore } from "../../store/objectStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetObjectDDL } from "../../../wailsjs/go/main/App";
+import { GetObjectDDL, ListObjects, ListSchemas } from "../../../wailsjs/go/main/App";
 
 // Module-level DDL cache and hover provider handle so we only register once
 // and don't accumulate duplicate providers on editor remounts.
 const hoverDDLCache = new Map<string, string>();
 let hoverProviderDisposable: { dispose(): void } | null = null;
+
+// Track which db/schema pairs and databases have already been lazy-fetched by
+// the completion provider so we don't fire duplicate requests.
+const fetchedSchemaObjects   = new Set<string>(); // "DB\0SCHEMA"
+const fetchedDatabaseSchemas = new Set<string>(); // "DB"
 
 const SNOWFLAKE_KEYWORDS = [
   "SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER",
@@ -108,7 +113,7 @@ export default function SqlEditor() {
 
     monaco.languages.registerCompletionItemProvider("sql", {
       triggerCharacters: ["."],
-      provideCompletionItems: (model: any, position: any) => {
+      provideCompletionItems: async (model: any, position: any) => {
         const word = model.getWordUntilPosition(position);
         const range = {
           startLineNumber: position.lineNumber,
@@ -123,15 +128,32 @@ export default function SqlEditor() {
           .getLineContent(position.lineNumber)
           .substring(0, word.startColumn - 1);
 
-        const { databases, schemas, objects } = useObjectStore.getState();
+        const UC = (s: string) => s.toUpperCase();
 
         // ── db.schema. → suggest objects in that schema ──────────────────
         const twoPartMatch = lineUpToWord.match(/\b(\w+)\.(\w+)\.\s*$/i);
         if (twoPartMatch) {
           const [, db, schema] = twoPartMatch;
-          const UC = (s: string) => s.toUpperCase();
+          const schemaKey = `${UC(db)}\0${UC(schema)}`;
+
+          const hasObjects = useObjectStore.getState().objects
+            .some((o) => UC(o.db) === UC(db) && UC(o.schema) === UC(schema));
+
+          if (!hasObjects && !fetchedSchemaObjects.has(schemaKey)) {
+            fetchedSchemaObjects.add(schemaKey);
+            try {
+              const fetched = await ListObjects(db, schema);
+              useObjectStore.getState().addObjects(
+                db, schema,
+                (fetched ?? []).map((o) => ({ name: o.name, kind: (o.kind || "OTHER").toUpperCase() })),
+              );
+            } catch {
+              fetchedSchemaObjects.delete(schemaKey); // allow retry on next keystroke
+            }
+          }
+
           return {
-            suggestions: objects
+            suggestions: useObjectStore.getState().objects
               .filter((o) => UC(o.db) === UC(db) && UC(o.schema) === UC(schema))
               .map((o) => ({
                 label:      o.name,
@@ -147,19 +169,31 @@ export default function SqlEditor() {
         const onePartMatch = lineUpToWord.match(/\b(\w+)\.\s*$/i);
         if (onePartMatch) {
           const [, qualifier] = onePartMatch;
-          const UC = (s: string) => s.toUpperCase();
+          const { databases, schemas, objects } = useObjectStore.getState();
 
           // Is the qualifier a known database?
-          const dbSchemas = schemas.filter((s) => UC(s.db) === UC(qualifier));
-          if (dbSchemas.length > 0) {
+          const isKnownDb = databases.some((db) => UC(db) === UC(qualifier));
+          if (isKnownDb) {
+            const dbSchemas = schemas.filter((s) => UC(s.db) === UC(qualifier));
+            if (dbSchemas.length === 0 && !fetchedDatabaseSchemas.has(UC(qualifier))) {
+              fetchedDatabaseSchemas.add(UC(qualifier));
+              try {
+                const fetched = await ListSchemas(qualifier);
+                useObjectStore.getState().addSchemas(qualifier, fetched ?? []);
+              } catch {
+                fetchedDatabaseSchemas.delete(UC(qualifier));
+              }
+            }
             return {
-              suggestions: dbSchemas.map((s) => ({
-                label:      s.name,
-                kind:       monaco.languages.CompletionItemKind.Module,
-                insertText: s.name,
-                detail:     "SCHEMA",
-                range,
-              })),
+              suggestions: useObjectStore.getState().schemas
+                .filter((s) => UC(s.db) === UC(qualifier))
+                .map((s) => ({
+                  label:      s.name,
+                  kind:       monaco.languages.CompletionItemKind.Module,
+                  insertText: s.name,
+                  detail:     "SCHEMA",
+                  range,
+                })),
             };
           }
 
@@ -179,6 +213,8 @@ export default function SqlEditor() {
         }
 
         // ── No qualifier → keywords + databases + all object names ────────
+        const { databases, schemas, objects } = useObjectStore.getState();
+
         const keywordSuggestions = SNOWFLAKE_KEYWORDS.map((kw) => ({
           label:      kw,
           kind:       monaco.languages.CompletionItemKind.Keyword,

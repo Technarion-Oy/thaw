@@ -50,6 +50,10 @@ export function GetSessionContext() {
   return window['go']['main']['App']['GetSessionContext']();
 }
 
+export function GetTableRetentionDays(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetTableRetentionDays'](arg1, arg2, arg3);
+}
+
 export function GetWarehouseDDL(arg1) {
   return window['go']['main']['App']['GetWarehouseDDL'](arg1);
 }

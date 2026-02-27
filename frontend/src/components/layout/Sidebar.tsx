@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useRef } from "react";
-import { Tree, Typography, Spin, Empty, Divider, Modal, Button, Input, Tooltip, message } from "antd";
+import { Tree, Typography, Spin, Empty, Divider, Modal, Button, Input, Tooltip, Slider, message } from "antd";
 import {
   DatabaseOutlined,
   TableOutlined,
@@ -28,10 +28,11 @@ import {
   DeleteOutlined,
   RollbackOutlined,
   EditOutlined,
+  HistoryOutlined,
 } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, ExportDatabaseDDL, ListDroppedTables } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, ExportDatabaseDDL, ListDroppedTables, GetTableRetentionDays } from "../../../wailsjs/go/main/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
 import { useObjectStore } from "../../store/objectStore";
@@ -94,6 +95,16 @@ interface RenameModal {
   kind: string;
   oldName: string;
   newName: string;
+}
+
+interface TimeTravelModal {
+  db: string;
+  schema: string;
+  name: string;
+  retentionDays: number | null; // null = still loading
+  minTs: number;   // Unix seconds — oldest queryable point
+  maxTs: number;   // Unix seconds — now
+  selectedTs: number; // Unix seconds — slider position
 }
 
 interface ObjectDDL {
@@ -201,6 +212,7 @@ export default function Sidebar() {
   const [callModal, setCallModal] = useState<{ db: string; schema: string; name: string; rawArgs: string } | null>(null);
   const [undropModal, setUndropModal] = useState<UndropModal | null>(null);
   const [renameModal, setRenameModal] = useState<RenameModal | null>(null);
+  const [timeTravelModal, setTimeTravelModal] = useState<TimeTravelModal | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
 
   // Close context menu on outside click
@@ -483,6 +495,37 @@ export default function Sidebar() {
     refreshDatabaseByName(db);
   };
 
+  const openTimeTravelModal = async () => {
+    if (!ctxMenu) return;
+    const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
+    const name = nameParts.join(":");
+    setCtxMenu(null);
+
+    const maxTs = Math.floor(Date.now() / 1000);
+    const defaultMin = maxTs - 86400; // 1 day fallback while loading
+    setTimeTravelModal({ db, schema, name, retentionDays: null, minTs: defaultMin, maxTs, selectedTs: maxTs - 3600 });
+
+    try {
+      const days = await GetTableRetentionDays(db, schema, name);
+      const retentionDays = Math.max(days, 1);
+      const minTs = maxTs - retentionDays * 86400;
+      setTimeTravelModal((prev) =>
+        prev ? { ...prev, retentionDays, minTs, selectedTs: Math.max(prev.selectedTs, minTs) } : null,
+      );
+    } catch {
+      setTimeTravelModal((prev) => prev ? { ...prev, retentionDays: 1 } : null);
+    }
+  };
+
+  const executeTimeTravel = () => {
+    if (!timeTravelModal) return;
+    const { db, schema, name, selectedTs } = timeTravelModal;
+    setTimeTravelModal(null);
+    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const sql = `SELECT * FROM ${q(db)}.${q(schema)}.${q(name)} AT(TIMESTAMP => TO_TIMESTAMP_NTZ(${selectedTs})) LIMIT 1000;`;
+    useQueryStore.getState().executeInNewTab(sql);
+  };
+
   const viewDefinition = async () => {
     if (!ctxMenu) return;
     const { nodeKey, objArgs = "" } = ctxMenu;
@@ -585,6 +628,8 @@ export default function Sidebar() {
           {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
+            menuItem("Time Travel Query…", <HistoryOutlined style={{ fontSize: 12 }} />, openTimeTravelModal)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PROCEDURE" &&
             menuItem("Call Procedure", <PlayCircleOutlined style={{ fontSize: 12 }} />, callProcedure)}
           {ctxMenu.nodeType === "obj" && menuItem("View Definition", null, viewDefinition)}
@@ -701,6 +746,81 @@ export default function Sidebar() {
           </div>
         )}
       </Modal>
+      {/* Time Travel modal */}
+      <Modal
+        open={timeTravelModal !== null}
+        title={
+          <span>
+            <HistoryOutlined style={{ marginRight: 8, color: "var(--link)" }} />
+            Time Travel — {timeTravelModal?.db}.{timeTravelModal?.schema}.{timeTravelModal?.name}
+          </span>
+        }
+        onCancel={() => setTimeTravelModal(null)}
+        onOk={executeTimeTravel}
+        okText="Query"
+        okButtonProps={{ disabled: timeTravelModal?.retentionDays === null }}
+        width={620}
+      >
+        {(!timeTravelModal || timeTravelModal.retentionDays === null) ? (
+          <div style={{ textAlign: "center", padding: "40px 0" }}>
+            <Spin />
+            <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-muted)" }}>Loading retention info…</div>
+          </div>
+        ) : (
+          <div style={{ padding: "20px 8px 8px" }}>
+            <div style={{ marginBottom: 20, fontSize: 12, color: "var(--text-muted)" }}>
+              Data retention window:{" "}
+              <strong style={{ color: "var(--text)" }}>
+                {timeTravelModal!.retentionDays} {timeTravelModal!.retentionDays === 1 ? "day" : "days"}
+              </strong>
+              {" · "}drag the handle to choose a point in time
+            </div>
+
+            <Slider
+              min={timeTravelModal!.minTs}
+              max={timeTravelModal!.maxTs}
+              value={timeTravelModal!.selectedTs}
+              step={60}
+              onChange={(v) => setTimeTravelModal((prev) => prev ? { ...prev, selectedTs: v } : null)}
+              tooltip={{ formatter: (v) => v ? new Date(v * 1000).toLocaleString() : "" }}
+              marks={{
+                [timeTravelModal!.minTs]: (
+                  <span style={{ fontSize: 10, color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+                    {new Date(timeTravelModal!.minTs * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                  </span>
+                ),
+                [timeTravelModal!.maxTs]: (
+                  <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Now</span>
+                ),
+              }}
+            />
+
+            <div
+              style={{
+                marginTop: 28,
+                padding: "14px 16px",
+                background: "var(--bg)",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                textAlign: "center",
+              }}
+            >
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Selected time</div>
+              <div style={{ fontFamily: "monospace", fontSize: 13, color: "var(--text)" }}>
+                {new Date(timeTravelModal!.selectedTs * 1000).toLocaleString(undefined, {
+                  weekday: "short", year: "numeric", month: "short",
+                  day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit",
+                })}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 12, fontSize: 11, color: "var(--text-faint)", fontFamily: "monospace", wordBreak: "break-all" }}>
+              AT(TIMESTAMP =&gt; TO_TIMESTAMP_NTZ({timeTravelModal!.selectedTs}))
+            </div>
+          </div>
+        )}
+      </Modal>
+
       {/* Rename modal */}
       <Modal
         open={renameModal !== null}

@@ -38,6 +38,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - Right-click a **schema** to browse dropped tables recoverable via Snowflake Time Travel
 - Right-click an **object** to:
   - Select the top 1 000 rows (tables and views) — opens in a new tab
+  - **Time Travel Query…** (tables) — opens a dialog with a timeline slider spanning the table's full retention window; drag to choose a point in time and run `SELECT … AT(TIMESTAMP => …) LIMIT 1000` in a new tab
   - Call the procedure with auto-generated parameter fields (procedures) — opens in a new tab
   - View the DDL definition inline
   - **Rename** the object (`ALTER … RENAME TO`) — available for tables, views, sequences, stages, streams, tasks, file formats, and pipes
