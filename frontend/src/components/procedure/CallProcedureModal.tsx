@@ -60,7 +60,7 @@ interface Props {
 export default function CallProcedureModal({ db, schema, name, rawArgs, onClose }: Props) {
   const [params, setParams] = useState<Param[] | null>(null);
   const [values, setValues] = useState<string[]>([]);
-  const executeWith = useQueryStore((s) => s.executeWith);
+  const executeInNewTab = useQueryStore((s) => s.executeInNewTab);
 
   useEffect(() => {
     GetProcedureParams(db, schema, name, rawArgs)
@@ -82,7 +82,7 @@ export default function CallProcedureModal({ db, schema, name, rawArgs, onClose 
     if (!params) return;
     const sql = buildCallSql(db, schema, name, params, values);
     onClose();
-    executeWith(sql);
+    executeInNewTab(sql);
   };
 
   const preview = params ? buildCallSql(db, schema, name, params, values) : "";

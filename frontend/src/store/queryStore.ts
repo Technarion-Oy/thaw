@@ -77,6 +77,7 @@ interface QueryState {
   setRunning: (isRunning: boolean) => void;
   setError: (error: string | null) => void;
   executeWith: (sql: string) => Promise<void>;
+  executeInNewTab: (sql: string) => Promise<void>;
 }
 
 // ── store ─────────────────────────────────────────────────────────────────────
@@ -243,6 +244,36 @@ export const useQueryStore = create<QueryState>((set) => ({
         error: String(e),
         isRunning: false,
         tabs: patchTab(state.tabs, state.activeTabId, { error: String(e) }),
+      }));
+    } finally {
+      set({ isRunning: false });
+    }
+  },
+
+  executeInNewTab: async (sql) => {
+    const newTab = makeTab({ sql });
+    set((state) => ({
+      tabs: [...state.tabs, newTab],
+      activeTabId: newTab.id,
+      sql,
+      selectedSql: "",
+      currentFile: null,
+      result: null,
+      error: null,
+      isRunning: true,
+    }));
+    try {
+      const res = await ExecuteQuery(sql);
+      set((state) => ({
+        result: res,
+        error: null,
+        tabs: patchTab(state.tabs, newTab.id, { result: res, error: null }),
+      }));
+    } catch (e) {
+      set((state) => ({
+        error: String(e),
+        isRunning: false,
+        tabs: patchTab(state.tabs, newTab.id, { error: String(e) }),
       }));
     } finally {
       set({ isRunning: false });

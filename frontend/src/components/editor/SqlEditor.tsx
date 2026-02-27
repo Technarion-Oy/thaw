@@ -13,6 +13,12 @@ import { useQueryStore } from "../../store/queryStore";
 import { useObjectStore } from "../../store/objectStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { GetObjectDDL } from "../../../wailsjs/go/main/App";
+
+// Module-level DDL cache and hover provider handle so we only register once
+// and don't accumulate duplicate providers on editor remounts.
+const hoverDDLCache = new Map<string, string>();
+let hoverProviderDisposable: { dispose(): void } | null = null;
 
 const SNOWFLAKE_KEYWORDS = [
   "SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER",
@@ -205,6 +211,52 @@ export default function SqlEditor() {
         }));
 
         return { suggestions: [...keywordSuggestions, ...dbSuggestions, ...schemaSuggestions, ...objectSuggestions] };
+      },
+    });
+
+    // ── Object definition hover ───────────────────────────────────────────
+    // Dispose any previous registration to avoid stacking on remount.
+    if (hoverProviderDisposable) {
+      hoverProviderDisposable.dispose();
+    }
+    hoverProviderDisposable = monaco.languages.registerHoverProvider("sql", {
+      provideHover: async (model: any, position: any) => {
+        const word = model.getWordAtPosition(position);
+        if (!word) return null;
+
+        const { objects } = useObjectStore.getState();
+        const match = objects.find(
+          (o) => o.name.toUpperCase() === word.word.toUpperCase() &&
+                 (o.kind === "TABLE" || o.kind === "VIEW"),
+        );
+        if (!match) return null;
+
+        const cacheKey = `${match.db}\0${match.schema}\0${match.kind}\0${match.name}`;
+        let ddl: string;
+        if (hoverDDLCache.has(cacheKey)) {
+          ddl = hoverDDLCache.get(cacheKey)!;
+        } else {
+          try {
+            ddl = await GetObjectDDL(match.db, match.schema, match.kind, match.name, "");
+            hoverDDLCache.set(cacheKey, ddl);
+          } catch {
+            return null;
+          }
+        }
+        if (!ddl) return null;
+
+        return {
+          range: {
+            startLineNumber: position.lineNumber,
+            endLineNumber:   position.lineNumber,
+            startColumn:     word.startColumn,
+            endColumn:       word.endColumn,
+          },
+          contents: [
+            { value: `**${match.kind}** — \`${match.db}.${match.schema}.${match.name}\`` },
+            { value: "```sql\n" + ddl + "\n```" },
+          ],
+        };
       },
     });
 

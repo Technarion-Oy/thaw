@@ -22,6 +22,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - **Query ID** — the Snowflake query ID is shown in the loading spinner while the query runs and in the results status bar after it completes; click the copy icon to copy it to the clipboard
 - **Selection highlight** — selecting any text highlights every other occurrence in the document with a blue background; overview-ruler markers make occurrences visible in long files
 - Word-under-cursor highlight when nothing is selected
+- **Hover definition** — hovering over a table or view name shows its DDL in a Monaco tooltip; definitions are cached per session so subsequent hovers are instant
 - Results displayed in a virtualised Ag-Grid table
 
 ### File management
@@ -36,11 +37,12 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - Right-click a **database** to refresh or export its DDL
 - Right-click a **schema** to browse dropped tables recoverable via Snowflake Time Travel
 - Right-click an **object** to:
-  - Select the top 1 000 rows (tables and views)
-  - Call the procedure with auto-generated parameter fields (procedures)
+  - Select the top 1 000 rows (tables and views) — opens in a new tab
+  - Call the procedure with auto-generated parameter fields (procedures) — opens in a new tab
   - View the DDL definition inline
   - **Rename** the object (`ALTER … RENAME TO`) — available for tables, views, sequences, stages, streams, tasks, file formats, and pipes
   - **Delete** the object (`DROP …`) — with a confirmation dialog
+- **Hover tooltip** — hovering over any object in the tree shows its DDL definition; fetched once and cached for the session
 - Tree automatically refreshes the affected database after any rename, drop, or undrop operation
 
 ### DDL export

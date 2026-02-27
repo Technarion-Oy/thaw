@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useRef } from "react";
-import { Tree, Typography, Spin, Empty, Divider, Modal, Button, Input, message } from "antd";
+import { Tree, Typography, Spin, Empty, Divider, Modal, Button, Input, Tooltip, message } from "antd";
 import {
   DatabaseOutlined,
   TableOutlined,
@@ -115,6 +115,79 @@ function clearNodeChildren(nodes: DataNode[], targetKey: string): DataNode[] {
     }
     return node;
   });
+}
+
+// Cache DDL per unique key so we only fetch once per session.
+const ddlCache = new Map<string, string>();
+
+function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
+  cacheKey: string;
+  db: string;
+  schema: string;
+  kind: string;
+  name: string;
+  args: string;
+  children: React.ReactNode;
+}) {
+  const [content, setContent] = useState<string | null>(() => ddlCache.get(cacheKey) ?? null);
+  const [loading, setLoading] = useState(false);
+
+  const onOpenChange = (open: boolean) => {
+    if (!open || content !== null || loading) return;
+    setLoading(true);
+    GetObjectDDL(db, schema, kind, name, args)
+      .then((src) => {
+        const text = src || "(empty)";
+        ddlCache.set(cacheKey, text);
+        setContent(text);
+      })
+      .catch((e) => {
+        const text = `Error: ${e}`;
+        ddlCache.set(cacheKey, text);
+        setContent(text);
+      })
+      .finally(() => setLoading(false));
+  };
+
+  const overlay = (
+    <pre
+      style={{
+        margin: 0,
+        fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace",
+        fontSize: 11,
+        lineHeight: 1.55,
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+        maxHeight: 340,
+        overflowY: "auto",
+        color: "var(--text)",
+      }}
+    >
+      {loading ? "Loading…" : content}
+    </pre>
+  );
+
+  return (
+    <Tooltip
+      title={overlay}
+      placement="left"
+      mouseEnterDelay={0.6}
+      mouseLeaveDelay={0.1}
+      onOpenChange={onOpenChange}
+      overlayStyle={{ maxWidth: 540 }}
+      overlayInnerStyle={{
+        background: "var(--bg-overlay)",
+        border: "1px solid var(--border)",
+        borderRadius: 6,
+        padding: "8px 12px",
+        boxShadow: "0 4px 16px rgba(0,0,0,0.45)",
+      }}
+    >
+      <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {children}
+      </span>
+    </Tooltip>
+  );
 }
 
 export default function Sidebar() {
@@ -292,7 +365,7 @@ export default function Sidebar() {
     const name = nameParts.join(":");
     const sql = `SELECT * FROM "${db}"."${schema}"."${name}" LIMIT 1000;`;
 
-    useQueryStore.getState().executeWith(sql);
+    useQueryStore.getState().executeInNewTab(sql);
   };
 
   const callProcedure = () => {
@@ -470,6 +543,23 @@ export default function Sidebar() {
           showIcon
           blockNode
           style={{ background: "transparent", color: "var(--text)" }}
+          titleRender={(node) => {
+            const key = String(node.key);
+            if (key.startsWith("obj:")) {
+              const parts = key.split(":");
+              const db     = parts[1];
+              const schema = parts[2];
+              const kind   = parts[3];
+              const name   = parts.slice(4).join(":");
+              const args   = (node as any).arguments ?? "";
+              return (
+                <ObjTooltip cacheKey={key} db={db} schema={schema} kind={kind} name={name} args={args}>
+                  {String(node.title)}
+                </ObjTooltip>
+              );
+            }
+            return node.title as React.ReactNode;
+          }}
         />
       )}
 
