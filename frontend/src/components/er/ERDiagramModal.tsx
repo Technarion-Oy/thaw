@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Technarion Oy. All rights reserved.
 
 import { useState, useId, useEffect, useRef, useMemo } from "react";
-import { Modal, Button, Checkbox, Spin } from "antd";
-import { ZoomInOutlined, ZoomOutOutlined, CopyOutlined } from "@ant-design/icons";
+import { Modal, Button, Checkbox, Spin, Dropdown } from "antd";
+import { ZoomInOutlined, ZoomOutOutlined, CopyOutlined, EditOutlined } from "@ant-design/icons";
 import mermaid from "mermaid";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { buildMermaid } from "./buildMermaid";
@@ -49,9 +49,10 @@ interface Props {
   database: string;
   data: snowflake.ERDiagramData;
   onClose: () => void;
+  onOpenDesigner?: (schema: string) => void;
 }
 
-export default function ERDiagramModal({ database, data, onClose }: Props) {
+export default function ERDiagramModal({ database, data, onClose, onOpenDesigner }: Props) {
   const baseId = useId().replace(/:/g, "_");
   const renderCount = useRef(0);
 
@@ -175,7 +176,7 @@ export default function ERDiagramModal({ database, data, onClose }: Props) {
           ))}
         </div>
 
-        {/* Zoom + copy controls */}
+        {/* Zoom + copy + design controls */}
         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
           <Button
             size="small"
@@ -193,6 +194,18 @@ export default function ERDiagramModal({ database, data, onClose }: Props) {
           <Button size="small" icon={<CopyOutlined />} onClick={copyMermaid}>
             Copy Mermaid
           </Button>
+          {onOpenDesigner && allSchemas.length > 0 && (
+            <Dropdown
+              menu={{
+                items: allSchemas.map((s) => ({ key: s, label: s })),
+                onClick: ({ key }) => onOpenDesigner(key),
+              }}
+            >
+              <Button size="small" icon={<EditOutlined />}>
+                Design Tables…
+              </Button>
+            </Dropdown>
+          )}
         </div>
       </div>
 

@@ -435,13 +435,6 @@ export default function Sidebar() {
     }
   };
 
-  const openDesigner = () => {
-    if (!ctxMenu) return;
-    const [, db, schema] = ctxMenu.nodeKey.split(":");
-    setCtxMenu(null);
-    setDesignerModal({ database: db, schema });
-  };
-
   const deleteObject = () => {
     if (!ctxMenu) return;
     const { nodeKey, objKind = "", objArgs = "" } = ctxMenu;
@@ -654,7 +647,6 @@ export default function Sidebar() {
           {ctxMenu.nodeType === "db" && menuItem("Export DDL", <CloudUploadOutlined style={{ fontSize: 12 }} />, exportDatabase)}
           {ctxMenu.nodeType === "db" && menuItem("ER Diagram…", <ApartmentOutlined style={{ fontSize: 12 }} />, generateERDiagram)}
           {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
-          {ctxMenu.nodeType === "schema" && menuItem("Design Tables…", <EditOutlined style={{ fontSize: 12 }} />, openDesigner)}
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
@@ -876,6 +868,7 @@ export default function Sidebar() {
           database={erModal.database}
           data={erModal.data}
           onClose={() => setErModal(null)}
+          onOpenDesigner={(schema) => setDesignerModal({ database: erModal.database, schema })}
         />
       )}
 
