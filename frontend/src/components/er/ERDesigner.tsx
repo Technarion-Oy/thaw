@@ -468,38 +468,40 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
 
             {tables.map((t) => (
               <div key={t.id} style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden", flexShrink: 0 }}>
-                {/* Table header — schema + name */}
+                {/* Table header — two rows: schema+delete, then table name */}
                 <div
                   style={{
                     display: "flex",
-                    alignItems: "center",
-                    gap: 6,
+                    flexDirection: "column",
+                    gap: 4,
                     padding: "6px 8px",
                     background: "var(--bg-overlay)",
                     borderBottom: "1px solid var(--border)",
                   }}
                 >
-                  <Select
-                    size="small"
-                    placeholder="schema"
-                    value={t.schema || undefined}
-                    onChange={(v) => updateTable(t.id, { schema: v })}
-                    options={schemaOptions}
-                    style={{ width: 140, flexShrink: 0, fontFamily: "monospace", fontSize: 12 }}
-                    showSearch
-                  />
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <Select
+                      size="small"
+                      placeholder="schema"
+                      value={t.schema || undefined}
+                      onChange={(v) => updateTable(t.id, { schema: v })}
+                      options={schemaOptions}
+                      style={{ flex: 1, fontFamily: "monospace", fontSize: 11 }}
+                      showSearch
+                    />
+                    <Button
+                      size="small"
+                      type="text"
+                      icon={<DeleteOutlined style={{ color: "#f85149" }} />}
+                      onClick={() => removeTable(t.id)}
+                    />
+                  </div>
                   <Input
                     size="small"
                     placeholder="TABLE_NAME"
                     value={t.name}
                     onChange={(e) => updateTable(t.id, { name: e.target.value.toUpperCase() })}
-                    style={{ flex: 1, fontFamily: "monospace", fontSize: 12 }}
-                  />
-                  <Button
-                    size="small"
-                    type="text"
-                    icon={<DeleteOutlined style={{ color: "#f85149" }} />}
-                    onClick={() => removeTable(t.id)}
+                    style={{ fontFamily: "monospace", fontSize: 13, fontWeight: 600 }}
                   />
                 </div>
 

@@ -35,9 +35,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 ### Object browser (sidebar)
 - Browse databases → schemas → objects (tables, views, functions, procedures, …)
 - Right-click a **database** to refresh, export its DDL, or **generate an ER Diagram**
-- Right-click a **schema** to:
-  - Browse dropped tables recoverable via Snowflake Time Travel
-  - **Design Tables…** — open the visual ER schema designer (see below)
+- Right-click a **schema** to browse dropped tables recoverable via Snowflake Time Travel
 - Right-click an **object** to:
   - Select the top 1 000 rows (tables and views) — opens in a new tab
   - **Time Travel Query…** (tables) — opens a dialog with a timeline slider spanning the table's full retention window; drag to choose a point in time and run `SELECT … AT(TIMESTAMP => …) LIMIT 1000` in a new tab
@@ -47,10 +45,13 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
   - **Delete** the object (`DROP …`) — with a confirmation dialog
 - **Hover tooltip** — hovering over any object in the tree shows its DDL definition; fetched once and cached for the session
 - Tree automatically refreshes the affected database after any rename, drop, or undrop operation
-- **ER Diagram** — right-click a database and choose **ER Diagram…** to generate an Entity Relationship Diagram from `INFORMATION_SCHEMA.COLUMNS`, `SHOW PRIMARY KEYS`, and `SHOW IMPORTED KEYS`; filter visible schemas with checkboxes, zoom in/out, drag to pan, and copy the Mermaid source to the clipboard
-- **Visual ER Designer** — right-click a schema and choose **Design Tables…** to open an interactive table designer:
-  - Add tables and define columns with name, data type (NUMBER, VARCHAR, BOOLEAN, DATE, TIMESTAMP_NTZ, TIMESTAMP_LTZ, FLOAT, VARIANT, ARRAY, OBJECT), Primary Key, and Not Null flags
-  - Set Foreign Key references to columns in other designer tables via a dropdown; FK arrows appear in the live preview automatically
+- **ER Diagram** — right-click a database and choose **ER Diagram…** to generate an Entity Relationship Diagram from `INFORMATION_SCHEMA.COLUMNS`, `SHOW PRIMARY KEYS`, and `SHOW IMPORTED KEYS`; only base tables are shown (views excluded); filter visible schemas with checkboxes, zoom in/out, drag to pan, and copy the Mermaid source to the clipboard
+- **Visual ER Designer** — click **Design Tables…** in the ER Diagram toolbar to open an interactive designer at the database level:
+  - Pre-populated with all existing base tables and their columns, data types, primary keys, and foreign keys
+  - Add new tables or edit existing ones; each table has its own schema selector to support cross-schema designs
+  - Define columns with name, data type (NUMBER, VARCHAR, BOOLEAN, DATE, TIMESTAMP_NTZ, TIMESTAMP_LTZ, FLOAT, VARIANT, ARRAY, OBJECT), Primary Key, and Not Null flags
+  - Set Foreign Key references across any table in any schema; FK arrows appear in the live preview automatically
+  - Resizable left panel (drag the divider) for comfortable editing alongside the live preview
   - Live Mermaid ER diagram preview (300 ms debounce) with zoom and drag-to-pan
   - **Show SQL & Run** — generates `CREATE TABLE IF NOT EXISTS` statements with `PRIMARY KEY` and `FOREIGN KEY` constraints and executes them against Snowflake in a single multi-statement call; the sidebar refreshes automatically on success
 
