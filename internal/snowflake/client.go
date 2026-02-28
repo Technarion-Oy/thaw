@@ -985,10 +985,13 @@ func (c *Client) GetERDiagramData(ctx context.Context, database string) (ERDiagr
 	go func() {
 		defer wg.Done()
 		query := fmt.Sprintf(
-			`SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE`+
-				` FROM "%s".INFORMATION_SCHEMA.COLUMNS`+
-				` WHERE TABLE_SCHEMA != 'INFORMATION_SCHEMA'`+
-				` ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION`, db)
+			`SELECT c.TABLE_SCHEMA, c.TABLE_NAME, c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE`+
+				` FROM "%s".INFORMATION_SCHEMA.COLUMNS c`+
+				` JOIN "%s".INFORMATION_SCHEMA.TABLES t`+
+				` ON c.TABLE_SCHEMA = t.TABLE_SCHEMA AND c.TABLE_NAME = t.TABLE_NAME`+
+				` WHERE c.TABLE_SCHEMA != 'INFORMATION_SCHEMA'`+
+				` AND t.TABLE_TYPE = 'BASE TABLE'`+
+				` ORDER BY c.TABLE_SCHEMA, c.TABLE_NAME, c.ORDINAL_POSITION`, db, db)
 		rows, err := c.db.QueryContext(ctx, query)
 		if err != nil {
 			colErr = err

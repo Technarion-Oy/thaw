@@ -221,6 +221,10 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
   const baseId = useId().replace(/:/g, "_");
   const renderCount = useRef(0);
 
+  const [leftWidth, setLeftWidth] = useState(490);
+  const [resizing, setResizing] = useState(false);
+  const resizeStart = useRef({ x: 0, width: 0 });
+
   const [schemas, setSchemas] = useState<string[]>([]);
   const [tables, setTables] = useState<DesignerTable[]>(() =>
     initialData ? initFromERData(initialData) : []
@@ -242,6 +246,33 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
   const [sqlModalOpen, setSqlModalOpen] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+
+  // ── Left panel resize ────────────────────────────────────────────────────────
+
+  const onResizeMouseDown = (e: React.MouseEvent) => {
+    resizeStart.current = { x: e.clientX, width: leftWidth };
+    setResizing(true);
+    e.preventDefault();
+  };
+
+  useEffect(() => {
+    if (!resizing) return;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    const onMove = (e: MouseEvent) => {
+      const w = resizeStart.current.width + (e.clientX - resizeStart.current.x);
+      setLeftWidth(Math.max(260, Math.min(700, w)));
+    };
+    const onUp = () => setResizing(false);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [resizing]);
 
   // ── Fetch schemas on mount ──────────────────────────────────────────────────
 
@@ -416,9 +447,8 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
           {/* Left panel */}
           <div
             style={{
-              width: 490,
+              width: leftWidth,
               flexShrink: 0,
-              borderRight: "1px solid var(--border)",
               overflowY: "auto",
               padding: 12,
               display: "flex",
@@ -542,8 +572,23 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
             ))}
           </div>
 
+          {/* Resize handle */}
+          <div
+            onMouseDown={onResizeMouseDown}
+            style={{
+              width: 5,
+              flexShrink: 0,
+              cursor: "col-resize",
+              background: resizing ? "var(--accent)" : "transparent",
+              borderLeft: "1px solid var(--border)",
+              transition: resizing ? "none" : "background 0.15s",
+            }}
+            onMouseEnter={(e) => { if (!resizing) e.currentTarget.style.background = "color-mix(in srgb, var(--accent) 26%, transparent)"; }}
+            onMouseLeave={(e) => { if (!resizing) e.currentTarget.style.background = "transparent"; }}
+          />
+
           {/* Right panel — live preview */}
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", userSelect: resizing ? "none" : undefined }}>
             <div
               style={{
                 display: "flex",
