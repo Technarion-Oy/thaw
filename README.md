@@ -53,7 +53,8 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
   - Set Foreign Key references across any table in any schema; FK arrows appear in the live preview automatically
   - Resizable left panel (drag the divider) for comfortable editing alongside the live preview
   - Live Mermaid ER diagram preview (300 ms debounce) with zoom and drag-to-pan
-  - **Show SQL & Run** — generates `CREATE TABLE IF NOT EXISTS` statements with `PRIMARY KEY` and `FOREIGN KEY` constraints and executes them against Snowflake in a single multi-statement call; the sidebar refreshes automatically on success
+  - **Review & Apply Changes** — diffs the current diagram against the existing Snowflake schema and generates only the necessary SQL: `DROP TABLE` for removed tables, `CREATE TABLE` for new ones, and `ALTER TABLE` statements for column additions/removals, type changes, nullability changes, and PK/FK updates; the sidebar refreshes automatically on success
+  - Closing the designer with unapplied changes prompts a confirmation dialog to prevent accidental data loss
 
 ### DDL export
 - Export DDL for every database (or a single one) with one file per object
