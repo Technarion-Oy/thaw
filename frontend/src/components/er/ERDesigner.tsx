@@ -614,6 +614,18 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
 
   const schemaOptions = schemas.map((s) => ({ value: s, label: s }));
 
+  const handleClose = () => {
+    if (!hasChanges) { onClose(); return; }
+    Modal.confirm({
+      title: "Discard unsaved changes?",
+      content: "You have unapplied schema changes. Close anyway?",
+      okText: "Discard changes",
+      okButtonProps: { danger: true },
+      cancelText: "Keep editing",
+      onOk: onClose,
+    });
+  };
+
   // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
@@ -621,9 +633,10 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
       <Modal
         open
         title={`Design Tables — ${database}`}
-        onCancel={onClose}
+        onCancel={handleClose}
         footer={
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <Button onClick={handleClose}>Cancel</Button>
             <Button
               type="primary"
               disabled={!hasChanges}
