@@ -50,9 +50,13 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
-func (a *App) shutdown(ctx context.Context) {
+func (a *App) shutdown(_ context.Context) {
 	if a.client != nil {
-		a.client.Close()
+		// Close asynchronously — the gosnowflake driver sends an HTTP DELETE
+		// /session to invalidate the token, which takes ~2 s. The app is
+		// exiting anyway, so there is no need to wait; the OS will close the
+		// TCP connection and Snowflake will expire the session on its own.
+		go a.client.Close() //nolint:errcheck
 	}
 }
 
