@@ -7,7 +7,14 @@
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
   "author": {
-    "name": "thaw",
+    "name": "Technarion Oy",
     "email": ""
+  },
+  "info": {
+    "companyName": "Technarion Oy",
+    "productName": "Thaw",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright © 2026 Technarion Oy. All rights reserved.",
+    "comments": "Snowflake Manager"
   }
 }

@@ -21,6 +21,14 @@ const MAX_WIDTH      = 600;
 const DEFAULT_LEFT   = 220;
 const DEFAULT_RIGHT  = 260;
 
+// Detect macOS at module load: Wails uses WKWebView on macOS whose user-agent
+// string contains "Macintosh". Edge WebView2 (Windows) and WebKitGTK (Linux)
+// do not. On macOS we render a 28 px drag area for the traffic-light buttons
+// (which overlap the WebView when TitleBarHiddenInset is active); on other
+// platforms the native OS window frame handles all window chrome.
+const IS_MAC = /Macintosh/i.test(navigator.userAgent);
+const TITLEBAR_HEIGHT = IS_MAC ? 28 : 0;
+
 // Generic hook for a resizable panel. direction controls whether dragging
 // right increases ("left" panel) or decreases ("right" panel) the width.
 function useResize(initial: number, direction: "left" | "right") {
@@ -90,11 +98,13 @@ export default function AppLayout() {
 
   return (
     <Layout style={{ height: "100vh", flexDirection: "row" }}>
-      {/* macOS traffic-light drag area */}
-      <div
-        className="titlebar-drag"
-        style={{ height: 28, background: "var(--bg-raised)", position: "fixed", top: 0, left: 0, right: 0, zIndex: 100 }}
-      />
+      {/* macOS traffic-light drag area — only rendered on macOS */}
+      {IS_MAC && (
+        <div
+          className="titlebar-drag"
+          style={{ height: TITLEBAR_HEIGHT, background: "var(--bg-raised)", position: "fixed", top: 0, left: 0, right: 0, zIndex: 100 }}
+        />
+      )}
 
       {/* Left panel — file browser + git */}
       <div
@@ -103,7 +113,7 @@ export default function AppLayout() {
           minWidth:   left.width,
           maxWidth:   left.width,
           background: "var(--bg-raised)",
-          paddingTop: 28,
+          paddingTop: TITLEBAR_HEIGHT,
           overflow:   "auto",
           flexShrink: 0,
         }}
@@ -116,7 +126,7 @@ export default function AppLayout() {
       {/* Content */}
       <Content
         style={{
-          paddingTop: 28,
+          paddingTop: TITLEBAR_HEIGHT,
           overflow: "hidden",
           display: "flex",
           flexDirection: "column",
@@ -138,7 +148,7 @@ export default function AppLayout() {
           minWidth:   right.width,
           maxWidth:   right.width,
           background: "var(--bg-raised)",
-          paddingTop: 28,
+          paddingTop: TITLEBAR_HEIGHT,
           overflow:   "auto",
           flexShrink: 0,
         }}
