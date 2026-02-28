@@ -9,11 +9,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "antd": "^5.22.0",
     "@ant-design/icons": "^5.5.0",
     "@monaco-editor/react": "^4.6.0",
     "ag-grid-community": "^32.0.0",
     "ag-grid-react": "^32.0.0",
+    "antd": "^5.22.0",
+    "mermaid": "^11.12.3",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "zustand": "^5.0.0"

@@ -34,7 +34,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 
 ### Object browser (sidebar)
 - Browse databases → schemas → objects (tables, views, functions, procedures, …)
-- Right-click a **database** to refresh or export its DDL
+- Right-click a **database** to refresh, export its DDL, or **generate an ER Diagram**
 - Right-click a **schema** to browse dropped tables recoverable via Snowflake Time Travel
 - Right-click an **object** to:
   - Select the top 1 000 rows (tables and views) — opens in a new tab
@@ -45,6 +45,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
   - **Delete** the object (`DROP …`) — with a confirmation dialog
 - **Hover tooltip** — hovering over any object in the tree shows its DDL definition; fetched once and cached for the session
 - Tree automatically refreshes the affected database after any rename, drop, or undrop operation
+- **ER Diagram** — right-click a database and choose **ER Diagram…** to generate an Entity Relationship Diagram from `INFORMATION_SCHEMA.COLUMNS`, `SHOW PRIMARY KEYS`, and `SHOW IMPORTED KEYS`; filter visible schemas with checkboxes, zoom in/out, drag to pan, and copy the Mermaid source to the clipboard
 
 ### DDL export
 - Export DDL for every database (or a single one) with one file per object

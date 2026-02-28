@@ -22,6 +22,8 @@ export function ExportAllDatabasesDDL(arg1:string):Promise<Array<ddl.ExportResul
 
 export function ExportDatabaseDDL(arg1:string,arg2:string):Promise<ddl.ExportResult>;
 
+export function GetERDiagramData(arg1:string):Promise<snowflake.ERDiagramData>;
+
 export function GetGitConfig():Promise<config.GitConfig>;
 
 export function GetObjectDDL(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;

@@ -30,6 +30,10 @@ export function ExportDatabaseDDL(arg1, arg2) {
   return window['go']['main']['App']['ExportDatabaseDDL'](arg1, arg2);
 }
 
+export function GetERDiagramData(arg1) {
+  return window['go']['main']['App']['GetERDiagramData'](arg1);
+}
+
 export function GetGitConfig() {
   return window['go']['main']['App']['GetGitConfig']();
 }

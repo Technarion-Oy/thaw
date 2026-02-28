@@ -29,16 +29,18 @@ import {
   RollbackOutlined,
   EditOutlined,
   HistoryOutlined,
+  ApartmentOutlined,
 } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, ExportDatabaseDDL, ListDroppedTables, GetTableRetentionDays } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, ExportDatabaseDDL, ListDroppedTables, GetTableRetentionDays, GetERDiagramData } from "../../../wailsjs/go/main/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
 import { useObjectStore } from "../../store/objectStore";
 import { useGitStore } from "../../store/gitStore";
 import AccountPanel from "../account/AccountPanel";
 import CallProcedureModal from "../procedure/CallProcedureModal";
+import ERDiagramModal from "../er/ERDiagramModal";
 
 const { Text } = Typography;
 
@@ -213,6 +215,7 @@ export default function Sidebar() {
   const [undropModal, setUndropModal] = useState<UndropModal | null>(null);
   const [renameModal, setRenameModal] = useState<RenameModal | null>(null);
   const [timeTravelModal, setTimeTravelModal] = useState<TimeTravelModal | null>(null);
+  const [erModal, setErModal] = useState<{ database: string; data: snowflake.ERDiagramData } | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
 
   // Close context menu on outside click
@@ -409,6 +412,21 @@ export default function Sidebar() {
       } else {
         message.success(`${db}: ${result.files} files written`);
       }
+    } catch (e) {
+      hide();
+      message.error(String(e));
+    }
+  };
+
+  const generateERDiagram = async () => {
+    if (!ctxMenu) return;
+    const db = ctxMenu.nodeKey.slice("db:".length);
+    setCtxMenu(null);
+    const hide = message.loading(`Loading ER diagram for ${db}…`, 0);
+    try {
+      const data = await GetERDiagramData(db);
+      hide();
+      setErModal({ database: db, data });
     } catch (e) {
       hide();
       message.error(String(e));
@@ -625,6 +643,7 @@ export default function Sidebar() {
         >
           {ctxMenu.nodeType === "db" && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshDatabase)}
           {ctxMenu.nodeType === "db" && menuItem("Export DDL", <CloudUploadOutlined style={{ fontSize: 12 }} />, exportDatabase)}
+          {ctxMenu.nodeType === "db" && menuItem("ER Diagram…", <ApartmentOutlined style={{ fontSize: 12 }} />, generateERDiagram)}
           {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
@@ -840,6 +859,15 @@ export default function Sidebar() {
           />
         </div>
       </Modal>
+
+      {/* ER Diagram modal */}
+      {erModal && (
+        <ERDiagramModal
+          database={erModal.database}
+          data={erModal.data}
+          onClose={() => setErModal(null)}
+        />
+      )}
     </div>
   );
 }

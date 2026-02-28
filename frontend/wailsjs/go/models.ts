@@ -308,6 +308,116 @@ export namespace snowflake {
 	        this.droppedOn = source["droppedOn"];
 	    }
 	}
+	export class ERColumn {
+	    name: string;
+	    dataType: string;
+	    isPK: boolean;
+	    nullable: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ERColumn(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.dataType = source["dataType"];
+	        this.isPK = source["isPK"];
+	        this.nullable = source["nullable"];
+	    }
+	}
+	export class ERForeignKey {
+	    fromSchema: string;
+	    fromTable: string;
+	    fromCol: string;
+	    toSchema: string;
+	    toTable: string;
+	    toCol: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ERForeignKey(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.fromSchema = source["fromSchema"];
+	        this.fromTable = source["fromTable"];
+	        this.fromCol = source["fromCol"];
+	        this.toSchema = source["toSchema"];
+	        this.toTable = source["toTable"];
+	        this.toCol = source["toCol"];
+	    }
+	}
+	export class ERTable {
+	    schema: string;
+	    name: string;
+	    columns: ERColumn[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ERTable(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.schema = source["schema"];
+	        this.name = source["name"];
+	        this.columns = this.convertValues(source["columns"], ERColumn);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ERDiagramData {
+	    database: string;
+	    tables: ERTable[];
+	    fks: ERForeignKey[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ERDiagramData(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.database = source["database"];
+	        this.tables = this.convertValues(source["tables"], ERTable);
+	        this.fks = this.convertValues(source["fks"], ERForeignKey);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	
 	export class ProcParam {
 	    name: string;
 	    dataType: string;

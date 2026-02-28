@@ -513,6 +513,16 @@ func (a *App) GetObjectDDL(database, schema, kind, name, arguments string) (stri
 	return a.client.GetObjectDDL(a.ctx, database, schema, kind, name, arguments)
 }
 
+// GetERDiagramData fetches column metadata, primary keys, and foreign keys for
+// every table in the database and returns the data needed to render an Entity
+// Relationship Diagram on the frontend.
+func (a *App) GetERDiagramData(database string) (snowflake.ERDiagramData, error) {
+	if a.client == nil {
+		return snowflake.ERDiagramData{}, ErrNotConnected
+	}
+	return a.client.GetERDiagramData(a.ctx, database)
+}
+
 // ─── DDL export ───────────────────────────────────────────────────────────────
 
 // ddlProgressEvent is the Wails event name emitted during export.

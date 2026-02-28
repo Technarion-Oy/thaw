@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -918,6 +919,215 @@ func loadPrivateKey(path, passphrase string) (*rsa.PrivateKey, error) {
 		return nil, fmt.Errorf("private key in %s is not an RSA key", path)
 	}
 	return rsaKey, nil
+}
+
+// ERColumn describes a single column in an ER diagram entity.
+type ERColumn struct {
+	Name     string `json:"name"`
+	DataType string `json:"dataType"`
+	IsPK     bool   `json:"isPK"`
+	Nullable string `json:"nullable"`
+}
+
+// ERTable represents a table (entity) in an ER diagram.
+type ERTable struct {
+	Schema  string     `json:"schema"`
+	Name    string     `json:"name"`
+	Columns []ERColumn `json:"columns"`
+}
+
+// ERForeignKey represents a foreign-key relationship between two tables.
+type ERForeignKey struct {
+	FromSchema string `json:"fromSchema"`
+	FromTable  string `json:"fromTable"`
+	FromCol    string `json:"fromCol"`
+	ToSchema   string `json:"toSchema"`
+	ToTable    string `json:"toTable"`
+	ToCol      string `json:"toCol"`
+}
+
+// ERDiagramData is the full payload sent to the frontend to render an ER diagram.
+type ERDiagramData struct {
+	Database string         `json:"database"`
+	Tables   []ERTable      `json:"tables"`
+	FKs      []ERForeignKey `json:"fks"`
+}
+
+// GetERDiagramData fetches column metadata, primary keys, and foreign keys for
+// every user table in the database concurrently and returns the data needed to
+// render an Entity Relationship Diagram.
+func (c *Client) GetERDiagramData(ctx context.Context, database string) (ERDiagramData, error) {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	db := esc(database)
+
+	type colRow struct {
+		tableSchema, tableName, columnName, dataType, isNullable string
+	}
+	type pkRow struct {
+		schema, table, column string
+	}
+	type fkRow struct {
+		fromSchema, fromTable, fromCol, toSchema, toTable, toCol string
+	}
+
+	var (
+		colRows []colRow
+		pkRows  []pkRow
+		fkRows  []fkRow
+		colErr  error
+		pkErr   error
+		fkErr   error
+		wg      sync.WaitGroup
+	)
+
+	// Fetch column metadata
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		query := fmt.Sprintf(
+			`SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE`+
+				` FROM "%s".INFORMATION_SCHEMA.COLUMNS`+
+				` WHERE TABLE_SCHEMA != 'INFORMATION_SCHEMA'`+
+				` ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION`, db)
+		rows, err := c.db.QueryContext(ctx, query)
+		if err != nil {
+			colErr = err
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var r colRow
+			if err := rows.Scan(&r.tableSchema, &r.tableName, &r.columnName, &r.dataType, &r.isNullable); err != nil {
+				continue
+			}
+			colRows = append(colRows, r)
+		}
+		colErr = rows.Err()
+	}()
+
+	// Fetch primary keys
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		query := fmt.Sprintf(`SHOW PRIMARY KEYS IN DATABASE "%s"`, db)
+		rows, err := c.db.QueryContext(ctx, query)
+		if err != nil {
+			pkErr = err
+			return
+		}
+		defer rows.Close()
+		cols, _ := rows.Columns()
+		idxs := colIndexMap(cols, "schema_name", "table_name", "column_name")
+		for rows.Next() {
+			vals, ptrs := makeValPtrs(len(cols))
+			if err := rows.Scan(ptrs...); err != nil {
+				continue
+			}
+			pkRows = append(pkRows, pkRow{
+				schema: strVal(vals, idxs["schema_name"]),
+				table:  strVal(vals, idxs["table_name"]),
+				column: strVal(vals, idxs["column_name"]),
+			})
+		}
+	}()
+
+	// Fetch foreign keys (imported keys = FK child side)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		query := fmt.Sprintf(`SHOW IMPORTED KEYS IN DATABASE "%s"`, db)
+		rows, err := c.db.QueryContext(ctx, query)
+		if err != nil {
+			fkErr = err
+			return
+		}
+		defer rows.Close()
+		cols, _ := rows.Columns()
+		idxs := colIndexMap(cols, "fk_schema_name", "fk_table_name", "fk_column_name", "pk_schema_name", "pk_table_name", "pk_column_name")
+		for rows.Next() {
+			vals, ptrs := makeValPtrs(len(cols))
+			if err := rows.Scan(ptrs...); err != nil {
+				continue
+			}
+			fkRows = append(fkRows, fkRow{
+				fromSchema: strVal(vals, idxs["fk_schema_name"]),
+				fromTable:  strVal(vals, idxs["fk_table_name"]),
+				fromCol:    strVal(vals, idxs["fk_column_name"]),
+				toSchema:   strVal(vals, idxs["pk_schema_name"]),
+				toTable:    strVal(vals, idxs["pk_table_name"]),
+				toCol:      strVal(vals, idxs["pk_column_name"]),
+			})
+		}
+	}()
+
+	wg.Wait()
+
+	if colErr != nil {
+		return ERDiagramData{}, colErr
+	}
+
+	// Build PK lookup: "schema\x00table\x00column" → true
+	pkSet := make(map[string]bool)
+	if pkErr == nil {
+		for _, r := range pkRows {
+			pkSet[r.schema+"\x00"+r.table+"\x00"+r.column] = true
+		}
+	}
+
+	// Aggregate columns into tables
+	type tableKey struct{ schema, name string }
+	tablesMap := make(map[tableKey]*ERTable)
+	for _, r := range colRows {
+		k := tableKey{r.tableSchema, r.tableName}
+		if _, ok := tablesMap[k]; !ok {
+			tablesMap[k] = &ERTable{Schema: r.tableSchema, Name: r.tableName, Columns: []ERColumn{}}
+		}
+		isPK := pkSet[r.tableSchema+"\x00"+r.tableName+"\x00"+r.columnName]
+		tablesMap[k].Columns = append(tablesMap[k].Columns, ERColumn{
+			Name:     r.columnName,
+			DataType: r.dataType,
+			IsPK:     isPK,
+			Nullable: r.isNullable,
+		})
+	}
+
+	// Sort tables deterministically by schema then name
+	keys := make([]tableKey, 0, len(tablesMap))
+	for k := range tablesMap {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].schema != keys[j].schema {
+			return keys[i].schema < keys[j].schema
+		}
+		return keys[i].name < keys[j].name
+	})
+
+	tables := make([]ERTable, 0, len(keys))
+	for _, k := range keys {
+		tables = append(tables, *tablesMap[k])
+	}
+
+	// Build FK list (non-fatal if SHOW IMPORTED KEYS failed)
+	var fks []ERForeignKey
+	if fkErr == nil {
+		for _, r := range fkRows {
+			fks = append(fks, ERForeignKey{
+				FromSchema: r.fromSchema,
+				FromTable:  r.fromTable,
+				FromCol:    r.fromCol,
+				ToSchema:   r.toSchema,
+				ToTable:    r.toTable,
+				ToCol:      r.toCol,
+			})
+		}
+	}
+
+	return ERDiagramData{
+		Database: database,
+		Tables:   tables,
+		FKs:      fks,
+	}, nil
 }
 
 // queryStringSlice is a helper that reads a single string column from a SHOW command.
