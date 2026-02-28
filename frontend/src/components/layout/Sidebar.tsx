@@ -41,7 +41,6 @@ import { useGitStore } from "../../store/gitStore";
 import AccountPanel from "../account/AccountPanel";
 import CallProcedureModal from "../procedure/CallProcedureModal";
 import ERDiagramModal from "../er/ERDiagramModal";
-import ERDesigner from "../er/ERDesigner";
 
 const { Text } = Typography;
 
@@ -217,7 +216,6 @@ export default function Sidebar() {
   const [renameModal, setRenameModal] = useState<RenameModal | null>(null);
   const [timeTravelModal, setTimeTravelModal] = useState<TimeTravelModal | null>(null);
   const [erModal, setErModal] = useState<{ database: string; data: snowflake.ERDiagramData } | null>(null);
-  const [designerModal, setDesignerModal] = useState<{ database: string } | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
 
   // Close context menu on outside click
@@ -868,21 +866,10 @@ export default function Sidebar() {
           database={erModal.database}
           data={erModal.data}
           onClose={() => setErModal(null)}
-          onOpenDesigner={() => setDesignerModal({ database: erModal.database })}
+          onDesignerSuccess={() => refreshDatabaseByName(erModal.database)}
         />
       )}
 
-      {/* ER Designer modal */}
-      {designerModal && (
-        <ERDesigner
-          database={designerModal.database}
-          onClose={() => setDesignerModal(null)}
-          onSuccess={() => {
-            refreshDatabaseByName(designerModal.database);
-            setDesignerModal(null);
-          }}
-        />
-      )}
     </div>
   );
 }

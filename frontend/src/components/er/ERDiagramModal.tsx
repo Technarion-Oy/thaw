@@ -6,6 +6,7 @@ import { ZoomInOutlined, ZoomOutOutlined, CopyOutlined, EditOutlined } from "@an
 import mermaid from "mermaid";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { buildMermaid } from "./buildMermaid";
+import ERDesigner from "./ERDesigner";
 
 mermaid.initialize({
   startOnLoad: false,
@@ -49,16 +50,17 @@ interface Props {
   database: string;
   data: snowflake.ERDiagramData;
   onClose: () => void;
-  onOpenDesigner?: () => void;
+  onDesignerSuccess?: () => void;
 }
 
-export default function ERDiagramModal({ database, data, onClose, onOpenDesigner }: Props) {
+export default function ERDiagramModal({ database, data, onClose, onDesignerSuccess }: Props) {
   const baseId = useId().replace(/:/g, "_");
   const renderCount = useRef(0);
 
   const allSchemas = [...new Set(data.tables.map((t) => t.schema))].sort();
 
   const [visibleSchemas, setVisibleSchemas] = useState<Set<string>>(new Set(allSchemas));
+  const [designerOpen, setDesignerOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [rawSvg, setRawSvg] = useState<string>("");
   const [rendering, setRendering] = useState(false);
@@ -144,6 +146,7 @@ export default function ERDiagramModal({ database, data, onClose, onOpenDesigner
   };
 
   return (
+    <>
     <Modal
       open
       title={`ER Diagram — ${database}`}
@@ -194,11 +197,9 @@ export default function ERDiagramModal({ database, data, onClose, onOpenDesigner
           <Button size="small" icon={<CopyOutlined />} onClick={copyMermaid}>
             Copy Mermaid
           </Button>
-          {onOpenDesigner && (
-            <Button size="small" icon={<EditOutlined />} onClick={onOpenDesigner}>
-              Design Tables…
-            </Button>
-          )}
+          <Button size="small" icon={<EditOutlined />} onClick={() => setDesignerOpen(true)}>
+            Design Tables…
+          </Button>
         </div>
       </div>
 
@@ -252,5 +253,18 @@ export default function ERDiagramModal({ database, data, onClose, onOpenDesigner
         )}
       </div>
     </Modal>
+
+    {designerOpen && (
+      <ERDesigner
+        database={database}
+        initialData={data}
+        onClose={() => setDesignerOpen(false)}
+        onSuccess={() => {
+          setDesignerOpen(false);
+          onDesignerSuccess?.();
+        }}
+      />
+    )}
+    </>
   );
 }

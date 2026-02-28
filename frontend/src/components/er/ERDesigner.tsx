@@ -5,6 +5,7 @@ import { Modal, Button, Input, Select, Spin, message as antMessage } from "antd"
 import { PlusOutlined, DeleteOutlined, ZoomInOutlined, ZoomOutOutlined, CopyOutlined } from "@ant-design/icons";
 import mermaid from "mermaid";
 import { ExecuteQuery, ListSchemas } from "../../../wailsjs/go/main/App";
+import type { snowflake } from "../../../wailsjs/go/models";
 
 mermaid.initialize({ startOnLoad: false, securityLevel: "loose", theme: "dark" });
 
@@ -28,6 +29,7 @@ interface DesignerTable {
 
 interface Props {
   database: string;
+  initialData?: snowflake.ERDiagramData;
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -167,14 +169,62 @@ function buildDesignerMermaid(tables: DesignerTable[]): string {
   return lines.join("\n");
 }
 
+// ── Seed from existing ER data ────────────────────────────────────────────────
+
+/** Map Snowflake INFORMATION_SCHEMA type strings to the canonical SF_TYPES list. */
+function normalizeDataType(dt: string): string {
+  const base = dt.replace(/\s*\([^)]*\)/g, "").trim().toUpperCase();
+  if (SF_TYPES.includes(base)) return base;
+  const aliases: Record<string, string> = {
+    TEXT: "VARCHAR", STRING: "VARCHAR", CHAR: "VARCHAR", CHARACTER: "VARCHAR",
+    NCHAR: "VARCHAR", NVARCHAR: "VARCHAR", NVARCHAR2: "VARCHAR",
+    INT: "NUMBER", INTEGER: "NUMBER", BIGINT: "NUMBER", SMALLINT: "NUMBER",
+    TINYINT: "NUMBER", BYTEINT: "NUMBER", DECIMAL: "NUMBER", NUMERIC: "NUMBER",
+    DOUBLE: "FLOAT", REAL: "FLOAT", FLOAT4: "FLOAT", FLOAT8: "FLOAT",
+    BOOL: "BOOLEAN",
+    DATETIME: "TIMESTAMP_NTZ", TIMESTAMP: "TIMESTAMP_NTZ",
+    TIMESTAMP_TZ: "TIMESTAMP_LTZ",
+  };
+  return aliases[base] ?? "VARCHAR";
+}
+
+function initFromERData(data: snowflake.ERDiagramData): DesignerTable[] {
+  const tables: DesignerTable[] = data.tables.map((t) => ({
+    id: crypto.randomUUID(),
+    schema: t.schema,
+    name: t.name,
+    columns: t.columns.map((c) => ({
+      id: crypto.randomUUID(),
+      name: c.name,
+      dataType: normalizeDataType(c.dataType),
+      isPK: c.isPK,
+      notNull: c.isPK || c.nullable === "NO",
+      fkRef: "",
+    })),
+  }));
+
+  // Wire up FK references
+  for (const fk of data.fks ?? []) {
+    const tbl = tables.find((t) => t.schema === fk.fromSchema && t.name === fk.fromTable);
+    if (!tbl) continue;
+    const col = tbl.columns.find((c) => c.name === fk.fromCol);
+    if (!col) continue;
+    col.fkRef = `${fk.toSchema}.${fk.toTable}.${fk.toCol}`;
+  }
+
+  return tables;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function ERDesigner({ database, onClose, onSuccess }: Props) {
+export default function ERDesigner({ database, initialData, onClose, onSuccess }: Props) {
   const baseId = useId().replace(/:/g, "_");
   const renderCount = useRef(0);
 
   const [schemas, setSchemas] = useState<string[]>([]);
-  const [tables, setTables] = useState<DesignerTable[]>([]);
+  const [tables, setTables] = useState<DesignerTable[]>(() =>
+    initialData ? initFromERData(initialData) : []
+  );
 
   // Preview state
   const [rawSvg, setRawSvg] = useState<string>("");
