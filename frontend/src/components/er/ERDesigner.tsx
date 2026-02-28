@@ -4,7 +4,7 @@ import { useState, useId, useEffect, useRef, useMemo } from "react";
 import { Modal, Button, Input, Select, Spin, message as antMessage } from "antd";
 import { PlusOutlined, DeleteOutlined, ZoomInOutlined, ZoomOutOutlined, CopyOutlined } from "@ant-design/icons";
 import mermaid from "mermaid";
-import { ExecuteQuery } from "../../../wailsjs/go/main/App";
+import { ExecuteQuery, ListSchemas } from "../../../wailsjs/go/main/App";
 
 mermaid.initialize({ startOnLoad: false, securityLevel: "loose", theme: "dark" });
 
@@ -16,18 +16,18 @@ interface DesignerColumn {
   dataType: string;
   isPK: boolean;
   notNull: boolean;
-  fkRef: string; // "OTHERTABLE.COLUMN" or "" for none
+  fkRef: string; // "SCHEMA.TABLE.COLUMN" or "" for none
 }
 
 interface DesignerTable {
   id: string;
+  schema: string;
   name: string;
   columns: DesignerColumn[];
 }
 
 interface Props {
   database: string;
-  schema: string;
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -52,6 +52,10 @@ const SF_TYPES = [
 function sanitiseId(s: string): string {
   const id = s.replace(/[^a-zA-Z0-9_]/g, "_");
   return /^[0-9]/.test(id) ? "_" + id : id;
+}
+
+function entityId(schema: string, table: string): string {
+  return sanitiseId(schema) + "__" + sanitiseId(table);
 }
 
 function shortType(dt: string): string {
@@ -82,13 +86,12 @@ function applyZoom(svg: string, zoom: number): string {
 
 // ── SQL generation ────────────────────────────────────────────────────────────
 
-function generateSQL(tables: DesignerTable[], database: string, schema: string): string {
+function generateSQL(tables: DesignerTable[], database: string): string {
   const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
-
   const stmts: string[] = [];
 
   for (const t of tables) {
-    if (!t.name.trim() || t.columns.length === 0) continue;
+    if (!t.schema || !t.name.trim() || t.columns.length === 0) continue;
 
     const colLines: string[] = [];
     const pkCols: string[] = [];
@@ -100,12 +103,11 @@ function generateSQL(tables: DesignerTable[], database: string, schema: string):
       colLines.push(`    ${q(c.name)} ${c.dataType}${nn}`);
       if (c.isPK) pkCols.push(q(c.name));
       if (c.fkRef) {
-        const dotIdx = c.fkRef.indexOf(".");
-        if (dotIdx !== -1) {
-          const refTable = c.fkRef.slice(0, dotIdx);
-          const refCol = c.fkRef.slice(dotIdx + 1);
+        const parts = c.fkRef.split(".");
+        if (parts.length === 3) {
+          const [refSchema, refTable, refCol] = parts;
           fkLines.push(
-            `    FOREIGN KEY (${q(c.name)}) REFERENCES ${q(database)}.${q(schema)}.${q(refTable)}(${q(refCol)})`
+            `    FOREIGN KEY (${q(c.name)}) REFERENCES ${q(database)}.${q(refSchema)}.${q(refTable)}(${q(refCol)})`
           );
         }
       }
@@ -118,7 +120,7 @@ function generateSQL(tables: DesignerTable[], database: string, schema: string):
     allLines.push(...fkLines);
 
     stmts.push(
-      `CREATE TABLE IF NOT EXISTS ${q(database)}.${q(schema)}.${q(t.name.trim())} (\n${allLines.join(",\n")}\n);`
+      `CREATE TABLE IF NOT EXISTS ${q(database)}.${q(t.schema)}.${q(t.name.trim())} (\n${allLines.join(",\n")}\n);`
     );
   }
 
@@ -129,12 +131,12 @@ function generateSQL(tables: DesignerTable[], database: string, schema: string):
 
 function buildDesignerMermaid(tables: DesignerTable[]): string {
   const lines: string[] = ["erDiagram"];
-  const validTables = tables.filter((t) => t.name.trim());
+  const validTables = tables.filter((t) => t.schema && t.name.trim());
 
   for (const t of validTables) {
     const namedCols = t.columns.filter((c) => c.name.trim());
     if (namedCols.length === 0) continue; // empty {} blocks are invalid Mermaid syntax
-    const id = sanitiseId(t.name.trim());
+    const id = entityId(t.schema, t.name.trim());
     lines.push(`  ${id} {`);
     for (const c of namedCols) {
       const type = shortType(c.dataType) || "string";
@@ -144,19 +146,21 @@ function buildDesignerMermaid(tables: DesignerTable[]): string {
     lines.push("  }");
   }
 
-  // FK relationships — deduplicate by table pair
+  // FK relationships — deduplicate by entity pair
   const seen = new Set<string>();
   for (const t of validTables) {
     for (const c of t.columns) {
       if (!c.fkRef) continue;
-      const dotIdx = c.fkRef.indexOf(".");
-      if (dotIdx === -1) continue;
-      const refTable = c.fkRef.slice(0, dotIdx).trim();
-      if (!refTable) continue;
-      const pairKey = `${t.name.trim()}__${refTable}`;
+      const parts = c.fkRef.split(".");
+      if (parts.length !== 3) continue;
+      const [refSchema, refTable] = parts;
+      if (!refTable.trim()) continue;
+      const fromId = entityId(t.schema, t.name.trim());
+      const toId = entityId(refSchema, refTable.trim());
+      const pairKey = `${fromId}__${toId}`;
       if (seen.has(pairKey)) continue;
       seen.add(pairKey);
-      lines.push(`  ${sanitiseId(t.name.trim())} }o--|| ${sanitiseId(refTable)} : "FK"`);
+      lines.push(`  ${fromId} }o--|| ${toId} : "FK"`);
     }
   }
 
@@ -165,10 +169,11 @@ function buildDesignerMermaid(tables: DesignerTable[]): string {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function ERDesigner({ database, schema, onClose, onSuccess }: Props) {
+export default function ERDesigner({ database, onClose, onSuccess }: Props) {
   const baseId = useId().replace(/:/g, "_");
   const renderCount = useRef(0);
 
+  const [schemas, setSchemas] = useState<string[]>([]);
   const [tables, setTables] = useState<DesignerTable[]>([]);
 
   // Preview state
@@ -187,6 +192,12 @@ export default function ERDesigner({ database, schema, onClose, onSuccess }: Pro
   const [sqlModalOpen, setSqlModalOpen] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+
+  // ── Fetch schemas on mount ──────────────────────────────────────────────────
+
+  useEffect(() => {
+    ListSchemas(database).then(setSchemas).catch(() => {});
+  }, [database]);
 
   // ── Panning handlers ────────────────────────────────────────────────────────
 
@@ -218,38 +229,26 @@ export default function ERDesigner({ database, schema, onClose, onSuccess }: Pro
   useEffect(() => {
     let cancelled = false;
     const timer = setTimeout(() => {
-      const src = buildDesignerMermaid(tables);
-      const validTables = tables.filter((t) => t.name.trim() && t.columns.some((c) => c.name.trim()));
+      const validTables = tables.filter((t) => t.schema && t.name.trim() && t.columns.some((c) => c.name.trim()));
 
       if (validTables.length === 0) {
-        if (!cancelled) {
-          setRawSvg("");
-          setRenderError(null);
-        }
+        if (!cancelled) { setRawSvg(""); setRenderError(null); }
         return;
       }
 
+      const src = buildDesignerMermaid(tables);
       const renderId = `${baseId}_${++renderCount.current}`;
       setRendering(true);
       setRenderError(null);
 
       mermaid
         .render(renderId, src)
-        .then(({ svg: rendered }) => {
-          if (!cancelled) setRawSvg(rendered);
-        })
-        .catch((e) => {
-          if (!cancelled) setRenderError(String(e));
-        })
-        .finally(() => {
-          if (!cancelled) setRendering(false);
-        });
+        .then(({ svg: rendered }) => { if (!cancelled) setRawSvg(rendered); })
+        .catch((e) => { if (!cancelled) setRenderError(String(e)); })
+        .finally(() => { if (!cancelled) setRendering(false); });
     }, 300);
 
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [tables, baseId]);
 
   const displaySvg = useMemo(() => applyZoom(rawSvg, zoom), [rawSvg, zoom]);
@@ -259,7 +258,7 @@ export default function ERDesigner({ database, schema, onClose, onSuccess }: Pro
   const addTable = () => {
     setTables((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), name: "", columns: [] },
+      { id: crypto.randomUUID(), schema: schemas[0] ?? "", name: "", columns: [] },
     ]);
   };
 
@@ -267,21 +266,15 @@ export default function ERDesigner({ database, schema, onClose, onSuccess }: Pro
     setTables((prev) => prev.filter((t) => t.id !== tableId));
   };
 
-  const updateTableName = (tableId: string, name: string) => {
-    setTables((prev) => prev.map((t) => (t.id === tableId ? { ...t, name } : t)));
+  const updateTable = (tableId: string, patch: Partial<Pick<DesignerTable, "name" | "schema">>) => {
+    setTables((prev) => prev.map((t) => (t.id === tableId ? { ...t, ...patch } : t)));
   };
 
   const addColumn = (tableId: string) => {
     setTables((prev) =>
       prev.map((t) =>
         t.id === tableId
-          ? {
-              ...t,
-              columns: [
-                ...t.columns,
-                { id: crypto.randomUUID(), name: "", dataType: "VARCHAR", isPK: false, notNull: false, fkRef: "" },
-              ],
-            }
+          ? { ...t, columns: [...t.columns, { id: crypto.randomUUID(), name: "", dataType: "VARCHAR", isPK: false, notNull: false, fkRef: "" }] }
           : t
       )
     );
@@ -289,9 +282,7 @@ export default function ERDesigner({ database, schema, onClose, onSuccess }: Pro
 
   const removeColumn = (tableId: string, colId: string) => {
     setTables((prev) =>
-      prev.map((t) =>
-        t.id === tableId ? { ...t, columns: t.columns.filter((c) => c.id !== colId) } : t
-      )
+      prev.map((t) => (t.id === tableId ? { ...t, columns: t.columns.filter((c) => c.id !== colId) } : t))
     );
   };
 
@@ -304,7 +295,6 @@ export default function ERDesigner({ database, schema, onClose, onSuccess }: Pro
               columns: t.columns.map((c) => {
                 if (c.id !== colId) return c;
                 const updated = { ...c, ...patch };
-                // PK auto-sets notNull
                 if (patch.isPK !== undefined && patch.isPK) updated.notNull = true;
                 return updated;
               }),
@@ -314,14 +304,14 @@ export default function ERDesigner({ database, schema, onClose, onSuccess }: Pro
     );
   };
 
-  // Build FK options: "TABLE.COLUMN" for every column of every OTHER table
+  // FK options: "SCHEMA.TABLE.COLUMN" for every named column in every other table
   const fkOptions = (currentTableId: string): { value: string; label: string }[] => {
     const opts: { value: string; label: string }[] = [{ value: "", label: "—" }];
     for (const t of tables) {
-      if (t.id === currentTableId || !t.name.trim()) continue;
+      if (t.id === currentTableId || !t.name.trim() || !t.schema) continue;
       for (const c of t.columns) {
         if (!c.name.trim()) continue;
-        const ref = `${t.name.trim()}.${c.name.trim()}`;
+        const ref = `${t.schema}.${t.name.trim()}.${c.name.trim()}`;
         opts.push({ value: ref, label: ref });
       }
     }
@@ -330,10 +320,8 @@ export default function ERDesigner({ database, schema, onClose, onSuccess }: Pro
 
   // ── SQL & run ─────────────────────────────────────────────────────────────────
 
-  const sql = generateSQL(tables, database, schema);
-  const hasValidTables = tables.some(
-    (t) => t.name.trim() && t.columns.some((c) => c.name.trim())
-  );
+  const sql = generateSQL(tables, database);
+  const hasValidTables = tables.some((t) => t.schema && t.name.trim() && t.columns.some((c) => c.name.trim()));
 
   const runSQL = async () => {
     setRunning(true);
@@ -350,13 +338,15 @@ export default function ERDesigner({ database, schema, onClose, onSuccess }: Pro
     }
   };
 
+  const schemaOptions = schemas.map((s) => ({ value: s, label: s }));
+
   // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
     <>
       <Modal
         open
-        title={`Design Tables — ${database}.${schema}`}
+        title={`Design Tables — ${database}`}
         onCancel={onClose}
         footer={
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -376,7 +366,7 @@ export default function ERDesigner({ database, schema, onClose, onSuccess }: Pro
           {/* Left panel */}
           <div
             style={{
-              width: 450,
+              width: 490,
               flexShrink: 0,
               borderRight: "1px solid var(--border)",
               overflowY: "auto",
@@ -386,12 +376,7 @@ export default function ERDesigner({ database, schema, onClose, onSuccess }: Pro
               gap: 8,
             }}
           >
-            <Button
-              size="small"
-              icon={<PlusOutlined />}
-              onClick={addTable}
-              style={{ alignSelf: "flex-start" }}
-            >
+            <Button size="small" icon={<PlusOutlined />} onClick={addTable} style={{ alignSelf: "flex-start" }}>
               Add Table
             </Button>
 
@@ -402,15 +387,8 @@ export default function ERDesigner({ database, schema, onClose, onSuccess }: Pro
             )}
 
             {tables.map((t) => (
-              <div
-                key={t.id}
-                style={{
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  overflow: "hidden",
-                }}
-              >
-                {/* Table header */}
+              <div key={t.id} style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
+                {/* Table header — schema + name */}
                 <div
                   style={{
                     display: "flex",
@@ -421,11 +399,20 @@ export default function ERDesigner({ database, schema, onClose, onSuccess }: Pro
                     borderBottom: "1px solid var(--border)",
                   }}
                 >
+                  <Select
+                    size="small"
+                    placeholder="schema"
+                    value={t.schema || undefined}
+                    onChange={(v) => updateTable(t.id, { schema: v })}
+                    options={schemaOptions}
+                    style={{ width: 140, flexShrink: 0, fontFamily: "monospace", fontSize: 12 }}
+                    showSearch
+                  />
                   <Input
                     size="small"
                     placeholder="TABLE_NAME"
                     value={t.name}
-                    onChange={(e) => updateTableName(t.id, e.target.value.toUpperCase())}
+                    onChange={(e) => updateTable(t.id, { name: e.target.value.toUpperCase() })}
                     style={{ flex: 1, fontFamily: "monospace", fontSize: 12 }}
                   />
                   <Button
@@ -440,7 +427,6 @@ export default function ERDesigner({ database, schema, onClose, onSuccess }: Pro
                 <div style={{ padding: "6px 8px", display: "flex", flexDirection: "column", gap: 4 }}>
                   {t.columns.map((c) => (
                     <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                      {/* Name — flex:1 takes all remaining space (~100px) */}
                       <Input
                         size="small"
                         placeholder="column_name"
@@ -448,7 +434,6 @@ export default function ERDesigner({ database, schema, onClose, onSuccess }: Pro
                         onChange={(e) => updateColumn(t.id, c.id, { name: e.target.value })}
                         style={{ flex: 1, fontFamily: "monospace", fontSize: 11, minWidth: 80 }}
                       />
-                      {/* Type — 100px */}
                       <Select
                         size="small"
                         value={c.dataType}
@@ -457,7 +442,6 @@ export default function ERDesigner({ database, schema, onClose, onSuccess }: Pro
                         showSearch
                         options={SF_TYPES.map((sf) => ({ value: sf, label: sf }))}
                       />
-                      {/* PK toggle — ~28px */}
                       <Button
                         size="small"
                         type={c.isPK ? "primary" : "default"}
@@ -467,7 +451,6 @@ export default function ERDesigner({ database, schema, onClose, onSuccess }: Pro
                       >
                         PK
                       </Button>
-                      {/* NN toggle — ~28px */}
                       <Button
                         size="small"
                         type={c.notNull ? "primary" : "default"}
@@ -477,15 +460,14 @@ export default function ERDesigner({ database, schema, onClose, onSuccess }: Pro
                       >
                         NN
                       </Button>
-                      {/* FK ref — 120px */}
                       <Select
                         size="small"
                         value={c.fkRef || ""}
                         onChange={(v) => updateColumn(t.id, c.id, { fkRef: v })}
-                        style={{ width: 120, flexShrink: 0 }}
+                        style={{ width: 150, flexShrink: 0 }}
                         options={fkOptions(t.id)}
+                        showSearch
                       />
-                      {/* Delete column */}
                       <Button
                         size="small"
                         type="text"
@@ -512,7 +494,6 @@ export default function ERDesigner({ database, schema, onClose, onSuccess }: Pro
 
           {/* Right panel — live preview */}
           <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-            {/* Zoom controls */}
             <div
               style={{
                 display: "flex",
@@ -523,33 +504,16 @@ export default function ERDesigner({ database, schema, onClose, onSuccess }: Pro
                 justifyContent: "flex-end",
               }}
             >
-              <Button
-                size="small"
-                icon={<ZoomOutOutlined />}
-                onClick={() => setZoom((z) => Math.max(0.25, +(z - 0.25).toFixed(2)))}
-              />
-              <Button
-                size="small"
-                onClick={() => setZoom(1)}
-                style={{ minWidth: 50, fontSize: 12 }}
-              >
+              <Button size="small" icon={<ZoomOutOutlined />} onClick={() => setZoom((z) => Math.max(0.25, +(z - 0.25).toFixed(2)))} />
+              <Button size="small" onClick={() => setZoom(1)} style={{ minWidth: 50, fontSize: 12 }}>
                 {Math.round(zoom * 100)}%
               </Button>
-              <Button
-                size="small"
-                icon={<ZoomInOutlined />}
-                onClick={() => setZoom((z) => Math.min(4, +(z + 0.25).toFixed(2)))}
-              />
-              <Button
-                size="small"
-                icon={<CopyOutlined />}
-                onClick={() => navigator.clipboard.writeText(buildDesignerMermaid(tables))}
-              >
+              <Button size="small" icon={<ZoomInOutlined />} onClick={() => setZoom((z) => Math.min(4, +(z + 0.25).toFixed(2)))} />
+              <Button size="small" icon={<CopyOutlined />} onClick={() => navigator.clipboard.writeText(buildDesignerMermaid(tables))}>
                 Copy Mermaid
               </Button>
             </div>
 
-            {/* Diagram area */}
             <div
               ref={containerRef}
               onMouseDown={startPan}
@@ -568,31 +532,17 @@ export default function ERDesigner({ database, schema, onClose, onSuccess }: Pro
               {rendering && (
                 <div style={{ textAlign: "center", padding: "80px 0" }}>
                   <Spin />
-                  <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-muted)" }}>
-                    Rendering diagram…
-                  </div>
+                  <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-muted)" }}>Rendering diagram…</div>
                 </div>
               )}
-
               {!rendering && renderError && (
-                <div style={{ color: "#f85149", fontFamily: "monospace", fontSize: 12, padding: 8 }}>
-                  {renderError}
-                </div>
+                <div style={{ color: "#f85149", fontFamily: "monospace", fontSize: 12, padding: 8 }}>{renderError}</div>
               )}
-
               {!rendering && !renderError && !displaySvg && (
-                <div
-                  style={{
-                    textAlign: "center",
-                    padding: "80px 0",
-                    color: "var(--text-muted)",
-                    fontSize: 13,
-                  }}
-                >
+                <div style={{ textAlign: "center", padding: "80px 0", color: "var(--text-muted)", fontSize: 13 }}>
                   Add tables and columns to see the live preview.
                 </div>
               )}
-
               {!rendering && !renderError && displaySvg && (
                 // eslint-disable-next-line react/no-danger
                 <div dangerouslySetInnerHTML={{ __html: displaySvg }} />
@@ -617,16 +567,8 @@ export default function ERDesigner({ database, schema, onClose, onSuccess }: Pro
               )}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              <Button onClick={() => navigator.clipboard.writeText(sql)} icon={<CopyOutlined />}>
-                Copy
-              </Button>
-              <Button
-                type="primary"
-                loading={running}
-                onClick={runSQL}
-              >
-                Run SQL
-              </Button>
+              <Button onClick={() => navigator.clipboard.writeText(sql)} icon={<CopyOutlined />}>Copy</Button>
+              <Button type="primary" loading={running} onClick={runSQL}>Run SQL</Button>
             </div>
           </div>
         }

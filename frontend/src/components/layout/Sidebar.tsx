@@ -217,7 +217,7 @@ export default function Sidebar() {
   const [renameModal, setRenameModal] = useState<RenameModal | null>(null);
   const [timeTravelModal, setTimeTravelModal] = useState<TimeTravelModal | null>(null);
   const [erModal, setErModal] = useState<{ database: string; data: snowflake.ERDiagramData } | null>(null);
-  const [designerModal, setDesignerModal] = useState<{ database: string; schema: string } | null>(null);
+  const [designerModal, setDesignerModal] = useState<{ database: string } | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
 
   // Close context menu on outside click
@@ -868,7 +868,7 @@ export default function Sidebar() {
           database={erModal.database}
           data={erModal.data}
           onClose={() => setErModal(null)}
-          onOpenDesigner={(schema) => setDesignerModal({ database: erModal.database, schema })}
+          onOpenDesigner={() => setDesignerModal({ database: erModal.database })}
         />
       )}
 
@@ -876,7 +876,6 @@ export default function Sidebar() {
       {designerModal && (
         <ERDesigner
           database={designerModal.database}
-          schema={designerModal.schema}
           onClose={() => setDesignerModal(null)}
           onSuccess={() => {
             refreshDatabaseByName(designerModal.database);
