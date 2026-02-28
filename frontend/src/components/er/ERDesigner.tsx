@@ -86,44 +86,237 @@ function applyZoom(svg: string, zoom: number): string {
   return svg;
 }
 
-// ── SQL generation ────────────────────────────────────────────────────────────
+// ── SQL generation (diff-based) ───────────────────────────────────────────────
 
-function generateSQL(tables: DesignerTable[], database: string): string {
+function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
+  if (a.size !== b.size) return false;
+  for (const x of a) if (!b.has(x)) return false;
+  return true;
+}
+
+/**
+ * Compare the designer tables against the baseline (initialData) and produce
+ * only the SQL needed to migrate the schema:
+ *   - Removed tables  → DROP TABLE
+ *   - New tables      → CREATE TABLE
+ *   - Existing tables → ALTER TABLE (add/drop/alter columns, PK, FK)
+ *
+ * When no baseline is provided (or it has no tables) every designer table
+ * becomes a CREATE TABLE IF NOT EXISTS (original behaviour).
+ */
+function generateDiffSQL(
+  tables: DesignerTable[],
+  database: string,
+  baseline?: snowflake.ERDiagramData
+): string {
   const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+  const tableRef = (schema: string, name: string) =>
+    `${q(database)}.${q(schema)}.${q(name.trim())}`;
+
   const stmts: string[] = [];
 
+  // ── Pure-create mode (no baseline tables) ────────────────────────────────────
+  if (!baseline || baseline.tables.length === 0) {
+    for (const t of tables) {
+      if (!t.schema || !t.name.trim() || t.columns.length === 0) continue;
+      const colLines: string[] = [];
+      const pkCols: string[] = [];
+      const fkLines: string[] = [];
+      for (const c of t.columns) {
+        if (!c.name.trim()) continue;
+        const nn = c.isPK || c.notNull ? " NOT NULL" : "";
+        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${nn}`);
+        if (c.isPK) pkCols.push(q(c.name.trim()));
+        if (c.fkRef) {
+          const parts = c.fkRef.split(".");
+          if (parts.length === 3) {
+            const [rs, rt, rc] = parts;
+            fkLines.push(
+              `    FOREIGN KEY (${q(c.name.trim())}) REFERENCES ${tableRef(rs, rt)}(${q(rc)})`
+            );
+          }
+        }
+      }
+      if (colLines.length === 0) continue;
+      const allLines = [...colLines];
+      if (pkCols.length > 0) allLines.push(`    PRIMARY KEY (${pkCols.join(", ")})`);
+      allLines.push(...fkLines);
+      stmts.push(
+        `CREATE TABLE IF NOT EXISTS ${tableRef(t.schema, t.name)} (\n${allLines.join(",\n")}\n);`
+      );
+    }
+    return stmts.join("\n\n");
+  }
+
+  // ── Diff mode ─────────────────────────────────────────────────────────────────
+
+  // Baseline table lookup keyed by "SCHEMA.TABLE"
+  const baselineMap = new Map<
+    string,
+    { schema: string; name: string; columns: snowflake.ERColumn[] }
+  >();
+  for (const t of baseline.tables) {
+    baselineMap.set(`${t.schema.toUpperCase()}.${t.name.toUpperCase()}`, t);
+  }
+
+  // Baseline FK lookup keyed by "SCHEMA.TABLE.COL"
+  const baseFKMap = new Map<string, snowflake.ERForeignKey>();
+  for (const fk of baseline.fks ?? []) {
+    baseFKMap.set(
+      `${fk.fromSchema.toUpperCase()}.${fk.fromTable.toUpperCase()}.${fk.fromCol.toUpperCase()}`,
+      fk
+    );
+  }
+
+  // Current table keys present in the designer
+  const currentSet = new Set<string>();
   for (const t of tables) {
-    if (!t.schema || !t.name.trim() || t.columns.length === 0) continue;
+    if (t.schema && t.name.trim()) {
+      currentSet.add(`${t.schema.toUpperCase()}.${t.name.trim().toUpperCase()}`);
+    }
+  }
 
-    const colLines: string[] = [];
-    const pkCols: string[] = [];
-    const fkLines: string[] = [];
+  // 1. DROP tables removed from the designer
+  for (const [key, bt] of baselineMap) {
+    if (!currentSet.has(key)) {
+      stmts.push(
+        `-- WARNING: this will permanently drop the table and all its data\nDROP TABLE ${tableRef(bt.schema, bt.name)};`
+      );
+    }
+  }
 
-    for (const c of t.columns) {
-      if (!c.name.trim()) continue;
-      const nn = c.isPK || c.notNull ? " NOT NULL" : "";
-      colLines.push(`    ${q(c.name)} ${c.dataType}${nn}`);
-      if (c.isPK) pkCols.push(q(c.name));
-      if (c.fkRef) {
-        const parts = c.fkRef.split(".");
-        if (parts.length === 3) {
-          const [refSchema, refTable, refCol] = parts;
-          fkLines.push(
-            `    FOREIGN KEY (${q(c.name)}) REFERENCES ${q(database)}.${q(refSchema)}.${q(refTable)}(${q(refCol)})`
+  // 2. Process each table currently in the designer
+  for (const t of tables) {
+    if (!t.schema || !t.name.trim()) continue;
+    const key = `${t.schema.toUpperCase()}.${t.name.trim().toUpperCase()}`;
+    const bt = baselineMap.get(key);
+
+    if (!bt) {
+      // ── New table ─────────────────────────────────────────────────────────────
+      const colLines: string[] = [];
+      const pkCols: string[] = [];
+      const fkLines: string[] = [];
+      for (const c of t.columns) {
+        if (!c.name.trim()) continue;
+        const nn = c.isPK || c.notNull ? " NOT NULL" : "";
+        colLines.push(`    ${q(c.name.trim())} ${c.dataType}${nn}`);
+        if (c.isPK) pkCols.push(q(c.name.trim()));
+        if (c.fkRef) {
+          const parts = c.fkRef.split(".");
+          if (parts.length === 3) {
+            const [rs, rt, rc] = parts;
+            fkLines.push(
+              `    FOREIGN KEY (${q(c.name.trim())}) REFERENCES ${tableRef(rs, rt)}(${q(rc)})`
+            );
+          }
+        }
+      }
+      if (colLines.length === 0) continue;
+      const allLines = [...colLines];
+      if (pkCols.length > 0) allLines.push(`    PRIMARY KEY (${pkCols.join(", ")})`);
+      allLines.push(...fkLines);
+      stmts.push(
+        `CREATE TABLE IF NOT EXISTS ${tableRef(t.schema, t.name)} (\n${allLines.join(",\n")}\n);`
+      );
+    } else {
+      // ── Existing table: diff ──────────────────────────────────────────────────
+      const ref = tableRef(t.schema, t.name);
+      const alter = `ALTER TABLE ${ref}`;
+
+      const baseColMap = new Map<string, snowflake.ERColumn>();
+      for (const bc of bt.columns) baseColMap.set(bc.name.toUpperCase(), bc);
+
+      const currentColSet = new Set<string>();
+      for (const c of t.columns) if (c.name.trim()) currentColSet.add(c.name.trim().toUpperCase());
+
+      const basePKs = new Set(bt.columns.filter((c) => c.isPK).map((c) => c.name.toUpperCase()));
+      const currPKs = new Set(
+        t.columns.filter((c) => c.isPK && c.name.trim()).map((c) => c.name.trim().toUpperCase())
+      );
+      const pkChanged = !setsEqual(basePKs, currPKs);
+
+      // DROP PRIMARY KEY before dropping PK columns
+      if (pkChanged && basePKs.size > 0) {
+        stmts.push(`${alter} DROP PRIMARY KEY;`);
+      }
+
+      // DROP removed columns
+      for (const [, bc] of baseColMap) {
+        if (!currentColSet.has(bc.name.toUpperCase())) {
+          stmts.push(
+            `-- WARNING: dropping column "${bc.name}" will permanently delete its data\n${alter} DROP COLUMN ${q(bc.name)};`
+          );
+        }
+      }
+
+      // ADD new columns / ALTER changed columns
+      for (const c of t.columns) {
+        if (!c.name.trim()) continue;
+        const ck = c.name.trim().toUpperCase();
+        const bc = baseColMap.get(ck);
+        if (!bc) {
+          // New column
+          const nn = c.isPK || c.notNull ? " NOT NULL" : "";
+          stmts.push(`${alter} ADD COLUMN ${q(c.name.trim())} ${c.dataType}${nn};`);
+        } else {
+          // Existing column — check for type change
+          if (normalizeDataType(bc.dataType) !== c.dataType) {
+            stmts.push(`${alter} ALTER COLUMN ${q(c.name.trim())} SET DATA TYPE ${c.dataType};`);
+          }
+          // Check nullability change
+          const baseNN = bc.isPK || bc.nullable === "NO";
+          const currNN = c.isPK || c.notNull;
+          if (baseNN !== currNN) {
+            stmts.push(
+              currNN
+                ? `${alter} ALTER COLUMN ${q(c.name.trim())} SET NOT NULL;`
+                : `${alter} ALTER COLUMN ${q(c.name.trim())} DROP NOT NULL;`
+            );
+          }
+        }
+      }
+
+      // ADD PRIMARY KEY (new or changed)
+      if (pkChanged && currPKs.size > 0) {
+        const pkList = t.columns
+          .filter((c) => c.isPK && c.name.trim())
+          .map((c) => q(c.name.trim()));
+        stmts.push(`${alter} ADD PRIMARY KEY (${pkList.join(", ")});`);
+      }
+
+      // FK changes
+      for (const c of t.columns) {
+        if (!c.name.trim()) continue;
+        const ck = c.name.trim().toUpperCase();
+        const mapKey = `${t.schema.toUpperCase()}.${t.name.trim().toUpperCase()}.${ck}`;
+        const baseFk = baseFKMap.get(mapKey);
+
+        if (c.fkRef) {
+          const parts = c.fkRef.split(".");
+          if (parts.length !== 3) continue;
+          const [rs, rt, rc] = parts;
+          // Skip if FK already exists with the exact same target
+          if (
+            baseFk &&
+            baseFk.toSchema.toUpperCase() === rs.toUpperCase() &&
+            baseFk.toTable.toUpperCase() === rt.toUpperCase() &&
+            baseFk.toCol.toUpperCase() === rc.toUpperCase()
+          ) {
+            continue;
+          }
+          stmts.push(
+            `${alter} ADD FOREIGN KEY (${q(c.name.trim())}) REFERENCES ${tableRef(rs, rt)}(${q(rc)});`
+          );
+        } else if (baseFk) {
+          // FK was removed — Snowflake requires the constraint name to drop it
+          stmts.push(
+            `-- NOTE: foreign key on "${c.name.trim()}" was removed in the designer.\n` +
+              `-- Run the statement below to find the constraint name, then drop it manually:\n` +
+              `-- SHOW IMPORTED KEYS IN TABLE ${ref};`
           );
         }
       }
     }
-
-    if (colLines.length === 0) continue;
-
-    const allLines = [...colLines];
-    if (pkCols.length > 0) allLines.push(`    PRIMARY KEY (${pkCols.join(", ")})`);
-    allLines.push(...fkLines);
-
-    stmts.push(
-      `CREATE TABLE IF NOT EXISTS ${q(database)}.${q(t.schema)}.${q(t.name.trim())} (\n${allLines.join(",\n")}\n);`
-    );
   }
 
   return stmts.join("\n\n");
@@ -401,15 +594,15 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
 
   // ── SQL & run ─────────────────────────────────────────────────────────────────
 
-  const sql = generateSQL(tables, database);
-  const hasValidTables = tables.some((t) => t.schema && t.name.trim() && t.columns.some((c) => c.name.trim()));
+  const sql = generateDiffSQL(tables, database, initialData);
+  const hasChanges = sql.trim().length > 0;
 
   const runSQL = async () => {
     setRunning(true);
     setRunError(null);
     try {
       await ExecuteQuery(sql);
-      antMessage.success("Tables created successfully.");
+      antMessage.success("Changes applied successfully.");
       setSqlModalOpen(false);
       onSuccess();
     } catch (e) {
@@ -433,10 +626,10 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <Button
               type="primary"
-              disabled={!hasValidTables}
+              disabled={!hasChanges}
               onClick={() => { setRunError(null); setSqlModalOpen(true); }}
             >
-              Show SQL & Run
+              Review & Apply Changes
             </Button>
           </div>
         }
@@ -652,7 +845,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
       {/* SQL review modal */}
       <Modal
         open={sqlModalOpen}
-        title="Generated SQL"
+        title="Schema Changes"
         onCancel={() => setSqlModalOpen(false)}
         footer={
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
@@ -665,7 +858,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <Button onClick={() => navigator.clipboard.writeText(sql)} icon={<CopyOutlined />}>Copy</Button>
-              <Button type="primary" loading={running} onClick={runSQL}>Run SQL</Button>
+              <Button type="primary" loading={running} onClick={runSQL} disabled={!hasChanges}>Apply</Button>
             </div>
           </div>
         }
@@ -687,7 +880,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
             border: "1px solid var(--border)",
           }}
         >
-          {sql || "(no valid tables defined)"}
+          {sql || "(no changes detected)"}
         </pre>
       </Modal>
     </>
