@@ -22,6 +22,8 @@ export function ExportAllDatabasesDDL(arg1:string):Promise<Array<ddl.ExportResul
 
 export function ExportDatabaseDDL(arg1:string,arg2:string):Promise<ddl.ExportResult>;
 
+export function ExportTableData(arg1:snowflake.ExportTableParams):Promise<snowflake.ExportTableResult>;
+
 export function GetERDiagramData(arg1:string):Promise<snowflake.ERDiagramData>;
 
 export function GetGitConfig():Promise<config.GitConfig>;
@@ -44,6 +46,8 @@ export function GitPull(arg1:gitrepo.PullParams):Promise<void>;
 
 export function GitStatus(arg1:string):Promise<gitrepo.RepoStatus>;
 
+export function ImportTableData(arg1:snowflake.ImportTableParams):Promise<snowflake.ImportTableResult>;
+
 export function IsConnected():Promise<boolean>;
 
 export function ListDatabases():Promise<Array<string>>;
@@ -61,6 +65,10 @@ export function ListSchemas(arg1:string):Promise<Array<string>>;
 export function ListWarehouses():Promise<Array<string>>;
 
 export function LoadSnowflakeCLIConfig():Promise<sfconfig.Config>;
+
+export function PickDataFile():Promise<string>;
+
+export function PickDataFileByFormat(arg1:string):Promise<string>;
 
 export function PickDirectory():Promise<string>;
 

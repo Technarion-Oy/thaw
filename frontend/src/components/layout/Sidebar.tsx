@@ -30,6 +30,8 @@ import {
   EditOutlined,
   HistoryOutlined,
   ApartmentOutlined,
+  DownloadOutlined,
+  UploadOutlined,
 } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
@@ -41,6 +43,8 @@ import { useGitStore } from "../../store/gitStore";
 import AccountPanel from "../account/AccountPanel";
 import CallProcedureModal from "../procedure/CallProcedureModal";
 import ERDiagramModal from "../er/ERDiagramModal";
+import ExportTableModal from "../export/ExportTableModal";
+import ImportTableModal from "../export/ImportTableModal";
 
 const { Text } = Typography;
 
@@ -216,6 +220,8 @@ export default function Sidebar() {
   const [renameModal, setRenameModal] = useState<RenameModal | null>(null);
   const [timeTravelModal, setTimeTravelModal] = useState<TimeTravelModal | null>(null);
   const [erModal, setErModal] = useState<{ database: string; data: snowflake.ERDiagramData } | null>(null);
+  const [exportModal, setExportModal] = useState<{ db: string; schema: string; table: string } | null>(null);
+  const [importModal, setImportModal] = useState<{ db: string; schema: string; table: string } | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
 
   // Close context menu on outside click
@@ -544,6 +550,22 @@ export default function Sidebar() {
     useQueryStore.getState().executeInNewTab(sql);
   };
 
+  const openExportModal = () => {
+    if (!ctxMenu) return;
+    const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
+    const table = nameParts.join(":");
+    setCtxMenu(null);
+    setExportModal({ db, schema, table });
+  };
+
+  const openImportModal = () => {
+    if (!ctxMenu) return;
+    const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
+    const table = nameParts.join(":");
+    setCtxMenu(null);
+    setImportModal({ db, schema, table });
+  };
+
   const viewDefinition = async () => {
     if (!ctxMenu) return;
     const { nodeKey, objArgs = "" } = ctxMenu;
@@ -649,6 +671,10 @@ export default function Sidebar() {
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
             menuItem("Time Travel Query…", <HistoryOutlined style={{ fontSize: 12 }} />, openTimeTravelModal)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
+            menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openExportModal)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
+            menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openImportModal)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PROCEDURE" &&
             menuItem("Call Procedure", <PlayCircleOutlined style={{ fontSize: 12 }} />, callProcedure)}
           {ctxMenu.nodeType === "obj" && menuItem("View Definition", null, viewDefinition)}
@@ -867,6 +893,27 @@ export default function Sidebar() {
           data={erModal.data}
           onClose={() => setErModal(null)}
           onDesignerSuccess={() => refreshDatabaseByName(erModal.database)}
+        />
+      )}
+
+      {/* Export Table Data modal */}
+      {exportModal && (
+        <ExportTableModal
+          db={exportModal.db}
+          schema={exportModal.schema}
+          table={exportModal.table}
+          onClose={() => setExportModal(null)}
+        />
+      )}
+
+      {/* Import Table Data modal */}
+      {importModal && (
+        <ImportTableModal
+          db={importModal.db}
+          schema={importModal.schema}
+          table={importModal.table}
+          onClose={() => setImportModal(null)}
+          onSuccess={() => refreshDatabaseByName(importModal.db)}
         />
       )}
 

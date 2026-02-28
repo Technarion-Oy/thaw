@@ -273,6 +273,57 @@ func (a *App) PickOpenFile() string {
 	return path
 }
 
+// PickDataFile opens a native open-file dialog filtered to common data file
+// formats (CSV, JSON, Parquet) and returns the chosen path, or an empty string
+// if the user cancels.
+func (a *App) PickDataFile() string {
+	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title: "Open data file",
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "Data Files (*.csv;*.json;*.jsonl;*.ndjson;*.parquet)", Pattern: "*.csv;*.json;*.jsonl;*.ndjson;*.parquet"},
+			{DisplayName: "CSV Files (*.csv)", Pattern: "*.csv"},
+			{DisplayName: "JSON Files (*.json;*.jsonl;*.ndjson)", Pattern: "*.json;*.jsonl;*.ndjson"},
+			{DisplayName: "Parquet Files (*.parquet)", Pattern: "*.parquet"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		},
+	})
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
+// PickDataFileByFormat opens a native open-file dialog filtered to the file
+// extensions that match the given format ("CSV", "JSON", or "PARQUET").
+func (a *App) PickDataFileByFormat(format string) string {
+	var filters []wailsruntime.FileFilter
+	switch strings.ToUpper(format) {
+	case "JSON":
+		filters = []wailsruntime.FileFilter{
+			{DisplayName: "JSON Files (*.json;*.jsonl;*.ndjson)", Pattern: "*.json;*.jsonl;*.ndjson"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		}
+	case "PARQUET":
+		filters = []wailsruntime.FileFilter{
+			{DisplayName: "Parquet Files (*.parquet)", Pattern: "*.parquet"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		}
+	default: // CSV
+		filters = []wailsruntime.FileFilter{
+			{DisplayName: "CSV Files (*.csv)", Pattern: "*.csv"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		}
+	}
+	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title:   "Open " + format + " file",
+		Filters: filters,
+	})
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
 // PickSaveFile opens a native save-file dialog pre-populated with defaultName
 // and returns the chosen path, or an empty string if the user cancels.
 func (a *App) PickSaveFile(defaultName string) string {
@@ -515,6 +566,26 @@ func (a *App) GetObjectDDL(database, schema, kind, name, arguments string) (stri
 		return "", ErrNotConnected
 	}
 	return a.client.GetObjectDDL(a.ctx, database, schema, kind, name, arguments)
+}
+
+// ExportTableData exports a Snowflake table to the local filesystem using a
+// temporary internal stage. The stage is dropped automatically after the
+// download completes or on error.
+func (a *App) ExportTableData(params snowflake.ExportTableParams) (snowflake.ExportTableResult, error) {
+	if a.client == nil {
+		return snowflake.ExportTableResult{}, ErrNotConnected
+	}
+	return a.client.ExportTableData(a.ctx, params)
+}
+
+// ImportTableData imports a local file into a Snowflake table using a temporary
+// internal stage. The stage is dropped automatically after the upload completes
+// or on error.
+func (a *App) ImportTableData(params snowflake.ImportTableParams) (snowflake.ImportTableResult, error) {
+	if a.client == nil {
+		return snowflake.ImportTableResult{}, ErrNotConnected
+	}
+	return a.client.ImportTableData(a.ctx, params)
 }
 
 // GetERDiagramData fetches column metadata, primary keys, and foreign keys for

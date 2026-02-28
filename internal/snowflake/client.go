@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -1155,4 +1156,365 @@ func (c *Client) queryStringSlice(ctx context.Context, query string, colIdx int)
 		result = append(result, fmt.Sprintf("%v", vals[colIdx]))
 	}
 	return result, rows.Err()
+}
+
+// ── Table data export ─────────────────────────────────────────────────────────
+
+// ExportTableParams specifies how to export a Snowflake table to the local machine.
+type ExportTableParams struct {
+	Database    string `json:"database"`
+	Schema      string `json:"schema"`
+	Table       string `json:"table"`
+	OutputDir   string `json:"outputDir"`
+	Format      string `json:"format"`      // "CSV", "JSON", "PARQUET"
+	Compression string `json:"compression"` // "NONE", "GZIP", "BZIP2", "SNAPPY"
+	// CSV-specific
+	Delimiter  string `json:"delimiter"`  // ",", "|", "\t", or a custom character
+	Header     bool   `json:"header"`     // include column names as first row
+	NullString string `json:"nullString"` // how NULL is represented: "", "\\N", "NULL"
+}
+
+// ExportTableResult reports the outcome of a table export.
+type ExportTableResult struct {
+	RowsUnloaded int64    `json:"rowsUnloaded"`
+	Files        []string `json:"files"`     // base file names inside OutputDir
+	OutputDir    string   `json:"outputDir"` // absolute path to the output sub-directory
+}
+
+// ExportTableData exports a Snowflake table to the local filesystem using a
+// temporary internal stage:
+//  1. CREATE TEMPORARY STAGE in the same schema as the table
+//  2. COPY INTO @stage  (writes Snowflake-side files)
+//  3. GET @stage        (downloads files to outputDir/<TABLE>/)
+//  4. DROP STAGE        (explicit cleanup; the deferred call also fires on error)
+func (c *Client) ExportTableData(ctx context.Context, params ExportTableParams) (ExportTableResult, error) {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+
+	// Unique stage name — timestamp-based, no external uuid package required
+	stageName := fmt.Sprintf("THAW_EXPORT_%d", time.Now().UnixNano())
+	stageRef := fmt.Sprintf(`"%s"."%s".%s`, esc(params.Database), esc(params.Schema), stageName)
+	stageAt := "@" + stageRef
+	tableRef := fmt.Sprintf(`"%s"."%s"."%s"`, esc(params.Database), esc(params.Schema), esc(params.Table))
+
+	// Create a temporary stage (auto-dropped when the session ends)
+	if _, err := c.db.ExecContext(ctx, "CREATE TEMPORARY STAGE "+stageRef); err != nil {
+		return ExportTableResult{}, fmt.Errorf("create export stage: %w", err)
+	}
+	// Explicit cleanup — also runs on error paths
+	defer c.db.ExecContext(context.Background(), "DROP STAGE IF EXISTS "+stageRef) //nolint:errcheck
+
+	// COPY data into the stage
+	copySQL := buildExportCopySQL(stageAt, tableRef, params)
+	copyRows, err := c.db.QueryContext(ctx, copySQL)
+	if err != nil {
+		return ExportTableResult{}, fmt.Errorf("copy into stage: %w", err)
+	}
+	var rowsUnloaded int64
+	if copyRows.Next() {
+		_ = copyRows.Scan(&rowsUnloaded) // first column is rows_unloaded
+	}
+	copyRows.Close()
+
+	// Create the output sub-directory: <outputDir>/<TABLE>/
+	outDir := filepath.Join(params.OutputDir, params.Table)
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return ExportTableResult{}, fmt.Errorf("create output directory: %w", err)
+	}
+
+	// Build a file:// URL pointing at the output directory
+	fileURL, err := localFileURL(outDir)
+	if err != nil {
+		return ExportTableResult{}, fmt.Errorf("build file url: %w", err)
+	}
+
+	// GET @stage → local directory
+	getSQL := fmt.Sprintf("GET %s '%s'", stageAt, fileURL)
+	getRows, err := c.db.QueryContext(ctx, getSQL)
+	if err != nil {
+		return ExportTableResult{}, fmt.Errorf("download files from stage: %w", err)
+	}
+	getCols, _ := getRows.Columns()
+	var files []string
+	for getRows.Next() {
+		vals, ptrs := makeValPtrs(len(getCols))
+		if err := getRows.Scan(ptrs...); err != nil {
+			continue
+		}
+		// Result columns: file, size, status, message
+		fileName := fmt.Sprintf("%v", vals[0])
+		status := ""
+		if len(vals) > 2 {
+			status = strings.ToUpper(fmt.Sprintf("%v", vals[2]))
+		}
+		if status == "DOWNLOADED" || status == "" {
+			files = append(files, filepath.Base(fileName))
+		}
+	}
+	getRows.Close()
+
+	return ExportTableResult{
+		RowsUnloaded: rowsUnloaded,
+		Files:        files,
+		OutputDir:    outDir,
+	}, nil
+}
+
+// buildExportCopySQL constructs the COPY INTO <stage> SQL for the given params.
+func buildExportCopySQL(stageAt, tableRef string, p ExportTableParams) string {
+	comp := strings.ToUpper(p.Compression)
+	if comp == "" {
+		comp = "NONE"
+	}
+
+	var ff strings.Builder
+	switch strings.ToUpper(p.Format) {
+	case "JSON":
+		fmt.Fprintf(&ff, "TYPE = 'JSON' COMPRESSION = %s", comp)
+	case "PARQUET":
+		snappy := "FALSE"
+		if comp == "SNAPPY" {
+			snappy = "TRUE"
+		}
+		fmt.Fprintf(&ff, "TYPE = 'PARQUET' SNAPPY_COMPRESSION = %s", snappy)
+	default: // CSV
+		delim := p.Delimiter
+		if delim == "" {
+			delim = ","
+		}
+		delim = strings.ReplaceAll(delim, "'", "\\'")
+		nullIf := strings.ReplaceAll(p.NullString, "'", "\\'")
+		fmt.Fprintf(&ff,
+			"TYPE = 'CSV' FIELD_DELIMITER = '%s' FIELD_OPTIONALLY_ENCLOSED_BY = '\"' NULL_IF = ('%s') EMPTY_FIELD_AS_NULL = TRUE COMPRESSION = %s",
+			delim, nullIf, comp)
+	}
+
+	// JSON and PARQUET require the source to be a query returning a single
+	// VARIANT column; OBJECT_CONSTRUCT(*) converts each row to a JSON object.
+	source := tableRef
+	if f := strings.ToUpper(p.Format); f == "JSON" || f == "PARQUET" {
+		source = fmt.Sprintf("(SELECT OBJECT_CONSTRUCT(*) FROM %s)", tableRef)
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "COPY INTO %s\nFROM %s\nFILE_FORMAT = (\n    %s\n)\nOVERWRITE = TRUE", stageAt, source, ff.String())
+	if strings.ToUpper(p.Format) == "CSV" && p.Header {
+		sb.WriteString("\nHEADER = TRUE")
+	}
+	return sb.String()
+}
+
+// localFileURL converts an absolute local directory path to a file:// URL
+// suitable for the gosnowflake GET command on all platforms.
+//   - Unix:    /tmp/dir  → file:///tmp/dir/
+//   - Windows: C:\dir    → file:///C:/dir/
+func localFileURL(dir string) (string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	slashed := filepath.ToSlash(abs)
+	if !strings.HasPrefix(slashed, "/") {
+		slashed = "/" + slashed // Windows: "C:/..." → "/C:/..."
+	}
+	if !strings.HasSuffix(slashed, "/") {
+		slashed += "/"
+	}
+	return "file://" + slashed, nil
+}
+
+// localFileURLForFile converts an absolute local file path to a file:// URL
+// suitable for the gosnowflake PUT command on all platforms.
+//   - Unix:    /tmp/data.csv   → file:///tmp/data.csv
+//   - Windows: C:\data.csv     → file:///C:/data.csv
+func localFileURLForFile(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	slashed := filepath.ToSlash(abs)
+	if !strings.HasPrefix(slashed, "/") {
+		slashed = "/" + slashed
+	}
+	return "file://" + slashed, nil
+}
+
+// ── Table data import ─────────────────────────────────────────────────────────
+
+// ImportTableParams specifies how to import a local file into a Snowflake table.
+type ImportTableParams struct {
+	Database  string `json:"database"`
+	Schema    string `json:"schema"`
+	Table     string `json:"table"`    // target table name
+	FilePath  string `json:"filePath"` // absolute local path to the source file
+	Format    string `json:"format"`   // "CSV", "JSON", "PARQUET"
+	// CSV-specific
+	Delimiter  string `json:"delimiter"`
+	Header     bool   `json:"header"`
+	NullString string `json:"nullString"`
+	// Behaviour
+	Overwrite   bool `json:"overwrite"`   // TRUNCATE TABLE before COPY INTO
+	CreateTable bool `json:"createTable"` // CREATE TABLE using INFER_SCHEMA first
+}
+
+// ImportTableResult reports the outcome of a table import.
+type ImportTableResult struct {
+	RowsLoaded  int64 `json:"rowsLoaded"`
+	FilesLoaded int   `json:"filesLoaded"`
+}
+
+// ImportTableData imports a local file into a Snowflake table via a temporary
+// internal stage:
+//  1. CREATE TEMPORARY STAGE in the same schema as the table
+//  2. PUT local file → stage
+//  3. Optionally CREATE TABLE USING TEMPLATE (INFER_SCHEMA) or TRUNCATE
+//  4. COPY INTO table FROM @stage
+//  5. DROP STAGE (deferred)
+func (c *Client) ImportTableData(ctx context.Context, params ImportTableParams) (ImportTableResult, error) {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+
+	stageName := fmt.Sprintf("THAW_IMPORT_%d", time.Now().UnixNano())
+	stageRef  := fmt.Sprintf(`"%s"."%s".%s`, esc(params.Database), esc(params.Schema), stageName)
+	stageAt   := "@" + stageRef
+	tableRef  := fmt.Sprintf(`"%s"."%s"."%s"`, esc(params.Database), esc(params.Schema), esc(params.Table))
+
+	if _, err := c.db.ExecContext(ctx, "CREATE TEMPORARY STAGE "+stageRef); err != nil {
+		return ImportTableResult{}, fmt.Errorf("create import stage: %w", err)
+	}
+	defer c.db.ExecContext(context.Background(), "DROP STAGE IF EXISTS "+stageRef) //nolint:errcheck
+
+	// PUT local file to the stage
+	fileURL, err := localFileURLForFile(params.FilePath)
+	if err != nil {
+		return ImportTableResult{}, fmt.Errorf("build file url: %w", err)
+	}
+	escapedURL := strings.ReplaceAll(fileURL, "'", "\\'")
+	putSQL := fmt.Sprintf("PUT '%s' %s AUTO_COMPRESS=FALSE OVERWRITE=TRUE", escapedURL, stageAt)
+	putRows, err := c.db.QueryContext(ctx, putSQL)
+	if err != nil {
+		return ImportTableResult{}, fmt.Errorf("upload file to stage: %w", err)
+	}
+	putRows.Close()
+
+	// Optionally create the target table from the file's inferred schema
+	if params.CreateTable {
+		createSQL := buildCreateTableSQL(stageAt, tableRef, params)
+		if _, err := c.db.ExecContext(ctx, createSQL); err != nil {
+			return ImportTableResult{}, fmt.Errorf("create table: %w", err)
+		}
+	} else if params.Overwrite {
+		if _, err := c.db.ExecContext(ctx, "TRUNCATE TABLE IF EXISTS "+tableRef); err != nil {
+			return ImportTableResult{}, fmt.Errorf("truncate table: %w", err)
+		}
+	}
+
+	copySQL := buildImportCopySQL(stageAt, tableRef, params)
+	copyRows, err := c.db.QueryContext(ctx, copySQL)
+	if err != nil {
+		return ImportTableResult{}, fmt.Errorf("copy into table: %w", err)
+	}
+	// COPY INTO result columns: file, status, rows_parsed, rows_loaded, …
+	cols, _ := copyRows.Columns()
+	var rowsLoaded int64
+	var filesLoaded int
+	for copyRows.Next() {
+		vals, ptrs := makeValPtrs(len(cols))
+		if err := copyRows.Scan(ptrs...); err != nil {
+			continue
+		}
+		filesLoaded++
+		if len(vals) > 3 {
+			switch v := vals[3].(type) {
+			case int64:
+				rowsLoaded += v
+			case string:
+				n, _ := strconv.ParseInt(v, 10, 64)
+				rowsLoaded += n
+			}
+		}
+	}
+	copyRows.Close()
+
+	return ImportTableResult{RowsLoaded: rowsLoaded, FilesLoaded: filesLoaded}, nil
+}
+
+// buildCreateTableSQL returns a CREATE TABLE statement that derives its schema
+// from the staged file using INFER_SCHEMA (CSV/PARQUET) or creates a single
+// VARIANT column for JSON (whose schema cannot be reliably inferred).
+func buildCreateTableSQL(stageAt, tableRef string, p ImportTableParams) string {
+	if strings.ToUpper(p.Format) == "JSON" {
+		return fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (VALUE VARIANT)", tableRef)
+	}
+
+	var inferFF string
+	if strings.ToUpper(p.Format) == "CSV" {
+		delim := p.Delimiter
+		if delim == "" {
+			delim = ","
+		}
+		delim = strings.ReplaceAll(delim, "'", "\\'")
+		if p.Header {
+			inferFF = fmt.Sprintf("TYPE='CSV' PARSE_HEADER=TRUE FIELD_DELIMITER='%s'", delim)
+		} else {
+			inferFF = fmt.Sprintf("TYPE='CSV' SKIP_HEADER=0 FIELD_DELIMITER='%s'", delim)
+		}
+	} else { // PARQUET
+		inferFF = "TYPE='PARQUET'"
+	}
+
+	return fmt.Sprintf(
+		"CREATE TABLE IF NOT EXISTS %s\nUSING TEMPLATE (\n    SELECT ARRAY_AGG(OBJECT_CONSTRUCT(*))\n    FROM TABLE(INFER_SCHEMA(\n        LOCATION=>'%s',\n        FILE_FORMAT=>(%s)\n    ))\n)",
+		tableRef, stageAt, inferFF)
+}
+
+// buildImportCopySQL returns the COPY INTO <table> FROM @stage statement.
+func buildImportCopySQL(stageAt, tableRef string, p ImportTableParams) string {
+	esc := func(s string) string { return strings.ReplaceAll(s, "'", "\\'") }
+
+	switch strings.ToUpper(p.Format) {
+	case "JSON":
+		if p.CreateTable {
+			// Table has a single VARIANT column named VALUE; load each JSON line as $1.
+			return fmt.Sprintf(
+				"COPY INTO %s (VALUE)\nFROM (SELECT $1 FROM %s)\nFILE_FORMAT = (TYPE='JSON' COMPRESSION=AUTO)\nFORCE = TRUE",
+				tableRef, stageAt)
+		}
+		// Existing table: match JSON keys to column names.
+		return fmt.Sprintf(
+			"COPY INTO %s\nFROM %s\nFILE_FORMAT = (TYPE='JSON' COMPRESSION=AUTO)\nMATCH_BY_COLUMN_NAME = CASE_INSENSITIVE\nFORCE = TRUE",
+			tableRef, stageAt)
+
+	case "PARQUET":
+		return fmt.Sprintf(
+			"COPY INTO %s\nFROM %s\nFILE_FORMAT = (TYPE='PARQUET')\nMATCH_BY_COLUMN_NAME = CASE_INSENSITIVE\nFORCE = TRUE",
+			tableRef, stageAt)
+
+	default: // CSV
+		delim := p.Delimiter
+		if delim == "" {
+			delim = ","
+		}
+		delim = esc(delim)
+		nullIf := esc(p.NullString)
+
+		if p.CreateTable && p.Header {
+			// Table was created with PARSE_HEADER; use the same so column order matches.
+			ff := fmt.Sprintf(
+				"TYPE='CSV' PARSE_HEADER=TRUE FIELD_DELIMITER='%s' FIELD_OPTIONALLY_ENCLOSED_BY='\"' NULL_IF=('%s') EMPTY_FIELD_AS_NULL=TRUE COMPRESSION=AUTO",
+				delim, nullIf)
+			return fmt.Sprintf(
+				"COPY INTO %s\nFROM %s\nFILE_FORMAT = (%s)\nMATCH_BY_COLUMN_NAME = CASE_INSENSITIVE\nFORCE = TRUE",
+				tableRef, stageAt, ff)
+		}
+
+		skipHeader := 0
+		if p.Header {
+			skipHeader = 1
+		}
+		ff := fmt.Sprintf(
+			"TYPE='CSV' FIELD_DELIMITER='%s' FIELD_OPTIONALLY_ENCLOSED_BY='\"' NULL_IF=('%s') EMPTY_FIELD_AS_NULL=TRUE SKIP_HEADER=%d COMPRESSION=AUTO",
+			delim, nullIf, skipHeader)
+		return fmt.Sprintf(
+			"COPY INTO %s\nFROM %s\nFILE_FORMAT = (%s)\nFORCE = TRUE",
+			tableRef, stageAt, ff)
+	}
 }

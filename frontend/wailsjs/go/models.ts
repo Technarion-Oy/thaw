@@ -418,6 +418,94 @@ export namespace snowflake {
 	}
 	
 	
+	export class ExportTableParams {
+	    database: string;
+	    schema: string;
+	    table: string;
+	    outputDir: string;
+	    format: string;
+	    compression: string;
+	    delimiter: string;
+	    header: boolean;
+	    nullString: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExportTableParams(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.database = source["database"];
+	        this.schema = source["schema"];
+	        this.table = source["table"];
+	        this.outputDir = source["outputDir"];
+	        this.format = source["format"];
+	        this.compression = source["compression"];
+	        this.delimiter = source["delimiter"];
+	        this.header = source["header"];
+	        this.nullString = source["nullString"];
+	    }
+	}
+	export class ExportTableResult {
+	    rowsUnloaded: number;
+	    files: string[];
+	    outputDir: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExportTableResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.rowsUnloaded = source["rowsUnloaded"];
+	        this.files = source["files"];
+	        this.outputDir = source["outputDir"];
+	    }
+	}
+	export class ImportTableParams {
+	    database: string;
+	    schema: string;
+	    table: string;
+	    filePath: string;
+	    format: string;
+	    delimiter: string;
+	    header: boolean;
+	    nullString: string;
+	    overwrite: boolean;
+	    createTable: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ImportTableParams(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.database = source["database"];
+	        this.schema = source["schema"];
+	        this.table = source["table"];
+	        this.filePath = source["filePath"];
+	        this.format = source["format"];
+	        this.delimiter = source["delimiter"];
+	        this.header = source["header"];
+	        this.nullString = source["nullString"];
+	        this.overwrite = source["overwrite"];
+	        this.createTable = source["createTable"];
+	    }
+	}
+	export class ImportTableResult {
+	    rowsLoaded: number;
+	    filesLoaded: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ImportTableResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.rowsLoaded = source["rowsLoaded"];
+	        this.filesLoaded = source["filesLoaded"];
+	    }
+	}
 	export class ProcParam {
 	    name: string;
 	    dataType: string;

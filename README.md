@@ -39,6 +39,10 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - Right-click an **object** to:
   - Select the top 1 000 rows (tables and views) — opens in a new tab
   - **Time Travel Query…** (tables) — opens a dialog with a timeline slider spanning the table's full retention window; drag to choose a point in time and run `SELECT … AT(TIMESTAMP => …) LIMIT 1000` in a new tab
+  - **Export Data…** (tables) — export table data to the local machine via a temporary internal Snowflake stage; choose format (CSV, JSON, PARQUET), compression, delimiter, header row, and output directory; the stage is dropped automatically after the download
+  - **Import Data…** (tables) — import a local file into a Snowflake table via a temporary internal stage; choose format (CSV, JSON, PARQUET) with format-specific options; the file picker filters to the selected format's extensions automatically; supports two modes:
+    - **Import into existing table** — optionally truncate before loading (overwrite mode)
+    - **Create new table from data** — derives the schema from the file using `INFER_SCHEMA` (CSV with headers and PARQUET) or creates a `VARIANT` column table (JSON); the object browser refreshes automatically on success
   - Call the procedure with auto-generated parameter fields (procedures) — opens in a new tab
   - View the DDL definition inline
   - **Rename** the object (`ALTER … RENAME TO`) — available for tables, views, sequences, stages, streams, tasks, file formats, and pipes
@@ -206,7 +210,10 @@ thaw/
     │       ├── editor/
     │       │   ├── SqlEditor.tsx  # Monaco editor with completions, selection highlight
     │       │   └── TabBar.tsx     # File/scratch tab strip with dirty indicator
-    │       ├── export/ExportPanel.tsx
+    │       ├── export/
+    │       │   ├── ExportPanel.tsx         # DDL export panel
+    │       │   ├── ExportTableModal.tsx    # Table data export dialog (CSV/JSON/PARQUET)
+    │       │   └── ImportTableModal.tsx    # Table data import dialog (CSV/JSON/PARQUET)
     │       ├── files/FileBrowser.tsx
     │       ├── git/
     │       │   ├── GitPanel.tsx

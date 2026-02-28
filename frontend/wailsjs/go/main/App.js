@@ -30,6 +30,10 @@ export function ExportDatabaseDDL(arg1, arg2) {
   return window['go']['main']['App']['ExportDatabaseDDL'](arg1, arg2);
 }
 
+export function ExportTableData(arg1) {
+  return window['go']['main']['App']['ExportTableData'](arg1);
+}
+
 export function GetERDiagramData(arg1) {
   return window['go']['main']['App']['GetERDiagramData'](arg1);
 }
@@ -74,6 +78,10 @@ export function GitStatus(arg1) {
   return window['go']['main']['App']['GitStatus'](arg1);
 }
 
+export function ImportTableData(arg1) {
+  return window['go']['main']['App']['ImportTableData'](arg1);
+}
+
 export function IsConnected() {
   return window['go']['main']['App']['IsConnected']();
 }
@@ -108,6 +116,14 @@ export function ListWarehouses() {
 
 export function LoadSnowflakeCLIConfig() {
   return window['go']['main']['App']['LoadSnowflakeCLIConfig']();
+}
+
+export function PickDataFile() {
+  return window['go']['main']['App']['PickDataFile']();
+}
+
+export function PickDataFileByFormat(arg1) {
+  return window['go']['main']['App']['PickDataFileByFormat'](arg1);
 }
 
 export function PickDirectory() {
