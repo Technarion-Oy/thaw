@@ -423,7 +423,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
               padding: 12,
               display: "flex",
               flexDirection: "column",
-              gap: 8,
+              gap: 14,
             }}
           >
             <Button size="small" icon={<PlusOutlined />} onClick={addTable} style={{ alignSelf: "flex-start" }}>
@@ -437,7 +437,7 @@ export default function ERDesigner({ database, initialData, onClose, onSuccess }
             )}
 
             {tables.map((t) => (
-              <div key={t.id} style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
+              <div key={t.id} style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden", flexShrink: 0 }}>
                 {/* Table header — schema + name */}
                 <div
                   style={{
