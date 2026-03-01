@@ -13,7 +13,7 @@ import { useQueryStore } from "../../store/queryStore";
 import { useObjectStore } from "../../store/objectStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetObjectDDL, ListObjects, ListSchemas } from "../../../wailsjs/go/main/App";
+import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns } from "../../../wailsjs/go/main/App";
 
 // Module-level DDL cache and hover provider handle so we only register once
 // and don't accumulate duplicate providers on editor remounts.
@@ -400,6 +400,51 @@ export default function SqlEditor() {
       }
     };
     window.addEventListener("thaw:scroll-to-line", handleScrollToLine);
+
+    // ── Drag-and-drop from sidebar ────────────────────────────────────────
+    // TABLE/VIEW nodes in the sidebar set dataTransfer "thaw/table" on drag.
+    // Intercept drops on the editor, fetch the column list, and insert a
+    // fully-qualified SELECT with all column names at the drop position.
+    const editorDom = editor.getDomNode();
+    if (editorDom) {
+      editorDom.addEventListener("dragover", (e: DragEvent) => {
+        if (e.dataTransfer?.types.includes("thaw/table")) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+        }
+      });
+
+      editorDom.addEventListener("drop", async (e: DragEvent) => {
+        const raw = e.dataTransfer?.getData("thaw/table");
+        if (!raw) return;
+        e.preventDefault();
+        let info: { db: string; schema: string; name: string };
+        try { info = JSON.parse(raw); } catch { return; }
+
+        const target = editor.getTargetAtClientPoint(e.clientX, e.clientY);
+        const pos = target?.position ?? editor.getPosition() ?? { lineNumber: 1, column: 1 };
+
+        const esc = (s: string) => s.replace(/"/g, '""');
+        let sql: string;
+        try {
+          const columns = await GetTableColumns(info.db, info.schema, info.name);
+          const colList = columns.map((c) => `    "${esc(c)}"`).join(",\n");
+          sql = `SELECT\n${colList}\nFROM "${esc(info.db)}"."${esc(info.schema)}"."${esc(info.name)}"\nLIMIT 1000;`;
+        } catch {
+          sql = `SELECT *\nFROM "${esc(info.db)}"."${esc(info.schema)}"."${esc(info.name)}"\nLIMIT 1000;`;
+        }
+
+        const range = {
+          startLineNumber: pos.lineNumber,
+          endLineNumber:   pos.lineNumber,
+          startColumn:     pos.column,
+          endColumn:       pos.column,
+        };
+        editor.executeEdits("drag-drop", [{ range, text: sql, forceMoveMarkers: true }]);
+        editor.pushUndoStop();
+        editor.focus();
+      });
+    }
   };
 
   return (

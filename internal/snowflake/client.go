@@ -649,6 +649,42 @@ type FunctionInfo struct {
 	IsTableFunction bool        `json:"isTableFunction"`
 }
 
+// GetTableColumns returns the ordered list of column names for a table or view
+// by running DESCRIBE TABLE (which works for both base tables and views in Snowflake).
+func (c *Client) GetTableColumns(ctx context.Context, database, schema, name string) ([]string, error) {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	query := fmt.Sprintf(`DESCRIBE TABLE "%s"."%s"."%s"`, esc(database), esc(schema), esc(name))
+	rows, err := c.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cols, _ := rows.Columns()
+	nameIdx := -1
+	for i, col := range cols {
+		if strings.EqualFold(col, "name") {
+			nameIdx = i
+			break
+		}
+	}
+	if nameIdx < 0 {
+		return nil, fmt.Errorf("unexpected DESCRIBE TABLE result")
+	}
+
+	vals, ptrs := makeValPtrs(len(cols))
+	var columnNames []string
+	for rows.Next() {
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, err
+		}
+		if n := strVal(vals, nameIdx); n != "" {
+			columnNames = append(columnNames, n)
+		}
+	}
+	return columnNames, rows.Err()
+}
+
 // GetFunctionInfo fetches the DDL for a user-defined function and returns its
 // parameter list together with a flag indicating whether it is a table function
 // (UDTF, whose DDL contains RETURNS TABLE) or a scalar function.

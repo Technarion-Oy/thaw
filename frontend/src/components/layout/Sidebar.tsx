@@ -831,11 +831,26 @@ export default function Sidebar() {
               const kind   = parts[3];
               const name   = parts.slice(4).join(":");
               const args   = (node as any).arguments ?? "";
-              return (
+              const tooltip = (
                 <ObjTooltip cacheKey={key} db={db} schema={schema} kind={kind} name={name} args={args}>
                   {String(node.title)}
                 </ObjTooltip>
               );
+              if (kind === "TABLE" || kind === "VIEW") {
+                return (
+                  <span
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("thaw/table", JSON.stringify({ db, schema, name }));
+                      e.dataTransfer.effectAllowed = "copy";
+                      e.stopPropagation();
+                    }}
+                  >
+                    {tooltip}
+                  </span>
+                );
+              }
+              return tooltip;
             }
             return node.title as React.ReactNode;
           }}

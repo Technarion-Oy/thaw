@@ -38,6 +38,8 @@ export function GetRoleDDL(arg1:string):Promise<string>;
 
 export function GetSessionContext():Promise<snowflake.SessionContext>;
 
+export function GetTableColumns(arg1:string,arg2:string,arg3:string):Promise<Array<string>>;
+
 export function GetTableRetentionDays(arg1:string,arg2:string,arg3:string):Promise<number>;
 
 export function GetWarehouseDDL(arg1:string):Promise<string>;

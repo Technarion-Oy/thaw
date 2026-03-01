@@ -50,6 +50,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
   - View the DDL definition inline
   - **Rename** the object (`ALTER … RENAME TO`) — available for tables, views, sequences, stages, streams, tasks, file formats, and pipes
   - **Delete** the object (`DROP …`) — with a confirmation dialog
+- **Drag and drop** — drag any table or view node from the sidebar into the editor to insert a fully-qualified `SELECT` with all column names (fetched from Snowflake and listed individually, not `*`) at the drop position
 - **Hover tooltip** — hovering over any object in the tree shows its DDL definition; fetched once and cached for the session
 - Tree automatically refreshes the affected database after any rename, drop, or undrop operation
 - **ER Diagram** — right-click a database and choose **ER Diagram…** to generate an Entity Relationship Diagram from `INFORMATION_SCHEMA.COLUMNS`, `SHOW PRIMARY KEYS`, and `SHOW IMPORTED KEYS`; only base tables are shown (views excluded); filter visible schemas with checkboxes, zoom in/out, drag to pan, and copy the Mermaid source to the clipboard

@@ -62,6 +62,10 @@ export function GetSessionContext() {
   return window['go']['main']['App']['GetSessionContext']();
 }
 
+export function GetTableColumns(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetTableColumns'](arg1, arg2, arg3);
+}
+
 export function GetTableRetentionDays(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetTableRetentionDays'](arg1, arg2, arg3);
 }

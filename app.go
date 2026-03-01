@@ -555,6 +555,14 @@ func (a *App) GetProcedureParams(database, schema, name, argTypes string) ([]sno
 	return a.client.GetProcedureParams(a.ctx, database, schema, name, argTypes)
 }
 
+// GetTableColumns returns the ordered column names for a table or view.
+func (a *App) GetTableColumns(database, schema, name string) ([]string, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.GetTableColumns(a.ctx, database, schema, name)
+}
+
 // GetFunctionInfo fetches the DDL for a user-defined function and returns its
 // parameter list together with a flag indicating whether it is a table function.
 func (a *App) GetFunctionInfo(database, schema, name, argTypes string) (*snowflake.FunctionInfo, error) {
