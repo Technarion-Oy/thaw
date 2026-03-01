@@ -488,6 +488,14 @@ func (a *App) ListWarehouses() ([]string, error) {
 	return a.client.ListWarehouses(a.ctx)
 }
 
+// ListNotificationIntegrations returns the names of all notification integrations.
+func (a *App) ListNotificationIntegrations() ([]string, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListNotificationIntegrations(a.ctx)
+}
+
 // UseRole switches the session to the given role.
 func (a *App) UseRole(role string) error {
 	if a.client == nil {

@@ -106,6 +106,10 @@ export function ListDroppedTables(arg1, arg2) {
   return window['go']['main']['App']['ListDroppedTables'](arg1, arg2);
 }
 
+export function ListNotificationIntegrations() {
+  return window['go']['main']['App']['ListNotificationIntegrations']();
+}
+
 export function ListObjects(arg1, arg2) {
   return window['go']['main']['App']['ListObjects'](arg1, arg2);
 }

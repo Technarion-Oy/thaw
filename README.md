@@ -36,7 +36,14 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - Browse databases → schemas → objects (tables, views, functions, procedures, …)
 - **Filter objects** — type in the search box at the top of the sidebar to filter objects by name across all databases and schemas; the tree cascade-loads all schemas and objects automatically and collapses back to the database list when the search is cleared
 - Right-click a **database** to refresh, export its DDL, **insert its name** at the editor cursor, or **generate an ER Diagram**
-- Right-click a **schema** to browse dropped tables recoverable via Snowflake Time Travel or **insert its fully-qualified name** at the editor cursor
+- Right-click a **schema** to browse dropped tables recoverable via Snowflake Time Travel, **insert its fully-qualified name** at the editor cursor, or **Create Task…** — opens a dialog to configure and generate a `CREATE OR REPLACE TASK` statement with:
+  - Compute: warehouse (searchable dropdown) or serverless with initial warehouse size
+  - Schedule: none, fixed interval (seconds/minutes/hours), or cron expression with timezone
+  - Dependencies: predecessor tasks (AFTER), boolean condition (WHEN)
+  - Execution: allow overlapping, timeout, suspend-after-failures, auto-retry attempts
+  - Integrations: error and success notification integrations (searchable dropdowns populated from `SHOW NOTIFICATION INTEGRATIONS`; default is none)
+  - Other: comment, finalize task
+  - SQL body (AS); live `CREATE TASK` preview updates as you type
 - Right-click an **object** to:
   - Select the top 1 000 rows (tables and views) — opens in a new tab
   - **Time Travel Query…** (tables) — opens a dialog with a timeline slider spanning the table's full retention window; drag to choose a point in time and run `SELECT … AT(TIMESTAMP => …) LIMIT 1000` in a new tab

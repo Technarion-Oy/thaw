@@ -429,9 +429,9 @@ export default function SqlEditor() {
         try {
           const columns = await GetTableColumns(info.db, info.schema, info.name);
           const colList = columns.map((c) => `    "${esc(c)}"`).join(",\n");
-          sql = `SELECT\n${colList}\nFROM "${esc(info.db)}"."${esc(info.schema)}"."${esc(info.name)}"\nLIMIT 1000;`;
+          sql = `SELECT\n${colList}\nFROM "${esc(info.db)}"."${esc(info.schema)}"."${esc(info.name)}";`;
         } catch {
-          sql = `SELECT *\nFROM "${esc(info.db)}"."${esc(info.schema)}"."${esc(info.name)}"\nLIMIT 1000;`;
+          sql = `SELECT *\nFROM "${esc(info.db)}"."${esc(info.schema)}"."${esc(info.name)}";`;
         }
 
         const range = {

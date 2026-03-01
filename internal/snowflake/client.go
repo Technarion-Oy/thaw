@@ -242,6 +242,13 @@ func (c *Client) ListWarehouses(ctx context.Context) ([]string, error) {
 	return c.queryStringSlice(ctx, "SHOW WAREHOUSES", 0)
 }
 
+// ListNotificationIntegrations returns the names of all notification integrations.
+// These are used for ERROR_INTEGRATION and SUCCESS_INTEGRATION in tasks.
+func (c *Client) ListNotificationIntegrations(ctx context.Context) ([]string, error) {
+	// SHOW NOTIFICATION INTEGRATIONS columns: created_on, name, type, category, enabled, comment
+	return c.queryStringSlice(ctx, "SHOW NOTIFICATION INTEGRATIONS", 1)
+}
+
 // GetRoleDDL constructs the DDL for a single role from SHOW commands.
 // Snowflake does not support GET_DDL for roles, so we build the output from:
 //   - SHOW ROLES LIKE '<name>'       → CREATE ROLE with optional comment

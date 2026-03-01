@@ -45,6 +45,7 @@ import { useGitStore } from "../../store/gitStore";
 import AccountPanel from "../account/AccountPanel";
 import CallProcedureModal from "../procedure/CallProcedureModal";
 import SelectFunctionModal from "../function/SelectFunctionModal";
+import CreateTaskModal from "../task/CreateTaskModal";
 import ERDiagramModal from "../er/ERDiagramModal";
 import ExportTableModal from "../export/ExportTableModal";
 import ImportTableModal from "../export/ImportTableModal";
@@ -248,6 +249,7 @@ export default function Sidebar() {
   const [ddlModal, setDdlModal]   = useState<ObjectDDL | null>(null);
   const [callModal, setCallModal] = useState<{ db: string; schema: string; name: string; rawArgs: string } | null>(null);
   const [selectFunctionModal, setSelectFunctionModal] = useState<{ db: string; schema: string; name: string; rawArgs: string } | null>(null);
+  const [createTaskModal, setCreateTaskModal] = useState<{ db: string; schema: string } | null>(null);
   const [undropModal, setUndropModal] = useState<UndropModal | null>(null);
   const [renameModal, setRenameModal] = useState<RenameModal | null>(null);
   const [timeTravelModal, setTimeTravelModal] = useState<TimeTravelModal | null>(null);
@@ -522,6 +524,13 @@ export default function Sidebar() {
     const [, db, schema, , ...nameParts] = nodeKey.split(":");
     const name = nameParts.join(":");
     setSelectFunctionModal({ db, schema, name, rawArgs: objArgs });
+  };
+
+  const openCreateTask = () => {
+    if (!ctxMenu) return;
+    const [, db, schema] = ctxMenu.nodeKey.split(":");
+    setCtxMenu(null);
+    setCreateTaskModal({ db, schema });
   };
 
   const exportDatabase = async () => {
@@ -880,6 +889,7 @@ export default function Sidebar() {
           {ctxMenu.nodeType === "db" && menuItem("Export DDL", <CloudUploadOutlined style={{ fontSize: 12 }} />, exportDatabase)}
           {ctxMenu.nodeType === "db" && menuItem("ER Diagram…", <ApartmentOutlined style={{ fontSize: 12 }} />, generateERDiagram)}
           {ctxMenu.nodeType === "schema" && menuItem("Insert Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
+          {ctxMenu.nodeType === "schema" && menuItem("Create Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)}
           {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
@@ -964,6 +974,15 @@ export default function Sidebar() {
           name={selectFunctionModal.name}
           rawArgs={selectFunctionModal.rawArgs}
           onClose={() => setSelectFunctionModal(null)}
+        />
+      )}
+
+      {/* Create Task modal */}
+      {createTaskModal && (
+        <CreateTaskModal
+          db={createTaskModal.db}
+          schema={createTaskModal.schema}
+          onClose={() => setCreateTaskModal(null)}
         />
       )}
 
