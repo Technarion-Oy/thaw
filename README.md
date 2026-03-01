@@ -34,6 +34,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 
 ### Object browser (sidebar)
 - Browse databases → schemas → objects (tables, views, functions, procedures, …)
+- **Filter objects** — type in the search box at the top of the sidebar to filter objects by name across all databases and schemas; the tree cascade-loads all schemas and objects automatically and collapses back to the database list when the search is cleared
 - Right-click a **database** to refresh, export its DDL, or **generate an ER Diagram**
 - Right-click a **schema** to browse dropped tables recoverable via Snowflake Time Travel
 - Right-click an **object** to:

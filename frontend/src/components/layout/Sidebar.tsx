@@ -8,7 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useEffect, useLayoutEffect, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Tree, Typography, Spin, Empty, Divider, Modal, Button, Input, Tooltip, Slider, message } from "antd";
 import {
   DatabaseOutlined,
@@ -32,6 +32,7 @@ import {
   ApartmentOutlined,
   DownloadOutlined,
   UploadOutlined,
+  SearchOutlined,
 } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
@@ -137,6 +138,35 @@ function clearNodeChildren(nodes: DataNode[], targetKey: string): DataNode[] {
 // Cache DDL per unique key so we only fetch once per session.
 const ddlCache = new Map<string, string>();
 
+// Keep only obj: nodes whose title matches the query; prune empty parents.
+function filterTree(nodes: DataNode[], query: string): DataNode[] {
+  const lower = query.toLowerCase();
+  return nodes.reduce<DataNode[]>((acc, node) => {
+    const key      = String(node.key);
+    const children = (node as any).children as DataNode[] | undefined;
+    if (children !== undefined) {
+      const filtered = filterTree(children, query);
+      if (filtered.length > 0) acc.push({ ...node, children: filtered });
+    } else if (key.startsWith("obj:")) {
+      if (String(node.title).toLowerCase().includes(lower)) acc.push(node);
+    }
+    return acc;
+  }, []);
+}
+
+// Collect keys of all non-leaf nodes (used to auto-expand filtered results).
+function getAllParentKeys(nodes: DataNode[]): Key[] {
+  const keys: Key[] = [];
+  for (const node of nodes) {
+    const children = (node as any).children as DataNode[] | undefined;
+    if (children !== undefined) {
+      keys.push(node.key as Key);
+      keys.push(...getAllParentKeys(children));
+    }
+  }
+  return keys;
+}
+
 function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
   cacheKey: string;
   db: string;
@@ -208,9 +238,8 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
 }
 
 export default function Sidebar() {
-  const [treeData, setTreeData]     = useState<DataNode[]>([]);
-  const [loadedKeys, setLoadedKeys] = useState<Key[]>([]);
-  const [loading, setLoading]       = useState(false);
+  const [treeData, setTreeData] = useState<DataNode[]>([]);
+  const [loading, setLoading]   = useState(false);
   const [loaded, setLoaded]         = useState(false);
 
   const [ctxMenu, setCtxMenu]     = useState<ContextMenu | null>(null);
@@ -222,6 +251,16 @@ export default function Sidebar() {
   const [erModal, setErModal] = useState<{ database: string; data: snowflake.ERDiagramData } | null>(null);
   const [exportModal, setExportModal] = useState<{ db: string; schema: string; table: string } | null>(null);
   const [importModal, setImportModal] = useState<{ db: string; schema: string; table: string } | null>(null);
+  const [searchQuery, setSearchQuery]               = useState("");
+  // Two separate expansion states so the cascade never touches the user's own
+  // tree navigation state. On clear we just wipe searchExpandedKeys.
+  const [expandedKeys, setExpandedKeys]             = useState<Key[]>([]);
+  const [searchExpandedKeys, setSearchExpandedKeys] = useState<Key[]>([]);
+  // searchResults holds a full copy of the tree built exclusively for the
+  // active search cascade. treeData is NEVER written to by cascade loads.
+  const [searchResults, setSearchResults]           = useState<DataNode[]>([]);
+  const loadingNodes    = useRef<Set<string>>(new Set());
+  const searchWasActive = useRef(false);
   const ctxRef = useRef<HTMLDivElement>(null);
 
   // Close context menu on outside click
@@ -231,6 +270,61 @@ export default function Sidebar() {
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
   }, [ctxMenu]);
+
+  // Cascade-load the full object tree into searchResults (never treeData).
+  // treeData stays pristine, so clearing the search just resets searchResults.
+  useEffect(() => {
+    if (!searchQuery) return;
+
+    // Step 1: ensure databases are loaded.
+    if (!loaded) {
+      loadDatabases();
+      return; // re-runs when `loaded` flips true
+    }
+
+    // Step 2: on first activation seed searchResults from the current tree.
+    if (!searchWasActive.current) {
+      setSearchResults([...treeData]); // shallow copy — cascade writes new refs
+      searchWasActive.current = true;
+      return; // re-runs when searchResults initialises
+    }
+
+    if (searchResults.length === 0) return; // not yet seeded
+
+    // Step 3: trigger schema loads for db nodes without children.
+    let waiting = false;
+    for (const dbNode of searchResults) {
+      const key = String(dbNode.key);
+      if (!(dbNode as any).children && !loadingNodes.current.has(key)) {
+        loadingNodes.current.add(key);
+        onLoadData(dbNode as any, setSearchResults).finally(() => loadingNodes.current.delete(key));
+        waiting = true;
+      }
+    }
+    if (waiting) return; // re-runs when searchResults gains schema children
+
+    // Step 4: trigger object loads for schema nodes without children.
+    for (const dbNode of searchResults) {
+      for (const schemaNode of ((dbNode as any).children ?? []) as DataNode[]) {
+        const key = String(schemaNode.key);
+        if (!(schemaNode as any).children && !loadingNodes.current.has(key)) {
+          loadingNodes.current.add(key);
+          onLoadData(schemaNode as any, setSearchResults).finally(() => loadingNodes.current.delete(key));
+          waiting = true;
+        }
+      }
+    }
+    if (waiting) return; // re-runs when searchResults gains object children
+
+    // Step 5: all data loaded — expand every parent that contains a match.
+    setSearchExpandedKeys(getAllParentKeys(filterTree(searchResults, searchQuery)));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, searchResults, loaded]);
+
+  const displayData = useMemo(
+    () => (searchQuery ? filterTree(searchResults, searchQuery) : treeData),
+    [searchResults, treeData, searchQuery],
+  );
 
   // Clamp context menu inside the viewport (runs before browser paint — no flash)
   useLayoutEffect(() => {
@@ -266,54 +360,71 @@ export default function Sidebar() {
     }
   };
 
-  const onLoadData = async (node: DataNode & { children?: DataNode[] }) => {
+  // commit is setSearchResults when called from the cascade; omitted (→ setTreeData)
+  // for user-triggered tree expansion. Cascade results never touch treeData.
+  const onLoadData = async (
+    node: DataNode & { children?: DataNode[] },
+    commit?: React.Dispatch<React.SetStateAction<DataNode[]>>,
+  ) => {
     if (node.children) return;
-    const key   = String(node.key);
-    const parts = key.split(":");
+    const key    = String(node.key);
+    const parts  = key.split(":");
+    const setData = commit ?? setTreeData;
 
     if (parts[0] === "db") {
-      const db      = parts[1];
-      const schemas = await ListSchemas(db);
-      setTreeData((prev) =>
-        updateNode(prev, key, schemas.map((s) => ({
-          title:  s,
-          key:    `schema:${db}:${s}`,
-          icon:   <FolderOutlined />,
-          isLeaf: false,
-        })))
-      );
-      useObjectStore.getState().addSchemas(db, schemas);
+      const db = parts[1];
+      try {
+        const schemas = await ListSchemas(db);
+        setData((prev) =>
+          updateNode(prev, key, schemas.map((s) => ({
+            title:  s,
+            key:    `schema:${db}:${s}`,
+            icon:   <FolderOutlined />,
+            isLeaf: false,
+          })))
+        );
+        if (!commit) useObjectStore.getState().addSchemas(db, schemas);
+      } catch {
+        // Shared / restricted databases (e.g. SNOWFLAKE) don't support
+        // SHOW SCHEMAS. Mark as empty so the cascade doesn't retry.
+        setData((prev) => updateNode(prev, key, []));
+      }
     } else if (parts[0] === "schema") {
       const [, db, schema] = parts;
-      const objects        = await ListObjects(db, schema);
+      try {
+        const objects = await ListObjects(db, schema);
 
-      const groups: Record<string, typeof objects> = {};
-      for (const obj of objects) {
-        const k = (obj.kind || "OTHER").toUpperCase();
-        if (!groups[k]) groups[k] = [];
-        groups[k].push(obj);
+        const groups: Record<string, typeof objects> = {};
+        for (const obj of objects) {
+          const k = (obj.kind || "OTHER").toUpperCase();
+          if (!groups[k]) groups[k] = [];
+          groups[k].push(obj);
+        }
+
+        const sortedKinds = [
+          ...KIND_ORDER.filter((k) => groups[k]),
+          ...Object.keys(groups).filter((k) => !KIND_ORDER.includes(k)).sort(),
+        ];
+
+        const typeNodes: DataNode[] = sortedKinds.map((kind) => ({
+          title:    KIND_LABEL[kind] ?? kind,
+          key:      `type:${db}:${schema}:${kind}`,
+          icon:     <FolderOutlined style={{ color: "var(--text-muted)" }} />,
+          children: groups[kind].map((o) => ({
+            title:     o.name,
+            key:       `obj:${db}:${schema}:${kind}:${o.name}`,
+            icon:      kindIcon(kind),
+            isLeaf:    true,
+            arguments: o.arguments ?? "",
+          })),
+        }));
+
+        setData((prev) => updateNode(prev, key, typeNodes));
+        if (!commit) useObjectStore.getState().addObjects(db, schema, objects.map((o) => ({ name: o.name, kind: (o.kind || "OTHER").toUpperCase() })));
+      } catch {
+        // Schema not accessible — mark as empty so the cascade doesn't retry.
+        setData((prev) => updateNode(prev, key, []));
       }
-
-      const sortedKinds = [
-        ...KIND_ORDER.filter((k) => groups[k]),
-        ...Object.keys(groups).filter((k) => !KIND_ORDER.includes(k)).sort(),
-      ];
-
-      const typeNodes: DataNode[] = sortedKinds.map((kind) => ({
-        title:    KIND_LABEL[kind] ?? kind,
-        key:      `type:${db}:${schema}:${kind}`,
-        icon:     <FolderOutlined style={{ color: "var(--text-muted)" }} />,
-        children: groups[kind].map((o) => ({
-          title:     o.name,
-          key:       `obj:${db}:${schema}:${kind}:${o.name}`,
-          icon:      kindIcon(kind),
-          isLeaf:    true,
-          arguments: o.arguments ?? "",
-        })),
-      }));
-
-      setTreeData((prev) => updateNode(prev, key, typeNodes));
-      useObjectStore.getState().addObjects(db, schema, objects.map((o) => ({ name: o.name, kind: (o.kind || "OTHER").toUpperCase() })));
     }
   };
 
@@ -345,18 +456,8 @@ export default function Sidebar() {
   const refreshDatabaseByName = (db: string) => {
     const dbKey = `db:${db}`;
     useObjectStore.getState().clearDatabase(db);
-    // Remove every key that belongs to this database from loadedKeys.
-    // Schema keys look like "schema:DBNAME:SCHEMANAME" — a different prefix
-    // from "db:DBNAME" — so they must be evicted separately; otherwise Tree
-    // sees them as already-loaded and never calls loadData for them again.
-    setLoadedKeys((prev) =>
-      prev.filter((k) => {
-        const s = String(k);
-        return !s.startsWith(dbKey) && !s.startsWith(`schema:${db}:`);
-      })
-    );
-    // Strip children from treeData — Tree won't call loadData for a node
-    // that still has a children array even if its key left loadedKeys.
+    // Stripping the children array is enough: onExpand will re-trigger
+    // onLoadData when the user next expands this database.
     setTreeData((prev) => clearNodeChildren(prev, dbKey));
   };
 
@@ -616,6 +717,37 @@ export default function Sidebar() {
         Objects
       </Text>
 
+      <div style={{ padding: "0 8px 8px" }}>
+        <Input
+          size="small"
+          placeholder="Filter objects…"
+          prefix={<SearchOutlined style={{ color: "var(--text-muted)", fontSize: 11 }} />}
+          allowClear
+          value={searchQuery}
+          onChange={(e) => {
+            const val = e.target.value;
+            if (!val && searchWasActive.current) {
+              setSearchResults([]);
+              setSearchExpandedKeys([]);
+              setExpandedKeys([]);
+              // Strip all cached schema/object children so the tree returns
+              // to a clean db-list-only view regardless of what was loaded
+              // during the cascade.
+              setTreeData((prev) =>
+                prev.map((dbNode) => {
+                  const { children: _, ...rest } = dbNode as any;
+                  return rest as DataNode;
+                })
+              );
+              loadingNodes.current.clear();
+              searchWasActive.current = false;
+            }
+            setSearchQuery(val);
+          }}
+          style={{ fontSize: 12 }}
+        />
+      </div>
+
       {loading && <Spin size="small" style={{ display: "block", margin: "16px auto" }} />}
 
       {!loaded && !loading && (
@@ -628,14 +760,34 @@ export default function Sidebar() {
 
       {loaded && treeData.length === 0 && <Empty description="No databases" imageStyle={{ height: 40 }} />}
 
-      {treeData.length > 0 && (
+      {treeData.length > 0 && searchQuery && displayData.length === 0 && (
+        <div style={{ padding: "12px", fontSize: 12, color: "var(--text-muted)" }}>
+          No objects match "{searchQuery}"
+        </div>
+      )}
+
+      {treeData.length > 0 && (!searchQuery || displayData.length > 0) && (
         <div style={{ overflowX: "auto" }}>
         <Tree
-          treeData={treeData}
-          loadedKeys={loadedKeys}
-          onLoad={(keys) => setLoadedKeys(keys)}
-          loadData={onLoadData as (node: DataNode) => Promise<void>}
+          treeData={displayData}
           onRightClick={onRightClick as any}
+          expandedKeys={searchQuery ? searchExpandedKeys : expandedKeys}
+          expandAction={"click" as any}
+          motion={false as any}
+          onExpand={(keys, { expanded, node }) => {
+            if (searchQuery) {
+              setSearchExpandedKeys(keys as Key[]);
+            } else {
+              setExpandedKeys(keys as Key[]);
+              // Trigger lazy load when a node without children is expanded.
+              // We drive loading from onExpand instead of the Tree's loadData
+              // prop so rc-tree never puts a node into "loading" state, which
+              // would block the user from collapsing it.
+              if (expanded && !(node as any).children) {
+                onLoadData(node as unknown as DataNode & { children?: DataNode[] });
+              }
+            }
+          }}
           showIcon
           blockNode
           style={{ background: "transparent", color: "var(--text)" }}
