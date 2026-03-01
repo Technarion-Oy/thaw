@@ -105,6 +105,8 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - Resizable sidebar — drag the divider to any width between 160 px and 600 px
 - **Theming** — light, dark, and system-default themes; switch via **View → Appearance** in the native menu bar; preference is persisted across sessions
 - Native application menu bar with **File** (open / save / new tab) and **View → Appearance** (System / Light / Dark) menus
+- Object browser scrolls horizontally when object names are wider than the sidebar
+- Right-click context menu is always clamped inside the viewport — never overflows the screen edges
 
 ---
 

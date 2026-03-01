@@ -66,11 +66,15 @@ body,
   background: var(--text-faint);
 }
 
-/* Truncate long node titles in Ant Design Tree components */
+/* Keep tree node titles on one line and let the list scroll horizontally */
 .ant-tree .ant-tree-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Allow tree rows to be as wide as the widest node name */
+.ant-tree-list-holder-inner {
+  width: max-content;
+  min-width: 100%;
 }
 
 /* Monaco editor — custom selection occurrence highlights.

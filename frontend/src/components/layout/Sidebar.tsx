@@ -8,7 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { Tree, Typography, Spin, Empty, Divider, Modal, Button, Input, Tooltip, Slider, message } from "antd";
 import {
   DatabaseOutlined,
@@ -200,7 +200,7 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
         boxShadow: "0 4px 16px rgba(0,0,0,0.45)",
       }}
     >
-      <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <span style={{ display: "block", whiteSpace: "nowrap" }}>
         {children}
       </span>
     </Tooltip>
@@ -230,6 +230,18 @@ export default function Sidebar() {
     const close = () => setCtxMenu(null);
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
+  }, [ctxMenu]);
+
+  // Clamp context menu inside the viewport (runs before browser paint — no flash)
+  useLayoutEffect(() => {
+    if (!ctxMenu || !ctxRef.current) return;
+    const el = ctxRef.current;
+    const { width, height } = el.getBoundingClientRect();
+    const pad = 8;
+    const left = Math.max(pad, Math.min(ctxMenu.x, window.innerWidth  - width  - pad));
+    const top  = Math.max(pad, Math.min(ctxMenu.y, window.innerHeight - height - pad));
+    el.style.left = `${left}px`;
+    el.style.top  = `${top}px`;
   }, [ctxMenu]);
 
   const loadDatabases = async () => {
@@ -617,6 +629,7 @@ export default function Sidebar() {
       {loaded && treeData.length === 0 && <Empty description="No databases" imageStyle={{ height: 40 }} />}
 
       {treeData.length > 0 && (
+        <div style={{ overflowX: "auto" }}>
         <Tree
           treeData={treeData}
           loadedKeys={loadedKeys}
@@ -644,6 +657,7 @@ export default function Sidebar() {
             return node.title as React.ReactNode;
           }}
         />
+        </div>
       )}
 
       {/* Context menu */}
