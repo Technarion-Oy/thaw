@@ -35,8 +35,8 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 ### Object browser (sidebar)
 - Browse databases → schemas → objects (tables, views, functions, procedures, …)
 - **Filter objects** — type in the search box at the top of the sidebar to filter objects by name across all databases and schemas; the tree cascade-loads all schemas and objects automatically and collapses back to the database list when the search is cleared
-- Right-click a **database** to refresh, export its DDL, or **generate an ER Diagram**
-- Right-click a **schema** to browse dropped tables recoverable via Snowflake Time Travel
+- Right-click a **database** to refresh, export its DDL, **insert its name** at the editor cursor, or **generate an ER Diagram**
+- Right-click a **schema** to browse dropped tables recoverable via Snowflake Time Travel or **insert its fully-qualified name** at the editor cursor
 - Right-click an **object** to:
   - Select the top 1 000 rows (tables and views) — opens in a new tab
   - **Time Travel Query…** (tables) — opens a dialog with a timeline slider spanning the table's full retention window; drag to choose a point in time and run `SELECT … AT(TIMESTAMP => …) LIMIT 1000` in a new tab
@@ -45,6 +45,8 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
     - **Import into existing table** — optionally truncate before loading (overwrite mode)
     - **Create new table from data** — derives the schema from the file using `INFER_SCHEMA` (CSV with headers and PARQUET) or creates a `VARIANT` column table (JSON); the object browser refreshes automatically on success
   - Call the procedure with auto-generated parameter fields (procedures) — opens in a new tab
+  - **Call Function…** (functions) — opens a parameter dialog with auto-generated fields; detects scalar vs. table functions from the DDL and generates the correct SQL (`SELECT func(args) AS result` or `SELECT * FROM TABLE(func(args))`); opens in a new tab
+  - **Insert Full Name** — inserts the fully-qualified `"DB"."SCHEMA"."NAME"` at the current editor cursor position
   - View the DDL definition inline
   - **Rename** the object (`ALTER … RENAME TO`) — available for tables, views, sequences, stages, streams, tasks, file formats, and pipes
   - **Delete** the object (`DROP …`) — with a confirmation dialog

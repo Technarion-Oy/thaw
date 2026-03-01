@@ -20,6 +20,19 @@ import { GetObjectDDL, ListObjects, ListSchemas } from "../../../wailsjs/go/main
 const hoverDDLCache = new Map<string, string>();
 let hoverProviderDisposable: { dispose(): void } | null = null;
 
+// Singleton editor reference — set on mount so external callers (e.g. the
+// sidebar) can insert text at the current cursor position without prop drilling.
+let _editorInstance: import("monaco-editor").editor.IStandaloneCodeEditor | null = null;
+
+export function insertAtCursor(text: string) {
+  if (!_editorInstance) return;
+  const selection = _editorInstance.getSelection();
+  if (!selection) return;
+  _editorInstance.executeEdits("sidebar-insert", [{ range: selection, text, forceMoveMarkers: true }]);
+  _editorInstance.pushUndoStop();
+  _editorInstance.focus();
+}
+
 // Track which db/schema pairs and databases have already been lazy-fetched by
 // the completion provider so we don't fire duplicate requests.
 const fetchedSchemaObjects   = new Set<string>(); // "DB\0SCHEMA"
@@ -54,6 +67,8 @@ export default function SqlEditor() {
   const resolved = useThemeStore((s) => s.resolved);
 
   const handleMount: OnMount = (editor, monaco) => {
+    _editorInstance = editor;
+
     // ── Clipboard (WKWebView fix) ─────────────────────────────────────────
     // WKWebView blocks navigator.clipboard.readText/writeText (async Clipboard
     // API), so Monaco's built-in copy/paste silently fails.

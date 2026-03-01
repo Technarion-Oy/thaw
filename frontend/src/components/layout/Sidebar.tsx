@@ -39,10 +39,12 @@ import type { Key } from "rc-tree/lib/interface";
 import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, ExportDatabaseDDL, ListDroppedTables, GetTableRetentionDays, GetERDiagramData } from "../../../wailsjs/go/main/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
+import { insertAtCursor } from "../editor/SqlEditor";
 import { useObjectStore } from "../../store/objectStore";
 import { useGitStore } from "../../store/gitStore";
 import AccountPanel from "../account/AccountPanel";
 import CallProcedureModal from "../procedure/CallProcedureModal";
+import SelectFunctionModal from "../function/SelectFunctionModal";
 import ERDiagramModal from "../er/ERDiagramModal";
 import ExportTableModal from "../export/ExportTableModal";
 import ImportTableModal from "../export/ImportTableModal";
@@ -245,6 +247,7 @@ export default function Sidebar() {
   const [ctxMenu, setCtxMenu]     = useState<ContextMenu | null>(null);
   const [ddlModal, setDdlModal]   = useState<ObjectDDL | null>(null);
   const [callModal, setCallModal] = useState<{ db: string; schema: string; name: string; rawArgs: string } | null>(null);
+  const [selectFunctionModal, setSelectFunctionModal] = useState<{ db: string; schema: string; name: string; rawArgs: string } | null>(null);
   const [undropModal, setUndropModal] = useState<UndropModal | null>(null);
   const [renameModal, setRenameModal] = useState<RenameModal | null>(null);
   const [timeTravelModal, setTimeTravelModal] = useState<TimeTravelModal | null>(null);
@@ -512,6 +515,15 @@ export default function Sidebar() {
     setCallModal({ db, schema, name, rawArgs: objArgs });
   };
 
+  const selectFunction = () => {
+    if (!ctxMenu) return;
+    const { nodeKey, objArgs = "" } = ctxMenu;
+    setCtxMenu(null);
+    const [, db, schema, , ...nameParts] = nodeKey.split(":");
+    const name = nameParts.join(":");
+    setSelectFunctionModal({ db, schema, name, rawArgs: objArgs });
+  };
+
   const exportDatabase = async () => {
     if (!ctxMenu) return;
     const db = ctxMenu.nodeKey.slice("db:".length);
@@ -679,6 +691,25 @@ export default function Sidebar() {
     setImportModal({ db, schema, table });
   };
 
+  const insertFullName = () => {
+    if (!ctxMenu) return;
+    const { nodeKey, nodeType } = ctxMenu;
+    setCtxMenu(null);
+    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    if (nodeType === "db") {
+      const db = nodeKey.slice("db:".length);
+      insertAtCursor(q(db));
+    } else if (nodeType === "schema") {
+      const [, db, schema] = nodeKey.split(":");
+      insertAtCursor(`${q(db)}.${q(schema)}`);
+    } else {
+      // key format: obj:DB:SCHEMA:KIND:NAME
+      const [, db, schema, , ...nameParts] = nodeKey.split(":");
+      const name = nameParts.join(":");
+      insertAtCursor(`${q(db)}.${q(schema)}.${q(name)}`);
+    }
+  };
+
   const viewDefinition = async () => {
     if (!ctxMenu) return;
     const { nodeKey, objArgs = "" } = ctxMenu;
@@ -829,9 +860,11 @@ export default function Sidebar() {
           }}
           onClick={(e) => e.stopPropagation()}
         >
+          {ctxMenu.nodeType === "db" && menuItem("Insert Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "db" && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshDatabase)}
           {ctxMenu.nodeType === "db" && menuItem("Export DDL", <CloudUploadOutlined style={{ fontSize: 12 }} />, exportDatabase)}
           {ctxMenu.nodeType === "db" && menuItem("ER Diagram…", <ApartmentOutlined style={{ fontSize: 12 }} />, generateERDiagram)}
+          {ctxMenu.nodeType === "schema" && menuItem("Insert Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
@@ -843,6 +876,9 @@ export default function Sidebar() {
             menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openImportModal)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PROCEDURE" &&
             menuItem("Call Procedure", <PlayCircleOutlined style={{ fontSize: 12 }} />, callProcedure)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "FUNCTION" &&
+            menuItem("Call Function…", <FunctionOutlined style={{ fontSize: 12 }} />, selectFunction)}
+          {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && menuItem("View Definition", null, viewDefinition)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "PROCEDURE" &&
             menuItem("Rename…", <EditOutlined style={{ fontSize: 12 }} />, renameObject)}
@@ -902,6 +938,17 @@ export default function Sidebar() {
           name={callModal.name}
           rawArgs={callModal.rawArgs}
           onClose={() => setCallModal(null)}
+        />
+      )}
+
+      {/* Select Function modal */}
+      {selectFunctionModal && (
+        <SelectFunctionModal
+          db={selectFunctionModal.db}
+          schema={selectFunctionModal.schema}
+          name={selectFunctionModal.name}
+          rawArgs={selectFunctionModal.rawArgs}
+          onClose={() => setSelectFunctionModal(null)}
         />
       )}
 

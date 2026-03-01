@@ -38,6 +38,10 @@ export function GetERDiagramData(arg1) {
   return window['go']['main']['App']['GetERDiagramData'](arg1);
 }
 
+export function GetFunctionInfo(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['GetFunctionInfo'](arg1, arg2, arg3, arg4);
+}
+
 export function GetGitConfig() {
   return window['go']['main']['App']['GetGitConfig']();
 }

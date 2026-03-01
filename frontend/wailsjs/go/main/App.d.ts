@@ -26,6 +26,8 @@ export function ExportTableData(arg1:snowflake.ExportTableParams):Promise<snowfl
 
 export function GetERDiagramData(arg1:string):Promise<snowflake.ERDiagramData>;
 
+export function GetFunctionInfo(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.FunctionInfo>;
+
 export function GetGitConfig():Promise<config.GitConfig>;
 
 export function GetObjectDDL(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;

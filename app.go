@@ -555,6 +555,15 @@ func (a *App) GetProcedureParams(database, schema, name, argTypes string) ([]sno
 	return a.client.GetProcedureParams(a.ctx, database, schema, name, argTypes)
 }
 
+// GetFunctionInfo fetches the DDL for a user-defined function and returns its
+// parameter list together with a flag indicating whether it is a table function.
+func (a *App) GetFunctionInfo(database, schema, name, argTypes string) (*snowflake.FunctionInfo, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.GetFunctionInfo(a.ctx, database, schema, name, argTypes)
+}
+
 // GetObjectDDL returns the definition of a single schema object using
 // Snowflake's GET_DDL function. kind should be one of: TABLE, VIEW, FUNCTION,
 // PROCEDURE, SEQUENCE, STAGE, STREAM, TASK, FILE FORMAT, PIPE.

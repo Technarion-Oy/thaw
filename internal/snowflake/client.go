@@ -643,6 +643,28 @@ func (c *Client) GetProcedureParams(ctx context.Context, database, schema, name,
 	return parseProcedureDDL(ddl), nil
 }
 
+// FunctionInfo holds the parameter list and type classification of a UDF.
+type FunctionInfo struct {
+	Params          []ProcParam `json:"params"`
+	IsTableFunction bool        `json:"isTableFunction"`
+}
+
+// GetFunctionInfo fetches the DDL for a user-defined function and returns its
+// parameter list together with a flag indicating whether it is a table function
+// (UDTF, whose DDL contains RETURNS TABLE) or a scalar function.
+func (c *Client) GetFunctionInfo(ctx context.Context, database, schema, name, argTypes string) (*FunctionInfo, error) {
+	ddl, err := c.GetObjectDDL(ctx, database, schema, "FUNCTION", name, argTypes)
+	if err != nil {
+		return nil, err
+	}
+	// A UDTF always has RETURNS TABLE(...) in its DDL; scalar functions never do.
+	isTable := strings.Contains(strings.ToUpper(ddl), "RETURNS TABLE")
+	return &FunctionInfo{
+		Params:          parseProcedureDDL(ddl),
+		IsTableFunction: isTable,
+	}, nil
+}
+
 // showInSchema runs a SHOW command and collects results as SnowflakeObjects.
 // If fixedKind is non-empty it is used as the Kind for every row; otherwise
 // the "kind" column in the result set is read (as in SHOW OBJECTS).
