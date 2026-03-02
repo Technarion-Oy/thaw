@@ -8,6 +8,10 @@ import {gitrepo} from '../models';
 import {filesystem} from '../models';
 import {sfconfig} from '../models';
 
+export function CanCreateUsers():Promise<boolean>;
+
+export function CanManageUsers():Promise<boolean>;
+
 export function CancelConnect():Promise<void>;
 
 export function Connect(arg1:snowflake.ConnectParams):Promise<void>;
@@ -42,6 +46,8 @@ export function GetTableColumns(arg1:string,arg2:string,arg3:string):Promise<Arr
 
 export function GetTableRetentionDays(arg1:string,arg2:string,arg3:string):Promise<number>;
 
+export function GetUserDDL(arg1:string):Promise<string>;
+
 export function GetWarehouseDDL(arg1:string):Promise<string>;
 
 export function GitCommitAndPush(arg1:gitrepo.PushParams):Promise<void>;
@@ -67,6 +73,8 @@ export function ListObjects(arg1:string,arg2:string):Promise<Array<snowflake.Sno
 export function ListRoles():Promise<Array<string>>;
 
 export function ListSchemas(arg1:string):Promise<Array<string>>;
+
+export function ListUsers():Promise<Array<snowflake.SnowflakeUser>>;
 
 export function ListWarehouses():Promise<Array<string>>;
 

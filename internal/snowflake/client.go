@@ -74,8 +74,16 @@ type QueryResult struct {
 }
 
 // Client wraps a *sql.DB with Snowflake-specific helpers.
+//
+// A single persistent connection (MaxOpenConns=1) is used intentionally so
+// that session-level statements such as USE ROLE and USE WAREHOUSE apply
+// consistently to every subsequent query. With a connection pool of N>1,
+// those statements would only affect whichever connection happened to execute
+// them, leaving other connections in the pool with the original session state.
 type Client struct {
-	db *sql.DB
+	db          *sql.DB
+	mu          sync.RWMutex
+	currentRole string // tracks the effective role after every UseRole call
 }
 
 // NewClient opens a new Snowflake connection. The provided context can be
@@ -141,19 +149,28 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 		return nil, fmt.Errorf("open connection: %w", err)
 	}
 
-	// Tune the connection pool so that many concurrent DDL fetches are possible
-	// without opening an unbounded number of connections to Snowflake.
-	db.SetMaxOpenConns(32)
-	db.SetMaxIdleConns(8)
-	db.SetConnMaxLifetime(30 * time.Minute)
-	db.SetConnMaxIdleTime(5 * time.Minute)
+	// Use a single persistent connection so that USE ROLE / USE WAREHOUSE apply
+	// to every subsequent query.  With MaxOpenConns>1, those session-level
+	// statements only affect the connection that ran them; other connections in
+	// the pool keep the original DSN role.  ConnMaxLifetime=0 prevents the
+	// driver from silently replacing the connection (which would reset the role
+	// back to the DSN default).
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0)
+	db.SetConnMaxIdleTime(0)
 
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
 		return nil, err
 	}
 
-	return &Client{db: db}, nil
+	// Record the initial role so CanCreateUsers/CanManageUsers can use it
+	// without a round-trip.
+	var initialRole string
+	_ = db.QueryRowContext(ctx, "SELECT CURRENT_ROLE()").Scan(&initialRole)
+
+	return &Client{db: db, currentRole: strings.TrimSpace(initialRole)}, nil
 }
 
 // IsAlive checks that the underlying connection is still usable.
@@ -247,6 +264,210 @@ func (c *Client) ListWarehouses(ctx context.Context) ([]string, error) {
 func (c *Client) ListNotificationIntegrations(ctx context.Context) ([]string, error) {
 	// SHOW NOTIFICATION INTEGRATIONS columns: created_on, name, type, category, enabled, comment
 	return c.queryStringSlice(ctx, "SHOW NOTIFICATION INTEGRATIONS", 1)
+}
+
+// GetUserDDL constructs a CREATE USER DDL statement for the given user by
+// running DESCRIBE USER and translating the property/value pairs.
+func (c *Client) GetUserDDL(ctx context.Context, name string) (string, error) {
+	escIdent := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	sq := func(s string) string { return `'` + strings.ReplaceAll(s, `'`, `''`) + `'` }
+
+	rows, err := c.db.QueryContext(ctx, fmt.Sprintf(`DESCRIBE USER "%s"`, escIdent(name)))
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	cols, _ := rows.Columns()
+	idxs := colIndexMap(cols, "property", "value")
+
+	props := map[string]string{}
+	for rows.Next() {
+		vals, ptrs := makeValPtrs(len(cols))
+		if rows.Scan(ptrs...) != nil {
+			continue
+		}
+		prop := strings.ToUpper(strVal(vals, idxs["property"]))
+		val := strVal(vals, idxs["value"])
+		if val != "" && val != "null" {
+			props[prop] = val
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+
+	var lines []string
+
+	addStr := func(prop, key string) {
+		if v, ok := props[key]; ok {
+			lines = append(lines, fmt.Sprintf("    %s = %s", prop, sq(v)))
+		}
+	}
+	addIdent := func(prop, key string) {
+		if v, ok := props[key]; ok {
+			lines = append(lines, fmt.Sprintf("    %s = %s", prop, v))
+		}
+	}
+	addBool := func(prop, key string) {
+		if v, ok := props[key]; ok {
+			upper := strings.ToUpper(v)
+			if upper == "TRUE" || upper == "FALSE" {
+				lines = append(lines, fmt.Sprintf("    %s = %s", prop, upper))
+			}
+		}
+	}
+
+	// Only emit LOGIN_NAME when it differs from the username.
+	if v, ok := props["LOGIN_NAME"]; ok && !strings.EqualFold(v, name) {
+		lines = append(lines, fmt.Sprintf("    LOGIN_NAME = %s", sq(v)))
+	}
+	addStr("DISPLAY_NAME", "DISPLAY_NAME")
+	addStr("FIRST_NAME", "FIRST_NAME")
+	addStr("LAST_NAME", "LAST_NAME")
+	addStr("EMAIL", "EMAIL")
+	addIdent("DEFAULT_WAREHOUSE", "DEFAULT_WAREHOUSE")
+	addIdent("DEFAULT_ROLE", "DEFAULT_ROLE")
+	addIdent("DEFAULT_NAMESPACE", "DEFAULT_NAMESPACE")
+	addStr("COMMENT", "COMMENT")
+	addBool("MUST_CHANGE_PASSWORD", "MUST_CHANGE_PASSWORD")
+	if v, ok := props["DAYS_TO_EXPIRY"]; ok {
+		if n, err2 := strconv.Atoi(v); err2 == nil && n > 0 {
+			lines = append(lines, fmt.Sprintf("    DAYS_TO_EXPIRY = %d", n))
+		}
+	}
+	addBool("DISABLED", "DISABLED")
+
+	sql := fmt.Sprintf("CREATE USER \"%s\"", escIdent(name))
+	if len(lines) > 0 {
+		sql += "\n" + strings.Join(lines, "\n")
+	}
+	return sql + ";", nil
+}
+
+// userAdminRole returns true for Snowflake's built-in roles that have implicit
+// user-management privileges even when SHOW GRANTS TO ROLE cannot be queried.
+func userAdminRole(upper string) bool {
+	switch upper {
+	case "ACCOUNTADMIN", "SECURITYADMIN", "USERADMIN":
+		return true
+	}
+	return false
+}
+
+// roleGrantsPrivilege checks SHOW GRANTS TO ROLE for direct account-level
+// privileges and collects inherited role names for further traversal.
+// Returns (found, inheritedRoles, error).
+func (c *Client) roleGrantsPrivilege(
+	ctx context.Context,
+	role string,
+	acceptedPrivs map[string]bool,
+) (bool, []string, error) {
+	esc := strings.ReplaceAll(role, `"`, `""`)
+	rows, err := c.db.QueryContext(ctx, fmt.Sprintf(`SHOW GRANTS TO ROLE "%s"`, esc))
+	if err != nil {
+		return false, nil, err
+	}
+	defer rows.Close()
+
+	cols, _ := rows.Columns()
+	idxs := colIndexMap(cols, "privilege", "granted_on", "name")
+
+	var inherited []string
+	for rows.Next() {
+		vals, ptrs := makeValPtrs(len(cols))
+		if rows.Scan(ptrs...) != nil {
+			continue
+		}
+		priv := strings.ToUpper(strVal(vals, idxs["privilege"]))
+		on := strings.ToUpper(strVal(vals, idxs["granted_on"]))
+		name := strVal(vals, idxs["name"])
+
+		if on == "ACCOUNT" && acceptedPrivs[priv] {
+			return true, nil, nil
+		}
+		if on == "ROLE" && name != "" {
+			inherited = append(inherited, name)
+		}
+	}
+	return false, inherited, rows.Err()
+}
+
+// walkRoleHierarchy traverses the role hierarchy breadth-first looking for
+// account-level privileges or a known system role with implicit capabilities.
+func (c *Client) walkRoleHierarchy(
+	ctx context.Context,
+	startRole string,
+	acceptedPrivs map[string]bool,
+) (bool, error) {
+	seen := map[string]bool{}
+	queue := []string{startRole}
+
+	for len(queue) > 0 && len(seen) <= 20 {
+		role := queue[0]
+		queue = queue[1:]
+
+		upper := strings.ToUpper(strings.TrimSpace(role))
+		if seen[upper] {
+			continue
+		}
+		seen[upper] = true
+
+		// Fast-path: system roles with implicit user-management privileges.
+		if userAdminRole(upper) {
+			return true, nil
+		}
+
+		found, inherited, err := c.roleGrantsPrivilege(ctx, role, acceptedPrivs)
+		if err != nil {
+			// SHOW GRANTS may be restricted for this role; skip it.
+			continue
+		}
+		if found {
+			return true, nil
+		}
+		queue = append(queue, inherited...)
+	}
+	return false, nil
+}
+
+// CanCreateUsers returns (true, nil) when the current session role (or any
+// role it inherits) allows creating users.
+func (c *Client) CanCreateUsers(ctx context.Context) (bool, error) {
+	c.mu.RLock()
+	role := c.currentRole
+	c.mu.RUnlock()
+
+	if role == "" {
+		// Fallback: ask the DB directly (e.g. before first UseRole call).
+		if err := c.db.QueryRowContext(ctx, "SELECT CURRENT_ROLE()").Scan(&role); err != nil {
+			return false, fmt.Errorf("CanCreateUsers: %w", err)
+		}
+		role = strings.TrimSpace(role)
+	}
+
+	return c.walkRoleHierarchy(ctx, role,
+		map[string]bool{"CREATE USER": true, "MANAGE GRANTS": true},
+	)
+}
+
+// CanManageUsers returns (true, nil) when the current session role (or any
+// role it inherits) can ALTER or DROP other users.
+func (c *Client) CanManageUsers(ctx context.Context) (bool, error) {
+	c.mu.RLock()
+	role := c.currentRole
+	c.mu.RUnlock()
+
+	if role == "" {
+		if err := c.db.QueryRowContext(ctx, "SELECT CURRENT_ROLE()").Scan(&role); err != nil {
+			return false, fmt.Errorf("CanManageUsers: %w", err)
+		}
+		role = strings.TrimSpace(role)
+	}
+
+	return c.walkRoleHierarchy(ctx, role,
+		map[string]bool{"MANAGE GRANTS": true},
+	)
 }
 
 // GetRoleDDL constructs the DDL for a single role from SHOW commands.
@@ -393,8 +614,13 @@ func (c *Client) GetWarehouseDDL(ctx context.Context, name string) (string, erro
 // UseRole switches the active role for the current session.
 func (c *Client) UseRole(ctx context.Context, role string) error {
 	escaped := strings.ReplaceAll(role, `"`, `""`)
-	_, err := c.db.ExecContext(ctx, fmt.Sprintf(`USE ROLE "%s"`, escaped))
-	return err
+	if _, err := c.db.ExecContext(ctx, fmt.Sprintf(`USE ROLE "%s"`, escaped)); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.currentRole = role
+	c.mu.Unlock()
+	return nil
 }
 
 // UseWarehouse switches the active warehouse for the current session.
@@ -544,6 +770,78 @@ func (c *Client) GetTableRetentionDays(ctx context.Context, database, schema, na
 		}
 	}
 	return 1, nil // default: 1 day
+}
+
+// SnowflakeUser holds the key properties of a Snowflake user account returned
+// by SHOW USERS.
+type SnowflakeUser struct {
+	Name               string `json:"name"`
+	LoginName          string `json:"loginName"`
+	DisplayName        string `json:"displayName"`
+	FirstName          string `json:"firstName"`
+	LastName           string `json:"lastName"`
+	Email              string `json:"email"`
+	DefaultWarehouse   string `json:"defaultWarehouse"`
+	DefaultRole        string `json:"defaultRole"`
+	DefaultNamespace   string `json:"defaultNamespace"`
+	Comment            string `json:"comment"`
+	Disabled           bool   `json:"disabled"`
+	MustChangePassword bool   `json:"mustChangePassword"`
+	DaysToExpiry       string `json:"daysToExpiry"`
+	Owner              string `json:"owner"`
+	LastSuccessLogin   string `json:"lastSuccessLogin"`
+}
+
+// ListUsers returns all users visible to the current role via SHOW USERS.
+// Returns an error (e.g. insufficient privileges) that the caller should
+// treat as "user management not available".
+func (c *Client) ListUsers(ctx context.Context) ([]SnowflakeUser, error) {
+	rows, err := c.db.QueryContext(ctx, "SHOW USERS")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cols, _ := rows.Columns()
+	col := func(name string) int {
+		for i, c := range cols {
+			if strings.EqualFold(c, name) {
+				return i
+			}
+		}
+		return -1
+	}
+
+	vals, ptrs := makeValPtrs(len(cols))
+	boolCol := func(name string) bool {
+		s := strings.ToLower(strVal(vals, col(name)))
+		return s == "true" || s == "1" || s == "yes"
+	}
+
+	var users []SnowflakeUser
+	for rows.Next() {
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, err
+		}
+		users = append(users, SnowflakeUser{
+			Name:               strVal(vals, col("name")),
+			LoginName:          strVal(vals, col("login_name")),
+			DisplayName:        strVal(vals, col("display_name")),
+			FirstName:          strVal(vals, col("first_name")),
+			LastName:           strVal(vals, col("last_name")),
+			Email:              strVal(vals, col("email")),
+			DefaultWarehouse:   strVal(vals, col("default_warehouse")),
+			DefaultRole:        strVal(vals, col("default_role")),
+			DefaultNamespace:   strVal(vals, col("default_namespace")),
+			Comment:            strVal(vals, col("comment")),
+			Disabled:           boolCol("disabled"),
+			MustChangePassword: boolCol("must_change_password"),
+			DaysToExpiry:       strVal(vals, col("days_to_expiry")),
+			Owner:              strVal(vals, col("owner")),
+			LastSuccessLogin:   strVal(vals, col("last_success_login")),
+		})
+	}
+	return users, rows.Err()
 }
 
 // ProcParam describes a single parameter of a stored procedure.

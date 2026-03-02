@@ -607,6 +607,46 @@ export namespace snowflake {
 	        this.arguments = source["arguments"];
 	    }
 	}
+	export class SnowflakeUser {
+	    name: string;
+	    loginName: string;
+	    displayName: string;
+	    firstName: string;
+	    lastName: string;
+	    email: string;
+	    defaultWarehouse: string;
+	    defaultRole: string;
+	    defaultNamespace: string;
+	    comment: string;
+	    disabled: boolean;
+	    mustChangePassword: boolean;
+	    daysToExpiry: string;
+	    owner: string;
+	    lastSuccessLogin: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SnowflakeUser(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.loginName = source["loginName"];
+	        this.displayName = source["displayName"];
+	        this.firstName = source["firstName"];
+	        this.lastName = source["lastName"];
+	        this.email = source["email"];
+	        this.defaultWarehouse = source["defaultWarehouse"];
+	        this.defaultRole = source["defaultRole"];
+	        this.defaultNamespace = source["defaultNamespace"];
+	        this.comment = source["comment"];
+	        this.disabled = source["disabled"];
+	        this.mustChangePassword = source["mustChangePassword"];
+	        this.daysToExpiry = source["daysToExpiry"];
+	        this.owner = source["owner"];
+	        this.lastSuccessLogin = source["lastSuccessLogin"];
+	    }
+	}
 
 }
 

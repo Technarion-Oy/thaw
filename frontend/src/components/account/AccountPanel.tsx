@@ -28,6 +28,7 @@ import {
 } from "../../../wailsjs/go/main/App";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { useGitStore } from "../../store/gitStore";
+import UserManagementPanel from "./UserManagementPanel";
 
 const { Text } = Typography;
 const CLR_BORDER    = "var(--border)";
@@ -228,6 +229,8 @@ export default function AccountPanel() {
                   />
                 </div>
               )}
+
+              {loaded && <UserManagementPanel />}
             </div>
           ),
         }]}

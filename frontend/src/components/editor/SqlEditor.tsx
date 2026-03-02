@@ -13,7 +13,7 @@ import { useQueryStore } from "../../store/queryStore";
 import { useObjectStore } from "../../store/objectStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns } from "../../../wailsjs/go/main/App";
+import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetUserDDL } from "../../../wailsjs/go/main/App";
 
 // Module-level DDL cache and hover provider handle so we only register once
 // and don't accumulate duplicate providers on editor remounts.
@@ -401,19 +401,50 @@ export default function SqlEditor() {
     };
     window.addEventListener("thaw:scroll-to-line", handleScrollToLine);
 
-    // ── Drag-and-drop from sidebar ────────────────────────────────────────
-    // TABLE/VIEW nodes in the sidebar set dataTransfer "thaw/table" on drag.
-    // Intercept drops on the editor, fetch the column list, and insert a
-    // fully-qualified SELECT with all column names at the drop position.
+    // ── Drag-and-drop from sidebar / panels ──────────────────────────────
+    // TABLE/VIEW nodes set "thaw/table"; user rows set "thaw/user".
     const editorDom = editor.getDomNode();
     if (editorDom) {
       editorDom.addEventListener("dragover", (e: DragEvent) => {
-        if (e.dataTransfer?.types.includes("thaw/table")) {
+        const types = e.dataTransfer?.types ?? [];
+        if (types.includes("thaw/table") || types.includes("thaw/user")) {
           e.preventDefault();
-          e.dataTransfer.dropEffect = "copy";
+          e.dataTransfer!.dropEffect = "copy";
         }
       });
 
+      // ── user DDL drop ─────────────────────────────────────────────────
+      editorDom.addEventListener("drop", async (e: DragEvent) => {
+        const rawUser = e.dataTransfer?.getData("thaw/user");
+        if (rawUser) {
+          e.preventDefault();
+          let info: { name: string };
+          try { info = JSON.parse(rawUser); } catch { return; }
+
+          const target = editor.getTargetAtClientPoint(e.clientX, e.clientY);
+          const pos = target?.position ?? editor.getPosition() ?? { lineNumber: 1, column: 1 };
+
+          let ddl: string;
+          try {
+            ddl = await GetUserDDL(info.name);
+          } catch {
+            ddl = `-- Could not fetch DDL for user "${info.name}"`;
+          }
+
+          const range = {
+            startLineNumber: pos.lineNumber,
+            endLineNumber:   pos.lineNumber,
+            startColumn:     pos.column,
+            endColumn:       pos.column,
+          };
+          editor.executeEdits("drag-drop-user", [{ range, text: ddl, forceMoveMarkers: true }]);
+          editor.pushUndoStop();
+          editor.focus();
+          return;
+        }
+      });
+
+      // ── table/view SELECT drop ────────────────────────────────────────
       editorDom.addEventListener("drop", async (e: DragEvent) => {
         const raw = e.dataTransfer?.getData("thaw/table");
         if (!raw) return;

@@ -57,7 +57,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
   - View the DDL definition inline
   - **Rename** the object (`ALTER … RENAME TO`) — available for tables, views, sequences, stages, streams, tasks, file formats, and pipes
   - **Delete** the object (`DROP …`) — with a confirmation dialog
-- **Drag and drop** — drag any table or view node from the sidebar into the editor to insert a fully-qualified `SELECT` with all column names (fetched from Snowflake and listed individually, not `*`) at the drop position
+- **Drag and drop** — drag any table or view node from the sidebar into the editor to insert a fully-qualified `SELECT` with all column names (fetched from Snowflake and listed individually, not `*`) at the drop position; drag a user from the User Management panel to insert a `CREATE USER` DDL statement
 - **Hover tooltip** — hovering over any object in the tree shows its DDL definition; fetched once and cached for the session
 - Tree automatically refreshes the affected database after any rename, drop, or undrop operation
 - **ER Diagram** — right-click a database and choose **ER Diagram…** to generate an Entity Relationship Diagram from `INFORMATION_SCHEMA.COLUMNS`, `SHOW PRIMARY KEYS`, and `SHOW IMPORTED KEYS`; only base tables are shown (views excluded); filter visible schemas with checkboxes, zoom in/out, drag to pan, and copy the Mermaid source to the clipboard
@@ -71,7 +71,34 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
   - **Review & Apply Changes** — diffs the current diagram against the existing Snowflake schema and generates only the necessary SQL: `DROP TABLE` for removed tables, `CREATE TABLE` for new ones, and `ALTER TABLE` statements for column additions/removals, type changes, nullability changes, and PK/FK updates; the sidebar refreshes automatically on success
   - Closing the designer with unapplied changes prompts a confirmation dialog to prevent accidental data loss
 
-### DDL export
+### Account Objects panel
+
+The **Account Objects** collapsible panel in the sidebar shows roles, warehouses, and users. It lazy-loads on first expand.
+
+#### User Management
+
+- Expandable scrollable list of all users in the account, with a live **search** box that filters by username, login name, display name, and email
+- **Disabled** users shown with a greyed-out `disabled` tag
+- **Create user** — opens a dialog to generate and execute a `CREATE USER` statement with:
+  - Username (required), masked password, identity fields (login name, display name, first/last name, email)
+  - Default warehouse and role (searchable dropdowns), default namespace
+  - Security options: must-change-password, days-to-expiry, create-as-disabled
+  - Live `CREATE USER` SQL preview
+  - Button is greyed out with a tooltip if the current role lacks the `CREATE USER` or `MANAGE GRANTS` privilege
+- **Right-click a user** to:
+  - **Edit…** — opens a pre-populated form to modify all user properties; generates `ALTER USER … SET / UNSET` SQL with a live preview; only changed fields are included
+  - **Enable / Disable** — runs `ALTER USER … SET DISABLED = TRUE/FALSE` immediately
+  - **Drop…** — confirmation dialog before `DROP USER`
+  - All three actions are greyed out if the current role lacks `MANAGE GRANTS`
+- **Drag a user** from the list into the editor to insert a `CREATE USER` DDL statement built from `DESCRIBE USER`
+- The panel hides itself entirely if the current role cannot access `SHOW USERS`
+- All content and privilege buttons **auto-refresh** when the active role is switched — no manual reload needed
+
+#### Role switching and session state
+
+Role and warehouse switches (via the toolbar dropdowns) are applied to a **single persistent connection**, so every subsequent query — including user management operations, privilege checks, and all SQL editor queries — immediately reflects the new role without needing a manual refresh.
+
+
 - Export DDL for every database (or a single one) with one file per object
 - Fully qualified names (`db.schema.object`) in every CREATE statement
 - Shared / imported databases (e.g. `SNOWFLAKE_SAMPLE_DATA`) are automatically skipped
@@ -235,8 +262,14 @@ thaw/
     │       │   ├── ERDiagramModal.tsx  # Read-only ER diagram viewer (from existing DB)
     │       │   ├── ERDesigner.tsx      # Visual ER schema designer (create new tables)
     │       │   └── buildMermaid.ts    # Mermaid source generator for the diagram viewer
+    │       ├── account/
+    │       │   ├── AccountPanel.tsx        # Roles, warehouses, and user management panel
+    │       │   ├── UserManagementPanel.tsx # User list, search, right-click menu
+    │       │   ├── EditUserModal.tsx       # ALTER USER dialog with live SQL preview
+    │       │   └── CreateUserModal.tsx     # CREATE USER dialog with live SQL preview
     │       ├── procedure/CallProcedureModal.tsx
     │       ├── results/ResultGrid.tsx
+    │       ├── task/CreateTaskModal.tsx    # CREATE OR REPLACE TASK dialog
     │       └── layout/
     │           ├── AppLayout.tsx  # Resizable sidebar
     │           └── Sidebar.tsx    # Object browser: lazy tree, right-click actions (rename, drop, undrop, DDL)

@@ -488,6 +488,39 @@ func (a *App) ListWarehouses() ([]string, error) {
 	return a.client.ListWarehouses(a.ctx)
 }
 
+// ListUsers returns all users visible to the current role.
+// Returns an error if the role lacks the required privilege.
+func (a *App) ListUsers() ([]snowflake.SnowflakeUser, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListUsers(a.ctx)
+}
+
+// GetUserDDL returns a CREATE USER DDL statement for the given user.
+func (a *App) GetUserDDL(name string) (string, error) {
+	if a.client == nil {
+		return "", ErrNotConnected
+	}
+	return a.client.GetUserDDL(a.ctx, name)
+}
+
+// CanManageUsers returns true when the current role can alter or drop users.
+func (a *App) CanManageUsers() (bool, error) {
+	if a.client == nil {
+		return false, ErrNotConnected
+	}
+	return a.client.CanManageUsers(a.ctx)
+}
+
+// CanCreateUsers returns true when the current role can create users.
+func (a *App) CanCreateUsers() (bool, error) {
+	if a.client == nil {
+		return false, ErrNotConnected
+	}
+	return a.client.CanCreateUsers(a.ctx)
+}
+
 // ListNotificationIntegrations returns the names of all notification integrations.
 func (a *App) ListNotificationIntegrations() ([]string, error) {
 	if a.client == nil {
