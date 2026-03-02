@@ -13,13 +13,16 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - Auto-fill connection form from `~/.snowflake/config.toml` (Snowflake CLI profiles)
 - Cancel an in-progress connection attempt
 - Switch role or warehouse from the query toolbar without reconnecting
+- Role dropdown shows only roles the current user can actually `USE ROLE` to — not all account-visible roles
 
 ### SQL editor
 - Monaco editor with full SQL syntax highlighting
 - Multi-tab editing — each open file gets its own tab; tabs restore their SQL, results and error state when switched back to
 - Unsaved changes shown with a `•` prefix in the tab title
 - Run the full query or just the selected text (`⌘ Enter` / `Ctrl Enter`)
+- **Cancel query** — while a query is running the Run button becomes a **Cancel** button; pressing it (or `Esc`) cancels client-side polling *and* issues `SYSTEM$CANCEL_QUERY` so the query stops consuming credits in Snowflake
 - **Query ID** — the Snowflake query ID is shown in the loading spinner while the query runs and in the results status bar after it completes; click the copy icon to copy it to the clipboard
+- Query SQL, results, and tab state survive Vite / WebView page reloads (persisted to `sessionStorage`)
 - **Selection highlight** — selecting any text highlights every other occurrence in the document with a blue background; overview-ruler markers make occurrences visible in long files
 - Word-under-cursor highlight when nothing is selected
 - **Hover definition** — hovering over a table or view name shows its DDL in a Monaco tooltip; definitions are cached per session so subsequent hovers are instant
@@ -35,7 +38,9 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 ### Object browser (sidebar)
 - Browse databases → schemas → objects (tables, views, functions, procedures, …)
 - **Filter objects** — type in the search box at the top of the sidebar to filter objects by name across all databases and schemas; the tree cascade-loads all schemas and objects automatically and collapses back to the database list when the search is cleared
-- Right-click a **database** to refresh, export its DDL, **insert its name** at the editor cursor, or **generate an ER Diagram**
+- **Refresh** button (`↺`) in the sidebar header reloads the entire database tree from Snowflake
+- Right-click a **database** to refresh, export its DDL, **insert its name** at the editor cursor, generate an **ER Diagram**, or **Show Dropped Schemas…** — lists schemas recoverable via Time Travel with an **Undrop** button for each
+- **Dropped Databases** button (`⏪`) in the sidebar header lists databases within their Time Travel retention window; click **Undrop** to restore any of them
 - Right-click a **schema** to browse dropped tables recoverable via Snowflake Time Travel, **insert its fully-qualified name** at the editor cursor, or **Create Task…** — opens a dialog to configure and generate a `CREATE OR REPLACE TASK` statement with:
   - Compute: warehouse (searchable dropdown) or serverless with initial warehouse size
   - Schedule: none, fixed interval (seconds/minutes/hours), or cron expression with timezone
@@ -138,6 +143,7 @@ Role and warehouse switches (via the toolbar dropdowns) are applied to a **singl
   - Filter files by extension (`.sql`, `.json`, …)
   - Enter a commit message and a personal-access token
 - Git credentials are **never persisted to disk** — the token is used in-memory only
+- OS junk files (`.DS_Store`, `Thumbs.db`, `desktop.ini`) are automatically excluded from commits and appended to `.gitignore`
 
 ### UI
 - Resizable sidebar — drag the divider to any width between 160 px and 600 px
@@ -419,6 +425,7 @@ granted to the owner of the database created by the test.
 | Shortcut | Action |
 |----------|--------|
 | `⌘ Enter` / `Ctrl+Enter` | Run the current query (or selected text) |
+| `Esc` | Cancel a running query |
 | `⌘O` / `Ctrl+O` | Open a SQL file |
 | `⌘S` / `Ctrl+S` | Save the active file |
 | `⌘⇧S` / `Ctrl+Shift+S` | Save As… (always opens a dialog) |

@@ -13,7 +13,9 @@ package gitrepo
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -135,6 +137,48 @@ func injectToken(remoteURL, token string) string {
 	return remoteURL
 }
 
+// osJunkFiles is the set of OS-generated file names that should never be
+// committed. It mirrors the entries written by ensureGitignore.
+var osJunkFiles = map[string]bool{
+	".DS_Store":  true,
+	"Thumbs.db":  true,
+	"desktop.ini": true,
+}
+
+// ensureGitignore writes a .gitignore in dir that covers common OS junk files
+// (e.g. .DS_Store on macOS, Thumbs.db on Windows). Entries that already
+// appear in the file are not duplicated. The file is created when absent.
+func ensureGitignore(dir string) error {
+	required := []string{".DS_Store", "Thumbs.db", "desktop.ini"}
+
+	path := filepath.Join(dir, ".gitignore")
+	existing, _ := os.ReadFile(path) // ignore error — empty on first run
+
+	var missing []string
+	for _, entry := range required {
+		found := false
+		for _, line := range strings.Split(string(existing), "\n") {
+			if strings.TrimSpace(line) == entry {
+				found = true
+				break
+			}
+		}
+		if !found {
+			missing = append(missing, entry)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+
+	content := string(existing)
+	if len(content) > 0 && !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	content += strings.Join(missing, "\n") + "\n"
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
 // CommitAndPush stages all changes, commits, and pushes to the remote.
 // "Nothing to commit" is treated as success.
 func CommitAndPush(ctx context.Context, p PushParams) error {
@@ -143,6 +187,11 @@ func CommitAndPush(ctx context.Context, p PushParams) error {
 		if _, err := run(ctx, p.Dir, "init"); err != nil {
 			return fmt.Errorf("git init: %w", err)
 		}
+	}
+
+	// Ensure OS junk files are gitignored before staging.
+	if err := ensureGitignore(p.Dir); err != nil {
+		return fmt.Errorf("write .gitignore: %w", err)
 	}
 
 	// Set or update origin (plain URL — token is only injected for push)
@@ -154,9 +203,21 @@ func CommitAndPush(ctx context.Context, p PushParams) error {
 		}
 	}
 
-	// Stage specified files or everything
+	// Stage specified files or everything.
+	// When an explicit list is given, strip any OS junk files: they are now
+	// covered by .gitignore and git will error with "did not match any files"
+	// if we try to add them explicitly.
 	if len(p.Files) > 0 {
-		addArgs := append([]string{"add", "--"}, p.Files...)
+		var stageable []string
+		for _, f := range p.Files {
+			if !osJunkFiles[filepath.Base(f)] {
+				stageable = append(stageable, f)
+			}
+		}
+		if len(stageable) == 0 {
+			return nil // nothing left to commit
+		}
+		addArgs := append([]string{"add", "--"}, stageable...)
 		if _, err := run(ctx, p.Dir, addArgs...); err != nil {
 			return fmt.Errorf("git add: %w", err)
 		}

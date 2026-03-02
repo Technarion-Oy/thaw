@@ -36,7 +36,7 @@ import {
 } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, ExportDatabaseDDL, ListDroppedTables, GetTableRetentionDays, GetERDiagramData } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData } from "../../../wailsjs/go/main/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
 import { insertAtCursor } from "../editor/SqlEditor";
@@ -96,6 +96,17 @@ interface UndropModal {
   db: string;
   schema: string;
   tables: snowflake.DroppedTable[] | null; // null = loading
+  error: string | null;
+}
+
+interface UndropSchemasModal {
+  db: string;
+  schemas: snowflake.DroppedTable[] | null; // null = loading
+  error: string | null;
+}
+
+interface UndropDatabasesModal {
+  databases: snowflake.DroppedTable[] | null; // null = loading
   error: string | null;
 }
 
@@ -251,6 +262,8 @@ export default function Sidebar() {
   const [selectFunctionModal, setSelectFunctionModal] = useState<{ db: string; schema: string; name: string; rawArgs: string } | null>(null);
   const [createTaskModal, setCreateTaskModal] = useState<{ db: string; schema: string } | null>(null);
   const [undropModal, setUndropModal] = useState<UndropModal | null>(null);
+  const [undropSchemasModal, setUndropSchemasModal] = useState<UndropSchemasModal | null>(null);
+  const [undropDatabasesModal, setUndropDatabasesModal] = useState<UndropDatabasesModal | null>(null);
   const [renameModal, setRenameModal] = useState<RenameModal | null>(null);
   const [timeTravelModal, setTimeTravelModal] = useState<TimeTravelModal | null>(null);
   const [erModal, setErModal] = useState<{ database: string; data: snowflake.ERDiagramData } | null>(null);
@@ -343,8 +356,7 @@ export default function Sidebar() {
     el.style.top  = `${top}px`;
   }, [ctxMenu]);
 
-  const loadDatabases = async () => {
-    if (loaded) return;
+  const doLoadDatabases = async () => {
     setLoading(true);
     try {
       const dbs = await ListDatabases();
@@ -363,6 +375,24 @@ export default function Sidebar() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadDatabases = () => {
+    if (loaded) return;
+    doLoadDatabases();
+  };
+
+  const refreshAllDatabases = () => {
+    setLoaded(false);
+    setTreeData([]);
+    setSearchQuery("");
+    setSearchResults([]);
+    setExpandedKeys([]);
+    setSearchExpandedKeys([]);
+    searchWasActive.current = false;
+    loadingNodes.current.clear();
+    useObjectStore.getState().setDatabases([]);
+    doLoadDatabases();
   };
 
   // commit is setSearchResults when called from the cascade; omitted (→ setTreeData)
@@ -493,6 +523,45 @@ export default function Sidebar() {
     setUndropModal(null);
     await useQueryStore.getState().executeWith(sql);
     refreshDatabaseByName(db);
+  };
+
+  const showDroppedSchemas = async () => {
+    if (!ctxMenu) return;
+    const db = ctxMenu.nodeKey.slice("db:".length);
+    setCtxMenu(null);
+    setUndropSchemasModal({ db, schemas: null, error: null });
+    try {
+      const schemas = await ListDroppedSchemas(db);
+      setUndropSchemasModal((prev) => prev ? { ...prev, schemas: schemas ?? [] } : null);
+    } catch (e) {
+      setUndropSchemasModal((prev) => prev ? { ...prev, schemas: [], error: String(e) } : null);
+    }
+  };
+
+  const undropSchema = async (db: string, name: string) => {
+    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const sql = `UNDROP SCHEMA ${q(db)}.${q(name)};`;
+    setUndropSchemasModal(null);
+    await useQueryStore.getState().executeWith(sql);
+    refreshDatabaseByName(db);
+  };
+
+  const showDroppedDatabases = async () => {
+    setUndropDatabasesModal({ databases: null, error: null });
+    try {
+      const databases = await ListDroppedDatabases();
+      setUndropDatabasesModal((prev) => prev ? { ...prev, databases: databases ?? [] } : null);
+    } catch (e) {
+      setUndropDatabasesModal((prev) => prev ? { ...prev, databases: [], error: String(e) } : null);
+    }
+  };
+
+  const undropDatabase = async (name: string) => {
+    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const sql = `UNDROP DATABASE ${q(name)};`;
+    setUndropDatabasesModal(null);
+    await useQueryStore.getState().executeWith(sql);
+    refreshAllDatabases();
   };
 
   const selectTop1000 = () => {
@@ -753,9 +822,30 @@ export default function Sidebar() {
 
   return (
     <div style={{ padding: "8px 4px" }}>
-      <Text type="secondary" style={{ fontSize: 11, padding: "0 12px", display: "block", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-        Objects
-      </Text>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 4px 0 12px", marginBottom: 8 }}>
+        <Text type="secondary" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          Objects
+        </Text>
+        <Tooltip title="Show dropped databases">
+          <Button
+            type="text"
+            size="small"
+            icon={<RollbackOutlined style={{ fontSize: 11 }} />}
+            onClick={showDroppedDatabases}
+            style={{ height: 20, padding: "0 4px", minWidth: 0, color: "var(--text-muted)" }}
+          />
+        </Tooltip>
+        <Tooltip title="Refresh all databases">
+          <Button
+            type="text"
+            size="small"
+            icon={<ReloadOutlined style={{ fontSize: 11 }} />}
+            loading={loading}
+            onClick={refreshAllDatabases}
+            style={{ height: 20, padding: "0 4px", minWidth: 0, color: "var(--text-muted)" }}
+          />
+        </Tooltip>
+      </div>
 
       <div style={{ padding: "0 8px 8px" }}>
         <Input
@@ -886,6 +976,7 @@ export default function Sidebar() {
         >
           {ctxMenu.nodeType === "db" && menuItem("Insert Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "db" && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshDatabase)}
+          {ctxMenu.nodeType === "db" && menuItem("Show Dropped Schemas…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedSchemas)}
           {ctxMenu.nodeType === "db" && menuItem("Export DDL", <CloudUploadOutlined style={{ fontSize: 12 }} />, exportDatabase)}
           {ctxMenu.nodeType === "db" && menuItem("ER Diagram…", <ApartmentOutlined style={{ fontSize: 12 }} />, generateERDiagram)}
           {ctxMenu.nodeType === "schema" && menuItem("Insert Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
@@ -1038,6 +1129,82 @@ export default function Sidebar() {
           </div>
         )}
       </Modal>
+      {/* Undrop Schemas modal */}
+      <Modal
+        open={undropSchemasModal !== null}
+        title={undropSchemasModal ? `Dropped schemas — ${undropSchemasModal.db}` : ""}
+        onCancel={() => setUndropSchemasModal(null)}
+        footer={null}
+        width={560}
+      >
+        {undropSchemasModal?.schemas === null && !undropSchemasModal?.error && (
+          <div style={{ textAlign: "center", padding: "24px 0" }}><Spin /></div>
+        )}
+        {undropSchemasModal?.error && (
+          <div style={{ color: "#f85149", fontFamily: "monospace", fontSize: 12, padding: 8 }}>
+            {undropSchemasModal.error}
+          </div>
+        )}
+        {undropSchemasModal?.schemas !== null && !undropSchemasModal?.error && undropSchemasModal?.schemas?.length === 0 && (
+          <div style={{ color: "var(--text-muted)", fontSize: 13, padding: "12px 0" }}>
+            No dropped schemas found within the Time Travel retention window.
+          </div>
+        )}
+        {undropSchemasModal?.schemas !== null && !undropSchemasModal?.error && (undropSchemasModal?.schemas?.length ?? 0) > 0 && (
+          <div>
+            {undropSchemasModal!.schemas!.map((s) => (
+              <div key={s.name} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 4px", borderBottom: "1px solid var(--border)" }}>
+                <div>
+                  <div style={{ fontFamily: "monospace", fontSize: 13, color: "var(--text)" }}>{s.name}</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>Dropped: {s.droppedOn}</div>
+                </div>
+                <Button size="small" icon={<RollbackOutlined />} onClick={() => undropSchema(undropSchemasModal!.db, s.name)}>
+                  Undrop
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
+
+      {/* Undrop Databases modal */}
+      <Modal
+        open={undropDatabasesModal !== null}
+        title="Dropped databases"
+        onCancel={() => setUndropDatabasesModal(null)}
+        footer={null}
+        width={560}
+      >
+        {undropDatabasesModal?.databases === null && !undropDatabasesModal?.error && (
+          <div style={{ textAlign: "center", padding: "24px 0" }}><Spin /></div>
+        )}
+        {undropDatabasesModal?.error && (
+          <div style={{ color: "#f85149", fontFamily: "monospace", fontSize: 12, padding: 8 }}>
+            {undropDatabasesModal.error}
+          </div>
+        )}
+        {undropDatabasesModal?.databases !== null && !undropDatabasesModal?.error && undropDatabasesModal?.databases?.length === 0 && (
+          <div style={{ color: "var(--text-muted)", fontSize: 13, padding: "12px 0" }}>
+            No dropped databases found within the Time Travel retention window.
+          </div>
+        )}
+        {undropDatabasesModal?.databases !== null && !undropDatabasesModal?.error && (undropDatabasesModal?.databases?.length ?? 0) > 0 && (
+          <div>
+            {undropDatabasesModal!.databases!.map((d) => (
+              <div key={d.name} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 4px", borderBottom: "1px solid var(--border)" }}>
+                <div>
+                  <div style={{ fontFamily: "monospace", fontSize: 13, color: "var(--text)" }}>{d.name}</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>Dropped: {d.droppedOn}</div>
+                </div>
+                <Button size="small" icon={<RollbackOutlined />} onClick={() => undropDatabase(d.name)}>
+                  Undrop
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
+
       {/* Time Travel modal */}
       <Modal
         open={timeTravelModal !== null}

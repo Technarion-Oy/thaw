@@ -14,6 +14,10 @@ export function CancelConnect() {
   return window['go']['main']['App']['CancelConnect']();
 }
 
+export function CancelQuery() {
+  return window['go']['main']['App']['CancelQuery']();
+}
+
 export function Connect(arg1) {
   return window['go']['main']['App']['Connect'](arg1);
 }
@@ -112,6 +116,14 @@ export function ListDatabases() {
 
 export function ListDirectory(arg1) {
   return window['go']['main']['App']['ListDirectory'](arg1);
+}
+
+export function ListDroppedDatabases() {
+  return window['go']['main']['App']['ListDroppedDatabases']();
+}
+
+export function ListDroppedSchemas(arg1) {
+  return window['go']['main']['App']['ListDroppedSchemas'](arg1);
 }
 
 export function ListDroppedTables(arg1, arg2) {

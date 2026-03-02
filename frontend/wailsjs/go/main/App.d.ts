@@ -14,6 +14,8 @@ export function CanManageUsers():Promise<boolean>;
 
 export function CancelConnect():Promise<void>;
 
+export function CancelQuery():Promise<void>;
+
 export function Connect(arg1:snowflake.ConnectParams):Promise<void>;
 
 export function Disconnect():Promise<void>;
@@ -63,6 +65,10 @@ export function IsConnected():Promise<boolean>;
 export function ListDatabases():Promise<Array<string>>;
 
 export function ListDirectory(arg1:string):Promise<Array<filesystem.FileEntry>>;
+
+export function ListDroppedDatabases():Promise<Array<snowflake.DroppedTable>>;
+
+export function ListDroppedSchemas(arg1:string):Promise<Array<snowflake.DroppedTable>>;
 
 export function ListDroppedTables(arg1:string,arg2:string):Promise<Array<snowflake.DroppedTable>>;
 

@@ -8,12 +8,12 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Button, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message } from "antd";
-import { PlayCircleOutlined, DisconnectOutlined, CopyOutlined } from "@ant-design/icons";
+import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined } from "@ant-design/icons";
 import { ClipboardSetText } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, Disconnect, SaveFile, PickSaveFile, PickOpenFile, ReadFile } from "../../wailsjs/go/main/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickOpenFile, ReadFile } from "../../wailsjs/go/main/App";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import SqlEditor from "../components/editor/SqlEditor";
 import TabBar from "../components/editor/TabBar";
@@ -27,6 +27,10 @@ const { Text } = Typography;
 export default function QueryPage() {
   const { sql, selectedSql, result, isRunning, error, setResult, setRunning, setError, markSaved, openScratch, openFile } = useQueryStore();
   const [runningQueryId, setRunningQueryId] = useState<string | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
+  // Ref so the async runQuery closure can detect user-initiated cancellation
+  // without relying on stale React state.
+  const cancelRequestedRef = useRef(false);
   const { params, disconnect } = useConnectionStore();
   const {
     role, warehouse, roles, warehouses,
@@ -45,6 +49,8 @@ export default function QueryPage() {
   const runQuery = async () => {
     const query = selectedSql.trim() || sql.trim();
     if (!query) return;
+    cancelRequestedRef.current = false;
+    setIsCancelling(false);
     setRunningQueryId(null);
     setRunning(true);
     try {
@@ -59,9 +65,25 @@ export default function QueryPage() {
       const res = await WaitForQueryResult();
       setResult(res);
     } catch (e) {
-      setError(String(e));
+      // Suppress the error when the user explicitly cancelled — keep whatever
+      // result was previously shown rather than replacing it with an error.
+      if (!cancelRequestedRef.current) {
+        setError(String(e));
+      }
     } finally {
       setRunning(false);
+      setIsCancelling(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!isRunning || isCancelling) return;
+    cancelRequestedRef.current = true;
+    setIsCancelling(true);
+    try {
+      await CancelQuery();
+    } catch (_) {
+      // ignore — WaitForQueryResult will return an error regardless
     }
   };
 
@@ -133,6 +155,15 @@ export default function QueryPage() {
     return () => window.removeEventListener("run-query", handler);
   });
 
+  // Escape cancels the running query.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isRunning && !isCancelling) handleCancel();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [isRunning, isCancelling]);
+
   useEffect(() => {
     const handler = () => handleSave();
     window.addEventListener("save-file", handler);
@@ -165,17 +196,32 @@ export default function QueryPage() {
         }}
       >
         <Space>
-          <Button
-            type="primary"
-            icon={<PlayCircleOutlined />}
-            loading={isRunning}
-            onClick={runQuery}
-            size="small"
-          >
-            Run
-          </Button>
+          {isRunning ? (
+            <Button
+              danger
+              icon={<StopOutlined />}
+              loading={isCancelling}
+              onClick={handleCancel}
+              size="small"
+            >
+              {isCancelling ? "Cancelling…" : "Cancel"}
+            </Button>
+          ) : (
+            <Button
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              onClick={runQuery}
+              size="small"
+            >
+              Run
+            </Button>
+          )}
           <Text type="secondary" style={{ fontSize: 11 }}>
-            {selectedSql.trim() ? "⌘↵ · running selection" : "⌘↵ to run"}
+            {isRunning
+              ? "Esc to cancel"
+              : selectedSql.trim()
+              ? "⌘↵ · running selection"
+              : "⌘↵ to run"}
           </Text>
         </Space>
 

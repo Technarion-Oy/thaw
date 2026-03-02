@@ -15,6 +15,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/pem"
 	"fmt"
 	"net/url"
@@ -73,17 +74,64 @@ type QueryResult struct {
 	QueryID      string          `json:"queryID"`
 }
 
+// sessionConnector wraps a gosnowflake Connector and applies the current
+// role and warehouse to every new connection the pool creates.  This lets
+// the pool keep its normal concurrency (MaxOpenConns=32) while ensuring that
+// each fresh connection immediately reflects the most-recently-switched role /
+// warehouse — without requiring a single serialising connection.
+//
+// When UseRole or UseWarehouse is called:
+//  1. The SQL statement is executed on whatever connection the pool provides.
+//  2. The stored role/warehouse is updated here (under the mutex).
+//  3. All idle pool connections are flushed (SetMaxIdleConns 0 → restore) so
+//     the next query that needs a connection gets a new one, which will have
+//     this connector's Apply() called and therefore inherit the new state.
+type sessionConnector struct {
+	base sf.Connector
+	mu   sync.RWMutex
+	role string
+	wh   string
+}
+
+func (sc *sessionConnector) Connect(ctx context.Context) (driver.Conn, error) {
+	conn, err := sc.base.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sc.mu.RLock()
+	role, wh := sc.role, sc.wh
+	sc.mu.RUnlock()
+	if role != "" {
+		connExec(conn, fmt.Sprintf(`USE ROLE "%s"`, strings.ReplaceAll(role, `"`, `""`)))
+	}
+	if wh != "" {
+		connExec(conn, fmt.Sprintf(`USE WAREHOUSE "%s"`, strings.ReplaceAll(wh, `"`, `""`)))
+	}
+	return conn, nil
+}
+
+func (sc *sessionConnector) Driver() driver.Driver { return sc.base.Driver() }
+
+// connExec runs a single statement on a raw driver.Conn (best-effort; errors
+// are silently dropped because the caller has no useful recovery path here).
+func connExec(conn driver.Conn, query string) {
+	stmt, err := conn.Prepare(query)
+	if err != nil {
+		return
+	}
+	defer stmt.Close()
+	stmt.Exec([]driver.Value{}) //nolint:errcheck
+}
+
 // Client wraps a *sql.DB with Snowflake-specific helpers.
 //
-// A single persistent connection (MaxOpenConns=1) is used intentionally so
-// that session-level statements such as USE ROLE and USE WAREHOUSE apply
-// consistently to every subsequent query. With a connection pool of N>1,
-// those statements would only affect whichever connection happened to execute
-// them, leaving other connections in the pool with the original session state.
+// Session state (role, warehouse) is managed through sessionConnector so that
+// every connection the pool creates automatically inherits the current state.
+// The pool runs at full concurrency (MaxOpenConns=32), which is essential for
+// parallel DDL export across many databases and schemas.
 type Client struct {
-	db          *sql.DB
-	mu          sync.RWMutex
-	currentRole string // tracks the effective role after every UseRole call
+	db        *sql.DB
+	connector *sessionConnector
 }
 
 // NewClient opens a new Snowflake connection. The provided context can be
@@ -110,6 +158,7 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 		loginTimeout = 3 * time.Minute
 	}
 
+	keepAlive := "true"
 	cfg := &sf.Config{
 		Account:       p.Account,
 		User:          p.User,
@@ -121,6 +170,21 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 		Authenticator: auth,
 		Passcode:      p.Passcode,
 		LoginTimeout:  loginTimeout,
+		// KeepSessionAlive prevents the driver from sending DELETE /session
+		// when the pool recycles a connection, which would invalidate the
+		// shared Snowflake session and break all other pool connections.
+		KeepSessionAlive: true,
+		// Params must be initialised to a non-nil map.  ParseDSN does this
+		// automatically, but we construct the Config directly, so we must do
+		// it ourselves — otherwise the driver panics with "assignment to entry
+		// in nil map" when it writes session parameters back into cfg.Params.
+		//
+		// client_session_keep_alive tells the driver to start a heartbeat
+		// goroutine (startHeartBeat) on every new connection.  Without it,
+		// Snowflake times out the idle session during long-running queries.
+		Params: map[string]*string{
+			"client_session_keep_alive": &keepAlive,
+		},
 	}
 
 	if p.OktaURL != "" {
@@ -139,38 +203,39 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 		cfg.PrivateKey = key
 	}
 
-	dsn, err := sf.DSN(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("build dsn: %w", err)
+	// Build the connector directly from the config (avoids the DSN round-trip
+	// and gives us a driver.Connector we can wrap).
+	sc := &sessionConnector{
+		base: sf.NewConnector(&sf.SnowflakeDriver{}, *cfg),
+		role: strings.TrimSpace(p.Role),
+		wh:   strings.TrimSpace(p.Warehouse),
 	}
 
-	db, err := sql.Open("snowflake", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("open connection: %w", err)
-	}
+	db := sql.OpenDB(sc)
 
-	// Use a single persistent connection so that USE ROLE / USE WAREHOUSE apply
-	// to every subsequent query.  With MaxOpenConns>1, those session-level
-	// statements only affect the connection that ran them; other connections in
-	// the pool keep the original DSN role.  ConnMaxLifetime=0 prevents the
-	// driver from silently replacing the connection (which would reset the role
-	// back to the DSN default).
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
-	db.SetConnMaxLifetime(0)
-	db.SetConnMaxIdleTime(0)
+	// Restore full pool concurrency.  Every new connection the pool creates
+	// goes through sessionConnector.Connect, which applies the current role
+	// and warehouse — so there is no longer any need for a single connection.
+	db.SetMaxOpenConns(32)
+	db.SetMaxIdleConns(2)
+	db.SetConnMaxLifetime(30 * time.Minute)
+	db.SetConnMaxIdleTime(3 * time.Minute)
 
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
 		return nil, err
 	}
 
-	// Record the initial role so CanCreateUsers/CanManageUsers can use it
-	// without a round-trip.
-	var initialRole string
-	_ = db.QueryRowContext(ctx, "SELECT CURRENT_ROLE()").Scan(&initialRole)
+	// Capture the role the server actually assigned (may differ from p.Role if
+	// the user left it blank or Snowflake normalised it).
+	var serverRole string
+	if err2 := db.QueryRowContext(ctx, "SELECT CURRENT_ROLE()").Scan(&serverRole); err2 == nil {
+		sc.mu.Lock()
+		sc.role = strings.TrimSpace(serverRole)
+		sc.mu.Unlock()
+	}
 
-	return &Client{db: db, currentRole: strings.TrimSpace(initialRole)}, nil
+	return &Client{db: db, connector: sc}, nil
 }
 
 // IsAlive checks that the underlying connection is still usable.
@@ -228,6 +293,14 @@ func (c *Client) Execute(ctx context.Context, query string) (*QueryResult, error
 	return &last, nil
 }
 
+// CancelSnowflakeQuery asks Snowflake to abort the query with the given ID.
+// This is a best-effort call; the caller may ignore errors.
+func (c *Client) CancelSnowflakeQuery(ctx context.Context, queryID string) error {
+	escaped := strings.ReplaceAll(queryID, "'", "''")
+	_, err := c.db.ExecContext(ctx, fmt.Sprintf("SELECT SYSTEM$CANCEL_QUERY('%s')", escaped))
+	return err
+}
+
 // SessionContext holds the current session's active role, warehouse, database and schema.
 type SessionContext struct {
 	Role      string `json:"role"`
@@ -247,10 +320,31 @@ func (c *Client) GetSessionContext(ctx context.Context) (SessionContext, error) 
 	return sc, nil
 }
 
-// ListRoles returns the names of all roles available to the current user.
+// ListRoles returns the roles that the current user is actually allowed to
+// assume. It uses CURRENT_AVAILABLE_ROLES() which returns a JSON array of
+// every role reachable through the user's role hierarchy — exactly the set
+// that USE ROLE will accept. SHOW ROLES is intentionally avoided because it
+// lists roles visible to the current role (often the whole account) rather
+// than roles the user can switch to.
 func (c *Client) ListRoles(ctx context.Context) ([]string, error) {
-	// SHOW ROLES columns: created_on, name, ...
-	return c.queryStringSlice(ctx, "SHOW ROLES", 1)
+	var raw string
+	if err := c.db.QueryRowContext(ctx, "SELECT CURRENT_AVAILABLE_ROLES()").Scan(&raw); err != nil {
+		return nil, err
+	}
+	// Result is a JSON array string, e.g. ["PUBLIC","SYSADMIN","ACCOUNTADMIN"]
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimPrefix(raw, "[")
+	raw = strings.TrimSuffix(raw, "]")
+	var roles []string
+	for _, token := range strings.Split(raw, ",") {
+		token = strings.TrimSpace(token)
+		token = strings.Trim(token, `"`)
+		if token != "" {
+			roles = append(roles, token)
+		}
+	}
+	sort.Strings(roles)
+	return roles, nil
 }
 
 // ListWarehouses returns the names of all warehouses visible to the current role.
@@ -434,9 +528,9 @@ func (c *Client) walkRoleHierarchy(
 // CanCreateUsers returns (true, nil) when the current session role (or any
 // role it inherits) allows creating users.
 func (c *Client) CanCreateUsers(ctx context.Context) (bool, error) {
-	c.mu.RLock()
-	role := c.currentRole
-	c.mu.RUnlock()
+	c.connector.mu.RLock()
+	role := c.connector.role
+	c.connector.mu.RUnlock()
 
 	if role == "" {
 		// Fallback: ask the DB directly (e.g. before first UseRole call).
@@ -454,9 +548,9 @@ func (c *Client) CanCreateUsers(ctx context.Context) (bool, error) {
 // CanManageUsers returns (true, nil) when the current session role (or any
 // role it inherits) can ALTER or DROP other users.
 func (c *Client) CanManageUsers(ctx context.Context) (bool, error) {
-	c.mu.RLock()
-	role := c.currentRole
-	c.mu.RUnlock()
+	c.connector.mu.RLock()
+	role := c.connector.role
+	c.connector.mu.RUnlock()
 
 	if role == "" {
 		if err := c.db.QueryRowContext(ctx, "SELECT CURRENT_ROLE()").Scan(&role); err != nil {
@@ -617,17 +711,30 @@ func (c *Client) UseRole(ctx context.Context, role string) error {
 	if _, err := c.db.ExecContext(ctx, fmt.Sprintf(`USE ROLE "%s"`, escaped)); err != nil {
 		return err
 	}
-	c.mu.Lock()
-	c.currentRole = role
-	c.mu.Unlock()
+	c.connector.mu.Lock()
+	c.connector.role = role
+	c.connector.mu.Unlock()
+	// Flush idle connections so the next query gets a fresh connection that
+	// goes through sessionConnector.Connect and inherits the new role.
+	c.db.SetMaxIdleConns(0)
+	c.db.SetMaxIdleConns(8)
 	return nil
 }
 
 // UseWarehouse switches the active warehouse for the current session.
 func (c *Client) UseWarehouse(ctx context.Context, warehouse string) error {
 	escaped := strings.ReplaceAll(warehouse, `"`, `""`)
-	_, err := c.db.ExecContext(ctx, fmt.Sprintf(`USE WAREHOUSE "%s"`, escaped))
-	return err
+	if _, err := c.db.ExecContext(ctx, fmt.Sprintf(`USE WAREHOUSE "%s"`, escaped)); err != nil {
+		return err
+	}
+	c.connector.mu.Lock()
+	c.connector.wh = warehouse
+	c.connector.mu.Unlock()
+	// Flush idle connections so the next query gets a fresh connection that
+	// goes through sessionConnector.Connect and inherits the new warehouse.
+	c.db.SetMaxIdleConns(0)
+	c.db.SetMaxIdleConns(8)
+	return nil
 }
 
 // ListDatabases returns all databases the user can see.
@@ -708,8 +815,14 @@ type DroppedTable struct {
 // returns only rows where dropped_on is non-empty.
 func (c *Client) ListDroppedTables(ctx context.Context, database, schema string) ([]DroppedTable, error) {
 	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
-	query := fmt.Sprintf(`SHOW TABLES HISTORY IN SCHEMA "%s"."%s"`, esc(database), esc(schema))
+	return c.listDroppedHistory(ctx,
+		fmt.Sprintf(`SHOW TABLES HISTORY IN SCHEMA "%s"."%s"`, esc(database), esc(schema)))
+}
 
+// listDroppedHistory is the shared helper for SHOW * HISTORY queries.
+// It reads any result set that has "name" and "dropped_on" columns and returns
+// only the rows where dropped_on is non-empty (i.e. the object is dropped).
+func (c *Client) listDroppedHistory(ctx context.Context, query string) ([]DroppedTable, error) {
 	rows, err := c.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
@@ -719,7 +832,7 @@ func (c *Client) ListDroppedTables(ctx context.Context, database, schema string)
 	cols, _ := rows.Columns()
 	idxs := colIndexMap(cols, "name", "dropped_on")
 	if idxs["name"] < 0 {
-		return nil, fmt.Errorf("no 'name' column in SHOW TABLES HISTORY result")
+		return nil, fmt.Errorf("no 'name' column in result: %s", query)
 	}
 
 	var result []DroppedTable
@@ -730,7 +843,7 @@ func (c *Client) ListDroppedTables(ctx context.Context, database, schema string)
 		}
 		droppedOn := strVal(vals, idxs["dropped_on"])
 		if droppedOn == "" {
-			continue // table is still alive
+			continue
 		}
 		result = append(result, DroppedTable{
 			Name:      strVal(vals, idxs["name"]),
@@ -738,6 +851,19 @@ func (c *Client) ListDroppedTables(ctx context.Context, database, schema string)
 		})
 	}
 	return result, rows.Err()
+}
+
+// ListDroppedSchemas returns schemas in the given database that have been
+// dropped but are still within the Time Travel retention window.
+func (c *Client) ListDroppedSchemas(ctx context.Context, database string) ([]DroppedTable, error) {
+	esc := strings.ReplaceAll(database, `"`, `""`)
+	return c.listDroppedHistory(ctx, fmt.Sprintf(`SHOW SCHEMAS HISTORY IN DATABASE "%s"`, esc))
+}
+
+// ListDroppedDatabases returns all databases that have been dropped but are
+// still within the Time Travel retention window.
+func (c *Client) ListDroppedDatabases(ctx context.Context) ([]DroppedTable, error) {
+	return c.listDroppedHistory(ctx, `SHOW DATABASES HISTORY`)
 }
 
 // GetTableRetentionDays returns the Time Travel data-retention period in days

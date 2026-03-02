@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	sf "github.com/snowflakedb/gosnowflake"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -35,11 +36,12 @@ type App struct {
 	cancelConnect context.CancelFunc
 
 	// Two-phase query execution (StartQuery / WaitForQueryResult).
-	queryMu     sync.Mutex
-	queryID     string
-	queryDone   chan struct{}
-	queryResult *snowflake.QueryResult
-	queryErr    error
+	queryMu         sync.Mutex
+	queryID         string
+	queryDone       chan struct{}
+	queryResult     *snowflake.QueryResult
+	queryErr        error
+	queryCancelFunc context.CancelFunc // cancels the in-flight query context
 }
 
 func NewApp() *App {
@@ -394,13 +396,26 @@ func (a *App) ExecuteQuery(sql string) (*snowflake.QueryResult, error) {
 // round-trip (slow queries) this returns while execution is still in progress,
 // giving the frontend a chance to display the query ID in the loading spinner.
 // Call WaitForQueryResult afterwards to obtain the actual rows.
+// An in-flight query can be stopped with CancelQuery.
 func (a *App) StartQuery(sql string) (string, error) {
 	if a.client == nil {
 		return "", ErrNotConnected
 	}
 
+	// Create a per-query cancellable context and replace any previous one.
+	ctx, cancel := context.WithCancel(a.ctx)
+
+	a.queryMu.Lock()
+	if a.queryCancelFunc != nil {
+		a.queryCancelFunc() // cancel any still-running previous query
+	}
+	a.queryCancelFunc = cancel
+	a.queryDone = nil // clear stale channel from previous query
+	a.queryID = ""
+	a.queryMu.Unlock()
+
 	qidChan := make(chan string, 1)
-	ctx := sf.WithQueryIDChan(a.ctx, qidChan)
+	ctx = sf.WithQueryIDChan(ctx, qidChan)
 	ctx = sf.WithAsyncMode(ctx) // ask Snowflake to return query ID immediately, before results are ready
 	done := make(chan struct{})
 
@@ -416,7 +431,8 @@ func (a *App) StartQuery(sql string) (string, error) {
 	}()
 
 	// Block until the driver assigns a query ID (arrives with the first HTTP
-	// response) or until the background goroutine finishes (fast query).
+	// response), the background goroutine finishes (fast query), or the query
+	// is cancelled.
 	var queryID string
 	select {
 	case qid := <-qidChan:
@@ -428,8 +444,8 @@ func (a *App) StartQuery(sql string) (string, error) {
 			queryID = qid
 		default:
 		}
-	case <-a.ctx.Done():
-		return "", a.ctx.Err()
+	case <-ctx.Done():
+		return "", ctx.Err()
 	}
 
 	a.queryMu.Lock()
@@ -438,6 +454,27 @@ func (a *App) StartQuery(sql string) (string, error) {
 	a.queryMu.Unlock()
 
 	return queryID, nil
+}
+
+// CancelQuery cancels the query currently in flight (started by StartQuery).
+// It is a no-op if no query is running. In addition to cancelling the local
+// context, it issues SYSTEM$CANCEL_QUERY so that Snowflake stops the query
+// server-side and stops consuming credits.
+func (a *App) CancelQuery() {
+	a.queryMu.Lock()
+	cancel := a.queryCancelFunc
+	queryID := a.queryID
+	a.queryMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if queryID != "" && a.client != nil {
+		go func() {
+			ctx, done := context.WithTimeout(a.ctx, 15*time.Second)
+			defer done()
+			_ = a.client.CancelSnowflakeQuery(ctx, queryID)
+		}()
+	}
 }
 
 // WaitForQueryResult blocks until the query submitted by StartQuery completes
@@ -456,6 +493,12 @@ func (a *App) WaitForQueryResult() (*snowflake.QueryResult, error) {
 	a.queryMu.Lock()
 	result := a.queryResult
 	err := a.queryErr
+	// Clean up so a subsequent call does not re-read stale state.
+	if a.queryCancelFunc != nil {
+		a.queryCancelFunc() // no-op if already cancelled; ensures context resources are freed
+		a.queryCancelFunc = nil
+	}
+	a.queryDone = nil
 	a.queryMu.Unlock()
 
 	if result != nil && queryID != "" {
@@ -585,6 +628,24 @@ func (a *App) ListDroppedTables(database, schema string) ([]snowflake.DroppedTab
 		return nil, ErrNotConnected
 	}
 	return a.client.ListDroppedTables(a.ctx, database, schema)
+}
+
+// ListDroppedSchemas returns schemas in the database that are within the Time
+// Travel retention window and can be recovered with UNDROP SCHEMA.
+func (a *App) ListDroppedSchemas(database string) ([]snowflake.DroppedTable, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListDroppedSchemas(a.ctx, database)
+}
+
+// ListDroppedDatabases returns databases that are within the Time Travel
+// retention window and can be recovered with UNDROP DATABASE.
+func (a *App) ListDroppedDatabases() ([]snowflake.DroppedTable, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListDroppedDatabases(a.ctx)
 }
 
 // GetProcedureParams fetches the DDL for a stored procedure and returns its

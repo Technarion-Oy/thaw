@@ -9,6 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
 import { ExecuteQuery } from "../../wailsjs/go/main/App";
 
 export interface QueryResult {
@@ -86,7 +87,9 @@ const INITIAL_SQL = "SELECT CURRENT_USER(), CURRENT_WAREHOUSE(), CURRENT_DATABAS
 
 const initialTab = makeTab({ sql: INITIAL_SQL, savedSql: INITIAL_SQL });
 
-export const useQueryStore = create<QueryState>((set) => ({
+export const useQueryStore = create<QueryState>()(
+  persist(
+    (set) => ({
   tabs: [initialTab],
   activeTabId: initialTab.id,
 
@@ -279,4 +282,20 @@ export const useQueryStore = create<QueryState>((set) => ({
       set({ isRunning: false });
     }
   },
-}));
+}),
+{
+  name: "thaw-query-store",
+  storage: createJSONStorage(() => sessionStorage),
+  // Persist the canonical tab state and the flat active-tab aliases.
+  // isRunning and selectedSql are intentionally excluded so they always
+  // reset to safe defaults (false / "") after a page reload.
+  partialize: (state) => ({
+    tabs: state.tabs,
+    activeTabId: state.activeTabId,
+    sql: state.sql,
+    result: state.result,
+    error: state.error,
+    currentFile: state.currentFile,
+  }),
+}
+));
