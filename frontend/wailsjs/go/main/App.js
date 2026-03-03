@@ -142,10 +142,6 @@ export function ListObjects(arg1, arg2) {
   return window['go']['main']['App']['ListObjects'](arg1, arg2);
 }
 
-export function ListAvailableRoles() {
-  return window['go']['main']['App']['ListAvailableRoles']();
-}
-
 export function ListRoles() {
   return window['go']['main']['App']['ListRoles']();
 }

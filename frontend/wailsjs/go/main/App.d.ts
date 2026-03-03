@@ -78,8 +78,6 @@ export function ListNotificationIntegrations():Promise<Array<string>>;
 
 export function ListObjects(arg1:string,arg2:string):Promise<Array<snowflake.SnowflakeObject>>;
 
-export function ListAvailableRoles():Promise<Array<string>>;
-
 export function ListRoles():Promise<Array<string>>;
 
 export function ListSchemas(arg1:string):Promise<Array<string>>;

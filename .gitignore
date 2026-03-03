@@ -1,3 +1,6 @@
+# ── Logs (dev-mode log files; production logs go to OS-specific paths) ────────
+logs/
+
 # ── Go ────────────────────────────────────────────────────────────────────────
 build/bin/
 frontend/package.json.md5

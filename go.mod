@@ -4,8 +4,10 @@ go 1.22.0
 
 require (
 	github.com/BurntSushi/toml v1.6.0
+	github.com/sirupsen/logrus v1.9.0
 	github.com/snowflakedb/gosnowflake v1.10.1
 	github.com/wailsapp/wails/v2 v2.11.0
+	gopkg.in/lumberjack.v2 v2.0.0
 )
 
 require (
@@ -60,7 +62,6 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/samber/lo v1.49.1 // indirect
-	github.com/sirupsen/logrus v1.9.0 // indirect
 	github.com/tkrajina/go-reflector v0.5.8 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
@@ -77,4 +78,5 @@ require (
 	golang.org/x/text v0.22.0 // indirect
 	golang.org/x/tools v0.30.0 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 )

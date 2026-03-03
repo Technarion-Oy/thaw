@@ -25,6 +25,7 @@ import (
 	"thaw/internal/ddl"
 	"thaw/internal/filesystem"
 	"thaw/internal/gitrepo"
+	"thaw/internal/logger"
 	"thaw/internal/sfconfig"
 	"thaw/internal/snowflake"
 )
@@ -34,6 +35,7 @@ type App struct {
 	ctx           context.Context
 	client        *snowflake.Client
 	cancelConnect context.CancelFunc
+	logCleanup    func() // closes the log rotation file on shutdown
 
 	// Two-phase query execution (StartQuery / WaitForQueryResult).
 	queryMu         sync.Mutex
@@ -50,6 +52,8 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.logCleanup = logger.Init()
+	logger.L.Info("application started")
 }
 
 // isQueryRunning reports whether a query submitted by StartQuery is still in flight.
@@ -78,6 +82,11 @@ func (a *App) shutdown(_ context.Context) {
 		// TCP connection and Snowflake will expire the session on its own.
 		go a.client.Close() //nolint:errcheck
 	}
+
+	logger.L.Info("application shutting down")
+	if a.logCleanup != nil {
+		a.logCleanup()
+	}
 }
 
 // Connect opens a Snowflake connection with the provided parameters.
@@ -90,14 +99,18 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 		a.cancelConnect = nil
 	}()
 
+	logger.L.Info("connecting to Snowflake", "account", params.Account, "user", params.User, "authenticator", params.Authenticator)
 	client, err := snowflake.NewClient(ctx, params)
 	if err != nil {
 		if ctx.Err() != nil {
+			logger.L.Info("connection cancelled by user")
 			return fmt.Errorf("connection cancelled")
 		}
+		logger.L.Error("connection failed", "account", params.Account, "err", err)
 		return err
 	}
 	a.client = client
+	logger.L.Info("connected", "account", params.Account, "user", params.User)
 	return nil
 }
 
@@ -471,6 +484,7 @@ func (a *App) StartQuery(sql string) (string, error) {
 	a.queryDone = done
 	a.queryMu.Unlock()
 
+	logger.L.Info("query started", "queryID", queryID)
 	return queryID, nil
 }
 
@@ -487,10 +501,13 @@ func (a *App) CancelQuery() {
 		cancel()
 	}
 	if queryID != "" && a.client != nil {
+		logger.L.Info("cancelling query", "queryID", queryID)
 		go func() {
 			ctx, done := context.WithTimeout(a.ctx, 15*time.Second)
 			defer done()
-			_ = a.client.CancelSnowflakeQuery(ctx, queryID)
+			if err := a.client.CancelSnowflakeQuery(ctx, queryID); err != nil {
+				logger.L.Warn("SYSTEM$CANCEL_QUERY failed", "queryID", queryID, "err", err)
+			}
 		}()
 	}
 }
@@ -521,6 +538,11 @@ func (a *App) WaitForQueryResult() (*snowflake.QueryResult, error) {
 
 	if result != nil && queryID != "" {
 		result.QueryID = queryID
+	}
+	if err != nil {
+		logger.L.Error("query failed", "queryID", queryID, "err", err)
+	} else {
+		logger.L.Info("query completed", "queryID", queryID)
 	}
 	return result, err
 }
