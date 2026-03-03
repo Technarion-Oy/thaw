@@ -182,12 +182,20 @@ export function PickOpenFile() {
   return window['go']['main']['App']['PickOpenFile']();
 }
 
+export function PickSaveExportFile(arg1, arg2) {
+  return window['go']['main']['App']['PickSaveExportFile'](arg1, arg2);
+}
+
 export function PickSaveFile(arg1) {
   return window['go']['main']['App']['PickSaveFile'](arg1);
 }
 
 export function ReadFile(arg1) {
   return window['go']['main']['App']['ReadFile'](arg1);
+}
+
+export function SaveBinaryFile(arg1, arg2) {
+  return window['go']['main']['App']['SaveBinaryFile'](arg1, arg2);
 }
 
 export function SaveFile(arg1, arg2) {

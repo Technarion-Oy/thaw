@@ -12,7 +12,9 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -389,6 +391,54 @@ func (a *App) PickSaveFile(defaultName string) string {
 		return ""
 	}
 	return path
+}
+
+// PickSaveExportFile opens a native save-file dialog with filters appropriate
+// for the requested format ("csv" or "excel") and returns the chosen path, or
+// an empty string if the user cancels.
+func (a *App) PickSaveExportFile(defaultName, format string) string {
+	var filters []wailsruntime.FileFilter
+	title := "Save export file"
+	switch format {
+	case "csv":
+		title = "Save as CSV"
+		filters = []wailsruntime.FileFilter{
+			{DisplayName: "CSV Files (*.csv)", Pattern: "*.csv"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		}
+	case "excel":
+		title = "Save as Excel"
+		filters = []wailsruntime.FileFilter{
+			{DisplayName: "Excel Files (*.xlsx)", Pattern: "*.xlsx"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		}
+	default:
+		filters = []wailsruntime.FileFilter{
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		}
+	}
+	path, err := wailsruntime.SaveFileDialog(a.ctx, wailsruntime.SaveDialogOptions{
+		Title:           title,
+		DefaultFilename: defaultName,
+		Filters:         filters,
+	})
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
+// SaveBinaryFile decodes the base64-encoded content and writes the raw bytes
+// to path. Used for binary export formats such as Excel (.xlsx).
+func (a *App) SaveBinaryFile(path, base64Content string) error {
+	data, err := base64.StdEncoding.DecodeString(base64Content)
+	if err != nil {
+		return fmt.Errorf("base64 decode: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
 }
 
 // PickDirectory opens a native folder-picker dialog and returns the selected path.

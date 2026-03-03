@@ -98,9 +98,13 @@ export function PickDirectory():Promise<string>;
 
 export function PickOpenFile():Promise<string>;
 
+export function PickSaveExportFile(arg1:string,arg2:string):Promise<string>;
+
 export function PickSaveFile(arg1:string):Promise<string>;
 
 export function ReadFile(arg1:string):Promise<string>;
+
+export function SaveBinaryFile(arg1:string,arg2:string):Promise<void>;
 
 export function SaveFile(arg1:string,arg2:string):Promise<void>;
 

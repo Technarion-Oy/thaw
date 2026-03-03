@@ -11,9 +11,10 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Button, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message } from "antd";
-import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined } from "@ant-design/icons";
+import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined } from "@ant-design/icons";
+import * as XLSX from "xlsx";
 import { ClipboardSetText } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickOpenFile, ReadFile } from "../../wailsjs/go/main/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile } from "../../wailsjs/go/main/App";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import SqlEditor from "../components/editor/SqlEditor";
 import TabBar from "../components/editor/TabBar";
@@ -90,6 +91,44 @@ export default function QueryPage() {
   const handleDisconnect = async () => {
     await Disconnect();
     disconnect();
+  };
+
+  const exportCSV = async () => {
+    if (!result) return;
+    const escape = (v: unknown) => {
+      const s = v === null || v === undefined ? "" : String(v);
+      return s.includes(",") || s.includes('"') || s.includes("\n")
+        ? `"${s.replace(/"/g, '""')}"`
+        : s;
+    };
+    const csv =
+      result.columns.map(escape).join(",") +
+      "\n" +
+      result.rows.map((r) => r.map(escape).join(",")).join("\n");
+    const path = await PickSaveExportFile("results.csv", "csv");
+    if (!path) return;
+    try {
+      await SaveFile(path, csv);
+      message.success("Exported to CSV");
+    } catch (e) {
+      message.error(String(e));
+    }
+  };
+
+  const exportExcel = async () => {
+    if (!result) return;
+    const ws = XLSX.utils.aoa_to_sheet([result.columns, ...result.rows]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Results");
+    const b64 = XLSX.write(wb, { type: "base64", bookType: "xlsx" });
+    const path = await PickSaveExportFile("results.xlsx", "excel");
+    if (!path) return;
+    try {
+      await SaveBinaryFile(path, b64);
+      message.success("Exported to Excel");
+    } catch (e) {
+      message.error(String(e));
+    }
   };
 
   // Save to the tab's existing path, or open a Save As dialog if it has none.
@@ -345,9 +384,29 @@ export default function QueryPage() {
                   />
                 </Space>
               )}
-              <Text style={{ fontSize: 11, color: "var(--text-faint)" }}>
-                {result.rows.length} row{result.rows.length !== 1 ? "s" : ""}
-              </Text>
+              <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+                <Tooltip title="Export as CSV">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<FileTextOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} />}
+                    style={{ height: 18, padding: "0 4px", minWidth: 0 }}
+                    onClick={exportCSV}
+                  />
+                </Tooltip>
+                <Tooltip title="Export as Excel">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<FileExcelOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} />}
+                    style={{ height: 18, padding: "0 4px", minWidth: 0 }}
+                    onClick={exportExcel}
+                  />
+                </Tooltip>
+                <Text style={{ fontSize: 11, color: "var(--text-faint)" }}>
+                  {result.rows.length} row{result.rows.length !== 1 ? "s" : ""}
+                </Text>
+              </div>
             </div>
             <div style={{ flex: 1, overflow: "hidden" }}>
               <ResultGrid result={result} />
