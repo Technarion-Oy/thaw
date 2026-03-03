@@ -126,7 +126,9 @@ Role and warehouse switches (via the toolbar dropdowns) are applied to a **singl
   ```
 - Parallel fetch (up to 8 databases concurrently) and parallel atomic writes
 - Live progress bar driven by Wails events from the Go backend
+- **Cancel export** — a Cancel button appears next to the Export button while a run is in progress; cancels both the in-flight Snowflake DDL fetch and the local file writes
 - Export directory can be changed directly from the Export DDL panel without opening the Git section
+- Results list (per-database file counts and errors) can be collapsed/expanded with a caret button; the summary tags (total files, skipped, errors) always remain visible
 
 ### File browser
 - Browse the export working directory in the sidebar
@@ -153,6 +155,27 @@ Role and warehouse switches (via the toolbar dropdowns) are applied to a **singl
 - Object browser scrolls horizontally when object names are wider than the sidebar
 - Right-click context menu is always clamped inside the viewport — never overflows the screen edges
 - Closing the app while a query is running shows a confirmation dialog; if confirmed, the query is cancelled in Snowflake before exit
+
+### Logging
+
+Thaw writes a structured, rotating log file automatically on every launch.
+
+| Build | Path |
+|---|---|
+| Development (`wails dev`) | `./logs/thaw.log` (also echoed to stderr) |
+| macOS production | `~/Library/Logs/thaw/thaw.log` |
+| Windows production | `%APPDATA%\thaw\logs\thaw.log` |
+| Linux production | `~/.local/state/thaw/thaw.log` (or `$XDG_STATE_HOME/thaw/thaw.log`) |
+
+Log files rotate at 10 MB, keeping 5 compressed backups for up to 30 days. The Snowflake driver's own log output (connection errors, async polling) is redirected into the same file.
+
+### Telemetry
+
+Anonymous usage events (app started/stopped, connections, query lifecycle, feature usage) are logged at DEBUG level. No SQL content, credentials, or account identifiers are ever recorded. A remote backend placeholder is provided in `internal/telemetry/telemetry.go` for future wiring to PostHog, Segment, or Mixpanel.
+
+### Crash reporting
+
+Unexpected panics are caught by a deferred `crashreport.Recover()` in `main()`. On crash, a timestamped JSON file (e.g. `crash_20260303T120000Z.json`) is written alongside the rotating log files. A remote delivery placeholder is provided in `internal/crashreport/crashreport.go` for future wiring to Sentry or Bugsnag.
 
 ---
 
@@ -217,6 +240,7 @@ thaw/
 ├── main.go                        # Wails entry point, window config, native menu
 ├── app.go                         # Methods bound to the frontend (Connect, ExecuteQuery, …)
 ├── errors.go                      # Sentinel errors
+├── version.go                     # Version string (overridable via -ldflags at build time)
 ├── go.mod
 ├── wails.json                     # Wails project configuration
 ├── build/
@@ -224,18 +248,24 @@ thaw/
 │   └── windows/                   # Windows resources
 ├── internal/
 │   ├── config/config.go           # Saved git / export settings
+│   ├── crashreport/crashreport.go # Panic handler; writes JSON crash file; remote-send placeholder
 │   ├── ddl/
 │   │   ├── parser.go              # SQL statement splitter (state machine)
 │   │   ├── object.go              # Metadata extraction + file-path generation
-│   │   ├── exporter.go            # Parallel DDL export orchestration
+│   │   ├── exporter.go            # Parallel DDL export orchestration (cancellable)
 │   │   ├── parser_test.go
 │   │   └── object_test.go
 │   ├── filesystem/fs.go           # Directory listing, file reading and writing
 │   ├── gitrepo/repo.go            # Git status, commit/push, pull
 │   ├── integration/
 │   │   └── export_test.go         # End-to-end tests (require live Snowflake account)
+│   ├── logger/
+│   │   ├── logger.go              # slog + lumberjack setup; logrus redirect for gosnowflake
+│   │   ├── path_dev.go            # Log path for dev builds (./logs/thaw.log)
+│   │   └── path_prod.go           # Log path for production builds (OS-specific)
 │   ├── sfconfig/reader.go         # Snowflake CLI config (~/.snowflake/config.toml)
-│   └── snowflake/client.go        # Snowflake driver wrapper
+│   ├── snowflake/client.go        # Snowflake driver wrapper
+│   └── telemetry/telemetry.go     # Anonymous event tracking; remote-send placeholder
 └── frontend/
     ├── index.html
     ├── vite.config.ts
@@ -445,6 +475,12 @@ Git and export settings are stored at:
 
 The file stores the remote URL, branch, export directory, and author info.
 **Git tokens are never written to disk.**
+
+Log and crash files are written to:
+
+- **macOS** — `~/Library/Logs/thaw/`
+- **Linux** — `~/.local/state/thaw/` (or `$XDG_STATE_HOME/thaw/`)
+- **Windows** — `%APPDATA%\thaw\logs\`
 
 Snowflake CLI connection profiles are read from `~/.snowflake/config.toml` and
 pre-fill the connection form, but are never modified by Thaw.
