@@ -21,12 +21,17 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+
+	"thaw/internal/crashreport"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
 
 func main() {
+	crashreport.Init(Version)
+	defer crashreport.Recover()
+
 	app := NewApp()
 
 	appMenu := buildMenu(app)

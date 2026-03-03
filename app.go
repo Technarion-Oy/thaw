@@ -28,6 +28,7 @@ import (
 	"thaw/internal/logger"
 	"thaw/internal/sfconfig"
 	"thaw/internal/snowflake"
+	"thaw/internal/telemetry"
 )
 
 // App is the main application struct. Methods bound here are callable from the frontend.
@@ -53,7 +54,9 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.logCleanup = logger.Init()
+	telemetry.Init(Version)
 	logger.L.Info("application started")
+	telemetry.Track(telemetry.EventAppStarted, nil)
 }
 
 // isQueryRunning reports whether a query submitted by StartQuery is still in flight.
@@ -83,6 +86,9 @@ func (a *App) shutdown(_ context.Context) {
 		go a.client.Close() //nolint:errcheck
 	}
 
+	telemetry.Track(telemetry.EventAppStopped, telemetry.Props{
+		"duration_s": int(telemetry.SessionDuration().Seconds()),
+	})
 	logger.L.Info("application shutting down")
 	if a.logCleanup != nil {
 		a.logCleanup()
@@ -107,10 +113,12 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 			return fmt.Errorf("connection cancelled")
 		}
 		logger.L.Error("connection failed", "account", params.Account, "err", err)
+		telemetry.Track(telemetry.EventConnectionFailed, nil)
 		return err
 	}
 	a.client = client
 	logger.L.Info("connected", "account", params.Account, "user", params.User)
+	telemetry.Track(telemetry.EventConnected, telemetry.Props{"authenticator": params.Authenticator})
 	return nil
 }
 
@@ -393,6 +401,7 @@ func (a *App) Disconnect() error {
 	}
 	err := a.client.Close()
 	a.client = nil
+	telemetry.Track(telemetry.EventDisconnected, nil)
 	return err
 }
 
@@ -485,6 +494,7 @@ func (a *App) StartQuery(sql string) (string, error) {
 	a.queryMu.Unlock()
 
 	logger.L.Info("query started", "queryID", queryID)
+	telemetry.Track(telemetry.EventQueryStarted, nil)
 	return queryID, nil
 }
 
@@ -502,6 +512,7 @@ func (a *App) CancelQuery() {
 	}
 	if queryID != "" && a.client != nil {
 		logger.L.Info("cancelling query", "queryID", queryID)
+		telemetry.Track(telemetry.EventQueryCancelled, nil)
 		go func() {
 			ctx, done := context.WithTimeout(a.ctx, 15*time.Second)
 			defer done()
@@ -541,8 +552,10 @@ func (a *App) WaitForQueryResult() (*snowflake.QueryResult, error) {
 	}
 	if err != nil {
 		logger.L.Error("query failed", "queryID", queryID, "err", err)
+		telemetry.Track(telemetry.EventQueryFailed, nil)
 	} else {
 		logger.L.Info("query completed", "queryID", queryID)
+		telemetry.Track(telemetry.EventQueryCompleted, nil)
 	}
 	return result, err
 }

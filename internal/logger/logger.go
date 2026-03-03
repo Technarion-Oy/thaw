@@ -14,6 +14,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/sirupsen/logrus"
 	"gopkg.in/lumberjack.v2"
@@ -23,6 +24,10 @@ import (
 // safe to use from multiple goroutines.
 var L *slog.Logger
 
+// Dir is the directory where log files are written. Set by Init; other
+// packages (e.g. crashreport) may use it to co-locate related files.
+var Dir string
+
 // Init sets up file-based logging with rotation and returns a cleanup function
 // that flushes and closes the log file. The caller should defer the cleanup.
 //
@@ -30,6 +35,7 @@ var L *slog.Logger
 // to stderr. Production builds log to the OS-specific application log directory.
 func Init() func() {
 	path := logFilePath()
+	Dir = filepath.Dir(path)
 
 	rot := &lumberjack.Logger{
 		Filename:   path,
