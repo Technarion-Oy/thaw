@@ -52,7 +52,25 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
+// isQueryRunning reports whether a query submitted by StartQuery is still in flight.
+func (a *App) isQueryRunning() bool {
+	a.queryMu.Lock()
+	defer a.queryMu.Unlock()
+	return a.queryID != ""
+}
+
 func (a *App) shutdown(_ context.Context) {
+	// Cancel any in-flight query so it stops consuming credits in Snowflake.
+	// CancelQuery issues SYSTEM$CANCEL_QUERY in a goroutine; give it a moment
+	// to fire before the process exits.
+	a.queryMu.Lock()
+	hasQuery := a.queryID != ""
+	a.queryMu.Unlock()
+	if hasQuery {
+		a.CancelQuery()
+		time.Sleep(500 * time.Millisecond)
+	}
+
 	if a.client != nil {
 		// Close asynchronously — the gosnowflake driver sends an HTTP DELETE
 		// /session to invalidate the token, which takes ~2 s. The app is

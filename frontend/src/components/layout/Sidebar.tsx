@@ -33,6 +33,8 @@ import {
   DownloadOutlined,
   UploadOutlined,
   SearchOutlined,
+  CaretRightFilled,
+  CaretDownFilled,
 } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
@@ -288,6 +290,32 @@ export default function Sidebar() {
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
   }, [ctxMenu]);
+
+  // ── Tree height resize ─────────────────────────────────────────────────────
+  const [treeCollapsed, setTreeCollapsed] = useState(false);
+  const [treeHeight, setTreeHeight] = useState(360);
+  const [resizingTree, setResizingTree] = useState(false);
+  const treeResizeStartY = useRef(0);
+  const treeResizeStartH = useRef(0);
+
+  useEffect(() => {
+    if (!resizingTree) return;
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+    const onMove = (e: MouseEvent) => {
+      const delta = e.clientY - treeResizeStartY.current;
+      setTreeHeight(Math.max(80, Math.min(800, treeResizeStartH.current + delta)));
+    };
+    const onUp = () => setResizingTree(false);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [resizingTree]);
 
   // Cascade-load the full object tree into searchResults (never treeData).
   // treeData stays pristine, so clearing the search just resets searchResults.
@@ -822,10 +850,21 @@ export default function Sidebar() {
 
   return (
     <div style={{ padding: "8px 4px" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 4px 0 12px", marginBottom: 8 }}>
-        <Text type="secondary" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-          Objects
-        </Text>
+      <div style={{ display: "flex", alignItems: "center", padding: "0 4px 0 8px", marginBottom: treeCollapsed ? 4 : 8, gap: 2 }}>
+        <div
+          style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", flex: 1, padding: "2px 4px", borderRadius: 4 }}
+          onClick={() => setTreeCollapsed((c) => !c)}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+        >
+          {treeCollapsed
+            ? <CaretRightFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
+            : <CaretDownFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
+          }
+          <Text type="secondary" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Objects
+          </Text>
+        </div>
         <Tooltip title="Show dropped databases">
           <Button
             type="text"
@@ -847,114 +886,139 @@ export default function Sidebar() {
         </Tooltip>
       </div>
 
-      <div style={{ padding: "0 8px 8px" }}>
-        <Input
-          size="small"
-          placeholder="Filter objects…"
-          prefix={<SearchOutlined style={{ color: "var(--text-muted)", fontSize: 11 }} />}
-          allowClear
-          value={searchQuery}
-          onChange={(e) => {
-            const val = e.target.value;
-            if (!val && searchWasActive.current) {
-              setSearchResults([]);
-              setSearchExpandedKeys([]);
-              setExpandedKeys([]);
-              // Strip all cached schema/object children so the tree returns
-              // to a clean db-list-only view regardless of what was loaded
-              // during the cascade.
-              setTreeData((prev) =>
-                prev.map((dbNode) => {
-                  const { children: _, ...rest } = dbNode as any;
-                  return rest as DataNode;
-                })
-              );
-              loadingNodes.current.clear();
-              searchWasActive.current = false;
-            }
-            setSearchQuery(val);
-          }}
-          style={{ fontSize: 12 }}
-        />
-      </div>
+      {!treeCollapsed && (
+        <div style={{ height: treeHeight, overflow: "auto" }}>
+          <div style={{ padding: "0 8px 8px" }}>
+            <Input
+              size="small"
+              placeholder="Filter objects…"
+              prefix={<SearchOutlined style={{ color: "var(--text-muted)", fontSize: 11 }} />}
+              allowClear
+              value={searchQuery}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (!val && searchWasActive.current) {
+                  setSearchResults([]);
+                  setSearchExpandedKeys([]);
+                  setExpandedKeys([]);
+                  // Strip all cached schema/object children so the tree returns
+                  // to a clean db-list-only view regardless of what was loaded
+                  // during the cascade.
+                  setTreeData((prev) =>
+                    prev.map((dbNode) => {
+                      const { children: _, ...rest } = dbNode as any;
+                      return rest as DataNode;
+                    })
+                  );
+                  loadingNodes.current.clear();
+                  searchWasActive.current = false;
+                }
+                setSearchQuery(val);
+              }}
+              style={{ fontSize: 12 }}
+            />
+          </div>
 
-      {loading && <Spin size="small" style={{ display: "block", margin: "16px auto" }} />}
+          {loading && <Spin size="small" style={{ display: "block", margin: "16px auto" }} />}
 
-      {!loaded && !loading && (
-        <div style={{ padding: "16px 12px" }}>
-          <Text type="secondary" style={{ cursor: "pointer", fontSize: 12 }} onClick={loadDatabases}>
-            Click to load databases
-          </Text>
+          {!loaded && !loading && (
+            <div style={{ padding: "16px 12px" }}>
+              <Text type="secondary" style={{ cursor: "pointer", fontSize: 12 }} onClick={loadDatabases}>
+                Click to load databases
+              </Text>
+            </div>
+          )}
+
+          {loaded && treeData.length === 0 && <Empty description="No databases" imageStyle={{ height: 40 }} />}
+
+          {treeData.length > 0 && searchQuery && displayData.length === 0 && (
+            <div style={{ padding: "12px", fontSize: 12, color: "var(--text-muted)" }}>
+              No objects match "{searchQuery}"
+            </div>
+          )}
+
+          {treeData.length > 0 && (!searchQuery || displayData.length > 0) && (
+            <div style={{ overflowX: "auto" }}>
+            <Tree
+              treeData={displayData}
+              onRightClick={onRightClick as any}
+              expandedKeys={searchQuery ? searchExpandedKeys : expandedKeys}
+              expandAction={"click" as any}
+              motion={false as any}
+              onExpand={(keys, { expanded, node }) => {
+                if (searchQuery) {
+                  setSearchExpandedKeys(keys as Key[]);
+                } else {
+                  setExpandedKeys(keys as Key[]);
+                  // Trigger lazy load when a node without children is expanded.
+                  // We drive loading from onExpand instead of the Tree's loadData
+                  // prop so rc-tree never puts a node into "loading" state, which
+                  // would block the user from collapsing it.
+                  if (expanded && !(node as any).children) {
+                    onLoadData(node as unknown as DataNode & { children?: DataNode[] });
+                  }
+                }
+              }}
+              showIcon
+              blockNode
+              style={{ background: "transparent", color: "var(--text)" }}
+              titleRender={(node) => {
+                const key = String(node.key);
+                if (key.startsWith("obj:")) {
+                  const parts = key.split(":");
+                  const db     = parts[1];
+                  const schema = parts[2];
+                  const kind   = parts[3];
+                  const name   = parts.slice(4).join(":");
+                  const args   = (node as any).arguments ?? "";
+                  const tooltip = (
+                    <ObjTooltip cacheKey={key} db={db} schema={schema} kind={kind} name={name} args={args}>
+                      {String(node.title)}
+                    </ObjTooltip>
+                  );
+                  if (kind === "TABLE" || kind === "VIEW") {
+                    return (
+                      <span
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData("thaw/table", JSON.stringify({ db, schema, name }));
+                          e.dataTransfer.effectAllowed = "copy";
+                          e.stopPropagation();
+                        }}
+                      >
+                        {tooltip}
+                      </span>
+                    );
+                  }
+                  return tooltip;
+                }
+                return node.title as React.ReactNode;
+              }}
+            />
+            </div>
+          )}
         </div>
       )}
 
-      {loaded && treeData.length === 0 && <Empty description="No databases" imageStyle={{ height: 40 }} />}
-
-      {treeData.length > 0 && searchQuery && displayData.length === 0 && (
-        <div style={{ padding: "12px", fontSize: 12, color: "var(--text-muted)" }}>
-          No objects match "{searchQuery}"
-        </div>
-      )}
-
-      {treeData.length > 0 && (!searchQuery || displayData.length > 0) && (
-        <div style={{ overflowX: "auto" }}>
-        <Tree
-          treeData={displayData}
-          onRightClick={onRightClick as any}
-          expandedKeys={searchQuery ? searchExpandedKeys : expandedKeys}
-          expandAction={"click" as any}
-          motion={false as any}
-          onExpand={(keys, { expanded, node }) => {
-            if (searchQuery) {
-              setSearchExpandedKeys(keys as Key[]);
-            } else {
-              setExpandedKeys(keys as Key[]);
-              // Trigger lazy load when a node without children is expanded.
-              // We drive loading from onExpand instead of the Tree's loadData
-              // prop so rc-tree never puts a node into "loading" state, which
-              // would block the user from collapsing it.
-              if (expanded && !(node as any).children) {
-                onLoadData(node as unknown as DataNode & { children?: DataNode[] });
-              }
-            }
+      {/* Resize handle */}
+      {!treeCollapsed && (
+        <div
+          style={{
+            height: 5,
+            cursor: "row-resize",
+            background: resizingTree ? "var(--accent)" : "transparent",
+            borderBottom: "1px solid var(--border)",
+            transition: resizingTree ? "none" : "background 0.15s",
           }}
-          showIcon
-          blockNode
-          style={{ background: "transparent", color: "var(--text)" }}
-          titleRender={(node) => {
-            const key = String(node.key);
-            if (key.startsWith("obj:")) {
-              const parts = key.split(":");
-              const db     = parts[1];
-              const schema = parts[2];
-              const kind   = parts[3];
-              const name   = parts.slice(4).join(":");
-              const args   = (node as any).arguments ?? "";
-              const tooltip = (
-                <ObjTooltip cacheKey={key} db={db} schema={schema} kind={kind} name={name} args={args}>
-                  {String(node.title)}
-                </ObjTooltip>
-              );
-              if (kind === "TABLE" || kind === "VIEW") {
-                return (
-                  <span
-                    draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData("thaw/table", JSON.stringify({ db, schema, name }));
-                      e.dataTransfer.effectAllowed = "copy";
-                      e.stopPropagation();
-                    }}
-                  >
-                    {tooltip}
-                  </span>
-                );
-              }
-              return tooltip;
-            }
-            return node.title as React.ReactNode;
+          onMouseDown={(e) => {
+            treeResizeStartY.current = e.clientY;
+            treeResizeStartH.current = treeHeight;
+            setResizingTree(true);
+            e.preventDefault();
           }}
+          onMouseEnter={(e) => { if (!resizingTree) e.currentTarget.style.background = "color-mix(in srgb, var(--accent) 26%, transparent)"; }}
+          onMouseLeave={(e) => { if (!resizingTree) e.currentTarget.style.background = "transparent"; }}
         />
-        </div>
       )}
 
       {/* Context menu */}

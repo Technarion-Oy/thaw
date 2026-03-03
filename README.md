@@ -147,10 +147,12 @@ Role and warehouse switches (via the toolbar dropdowns) are applied to a **singl
 
 ### UI
 - Resizable sidebar — drag the divider to any width between 160 px and 600 px
+- **Object browser height** — the Objects panel is collapsible (click the label or the ▶/▼ chevron) and vertically resizable (drag the handle below the tree, 80 – 800 px); the Account Objects panel fills the remaining space
 - **Theming** — light, dark, and system-default themes; switch via **View → Appearance** in the native menu bar; preference is persisted across sessions
 - Native application menu bar with **File** (open / save / new tab) and **View → Appearance** (System / Light / Dark) menus
 - Object browser scrolls horizontally when object names are wider than the sidebar
 - Right-click context menu is always clamped inside the viewport — never overflows the screen edges
+- Closing the app while a query is running shows a confirmation dialog; if confirmed, the query is cancelled in Snowflake before exit
 
 ---
 
