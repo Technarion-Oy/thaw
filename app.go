@@ -604,6 +604,7 @@ func (a *App) WaitForQueryResult() (*snowflake.QueryResult, error) {
 		a.queryCancelFunc = nil
 	}
 	a.queryDone = nil
+	a.queryID = ""
 	a.queryMu.Unlock()
 
 	if result != nil && queryID != "" {
