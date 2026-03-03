@@ -320,13 +320,19 @@ func (c *Client) GetSessionContext(ctx context.Context) (SessionContext, error) 
 	return sc, nil
 }
 
-// ListRoles returns the roles that the current user is actually allowed to
-// assume. It uses CURRENT_AVAILABLE_ROLES() which returns a JSON array of
-// every role reachable through the user's role hierarchy — exactly the set
-// that USE ROLE will accept. SHOW ROLES is intentionally avoided because it
-// lists roles visible to the current role (often the whole account) rather
-// than roles the user can switch to.
+// ListRoles returns all roles visible to the current role via SHOW ROLES.
+// Used for informational displays (Account Objects panel, user-management
+// default-role pickers) where the full visible set is desired.
 func (c *Client) ListRoles(ctx context.Context) ([]string, error) {
+	// SHOW ROLES columns: created_on, name, ...
+	return c.queryStringSlice(ctx, "SHOW ROLES", 1)
+}
+
+// ListAvailableRoles returns only the roles the current user can actually
+// switch to. It uses CURRENT_AVAILABLE_ROLES() which returns the JSON array
+// of every role reachable through the user's role hierarchy — exactly the set
+// that USE ROLE will accept without error.
+func (c *Client) ListAvailableRoles(ctx context.Context) ([]string, error) {
 	var raw string
 	if err := c.db.QueryRowContext(ctx, "SELECT CURRENT_AVAILABLE_ROLES()").Scan(&raw); err != nil {
 		return nil, err

@@ -62,6 +62,8 @@ export function ImportTableData(arg1:snowflake.ImportTableParams):Promise<snowfl
 
 export function IsConnected():Promise<boolean>;
 
+export function ListAvailableRoles():Promise<Array<string>>;
+
 export function ListDatabases():Promise<Array<string>>;
 
 export function ListDirectory(arg1:string):Promise<Array<filesystem.FileEntry>>;
@@ -75,6 +77,8 @@ export function ListDroppedTables(arg1:string,arg2:string):Promise<Array<snowfla
 export function ListNotificationIntegrations():Promise<Array<string>>;
 
 export function ListObjects(arg1:string,arg2:string):Promise<Array<snowflake.SnowflakeObject>>;
+
+export function ListAvailableRoles():Promise<Array<string>>;
 
 export function ListRoles():Promise<Array<string>>;
 

@@ -11,7 +11,7 @@
 import { create } from "zustand";
 import {
   GetSessionContext,
-  ListRoles,
+  ListAvailableRoles,
   ListWarehouses,
   UseRole,
   UseWarehouse,
@@ -65,7 +65,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     if (get().roles.length > 0) return;
     set({ loadingRoles: true });
     try {
-      const roles = await ListRoles();
+      const roles = await ListAvailableRoles();
       set({ roles });
     } catch (e) {
       set({ error: String(e) });

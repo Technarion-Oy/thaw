@@ -533,12 +533,22 @@ func (a *App) GetSessionContext() (snowflake.SessionContext, error) {
 	return a.client.GetSessionContext(a.ctx)
 }
 
-// ListRoles returns all roles available to the current user.
+// ListRoles returns all roles visible to the current role (SHOW ROLES).
+// Used for informational displays and user-management role pickers.
 func (a *App) ListRoles() ([]string, error) {
 	if a.client == nil {
 		return nil, ErrNotConnected
 	}
 	return a.client.ListRoles(a.ctx)
+}
+
+// ListAvailableRoles returns only the roles the current user can switch to
+// (CURRENT_AVAILABLE_ROLES). Used for the role-selection toolbar dropdown.
+func (a *App) ListAvailableRoles() ([]string, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListAvailableRoles(a.ctx)
 }
 
 // ListWarehouses returns all warehouses visible to the current role.
