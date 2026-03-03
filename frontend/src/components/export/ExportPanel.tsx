@@ -16,6 +16,8 @@ import {
   CheckCircleOutlined,
   WarningOutlined,
   FolderOpenOutlined,
+  CaretDownOutlined,
+  CaretRightOutlined,
 } from "@ant-design/icons";
 import { EventsOn } from "../../../wailsjs/runtime/runtime";
 import { ExportAllDatabasesDDL, CancelExport } from "../../../wailsjs/go/main/App";
@@ -40,6 +42,7 @@ export default function ExportPanel() {
   const [results, setResults]     = useState<ExportResult[]>([]);
   const [error, setError]         = useState<string | null>(null);
   const [finished, setFinished]   = useState(false);
+  const [showList, setShowList]   = useState(true);
 
   const exportAll = async () => {
     if (!exportDir || running) return;
@@ -148,60 +151,71 @@ export default function ExportPanel() {
       {/* Summary */}
       {finished && results.length > 0 && (
         <div>
-          <Space size={4} style={{ marginBottom: 6, flexWrap: "wrap" }}>
-            <Tag
-              icon={<CheckCircleOutlined />}
-              color="green"
-              style={{ fontSize: 10, margin: 0 }}
-            >
-              {totalFiles} files
-            </Tag>
-            {totalSkipped > 0 && (
-              <Tag style={{ fontSize: 10, margin: 0 }}>{totalSkipped} skipped</Tag>
-            )}
-            {hasErrors && (
+          <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
+            <Space size={4} style={{ flex: 1, flexWrap: "wrap" }}>
               <Tag
-                icon={<WarningOutlined />}
-                color="red"
+                icon={<CheckCircleOutlined />}
+                color="green"
                 style={{ fontSize: 10, margin: 0 }}
               >
-                errors
+                {totalFiles} files
               </Tag>
-            )}
-          </Space>
+              {totalSkipped > 0 && (
+                <Tag style={{ fontSize: 10, margin: 0 }}>{totalSkipped} skipped</Tag>
+              )}
+              {hasErrors && (
+                <Tag
+                  icon={<WarningOutlined />}
+                  color="red"
+                  style={{ fontSize: 10, margin: 0 }}
+                >
+                  errors
+                </Tag>
+              )}
+            </Space>
+            <Button
+              type="text"
+              size="small"
+              icon={showList ? <CaretDownOutlined /> : <CaretRightOutlined />}
+              onClick={() => setShowList((v) => !v)}
+              style={{ fontSize: 10, color: "var(--text-muted)", padding: "0 4px" }}
+            />
+          </div>
 
-          <Collapse
-            size="small"
-            ghost
-            style={{ fontSize: 11 }}
-            items={results.map((r) => ({
-              key: r.database,
-              label: (
-                <Space size={4}>
-                  <DatabaseOutlined style={{ fontSize: 11 }} />
-                  <span style={{ fontSize: 11 }}>{r.database}</span>
-                  <Tag style={{ fontSize: 10, margin: 0 }}>{r.files} files</Tag>
-                  {(r.errors?.length ?? 0) > 0 && (
-                    <Tag color="red" style={{ fontSize: 10, margin: 0 }}>
-                      {r.errors!.length} err
-                    </Tag>
-                  )}
-                </Space>
-              ),
-              children:
-                (r.errors?.length ?? 0) > 0 ? (
-                  <div style={{ fontSize: 11, color: "#f85149" }}>
-                    {r.errors!.map((e, i) => (
-                      <div key={i}>{e}</div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ fontSize: 11, color: "#3fb950" }}>
-                    {r.files} files written, {r.skipped} skipped
-                  </div>
+          {showList && (
+            <Collapse
+              size="small"
+              ghost
+              style={{ fontSize: 11 }}
+              items={results.map((r) => ({
+                key: r.database,
+                label: (
+                  <Space size={4}>
+                    <DatabaseOutlined style={{ fontSize: 11 }} />
+                    <span style={{ fontSize: 11 }}>{r.database}</span>
+                    <Tag style={{ fontSize: 10, margin: 0 }}>{r.files} files</Tag>
+                    {(r.errors?.length ?? 0) > 0 && (
+                      <Tag color="red" style={{ fontSize: 10, margin: 0 }}>
+                        {r.errors!.length} err
+                      </Tag>
+                    )}
+                  </Space>
                 ),
-            }))}
-          />
+                children:
+                  (r.errors?.length ?? 0) > 0 ? (
+                    <div style={{ fontSize: 11, color: "#f85149" }}>
+                      {r.errors!.map((e, i) => (
+                        <div key={i}>{e}</div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 11, color: "#3fb950" }}>
+                      {r.files} files written, {r.skipped} skipped
+                    </div>
+                  ),
+              }))}
+            />
+          )}
         </div>
       )}
     </div>
