@@ -35,8 +35,9 @@ import (
 type App struct {
 	ctx           context.Context
 	client        *snowflake.Client
-	cancelConnect context.CancelFunc
-	logCleanup    func() // closes the log rotation file on shutdown
+	cancelConnect    context.CancelFunc
+	exportCancelFunc context.CancelFunc // cancels an in-flight DDL export
+	logCleanup       func()             // closes the log rotation file on shutdown
 
 	// Two-phase query execution (StartQuery / WaitForQueryResult).
 	queryMu         sync.Mutex
@@ -126,6 +127,14 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 func (a *App) CancelConnect() {
 	if a.cancelConnect != nil {
 		a.cancelConnect()
+	}
+}
+
+// CancelExport aborts an in-progress DDL export started by ExportAllDatabasesDDL
+// or ExportDatabaseDDL. It is a no-op if no export is running.
+func (a *App) CancelExport() {
+	if a.exportCancelFunc != nil {
+		a.exportCancelFunc()
 	}
 }
 
@@ -803,11 +812,18 @@ func (a *App) ExportDatabaseDDL(database, outputDir string) (ddl.ExportResult, e
 		return ddl.ExportResult{}, ErrNotConnected
 	}
 
+	ctx, cancel := context.WithCancel(a.ctx)
+	a.exportCancelFunc = cancel
+	defer func() {
+		cancel()
+		a.exportCancelFunc = nil
+	}()
+
 	opts := ddl.ExportOptions{OutputDir: outputDir}
 
 	var result ddl.ExportResult
 	ddl.ExportDatabases(
-		a.ctx,
+		ctx,
 		[]string{database},
 		a.client.GetCompleteDatabaseDDL,
 		opts,
@@ -839,10 +855,17 @@ func (a *App) ExportAllDatabasesDDL(outputDir string) ([]ddl.ExportResult, error
 		return nil, err
 	}
 
+	ctx, cancel := context.WithCancel(a.ctx)
+	a.exportCancelFunc = cancel
+	defer func() {
+		cancel()
+		a.exportCancelFunc = nil
+	}()
+
 	opts := ddl.ExportOptions{OutputDir: outputDir}
 
 	results := ddl.ExportDatabases(
-		a.ctx,
+		ctx,
 		databases,
 		a.client.GetCompleteDatabaseDDL,
 		opts,

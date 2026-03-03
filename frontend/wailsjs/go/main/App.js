@@ -14,6 +14,10 @@ export function CancelConnect() {
   return window['go']['main']['App']['CancelConnect']();
 }
 
+export function CancelExport() {
+  return window['go']['main']['App']['CancelExport']();
+}
+
 export function CancelQuery() {
   return window['go']['main']['App']['CancelQuery']();
 }

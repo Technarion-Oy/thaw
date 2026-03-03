@@ -18,7 +18,7 @@ import {
   FolderOpenOutlined,
 } from "@ant-design/icons";
 import { EventsOn } from "../../../wailsjs/runtime/runtime";
-import { ExportAllDatabasesDDL } from "../../../wailsjs/go/main/App";
+import { ExportAllDatabasesDDL, CancelExport } from "../../../wailsjs/go/main/App";
 import { useGitStore } from "../../store/gitStore";
 import type { ddl } from "../../../wailsjs/go/models";
 
@@ -106,17 +106,24 @@ export default function ExportPanel() {
         </Tooltip>
       </div>
 
-      <Button
-        size="small"
-        type="primary"
-        icon={<CloudUploadOutlined />}
-        disabled={!exportDir || running}
-        loading={running}
-        onClick={exportAll}
-        style={{ width: "100%", marginBottom: 8 }}
-      >
-        {running ? `Exporting… (${progress.done}/${progress.total})` : "Export All Databases"}
-      </Button>
+      <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+        <Button
+          size="small"
+          type="primary"
+          icon={<CloudUploadOutlined />}
+          disabled={!exportDir || running}
+          loading={running}
+          onClick={exportAll}
+          style={{ flex: 1 }}
+        >
+          {running ? `Exporting… (${progress.done}/${progress.total})` : "Export All Databases"}
+        </Button>
+        {running && (
+          <Button size="small" danger onClick={() => CancelExport()}>
+            Cancel
+          </Button>
+        )}
+      </div>
 
       {/* Progress bar */}
       {running && progress.total > 0 && (

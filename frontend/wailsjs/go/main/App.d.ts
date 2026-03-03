@@ -14,6 +14,8 @@ export function CanManageUsers():Promise<boolean>;
 
 export function CancelConnect():Promise<void>;
 
+export function CancelExport():Promise<void>;
+
 export function CancelQuery():Promise<void>;
 
 export function Connect(arg1:snowflake.ConnectParams):Promise<void>;

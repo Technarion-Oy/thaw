@@ -94,8 +94,13 @@ func ExportDatabases(
 		go func(idx int, dbName string) {
 			defer wg.Done()
 
-			sem <- struct{}{} // acquire
-			defer func() { <-sem }() // release
+			// Wait for a semaphore slot, but bail out if the context is cancelled.
+			select {
+			case sem <- struct{}{}: // acquire
+				defer func() { <-sem }() // release
+			case <-ctx.Done():
+				return
+			}
 
 			res := exportOne(ctx, dbName, fetch, opts)
 			results[idx] = res
@@ -176,6 +181,9 @@ func exportOne(ctx context.Context, database string, fetch FetchDDL, opts Export
 		go func() {
 			defer writeWg.Done()
 			for j := range jobCh {
+				if ctx.Err() != nil {
+					return
+				}
 				if err := atomicWrite(j.absPath, j.content); err != nil {
 					mu.Lock()
 					res.Errors = append(res.Errors, err.Error())
