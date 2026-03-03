@@ -27,6 +27,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - Word-under-cursor highlight when nothing is selected
 - **Hover definition** — hovering over a table or view name shows its DDL in a Monaco tooltip; definitions are cached per session so subsequent hovers are instant
 - Results displayed in a virtualised Ag-Grid table
+- **Export results** — CSV and Excel (`.xlsx`) export buttons in the results status bar; CSV uses RFC 4180 quoting; Excel uses SheetJS to produce a native `.xlsx` file; both open a native save dialog with format-appropriate file filters
 
 ### File management
 - **Open…** (`⌘O` / `Ctrl+O`) — native OS open-file dialog filtered to `.sql`; re-activates an existing tab if the file is already open
