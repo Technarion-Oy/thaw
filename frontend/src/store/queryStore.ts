@@ -289,11 +289,15 @@ export const useQueryStore = create<QueryState>()(
   // Persist the canonical tab state and the flat active-tab aliases.
   // isRunning and selectedSql are intentionally excluded so they always
   // reset to safe defaults (false / "") after a page reload.
+  // result is intentionally excluded from persistence — large result sets
+  // (e.g. account_usage.query_history) exceed the sessionStorage quota and
+  // throw a QuotaExceededError. Results are kept in memory during the session
+  // so tab-switching still works; they are simply not restored after a reload.
   partialize: (state) => ({
-    tabs: state.tabs,
+    tabs: state.tabs.map((t) => ({ ...t, result: null })),
     activeTabId: state.activeTabId,
     sql: state.sql,
-    result: state.result,
+    result: null,
     error: state.error,
     currentFile: state.currentFile,
   }),
