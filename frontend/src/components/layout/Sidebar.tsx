@@ -204,10 +204,11 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
         ddlCache.set(cacheKey, text);
         setContent(text);
       })
-      .catch((e) => {
-        const text = `Error: ${e}`;
-        ddlCache.set(cacheKey, text);
-        setContent(text);
+      .catch(() => {
+        // Silently suppress DDL errors (e.g. shared databases like SNOWFLAKE
+        // that don't support GET_DDL). Cache an empty string so we don't retry.
+        ddlCache.set(cacheKey, "");
+        setContent("");
       })
       .finally(() => setLoading(false));
   };
@@ -232,7 +233,7 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
 
   return (
     <Tooltip
-      title={overlay}
+      title={loading || content ? overlay : null}
       placement="left"
       mouseEnterDelay={0.6}
       mouseLeaveDelay={0.1}
