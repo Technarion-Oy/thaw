@@ -32,6 +32,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
   - After `db.schema.table.` or `schema.table.` or `table.` → columns of that table/view
   - `Ctrl+Space` anywhere in a query (SELECT list, WHERE clause, etc.) → columns from all tables/views referenced in the `FROM`/`JOIN` clauses of the current statement; both quoted (`"TABLE"`) and unquoted identifiers are recognised; works above the FROM clause (e.g. inside the SELECT column list)
   - Column lists are fetched once via `DESCRIBE TABLE` and cached for the session; subsequent invocations are instant
+- **AI inline completions** — ghost-text SQL suggestions powered by OpenAI or Google AI Studios (Gemini); appears automatically as you type and is accepted with `Tab`; configure via **AI → Configure AI…** in the menu bar
 - Results displayed in a virtualised Ag-Grid table
 - **Export results** — CSV and Excel (`.xlsx`) export buttons in the results status bar; CSV uses RFC 4180 quoting; Excel uses SheetJS to produce a native `.xlsx` file; both open a native save dialog with format-appropriate file filters
 
@@ -160,7 +161,7 @@ Role and warehouse switches (via the toolbar dropdowns) are applied to a **singl
 - Resizable sidebar — drag the divider to any width between 160 px and 600 px
 - **Object browser height** — the Objects panel is collapsible (click the label or the ▶/▼ chevron) and vertically resizable (drag the handle below the tree, 80 – 800 px); the Account Objects panel fills the remaining space
 - **Theming** — light, dark, and system-default themes; switch via **View → Appearance** in the native menu bar; preference is persisted across sessions
-- Native application menu bar with **File** (open / save / new tab) and **View → Appearance** (System / Light / Dark) menus
+- Native application menu bar with **File** (open / save / new tab), **View → Appearance** (System / Light / Dark), and **AI → Configure AI…** menus
 - Object browser scrolls horizontally when object names are wider than the sidebar
 - Right-click context menu is always clamped inside the viewport — never overflows the screen edges
 - Closing the app while a query is running shows a confirmation dialog; if confirmed, the query is cancelled in Snowflake before exit
@@ -256,7 +257,8 @@ thaw/
 │   ├── darwin/                    # macOS app icons
 │   └── windows/                   # Windows resources
 ├── internal/
-│   ├── config/config.go           # Saved git / export settings
+│   ├── ai/ai.go                   # AI provider HTTP clients (OpenAI, Google AI Studios); model listing
+│   ├── config/config.go           # Saved git / export / AI settings
 │   ├── crashreport/crashreport.go # Panic handler; writes JSON crash file; remote-send placeholder
 │   ├── ddl/
 │   │   ├── parser.go              # SQL statement splitter (state machine)
@@ -316,6 +318,9 @@ thaw/
     │       │   └── CreateUserModal.tsx     # CREATE USER dialog with live SQL preview
     │       ├── procedure/CallProcedureModal.tsx
     │       ├── results/ResultGrid.tsx
+    │       ├── settings/
+    │       │   ├── AISettingsModal.tsx    # AI provider / API key / model configuration
+    │       │   └── LayoutSettingsModal.tsx
     │       ├── task/CreateTaskModal.tsx    # CREATE OR REPLACE TASK dialog
     │       └── layout/
     │           ├── AppLayout.tsx  # Resizable sidebar
@@ -482,8 +487,8 @@ Git and export settings are stored at:
 - **Linux** — `~/.config/thaw/config.json`
 - **Windows** — `%APPDATA%\thaw\config.json`
 
-The file stores the remote URL, branch, export directory, and author info.
-**Git tokens are never written to disk.**
+The file stores the remote URL, branch, export directory, author info, and AI provider settings (provider, model, enabled flag, and API key).
+**Git tokens are never written to disk.** The AI API key is written to `config.json` with mode `0600` (owner-read-only).
 
 Log and crash files are written to:
 
@@ -493,6 +498,19 @@ Log and crash files are written to:
 
 Snowflake CLI connection profiles are read from `~/.snowflake/config.toml` and
 pre-fill the connection form, but are never modified by Thaw.
+
+### AI inline completions
+
+Open **AI → Configure AI…** in the menu bar to configure:
+
+| Setting | Description |
+|---------|-------------|
+| **Enable AI suggestions** | Master on/off toggle |
+| **Provider** | `OpenAI` or `Google AI Studios` |
+| **API Key** | Stored locally in `config.json` (mode `0600`) |
+| **Model** | Auto-fetched from the provider after entering a valid key; falls back to built-in defaults if the key is not yet valid |
+
+Once enabled, the Monaco editor fetches ghost-text suggestions as you type (triggered automatically after a short pause). Press `Tab` to accept a suggestion.
 
 ---
 

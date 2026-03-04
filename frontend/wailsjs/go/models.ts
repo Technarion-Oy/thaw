@@ -1,5 +1,23 @@
 export namespace config {
 	
+	export class AIConfig {
+	    provider: string;
+	    apiKey: string;
+	    model: string;
+	    enabled: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new AIConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.provider = source["provider"];
+	        this.apiKey = source["apiKey"];
+	        this.model = source["model"];
+	        this.enabled = source["enabled"];
+	    }
+	}
 	export class GitConfig {
 	    exportDir: string;
 	    remoteURL: string;

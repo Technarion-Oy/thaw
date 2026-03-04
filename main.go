@@ -135,5 +135,17 @@ func buildMenu(app *App) *menu.Menu {
 		setAppearance(darkItem, "dark")
 	})
 
+	appearanceMenu.AddSeparator()
+
+	appearanceMenu.AddText("Customize Layout…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:customize-layout")
+	})
+
+	// ── AI ────────────────────────────────────────────────────────────────────
+	aiMenu := appMenu.AddSubmenu("AI")
+	aiMenu.AddText("Configure AI…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:configure-ai")
+	})
+
 	return appMenu
 }

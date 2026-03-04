@@ -37,10 +37,20 @@ type GitConfig struct {
 	AuthorEmail string `json:"authorEmail"`
 }
 
+// AIConfig holds AI provider settings.
+// APIKey is stored in ~/.config/thaw/config.json (mode 0600).
+type AIConfig struct {
+	Provider string `json:"provider"` // "openai" | "google"
+	APIKey   string `json:"apiKey"`
+	Model    string `json:"model"`
+	Enabled  bool   `json:"enabled"`
+}
+
 // AppConfig is the on-disk configuration for Thaw.
 type AppConfig struct {
 	Connections []Connection `json:"connections"`
 	Git         GitConfig    `json:"git"`
+	AI          AIConfig     `json:"ai"`
 }
 
 func configPath() (string, error) {

@@ -32,6 +32,10 @@ export function ExportDatabaseDDL(arg1:string,arg2:string):Promise<ddl.ExportRes
 
 export function ExportTableData(arg1:snowflake.ExportTableParams):Promise<snowflake.ExportTableResult>;
 
+export function GetAIConfig():Promise<config.AIConfig>;
+
+export function GetAISuggestion(arg1:string):Promise<string>;
+
 export function GetERDiagramData(arg1:string):Promise<snowflake.ERDiagramData>;
 
 export function GetFunctionInfo(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.FunctionInfo>;
@@ -65,6 +69,8 @@ export function GitStatus(arg1:string):Promise<gitrepo.RepoStatus>;
 export function ImportTableData(arg1:snowflake.ImportTableParams):Promise<snowflake.ImportTableResult>;
 
 export function IsConnected():Promise<boolean>;
+
+export function ListAIModels(arg1:string,arg2:string):Promise<Array<string>>;
 
 export function ListAvailableRoles():Promise<Array<string>>;
 
@@ -105,6 +111,8 @@ export function PickSaveExportFile(arg1:string,arg2:string):Promise<string>;
 export function PickSaveFile(arg1:string):Promise<string>;
 
 export function ReadFile(arg1:string):Promise<string>;
+
+export function SaveAIConfig(arg1:config.AIConfig):Promise<void>;
 
 export function SaveBinaryFile(arg1:string,arg2:string):Promise<void>;
 

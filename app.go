@@ -23,6 +23,7 @@ import (
 	sf "github.com/snowflakedb/gosnowflake"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"thaw/internal/ai"
 	"thaw/internal/config"
 	"thaw/internal/ddl"
 	"thaw/internal/filesystem"
@@ -1033,4 +1034,59 @@ func (a *App) ExportAllDatabasesDDL(outputDir string) ([]ddl.ExportResult, error
 	)
 
 	return results, nil
+}
+
+// ─── AI configuration ─────────────────────────────────────────────────────────
+
+// GetAIConfig returns the persisted AI provider settings.
+func (a *App) GetAIConfig() config.AIConfig {
+	cfg, err := config.Load()
+	if err != nil {
+		return config.AIConfig{}
+	}
+	return cfg.AI
+}
+
+// SaveAIConfig persists AI provider settings to disk.
+func (a *App) SaveAIConfig(aiCfg config.AIConfig) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	cfg.AI = aiCfg
+	return config.Save(cfg)
+}
+
+// ListAIModels returns the models available for the given provider and API key.
+// Returns nil (not an error) when the key is invalid or the request fails so
+// the frontend can fall back to its static defaults.
+func (a *App) ListAIModels(provider, apiKey string) []string {
+	models, err := ai.ListModels(provider, apiKey)
+	if err != nil {
+		logger.L.Warn("failed to list AI models", "provider", provider, "err", err)
+		return nil
+	}
+	return models
+}
+
+// GetAISuggestion calls the configured AI provider and returns an inline SQL
+// completion for the given prefix text. Returns an empty string when AI is
+// disabled, when no API key is set, or when the provider returns an error.
+func (a *App) GetAISuggestion(prefix string) string {
+	cfg, err := config.Load()
+	if err != nil {
+		return ""
+	}
+	if !cfg.AI.Enabled || cfg.AI.APIKey == "" {
+		return ""
+	}
+
+	prompt := "Complete this Snowflake SQL query. Return ONLY the completion text to insert at the cursor — no explanation, no markdown, no repetition of existing text. Keep it to 1–2 lines.\n\n" + prefix
+
+	suggestion, err := ai.GetSuggestion(cfg.AI.Provider, cfg.AI.APIKey, cfg.AI.Model, prompt)
+	if err != nil {
+		logger.L.Warn("AI suggestion failed", "provider", cfg.AI.Provider, "err", err)
+		return ""
+	}
+	return suggestion
 }

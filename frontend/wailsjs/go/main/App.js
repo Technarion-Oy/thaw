@@ -50,6 +50,14 @@ export function ExportTableData(arg1) {
   return window['go']['main']['App']['ExportTableData'](arg1);
 }
 
+export function GetAIConfig() {
+  return window['go']['main']['App']['GetAIConfig']();
+}
+
+export function GetAISuggestion(arg1) {
+  return window['go']['main']['App']['GetAISuggestion'](arg1);
+}
+
 export function GetERDiagramData(arg1) {
   return window['go']['main']['App']['GetERDiagramData'](arg1);
 }
@@ -116,6 +124,10 @@ export function ImportTableData(arg1) {
 
 export function IsConnected() {
   return window['go']['main']['App']['IsConnected']();
+}
+
+export function ListAIModels(arg1, arg2) {
+  return window['go']['main']['App']['ListAIModels'](arg1, arg2);
 }
 
 export function ListAvailableRoles() {
@@ -196,6 +208,10 @@ export function PickSaveFile(arg1) {
 
 export function ReadFile(arg1) {
   return window['go']['main']['App']['ReadFile'](arg1);
+}
+
+export function SaveAIConfig(arg1) {
+  return window['go']['main']['App']['SaveAIConfig'](arg1);
 }
 
 export function SaveBinaryFile(arg1, arg2) {

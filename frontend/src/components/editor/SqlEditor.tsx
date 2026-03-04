@@ -13,12 +13,13 @@ import { useQueryStore } from "../../store/queryStore";
 import { useObjectStore } from "../../store/objectStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetUserDDL } from "../../../wailsjs/go/main/App";
+import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetUserDDL, GetAISuggestion } from "../../../wailsjs/go/main/App";
 
 // Module-level DDL cache and hover provider handle so we only register once
 // and don't accumulate duplicate providers on editor remounts.
 const hoverDDLCache = new Map<string, string>();
 let hoverProviderDisposable: { dispose(): void } | null = null;
+let inlineCompletionsDisposable: { dispose(): void } | null = null;
 
 // Singleton editor reference — set on mount so external callers (e.g. the
 // sidebar) can insert text at the current cursor position without prop drilling.
@@ -96,7 +97,9 @@ function monacoKind(monaco: any, kind: string): number {
 
 export default function SqlEditor() {
   const { sql, setSql, setSelectedSql } = useQueryStore();
-  const resolved = useThemeStore((s) => s.resolved);
+  const resolved       = useThemeStore((s) => s.resolved);
+  const editorFont     = useThemeStore((s) => s.editorFont);
+  const editorFontSize = useThemeStore((s) => s.editorFontSize);
 
   const handleMount: OnMount = (editor, monaco) => {
     _editorInstance = editor;
@@ -446,6 +449,28 @@ export default function SqlEditor() {
       },
     });
 
+    // ── AI inline completions ─────────────────────────────────────────────
+    if (!inlineCompletionsDisposable) {
+      inlineCompletionsDisposable = monaco.languages.registerInlineCompletionsProvider("sql", {
+        provideInlineCompletions: async (model: any, position: any, _ctx: any, token: any) => {
+          const prefix = model.getValueInRange({
+            startLineNumber: Math.max(1, position.lineNumber - 30),
+            startColumn:     1,
+            endLineNumber:   position.lineNumber,
+            endColumn:       position.column,
+          });
+          const trimmed = prefix.length > 800 ? prefix.slice(-800) : prefix;
+          if (trimmed.trim().length < 3) return { items: [] };
+
+          const suggestion = await GetAISuggestion(trimmed);
+          if (token.isCancellationRequested || !suggestion) return { items: [] };
+
+          return { items: [{ insertText: suggestion }] };
+        },
+        freeInlineCompletions: () => {},
+      });
+    }
+
     // ── Selection highlight ───────────────────────────────────────────────
     // When text is selected, find every other occurrence in the document and
     // decorate it with a coloured background so they are easy to spot.
@@ -622,7 +647,8 @@ export default function SqlEditor() {
       onChange={(v) => setSql(v ?? "")}
       onMount={handleMount}
       options={{
-        fontSize: 14,
+        fontSize: editorFontSize,
+        fontFamily: editorFont,
         minimap: { enabled: false },
         scrollBeyondLastLine: false,
         lineNumbers: "on",
