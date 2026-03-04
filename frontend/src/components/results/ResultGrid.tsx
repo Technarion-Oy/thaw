@@ -20,6 +20,10 @@ interface Props {
   result: QueryResult;
 }
 
+// Maximum column width in px. Prevents wide-content columns (e.g. QUERY_TEXT)
+// from consuming the entire grid and hiding all other columns.
+const MAX_COL_WIDTH = 300;
+
 export default function ResultGrid({ result }: Props) {
   const resolved = useThemeStore((s) => s.resolved);
   const apiRef = useRef<GridApi | null>(null);
@@ -32,7 +36,8 @@ export default function ResultGrid({ result }: Props) {
         resizable: true,
         sortable: true,
         filter: true,
-        minWidth: 80,
+        minWidth: 60,
+        maxWidth: MAX_COL_WIDTH,
       })),
     [result.columns]
   );
@@ -45,17 +50,22 @@ export default function ResultGrid({ result }: Props) {
     [result.rows, result.columns]
   );
 
-  // Auto-size every column to fit its header text and cell content.
+  // Auto-size every column to fit its header and cell content, capped at MAX_COL_WIDTH.
   const autoSize = useCallback((e: FirstDataRenderedEvent | RowDataUpdatedEvent) => {
     (e.api as GridApi).autoSizeAllColumns();
   }, []);
 
   return (
-    <div className={resolved === "dark" ? "ag-theme-alpine-dark" : "ag-theme-alpine"} style={{ height: "100%", width: "100%" }}>
+    <div
+      className={resolved === "dark" ? "ag-theme-alpine-dark" : "ag-theme-alpine"}
+      style={{ height: "100%", width: "100%", "--ag-font-size": "11px" } as React.CSSProperties}
+    >
       <AgGridReact
         columnDefs={columnDefs}
         rowData={rowData}
-        defaultColDef={{ resizable: true, minWidth: 80 }}
+        defaultColDef={{ resizable: true, minWidth: 60, maxWidth: MAX_COL_WIDTH }}
+        rowHeight={24}
+        headerHeight={28}
         animateRows
         enableCellTextSelection
         suppressMenuHide
