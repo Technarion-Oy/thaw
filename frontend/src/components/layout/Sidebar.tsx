@@ -35,10 +35,13 @@ import {
   SearchOutlined,
   CaretRightFilled,
   CaretDownFilled,
+  CopyOutlined,
 } from "@ant-design/icons";
+import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData } from "../../../wailsjs/go/main/App";
+import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
 import { insertAtCursor } from "../editor/SqlEditor";
@@ -51,6 +54,7 @@ import CreateTaskModal from "../task/CreateTaskModal";
 import ERDiagramModal from "../er/ERDiagramModal";
 import ExportTableModal from "../export/ExportTableModal";
 import ImportTableModal from "../export/ImportTableModal";
+import PropertiesModal from "../common/PropertiesModal";
 
 const { Text } = Typography;
 
@@ -270,6 +274,7 @@ export default function Sidebar() {
   const [renameModal, setRenameModal] = useState<RenameModal | null>(null);
   const [timeTravelModal, setTimeTravelModal] = useState<TimeTravelModal | null>(null);
   const [erModal, setErModal] = useState<{ database: string; data: snowflake.ERDiagramData } | null>(null);
+  const [propsModal, setPropsModal] = useState<{ title: string; rows: main.PropertyPair[] | null; error: string | null } | null>(null);
   const [exportModal, setExportModal] = useState<{ db: string; schema: string; table: string } | null>(null);
   const [importModal, setImportModal] = useState<{ db: string; schema: string; table: string } | null>(null);
   const [searchQuery, setSearchQuery]               = useState("");
@@ -835,6 +840,43 @@ export default function Sidebar() {
     }
   };
 
+  const viewProperties = async () => {
+    if (!ctxMenu) return;
+    const { nodeKey, nodeType, objKind = "" } = ctxMenu;
+    setCtxMenu(null);
+
+    let db = "", schema = "", kind = "", name = "", title = "";
+
+    if (nodeType === "db") {
+      db   = nodeKey.slice("db:".length);
+      kind = "DATABASE";
+      name = db;
+      title = `Properties: DATABASE — ${db}`;
+    } else if (nodeType === "schema") {
+      // key format: schema:DB:SCHEMA
+      [, db, schema] = nodeKey.split(":");
+      kind  = "SCHEMA";
+      name  = schema;
+      title = `Properties: SCHEMA — ${db}.${schema}`;
+    } else {
+      // key format: obj:DB:SCHEMA:KIND:NAME
+      const [, d, s, , ...nameParts] = nodeKey.split(":");
+      db     = d;
+      schema = s;
+      kind   = objKind;
+      name   = nameParts.join(":");
+      title  = `Properties: ${objKind} — ${db}.${schema}.${name}`;
+    }
+
+    setPropsModal({ title, rows: null, error: null });
+    try {
+      const rows = await GetObjectProperties(db, schema, kind, name);
+      setPropsModal((prev) => prev ? { ...prev, rows: rows ?? [] } : null);
+    } catch (e) {
+      setPropsModal((prev) => prev ? { ...prev, rows: [], error: String(e) } : null);
+    }
+  };
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   const menuItem = (label: string, icon: React.ReactNode, onClick: () => void, color?: string) => (
@@ -1044,9 +1086,11 @@ export default function Sidebar() {
           {ctxMenu.nodeType === "db" && menuItem("Show Dropped Schemas…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedSchemas)}
           {ctxMenu.nodeType === "db" && menuItem("Export DDL", <CloudUploadOutlined style={{ fontSize: 12 }} />, exportDatabase)}
           {ctxMenu.nodeType === "db" && menuItem("ER Diagram…", <ApartmentOutlined style={{ fontSize: 12 }} />, generateERDiagram)}
+          {ctxMenu.nodeType === "db" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "schema" && menuItem("Insert Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "schema" && menuItem("Create Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)}
           {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
+          {ctxMenu.nodeType === "schema" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
@@ -1061,6 +1105,7 @@ export default function Sidebar() {
             menuItem("Call Function…", <FunctionOutlined style={{ fontSize: 12 }} />, selectFunction)}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && menuItem("View Definition", null, viewDefinition)}
+          {ctxMenu.nodeType === "obj" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "PROCEDURE" &&
             menuItem("Rename…", <EditOutlined style={{ fontSize: 12 }} />, renameObject)}
           {ctxMenu.nodeType === "obj" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
@@ -1073,7 +1118,22 @@ export default function Sidebar() {
         open={ddlModal !== null}
         title={ddlModal?.title}
         onCancel={() => setDdlModal(null)}
-        footer={null}
+        footer={[
+          <Button
+            key="copy"
+            icon={<CopyOutlined />}
+            disabled={!ddlModal?.src || !!ddlModal?.loading}
+            onClick={() => {
+              if (!ddlModal?.src) return;
+              ClipboardSetText(ddlModal.src).then(() => message.success("Copied to clipboard"));
+            }}
+          >
+            Copy
+          </Button>,
+          <Button key="close" onClick={() => setDdlModal(null)}>
+            Close
+          </Button>,
+        ]}
         width={780}
         styles={{ body: { padding: 0 } }}
       >
@@ -1372,6 +1432,16 @@ export default function Sidebar() {
           data={erModal.data}
           onClose={() => setErModal(null)}
           onDesignerSuccess={() => refreshDatabaseByName(erModal.database)}
+        />
+      )}
+
+      {/* Properties modal */}
+      {propsModal && (
+        <PropertiesModal
+          title={propsModal.title}
+          rows={propsModal.rows}
+          error={propsModal.error}
+          onClose={() => setPropsModal(null)}
         />
       )}
 

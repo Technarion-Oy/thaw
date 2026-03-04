@@ -30,7 +30,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
   - After `db.` → schemas of that database
   - After `db.schema.` → objects (tables, views, functions, …) in that schema
   - After `db.schema.table.` or `schema.table.` or `table.` → columns of that table/view
-  - `Ctrl+Space` anywhere in a query (SELECT list, WHERE clause, etc.) → columns from all tables/views referenced in the `FROM`/`JOIN` clauses of the current statement; both quoted (`"TABLE"`) and unquoted identifiers are recognised
+  - `Ctrl+Space` anywhere in a query (SELECT list, WHERE clause, etc.) → columns from all tables/views referenced in the `FROM`/`JOIN` clauses of the current statement; both quoted (`"TABLE"`) and unquoted identifiers are recognised; works above the FROM clause (e.g. inside the SELECT column list)
   - Column lists are fetched once via `DESCRIBE TABLE` and cached for the session; subsequent invocations are instant
 - Results displayed in a virtualised Ag-Grid table
 - **Export results** — CSV and Excel (`.xlsx`) export buttons in the results status bar; CSV uses RFC 4180 quoting; Excel uses SheetJS to produce a native `.xlsx` file; both open a native save dialog with format-appropriate file filters
@@ -71,6 +71,8 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
   - **Delete** the object (`DROP …`) — with a confirmation dialog
 - **Drag and drop** — drag any table or view node from the sidebar into the editor to insert a fully-qualified `SELECT` with all column names (fetched from Snowflake and listed individually, not `*`) at the drop position; drag a user from the User Management panel to insert a `CREATE USER` DDL statement
 - **Hover tooltip** — hovering over any object in the tree shows its DDL definition; fetched once and cached for the session
+- **View Definition** — right-click any object → **View Definition** opens a modal with the full DDL; a **Copy** button copies the SQL to the clipboard
+- **Properties** — right-click any database, schema, or object → **Properties** opens a key/value panel populated by the corresponding `SHOW` command (e.g. `SHOW TABLES`, `SHOW SCHEMAS`, `SHOW DATABASES`); right-click a role or warehouse in the Account Objects panel, or a user in User Management, for the same panel; a **Copy** button copies all rows as `property: value` lines
 - Tree automatically refreshes the affected database after any rename, drop, or undrop operation
 - **ER Diagram** — right-click a database and choose **ER Diagram…** to generate an Entity Relationship Diagram from `INFORMATION_SCHEMA.COLUMNS`, `SHOW PRIMARY KEYS`, and `SHOW IMPORTED KEYS`; only base tables are shown (views excluded); filter visible schemas with checkboxes, zoom in/out, drag to pan, and copy the Mermaid source to the clipboard
 - **Visual ER Designer** — click **Design Tables…** in the ER Diagram toolbar to open an interactive designer at the database level:

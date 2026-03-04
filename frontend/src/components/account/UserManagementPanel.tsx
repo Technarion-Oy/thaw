@@ -19,12 +19,14 @@ import {
   StopOutlined,
   CheckCircleOutlined,
   SearchOutlined,
+  FileOutlined,
 } from "@ant-design/icons";
-import { ListUsers, ExecuteQuery, CanCreateUsers, CanManageUsers } from "../../../wailsjs/go/main/App";
+import { ListUsers, ExecuteQuery, CanCreateUsers, CanManageUsers, GetObjectProperties } from "../../../wailsjs/go/main/App";
 import { useSessionStore } from "../../store/sessionStore";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type { snowflake, main } from "../../../wailsjs/go/models";
 import EditUserModal from "./EditUserModal";
 import CreateUserModal from "./CreateUserModal";
+import PropertiesModal from "../common/PropertiesModal";
 
 const { Text } = Typography;
 
@@ -45,6 +47,7 @@ export default function UserManagementPanel() {
   const [showCreate,     setShowCreate]     = useState(false);
   const [canCreate,      setCanCreate]      = useState(false);
   const [canManage,      setCanManage]      = useState(false);
+  const [propsModal,     setPropsModal]     = useState<{ title: string; rows: main.PropertyPair[] | null; error: string | null } | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -127,6 +130,17 @@ export default function UserManagementPanel() {
         }
       },
     });
+  };
+
+  const openUserProperties = async (user: snowflake.SnowflakeUser) => {
+    setCtxMenu(null);
+    setPropsModal({ title: `Properties: USER — ${user.name}`, rows: null, error: null });
+    try {
+      const rows = await GetObjectProperties("", "", "USER", user.name);
+      setPropsModal((prev) => prev ? { ...prev, rows: rows ?? [] } : null);
+    } catch (e) {
+      setPropsModal((prev) => prev ? { ...prev, rows: [], error: String(e) } : null);
+    }
   };
 
   const menuItem = (
@@ -282,6 +296,7 @@ export default function UserManagementPanel() {
             undefined,
             !canManage,
           )}
+          {menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, () => openUserProperties(ctxMenu.user))}
           <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
           {menuItem("Drop…", <DeleteOutlined style={{ fontSize: 12, color: !canManage ? undefined : "#f85149" }} />, () => handleDrop(ctxMenu.user), !canManage ? undefined : "#f85149", !canManage)}
         </div>
@@ -301,6 +316,16 @@ export default function UserManagementPanel() {
         <CreateUserModal
           onClose={() => setShowCreate(false)}
           onSuccess={() => { setShowCreate(false); load(); }}
+        />
+      )}
+
+      {/* Properties modal */}
+      {propsModal && (
+        <PropertiesModal
+          title={propsModal.title}
+          rows={propsModal.rows}
+          error={propsModal.error}
+          onClose={() => setPropsModal(null)}
         />
       )}
     </div>

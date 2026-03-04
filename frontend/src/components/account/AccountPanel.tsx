@@ -8,7 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState } from "react";
+import { useState, useLayoutEffect, useRef } from "react";
 import { Collapse, Space, Button, Typography, Tree, Spin, Modal, message } from "antd";
 import {
   TeamOutlined,
@@ -16,6 +16,7 @@ import {
   ReloadOutlined,
   ExportOutlined,
   CopyOutlined,
+  FileOutlined,
 } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
@@ -25,10 +26,13 @@ import {
   GetRoleDDL,
   GetWarehouseDDL,
   ExportAccountObjectsDDL,
+  GetObjectProperties,
 } from "../../../wailsjs/go/main/App";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { useGitStore } from "../../store/gitStore";
 import UserManagementPanel from "./UserManagementPanel";
+import PropertiesModal from "../common/PropertiesModal";
+import type { main } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
 const CLR_BORDER    = "var(--border)";
@@ -39,6 +43,13 @@ interface DdlModal {
   src: string;
   loading: boolean;
   error: string | null;
+}
+
+interface AccountCtxMenu {
+  x: number;
+  y: number;
+  kind: "role" | "warehouse";
+  name: string;
 }
 
 function buildTree(roles: string[], warehouses: string[]): DataNode[] {
@@ -80,6 +91,9 @@ export default function AccountPanel() {
   const [warehouses, setWarehouses] = useState<string[]>([]);
   const [exporting,  setExporting]  = useState(false);
   const [ddlModal,   setDdlModal]   = useState<DdlModal | null>(null);
+  const [ctxMenu,    setCtxMenu]    = useState<AccountCtxMenu | null>(null);
+  const [propsModal, setPropsModal] = useState<{ title: string; rows: main.PropertyPair[] | null; error: string | null } | null>(null);
+  const ctxRef = useRef<HTMLDivElement>(null);
 
   // ── Loading ──────────────────────────────────────────────────────────────
 
@@ -106,6 +120,42 @@ export default function AccountPanel() {
     setWarehouses([]);
     setError(null);
     fetchData();
+  };
+
+  // ── Context menu ─────────────────────────────────────────────────────────
+
+  const onRightClick = ({ event, node }: { event: React.MouseEvent; node: DataNode }) => {
+    event.preventDefault();
+    const key = String(node.key);
+    if (key.startsWith("role:")) {
+      setCtxMenu({ x: event.clientX, y: event.clientY, kind: "role", name: key.slice("role:".length) });
+    } else if (key.startsWith("warehouse:")) {
+      setCtxMenu({ x: event.clientX, y: event.clientY, kind: "warehouse", name: key.slice("warehouse:".length) });
+    }
+  };
+
+  // Clamp context menu inside the viewport (runs before browser paint — no flash).
+  useLayoutEffect(() => {
+    if (!ctxMenu || !ctxRef.current) return;
+    const el = ctxRef.current;
+    const { width, height } = el.getBoundingClientRect();
+    const pad = 8;
+    const left = Math.max(pad, Math.min(ctxMenu.x, window.innerWidth  - width  - pad));
+    const top  = Math.max(pad, Math.min(ctxMenu.y, window.innerHeight - height - pad));
+    el.style.left = `${left}px`;
+    el.style.top  = `${top}px`;
+  }, [ctxMenu]);
+
+  const openProperties = async (kind: "role" | "warehouse", name: string) => {
+    setCtxMenu(null);
+    const sfKind = kind === "role" ? "ROLE" : "WAREHOUSE";
+    setPropsModal({ title: `Properties: ${sfKind} — ${name}`, rows: null, error: null });
+    try {
+      const rows = await GetObjectProperties("", "", sfKind, name);
+      setPropsModal((prev) => prev ? { ...prev, rows: rows ?? [] } : null);
+    } catch (e) {
+      setPropsModal((prev) => prev ? { ...prev, rows: [], error: String(e) } : null);
+    }
   };
 
   // ── DDL view ─────────────────────────────────────────────────────────────
@@ -222,6 +272,7 @@ export default function AccountPanel() {
                   <Tree
                     treeData={treeData}
                     onSelect={onSelect as any}
+                    onRightClick={onRightClick as any}
                     defaultExpandAll
                     showIcon
                     blockNode
@@ -235,6 +286,47 @@ export default function AccountPanel() {
           ),
         }]}
       />
+
+      {/* Account object context menu */}
+      {ctxMenu && (
+        <div
+          ref={ctxRef}
+          style={{
+            position: "fixed",
+            top: ctxMenu.y,
+            left: ctxMenu.x,
+            zIndex: 9999,
+            background: "var(--bg-overlay)",
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
+            minWidth: 160,
+            padding: "4px 0",
+          }}
+          onClick={(e) => e.stopPropagation()}
+          onMouseLeave={() => setCtxMenu(null)}
+        >
+          <div
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", fontSize: 13, cursor: "pointer", color: "var(--text)" }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+            onClick={() => openProperties(ctxMenu.kind, ctxMenu.name)}
+          >
+            <FileOutlined style={{ fontSize: 12 }} />
+            Properties
+          </div>
+        </div>
+      )}
+
+      {/* Properties modal */}
+      {propsModal && (
+        <PropertiesModal
+          title={propsModal.title}
+          rows={propsModal.rows}
+          error={propsModal.error}
+          onClose={() => setPropsModal(null)}
+        />
+      )}
 
       {/* DDL modal */}
       <Modal

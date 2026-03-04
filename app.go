@@ -810,6 +810,109 @@ func (a *App) GetObjectDDL(database, schema, kind, name, arguments string) (stri
 	return a.client.GetObjectDDL(a.ctx, database, schema, kind, name, arguments)
 }
 
+// PropertyPair is a single key/value property row returned by GetObjectProperties.
+type PropertyPair struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// GetObjectProperties returns structured metadata for any Snowflake object by
+// running the appropriate SHOW or DESCRIBE command and returning the result as
+// key/value pairs. kind is one of: TABLE, VIEW, FUNCTION, PROCEDURE, SEQUENCE,
+// STAGE, STREAM, TASK, FILE FORMAT, PIPE, WAREHOUSE, ROLE, USER.
+func (a *App) GetObjectProperties(database, schema, kind, name string) ([]PropertyPair, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	like := strings.ReplaceAll(name, "'", "''")
+
+	var query string
+	switch strings.ToUpper(kind) {
+	case "DATABASE":
+		query = fmt.Sprintf("SHOW DATABASES LIKE '%s'", like)
+	case "SCHEMA":
+		query = fmt.Sprintf("SHOW SCHEMAS LIKE '%s' IN DATABASE %s", like, q(database))
+	case "TABLE":
+		query = fmt.Sprintf("SHOW TABLES LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
+	case "VIEW":
+		query = fmt.Sprintf("SHOW VIEWS LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
+	case "FUNCTION":
+		query = fmt.Sprintf("SHOW FUNCTIONS LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
+	case "PROCEDURE":
+		query = fmt.Sprintf("SHOW PROCEDURES LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
+	case "SEQUENCE":
+		query = fmt.Sprintf("SHOW SEQUENCES LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
+	case "STAGE":
+		query = fmt.Sprintf("SHOW STAGES LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
+	case "STREAM":
+		query = fmt.Sprintf("SHOW STREAMS LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
+	case "TASK":
+		query = fmt.Sprintf("SHOW TASKS LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
+	case "FILE FORMAT":
+		query = fmt.Sprintf("SHOW FILE FORMATS LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
+	case "PIPE":
+		query = fmt.Sprintf("SHOW PIPES LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
+	case "WAREHOUSE":
+		query = fmt.Sprintf("SHOW WAREHOUSES LIKE '%s'", like)
+	case "ROLE":
+		query = fmt.Sprintf("SHOW ROLES LIKE '%s'", like)
+	case "USER":
+		query = fmt.Sprintf("DESCRIBE USER %s", q(name))
+	default:
+		return nil, fmt.Errorf("unsupported object kind: %s", kind)
+	}
+
+	res, err := a.client.Execute(a.ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	if len(res.Rows) == 0 {
+		return []PropertyPair{}, nil
+	}
+
+	toString := func(v interface{}) string {
+		if v == nil {
+			return ""
+		}
+		switch t := v.(type) {
+		case []byte:
+			return string(t)
+		case string:
+			return t
+		default:
+			return fmt.Sprintf("%v", t)
+		}
+	}
+
+	var pairs []PropertyPair
+	if strings.ToUpper(kind) == "USER" {
+		// DESCRIBE USER returns rows of (property, value, default) — use property/value columns.
+		for _, row := range res.Rows {
+			if len(row) < 2 {
+				continue
+			}
+			k := toString(row[0])
+			v := toString(row[1])
+			if k != "" {
+				pairs = append(pairs, PropertyPair{Key: k, Value: v})
+			}
+		}
+	} else {
+		// SHOW commands: first matching row; each column name is the property key.
+		row := res.Rows[0]
+		for i, col := range res.Columns {
+			val := ""
+			if i < len(row) {
+				val = toString(row[i])
+			}
+			pairs = append(pairs, PropertyPair{Key: col, Value: val})
+		}
+	}
+	return pairs, nil
+}
+
 // ExportTableData exports a Snowflake table to the local filesystem using a
 // temporary internal stage. The stage is dropped automatically after the
 // download completes or on error.
