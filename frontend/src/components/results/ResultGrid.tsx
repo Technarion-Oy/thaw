@@ -8,8 +8,9 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useMemo } from "react";
+import { useMemo, useRef, useCallback } from "react";
 import { AgGridReact } from "ag-grid-react";
+import type { GridApi, FirstDataRenderedEvent, RowDataUpdatedEvent } from "ag-grid-community";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
 import type { QueryResult } from "../../store/queryStore";
@@ -21,6 +22,8 @@ interface Props {
 
 export default function ResultGrid({ result }: Props) {
   const resolved = useThemeStore((s) => s.resolved);
+  const apiRef = useRef<GridApi | null>(null);
+
   const columnDefs = useMemo(
     () =>
       result.columns.map((col) => ({
@@ -42,17 +45,25 @@ export default function ResultGrid({ result }: Props) {
     [result.rows, result.columns]
   );
 
+  // Auto-size every column to fit its header text and cell content.
+  const autoSize = useCallback((e: FirstDataRenderedEvent | RowDataUpdatedEvent) => {
+    (e.api as GridApi).autoSizeAllColumns();
+  }, []);
+
   return (
     <div className={resolved === "dark" ? "ag-theme-alpine-dark" : "ag-theme-alpine"} style={{ height: "100%", width: "100%" }}>
       <AgGridReact
         columnDefs={columnDefs}
         rowData={rowData}
-        defaultColDef={{ flex: 1, minWidth: 80 }}
+        defaultColDef={{ resizable: true, minWidth: 80 }}
         animateRows
         enableCellTextSelection
         suppressMenuHide
         pagination
         paginationPageSize={500}
+        onGridReady={(e) => { apiRef.current = e.api; }}
+        onFirstDataRendered={autoSize}
+        onRowDataUpdated={autoSize}
       />
     </div>
   );
