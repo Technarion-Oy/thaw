@@ -26,6 +26,12 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - **Selection highlight** — selecting any text highlights every other occurrence in the document with a blue background; overview-ruler markers make occurrences visible in long files
 - Word-under-cursor highlight when nothing is selected
 - **Hover definition** — hovering over a table or view name shows its DDL in a Monaco tooltip; definitions are cached per session so subsequent hovers are instant
+- **SQL autocomplete** — context-aware completions triggered by `.` or `Ctrl+Space`:
+  - After `db.` → schemas of that database
+  - After `db.schema.` → objects (tables, views, functions, …) in that schema
+  - After `db.schema.table.` or `schema.table.` or `table.` → columns of that table/view
+  - `Ctrl+Space` anywhere in a query (SELECT list, WHERE clause, etc.) → columns from all tables/views referenced in the `FROM`/`JOIN` clauses of the current statement; both quoted (`"TABLE"`) and unquoted identifiers are recognised
+  - Column lists are fetched once via `DESCRIBE TABLE` and cached for the session; subsequent invocations are instant
 - Results displayed in a virtualised Ag-Grid table
 - **Export results** — CSV and Excel (`.xlsx`) export buttons in the results status bar; CSV uses RFC 4180 quoting; Excel uses SheetJS to produce a native `.xlsx` file; both open a native save dialog with format-appropriate file filters
 

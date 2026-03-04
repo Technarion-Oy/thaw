@@ -38,6 +38,38 @@ export function insertAtCursor(text: string) {
 const fetchedSchemaObjects   = new Set<string>(); // "DB\0SCHEMA"
 const fetchedDatabaseSchemas = new Set<string>(); // "DB"
 
+// ── Column-level completion cache ─────────────────────────────────────────────
+// Keyed "DB\0SCHEMA\0TABLE". Populated lazily on first dot-trigger.
+const columnCache  = new Map<string, string[]>();
+const fetchingCols = new Set<string>();
+
+async function getColumns(db: string, schema: string, table: string): Promise<string[]> {
+  const key = `${db.toUpperCase()}\0${schema.toUpperCase()}\0${table.toUpperCase()}`;
+  if (columnCache.has(key)) return columnCache.get(key)!;
+  if (fetchingCols.has(key)) return [];
+  fetchingCols.add(key);
+  try {
+    const cols = await GetTableColumns(db, schema, table);
+    columnCache.set(key, cols ?? []);
+    return cols ?? [];
+  } catch {
+    columnCache.set(key, []);
+    return [];
+  } finally {
+    fetchingCols.delete(key);
+  }
+}
+
+function mkColSuggestions(cols: string[], range: any, monaco: any) {
+  return cols.map((col) => ({
+    label:      col,
+    kind:       monaco.languages.CompletionItemKind.Field,
+    insertText: col,
+    detail:     "COLUMN",
+    range,
+  }));
+}
+
 const SNOWFLAKE_KEYWORDS = [
   "SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER",
   "GROUP BY", "ORDER BY", "HAVING", "LIMIT", "INSERT", "UPDATE", "DELETE",
@@ -145,11 +177,29 @@ export default function SqlEditor() {
 
         const UC = (s: string) => s.toUpperCase();
 
+        // ── db.schema.table. → suggest columns ──────────────────────────
+        const threePartMatch = lineUpToWord.match(/\b(\w+)\.(\w+)\.(\w+)\.\s*$/i);
+        if (threePartMatch) {
+          const [, db, schema, table] = threePartMatch;
+          return { suggestions: mkColSuggestions(await getColumns(db, schema, table), range, monaco) };
+        }
+
         // ── db.schema. → suggest objects in that schema ──────────────────
         const twoPartMatch = lineUpToWord.match(/\b(\w+)\.(\w+)\.\s*$/i);
         if (twoPartMatch) {
           const [, db, schema] = twoPartMatch;
           const schemaKey = `${UC(db)}\0${UC(schema)}`;
+
+          // If `db` is not a known database, treat this as schema.table. → columns
+          if (!useObjectStore.getState().databases.some((d) => UC(d) === UC(db))) {
+            const colObj = useObjectStore.getState().objects.find(
+              (o) => UC(o.schema) === UC(db) && UC(o.name) === UC(schema) &&
+                     (o.kind === "TABLE" || o.kind === "VIEW")
+            );
+            if (colObj) {
+              return { suggestions: mkColSuggestions(await getColumns(colObj.db, colObj.schema, colObj.name), range, monaco) };
+            }
+          }
 
           const hasObjects = useObjectStore.getState().objects
             .some((o) => UC(o.db) === UC(db) && UC(o.schema) === UC(schema));
@@ -225,6 +275,22 @@ export default function SqlEditor() {
               })),
             };
           }
+
+          // Is the qualifier a known table/view? → suggest its columns
+          const colObjs = objects.filter(
+            (o) => UC(o.name) === UC(qualifier) && (o.kind === "TABLE" || o.kind === "VIEW")
+          );
+          if (colObjs.length > 0) {
+            const allCols = new Set<string>();
+            await Promise.all(
+              colObjs.map(async (o) => {
+                (await getColumns(o.db, o.schema, o.name)).forEach((c) => allCols.add(c));
+              })
+            );
+            if (allCols.size > 0) {
+              return { suggestions: mkColSuggestions(Array.from(allCols), range, monaco) };
+            }
+          }
         }
 
         // ── No qualifier → keywords + databases + all object names ────────
@@ -261,7 +327,76 @@ export default function SqlEditor() {
           range,
         }));
 
-        return { suggestions: [...keywordSuggestions, ...dbSuggestions, ...schemaSuggestions, ...objectSuggestions] };
+        // ── Context columns: scan FROM/JOIN refs in the current query ────
+        // Use the column cache SYNCHRONOUSLY so Monaco sees results immediately.
+        // If a table's columns are not yet cached, fire a background fetch so
+        // the NEXT Ctrl+Space press will find them in the cache.
+        // Scan the full editor text so FROM/JOIN refs below the cursor
+        // (e.g. when completing inside a SELECT list) are also found.
+        const fullTextToCursor = model.getValue();
+
+        // Matches quoted ("IDENT") and unquoted identifiers in FROM/JOIN clauses.
+        // Handles: db.schema.table | schema.table | table (each part quoted or unquoted)
+        const ID_PAT = `(?:"[^"]+"|\\w+)`;
+        const tableRefRe = new RegExp(
+          `(?:FROM|JOIN)\\s+(?:(${ID_PAT})\\.(${ID_PAT})\\.(${ID_PAT})|(${ID_PAT})\\.(${ID_PAT})|(${ID_PAT}))`,
+          "gi"
+        );
+        // Strip surrounding double-quotes from a captured identifier group.
+        const stripQ = (s: string | undefined) =>
+          s ? (s.startsWith('"') ? s.slice(1, -1) : s) : undefined;
+
+        const seenColKeys = new Set<string>();
+        const contextColSuggestions: any[] = [];
+        let fetchPending = false;
+        let tm: RegExpExecArray | null;
+        while ((tm = tableRefRe.exec(fullTextToCursor)) !== null) {
+          let refDb: string | undefined, refSchema: string | undefined, refName: string;
+          if (tm[1] && tm[2] && tm[3]) {
+            [refDb, refSchema, refName] = [stripQ(tm[1])!, stripQ(tm[2])!, stripQ(tm[3])!];
+          } else if (tm[4] && tm[5]) {
+            [refSchema, refName] = [stripQ(tm[4])!, stripQ(tm[5])!];
+          } else {
+            refName = stripQ(tm[6])!;
+          }
+
+          const matchedObjs = objects.filter((o) => {
+            if (o.kind !== "TABLE" && o.kind !== "VIEW") return false;
+            if (UC(o.name) !== UC(refName)) return false;
+            if (refDb && UC(o.db) !== UC(refDb)) return false;
+            if (refSchema && UC(o.schema) !== UC(refSchema)) return false;
+            return true;
+          });
+
+          for (const obj of matchedObjs) {
+            const cacheKey = `${UC(obj.db)}\0${UC(obj.schema)}\0${UC(obj.name)}`;
+            if (columnCache.has(cacheKey)) {
+              // Columns already cached — add synchronously
+              for (const col of columnCache.get(cacheKey)!) {
+                if (!seenColKeys.has(UC(col))) {
+                  seenColKeys.add(UC(col));
+                  contextColSuggestions.push({
+                    label:      col,
+                    kind:       monaco.languages.CompletionItemKind.Field,
+                    insertText: col,
+                    detail:     `COLUMN · ${obj.name}`,
+                    range,
+                  });
+                }
+              }
+            } else {
+              // Not cached yet — fire background fetch; columns appear on next Ctrl+Space
+              getColumns(obj.db, obj.schema, obj.name);
+              fetchPending = true;
+            }
+          }
+        }
+
+        return {
+          suggestions: [...contextColSuggestions, ...keywordSuggestions, ...dbSuggestions, ...schemaSuggestions, ...objectSuggestions],
+          // Tell Monaco these results may be incomplete so it re-queries on next invocation
+          incomplete: fetchPending,
+        };
       },
     });
 
