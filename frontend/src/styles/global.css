@@ -40,7 +40,7 @@ body,
   overflow: hidden;
   background: var(--bg);
   color: var(--text);
-  font-family: "Inter", "SF Pro Text", system-ui, sans-serif;
+  font-family: var(--ui-font, "Inter", "SF Pro Text", system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -75,6 +75,20 @@ body,
 .ant-tree-list-holder-inner {
   width: max-content;
   min-width: 100%;
+}
+
+/* ── UI density ─────────────────────────────────────────────────────────── */
+:root {
+  --row-height:    24px;
+  --header-height: 28px;
+}
+[data-density="compact"] {
+  --row-height:    20px;
+  --header-height: 24px;
+}
+[data-density="comfortable"] {
+  --row-height:    32px;
+  --header-height: 36px;
 }
 
 /* Monaco editor — custom selection occurrence highlights.

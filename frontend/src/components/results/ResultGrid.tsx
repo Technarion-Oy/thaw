@@ -24,8 +24,18 @@ interface Props {
 // from consuming the entire grid and hiding all other columns.
 const MAX_COL_WIDTH = 300;
 
+// Read a CSS variable from the document root as a number (strip "px").
+function cssVar(name: string, fallback: number): number {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const n = parseInt(raw, 10);
+  return isNaN(n) ? fallback : n;
+}
+
 export default function ResultGrid({ result }: Props) {
-  const resolved = useThemeStore((s) => s.resolved);
+  const resolved  = useThemeStore((s) => s.resolved);
+  // Subscribe to uiDensity so the grid re-renders (and re-reads CSS vars) when
+  // the user changes the density setting.
+  useThemeStore((s) => s.uiDensity);
   const apiRef = useRef<GridApi | null>(null);
 
   const columnDefs = useMemo(
@@ -64,8 +74,8 @@ export default function ResultGrid({ result }: Props) {
         columnDefs={columnDefs}
         rowData={rowData}
         defaultColDef={{ resizable: true, minWidth: 60, maxWidth: MAX_COL_WIDTH }}
-        rowHeight={24}
-        headerHeight={28}
+        rowHeight={cssVar("--row-height", 24)}
+        headerHeight={cssVar("--header-height", 28)}
         animateRows
         enableCellTextSelection
         suppressMenuHide
