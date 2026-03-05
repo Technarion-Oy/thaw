@@ -13,6 +13,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1067,6 +1068,175 @@ func (a *App) ListAIModels(provider, apiKey string) []string {
 		return nil
 	}
 	return models
+}
+
+// SendChatMessage runs one agentic chat turn. currentSQL is the text currently
+// in the editor (may be empty). lastResultSummary is a pre-formatted text
+// summary of the most recent query result (may be empty). Both are injected
+// into the system prompt so the AI has context without the user having to paste.
+func (a *App) SendChatMessage(
+	history []ai.UIMessage,
+	userText string,
+	currentSQL string,
+	lastResultSummary string,
+) ([]ai.UIMessage, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	cfg, err := config.Load()
+	if err != nil || !cfg.AI.Enabled || cfg.AI.APIKey == "" {
+		return nil, fmt.Errorf("AI not configured or disabled")
+	}
+
+	executor := func(name, inputJSON string) (string, bool) {
+		var args map[string]string
+		json.Unmarshal([]byte(inputJSON), &args) //nolint:errcheck
+		switch name {
+		case "get_session_context":
+			sc, err := a.client.GetSessionContext(a.ctx)
+			if err != nil {
+				return err.Error(), true
+			}
+			return fmt.Sprintf("role: %s\nwarehouse: %s\ndatabase: %s\nschema: %s",
+				sc.Role, sc.Warehouse, sc.Database, sc.Schema), false
+		case "list_databases":
+			dbs, err := a.client.ListDatabases(a.ctx)
+			if err != nil {
+				return err.Error(), true
+			}
+			return strings.Join(dbs, "\n"), false
+		case "list_schemas":
+			schemas, err := a.client.ListSchemas(a.ctx, args["database"])
+			if err != nil {
+				return err.Error(), true
+			}
+			return strings.Join(schemas, "\n"), false
+		case "list_tables":
+			objs, err := a.client.ListObjects(a.ctx, args["database"], args["schema"])
+			if err != nil {
+				return err.Error(), true
+			}
+			lines := make([]string, len(objs))
+			for i, o := range objs {
+				lines[i] = o.Name + " (" + o.Kind + ")"
+			}
+			return strings.Join(lines, "\n"), false
+		case "describe_table":
+			esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+			query := fmt.Sprintf(`DESCRIBE TABLE "%s"."%s"."%s"`,
+				esc(args["database"]), esc(args["schema"]), esc(args["table"]))
+			res, err := a.client.Execute(a.ctx, query)
+			if err != nil {
+				return err.Error(), true
+			}
+			return formatDescribeResult(res), false
+		case "run_sql":
+			res, err := a.client.Execute(a.ctx, args["query"])
+			if err != nil {
+				return err.Error(), true
+			}
+			return formatChatQueryResult(res), false
+		}
+		return "unknown tool", true
+	}
+
+	msg, err := ai.Chat(cfg.AI.Provider, cfg.AI.APIKey, cfg.AI.Model,
+		history, userText, currentSQL, lastResultSummary, executor)
+	if err != nil {
+		return nil, err
+	}
+	return []ai.UIMessage{{Role: "user", Text: userText}, msg}, nil
+}
+
+// formatDescribeResult extracts name and type columns from a DESCRIBE TABLE result.
+func formatDescribeResult(res *snowflake.QueryResult) string {
+	if res == nil {
+		return "(no result)"
+	}
+	nameIdx, typeIdx := -1, -1
+	for i, col := range res.Columns {
+		switch strings.ToLower(col) {
+		case "name":
+			nameIdx = i
+		case "type":
+			typeIdx = i
+		}
+	}
+	if nameIdx < 0 {
+		return "(unexpected DESCRIBE result)"
+	}
+	toString := func(v interface{}) string {
+		if v == nil {
+			return ""
+		}
+		switch t := v.(type) {
+		case []byte:
+			return string(t)
+		case string:
+			return t
+		default:
+			return fmt.Sprintf("%v", t)
+		}
+	}
+	var lines []string
+	for _, row := range res.Rows {
+		name := ""
+		typ := ""
+		if nameIdx < len(row) {
+			name = toString(row[nameIdx])
+		}
+		if typeIdx >= 0 && typeIdx < len(row) {
+			typ = toString(row[typeIdx])
+		}
+		if name == "" {
+			continue
+		}
+		if typ != "" {
+			lines = append(lines, name+" "+typ)
+		} else {
+			lines = append(lines, name)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// formatChatQueryResult renders up to 50 rows of a query result as a plain-text table.
+func formatChatQueryResult(res *snowflake.QueryResult) string {
+	if res == nil {
+		return "(no result)"
+	}
+	toString := func(v interface{}) string {
+		if v == nil {
+			return "NULL"
+		}
+		switch t := v.(type) {
+		case []byte:
+			return string(t)
+		case string:
+			return t
+		default:
+			return fmt.Sprintf("%v", t)
+		}
+	}
+	var sb strings.Builder
+	sb.WriteString(strings.Join(res.Columns, " | "))
+	sb.WriteByte('\n')
+	limit := len(res.Rows)
+	if limit > 50 {
+		limit = 50
+	}
+	for _, row := range res.Rows[:limit] {
+		vals := make([]string, len(row))
+		for i, v := range row {
+			vals[i] = toString(v)
+		}
+		sb.WriteString(strings.Join(vals, " | "))
+		sb.WriteByte('\n')
+	}
+	if len(res.Rows) > 50 {
+		sb.WriteString(fmt.Sprintf("... (%d rows total)\n", len(res.Rows)))
+	}
+	return sb.String()
 }
 
 // GetAISuggestion calls the configured AI provider and returns an inline SQL

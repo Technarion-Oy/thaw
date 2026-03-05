@@ -14,11 +14,12 @@ import { Button, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message }
 import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile } from "../../wailsjs/go/main/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig } from "../../wailsjs/go/main/App";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import SqlEditor from "../components/editor/SqlEditor";
 import TabBar from "../components/editor/TabBar";
 import ResultGrid from "../components/results/ResultGrid";
+import AiChat from "../components/chat/AiChat";
 import { useQueryStore } from "../store/queryStore";
 import { useConnectionStore } from "../store/connectionStore";
 import { useSessionStore } from "../store/sessionStore";
@@ -29,6 +30,8 @@ export default function QueryPage() {
   const { sql, selectedSql, result, isRunning, error, setResult, setRunning, setError, markSaved, openScratch, openFile } = useQueryStore();
   const [runningQueryId, setRunningQueryId] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [resultPane, setResultPane] = useState<"results" | "chat">("results");
+  const [aiEnabled, setAiEnabled] = useState(false);
   // Ref so the async runQuery closure can detect user-initiated cancellation
   // without relying on stale React state.
   const cancelRequestedRef = useRef(false);
@@ -45,6 +48,21 @@ export default function QueryPage() {
   // Load current role/warehouse on mount
   useEffect(() => {
     loadContext();
+  }, []);
+
+  // Load AI config on mount
+  useEffect(() => {
+    GetAIConfig().then((c) => setAiEnabled(c.enabled));
+  }, []);
+
+  // Handle run-ai-sql events from the chat panel
+  useEffect(() => {
+    const handler = (e: CustomEvent<{ sql: string; run: boolean }>) => {
+      useQueryStore.getState().setSql(e.detail.sql);
+      if (e.detail.run) window.dispatchEvent(new Event("run-query"));
+    };
+    window.addEventListener("run-ai-sql", handler as EventListener);
+    return () => window.removeEventListener("run-ai-sql", handler as EventListener);
   }, []);
 
   const runQuery = async () => {
@@ -335,90 +353,117 @@ export default function QueryPage() {
         <SqlEditor />
       </div>
 
-      {/* Results — bottom half */}
-      <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
-        {isRunning && (
-          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, zIndex: 10, background: "rgba(0,0,0,0.4)" }}>
-            <Spin size="large" />
-            {runningQueryId && (
-              <Space size={4}>
-                <Text style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)" }}>
-                  {runningQueryId}
-                </Text>
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<CopyOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
-                  style={{ height: 16, padding: "0 2px", minWidth: 0 }}
-                  onClick={async () => { await ClipboardSetText(runningQueryId); message.success("Query ID copied"); }}
-                />
-              </Space>
+      {/* Results / AI Chat — bottom half */}
+      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        {/* Tab bar */}
+        <div style={{ display: "flex", background: "var(--bg-raised)", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+          {(["results", ...(aiEnabled ? ["chat"] : [])] as Array<"results" | "chat">).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setResultPane(tab)}
+              style={{
+                padding: "4px 14px",
+                fontSize: 12,
+                background: "none",
+                border: "none",
+                borderBottom: resultPane === tab ? "2px solid var(--accent)" : "2px solid transparent",
+                color: resultPane === tab ? "var(--text)" : "var(--text-muted)",
+                cursor: "pointer",
+              }}
+            >
+              {tab === "results" ? "Results" : "AI Chat"}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ flex: 1, overflow: "hidden", position: "relative", display: resultPane === "results" ? "block" : "none" }}>
+            {isRunning && (
+              <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, zIndex: 10, background: "rgba(0,0,0,0.4)" }}>
+                <Spin size="large" />
+                {runningQueryId && (
+                  <Space size={4}>
+                    <Text style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)" }}>
+                      {runningQueryId}
+                    </Text>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<CopyOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
+                      style={{ height: 16, padding: "0 2px", minWidth: 0 }}
+                      onClick={async () => { await ClipboardSetText(runningQueryId); message.success("Query ID copied"); }}
+                    />
+                  </Space>
+                )}
+              </div>
+            )}
+
+            {error && (
+              <Alert
+                type="error"
+                message={error}
+                showIcon
+                closable
+                style={{ margin: 12 }}
+              />
+            )}
+
+            {result && !error && (
+              <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "3px 12px", background: "var(--bg-raised)", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+                  {result.queryID && (
+                    <Space size={4}>
+                      <Text style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)" }}>
+                        {result.queryID}
+                      </Text>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<CopyOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
+                        style={{ height: 16, padding: "0 2px", minWidth: 0 }}
+                        onClick={async () => { await ClipboardSetText(result.queryID!); message.success("Query ID copied"); }}
+                      />
+                    </Space>
+                  )}
+                  <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+                    <Tooltip title="Export as CSV">
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<FileTextOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} />}
+                        style={{ height: 18, padding: "0 4px", minWidth: 0 }}
+                        onClick={exportCSV}
+                      />
+                    </Tooltip>
+                    <Tooltip title="Export as Excel">
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<FileExcelOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} />}
+                        style={{ height: 18, padding: "0 4px", minWidth: 0 }}
+                        onClick={exportExcel}
+                      />
+                    </Tooltip>
+                    <Text style={{ fontSize: 11, color: "var(--text-faint)" }}>
+                      {result.rows.length} row{result.rows.length !== 1 ? "s" : ""}
+                    </Text>
+                  </div>
+                </div>
+                <div style={{ flex: 1, overflow: "hidden" }}>
+                  <ResultGrid result={result} />
+                </div>
+              </div>
+            )}
+
+            {!result && !error && !isRunning && (
+              <div style={{ padding: 24, color: "var(--text-faint)", fontSize: 13 }}>
+                Run a query to see results here.
+              </div>
             )}
           </div>
-        )}
 
-        {error && (
-          <Alert
-            type="error"
-            message={error}
-            showIcon
-            closable
-            style={{ margin: 12 }}
-          />
-        )}
-
-        {result && !error && (
-          <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "3px 12px", background: "var(--bg-raised)", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-              {result.queryID && (
-                <Space size={4}>
-                  <Text style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)" }}>
-                    {result.queryID}
-                  </Text>
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<CopyOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
-                    style={{ height: 16, padding: "0 2px", minWidth: 0 }}
-                    onClick={async () => { await ClipboardSetText(result.queryID!); message.success("Query ID copied"); }}
-                  />
-                </Space>
-              )}
-              <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
-                <Tooltip title="Export as CSV">
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<FileTextOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} />}
-                    style={{ height: 18, padding: "0 4px", minWidth: 0 }}
-                    onClick={exportCSV}
-                  />
-                </Tooltip>
-                <Tooltip title="Export as Excel">
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<FileExcelOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} />}
-                    style={{ height: 18, padding: "0 4px", minWidth: 0 }}
-                    onClick={exportExcel}
-                  />
-                </Tooltip>
-                <Text style={{ fontSize: 11, color: "var(--text-faint)" }}>
-                  {result.rows.length} row{result.rows.length !== 1 ? "s" : ""}
-                </Text>
-              </div>
-            </div>
-            <div style={{ flex: 1, overflow: "hidden" }}>
-              <ResultGrid result={result} />
-            </div>
+          <div style={{ flex: 1, overflow: "hidden", display: resultPane === "chat" ? "flex" : "none" }}>
+            <AiChat />
           </div>
-        )}
-
-        {!result && !error && !isRunning && (
-          <div style={{ padding: 24, color: "var(--text-faint)", fontSize: 13 }}>
-            Run a query to see results here.
-          </div>
-        )}
       </div>
     </div>
   );

@@ -92,6 +92,15 @@ body,
   --header-height: 36px;
 }
 
+/* AI chat — re-enable text selection so users can copy messages and errors.
+   WKWebView (macOS) sets user-select:none on the body; !important is needed
+   to override it for the entire chat panel. */
+.ai-chat-selectable,
+.ai-chat-selectable * {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+
 /* Monaco editor — custom selection occurrence highlights.
    Applied to every match of the selected text that is not the selection itself. */
 .sql-occurrence-highlight {

@@ -7,6 +7,7 @@ import {config} from '../models';
 import {gitrepo} from '../models';
 import {filesystem} from '../models';
 import {sfconfig} from '../models';
+import {ai} from '../models';
 
 export function CanCreateUsers():Promise<boolean>;
 
@@ -121,6 +122,8 @@ export function SaveFile(arg1:string,arg2:string):Promise<void>;
 export function SaveGitConfig(arg1:config.GitConfig):Promise<void>;
 
 export function SearchFiles(arg1:string,arg2:string,arg3:boolean):Promise<Array<filesystem.SearchMatch>>;
+
+export function SendChatMessage(arg1:Array<ai.UIMessage>,arg2:string,arg3:string,arg4:string):Promise<Array<ai.UIMessage>>;
 
 export function StartQuery(arg1:string):Promise<string>;
 

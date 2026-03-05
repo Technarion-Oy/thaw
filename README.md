@@ -33,6 +33,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
   - `Ctrl+Space` anywhere in a query (SELECT list, WHERE clause, etc.) → columns from all tables/views referenced in the `FROM`/`JOIN` clauses of the current statement; both quoted (`"TABLE"`) and unquoted identifiers are recognised; works above the FROM clause (e.g. inside the SELECT column list)
   - Column lists are fetched once via `DESCRIBE TABLE` and cached for the session; subsequent invocations are instant
 - **AI inline completions** — ghost-text SQL suggestions powered by OpenAI or Google AI Studios (Gemini); appears automatically as you type and is accepted with `Tab`; configure via **AI → Configure AI…** in the menu bar
+- **AI Chat** — agentic chat panel in the results area (Results / AI Chat tabs); the assistant can call tools against the live Snowflake connection to answer questions about your data — see [AI Chat](#ai-chat) below
 - Results displayed in a virtualised Ag-Grid table
 - **Export results** — CSV and Excel (`.xlsx`) export buttons in the results status bar; CSV uses RFC 4180 quoting; Excel uses SheetJS to produce a native `.xlsx` file; both open a native save dialog with format-appropriate file filters
 
@@ -257,7 +258,7 @@ thaw/
 │   ├── darwin/                    # macOS app icons
 │   └── windows/                   # Windows resources
 ├── internal/
-│   ├── ai/ai.go                   # AI provider HTTP clients (OpenAI, Google AI Studios); model listing
+│   ├── ai/ai.go                   # AI provider HTTP clients (OpenAI, Google AI Studios); model listing; agentic chat loop with tool-calling
 │   ├── config/config.go           # Saved git / export / AI settings
 │   ├── crashreport/crashreport.go # Panic handler; writes JSON crash file; remote-send placeholder
 │   ├── ddl/
@@ -316,6 +317,7 @@ thaw/
     │       │   ├── UserManagementPanel.tsx # User list, search, right-click menu
     │       │   ├── EditUserModal.tsx       # ALTER USER dialog with live SQL preview
     │       │   └── CreateUserModal.tsx     # CREATE USER dialog with live SQL preview
+    │       ├── chat/AiChat.tsx        # AI Chat panel with tool-call display and Run/Copy buttons
     │       ├── procedure/CallProcedureModal.tsx
     │       ├── results/ResultGrid.tsx
     │       ├── settings/
@@ -498,6 +500,31 @@ Log and crash files are written to:
 
 Snowflake CLI connection profiles are read from `~/.snowflake/config.toml` and
 pre-fill the connection form, but are never modified by Thaw.
+
+### AI Chat
+
+When AI is enabled, an **AI Chat** tab appears next to the **Results** tab in the bottom half of the query workspace. The assistant is connected to the live Snowflake session and can call tools to explore your data before answering.
+
+**Tools the assistant can call:**
+
+| Tool | What it does |
+|------|-------------|
+| `get_session_context` | Returns the active role, warehouse, database, and schema |
+| `list_databases` | Lists all databases accessible to the current role |
+| `list_schemas(database)` | Lists all schemas in a database |
+| `list_tables(database, schema)` | Lists all tables and views in a schema (with kind) |
+| `describe_table(database, schema, table)` | Returns each column's name and data type |
+| `run_sql(query)` | Executes a SQL query and returns up to 50 rows |
+
+The assistant always looks up real names before writing SQL — it will not guess database, schema, table, or column names.
+
+**Context injection:** The current SQL in the editor and the most recent query result are automatically included in each turn so the assistant has full context without the user needing to paste them.
+
+**Run button:** SQL code blocks in the assistant's response include a **Run** button that inserts the SQL into the active editor tab and executes it immediately.
+
+**Copy button:** Every message and error has a **Copy** button that writes the text to the clipboard via the native OS clipboard API.
+
+Chat history is preserved when switching between the Results and AI Chat tabs; it resets when the page is reloaded.
 
 ### AI inline completions
 

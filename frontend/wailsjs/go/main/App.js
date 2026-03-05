@@ -230,6 +230,10 @@ export function SearchFiles(arg1, arg2, arg3) {
   return window['go']['main']['App']['SearchFiles'](arg1, arg2, arg3);
 }
 
+export function SendChatMessage(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['SendChatMessage'](arg1, arg2, arg3, arg4);
+}
+
 export function StartQuery(arg1) {
   return window['go']['main']['App']['StartQuery'](arg1);
 }

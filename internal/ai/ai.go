@@ -23,6 +23,421 @@ import (
 
 var httpClient = &http.Client{Timeout: 5 * time.Second}
 
+var chatHttpClient = &http.Client{Timeout: 60 * time.Second}
+
+// UIToolCall holds one tool invocation and its result, for the frontend.
+type UIToolCall struct {
+	Name    string `json:"name"`
+	Input   string `json:"input"`   // raw JSON the AI sent
+	Output  string `json:"output"`  // formatted result or error
+	IsError bool   `json:"isError"`
+}
+
+// UIMessage is the display-facing message format shared between Go and the frontend.
+type UIMessage struct {
+	Role      string       `json:"role"`                       // "user" | "assistant"
+	Text      string       `json:"text"`
+	ToolCalls []UIToolCall `json:"toolCalls,omitempty"`
+}
+
+// ToolExecutor is called by Chat to run a tool by name with its JSON input.
+// Returns (output text, isError).
+type ToolExecutor func(name, inputJSON string) (string, bool)
+
+// chatTools is the tool definitions sent to both providers.
+var chatTools = []map[string]any{
+	{
+		"name":        "get_session_context",
+		"description": "Return the current Snowflake session context: active role, warehouse, database, and schema. Call this first whenever you need to know where you are before listing schemas or tables.",
+	},
+	{
+		"name":        "list_databases",
+		"description": "List all databases the current role can access.",
+	},
+	{
+		"name":        "list_schemas",
+		"description": "List all schemas in a database.",
+		"parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"database": map[string]any{"type": "string", "description": "Database name"},
+			},
+			"required": []string{"database"},
+		},
+	},
+	{
+		"name":        "list_tables",
+		"description": "List all tables and views in the given database.schema.",
+		"parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"database": map[string]any{"type": "string", "description": "Database name"},
+				"schema":   map[string]any{"type": "string", "description": "Schema name"},
+			},
+			"required": []string{"database", "schema"},
+		},
+	},
+	{
+		"name":        "describe_table",
+		"description": "Return each column's name and data type for a table or view.",
+		"parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"database": map[string]any{"type": "string", "description": "Database name"},
+				"schema":   map[string]any{"type": "string", "description": "Schema name"},
+				"table":    map[string]any{"type": "string", "description": "Table or view name"},
+			},
+			"required": []string{"database", "schema", "table"},
+		},
+	},
+	{
+		"name":        "run_sql",
+		"description": "Execute a SQL query. Returns up to 50 rows as a plain-text table.",
+		"parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{"type": "string", "description": "The SQL query to execute"},
+			},
+			"required": []string{"query"},
+		},
+	},
+}
+
+// Chat runs one agentic turn: sends history + userText to the AI, executes
+// any tool calls via exec, loops until the model produces a final text response,
+// and returns the assistant UIMessage (with ToolCalls populated).
+// Uses chatHttpClient with 30-second timeout. Max 8 tool-calling iterations.
+func Chat(provider, apiKey, model string, history []UIMessage, userText, currentSQL, lastResultSummary string, exec ToolExecutor) (UIMessage, error) {
+	switch provider {
+	case "openai":
+		return openAIChat(apiKey, model, history, userText, currentSQL, lastResultSummary, exec)
+	case "google":
+		return googleChat(apiKey, model, history, userText, currentSQL, lastResultSummary, exec)
+	default:
+		return UIMessage{}, fmt.Errorf("unknown AI provider: %s", provider)
+	}
+}
+
+func buildSystemPrompt(currentSQL, lastResultSummary string) string {
+	var sb strings.Builder
+	sb.WriteString("You are a helpful SQL assistant connected to a live Snowflake database.\n")
+	sb.WriteString("You have tools to explore the database and run SQL. Follow these rules:\n")
+	sb.WriteString("1. Never guess database names, schema names, table names, or column names. Always look them up first.\n")
+	sb.WriteString("2. When you need to know where you are, call get_session_context first.\n")
+	sb.WriteString("3. When you need tables in a schema, call list_tables. If you don't know the schema, call list_schemas first.\n")
+	sb.WriteString("4. Before writing any SELECT, call describe_table to confirm the real column names and types.\n")
+	sb.WriteString("5. Only call run_sql once you have verified the table and column names through the other tools.\n")
+	if currentSQL != "" {
+		sb.WriteString("\nCurrent SQL in the editor:\n```sql\n")
+		sb.WriteString(currentSQL)
+		sb.WriteString("\n```\n")
+	}
+	if lastResultSummary != "" {
+		sb.WriteString("\nMost recent query result:\n")
+		sb.WriteString(lastResultSummary)
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+// ── OpenAI chat with tool-calling ─────────────────────────────────────────────
+
+func openAIChat(apiKey, model string, history []UIMessage, userText, currentSQL, lastResultSummary string, exec ToolExecutor) (UIMessage, error) {
+	systemPrompt := buildSystemPrompt(currentSQL, lastResultSummary)
+
+	// Build initial messages
+	messages := []map[string]any{
+		{"role": "system", "content": systemPrompt},
+	}
+	for _, m := range history {
+		messages = append(messages, map[string]any{"role": m.Role, "content": m.Text})
+	}
+	messages = append(messages, map[string]any{"role": "user", "content": userText})
+
+	// Convert tools to OpenAI format
+	openAITools := make([]map[string]any, len(chatTools))
+	for i, t := range chatTools {
+		openAITools[i] = map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        t["name"],
+				"description": t["description"],
+				"parameters":  t["parameters"],
+			},
+		}
+	}
+
+	var accumulated []UIToolCall
+	const maxIter = 8
+
+	for iter := 0; iter < maxIter; iter++ {
+		body, err := json.Marshal(map[string]any{
+			"model":    model,
+			"messages": messages,
+			"tools":    openAITools,
+		})
+		if err != nil {
+			return UIMessage{}, err
+		}
+
+		req, err := http.NewRequest(http.MethodPost, "https://api.openai.com/v1/chat/completions", bytes.NewReader(body))
+		if err != nil {
+			return UIMessage{}, err
+		}
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := chatHttpClient.Do(req)
+		if err != nil {
+			return UIMessage{}, err
+		}
+		raw, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return UIMessage{}, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			return UIMessage{}, fmt.Errorf("openai: status %d: %s", resp.StatusCode, raw)
+		}
+
+		var result struct {
+			Choices []struct {
+				FinishReason string `json:"finish_reason"`
+				Message      struct {
+					Content   string `json:"content"`
+					ToolCalls []struct {
+						ID       string `json:"id"`
+						Function struct {
+							Name      string `json:"name"`
+							Arguments string `json:"arguments"`
+						} `json:"function"`
+					} `json:"tool_calls"`
+				} `json:"message"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal(raw, &result); err != nil {
+			return UIMessage{}, err
+		}
+		if len(result.Choices) == 0 {
+			return UIMessage{}, fmt.Errorf("openai: no choices returned")
+		}
+
+		choice := result.Choices[0]
+
+		if choice.FinishReason != "tool_calls" {
+			return UIMessage{
+				Role:      "assistant",
+				Text:      strings.TrimSpace(choice.Message.Content),
+				ToolCalls: accumulated,
+			}, nil
+		}
+
+		// Append assistant message with tool_calls
+		assistantMsg := map[string]any{
+			"role":    "assistant",
+			"content": choice.Message.Content,
+		}
+		toolCallsForMsg := make([]map[string]any, len(choice.Message.ToolCalls))
+		for i, tc := range choice.Message.ToolCalls {
+			toolCallsForMsg[i] = map[string]any{
+				"id":   tc.ID,
+				"type": "function",
+				"function": map[string]any{
+					"name":      tc.Function.Name,
+					"arguments": tc.Function.Arguments,
+				},
+			}
+		}
+		assistantMsg["tool_calls"] = toolCallsForMsg
+		messages = append(messages, assistantMsg)
+
+		// Execute each tool and append results
+		for _, tc := range choice.Message.ToolCalls {
+			output, isErr := exec(tc.Function.Name, tc.Function.Arguments)
+			accumulated = append(accumulated, UIToolCall{
+				Name:    tc.Function.Name,
+				Input:   tc.Function.Arguments,
+				Output:  output,
+				IsError: isErr,
+			})
+			messages = append(messages, map[string]any{
+				"role":         "tool",
+				"tool_call_id": tc.ID,
+				"content":      output,
+			})
+		}
+	}
+
+	return UIMessage{}, fmt.Errorf("openai: exceeded max tool-calling iterations")
+}
+
+// ── Google Gemini chat with function-calling ───────────────────────────────────
+
+func googleChat(apiKey, model string, history []UIMessage, userText, currentSQL, lastResultSummary string, exec ToolExecutor) (UIMessage, error) {
+	systemPrompt := buildSystemPrompt(currentSQL, lastResultSummary)
+
+	// Build Google function declarations (omit parameters for no-arg tools).
+	functionDecls := make([]map[string]any, 0, len(chatTools))
+	for _, t := range chatTools {
+		decl := map[string]any{
+			"name":        t["name"],
+			"description": t["description"],
+		}
+		if params, ok := t["parameters"]; ok {
+			decl["parameters"] = params
+		}
+		functionDecls = append(functionDecls, decl)
+	}
+
+	// Build contents from history.
+	contents := []map[string]any{}
+	for _, m := range history {
+		role := m.Role
+		if role == "assistant" {
+			role = "model"
+		}
+		contents = append(contents, map[string]any{
+			"role":  role,
+			"parts": []map[string]any{{"text": m.Text}},
+		})
+	}
+	contents = append(contents, map[string]any{
+		"role":  "user",
+		"parts": []map[string]any{{"text": userText}},
+	})
+
+	var accumulated []UIToolCall
+	const maxIter = 8
+
+	apiURL := fmt.Sprintf(
+		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
+		model, apiKey,
+	)
+
+	// partEnvelope is used only to inspect a part — never to reconstruct it.
+	type partEnvelope struct {
+		Text         string `json:"text"`
+		FunctionCall *struct {
+			Name string         `json:"name"`
+			Args map[string]any `json:"args"`
+		} `json:"functionCall"`
+	}
+
+	for iter := 0; iter < maxIter; iter++ {
+		body, err := json.Marshal(map[string]any{
+			"system_instruction": map[string]any{
+				"parts": []map[string]any{{"text": systemPrompt}},
+			},
+			"contents": contents,
+			"tools": []map[string]any{
+				{"function_declarations": functionDecls},
+			},
+			"tool_config": map[string]any{
+				"function_calling_config": map[string]any{"mode": "AUTO"},
+			},
+		})
+		if err != nil {
+			return UIMessage{}, err
+		}
+
+		req, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewReader(body))
+		if err != nil {
+			return UIMessage{}, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := chatHttpClient.Do(req)
+		if err != nil {
+			return UIMessage{}, err
+		}
+		rawResp, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return UIMessage{}, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			return UIMessage{}, fmt.Errorf("google: status %d: %s", resp.StatusCode, rawResp)
+		}
+
+		// Parse the candidate content with raw parts so we never lose fields
+		// like thought_signature that thinking models attach to functionCall parts.
+		var result struct {
+			Candidates []struct {
+				Content struct {
+					Parts []json.RawMessage `json:"parts"`
+				} `json:"content"`
+			} `json:"candidates"`
+		}
+		if err := json.Unmarshal(rawResp, &result); err != nil {
+			return UIMessage{}, err
+		}
+		if len(result.Candidates) == 0 {
+			return UIMessage{}, fmt.Errorf("google: no candidates returned")
+		}
+
+		rawParts := result.Candidates[0].Content.Parts
+
+		// Inspect each part to find function calls, but keep the raw bytes.
+		var functionCalls []partEnvelope
+		var textParts []string
+		hasFunctionCall := false
+		for _, rp := range rawParts {
+			var p partEnvelope
+			if err := json.Unmarshal(rp, &p); err != nil {
+				continue
+			}
+			if p.FunctionCall != nil {
+				hasFunctionCall = true
+				functionCalls = append(functionCalls, p)
+			} else if p.Text != "" {
+				textParts = append(textParts, p.Text)
+			}
+		}
+
+		if !hasFunctionCall {
+			return UIMessage{
+				Role:      "assistant",
+				Text:      strings.TrimSpace(strings.Join(textParts, "")),
+				ToolCalls: accumulated,
+			}, nil
+		}
+
+		// Echo the model turn back verbatim — raw parts preserve thought_signature
+		// and any other fields that thinking models include.
+		contents = append(contents, map[string]any{
+			"role":  "model",
+			"parts": rawParts,
+		})
+
+		// Execute each tool and build the functionResponse turn.
+		var responseParts []map[string]any
+		for _, fc := range functionCalls {
+			argsJSON, _ := json.Marshal(fc.FunctionCall.Args)
+			output, isErr := exec(fc.FunctionCall.Name, string(argsJSON))
+			accumulated = append(accumulated, UIToolCall{
+				Name:    fc.FunctionCall.Name,
+				Input:   string(argsJSON),
+				Output:  output,
+				IsError: isErr,
+			})
+			responseParts = append(responseParts, map[string]any{
+				"functionResponse": map[string]any{
+					"name": fc.FunctionCall.Name,
+					"response": map[string]any{
+						"output": output,
+					},
+				},
+			})
+		}
+		contents = append(contents, map[string]any{
+			"role":  "user",
+			"parts": responseParts,
+		})
+	}
+
+	return UIMessage{}, fmt.Errorf("google: exceeded max tool-calling iterations")
+}
+
 // GetSuggestion requests an inline SQL completion from the configured provider.
 // provider must be "openai" or "google". Returns the trimmed completion text.
 func GetSuggestion(provider, apiKey, model, prompt string) (string, error) {
