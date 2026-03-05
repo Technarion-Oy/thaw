@@ -904,7 +904,7 @@ export default function Sidebar() {
             ? <CaretRightFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
             : <CaretDownFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
           }
-          <Text type="secondary" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          <Text style={{ fontSize: 11, color: "var(--text)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
             Objects
           </Text>
         </div>

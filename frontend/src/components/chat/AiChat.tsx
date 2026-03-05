@@ -325,7 +325,7 @@ export default function AiChat() {
   }
 
   return (
-    <div className="ai-chat-selectable" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+    <div className="ai-chat-selectable" style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", overflow: "hidden" }}>
       {/* Messages */}
       <div
         ref={scrollRef}

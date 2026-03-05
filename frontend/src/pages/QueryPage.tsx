@@ -461,7 +461,7 @@ export default function QueryPage() {
             )}
           </div>
 
-          <div style={{ flex: 1, overflow: "hidden", display: resultPane === "chat" ? "flex" : "none" }}>
+          <div style={{ flex: 1, overflow: "hidden", display: resultPane === "chat" ? "flex" : "none", flexDirection: "column" }}>
             <AiChat />
           </div>
       </div>

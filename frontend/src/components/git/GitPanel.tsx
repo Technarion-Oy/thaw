@@ -77,8 +77,8 @@ export default function GitPanel() {
           key: "git",
           label: (
             <Space size={6}>
-              <BranchesOutlined style={{ color: CLR_SECONDARY, fontSize: 13 }} />
-              <Text style={{ fontSize: 11, color: CLR_SECONDARY, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              <BranchesOutlined style={{ color: "var(--text)", fontSize: 13 }} />
+              <Text style={{ fontSize: 11, color: "var(--text)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
                 {headerLabel}
               </Text>
               {totalChanged > 0 && (
