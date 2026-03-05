@@ -8,7 +8,8 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import Editor, { type OnMount } from "@monaco-editor/react";
+import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
+import { snowflakeMonarchLanguage, thawDarkTheme, thawLightTheme } from "./snowflakeSql";
 import { useQueryStore } from "../../store/queryStore";
 import { useObjectStore } from "../../store/objectStore";
 import { useThemeStore } from "../../store/themeStore";
@@ -20,6 +21,7 @@ import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetUserDDL, Ge
 const hoverDDLCache = new Map<string, string>();
 let hoverProviderDisposable: { dispose(): void } | null = null;
 let inlineCompletionsDisposable: { dispose(): void } | null = null;
+let languageAndThemesRegistered = false;
 
 // Singleton editor reference — set on mount so external callers (e.g. the
 // sidebar) can insert text at the current cursor position without prop drilling.
@@ -100,6 +102,16 @@ export default function SqlEditor() {
   const resolved       = useThemeStore((s) => s.resolved);
   const editorFont     = useThemeStore((s) => s.editorFont);
   const editorFontSize = useThemeStore((s) => s.editorFontSize);
+
+  // Register the custom Snowflake SQL tokenizer and themes exactly once,
+  // before the editor instance is created.
+  const handleBeforeMount: BeforeMount = (monaco) => {
+    if (languageAndThemesRegistered) return;
+    languageAndThemesRegistered = true;
+    monaco.languages.setMonarchTokensProvider("sql", snowflakeMonarchLanguage as any);
+    monaco.editor.defineTheme("thaw-dark",  thawDarkTheme  as any);
+    monaco.editor.defineTheme("thaw-light", thawLightTheme as any);
+  };
 
   const handleMount: OnMount = (editor, monaco) => {
     _editorInstance = editor;
@@ -642,9 +654,10 @@ export default function SqlEditor() {
     <Editor
       height="100%"
       defaultLanguage="sql"
-      theme={resolved === "dark" ? "vs-dark" : "vs"}
+      theme={resolved === "dark" ? "thaw-dark" : "thaw-light"}
       value={sql}
       onChange={(v) => setSql(v ?? "")}
+      beforeMount={handleBeforeMount}
       onMount={handleMount}
       options={{
         fontSize: editorFontSize,
