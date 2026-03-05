@@ -117,15 +117,30 @@ export default function App() {
   }, []);
 
   const antdAlgorithm = resolved === "dark" ? theme.darkAlgorithm : theme.defaultAlgorithm;
+  const isDark = resolved === "dark";
 
   return (
     <ConfigProvider
       theme={{
         algorithm: antdAlgorithm,
         token: {
-          colorPrimary: resolved === "dark" ? "#29B6F6" : "#0969da",
+          colorPrimary: isDark ? "#40c8fc" : "#0969da",
           borderRadius: 6,
           fontFamily: uiFont,
+          fontWeightStrong: 600,
+        },
+        components: {
+          Button: {
+            fontWeight: 500,
+            // Dark mode: vivid text and a clearly visible border on default buttons.
+            ...(isDark && {
+              defaultColor:            "#f0f6fc",
+              defaultBorderColor:      "#768390",
+              defaultHoverColor:       "#ffffff",
+              defaultHoverBorderColor: "#adbac7",
+              defaultHoverBg:          "#2d333b",
+            }),
+          },
         },
       }}
     >
