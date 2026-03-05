@@ -238,6 +238,10 @@ export function StartQuery(arg1) {
   return window['go']['main']['App']['StartQuery'](arg1);
 }
 
+export function TestAIModel(arg1, arg2, arg3) {
+  return window['go']['main']['App']['TestAIModel'](arg1, arg2, arg3);
+}
+
 export function UseRole(arg1) {
   return window['go']['main']['App']['UseRole'](arg1);
 }

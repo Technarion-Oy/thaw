@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Button, Input, Modal, Radio, Select, Switch, Typography, message } from "antd";
-import { GetAIConfig, ListAIModels, SaveAIConfig } from "../../../wailsjs/go/main/App";
+import { GetAIConfig, ListAIModels, SaveAIConfig, TestAIModel } from "../../../wailsjs/go/main/App";
 
 const { Text } = Typography;
 
@@ -50,9 +50,13 @@ export default function AISettingsModal({ onClose }: Props) {
   const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
   const [modelsFetching, setModelsFetching] = useState(false);
 
-  // Debounce timer ref — cleared on each keystroke so we only fire after the
-  // user stops typing for 700 ms.
+  // Model connectivity test.
+  const [modelTest, setModelTest] = useState<"idle" | "testing" | "ok" | "error">("idle");
+  const [modelTestMsg, setModelTestMsg] = useState("");
+
+  // Debounce timer refs.
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const testDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load saved config on open.
   useEffect(() => {
@@ -96,6 +100,36 @@ export default function AISettingsModal({ onClose }: Props) {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [state.provider, state.apiKey]);
+
+  // Test model connectivity whenever provider, apiKey, or model changes.
+  useEffect(() => {
+    if (testDebounceRef.current) clearTimeout(testDebounceRef.current);
+    setModelTest("idle");
+    setModelTestMsg("");
+
+    if (state.apiKey.length < 8 || !state.model) return;
+
+    testDebounceRef.current = setTimeout(async () => {
+      setModelTest("testing");
+      try {
+        const errMsg = await TestAIModel(state.provider, state.apiKey, state.model);
+        if (errMsg) {
+          setModelTest("error");
+          setModelTestMsg(errMsg);
+        } else {
+          setModelTest("ok");
+          setModelTestMsg("");
+        }
+      } catch (e) {
+        setModelTest("error");
+        setModelTestMsg(String(e));
+      }
+    }, 800);
+
+    return () => {
+      if (testDebounceRef.current) clearTimeout(testDebounceRef.current);
+    };
+  }, [state.provider, state.apiKey, state.model]);
 
   function setProvider(provider: Provider) {
     setState((s) => ({ ...s, provider, model: DEFAULT_MODEL[provider] }));
@@ -191,6 +225,21 @@ export default function AISettingsModal({ onClose }: Props) {
             onChange={(v) => setState((s) => ({ ...s, model: v }))}
             options={modelOptions}
           />
+          {modelTest !== "idle" && (
+            <div style={{ marginTop: 5, fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
+              {modelTest === "testing" && (
+                <Text type="secondary">Testing model…</Text>
+              )}
+              {modelTest === "ok" && (
+                <span style={{ color: "#52c41a" }}>● Model OK</span>
+              )}
+              {modelTest === "error" && (
+                <span style={{ color: "#f5222d" }} title={modelTestMsg}>
+                  ● {modelTestMsg}
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Storage note */}

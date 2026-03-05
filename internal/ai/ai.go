@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-var httpClient = &http.Client{Timeout: 5 * time.Second}
+var httpClient = &http.Client{Timeout: 3 * time.Second}
 
 var chatHttpClient = &http.Client{Timeout: 60 * time.Second}
 
@@ -611,6 +611,100 @@ func listGoogleModels(apiKey string) ([]string, error) {
 	}
 	sort.Strings(models)
 	return models, nil
+}
+
+// ── Model testing ─────────────────────────────────────────────────────────────
+
+// testHttpClient has a 10-second timeout — long enough for a real API response
+// but short enough to give quick feedback in the settings dialog.
+var testHttpClient = &http.Client{Timeout: 10 * time.Second}
+
+// TestModel sends a minimal one-token request to verify that the given
+// provider / API key / model combination is reachable and valid.
+// Returns nil on success or a user-readable error.
+func TestModel(provider, apiKey, model string) error {
+	switch provider {
+	case "openai":
+		return testOpenAIModel(apiKey, model)
+	case "google":
+		return testGoogleModel(apiKey, model)
+	default:
+		return fmt.Errorf("unknown provider: %s", provider)
+	}
+}
+
+func testOpenAIModel(apiKey, model string) error {
+	body, err := json.Marshal(map[string]any{
+		"model":      model,
+		"messages":   []map[string]string{{"role": "user", "content": "hi"}},
+		"max_tokens": 1,
+	})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost, "https://api.openai.com/v1/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := testHttpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(raw, &errResp) == nil && errResp.Error.Message != "" {
+			return fmt.Errorf("%s", errResp.Error.Message)
+		}
+		return fmt.Errorf("status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func testGoogleModel(apiKey, model string) error {
+	url := fmt.Sprintf(
+		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
+		model, apiKey,
+	)
+	body, err := json.Marshal(map[string]any{
+		"contents":         []map[string]any{{"parts": []map[string]string{{"text": "hi"}}}},
+		"generationConfig": map[string]any{"maxOutputTokens": 1},
+	})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := testHttpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(raw, &errResp) == nil && errResp.Error.Message != "" {
+			return fmt.Errorf("%s", errResp.Error.Message)
+		}
+		return fmt.Errorf("status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // ── Google AI Studios (Gemini) ────────────────────────────────────────────────

@@ -536,6 +536,7 @@ Open **AI → Configure AI…** in the menu bar to configure:
 | **Provider** | `OpenAI` or `Google AI Studios` |
 | **API Key** | Stored locally in `config.json` (mode `0600`) |
 | **Model** | Auto-fetched from the provider after entering a valid key; falls back to built-in defaults if the key is not yet valid |
+| **Model status** | A live indicator appears below the model dropdown: `● Model OK` (green) confirms the selected model is reachable; `● <error>` (red) shows the exact API error (e.g. invalid model name) within 10 seconds of selection |
 
 Once enabled, the Monaco editor fetches ghost-text suggestions as you type (triggered automatically after a short pause). Press `Tab` to accept a suggestion.
 

@@ -1070,6 +1070,16 @@ func (a *App) ListAIModels(provider, apiKey string) []string {
 	return models
 }
 
+// TestAIModel makes a minimal one-token API call to verify that the given
+// provider/key/model combination is valid and reachable.
+// Returns an empty string on success or a human-readable error message.
+func (a *App) TestAIModel(provider, apiKey, model string) string {
+	if err := ai.TestModel(provider, apiKey, model); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
 // SendChatMessage runs one agentic chat turn. currentSQL is the text currently
 // in the editor (may be empty). lastResultSummary is a pre-formatted text
 // summary of the most recent query result (may be empty). Both are injected
@@ -1255,7 +1265,7 @@ func (a *App) GetAISuggestion(prefix string) string {
 
 	suggestion, err := ai.GetSuggestion(cfg.AI.Provider, cfg.AI.APIKey, cfg.AI.Model, prompt)
 	if err != nil {
-		logger.L.Warn("AI suggestion failed", "provider", cfg.AI.Provider, "err", err)
+		logger.L.Debug("AI suggestion failed", "provider", cfg.AI.Provider, "err", err)
 		return ""
 	}
 	return suggestion
