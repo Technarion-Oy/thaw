@@ -26,6 +26,7 @@ import AiChat from "../components/chat/AiChat";
 import { useQueryStore } from "../store/queryStore";
 import { useConnectionStore } from "../store/connectionStore";
 import { useSessionStore } from "../store/sessionStore";
+import { usePanelLayoutStore } from "../store/panelLayoutStore";
 
 const { Text } = Typography;
 
@@ -35,6 +36,12 @@ export default function QueryPage() {
   const resolved       = useThemeStore((s) => s.resolved);
   const editorFont     = useThemeStore((s) => s.editorFont);
   const editorFontSize = useThemeStore((s) => s.editorFontSize);
+  const editorSplit    = usePanelLayoutStore((s) => s.editorSplit);
+  const setEditorSplit = usePanelLayoutStore((s) => s.setEditorSplit);
+  const [splitPct, setSplitPct] = useState(editorSplit);
+  const splitResizing  = useRef(false);
+  const splitStartY    = useRef(0);
+  const splitStartPct  = useRef(0);
   const [runningQueryId, setRunningQueryId] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   const [resultPane, setResultPane] = useState<"results" | "chat">("results");
@@ -51,6 +58,9 @@ export default function QueryPage() {
     loadContext, loadRoles, loadWarehouses,
     switchRole, switchWarehouse, clearError,
   } = useSessionStore();
+
+  // Sync local split state when the store value changes (e.g., after layout reset).
+  useEffect(() => { setSplitPct(editorSplit); }, [editorSplit]);
 
   // Load current role/warehouse on mount
   useEffect(() => {
@@ -247,7 +257,7 @@ export default function QueryPage() {
   const selectStyle = { fontSize: 12, minWidth: 130 };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg)" }}>
+    <div data-query-layout style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg)" }}>
       {/* Toolbar */}
       <div
         style={{
@@ -401,12 +411,58 @@ export default function QueryPage() {
         </div>
       )}
 
-      {/* SQL Editor — top half */}
-      {!activeDiff && <div style={{ flex: "0 0 40%", borderBottom: "1px solid var(--border)" }}>
+      {/* SQL Editor — top portion (resizable) */}
+      {!activeDiff && <div style={{ flex: `0 0 ${splitPct * 100}%`, borderBottom: "1px solid var(--border)", overflow: "hidden" }}>
         <SqlEditor />
       </div>}
 
-      {/* Results / AI Chat — bottom half */}
+      {/* Horizontal resize handle */}
+      {!activeDiff && (
+        <div
+          style={{
+            height: 5,
+            flexShrink: 0,
+            cursor: "row-resize",
+            background: "transparent",
+            borderTop: "1px solid var(--border)",
+            transition: "background 0.15s",
+            zIndex: 10,
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--accent) 26%, transparent)"; }}
+          onMouseLeave={(e) => { if (!splitResizing.current) e.currentTarget.style.background = "transparent"; }}
+          onMouseDown={(e) => {
+            splitResizing.current = true;
+            splitStartY.current   = e.clientY;
+            splitStartPct.current = splitPct;
+            document.body.style.cursor     = "row-resize";
+            document.body.style.userSelect = "none";
+            e.preventDefault();
+            const parent = (e.currentTarget as HTMLElement).closest("[data-query-layout]") as HTMLElement | null;
+            const onMove = (ev: MouseEvent) => {
+              if (!parent) return;
+              const delta = ev.clientY - splitStartY.current;
+              const pct = splitStartPct.current + delta / parent.clientHeight;
+              setSplitPct(Math.min(0.85, Math.max(0.15, pct)));
+            };
+            const onUp = (ev: MouseEvent) => {
+              splitResizing.current = false;
+              document.body.style.cursor     = "";
+              document.body.style.userSelect = "";
+              if (parent) {
+                const delta = ev.clientY - splitStartY.current;
+                const pct = splitStartPct.current + delta / parent.clientHeight;
+                setEditorSplit(Math.min(0.85, Math.max(0.15, pct)));
+              }
+              window.removeEventListener("mousemove", onMove);
+              window.removeEventListener("mouseup",   onUp);
+            };
+            window.addEventListener("mousemove", onMove);
+            window.addEventListener("mouseup",   onUp);
+          }}
+        />
+      )}
+
+      {/* Results / AI Chat — bottom portion */}
       {!activeDiff &&
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {/* Tab bar */}

@@ -260,7 +260,7 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
   );
 }
 
-export default function Sidebar() {
+export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel?: boolean }) {
   const [treeData, setTreeData] = useState<DataNode[]>([]);
   const [loading, setLoading]   = useState(false);
   const [loaded, setLoaded]         = useState(false);
@@ -1207,8 +1207,12 @@ export default function Sidebar() {
         )}
       </Modal>
 
-      <Divider style={{ borderColor: "var(--border)", margin: "8px 0 0" }} />
-      <AccountPanel />
+      {!hideAccountPanel && (
+        <>
+          <Divider style={{ borderColor: "var(--border)", margin: "8px 0 0" }} />
+          <AccountPanel />
+        </>
+      )}
 
       {/* Call Procedure modal */}
       {callModal && (

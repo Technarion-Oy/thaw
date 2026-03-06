@@ -10,7 +10,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 
 ### Snowflake connectivity
 - Connect with account / user / password / warehouse / role
-- Auto-fill connection form from `~/.snowflake/config.toml` (Snowflake CLI profiles)
+- Auto-fill connection form from `~/.snowflake/config.toml` (Snowflake CLI profiles), including key-pair (`SNOWFLAKE_JWT`) profiles; authenticator values are matched case-insensitively
 - Cancel an in-progress connection attempt
 - Switch role or warehouse from the query toolbar without reconnecting
 - Role dropdown shows only roles the current user can actually `USE ROLE` to — not all account-visible roles
@@ -18,6 +18,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 ### SQL editor
 - Monaco editor with full SQL syntax highlighting
 - Multi-tab editing — each open file gets its own tab; tabs restore their SQL, results and error state when switched back to
+- **Tab reordering** — drag any tab left or right to rearrange the tab strip; a vertical accent line shows the drop position
 - Unsaved changes shown with a `•` prefix in the tab title
 - Run the full query or just the selected text (`⌘ Enter` / `Ctrl Enter`)
 - **Cancel query** — while a query is running the Run button becomes a **Cancel** button; pressing it (or `Esc`) cancels client-side polling *and* issues `SYSTEM$CANCEL_QUERY` so the query stops consuming credits in Snowflake
@@ -160,7 +161,10 @@ Role and warehouse switches (via the toolbar dropdowns) are applied to a **singl
 - OS junk files (`.DS_Store`, `Thumbs.db`, `desktop.ini`) are automatically excluded from commits and appended to `.gitignore`
 
 ### UI
-- Resizable sidebar — drag the divider to any width between 160 px and 600 px
+- **Drag-and-drop panel layout** — every sidebar panel (Export DDL, File Browser, Git, Object Browser, Account Objects) has a drag handle at its top edge; drag panels between the left and right sidebars or reorder them within a sidebar; layout is persisted across sessions
+- **Reset Layout** — restore default panel positions and split ratio from the **Customize Layout…** dialog
+- Resizable sidebars — drag either edge to any width between 160 px and 600 px
+- **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane; ratio is persisted across sessions
 - **Object browser height** — the Objects panel is collapsible (click the label or the ▶/▼ chevron) and vertically resizable (drag the handle below the tree, 80 – 800 px); the Account Objects panel fills the remaining space
 - **Theming** — light, dark, and system-default themes; switch via **View → Appearance** in the native menu bar; preference is persisted across sessions
 - Native application menu bar with **File** (open / save / new tab), **View → Appearance** (System / Light / Dark), and **AI → Configure AI…** menus
@@ -288,19 +292,18 @@ thaw/
     │   ├── main.tsx               # React entry point; suppresses WebView context menu
     │   ├── styles/global.css      # Global styles incl. Monaco occurrence-highlight class
     │   ├── store/
-    │   │   ├── connectionStore.ts # Connection state (Zustand)
-    │   │   ├── diffStore.ts       # Text comparison pending item + modal state (Zustand)
-    │   │   ├── gitStore.ts        # Git / export directory state (Zustand)
-    │   │   ├── objectStore.ts     # Object browser state (Zustand)
-    │   │   ├── queryStore.ts      # Multi-tab editor state (Zustand)
-    │   │   ├── sessionStore.ts    # Active role & warehouse (Zustand)
-    │   │   └── themeStore.ts      # Light/dark/system theme preference (Zustand, persisted)
+    │   │   ├── connectionStore.ts  # Connection state (Zustand)
+    │   │   ├── diffStore.ts        # Text comparison pending item + fetch state (Zustand)
+    │   │   ├── gitStore.ts         # Git / export directory state (Zustand)
+    │   │   ├── objectStore.ts      # Object browser state (Zustand)
+    │   │   ├── panelLayoutStore.ts # Sidebar panel order, widths, editor split (Zustand, persisted)
+    │   │   ├── queryStore.ts       # Multi-tab editor state (Zustand)
+    │   │   ├── sessionStore.ts     # Active role & warehouse (Zustand)
+    │   │   └── themeStore.ts       # Light/dark/system theme preference (Zustand, persisted)
     │   ├── pages/
     │   │   └── QueryPage.tsx      # Main query workspace; save handlers; menu event wiring
     │   └── components/
     │       ├── connection/ConnectModal.tsx
-    │       ├── diff/
-    │       │   └── DiffModal.tsx  # Monaco side-by-side diff modal
     │       ├── editor/
     │       │   ├── monacoSetup.ts # Shared Monaco theme/language registration
     │       │   ├── SqlEditor.tsx  # Monaco editor with completions, selection highlight
@@ -330,7 +333,7 @@ thaw/
     │       │   └── LayoutSettingsModal.tsx
     │       ├── task/CreateTaskModal.tsx    # CREATE OR REPLACE TASK dialog
     │       └── layout/
-    │           ├── AppLayout.tsx  # Resizable sidebar
+    │           ├── AppLayout.tsx  # Two-sidebar layout with drag-and-drop panel reordering and resize handles
     │           └── Sidebar.tsx    # Object browser: lazy tree, right-click actions (rename, drop, undrop, DDL)
     └── wailsjs/                   # Auto-generated Go→JS bridge (do not edit)
 ```

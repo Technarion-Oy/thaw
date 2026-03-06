@@ -77,6 +77,7 @@ interface QueryState {
   openScratch: () => void;
   openDiff: (leftLabel: string, leftText: string, rightLabel: string, rightText: string) => void;
   closeTab: (id: string) => void;
+  moveTab: (draggedId: string, targetId: string, before: boolean) => void;
   // Called after a successful save to update the tab's path/title and clear dirty state.
   markSaved: (id: string, path: string, title: string) => void;
 
@@ -194,6 +195,15 @@ export const useQueryStore = create<QueryState>()(
         result: null,
         error: null,
       };
+    }),
+
+  moveTab: (draggedId, targetId, before) =>
+    set((state) => {
+      const without = state.tabs.filter((t) => t.id !== draggedId);
+      const idx = without.findIndex((t) => t.id === targetId);
+      if (idx === -1) return {};
+      without.splice(before ? idx : idx + 1, 0, state.tabs.find((t) => t.id === draggedId)!);
+      return { tabs: without };
     }),
 
   closeTab: (id) =>

@@ -21,6 +21,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 - **AI inline completions** — ghost-text SQL suggestions powered by OpenAI or Google AI Studios (Gemini); press `Tab` to accept
 - **AI Chat** — an agentic assistant in the results area that can query your live Snowflake connection to answer questions about your data (see [AI Features](#ai-features))
 - **Unsaved-change indicator** — a `•` dot in the tab title shows unsaved work at a glance
+- **Tab reordering** — drag any tab left or right to rearrange the tab strip; a vertical accent line shows the insertion point
 
 ---
 
@@ -156,7 +157,7 @@ Open **AI → Configure AI…** in the menu bar to set your provider, API key, a
 ## Snowflake Connectivity
 
 - Connect with account / user / password / warehouse / role
-- **Auto-fill from Snowflake CLI** — reads `~/.snowflake/config.toml` and populates the connection form from any saved profile
+- **Auto-fill from Snowflake CLI** — reads `~/.snowflake/config.toml` and populates the connection form from any saved profile, including key-pair (`SNOWFLAKE_JWT`) profiles; authenticator values are matched case-insensitively so both `snowflake_jwt` and `SNOWFLAKE_JWT` work
 - **Cancel connection** — abort an in-progress connection attempt
 - **Switch role or warehouse** from the toolbar without disconnecting — all subsequent queries, privilege checks, and object browsing immediately reflect the new session state
 - Role dropdown shows only roles the current user can actually assume
@@ -166,7 +167,10 @@ Open **AI → Configure AI…** in the menu bar to set your provider, API key, a
 ## UI & Theming
 
 - **Light, Dark, and System** themes — switch via **View → Appearance**; preference is saved across sessions
-- **Resizable sidebar** — drag to any width
+- **Resizable sidebars** — drag either sidebar edge to any width between 160 px and 600 px
+- **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane to any ratio; position is saved across sessions
+- **Drag-and-drop panel layout** — every sidebar panel (Export DDL, File Browser, Git, Object Browser, Account Objects) has a drag handle at its top edge; drag panels between the left and right sidebars or reorder them within a sidebar; layout is persisted across sessions
+- **Reset Layout** — restore the default panel positions and editor/results split via the **Customize Layout…** dialog (accessible from the **View** menu)
 - **Resizable object browser** — collapse, expand, or drag to resize the object tree panel
 - Right-click context menus are always clamped inside the viewport
 - Closing the app while a query is running prompts a confirmation dialog; the query is cancelled in Snowflake before exit

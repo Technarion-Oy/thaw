@@ -143,7 +143,7 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 		"okta":                  sf.AuthTypeOkta,
 		"snowflake_jwt":         sf.AuthTypeJwt,
 	}
-	auth, ok := authMap[p.Authenticator]
+	auth, ok := authMap[strings.ToLower(p.Authenticator)]
 	if !ok {
 		auth = sf.AuthTypeSnowflake
 	}
@@ -151,10 +151,11 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 	// Interactive flows need more time; plain password should fail quickly.
 	// LoginTimeout is the gosnowflake-internal control — context cancellation
 	// alone is not reliable for aborting auth inside the driver.
+	authenticatorLower := strings.ToLower(p.Authenticator)
 	loginTimeout := 15 * time.Second
-	if p.Authenticator == "username_password_mfa" ||
-		p.Authenticator == "externalbrowser" ||
-		p.Authenticator == "okta" {
+	if authenticatorLower == "username_password_mfa" ||
+		authenticatorLower == "externalbrowser" ||
+		authenticatorLower == "okta" {
 		loginTimeout = 3 * time.Minute
 	}
 

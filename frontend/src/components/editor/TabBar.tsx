@@ -8,7 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { FileOutlined, CodeOutlined, PlusOutlined, CloseOutlined, DiffOutlined } from "@ant-design/icons";
 import { useQueryStore } from "../../store/queryStore";
 
@@ -24,7 +24,11 @@ export default function TabBar() {
   const activeTabId = useQueryStore((s) => s.activeTabId);
   const activateTab = useQueryStore((s) => s.activateTab);
   const closeTab    = useQueryStore((s) => s.closeTab);
+  const moveTab     = useQueryStore((s) => s.moveTab);
   const openScratch = useQueryStore((s) => s.openScratch);
+
+  const draggingId  = useRef<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: string; before: boolean } | null>(null);
 
   // Track which tab the pointer is hovering over so the close button
   // only appears on hover (less cluttered when many tabs are open).
@@ -46,13 +50,38 @@ export default function TabBar() {
         const active  = tab.id === activeTabId;
         const hovered = tab.id === hoveredId;
 
+        const isDropBefore = dropTarget?.id === tab.id && dropTarget.before;
+        const isDropAfter  = dropTarget?.id === tab.id && !dropTarget.before;
+
         return (
           <div
             key={tab.id}
+            draggable
             onClick={() => activateTab(tab.id)}
             onMouseEnter={() => setHoveredId(tab.id)}
             onMouseLeave={() => setHoveredId(null)}
-            style={{
+            onDragStart={(e) => {
+              draggingId.current = tab.id;
+              e.dataTransfer.effectAllowed = "move";
+              e.dataTransfer.setData("text/plain", tab.id);
+            }}
+            onDragEnd={() => { draggingId.current = null; setDropTarget(null); }}
+            onDragOver={(e) => {
+              if (!draggingId.current || draggingId.current === tab.id) return;
+              e.preventDefault();
+              const rect = e.currentTarget.getBoundingClientRect();
+              setDropTarget({ id: tab.id, before: e.clientX < rect.left + rect.width / 2 });
+            }}
+            onDragLeave={() => setDropTarget(null)}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (draggingId.current && draggingId.current !== tab.id && dropTarget) {
+                moveTab(draggingId.current, tab.id, dropTarget.before);
+              }
+              draggingId.current = null;
+              setDropTarget(null);
+            }}
+            style={{ position: "relative",
               display: "flex",
               alignItems: "center",
               gap: 5,
@@ -108,6 +137,10 @@ export default function TabBar() {
                 <CloseOutlined style={{ fontSize: 9, opacity: 0.7 }} />
               )}
             </span>
+
+            {/* Drop indicators */}
+            {isDropBefore && <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 2, background: CLR_ACCENT, pointerEvents: "none" }} />}
+            {isDropAfter  && <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 2, background: CLR_ACCENT, pointerEvents: "none" }} />}
           </div>
         );
       })}

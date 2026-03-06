@@ -16,6 +16,7 @@ import {
   EDITOR_FONT_SIZES,
   type UIDensity,
 } from "../../store/themeStore";
+import { usePanelLayoutStore } from "../../store/panelLayoutStore";
 
 const { Text } = Typography;
 
@@ -63,6 +64,7 @@ export default function LayoutSettingsModal({ onClose }: Props) {
   const setEditorFont     = useThemeStore((s) => s.setEditorFont);
   const setEditorFontSize = useThemeStore((s) => s.setEditorFontSize);
   const setUIDensity      = useThemeStore((s) => s.setUIDensity);
+  const resetPanelLayout  = usePanelLayoutStore((s) => s.reset);
 
   const applyPreset = (preset: (typeof PRESETS)[number]) => {
     setUiFont(preset.uiFont);
@@ -77,6 +79,9 @@ export default function LayoutSettingsModal({ onClose }: Props) {
       title="Customize Layout"
       onCancel={onClose}
       footer={[
+        <Button key="reset" onClick={resetPanelLayout}>
+          Reset Layout
+        </Button>,
         <Button key="close" type="primary" onClick={onClose}>
           Done
         </Button>,

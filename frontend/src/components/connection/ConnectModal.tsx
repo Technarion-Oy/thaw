@@ -70,7 +70,7 @@ export default function ConnectModal() {
     const conn = cliConfig?.connections?.find((c) => c.name === name);
     if (!conn) return;
 
-    const authValue = conn.authenticator || "username_password_mfa";
+    const authValue = (conn.authenticator || "username_password_mfa").toLowerCase();
     setAuth(authValue);
 
     form.setFieldsValue({
