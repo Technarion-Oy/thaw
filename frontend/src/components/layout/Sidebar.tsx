@@ -36,6 +36,7 @@ import {
   CaretRightFilled,
   CaretDownFilled,
   CopyOutlined,
+  DiffOutlined,
 } from "@ant-design/icons";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
@@ -47,6 +48,7 @@ import { useQueryStore } from "../../store/queryStore";
 import { insertAtCursor } from "../editor/SqlEditor";
 import { useObjectStore } from "../../store/objectStore";
 import { useGitStore } from "../../store/gitStore";
+import { useDiffStore } from "../../store/diffStore";
 import AccountPanel from "../account/AccountPanel";
 import CallProcedureModal from "../procedure/CallProcedureModal";
 import SelectFunctionModal from "../function/SelectFunctionModal";
@@ -288,6 +290,10 @@ export default function Sidebar() {
   const loadingNodes    = useRef<Set<string>>(new Set());
   const searchWasActive = useRef(false);
   const ctxRef = useRef<HTMLDivElement>(null);
+
+  const pendingDiff   = useDiffStore((s) => s.pending);
+  const selectForComp = useDiffStore((s) => s.selectForComparison);
+  const compareWith   = useDiffStore((s) => s.compareWith);
 
   // Close context menu on outside click
   useEffect(() => {
@@ -877,6 +883,35 @@ export default function Sidebar() {
     }
   };
 
+  const selectObjForComparison = () => {
+    if (!ctxMenu) return;
+    const { nodeKey, objKind = "", objArgs = "" } = ctxMenu;
+    const [, db, schema, kind, ...nameParts] = nodeKey.split(":");
+    const name = nameParts.join(":");
+    const k = kind || objKind;
+    setCtxMenu(null);
+    selectForComp({
+      category: "obj",
+      label:    `${k}: ${db}.${schema}.${name}`,
+      db, schema, kind: k, name, args: objArgs,
+    });
+    message.success(`Selected for comparison: ${name}`);
+  };
+
+  const compareObjWith = () => {
+    if (!ctxMenu) return;
+    const { nodeKey, objKind = "", objArgs = "" } = ctxMenu;
+    const [, db, schema, kind, ...nameParts] = nodeKey.split(":");
+    const name = nameParts.join(":");
+    const k = kind || objKind;
+    setCtxMenu(null);
+    compareWith({
+      category: "obj",
+      label:    `${k}: ${db}.${schema}.${name}`,
+      db, schema, kind: k, name, args: objArgs,
+    });
+  };
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   const menuItem = (label: string, icon: React.ReactNode, onClick: () => void, color?: string) => (
@@ -1106,6 +1141,10 @@ export default function Sidebar() {
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && menuItem("View Definition", null, viewDefinition)}
           {ctxMenu.nodeType === "obj" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" &&
+            menuItem("Select for Comparison", <DiffOutlined style={{ fontSize: 12 }} />, selectObjForComparison)}
+          {ctxMenu.nodeType === "obj" && pendingDiff !== null &&
+            menuItem(`Compare with: ${pendingDiff.label}`, <DiffOutlined style={{ fontSize: 12, color: "var(--accent)" }} />, compareObjWith)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "PROCEDURE" &&
             menuItem("Rename…", <EditOutlined style={{ fontSize: 12 }} />, renameObject)}
           {ctxMenu.nodeType === "obj" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}

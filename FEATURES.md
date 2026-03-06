@@ -37,6 +37,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - View DDL definition inline
   - **Rename** the object
   - **Drop** the object (with confirmation)
+  - **Select for Comparison** / **Compare with** — side-by-side DDL diff (see [Text Comparison](#text-comparison))
 - **Right-click a database** to export its DDL, generate an ER Diagram, or view dropped schemas recoverable via Time Travel
 - **Right-click a schema** to view dropped tables or create a new Snowflake Task
 - **Drag and drop** — drag any table or view into the editor to insert a `SELECT` statement with all column names listed individually
@@ -47,6 +48,21 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 - **Time Travel / Undrop** — list dropped databases, schemas, and tables within their retention window and restore them with a single click
 - **ER Diagram** — generate an Entity Relationship Diagram for any database; filter by schema, zoom, pan, and copy the Mermaid source
 - **Visual ER Designer** — interactively design or modify tables: add columns, set data types, define primary and foreign keys, preview the live Mermaid diagram, then generate and apply the necessary `CREATE TABLE` / `ALTER TABLE` SQL in one step
+
+---
+
+## Text Comparison
+
+Compare the DDL or content of any two database objects, files, roles, or warehouses side by side:
+
+1. Right-click any object, file, role, or warehouse and choose **Select for Comparison**.
+2. Right-click a second item (any category) and choose **Compare with: …** — the label of the first item is shown so you always know what you are comparing against.
+3. A Monaco side-by-side diff view opens, showing additions and deletions highlighted inline.
+
+- Works across categories — compare a table's DDL against a local `.sql` file, a role against a warehouse, etc.
+- Both sides are fetched concurrently so the modal opens without delay.
+- The diff editor respects the active light/dark theme and the configured editor font and size.
+- Trailing whitespace is trimmed from both sides before diffing to avoid spurious empty-line differences.
 
 ---
 
@@ -91,7 +107,7 @@ Open **AI → Configure AI…** in the menu bar to set your provider, API key, a
 - **Save** (`⌘S` / `Ctrl+S`) — writes back to the file's original path
 - **Save As…** (`⌘⇧S` / `Ctrl+Shift+S`) — native OS save dialog; promotes a scratch tab to a named file
 - **New Tab** (`⌘T` / `Ctrl+T`) — opens a blank scratch tab
-- **File Browser** — browse the working directory in the sidebar; click any file to open it; auto-refreshes after a DDL export
+- **File Browser** — browse the working directory in the sidebar; click any file to open it; auto-refreshes after a DDL export; right-click any file to **Select for Comparison** or **Compare with** another item
 
 ---
 

@@ -75,6 +75,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - **Hover tooltip** — hovering over any object in the tree shows its DDL definition; fetched once and cached for the session
 - **View Definition** — right-click any object → **View Definition** opens a modal with the full DDL; a **Copy** button copies the SQL to the clipboard
 - **Properties** — right-click any database, schema, or object → **Properties** opens a key/value panel populated by the corresponding `SHOW` command (e.g. `SHOW TABLES`, `SHOW SCHEMAS`, `SHOW DATABASES`); right-click a role or warehouse in the Account Objects panel, or a user in User Management, for the same panel; a **Copy** button copies all rows as `property: value` lines
+- **Text Comparison** — right-click any object, role, warehouse, or file → **Select for Comparison**; then right-click a second item → **Compare with: …** to open a Monaco side-by-side diff view; works across categories (e.g. compare a table DDL against a local `.sql` file); both sides are fetched concurrently and trailing whitespace is trimmed before diffing
 - Tree automatically refreshes the affected database after any rename, drop, or undrop operation
 - **ER Diagram** — right-click a database and choose **ER Diagram…** to generate an Entity Relationship Diagram from `INFORMATION_SCHEMA.COLUMNS`, `SHOW PRIMARY KEYS`, and `SHOW IMPORTED KEYS`; only base tables are shown (views excluded); filter visible schemas with checkboxes, zoom in/out, drag to pan, and copy the Mermaid source to the clipboard
 - **Visual ER Designer** — click **Design Tables…** in the ER Diagram toolbar to open an interactive designer at the database level:
@@ -288,6 +289,7 @@ thaw/
     │   ├── styles/global.css      # Global styles incl. Monaco occurrence-highlight class
     │   ├── store/
     │   │   ├── connectionStore.ts # Connection state (Zustand)
+    │   │   ├── diffStore.ts       # Text comparison pending item + modal state (Zustand)
     │   │   ├── gitStore.ts        # Git / export directory state (Zustand)
     │   │   ├── objectStore.ts     # Object browser state (Zustand)
     │   │   ├── queryStore.ts      # Multi-tab editor state (Zustand)
@@ -297,7 +299,10 @@ thaw/
     │   │   └── QueryPage.tsx      # Main query workspace; save handlers; menu event wiring
     │   └── components/
     │       ├── connection/ConnectModal.tsx
+    │       ├── diff/
+    │       │   └── DiffModal.tsx  # Monaco side-by-side diff modal
     │       ├── editor/
+    │       │   ├── monacoSetup.ts # Shared Monaco theme/language registration
     │       │   ├── SqlEditor.tsx  # Monaco editor with completions, selection highlight
     │       │   └── TabBar.tsx     # File/scratch tab strip with dirty indicator
     │       ├── export/

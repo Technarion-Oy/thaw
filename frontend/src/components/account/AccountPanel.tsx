@@ -17,6 +17,7 @@ import {
   ExportOutlined,
   CopyOutlined,
   FileOutlined,
+  DiffOutlined,
 } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
@@ -30,6 +31,7 @@ import {
 } from "../../../wailsjs/go/main/App";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { useGitStore } from "../../store/gitStore";
+import { useDiffStore } from "../../store/diffStore";
 import UserManagementPanel from "./UserManagementPanel";
 import PropertiesModal from "../common/PropertiesModal";
 import type { main } from "../../../wailsjs/go/models";
@@ -95,6 +97,10 @@ export default function AccountPanel() {
   const [propsModal, setPropsModal] = useState<{ title: string; rows: main.PropertyPair[] | null; error: string | null } | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
 
+  const pendingDiff   = useDiffStore((s) => s.pending);
+  const selectForComp = useDiffStore((s) => s.selectForComparison);
+  const compareWith   = useDiffStore((s) => s.compareWith);
+
   // ── Loading ──────────────────────────────────────────────────────────────
 
   const fetchData = async () => {
@@ -156,6 +162,29 @@ export default function AccountPanel() {
     } catch (e) {
       setPropsModal((prev) => prev ? { ...prev, rows: [], error: String(e) } : null);
     }
+  };
+
+  const selectForComparison = () => {
+    if (!ctxMenu) return;
+    const { kind, name } = ctxMenu;
+    setCtxMenu(null);
+    selectForComp({
+      category: kind,
+      label:    `${kind.toUpperCase()}: ${name}`,
+      name,
+    });
+    message.success(`Selected for comparison: ${name}`);
+  };
+
+  const compareWithSelected = () => {
+    if (!ctxMenu) return;
+    const { kind, name } = ctxMenu;
+    setCtxMenu(null);
+    compareWith({
+      category: kind,
+      label:    `${kind.toUpperCase()}: ${name}`,
+      name,
+    });
   };
 
   // ── DDL view ─────────────────────────────────────────────────────────────
@@ -315,6 +344,26 @@ export default function AccountPanel() {
             <FileOutlined style={{ fontSize: 12 }} />
             Properties
           </div>
+          <div
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", fontSize: 13, cursor: "pointer", color: "var(--text)" }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+            onClick={selectForComparison}
+          >
+            <DiffOutlined style={{ fontSize: 12 }} />
+            Select for Comparison
+          </div>
+          {pendingDiff !== null && (
+            <div
+              style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", fontSize: 13, cursor: "pointer", color: "var(--text)" }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              onClick={compareWithSelected}
+            >
+              <DiffOutlined style={{ fontSize: 12, color: "var(--accent)" }} />
+              {`Compare with: ${pendingDiff.label}`}
+            </div>
+          )}
         </div>
       )}
 

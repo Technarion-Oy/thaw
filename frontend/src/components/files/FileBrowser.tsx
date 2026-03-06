@@ -8,7 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { Tree, Typography, Spin, Collapse, Space, Button, Input, Switch, message } from "antd";
 import {
   FolderOutlined,
@@ -16,12 +16,14 @@ import {
   FileOutlined,
   ReloadOutlined,
   SearchOutlined,
+  DiffOutlined,
 } from "@ant-design/icons";
 import type { DataNode, EventDataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
 import { ListDirectory, ReadFile, SearchFiles } from "../../../wailsjs/go/main/App";
 import { useGitStore } from "../../store/gitStore";
 import { useQueryStore } from "../../store/queryStore";
+import { useDiffStore } from "../../store/diffStore";
 import type { filesystem } from "../../../wailsjs/go/models";
 
 type FileEntry    = filesystem.FileEntry;
@@ -101,8 +103,36 @@ export default function FileBrowser() {
   const [searchError,   setSearchError]   = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Context menu for file comparison ──────────────────────────────────────
+  const [fileCtxMenu, setFileCtxMenu] = useState<{ x: number; y: number; path: string; name: string } | null>(null);
+  const fileCtxRef = useRef<HTMLDivElement>(null);
+
   // ── Collapse controlled key (so search icon can expand the panel) ──────────
   const [activeKeys, setActiveKeys] = useState<string[]>([]);
+
+  const pendingDiff   = useDiffStore((s) => s.pending);
+  const selectForComp = useDiffStore((s) => s.selectForComparison);
+  const compareWith   = useDiffStore((s) => s.compareWith);
+
+  // Close file context menu on outside click
+  useEffect(() => {
+    if (!fileCtxMenu) return;
+    const close = () => setFileCtxMenu(null);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [fileCtxMenu]);
+
+  // Clamp file context menu inside the viewport (runs before browser paint — no flash)
+  useLayoutEffect(() => {
+    if (!fileCtxMenu || !fileCtxRef.current) return;
+    const el = fileCtxRef.current;
+    const { width, height } = el.getBoundingClientRect();
+    const pad = 8;
+    const left = Math.max(pad, Math.min(fileCtxMenu.x, window.innerWidth  - width  - pad));
+    const top  = Math.max(pad, Math.min(fileCtxMenu.y, window.innerHeight - height - pad));
+    el.style.left = `${left}px`;
+    el.style.top  = `${top}px`;
+  }, [fileCtxMenu]);
 
   // Reset tree when the working directory changes
   useEffect(() => {
@@ -248,6 +278,29 @@ export default function FileBrowser() {
     } catch {
       // non-fatal
     }
+  };
+
+  const onRightClick = ({ event, node }: { event: React.MouseEvent; node: DataNode }) => {
+    event.preventDefault();
+    if ((node as any).isLeaf === false) return; // skip directories
+    const path = String(node.key);
+    const name = path.split("/").pop() ?? path;
+    setFileCtxMenu({ x: event.clientX, y: event.clientY, path, name });
+  };
+
+  const selectFileForComparison = () => {
+    if (!fileCtxMenu) return;
+    const { path, name } = fileCtxMenu;
+    setFileCtxMenu(null);
+    selectForComp({ category: "file", label: `FILE: ${name}`, path });
+    message.success(`Selected for comparison: ${name}`);
+  };
+
+  const compareFileWith = () => {
+    if (!fileCtxMenu) return;
+    const { path, name } = fileCtxMenu;
+    setFileCtxMenu(null);
+    compareWith({ category: "file", label: `FILE: ${name}`, path });
   };
 
   const grouped = groupByPath(searchResults);
@@ -442,6 +495,7 @@ export default function FileBrowser() {
                     onLoad={(keys) => setLoadedKeys(keys)}
                     loadData={onLoadData as any}
                     onSelect={onSelect as any}
+                    onRightClick={onRightClick as any}
                     showIcon
                     blockNode
                     style={{ background: "transparent", color: "var(--text)", fontSize: 12 }}
@@ -452,6 +506,48 @@ export default function FileBrowser() {
           ),
         }]}
       />
+
+      {/* File comparison context menu */}
+      {fileCtxMenu && (
+        <div
+          ref={fileCtxRef}
+          style={{
+            position: "fixed",
+            top: fileCtxMenu.y,
+            left: fileCtxMenu.x,
+            zIndex: 9999,
+            background: "var(--bg-overlay)",
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
+            minWidth: 180,
+            padding: "4px 0",
+          }}
+          onClick={(e) => e.stopPropagation()}
+          onMouseLeave={() => setFileCtxMenu(null)}
+        >
+          <div
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", fontSize: 13, cursor: "pointer", color: "var(--text)" }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+            onClick={selectFileForComparison}
+          >
+            <DiffOutlined style={{ fontSize: 12 }} />
+            Select for Comparison
+          </div>
+          {pendingDiff !== null && (
+            <div
+              style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", fontSize: 13, cursor: "pointer", color: "var(--text)" }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              onClick={compareFileWith}
+            >
+              <DiffOutlined style={{ fontSize: 12, color: "var(--accent)" }} />
+              {`Compare with: ${pendingDiff.label}`}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

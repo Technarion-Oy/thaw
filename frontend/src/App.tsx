@@ -15,9 +15,11 @@ import { useConnectionStore } from "./store/connectionStore";
 import ConnectModal from "./components/connection/ConnectModal";
 import LayoutSettingsModal from "./components/settings/LayoutSettingsModal";
 import AISettingsModal from "./components/settings/AISettingsModal";
+import DiffModal from "./components/diff/DiffModal";
 import { IsConnected } from "../wailsjs/go/main/App";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../wailsjs/runtime/runtime";
 import { useThemeStore, type ThemePreference } from "./store/themeStore";
+import { useDiffStore } from "./store/diffStore";
 
 export default function App() {
   const isConnected    = useConnectionStore((s) => s.isConnected);
@@ -29,6 +31,8 @@ export default function App() {
 
   const [layoutModalOpen, setLayoutModalOpen] = useState(false);
   const [aiModalOpen, setAiModalOpen] = useState(false);
+  const diffIsOpen = useDiffStore((s) => s.isOpen);
+  const closeDiff  = useDiffStore((s) => s.close);
 
   // After a frontend reload the Go backend keeps the connection alive.
   // Restore the connected state so the user isn't kicked to the login screen.
@@ -149,6 +153,7 @@ export default function App() {
         <LayoutSettingsModal onClose={() => setLayoutModalOpen(false)} />
       )}
       {aiModalOpen && <AISettingsModal onClose={() => setAiModalOpen(false)} />}
+      {diffIsOpen && <DiffModal onClose={closeDiff} />}
     </ConfigProvider>
   );
 }

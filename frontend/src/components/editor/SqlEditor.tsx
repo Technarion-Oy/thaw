@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
-import { snowflakeMonarchLanguage, thawDarkTheme, thawLightTheme } from "./snowflakeSql";
+import { ensureMonacoSetup } from "./monacoSetup";
 import { useQueryStore } from "../../store/queryStore";
 import { useObjectStore } from "../../store/objectStore";
 import { useThemeStore } from "../../store/themeStore";
@@ -21,8 +21,6 @@ import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetUserDDL, Ge
 const hoverDDLCache = new Map<string, string>();
 let hoverProviderDisposable: { dispose(): void } | null = null;
 let inlineCompletionsDisposable: { dispose(): void } | null = null;
-let languageAndThemesRegistered = false;
-
 // Singleton editor reference — set on mount so external callers (e.g. the
 // sidebar) can insert text at the current cursor position without prop drilling.
 let _editorInstance: import("monaco-editor").editor.IStandaloneCodeEditor | null = null;
@@ -106,11 +104,7 @@ export default function SqlEditor() {
   // Register the custom Snowflake SQL tokenizer and themes exactly once,
   // before the editor instance is created.
   const handleBeforeMount: BeforeMount = (monaco) => {
-    if (languageAndThemesRegistered) return;
-    languageAndThemesRegistered = true;
-    monaco.languages.setMonarchTokensProvider("sql", snowflakeMonarchLanguage as any);
-    monaco.editor.defineTheme("thaw-dark",  thawDarkTheme  as any);
-    monaco.editor.defineTheme("thaw-light", thawLightTheme as any);
+    ensureMonacoSetup(monaco);
   };
 
   const handleMount: OnMount = (editor, monaco) => {
