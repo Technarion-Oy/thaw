@@ -10,6 +10,7 @@
 
 import { create } from "zustand";
 import { GetObjectDDL, GetRoleDDL, GetWarehouseDDL, ReadFile } from "../../wailsjs/go/main/App";
+import { useQueryStore } from "./queryStore";
 
 export type DiffCategory = "obj" | "file" | "role" | "warehouse";
 
@@ -23,15 +24,13 @@ export interface PendingDiffItem {
 }
 
 interface DiffState {
-  pending:    PendingDiffItem | null;
-  isOpen:     boolean;
-  leftText:   string;  rightText:  string;
-  leftLabel:  string;  rightLabel: string;
-  loading:    boolean;  error: string | null;
+  pending:  PendingDiffItem | null;
+  loading:  boolean;
+  error:    string | null;
 
   selectForComparison: (item: PendingDiffItem) => void;
   compareWith:         (item: PendingDiffItem) => Promise<void>;
-  close:               () => void;
+  clearError:          () => void;
 }
 
 async function fetchText(item: PendingDiffItem): Promise<string> {
@@ -48,14 +47,9 @@ async function fetchText(item: PendingDiffItem): Promise<string> {
 }
 
 export const useDiffStore = create<DiffState>()((set, get) => ({
-  pending:    null,
-  isOpen:     false,
-  leftText:   "",
-  rightText:  "",
-  leftLabel:  "",
-  rightLabel: "",
-  loading:    false,
-  error:      null,
+  pending:  null,
+  loading:  false,
+  error:    null,
 
   selectForComparison: (item) => {
     set({ pending: item });
@@ -65,25 +59,15 @@ export const useDiffStore = create<DiffState>()((set, get) => ({
     const left = get().pending;
     if (!left) return;
 
-    set({
-      isOpen:     true,
-      loading:    true,
-      error:      null,
-      leftLabel:  left.label,
-      rightLabel: item.label,
-      leftText:   "",
-      rightText:  "",
-    });
-
+    set({ loading: true, error: null });
     try {
       const [leftText, rightText] = (await Promise.all([fetchText(left), fetchText(item)])).map((t) => t.trim());
-      set({ leftText, rightText, loading: false, pending: null });
+      set({ loading: false, pending: null });
+      useQueryStore.getState().openDiff(left.label, leftText, item.label, rightText);
     } catch (e) {
       set({ error: String(e), loading: false });
     }
   },
 
-  close: () => {
-    set({ isOpen: false, leftText: "", rightText: "", leftLabel: "", rightLabel: "", error: null });
-  },
+  clearError: () => set({ error: null }),
 }));

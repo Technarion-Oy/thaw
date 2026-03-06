@@ -9,13 +9,12 @@
 // license agreement with Technarion Oy.
 
 import { useEffect, useState } from "react";
-import { ConfigProvider, theme } from "antd";
+import { ConfigProvider, theme, message } from "antd";
 import AppLayout from "./components/layout/AppLayout";
 import { useConnectionStore } from "./store/connectionStore";
 import ConnectModal from "./components/connection/ConnectModal";
 import LayoutSettingsModal from "./components/settings/LayoutSettingsModal";
 import AISettingsModal from "./components/settings/AISettingsModal";
-import DiffModal from "./components/diff/DiffModal";
 import { IsConnected } from "../wailsjs/go/main/App";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../wailsjs/runtime/runtime";
 import { useThemeStore, type ThemePreference } from "./store/themeStore";
@@ -31,8 +30,15 @@ export default function App() {
 
   const [layoutModalOpen, setLayoutModalOpen] = useState(false);
   const [aiModalOpen, setAiModalOpen] = useState(false);
-  const diffIsOpen = useDiffStore((s) => s.isOpen);
-  const closeDiff  = useDiffStore((s) => s.close);
+  const diffError    = useDiffStore((s) => s.error);
+  const clearDiffError = useDiffStore((s) => s.clearError);
+
+  useEffect(() => {
+    if (diffError) {
+      message.error(`Comparison failed: ${diffError}`);
+      clearDiffError();
+    }
+  }, [diffError]);
 
   // After a frontend reload the Go backend keeps the connection alive.
   // Restore the connected state so the user isn't kicked to the login screen.
@@ -153,7 +159,6 @@ export default function App() {
         <LayoutSettingsModal onClose={() => setLayoutModalOpen(false)} />
       )}
       {aiModalOpen && <AISettingsModal onClose={() => setAiModalOpen(false)} />}
-      {diffIsOpen && <DiffModal onClose={closeDiff} />}
     </ConfigProvider>
   );
 }

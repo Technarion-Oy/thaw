@@ -18,6 +18,9 @@ import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, Pick
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import SqlEditor from "../components/editor/SqlEditor";
 import TabBar from "../components/editor/TabBar";
+import { DiffEditor } from "@monaco-editor/react";
+import { ensureMonacoSetup } from "../components/editor/monacoSetup";
+import { useThemeStore } from "../store/themeStore";
 import ResultGrid from "../components/results/ResultGrid";
 import AiChat from "../components/chat/AiChat";
 import { useQueryStore } from "../store/queryStore";
@@ -28,6 +31,10 @@ const { Text } = Typography;
 
 export default function QueryPage() {
   const { sql, selectedSql, result, isRunning, error, setResult, setRunning, setError, markSaved, openScratch, openFile } = useQueryStore();
+  const activeDiff     = useQueryStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.diff ?? null);
+  const resolved       = useThemeStore((s) => s.resolved);
+  const editorFont     = useThemeStore((s) => s.editorFont);
+  const editorFontSize = useThemeStore((s) => s.editorFontSize);
   const [runningQueryId, setRunningQueryId] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   const [resultPane, setResultPane] = useState<"results" | "chat">("results");
@@ -348,12 +355,59 @@ export default function QueryPage() {
       {/* Tab bar */}
       <TabBar />
 
+      {/* Diff view — replaces editor + results when the active tab is a diff tab */}
+      {activeDiff && (
+        <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              background: "var(--bg-raised)",
+              borderBottom: "1px solid var(--border)",
+              flexShrink: 0,
+            }}
+          >
+            <div
+              style={{ padding: "4px 12px", fontSize: 12, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderRight: "1px solid var(--border)" }}
+              title={activeDiff.leftLabel}
+            >
+              {activeDiff.leftLabel}
+            </div>
+            <div
+              style={{ padding: "4px 12px", fontSize: 12, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+              title={activeDiff.rightLabel}
+            >
+              {activeDiff.rightLabel}
+            </div>
+          </div>
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <DiffEditor
+              height="100%"
+              language="sql"
+              theme={resolved === "dark" ? "thaw-dark" : "thaw-light"}
+              original={activeDiff.leftText}
+              modified={activeDiff.rightText}
+              beforeMount={ensureMonacoSetup}
+              options={{
+                readOnly: true,
+                renderSideBySide: true,
+                minimap: { enabled: false },
+                fontSize: editorFontSize,
+                fontFamily: editorFont,
+                scrollBeyondLastLine: false,
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* SQL Editor — top half */}
-      <div style={{ flex: "0 0 40%", borderBottom: "1px solid var(--border)" }}>
+      {!activeDiff && <div style={{ flex: "0 0 40%", borderBottom: "1px solid var(--border)" }}>
         <SqlEditor />
-      </div>
+      </div>}
 
       {/* Results / AI Chat — bottom half */}
+      {!activeDiff &&
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {/* Tab bar */}
         <div style={{ display: "flex", background: "var(--bg-raised)", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
@@ -464,7 +518,7 @@ export default function QueryPage() {
           <div style={{ flex: 1, overflow: "hidden", display: resultPane === "chat" ? "flex" : "none", flexDirection: "column" }}>
             <AiChat />
           </div>
-      </div>
+      </div>}
     </div>
   );
 }

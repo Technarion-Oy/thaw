@@ -19,6 +19,13 @@ export interface QueryResult {
   queryID?: string;
 }
 
+export interface TabDiff {
+  leftLabel: string;
+  rightLabel: string;
+  leftText: string;
+  rightText: string;
+}
+
 export interface Tab {
   id: string;
   path: string | null;   // null = unsaved scratch tab
@@ -27,6 +34,7 @@ export interface Tab {
   savedSql: string;      // content at last open/save; compare to sql to derive isDirty
   result: QueryResult | null;
   error: string | null;
+  diff?: TabDiff | null; // populated for diff tabs; absent for regular SQL tabs
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -67,6 +75,7 @@ interface QueryState {
   activateTab: (id: string) => void;
   openFile: (path: string, content: string) => void;
   openScratch: () => void;
+  openDiff: (leftLabel: string, leftText: string, rightLabel: string, rightText: string) => void;
   closeTab: (id: string) => void;
   // Called after a successful save to update the tab's path/title and clear dirty state.
   markSaved: (id: string, path: string, title: string) => void;
@@ -154,6 +163,28 @@ export const useQueryStore = create<QueryState>()(
   openScratch: () =>
     set((state) => {
       const newTab = makeTab();
+      return {
+        tabs: [...state.tabs, newTab],
+        activeTabId: newTab.id,
+        sql: "",
+        selectedSql: "",
+        currentFile: null,
+        result: null,
+        error: null,
+      };
+    }),
+
+  openDiff: (leftLabel, leftText, rightLabel, rightText) =>
+    set((state) => {
+      // Derive short names for the tab title, e.g. "TABLE: DB.SCHEMA.ORDERS" → "ORDERS"
+      const short = (label: string) => {
+        const part = label.includes(":") ? label.split(":").slice(1).join(":").trim() : label;
+        return part.split(/[./\\]/).filter(Boolean).pop() ?? part;
+      };
+      const newTab = makeTab({
+        title: `${short(leftLabel)} ↔ ${short(rightLabel)}`,
+        diff: { leftLabel, leftText, rightLabel, rightText },
+      });
       return {
         tabs: [...state.tabs, newTab],
         activeTabId: newTab.id,
@@ -294,7 +325,7 @@ export const useQueryStore = create<QueryState>()(
   // throw a QuotaExceededError. Results are kept in memory during the session
   // so tab-switching still works; they are simply not restored after a reload.
   partialize: (state) => ({
-    tabs: state.tabs.map((t) => ({ ...t, result: null })),
+    tabs: state.tabs.map((t) => ({ ...t, result: null, diff: null })),
     activeTabId: state.activeTabId,
     sql: state.sql,
     result: null,
