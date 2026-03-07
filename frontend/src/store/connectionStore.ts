@@ -9,6 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
 
 export interface ConnectionParams {
   account: string;
@@ -33,10 +34,30 @@ interface ConnectionState {
   disconnect: () => void;
 }
 
-export const useConnectionStore = create<ConnectionState>((set) => ({
-  isConnected: false,
-  params: null,
-  setConnected: (params) => set({ isConnected: true, params }),
-  setIsConnected: (v) => set({ isConnected: v }),
-  disconnect: () => set({ isConnected: false, params: null }),
-}));
+export const useConnectionStore = create<ConnectionState>()(
+  persist(
+    (set) => ({
+      isConnected: false,
+      params: null,
+      setConnected: (params) => set({ isConnected: true, params }),
+      setIsConnected: (v) => set({ isConnected: v }),
+      disconnect: () => set({ isConnected: false, params: null }),
+    }),
+    {
+      name: "thaw-connection",
+      storage: createJSONStorage(() => sessionStorage),
+      partialize: (state) => ({
+        isConnected: state.isConnected,
+        params: state.params
+          ? {
+              ...state.params,
+              // Never persist credentials to storage
+              password: "",
+              passcode: "",
+              privateKeyPassphrase: "",
+            }
+          : null,
+      }),
+    },
+  ),
+);

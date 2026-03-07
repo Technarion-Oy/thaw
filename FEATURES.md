@@ -173,6 +173,7 @@ Open **AI → Configure AI…** in the menu bar to set your provider, API key, a
 - **Cancel connection** — abort an in-progress connection attempt
 - **Switch role or warehouse** from the toolbar without disconnecting — all subsequent queries, privilege checks, and object browsing immediately reflect the new session state
 - Role dropdown shows only roles the current user can actually assume
+- **Session state persisted across reloads** — the account · user tag and non-sensitive connection details survive a page reload via `sessionStorage`; credentials (password, passcode, private key passphrase) are never written to storage
 - **Session Properties** — right-click the account · user tag in the toolbar to open a **Session Properties** modal:
   - **Parameters** section — all rows from `SHOW PARAMETERS IN SESSION`; boolean parameters render as a toggle switch (saves immediately); all other parameters show a pencil button that opens an inline input with Save / Cancel; changes apply via `ALTER SESSION SET`
   - **Variables** section — all rows from `SHOW VARIABLES`; editing works identically; changes apply via `SET variable = value`

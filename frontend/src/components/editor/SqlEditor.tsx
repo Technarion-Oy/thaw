@@ -10,6 +10,7 @@
 
 import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
 import { ensureMonacoSetup } from "./monacoSetup";
+import { setEditorInstance } from "./editorRef";
 import { useQueryStore } from "../../store/queryStore";
 import { useObjectStore } from "../../store/objectStore";
 import { useThemeStore } from "../../store/themeStore";
@@ -22,18 +23,6 @@ const DDL_CACHE_TTL = 60_000; // ms — stale entries are re-fetched after this
 const hoverDDLCache = new Map<string, { ddl: string; ts: number }>();
 let hoverProviderDisposable: { dispose(): void } | null = null;
 let inlineCompletionsDisposable: { dispose(): void } | null = null;
-// Singleton editor reference — set on mount so external callers (e.g. the
-// sidebar) can insert text at the current cursor position without prop drilling.
-let _editorInstance: import("monaco-editor").editor.IStandaloneCodeEditor | null = null;
-
-export function insertAtCursor(text: string) {
-  if (!_editorInstance) return;
-  const selection = _editorInstance.getSelection();
-  if (!selection) return;
-  _editorInstance.executeEdits("sidebar-insert", [{ range: selection, text, forceMoveMarkers: true }]);
-  _editorInstance.pushUndoStop();
-  _editorInstance.focus();
-}
 
 // Track which db/schema pairs and databases have already been lazy-fetched by
 // the completion provider so we don't fire duplicate requests.
@@ -109,7 +98,8 @@ export default function SqlEditor() {
   };
 
   const handleMount: OnMount = (editor, monaco) => {
-    _editorInstance = editor;
+    setEditorInstance(editor);
+    editor.onDidDispose(() => setEditorInstance(null));
 
     // ── Clipboard (WKWebView fix) ─────────────────────────────────────────
     // WKWebView blocks navigator.clipboard.readText/writeText (async Clipboard

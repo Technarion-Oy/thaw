@@ -45,7 +45,7 @@ import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectPropert
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
-import { insertAtCursor } from "../editor/SqlEditor";
+import { insertAtCursor } from "../editor/editorRef";
 import { useObjectStore } from "../../store/objectStore";
 import { useGitStore } from "../../store/gitStore";
 import { useDiffStore } from "../../store/diffStore";
