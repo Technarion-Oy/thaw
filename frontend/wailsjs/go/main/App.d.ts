@@ -61,6 +61,10 @@ export function GetRoleDDL(arg1:string):Promise<string>;
 
 export function GetSessionContext():Promise<snowflake.SessionContext>;
 
+export function GetSessionParameters():Promise<Array<main.SessionParam>>;
+
+export function GetSessionVariables():Promise<Array<main.SessionVar>>;
+
 export function GetTableColumns(arg1:string,arg2:string,arg3:string):Promise<Array<string>>;
 
 export function GetTableRetentionDays(arg1:string,arg2:string,arg3:string):Promise<number>;
@@ -138,6 +142,10 @@ export function SearchFiles(arg1:string,arg2:string,arg3:boolean):Promise<Array<
 export function SendChatMessage(arg1:Array<ai.UIMessage>,arg2:string,arg3:string,arg4:string,arg5:boolean):Promise<Array<ai.UIMessage>>;
 
 export function SetColumnComment(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
+
+export function SetSessionParameter(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function SetSessionVariable(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function StartQuery(arg1:string):Promise<string>;
 

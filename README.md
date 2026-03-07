@@ -128,6 +128,15 @@ The **Account Objects** collapsible panel in the sidebar shows roles, warehouses
 
 Role and warehouse switches (via the toolbar dropdowns) are applied to a **single persistent connection**, so every subsequent query — including user management operations, privilege checks, and all SQL editor queries — immediately reflects the new role without needing a manual refresh.
 
+#### Session Properties
+
+Right-click the **account · user** tag in the query toolbar to open the **Session Properties** modal:
+
+- **Parameters** — all rows from `SHOW PARAMETERS IN SESSION`; boolean parameters render as a toggle switch (saves immediately via `ALTER SESSION SET`); other parameters show a pencil button that opens an inline input with Save / Cancel; hovering the parameter name shows its description
+- **Variables** — all rows from `SHOW VARIABLES`; editing works identically; changes apply via `SET variable = value`
+- String-type values are automatically single-quoted in the generated SQL; booleans and numbers are passed through raw
+- **Copy** button exports all parameters and variables as `key: value` lines to the clipboard
+
 
 - Export DDL for every database (or a single one) with one file per object
 - Fully qualified names (`db.schema.object`) in every CREATE statement

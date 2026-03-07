@@ -935,6 +935,158 @@ func (a *App) GetObjectProperties(database, schema, kind, name string) ([]Proper
 	return pairs, nil
 }
 
+// SessionParam holds one row from SHOW PARAMETERS.
+type SessionParam struct {
+	Key         string `json:"key"`
+	Value       string `json:"value"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
+}
+
+// SessionVar holds one row from SHOW VARIABLES.
+type SessionVar struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+	Type  string `json:"type"`
+}
+
+// colIdx returns the index of the first column whose lowercase name matches any
+// of the given alternatives, or -1 if none match.
+func colIdx(cols []string, names ...string) int {
+	for i, c := range cols {
+		lc := strings.ToLower(c)
+		for _, n := range names {
+			if lc == n {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// GetSessionParameters returns the current session parameters from SHOW PARAMETERS IN SESSION.
+func (a *App) GetSessionParameters() ([]SessionParam, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	res, err := a.client.Execute(a.ctx, "SHOW PARAMETERS IN SESSION")
+	if err != nil {
+		return nil, err
+	}
+
+	toString := func(v interface{}) string {
+		if v == nil {
+			return ""
+		}
+		switch t := v.(type) {
+		case string:
+			return t
+		case []byte:
+			return string(t)
+		default:
+			return fmt.Sprintf("%v", t)
+		}
+	}
+
+	// SHOW PARAMETERS columns: key, value, default, level, description, type
+	keyIdx  := colIdx(res.Columns, "key", "name")
+	valIdx  := colIdx(res.Columns, "value")
+	typIdx  := colIdx(res.Columns, "type")
+	descIdx := colIdx(res.Columns, "description")
+
+	var params []SessionParam
+	for _, row := range res.Rows {
+		key, val, typ, desc := "", "", "", ""
+		if keyIdx >= 0 && keyIdx < len(row) { key = toString(row[keyIdx]) }
+		if valIdx >= 0 && valIdx < len(row)  { val = toString(row[valIdx]) }
+		if typIdx >= 0 && typIdx < len(row)  { typ = toString(row[typIdx]) }
+		if descIdx >= 0 && descIdx < len(row) { desc = toString(row[descIdx]) }
+		if key != "" {
+			params = append(params, SessionParam{Key: key, Value: val, Type: typ, Description: desc})
+		}
+	}
+	if params == nil {
+		params = []SessionParam{}
+	}
+	return params, nil
+}
+
+// GetSessionVariables returns the current session variables from SHOW VARIABLES.
+func (a *App) GetSessionVariables() ([]SessionVar, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	res, err := a.client.Execute(a.ctx, "SHOW VARIABLES")
+	if err != nil {
+		return nil, err
+	}
+
+	toString := func(v interface{}) string {
+		if v == nil {
+			return ""
+		}
+		switch t := v.(type) {
+		case string:
+			return t
+		case []byte:
+			return string(t)
+		default:
+			return fmt.Sprintf("%v", t)
+		}
+	}
+
+	// SHOW VARIABLES columns: name, value, default, type, ...
+	nameIdx := colIdx(res.Columns, "name", "key")
+	valIdx  := colIdx(res.Columns, "value")
+	typIdx  := colIdx(res.Columns, "type")
+
+	var vars []SessionVar
+	for _, row := range res.Rows {
+		name, val, typ := "", "", ""
+		if nameIdx >= 0 && nameIdx < len(row) { name = toString(row[nameIdx]) }
+		if valIdx >= 0 && valIdx < len(row)   { val = toString(row[valIdx]) }
+		if typIdx >= 0 && typIdx < len(row)   { typ = toString(row[typIdx]) }
+		if name != "" {
+			vars = append(vars, SessionVar{Key: name, Value: val, Type: typ})
+		}
+	}
+	if vars == nil {
+		vars = []SessionVar{}
+	}
+	return vars, nil
+}
+
+// quoteIfString wraps value in single quotes (with escaping) when paramType
+// indicates a string-like type; returns value unchanged for booleans/numbers.
+func quoteIfString(value, paramType string) string {
+	switch strings.ToUpper(paramType) {
+	case "BOOLEAN", "NUMBER", "FIXED", "FLOAT":
+		return value
+	default:
+		return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+	}
+}
+
+// SetSessionParameter applies ALTER SESSION SET key = value for the given parameter.
+func (a *App) SetSessionParameter(name, value, paramType string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	valExpr := quoteIfString(value, paramType)
+	_, err := a.client.Execute(a.ctx, "ALTER SESSION SET "+name+" = "+valExpr)
+	return err
+}
+
+// SetSessionVariable applies SET name = value for the given session variable.
+func (a *App) SetSessionVariable(name, value, varType string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	valExpr := quoteIfString(value, varType)
+	_, err := a.client.Execute(a.ctx, "SET "+name+" = "+valExpr)
+	return err
+}
+
 // ColumnComment holds a column name and its optional comment.
 type ColumnComment struct {
 	Column  string `json:"column"`

@@ -285,6 +285,40 @@ export namespace main {
 	        this.value = source["value"];
 	    }
 	}
+	export class SessionParam {
+	    key: string;
+	    value: string;
+	    type: string;
+	    description: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionParam(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.value = source["value"];
+	        this.type = source["type"];
+	        this.description = source["description"];
+	    }
+	}
+	export class SessionVar {
+	    key: string;
+	    value: string;
+	    type: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionVar(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.value = source["value"];
+	        this.type = source["type"];
+	    }
+	}
 	export class TableSettings {
 	    clusterBy: string;
 	    enableSchemaEvolution: boolean;

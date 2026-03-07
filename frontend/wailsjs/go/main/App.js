@@ -106,6 +106,14 @@ export function GetSessionContext() {
   return window['go']['main']['App']['GetSessionContext']();
 }
 
+export function GetSessionParameters() {
+  return window['go']['main']['App']['GetSessionParameters']();
+}
+
+export function GetSessionVariables() {
+  return window['go']['main']['App']['GetSessionVariables']();
+}
+
 export function GetTableColumns(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetTableColumns'](arg1, arg2, arg3);
 }
@@ -260,6 +268,14 @@ export function SendChatMessage(arg1, arg2, arg3, arg4, arg5) {
 
 export function SetColumnComment(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['SetColumnComment'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function SetSessionParameter(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SetSessionParameter'](arg1, arg2, arg3);
+}
+
+export function SetSessionVariable(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SetSessionVariable'](arg1, arg2, arg3);
 }
 
 export function StartQuery(arg1) {

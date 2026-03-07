@@ -10,11 +10,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { Button, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message } from "antd";
+import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message } from "antd";
 import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig } from "../../wailsjs/go/main/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables } from "../../wailsjs/go/main/App";
+import type { main } from "../../wailsjs/go/models";
+import SessionPropertiesModal from "../components/common/SessionPropertiesModal";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import SqlEditor from "../components/editor/SqlEditor";
 import TabBar from "../components/editor/TabBar";
@@ -48,6 +50,10 @@ export default function QueryPage() {
   const [resultPane, setResultPane] = useState<"results" | "chat" | "terminal">("results");
   const [aiEnabled, setAiEnabled] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
+  const [sessionPropsOpen, setSessionPropsOpen] = useState(false);
+  const [sessionParams, setSessionParams] = useState<main.SessionParam[] | null>(null);
+  const [sessionVars, setSessionVars] = useState<main.SessionVar[] | null>(null);
+  const [sessionPropsError, setSessionPropsError] = useState<string | null>(null);
   // Ref so the async runQuery closure can detect user-initiated cancellation
   // without relying on stale React state.
   const cancelRequestedRef = useRef(false);
@@ -129,6 +135,28 @@ export default function QueryPage() {
   const handleDisconnect = async () => {
     await Disconnect();
     disconnect();
+  };
+
+  const openSessionProperties = async () => {
+    setSessionPropsOpen(true);
+    setSessionParams(null);
+    setSessionVars(null);
+    setSessionPropsError(null);
+    try {
+      const [p, v] = await Promise.all([GetSessionParameters(), GetSessionVariables()]);
+      setSessionParams(p);
+      setSessionVars(v);
+    } catch (e) {
+      setSessionPropsError(String(e));
+    }
+  };
+
+  const handleParamChange = (key: string, value: string) => {
+    setSessionParams((prev) => prev ? prev.map((p) => p.key === key ? { ...p, value } : p) : prev);
+  };
+
+  const handleVarChange = (key: string, value: string) => {
+    setSessionVars((prev) => prev ? prev.map((v) => v.key === key ? { ...v, value } : v) : prev);
   };
 
   const exportCSV = async () => {
@@ -346,9 +374,18 @@ export default function QueryPage() {
           </Tooltip>
 
           {params && (
-            <Tag color="blue" style={{ fontSize: 11, margin: 0 }}>
-              {params.account} · {params.user}
-            </Tag>
+            <Dropdown
+              trigger={["contextMenu"]}
+              menu={{
+                items: [
+                  { key: "session-props", label: "Session Properties", onClick: openSessionProperties },
+                ],
+              }}
+            >
+              <Tag color="blue" style={{ fontSize: 11, margin: 0, cursor: "context-menu" }}>
+                {params.account} · {params.user}
+              </Tag>
+            </Dropdown>
           )}
           <Button
             icon={<DisconnectOutlined />}
@@ -592,6 +629,17 @@ export default function QueryPage() {
             </div>
           )}
       </div>}
+
+      {sessionPropsOpen && (
+        <SessionPropertiesModal
+          parameters={sessionParams}
+          variables={sessionVars}
+          error={sessionPropsError}
+          onClose={() => setSessionPropsOpen(false)}
+          onParamChange={handleParamChange}
+          onVarChange={handleVarChange}
+        />
+      )}
     </div>
   );
 }
