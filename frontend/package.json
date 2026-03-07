@@ -11,6 +11,8 @@
   "dependencies": {
     "@ant-design/icons": "^5.5.0",
     "@monaco-editor/react": "^4.6.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "ag-grid-community": "^32.0.0",
     "ag-grid-react": "^32.0.0",
     "antd": "^5.22.0",

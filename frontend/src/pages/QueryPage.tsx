@@ -23,6 +23,7 @@ import { ensureMonacoSetup } from "../components/editor/monacoSetup";
 import { useThemeStore } from "../store/themeStore";
 import ResultGrid from "../components/results/ResultGrid";
 import AiChat from "../components/chat/AiChat";
+import TerminalPanel from "../components/terminal/TerminalPanel";
 import { useQueryStore } from "../store/queryStore";
 import { useConnectionStore } from "../store/connectionStore";
 import { useSessionStore } from "../store/sessionStore";
@@ -44,8 +45,9 @@ export default function QueryPage() {
   const splitStartPct  = useRef(0);
   const [runningQueryId, setRunningQueryId] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
-  const [resultPane, setResultPane] = useState<"results" | "chat">("results");
+  const [resultPane, setResultPane] = useState<"results" | "chat" | "terminal">("results");
   const [aiEnabled, setAiEnabled] = useState(false);
+  const [terminalOpen, setTerminalOpen] = useState(false);
   // Ref so the async runQuery closure can detect user-initiated cancellation
   // without relying on stale React state.
   const cancelRequestedRef = useRef(false);
@@ -88,6 +90,7 @@ export default function QueryPage() {
     cancelRequestedRef.current = false;
     setIsCancelling(false);
     setRunningQueryId(null);
+    setResultPane("results");
     setRunning(true);
     try {
       // Phase 1: submit and get query ID.
@@ -251,6 +254,14 @@ export default function QueryPage() {
     const offSave    = EventsOn("menu:save",     () => handleSave());
     const offSaveAs  = EventsOn("menu:save-as",  () => handleSaveAs());
     return () => { offNewTab(); offOpen(); offSave(); offSaveAs(); };
+  }, []);
+
+  useEffect(() => {
+    const off = EventsOn("menu:open-terminal", () => {
+      setTerminalOpen(true);
+      setResultPane("terminal");
+    });
+    return () => off();
   }, []);
 
 
@@ -467,7 +478,7 @@ export default function QueryPage() {
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {/* Tab bar */}
         <div style={{ display: "flex", background: "var(--bg-raised)", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-          {(["results", ...(aiEnabled ? ["chat"] : [])] as Array<"results" | "chat">).map((tab) => (
+          {(["results", ...(aiEnabled ? ["chat"] : []), ...(terminalOpen ? ["terminal"] : [])] as Array<"results" | "chat" | "terminal">).map((tab) => (
             <button
               key={tab}
               onClick={() => setResultPane(tab)}
@@ -481,7 +492,7 @@ export default function QueryPage() {
                 cursor: "pointer",
               }}
             >
-              {tab === "results" ? "Results" : "AI Chat"}
+              {tab === "results" ? "Results" : tab === "chat" ? "AI Chat" : "Terminal"}
             </button>
           ))}
         </div>
@@ -574,6 +585,12 @@ export default function QueryPage() {
           <div style={{ flex: 1, overflow: "hidden", display: resultPane === "chat" ? "flex" : "none", flexDirection: "column" }}>
             <AiChat />
           </div>
+
+          {terminalOpen && (
+            <div style={{ flex: 1, overflow: "hidden", display: resultPane === "terminal" ? "flex" : "none", flexDirection: "column" }}>
+              <TerminalPanel onClose={() => { setTerminalOpen(false); setResultPane("results"); }} />
+            </div>
+          )}
       </div>}
     </div>
   );

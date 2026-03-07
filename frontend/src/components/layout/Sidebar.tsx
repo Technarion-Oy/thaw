@@ -157,8 +157,10 @@ function clearNodeChildren(nodes: DataNode[], targetKey: string): DataNode[] {
   });
 }
 
-// Cache DDL per unique key so we only fetch once per session.
-const ddlCache = new Map<string, string>();
+// Cache DDL per unique key; entries expire after DDL_CACHE_TTL so changes
+// are visible without a full app restart.
+const DDL_CACHE_TTL = 60_000; // ms
+const ddlCache = new Map<string, { ddl: string; ts: number }>();
 
 // Keep only obj: nodes whose title matches the query; prune empty parents.
 function filterTree(nodes: DataNode[], query: string): DataNode[] {
@@ -198,22 +200,31 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
   args: string;
   children: React.ReactNode;
 }) {
-  const [content, setContent] = useState<string | null>(() => ddlCache.get(cacheKey) ?? null);
+  const getCached = () => {
+    const entry = ddlCache.get(cacheKey);
+    return entry && Date.now() - entry.ts < DDL_CACHE_TTL ? entry.ddl : null;
+  };
+  const [content, setContent] = useState<string | null>(getCached);
   const [loading, setLoading] = useState(false);
 
   const onOpenChange = (open: boolean) => {
-    if (!open || content !== null || loading) return;
+    if (!open || loading) return;
+    const fresh = getCached();
+    if (fresh !== null) {
+      if (content !== fresh) setContent(fresh);
+      return;
+    }
     setLoading(true);
     GetObjectDDL(db, schema, kind, name, args)
       .then((src) => {
         const text = src || "(empty)";
-        ddlCache.set(cacheKey, text);
+        ddlCache.set(cacheKey, { ddl: text, ts: Date.now() });
         setContent(text);
       })
       .catch(() => {
         // Silently suppress DDL errors (e.g. shared databases like SNOWFLAKE
         // that don't support GET_DDL). Cache an empty string so we don't retry.
-        ddlCache.set(cacheKey, "");
+        ddlCache.set(cacheKey, { ddl: "", ts: Date.now() });
         setContent("");
       })
       .finally(() => setLoading(false));
@@ -276,7 +287,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [renameModal, setRenameModal] = useState<RenameModal | null>(null);
   const [timeTravelModal, setTimeTravelModal] = useState<TimeTravelModal | null>(null);
   const [erModal, setErModal] = useState<{ database: string; data: snowflake.ERDiagramData } | null>(null);
-  const [propsModal, setPropsModal] = useState<{ title: string; rows: main.PropertyPair[] | null; error: string | null } | null>(null);
+  const [propsModal, setPropsModal] = useState<{ title: string; rows: main.PropertyPair[] | null; error: string | null; tableContext?: { db: string; schema: string; table: string } } | null>(null);
   const [exportModal, setExportModal] = useState<{ db: string; schema: string; table: string } | null>(null);
   const [importModal, setImportModal] = useState<{ db: string; schema: string; table: string } | null>(null);
   const [searchQuery, setSearchQuery]               = useState("");
@@ -874,7 +885,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       title  = `Properties: ${objKind} — ${db}.${schema}.${name}`;
     }
 
-    setPropsModal({ title, rows: null, error: null });
+    const tableContext = kind === "TABLE" ? { db, schema, table: name } : undefined;
+    setPropsModal({ title, rows: null, error: null, tableContext });
     try {
       const rows = await GetObjectProperties(db, schema, kind, name);
       setPropsModal((prev) => prev ? { ...prev, rows: rows ?? [] } : null);
@@ -1485,6 +1497,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           rows={propsModal.rows}
           error={propsModal.error}
           onClose={() => setPropsModal(null)}
+          tableContext={propsModal.tableContext}
         />
       )}
 

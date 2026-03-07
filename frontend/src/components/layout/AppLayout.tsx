@@ -25,7 +25,7 @@ const MIN_WIDTH = 160;
 const MAX_WIDTH = 600;
 
 const IS_MAC = /Macintosh/i.test(navigator.userAgent);
-const TITLEBAR_HEIGHT = IS_MAC ? 28 : 0;
+const TITLEBAR_HEIGHT = IS_MAC ? 40 : 0;
 
 // ── Sidebar width resize ───────────────────────────────────────────────────────
 

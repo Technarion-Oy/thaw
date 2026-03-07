@@ -48,7 +48,7 @@ body,
 
 /* Make the macOS traffic-light area draggable */
 .titlebar-drag {
-  -webkit-app-region: drag;
+  --wails-draggable: drag;
 }
 
 /* Scrollbar styling */
@@ -94,7 +94,13 @@ body,
 
 /* AI chat — re-enable text selection so users can copy messages and errors.
    WKWebView (macOS) sets user-select:none on the body; !important is needed
-   to override it for the entire chat panel. */
+   to override it for the entire chat panel.
+   --wails-draggable: no-drag is also required on macOS: without it the WebKit
+   layer intercepts pointer events for window dragging before CSS user-select
+   can take effect. */
+.ai-chat-selectable {
+  --wails-draggable: no-drag;
+}
 .ai-chat-selectable,
 .ai-chat-selectable * {
   -webkit-user-select: text !important;

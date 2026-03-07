@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ai } from "../../../wailsjs/go/models";
-import { SendChatMessage, GetAIConfig } from "../../../wailsjs/go/main/App";
+import { SendChatMessage, GetAIConfig, CancelChat } from "../../../wailsjs/go/main/App";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { useQueryStore } from "../../store/queryStore";
 
@@ -265,6 +265,7 @@ export default function AiChat() {
   const [loading, setLoading] = useState(false);
   const [aiEnabled, setAiEnabled] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [agentMode, setAgentMode] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -292,13 +293,20 @@ export default function AiChat() {
     const summary = buildResultSummary(result);
 
     try {
-      const newMsgs = await SendChatMessage(messages, text, sql, summary);
+      const newMsgs = await SendChatMessage(messages, text, sql, summary, agentMode);
       setMessages((prev) => [...prev, ...newMsgs]);
     } catch (e) {
-      setError(String(e));
+      const msg = String(e);
+      if (!msg.includes("context canceled") && !msg.includes("context cancelled")) {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleStop = () => {
+    CancelChat().catch(() => {});
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -344,8 +352,22 @@ export default function AiChat() {
           <MessageBubble key={i} msg={msg} />
         ))}
         {loading && (
-          <div style={{ color: "var(--text-muted)", fontSize: 12, paddingBottom: 8 }}>
-            Thinking…
+          <div style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 8 }}>
+            <span style={{ color: "var(--text-muted)", fontSize: 12 }}>Thinking…</span>
+            <button
+              onClick={handleStop}
+              style={{
+                fontSize: 11,
+                padding: "2px 8px",
+                background: "none",
+                border: "1px solid var(--border)",
+                borderRadius: 3,
+                color: "var(--text-muted)",
+                cursor: "pointer",
+              }}
+            >
+              Stop
+            </button>
           </div>
         )}
         {error && (
@@ -376,49 +398,75 @@ export default function AiChat() {
         padding: "8px 12px",
         borderTop: "1px solid var(--border)",
         display: "flex",
-        gap: 8,
-        alignItems: "flex-end",
+        flexDirection: "column",
+        gap: 6,
         flexShrink: 0,
       }}>
-        <textarea
-          ref={textareaRef}
-          rows={2}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Ask a question… (Enter to send, Shift+Enter for newline)"
-          disabled={loading}
-          style={{
-            flex: 1,
-            resize: "none",
-            fontSize: 13,
-            padding: "6px 8px",
-            background: "var(--bg-overlay)",
-            border: "1px solid var(--border)",
-            borderRadius: 4,
-            color: "var(--text)",
-            fontFamily: "inherit",
-            outline: "none",
-          }}
-        />
-        <button
-          onClick={handleSend}
-          disabled={loading || !input.trim()}
-          style={{
-            padding: "6px 14px",
-            fontSize: 13,
-            background: "var(--accent)",
-            color: "#fff",
-            border: "none",
-            borderRadius: 4,
-            cursor: loading || !input.trim() ? "not-allowed" : "pointer",
-            opacity: loading || !input.trim() ? 0.5 : 1,
-            flexShrink: 0,
-            alignSelf: "flex-end",
-          }}
-        >
-          Send ↵
-        </button>
+        {/* Mode toggle */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <button
+            onClick={() => setAgentMode((v) => !v)}
+            title={agentMode ? "Agent mode: AI can explore your database and run queries" : "Chat mode: conversational only, no database access"}
+            style={{
+              fontSize: 11,
+              padding: "2px 8px",
+              borderRadius: 10,
+              border: `1px solid ${agentMode ? "var(--accent)" : "var(--border)"}`,
+              background: agentMode ? "color-mix(in srgb, var(--accent) 15%, transparent)" : "none",
+              color: agentMode ? "var(--accent)" : "var(--text-muted)",
+              cursor: "pointer",
+              fontWeight: agentMode ? 600 : 400,
+              transition: "all 0.15s",
+            }}
+          >
+            {agentMode ? "⚡ Agent" : "Agent"}
+          </button>
+          <span style={{ fontSize: 11, color: "var(--text-faint)" }}>
+            {agentMode ? "Can explore schema and run queries" : "Chat only · enable Agent for database access"}
+          </span>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+          <textarea
+            ref={textareaRef}
+            rows={2}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Ask a question… (Enter to send, Shift+Enter for newline)"
+            disabled={loading}
+            style={{
+              flex: 1,
+              resize: "none",
+              fontSize: 13,
+              padding: "6px 8px",
+              background: "var(--bg-overlay)",
+              border: "1px solid var(--border)",
+              borderRadius: 4,
+              color: "var(--text)",
+              fontFamily: "inherit",
+              outline: "none",
+            }}
+          />
+          <button
+            onClick={handleSend}
+            disabled={loading || !input.trim()}
+            style={{
+              padding: "6px 14px",
+              fontSize: 13,
+              background: "var(--accent)",
+              color: "#fff",
+              border: "none",
+              borderRadius: 4,
+              cursor: loading || !input.trim() ? "not-allowed" : "pointer",
+              opacity: loading || !input.trim() ? 0.5 : 1,
+              flexShrink: 0,
+              alignSelf: "flex-end",
+            }}
+          >
+            Send ↵
+          </button>
+        </div>
       </div>
     </div>
   );

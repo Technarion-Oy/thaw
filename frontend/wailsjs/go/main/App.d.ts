@@ -9,9 +9,13 @@ import {filesystem} from '../models';
 import {sfconfig} from '../models';
 import {ai} from '../models';
 
+export function AlterTableProperty(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
+
 export function CanCreateUsers():Promise<boolean>;
 
 export function CanManageUsers():Promise<boolean>;
+
+export function CancelChat():Promise<void>;
 
 export function CancelConnect():Promise<void>;
 
@@ -37,6 +41,10 @@ export function GetAIConfig():Promise<config.AIConfig>;
 
 export function GetAISuggestion(arg1:string):Promise<string>;
 
+export function GetAvailableShells():Promise<Array<string>>;
+
+export function GetColumnComments(arg1:string,arg2:string,arg3:string):Promise<Array<main.ColumnComment>>;
+
 export function GetERDiagramData(arg1:string):Promise<snowflake.ERDiagramData>;
 
 export function GetFunctionInfo(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.FunctionInfo>;
@@ -56,6 +64,8 @@ export function GetSessionContext():Promise<snowflake.SessionContext>;
 export function GetTableColumns(arg1:string,arg2:string,arg3:string):Promise<Array<string>>;
 
 export function GetTableRetentionDays(arg1:string,arg2:string,arg3:string):Promise<number>;
+
+export function GetTableSettings(arg1:string,arg2:string,arg3:string):Promise<main.TableSettings>;
 
 export function GetUserDDL(arg1:string):Promise<string>;
 
@@ -113,6 +123,8 @@ export function PickSaveFile(arg1:string):Promise<string>;
 
 export function ReadFile(arg1:string):Promise<string>;
 
+export function ResizeShell(arg1:number,arg2:number):Promise<void>;
+
 export function SaveAIConfig(arg1:config.AIConfig):Promise<void>;
 
 export function SaveBinaryFile(arg1:string,arg2:string):Promise<void>;
@@ -123,9 +135,15 @@ export function SaveGitConfig(arg1:config.GitConfig):Promise<void>;
 
 export function SearchFiles(arg1:string,arg2:string,arg3:boolean):Promise<Array<filesystem.SearchMatch>>;
 
-export function SendChatMessage(arg1:Array<ai.UIMessage>,arg2:string,arg3:string,arg4:string):Promise<Array<ai.UIMessage>>;
+export function SendChatMessage(arg1:Array<ai.UIMessage>,arg2:string,arg3:string,arg4:string,arg5:boolean):Promise<Array<ai.UIMessage>>;
+
+export function SetColumnComment(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
 export function StartQuery(arg1:string):Promise<string>;
+
+export function StartShell(arg1:string,arg2:string):Promise<void>;
+
+export function StopShell():Promise<void>;
 
 export function TestAIModel(arg1:string,arg2:string,arg3:string):Promise<string>;
 
@@ -134,3 +152,5 @@ export function UseRole(arg1:string):Promise<void>;
 export function UseWarehouse(arg1:string):Promise<void>;
 
 export function WaitForQueryResult():Promise<snowflake.QueryResult>;
+
+export function WriteShell(arg1:string):Promise<void>;

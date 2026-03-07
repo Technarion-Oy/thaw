@@ -147,5 +147,11 @@ func buildMenu(app *App) *menu.Menu {
 		wailsruntime.EventsEmit(app.ctx, "menu:configure-ai")
 	})
 
+	// ── Terminal ──────────────────────────────────────────────────────────────
+	terminalMenu := appMenu.AddSubmenu("Terminal")
+	terminalMenu.AddText("New Terminal", keys.CmdOrCtrl("`"), func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:open-terminal")
+	})
+
 	return appMenu
 }

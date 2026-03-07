@@ -44,7 +44,9 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 - **Drag and drop** — drag any table or view into the editor to insert a `SELECT` statement with all column names listed individually
 - **Hover tooltips** — hovering any object in the tree shows its DDL definition
 - **View Definition** — opens the DDL in a modal with a Copy button
-- **Properties** — opens a key/value panel of object metadata populated from the relevant `SHOW` command
+- **Properties** — opens a key/value panel of object metadata populated from the relevant `SHOW` command; for tables the panel additionally provides two inline-editable sections:
+  - **Table Settings** — view and edit cluster key, schema evolution, change tracking, data retention days, max data extension days, default DDL collation, and comment; booleans are toggled with a switch, numeric and text fields open an inline input with Save / Cancel; changes are applied immediately via `ALTER TABLE SET`
+  - **Column Comments** — view and edit the comment on every column; each row shows the column name, its current comment (or a dash if empty), and a pencil icon to edit inline
 - **Refresh** — reload the full object tree with one click
 - **Time Travel / Undrop** — list dropped databases, schemas, and tables within their retention window and restore them with a single click
 - **ER Diagram** — generate an Entity Relationship Diagram for any database; filter by schema, zoom, pan, and copy the Mermaid source
@@ -73,7 +75,11 @@ Compare the DDL or content of any two database objects, files, roles, or warehou
 
 An agentic chat panel lives alongside the SQL results. The assistant has access to your live Snowflake connection and calls tools autonomously to answer questions about your data — without you having to paste schema or query results.
 
-**Tools available to the assistant:**
+**Chat mode vs Agent mode** — a toggle above the input switches between:
+- **Chat mode** (default) — conversational only; the assistant sees the current SQL and last query result but makes no live calls
+- **Agent mode** — the assistant calls tools autonomously against the live Snowflake session and the local file system
+
+**Tools available in Agent mode:**
 
 | Tool | What it does |
 |------|-------------|
@@ -83,8 +89,13 @@ An agentic chat panel lives alongside the SQL results. The assistant has access 
 | `list_tables` | Lists all tables and views in a schema |
 | `describe_table` | Returns column names and data types |
 | `run_sql` | Executes a SQL query and returns up to 50 rows |
+| `list_directory` | Lists files and subdirectories in the project working directory |
+| `read_file` | Reads the content of a local file (SQL scripts, configs, etc.) |
+| `run_command` | Runs a shell command in the project working directory |
 
+- **Working directory** — the assistant always knows the configured export directory so it can refer to local SQL files by path
 - **Context injection** — the current SQL in the editor and the most recent query result are automatically included so the assistant has full context
+- **Stop generation** — a **Stop** button appears while the assistant is thinking; clicking it immediately cancels the in-flight API request
 - **Run button** — SQL code blocks in the assistant's response include a **Run** button that loads the query into the editor and executes it immediately
 - **Copy button** — every message and error has a **Copy** button using the native OS clipboard
 
@@ -118,7 +129,7 @@ Open **AI → Configure AI…** in the menu bar to set your provider, API key, a
 - Fully qualified object names (`db.schema.object`) in every `CREATE` statement
 - Shared / imported databases (e.g. `SNOWFLAKE_SAMPLE_DATA`) are automatically skipped
 - Files are organised on disk by schema and object type (tables, views, functions, procedures, sequences, stages, streams, tasks, file formats, pipes)
-- Parallel export — up to 8 databases fetched concurrently
+- Parallel export — up to 16 databases fetched concurrently; each database uses a single `GET_DDL('DATABASE', name, true)` call for maximum throughput
 - **Live progress bar** while the export runs
 - **Cancel** — stop an in-progress export at any time
 - Results summary shows file counts, skipped databases, and any errors
@@ -164,6 +175,19 @@ Open **AI → Configure AI…** in the menu bar to set your provider, API key, a
 
 ---
 
+## Embedded Terminal
+
+An OS shell terminal is available as a tab in the results area alongside Results and AI Chat.
+
+- **Open** via **Terminal → New Terminal** in the menu bar (`⌘ \`` / `Ctrl+\``)
+- **Shell picker** — a dropdown lists all shells from `/etc/shells`; switching shells immediately restarts the session in the selected shell
+- **New** button restarts the current shell; **Kill** stops it without closing the tab; **×** closes the tab and returns to the Results tab
+- The terminal opens in the configured export directory so file operations run in context
+- Resizes automatically when the results pane is resized
+- Full ANSI colour and cursor support via xterm.js
+
+---
+
 ## UI & Theming
 
 - **Light, Dark, and System** themes — switch via **View → Appearance**; preference is saved across sessions
@@ -187,6 +211,7 @@ Open **AI → Configure AI…** in the menu bar to set your provider, API key, a
 | `⌘S` / `Ctrl+S` | Save active file |
 | `⌘⇧S` / `Ctrl+Shift+S` | Save As… |
 | `⌘T` / `Ctrl+T` | New scratch tab |
+| `⌘\`` / `Ctrl+\`` | Open embedded terminal |
 
 ---
 

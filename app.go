@@ -11,16 +11,19 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/creack/pty"
 	sf "github.com/snowflakedb/gosnowflake"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -41,6 +44,7 @@ type App struct {
 	client        *snowflake.Client
 	cancelConnect    context.CancelFunc
 	exportCancelFunc context.CancelFunc // cancels an in-flight DDL export
+	cancelChat       context.CancelFunc // cancels an in-flight AI chat request
 	logCleanup       func()             // closes the log rotation file on shutdown
 
 	// Two-phase query execution (StartQuery / WaitForQueryResult).
@@ -50,6 +54,11 @@ type App struct {
 	queryResult     *snowflake.QueryResult
 	queryErr        error
 	queryCancelFunc context.CancelFunc // cancels the in-flight query context
+
+	// Embedded terminal (pseudo-terminal).
+	ptyMu  sync.Mutex
+	ptmx   *os.File
+	ptyCmd *exec.Cmd
 }
 
 func NewApp() *App {
@@ -72,6 +81,9 @@ func (a *App) isQueryRunning() bool {
 }
 
 func (a *App) shutdown(_ context.Context) {
+	// Stop any running terminal process cleanly before the app exits.
+	a.StopShell() //nolint:errcheck
+
 	// Cancel any in-flight query so it stops consuming credits in Snowflake.
 	// CancelQuery issues SYSTEM$CANCEL_QUERY in a goroutine; give it a moment
 	// to fire before the process exits.
@@ -139,6 +151,14 @@ func (a *App) CancelConnect() {
 func (a *App) CancelExport() {
 	if a.exportCancelFunc != nil {
 		a.exportCancelFunc()
+	}
+}
+
+// CancelChat aborts an in-progress AI chat request. It is a no-op if no
+// request is in flight.
+func (a *App) CancelChat() {
+	if a.cancelChat != nil {
+		a.cancelChat()
 	}
 }
 
@@ -915,6 +935,194 @@ func (a *App) GetObjectProperties(database, schema, kind, name string) ([]Proper
 	return pairs, nil
 }
 
+// ColumnComment holds a column name and its optional comment.
+type ColumnComment struct {
+	Column  string `json:"column"`
+	Comment string `json:"comment"`
+}
+
+// GetColumnComments returns the comment for every column in a table, ordered
+// by ordinal position.
+func (a *App) GetColumnComments(database, schema, table string) ([]ColumnComment, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	escId := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	escStr := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
+	query := fmt.Sprintf(
+		`SELECT COLUMN_NAME, COALESCE(COMMENT, '') AS COMMENT`+
+			` FROM "%s".INFORMATION_SCHEMA.COLUMNS`+
+			` WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = '%s'`+
+			` ORDER BY ORDINAL_POSITION`,
+		escId(database), escStr(strings.ToUpper(schema)), escStr(strings.ToUpper(table)),
+	)
+	res, err := a.client.Execute(a.ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ColumnComment, 0, len(res.Rows))
+	for _, row := range res.Rows {
+		col, cmt := "", ""
+		if len(row) > 0 && row[0] != nil {
+			col = fmt.Sprint(row[0])
+		}
+		if len(row) > 1 && row[1] != nil {
+			cmt = fmt.Sprint(row[1])
+		}
+		out = append(out, ColumnComment{Column: col, Comment: cmt})
+	}
+	return out, nil
+}
+
+// SetColumnComment sets (or clears) the COMMENT on a single table column.
+func (a *App) SetColumnComment(database, schema, table, column, comment string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	escId := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	escStr := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
+	query := fmt.Sprintf(
+		`ALTER TABLE "%s"."%s"."%s" MODIFY COLUMN "%s" COMMENT '%s'`,
+		escId(database), escId(schema), escId(table), escId(column), escStr(comment),
+	)
+	_, err := a.client.Execute(a.ctx, query)
+	return err
+}
+
+// TableSettings holds the modifiable table-level properties that can be
+// changed via ALTER TABLE ... SET without re-creating the table.
+type TableSettings struct {
+	ClusterBy             string `json:"clusterBy"`
+	EnableSchemaEvolution bool   `json:"enableSchemaEvolution"`
+	DataRetentionDays     int    `json:"dataRetentionDays"`
+	MaxDataExtensionDays  int    `json:"maxDataExtensionDays"`
+	ChangeTracking        bool   `json:"changeTracking"`
+	DefaultDDLCollation   string `json:"defaultDDLCollation"`
+	Comment               string `json:"comment"`
+}
+
+// GetTableSettings reads the current values of all modifiable table properties
+// by running SHOW TABLES and (for collation) SHOW PARAMETERS.
+func (a *App) GetTableSettings(database, schema, table string) (TableSettings, error) {
+	if a.client == nil {
+		return TableSettings{}, ErrNotConnected
+	}
+	escId := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	escStr := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
+
+	res, err := a.client.Execute(a.ctx, fmt.Sprintf(
+		`SHOW TABLES LIKE '%s' IN SCHEMA "%s"."%s"`,
+		escStr(table), escId(database), escId(schema),
+	))
+	if err != nil {
+		return TableSettings{}, err
+	}
+
+	// Build column-name → index map (case-insensitive).
+	colIdx := make(map[string]int, len(res.Columns))
+	for i, c := range res.Columns {
+		colIdx[strings.ToLower(c)] = i
+	}
+
+	// Find the row whose name matches exactly (LIKE can return partial matches).
+	var row []interface{}
+	for _, r := range res.Rows {
+		idx, ok := colIdx["name"]
+		if ok && idx < len(r) && r[idx] != nil && strings.EqualFold(fmt.Sprint(r[idx]), table) {
+			row = r
+			break
+		}
+	}
+	if row == nil {
+		return TableSettings{}, fmt.Errorf("table %q not found", table)
+	}
+
+	get := func(name string) string {
+		idx, ok := colIdx[name]
+		if !ok || idx >= len(row) || row[idx] == nil {
+			return ""
+		}
+		return fmt.Sprint(row[idx])
+	}
+	parseBool := func(s string) bool {
+		s = strings.ToLower(strings.TrimSpace(s))
+		return s == "y" || s == "true" || s == "on" || s == "1"
+	}
+	parseInt := func(s string) int {
+		var n int
+		fmt.Sscanf(s, "%d", &n)
+		return n
+	}
+
+	settings := TableSettings{
+		ClusterBy:             get("cluster_by"),
+		EnableSchemaEvolution: parseBool(get("enable_schema_evolution")),
+		DataRetentionDays:     parseInt(get("retention_time")),
+		MaxDataExtensionDays:  parseInt(get("max_data_extension_time_in_days")),
+		ChangeTracking:        parseBool(get("change_tracking")),
+		Comment:               get("comment"),
+		DefaultDDLCollation:   get("default_ddl_collation"),
+	}
+
+	// Fallback: read DEFAULT_DDL_COLLATION from SHOW PARAMETERS if not in SHOW TABLES.
+	if settings.DefaultDDLCollation == "" {
+		pres, perr := a.client.Execute(a.ctx, fmt.Sprintf(
+			`SHOW PARAMETERS LIKE 'DEFAULT_DDL_COLLATION' IN TABLE "%s"."%s"."%s"`,
+			escId(database), escId(schema), escId(table),
+		))
+		if perr == nil && len(pres.Rows) > 0 {
+			pidx := make(map[string]int, len(pres.Columns))
+			for i, c := range pres.Columns {
+				pidx[strings.ToLower(c)] = i
+			}
+			if vi, ok := pidx["value"]; ok && vi < len(pres.Rows[0]) && pres.Rows[0][vi] != nil {
+				settings.DefaultDDLCollation = fmt.Sprint(pres.Rows[0][vi])
+			}
+		}
+	}
+
+	return settings, nil
+}
+
+// AlterTableProperty applies a single ALTER TABLE SET change.
+// property must be one of: clusterBy, enableSchemaEvolution, dataRetentionDays,
+// maxDataExtensionDays, changeTracking, defaultDDLCollation, comment.
+func (a *App) AlterTableProperty(database, schema, table, property, value string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	escId := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	escStr := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
+	tbl := fmt.Sprintf(`"%s"."%s"."%s"`, escId(database), escId(schema), escId(table))
+
+	var query string
+	switch property {
+	case "clusterBy":
+		if strings.TrimSpace(value) == "" {
+			query = fmt.Sprintf(`ALTER TABLE %s DROP CLUSTERING KEY`, tbl)
+		} else {
+			query = fmt.Sprintf(`ALTER TABLE %s CLUSTER BY (%s)`, tbl, value)
+		}
+	case "enableSchemaEvolution":
+		query = fmt.Sprintf(`ALTER TABLE %s SET ENABLE_SCHEMA_EVOLUTION = %s`, tbl, strings.ToUpper(value))
+	case "dataRetentionDays":
+		query = fmt.Sprintf(`ALTER TABLE %s SET DATA_RETENTION_TIME_IN_DAYS = %s`, tbl, value)
+	case "maxDataExtensionDays":
+		query = fmt.Sprintf(`ALTER TABLE %s SET MAX_DATA_EXTENSION_TIME_IN_DAYS = %s`, tbl, value)
+	case "changeTracking":
+		query = fmt.Sprintf(`ALTER TABLE %s SET CHANGE_TRACKING = %s`, tbl, strings.ToUpper(value))
+	case "defaultDDLCollation":
+		query = fmt.Sprintf(`ALTER TABLE %s SET DEFAULT_DDL_COLLATION = '%s'`, tbl, escStr(value))
+	case "comment":
+		query = fmt.Sprintf(`ALTER TABLE %s SET COMMENT = '%s'`, tbl, escStr(value))
+	default:
+		return fmt.Errorf("unknown property: %s", property)
+	}
+
+	_, err := a.client.Execute(a.ctx, query)
+	return err
+}
+
 // ExportTableData exports a Snowflake table to the local filesystem using a
 // temporary internal stage. The stage is dropped automatically after the
 // download completes or on error.
@@ -1089,6 +1297,7 @@ func (a *App) SendChatMessage(
 	userText string,
 	currentSQL string,
 	lastResultSummary string,
+	agentMode bool,
 ) ([]ai.UIMessage, error) {
 	if a.client == nil {
 		return nil, ErrNotConnected
@@ -1097,6 +1306,15 @@ func (a *App) SendChatMessage(
 	if err != nil || !cfg.AI.Enabled || cfg.AI.APIKey == "" {
 		return nil, fmt.Errorf("AI not configured or disabled")
 	}
+
+	workDir := cfg.Git.ExportDir
+
+	chatCtx, cancel := context.WithCancel(a.ctx)
+	a.cancelChat = cancel
+	defer func() {
+		cancel()
+		a.cancelChat = nil
+	}()
 
 	executor := func(name, inputJSON string) (string, bool) {
 		var args map[string]string
@@ -1146,12 +1364,62 @@ func (a *App) SendChatMessage(
 				return err.Error(), true
 			}
 			return formatChatQueryResult(res), false
+		case "list_directory":
+			p := args["path"]
+			if !filepath.IsAbs(p) {
+				p = filepath.Join(workDir, p)
+			}
+			p = filepath.Clean(p)
+			entries, err := filesystem.ListDir(p)
+			if err != nil {
+				return err.Error(), true
+			}
+			lines := make([]string, len(entries))
+			for i, e := range entries {
+				if e.IsDir {
+					lines[i] = e.Name + "/"
+				} else {
+					lines[i] = fmt.Sprintf("%s (%d bytes)", e.Name, e.Size)
+				}
+			}
+			return strings.Join(lines, "\n"), false
+		case "read_file":
+			p := args["path"]
+			if !filepath.IsAbs(p) {
+				p = filepath.Join(workDir, p)
+			}
+			p = filepath.Clean(p)
+			content, err := filesystem.ReadFile(p)
+			if err != nil {
+				return err.Error(), true
+			}
+			const maxBytes = 50_000
+			if len(content) > maxBytes {
+				content = content[:maxBytes] + "\n... (truncated)"
+			}
+			return content, false
+		case "run_command":
+			cmd := exec.CommandContext(chatCtx, "sh", "-c", args["command"])
+			cmd.Dir = workDir
+			out, err := cmd.CombinedOutput()
+			output := strings.TrimSpace(string(out))
+			if err != nil {
+				if output != "" {
+					return output, true
+				}
+				return err.Error(), true
+			}
+			const maxBytes = 50_000
+			if len(output) > maxBytes {
+				output = output[:maxBytes] + "\n... (truncated)"
+			}
+			return output, false
 		}
 		return "unknown tool", true
 	}
 
-	msg, err := ai.Chat(cfg.AI.Provider, cfg.AI.APIKey, cfg.AI.Model,
-		history, userText, currentSQL, lastResultSummary, executor)
+	msg, err := ai.Chat(chatCtx, cfg.AI.Provider, cfg.AI.APIKey, cfg.AI.Model,
+		history, userText, currentSQL, lastResultSummary, agentMode, workDir, executor)
 	if err != nil {
 		return nil, err
 	}
@@ -1269,4 +1537,129 @@ func (a *App) GetAISuggestion(prefix string) string {
 		return ""
 	}
 	return suggestion
+}
+
+// ─── Embedded terminal ────────────────────────────────────────────────────────
+
+// GetAvailableShells reads /etc/shells and returns the list of valid shells.
+// Lines starting with '#' are skipped, as are paths that do not exist on disk.
+// Falls back to ["/bin/zsh", "/bin/bash", "/bin/sh"] when the file cannot be read.
+func (a *App) GetAvailableShells() []string {
+	f, err := os.Open("/etc/shells")
+	if err != nil {
+		return []string{"/bin/zsh", "/bin/bash", "/bin/sh"}
+	}
+	defer f.Close()
+
+	var shells []string
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if _, err := os.Stat(line); err == nil {
+			shells = append(shells, line)
+		}
+	}
+	if len(shells) == 0 {
+		return []string{"/bin/zsh", "/bin/bash", "/bin/sh"}
+	}
+	return shells
+}
+
+// StartShell launches the given shell in a pseudo-terminal.
+// If a shell is already running it is stopped first.
+// dir sets the working directory; when empty the shell inherits the process cwd.
+// Output from the shell is emitted as base64-encoded "terminal:data" events;
+// process exit is signalled by a "terminal:exit" event.
+func (a *App) StartShell(shell, dir string) error {
+	a.ptyMu.Lock()
+	defer a.ptyMu.Unlock()
+
+	// Stop any previously running shell (already locked, so call internals directly).
+	if a.ptmx != nil {
+		a.ptmx.Close()  //nolint:errcheck
+		if a.ptyCmd != nil && a.ptyCmd.Process != nil {
+			a.ptyCmd.Process.Kill() //nolint:errcheck
+		}
+		a.ptmx = nil
+		a.ptyCmd = nil
+	}
+
+	cmd := exec.Command(shell)
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	if dir != "" {
+		cmd.Dir = dir
+	}
+
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		return err
+	}
+	a.ptmx = ptmx
+	a.ptyCmd = cmd
+
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := ptmx.Read(buf)
+			if n > 0 {
+				encoded := base64.StdEncoding.EncodeToString(buf[:n])
+				wailsruntime.EventsEmit(a.ctx, "terminal:data", encoded)
+			}
+			if err != nil {
+				// EOF or closed — shell exited.
+				a.ptyMu.Lock()
+				a.ptmx = nil
+				a.ptyCmd = nil
+				a.ptyMu.Unlock()
+				wailsruntime.EventsEmit(a.ctx, "terminal:exit")
+				return
+			}
+		}
+	}()
+
+	return nil
+}
+
+// WriteShell sends data (keystrokes) to the running shell's stdin.
+func (a *App) WriteShell(data string) error {
+	a.ptyMu.Lock()
+	defer a.ptyMu.Unlock()
+	if a.ptmx == nil {
+		return nil
+	}
+	_, err := a.ptmx.Write([]byte(data))
+	return err
+}
+
+// ResizeShell updates the terminal window size of the running pseudo-terminal.
+func (a *App) ResizeShell(cols, rows int) error {
+	a.ptyMu.Lock()
+	defer a.ptyMu.Unlock()
+	if a.ptmx == nil {
+		return nil
+	}
+	return pty.Setsize(a.ptmx, &pty.Winsize{
+		Rows: uint16(rows),
+		Cols: uint16(cols),
+	})
+}
+
+// StopShell kills the running shell and closes the pseudo-terminal.
+// It is a no-op when no shell is running.
+func (a *App) StopShell() error {
+	a.ptyMu.Lock()
+	defer a.ptyMu.Unlock()
+	if a.ptmx == nil {
+		return nil
+	}
+	a.ptmx.Close() //nolint:errcheck
+	if a.ptyCmd != nil && a.ptyCmd.Process != nil {
+		a.ptyCmd.Process.Kill() //nolint:errcheck
+	}
+	a.ptmx = nil
+	a.ptyCmd = nil
+	return nil
 }

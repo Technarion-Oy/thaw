@@ -26,7 +26,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - Query SQL, results, and tab state survive Vite / WebView page reloads (persisted to `sessionStorage`)
 - **Selection highlight** — selecting any text highlights every other occurrence in the document with a blue background; overview-ruler markers make occurrences visible in long files
 - Word-under-cursor highlight when nothing is selected
-- **Hover definition** — hovering over a table or view name shows its DDL in a Monaco tooltip; definitions are cached per session so subsequent hovers are instant
+- **Hover definition** — hovering over a table or view name shows its DDL in a Monaco tooltip; entries are cached and automatically refreshed after 60 seconds so stale definitions are never shown indefinitely
 - **SQL autocomplete** — context-aware completions triggered by `.` or `Ctrl+Space`:
   - After `db.` → schemas of that database
   - After `db.schema.` → objects (tables, views, functions, …) in that schema
@@ -34,9 +34,19 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
   - `Ctrl+Space` anywhere in a query (SELECT list, WHERE clause, etc.) → columns from all tables/views referenced in the `FROM`/`JOIN` clauses of the current statement; both quoted (`"TABLE"`) and unquoted identifiers are recognised; works above the FROM clause (e.g. inside the SELECT column list)
   - Column lists are fetched once via `DESCRIBE TABLE` and cached for the session; subsequent invocations are instant
 - **AI inline completions** — ghost-text SQL suggestions powered by OpenAI or Google AI Studios (Gemini); appears automatically as you type and is accepted with `Tab`; configure via **AI → Configure AI…** in the menu bar
-- **AI Chat** — agentic chat panel in the results area (Results / AI Chat tabs); the assistant can call tools against the live Snowflake connection to answer questions about your data — see [AI Chat](#ai-chat) below
+- **AI Chat** — agentic chat panel in the results area (Results / AI Chat / Terminal tabs); the assistant operates in **Chat** or **Agent** mode (toggle above the input); in agent mode it calls tools against the live Snowflake connection and the local file system — see [AI Chat](#ai-chat) below
 - Results displayed in a virtualised Ag-Grid table
 - **Export results** — CSV and Excel (`.xlsx`) export buttons in the results status bar; CSV uses RFC 4180 quoting; Excel uses SheetJS to produce a native `.xlsx` file; both open a native save dialog with format-appropriate file filters
+
+### Embedded terminal
+
+- **Terminal tab** appears in the results area alongside Results and AI Chat; open via **Terminal → New Terminal** (`⌘ \`` / `Ctrl+\``) in the menu bar
+- **Shell picker** — a dropdown lists every shell from `/etc/shells`; switching shells immediately restarts the session in the chosen binary
+- **New** button restarts the current shell; **Kill** stops it without closing the tab; **×** closes the tab and returns to Results
+- The terminal opens in the configured export / working directory by default
+- Resizes automatically when the results pane is resized (ResizeObserver → `FitAddon`)
+- Full ANSI colour, cursor blink, and mouse support via xterm.js (`@xterm/xterm`, `@xterm/addon-fit`)
+- PTY managed by the Go backend via `github.com/creack/pty`
 
 ### File management
 - **Open…** (`⌘O` / `Ctrl+O`) — native OS open-file dialog filtered to `.sql`; re-activates an existing tab if the file is already open
@@ -73,9 +83,11 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
   - **Rename** the object (`ALTER … RENAME TO`) — available for tables, views, sequences, stages, streams, tasks, file formats, and pipes
   - **Delete** the object (`DROP …`) — with a confirmation dialog
 - **Drag and drop** — drag any table or view node from the sidebar into the editor to insert a fully-qualified `SELECT` with all column names (fetched from Snowflake and listed individually, not `*`) at the drop position; drag a user from the User Management panel to insert a `CREATE USER` DDL statement
-- **Hover tooltip** — hovering over any object in the tree shows its DDL definition; fetched once and cached for the session
+- **Hover tooltip** — hovering over any object in the tree shows its DDL definition; cached with a 60-second TTL so changes made outside the app are visible promptly
 - **View Definition** — right-click any object → **View Definition** opens a modal with the full DDL; a **Copy** button copies the SQL to the clipboard
-- **Properties** — right-click any database, schema, or object → **Properties** opens a key/value panel populated by the corresponding `SHOW` command (e.g. `SHOW TABLES`, `SHOW SCHEMAS`, `SHOW DATABASES`); right-click a role or warehouse in the Account Objects panel, or a user in User Management, for the same panel; a **Copy** button copies all rows as `property: value` lines
+- **Properties** — right-click any database, schema, or object → **Properties** opens a key/value panel populated by the corresponding `SHOW` command; a **Copy** button copies all rows as `property: value` lines; for **tables** the panel includes two additional inline-editable sections:
+  - **Table Settings** — cluster key, schema evolution, change tracking, data retention days, max data extension days, default DDL collation, and comment; booleans are toggled with a switch, other fields open an inline input with Save / Cancel; changes apply via `ALTER TABLE SET`
+  - **Column Comments** — lists every column with its current comment; click the pencil icon to edit inline; saving runs `ALTER TABLE … MODIFY COLUMN … COMMENT`
 - **Text Comparison** — right-click any object, role, warehouse, or file → **Select for Comparison**; then right-click a second item → **Compare with: …** to open a Monaco side-by-side diff view; works across categories (e.g. compare a table DDL against a local `.sql` file); both sides are fetched concurrently and trailing whitespace is trimmed before diffing
 - Tree automatically refreshes the affected database after any rename, drop, or undrop operation
 - **ER Diagram** — right-click a database and choose **ER Diagram…** to generate an Entity Relationship Diagram from `INFORMATION_SCHEMA.COLUMNS`, `SHOW PRIMARY KEYS`, and `SHOW IMPORTED KEYS`; only base tables are shown (views excluded); filter visible schemas with checkboxes, zoom in/out, drag to pan, and copy the Mermaid source to the clipboard
@@ -137,7 +149,7 @@ Role and warehouse switches (via the toolbar dropdowns) are applied to a **singl
           file_formats/
           pipes/
   ```
-- Parallel fetch (up to 8 databases concurrently) and parallel atomic writes
+- Parallel fetch (up to 16 databases concurrently) and parallel atomic writes; each database is fetched with a single `GET_DDL('DATABASE', name, true)` call
 - Live progress bar driven by Wails events from the Go backend
 - **Cancel export** — a Cancel button appears next to the Export button while a run is in progress; cancels both the in-flight Snowflake DDL fetch and the local file writes
 - Export directory can be changed directly from the Export DDL panel without opening the Git section
@@ -486,6 +498,7 @@ granted to the owner of the database created by the test.
 | `⌘S` / `Ctrl+S` | Save the active file |
 | `⌘⇧S` / `Ctrl+Shift+S` | Save As… (always opens a dialog) |
 | `⌘T` / `Ctrl+T` | New scratch tab |
+| `⌘\`` / `Ctrl+\`` | Open embedded terminal |
 
 ---
 
@@ -511,9 +524,13 @@ pre-fill the connection form, but are never modified by Thaw.
 
 ### AI Chat
 
-When AI is enabled, an **AI Chat** tab appears next to the **Results** tab in the bottom half of the query workspace. The assistant is connected to the live Snowflake session and can call tools to explore your data before answering.
+When AI is enabled, an **AI Chat** tab appears next to the **Results** tab in the bottom half of the query workspace.
 
-**Tools the assistant can call:**
+**Chat mode vs Agent mode** — a toggle above the input switches between:
+- **Chat mode** (default) — single API call, no tools; the assistant sees the current SQL and last query result but makes no live Snowflake calls
+- **Agent mode** — a tool-calling loop (up to 8 iterations) that gives the assistant access to the live Snowflake session and the local file system
+
+**Tools available in Agent mode:**
 
 | Tool | What it does |
 |------|-------------|
@@ -523,8 +540,15 @@ When AI is enabled, an **AI Chat** tab appears next to the **Results** tab in th
 | `list_tables(database, schema)` | Lists all tables and views in a schema (with kind) |
 | `describe_table(database, schema, table)` | Returns each column's name and data type |
 | `run_sql(query)` | Executes a SQL query and returns up to 50 rows |
+| `list_directory(path)` | Lists files and subdirectories relative to the working directory |
+| `read_file(path)` | Reads a local text file (SQL scripts, configs, …); capped at 50 000 characters |
+| `run_command(command)` | Runs a shell command in the working directory; returns combined stdout/stderr |
 
 The assistant always looks up real names before writing SQL — it will not guess database, schema, table, or column names.
+
+**Working directory:** The assistant is told the configured export/working directory so it can reference local SQL files by path.
+
+**Stop generation:** A **Stop** button appears while the assistant is thinking; clicking it cancels the in-flight API request immediately without showing an error.
 
 **Context injection:** The current SQL in the editor and the most recent query result are automatically included in each turn so the assistant has full context without the user needing to paste them.
 

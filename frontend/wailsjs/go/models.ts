@@ -257,6 +257,20 @@ export namespace main {
 	        this.errors = source["errors"];
 	    }
 	}
+	export class ColumnComment {
+	    column: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ColumnComment(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.column = source["column"];
+	        this.comment = source["comment"];
+	    }
+	}
 	export class PropertyPair {
 	    key: string;
 	    value: string;
@@ -269,6 +283,30 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.key = source["key"];
 	        this.value = source["value"];
+	    }
+	}
+	export class TableSettings {
+	    clusterBy: string;
+	    enableSchemaEvolution: boolean;
+	    dataRetentionDays: number;
+	    maxDataExtensionDays: number;
+	    changeTracking: boolean;
+	    defaultDDLCollation: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TableSettings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.clusterBy = source["clusterBy"];
+	        this.enableSchemaEvolution = source["enableSchemaEvolution"];
+	        this.dataRetentionDays = source["dataRetentionDays"];
+	        this.maxDataExtensionDays = source["maxDataExtensionDays"];
+	        this.changeTracking = source["changeTracking"];
+	        this.defaultDDLCollation = source["defaultDDLCollation"];
+	        this.comment = source["comment"];
 	    }
 	}
 

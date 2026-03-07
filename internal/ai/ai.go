@@ -12,6 +12,7 @@ package ai
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -101,32 +102,80 @@ var chatTools = []map[string]any{
 			"required": []string{"query"},
 		},
 	},
+	{
+		"name":        "list_directory",
+		"description": "List files and subdirectories in a directory on the local file system. Use \".\" to list the project root.",
+		"parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path": map[string]any{"type": "string", "description": "Directory path relative to the project root, or an absolute path."},
+			},
+			"required": []string{"path"},
+		},
+	},
+	{
+		"name":        "read_file",
+		"description": "Read the text content of a local file. Use this to inspect SQL files, configurations, and other text files in the project.",
+		"parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path": map[string]any{"type": "string", "description": "File path relative to the project root, or an absolute path."},
+			},
+			"required": []string{"path"},
+		},
+	},
+	{
+		"name":        "run_command",
+		"description": "Run a shell command in the project working directory. Use this to run scripts, git commands, build tools, etc. Returns combined stdout and stderr.",
+		"parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"command": map[string]any{"type": "string", "description": "The shell command to execute, e.g. \"git log --oneline -10\" or \"ls -la\"."},
+			},
+			"required": []string{"command"},
+		},
+	},
 }
 
-// Chat runs one agentic turn: sends history + userText to the AI, executes
-// any tool calls via exec, loops until the model produces a final text response,
-// and returns the assistant UIMessage (with ToolCalls populated).
-// Uses chatHttpClient with 30-second timeout. Max 8 tool-calling iterations.
-func Chat(provider, apiKey, model string, history []UIMessage, userText, currentSQL, lastResultSummary string, exec ToolExecutor) (UIMessage, error) {
+// Chat runs one chat turn.
+// When agentMode is true the AI may invoke tools (explore schema, run SQL) over
+// up to 8 iterations. When false a single plain-text response is returned with
+// no tool access.
+func Chat(ctx context.Context, provider, apiKey, model string, history []UIMessage, userText, currentSQL, lastResultSummary string, agentMode bool, workDir string, exec ToolExecutor) (UIMessage, error) {
 	switch provider {
 	case "openai":
-		return openAIChat(apiKey, model, history, userText, currentSQL, lastResultSummary, exec)
+		return openAIChat(ctx, apiKey, model, history, userText, currentSQL, lastResultSummary, agentMode, workDir, exec)
 	case "google":
-		return googleChat(apiKey, model, history, userText, currentSQL, lastResultSummary, exec)
+		return googleChat(ctx, apiKey, model, history, userText, currentSQL, lastResultSummary, agentMode, workDir, exec)
 	default:
 		return UIMessage{}, fmt.Errorf("unknown AI provider: %s", provider)
 	}
 }
 
-func buildSystemPrompt(currentSQL, lastResultSummary string) string {
+func buildSystemPrompt(currentSQL, lastResultSummary string, agentMode bool, workDir string) string {
 	var sb strings.Builder
-	sb.WriteString("You are a helpful SQL assistant connected to a live Snowflake database.\n")
-	sb.WriteString("You have tools to explore the database and run SQL. Follow these rules:\n")
-	sb.WriteString("1. Never guess database names, schema names, table names, or column names. Always look them up first.\n")
-	sb.WriteString("2. When you need to know where you are, call get_session_context first.\n")
-	sb.WriteString("3. When you need tables in a schema, call list_tables. If you don't know the schema, call list_schemas first.\n")
-	sb.WriteString("4. Before writing any SELECT, call describe_table to confirm the real column names and types.\n")
-	sb.WriteString("5. Only call run_sql once you have verified the table and column names through the other tools.\n")
+	if agentMode {
+		sb.WriteString("You are a helpful SQL assistant connected to a live Snowflake database.\n")
+		sb.WriteString("You have tools to explore the database, run SQL, and access the local file system. Follow these rules:\n")
+		sb.WriteString("1. Never guess database names, schema names, table names, or column names. Always look them up first.\n")
+		sb.WriteString("2. When you need to know where you are, call get_session_context first.\n")
+		sb.WriteString("3. When you need tables in a schema, call list_tables. If you don't know the schema, call list_schemas first.\n")
+		sb.WriteString("4. Before writing any SELECT, call describe_table to confirm the real column names and types.\n")
+		sb.WriteString("5. Only call run_sql once you have verified the table and column names through the other tools.\n")
+		sb.WriteString("6. You can access the local file system with list_directory, read_file, and run_command. Use \".\" as the path to list the project root.\n")
+		if workDir != "" {
+			sb.WriteString("Project working directory: ")
+			sb.WriteString(workDir)
+			sb.WriteString("\n")
+		}
+	} else {
+		sb.WriteString("You are a helpful SQL assistant. You can see the user's current SQL query and their most recent query result for context, but you cannot access the database directly. Help the user understand their data, improve their queries, and answer questions about SQL and Snowflake.\n")
+		if workDir != "" {
+			sb.WriteString("Project working directory: ")
+			sb.WriteString(workDir)
+			sb.WriteString("\n")
+		}
+	}
 	if currentSQL != "" {
 		sb.WriteString("\nCurrent SQL in the editor:\n```sql\n")
 		sb.WriteString(currentSQL)
@@ -142,8 +191,8 @@ func buildSystemPrompt(currentSQL, lastResultSummary string) string {
 
 // ── OpenAI chat with tool-calling ─────────────────────────────────────────────
 
-func openAIChat(apiKey, model string, history []UIMessage, userText, currentSQL, lastResultSummary string, exec ToolExecutor) (UIMessage, error) {
-	systemPrompt := buildSystemPrompt(currentSQL, lastResultSummary)
+func openAIChat(ctx context.Context, apiKey, model string, history []UIMessage, userText, currentSQL, lastResultSummary string, agentMode bool, workDir string, exec ToolExecutor) (UIMessage, error) {
+	systemPrompt := buildSystemPrompt(currentSQL, lastResultSummary, agentMode, workDir)
 
 	// Build initial messages
 	messages := []map[string]any{
@@ -153,6 +202,49 @@ func openAIChat(apiKey, model string, history []UIMessage, userText, currentSQL,
 		messages = append(messages, map[string]any{"role": m.Role, "content": m.Text})
 	}
 	messages = append(messages, map[string]any{"role": "user", "content": userText})
+
+	// Chat mode: single round-trip, no tools.
+	if !agentMode {
+		body, err := json.Marshal(map[string]any{
+			"model":    model,
+			"messages": messages,
+		})
+		if err != nil {
+			return UIMessage{}, err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/chat/completions", bytes.NewReader(body))
+		if err != nil {
+			return UIMessage{}, err
+		}
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := chatHttpClient.Do(req)
+		if err != nil {
+			return UIMessage{}, err
+		}
+		raw, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return UIMessage{}, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			return UIMessage{}, fmt.Errorf("openai: status %d: %s", resp.StatusCode, raw)
+		}
+		var result struct {
+			Choices []struct {
+				Message struct{ Content string `json:"content"` } `json:"message"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal(raw, &result); err != nil {
+			return UIMessage{}, err
+		}
+		if len(result.Choices) == 0 {
+			return UIMessage{}, fmt.Errorf("openai: no choices returned")
+		}
+		return UIMessage{Role: "assistant", Text: strings.TrimSpace(result.Choices[0].Message.Content)}, nil
+	}
+
+	// Agent mode: tool-calling loop.
 
 	// Convert tools to OpenAI format
 	openAITools := make([]map[string]any, len(chatTools))
@@ -180,7 +272,7 @@ func openAIChat(apiKey, model string, history []UIMessage, userText, currentSQL,
 			return UIMessage{}, err
 		}
 
-		req, err := http.NewRequest(http.MethodPost, "https://api.openai.com/v1/chat/completions", bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/chat/completions", bytes.NewReader(body))
 		if err != nil {
 			return UIMessage{}, err
 		}
@@ -273,21 +365,8 @@ func openAIChat(apiKey, model string, history []UIMessage, userText, currentSQL,
 
 // ── Google Gemini chat with function-calling ───────────────────────────────────
 
-func googleChat(apiKey, model string, history []UIMessage, userText, currentSQL, lastResultSummary string, exec ToolExecutor) (UIMessage, error) {
-	systemPrompt := buildSystemPrompt(currentSQL, lastResultSummary)
-
-	// Build Google function declarations (omit parameters for no-arg tools).
-	functionDecls := make([]map[string]any, 0, len(chatTools))
-	for _, t := range chatTools {
-		decl := map[string]any{
-			"name":        t["name"],
-			"description": t["description"],
-		}
-		if params, ok := t["parameters"]; ok {
-			decl["parameters"] = params
-		}
-		functionDecls = append(functionDecls, decl)
-	}
+func googleChat(ctx context.Context, apiKey, model string, history []UIMessage, userText, currentSQL, lastResultSummary string, agentMode bool, workDir string, exec ToolExecutor) (UIMessage, error) {
+	systemPrompt := buildSystemPrompt(currentSQL, lastResultSummary, agentMode, workDir)
 
 	// Build contents from history.
 	contents := []map[string]any{}
@@ -306,13 +385,78 @@ func googleChat(apiKey, model string, history []UIMessage, userText, currentSQL,
 		"parts": []map[string]any{{"text": userText}},
 	})
 
-	var accumulated []UIToolCall
-	const maxIter = 8
-
 	apiURL := fmt.Sprintf(
 		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
 		model, apiKey,
 	)
+
+	// Chat mode: single round-trip, no tools.
+	if !agentMode {
+		body, err := json.Marshal(map[string]any{
+			"system_instruction": map[string]any{
+				"parts": []map[string]any{{"text": systemPrompt}},
+			},
+			"contents": contents,
+		})
+		if err != nil {
+			return UIMessage{}, err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(body))
+		if err != nil {
+			return UIMessage{}, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := chatHttpClient.Do(req)
+		if err != nil {
+			return UIMessage{}, err
+		}
+		rawResp, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return UIMessage{}, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			return UIMessage{}, fmt.Errorf("google: status %d: %s", resp.StatusCode, rawResp)
+		}
+		var result struct {
+			Candidates []struct {
+				Content struct {
+					Parts []struct{ Text string `json:"text"` } `json:"parts"`
+				} `json:"content"`
+			} `json:"candidates"`
+		}
+		if err := json.Unmarshal(rawResp, &result); err != nil {
+			return UIMessage{}, err
+		}
+		if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
+			return UIMessage{}, fmt.Errorf("google: no candidates returned")
+		}
+		var parts []string
+		for _, p := range result.Candidates[0].Content.Parts {
+			if p.Text != "" {
+				parts = append(parts, p.Text)
+			}
+		}
+		return UIMessage{Role: "assistant", Text: strings.TrimSpace(strings.Join(parts, ""))}, nil
+	}
+
+	// Agent mode: tool-calling loop.
+
+	// Build Google function declarations (omit parameters for no-arg tools).
+	functionDecls := make([]map[string]any, 0, len(chatTools))
+	for _, t := range chatTools {
+		decl := map[string]any{
+			"name":        t["name"],
+			"description": t["description"],
+		}
+		if params, ok := t["parameters"]; ok {
+			decl["parameters"] = params
+		}
+		functionDecls = append(functionDecls, decl)
+	}
+
+	var accumulated []UIToolCall
+	const maxIter = 8
 
 	// partEnvelope is used only to inspect a part — never to reconstruct it.
 	type partEnvelope struct {
@@ -340,7 +484,7 @@ func googleChat(apiKey, model string, history []UIMessage, userText, currentSQL,
 			return UIMessage{}, err
 		}
 
-		req, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(body))
 		if err != nil {
 			return UIMessage{}, err
 		}

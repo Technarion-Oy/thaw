@@ -18,7 +18,8 @@ import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetUserDDL, Ge
 
 // Module-level DDL cache and hover provider handle so we only register once
 // and don't accumulate duplicate providers on editor remounts.
-const hoverDDLCache = new Map<string, string>();
+const DDL_CACHE_TTL = 60_000; // ms — stale entries are re-fetched after this
+const hoverDDLCache = new Map<string, { ddl: string; ts: number }>();
 let hoverProviderDisposable: { dispose(): void } | null = null;
 let inlineCompletionsDisposable: { dispose(): void } | null = null;
 // Singleton editor reference — set on mount so external callers (e.g. the
@@ -428,12 +429,13 @@ export default function SqlEditor() {
 
         const cacheKey = `${match.db}\0${match.schema}\0${match.kind}\0${match.name}`;
         let ddl: string;
-        if (hoverDDLCache.has(cacheKey)) {
-          ddl = hoverDDLCache.get(cacheKey)!;
+        const cached = hoverDDLCache.get(cacheKey);
+        if (cached && Date.now() - cached.ts < DDL_CACHE_TTL) {
+          ddl = cached.ddl;
         } else {
           try {
             ddl = await GetObjectDDL(match.db, match.schema, match.kind, match.name, "");
-            hoverDDLCache.set(cacheKey, ddl);
+            hoverDDLCache.set(cacheKey, { ddl, ts: Date.now() });
           } catch {
             return null;
           }

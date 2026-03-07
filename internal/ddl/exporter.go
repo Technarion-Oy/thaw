@@ -28,7 +28,7 @@ type ExportOptions struct {
 	OutputDir string
 
 	// DBConcurrency is the maximum number of databases fetched from Snowflake
-	// simultaneously.  Defaults to min(8, runtime.NumCPU()).
+	// simultaneously.  Defaults to min(16, runtime.NumCPU()*4).
 	DBConcurrency int
 
 	// FileConcurrency is the maximum number of files written to disk in parallel
@@ -38,7 +38,10 @@ type ExportOptions struct {
 
 func (o *ExportOptions) applyDefaults() {
 	if o.DBConcurrency <= 0 {
-		o.DBConcurrency = min(8, runtime.NumCPU())
+		// Each database fetch is now a single Snowflake round-trip (pure I/O),
+		// so concurrency is not bounded by CPU. A generous default keeps
+		// Snowflake busy across large account inventories.
+		o.DBConcurrency = min(16, runtime.NumCPU()*4)
 	}
 	if o.FileConcurrency <= 0 {
 		o.FileConcurrency = runtime.NumCPU() * 4
