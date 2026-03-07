@@ -102,9 +102,26 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
   - **Review & Apply Changes** — diffs the current diagram against the existing Snowflake schema and generates only the necessary SQL: `DROP TABLE` for removed tables, `CREATE TABLE` for new ones, and `ALTER TABLE` statements for column additions/removals, type changes, nullability changes, and PK/FK updates; the sidebar refreshes automatically on success
   - Closing the designer with unapplied changes prompts a confirmation dialog to prevent accidental data loss
 
-### Account Objects panel
+### Administration panel
 
-The **Account Objects** collapsible panel in the sidebar shows roles, warehouses, and users. It lazy-loads on first expand.
+The **Administration** collapsible panel in the sidebar shows roles, warehouses, and users. It lazy-loads on first expand.
+
+#### Query Activity
+
+Click the clock icon (⏱) in the Administration panel header to open the **Query Activity** modal — available even before expanding the panel:
+
+- **Scope** — filter by *Current Session*, *By User*, *By Warehouse*, or *All*
+  - **By User** — autocomplete dropdown populated from `SHOW USERS`; accepts free-typed names for users that no longer exist
+  - **By Warehouse** — autocomplete dropdown populated from the live warehouse list; accepts free-typed names for dropped/renamed warehouses
+- **Time range** — optional date/time range picker (`END_TIME_RANGE_START` / `END_TIME_RANGE_END`)
+- **Limit** — result row cap (1 – 10 000, default 100)
+- **Include client-generated** — optionally include Thaw's own internal statements
+- **Run** — re-fetches with the current filter settings; the modal also auto-fetches on open using the current session scope
+- Results table shows status (colour-coded tag), query type, query preview, user, warehouse, database, start time, and duration
+- **Query text search** — a live filter bar above the table narrows rows by query text as you type; matches are highlighted in the preview column and in the expanded full-SQL view; the row count shows `N of M rows` when a filter is active
+- Expand any row to see the full SQL with match highlighting and an **Error** message if the query failed
+- **Load in Editor** — inserts the selected query into the active editor tab and closes the modal
+- Backed by `SNOWFLAKE.INFORMATION_SCHEMA.QUERY_HISTORY_BY_SESSION / _BY_USER / _BY_WAREHOUSE / QUERY_HISTORY` table functions
 
 #### User Management
 
@@ -183,11 +200,11 @@ Right-click the **account · user** tag in the query toolbar to open the **Sessi
 - OS junk files (`.DS_Store`, `Thumbs.db`, `desktop.ini`) are automatically excluded from commits and appended to `.gitignore`
 
 ### UI
-- **Drag-and-drop panel layout** — every sidebar panel (Export DDL, File Browser, Git, Object Browser, Account Objects) has a drag handle at its top edge; drag panels between the left and right sidebars or reorder them within a sidebar; layout is persisted across sessions
+- **Drag-and-drop panel layout** — every sidebar panel (Export DDL, File Browser, Git, Object Browser, Administration) has a drag handle at its top edge; drag panels between the left and right sidebars or reorder them within a sidebar; layout is persisted across sessions
 - **Reset Layout** — restore default panel positions and split ratio from the **Customize Layout…** dialog
 - Resizable sidebars — drag either edge to any width between 160 px and 600 px
 - **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane; ratio is persisted across sessions
-- **Object browser height** — the Objects panel is collapsible (click the label or the ▶/▼ chevron) and vertically resizable (drag the handle below the tree, 80 – 800 px); the Account Objects panel fills the remaining space
+- **Object browser height** — the Objects panel is collapsible (click the label or the ▶/▼ chevron) and vertically resizable (drag the handle below the tree, 80 – 800 px); the Administration panel fills the remaining space
 - **Theming** — light, dark, and system-default themes; switch via **View → Appearance** in the native menu bar; preference is persisted across sessions
 - Native application menu bar with **File** (open / save / new tab), **View → Appearance** (System / Light / Dark), and **AI → Configure AI…** menus
 - Object browser scrolls horizontally when object names are wider than the sidebar
@@ -343,7 +360,8 @@ thaw/
     │       │   ├── ERDesigner.tsx      # Visual ER schema designer (create new tables)
     │       │   └── buildMermaid.ts    # Mermaid source generator for the diagram viewer
     │       ├── account/
-    │       │   ├── AccountPanel.tsx        # Roles, warehouses, and user management panel
+    │       │   ├── AccountPanel.tsx        # Administration panel: roles, warehouses, user management
+    │       │   ├── QueryHistoryModal.tsx   # Query Activity modal (INFORMATION_SCHEMA.QUERY_HISTORY_*)
     │       │   ├── UserManagementPanel.tsx # User list, search, right-click menu
     │       │   ├── EditUserModal.tsx       # ALTER USER dialog with live SQL preview
     │       │   └── CreateUserModal.tsx     # CREATE USER dialog with live SQL preview

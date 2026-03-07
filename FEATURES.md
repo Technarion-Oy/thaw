@@ -146,9 +146,28 @@ Open **AI → Configure AI…** in the menu bar to set your provider, API key, a
 
 ---
 
-## Account & User Management
+## Administration
 
-- View all roles, warehouses, and users in the account
+- View all roles, warehouses, and users in the account from the **Administration** panel in the sidebar
+
+### Query Activity
+
+Click the clock icon in the Administration panel header (always visible, even before expanding) to open the **Query Activity** modal:
+
+- **Scope** — *Current Session*, *By User*, *By Warehouse*, or *All*
+  - *By User* — autocomplete dropdown from `SHOW USERS`; accepts free-typed names for users that no longer exist
+  - *By Warehouse* — autocomplete dropdown from the live warehouse list; accepts free-typed names for dropped or renamed warehouses
+- **Time range** — optional date/time range picker to bound the history window
+- **Limit** — cap results from 1 to 10 000 (default 100)
+- **Include client-generated** — toggle to include Thaw's own internal statements
+- **Run** — re-fetches with the current filters; auto-runs on open with current session scope
+- **Query text search** — live filter bar narrows the loaded results by query text as you type; matches are highlighted in the table and in expanded rows; row count shows `N of M rows` when a filter is active
+- Results table shows status (colour-coded), query type, query preview, user, warehouse, database, start time, and duration
+- Expand any row to see the full SQL and any error message
+- **Load in Editor** — inserts the query into the active editor tab and closes the modal
+
+### User Management
+
 - **User Management** — search users by name, login, display name, or email; view disabled accounts at a glance
 - **Create User** — dialog with all user properties and a live `CREATE USER` SQL preview
 - **Edit User** — pre-populated form that generates only the `ALTER USER … SET/UNSET` statements needed for the changed fields
@@ -200,7 +219,7 @@ An OS shell terminal is available as a tab in the results area alongside Results
 - **Light, Dark, and System** themes — switch via **View → Appearance**; preference is saved across sessions
 - **Resizable sidebars** — drag either sidebar edge to any width between 160 px and 600 px
 - **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane to any ratio; position is saved across sessions
-- **Drag-and-drop panel layout** — every sidebar panel (Export DDL, File Browser, Git, Object Browser, Account Objects) has a drag handle at its top edge; drag panels between the left and right sidebars or reorder them within a sidebar; layout is persisted across sessions
+- **Drag-and-drop panel layout** — every sidebar panel (Export DDL, File Browser, Git, Object Browser, Administration) has a drag handle at its top edge; drag panels between the left and right sidebars or reorder them within a sidebar; layout is persisted across sessions
 - **Reset Layout** — restore the default panel positions and editor/results split via the **Customize Layout…** dialog (accessible from the **View** menu)
 - **Resizable object browser** — collapse, expand, or drag to resize the object tree panel
 - Right-click context menus are always clamped inside the viewport

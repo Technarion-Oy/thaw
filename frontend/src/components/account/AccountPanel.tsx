@@ -18,6 +18,7 @@ import {
   CopyOutlined,
   FileOutlined,
   DiffOutlined,
+  HistoryOutlined,
 } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
@@ -34,6 +35,7 @@ import { useGitStore } from "../../store/gitStore";
 import { useDiffStore } from "../../store/diffStore";
 import UserManagementPanel from "./UserManagementPanel";
 import PropertiesModal from "../common/PropertiesModal";
+import QueryHistoryModal from "./QueryHistoryModal";
 import type { main } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -95,6 +97,7 @@ export default function AccountPanel() {
   const [ddlModal,   setDdlModal]   = useState<DdlModal | null>(null);
   const [ctxMenu,    setCtxMenu]    = useState<AccountCtxMenu | null>(null);
   const [propsModal, setPropsModal] = useState<{ title: string; rows: main.PropertyPair[] | null; error: string | null } | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const ctxRef = useRef<HTMLDivElement>(null);
 
   const pendingDiff   = useDiffStore((s) => s.pending);
@@ -258,32 +261,42 @@ export default function AccountPanel() {
             <Space size={6}>
               <TeamOutlined style={{ color: "var(--text)", fontSize: 13 }} />
               <Text style={{ fontSize: 11, color: "var(--text)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                Account Objects
+                Administration
               </Text>
             </Space>
           ),
           style: { border: "none" },
-          extra: loaded ? (
-            <Space size={2}>
+          extra: (
+            <Space size={2} onClick={(e) => e.stopPropagation()}>
               <Button
                 size="small"
                 type="text"
-                icon={<ExportOutlined style={{ fontSize: 11 }} />}
-                loading={exporting}
-                title="Export roles & warehouses to files"
-                onClick={exportAll}
+                icon={<HistoryOutlined style={{ fontSize: 11 }} />}
+                title="Query Activity"
+                onClick={() => setHistoryOpen(true)}
                 style={{ height: 18, padding: "0 4px", minWidth: 0 }}
               />
-              <Button
-                size="small"
-                type="text"
-                icon={<ReloadOutlined style={{ fontSize: 11 }} />}
-                loading={loading}
-                onClick={(e) => { e.stopPropagation(); refresh(); }}
-                style={{ height: 18, padding: "0 4px", minWidth: 0 }}
-              />
+              {loaded && <>
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<ExportOutlined style={{ fontSize: 11 }} />}
+                  loading={exporting}
+                  title="Export roles & warehouses to files"
+                  onClick={exportAll}
+                  style={{ height: 18, padding: "0 4px", minWidth: 0 }}
+                />
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<ReloadOutlined style={{ fontSize: 11 }} />}
+                  loading={loading}
+                  onClick={(e) => { e.stopPropagation(); refresh(); }}
+                  style={{ height: 18, padding: "0 4px", minWidth: 0 }}
+                />
+              </>}
             </Space>
-          ) : undefined,
+          ),
           children: (
             <div style={{ padding: "0 4px 8px" }}>
               {loading && (
@@ -366,6 +379,9 @@ export default function AccountPanel() {
           )}
         </div>
       )}
+
+      {/* Query history modal */}
+      {historyOpen && <QueryHistoryModal onClose={() => setHistoryOpen(false)} />}
 
       {/* Properties modal */}
       {propsModal && (

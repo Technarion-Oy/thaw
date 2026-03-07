@@ -285,6 +285,44 @@ export namespace main {
 	        this.value = source["value"];
 	    }
 	}
+	export class QueryHistoryRow {
+	    queryId: string;
+	    queryText: string;
+	    queryType: string;
+	    userName: string;
+	    warehouseName: string;
+	    databaseName: string;
+	    schemaName: string;
+	    startTime: string;
+	    endTime: string;
+	    elapsedMs: number;
+	    status: string;
+	    errorMessage: string;
+	    rowsProduced: number;
+	    bytesScanned: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new QueryHistoryRow(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.queryId = source["queryId"];
+	        this.queryText = source["queryText"];
+	        this.queryType = source["queryType"];
+	        this.userName = source["userName"];
+	        this.warehouseName = source["warehouseName"];
+	        this.databaseName = source["databaseName"];
+	        this.schemaName = source["schemaName"];
+	        this.startTime = source["startTime"];
+	        this.endTime = source["endTime"];
+	        this.elapsedMs = source["elapsedMs"];
+	        this.status = source["status"];
+	        this.errorMessage = source["errorMessage"];
+	        this.rowsProduced = source["rowsProduced"];
+	        this.bytesScanned = source["bytesScanned"];
+	    }
+	}
 	export class SessionParam {
 	    key: string;
 	    value: string;

@@ -294,6 +294,36 @@ func (c *Client) Execute(ctx context.Context, query string) (*QueryResult, error
 	return &last, nil
 }
 
+// QuerySingle executes a single SQL statement without multi-statement mode and
+// returns the result set. Use this instead of Execute for TABLE() function calls
+// and other queries that are incompatible with the multi-statement API.
+func (c *Client) QuerySingle(ctx context.Context, query string) (*QueryResult, error) {
+	rows, err := c.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	result := &QueryResult{Columns: cols, Rows: [][]interface{}{}}
+
+	for rows.Next() {
+		vals := make([]interface{}, len(cols))
+		ptrs := make([]interface{}, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, err
+		}
+		result.Rows = append(result.Rows, vals)
+	}
+	return result, rows.Err()
+}
+
 // CancelSnowflakeQuery asks Snowflake to abort the query with the given ID.
 // This is a best-effort call; the caller may ignore errors.
 func (c *Client) CancelSnowflakeQuery(ctx context.Context, queryID string) error {

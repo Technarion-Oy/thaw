@@ -34,7 +34,7 @@ import { usePanelLayoutStore } from "../store/panelLayoutStore";
 const { Text } = Typography;
 
 export default function QueryPage() {
-  const { sql, selectedSql, isRunning, error, setResult, setRunning, setError, markSaved, openScratch, openFile } = useQueryStore();
+  const { sql, selectedSql, isRunning, error, setResult, setRunning, setError, markSaved, openScratch, openFile, setSql } = useQueryStore();
   const activeDiff     = useQueryStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.diff ?? null);
   const resolved       = useThemeStore((s) => s.resolved);
   const editorFont     = useThemeStore((s) => s.editorFont);
@@ -95,6 +95,16 @@ export default function QueryPage() {
     window.addEventListener("run-ai-sql", handler as EventListener);
     return () => window.removeEventListener("run-ai-sql", handler as EventListener);
   }, []);
+
+  // Handle load-query events from QueryHistoryModal
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { sql: querySql } = (e as CustomEvent<{ sql: string }>).detail;
+      setSql(querySql);
+    };
+    window.addEventListener("load-query", handler);
+    return () => window.removeEventListener("load-query", handler);
+  }, [setSql]);
 
   const runQuery = async () => {
     const query = selectedSql.trim() || sql.trim();
