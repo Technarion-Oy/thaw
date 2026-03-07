@@ -36,7 +36,8 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - **AI inline completions** — ghost-text SQL suggestions powered by OpenAI or Google AI Studios (Gemini); appears automatically as you type and is accepted with `Tab`; configure via **AI → Configure AI…** in the menu bar
 - **AI Chat** — agentic chat panel in the results area (Results / AI Chat / Terminal tabs); the assistant operates in **Chat** or **Agent** mode (toggle above the input); in agent mode it calls tools against the live Snowflake connection and the local file system — see [AI Chat](#ai-chat) below
 - Results displayed in a virtualised Ag-Grid table
-- **Export results** — CSV and Excel (`.xlsx`) export buttons in the results status bar; CSV uses RFC 4180 quoting; Excel uses SheetJS to produce a native `.xlsx` file; both open a native save dialog with format-appropriate file filters
+- **Result history** — the last 10 successful result sets are kept in memory; a dropdown in the results status bar lets you switch between them (analogous to `LAST_QUERY_ID(-n)`); after a query failure the dropdown becomes a standalone **Previous results** picker — the grid is hidden until a result is explicitly selected, keeping the error visible and unambiguous
+- **Export results** — CSV and Excel (`.xlsx`) export buttons in the results status bar; CSV uses RFC 4180 quoting; Excel uses SheetJS to produce a native `.xlsx` file; both open a native save dialog with format-appropriate file filters; exports reflect whichever historical result is currently selected
 
 ### Embedded terminal
 

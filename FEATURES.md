@@ -160,7 +160,8 @@ Open **AI → Configure AI…** in the menu bar to set your provider, API key, a
 ## Results & Export
 
 - Query results displayed in a virtualised grid — handles large result sets smoothly
-- **Export results** — CSV (RFC 4180) and Excel (`.xlsx`) export with a native save dialog
+- **Result history** — the last 10 successful result sets are kept in memory for the session; a dropdown in the results status bar (visible after two or more runs) lets you switch between them instantly, similar to `LAST_QUERY_ID(-n)` in SQL; after a query failure the error is shown and the dropdown appears as a standalone **Previous results** picker — the last result grid is not auto-displayed so the failure is immediately obvious, but any historical result can be recalled on demand
+- **Export results** — CSV (RFC 4180) and Excel (`.xlsx`) export with a native save dialog; exports always reflect whichever result is currently selected in the history dropdown
 - Column sorting and horizontal scrolling
 
 ---

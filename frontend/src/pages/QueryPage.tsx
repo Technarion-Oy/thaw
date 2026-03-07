@@ -26,7 +26,7 @@ import { useThemeStore } from "../store/themeStore";
 import ResultGrid from "../components/results/ResultGrid";
 import AiChat from "../components/chat/AiChat";
 import TerminalPanel from "../components/terminal/TerminalPanel";
-import { useQueryStore } from "../store/queryStore";
+import { useQueryStore, type QueryResult } from "../store/queryStore";
 import { useConnectionStore } from "../store/connectionStore";
 import { useSessionStore } from "../store/sessionStore";
 import { usePanelLayoutStore } from "../store/panelLayoutStore";
@@ -34,7 +34,7 @@ import { usePanelLayoutStore } from "../store/panelLayoutStore";
 const { Text } = Typography;
 
 export default function QueryPage() {
-  const { sql, selectedSql, result, isRunning, error, setResult, setRunning, setError, markSaved, openScratch, openFile } = useQueryStore();
+  const { sql, selectedSql, isRunning, error, setResult, setRunning, setError, markSaved, openScratch, openFile } = useQueryStore();
   const activeDiff     = useQueryStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.diff ?? null);
   const resolved       = useThemeStore((s) => s.resolved);
   const editorFont     = useThemeStore((s) => s.editorFont);
@@ -50,6 +50,12 @@ export default function QueryPage() {
   const [resultPane, setResultPane] = useState<"results" | "chat" | "terminal">("results");
   const [aiEnabled, setAiEnabled] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
+
+  // ── Result history (last 10 runs, most-recent-first) ──────────────────────
+  interface HistoryEntry { queryID: string; sql: string; result: QueryResult; }
+  const [resultHistory, setResultHistory] = useState<HistoryEntry[]>([]);
+  const [historyIdx,    setHistoryIdx]    = useState<number | null>(null);
+
   const [sessionPropsOpen, setSessionPropsOpen] = useState(false);
   const [sessionParams, setSessionParams] = useState<main.SessionParam[] | null>(null);
   const [sessionVars, setSessionVars] = useState<main.SessionVar[] | null>(null);
@@ -109,11 +115,14 @@ export default function QueryPage() {
       // Phase 2: block until results are ready.
       const res = await WaitForQueryResult();
       setResult(res);
+      setResultHistory((prev) => [{ queryID: res.queryID ?? "", sql: query, result: res }, ...prev].slice(0, 10));
+      setHistoryIdx(0);
     } catch (e) {
       // Suppress the error when the user explicitly cancelled — keep whatever
       // result was previously shown rather than replacing it with an error.
       if (!cancelRequestedRef.current) {
         setError(String(e));
+        setHistoryIdx(null); // hide the grid; let the user re-select from history
       }
     } finally {
       setRunning(false);
@@ -160,7 +169,7 @@ export default function QueryPage() {
   };
 
   const exportCSV = async () => {
-    if (!result) return;
+    if (!displayedResult) return;
     const escape = (v: unknown) => {
       const s = v === null || v === undefined ? "" : String(v);
       return s.includes(",") || s.includes('"') || s.includes("\n")
@@ -168,9 +177,9 @@ export default function QueryPage() {
         : s;
     };
     const csv =
-      result.columns.map(escape).join(",") +
+      displayedResult.columns.map(escape).join(",") +
       "\n" +
-      result.rows.map((r) => r.map(escape).join(",")).join("\n");
+      displayedResult.rows.map((r) => r.map(escape).join(",")).join("\n");
     const path = await PickSaveExportFile("results.csv", "csv");
     if (!path) return;
     try {
@@ -182,8 +191,8 @@ export default function QueryPage() {
   };
 
   const exportExcel = async () => {
-    if (!result) return;
-    const ws = XLSX.utils.aoa_to_sheet([result.columns, ...result.rows]);
+    if (!displayedResult) return;
+    const ws = XLSX.utils.aoa_to_sheet([displayedResult.columns, ...displayedResult.rows]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Results");
     const b64 = XLSX.write(wb, { type: "base64", bookType: "xlsx" });
@@ -295,6 +304,16 @@ export default function QueryPage() {
 
   const selectStyle = { fontSize: 12, minWidth: 130 };
 
+  // The result currently shown in the grid — null when no result is selected
+  // (e.g. right after a failed query; the user must pick from history explicitly).
+  const displayedResult: QueryResult | null =
+    historyIdx !== null ? (resultHistory[historyIdx]?.result ?? null) : null;
+
+  const sqlSnippet = (s: string) => {
+    const n = s.replace(/\s+/g, " ").trim();
+    return n.length > 45 ? n.slice(0, 45) + "…" : n;
+  };
+
   return (
     <div data-query-layout style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg)" }}>
       {/* Toolbar */}
@@ -329,7 +348,7 @@ export default function QueryPage() {
               Run
             </Button>
           )}
-          <Text type="secondary" style={{ fontSize: 11 }}>
+          <Text type="secondary" style={{ fontSize: 11, whiteSpace: "nowrap" }}>
             {isRunning
               ? "Esc to cancel"
               : selectedSql.trim()
@@ -555,30 +574,45 @@ export default function QueryPage() {
               </div>
             )}
 
-            {error && (
-              <Alert
-                type="error"
-                message={error}
-                showIcon
-                closable
-                style={{ margin: 12 }}
-              />
-            )}
-
-            {result && !error && (
+            {displayedResult ? (
               <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "3px 12px", background: "var(--bg-raised)", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-                  {result.queryID && (
+                {/* Error banner inside the results section when user is viewing history after a failure */}
+                {error && (
+                  <Alert
+                    type="error"
+                    message={error}
+                    showIcon
+                    closable
+                    style={{ margin: "8px 12px 0", flexShrink: 0 }}
+                  />
+                )}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 12px", background: "var(--bg-raised)", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+                  {/* History selector */}
+                  {resultHistory.length > 1 && (
+                    <Select
+                      size="small"
+                      value={historyIdx}
+                      onChange={(v) => setHistoryIdx(v)}
+                      style={{ fontSize: 11, width: 220 }}
+                      popupMatchSelectWidth={false}
+                      options={resultHistory.map((e, i) => ({
+                        value: i,
+                        label: `#${i + 1}${i === 0 ? " · " : "  "}${sqlSnippet(e.sql)}`,
+                      }))}
+                    />
+                  )}
+                  {/* Query ID for displayed result */}
+                  {displayedResult.queryID && (
                     <Space size={4}>
                       <Text style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)" }}>
-                        {result.queryID}
+                        {displayedResult.queryID}
                       </Text>
                       <Button
                         type="text"
                         size="small"
                         icon={<CopyOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
                         style={{ height: 16, padding: "0 2px", minWidth: 0 }}
-                        onClick={async () => { await ClipboardSetText(result.queryID!); message.success("Query ID copied"); }}
+                        onClick={async () => { await ClipboardSetText(displayedResult.queryID!); message.success("Query ID copied"); }}
                       />
                     </Space>
                   )}
@@ -602,20 +636,49 @@ export default function QueryPage() {
                       />
                     </Tooltip>
                     <Text style={{ fontSize: 11, color: "var(--text-faint)" }}>
-                      {result.rows.length} row{result.rows.length !== 1 ? "s" : ""}
+                      {displayedResult.rows.length} row{displayedResult.rows.length !== 1 ? "s" : ""}
                     </Text>
                   </div>
                 </div>
                 <div style={{ flex: 1, overflow: "hidden" }}>
-                  <ResultGrid result={result} />
+                  <ResultGrid result={displayedResult} />
                 </div>
               </div>
-            )}
-
-            {!result && !error && !isRunning && (
-              <div style={{ padding: 24, color: "var(--text-faint)", fontSize: 13 }}>
-                Run a query to see results here.
-              </div>
+            ) : (
+              <>
+                {/* Error with no active result shown — offer the history picker */}
+                {error && (
+                  <Alert
+                    type="error"
+                    message={error}
+                    showIcon
+                    closable
+                    style={{ margin: 12 }}
+                  />
+                )}
+                {resultHistory.length > 0 && !isRunning && (
+                  <div style={{ padding: "4px 12px 8px", display: "flex", alignItems: "center", gap: 8 }}>
+                    <Text style={{ fontSize: 12, color: "var(--text-muted)", whiteSpace: "nowrap" }}>Previous results:</Text>
+                    <Select
+                      size="small"
+                      placeholder="Select to view…"
+                      value={undefined}
+                      onChange={(v: number) => setHistoryIdx(v)}
+                      style={{ fontSize: 11, width: 260 }}
+                      popupMatchSelectWidth={false}
+                      options={resultHistory.map((e, i) => ({
+                        value: i,
+                        label: `#${i + 1}  ${sqlSnippet(e.sql)}`,
+                      }))}
+                    />
+                  </div>
+                )}
+                {!error && !isRunning && resultHistory.length === 0 && (
+                  <div style={{ padding: 24, color: "var(--text-faint)", fontSize: 13 }}>
+                    Run a query to see results here.
+                  </div>
+                )}
+              </>
             )}
           </div>
 
