@@ -305,6 +305,8 @@ export namespace main {
 	}
 	export class BackupSetRow {
 	    name: string;
+	    backupSetDb: string;
+	    backupSetSchema: string;
 	    createdOn: string;
 	    objectType: string;
 	    objectName: string;
@@ -318,6 +320,8 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
+	        this.backupSetDb = source["backupSetDb"];
+	        this.backupSetSchema = source["backupSetSchema"];
 	        this.createdOn = source["createdOn"];
 	        this.objectType = source["objectType"];
 	        this.objectName = source["objectName"];

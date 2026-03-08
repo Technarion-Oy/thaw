@@ -178,10 +178,14 @@ Click the clock icon in the Administration panel header (always visible, even be
 
 Right-click any **database**, **schema**, or **table** in the object browser and choose **Backup Sets…**:
 
-- Lists all backup sets scoped to the selected database or schema
-- **Create** — `CREATE BACKUP SET FOR DATABASE|SCHEMA|TABLE <fqn>` with optional backup policy applied after creation
+- **Scoped listing** — backup sets are always shown for exactly the right object:
+  - Database and schema scopes use `SHOW BACKUP SETS IN DATABASE|SCHEMA`
+  - Table scope queries `INFORMATION_SCHEMA.BACKUP_SETS` filtered by object name and schema (Snowflake does not support `SHOW BACKUP SETS IN TABLE`)
+- **Create** — `CREATE BACKUP SET FOR DATABASE|SCHEMA|TABLE <fqn>` with optional backup policy applied after creation:
+  - Backup set name is fully qualified: choose the **database** and **schema** from dropdowns (defaulting to the source object's database and schema), then enter just the name — the full `db.schema.name` is assembled automatically
 - **Alter** — rename, set/unset comment, apply/suspend/resume backup policy
 - **Drop** — with confirmation
+- All operations (list, add, alter, drop, restore) reference backup sets by their fully-qualified name (`"db"."schema"."name"`) to avoid schema-resolution ambiguity
 - **Expand any row** to see its individual backups:
   - Backup name, status, created date, size, and comment
   - **Add Backup** — `ALTER BACKUP SET … ADD BACKUP`
@@ -189,6 +193,8 @@ Right-click any **database**, **schema**, or **table** in the object browser and
   - **Restore** — create a new object from a backup snapshot:
     - Object type auto-detected from the backup set
     - Requires a new name (Snowflake does not allow restoring over an existing object)
+    - For **TABLE** restores: choose the target **database** and **schema** from dropdowns (defaulting to the source object's location), then enter only the new table name
+    - For **DATABASE** and **SCHEMA** restores: enter the new name directly
     - Executes `CREATE <type> <new_name> FROM BACKUP SET "<set>" IDENTIFIER '<uuid>'`
 
 ### User Management

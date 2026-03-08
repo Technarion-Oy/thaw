@@ -27,7 +27,7 @@ import {
 } from "antd";
 import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, RollbackOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { ListBackupSets, CreateBackupSet, DropBackupSet, AlterBackupSet, ListBackupPolicies, ListBackups, AddBackup, DropBackup, RestoreFromBackup } from "../../../wailsjs/go/main/App";
+import { ListBackupSets, CreateBackupSet, DropBackupSet, AlterBackupSet, ListBackupPolicies, ListBackups, AddBackup, DropBackup, RestoreFromBackup, ListDatabases, ListSchemas } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 import dayjs from "dayjs";
 
@@ -45,14 +45,18 @@ interface Props {
 type AlterAction = "rename" | "set-comment" | "unset-comment" | "apply-policy" | "suspend-policy" | "resume-policy";
 
 interface AlterState {
-  name: string;       // backup set name being altered
+  name: string;           // backup set name being altered
+  backupSetDb: string;
+  backupSetSchema: string;
   action: AlterAction;
-  value: string;      // for rename / set-comment / apply-policy
+  value: string;          // for rename / set-comment / apply-policy
 }
 
 interface CreateState {
   open: boolean;
   name: string;
+  nameDb: string;    // database component of the backup set's own fully-qualified name
+  nameSchema: string; // schema component — empty until user selects for DATABASE scope
   forType: "DATABASE" | "SCHEMA" | "TABLE";
   objectFQN: string;
   backupPolicy: string;
@@ -67,7 +71,12 @@ interface RestoreState {
   backupID: string;       // UUID identifier of the specific backup
   objectType: "DATABASE" | "SCHEMA" | "TABLE";
   objectName: string;     // original FQN (shown for reference, not used as target)
-  targetName: string;     // new name — must differ from original; user must provide it
+  // For DATABASE / SCHEMA: the user types a plain new name here
+  targetName: string;
+  // For TABLE: the user picks db + schema from dropdowns and types just the table name
+  targetDb: string;
+  targetSchema: string;
+  targetTableName: string;
   loading: boolean;
   error: string | null;
 }
@@ -88,13 +97,13 @@ function defaultForType(scopeType: Props["scopeType"]): "DATABASE" | "SCHEMA" | 
 function showScope(props: Props): string {
   if (props.scopeType === "DATABASE") return `DATABASE ${props.db}`;
   if (props.scopeType === "SCHEMA") return `SCHEMA ${props.db}.${props.schema}`;
-  // TABLE: SHOW BACKUP SETS doesn't support IN TABLE — show schema-level
-  return `SCHEMA ${props.db}.${props.schema}`;
+  return `TABLE ${props.db}.${props.schema}.${props.table}`;
 }
 
-function listScopeArgs(props: Props): ["DATABASE" | "SCHEMA", string, string] {
-  if (props.scopeType === "DATABASE") return ["DATABASE", props.db, ""];
-  return ["SCHEMA", props.db, props.schema];
+function listScopeArgs(props: Props): ["DATABASE" | "SCHEMA" | "TABLE", string, string, string] {
+  if (props.scopeType === "DATABASE") return ["DATABASE", props.db, "", ""];
+  if (props.scopeType === "SCHEMA")   return ["SCHEMA",   props.db, props.schema, ""];
+  return ["TABLE", props.db, props.schema, props.table];
 }
 
 export default function BackupSetsModal(props: Props) {
@@ -115,33 +124,82 @@ export default function BackupSetsModal(props: Props) {
   const [backupErrors, setBackupErrors] = useState<Record<string, string>>({});
   const [restoreState, setRestoreState] = useState<RestoreState | null>(null);
 
-  const loadBackups = async (setName: string) => {
-    setBackupCache((c) => ({ ...c, [setName]: "loading" }));
-    setBackupErrors((e) => { const n = { ...e }; delete n[setName]; return n; });
+  // For the create backup set name db/schema dropdowns
+  const [createDbList,         setCreateDbList]         = useState<string[]>([]);
+  const [createDbLoading,      setCreateDbLoading]      = useState(false);
+  const [createSchemaList,     setCreateSchemaList]     = useState<string[]>([]);
+  const [createSchemaLoading,  setCreateSchemaLoading]  = useState(false);
+
+  const loadCreateDatabases = async () => {
+    if (createDbList.length > 0 || createDbLoading) return;
+    setCreateDbLoading(true);
+    try { setCreateDbList((await ListDatabases()) ?? []); }
+    catch { /* ignore */ }
+    finally { setCreateDbLoading(false); }
+  };
+
+  const loadCreateSchemas = async (dbName: string) => {
+    if (!dbName) { setCreateSchemaList([]); return; }
+    setCreateSchemaLoading(true);
+    try { setCreateSchemaList((await ListSchemas(dbName)) ?? []); }
+    catch { setCreateSchemaList([]); }
+    finally { setCreateSchemaLoading(false); }
+  };
+
+  // For the TABLE restore target db/schema dropdowns
+  const [restoreDbList,       setRestoreDbList]       = useState<string[]>([]);
+  const [restoreDbLoading,    setRestoreDbLoading]    = useState(false);
+  const [restoreSchemaList,   setRestoreSchemaList]   = useState<string[]>([]);
+  const [restoreSchemaLoading,setRestoreSchemaLoading]= useState(false);
+
+  const loadRestoreDatabases = async () => {
+    if (restoreDbList.length > 0 || restoreDbLoading) return;
+    setRestoreDbLoading(true);
     try {
-      const data = await ListBackups(setName, db);
-      setBackupCache((c) => ({ ...c, [setName]: data ?? [] }));
+      const data = await ListDatabases();
+      setRestoreDbList(data ?? []);
+    } catch { /* ignore */ }
+    finally { setRestoreDbLoading(false); }
+  };
+
+  const loadRestoreSchemas = async (dbName: string) => {
+    if (!dbName) { setRestoreSchemaList([]); return; }
+    setRestoreSchemaLoading(true);
+    try {
+      const data = await ListSchemas(dbName);
+      setRestoreSchemaList(data ?? []);
+    } catch { setRestoreSchemaList([]); }
+    finally { setRestoreSchemaLoading(false); }
+  };
+
+  const loadBackups = async (record: main.BackupSetRow) => {
+    const key = record.name;
+    setBackupCache((c) => ({ ...c, [key]: "loading" }));
+    setBackupErrors((e) => { const n = { ...e }; delete n[key]; return n; });
+    try {
+      const data = await ListBackups(record.name, record.backupSetDb, record.backupSetSchema);
+      setBackupCache((c) => ({ ...c, [key]: data ?? [] }));
     } catch (e) {
-      setBackupCache((c) => { const n = { ...c }; delete n[setName]; return n; });
-      setBackupErrors((prev) => ({ ...prev, [setName]: String(e) }));
+      setBackupCache((c) => { const n = { ...c }; delete n[key]; return n; });
+      setBackupErrors((prev) => ({ ...prev, [key]: String(e) }));
     }
   };
 
-  const handleAddBackup = async (setName: string) => {
+  const handleAddBackup = async (record: main.BackupSetRow) => {
     try {
-      await AddBackup(setName);
-      message.success(`Backup added to "${setName}".`);
-      loadBackups(setName);
+      await AddBackup(record.name, record.backupSetDb, record.backupSetSchema);
+      message.success(`Backup added to "${record.name}".`);
+      loadBackups(record);
     } catch (e) {
       message.error(String(e));
     }
   };
 
-  const handleDropBackup = async (setName: string, backupName: string) => {
+  const handleDropBackup = async (record: main.BackupSetRow, backupName: string) => {
     try {
       await DropBackup(backupName, db);
       message.success(`Backup "${backupName}" dropped.`);
-      loadBackups(setName);
+      loadBackups(record);
     } catch (e) {
       message.error(String(e));
     }
@@ -149,15 +207,26 @@ export default function BackupSetsModal(props: Props) {
 
   const handleRestore = async () => {
     if (!restoreState) return;
-    if (!restoreState.targetName.trim()) {
-      setRestoreState((s) => s ? { ...s, error: "Target name is required." } : s);
-      return;
+    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    let targetName: string;
+    if (restoreState.objectType === "TABLE") {
+      if (!restoreState.targetDb || !restoreState.targetSchema || !restoreState.targetTableName.trim()) {
+        setRestoreState((s) => s ? { ...s, error: "Database, schema, and table name are all required." } : s);
+        return;
+      }
+      targetName = `${q(restoreState.targetDb)}.${q(restoreState.targetSchema)}.${q(restoreState.targetTableName.trim())}`;
+    } else {
+      if (!restoreState.targetName.trim()) {
+        setRestoreState((s) => s ? { ...s, error: "Target name is required." } : s);
+        return;
+      }
+      targetName = restoreState.targetName.trim();
     }
     setRestoreState((s) => s ? { ...s, loading: true, error: null } : s);
     try {
       await RestoreFromBackup(
         restoreState.objectType,
-        restoreState.targetName,
+        targetName,
         restoreState.backupSetName,
         restoreState.backupID,
         db,
@@ -185,6 +254,8 @@ export default function BackupSetsModal(props: Props) {
   const [createState, setCreateState] = useState<CreateState>({
     open: false,
     name: "",
+    nameDb: db,
+    nameSchema: scopeType === "DATABASE" ? "" : schema,
     forType: defaultForType(scopeType),
     objectFQN: objectFQNFor(props),
     backupPolicy: "",
@@ -199,8 +270,8 @@ export default function BackupSetsModal(props: Props) {
     setError(null);
     setRows(null);
     try {
-      const [sType, sDb, sSchema] = listScopeArgs(props);
-      const data = await ListBackupSets(sType, sDb, sSchema);
+      const [sType, sDb, sSchema, sTable] = listScopeArgs(props);
+      const data = await ListBackupSets(sType, sDb, sSchema, sTable);
       setRows(data ?? []);
     } catch (e) {
       setError(String(e));
@@ -211,10 +282,10 @@ export default function BackupSetsModal(props: Props) {
 
   useEffect(() => { loadRows(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleDrop = async (name: string) => {
+  const handleDrop = async (row: main.BackupSetRow) => {
     try {
-      await DropBackupSet(name);
-      message.success(`Backup set "${name}" dropped.`);
+      await DropBackupSet(row.name, row.backupSetDb, row.backupSetSchema);
+      message.success(`Backup set "${row.name}" dropped.`);
       loadRows();
     } catch (e) {
       message.error(String(e));
@@ -247,7 +318,7 @@ export default function BackupSetsModal(props: Props) {
           alteration = "RESUME BACKUP POLICY";
           break;
       }
-      await AlterBackupSet(alterState.name, alteration);
+      await AlterBackupSet(alterState.name, alterState.backupSetDb, alterState.backupSetSchema, alteration);
       message.success("Backup set updated.");
       setAlterState(null);
       loadRows();
@@ -259,10 +330,16 @@ export default function BackupSetsModal(props: Props) {
   };
 
   const handleCreate = async () => {
+    if (!createState.nameDb || !createState.nameSchema) {
+      setCreateState((s) => ({ ...s, error: "Database and schema for the backup set name are required." }));
+      return;
+    }
     setCreateState((s) => ({ ...s, loading: true, error: null }));
     try {
       await CreateBackupSet(
         createState.name,
+        createState.nameDb,
+        createState.nameSchema,
         createState.forType,
         createState.objectFQN,
         db,
@@ -271,7 +348,7 @@ export default function BackupSetsModal(props: Props) {
       );
       // Apply backup policy after creation if one was selected
       if (createState.backupPolicy.trim()) {
-        await AlterBackupSet(createState.name, `APPLY BACKUP POLICY ${createState.backupPolicy.trim()}`);
+        await AlterBackupSet(createState.name, createState.nameDb, createState.nameSchema, `APPLY BACKUP POLICY ${createState.backupPolicy.trim()}`);
       }
       message.success(`Backup set "${createState.name}" created.`);
       setCreateState((s) => ({ ...s, open: false, name: "", backupPolicy: "", loading: false }));
@@ -309,7 +386,7 @@ export default function BackupSetsModal(props: Props) {
             type="text"
             icon={<PlusCircleOutlined style={{ fontSize: 11 }} />}
             title="Add backup"
-            onClick={(e) => { e.stopPropagation(); handleAddBackup(row.name); }}
+            onClick={(e) => { e.stopPropagation(); handleAddBackup(row); }}
             style={{ height: 18, padding: "0 2px", minWidth: 0, color: "var(--colorTextTertiary)" }}
           />
         </Space>
@@ -359,11 +436,11 @@ export default function BackupSetsModal(props: Props) {
             type="text"
             icon={<EditOutlined />}
             title="Alter…"
-            onClick={() => setAlterState({ name: row.name, action: "rename", value: row.name })}
+            onClick={() => setAlterState({ name: row.name, backupSetDb: row.backupSetDb, backupSetSchema: row.backupSetSchema, action: "rename", value: row.name })}
           />
           <Popconfirm
             title={`Drop backup set "${row.name}"?`}
-            onConfirm={() => handleDrop(row.name)}
+            onConfirm={() => handleDrop(row)}
             okText="Drop"
             okButtonProps={{ danger: true }}
           >
@@ -400,15 +477,6 @@ export default function BackupSetsModal(props: Props) {
         width={820}
         footer={null}
       >
-        {scopeType === "TABLE" && (
-          <Alert
-            type="info"
-            message={`Showing backup sets scoped to SCHEMA ${db}.${schema}. Snowflake's SHOW BACKUP SETS command does not support IN TABLE scope.`}
-            style={{ marginBottom: 12 }}
-            showIcon
-          />
-        )}
-
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <Text style={{ fontSize: 12, color: "var(--text-muted)" }}>
             {rows !== null ? `${rows.length} backup set${rows.length !== 1 ? "s" : ""} in ${showScope(props)}` : ""}
@@ -428,9 +496,14 @@ export default function BackupSetsModal(props: Props) {
               icon={<PlusOutlined />}
               onClick={() => {
                 loadPolicies();
+                loadCreateDatabases();
+                const defaultNameSchema = scopeType === "DATABASE" ? "" : schema;
+                if (defaultNameSchema) loadCreateSchemas(db);
                 setCreateState({
                   open: true,
                   name: "",
+                  nameDb: db,
+                  nameSchema: defaultNameSchema,
                   forType: defaultForType(scopeType),
                   objectFQN: objectFQNFor(props),
                   backupPolicy: "",
@@ -459,7 +532,7 @@ export default function BackupSetsModal(props: Props) {
             expandable={{
               onExpand: (expanded, record) => {
                 if (expanded && !(record.name in backupCache)) {
-                  loadBackups(record.name);
+                  loadBackups(record);
                 }
               },
               expandedRowRender: (record) => {
@@ -523,14 +596,21 @@ export default function BackupSetsModal(props: Props) {
                               objectType: inferredType,
                               objectName: record.objectName,
                               targetName: "",
+                              targetDb: db,
+                              targetSchema: schema,
+                              targetTableName: "",
                               loading: false,
                               error: null,
                             });
+                            if (inferredType === "TABLE") {
+                              loadRestoreDatabases();
+                              loadRestoreSchemas(db);
+                            }
                           }}
                         />
                         <Popconfirm
                           title={`Drop backup "${backup.name}"?`}
-                          onConfirm={() => handleDropBackup(record.name, backup.name)}
+                          onConfirm={() => handleDropBackup(record, backup.name)}
                           okText="Drop"
                           okButtonProps={{ danger: true }}
                         >
@@ -549,7 +629,7 @@ export default function BackupSetsModal(props: Props) {
                         type="primary"
                         icon={<PlusOutlined />}
                         loading={isLoading}
-                        onClick={() => handleAddBackup(record.name)}
+                        onClick={() => handleAddBackup(record)}
                       >
                         Add Backup
                       </Button>
@@ -667,23 +747,70 @@ export default function BackupSetsModal(props: Props) {
             <Form.Item label="Original object">
               <Text type="secondary" style={{ fontSize: 12 }}>{restoreState.objectName || "—"}</Text>
             </Form.Item>
-            <Form.Item
-              label="New name (target)"
-              required
-              help={
-                <span style={{ fontSize: 11 }}>
-                  Snowflake requires a new name — you cannot restore over an existing object.
-                  Provide a fully-qualified name if needed (e.g. <code>MY_DB_RESTORED</code>).
-                </span>
-              }
-            >
-              <Input
-                value={restoreState.targetName}
-                onChange={(e) => setRestoreState((s) => s ? { ...s, targetName: e.target.value } : s)}
-                placeholder={`${restoreState.objectName || "MY_OBJECT"}_RESTORED`}
-                status={restoreState.error && !restoreState.targetName.trim() ? "error" : undefined}
-              />
-            </Form.Item>
+            {restoreState.objectType === "TABLE" ? (
+              <>
+                <Form.Item
+                  label="Target database"
+                  required
+                  help={<span style={{ fontSize: 11 }}>Database to restore the table into. Defaults to the source database.</span>}
+                >
+                  <Select
+                    value={restoreState.targetDb || undefined}
+                    onChange={(v) => {
+                      setRestoreState((s) => s ? { ...s, targetDb: v, targetSchema: "", } : s);
+                      setRestoreSchemaList([]);
+                      loadRestoreSchemas(v);
+                    }}
+                    options={restoreDbList.map((d) => ({ value: d, label: d }))}
+                    loading={restoreDbLoading}
+                    showSearch
+                    placeholder="Select database…"
+                    style={{ width: "100%" }}
+                  />
+                </Form.Item>
+                <Form.Item
+                  label="Target schema"
+                  required
+                  help={<span style={{ fontSize: 11 }}>Schema to restore the table into. Defaults to the source schema.</span>}
+                >
+                  <Select
+                    value={restoreState.targetSchema || undefined}
+                    onChange={(v) => setRestoreState((s) => s ? { ...s, targetSchema: v } : s)}
+                    options={restoreSchemaList.map((s) => ({ value: s, label: s }))}
+                    loading={restoreSchemaLoading}
+                    disabled={!restoreState.targetDb}
+                    showSearch
+                    placeholder="Select schema…"
+                    style={{ width: "100%" }}
+                  />
+                </Form.Item>
+                <Form.Item
+                  label="New table name"
+                  required
+                  help={<span style={{ fontSize: 11 }}>Snowflake requires a new name — you cannot restore over an existing object.</span>}
+                >
+                  <Input
+                    value={restoreState.targetTableName}
+                    onChange={(e) => setRestoreState((s) => s ? { ...s, targetTableName: e.target.value } : s)}
+                    placeholder="MY_TABLE_RESTORED"
+                    status={restoreState.error && !restoreState.targetTableName.trim() ? "error" : undefined}
+                  />
+                </Form.Item>
+              </>
+            ) : (
+              <Form.Item
+                label="New name (target)"
+                required
+                help={<span style={{ fontSize: 11 }}>Snowflake requires a new name — you cannot restore over an existing object.</span>}
+              >
+                <Input
+                  value={restoreState.targetName}
+                  onChange={(e) => setRestoreState((s) => s ? { ...s, targetName: e.target.value } : s)}
+                  placeholder={`${restoreState.objectName || "MY_OBJECT"}_RESTORED`}
+                  status={restoreState.error && !restoreState.targetName.trim() ? "error" : undefined}
+                />
+              </Form.Item>
+            )}
 
             {restoreState.error && (
               <Alert type="error" message={restoreState.error} style={{ marginBottom: 8 }} />
@@ -704,6 +831,33 @@ export default function BackupSetsModal(props: Props) {
           width={520}
         >
           <Form layout="vertical" style={{ marginTop: 8 }}>
+            <Form.Item label="Backup set database" required>
+              <Select
+                value={createState.nameDb || undefined}
+                onChange={(v) => {
+                  setCreateState((s) => ({ ...s, nameDb: v, nameSchema: "" }));
+                  setCreateSchemaList([]);
+                  loadCreateSchemas(v);
+                }}
+                options={createDbList.map((d) => ({ value: d, label: d }))}
+                loading={createDbLoading}
+                showSearch
+                placeholder="Select database…"
+                style={{ width: "100%" }}
+              />
+            </Form.Item>
+            <Form.Item label="Backup set schema" required>
+              <Select
+                value={createState.nameSchema || undefined}
+                onChange={(v) => setCreateState((s) => ({ ...s, nameSchema: v }))}
+                options={createSchemaList.map((s) => ({ value: s, label: s }))}
+                loading={createSchemaLoading}
+                disabled={!createState.nameDb}
+                showSearch
+                placeholder="Select schema…"
+                style={{ width: "100%" }}
+              />
+            </Form.Item>
             <Form.Item label="Backup set name" required>
               <Input
                 value={createState.name}

@@ -159,17 +159,24 @@ A **Backup Policies** section in the Administration panel lets you manage accoun
 
 Right-click any **database**, **schema**, or **table** in the object browser and choose **Backup Sets…** to open the Backup Sets modal:
 
-- Lists all backup sets in the selected database or schema scope
-- **Create** — configure `CREATE BACKUP SET FOR DATABASE|SCHEMA|TABLE <fqn>` with an optional backup policy applied immediately after creation
+- **Scoped listing** — backup sets are always fetched for the correct scope:
+  - Database and schema: `SHOW BACKUP SETS IN DATABASE|SCHEMA`
+  - Table: `INFORMATION_SCHEMA.BACKUP_SETS` filtered by object name and schema (Snowflake does not support `SHOW BACKUP SETS IN TABLE`)
+- **Create** — configure `CREATE BACKUP SET FOR DATABASE|SCHEMA|TABLE <fqn>`:
+  - Backup set name is fully qualified: select the **database** and **schema** from dropdowns (pre-filled from the source object's location), then type only the name — the full `"db"."schema"."name"` is assembled and sent to Snowflake
+  - Optional backup policy applied immediately after creation
 - **Alter** — rename, set/unset comment, apply/suspend/resume backup policy
-- **Drop** — with confirmation
+- **Drop** — with Popconfirm confirmation
+- All backup-set operations (list, add, alter, drop, restore) use the fully-qualified name (`"db"."schema"."name"`) to avoid schema-resolution ambiguity regardless of the session's current schema
 - **Expand** any backup set row to see its individual backups (`SHOW BACKUPS IN BACKUP SET`):
   - Columns: backup name, status (colour-coded tag), created date, size, comment
-  - **Add Backup** — triggers `ALTER BACKUP SET … ADD BACKUP` and refreshes the list immediately
-  - **Drop Backup** — `DROP BACKUP` with a Popconfirm confirmation
-  - **Restore** — opens a dialog to restore from the selected backup:
-    - Auto-detects the object type (DATABASE / SCHEMA / TABLE)
+  - **Add Backup** — triggers `ALTER BACKUP SET … ADD BACKUP` and refreshes immediately
+  - **Drop Backup** — `DROP BACKUP` with Popconfirm confirmation
+  - **Restore** — opens a dialog to create a new object from the selected backup:
+    - Auto-detects the object type (DATABASE / SCHEMA / TABLE) from the backup set
     - Requires a new target name (Snowflake does not support restoring over an existing object)
+    - For **TABLE** restores: select the target **database** and **schema** from dropdowns (pre-filled from the source object's location), then enter only the new table name
+    - For **DATABASE** / **SCHEMA** restores: enter the new name directly
     - Executes `CREATE <type> <new_name> FROM BACKUP SET "<set>" IDENTIFIER '<uuid>'`
 
 #### Role switching and session state

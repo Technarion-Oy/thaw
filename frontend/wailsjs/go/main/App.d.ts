@@ -9,11 +9,11 @@ import {filesystem} from '../models';
 import {sfconfig} from '../models';
 import {ai} from '../models';
 
-export function AddBackup(arg1:string):Promise<void>;
+export function AddBackup(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function AlterBackupPolicy(arg1:string,arg2:string):Promise<void>;
 
-export function AlterBackupSet(arg1:string,arg2:string):Promise<void>;
+export function AlterBackupSet(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterTableProperty(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
@@ -33,7 +33,7 @@ export function Connect(arg1:snowflake.ConnectParams):Promise<void>;
 
 export function CreateBackupPolicy(arg1:string,arg2:string,arg3:number,arg4:boolean,arg5:string,arg6:string,arg7:boolean,arg8:boolean):Promise<void>;
 
-export function CreateBackupSet(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean,arg6:boolean):Promise<void>;
+export function CreateBackupSet(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:boolean,arg8:boolean):Promise<void>;
 
 export function Disconnect():Promise<void>;
 
@@ -41,7 +41,7 @@ export function DropBackup(arg1:string,arg2:string):Promise<void>;
 
 export function DropBackupPolicy(arg1:string):Promise<void>;
 
-export function DropBackupSet(arg1:string):Promise<void>;
+export function DropBackupSet(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function ExecuteQuery(arg1:string):Promise<snowflake.QueryResult>;
 
@@ -109,9 +109,9 @@ export function ListAvailableRoles():Promise<Array<string>>;
 
 export function ListBackupPolicies():Promise<Array<main.BackupPolicyRow>>;
 
-export function ListBackupSets(arg1:string,arg2:string,arg3:string):Promise<Array<main.BackupSetRow>>;
+export function ListBackupSets(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<main.BackupSetRow>>;
 
-export function ListBackups(arg1:string,arg2:string):Promise<Array<main.BackupRow>>;
+export function ListBackups(arg1:string,arg2:string,arg3:string):Promise<Array<main.BackupRow>>;
 
 export function ListDatabases():Promise<Array<string>>;
 
