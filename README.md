@@ -166,10 +166,11 @@ Right-click any **database**, **schema**, or **table** in the object browser and
 - **Alter** — rename, set/unset comment, apply/suspend/resume backup policy
 - **Drop** — with Popconfirm confirmation
 - All backup-set operations (list, add, alter, drop, restore) use the fully-qualified name (`"db"."schema"."name"`) to avoid schema-resolution ambiguity regardless of the session's current schema
+- The **Name** column displays the full `db.schema.name` qualified name so the storage location is always visible
 - **Delete oldest backup** — each backup set row has a **Delete oldest backup** button (`−` icon) that finds and deletes the oldest backup without a legal hold via `ALTER BACKUP SET … DELETE BACKUP IDENTIFIER '<uuid>'`; the button is greyed out automatically when the set has no backups (counts are pre-loaded in the background when the modal opens, so no row expansion is required)
 - **Expand** any backup set row to see its individual backups (`SHOW BACKUPS IN BACKUP SET`):
   - Columns: backup name, status (colour-coded tag), created date, size, comment
-  - **Add Backup** — triggers `ALTER BACKUP SET … ADD BACKUP` and refreshes immediately
+  - **Add Backup** — runs `ALTER BACKUP SET … ADD BACKUP`, waits for Snowflake to complete the operation, then refreshes the backup list automatically; the button shows a loading spinner while in progress to prevent accidental double-clicks
   - **Restore** — opens a dialog to create a new object from the selected backup:
     - Auto-detects the object type (DATABASE / SCHEMA / TABLE) from the backup set
     - Requires a new target name (Snowflake does not support restoring over an existing object)

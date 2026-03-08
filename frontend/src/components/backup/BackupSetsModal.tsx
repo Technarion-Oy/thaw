@@ -122,6 +122,8 @@ export default function BackupSetsModal(props: Props) {
   // Per-backup-set cache: null = not loaded, "loading" = in flight, array = loaded
   const [backupCache, setBackupCache] = useState<Record<string, main.BackupRow[] | "loading">>({});
   const [backupErrors, setBackupErrors] = useState<Record<string, string>>({});
+  // Tracks which backup sets have an in-flight ADD BACKUP call
+  const [addingBackup, setAddingBackup] = useState<Record<string, boolean>>({});
   const [restoreState, setRestoreState] = useState<RestoreState | null>(null);
 
   // For the create backup set name db/schema dropdowns
@@ -186,12 +188,15 @@ export default function BackupSetsModal(props: Props) {
   };
 
   const handleAddBackup = async (record: main.BackupSetRow) => {
+    setAddingBackup(a => ({ ...a, [record.name]: true }));
     try {
       await AddBackup(record.name, record.backupSetDb, record.backupSetSchema);
       message.success(`Backup added to "${record.name}".`);
-      loadBackups(record);
+      await loadBackups(record);
     } catch (e) {
       message.error(String(e));
+    } finally {
+      setAddingBackup(a => ({ ...a, [record.name]: false }));
     }
   };
 
@@ -386,19 +391,24 @@ export default function BackupSetsModal(props: Props) {
       key: "name",
       title: "Name",
       dataIndex: "name",
-      render: (v: string, row: main.BackupSetRow) => (
-        <Space size={4} align="center">
-          <Text code style={{ fontSize: 12 }}>{v}</Text>
-          <Button
-            size="small"
-            type="text"
-            icon={<PlusCircleOutlined style={{ fontSize: 11 }} />}
-            title="Add backup"
-            onClick={(e) => { e.stopPropagation(); handleAddBackup(row); }}
-            style={{ height: 18, padding: "0 2px", minWidth: 0, color: "var(--colorTextTertiary)" }}
-          />
-        </Space>
-      ),
+      render: (v: string, row: main.BackupSetRow) => {
+        const parts = [row.backupSetDb, row.backupSetSchema, v].filter(Boolean);
+        const fullName = parts.join(".");
+        return (
+          <div style={{ display: "flex", alignItems: "center", gap: 4, overflow: "hidden" }}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fullName}</span>
+            <Button
+              size="small"
+              type="text"
+              icon={<PlusCircleOutlined style={{ fontSize: 11 }} />}
+              title="Add backup"
+              loading={addingBackup[row.name]}
+              onClick={(e) => { e.stopPropagation(); handleAddBackup(row); }}
+              style={{ flexShrink: 0, height: 18, padding: "0 2px", minWidth: 0, color: "var(--colorTextTertiary)" }}
+            />
+          </div>
+        );
+      },
     },
     {
       key: "objectType",
@@ -554,7 +564,14 @@ export default function BackupSetsModal(props: Props) {
         {error && <Alert type="error" message={error} style={{ marginBottom: 8 }} />}
         {rows !== null && !loading && (
           <Table<main.BackupSetRow>
-            dataSource={rows}
+            dataSource={rows.map(row => ({
+              ...row,
+              // _rev changes when the backup cache for this row changes, which
+              // causes Ant Design Table to re-render the expanded row content.
+              _rev: Array.isArray(backupCache[row.name])
+                ? (backupCache[row.name] as main.BackupRow[]).length
+                : backupCache[row.name] === "loading" ? -1 : -2,
+            } as main.BackupSetRow))}
             columns={columns}
             rowKey="name"
             size="small"
@@ -647,7 +664,7 @@ export default function BackupSetsModal(props: Props) {
                         size="small"
                         type="primary"
                         icon={<PlusOutlined />}
-                        loading={isLoading}
+                        loading={addingBackup[record.name]}
                         onClick={() => handleAddBackup(record)}
                       >
                         Add Backup
