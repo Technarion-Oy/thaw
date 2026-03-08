@@ -23,7 +23,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - Run the full query or just the selected text (`⌘ Enter` / `Ctrl Enter`)
 - **Cancel query** — while a query is running the Run button becomes a **Cancel** button; pressing it (or `Esc`) cancels client-side polling *and* issues `SYSTEM$CANCEL_QUERY` so the query stops consuming credits in Snowflake
 - **Query ID** — the Snowflake query ID is shown in the loading spinner while the query runs and in the results status bar after it completes; click the copy icon to copy it to the clipboard
-- Query SQL, results, tab state, and the active connection (account · user tag) survive Vite / WebView page reloads (persisted to `sessionStorage`; credentials are never stored)
+- Query SQL, results, tab state, and the active connection (account · user tag) survive Vite / WebView page reloads (persisted to `sessionStorage`; credentials are never stored); the connection state is verified against the backend on every reload so a backend restart shows ConnectModal immediately rather than a broken UI; the UI waits for the persisted state to hydrate before rendering, eliminating the brief ConnectModal flash that occurred on HMR reloads
 - **Selection highlight** — selecting any text highlights every other occurrence in the document with a blue background; overview-ruler markers make occurrences visible in long files
 - Word-under-cursor highlight when nothing is selected
 - **Hover definition** — hovering over a table or view name shows its DDL in a Monaco tooltip; entries are cached and automatically refreshed after 60 seconds so stale definitions are never shown indefinitely

@@ -33,6 +33,21 @@ export default function App() {
   const diffError    = useDiffStore((s) => s.error);
   const clearDiffError = useDiffStore((s) => s.clearError);
 
+  // Whether the Zustand persist store has finished hydrating from sessionStorage.
+  // We hold off rendering ConnectModal vs AppLayout until we know the true
+  // persisted state, otherwise the modal flashes briefly on every page reload
+  // (even when the backend is still connected) while Zustand is async-reading
+  // sessionStorage for the first time.
+  const [hydrated, setHydrated] = useState(
+    () => useConnectionStore.persist.hasHydrated()
+  );
+  useEffect(() => {
+    if (!hydrated) {
+      const unsub = useConnectionStore.persist.onFinishHydration(() => setHydrated(true));
+      return unsub;
+    }
+  }, [hydrated]);
+
   useEffect(() => {
     if (diffError) {
       message.error(`Comparison failed: ${diffError}`);
@@ -41,10 +56,12 @@ export default function App() {
   }, [diffError]);
 
   // After a frontend reload the Go backend keeps the connection alive.
-  // Restore the connected state so the user isn't kicked to the login screen.
+  // Sync the store to the actual backend state: set connected if the backend
+  // is still alive, or clear it if the backend was restarted (so the user
+  // gets ConnectModal with pre-filled params rather than a broken AppLayout).
   useEffect(() => {
     IsConnected().then((alive) => {
-      if (alive) setIsConnected(true);
+      setIsConnected(alive);
     });
   }, []);
 
@@ -154,7 +171,7 @@ export default function App() {
         },
       }}
     >
-      {isConnected ? <AppLayout /> : <ConnectModal />}
+      {hydrated && (isConnected ? <AppLayout /> : <ConnectModal />)}
       {layoutModalOpen && (
         <LayoutSettingsModal onClose={() => setLayoutModalOpen(false)} />
       )}

@@ -9,4 +9,11 @@ export default defineConfig({
       "@": "/src",
     },
   },
+  server: {
+    watch: {
+      // Wails regenerates these files during dev-mode startup; ignore them so
+      // Vite doesn't trigger a full page reload when runtime.js is written.
+      ignored: ["**/wailsjs/**"],
+    },
+  },
 });
