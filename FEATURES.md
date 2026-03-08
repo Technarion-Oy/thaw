@@ -40,7 +40,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Drop** the object (with confirmation)
   - **Select for Comparison** / **Compare with** — side-by-side DDL diff (see [Text Comparison](#text-comparison))
 - **Right-click a database** to export its DDL, generate an ER Diagram, view dropped schemas recoverable via Time Travel, or open **Backup Sets…**
-- **Right-click a schema** to view dropped tables, create a new Snowflake Task, or open **Backup Sets…**
+- **Right-click a schema** to view dropped tables, open **Backup Sets…**, or use the **Create Object** cascading submenu (opens left or right depending on available screen space); currently contains **Task…** to create a new Snowflake Task
 - **Right-click a table** to open **Backup Sets…** (shows backup sets scoped to its schema)
 - **Drag and drop** — drag any table or view into the editor to insert a `SELECT` statement with all column names listed individually
 - **Hover tooltips** — hovering any object in the tree shows its DDL definition

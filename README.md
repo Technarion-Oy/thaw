@@ -62,7 +62,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - **Refresh** button (`↺`) in the sidebar header reloads the entire database tree from Snowflake
 - Right-click a **database** to refresh, export its DDL, **insert its name** at the editor cursor, generate an **ER Diagram**, **Show Dropped Schemas…**, or open **Backup Sets…** — lists schemas recoverable via Time Travel with an **Undrop** button for each
 - **Dropped Databases** button (`⏪`) in the sidebar header lists databases within their Time Travel retention window; click **Undrop** to restore any of them
-- Right-click a **schema** to browse dropped tables recoverable via Snowflake Time Travel, **insert its fully-qualified name** at the editor cursor, **Create Task…**, or open **Backup Sets…** — opens a dialog to configure and generate a `CREATE OR REPLACE TASK` statement with:
+- Right-click a **schema** to browse dropped tables recoverable via Snowflake Time Travel, **insert its fully-qualified name** at the editor cursor, open the **Create Object** cascading submenu, or open **Backup Sets…**; the **Create Object** submenu currently contains **Task…** — opens a dialog to configure and generate a `CREATE OR REPLACE TASK` statement with:
   - Compute: warehouse (searchable dropdown) or serverless with initial warehouse size
   - Schedule: none, fixed interval (seconds/minutes/hours), or cron expression with timezone
   - Dependencies: predecessor tasks (AFTER), boolean condition (WHEN)

@@ -38,6 +38,8 @@ import {
   CopyOutlined,
   DiffOutlined,
   SaveOutlined,
+  PlusSquareOutlined,
+  RightOutlined,
 } from "@ant-design/icons";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
@@ -279,6 +281,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [loaded, setLoaded]         = useState(false);
 
   const [ctxMenu, setCtxMenu]     = useState<ContextMenu | null>(null);
+  const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
+  const [submenuDir, setSubmenuDir] = useState<"left" | "right">("right");
+  const submenuTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [ddlModal, setDdlModal]   = useState<ObjectDDL | null>(null);
   const [callModal, setCallModal] = useState<{ db: string; schema: string; name: string; rawArgs: string } | null>(null);
   const [selectFunctionModal, setSelectFunctionModal] = useState<{ db: string; schema: string; name: string; rawArgs: string } | null>(null);
@@ -959,6 +964,44 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     </div>
   );
 
+  // A menu item that reveals a cascading submenu on hover.
+  // Uses a 150 ms hide-delay so the mouse can travel into the submenu panel
+  // without it disappearing.
+  const showSub = (key: string, triggerEl: HTMLElement) => {
+    if (submenuTimer.current) clearTimeout(submenuTimer.current);
+    const rect = triggerEl.getBoundingClientRect();
+    setSubmenuDir(window.innerWidth - rect.right >= 160 ? "right" : "left");
+    setActiveSubmenu(key);
+  };
+  const hideSub = () => {
+    submenuTimer.current = setTimeout(() => setActiveSubmenu(null), 150);
+  };
+  const cancelHide = () => {
+    if (submenuTimer.current) clearTimeout(submenuTimer.current);
+  };
+
+  const menuItemSub = (label: string, icon: React.ReactNode, subKey: string, children: React.ReactNode) => (
+    <div style={{ position: "relative" }} onMouseEnter={(e) => showSub(subKey, e.currentTarget)} onMouseLeave={hideSub}>
+      <div
+        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 14px", fontSize: 13, cursor: "default", color: "var(--text)", background: activeSubmenu === subKey ? "var(--border)" : "transparent" }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
+        onMouseLeave={(e) => (e.currentTarget.style.background = activeSubmenu === subKey ? "var(--border)" : "transparent")}
+      >
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>{icon}{label}</span>
+        <RightOutlined style={{ fontSize: 9, opacity: 0.5, marginLeft: 12 }} />
+      </div>
+      {activeSubmenu === subKey && (
+        <div
+          style={{ position: "absolute", top: 0, ...(submenuDir === "right" ? { left: "100%" } : { right: "100%" }), background: "var(--bg-overlay)", border: "1px solid var(--border)", borderRadius: 6, boxShadow: "0 4px 16px rgba(0,0,0,0.5)", minWidth: 160, zIndex: 10000 }}
+          onMouseEnter={cancelHide}
+          onMouseLeave={hideSub}
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div style={{ padding: "8px 4px" }}>
       <div style={{ display: "flex", alignItems: "center", padding: "0 4px 0 8px", marginBottom: treeCollapsed ? 4 : 8, gap: 2 }}>
@@ -1157,7 +1200,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "db" && menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets)}
           {ctxMenu.nodeType === "db" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "schema" && menuItem("Insert Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
-          {ctxMenu.nodeType === "schema" && menuItem("Create Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)}
+          {ctxMenu.nodeType === "schema" && menuItemSub("Create Object", <PlusSquareOutlined style={{ fontSize: 12 }} />, "create-object", (
+            menuItem("Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)
+          ))}
           {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
           {ctxMenu.nodeType === "schema" && menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets)}
           {ctxMenu.nodeType === "schema" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
