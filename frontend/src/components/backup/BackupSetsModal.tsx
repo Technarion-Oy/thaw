@@ -25,9 +25,9 @@ import {
   Typography,
   message,
 } from "antd";
-import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, RollbackOutlined } from "@ant-design/icons";
+import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, MinusCircleOutlined, ReloadOutlined, RollbackOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { ListBackupSets, CreateBackupSet, DropBackupSet, AlterBackupSet, ListBackupPolicies, ListBackups, AddBackup, DropBackup, RestoreFromBackup, ListDatabases, ListSchemas } from "../../../wailsjs/go/main/App";
+import { ListBackupSets, CreateBackupSet, DropBackupSet, AlterBackupSet, ListBackupPolicies, ListBackups, AddBackup, DeleteOldestBackup, RestoreFromBackup, ListDatabases, ListSchemas } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 import dayjs from "dayjs";
 
@@ -195,10 +195,10 @@ export default function BackupSetsModal(props: Props) {
     }
   };
 
-  const handleDropBackup = async (record: main.BackupSetRow, backupName: string) => {
+  const handleDeleteOldestBackup = async (record: main.BackupSetRow) => {
     try {
-      await DropBackup(backupName, db);
-      message.success(`Backup "${backupName}" dropped.`);
+      await DeleteOldestBackup(record.name, record.backupSetDb, record.backupSetSchema);
+      message.success(`Oldest eligible backup deleted from "${record.name}".`);
       loadBackups(record);
     } catch (e) {
       message.error(String(e));
@@ -269,10 +269,18 @@ export default function BackupSetsModal(props: Props) {
     setLoading(true);
     setError(null);
     setRows(null);
+    setBackupCache({});
+    setBackupErrors({});
     try {
       const [sType, sDb, sSchema, sTable] = listScopeArgs(props);
       const data = await ListBackupSets(sType, sDb, sSchema, sTable);
-      setRows(data ?? []);
+      const sets = data ?? [];
+      setRows(sets);
+      // Pre-load backups for all sets in the background so the "delete oldest"
+      // button can be greyed out immediately when a set has no backups.
+      for (const record of sets) {
+        loadBackups(record);
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -428,7 +436,7 @@ export default function BackupSetsModal(props: Props) {
     {
       key: "actions",
       title: "",
-      width: 80,
+      width: 108,
       render: (_: unknown, row: main.BackupSetRow) => (
         <Space size={4}>
           <Button
@@ -438,13 +446,36 @@ export default function BackupSetsModal(props: Props) {
             title="Alter…"
             onClick={() => setAlterState({ name: row.name, backupSetDb: row.backupSetDb, backupSetSchema: row.backupSetSchema, action: "rename", value: row.name })}
           />
+          {(() => {
+            const cached = backupCache[row.name];
+            const noBackups = Array.isArray(cached) && cached.length === 0;
+            return (
+              <Popconfirm
+                title="Delete the oldest eligible backup in this set?"
+                description="Only the oldest backup without a legal hold can be deleted."
+                onConfirm={() => handleDeleteOldestBackup(row)}
+                okText="Delete"
+                okButtonProps={{ danger: true }}
+                disabled={noBackups}
+              >
+                <Button
+                  size="small"
+                  type="text"
+                  danger={!noBackups}
+                  disabled={noBackups}
+                  icon={<MinusCircleOutlined />}
+                  title={noBackups ? "No backups in this set" : "Delete oldest backup"}
+                />
+              </Popconfirm>
+            );
+          })()}
           <Popconfirm
             title={`Drop backup set "${row.name}"?`}
             onConfirm={() => handleDrop(row)}
             okText="Drop"
             okButtonProps={{ danger: true }}
           >
-            <Button size="small" type="text" danger icon={<DeleteOutlined />} title="Drop" />
+            <Button size="small" type="text" danger icon={<DeleteOutlined />} title="Drop backup set" />
           </Popconfirm>
         </Space>
       ),
@@ -577,48 +608,36 @@ export default function BackupSetsModal(props: Props) {
                   {
                     key: "actions",
                     title: "",
-                    width: 72,
-                    render: (_: unknown, backup: main.BackupRow) => {
-                      return (
-                      <Space size={2}>
-                        <Button
-                          size="small"
-                          type="text"
-                          icon={<RollbackOutlined />}
-                          title="Restore from this backup…"
-                          onClick={() => {
-                            const inferredType = (
-                              record.objectType?.toUpperCase() as "DATABASE" | "SCHEMA" | "TABLE" | ""
-                            ) || scopeType;
-                            setRestoreState({
-                              backupSetName: record.name,
-                              backupID: backup.id || backup.name,
-                              objectType: inferredType,
-                              objectName: record.objectName,
-                              targetName: "",
-                              targetDb: db,
-                              targetSchema: schema,
-                              targetTableName: "",
-                              loading: false,
-                              error: null,
-                            });
-                            if (inferredType === "TABLE") {
-                              loadRestoreDatabases();
-                              loadRestoreSchemas(db);
-                            }
-                          }}
-                        />
-                        <Popconfirm
-                          title={`Drop backup "${backup.name}"?`}
-                          onConfirm={() => handleDropBackup(record, backup.name)}
-                          okText="Drop"
-                          okButtonProps={{ danger: true }}
-                        >
-                          <Button size="small" type="text" danger icon={<DeleteOutlined />} title="Drop backup" />
-                        </Popconfirm>
-                      </Space>
-                    );
-                    },
+                    width: 40,
+                    render: (_: unknown, backup: main.BackupRow) => (
+                      <Button
+                        size="small"
+                        type="text"
+                        icon={<RollbackOutlined />}
+                        title="Restore from this backup…"
+                        onClick={() => {
+                          const inferredType = (
+                            record.objectType?.toUpperCase() as "DATABASE" | "SCHEMA" | "TABLE" | ""
+                          ) || scopeType;
+                          setRestoreState({
+                            backupSetName: record.name,
+                            backupID: backup.id || backup.name,
+                            objectType: inferredType,
+                            objectName: record.objectName,
+                            targetName: "",
+                            targetDb: db,
+                            targetSchema: schema,
+                            targetTableName: "",
+                            loading: false,
+                            error: null,
+                          });
+                          if (inferredType === "TABLE") {
+                            loadRestoreDatabases();
+                            loadRestoreSchemas(db);
+                          }
+                        }}
+                      />
+                    ),
                   },
                 ];
                 return (

@@ -35,9 +35,9 @@ export function CreateBackupPolicy(arg1:string,arg2:string,arg3:number,arg4:bool
 
 export function CreateBackupSet(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:boolean,arg8:boolean):Promise<void>;
 
-export function Disconnect():Promise<void>;
+export function DeleteOldestBackup(arg1:string,arg2:string,arg3:string):Promise<void>;
 
-export function DropBackup(arg1:string,arg2:string):Promise<void>;
+export function Disconnect():Promise<void>;
 
 export function DropBackupPolicy(arg1:string):Promise<void>;
 

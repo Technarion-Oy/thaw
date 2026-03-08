@@ -2399,8 +2399,9 @@ func (a *App) ListBackups(backupSetName, bsDb, bsSchema string) ([]BackupRow, er
 		return 0
 	}
 
-	idIdx      := colIdx(res.Columns, "backup_id", "id", "identifier", "uuid")
-	nameIdx    := colIdx(res.Columns, "name", "backup_name", "backup")
+	// Snowflake internally uses "snapshot" terminology; column names vary by version.
+	idIdx      := colIdx(res.Columns, "backup_id", "snapshot_id", "id", "identifier", "uuid")
+	nameIdx    := colIdx(res.Columns, "name", "backup_name", "snapshot_name", "backup", "snapshot")
 	createdIdx := colIdx(res.Columns, "created_on")
 	statusIdx  := colIdx(res.Columns, "status")
 	sizeIdx    := colIdx(res.Columns, "size_bytes", "size")
@@ -2417,9 +2418,11 @@ func (a *App) ListBackups(backupSetName, bsDb, bsSchema string) ([]BackupRow, er
 	for _, row := range res.Rows {
 		idVal   := toString(get(row, idIdx))
 		nameVal := toString(get(row, nameIdx))
-		// If we couldn't find a dedicated ID column, try to use the name column as the ID
-		// (some Snowflake versions store the UUID in "name"). If neither resolved, leave both
-		// blank rather than falling back to a timestamp column.
+		// If no dedicated name column was found, fall back to created_on — Snowflake
+		// uses the creation timestamp as the backup identifier in DROP BACKUP.
+		if nameVal == "" {
+			nameVal = toString(get(row, createdIdx))
+		}
 		rows = append(rows, BackupRow{
 			ID:        idVal,
 			Name:      nameVal,
@@ -2492,18 +2495,77 @@ func (a *App) RestoreFromBackup(objectType, targetName, backupSetName, backupID,
 	return err
 }
 
-// DropBackup drops a specific backup snapshot.
-// db must be non-empty; it is used to set a current database context first.
-func (a *App) DropBackup(backupName string, db string) error {
+// DeleteOldestBackup finds the oldest backup in the set that has no legal hold
+// and deletes it using ALTER BACKUP SET … DELETE BACKUP IDENTIFIER '<id>'.
+// Snowflake only permits deleting the single oldest eligible backup at a time.
+func (a *App) DeleteOldestBackup(backupSetName, bsDb, bsSchema string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
 	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-	if db != "" {
-		if _, err := a.client.Execute(a.ctx, fmt.Sprintf("USE DATABASE %s", q(db))); err != nil {
-			return err
+	fqn := bsFQN(q, backupSetName, bsDb, bsSchema)
+
+	res, err := a.client.Execute(a.ctx, fmt.Sprintf("SHOW BACKUPS IN BACKUP SET %s", fqn))
+	if err != nil {
+		return err
+	}
+
+	toString := func(v interface{}) string {
+		if v == nil {
+			return ""
+		}
+		switch t := v.(type) {
+		case []byte:
+			return string(t)
+		case string:
+			return t
+		case time.Time:
+			return t.Format(time.RFC3339)
+		default:
+			return fmt.Sprintf("%v", t)
 		}
 	}
-	_, err := a.client.Execute(a.ctx, fmt.Sprintf("DROP BACKUP %s", q(backupName)))
+
+	get := func(row []interface{}, idx int) interface{} {
+		if idx < 0 || idx >= len(row) {
+			return nil
+		}
+		return row[idx]
+	}
+
+	idIdx        := colIdx(res.Columns, "backup_id", "snapshot_id", "id", "identifier", "uuid")
+	createdIdx   := colIdx(res.Columns, "created_on")
+	legalHoldIdx := colIdx(res.Columns, "is_under_legal_hold", "legal_hold", "under_legal_hold")
+
+	type candidate struct {
+		id        string
+		createdOn string
+	}
+	var best *candidate
+
+	for _, row := range res.Rows {
+		lh := strings.ToUpper(strings.TrimSpace(toString(get(row, legalHoldIdx))))
+		if lh == "Y" || lh == "TRUE" || lh == "YES" || lh == "1" {
+			continue
+		}
+		id := toString(get(row, idIdx))
+		if id == "" {
+			continue
+		}
+		created := toString(get(row, createdIdx))
+		if best == nil || created < best.createdOn {
+			best = &candidate{id: id, createdOn: created}
+		}
+	}
+
+	if best == nil {
+		return fmt.Errorf("no eligible backup found (all backups may be under legal hold)")
+	}
+
+	escapedID := strings.ReplaceAll(best.id, "'", "''")
+	_, err = a.client.Execute(a.ctx, fmt.Sprintf(
+		"ALTER BACKUP SET %s DELETE BACKUP IDENTIFIER '%s'",
+		fqn, escapedID,
+	))
 	return err
 }

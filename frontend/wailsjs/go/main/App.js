@@ -54,12 +54,12 @@ export function CreateBackupSet(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) 
   return window['go']['main']['App']['CreateBackupSet'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
 }
 
-export function Disconnect() {
-  return window['go']['main']['App']['Disconnect']();
+export function DeleteOldestBackup(arg1, arg2, arg3) {
+  return window['go']['main']['App']['DeleteOldestBackup'](arg1, arg2, arg3);
 }
 
-export function DropBackup(arg1, arg2) {
-  return window['go']['main']['App']['DropBackup'](arg1, arg2);
+export function Disconnect() {
+  return window['go']['main']['App']['Disconnect']();
 }
 
 export function DropBackupPolicy(arg1) {
