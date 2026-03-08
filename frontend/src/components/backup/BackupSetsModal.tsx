@@ -141,7 +141,7 @@ export default function BackupSetsModal(props: Props) {
   const loadCreateSchemas = async (dbName: string) => {
     if (!dbName) { setCreateSchemaList([]); return; }
     setCreateSchemaLoading(true);
-    try { setCreateSchemaList((await ListSchemas(dbName)) ?? []); }
+    try { setCreateSchemaList(((await ListSchemas(dbName)) ?? []).filter((s) => s.toUpperCase() !== "INFORMATION_SCHEMA")); }
     catch { setCreateSchemaList([]); }
     finally { setCreateSchemaLoading(false); }
   };
@@ -529,7 +529,7 @@ export default function BackupSetsModal(props: Props) {
                 loadPolicies();
                 loadCreateDatabases();
                 const defaultNameSchema = scopeType === "DATABASE" ? "" : schema;
-                if (defaultNameSchema) loadCreateSchemas(db);
+                if (db) loadCreateSchemas(db);
                 setCreateState({
                   open: true,
                   name: "",

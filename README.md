@@ -163,7 +163,7 @@ Right-click any **database**, **schema**, or **table** in the object browser and
   - Database and schema: `SHOW BACKUP SETS IN DATABASE|SCHEMA`
   - Table: `INFORMATION_SCHEMA.BACKUP_SETS` filtered by object name and schema (Snowflake does not support `SHOW BACKUP SETS IN TABLE`)
 - **Create** — configure `CREATE BACKUP SET FOR DATABASE|SCHEMA|TABLE <fqn>`:
-  - Backup set name is fully qualified: select the **database** and **schema** from dropdowns (pre-filled from the source object's location), then type only the name — the full `"db"."schema"."name"` is assembled and sent to Snowflake
+  - Backup set name is fully qualified: select the **database** and **schema** from dropdowns (pre-filled from the source object's location; `INFORMATION_SCHEMA` is excluded), then type only the name — the full `"db"."schema"."name"` is assembled and sent to Snowflake
   - Optional backup policy applied immediately after creation
 - **Alter** — rename, set/unset comment, apply/suspend/resume backup policy
 - **Drop** — with Popconfirm confirmation

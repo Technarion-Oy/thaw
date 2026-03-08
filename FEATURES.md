@@ -182,7 +182,7 @@ Right-click any **database**, **schema**, or **table** in the object browser and
   - Database and schema scopes use `SHOW BACKUP SETS IN DATABASE|SCHEMA`
   - Table scope queries `INFORMATION_SCHEMA.BACKUP_SETS` filtered by object name and schema (Snowflake does not support `SHOW BACKUP SETS IN TABLE`)
 - **Create** — `CREATE BACKUP SET FOR DATABASE|SCHEMA|TABLE <fqn>` with optional backup policy applied after creation:
-  - Backup set name is fully qualified: choose the **database** and **schema** from dropdowns (defaulting to the source object's database and schema), then enter just the name — the full `db.schema.name` is assembled automatically
+  - Backup set name is fully qualified: choose the **database** and **schema** from dropdowns (defaulting to the source object's database and schema; `INFORMATION_SCHEMA` is excluded from the schema list), then enter just the name — the full `db.schema.name` is assembled automatically
 - **Alter** — rename, set/unset comment, apply/suspend/resume backup policy
 - **Drop** — with confirmation
 - All operations (list, add, alter, drop, restore) reference backup sets by their fully-qualified name (`"db"."schema"."name"`) to avoid schema-resolution ambiguity
