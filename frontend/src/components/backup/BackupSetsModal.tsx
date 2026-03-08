@@ -510,7 +510,7 @@ export default function BackupSetsModal(props: Props) {
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <Text style={{ fontSize: 12, color: "var(--text-muted)" }}>
-            {rows !== null ? `${rows.length} backup set${rows.length !== 1 ? "s" : ""} in ${showScope(props)}` : ""}
+            {rows !== null ? `${rows.length} backup set${rows.length !== 1 ? "s" : ""} for ${showScope(props)}` : ""}
           </Text>
           <Space size={4}>
             <Button

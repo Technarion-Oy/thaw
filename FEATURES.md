@@ -178,9 +178,7 @@ Click the clock icon in the Administration panel header (always visible, even be
 
 Right-click any **database**, **schema**, or **table** in the object browser and choose **Backup Sets…**:
 
-- **Scoped listing** — backup sets are always shown for exactly the right object:
-  - Database and schema scopes use `SHOW BACKUP SETS IN DATABASE|SCHEMA`
-  - Table scope queries `INFORMATION_SCHEMA.BACKUP_SETS` filtered by object name and schema (Snowflake does not support `SHOW BACKUP SETS IN TABLE`)
+- **Object-scoped listing** — backup sets shown are those that actually back up the right-clicked object: `SHOW BACKUP SETS IN DATABASE <db>` is issued and the results are post-filtered by `object_kind`, `object_name`, `object_database_name`, and `object_schema_name` — so right-clicking a table returns only backup sets covering that exact table, not all backup sets stored in that database
 - **Create** — `CREATE BACKUP SET FOR DATABASE|SCHEMA|TABLE <fqn>` with optional backup policy applied after creation:
   - Backup set name is fully qualified: choose the **database** and **schema** from dropdowns (defaulting to the source object's database and schema; `INFORMATION_SCHEMA` is excluded from the schema list), then enter just the name — the full `db.schema.name` is assembled automatically
 - **Alter** — rename, set/unset comment, apply/suspend/resume backup policy

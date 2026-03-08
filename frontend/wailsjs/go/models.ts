@@ -310,6 +310,8 @@ export namespace main {
 	    createdOn: string;
 	    objectType: string;
 	    objectName: string;
+	    objectDb: string;
+	    objectSchema: string;
 	    status: string;
 	    comment: string;
 	
@@ -325,6 +327,8 @@ export namespace main {
 	        this.createdOn = source["createdOn"];
 	        this.objectType = source["objectType"];
 	        this.objectName = source["objectName"];
+	        this.objectDb = source["objectDb"];
+	        this.objectSchema = source["objectSchema"];
 	        this.status = source["status"];
 	        this.comment = source["comment"];
 	    }

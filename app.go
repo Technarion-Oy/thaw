@@ -980,6 +980,8 @@ type BackupSetRow struct {
 	CreatedOn       string `json:"createdOn"`
 	ObjectType      string `json:"objectType"`
 	ObjectName      string `json:"objectName"`
+	ObjectDb        string `json:"objectDb"`
+	ObjectSchema    string `json:"objectSchema"`
 	Status          string `json:"status"`
 	Comment         string `json:"comment"`
 }
@@ -2038,47 +2040,19 @@ func bsFQN(q func(string) string, name, bsDb, bsSchema string) string {
 	return q(name)
 }
 
-// For DATABASE and SCHEMA it uses SHOW BACKUP SETS IN …; for TABLE it queries
-// <db>.INFORMATION_SCHEMA.BACKUP_SETS and filters by schema + table name.
+// ListBackupSets returns backup sets whose backed-up object matches the right-clicked item.
+// It uses SHOW BACKUP SETS IN DATABASE <db> and post-filters by object_kind / object_name /
+// object_database_name / object_schema_name so that only backup sets actually covering the
+// specified database, schema, or table are returned — not all backup sets stored there.
 func (a *App) ListBackupSets(scopeType, db, schema, table string) ([]BackupSetRow, error) {
 	if a.client == nil {
 		return nil, ErrNotConnected
 	}
-	q  := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-	qs := func(s string) string { return `'` + strings.ReplaceAll(s, `'`, `''`) + `'` }
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
 
-	var (
-		query     string
-		useExec   = true // Execute (SHOW) vs QuerySingle (SELECT)
-	)
-	switch strings.ToUpper(scopeType) {
-	case "DATABASE":
-		query = fmt.Sprintf("SHOW BACKUP SETS IN DATABASE %s", q(db))
-	case "SCHEMA":
-		query = fmt.Sprintf("SHOW BACKUP SETS IN SCHEMA %s.%s", q(db), q(schema))
-	case "TABLE":
-		query = fmt.Sprintf(
-			`SELECT "BACKUP_SET_NAME", "BACKUP_SET_SCHEMA", "BACKUP_SET_CATALOG",`+
-				` "OBJECT_KIND", "OBJECT_NAME", "OBJECT_SCHEMA",`+
-				` "OBJECT_CATALOG", "CREATED", "COMMENT"`+
-				` FROM %s."INFORMATION_SCHEMA"."BACKUP_SETS"`+
-				` WHERE UPPER("OBJECT_NAME") = UPPER(%s)`+
-				` AND UPPER("OBJECT_SCHEMA") = UPPER(%s)`+
-				` ORDER BY "CREATED" DESC`,
-			q(db), qs(table), qs(schema),
-		)
-		useExec = false
-	default:
-		return nil, fmt.Errorf("unsupported scope: %s", scopeType)
-	}
-
-	var res *snowflake.QueryResult
-	var err error
-	if useExec {
-		res, err = a.client.Execute(a.ctx, query)
-	} else {
-		res, err = a.client.QuerySingle(a.ctx, query)
-	}
+	// Always query at the database level; the object columns tell us what is backed up.
+	query := fmt.Sprintf("SHOW BACKUP SETS IN DATABASE %s", q(db))
+	res, err := a.client.Execute(a.ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -2099,14 +2073,15 @@ func (a *App) ListBackupSets(scopeType, db, schema, table string) ([]BackupSetRo
 		}
 	}
 
-	// Column names differ between SHOW BACKUP SETS and INFORMATION_SCHEMA.BACKUP_SETS.
-	nameIdx    := colIdx(res.Columns, "name", "backup_set_name")
-	bsDbIdx    := colIdx(res.Columns, "database_name", "backup_set_catalog", "catalog")
-	bsSchIdx   := colIdx(res.Columns, "schema_name", "backup_set_schema")
-	createdIdx := colIdx(res.Columns, "created_on", "created")
-	otypeIdx   := colIdx(res.Columns, "object_type", "object_kind", "type", "for_type", "object_domain", "domain")
-	onameIdx   := colIdx(res.Columns, "object_name", "for_name", "object")
-	statusIdx  := colIdx(res.Columns, "status")
+	nameIdx    := colIdx(res.Columns, "name")
+	bsDbIdx    := colIdx(res.Columns, "database_name")
+	bsSchIdx   := colIdx(res.Columns, "schema_name")
+	createdIdx := colIdx(res.Columns, "created_on")
+	otypeIdx   := colIdx(res.Columns, "object_kind")
+	onameIdx   := colIdx(res.Columns, "object_name")
+	objDbIdx   := colIdx(res.Columns, "object_database_name")
+	objSchIdx  := colIdx(res.Columns, "object_schema_name")
+	statusIdx  := colIdx(res.Columns, "backup_policy_state", "status")
 	commentIdx := colIdx(res.Columns, "comment")
 
 	get := func(row []interface{}, idx int) interface{} {
@@ -2116,26 +2091,50 @@ func (a *App) ListBackupSets(scopeType, db, schema, table string) ([]BackupSetRo
 		return row[idx]
 	}
 
+	upperScope := strings.ToUpper(scopeType)
 	rows := make([]BackupSetRow, 0, len(res.Rows))
 	for _, row := range res.Rows {
+		otype  := strings.ToUpper(toString(get(row, otypeIdx)))
+		oname  := toString(get(row, onameIdx))
+		objDb  := toString(get(row, objDbIdx))
+		objSch := toString(get(row, objSchIdx))
+
+		// Post-filter: only include backup sets whose backed-up object matches
+		// the right-clicked item.
+		var match bool
+		switch upperScope {
+		case "DATABASE":
+			match = otype == "DATABASE" && strings.EqualFold(oname, db)
+		case "SCHEMA":
+			match = otype == "SCHEMA" &&
+				strings.EqualFold(objDb, db) &&
+				strings.EqualFold(oname, schema)
+		case "TABLE":
+			match = (otype == "TABLE" || otype == "EXTERNAL TABLE") &&
+				strings.EqualFold(objDb, db) &&
+				strings.EqualFold(objSch, schema) &&
+				strings.EqualFold(oname, table)
+		default:
+			return nil, fmt.Errorf("unsupported scope: %s", scopeType)
+		}
+		if !match {
+			continue
+		}
+
 		rowBsDb  := toString(get(row, bsDbIdx))
 		rowBsSch := toString(get(row, bsSchIdx))
-		// Fall back to the scope params when the result set doesn't carry db/schema columns.
-		// For SCHEMA scope the props are exact. For DATABASE scope the db is always correct;
-		// the per-row schema column (if absent) stays empty and the caller must ensure FQN.
 		if rowBsDb == "" {
 			rowBsDb = db
-		}
-		if rowBsSch == "" && (strings.ToUpper(scopeType) == "SCHEMA" || strings.ToUpper(scopeType) == "TABLE") {
-			rowBsSch = schema
 		}
 		rows = append(rows, BackupSetRow{
 			Name:            toString(get(row, nameIdx)),
 			BackupSetDb:     rowBsDb,
 			BackupSetSchema: rowBsSch,
 			CreatedOn:       toString(get(row, createdIdx)),
-			ObjectType:      toString(get(row, otypeIdx)),
-			ObjectName:      toString(get(row, onameIdx)),
+			ObjectType:      otype,
+			ObjectName:      oname,
+			ObjectDb:        objDb,
+			ObjectSchema:    objSch,
 			Status:          toString(get(row, statusIdx)),
 			Comment:         toString(get(row, commentIdx)),
 		})

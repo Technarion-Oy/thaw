@@ -159,9 +159,7 @@ A **Backup Policies** section in the Administration panel lets you manage accoun
 
 Right-click any **database**, **schema**, or **table** in the object browser and choose **Backup Sets…** to open the Backup Sets modal:
 
-- **Scoped listing** — backup sets are always fetched for the correct scope:
-  - Database and schema: `SHOW BACKUP SETS IN DATABASE|SCHEMA`
-  - Table: `INFORMATION_SCHEMA.BACKUP_SETS` filtered by object name and schema (Snowflake does not support `SHOW BACKUP SETS IN TABLE`)
+- **Object-scoped listing** — backup sets are filtered by the actual backed-up object, not just storage location: uses `SHOW BACKUP SETS IN DATABASE <db>` and post-filters by `object_kind`, `object_name`, `object_database_name`, and `object_schema_name` so only backup sets that back up the right-clicked object are shown
 - **Create** — configure `CREATE BACKUP SET FOR DATABASE|SCHEMA|TABLE <fqn>`:
   - Backup set name is fully qualified: select the **database** and **schema** from dropdowns (pre-filled from the source object's location; `INFORMATION_SCHEMA` is excluded), then type only the name — the full `"db"."schema"."name"` is assembled and sent to Snowflake
   - Optional backup policy applied immediately after creation
