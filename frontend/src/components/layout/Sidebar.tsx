@@ -37,6 +37,7 @@ import {
   CaretDownFilled,
   CopyOutlined,
   DiffOutlined,
+  SaveOutlined,
 } from "@ant-design/icons";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
@@ -57,6 +58,7 @@ import ERDiagramModal from "../er/ERDiagramModal";
 import ExportTableModal from "../export/ExportTableModal";
 import ImportTableModal from "../export/ImportTableModal";
 import PropertiesModal from "../common/PropertiesModal";
+import BackupSetsModal from "../backup/BackupSetsModal";
 
 const { Text } = Typography;
 
@@ -290,6 +292,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [propsModal, setPropsModal] = useState<{ title: string; rows: main.PropertyPair[] | null; error: string | null; tableContext?: { db: string; schema: string; table: string } } | null>(null);
   const [exportModal, setExportModal] = useState<{ db: string; schema: string; table: string } | null>(null);
   const [importModal, setImportModal] = useState<{ db: string; schema: string; table: string } | null>(null);
+  const [backupSetsModal, setBackupSetsModal] = useState<{ scopeType: "DATABASE" | "SCHEMA" | "TABLE"; db: string; schema: string; table: string } | null>(null);
   const [searchQuery, setSearchQuery]               = useState("");
   // Two separate expansion states so the cascade never touches the user's own
   // tree navigation state. On clear we just wipe searchExpandedKeys.
@@ -820,6 +823,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setImportModal({ db, schema, table });
   };
 
+  const openBackupSets = () => {
+    if (!ctxMenu) return;
+    const { nodeKey, nodeType } = ctxMenu;
+    setCtxMenu(null);
+    if (nodeType === "db") {
+      const db = nodeKey.slice("db:".length);
+      setBackupSetsModal({ scopeType: "DATABASE", db, schema: "", table: "" });
+    } else if (nodeType === "schema") {
+      const [, db, schema] = nodeKey.split(":");
+      setBackupSetsModal({ scopeType: "SCHEMA", db, schema, table: "" });
+    } else {
+      // obj — TABLE
+      const [, db, schema, , ...nameParts] = nodeKey.split(":");
+      const table = nameParts.join(":");
+      setBackupSetsModal({ scopeType: "TABLE", db, schema, table });
+    }
+  };
+
   const insertFullName = () => {
     if (!ctxMenu) return;
     const { nodeKey, nodeType } = ctxMenu;
@@ -1133,10 +1154,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "db" && menuItem("Show Dropped Schemas…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedSchemas)}
           {ctxMenu.nodeType === "db" && menuItem("Export DDL", <CloudUploadOutlined style={{ fontSize: 12 }} />, exportDatabase)}
           {ctxMenu.nodeType === "db" && menuItem("ER Diagram…", <ApartmentOutlined style={{ fontSize: 12 }} />, generateERDiagram)}
+          {ctxMenu.nodeType === "db" && menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets)}
           {ctxMenu.nodeType === "db" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "schema" && menuItem("Insert Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "schema" && menuItem("Create Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)}
           {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
+          {ctxMenu.nodeType === "schema" && menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets)}
           {ctxMenu.nodeType === "schema" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
@@ -1146,6 +1169,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openExportModal)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
             menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openImportModal)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
+            menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PROCEDURE" &&
             menuItem("Call Procedure", <PlayCircleOutlined style={{ fontSize: 12 }} />, callProcedure)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "FUNCTION" &&
@@ -1254,6 +1279,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           db={createTaskModal.db}
           schema={createTaskModal.schema}
           onClose={() => setCreateTaskModal(null)}
+        />
+      )}
+
+      {/* Backup Sets modal */}
+      {backupSetsModal && (
+        <BackupSetsModal
+          scopeType={backupSetsModal.scopeType}
+          db={backupSetsModal.db}
+          schema={backupSetsModal.schema}
+          table={backupSetsModal.table}
+          onClose={() => setBackupSetsModal(null)}
         />
       )}
 

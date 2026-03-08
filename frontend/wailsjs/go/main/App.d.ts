@@ -9,6 +9,12 @@ import {filesystem} from '../models';
 import {sfconfig} from '../models';
 import {ai} from '../models';
 
+export function AddBackup(arg1:string):Promise<void>;
+
+export function AlterBackupPolicy(arg1:string,arg2:string):Promise<void>;
+
+export function AlterBackupSet(arg1:string,arg2:string):Promise<void>;
+
 export function AlterTableProperty(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
 export function CanCreateUsers():Promise<boolean>;
@@ -25,7 +31,17 @@ export function CancelQuery():Promise<void>;
 
 export function Connect(arg1:snowflake.ConnectParams):Promise<void>;
 
+export function CreateBackupPolicy(arg1:string,arg2:string,arg3:number,arg4:boolean,arg5:string,arg6:string,arg7:boolean,arg8:boolean):Promise<void>;
+
+export function CreateBackupSet(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean,arg6:boolean):Promise<void>;
+
 export function Disconnect():Promise<void>;
+
+export function DropBackup(arg1:string,arg2:string):Promise<void>;
+
+export function DropBackupPolicy(arg1:string):Promise<void>;
+
+export function DropBackupSet(arg1:string):Promise<void>;
 
 export function ExecuteQuery(arg1:string):Promise<snowflake.QueryResult>;
 
@@ -91,6 +107,12 @@ export function ListAIModels(arg1:string,arg2:string):Promise<Array<string>>;
 
 export function ListAvailableRoles():Promise<Array<string>>;
 
+export function ListBackupPolicies():Promise<Array<main.BackupPolicyRow>>;
+
+export function ListBackupSets(arg1:string,arg2:string,arg3:string):Promise<Array<main.BackupSetRow>>;
+
+export function ListBackups(arg1:string,arg2:string):Promise<Array<main.BackupRow>>;
+
 export function ListDatabases():Promise<Array<string>>;
 
 export function ListDirectory(arg1:string):Promise<Array<filesystem.FileEntry>>;
@@ -130,6 +152,8 @@ export function PickSaveFile(arg1:string):Promise<string>;
 export function ReadFile(arg1:string):Promise<string>;
 
 export function ResizeShell(arg1:number,arg2:number):Promise<void>;
+
+export function RestoreFromBackup(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
 export function SaveAIConfig(arg1:config.AIConfig):Promise<void>;
 

@@ -257,6 +257,74 @@ export namespace main {
 	        this.errors = source["errors"];
 	    }
 	}
+	export class BackupPolicyRow {
+	    name: string;
+	    createdOn: string;
+	    owner: string;
+	    schedule: string;
+	    expireAfterDays: number;
+	    retentionLock: boolean;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new BackupPolicyRow(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.createdOn = source["createdOn"];
+	        this.owner = source["owner"];
+	        this.schedule = source["schedule"];
+	        this.expireAfterDays = source["expireAfterDays"];
+	        this.retentionLock = source["retentionLock"];
+	        this.comment = source["comment"];
+	    }
+	}
+	export class BackupRow {
+	    id: string;
+	    name: string;
+	    createdOn: string;
+	    status: string;
+	    sizeBytes: number;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new BackupRow(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.createdOn = source["createdOn"];
+	        this.status = source["status"];
+	        this.sizeBytes = source["sizeBytes"];
+	        this.comment = source["comment"];
+	    }
+	}
+	export class BackupSetRow {
+	    name: string;
+	    createdOn: string;
+	    objectType: string;
+	    objectName: string;
+	    status: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new BackupSetRow(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.createdOn = source["createdOn"];
+	        this.objectType = source["objectType"];
+	        this.objectName = source["objectName"];
+	        this.status = source["status"];
+	        this.comment = source["comment"];
+	    }
+	}
 	export class ColumnComment {
 	    column: string;
 	    comment: string;

@@ -39,8 +39,9 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Rename** the object
   - **Drop** the object (with confirmation)
   - **Select for Comparison** / **Compare with** — side-by-side DDL diff (see [Text Comparison](#text-comparison))
-- **Right-click a database** to export its DDL, generate an ER Diagram, or view dropped schemas recoverable via Time Travel
-- **Right-click a schema** to view dropped tables or create a new Snowflake Task
+- **Right-click a database** to export its DDL, generate an ER Diagram, view dropped schemas recoverable via Time Travel, or open **Backup Sets…**
+- **Right-click a schema** to view dropped tables, create a new Snowflake Task, or open **Backup Sets…**
+- **Right-click a table** to open **Backup Sets…** (shows backup sets scoped to its schema)
 - **Drag and drop** — drag any table or view into the editor to insert a `SELECT` statement with all column names listed individually
 - **Hover tooltips** — hovering any object in the tree shows its DDL definition
 - **View Definition** — opens the DDL in a modal with a Copy button
@@ -165,6 +166,30 @@ Click the clock icon in the Administration panel header (always visible, even be
 - Results table shows status (colour-coded), query type, query preview, user, warehouse, database, start time, and duration
 - Expand any row to see the full SQL and any error message
 - **Load in Editor** — inserts the query into the active editor tab and closes the modal
+
+### Backup Policies
+
+- List all backup policies with schedule, expiry, retention lock, owner, and comment
+- **Create** — full `CREATE BACKUP POLICY` support: schedule, expire after days, tags, comment, `WITH RETENTION LOCK`, and `OR REPLACE` / `IF NOT EXISTS` modifiers
+- **Alter** — rename, set/unset schedule, expiry, comment, and retention lock via an action dropdown
+- **Drop** — with confirmation
+
+### Backup Sets
+
+Right-click any **database**, **schema**, or **table** in the object browser and choose **Backup Sets…**:
+
+- Lists all backup sets scoped to the selected database or schema
+- **Create** — `CREATE BACKUP SET FOR DATABASE|SCHEMA|TABLE <fqn>` with optional backup policy applied after creation
+- **Alter** — rename, set/unset comment, apply/suspend/resume backup policy
+- **Drop** — with confirmation
+- **Expand any row** to see its individual backups:
+  - Backup name, status, created date, size, and comment
+  - **Add Backup** — `ALTER BACKUP SET … ADD BACKUP`
+  - **Drop Backup** — `DROP BACKUP` with confirmation
+  - **Restore** — create a new object from a backup snapshot:
+    - Object type auto-detected from the backup set
+    - Requires a new name (Snowflake does not allow restoring over an existing object)
+    - Executes `CREATE <type> <new_name> FROM BACKUP SET "<set>" IDENTIFIER '<uuid>'`
 
 ### User Management
 

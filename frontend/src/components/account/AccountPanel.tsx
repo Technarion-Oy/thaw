@@ -36,6 +36,7 @@ import { useDiffStore } from "../../store/diffStore";
 import UserManagementPanel from "./UserManagementPanel";
 import PropertiesModal from "../common/PropertiesModal";
 import QueryHistoryModal from "./QueryHistoryModal";
+import BackupPoliciesPanel from "../backup/BackupPoliciesPanel";
 import type { main } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -324,6 +325,7 @@ export default function AccountPanel() {
               )}
 
               {loaded && <UserManagementPanel />}
+              {loaded && <BackupPoliciesPanel />}
             </div>
           ),
         }]}

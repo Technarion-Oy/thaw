@@ -951,6 +951,37 @@ type SessionVar struct {
 	Type  string `json:"type"`
 }
 
+// BackupPolicyRow holds one row from SHOW BACKUP POLICIES.
+type BackupPolicyRow struct {
+	Name            string `json:"name"`
+	CreatedOn       string `json:"createdOn"`
+	Owner           string `json:"owner"`
+	Schedule        string `json:"schedule"`
+	ExpireAfterDays int64  `json:"expireAfterDays"`
+	RetentionLock   bool   `json:"retentionLock"`
+	Comment         string `json:"comment"`
+}
+
+// BackupRow holds one row from SHOW BACKUPS IN BACKUP SET.
+type BackupRow struct {
+	ID        string `json:"id"`        // UUID used in IDENTIFIER clause of CREATE ... FROM BACKUP SET
+	Name      string `json:"name"`      // human-readable name / timestamp label
+	CreatedOn string `json:"createdOn"`
+	Status    string `json:"status"`
+	SizeBytes int64  `json:"sizeBytes"`
+	Comment   string `json:"comment"`
+}
+
+// BackupSetRow holds one row from SHOW BACKUP SETS.
+type BackupSetRow struct {
+	Name       string `json:"name"`
+	CreatedOn  string `json:"createdOn"`
+	ObjectType string `json:"objectType"`
+	ObjectName string `json:"objectName"`
+	Status     string `json:"status"`
+	Comment    string `json:"comment"`
+}
+
 // QueryHistoryRow holds one row from INFORMATION_SCHEMA.QUERY_HISTORY*.
 type QueryHistoryRow struct {
 	QueryID       string `json:"queryId"`
@@ -1988,4 +2019,428 @@ ORDER BY START_TIME DESC`, funcName, argClause)
 		})
 	}
 	return rows, nil
+}
+
+// ─── Backup Sets ──────────────────────────────────────────────────────────────
+
+// ListBackupSets runs SHOW BACKUP SETS scoped to a database or schema.
+// scopeType must be "DATABASE" or "SCHEMA".
+func (a *App) ListBackupSets(scopeType, db, schema string) ([]BackupSetRow, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+
+	var query string
+	switch strings.ToUpper(scopeType) {
+	case "DATABASE":
+		query = fmt.Sprintf("SHOW BACKUP SETS IN DATABASE %s", q(db))
+	case "SCHEMA":
+		query = fmt.Sprintf("SHOW BACKUP SETS IN SCHEMA %s.%s", q(db), q(schema))
+	default:
+		return nil, fmt.Errorf("unsupported scope: %s", scopeType)
+	}
+
+	res, err := a.client.Execute(a.ctx, query)
+	if err != nil {
+		return nil, err
+	}
+
+	toString := func(v interface{}) string {
+		if v == nil {
+			return ""
+		}
+		switch t := v.(type) {
+		case []byte:
+			return string(t)
+		case string:
+			return t
+		case time.Time:
+			return t.Format(time.RFC3339)
+		default:
+			return fmt.Sprintf("%v", t)
+		}
+	}
+
+	nameIdx    := colIdx(res.Columns, "name", "backup_set_name")
+	createdIdx := colIdx(res.Columns, "created_on")
+	otypeIdx   := colIdx(res.Columns, "object_type", "type", "for_type", "object_domain", "domain")
+	onameIdx   := colIdx(res.Columns, "object_name", "for_name", "object")
+	statusIdx  := colIdx(res.Columns, "status")
+	commentIdx := colIdx(res.Columns, "comment")
+
+	get := func(row []interface{}, idx int) interface{} {
+		if idx < 0 || idx >= len(row) {
+			return nil
+		}
+		return row[idx]
+	}
+
+	rows := make([]BackupSetRow, 0, len(res.Rows))
+	for _, row := range res.Rows {
+		rows = append(rows, BackupSetRow{
+			Name:       toString(get(row, nameIdx)),
+			CreatedOn:  toString(get(row, createdIdx)),
+			ObjectType: toString(get(row, otypeIdx)),
+			ObjectName: toString(get(row, onameIdx)),
+			Status:     toString(get(row, statusIdx)),
+			Comment:    toString(get(row, commentIdx)),
+		})
+	}
+	return rows, nil
+}
+
+// CreateBackupSet creates a new backup set for a DATABASE, SCHEMA, or TABLE.
+// forType must be "DATABASE", "SCHEMA", or "TABLE".
+// db is the database name used to set the session context before the CREATE.
+// objectFQN is the fully-qualified object name, e.g. "MY_DB" or "MY_DB"."MY_SCHEMA"."MY_TABLE".
+func (a *App) CreateBackupSet(name, forType, objectFQN, db string, orReplace, ifNotExists bool) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+
+	// Snowflake requires a current database to be set for CREATE BACKUP SET,
+	// even when the object name is fully qualified.
+	if db != "" {
+		if _, err := a.client.Execute(a.ctx, fmt.Sprintf("USE DATABASE %s", q(db))); err != nil {
+			return err
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString("CREATE ")
+	if orReplace {
+		sb.WriteString("OR REPLACE ")
+	}
+	sb.WriteString("BACKUP SET ")
+	if ifNotExists && !orReplace {
+		sb.WriteString("IF NOT EXISTS ")
+	}
+	sb.WriteString(q(name))
+	sb.WriteString(" FOR ")
+	sb.WriteString(strings.ToUpper(forType))
+	sb.WriteString(" ")
+	sb.WriteString(objectFQN)
+
+	_, err := a.client.Execute(a.ctx, sb.String())
+	return err
+}
+
+// DropBackupSet drops the named backup set.
+func (a *App) DropBackupSet(name string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	_, err := a.client.Execute(a.ctx, fmt.Sprintf("DROP BACKUP SET %s", q(name)))
+	return err
+}
+
+// AlterBackupSet executes ALTER BACKUP SET <name> <alteration>.
+// alteration is the full action fragment, e.g. "RENAME TO new_name",
+// "SET COMMENT = 'text'", "UNSET COMMENT", "SUSPEND BACKUP POLICY", etc.
+func (a *App) AlterBackupSet(name, alteration string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	_, err := a.client.Execute(a.ctx, fmt.Sprintf("ALTER BACKUP SET %s %s", q(name), alteration))
+	return err
+}
+
+// ─── Backup Policies ──────────────────────────────────────────────────────────
+
+// ListBackupPolicies runs SHOW BACKUP POLICIES and returns all visible policies.
+func (a *App) ListBackupPolicies() ([]BackupPolicyRow, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	res, err := a.client.Execute(a.ctx, "SHOW BACKUP POLICIES")
+	if err != nil {
+		return nil, err
+	}
+
+	toString := func(v interface{}) string {
+		if v == nil {
+			return ""
+		}
+		switch t := v.(type) {
+		case []byte:
+			return string(t)
+		case string:
+			return t
+		case time.Time:
+			return t.Format(time.RFC3339)
+		default:
+			return fmt.Sprintf("%v", t)
+		}
+	}
+
+	toBool := func(v interface{}) bool {
+		s := strings.ToUpper(toString(v))
+		return s == "TRUE" || s == "YES" || s == "1"
+	}
+
+	nameIdx    := colIdx(res.Columns, "name")
+	createdIdx := colIdx(res.Columns, "created_on")
+	ownerIdx   := colIdx(res.Columns, "owner")
+	schedIdx   := colIdx(res.Columns, "schedule")
+	expireIdx  := colIdx(res.Columns, "expire_after_days")
+	lockIdx    := colIdx(res.Columns, "retention_lock", "with_retention_lock")
+	commentIdx := colIdx(res.Columns, "comment")
+
+	get := func(row []interface{}, idx int) interface{} {
+		if idx < 0 || idx >= len(row) {
+			return nil
+		}
+		return row[idx]
+	}
+
+	toInt64 := func(v interface{}) int64 {
+		s := toString(v)
+		if s == "" {
+			return 0
+		}
+		if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+			return i
+		}
+		return 0
+	}
+
+	rows := make([]BackupPolicyRow, 0, len(res.Rows))
+	for _, row := range res.Rows {
+		rows = append(rows, BackupPolicyRow{
+			Name:            toString(get(row, nameIdx)),
+			CreatedOn:       toString(get(row, createdIdx)),
+			Owner:           toString(get(row, ownerIdx)),
+			Schedule:        toString(get(row, schedIdx)),
+			ExpireAfterDays: toInt64(get(row, expireIdx)),
+			RetentionLock:   toBool(get(row, lockIdx)),
+			Comment:         toString(get(row, commentIdx)),
+		})
+	}
+	return rows, nil
+}
+
+// CreateBackupPolicy creates a new backup policy.
+// schedule: optional, e.g. "60 MINUTE", "6 HOUR", "USING CRON 0 2 * * * UTC"
+// expireAfterDays: 0 means not set
+// tags: optional raw tag expression e.g. `"MY_TAG" = 'value'`
+func (a *App) CreateBackupPolicy(name, schedule string, expireAfterDays int64, retentionLock bool, comment, tags string, orReplace, ifNotExists bool) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
+
+	var sb strings.Builder
+	sb.WriteString("CREATE ")
+	if orReplace {
+		sb.WriteString("OR REPLACE ")
+	}
+	sb.WriteString("BACKUP POLICY ")
+	if ifNotExists && !orReplace {
+		sb.WriteString("IF NOT EXISTS ")
+	}
+	sb.WriteString(q(name))
+	if tags != "" {
+		sb.WriteString(fmt.Sprintf(" WITH TAG (%s)", tags))
+	}
+	if retentionLock {
+		sb.WriteString(" WITH RETENTION LOCK")
+	}
+	if schedule != "" {
+		sb.WriteString(fmt.Sprintf(" SCHEDULE = '%s'", esc(schedule)))
+	}
+	if expireAfterDays > 0 {
+		sb.WriteString(fmt.Sprintf(" EXPIRE_AFTER_DAYS = %d", expireAfterDays))
+	}
+	if comment != "" {
+		sb.WriteString(fmt.Sprintf(" COMMENT = '%s'", esc(comment)))
+	}
+
+	_, err := a.client.Execute(a.ctx, sb.String())
+	return err
+}
+
+// DropBackupPolicy drops the named backup policy.
+func (a *App) DropBackupPolicy(name string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	_, err := a.client.Execute(a.ctx, fmt.Sprintf("DROP BACKUP POLICY %s", q(name)))
+	return err
+}
+
+// AlterBackupPolicy executes ALTER BACKUP POLICY <name> <alteration>.
+// alteration is the full action fragment, e.g. "RENAME TO new_name",
+// "SET SCHEDULE = '60 MINUTE'", "SET COMMENT = 'text'", "UNSET COMMENT", etc.
+func (a *App) AlterBackupPolicy(name, alteration string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	_, err := a.client.Execute(a.ctx, fmt.Sprintf("ALTER BACKUP POLICY %s %s", q(name), alteration))
+	return err
+}
+
+// ─── Backups (snapshots inside a backup set) ──────────────────────────────────
+
+// ListBackups runs SHOW BACKUPS IN BACKUP SET <name> and returns the result.
+// db must be non-empty; it is used to set a current database context first.
+func (a *App) ListBackups(backupSetName string, db string) ([]BackupRow, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+
+	if db != "" {
+		if _, err := a.client.Execute(a.ctx, fmt.Sprintf("USE DATABASE %s", q(db))); err != nil {
+			return nil, err
+		}
+	}
+
+	res, err := a.client.Execute(a.ctx, fmt.Sprintf("SHOW BACKUPS IN BACKUP SET %s", q(backupSetName)))
+	if err != nil {
+		return nil, err
+	}
+
+	toString := func(v interface{}) string {
+		if v == nil {
+			return ""
+		}
+		switch t := v.(type) {
+		case []byte:
+			return string(t)
+		case string:
+			return t
+		case time.Time:
+			return t.Format(time.RFC3339)
+		default:
+			return fmt.Sprintf("%v", t)
+		}
+	}
+
+	toInt64 := func(v interface{}) int64 {
+		s := toString(v)
+		if s == "" {
+			return 0
+		}
+		if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+			return i
+		}
+		if f, err := strconv.ParseFloat(s, 64); err == nil {
+			return int64(f)
+		}
+		return 0
+	}
+
+	idIdx      := colIdx(res.Columns, "backup_id", "id", "identifier", "uuid")
+	nameIdx    := colIdx(res.Columns, "name", "backup_name", "backup")
+	createdIdx := colIdx(res.Columns, "created_on")
+	statusIdx  := colIdx(res.Columns, "status")
+	sizeIdx    := colIdx(res.Columns, "size_bytes", "size")
+	commentIdx := colIdx(res.Columns, "comment")
+
+	get := func(row []interface{}, idx int) interface{} {
+		if idx < 0 || idx >= len(row) {
+			return nil
+		}
+		return row[idx]
+	}
+
+	rows := make([]BackupRow, 0, len(res.Rows))
+	for _, row := range res.Rows {
+		idVal   := toString(get(row, idIdx))
+		nameVal := toString(get(row, nameIdx))
+		// If we couldn't find a dedicated ID column, try to use the name column as the ID
+		// (some Snowflake versions store the UUID in "name"). If neither resolved, leave both
+		// blank rather than falling back to a timestamp column.
+		rows = append(rows, BackupRow{
+			ID:        idVal,
+			Name:      nameVal,
+			CreatedOn: toString(get(row, createdIdx)),
+			Status:    toString(get(row, statusIdx)),
+			SizeBytes: toInt64(get(row, sizeIdx)),
+			Comment:   toString(get(row, commentIdx)),
+		})
+	}
+	return rows, nil
+}
+
+// AddBackup triggers ALTER BACKUP SET <name> ADD BACKUP to create a new backup snapshot.
+func (a *App) AddBackup(backupSetName string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	_, err := a.client.Execute(a.ctx, fmt.Sprintf("ALTER BACKUP SET %s ADD BACKUP", q(backupSetName)))
+	return err
+}
+
+// RestoreFromBackup executes RESTORE [OR REPLACE] <objectType> <targetName> FROM BACKUP <backupName>.
+// db must be non-empty; it is used to set a current database context first.
+// targetName is the fully-qualified target object name (may differ from the original to restore into a new object).
+// RestoreFromBackup executes:
+//
+//	CREATE <objectType> <targetName>
+//	  FROM BACKUP SET <backupSetName>
+//	  IDENTIFIER '<backupID>'
+//
+// Snowflake does not support OR REPLACE for this form — the target must be a new name.
+// db must be non-empty; it is used to set a current database context first.
+// targetName is used as-is (caller provides the identifier, quoted or unquoted).
+// backupID is the UUID returned by SHOW BACKUPS (stored as a single-quoted string literal).
+func (a *App) RestoreFromBackup(objectType, targetName, backupSetName, backupID, db string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	objType := strings.ToUpper(strings.TrimSpace(objectType))
+	if objType == "" {
+		return fmt.Errorf("object type must be DATABASE, SCHEMA, or TABLE")
+	}
+	if targetName == "" {
+		return fmt.Errorf("target name must not be empty")
+	}
+	if backupSetName == "" {
+		return fmt.Errorf("backup set name must not be empty")
+	}
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	if db != "" {
+		if _, err := a.client.Execute(a.ctx, fmt.Sprintf("USE DATABASE %s", q(db))); err != nil {
+			return err
+		}
+	}
+	var sb strings.Builder
+	sb.WriteString("CREATE ")
+	sb.WriteString(objType)
+	sb.WriteString(" ")
+	sb.WriteString(targetName)
+	sb.WriteString(" FROM BACKUP SET ")
+	sb.WriteString(q(backupSetName))
+	sb.WriteString(" IDENTIFIER '")
+	sb.WriteString(strings.ReplaceAll(backupID, "'", "''"))
+	sb.WriteString("'")
+	// Must use QuerySingle (plain db.QueryContext) — multi-statement mode breaks
+	// the FROM BACKUP SET ... IDENTIFIER syntax just like TABLE() function calls.
+	_, err := a.client.QuerySingle(a.ctx, sb.String())
+	return err
+}
+
+// DropBackup drops a specific backup snapshot.
+// db must be non-empty; it is used to set a current database context first.
+func (a *App) DropBackup(backupName string, db string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	if db != "" {
+		if _, err := a.client.Execute(a.ctx, fmt.Sprintf("USE DATABASE %s", q(db))); err != nil {
+			return err
+		}
+	}
+	_, err := a.client.Execute(a.ctx, fmt.Sprintf("DROP BACKUP %s", q(backupName)))
+	return err
 }

@@ -60,9 +60,9 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - Browse databases → schemas → objects (tables, views, functions, procedures, …)
 - **Filter objects** — type in the search box at the top of the sidebar to filter objects by name across all databases and schemas; the tree cascade-loads all schemas and objects automatically and collapses back to the database list when the search is cleared
 - **Refresh** button (`↺`) in the sidebar header reloads the entire database tree from Snowflake
-- Right-click a **database** to refresh, export its DDL, **insert its name** at the editor cursor, generate an **ER Diagram**, or **Show Dropped Schemas…** — lists schemas recoverable via Time Travel with an **Undrop** button for each
+- Right-click a **database** to refresh, export its DDL, **insert its name** at the editor cursor, generate an **ER Diagram**, **Show Dropped Schemas…**, or open **Backup Sets…** — lists schemas recoverable via Time Travel with an **Undrop** button for each
 - **Dropped Databases** button (`⏪`) in the sidebar header lists databases within their Time Travel retention window; click **Undrop** to restore any of them
-- Right-click a **schema** to browse dropped tables recoverable via Snowflake Time Travel, **insert its fully-qualified name** at the editor cursor, or **Create Task…** — opens a dialog to configure and generate a `CREATE OR REPLACE TASK` statement with:
+- Right-click a **schema** to browse dropped tables recoverable via Snowflake Time Travel, **insert its fully-qualified name** at the editor cursor, **Create Task…**, or open **Backup Sets…** — opens a dialog to configure and generate a `CREATE OR REPLACE TASK` statement with:
   - Compute: warehouse (searchable dropdown) or serverless with initial warehouse size
   - Schedule: none, fixed interval (seconds/minutes/hours), or cron expression with timezone
   - Dependencies: predecessor tasks (AFTER), boolean condition (WHEN)
@@ -141,6 +141,36 @@ Click the clock icon (⏱) in the Administration panel header to open the **Quer
 - **Drag a user** from the list into the editor to insert a `CREATE USER` DDL statement built from `DESCRIBE USER`
 - The panel hides itself entirely if the current role cannot access `SHOW USERS`
 - All content and privilege buttons **auto-refresh** when the active role is switched — no manual reload needed
+
+#### Backup Policies
+
+A **Backup Policies** section in the Administration panel lets you manage account-level backup policies:
+
+- List all backup policies with schedule, expiry, retention lock status, owner, and comment
+- **Create** — configure `CREATE BACKUP POLICY` with:
+  - Schedule (e.g. `60 MINUTE`, `USING CRON 0 2 * * * UTC`)
+  - Expire after days
+  - Optional tags, comment, and `WITH RETENTION LOCK`
+  - `OR REPLACE` / `IF NOT EXISTS` modifiers
+- **Alter** — rename, set/unset schedule, expiry, comment, and retention lock via a dropdown action picker
+- **Drop** — with a Popconfirm confirmation
+
+#### Backup Sets
+
+Right-click any **database**, **schema**, or **table** in the object browser and choose **Backup Sets…** to open the Backup Sets modal:
+
+- Lists all backup sets in the selected database or schema scope
+- **Create** — configure `CREATE BACKUP SET FOR DATABASE|SCHEMA|TABLE <fqn>` with an optional backup policy applied immediately after creation
+- **Alter** — rename, set/unset comment, apply/suspend/resume backup policy
+- **Drop** — with confirmation
+- **Expand** any backup set row to see its individual backups (`SHOW BACKUPS IN BACKUP SET`):
+  - Columns: backup name, status (colour-coded tag), created date, size, comment
+  - **Add Backup** — triggers `ALTER BACKUP SET … ADD BACKUP` and refreshes the list immediately
+  - **Drop Backup** — `DROP BACKUP` with a Popconfirm confirmation
+  - **Restore** — opens a dialog to restore from the selected backup:
+    - Auto-detects the object type (DATABASE / SCHEMA / TABLE)
+    - Requires a new target name (Snowflake does not support restoring over an existing object)
+    - Executes `CREATE <type> <new_name> FROM BACKUP SET "<set>" IDENTIFIER '<uuid>'`
 
 #### Role switching and session state
 
@@ -360,11 +390,14 @@ thaw/
     │       │   ├── ERDesigner.tsx      # Visual ER schema designer (create new tables)
     │       │   └── buildMermaid.ts    # Mermaid source generator for the diagram viewer
     │       ├── account/
-    │       │   ├── AccountPanel.tsx        # Administration panel: roles, warehouses, user management
+    │       │   ├── AccountPanel.tsx        # Administration panel: roles, warehouses, user management, backup policies
     │       │   ├── QueryHistoryModal.tsx   # Query Activity modal (INFORMATION_SCHEMA.QUERY_HISTORY_*)
     │       │   ├── UserManagementPanel.tsx # User list, search, right-click menu
     │       │   ├── EditUserModal.tsx       # ALTER USER dialog with live SQL preview
-    │       │   └── CreateUserModal.tsx     # CREATE USER dialog with live SQL preview
+    │       │   ├── CreateUserModal.tsx     # CREATE USER dialog with live SQL preview
+    │       │   └── BackupPoliciesPanel.tsx # Backup policies list with create/alter/drop
+    │       ├── backup/
+    │       │   └── BackupSetsModal.tsx     # Backup sets + nested backups with add/drop/restore
     │       ├── chat/AiChat.tsx        # AI Chat panel with tool-call display and Run/Copy buttons
     │       ├── procedure/CallProcedureModal.tsx
     │       ├── results/ResultGrid.tsx
