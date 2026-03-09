@@ -26,7 +26,10 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - Query SQL, results, tab state, and the active connection (account · user tag) survive Vite / WebView page reloads (persisted to `sessionStorage`; credentials are never stored); the connection state is verified against the backend on every reload so a backend restart shows ConnectModal immediately rather than a broken UI; the UI waits for the persisted state to hydrate before rendering, eliminating the brief ConnectModal flash that occurred on HMR reloads
 - **Selection highlight** — selecting any text highlights every other occurrence in the document with a blue background; overview-ruler markers make occurrences visible in long files
 - Word-under-cursor highlight when nothing is selected
-- **Hover definition** — hovering over a table or view name shows its DDL in a Monaco tooltip; entries are cached and automatically refreshed after 60 seconds so stale definitions are never shown indefinitely
+- **Hover definition** — hovering over a table or view name shows its DDL in a custom scrollable overlay tooltip; the tooltip stays open when the cursor moves into it; entries are cached and automatically refreshed after 60 seconds so stale definitions are never shown indefinitely:
+  - **Copy button** — copies the full DDL to the clipboard
+  - **Text selection** — paint to select any portion of the DDL, then copy with `⌘C` / `Ctrl+C`
+  - **Right-click → Copy** — right-clicking inside the tooltip opens a context menu; choosing Copy copies the selected text to the clipboard
 - **SQL autocomplete** — context-aware completions triggered by `.` or `Ctrl+Space`:
   - After `db.` → schemas of that database
   - After `db.schema.` → objects (tables, views, functions, …) in that schema

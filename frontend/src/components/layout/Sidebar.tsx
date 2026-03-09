@@ -255,7 +255,7 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
   return (
     <Tooltip
       title={loading || content ? overlay : null}
-      placement="left"
+      placement="right"
       mouseEnterDelay={0.6}
       mouseLeaveDelay={0.1}
       onOpenChange={onOpenChange}

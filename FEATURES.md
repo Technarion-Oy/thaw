@@ -12,7 +12,11 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 - **Cancel queries** — cancel a running query at any time; Thaw issues `SYSTEM$CANCEL_QUERY` so it also stops consuming Snowflake credits
 - **Query ID** — the Snowflake Query ID is shown while running and after completion; click to copy
 - **Selection highlight** — selecting text highlights every other occurrence in the document; overview-ruler markers show occurrences in long files
-- **Hover definitions** — hover over any table or view name to see its DDL in a tooltip; definitions are cached per session
+- **Hover definitions** — hover over any table or view name to see its DDL in a scrollable overlay tooltip; the tooltip stays open when the cursor moves into it:
+  - **Copy button** — copies the full DDL to the clipboard
+  - **Text selection** — paint any portion of the DDL and copy with `⌘C` / `Ctrl+C`
+  - **Right-click → Copy** — right-click inside the tooltip to copy the selected text via a context menu
+  - Definitions are cached per session and refreshed automatically after 60 seconds
 - **SQL autocomplete** — context-aware completions:
   - `db.` → schemas in that database
   - `db.schema.` → tables, views, functions, and other objects in that schema

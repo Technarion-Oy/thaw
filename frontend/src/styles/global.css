@@ -107,6 +107,16 @@ body,
   user-select: text !important;
 }
 
+/* DDL hover tooltip — re-enable text selection (same reasoning as .ai-chat-selectable). */
+.ddl-tooltip {
+  --wails-draggable: no-drag;
+}
+.ddl-tooltip,
+.ddl-tooltip * {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+
 /* Monaco editor — custom selection occurrence highlights.
    Applied to every match of the selected text that is not the selection itself. */
 .sql-occurrence-highlight {

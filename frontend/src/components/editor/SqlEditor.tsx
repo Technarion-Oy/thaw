@@ -8,6 +8,8 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
+import { useState, useRef, useCallback, useEffect } from "react";
+import { Button } from "antd";
 import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
 import { ensureMonacoSetup } from "./monacoSetup";
 import { setEditorInstance } from "./editorRef";
@@ -85,11 +87,80 @@ function monacoKind(monaco: any, kind: string): number {
   }
 }
 
+interface DdlHover {
+  ddl: string; kind: string; db: string; schema: string; name: string;
+  x: number; y: number;
+}
+
 export default function SqlEditor() {
   const { sql, setSql, setSelectedSql } = useQueryStore();
   const resolved       = useThemeStore((s) => s.resolved);
   const editorFont     = useThemeStore((s) => s.editorFont);
   const editorFontSize = useThemeStore((s) => s.editorFontSize);
+
+  const [ddlHover, setDdlHover] = useState<DdlHover | null>(null);
+  const [tooltipCtxMenu, setTooltipCtxMenu] = useState<{ x: number; y: number; sel: string } | null>(null);
+  const hoverTimerRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // True while the cursor is physically inside the tooltip overlay.
+  const isOnTooltipRef    = useRef(false);
+  // True while a mouse button is held down (e.g. text selection drag).
+  const isMouseDownRef    = useRef(false);
+  // True while the right-click context menu is open (prevents tooltip hiding).
+  const isCtxMenuOpenRef  = useRef(false);
+  // Last text selection made inside the tooltip (saved on mouseup so right-click
+  // can't clear it before onContextMenu fires).
+  const savedSelRef       = useRef("");
+
+  const scheduleHide = useCallback(() => {
+    if (hoverHideTimerRef.current) clearTimeout(hoverHideTimerRef.current);
+    hoverHideTimerRef.current = setTimeout(() => setDdlHover(null), 400);
+  }, []);
+  const cancelHide = useCallback(() => {
+    if (hoverHideTimerRef.current) clearTimeout(hoverHideTimerRef.current);
+  }, []);
+
+  // Hide tooltip on mouseup if cursor has left the overlay (handles text-selection drags
+  // that temporarily move the cursor outside the tooltip bounds).
+  useEffect(() => {
+    const handleMouseUp = () => {
+      isMouseDownRef.current = false;
+      if (!isOnTooltipRef.current && !isCtxMenuOpenRef.current) setDdlHover(null);
+    };
+    document.addEventListener("mouseup", handleMouseUp);
+    return () => document.removeEventListener("mouseup", handleMouseUp);
+  }, []);
+
+  // While the tooltip is open, intercept Cmd+C / Ctrl+C at capture phase so it
+  // fires before Monaco's global key handler. Copies the current text selection
+  // (if any) via the Wails clipboard API which works reliably in WKWebView.
+  useEffect(() => {
+    if (!ddlHover) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "c") {
+        const sel = window.getSelection()?.toString();
+        if (sel) {
+          e.stopPropagation();
+          ClipboardSetText(sel);
+        }
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => document.removeEventListener("keydown", handleKeyDown, true);
+  }, [ddlHover]);
+
+  // Dismiss the right-click context menu on the next left-click anywhere.
+  // Using a document click listener avoids needing a backdrop div, which would
+  // cause mouseleave to fire on the tooltip and hide it.
+  useEffect(() => {
+    if (!tooltipCtxMenu) return;
+    const dismiss = () => {
+      setTooltipCtxMenu(null);
+      setTimeout(() => { isCtxMenuOpenRef.current = false; }, 50);
+    };
+    document.addEventListener("click", dismiss);
+    return () => document.removeEventListener("click", dismiss);
+  }, [tooltipCtxMenu]);
 
   // Register the custom Snowflake SQL tokenizer and themes exactly once,
   // before the editor instance is created.
@@ -400,22 +471,28 @@ export default function SqlEditor() {
       },
     });
 
-    // ── Object definition hover ───────────────────────────────────────────
-    // Dispose any previous registration to avoid stacking on remount.
+    // ── Object definition hover (custom React overlay) ───────────────────
+    // Dispose any previously registered Monaco hover provider from a prior mount.
     if (hoverProviderDisposable) {
       hoverProviderDisposable.dispose();
+      hoverProviderDisposable = null;
     }
-    hoverProviderDisposable = monaco.languages.registerHoverProvider("sql", {
-      provideHover: async (model: any, position: any) => {
-        const word = model.getWordAtPosition(position);
-        if (!word) return null;
 
+    editor.onMouseMove((e: any) => {
+      const pos = e.target?.position;
+      const word = pos ? editor.getModel()?.getWordAtPosition(pos) : null;
+      if (!word) { if (!isOnTooltipRef.current) scheduleHide(); return; }
+
+      cancelHide();
+      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+
+      hoverTimerRef.current = setTimeout(async () => {
         const { objects } = useObjectStore.getState();
         const match = objects.find(
           (o) => o.name.toUpperCase() === word.word.toUpperCase() &&
                  (o.kind === "TABLE" || o.kind === "VIEW"),
         );
-        if (!match) return null;
+        if (!match) { setDdlHover(null); return; }
 
         const cacheKey = `${match.db}\0${match.schema}\0${match.kind}\0${match.name}`;
         let ddl: string;
@@ -427,24 +504,31 @@ export default function SqlEditor() {
             ddl = await GetObjectDDL(match.db, match.schema, match.kind, match.name, "");
             hoverDDLCache.set(cacheKey, { ddl, ts: Date.now() });
           } catch {
-            return null;
+            return;
           }
         }
-        if (!ddl) return null;
+        if (!ddl) return;
 
-        return {
-          range: {
-            startLineNumber: position.lineNumber,
-            endLineNumber:   position.lineNumber,
-            startColumn:     word.startColumn,
-            endColumn:       word.endColumn,
-          },
-          contents: [
-            { value: `**${match.kind}** — \`${match.db}.${match.schema}.${match.name}\`` },
-            { value: "```sql\n" + ddl + "\n```" },
-          ],
-        };
-      },
+        const editorDom = editor.getDomNode();
+        const editorRect = editorDom?.getBoundingClientRect();
+        const scrolledPos = editor.getScrolledVisiblePosition(pos);
+        if (!scrolledPos || !editorRect) return;
+
+        const lineH   = scrolledPos.height ?? 20;
+        const rawX    = editorRect.left + scrolledPos.left;
+        const belowY  = editorRect.top + scrolledPos.top + lineH + 4;
+        const aboveY  = editorRect.top + scrolledPos.top - 4;
+        const fitsBelow = belowY + 320 <= window.innerHeight;
+        const x = Math.min(rawX, window.innerWidth - 570);
+        const y = fitsBelow ? belowY : Math.max(0, aboveY - 320);
+
+        setDdlHover({ ddl, kind: match.kind, db: match.db, schema: match.schema, name: match.name, x, y });
+      }, 500);
+    });
+
+    editor.onMouseLeave(() => {
+      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+      if (!isOnTooltipRef.current) scheduleHide();
     });
 
     // ── AI inline completions ─────────────────────────────────────────────
@@ -637,6 +721,7 @@ export default function SqlEditor() {
   };
 
   return (
+  <>
     <Editor
       height="100%"
       defaultLanguage="sql"
@@ -661,7 +746,106 @@ export default function SqlEditor() {
         selectionHighlight: false,
         // Keep Monaco's word-under-cursor highlight for single clicks.
         occurrencesHighlight: "singleFile",
+        // Disable Monaco's built-in hover widget; we render our own overlay
+        // so we can support scrolling and a copy button.
+        hover: { enabled: false },
       }}
     />
+    {ddlHover && (
+      <div
+        className="ddl-tooltip"
+        tabIndex={0}
+        onMouseEnter={() => { isOnTooltipRef.current = true; cancelHide(); }}
+        onMouseDown={() => { isMouseDownRef.current = true; }}
+        onMouseUp={() => {
+          // Save selection now, before a right-click can clear window.getSelection().
+          const sel = window.getSelection()?.toString() ?? "";
+          if (sel) savedSelRef.current = sel;
+        }}
+        onMouseLeave={() => {
+          isOnTooltipRef.current = false;
+          // Don't hide while selecting text or context menu is open.
+          if (!isMouseDownRef.current && !isCtxMenuOpenRef.current) setDdlHover(null);
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          isCtxMenuOpenRef.current = true;
+          setTooltipCtxMenu({ x: e.clientX, y: e.clientY, sel: savedSelRef.current });
+        }}
+        style={{
+          position: "fixed",
+          left: ddlHover.x,
+          top: ddlHover.y,
+          zIndex: 9999,
+          background: "var(--bg-overlay)",
+          border: "1px solid var(--border)",
+          borderRadius: 6,
+          maxWidth: 560,
+          maxHeight: 320,
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          boxShadow: "0 4px 16px rgba(0,0,0,0.45)",
+          fontSize: 12,
+        }}
+      >
+        <div style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          padding: "5px 10px", borderBottom: "1px solid var(--border)", flexShrink: 0, gap: 8,
+        }}>
+          <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
+            {ddlHover.kind} — {ddlHover.db}.{ddlHover.schema}.{ddlHover.name}
+          </span>
+          <Button size="small" onClick={() => ClipboardSetText(ddlHover.ddl)}>Copy</Button>
+        </div>
+        <pre style={{
+          margin: 0, padding: "8px 10px", fontSize: 12, overflow: "auto",
+          flex: 1, minWidth: 0, fontFamily: "monospace", whiteSpace: "pre", userSelect: "text",
+          color: "var(--text-primary)",
+        }}>
+          {ddlHover.ddl}
+        </pre>
+      </div>
+    )}
+    {tooltipCtxMenu && (
+      <>
+        <div
+          style={{
+            position: "fixed",
+            left: tooltipCtxMenu.x,
+            top: tooltipCtxMenu.y,
+            zIndex: 10001,
+            background: "var(--bg-overlay)",
+            border: "1px solid var(--border)",
+            borderRadius: 4,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
+            minWidth: 120,
+            padding: "2px 0",
+            fontSize: 12,
+          }}
+        >
+          <div
+            style={{
+              padding: "5px 14px", cursor: "pointer",
+              color: tooltipCtxMenu.sel ? "var(--text-primary)" : "var(--text-faint)",
+            }}
+            onMouseEnter={(e) => { if (tooltipCtxMenu.sel) (e.currentTarget as HTMLElement).style.background = "var(--bg-raised)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ""; }}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (tooltipCtxMenu.sel) ClipboardSetText(tooltipCtxMenu.sel);
+              savedSelRef.current = "";
+              setTooltipCtxMenu(null);
+              // Defer so the mouseleave fired when the menu div disappears is
+              // still guarded by isCtxMenuOpenRef before we clear it.
+              setTimeout(() => { isCtxMenuOpenRef.current = false; }, 50);
+            }}
+          >
+            Copy{tooltipCtxMenu.sel ? "" : " (no selection)"}
+          </div>
+        </div>
+      </>
+    )}
+  </>
   );
 }
