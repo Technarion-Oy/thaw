@@ -9,6 +9,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 - **Monaco-based editor** with full SQL syntax highlighting and rich keyboard shortcuts
 - **Multi-tab editing** — open multiple files simultaneously; each tab remembers its SQL, results, and scroll position
 - **Run selected text** — highlight any portion of a query and run only that part (`⌘ Enter` / `Ctrl+Enter`)
+- **Multi-statement scripts** — separate statements with `;`; all statements execute sequentially on a dedicated Snowflake session so `LAST_QUERY_ID(-1)` and `RESULT_SCAN` work correctly across statements, matching Snowsight behaviour
 - **Cancel queries** — cancel a running query at any time; Thaw issues `SYSTEM$CANCEL_QUERY` so it also stops consuming Snowflake credits
 - **Query ID** — the Snowflake Query ID is shown while running and after completion; click to copy
 - **Selection highlight** — selecting text highlights every other occurrence in the document; overview-ruler markers show occurrences in long files
