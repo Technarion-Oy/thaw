@@ -19,6 +19,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - Monaco editor with full SQL syntax highlighting
 - Multi-tab editing — each open file gets its own tab; tabs restore their SQL, results and error state when switched back to
 - **Tab reordering** — drag any tab left or right to rearrange the tab strip; a vertical accent line shows the drop position
+- **Split view** — right-click any tab and choose **Split with: [tab name]** to view two editors side by side; a draggable vertical divider separates them and the ratio is persisted across sessions; each editor is fully independent with its own completions, hover definitions, and editing history; close the split with the × button in the secondary editor header, via **Close split view** in the right-click menu, or by closing either of the two tabs
 - Unsaved changes shown with a `•` prefix in the tab title
 - Run the full query or just the selected text (`⌘ Enter` / `Ctrl Enter`)
 - **Cancel query** — while a query is running the Run button becomes a **Cancel** button; pressing it (or `Esc`) cancels client-side polling *and* issues `SYSTEM$CANCEL_QUERY` so the query stops consuming credits in Snowflake

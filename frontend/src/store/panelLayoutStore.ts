@@ -14,11 +14,12 @@ import { persist } from "zustand/middleware";
 export type PanelId   = "export" | "files" | "git" | "objects" | "account";
 export type SidebarId = "left" | "right";
 
-const DEFAULT_LEFT:  PanelId[] = ["export", "files", "git"];
-const DEFAULT_RIGHT: PanelId[] = ["objects", "account"];
-const DEFAULT_EDITOR_SPLIT     = 0.4;
-const DEFAULT_LEFT_WIDTH       = 220;
-const DEFAULT_RIGHT_WIDTH      = 260;
+const DEFAULT_LEFT:              PanelId[] = ["export", "files", "git"];
+const DEFAULT_RIGHT:             PanelId[] = ["objects", "account"];
+const DEFAULT_EDITOR_SPLIT                 = 0.4;
+const DEFAULT_LEFT_WIDTH                   = 220;
+const DEFAULT_RIGHT_WIDTH                  = 260;
+const DEFAULT_SPLIT_EDITOR_WIDTH           = 0.5;
 
 interface PanelLayoutState {
   left:          PanelId[];
@@ -27,21 +28,24 @@ interface PanelLayoutState {
   leftWidth:     number;
   rightWidth:    number;
 
-  movePanel:      (panelId: PanelId, targetId: PanelId | null, targetSidebar: SidebarId, insertBefore: boolean) => void;
-  setEditorSplit: (v: number) => void;
-  setLeftWidth:   (v: number) => void;
-  setRightWidth:  (v: number) => void;
-  reset:          () => void;
+  splitEditorWidth:    number;
+  movePanel:           (panelId: PanelId, targetId: PanelId | null, targetSidebar: SidebarId, insertBefore: boolean) => void;
+  setEditorSplit:      (v: number) => void;
+  setLeftWidth:        (v: number) => void;
+  setRightWidth:       (v: number) => void;
+  setSplitEditorWidth: (v: number) => void;
+  reset:               () => void;
 }
 
 export const usePanelLayoutStore = create<PanelLayoutState>()(
   persist(
     (set) => ({
-      left:        DEFAULT_LEFT,
-      right:       DEFAULT_RIGHT,
-      editorSplit: DEFAULT_EDITOR_SPLIT,
-      leftWidth:   DEFAULT_LEFT_WIDTH,
-      rightWidth:  DEFAULT_RIGHT_WIDTH,
+      left:             DEFAULT_LEFT,
+      right:            DEFAULT_RIGHT,
+      editorSplit:      DEFAULT_EDITOR_SPLIT,
+      leftWidth:        DEFAULT_LEFT_WIDTH,
+      rightWidth:       DEFAULT_RIGHT_WIDTH,
+      splitEditorWidth: DEFAULT_SPLIT_EDITOR_WIDTH,
 
       movePanel: (panelId, targetId, targetSidebar, insertBefore) =>
         set((state) => {
@@ -62,16 +66,18 @@ export const usePanelLayoutStore = create<PanelLayoutState>()(
           };
         }),
 
-      setEditorSplit: (editorSplit) => set({ editorSplit }),
-      setLeftWidth:   (leftWidth)   => set({ leftWidth }),
-      setRightWidth:  (rightWidth)  => set({ rightWidth }),
+      setEditorSplit:      (editorSplit)      => set({ editorSplit }),
+      setLeftWidth:        (leftWidth)        => set({ leftWidth }),
+      setRightWidth:       (rightWidth)       => set({ rightWidth }),
+      setSplitEditorWidth: (splitEditorWidth) => set({ splitEditorWidth }),
 
       reset: () => set({
-        left:        DEFAULT_LEFT,
-        right:       DEFAULT_RIGHT,
-        editorSplit: DEFAULT_EDITOR_SPLIT,
-        leftWidth:   DEFAULT_LEFT_WIDTH,
-        rightWidth:  DEFAULT_RIGHT_WIDTH,
+        left:             DEFAULT_LEFT,
+        right:            DEFAULT_RIGHT,
+        editorSplit:      DEFAULT_EDITOR_SPLIT,
+        leftWidth:        DEFAULT_LEFT_WIDTH,
+        rightWidth:       DEFAULT_RIGHT_WIDTH,
+        splitEditorWidth: DEFAULT_SPLIT_EDITOR_WIDTH,
       }),
     }),
     { name: "thaw-panel-layout" }

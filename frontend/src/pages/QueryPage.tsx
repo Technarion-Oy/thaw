@@ -39,12 +39,22 @@ export default function QueryPage() {
   const resolved       = useThemeStore((s) => s.resolved);
   const editorFont     = useThemeStore((s) => s.editorFont);
   const editorFontSize = useThemeStore((s) => s.editorFontSize);
-  const editorSplit    = usePanelLayoutStore((s) => s.editorSplit);
-  const setEditorSplit = usePanelLayoutStore((s) => s.setEditorSplit);
+  const editorSplit        = usePanelLayoutStore((s) => s.editorSplit);
+  const setEditorSplit     = usePanelLayoutStore((s) => s.setEditorSplit);
+  const splitEditorWidth   = usePanelLayoutStore((s) => s.splitEditorWidth);
+  const setSplitEditorWidth = usePanelLayoutStore((s) => s.setSplitEditorWidth);
+  const splitTabId  = useQueryStore((s) => s.splitTabId);
+  const splitTab    = useQueryStore((s) => s.tabs.find((t) => t.id === s.splitTabId) ?? null);
+  const setSplitTab = useQueryStore((s) => s.setSplitTab);
   const [splitPct, setSplitPct] = useState(editorSplit);
   const splitResizing  = useRef(false);
   const splitStartY    = useRef(0);
   const splitStartPct  = useRef(0);
+  // Vertical (left/right) split state
+  const vSplitResizing  = useRef(false);
+  const vSplitStartX    = useRef(0);
+  const vSplitStartW    = useRef(0);
+  const [splitW, setSplitW] = useState(splitEditorWidth);
   const [runningQueryId, setRunningQueryId] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   const [resultPane, setResultPane] = useState<"results" | "chat" | "terminal">("results");
@@ -75,6 +85,7 @@ export default function QueryPage() {
 
   // Sync local split state when the store value changes (e.g., after layout reset).
   useEffect(() => { setSplitPct(editorSplit); }, [editorSplit]);
+  useEffect(() => { setSplitW(splitEditorWidth); }, [splitEditorWidth]);
 
   // Load current role/warehouse on mount
   useEffect(() => {
@@ -105,6 +116,31 @@ export default function QueryPage() {
     window.addEventListener("load-query", handler);
     return () => window.removeEventListener("load-query", handler);
   }, [setSql]);
+
+  // Vertical drag handle mouse handlers (for split editor width).
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!vSplitResizing.current) return;
+      const parent = document.querySelector(".editor-area") as HTMLElement | null;
+      if (!parent) return;
+      const delta = e.clientX - vSplitStartX.current;
+      const pct = vSplitStartW.current + delta / parent.clientWidth;
+      setSplitW(Math.min(0.85, Math.max(0.15, pct)));
+    };
+    const onUp = () => {
+      if (!vSplitResizing.current) return;
+      vSplitResizing.current = false;
+      document.body.style.cursor     = "";
+      document.body.style.userSelect = "";
+      setSplitW((w) => { setSplitEditorWidth(w); return w; });
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup",   onUp);
+    return () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup",   onUp);
+    };
+  }, [setSplitEditorWidth]);
 
   const runQuery = async () => {
     const query = selectedSql.trim() || sql.trim();
@@ -489,9 +525,57 @@ export default function QueryPage() {
       )}
 
       {/* SQL Editor — top portion (resizable) */}
-      {!activeDiff && <div style={{ flex: `0 0 ${splitPct * 100}%`, borderBottom: "1px solid var(--border)", overflow: "hidden" }}>
-        <SqlEditor />
-      </div>}
+      {!activeDiff && (
+        <div
+          className="editor-area"
+          style={{ flex: `0 0 ${splitPct * 100}%`, borderBottom: "1px solid var(--border)", overflow: "hidden", display: "flex" }}
+        >
+          {/* Primary editor */}
+          <div style={{ flex: splitTabId ? `0 0 ${splitW * 100}%` : "1 1 100%", overflow: "hidden" }}>
+            <SqlEditor />
+          </div>
+
+          {/* Vertical drag handle + secondary editor */}
+          {splitTabId && splitTab && <>
+            <div
+              style={{
+                width: 4, cursor: "col-resize",
+                background: "var(--border)", flexShrink: 0,
+                position: "relative", zIndex: 1,
+              }}
+              onMouseDown={(e) => {
+                vSplitResizing.current = true;
+                vSplitStartX.current  = e.clientX;
+                vSplitStartW.current  = splitW;
+                document.body.style.cursor     = "col-resize";
+                document.body.style.userSelect = "none";
+                e.preventDefault();
+              }}
+            />
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+              {/* Secondary tab header */}
+              <div style={{
+                height: 24, display: "flex", alignItems: "center",
+                justifyContent: "space-between", padding: "0 8px",
+                background: "var(--bg-raised)", borderBottom: "1px solid var(--border)",
+                fontSize: 12, color: "var(--text-muted)", flexShrink: 0,
+              }}>
+                <span>{splitTab.title}</span>
+                <button
+                  onClick={() => setSplitTab(null)}
+                  style={{
+                    background: "none", border: "none", cursor: "pointer",
+                    color: "var(--text-muted)", fontSize: 14, lineHeight: 1, padding: 0,
+                  }}
+                >×</button>
+              </div>
+              <div style={{ flex: 1, overflow: "hidden" }}>
+                <SqlEditor tabId={splitTabId} />
+              </div>
+            </div>
+          </>}
+        </div>
+      )}
 
       {/* Horizontal resize handle */}
       {!activeDiff && (

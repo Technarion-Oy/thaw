@@ -28,6 +28,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 - **AI Chat** — an agentic assistant in the results area that can query your live Snowflake connection to answer questions about your data (see [AI Features](#ai-features))
 - **Unsaved-change indicator** — a `•` dot in the tab title shows unsaved work at a glance
 - **Tab reordering** — drag any tab left or right to rearrange the tab strip; a vertical accent line shows the insertion point
+- **Split view** — right-click any tab and choose **Split with: [tab name]** to view two editors side by side; a draggable vertical divider separates them and the ratio is persisted across sessions; each editor is fully independent with its own completions, hover definitions, and editing history; close the split with the × button in the secondary editor header, via **Close split view** in the right-click menu, or by closing either of the two tabs
 
 ---
 

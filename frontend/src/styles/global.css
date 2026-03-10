@@ -129,3 +129,15 @@ body,
   background: rgba(9, 105, 218, 0.12);
   border: 1px solid rgba(9, 105, 218, 0.35);
 }
+
+/* Tab bar right-click context menu items */
+.ctx-item {
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text);
+  white-space: nowrap;
+}
+.ctx-item:hover {
+  background: var(--bg-raised);
+}

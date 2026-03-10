@@ -8,7 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FileOutlined, CodeOutlined, PlusOutlined, CloseOutlined, DiffOutlined } from "@ant-design/icons";
 import { useQueryStore } from "../../store/queryStore";
 
@@ -26,13 +26,24 @@ export default function TabBar() {
   const closeTab    = useQueryStore((s) => s.closeTab);
   const moveTab     = useQueryStore((s) => s.moveTab);
   const openScratch = useQueryStore((s) => s.openScratch);
+  const splitTabId  = useQueryStore((s) => s.splitTabId);
+  const setSplitTab = useQueryStore((s) => s.setSplitTab);
 
   const draggingId  = useRef<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; before: boolean } | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; tabId: string } | null>(null);
 
   // Track which tab the pointer is hovering over so the close button
   // only appears on hover (less cluttered when many tabs are open).
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+
+  // Dismiss context menu on next document click.
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const dismiss = () => setCtxMenu(null);
+    document.addEventListener("click", dismiss);
+    return () => document.removeEventListener("click", dismiss);
+  }, [ctxMenu]);
 
   return (
     <div
@@ -80,6 +91,10 @@ export default function TabBar() {
               }
               draggingId.current = null;
               setDropTarget(null);
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setCtxMenu({ x: e.clientX, y: e.clientY, tabId: tab.id });
             }}
             style={{ position: "relative",
               display: "flex",
@@ -163,6 +178,47 @@ export default function TabBar() {
       >
         <PlusOutlined style={{ fontSize: 11 }} />
       </div>
+
+      {/* Right-click context menu */}
+      {ctxMenu && (() => {
+        const others = tabs.filter((t) => t.id !== ctxMenu.tabId && !t.diff);
+        return (
+          <div
+            style={{
+              position: "fixed", zIndex: 9999,
+              top: ctxMenu.y, left: ctxMenu.x,
+              background: "var(--bg-overlay)",
+              border: "1px solid var(--border)",
+              borderRadius: 4, padding: "2px 0",
+              minWidth: 160,
+              boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            {splitTabId
+              ? (
+                <div className="ctx-item" onClick={() => { setSplitTab(null); setCtxMenu(null); }}>
+                  Close split view
+                </div>
+              )
+              : others.map((t) => (
+                <div
+                  key={t.id}
+                  className="ctx-item"
+                  onClick={() => { setSplitTab(t.id); setCtxMenu(null); }}
+                >
+                  Split with: {t.title}
+                </div>
+              ))
+            }
+            {!splitTabId && others.length === 0 && (
+              <div style={{ padding: "4px 12px", color: "var(--text-faint)", fontSize: 11 }}>
+                No other tabs
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }

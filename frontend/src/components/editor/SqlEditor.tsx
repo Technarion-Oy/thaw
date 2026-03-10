@@ -92,8 +92,19 @@ interface DdlHover {
   x: number; y: number;
 }
 
-export default function SqlEditor() {
-  const { sql, setSql, setSelectedSql } = useQueryStore();
+interface SqlEditorProps {
+  tabId?: string;
+}
+
+export default function SqlEditor({ tabId }: SqlEditorProps = {}) {
+  const activeSql       = useQueryStore((s) => s.sql);
+  const activeSqlSetter = useQueryStore((s) => s.setSql);
+  const tabs            = useQueryStore((s) => s.tabs);
+  const setSqlForTab    = useQueryStore((s) => s.setSqlForTab);
+  const setSelectedSql  = useQueryStore((s) => s.setSelectedSql);
+
+  const sql    = tabId ? (tabs.find((t) => t.id === tabId)?.sql ?? "") : activeSql;
+  const setSql = tabId ? (newSql: string) => setSqlForTab(tabId, newSql) : activeSqlSetter;
   const resolved          = useThemeStore((s) => s.resolved);
   const editorFont        = useThemeStore((s) => s.editorFont);
   const editorFontSize    = useThemeStore((s) => s.editorFontSize);
@@ -174,8 +185,10 @@ export default function SqlEditor() {
   };
 
   const handleMount: OnMount = (editor, monaco) => {
-    setEditorInstance(editor);
-    editor.onDidDispose(() => setEditorInstance(null));
+    if (!tabId) {
+      setEditorInstance(editor);
+      editor.onDidDispose(() => setEditorInstance(null));
+    }
 
     // ── Clipboard (WKWebView fix) ─────────────────────────────────────────
     // WKWebView blocks navigator.clipboard.readText/writeText (async Clipboard
@@ -212,26 +225,26 @@ export default function SqlEditor() {
       editor.pushUndoStop();
     };
 
-    // Keyboard shortcut overrides (addCommand).
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyV, doPaste);
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyC, doCopy);
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyX, doCut);
-
     // Context-menu paste: Monaco's context menu calls commandService.executeCommand()
-    // directly, bypassing addCommand keybindings. Patch the editor's internal
-    // command service so paste/copy/cut from the context menu also use the
-    // Wails native clipboard instead of the blocked navigator.clipboard API.
-    const cs = (editor as any)._commandService;
-    if (cs && typeof cs.executeCommand === "function") {
-      const origExec = cs.executeCommand.bind(cs);
-      cs.executeCommand = (commandId: string, ...args: any[]): Promise<any> => {
-        switch (commandId) {
-          case "editor.action.clipboardPasteAction": doPaste(); return Promise.resolve();
-          case "editor.action.clipboardCopyAction":  doCopy();  return Promise.resolve();
-          case "editor.action.clipboardCutAction":   doCut();   return Promise.resolve();
-          default: return origExec(commandId, ...args);
-        }
-      };
+    // directly. Patch the editor's internal command service so paste/copy/cut from
+    // the context menu use the Wails native clipboard.
+    // Only patch for the primary editor: _commandService is shared across all Monaco
+    // editor instances in the same window. The keyboard shortcuts (Cmd+V/C/X) are
+    // handled via a capture-phase DOM listener below, which is per-editor and does
+    // not have this sharing problem.
+    if (!tabId) {
+      const cs = (editor as any)._commandService;
+      if (cs && typeof cs.executeCommand === "function") {
+        const origExec = cs.executeCommand.bind(cs);
+        cs.executeCommand = (commandId: string, ...args: any[]): Promise<any> => {
+          switch (commandId) {
+            case "editor.action.clipboardPasteAction": doPaste(); return Promise.resolve();
+            case "editor.action.clipboardCopyAction":  doCopy();  return Promise.resolve();
+            case "editor.action.clipboardCutAction":   doCut();   return Promise.resolve();
+            default: return origExec(commandId, ...args);
+          }
+        };
+      }
     }
 
     monaco.languages.registerCompletionItemProvider("sql", {
@@ -687,6 +700,21 @@ export default function SqlEditor() {
           setEditorFontSize(14);
         }
       });
+
+      // Clipboard shortcuts — use a capture-phase listener so this fires before
+      // Monaco's internal keyboard handler (which runs on the textarea inside
+      // editorDom). stopPropagation() prevents the event from reaching the
+      // textarea, so Monaco never sees Cmd+V/C/X and doesn't call the shared
+      // _commandService. Each editor's editorDom is a separate DOM node, so
+      // capture listeners here are definitively per-editor instance.
+      editorDom.addEventListener("keydown", (e: KeyboardEvent) => {
+        if (!(e.metaKey || e.ctrlKey)) return;
+        switch (e.key.toLowerCase()) {
+          case "v": e.preventDefault(); e.stopPropagation(); doPaste(); break;
+          case "c": e.preventDefault(); e.stopPropagation(); doCopy(); break;
+          case "x": e.preventDefault(); e.stopPropagation(); doCut(); break;
+        }
+      }, true /* capture */);
 
       editorDom.addEventListener("dragover", (e: DragEvent) => {
         const types = e.dataTransfer?.types ?? [];

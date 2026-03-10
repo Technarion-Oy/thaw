@@ -71,6 +71,8 @@ interface QueryState {
   isRunning: boolean;
   error: string | null;
 
+  splitTabId: string | null;
+
   // Tab management
   activateTab: (id: string) => void;
   openFile: (path: string, content: string) => void;
@@ -80,6 +82,8 @@ interface QueryState {
   moveTab: (draggedId: string, targetId: string, before: boolean) => void;
   // Called after a successful save to update the tab's path/title and clear dirty state.
   markSaved: (id: string, path: string, title: string) => void;
+  setSplitTab: (id: string | null) => void;
+  setSqlForTab: (tabId: string, sql: string) => void;
 
   // Active-tab mutations (also kept in the tabs array for restoration on switch)
   setSql: (sql: string) => void;
@@ -102,6 +106,7 @@ export const useQueryStore = create<QueryState>()(
     (set) => ({
   tabs: [initialTab],
   activeTabId: initialTab.id,
+  splitTabId: null,
 
   sql: initialTab.sql,
   selectedSql: "",
@@ -206,27 +211,40 @@ export const useQueryStore = create<QueryState>()(
       return { tabs: without };
     }),
 
+  setSplitTab: (id) => set({ splitTabId: id }),
+
+  setSqlForTab: (tabId, sql) =>
+    set((s) => ({
+      tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, sql } : t)),
+    })),
+
   closeTab: (id) =>
     set((state) => {
       if (state.tabs.length <= 1) return {};
       const idx = state.tabs.findIndex((t) => t.id === id);
       const newTabs = state.tabs.filter((t) => t.id !== id);
 
+      let next: Partial<QueryState>;
       if (id !== state.activeTabId) {
-        return { tabs: newTabs };
+        next = { tabs: newTabs };
+      } else {
+        // Closing the active tab — move to the nearest neighbour
+        const nextTab = newTabs[Math.min(idx, newTabs.length - 1)];
+        next = {
+          tabs: newTabs,
+          activeTabId: nextTab.id,
+          sql: nextTab.sql,
+          selectedSql: "",
+          currentFile: nextTab.path,
+          result: nextTab.result,
+          error: nextTab.error,
+        };
       }
 
-      // Closing the active tab — move to the nearest neighbour
-      const next = newTabs[Math.min(idx, newTabs.length - 1)];
-      return {
-        tabs: newTabs,
-        activeTabId: next.id,
-        sql: next.sql,
-        selectedSql: "",
-        currentFile: next.path,
-        result: next.result,
-        error: next.error,
-      };
+      if (state.splitTabId === id) {
+        return { ...next, splitTabId: null };
+      }
+      return next;
     }),
 
   markSaved: (id, path, title) =>
