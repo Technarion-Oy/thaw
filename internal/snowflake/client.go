@@ -64,6 +64,10 @@ type SnowflakeObject struct {
 	// Arguments holds the parameter type list for procedures and functions,
 	// e.g. "NUMBER, VARCHAR". Empty for all other object kinds.
 	Arguments string `json:"arguments"`
+	// RowCount is populated for TABLE objects from the "rows" column of
+	// SHOW OBJECTS. Nil means the count was unavailable (e.g. views, or
+	// when SHOW OBJECTS does not include a rows column).
+	RowCount  *int64 `json:"rowCount,omitempty"`
 }
 
 // QueryResult is the serialisable result of a SQL query.
@@ -1182,7 +1186,7 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 	defer rows.Close()
 
 	cols, _ := rows.Columns()
-	nameIdx, kindIdx, argsIdx, builtinIdx := -1, -1, -1, -1
+	nameIdx, kindIdx, argsIdx, builtinIdx, rowsIdx := -1, -1, -1, -1, -1
 	for i, col := range cols {
 		switch strings.ToLower(col) {
 		case "name":
@@ -1193,6 +1197,8 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 			argsIdx = i
 		case "is_builtin":
 			builtinIdx = i
+		case "rows":
+			rowsIdx = i
 		}
 	}
 	if nameIdx < 0 {
@@ -1233,7 +1239,29 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 		if captureArgs && argsIdx >= 0 {
 			argTypes = extractArgTypes(fmt.Sprintf("%v", vals[argsIdx]))
 		}
-		objects = append(objects, SnowflakeObject{Name: name, Kind: kind, Schema: schema, Arguments: argTypes})
+		var rowCount *int64
+		if rowsIdx >= 0 && vals[rowsIdx] != nil {
+			var n int64
+			ok := false
+			switch v := vals[rowsIdx].(type) {
+			case int64:
+				n, ok = v, true
+			case float64:
+				n, ok = int64(v), true
+			case string:
+				if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
+					n, ok = parsed, true
+				}
+			case []uint8:
+				if parsed, err := strconv.ParseInt(string(v), 10, 64); err == nil {
+					n, ok = parsed, true
+				}
+			}
+			if ok {
+				rowCount = &n
+			}
+		}
+		objects = append(objects, SnowflakeObject{Name: name, Kind: kind, Schema: schema, Arguments: argTypes, RowCount: rowCount})
 	}
 	return objects, rows.Err()
 }

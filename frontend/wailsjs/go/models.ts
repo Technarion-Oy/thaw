@@ -869,6 +869,7 @@ export namespace snowflake {
 	    kind: string;
 	    schema: string;
 	    arguments: string;
+	    rowCount?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new SnowflakeObject(source);
@@ -880,6 +881,7 @@ export namespace snowflake {
 	        this.kind = source["kind"];
 	        this.schema = source["schema"];
 	        this.arguments = source["arguments"];
+	        this.rowCount = source["rowCount"];
 	    }
 	}
 	export class SnowflakeUser {

@@ -510,6 +510,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             icon:      kindIcon(kind),
             isLeaf:    true,
             arguments: o.arguments ?? "",
+            rowCount:  o.rowCount,
           })),
         }));
 
@@ -1124,10 +1125,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   const schema = parts[2];
                   const kind   = parts[3];
                   const name   = parts.slice(4).join(":");
-                  const args   = (node as any).arguments ?? "";
+                  const args      = (node as any).arguments ?? "";
+                  const rowCount  = (node as any).rowCount as number | undefined;
+                  const isEmpty   = kind === "TABLE" && rowCount !== undefined && rowCount === 0;
                   const tooltip = (
                     <ObjTooltip cacheKey={key} db={db} schema={schema} kind={kind} name={name} args={args}>
-                      {String(node.title)}
+                      <span style={isEmpty ? { color: "var(--text-faint)" } : undefined}>
+                        {String(node.title)}
+                      </span>
                     </ObjTooltip>
                   );
                   if (kind === "TABLE" || kind === "VIEW") {
