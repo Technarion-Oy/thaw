@@ -254,23 +254,67 @@ func (c *Client) Close() error {
 }
 
 // Execute runs one or more semicolon-separated SQL statements sequentially and
-// returns the last result set. Statements are split and executed one at a time
-// so that session functions like RESULT_SCAN(LAST_QUERY_ID()) see the results
-// of earlier statements in the same script, matching the behaviour of Snowsight.
+// returns the last result set.
+//
+// For multi-statement scripts a dedicated *sql.Conn is acquired for the whole
+// script so that every statement runs on the same Snowflake session. This is
+// critical for session-scoped functions like LAST_QUERY_ID() / RESULT_SCAN:
+// database/sql connection pooling can otherwise assign consecutive statements
+// to different connections (= different Snowflake sessions), causing
+// LAST_QUERY_ID() in statement N to be unaware of what statement N-1 produced.
 func (c *Client) Execute(ctx context.Context, query string) (*QueryResult, error) {
 	stmts := splitStatements(query)
 	if len(stmts) == 0 {
 		return &QueryResult{Rows: [][]interface{}{}}, nil
 	}
+	if len(stmts) == 1 {
+		return c.QuerySingle(ctx, stmts[0])
+	}
+
+	// Pin all statements to one connection so LAST_QUERY_ID() is consistent.
+	conn, err := c.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
 	var last *QueryResult
 	for _, stmt := range stmts {
-		result, err := c.QuerySingle(ctx, stmt)
+		result, err := queryOnConn(ctx, conn, stmt)
 		if err != nil {
 			return nil, err
 		}
 		last = result
 	}
 	return last, nil
+}
+
+// queryOnConn executes a single SQL statement on a pinned *sql.Conn and
+// returns its result set.
+func queryOnConn(ctx context.Context, conn *sql.Conn, query string) (*QueryResult, error) {
+	rows, err := conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	result := &QueryResult{Columns: cols, Rows: [][]interface{}{}}
+	for rows.Next() {
+		vals := make([]interface{}, len(cols))
+		ptrs := make([]interface{}, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, err
+		}
+		result.Rows = append(result.Rows, vals)
+	}
+	return result, rows.Err()
 }
 
 // QuerySingle executes a single SQL statement without multi-statement mode and
