@@ -94,9 +94,14 @@ interface DdlHover {
 
 export default function SqlEditor() {
   const { sql, setSql, setSelectedSql } = useQueryStore();
-  const resolved       = useThemeStore((s) => s.resolved);
-  const editorFont     = useThemeStore((s) => s.editorFont);
-  const editorFontSize = useThemeStore((s) => s.editorFontSize);
+  const resolved          = useThemeStore((s) => s.resolved);
+  const editorFont        = useThemeStore((s) => s.editorFont);
+  const editorFontSize    = useThemeStore((s) => s.editorFontSize);
+  const setEditorFontSize = useThemeStore((s) => s.setEditorFontSize);
+  // Ref so the native keydown listener always sees the current font size
+  // without being re-registered on every render.
+  const fontSizeRef = useRef(editorFontSize);
+  useEffect(() => { fontSizeRef.current = editorFontSize; }, [editorFontSize]);
 
   const [ddlHover, setDdlHover] = useState<DdlHover | null>(null);
   const [tooltipCtxMenu, setTooltipCtxMenu] = useState<{ x: number; y: number; sel: string } | null>(null);
@@ -623,6 +628,16 @@ export default function SqlEditor() {
       () => window.dispatchEvent(new CustomEvent("save-file"))
     );
 
+    // Toggle Line Comment → right-click context menu entry only (no keybinding here;
+    // the shortcut is handled via a native keydown listener below to avoid WKWebView capture).
+    editor.addAction({
+      id: "thaw.toggleLineComment",
+      label: "Toggle Line Comment",
+      contextMenuGroupId: "1_modification",
+      contextMenuOrder: 1,
+      run: (ed) => ed.trigger("keyboard", "editor.action.commentLine", null),
+    });
+
     // thaw:scroll-to-line → jump to a specific line and highlight the match (used by file search)
     const handleScrollToLine = (e: Event) => {
       const { line, matchStart, matchEnd } =
@@ -647,6 +662,32 @@ export default function SqlEditor() {
     // TABLE/VIEW nodes set "thaw/table"; user rows set "thaw/user".
     const editorDom = editor.getDomNode();
     if (editorDom) {
+      // Native keydown listener — handles shortcuts that WKWebView intercepts
+      // before Monaco's own keybinding layer sees them.
+      // Font-size shortcuts use e.key (the printed character) so they work
+      // correctly on non-US keyboard layouts such as Finnish, where e.code
+      // positions differ from the US layout (e.g. Finnish "+" is e.code=Minus).
+      editorDom.addEventListener("keydown", (e: KeyboardEvent) => {
+        if (!(e.metaKey || e.ctrlKey)) return;
+        // Cmd++ / Cmd+= → increase font size
+        if (e.key === "+" || e.key === "=") {
+          e.preventDefault();
+          setEditorFontSize(Math.min(fontSizeRef.current + 1, 32));
+          return;
+        }
+        // Cmd+- → decrease font size
+        if (e.key === "-") {
+          e.preventDefault();
+          setEditorFontSize(Math.max(fontSizeRef.current - 1, 8));
+          return;
+        }
+        // Cmd+0 → reset font size to default
+        if (e.key === "0") {
+          e.preventDefault();
+          setEditorFontSize(14);
+        }
+      });
+
       editorDom.addEventListener("dragover", (e: DragEvent) => {
         const types = e.dataTransfer?.types ?? [];
         if (types.includes("thaw/table") || types.includes("thaw/user")) {

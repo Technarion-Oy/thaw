@@ -12,6 +12,8 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 - **Cancel queries** — cancel a running query at any time; Thaw issues `SYSTEM$CANCEL_QUERY` so it also stops consuming Snowflake credits
 - **Query ID** — the Snowflake Query ID is shown while running and after completion; click to copy
 - **Selection highlight** — selecting text highlights every other occurrence in the document; overview-ruler markers show occurrences in long files
+- **Toggle line comment** — right-click in the editor and choose **Toggle Line Comment** to add or remove `--` on the current line or on every line in the selection
+- **Font size zoom** — `⌘+` / `Ctrl++` increases the editor font size, `⌘-` / `Ctrl+-` decreases it, `⌘0` / `Ctrl+0` resets to the default
 - **Hover definitions** — hover over any table or view name to see its DDL in a scrollable overlay tooltip; the tooltip stays open when the cursor moves into it:
   - **Copy button** — copies the full DDL to the clipboard
   - **Text selection** — paint any portion of the DDL and copy with `⌘C` / `Ctrl+C`
@@ -272,6 +274,9 @@ An OS shell terminal is available as a tab in the results area alongside Results
 | `⌘⇧S` / `Ctrl+Shift+S` | Save As… |
 | `⌘T` / `Ctrl+T` | New scratch tab |
 | `⌘\`` / `Ctrl+\`` | Open embedded terminal |
+| `⌘+` / `Ctrl++` | Increase editor font size |
+| `⌘-` / `Ctrl+-` | Decrease editor font size |
+| `⌘0` / `Ctrl+0` | Reset editor font size to default |
 
 ---
 
