@@ -253,49 +253,24 @@ func (c *Client) Close() error {
 	return c.db.Close()
 }
 
-// Execute runs one or more semicolon-separated SQL statements and returns the
-// last result set. Using sf.WithMultiStatement(ctx, 0) tells the driver to
-// accept any number of statements in a single call.
+// Execute runs one or more semicolon-separated SQL statements sequentially and
+// returns the last result set. Statements are split and executed one at a time
+// so that session functions like RESULT_SCAN(LAST_QUERY_ID()) see the results
+// of earlier statements in the same script, matching the behaviour of Snowsight.
 func (c *Client) Execute(ctx context.Context, query string) (*QueryResult, error) {
-	multiCtx, err := sf.WithMultiStatement(ctx, 0)
-	if err != nil {
-		return nil, err
+	stmts := splitStatements(query)
+	if len(stmts) == 0 {
+		return &QueryResult{Rows: [][]interface{}{}}, nil
 	}
-
-	rows, err := c.db.QueryContext(multiCtx, query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var last QueryResult
-	for {
-		cols, err := rows.Columns()
+	var last *QueryResult
+	for _, stmt := range stmts {
+		result, err := c.QuerySingle(ctx, stmt)
 		if err != nil {
 			return nil, err
 		}
-		last = QueryResult{Columns: cols, Rows: [][]interface{}{}}
-
-		for rows.Next() {
-			vals := make([]interface{}, len(cols))
-			ptrs := make([]interface{}, len(cols))
-			for i := range vals {
-				ptrs[i] = &vals[i]
-			}
-			if err := rows.Scan(ptrs...); err != nil {
-				return nil, err
-			}
-			last.Rows = append(last.Rows, vals)
-		}
-		if err := rows.Err(); err != nil {
-			return nil, err
-		}
-		if !rows.NextResultSet() {
-			break
-		}
+		last = result
 	}
-
-	return &last, nil
+	return last, nil
 }
 
 // QuerySingle executes a single SQL statement without multi-statement mode and
@@ -326,6 +301,111 @@ func (c *Client) QuerySingle(ctx context.Context, query string) (*QueryResult, e
 		result.Rows = append(result.Rows, vals)
 	}
 	return result, rows.Err()
+}
+
+// splitStatements splits a SQL string into individual statements on semicolons,
+// respecting single-quoted strings, double-quoted identifiers, line comments
+// (--), block comments (/* */), and Snowflake dollar-quoted strings ($$...$$
+// and $tag$...$tag$).
+func splitStatements(sql string) []string {
+	var stmts []string
+	var cur strings.Builder
+	i, n := 0, len(sql)
+	for i < n {
+		ch := sql[i]
+		switch {
+		case ch == '-' && i+1 < n && sql[i+1] == '-':
+			// Line comment — consume through end of line.
+			for i < n && sql[i] != '\n' {
+				cur.WriteByte(sql[i])
+				i++
+			}
+		case ch == '/' && i+1 < n && sql[i+1] == '*':
+			// Block comment — consume through */.
+			cur.WriteByte(sql[i])
+			cur.WriteByte(sql[i+1])
+			i += 2
+			for i < n {
+				if sql[i] == '*' && i+1 < n && sql[i+1] == '/' {
+					cur.WriteByte(sql[i])
+					cur.WriteByte(sql[i+1])
+					i += 2
+					break
+				}
+				cur.WriteByte(sql[i])
+				i++
+			}
+		case ch == '\'':
+			// Single-quoted string — handle '' escaping.
+			cur.WriteByte(ch)
+			i++
+			for i < n {
+				c := sql[i]
+				cur.WriteByte(c)
+				i++
+				if c == '\'' {
+					if i < n && sql[i] == '\'' {
+						cur.WriteByte(sql[i])
+						i++
+					} else {
+						break
+					}
+				}
+			}
+		case ch == '"':
+			// Double-quoted identifier.
+			cur.WriteByte(ch)
+			i++
+			for i < n {
+				c := sql[i]
+				cur.WriteByte(c)
+				i++
+				if c == '"' {
+					break
+				}
+			}
+		case ch == '$':
+			// Possible dollar-quoted string: $$...$$ or $tag$...$tag$.
+			end := i + 1
+			for end < n && (sql[end] == '_' ||
+				(sql[end] >= 'a' && sql[end] <= 'z') ||
+				(sql[end] >= 'A' && sql[end] <= 'Z') ||
+				(sql[end] >= '0' && sql[end] <= '9')) {
+				end++
+			}
+			if end < n && sql[end] == '$' {
+				tag := sql[i : end+1] // e.g. "$$" or "$my_tag$"
+				cur.WriteString(tag)
+				i = end + 1
+				for i < n {
+					if strings.HasPrefix(sql[i:], tag) {
+						cur.WriteString(tag)
+						i += len(tag)
+						break
+					}
+					cur.WriteByte(sql[i])
+					i++
+				}
+			} else {
+				cur.WriteByte(ch)
+				i++
+			}
+		case ch == ';':
+			stmt := strings.TrimSpace(cur.String())
+			if stmt != "" {
+				stmts = append(stmts, stmt)
+			}
+			cur.Reset()
+			i++
+		default:
+			cur.WriteByte(ch)
+			i++
+		}
+	}
+	if stmt := strings.TrimSpace(cur.String()); stmt != "" {
+		stmts = append(stmts, stmt)
+	}
+	return stmts
 }
 
 // CancelSnowflakeQuery asks Snowflake to abort the query with the given ID.
