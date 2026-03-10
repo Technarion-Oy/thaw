@@ -256,12 +256,20 @@ func (c *Client) Close() error {
 // Execute runs one or more semicolon-separated SQL statements sequentially and
 // returns the last result set.
 //
-// For multi-statement scripts a dedicated *sql.Conn is acquired for the whole
-// script so that every statement runs on the same Snowflake session. This is
-// critical for session-scoped functions like LAST_QUERY_ID() / RESULT_SCAN:
-// database/sql connection pooling can otherwise assign consecutive statements
-// to different connections (= different Snowflake sessions), causing
-// LAST_QUERY_ID() in statement N to be unaware of what statement N-1 produced.
+// For multi-statement scripts two things are required:
+//
+//  1. A dedicated *sql.Conn so every statement shares the same Snowflake
+//     session. database/sql's pool would otherwise route consecutive calls to
+//     different connections (different sessions), breaking LAST_QUERY_ID() /
+//     RESULT_SCAN which are session-scoped.
+//
+//  2. A plain context WITHOUT sf.WithAsyncMode. Async mode makes the driver
+//     return a placeholder rows object immediately and poll Snowflake in a
+//     background goroutine. database/sql keeps the *sql.Conn marked as busy
+//     until all rows are closed; the second statement's conn.QueryContext
+//     then deadlocks waiting for the conn to become free. Running without
+//     async mode means each statement blocks until its results arrive, which
+//     is exactly what sequential scripts need.
 func (c *Client) Execute(ctx context.Context, query string) (*QueryResult, error) {
 	stmts := splitStatements(query)
 	if len(stmts) == 0 {
@@ -271,8 +279,19 @@ func (c *Client) Execute(ctx context.Context, query string) (*QueryResult, error
 		return c.QuerySingle(ctx, stmts[0])
 	}
 
-	// Pin all statements to one connection so LAST_QUERY_ID() is consistent.
-	conn, err := c.db.Conn(ctx)
+	// Build a plain cancellable context that inherits cancellation from ctx
+	// but carries none of the sf-specific context values (async mode, qidChan).
+	execCtx, execCancel := context.WithCancel(context.Background())
+	defer execCancel()
+	go func() {
+		select {
+		case <-ctx.Done():
+			execCancel()
+		case <-execCtx.Done():
+		}
+	}()
+
+	conn, err := c.db.Conn(execCtx)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +299,7 @@ func (c *Client) Execute(ctx context.Context, query string) (*QueryResult, error
 
 	var last *QueryResult
 	for _, stmt := range stmts {
-		result, err := queryOnConn(ctx, conn, stmt)
+		result, err := queryOnConn(execCtx, conn, stmt)
 		if err != nil {
 			return nil, err
 		}
