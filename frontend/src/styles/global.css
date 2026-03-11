@@ -117,6 +117,21 @@ body,
   user-select: text !important;
 }
 
+/* Ag-Grid result cells — re-enable text selection.
+   WKWebView sets user-select:none on the body; the grid's built-in
+   enableCellTextSelection prop has no effect without this override.
+   --wails-draggable: no-drag prevents the WebKit drag layer from swallowing
+   pointer events before user-select can take effect. */
+.ag-theme-alpine,
+.ag-theme-alpine-dark {
+  --wails-draggable: no-drag;
+}
+.ag-theme-alpine .ag-cell,
+.ag-theme-alpine-dark .ag-cell {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+
 /* Monaco editor — custom selection occurrence highlights.
    Applied to every match of the selected text that is not the selection itself. */
 .sql-occurrence-highlight {

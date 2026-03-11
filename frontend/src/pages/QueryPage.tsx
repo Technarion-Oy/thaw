@@ -26,7 +26,7 @@ import { useThemeStore } from "../store/themeStore";
 import ResultGrid from "../components/results/ResultGrid";
 import AiChat from "../components/chat/AiChat";
 import TerminalPanel from "../components/terminal/TerminalPanel";
-import { useQueryStore, type QueryResult } from "../store/queryStore";
+import { useQueryStore, type QueryResult, EXECUTE_IN_TAB_EVENT } from "../store/queryStore";
 import { useConnectionStore } from "../store/connectionStore";
 import { useSessionStore } from "../store/sessionStore";
 import { usePanelLayoutStore } from "../store/panelLayoutStore";
@@ -142,8 +142,8 @@ export default function QueryPage() {
     };
   }, [setSplitEditorWidth]);
 
-  const runQuery = async () => {
-    const query = selectedSql.trim() || sql.trim();
+  const runQuery = async (overrideSql?: string) => {
+    const query = overrideSql ?? (selectedSql.trim() || sql.trim());
     if (!query) return;
     cancelRequestedRef.current = false;
     setIsCancelling(false);
@@ -186,6 +186,21 @@ export default function QueryPage() {
       // ignore — WaitForQueryResult will return an error regardless
     }
   };
+
+  // Handle execute-in-tab events dispatched by executeInNewTab.  The store has
+  // already opened the new tab and set its SQL; we receive the SQL in the event
+  // detail to avoid stale closures and run through the proper
+  // StartQuery/WaitForQueryResult path so resultHistory is populated.
+  const runQueryRef = useRef(runQuery);
+  useEffect(() => { runQueryRef.current = runQuery; });
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { sql: querySql } = (e as CustomEvent<{ sql: string }>).detail;
+      runQueryRef.current(querySql);
+    };
+    window.addEventListener(EXECUTE_IN_TAB_EVENT, handler);
+    return () => window.removeEventListener(EXECUTE_IN_TAB_EVENT, handler);
+  }, []);
 
   const handleDisconnect = async () => {
     await Disconnect();
@@ -388,7 +403,7 @@ export default function QueryPage() {
             <Button
               type="primary"
               icon={<PlayCircleOutlined />}
-              onClick={runQuery}
+              onClick={() => runQuery()}
               size="small"
             >
               Run

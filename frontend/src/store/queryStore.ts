@@ -12,6 +12,11 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { ExecuteQuery } from "../../wailsjs/go/main/App";
 
+// Custom event name used by executeInNewTab to ask QueryPage to run a query
+// through its own StartQuery/WaitForQueryResult path (the only path that
+// populates resultHistory and makes results visible in the UI).
+export const EXECUTE_IN_TAB_EVENT = "thaw:execute-in-tab";
+
 export interface QueryResult {
   columns: string[];
   rows: unknown[][];
@@ -92,7 +97,7 @@ interface QueryState {
   setRunning: (isRunning: boolean) => void;
   setError: (error: string | null) => void;
   executeWith: (sql: string) => Promise<void>;
-  executeInNewTab: (sql: string) => Promise<void>;
+  executeInNewTab: (sql: string) => void;
 }
 
 // ── store ─────────────────────────────────────────────────────────────────────
@@ -312,7 +317,7 @@ export const useQueryStore = create<QueryState>()(
     }
   },
 
-  executeInNewTab: async (sql) => {
+  executeInNewTab: (sql) => {
     const newTab = makeTab({ sql });
     set((state) => ({
       tabs: [...state.tabs, newTab],
@@ -322,24 +327,12 @@ export const useQueryStore = create<QueryState>()(
       currentFile: null,
       result: null,
       error: null,
-      isRunning: true,
+      isRunning: false,
     }));
-    try {
-      const res = await ExecuteQuery(sql);
-      set((state) => ({
-        result: res,
-        error: null,
-        tabs: patchTab(state.tabs, newTab.id, { result: res, error: null }),
-      }));
-    } catch (e) {
-      set((state) => ({
-        error: String(e),
-        isRunning: false,
-        tabs: patchTab(state.tabs, newTab.id, { error: String(e) }),
-      }));
-    } finally {
-      set({ isRunning: false });
-    }
+    // Ask QueryPage to run via its StartQuery/WaitForQueryResult path, which
+    // is the only path that populates resultHistory and shows results in the UI.
+    // The SQL is passed in the event detail to avoid stale-closure issues.
+    window.dispatchEvent(new CustomEvent(EXECUTE_IN_TAB_EVENT, { detail: { sql } }));
   },
 }),
 {

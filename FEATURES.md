@@ -37,8 +37,10 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 
 - Browse all databases → schemas → tables, views, functions, procedures, sequences, stages, streams, tasks, file formats, and pipes
 - **Search** — filter objects by name across all databases and schemas in real time
+- **Right-click procedures** to open a parameter dialog; clicking **Execute** generates the `CALL` statement, opens a new tab, and runs it immediately — no manual Run press needed
+- **Right-click functions** (**Call Function…**) to open a parameter dialog; detects scalar vs. table functions and generates the correct SQL; clicking **Execute** opens a new tab and runs it immediately
 - **Right-click tables and views** to:
-  - Select the top 1,000 rows (opens in a new tab)
+  - Select the top 1,000 rows — opens a new tab and executes immediately
   - **Time Travel Query** — drag a timeline slider to query data at any past point within the retention window
   - **Export Data** — download table data as CSV, JSON, or Parquet via a temporary Snowflake stage
   - **Import Data** — upload a local file into Snowflake; supports CSV, JSON, and Parquet; can create a new table automatically by inferring the schema
@@ -230,6 +232,7 @@ Right-click any **database**, **schema**, or **table** in the object browser and
 ## Results & Export
 
 - Query results displayed in a virtualised grid — handles large result sets smoothly
+- **Copy from results** — right-click any cell to open a context menu with: **Copy cell value**, **Copy row (tab-separated)**, and **Copy row with headers**; all three write to the native OS clipboard so they work reliably on macOS
 - **Result history** — the last 10 successful result sets are kept in memory for the session; a dropdown in the results status bar (visible after two or more runs) lets you switch between them instantly, similar to `LAST_QUERY_ID(-n)` in SQL; after a query failure the error is shown and the dropdown appears as a standalone **Previous results** picker — the last result grid is not auto-displayed so the failure is immediately obvious, but any historical result can be recalled on demand
 - **Export results** — CSV (RFC 4180) and Excel (`.xlsx`) export with a native save dialog; exports always reflect whichever result is currently selected in the history dropdown
 - Column sorting and horizontal scrolling
