@@ -26,6 +26,10 @@ export function CanManageUsers() {
   return window['go']['main']['App']['CanManageUsers']();
 }
 
+export function CanViewWarehouseMeteringHistory() {
+  return window['go']['main']['App']['CanViewWarehouseMeteringHistory']();
+}
+
 export function CancelChat() {
   return window['go']['main']['App']['CancelChat']();
 }

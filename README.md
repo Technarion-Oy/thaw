@@ -118,6 +118,7 @@ The **Administration** collapsible panel in the sidebar shows roles, warehouses,
 
 Click the bar-chart icon in the Administration panel header (always visible, even before expanding) to open the **Warehouse Credit Usage** modal — backed by `SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY`:
 
+- The button is only shown to users whose current role has `SELECT` access to `SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY`; a zero-row probe query is run on mount and the button is hidden automatically for roles without access
 - **Warehouse** — select a specific warehouse or leave as *All warehouses* to aggregate across all
 - **Date range** — pick any start/end date; defaults to the last 30 days
 - **Apply** — re-fetches with the current filters; the modal also auto-fetches on open

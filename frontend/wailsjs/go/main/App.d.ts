@@ -21,6 +21,8 @@ export function CanCreateUsers():Promise<boolean>;
 
 export function CanManageUsers():Promise<boolean>;
 
+export function CanViewWarehouseMeteringHistory():Promise<boolean>;
+
 export function CancelChat():Promise<void>;
 
 export function CancelConnect():Promise<void>;

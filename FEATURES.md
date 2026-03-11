@@ -164,6 +164,7 @@ Open **AI → Configure AI…** in the menu bar to set your provider, API key, a
 
 Click the bar-chart icon in the Administration panel header (always visible, even before expanding) to open the **Warehouse Credit Usage** modal — backed by `SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY`:
 
+- The button is only shown to users whose current role has `SELECT` access to `SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY`; a zero-row probe query runs on mount and hides the button automatically for roles without access
 - **Warehouse** — select a specific warehouse or *All warehouses* to aggregate across the account
 - **Date range** — defaults to the last 30 days; pick any custom range and click **Apply** to refresh
 - **Summary cards** — total credits used, compute credits, and cloud services credits for the selected scope

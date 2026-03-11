@@ -8,7 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useLayoutEffect, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { Collapse, Space, Button, Typography, Tree, Spin, Modal, message } from "antd";
 import {
   TeamOutlined,
@@ -30,6 +30,7 @@ import {
   GetWarehouseDDL,
   ExportAccountObjectsDDL,
   GetObjectProperties,
+  CanViewWarehouseMeteringHistory,
 } from "../../../wailsjs/go/main/App";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { useGitStore } from "../../store/gitStore";
@@ -100,13 +101,20 @@ export default function AccountPanel() {
   const [ddlModal,   setDdlModal]   = useState<DdlModal | null>(null);
   const [ctxMenu,    setCtxMenu]    = useState<AccountCtxMenu | null>(null);
   const [propsModal, setPropsModal] = useState<{ title: string; rows: main.PropertyPair[] | null; error: string | null } | null>(null);
-  const [historyOpen,  setHistoryOpen]  = useState(false);
-  const [meteringOpen, setMeteringOpen] = useState(false);
+  const [historyOpen,        setHistoryOpen]        = useState(false);
+  const [meteringOpen,       setMeteringOpen]       = useState(false);
+  const [canViewMetering,    setCanViewMetering]    = useState(false);
   const ctxRef = useRef<HTMLDivElement>(null);
 
   const pendingDiff   = useDiffStore((s) => s.pending);
   const selectForComp = useDiffStore((s) => s.selectForComparison);
   const compareWith   = useDiffStore((s) => s.compareWith);
+
+  // ── Probe warehouse metering access on mount ─────────────────────────────
+
+  useEffect(() => {
+    CanViewWarehouseMeteringHistory().then(setCanViewMetering).catch(() => {});
+  }, []);
 
   // ── Loading ──────────────────────────────────────────────────────────────
 
@@ -280,14 +288,16 @@ export default function AccountPanel() {
                 onClick={() => setHistoryOpen(true)}
                 style={{ height: 18, padding: "0 4px", minWidth: 0 }}
               />
-              <Button
-                size="small"
-                type="text"
-                icon={<BarChartOutlined style={{ fontSize: 11 }} />}
-                title="Warehouse Credit Usage"
-                onClick={() => setMeteringOpen(true)}
-                style={{ height: 18, padding: "0 4px", minWidth: 0 }}
-              />
+              {canViewMetering && (
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<BarChartOutlined style={{ fontSize: 11 }} />}
+                  title="Warehouse Credit Usage"
+                  onClick={() => setMeteringOpen(true)}
+                  style={{ height: 18, padding: "0 4px", minWidth: 0 }}
+                />
+              )}
               {loaded && <>
                 <Button
                   size="small"

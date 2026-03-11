@@ -1890,6 +1890,21 @@ func (a *App) StopShell() error {
 // endTimeStart/End:    RFC3339 strings or "" for no filter
 // resultLimit:         max rows returned (1–10 000)
 // includeClientGenerated: include client-generated statements
+// CanViewWarehouseMeteringHistory returns true when the current role has SELECT
+// access to SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY.  It runs a
+// zero-row probe query so it is fast and never touches real data.
+func (a *App) CanViewWarehouseMeteringHistory() (bool, error) {
+	if a.client == nil {
+		return false, ErrNotConnected
+	}
+	_, err := a.client.QuerySingle(a.ctx,
+		"SELECT 1 FROM SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY LIMIT 0")
+	if err != nil {
+		return false, nil //nolint:nilerr // permission denied is not a caller error
+	}
+	return true, nil
+}
+
 func (a *App) GetWarehouseMeteringHistory(warehouse, startDate, endDate string) ([]WarehouseMeteringRow, error) {
 	if a.client == nil {
 		return nil, ErrNotConnected
