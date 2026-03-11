@@ -170,7 +170,7 @@ Click the bar-chart icon in the Administration panel header (always visible, eve
 - **Warehouse** — select a specific warehouse or *All warehouses* to aggregate across the account
 - **Date range** — defaults to the last 30 days; pick any custom range and click **Apply** to refresh
 - **Summary cards** — total credits used, compute credits, and cloud services credits for the selected scope
-- **Daily stacked bar chart** — hourly records are aggregated by day; Compute (blue) and Cloud Services (orange) are stacked so the credit split is immediately visible; built with recharts inside a responsive container
+- **Stacked bar chart** — toggle between **Daily** and **Hourly** granularity with the segmented control above the chart; Compute (blue) and Cloud Services (orange) are stacked so the credit split is immediately visible; in hourly view the X-axis labels are thinned automatically to avoid overlap; built with recharts inside a responsive container
 - **Hourly detail table** — one row per metering record; columns: Start Time, Warehouse, Total Credits, Compute Credits, Cloud Svc Credits; paginated at 20 rows/page
 - **Collapse / Expand table** — a toggle button in the table header hides the row detail while keeping the summary cards and chart visible
 

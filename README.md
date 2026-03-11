@@ -125,7 +125,7 @@ Click the bar-chart icon in the Administration panel header (always visible, eve
 - **Date range** — pick any start/end date; defaults to the last 30 days
 - **Apply** — re-fetches with the current filters; the modal also auto-fetches on open
 - **Summary cards** — total credits used, compute credits, and cloud services credits across the selected filters
-- **Daily stacked bar chart** — hourly rows are aggregated to daily totals; stacked bars show Compute (blue) and Cloud Services (orange) separately so the credit split is immediately visible; built with recharts inside a responsive container
+- **Stacked bar chart** — toggle between **Daily** and **Hourly** granularity with a segmented control above the chart; stacked bars show Compute (blue) and Cloud Services (orange) separately so the credit split is immediately visible; in hourly view the X-axis labels are thinned automatically to avoid overlap; built with recharts inside a responsive container
 - **Hourly detail table** — one row per hourly metering record; columns: Start Time, Warehouse, Total Credits, Compute Credits, Cloud Svc Credits (all credit values shown to 4 decimal places); paginated at 20 rows/page
 - **Collapse / Expand table** — a button in the table header hides the detail rows while keeping the summary cards and chart visible; useful when the chart is all you need
 

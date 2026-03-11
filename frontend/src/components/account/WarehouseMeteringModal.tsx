@@ -19,6 +19,7 @@ import {
   Alert,
   Statistic,
   Tooltip as AntTooltip,
+  Segmented,
 } from "antd";
 import { CompressOutlined, ExpandOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
@@ -44,8 +45,10 @@ interface Props {
   onClose: () => void;
 }
 
-interface DailyEntry {
-  date: string;
+type Granularity = "daily" | "hourly";
+
+interface ChartEntry {
+  label: string;
   compute: number;
   cloud: number;
 }
@@ -59,10 +62,11 @@ export default function WarehouseMeteringModal({ onClose }: Props) {
     dayjs().subtract(30, "day"),
     dayjs(),
   ]);
-  const [rows,       setRows]       = useState<main.WarehouseMeteringRow[] | null>(null);
-  const [loading,    setLoading]    = useState(false);
-  const [error,      setError]      = useState<string | null>(null);
+  const [rows,           setRows]           = useState<main.WarehouseMeteringRow[] | null>(null);
+  const [loading,        setLoading]        = useState(false);
+  const [error,          setError]          = useState<string | null>(null);
   const [tableCollapsed, setTableCollapsed] = useState(false);
+  const [granularity,    setGranularity]    = useState<Granularity>("daily");
 
   const fetchData = async () => {
     setLoading(true);
@@ -84,29 +88,41 @@ export default function WarehouseMeteringModal({ onClose }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { loadWarehouses(); fetchData(); }, []);
 
-  const { dailyData, totalCredits, totalCompute, totalCloud } = useMemo(() => {
-    if (!rows) return { dailyData: [], totalCredits: 0, totalCompute: 0, totalCloud: 0 };
+  const { dailyData, hourlyData, totalCredits, totalCompute, totalCloud } = useMemo(() => {
+    if (!rows) return { dailyData: [], hourlyData: [], totalCredits: 0, totalCompute: 0, totalCloud: 0 };
 
-    const byDate: Record<string, DailyEntry> = {};
+    const byDay:  Record<string, ChartEntry> = {};
+    const byHour: Record<string, ChartEntry> = {};
     let sumCredits = 0, sumCompute = 0, sumCloud = 0;
 
     for (const r of rows) {
-      const date = r.startTime ? r.startTime.slice(0, 10) : "unknown";
-      if (!byDate[date]) byDate[date] = { date, compute: 0, cloud: 0 };
-      byDate[date].compute += r.creditsUsedCompute;
-      byDate[date].cloud   += r.creditsUsedCloudServices;
+      const day  = r.startTime ? r.startTime.slice(0, 10) : "unknown";
+      // "YYYY-MM-DD HH:00" — keep the key sortable and human-readable
+      const hour = r.startTime ? dayjs(r.startTime).format("YYYY-MM-DD HH:00") : "unknown";
+
+      if (!byDay[day])   byDay[day]   = { label: day,  compute: 0, cloud: 0 };
+      if (!byHour[hour]) byHour[hour] = { label: hour, compute: 0, cloud: 0 };
+
+      byDay[day].compute   += r.creditsUsedCompute;
+      byDay[day].cloud     += r.creditsUsedCloudServices;
+      byHour[hour].compute += r.creditsUsedCompute;
+      byHour[hour].cloud   += r.creditsUsedCloudServices;
+
       sumCredits += r.creditsUsed;
       sumCompute += r.creditsUsedCompute;
       sumCloud   += r.creditsUsedCloudServices;
     }
 
     return {
-      dailyData:    Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date)),
+      dailyData:    Object.values(byDay).sort((a, b)  => a.label.localeCompare(b.label)),
+      hourlyData:   Object.values(byHour).sort((a, b) => a.label.localeCompare(b.label)),
       totalCredits: sumCredits,
       totalCompute: sumCompute,
       totalCloud:   sumCloud,
     };
   }, [rows]);
+
+  const chartData = granularity === "daily" ? dailyData : hourlyData;
 
   const columns: ColumnsType<main.WarehouseMeteringRow> = [
     {
@@ -213,13 +229,29 @@ export default function WarehouseMeteringModal({ onClose }: Props) {
             />
           </div>
 
-          {/* Daily stacked bar chart */}
-          {dailyData.length > 0 && (
+          {/* Stacked bar chart with daily / hourly toggle */}
+          {chartData.length > 0 && (
             <div style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginBottom: 4 }}>
+                <Segmented
+                  size="small"
+                  value={granularity}
+                  onChange={(v) => setGranularity(v as Granularity)}
+                  options={[
+                    { label: "Daily",  value: "daily"  },
+                    { label: "Hourly", value: "hourly" },
+                  ]}
+                />
+              </div>
               <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={dailyData} margin={{ top: 4, right: 16, bottom: 4, left: 0 }}>
+                <BarChart data={chartData} margin={{ top: 4, right: 16, bottom: 4, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: "var(--text-muted)" }} />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fontSize: 10, fill: "var(--text-muted)" }}
+                    // In hourly view with many bars, only show every Nth tick to avoid overlap
+                    interval={granularity === "hourly" ? Math.max(0, Math.floor(chartData.length / 24) - 1) : 0}
+                  />
                   <YAxis tick={{ fontSize: 11, fill: "var(--text-muted)" }} />
                   <Tooltip
                     contentStyle={{
