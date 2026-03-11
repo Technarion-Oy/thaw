@@ -249,8 +249,13 @@ export default function WarehouseMeteringModal({ onClose }: Props) {
                   <XAxis
                     dataKey="label"
                     tick={{ fontSize: 10, fill: "var(--text-muted)" }}
-                    // In hourly view with many bars, only show every Nth tick to avoid overlap
-                    interval={granularity === "hourly" ? Math.max(0, Math.floor(chartData.length / 24) - 1) : 0}
+                    angle={-40}
+                    textAnchor="end"
+                    height={50}
+                    interval={Math.max(0, Math.ceil(chartData.length / 20) - 1)}
+                    tickFormatter={(v: string) =>
+                      granularity === "daily" ? v.slice(5) : v.slice(5, 13)
+                    }
                   />
                   <YAxis tick={{ fontSize: 11, fill: "var(--text-muted)" }} />
                   <Tooltip
