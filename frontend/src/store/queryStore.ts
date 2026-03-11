@@ -98,6 +98,7 @@ interface QueryState {
   setError: (error: string | null) => void;
   executeWith: (sql: string) => Promise<void>;
   executeInNewTab: (sql: string) => void;
+  loadInNewTab: (sql: string) => void;
 }
 
 // ── store ─────────────────────────────────────────────────────────────────────
@@ -333,6 +334,20 @@ export const useQueryStore = create<QueryState>()(
     // is the only path that populates resultHistory and shows results in the UI.
     // The SQL is passed in the event detail to avoid stale-closure issues.
     window.dispatchEvent(new CustomEvent(EXECUTE_IN_TAB_EVENT, { detail: { sql } }));
+  },
+
+  loadInNewTab: (sql) => {
+    const newTab = makeTab({ sql });
+    set((state) => ({
+      tabs: [...state.tabs, newTab],
+      activeTabId: newTab.id,
+      sql,
+      selectedSql: "",
+      currentFile: null,
+      result: null,
+      error: null,
+      isRunning: false,
+    }));
   },
 }),
 {

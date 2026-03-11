@@ -153,5 +153,11 @@ func buildMenu(app *App) *menu.Menu {
 		wailsruntime.EventsEmit(app.ctx, "menu:open-terminal")
 	})
 
+	// ── Tools ─────────────────────────────────────────────────────────────────
+	toolsMenu := appMenu.AddSubmenu("Tools")
+	toolsMenu.AddText("Code Snippets…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:code-snippets")
+	})
+
 	return appMenu
 }

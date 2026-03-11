@@ -42,6 +42,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
   - Column lists are fetched once via `DESCRIBE TABLE` and cached for the session; subsequent invocations are instant
 - **AI inline completions** — ghost-text SQL suggestions powered by OpenAI or Google AI Studios (Gemini); appears automatically as you type and is accepted with `Tab`; configure via **AI → Configure AI…** in the menu bar
 - **AI Chat** — agentic chat panel in the results area (Results / AI Chat / Terminal tabs); the assistant operates in **Chat** or **Agent** mode (toggle above the input); in agent mode it calls tools against the live Snowflake connection and the local file system — see [AI Chat](#ai-chat) below
+- **Code Snippets** — open **Tools → Code Snippets…** in the menu bar to browse 24 curated `CREATE OR REPLACE` templates across six categories (Data Objects, Code, Automation, Storage, Governance, Infrastructure); live search filters by name; selecting a snippet shows a read-only preview; clicking **Open in New Tab** loads the SQL into a new scratch tab for review and customisation before running
 - Results displayed in a virtualised Ag-Grid table
 - **NULL display** — `NULL` values are rendered as a faded italic `NULL` label so they are never confused with empty strings
 - **Copy from results** — right-click any cell to open a context menu with three options: **Copy cell value**, **Copy row (tab-separated)**, and **Copy row with headers**; all three write to the native OS clipboard via the Wails runtime so they work reliably on macOS (WKWebView suppresses standard browser clipboard access)
@@ -265,7 +266,7 @@ Right-click the **account · user** tag in the query toolbar to open the **Sessi
 - **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane; ratio is persisted across sessions
 - **Object browser height** — the Objects panel is collapsible (click the label or the ▶/▼ chevron) and vertically resizable (drag the handle below the tree, 80 – 800 px); the Administration panel fills the remaining space
 - **Theming** — light, dark, and system-default themes; switch via **View → Appearance** in the native menu bar; preference is persisted across sessions
-- Native application menu bar with **File** (open / save / new tab), **View → Appearance** (System / Light / Dark), and **AI → Configure AI…** menus
+- Native application menu bar with **File** (open / save / new tab), **View → Appearance** (System / Light / Dark), **AI → Configure AI…**, and **Tools → Code Snippets…** menus
 - Object browser scrolls horizontally when object names are wider than the sidebar
 - Right-click context menu is always clamped inside the viewport — never overflows the screen edges
 - Closing the app while a query is running shows a confirmation dialog; if confirmed, the query is cancelled in Snowflake before exit
@@ -434,6 +435,7 @@ thaw/
     │       ├── settings/
     │       │   ├── AISettingsModal.tsx    # AI provider / API key / model configuration
     │       │   └── LayoutSettingsModal.tsx
+    │       ├── snippets/SnippetsModal.tsx  # Code Snippets browser (Tools menu)
     │       ├── task/CreateTaskModal.tsx    # CREATE OR REPLACE TASK dialog
     │       └── layout/
     │           ├── AppLayout.tsx  # Two-sidebar layout with drag-and-drop panel reordering and resize handles

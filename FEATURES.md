@@ -27,6 +27,14 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - `Ctrl+Space` inside a query → columns from all tables referenced in the current `FROM`/`JOIN` clauses
 - **AI inline completions** — ghost-text SQL suggestions powered by OpenAI or Google AI Studios (Gemini); press `Tab` to accept
 - **AI Chat** — an agentic assistant in the results area that can query your live Snowflake connection to answer questions about your data (see [AI Features](#ai-features))
+- **Code Snippets** — open **Tools → Code Snippets…** in the menu bar to browse 24 curated `CREATE OR REPLACE` templates across six categories:
+  - **Data Objects** — Table, View, Materialized View, Dynamic Table, Sequence
+  - **Code** — Stored Procedure (Snowflake Scripting), Stored Procedure (Python), UDF (SQL), UDF (JavaScript), UDF (Python)
+  - **Automation** — Task, Stream on Table, Pipe, Alert
+  - **Storage** — Stage (Internal), Stage (External S3), File Format (CSV), File Format (Parquet)
+  - **Governance** — Network Policy, Resource Monitor
+  - **Infrastructure** — Database, Schema, Warehouse
+  - Live search filters by snippet name across all categories; the first match is auto-selected; clicking **Open in New Tab** loads the SQL into a new scratch tab for review and customisation — not auto-executed
 - **Unsaved-change indicator** — a `•` dot in the tab title shows unsaved work at a glance
 - **Tab reordering** — drag any tab left or right to rearrange the tab strip; a vertical accent line shows the insertion point
 - **Split view** — right-click any tab and choose **Split with: [tab name]** to view two editors side by side; a draggable vertical divider separates them and the ratio is persisted across sessions; each editor is fully independent with its own completions, hover definitions, and editing history; close the split with the × button in the secondary editor header, via **Close split view** in the right-click menu, or by closing either of the two tabs
@@ -272,6 +280,7 @@ An OS shell terminal is available as a tab in the results area alongside Results
 ## UI & Theming
 
 - **Light, Dark, and System** themes — switch via **View → Appearance**; preference is saved across sessions
+- **Tools menu** — native menu bar **Tools** entry contains developer utilities; currently provides **Code Snippets…** (see above)
 - **Resizable sidebars** — drag either sidebar edge to any width between 160 px and 600 px
 - **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane to any ratio; position is saved across sessions
 - **Drag-and-drop panel layout** — every sidebar panel (Export DDL, File Browser, Git, Object Browser, Administration) has a drag handle at its top edge; drag panels between the left and right sidebars or reorder them within a sidebar; layout is persisted across sessions
