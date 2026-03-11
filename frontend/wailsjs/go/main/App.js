@@ -170,6 +170,10 @@ export function GetWarehouseDDL(arg1) {
   return window['go']['main']['App']['GetWarehouseDDL'](arg1);
 }
 
+export function GetWarehouseMeteringHistory(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetWarehouseMeteringHistory'](arg1, arg2, arg3);
+}
+
 export function GitCommitAndPush(arg1) {
   return window['go']['main']['App']['GitCommitAndPush'](arg1);
 }

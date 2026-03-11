@@ -160,6 +160,17 @@ Open **AI → Configure AI…** in the menu bar to set your provider, API key, a
 
 - View all roles, warehouses, and users in the account from the **Administration** panel in the sidebar
 
+### Warehouse Credit Usage
+
+Click the bar-chart icon in the Administration panel header (always visible, even before expanding) to open the **Warehouse Credit Usage** modal — backed by `SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY`:
+
+- **Warehouse** — select a specific warehouse or *All warehouses* to aggregate across the account
+- **Date range** — defaults to the last 30 days; pick any custom range and click **Apply** to refresh
+- **Summary cards** — total credits used, compute credits, and cloud services credits for the selected scope
+- **Daily stacked bar chart** — hourly records are aggregated by day; Compute (blue) and Cloud Services (orange) are stacked so the credit split is immediately visible; built with recharts inside a responsive container
+- **Hourly detail table** — one row per metering record; columns: Start Time, Warehouse, Total Credits, Compute Credits, Cloud Svc Credits; paginated at 20 rows/page
+- **Collapse / Expand table** — a toggle button in the table header hides the row detail while keeping the summary cards and chart visible
+
 ### Query Activity
 
 Click the clock icon in the Administration panel header (always visible, even before expanding) to open the **Query Activity** modal:

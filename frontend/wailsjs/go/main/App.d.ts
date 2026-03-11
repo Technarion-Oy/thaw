@@ -93,6 +93,8 @@ export function GetUserDDL(arg1:string):Promise<string>;
 
 export function GetWarehouseDDL(arg1:string):Promise<string>;
 
+export function GetWarehouseMeteringHistory(arg1:string,arg2:string,arg3:string):Promise<Array<main.WarehouseMeteringRow>>;
+
 export function GitCommitAndPush(arg1:gitrepo.PushParams):Promise<void>;
 
 export function GitPull(arg1:gitrepo.PullParams):Promise<void>;

@@ -986,6 +986,16 @@ type BackupSetRow struct {
 	Comment         string `json:"comment"`
 }
 
+// WarehouseMeteringRow holds one row from ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY.
+type WarehouseMeteringRow struct {
+	StartTime                string  `json:"startTime"`
+	EndTime                  string  `json:"endTime"`
+	WarehouseName            string  `json:"warehouseName"`
+	CreditsUsed              float64 `json:"creditsUsed"`
+	CreditsUsedCompute       float64 `json:"creditsUsedCompute"`
+	CreditsUsedCloudServices float64 `json:"creditsUsedCloudServices"`
+}
+
 // QueryHistoryRow holds one row from INFORMATION_SCHEMA.QUERY_HISTORY*.
 type QueryHistoryRow struct {
 	QueryID       string `json:"queryId"`
@@ -1880,6 +1890,87 @@ func (a *App) StopShell() error {
 // endTimeStart/End:    RFC3339 strings or "" for no filter
 // resultLimit:         max rows returned (1–10 000)
 // includeClientGenerated: include client-generated statements
+func (a *App) GetWarehouseMeteringHistory(warehouse, startDate, endDate string) ([]WarehouseMeteringRow, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	var conds []string
+	if warehouse != "" {
+		conds = append(conds, fmt.Sprintf("WAREHOUSE_NAME = '%s'", strings.ReplaceAll(warehouse, "'", "''")))
+	}
+	if startDate != "" {
+		conds = append(conds, fmt.Sprintf("START_TIME >= '%s'::TIMESTAMP_LTZ", startDate))
+	}
+	if endDate != "" {
+		conds = append(conds, fmt.Sprintf("START_TIME < '%s'::TIMESTAMP_LTZ", endDate))
+	}
+	where := ""
+	if len(conds) > 0 {
+		where = "WHERE " + strings.Join(conds, " AND ")
+	}
+	query := fmt.Sprintf(`
+SELECT START_TIME, END_TIME, WAREHOUSE_NAME,
+       CREDITS_USED, CREDITS_USED_COMPUTE, CREDITS_USED_CLOUD_SERVICES
+FROM SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY
+%s
+ORDER BY START_TIME ASC`, where)
+
+	res, err := a.client.QuerySingle(a.ctx, query)
+	if err != nil {
+		return nil, err
+	}
+
+	startIdx := colIdx(res.Columns, "start_time")
+	endIdx   := colIdx(res.Columns, "end_time")
+	nameIdx  := colIdx(res.Columns, "warehouse_name")
+	usedIdx  := colIdx(res.Columns, "credits_used")
+	compIdx  := colIdx(res.Columns, "credits_used_compute")
+	cloudIdx := colIdx(res.Columns, "credits_used_cloud_services")
+
+	toString := func(v interface{}) string {
+		if v == nil {
+			return ""
+		}
+		switch t := v.(type) {
+		case time.Time:
+			return t.Format(time.RFC3339)
+		default:
+			return fmt.Sprint(v)
+		}
+	}
+	toFloat := func(v interface{}) float64 {
+		if v == nil {
+			return 0
+		}
+		switch t := v.(type) {
+		case float64:
+			return t
+		case float32:
+			return float64(t)
+		case []byte:
+			f, _ := strconv.ParseFloat(string(t), 64)
+			return f
+		case string:
+			f, _ := strconv.ParseFloat(t, 64)
+			return f
+		}
+		return 0
+	}
+
+	rows := make([]WarehouseMeteringRow, 0, len(res.Rows))
+	for _, row := range res.Rows {
+		rows = append(rows, WarehouseMeteringRow{
+			StartTime:                toString(row[startIdx]),
+			EndTime:                  toString(row[endIdx]),
+			WarehouseName:            toString(row[nameIdx]),
+			CreditsUsed:              toFloat(row[usedIdx]),
+			CreditsUsedCompute:       toFloat(row[compIdx]),
+			CreditsUsedCloudServices: toFloat(row[cloudIdx]),
+		})
+	}
+	return rows, nil
+}
+
 func (a *App) GetQueryHistory(
 	filterType string,
 	sessionID string,

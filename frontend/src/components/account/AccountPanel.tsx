@@ -19,6 +19,7 @@ import {
   FileOutlined,
   DiffOutlined,
   HistoryOutlined,
+  BarChartOutlined,
 } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
@@ -36,6 +37,7 @@ import { useDiffStore } from "../../store/diffStore";
 import UserManagementPanel from "./UserManagementPanel";
 import PropertiesModal from "../common/PropertiesModal";
 import QueryHistoryModal from "./QueryHistoryModal";
+import WarehouseMeteringModal from "./WarehouseMeteringModal";
 import BackupPoliciesPanel from "../backup/BackupPoliciesPanel";
 import type { main } from "../../../wailsjs/go/models";
 
@@ -98,7 +100,8 @@ export default function AccountPanel() {
   const [ddlModal,   setDdlModal]   = useState<DdlModal | null>(null);
   const [ctxMenu,    setCtxMenu]    = useState<AccountCtxMenu | null>(null);
   const [propsModal, setPropsModal] = useState<{ title: string; rows: main.PropertyPair[] | null; error: string | null } | null>(null);
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyOpen,  setHistoryOpen]  = useState(false);
+  const [meteringOpen, setMeteringOpen] = useState(false);
   const ctxRef = useRef<HTMLDivElement>(null);
 
   const pendingDiff   = useDiffStore((s) => s.pending);
@@ -277,6 +280,14 @@ export default function AccountPanel() {
                 onClick={() => setHistoryOpen(true)}
                 style={{ height: 18, padding: "0 4px", minWidth: 0 }}
               />
+              <Button
+                size="small"
+                type="text"
+                icon={<BarChartOutlined style={{ fontSize: 11 }} />}
+                title="Warehouse Credit Usage"
+                onClick={() => setMeteringOpen(true)}
+                style={{ height: 18, padding: "0 4px", minWidth: 0 }}
+              />
               {loaded && <>
                 <Button
                   size="small"
@@ -384,6 +395,9 @@ export default function AccountPanel() {
 
       {/* Query history modal */}
       {historyOpen && <QueryHistoryModal onClose={() => setHistoryOpen(false)} />}
+
+      {/* Warehouse metering modal */}
+      {meteringOpen && <WarehouseMeteringModal onClose={() => setMeteringOpen(false)} />}
 
       {/* Properties modal */}
       {propsModal && (

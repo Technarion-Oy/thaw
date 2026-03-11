@@ -114,6 +114,18 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 
 The **Administration** collapsible panel in the sidebar shows roles, warehouses, and users. It lazy-loads on first expand.
 
+#### Warehouse Credit Usage
+
+Click the bar-chart icon in the Administration panel header (always visible, even before expanding) to open the **Warehouse Credit Usage** modal — backed by `SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY`:
+
+- **Warehouse** — select a specific warehouse or leave as *All warehouses* to aggregate across all
+- **Date range** — pick any start/end date; defaults to the last 30 days
+- **Apply** — re-fetches with the current filters; the modal also auto-fetches on open
+- **Summary cards** — total credits used, compute credits, and cloud services credits across the selected filters
+- **Daily stacked bar chart** — hourly rows are aggregated to daily totals; stacked bars show Compute (blue) and Cloud Services (orange) separately so the credit split is immediately visible; built with recharts inside a responsive container
+- **Hourly detail table** — one row per hourly metering record; columns: Start Time, Warehouse, Total Credits, Compute Credits, Cloud Svc Credits (all credit values shown to 4 decimal places); paginated at 20 rows/page
+- **Collapse / Expand table** — a button in the table header hides the detail rows while keeping the summary cards and chart visible; useful when the chart is all you need
+
 #### Query Activity
 
 Click the clock icon (⏱) in the Administration panel header to open the **Query Activity** modal — available even before expanding the panel:
@@ -404,12 +416,13 @@ thaw/
     │       │   ├── ERDesigner.tsx      # Visual ER schema designer (create new tables)
     │       │   └── buildMermaid.ts    # Mermaid source generator for the diagram viewer
     │       ├── account/
-    │       │   ├── AccountPanel.tsx        # Administration panel: roles, warehouses, user management, backup policies
-    │       │   ├── QueryHistoryModal.tsx   # Query Activity modal (INFORMATION_SCHEMA.QUERY_HISTORY_*)
-    │       │   ├── UserManagementPanel.tsx # User list, search, right-click menu
-    │       │   ├── EditUserModal.tsx       # ALTER USER dialog with live SQL preview
-    │       │   ├── CreateUserModal.tsx     # CREATE USER dialog with live SQL preview
-    │       │   └── BackupPoliciesPanel.tsx # Backup policies list with create/alter/drop
+    │       │   ├── AccountPanel.tsx           # Administration panel: roles, warehouses, user management, backup policies
+    │       │   ├── QueryHistoryModal.tsx       # Query Activity modal (INFORMATION_SCHEMA.QUERY_HISTORY_*)
+    │       │   ├── WarehouseMeteringModal.tsx  # Warehouse Credit Usage modal (ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY)
+    │       │   ├── UserManagementPanel.tsx     # User list, search, right-click menu
+    │       │   ├── EditUserModal.tsx           # ALTER USER dialog with live SQL preview
+    │       │   ├── CreateUserModal.tsx         # CREATE USER dialog with live SQL preview
+    │       │   └── BackupPoliciesPanel.tsx     # Backup policies list with create/alter/drop
     │       ├── backup/
     │       │   └── BackupSetsModal.tsx     # Backup sets + nested backups with add/drop/restore
     │       ├── chat/AiChat.tsx        # AI Chat panel with tool-call display and Run/Copy buttons

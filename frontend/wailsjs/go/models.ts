@@ -457,6 +457,28 @@ export namespace main {
 	        this.comment = source["comment"];
 	    }
 	}
+	export class WarehouseMeteringRow {
+	    startTime: string;
+	    endTime: string;
+	    warehouseName: string;
+	    creditsUsed: number;
+	    creditsUsedCompute: number;
+	    creditsUsedCloudServices: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new WarehouseMeteringRow(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.startTime = source["startTime"];
+	        this.endTime = source["endTime"];
+	        this.warehouseName = source["warehouseName"];
+	        this.creditsUsed = source["creditsUsed"];
+	        this.creditsUsedCompute = source["creditsUsedCompute"];
+	        this.creditsUsedCloudServices = source["creditsUsedCloudServices"];
+	    }
+	}
 
 }
 
