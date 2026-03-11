@@ -232,6 +232,7 @@ Right-click any **database**, **schema**, or **table** in the object browser and
 ## Results & Export
 
 - Query results displayed in a virtualised grid — handles large result sets smoothly
+- **NULL display** — `NULL` values are rendered as a faded italic `NULL` label so they are never confused with empty strings
 - **Copy from results** — right-click any cell to open a context menu with: **Copy cell value**, **Copy row (tab-separated)**, and **Copy row with headers**; all three write to the native OS clipboard so they work reliably on macOS
 - **Result history** — the last 10 successful result sets are kept in memory for the session; a dropdown in the results status bar (visible after two or more runs) lets you switch between them instantly, similar to `LAST_QUERY_ID(-n)` in SQL; after a query failure the error is shown and the dropdown appears as a standalone **Previous results** picker — the last result grid is not auto-displayed so the failure is immediately obvious, but any historical result can be recalled on demand
 - **Export results** — CSV (RFC 4180) and Excel (`.xlsx`) export with a native save dialog; exports always reflect whichever result is currently selected in the history dropdown

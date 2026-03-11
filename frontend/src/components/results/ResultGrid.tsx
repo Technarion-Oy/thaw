@@ -34,6 +34,19 @@ interface CtxMenu {
 // from consuming the entire grid and hiding all other columns.
 const MAX_COL_WIDTH = 300;
 
+// Render NULL/undefined as a distinct faded label so it is never confused
+// with an empty string.  All other values are stringified normally.
+function NullCellRenderer({ value }: { value: unknown }) {
+  if (value === null || value === undefined) {
+    return (
+      <span style={{ color: "var(--text-faint)", fontStyle: "italic", fontSize: 10, letterSpacing: "0.04em" }}>
+        NULL
+      </span>
+    );
+  }
+  return <>{String(value)}</>;
+}
+
 // Read a CSS variable from the document root as a number (strip "px").
 function cssVar(name: string, fallback: number): number {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -162,7 +175,7 @@ export default function ResultGrid({ result }: Props) {
         <AgGridReact
           columnDefs={columnDefs}
           rowData={rowData}
-          defaultColDef={{ resizable: true, minWidth: 60, maxWidth: MAX_COL_WIDTH }}
+          defaultColDef={{ resizable: true, minWidth: 60, maxWidth: MAX_COL_WIDTH, cellRenderer: NullCellRenderer }}
           rowHeight={cssVar("--row-height", 24)}
           headerHeight={cssVar("--header-height", 28)}
           animateRows
