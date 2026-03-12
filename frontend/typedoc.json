@@ -1,0 +1,19 @@
+{
+  "plugin": ["typedoc-plugin-markdown"],
+  "entryPointStrategy": "expand",
+  "entryPoints": ["src"],
+  "out": "../docs/frontend",
+  "tsconfig": "./tsconfig.typedoc.json",
+  "readme": "none",
+  "name": "Thaw Frontend",
+  "outputFileStrategy": "modules",
+  "useCodeBlocks": true,
+  "parametersFormat": "table",
+  "propertiesFormat": "table",
+  "enumMembersFormat": "table",
+  "typeDeclarationFormat": "table",
+  "indexFormat": "table",
+  "excludeExternals": true,
+  "exclude": ["**/*.test.ts", "**/*.spec.ts"],
+  "skipErrorChecking": true
+}

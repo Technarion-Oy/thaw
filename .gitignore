@@ -34,5 +34,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# ── Generated documentation (source files in docs/ are tracked; output is not) ─
+/docs/frontend/
+/docs/backend/
+
 # ── Claude Code (local session state — not project files) ─────────────────────
 .claude/
