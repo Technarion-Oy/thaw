@@ -578,6 +578,7 @@ granted to the owner of the database created by the test.
 - **Adding a new backend method** — add the method to `app.go`, then run `wails generate module` to regenerate the JS bindings in `frontend/wailsjs/`.
 - **Adding a new Go package** — place it under `internal/` and import it from `app.go`.
 - **Adding a native menu item** — extend `buildMenu` in `main.go`; emit a Wails event from the callback and listen with `EventsOn` in the relevant frontend component.
+- **GoDoc coverage** — every exported identifier and every significant unexported function carries a GoDoc comment; run `go doc ./...` or hover in any LSP-enabled editor to browse them.
 
 ---
 

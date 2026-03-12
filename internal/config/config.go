@@ -53,6 +53,8 @@ type AppConfig struct {
 	AI          AIConfig     `json:"ai"`
 }
 
+// configPath returns the absolute path to the application configuration file,
+// typically $HOME/.config/thaw/config.json on Linux/macOS.
 func configPath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {

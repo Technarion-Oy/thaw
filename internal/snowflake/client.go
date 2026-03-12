@@ -97,6 +97,9 @@ type sessionConnector struct {
 	wh   string
 }
 
+// Connect opens a new raw driver connection via the underlying gosnowflake
+// connector and immediately applies the stored role and warehouse, ensuring
+// that every pooled connection reflects the current session state.
 func (sc *sessionConnector) Connect(ctx context.Context) (driver.Conn, error) {
 	conn, err := sc.base.Connect(ctx)
 	if err != nil {
@@ -114,6 +117,7 @@ func (sc *sessionConnector) Connect(ctx context.Context) (driver.Conn, error) {
 	return conn, nil
 }
 
+// Driver returns the underlying gosnowflake driver. Required by driver.Connector.
 func (sc *sessionConnector) Driver() driver.Driver { return sc.base.Driver() }
 
 // connExec runs a single statement on a raw driver.Conn (best-effort; errors

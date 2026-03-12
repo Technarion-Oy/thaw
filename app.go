@@ -62,10 +62,13 @@ type App struct {
 	ptyCmd *exec.Cmd
 }
 
+// NewApp creates and returns a new App instance for use with the Wails runtime.
 func NewApp() *App {
 	return &App{}
 }
 
+// startup is called by the Wails runtime after the application window is ready.
+// It stores the application context, initialises logging and telemetry.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.logCleanup = logger.Init()
@@ -81,6 +84,9 @@ func (a *App) isQueryRunning() bool {
 	return a.queryID != ""
 }
 
+// shutdown is called by the Wails runtime just before the application exits.
+// It stops the embedded terminal, cancels any in-flight query, closes the
+// Snowflake connection, and flushes logs and telemetry.
 func (a *App) shutdown(_ context.Context) {
 	// Stop any running terminal process cleanly before the app exits.
 	a.StopShell() //nolint:errcheck
@@ -1905,6 +1911,10 @@ func (a *App) CanViewWarehouseMeteringHistory() (bool, error) {
 	return true, nil
 }
 
+// GetWarehouseMeteringHistory returns hourly credit usage records from
+// SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY. Rows are ordered by
+// START_TIME ascending. warehouse, startDate, and endDate are all optional
+// filters; dates must be RFC3339 strings when provided.
 func (a *App) GetWarehouseMeteringHistory(warehouse, startDate, endDate string) ([]WarehouseMeteringRow, error) {
 	if a.client == nil {
 		return nil, ErrNotConnected
@@ -1986,6 +1996,16 @@ ORDER BY START_TIME ASC`, where)
 	return rows, nil
 }
 
+// GetQueryHistory queries SNOWFLAKE.INFORMATION_SCHEMA.QUERY_HISTORY* table
+// functions and returns a slice of QueryHistoryRow ordered by start time desc.
+//
+//   - filterType:             "session" | "user" | "warehouse" | "all"
+//   - sessionID:              non-empty → SESSION_ID => <id> (filterType="session")
+//   - userName:               non-empty → USER_NAME => '<name>'
+//   - warehouseName:          non-empty → WAREHOUSE_NAME => '<name>'
+//   - endTimeStart/End:       RFC3339 strings or "" for no filter
+//   - resultLimit:            max rows returned (1–10 000)
+//   - includeClientGenerated: include client-generated statements
 func (a *App) GetQueryHistory(
 	filterType string,
 	sessionID string,

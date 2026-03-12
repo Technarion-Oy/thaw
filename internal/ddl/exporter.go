@@ -36,6 +36,8 @@ type ExportOptions struct {
 	FileConcurrency int
 }
 
+// applyDefaults fills in zero-value concurrency fields with CPU-proportional
+// defaults so callers do not need to set them explicitly.
 func (o *ExportOptions) applyDefaults() {
 	if o.DBConcurrency <= 0 {
 		// Each database fetch is now a single Snowflake round-trip (pure I/O),
@@ -121,6 +123,8 @@ func ExportDatabases(
 
 // ─── per-database export ──────────────────────────────────────────────────────
 
+// writeJob is a unit of work dispatched to the file-writer goroutine pool.
+// absPath is the destination file and content is the SQL to write.
 type writeJob struct {
 	absPath string
 	content []byte

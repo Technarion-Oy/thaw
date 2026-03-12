@@ -28,6 +28,8 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+// main is the application entry point. It initialises crash reporting, builds
+// the native menu, and hands control to the Wails runtime.
 func main() {
 	crashreport.Init(Version)
 	defer crashreport.Recover()

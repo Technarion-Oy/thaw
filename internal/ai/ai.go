@@ -152,6 +152,9 @@ func Chat(ctx context.Context, provider, apiKey, model string, history []UIMessa
 	}
 }
 
+// buildSystemPrompt returns the system-level instruction block injected at the
+// start of every chat request. It adapts based on whether agent mode (tool
+// access) is active and includes the current SQL and last result for context.
 func buildSystemPrompt(currentSQL, lastResultSummary string, agentMode bool, workDir string) string {
 	var sb strings.Builder
 	if agentMode {
@@ -191,6 +194,9 @@ func buildSystemPrompt(currentSQL, lastResultSummary string, agentMode bool, wor
 
 // ── OpenAI chat with tool-calling ─────────────────────────────────────────────
 
+// openAIChat handles a single chat turn using the OpenAI Chat Completions API.
+// In agent mode it runs a tool-calling loop (up to 8 iterations); otherwise
+// it performs a single round-trip and returns the assistant response.
 func openAIChat(ctx context.Context, apiKey, model string, history []UIMessage, userText, currentSQL, lastResultSummary string, agentMode bool, workDir string, exec ToolExecutor) (UIMessage, error) {
 	systemPrompt := buildSystemPrompt(currentSQL, lastResultSummary, agentMode, workDir)
 
@@ -365,6 +371,9 @@ func openAIChat(ctx context.Context, apiKey, model string, history []UIMessage, 
 
 // ── Google Gemini chat with function-calling ───────────────────────────────────
 
+// googleChat handles a single chat turn using the Google Gemini generateContent
+// API. In agent mode it runs a function-calling loop (up to 8 iterations);
+// otherwise it performs a single round-trip and returns the model response.
 func googleChat(ctx context.Context, apiKey, model string, history []UIMessage, userText, currentSQL, lastResultSummary string, agentMode bool, workDir string, exec ToolExecutor) (UIMessage, error) {
 	systemPrompt := buildSystemPrompt(currentSQL, lastResultSummary, agentMode, workDir)
 
@@ -597,6 +606,8 @@ func GetSuggestion(provider, apiKey, model, prompt string) (string, error) {
 
 // ── OpenAI ────────────────────────────────────────────────────────────────────
 
+// openAISuggestion requests an inline SQL completion from the OpenAI Chat
+// Completions API. It returns the trimmed response text or an error.
 func openAISuggestion(apiKey, model, prompt string) (string, error) {
 	body, err := json.Marshal(map[string]any{
 		"model":      model,
@@ -661,6 +672,8 @@ func ListModels(provider, apiKey string) ([]string, error) {
 	}
 }
 
+// listOpenAIModels fetches the available models from the OpenAI /v1/models
+// endpoint and returns only GPT chat-capable model IDs, sorted alphabetically.
 func listOpenAIModels(apiKey string) ([]string, error) {
 	req, err := http.NewRequest(http.MethodGet, "https://api.openai.com/v1/models", nil)
 	if err != nil {
@@ -702,6 +715,8 @@ func listOpenAIModels(apiKey string) ([]string, error) {
 	return models, nil
 }
 
+// listGoogleModels fetches Gemini models from the Google Generative Language
+// API and returns only those that support generateContent, sorted alphabetically.
 func listGoogleModels(apiKey string) ([]string, error) {
 	url := "https://generativelanguage.googleapis.com/v1beta/models?key=" + apiKey
 
@@ -777,6 +792,8 @@ func TestModel(provider, apiKey, model string) error {
 	}
 }
 
+// testOpenAIModel sends a minimal one-token request to the OpenAI Chat
+// Completions API to verify that the key and model are valid.
 func testOpenAIModel(apiKey, model string) error {
 	body, err := json.Marshal(map[string]any{
 		"model":      model,
@@ -813,6 +830,8 @@ func testOpenAIModel(apiKey, model string) error {
 	return nil
 }
 
+// testGoogleModel sends a minimal one-token request to the Google Gemini
+// generateContent API to verify that the key and model are valid.
 func testGoogleModel(apiKey, model string) error {
 	url := fmt.Sprintf(
 		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
@@ -853,6 +872,8 @@ func testGoogleModel(apiKey, model string) error {
 
 // ── Google AI Studios (Gemini) ────────────────────────────────────────────────
 
+// googleSuggestion requests an inline SQL completion from the Google Gemini
+// generateContent API. It returns the trimmed response text or an error.
 func googleSuggestion(apiKey, model, prompt string) (string, error) {
 	url := fmt.Sprintf(
 		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",

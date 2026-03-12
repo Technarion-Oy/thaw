@@ -349,6 +349,7 @@ type nameTracker struct {
 	seen map[string]struct{}
 }
 
+// newNameTracker returns an initialised nameTracker ready for use.
 func newNameTracker() *nameTracker {
 	return &nameTracker{seen: make(map[string]struct{})}
 }
