@@ -81,6 +81,11 @@ type Object struct {
 	SQL      string // full DDL text (without trailing semicolon)
 }
 
+// DefaultExportPathTemplate is the path template used when no custom template
+// has been configured. Placeholders: {database}, {schema}, {object_type},
+// {object_name}.
+const DefaultExportPathTemplate = "{database}/{schema}/{object_type}/{object_name}.sql"
+
 // FilePath returns the path relative to the database output directory where
 // this object's .sql file should be written.
 //
@@ -108,6 +113,51 @@ func (o *Object) FilePath() string {
 			fname = fname + "__" + o.ArgSig
 		}
 		return filepath.Join(sanitize(schema), dirFor(o.Kind), fname+".sql")
+	}
+}
+
+// FilePathFor returns the path relative to OutputDir where this object's .sql
+// file should be written, applying the given path template.
+//
+// For KindDatabase and KindSchema the path is always fixed regardless of the
+// template, since they are structural anchors:
+//
+//	<database>/_database.sql
+//	<database>/schemas/<SCHEMA>.sql
+//
+// For all other kinds the template is applied with the following substitutions:
+//
+//	{database}    → sanitized database name
+//	{schema}      → sanitized schema name (or "_root" when absent)
+//	{object_type} → plural lowercase type directory (e.g. "tables", "views")
+//	{object_name} → sanitized object name (includes __argsig for overloads)
+//
+// An empty template falls back to DefaultExportPathTemplate.
+func (o *Object) FilePathFor(template, database string) string {
+	switch o.Kind {
+	case KindDatabase:
+		return filepath.Join(sanitize(database), "_database.sql")
+	case KindSchema:
+		return filepath.Join(sanitize(database), "schemas", sanitize(o.Name)+".sql")
+	default:
+		if template == "" {
+			template = DefaultExportPathTemplate
+		}
+		schema := o.Schema
+		if schema == "" {
+			schema = "_root"
+		}
+		fname := sanitize(o.Name)
+		if (o.Kind == KindFunction || o.Kind == KindProcedure) && o.ArgSig != "" {
+			fname = fname + "__" + o.ArgSig
+		}
+		r := strings.NewReplacer(
+			"{database}", sanitize(database),
+			"{schema}", sanitize(schema),
+			"{object_type}", dirFor(o.Kind),
+			"{object_name}", fname,
+		)
+		return filepath.FromSlash(r.Replace(template))
 	}
 }
 

@@ -30,11 +30,12 @@ type Connection struct {
 // GitConfig holds the persisted git / export settings.
 // Token is intentionally excluded — it must not be written to disk.
 type GitConfig struct {
-	ExportDir   string `json:"exportDir"`
-	RemoteURL   string `json:"remoteURL"`
-	Branch      string `json:"branch"`
-	AuthorName  string `json:"authorName"`
-	AuthorEmail string `json:"authorEmail"`
+	ExportDir          string `json:"exportDir"`
+	RemoteURL          string `json:"remoteURL"`
+	Branch             string `json:"branch"`
+	AuthorName         string `json:"authorName"`
+	AuthorEmail        string `json:"authorEmail"`
+	ExportPathTemplate string `json:"exportPathTemplate"`
 }
 
 // AIConfig holds AI provider settings.

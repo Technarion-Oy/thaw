@@ -149,6 +149,7 @@ Open **AI → Configure AI…** in the menu bar to set your provider, API key, a
 - Fully qualified object names (`db.schema.object`) in every `CREATE` statement
 - Shared / imported databases (e.g. `SNOWFLAKE_SAMPLE_DATA`) are automatically skipped
 - Files are organised on disk by schema and object type (tables, views, functions, procedures, sequences, stages, streams, tasks, file formats, pipes)
+- **Configurable export path format** — open **Tools → Export Path Format…** to define a custom file path template; supported placeholders: `{database}`, `{schema}`, `{object_type}`, `{object_name}`; leave blank to use the default `{database}/{schema}/{object_type}/{object_name}.sql`; a live preview shows an example path as you type; the template is persisted across sessions
 - Parallel export — up to 16 databases fetched concurrently; each database uses a single `GET_DDL('DATABASE', name, true)` call for maximum throughput
 - **Live progress bar** while the export runs
 - **Cancel** — stop an in-progress export at any time
@@ -280,7 +281,7 @@ An OS shell terminal is available as a tab in the results area alongside Results
 ## UI & Theming
 
 - **Light, Dark, and System** themes — switch via **View → Appearance**; preference is saved across sessions
-- **Tools menu** — native menu bar **Tools** entry contains developer utilities; currently provides **Code Snippets…** (see above)
+- **Tools menu** — native menu bar **Tools** entry contains developer utilities; currently provides **Code Snippets…** (see above) and **Export Path Format…** (configure the DDL export file path template)
 - **Resizable sidebars** — drag either sidebar edge to any width between 160 px and 600 px
 - **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane to any ratio; position is saved across sessions
 - **Drag-and-drop panel layout** — every sidebar panel (Export DDL, File Browser, Git, Object Browser, Administration) has a drag handle at its top edge; drag panels between the left and right sidebars or reorder them within a sidebar; layout is persisted across sessions

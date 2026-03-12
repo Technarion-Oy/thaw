@@ -27,6 +27,11 @@ type ExportOptions struct {
 	// OutputDir is the root directory under which per-database sub-trees are written.
 	OutputDir string
 
+	// PathTemplate controls the file path produced for each exported object.
+	// Supported placeholders: {database}, {schema}, {object_type}, {object_name}.
+	// An empty value falls back to DefaultExportPathTemplate.
+	PathTemplate string
+
 	// DBConcurrency is the maximum number of databases fetched from Snowflake
 	// simultaneously.  Defaults to min(16, runtime.NumCPU()*4).
 	DBConcurrency int
@@ -146,7 +151,6 @@ func exportOne(ctx context.Context, database string, fetch FetchDDL, opts Export
 	// This is intentionally single-threaded: the collision resolver is stateful
 	// and sequential resolution gives deterministic, reproducible output.
 	tracker := newNameTracker()
-	dbDir := filepath.Join(opts.OutputDir, sanitize(database))
 
 	jobs := make([]writeJob, 0, len(stmts))
 	for _, s := range stmts {
@@ -156,9 +160,9 @@ func exportOne(ctx context.Context, database string, fetch FetchDDL, opts Export
 			continue
 		}
 
-		rel := tracker.resolve(obj.FilePath())
+		rel := tracker.resolve(obj.FilePathFor(opts.PathTemplate, database))
 		jobs = append(jobs, writeJob{
-			absPath: filepath.Join(dbDir, rel),
+			absPath: filepath.Join(opts.OutputDir, rel),
 			content: []byte(obj.SQL + ";\n"),
 		})
 	}
@@ -209,7 +213,7 @@ func exportOne(ctx context.Context, database string, fetch FetchDDL, opts Export
 	// fully-qualified-name support was added (GET_DDL(..., true)).  Now that all
 	// objects use three-part names the directory is never written to, but old
 	// runs may have left files there that would confuse users.
-	rootDir := filepath.Join(dbDir, "_root")
+	rootDir := filepath.Join(opts.OutputDir, sanitize(database), "_root")
 	if _, statErr := os.Stat(rootDir); statErr == nil {
 		_ = os.RemoveAll(rootDir)
 	}

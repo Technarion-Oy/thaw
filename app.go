@@ -1405,7 +1405,11 @@ func (a *App) ExportDatabaseDDL(database, outputDir string) (ddl.ExportResult, e
 		a.exportCancelFunc = nil
 	}()
 
-	opts := ddl.ExportOptions{OutputDir: outputDir}
+	var pathTemplate string
+	if cfg, err := config.Load(); err == nil {
+		pathTemplate = cfg.Git.ExportPathTemplate
+	}
+	opts := ddl.ExportOptions{OutputDir: outputDir, PathTemplate: pathTemplate}
 
 	var result ddl.ExportResult
 	ddl.ExportDatabases(
@@ -1448,7 +1452,11 @@ func (a *App) ExportAllDatabasesDDL(outputDir string) ([]ddl.ExportResult, error
 		a.exportCancelFunc = nil
 	}()
 
-	opts := ddl.ExportOptions{OutputDir: outputDir}
+	var pathTemplate string
+	if cfg, err := config.Load(); err == nil {
+		pathTemplate = cfg.Git.ExportPathTemplate
+	}
+	opts := ddl.ExportOptions{OutputDir: outputDir, PathTemplate: pathTemplate}
 
 	results := ddl.ExportDatabases(
 		ctx,

@@ -81,6 +81,7 @@ export namespace config {
 	    branch: string;
 	    authorName: string;
 	    authorEmail: string;
+	    exportPathTemplate: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new GitConfig(source);
@@ -93,6 +94,7 @@ export namespace config {
 	        this.branch = source["branch"];
 	        this.authorName = source["authorName"];
 	        this.authorEmail = source["authorEmail"];
+	        this.exportPathTemplate = source["exportPathTemplate"];
 	    }
 	}
 

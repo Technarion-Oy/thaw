@@ -18,6 +18,7 @@ import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, Pick
 import type { main } from "../../wailsjs/go/models";
 import SessionPropertiesModal from "../components/common/SessionPropertiesModal";
 import SnippetsModal from "../components/snippets/SnippetsModal";
+import ExportPathFormatModal from "../components/export/ExportPathFormatModal";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import SqlEditor from "../components/editor/SqlEditor";
 import TabBar from "../components/editor/TabBar";
@@ -68,6 +69,7 @@ export default function QueryPage() {
   const [historyIdx,    setHistoryIdx]    = useState<number | null>(null);
 
   const [snippetsOpen, setSnippetsOpen] = useState(false);
+  const [exportPathFormatOpen, setExportPathFormatOpen] = useState(false);
   const [sessionPropsOpen, setSessionPropsOpen] = useState(false);
   const [sessionParams, setSessionParams] = useState<main.SessionParam[] | null>(null);
   const [sessionVars, setSessionVars] = useState<main.SessionVar[] | null>(null);
@@ -366,6 +368,11 @@ export default function QueryPage() {
 
   useEffect(() => {
     const off = EventsOn("menu:code-snippets", () => setSnippetsOpen(true));
+    return () => off();
+  }, []);
+
+  useEffect(() => {
+    const off = EventsOn("menu:export-path-format", () => setExportPathFormatOpen(true));
     return () => off();
   }, []);
 
@@ -810,6 +817,7 @@ export default function QueryPage() {
       </div>}
 
       {snippetsOpen && <SnippetsModal onClose={() => setSnippetsOpen(false)} />}
+      {exportPathFormatOpen && <ExportPathFormatModal onClose={() => setExportPathFormatOpen(false)} />}
 
       {sessionPropsOpen && (
         <SessionPropertiesModal

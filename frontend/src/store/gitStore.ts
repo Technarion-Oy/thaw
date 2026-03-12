@@ -22,6 +22,7 @@ interface GitState {
   branch: string;
   authorName: string;
   authorEmail: string;
+  exportPathTemplate: string;
   configLoaded: boolean;
 
   // Runtime state
@@ -39,6 +40,7 @@ interface GitState {
     branch: string;
     authorName: string;
     authorEmail: string;
+    exportPathTemplate: string;
   }>) => Promise<void>;
   pickExportDir: () => Promise<void>;
   refreshStatus: () => Promise<void>;
@@ -53,6 +55,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   branch: "main",
   authorName: "",
   authorEmail: "",
+  exportPathTemplate: "",
   configLoaded: false,
 
   status: null,
@@ -65,11 +68,12 @@ export const useGitStore = create<GitState>((set, get) => ({
     try {
       const cfg = await GetGitConfig();
       set({
-        exportDir:   cfg.exportDir   || "",
-        remoteURL:   cfg.remoteURL   || "",
-        branch:      cfg.branch      || "main",
-        authorName:  cfg.authorName  || "",
-        authorEmail: cfg.authorEmail || "",
+        exportDir:          cfg.exportDir          || "",
+        remoteURL:          cfg.remoteURL          || "",
+        branch:             cfg.branch             || "main",
+        authorName:         cfg.authorName         || "",
+        authorEmail:        cfg.authorEmail        || "",
+        exportPathTemplate: cfg.exportPathTemplate || "",
         configLoaded: true,
       });
       // Auto-refresh git status if we have a saved directory
@@ -82,8 +86,8 @@ export const useGitStore = create<GitState>((set, get) => ({
   },
 
   saveConfig: async (patch) => {
-    const { exportDir, remoteURL, branch, authorName, authorEmail } = get();
-    const merged = { exportDir, remoteURL, branch, authorName, authorEmail, ...patch };
+    const { exportDir, remoteURL, branch, authorName, authorEmail, exportPathTemplate } = get();
+    const merged = { exportDir, remoteURL, branch, authorName, authorEmail, exportPathTemplate, ...patch };
     set(merged);
     try {
       await SaveGitConfig(merged);

@@ -219,7 +219,7 @@ Right-click the **account · user** tag in the query toolbar to open the **Sessi
 - Export DDL for every database (or a single one) with one file per object
 - Fully qualified names (`db.schema.object`) in every CREATE statement
 - Shared / imported databases (e.g. `SNOWFLAKE_SAMPLE_DATA`) are automatically skipped
-- Files are organised on disk by schema and object type:
+- Files are organised on disk by schema and object type (default layout):
   ```
   <outputDir>/<DATABASE>/
       _database.sql
@@ -236,6 +236,7 @@ Right-click the **account · user** tag in the query toolbar to open the **Sessi
           file_formats/
           pipes/
   ```
+- **Configurable export path format** — open **Tools → Export Path Format…** in the menu bar to customise the file path template used for each exported object; supported placeholders: `{database}`, `{schema}`, `{object_type}`, `{object_name}`; a live preview shows an example path as you type; the setting is persisted to `config.json`
 - Parallel fetch (up to 16 databases concurrently) and parallel atomic writes; each database is fetched with a single `GET_DDL('DATABASE', name, true)` call
 - Live progress bar driven by Wails events from the Go backend
 - **Cancel export** — a Cancel button appears next to the Export button while a run is in progress; cancels both the in-flight Snowflake DDL fetch and the local file writes
@@ -266,7 +267,7 @@ Right-click the **account · user** tag in the query toolbar to open the **Sessi
 - **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane; ratio is persisted across sessions
 - **Object browser height** — the Objects panel is collapsible (click the label or the ▶/▼ chevron) and vertically resizable (drag the handle below the tree, 80 – 800 px); the Administration panel fills the remaining space
 - **Theming** — light, dark, and system-default themes; switch via **View → Appearance** in the native menu bar; preference is persisted across sessions
-- Native application menu bar with **File** (open / save / new tab), **View → Appearance** (System / Light / Dark), **AI → Configure AI…**, and **Tools → Code Snippets…** menus
+- Native application menu bar with **File** (open / save / new tab), **View → Appearance** (System / Light / Dark), **AI → Configure AI…**, and **Tools** (**Code Snippets…**, **Export Path Format…**) menus
 - Object browser scrolls horizontally when object names are wider than the sidebar
 - Right-click context menu is always clamped inside the viewport — never overflows the screen edges
 - Closing the app while a query is running shows a confirmation dialog; if confirmed, the query is cancelled in Snowflake before exit
@@ -607,7 +608,7 @@ Git and export settings are stored at:
 - **Linux** — `~/.config/thaw/config.json`
 - **Windows** — `%APPDATA%\thaw\config.json`
 
-The file stores the remote URL, branch, export directory, author info, and AI provider settings (provider, model, enabled flag, and API key).
+The file stores the remote URL, branch, export directory, export path template, author info, and AI provider settings (provider, model, enabled flag, and API key).
 **Git tokens are never written to disk.** The AI API key is written to `config.json` with mode `0600` (owner-read-only).
 
 Log and crash files are written to:
