@@ -550,7 +550,12 @@ func (a *App) StartQuery(sql string) (string, error) {
 	// Execute the query in a background goroutine so this method can return
 	// as soon as the query ID arrives (before results are ready).
 	go func() {
-		result, err := a.client.Execute(ctx, sql)
+		result, err := a.client.Execute(ctx, sql, func(idx, total int) {
+			// Notify the frontend which statement is about to run.  Only
+			// fired for multi-statement scripts (total > 1).
+			wailsruntime.EventsEmit(a.ctx, "query:statement-start",
+				map[string]int{"index": idx, "total": total})
+		})
 		a.queryMu.Lock()
 		a.queryResult = result
 		a.queryErr = err

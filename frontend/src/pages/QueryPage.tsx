@@ -59,6 +59,12 @@ export default function QueryPage() {
   const [splitW, setSplitW] = useState(splitEditorWidth);
   const [runningQueryId, setRunningQueryId] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
+  // Multi-statement progress: which statement is running and out of how many.
+  const [stmtProgress, setStmtProgress] = useState<{ index: number; total: number } | null>(null);
+  // Zero-based index of the statement currently executing; drives editor highlight.
+  const [activeStmtIdx, setActiveStmtIdx] = useState<number | null>(null);
+  // True while the running query is a user-text selection (not the full buffer).
+  const isSelectionRunRef = useRef(false);
   const [resultPane, setResultPane] = useState<"results" | "chat" | "terminal">("results");
   const [aiEnabled, setAiEnabled] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
@@ -121,6 +127,20 @@ export default function QueryPage() {
     return () => window.removeEventListener("load-query", handler);
   }, [setSql]);
 
+  // Listen for per-statement progress events emitted by the Go backend while
+  // executing a multi-statement script.  Update the spinner label and highlight
+  // the active statement in the editor.
+  useEffect(() => {
+    const cleanup = EventsOn("query:statement-start", (data: { index: number; total: number }) => {
+      setStmtProgress({ index: data.index, total: data.total });
+      // Only highlight in the editor when running the full buffer (not a selection).
+      if (!isSelectionRunRef.current) {
+        setActiveStmtIdx(data.index);
+      }
+    });
+    return cleanup as () => void;
+  }, []);
+
   // Vertical drag handle mouse handlers (for split editor width).
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
@@ -150,8 +170,11 @@ export default function QueryPage() {
     const query = overrideSql ?? (selectedSql.trim() || sql.trim());
     if (!query) return;
     cancelRequestedRef.current = false;
+    isSelectionRunRef.current  = !overrideSql && selectedSql.trim() !== "";
     setIsCancelling(false);
     setRunningQueryId(null);
+    setStmtProgress(null);
+    setActiveStmtIdx(null);
     setResultPane("results");
     setRunning(true);
     try {
@@ -177,6 +200,8 @@ export default function QueryPage() {
     } finally {
       setRunning(false);
       setIsCancelling(false);
+      setStmtProgress(null);
+      setActiveStmtIdx(null);
     }
   };
 
@@ -561,7 +586,7 @@ export default function QueryPage() {
         >
           {/* Primary editor */}
           <div style={{ flex: splitTabId ? `0 0 ${splitW * 100}%` : "1 1 100%", overflow: "hidden" }}>
-            <SqlEditor />
+            <SqlEditor activeStmtIdx={activeStmtIdx} />
           </div>
 
           {/* Vertical drag handle + secondary editor */}
@@ -680,7 +705,11 @@ export default function QueryPage() {
             {isRunning && (
               <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, zIndex: 10, background: "rgba(0,0,0,0.4)" }}>
                 <Spin size="large" />
-                {runningQueryId && (
+                {stmtProgress && stmtProgress.total > 1 ? (
+                  <Text style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                    statement {stmtProgress.index + 1} of {stmtProgress.total}
+                  </Text>
+                ) : runningQueryId ? (
                   <Space size={4}>
                     <Text style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)" }}>
                       {runningQueryId}
@@ -693,7 +722,7 @@ export default function QueryPage() {
                       onClick={async () => { await ClipboardSetText(runningQueryId); message.success("Query ID copied"); }}
                     />
                   </Space>
-                )}
+                ) : null}
               </div>
             )}
 

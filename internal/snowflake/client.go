@@ -274,7 +274,15 @@ func (c *Client) Close() error {
 //     then deadlocks waiting for the conn to become free. Running without
 //     async mode means each statement blocks until its results arrive, which
 //     is exactly what sequential scripts need.
-func (c *Client) Execute(ctx context.Context, query string) (*QueryResult, error) {
+// Execute runs one or more semicolon-separated SQL statements sequentially and
+// returns the last result set.
+//
+// onProgress, if provided, is called once per statement before that statement
+// begins executing.  The first argument is the zero-based statement index; the
+// second is the total statement count.  This is used by the frontend to
+// highlight the currently-running statement in the editor.  The parameter is
+// variadic so all existing callers remain unchanged.
+func (c *Client) Execute(ctx context.Context, query string, onProgress ...func(idx, total int)) (*QueryResult, error) {
 	stmts := splitStatements(query)
 	if len(stmts) == 0 {
 		return &QueryResult{Rows: [][]interface{}{}}, nil
@@ -301,8 +309,15 @@ func (c *Client) Execute(ctx context.Context, query string) (*QueryResult, error
 	}
 	defer conn.Close()
 
+	progress := func(idx int) {
+		if len(onProgress) > 0 && onProgress[0] != nil {
+			onProgress[0](idx, len(stmts))
+		}
+	}
+
 	var last *QueryResult
-	for _, stmt := range stmts {
+	for i, stmt := range stmts {
+		progress(i)
 		result, err := queryOnConn(execCtx, conn, stmt)
 		if err != nil {
 			return nil, err

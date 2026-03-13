@@ -94,9 +94,88 @@ interface DdlHover {
 
 interface SqlEditorProps {
   tabId?: string;
+  /** Zero-based index of the statement currently executing; null when idle. */
+  activeStmtIdx?: number | null;
 }
 
-export default function SqlEditor({ tabId }: SqlEditorProps = {}) {
+// ── Statement range parser ─────────────────────────────────────────────────
+// Returns [{startLine, endLine}] (1-indexed Monaco line numbers) for each
+// semicolon-separated statement in the SQL.  Mirrors the backend's
+// splitStatements logic for consistent statement counting.
+function getStatementLineRanges(sql: string): Array<{ startLine: number; endLine: number }> {
+  const ranges: Array<{ startLine: number; endLine: number }> = [];
+  let line = 1;
+  let stmtStartLine = -1; // -1 = not yet started (waiting for first non-ws char)
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  let dollarTag = "";
+
+  const finishStmt = (endLine: number) => {
+    if (stmtStartLine > 0) {
+      ranges.push({ startLine: stmtStartLine, endLine });
+      stmtStartLine = -1;
+    }
+  };
+
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+
+    if (ch === "\n") {
+      if (inLineComment) inLineComment = false;
+      line++;
+      continue;
+    }
+
+    if (inLineComment) continue;
+
+    if (inBlockComment) {
+      if (ch === "*" && sql[i + 1] === "/") { inBlockComment = false; i++; }
+      continue;
+    }
+
+    if (inSingleQuote) {
+      if (ch === "'" && sql[i + 1] === "'") { i++; } // '' escape
+      else if (ch === "'") { inSingleQuote = false; }
+      continue;
+    }
+
+    if (inDoubleQuote) {
+      if (ch === '"') inDoubleQuote = false;
+      continue;
+    }
+
+    if (dollarTag) {
+      if (sql.startsWith(dollarTag, i)) { i += dollarTag.length - 1; dollarTag = ""; }
+      continue;
+    }
+
+    // Mark the start of a new statement on the first real (non-ws, non-comment-open) character.
+    if (stmtStartLine < 0) {
+      const ws  = ch === " " || ch === "\t" || ch === "\r";
+      const cmt = (ch === "-" && sql[i + 1] === "-") || (ch === "/" && sql[i + 1] === "*");
+      if (!ws && !cmt) stmtStartLine = line;
+    }
+
+    if (ch === "-" && sql[i + 1] === "-") { inLineComment = true; i++; continue; }
+    if (ch === "/" && sql[i + 1] === "*") { inBlockComment = true; i++; continue; }
+    if (ch === "'") { inSingleQuote = true; continue; }
+    if (ch === '"') { inDoubleQuote = true; continue; }
+
+    if (ch === "$") {
+      const m = sql.slice(i).match(/^\$([a-zA-Z0-9_]*)\$/);
+      if (m) { dollarTag = m[0]; i += dollarTag.length - 1; continue; }
+    }
+
+    if (ch === ";") { finishStmt(line); continue; }
+  }
+
+  finishStmt(line); // last statement with no trailing semicolon
+  return ranges;
+}
+
+export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {}) {
   const activeSql       = useQueryStore((s) => s.sql);
   const activeSqlSetter = useQueryStore((s) => s.setSql);
   const tabs            = useQueryStore((s) => s.tabs);
@@ -113,6 +192,11 @@ export default function SqlEditor({ tabId }: SqlEditorProps = {}) {
   // without being re-registered on every render.
   const fontSizeRef = useRef(editorFontSize);
   useEffect(() => { fontSizeRef.current = editorFontSize; }, [editorFontSize]);
+
+  // Decoration collection for the currently-running statement highlight.
+  // Set inside handleMount; read by the useEffect below.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const activeStmtDecRef = useRef<any>(null);
 
   const [ddlHover, setDdlHover] = useState<DdlHover | null>(null);
   const [tooltipCtxMenu, setTooltipCtxMenu] = useState<{ x: number; y: number; sel: string } | null>(null);
@@ -189,6 +273,9 @@ export default function SqlEditor({ tabId }: SqlEditorProps = {}) {
       setEditorInstance(editor);
       editor.onDidDispose(() => setEditorInstance(null));
     }
+
+    // Create the decoration collection used to highlight the active statement.
+    activeStmtDecRef.current = editor.createDecorationsCollection([]);
 
     // ── Clipboard (WKWebView fix) ─────────────────────────────────────────
     // WKWebView blocks navigator.clipboard.readText/writeText (async Clipboard
@@ -788,6 +875,40 @@ export default function SqlEditor({ tabId }: SqlEditorProps = {}) {
       });
     }
   };
+
+  // ── Active-statement decoration ──────────────────────────────────────────
+  // Highlights the statement currently being executed in a multi-statement run.
+  useEffect(() => {
+    const dec = activeStmtDecRef.current;
+    if (!dec) return;
+    if (activeStmtIdx == null) {
+      dec.clear();
+      return;
+    }
+    const ranges = getStatementLineRanges(sql);
+    const range  = ranges[activeStmtIdx];
+    if (!range) {
+      dec.clear();
+      return;
+    }
+    dec.set([{
+      range: {
+        startLineNumber: range.startLine,
+        startColumn:     1,
+        endLineNumber:   range.endLine,
+        endColumn:       1,
+      },
+      options: {
+        isWholeLine:              true,
+        className:                "sql-active-stmt-bg",
+        linesDecorationsClassName: "sql-active-stmt-indicator",
+        overviewRuler: {
+          color:    "rgba(210, 153, 34, 0.8)",
+          position: 4, // monaco.editor.OverviewRulerLane.Full
+        },
+      },
+    }]);
+  }, [activeStmtIdx, sql]);
 
   return (
   <>

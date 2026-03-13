@@ -145,6 +145,24 @@ body,
   border: 1px solid rgba(9, 105, 218, 0.35);
 }
 
+/* Monaco editor — currently-running statement highlight (multi-statement mode) */
+.sql-active-stmt-bg {
+  background: rgba(210, 153, 34, 0.10);
+}
+/* Amber indicator bar in the line-decorations gutter */
+.sql-active-stmt-indicator {
+  background: rgba(210, 153, 34, 0.85);
+  border-radius: 2px;
+  width: 3px !important;
+  margin-left: 1px;
+}
+[data-theme="light"] .sql-active-stmt-bg {
+  background: rgba(154, 103, 0, 0.09);
+}
+[data-theme="light"] .sql-active-stmt-indicator {
+  background: rgba(154, 103, 0, 0.80);
+}
+
 /* Tab bar right-click context menu items */
 .ctx-item {
   padding: 4px 12px;
