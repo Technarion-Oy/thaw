@@ -89,6 +89,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
     - **Create new table from data** — derives the schema from the file using `INFER_SCHEMA` (CSV with headers and PARQUET) or creates a `VARIANT` column table (JSON); the object browser refreshes automatically on success
   - Call the procedure with auto-generated parameter fields (procedures) — opens a parameter dialog; clicking **Execute** opens a new tab with the generated `CALL` statement and runs it immediately
   - **Call Function…** (functions) — opens a parameter dialog with auto-generated fields; detects scalar vs. table functions from the DDL and generates the correct SQL (`SELECT func(args) AS result` or `SELECT * FROM TABLE(func(args))`); clicking **Execute** opens a new tab and runs it immediately
+  - **View Dependencies…** (views, procedures, functions) — opens a modal with a fully recursive dependency tree built by parsing DDL — no dynamic SQL or Snowflake lineage service required; each node shows the object kind (icon + colour-coded tag), fully-qualified name, and optional error/circular badges; hover any node to see its DDL in a tooltip (fetched lazily, cached for 60 seconds); circular references are detected automatically and labelled "already shown" to prevent infinite expansion; SQL-language objects are expanded recursively up to 8 levels deep; tables and non-SQL objects are shown as leaf nodes; the tree is fully expanded on load and can be collapsed/expanded manually
   - **Insert Full Name** — inserts the fully-qualified `"DB"."SCHEMA"."NAME"` at the current editor cursor position
   - View the DDL definition inline
   - **Rename** the object (`ALTER … RENAME TO`) — available for tables, views, sequences, stages, streams, tasks, file formats, and pipes
@@ -382,6 +383,7 @@ thaw/
 │   │   └── path_prod.go           # Log path for production builds (OS-specific)
 │   ├── sfconfig/reader.go         # Snowflake CLI config (~/.snowflake/config.toml)
 │   ├── snowflake/client.go        # Snowflake driver wrapper
+│   ├── snowflake/lineage.go       # DDL-based dependency/lineage parser (recursive, cycle-safe)
 │   └── telemetry/telemetry.go     # Anonymous event tracking; remote-send placeholder
 └── frontend/
     ├── index.html
@@ -431,6 +433,7 @@ thaw/
     │       ├── backup/
     │       │   └── BackupSetsModal.tsx     # Backup sets + nested backups with add/drop/restore
     │       ├── chat/AiChat.tsx        # AI Chat panel with tool-call display and Run/Copy buttons
+    │       ├── lineage/DependenciesModal.tsx  # Recursive dependency tree modal with DDL hover tooltips
     │       ├── procedure/CallProcedureModal.tsx
     │       ├── results/ResultGrid.tsx
     │       ├── settings/

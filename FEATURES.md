@@ -47,6 +47,13 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 - **Search** — filter objects by name across all databases and schemas in real time
 - **Right-click procedures** to open a parameter dialog; clicking **Execute** generates the `CALL` statement, opens a new tab, and runs it immediately — no manual Run press needed
 - **Right-click functions** (**Call Function…**) to open a parameter dialog; detects scalar vs. table functions and generates the correct SQL; clicking **Execute** opens a new tab and runs it immediately
+- **View Dependencies…** (views, procedures, functions) — right-click any view, procedure, or function and choose **View Dependencies…** to open a recursive dependency tree built by parsing DDL:
+  - Every referenced object (tables, views, procedures, functions) appears as a node with its kind icon, colour-coded type tag, and fully-qualified name
+  - The tree is recursive — each SQL-language object's own dependencies are expanded as children, up to 8 levels deep
+  - **Circular reference detection** — objects that have already appeared higher in the tree are marked with an "already shown" badge and shown as leaf nodes to prevent infinite expansion
+  - **Hover for DDL** — hovering any node shows its DDL definition in a tooltip; content is fetched lazily on first hover and cached for 60 seconds
+  - Tables and non-SQL objects (non-SQL procedures, external functions) are shown as leaf nodes
+  - The tree is fully expanded on load; nodes can be collapsed and re-expanded manually
 - **Right-click tables and views** to:
   - Select the top 1,000 rows — opens a new tab and executes immediately
   - **Time Travel Query** — drag a timeline slider to query data at any past point within the retention window

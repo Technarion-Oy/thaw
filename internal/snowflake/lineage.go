@@ -1,0 +1,454 @@
+// Copyright (c) 2026 Technarion Oy. All rights reserved.
+//
+// This software and its source code are proprietary and confidential.
+// Unauthorized copying, distribution, modification, or use of this software,
+// in whole or in part, is strictly prohibited without prior written permission
+// from Technarion Oy.
+//
+// Commercial use of this software is restricted to parties holding a valid
+// license agreement with Technarion Oy.
+
+package snowflake
+
+import (
+	"context"
+	"fmt"
+	"regexp"
+	"strings"
+)
+
+// maxDependencyDepth caps recursive DDL-parsing depth to prevent runaway
+// recursion on deeply nested or cyclic object graphs.
+const maxDependencyDepth = 8
+
+// DependencyNode is one node in the recursive dependency tree returned by
+// GetObjectDependencies.
+type DependencyNode struct {
+	Name     string           `json:"name"`
+	Schema   string           `json:"schema"`
+	Database string           `json:"database"`
+	// Kind is one of TABLE, VIEW, PROCEDURE, FUNCTION, UNKNOWN.
+	Kind     string           `json:"kind"`
+	Children []DependencyNode `json:"children"`
+	// Circular is true when this node was already encountered in the current
+	// tree (prevents infinite expansion of cyclic or shared dependencies).
+	Circular bool             `json:"circular,omitempty"`
+	// Error contains a short description when the object could not be resolved.
+	Error    string           `json:"error,omitempty"`
+}
+
+// sqlRef is an unresolved reference extracted from a SQL body.
+type sqlRef struct {
+	db     string
+	schema string
+	name   string
+	// isCall is true when the reference was found in a CALL statement,
+	// meaning the target is definitely a stored procedure.
+	isCall bool
+}
+
+// depVisited is a simple string-set used to track which objects have already
+// been expanded in the current tree traversal.
+type depVisited map[string]bool
+
+func (v depVisited) has(db, schema, name string) bool {
+	return v[depKey(db, schema, name)]
+}
+
+func (v depVisited) add(db, schema, name string) {
+	v[depKey(db, schema, name)] = true
+}
+
+func depKey(db, schema, name string) string {
+	return strings.ToUpper(db + "." + schema + "." + name)
+}
+
+// ── compiled regexes ───────────────────────────────────────────────────────────
+
+// identPat matches a single- or multi-part (up to three) Snowflake identifier.
+// Supports both quoted ("my object") and unquoted (MY_OBJ) names.
+const identPat = `(?:"[^"]*"|\w+)(?:\.(?:"[^"]*"|\w+)){0,2}`
+
+var (
+	reLineComment  = regexp.MustCompile(`--[^\n]*`)
+	reBlockComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
+
+	// Table / view references
+	reFrom   = regexp.MustCompile(`(?i)\bFROM\s+(` + identPat + `)`)
+	reJoin   = regexp.MustCompile(`(?i)\bJOIN\s+(` + identPat + `)`)
+	reInto   = regexp.MustCompile(`(?i)\bINTO\s+(` + identPat + `)`)
+	reUpdate = regexp.MustCompile(`(?i)\bUPDATE\s+(` + identPat + `)`)
+	reMerge  = regexp.MustCompile(`(?i)\bMERGE\s+INTO\s+(` + identPat + `)`)
+	// USING captures the source table/view in MERGE ... USING <source>.
+	// In JOIN ... USING (col) the token after USING starts with "(" which
+	// does not match identPat, so JOIN columns are never picked up here.
+	reUsing = regexp.MustCompile(`(?i)\bUSING\s+(` + identPat + `)`)
+
+	// Procedure calls
+	reCall = regexp.MustCompile(`(?i)\bCALL\s+(` + identPat + `)\s*\(`)
+
+	// CTE names (to be excluded from references)
+	reCTE = regexp.MustCompile(`(?i)\b(?:WITH|,)\s+((?:"[^"]*"|\w+))\s+AS\s*\(`)
+
+	// Language check for procedures/functions
+	reLanguageSQL = regexp.MustCompile(`(?i)\bLANGUAGE\s+SQL\b`)
+
+	// Dollar-quoted body: $$ ... $$ (standard Snowflake delimiter)
+	reProcBodyDouble = regexp.MustCompile(`(?s)\$\$(.+)\$\$`)
+
+	// Single-$ delimiter: some Snowflake clients emit  AS\n$\n...\n$
+	// which uses a bare dollar sign on its own line as the delimiter.
+	reProcBodySingle = regexp.MustCompile(`(?i)AS[ \t]*\n\$[ \t]*\n([\s\S]+?)\n\$`)
+
+	// View body: everything after the closing "AS" that precedes SELECT/WITH
+	reViewBody = regexp.MustCompile(`(?is)\bAS\s+((?:WITH\b|SELECT\b).+)$`)
+)
+
+// skipNames is a set of Snowflake / SQL keywords that must never be treated as
+// object references even if they follow FROM / INTO / etc.
+var skipNames = map[string]bool{
+	"SELECT": true, "WHERE": true, "SET": true, "VALUES": true,
+	"LATERAL": true, "FLATTEN": true, "UNNEST": true, "GENERATOR": true,
+	"TABLE": true, "RESULT_SCAN": true, "SNOWFLAKE": true,
+	"DUAL": true, "NULL": true, "TRUE": true, "FALSE": true,
+}
+
+// ── public entry-point ────────────────────────────────────────────────────────
+
+// GetObjectDependencies returns the full recursive dependency tree for the
+// given VIEW, PROCEDURE, or FUNCTION by parsing its DDL.  Tables are treated
+// as leaf nodes.  Non-SQL-language procedures and functions are not parsed
+// (they have no reachable body).
+func (c *Client) GetObjectDependencies(ctx context.Context, database, schema, kind, name, arguments string) (DependencyNode, error) {
+	ddlText, err := c.GetObjectDDL(ctx, database, schema, kind, name, arguments)
+	if err != nil {
+		return DependencyNode{}, fmt.Errorf("GetObjectDDL: %w", err)
+	}
+
+	vis := make(depVisited)
+	vis.add(database, schema, name)
+
+	root := DependencyNode{
+		Name:     strings.ToUpper(name),
+		Schema:   strings.ToUpper(schema),
+		Database: strings.ToUpper(database),
+		Kind:     strings.ToUpper(kind),
+	}
+	root.Children = c.buildChildren(ctx, ddlText, database, schema, strings.ToUpper(kind), vis, 0)
+	return root, nil
+}
+
+// ── recursive builder ─────────────────────────────────────────────────────────
+
+func (c *Client) buildChildren(ctx context.Context, ddlText, defaultDB, defaultSchema, kind string, vis depVisited, depth int) []DependencyNode {
+	if depth >= maxDependencyDepth {
+		return nil
+	}
+
+	body := extractDDLBody(ddlText, kind)
+	if body == "" {
+		return nil
+	}
+
+	refs := parseSQLReferences(body, defaultDB, defaultSchema)
+	if len(refs) == 0 {
+		return nil
+	}
+
+	// Deduplicate references by (db, schema, name) before resolving.
+	seen := map[string]bool{}
+	var unique []sqlRef
+	for _, r := range refs {
+		k := depKey(r.db, r.schema, r.name)
+		if !seen[k] {
+			seen[k] = true
+			unique = append(unique, r)
+		}
+	}
+
+	var nodes []DependencyNode
+	for _, ref := range unique {
+		nodes = append(nodes, c.resolveRef(ctx, ref, vis, depth))
+	}
+	return nodes
+}
+
+func (c *Client) resolveRef(ctx context.Context, ref sqlRef, vis depVisited, depth int) DependencyNode {
+	node := DependencyNode{
+		Name:     strings.ToUpper(ref.name),
+		Schema:   strings.ToUpper(ref.schema),
+		Database: strings.ToUpper(ref.db),
+	}
+
+	if vis.has(ref.db, ref.schema, ref.name) {
+		node.Kind = "UNKNOWN"
+		node.Circular = true
+		return node
+	}
+
+	if ref.isCall {
+		return c.resolveProcedureRef(ctx, ref, vis, depth)
+	}
+
+	// Use INFORMATION_SCHEMA.TABLES to determine whether the reference is a
+	// VIEW or a TABLE.  Doing a speculative GET_DDL('VIEW',...) call would
+	// trigger error log entries inside the gosnowflake driver for every
+	// non-view reference, producing confusing noise in application logs.
+	if c.isViewInSchema(ctx, ref.db, ref.schema, ref.name) {
+		node.Kind = "VIEW"
+		vis.add(ref.db, ref.schema, ref.name)
+		ddlText, err := c.GetObjectDDL(ctx, ref.db, ref.schema, "VIEW", ref.name, "")
+		if err == nil {
+			node.Children = c.buildChildren(ctx, ddlText, ref.db, ref.schema, "VIEW", vis, depth+1)
+		} else {
+			node.Error = err.Error()
+		}
+		return node
+	}
+
+	node.Kind = "TABLE"
+	return node
+}
+
+// isViewInSchema queries INFORMATION_SCHEMA.TABLES to check whether the given
+// object is a VIEW.  Returns false for tables and for objects not found in
+// INFORMATION_SCHEMA (e.g. procedures, functions, or objects the current role
+// cannot access).
+func (c *Client) isViewInSchema(ctx context.Context, db, schema, name string) bool {
+	escVal := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
+	q := fmt.Sprintf(
+		`SELECT TABLE_TYPE FROM "%s".INFORMATION_SCHEMA.TABLES`+
+			` WHERE TABLE_CATALOG = '%s' AND TABLE_SCHEMA = '%s' AND TABLE_NAME = '%s'`,
+		strings.ReplaceAll(db, `"`, `""`),
+		escVal(strings.ToUpper(db)),
+		escVal(strings.ToUpper(schema)),
+		escVal(strings.ToUpper(name)),
+	)
+	row := c.db.QueryRowContext(ctx, q)
+	var typ string
+	if err := row.Scan(&typ); err != nil {
+		return false
+	}
+	return strings.ToUpper(typ) == "VIEW"
+}
+
+func (c *Client) resolveProcedureRef(ctx context.Context, ref sqlRef, vis depVisited, depth int) DependencyNode {
+	node := DependencyNode{
+		Name:     strings.ToUpper(ref.name),
+		Schema:   strings.ToUpper(ref.schema),
+		Database: strings.ToUpper(ref.db),
+		Kind:     "PROCEDURE",
+	}
+
+	// SHOW PROCEDURES returns all overloads; we need the argument signature to
+	// call GET_DDL for each one.
+	query := fmt.Sprintf(
+		`SHOW PROCEDURES LIKE '%s' IN SCHEMA "%s"."%s"`,
+		strings.ReplaceAll(ref.name, "'", "''"),
+		strings.ReplaceAll(ref.db, `"`, `""`),
+		strings.ReplaceAll(ref.schema, `"`, `""`),
+	)
+	rows, err := c.db.QueryContext(ctx, query)
+	if err != nil {
+		node.Error = err.Error()
+		return node
+	}
+	defer rows.Close()
+
+	cols, _ := rows.Columns()
+	argIdx, nameIdx := -1, -1
+	for i, col := range cols {
+		switch strings.ToLower(col) {
+		case "arguments":
+			argIdx = i
+		case "name":
+			nameIdx = i
+		}
+	}
+
+	type overload struct{ args string }
+	var overloads []overload
+
+	vals := make([]interface{}, len(cols))
+	ptrs := make([]interface{}, len(cols))
+	for i := range vals {
+		ptrs[i] = &vals[i]
+	}
+	for rows.Next() {
+		if err := rows.Scan(ptrs...); err != nil {
+			continue
+		}
+		var procName, argsRaw string
+		if nameIdx >= 0 {
+			if v, ok := vals[nameIdx].(string); ok {
+				procName = v
+			}
+		}
+		if argIdx >= 0 {
+			if v, ok := vals[argIdx].(string); ok {
+				argsRaw = v
+			}
+		}
+		if strings.EqualFold(procName, ref.name) {
+			overloads = append(overloads, overload{args: extractArgTypesFromShow(argsRaw)})
+		}
+	}
+
+	if len(overloads) == 0 {
+		return node
+	}
+
+	vis.add(ref.db, ref.schema, ref.name)
+	for _, ol := range overloads {
+		ddlText, err := c.GetObjectDDL(ctx, ref.db, ref.schema, "PROCEDURE", ref.name, ol.args)
+		if err != nil {
+			continue
+		}
+		children := c.buildChildren(ctx, ddlText, ref.db, ref.schema, "PROCEDURE", vis, depth+1)
+		node.Children = append(node.Children, children...)
+	}
+	return node
+}
+
+// extractArgTypesFromShow parses the argument type list from the string
+// returned by SHOW PROCEDURES / SHOW FUNCTIONS in the "arguments" column.
+// That column has the form "PROC_NAME(TYPE1, TYPE2) RETURN RETURN_TYPE".
+func extractArgTypesFromShow(s string) string {
+	i := strings.Index(s, "(")
+	j := strings.LastIndex(s, ")")
+	if i < 0 || j <= i {
+		return ""
+	}
+	return strings.TrimSpace(s[i+1 : j])
+}
+
+// ── DDL body extraction ───────────────────────────────────────────────────────
+
+// extractDDLBody returns the SQL body of a DDL statement that should be
+// scanned for object references.  Returns an empty string when the body cannot
+// be extracted (e.g. non-SQL-language procedures).
+func extractDDLBody(ddl, kind string) string {
+	switch strings.ToUpper(kind) {
+	case "VIEW":
+		// Everything after the final AS that precedes SELECT or WITH.
+		if m := reViewBody.FindStringSubmatch(strings.TrimRight(ddl, "; \t\n\r")); len(m) > 1 {
+			return m[1]
+		}
+		// Fallback: parse the entire DDL (may produce false positives from
+		// the CREATE header, but deduplication and the visited set handle it).
+		return ddl
+
+	case "PROCEDURE", "FUNCTION":
+		// Only parse SQL-language bodies; JavaScript / Python / Java bodies
+		// contain no Snowflake object references we can statically extract.
+		if !reLanguageSQL.MatchString(ddl) {
+			return ""
+		}
+		// Standard Snowflake dollar-quoting: $$ ... $$
+		if m := reProcBodyDouble.FindStringSubmatch(ddl); len(m) > 1 {
+			return m[1]
+		}
+		// Single-$ delimiter: some clients / older DDL exports use a bare $
+		// on its own line (e.g.  AS\n$\nBEGIN...\nEND;\n$).
+		if m := reProcBodySingle.FindStringSubmatch(ddl); len(m) > 1 {
+			return m[1]
+		}
+		// Single-quoted body: AS '...'
+		if i := strings.Index(ddl, "AS '"); i >= 0 {
+			inner := ddl[i+4:]
+			if j := strings.LastIndex(inner, "'"); j > 0 {
+				return inner[:j]
+			}
+		}
+		return ""
+	}
+	return ""
+}
+
+// ── SQL reference parser ──────────────────────────────────────────────────────
+
+// parseSQLReferences scans a SQL text for table/view/procedure references and
+// returns a list of sqlRef values.  defaultDB and defaultSchema are used to
+// qualify unqualified names.
+func parseSQLReferences(sql, defaultDB, defaultSchema string) []sqlRef {
+	// Strip comments to avoid false positives.
+	sql = reLineComment.ReplaceAllString(sql, " ")
+	sql = reBlockComment.ReplaceAllString(sql, " ")
+
+	// Collect CTE names — these are local aliases, not real objects.
+	cteNames := map[string]bool{}
+	for _, m := range reCTE.FindAllStringSubmatch(sql, -1) {
+		cteNames[strings.ToUpper(stripQuotes(m[1]))] = true
+	}
+
+	var refs []sqlRef
+
+	addRef := func(raw string, isCall bool) {
+		parts := splitIdent(raw)
+		if len(parts) == 0 {
+			return
+		}
+		name := parts[len(parts)-1]
+		nameUpper := strings.ToUpper(name)
+
+		if skipNames[nameUpper] {
+			return
+		}
+		if strings.EqualFold(name, "INFORMATION_SCHEMA") {
+			return
+		}
+		if cteNames[nameUpper] {
+			return
+		}
+
+		var db, schema string
+		switch len(parts) {
+		case 1:
+			db, schema = defaultDB, defaultSchema
+		case 2:
+			db, schema = defaultDB, parts[0]
+		case 3:
+			db, schema = parts[0], parts[1]
+		}
+
+		if strings.EqualFold(schema, "INFORMATION_SCHEMA") {
+			return
+		}
+
+		refs = append(refs, sqlRef{db: db, schema: schema, name: name, isCall: isCall})
+	}
+
+	// Table / view patterns (order does not matter; deduplication runs later).
+	for _, pat := range []*regexp.Regexp{reFrom, reJoin, reInto, reUpdate, reUsing} {
+		for _, m := range pat.FindAllStringSubmatch(sql, -1) {
+			addRef(m[1], false)
+		}
+	}
+	for _, m := range reMerge.FindAllStringSubmatch(sql, -1) {
+		addRef(m[1], false)
+	}
+	// Procedure calls.
+	for _, m := range reCall.FindAllStringSubmatch(sql, -1) {
+		addRef(m[1], true)
+	}
+
+	return refs
+}
+
+// splitIdent splits a (possibly quoted, possibly multi-part) identifier string
+// into its component parts, stripping surrounding double-quotes from each part.
+func splitIdent(s string) []string {
+	var parts []string
+	for _, p := range strings.Split(s, ".") {
+		parts = append(parts, stripQuotes(p))
+	}
+	return parts
+}
+
+func stripQuotes(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return s[1 : len(s)-1]
+	}
+	return s
+}

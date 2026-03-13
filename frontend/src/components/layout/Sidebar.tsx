@@ -40,6 +40,7 @@ import {
   SaveOutlined,
   PlusSquareOutlined,
   RightOutlined,
+  ShareAltOutlined,
 } from "@ant-design/icons";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
@@ -61,6 +62,7 @@ import ExportTableModal from "../export/ExportTableModal";
 import ImportTableModal from "../export/ImportTableModal";
 import PropertiesModal from "../common/PropertiesModal";
 import BackupSetsModal from "../backup/BackupSetsModal";
+import DependenciesModal from "../lineage/DependenciesModal";
 
 const { Text } = Typography;
 
@@ -298,6 +300,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [exportModal, setExportModal] = useState<{ db: string; schema: string; table: string } | null>(null);
   const [importModal, setImportModal] = useState<{ db: string; schema: string; table: string } | null>(null);
   const [backupSetsModal, setBackupSetsModal] = useState<{ scopeType: "DATABASE" | "SCHEMA" | "TABLE"; db: string; schema: string; table: string } | null>(null);
+  const [depsModal, setDepsModal] = useState<{ db: string; schema: string; kind: string; name: string; args: string } | null>(null);
   const [searchQuery, setSearchQuery]               = useState("");
   // Two separate expansion states so the cascade never touches the user's own
   // tree navigation state. On clear we just wipe searchExpandedKeys.
@@ -660,6 +663,16 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const [, db, schema] = ctxMenu.nodeKey.split(":");
     setCtxMenu(null);
     setCreateTaskModal({ db, schema });
+  };
+
+  const viewDependencies = () => {
+    if (!ctxMenu) return;
+    const { nodeKey, objKind = "", objArgs = "" } = ctxMenu;
+    setCtxMenu(null);
+    // key format: obj:DB:SCHEMA:KIND:NAME
+    const [, db, schema, , ...nameParts] = nodeKey.split(":");
+    const name = nameParts.join(":");
+    setDepsModal({ db, schema, kind: objKind, name, args: objArgs });
   };
 
   const exportDatabase = async () => {
@@ -1232,6 +1245,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Select for Comparison", <DiffOutlined style={{ fontSize: 12 }} />, selectObjForComparison)}
           {ctxMenu.nodeType === "obj" && pendingDiff !== null &&
             menuItem(`Compare with: ${pendingDiff.label}`, <DiffOutlined style={{ fontSize: 12, color: "var(--accent)" }} />, compareObjWith)}
+          {ctxMenu.nodeType === "obj" &&
+            (ctxMenu.objKind === "VIEW" || ctxMenu.objKind === "PROCEDURE" || ctxMenu.objKind === "FUNCTION") &&
+            menuItem("View Dependencies…", <ShareAltOutlined style={{ fontSize: 12 }} />, viewDependencies)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "FUNCTION" && ctxMenu.objKind !== "PROCEDURE" &&
             menuItem("Rename…", <EditOutlined style={{ fontSize: 12 }} />, renameObject)}
           {ctxMenu.nodeType === "obj" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
@@ -1340,6 +1356,19 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={backupSetsModal.schema}
           table={backupSetsModal.table}
           onClose={() => setBackupSetsModal(null)}
+        />
+      )}
+
+      {/* Dependencies modal */}
+      {depsModal && (
+        <DependenciesModal
+          open
+          database={depsModal.db}
+          schema={depsModal.schema}
+          kind={depsModal.kind}
+          name={depsModal.name}
+          arguments={depsModal.args}
+          onClose={() => setDepsModal(null)}
         />
       )}
 

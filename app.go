@@ -839,6 +839,18 @@ func (a *App) GetObjectDDL(database, schema, kind, name, arguments string) (stri
 	return a.client.GetObjectDDL(a.ctx, database, schema, kind, name, arguments)
 }
 
+// GetObjectDependencies parses the DDL of a VIEW, PROCEDURE, or FUNCTION and
+// returns a recursive tree of objects it depends on.  Tables are leaf nodes;
+// views and SQL-language procedures/functions are expanded recursively.
+// arguments should be the parameter type list for procedures/functions
+// (e.g. "NUMBER, VARCHAR") or an empty string for views.
+func (a *App) GetObjectDependencies(database, schema, kind, name, arguments string) (snowflake.DependencyNode, error) {
+	if a.client == nil {
+		return snowflake.DependencyNode{}, ErrNotConnected
+	}
+	return a.client.GetObjectDependencies(a.ctx, database, schema, kind, name, arguments)
+}
+
 // PropertyPair is a single key/value property row returned by GetObjectProperties.
 type PropertyPair struct {
 	Key   string `json:"key"`

@@ -1471,10 +1471,12 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 func (c *Client) GetObjectDDL(ctx context.Context, database, schema, kind, name, arguments string) (string, error) {
 	escapeIdent := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
 	qualified := fmt.Sprintf(`"%s"."%s"."%s"`, escapeIdent(database), escapeIdent(schema), escapeIdent(name))
-	// Procedures and functions require the argument type list appended to the
-	// qualified name so Snowflake can resolve the right overload.
+	// Procedures and functions require the argument type list (which may be
+	// empty for zero-arg procedures) appended so Snowflake can resolve the
+	// overload.  Omitting the parentheses entirely causes GET_DDL to return
+	// "Object does not exist" even when the procedure exists.
 	upperKind := strings.ToUpper(kind)
-	if (upperKind == "PROCEDURE" || upperKind == "FUNCTION") && arguments != "" {
+	if upperKind == "PROCEDURE" || upperKind == "FUNCTION" {
 		qualified += fmt.Sprintf("(%s)", arguments)
 	}
 	escapedKind := strings.ReplaceAll(kind, "'", "''")
