@@ -60,7 +60,7 @@ export default function QueryPage() {
   const [runningQueryId, setRunningQueryId] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   // Multi-statement progress: which statement is running and out of how many.
-  const [stmtProgress, setStmtProgress] = useState<{ index: number; total: number } | null>(null);
+  const [stmtProgress, setStmtProgress] = useState<{ index: number; total: number; queryID?: string } | null>(null);
   // Zero-based index of the statement currently executing; drives editor highlight.
   const [activeStmtIdx, setActiveStmtIdx] = useState<number | null>(null);
   // True while the running query is a user-text selection (not the full buffer).
@@ -131,14 +131,23 @@ export default function QueryPage() {
   // executing a multi-statement script.  Update the spinner label and highlight
   // the active statement in the editor.
   useEffect(() => {
-    const cleanup = EventsOn("query:statement-start", (data: { index: number; total: number }) => {
+    const cleanupStart = EventsOn("query:statement-start", (data: { index: number; total: number }) => {
       setStmtProgress({ index: data.index, total: data.total });
       // Only highlight in the editor when running the full buffer (not a selection).
       if (!isSelectionRunRef.current) {
         setActiveStmtIdx(data.index);
       }
     });
-    return cleanup as () => void;
+    const cleanupQid = EventsOn("query:statement-qid", (data: { index: number; queryID: string }) => {
+      // Update queryID unconditionally — for fast statements the qid can
+      // arrive after the next statement-start has already advanced the index,
+      // so a strict index guard would silently discard it.
+      setStmtProgress(prev => prev ? { ...prev, queryID: data.queryID } : prev);
+      // Also drive runningQueryId so the qid persists even if stmtProgress
+      // is cleared before the next render.
+      setRunningQueryId(data.queryID);
+    });
+    return () => { (cleanupStart as () => void)(); (cleanupQid as () => void)(); };
   }, []);
 
   // Vertical drag handle mouse handlers (for split editor width).
@@ -180,10 +189,11 @@ export default function QueryPage() {
     try {
       // Phase 1: submit and get query ID.
       const qid = await StartQuery(query);
-      // Force React to commit the query ID to the DOM synchronously, then wait
-      // for a browser paint before fetching results. This guarantees the spinner
-      // shows the query ID for at least one frame before the results arrive.
-      flushSync(() => setRunningQueryId(qid));
+      // For single-statement queries, commit the query ID synchronously so the
+      // spinner shows it for at least one frame before results arrive.
+      // For multi-statement (qid = ""), skip the overwrite — runningQueryId may
+      // already hold a per-statement qid from a statement-qid event.
+      if (qid) flushSync(() => setRunningQueryId(qid));
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       // Phase 2: block until results are ready.
       const res = await WaitForQueryResult();
@@ -706,9 +716,25 @@ export default function QueryPage() {
               <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, zIndex: 10, background: "rgba(0,0,0,0.4)" }}>
                 <Spin size="large" />
                 {stmtProgress && stmtProgress.total > 1 ? (
-                  <Text style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                    statement {stmtProgress.index + 1} of {stmtProgress.total}
-                  </Text>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                    <Text style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                      statement {stmtProgress.index + 1} of {stmtProgress.total}
+                    </Text>
+                    {(stmtProgress.queryID || runningQueryId) && (
+                      <Space size={4}>
+                        <Text style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)" }}>
+                          {stmtProgress.queryID || runningQueryId}
+                        </Text>
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<CopyOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
+                          style={{ height: 16, padding: "0 2px", minWidth: 0 }}
+                          onClick={async () => { await ClipboardSetText((stmtProgress.queryID || runningQueryId)!); message.success("Query ID copied"); }}
+                        />
+                      </Space>
+                    )}
+                  </div>
                 ) : runningQueryId ? (
                   <Space size={4}>
                     <Text style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)" }}>

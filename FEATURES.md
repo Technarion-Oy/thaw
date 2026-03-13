@@ -9,9 +9,9 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 - **Monaco-based editor** with full SQL syntax highlighting and rich keyboard shortcuts
 - **Multi-tab editing** — open multiple files simultaneously; each tab remembers its SQL, results, and scroll position
 - **Run selected text** — highlight any portion of a query and run only that part (`⌘ Enter` / `Ctrl+Enter`)
-- **Multi-statement scripts** — separate statements with `;`; all statements execute sequentially on a dedicated Snowflake session so `LAST_QUERY_ID(-1)` and `RESULT_SCAN` work correctly across statements, matching Snowsight behaviour
+- **Multi-statement scripts** — separate statements with `;`; all statements execute sequentially on a dedicated Snowflake session so `LAST_QUERY_ID(-1)` and `RESULT_SCAN` work correctly across statements, matching Snowsight behaviour; the spinner shows **statement N of M** and the Snowflake query ID for the active statement while the script runs; the currently-executing statement is highlighted in the editor with an amber background and a gutter indicator so you always know exactly where execution is
 - **Cancel queries** — cancel a running query at any time; Thaw issues `SYSTEM$CANCEL_QUERY` so it also stops consuming Snowflake credits
-- **Query ID** — the Snowflake Query ID is shown while running and after completion; click to copy
+- **Query ID** — the Snowflake Query ID is shown in the spinner while running (per-statement for multi-statement scripts) and in the results status bar after completion; click the copy icon to copy it to the clipboard
 - **Selection highlight** — selecting text highlights every other occurrence in the document; overview-ruler markers show occurrences in long files
 - **Toggle line comment** — right-click in the editor and choose **Toggle Line Comment** to add or remove `--` on the current line or on every line in the selection
 - **Font size zoom** — `⌘+` / `Ctrl++` increases the editor font size, `⌘-` / `Ctrl+-` decreases it, `⌘0` / `Ctrl+0` resets to the default

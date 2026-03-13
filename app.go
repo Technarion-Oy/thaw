@@ -549,13 +549,40 @@ func (a *App) StartQuery(sql string) (string, error) {
 
 	// Execute the query in a background goroutine so this method can return
 	// as soon as the query ID arrives (before results are ready).
+	var wg sync.WaitGroup
 	go func() {
-		result, err := a.client.Execute(ctx, sql, func(idx, total int) {
-			// Notify the frontend which statement is about to run.  Only
-			// fired for multi-statement scripts (total > 1).
+		result, err := a.client.Execute(ctx, sql, func(idx, total int, stmtQidChan <-chan string) {
+			// Notify the frontend which statement is about to run.
 			wailsruntime.EventsEmit(a.ctx, "query:statement-start",
 				map[string]int{"index": idx, "total": total})
+			// Watch for the per-statement query ID.  The channel is closed
+			// by Execute once queryOnConn returns, so this goroutine always
+			// terminates without needing ctx.Done().
+			wg.Add(1)
+			go func(i int, ch <-chan string) {
+				defer wg.Done()
+				// The gosnowflake driver closes ch after writing the qid, so
+				// this select always terminates.  ctx.Done() is a fallback for
+				// the rare case where the query is cancelled before the driver
+				// writes to the channel.
+				select {
+				case qid := <-ch:
+					if qid != "" {
+						// Keep a.queryID up to date so WaitForQueryResult can
+						// embed the last statement's query ID in the result.
+						a.queryMu.Lock()
+						a.queryID = qid
+						a.queryMu.Unlock()
+						wailsruntime.EventsEmit(a.ctx, "query:statement-qid",
+							map[string]interface{}{"index": i, "queryID": qid})
+					}
+				case <-ctx.Done():
+				}
+			}(idx, stmtQidChan)
 		})
+		// Wait for every per-statement qid goroutine to finish before
+		// closing done, so WaitForQueryResult always reads a complete a.queryID.
+		wg.Wait()
 		a.queryMu.Lock()
 		a.queryResult = result
 		a.queryErr = err
@@ -582,7 +609,14 @@ func (a *App) StartQuery(sql string) (string, error) {
 	}
 
 	a.queryMu.Lock()
-	a.queryID = queryID
+	// For single-statement queries, queryID comes from the outer qidChan
+	// (async mode) and should be stored.  For multi-statement queries the
+	// outer qidChan never fires (queryID = ""), so we leave a.queryID as-is:
+	// the per-statement qid goroutines (guarded by wg.Wait before close(done))
+	// have already written the last statement's query ID into a.queryID.
+	if queryID != "" {
+		a.queryID = queryID
+	}
 	a.queryDone = done
 	a.queryMu.Unlock()
 
@@ -621,7 +655,6 @@ func (a *App) CancelQuery() {
 func (a *App) WaitForQueryResult() (*snowflake.QueryResult, error) {
 	a.queryMu.Lock()
 	done := a.queryDone
-	queryID := a.queryID
 	a.queryMu.Unlock()
 
 	if done == nil {
@@ -632,6 +665,9 @@ func (a *App) WaitForQueryResult() (*snowflake.QueryResult, error) {
 	a.queryMu.Lock()
 	result := a.queryResult
 	err := a.queryErr
+	// Read queryID after done fires so multi-statement queries get the last
+	// per-statement qid (updated by wg-tracked goroutines before close(done)).
+	queryID := a.queryID
 	// Clean up so a subsequent call does not re-read stale state.
 	if a.queryCancelFunc != nil {
 		a.queryCancelFunc() // no-op if already cancelled; ensures context resources are freed
