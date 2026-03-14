@@ -117,6 +117,8 @@ export function ImportTableData(arg1:snowflake.ImportTableParams):Promise<snowfl
 
 export function InstallCondaEnv():Promise<void>;
 
+export function InstallEnvPackage(arg1:string):Promise<void>;
+
 export function InstallJupyterNotebook():Promise<void>;
 
 export function InstallJupyterVenv():Promise<void>;
@@ -150,6 +152,8 @@ export function ListDroppedDatabases():Promise<Array<snowflake.DroppedTable>>;
 export function ListDroppedSchemas(arg1:string):Promise<Array<snowflake.DroppedTable>>;
 
 export function ListDroppedTables(arg1:string,arg2:string):Promise<Array<snowflake.DroppedTable>>;
+
+export function ListEnvPackages():Promise<Array<main.PackageInfo>>;
 
 export function ListNotificationIntegrations():Promise<Array<string>>;
 
@@ -230,6 +234,8 @@ export function StopNotebookSession(arg1:string):Promise<void>;
 export function StopShell():Promise<void>;
 
 export function TestAIModel(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function UninstallEnvPackage(arg1:string):Promise<void>;
 
 export function UseDatabase(arg1:string):Promise<void>;
 

@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useEffect, useRef, useState } from "react";
-import { Modal, Button, Steps, Typography, Alert, Space, Tag, Radio, Divider, Select } from "antd";
+import { Modal, Button, Steps, Typography, Alert, Space, Tag, Radio, Divider, Select, Input, List, Spin } from "antd";
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
@@ -22,6 +22,7 @@ import {
   SaveSnowparkConfig,
   SaveSnowparkPythonPath,
   ListSystemPythons,
+  CheckSnowparkEnv,
   InstallCondaEnv,
   InstallSnowparkPackage,
   InstallJupyterNotebook,
@@ -29,6 +30,9 @@ import {
   InstallSnowparkVenv,
   InstallJupyterVenv,
   DeleteVenvFolder,
+  ListEnvPackages,
+  InstallEnvPackage,
+  UninstallEnvPackage,
 } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 import { EventsOn } from "../../../wailsjs/runtime/runtime";
@@ -117,6 +121,16 @@ export default function SnowparkSetupModal({ onClose }: Props) {
   const [, setConfigLoaded] = useState(false);
   const logEndRef = useRef<HTMLDivElement | null>(null);
 
+  // Package management (step 3)
+  const [packages, setPackages]           = useState<main.PackageInfo[]>([]);
+  const [packagesLoading, setPackagesLoading] = useState(false);
+  const [packagesError, setPackagesError] = useState<string | null>(null);
+  const [packageInput, setPackageInput]   = useState("");
+  const [packageLog, setPackageLog]       = useState<string[]>([]);
+  const [packageOpRunning, setPackageOpRunning] = useState(false);
+  const [uninstallingPkg, setUninstallingPkg] = useState<string | null>(null);
+  const pkgLogEndRef = useRef<HTMLDivElement | null>(null);
+
   const exportDir    = useGitStore((s) => s.exportDir);
   const gitConfigLoaded = useGitStore((s) => s.configLoaded);
   const loadConfig   = useGitStore((s) => s.loadConfig);
@@ -132,6 +146,18 @@ export default function SnowparkSetupModal({ onClose }: Props) {
       setConfigLoaded(true);
     });
     ListSystemPythons().then(setAvailablePythons);
+    // If the environment is already fully set up, pre-mark all steps done
+    // and go straight to the package manager.
+    CheckSnowparkEnv().then((env) => {
+      if (env.isReady) {
+        setSteps([
+          { status: "done", log: [], error: null },
+          { status: "done", log: [], error: null },
+          { status: "done", log: [], error: null },
+        ]);
+        setCurrent(3);
+      }
+    });
   }, []);
 
   // Reset steps when backend changes.
@@ -153,10 +179,34 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     return () => (off as () => void)();
   }, [current]);
 
-  // Auto-scroll log.
+  // Auto-scroll install log.
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [steps[current].log]);
+  }, [steps[Math.min(current, 2)].log]);
+
+  // Stream package operation output.
+  useEffect(() => {
+    const off = EventsOn("snowpark:package-output", (line: string) => {
+      setPackageLog((prev) => [...prev, line]);
+    });
+    return () => (off as () => void)();
+  }, []);
+
+  // Auto-scroll package log.
+  useEffect(() => {
+    pkgLogEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [packageLog]);
+
+  // Load installed packages when entering step 3.
+  useEffect(() => {
+    if (current !== 3) return;
+    setPackagesLoading(true);
+    setPackagesError(null);
+    ListEnvPackages()
+      .then((pkgs) => { setPackages(pkgs); setPackagesError(null); })
+      .catch((e) => { setPackages([]); setPackagesError(String(e)); })
+      .finally(() => setPackagesLoading(false));
+  }, [current]);
 
   const patch = (idx: number, p: Partial<StepState>) =>
     setSteps((prev) => prev.map((s, i) => (i === idx ? { ...s, ...p } : s)));
@@ -208,9 +258,49 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     : undefined,
   );
 
+  const handleInstallPackage = async () => {
+    const pkg = packageInput.trim();
+    if (!pkg) return;
+    setPackageOpRunning(true);
+    setPackageLog([]);
+    try {
+      await InstallEnvPackage(pkg);
+      setPackageInput("");
+      const updated = await ListEnvPackages();
+      setPackages(updated);
+    } catch (e) {
+      setPackageLog((prev) => [...prev, String(e)]);
+    } finally {
+      setPackageOpRunning(false);
+    }
+  };
+
+  const handleUninstallPackage = (name: string) => {
+    Modal.confirm({
+      title: `Uninstall ${name}?`,
+      content: `This will remove ${name} from the Snowpark environment.`,
+      okText: "Uninstall",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setUninstallingPkg(name);
+        setPackageLog([]);
+        try {
+          await UninstallEnvPackage(name);
+          const updated = await ListEnvPackages();
+          setPackages(updated);
+        } catch (e) {
+          setPackageLog((prev) => [...prev, String(e)]);
+        } finally {
+          setUninstallingPkg(null);
+        }
+      },
+    });
+  };
+
   const defs   = backend === "conda" ? condaSteps(isAppleSilicon) : venvSteps(venvPath, withPandas, pythonPath);
-  const cur    = steps[current];
-  const allDone = steps.every((s) => s.status === "done");
+  const setupDone = steps.every((s) => s.status === "done");
+  // cur is only valid for setup steps 0-2; use a safe fallback for step 3.
+  const cur    = steps[Math.min(current, 2)];
   const anyRunning = steps.some((s) => s.status === "running");
 
   return (
@@ -220,7 +310,13 @@ export default function SnowparkSetupModal({ onClose }: Props) {
       onCancel={onClose}
       width={620}
       footer={[
-        allDone
+        current === 3
+          ? <Button key="back" onClick={() => setCurrent(2)} style={{ float: "left" }}>Back</Button>
+          : null,
+        current < 3
+          ? <Button key="manage" onClick={() => setCurrent(3)}>Manage Packages</Button>
+          : null,
+        setupDone
           ? <Button key="done" type="primary" onClick={onClose}>Done</Button>
           : <Button key="close" onClick={onClose}>Cancel</Button>,
       ]}
@@ -353,78 +449,189 @@ export default function SnowparkSetupModal({ onClose }: Props) {
         <Steps
           current={current}
           size="small"
-          items={defs.map((s, i) => ({
-            title: s.title,
-            description: s.description,
-            status: antdStatus(steps[i].status),
-            icon: stepIcons[i],
-          }))}
+          items={[
+            ...defs.map((s, i) => ({
+              title: s.title,
+              description: s.description,
+              status: antdStatus(steps[i].status),
+              icon: stepIcons[i],
+            })),
+            {
+              title: "Manage Packages",
+              description: "Install or remove libraries",
+              status: current === 3 ? "process" as const : "wait" as const,
+            },
+          ]}
+          onChange={(idx) => {
+            if (idx < 3) setCurrent(idx);
+            else setCurrent(3);
+          }}
         />
 
-        {/* ── Command + log ──────────────────────────────────────────────── */}
-        <div style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
-          <div style={{
-            padding: "6px 10px",
-            background: "var(--bg-raised)",
-            borderBottom: "1px solid var(--border)",
-            fontFamily: "monospace",
-            fontSize: 11,
-            color: "var(--text-muted)",
-            whiteSpace: "pre",
-          }}>
-            {defs[current].command}
-          </div>
-          <div style={{
-            height: 180,
-            overflowY: "auto",
-            padding: "6px 10px",
-            background: "var(--bg)",
-            fontFamily: "monospace",
-            fontSize: 11,
-          }}>
-            {cur.log.length === 0 && cur.status === "idle" && (
-              <Text type="secondary" style={{ fontSize: 11 }}>Press Run to start this step.</Text>
-            )}
-            {cur.log.map((line, i) => (
-              <div key={i} style={{ whiteSpace: "pre-wrap", lineHeight: "1.5", color: "var(--text)" }}>
-                {line}
+        {/* ── Package manager (step 3) ────────────────────────────────────── */}
+        {current === 3 && (
+          <Space direction="vertical" style={{ width: "100%" }} size={10}>
+            {/* Install input */}
+            <div style={{ display: "flex", gap: 8 }}>
+              <Input
+                placeholder="Package name (e.g. scikit-learn)"
+                size="small"
+                value={packageInput}
+                onChange={(e) => setPackageInput(e.target.value)}
+                onPressEnter={handleInstallPackage}
+                disabled={packageOpRunning}
+                style={{ flex: 1, fontFamily: "monospace", fontSize: 12 }}
+              />
+              <Button
+                type="primary"
+                size="small"
+                loading={packageOpRunning && !uninstallingPkg}
+                disabled={!packageInput.trim() || !!uninstallingPkg}
+                onClick={handleInstallPackage}
+              >
+                Install
+              </Button>
+            </div>
+
+            {/* Output log */}
+            {(packageLog.length > 0 || packageOpRunning) && (
+              <div style={{
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                overflow: "hidden",
+              }}>
+                <div style={{
+                  height: 120,
+                  overflowY: "auto",
+                  padding: "6px 10px",
+                  background: "var(--bg)",
+                  fontFamily: "monospace",
+                  fontSize: 11,
+                }}>
+                  {packageLog.map((line, i) => (
+                    <div key={i} style={{ whiteSpace: "pre-wrap", lineHeight: "1.5", color: "var(--text)" }}>
+                      {line}
+                    </div>
+                  ))}
+                  <div ref={pkgLogEndRef} />
+                </div>
               </div>
-            ))}
-            <div ref={logEndRef} />
-          </div>
-        </div>
+            )}
 
-        {/* ── Error ──────────────────────────────────────────────────────── */}
-        {cur.error && (
-          <Alert type="error" message={cur.error} showIcon style={{ fontSize: 12 }} />
+            {/* Package list */}
+            {packagesError && (
+              <Alert type="error" message={packagesError} showIcon style={{ fontSize: 12 }} />
+            )}
+            <div style={{
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              maxHeight: 260,
+              overflowY: "auto",
+            }}>
+              {packagesLoading
+                ? <div style={{ padding: 16, textAlign: "center" }}><Spin size="small" /></div>
+                : (
+                  <List
+                    size="small"
+                    dataSource={packages}
+                    renderItem={(pkg) => (
+                      <List.Item
+                        style={{ padding: "4px 10px" }}
+                        actions={[
+                          <Button
+                            key="uninstall"
+                            danger
+                            size="small"
+                            loading={uninstallingPkg === pkg.name}
+                            disabled={packageOpRunning && uninstallingPkg !== pkg.name}
+                            onClick={() => handleUninstallPackage(pkg.name)}
+                          >
+                            Uninstall
+                          </Button>,
+                        ]}
+                      >
+                        <span style={{ fontFamily: "monospace", fontSize: 12 }}>
+                          {pkg.name}
+                        </span>
+                        <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)", marginLeft: 8 }}>
+                          {pkg.version}
+                        </span>
+                      </List.Item>
+                    )}
+                  />
+                )
+              }
+            </div>
+          </Space>
         )}
 
-        {/* ── Step controls ──────────────────────────────────────────────── */}
-        {!allDone && (
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <Button
-              type="primary"
-              loading={cur.status === "running"}
-              disabled={cur.status === "done"}
-              onClick={() => runStep(current)}
-            >
-              {cur.status === "idle"    ? "Run"
-               : cur.status === "running" ? "Running…"
-               : cur.status === "error"   ? "Retry"
-               : "Done"}
-            </Button>
-            {current > 0 && cur.status !== "running" && (
-              <Button onClick={() => setCurrent((c) => c - 1)}>Back</Button>
+        {/* ── Command + log (setup steps 0-2) ────────────────────────────── */}
+        {current < 3 && (
+          <>
+            <div style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
+              <div style={{
+                padding: "6px 10px",
+                background: "var(--bg-raised)",
+                borderBottom: "1px solid var(--border)",
+                fontFamily: "monospace",
+                fontSize: 11,
+                color: "var(--text-muted)",
+                whiteSpace: "pre",
+              }}>
+                {defs[current].command}
+              </div>
+              <div style={{
+                height: 180,
+                overflowY: "auto",
+                padding: "6px 10px",
+                background: "var(--bg)",
+                fontFamily: "monospace",
+                fontSize: 11,
+              }}>
+                {cur.log.length === 0 && cur.status === "idle" && (
+                  <Text type="secondary" style={{ fontSize: 11 }}>Press Run to start this step.</Text>
+                )}
+                {cur.log.map((line, i) => (
+                  <div key={i} style={{ whiteSpace: "pre-wrap", lineHeight: "1.5", color: "var(--text)" }}>
+                    {line}
+                  </div>
+                ))}
+                <div ref={logEndRef} />
+              </div>
+            </div>
+
+            {/* ── Error ────────────────────────────────────────────────────── */}
+            {cur.error && (
+              <Alert type="error" message={cur.error} showIcon style={{ fontSize: 12 }} />
             )}
-            {cur.status === "done" && current < 2 && (
-              <Button onClick={() => setCurrent((c) => c + 1)}>Next step</Button>
+
+            {/* ── Step controls ────────────────────────────────────────────── */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <Button
+                type="primary"
+                loading={cur.status === "running"}
+                disabled={cur.status === "done"}
+                onClick={() => runStep(current)}
+              >
+                {cur.status === "idle"    ? "Run"
+                 : cur.status === "running" ? "Running…"
+                 : cur.status === "error"   ? "Retry"
+                 : "Done"}
+              </Button>
+              {current > 0 && cur.status !== "running" && (
+                <Button onClick={() => setCurrent((c) => c - 1)}>Back</Button>
+              )}
+              {cur.status === "done" && current < 2 && (
+                <Button onClick={() => setCurrent((c) => c + 1)}>Next step</Button>
+              )}
+            </div>
+
+            {setupDone && (
+              <Tag color="success" style={{ fontSize: 12 }}>
+                ✓ All steps completed — environment is ready
+              </Tag>
             )}
-          </div>
-        )}
-        {allDone && (
-          <Tag color="success" style={{ fontSize: 12 }}>
-            ✓ All steps completed — environment is ready
-          </Tag>
+          </>
         )}
 
       </Space>

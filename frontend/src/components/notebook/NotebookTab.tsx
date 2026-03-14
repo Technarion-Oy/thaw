@@ -28,6 +28,7 @@ import {
   RunNotebookSql,
   StopNotebookSession,
   SaveNotebook,
+  GetTableColumns,
 } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
@@ -102,6 +103,7 @@ interface Cell {
   kind: "code" | "markdown" | "sql";
   source: string;
   outputs: CellOutput[];
+  images: string[];   // base64-encoded PNG plots from matplotlib
   sqlResult: SqlResult | null;
   executionCount: number | null;
   running: boolean;
@@ -130,6 +132,7 @@ function parseNotebook(json: string): { cells: Cell[]; raw: RawNotebook } {
       kind,
       source: toStr(c.source),
       outputs: mapOutputs(c.outputs ?? []),
+      images: [],
       sqlResult: null,
       executionCount: c.execution_count ?? null,
       running: false,
@@ -249,7 +252,7 @@ export default function NotebookTab({ tabId }: Props) {
     if (cell.running) return;
 
     if (cell.kind === "sql") {
-      patchCell(cell.id, { running: true, sqlResult: null, outputs: [] });
+      patchCell(cell.id, { running: true, sqlResult: null, outputs: [], images: [] });
       try {
         const result = await RunNotebookSql(cell.source);
         setCells((prev) => {
@@ -271,17 +274,18 @@ export default function NotebookTab({ tabId }: Props) {
     }
 
     if (!kernelReady) return;
-    patchCell(cell.id, { running: true, outputs: [], sqlResult: null });
+    patchCell(cell.id, { running: true, outputs: [], images: [], sqlResult: null });
     try {
       const out = await RunNotebookCell(tabId, cell.source);
       const outputs: CellOutput[] = [];
       if (out.stdout) outputs.push({ type: "stdout", text: out.stdout });
       if (out.stderr) outputs.push({ type: "stderr", text: out.stderr });
       if (out.error)  outputs.push({ type: "error",  text: out.error  });
+      const images = out.images ?? [];
       setCells((prev) => {
         const updated = prev.map((c) =>
           c.id === cell.id
-            ? { ...c, running: false, outputs, executionCount: (c.executionCount ?? 0) + 1 }
+            ? { ...c, running: false, outputs, images, executionCount: (c.executionCount ?? 0) + 1 }
             : c,
         );
         syncToStore(updated);
@@ -332,6 +336,7 @@ export default function NotebookTab({ tabId }: Props) {
       kind: "code",
       source: "",
       outputs: [],
+      images: [],
       sqlResult: null,
       executionCount: null,
       running: false,
@@ -379,7 +384,7 @@ export default function NotebookTab({ tabId }: Props) {
 
   const setCellKind = useCallback((id: string, kind: Cell["kind"]) => {
     setCells((prev) => {
-      const updated = prev.map((c) => (c.id === id ? { ...c, kind, outputs: [] } : c));
+      const updated = prev.map((c) => (c.id === id ? { ...c, kind, outputs: [], images: [] } : c));
       syncToStore(updated);
       return updated;
     });
@@ -646,6 +651,57 @@ function CellView({
         case "x": e.preventDefault(); e.stopPropagation(); doCut(); break;
       }
     }, true /* capture */);
+
+    // Drag-and-drop from sidebar (same payload as SqlEditor).
+    editorDom?.addEventListener("dragover", (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes("thaw/table")) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+      }
+    });
+
+    editorDom?.addEventListener("drop", async (e: DragEvent) => {
+      const raw = e.dataTransfer?.getData("thaw/table");
+      if (!raw) return;
+      e.preventDefault();
+      let info: { db: string; schema: string; name: string };
+      try { info = JSON.parse(raw); } catch { return; }
+
+      const target = editor.getTargetAtClientPoint(e.clientX, e.clientY);
+      const pos = target?.position ?? editor.getPosition() ?? { lineNumber: 1, column: 1 };
+
+      const esc = (s: string) => s.replace(/"/g, '""');
+      const fqn = `"${esc(info.db)}"."${esc(info.schema)}"."${esc(info.name)}"`;
+
+      let text: string;
+      if (cell.kind === "sql") {
+        try {
+          const columns = await GetTableColumns(info.db, info.schema, info.name);
+          const colList = columns.map((c) => `    "${esc(c)}"`).join(",\n");
+          text = `SELECT\n${colList}\nFROM ${fqn};`;
+        } catch {
+          text = `SELECT *\nFROM ${fqn};`;
+        }
+      } else {
+        // Code cell: generate a Snowpark DataFrame snippet.
+        try {
+          const columns = await GetTableColumns(info.db, info.schema, info.name);
+          text = `df = session.table('${fqn}')\n# columns: ${columns.join(", ")}\ndf.show()`;
+        } catch {
+          text = `df = session.table('${fqn}')\ndf.show()`;
+        }
+      }
+
+      const range = {
+        startLineNumber: pos.lineNumber,
+        endLineNumber:   pos.lineNumber,
+        startColumn:     pos.column,
+        endColumn:       pos.column,
+      };
+      editor.executeEdits("drag-drop", [{ range, text, forceMoveMarkers: true }]);
+      editor.pushUndoStop();
+      editor.focus();
+    });
   };
 
   return (
@@ -748,8 +804,8 @@ function CellView({
         </div>
 
         {/* Code cell outputs */}
-        {cell.kind === "code" && cell.outputs.length > 0 && (
-          <div style={{ borderTop: `1px solid ${border}` }}>
+        {cell.kind === "code" && (cell.outputs.length > 0 || cell.images.length > 0) && (
+          <div style={{ borderTop: `1px solid ${border}`, background: isDark ? "#1a1a1a" : "#fafafa" }}>
             {cell.outputs.map((out, i) => (
               <div key={i} style={{ position: "relative" }}>
                 <pre style={{
@@ -760,7 +816,7 @@ function CellView({
                   lineHeight: "1.5",
                   whiteSpace: "pre-wrap",
                   wordBreak: "break-word",
-                  background: isDark ? "#1a1a1a" : "#fafafa",
+                  background: "transparent",
                   color: out.type === "error"  ? "#ff4d4f"
                        : out.type === "stderr" ? "#e6a817"
                        : isDark ? "#d4d4d4" : "#1f2328",
@@ -776,6 +832,15 @@ function CellView({
                     style={{ position: "absolute", top: 4, right: 4, opacity: 0.45, fontSize: 11 }}
                   />
                 </Tooltip>
+              </div>
+            ))}
+            {cell.images.map((b64, i) => (
+              <div key={`img-${i}`} style={{ padding: "8px 10px" }}>
+                <img
+                  src={`data:image/png;base64,${b64}`}
+                  alt={`plot ${i + 1}`}
+                  style={{ maxWidth: "100%", display: "block", borderRadius: 4 }}
+                />
               </div>
             ))}
           </div>

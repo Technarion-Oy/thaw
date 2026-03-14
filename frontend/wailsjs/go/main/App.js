@@ -218,6 +218,10 @@ export function InstallCondaEnv() {
   return window['go']['main']['App']['InstallCondaEnv']();
 }
 
+export function InstallEnvPackage(arg1) {
+  return window['go']['main']['App']['InstallEnvPackage'](arg1);
+}
+
 export function InstallJupyterNotebook() {
   return window['go']['main']['App']['InstallJupyterNotebook']();
 }
@@ -284,6 +288,10 @@ export function ListDroppedSchemas(arg1) {
 
 export function ListDroppedTables(arg1, arg2) {
   return window['go']['main']['App']['ListDroppedTables'](arg1, arg2);
+}
+
+export function ListEnvPackages() {
+  return window['go']['main']['App']['ListEnvPackages']();
 }
 
 export function ListNotificationIntegrations() {
@@ -444,6 +452,10 @@ export function StopShell() {
 
 export function TestAIModel(arg1, arg2, arg3) {
   return window['go']['main']['App']['TestAIModel'](arg1, arg2, arg3);
+}
+
+export function UninstallEnvPackage(arg1) {
+  return window['go']['main']['App']['UninstallEnvPackage'](arg1);
 }
 
 export function UseDatabase(arg1) {

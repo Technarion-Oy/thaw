@@ -37,13 +37,41 @@ const kernelRunMarker = "<<<THAW_RUN>>>"
 
 // kernelPyScript is a minimal stateful Python kernel.  It reads code blocks
 // from stdin (terminated by kernelRunMarker), executes them in a shared
-// namespace, captures stdout/stderr, and writes a JSON result + sentinel line.
-const kernelPyScript = `import sys, io, traceback, json
+// namespace, captures stdout/stderr, captures matplotlib figures as base64
+// PNGs, and writes a JSON result + sentinel line.
+const kernelPyScript = `import sys, io, traceback, json, base64, warnings
 
 SENTINEL   = "<<<THAW_CELL_DONE>>>"
 RUN_MARKER = "<<<THAW_RUN>>>"
 
+# Force matplotlib to use the non-interactive Agg backend so that show()
+# does not try to open a GUI window.
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    # plt.show() on the Agg backend emits a UserWarning explaining that the
+    # canvas is non-interactive.  Suppress it — figures are captured as PNG.
+    warnings.filterwarnings("ignore", message="FigureCanvasAgg is non-interactive")
+except Exception:
+    pass
+
 g = {}
+
+def _capture_figures():
+    """Return a list of base64-encoded PNG strings for all open figures."""
+    images = []
+    try:
+        import matplotlib.pyplot as plt
+        for num in plt.get_fignums():
+            fig = plt.figure(num)
+            buf = io.BytesIO()
+            fig.savefig(buf, format="png", bbox_inches="tight", dpi=150)
+            buf.seek(0)
+            images.append(base64.b64encode(buf.read()).decode("utf-8"))
+        plt.close("all")
+    except Exception:
+        pass
+    return images
 
 while True:
     lines = []
@@ -70,7 +98,8 @@ while True:
         sys.stdout = old_out
         sys.stderr = old_err
 
-    result = {"stdout": buf_out.getvalue(), "stderr": buf_err.getvalue(), "error": err_info}
+    images = _capture_figures()
+    result = {"stdout": buf_out.getvalue(), "stderr": buf_err.getvalue(), "error": err_info, "images": images}
     print(json.dumps(result), flush=True)
     print(SENTINEL, flush=True)
 `
@@ -108,9 +137,10 @@ type PythonInfo struct {
 
 // NotebookCellOutput is the result of running a single notebook cell.
 type NotebookCellOutput struct {
-	Stdout string `json:"stdout"`
-	Stderr string `json:"stderr"`
-	Error  string `json:"error"`
+	Stdout string   `json:"stdout"`
+	Stderr string   `json:"stderr"`
+	Error  string   `json:"error"`
+	Images []string `json:"images"` // base64-encoded PNG figures (e.g. matplotlib plots)
 }
 
 // NotebookSqlResult is returned by RunNotebookSql.
@@ -119,6 +149,12 @@ type NotebookSqlResult struct {
 	Rows     [][]any  `json:"rows"`
 	RowCount int64    `json:"rowCount"`
 	QueryID  string   `json:"queryID"`
+}
+
+// PackageInfo describes a Python package installed in the Snowpark environment.
+type PackageInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
 }
 
 // ─── kernel session management ────────────────────────────────────────────────
@@ -448,8 +484,8 @@ func (a *App) checkVenvEnv(result *SnowparkCheckResult, cfg *config.AppConfig) S
 	return *result
 }
 
-// streamCommand runs cmd and emits each output line as a "snowpark:install-output" event.
-func (a *App) streamCommand(cmd *exec.Cmd) error {
+// streamCommandTo runs cmd and emits each output line as the given event.
+func (a *App) streamCommandTo(cmd *exec.Cmd, eventName string) error {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -463,7 +499,7 @@ func (a *App) streamCommand(cmd *exec.Cmd) error {
 	}
 
 	emit := func(line string) {
-		wailsruntime.EventsEmit(a.ctx, "snowpark:install-output", line)
+		wailsruntime.EventsEmit(a.ctx, eventName, line)
 	}
 
 	var wg sync.WaitGroup
@@ -479,6 +515,139 @@ func (a *App) streamCommand(cmd *exec.Cmd) error {
 	go scanPipe(stderr)
 	wg.Wait()
 	return cmd.Wait()
+}
+
+// streamCommand runs cmd and emits each output line as a "snowpark:install-output" event.
+func (a *App) streamCommand(cmd *exec.Cmd) error {
+	return a.streamCommandTo(cmd, "snowpark:install-output")
+}
+
+// pipBinForEnv returns the pip binary path for the active backend environment.
+func (a *App) pipBinForEnv() (string, error) {
+	cfg, _ := config.Load()
+	backend := cfg.Snowpark.Backend
+	if backend == "" {
+		backend = "conda"
+	}
+	if backend == "venv" {
+		venvPath := cfg.Snowpark.VenvPath
+		if venvPath == "" {
+			venvPath = defaultVenvPath()
+		}
+		pip := venvPipBin(venvPath)
+		if _, err := os.Stat(pip); err != nil {
+			return "", fmt.Errorf("venv pip not found at %s — run Setup first", pip)
+		}
+		return pip, nil
+	}
+	// conda: use "conda run -n thaw_snowpark pip"
+	return "", nil
+}
+
+// ListEnvPackages returns all packages installed in the active Snowpark environment.
+func (a *App) ListEnvPackages() ([]PackageInfo, error) {
+	cfg, _ := config.Load()
+	backend := cfg.Snowpark.Backend
+	if backend == "" {
+		backend = "conda"
+	}
+
+	var cmd *exec.Cmd
+	if backend == "venv" {
+		pip, err := a.pipBinForEnv()
+		if err != nil {
+			return nil, err
+		}
+		cmd = exec.Command(pip, "list", "--format=json")
+	} else {
+		condaPath, err := exec.LookPath("conda")
+		if err != nil {
+			return nil, fmt.Errorf("conda not found: %w", err)
+		}
+		cmd = exec.Command(condaPath, "run", "-n", SnowparkCondaEnv,
+			"pip", "list", "--format=json")
+	}
+
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("pip list: %w", err)
+	}
+
+	var raw []struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return nil, fmt.Errorf("parse pip list: %w", err)
+	}
+
+	pkgs := make([]PackageInfo, 0, len(raw))
+	for _, r := range raw {
+		pkgs = append(pkgs, PackageInfo{Name: r.Name, Version: r.Version})
+	}
+	return pkgs, nil
+}
+
+// InstallEnvPackage installs a single Python package in the active environment,
+// streaming output via the "snowpark:package-output" event.
+func (a *App) InstallEnvPackage(pkg string) error {
+	cfg, _ := config.Load()
+	backend := cfg.Snowpark.Backend
+	if backend == "" {
+		backend = "conda"
+	}
+
+	var cmd *exec.Cmd
+	if backend == "venv" {
+		pip, err := a.pipBinForEnv()
+		if err != nil {
+			return err
+		}
+		cmd = exec.Command(pip, "install", pkg)
+	} else {
+		condaPath, err := exec.LookPath("conda")
+		if err != nil {
+			return fmt.Errorf("conda not found: %w", err)
+		}
+		cmd = exec.Command(condaPath, "run", "-n", SnowparkCondaEnv,
+			"pip", "install", pkg)
+	}
+
+	if err := a.streamCommandTo(cmd, "snowpark:package-output"); err != nil {
+		return fmt.Errorf("install %s failed: %w", pkg, err)
+	}
+	return nil
+}
+
+// UninstallEnvPackage removes a Python package from the active environment,
+// streaming output via the "snowpark:package-output" event.
+func (a *App) UninstallEnvPackage(pkg string) error {
+	cfg, _ := config.Load()
+	backend := cfg.Snowpark.Backend
+	if backend == "" {
+		backend = "conda"
+	}
+
+	var cmd *exec.Cmd
+	if backend == "venv" {
+		pip, err := a.pipBinForEnv()
+		if err != nil {
+			return err
+		}
+		cmd = exec.Command(pip, "uninstall", "-y", pkg)
+	} else {
+		condaPath, err := exec.LookPath("conda")
+		if err != nil {
+			return fmt.Errorf("conda not found: %w", err)
+		}
+		cmd = exec.Command(condaPath, "run", "-n", SnowparkCondaEnv,
+			"pip", "uninstall", "-y", pkg)
+	}
+
+	if err := a.streamCommandTo(cmd, "snowpark:package-output"); err != nil {
+		return fmt.Errorf("uninstall %s failed: %w", pkg, err)
+	}
+	return nil
 }
 
 // InstallCondaEnv creates the thaw_snowpark conda environment.

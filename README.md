@@ -80,6 +80,10 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - Each step streams its output line-by-line into a scrollable log panel as the command runs; errors are surfaced immediately with retry support
 - The project directory (same location used for DDL export and the embedded terminal) is shown in the setup dialog for reference
 - Environment and backend settings are persisted to `~/.config/thaw/config.json`
+- **Manage Packages** — a 4th step in the setup wizard (always accessible via the stepper or the "Manage Packages" footer button) provides a persistent package manager for the Snowpark environment:
+  - **Install** — type any package name (e.g. `scikit-learn`) and press Install or Enter; installation streams line-by-line output into a scrollable log and refreshes the package list on completion
+  - **Uninstall** — every installed package is listed with its version and an Uninstall button; a confirmation dialog is shown before removal
+  - The package list is loaded automatically on each visit by running `pip list --format=json` inside the active environment (conda or venv); works without completing the setup steps on return visits
 
 #### Notebook tabs
 
@@ -106,6 +110,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - The kernel uses `snowflake-snowpark-python` from the configured conda or venv environment
 - Per-cell output shows stdout, stderr, and tracebacks in colour-coded blocks
 - **Copy output** — each output block has a copy button that writes the text to the native clipboard
+- **Inline plots** — matplotlib figures are captured as PNG images and rendered directly below the cell output; `plt.show()` works as expected without opening a separate window; the matplotlib `Agg` backend is configured automatically by the kernel; multiple figures per cell are supported
 
 #### SQL cells
 

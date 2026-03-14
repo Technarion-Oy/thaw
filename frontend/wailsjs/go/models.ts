@@ -353,6 +353,7 @@ export namespace main {
 	    stdout: string;
 	    stderr: string;
 	    error: string;
+	    images: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new NotebookCellOutput(source);
@@ -363,6 +364,7 @@ export namespace main {
 	        this.stdout = source["stdout"];
 	        this.stderr = source["stderr"];
 	        this.error = source["error"];
+	        this.images = source["images"];
 	    }
 	}
 	export class NotebookSqlResult {
@@ -381,6 +383,20 @@ export namespace main {
 	        this.rows = source["rows"];
 	        this.rowCount = source["rowCount"];
 	        this.queryID = source["queryID"];
+	    }
+	}
+	export class PackageInfo {
+	    name: string;
+	    version: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PackageInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.version = source["version"];
 	    }
 	}
 	export class PropertyPair {

@@ -304,6 +304,10 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - **Apple Silicon warning** (conda only) — `CONDA_SUBDIR=osx-64` is applied automatically on Apple M-series chips to work around a known `pyOpenSSL` incompatibility; a banner explains this
 - **Delete venv folder** — danger button with a confirmation dialog removes the venv directory and resets all steps
 - The project directory (same path used for DDL export and the terminal) is shown for reference
+- **Manage Packages** — a 4th step in the setup wizard is always accessible (via the stepper or the "Manage Packages" footer button) regardless of whether the setup steps have been run in the current session:
+  - **Install** — enter any package name and press Install or hit Enter; output streams line-by-line into a log panel; the package list refreshes automatically on success
+  - **Uninstall** — all installed packages are listed with their versions; click Uninstall on any row (with confirmation) to remove it; the list refreshes after removal
+  - Backed by `pip list --format=json` and `pip install` / `pip uninstall -y` inside the active conda or venv environment
 
 ### Notebook tabs
 
@@ -326,6 +330,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - Cells share a **persistent Python kernel** subprocess per notebook tab — variables and imports carry across cells
 - The kernel uses the `snowflake-snowpark-python` environment (conda or venv)
 - Output shows stdout, stderr, and tracebacks in colour-coded blocks with a per-block copy button
+- **Inline plots** — matplotlib figures (e.g. from `plt.show()`) are captured as PNG images after each cell run and rendered inline below the cell output; no separate window opens; the kernel automatically configures the `Agg` backend on startup; multiple figures per cell are each rendered in order
 
 ### SQL cells
 
