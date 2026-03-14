@@ -89,6 +89,8 @@ export function GetSessionVariables():Promise<Array<main.SessionVar>>;
 
 export function GetTableColumns(arg1:string,arg2:string,arg3:string):Promise<Array<string>>;
 
+export function GetTableForeignKeys(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.TableForeignKey>>;
+
 export function GetTableRetentionDays(arg1:string,arg2:string,arg3:string):Promise<number>;
 
 export function GetTableSettings(arg1:string,arg2:string,arg3:string):Promise<main.TableSettings>;

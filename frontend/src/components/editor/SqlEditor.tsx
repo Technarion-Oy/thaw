@@ -17,7 +17,7 @@ import { useQueryStore } from "../../store/queryStore";
 import { useObjectStore } from "../../store/objectStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetUserDDL, GetAISuggestion } from "../../../wailsjs/go/main/App";
+import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetUserDDL, GetAISuggestion } from "../../../wailsjs/go/main/App";
 
 // Module-level DDL cache and hover provider handle so we only register once
 // and don't accumulate duplicate providers on editor remounts.
@@ -51,6 +51,74 @@ async function getColumns(db: string, schema: string, table: string): Promise<st
   } finally {
     fetchingCols.delete(key);
   }
+}
+
+// ── FK cache for JOIN ON autocomplete ─────────────────────────────────────────
+// Keyed "DB\0SCHEMA\0TABLE" → imported FKs (where the table is the child side).
+interface FKEntry { pkDatabase: string; pkSchema: string; pkTable: string; pkColumn: string; fkColumn: string; }
+const fkCache    = new Map<string, FKEntry[]>();
+const fetchingFKs = new Set<string>();
+
+async function getFKs(db: string, schema: string, table: string): Promise<FKEntry[]> {
+  const key = `${db.toUpperCase()}\0${schema.toUpperCase()}\0${table.toUpperCase()}`;
+  if (fkCache.has(key)) return fkCache.get(key)!;
+  if (fetchingFKs.has(key)) return [];
+  fetchingFKs.add(key);
+  try {
+    const fks = await GetTableForeignKeys(db, schema, table);
+    const entries: FKEntry[] = (fks ?? []).map((fk: any) => ({
+      pkDatabase: fk.pkDatabase ?? "",
+      pkSchema:   fk.pkSchema   ?? "",
+      pkTable:    fk.pkTable    ?? "",
+      pkColumn:   fk.pkColumn   ?? "",
+      fkColumn:   fk.fkColumn   ?? "",
+    }));
+    fkCache.set(key, entries);
+    return entries;
+  } catch {
+    fkCache.set(key, []);
+    return [];
+  } finally {
+    fetchingFKs.delete(key);
+  }
+}
+
+// ── JOIN table ref parser ──────────────────────────────────────────────────────
+// Extracts all FROM/JOIN table references (with aliases) from the given SQL text.
+interface JoinTableRef { db?: string; schema?: string; name: string; alias: string; }
+
+const JOIN_STOP_KW = new Set([
+  "ON","WHERE","SET","GROUP","ORDER","HAVING","LIMIT","UNION","EXCEPT",
+  "INTERSECT","CROSS","INNER","LEFT","RIGHT","FULL","OUTER","NATURAL","JOIN",
+  "SELECT","WITH","FROM",
+]);
+
+function parseJoinTables(sql: string): JoinTableRef[] {
+  const ID_PAT = `(?:"[^"]+"|\\w+)`;
+  // Use [ \t]+ (NOT \s+) for the alias separator so the alias group never crosses
+  // a newline and accidentally consumes the JOIN keyword of the next clause.
+  const tableRefRe = new RegExp(
+    `(?:FROM|JOIN)\\s+(?:(${ID_PAT})\\.(${ID_PAT})\\.(${ID_PAT})|(${ID_PAT})\\.(${ID_PAT})|(${ID_PAT}))` +
+    `(?:[ \\t]+(?:AS[ \\t]+)?(${ID_PAT}))?`,
+    "gi",
+  );
+  const stripQ = (s?: string) => (s && s.startsWith('"') ? s.slice(1, -1) : s);
+  const result: JoinTableRef[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = tableRefRe.exec(sql)) !== null) {
+    let db: string | undefined, schema: string | undefined, name: string;
+    if (m[1] && m[2] && m[3]) {
+      db = stripQ(m[1])!; schema = stripQ(m[2])!; name = stripQ(m[3])!;
+    } else if (m[4] && m[5]) {
+      schema = stripQ(m[4])!; name = stripQ(m[5])!;
+    } else {
+      name = stripQ(m[6])!;
+    }
+    const rawAlias = stripQ(m[7]);
+    const alias = rawAlias && !JOIN_STOP_KW.has(rawAlias.toUpperCase()) ? rawAlias : name;
+    result.push({ db, schema, name, alias });
+  }
+  return result;
 }
 
 function mkColSuggestions(cols: string[], range: any, monaco: any) {
@@ -531,6 +599,102 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             );
             if (allCols.size > 0) {
               return { suggestions: mkColSuggestions(Array.from(allCols), range, monaco) };
+            }
+          }
+        }
+
+        // ── JOIN ON → suggest FK / same-name-column conditions ──────────────
+        // Detect "ON" immediately before the cursor, handling two layouts:
+        //   (a) same line:  "JOIN t2 ON <cursor>"       lineUpToWord ends in "ON "
+        //   (b) split line: "JOIN t2 ON\n  <cursor>"    prevLine ends in "ON"
+        // When no alias is used, ref.alias defaults to the table name, so
+        // suggestions appear as  TABLE1.col = TABLE2.col  rather than  a.col = b.col.
+        const prevLineForOn = position.lineNumber > 1
+          ? model.getLineContent(position.lineNumber - 1)
+          : "";
+        const onCheckText = prevLineForOn + "\n" + lineUpToWord;
+        if (onCheckText.match(/\bON\s*(?:\n\s*)?$/i)) {
+          const cursorOffset = model.getOffsetAt(position);
+          const textToCursor = model.getValue().slice(0, cursorOffset);
+          const refs = parseJoinTables(textToCursor);
+          if (refs.length >= 2) {
+            const storeObjs = useObjectStore.getState().objects;
+            const resolvedRefs = refs.map((ref) => {
+              // 3-part ref (db.schema.name): we already have everything needed —
+              // skip the store lookup so FK suggestions work even before the schema
+              // has been lazy-loaded into the object store via dot-completion.
+              if (ref.db && ref.schema) {
+                return { db: ref.db, schema: ref.schema, name: ref.name, alias: ref.alias };
+              }
+              // 1- or 2-part ref: resolve via the object store.
+              const obj = storeObjs.find((o) => {
+                if (o.kind !== "TABLE" && o.kind !== "VIEW") return false;
+                if (UC(o.name) !== UC(ref.name)) return false;
+                if (ref.db     && UC(o.db)     !== UC(ref.db))     return false;
+                if (ref.schema && UC(o.schema) !== UC(ref.schema)) return false;
+                return true;
+              });
+              return obj ? { db: obj.db, schema: obj.schema, name: obj.name, alias: ref.alias } : null;
+            }).filter(Boolean) as Array<{ db: string; schema: string; name: string; alias: string }>;
+
+            if (resolvedRefs.length >= 2) {
+              const onSuggestions: any[] = [];
+              const seen = new Set<string>();
+              const lastRef   = resolvedRefs[resolvedRefs.length - 1];
+              const otherRefs = resolvedRefs.slice(0, -1);
+
+              // FK conditions: lastRef is the FK child, referencing one of the other tables
+              const lastFKs = await getFKs(lastRef.db, lastRef.schema, lastRef.name);
+              for (const fk of lastFKs) {
+                const pkRef = otherRefs.find((r) =>
+                  UC(r.name) === UC(fk.pkTable) &&
+                  (!fk.pkSchema   || UC(r.schema) === UC(fk.pkSchema))   &&
+                  (!fk.pkDatabase || UC(r.db)     === UC(fk.pkDatabase)),
+                );
+                if (!pkRef) continue;
+                const cond = `${lastRef.alias}.${fk.fkColumn} = ${pkRef.alias}.${fk.pkColumn}`;
+                if (!seen.has(cond)) {
+                  seen.add(cond);
+                  onSuggestions.push({ label: cond, kind: monaco.languages.CompletionItemKind.Operator, insertText: cond, detail: "FK RELATION", sortText: `0${cond}`, range });
+                }
+              }
+
+              // FK conditions: one of the other tables is the FK child, referencing lastRef
+              for (const otherRef of otherRefs) {
+                const otherFKs = await getFKs(otherRef.db, otherRef.schema, otherRef.name);
+                for (const fk of otherFKs) {
+                  if (
+                    UC(fk.pkTable) === UC(lastRef.name) &&
+                    (!fk.pkSchema   || UC(fk.pkSchema)   === UC(lastRef.schema)) &&
+                    (!fk.pkDatabase || UC(fk.pkDatabase) === UC(lastRef.db))
+                  ) {
+                    const cond = `${otherRef.alias}.${fk.fkColumn} = ${lastRef.alias}.${fk.pkColumn}`;
+                    if (!seen.has(cond)) {
+                      seen.add(cond);
+                      onSuggestions.push({ label: cond, kind: monaco.languages.CompletionItemKind.Operator, insertText: cond, detail: "FK RELATION", sortText: `0${cond}`, range });
+                    }
+                  }
+                }
+              }
+
+              // Same-name column conditions between lastRef and each other table
+              const lastCols = new Set((await getColumns(lastRef.db, lastRef.schema, lastRef.name)).map(UC));
+              for (const otherRef of otherRefs) {
+                const otherCols = await getColumns(otherRef.db, otherRef.schema, otherRef.name);
+                for (const col of otherCols) {
+                  if (lastCols.has(UC(col))) {
+                    const cond = `${lastRef.alias}.${col} = ${otherRef.alias}.${col}`;
+                    if (!seen.has(cond)) {
+                      seen.add(cond);
+                      onSuggestions.push({ label: cond, kind: monaco.languages.CompletionItemKind.Operator, insertText: cond, detail: "SAME-NAME COLUMN", sortText: `1${cond}`, range });
+                    }
+                  }
+                }
+              }
+
+              if (onSuggestions.length > 0) {
+                return { suggestions: onSuggestions };
+              }
             }
           }
         }

@@ -25,6 +25,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - `db.schema.` → tables, views, functions, and other objects in that schema
   - `db.schema.table.` → columns of that table or view
   - `Ctrl+Space` inside a query → columns from all tables referenced in the current `FROM`/`JOIN` clauses
+  - After `ON` in a `JOIN` clause → join conditions: FK relationships listed first (sourced from `SHOW IMPORTED KEYS IN TABLE`), followed by columns that share the same name across the joined tables; works with full three-part identifiers or bare table names, with or without aliases
 - **AI inline completions** — ghost-text SQL suggestions powered by OpenAI or Google AI Studios (Gemini); press `Tab` to accept
 - **AI Chat** — an agentic assistant in the results area that can query your live Snowflake connection to answer questions about your data (see [AI Features](#ai-features))
 - **Code Snippets** — open **Tools → Code Snippets…** in the menu bar to browse 24 curated `CREATE OR REPLACE` templates across six categories:

@@ -39,6 +39,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
   - After `db.schema.` → objects (tables, views, functions, …) in that schema
   - After `db.schema.table.` or `schema.table.` or `table.` → columns of that table/view
   - `Ctrl+Space` anywhere in a query (SELECT list, WHERE clause, etc.) → columns from all tables/views referenced in the `FROM`/`JOIN` clauses of the current statement; both quoted (`"TABLE"`) and unquoted identifiers are recognised; works above the FROM clause (e.g. inside the SELECT column list)
+  - After `ON` in a `JOIN` clause → join conditions sorted by relevance: FK relationships first (via `SHOW IMPORTED KEYS IN TABLE`), then columns shared by name between the joined tables; works with full three-part identifiers or short names, with or without table aliases (the table name is used as the prefix when no alias is defined)
   - Column lists are fetched once via `DESCRIBE TABLE` and cached for the session; subsequent invocations are instant
 - **AI inline completions** — ghost-text SQL suggestions powered by OpenAI or Google AI Studios (Gemini); appears automatically as you type and is accepted with `Tab`; configure via **AI → Configure AI…** in the menu bar
 - **AI Chat** — agentic chat panel in the results area (Results / AI Chat / Terminal tabs); the assistant operates in **Chat** or **Agent** mode (toggle above the input); in agent mode it calls tools against the live Snowflake connection and the local file system — see [AI Chat](#ai-chat) below

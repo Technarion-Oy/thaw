@@ -1322,6 +1322,57 @@ func (c *Client) GetTableColumns(ctx context.Context, database, schema, name str
 	return columnNames, rows.Err()
 }
 
+// TableForeignKey describes a single foreign-key column mapping between two tables.
+// It is returned by GetTableForeignKeys and used by the editor's JOIN ON autocomplete.
+type TableForeignKey struct {
+	PKDatabase string `json:"pkDatabase"`
+	PKSchema   string `json:"pkSchema"`
+	PKTable    string `json:"pkTable"`
+	PKColumn   string `json:"pkColumn"`
+	FKDatabase string `json:"fkDatabase"`
+	FKSchema   string `json:"fkSchema"`
+	FKTable    string `json:"fkTable"`
+	FKColumn   string `json:"fkColumn"`
+}
+
+// GetTableForeignKeys returns every foreign key where the given table is the
+// referencing (child / FK) side. It runs SHOW IMPORTED KEYS IN TABLE and maps
+// the pk_*/fk_* columns into TableForeignKey values.
+func (c *Client) GetTableForeignKeys(ctx context.Context, database, schema, table string) ([]TableForeignKey, error) {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	query := fmt.Sprintf(`SHOW IMPORTED KEYS IN TABLE "%s"."%s"."%s"`, esc(database), esc(schema), esc(table))
+	rows, err := c.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cols, _ := rows.Columns()
+	idxs := colIndexMap(cols,
+		"pk_database_name", "pk_schema_name", "pk_table_name", "pk_column_name",
+		"fk_database_name", "fk_schema_name", "fk_table_name", "fk_column_name",
+	)
+
+	var result []TableForeignKey
+	for rows.Next() {
+		vals, ptrs := makeValPtrs(len(cols))
+		if err := rows.Scan(ptrs...); err != nil {
+			continue
+		}
+		result = append(result, TableForeignKey{
+			PKDatabase: strVal(vals, idxs["pk_database_name"]),
+			PKSchema:   strVal(vals, idxs["pk_schema_name"]),
+			PKTable:    strVal(vals, idxs["pk_table_name"]),
+			PKColumn:   strVal(vals, idxs["pk_column_name"]),
+			FKDatabase: strVal(vals, idxs["fk_database_name"]),
+			FKSchema:   strVal(vals, idxs["fk_schema_name"]),
+			FKTable:    strVal(vals, idxs["fk_table_name"]),
+			FKColumn:   strVal(vals, idxs["fk_column_name"]),
+		})
+	}
+	return result, rows.Err()
+}
+
 // GetFunctionInfo fetches the DDL for a user-defined function and returns its
 // parameter list together with a flag indicating whether it is a table function
 // (UDTF, whose DDL contains RETURNS TABLE) or a scalar function.

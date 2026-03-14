@@ -858,6 +858,15 @@ func (a *App) GetTableColumns(database, schema, name string) ([]string, error) {
 	return a.client.GetTableColumns(a.ctx, database, schema, name)
 }
 
+// GetTableForeignKeys returns the foreign keys where the given table is the
+// referencing side. Used by the editor's JOIN ON autocomplete.
+func (a *App) GetTableForeignKeys(database, schema, table string) ([]snowflake.TableForeignKey, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.GetTableForeignKeys(a.ctx, database, schema, table)
+}
+
 // GetFunctionInfo fetches the DDL for a user-defined function and returns its
 // parameter list together with a flag indicating whether it is a table function.
 func (a *App) GetFunctionInfo(database, schema, name, argTypes string) (*snowflake.FunctionInfo, error) {
