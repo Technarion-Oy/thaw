@@ -46,6 +46,10 @@ export function CancelQuery() {
   return window['go']['main']['App']['CancelQuery']();
 }
 
+export function CheckSnowparkEnv() {
+  return window['go']['main']['App']['CheckSnowparkEnv']();
+}
+
 export function Connect(arg1) {
   return window['go']['main']['App']['Connect'](arg1);
 }
@@ -60,6 +64,10 @@ export function CreateBackupSet(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) 
 
 export function DeleteOldestBackup(arg1, arg2, arg3) {
   return window['go']['main']['App']['DeleteOldestBackup'](arg1, arg2, arg3);
+}
+
+export function DeleteVenvFolder() {
+  return window['go']['main']['App']['DeleteVenvFolder']();
 }
 
 export function Disconnect() {
@@ -158,6 +166,10 @@ export function GetSessionVariables() {
   return window['go']['main']['App']['GetSessionVariables']();
 }
 
+export function GetSnowparkConfig() {
+  return window['go']['main']['App']['GetSnowparkConfig']();
+}
+
 export function GetTableColumns(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetTableColumns'](arg1, arg2, arg3);
 }
@@ -200,6 +212,34 @@ export function GitStatus(arg1) {
 
 export function ImportTableData(arg1) {
   return window['go']['main']['App']['ImportTableData'](arg1);
+}
+
+export function InstallCondaEnv() {
+  return window['go']['main']['App']['InstallCondaEnv']();
+}
+
+export function InstallJupyterNotebook() {
+  return window['go']['main']['App']['InstallJupyterNotebook']();
+}
+
+export function InstallJupyterVenv() {
+  return window['go']['main']['App']['InstallJupyterVenv']();
+}
+
+export function InstallSnowparkPackage() {
+  return window['go']['main']['App']['InstallSnowparkPackage']();
+}
+
+export function InstallSnowparkVenv(arg1) {
+  return window['go']['main']['App']['InstallSnowparkVenv'](arg1);
+}
+
+export function InstallVenvEnv() {
+  return window['go']['main']['App']['InstallVenvEnv']();
+}
+
+export function IsAppleSilicon() {
+  return window['go']['main']['App']['IsAppleSilicon']();
 }
 
 export function IsConnected() {
@@ -262,6 +302,10 @@ export function ListSchemas(arg1) {
   return window['go']['main']['App']['ListSchemas'](arg1);
 }
 
+export function ListSystemPythons() {
+  return window['go']['main']['App']['ListSystemPythons']();
+}
+
 export function ListUsers() {
   return window['go']['main']['App']['ListUsers']();
 }
@@ -274,6 +318,10 @@ export function LoadSnowflakeCLIConfig() {
   return window['go']['main']['App']['LoadSnowflakeCLIConfig']();
 }
 
+export function NewNotebook() {
+  return window['go']['main']['App']['NewNotebook']();
+}
+
 export function PickDataFile() {
   return window['go']['main']['App']['PickDataFile']();
 }
@@ -284,6 +332,10 @@ export function PickDataFileByFormat(arg1) {
 
 export function PickDirectory() {
   return window['go']['main']['App']['PickDirectory']();
+}
+
+export function PickNotebookFile() {
+  return window['go']['main']['App']['PickNotebookFile']();
 }
 
 export function PickOpenFile() {
@@ -302,12 +354,24 @@ export function ReadFile(arg1) {
   return window['go']['main']['App']['ReadFile'](arg1);
 }
 
+export function ReadNotebook(arg1) {
+  return window['go']['main']['App']['ReadNotebook'](arg1);
+}
+
 export function ResizeShell(arg1, arg2) {
   return window['go']['main']['App']['ResizeShell'](arg1, arg2);
 }
 
 export function RestoreFromBackup(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['RestoreFromBackup'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function RunNotebookCell(arg1, arg2) {
+  return window['go']['main']['App']['RunNotebookCell'](arg1, arg2);
+}
+
+export function RunNotebookSql(arg1) {
+  return window['go']['main']['App']['RunNotebookSql'](arg1);
 }
 
 export function SaveAIConfig(arg1) {
@@ -324,6 +388,18 @@ export function SaveFile(arg1, arg2) {
 
 export function SaveGitConfig(arg1) {
   return window['go']['main']['App']['SaveGitConfig'](arg1);
+}
+
+export function SaveNotebook(arg1, arg2) {
+  return window['go']['main']['App']['SaveNotebook'](arg1, arg2);
+}
+
+export function SaveSnowparkConfig(arg1) {
+  return window['go']['main']['App']['SaveSnowparkConfig'](arg1);
+}
+
+export function SaveSnowparkPythonPath(arg1) {
+  return window['go']['main']['App']['SaveSnowparkPythonPath'](arg1);
 }
 
 export function SearchFiles(arg1, arg2, arg3) {
@@ -346,12 +422,20 @@ export function SetSessionVariable(arg1, arg2, arg3) {
   return window['go']['main']['App']['SetSessionVariable'](arg1, arg2, arg3);
 }
 
+export function StartNotebookSession(arg1) {
+  return window['go']['main']['App']['StartNotebookSession'](arg1);
+}
+
 export function StartQuery(arg1) {
   return window['go']['main']['App']['StartQuery'](arg1);
 }
 
 export function StartShell(arg1, arg2) {
   return window['go']['main']['App']['StartShell'](arg1, arg2);
+}
+
+export function StopNotebookSession(arg1) {
+  return window['go']['main']['App']['StopNotebookSession'](arg1);
 }
 
 export function StopShell() {

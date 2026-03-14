@@ -288,10 +288,64 @@ An OS shell terminal is available as a tab in the results area alongside Results
 
 ---
 
+## Snowpark & Jupyter Notebooks
+
+Open the **Snowpark** menu to set up a local Python environment and run Jupyter-style notebooks directly inside Thaw.
+
+### Environment setup
+
+- **Check Environment** (`Snowpark → Check Environment…`) — scans the local machine and shows the status of system Python, the selected backend (conda env or venv), `snowflake-snowpark-python`, `notebook`, `ipython-sql`, and `sqlalchemy`; offers a direct shortcut to the setup wizard when anything is missing
+- **Setup Environment** (`Snowpark → Setup Environment…`) — three-step guided wizard that streams command output line-by-line into a scrollable log:
+  1. Create a conda environment (`thaw_snowpark`, Python 3.12, Snowflake channel) **or** a Python venv
+  2. Install `snowflake-snowpark-python` (with optional `[pandas]` extras for venv)
+  3. Install `notebook`, `ipython-sql`, and `sqlalchemy`
+- **Backend choice** — radio group selects **conda** or **venv**; all commands adapt accordingly
+- **Python interpreter selector** (venv only) — dropdown lists every Python interpreter found on the system (`/usr/bin`, Homebrew, pyenv, etc.); duplicates are removed by resolving symlinks; the selection is saved to `config.json`
+- **Apple Silicon warning** (conda only) — `CONDA_SUBDIR=osx-64` is applied automatically on Apple M-series chips to work around a known `pyOpenSSL` incompatibility; a banner explains this
+- **Delete venv folder** — danger button with a confirmation dialog removes the venv directory and resets all steps
+- The project directory (same path used for DDL export and the terminal) is shown for reference
+
+### Notebook tabs
+
+- **New Notebook** (`Snowpark → New Notebook…`) — native save dialog writes a blank `nbformat v4` file and opens it as a new notebook tab
+- **Open Notebook** (`Snowpark → Open Notebook…`) — file picker filtered to `.ipynb`; opens alongside SQL tabs
+- Notebooks are saved as standard `.ipynb` files compatible with JupyterLab and VS Code
+
+### Cell editor
+
+- **Monaco editor per cell** with full syntax highlighting:
+  - **Code cells** → Python syntax (keywords, builtins, decorators, strings, comments)
+  - **SQL cells** → custom Snowflake SQL tokenizer (same as the main SQL editor)
+  - **Markdown cells** → Markdown syntax highlighting
+- Editor auto-sizes vertically to its content
+- Native undo/redo (`⌘Z` / `⌘⇧Z`) and clipboard (`⌘C` / `⌘V` / `⌘X`) via Monaco and Wails native APIs
+- `Shift+Enter` runs the current cell; cell kind (Code / SQL / Markdown) can be changed at any time
+
+### Python code cells
+
+- Cells share a **persistent Python kernel** subprocess per notebook tab — variables and imports carry across cells
+- The kernel uses the `snowflake-snowpark-python` environment (conda or venv)
+- Output shows stdout, stderr, and tracebacks in colour-coded blocks with a per-block copy button
+
+### SQL cells
+
+- SQL cells execute directly against the **active Snowflake connection** — no Python kernel required
+- Results render in a **sticky-header scrollable table** (up to 1 000 rows)
+- DDL / DML with no result set shows "OK — N rows affected · queryID"
+
+### Notebook management
+
+- **Run All**, **Restart Kernel**, **Save**, **Add Cell** in the toolbar
+- Per-cell controls: run, move up/down, add below, delete
+- Kernel status indicator: starting spinner → "Kernel ready" → "Kernel error"
+
+---
+
 ## UI & Theming
 
 - **Light, Dark, and System** themes — switch via **View → Appearance**; preference is saved across sessions
-- **Tools menu** — native menu bar **Tools** entry contains developer utilities; currently provides **Code Snippets…** (see above) and **Export Path Format…** (configure the DDL export file path template)
+- **Tools menu** — native menu bar **Tools** entry provides **Code Snippets…** and **Export Path Format…**
+- **Snowpark menu** — native menu bar **Snowpark** entry provides **Check Environment…**, **Setup Environment…**, **New Notebook…**, and **Open Notebook…**
 - **Resizable sidebars** — drag either sidebar edge to any width between 160 px and 600 px
 - **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane to any ratio; position is saved across sessions
 - **Drag-and-drop panel layout** — every sidebar panel (Export DDL, File Browser, Git, Object Browser, Administration) has a drag handle at its top edge; drag panels between the left and right sidebars or reorder them within a sidebar; layout is persisted across sessions

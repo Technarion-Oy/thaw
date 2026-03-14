@@ -62,6 +62,67 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - Full ANSI colour, cursor blink, and mouse support via xterm.js (`@xterm/xterm`, `@xterm/addon-fit`)
 - PTY managed by the Go backend via `github.com/creack/pty`
 
+### Snowpark & Jupyter notebooks
+
+Open the **Snowpark** menu to set up a local Python environment and run Jupyter-style notebooks directly inside Thaw.
+
+#### Environment setup
+
+- **Check Environment** — scans the local machine and reports which components are present: system Python, conda / venv, `snowflake-snowpark-python`, `notebook`, `ipython-sql`, and `sqlalchemy`; shows a "Setup Environment…" shortcut when anything is missing
+- **Setup Environment** — three-step guided wizard:
+  1. **Create environment** — conda (`thaw_snowpark`, Python 3.12, Snowflake channel) or venv (uses a chosen system Python)
+  2. **Install Snowpark** — `snowflake-snowpark-python` (with optional `[pandas]` extras for venv)
+  3. **Install Jupyter & SQL** — `notebook`, `ipython-sql`, `sqlalchemy`
+- **Backend choice** — select **conda** or **venv** from a radio group; the wizard adapts all commands accordingly
+- **Python interpreter selector** (venv only) — a dropdown lists every Python interpreter found on the system (`/usr/bin`, `/usr/local/bin`, `/opt/homebrew/bin`, Homebrew formula dirs, `~/.pyenv/versions/*/bin`); duplicates are removed by resolving symlinks; selection is persisted to `config.json`
+- **Apple Silicon warning** (conda only) — when an Apple M-series chip is detected, the conda environment is created with `CONDA_SUBDIR=osx-64` to work around a known `pyOpenSSL` incompatibility; a warning banner explains this automatically
+- **Delete venv folder** — danger button with confirmation dialog removes the venv directory and resets all steps, letting the user reinstall cleanly
+- Each step streams its output line-by-line into a scrollable log panel as the command runs; errors are surfaced immediately with retry support
+- The project directory (same location used for DDL export and the embedded terminal) is shown in the setup dialog for reference
+- Environment and backend settings are persisted to `~/.config/thaw/config.json`
+
+#### Notebook tabs
+
+- **New Notebook** (`Snowpark → New Notebook…`) — shows a native save dialog, writes a blank `nbformat v4` file, and opens it as a new tab
+- **Open Notebook** (`Snowpark → Open Notebook…`) — file picker filtered to `.ipynb`; opens the notebook as a tab alongside SQL tabs
+- Notebook tabs are identified by an experiment icon in the tab strip
+- Notebooks are saved back to disk as standard `.ipynb` files compatible with JupyterLab and VS Code
+
+#### Cell editor
+
+- **Monaco editor per cell** — each cell uses a Monaco editor with full syntax highlighting:
+  - **Code cells** → Python (keywords, builtins, decorators, strings, comments)
+  - **SQL cells** → custom Snowflake SQL tokenizer (same as the main SQL editor)
+  - **Markdown cells** → Markdown syntax highlighting
+- Editor auto-sizes vertically to its content — no internal scrollbar for short cells
+- Native undo/redo (`⌘Z` / `⌘⇧Z`) via Monaco's built-in history
+- Clipboard operations (`⌘C` / `⌘V` / `⌘X`) routed through the Wails native API to work correctly inside WKWebView
+- `Shift+Enter` runs the current cell (code and SQL cells)
+- Cell kind (Code / SQL / Markdown) can be changed at any time via a dropdown in the cell header
+
+#### Python code cells
+
+- Cells run in a **persistent Python kernel** subprocess — variables and imports are shared across all cells in the same tab
+- The kernel uses `snowflake-snowpark-python` from the configured conda or venv environment
+- Per-cell output shows stdout, stderr, and tracebacks in colour-coded blocks
+- **Copy output** — each output block has a copy button that writes the text to the native clipboard
+
+#### SQL cells
+
+- SQL cells execute directly against the **active Snowflake connection** — no kernel required
+- Results are rendered in a **sticky-header scrollable table** (up to 1 000 rows displayed)
+- DDL / DML statements with no result set show an "OK — N rows affected · queryID" line
+- `Shift+Enter` runs the SQL and displays the result inline below the cell
+
+#### Notebook management
+
+- **Run All** — executes all code and SQL cells sequentially
+- **Restart Kernel** — stops and relaunches the Python kernel subprocess; existing SQL cell results are preserved
+- **Save** — writes the notebook to disk at its original path; the tab's unsaved-change indicator clears
+- **Add Cell** — inserts a new code cell at the bottom or below a specific cell
+- Per-cell controls: run, move up, move down, add below, delete
+- Kernel status indicator in the toolbar: "Starting kernel…" spinner, "Kernel ready" tag, or "Kernel error" tag
+
 ### File management
 - **Open…** (`⌘O` / `Ctrl+O`) — native OS open-file dialog filtered to `.sql`; re-activates an existing tab if the file is already open
 - **Save** (`⌘S` / `Ctrl+S`) — writes back to the file's original path
@@ -271,7 +332,7 @@ Right-click the **account · user** tag in the query toolbar to open the **Sessi
 - **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane; ratio is persisted across sessions
 - **Object browser height** — the Objects panel is collapsible (click the label or the ▶/▼ chevron) and vertically resizable (drag the handle below the tree, 80 – 800 px); the Administration panel fills the remaining space
 - **Theming** — light, dark, and system-default themes; switch via **View → Appearance** in the native menu bar; preference is persisted across sessions
-- Native application menu bar with **File** (open / save / new tab), **View → Appearance** (System / Light / Dark), **AI → Configure AI…**, and **Tools** (**Code Snippets…**, **Export Path Format…**) menus
+- Native application menu bar with **File** (open / save / new tab), **View → Appearance** (System / Light / Dark), **AI → Configure AI…**, **Tools** (**Code Snippets…**, **Export Path Format…**), and **Snowpark** (**Check Environment…**, **Setup Environment…**, **New Notebook…**, **Open Notebook…**) menus
 - Object browser scrolls horizontally when object names are wider than the sidebar
 - Right-click context menu is always clamped inside the viewport — never overflows the screen edges
 - Closing the app while a query is running shows a confirmation dialog; if confirmed, the query is cancelled in Snowflake before exit
@@ -359,6 +420,7 @@ The output binary is placed in `build/bin/`.
 thaw/
 ├── main.go                        # Wails entry point, window config, native menu
 ├── app.go                         # Methods bound to the frontend (Connect, ExecuteQuery, …)
+├── snowpark.go                    # Snowpark IPC: env check/setup, notebook kernel, SQL cells
 ├── errors.go                      # Sentinel errors
 ├── version.go                     # Version string (overridable via -ldflags at build time)
 ├── go.mod
@@ -442,6 +504,11 @@ thaw/
     │       ├── settings/
     │       │   ├── AISettingsModal.tsx    # AI provider / API key / model configuration
     │       │   └── LayoutSettingsModal.tsx
+    │       ├── snowpark/
+    │       │   ├── SnowparkCheckModal.tsx  # Environment check dialog
+    │       │   └── SnowparkSetupModal.tsx  # Three-step setup wizard (conda / venv)
+    │       ├── notebook/
+    │       │   └── NotebookTab.tsx         # Jupyter-style notebook with Monaco cell editors
     │       ├── snippets/SnippetsModal.tsx  # Code Snippets browser (Tools menu)
     │       ├── task/CreateTaskModal.tsx    # CREATE OR REPLACE TASK dialog
     │       └── layout/

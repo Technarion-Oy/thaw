@@ -47,11 +47,19 @@ type AIConfig struct {
 	Enabled  bool   `json:"enabled"`
 }
 
+// SnowparkConfig holds Snowpark environment settings.
+type SnowparkConfig struct {
+	Backend    string `json:"backend"`    // "conda" | "venv" | "" (empty = default to conda)
+	VenvPath   string `json:"venvPath"`   // custom venv path; empty = use computed default
+	PythonPath string `json:"pythonPath"` // explicit python binary for venv creation; empty = auto-detect
+}
+
 // AppConfig is the on-disk configuration for Thaw.
 type AppConfig struct {
-	Connections []Connection `json:"connections"`
-	Git         GitConfig    `json:"git"`
-	AI          AIConfig     `json:"ai"`
+	Connections []Connection   `json:"connections"`
+	Git         GitConfig      `json:"git"`
+	AI          AIConfig       `json:"ai"`
+	Snowpark    SnowparkConfig `json:"snowpark"`
 }
 
 // configPath returns the absolute path to the application configuration file,

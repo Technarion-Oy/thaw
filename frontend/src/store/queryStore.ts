@@ -33,6 +33,7 @@ export interface TabDiff {
 
 export interface Tab {
   id: string;
+  kind?: "sql" | "notebook"; // defaults to "sql" when absent (backward compat)
   path: string | null;   // null = unsaved scratch tab
   title: string;
   sql: string;
@@ -83,6 +84,7 @@ interface QueryState {
   openFile: (path: string, content: string) => void;
   openScratch: () => void;
   openDiff: (leftLabel: string, leftText: string, rightLabel: string, rightText: string) => void;
+  openNotebook: (path: string, content: string) => void;
   closeTab: (id: string) => void;
   moveTab: (draggedId: string, targetId: string, before: boolean) => void;
   // Called after a successful save to update the tab's path/title and clear dirty state.
@@ -203,6 +205,38 @@ export const useQueryStore = create<QueryState>()(
         sql: "",
         selectedSql: "",
         currentFile: null,
+        result: null,
+        error: null,
+      };
+    }),
+
+  openNotebook: (path, content) =>
+    set((state) => {
+      const existing = state.tabs.find((t) => t.path === path);
+      if (existing) {
+        if (existing.id === state.activeTabId) return {};
+        return {
+          activeTabId: existing.id,
+          sql: existing.sql,
+          selectedSql: "",
+          currentFile: existing.path,
+          result: null,
+          error: null,
+        };
+      }
+      const newTab = makeTab({
+        kind: "notebook",
+        path,
+        title: path.split("/").pop() ?? path,
+        sql: content,
+        savedSql: content,
+      });
+      return {
+        tabs: [...state.tabs, newTab],
+        activeTabId: newTab.id,
+        sql: content,
+        selectedSql: "",
+        currentFile: path,
         result: null,
         error: null,
       };

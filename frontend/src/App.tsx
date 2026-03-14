@@ -15,6 +15,8 @@ import { useConnectionStore } from "./store/connectionStore";
 import ConnectModal from "./components/connection/ConnectModal";
 import LayoutSettingsModal from "./components/settings/LayoutSettingsModal";
 import AISettingsModal from "./components/settings/AISettingsModal";
+import SnowparkCheckModal from "./components/snowpark/SnowparkCheckModal";
+import SnowparkSetupModal from "./components/snowpark/SnowparkSetupModal";
 import { IsConnected } from "../wailsjs/go/main/App";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../wailsjs/runtime/runtime";
 import { useThemeStore, type ThemePreference } from "./store/themeStore";
@@ -30,6 +32,8 @@ export default function App() {
 
   const [layoutModalOpen, setLayoutModalOpen] = useState(false);
   const [aiModalOpen, setAiModalOpen] = useState(false);
+  const [snowparkCheckOpen, setSnowparkCheckOpen] = useState(false);
+  const [snowparkSetupOpen, setSnowparkSetupOpen] = useState(false);
   const diffError    = useDiffStore((s) => s.error);
   const clearDiffError = useDiffStore((s) => s.clearError);
 
@@ -92,6 +96,13 @@ export default function App() {
   useEffect(() => {
     const off = EventsOn("menu:configure-ai", () => setAiModalOpen(true));
     return () => off();
+  }, []);
+
+  // Listen for Snowpark menu events.
+  useEffect(() => {
+    const offCheck = EventsOn("menu:snowpark-check", () => setSnowparkCheckOpen(true));
+    const offSetup = EventsOn("menu:snowpark-setup", () => setSnowparkSetupOpen(true));
+    return () => { (offCheck as () => void)(); (offSetup as () => void)(); };
   }, []);
 
   // Global clipboard fix for WKWebView on macOS.
@@ -176,6 +187,15 @@ export default function App() {
         <LayoutSettingsModal onClose={() => setLayoutModalOpen(false)} />
       )}
       {aiModalOpen && <AISettingsModal onClose={() => setAiModalOpen(false)} />}
+      {snowparkCheckOpen && (
+        <SnowparkCheckModal
+          onClose={() => setSnowparkCheckOpen(false)}
+          onSetup={() => setSnowparkSetupOpen(true)}
+        />
+      )}
+      {snowparkSetupOpen && (
+        <SnowparkSetupModal onClose={() => setSnowparkSetupOpen(false)} />
+      )}
     </ConfigProvider>
   );
 }

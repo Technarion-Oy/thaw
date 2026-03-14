@@ -349,6 +349,40 @@ export namespace main {
 	        this.comment = source["comment"];
 	    }
 	}
+	export class NotebookCellOutput {
+	    stdout: string;
+	    stderr: string;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new NotebookCellOutput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.stdout = source["stdout"];
+	        this.stderr = source["stderr"];
+	        this.error = source["error"];
+	    }
+	}
+	export class NotebookSqlResult {
+	    columns: string[];
+	    rows: any[][];
+	    rowCount: number;
+	    queryID: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new NotebookSqlResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.columns = source["columns"];
+	        this.rows = source["rows"];
+	        this.rowCount = source["rowCount"];
+	        this.queryID = source["queryID"];
+	    }
+	}
 	export class PropertyPair {
 	    key: string;
 	    value: string;
@@ -361,6 +395,20 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.key = source["key"];
 	        this.value = source["value"];
+	    }
+	}
+	export class PythonInfo {
+	    path: string;
+	    version: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PythonInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.version = source["version"];
 	    }
 	}
 	export class QueryHistoryRow {
@@ -433,6 +481,56 @@ export namespace main {
 	        this.key = source["key"];
 	        this.value = source["value"];
 	        this.type = source["type"];
+	    }
+	}
+	export class SnowparkCheckResult {
+	    isReady: boolean;
+	    details: string;
+	    pythonPath: string;
+	    version: string;
+	    systemPythonVersion: string;
+	    backend: string;
+	    venvPath: string;
+	    hasConda: boolean;
+	    hasEnv: boolean;
+	    hasVenv: boolean;
+	    hasSnowpark: boolean;
+	    hasNotebook: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new SnowparkCheckResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.isReady = source["isReady"];
+	        this.details = source["details"];
+	        this.pythonPath = source["pythonPath"];
+	        this.version = source["version"];
+	        this.systemPythonVersion = source["systemPythonVersion"];
+	        this.backend = source["backend"];
+	        this.venvPath = source["venvPath"];
+	        this.hasConda = source["hasConda"];
+	        this.hasEnv = source["hasEnv"];
+	        this.hasVenv = source["hasVenv"];
+	        this.hasSnowpark = source["hasSnowpark"];
+	        this.hasNotebook = source["hasNotebook"];
+	    }
+	}
+	export class SnowparkConfigResult {
+	    backend: string;
+	    venvPath: string;
+	    pythonPath: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SnowparkConfigResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.backend = source["backend"];
+	        this.venvPath = source["venvPath"];
+	        this.pythonPath = source["pythonPath"];
 	    }
 	}
 	export class TableSettings {

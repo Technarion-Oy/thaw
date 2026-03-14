@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useEffect, useRef, useState } from "react";
-import { FileOutlined, CodeOutlined, PlusOutlined, CloseOutlined, DiffOutlined } from "@ant-design/icons";
+import { FileOutlined, CodeOutlined, PlusOutlined, CloseOutlined, DiffOutlined, ExperimentOutlined } from "@ant-design/icons";
 import { useQueryStore } from "../../store/queryStore";
 
 const CLR_BORDER       = "var(--border)";
@@ -116,6 +116,8 @@ export default function TabBar() {
           >
             {tab.diff
               ? <DiffOutlined style={{ fontSize: 11, flexShrink: 0 }} />
+              : tab.kind === "notebook"
+              ? <ExperimentOutlined style={{ fontSize: 11, flexShrink: 0 }} />
               : tab.path
               ? <FileOutlined style={{ fontSize: 11, flexShrink: 0 }} />
               : <CodeOutlined style={{ fontSize: 11, flexShrink: 0 }} />

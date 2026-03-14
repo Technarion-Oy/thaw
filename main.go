@@ -165,5 +165,21 @@ func buildMenu(app *App) *menu.Menu {
 		wailsruntime.EventsEmit(app.ctx, "menu:export-path-format")
 	})
 
+	// ── Snowpark ──────────────────────────────────────────────────────────────
+	snowparkMenu := appMenu.AddSubmenu("Snowpark")
+	snowparkMenu.AddText("Check Environment…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:snowpark-check")
+	})
+	snowparkMenu.AddText("Setup Environment…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:snowpark-setup")
+	})
+	snowparkMenu.AddSeparator()
+	snowparkMenu.AddText("New Notebook…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:snowpark-new-notebook")
+	})
+	snowparkMenu.AddText("Open Notebook…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:snowpark-open-notebook")
+	})
+
 	return appMenu
 }

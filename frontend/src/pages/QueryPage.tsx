@@ -14,7 +14,7 @@ import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip,
 import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables } from "../../wailsjs/go/main/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NewNotebook } from "../../wailsjs/go/main/App";
 import type { main } from "../../wailsjs/go/models";
 import SessionPropertiesModal from "../components/common/SessionPropertiesModal";
 import SnippetsModal from "../components/snippets/SnippetsModal";
@@ -28,6 +28,7 @@ import { useThemeStore } from "../store/themeStore";
 import ResultGrid from "../components/results/ResultGrid";
 import AiChat from "../components/chat/AiChat";
 import TerminalPanel from "../components/terminal/TerminalPanel";
+import NotebookTab from "../components/notebook/NotebookTab";
 import { useQueryStore, type QueryResult, EXECUTE_IN_TAB_EVENT } from "../store/queryStore";
 import { useConnectionStore } from "../store/connectionStore";
 import { useSessionStore } from "../store/sessionStore";
@@ -36,7 +37,9 @@ import { usePanelLayoutStore } from "../store/panelLayoutStore";
 const { Text } = Typography;
 
 export default function QueryPage() {
-  const { sql, selectedSql, isRunning, error, setResult, setRunning, setError, markSaved, openScratch, openFile, setSql } = useQueryStore();
+  const { sql, selectedSql, isRunning, error, setResult, setRunning, setError, markSaved, openScratch, openFile, setSql, openNotebook } = useQueryStore();
+  const activeTabId    = useQueryStore((s) => s.activeTabId);
+  const isNotebookTab  = useQueryStore((s) => (s.tabs.find((t) => t.id === s.activeTabId)?.kind ?? "sql") === "notebook");
   const activeDiff     = useQueryStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.diff ?? null);
   const resolved       = useThemeStore((s) => s.resolved);
   const editorFont     = useThemeStore((s) => s.editorFont);
@@ -131,6 +134,36 @@ export default function QueryPage() {
     window.addEventListener("load-query", handler);
     return () => window.removeEventListener("load-query", handler);
   }, [setSql]);
+
+  // Open notebook from Snowpark menu
+  useEffect(() => {
+    const off = EventsOn("menu:snowpark-open-notebook", async () => {
+      try {
+        const path = await PickNotebookFile();
+        if (!path) return;
+        const content = await ReadNotebook(path);
+        openNotebook(path, content);
+      } catch (e) {
+        message.error(String(e));
+      }
+    });
+    return () => (off as () => void)();
+  }, [openNotebook]);
+
+  // New notebook from Snowpark menu
+  useEffect(() => {
+    const off = EventsOn("menu:snowpark-new-notebook", async () => {
+      try {
+        const path = await NewNotebook();
+        if (!path) return;
+        const content = await ReadNotebook(path);
+        openNotebook(path, content);
+      } catch (e) {
+        message.error(String(e));
+      }
+    });
+    return () => (off as () => void)();
+  }, [openNotebook]);
 
   // Listen for per-statement progress events emitted by the Go backend while
   // executing a multi-statement script.  Update the spinner label and highlight
@@ -433,7 +466,7 @@ export default function QueryPage() {
   }, []);
 
 
-  const selectStyle = { fontSize: 12, minWidth: 130 };
+  const selectStyle = { fontSize: 12, width: 130 };
 
   // The result currently shown in the grid — null when no result is selected
   // (e.g. right after a failed query; the user must pick from history explicitly).
@@ -493,7 +526,7 @@ export default function QueryPage() {
           <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
             <Space size={6}>
               {/* ── Role selector ───────────────────────────────── */}
-              <Tooltip title="Active role">
+              <Tooltip title={role ? `Role: ${role}` : "Active role"}>
                 <Select
                   size="small"
                   style={selectStyle}
@@ -510,7 +543,7 @@ export default function QueryPage() {
               </Tooltip>
 
               {/* ── Warehouse selector ──────────────────────────── */}
-              <Tooltip title="Active warehouse">
+              <Tooltip title={warehouse ? `Warehouse: ${warehouse}` : "Active warehouse"}>
                 <Select
                   size="small"
                   style={selectStyle}
@@ -529,7 +562,7 @@ export default function QueryPage() {
 
             <Space size={6}>
               {/* ── Database selector ───────────────────────────── */}
-              <Tooltip title="Active database">
+              <Tooltip title={database ? `Database: ${database}` : "Active database"}>
                 <Select
                   size="small"
                   style={selectStyle}
@@ -546,7 +579,7 @@ export default function QueryPage() {
               </Tooltip>
 
               {/* ── Schema selector ─────────────────────────────── */}
-              <Tooltip title="Active schema">
+              <Tooltip title={schema ? `Schema: ${schema}` : "Active schema"}>
                 <Select
                   size="small"
                   style={selectStyle}
@@ -650,8 +683,15 @@ export default function QueryPage() {
         </div>
       )}
 
+      {/* Notebook view — replaces editor + results when the active tab is a notebook */}
+      {!activeDiff && isNotebookTab && (
+        <div style={{ flex: 1, overflow: "hidden" }}>
+          <NotebookTab tabId={activeTabId} />
+        </div>
+      )}
+
       {/* SQL Editor — top portion (resizable) */}
-      {!activeDiff && (
+      {!activeDiff && !isNotebookTab && (
         <div
           className="editor-area"
           style={{ flex: `0 0 ${splitPct * 100}%`, borderBottom: "1px solid var(--border)", overflow: "hidden", display: "flex" }}
@@ -704,7 +744,7 @@ export default function QueryPage() {
       )}
 
       {/* Horizontal resize handle */}
-      {!activeDiff && (
+      {!activeDiff && !isNotebookTab && (
         <div
           style={{
             height: 5,
@@ -750,7 +790,7 @@ export default function QueryPage() {
       )}
 
       {/* Results / AI Chat — bottom portion */}
-      {!activeDiff &&
+      {!activeDiff && !isNotebookTab &&
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {/* Tab bar */}
         <div style={{ display: "flex", background: "var(--bg-raised)", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
