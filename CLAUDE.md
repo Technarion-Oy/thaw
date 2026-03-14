@@ -90,7 +90,7 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 ## Critical Gotchas
 
 ### gosnowflake driver logs errors before throwing
-The gosnowflake driver logs ALL query errors at ERROR level via logrus, even when the caller catches them. Do NOT call `GetObjectDDL` with a guessed object kind (TABLE vs VIEW) — always determine the kind first (from the objects store or a `ListObjects` call) to avoid noisy error logs from failed GET_DDL attempts.
+The gosnowflake driver logs ALL query errors at ERROR level via slog, even when the caller catches them. Do NOT call `GetObjectDDL` with a guessed object kind (TABLE vs VIEW) — always determine the kind first (from the objects store or a `ListObjects` call) to avoid noisy error logs from failed GET_DDL attempts.
 
 ### gosnowflake `sf.WithQueryIDChan`
 The driver writes the query ID to the channel and **then closes it**. Never call `close(qidChan)` manually — that panics. Use `case qid := <-ch:` to drain, with `case <-ctx.Done():` as cancellation fallback.
@@ -122,7 +122,7 @@ No frontend test framework is configured. Integration tests live in `internal/in
 |-------|-----------|
 | Desktop runtime | Wails v2.11 |
 | Backend | Go 1.22 |
-| Snowflake driver | gosnowflake v1.10 |
+| Snowflake driver | gosnowflake v2.0 |
 | Frontend | React 18 + TypeScript 5.6 |
 | Build tool | Vite 5 |
 | UI library | Ant Design 5 |

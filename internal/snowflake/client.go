@@ -27,7 +27,7 @@ import (
 	"sync"
 	"time"
 
-	sf "github.com/snowflakedb/gosnowflake"
+	sf "github.com/snowflakedb/gosnowflake/v2"
 )
 
 // ConnectParams holds all fields needed to open a Snowflake connection.
@@ -92,7 +92,7 @@ type QueryResult struct {
 //     the next query that needs a connection gets a new one, which will have
 //     this connector's Connect() called and therefore inherit the new state.
 type sessionConnector struct {
-	base sf.Connector
+	base driver.Connector // sf.NewConnector returns driver.Connector in v2
 	mu   sync.RWMutex
 	role string
 	wh   string
@@ -188,10 +188,10 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 		Authenticator: auth,
 		Passcode:      p.Passcode,
 		LoginTimeout:  loginTimeout,
-		// KeepSessionAlive prevents the driver from sending DELETE /session
+		// ServerSessionKeepAlive prevents the driver from sending DELETE /session
 		// when the pool recycles a connection, which would invalidate the
 		// shared Snowflake session and break all other pool connections.
-		KeepSessionAlive: true,
+		ServerSessionKeepAlive: true,
 		// Params must be initialised to a non-nil map.  ParseDSN does this
 		// automatically, but we construct the Config directly, so we must do
 		// it ourselves — otherwise the driver panics with "assignment to entry

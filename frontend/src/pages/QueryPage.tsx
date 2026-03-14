@@ -489,73 +489,80 @@ export default function QueryPage() {
         </Space>
 
         <Space size={6}>
-          {/* ── Role selector ─────────────────────────────────── */}
-          <Tooltip title="Active role">
-            <Select
-              size="small"
-              style={selectStyle}
-              value={role || undefined}
-              placeholder={loadingContext ? "…" : "Role"}
-              loading={loadingRoles || switchingRole}
-              showSearch
-              optionFilterProp="label"
-              onChange={switchRole}
-              onDropdownVisibleChange={(open) => { if (open) loadRoles(); }}
-              options={roles.map((r) => ({ value: r, label: r }))}
-              dropdownStyle={{ minWidth: 200 }}
-            />
-          </Tooltip>
+          {/* ── Session selectors: two rows (role+wh / db+schema) ── */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <Space size={6}>
+              {/* ── Role selector ───────────────────────────────── */}
+              <Tooltip title="Active role">
+                <Select
+                  size="small"
+                  style={selectStyle}
+                  value={role || undefined}
+                  placeholder={loadingContext ? "…" : "Role"}
+                  loading={loadingRoles || switchingRole}
+                  showSearch
+                  optionFilterProp="label"
+                  onChange={switchRole}
+                  onDropdownVisibleChange={(open) => { if (open) loadRoles(); }}
+                  options={roles.map((r) => ({ value: r, label: r }))}
+                  dropdownStyle={{ minWidth: 200 }}
+                />
+              </Tooltip>
 
-          {/* ── Warehouse selector ────────────────────────────── */}
-          <Tooltip title="Active warehouse">
-            <Select
-              size="small"
-              style={selectStyle}
-              value={warehouse || undefined}
-              placeholder={loadingContext ? "…" : "Warehouse"}
-              loading={loadingWarehouses || switchingWarehouse}
-              showSearch
-              optionFilterProp="label"
-              onChange={switchWarehouse}
-              onDropdownVisibleChange={(open) => { if (open) loadWarehouses(); }}
-              options={warehouses.map((w) => ({ value: w, label: w }))}
-              dropdownStyle={{ minWidth: 200 }}
-            />
-          </Tooltip>
+              {/* ── Warehouse selector ──────────────────────────── */}
+              <Tooltip title="Active warehouse">
+                <Select
+                  size="small"
+                  style={selectStyle}
+                  value={warehouse || undefined}
+                  placeholder={loadingContext ? "…" : "Warehouse"}
+                  loading={loadingWarehouses || switchingWarehouse}
+                  showSearch
+                  optionFilterProp="label"
+                  onChange={switchWarehouse}
+                  onDropdownVisibleChange={(open) => { if (open) loadWarehouses(); }}
+                  options={warehouses.map((w) => ({ value: w, label: w }))}
+                  dropdownStyle={{ minWidth: 200 }}
+                />
+              </Tooltip>
+            </Space>
 
-          {/* ── Database selector ──────────────────────────────── */}
-          <Tooltip title="Active database">
-            <Select
-              size="small"
-              style={selectStyle}
-              value={database || undefined}
-              placeholder={loadingContext ? "…" : "Database"}
-              loading={loadingDatabases || switchingDatabase}
-              showSearch
-              optionFilterProp="label"
-              onChange={switchDatabase}
-              onDropdownVisibleChange={(open) => { if (open) loadDatabases(); }}
-              options={databases.map((d) => ({ value: d, label: d }))}
-              dropdownStyle={{ minWidth: 200 }}
-            />
-          </Tooltip>
+            <Space size={6}>
+              {/* ── Database selector ───────────────────────────── */}
+              <Tooltip title="Active database">
+                <Select
+                  size="small"
+                  style={selectStyle}
+                  value={database || undefined}
+                  placeholder={loadingContext ? "…" : "Database"}
+                  loading={loadingDatabases || switchingDatabase}
+                  showSearch
+                  optionFilterProp="label"
+                  onChange={switchDatabase}
+                  onDropdownVisibleChange={(open) => { if (open) loadDatabases(); }}
+                  options={databases.map((d) => ({ value: d, label: d }))}
+                  dropdownStyle={{ minWidth: 200 }}
+                />
+              </Tooltip>
 
-          {/* ── Schema selector ────────────────────────────────── */}
-          <Tooltip title="Active schema">
-            <Select
-              size="small"
-              style={selectStyle}
-              value={schema || undefined}
-              placeholder={loadingContext ? "…" : "Schema"}
-              loading={loadingSchemas || switchingSchema}
-              showSearch
-              optionFilterProp="label"
-              onChange={switchSchema}
-              onDropdownVisibleChange={(open) => { if (open) loadSchemas(); }}
-              options={schemas.map((s) => ({ value: s, label: s }))}
-              dropdownStyle={{ minWidth: 200 }}
-            />
-          </Tooltip>
+              {/* ── Schema selector ─────────────────────────────── */}
+              <Tooltip title="Active schema">
+                <Select
+                  size="small"
+                  style={selectStyle}
+                  value={schema || undefined}
+                  placeholder={loadingContext ? "…" : "Schema"}
+                  loading={loadingSchemas || switchingSchema}
+                  showSearch
+                  optionFilterProp="label"
+                  onChange={switchSchema}
+                  onDropdownVisibleChange={(open) => { if (open) loadSchemas(); }}
+                  options={schemas.map((s) => ({ value: s, label: s }))}
+                  dropdownStyle={{ minWidth: 200 }}
+                />
+              </Tooltip>
+            </Space>
+          </div>
 
           {params && (
             <Dropdown

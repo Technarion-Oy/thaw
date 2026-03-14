@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	sf "github.com/snowflakedb/gosnowflake"
+	sf "github.com/snowflakedb/gosnowflake/v2"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"thaw/internal/ai"

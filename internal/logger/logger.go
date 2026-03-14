@@ -16,7 +16,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/sirupsen/logrus"
 	"gopkg.in/lumberjack.v2"
 )
 
@@ -65,14 +64,8 @@ func Init() func() {
 	L = slog.New(handler)
 	slog.SetDefault(L)
 
-	// Redirect gosnowflake's logrus output to the rotation file so Snowflake
-	// driver messages (connection errors, async polling, etc.) appear in the
-	// application log alongside our own entries.
-	logrus.SetOutput(appWriter)
-	logrus.SetFormatter(&logrus.TextFormatter{
-		FullTimestamp:   true,
-		TimestampFormat: "2006-01-02T15:04:05.000Z07:00",
-	})
+	// gosnowflake v2 defaults to slog.Default(), which is already set to L
+	// above — no explicit redirect needed.
 
 	L.Info("logger initialised", "path", path, "dev", devMode)
 
