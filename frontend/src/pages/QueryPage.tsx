@@ -20,7 +20,7 @@ import SessionPropertiesModal from "../components/common/SessionPropertiesModal"
 import SnippetsModal from "../components/snippets/SnippetsModal";
 import ExportPathFormatModal from "../components/export/ExportPathFormatModal";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
-import SqlEditor from "../components/editor/SqlEditor";
+import SqlEditor, { getStatementLineRanges } from "../components/editor/SqlEditor";
 import TabBar from "../components/editor/TabBar";
 import { DiffEditor } from "@monaco-editor/react";
 import { ensureMonacoSetup } from "../components/editor/monacoSetup";
@@ -65,6 +65,10 @@ export default function QueryPage() {
   const [activeStmtIdx, setActiveStmtIdx] = useState<number | null>(null);
   // True while the running query is a user-text selection (not the full buffer).
   const isSelectionRunRef = useRef(false);
+  // Index of the first selected statement within the full-buffer statement list.
+  // Used to map backend-reported indices (relative to selection) back to the
+  // full-buffer indices that SqlEditor's decorator uses.
+  const selectionBaseStmtIdxRef = useRef(0);
   const [resultPane, setResultPane] = useState<"results" | "chat" | "terminal">("results");
   const [aiEnabled, setAiEnabled] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
@@ -133,10 +137,10 @@ export default function QueryPage() {
   useEffect(() => {
     const cleanupStart = EventsOn("query:statement-start", (data: { index: number; total: number }) => {
       setStmtProgress({ index: data.index, total: data.total });
-      // Only highlight in the editor when running the full buffer (not a selection).
-      if (!isSelectionRunRef.current) {
-        setActiveStmtIdx(data.index);
-      }
+      // Map the backend's selection-relative index to the full-buffer index so
+      // the editor decorator highlights the correct statement in both full-buffer
+      // and selection runs.
+      setActiveStmtIdx(selectionBaseStmtIdxRef.current + data.index);
     });
     const cleanupQid = EventsOn("query:statement-qid", (data: { index: number; queryID: string }) => {
       // Update queryID unconditionally — for fast statements the qid can
@@ -180,6 +184,21 @@ export default function QueryPage() {
     if (!query) return;
     cancelRequestedRef.current = false;
     isSelectionRunRef.current  = !overrideSql && selectedSql.trim() !== "";
+    // For selection runs, find which full-buffer statement index the selection
+    // starts at, so we can offset the backend's 0-based statement indices.
+    if (isSelectionRunRef.current) {
+      const offset = sql.indexOf(selectedSql);
+      if (offset >= 0) {
+        const linesBefore = sql.slice(0, offset).split("\n").length; // 1-based
+        const fullRanges = getStatementLineRanges(sql);
+        const baseIdx = fullRanges.findIndex((r) => r.startLine >= linesBefore);
+        selectionBaseStmtIdxRef.current = baseIdx >= 0 ? baseIdx : 0;
+      } else {
+        selectionBaseStmtIdxRef.current = 0;
+      }
+    } else {
+      selectionBaseStmtIdxRef.current = 0;
+    }
     setIsCancelling(false);
     setRunningQueryId(null);
     setStmtProgress(null);

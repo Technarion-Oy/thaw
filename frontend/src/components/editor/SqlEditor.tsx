@@ -98,11 +98,77 @@ interface SqlEditorProps {
   activeStmtIdx?: number | null;
 }
 
+// ── Qualified identifier extractor ────────────────────────────────────────
+// Given a Monaco model and cursor position, finds the full dot-separated
+// identifier that contains the cursor (e.g. "DB.SCHEMA.TABLE" when the cursor
+// is over any of the three parts) and returns its unquoted parts.
+function getQualifiedIdent(model: any, pos: any): string[] | null {
+  const line: string = model.getLineContent(pos.lineNumber);
+  const col = pos.column - 1; // 0-based
+
+  // Expand left: allow word chars, dots, and quoted identifiers.
+  let start = col;
+  while (start > 0) {
+    const prev = line[start - 1];
+    if (prev === '"') {
+      // Walk back past the closing quote of a quoted identifier.
+      const cq = start - 1;
+      let oq = cq - 1;
+      while (oq >= 0 && line[oq] !== '"') oq--;
+      if (oq < 0) break;
+      start = oq;
+    } else if (/[\w.]/.test(prev)) {
+      start--;
+    } else {
+      break;
+    }
+  }
+
+  // Expand right.
+  let end = col;
+  while (end < line.length) {
+    const ch = line[end];
+    if (ch === '"') {
+      end++;
+      while (end < line.length && line[end] !== '"') end++;
+      if (end < line.length) end++; // past closing quote
+    } else if (/[\w.]/.test(ch)) {
+      end++;
+    } else {
+      break;
+    }
+  }
+
+  const raw = line.slice(start, end).trim();
+  if (!raw) return null;
+
+  // Split on dots, stripping double-quote wrappers from each part.
+  const parts: string[] = [];
+  let cur = '';
+  let i = 0;
+  while (i < raw.length) {
+    const ch = raw[i];
+    if (ch === '"') {
+      i++;
+      while (i < raw.length && raw[i] !== '"') { cur += raw[i]; i++; }
+      i++; // closing quote
+    } else if (ch === '.') {
+      if (cur) { parts.push(cur); cur = ''; }
+      i++;
+    } else {
+      cur += ch; i++;
+    }
+  }
+  if (cur) parts.push(cur);
+  return parts.length > 0 ? parts : null;
+}
+
 // ── Statement range parser ─────────────────────────────────────────────────
 // Returns [{startLine, endLine}] (1-indexed Monaco line numbers) for each
 // semicolon-separated statement in the SQL.  Mirrors the backend's
 // splitStatements logic for consistent statement counting.
-function getStatementLineRanges(sql: string): Array<{ startLine: number; endLine: number }> {
+// Exported so QueryPage can compute statement offsets for selection runs.
+export function getStatementLineRanges(sql: string): Array<{ startLine: number; endLine: number }> {
   const ranges: Array<{ startLine: number; endLine: number }> = [];
   let line = 1;
   let stmtStartLine = -1; // -1 = not yet started (waiting for first non-ws char)
@@ -585,31 +651,85 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
     editor.onMouseMove((e: any) => {
       const pos = e.target?.position;
-      const word = pos ? editor.getModel()?.getWordAtPosition(pos) : null;
-      if (!word) { if (!isOnTooltipRef.current) scheduleHide(); return; }
+      const model = editor.getModel();
+      const parts = (pos && model) ? getQualifiedIdent(model, pos) : null;
+      if (!parts || parts.length === 0) { if (!isOnTooltipRef.current) scheduleHide(); return; }
 
       cancelHide();
       if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
 
       hoverTimerRef.current = setTimeout(async () => {
         const { objects } = useObjectStore.getState();
-        const match = objects.find(
-          (o) => o.name.toUpperCase() === word.word.toUpperCase() &&
-                 (o.kind === "TABLE" || o.kind === "VIEW"),
-        );
-        if (!match) { setDdlHover(null); return; }
+        const UC = (s: string) => s.toUpperCase();
 
-        const cacheKey = `${match.db}\0${match.schema}\0${match.kind}\0${match.name}`;
-        let ddl: string;
-        const cached = hoverDDLCache.get(cacheKey);
-        if (cached && Date.now() - cached.ts < DDL_CACHE_TTL) {
-          ddl = cached.ddl;
+        let db = "", schema = "", kind = "", name = "", ddl = "";
+
+        if (parts.length >= 3) {
+          // 3-part: DB.SCHEMA.TABLE — use last three parts
+          const [pDb, pSchema, pName] = [
+            parts[parts.length - 3],
+            parts[parts.length - 2],
+            parts[parts.length - 1],
+          ];
+          // If this schema's objects aren't loaded yet, fetch them now so we
+          // know the kind before calling GET_DDL. This avoids a failed
+          // GET_DDL('TABLE',...) attempt on a VIEW (and vice versa) which the
+          // gosnowflake driver logs at ERROR level even when caught gracefully.
+          const schemaKey = `${UC(pDb)}\0${UC(pSchema)}`;
+          const hasSchemaInStore = useObjectStore.getState().objects
+            .some((o) => UC(o.db) === UC(pDb) && UC(o.schema) === UC(pSchema));
+          if (!hasSchemaInStore && !fetchedSchemaObjects.has(schemaKey)) {
+            fetchedSchemaObjects.add(schemaKey);
+            try {
+              const fetched = await ListObjects(pDb, pSchema);
+              useObjectStore.getState().addObjects(
+                pDb, pSchema,
+                (fetched ?? []).map((o) => ({ name: o.name, kind: (o.kind || "OTHER").toUpperCase() })),
+              );
+            } catch {
+              fetchedSchemaObjects.delete(schemaKey);
+            }
+          }
+          const inStore = useObjectStore.getState().objects.find(
+            (o) => UC(o.db) === UC(pDb) && UC(o.schema) === UC(pSchema) &&
+                   UC(o.name) === UC(pName) && (o.kind === "TABLE" || o.kind === "VIEW"),
+          );
+          if (inStore) {
+            db = inStore.db; schema = inStore.schema; kind = inStore.kind; name = inStore.name;
+          } else {
+            setDdlHover(null); return;
+          }
+        } else if (parts.length === 2) {
+          // 2-part: SCHEMA.TABLE
+          const [qualifier, pName] = [parts[0], parts[1]];
+          const inStore = objects.find(
+            (o) => UC(o.schema) === UC(qualifier) && UC(o.name) === UC(pName) &&
+                   (o.kind === "TABLE" || o.kind === "VIEW"),
+          );
+          if (!inStore) { setDdlHover(null); return; }
+          db = inStore.db; schema = inStore.schema; kind = inStore.kind; name = inStore.name;
         } else {
-          try {
-            ddl = await GetObjectDDL(match.db, match.schema, match.kind, match.name, "");
-            hoverDDLCache.set(cacheKey, { ddl, ts: Date.now() });
-          } catch {
-            return;
+          // 1-part: name only
+          const inStore = objects.find(
+            (o) => UC(o.name) === UC(parts[0]) && (o.kind === "TABLE" || o.kind === "VIEW"),
+          );
+          if (!inStore) { setDdlHover(null); return; }
+          db = inStore.db; schema = inStore.schema; kind = inStore.kind; name = inStore.name;
+        }
+
+        // Fetch DDL from cache or API (skip if already resolved by direct 3-part fetch above)
+        if (!ddl) {
+          const cacheKey = `${db}\0${schema}\0${kind}\0${name}`;
+          const cached = hoverDDLCache.get(cacheKey);
+          if (cached && Date.now() - cached.ts < DDL_CACHE_TTL) {
+            ddl = cached.ddl;
+          } else {
+            try {
+              ddl = await GetObjectDDL(db, schema, kind, name, "");
+              hoverDDLCache.set(cacheKey, { ddl, ts: Date.now() });
+            } catch {
+              return;
+            }
           }
         }
         if (!ddl) return;
@@ -627,7 +747,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const x = Math.min(rawX, window.innerWidth - 570);
         const y = fitsBelow ? belowY : Math.max(0, aboveY - 320);
 
-        setDdlHover({ ddl, kind: match.kind, db: match.db, schema: match.schema, name: match.name, x, y });
+        setDdlHover({ ddl, kind, db, schema, name, x, y });
       }, 500);
     });
 
