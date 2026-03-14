@@ -362,8 +362,16 @@ export function TestAIModel(arg1, arg2, arg3) {
   return window['go']['main']['App']['TestAIModel'](arg1, arg2, arg3);
 }
 
+export function UseDatabase(arg1) {
+  return window['go']['main']['App']['UseDatabase'](arg1);
+}
+
 export function UseRole(arg1) {
   return window['go']['main']['App']['UseRole'](arg1);
+}
+
+export function UseSchema(arg1) {
+  return window['go']['main']['App']['UseSchema'](arg1);
 }
 
 export function UseWarehouse(arg1) {

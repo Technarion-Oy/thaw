@@ -89,12 +89,13 @@ export default function QueryPage() {
   const cancelRequestedRef = useRef(false);
   const { params, disconnect } = useConnectionStore();
   const {
-    role, warehouse, roles, warehouses,
-    loadingContext, loadingRoles, loadingWarehouses,
-    switchingRole, switchingWarehouse,
+    role, warehouse, database, schema,
+    roles, warehouses, databases, schemas,
+    loadingContext, loadingRoles, loadingWarehouses, loadingDatabases, loadingSchemas,
+    switchingRole, switchingWarehouse, switchingDatabase, switchingSchema,
     error: sessionError,
-    loadContext, loadRoles, loadWarehouses,
-    switchRole, switchWarehouse, clearError,
+    loadContext, loadRoles, loadWarehouses, loadDatabases, loadSchemas,
+    switchRole, switchWarehouse, switchDatabase, switchSchema, clearError,
   } = useSessionStore();
 
   // Sync local split state when the store value changes (e.g., after layout reset).
@@ -231,6 +232,7 @@ export default function QueryPage() {
       setIsCancelling(false);
       setStmtProgress(null);
       setActiveStmtIdx(null);
+      loadContext(); // refresh database/schema (and role/warehouse) after any USE command
     }
   };
 
@@ -517,6 +519,40 @@ export default function QueryPage() {
               onChange={switchWarehouse}
               onDropdownVisibleChange={(open) => { if (open) loadWarehouses(); }}
               options={warehouses.map((w) => ({ value: w, label: w }))}
+              dropdownStyle={{ minWidth: 200 }}
+            />
+          </Tooltip>
+
+          {/* ── Database selector ──────────────────────────────── */}
+          <Tooltip title="Active database">
+            <Select
+              size="small"
+              style={selectStyle}
+              value={database || undefined}
+              placeholder={loadingContext ? "…" : "Database"}
+              loading={loadingDatabases || switchingDatabase}
+              showSearch
+              optionFilterProp="label"
+              onChange={switchDatabase}
+              onDropdownVisibleChange={(open) => { if (open) loadDatabases(); }}
+              options={databases.map((d) => ({ value: d, label: d }))}
+              dropdownStyle={{ minWidth: 200 }}
+            />
+          </Tooltip>
+
+          {/* ── Schema selector ────────────────────────────────── */}
+          <Tooltip title="Active schema">
+            <Select
+              size="small"
+              style={selectStyle}
+              value={schema || undefined}
+              placeholder={loadingContext ? "…" : "Schema"}
+              loading={loadingSchemas || switchingSchema}
+              showSearch
+              optionFilterProp="label"
+              onChange={switchSchema}
+              onDropdownVisibleChange={(open) => { if (open) loadSchemas(); }}
+              options={schemas.map((s) => ({ value: s, label: s }))}
               dropdownStyle={{ minWidth: 200 }}
             />
           </Tooltip>

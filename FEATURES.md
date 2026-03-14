@@ -262,8 +262,10 @@ Right-click any **database**, **schema**, or **table** in the object browser and
 - Connect with account / user / password / warehouse / role
 - **Auto-fill from Snowflake CLI** — reads `~/.snowflake/config.toml` and populates the connection form from any saved profile, including key-pair (`SNOWFLAKE_JWT`) profiles; authenticator values are matched case-insensitively so both `snowflake_jwt` and `SNOWFLAKE_JWT` work
 - **Cancel connection** — abort an in-progress connection attempt
-- **Switch role or warehouse** from the toolbar without disconnecting — all subsequent queries, privilege checks, and object browsing immediately reflect the new session state
+- **Switch role, warehouse, database, or schema** from the toolbar without disconnecting — all subsequent queries, privilege checks, and object browsing immediately reflect the new session state
 - Role dropdown shows only roles the current user can actually assume
+- Schema dropdown lists only schemas belonging to the currently selected database; the list resets automatically when the database is changed
+- After any `USE DATABASE`, `USE SCHEMA`, `USE ROLE`, or `USE WAREHOUSE` command runs in the editor, all four toolbar dropdowns update automatically to reflect the resulting session state
 - **Session state persisted across reloads** — the account · user tag and non-sensitive connection details survive a page reload via `sessionStorage`; credentials (password, passcode, private key passphrase) are never written to storage; the connected state is verified against the backend on every reload so a backend restart correctly shows ConnectModal pre-filled with the last-used parameters rather than a broken UI; the UI waits for `sessionStorage` hydration to complete before rendering, preventing a spurious ConnectModal flash on HMR page reloads
 - **Session Properties** — right-click the account · user tag in the toolbar to open a **Session Properties** modal:
   - **Parameters** section — all rows from `SHOW PARAMETERS IN SESSION`; boolean parameters render as a toggle switch (saves immediately); all other parameters show a pencil button that opens an inline input with Save / Cancel; changes apply via `ALTER SESSION SET`

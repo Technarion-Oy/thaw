@@ -781,6 +781,22 @@ func (a *App) UseWarehouse(warehouse string) error {
 	return a.client.UseWarehouse(a.ctx, warehouse)
 }
 
+// UseDatabase switches the session to the given database.
+func (a *App) UseDatabase(database string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	return a.client.UseDatabase(a.ctx, database)
+}
+
+// UseSchema switches the session to the given schema.
+func (a *App) UseSchema(schema string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	return a.client.UseSchema(a.ctx, schema)
+}
+
 // ListDatabases returns all databases visible to the current role.
 func (a *App) ListDatabases() ([]string, error) {
 	if a.client == nil {

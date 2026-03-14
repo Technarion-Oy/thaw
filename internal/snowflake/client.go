@@ -79,22 +79,25 @@ type QueryResult struct {
 }
 
 // sessionConnector wraps a gosnowflake Connector and applies the current
-// role and warehouse to every new connection the pool creates.  This lets
-// the pool keep its normal concurrency (MaxOpenConns=32) while ensuring that
-// each fresh connection immediately reflects the most-recently-switched role /
-// warehouse — without requiring a single serialising connection.
+// role, warehouse, database, and schema to every new connection the pool
+// creates.  This lets the pool keep its normal concurrency (MaxOpenConns=32)
+// while ensuring that each fresh connection immediately reflects the
+// most-recently-switched session state — without requiring a single
+// serialising connection.
 //
-// When UseRole or UseWarehouse is called:
+// When UseRole, UseWarehouse, UseDatabase, or UseSchema is called:
 //  1. The SQL statement is executed on whatever connection the pool provides.
-//  2. The stored role/warehouse is updated here (under the mutex).
+//  2. The stored state is updated here (under the mutex).
 //  3. All idle pool connections are flushed (SetMaxIdleConns 0 → restore) so
 //     the next query that needs a connection gets a new one, which will have
-//     this connector's Apply() called and therefore inherit the new state.
+//     this connector's Connect() called and therefore inherit the new state.
 type sessionConnector struct {
 	base sf.Connector
 	mu   sync.RWMutex
 	role string
 	wh   string
+	db   string // active database
+	sc   string // active schema
 }
 
 // Connect opens a new raw driver connection via the underlying gosnowflake
@@ -106,13 +109,19 @@ func (sc *sessionConnector) Connect(ctx context.Context) (driver.Conn, error) {
 		return nil, err
 	}
 	sc.mu.RLock()
-	role, wh := sc.role, sc.wh
+	role, wh, db, schema := sc.role, sc.wh, sc.db, sc.sc
 	sc.mu.RUnlock()
 	if role != "" {
 		connExec(conn, fmt.Sprintf(`USE ROLE "%s"`, strings.ReplaceAll(role, `"`, `""`)))
 	}
 	if wh != "" {
 		connExec(conn, fmt.Sprintf(`USE WAREHOUSE "%s"`, strings.ReplaceAll(wh, `"`, `""`)))
+	}
+	if db != "" {
+		connExec(conn, fmt.Sprintf(`USE DATABASE "%s"`, strings.ReplaceAll(db, `"`, `""`)))
+	}
+	if schema != "" {
+		connExec(conn, fmt.Sprintf(`USE SCHEMA "%s"`, strings.ReplaceAll(schema, `"`, `""`)))
 	}
 	return conn, nil
 }
@@ -938,6 +947,36 @@ func (c *Client) UseWarehouse(ctx context.Context, warehouse string) error {
 	c.connector.mu.Unlock()
 	// Flush idle connections so the next query gets a fresh connection that
 	// goes through sessionConnector.Connect and inherits the new warehouse.
+	c.db.SetMaxIdleConns(0)
+	c.db.SetMaxIdleConns(8)
+	return nil
+}
+
+// UseDatabase switches the active database for the current session.
+// Switching the database also resets the active schema.
+func (c *Client) UseDatabase(ctx context.Context, database string) error {
+	escaped := strings.ReplaceAll(database, `"`, `""`)
+	if _, err := c.db.ExecContext(ctx, fmt.Sprintf(`USE DATABASE "%s"`, escaped)); err != nil {
+		return err
+	}
+	c.connector.mu.Lock()
+	c.connector.db = database
+	c.connector.sc = "" // schema context resets on database change
+	c.connector.mu.Unlock()
+	c.db.SetMaxIdleConns(0)
+	c.db.SetMaxIdleConns(8)
+	return nil
+}
+
+// UseSchema switches the active schema for the current session.
+func (c *Client) UseSchema(ctx context.Context, schema string) error {
+	escaped := strings.ReplaceAll(schema, `"`, `""`)
+	if _, err := c.db.ExecContext(ctx, fmt.Sprintf(`USE SCHEMA "%s"`, escaped)); err != nil {
+		return err
+	}
+	c.connector.mu.Lock()
+	c.connector.sc = schema
+	c.connector.mu.Unlock()
 	c.db.SetMaxIdleConns(0)
 	c.db.SetMaxIdleConns(8)
 	return nil

@@ -189,7 +189,11 @@ export function StopShell():Promise<void>;
 
 export function TestAIModel(arg1:string,arg2:string,arg3:string):Promise<string>;
 
+export function UseDatabase(arg1:string):Promise<void>;
+
 export function UseRole(arg1:string):Promise<void>;
+
+export function UseSchema(arg1:string):Promise<void>;
 
 export function UseWarehouse(arg1:string):Promise<void>;
 

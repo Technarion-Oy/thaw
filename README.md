@@ -12,8 +12,10 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - Connect with account / user / password / warehouse / role
 - Auto-fill connection form from `~/.snowflake/config.toml` (Snowflake CLI profiles), including key-pair (`SNOWFLAKE_JWT`) profiles; authenticator values are matched case-insensitively
 - Cancel an in-progress connection attempt
-- Switch role or warehouse from the query toolbar without reconnecting
+- Switch role, warehouse, database, or schema from the query toolbar without reconnecting
 - Role dropdown shows only roles the current user can actually `USE ROLE` to — not all account-visible roles
+- Schema dropdown lists only schemas belonging to the currently selected database; resets automatically when the database is switched
+- After any `USE` command runs in the editor, all four toolbar dropdowns (role, warehouse, database, schema) update automatically to reflect the new session state
 
 ### SQL editor
 - Monaco editor with full SQL syntax highlighting
@@ -206,7 +208,7 @@ Right-click any **database**, **schema**, or **table** in the object browser and
 
 #### Role switching and session state
 
-Role and warehouse switches (via the toolbar dropdowns) are applied to a **single persistent connection**, so every subsequent query — including user management operations, privilege checks, and all SQL editor queries — immediately reflects the new role without needing a manual refresh.
+Role, warehouse, database, and schema switches (via the toolbar dropdowns) are applied to a **single persistent connection**, so every subsequent query — including user management operations, privilege checks, and all SQL editor queries — immediately reflects the new session state without needing a manual refresh. Running any `USE` command in the SQL editor has the same effect: all four dropdowns sync automatically when the query completes.
 
 #### Session Properties
 

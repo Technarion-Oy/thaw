@@ -990,6 +990,32 @@ export namespace snowflake {
 	        this.lastSuccessLogin = source["lastSuccessLogin"];
 	    }
 	}
+	export class TableForeignKey {
+	    pkDatabase: string;
+	    pkSchema: string;
+	    pkTable: string;
+	    pkColumn: string;
+	    fkDatabase: string;
+	    fkSchema: string;
+	    fkTable: string;
+	    fkColumn: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TableForeignKey(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.pkDatabase = source["pkDatabase"];
+	        this.pkSchema = source["pkSchema"];
+	        this.pkTable = source["pkTable"];
+	        this.pkColumn = source["pkColumn"];
+	        this.fkDatabase = source["fkDatabase"];
+	        this.fkSchema = source["fkSchema"];
+	        this.fkTable = source["fkTable"];
+	        this.fkColumn = source["fkColumn"];
+	    }
+	}
 
 }
 
