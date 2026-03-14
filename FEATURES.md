@@ -331,6 +331,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - The kernel uses the `snowflake-snowpark-python` environment (conda or venv)
 - Output shows stdout, stderr, and tracebacks in colour-coded blocks with a per-block copy button
 - **Inline plots** — matplotlib figures (e.g. from `plt.show()`) are captured as PNG images after each cell run and rendered inline below the cell output; no separate window opens; the kernel automatically configures the `Agg` backend on startup; multiple figures per cell are each rendered in order
+- **Auto-created `session`** — a Snowpark `session` variable is ready in every Python cell without any connection boilerplate, mirroring the behaviour of Snowsight notebooks; it uses the same account, role, warehouse, database, and schema as the active app connection; session init errors (e.g. wrong credentials or missing private key) are surfaced in the first cell's output rather than silently swallowed
 
 ### SQL cells
 

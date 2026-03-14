@@ -111,6 +111,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - Per-cell output shows stdout, stderr, and tracebacks in colour-coded blocks
 - **Copy output** — each output block has a copy button that writes the text to the native clipboard
 - **Inline plots** — matplotlib figures are captured as PNG images and rendered directly below the cell output; `plt.show()` works as expected without opening a separate window; the matplotlib `Agg` backend is configured automatically by the kernel; multiple figures per cell are supported
+- **Auto-created `session`** — a Snowpark `session` variable is automatically available in every Python cell, pre-configured with the same account, role, warehouse, database, and schema as the active app connection — no `Session.builder` boilerplate needed, matching the behaviour of Snowsight notebooks; supports password, key-pair (`snowflake_jwt`), Okta, and MFA authenticators; `externalbrowser` SSO requires manual session creation
 
 #### SQL cells
 

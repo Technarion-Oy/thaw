@@ -43,6 +43,7 @@ import (
 type App struct {
 	ctx           context.Context
 	client        *snowflake.Client
+	connectParams *snowflake.ConnectParams // stored after a successful Connect for notebook session init
 	cancelConnect    context.CancelFunc
 	exportCancelFunc context.CancelFunc // cancels an in-flight DDL export
 	cancelChat       context.CancelFunc // cancels an in-flight AI chat request
@@ -141,6 +142,7 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 		return err
 	}
 	a.client = client
+	a.connectParams = &params
 	logger.L.Info("connected", "account", params.Account, "user", params.User)
 	telemetry.Track(telemetry.EventConnected, telemetry.Props{"authenticator": params.Authenticator})
 	return nil

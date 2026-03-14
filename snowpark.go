@@ -39,7 +39,7 @@ const kernelRunMarker = "<<<THAW_RUN>>>"
 // from stdin (terminated by kernelRunMarker), executes them in a shared
 // namespace, captures stdout/stderr, captures matplotlib figures as base64
 // PNGs, and writes a JSON result + sentinel line.
-const kernelPyScript = `import sys, io, traceback, json, base64, warnings
+const kernelPyScript = `import sys, io, traceback, json, base64, warnings, os
 
 SENTINEL   = "<<<THAW_CELL_DONE>>>"
 RUN_MARKER = "<<<THAW_RUN>>>"
@@ -56,6 +56,71 @@ except Exception:
     pass
 
 g = {}
+
+# ── Auto-create Snowpark session matching the Thaw app connection ──────────────
+# Connection parameters are injected via THAW_SF_* environment variables so
+# that Python cells share the same account, role, warehouse, database and
+# schema as SQL cells.  The function puts a 'session' variable directly into
+# the user-cell namespace 'g' so it is available in every cell without any
+# import or builder call.
+def _thaw_create_session(ns):
+    account = os.environ.get("THAW_SF_ACCOUNT", "")
+    user    = os.environ.get("THAW_SF_USER", "")
+    if not account or not user:
+        return  # not connected
+
+    auth = os.environ.get("THAW_SF_AUTHENTICATOR", "snowflake").lower()
+    if auth == "externalbrowser":
+        # Cannot automate browser-based SSO — the user must call Session.builder manually.
+        print("[thaw] externalbrowser auth: create session manually with Session.builder", file=sys.stderr)
+        return
+
+    cfg = {"account": account, "user": user}
+    for k, v in [
+        ("role",      os.environ.get("THAW_SF_ROLE", "")),
+        ("warehouse", os.environ.get("THAW_SF_WAREHOUSE", "")),
+        ("database",  os.environ.get("THAW_SF_DATABASE", "")),
+        ("schema",    os.environ.get("THAW_SF_SCHEMA", "")),
+    ]:
+        if v:
+            cfg[k] = v
+
+    pk_path = os.environ.get("THAW_SF_PRIVATE_KEY_PATH", "")
+    pk_pass = os.environ.get("THAW_SF_PRIVATE_KEY_PASSPHRASE", "")
+    okta_url = os.environ.get("THAW_SF_OKTA_URL", "")
+
+    if auth in ("snowflake_jwt", "jwt"):
+        cfg["authenticator"]   = "snowflake_jwt"
+        cfg["private_key_file"] = pk_path  # snowflake-connector-python expects "private_key_file"
+        if pk_pass:
+            # passphrase must be bytes, not str
+            cfg["private_key_file_pwd"] = pk_pass.encode("utf-8")
+    elif auth == "okta" and okta_url:
+        cfg["authenticator"] = okta_url  # Snowpark uses the Okta URL as authenticator
+        cfg["password"]      = os.environ.get("THAW_SF_PASSWORD", "")
+    else:
+        cfg["password"] = os.environ.get("THAW_SF_PASSWORD", "")
+        if auth and auth != "snowflake":
+            cfg["authenticator"] = auth
+
+    try:
+        from snowflake.snowpark import Session as _Session
+        # Redirect stdout during session creation — Snowpark may print banners
+        # that would corrupt the stdin/stdout protocol.
+        _old_out, sys.stdout = sys.stdout, io.StringIO()
+        try:
+            ns["session"] = _Session.builder.configs(cfg).create()
+        finally:
+            sys.stdout = _old_out
+    except Exception as _e:
+        # Store full traceback so it surfaces in the first cell's stderr output
+        # rather than being lost to the discarded kernel stderr stream.
+        import traceback as _tb
+        _thaw_init_errors.append(_tb.format_exc())
+
+_thaw_init_errors = []
+_thaw_create_session(g)
+del _thaw_create_session
 
 def _capture_figures():
     """Return a list of base64-encoded PNG strings for all open figures."""
@@ -86,6 +151,9 @@ while True:
     code    = "".join(lines)
     buf_out = io.StringIO()
     buf_err = io.StringIO()
+    # Drain any deferred session-init errors into the first cell's stderr.
+    while _thaw_init_errors:
+        buf_err.write(_thaw_init_errors.pop(0))
     old_out, old_err = sys.stdout, sys.stderr
     sys.stdout = buf_out
     sys.stderr = buf_err
@@ -899,6 +967,39 @@ func (a *App) RunNotebookSql(sql string) (NotebookSqlResult, error) {
 	}, nil
 }
 
+// notebookKernelEnv returns the THAW_SF_* environment variables to inject into
+// the kernel subprocess so it can auto-create a matching Snowpark session.
+// Falls back to nil (no extra vars) when not connected or params are unavailable.
+func (a *App) notebookKernelEnv() []string {
+	if a.connectParams == nil || a.client == nil {
+		return nil
+	}
+	p := a.connectParams
+	// Fetch the live session state — the user may have switched role / warehouse
+	// / database / schema since connecting.
+	ctx, err := a.client.GetSessionContext(a.ctx)
+	if err != nil {
+		// Fall back to original params if the query fails.
+		ctx.Role      = p.Role
+		ctx.Warehouse = p.Warehouse
+		ctx.Database  = p.Database
+		ctx.Schema    = p.Schema
+	}
+	return []string{
+		"THAW_SF_ACCOUNT="               + p.Account,
+		"THAW_SF_USER="                  + p.User,
+		"THAW_SF_PASSWORD="              + p.Password,
+		"THAW_SF_AUTHENTICATOR="         + p.Authenticator,
+		"THAW_SF_OKTA_URL="              + p.OktaURL,
+		"THAW_SF_PRIVATE_KEY_PATH="      + p.PrivateKeyPath,
+		"THAW_SF_PRIVATE_KEY_PASSPHRASE="+ p.PrivateKeyPassphrase,
+		"THAW_SF_ROLE="                  + ctx.Role,
+		"THAW_SF_WAREHOUSE="             + ctx.Warehouse,
+		"THAW_SF_DATABASE="              + ctx.Database,
+		"THAW_SF_SCHEMA="                + ctx.Schema,
+	}
+}
+
 // StartNotebookSession launches the Python kernel subprocess for a notebook tab.
 // Safe to call multiple times — returns immediately if a session already exists.
 func (a *App) StartNotebookSession(tabId string) error {
@@ -917,6 +1018,11 @@ func (a *App) StartNotebookSession(tabId string) error {
 	}
 
 	cmd := exec.Command(python, "-u", scriptPath)
+	// Inject connection parameters so the kernel can auto-create a Snowpark
+	// session that matches the app's active connection.
+	if extra := a.notebookKernelEnv(); len(extra) > 0 {
+		cmd.Env = append(os.Environ(), extra...)
+	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
