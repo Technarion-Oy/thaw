@@ -613,7 +613,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           ? model.getLineContent(position.lineNumber - 1)
           : "";
         const onCheckText = prevLineForOn + "\n" + lineUpToWord;
-        if (onCheckText.match(/\bON\s*(?:\n\s*)?$/i)) {
+        // Also fire when "ON" is the word currently being typed: lineUpToWord only
+        // covers text *before* the current word, so it misses the case where the
+        // user has just typed "ON" on a new line and cursor is right after it.
+        const wordIsOn = word.word.toUpperCase() === "ON";
+        if (wordIsOn || onCheckText.match(/\bON\s*(?:\n\s*)?$/i)) {
           const cursorOffset = model.getOffsetAt(position);
           const textToCursor = model.getValue().slice(0, cursorOffset);
           const refs = parseJoinTables(textToCursor);
