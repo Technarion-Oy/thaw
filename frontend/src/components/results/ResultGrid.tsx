@@ -10,7 +10,7 @@
 
 import { useMemo, useRef, useCallback, useState, useEffect, useLayoutEffect } from "react";
 import { AgGridReact } from "ag-grid-react";
-import type { GridApi, FirstDataRenderedEvent, RowDataUpdatedEvent, CellContextMenuEvent } from "ag-grid-community";
+import type { GridApi, FirstDataRenderedEvent, RowDataUpdatedEvent, CellContextMenuEvent, BodyScrollEvent } from "ag-grid-community";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
 import { message } from "antd";
@@ -18,8 +18,16 @@ import type { QueryResult } from "../../store/queryStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 
+export interface ScrollSyncHandle {
+  scrollTo: (top: number) => void;
+}
+
 interface Props {
   result: QueryResult;
+  /** Exposes a scrollTo handle so a sibling grid can drive this grid's scroll position. */
+  syncScrollRef?: React.MutableRefObject<ScrollSyncHandle | null>;
+  /** Called when this grid scrolls vertically so the sibling can follow. */
+  onVerticalScroll?: (top: number) => void;
 }
 
 interface CtxMenu {
@@ -54,14 +62,36 @@ function cssVar(name: string, fallback: number): number {
   return isNaN(n) ? fallback : n;
 }
 
-export default function ResultGrid({ result }: Props) {
+export default function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
   const resolved  = useThemeStore((s) => s.resolved);
   // Subscribe to uiDensity so the grid re-renders (and re-reads CSS vars) when
   // the user changes the density setting.
   useThemeStore((s) => s.uiDensity);
-  const apiRef  = useRef<GridApi | null>(null);
+  const apiRef       = useRef<GridApi | null>(null);
+  const wrapperRef   = useRef<HTMLDivElement>(null);
+  const isSyncingRef = useRef(false);
   const ctxRef  = useRef<HTMLDivElement>(null);
   const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null);
+
+  // Helper: returns the ag-grid scrollable viewport element.
+  const getViewport = () =>
+    wrapperRef.current?.querySelector<HTMLElement>(".ag-body-viewport") ?? null;
+
+  // Register a scrollTo handle so the parent can programmatically scroll this grid.
+  useEffect(() => {
+    if (!syncScrollRef) return;
+    syncScrollRef.current = {
+      scrollTo: (top: number) => {
+        const vp = getViewport();
+        if (!vp) return;
+        isSyncingRef.current = true;
+        vp.scrollTop = top;
+        requestAnimationFrame(() => { isSyncingRef.current = false; });
+      },
+    };
+    return () => { if (syncScrollRef) syncScrollRef.current = null; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncScrollRef]);
 
   // Dismiss context menu on outside mousedown or Escape.
   useEffect(() => {
@@ -115,6 +145,12 @@ export default function ResultGrid({ result }: Props) {
     (e.api as GridApi).autoSizeAllColumns();
   }, []);
 
+  const onBodyScroll = useCallback((e: BodyScrollEvent) => {
+    if (isSyncingRef.current || e.direction !== "vertical") return;
+    onVerticalScroll?.(getViewport()?.scrollTop ?? 0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onVerticalScroll]);
+
   const onCellContextMenu = useCallback((e: CellContextMenuEvent) => {
     const mouse = e.event as MouseEvent | undefined;
     if (!mouse) return;
@@ -167,7 +203,7 @@ export default function ResultGrid({ result }: Props) {
   );
 
   return (
-    <div style={{ height: "100%", width: "100%", position: "relative" }}>
+    <div ref={wrapperRef} style={{ height: "100%", width: "100%", position: "relative" }}>
       <div
         className={resolved === "dark" ? "ag-theme-alpine-dark" : "ag-theme-alpine"}
         style={{ height: "100%", width: "100%", "--ag-font-size": "11px" } as React.CSSProperties}
@@ -186,6 +222,7 @@ export default function ResultGrid({ result }: Props) {
           onGridReady={(e) => { apiRef.current = e.api; }}
           onFirstDataRendered={autoSize}
           onRowDataUpdated={autoSize}
+          onBodyScroll={onBodyScroll}
           onCellContextMenu={onCellContextMenu}
         />
       </div>

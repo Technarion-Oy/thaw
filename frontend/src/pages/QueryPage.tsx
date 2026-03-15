@@ -10,8 +10,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message } from "antd";
-import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled } from "@ant-design/icons";
+import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, type MenuProps } from "antd";
+import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText } from "../../wailsjs/runtime/runtime";
 import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NewNotebook, NotebookUseContext } from "../../wailsjs/go/main/App";
@@ -25,7 +25,7 @@ import TabBar from "../components/editor/TabBar";
 import { DiffEditor } from "@monaco-editor/react";
 import { ensureMonacoSetup } from "../components/editor/monacoSetup";
 import { useThemeStore } from "../store/themeStore";
-import ResultGrid from "../components/results/ResultGrid";
+import ResultGrid, { type ScrollSyncHandle } from "../components/results/ResultGrid";
 import AiChat from "../components/chat/AiChat";
 import TerminalPanel from "../components/terminal/TerminalPanel";
 import NotebookTab from "../components/notebook/NotebookTab";
@@ -84,6 +84,8 @@ export default function QueryPage() {
   const togglePin = (id: string) =>
     setResultHistory((prev) => prev.map((e) => (e.id === id ? { ...e, pinned: !e.pinned } : e)));
 
+  const [compareHistoryId, setCompareHistoryId] = useState<string | null>(null);
+
   const [snippetsOpen, setSnippetsOpen] = useState(false);
   const [exportPathFormatOpen, setExportPathFormatOpen] = useState(false);
   const [sessionPropsOpen, setSessionPropsOpen] = useState(false);
@@ -93,6 +95,9 @@ export default function QueryPage() {
   // Ref so the async runQuery closure can detect user-initiated cancellation
   // without relying on stale React state.
   const cancelRequestedRef = useRef(false);
+  // Scroll-sync handles for the side-by-side grid split.
+  const primarySyncRef = useRef<ScrollSyncHandle | null>(null);
+  const compareSyncRef = useRef<ScrollSyncHandle | null>(null);
   const { params, disconnect } = useConnectionStore();
   const {
     role, warehouse, database, schema,
@@ -490,6 +495,9 @@ export default function QueryPage() {
   const displayedResult: QueryResult | null =
     historyId !== null ? (resultHistory.find((e) => e.id === historyId)?.result ?? null) : null;
 
+  const compareEntry = compareHistoryId !== null ? (resultHistory.find((e) => e.id === compareHistoryId) ?? null) : null;
+  const compareResult: QueryResult | null = compareEntry?.result ?? null;
+
   // Pinned entries float to the top; within each group the original order is preserved.
   const sortedHistory = [
     ...resultHistory.filter((e) => e.pinned),
@@ -879,7 +887,7 @@ export default function QueryPage() {
 
             {displayedResult ? (
               <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-                {/* Error banner inside the results section when user is viewing history after a failure */}
+                {/* Error banner spans full width above both panels */}
                 {error && (
                   <Alert
                     type="error"
@@ -889,84 +897,146 @@ export default function QueryPage() {
                     style={{ margin: "8px 12px 0", flexShrink: 0 }}
                   />
                 )}
-                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 12px", background: "var(--bg-raised)", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-                  {/* History selector */}
-                  {resultHistory.length > 1 && (
-                    <Select
-                      size="small"
-                      value={historyId}
-                      onChange={(v) => setHistoryId(v)}
-                      style={{ fontSize: 11, width: 220 }}
-                      popupMatchSelectWidth={false}
-                      options={sortedHistory.map((e) => {
-                        const origIdx = resultHistory.indexOf(e);
-                        return {
-                          value: e.id,
-                          label: `${e.pinned ? "📌 " : ""}#${origIdx + 1}${origIdx === 0 ? " · " : "  "}${sqlSnippet(e.sql)}`,
-                        };
-                      })}
-                      optionRender={(option) => {
-                        const entry = resultHistory.find((e) => e.id === option.value);
-                        if (!entry) return option.label;
-                        return (
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
-                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option.label as string}</span>
-                            <Button
-                              type="text"
-                              size="small"
-                              icon={entry.pinned
-                                ? <PushpinFilled style={{ fontSize: 11, color: "var(--color-primary, #1677ff)" }} />
-                                : <PushpinOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} />}
-                              style={{ height: 16, padding: "0 2px", minWidth: 0, flexShrink: 0 }}
-                              onClick={(e) => { e.stopPropagation(); e.preventDefault(); togglePin(entry.id); }}
-                            />
-                          </div>
-                        );
-                      }}
-                    />
-                  )}
-                  {/* Query ID for displayed result */}
-                  {displayedResult.queryID && (
-                    <Space size={4}>
-                      <Text style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)" }}>
-                        {displayedResult.queryID}
+                {/* Status bar — two rows when compare is active, one row otherwise */}
+                <div style={{ display: "flex", flexDirection: "column", background: "var(--bg-raised)", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+                  {/* ── Row 1: primary controls ──────────────────────────── */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 12px" }}>
+                    {/* History selector */}
+                    {resultHistory.length > 1 && (
+                      <Select
+                        size="small"
+                        value={historyId}
+                        onChange={(v) => setHistoryId(v)}
+                        style={{ fontSize: 11, width: 220 }}
+                        popupMatchSelectWidth={false}
+                        options={sortedHistory.map((e) => {
+                          const origIdx = resultHistory.indexOf(e);
+                          return {
+                            value: e.id,
+                            label: `${e.pinned ? "📌 " : ""}#${origIdx + 1}${origIdx === 0 ? " · " : "  "}${sqlSnippet(e.sql)}`,
+                          };
+                        })}
+                        optionRender={(option) => {
+                          const entry = resultHistory.find((e) => e.id === option.value);
+                          if (!entry) return option.label;
+                          const ctxMenu: MenuProps = { items: [{
+                            key: "side-by-side",
+                            icon: <LayoutOutlined />,
+                            label: "View side by side",
+                            disabled: entry.id === historyId || entry.id === compareHistoryId,
+                            onClick: ({ domEvent }) => { domEvent.stopPropagation(); setCompareHistoryId(entry.id); },
+                          }]};
+                          return (
+                            <Dropdown trigger={["contextMenu"]} menu={ctxMenu}>
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+                                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option.label as string}</span>
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  icon={entry.pinned
+                                    ? <PushpinFilled style={{ fontSize: 11, color: "var(--color-primary, #1677ff)" }} />
+                                    : <PushpinOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} />}
+                                  style={{ height: 16, padding: "0 2px", minWidth: 0, flexShrink: 0 }}
+                                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); togglePin(entry.id); }}
+                                />
+                              </div>
+                            </Dropdown>
+                          );
+                        }}
+                      />
+                    )}
+                    {displayedResult.queryID && (
+                      <Space size={4}>
+                        <Text style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)" }}>
+                          {displayedResult.queryID}
+                        </Text>
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<CopyOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
+                          style={{ height: 16, padding: "0 2px", minWidth: 0 }}
+                          onClick={async () => { await ClipboardSetText(displayedResult.queryID!); message.success("Query ID copied"); }}
+                        />
+                      </Space>
+                    )}
+                    <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+                      <Tooltip title="Export as CSV">
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<FileTextOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} />}
+                          style={{ height: 18, padding: "0 4px", minWidth: 0 }}
+                          onClick={exportCSV}
+                        />
+                      </Tooltip>
+                      <Tooltip title="Export as Excel">
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<FileExcelOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} />}
+                          style={{ height: 18, padding: "0 4px", minWidth: 0 }}
+                          onClick={exportExcel}
+                        />
+                      </Tooltip>
+                      <Text style={{ fontSize: 11, color: "var(--text-faint)" }}>
+                        {displayedResult.rows.length} row{displayedResult.rows.length !== 1 ? "s" : ""}
                       </Text>
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<CopyOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
-                        style={{ height: 16, padding: "0 2px", minWidth: 0 }}
-                        onClick={async () => { await ClipboardSetText(displayedResult.queryID!); message.success("Query ID copied"); }}
-                      />
-                    </Space>
-                  )}
-                  <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
-                    <Tooltip title="Export as CSV">
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<FileTextOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} />}
-                        style={{ height: 18, padding: "0 4px", minWidth: 0 }}
-                        onClick={exportCSV}
-                      />
-                    </Tooltip>
-                    <Tooltip title="Export as Excel">
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<FileExcelOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} />}
-                        style={{ height: 18, padding: "0 4px", minWidth: 0 }}
-                        onClick={exportExcel}
-                      />
-                    </Tooltip>
-                    <Text style={{ fontSize: 11, color: "var(--text-faint)" }}>
-                      {displayedResult.rows.length} row{displayedResult.rows.length !== 1 ? "s" : ""}
-                    </Text>
+                    </div>
                   </div>
+                  {/* ── Row 2: compare info, right-aligned (only when active) */}
+                  {compareResult && compareEntry && (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6, padding: "2px 8px 3px 12px", borderTop: "1px solid var(--border)" }}>
+                      <Text style={{ fontSize: 11, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {sqlSnippet(compareEntry.sql)}
+                      </Text>
+                      {compareEntry.queryID && (
+                        <Space size={4} style={{ flexShrink: 0 }}>
+                          <Text style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-muted)" }}>
+                            {compareEntry.queryID}
+                          </Text>
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<CopyOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
+                            style={{ height: 16, padding: "0 2px", minWidth: 0 }}
+                            onClick={async () => { await ClipboardSetText(compareEntry.queryID!); message.success("Query ID copied"); }}
+                          />
+                        </Space>
+                      )}
+                      <Text style={{ fontSize: 11, color: "var(--text-faint)", flexShrink: 0 }}>
+                        {compareResult.rows.length} row{compareResult.rows.length !== 1 ? "s" : ""}
+                      </Text>
+                      <Tooltip title="Close side-by-side view">
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<CloseOutlined style={{ fontSize: 11 }} />}
+                          style={{ height: 18, padding: "0 4px", minWidth: 0, flexShrink: 0 }}
+                          onClick={() => setCompareHistoryId(null)}
+                        />
+                      </Tooltip>
+                    </div>
+                  )}
                 </div>
-                <div style={{ flex: 1, overflow: "hidden" }}>
-                  <ResultGrid result={displayedResult} />
-                </div>
+                {/* Grids row — bare grids, headers at the same level */}
+                <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+                  <div style={{ flex: 1, overflow: "hidden", ...(compareResult ? { borderRight: "1px solid var(--border)" } : {}) }}>
+                    <ResultGrid
+                      result={displayedResult}
+                      syncScrollRef={compareResult ? primarySyncRef : undefined}
+                      onVerticalScroll={compareResult ? (top) => compareSyncRef.current?.scrollTo(top) : undefined}
+                    />
+                  </div>
+                  {compareResult && compareEntry && (
+                    <div style={{ flex: 1, overflow: "hidden" }}>
+                      <ResultGrid
+                        result={compareResult}
+                        syncScrollRef={compareSyncRef}
+                        onVerticalScroll={(top) => primarySyncRef.current?.scrollTo(top)}
+                      />
+                    </div>
+                  )}
+                </div>{/* end grids row */}
               </div>
             ) : (
               <>
