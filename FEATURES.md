@@ -15,7 +15,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 - **Selection highlight** — selecting text highlights every other occurrence in the document; overview-ruler markers show occurrences in long files
 - **Toggle line comment** — right-click in the editor and choose **Toggle Line Comment** to add or remove `--` on the current line or on every line in the selection
 - **Font size zoom** — `⌘+` / `Ctrl++` increases the editor font size, `⌘-` / `Ctrl+-` decreases it, `⌘0` / `Ctrl+0` resets to the default
-- **Hover definitions** — hover over any table or view name — including fully-qualified three-part identifiers (`DB.SCHEMA.TABLE`) — to see its DDL in a scrollable overlay tooltip; the tooltip stays open when the cursor moves into it:
+- **Hover definitions** — move the cursor over any table or view name — including fully-qualified three-part identifiers (`DB.SCHEMA.TABLE`) and double-quoted identifiers (`"MY_TABLE"`, `"DB"."SCHEMA"."TABLE"`) — to see its DDL in a scrollable overlay tooltip; the tooltip fires as the cursor enters the token (not just when stationary at the end), stays open when the cursor moves into it, and auto-loads object metadata for schemas not yet expanded in the sidebar:
   - **Copy button** — copies the full DDL to the clipboard
   - **Text selection** — paint any portion of the DDL and copy with `⌘C` / `Ctrl+C`
   - **Right-click → Copy** — right-click inside the tooltip to copy the selected text via a context menu

@@ -15,6 +15,7 @@ import { ensureMonacoSetup } from "./monacoSetup";
 import { setEditorInstance } from "./editorRef";
 import { useQueryStore } from "../../store/queryStore";
 import { useObjectStore } from "../../store/objectStore";
+import { useSessionStore } from "../../store/sessionStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetUserDDL, GetAISuggestion } from "../../../wailsjs/go/main/App";
@@ -174,61 +175,62 @@ function getQualifiedIdent(model: any, pos: any): string[] | null {
   const line: string = model.getLineContent(pos.lineNumber);
   const col = pos.column - 1; // 0-based
 
-  // Expand left: allow word chars, dots, and quoted identifiers.
-  let start = col;
-  while (start > 0) {
-    const prev = line[start - 1];
-    if (prev === '"') {
-      // Walk back past the closing quote of a quoted identifier.
-      const cq = start - 1;
-      let oq = cq - 1;
-      while (oq >= 0 && line[oq] !== '"') oq--;
-      if (oq < 0) break;
-      start = oq;
-    } else if (/[\w.]/.test(prev)) {
-      start--;
-    } else {
-      break;
-    }
-  }
-
-  // Expand right.
-  let end = col;
-  while (end < line.length) {
-    const ch = line[end];
-    if (ch === '"') {
-      end++;
-      while (end < line.length && line[end] !== '"') end++;
-      if (end < line.length) end++; // past closing quote
-    } else if (/[\w.]/.test(ch)) {
-      end++;
-    } else {
-      break;
-    }
-  }
-
-  const raw = line.slice(start, end).trim();
-  if (!raw) return null;
-
-  // Split on dots, stripping double-quote wrappers from each part.
-  const parts: string[] = [];
-  let cur = '';
+  // Scan the line left-to-right, building each dot-separated qualified
+  // identifier (which may contain quoted parts like "MY_TABLE"), and return
+  // the one whose character span contains `col`.
+  //
+  // This forward-scanning approach correctly handles all combinations:
+  //   MY_TABLE        "MY_TABLE"        DB.SCHEMA.TABLE
+  //   "DB"."SCHEMA"."TABLE"     SCHEMA."TABLE"
+  // It avoids the ambiguity of bidirectional expansion, which struggled to
+  // distinguish opening vs closing double-quotes for cursors inside a quoted
+  // identifier.
   let i = 0;
-  while (i < raw.length) {
-    const ch = raw[i];
-    if (ch === '"') {
-      i++;
-      while (i < raw.length && raw[i] !== '"') { cur += raw[i]; i++; }
-      i++; // closing quote
-    } else if (ch === '.') {
-      if (cur) { parts.push(cur); cur = ''; }
-      i++;
-    } else {
-      cur += ch; i++;
+  while (i < line.length) {
+    // Skip characters that cannot begin an identifier part.
+    if (line[i] !== '"' && !/\w/.test(line[i])) { i++; continue; }
+
+    const parts: string[] = [];
+    let containsCol = false;
+
+    // Parse one dot-separated qualified identifier.
+    while (i < line.length) {
+      const partStart = i;
+      let partName = '';
+
+      if (line[i] === '"') {
+        // Quoted identifier: consume everything between the double-quotes.
+        i++; // past opening '"'
+        while (i < line.length && line[i] !== '"') { partName += line[i]; i++; }
+        if (i < line.length) i++; // past closing '"'
+      } else if (/\w/.test(line[i])) {
+        // Bare (unquoted) identifier.
+        while (i < line.length && /\w/.test(line[i])) { partName += line[i]; i++; }
+      } else {
+        break;
+      }
+
+      parts.push(partName);
+
+      // `col` falls inside this part (including any surrounding quote chars).
+      if (col >= partStart && col < i) containsCol = true;
+
+      // Continue only if followed by '.' and another identifier part.
+      if (i < line.length && line[i] === '.') {
+        const next = line[i + 1];
+        if (next !== undefined && (next === '"' || /\w/.test(next))) {
+          if (col === i) containsCol = true; // cursor is on the '.'
+          i++; // past '.'
+          continue;
+        }
+      }
+      break;
     }
+
+    if (containsCol && parts.length > 0) return parts;
   }
-  if (cur) parts.push(cur);
-  return parts.length > 0 ? parts : null;
+
+  return null;
 }
 
 // ── Statement range parser ─────────────────────────────────────────────────
@@ -336,6 +338,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   const [tooltipCtxMenu, setTooltipCtxMenu] = useState<{ x: number; y: number; sel: string } | null>(null);
   const hoverTimerRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks the word key ("db.schema.table") the hover timer is currently running
+  // for, and the latest cursor position under the mouse for that word.
+  const lastHoverWordRef  = useRef<string | null>(null);
+  const currentHoverPosRef = useRef<any>(null);
   // True while the cursor is physically inside the tooltip overlay.
   const isOnTooltipRef    = useRef(false);
   // True while a mouse button is held down (e.g. text selection drag).
@@ -348,7 +354,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
   const scheduleHide = useCallback(() => {
     if (hoverHideTimerRef.current) clearTimeout(hoverHideTimerRef.current);
-    hoverHideTimerRef.current = setTimeout(() => setDdlHover(null), 400);
+    hoverHideTimerRef.current = setTimeout(() => {
+      setDdlHover(null);
+      lastHoverWordRef.current = null;
+    }, 400);
   }, []);
   const cancelHide = useCallback(() => {
     if (hoverHideTimerRef.current) clearTimeout(hoverHideTimerRef.current);
@@ -821,12 +830,39 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       const pos = e.target?.position;
       const model = editor.getModel();
       const parts = (pos && model) ? getQualifiedIdent(model, pos) : null;
-      if (!parts || parts.length === 0) { if (!isOnTooltipRef.current) scheduleHide(); return; }
+      if (!parts || parts.length === 0) {
+        // Mouse moved off any recognisable identifier — cancel the pending show
+        // timer so it doesn't fire after the mouse has already left the word.
+        lastHoverWordRef.current = null;
+        if (hoverTimerRef.current) { clearTimeout(hoverTimerRef.current); hoverTimerRef.current = null; }
+        if (!isOnTooltipRef.current) scheduleHide();
+        return;
+      }
 
       cancelHide();
+
+      // Always update the latest position so the tooltip appears where the
+      // mouse currently is, even if it moved within the same word.
+      currentHoverPosRef.current = pos;
+
+      // Only restart the timer when the hovered word changes.  Moving
+      // within the same word should NOT reset the clock — otherwise the tooltip
+      // never fires while the mouse is crossing the token.
+      const wordKey = parts.join("\0");
+      if (wordKey === lastHoverWordRef.current) return;
+      lastHoverWordRef.current = wordKey;
+
       if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
 
       hoverTimerRef.current = setTimeout(async () => {
+        // Bail if the mouse has already moved to a different word (or off-word)
+        // since this timer was scheduled.
+        if (lastHoverWordRef.current !== wordKey) return;
+
+        // Use the most recent position so the tooltip is anchored to wherever
+        // the mouse is now (may have moved within the same word).
+        const pos = currentHoverPosRef.current;
+        if (!pos) return;
         const { objects } = useObjectStore.getState();
         const UC = (s: string) => s.toUpperCase();
 
@@ -870,17 +906,60 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         } else if (parts.length === 2) {
           // 2-part: SCHEMA.TABLE
           const [qualifier, pName] = [parts[0], parts[1]];
-          const inStore = objects.find(
+          let inStore = objects.find(
             (o) => UC(o.schema) === UC(qualifier) && UC(o.name) === UC(pName) &&
                    (o.kind === "TABLE" || o.kind === "VIEW"),
           );
+          if (!inStore) {
+            // Objects for this schema may not be loaded yet — try auto-loading
+            // using the current session database.
+            const sessDb = useSessionStore.getState().database;
+            if (sessDb) {
+              const schemaKey = `${UC(sessDb)}\0${UC(qualifier)}`;
+              if (!fetchedSchemaObjects.has(schemaKey)) {
+                fetchedSchemaObjects.add(schemaKey);
+                try {
+                  const fetched = await ListObjects(sessDb, qualifier);
+                  useObjectStore.getState().addObjects(
+                    sessDb, qualifier,
+                    (fetched ?? []).map((o) => ({ name: o.name, kind: (o.kind || "OTHER").toUpperCase() })),
+                  );
+                } catch { fetchedSchemaObjects.delete(schemaKey); }
+              }
+              inStore = useObjectStore.getState().objects.find(
+                (o) => UC(o.db) === UC(sessDb) && UC(o.schema) === UC(qualifier) &&
+                       UC(o.name) === UC(pName) && (o.kind === "TABLE" || o.kind === "VIEW"),
+              );
+            }
+          }
           if (!inStore) { setDdlHover(null); return; }
           db = inStore.db; schema = inStore.schema; kind = inStore.kind; name = inStore.name;
         } else {
-          // 1-part: name only
-          const inStore = objects.find(
+          // 1-part: name only — look in any loaded schema first, then auto-load
+          // from the current session's database+schema if needed.
+          let inStore = objects.find(
             (o) => UC(o.name) === UC(parts[0]) && (o.kind === "TABLE" || o.kind === "VIEW"),
           );
+          if (!inStore) {
+            const sess = useSessionStore.getState();
+            if (sess.database && sess.schema) {
+              const schemaKey = `${UC(sess.database)}\0${UC(sess.schema)}`;
+              if (!fetchedSchemaObjects.has(schemaKey)) {
+                fetchedSchemaObjects.add(schemaKey);
+                try {
+                  const fetched = await ListObjects(sess.database, sess.schema);
+                  useObjectStore.getState().addObjects(
+                    sess.database, sess.schema,
+                    (fetched ?? []).map((o) => ({ name: o.name, kind: (o.kind || "OTHER").toUpperCase() })),
+                  );
+                } catch { fetchedSchemaObjects.delete(schemaKey); }
+              }
+              inStore = useObjectStore.getState().objects.find(
+                (o) => UC(o.db) === UC(sess.database) && UC(o.schema) === UC(sess.schema) &&
+                       UC(o.name) === UC(parts[0]) && (o.kind === "TABLE" || o.kind === "VIEW"),
+              );
+            }
+          }
           if (!inStore) { setDdlHover(null); return; }
           db = inStore.db; schema = inStore.schema; kind = inStore.kind; name = inStore.name;
         }
@@ -915,11 +994,16 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const x = Math.min(rawX, window.innerWidth - 570);
         const y = fitsBelow ? belowY : Math.max(0, aboveY - 320);
 
+        // Cancel any pending hide before showing — prevents a race where the
+        // mouse crossed the word quickly, scheduleHide() was called, and its
+        // 400 ms timer would dismiss the tooltip right after it appears.
+        if (hoverHideTimerRef.current) { clearTimeout(hoverHideTimerRef.current); hoverHideTimerRef.current = null; }
         setDdlHover({ ddl, kind, db, schema, name, x, y });
-      }, 500);
+      }, 200);
     });
 
     editor.onMouseLeave(() => {
+      lastHoverWordRef.current = null;
       if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
       if (!isOnTooltipRef.current) scheduleHide();
     });

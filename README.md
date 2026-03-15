@@ -32,7 +32,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - Word-under-cursor highlight when nothing is selected
 - **Toggle line comment** — right-click in the editor and choose **Toggle Line Comment** to add or remove `--` on the current line or every line in the selection
 - **Font size zoom** — `⌘+` / `Ctrl++` increases the editor font size, `⌘-` / `Ctrl+-` decreases it, `⌘0` / `Ctrl+0` resets to the default; uses the printed character so shortcuts work correctly on non-US keyboard layouts
-- **Hover definition** — hovering over a table or view name — including fully-qualified three-part identifiers (`DB.SCHEMA.TABLE`) — shows its DDL in a custom scrollable overlay tooltip; the tooltip stays open when the cursor moves into it; entries are cached and automatically refreshed after 60 seconds so stale definitions are never shown indefinitely:
+- **Hover definition** — move the cursor over any table or view name — including fully-qualified three-part identifiers (`DB.SCHEMA.TABLE`) and double-quoted identifiers (`"MY_TABLE"`, `"DB"."SCHEMA"."TABLE"`) — to see its DDL in a custom scrollable overlay tooltip; the tooltip fires as the cursor enters the token (not just when stationary at its end), stays open when the cursor moves into it, and auto-loads object metadata for schemas not yet expanded in the sidebar; entries are cached and automatically refreshed after 60 seconds so stale definitions are never shown indefinitely:
   - **Copy button** — copies the full DDL to the clipboard
   - **Text selection** — paint to select any portion of the DDL, then copy with `⌘C` / `Ctrl+C`
   - **Right-click → Copy** — right-clicking inside the tooltip opens a context menu; choosing Copy copies the selected text to the clipboard
