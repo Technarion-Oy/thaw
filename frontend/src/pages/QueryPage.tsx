@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message } from "antd";
-import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined } from "@ant-design/icons";
+import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText } from "../../wailsjs/runtime/runtime";
 import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NewNotebook, NotebookUseContext } from "../../wailsjs/go/main/App";
@@ -76,10 +76,13 @@ export default function QueryPage() {
   const [aiEnabled, setAiEnabled] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
 
-  // ── Result history (last 10 runs, most-recent-first) ──────────────────────
-  interface HistoryEntry { queryID: string; sql: string; result: QueryResult; }
+  // ── Result history (last 10 unpinned + all pinned, most-recent-first) ────
+  interface HistoryEntry { id: string; queryID: string; sql: string; result: QueryResult; pinned: boolean; }
   const [resultHistory, setResultHistory] = useState<HistoryEntry[]>([]);
-  const [historyIdx,    setHistoryIdx]    = useState<number | null>(null);
+  const [historyId,     setHistoryId]     = useState<string | null>(null);
+
+  const togglePin = (id: string) =>
+    setResultHistory((prev) => prev.map((e) => (e.id === id ? { ...e, pinned: !e.pinned } : e)));
 
   const [snippetsOpen, setSnippetsOpen] = useState(false);
   const [exportPathFormatOpen, setExportPathFormatOpen] = useState(false);
@@ -258,14 +261,21 @@ export default function QueryPage() {
       // Phase 2: block until results are ready.
       const res = await WaitForQueryResult();
       setResult(res);
-      setResultHistory((prev) => [{ queryID: res.queryID ?? "", sql: query, result: res }, ...prev].slice(0, 10));
-      setHistoryIdx(0);
+      const newId = crypto.randomUUID();
+      setResultHistory((prev) => {
+        const withNew = [{ id: newId, queryID: res.queryID ?? "", sql: query, result: res, pinned: false }, ...prev];
+        const pinned = withNew.filter((e) => e.pinned);
+        const unpinned = withNew.filter((e) => !e.pinned).slice(0, 10);
+        const kept = new Set([...unpinned.map((e) => e.id), ...pinned.map((e) => e.id)]);
+        return withNew.filter((e) => kept.has(e.id));
+      });
+      setHistoryId(newId);
     } catch (e) {
       // Suppress the error when the user explicitly cancelled — keep whatever
       // result was previously shown rather than replacing it with an error.
       if (!cancelRequestedRef.current) {
         setError(String(e));
-        setHistoryIdx(null); // hide the grid; let the user re-select from history
+        setHistoryId(null); // hide the grid; let the user re-select from history
       }
     } finally {
       setRunning(false);
@@ -478,7 +488,13 @@ export default function QueryPage() {
   // The result currently shown in the grid — null when no result is selected
   // (e.g. right after a failed query; the user must pick from history explicitly).
   const displayedResult: QueryResult | null =
-    historyIdx !== null ? (resultHistory[historyIdx]?.result ?? null) : null;
+    historyId !== null ? (resultHistory.find((e) => e.id === historyId)?.result ?? null) : null;
+
+  // Pinned entries float to the top; within each group the original order is preserved.
+  const sortedHistory = [
+    ...resultHistory.filter((e) => e.pinned),
+    ...resultHistory.filter((e) => !e.pinned),
+  ];
 
   const sqlSnippet = (s: string) => {
     const n = s.replace(/\s+/g, " ").trim();
@@ -878,14 +894,35 @@ export default function QueryPage() {
                   {resultHistory.length > 1 && (
                     <Select
                       size="small"
-                      value={historyIdx}
-                      onChange={(v) => setHistoryIdx(v)}
+                      value={historyId}
+                      onChange={(v) => setHistoryId(v)}
                       style={{ fontSize: 11, width: 220 }}
                       popupMatchSelectWidth={false}
-                      options={resultHistory.map((e, i) => ({
-                        value: i,
-                        label: `#${i + 1}${i === 0 ? " · " : "  "}${sqlSnippet(e.sql)}`,
-                      }))}
+                      options={sortedHistory.map((e) => {
+                        const origIdx = resultHistory.indexOf(e);
+                        return {
+                          value: e.id,
+                          label: `${e.pinned ? "📌 " : ""}#${origIdx + 1}${origIdx === 0 ? " · " : "  "}${sqlSnippet(e.sql)}`,
+                        };
+                      })}
+                      optionRender={(option) => {
+                        const entry = resultHistory.find((e) => e.id === option.value);
+                        if (!entry) return option.label;
+                        return (
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option.label as string}</span>
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={entry.pinned
+                                ? <PushpinFilled style={{ fontSize: 11, color: "var(--color-primary, #1677ff)" }} />
+                                : <PushpinOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} />}
+                              style={{ height: 16, padding: "0 2px", minWidth: 0, flexShrink: 0 }}
+                              onClick={(e) => { e.stopPropagation(); e.preventDefault(); togglePin(entry.id); }}
+                            />
+                          </div>
+                        );
+                      }}
                     />
                   )}
                   {/* Query ID for displayed result */}
@@ -950,13 +987,34 @@ export default function QueryPage() {
                       size="small"
                       placeholder="Select to view…"
                       value={undefined}
-                      onChange={(v: number) => setHistoryIdx(v)}
+                      onChange={(v: string) => setHistoryId(v)}
                       style={{ fontSize: 11, width: 260 }}
                       popupMatchSelectWidth={false}
-                      options={resultHistory.map((e, i) => ({
-                        value: i,
-                        label: `#${i + 1}  ${sqlSnippet(e.sql)}`,
-                      }))}
+                      options={sortedHistory.map((e) => {
+                        const origIdx = resultHistory.indexOf(e);
+                        return {
+                          value: e.id,
+                          label: `${e.pinned ? "📌 " : ""}#${origIdx + 1}  ${sqlSnippet(e.sql)}`,
+                        };
+                      })}
+                      optionRender={(option) => {
+                        const entry = resultHistory.find((e) => e.id === option.value);
+                        if (!entry) return option.label;
+                        return (
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option.label as string}</span>
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={entry.pinned
+                                ? <PushpinFilled style={{ fontSize: 11, color: "var(--color-primary, #1677ff)" }} />
+                                : <PushpinOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} />}
+                              style={{ height: 16, padding: "0 2px", minWidth: 0, flexShrink: 0 }}
+                              onClick={(e) => { e.stopPropagation(); e.preventDefault(); togglePin(entry.id); }}
+                            />
+                          </div>
+                        );
+                      }}
                     />
                   </div>
                 )}
