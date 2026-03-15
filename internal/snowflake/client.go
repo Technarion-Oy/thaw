@@ -1364,14 +1364,16 @@ func (c *Client) GetTableColumns(ctx context.Context, database, schema, name str
 // TableForeignKey describes a single foreign-key column mapping between two tables.
 // It is returned by GetTableForeignKeys and used by the editor's JOIN ON autocomplete.
 type TableForeignKey struct {
-	PKDatabase string `json:"pkDatabase"`
-	PKSchema   string `json:"pkSchema"`
-	PKTable    string `json:"pkTable"`
-	PKColumn   string `json:"pkColumn"`
-	FKDatabase string `json:"fkDatabase"`
-	FKSchema   string `json:"fkSchema"`
-	FKTable    string `json:"fkTable"`
-	FKColumn   string `json:"fkColumn"`
+	PKDatabase     string `json:"pkDatabase"`
+	PKSchema       string `json:"pkSchema"`
+	PKTable        string `json:"pkTable"`
+	PKColumn       string `json:"pkColumn"`
+	FKDatabase     string `json:"fkDatabase"`
+	FKSchema       string `json:"fkSchema"`
+	FKTable        string `json:"fkTable"`
+	FKColumn       string `json:"fkColumn"`
+	ConstraintName string `json:"constraintName"` // fk_name column
+	KeySequence    int    `json:"keySequence"`    // key_sequence column (1-based)
 }
 
 // GetTableForeignKeys returns every foreign key where the given table is the
@@ -1390,6 +1392,7 @@ func (c *Client) GetTableForeignKeys(ctx context.Context, database, schema, tabl
 	idxs := colIndexMap(cols,
 		"pk_database_name", "pk_schema_name", "pk_table_name", "pk_column_name",
 		"fk_database_name", "fk_schema_name", "fk_table_name", "fk_column_name",
+		"fk_name", "key_sequence",
 	)
 
 	var result []TableForeignKey
@@ -1398,15 +1401,101 @@ func (c *Client) GetTableForeignKeys(ctx context.Context, database, schema, tabl
 		if err := rows.Scan(ptrs...); err != nil {
 			continue
 		}
+		seq, _ := strconv.Atoi(strVal(vals, idxs["key_sequence"]))
 		result = append(result, TableForeignKey{
-			PKDatabase: strVal(vals, idxs["pk_database_name"]),
-			PKSchema:   strVal(vals, idxs["pk_schema_name"]),
-			PKTable:    strVal(vals, idxs["pk_table_name"]),
-			PKColumn:   strVal(vals, idxs["pk_column_name"]),
-			FKDatabase: strVal(vals, idxs["fk_database_name"]),
-			FKSchema:   strVal(vals, idxs["fk_schema_name"]),
-			FKTable:    strVal(vals, idxs["fk_table_name"]),
-			FKColumn:   strVal(vals, idxs["fk_column_name"]),
+			PKDatabase:     strVal(vals, idxs["pk_database_name"]),
+			PKSchema:       strVal(vals, idxs["pk_schema_name"]),
+			PKTable:        strVal(vals, idxs["pk_table_name"]),
+			PKColumn:       strVal(vals, idxs["pk_column_name"]),
+			FKDatabase:     strVal(vals, idxs["fk_database_name"]),
+			FKSchema:       strVal(vals, idxs["fk_schema_name"]),
+			FKTable:        strVal(vals, idxs["fk_table_name"]),
+			FKColumn:       strVal(vals, idxs["fk_column_name"]),
+			ConstraintName: strVal(vals, idxs["fk_name"]),
+			KeySequence:    seq,
+		})
+	}
+	return result, rows.Err()
+}
+
+// ColumnInfo holds the name and data-type string for a single table column.
+// It is returned by GetTableColumnsWithTypes and used by the editor's JOIN ON
+// autocomplete to filter same-name suggestions by type compatibility.
+type ColumnInfo struct {
+	Name     string `json:"name"`
+	DataType string `json:"dataType"` // e.g. "VARCHAR(256)", "NUMBER(38,0)"
+}
+
+// GetTableColumnsWithTypes returns the ordered column list for a table or view
+// together with their data types by running DESCRIBE TABLE.
+func (c *Client) GetTableColumnsWithTypes(ctx context.Context, database, schema, name string) ([]ColumnInfo, error) {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	query := fmt.Sprintf(`DESCRIBE TABLE "%s"."%s"."%s"`, esc(database), esc(schema), esc(name))
+	rows, err := c.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cols, _ := rows.Columns()
+	idxs := colIndexMap(cols, "name", "type")
+
+	var result []ColumnInfo
+	for rows.Next() {
+		vals, ptrs := makeValPtrs(len(cols))
+		if err := rows.Scan(ptrs...); err != nil {
+			continue
+		}
+		n := strVal(vals, idxs["name"])
+		if n == "" {
+			continue
+		}
+		result = append(result, ColumnInfo{
+			Name:     n,
+			DataType: strVal(vals, idxs["type"]),
+		})
+	}
+	return result, rows.Err()
+}
+
+// GetSchemaForeignKeys returns all FK→PK column mappings in a schema by running
+// SHOW IMPORTED KEYS IN SCHEMA. This bulk call is cheaper than per-table SHOW
+// IMPORTED KEYS when the editor needs to warm up FK data for many tables at once.
+// The result set columns are identical to SHOW IMPORTED KEYS IN TABLE.
+func (c *Client) GetSchemaForeignKeys(ctx context.Context, database, schema string) ([]TableForeignKey, error) {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	query := fmt.Sprintf(`SHOW IMPORTED KEYS IN SCHEMA "%s"."%s"`, esc(database), esc(schema))
+	rows, err := c.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cols, _ := rows.Columns()
+	idxs := colIndexMap(cols,
+		"pk_database_name", "pk_schema_name", "pk_table_name", "pk_column_name",
+		"fk_database_name", "fk_schema_name", "fk_table_name", "fk_column_name",
+		"fk_name", "key_sequence",
+	)
+
+	var result []TableForeignKey
+	for rows.Next() {
+		vals, ptrs := makeValPtrs(len(cols))
+		if err := rows.Scan(ptrs...); err != nil {
+			continue
+		}
+		seq, _ := strconv.Atoi(strVal(vals, idxs["key_sequence"]))
+		result = append(result, TableForeignKey{
+			PKDatabase:     strVal(vals, idxs["pk_database_name"]),
+			PKSchema:       strVal(vals, idxs["pk_schema_name"]),
+			PKTable:        strVal(vals, idxs["pk_table_name"]),
+			PKColumn:       strVal(vals, idxs["pk_column_name"]),
+			FKDatabase:     strVal(vals, idxs["fk_database_name"]),
+			FKSchema:       strVal(vals, idxs["fk_schema_name"]),
+			FKTable:        strVal(vals, idxs["fk_table_name"]),
+			FKColumn:       strVal(vals, idxs["fk_column_name"]),
+			ConstraintName: strVal(vals, idxs["fk_name"]),
+			KeySequence:    seq,
 		})
 	}
 	return result, rows.Err()

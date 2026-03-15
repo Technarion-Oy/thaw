@@ -85,6 +85,8 @@ export function GetQueryHistory(arg1:string,arg2:string,arg3:string,arg4:string,
 
 export function GetRoleDDL(arg1:string):Promise<string>;
 
+export function GetSchemaForeignKeys(arg1:string,arg2:string):Promise<Array<snowflake.TableForeignKey>>;
+
 export function GetSessionContext():Promise<snowflake.SessionContext>;
 
 export function GetSessionParameters():Promise<Array<main.SessionParam>>;
@@ -94,6 +96,8 @@ export function GetSessionVariables():Promise<Array<main.SessionVar>>;
 export function GetSnowparkConfig():Promise<main.SnowparkConfigResult>;
 
 export function GetTableColumns(arg1:string,arg2:string,arg3:string):Promise<Array<string>>;
+
+export function GetTableColumnsWithTypes(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.ColumnInfo>>;
 
 export function GetTableForeignKeys(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.TableForeignKey>>;
 

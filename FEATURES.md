@@ -25,7 +25,9 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - `db.schema.` → tables, views, functions, and other objects in that schema
   - `db.schema.table.` → columns of that table or view
   - `Ctrl+Space` inside a query → columns from all tables referenced in the current `FROM`/`JOIN` clauses
-  - After `ON` in a `JOIN` clause → join conditions: FK relationships listed first (sourced from `SHOW IMPORTED KEYS IN TABLE`), followed by columns that share the same name across the joined tables; works with full three-part identifiers or bare table names, with or without aliases
+  - After `ON` in a `JOIN` clause → join conditions in three tiers: **(1)** FK relationships — composite multi-column constraints produce a single `col1 = ref.col1 AND col2 = ref.col2` expression (sourced from `SHOW IMPORTED KEYS`); **(2)** PK-naming-convention heuristic (`orders.CUSTOMER_ID = customers.ID`) when no FK constraint exists; **(3)** type-compatible same-name columns with both `a.col = b.col` equality and `USING (col)` alternatives; works with quoted/unquoted identifiers, full three-part names, and optional table aliases
+  - **Ghost text before ON** — after `JOIN table ` (before typing `ON`), an inline ghost-text suggestion `ON <condition>` appears and can be accepted with `Tab` (FK-cache-backed, instant)
+  - **Ctrl+Space before ON** — pressing `Ctrl+Space` after a JOIN table reference but before typing `ON` opens a full dropdown of `ON <condition>` suggestions covering all three tiers
 - **AI inline completions** — ghost-text SQL suggestions powered by OpenAI or Google AI Studios (Gemini); press `Tab` to accept
 - **AI Chat** — an agentic assistant in the results area that can query your live Snowflake connection to answer questions about your data (see [AI Features](#ai-features))
 - **Code Snippets** — open **Tools → Code Snippets…** in the menu bar to browse 24 curated `CREATE OR REPLACE` templates across six categories:

@@ -154,6 +154,10 @@ export function GetRoleDDL(arg1) {
   return window['go']['main']['App']['GetRoleDDL'](arg1);
 }
 
+export function GetSchemaForeignKeys(arg1, arg2) {
+  return window['go']['main']['App']['GetSchemaForeignKeys'](arg1, arg2);
+}
+
 export function GetSessionContext() {
   return window['go']['main']['App']['GetSessionContext']();
 }
@@ -172,6 +176,10 @@ export function GetSnowparkConfig() {
 
 export function GetTableColumns(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetTableColumns'](arg1, arg2, arg3);
+}
+
+export function GetTableColumnsWithTypes(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetTableColumnsWithTypes'](arg1, arg2, arg3);
 }
 
 export function GetTableForeignKeys(arg1, arg2, arg3) {

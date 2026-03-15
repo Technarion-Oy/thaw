@@ -885,6 +885,26 @@ func (a *App) GetTableForeignKeys(database, schema, table string) ([]snowflake.T
 	return a.client.GetTableForeignKeys(a.ctx, database, schema, table)
 }
 
+// GetTableColumnsWithTypes returns ordered column names and data types for a
+// table or view. Used by the editor's JOIN ON autocomplete for type-compatible
+// same-name column suggestions.
+func (a *App) GetTableColumnsWithTypes(database, schema, name string) ([]snowflake.ColumnInfo, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.GetTableColumnsWithTypes(a.ctx, database, schema, name)
+}
+
+// GetSchemaForeignKeys returns all FK→PK column mappings in the given schema
+// from INFORMATION_SCHEMA. Used by the editor to bulk-warm FK data for the
+// JOIN ON autocomplete instead of issuing per-table SHOW IMPORTED KEYS calls.
+func (a *App) GetSchemaForeignKeys(database, schema string) ([]snowflake.TableForeignKey, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.GetSchemaForeignKeys(a.ctx, database, schema)
+}
+
 // GetFunctionInfo fetches the DDL for a user-defined function and returns its
 // parameter list together with a flag indicating whether it is a table function.
 func (a *App) GetFunctionInfo(database, schema, name, argTypes string) (*snowflake.FunctionInfo, error) {

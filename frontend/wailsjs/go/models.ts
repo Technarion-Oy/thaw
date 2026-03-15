@@ -673,6 +673,20 @@ export namespace sfconfig {
 
 export namespace snowflake {
 	
+	export class ColumnInfo {
+	    name: string;
+	    dataType: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ColumnInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.dataType = source["dataType"];
+	    }
+	}
 	export class ConnectParams {
 	    account: string;
 	    user: string;
@@ -1113,6 +1127,8 @@ export namespace snowflake {
 	    fkSchema: string;
 	    fkTable: string;
 	    fkColumn: string;
+	    constraintName: string;
+	    keySequence: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new TableForeignKey(source);
@@ -1128,6 +1144,8 @@ export namespace snowflake {
 	        this.fkSchema = source["fkSchema"];
 	        this.fkTable = source["fkTable"];
 	        this.fkColumn = source["fkColumn"];
+	        this.constraintName = source["constraintName"];
+	        this.keySequence = source["keySequence"];
 	    }
 	}
 
