@@ -350,6 +350,10 @@ export function PickDataFileByFormat(arg1) {
   return window['go']['main']['App']['PickDataFileByFormat'](arg1);
 }
 
+export function PickDataFilesByFormat(arg1) {
+  return window['go']['main']['App']['PickDataFilesByFormat'](arg1);
+}
+
 export function PickDirectory() {
   return window['go']['main']['App']['PickDirectory']();
 }

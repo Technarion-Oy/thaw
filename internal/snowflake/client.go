@@ -2171,20 +2171,65 @@ func localFileURLForFile(path string) (string, error) {
 
 // ── Table data import ─────────────────────────────────────────────────────────
 
-// ImportTableParams specifies how to import a local file into a Snowflake table.
+// FormatTypeOptions holds all Snowflake file-format options for a given type.
+// Fields that are unused by a particular format are ignored by buildFFOptions.
+// String values use SQL escape notation (e.g. "\n" for newline, "\\" for backslash).
+// Keyword values (AUTO, NONE, HEX, …) are stored as their uppercase names.
+type FormatTypeOptions struct {
+	// ── Common ───────────────────────────────────────────────────────────────
+	Compression              string   `json:"compression"`              // AUTO | GZIP | BZ2 | …
+	TrimSpace                bool     `json:"trimSpace"`
+	ReplaceInvalidCharacters bool     `json:"replaceInvalidCharacters"`
+	NullIf                   []string `json:"nullIf"` // list of null-indicator strings
+
+	// ── CSV + JSON ───────────────────────────────────────────────────────────
+	DateFormat      string `json:"dateFormat"`      // AUTO | format-string
+	TimeFormat      string `json:"timeFormat"`
+	TimestampFormat string `json:"timestampFormat"`
+	BinaryFormat    string `json:"binaryFormat"`    // HEX | BASE64 | UTF8
+	FileExtension   string `json:"fileExtension"`   // NONE or extension string
+	MultiLine       bool   `json:"multiLine"`
+	SkipByteOrderMark bool `json:"skipByteOrderMark"`
+	IgnoreUtf8Errors  bool `json:"ignoreUtf8Errors"` // JSON
+
+	// ── CSV ──────────────────────────────────────────────────────────────────
+	RecordDelimiter           string `json:"recordDelimiter"`
+	FieldDelimiter            string `json:"fieldDelimiter"`
+	ParseHeader               bool   `json:"parseHeader"`
+	SkipHeader                int    `json:"skipHeader"`
+	SkipBlankLines            bool   `json:"skipBlankLines"`
+	Escape                    string `json:"escape"`                    // NONE or char
+	EscapeUnenclosedField     string `json:"escapeUnenclosedField"`
+	FieldOptionallyEnclosedBy string `json:"fieldOptionallyEnclosedBy"` // NONE or char
+	ErrorOnColumnCountMismatch bool  `json:"errorOnColumnCountMismatch"`
+	EmptyFieldAsNull           bool  `json:"emptyFieldAsNull"`
+	Encoding                  string `json:"encoding"` // UTF8 | …
+
+	// ── JSON-only ────────────────────────────────────────────────────────────
+	EnableOctal     bool `json:"enableOctal"`
+	AllowDuplicate  bool `json:"allowDuplicate"`
+	StripOuterArray bool `json:"stripOuterArray"`
+	StripNullValues bool `json:"stripNullValues"`
+
+	// ── PARQUET ──────────────────────────────────────────────────────────────
+	SnappyCompression    bool `json:"snappyCompression"`
+	BinaryAsText         bool `json:"binaryAsText"`
+	UseLogicalType       bool `json:"useLogicalType"`
+	UseVectorizedScanner bool `json:"useVectorizedScanner"`
+}
+
+// ImportTableParams specifies how to import one or more local files into a Snowflake table.
 type ImportTableParams struct {
-	Database  string `json:"database"`
-	Schema    string `json:"schema"`
-	Table     string `json:"table"`    // target table name
-	FilePath  string `json:"filePath"` // absolute local path to the source file
-	Format    string `json:"format"`   // "CSV", "JSON", "PARQUET"
-	// CSV-specific
-	Delimiter  string `json:"delimiter"`
-	Header     bool   `json:"header"`
-	NullString string `json:"nullString"`
+	Database  string   `json:"database"`
+	Schema    string   `json:"schema"`
+	Table     string   `json:"table"`     // target table name
+	FilePaths []string `json:"filePaths"` // one or more absolute local paths
+	Format    string   `json:"format"`    // "CSV", "JSON", "AVRO", "ORC", "PARQUET"
 	// Behaviour
 	Overwrite   bool `json:"overwrite"`   // TRUNCATE TABLE before COPY INTO
 	CreateTable bool `json:"createTable"` // CREATE TABLE using INFER_SCHEMA first
+	// Format-specific options (see FormatTypeOptions)
+	Options FormatTypeOptions `json:"options"`
 }
 
 // ImportTableResult reports the outcome of a table import.
@@ -2193,15 +2238,19 @@ type ImportTableResult struct {
 	FilesLoaded int   `json:"filesLoaded"`
 }
 
-// ImportTableData imports a local file into a Snowflake table via a temporary
-// internal stage:
+// ImportTableData imports one or more local files into a Snowflake table via a
+// temporary internal stage:
 //  1. CREATE TEMPORARY STAGE in the same schema as the table
-//  2. PUT local file → stage
+//  2. PUT each local file → stage
 //  3. Optionally CREATE TABLE USING TEMPLATE (INFER_SCHEMA) or TRUNCATE
-//  4. COPY INTO table FROM @stage
+//  4. COPY INTO table FROM @stage  (loads all staged files in one pass)
 //  5. DROP STAGE (deferred)
 func (c *Client) ImportTableData(ctx context.Context, params ImportTableParams) (ImportTableResult, error) {
 	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+
+	if len(params.FilePaths) == 0 {
+		return ImportTableResult{}, fmt.Errorf("no files specified")
+	}
 
 	stageName := fmt.Sprintf("THAW_IMPORT_%d", time.Now().UnixNano())
 	stageRef  := fmt.Sprintf(`"%s"."%s".%s`, esc(params.Database), esc(params.Schema), stageName)
@@ -2213,22 +2262,39 @@ func (c *Client) ImportTableData(ctx context.Context, params ImportTableParams) 
 	}
 	defer c.db.ExecContext(context.Background(), "DROP STAGE IF EXISTS "+stageRef) //nolint:errcheck
 
-	// PUT local file to the stage
-	fileURL, err := localFileURLForFile(params.FilePath)
-	if err != nil {
-		return ImportTableResult{}, fmt.Errorf("build file url: %w", err)
+	// PUT each local file to the stage.
+	for _, fp := range params.FilePaths {
+		fileURL, err := localFileURLForFile(fp)
+		if err != nil {
+			return ImportTableResult{}, fmt.Errorf("build file url for %s: %w", filepath.Base(fp), err)
+		}
+		escapedURL := strings.ReplaceAll(fileURL, "'", "\\'")
+		putSQL := fmt.Sprintf("PUT '%s' %s AUTO_COMPRESS=FALSE OVERWRITE=TRUE", escapedURL, stageAt)
+		putRows, err := c.db.QueryContext(ctx, putSQL)
+		if err != nil {
+			return ImportTableResult{}, fmt.Errorf("upload %s to stage: %w", filepath.Base(fp), err)
+		}
+		putRows.Close()
 	}
-	escapedURL := strings.ReplaceAll(fileURL, "'", "\\'")
-	putSQL := fmt.Sprintf("PUT '%s' %s AUTO_COMPRESS=FALSE OVERWRITE=TRUE", escapedURL, stageAt)
-	putRows, err := c.db.QueryContext(ctx, putSQL)
-	if err != nil {
-		return ImportTableResult{}, fmt.Errorf("upload file to stage: %w", err)
-	}
-	putRows.Close()
 
-	// Optionally create the target table from the file's inferred schema
+	// Optionally create the target table from the file's inferred schema.
+	// INFER_SCHEMA does not support PARSE_HEADER / FIELD_DELIMITER as inline
+	// FILE_FORMAT options, so for CSV with PARSE_HEADER=TRUE we create a named
+	// file format, reference it by name, and drop it when done.
+	var inferFmtRef string
+	if params.CreateTable && strings.ToUpper(params.Format) == "CSV" && params.Options.ParseHeader {
+		fmtName := fmt.Sprintf("THAW_IMPORT_FF_%d", time.Now().UnixNano())
+		fmtRef := fmt.Sprintf(`"%s"."%s".%s`, esc(params.Database), esc(params.Schema), fmtName)
+		createFmtSQL := fmt.Sprintf("CREATE OR REPLACE FILE FORMAT %s %s", fmtRef, buildFFOptions(params.Format, params.Options))
+		if _, err := c.db.ExecContext(ctx, createFmtSQL); err != nil {
+			return ImportTableResult{}, fmt.Errorf("create file format: %w", err)
+		}
+		defer c.db.ExecContext(context.Background(), "DROP FILE FORMAT IF EXISTS "+fmtRef) //nolint:errcheck
+		inferFmtRef = fmtRef
+	}
+
 	if params.CreateTable {
-		createSQL := buildCreateTableSQL(stageAt, tableRef, params)
+		createSQL := buildCreateTableSQL(stageAt, tableRef, inferFmtRef, params)
 		if _, err := c.db.ExecContext(ctx, createSQL); err != nil {
 			return ImportTableResult{}, fmt.Errorf("create table: %w", err)
 		}
@@ -2268,82 +2334,188 @@ func (c *Client) ImportTableData(ctx context.Context, params ImportTableParams) 
 	return ImportTableResult{RowsLoaded: rowsLoaded, FilesLoaded: filesLoaded}, nil
 }
 
+// ── File-format SQL helpers ───────────────────────────────────────────────────
+
+// ffKeywords are Snowflake file-format option values that must not be quoted.
+var ffKeywords = map[string]struct{}{
+	"AUTO": {}, "GZIP": {}, "BZ2": {}, "BROTLI": {}, "ZSTD": {}, "DEFLATE": {},
+	"RAW_DEFLATE": {}, "NONE": {}, "LZO": {}, "SNAPPY": {},
+	"HEX": {}, "BASE64": {}, "UTF8": {},
+}
+
+// ffVal formats a file-format string option value: keyword values are returned
+// unquoted (uppercase), all others are wrapped in single quotes.
+// The string is assumed to use SQL escape notation (e.g. \n, \\).
+func ffVal(s string) string {
+	up := strings.ToUpper(s)
+	if _, ok := ffKeywords[up]; ok {
+		return up
+	}
+	return "'" + strings.ReplaceAll(s, "'", "\\'") + "'"
+}
+
+func ffBool(v bool) string {
+	if v {
+		return "TRUE"
+	}
+	return "FALSE"
+}
+
+// ffNullIf formats the NULL_IF clause, e.g. NULL_IF = ('\N', 'NULL').
+func ffNullIf(nullIf []string) string {
+	if len(nullIf) == 0 {
+		return "NULL_IF = ()"
+	}
+	parts := make([]string, len(nullIf))
+	for i, s := range nullIf {
+		parts[i] = "'" + strings.ReplaceAll(s, "'", "\\'") + "'"
+	}
+	return "NULL_IF = (" + strings.Join(parts, ", ") + ")"
+}
+
+// buildFFOptions returns the TYPE='…' option string for a Snowflake file format.
+// It does NOT include surrounding parentheses; callers add those as needed.
+func buildFFOptions(format string, o FormatTypeOptions) string {
+	var b strings.Builder
+	w := func(s string) { b.WriteString(" "); b.WriteString(s) }
+
+	switch strings.ToUpper(format) {
+	case "CSV":
+		b.WriteString("TYPE='CSV'")
+		w("COMPRESSION=" + ffVal(o.Compression))
+		w("RECORD_DELIMITER=" + ffVal(o.RecordDelimiter))
+		w("FIELD_DELIMITER=" + ffVal(o.FieldDelimiter))
+		w("MULTI_LINE=" + ffBool(o.MultiLine))
+		if o.ParseHeader {
+			w("PARSE_HEADER=TRUE")
+		} else {
+			w(fmt.Sprintf("SKIP_HEADER=%d", o.SkipHeader))
+		}
+		w("SKIP_BLANK_LINES=" + ffBool(o.SkipBlankLines))
+		w("DATE_FORMAT=" + ffVal(o.DateFormat))
+		w("TIME_FORMAT=" + ffVal(o.TimeFormat))
+		w("TIMESTAMP_FORMAT=" + ffVal(o.TimestampFormat))
+		w("BINARY_FORMAT=" + ffVal(o.BinaryFormat))
+		w("ESCAPE=" + ffVal(o.Escape))
+		w("ESCAPE_UNENCLOSED_FIELD=" + ffVal(o.EscapeUnenclosedField))
+		w("TRIM_SPACE=" + ffBool(o.TrimSpace))
+		w("FIELD_OPTIONALLY_ENCLOSED_BY=" + ffVal(o.FieldOptionallyEnclosedBy))
+		w(ffNullIf(o.NullIf))
+		w("ERROR_ON_COLUMN_COUNT_MISMATCH=" + ffBool(o.ErrorOnColumnCountMismatch))
+		w("REPLACE_INVALID_CHARACTERS=" + ffBool(o.ReplaceInvalidCharacters))
+		w("EMPTY_FIELD_AS_NULL=" + ffBool(o.EmptyFieldAsNull))
+		w("SKIP_BYTE_ORDER_MARK=" + ffBool(o.SkipByteOrderMark))
+		w("ENCODING=" + ffVal(o.Encoding))
+		if o.FileExtension != "" && strings.ToUpper(o.FileExtension) != "NONE" {
+			w("FILE_EXTENSION=" + ffVal(o.FileExtension))
+		}
+
+	case "JSON":
+		b.WriteString("TYPE='JSON'")
+		w("COMPRESSION=" + ffVal(o.Compression))
+		w("DATE_FORMAT=" + ffVal(o.DateFormat))
+		w("TIME_FORMAT=" + ffVal(o.TimeFormat))
+		w("TIMESTAMP_FORMAT=" + ffVal(o.TimestampFormat))
+		w("BINARY_FORMAT=" + ffVal(o.BinaryFormat))
+		w("TRIM_SPACE=" + ffBool(o.TrimSpace))
+		w("MULTI_LINE=" + ffBool(o.MultiLine))
+		w(ffNullIf(o.NullIf))
+		if o.FileExtension != "" && strings.ToUpper(o.FileExtension) != "NONE" {
+			w("FILE_EXTENSION=" + ffVal(o.FileExtension))
+		}
+		w("ENABLE_OCTAL=" + ffBool(o.EnableOctal))
+		w("ALLOW_DUPLICATE=" + ffBool(o.AllowDuplicate))
+		w("STRIP_OUTER_ARRAY=" + ffBool(o.StripOuterArray))
+		w("STRIP_NULL_VALUES=" + ffBool(o.StripNullValues))
+		w("REPLACE_INVALID_CHARACTERS=" + ffBool(o.ReplaceInvalidCharacters))
+		w("IGNORE_UTF8_ERRORS=" + ffBool(o.IgnoreUtf8Errors))
+		w("SKIP_BYTE_ORDER_MARK=" + ffBool(o.SkipByteOrderMark))
+
+	case "AVRO":
+		b.WriteString("TYPE='AVRO'")
+		w("COMPRESSION=" + ffVal(o.Compression))
+		w("TRIM_SPACE=" + ffBool(o.TrimSpace))
+		w("REPLACE_INVALID_CHARACTERS=" + ffBool(o.ReplaceInvalidCharacters))
+		w(ffNullIf(o.NullIf))
+
+	case "ORC":
+		b.WriteString("TYPE='ORC'")
+		w("TRIM_SPACE=" + ffBool(o.TrimSpace))
+		w("REPLACE_INVALID_CHARACTERS=" + ffBool(o.ReplaceInvalidCharacters))
+		w(ffNullIf(o.NullIf))
+
+	case "PARQUET":
+		b.WriteString("TYPE='PARQUET'")
+		w("COMPRESSION=" + ffVal(o.Compression))
+		w("SNAPPY_COMPRESSION=" + ffBool(o.SnappyCompression))
+		w("BINARY_AS_TEXT=" + ffBool(o.BinaryAsText))
+		w("USE_LOGICAL_TYPE=" + ffBool(o.UseLogicalType))
+		w("TRIM_SPACE=" + ffBool(o.TrimSpace))
+		w("USE_VECTORIZED_SCANNER=" + ffBool(o.UseVectorizedScanner))
+		w("REPLACE_INVALID_CHARACTERS=" + ffBool(o.ReplaceInvalidCharacters))
+		w(ffNullIf(o.NullIf))
+	}
+
+	return b.String()
+}
+
+// ── CREATE TABLE ─────────────────────────────────────────────────────────────
+
 // buildCreateTableSQL returns a CREATE TABLE statement that derives its schema
-// from the staged file using INFER_SCHEMA (CSV/PARQUET) or creates a single
-// VARIANT column for JSON (whose schema cannot be reliably inferred).
-func buildCreateTableSQL(stageAt, tableRef string, p ImportTableParams) string {
+// from the staged file using INFER_SCHEMA (CSV/AVRO/ORC/PARQUET) or creates a
+// single VARIANT column for JSON (whose schema cannot be reliably inferred).
+//
+// fmtRef, when non-empty, is the fully-qualified name of a pre-created named
+// file format. INFER_SCHEMA requires a named format for CSV with
+// PARSE_HEADER=TRUE because it does not accept PARSE_HEADER inline.
+func buildCreateTableSQL(stageAt, tableRef, fmtRef string, p ImportTableParams) string {
 	if strings.ToUpper(p.Format) == "JSON" {
 		return fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (VALUE VARIANT)", tableRef)
 	}
 
-	var inferFF string
-	if strings.ToUpper(p.Format) == "CSV" {
-		delim := p.Delimiter
-		if delim == "" {
-			delim = ","
-		}
-		delim = strings.ReplaceAll(delim, "'", "\\'")
-		if p.Header {
-			inferFF = fmt.Sprintf("TYPE='CSV' PARSE_HEADER=TRUE FIELD_DELIMITER='%s'", delim)
-		} else {
-			inferFF = fmt.Sprintf("TYPE='CSV' SKIP_HEADER=0 FIELD_DELIMITER='%s'", delim)
-		}
-	} else { // PARQUET
-		inferFF = "TYPE='PARQUET'"
+	var ffClause string
+	if fmtRef != "" {
+		// Named file format (single-quoted identifier, no parens).
+		ffClause = fmt.Sprintf("FILE_FORMAT=>'%s'", strings.ReplaceAll(fmtRef, "'", "\\'"))
+	} else {
+		ffClause = fmt.Sprintf("FILE_FORMAT=>(%s)", buildFFOptions(p.Format, p.Options))
 	}
 
 	return fmt.Sprintf(
-		"CREATE TABLE IF NOT EXISTS %s\nUSING TEMPLATE (\n    SELECT ARRAY_AGG(OBJECT_CONSTRUCT(*))\n    FROM TABLE(INFER_SCHEMA(\n        LOCATION=>'%s',\n        FILE_FORMAT=>(%s)\n    ))\n)",
-		tableRef, stageAt, inferFF)
+		"CREATE TABLE IF NOT EXISTS %s\nUSING TEMPLATE (\n    SELECT ARRAY_AGG(OBJECT_CONSTRUCT(*))\n    FROM TABLE(INFER_SCHEMA(\n        LOCATION=>'%s',\n        %s\n    ))\n)",
+		tableRef, stageAt, ffClause)
 }
+
+// ── COPY INTO ────────────────────────────────────────────────────────────────
 
 // buildImportCopySQL returns the COPY INTO <table> FROM @stage statement.
 func buildImportCopySQL(stageAt, tableRef string, p ImportTableParams) string {
-	esc := func(s string) string { return strings.ReplaceAll(s, "'", "\\'") }
+	ff := buildFFOptions(p.Format, p.Options)
 
 	switch strings.ToUpper(p.Format) {
 	case "JSON":
 		if p.CreateTable {
-			// Table has a single VARIANT column named VALUE; load each JSON line as $1.
+			// Table has a single VARIANT column named VALUE; load each JSON object as $1.
 			return fmt.Sprintf(
-				"COPY INTO %s (VALUE)\nFROM (SELECT $1 FROM %s)\nFILE_FORMAT = (TYPE='JSON' COMPRESSION=AUTO)\nFORCE = TRUE",
-				tableRef, stageAt)
+				"COPY INTO %s (VALUE)\nFROM (SELECT $1 FROM %s)\nFILE_FORMAT = (%s)\nFORCE = TRUE",
+				tableRef, stageAt, ff)
 		}
-		// Existing table: match JSON keys to column names.
 		return fmt.Sprintf(
-			"COPY INTO %s\nFROM %s\nFILE_FORMAT = (TYPE='JSON' COMPRESSION=AUTO)\nMATCH_BY_COLUMN_NAME = CASE_INSENSITIVE\nFORCE = TRUE",
-			tableRef, stageAt)
+			"COPY INTO %s\nFROM %s\nFILE_FORMAT = (%s)\nMATCH_BY_COLUMN_NAME = CASE_INSENSITIVE\nFORCE = TRUE",
+			tableRef, stageAt, ff)
 
-	case "PARQUET":
+	case "AVRO", "ORC", "PARQUET":
 		return fmt.Sprintf(
-			"COPY INTO %s\nFROM %s\nFILE_FORMAT = (TYPE='PARQUET')\nMATCH_BY_COLUMN_NAME = CASE_INSENSITIVE\nFORCE = TRUE",
-			tableRef, stageAt)
+			"COPY INTO %s\nFROM %s\nFILE_FORMAT = (%s)\nMATCH_BY_COLUMN_NAME = CASE_INSENSITIVE\nFORCE = TRUE",
+			tableRef, stageAt, ff)
 
 	default: // CSV
-		delim := p.Delimiter
-		if delim == "" {
-			delim = ","
-		}
-		delim = esc(delim)
-		nullIf := esc(p.NullString)
-
-		if p.CreateTable && p.Header {
-			// Table was created with PARSE_HEADER; use the same so column order matches.
-			ff := fmt.Sprintf(
-				"TYPE='CSV' PARSE_HEADER=TRUE FIELD_DELIMITER='%s' FIELD_OPTIONALLY_ENCLOSED_BY='\"' NULL_IF=('%s') EMPTY_FIELD_AS_NULL=TRUE COMPRESSION=AUTO",
-				delim, nullIf)
+		if p.CreateTable && p.Options.ParseHeader {
+			// Table was created with PARSE_HEADER; match columns by name.
 			return fmt.Sprintf(
 				"COPY INTO %s\nFROM %s\nFILE_FORMAT = (%s)\nMATCH_BY_COLUMN_NAME = CASE_INSENSITIVE\nFORCE = TRUE",
 				tableRef, stageAt, ff)
 		}
-
-		skipHeader := 0
-		if p.Header {
-			skipHeader = 1
-		}
-		ff := fmt.Sprintf(
-			"TYPE='CSV' FIELD_DELIMITER='%s' FIELD_OPTIONALLY_ENCLOSED_BY='\"' NULL_IF=('%s') EMPTY_FIELD_AS_NULL=TRUE SKIP_HEADER=%d COMPRESSION=AUTO",
-			delim, nullIf, skipHeader)
 		return fmt.Sprintf(
 			"COPY INTO %s\nFROM %s\nFILE_FORMAT = (%s)\nFORCE = TRUE",
 			tableRef, stageAt, ff)

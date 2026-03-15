@@ -356,17 +356,49 @@ func (a *App) PickOpenFile() string {
 	return path
 }
 
+// dataFileFilters returns dialog file filters for the given import format.
+func dataFileFilters(format string) []wailsruntime.FileFilter {
+	switch strings.ToUpper(format) {
+	case "JSON":
+		return []wailsruntime.FileFilter{
+			{DisplayName: "JSON Files (*.json;*.jsonl;*.ndjson)", Pattern: "*.json;*.jsonl;*.ndjson"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		}
+	case "PARQUET":
+		return []wailsruntime.FileFilter{
+			{DisplayName: "Parquet Files (*.parquet)", Pattern: "*.parquet"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		}
+	case "AVRO":
+		return []wailsruntime.FileFilter{
+			{DisplayName: "Avro Files (*.avro)", Pattern: "*.avro"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		}
+	case "ORC":
+		return []wailsruntime.FileFilter{
+			{DisplayName: "ORC Files (*.orc)", Pattern: "*.orc"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		}
+	default: // CSV
+		return []wailsruntime.FileFilter{
+			{DisplayName: "CSV Files (*.csv)", Pattern: "*.csv"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		}
+	}
+}
+
 // PickDataFile opens a native open-file dialog filtered to common data file
-// formats (CSV, JSON, Parquet) and returns the chosen path, or an empty string
-// if the user cancels.
+// formats and returns the chosen path, or an empty string if the user cancels.
 func (a *App) PickDataFile() string {
 	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
 		Title: "Open data file",
 		Filters: []wailsruntime.FileFilter{
-			{DisplayName: "Data Files (*.csv;*.json;*.jsonl;*.ndjson;*.parquet)", Pattern: "*.csv;*.json;*.jsonl;*.ndjson;*.parquet"},
+			{DisplayName: "Data Files (*.csv;*.json;*.jsonl;*.ndjson;*.parquet;*.avro;*.orc)", Pattern: "*.csv;*.json;*.jsonl;*.ndjson;*.parquet;*.avro;*.orc"},
 			{DisplayName: "CSV Files (*.csv)", Pattern: "*.csv"},
 			{DisplayName: "JSON Files (*.json;*.jsonl;*.ndjson)", Pattern: "*.json;*.jsonl;*.ndjson"},
 			{DisplayName: "Parquet Files (*.parquet)", Pattern: "*.parquet"},
+			{DisplayName: "Avro Files (*.avro)", Pattern: "*.avro"},
+			{DisplayName: "ORC Files (*.orc)", Pattern: "*.orc"},
 			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
 		},
 	})
@@ -377,34 +409,31 @@ func (a *App) PickDataFile() string {
 }
 
 // PickDataFileByFormat opens a native open-file dialog filtered to the file
-// extensions that match the given format ("CSV", "JSON", or "PARQUET").
+// extensions that match the given format.
 func (a *App) PickDataFileByFormat(format string) string {
-	var filters []wailsruntime.FileFilter
-	switch strings.ToUpper(format) {
-	case "JSON":
-		filters = []wailsruntime.FileFilter{
-			{DisplayName: "JSON Files (*.json;*.jsonl;*.ndjson)", Pattern: "*.json;*.jsonl;*.ndjson"},
-			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
-		}
-	case "PARQUET":
-		filters = []wailsruntime.FileFilter{
-			{DisplayName: "Parquet Files (*.parquet)", Pattern: "*.parquet"},
-			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
-		}
-	default: // CSV
-		filters = []wailsruntime.FileFilter{
-			{DisplayName: "CSV Files (*.csv)", Pattern: "*.csv"},
-			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
-		}
-	}
 	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
 		Title:   "Open " + format + " file",
-		Filters: filters,
+		Filters: dataFileFilters(format),
 	})
 	if err != nil {
 		return ""
 	}
 	return path
+}
+
+// PickDataFilesByFormat opens a native open-file dialog (multi-select) filtered
+// to the extensions that match the given format. Returns the selected paths, or
+// nil if the user cancels.
+func (a *App) PickDataFilesByFormat(format string) []string {
+	filters := dataFileFilters(format)
+	paths, err := wailsruntime.OpenMultipleFilesDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title:   "Open " + format + " files",
+		Filters: filters,
+	})
+	if err != nil {
+		return nil
+	}
+	return paths
 }
 
 // PickSaveFile opens a native save-file dialog pre-populated with defaultName

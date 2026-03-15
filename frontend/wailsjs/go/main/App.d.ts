@@ -183,6 +183,8 @@ export function PickDataFile():Promise<string>;
 
 export function PickDataFileByFormat(arg1:string):Promise<string>;
 
+export function PickDataFilesByFormat(arg1:string):Promise<Array<string>>;
+
 export function PickDirectory():Promise<string>;
 
 export function PickNotebookFile():Promise<string>;

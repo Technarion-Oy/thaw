@@ -842,6 +842,20 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setImportModal({ db, schema, table });
   };
 
+  const openSchemaExportModal = () => {
+    if (!ctxMenu) return;
+    const [, db, schema] = ctxMenu.nodeKey.split(":");
+    setCtxMenu(null);
+    setExportModal({ db, schema, table: "" });
+  };
+
+  const openSchemaImportModal = () => {
+    if (!ctxMenu) return;
+    const [, db, schema] = ctxMenu.nodeKey.split(":");
+    setCtxMenu(null);
+    setImportModal({ db, schema, table: "" });
+  };
+
   const openBackupSets = () => {
     if (!ctxMenu) return;
     const { nodeKey, nodeType } = ctxMenu;
@@ -1222,6 +1236,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)
           ))}
           {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
+          {ctxMenu.nodeType === "schema" && menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openSchemaExportModal)}
+          {ctxMenu.nodeType === "schema" && menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openSchemaImportModal)}
           {ctxMenu.nodeType === "schema" && menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets)}
           {ctxMenu.nodeType === "schema" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&

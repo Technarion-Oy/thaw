@@ -61,14 +61,14 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - Select the top 1,000 rows — opens a new tab and executes immediately
   - **Time Travel Query** — drag a timeline slider to query data at any past point within the retention window
   - **Export Data** — download table data as CSV, JSON, or Parquet via a temporary Snowflake stage
-  - **Import Data** — upload a local file into Snowflake; supports CSV, JSON, and Parquet; can create a new table automatically by inferring the schema
+  - **Import Data** — upload one or more local files into Snowflake; supports CSV, JSON, AVRO, ORC, and Parquet; exposes all Snowflake `FORMAT_TYPE_OPTIONS` with defaults pre-filled; can create a new table automatically by inferring the schema
   - **Insert Full Name** — insert the fully-qualified `"DB"."SCHEMA"."OBJECT"` identifier at the cursor
   - View DDL definition inline
   - **Rename** the object
   - **Drop** the object (with confirmation)
   - **Select for Comparison** / **Compare with** — side-by-side DDL diff (see [Text Comparison](#text-comparison))
 - **Right-click a database** to export its DDL, generate an ER Diagram, view dropped schemas recoverable via Time Travel, or open **Backup Sets…**
-- **Right-click a schema** to view dropped tables, open **Backup Sets…**, or use the **Create Object** cascading submenu (opens left or right depending on available screen space); currently contains **Task…** to create a new Snowflake Task
+- **Right-click a schema** to view dropped tables, **Export Data…** or **Import Data…** without needing an existing table (schema-level launch opens the same modals with a table selector or name field), open **Backup Sets…**, or use the **Create Object** cascading submenu (opens left or right depending on available screen space); currently contains **Task…** to create a new Snowflake Task
 - **Right-click a table** to open **Backup Sets…** (shows backup sets scoped to its schema)
 - **Drag and drop** — drag any table or view into the editor to insert a `SELECT` statement with all column names listed individually
 - **Empty table indicator** — table names with zero rows appear in a faded colour so unpopulated tables are immediately visible in the tree

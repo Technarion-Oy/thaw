@@ -145,7 +145,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - **Refresh** button (`↺`) in the sidebar header reloads the entire database tree from Snowflake
 - Right-click a **database** to refresh, export its DDL, **insert its name** at the editor cursor, generate an **ER Diagram**, **Show Dropped Schemas…**, or open **Backup Sets…** — lists schemas recoverable via Time Travel with an **Undrop** button for each
 - **Dropped Databases** button (`⏪`) in the sidebar header lists databases within their Time Travel retention window; click **Undrop** to restore any of them
-- Right-click a **schema** to browse dropped tables recoverable via Snowflake Time Travel, **insert its fully-qualified name** at the editor cursor, open the **Create Object** cascading submenu, or open **Backup Sets…**; the **Create Object** submenu currently contains **Task…** — opens a dialog to configure and generate a `CREATE OR REPLACE TASK` statement with:
+- Right-click a **schema** to browse dropped tables recoverable via Snowflake Time Travel, **insert its fully-qualified name** at the editor cursor, **Export Data…** or **Import Data…** (opens the same export/import modals with a table selector — no need to expand the schema first), open the **Create Object** cascading submenu, or open **Backup Sets…**; the **Create Object** submenu currently contains **Task…** — opens a dialog to configure and generate a `CREATE OR REPLACE TASK` statement with:
   - Compute: warehouse (searchable dropdown) or serverless with initial warehouse size
   - Schedule: none, fixed interval (seconds/minutes/hours), or cron expression with timezone
   - Dependencies: predecessor tasks (AFTER), boolean condition (WHEN)
@@ -157,7 +157,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
   - Select the top 1 000 rows (tables and views) — opens in a new tab
   - **Time Travel Query…** (tables) — opens a dialog with a timeline slider spanning the table's full retention window; drag to choose a point in time and run `SELECT … AT(TIMESTAMP => …) LIMIT 1000` in a new tab
   - **Export Data…** (tables) — export table data to the local machine via a temporary internal Snowflake stage; choose format (CSV, JSON, PARQUET), compression, delimiter, header row, and output directory; the stage is dropped automatically after the download
-  - **Import Data…** (tables) — import a local file into a Snowflake table via a temporary internal stage; choose format (CSV, JSON, PARQUET) with format-specific options; the file picker filters to the selected format's extensions automatically; supports two modes:
+  - **Import Data…** (tables) — import one or more local files into a Snowflake table via a temporary internal stage; supports CSV, JSON, AVRO, ORC, and PARQUET; all Snowflake `FORMAT_TYPE_OPTIONS` are exposed with defaults pre-filled in a collapsible panel; the file picker filters to the selected format's extensions; supports two modes:
     - **Import into existing table** — optionally truncate before loading (overwrite mode)
     - **Create new table from data** — derives the schema from the file using `INFER_SCHEMA` (CSV with headers and PARQUET) or creates a `VARIANT` column table (JSON); the object browser refreshes automatically on success
   - Call the procedure with auto-generated parameter fields (procedures) — opens a parameter dialog; clicking **Execute** opens a new tab with the generated `CALL` statement and runs it immediately
@@ -487,7 +487,7 @@ thaw/
     │       ├── export/
     │       │   ├── ExportPanel.tsx         # DDL export panel
     │       │   ├── ExportTableModal.tsx    # Table data export dialog (CSV/JSON/PARQUET)
-    │       │   └── ImportTableModal.tsx    # Table data import dialog (CSV/JSON/PARQUET)
+    │       │   └── ImportTableModal.tsx    # Table data import dialog (CSV/JSON/AVRO/ORC/PARQUET)
     │       ├── files/FileBrowser.tsx
     │       ├── git/
     │       │   ├── GitPanel.tsx

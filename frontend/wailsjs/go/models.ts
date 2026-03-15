@@ -931,6 +931,78 @@ export namespace snowflake {
 	        this.outputDir = source["outputDir"];
 	    }
 	}
+	export class FormatTypeOptions {
+	    compression: string;
+	    trimSpace: boolean;
+	    replaceInvalidCharacters: boolean;
+	    nullIf: string[];
+	    dateFormat: string;
+	    timeFormat: string;
+	    timestampFormat: string;
+	    binaryFormat: string;
+	    fileExtension: string;
+	    multiLine: boolean;
+	    skipByteOrderMark: boolean;
+	    ignoreUtf8Errors: boolean;
+	    recordDelimiter: string;
+	    fieldDelimiter: string;
+	    parseHeader: boolean;
+	    skipHeader: number;
+	    skipBlankLines: boolean;
+	    escape: string;
+	    escapeUnenclosedField: string;
+	    fieldOptionallyEnclosedBy: string;
+	    errorOnColumnCountMismatch: boolean;
+	    emptyFieldAsNull: boolean;
+	    encoding: string;
+	    enableOctal: boolean;
+	    allowDuplicate: boolean;
+	    stripOuterArray: boolean;
+	    stripNullValues: boolean;
+	    snappyCompression: boolean;
+	    binaryAsText: boolean;
+	    useLogicalType: boolean;
+	    useVectorizedScanner: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new FormatTypeOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.compression = source["compression"];
+	        this.trimSpace = source["trimSpace"];
+	        this.replaceInvalidCharacters = source["replaceInvalidCharacters"];
+	        this.nullIf = source["nullIf"];
+	        this.dateFormat = source["dateFormat"];
+	        this.timeFormat = source["timeFormat"];
+	        this.timestampFormat = source["timestampFormat"];
+	        this.binaryFormat = source["binaryFormat"];
+	        this.fileExtension = source["fileExtension"];
+	        this.multiLine = source["multiLine"];
+	        this.skipByteOrderMark = source["skipByteOrderMark"];
+	        this.ignoreUtf8Errors = source["ignoreUtf8Errors"];
+	        this.recordDelimiter = source["recordDelimiter"];
+	        this.fieldDelimiter = source["fieldDelimiter"];
+	        this.parseHeader = source["parseHeader"];
+	        this.skipHeader = source["skipHeader"];
+	        this.skipBlankLines = source["skipBlankLines"];
+	        this.escape = source["escape"];
+	        this.escapeUnenclosedField = source["escapeUnenclosedField"];
+	        this.fieldOptionallyEnclosedBy = source["fieldOptionallyEnclosedBy"];
+	        this.errorOnColumnCountMismatch = source["errorOnColumnCountMismatch"];
+	        this.emptyFieldAsNull = source["emptyFieldAsNull"];
+	        this.encoding = source["encoding"];
+	        this.enableOctal = source["enableOctal"];
+	        this.allowDuplicate = source["allowDuplicate"];
+	        this.stripOuterArray = source["stripOuterArray"];
+	        this.stripNullValues = source["stripNullValues"];
+	        this.snappyCompression = source["snappyCompression"];
+	        this.binaryAsText = source["binaryAsText"];
+	        this.useLogicalType = source["useLogicalType"];
+	        this.useVectorizedScanner = source["useVectorizedScanner"];
+	    }
+	}
 	export class ProcParam {
 	    name: string;
 	    dataType: string;
@@ -981,13 +1053,11 @@ export namespace snowflake {
 	    database: string;
 	    schema: string;
 	    table: string;
-	    filePath: string;
+	    filePaths: string[];
 	    format: string;
-	    delimiter: string;
-	    header: boolean;
-	    nullString: string;
 	    overwrite: boolean;
 	    createTable: boolean;
+	    options: FormatTypeOptions;
 	
 	    static createFrom(source: any = {}) {
 	        return new ImportTableParams(source);
@@ -998,14 +1068,30 @@ export namespace snowflake {
 	        this.database = source["database"];
 	        this.schema = source["schema"];
 	        this.table = source["table"];
-	        this.filePath = source["filePath"];
+	        this.filePaths = source["filePaths"];
 	        this.format = source["format"];
-	        this.delimiter = source["delimiter"];
-	        this.header = source["header"];
-	        this.nullString = source["nullString"];
 	        this.overwrite = source["overwrite"];
 	        this.createTable = source["createTable"];
+	        this.options = this.convertValues(source["options"], FormatTypeOptions);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class ImportTableResult {
 	    rowsLoaded: number;

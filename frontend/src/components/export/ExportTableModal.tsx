@@ -8,10 +8,10 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Modal, Select, Switch, Input, Button, Space, Typography, Spin, Segmented } from "antd";
 import { DownloadOutlined, FolderOpenOutlined, CheckCircleOutlined } from "@ant-design/icons";
-import { ExportTableData, PickDirectory } from "../../../wailsjs/go/main/App";
+import { ExportTableData, PickDirectory, ListObjects } from "../../../wailsjs/go/main/App";
 
 const { Text } = Typography;
 
@@ -68,6 +68,26 @@ export default function ExportTableModal({ db, schema, table, onClose }: Props) 
   const [exporting, setExporting]         = useState(false);
   const [error, setError]                 = useState<string | null>(null);
   const [result, setResult]               = useState<ExportResult | null>(null);
+  const [selectedTable, setSelectedTable] = useState(table);
+  const [tableOptions, setTableOptions]   = useState<string[]>([]);
+  const [loadingTables, setLoadingTables] = useState(false);
+
+  useEffect(() => {
+    if (table !== "") return;
+    setLoadingTables(true);
+    ListObjects(db, schema)
+      .then((objs) => {
+        const tables = objs
+          .filter((o) => o.kind?.toUpperCase() === "TABLE")
+          .map((o) => o.name)
+          .sort();
+        setTableOptions(tables);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingTables(false));
+  }, [db, schema, table]);
+
+  const effectiveTable = table || selectedTable;
 
   const changeFormat = (f: Format) => {
     setFormat(f);
@@ -87,14 +107,14 @@ export default function ExportTableModal({ db, schema, table, onClose }: Props) 
   const effectiveDelimiter = delimiter === "_custom_" ? customDelimiter : delimiter;
 
   const handleExport = async () => {
-    if (!outputDir) return;
+    if (!outputDir || !effectiveTable) return;
     setError(null);
     setExporting(true);
     try {
       const r = await ExportTableData({
         database:    db,
         schema,
-        table,
+        table:       effectiveTable,
         outputDir,
         format,
         compression,
@@ -121,9 +141,11 @@ export default function ExportTableModal({ db, schema, table, onClose }: Props) 
         <Space size={6}>
           <DownloadOutlined style={{ color: "var(--link)" }} />
           <span>Export table data</span>
-          <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
-            {db}.{schema}.{table}
-          </Text>
+          {effectiveTable && (
+            <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
+              {db}.{schema}.{effectiveTable}
+            </Text>
+          )}
         </Space>
       }
       onCancel={onClose}
@@ -137,7 +159,7 @@ export default function ExportTableModal({ db, schema, table, onClose }: Props) 
               type="primary"
               icon={<DownloadOutlined />}
               onClick={handleExport}
-              disabled={!outputDir || exporting}
+              disabled={!outputDir || !effectiveTable || exporting}
               loading={exporting}
             >
               Export
@@ -187,6 +209,23 @@ export default function ExportTableModal({ db, schema, table, onClose }: Props) 
       ) : (
         /* ── Options ── */
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          {/* Table selector (schema-level mode) */}
+          {table === "" && (
+            <div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>Table</div>
+              <Select
+                value={selectedTable || undefined}
+                onChange={setSelectedTable}
+                options={tableOptions.map((t) => ({ value: t, label: t }))}
+                placeholder="Select a table…"
+                style={{ width: "100%" }}
+                showSearch
+                loading={loadingTables}
+                notFoundContent={loadingTables ? <Spin size="small" /> : "No tables found"}
+              />
+            </div>
+          )}
+
           {/* Format */}
           <div>
             <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>Format</div>
