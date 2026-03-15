@@ -112,6 +112,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - **Copy output** — each output block has a copy button that writes the text to the native clipboard
 - **Inline plots** — matplotlib figures are captured as PNG images and rendered directly below the cell output; `plt.show()` works as expected without opening a separate window; the matplotlib `Agg` backend is configured automatically by the kernel; multiple figures per cell are supported
 - **Auto-created `session`** — a Snowpark `session` variable is automatically available in every Python cell, pre-configured with the same account, role, warehouse, database, and schema as the active app connection — no `Session.builder` boilerplate needed, matching the behaviour of Snowsight notebooks; supports password, key-pair (`snowflake_jwt`), Okta, and MFA authenticators; `externalbrowser` SSO requires manual session creation
+- **Session kept in sync** — whenever role, warehouse, database, or schema is changed via the toolbar dropdowns, the kernel's `session` object is automatically updated (`session.use_role()` / `session.use_warehouse()` / `session.use_database()` / `session.use_schema()`); switching to a notebook tab also triggers a sync so `session.sql("SELECT CURRENT_WAREHOUSE()").show()` and a SQL cell always return the same value
 
 #### SQL cells
 

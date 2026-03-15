@@ -248,13 +248,15 @@ export default function NotebookTab({ tabId }: Props) {
     setSql(json);
   }, [rawNb, setSql]);
 
-  const runCell = useCallback(async (cell: Cell) => {
+  const runCell = useCallback(async (cell: Cell, code?: string) => {
     if (cell.running) return;
+
+    const codeToRun = code ?? cell.source;
 
     if (cell.kind === "sql") {
       patchCell(cell.id, { running: true, sqlResult: null, outputs: [], images: [] });
       try {
-        const result = await RunNotebookSql(cell.source);
+        const result = await RunNotebookSql(codeToRun);
         setCells((prev) => {
           const updated = prev.map((c) =>
             c.id === cell.id
@@ -276,7 +278,7 @@ export default function NotebookTab({ tabId }: Props) {
     if (!kernelReady) return;
     patchCell(cell.id, { running: true, outputs: [], images: [], sqlResult: null });
     try {
-      const out = await RunNotebookCell(tabId, cell.source);
+      const out = await RunNotebookCell(tabId, codeToRun);
       const outputs: CellOutput[] = [];
       if (out.stdout) outputs.push({ type: "stdout", text: out.stdout });
       if (out.stderr) outputs.push({ type: "stderr", text: out.stderr });
@@ -471,7 +473,7 @@ export default function NotebookTab({ tabId }: Props) {
             border={border}
             bgRaised={bgRaised}
             textMuted={textMuted}
-            onRun={() => runCell(cell)}
+            onRun={(code) => runCell(cell, code)}
             onDelete={() => deleteCell(cell.id)}
             onMoveUp={() => moveCell(cell.id, -1)}
             onMoveDown={() => moveCell(cell.id, 1)}
@@ -570,7 +572,7 @@ interface CellViewProps {
   border: string;
   bgRaised: string;
   textMuted: string;
-  onRun: () => void;
+  onRun: (code?: string) => void;
   onDelete: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
@@ -610,10 +612,19 @@ function CellView({
     editor.onDidFocusEditorWidget(() => setFocused(true));
     editor.onDidBlurEditorWidget(() => setFocused(false));
 
-    // Shift+Enter to run.
+    // Shift+Enter: run selection if text is selected, otherwise run full cell.
     editor.addCommand(
       monaco.KeyMod.Shift | monaco.KeyCode.Enter,
-      () => { if (cell.kind !== "markdown") onRunRef.current(); },
+      () => {
+        if (cell.kind === "markdown") return;
+        const sel = editor.getSelection();
+        const model = editor.getModel();
+        if (sel && !sel.isEmpty() && model) {
+          onRunRef.current(model.getValueInRange(sel));
+        } else {
+          onRunRef.current();
+        }
+      },
     );
 
     // WKWebView clipboard fix — same pattern as SqlEditor.
@@ -744,13 +755,13 @@ function CellView({
           <div style={{ flex: 1 }} />
 
           {/* Actions */}
-          <Tooltip title="Run cell (Shift+Enter)">
+          <Tooltip title="Run cell (Shift+Enter) · Run selection (select text, then Shift+Enter)">
             <Button
               type="text"
               size="small"
               icon={cell.running ? <Spin size="small" /> : <PlayCircleOutlined />}
               disabled={cell.kind === "markdown" || (cell.kind === "code" && !kernelReady)}
-              onClick={onRun}
+              onClick={() => onRun()}
               style={{ color: accentColor }}
             />
           </Tooltip>

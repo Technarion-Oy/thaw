@@ -1086,6 +1086,58 @@ func (a *App) RunNotebookCell(tabId string, code string) (NotebookCellOutput, er
 	return out, nil
 }
 
+// NotebookUseContext sends USE statements to the running Snowpark kernel for a
+// notebook tab so the session matches the tab's role/warehouse/database/schema.
+// Returns nil immediately if no kernel is running for tabId or all params are empty.
+func (a *App) NotebookUseContext(tabId, role, warehouse, database, schema string) error {
+	if role == "" && warehouse == "" && database == "" && schema == "" {
+		return nil
+	}
+	val, ok := notebookSessions.Load(tabId)
+	if !ok {
+		return nil // no kernel running — silently ignore
+	}
+	s := val.(*notebookSession)
+
+	escape := func(v string) string {
+		return strings.ReplaceAll(v, "'", "\\'")
+	}
+
+	lines := []string{"if 'session' in globals():", "    _s = globals()['session']"}
+	if role != "" {
+		lines = append(lines, fmt.Sprintf("    _s.use_role('%s')", escape(role)))
+	}
+	if warehouse != "" {
+		lines = append(lines, fmt.Sprintf("    _s.use_warehouse('%s')", escape(warehouse)))
+	}
+	if database != "" {
+		lines = append(lines, fmt.Sprintf("    _s.use_database('%s')", escape(database)))
+	}
+	if schema != "" {
+		lines = append(lines, fmt.Sprintf("    _s.use_schema('%s')", escape(schema)))
+	}
+	code := strings.Join(lines, "\n")
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, err := fmt.Fprintf(s.stdin, "%s\n%s\n", code, kernelRunMarker); err != nil {
+		return fmt.Errorf("write to kernel: %w", err)
+	}
+
+	// Drain stdout until the sentinel (discard output).
+	for {
+		line, err := s.stdout.ReadString('\n')
+		if err != nil {
+			return fmt.Errorf("read from kernel: %w", err)
+		}
+		if strings.TrimRight(line, "\n\r") == kernelSentinel {
+			break
+		}
+	}
+	return nil
+}
+
 // StopNotebookSession kills the Python kernel for a notebook tab.
 func (a *App) StopNotebookSession(tabId string) error {
 	val, ok := notebookSessions.LoadAndDelete(tabId)

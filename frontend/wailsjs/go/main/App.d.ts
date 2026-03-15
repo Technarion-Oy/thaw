@@ -173,6 +173,8 @@ export function LoadSnowflakeCLIConfig():Promise<sfconfig.Config>;
 
 export function NewNotebook():Promise<string>;
 
+export function NotebookUseContext(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
+
 export function PickDataFile():Promise<string>;
 
 export function PickDataFileByFormat(arg1:string):Promise<string>;

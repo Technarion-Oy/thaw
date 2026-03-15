@@ -330,6 +330,10 @@ export function NewNotebook() {
   return window['go']['main']['App']['NewNotebook']();
 }
 
+export function NotebookUseContext(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['NotebookUseContext'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function PickDataFile() {
   return window['go']['main']['App']['PickDataFile']();
 }

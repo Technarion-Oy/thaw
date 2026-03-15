@@ -14,7 +14,7 @@ import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip,
 import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NewNotebook } from "../../wailsjs/go/main/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NewNotebook, NotebookUseContext } from "../../wailsjs/go/main/App";
 import type { main } from "../../wailsjs/go/models";
 import SessionPropertiesModal from "../components/common/SessionPropertiesModal";
 import SnippetsModal from "../components/snippets/SnippetsModal";
@@ -105,10 +105,17 @@ export default function QueryPage() {
   useEffect(() => { setSplitPct(editorSplit); }, [editorSplit]);
   useEffect(() => { setSplitW(splitEditorWidth); }, [splitEditorWidth]);
 
-  // Load current role/warehouse on mount
+  // Load current role/warehouse on mount.
   useEffect(() => {
     loadContext();
   }, []);
+
+  // Keep the Snowpark kernel in sync with the shared session whenever role,
+  // warehouse, database or schema changes, or when switching to a notebook tab.
+  useEffect(() => {
+    if (!isNotebookTab) return;
+    NotebookUseContext(activeTabId, role, warehouse, database, schema).catch(() => {});
+  }, [role, warehouse, database, schema, activeTabId]);
 
   // Load AI config on mount
   useEffect(() => {
