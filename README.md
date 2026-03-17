@@ -116,17 +116,21 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - **Copy output** — each output block has a copy button that writes the text to the native clipboard
 - **Inline plots** — matplotlib figures are captured as PNG images and rendered directly below the cell output; `plt.show()` works as expected without opening a separate window; the matplotlib `Agg` backend is configured automatically by the kernel; multiple figures per cell are supported
 - **Auto-connected Snowpark session** — a Snowpark session is automatically created on kernel startup using the same account, role, warehouse, database, and schema as the active app connection; the session registers itself as the active session so `get_active_session()` (from `snowflake.snowpark.context`) works in every Python cell without any `Session.builder` boilerplate — matching the behaviour of Snowflake's native notebooks; supports password, key-pair (`snowflake_jwt`), Okta, and MFA authenticators; `externalbrowser` SSO requires manual session creation; session init errors are surfaced in the first cell's stderr rather than silently swallowed
-- **Session kept in sync** — whenever role, warehouse, database, or schema is changed via the toolbar dropdowns, `get_active_session()` is used to apply the update to the live kernel session (`use_role()` / `use_warehouse()` / `use_database()` / `use_schema()`); switching to a notebook tab also triggers a sync so `get_active_session().sql("SELECT CURRENT_WAREHOUSE()").collect()` and a SQL cell always return the same value
+- **Session kept in sync — bidirectional** — whenever role, warehouse, database, or schema is changed via the toolbar dropdowns, `get_active_session()` is used to apply the update to the live kernel session; switching to a notebook tab also triggers a sync; conversely, when a Python or SQL cell runs a `USE` command the change is propagated back to the main connection and all four toolbar dropdowns update automatically — so `get_active_session().sql("SELECT CURRENT_DATABASE()").collect()` and a SQL cell always return the same value
+- **DDL executes immediately** — `session.sql("USE DATABASE X")` takes effect without an explicit `.collect()` call, matching Snowflake native notebook behaviour; USE, CREATE, ALTER, DROP, TRUNCATE, COMMENT, GRANT, and REVOKE statements are auto-collected on the session instance at startup
 - **Python intellisense** — powered by [Jedi](https://jedi.readthedocs.io/) running inside the live kernel subprocess, giving runtime-aware completions and documentation in every code cell:
   - **Autocomplete** — triggered by `.` or `Ctrl+Space`; completions are sourced from the kernel's live namespace so variables and objects defined in earlier cells are fully reflected (e.g. `df.` on a Pandas DataFrame shows all DataFrame methods); completion items display the kind icon (function, class, module, keyword, variable, …), the fully-qualified name as detail, and the raw docstring in a documentation popover; up to 200 items are returned per request
   - **Hover documentation** — move the cursor over any name to see its documentation tooltip; function calls show the full signature with parameter names and types first, followed by the docstring; for other names the fully-qualified name and docstring are shown; content is fetched live from the kernel on each hover
 
 #### SQL cells
 
-- SQL cells execute directly against the **active Snowflake connection** — no kernel required
+- SQL cells execute through the **Snowpark kernel session** — the same session Python cells use — so `USE` commands in SQL cells affect Python cells and vice versa, and `SELECT CURRENT_DATABASE()` always returns the same value in both cell types
+- SQL is split into individual statements by a parser that correctly handles `--` line comments, `/* */` block comments, single-quoted strings, and `$$`-dollar-quoted strings; each statement runs in order and the last result is displayed
+- **Run selection** — if text is selected in a SQL cell, only the selected SQL is sent for execution
 - Results are rendered in a **sticky-header scrollable table** (up to 1 000 rows displayed)
-- DDL / DML statements with no result set show an "OK — N rows affected · queryID" line
-- `Shift+Enter` runs the SQL and displays the result inline below the cell
+- DDL / DML statements with no result set show an "OK — N rows affected" line
+- `Shift+Enter` runs the SQL (or selection) and displays the result inline below the cell
+- `USE DATABASE X;` in a SQL cell updates the toolbar dropdowns and the Python session automatically
 
 #### Notebook management
 

@@ -418,6 +418,10 @@ export function RunNotebookCell(arg1, arg2) {
   return window['go']['main']['App']['RunNotebookCell'](arg1, arg2);
 }
 
+export function RunNotebookCellSql(arg1, arg2) {
+  return window['go']['main']['App']['RunNotebookCellSql'](arg1, arg2);
+}
+
 export function RunNotebookSql(arg1) {
   return window['go']['main']['App']['RunNotebookSql'](arg1);
 }

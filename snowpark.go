@@ -36,6 +36,7 @@ const kernelSentinel       = "<<<THAW_CELL_DONE>>>"
 const kernelRunMarker      = "<<<THAW_RUN>>>"
 const kernelCompleteMarker = "<<<THAW_COMPLETE>>>"
 const kernelHoverMarker    = "<<<THAW_HOVER>>>"
+const kernelSqlMarker      = "<<<THAW_SQL>>>"
 
 // kernelPyScript is a minimal stateful Python kernel.  It reads code blocks
 // from stdin (terminated by kernelRunMarker), executes them in a shared
@@ -56,6 +57,13 @@ try:
     warnings.filterwarnings("ignore", message="FigureCanvasAgg is non-interactive")
 except Exception:
     pass
+
+import re as _re
+# DDL pattern: statements that should execute immediately (no lazy .collect() needed).
+_THAW_DDL_RE = _re.compile(
+    r'^\s*(USE|CREATE|ALTER|DROP|TRUNCATE|COMMENT|GRANT|REVOKE)\b',
+    _re.IGNORECASE,
+)
 
 g = {}
 
@@ -111,7 +119,23 @@ def _thaw_create_session(ns):
         # that would corrupt the stdin/stdout protocol.
         _old_out, sys.stdout = sys.stdout, io.StringIO()
         try:
-            _Session.builder.configs(cfg).create()
+            _sess = _Session.builder.configs(cfg).create()
+            # Store original sql() before patching so _thaw_run_sql_cell can
+            # call it directly and avoid double-executing DDL statements.
+            _orig_sql = _sess.sql
+            ns['_thaw_orig_session_sql'] = _orig_sql
+            # Patch instance-level sql() so DDL/USE statements execute
+            # immediately without an explicit .collect(), matching Snowflake
+            # native notebook behaviour.
+            def _auto_collect_sql(_query, *_a, **_kw):
+                _df = _orig_sql(_query, *_a, **_kw)
+                if _THAW_DDL_RE.match(_query.strip()):
+                    try:
+                        _df.collect()
+                    except Exception:
+                        pass
+                return _df
+            _sess.sql = _auto_collect_sql
         finally:
             sys.stdout = _old_out
     except Exception as _e:
@@ -127,6 +151,7 @@ del _thaw_create_session
 # ── Intellisense protocol markers ─────────────────────────────────────────────
 COMPLETE_MARKER = "<<<THAW_COMPLETE>>>"
 HOVER_MARKER    = "<<<THAW_HOVER>>>"
+SQL_MARKER      = "<<<THAW_SQL>>>"
 
 def _thaw_handle_complete(req_json):
     """Return jedi completions as JSON, using the live kernel namespace."""
@@ -209,6 +234,97 @@ def _capture_figures():
         pass
     return images
 
+def _thaw_get_session_context():
+    """Return current Snowpark session context (role/warehouse/database/schema)."""
+    try:
+        from snowflake.snowpark.context import get_active_session as _gas
+        _s = _gas()
+        _v = lambda x: (x or "")
+        return {
+            "role":      _v(_s.get_current_role()),
+            "warehouse": _v(_s.get_current_warehouse()),
+            "database":  _v(_s.get_current_database()),
+            "schema":    _v(_s.get_current_schema()),
+        }
+    except Exception:
+        return {}
+
+def _thaw_split_sql(sql):
+    """Split SQL into statements on ';', respecting strings and comments."""
+    stmts, buf, i, n = [], [], 0, len(sql)
+    while i < n:
+        ch = sql[i]
+        if ch == '-' and i+1 < n and sql[i+1] == '-':          # line comment
+            end = sql.find('\n', i)
+            buf.append(sql[i:] if end < 0 else sql[i:end+1])
+            i = n if end < 0 else end+1
+        elif ch == '/' and i+1 < n and sql[i+1] == '*':        # block comment
+            end = sql.find('*/', i+2)
+            buf.append(sql[i:] if end < 0 else sql[i:end+2])
+            i = n if end < 0 else end+2
+        elif ch == "'":                                          # single-quoted string
+            j = i+1
+            while j < n:
+                if sql[j] == "'" and j+1 < n and sql[j+1] == "'": j += 2
+                elif sql[j] == "'": j += 1; break
+                else: j += 1
+            buf.append(sql[i:j]); i = j
+        elif ch == '$' and i+1 < n and sql[i+1] == '$':        # dollar-quoted string
+            end = sql.find('$$', i+2)
+            buf.append(sql[i:] if end < 0 else sql[i:end+2])
+            i = n if end < 0 else end+2
+        elif ch == ';':
+            s = ''.join(buf).strip()
+            if s: stmts.append(s)
+            buf = []; i += 1
+        else:
+            buf.append(ch); i += 1
+    s = ''.join(buf).strip()
+    if s: stmts.append(s)
+    return stmts
+
+def _thaw_run_sql_cell(sql_str):
+    """Run sql_str via the active Snowpark session; returns JSON with columns/rows/error/session_context."""
+    import json as _json
+    def _jval(v):
+        if v is None: return None
+        import decimal as _dec, datetime as _dt
+        if isinstance(v, _dec.Decimal): return float(v)
+        if isinstance(v, (_dt.datetime, _dt.date, _dt.time)): return str(v)
+        if isinstance(v, (int, float, bool, str)): return v
+        return str(v)
+
+    # Use the original (unpatched) sql() to avoid double-collecting DDL.
+    _sql_fn = g.get('_thaw_orig_session_sql')
+    if _sql_fn is None:
+        try:
+            from snowflake.snowpark.context import get_active_session as _gas
+            _sql_fn = _gas().sql
+        except Exception as _e:
+            return _json.dumps({"columns": [], "rows": [], "rowCount": 0,
+                                "error": "No active session: " + str(_e),
+                                "session_context": _thaw_get_session_context()})
+
+    stmts = _thaw_split_sql(sql_str)
+    last = {"columns": [], "rows": [], "rowCount": 0, "error": None}
+    for _stmt in stmts:
+        _stmt = _stmt.strip()
+        if not _stmt:
+            continue
+        try:
+            _df = _sql_fn(_stmt)
+            _rows = _df.collect()
+            last = {
+                "columns": [f.name for f in _df.schema.fields],
+                "rows":    [[_jval(v) for v in r] for r in _rows],
+                "rowCount": len(_rows),
+                "error": None,
+            }
+        except Exception as _ex:
+            last = {"columns": [], "rows": [], "rowCount": 0, "error": str(_ex)}
+    last["session_context"] = _thaw_get_session_context()
+    return _json.dumps(last)
+
 while True:
     lines = []
     while True:
@@ -221,13 +337,17 @@ while True:
 
     code = "".join(lines)
 
-    # ── Intellisense requests ──────────────────────────────────────────────────
+    # ── Protocol requests ─────────────────────────────────────────────────────
     if code.startswith(COMPLETE_MARKER + "\n"):
         print(_thaw_handle_complete(code[len(COMPLETE_MARKER) + 1:]), flush=True)
         print(SENTINEL, flush=True)
         continue
     if code.startswith(HOVER_MARKER + "\n"):
         print(_thaw_handle_hover(code[len(HOVER_MARKER) + 1:]), flush=True)
+        print(SENTINEL, flush=True)
+        continue
+    if code.startswith(SQL_MARKER + "\n"):
+        print(_thaw_run_sql_cell(code[len(SQL_MARKER) + 1:]), flush=True)
         print(SENTINEL, flush=True)
         continue
 
@@ -249,7 +369,7 @@ while True:
         sys.stderr = old_err
 
     images = _capture_figures()
-    result = {"stdout": buf_out.getvalue(), "stderr": buf_err.getvalue(), "error": err_info, "images": images}
+    result = {"stdout": buf_out.getvalue(), "stderr": buf_err.getvalue(), "error": err_info, "images": images, "session_context": _thaw_get_session_context()}
     print(json.dumps(result), flush=True)
     print(SENTINEL, flush=True)
 `
@@ -285,12 +405,23 @@ type PythonInfo struct {
 	Version string `json:"version"`
 }
 
+// NotebookSessionContext captures the Snowpark session state returned by the
+// Python kernel after each cell execution.  When any field changes it means
+// the user's cell ran a USE command (e.g. session.sql("USE DATABASE X")).
+type NotebookSessionContext struct {
+	Role      string `json:"role"`
+	Warehouse string `json:"warehouse"`
+	Database  string `json:"database"`
+	Schema    string `json:"schema"`
+}
+
 // NotebookCellOutput is the result of running a single notebook cell.
 type NotebookCellOutput struct {
-	Stdout string   `json:"stdout"`
-	Stderr string   `json:"stderr"`
-	Error  string   `json:"error"`
-	Images []string `json:"images"` // base64-encoded PNG figures (e.g. matplotlib plots)
+	Stdout          string                  `json:"stdout"`
+	Stderr          string                  `json:"stderr"`
+	Error           string                  `json:"error"`
+	Images          []string                `json:"images"`          // base64-encoded PNG figures (e.g. matplotlib plots)
+	SessionContext  *NotebookSessionContext  `json:"session_context"` // current kernel session state
 }
 
 // NotebookSqlResult is returned by RunNotebookSql.
@@ -319,10 +450,11 @@ type NotebookCompletion struct {
 // ─── kernel session management ────────────────────────────────────────────────
 
 type notebookSession struct {
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout *bufio.Reader
-	mu     sync.Mutex
+	cmd     *exec.Cmd
+	stdin   io.WriteCloser
+	stdout  *bufio.Reader
+	mu      sync.Mutex
+	lastCtx NotebookSessionContext // last known kernel session context
 }
 
 var (
@@ -1130,10 +1262,24 @@ func (a *App) StartNotebookSession(tabId string) error {
 		return fmt.Errorf("kernel start: %w", err)
 	}
 
+	// Capture the current main-connection context so we can detect drift later.
+	var initCtx NotebookSessionContext
+	if a.client != nil {
+		if sc, err := a.client.GetSessionContext(a.ctx); err == nil {
+			initCtx = NotebookSessionContext{
+				Role:      sc.Role,
+				Warehouse: sc.Warehouse,
+				Database:  sc.Database,
+				Schema:    sc.Schema,
+			}
+		}
+	}
+
 	notebookSessions.Store(tabId, &notebookSession{
-		cmd:    cmd,
-		stdin:  stdin,
-		stdout: bufio.NewReader(stdout),
+		cmd:     cmd,
+		stdin:   stdin,
+		stdout:  bufio.NewReader(stdout),
+		lastCtx: initCtx,
 	})
 	return nil
 }
@@ -1174,7 +1320,103 @@ func (a *App) RunNotebookCell(tabId string, code string) (NotebookCellOutput, er
 			out.Stdout = lastJSON
 		}
 	}
+
+	// Sync session context changes back to the main connection (see syncKernelContext).
+	a.syncKernelContext(s, out.SessionContext)
+
 	return out, nil
+}
+
+// syncKernelContext compares a newly-returned kernel context against the last
+// known context stored in s, applies any USE commands to the main connection,
+// emits a context-changed event when something changed, and updates s.lastCtx.
+// The caller must hold s.mu.
+func (a *App) syncKernelContext(s *notebookSession, ctx *NotebookSessionContext) {
+	if ctx == nil {
+		return
+	}
+	strip := func(v string) string { return strings.Trim(v, `"`) }
+	newCtx := NotebookSessionContext{
+		Role:      strip(ctx.Role),
+		Warehouse: strip(ctx.Warehouse),
+		Database:  strip(ctx.Database),
+		Schema:    strip(ctx.Schema),
+	}
+	oldCtx := NotebookSessionContext{
+		Role:      strip(s.lastCtx.Role),
+		Warehouse: strip(s.lastCtx.Warehouse),
+		Database:  strip(s.lastCtx.Database),
+		Schema:    strip(s.lastCtx.Schema),
+	}
+	if newCtx != oldCtx && a.client != nil {
+		if newCtx.Role != oldCtx.Role && newCtx.Role != "" {
+			_, _ = a.client.Execute(a.ctx, fmt.Sprintf("USE ROLE %s", newCtx.Role))
+		}
+		if newCtx.Warehouse != oldCtx.Warehouse && newCtx.Warehouse != "" {
+			_, _ = a.client.Execute(a.ctx, fmt.Sprintf("USE WAREHOUSE %s", newCtx.Warehouse))
+		}
+		if newCtx.Database != oldCtx.Database && newCtx.Database != "" {
+			_, _ = a.client.Execute(a.ctx, fmt.Sprintf("USE DATABASE %s", newCtx.Database))
+		}
+		if newCtx.Schema != oldCtx.Schema && newCtx.Schema != "" {
+			_, _ = a.client.Execute(a.ctx, fmt.Sprintf("USE SCHEMA %s", newCtx.Schema))
+		}
+		s.lastCtx = newCtx
+		wailsruntime.EventsEmit(a.ctx, "notebook:session:context:changed", newCtx)
+	} else {
+		s.lastCtx = newCtx
+	}
+}
+
+// RunNotebookCellSql executes SQL via the active Snowpark kernel session for the
+// given notebook tab so that SQL cells share context with Python cells (USE,
+// role/warehouse changes, etc.).  Falls back to the main connection when no
+// kernel is running.
+func (a *App) RunNotebookCellSql(tabId, sql string) (NotebookSqlResult, error) {
+	val, ok := notebookSessions.Load(tabId)
+	if !ok {
+		// No kernel — fall back to main connection.
+		return a.RunNotebookSql(sql)
+	}
+	s := val.(*notebookSession)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	payload := fmt.Sprintf("%s\n%s\n%s\n", kernelSqlMarker, sql, kernelRunMarker)
+	resultJSON, err := kernelRPC(s, payload)
+	if err != nil {
+		return NotebookSqlResult{}, err
+	}
+
+	var raw struct {
+		Columns        []string               `json:"columns"`
+		Rows           [][]any                `json:"rows"`
+		RowCount       int64                  `json:"rowCount"`
+		Error          *string                `json:"error"`
+		QueryID        string                 `json:"queryID"`
+		SessionContext *NotebookSessionContext `json:"session_context"`
+	}
+	if resultJSON != "" {
+		if err := json.Unmarshal([]byte(resultJSON), &raw); err != nil {
+			return NotebookSqlResult{}, fmt.Errorf("kernel SQL result: %w", err)
+		}
+	}
+	if raw.Error != nil && *raw.Error != "" {
+		return NotebookSqlResult{}, fmt.Errorf("%s", *raw.Error)
+	}
+
+	a.syncKernelContext(s, raw.SessionContext)
+
+	rows := raw.Rows
+	if rows == nil {
+		rows = [][]any{}
+	}
+	return NotebookSqlResult{
+		Columns:  raw.Columns,
+		Rows:     rows,
+		RowCount: raw.RowCount,
+		QueryID:  raw.QueryID,
+	}, nil
 }
 
 // NotebookUseContext sends USE statements to the running Snowpark kernel for a

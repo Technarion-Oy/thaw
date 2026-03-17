@@ -217,6 +217,8 @@ export function RestoreFromBackup(arg1:string,arg2:string,arg3:string,arg4:strin
 
 export function RunNotebookCell(arg1:string,arg2:string):Promise<main.NotebookCellOutput>;
 
+export function RunNotebookCellSql(arg1:string,arg2:string):Promise<main.NotebookSqlResult>;
+
 export function RunNotebookSql(arg1:string):Promise<main.NotebookSqlResult>;
 
 export function SaveAIConfig(arg1:config.AIConfig):Promise<void>;

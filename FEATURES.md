@@ -339,16 +339,20 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - Output shows stdout, stderr, and tracebacks in colour-coded blocks with a per-block copy button
 - **Inline plots** — matplotlib figures (e.g. from `plt.show()`) are captured as PNG images after each cell run and rendered inline below the cell output; no separate window opens; the kernel automatically configures the `Agg` backend on startup; multiple figures per cell are each rendered in order
 - **Auto-connected Snowpark session** — a Snowpark session is automatically created on kernel startup using the same account, role, warehouse, database, and schema as the active app connection; `get_active_session()` (from `snowflake.snowpark.context`) works in every Python cell with no `Session.builder` boilerplate — matching Snowflake's native notebook behaviour; session init errors (e.g. wrong credentials or missing private key) are surfaced in the first cell's stderr
-- **Session kept in sync** — changing role, warehouse, database, or schema via the toolbar automatically applies the change to the kernel session via `get_active_session()`; switching to a notebook tab also triggers a sync, so `get_active_session().sql("SELECT CURRENT_WAREHOUSE()").collect()` and a SQL cell always agree
+- **Session kept in sync — bidirectional** — changing role, warehouse, database, or schema via the toolbar automatically applies the change to the kernel session via `get_active_session()`; switching to a notebook tab also triggers a sync; conversely, when a Python or SQL cell runs a `USE` command the change propagates back to the main connection and all four toolbar dropdowns update automatically — Python and SQL cells always see the same session state
+- **DDL executes immediately** — `session.sql("USE DATABASE X")` takes effect without an explicit `.collect()` call, matching Snowflake native notebook behaviour; USE, CREATE, ALTER, DROP, TRUNCATE, COMMENT, GRANT, and REVOKE are auto-collected on the session instance at startup
 - **Python intellisense** — [Jedi](https://jedi.readthedocs.io/)-powered completions and hover documentation in every code cell, sourced from the running kernel so the live namespace (all variables defined in previous cells) is available:
   - **Autocomplete** — trigger with `.` or `Ctrl+Space`; shows function, class, module, keyword, variable, and property completions with kind icons, fully-qualified name detail, and docstring popovers; runtime-aware so `df.` on a Pandas DataFrame shows all DataFrame methods
   - **Hover documentation** — hover any name to see its signature and docstring; function calls show the full parameter signature first; content is fetched from the kernel on demand
 
 ### SQL cells
 
-- SQL cells execute directly against the **active Snowflake connection** — no Python kernel required
+- SQL cells execute through the **Snowpark kernel session** — the same session Python cells use — so `USE` commands in SQL cells affect Python cells and vice versa, and `SELECT CURRENT_DATABASE()` always returns the same value in both cell types
+- SQL is split into individual statements by a parser that handles `--` line comments, `/* */` block comments, single-quoted strings, and `$$`-dollar-quoted strings; each statement runs in order and the last result is displayed
+- **Run selection** — if text is selected in a SQL cell, only the selected SQL is executed
+- `USE DATABASE X;` in a SQL cell updates the toolbar dropdowns and the Python session automatically
 - Results render in a **sticky-header scrollable table** (up to 1 000 rows)
-- DDL / DML with no result set shows "OK — N rows affected · queryID"
+- DDL / DML with no result set shows "OK — N rows affected"
 
 ### Notebook management
 

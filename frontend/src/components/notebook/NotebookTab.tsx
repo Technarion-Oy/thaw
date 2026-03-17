@@ -26,7 +26,7 @@ import {
 import {
   StartNotebookSession,
   RunNotebookCell,
-  RunNotebookSql,
+  RunNotebookCellSql,
   StopNotebookSession,
   SaveNotebook,
   GetTableColumns,
@@ -34,7 +34,7 @@ import {
   GetNotebookHover,
 } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
-import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { ClipboardGetText, ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 
 // Install a document-level capture-phase Cmd+C handler that routes clipboard
 // writes through the Wails native API.  WKWebView blocks all web-content
@@ -61,6 +61,7 @@ function installCopyHandler(containerEl: HTMLElement): () => void {
 }
 import { useQueryStore } from "../../store/queryStore";
 import { useThemeStore } from "../../store/themeStore";
+import { useSessionStore } from "../../store/sessionStore";
 import DeployNotebookModal from "./DeployNotebookModal";
 
 const { Text } = Typography;
@@ -199,9 +200,10 @@ export default function NotebookTab({ tabId }: Props) {
   const resolved = useThemeStore((s) => s.resolved);
   const isDark   = resolved === "dark";
 
-  const tab       = useQueryStore((s) => s.tabs.find((t) => t.id === tabId));
-  const setSql    = useQueryStore((s) => s.setSql);
-  const markSaved = useQueryStore((s) => s.markSaved);
+  const tab         = useQueryStore((s) => s.tabs.find((t) => t.id === tabId));
+  const setSql      = useQueryStore((s) => s.setSql);
+  const markSaved   = useQueryStore((s) => s.markSaved);
+  const loadContext = useSessionStore((s) => s.loadContext);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -245,6 +247,16 @@ export default function NotebookTab({ tabId }: Props) {
     return () => { StopNotebookSession(tabId).catch(() => {}); };
   }, [tabId]);
 
+  // ── sync session context changes from Python cells back to the toolbar ────
+  // When a Python cell runs session.sql("USE DATABASE X"), the Go backend syncs
+  // the change to the main connection and emits this event so the toolbar reflects it.
+  useEffect(() => {
+    const off = EventsOn("notebook:session:context:changed", () => {
+      loadContext();
+    });
+    return off;
+  }, [loadContext]);
+
   // ── helpers ───────────────────────────────────────────────────────────────
 
   const patchCell = useCallback((id: string, patch: Partial<Cell>) => {
@@ -264,7 +276,7 @@ export default function NotebookTab({ tabId }: Props) {
     if (cell.kind === "sql") {
       patchCell(cell.id, { running: true, sqlResult: null, outputs: [], images: [] });
       try {
-        const result = await RunNotebookSql(codeToRun);
+        const result = await RunNotebookCellSql(tabId, codeToRun);
         setCells((prev) => {
           const updated = prev.map((c) =>
             c.id === cell.id
@@ -279,6 +291,8 @@ export default function NotebookTab({ tabId }: Props) {
           running: false,
           outputs: [{ type: "error", text: String(e) }],
         });
+      } finally {
+        loadContext(); // refresh toolbar after USE commands
       }
       return;
     }
