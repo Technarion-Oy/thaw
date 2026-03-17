@@ -85,6 +85,7 @@ interface QueryState {
   openScratch: () => void;
   openDiff: (leftLabel: string, leftText: string, rightLabel: string, rightText: string) => void;
   openNotebook: (path: string, content: string) => void;
+  openNotebookUnsaved: (title: string, content: string) => void;
   closeTab: (id: string) => void;
   moveTab: (draggedId: string, targetId: string, before: boolean) => void;
   // Called after a successful save to update the tab's path/title and clear dirty state.
@@ -237,6 +238,26 @@ export const useQueryStore = create<QueryState>()(
         sql: content,
         selectedSql: "",
         currentFile: path,
+        result: null,
+        error: null,
+      };
+    }),
+
+  openNotebookUnsaved: (title, content) =>
+    set((state) => {
+      const newTab = makeTab({
+        kind: "notebook",
+        path: null,
+        title,
+        sql: content,
+        savedSql: "",  // dirty from the start — no saved version
+      });
+      return {
+        tabs: [...state.tabs, newTab],
+        activeTabId: newTab.id,
+        sql: content,
+        selectedSql: "",
+        currentFile: null,
         result: null,
         error: null,
       };

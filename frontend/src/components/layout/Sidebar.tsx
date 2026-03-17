@@ -46,7 +46,7 @@ import {
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData, FetchNotebookContent } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
@@ -829,6 +829,19 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     useQueryStore.getState().executeInNewTab(sql);
   };
 
+  const openNotebookFromSnowflake = async () => {
+    if (!ctxMenu) return;
+    const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
+    const name = nameParts.join(":");
+    setCtxMenu(null);
+    try {
+      const content = await FetchNotebookContent(db, schema, name);
+      useQueryStore.getState().openNotebookUnsaved(name, content);
+    } catch (e) {
+      message.error(`Failed to open notebook: ${String(e)}`);
+    }
+  };
+
   const openExportModal = () => {
     if (!ctxMenu) return;
     const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
@@ -1257,6 +1270,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Call Procedure", <PlayCircleOutlined style={{ fontSize: 12 }} />, callProcedure)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "FUNCTION" &&
             menuItem("Call Function…", <FunctionOutlined style={{ fontSize: 12 }} />, selectFunction)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "NOTEBOOK" &&
+            menuItem("Open Notebook", <ExperimentOutlined style={{ fontSize: 12 }} />, openNotebookFromSnowflake)}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && menuItem("View Definition", null, viewDefinition)}
           {ctxMenu.nodeType === "obj" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}

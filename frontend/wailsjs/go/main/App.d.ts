@@ -61,6 +61,8 @@ export function ExportDatabaseDDL(arg1:string,arg2:string):Promise<ddl.ExportRes
 
 export function ExportTableData(arg1:snowflake.ExportTableParams):Promise<snowflake.ExportTableResult>;
 
+export function FetchNotebookContent(arg1:string,arg2:string,arg3:string):Promise<string>;
+
 export function GetAIConfig():Promise<config.AIConfig>;
 
 export function GetAISuggestion(arg1:string):Promise<string>;

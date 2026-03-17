@@ -106,6 +106,10 @@ export function ExportTableData(arg1) {
   return window['go']['main']['App']['ExportTableData'](arg1);
 }
 
+export function FetchNotebookContent(arg1, arg2, arg3) {
+  return window['go']['main']['App']['FetchNotebookContent'](arg1, arg2, arg3);
+}
+
 export function GetAIConfig() {
   return window['go']['main']['App']['GetAIConfig']();
 }

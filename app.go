@@ -1494,6 +1494,17 @@ func (a *App) ImportTableData(params snowflake.ImportTableParams) (snowflake.Imp
 	return a.client.ImportTableData(a.ctx, params)
 }
 
+// FetchNotebookContent retrieves the content of a Snowflake Notebook object.
+// It describes the notebook to find its stage URI, downloads the .ipynb file
+// to a temporary local directory, reads the file, and returns the nbformat JSON.
+// The temporary directory is cleaned up automatically.
+func (a *App) FetchNotebookContent(database, schema, name string) (string, error) {
+	if a.client == nil {
+		return "", ErrNotConnected
+	}
+	return a.client.FetchNotebookContent(a.ctx, database, schema, name)
+}
+
 // DeployNotebook uploads a local .ipynb file to a temporary Snowflake internal
 // stage and creates a NOTEBOOK object from it. The temporary stage is dropped
 // automatically after the notebook is created (or on error).

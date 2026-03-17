@@ -2523,6 +2523,110 @@ func buildImportCopySQL(stageAt, tableRef string, p ImportTableParams) string {
 	}
 }
 
+// FetchNotebookContent retrieves the source of a Snowflake Notebook object and
+// returns it as a string (nbformat v4 JSON).
+//
+// Steps:
+//  1. DESC NOTEBOOK "<db>"."<schema>"."<name>" → read last_version_location_uri
+//  2. GET <uri> to a temp directory
+//  3. Read the downloaded .ipynb file
+//  4. Clean up the temp directory
+func (c *Client) FetchNotebookContent(ctx context.Context, database, schema, name string) (string, error) {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	notebookRef := fmt.Sprintf(`"%s"."%s"."%s"`, esc(database), esc(schema), esc(name))
+
+	// DESC NOTEBOOK to find the stage URI of the latest version.
+	descRows, err := c.db.QueryContext(ctx, "DESC NOTEBOOK "+notebookRef)
+	if err != nil {
+		return "", fmt.Errorf("describe notebook: %w", err)
+	}
+	defer descRows.Close()
+
+	cols, err := descRows.Columns()
+	if err != nil {
+		return "", fmt.Errorf("describe notebook columns: %w", err)
+	}
+
+	// Find the last_version_location_uri column index.
+	uriIdx := -1
+	for i, col := range cols {
+		if strings.EqualFold(col, "last_version_location_uri") {
+			uriIdx = i
+			break
+		}
+	}
+	if uriIdx < 0 {
+		return "", fmt.Errorf("DESC NOTEBOOK did not return a last_version_location_uri column (columns: %v)", cols)
+	}
+
+	var stageURI string
+	for descRows.Next() {
+		vals := make([]interface{}, len(cols))
+		ptrs := make([]interface{}, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := descRows.Scan(ptrs...); err != nil {
+			continue
+		}
+		if v := fmt.Sprintf("%v", vals[uriIdx]); v != "" && v != "<nil>" {
+			stageURI = v
+			break
+		}
+	}
+	descRows.Close()
+	if stageURI == "" {
+		return "", fmt.Errorf("last_version_location_uri is empty for notebook %s", notebookRef)
+	}
+
+	// Download the file to a temp directory.
+	tmpDir, err := os.MkdirTemp("", "thaw_nb_")
+	if err != nil {
+		return "", fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dirURL, err := localFileURL(tmpDir)
+	if err != nil {
+		return "", fmt.Errorf("build temp dir url: %w", err)
+	}
+
+	getSQL := fmt.Sprintf("GET '%s' '%s'", strings.ReplaceAll(stageURI, "'", "\\'"), dirURL)
+	getRows, err := c.db.QueryContext(ctx, getSQL)
+	if err != nil {
+		return "", fmt.Errorf("GET notebook file: %w", err)
+	}
+	getRows.Close()
+
+	// Find the downloaded .ipynb file in the temp directory.
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		return "", fmt.Errorf("read temp dir: %w", err)
+	}
+
+	var ipynbPath string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".ipynb") {
+			ipynbPath = filepath.Join(tmpDir, e.Name())
+			break
+		}
+	}
+	// Fallback: take the first file if no .ipynb was found (some runtimes omit
+	// the extension in the stage path).
+	if ipynbPath == "" && len(entries) > 0 {
+		ipynbPath = filepath.Join(tmpDir, entries[0].Name())
+	}
+	if ipynbPath == "" {
+		return "", fmt.Errorf("GET succeeded but no file was written to temp dir")
+	}
+
+	data, err := os.ReadFile(ipynbPath)
+	if err != nil {
+		return "", fmt.Errorf("read notebook file: %w", err)
+	}
+	return string(data), nil
+}
+
 // DeployNotebookParams holds the parameters for deploying a local .ipynb
 // notebook to Snowflake via a temporary internal stage.
 type DeployNotebookParams struct {
