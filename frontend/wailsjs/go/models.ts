@@ -768,6 +768,7 @@ export namespace snowflake {
 	    schema: string;
 	    name: string;
 	    filePath: string;
+	    content: string;
 	    orReplace: boolean;
 	    ifNotExists: boolean;
 	    comment: string;
@@ -787,6 +788,7 @@ export namespace snowflake {
 	        this.schema = source["schema"];
 	        this.name = source["name"];
 	        this.filePath = source["filePath"];
+	        this.content = source["content"];
 	        this.orReplace = source["orReplace"];
 	        this.ifNotExists = source["ifNotExists"];
 	        this.comment = source["comment"];

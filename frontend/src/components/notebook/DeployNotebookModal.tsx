@@ -20,15 +20,17 @@ const { Text } = Typography;
 
 interface Props {
   open: boolean;
-  /** Absolute local path of the .ipynb file being deployed. */
+  /** Absolute local path of the .ipynb file. Empty string for unsaved notebooks. */
   filePath: string;
-  /** Base filename shown as the default notebook name. */
+  /** Serialized nbformat JSON; used when filePath is empty (unsaved notebooks). */
+  content: string;
+  /** Base filename / tab title shown as the default notebook name. */
   defaultName: string;
   onClose: () => void;
   onDeployed: () => void;
 }
 
-export default function DeployNotebookModal({ open, filePath, defaultName, onClose, onDeployed }: Props) {
+export default function DeployNotebookModal({ open, filePath, content, defaultName, onClose, onDeployed }: Props) {
   const [form] = Form.useForm();
   const [deploying, setDeploying] = useState(false);
 
@@ -100,6 +102,7 @@ export default function DeployNotebookModal({ open, filePath, defaultName, onClo
         schema:                  values.schema as string,
         name:                    values.name as string,
         filePath,
+        content,
         orReplace:               (values.orReplace as boolean) ?? false,
         ifNotExists:             (values.ifNotExists as boolean) ?? false,
         comment:                 (values.comment as string) ?? "",

@@ -2633,7 +2633,8 @@ type DeployNotebookParams struct {
 	Database    string `json:"database"`
 	Schema      string `json:"schema"`
 	Name        string `json:"name"`        // notebook object name in Snowflake
-	FilePath    string `json:"filePath"`    // absolute local path to the .ipynb file
+	FilePath    string `json:"filePath"`    // absolute local path to the .ipynb file; mutually exclusive with Content
+	Content     string `json:"content"`     // raw nbformat JSON; used when FilePath is empty (unsaved notebooks)
 	OrReplace   bool   `json:"orReplace"`
 	IfNotExists bool   `json:"ifNotExists"`
 	// Optional CREATE NOTEBOOK clauses
@@ -2655,6 +2656,26 @@ type DeployNotebookParams struct {
 func (c *Client) DeployNotebook(ctx context.Context, params DeployNotebookParams) error {
 	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
 	escapeLit := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
+
+	// If no file path was given, write the in-memory content to a temp file so
+	// the rest of the function can treat both cases identically.
+	if params.FilePath == "" {
+		if params.Content == "" {
+			return fmt.Errorf("either FilePath or Content must be provided")
+		}
+		tmp, err := os.CreateTemp("", "thaw_nb_*.ipynb")
+		if err != nil {
+			return fmt.Errorf("create temp notebook file: %w", err)
+		}
+		tmpPath := tmp.Name()
+		defer os.Remove(tmpPath)
+		if _, err := tmp.WriteString(params.Content); err != nil {
+			tmp.Close()
+			return fmt.Errorf("write temp notebook file: %w", err)
+		}
+		tmp.Close()
+		params.FilePath = tmpPath
+	}
 
 	// Create a temporary stage in the target schema.
 	stageName := fmt.Sprintf("THAW_NB_%d", time.Now().UnixNano())

@@ -210,6 +210,9 @@ export default function NotebookTab({ tabId }: Props) {
   const [kernelError, setKernelError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deployOpen, setDeployOpen] = useState(false);
+  // Snapshot of serialized notebook content captured when the Deploy modal is opened.
+  // Used for unsaved notebooks that have no on-disk file path.
+  const [deployContent, setDeployContent] = useState("");
 
   // Track current cells in a ref to avoid stale closures in the serializer.
   const cellsRef = useRef(cells);
@@ -441,12 +444,14 @@ export default function NotebookTab({ tabId }: Props) {
 
         <div style={{ flex: 1 }} />
 
-        <Tooltip title={tab?.path ? "Deploy this notebook to Snowflake" : "Save the notebook first to deploy it"}>
+        <Tooltip title="Deploy this notebook to Snowflake">
           <Button
             icon={<CloudUploadOutlined />}
             size="small"
-            disabled={!tab?.path}
-            onClick={() => setDeployOpen(true)}
+            onClick={() => {
+              setDeployContent(serializeNotebook(rawNb, cellsRef.current));
+              setDeployOpen(true);
+            }}
           >
             Deploy
           </Button>
@@ -498,15 +503,14 @@ export default function NotebookTab({ tabId }: Props) {
         ))}
       </div>
 
-      {tab?.path && (
-        <DeployNotebookModal
-          open={deployOpen}
-          filePath={tab.path}
-          defaultName={tab.title}
-          onClose={() => setDeployOpen(false)}
-          onDeployed={() => setDeployOpen(false)}
-        />
-      )}
+      <DeployNotebookModal
+        open={deployOpen}
+        filePath={tab?.path ?? ""}
+        content={deployContent}
+        defaultName={tab?.title ?? "notebook"}
+        onClose={() => setDeployOpen(false)}
+        onDeployed={() => setDeployOpen(false)}
+      />
     </div>
   );
 }
