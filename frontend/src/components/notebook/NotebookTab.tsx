@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
+import Editor, { type BeforeMount, type OnMount, type Monaco } from "@monaco-editor/react";
 import { ensureMonacoSetup } from "../editor/monacoSetup";
 import { Button, Space, Spin, Tooltip, Typography, Select, Tag, message } from "antd";
 import {
@@ -30,6 +30,8 @@ import {
   StopNotebookSession,
   SaveNotebook,
   GetTableColumns,
+  GetNotebookCompletions,
+  GetNotebookHover,
 } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
@@ -484,6 +486,7 @@ export default function NotebookTab({ tabId }: Props) {
         {cells.map((cell, idx) => (
           <CellView
             key={cell.id}
+            tabId={tabId}
             cell={cell}
             isFirst={idx === 0}
             isLast={idx === cells.length - 1}
@@ -589,9 +592,94 @@ function SqlResultTable({ result, isDark, border }: {
   );
 }
 
+// ─── Python intellisense (jedi via kernel) ────────────────────────────────────
+
+// Maps Monaco model URI → notebook tabId so the global providers know which
+// kernel to query for each individual cell editor.
+const cellModelTabIds = new Map<string, string>();
+
+// Registered once — Monaco language providers are global per language.
+let pythonProvidersRegistered = false;
+
+function jediKindToMonaco(monaco: Monaco, jediType: string): number {
+  const K = monaco.languages.CompletionItemKind;
+  switch (jediType) {
+    case "function":  return K.Function;
+    case "class":     return K.Class;
+    case "module":    return K.Module;
+    case "keyword":   return K.Keyword;
+    case "property":  return K.Property;
+    case "path":      return K.File;
+    case "instance":  return K.Variable;
+    case "statement": return K.Variable;
+    case "param":     return K.Variable;
+    default:          return K.Text;
+  }
+}
+
+function ensurePythonProviders(monaco: Monaco) {
+  if (pythonProvidersRegistered) return;
+  pythonProvidersRegistered = true;
+
+  // Completion provider — triggered by "." and Ctrl+Space.
+  monaco.languages.registerCompletionItemProvider("python", {
+    triggerCharacters: ["."],
+    provideCompletionItems: async (model: any, position: any) => {
+      const tabId = cellModelTabIds.get(model.uri.toString());
+      if (!tabId) return { suggestions: [] };
+      const code = model.getValue();
+      const line = position.lineNumber;           // jedi: 1-indexed
+      const col  = position.column - 1;           // jedi: 0-indexed
+      try {
+        const items = await GetNotebookCompletions(tabId, code, line, col);
+        if (!items || items.length === 0) return { suggestions: [] };
+        const word = model.getWordUntilPosition(position);
+        const range = {
+          startLineNumber: position.lineNumber,
+          endLineNumber:   position.lineNumber,
+          startColumn:     word.startColumn,
+          endColumn:       position.column,
+        };
+        return {
+          suggestions: items.map((item) => ({
+            label:         { label: item.label, description: item.detail },
+            kind:          jediKindToMonaco(monaco, item.type),
+            documentation: item.documentation
+              ? { value: item.documentation, isTrusted: false }
+              : undefined,
+            insertText: item.label,
+            range,
+          })),
+        };
+      } catch {
+        return { suggestions: [] };
+      }
+    },
+  });
+
+  // Hover provider — fires when the cursor rests on a token.
+  monaco.languages.registerHoverProvider("python", {
+    provideHover: async (model: any, position: any) => {
+      const tabId = cellModelTabIds.get(model.uri.toString());
+      if (!tabId) return null;
+      const code = model.getValue();
+      const line = position.lineNumber;
+      const col  = position.column - 1;
+      try {
+        const hover = await GetNotebookHover(tabId, code, line, col);
+        if (!hover) return null;
+        return { contents: [{ value: "```python\n" + hover + "\n```" }] };
+      } catch {
+        return null;
+      }
+    },
+  });
+}
+
 // ─── CellView ─────────────────────────────────────────────────────────────────
 
 interface CellViewProps {
+  tabId: string;
   cell: Cell;
   isFirst: boolean;
   isLast: boolean;
@@ -610,7 +698,7 @@ interface CellViewProps {
 }
 
 function CellView({
-  cell, isFirst, isLast, kernelReady, isDark, border, bgRaised, textMuted,
+  tabId, cell, isFirst, isLast, kernelReady, isDark, border, bgRaised, textMuted,
   onRun, onDelete, onMoveUp, onMoveDown, onSourceChange, onKindChange, onAddAfter,
 }: CellViewProps) {
   const [focused, setFocused] = useState(false);
@@ -625,10 +713,22 @@ function CellView({
 
   const handleBeforeMount: BeforeMount = (monaco) => {
     ensureMonacoSetup(monaco);
+    ensurePythonProviders(monaco);
   };
 
   const handleMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
+
+    // Register model → tabId mapping so the global jedi providers can route
+    // requests to the correct kernel.  Clean up on editor disposal.
+    if (cell.kind === "code") {
+      const model = editor.getModel();
+      if (model) {
+        const uri = model.uri.toString();
+        cellModelTabIds.set(uri, tabId);
+        editor.onDidDispose(() => cellModelTabIds.delete(uri));
+      }
+    }
 
     // Auto-size height to content.
     const updateHeight = () =>

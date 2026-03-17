@@ -32,8 +32,10 @@ import (
 const SnowparkCondaEnv = "thaw_snowpark"
 
 // Markers used by the embedded Python kernel to delimit cell execution.
-const kernelSentinel  = "<<<THAW_CELL_DONE>>>"
-const kernelRunMarker = "<<<THAW_RUN>>>"
+const kernelSentinel       = "<<<THAW_CELL_DONE>>>"
+const kernelRunMarker      = "<<<THAW_RUN>>>"
+const kernelCompleteMarker = "<<<THAW_COMPLETE>>>"
+const kernelHoverMarker    = "<<<THAW_HOVER>>>"
 
 // kernelPyScript is a minimal stateful Python kernel.  It reads code blocks
 // from stdin (terminated by kernelRunMarker), executes them in a shared
@@ -122,6 +124,75 @@ _thaw_init_errors = []
 _thaw_create_session(g)
 del _thaw_create_session
 
+# ── Intellisense protocol markers ─────────────────────────────────────────────
+COMPLETE_MARKER = "<<<THAW_COMPLETE>>>"
+HOVER_MARKER    = "<<<THAW_HOVER>>>"
+
+def _thaw_handle_complete(req_json):
+    """Return jedi completions as JSON, using the live kernel namespace."""
+    try:
+        import jedi as _jedi, json as _json
+        _req = _json.loads(req_json)
+        _src = _req.get("code", "")
+        _ln  = _req.get("line", 1)
+        _col = _req.get("col", 0)
+        try:
+            _s = _jedi.Interpreter(_src, [g])
+        except Exception:
+            _s = _jedi.Script(_src)
+        _items = []
+        for _c in _s.complete(_ln, _col)[:200]:
+            try:    _doc = _c.docstring(raw=True)[:1000]
+            except: _doc = ""
+            _items.append({
+                "label": _c.name,
+                "type":  _c.type,
+                "detail": _c.full_name or "",
+                "documentation": _doc,
+            })
+        return _json.dumps({"completions": _items})
+    except Exception as _ex:
+        import json as _j
+        return _j.dumps({"completions": [], "error": str(_ex)})
+
+def _thaw_handle_hover(req_json):
+    """Return jedi hover documentation as JSON, using the live kernel namespace."""
+    try:
+        import jedi as _jedi, json as _json
+        _req = _json.loads(req_json)
+        _src = _req.get("code", "")
+        _ln  = _req.get("line", 1)
+        _col = _req.get("col", 0)
+        try:
+            _s = _jedi.Interpreter(_src, [g])
+        except Exception:
+            _s = _jedi.Script(_src)
+        _text = ""
+        # Signatures are richer for function calls
+        try:
+            _sigs = _s.get_signatures(_ln, _col)
+            if _sigs:
+                _lbl = _sigs[0].to_string()
+                try:    _d = _sigs[0].docstring(raw=True)
+                except: _d = ""
+                _text = _lbl + ("\n\n" + _d if _d else "")
+        except Exception:
+            pass
+        if not _text:
+            try:
+                _helps = _s.help(_ln, _col)
+                if _helps:
+                    try:    _d = _helps[0].docstring(raw=True)
+                    except: _d = ""
+                    _n = getattr(_helps[0], "full_name", None) or getattr(_helps[0], "name", None) or ""
+                    _text = (_n + "\n\n" + _d) if (_n and _d) else (_d or _n)
+            except Exception:
+                pass
+        return _json.dumps({"hover": _text})
+    except Exception as _ex:
+        import json as _j
+        return _j.dumps({"hover": "", "error": str(_ex)})
+
 def _capture_figures():
     """Return a list of base64-encoded PNG strings for all open figures."""
     images = []
@@ -148,7 +219,18 @@ while True:
             break
         lines.append(line)
 
-    code    = "".join(lines)
+    code = "".join(lines)
+
+    # ── Intellisense requests ──────────────────────────────────────────────────
+    if code.startswith(COMPLETE_MARKER + "\n"):
+        print(_thaw_handle_complete(code[len(COMPLETE_MARKER) + 1:]), flush=True)
+        print(SENTINEL, flush=True)
+        continue
+    if code.startswith(HOVER_MARKER + "\n"):
+        print(_thaw_handle_hover(code[len(HOVER_MARKER) + 1:]), flush=True)
+        print(SENTINEL, flush=True)
+        continue
+
     buf_out = io.StringIO()
     buf_err = io.StringIO()
     # Drain any deferred session-init errors into the first cell's stderr.
@@ -223,6 +305,15 @@ type NotebookSqlResult struct {
 type PackageInfo struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
+}
+
+// NotebookCompletion is a single intellisense completion item returned by jedi
+// from the running Python kernel.
+type NotebookCompletion struct {
+	Label         string `json:"label"`
+	Type          string `json:"type"`          // jedi type: "function", "class", "module", …
+	Detail        string `json:"detail"`        // fully-qualified name
+	Documentation string `json:"documentation"` // raw docstring (may be empty)
 }
 
 // ─── kernel session management ────────────────────────────────────────────────
@@ -1141,6 +1232,83 @@ func (a *App) NotebookUseContext(tabId, role, warehouse, database, schema string
 		}
 	}
 	return nil
+}
+
+// kernelRPC sends a pre-formatted request string to the kernel stdin, reads
+// stdout until the sentinel, and returns the last non-sentinel line (JSON).
+// The caller must already hold s.mu.
+func kernelRPC(s *notebookSession, request string) (string, error) {
+	if _, err := fmt.Fprint(s.stdin, request); err != nil {
+		return "", fmt.Errorf("write to kernel: %w", err)
+	}
+	var lastLine string
+	for {
+		line, err := s.stdout.ReadString('\n')
+		if err != nil {
+			return "", fmt.Errorf("read from kernel: %w", err)
+		}
+		line = strings.TrimRight(line, "\n\r")
+		if line == kernelSentinel {
+			break
+		}
+		lastLine = line
+	}
+	return lastLine, nil
+}
+
+// GetNotebookCompletions queries jedi completions from the running kernel for
+// the given Python source at cursor position (line, col).  line is 1-indexed
+// and col is 0-indexed, matching jedi's convention.  Returns nil without error
+// when no kernel is running for the tab (e.g. kernel not yet started).
+func (a *App) GetNotebookCompletions(tabId, code string, line, col int) ([]NotebookCompletion, error) {
+	val, ok := notebookSessions.Load(tabId)
+	if !ok {
+		return nil, nil
+	}
+	s := val.(*notebookSession)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	req, _ := json.Marshal(map[string]any{"code": code, "line": line, "col": col})
+	payload := fmt.Sprintf("%s\n%s\n%s\n", kernelCompleteMarker, string(req), kernelRunMarker)
+	resultJSON, err := kernelRPC(s, payload)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Completions []NotebookCompletion `json:"completions"`
+	}
+	if resultJSON != "" {
+		_ = json.Unmarshal([]byte(resultJSON), &resp)
+	}
+	return resp.Completions, nil
+}
+
+// GetNotebookHover queries jedi hover documentation from the running kernel for
+// the given Python source at cursor position (line, col).  Returns an empty
+// string when no kernel is running or no documentation is available.
+func (a *App) GetNotebookHover(tabId, code string, line, col int) (string, error) {
+	val, ok := notebookSessions.Load(tabId)
+	if !ok {
+		return "", nil
+	}
+	s := val.(*notebookSession)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	req, _ := json.Marshal(map[string]any{"code": code, "line": line, "col": col})
+	payload := fmt.Sprintf("%s\n%s\n%s\n", kernelHoverMarker, string(req), kernelRunMarker)
+	resultJSON, err := kernelRPC(s, payload)
+	if err != nil {
+		return "", err
+	}
+	var resp struct {
+		Hover string `json:"hover"`
+	}
+	if resultJSON != "" {
+		_ = json.Unmarshal([]byte(resultJSON), &resp)
+	}
+	return resp.Hover, nil
 }
 
 // StopNotebookSession kills the Python kernel for a notebook tab.

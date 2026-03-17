@@ -367,6 +367,24 @@ export namespace main {
 	        this.images = source["images"];
 	    }
 	}
+	export class NotebookCompletion {
+	    label: string;
+	    type: string;
+	    detail: string;
+	    documentation: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new NotebookCompletion(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.label = source["label"];
+	        this.type = source["type"];
+	        this.detail = source["detail"];
+	        this.documentation = source["documentation"];
+	    }
+	}
 	export class NotebookSqlResult {
 	    columns: string[];
 	    rows: any[][];

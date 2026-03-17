@@ -79,6 +79,10 @@ export function GetFunctionInfo(arg1:string,arg2:string,arg3:string,arg4:string)
 
 export function GetGitConfig():Promise<config.GitConfig>;
 
+export function GetNotebookCompletions(arg1:string,arg2:string,arg3:number,arg4:number):Promise<Array<main.NotebookCompletion>>;
+
+export function GetNotebookHover(arg1:string,arg2:string,arg3:number,arg4:number):Promise<string>;
+
 export function GetNotebookQueryWarehouse(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function GetObjectDDL(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;

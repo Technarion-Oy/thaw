@@ -142,6 +142,14 @@ export function GetGitConfig() {
   return window['go']['main']['App']['GetGitConfig']();
 }
 
+export function GetNotebookCompletions(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['GetNotebookCompletions'](arg1, arg2, arg3, arg4);
+}
+
+export function GetNotebookHover(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['GetNotebookHover'](arg1, arg2, arg3, arg4);
+}
+
 export function GetNotebookQueryWarehouse(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetNotebookQueryWarehouse'](arg1, arg2, arg3);
 }
