@@ -70,7 +70,9 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Select for Comparison** / **Compare with** — side-by-side DDL diff (see [Text Comparison](#text-comparison))
 - **Right-click a database** to export its DDL, generate an ER Diagram, view dropped schemas recoverable via Time Travel, or open **Backup Sets…**
 - **Right-click a schema** to view dropped tables, **Export Data…** or **Import Data…** without needing an existing table (schema-level launch opens the same modals with a table selector or name field), open **Backup Sets…**, or use the **Create Object** cascading submenu (opens left or right depending on available screen space); currently contains **Task…** to create a new Snowflake Task
-- **Right-click a notebook** to **Open Notebook** — pulls the latest version from Snowflake using `DESC NOTEBOOK` and `GET`, then opens it in a new unsaved notebook tab
+- **Right-click a notebook** to:
+  - **Open Notebook** — pulls the latest version from Snowflake using `DESC NOTEBOOK` and `GET`, then opens it in a new unsaved notebook tab
+  - **Execute Notebook…** — opens a dialog to run `EXECUTE NOTEBOOK` with optional string parameters (each value is automatically single-quoted); the dialog shows the notebook's current Query Warehouse fetched from `SHOW NOTEBOOKS`; if none is set a warning alert offers a **Set Warehouse** button that opens a separate dialog with a warehouse selector and explicit **Save** / **Cancel** buttons (saves via `ALTER NOTEBOOK … SET QUERY_WAREHOUSE`); the execute dialog updates live once the warehouse is saved; a live SQL preview shows the exact statement that will run
 - **Right-click a table** to open **Backup Sets…** (shows backup sets scoped to its schema)
 - **Drag and drop** — drag any table or view into the editor to insert a `SELECT` statement with all column names listed individually
 - **Empty table indicator** — table names with zero rows appear in a faded colour so unpopulated tables are immediately visible in the tree
@@ -336,8 +338,8 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - The kernel uses the `snowflake-snowpark-python` environment (conda or venv)
 - Output shows stdout, stderr, and tracebacks in colour-coded blocks with a per-block copy button
 - **Inline plots** — matplotlib figures (e.g. from `plt.show()`) are captured as PNG images after each cell run and rendered inline below the cell output; no separate window opens; the kernel automatically configures the `Agg` backend on startup; multiple figures per cell are each rendered in order
-- **Auto-created `session`** — a Snowpark `session` variable is ready in every Python cell without any connection boilerplate, mirroring the behaviour of Snowsight notebooks; it uses the same account, role, warehouse, database, and schema as the active app connection; session init errors (e.g. wrong credentials or missing private key) are surfaced in the first cell's output rather than silently swallowed
-- **Session kept in sync** — changing role, warehouse, database, or schema via the toolbar automatically updates the kernel's `session` object (`session.use_role()` / `session.use_warehouse()` / `session.use_database()` / `session.use_schema()`); switching to a notebook tab also triggers a sync, so `session.sql("SELECT CURRENT_WAREHOUSE()").show()` and a SQL cell always agree
+- **Auto-connected Snowpark session** — a Snowpark session is automatically created on kernel startup using the same account, role, warehouse, database, and schema as the active app connection; `get_active_session()` (from `snowflake.snowpark.context`) works in every Python cell with no `Session.builder` boilerplate — matching Snowflake's native notebook behaviour; session init errors (e.g. wrong credentials or missing private key) are surfaced in the first cell's stderr
+- **Session kept in sync** — changing role, warehouse, database, or schema via the toolbar automatically applies the change to the kernel session via `get_active_session()`; switching to a notebook tab also triggers a sync, so `get_active_session().sql("SELECT CURRENT_WAREHOUSE()").collect()` and a SQL cell always agree
 
 ### SQL cells
 

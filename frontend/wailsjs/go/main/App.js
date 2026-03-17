@@ -142,6 +142,10 @@ export function GetGitConfig() {
   return window['go']['main']['App']['GetGitConfig']();
 }
 
+export function GetNotebookQueryWarehouse(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetNotebookQueryWarehouse'](arg1, arg2, arg3);
+}
+
 export function GetObjectDDL(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['GetObjectDDL'](arg1, arg2, arg3, arg4, arg5);
 }
@@ -448,6 +452,10 @@ export function SendChatMessage(arg1, arg2, arg3, arg4, arg5) {
 
 export function SetColumnComment(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['SetColumnComment'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function SetNotebookQueryWarehouse(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['SetNotebookQueryWarehouse'](arg1, arg2, arg3, arg4);
 }
 
 export function SetSessionParameter(arg1, arg2, arg3) {

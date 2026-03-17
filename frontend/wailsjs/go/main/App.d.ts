@@ -79,6 +79,8 @@ export function GetFunctionInfo(arg1:string,arg2:string,arg3:string,arg4:string)
 
 export function GetGitConfig():Promise<config.GitConfig>;
 
+export function GetNotebookQueryWarehouse(arg1:string,arg2:string,arg3:string):Promise<string>;
+
 export function GetObjectDDL(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
 
 export function GetObjectDependencies(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<snowflake.DependencyNode>;
@@ -232,6 +234,8 @@ export function SearchFiles(arg1:string,arg2:string,arg3:boolean):Promise<Array<
 export function SendChatMessage(arg1:Array<ai.UIMessage>,arg2:string,arg3:string,arg4:string,arg5:boolean):Promise<Array<ai.UIMessage>>;
 
 export function SetColumnComment(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
+
+export function SetNotebookQueryWarehouse(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function SetSessionParameter(arg1:string,arg2:string,arg3:string):Promise<void>;
 

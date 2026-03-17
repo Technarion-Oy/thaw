@@ -2648,6 +2648,48 @@ func (c *Client) ExecuteNotebook(ctx context.Context, database, schema, name str
 	return result.QueryID, nil
 }
 
+// GetNotebookQueryWarehouse returns the QUERY_WAREHOUSE currently set on a
+// Snowflake Notebook object, or an empty string if none is configured.
+func (c *Client) GetNotebookQueryWarehouse(ctx context.Context, database, schema, name string) (string, error) {
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	like := strings.ReplaceAll(name, "'", "''")
+	sql := fmt.Sprintf("SHOW NOTEBOOKS LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
+	res, err := c.Execute(ctx, sql)
+	if err != nil {
+		return "", err
+	}
+	if len(res.Rows) == 0 {
+		return "", nil
+	}
+	row := res.Rows[0]
+	for i, col := range res.Columns {
+		if strings.EqualFold(col, "query_warehouse") && i < len(row) {
+			if row[i] == nil {
+				return "", nil
+			}
+			switch v := row[i].(type) {
+			case string:
+				return v, nil
+			case []byte:
+				return string(v), nil
+			default:
+				return fmt.Sprintf("%v", v), nil
+			}
+		}
+	}
+	return "", nil
+}
+
+// SetNotebookQueryWarehouse issues ALTER NOTEBOOK … SET QUERY_WAREHOUSE on the
+// given notebook object.
+func (c *Client) SetNotebookQueryWarehouse(ctx context.Context, database, schema, name, warehouse string) error {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	notebookRef := fmt.Sprintf(`"%s"."%s"."%s"`, esc(database), esc(schema), esc(name))
+	sql := fmt.Sprintf(`ALTER NOTEBOOK %s SET QUERY_WAREHOUSE = "%s"`, notebookRef, esc(warehouse))
+	_, err := c.Execute(ctx, sql)
+	return err
+}
+
 // DeployNotebookParams holds the parameters for deploying a local .ipynb
 // notebook to Snowflake via a temporary internal stage.
 type DeployNotebookParams struct {

@@ -109,7 +109,7 @@ def _thaw_create_session(ns):
         # that would corrupt the stdin/stdout protocol.
         _old_out, sys.stdout = sys.stdout, io.StringIO()
         try:
-            ns["session"] = _Session.builder.configs(cfg).create()
+            _Session.builder.configs(cfg).create()
         finally:
             sys.stdout = _old_out
     except Exception as _e:
@@ -1103,7 +1103,11 @@ func (a *App) NotebookUseContext(tabId, role, warehouse, database, schema string
 		return strings.ReplaceAll(v, "'", "\\'")
 	}
 
-	lines := []string{"if 'session' in globals():", "    _s = globals()['session']"}
+	lines := []string{
+		"try:",
+		"    from snowflake.snowpark.context import get_active_session as _gas",
+		"    _s = _gas()",
+	}
 	if role != "" {
 		lines = append(lines, fmt.Sprintf("    _s.use_role('%s')", escape(role)))
 	}
@@ -1116,6 +1120,7 @@ func (a *App) NotebookUseContext(tabId, role, warehouse, database, schema string
 	if schema != "" {
 		lines = append(lines, fmt.Sprintf("    _s.use_schema('%s')", escape(schema)))
 	}
+	lines = append(lines, "except Exception:", "    pass")
 	code := strings.Join(lines, "\n")
 
 	s.mu.Lock()

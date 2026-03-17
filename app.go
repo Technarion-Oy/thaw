@@ -1504,6 +1504,24 @@ func (a *App) ExecuteNotebook(database, schema, name string, params []string) (s
 	return a.client.ExecuteNotebook(a.ctx, database, schema, name, params)
 }
 
+// GetNotebookQueryWarehouse returns the QUERY_WAREHOUSE currently configured on
+// the given Snowflake Notebook, or an empty string if none is set.
+func (a *App) GetNotebookQueryWarehouse(database, schema, name string) (string, error) {
+	if a.client == nil {
+		return "", ErrNotConnected
+	}
+	return a.client.GetNotebookQueryWarehouse(a.ctx, database, schema, name)
+}
+
+// SetNotebookQueryWarehouse updates the QUERY_WAREHOUSE property of the given
+// Snowflake Notebook via ALTER NOTEBOOK … SET QUERY_WAREHOUSE.
+func (a *App) SetNotebookQueryWarehouse(database, schema, name, warehouse string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	return a.client.SetNotebookQueryWarehouse(a.ctx, database, schema, name, warehouse)
+}
+
 // FetchNotebookContent retrieves the content of a Snowflake Notebook object.
 // It describes the notebook to find its stage URI, downloads the .ipynb file
 // to a temporary local directory, reads the file, and returns the nbformat JSON.
