@@ -1618,6 +1618,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         // Disable Monaco's built-in hover widget; we render our own overlay
         // so we can support scrolling and a copy button.
         hover: { enabled: false },
+        folding: true,
+        showFoldingControls: "always",
       }}
     />
     {ddlHover && (
