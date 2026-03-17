@@ -763,6 +763,40 @@ export namespace snowflake {
 		    return a;
 		}
 	}
+	export class DeployNotebookParams {
+	    database: string;
+	    schema: string;
+	    name: string;
+	    filePath: string;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    comment: string;
+	    queryWarehouse: string;
+	    idleAutoShutdownSeconds: number;
+	    runtimeName: string;
+	    computePool: string;
+	    warehouse: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeployNotebookParams(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.database = source["database"];
+	        this.schema = source["schema"];
+	        this.name = source["name"];
+	        this.filePath = source["filePath"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.comment = source["comment"];
+	        this.queryWarehouse = source["queryWarehouse"];
+	        this.idleAutoShutdownSeconds = source["idleAutoShutdownSeconds"];
+	        this.runtimeName = source["runtimeName"];
+	        this.computePool = source["computePool"];
+	        this.warehouse = source["warehouse"];
+	    }
+	}
 	export class DroppedTable {
 	    name: string;
 	    droppedOn: string;

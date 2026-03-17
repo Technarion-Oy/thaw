@@ -70,6 +70,10 @@ export function DeleteVenvFolder() {
   return window['go']['main']['App']['DeleteVenvFolder']();
 }
 
+export function DeployNotebook(arg1) {
+  return window['go']['main']['App']['DeployNotebook'](arg1);
+}
+
 export function Disconnect() {
   return window['go']['main']['App']['Disconnect']();
 }

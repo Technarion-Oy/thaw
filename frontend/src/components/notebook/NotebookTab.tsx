@@ -21,6 +21,7 @@ import {
   SaveOutlined,
   ReloadOutlined,
   CopyOutlined,
+  CloudUploadOutlined,
 } from "@ant-design/icons";
 import {
   StartNotebookSession,
@@ -58,6 +59,7 @@ function installCopyHandler(containerEl: HTMLElement): () => void {
 }
 import { useQueryStore } from "../../store/queryStore";
 import { useThemeStore } from "../../store/themeStore";
+import DeployNotebookModal from "./DeployNotebookModal";
 
 const { Text } = Typography;
 
@@ -207,6 +209,7 @@ export default function NotebookTab({ tabId }: Props) {
   const [kernelStarting, setKernelStarting] = useState(false);
   const [kernelError, setKernelError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deployOpen, setDeployOpen] = useState(false);
 
   // Track current cells in a ref to avoid stale closures in the serializer.
   const cellsRef = useRef(cells);
@@ -438,6 +441,17 @@ export default function NotebookTab({ tabId }: Props) {
 
         <div style={{ flex: 1 }} />
 
+        <Tooltip title={tab?.path ? "Deploy this notebook to Snowflake" : "Save the notebook first to deploy it"}>
+          <Button
+            icon={<CloudUploadOutlined />}
+            size="small"
+            disabled={!tab?.path}
+            onClick={() => setDeployOpen(true)}
+          >
+            Deploy
+          </Button>
+        </Tooltip>
+
         {/* Kernel status */}
         {kernelStarting && <Spin size="small" />}
         {kernelStarting && <Text style={{ fontSize: 11, color: textMuted }}>Starting kernel…</Text>}
@@ -483,6 +497,16 @@ export default function NotebookTab({ tabId }: Props) {
           />
         ))}
       </div>
+
+      {tab?.path && (
+        <DeployNotebookModal
+          open={deployOpen}
+          filePath={tab.path}
+          defaultName={tab.title}
+          onClose={() => setDeployOpen(false)}
+          onDeployed={() => setDeployOpen(false)}
+        />
+      )}
     </div>
   );
 }

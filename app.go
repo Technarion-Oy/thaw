@@ -1494,6 +1494,16 @@ func (a *App) ImportTableData(params snowflake.ImportTableParams) (snowflake.Imp
 	return a.client.ImportTableData(a.ctx, params)
 }
 
+// DeployNotebook uploads a local .ipynb file to a temporary Snowflake internal
+// stage and creates a NOTEBOOK object from it. The temporary stage is dropped
+// automatically after the notebook is created (or on error).
+func (a *App) DeployNotebook(params snowflake.DeployNotebookParams) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	return a.client.DeployNotebook(a.ctx, params)
+}
+
 // GetERDiagramData fetches column metadata, primary keys, and foreign keys for
 // every table in the database and returns the data needed to render an Entity
 // Relationship Diagram on the frontend.

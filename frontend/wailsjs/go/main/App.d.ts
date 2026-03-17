@@ -43,6 +43,8 @@ export function DeleteOldestBackup(arg1:string,arg2:string,arg3:string):Promise<
 
 export function DeleteVenvFolder():Promise<void>;
 
+export function DeployNotebook(arg1:snowflake.DeployNotebookParams):Promise<void>;
+
 export function Disconnect():Promise<void>;
 
 export function DropBackupPolicy(arg1:string):Promise<void>;

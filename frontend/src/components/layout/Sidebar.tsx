@@ -41,6 +41,7 @@ import {
   PlusSquareOutlined,
   RightOutlined,
   ShareAltOutlined,
+  ExperimentOutlined,
 } from "@ant-design/icons";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
@@ -77,9 +78,10 @@ const KIND_LABEL: Record<string, string> = {
   TASK:          "Tasks",
   "FILE FORMAT": "File Formats",
   PIPE:          "Pipes",
+  NOTEBOOK:      "Notebooks",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "FILE FORMAT", "PIPE"];
+const KIND_ORDER = ["TABLE", "VIEW", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "FILE FORMAT", "PIPE", "NOTEBOOK"];
 
 function kindIcon(kind: string) {
   switch (kind) {
@@ -93,6 +95,7 @@ function kindIcon(kind: string) {
     case "TASK":        return <ClockCircleOutlined />;
     case "FILE FORMAT": return <FileOutlined />;
     case "PIPE":        return <ApiOutlined />;
+    case "NOTEBOOK":    return <ExperimentOutlined />;
     default:            return <FileOutlined />;
   }
 }

@@ -1630,6 +1630,7 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 		{fmt.Sprintf("SHOW STAGES IN SCHEMA %s", q), "STAGE"},
 		{fmt.Sprintf("SHOW FILE FORMATS IN SCHEMA %s", q), "FILE FORMAT"},
 		{fmt.Sprintf("SHOW PIPES IN SCHEMA %s", q), "PIPE"},
+		{fmt.Sprintf("SHOW NOTEBOOKS IN SCHEMA %s", q), "NOTEBOOK"},
 	}
 
 	type result struct {
@@ -2520,4 +2521,97 @@ func buildImportCopySQL(stageAt, tableRef string, p ImportTableParams) string {
 			"COPY INTO %s\nFROM %s\nFILE_FORMAT = (%s)\nFORCE = TRUE",
 			tableRef, stageAt, ff)
 	}
+}
+
+// DeployNotebookParams holds the parameters for deploying a local .ipynb
+// notebook to Snowflake via a temporary internal stage.
+type DeployNotebookParams struct {
+	Database    string `json:"database"`
+	Schema      string `json:"schema"`
+	Name        string `json:"name"`        // notebook object name in Snowflake
+	FilePath    string `json:"filePath"`    // absolute local path to the .ipynb file
+	OrReplace   bool   `json:"orReplace"`
+	IfNotExists bool   `json:"ifNotExists"`
+	// Optional CREATE NOTEBOOK clauses
+	Comment                 string `json:"comment"`
+	QueryWarehouse          string `json:"queryWarehouse"`          // warehouse for SQL queries inside the notebook
+	IdleAutoShutdownSeconds int    `json:"idleAutoShutdownSeconds"` // 0 → omit
+	RuntimeName             string `json:"runtimeName"`
+	ComputePool             string `json:"computePool"`
+	Warehouse               string `json:"warehouse"` // warehouse for Python runtime
+}
+
+// DeployNotebook uploads a local .ipynb file to a temporary internal stage and
+// creates a Snowflake NOTEBOOK object from it, then drops the stage.
+//
+//  1. CREATE TEMPORARY STAGE in the target schema
+//  2. PUT the .ipynb file to the stage
+//  3. CREATE [OR REPLACE] NOTEBOOK … FROM '<stage>' MAIN_FILE = '<file>'
+//  4. DROP STAGE (deferred – also fires on error)
+func (c *Client) DeployNotebook(ctx context.Context, params DeployNotebookParams) error {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	escapeLit := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
+
+	// Create a temporary stage in the target schema.
+	stageName := fmt.Sprintf("THAW_NB_%d", time.Now().UnixNano())
+	stageRef := fmt.Sprintf(`"%s"."%s".%s`, esc(params.Database), esc(params.Schema), stageName)
+	stageAt := "@" + stageRef
+
+	if _, err := c.db.ExecContext(ctx, "CREATE TEMPORARY STAGE "+stageRef); err != nil {
+		return fmt.Errorf("create notebook stage: %w", err)
+	}
+	defer c.db.ExecContext(context.Background(), "DROP STAGE IF EXISTS "+stageRef) //nolint:errcheck
+
+	// PUT the .ipynb file to the stage.
+	fileURL, err := localFileURLForFile(params.FilePath)
+	if err != nil {
+		return fmt.Errorf("build file url: %w", err)
+	}
+	escapedURL := strings.ReplaceAll(fileURL, "'", "\\'")
+	putSQL := fmt.Sprintf("PUT '%s' %s AUTO_COMPRESS=FALSE OVERWRITE=TRUE", escapedURL, stageAt)
+	putRows, err := c.db.QueryContext(ctx, putSQL)
+	if err != nil {
+		return fmt.Errorf("upload notebook to stage: %w", err)
+	}
+	putRows.Close()
+
+	// Build the CREATE NOTEBOOK statement.
+	notebookRef := fmt.Sprintf(`"%s"."%s"."%s"`, esc(params.Database), esc(params.Schema), esc(params.Name))
+	mainFile := filepath.Base(params.FilePath)
+
+	var sb strings.Builder
+	sb.WriteString("CREATE ")
+	if params.OrReplace {
+		sb.WriteString("OR REPLACE ")
+	}
+	sb.WriteString("NOTEBOOK ")
+	if params.IfNotExists {
+		sb.WriteString("IF NOT EXISTS ")
+	}
+	sb.WriteString(notebookRef)
+	sb.WriteString(fmt.Sprintf("\n  FROM '%s'", stageAt))
+	sb.WriteString(fmt.Sprintf("\n  MAIN_FILE = '%s'", escapeLit(mainFile)))
+	if params.Comment != "" {
+		sb.WriteString(fmt.Sprintf("\n  COMMENT = '%s'", escapeLit(params.Comment)))
+	}
+	if params.QueryWarehouse != "" {
+		sb.WriteString(fmt.Sprintf("\n  QUERY_WAREHOUSE = %s", params.QueryWarehouse))
+	}
+	if params.IdleAutoShutdownSeconds > 0 {
+		sb.WriteString(fmt.Sprintf("\n  IDLE_AUTO_SHUTDOWN_TIME_SECONDS = %d", params.IdleAutoShutdownSeconds))
+	}
+	if params.RuntimeName != "" {
+		sb.WriteString(fmt.Sprintf("\n  RUNTIME_NAME = '%s'", escapeLit(params.RuntimeName)))
+	}
+	if params.ComputePool != "" {
+		sb.WriteString(fmt.Sprintf("\n  COMPUTE_POOL = '%s'", escapeLit(params.ComputePool)))
+	}
+	if params.Warehouse != "" {
+		sb.WriteString(fmt.Sprintf("\n  WAREHOUSE = %s", params.Warehouse))
+	}
+
+	if _, err := c.db.ExecContext(ctx, sb.String()); err != nil {
+		return fmt.Errorf("create notebook: %w", err)
+	}
+	return nil
 }
