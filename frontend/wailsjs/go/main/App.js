@@ -86,6 +86,10 @@ export function DropBackupSet(arg1, arg2, arg3) {
   return window['go']['main']['App']['DropBackupSet'](arg1, arg2, arg3);
 }
 
+export function ExecuteNotebook(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ExecuteNotebook'](arg1, arg2, arg3, arg4);
+}
+
 export function ExecuteQuery(arg1) {
   return window['go']['main']['App']['ExecuteQuery'](arg1);
 }

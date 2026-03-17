@@ -51,6 +51,8 @@ export function DropBackupPolicy(arg1:string):Promise<void>;
 
 export function DropBackupSet(arg1:string,arg2:string,arg3:string):Promise<void>;
 
+export function ExecuteNotebook(arg1:string,arg2:string,arg3:string,arg4:Array<string>):Promise<string>;
+
 export function ExecuteQuery(arg1:string):Promise<snowflake.QueryResult>;
 
 export function ExportAccountObjectsDDL(arg1:string):Promise<main.AccountExportResult>;

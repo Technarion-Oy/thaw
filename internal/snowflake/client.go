@@ -2627,6 +2627,27 @@ func (c *Client) FetchNotebookContent(ctx context.Context, database, schema, nam
 	return string(data), nil
 }
 
+// ExecuteNotebook runs EXECUTE NOTEBOOK against a Snowflake Notebook object.
+// params contains the string literal values to pass; each value is
+// single-quote escaped and wrapped in quotes before being embedded in the SQL.
+// Pass an empty slice to execute with no parameters.
+func (c *Client) ExecuteNotebook(ctx context.Context, database, schema, name string, params []string) (string, error) {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	notebookRef := fmt.Sprintf(`"%s"."%s"."%s"`, esc(database), esc(schema), esc(name))
+
+	args := make([]string, len(params))
+	for i, p := range params {
+		args[i] = "'" + strings.ReplaceAll(p, "'", "''") + "'"
+	}
+	sql := fmt.Sprintf("EXECUTE NOTEBOOK %s(%s)", notebookRef, strings.Join(args, ", "))
+
+	result, err := c.Execute(ctx, sql)
+	if err != nil {
+		return "", err
+	}
+	return result.QueryID, nil
+}
+
 // DeployNotebookParams holds the parameters for deploying a local .ipynb
 // notebook to Snowflake via a temporary internal stage.
 type DeployNotebookParams struct {

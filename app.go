@@ -1494,6 +1494,16 @@ func (a *App) ImportTableData(params snowflake.ImportTableParams) (snowflake.Imp
 	return a.client.ImportTableData(a.ctx, params)
 }
 
+// ExecuteNotebook runs EXECUTE NOTEBOOK against a Snowflake Notebook object and
+// returns the resulting query ID. Each element of params is treated as a string
+// literal value and is automatically single-quoted in the generated SQL.
+func (a *App) ExecuteNotebook(database, schema, name string, params []string) (string, error) {
+	if a.client == nil {
+		return "", ErrNotConnected
+	}
+	return a.client.ExecuteNotebook(a.ctx, database, schema, name, params)
+}
+
 // FetchNotebookContent retrieves the content of a Snowflake Notebook object.
 // It describes the notebook to find its stage URI, downloads the .ipynb file
 // to a temporary local directory, reads the file, and returns the nbformat JSON.

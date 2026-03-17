@@ -56,6 +56,7 @@ import { useGitStore } from "../../store/gitStore";
 import { useDiffStore } from "../../store/diffStore";
 import AccountPanel from "../account/AccountPanel";
 import CallProcedureModal from "../procedure/CallProcedureModal";
+import ExecuteNotebookModal from "../notebook/ExecuteNotebookModal";
 import SelectFunctionModal from "../function/SelectFunctionModal";
 import CreateTaskModal from "../task/CreateTaskModal";
 import ERDiagramModal from "../er/ERDiagramModal";
@@ -292,6 +293,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [ddlModal, setDdlModal]   = useState<ObjectDDL | null>(null);
   const [callModal, setCallModal] = useState<{ db: string; schema: string; name: string; rawArgs: string } | null>(null);
   const [selectFunctionModal, setSelectFunctionModal] = useState<{ db: string; schema: string; name: string; rawArgs: string } | null>(null);
+  const [executeNotebookModal, setExecuteNotebookModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createTaskModal, setCreateTaskModal] = useState<{ db: string; schema: string } | null>(null);
   const [undropModal, setUndropModal] = useState<UndropModal | null>(null);
   const [undropSchemasModal, setUndropSchemasModal] = useState<UndropSchemasModal | null>(null);
@@ -659,6 +661,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const [, db, schema, , ...nameParts] = nodeKey.split(":");
     const name = nameParts.join(":");
     setSelectFunctionModal({ db, schema, name, rawArgs: objArgs });
+  };
+
+  const executeNotebook = () => {
+    if (!ctxMenu) return;
+    const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
+    const name = nameParts.join(":");
+    setCtxMenu(null);
+    setExecuteNotebookModal({ db, schema, name });
   };
 
   const openCreateTask = () => {
@@ -1272,6 +1282,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Call Function…", <FunctionOutlined style={{ fontSize: 12 }} />, selectFunction)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "NOTEBOOK" &&
             menuItem("Open Notebook", <ExperimentOutlined style={{ fontSize: 12 }} />, openNotebookFromSnowflake)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "NOTEBOOK" &&
+            menuItem("Execute Notebook…", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeNotebook)}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && menuItem("View Definition", null, viewDefinition)}
           {ctxMenu.nodeType === "obj" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
@@ -1349,6 +1361,16 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           <Divider style={{ borderColor: "var(--border)", margin: "8px 0 0" }} />
           <AccountPanel />
         </>
+      )}
+
+      {/* Execute Notebook modal */}
+      {executeNotebookModal && (
+        <ExecuteNotebookModal
+          db={executeNotebookModal.db}
+          schema={executeNotebookModal.schema}
+          name={executeNotebookModal.name}
+          onClose={() => setExecuteNotebookModal(null)}
+        />
       )}
 
       {/* Call Procedure modal */}
