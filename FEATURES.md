@@ -47,7 +47,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 
 ## Object Browser
 
-- Browse all databases → schemas → tables, views, functions, procedures, sequences, stages, streams, tasks, file formats, and pipes
+- Browse all databases → schemas → tables, views, functions, procedures, sequences, stages, streams, tasks, file formats, pipes, and notebooks
 - **Search** — filter objects by name across all databases and schemas in real time
 - **Right-click procedures** to open a parameter dialog; clicking **Execute** generates the `CALL` statement, opens a new tab, and runs it immediately — no manual Run press needed
 - **Right-click functions** (**Call Function…**) to open a parameter dialog; detects scalar vs. table functions and generates the correct SQL; clicking **Execute** opens a new tab and runs it immediately
@@ -70,6 +70,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Select for Comparison** / **Compare with** — side-by-side DDL diff (see [Text Comparison](#text-comparison))
 - **Right-click a database** to export its DDL, generate an ER Diagram, view dropped schemas recoverable via Time Travel, or open **Backup Sets…**
 - **Right-click a schema** to view dropped tables, **Export Data…** or **Import Data…** without needing an existing table (schema-level launch opens the same modals with a table selector or name field), open **Backup Sets…**, or use the **Create Object** cascading submenu (opens left or right depending on available screen space); currently contains **Task…** to create a new Snowflake Task
+- **Right-click a notebook** to **Open Notebook** — pulls the latest version from Snowflake using `DESC NOTEBOOK` and `GET`, then opens it in a new unsaved notebook tab
 - **Right-click a table** to open **Backup Sets…** (shows backup sets scoped to its schema)
 - **Drag and drop** — drag any table or view into the editor to insert a `SELECT` statement with all column names listed individually
 - **Empty table indicator** — table names with zero rows appear in a faded colour so unpopulated tables are immediately visible in the tree
@@ -316,6 +317,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 
 - **New Notebook** (`Snowpark → New Notebook…`) — native save dialog writes a blank `nbformat v4` file and opens it as a new notebook tab
 - **Open Notebook** (`Snowpark → Open Notebook…`) — file picker filtered to `.ipynb`; opens alongside SQL tabs
+- **Open from Snowflake** — right-click any notebook in the object browser and choose **Open Notebook**; the latest version is downloaded from Snowflake and opened as a new unsaved notebook tab
 - Notebooks are saved as standard `.ipynb` files compatible with JupyterLab and VS Code
 
 ### Cell editor
@@ -346,6 +348,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 ### Notebook management
 
 - **Run All**, **Restart Kernel**, **Save**, **Add Cell** in the toolbar
+- **Deploy** — deploys the notebook to Snowflake via a dialog with all `CREATE NOTEBOOK` options (database, schema, name, `OR REPLACE` / `IF NOT EXISTS`, comment, query warehouse, Python runtime warehouse, idle auto-shutdown seconds, runtime name, compute pool); works for both saved and unsaved notebooks — unsaved content is serialised and written to a temporary file automatically
 - Per-cell controls: run, move up/down, add below, delete
 - Kernel status indicator: starting spinner → "Kernel ready" → "Kernel error"
 

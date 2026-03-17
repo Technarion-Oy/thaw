@@ -92,6 +92,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 
 - **New Notebook** (`Snowpark → New Notebook…`) — shows a native save dialog, writes a blank `nbformat v4` file, and opens it as a new tab
 - **Open Notebook** (`Snowpark → Open Notebook…`) — file picker filtered to `.ipynb`; opens the notebook as a tab alongside SQL tabs
+- **Open from Snowflake** — right-click any notebook in the object browser and choose **Open Notebook** to pull the latest version directly from Snowflake; `DESC NOTEBOOK` locates the stage URI and `GET` downloads the file to a temporary directory; the content opens in a new unsaved notebook tab (the unsaved indicator is shown so you can choose to save it locally)
 - Notebook tabs are identified by an experiment icon in the tab strip
 - Notebooks are saved back to disk as standard `.ipynb` files compatible with JupyterLab and VS Code
 
@@ -130,6 +131,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - **Restart Kernel** — stops and relaunches the Python kernel subprocess; existing SQL cell results are preserved
 - **Save** — writes the notebook to disk at its original path; the tab's unsaved-change indicator clears
 - **Add Cell** — inserts a new code cell at the bottom or below a specific cell
+- **Deploy** — deploys the notebook as a Snowflake Notebook object; opens a dialog with all `CREATE NOTEBOOK` options: database, schema, name, `OR REPLACE` / `IF NOT EXISTS`, comment, query warehouse (for SQL queries), Python runtime warehouse, idle auto-shutdown seconds, runtime name, and compute pool; works for both saved notebooks (uploaded from their file path) and unsaved notebooks (the current in-memory content is serialised and written to a temporary file before upload; the temp file is removed after the stage transfer)
 - Per-cell controls: run, move up, move down, add below, delete
 - Kernel status indicator in the toolbar: "Starting kernel…" spinner, "Kernel ready" tag, or "Kernel error" tag
 
@@ -141,7 +143,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - All four actions are available in the **File** menu in the macOS/Windows menu bar as well as in the toolbar
 
 ### Object browser (sidebar)
-- Browse databases → schemas → objects (tables, views, functions, procedures, …)
+- Browse databases → schemas → objects (tables, views, functions, procedures, notebooks, …)
 - **Filter objects** — type in the search box at the top of the sidebar to filter objects by name across all databases and schemas; the tree cascade-loads all schemas and objects automatically and collapses back to the database list when the search is cleared
 - **Refresh** button (`↺`) in the sidebar header reloads the entire database tree from Snowflake
 - Right-click a **database** to refresh, export its DDL, **insert its name** at the editor cursor, generate an **ER Diagram**, **Show Dropped Schemas…**, or open **Backup Sets…** — lists schemas recoverable via Time Travel with an **Undrop** button for each
@@ -164,6 +166,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
   - Call the procedure with auto-generated parameter fields (procedures) — opens a parameter dialog; clicking **Execute** opens a new tab with the generated `CALL` statement and runs it immediately
   - **Call Function…** (functions) — opens a parameter dialog with auto-generated fields; detects scalar vs. table functions from the DDL and generates the correct SQL (`SELECT func(args) AS result` or `SELECT * FROM TABLE(func(args))`); clicking **Execute** opens a new tab and runs it immediately
   - **View Dependencies…** (views, procedures, functions) — opens a modal with a fully recursive dependency tree built by parsing DDL — no dynamic SQL or Snowflake lineage service required; each node shows the object kind (icon + colour-coded tag), fully-qualified name, and optional error/circular badges; hover any node to see its DDL in a tooltip (fetched lazily, cached for 60 seconds); circular references are detected automatically and labelled "already shown" to prevent infinite expansion; SQL-language objects are expanded recursively up to 8 levels deep; tables and non-SQL objects are shown as leaf nodes; the tree is fully expanded on load and can be collapsed/expanded manually
+  - **Open Notebook** (notebooks) — downloads the notebook source from Snowflake via `DESC NOTEBOOK` → `GET`, opens it in a new unsaved notebook tab; the `•` unsaved indicator is shown immediately so it's clear the file hasn't been saved locally yet
   - **Insert Full Name** — inserts the fully-qualified `"DB"."SCHEMA"."NAME"` at the current editor cursor position
   - View the DDL definition inline
   - **Rename** the object (`ALTER … RENAME TO`) — available for tables, views, sequences, stages, streams, tasks, file formats, and pipes
