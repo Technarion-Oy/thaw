@@ -164,6 +164,10 @@ func buildMenu(app *App) *menu.Menu {
 	toolsMenu.AddText("Export Path Format…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:export-path-format")
 	})
+	toolsMenu.AddSeparator()
+	toolsMenu.AddText("Schema Migration…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:migration")
+	})
 
 	// ── Snowpark ──────────────────────────────────────────────────────────────
 	snowparkMenu := appMenu.AddSubmenu("Snowpark")

@@ -17,6 +17,8 @@ export function AlterBackupSet(arg1:string,arg2:string,arg3:string,arg4:string):
 
 export function AlterTableProperty(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
+export function AnalyzeMigration(arg1:Array<main.MigrationObject>,arg2:string):Promise<Array<main.MigrationDiffItem>>;
+
 export function CanCreateUsers():Promise<boolean>;
 
 export function CanManageUsers():Promise<boolean>;
@@ -29,6 +31,8 @@ export function CancelConnect():Promise<void>;
 
 export function CancelExport():Promise<void>;
 
+export function CancelMigration():Promise<void>;
+
 export function CancelQuery():Promise<void>;
 
 export function CheckSnowparkEnv():Promise<main.SnowparkCheckResult>;
@@ -38,6 +42,8 @@ export function Connect(arg1:snowflake.ConnectParams):Promise<void>;
 export function CreateBackupPolicy(arg1:string,arg2:string,arg3:number,arg4:boolean,arg5:string,arg6:string,arg7:boolean,arg8:boolean):Promise<void>;
 
 export function CreateBackupSet(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:boolean,arg8:boolean):Promise<void>;
+
+export function CreateMigrationSnapshot(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean,arg6:string,arg7:boolean):Promise<void>;
 
 export function DeleteOldestBackup(arg1:string,arg2:string,arg3:string):Promise<void>;
 
@@ -50,6 +56,8 @@ export function Disconnect():Promise<void>;
 export function DropBackupPolicy(arg1:string):Promise<void>;
 
 export function DropBackupSet(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function ExecuteMigration(arg1:Array<main.MigrationObject>,arg2:string,arg3:number):Promise<Array<main.MigrationExecEvent>>;
 
 export function ExecuteNotebook(arg1:string,arg2:string,arg3:string,arg4:Array<string>):Promise<string>;
 
@@ -234,6 +242,8 @@ export function SaveNotebook(arg1:string,arg2:string):Promise<void>;
 export function SaveSnowparkConfig(arg1:string):Promise<void>;
 
 export function SaveSnowparkPythonPath(arg1:string):Promise<void>;
+
+export function ScanMigrationSource(arg1:string):Promise<Array<main.MigrationObject>>;
 
 export function SearchFiles(arg1:string,arg2:string,arg3:boolean):Promise<Array<filesystem.SearchMatch>>;
 

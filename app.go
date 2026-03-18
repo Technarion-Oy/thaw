@@ -45,8 +45,9 @@ type App struct {
 	client        *snowflake.Client
 	connectParams *snowflake.ConnectParams // stored after a successful Connect for notebook session init
 	cancelConnect    context.CancelFunc
-	exportCancelFunc context.CancelFunc // cancels an in-flight DDL export
-	cancelChat       context.CancelFunc // cancels an in-flight AI chat request
+	exportCancelFunc    context.CancelFunc // cancels an in-flight DDL export
+	migrationCancelFunc context.CancelFunc // cancels an in-flight schema migration
+	cancelChat          context.CancelFunc // cancels an in-flight AI chat request
 	logCleanup       func()             // closes the log rotation file on shutdown
 
 	// Two-phase query execution (StartQuery / WaitForQueryResult).

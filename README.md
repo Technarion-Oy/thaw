@@ -330,6 +330,25 @@ Right-click the **account · user** tag in the query toolbar to open the **Sessi
 - Export directory can be changed directly from the Export DDL panel without opening the Git section
 - Results list (per-database file counts and errors) can be collapsed/expanded with a caret button; the summary tags (total files, skipped, errors) always remain visible
 
+### Schema Migration
+
+Open **Tools → Schema Migration…** in the menu bar to deploy local `.sql` DDL files to Snowflake with conflict detection, dependency ordering, and safety snapshots. A 5-step wizard guides the process:
+
+1. **Configure** — pick the local source directory and the target Snowflake database
+2. **Scan** — reads every `.sql` file in the directory tree, splits multi-statement files, tracks `USE DATABASE` / `USE SCHEMA` context, and deduplicates objects by kind + name; the summary shows counts by object type
+3. **Review** — shows an Ag-Grid diff table with a status tag for each object:
+   - **New** — exists locally but not in Snowflake
+   - **Changed** — exists in both; DDL is normalised (comments stripped, whitespace collapsed, uppercased, trailing `;` removed) before comparison to eliminate cosmetic noise
+   - **Unchanged** — identical DDL; hidden from selection by default
+   - **Removed** — exists in Snowflake but not locally
+   - **Monaco DiffEditor** below the grid shows local vs remote DDL for the selected row
+   - **Auto-dependency selection** — when a VIEW or PROCEDURE is checked, any referenced TABLE that is also "new" or "changed" is selected automatically and a toast is shown; unchecking a TABLE that a selected VIEW depends on is blocked with an inline warning
+   - **Open in SQL Editor** — generates the full deployment script (sorted by execution priority), loads it into a new editor tab, and closes the modal for manual review before running
+4. **Protect** — optional safety measures before deploying:
+   - Create a Snowflake Backup Set (`CREATE BACKUP SET FOR DATABASE …`)
+   - Create a zero-copy clone database (`CREATE DATABASE … CLONE …`)
+5. **Deploy** — executes the selected objects in dependency order (DATABASE → SCHEMA → SEQUENCE → TABLE → FILE FORMAT → STAGE → VIEW → MATERIALIZED VIEW → FUNCTION → PROCEDURE → STREAM → TASK → PIPE) with up to 5 retry passes; objects that fail with a dependency error ("does not exist" / "not authorized") are automatically retried in subsequent passes; a live progress table shows pass number, object name, and per-object status; **Cancel** stops the run cleanly
+
 ### File browser
 - Browse the export working directory in the sidebar
 - Lazy-loads subdirectories on demand
@@ -354,7 +373,7 @@ Right-click the **account · user** tag in the query toolbar to open the **Sessi
 - **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane; ratio is persisted across sessions
 - **Object browser height** — the Objects panel is collapsible (click the label or the ▶/▼ chevron) and vertically resizable (drag the handle below the tree, 80 – 800 px); the Administration panel fills the remaining space
 - **Theming** — light, dark, and system-default themes; switch via **View → Appearance** in the native menu bar; preference is persisted across sessions
-- Native application menu bar with **File** (open / save / new tab), **View → Appearance** (System / Light / Dark), **AI → Configure AI…**, **Tools** (**Code Snippets…**, **Export Path Format…**), and **Snowpark** (**Check Environment…**, **Setup Environment…**, **New Notebook…**, **Open Notebook…**) menus
+- Native application menu bar with **File** (open / save / new tab), **View → Appearance** (System / Light / Dark), **AI → Configure AI…**, **Tools** (**Code Snippets…**, **Export Path Format…**, **Schema Migration…**), and **Snowpark** (**Check Environment…**, **Setup Environment…**, **New Notebook…**, **Open Notebook…**) menus
 - Object browser scrolls horizontally when object names are wider than the sidebar
 - Right-click context menu is always clamped inside the viewport — never overflows the screen edges
 - Closing the app while a query is running shows a confirmation dialog; if confirmed, the query is cancelled in Snowflake before exit
@@ -531,6 +550,7 @@ thaw/
     │       │   └── SnowparkSetupModal.tsx  # Three-step setup wizard (conda / venv)
     │       ├── notebook/
     │       │   └── NotebookTab.tsx         # Jupyter-style notebook with Monaco cell editors
+    │       ├── migration/MigrationModal.tsx # Schema Migration wizard (Tools menu)
     │       ├── snippets/SnippetsModal.tsx  # Code Snippets browser (Tools menu)
     │       ├── task/CreateTaskModal.tsx    # CREATE OR REPLACE TASK dialog
     │       └── layout/

@@ -18,6 +18,10 @@ export function AlterTableProperty(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['AlterTableProperty'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function AnalyzeMigration(arg1, arg2) {
+  return window['go']['main']['App']['AnalyzeMigration'](arg1, arg2);
+}
+
 export function CanCreateUsers() {
   return window['go']['main']['App']['CanCreateUsers']();
 }
@@ -42,6 +46,10 @@ export function CancelExport() {
   return window['go']['main']['App']['CancelExport']();
 }
 
+export function CancelMigration() {
+  return window['go']['main']['App']['CancelMigration']();
+}
+
 export function CancelQuery() {
   return window['go']['main']['App']['CancelQuery']();
 }
@@ -60,6 +68,10 @@ export function CreateBackupPolicy(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg
 
 export function CreateBackupSet(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
   return window['go']['main']['App']['CreateBackupSet'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+}
+
+export function CreateMigrationSnapshot(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
+  return window['go']['main']['App']['CreateMigrationSnapshot'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 }
 
 export function DeleteOldestBackup(arg1, arg2, arg3) {
@@ -84,6 +96,10 @@ export function DropBackupPolicy(arg1) {
 
 export function DropBackupSet(arg1, arg2, arg3) {
   return window['go']['main']['App']['DropBackupSet'](arg1, arg2, arg3);
+}
+
+export function ExecuteMigration(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ExecuteMigration'](arg1, arg2, arg3);
 }
 
 export function ExecuteNotebook(arg1, arg2, arg3, arg4) {
@@ -452,6 +468,10 @@ export function SaveSnowparkConfig(arg1) {
 
 export function SaveSnowparkPythonPath(arg1) {
   return window['go']['main']['App']['SaveSnowparkPythonPath'](arg1);
+}
+
+export function ScanMigrationSource(arg1) {
+  return window['go']['main']['App']['ScanMigrationSource'](arg1);
 }
 
 export function SearchFiles(arg1, arg2, arg3) {

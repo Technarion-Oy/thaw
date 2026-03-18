@@ -349,6 +349,91 @@ export namespace main {
 	        this.comment = source["comment"];
 	    }
 	}
+	export class MigrationObject {
+	    filePath: string;
+	    database: string;
+	    schema: string;
+	    objectKind: string;
+	    objectName: string;
+	    argSig: string;
+	    ddl: string;
+	    isReplace: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new MigrationObject(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.filePath = source["filePath"];
+	        this.database = source["database"];
+	        this.schema = source["schema"];
+	        this.objectKind = source["objectKind"];
+	        this.objectName = source["objectName"];
+	        this.argSig = source["argSig"];
+	        this.ddl = source["ddl"];
+	        this.isReplace = source["isReplace"];
+	    }
+	}
+	export class MigrationDiffItem {
+	    object: MigrationObject;
+	    status: string;
+	    localDDL: string;
+	    remoteDDL: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MigrationDiffItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.object = this.convertValues(source["object"], MigrationObject);
+	        this.status = source["status"];
+	        this.localDDL = source["localDDL"];
+	        this.remoteDDL = source["remoteDDL"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class MigrationExecEvent {
+	    done: number;
+	    total: number;
+	    object: string;
+	    status: string;
+	    error: string;
+	    pass: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new MigrationExecEvent(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.done = source["done"];
+	        this.total = source["total"];
+	        this.object = source["object"];
+	        this.status = source["status"];
+	        this.error = source["error"];
+	        this.pass = source["pass"];
+	    }
+	}
+	
 	export class NotebookSessionContext {
 	    role: string;
 	    warehouse: string;

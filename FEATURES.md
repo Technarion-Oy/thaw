@@ -171,6 +171,42 @@ Open **AI → Configure AI…** in the menu bar to set your provider, API key, a
 
 ---
 
+## Schema Migration
+
+Open **Tools → Schema Migration…** to deploy local `.sql` DDL files to a Snowflake database. A 5-step wizard guides the process from source directory to live deployment.
+
+### Step 1 — Configure
+- Pick the local source directory containing `.sql` files
+- Select the target Snowflake database from a dropdown
+
+### Step 2 — Scan
+- Recursively reads every `.sql` file in the source tree
+- Handles multi-statement files; tracks `USE DATABASE` / `USE SCHEMA` context to resolve unqualified names
+- Deduplicates objects (last definition wins); shows a count breakdown by object type (TABLE: N, VIEW: N, …)
+
+### Step 3 — Review
+- **Ag-Grid diff table** with status tags:
+  - **New** — object exists locally but not in Snowflake
+  - **Changed** — DDL differs after normalisation (comments stripped, whitespace collapsed, uppercased, trailing `;` removed)
+  - **Unchanged** — identical; hidden from selection by default
+  - **Removed** — exists in Snowflake but not in the local source
+- **Monaco DiffEditor** below the grid shows the local vs remote DDL for the selected row
+- **Dependency auto-select** — selecting a VIEW or PROCEDURE automatically selects any referenced TABLE that is also "new" or "changed"; unchecking a TABLE that a selected VIEW or PROCEDURE depends on is blocked with an inline warning ("Required by: VIEW_NAME")
+- **Open in SQL Editor** — generates the full deployment script in execution-priority order and opens it in a new editor tab so you can review and edit before running
+
+### Step 4 — Protect
+Optional safety nets before deploying:
+- **Create Backup Set** — `CREATE BACKUP SET FOR DATABASE <db>` targeting a chosen database / schema / name
+- **Create Zero-Copy Clone** — `CREATE DATABASE <clone> CLONE <db>` for a point-in-time snapshot
+
+### Step 5 — Deploy
+- Objects execute in dependency order: DATABASE → SCHEMA → SEQUENCE → TABLE → FILE FORMAT → STAGE → VIEW → MATERIALIZED VIEW → FUNCTION → PROCEDURE → STREAM → TASK → PIPE
+- Up to **5 retry passes** — objects that fail with a dependency error ("does not exist" / "not authorized") are automatically re-queued for the next pass; once a pass produces no progress the remaining objects are marked as failed
+- **Live progress table** — pass number, object kind, fully-qualified name, and per-object status tag (running / success / failed / skipped) update in real time as events arrive
+- **Cancel** — stops the deployment cleanly mid-run
+
+---
+
 ## Git Integration
 
 - View git status for the working directory (staged and unstaged files)
@@ -367,7 +403,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 ## UI & Theming
 
 - **Light, Dark, and System** themes — switch via **View → Appearance**; preference is saved across sessions
-- **Tools menu** — native menu bar **Tools** entry provides **Code Snippets…** and **Export Path Format…**
+- **Tools menu** — native menu bar **Tools** entry provides **Code Snippets…**, **Export Path Format…**, and **Schema Migration…**
 - **Snowpark menu** — native menu bar **Snowpark** entry provides **Check Environment…**, **Setup Environment…**, **New Notebook…**, and **Open Notebook…**
 - **Resizable sidebars** — drag either sidebar edge to any width between 160 px and 600 px
 - **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane to any ratio; position is saved across sessions
