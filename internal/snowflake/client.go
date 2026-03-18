@@ -1615,7 +1615,12 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 // privileges on a particular object type) are silently skipped so that the
 // rest still appear.
 func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
-	q := fmt.Sprintf("%s.%s", database, schema)
+	quoteIdent := func(v string) string {
+		v = strings.Trim(v, `"`)
+		v = strings.ReplaceAll(v, `"`, `""`)
+		return `"` + v + `"`
+	}
+	q := fmt.Sprintf("%s.%s", quoteIdent(database), quoteIdent(schema))
 
 	type showCmd struct {
 		query string

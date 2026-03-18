@@ -227,10 +227,11 @@ Click the clock icon (⏱) in the Administration panel header to open the **Quer
 - **Limit** — result row cap (1 – 10 000, default 100)
 - **Include client-generated** — optionally include Thaw's own internal statements
 - **Run** — re-fetches with the current filter settings; the modal also auto-fetches on open using the current session scope
-- Results table shows status (colour-coded tag), query type, query preview, user, warehouse, database, start time, and duration
+- Results table shows status (colour-coded tag), query type, query preview, start time, end time, and duration
 - **Query text search** — a live filter bar above the table narrows rows by query text as you type; matches are highlighted in the preview column and in the expanded full-SQL view; the row count shows `N of M rows` when a filter is active
-- Expand any row to see the full SQL with match highlighting and an **Error** message if the query failed
+- Expand any row to see the full SQL with match highlighting plus a detail grid with user, warehouse, database, schema, rows produced, bytes scanned, and query ID
 - **Load in Editor** — inserts the selected query into the active editor tab and closes the modal
+- **Copy** — copies the full query text to the clipboard; the button briefly shows "Copied!" as confirmation
 - Backed by `SNOWFLAKE.INFORMATION_SCHEMA.QUERY_HISTORY_BY_SESSION / _BY_USER / _BY_WAREHOUSE / QUERY_HISTORY` table functions
 
 #### User Management

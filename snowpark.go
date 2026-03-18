@@ -1335,7 +1335,21 @@ func (a *App) syncKernelContext(s *notebookSession, ctx *NotebookSessionContext)
 	if ctx == nil {
 		return
 	}
+	// strip removes Snowflake-style surrounding double-quotes from a returned
+	// identifier value, e.g. `"Oddly Named Schema!"` → `Oddly Named Schema!`.
+	// Used for comparison only.
 	strip := func(v string) string { return strings.Trim(v, `"`) }
+
+	// quoteIdent produces a safely double-quoted SQL identifier from a stripped
+	// name, escaping any embedded double-quotes (e.g. `Oddly Named Schema!` →
+	// `"Oddly Named Schema!"`).  This handles names with spaces, special chars,
+	// and mixed case that would break bare USE statements.
+	quoteIdent := func(v string) string {
+		v = strings.Trim(v, `"`)                    // strip surrounding quotes first
+		v = strings.ReplaceAll(v, `"`, `""`)        // escape embedded double-quotes
+		return `"` + v + `"`
+	}
+
 	newCtx := NotebookSessionContext{
 		Role:      strip(ctx.Role),
 		Warehouse: strip(ctx.Warehouse),
@@ -1350,16 +1364,16 @@ func (a *App) syncKernelContext(s *notebookSession, ctx *NotebookSessionContext)
 	}
 	if newCtx != oldCtx && a.client != nil {
 		if newCtx.Role != oldCtx.Role && newCtx.Role != "" {
-			_, _ = a.client.Execute(a.ctx, fmt.Sprintf("USE ROLE %s", newCtx.Role))
+			_, _ = a.client.Execute(a.ctx, fmt.Sprintf("USE ROLE %s", quoteIdent(newCtx.Role)))
 		}
 		if newCtx.Warehouse != oldCtx.Warehouse && newCtx.Warehouse != "" {
-			_, _ = a.client.Execute(a.ctx, fmt.Sprintf("USE WAREHOUSE %s", newCtx.Warehouse))
+			_, _ = a.client.Execute(a.ctx, fmt.Sprintf("USE WAREHOUSE %s", quoteIdent(newCtx.Warehouse)))
 		}
 		if newCtx.Database != oldCtx.Database && newCtx.Database != "" {
-			_, _ = a.client.Execute(a.ctx, fmt.Sprintf("USE DATABASE %s", newCtx.Database))
+			_, _ = a.client.Execute(a.ctx, fmt.Sprintf("USE DATABASE %s", quoteIdent(newCtx.Database)))
 		}
 		if newCtx.Schema != oldCtx.Schema && newCtx.Schema != "" {
-			_, _ = a.client.Execute(a.ctx, fmt.Sprintf("USE SCHEMA %s", newCtx.Schema))
+			_, _ = a.client.Execute(a.ctx, fmt.Sprintf("USE SCHEMA %s", quoteIdent(newCtx.Schema)))
 		}
 		s.lastCtx = newCtx
 		wailsruntime.EventsEmit(a.ctx, "notebook:session:context:changed", newCtx)

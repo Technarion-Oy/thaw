@@ -209,9 +209,10 @@ Click the clock icon in the Administration panel header (always visible, even be
 - **Include client-generated** — toggle to include Thaw's own internal statements
 - **Run** — re-fetches with the current filters; auto-runs on open with current session scope
 - **Query text search** — live filter bar narrows the loaded results by query text as you type; matches are highlighted in the table and in expanded rows; row count shows `N of M rows` when a filter is active
-- Results table shows status (colour-coded), query type, query preview, user, warehouse, database, start time, and duration
-- Expand any row to see the full SQL and any error message
+- Results table shows status (colour-coded), query type, query preview, start time, end time, and duration
+- Expand any row to see the full SQL plus a detail grid with user, warehouse, database, schema, rows produced, bytes scanned, and query ID
 - **Load in Editor** — inserts the query into the active editor tab and closes the modal
+- **Copy** — copies the full query text to the clipboard with a brief "Copied!" confirmation
 
 ### Backup Policies
 

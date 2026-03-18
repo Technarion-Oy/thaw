@@ -8,7 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Modal,
   Select,
@@ -30,6 +30,7 @@ import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 import { GetQueryHistory, ListUsers } from "../../../wailsjs/go/main/App";
+import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { useConnectionStore } from "../../store/connectionStore";
 import { useSessionStore } from "../../store/sessionStore";
 import type { main } from "../../../wailsjs/go/models";
@@ -61,6 +62,8 @@ export default function QueryHistoryModal({ onClose }: Props) {
   const [error,           setError]           = useState<string | null>(null);
   const [querySearch,     setQuerySearch]     = useState("");
   const [userList,        setUserList]        = useState<string[]>([]);
+  const [copiedId,        setCopiedId]        = useState<string | null>(null);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const runQuery = async () => {
     setLoading(true);
@@ -153,27 +156,16 @@ export default function QueryHistoryModal({ onClose }: Props) {
       },
     },
     {
-      key: "userName",
-      title: "User",
-      dataIndex: "userName",
-      width: 120,
-    },
-    {
-      key: "warehouseName",
-      title: "Warehouse",
-      dataIndex: "warehouseName",
-      width: 120,
-    },
-    {
-      key: "databaseName",
-      title: "DB",
-      dataIndex: "databaseName",
-      width: 100,
-    },
-    {
       key: "startTime",
       title: "Start",
       dataIndex: "startTime",
+      width: 140,
+      render: (v: string) => v ? dayjs(v).format("HH:mm:ss DD MMM") : "—",
+    },
+    {
+      key: "endTime",
+      title: "End",
+      dataIndex: "endTime",
       width: 140,
       render: (v: string) => v ? dayjs(v).format("HH:mm:ss DD MMM") : "—",
     },
@@ -191,7 +183,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
       open
       title="Query Activity"
       onCancel={onClose}
-      width={1000}
+      width="min(1300px, 92vw)"
       footer={null}
     >
       {/* Filter form */}
@@ -308,24 +300,54 @@ export default function QueryHistoryModal({ onClose }: Props) {
             columns={columns}
             rowKey="queryId"
             size="small"
-            scroll={{ x: true }}
+            scroll={{ y: 420 }}
             pagination={{ pageSize: 50, showSizeChanger: false }}
             expandable={{
-              expandedRowRender: (row) => (
-                <div style={{ padding: "8px 0" }}>
-                  <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, margin: 0, fontFamily: "monospace" }}>
-                    {highlight(row.queryText, querySearch)}
-                  </pre>
-                  <Space style={{ marginTop: 8 }}>
-                    <Button size="small" onClick={() => loadInEditor(row.queryText)}>
-                      Load in Editor
-                    </Button>
-                    {row.errorMessage && (
-                      <Text type="danger" style={{ fontSize: 11 }}>{row.errorMessage}</Text>
-                    )}
-                  </Space>
-                </div>
-              ),
+              expandedRowRender: (row) => {
+                const details: { label: string; value: string | number | null }[] = [
+                  { label: "User",          value: row.userName      || null },
+                  { label: "Warehouse",     value: row.warehouseName || null },
+                  { label: "Database",      value: row.databaseName  || null },
+                  { label: "Schema",        value: row.schemaName    || null },
+                  { label: "Rows produced", value: row.rowsProduced  ?? null },
+                  { label: "Bytes scanned", value: row.bytesScanned  ?? null },
+                  { label: "Query ID",      value: row.queryId       || null },
+                ];
+                return (
+                  <div style={{ padding: "8px 0 4px" }}>
+                    <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, margin: "0 0 10px", fontFamily: "monospace" }}>
+                      {highlight(row.queryText, querySearch)}
+                    </pre>
+                    <div style={{ display: "grid", gridTemplateColumns: "max-content 1fr", rowGap: 3, columnGap: 12, fontSize: 12, marginBottom: 8 }}>
+                      {details.map(({ label, value }) => value !== null && (
+                        <>
+                          <span key={label + "-l"} style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }}>{label}</span>
+                          <span key={label + "-v"} style={{ fontFamily: label === "Query ID" ? "monospace" : undefined, wordBreak: "break-all" }}>{String(value)}</span>
+                        </>
+                      ))}
+                    </div>
+                    <Space>
+                      <Button size="small" onClick={() => loadInEditor(row.queryText)}>
+                        Load in Editor
+                      </Button>
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          ClipboardSetText(row.queryText);
+                          if (copyTimer.current) clearTimeout(copyTimer.current);
+                          setCopiedId(row.queryId);
+                          copyTimer.current = setTimeout(() => setCopiedId(null), 1500);
+                        }}
+                      >
+                        {copiedId === row.queryId ? "Copied!" : "Copy"}
+                      </Button>
+                      {row.errorMessage && (
+                        <Text type="danger" style={{ fontSize: 11 }}>{row.errorMessage}</Text>
+                      )}
+                    </Space>
+                  </div>
+                );
+              },
             }}
           />
           <Text style={{ fontSize: 11, color: "var(--text-muted)" }}>
