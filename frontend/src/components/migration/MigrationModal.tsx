@@ -14,6 +14,7 @@ import {
   Button,
   Checkbox,
   Descriptions,
+  Divider,
   Input,
   Modal,
   Progress,
@@ -25,6 +26,7 @@ import {
   Typography,
   message,
 } from "antd";
+import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { DiffEditor } from "@monaco-editor/react";
 import { AgGridReact } from "ag-grid-react";
 import type { ColDef } from "ag-grid-community";
@@ -82,6 +84,24 @@ interface MigrationExecEvent {
   pass: number;
 }
 
+// ─── multi-db types ───────────────────────────────────────────────────────────
+
+interface SourceMapping {
+  id: string;
+  sourceDir: string;
+  targetDB: string;
+}
+
+interface DBProtection {
+  database: string;
+  doBackup: boolean;
+  backupSetDB: string;
+  backupSetSchema: string;
+  backupSetName: string;
+  doClone: boolean;
+  cloneDB: string;
+}
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 function statusColor(status: string): string {
@@ -131,6 +151,8 @@ function extractReferencedNames(ddl: string): string[] {
   return names;
 }
 
+let nextMappingId = 1;
+
 // ─── MigrationModal ───────────────────────────────────────────────────────────
 
 export default function MigrationModal({ onClose }: Props) {
@@ -142,13 +164,15 @@ export default function MigrationModal({ onClose }: Props) {
   const [step, setStep] = useState(0);
 
   // Step 0 — Configure
-  const [sourceDir, setSourceDir] = useState("");
-  const [targetDB, setTargetDB] = useState("");
+  const [mappings, setMappings] = useState<SourceMapping[]>([
+    { id: "0", sourceDir: "", targetDB: "" },
+  ]);
   const [databases, setDatabases] = useState<string[]>([]);
   const [scanning, setScanning] = useState(false);
 
   // Step 1 — Scan results
   const [scanObjects, setScanObjects] = useState<MigrationObject[]>([]);
+  const [scannedMappingCount, setScannedMappingCount] = useState(0);
 
   // Step 2 — Review
   const [analyzing, setAnalyzing] = useState(false);
@@ -161,12 +185,7 @@ export default function MigrationModal({ onClose }: Props) {
 
   // Step 3 — Strategy & Protect
   const [tableStrategy, setTableStrategy] = useState<string>("in_place");
-  const [doBackup, setDoBackup] = useState(false);
-  const [backupSetDB, setBackupSetDB] = useState("");
-  const [backupSetSchema, setBackupSetSchema] = useState("");
-  const [backupSetName, setBackupSetName] = useState("");
-  const [doClone, setDoClone] = useState(false);
-  const [cloneDB, setCloneDB] = useState("");
+  const [dbProtections, setDbProtections] = useState<Record<string, DBProtection>>({});
   const [snapshotting, setSnapshotting] = useState(false);
 
   // Step 4 — Deploy
@@ -179,19 +198,47 @@ export default function MigrationModal({ onClose }: Props) {
     ListDatabases().then(setDatabases).catch(() => {});
   }, []);
 
-  // ── Step 0 ────────────────────────────────────────────────────────────────
+  // ── Mapping helpers ────────────────────────────────────────────────────────
 
-  async function handlePickDir() {
-    const dir = await PickDirectory().catch(() => "");
-    if (dir) setSourceDir(dir);
+  function addMapping() {
+    setMappings((prev) => [
+      ...prev,
+      { id: String(nextMappingId++), sourceDir: "", targetDB: "" },
+    ]);
   }
 
+  function removeMapping(id: string) {
+    setMappings((prev) => prev.filter((m) => m.id !== id));
+  }
+
+  function updateMapping(id: string, updates: Partial<SourceMapping>) {
+    setMappings((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, ...updates } : m))
+    );
+  }
+
+  async function handlePickDir(id: string) {
+    const dir = await PickDirectory().catch(() => "");
+    if (dir) updateMapping(id, { sourceDir: dir });
+  }
+
+  // ── Step 0 ────────────────────────────────────────────────────────────────
+
   async function handleScan() {
-    if (!sourceDir) return;
+    const validMappings = mappings.filter((m) => m.sourceDir);
+    if (validMappings.length === 0) return;
     setScanning(true);
     try {
-      const objects = await ScanMigrationSource(sourceDir) as unknown as MigrationObject[];
-      setScanObjects(objects);
+      const allObjects = new Map<string, MigrationObject>();
+      for (const mapping of validMappings) {
+        const objects = await ScanMigrationSource(mapping.sourceDir) as unknown as MigrationObject[];
+        for (const obj of objects) {
+          const withDB = { ...obj, database: obj.database || mapping.targetDB };
+          allObjects.set(objectLabel(withDB), withDB);
+        }
+      }
+      setScanObjects([...allObjects.values()]);
+      setScannedMappingCount(validMappings.length);
       setStep(1);
     } catch (e: any) {
       messageApi.error("Scan failed: " + (e?.message ?? String(e)));
@@ -210,8 +257,10 @@ export default function MigrationModal({ onClose }: Props) {
       setAnalyzeProgress({ done: data.done, total: data.total });
     });
 
+    const fallbackDB = mappings[0]?.targetDB || "";
+
     try {
-      const rawItems = await AnalyzeMigration(scanObjects as any, targetDB);
+      const rawItems = await AnalyzeMigration(scanObjects as any, fallbackDB);
       const items = rawItems as unknown as MigrationDiffItem[];
       setDiffItems(items);
       // Pre-select new + changed
@@ -294,10 +343,11 @@ export default function MigrationModal({ onClose }: Props) {
 
   async function handleOpenInEditor() {
     const selectedItems = diffItems.filter((d) => selectedKeys.has(objectLabel(d.object)));
+    const fallbackDB = mappings[0]?.targetDB || "";
     try {
       const sql = await GenerateMigrationScript(
         selectedItems as any,
-        targetDB,
+        fallbackDB,
         tableStrategy
       ) as unknown as string;
       loadInNewTab(sql);
@@ -353,20 +403,61 @@ export default function MigrationModal({ onClose }: Props) {
     return item.status === statusFilter;
   });
 
-  // ── Step 3 ────────────────────────────────────────────────────────────────
+  // ── Step 3 helpers ─────────────────────────────────────────────────────────
+
+  function getSelectedDBs(): string[] {
+    const dbs = new Set<string>();
+    for (const key of selectedKeys) {
+      const item = diffItems.find((d) => objectLabel(d.object) === key);
+      if (item?.object.database) dbs.add(item.object.database);
+    }
+    return [...dbs].sort();
+  }
+
+  function getDBProtection(database: string): DBProtection {
+    return (
+      dbProtections[database] ?? {
+        database,
+        doBackup: false,
+        backupSetDB: "",
+        backupSetSchema: "",
+        backupSetName: "",
+        doClone: false,
+        cloneDB: "",
+      }
+    );
+  }
+
+  function updateDBProtection(database: string, updates: Partial<DBProtection>) {
+    setDbProtections((prev) => {
+      const existing: DBProtection = prev[database] ?? {
+        database,
+        doBackup: false,
+        backupSetDB: "",
+        backupSetSchema: "",
+        backupSetName: "",
+        doClone: false,
+        cloneDB: "",
+      };
+      return { ...prev, [database]: { ...existing, ...updates } };
+    });
+  }
 
   async function handleProtectAndDeploy() {
     setSnapshotting(true);
     try {
-      await CreateMigrationSnapshot(
-        targetDB,
-        backupSetDB,
-        backupSetSchema,
-        backupSetName,
-        doBackup,
-        cloneDB,
-        doClone
-      );
+      for (const prot of Object.values(dbProtections)) {
+        if (!prot.doBackup && !prot.doClone) continue;
+        await CreateMigrationSnapshot(
+          prot.database,
+          prot.backupSetDB,
+          prot.backupSetSchema,
+          prot.backupSetName,
+          prot.doBackup,
+          prot.cloneDB,
+          prot.doClone
+        );
+      }
     } catch (e: any) {
       messageApi.error("Snapshot failed: " + (e?.message ?? String(e)));
       setSnapshotting(false);
@@ -388,13 +479,15 @@ export default function MigrationModal({ onClose }: Props) {
       .filter((d) => selectedKeys.has(objectLabel(d.object)))
       .map((d) => d.object);
 
+    const fallbackDB = mappings[0]?.targetDB || "";
+
     const off = EventsOn("migration:exec:progress", (evt: MigrationExecEvent) => {
       setExecEvents((prev) => [...prev, evt]);
       setLatestProgress({ done: evt.done, total: evt.total });
     });
 
     try {
-      await ExecuteMigration(selectedObjects as any, targetDB, 5, tableStrategy);
+      await ExecuteMigration(selectedObjects as any, fallbackDB, 5, tableStrategy);
     } catch (e: any) {
       messageApi.error("Deploy error: " + (e?.message ?? String(e)));
     } finally {
@@ -410,41 +503,57 @@ export default function MigrationModal({ onClose }: Props) {
   // ── Render steps ──────────────────────────────────────────────────────────
 
   function renderStep0() {
+    const hasAnyDir = mappings.some((m) => m.sourceDir);
+
     return (
       <Space direction="vertical" style={{ width: "100%", gap: 16 }}>
         <div>
           <Text strong style={{ display: "block", marginBottom: 6 }}>
-            Source Directory
+            Source Mappings
           </Text>
-          <Space.Compact style={{ width: "100%" }}>
-            <Input
-              value={sourceDir}
-              onChange={(e) => setSourceDir(e.target.value)}
-              placeholder="/path/to/your/sql/files"
-              style={{ fontFamily: "monospace" }}
-            />
-            <Button onClick={handlePickDir}>Browse…</Button>
-          </Space.Compact>
-          <Text type="secondary" style={{ fontSize: 12, marginTop: 4, display: "block" }}>
-            All .sql files in this directory and subdirectories will be scanned.
+          <Text type="secondary" style={{ fontSize: 12, marginBottom: 12, display: "block" }}>
+            Map each source directory to its target database. The target database is used as the
+            fallback for objects without an explicit USE DATABASE context.
           </Text>
-        </div>
-
-        <div>
-          <Text strong style={{ display: "block", marginBottom: 6 }}>
-            Target Database
-          </Text>
-          <Select
-            showSearch
-            value={targetDB || undefined}
-            onChange={setTargetDB}
-            options={databases.map((d) => ({ value: d, label: d }))}
-            placeholder="Select database"
-            style={{ width: "100%" }}
-          />
-          <Text type="secondary" style={{ fontSize: 12, marginTop: 4, display: "block" }}>
-            Used as the fallback database for objects without an explicit USE DATABASE context.
-          </Text>
+          <Space direction="vertical" style={{ width: "100%", gap: 8 }}>
+            {mappings.map((mapping) => (
+              <div key={mapping.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <Space.Compact style={{ flex: 1 }}>
+                  <Input
+                    value={mapping.sourceDir}
+                    onChange={(e) => updateMapping(mapping.id, { sourceDir: e.target.value })}
+                    placeholder="/path/to/sql/files"
+                    style={{ fontFamily: "monospace" }}
+                  />
+                  <Button onClick={() => handlePickDir(mapping.id)}>Browse…</Button>
+                </Space.Compact>
+                <Select
+                  showSearch
+                  value={mapping.targetDB || undefined}
+                  onChange={(v) => updateMapping(mapping.id, { targetDB: v })}
+                  options={databases.map((d) => ({ value: d, label: d }))}
+                  placeholder="Target DB (optional)"
+                  style={{ width: 200 }}
+                />
+                {mappings.length > 1 && (
+                  <Button
+                    type="text"
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={() => removeMapping(mapping.id)}
+                  />
+                )}
+              </div>
+            ))}
+          </Space>
+          <Button
+            type="dashed"
+            icon={<PlusOutlined />}
+            onClick={addMapping}
+            style={{ marginTop: 8 }}
+          >
+            Add Database
+          </Button>
         </div>
 
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -452,7 +561,7 @@ export default function MigrationModal({ onClose }: Props) {
             type="primary"
             onClick={handleScan}
             loading={scanning}
-            disabled={!sourceDir}
+            disabled={!hasAnyDir}
           >
             Scan
           </Button>
@@ -463,13 +572,17 @@ export default function MigrationModal({ onClose }: Props) {
 
   function renderStep1() {
     const counts = kindCounts(scanObjects);
+    const srcLabel =
+      scannedMappingCount === 1
+        ? "1 source directory"
+        : `${scannedMappingCount} source directories`;
 
     return (
       <Space direction="vertical" style={{ width: "100%", gap: 16 }}>
         <div>
           <Text type="secondary">
-            Found <strong>{scanObjects.length}</strong> object{scanObjects.length !== 1 ? "s" : ""} in{" "}
-            <code>{sourceDir}</code>.
+            Found <strong>{scanObjects.length}</strong> object{scanObjects.length !== 1 ? "s" : ""}{" "}
+            across <strong>{srcLabel}</strong>.
           </Text>
         </div>
 
@@ -587,6 +700,8 @@ export default function MigrationModal({ onClose }: Props) {
       return item?.object.objectKind.toUpperCase() === "TABLE";
     });
 
+    const selectedDBs = getSelectedDBs();
+
     return (
       <Space direction="vertical" style={{ width: "100%", gap: 20 }}>
         {hasSelectedTables && (
@@ -643,56 +758,76 @@ export default function MigrationModal({ onClose }: Props) {
 
         <div>
           <Text strong style={{ display: "block", marginBottom: 6 }}>
-            Safety Snapshot
+            Safety Snapshot (Optional)
           </Text>
-          <Text type="secondary" style={{ fontSize: 12, marginBottom: 10, display: "block" }}>
-            Optionally create a safety snapshot of <strong>{targetDB}</strong> before deploying.
+          <Text type="secondary" style={{ fontSize: 12, marginBottom: 12, display: "block" }}>
+            Create a backup set or zero-copy clone before deploying each target database.
           </Text>
-        </div>
+          {selectedDBs.length === 0 ? (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              No databases detected from selected objects.
+            </Text>
+          ) : (
+            selectedDBs.map((db, idx) => {
+              const prot = getDBProtection(db);
+              return (
+                <div key={db}>
+                  {idx > 0 && <Divider style={{ margin: "12px 0" }} />}
+                  <Text strong style={{ display: "block", marginBottom: 8, fontSize: 13 }}>
+                    {db}
+                  </Text>
+                  <Space direction="vertical" style={{ width: "100%", gap: 6, paddingLeft: 8 }}>
+                    <Checkbox
+                      checked={prot.doBackup}
+                      onChange={(e) => updateDBProtection(db, { doBackup: e.target.checked })}
+                    >
+                      Create Backup Set
+                    </Checkbox>
+                    {prot.doBackup && (
+                      <div style={{ marginTop: 4, paddingLeft: 24 }}>
+                        <Space direction="vertical" style={{ width: "100%", gap: 6 }}>
+                          <Input
+                            placeholder="Backup Set Name"
+                            value={prot.backupSetName}
+                            onChange={(e) => updateDBProtection(db, { backupSetName: e.target.value })}
+                          />
+                          <Space.Compact style={{ width: "100%" }}>
+                            <Input
+                              placeholder="Database"
+                              value={prot.backupSetDB}
+                              onChange={(e) => updateDBProtection(db, { backupSetDB: e.target.value })}
+                              style={{ width: "50%" }}
+                            />
+                            <Input
+                              placeholder="Schema"
+                              value={prot.backupSetSchema}
+                              onChange={(e) => updateDBProtection(db, { backupSetSchema: e.target.value })}
+                              style={{ width: "50%" }}
+                            />
+                          </Space.Compact>
+                        </Space>
+                      </div>
+                    )}
 
-        <div>
-          <Checkbox checked={doBackup} onChange={(e) => setDoBackup(e.target.checked)}>
-            Create Backup Set
-          </Checkbox>
-          {doBackup && (
-            <div style={{ marginTop: 8, paddingLeft: 24 }}>
-              <Space direction="vertical" style={{ width: "100%", gap: 6 }}>
-                <Input
-                  placeholder="Backup Set Name"
-                  value={backupSetName}
-                  onChange={(e) => setBackupSetName(e.target.value)}
-                />
-                <Space.Compact style={{ width: "100%" }}>
-                  <Input
-                    placeholder="Database"
-                    value={backupSetDB}
-                    onChange={(e) => setBackupSetDB(e.target.value)}
-                    style={{ width: "50%" }}
-                  />
-                  <Input
-                    placeholder="Schema"
-                    value={backupSetSchema}
-                    onChange={(e) => setBackupSetSchema(e.target.value)}
-                    style={{ width: "50%" }}
-                  />
-                </Space.Compact>
-              </Space>
-            </div>
-          )}
-        </div>
-
-        <div>
-          <Checkbox checked={doClone} onChange={(e) => setDoClone(e.target.checked)}>
-            Create Zero-Copy Clone
-          </Checkbox>
-          {doClone && (
-            <div style={{ marginTop: 8, paddingLeft: 24 }}>
-              <Input
-                placeholder="Clone Database Name"
-                value={cloneDB}
-                onChange={(e) => setCloneDB(e.target.value)}
-              />
-            </div>
+                    <Checkbox
+                      checked={prot.doClone}
+                      onChange={(e) => updateDBProtection(db, { doClone: e.target.checked })}
+                    >
+                      Create Zero-Copy Clone
+                    </Checkbox>
+                    {prot.doClone && (
+                      <div style={{ marginTop: 4, paddingLeft: 24 }}>
+                        <Input
+                          placeholder="Clone Database Name"
+                          value={prot.cloneDB}
+                          onChange={(e) => updateDBProtection(db, { cloneDB: e.target.value })}
+                        />
+                      </div>
+                    )}
+                  </Space>
+                </div>
+              );
+            })
           )}
         </div>
 

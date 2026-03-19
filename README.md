@@ -334,8 +334,8 @@ Right-click the **account · user** tag in the query toolbar to open the **Sessi
 
 Open **Tools → Schema Migration…** in the menu bar to deploy local `.sql` DDL files to Snowflake with conflict detection, dependency ordering, and safety snapshots. A 5-step wizard guides the process:
 
-1. **Configure** — pick the local source directory and the target Snowflake database
-2. **Scan** — reads every `.sql` file in the directory tree, splits multi-statement files, tracks `USE DATABASE` / `USE SCHEMA` context, and deduplicates objects by kind + name; the summary shows counts by object type
+1. **Configure** — add one or more source directory → target database mappings; each mapping associates a local `.sql` directory with a fallback Snowflake database used for objects that have no explicit `USE DATABASE` context; multiple mappings let you migrate several databases in a single wizard run
+2. **Scan** — reads every `.sql` file in all source directories, splits multi-statement files, tracks `USE DATABASE` / `USE SCHEMA` context, applies each mapping's fallback database, and deduplicates objects across all sources by kind + name; the summary shows total counts by object type
 3. **Review** — shows an Ag-Grid diff table with a status tag for each object:
    - **New** — exists locally but not in Snowflake
    - **Changed** — exists in both; DDL is normalised (comments stripped, whitespace collapsed, uppercased, trailing `;` removed) before comparison to eliminate cosmetic noise
@@ -350,7 +350,7 @@ Open **Tools → Schema Migration…** in the menu bar to deploy local `.sql` DD
    - **Destructive Rebuild** — `DROP TABLE IF EXISTS` + `CREATE TABLE`; all existing data is permanently lost; shows a red warning banner when selected
    - **Empty-table shortcut** — if `SHOW TABLES` reports 0 rows for a table, the data-preserving strategies are skipped and a direct `DROP + CREATE` is used instead, regardless of the chosen strategy
    - **Open in SQL Editor** — generates a strategy-aware SQL script (ALTER TABLE statements for in-place, multi-step sequences for the others) and loads it into a new editor tab for review before running
-   - **Safety snapshots** (optional): Create a Backup Set (`CREATE BACKUP SET FOR DATABASE …`) and/or a zero-copy clone database (`CREATE DATABASE … CLONE …`)
+   - **Safety snapshots** (optional, per target database): Create a Backup Set (`CREATE BACKUP SET FOR DATABASE …`) and/or a zero-copy clone database (`CREATE DATABASE … CLONE …`) for each unique target database involved in the selected objects
 5. **Deploy** — executes the selected objects in dependency order (DATABASE → SCHEMA → SEQUENCE → TABLE → FILE FORMAT → STAGE → VIEW → MATERIALIZED VIEW → FUNCTION → PROCEDURE → STREAM → TASK → PIPE) with up to 5 retry passes; objects that fail with a dependency error ("does not exist" / "not authorized") are automatically retried in subsequent passes; a live progress table shows pass number, object name, and per-object status; **Cancel** stops the run cleanly
 
 ### File browser

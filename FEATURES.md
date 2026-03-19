@@ -176,13 +176,16 @@ Open **AI → Configure AI…** in the menu bar to set your provider, API key, a
 Open **Tools → Schema Migration…** to deploy local `.sql` DDL files to a Snowflake database. A 5-step wizard guides the process from source directory to live deployment.
 
 ### Step 1 — Configure
-- Pick the local source directory containing `.sql` files
-- Select the target Snowflake database from a dropdown
+- Add one or more **source directory → target database** mappings using the mapping list:
+  - Each row has a source directory (type or **Browse…**) and a **Target DB** dropdown (optional fallback)
+  - The target database is used for objects in that directory that have no explicit `USE DATABASE` context in the SQL files
+  - Click **Add Database** to add a row; click the delete button to remove one; at least one directory is required to scan
+  - Multiple mappings let you migrate several databases in a single wizard run
 
 ### Step 2 — Scan
-- Recursively reads every `.sql` file in the source tree
-- Handles multi-statement files; tracks `USE DATABASE` / `USE SCHEMA` context to resolve unqualified names
-- Deduplicates objects (last definition wins); shows a count breakdown by object type (TABLE: N, VIEW: N, …)
+- Recursively reads every `.sql` file in all source directories
+- Handles multi-statement files; tracks `USE DATABASE` / `USE SCHEMA` context; applies each mapping's fallback database for unqualified objects
+- Merges and deduplicates objects across all sources by kind + name (last definition wins); shows a count breakdown by object type (TABLE: N, VIEW: N, …)
 
 ### Step 3 — Review
 - **Ag-Grid diff table** with status tags:
@@ -212,9 +215,11 @@ Only applies to TABLE objects that already exist in Snowflake and have rows. Emp
   - View-Based Soft Cutover → `ALTER TABLE RENAME TO _v1; CREATE TABLE; CREATE VIEW _compat AS SELECT …`
   - Destructive Rebuild → `DROP TABLE IF EXISTS; CREATE TABLE`
 
-#### Safety Snapshots (optional)
+#### Safety Snapshots (optional, per target database)
+- The snapshot section shows one block per unique target database involved in the selected objects
 - **Create Backup Set** — `CREATE BACKUP SET FOR DATABASE <db>` targeting a chosen database / schema / name
 - **Create Zero-Copy Clone** — `CREATE DATABASE <clone> CLONE <db>` for a point-in-time snapshot
+- Each database's backup and clone settings are independent; databases with no snapshot options checked are skipped
 
 ### Step 5 — Deploy
 - Objects execute in dependency order: DATABASE → SCHEMA → SEQUENCE → TABLE → FILE FORMAT → STAGE → VIEW → MATERIALIZED VIEW → FUNCTION → PROCEDURE → STREAM → TASK → PIPE
