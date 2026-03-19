@@ -26,6 +26,8 @@ var httpClient = &http.Client{Timeout: 3 * time.Second}
 
 var chatHttpClient = &http.Client{Timeout: 60 * time.Second}
 
+var suggestHttpClient = &http.Client{Timeout: 15 * time.Second}
+
 // UIToolCall holds one tool invocation and its result, for the frontend.
 type UIToolCall struct {
 	Name    string `json:"name"`
@@ -602,6 +604,200 @@ func GetSuggestion(provider, apiKey, model, prompt string) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown AI provider: %s", provider)
 	}
+}
+
+// SuggestFormatOptions analyses the provided file sample and returns a clean
+// JSON string containing suggested Snowflake COPY INTO format options.
+// format should be "CSV" or "JSON". Code fences are stripped and the result
+// is validated before being returned; an error is returned if the AI response
+// cannot be parsed as JSON.
+func SuggestFormatOptions(provider, apiKey, model, format, sampleContent string) (string, error) {
+	prompt := buildFormatSuggestionPrompt(format, sampleContent)
+	var raw string
+	var err error
+	switch provider {
+	case "openai":
+		raw, err = openAISuggestFormat(apiKey, model, prompt)
+	case "google":
+		raw, err = googleSuggestFormat(apiKey, model, prompt)
+	default:
+		return "", fmt.Errorf("unknown AI provider: %s", provider)
+	}
+	if err != nil {
+		return "", err
+	}
+	return extractFormatJSON(raw)
+}
+
+// extractFormatJSON strips markdown code fences from an AI response, extracts
+// the first JSON object, and validates it.
+func extractFormatJSON(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+
+	// Strip opening code fence line (``` or ```json or ```JSON etc.)
+	if strings.HasPrefix(raw, "```") {
+		if nl := strings.Index(raw, "\n"); nl != -1 {
+			raw = raw[nl+1:]
+		} else {
+			raw = raw[3:]
+		}
+		// Strip closing fence
+		if idx := strings.LastIndex(raw, "```"); idx != -1 {
+			raw = raw[:idx]
+		}
+		raw = strings.TrimSpace(raw)
+	}
+
+	// Find the outermost JSON object
+	start := strings.Index(raw, "{")
+	end := strings.LastIndex(raw, "}")
+	if start != -1 && end > start {
+		raw = raw[start : end+1]
+	}
+
+	if !json.Valid([]byte(raw)) {
+		return "", fmt.Errorf("AI returned invalid JSON: %.120s", raw)
+	}
+	return raw, nil
+}
+
+func buildFormatSuggestionPrompt(format, sample string) string {
+	const maxSample = 3000
+	if len(sample) > maxSample {
+		sample = sample[:maxSample] + "\n...(truncated)"
+	}
+	var fieldHint string
+	if format == "CSV" {
+		fieldHint = `- fieldDelimiter: string (e.g. "," or "\\t" or "|")
+- parseHeader: boolean (true if first row contains column names)
+- fieldOptionallyEnclosedBy: string (e.g. "\"" or "NONE")
+- encoding: string (e.g. "UTF8", "ISO8859_1" — omit if clearly UTF-8)
+- compression: string (e.g. "AUTO", "GZIP", "NONE")
+- recordDelimiter: string (e.g. "\\n", "\\r\\n" — omit if standard \n)
+`
+	} else {
+		fieldHint = `- multiLine: boolean (true if each record spans multiple lines)
+- stripOuterArray: boolean (true if root element is an array of objects)
+- compression: string (e.g. "AUTO", "GZIP", "NONE")
+`
+	}
+	return fmt.Sprintf(`Analyze this %s file sample and return Snowflake COPY INTO format option suggestions.
+
+File sample:
+---
+%s
+---
+
+Return ONLY a compact JSON object. Include only fields you are confident about:
+%s- explanation: string (brief, max 15 words)
+
+Output the JSON object only. No prose, no markdown fences.`, format, sample, fieldHint)
+}
+
+func openAISuggestFormat(apiKey, model, prompt string) (string, error) {
+	body, err := json.Marshal(map[string]any{
+		"model":      model,
+		"max_tokens": 600,
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "https://api.openai.com/v1/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := suggestHttpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("openai: status %d: %s", resp.StatusCode, raw)
+	}
+
+	var result struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return "", err
+	}
+	if len(result.Choices) == 0 {
+		return "", nil
+	}
+	return strings.TrimSpace(result.Choices[0].Message.Content), nil
+}
+
+func googleSuggestFormat(apiKey, model, prompt string) (string, error) {
+	url := fmt.Sprintf(
+		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
+		model, apiKey,
+	)
+
+	body, err := json.Marshal(map[string]any{
+		"contents": []map[string]any{
+			{"parts": []map[string]string{{"text": prompt}}},
+		},
+		"generationConfig": map[string]any{
+			"maxOutputTokens": 600,
+			"temperature":     0.1,
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := suggestHttpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("google: status %d: %s", resp.StatusCode, raw)
+	}
+
+	var result struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return "", err
+	}
+	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
+		return "", nil
+	}
+	return strings.TrimSpace(result.Candidates[0].Content.Parts[0].Text), nil
 }
 
 // ── OpenAI ────────────────────────────────────────────────────────────────────

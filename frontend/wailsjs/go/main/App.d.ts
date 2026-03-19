@@ -271,6 +271,8 @@ export function StopNotebookSession(arg1:string):Promise<void>;
 
 export function StopShell():Promise<void>;
 
+export function SuggestImportOptions(arg1:string,arg2:string):Promise<string>;
+
 export function TestAIModel(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function UninstallEnvPackage(arg1:string):Promise<void>;

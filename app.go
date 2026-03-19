@@ -1954,6 +1954,27 @@ func (a *App) GetAISuggestion(prefix string) string {
 	return suggestion
 }
 
+// SuggestImportOptions calls the configured AI provider with the given file
+// sample content and returns a JSON string containing suggested Snowflake
+// COPY INTO format options. format should be "CSV" or "JSON".
+// Returns an error when AI is not configured or the provider call fails.
+func (a *App) SuggestImportOptions(format, sampleContent string) (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", fmt.Errorf("failed to load config: %w", err)
+	}
+	if !cfg.AI.Enabled || cfg.AI.APIKey == "" {
+		return "", fmt.Errorf("AI is not configured — enable it in Settings → AI")
+	}
+
+	result, err := ai.SuggestFormatOptions(cfg.AI.Provider, cfg.AI.APIKey, cfg.AI.Model, format, sampleContent)
+	if err != nil {
+		logger.L.Debug("AI format suggestion failed", "provider", cfg.AI.Provider, "err", err)
+		return "", fmt.Errorf("AI suggestion failed: %w", err)
+	}
+	return result, nil
+}
+
 // ─── Embedded terminal ────────────────────────────────────────────────────────
 
 // GetAvailableShells reads /etc/shells and returns the list of valid shells.

@@ -526,6 +526,10 @@ export function StopShell() {
   return window['go']['main']['App']['StopShell']();
 }
 
+export function SuggestImportOptions(arg1, arg2) {
+  return window['go']['main']['App']['SuggestImportOptions'](arg1, arg2);
+}
+
 export function TestAIModel(arg1, arg2, arg3) {
   return window['go']['main']['App']['TestAIModel'](arg1, arg2, arg3);
 }
