@@ -8,16 +8,16 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Modal, Select, Switch, Input, InputNumber, Button, Space, Typography,
-  Spin, Segmented, Tooltip, Collapse,
+  Spin, Segmented, Tooltip, Collapse, Tabs,
 } from "antd";
 import {
   UploadOutlined, FolderOpenOutlined, CheckCircleOutlined,
   CloseOutlined, FileOutlined, SettingOutlined,
 } from "@ant-design/icons";
-import { ImportTableData, PickDataFilesByFormat } from "../../../wailsjs/go/main/App";
+import { ImportTableData, PickDataFilesByFormat, ReadFileHead } from "../../../wailsjs/go/main/App";
 import { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -138,6 +138,328 @@ function detectFormat(p: string): Format {
 
 function baseName(p: string): string {
   return p.split(/[/\\]/).pop() ?? p;
+}
+
+// ── Preview helpers ───────────────────────────────────────────────────────────
+
+function unescapeDelimiter(raw: string): string {
+  if (raw === "\\t") return "\t";
+  if (raw === "\\n") return "\n";
+  if (raw === "\\r") return "\r";
+  return raw;
+}
+
+function parseOneCsvRow(line: string, delimiter: string): string[] {
+  const cols: string[] = [];
+  let cur = "";
+  let inQuote = false;
+  let i = 0;
+  while (i < line.length) {
+    const ch = line[i];
+    if (inQuote) {
+      if (ch === '"' && i + 1 < line.length && line[i + 1] === '"') {
+        cur += '"'; i += 2; // escaped double-quote
+      } else if (ch === '"') {
+        inQuote = false; i++;
+      } else {
+        cur += ch; i++;
+      }
+    } else {
+      if (ch === '"' && cur === "") {
+        inQuote = true; i++;
+      } else if (delimiter.length > 0 && line.startsWith(delimiter, i)) {
+        cols.push(cur);
+        cur = "";
+        i += delimiter.length;
+      } else {
+        cur += ch; i++;
+      }
+    }
+  }
+  cols.push(cur);
+  return cols;
+}
+
+function parseCsvPreview(
+  content: string,
+  rawDelimiter: string,
+  hasHeader: boolean,
+  maxRows: number,
+): { headers: string[]; rows: string[][]; truncated: boolean } {
+  const delimiter = unescapeDelimiter(rawDelimiter) || ",";
+  const lines = content
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .filter((l) => l.trim() !== "");
+
+  if (lines.length === 0) return { headers: [], rows: [], truncated: false };
+
+  let headers: string[];
+  let dataLines: string[];
+
+  if (hasHeader) {
+    headers = parseOneCsvRow(lines[0], delimiter);
+    dataLines = lines.slice(1);
+  } else {
+    const firstCols = parseOneCsvRow(lines[0], delimiter);
+    headers = firstCols.map((_, i) => `Column ${i + 1}`);
+    dataLines = lines;
+  }
+
+  const truncated = dataLines.length > maxRows;
+  const rows = dataLines.slice(0, maxRows).map((l) => parseOneCsvRow(l, delimiter));
+  return { headers, rows, truncated };
+}
+
+type JsonParsed =
+  | { kind: "table"; headers: string[]; rows: string[][]; truncated: boolean }
+  | { kind: "error"; message: string };
+
+function parseJsonPreview(content: string, maxRows: number): JsonParsed {
+  if (!content.trim()) return { kind: "error", message: "Empty file" };
+
+  let data: unknown;
+
+  // Try full JSON parse first
+  try {
+    data = JSON.parse(content.trim());
+  } catch {
+    // Try NDJSON / JSON Lines (one JSON value per line)
+    const objects: unknown[] = [];
+    for (const line of content.trim().split("\n")) {
+      if (!line.trim()) continue;
+      try { objects.push(JSON.parse(line.trim())); } catch { /* skip bad lines */ }
+    }
+    if (objects.length > 0) {
+      data = objects;
+    } else {
+      return { kind: "error", message: "Could not parse JSON (preview content may be truncated)" };
+    }
+  }
+
+  if (Array.isArray(data)) {
+    const items = data.slice(0, maxRows);
+    const truncated = data.length > maxRows;
+    if (items.length > 0 && items[0] !== null && typeof items[0] === "object") {
+      // Collect headers from the first few objects to handle sparse records
+      const headerSet = new Set<string>();
+      items.slice(0, 5).forEach((item) =>
+        Object.keys(item as Record<string, unknown>).forEach((k) => headerSet.add(k))
+      );
+      const headers = Array.from(headerSet);
+      const rows = items.map((item) =>
+        headers.map((h) => {
+          const v = (item as Record<string, unknown>)[h];
+          if (v === null) return "null";
+          if (v === undefined) return "";
+          if (typeof v === "object") return JSON.stringify(v);
+          return String(v);
+        })
+      );
+      return { kind: "table", headers, rows, truncated };
+    }
+    // Array of primitives
+    return {
+      kind: "table",
+      headers: ["Value"],
+      rows: items.map((v) => [v === null ? "null" : String(v)]),
+      truncated,
+    };
+  }
+
+  if (typeof data === "object" && data !== null) {
+    const entries = Object.entries(data as Record<string, unknown>).slice(0, maxRows);
+    const truncated = Object.keys(data).length > maxRows;
+    return {
+      kind: "table",
+      headers: ["Key", "Value"],
+      rows: entries.map(([k, v]) => [
+        k,
+        v === null ? "null" : typeof v === "object" ? JSON.stringify(v) : String(v),
+      ]),
+      truncated,
+    };
+  }
+
+  return { kind: "error", message: "Unsupported JSON structure for tabular preview" };
+}
+
+// ── Preview sub-components ────────────────────────────────────────────────────
+
+function PreviewTable({
+  headers,
+  rows,
+  truncated,
+}: {
+  headers: string[];
+  rows: string[][];
+  truncated: boolean;
+}) {
+  if (headers.length === 0 && rows.length === 0) {
+    return <Text type="secondary" style={{ fontSize: 11 }}>No data to preview</Text>;
+  }
+  return (
+    <div>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ borderCollapse: "collapse", fontSize: 11, fontFamily: "monospace" }}>
+          {headers.length > 0 && (
+            <thead>
+              <tr>
+                {headers.map((h, i) => (
+                  <th
+                    key={i}
+                    style={{
+                      border: "1px solid var(--border)",
+                      padding: "2px 6px",
+                      background: "var(--bg-secondary)",
+                      fontWeight: 600,
+                      whiteSpace: "nowrap",
+                      maxWidth: 160,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {h || <em style={{ color: "var(--text-muted)" }}>(empty)</em>}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+          )}
+          <tbody>
+            {rows.map((row, ri) => (
+              <tr key={ri}>
+                {row.map((cell, ci) => (
+                  <td
+                    key={ci}
+                    style={{
+                      border: "1px solid var(--border)",
+                      padding: "2px 6px",
+                      maxWidth: 160,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {cell === "" ? (
+                      <em style={{ color: "var(--text-muted)", fontSize: 10 }}>(empty)</em>
+                    ) : (
+                      cell
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {truncated && (
+        <Text type="secondary" style={{ fontSize: 10, display: "block", marginTop: 4 }}>
+          Showing first 10 rows
+        </Text>
+      )}
+    </div>
+  );
+}
+
+function CsvFilePrev({
+  content,
+  fieldDelimiter,
+  parseHeader,
+}: {
+  content: string;
+  fieldDelimiter: string;
+  parseHeader: boolean;
+}) {
+  const [view, setView] = useState<"parsed" | "raw">("parsed");
+  const { headers, rows, truncated } = parseCsvPreview(content, fieldDelimiter, parseHeader, 10);
+  return (
+    <div>
+      <Segmented
+        size="small"
+        value={view}
+        onChange={(v) => setView(v as "parsed" | "raw")}
+        options={[
+          { label: "Parsed", value: "parsed" },
+          { label: "Raw", value: "raw" },
+        ]}
+        style={{ marginBottom: 8 }}
+      />
+      {view === "parsed" ? (
+        <PreviewTable headers={headers} rows={rows} truncated={truncated} />
+      ) : (
+        <pre
+          style={{
+            fontSize: 11,
+            fontFamily: "monospace",
+            maxHeight: 180,
+            overflowY: "auto",
+            overflowX: "auto",
+            background: "var(--bg-secondary)",
+            border: "1px solid var(--border)",
+            borderRadius: 4,
+            padding: "6px 8px",
+            margin: 0,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-all",
+          }}
+        >
+          {content.length > 4096 ? content.slice(0, 4096) + "\n…(truncated)" : content}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function JsonFilePrev({ content }: { content: string }) {
+  const [view, setView] = useState<"parsed" | "raw">("parsed");
+  const parsed = parseJsonPreview(content, 10);
+  return (
+    <div>
+      <Segmented
+        size="small"
+        value={view}
+        onChange={(v) => setView(v as "parsed" | "raw")}
+        options={[
+          { label: "Parsed", value: "parsed" },
+          { label: "Raw", value: "raw" },
+        ]}
+        style={{ marginBottom: 8 }}
+      />
+      {view === "parsed" ? (
+        parsed.kind === "error" ? (
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            {parsed.message} — switch to Raw view to inspect the content
+          </Text>
+        ) : (
+          <PreviewTable
+            headers={parsed.headers}
+            rows={parsed.rows}
+            truncated={parsed.truncated}
+          />
+        )
+      ) : (
+        <pre
+          style={{
+            fontSize: 11,
+            fontFamily: "monospace",
+            maxHeight: 180,
+            overflowY: "auto",
+            overflowX: "auto",
+            background: "var(--bg-secondary)",
+            border: "1px solid var(--border)",
+            borderRadius: 4,
+            padding: "6px 8px",
+            margin: 0,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-all",
+          }}
+        >
+          {content.length > 4096 ? content.slice(0, 4096) + "\n…(truncated)" : content}
+        </pre>
+      )}
+    </div>
+  );
 }
 
 // ── UI sub-components ─────────────────────────────────────────────────────────
@@ -417,6 +739,10 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
   const [error, setError]             = useState<string | null>(null);
   const [result, setResult]           = useState<ImportResult | null>(null);
 
+  // File preview state — keyed by file path; null = loading, string = content (or "" on error)
+  const [fileHeads, setFileHeads] = useState<Record<string, string | null>>({});
+  const pendingLoads = useRef<Set<string>>(new Set());
+
   const effectiveTable = createTable ? newTableName.trim() : (table || targetTable.trim());
 
   const setOpt = (k: keyof FormatOptions, v: any) =>
@@ -426,6 +752,19 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
     setFormat(f);
     setOptions(defaultOptions(f));
   };
+
+  // Load file heads for CSV / JSON previews
+  useEffect(() => {
+    if (format !== "CSV" && format !== "JSON") return;
+    filePaths.slice(0, 5).forEach((fp) => {
+      if (pendingLoads.current.has(fp)) return;
+      pendingLoads.current.add(fp);
+      setFileHeads((prev) => ({ ...prev, [fp]: null }));
+      ReadFileHead(fp, 65536)
+        .then((content) => setFileHeads((prev) => ({ ...prev, [fp]: content })))
+        .catch(() => setFileHeads((prev) => ({ ...prev, [fp]: "" })));
+    });
+  }, [filePaths, format]);
 
   const addFiles = async () => {
     const picked = await PickDataFilesByFormat(format);
@@ -478,6 +817,91 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
     }
   };
 
+  // ── File preview section (CSV / JSON only) ─────────────────────────────────
+
+  const renderPreview = () => {
+    if (format !== "CSV" && format !== "JSON") return null;
+    if (filePaths.length === 0) return null;
+
+    const previewFiles = filePaths.slice(0, 5);
+    const hasMore = filePaths.length > 5;
+
+    const renderFileContent = (fp: string) => {
+      const head = fileHeads[fp];
+      if (head === null || head === undefined) {
+        return (
+          <div style={{ padding: "8px 0", display: "flex", alignItems: "center", gap: 8 }}>
+            <Spin size="small" />
+            <Text type="secondary" style={{ fontSize: 11 }}>Loading preview…</Text>
+          </div>
+        );
+      }
+      if (head === "") {
+        return <Text type="secondary" style={{ fontSize: 11 }}>Preview not available</Text>;
+      }
+      if (format === "CSV") {
+        return (
+          <CsvFilePrev
+            content={head}
+            fieldDelimiter={options.fieldDelimiter}
+            parseHeader={options.parseHeader}
+          />
+        );
+      }
+      // JSON — JsonFilePrev manages its own parsed/raw toggle state
+      return <JsonFilePrev content={head} />;
+    };
+
+    const wrapContent = (fp: string) => (
+      <div style={{ maxHeight: 220, overflowY: "auto", padding: "6px 2px" }}>
+        {renderFileContent(fp)}
+      </div>
+    );
+
+    return (
+      <div>
+        <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>
+          File preview
+          {hasMore && (
+            <span style={{ marginLeft: 6, fontSize: 11 }}>
+              — first 5 of {filePaths.length} files
+            </span>
+          )}
+        </div>
+        {previewFiles.length === 1 ? (
+          <div
+            style={{
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              padding: "8px 12px",
+              overflowX: "auto",
+            }}
+          >
+            {wrapContent(previewFiles[0])}
+          </div>
+        ) : (
+          <div style={{ border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
+            <Tabs
+              size="small"
+              style={{ padding: "0 8px" }}
+              items={previewFiles.map((fp) => ({
+                key: fp,
+                label: (
+                  <Tooltip title={fp} mouseEnterDelay={0.5}>
+                    <span style={{ fontSize: 12, maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", display: "inline-block", whiteSpace: "nowrap" }}>
+                      {baseName(fp)}
+                    </span>
+                  </Tooltip>
+                ),
+                children: wrapContent(fp),
+              }))}
+            />
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <Modal
       open
@@ -509,8 +933,8 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
           </Space>
         )
       }
-      width={580}
-      styles={{ body: { paddingTop: 20, maxHeight: "75vh", overflowY: "auto" } }}
+      width={600}
+      styles={{ body: { paddingTop: 20, maxHeight: "80vh", overflowY: "auto" } }}
     >
       {result ? (
         /* ── Success ── */
@@ -566,6 +990,9 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
               block
             />
           </div>
+
+          {/* ── File preview (CSV / JSON) ── */}
+          {renderPreview()}
 
           {/* ── Format options (collapsible) ── */}
           <Collapse

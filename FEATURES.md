@@ -62,7 +62,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - Select the top 1,000 rows — opens a new tab and executes immediately
   - **Time Travel Query** — drag a timeline slider to query data at any past point within the retention window
   - **Export Data** — download table data as CSV, JSON, or Parquet via a temporary Snowflake stage
-  - **Import Data** — upload one or more local files into Snowflake; supports CSV, JSON, AVRO, ORC, and Parquet; exposes all Snowflake `FORMAT_TYPE_OPTIONS` with defaults pre-filled; can create a new table automatically by inferring the schema
+  - **Import Data** — upload one or more local files into Snowflake; supports CSV, JSON, AVRO, ORC, and Parquet; exposes all Snowflake `FORMAT_TYPE_OPTIONS` with defaults pre-filled; can create a new table automatically by inferring the schema; **file preview** for CSV and JSON shows the first 10 rows of up to 5 files — CSV offers **Parsed** (table respecting current delimiter and header settings) and **Raw** views; JSON offers **Parsed** (tabular, supports arrays-of-objects and NDJSON) and **Raw** views; multiple files shown in a tabbed layout
   - **Insert Full Name** — insert the fully-qualified `"DB"."SCHEMA"."OBJECT"` identifier at the cursor
   - View DDL definition inline
   - **Rename** the object

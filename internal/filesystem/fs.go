@@ -11,6 +11,7 @@
 package filesystem
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -30,6 +31,27 @@ func ReadFile(path string) (string, error) {
 		return "", err
 	}
 	return string(data), nil
+}
+
+// ReadFileHead returns the first maxBytes bytes of the file at path as a string.
+// If the file is smaller than maxBytes, the full content is returned.
+// This is intended for lightweight previews and is safe to call on large files.
+func ReadFileHead(path string, maxBytes int) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	buf := make([]byte, maxBytes)
+	n, err := io.ReadFull(f, buf)
+	if err == io.ErrUnexpectedEOF || err == io.EOF {
+		err = nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return string(buf[:n]), nil
 }
 
 // WriteFile creates or overwrites the file at path with content.

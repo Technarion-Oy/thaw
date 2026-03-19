@@ -235,6 +235,12 @@ func (a *App) ReadFile(path string) (string, error) {
 	return filesystem.ReadFile(path)
 }
 
+// ReadFileHead returns the first maxBytes bytes of the file at path.
+// It is intended for lightweight file previews and is safe to call on large files.
+func (a *App) ReadFileHead(path string, maxBytes int) (string, error) {
+	return filesystem.ReadFileHead(path, maxBytes)
+}
+
 // SaveFile writes content to path, creating parent directories as needed.
 func (a *App) SaveFile(path, content string) error {
 	return filesystem.WriteFile(path, content)
