@@ -343,10 +343,14 @@ Open **Tools → Schema Migration…** in the menu bar to deploy local `.sql` DD
    - **Removed** — exists in Snowflake but not locally
    - **Monaco DiffEditor** below the grid shows local vs remote DDL for the selected row
    - **Auto-dependency selection** — when a VIEW or PROCEDURE is checked, any referenced TABLE that is also "new" or "changed" is selected automatically and a toast is shown; unchecking a TABLE that a selected VIEW depends on is blocked with an inline warning
-   - **Open in SQL Editor** — generates the full deployment script (sorted by execution priority), loads it into a new editor tab, and closes the modal for manual review before running
-4. **Protect** — optional safety measures before deploying:
-   - Create a Snowflake Backup Set (`CREATE BACKUP SET FOR DATABASE …`)
-   - Create a zero-copy clone database (`CREATE DATABASE … CLONE …`)
+4. **Strategy & Protect** — choose how existing TABLE objects with data are migrated, then optionally create safety snapshots:
+   - **Smart In-Place** *(default)* — diffs local vs remote column definitions and issues `ALTER TABLE ADD COLUMN` / `DROP COLUMN` / `ALTER COLUMN TYPE`; no data movement; safest for compatible schema changes
+   - **Blue/Green Swap** — creates a temporary table with the new schema, copies shared columns with `INSERT … SELECT`, atomically swaps the two tables with `ALTER TABLE … SWAP WITH`, then drops the temp; non-shared columns are discarded
+   - **View-Based Soft Cutover** — renames the original table to `<name>_v1`, creates the new table from local DDL, and creates a compatibility view `<name>_compat` exposing the shared columns from the archived data
+   - **Destructive Rebuild** — `DROP TABLE IF EXISTS` + `CREATE TABLE`; all existing data is permanently lost; shows a red warning banner when selected
+   - **Empty-table shortcut** — if `SHOW TABLES` reports 0 rows for a table, the data-preserving strategies are skipped and a direct `DROP + CREATE` is used instead, regardless of the chosen strategy
+   - **Open in SQL Editor** — generates a strategy-aware SQL script (ALTER TABLE statements for in-place, multi-step sequences for the others) and loads it into a new editor tab for review before running
+   - **Safety snapshots** (optional): Create a Backup Set (`CREATE BACKUP SET FOR DATABASE …`) and/or a zero-copy clone database (`CREATE DATABASE … CLONE …`)
 5. **Deploy** — executes the selected objects in dependency order (DATABASE → SCHEMA → SEQUENCE → TABLE → FILE FORMAT → STAGE → VIEW → MATERIALIZED VIEW → FUNCTION → PROCEDURE → STREAM → TASK → PIPE) with up to 5 retry passes; objects that fail with a dependency error ("does not exist" / "not authorized") are automatically retried in subsequent passes; a live progress table shows pass number, object name, and per-object status; **Cancel** stops the run cleanly
 
 ### File browser

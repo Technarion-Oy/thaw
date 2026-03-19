@@ -81,6 +81,12 @@ var (
 	migrationUseDatabaseRE  = regexp.MustCompile(`(?i)^\s*USE\s+DATABASE\s+"?([^"\s;]+)"?`)
 	migrationUseSchemaRE    = regexp.MustCompile(`(?i)^\s*USE\s+SCHEMA\s+"?([^"\s;]+)"?`)
 	migrationIsReplaceRE    = regexp.MustCompile(`(?i)^\s*CREATE\s+OR\s+REPLACE\b`)
+
+	// column-parsing patterns used by table migration strategies
+	migrConstraintPrefixRE = regexp.MustCompile(
+		`(?i)^\s*(CONSTRAINT|PRIMARY\s+KEY|UNIQUE|CHECK|FOREIGN\s+KEY|CLUSTER\s+BY)`)
+	migrColNameRE = regexp.MustCompile(`(?i)^\s*"?([A-Za-z_][A-Za-z0-9_$]*)"?\s+\S`)
+	migrColTypeRE = regexp.MustCompile(`(?i)^\w+(?:\s*\([^)]*\))?`)
 )
 
 // ─── ScanMigrationSource ─────────────────────────────────────────────────────
@@ -474,7 +480,7 @@ func (a *App) CreateMigrationSnapshot(database, backupSetDB, backupSetSchema, ba
 // ExecuteMigration deploys the selected objects to Snowflake in dependency order
 // with up to maxPasses retry passes for objects that fail due to dependency
 // errors. It emits migration:exec:progress events throughout.
-func (a *App) ExecuteMigration(selected []MigrationObject, database string, maxPasses int) ([]MigrationExecEvent, error) {
+func (a *App) ExecuteMigration(selected []MigrationObject, database string, maxPasses int, strategy TableMigrationStrategy) ([]MigrationExecEvent, error) {
 	if a.client == nil {
 		return nil, ErrNotConnected
 	}
@@ -508,10 +514,6 @@ func (a *App) ExecuteMigration(selected []MigrationObject, database string, maxP
 	var allEvents []MigrationExecEvent
 	var doneCount int
 
-	q := func(s string) string {
-		return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
-	}
-
 	work := sorted
 
 	for pass := 1; pass <= maxPasses && len(work) > 0; pass++ {
@@ -540,12 +542,12 @@ func (a *App) ExecuteMigration(selected []MigrationObject, database string, maxP
 
 			// Set database context if known
 			if mo.Database != "" {
-				if _, err := a.client.Execute(ctx, fmt.Sprintf("USE DATABASE %s", q(mo.Database))); err != nil {
+				if _, err := a.client.Execute(ctx, fmt.Sprintf("USE DATABASE %s", migrQuote(mo.Database))); err != nil {
 					// Non-fatal; proceed anyway
 				}
 			}
 
-			_, execErr := a.client.Execute(ctx, mo.DDL)
+			execErr := a.executeMigrationObject(ctx, mo, strategy)
 
 			if execErr == nil {
 				doneCount++
@@ -693,4 +695,718 @@ func isDependencyError(msg string) bool {
 	lower := strings.ToLower(msg)
 	return strings.Contains(lower, "does not exist") ||
 		strings.Contains(lower, "not authorized")
+}
+
+// ─── TableMigrationStrategy ───────────────────────────────────────────────────
+
+// TableMigrationStrategy controls how TABLE objects that already exist in
+// Snowflake are handled during migration. It has no effect on non-TABLE objects,
+// which are always executed via their raw DDL.
+type TableMigrationStrategy string
+
+const (
+	// StrategyInPlace applies ALTER TABLE ADD/DROP/ALTER COLUMN statements to
+	// the existing table without touching unaffected rows.
+	StrategyInPlace TableMigrationStrategy = "in_place"
+
+	// StrategyBlueGreenSwap creates a temporary table with the new schema,
+	// copies shared columns from the original, then atomically swaps the two
+	// tables with ALTER TABLE … SWAP WITH. Columns absent from the new schema
+	// are discarded; all other rows are preserved.
+	StrategyBlueGreenSwap TableMigrationStrategy = "blue_green_swap"
+
+	// StrategyViewAbstraction renames the original table to <name>_v1, creates
+	// the new table with the updated schema, and creates a compatibility view
+	// <name>_compat that exposes shared columns from the archived data.
+	StrategyViewAbstraction TableMigrationStrategy = "view_abstraction"
+
+	// StrategyDestructiveRebuild drops the existing table before recreating it.
+	// All existing data is permanently lost.
+	StrategyDestructiveRebuild TableMigrationStrategy = "destructive_rebuild"
+)
+
+// ─── column helpers ──────────────────────────────────────────────────────────
+
+// migrColDef is a column name plus its normalised type expression.
+type migrColDef struct {
+	Name     string // upper-cased, unquoted
+	TypeExpr string // base type only, e.g. "VARCHAR(255)" or "NUMBER(38,0)"
+}
+
+// migrTempCounter generates unique temp-table name suffixes within a session.
+var migrTempCounter atomic.Int64
+
+// migrTempName returns a temporary table name unlikely to collide with
+// existing objects.
+func migrTempName(base string) string {
+	n := migrTempCounter.Add(1)
+	if len(base) > 50 {
+		base = base[:50]
+	}
+	return fmt.Sprintf("%s__thaw_tmp_%d", base, n)
+}
+
+// migrQuote double-quote-escapes a Snowflake identifier.
+func migrQuote(s string) string {
+	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+}
+
+// parseLocalTableColumns extracts column definitions from a CREATE TABLE DDL
+// statement. Constraint and clustering clauses are skipped.
+func parseLocalTableColumns(ddl string) []migrColDef {
+	// Locate the outermost parenthesised block.
+	start := strings.IndexByte(ddl, '(')
+	if start < 0 {
+		return nil
+	}
+	depth, end := 0, -1
+	for i := start; i < len(ddl); i++ {
+		switch ddl[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				end = i
+			}
+		}
+		if end >= 0 {
+			break
+		}
+	}
+	if end < 0 {
+		return nil
+	}
+
+	var cols []migrColDef
+	for _, part := range splitTopLevel(ddl[start+1:end], ',') {
+		part = strings.TrimSpace(part)
+		if part == "" || migrConstraintPrefixRE.MatchString(part) {
+			continue
+		}
+		locs := migrColNameRE.FindStringSubmatchIndex(part)
+		if locs == nil {
+			continue
+		}
+		name := strings.ToUpper(part[locs[2]:locs[3]]) // capture group [1]
+		// The full match ends at locs[1]; the trailing \S in the pattern is the
+		// first character of the type expression — start rest from there so the
+		// closing " of a quoted identifier is not included in the type clause.
+		rest := strings.TrimSpace(part[locs[1]-1:])
+		// Extract only the base type (strip NOT NULL, DEFAULT, etc.)
+		typeExpr := ""
+		if tm := migrColTypeRE.FindString(rest); tm != "" {
+			typeExpr = strings.ToUpper(strings.TrimSpace(tm))
+		} else if len(strings.Fields(rest)) > 0 {
+			typeExpr = strings.ToUpper(strings.Fields(rest)[0])
+		}
+		if typeExpr != "" {
+			cols = append(cols, migrColDef{Name: name, TypeExpr: typeExpr})
+		}
+	}
+	return cols
+}
+
+// splitTopLevel splits s on sep, respecting nested parentheses.
+func splitTopLevel(s string, sep byte) []string {
+	var parts []string
+	depth, start := 0, 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		default:
+			if s[i] == sep && depth == 0 {
+				parts = append(parts, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(parts, s[start:])
+}
+
+// commonColumnNames returns column names from a that also appear in b,
+// preserving the order from a.
+func commonColumnNames(a, b []migrColDef) []string {
+	set := make(map[string]bool, len(b))
+	for _, c := range b {
+		set[c.Name] = true
+	}
+	var out []string
+	for _, c := range a {
+		if set[c.Name] {
+			out = append(out, c.Name)
+		}
+	}
+	return out
+}
+
+// replaceDDLTableName rewrites the table identifier in a CREATE TABLE DDL so
+// it references db.schema.newName. Handles quoted/unquoted and qualified names
+// as well as CREATE OR REPLACE [TRANSIENT] TABLE variants.
+func replaceDDLTableName(ddl, db, schema, newName string) string {
+	newFQN := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(newName)
+
+	// Split at the first '(' to isolate the header.
+	parenIdx := strings.IndexByte(ddl, '(')
+	if parenIdx < 0 {
+		return ddl
+	}
+	header := ddl[:parenIdx]
+	body := ddl[parenIdx:]
+
+	// Find the last "TABLE" keyword in the header (handles TRANSIENT TABLE).
+	upper := strings.ToUpper(header)
+	tablePos := strings.LastIndex(upper, "TABLE")
+	if tablePos < 0 {
+		return ddl
+	}
+
+	// Skip whitespace after TABLE to find the start of the identifier.
+	i := tablePos + 5
+	for i < len(header) && (header[i] == ' ' || header[i] == '\t') {
+		i++
+	}
+	identStart := i
+
+	// Scan the identifier, respecting double-quoted segments.
+	inQuote := false
+	for i < len(header) {
+		ch := header[i]
+		if ch == '"' {
+			inQuote = !inQuote
+		} else if !inQuote && (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
+			break
+		}
+		i++
+	}
+	identEnd := i
+
+	return header[:identStart] + newFQN + header[identEnd:] + body
+}
+
+// ─── Snowflake introspection helpers ─────────────────────────────────────────
+
+// tableExists reports whether a BASE TABLE with the given name exists.
+// Uses INFORMATION_SCHEMA to avoid triggering gosnowflake driver error logs
+// when the table is absent.
+func (a *App) tableExists(ctx context.Context, db, schema, name string) (bool, error) {
+	sql := fmt.Sprintf(
+		"SELECT COUNT(*) FROM %s.INFORMATION_SCHEMA.TABLES"+
+			" WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = '%s'"+
+			" AND TABLE_TYPE = 'BASE TABLE'",
+		migrQuote(db),
+		strings.ReplaceAll(strings.ToUpper(schema), "'", "''"),
+		strings.ReplaceAll(strings.ToUpper(name), "'", "''"),
+	)
+	res, err := a.client.Execute(ctx, sql)
+	if err != nil {
+		return false, err
+	}
+	if len(res.Rows) == 0 || len(res.Rows[0]) == 0 {
+		return false, nil
+	}
+	switch v := res.Rows[0][0].(type) {
+	case int64:
+		return v > 0, nil
+	case float64:
+		return v > 0, nil
+	case string:
+		return v != "0" && v != "", nil
+	}
+	return false, nil
+}
+
+// describeTableColumns runs DESCRIBE TABLE and returns the column definitions.
+// Only rows with kind = "Column" are included.
+func (a *App) describeTableColumns(ctx context.Context, db, schema, table string) ([]migrColDef, error) {
+	fqn := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(table)
+	res, err := a.client.Execute(ctx, "DESCRIBE TABLE "+fqn)
+	if err != nil {
+		return nil, err
+	}
+	var cols []migrColDef
+	for _, row := range res.Rows {
+		if len(row) < 3 {
+			continue
+		}
+		kind, _ := row[2].(string)
+		if !strings.EqualFold(kind, "Column") {
+			continue
+		}
+		colName, _ := row[0].(string)
+		typeExpr, _ := row[1].(string)
+		cols = append(cols, migrColDef{
+			Name:     strings.ToUpper(colName),
+			TypeExpr: strings.ToUpper(typeExpr),
+		})
+	}
+	return cols, nil
+}
+
+// tableRowCount returns the row count for a table using SHOW TABLES.
+// It returns 0 without error when the table is not found or the count cannot
+// be determined, so callers should treat any error as "unknown" rather than
+// "empty".
+func (a *App) tableRowCount(ctx context.Context, db, schema, name string) (int64, error) {
+	// LIKE matching is case-insensitive; escape LIKE metacharacters in the name.
+	escaped := strings.ReplaceAll(name, "'", "''")
+	escaped = strings.ReplaceAll(escaped, "%", "\\%")
+	escaped = strings.ReplaceAll(escaped, "_", "\\_")
+	sql := fmt.Sprintf(
+		"SHOW TABLES LIKE '%s' IN SCHEMA %s.%s",
+		escaped, migrQuote(db), migrQuote(schema),
+	)
+	res, err := a.client.Execute(ctx, sql)
+	if err != nil {
+		return 0, err
+	}
+	if len(res.Rows) == 0 {
+		return 0, nil
+	}
+
+	// Locate "name" and "rows" column indices dynamically — SHOW output can vary.
+	nameIdx, rowsIdx := -1, -1
+	for i, col := range res.Columns {
+		switch strings.ToLower(col) {
+		case "name":
+			nameIdx = i
+		case "rows":
+			rowsIdx = i
+		}
+	}
+	if rowsIdx < 0 {
+		return 0, nil
+	}
+
+	// SHOW TABLES LIKE can match multiple tables (e.g. MY_TABLE and MY1TABLE);
+	// scan all rows and match on the exact name.
+	for _, row := range res.Rows {
+		if nameIdx >= 0 && len(row) > nameIdx {
+			rowName, _ := row[nameIdx].(string)
+			if !strings.EqualFold(rowName, name) {
+				continue
+			}
+		}
+		if len(row) <= rowsIdx {
+			continue
+		}
+		switch v := row[rowsIdx].(type) {
+		case int64:
+			return v, nil
+		case float64:
+			return int64(v), nil
+		case string:
+			var n int64
+			_, _ = fmt.Sscanf(v, "%d", &n)
+			return n, nil
+		}
+	}
+	return 0, nil
+}
+
+// ─── strategy dispatch ────────────────────────────────────────────────────────
+
+// executeMigrationObject runs the appropriate strategy for a single migration
+// object. Non-TABLE objects are always executed via their raw DDL. TABLE objects
+// use the chosen strategy only when the table already exists; brand-new tables
+// are always created via their DDL directly.
+func (a *App) executeMigrationObject(ctx context.Context, mo MigrationObject, strategy TableMigrationStrategy) error {
+	if strings.ToUpper(mo.ObjectKind) != "TABLE" {
+		_, err := a.client.Execute(ctx, mo.DDL)
+		return err
+	}
+
+	exists, err := a.tableExists(ctx, mo.Database, mo.Schema, mo.ObjectName)
+	if err != nil {
+		// Cannot determine existence; fall back to direct execution.
+		_, execErr := a.client.Execute(ctx, mo.DDL)
+		return execErr
+	}
+	if !exists {
+		_, err = a.client.Execute(ctx, mo.DDL)
+		return err
+	}
+
+	// Empty table: data-preserving strategies add no value — use a fast
+	// CREATE OR REPLACE path instead (DROP + CREATE so the DDL is applied as-is
+	// even when the local file lacks OR REPLACE).
+	rowCount, rcErr := a.tableRowCount(ctx, mo.Database, mo.Schema, mo.ObjectName)
+	if rcErr == nil && rowCount == 0 {
+		return a.executeDestructiveRebuild(ctx, mo)
+	}
+
+	// Existing non-empty table: apply chosen strategy.
+	switch strategy {
+	case StrategyBlueGreenSwap:
+		return a.executeBlueGreenSwap(ctx, mo)
+	case StrategyViewAbstraction:
+		return a.executeViewAbstraction(ctx, mo)
+	case StrategyDestructiveRebuild:
+		return a.executeDestructiveRebuild(ctx, mo)
+	default: // StrategyInPlace
+		return a.executeInPlace(ctx, mo)
+	}
+}
+
+// ─── strategy: in_place ───────────────────────────────────────────────────────
+
+// executeInPlace diffs local column definitions against the remote schema and
+// applies ALTER TABLE ADD/DROP/ALTER COLUMN TYPE statements.
+func (a *App) executeInPlace(ctx context.Context, mo MigrationObject) error {
+	db, schema, name := mo.Database, mo.Schema, mo.ObjectName
+	fqn := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(name)
+
+	remoteCols, err := a.describeTableColumns(ctx, db, schema, name)
+	if err != nil {
+		return fmt.Errorf("describe remote columns: %w", err)
+	}
+	localCols := parseLocalTableColumns(mo.DDL)
+	if len(localCols) == 0 {
+		// Cannot parse local DDL; fall back to direct execution.
+		_, execErr := a.client.Execute(ctx, mo.DDL)
+		return execErr
+	}
+
+	remoteByName := make(map[string]migrColDef, len(remoteCols))
+	for _, c := range remoteCols {
+		remoteByName[c.Name] = c
+	}
+	localByName := make(map[string]migrColDef, len(localCols))
+	for _, c := range localCols {
+		localByName[c.Name] = c
+	}
+
+	// ADD new columns.
+	for _, c := range localCols {
+		if _, exists := remoteByName[c.Name]; !exists {
+			sql := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", fqn, migrQuote(c.Name), c.TypeExpr)
+			if _, err = a.client.Execute(ctx, sql); err != nil {
+				return fmt.Errorf("add column %s: %w", c.Name, err)
+			}
+		}
+	}
+
+	// DROP removed columns.
+	for _, c := range remoteCols {
+		if _, exists := localByName[c.Name]; !exists {
+			sql := fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s", fqn, migrQuote(c.Name))
+			if _, err = a.client.Execute(ctx, sql); err != nil {
+				return fmt.Errorf("drop column %s: %w", c.Name, err)
+			}
+		}
+	}
+
+	// ALTER COLUMN TYPE for changed columns.
+	for _, lc := range localCols {
+		rc, exists := remoteByName[lc.Name]
+		if !exists {
+			continue // just added above
+		}
+		if !strings.EqualFold(lc.TypeExpr, rc.TypeExpr) {
+			sql := fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s TYPE %s", fqn, migrQuote(lc.Name), lc.TypeExpr)
+			if _, err = a.client.Execute(ctx, sql); err != nil {
+				return fmt.Errorf("alter column %s type: %w", lc.Name, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// ─── strategy: blue_green_swap ────────────────────────────────────────────────
+
+// executeBlueGreenSwap creates a temporary table with the new schema (by
+// rewriting the table name in the local DDL), copies shared columns from the
+// original, atomically swaps the two tables, then drops the temp.
+func (a *App) executeBlueGreenSwap(ctx context.Context, mo MigrationObject) error {
+	db, schema, name := mo.Database, mo.Schema, mo.ObjectName
+	tmpName := migrTempName(name)
+	origFQN := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(name)
+	tmpFQN := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(tmpName)
+
+	// 1. Create temporary table with new DDL (same schema, different name).
+	tmpDDL := replaceDDLTableName(mo.DDL, db, schema, tmpName)
+	if _, err := a.client.Execute(ctx, tmpDDL); err != nil {
+		return fmt.Errorf("create temp table: %w", err)
+	}
+
+	dropTmp := func() { _, _ = a.client.Execute(ctx, "DROP TABLE IF EXISTS "+tmpFQN) }
+
+	// 2. Determine shared columns: remote (old) ∩ new.
+	remoteCols, err := a.describeTableColumns(ctx, db, schema, name)
+	if err != nil {
+		dropTmp()
+		return fmt.Errorf("describe remote columns: %w", err)
+	}
+	newCols, err := a.describeTableColumns(ctx, db, schema, tmpName)
+	if err != nil {
+		dropTmp()
+		return fmt.Errorf("describe new columns: %w", err)
+	}
+	commonNames := commonColumnNames(remoteCols, newCols)
+
+	// 3. Copy shared columns from original into temp.
+	if len(commonNames) > 0 {
+		var colList strings.Builder
+		for i, n := range commonNames {
+			if i > 0 {
+				colList.WriteString(", ")
+			}
+			colList.WriteString(migrQuote(n))
+		}
+		cols := colList.String()
+		insertSQL := fmt.Sprintf("INSERT INTO %s (%s) SELECT %s FROM %s", tmpFQN, cols, cols, origFQN)
+		if _, err = a.client.Execute(ctx, insertSQL); err != nil {
+			dropTmp()
+			return fmt.Errorf("copy data: %w", err)
+		}
+	}
+
+	// 4. Atomically swap: original now has new schema + copied rows.
+	if _, err = a.client.Execute(ctx, fmt.Sprintf("ALTER TABLE %s SWAP WITH %s", origFQN, tmpFQN)); err != nil {
+		dropTmp()
+		return fmt.Errorf("swap tables: %w", err)
+	}
+
+	// 5. Drop temp (now holds the old schema/data).
+	dropTmp()
+	return nil
+}
+
+// ─── strategy: view_abstraction ───────────────────────────────────────────────
+
+// executeViewAbstraction renames the existing table to <name>_v1, creates the
+// new table from local DDL, and creates a compatibility view <name>_compat that
+// exposes shared columns from the archived data.
+func (a *App) executeViewAbstraction(ctx context.Context, mo MigrationObject) error {
+	db, schema, name := mo.Database, mo.Schema, mo.ObjectName
+	archiveName := name + "_v1"
+	origFQN := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(name)
+	archiveFQN := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(archiveName)
+	compatFQN := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(name+"_compat")
+
+	// 1. Capture remote columns before renaming.
+	remoteCols, err := a.describeTableColumns(ctx, db, schema, name)
+	if err != nil {
+		return fmt.Errorf("describe remote columns: %w", err)
+	}
+
+	// 2. Rename original table to archive.
+	if _, err = a.client.Execute(ctx, fmt.Sprintf("ALTER TABLE %s RENAME TO %s", origFQN, archiveFQN)); err != nil {
+		return fmt.Errorf("rename table: %w", err)
+	}
+
+	// 3. Create new table from local DDL.
+	if _, err = a.client.Execute(ctx, mo.DDL); err != nil {
+		// Roll back the rename.
+		_, _ = a.client.Execute(ctx, fmt.Sprintf("ALTER TABLE %s RENAME TO %s", archiveFQN, origFQN))
+		return fmt.Errorf("create new table: %w", err)
+	}
+
+	// 4. Create a compatibility view over the shared columns.
+	localCols := parseLocalTableColumns(mo.DDL)
+	commonNames := commonColumnNames(remoteCols, localCols)
+	if len(commonNames) > 0 {
+		var colList strings.Builder
+		for i, n := range commonNames {
+			if i > 0 {
+				colList.WriteString(", ")
+			}
+			colList.WriteString(migrQuote(n))
+		}
+		viewSQL := fmt.Sprintf(
+			"CREATE OR REPLACE VIEW %s AS SELECT %s FROM %s",
+			compatFQN, colList.String(), archiveFQN,
+		)
+		if _, err = a.client.Execute(ctx, viewSQL); err != nil {
+			return fmt.Errorf("create compat view: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// ─── strategy: destructive_rebuild ────────────────────────────────────────────
+
+// executeDestructiveRebuild drops the existing table and recreates it from
+// local DDL. All existing data is permanently lost.
+func (a *App) executeDestructiveRebuild(ctx context.Context, mo MigrationObject) error {
+	db, schema, name := mo.Database, mo.Schema, mo.ObjectName
+	fqn := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(name)
+	if _, err := a.client.Execute(ctx, "DROP TABLE IF EXISTS "+fqn); err != nil {
+		return fmt.Errorf("drop table: %w", err)
+	}
+	if _, err := a.client.Execute(ctx, mo.DDL); err != nil {
+		return fmt.Errorf("create table: %w", err)
+	}
+	return nil
+}
+
+// ─── GenerateMigrationScript ──────────────────────────────────────────────────
+
+// GenerateMigrationScript builds a human-readable SQL script for the supplied
+// diff items using the chosen table migration strategy. It does not require an
+// active Snowflake connection because all column information is derived from the
+// DDL text already present in the diff items.
+func (a *App) GenerateMigrationScript(items []MigrationDiffItem, database string, strategy TableMigrationStrategy) (string, error) {
+	return buildMigrationScript(items, database, strategy), nil
+}
+
+func buildMigrationScript(items []MigrationDiffItem, database string, strategy TableMigrationStrategy) string {
+	dbFallback := strings.ToUpper(database)
+
+	sorted := make([]MigrationDiffItem, len(items))
+	copy(sorted, items)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return executionPriority(sorted[i].Object.ObjectKind) < executionPriority(sorted[j].Object.ObjectKind)
+	})
+
+	var sb strings.Builder
+	sb.WriteString("-- Schema Migration Script\n-- Generated by Thaw\n\n")
+
+	header := sb.Len()
+	var currentDB string
+
+	for _, item := range sorted {
+		if item.Status == "unchanged" || item.Status == "removed" {
+			continue
+		}
+
+		mo := item.Object
+		db := mo.Database
+		if db == "" {
+			db = dbFallback
+		}
+
+		if db != "" && strings.ToUpper(db) != currentDB {
+			if sb.Len() > header {
+				sb.WriteString("\n")
+			}
+			fmt.Fprintf(&sb, "USE DATABASE %s;\n\n", migrQuote(db))
+			currentDB = strings.ToUpper(db)
+		}
+
+		fqn := migrQuote(db) + "." + migrQuote(mo.Schema) + "." + migrQuote(mo.ObjectName)
+		ddl := strings.TrimRight(mo.DDL, ";\n ")
+
+		if strings.ToUpper(mo.ObjectKind) != "TABLE" || item.Status == "new" {
+			fmt.Fprintf(&sb, "%s;\n\n", ddl)
+			continue
+		}
+
+		// Existing TABLE: emit strategy-specific SQL.
+		switch strategy {
+		case StrategyInPlace:
+			scriptInPlace(&sb, fqn, mo.ObjectName, item.LocalDDL, item.RemoteDDL)
+		case StrategyBlueGreenSwap:
+			scriptBlueGreen(&sb, fqn, db, mo.Schema, mo.ObjectName, item.LocalDDL, item.RemoteDDL, ddl)
+		case StrategyViewAbstraction:
+			scriptViewAbstraction(&sb, fqn, db, mo.Schema, mo.ObjectName, item.LocalDDL, item.RemoteDDL, ddl)
+		case StrategyDestructiveRebuild:
+			fmt.Fprintf(&sb, "-- Destructive Rebuild: %s\n", mo.ObjectName)
+			fmt.Fprintf(&sb, "DROP TABLE IF EXISTS %s;\n%s;\n\n", fqn, ddl)
+		}
+	}
+
+	return sb.String()
+}
+
+func scriptInPlace(sb *strings.Builder, fqn, objectName, localDDL, remoteDDL string) {
+	remoteCols := parseLocalTableColumns(remoteDDL)
+	localCols := parseLocalTableColumns(localDDL)
+	if len(localCols) == 0 {
+		fmt.Fprintf(sb, "-- Could not parse local columns for %s; manual review required.\n%s;\n\n",
+			objectName, strings.TrimRight(localDDL, ";\n "))
+		return
+	}
+
+	remoteByName := make(map[string]migrColDef, len(remoteCols))
+	for _, c := range remoteCols {
+		remoteByName[c.Name] = c
+	}
+	localByName := make(map[string]migrColDef, len(localCols))
+	for _, c := range localCols {
+		localByName[c.Name] = c
+	}
+
+	fmt.Fprintf(sb, "-- Smart In-Place: %s\n", objectName)
+	written := false
+	for _, c := range localCols {
+		if _, exists := remoteByName[c.Name]; !exists {
+			fmt.Fprintf(sb, "ALTER TABLE %s ADD COLUMN %s %s;\n", fqn, migrQuote(c.Name), c.TypeExpr)
+			written = true
+		}
+	}
+	for _, c := range remoteCols {
+		if _, exists := localByName[c.Name]; !exists {
+			fmt.Fprintf(sb, "ALTER TABLE %s DROP COLUMN %s;\n", fqn, migrQuote(c.Name))
+			written = true
+		}
+	}
+	for _, lc := range localCols {
+		rc, exists := remoteByName[lc.Name]
+		if !exists {
+			continue
+		}
+		if !strings.EqualFold(lc.TypeExpr, rc.TypeExpr) {
+			fmt.Fprintf(sb, "ALTER TABLE %s ALTER COLUMN %s TYPE %s;\n", fqn, migrQuote(lc.Name), lc.TypeExpr)
+			written = true
+		}
+	}
+	if !written {
+		fmt.Fprintf(sb, "-- (no column changes detected)\n")
+	}
+	sb.WriteString("\n")
+}
+
+func scriptBlueGreen(sb *strings.Builder, origFQN, db, schema, objectName, localDDL, remoteDDL, ddl string) {
+	tmpName := objectName + "__migration_tmp"
+	tmpFQN := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(tmpName)
+	tmpDDL := strings.TrimRight(replaceDDLTableName(ddl, db, schema, tmpName), ";\n ")
+
+	remoteCols := parseLocalTableColumns(remoteDDL)
+	localCols := parseLocalTableColumns(localDDL)
+	commonNames := commonColumnNames(remoteCols, localCols)
+
+	fmt.Fprintf(sb, "-- Blue/Green Swap: %s\n", objectName)
+	fmt.Fprintf(sb, "%s;\n", tmpDDL)
+	if len(commonNames) > 0 {
+		var colList strings.Builder
+		for i, n := range commonNames {
+			if i > 0 {
+				colList.WriteString(", ")
+			}
+			colList.WriteString(migrQuote(n))
+		}
+		cols := colList.String()
+		fmt.Fprintf(sb, "INSERT INTO %s (%s)\n  SELECT %s FROM %s;\n", tmpFQN, cols, cols, origFQN)
+	}
+	fmt.Fprintf(sb, "ALTER TABLE %s SWAP WITH %s;\n", origFQN, tmpFQN)
+	fmt.Fprintf(sb, "DROP TABLE IF EXISTS %s;\n\n", tmpFQN)
+}
+
+func scriptViewAbstraction(sb *strings.Builder, origFQN, db, schema, objectName, localDDL, remoteDDL, ddl string) {
+	archiveFQN := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(objectName+"_v1")
+	compatFQN := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(objectName+"_compat")
+
+	remoteCols := parseLocalTableColumns(remoteDDL)
+	localCols := parseLocalTableColumns(localDDL)
+	commonNames := commonColumnNames(remoteCols, localCols)
+
+	fmt.Fprintf(sb, "-- View Abstraction: %s\n", objectName)
+	fmt.Fprintf(sb, "ALTER TABLE %s RENAME TO %s;\n%s;\n", origFQN, archiveFQN, ddl)
+	if len(commonNames) > 0 {
+		var colList strings.Builder
+		for i, n := range commonNames {
+			if i > 0 {
+				colList.WriteString(", ")
+			}
+			colList.WriteString(migrQuote(n))
+		}
+		fmt.Fprintf(sb, "CREATE OR REPLACE VIEW %s AS SELECT %s FROM %s;\n", compatFQN, colList.String(), archiveFQN)
+	}
+	sb.WriteString("\n")
 }

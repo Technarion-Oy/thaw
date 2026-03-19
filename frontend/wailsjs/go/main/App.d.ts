@@ -57,7 +57,7 @@ export function DropBackupPolicy(arg1:string):Promise<void>;
 
 export function DropBackupSet(arg1:string,arg2:string,arg3:string):Promise<void>;
 
-export function ExecuteMigration(arg1:Array<main.MigrationObject>,arg2:string,arg3:number):Promise<Array<main.MigrationExecEvent>>;
+export function ExecuteMigration(arg1:Array<main.MigrationObject>,arg2:string,arg3:number,arg4:main.TableMigrationStrategy):Promise<Array<main.MigrationExecEvent>>;
 
 export function ExecuteNotebook(arg1:string,arg2:string,arg3:string,arg4:Array<string>):Promise<string>;
 
@@ -72,6 +72,8 @@ export function ExportDatabaseDDL(arg1:string,arg2:string):Promise<ddl.ExportRes
 export function ExportTableData(arg1:snowflake.ExportTableParams):Promise<snowflake.ExportTableResult>;
 
 export function FetchNotebookContent(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function GenerateMigrationScript(arg1:Array<main.MigrationDiffItem>,arg2:string,arg3:main.TableMigrationStrategy):Promise<string>;
 
 export function GetAIConfig():Promise<config.AIConfig>;
 

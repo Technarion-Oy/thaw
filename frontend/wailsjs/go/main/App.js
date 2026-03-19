@@ -98,8 +98,8 @@ export function DropBackupSet(arg1, arg2, arg3) {
   return window['go']['main']['App']['DropBackupSet'](arg1, arg2, arg3);
 }
 
-export function ExecuteMigration(arg1, arg2, arg3) {
-  return window['go']['main']['App']['ExecuteMigration'](arg1, arg2, arg3);
+export function ExecuteMigration(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ExecuteMigration'](arg1, arg2, arg3, arg4);
 }
 
 export function ExecuteNotebook(arg1, arg2, arg3, arg4) {
@@ -128,6 +128,10 @@ export function ExportTableData(arg1) {
 
 export function FetchNotebookContent(arg1, arg2, arg3) {
   return window['go']['main']['App']['FetchNotebookContent'](arg1, arg2, arg3);
+}
+
+export function GenerateMigrationScript(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GenerateMigrationScript'](arg1, arg2, arg3);
 }
 
 export function GetAIConfig() {

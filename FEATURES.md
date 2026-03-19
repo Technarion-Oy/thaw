@@ -192,10 +192,27 @@ Open **Tools → Schema Migration…** to deploy local `.sql` DDL files to a Sno
   - **Removed** — exists in Snowflake but not in the local source
 - **Monaco DiffEditor** below the grid shows the local vs remote DDL for the selected row
 - **Dependency auto-select** — selecting a VIEW or PROCEDURE automatically selects any referenced TABLE that is also "new" or "changed"; unchecking a TABLE that a selected VIEW or PROCEDURE depends on is blocked with an inline warning ("Required by: VIEW_NAME")
-- **Open in SQL Editor** — generates the full deployment script in execution-priority order and opens it in a new editor tab so you can review and edit before running
 
-### Step 4 — Protect
-Optional safety nets before deploying:
+### Step 4 — Strategy & Protect
+Choose how existing TABLE objects with data are handled, then optionally create safety snapshots before deploying.
+
+#### Table Migration Strategies
+Only applies to TABLE objects that already exist in Snowflake and have rows. Empty tables (`SHOW TABLES` reports 0 rows) always use a fast `DROP + CREATE` regardless of the selected strategy.
+
+| Strategy | How it works |
+|---|---|
+| **Smart In-Place** *(default)* | Diffs local vs remote column definitions; issues `ALTER TABLE ADD COLUMN`, `DROP COLUMN`, and `ALTER COLUMN TYPE` — no data movement |
+| **Blue/Green Swap** | Creates a temp table with the new schema, copies shared columns via `INSERT … SELECT`, atomically swaps with `ALTER TABLE … SWAP WITH`, drops the temp; non-shared columns are discarded |
+| **View-Based Soft Cutover** | Renames the original table to `<name>_v1`, creates the new table, and creates a compatibility view `<name>_compat` that exposes the shared columns from the archived data |
+| **Destructive Rebuild** | `DROP TABLE IF EXISTS` + `CREATE TABLE`; all existing data is permanently lost; a red warning banner is shown when this strategy is selected |
+
+- **Open in SQL Editor** — generates a strategy-aware SQL script and opens it in a new editor tab for review and editing before running:
+  - Smart In-Place → `ALTER TABLE ADD/DROP/ALTER COLUMN TYPE` statements
+  - Blue/Green Swap → `CREATE TABLE tmp; INSERT … SELECT; ALTER TABLE SWAP WITH; DROP TABLE`
+  - View-Based Soft Cutover → `ALTER TABLE RENAME TO _v1; CREATE TABLE; CREATE VIEW _compat AS SELECT …`
+  - Destructive Rebuild → `DROP TABLE IF EXISTS; CREATE TABLE`
+
+#### Safety Snapshots (optional)
 - **Create Backup Set** — `CREATE BACKUP SET FOR DATABASE <db>` targeting a chosen database / schema / name
 - **Create Zero-Copy Clone** — `CREATE DATABASE <clone> CLONE <db>` for a point-in-time snapshot
 
