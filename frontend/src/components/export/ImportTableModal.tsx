@@ -761,7 +761,7 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
   const [aiError, setAiError]               = useState<string | null>(null);
   const [collapseOpen, setCollapseOpen]     = useState<string[]>([]);
 
-  const handleAiSuggest = async () => {
+  const runAiSuggest = async () => {
     // Find first successfully loaded file sample
     const firstLoaded = filePaths.slice(0, 5).find(
       (fp) => fileHeads[fp] !== null && fileHeads[fp] !== undefined && fileHeads[fp] !== ""
@@ -798,6 +798,27 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
     } finally {
       setAiSuggesting(false);
     }
+  };
+
+  const handleAiSuggest = () => {
+    Modal.confirm({
+      title: "Send file content to AI provider?",
+      content: (
+        <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+          <p style={{ marginBottom: 8 }}>
+            To suggest format options, a sample of your file content (up to 64 KB)
+            will be sent to your configured AI provider.
+          </p>
+          <p style={{ margin: 0, color: "var(--text-muted)" }}>
+            Do not use this feature if your files contain sensitive or confidential data
+            that should not leave this machine.
+          </p>
+        </div>
+      ),
+      okText: "Send & Suggest",
+      cancelText: "Cancel",
+      onOk: runAiSuggest,
+    });
   };
 
   // Load file heads for CSV / JSON previews
