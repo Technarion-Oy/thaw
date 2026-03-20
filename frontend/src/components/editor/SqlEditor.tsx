@@ -18,7 +18,7 @@ import { useObjectStore } from "../../store/objectStore";
 import { useSessionStore } from "../../store/sessionStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion } from "../../../wailsjs/go/main/App";
+import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames } from "../../../wailsjs/go/main/App";
 
 // Module-level DDL cache and hover provider handle so we only register once
 // and don't accumulate duplicate providers on editor remounts.
@@ -26,6 +26,12 @@ const DDL_CACHE_TTL = 60_000; // ms — stale entries are re-fetched after this
 const hoverDDLCache = new Map<string, { ddl: string; ts: number }>();
 let hoverProviderDisposable: { dispose(): void } | null = null;
 let inlineCompletionsDisposable: { dispose(): void } | null = null;
+
+// Function name sets for decoration-based highlighting.
+// Populated once from the local SQLite cache; shared across all editor instances.
+const builtinFns = new Set<string>();
+const udfFns     = new Set<string>();
+let fnNamesLoaded = false;
 
 // Track which db/schema pairs and databases have already been lazy-fetched by
 // the completion provider so we don't fire duplicate requests.
@@ -512,6 +518,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const activeStmtDecRef = useRef<any>(null);
 
+  // Decoration collection for function-call token highlighting.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fnDecRef      = useRef<any>(null);
+  const fnDecTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [ddlHover, setDdlHover] = useState<DdlHover | null>(null);
   const [tooltipCtxMenu, setTooltipCtxMenu] = useState<{ x: number; y: number; sel: string } | null>(null);
   const hoverTimerRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -597,6 +608,56 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
     // Create the decoration collection used to highlight the active statement.
     activeStmtDecRef.current = editor.createDecorationsCollection([]);
+
+    // ── Function-call token highlighting ──────────────────────────────────
+    fnDecRef.current = editor.createDecorationsCollection([]);
+
+    // Regex: matches identifiers immediately followed by '(' — i.e. function calls.
+    const fnCallRe = /\b([A-Za-z_][A-Za-z0-9_$]*)\s*(?=\()/g;
+
+    const refreshFnDecorations = () => {
+      const model = editor.getModel();
+      if (!model || (builtinFns.size === 0 && udfFns.size === 0)) return;
+      const text = model.getValue();
+      const decorations: any[] = [];
+      fnCallRe.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = fnCallRe.exec(text)) !== null) {
+        const word = m[1].toUpperCase();
+        const cls = builtinFns.has(word) ? "sql-token-builtin"
+                  : udfFns.has(word)     ? "sql-token-udf"
+                  : null;
+        if (!cls) continue;
+        const start = model.getPositionAt(m.index);
+        const end   = model.getPositionAt(m.index + m[1].length);
+        decorations.push({
+          range: new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column),
+          options: { inlineClassName: cls },
+        });
+      }
+      fnDecRef.current?.set(decorations);
+    };
+
+    // Populate function name sets on first mount, then decorate immediately.
+    if (!fnNamesLoaded) {
+      GetAllFunctionNames().then((fns) => {
+        if (!fns) return;
+        for (const fn of fns) {
+          if (fn.functionType === "UDF") udfFns.add(fn.functionName);
+          else builtinFns.add(fn.functionName);
+        }
+        fnNamesLoaded = true;
+        refreshFnDecorations();
+      }).catch(() => { /* best-effort */ });
+    } else {
+      refreshFnDecorations();
+    }
+
+    // Re-decorate on every content change (debounced).
+    editor.getModel()?.onDidChangeContent(() => {
+      if (fnDecTimerRef.current) clearTimeout(fnDecTimerRef.current);
+      fnDecTimerRef.current = setTimeout(refreshFnDecorations, 200);
+    });
 
     // ── Clipboard (WKWebView fix) ─────────────────────────────────────────
     // WKWebView blocks navigator.clipboard.readText/writeText (async Clipboard
@@ -1095,8 +1156,30 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           }
         }
 
+        // ── Function completions (only when not inside a dotted context) ────
+        let fnSuggestions: any[] = [];
+        if (word.word.length >= 2 && !lineUpToWord.trim().endsWith(".")) {
+          try {
+            const fns = await GetFunctionSuggestions(word.word);
+            if (fns) {
+              fnSuggestions = fns.map((fn) => ({
+                label:            fn.functionName,
+                kind:             monaco.languages.CompletionItemKind.Function,
+                detail:           fn.functionType === "UDF" ? "User-defined function" : "Built-in function",
+                documentation:    fn.description || fn.functionSignature,
+                insertText:       fn.functionName,
+                filterText:       fn.functionName,
+                sortText:         fn.functionType === "UDF" ? "0" + fn.functionName : "1" + fn.functionName,
+                range,
+              }));
+            }
+          } catch {
+            // best-effort — silently ignore if store is not ready
+          }
+        }
+
         return {
-          suggestions: [...contextColSuggestions, ...keywordSuggestions, ...dbSuggestions, ...schemaSuggestions, ...objectSuggestions],
+          suggestions: [...contextColSuggestions, ...keywordSuggestions, ...dbSuggestions, ...schemaSuggestions, ...objectSuggestions, ...fnSuggestions],
           // Tell Monaco these results may be incomplete so it re-queries on next invocation
           incomplete: fetchPending,
         };
@@ -1243,7 +1326,35 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
               );
             }
           }
-          if (!inStore) { setDdlHover(null); return; }
+          if (!inStore) {
+            // Not a TABLE/VIEW — check if it's a known Snowflake function.
+            try {
+              const fns = await GetFunctionTooltip(parts[0]);
+              if (fns && fns.length > 0) {
+                const sigs = fns.map((fn: any) => fn.functionSignature).join("\n");
+                const desc = fns.find((fn: any) => fn.description)?.description ?? "";
+                const fnDdl = desc ? `${sigs}\n\n${desc}` : sigs;
+                const fnKind = fns[0].functionType === "UDF" ? "UDF" : "FUNCTION";
+                const editorDom2 = editor.getDomNode();
+                const editorRect2 = editorDom2?.getBoundingClientRect();
+                const scrolledPos2 = editor.getScrolledVisiblePosition(pos);
+                if (scrolledPos2 && editorRect2) {
+                  const lineH2 = scrolledPos2.height ?? 20;
+                  const rawX2 = editorRect2.left + scrolledPos2.left;
+                  const belowY2 = editorRect2.top + scrolledPos2.top + lineH2 + 4;
+                  const aboveY2 = editorRect2.top + scrolledPos2.top - 4;
+                  const fitsBelow2 = belowY2 + 320 <= window.innerHeight;
+                  const fnX = Math.min(rawX2, window.innerWidth - 570);
+                  const fnY = fitsBelow2 ? belowY2 : Math.max(0, aboveY2 - 320);
+                  if (hoverHideTimerRef.current) { clearTimeout(hoverHideTimerRef.current); hoverHideTimerRef.current = null; }
+                  setDdlHover({ ddl: fnDdl, kind: fnKind, db: "", schema: "", name: parts[0].toUpperCase(), x: fnX, y: fnY });
+                }
+              } else {
+                setDdlHover(null);
+              }
+            } catch { setDdlHover(null); }
+            return;
+          }
           db = inStore.db; schema = inStore.schema; kind = inStore.kind; name = inStore.name;
         }
 
@@ -1665,7 +1776,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           padding: "5px 10px", borderBottom: "1px solid var(--border)", flexShrink: 0, gap: 8,
         }}>
           <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
-            {ddlHover.kind} — {ddlHover.db}.{ddlHover.schema}.{ddlHover.name}
+            {ddlHover.db
+              ? `${ddlHover.kind} — ${ddlHover.db}.${ddlHover.schema}.${ddlHover.name}`
+              : `${ddlHover.kind} — ${ddlHover.name}`}
           </span>
           <Button size="small" onClick={() => ClipboardSetText(ddlHover.ddl)}>Copy</Button>
         </div>

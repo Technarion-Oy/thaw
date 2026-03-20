@@ -4,6 +4,7 @@ import {main} from '../models';
 import {snowflake} from '../models';
 import {ddl} from '../models';
 import {config} from '../models';
+import {fnmeta} from '../models';
 import {gitrepo} from '../models';
 import {filesystem} from '../models';
 import {sfconfig} from '../models';
@@ -79,6 +80,8 @@ export function GetAIConfig():Promise<config.AIConfig>;
 
 export function GetAISuggestion(arg1:string):Promise<string>;
 
+export function GetAllFunctionNames():Promise<Array<fnmeta.FunctionMeta>>;
+
 export function GetAvailableShells():Promise<Array<string>>;
 
 export function GetColumnComments(arg1:string,arg2:string,arg3:string):Promise<Array<main.ColumnComment>>;
@@ -86,6 +89,10 @@ export function GetColumnComments(arg1:string,arg2:string,arg3:string):Promise<A
 export function GetERDiagramData(arg1:string):Promise<snowflake.ERDiagramData>;
 
 export function GetFunctionInfo(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.FunctionInfo>;
+
+export function GetFunctionSuggestions(arg1:string):Promise<Array<fnmeta.FunctionMeta>>;
+
+export function GetFunctionTooltip(arg1:string):Promise<Array<fnmeta.FunctionMeta>>;
 
 export function GetGitConfig():Promise<config.GitConfig>;
 

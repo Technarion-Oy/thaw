@@ -166,6 +166,29 @@ export namespace filesystem {
 
 }
 
+export namespace fnmeta {
+	
+	export class FunctionMeta {
+	    functionName: string;
+	    functionSignature: string;
+	    description: string;
+	    functionType: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FunctionMeta(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.functionName = source["functionName"];
+	        this.functionSignature = source["functionSignature"];
+	        this.description = source["description"];
+	        this.functionType = source["functionType"];
+	    }
+	}
+
+}
+
 export namespace gitrepo {
 	
 	export class PullParams {

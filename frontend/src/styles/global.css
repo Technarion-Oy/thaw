@@ -163,6 +163,16 @@ body,
   background: rgba(154, 103, 0, 0.80);
 }
 
+/* Monaco editor — Snowflake function call highlighting.
+   Built-ins use the same gold as the Monarch `predefined` token so they are
+   consistent with the hardcoded keyword list.  UDFs use a distinct teal so
+   users can distinguish custom from system functions at a glance. */
+.sql-token-builtin { color: #e3b341 !important; }
+.sql-token-udf     { color: #4ec9b0 !important; }
+
+[data-theme="light"] .sql-token-builtin { color: #953800 !important; }
+[data-theme="light"] .sql-token-udf     { color: #0a7266 !important; }
+
 /* Tab bar right-click context menu items */
 .ctx-item {
   padding: 4px 12px;

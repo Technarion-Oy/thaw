@@ -1,0 +1,110 @@
+// Copyright (c) 2026 Technarion Oy. All rights reserved.
+//
+// This software and its source code are proprietary and confidential.
+// Unauthorized copying, distribution, modification, or use of this software,
+// in whole or in part, is strictly prohibited without prior written permission
+// from Technarion Oy.
+//
+// Commercial use of this software is restricted to parties holding a valid
+// license agreement with Technarion Oy.
+
+package fnmeta
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"thaw/internal/snowflake"
+)
+
+// SyncFromSnowflake fetches built-in and user-defined functions from the live
+// Snowflake connection and upserts them into the local SQLite cache.
+// Both steps are attempted independently; a UDF fetch failure is silently
+// ignored so built-ins are still refreshed.
+func SyncFromSnowflake(ctx context.Context, client *snowflake.Client, store *Store) error {
+	builtins, err := fetchBuiltins(ctx, client)
+	if err != nil {
+		return fmt.Errorf("fnmeta sync builtins: %w", err)
+	}
+	if err := store.Upsert(builtins); err != nil {
+		return fmt.Errorf("fnmeta upsert builtins: %w", err)
+	}
+
+	// UDFs are best-effort — failure does not prevent the sync from being useful.
+	if udfs, err := fetchUDFs(ctx, client); err == nil {
+		_ = store.Upsert(udfs) //nolint:errcheck
+	}
+	return nil
+}
+
+// fetchBuiltins executes SHOW FUNCTIONS and returns only the built-in entries.
+// The gosnowflake driver returns SHOW rows directly (no RESULT_SCAN needed),
+// so we filter is_builtin = 'Y' in Go to avoid session-affinity issues with
+// LAST_QUERY_ID() across pooled connections.
+func fetchBuiltins(ctx context.Context, client *snowflake.Client) ([]FunctionMeta, error) {
+	result, err := client.Execute(ctx, "SHOW FUNCTIONS")
+	if err != nil {
+		return nil, err
+	}
+	return toFunctionMeta(result, "BUILTIN", "is_builtin", "Y"), nil
+}
+
+// fetchUDFs executes SHOW USER FUNCTIONS and returns all entries as UDFs.
+func fetchUDFs(ctx context.Context, client *snowflake.Client) ([]FunctionMeta, error) {
+	result, err := client.Execute(ctx, "SHOW USER FUNCTIONS")
+	if err != nil {
+		return nil, err
+	}
+	return toFunctionMeta(result, "UDF", "", ""), nil
+}
+
+// toFunctionMeta converts a raw QueryResult from a SHOW command into a
+// []FunctionMeta slice. Columns are located by name (case-insensitive) so
+// column order does not matter. When filterCol/filterVal are non-empty, only
+// rows where that column equals filterVal are included.
+func toFunctionMeta(result *snowflake.QueryResult, fnType, filterCol, filterVal string) []FunctionMeta {
+	if result == nil || len(result.Rows) == 0 {
+		return nil
+	}
+	nameIdx, sigIdx, descIdx, filterIdx := -1, -1, -1, -1
+	for i, col := range result.Columns {
+		switch strings.ToLower(col) {
+		case "name":
+			nameIdx = i
+		case "arguments":
+			sigIdx = i
+		case "description":
+			descIdx = i
+		default:
+			if filterCol != "" && strings.EqualFold(col, filterCol) {
+				filterIdx = i
+			}
+		}
+	}
+	if nameIdx < 0 || sigIdx < 0 {
+		return nil
+	}
+	metas := make([]FunctionMeta, 0, len(result.Rows))
+	for _, row := range result.Rows {
+		if nameIdx >= len(row) || sigIdx >= len(row) {
+			continue
+		}
+		// Apply row filter if requested.
+		if filterIdx >= 0 && filterIdx < len(row) {
+			if fmt.Sprint(row[filterIdx]) != filterVal {
+				continue
+			}
+		}
+		m := FunctionMeta{
+			FunctionName:      strings.ToUpper(fmt.Sprint(row[nameIdx])),
+			FunctionSignature: fmt.Sprint(row[sigIdx]),
+			FunctionType:      fnType,
+		}
+		if descIdx >= 0 && descIdx < len(row) && row[descIdx] != nil {
+			m.Description = fmt.Sprint(row[descIdx])
+		}
+		metas = append(metas, m)
+	}
+	return metas
+}

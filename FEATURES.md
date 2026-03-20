@@ -21,6 +21,8 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Text selection** — paint any portion of the DDL and copy with `⌘C` / `Ctrl+C`
   - **Right-click → Copy** — right-click inside the tooltip to copy the selected text via a context menu
   - Definitions are cached per session and refreshed automatically after 60 seconds
+  - **Function tooltips** — hovering over a bare function name (e.g. `DATEADD`, `FLATTEN`, or a UDF) shows all overloads with their full signatures and descriptions in the same overlay; backed by an embedded catalogue of ~200 built-in functions that is always available offline, and refreshed with live metadata after each Snowflake connection
+- **Function call highlighting** — every function call in the editor is syntax-coloured by kind: built-in Snowflake functions appear in **gold** and user-defined functions appear in **teal**, making it easy to distinguish system functions from custom logic at a glance; highlighting updates as you type (200 ms debounce) and is seeded from a local SQLite cache on editor mount so it works without a live connection
 - **SQL autocomplete** — context-aware completions:
   - `db.` → schemas in that database
   - `db.schema.` → tables, views, functions, and other objects in that schema
@@ -29,6 +31,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - After `ON` in a `JOIN` clause → join conditions in three tiers: **(1)** FK relationships — composite multi-column constraints produce a single `col1 = ref.col1 AND col2 = ref.col2` expression (sourced from `SHOW IMPORTED KEYS`); **(2)** PK-naming-convention heuristic (`orders.CUSTOMER_ID = customers.ID`) when no FK constraint exists; **(3)** type-compatible same-name columns with both `a.col = b.col` equality and `USING (col)` alternatives; works with quoted/unquoted identifiers, full three-part names, and optional table aliases
   - **Ghost text before ON** — after `JOIN table ` (before typing `ON`), an inline ghost-text suggestion `ON <condition>` appears and can be accepted with `Tab` (FK-cache-backed, instant)
   - **Ctrl+Space before ON** — pressing `Ctrl+Space` after a JOIN table reference but before typing `ON` opens a full dropdown of `ON <condition>` suggestions covering all three tiers
+  - **Function completions** — typing two or more characters outside a dotted context also suggests matching Snowflake built-in and user-defined functions from the local cache; UDFs sort above built-ins so custom functions surface first; instant and available offline
 - **AI inline completions** — ghost-text SQL suggestions powered by OpenAI or Google AI Studios (Gemini); press `Tab` to accept
 - **AI Chat** — an agentic assistant in the results area that can query your live Snowflake connection to answer questions about your data (see [AI Features](#ai-features))
 - **Code Snippets** — open **Tools → Code Snippets…** in the menu bar to browse 24 curated `CREATE OR REPLACE` templates across six categories:

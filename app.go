@@ -32,6 +32,7 @@ import (
 	"thaw/internal/config"
 	"thaw/internal/ddl"
 	"thaw/internal/filesystem"
+	"thaw/internal/fnmeta"
 	"thaw/internal/gitrepo"
 	"thaw/internal/logger"
 	"thaw/internal/sfconfig"
@@ -48,6 +49,7 @@ type App struct {
 	exportCancelFunc    context.CancelFunc // cancels an in-flight DDL export
 	migrationCancelFunc context.CancelFunc // cancels an in-flight schema migration
 	cancelChat          context.CancelFunc // cancels an in-flight AI chat request
+	fnStore          *fnmeta.Store      // local SQLite cache for Snowflake function metadata
 	logCleanup       func()             // closes the log rotation file on shutdown
 
 	// Two-phase query execution (StartQuery / WaitForQueryResult).
@@ -77,6 +79,22 @@ func (a *App) startup(ctx context.Context) {
 	telemetry.Init(Version)
 	logger.L.Info("application started")
 	telemetry.Track(telemetry.EventAppStarted, nil)
+
+	// Open the function-metadata SQLite cache and seed it from the embedded
+	// fallback JSON so autocomplete works immediately, even offline.
+	if cfgDir, err := os.UserConfigDir(); err == nil {
+		storeDir := filepath.Join(cfgDir, "Thaw")
+		if store, err := fnmeta.Open(storeDir); err == nil {
+			a.fnStore = store
+			go func() {
+				if err := store.LoadFallback(); err != nil {
+					logger.L.Warn("fnmeta: load fallback failed", "err", err)
+				}
+			}()
+		} else {
+			logger.L.Warn("fnmeta: open store failed", "err", err)
+		}
+	}
 }
 
 // isQueryRunning reports whether a query submitted by StartQuery is still in flight.
@@ -110,6 +128,10 @@ func (a *App) shutdown(_ context.Context) {
 		// exiting anyway, so there is no need to wait; the OS will close the
 		// TCP connection and Snowflake will expire the session on its own.
 		go a.client.Close() //nolint:errcheck
+	}
+
+	if a.fnStore != nil {
+		a.fnStore.Close() //nolint:errcheck
 	}
 
 	telemetry.Track(telemetry.EventAppStopped, telemetry.Props{
@@ -146,6 +168,16 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 	a.connectParams = &params
 	logger.L.Info("connected", "account", params.Account, "user", params.User)
 	telemetry.Track(telemetry.EventConnected, telemetry.Props{"authenticator": params.Authenticator})
+
+	// Refresh the function metadata cache in the background.
+	if a.fnStore != nil {
+		go func() {
+			if err := fnmeta.SyncFromSnowflake(a.ctx, client, a.fnStore); err != nil {
+				logger.L.Warn("fnmeta: background sync failed", "err", err)
+			}
+		}()
+	}
+
 	return nil
 }
 
@@ -1973,6 +2005,37 @@ func (a *App) SuggestImportOptions(format, sampleContent string) (string, error)
 		return "", fmt.Errorf("AI suggestion failed: %w", err)
 	}
 	return result, nil
+}
+
+// ─── Function metadata (autocomplete + hover) ────────────────────────────────
+
+// GetFunctionSuggestions returns up to 50 Snowflake functions whose name
+// starts with prefix (case-insensitive). It reads the local SQLite cache so
+// results are available instantly, even before a connection is established.
+func (a *App) GetFunctionSuggestions(prefix string) ([]fnmeta.FunctionMeta, error) {
+	if a.fnStore == nil {
+		return nil, nil
+	}
+	return a.fnStore.Search(strings.ToUpper(prefix))
+}
+
+// GetAllFunctionNames returns every distinct function name and type in the
+// local SQLite cache. Used by the editor to build its decoration/highlight set.
+func (a *App) GetAllFunctionNames() ([]fnmeta.FunctionMeta, error) {
+	if a.fnStore == nil {
+		return nil, nil
+	}
+	return a.fnStore.GetAllNames()
+}
+
+// GetFunctionTooltip returns all overloads for the given Snowflake function
+// name. The name is matched case-insensitively via an exact lookup in the
+// local SQLite cache.
+func (a *App) GetFunctionTooltip(name string) ([]fnmeta.FunctionMeta, error) {
+	if a.fnStore == nil {
+		return nil, nil
+	}
+	return a.fnStore.Lookup(strings.ToUpper(name))
 }
 
 // ─── Embedded terminal ────────────────────────────────────────────────────────

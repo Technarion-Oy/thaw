@@ -142,6 +142,10 @@ export function GetAISuggestion(arg1) {
   return window['go']['main']['App']['GetAISuggestion'](arg1);
 }
 
+export function GetAllFunctionNames() {
+  return window['go']['main']['App']['GetAllFunctionNames']();
+}
+
 export function GetAvailableShells() {
   return window['go']['main']['App']['GetAvailableShells']();
 }
@@ -156,6 +160,14 @@ export function GetERDiagramData(arg1) {
 
 export function GetFunctionInfo(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['GetFunctionInfo'](arg1, arg2, arg3, arg4);
+}
+
+export function GetFunctionSuggestions(arg1) {
+  return window['go']['main']['App']['GetFunctionSuggestions'](arg1);
+}
+
+export function GetFunctionTooltip(arg1) {
+  return window['go']['main']['App']['GetFunctionTooltip'](arg1);
 }
 
 export function GetGitConfig() {
