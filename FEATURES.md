@@ -140,6 +140,18 @@ An agentic chat panel lives alongside the SQL results. The assistant has access 
 
 Ghost-text SQL suggestions appear automatically as you type in the editor. Press `Tab` to accept. Powered by OpenAI or Google AI Studios.
 
+### Function Catalog AI Chat
+
+Open **Help → Function Catalog…** and select any function to get:
+
+- **Details tab** — all overload signatures and descriptions from the local function cache
+- **Ask AI tab** — a chat panel for asking questions about the selected function:
+  - The function's full signatures and descriptions are automatically injected as context — no need to paste anything
+  - Ask usage questions, request examples, compare overloads, or explore edge cases
+  - For built-in Snowflake functions, a **📖 Snowflake documentation** link at the top of the tab opens the official docs page in the system browser
+  - Chat history resets automatically when you switch to a different function
+  - Requires AI to be configured via **AI → Configure AI…**
+
 ### Model Validation
 
 When configuring AI, a live **model status indicator** appears next to the model selector: a green `● Model OK` confirms the model is reachable, while a red indicator shows the exact API error — so misconfigured model names are caught immediately rather than at runtime.
@@ -436,7 +448,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - **Session restoration across app restarts** — all open tabs (scratch SQL, file tabs, notebook tabs) and their SQL content are restored exactly when the app is relaunched; file-backed tabs re-read their content from disk on startup so they always show the current file; if a file has been deleted or moved the tab becomes a scratch tab (prefixed `↺`) so the last-known SQL content is not lost; window size is saved on quit and restored on the next launch
 - **Tools menu** — native menu bar **Tools** entry provides **Code Snippets…**, **Export Path Format…**, and **Schema Migration…**
 - **Snowpark menu** — native menu bar **Snowpark** entry provides **Check Environment…**, **Setup Environment…**, **New Notebook…**, and **Open Notebook…**
-- **Help menu** — **Function Catalog…** opens the built-in Snowflake function reference; **Keyboard Shortcuts…** opens a searchable modal listing every shortcut with macOS and Windows columns
+- **Help menu** — **Function Catalog…** opens the built-in Snowflake function reference with an **Ask AI** tab for chatting about any selected function (see below); **Keyboard Shortcuts…** opens a searchable modal listing every shortcut with macOS and Windows columns
 - **Resizable sidebars** — drag either sidebar edge to any width between 160 px and 600 px
 - **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane to any ratio; position is saved across sessions
 - **Drag-and-drop panel layout** — every sidebar panel (Export DDL, File Browser, Git, Object Browser, Administration) has a drag handle at its top edge; drag panels between the left and right sidebars or reorder them within a sidebar; layout is persisted across sessions
