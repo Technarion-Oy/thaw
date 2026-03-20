@@ -228,6 +228,7 @@ export default function AppLayout() {
   const setRightWidth    = usePanelLayoutStore((s) => s.setRightWidth);
   const leftPanels       = usePanelLayoutStore((s) => s.left);
   const rightPanels      = usePanelLayoutStore((s) => s.right);
+  const leftHidden       = usePanelLayoutStore((s) => s.leftHidden);
 
   const left  = useResize(storedLeftWidth,  "left",  setLeftWidth);
   const right = useResize(storedRightWidth, "right", setRightWidth);
@@ -255,13 +256,14 @@ export default function AppLayout() {
         />
       )}
 
-      {/* Left sidebar */}
-      <div style={sidebarStyle(left.width)}>
-        {leftPanels.map((id) => <PanelWrapper key={id} id={id} sidebar="left" />)}
-        <SidebarDropZone sidebar="left" />
-      </div>
-
-      <ResizeHandle resizing={left.resizing} onMouseDown={left.onMouseDown} />
+      {/* Left sidebar — hidden when ⌘B is toggled */}
+      {!leftHidden && (
+        <div style={sidebarStyle(left.width)}>
+          {leftPanels.map((id) => <PanelWrapper key={id} id={id} sidebar="left" />)}
+          <SidebarDropZone sidebar="left" />
+        </div>
+      )}
+      {!leftHidden && <ResizeHandle resizing={left.resizing} onMouseDown={left.onMouseDown} />}
 
       {/* Center content */}
       <Content

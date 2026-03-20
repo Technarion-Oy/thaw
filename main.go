@@ -190,6 +190,10 @@ func buildMenu(app *App) *menu.Menu {
 	helpMenu.AddText("Function Catalog…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:function-catalog")
 	})
+	helpMenu.AddSeparator()
+	helpMenu.AddText("Keyboard Shortcuts…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:keyboard-shortcuts")
+	})
 
 	return appMenu
 }

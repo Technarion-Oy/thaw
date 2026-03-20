@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Editor, { type BeforeMount, type OnMount, type Monaco } from "@monaco-editor/react";
 import { ensureMonacoSetup } from "../editor/monacoSetup";
-import { Button, Space, Spin, Tooltip, Typography, Select, Tag, message } from "antd";
+import { Button, Modal, Space, Spin, Tooltip, Typography, Select, Tag, message } from "antd";
 import {
   PlayCircleOutlined,
   PlusOutlined,
@@ -218,6 +218,13 @@ export default function NotebookTab({ tabId }: Props) {
   // Used for unsaved notebooks that have no on-disk file path.
   const [deployContent, setDeployContent] = useState("");
 
+  // Command-mode cell selection.
+  const [selectedCellId, setSelectedCellId] = useState<string | null>(null);
+  const selectedCellIdRef = useRef<string | null>(null);
+  useEffect(() => { selectedCellIdRef.current = selectedCellId; }, [selectedCellId]);
+  // D+D detection: store timestamp of last "d" keypress.
+  const lastDPressRef = useRef<number>(0);
+
   // Track current cells in a ref to avoid stale closures in the serializer.
   const cellsRef = useRef(cells);
   useEffect(() => { cellsRef.current = cells; }, [cells]);
@@ -376,6 +383,29 @@ export default function NotebookTab({ tabId }: Props) {
       syncToStore(updated);
       return updated;
     });
+    setSelectedCellId(newCell.id);
+  }, [syncToStore]);
+
+  const addCellAbove = useCallback((beforeId: string) => {
+    const newCell: Cell = {
+      id: crypto.randomUUID(),
+      kind: "code",
+      source: "",
+      outputs: [],
+      images: [],
+      sqlResult: null,
+      executionCount: null,
+      running: false,
+    };
+    setCells((prev) => {
+      const idx = prev.findIndex((c) => c.id === beforeId);
+      const updated = idx >= 0
+        ? [...prev.slice(0, idx), newCell, ...prev.slice(idx)]
+        : [newCell, ...prev];
+      syncToStore(updated);
+      return updated;
+    });
+    setSelectedCellId(newCell.id);
   }, [syncToStore]);
 
   const deleteCell = useCallback((id: string) => {
@@ -385,6 +415,17 @@ export default function NotebookTab({ tabId }: Props) {
       return updated;
     });
   }, [syncToStore]);
+
+  const confirmDeleteCell = useCallback((id: string) => {
+    Modal.confirm({
+      title: "Delete cell?",
+      content: "This action cannot be undone.",
+      okText: "Delete",
+      okButtonProps: { danger: true },
+      cancelText: "Cancel",
+      onOk: () => deleteCell(id),
+    });
+  }, [deleteCell]);
 
   const moveCell = useCallback((id: string, dir: -1 | 1) => {
     setCells((prev) => {
@@ -413,6 +454,56 @@ export default function NotebookTab({ tabId }: Props) {
       return updated;
     });
   }, [syncToStore]);
+
+  // ── Notebook command-mode keyboard shortcuts ───────────────────────────────
+  // Only fire when no Monaco editor (or other input) is focused.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const el = document.activeElement;
+      if (el?.classList.contains("inputarea")) return; // Monaco focused
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
+
+      const selId = selectedCellIdRef.current ?? cellsRef.current[0]?.id ?? null;
+      if (!selId) return;
+
+      switch (e.key) {
+        case "b":
+          e.preventDefault();
+          addCell(selId);
+          return;
+        case "a":
+          e.preventDefault();
+          addCellAbove(selId);
+          return;
+        case "d":
+        case "D": {
+          const now = Date.now();
+          if (now - lastDPressRef.current < 500) {
+            e.preventDefault();
+            lastDPressRef.current = 0;
+            confirmDeleteCell(selId);
+          } else {
+            lastDPressRef.current = now;
+          }
+          return;
+        }
+        case "y":
+          e.preventDefault();
+          setCellKind(selId, "code");
+          return;
+        case "m":
+          e.preventDefault();
+          setCellKind(selId, "markdown");
+          return;
+        case "s":
+          e.preventDefault();
+          setCellKind(selId, "sql");
+          return;
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [addCell, addCellAbove, confirmDeleteCell, setCellKind]);
 
   // ── styles ────────────────────────────────────────────────────────────────
 
@@ -509,13 +600,15 @@ export default function NotebookTab({ tabId }: Props) {
             border={border}
             bgRaised={bgRaised}
             textMuted={textMuted}
+            isSelected={selectedCellId === cell.id}
             onRun={(code) => runCell(cell, code)}
-            onDelete={() => deleteCell(cell.id)}
+            onDelete={() => confirmDeleteCell(cell.id)}
             onMoveUp={() => moveCell(cell.id, -1)}
             onMoveDown={() => moveCell(cell.id, 1)}
             onSourceChange={(s) => updateSource(cell.id, s)}
             onKindChange={(k) => setCellKind(cell.id, k)}
             onAddAfter={() => addCell(cell.id)}
+            onSelect={() => setSelectedCellId(cell.id)}
           />
         ))}
       </div>
@@ -702,6 +795,7 @@ interface CellViewProps {
   border: string;
   bgRaised: string;
   textMuted: string;
+  isSelected: boolean;
   onRun: (code?: string) => void;
   onDelete: () => void;
   onMoveUp: () => void;
@@ -709,19 +803,22 @@ interface CellViewProps {
   onSourceChange: (s: string) => void;
   onKindChange: (k: Cell["kind"]) => void;
   onAddAfter: () => void;
+  onSelect: () => void;
 }
 
 function CellView({
   tabId, cell, isFirst, isLast, kernelReady, isDark, border, bgRaised, textMuted,
-  onRun, onDelete, onMoveUp, onMoveDown, onSourceChange, onKindChange, onAddAfter,
+  isSelected, onRun, onDelete, onMoveUp, onMoveDown, onSourceChange, onKindChange, onAddAfter, onSelect,
 }: CellViewProps) {
   const [focused, setFocused] = useState(false);
   const accentColor = isDark ? "#40c8fc" : "#0969da";
 
   // ── Monaco editor setup ───────────────────────────────────────────────────
-  const editorRef = useRef<any>(null);
-  const onRunRef  = useRef(onRun);
+  const editorRef    = useRef<any>(null);
+  const onRunRef     = useRef(onRun);
+  const onSelectRef  = useRef(onSelect);
   useEffect(() => { onRunRef.current = onRun; }, [onRun]);
+  useEffect(() => { onSelectRef.current = onSelect; }, [onSelect]);
 
   const [editorHeight, setEditorHeight] = useState(60);
 
@@ -750,8 +847,8 @@ function CellView({
     editor.onDidContentSizeChange(updateHeight);
     updateHeight();
 
-    // Focus border.
-    editor.onDidFocusEditorWidget(() => setFocused(true));
+    // Focus border + cell selection.
+    editor.onDidFocusEditorWidget(() => { setFocused(true); onSelectRef.current(); });
     editor.onDidBlurEditorWidget(() => setFocused(false));
 
     // Shift+Enter: run selection if text is selected, otherwise run full cell.
@@ -858,9 +955,10 @@ function CellView({
   };
 
   return (
-    <div style={{ margin: "0 20px 8px", position: "relative" }}>
+    <div style={{ margin: "0 20px 8px", position: "relative" }} onClick={onSelect}>
       <div style={{
-        border: `1px solid ${focused ? accentColor : border}`,
+        border: `1px solid ${(focused || isSelected) ? accentColor : border}`,
+        borderLeft: isSelected && !focused ? `3px solid ${accentColor}` : undefined,
         borderRadius: 6,
         overflow: "hidden",
         transition: "border-color 0.15s",

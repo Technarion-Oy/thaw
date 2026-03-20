@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { Tree, Typography, Spin, Empty, Divider, Modal, Button, Input, Tooltip, Slider, message } from "antd";
+import { Tree, Typography, Spin, Empty, Divider, Modal, Button, Input, Tooltip, Slider, message, type InputRef } from "antd";
 import {
   DatabaseOutlined,
   TableOutlined,
@@ -307,6 +307,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [backupSetsModal, setBackupSetsModal] = useState<{ scopeType: "DATABASE" | "SCHEMA" | "TABLE"; db: string; schema: string; table: string } | null>(null);
   const [depsModal, setDepsModal] = useState<{ db: string; schema: string; kind: string; name: string; args: string } | null>(null);
   const [searchQuery, setSearchQuery]               = useState("");
+  const searchInputRef = useRef<InputRef>(null);
+
+  // ⌘⇧F / Ctrl+Shift+F — focus the object browser search input.
+  useEffect(() => {
+    const handler = () => searchInputRef.current?.focus();
+    window.addEventListener("thaw:focus-object-search", handler);
+    return () => window.removeEventListener("thaw:focus-object-search", handler);
+  }, []);
   // Two separate expansion states so the cascade never touches the user's own
   // tree navigation state. On clear we just wipe searchExpandedKeys.
   const [expandedKeys, setExpandedKeys]             = useState<Key[]>([]);
@@ -1098,6 +1106,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         <div style={{ height: treeHeight, overflow: "auto" }}>
           <div style={{ padding: "0 8px 8px" }}>
             <Input
+              ref={searchInputRef}
               size="small"
               placeholder="Filter objects…"
               prefix={<SearchOutlined style={{ color: "var(--text-muted)", fontSize: 11 }} />}

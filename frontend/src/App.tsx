@@ -92,10 +92,13 @@ export default function App() {
     return () => off();
   }, []);
 
-  // Listen for "Configure AI…" menu event.
+  // Listen for "Configure AI…" — from both the native menu (Wails event) and
+  // the ⌘, keyboard shortcut (browser custom event).
   useEffect(() => {
-    const off = EventsOn("menu:configure-ai", () => setAiModalOpen(true));
-    return () => off();
+    const wailsOff = EventsOn("menu:configure-ai", () => setAiModalOpen(true));
+    const domHandler = () => setAiModalOpen(true);
+    window.addEventListener("thaw:configure-ai", domHandler);
+    return () => { wailsOff(); window.removeEventListener("thaw:configure-ai", domHandler); };
   }, []);
 
   // Listen for Snowpark menu events.

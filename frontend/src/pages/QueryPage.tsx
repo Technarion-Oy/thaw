@@ -21,6 +21,8 @@ import SnippetsModal from "../components/snippets/SnippetsModal";
 import ExportPathFormatModal from "../components/export/ExportPathFormatModal";
 import MigrationModal from "../components/migration/MigrationModal";
 import FunctionCatalogModal from "../components/fnmeta/FunctionCatalogModal";
+import KeyboardShortcutsModal from "../components/help/KeyboardShortcutsModal";
+import { usePanelLayoutStore } from "../store/panelLayoutStore";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import SqlEditor, { getStatementLineRanges } from "../components/editor/SqlEditor";
 import TabBar from "../components/editor/TabBar";
@@ -34,7 +36,6 @@ import NotebookTab from "../components/notebook/NotebookTab";
 import { useQueryStore, type QueryResult, EXECUTE_IN_TAB_EVENT } from "../store/queryStore";
 import { useConnectionStore } from "../store/connectionStore";
 import { useSessionStore } from "../store/sessionStore";
-import { usePanelLayoutStore } from "../store/panelLayoutStore";
 
 const { Text } = Typography;
 
@@ -92,6 +93,10 @@ export default function QueryPage() {
   const [exportPathFormatOpen, setExportPathFormatOpen] = useState(false);
   const [migrationOpen, setMigrationOpen] = useState(false);
   const [fnCatalogOpen, setFnCatalogOpen] = useState(false);
+  const [kbShortcutsOpen, setKbShortcutsOpen] = useState(false);
+
+  // Stack of recently-closed tabs for ⌘⇧T / Ctrl+Shift+T reopen.
+  const closedTabsRef = useRef<Array<{ path: string | null; title: string; sql: string; kind?: string }>>([]);
   const [sessionPropsOpen, setSessionPropsOpen] = useState(false);
   const [sessionParams, setSessionParams] = useState<main.SessionParam[] | null>(null);
   const [sessionVars, setSessionVars] = useState<main.SessionVar[] | null>(null);
@@ -449,6 +454,20 @@ export default function QueryPage() {
     return () => window.removeEventListener("run-query", handler);
   });
 
+  // ⌘⇧Enter / Ctrl+Shift+Enter — Run All Statements (ignores any selection).
+  useEffect(() => {
+    const handler = () => { const { sql } = useQueryStore.getState(); runQuery(sql); };
+    window.addEventListener("run-all-query", handler);
+    return () => window.removeEventListener("run-all-query", handler);
+  });
+
+  // thaw:focus-results — scroll results panel into view and switch tab to Results.
+  useEffect(() => {
+    const handler = () => setResultPane("results");
+    window.addEventListener("thaw:focus-results", handler);
+    return () => window.removeEventListener("thaw:focus-results", handler);
+  }, []);
+
   // Escape cancels the running query.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -457,6 +476,123 @@ export default function QueryPage() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [isRunning, isCancelling]);
+
+  // ── Global keyboard shortcuts ──────────────────────────────────────────────
+  useEffect(() => {
+    const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+
+    const handler = (e: KeyboardEvent) => {
+      const cmd  = isMac ? e.metaKey : e.ctrlKey;
+      const ctrl = e.ctrlKey;
+
+      // ── Tab shortcuts ────────────────────────────────────────────────────
+
+      // ⌘W / Ctrl+W — Close current tab
+      if (cmd && !e.shiftKey && !e.altKey && e.key === "w") {
+        e.preventDefault();
+        const { tabs, activeTabId, closeTab } = useQueryStore.getState();
+        const tab = tabs.find((t) => t.id === activeTabId);
+        if (tab) {
+          closedTabsRef.current.unshift({ path: tab.path, title: tab.title, sql: tab.sql, kind: tab.kind });
+          if (closedTabsRef.current.length > 15) closedTabsRef.current.pop();
+          closeTab(tab.id);
+        }
+        return;
+      }
+
+      // ⌘⇧T / Ctrl+Shift+T — Reopen last closed tab
+      if (cmd && e.shiftKey && !e.altKey && e.key === "T") {
+        e.preventDefault();
+        const closed = closedTabsRef.current.shift();
+        if (closed) {
+          const { openScratch, openFile, setSql } = useQueryStore.getState();
+          if (closed.path) {
+            openFile(closed.path, closed.sql);
+          } else {
+            openScratch();
+            if (closed.sql) setSql(closed.sql);
+          }
+        }
+        return;
+      }
+
+      // Ctrl+Tab / Ctrl+Shift+Tab — Next / Prev tab (Ctrl on all platforms)
+      if (ctrl && !e.metaKey && e.key === "Tab") {
+        e.preventDefault();
+        const { tabs, activeTabId, activateTab } = useQueryStore.getState();
+        if (tabs.length < 2) return;
+        const idx  = tabs.findIndex((t) => t.id === activeTabId);
+        const next = e.shiftKey
+          ? tabs[(idx - 1 + tabs.length) % tabs.length]
+          : tabs[(idx + 1) % tabs.length];
+        if (next) activateTab(next.id);
+        return;
+      }
+
+      // ⌘, / Ctrl+, — Open Preferences (AI settings)
+      if (cmd && !e.shiftKey && !e.altKey && e.key === ",") {
+        e.preventDefault();
+        window.dispatchEvent(new Event("thaw:configure-ai"));
+        return;
+      }
+
+      // ── Query shortcuts ──────────────────────────────────────────────────
+
+      // ⌘⇧Enter / Ctrl+Shift+Enter — Run All Statements
+      if (cmd && e.shiftKey && !e.altKey && e.key === "Enter") {
+        e.preventDefault();
+        window.dispatchEvent(new Event("run-all-query"));
+        return;
+      }
+
+      // ⌘E / Ctrl+E — Export current results as CSV
+      if (cmd && !e.shiftKey && !e.altKey && e.key === "e") {
+        e.preventDefault();
+        window.dispatchEvent(new Event("thaw:export-csv"));
+        return;
+      }
+
+      // ── UI shortcuts ─────────────────────────────────────────────────────
+
+      // ⌘B / Ctrl+B — Toggle left sidebar
+      if (cmd && !e.shiftKey && !e.altKey && e.key === "b") {
+        e.preventDefault();
+        usePanelLayoutStore.getState().toggleLeftHidden();
+        return;
+      }
+
+      // ⌘\ / Ctrl+\ — Toggle split editor
+      if (cmd && !e.shiftKey && !e.altKey && e.key === "\\") {
+        e.preventDefault();
+        const { tabs, activeTabId, splitTabId, setSplitTab } = useQueryStore.getState();
+        if (splitTabId) {
+          setSplitTab(null);
+        } else {
+          const others = tabs.filter((t) => t.id !== activeTabId && (!t.kind || t.kind === "sql"));
+          if (others.length > 0) setSplitTab(others[others.length - 1].id);
+        }
+        return;
+      }
+
+      // ⌘L / Ctrl+L — Focus AI Chat
+      if (cmd && !e.shiftKey && !e.altKey && e.key === "l") {
+        e.preventDefault();
+        setResultPane("chat");
+        setTimeout(() => window.dispatchEvent(new Event("thaw:focus-ai-chat")), 30);
+        return;
+      }
+
+      // ⌘⇧F / Ctrl+Shift+F — Focus Object Browser Search
+      if (cmd && e.shiftKey && !e.altKey && e.key === "F") {
+        e.preventDefault();
+        window.dispatchEvent(new Event("thaw:focus-object-search"));
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }); // no dep array — same pattern as run-query/save-file listeners
 
   useEffect(() => {
     const handler = () => handleSave();
@@ -500,6 +636,18 @@ export default function QueryPage() {
     const off = EventsOn("menu:function-catalog", () => setFnCatalogOpen(true));
     return () => off();
   }, []);
+
+  useEffect(() => {
+    const off = EventsOn("menu:keyboard-shortcuts", () => setKbShortcutsOpen(true));
+    return () => off();
+  }, []);
+
+  // ⌘E / Ctrl+E — Export current results as CSV (wired from keyboard handler).
+  useEffect(() => {
+    const handler = () => exportCSV();
+    window.addEventListener("thaw:export-csv", handler);
+    return () => window.removeEventListener("thaw:export-csv", handler);
+  });
 
 
   const selectStyle = { fontSize: 12, width: 130 };
@@ -1126,6 +1274,7 @@ export default function QueryPage() {
       {exportPathFormatOpen && <ExportPathFormatModal onClose={() => setExportPathFormatOpen(false)} />}
       {migrationOpen && <MigrationModal onClose={() => setMigrationOpen(false)} />}
       {fnCatalogOpen && <FunctionCatalogModal onClose={() => setFnCatalogOpen(false)} />}
+      {kbShortcutsOpen && <KeyboardShortcutsModal onClose={() => setKbShortcutsOpen(false)} />}
 
       {sessionPropsOpen && (
         <SessionPropertiesModal

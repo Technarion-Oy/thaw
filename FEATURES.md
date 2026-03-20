@@ -13,7 +13,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 - **Cancel queries** — cancel a running query at any time; Thaw issues `SYSTEM$CANCEL_QUERY` so it also stops consuming Snowflake credits
 - **Query ID** — the Snowflake Query ID is shown in the spinner while running (per-statement for multi-statement scripts) and in the results status bar after completion; click the copy icon to copy it to the clipboard
 - **Selection highlight** — selecting text highlights every other occurrence in the document; overview-ruler markers show occurrences in long files
-- **Toggle line comment** — right-click in the editor and choose **Toggle Line Comment** to add or remove `--` on the current line or on every line in the selection
+- **Toggle line comment** — `⌘/` / `Ctrl+/` (or right-click → **Toggle Line Comment**) adds or removes `--` on the current line or on every line in the selection
 - **Font size zoom** — `⌘+` / `Ctrl++` increases the editor font size, `⌘-` / `Ctrl+-` decreases it, `⌘0` / `Ctrl+0` resets to the default
 - **Code folding** — fold arrows are always visible in the editor gutter; click to collapse or expand any SQL block — CTEs, `BEGIN…END` blocks, subqueries, and multi-line expressions
 - **Hover definitions** — move the cursor over any table or view name — including fully-qualified three-part identifiers (`DB.SCHEMA.TABLE`) and double-quoted identifiers (`"MY_TABLE"`, `"DB"."SCHEMA"."TABLE"`) — to see its DDL in a scrollable overlay tooltip; the tooltip fires as the cursor enters the token (not just when stationary at the end), stays open when the cursor moves into it, and auto-loads object metadata for schemas not yet expanded in the sidebar:
@@ -420,7 +420,12 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 
 - **Run All**, **Restart Kernel**, **Save**, **Add Cell** in the toolbar
 - **Deploy** — deploys the notebook to Snowflake via a dialog with all `CREATE NOTEBOOK` options (database, schema, name, `OR REPLACE` / `IF NOT EXISTS`, comment, query warehouse, Python runtime warehouse, idle auto-shutdown seconds, runtime name, compute pool); works for both saved and unsaved notebooks — unsaved content is serialised and written to a temporary file automatically
-- Per-cell controls: run, move up/down, add below, delete
+- Per-cell controls: run, move up/down, add below, **delete** (confirmation dialog)
+- **Command mode** — when no cell Monaco editor is focused, the selected cell (last clicked or focused, shown with an accent left border) can be operated on with single-key shortcuts:
+  - `B` — add a new code cell below the selected cell
+  - `A` — add a new code cell above the selected cell
+  - `D D` — delete the selected cell (a confirmation dialog is always shown)
+  - `Y` / `M` / `S` — change the selected cell's type to Code / Markdown / SQL
 - Kernel status indicator: starting spinner → "Kernel ready" → "Kernel error"
 
 ---
@@ -430,6 +435,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - **Light, Dark, and System** themes — switch via **View → Appearance**; preference is saved across sessions
 - **Tools menu** — native menu bar **Tools** entry provides **Code Snippets…**, **Export Path Format…**, and **Schema Migration…**
 - **Snowpark menu** — native menu bar **Snowpark** entry provides **Check Environment…**, **Setup Environment…**, **New Notebook…**, and **Open Notebook…**
+- **Help menu** — **Function Catalog…** opens the built-in Snowflake function reference; **Keyboard Shortcuts…** opens a searchable modal listing every shortcut with macOS and Windows columns
 - **Resizable sidebars** — drag either sidebar edge to any width between 160 px and 600 px
 - **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane to any ratio; position is saved across sessions
 - **Drag-and-drop panel layout** — every sidebar panel (Export DDL, File Browser, Git, Object Browser, Administration) has a drag handle at its top edge; drag panels between the left and right sidebars or reorder them within a sidebar; layout is persisted across sessions
@@ -442,18 +448,70 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 
 ## Keyboard Shortcuts
 
-| Shortcut | Action |
-|----------|--------|
-| `⌘ Enter` / `Ctrl+Enter` | Run query (or selected text) |
-| `Esc` | Cancel running query |
-| `⌘O` / `Ctrl+O` | Open SQL file |
-| `⌘S` / `Ctrl+S` | Save active file |
-| `⌘⇧S` / `Ctrl+Shift+S` | Save As… |
-| `⌘T` / `Ctrl+T` | New scratch tab |
-| `⌘\`` / `Ctrl+\`` | Open embedded terminal |
-| `⌘+` / `Ctrl++` | Increase editor font size |
-| `⌘-` / `Ctrl+-` | Decrease editor font size |
-| `⌘0` / `Ctrl+0` | Reset editor font size to default |
+Open **Help → Keyboard Shortcuts…** in the menu bar for a searchable, always-up-to-date reference.
+
+### Tabs & Navigation
+
+| macOS | Windows / Linux | Action |
+|-------|-----------------|--------|
+| `⌘T` | `Ctrl+T` | New scratch tab |
+| `⌘O` | `Ctrl+O` | Open SQL file |
+| `⌘S` | `Ctrl+S` | Save active file |
+| `⌘⇧S` | `Ctrl+Shift+S` | Save As… |
+| `⌘W` | `Ctrl+W` | Close current tab |
+| `⌘⇧T` | `Ctrl+Shift+T` | Reopen last closed tab |
+| `⌃Tab` | `Ctrl+Tab` | Switch to next tab |
+| `⌃⇧Tab` | `Ctrl+Shift+Tab` | Switch to previous tab |
+| `⌘,` | `Ctrl+,` | Open Preferences (AI settings) |
+
+### Query Execution
+
+| macOS | Windows / Linux | Action |
+|-------|-----------------|--------|
+| `⌘ Enter` | `Ctrl+Enter` | Run query (or selected text) |
+| `⌘⇧ Enter` | `Ctrl+Shift+Enter` | Run all statements |
+| `Esc` | `Esc` | Cancel running query |
+| `⌘↓` | `Ctrl+↓` | Focus results grid |
+| `⌘E` | `Ctrl+E` | Export current results as CSV |
+
+### Editor
+
+| macOS | Windows / Linux | Action |
+|-------|-----------------|--------|
+| `⌘/` | `Ctrl+/` | Toggle line comment |
+| `⇧⌥A` | `Shift+Alt+A` | Toggle block comment |
+| `⇧⌥F` | `Shift+Alt+F` | Format SQL document |
+| `Ctrl+Space` | `Ctrl+Space` | Trigger autocomplete |
+| `Tab` | `Tab` | Accept AI suggestion |
+| `⌘F` | `Ctrl+F` | Find in document |
+| `⌘⌥F` | `Ctrl+H` | Find and replace |
+| `⌘D` | `Ctrl+D` | Select next occurrence |
+| `⌃G` | `Ctrl+G` | Go to line |
+| `⌘+` | `Ctrl++` | Increase editor font size |
+| `⌘-` | `Ctrl+-` | Decrease editor font size |
+| `⌘0` | `Ctrl+0` | Reset editor font size to default |
+
+### UI & Panels
+
+| macOS | Windows / Linux | Action |
+|-------|-----------------|--------|
+| `⌘B` | `Ctrl+B` | Toggle left sidebar |
+| `⌘⇧F` | `Ctrl+Shift+F` | Focus object browser search |
+| `⌘\` | `Ctrl+\` | Toggle split editor view |
+| `⌘L` | `Ctrl+L` | Focus AI Chat |
+| `⌘\`` | `Ctrl+\`` | Open embedded terminal |
+
+### Notebook (Command Mode — no cell editor focused)
+
+| Key | Action |
+|-----|--------|
+| `Shift+Enter` | Run current cell |
+| `B` | Add cell below |
+| `A` | Add cell above |
+| `D D` | Delete current cell (confirmation required) |
+| `Y` | Change cell type to Code |
+| `M` | Change cell type to Markdown |
+| `S` | Change cell type to SQL |
 
 ---
 

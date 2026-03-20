@@ -276,6 +276,13 @@ export default function AiChat() {
     GetAIConfig().then((c) => setAiEnabled(c.enabled));
   }, []);
 
+  // ⌘L / Ctrl+L — focus the AI chat input from a keyboard shortcut.
+  useEffect(() => {
+    const handler = () => textareaRef.current?.focus();
+    window.addEventListener("thaw:focus-ai-chat", handler);
+    return () => window.removeEventListener("thaw:focus-ai-chat", handler);
+  }, []);
+
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;

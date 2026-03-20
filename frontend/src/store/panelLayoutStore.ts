@@ -27,6 +27,7 @@ interface PanelLayoutState {
   editorSplit:   number;   // 0–1, fraction of space given to SQL editor vs results
   leftWidth:     number;
   rightWidth:    number;
+  leftHidden:    boolean;  // ⌘B sidebar toggle
 
   splitEditorWidth:    number;
   movePanel:           (panelId: PanelId, targetId: PanelId | null, targetSidebar: SidebarId, insertBefore: boolean) => void;
@@ -34,6 +35,7 @@ interface PanelLayoutState {
   setLeftWidth:        (v: number) => void;
   setRightWidth:       (v: number) => void;
   setSplitEditorWidth: (v: number) => void;
+  toggleLeftHidden:    () => void;
   reset:               () => void;
 }
 
@@ -45,6 +47,7 @@ export const usePanelLayoutStore = create<PanelLayoutState>()(
       editorSplit:      DEFAULT_EDITOR_SPLIT,
       leftWidth:        DEFAULT_LEFT_WIDTH,
       rightWidth:       DEFAULT_RIGHT_WIDTH,
+      leftHidden:       false,
       splitEditorWidth: DEFAULT_SPLIT_EDITOR_WIDTH,
 
       movePanel: (panelId, targetId, targetSidebar, insertBefore) =>
@@ -70,6 +73,7 @@ export const usePanelLayoutStore = create<PanelLayoutState>()(
       setLeftWidth:        (leftWidth)        => set({ leftWidth }),
       setRightWidth:       (rightWidth)       => set({ rightWidth }),
       setSplitEditorWidth: (splitEditorWidth) => set({ splitEditorWidth }),
+      toggleLeftHidden:    ()                 => set((s) => ({ leftHidden: !s.leftHidden })),
 
       reset: () => set({
         left:             DEFAULT_LEFT,
@@ -77,6 +81,7 @@ export const usePanelLayoutStore = create<PanelLayoutState>()(
         editorSplit:      DEFAULT_EDITOR_SPLIT,
         leftWidth:        DEFAULT_LEFT_WIDTH,
         rightWidth:       DEFAULT_RIGHT_WIDTH,
+        leftHidden:       false,
         splitEditorWidth: DEFAULT_SPLIT_EDITOR_WIDTH,
       }),
     }),

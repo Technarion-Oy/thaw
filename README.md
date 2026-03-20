@@ -30,7 +30,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - Query SQL, results, tab state, and the active connection (account · user tag) survive Vite / WebView page reloads (persisted to `sessionStorage`; credentials are never stored); the connection state is verified against the backend on every reload so a backend restart shows ConnectModal immediately rather than a broken UI; the UI waits for the persisted state to hydrate before rendering, eliminating the brief ConnectModal flash that occurred on HMR reloads
 - **Selection highlight** — selecting any text highlights every other occurrence in the document with a blue background; overview-ruler markers make occurrences visible in long files
 - Word-under-cursor highlight when nothing is selected
-- **Toggle line comment** — right-click in the editor and choose **Toggle Line Comment** to add or remove `--` on the current line or every line in the selection
+- **Toggle line comment** — `⌘/` / `Ctrl+/` (or right-click → **Toggle Line Comment**) adds or removes `--` on the current line or every line in the selection
 - **Font size zoom** — `⌘+` / `Ctrl++` increases the editor font size, `⌘-` / `Ctrl+-` decreases it, `⌘0` / `Ctrl+0` resets to the default; uses the printed character so shortcuts work correctly on non-US keyboard layouts
 - **Code folding** — fold arrows are always visible in the editor gutter; click to collapse or expand any SQL block — CTEs, `BEGIN…END` blocks, subqueries, and multi-line expressions; keyboard shortcut `⌘K ⌘[` / `Ctrl+K Ctrl+[` folds the current block and `⌘K ⌘]` / `Ctrl+K Ctrl+]` unfolds it
 - **Hover definition** — move the cursor over any table or view name — including fully-qualified three-part identifiers (`DB.SCHEMA.TABLE`) and double-quoted identifiers (`"MY_TABLE"`, `"DB"."SCHEMA"."TABLE"`) — to see its DDL in a custom scrollable overlay tooltip; the tooltip fires as the cursor enters the token (not just when stationary at its end), stays open when the cursor moves into it, and auto-loads object metadata for schemas not yet expanded in the sidebar; entries are cached and automatically refreshed after 60 seconds so stale definitions are never shown indefinitely:
@@ -142,7 +142,14 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - **Save** — writes the notebook to disk at its original path; the tab's unsaved-change indicator clears
 - **Add Cell** — inserts a new code cell at the bottom or below a specific cell
 - **Deploy** — deploys the notebook as a Snowflake Notebook object; opens a dialog with all `CREATE NOTEBOOK` options: database, schema, name, `OR REPLACE` / `IF NOT EXISTS`, comment, query warehouse (for SQL queries), Python runtime warehouse, idle auto-shutdown seconds, runtime name, and compute pool; works for both saved notebooks (uploaded from their file path) and unsaved notebooks (the current in-memory content is serialised and written to a temporary file before upload; the temp file is removed after the stage transfer)
-- Per-cell controls: run, move up, move down, add below, delete
+- Per-cell controls: run, move up, move down, add below, **delete** (with confirmation dialog)
+- **Command mode** — when no cell editor is focused, single-key shortcuts operate on the selected cell (the last clicked or focused cell, highlighted with an accent left border):
+  - `B` — add a new code cell below
+  - `A` — add a new code cell above
+  - `D D` — delete the selected cell (confirmation dialog required)
+  - `Y` — change cell type to Code
+  - `M` — change cell type to Markdown
+  - `S` — change cell type to SQL
 - Kernel status indicator in the toolbar: "Starting kernel…" spinner, "Kernel ready" tag, or "Kernel error" tag
 
 ### File management
@@ -382,7 +389,7 @@ Open **Tools → Schema Migration…** in the menu bar to deploy local `.sql` DD
 - **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane; ratio is persisted across sessions
 - **Object browser height** — the Objects panel is collapsible (click the label or the ▶/▼ chevron) and vertically resizable (drag the handle below the tree, 80 – 800 px); the Administration panel fills the remaining space
 - **Theming** — light, dark, and system-default themes; switch via **View → Appearance** in the native menu bar; preference is persisted across sessions
-- Native application menu bar with **File** (open / save / new tab), **View → Appearance** (System / Light / Dark), **AI → Configure AI…**, **Tools** (**Code Snippets…**, **Export Path Format…**, **Schema Migration…**), and **Snowpark** (**Check Environment…**, **Setup Environment…**, **New Notebook…**, **Open Notebook…**) menus
+- Native application menu bar with **File** (open / save / new tab), **View → Appearance** (System / Light / Dark), **AI → Configure AI…**, **Tools** (**Code Snippets…**, **Export Path Format…**, **Schema Migration…**), **Snowpark** (**Check Environment…**, **Setup Environment…**, **New Notebook…**, **Open Notebook…**), and **Help** (**Function Catalog…**, **Keyboard Shortcuts…**) menus
 - Object browser scrolls horizontally when object names are wider than the sidebar
 - Right-click context menu is always clamped inside the viewport — never overflows the screen edges
 - Closing the app while a query is running shows a confirmation dialog; if confirmed, the query is cancelled in Snowflake before exit
@@ -561,6 +568,7 @@ thaw/
     │       │   └── NotebookTab.tsx         # Jupyter-style notebook with Monaco cell editors
     │       ├── migration/MigrationModal.tsx # Schema Migration wizard (Tools menu)
     │       ├── snippets/SnippetsModal.tsx  # Code Snippets browser (Tools menu)
+    │       ├── help/KeyboardShortcutsModal.tsx  # Searchable keyboard shortcuts reference (Help menu)
     │       ├── task/CreateTaskModal.tsx    # CREATE OR REPLACE TASK dialog
     │       └── layout/
     │           ├── AppLayout.tsx  # Two-sidebar layout with drag-and-drop panel reordering and resize handles
@@ -709,18 +717,70 @@ granted to the owner of the database created by the test.
 
 ## Keyboard shortcuts
 
-| Shortcut | Action |
-|----------|--------|
-| `⌘ Enter` / `Ctrl+Enter` | Run the current query (or selected text) |
-| `Esc` | Cancel a running query |
-| `⌘O` / `Ctrl+O` | Open a SQL file |
-| `⌘S` / `Ctrl+S` | Save the active file |
-| `⌘⇧S` / `Ctrl+Shift+S` | Save As… (always opens a dialog) |
-| `⌘T` / `Ctrl+T` | New scratch tab |
-| `⌘\`` / `Ctrl+\`` | Open embedded terminal |
-| `⌘+` / `Ctrl++` | Increase editor font size |
-| `⌘-` / `Ctrl+-` | Decrease editor font size |
-| `⌘0` / `Ctrl+0` | Reset editor font size to default |
+Open **Help → Keyboard Shortcuts…** in the menu bar for a searchable, always-up-to-date reference. The full list is below.
+
+### Tabs & Navigation
+
+| macOS | Windows / Linux | Action |
+|-------|-----------------|--------|
+| `⌘T` | `Ctrl+T` | New scratch tab |
+| `⌘O` | `Ctrl+O` | Open SQL file |
+| `⌘S` | `Ctrl+S` | Save active file |
+| `⌘⇧S` | `Ctrl+Shift+S` | Save As… |
+| `⌘W` | `Ctrl+W` | Close current tab |
+| `⌘⇧T` | `Ctrl+Shift+T` | Reopen last closed tab |
+| `⌃Tab` | `Ctrl+Tab` | Switch to next tab |
+| `⌃⇧Tab` | `Ctrl+Shift+Tab` | Switch to previous tab |
+| `⌘,` | `Ctrl+,` | Open Preferences (AI settings) |
+
+### Query Execution
+
+| macOS | Windows / Linux | Action |
+|-------|-----------------|--------|
+| `⌘ Enter` | `Ctrl+Enter` | Run query (or selected text) |
+| `⌘⇧ Enter` | `Ctrl+Shift+Enter` | Run all statements |
+| `Esc` | `Esc` | Cancel running query |
+| `⌘↓` | `Ctrl+↓` | Focus results grid |
+| `⌘E` | `Ctrl+E` | Export current results as CSV |
+
+### Editor
+
+| macOS | Windows / Linux | Action |
+|-------|-----------------|--------|
+| `⌘/` | `Ctrl+/` | Toggle line comment |
+| `⇧⌥A` | `Shift+Alt+A` | Toggle block comment |
+| `⇧⌥F` | `Shift+Alt+F` | Format SQL document |
+| `Ctrl+Space` | `Ctrl+Space` | Trigger autocomplete |
+| `Tab` | `Tab` | Accept AI suggestion |
+| `⌘F` | `Ctrl+F` | Find in document |
+| `⌘⌥F` | `Ctrl+H` | Find and replace |
+| `⌘D` | `Ctrl+D` | Select next occurrence |
+| `⌃G` | `Ctrl+G` | Go to line |
+| `⌘+` | `Ctrl++` | Increase editor font size |
+| `⌘-` | `Ctrl+-` | Decrease editor font size |
+| `⌘0` | `Ctrl+0` | Reset editor font size to default |
+
+### UI & Panels
+
+| macOS | Windows / Linux | Action |
+|-------|-----------------|--------|
+| `⌘B` | `Ctrl+B` | Toggle left sidebar |
+| `⌘⇧F` | `Ctrl+Shift+F` | Focus object browser search |
+| `⌘\` | `Ctrl+\` | Toggle split editor view |
+| `⌘L` | `Ctrl+L` | Focus AI Chat |
+| `⌘\`` | `Ctrl+\`` | Open embedded terminal |
+
+### Notebook (Command Mode — no cell editor focused)
+
+| Key | Action |
+|-----|--------|
+| `Shift+Enter` | Run current cell |
+| `B` | Add cell below |
+| `A` | Add cell above |
+| `D D` | Delete current cell (confirmation required) |
+| `Y` | Change cell type to Code |
+| `M` | Change cell type to Markdown |
+| `S` | Change cell type to SQL |
 
 ---
 
