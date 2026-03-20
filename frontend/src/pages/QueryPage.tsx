@@ -40,7 +40,7 @@ import { useSessionStore } from "../store/sessionStore";
 const { Text } = Typography;
 
 export default function QueryPage() {
-  const { sql, selectedSql, isRunning, error, setResult, setRunning, setError, markSaved, openScratch, openFile, setSql, openNotebook } = useQueryStore();
+  const { sql, selectedSql, isRunning, error, setResult, setRunning, setError, markSaved, openScratch, openFile, setSql, openNotebook, refreshFileTab, orphanFileTab } = useQueryStore();
   const activeTabId    = useQueryStore((s) => s.activeTabId);
   const isNotebookTab  = useQueryStore((s) => (s.tabs.find((t) => t.id === s.activeTabId)?.kind ?? "sql") === "notebook");
   const activeDiff     = useQueryStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.diff ?? null);
@@ -125,6 +125,23 @@ export default function QueryPage() {
   // Load current role/warehouse on mount.
   useEffect(() => {
     loadContext();
+  }, []);
+
+  // On mount, re-read file-backed tabs from disk so their content is fresh
+  // after an app restart (they were persisted with cleared sql/savedSql).
+  useEffect(() => {
+    const { tabs } = useQueryStore.getState();
+    tabs.forEach(async (tab) => {
+      if (!tab.path) return;
+      try {
+        const content = tab.kind === "notebook"
+          ? await ReadNotebook(tab.path)
+          : await ReadFile(tab.path);
+        refreshFileTab(tab.id, content);
+      } catch {
+        orphanFileTab(tab.id);
+      }
+    });
   }, []);
 
   // Keep the Snowpark kernel in sync with the shared session whenever role,

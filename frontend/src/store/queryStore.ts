@@ -92,6 +92,11 @@ interface QueryState {
   markSaved: (id: string, path: string, title: string) => void;
   setSplitTab: (id: string | null) => void;
   setSqlForTab: (tabId: string, sql: string) => void;
+  // Called on startup: update a file tab with fresh disk content.
+  // Preserves dirty sql but always updates savedSql.
+  refreshFileTab: (id: string, diskContent: string) => void;
+  // Called when a file no longer exists on disk: make it a scratch tab.
+  orphanFileTab: (id: string) => void;
 
   // Active-tab mutations (also kept in the tabs array for restoration on switch)
   setSql: (sql: string) => void;
@@ -279,6 +284,41 @@ export const useQueryStore = create<QueryState>()(
       tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, sql } : t)),
     })),
 
+  refreshFileTab: (id, diskContent) =>
+    set((state) => {
+      const tab = state.tabs.find((t) => t.id === id);
+      if (!tab) return {};
+      // If clean (no unsaved changes), update both sql and savedSql.
+      // If dirty, only update savedSql so the user's edits are preserved.
+      const isClean = tab.sql === tab.savedSql;
+      const updatedTabs = state.tabs.map((t) =>
+        t.id === id
+          ? { ...t, savedSql: diskContent, ...(isClean ? { sql: diskContent } : {}) }
+          : t
+      );
+      const isActive = state.activeTabId === id;
+      return {
+        tabs: updatedTabs,
+        ...(isActive && isClean ? { sql: diskContent } : {}),
+      };
+    }),
+
+  orphanFileTab: (id) =>
+    set((state) => {
+      const tab = state.tabs.find((t) => t.id === id);
+      if (!tab) return {};
+      const updatedTabs = state.tabs.map((t) =>
+        t.id === id
+          ? { ...t, path: null, title: `↺ ${t.title}`, savedSql: "" }
+          : t
+      );
+      const isActive = state.activeTabId === id;
+      return {
+        tabs: updatedTabs,
+        ...(isActive ? { currentFile: null } : {}),
+      };
+    }),
+
   closeTab: (id) =>
     set((state) => {
       if (state.tabs.length <= 1) return {};
@@ -407,16 +447,24 @@ export const useQueryStore = create<QueryState>()(
 }),
 {
   name: "thaw-query-store",
-  storage: createJSONStorage(() => sessionStorage),
+  storage: createJSONStorage(() => localStorage),
   // Persist the canonical tab state and the flat active-tab aliases.
   // isRunning and selectedSql are intentionally excluded so they always
   // reset to safe defaults (false / "") after a page reload.
   // result is intentionally excluded from persistence — large result sets
-  // (e.g. account_usage.query_history) exceed the sessionStorage quota and
-  // throw a QuotaExceededError. Results are kept in memory during the session
-  // so tab-switching still works; they are simply not restored after a reload.
+  // (e.g. account_usage.query_history) exceed the storage quota and throw a
+  // QuotaExceededError. Results are kept in memory during the session so
+  // tab-switching still works; they are simply not restored after a reload.
+  // For file-backed notebook tabs, sql/savedSql are cleared before persisting
+  // (content can be large) and re-read from disk on startup by QueryPage.
   partialize: (state) => ({
-    tabs: state.tabs.map((t) => ({ ...t, result: null, diff: null })),
+    tabs: state.tabs.map((t) => ({
+      ...t,
+      result: null,
+      diff: null,
+      sql:      (t.kind === "notebook" && t.path) ? "" : t.sql,
+      savedSql: (t.kind === "notebook" && t.path) ? "" : t.savedSql,
+    })),
     activeTabId: state.activeTabId,
     sql: state.sql,
     result: null,

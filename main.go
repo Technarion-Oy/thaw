@@ -36,12 +36,18 @@ func main() {
 
 	app := NewApp()
 
+	winW, winH := 1400, 900
+	if saved, ok := loadWindowState(); ok {
+		winW, winH = saved.Width, saved.Height
+		app.savedWindowState = &saved
+	}
+
 	appMenu := buildMenu(app)
 
 	err := wails.Run(&options.App{
 		Title:  "Thaw — Snowflake Manager",
-		Width:  1400,
-		Height: 900,
+		Width:  winW,
+		Height: winH,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},

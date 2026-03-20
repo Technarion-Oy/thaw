@@ -51,6 +51,7 @@ type App struct {
 	cancelChat          context.CancelFunc // cancels an in-flight AI chat request
 	fnStore          *fnmeta.Store      // local SQLite cache for Snowflake function metadata
 	logCleanup       func()             // closes the log rotation file on shutdown
+	savedWindowState *WindowState       // non-nil when a persisted window state was loaded at launch
 
 	// Two-phase query execution (StartQuery / WaitForQueryResult).
 	queryMu         sync.Mutex
@@ -75,6 +76,12 @@ func NewApp() *App {
 // It stores the application context, initialises logging and telemetry.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	if a.savedWindowState != nil {
+		wailsruntime.WindowSetPosition(ctx, a.savedWindowState.X, a.savedWindowState.Y)
+		if a.savedWindowState.Maximised {
+			wailsruntime.WindowMaximise(ctx)
+		}
+	}
 	a.logCleanup = logger.Init()
 	telemetry.Init(Version)
 	logger.L.Info("application started")
@@ -108,6 +115,12 @@ func (a *App) isQueryRunning() bool {
 // It stops the embedded terminal, cancels any in-flight query, closes the
 // Snowflake connection, and flushes logs and telemetry.
 func (a *App) shutdown(_ context.Context) {
+	// Persist window geometry so it can be restored on the next launch.
+	w, h := wailsruntime.WindowGetSize(a.ctx)
+	x, y := wailsruntime.WindowGetPosition(a.ctx)
+	m := wailsruntime.WindowIsMaximised(a.ctx)
+	_ = saveWindowState(WindowState{X: x, Y: y, Width: w, Height: h, Maximised: m})
+
 	// Stop any running terminal process cleanly before the app exits.
 	a.StopShell() //nolint:errcheck
 

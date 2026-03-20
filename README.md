@@ -27,7 +27,8 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - **Multi-statement scripts** — separate statements with `;`; all statements execute sequentially on the same Snowflake session so `LAST_QUERY_ID(-1)` and `RESULT_SCAN` work correctly across statements, matching Snowsight behaviour; while the script runs the spinner shows **statement N of M** and the Snowflake query ID for the active statement; the currently-executing statement is highlighted in the editor with an amber background and a gutter indicator — works whether running the full buffer or a painted selection of multiple statements
 - **Cancel query** — while a query is running the Run button becomes a **Cancel** button; pressing it (or `Esc`) cancels client-side polling *and* issues `SYSTEM$CANCEL_QUERY` so the query stops consuming credits in Snowflake
 - **Query ID** — the Snowflake query ID is shown in the loading spinner while the query runs (per-statement for multi-statement scripts) and in the results status bar after it completes; click the copy icon to copy it to the clipboard
-- Query SQL, results, tab state, and the active connection (account · user tag) survive Vite / WebView page reloads (persisted to `sessionStorage`; credentials are never stored); the connection state is verified against the backend on every reload so a backend restart shows ConnectModal immediately rather than a broken UI; the UI waits for the persisted state to hydrate before rendering, eliminating the brief ConnectModal flash that occurred on HMR reloads
+- Query SQL, results, tab state, and the active connection (account · user tag) survive Vite / WebView page reloads (persisted to `localStorage`; credentials are never stored); the connection state is verified against the backend on every reload so a backend restart shows ConnectModal immediately rather than a broken UI; the UI waits for the persisted state to hydrate before rendering, eliminating the brief ConnectModal flash that occurred on HMR reloads
+- **Session restoration across app restarts** — all open tabs (scratch SQL, file tabs, notebook tabs) and their SQL content are restored exactly when the app is relaunched; file-backed tabs re-read their content from disk on startup so they are always current; if a file has been deleted or moved while the app was closed the tab becomes a scratch tab (prefixed `↺`) so the last-known SQL is not lost; window size is also saved and restored on the next launch
 - **Selection highlight** — selecting any text highlights every other occurrence in the document with a blue background; overview-ruler markers make occurrences visible in long files
 - Word-under-cursor highlight when nothing is selected
 - **Toggle line comment** — `⌘/` / `Ctrl+/` (or right-click → **Toggle Line Comment**) adds or removes `--` on the current line or every line in the selection
@@ -478,6 +479,9 @@ thaw/
 ├── main.go                        # Wails entry point, window config, native menu
 ├── app.go                         # Methods bound to the frontend (Connect, ExecuteQuery, …)
 ├── snowpark.go                    # Snowpark IPC: env check/setup, notebook kernel, SQL cells
+├── session.go                     # Window state persistence (WindowState, load/save)
+├── session_path_dev.go            # Session file path for dev builds (./thaw-session.json)
+├── session_path_prod.go           # Session file path for production builds (OS-specific)
 ├── errors.go                      # Sentinel errors
 ├── version.go                     # Version string (overridable via -ldflags at build time)
 ├── go.mod
@@ -794,6 +798,15 @@ Git and export settings are stored at:
 
 The file stores the remote URL, branch, export directory, export path template, author info, and AI provider settings (provider, model, enabled flag, and API key).
 **Git tokens are never written to disk.** The AI API key is written to `config.json` with mode `0600` (owner-read-only).
+
+Session state (window size and tab list) is stored at:
+
+| Build | Path |
+|---|---|
+| Development (`wails dev`) | `./thaw-session.json` |
+| macOS production | `~/Library/Application Support/thaw/session.json` |
+| Windows production | `%LOCALAPPDATA%\thaw\session.json` |
+| Linux production | `~/.local/share/thaw/session.json` (or `$XDG_DATA_HOME/thaw/session.json`) |
 
 Log and crash files are written to:
 

@@ -236,12 +236,21 @@ export default function NotebookTab({ tabId }: Props) {
   }, []);
 
   // ── parse notebook JSON when the tab content changes ──────────────────────
+  // parsedRef tracks whether we have performed the initial parse for the
+  // current path.  We must not also depend on tab?.sql directly (that changes
+  // on every cell edit via the serializer below and would cause infinite loops).
+  // Instead we reset the flag whenever the path changes, then parse on the
+  // first non-empty sql — which may arrive asynchronously after a disk refresh
+  // on app restart (partialize clears notebook sql to keep storage small).
+  const parsedRef = useRef(false);
+  useEffect(() => { parsedRef.current = false; }, [tab?.path]);
   useEffect(() => {
-    if (!tab?.sql) return;
+    if (!tab?.sql || parsedRef.current) return;
+    parsedRef.current = true;
     const { cells: parsed, raw } = parseNotebook(tab.sql);
     setCells(parsed);
     setRawNb(raw);
-  }, [tab?.path]); // only re-parse when the file changes, not on every edit
+  }, [tab?.path, tab?.sql]); // tab?.sql triggers the initial parse after async disk refresh
 
   // ── start kernel on mount, stop on unmount ────────────────────────────────
   useEffect(() => {

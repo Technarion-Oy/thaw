@@ -334,7 +334,7 @@ Right-click any **database**, **schema**, or **table** in the object browser and
 - Role dropdown shows only roles the current user can actually assume
 - Schema dropdown lists only schemas belonging to the currently selected database; the list resets automatically when the database is changed
 - After any `USE DATABASE`, `USE SCHEMA`, `USE ROLE`, or `USE WAREHOUSE` command runs in the editor, all four toolbar dropdowns update automatically to reflect the resulting session state
-- **Session state persisted across reloads** — the account · user tag and non-sensitive connection details survive a page reload via `sessionStorage`; credentials (password, passcode, private key passphrase) are never written to storage; the connected state is verified against the backend on every reload so a backend restart correctly shows ConnectModal pre-filled with the last-used parameters rather than a broken UI; the UI waits for `sessionStorage` hydration to complete before rendering, preventing a spurious ConnectModal flash on HMR page reloads
+- **Session state persisted across reloads** — the account · user tag and non-sensitive connection details survive a page reload; credentials (password, passcode, private key passphrase) are never written to storage; the connected state is verified against the backend on every reload so a backend restart correctly shows ConnectModal pre-filled with the last-used parameters rather than a broken UI; the UI waits for state hydration to complete before rendering, preventing a spurious ConnectModal flash on HMR page reloads
 - **Session Properties** — right-click the account · user tag in the toolbar to open a **Session Properties** modal:
   - **Parameters** section — all rows from `SHOW PARAMETERS IN SESSION`; boolean parameters render as a toggle switch (saves immediately); all other parameters show a pencil button that opens an inline input with Save / Cancel; changes apply via `ALTER SESSION SET`
   - **Variables** section — all rows from `SHOW VARIABLES`; editing works identically; changes apply via `SET variable = value`
@@ -433,6 +433,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 ## UI & Theming
 
 - **Light, Dark, and System** themes — switch via **View → Appearance**; preference is saved across sessions
+- **Session restoration across app restarts** — all open tabs (scratch SQL, file tabs, notebook tabs) and their SQL content are restored exactly when the app is relaunched; file-backed tabs re-read their content from disk on startup so they always show the current file; if a file has been deleted or moved the tab becomes a scratch tab (prefixed `↺`) so the last-known SQL content is not lost; window size is saved on quit and restored on the next launch
 - **Tools menu** — native menu bar **Tools** entry provides **Code Snippets…**, **Export Path Format…**, and **Schema Migration…**
 - **Snowpark menu** — native menu bar **Snowpark** entry provides **Check Environment…**, **Setup Environment…**, **New Notebook…**, and **Open Notebook…**
 - **Help menu** — **Function Catalog…** opens the built-in Snowflake function reference; **Keyboard Shortcuts…** opens a searchable modal listing every shortcut with macOS and Windows columns
