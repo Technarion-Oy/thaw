@@ -37,7 +37,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
   - **Copy button** — copies the full DDL to the clipboard
   - **Text selection** — paint to select any portion of the DDL, then copy with `⌘C` / `Ctrl+C`
   - **Right-click → Copy** — right-clicking inside the tooltip opens a context menu; choosing Copy copies the selected text to the clipboard
-  - **Function tooltips** — hovering over any bare function name (e.g. `DATEADD`, `COALESCE`, or a UDF) shows all overloads with their full signatures and descriptions in the same overlay; works offline from an embedded catalogue of ~200 built-in functions and is refreshed with live function metadata after each connection
+  - **Function tooltips** — hovering over any bare function name (e.g. `DATEADD`, `COALESCE`, or a UDF) shows all overloads with their full signatures and descriptions in the same overlay; works offline from an embedded catalogue of ~320 built-in functions and is refreshed with live function metadata after each connection
 - **Function call highlighting** — every function call in the editor is coloured based on what it is: built-in Snowflake functions appear in **gold** (matching the keyword colour palette) and user-defined functions appear in **teal**; highlighting is applied as you type (200 ms debounce) so it stays current without any manual refresh; the colour set is populated from the local SQLite function cache on editor mount and includes all functions from the embedded fallback catalogue plus any UDFs discovered after a live connection
 - **SQL autocomplete** — context-aware completions triggered by `.` or `Ctrl+Space`:
   - After `db.` → schemas of that database

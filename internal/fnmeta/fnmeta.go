@@ -64,9 +64,23 @@ func Open(dir string) (*Store, error) {
 // Close closes the underlying database connection.
 func (s *Store) Close() error { return s.db.Close() }
 
-// init creates the schema if it does not already exist.
+// schemaVersion is incremented whenever a breaking change (e.g. data-quality
+// fix) requires the cache to be rebuilt from the embedded fallback.
+const schemaVersion = 3
+
+// init creates (or migrates) the schema. A user_version pragma is used as a
+// lightweight version tag: when the stored version is older than schemaVersion
+// the table is dropped and recreated, triggering a clean re-seed from the
+// fallback on the next LoadFallback call.
 func (s *Store) init() error {
-	_, err := s.db.Exec(`
+	var version int
+	_ = s.db.QueryRow("PRAGMA user_version").Scan(&version)
+	if version < schemaVersion {
+		if _, err := s.db.Exec(`DROP TABLE IF EXISTS function_metadata`); err != nil {
+			return err
+		}
+	}
+	if _, err := s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS function_metadata (
 			function_name      TEXT NOT NULL,
 			function_signature TEXT NOT NULL,
@@ -77,7 +91,10 @@ func (s *Store) init() error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_autocomplete_name
 			ON function_metadata(function_name);
-	`)
+	`); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion))
 	return err
 }
 

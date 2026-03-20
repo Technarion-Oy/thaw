@@ -26,6 +26,73 @@ const DDL_CACHE_TTL = 60_000; // ms — stale entries are re-fetched after this
 const hoverDDLCache = new Map<string, { ddl: string; ts: number }>();
 let hoverProviderDisposable: { dispose(): void } | null = null;
 let inlineCompletionsDisposable: { dispose(): void } | null = null;
+let signatureHelpDisposable: { dispose(): void } | null = null;
+
+// ── Signature-help helpers ─────────────────────────────────────────────────
+
+// Scan a SQL prefix string forwards, tracking paren nesting and single-quoted
+// strings, to find the innermost unclosed function call.  Returns the function
+// name and the 0-based index of the currently active parameter (= number of
+// top-level commas seen so far inside the call).
+function getActiveFunctionCall(prefix: string): { name: string; paramIndex: number } | null {
+  const stack: Array<{ name: string; commas: number }> = [];
+  let inStr = false;
+
+  for (let i = 0; i < prefix.length; i++) {
+    const ch = prefix[i];
+    if (ch === "'") { inStr = !inStr; continue; }
+    if (inStr) continue;
+
+    if (ch === "(") {
+      const nm = prefix.slice(0, i).trimEnd().match(/([A-Za-z_][A-Za-z0-9_$]*)$/);
+      stack.push({ name: nm ? nm[1] : "", commas: 0 });
+    } else if (ch === ")") {
+      stack.pop();
+    } else if (ch === "," && stack.length > 0) {
+      stack[stack.length - 1].commas++;
+    }
+  }
+
+  if (stack.length === 0) return null;
+  const top = stack[stack.length - 1];
+  if (!top.name) return null;
+  return { name: top.name, paramIndex: top.commas };
+}
+
+// Parse a Snowflake function signature string (e.g. "DATEADD(part TEXT, n NUMBER, d DATE) RETURN DATE")
+// and return character-offset pairs [start, end) for each parameter within the label string.
+// The offsets are suitable for Monaco's ParameterInformation.label: [number, number].
+function parseSignatureParams(sig: string): Array<[number, number]> {
+  const openIdx = sig.indexOf("(");
+  if (openIdx < 0) return [];
+
+  let depth = 0, closeIdx = -1;
+  for (let i = openIdx; i < sig.length; i++) {
+    if (sig[i] === "(") depth++;
+    else if (sig[i] === ")") { depth--; if (depth === 0) { closeIdx = i; break; } }
+  }
+  if (closeIdx < 0 || closeIdx === openIdx + 1) return [];
+
+  const params: Array<[number, number]> = [];
+  let start = openIdx + 1;
+  let d = 0;
+
+  for (let i = openIdx + 1; i <= closeIdx; i++) {
+    const ch = sig[i];
+    if (ch === "(" ) d++;
+    else if (ch === ")") d--;
+
+    if ((ch === "," && d === 0) || i === closeIdx) {
+      const rawEnd = i === closeIdx ? closeIdx : i;
+      let ps = start, pe = rawEnd;
+      while (ps < pe && sig[ps] === " ") ps++;
+      while (pe > ps && sig[pe - 1] === " ") pe--;
+      if (ps < pe) params.push([ps, pe]);
+      start = i + 1;
+    }
+  }
+  return params;
+}
 
 // Function name sets for decoration-based highlighting.
 // Populated once from the local SQLite cache; shared across all editor instances.
@@ -1445,6 +1512,51 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           return { items: [{ insertText: suggestion }] };
         },
         freeInlineCompletions: () => {},
+      });
+    }
+
+    // ── Parameter signature help ──────────────────────────────────────────
+    // Shows the function signature popup with the active parameter bolded
+    // when the user types '(' or ',' inside a known Snowflake function call.
+    if (!signatureHelpDisposable) {
+      signatureHelpDisposable = monaco.languages.registerSignatureHelpProvider("sql", {
+        signatureHelpTriggerCharacters:   ["(", ","],
+        signatureHelpRetriggerCharacters: [","],
+        provideSignatureHelp: async (model: any, position: any, _token: any, context: any) => {
+          const prefix = model.getValueInRange({
+            startLineNumber: 1, startColumn: 1,
+            endLineNumber:   position.lineNumber, endColumn: position.column,
+          });
+
+          const call = getActiveFunctionCall(prefix);
+          if (!call) return null;
+
+          let overloads: any[] | null = null;
+          try { overloads = await GetFunctionTooltip(call.name); } catch { return null; }
+          if (!overloads || overloads.length === 0) return null;
+
+          const signatures = overloads.map((fn: any) => ({
+            label:         fn.functionSignature,
+            documentation: fn.description ? { value: fn.description } : undefined,
+            parameters:    parseSignatureParams(fn.functionSignature).map(([s, e]) => ({ label: [s, e] as [number, number] })),
+          }));
+
+          // Preserve the user's overload choice on retrigger; otherwise pick
+          // the overload with the fewest params that still covers paramIndex.
+          let activeSignature = context?.activeSignatureHelp?.activeSignature ?? 0;
+          if (!context?.activeSignatureHelp) {
+            let best = Infinity;
+            signatures.forEach((sig: any, i: number) => {
+              const n = sig.parameters.length;
+              if (n >= call.paramIndex && n < best) { best = n; activeSignature = i; }
+            });
+          }
+
+          return {
+            value:   { signatures, activeSignature, activeParameter: call.paramIndex },
+            dispose: () => {},
+          };
+        },
       });
     }
 

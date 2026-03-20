@@ -18,20 +18,22 @@ import (
 	"thaw/internal/snowflake"
 )
 
-// SyncFromSnowflake fetches built-in and user-defined functions from the live
-// Snowflake connection and upserts them into the local SQLite cache.
-// Both steps are attempted independently; a UDF fetch failure is silently
-// ignored so built-ins are still refreshed.
-func SyncFromSnowflake(ctx context.Context, client *snowflake.Client, store *Store) error {
-	builtins, err := fetchBuiltins(ctx, client)
-	if err != nil {
-		return fmt.Errorf("fnmeta sync builtins: %w", err)
-	}
-	if err := store.Upsert(builtins); err != nil {
-		return fmt.Errorf("fnmeta upsert builtins: %w", err)
-	}
+// fetchBuiltins is retained for reference but not called by SyncFromSnowflake —
+// see the comment there for why. It may be useful for diagnostics.
+var _ = fetchBuiltins
 
-	// UDFs are best-effort — failure does not prevent the sync from being useful.
+// SyncFromSnowflake syncs user-defined functions from the live Snowflake
+// connection into the local SQLite cache.
+//
+// Built-in functions are intentionally NOT synced here. Snowflake's
+// SHOW FUNCTIONS returns type-only signatures (e.g. "ABS(NUMBER) RETURN NUMBER")
+// with no parameter names, which would create duplicate low-quality entries
+// alongside the embedded fallback catalogue that has proper named signatures
+// (e.g. "ABS(expr FLOAT) RETURN FLOAT"). The fallback covers all standard
+// built-ins; UDFs are synced live because Snowflake does include parameter
+// names for user-defined functions.
+func SyncFromSnowflake(ctx context.Context, client *snowflake.Client, store *Store) error {
+	// UDFs are best-effort — failure is silently ignored.
 	if udfs, err := fetchUDFs(ctx, client); err == nil {
 		_ = store.Upsert(udfs) //nolint:errcheck
 	}

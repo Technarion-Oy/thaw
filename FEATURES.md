@@ -21,7 +21,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Text selection** — paint any portion of the DDL and copy with `⌘C` / `Ctrl+C`
   - **Right-click → Copy** — right-click inside the tooltip to copy the selected text via a context menu
   - Definitions are cached per session and refreshed automatically after 60 seconds
-  - **Function tooltips** — hovering over a bare function name (e.g. `DATEADD`, `FLATTEN`, or a UDF) shows all overloads with their full signatures and descriptions in the same overlay; backed by an embedded catalogue of ~200 built-in functions that is always available offline, and refreshed with live metadata after each Snowflake connection
+  - **Function tooltips** — hovering over a bare function name (e.g. `DATEADD`, `FLATTEN`, or a UDF) shows all overloads with their full signatures and descriptions in the same overlay; backed by an embedded catalogue of ~320 built-in functions that is always available offline, and refreshed with live metadata after each Snowflake connection
 - **Function call highlighting** — every function call in the editor is syntax-coloured by kind: built-in Snowflake functions appear in **gold** and user-defined functions appear in **teal**, making it easy to distinguish system functions from custom logic at a glance; highlighting updates as you type (200 ms debounce) and is seeded from a local SQLite cache on editor mount so it works without a live connection
 - **SQL autocomplete** — context-aware completions:
   - `db.` → schemas in that database
