@@ -20,6 +20,7 @@ import SessionPropertiesModal from "../components/common/SessionPropertiesModal"
 import SnippetsModal from "../components/snippets/SnippetsModal";
 import ExportPathFormatModal from "../components/export/ExportPathFormatModal";
 import MigrationModal from "../components/migration/MigrationModal";
+import FunctionCatalogModal from "../components/fnmeta/FunctionCatalogModal";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import SqlEditor, { getStatementLineRanges } from "../components/editor/SqlEditor";
 import TabBar from "../components/editor/TabBar";
@@ -90,6 +91,7 @@ export default function QueryPage() {
   const [snippetsOpen, setSnippetsOpen] = useState(false);
   const [exportPathFormatOpen, setExportPathFormatOpen] = useState(false);
   const [migrationOpen, setMigrationOpen] = useState(false);
+  const [fnCatalogOpen, setFnCatalogOpen] = useState(false);
   const [sessionPropsOpen, setSessionPropsOpen] = useState(false);
   const [sessionParams, setSessionParams] = useState<main.SessionParam[] | null>(null);
   const [sessionVars, setSessionVars] = useState<main.SessionVar[] | null>(null);
@@ -491,6 +493,11 @@ export default function QueryPage() {
 
   useEffect(() => {
     const off = EventsOn("menu:migration", () => setMigrationOpen(true));
+    return () => off();
+  }, []);
+
+  useEffect(() => {
+    const off = EventsOn("menu:function-catalog", () => setFnCatalogOpen(true));
     return () => off();
   }, []);
 
@@ -1118,6 +1125,7 @@ export default function QueryPage() {
       {snippetsOpen && <SnippetsModal onClose={() => setSnippetsOpen(false)} />}
       {exportPathFormatOpen && <ExportPathFormatModal onClose={() => setExportPathFormatOpen(false)} />}
       {migrationOpen && <MigrationModal onClose={() => setMigrationOpen(false)} />}
+      {fnCatalogOpen && <FunctionCatalogModal onClose={() => setFnCatalogOpen(false)} />}
 
       {sessionPropsOpen && (
         <SessionPropertiesModal

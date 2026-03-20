@@ -185,5 +185,11 @@ func buildMenu(app *App) *menu.Menu {
 		wailsruntime.EventsEmit(app.ctx, "menu:snowpark-open-notebook")
 	})
 
+	// ── Help ──────────────────────────────────────────────────────────────────
+	helpMenu := appMenu.AddSubmenu("Help")
+	helpMenu.AddText("Function Catalog…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:function-catalog")
+	})
+
 	return appMenu
 }
