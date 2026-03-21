@@ -35,7 +35,11 @@ jobs:
           SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
           SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
           SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
-        run: go test -v -tags integration -race -count=1 -timeout 5m ./internal/integration/... 2>&1 | go-junit-report -set-exit-code > report.xml
+          # Optional: set these secrets to target a specific database/schema
+          # for migration integration tests (defaults to CURRENT_DATABASE()/PUBLIC).
+          SNOWFLAKE_TEST_DATABASE: ${{ secrets.SNOWFLAKE_TEST_DATABASE }}
+          SNOWFLAKE_TEST_SCHEMA: ${{ secrets.SNOWFLAKE_TEST_SCHEMA }}
+        run: go test -v -tags integration -race -count=1 -timeout 10m ./internal/integration/... 2>&1 | go-junit-report -set-exit-code > report.xml
 
       - name: Publish test results
         uses: EnricoMi/publish-unit-test-result-action@v2

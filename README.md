@@ -511,6 +511,7 @@ thaw/
 ├── session_path_prod.go           # Session file path for production builds (OS-specific)
 ├── errors.go                      # Sentinel errors
 ├── version.go                     # Version string (overridable via -ldflags at build time)
+├── migration_test.go              # Unit tests for migration helper functions (no Snowflake required)
 ├── go.mod
 ├── wails.json                     # Wails project configuration
 ├── build/
@@ -529,7 +530,9 @@ thaw/
 │   ├── filesystem/fs.go           # Directory listing, file reading and writing
 │   ├── gitrepo/repo.go            # Git status, commit/push, pull
 │   ├── integration/
-│   │   └── export_test.go         # End-to-end tests (require live Snowflake account)
+│   │   ├── basic_test.go          # Connectivity + result-shape integration tests (key-pair auth)
+│   │   ├── export_test.go         # DDL export end-to-end tests (require live Snowflake account)
+│   │   └── migration_test.go      # Schema migration strategy integration tests (key-pair auth)
 │   ├── logger/
 │   │   ├── logger.go              # slog + lumberjack setup; sets slog.Default so gosnowflake v2 logs flow in automatically
 │   │   ├── path_dev.go            # Log path for dev builds (./logs/thaw.log)
@@ -656,6 +659,20 @@ go test -coverprofile=coverage.out ./...
 go tool cover -html=coverage.out
 ```
 
+### Migration helper tests
+
+The root package (`migration.go`) contains unit tests for all pure migration helper functions — no Snowflake connection required.
+
+```bash
+go test -v -run "^Test(Normalize|SplitTopLevel|MigrQuote|ParseLocal|CommonColumn|ReplaceDDL|IsDependency|ExecutionPriority|RemoteKey|BuildMigration|ScanMigration)" .
+```
+
+> **Linux note** — the root package imports Wails (CGO + GTK/WebKit). Install the system headers first:
+> ```bash
+> sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+> go test -v -run "^Test(Normalize|SplitTopLevel|MigrQuote|ParseLocal|CommonColumn|ReplaceDDL|IsDependency|ExecutionPriority|RemoteKey|BuildMigration|ScanMigration)" .
+> ```
+
 ---
 
 ## Integration tests
@@ -666,17 +683,32 @@ require a real Snowflake account.
 
 ### What they do
 
-Each test run:
+**DDL export tests** (`export_test.go`) each:
 
-1. Connects to Snowflake using environment variables.
-2. Creates a temporary database named `THAW_TEST_<random>` with two schemas
+1. Connect to Snowflake using environment variables.
+2. Create a temporary database named `THAW_TEST_<random>` with two schemas
    (`ALPHA`, `BETA`) containing objects of every supported DDL type — tables,
    views, JavaScript functions (including overloads), stored procedures,
    sequences, internal stages, streams, and file formats.
-3. Runs the full parallel export pipeline (`ddl.ExportDatabases`).
-4. Validates the file-system output: file existence, directory structure,
+3. Run the full parallel export pipeline (`ddl.ExportDatabases`).
+4. Validate the file-system output: file existence, directory structure,
    content correctness, and that function overloads land at distinct paths.
-5. Drops the temporary database unconditionally, even when the test fails.
+5. Drop the temporary database unconditionally, even when the test fails.
+
+**Schema migration tests** (`migration_test.go`) each:
+
+1. Connect to Snowflake using environment variables.
+2. Create a temporary database (`THAW_MIGTEST_<random>` if `SNOWFLAKE_TEST_DATABASE` is
+   not set — using `CREATE DATABASE` without `OR REPLACE` to avoid clobbering anything;
+   retries with a new random name if the candidate name already exists).
+3. Exercise all four migration strategies against real tables with dummy data:
+   - **Smart In-Place** — `ALTER TABLE ADD/DROP/ALTER COLUMN`; data preserved
+   - **Blue/Green Swap** — temp table + `SWAP WITH`; shared columns preserved
+   - **View-Based Soft Cutover** — rename to `_v1` + new table + compat view
+   - **Destructive Rebuild** — `DROP + CREATE`; data gone
+   - **Empty-table fast path** — zero-row tables always use `DROP + CREATE`
+   - **Various column types** — NUMBER, FLOAT, VARIANT, ARRAY, OBJECT, TIMESTAMP_NTZ
+4. Drop the temporary database unconditionally via `t.Cleanup`, even when the test fails.
 
 ### Required environment variables
 
@@ -684,9 +716,10 @@ Each test run:
 |---|---|
 | `SNOWFLAKE_ACCOUNT` | Account identifier, e.g. `myorg-myaccount` |
 | `SNOWFLAKE_USER` | Login name |
-| `SNOWFLAKE_PASSWORD` | Password |
+| `SNOWFLAKE_PRIVATE_KEY` | PEM-encoded RSA private key (key-pair authentication) |
 | `SNOWFLAKE_WAREHOUSE` | Warehouse to use, e.g. `COMPUTE_WH` |
-| `SNOWFLAKE_ROLE` | *(optional)* Role to assume |
+| `SNOWFLAKE_TEST_DATABASE` | *(optional)* Database for migration tests; auto-created as `THAW_MIGTEST_<random>` if not set |
+| `SNOWFLAKE_TEST_SCHEMA` | *(optional)* Schema within the test database; defaults to `PUBLIC` |
 
 If any required variable is missing the tests are **skipped**, not failed —
 safe to run in CI environments that lack Snowflake access.
@@ -730,8 +763,13 @@ GRANT CREATE DATABASE ON ACCOUNT TO ROLE <role>;
 GRANT USAGE ON WAREHOUSE <warehouse> TO ROLE <role>;
 ```
 
-All other privileges (CREATE TABLE, CREATE FUNCTION, etc.) are automatically
-granted to the owner of the database created by the test.
+All other privileges (CREATE TABLE, CREATE VIEW, CREATE FUNCTION, CREATE STAGE, etc.) are
+automatically granted to the owner of the database created by the test.
+
+Migration tests also need `CREATE TABLE` / `ALTER TABLE` / `DROP TABLE` within the
+test database — these are covered by the ownership grant above when the test creates
+the database itself. If you supply a pre-existing `SNOWFLAKE_TEST_DATABASE`, ensure the
+role has at least `CREATE SCHEMA` and `CREATE TABLE` on that database.
 
 ---
 
