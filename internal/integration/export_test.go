@@ -66,7 +66,7 @@ func connFromEnv(t *testing.T) *snowflake.Client {
 		}
 	}
 
-	client, err := snowflake.NewClient(snowflake.ConnectParams{
+	client, err := snowflake.NewClient(context.Background(), snowflake.ConnectParams{
 		Account:   os.Getenv("SNOWFLAKE_ACCOUNT"),
 		User:      os.Getenv("SNOWFLAKE_USER"),
 		Password:  os.Getenv("SNOWFLAKE_PASSWORD"),
