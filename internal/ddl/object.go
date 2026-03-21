@@ -301,6 +301,28 @@ func tokeniseQualifiedIdent(s string) (parts []string, rest string) {
 	return
 }
 
+// splitParamList splits s on commas that are at paren depth 0, so commas
+// inside size qualifiers like NUMBER(38,0) are not treated as separators.
+func splitParamList(s string) []string {
+	var parts []string
+	depth, start := 0, 0
+	for i, r := range s {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				parts = append(parts, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	parts = append(parts, s[start:])
+	return parts
+}
+
 // parseArgSig extracts a simplified, sanitised argument-type signature from
 // the text that immediately follows a function/procedure name, e.g.:
 //
@@ -341,8 +363,10 @@ func parseArgSig(after string) string {
 
 	// Each comma-separated param is either "name TYPE" or just "TYPE".
 	// We want only the TYPE portion, stripped of size qualifiers like (256).
+	// Use a paren-depth-aware split so commas inside NUMBER(38,0) are not
+	// treated as parameter separators.
 	var types []string
-	for _, param := range strings.Split(inner, ",") {
+	for _, param := range splitParamList(inner) {
 		param = strings.TrimSpace(param)
 		if param == "" {
 			continue

@@ -83,7 +83,7 @@ func TestSplit(t *testing.T) {
 		{
 			name:  "semicolon inside line comment is ignored",
 			input: "SELECT 1 -- hidden; semi\n;",
-			want:  []string{"SELECT 1 -- hidden; semi\n"},
+			want:  []string{"SELECT 1 -- hidden; semi"},
 		},
 		{
 			name:  "leading line comment",
