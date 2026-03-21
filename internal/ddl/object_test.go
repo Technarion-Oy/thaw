@@ -328,6 +328,153 @@ func TestParse_Kinds(t *testing.T) {
 			wantKind: KindStream, wantDB: "DB", wantSch: "SCH", wantName: "orders-stream",
 		},
 
+		// ── VOLATILE modifier ────────────────────────────────────────────────
+		{
+			name:     "volatile table modifier",
+			sql:      `CREATE OR REPLACE VOLATILE TABLE "DB"."SCH"."VOL" (id INT)`,
+			wantKind: KindTable, wantDB: "DB", wantSch: "SCH", wantName: "VOL",
+		},
+
+		// ── SQL reserved words as object names ───────────────────────────────
+		{
+			name:     "SQL keyword SELECT as table name",
+			sql:      `CREATE TABLE "DB"."SCH"."SELECT" (id INT)`,
+			wantKind: KindTable, wantDB: "DB", wantSch: "SCH", wantName: "SELECT",
+		},
+		{
+			name:     "SQL keyword CREATE as view name",
+			sql:      `CREATE OR REPLACE VIEW "DB"."SCH"."CREATE" AS SELECT 1`,
+			wantKind: KindView, wantDB: "DB", wantSch: "SCH", wantName: "CREATE",
+		},
+		{
+			name:     "SQL keyword FROM as schema name",
+			sql:      `CREATE TABLE "DB"."FROM"."TBL" (id INT)`,
+			wantKind: KindTable, wantDB: "DB", wantSch: "FROM", wantName: "TBL",
+		},
+
+		// ── object names with path separator characters ───────────────────────
+		{
+			name:     "object name with forward slash",
+			sql:      `CREATE TABLE "DB"."SCH"."path/to/table" (id INT)`,
+			wantKind: KindTable, wantDB: "DB", wantSch: "SCH", wantName: "path/to/table",
+		},
+		{
+			name:     "object name with backslash",
+			sql:      `CREATE TABLE "DB"."SCH"."path\table" (id INT)`,
+			wantKind: KindTable, wantDB: "DB", wantSch: "SCH", wantName: `path\table`,
+		},
+		{
+			name:     "database name with forward slash",
+			sql:      `CREATE TABLE "db/1"."SCH"."TBL" (id INT)`,
+			wantKind: KindTable, wantDB: "db/1", wantSch: "SCH", wantName: "TBL",
+		},
+
+		// ── object names with single quotes ───────────────────────────────────
+		{
+			name:     "table name with single quote inside double-quoted name",
+			sql:      `CREATE TABLE "DB"."SCH"."it's a table" (id INT)`,
+			wantKind: KindTable, wantDB: "DB", wantSch: "SCH", wantName: "it's a table",
+		},
+
+		// ── object names with newline / tab ───────────────────────────────────
+		{
+			name:     "table name with embedded tab",
+			sql:      "CREATE TABLE \"DB\".\"SCH\".\"col\tname\" (id INT)",
+			wantKind: KindTable, wantDB: "DB", wantSch: "SCH", wantName: "col\tname",
+		},
+
+		// ── whitespace normalization in CREATE keyword ────────────────────────
+		{
+			name:     "tabs between keywords instead of spaces",
+			sql:      "CREATE\t\tOR\t\tREPLACE\t\tTABLE\t\t\"DB\".\"SCH\".\"T\" (id INT)",
+			wantKind: KindTable, wantDB: "DB", wantSch: "SCH", wantName: "T",
+		},
+		{
+			name:     "mixed whitespace between keywords",
+			sql:      "CREATE  \t  OR  \t  REPLACE  \t  VIEW v AS SELECT 1",
+			wantKind: KindView, wantName: "v",
+		},
+
+		// ── very long object names ────────────────────────────────────────────
+		{
+			name: "table name at Snowflake maximum length (255 chars)",
+			sql:  `CREATE TABLE "DB"."SCH"."` + strings.Repeat("A", 255) + `" (id INT)`,
+			wantKind: KindTable, wantDB: "DB", wantSch: "SCH",
+			wantName: strings.Repeat("A", 255),
+		},
+		{
+			name: "fully-qualified name all parts at 64 chars",
+			sql: `CREATE VIEW "` + strings.Repeat("D", 64) + `"."` +
+				strings.Repeat("S", 64) + `"."` + strings.Repeat("V", 64) + `" AS SELECT 1`,
+			wantKind: KindView,
+			wantDB:   strings.Repeat("D", 64),
+			wantSch:  strings.Repeat("S", 64),
+			wantName: strings.Repeat("V", 64),
+		},
+
+		// ── IF NOT EXISTS on all major object kinds ───────────────────────────
+		{
+			name:     "CREATE DATABASE IF NOT EXISTS",
+			sql:      `CREATE DATABASE IF NOT EXISTS "MY_DB"`,
+			wantKind: KindDatabase, wantName: "MY_DB",
+		},
+		{
+			name:     "CREATE SCHEMA IF NOT EXISTS three-part",
+			sql:      `CREATE SCHEMA IF NOT EXISTS "DB"."PUBLIC"`,
+			wantKind: KindSchema, wantSch: "DB", wantName: "PUBLIC",
+		},
+		{
+			name:     "CREATE VIEW IF NOT EXISTS",
+			sql:      `CREATE VIEW IF NOT EXISTS "DB"."SCH"."V" AS SELECT 1`,
+			wantKind: KindView, wantDB: "DB", wantSch: "SCH", wantName: "V",
+		},
+
+		// ── function / procedure extreme name and arg cases ──────────────────
+		{
+			name:      "function name with no space before open paren (unquoted)",
+			sql:       `CREATE FUNCTION f(X FLOAT) RETURNS FLOAT AS $$ return X; $$`,
+			wantKind:  KindFunction, wantName: "f",
+			wantArgSig: "FLOAT",
+		},
+		{
+			name:      "function with ARRAY type parameter",
+			sql:       `CREATE FUNCTION arr(A ARRAY) RETURNS VARIANT AS $$ return A; $$`,
+			wantKind:  KindFunction, wantName: "arr",
+			wantArgSig: "ARRAY",
+		},
+		{
+			name:      "function with MAP type parameter",
+			sql:       `CREATE FUNCTION mp(M MAP(VARCHAR, NUMBER)) RETURNS VARIANT AS $$ return M; $$`,
+			wantKind:  KindFunction, wantName: "mp",
+			wantArgSig: "MAP",
+		},
+		{
+			name:      "function with VECTOR type parameter",
+			sql:       `CREATE FUNCTION vec(V VECTOR(FLOAT, 64)) RETURNS FLOAT AS $$ return V[0]; $$`,
+			wantKind:  KindFunction, wantName: "vec",
+			wantArgSig: "VECTOR",
+		},
+		{
+			name:      "procedure with ten parameters",
+			sql: `CREATE PROCEDURE "DB"."SCH"."P"(A VARCHAR, B NUMBER, C FLOAT, D DATE,` +
+				` E BOOLEAN, F TIMESTAMP_NTZ, G VARIANT, H ARRAY, I OBJECT, J BINARY)` +
+				` RETURNS VARCHAR AS $$ return ''; $$`,
+			wantKind:  KindProcedure, wantDB: "DB", wantSch: "SCH", wantName: "P",
+			wantArgSig: "VARCHAR_NUMBER_FLOAT_DATE_BOOLEAN_TIMESTAMP_NTZ_VARIANT_ARRAY_OBJECT_BINARY",
+		},
+		{
+			name:      "function name is a SQL keyword",
+			sql:       `CREATE FUNCTION "DB"."SCH"."SELECT"(X FLOAT) RETURNS FLOAT AS $$ return X; $$`,
+			wantKind:  KindFunction, wantDB: "DB", wantSch: "SCH", wantName: "SELECT",
+			wantArgSig: "FLOAT",
+		},
+		{
+			name:      "procedure with all-special-char quoted name",
+			sql:       `CREATE PROCEDURE "DB"."SCH"."!@#$%"() RETURNS VARCHAR AS $$ return ''; $$`,
+			wantKind:  KindProcedure, wantDB: "DB", wantSch: "SCH", wantName: "!@#$%",
+			wantArgSig: "noargs",
+		},
+
 		// ── non-CREATE / unknown statements ──────────────────────────────────
 		{
 			name:     "SELECT is unknown",
@@ -426,6 +573,39 @@ func TestParseArgSig(t *testing.T) {
 		{"(X TIMESTAMP_LTZ)", "TIMESTAMP_LTZ"},
 		// Trailing content after closing paren is ignored.
 		{"(X FLOAT) RETURNS FLOAT AS $$ x $$", "FLOAT"},
+
+		// All positional (no names) — type is the only field.
+		{"(FLOAT, VARCHAR, NUMBER)", "FLOAT_VARCHAR_NUMBER"},
+		{"(FLOAT)", "FLOAT"},
+		// ARRAY, MAP, VECTOR complex types (named params — name precedes type).
+		{"(A ARRAY)", "ARRAY"},
+		{"(A MAP(VARCHAR, NUMBER))", "MAP"},
+		{"(A VECTOR(FLOAT, 64))", "VECTOR"},
+		// Positional TABLE type with inline column list: fields[1] (not fields[0])
+		// is used when len(fields) >= 2, so the first word after TABLE( is picked up
+		// as a "field" and the actual type extraction gives "FLOAT_" not "TABLE".
+		// This is the documented (if surprising) behaviour for positional TABLE params.
+		{"(TABLE(X FLOAT, Y NUMBER))", "FLOAT_"},
+		// Ten parameters.
+		{"(A VARCHAR, B NUMBER, C FLOAT, D DATE, E BOOLEAN, F TIMESTAMP_NTZ, G VARIANT, H ARRAY, I OBJECT, J BINARY)",
+			"VARCHAR_NUMBER_FLOAT_DATE_BOOLEAN_TIMESTAMP_NTZ_VARIANT_ARRAY_OBJECT_BINARY"},
+		// Comma inside single-quoted DEFAULT value splits at depth 0 —
+		// this is expected (and documented) behaviour: the parser does not track
+		// quote context inside parameter lists.
+		{"(X VARCHAR DEFAULT 'hello, world')", "VARCHAR_WORLD_"},
+		// Only-whitespace inner content.
+		{"(   )", "noargs"},
+		// Unclosed inner paren: depth never returns to 0, so end=-1 → "".
+		{"(X NESTED(1,2)", ""},
+		// Single param with very long type name.
+		{"(A " + strings.Repeat("X", 60) + ")", sanitize(strings.Repeat("X", 60))},
+		// Param where type name contains digits (e.g. FLOAT4).
+		{"(X FLOAT4)", "FLOAT4"},
+		// Param with GEOGRAPHY / GEOMETRY types.
+		{"(G GEOGRAPHY)", "GEOGRAPHY"},
+		{"(G GEOMETRY)", "GEOMETRY"},
+		// Very deeply nested brackets.
+		{"(A FUNC(FUNC2(FUNC3(x,y),z),w))", "FUNC"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
@@ -452,6 +632,40 @@ func TestSanitize(t *testing.T) {
 		{"", ""},
 		{"abc123", "abc123"},
 		{"MY__TABLE", "MY__TABLE"},  // double underscore preserved
+		// Path separator characters.
+		{"path/to/file", "path_to_file"},
+		{`path\to\file`, "path_to_file"},
+		// Tab and other whitespace.
+		{"col\tname", "col_name"},
+		{"\n\r\t", "___"},
+		// Single quote, brackets, operators.
+		{"it's a table", "it_s_a_table"},
+		{"[bracket]", "_bracket_"},
+		{"col+1", "col_1"},
+		{"col*2", "col_2"},
+		{"a=b", "a_b"},
+		// All allowed characters together.
+		{"aZ0_-", "aZ0_-"},
+		// Alternating valid / invalid characters.
+		{"a!b@c#d", "a_b_c_d"},
+		// Only path separators.
+		{"///", "___"},
+		// Digits only.
+		{"0123456789", "0123456789"},
+		// Single characters.
+		{"a", "a"},
+		{"!", "_"},
+		{"-", "-"},
+		{"_", "_"},
+		// Very long valid string (performance check).
+		{strings.Repeat("aA0_-", 50), strings.Repeat("aA0_-", 50)},
+		// Very long string with every-other char invalid.
+		{strings.Repeat("a!", 50), strings.Repeat("a_", 50)},
+		// Unicode: each non-ASCII rune becomes an underscore.
+		{"café", "caf_"},
+		{"注文テーブル", "______"},
+		{"naïve", "na_ve"},
+		{"emoji🔥table", "emoji_table"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
@@ -614,6 +828,82 @@ func TestFilePath(t *testing.T) {
 			obj:  Object{Kind: KindTable, Schema: "SCH", Name: strings.Repeat("A", 128)},
 			want: fp("SCH", "tables", strings.Repeat("A", 128)+".sql"),
 		},
+		// Path separator in name is sanitized.
+		{
+			name: "forward slash in name becomes underscore",
+			obj:  Object{Kind: KindTable, Schema: "SCH", Name: "path/to/table"},
+			want: fp("SCH", "tables", "path_to_table.sql"),
+		},
+		{
+			name: "backslash in name becomes underscore",
+			obj:  Object{Kind: KindTable, Schema: "SCH", Name: `path\table`},
+			want: fp("SCH", "tables", "path_table.sql"),
+		},
+		// Path separator in schema is sanitized.
+		{
+			name: "forward slash in schema becomes underscore",
+			obj:  Object{Kind: KindView, Schema: "MY/SCH", Name: "V"},
+			want: fp("MY_SCH", "views", "V.sql"),
+		},
+		// Single quote in name sanitized.
+		{
+			name: "single quote in name becomes underscore",
+			obj:  Object{Kind: KindTable, Schema: "SCH", Name: "it's a table"},
+			want: fp("SCH", "tables", "it_s_a_table.sql"),
+		},
+		// Tab in name sanitized.
+		{
+			name: "tab in name becomes underscore",
+			obj:  Object{Kind: KindTable, Schema: "SCH", Name: "col\tname"},
+			want: fp("SCH", "tables", "col_name.sql"),
+		},
+		// Emoji in schema → underscores.
+		{
+			name: "emoji in schema sanitized",
+			obj:  Object{Kind: KindTable, Schema: "SCH🔥1", Name: "T"},
+			want: fp("SCH_1", "tables", "T.sql"),
+		},
+		// Leading/trailing hyphens preserved.
+		{
+			name: "leading and trailing hyphens preserved",
+			obj:  Object{Kind: KindTable, Schema: "SCH", Name: "-my-table-"},
+			want: fp("SCH", "tables", "-my-table-.sql"),
+		},
+		// Function with very long arg sig.
+		{
+			name: "function with very long arg sig",
+			obj:  Object{Kind: KindFunction, Schema: "SCH", Name: "F",
+				ArgSig: strings.Repeat("VARCHAR_", 10) + "NUMBER"},
+			want: fp("SCH", "functions", "F__"+strings.Repeat("VARCHAR_", 10)+"NUMBER.sql"),
+		},
+		// All object kinds with no schema fall back to _root.
+		{
+			name: "stage without schema uses _root",
+			obj:  Object{Kind: KindStage, Schema: "", Name: "STG"},
+			want: fp("_root", "stages", "STG.sql"),
+		},
+		{
+			name: "pipe without schema uses _root",
+			obj:  Object{Kind: KindPipe, Schema: "", Name: "PP"},
+			want: fp("_root", "pipes", "PP.sql"),
+		},
+		{
+			name: "file_format without schema uses _root",
+			obj:  Object{Kind: KindFileFormat, Schema: "", Name: "FF"},
+			want: fp("_root", "file_formats", "FF.sql"),
+		},
+		// Name that would produce an empty sanitized string (all special chars + digits).
+		{
+			name: "name with all numeric digits preserved",
+			obj:  Object{Kind: KindTable, Schema: "SCH", Name: "0123"},
+			want: fp("SCH", "tables", "0123.sql"),
+		},
+		// Schema that itself would be _root if used as fallback.
+		{
+			name: "schema literally named _root",
+			obj:  Object{Kind: KindTable, Schema: "_root", Name: "T"},
+			want: fp("_root", "tables", "T.sql"),
+		},
 	}
 
 	for _, tt := range tests {
@@ -759,6 +1049,94 @@ func TestFilePathFor(t *testing.T) {
 			database: "DB",
 			want:     "T.sql",
 		},
+		// Template with no placeholders at all: every object maps to the same path.
+		{
+			name:     "template with no placeholders",
+			obj:      Object{Kind: KindTable, Schema: "SCH", Name: "T"},
+			template: "output/all.sql",
+			database: "DB",
+			want:     fp("output", "all.sql"),
+		},
+		// Template with a repeated placeholder.
+		{
+			name:     "template with repeated database placeholder",
+			obj:      Object{Kind: KindTable, Schema: "SCH", Name: "T"},
+			template: "{database}/{database}/{object_name}.sql",
+			database: "DB",
+			want:     fp("DB", "DB", "T.sql"),
+		},
+		// Template with an unknown placeholder passes through literally.
+		{
+			name:     "unknown placeholder passes through unchanged",
+			obj:      Object{Kind: KindTable, Schema: "SCH", Name: "T"},
+			template: "{database}/{version}/{object_name}.sql",
+			database: "DB",
+			want:     fp("DB", "{version}", "T.sql"),
+		},
+		// Template with only the object_type placeholder.
+		{
+			name:     "template with only object_type and object_name",
+			obj:      Object{Kind: KindView, Schema: "SCH", Name: "V"},
+			template: "{object_type}/{object_name}.sql",
+			database: "DB",
+			want:     fp("views", "V.sql"),
+		},
+		// Special chars in database name sanitized in FilePathFor.
+		{
+			name:     "path separator in database name sanitized",
+			obj:      Object{Kind: KindTable, Schema: "SCH", Name: "T"},
+			template: "{database}/{object_name}.sql",
+			database: "db/path",
+			want:     fp("db_path", "T.sql"),
+		},
+		{
+			name:     "unicode in database name sanitized",
+			obj:      Object{Kind: KindTable, Schema: "SCH", Name: "T"},
+			template: "{database}/{object_name}.sql",
+			database: "データ", // 3 katakana runes → 3 underscores
+			want:     fp("___", "T.sql"),
+		},
+		// Special chars in object name sanitized.
+		{
+			name:     "slash in object name sanitized",
+			obj:      Object{Kind: KindTable, Schema: "SCH", Name: "a/b"},
+			template: "{database}/{object_name}.sql",
+			database: "DB",
+			want:     fp("DB", "a_b.sql"),
+		},
+		// DATABASE and SCHEMA special-case: unicode in database arg sanitized.
+		// "my データ db": m,y,<space>,デ,ー,タ,<space>,d,b → invalid: space+3 kana+space = 5 → "my_____db"
+		{
+			name:     "DATABASE with unicode db arg sanitized",
+			obj:      Object{Kind: KindDatabase},
+			template: "",
+			database: "my データ db",
+			want:     fp("my_____db", "_database.sql"),
+		},
+		// Function with empty schema and argsig in FilePathFor.
+		{
+			name:     "function no schema uses _root with argsig",
+			obj:      Object{Kind: KindFunction, Schema: "", Name: "F", ArgSig: "FLOAT_VARCHAR"},
+			template: "{database}/{schema}/{object_type}/{object_name}.sql",
+			database: "DB",
+			want:     fp("DB", "_root", "functions", "F__FLOAT_VARCHAR.sql"),
+		},
+		// Procedure with no args.
+		{
+			name:     "procedure noargs in custom template",
+			obj:      Object{Kind: KindProcedure, Schema: "SCH", Name: "P", ArgSig: "noargs"},
+			template: "{schema}/{object_type}/{object_name}.sql",
+			database: "DB",
+			want:     fp("SCH", "procedures", "P__noargs.sql"),
+		},
+		// Template that is just a filename with no directory component.
+		{
+			name:     "template with just object_name and extension",
+			obj:      Object{Kind: KindSequence, Schema: "SCH", Name: "SEQ"},
+			template: "{object_name}.sql",
+			database: "DB",
+			want:     "SEQ.sql",
+		},
 	}
 
 	for _, tt := range tests {
@@ -851,6 +1229,121 @@ func TestNameTracker_AllResultsUnique(t *testing.T) {
 			t.Fatalf("duplicate path returned at iteration %d: %q", i, p)
 		}
 		seen[p] = true
+	}
+}
+
+func TestNameTracker_NoExtension(t *testing.T) {
+	// filepath.Ext("foo") == "" so base="foo", suffix candidate is "foo_2".
+	nt := newNameTracker()
+	nt.resolve("foo")
+	got := nt.resolve("foo")
+	if got != "foo_2" {
+		t.Errorf("resolve() = %q, want %q", got, "foo_2")
+	}
+}
+
+func TestNameTracker_MultipleDots(t *testing.T) {
+	// filepath.Ext("my.table.sql") == ".sql", base = "my.table".
+	nt := newNameTracker()
+	nt.resolve("my.table.sql")
+	got := nt.resolve("my.table.sql")
+	if got != "my.table_2.sql" {
+		t.Errorf("resolve() = %q, want %q", got, "my.table_2.sql")
+	}
+}
+
+func TestNameTracker_DotfileStylePath(t *testing.T) {
+	// filepath.Ext(".gitignore") returns ".gitignore" (the leading dot makes the
+	// entire string the extension; base is "").  Second call gets "_2.gitignore".
+	nt := newNameTracker()
+	nt.resolve(".gitignore")
+	got := nt.resolve(".gitignore")
+	if got != "_2.gitignore" {
+		t.Errorf("resolve() = %q, want %q", got, "_2.gitignore")
+	}
+}
+
+func TestNameTracker_EmptyStringPath(t *testing.T) {
+	// An empty string has no extension; second call gets "_2".
+	nt := newNameTracker()
+	nt.resolve("")
+	got := nt.resolve("")
+	if got != "_2" {
+		t.Errorf("resolve() = %q, want %q", got, "_2")
+	}
+}
+
+func TestNameTracker_100Collisions(t *testing.T) {
+	// Resolve the same path 100 times; all results must be unique and the
+	// last must be the _100 variant.
+	nt := newNameTracker()
+	seen := make(map[string]bool, 100)
+	var last string
+	for i := 0; i < 100; i++ {
+		last = nt.resolve("obj.sql")
+		if seen[last] {
+			t.Fatalf("duplicate at iteration %d: %q", i, last)
+		}
+		seen[last] = true
+	}
+	if last != "obj_100.sql" {
+		t.Errorf("100th result = %q, want %q", last, "obj_100.sql")
+	}
+}
+
+func TestNameTracker_OnlyExtension(t *testing.T) {
+	// filepath.Ext(".sql") returns ".sql" (leading dot, no other dot → whole
+	// string is the extension, base is "").  Second call gets "_2.sql".
+	nt := newNameTracker()
+	nt.resolve(".sql")
+	got := nt.resolve(".sql")
+	if got != "_2.sql" {
+		t.Errorf("resolve() = %q, want %q", got, "_2.sql")
+	}
+}
+
+func TestNameTracker_UnicodeInPath(t *testing.T) {
+	// Unicode characters are valid path components; tracker must handle them.
+	nt := newNameTracker()
+	p := filepath.Join("SCH", "tables", "données.sql")
+	got1 := nt.resolve(p)
+	got2 := nt.resolve(p)
+	if got1 != p {
+		t.Errorf("first = %q, want %q", got1, p)
+	}
+	want2 := filepath.Join("SCH", "tables", "données_2.sql")
+	if got2 != want2 {
+		t.Errorf("second = %q, want %q", got2, want2)
+	}
+}
+
+func TestNameTracker_ConcurrentMixedPaths(t *testing.T) {
+	// Concurrent access with two hot paths; each must return unique results.
+	nt := newNameTracker()
+	const goroutines = 30
+
+	type result struct {
+		path string
+		val  string
+	}
+	ch := make(chan result, goroutines*2)
+	for i := 0; i < goroutines; i++ {
+		go func() { ch <- result{"a.sql", nt.resolve("a.sql")} }()
+		go func() { ch <- result{"b.sql", nt.resolve("b.sql")} }()
+	}
+
+	seenA := make(map[string]bool)
+	seenB := make(map[string]bool)
+	for i := 0; i < goroutines*2; i++ {
+		r := <-ch
+		m := seenA
+		if r.path == "b.sql" {
+			m = seenB
+		}
+		if m[r.val] {
+			t.Errorf("duplicate for %s: %q", r.path, r.val)
+		}
+		m[r.val] = true
 	}
 }
 

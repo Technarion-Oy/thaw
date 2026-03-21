@@ -363,6 +363,185 @@ func TestSplit(t *testing.T) {
 			want:  []string{"SELECT 'line1\nline2'"},
 		},
 
+		// ── carriage-return / old-Mac line endings ──────────────────────────
+		{
+			name:  "bare CR in normal text is treated as whitespace and trimmed",
+			input: "SELECT\r1;",
+			want:  []string{"SELECT\r1"},
+		},
+		{
+			name:  "CR-only line ending does NOT terminate a line comment",
+			// \r without \n: the line comment stays open through the \r, so the
+			// entire input is a single unterminated statement flushed at the end.
+			input: "-- comment\rSELECT 2;",
+			want:  []string{"-- comment\rSELECT 2;"},
+		},
+
+		// ── backslash is not an escape character in Snowflake strings ────────
+		{
+			name: "backslash before closing quote does not escape it",
+			// 'a\' closes the string (backslash is literal); the following ;
+			// splits statements.  The remaining b'; is an unterminated string.
+			input: "SELECT 'a\\';b';",
+			want:  []string{"SELECT 'a\\'", "b';"},
+		},
+		{
+			name:  "backslash inside single-quoted string is just a character",
+			input: `SELECT 'path\to\file';`,
+			want:  []string{`SELECT 'path\to\file'`},
+		},
+
+		// ── dollar-quote tag case-sensitivity ────────────────────────────────
+		{
+			name:  "dollar-quote tag is case-sensitive: uppercase tag not closed by lowercase",
+			input: "x $BODY$ inside; still inside $body$ not closed",
+			want:  []string{"x $BODY$ inside; still inside $body$ not closed"},
+		},
+		{
+			name:  "dollar-quote tag with digits and underscores",
+			input: "x $tag_1$body;$tag_1$;",
+			want:  []string{"x $tag_1$body;$tag_1$"},
+		},
+		{
+			name:  "dollar-quote tag starting with underscore",
+			input: "x $_tag$body;$_tag$;",
+			want:  []string{"x $_tag$body;$_tag$"},
+		},
+		{
+			name:  "very long dollar-quote tag",
+			input: "x $" + strings.Repeat("a", 60) + "$body;$" + strings.Repeat("a", 60) + "$;",
+			want:  []string{"x $" + strings.Repeat("a", 60) + "$body;$" + strings.Repeat("a", 60) + "$"},
+		},
+
+		// ── comment-only statements ───────────────────────────────────────────
+		{
+			name:  "block comment only statement",
+			input: "/* comment */;",
+			want:  []string{"/* comment */"},
+		},
+		{
+			name:  "line comment only with no terminating newline",
+			input: "-- only a comment",
+			want:  []string{"-- only a comment"},
+		},
+		{
+			name:  "line comment only followed by semicolon on next line",
+			input: "-- comment\n;",
+			want:  []string{"-- comment"},
+		},
+
+		// ── whitespace and empty statements ───────────────────────────────────
+		{
+			name:  "tab character adjacent to semicolon is trimmed",
+			input: "SELECT 1\t;",
+			want:  []string{"SELECT 1"},
+		},
+		{
+			name:  "form feed and vertical tab as whitespace",
+			input: "\f\vSELECT 1\f\v;",
+			want:  []string{"SELECT 1"},
+		},
+		{
+			name:  "whitespace-only between semicolons produces no statement",
+			input: "SELECT 1;   ;   ;SELECT 2;",
+			want:  []string{"SELECT 1", "SELECT 2"},
+		},
+		{
+			name: "thousand semicolons produce no statements",
+			input: func() string {
+				return strings.Repeat(";", 1000)
+			}(),
+			want: nil,
+		},
+
+		// ── large string bodies ───────────────────────────────────────────────
+		{
+			name: "large single-quoted string with embedded semicolons",
+			input: func() string {
+				inner := strings.Repeat("a;b;c;", 80) // 480 chars
+				return "SELECT '" + inner + "';"
+			}(),
+			want: func() []string {
+				inner := strings.Repeat("a;b;c;", 80)
+				return []string{"SELECT '" + inner + "'"}
+			}(),
+		},
+		{
+			name: "large dollar-quoted body with semicolons and comments",
+			input: func() string {
+				// Simulate a fat JS function body
+				lines := []string{"CREATE FUNCTION big() RETURNS VARIANT LANGUAGE JAVASCRIPT AS $$"}
+				for i := 0; i < 50; i++ {
+					lines = append(lines, "  // step "+strings.Repeat("x", 20)+";")
+					lines = append(lines, "  var x = 'value; with; semis';")
+				}
+				lines = append(lines, "$$;")
+				return strings.Join(lines, "\n")
+			}(),
+			want: nil, // handled in special case below
+		},
+
+		// ── two dollar-quote bodies in one statement ──────────────────────────
+		{
+			name:  "two sequential dollar-quotes in one statement",
+			input: "SELECT $a$ part1; $a$, $b$ part2; $b$;",
+			want:  []string{"SELECT $a$ part1; $a$, $b$ part2; $b$"},
+		},
+		{
+			name:  "dollar-quote body containing block comment syntax",
+			input: "CREATE FUNCTION f() AS $$ return /* not a comment */ 1; $$;",
+			want:  []string{"CREATE FUNCTION f() AS $$ return /* not a comment */ 1; $$"},
+		},
+		{
+			name:  "dollar-quote body containing line comment syntax",
+			input: "CREATE FUNCTION f() AS $$ return -- not a comment\n1; $$;",
+			want:  []string{"CREATE FUNCTION f() AS $$ return -- not a comment\n1; $$"},
+		},
+		{
+			name:  "dollar-quote containing a double-quoted identifier with semicolon",
+			input: `CREATE FUNCTION f() AS $$ SELECT "col;1" FROM t; $$;`,
+			want:  []string{`CREATE FUNCTION f() AS $$ SELECT "col;1" FROM t; $$`},
+		},
+
+		// ── block comment edge cases ──────────────────────────────────────────
+		{
+			name:  "empty block comment",
+			input: "SELECT /**/1;",
+			want:  []string{"SELECT /**/1"},
+		},
+		{
+			name:  "block comment with only stars",
+			input: "SELECT /****/ 1;",
+			want:  []string{"SELECT /****/ 1"},
+		},
+		{
+			name:  "two block comments in one statement",
+			input: "SELECT /* a */ 1 /* b */;",
+			want:  []string{"SELECT /* a */ 1 /* b */"},
+		},
+
+		// ── single-quoted string edge cases ───────────────────────────────────
+		{
+			name:  "empty single-quoted string",
+			input: "SELECT '';",
+			want:  []string{"SELECT ''"},
+		},
+		{
+			name:  "single-quoted string with embedded newline",
+			input: "SELECT 'line1\nline2';",
+			want:  []string{"SELECT 'line1\nline2'"},
+		},
+		{
+			name:  "many escaped single-quotes in sequence",
+			input: "SELECT '''' = '''';",
+			want:  []string{"SELECT '''' = ''''"},
+		},
+		{
+			name:  "single-quote immediately after dollar-quote close",
+			input: "SELECT $$body$$'suffix';",
+			want:  []string{"SELECT $$body$$'suffix'"},
+		},
+
 		// ── many statements ───────────────────────────────────────────────────
 		{
 			name: "fifty sequential statements",
@@ -416,6 +595,14 @@ func TestSplit(t *testing.T) {
 				got := Split(tt.input)
 				if len(got) != 5 {
 					t.Errorf("Split() = %d statements, want 5\nstatements: %#v", len(got), got)
+				}
+				return
+			}
+			// Special case: large dollar-quoted body — just verify it's one statement.
+			if tt.name == "large dollar-quoted body with semicolons and comments" {
+				got := Split(tt.input)
+				if len(got) != 1 {
+					t.Errorf("Split() = %d statements, want 1", len(got))
 				}
 				return
 			}
@@ -490,6 +677,26 @@ func TestSplitParamList(t *testing.T) {
 		{"NESTED((a,b),c), D", []string{"NESTED((a,b),c)", " D"}},
 		// Three params, middle one with precision.
 		{"A FLOAT, B NUMBER(10,2), C DATE", []string{"A FLOAT", " B NUMBER(10,2)", " C DATE"}},
+		// Just a comma — two empty strings.
+		{",", []string{"", ""}},
+		// Trailing comma — last element is empty.
+		{"A,", []string{"A", ""}},
+		// Leading comma — first element is empty.
+		{",B", []string{"", "B"}},
+		// MAP type with two nested type params.
+		{"K MAP(VARCHAR, NUMBER)", []string{"K MAP(VARCHAR, NUMBER)"}},
+		// ARRAY type with comma inside.
+		{"A ARRAY(FLOAT, 3)", []string{"A ARRAY(FLOAT, 3)"}},
+		// Deeply nested at depth 3: outer comma at depth 0 still splits.
+		{"FUNC(((a,b),c),d), E", []string{"FUNC(((a,b),c),d)", " E"}},
+		// Unclosed paren: depth never returns to 0 so no split ever happens.
+		{"NESTED(1,2", []string{"NESTED(1,2"}},
+		// Multiple unclosed: all one part regardless of commas.
+		{"A FUNC(x,y, B OTHER(p,q", []string{"A FUNC(x,y, B OTHER(p,q"}},
+		// Whitespace-only entry.
+		{"   ,   ", []string{"   ", "   "}},
+		// Comma at depth 0 and depth 1 interleaved.
+		{"A(x,y), B, C(p,q,r), D", []string{"A(x,y)", " B", " C(p,q,r)", " D"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
@@ -636,6 +843,103 @@ func TestTokeniseQualifiedIdent(t *testing.T) {
 			name:      "empty quoted identifier",
 			input:     `""`,
 			wantParts: nil, // empty string part is discarded
+		},
+
+		// ── mixed quoted / unquoted parts ────────────────────────────────────
+		{
+			name:      "three-part unquoted",
+			input:     "DB.SCHEMA.TABLE (id INT)",
+			wantParts: []string{"DB", "SCHEMA", "TABLE"},
+		},
+		{
+			name:      "mixed: quoted db, unquoted schema, quoted table",
+			input:     `"MY_DB".PUBLIC."MY TABLE"`,
+			wantParts: []string{"MY_DB", "PUBLIC", "MY TABLE"},
+		},
+		{
+			name:      "mixed: unquoted db, quoted schema, unquoted table",
+			input:     `DB."MY SCHEMA".TBL`,
+			wantParts: []string{"DB", "MY SCHEMA", "TBL"},
+		},
+
+		// ── SQL reserved words as quoted identifiers ──────────────────────────
+		{
+			name:      "SQL keyword SELECT as quoted name",
+			input:     `"SELECT"."FROM"."WHERE"`,
+			wantParts: []string{"SELECT", "FROM", "WHERE"},
+		},
+		{
+			name:      "SQL keyword CREATE as quoted table name",
+			input:     `"DB"."SCH"."CREATE"`,
+			wantParts: []string{"DB", "SCH", "CREATE"},
+		},
+
+		// ── digits and special content in quoted names ─────────────────────
+		{
+			name:      "name with only digits",
+			input:     `"123"`,
+			wantParts: []string{"123"},
+		},
+		{
+			name:      "name with path separator slash",
+			input:     `"db/path"."sch"`,
+			wantParts: []string{"db/path", "sch"},
+		},
+		{
+			name:      "name with backslash",
+			input:     `"db\path"`,
+			wantParts: []string{`db\path`},
+		},
+		{
+			name:      "name with single quotes inside double-quoted identifier",
+			input:     `"it's a table"`,
+			wantParts: []string{"it's a table"},
+		},
+		{
+			name:      "name with embedded newline in double-quoted identifier",
+			input:     "\"line1\nline2\"",
+			wantParts: []string{"line1\nline2"},
+		},
+		{
+			name:      "name with embedded tab in double-quoted identifier",
+			input:     "\"col\tname\"",
+			wantParts: []string{"col\tname"},
+		},
+		{
+			name:      "name consisting only of special characters",
+			input:     `"!@#$%^&*()"`,
+			wantParts: []string{"!@#$%^&*()"},
+		},
+		{
+			name:      "whitespace-only quoted name is a valid non-empty part",
+			input:     `"   "`,
+			wantParts: []string{"   "},
+		},
+
+		// ── empty middle part is silently skipped but loop continues ───────────
+		{
+			// After "A" the dot is consumed, then "" is empty so not appended,
+			// then the NEXT dot IS present (rs[6]=='.' after pos 4-5 for "")
+			// so the loop continues and picks up "C".  Result: ["A", "C"].
+			name:      "empty middle part skipped but next dot still consumed",
+			input:     `"A"."". "C"`,
+			wantParts: []string{"A", "C"},
+		},
+
+		// ── leading dot: empty unquoted prefix consumed, rest parsed ──────────
+		{
+			// Unquoted loop immediately stops at '.', empty part discarded, dot
+			// is consumed, and parsing continues — yielding ["SCH", "TBL"].
+			name:      "leading dot: empty unquoted prefix consumed, rest parsed",
+			input:     `."SCH"."TBL"`,
+			wantParts: []string{"SCH", "TBL"},
+		},
+
+		// ── very long quoted name ─────────────────────────────────────────────
+		{
+			name:      "very long quoted name (255 chars)",
+			input:     `"` + strings.Repeat("X", 255) + `"`,
+			wantParts: []string{strings.Repeat("X", 255)},
 		},
 	}
 
