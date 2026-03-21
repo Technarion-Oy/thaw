@@ -18,6 +18,26 @@ export function AlterTableProperty(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['AlterTableProperty'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function AlterWarehouseAbortAllQueries(arg1) {
+  return window['go']['main']['App']['AlterWarehouseAbortAllQueries'](arg1);
+}
+
+export function AlterWarehouseProperty(arg1, arg2, arg3) {
+  return window['go']['main']['App']['AlterWarehouseProperty'](arg1, arg2, arg3);
+}
+
+export function AlterWarehouseRename(arg1, arg2) {
+  return window['go']['main']['App']['AlterWarehouseRename'](arg1, arg2);
+}
+
+export function AlterWarehouseResume(arg1) {
+  return window['go']['main']['App']['AlterWarehouseResume'](arg1);
+}
+
+export function AlterWarehouseSuspend(arg1) {
+  return window['go']['main']['App']['AlterWarehouseSuspend'](arg1);
+}
+
 export function AnalyzeMigration(arg1, arg2) {
   return window['go']['main']['App']['AnalyzeMigration'](arg1, arg2);
 }
@@ -260,6 +280,10 @@ export function GetWarehouseDDL(arg1) {
 
 export function GetWarehouseMeteringHistory(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetWarehouseMeteringHistory'](arg1, arg2, arg3);
+}
+
+export function GetWarehouseParameters(arg1) {
+  return window['go']['main']['App']['GetWarehouseParameters'](arg1);
 }
 
 export function GitCommitAndPush(arg1) {

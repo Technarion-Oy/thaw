@@ -317,6 +317,21 @@ Right-click any **database**, **schema**, or **table** in the object browser and
     - For **DATABASE** and **SCHEMA** restores: enter the new name directly
     - Executes `CREATE <type> <new_name> FROM BACKUP SET "<set>" IDENTIFIER '<uuid>'`
 
+### Warehouse Properties
+
+Right-click any warehouse in the Administration panel and choose **Properties** to open an editable properties modal:
+
+- **Status** — current state badge (STARTED / SUSPENDED / RESUMING / QUIESCING) with type, size, and owner; action buttons:
+  - **Suspend** / **Resume** — toggle warehouse state immediately
+  - **Abort All Queries** — cancel all running queries (confirmation required)
+  - **Rename** — inline name input; the sidebar warehouse list updates live
+- **Compute** — warehouse size (X-Small → 6X-Large), warehouse type (Standard / Snowpark-Optimized); multi-cluster warehouses also expose max/min cluster count and scaling policy
+- **Behavior** — auto-suspend seconds (0 = disabled), auto-resume toggle
+- **Query Acceleration** — enable/disable, max scale factor (0–100)
+- **Resource & Timeouts** — resource monitor, max concurrency level, statement queued timeout, statement timeout (from `SHOW PARAMETERS IN WAREHOUSE`)
+- **General** — comment
+- Each property saves immediately via `ALTER WAREHOUSE … SET` on confirm
+
 ### User Management
 
 - **User Management** — search users by name, login, display name, or email; view disabled accounts at a glance

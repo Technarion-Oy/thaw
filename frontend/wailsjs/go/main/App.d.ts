@@ -18,6 +18,16 @@ export function AlterBackupSet(arg1:string,arg2:string,arg3:string,arg4:string):
 
 export function AlterTableProperty(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
+export function AlterWarehouseAbortAllQueries(arg1:string):Promise<void>;
+
+export function AlterWarehouseProperty(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function AlterWarehouseRename(arg1:string,arg2:string):Promise<void>;
+
+export function AlterWarehouseResume(arg1:string):Promise<void>;
+
+export function AlterWarehouseSuspend(arg1:string):Promise<void>;
+
 export function AnalyzeMigration(arg1:Array<main.MigrationObject>,arg2:string):Promise<Array<main.MigrationDiffItem>>;
 
 export function CanCreateUsers():Promise<boolean>;
@@ -139,6 +149,8 @@ export function GetUserDDL(arg1:string):Promise<string>;
 export function GetWarehouseDDL(arg1:string):Promise<string>;
 
 export function GetWarehouseMeteringHistory(arg1:string,arg2:string,arg3:string):Promise<Array<main.WarehouseMeteringRow>>;
+
+export function GetWarehouseParameters(arg1:string):Promise<Array<main.PropertyPair>>;
 
 export function GitCommitAndPush(arg1:gitrepo.PushParams):Promise<void>;
 

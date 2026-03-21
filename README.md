@@ -304,6 +304,22 @@ Right-click any **database**, **schema**, or **table** in the object browser and
     - For **DATABASE** / **SCHEMA** restores: enter the new name directly
     - Executes `CREATE <type> <new_name> FROM BACKUP SET "<set>" IDENTIFIER '<uuid>'`
 
+#### Warehouse Properties
+
+Right-click any warehouse in the Administration panel and choose **Properties** to open a dedicated editable properties modal:
+
+- **Status bar** — shows the current state (STARTED / SUSPENDED / RESUMING / QUIESCING) as a colour-coded badge alongside the type, size, and owner; action buttons live here:
+  - **Suspend** (visible when started) and **Resume** (visible when suspended) toggle the warehouse state immediately
+  - **Abort All Queries** cancels all currently running queries on the warehouse (with a confirmation prompt)
+  - **Rename** — opens an inline name input; the warehouse list in the sidebar updates live on save
+- **Compute** — warehouse size (dropdown: X-Small → 6X-Large), warehouse type (Standard / Snowpark-Optimized); for multi-cluster warehouses: max and min cluster count, scaling policy (Standard / Economy)
+- **Behavior** — auto-suspend timeout in seconds (0 = disabled), auto-resume toggle
+- **Query Acceleration** — enable/disable toggle, max scale factor (0–100)
+- **Resource & Timeouts** — resource monitor name, max concurrency level, statement queued timeout, statement timeout (sourced from `SHOW PARAMETERS IN WAREHOUSE`)
+- **General** — comment
+- **Info** — read-only: owner, created_on, resumed_on, updated_on, running/queued query counts
+- All editable fields use inline pencil-click editing (text/number fields) or instant toggle switches (booleans) — each save runs the corresponding `ALTER WAREHOUSE … SET` statement immediately
+
 #### Role switching and session state
 
 Role, warehouse, database, and schema switches (via the toolbar dropdowns) are applied to a **single persistent connection**, so every subsequent query — including user management operations, privilege checks, and all SQL editor queries — immediately reflects the new session state without needing a manual refresh. Running any `USE` command in the SQL editor has the same effect: all four dropdowns sync automatically when the query completes.

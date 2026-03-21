@@ -807,6 +807,147 @@ func (a *App) ListWarehouses() ([]string, error) {
 	return a.client.ListWarehouses(a.ctx)
 }
 
+// AlterWarehouseProperty applies a single SET property to a warehouse.
+// property must be one of: size, warehouseType, autoSuspend, autoResume, comment,
+// maxClusterCount, minClusterCount, scalingPolicy, resourceMonitor,
+// enableQueryAcceleration, queryAccelerationMaxScaleFactor,
+// maxConcurrencyLevel, statementQueuedTimeout, statementTimeout.
+func (a *App) AlterWarehouseProperty(name, property, value string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	escId  := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	escStr := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
+	wh     := fmt.Sprintf(`"%s"`, escId(name))
+	var query string
+	switch property {
+	case "size":
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET WAREHOUSE_SIZE = %s`, wh, strings.ToUpper(value))
+	case "warehouseType":
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET WAREHOUSE_TYPE = %s`, wh, strings.ToUpper(value))
+	case "autoSuspend":
+		if value == "0" || value == "" {
+			query = fmt.Sprintf(`ALTER WAREHOUSE %s SET AUTO_SUSPEND = NULL`, wh)
+		} else {
+			query = fmt.Sprintf(`ALTER WAREHOUSE %s SET AUTO_SUSPEND = %s`, wh, value)
+		}
+	case "autoResume":
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET AUTO_RESUME = %s`, wh, strings.ToUpper(value))
+	case "comment":
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET COMMENT = '%s'`, wh, escStr(value))
+	case "maxClusterCount":
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET MAX_CLUSTER_COUNT = %s`, wh, value)
+	case "minClusterCount":
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET MIN_CLUSTER_COUNT = %s`, wh, value)
+	case "scalingPolicy":
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET SCALING_POLICY = %s`, wh, strings.ToUpper(value))
+	case "resourceMonitor":
+		if strings.TrimSpace(value) == "" {
+			query = fmt.Sprintf(`ALTER WAREHOUSE %s SET RESOURCE_MONITOR = NULL`, wh)
+		} else {
+			query = fmt.Sprintf(`ALTER WAREHOUSE %s SET RESOURCE_MONITOR = "%s"`, wh, escId(value))
+		}
+	case "enableQueryAcceleration":
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET ENABLE_QUERY_ACCELERATION = %s`, wh, strings.ToUpper(value))
+	case "queryAccelerationMaxScaleFactor":
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET QUERY_ACCELERATION_MAX_SCALE_FACTOR = %s`, wh, value)
+	case "maxConcurrencyLevel":
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET MAX_CONCURRENCY_LEVEL = %s`, wh, value)
+	case "statementQueuedTimeout":
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET STATEMENT_QUEUED_TIMEOUT_IN_SECONDS = %s`, wh, value)
+	case "statementTimeout":
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET STATEMENT_TIMEOUT_IN_SECONDS = %s`, wh, value)
+	default:
+		return fmt.Errorf("unknown warehouse property: %s", property)
+	}
+	_, err := a.client.Execute(a.ctx, query)
+	return err
+}
+
+// AlterWarehouseSuspend suspends the named warehouse.
+func (a *App) AlterWarehouseSuspend(name string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	escId := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	_, err := a.client.Execute(a.ctx, fmt.Sprintf(`ALTER WAREHOUSE "%s" SUSPEND`, escId(name)))
+	return err
+}
+
+// AlterWarehouseResume resumes the named warehouse if it is suspended.
+func (a *App) AlterWarehouseResume(name string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	escId := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	_, err := a.client.Execute(a.ctx, fmt.Sprintf(`ALTER WAREHOUSE "%s" RESUME IF SUSPENDED`, escId(name)))
+	return err
+}
+
+// AlterWarehouseAbortAllQueries issues ABORT ALL QUERIES on the named warehouse.
+func (a *App) AlterWarehouseAbortAllQueries(name string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	escId := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	_, err := a.client.Execute(a.ctx, fmt.Sprintf(`ALTER WAREHOUSE "%s" ABORT ALL QUERIES`, escId(name)))
+	return err
+}
+
+// AlterWarehouseRename renames a warehouse and returns the new name.
+func (a *App) AlterWarehouseRename(name, newName string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	escId := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	_, err := a.client.Execute(a.ctx, fmt.Sprintf(`ALTER WAREHOUSE "%s" RENAME TO "%s"`, escId(name), escId(newName)))
+	return err
+}
+
+// GetWarehouseParameters returns per-warehouse parameter overrides (MAX_CONCURRENCY_LEVEL,
+// STATEMENT_QUEUED_TIMEOUT_IN_SECONDS, STATEMENT_TIMEOUT_IN_SECONDS) sourced from
+// SHOW PARAMETERS IN WAREHOUSE. The returned map key is the parameter name.
+func (a *App) GetWarehouseParameters(name string) ([]PropertyPair, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	escId := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	qr, err := a.client.Execute(a.ctx, fmt.Sprintf(`SHOW PARAMETERS IN WAREHOUSE "%s"`, escId(name)))
+	if err != nil {
+		return nil, err
+	}
+	want := map[string]bool{
+		"MAX_CONCURRENCY_LEVEL":               true,
+		"STATEMENT_QUEUED_TIMEOUT_IN_SECONDS": true,
+		"STATEMENT_TIMEOUT_IN_SECONDS":        true,
+	}
+	// Find column indices for "key" and "value".
+	keyIdx, valIdx := -1, -1
+	for i, c := range qr.Columns {
+		switch strings.ToLower(c) {
+		case "key":
+			keyIdx = i
+		case "value":
+			valIdx = i
+		}
+	}
+	var result []PropertyPair
+	for _, row := range qr.Rows {
+		if keyIdx < 0 || keyIdx >= len(row) {
+			continue
+		}
+		key := fmt.Sprint(row[keyIdx])
+		val := ""
+		if valIdx >= 0 && valIdx < len(row) && row[valIdx] != nil {
+			val = fmt.Sprint(row[valIdx])
+		}
+		if want[strings.ToUpper(key)] {
+			result = append(result, PropertyPair{Key: key, Value: val})
+		}
+	}
+	return result, nil
+}
+
 // ListUsers returns all users visible to the current role.
 // Returns an error if the role lacks the required privilege.
 func (a *App) ListUsers() ([]snowflake.SnowflakeUser, error) {

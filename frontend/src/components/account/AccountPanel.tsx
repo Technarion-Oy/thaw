@@ -37,6 +37,7 @@ import { useGitStore } from "../../store/gitStore";
 import { useDiffStore } from "../../store/diffStore";
 import UserManagementPanel from "./UserManagementPanel";
 import PropertiesModal from "../common/PropertiesModal";
+import WarehousePropertiesModal from "./WarehousePropertiesModal";
 import QueryHistoryModal from "./QueryHistoryModal";
 import WarehouseMeteringModal from "./WarehouseMeteringModal";
 import BackupPoliciesPanel from "../backup/BackupPoliciesPanel";
@@ -100,7 +101,8 @@ export default function AccountPanel() {
   const [exporting,  setExporting]  = useState(false);
   const [ddlModal,   setDdlModal]   = useState<DdlModal | null>(null);
   const [ctxMenu,    setCtxMenu]    = useState<AccountCtxMenu | null>(null);
-  const [propsModal, setPropsModal] = useState<{ title: string; rows: main.PropertyPair[] | null; error: string | null } | null>(null);
+  const [propsModal,   setPropsModal]   = useState<{ title: string; rows: main.PropertyPair[] | null; error: string | null } | null>(null);
+  const [whPropsName,  setWhPropsName]  = useState<string | null>(null);
   const [historyOpen,        setHistoryOpen]        = useState(false);
   const [meteringOpen,       setMeteringOpen]       = useState(false);
   const [canViewMetering,    setCanViewMetering]    = useState(false);
@@ -169,10 +171,13 @@ export default function AccountPanel() {
 
   const openProperties = async (kind: "role" | "warehouse", name: string) => {
     setCtxMenu(null);
-    const sfKind = kind === "role" ? "ROLE" : "WAREHOUSE";
-    setPropsModal({ title: `Properties: ${sfKind} — ${name}`, rows: null, error: null });
+    if (kind === "warehouse") {
+      setWhPropsName(name);
+      return;
+    }
+    setPropsModal({ title: `Properties: ROLE — ${name}`, rows: null, error: null });
     try {
-      const rows = await GetObjectProperties("", "", sfKind, name);
+      const rows = await GetObjectProperties("", "", "ROLE", name);
       setPropsModal((prev) => prev ? { ...prev, rows: rows ?? [] } : null);
     } catch (e) {
       setPropsModal((prev) => prev ? { ...prev, rows: [], error: String(e) } : null);
@@ -409,7 +414,19 @@ export default function AccountPanel() {
       {/* Warehouse metering modal */}
       {meteringOpen && <WarehouseMeteringModal onClose={() => setMeteringOpen(false)} />}
 
-      {/* Properties modal */}
+      {/* Warehouse properties modal (editable) */}
+      {whPropsName && (
+        <WarehousePropertiesModal
+          name={whPropsName}
+          onClose={() => setWhPropsName(null)}
+          onRename={(newName) => {
+            setWarehouses((prev) => prev.map((w) => (w === whPropsName ? newName : w)));
+            setWhPropsName(newName);
+          }}
+        />
+      )}
+
+      {/* Role properties modal (read-only) */}
       {propsModal && (
         <PropertiesModal
           title={propsModal.title}
