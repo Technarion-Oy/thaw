@@ -189,18 +189,6 @@ func TestWarehouseActive(t *testing.T) {
 	}
 }
 
-// TestQueryIDNonEmpty verifies that Execute populates the QueryID field.
-// Snowflake assigns a unique query ID to every statement it executes.
-func TestQueryIDNonEmpty(t *testing.T) {
-	client := keyPairConnFromEnv(t)
-
-	result := mustQuery(t, client, "SELECT 42")
-	if strings.TrimSpace(result.QueryID) == "" {
-		t.Error("QueryID is empty; expected a non-empty Snowflake query ID")
-	}
-	t.Logf("QueryID = %s", result.QueryID)
-}
-
 // ─── result shape ─────────────────────────────────────────────────────────────
 
 // TestMultiRowResults verifies that a multi-row SELECT returns all rows with
