@@ -86,18 +86,26 @@ interface RowProps {
 }
 
 function EditRow({ label, value, type, options, min, max, saving: externalSaving, disabled, hint, onSave }: RowProps) {
-  const [editing,  setEditing]  = useState(false);
-  const [editVal,  setEditVal]  = useState(value);
-  const [saving,   setSaving]   = useState(false);
+  const [editing,   setEditing]   = useState(false);
+  const [editVal,   setEditVal]   = useState(value);
+  const [saving,    setSaving]    = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
-  const startEdit = () => { setEditing(true); setEditVal(value); };
-  const cancel    = () => setEditing(false);
+  const startEdit = () => { setEditing(true); setEditVal(value); setEditError(null); };
+  const cancel    = () => { setEditing(false); setEditError(null); };
 
   const save = async () => {
     setSaving(true);
+    setEditError(null);
     try {
       await onSave(editVal);
       setEditing(false);
+    } catch (e) {
+      // Strip gosnowflake noise — show only the human-readable part after the last ":"
+      // e.g. "003001 (42501): SQL access control error:\nInsufficient privileges…"
+      const raw = String(e);
+      const match = raw.match(/Insufficient privileges[^\n]*/i) ?? raw.match(/:\s*(.+)$/s);
+      setEditError(match ? match[0].trim() : raw);
     } finally {
       setSaving(false);
     }
@@ -110,9 +118,17 @@ function EditRow({ label, value, type, options, min, max, saving: externalSaving
         <td style={{ padding: "6px 0", verticalAlign: "middle" }}>
           <Switch
             size="small"
-            checked={value === "true" || value === "TRUE" || value === "true"}
+            checked={value === "true" || value === "TRUE"}
             disabled={disabled || externalSaving}
-            onChange={async (checked) => { await onSave(checked ? "TRUE" : "FALSE"); }}
+            onChange={async (checked) => {
+              try {
+                await onSave(checked ? "TRUE" : "FALSE");
+              } catch (e) {
+                const raw = String(e);
+                const match = raw.match(/Insufficient privileges[^\n]*/i) ?? raw.match(/:\s*(.+)$/s);
+                message.error(match ? match[0].trim() : raw, 6);
+              }
+            }}
           />
         </td>
       </tr>
@@ -124,39 +140,47 @@ function EditRow({ label, value, type, options, min, max, saving: externalSaving
       <td style={LABEL_TD}>{label}</td>
       <td style={{ padding: "4px 0", verticalAlign: "middle" }}>
         {editing ? (
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            {type === "select" ? (
-              <Select
-                size="small"
-                value={editVal}
-                onChange={setEditVal}
-                options={options}
-                style={{ minWidth: 160 }}
-                autoFocus
-              />
-            ) : type === "number" ? (
-              <InputNumber
-                size="small"
-                min={min ?? 0}
-                max={max}
-                value={parseInt(editVal, 10) || 0}
-                onChange={(v) => setEditVal(String(v ?? 0))}
-                style={{ width: 120 }}
-                title={hint}
-              />
-            ) : (
-              <Input
-                size="small"
-                value={editVal}
-                onChange={(e) => setEditVal(e.target.value)}
-                onPressEnter={save}
-                autoFocus
-                style={{ fontFamily: "monospace", fontSize: 12 }}
-                title={hint}
-              />
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              {type === "select" ? (
+                <Select
+                  size="small"
+                  value={editVal}
+                  onChange={setEditVal}
+                  options={options}
+                  style={{ minWidth: 160 }}
+                  autoFocus
+                />
+              ) : type === "number" ? (
+                <InputNumber
+                  size="small"
+                  min={min ?? 0}
+                  max={max}
+                  value={parseInt(editVal, 10) || 0}
+                  onChange={(v) => setEditVal(String(v ?? 0))}
+                  style={{ width: 120 }}
+                  title={hint}
+                />
+              ) : (
+                <Input
+                  size="small"
+                  value={editVal}
+                  onChange={(e) => setEditVal(e.target.value)}
+                  onPressEnter={save}
+                  autoFocus
+                  style={{ fontFamily: "monospace", fontSize: 12 }}
+                  title={hint}
+                  status={editError ? "error" : undefined}
+                />
+              )}
+              <Button size="small" type="primary" icon={<CheckOutlined />} loading={saving} onClick={save} />
+              <Button size="small" icon={<CloseOutlined />} disabled={saving} onClick={cancel} />
+            </div>
+            {editError && (
+              <div style={{ color: "#f85149", fontSize: 11, fontFamily: "monospace", lineHeight: 1.4, paddingLeft: 2 }}>
+                {editError}
+              </div>
             )}
-            <Button size="small" type="primary" icon={<CheckOutlined />} loading={saving} onClick={save} />
-            <Button size="small" icon={<CloseOutlined />} disabled={saving} onClick={cancel} />
           </div>
         ) : (
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -216,9 +240,10 @@ export default function WarehousePropertiesModal({ name: initialName, onClose, o
   const [loadError,  setLoadError]  = useState<string | null>(null);
 
   // Rename state
-  const [renaming,    setRenaming]   = useState(false);
-  const [renameVal,   setRenameVal]  = useState("");
-  const [renameSaving,setRenameSaving] = useState(false);
+  const [renaming,     setRenaming]     = useState(false);
+  const [renameVal,    setRenameVal]    = useState("");
+  const [renameSaving, setRenameSaving] = useState(false);
+  const [renameError,  setRenameError]  = useState<string | null>(null);
 
   // Action busy state
   const [suspending, setSuspending] = useState(false);
@@ -293,13 +318,14 @@ export default function WarehousePropertiesModal({ name: initialName, onClose, o
     }
   };
 
-  const startRename = () => { setRenaming(true); setRenameVal(name); };
-  const cancelRename = () => setRenaming(false);
+  const startRename = () => { setRenaming(true); setRenameVal(name); setRenameError(null); };
+  const cancelRename = () => { setRenaming(false); setRenameError(null); };
 
   const saveRename = async () => {
     const trimmed = renameVal.trim();
     if (!trimmed || trimmed === name) { setRenaming(false); return; }
     setRenameSaving(true);
+    setRenameError(null);
     try {
       await AlterWarehouseRename(name, trimmed);
       message.success(`Renamed to ${trimmed}`);
@@ -307,7 +333,9 @@ export default function WarehousePropertiesModal({ name: initialName, onClose, o
       onRename(trimmed);
       setRenaming(false);
     } catch (e) {
-      message.error(String(e));
+      const raw = String(e);
+      const match = raw.match(/Insufficient privileges[^\n]*/i) ?? raw.match(/:\s*(.+)$/s);
+      setRenameError(match ? match[0].trim() : raw);
     } finally {
       setRenameSaving(false);
     }
@@ -399,18 +427,26 @@ export default function WarehousePropertiesModal({ name: initialName, onClose, o
 
           {/* ── Rename inline ─────────────────────────────────────────────── */}
           {renaming && (
-            <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 12 }}>
-              <Input
-                size="small"
-                value={renameVal}
-                onChange={(e) => setRenameVal(e.target.value)}
-                onPressEnter={saveRename}
-                autoFocus
-                style={{ fontFamily: "monospace", fontSize: 12, maxWidth: 280 }}
-                addonBefore="New name:"
-              />
-              <Button size="small" type="primary" icon={<CheckOutlined />} loading={renameSaving} onClick={saveRename} />
-              <Button size="small" icon={<CloseOutlined />} disabled={renameSaving} onClick={cancelRename} />
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 12 }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <Input
+                  size="small"
+                  value={renameVal}
+                  onChange={(e) => { setRenameVal(e.target.value); setRenameError(null); }}
+                  onPressEnter={saveRename}
+                  autoFocus
+                  style={{ fontFamily: "monospace", fontSize: 12, maxWidth: 280 }}
+                  addonBefore="New name:"
+                  status={renameError ? "error" : undefined}
+                />
+                <Button size="small" type="primary" icon={<CheckOutlined />} loading={renameSaving} onClick={saveRename} />
+                <Button size="small" icon={<CloseOutlined />} disabled={renameSaving} onClick={cancelRename} />
+              </div>
+              {renameError && (
+                <div style={{ color: "#f85149", fontSize: 11, fontFamily: "monospace", lineHeight: 1.4, paddingLeft: 2 }}>
+                  {renameError}
+                </div>
+              )}
             </div>
           )}
 
