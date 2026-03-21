@@ -2022,19 +2022,34 @@ func (a *App) ExportDatabaseDDL(database, outputDir string) (ddl.ExportResult, e
 	return result, nil
 }
 
-// ExportAllDatabasesDDL lists every database visible to the current role and
-// exports DDL for all of them in parallel.
+// ListExportableDatabases returns the names of all databases that can be
+// exported (own databases; shared/imported databases such as
+// SNOWFLAKE_SAMPLE_DATA are excluded).  The frontend uses this list to
+// populate the database-selection checkboxes in the Export DDL panel.
+func (a *App) ListExportableDatabases() ([]string, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListExportableDatabases(a.ctx)
+}
+
+// ExportAllDatabasesDDL exports DDL for the given databases in parallel.
+// When databases is nil or empty every exportable database owned by the
+// account is exported (same behaviour as before database selection was added).
 //
 // Progress events ("ddl:progress") are emitted after each database completes,
 // allowing the frontend to show a live progress bar.
-func (a *App) ExportAllDatabasesDDL(outputDir string) ([]ddl.ExportResult, error) {
+func (a *App) ExportAllDatabasesDDL(outputDir string, databases []string) ([]ddl.ExportResult, error) {
 	if a.client == nil {
 		return nil, ErrNotConnected
 	}
 
-	databases, err := a.client.ListExportableDatabases(a.ctx)
-	if err != nil {
-		return nil, err
+	if len(databases) == 0 {
+		var err error
+		databases, err = a.client.ListExportableDatabases(a.ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	ctx, cancel := context.WithCancel(a.ctx)

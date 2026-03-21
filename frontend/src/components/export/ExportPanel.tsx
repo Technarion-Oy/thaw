@@ -4,12 +4,9 @@
 // Unauthorized copying, distribution, modification, or use of this software,
 // in whole or in part, is strictly prohibited without prior written permission
 // from Technarion Oy.
-//
-// Commercial use of this software is restricted to parties holding a valid
-// license agreement with Technarion Oy.
 
-import { useState } from "react";
-import { Button, Progress, Typography, Space, Tag, Collapse, Alert, Tooltip } from "antd";
+import { useState, useEffect } from "react";
+import { Button, Progress, Typography, Space, Tag, Collapse, Alert, Tooltip, Checkbox } from "antd";
 import {
   CloudUploadOutlined,
   DatabaseOutlined,
@@ -18,9 +15,14 @@ import {
   FolderOpenOutlined,
   CaretDownOutlined,
   CaretRightOutlined,
+  ReloadOutlined,
 } from "@ant-design/icons";
 import { EventsOn } from "../../../wailsjs/runtime/runtime";
-import { ExportAllDatabasesDDL, CancelExport } from "../../../wailsjs/go/main/App";
+import {
+  ExportAllDatabasesDDL,
+  CancelExport,
+  ListExportableDatabases,
+} from "../../../wailsjs/go/main/App";
 import { useGitStore } from "../../store/gitStore";
 import type { ddl } from "../../../wailsjs/go/models";
 
@@ -37,6 +39,49 @@ const { Text } = Typography;
 export default function ExportPanel() {
   const { exportDir, pickExportDir } = useGitStore();
 
+  // ── database selection ────────────────────────────────────────────────────
+  const [dbs, setDbs]               = useState<string[]>([]);
+  const [selected, setSelected]     = useState<Set<string>>(new Set());
+  const [dbsLoading, setDbsLoading] = useState(false);
+
+  const loadDbs = async () => {
+    setDbsLoading(true);
+    try {
+      const list = await ListExportableDatabases();
+      setDbs(list ?? []);
+      setSelected(new Set(list ?? []));
+    } catch {
+      // not connected yet — leave list empty, export-all fallback applies
+      setDbs([]);
+      setSelected(new Set());
+    } finally {
+      setDbsLoading(false);
+    }
+  };
+
+  useEffect(() => { loadDbs(); }, []);
+
+  const allChecked  = dbs.length > 0 && selected.size === dbs.length;
+  const noneChecked = selected.size === 0;
+
+  const toggleAll = () => {
+    if (allChecked) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(dbs));
+    }
+  };
+
+  const toggleDb = (db: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(db)) next.delete(db);
+      else next.add(db);
+      return next;
+    });
+  };
+
+  // ── export state ──────────────────────────────────────────────────────────
   const [running, setRunning]     = useState(false);
   const [progress, setProgress]   = useState({ done: 0, total: 0 });
   const [results, setResults]     = useState<ExportResult[]>([]);
@@ -44,7 +89,7 @@ export default function ExportPanel() {
   const [finished, setFinished]   = useState(false);
   const [showList, setShowList]   = useState(true);
 
-  const exportAll = async () => {
+  const exportSelected = async () => {
     if (!exportDir || running) return;
     setRunning(true);
     setFinished(false);
@@ -57,8 +102,11 @@ export default function ExportPanel() {
       setResults((prev) => [...prev, payload.result]);
     });
 
+    // Pass selected list; empty array means "export all" on the backend.
+    const dbList = allChecked || noneChecked ? [] : Array.from(selected);
+
     try {
-      await ExportAllDatabasesDDL(exportDir);
+      await ExportAllDatabasesDDL(exportDir, dbList);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -73,9 +121,15 @@ export default function ExportPanel() {
     ? Math.round((progress.done / progress.total) * 100)
     : 0;
 
-  const totalFiles  = results.reduce((s, r) => s + r.files, 0);
+  const totalFiles   = results.reduce((s, r) => s + r.files, 0);
   const totalSkipped = results.reduce((s, r) => s + r.skipped, 0);
-  const hasErrors   = results.some((r) => (r.errors?.length ?? 0) > 0);
+  const hasErrors    = results.some((r) => (r.errors?.length ?? 0) > 0);
+
+  const exportLabel = (() => {
+    if (running) return `Exporting… (${progress.done}/${progress.total})`;
+    if (dbs.length === 0 || allChecked || noneChecked) return "Export All Databases";
+    return `Export ${selected.size} of ${dbs.length} Databases`;
+  })();
 
   return (
     <div style={{ padding: "10px 12px", fontSize: 12 }}>
@@ -109,17 +163,80 @@ export default function ExportPanel() {
         </Tooltip>
       </div>
 
+      {/* Database selection */}
+      {dbs.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", marginBottom: 4 }}>
+            <Checkbox
+              checked={allChecked}
+              indeterminate={!allChecked && !noneChecked}
+              onChange={toggleAll}
+              disabled={running}
+              style={{ fontSize: 11 }}
+            >
+              <Text type="secondary" style={{ fontSize: 11 }}>Databases</Text>
+            </Checkbox>
+            <div style={{ flex: 1 }} />
+            <Tooltip title="Refresh database list">
+              <Button
+                type="text"
+                size="small"
+                icon={<ReloadOutlined style={{ fontSize: 10 }} />}
+                onClick={loadDbs}
+                loading={dbsLoading}
+                disabled={running}
+                style={{ color: "var(--text-muted)", padding: "0 4px", height: 18 }}
+              />
+            </Tooltip>
+          </div>
+          <div
+            style={{
+              maxHeight: 130,
+              overflowY: "auto",
+              border: "1px solid var(--border)",
+              borderRadius: 4,
+              padding: "2px 0",
+            }}
+          >
+            {dbs.map((db) => (
+              <div
+                key={db}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  padding: "2px 8px",
+                  cursor: running ? "default" : "pointer",
+                  userSelect: "none",
+                }}
+                onClick={() => !running && toggleDb(db)}
+              >
+                <Checkbox
+                  checked={selected.has(db)}
+                  disabled={running}
+                  onChange={() => toggleDb(db)}
+                  style={{ fontSize: 11 }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <DatabaseOutlined style={{ fontSize: 10, marginLeft: 6, marginRight: 4, opacity: 0.5 }} />
+                <Text style={{ fontSize: 11 }} ellipsis title={db}>{db}</Text>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Export / Cancel buttons */}
       <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
         <Button
           size="small"
           type="primary"
           icon={<CloudUploadOutlined />}
-          disabled={!exportDir || running}
+          disabled={!exportDir || running || (dbs.length > 0 && noneChecked)}
           loading={running}
-          onClick={exportAll}
+          onClick={exportSelected}
           style={{ flex: 1 }}
         >
-          {running ? `Exporting… (${progress.done}/${progress.total})` : "Export All Databases"}
+          {exportLabel}
         </Button>
         {running && (
           <Button size="small" danger onClick={() => CancelExport()}>

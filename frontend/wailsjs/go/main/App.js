@@ -142,8 +142,8 @@ export function ExportAccountObjectsDDL(arg1) {
   return window['go']['main']['App']['ExportAccountObjectsDDL'](arg1);
 }
 
-export function ExportAllDatabasesDDL(arg1) {
-  return window['go']['main']['App']['ExportAllDatabasesDDL'](arg1);
+export function ExportAllDatabasesDDL(arg1, arg2) {
+  return window['go']['main']['App']['ExportAllDatabasesDDL'](arg1, arg2);
 }
 
 export function ExportDatabaseDDL(arg1, arg2) {
@@ -396,6 +396,10 @@ export function ListDroppedTables(arg1, arg2) {
 
 export function ListEnvPackages() {
   return window['go']['main']['App']['ListEnvPackages']();
+}
+
+export function ListExportableDatabases() {
+  return window['go']['main']['App']['ListExportableDatabases']();
 }
 
 export function ListNotificationIntegrations() {

@@ -80,7 +80,7 @@ export function ExecuteQuery(arg1:string):Promise<snowflake.QueryResult>;
 
 export function ExportAccountObjectsDDL(arg1:string):Promise<main.AccountExportResult>;
 
-export function ExportAllDatabasesDDL(arg1:string):Promise<Array<ddl.ExportResult>>;
+export function ExportAllDatabasesDDL(arg1:string,arg2:Array<string>):Promise<Array<ddl.ExportResult>>;
 
 export function ExportDatabaseDDL(arg1:string,arg2:string):Promise<ddl.ExportResult>;
 
@@ -207,6 +207,8 @@ export function ListDroppedSchemas(arg1:string):Promise<Array<snowflake.DroppedT
 export function ListDroppedTables(arg1:string,arg2:string):Promise<Array<snowflake.DroppedTable>>;
 
 export function ListEnvPackages():Promise<Array<main.PackageInfo>>;
+
+export function ListExportableDatabases():Promise<Array<string>>;
 
 export function ListNotificationIntegrations():Promise<Array<string>>;
 
