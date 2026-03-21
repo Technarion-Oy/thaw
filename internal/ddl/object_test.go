@@ -12,6 +12,7 @@ package ddl
 
 import (
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -220,6 +221,113 @@ func TestParse_Kinds(t *testing.T) {
 			wantKind: KindTable, wantName: `MY"TABLE`,
 		},
 
+		// ── quoted names with special characters ─────────────────────────────
+		{
+			name:     "table name with embedded space",
+			sql:      `CREATE TABLE "MY DB"."MY SCHEMA"."MY TABLE" (id INT)`,
+			wantKind: KindTable, wantDB: "MY DB", wantSch: "MY SCHEMA", wantName: "MY TABLE",
+		},
+		{
+			name:     "object name with dot inside quotes",
+			sql:      `CREATE TABLE "DB"."SCH.1"."TBL.2" (id INT)`,
+			wantKind: KindTable, wantDB: "DB", wantSch: "SCH.1", wantName: "TBL.2",
+		},
+		{
+			name:     "object name with semicolon inside quotes",
+			sql:      `CREATE TABLE "DB"."SCH"."tbl;1" (id INT)`,
+			wantKind: KindTable, wantDB: "DB", wantSch: "SCH", wantName: "tbl;1",
+		},
+		{
+			name:     "object name with hyphen inside quotes",
+			sql:      `CREATE TABLE "DB"."SCH"."my-table" (id INT)`,
+			wantKind: KindTable, wantDB: "DB", wantSch: "SCH", wantName: "my-table",
+		},
+		{
+			name:     "object name with dollar sign inside quotes",
+			sql:      `CREATE TABLE "DB"."SCH"."$TEMP" (id INT)`,
+			wantKind: KindTable, wantDB: "DB", wantSch: "SCH", wantName: "$TEMP",
+		},
+		{
+			name:     "object name with open paren inside quotes",
+			sql:      `CREATE TABLE "DB"."SCH"."tbl(1)" (id INT)`,
+			wantKind: KindTable, wantDB: "DB", wantSch: "SCH", wantName: "tbl(1)",
+		},
+		{
+			name:     "multiple double-quote escapes in name",
+			sql:      `CREATE TABLE "A""B""C" (id INT)`,
+			wantKind: KindTable, wantName: `A"B"C`,
+		},
+
+		// ── unicode object names ──────────────────────────────────────────────
+		{
+			name:     "unicode table name",
+			sql:      `CREATE TABLE "DB"."SCH"."données" (id INT)`,
+			wantKind: KindTable, wantDB: "DB", wantSch: "SCH", wantName: "données",
+		},
+		{
+			name:     "japanese table name",
+			sql:      `CREATE TABLE "DB"."SCH"."注文" (id INT)`,
+			wantKind: KindTable, wantDB: "DB", wantSch: "SCH", wantName: "注文",
+		},
+
+		// ── leading / trailing whitespace in input SQL ────────────────────────
+		{
+			name:     "leading and trailing whitespace in SQL",
+			sql:      "  \n  CREATE TABLE t (id INT)  \n  ",
+			wantKind: KindTable, wantName: "t",
+		},
+
+		// ── very long names ───────────────────────────────────────────────────
+		{
+			name: "very long unquoted identifier",
+			sql:  `CREATE TABLE ` + strings.Repeat("A", 128) + ` (id INT)`,
+			wantKind: KindTable, wantName: strings.Repeat("A", 128),
+		},
+
+		// ── additional modifiers ──────────────────────────────────────────────
+		{
+			name:     "iceberg table modifier",
+			sql:      `CREATE OR REPLACE ICEBERG TABLE "DB"."SCH"."ICE" EXTERNAL_VOLUME='vol'`,
+			wantKind: KindTable, wantDB: "DB", wantSch: "SCH", wantName: "ICE",
+		},
+		{
+			name:     "event table modifier",
+			sql:      `CREATE OR REPLACE EVENT TABLE "DB"."SCH"."EVT"`,
+			wantKind: KindTable, wantDB: "DB", wantSch: "SCH", wantName: "EVT",
+		},
+
+		// ── functions / procedures with precision args ────────────────────────
+		{
+			name:      "function with NUMBER precision args",
+			sql:       `CREATE FUNCTION f(A NUMBER(18,2), B NUMBER(38,0)) RETURNS NUMBER AS $$ return 0; $$`,
+			wantKind:  KindFunction, wantName: "f",
+			wantArgSig: "NUMBER_NUMBER",
+		},
+		{
+			name:      "function with mixed precision and plain args",
+			sql:       `CREATE FUNCTION f(A VARCHAR(256), B FLOAT, C NUMBER(10,4)) RETURNS FLOAT AS $$ return 0; $$`,
+			wantKind:  KindFunction, wantName: "f",
+			wantArgSig: "VARCHAR_FLOAT_NUMBER",
+		},
+		{
+			name:      "python procedure with multiple args",
+			sql:       `CREATE OR REPLACE PROCEDURE "DB"."SCH"."PY_PROC"(N NUMBER, S VARCHAR(256)) RETURNS VARCHAR LANGUAGE PYTHON RUNTIME_VERSION='3.11' AS $$pass$$`,
+			wantKind:  KindProcedure, wantDB: "DB", wantSch: "SCH", wantName: "PY_PROC",
+			wantArgSig: "NUMBER_VARCHAR",
+		},
+
+		// ── pipe / stream with quoted names containing spaces ─────────────────
+		{
+			name:     "pipe with space in quoted name",
+			sql:      `CREATE OR REPLACE PIPE "DB"."SCH"."my pipe" AS COPY INTO t`,
+			wantKind: KindPipe, wantDB: "DB", wantSch: "SCH", wantName: "my pipe",
+		},
+		{
+			name:     "stream with hyphen in quoted name",
+			sql:      `CREATE OR REPLACE STREAM "DB"."SCH"."orders-stream" ON TABLE t`,
+			wantKind: KindStream, wantDB: "DB", wantSch: "SCH", wantName: "orders-stream",
+		},
+
 		// ── non-CREATE / unknown statements ──────────────────────────────────
 		{
 			name:     "SELECT is unknown",
@@ -296,6 +404,28 @@ func TestParseArgSig(t *testing.T) {
 		{"", ""},
 		// Unclosed paren → empty.
 		{"(FLOAT", ""},
+
+		// Multiple params each with precision qualifiers.
+		{"(A NUMBER(18,2), B VARCHAR(256))", "NUMBER_VARCHAR"},
+		{"(A NUMBER(18,2), B NUMBER(38,0), C FLOAT)", "NUMBER_NUMBER_FLOAT"},
+		// Five args — no precision.
+		{"(A FLOAT, B INT, C DATE, D BOOLEAN, E VARIANT)", "FLOAT_INT_DATE_BOOLEAN_VARIANT"},
+		// TABLE type with inline column definition list.
+		{"(T TABLE(X FLOAT, Y NUMBER))", "TABLE"},
+		// DEFAULT keyword after type — only the type is captured.
+		{"(X FLOAT DEFAULT 1.0)", "FLOAT"},
+		{"(X VARCHAR(256) DEFAULT 'hello')", "VARCHAR"},
+		// OBJECT type with nested parens.
+		{"(O OBJECT(k VARCHAR, v VARIANT))", "OBJECT"},
+		// Deeply nested precision: not real Snowflake but tests depth tracking.
+		{"(A NESTED((1,2),3))", "NESTED"},
+		// Whitespace-heavy formatting.
+		{"(  X   FLOAT  ,  Y   VARCHAR  )", "FLOAT_VARCHAR"},
+		// All-caps complex type names preserved.
+		{"(X TIMESTAMP_NTZ)", "TIMESTAMP_NTZ"},
+		{"(X TIMESTAMP_LTZ)", "TIMESTAMP_LTZ"},
+		// Trailing content after closing paren is ignored.
+		{"(X FLOAT) RETURNS FLOAT AS $$ x $$", "FLOAT"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
@@ -443,12 +573,199 @@ func TestFilePath(t *testing.T) {
 			obj:  Object{Kind: KindTable, Schema: "MY.SCHEMA", Name: "T"},
 			want: fp("MY_SCHEMA", "tables", "T.sql"),
 		},
+		// Unicode names: non-ASCII characters become underscores.
+		{
+			name: "unicode table name sanitized to underscores",
+			obj:  Object{Kind: KindTable, Schema: "PUBLIC", Name: "données"},
+			want: fp("PUBLIC", "tables", "donn_es.sql"),
+		},
+		{
+			name: "japanese table name fully sanitized",
+			obj:  Object{Kind: KindTable, Schema: "PUBLIC", Name: "注文"},
+			want: fp("PUBLIC", "tables", "__.sql"),
+		},
+		// Name consisting entirely of special characters.
+		{
+			name: "name with only special chars becomes underscores",
+			obj:  Object{Kind: KindTable, Schema: "PUBLIC", Name: ";:@#!"},
+			want: fp("PUBLIC", "tables", "_____.sql"),
+		},
+		// KindUnknown uses the "other" fallback directory.
+		{
+			name: "unknown kind uses other directory",
+			obj:  Object{Kind: KindUnknown, Schema: "PUBLIC", Name: "X"},
+			want: fp("PUBLIC", "other", "X.sql"),
+		},
+		// Hyphen in name is preserved (it's in sanitize's allowed set).
+		{
+			name: "hyphen in name is preserved",
+			obj:  Object{Kind: KindTable, Schema: "SCH", Name: "my-table"},
+			want: fp("SCH", "tables", "my-table.sql"),
+		},
+		// Dollar sign in name becomes underscore.
+		{
+			name: "dollar sign in name sanitized",
+			obj:  Object{Kind: KindTable, Schema: "SCH", Name: "$TEMP"},
+			want: fp("SCH", "tables", "_TEMP.sql"),
+		},
+		// Very long name passes through unchanged (only chars matter, not length).
+		{
+			name: "very long name",
+			obj:  Object{Kind: KindTable, Schema: "SCH", Name: strings.Repeat("A", 128)},
+			want: fp("SCH", "tables", strings.Repeat("A", 128)+".sql"),
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.obj.FilePath(); got != tt.want {
 				t.Errorf("FilePath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// ─── FilePathFor ──────────────────────────────────────────────────────────────
+
+func TestFilePathFor(t *testing.T) {
+	fp := func(parts ...string) string { return filepath.Join(parts...) }
+
+	tests := []struct {
+		name     string
+		obj      Object
+		template string
+		database string
+		want     string
+	}{
+		// DATABASE and SCHEMA always use fixed paths regardless of template.
+		{
+			name:     "database ignores custom template",
+			obj:      Object{Kind: KindDatabase},
+			template: "custom/{object_name}.sql",
+			database: "MY_DB",
+			want:     fp("MY_DB", "_database.sql"),
+		},
+		{
+			name:     "database with special chars in db name",
+			obj:      Object{Kind: KindDatabase},
+			template: "",
+			database: "MY DB",
+			want:     fp("MY_DB", "_database.sql"),
+		},
+		{
+			name:     "schema ignores custom template",
+			obj:      Object{Kind: KindSchema, Name: "PUBLIC"},
+			template: "flat/{object_name}.sql",
+			database: "MY_DB",
+			want:     fp("MY_DB", "schemas", "PUBLIC.sql"),
+		},
+		{
+			name:     "schema with special chars in schema name",
+			obj:      Object{Kind: KindSchema, Name: "MY SCHEMA"},
+			template: "",
+			database: "DB",
+			want:     fp("DB", "schemas", "MY_SCHEMA.sql"),
+		},
+
+		// Empty template falls back to DefaultExportPathTemplate.
+		{
+			name:     "empty template uses default layout",
+			obj:      Object{Kind: KindTable, Schema: "PUBLIC", Name: "T"},
+			template: "",
+			database: "MY_DB",
+			want:     fp("MY_DB", "PUBLIC", "tables", "T.sql"),
+		},
+
+		// Custom template with all four placeholders.
+		{
+			name:     "custom template with all placeholders",
+			obj:      Object{Kind: KindTable, Schema: "SCH", Name: "T"},
+			template: "objects/{database}/{schema}/{object_type}/{object_name}.sql",
+			database: "DB",
+			want:     fp("objects", "DB", "SCH", "tables", "T.sql"),
+		},
+
+		// Custom template omitting schema placeholder.
+		{
+			name:     "custom template omitting schema",
+			obj:      Object{Kind: KindView, Schema: "PUBLIC", Name: "V"},
+			template: "{database}/{object_type}/{object_name}.sql",
+			database: "DB",
+			want:     fp("DB", "views", "V.sql"),
+		},
+
+		// Custom template omitting database placeholder.
+		{
+			name:     "custom template omitting database",
+			obj:      Object{Kind: KindTable, Schema: "SCH", Name: "T"},
+			template: "{schema}/{object_type}/{object_name}.sql",
+			database: "DB",
+			want:     fp("SCH", "tables", "T.sql"),
+		},
+
+		// Function: {object_name} includes the __argsig suffix.
+		{
+			name:     "function argsig included in object_name placeholder",
+			obj:      Object{Kind: KindFunction, Schema: "SCH", Name: "F", ArgSig: "FLOAT"},
+			template: "{database}/{schema}/{object_type}/{object_name}.sql",
+			database: "DB",
+			want:     fp("DB", "SCH", "functions", "F__FLOAT.sql"),
+		},
+		{
+			name:     "procedure argsig included in object_name placeholder",
+			obj:      Object{Kind: KindProcedure, Schema: "SCH", Name: "P", ArgSig: "NUMBER_VARCHAR"},
+			template: "{database}/{schema}/{object_type}/{object_name}.sql",
+			database: "DB",
+			want:     fp("DB", "SCH", "procedures", "P__NUMBER_VARCHAR.sql"),
+		},
+
+		// Special characters in various components are sanitized.
+		{
+			name:     "special chars in database name sanitized",
+			obj:      Object{Kind: KindTable, Schema: "SCH", Name: "T"},
+			template: "{database}/{schema}/{object_type}/{object_name}.sql",
+			database: "MY DB",
+			want:     fp("MY_DB", "SCH", "tables", "T.sql"),
+		},
+		{
+			name:     "special chars in schema name sanitized",
+			obj:      Object{Kind: KindTable, Schema: "MY.SCHEMA", Name: "T"},
+			template: "{database}/{schema}/{object_type}/{object_name}.sql",
+			database: "DB",
+			want:     fp("DB", "MY_SCHEMA", "tables", "T.sql"),
+		},
+		{
+			name:     "special chars in object name sanitized",
+			obj:      Object{Kind: KindTable, Schema: "SCH", Name: "MY TABLE"},
+			template: "{database}/{schema}/{object_type}/{object_name}.sql",
+			database: "DB",
+			want:     fp("DB", "SCH", "tables", "MY_TABLE.sql"),
+		},
+
+		// Empty schema falls back to _root.
+		{
+			name:     "empty schema uses _root",
+			obj:      Object{Kind: KindTable, Schema: "", Name: "T"},
+			template: "",
+			database: "DB",
+			want:     fp("DB", "_root", "tables", "T.sql"),
+		},
+
+		// Flat template — single file per object regardless of type.
+		{
+			name:     "flat template produces single level",
+			obj:      Object{Kind: KindTable, Schema: "SCH", Name: "T"},
+			template: "{object_name}.sql",
+			database: "DB",
+			want:     "T.sql",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.obj.FilePathFor(tt.template, tt.database)
+			if got != tt.want {
+				t.Errorf("FilePathFor(%q, %q) = %q, want %q", tt.template, tt.database, got, tt.want)
 			}
 		})
 	}
