@@ -1194,6 +1194,76 @@ func (a *App) ListNotificationIntegrations() ([]string, error) {
 	return a.client.ListNotificationIntegrations(a.ctx)
 }
 
+// ListIntegrations runs SHOW <kind> INTEGRATIONS and returns structured rows.
+// kind may be "STORAGE", "API", "CATALOG", "EXTERNAL ACCESS", "NOTIFICATION", or "SECURITY".
+func (a *App) ListIntegrations(kind string) ([]snowflake.IntegrationRow, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListIntegrations(a.ctx, kind)
+}
+
+// GetIntegrationProperties runs DESCRIBE INTEGRATION for the named integration
+// and returns the result as key/value pairs.
+func (a *App) GetIntegrationProperties(name string) ([]PropertyPair, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	esc := strings.ReplaceAll(name, `"`, `""`)
+	res, err := a.client.Execute(a.ctx, fmt.Sprintf(`DESCRIBE INTEGRATION "%s"`, esc))
+	if err != nil {
+		return nil, err
+	}
+	if len(res.Rows) == 0 {
+		return []PropertyPair{}, nil
+	}
+	toString := func(v interface{}) string {
+		if v == nil {
+			return ""
+		}
+		switch t := v.(type) {
+		case []byte:
+			return string(t)
+		case string:
+			return t
+		case time.Time:
+			return t.Format(time.RFC3339)
+		default:
+			return fmt.Sprintf("%v", t)
+		}
+	}
+	// DESCRIBE INTEGRATION returns rows of (property, property_type, property_value, property_default)
+	// We return property / property_value pairs.
+	var pairs []PropertyPair
+	for _, row := range res.Rows {
+		if len(row) < 3 {
+			continue
+		}
+		k := toString(row[0])
+		v := toString(row[2])
+		if k != "" {
+			pairs = append(pairs, PropertyPair{Key: k, Value: v})
+		}
+	}
+	return pairs, nil
+}
+
+// DropIntegration drops the named integration.
+func (a *App) DropIntegration(name string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	return a.client.DropIntegration(a.ctx, name)
+}
+
+// CanCreateIntegration returns true when the current role can create integrations.
+func (a *App) CanCreateIntegration() (bool, error) {
+	if a.client == nil {
+		return false, ErrNotConnected
+	}
+	return a.client.CanCreateIntegration(a.ctx)
+}
+
 // UseRole switches the session to the given role.
 func (a *App) UseRole(role string) error {
 	if a.client == nil {
@@ -1224,6 +1294,23 @@ func (a *App) UseSchema(schema string) error {
 		return ErrNotConnected
 	}
 	return a.client.UseSchema(a.ctx, schema)
+}
+
+// GetCurrentRegion returns the result of SELECT CURRENT_REGION(), which
+// encodes both the cloud provider and the deployment region, e.g.
+// "AWS_US_EAST_1", "AZURE_EASTUS2", or "GCP_US_CENTRAL1".
+func (a *App) GetCurrentRegion() (string, error) {
+	if a.client == nil {
+		return "", ErrNotConnected
+	}
+	qr, err := a.client.Execute(a.ctx, `SELECT CURRENT_REGION()`)
+	if err != nil {
+		return "", err
+	}
+	if len(qr.Rows) > 0 && len(qr.Rows[0]) > 0 && qr.Rows[0][0] != nil {
+		return fmt.Sprint(qr.Rows[0][0]), nil
+	}
+	return "", nil
 }
 
 // GetCurrentUser returns the result of SELECT CURRENT_USER(), which reflects

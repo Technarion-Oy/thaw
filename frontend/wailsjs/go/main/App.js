@@ -42,6 +42,10 @@ export function AnalyzeMigration(arg1, arg2) {
   return window['go']['main']['App']['AnalyzeMigration'](arg1, arg2);
 }
 
+export function CanCreateIntegration() {
+  return window['go']['main']['App']['CanCreateIntegration']();
+}
+
 export function CanCreateUsers() {
   return window['go']['main']['App']['CanCreateUsers']();
 }
@@ -126,6 +130,10 @@ export function DropBackupSet(arg1, arg2, arg3) {
   return window['go']['main']['App']['DropBackupSet'](arg1, arg2, arg3);
 }
 
+export function DropIntegration(arg1) {
+  return window['go']['main']['App']['DropIntegration'](arg1);
+}
+
 export function ExecuteMigration(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['ExecuteMigration'](arg1, arg2, arg3, arg4);
 }
@@ -186,6 +194,10 @@ export function GetColumnComments(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetColumnComments'](arg1, arg2, arg3);
 }
 
+export function GetCurrentRegion() {
+  return window['go']['main']['App']['GetCurrentRegion']();
+}
+
 export function GetCurrentUser() {
   return window['go']['main']['App']['GetCurrentUser']();
 }
@@ -208,6 +220,10 @@ export function GetFunctionTooltip(arg1) {
 
 export function GetGitConfig() {
   return window['go']['main']['App']['GetGitConfig']();
+}
+
+export function GetIntegrationProperties(arg1) {
+  return window['go']['main']['App']['GetIntegrationProperties'](arg1);
 }
 
 export function GetNotebookCompletions(arg1, arg2, arg3, arg4) {
@@ -400,6 +416,10 @@ export function ListEnvPackages() {
 
 export function ListExportableDatabases() {
   return window['go']['main']['App']['ListExportableDatabases']();
+}
+
+export function ListIntegrations(arg1) {
+  return window['go']['main']['App']['ListIntegrations'](arg1);
 }
 
 export function ListNotificationIntegrations() {

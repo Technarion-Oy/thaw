@@ -30,6 +30,8 @@ export function AlterWarehouseSuspend(arg1:string):Promise<void>;
 
 export function AnalyzeMigration(arg1:Array<main.MigrationObject>,arg2:string):Promise<Array<main.MigrationDiffItem>>;
 
+export function CanCreateIntegration():Promise<boolean>;
+
 export function CanCreateUsers():Promise<boolean>;
 
 export function CanManageUsers():Promise<boolean>;
@@ -72,6 +74,8 @@ export function DropBackupPolicy(arg1:string):Promise<void>;
 
 export function DropBackupSet(arg1:string,arg2:string,arg3:string):Promise<void>;
 
+export function DropIntegration(arg1:string):Promise<void>;
+
 export function ExecuteMigration(arg1:Array<main.MigrationObject>,arg2:string,arg3:number,arg4:main.TableMigrationStrategy):Promise<Array<main.MigrationExecEvent>>;
 
 export function ExecuteNotebook(arg1:string,arg2:string,arg3:string,arg4:Array<string>):Promise<string>;
@@ -102,6 +106,8 @@ export function GetAvailableShells():Promise<Array<string>>;
 
 export function GetColumnComments(arg1:string,arg2:string,arg3:string):Promise<Array<main.ColumnComment>>;
 
+export function GetCurrentRegion():Promise<string>;
+
 export function GetCurrentUser():Promise<string>;
 
 export function GetERDiagramData(arg1:string):Promise<snowflake.ERDiagramData>;
@@ -113,6 +119,8 @@ export function GetFunctionSuggestions(arg1:string):Promise<Array<fnmeta.Functio
 export function GetFunctionTooltip(arg1:string):Promise<Array<fnmeta.FunctionMeta>>;
 
 export function GetGitConfig():Promise<config.GitConfig>;
+
+export function GetIntegrationProperties(arg1:string):Promise<Array<main.PropertyPair>>;
 
 export function GetNotebookCompletions(arg1:string,arg2:string,arg3:number,arg4:number):Promise<Array<main.NotebookCompletion>>;
 
@@ -209,6 +217,8 @@ export function ListDroppedTables(arg1:string,arg2:string):Promise<Array<snowfla
 export function ListEnvPackages():Promise<Array<main.PackageInfo>>;
 
 export function ListExportableDatabases():Promise<Array<string>>;
+
+export function ListIntegrations(arg1:string):Promise<Array<snowflake.IntegrationRow>>;
 
 export function ListNotificationIntegrations():Promise<Array<string>>;
 

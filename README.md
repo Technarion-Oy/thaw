@@ -217,7 +217,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 
 ### Administration panel
 
-The **Administration** collapsible panel in the sidebar shows roles, warehouses, and users. It lazy-loads on first expand.
+The **Administration** collapsible panel in the sidebar shows roles, warehouses, users, and Snowflake integrations. It lazy-loads on first expand.
 
 #### Warehouse Credit Usage
 
@@ -288,6 +288,24 @@ A **Backup Policies** section in the Administration panel lets you manage accoun
   - `OR REPLACE` / `IF NOT EXISTS` modifiers
 - **Alter** — rename, set/unset schedule, expiry, comment, and retention lock via a dropdown action picker
 - **Drop** — with a Popconfirm confirmation
+
+#### Integrations
+
+An **Integrations** section in the Administration panel lets you browse, create, modify, and drop all six Snowflake integration types — each as a lazy-loading category in an expandable tree:
+
+- **Storage** — S3, S3 GovCloud, GCS, and Azure Blob external stage integrations
+- **API** — AWS API Gateway, AWS Private API Gateway, Azure API Management, Google API Gateway, and Git HTTPS API integrations
+- **Catalog** — Glue, Object Store, Polaris, Iceberg REST, and SAP BDC catalog integrations
+- **External Access** — network-rule-based external access integrations
+- **Notification** — Email, Webhook, Azure Storage Queue (inbound), GCP Pub/Sub (inbound/outbound), AWS SNS (outbound), and Azure Event Grid (outbound) integrations
+- **Security** — API Authentication, External OAuth, OAuth (partner and custom), SAML2, and SCIM integrations
+
+Right-click a **category** to **Create** a new integration (the option is disabled automatically if the current role lacks `CREATE INTEGRATION`). Right-click any **integration** to:
+- **Properties** — `DESCRIBE INTEGRATION` output as a read-only key/value table
+- **Modify** — shows current DESCRIBE properties alongside an editable ALTER SQL textarea; click **Run** to apply
+- **Drop** — with a Popconfirm confirmation that reloads the category on success
+
+The **Create** dialog adapts its form fields dynamically based on the selected kind and subtype/provider. Cloud provider defaults (S3 / GCS / Azure for Storage; matching defaults for API) are pre-selected based on `SELECT CURRENT_REGION()` at the time the dialog opens.
 
 #### Backup Sets
 
@@ -579,13 +597,16 @@ thaw/
     │       │   ├── ERDesigner.tsx      # Visual ER schema designer (create new tables)
     │       │   └── buildMermaid.ts    # Mermaid source generator for the diagram viewer
     │       ├── account/
-    │       │   ├── AccountPanel.tsx           # Administration panel: roles, warehouses, user management, backup policies
-    │       │   ├── QueryHistoryModal.tsx       # Query Activity modal (INFORMATION_SCHEMA.QUERY_HISTORY_*)
-    │       │   ├── WarehouseMeteringModal.tsx  # Warehouse Credit Usage modal (ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY)
-    │       │   ├── UserManagementPanel.tsx     # User list, search, right-click menu
-    │       │   ├── EditUserModal.tsx           # ALTER USER dialog with live SQL preview
-    │       │   ├── CreateUserModal.tsx         # CREATE USER dialog with live SQL preview
-    │       │   └── BackupPoliciesPanel.tsx     # Backup policies list with create/alter/drop
+    │       │   ├── AccountPanel.tsx              # Administration panel: roles, warehouses, user management, backup policies, integrations
+    │       │   ├── QueryHistoryModal.tsx          # Query Activity modal (INFORMATION_SCHEMA.QUERY_HISTORY_*)
+    │       │   ├── WarehouseMeteringModal.tsx     # Warehouse Credit Usage modal (ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY)
+    │       │   ├── UserManagementPanel.tsx        # User list, search, right-click menu
+    │       │   ├── EditUserModal.tsx              # ALTER USER dialog with live SQL preview
+    │       │   ├── CreateUserModal.tsx            # CREATE USER dialog with live SQL preview
+    │       │   ├── BackupPoliciesPanel.tsx        # Backup policies list with create/alter/drop
+    │       │   ├── IntegrationsPanel.tsx          # Integrations tree: lazy-load, right-click create/properties/modify/drop
+    │       │   ├── CreateIntegrationModal.tsx     # Dynamic CREATE INTEGRATION form per kind and subtype
+    │       │   └── IntegrationModifyModal.tsx     # DESCRIBE properties + editable ALTER SQL editor
     │       ├── backup/
     │       │   └── BackupSetsModal.tsx     # Backup sets + nested backups with add/drop/restore
     │       ├── chat/AiChat.tsx        # AI Chat panel with tool-call display and Run/Copy buttons

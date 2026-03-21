@@ -575,6 +575,96 @@ func (c *Client) ListNotificationIntegrations(ctx context.Context) ([]string, er
 	return c.queryStringSlice(ctx, "SHOW NOTIFICATION INTEGRATIONS", 1)
 }
 
+// IntegrationRow holds metadata returned by SHOW <kind> INTEGRATIONS.
+type IntegrationRow struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Category string `json:"category"`
+	Enabled  bool   `json:"enabled"`
+	Comment  string `json:"comment"`
+}
+
+// ListIntegrations runs SHOW <kind> INTEGRATIONS and returns the result rows.
+// kind may be "STORAGE", "API", "CATALOG", "EXTERNAL ACCESS", "NOTIFICATION", or "SECURITY".
+// Column layouts differ by integration type; we use column names for resilience.
+func (c *Client) ListIntegrations(ctx context.Context, kind string) ([]IntegrationRow, error) {
+	rows, err := c.db.QueryContext(ctx, fmt.Sprintf("SHOW %s INTEGRATIONS", kind))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	idx := colIndexMap(cols, "name", "type", "category", "enabled", "comment")
+
+	toString := func(v interface{}) string {
+		if v == nil {
+			return ""
+		}
+		switch t := v.(type) {
+		case []byte:
+			return string(t)
+		case string:
+			return t
+		default:
+			return fmt.Sprintf("%v", t)
+		}
+	}
+
+	var result []IntegrationRow
+	for rows.Next() {
+		vals, ptrs := makeValPtrs(len(cols))
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, err
+		}
+		get := func(key string) string {
+			i := idx[key]
+			if i < 0 || i >= len(vals) {
+				return ""
+			}
+			return toString(vals[i])
+		}
+		enabledStr := strings.ToLower(get("enabled"))
+		result = append(result, IntegrationRow{
+			Name:     get("name"),
+			Type:     get("type"),
+			Category: get("category"),
+			Enabled:  enabledStr == "true" || enabledStr == "1" || enabledStr == "yes",
+			Comment:  get("comment"),
+		})
+	}
+	return result, rows.Err()
+}
+
+// DropIntegration drops the named integration.
+func (c *Client) DropIntegration(ctx context.Context, name string) error {
+	esc := strings.ReplaceAll(name, `"`, `""`)
+	_, err := c.db.ExecContext(ctx, fmt.Sprintf(`DROP INTEGRATION "%s"`, esc))
+	return err
+}
+
+// CanCreateIntegration returns (true, nil) when the current session role (or any
+// role it inherits) allows creating integrations.
+func (c *Client) CanCreateIntegration(ctx context.Context) (bool, error) {
+	c.connector.mu.RLock()
+	role := c.connector.role
+	c.connector.mu.RUnlock()
+
+	if role == "" {
+		if err := c.db.QueryRowContext(ctx, "SELECT CURRENT_ROLE()").Scan(&role); err != nil {
+			return false, fmt.Errorf("CanCreateIntegration: %w", err)
+		}
+		role = strings.TrimSpace(role)
+	}
+
+	return c.walkRoleHierarchy(ctx, role,
+		map[string]bool{"CREATE INTEGRATION": true},
+	)
+}
+
 // GetUserDDL constructs a CREATE USER DDL statement for the given user by
 // running DESCRIBE USER and translating the property/value pairs.
 func (c *Client) GetUserDDL(ctx context.Context, name string) (string, error) {

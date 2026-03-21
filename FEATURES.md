@@ -257,7 +257,7 @@ Only applies to TABLE objects that already exist in Snowflake and have rows. Emp
 
 ## Administration
 
-- View all roles, warehouses, and users in the account from the **Administration** panel in the sidebar
+- View all roles, warehouses, users, and Snowflake integrations from the **Administration** panel in the sidebar
 
 ### Warehouse Credit Usage
 
@@ -294,6 +294,25 @@ Click the clock icon in the Administration panel header (always visible, even be
 - **Create** — full `CREATE BACKUP POLICY` support: schedule, expire after days, tags, comment, `WITH RETENTION LOCK`, and `OR REPLACE` / `IF NOT EXISTS` modifiers
 - **Alter** — rename, set/unset schedule, expiry, comment, and retention lock via an action dropdown
 - **Drop** — with confirmation
+
+### Integrations
+
+Browse, create, modify, and drop all six Snowflake integration types from a lazy-loading tree in the Administration panel:
+
+| Kind | Supported Subtypes / Providers |
+|------|-------------------------------|
+| **Storage** | Amazon S3, S3 GovCloud, Google Cloud Storage, Azure Blob Storage |
+| **API** | AWS API Gateway, AWS Private API Gateway, Azure API Management, Google API Gateway, Git HTTPS API |
+| **Catalog** | AWS Glue, Object Store, Polaris, Iceberg REST, SAP BDC |
+| **External Access** | Network-rule-based (allowed network rules + optional authentication secrets) |
+| **Notification** | Email, Webhook, Azure Storage Queue (inbound), GCP Pub/Sub (inbound/outbound), AWS SNS (outbound), Azure Event Grid (outbound) |
+| **Security** | API Authentication (AWS IAM / OAuth2), External OAuth, OAuth partner (Looker, Tableau, Power BI), OAuth custom, SAML2, SCIM |
+
+- **Lazy loading** — each category's integrations are fetched from Snowflake only when the node is first expanded
+- **Create** — right-click any category to open a structured form; fields change dynamically based on the selected integration type and subtype; cloud provider defaults (S3 / GCS / Azure for Storage; equivalent defaults for API) are pre-selected based on the current Snowflake region; the option is automatically disabled when the current role lacks `CREATE INTEGRATION`
+- **Properties** — right-click any integration and choose **Properties** to see its `DESCRIBE INTEGRATION` output as a key/value table
+- **Modify** — right-click and choose **Modify** to open a modal showing current DESCRIBE properties alongside an editable ALTER SQL textarea; click **Run** to execute the statement
+- **Drop** — right-click and choose **Drop** with a Popconfirm confirmation; the category reloads automatically on success
 
 ### Backup Sets
 

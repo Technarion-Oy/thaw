@@ -41,6 +41,7 @@ import WarehousePropertiesModal from "./WarehousePropertiesModal";
 import QueryHistoryModal from "./QueryHistoryModal";
 import WarehouseMeteringModal from "./WarehouseMeteringModal";
 import BackupPoliciesPanel from "../backup/BackupPoliciesPanel";
+import IntegrationsPanel from "./IntegrationsPanel";
 import type { main } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -352,6 +353,7 @@ export default function AccountPanel() {
 
               {loaded && <UserManagementPanel />}
               {loaded && <BackupPoliciesPanel />}
+              {loaded && <IntegrationsPanel />}
             </div>
           ),
         }]}

@@ -1324,6 +1324,26 @@ export namespace snowflake {
 	        this.filesLoaded = source["filesLoaded"];
 	    }
 	}
+	export class IntegrationRow {
+	    name: string;
+	    type: string;
+	    category: string;
+	    enabled: boolean;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new IntegrationRow(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.type = source["type"];
+	        this.category = source["category"];
+	        this.enabled = source["enabled"];
+	        this.comment = source["comment"];
+	    }
+	}
 	
 	export class QueryResult {
 	    columns: string[];
