@@ -66,6 +66,9 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      - name: Create frontend dist stub (required by go:embed in main.go)
+        run: mkdir -p frontend/dist
+
       - name: Install go-junit-report
         run: go install github.com/jstemmer/go-junit-report/v2@latest
 

@@ -718,6 +718,7 @@ require a real Snowflake account.
 | `SNOWFLAKE_USER` | Login name |
 | `SNOWFLAKE_PRIVATE_KEY` | PEM-encoded RSA private key (key-pair authentication) |
 | `SNOWFLAKE_WAREHOUSE` | Warehouse to use, e.g. `COMPUTE_WH` |
+| `SNOWFLAKE_ROLE` | *(optional)* Role to assume; must have `CREATE DATABASE` for migration tests |
 | `SNOWFLAKE_TEST_DATABASE` | *(optional)* Database for migration tests; auto-created as `THAW_MIGTEST_<random>` if not set |
 | `SNOWFLAKE_TEST_SCHEMA` | *(optional)* Schema within the test database; defaults to `PUBLIC` |
 

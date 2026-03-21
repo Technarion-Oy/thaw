@@ -79,10 +79,11 @@ func keyPairConnFromEnv(t *testing.T) *snowflake.Client {
 	defer cancel()
 
 	client, err := snowflake.NewClient(ctx, snowflake.ConnectParams{
-		Account:       os.Getenv("SNOWFLAKE_ACCOUNT"),
-		User:          os.Getenv("SNOWFLAKE_USER"),
-		Warehouse:     os.Getenv("SNOWFLAKE_WAREHOUSE"),
-		Authenticator: "snowflake_jwt",
+		Account:        os.Getenv("SNOWFLAKE_ACCOUNT"),
+		User:           os.Getenv("SNOWFLAKE_USER"),
+		Role:           os.Getenv("SNOWFLAKE_ROLE"), // optional; empty = account default
+		Warehouse:      os.Getenv("SNOWFLAKE_WAREHOUSE"),
+		Authenticator:  "snowflake_jwt",
 		PrivateKeyPath: tmpFile.Name(),
 	})
 	if err != nil {
