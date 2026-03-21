@@ -151,13 +151,13 @@ func (o *Object) FilePathFor(template, database string) string {
 		if (o.Kind == KindFunction || o.Kind == KindProcedure) && o.ArgSig != "" {
 			fname = fname + "__" + o.ArgSig
 		}
-		r := strings.NewReplacer(
-			"{database}", sanitize(database),
-			"{schema}", sanitize(schema),
-			"{object_type}", dirFor(o.Kind),
-			"{object_name}", fname,
-		)
-		return filepath.FromSlash(r.Replace(template))
+		// Four direct replacements on a short template string are faster
+		// than constructing a strings.Replacer state machine per object.
+		path := strings.ReplaceAll(template, "{database}", sanitize(database))
+		path = strings.ReplaceAll(path, "{schema}", sanitize(schema))
+		path = strings.ReplaceAll(path, "{object_type}", dirFor(o.Kind))
+		path = strings.ReplaceAll(path, "{object_name}", fname)
+		return filepath.FromSlash(path)
 	}
 }
 

@@ -4,9 +4,6 @@
 // Unauthorized copying, distribution, modification, or use of this software,
 // in whole or in part, is strictly prohibited without prior written permission
 // from Technarion Oy.
-//
-// Commercial use of this software is restricted to parties holding a valid
-// license agreement with Technarion Oy.
 
 // Package ddl provides tools for parsing and splitting Snowflake DDL strings
 // into individual SQL statements, and for extracting per-object metadata so
@@ -14,18 +11,6 @@
 package ddl
 
 import "strings"
-
-// psState is the current lexer state.
-type psState uint8
-
-const (
-	psNormal      psState = iota
-	psLineComment         // after --
-	psBlockComment        // inside /* … */
-	psSingleQuote         // inside '…'
-	psDoubleQuote         // inside "…"
-	psDollarQuote         // inside $tag$…$tag$
-)
 
 // Split tokenises src and returns individual, whitespace-trimmed SQL
 // statements.  It correctly handles all quoting and comment styles that
@@ -39,147 +24,143 @@ const (
 //
 // Semicolons inside any of the above are never treated as statement
 // terminators.
+//
+// Implementation notes:
+//   - Works entirely at the byte level — no []rune allocation.
+//   - Uses strings.Index / strings.IndexByte for comment and quoted-body
+//     boundaries; these compile to SIMD-accelerated memchr/memmem on
+//     amd64 and arm64, making large procedure bodies very fast to skip.
+//   - Plain SQL text is bulk-copied with WriteString rather than emitted
+//     one rune at a time.
 func Split(src string) []string {
-	rs := []rune(src)
-	n := len(rs)
+	n := len(src)
 
 	out := make([]string, 0, 64)
 	var buf strings.Builder
-	buf.Grow(min(len(src)/8, 1<<14)) // pre-allocate a reasonable chunk
-
-	st := psNormal
-	var dollarTag []rune // the current opening tag, e.g. []rune("$$") or []rune("$body$")
+	buf.Grow(min(n/8, 1<<14)) // pre-allocate a reasonable chunk
 
 	flush := func() {
-		s := strings.TrimSpace(buf.String())
-		if s != "" {
+		if s := strings.TrimSpace(buf.String()); s != "" {
 			out = append(out, s)
 		}
 		buf.Reset()
 	}
 
-	for i := 0; i < n; {
-		r := rs[i]
-
-		switch st {
-		// ── normal text ──────────────────────────────────────────────────────
-		case psNormal:
-			switch {
-
-			// -- line comment
-			case r == '-' && i+1 < n && rs[i+1] == '-':
-				buf.WriteRune(r)
-				buf.WriteRune(rs[i+1])
-				i += 2
-				st = psLineComment
-
-			// /* block comment */
-			case r == '/' && i+1 < n && rs[i+1] == '*':
-				buf.WriteRune(r)
-				buf.WriteRune(rs[i+1])
-				i += 2
-				st = psBlockComment
-
-			// 'single-quoted string'
-			case r == '\'':
-				buf.WriteRune(r)
-				i++
-				st = psSingleQuote
-
-			// "double-quoted identifier"
-			case r == '"':
-				buf.WriteRune(r)
-				i++
-				st = psDoubleQuote
-
-			// $tag$ dollar-quoted body
-			// Tag chars: only letters, digits, underscores (Snowflake spec).
-			// An immediately repeated $ ($$) is also valid (empty tag).
-			case r == '$':
-				j := i + 1
-				for j < n && (isIdentRune(rs[j])) {
-					j++
-				}
-				if j < n && rs[j] == '$' {
-					tag := rs[i : j+1]
-					buf.WriteString(string(tag))
-					dollarTag = tag
-					i = j + 1
-					st = psDollarQuote
-				} else {
-					// Not a valid dollar-quote opener — treat as a literal character.
-					buf.WriteRune(r)
-					i++
-				}
-
-			// ; statement terminator
-			case r == ';':
-				flush()
-				i++
-
-			default:
-				buf.WriteRune(r)
-				i++
-			}
+	i := 0
+	for i < n {
+		switch src[i] {
 
 		// ── -- line comment ──────────────────────────────────────────────────
-		case psLineComment:
-			buf.WriteRune(r)
-			i++
-			if r == '\n' {
-				st = psNormal
+		case '-':
+			if i+1 < n && src[i+1] == '-' {
+				start := i
+				i += 2
+				if nl := strings.IndexByte(src[i:], '\n'); nl < 0 {
+					i = n
+				} else {
+					i += nl + 1
+				}
+				buf.WriteString(src[start:i])
+			} else {
+				buf.WriteByte('-')
+				i++
 			}
 
 		// ── /* block comment */ ──────────────────────────────────────────────
-		case psBlockComment:
-			buf.WriteRune(r)
-			if r == '*' && i+1 < n && rs[i+1] == '/' {
-				buf.WriteRune(rs[i+1])
+		case '/':
+			if i+1 < n && src[i+1] == '*' {
+				start := i
 				i += 2
-				st = psNormal
+				if end := strings.Index(src[i:], "*/"); end < 0 {
+					i = n
+				} else {
+					i += end + 2
+				}
+				buf.WriteString(src[start:i])
 			} else {
+				buf.WriteByte('/')
 				i++
 			}
 
 		// ── 'single-quoted string' ───────────────────────────────────────────
-		case psSingleQuote:
-			buf.WriteRune(r)
-			i++
-			if r == '\'' {
-				if i < n && rs[i] == '\'' { // '' escape sequence
-					buf.WriteRune(rs[i])
-					i++
+		case '\'':
+			start := i
+			i++ // skip opening quote
+			for i < n {
+				j := strings.IndexByte(src[i:], '\'')
+				if j < 0 {
+					i = n
+					break
+				}
+				i += j + 1 // position after the quote
+				if i < n && src[i] == '\'' {
+					i++ // '' escape — continue scanning
 				} else {
-					st = psNormal
+					break // closing quote found
 				}
 			}
+			buf.WriteString(src[start:i])
 
 		// ── "double-quoted identifier" ───────────────────────────────────────
-		case psDoubleQuote:
-			buf.WriteRune(r)
-			i++
-			if r == '"' {
-				if i < n && rs[i] == '"' { // "" escape sequence
-					buf.WriteRune(rs[i])
-					i++
+		case '"':
+			start := i
+			i++ // skip opening quote
+			for i < n {
+				j := strings.IndexByte(src[i:], '"')
+				if j < 0 {
+					i = n
+					break
+				}
+				i += j + 1
+				if i < n && src[i] == '"' {
+					i++ // "" escape
 				} else {
-					st = psNormal
+					break
 				}
 			}
+			buf.WriteString(src[start:i])
 
 		// ── $tag$ dollar-quoted body $tag$ ───────────────────────────────────
-		case psDollarQuote:
-			tl := len(dollarTag)
-			// Check whether we are at the start of the matching closing tag.
-			if r == '$' && i+tl <= n && runesEqual(rs[i:i+tl], dollarTag) {
-				buf.WriteString(string(dollarTag))
-				i += tl
-				st = psNormal
-				dollarTag = nil
+		case '$':
+			j := i + 1
+			for j < n && isIdentByte(src[j]) {
+				j++
+			}
+			if j < n && src[j] == '$' {
+				tag := src[i : j+1] // e.g. "$$" or "$body$" — ASCII only per spec
+				start := i
+				i = j + 1
+				if end := strings.Index(src[i:], tag); end < 0 {
+					i = n
+				} else {
+					i += end + len(tag)
+				}
+				buf.WriteString(src[start:i])
 			} else {
-				buf.WriteRune(r)
+				// Not a valid dollar-quote opener — treat as a literal character.
+				buf.WriteByte('$')
 				i++
 			}
+
+		// ── ; statement terminator ───────────────────────────────────────────
+		case ';':
+			flush()
+			i++
+
+		// ── plain SQL text (bulk copy) ───────────────────────────────────────
+		default:
+			// Scan forward past all bytes that cannot trigger a state change,
+			// then copy the entire span with a single WriteString call.
+			start := i
+			i++
+			for i < n {
+				c := src[i]
+				if c == '-' || c == '/' || c == '\'' || c == '"' || c == '$' || c == ';' {
+					break
+				}
+				i++
+			}
+			buf.WriteString(src[start:i])
 		}
 	}
 
@@ -187,8 +168,18 @@ func Split(src string) []string {
 	return out
 }
 
-// isIdentRune reports whether r can appear inside a dollar-quote tag
-// (letters, digits, underscore).
+// isIdentByte reports whether b can appear inside a dollar-quote tag
+// (ASCII letters, digits, underscore — Snowflake spec).
+// Used by Split; operates at the byte level because tag chars are always ASCII.
+func isIdentByte(b byte) bool {
+	return (b >= 'a' && b <= 'z') ||
+		(b >= 'A' && b <= 'Z') ||
+		(b >= '0' && b <= '9') ||
+		b == '_'
+}
+
+// isIdentRune reports whether r can appear inside a dollar-quote tag.
+// Kept for tests and any callers that operate on rune values.
 func isIdentRune(r rune) bool {
 	return (r >= 'a' && r <= 'z') ||
 		(r >= 'A' && r <= 'Z') ||
@@ -197,6 +188,7 @@ func isIdentRune(r rune) bool {
 }
 
 // runesEqual reports whether two rune slices have identical contents.
+// Kept for tests.
 func runesEqual(a, b []rune) bool {
 	if len(a) != len(b) {
 		return false

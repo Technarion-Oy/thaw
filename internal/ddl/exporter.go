@@ -170,6 +170,20 @@ func exportOne(ctx context.Context, database string, fetch FetchDDL, opts Export
 		return res
 	}
 
+	// Pre-create all unique output directories before dispatching parallel
+	// writers.  This reduces MkdirAll calls from O(files) to O(unique dirs)
+	// and removes the per-file MkdirAll from the parallel hot-path entirely.
+	seenDirs := make(map[string]struct{}, len(jobs)/4)
+	for _, j := range jobs {
+		d := filepath.Dir(j.absPath)
+		if _, ok := seenDirs[d]; !ok {
+			seenDirs[d] = struct{}{}
+			if err := os.MkdirAll(d, 0o755); err != nil {
+				res.Errors = append(res.Errors, fmt.Sprintf("mkdir %s: %v", d, err))
+			}
+		}
+	}
+
 	// Fan-out writes across FileConcurrency workers.
 	nWorkers := min(opts.FileConcurrency, len(jobs))
 	if nWorkers < 1 {
@@ -222,17 +236,13 @@ func exportOne(ctx context.Context, database string, fetch FetchDDL, opts Export
 
 // ─── atomic file write ────────────────────────────────────────────────────────
 
-// atomicWrite ensures the parent directory exists, writes content to a
-// temporary file in the same directory, then renames it to path.
-// Rename is an atomic operation on POSIX systems, so readers never see a
-// partially-written file.
+// atomicWrite writes content to a temporary file in the same directory as
+// path, then atomically renames it to path.  Rename is atomic on POSIX
+// systems, so readers never see a partially-written file.
+//
+// The parent directory must already exist; call os.MkdirAll before the first
+// write to any new directory (exportOne does this upfront for all paths).
 func atomicWrite(path string, content []byte) error {
-	dir := filepath.Dir(path)
-
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", dir, err)
-	}
-
 	// Write to a temp file in the same directory so os.Rename never crosses
 	// a filesystem boundary.
 	tmp := path + ".tmp"
