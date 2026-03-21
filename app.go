@@ -1021,6 +1021,22 @@ func (a *App) UseSchema(schema string) error {
 	return a.client.UseSchema(a.ctx, schema)
 }
 
+// GetCurrentUser returns the result of SELECT CURRENT_USER(), which reflects
+// the canonical Snowflake username exactly as stored (preserving case).
+func (a *App) GetCurrentUser() (string, error) {
+	if a.client == nil {
+		return "", ErrNotConnected
+	}
+	qr, err := a.client.Execute(a.ctx, `SELECT CURRENT_USER()`)
+	if err != nil {
+		return "", err
+	}
+	if len(qr.Rows) > 0 && len(qr.Rows[0]) > 0 && qr.Rows[0][0] != nil {
+		return fmt.Sprint(qr.Rows[0][0]), nil
+	}
+	return "", nil
+}
+
 // ListDatabases returns all databases visible to the current role.
 func (a *App) ListDatabases() ([]string, error) {
 	if a.client == nil {

@@ -14,7 +14,7 @@ import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip,
 import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NewNotebook, NotebookUseContext, SaveNotebook } from "../../wailsjs/go/main/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NewNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser } from "../../wailsjs/go/main/App";
 import type { main } from "../../wailsjs/go/models";
 import SessionPropertiesModal from "../components/common/SessionPropertiesModal";
 import SnippetsModal from "../components/snippets/SnippetsModal";
@@ -99,6 +99,7 @@ export default function QueryPage() {
   const closedTabsRef = useRef<Array<{ path: string | null; title: string; sql: string; kind?: string }>>([]);
   const [sessionPropsOpen, setSessionPropsOpen] = useState(false);
   const [closeConfirm, setCloseConfirm] = useState<{ tabId: string; title: string } | null>(null);
+  const [currentUser, setCurrentUser] = useState<string | null>(null);
   const [sessionParams, setSessionParams] = useState<main.SessionParam[] | null>(null);
   const [sessionVars, setSessionVars] = useState<main.SessionVar[] | null>(null);
   const [sessionPropsError, setSessionPropsError] = useState<string | null>(null);
@@ -126,6 +127,7 @@ export default function QueryPage() {
   // Load current role/warehouse on mount.
   useEffect(() => {
     loadContext();
+    GetCurrentUser().then(setCurrentUser).catch(() => {});
   }, []);
 
   // On mount, re-read file-backed tabs from disk so their content is fresh
@@ -786,11 +788,6 @@ export default function QueryPage() {
         <Space size={6}>
           {/* ── Session selectors: two rows (role+wh / db+schema) ── */}
           <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            {params && (
-              <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "monospace", lineHeight: 1, paddingLeft: 1 }}>
-                {params.user}
-              </div>
-            )}
             <Space size={6}>
               {/* ── Role selector ───────────────────────────────── */}
               <Tooltip title={role ? `Role: ${role}` : "Active role"}>
@@ -865,18 +862,25 @@ export default function QueryPage() {
           </div>
 
           {params && (
-            <Dropdown
-              trigger={["contextMenu"]}
-              menu={{
-                items: [
-                  { key: "session-props", label: "Session Properties", onClick: openSessionProperties },
-                ],
-              }}
-            >
-              <Tag color="blue" style={{ fontSize: 11, margin: 0, cursor: "context-menu" }}>
-                {params.account} · {params.user}
-              </Tag>
-            </Dropdown>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+              {currentUser && (
+                <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "monospace", lineHeight: 1 }}>
+                  {currentUser}
+                </div>
+              )}
+              <Dropdown
+                trigger={["contextMenu"]}
+                menu={{
+                  items: [
+                    { key: "session-props", label: "Session Properties", onClick: openSessionProperties },
+                  ],
+                }}
+              >
+                <Tag color="blue" style={{ fontSize: 11, margin: 0, cursor: "context-menu" }}>
+                  {params.account} · {params.user}
+                </Tag>
+              </Dropdown>
+            </div>
           )}
           <Button
             icon={<DisconnectOutlined />}

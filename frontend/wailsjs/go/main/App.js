@@ -174,6 +174,10 @@ export function GetColumnComments(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetColumnComments'](arg1, arg2, arg3);
 }
 
+export function GetCurrentUser() {
+  return window['go']['main']['App']['GetCurrentUser']();
+}
+
 export function GetERDiagramData(arg1) {
   return window['go']['main']['App']['GetERDiagramData'](arg1);
 }
