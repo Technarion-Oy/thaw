@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Input, Spin, Button, Modal, Typography, message, Tag, Space } from "antd";
+import { Input, Spin, Button, Modal, Typography, message, Tag, Space, Tooltip } from "antd";
 import {
   UserOutlined,
   UserAddOutlined,
@@ -20,13 +20,15 @@ import {
   CheckCircleOutlined,
   SearchOutlined,
   FileOutlined,
+  KeyOutlined,
 } from "@ant-design/icons";
-import { ListUsers, ExecuteQuery, CanCreateUsers, CanManageUsers, GetObjectProperties } from "../../../wailsjs/go/main/App";
+import { ListUsers, ExecuteQuery, CanCreateUsers, CanManageUsers, CanModifyUserAuth, GetObjectProperties } from "../../../wailsjs/go/main/App";
 import { useSessionStore } from "../../store/sessionStore";
 import type { snowflake, main } from "../../../wailsjs/go/models";
 import EditUserModal from "./EditUserModal";
 import CreateUserModal from "./CreateUserModal";
 import PropertiesModal from "../common/PropertiesModal";
+import KeyPairAuthModal from "./KeyPairAuthModal";
 
 const { Text } = Typography;
 
@@ -45,8 +47,10 @@ export default function UserManagementPanel() {
   const [ctxMenu,        setCtxMenu]        = useState<CtxMenu | null>(null);
   const [editUser,       setEditUser]       = useState<snowflake.SnowflakeUser | null>(null);
   const [showCreate,     setShowCreate]     = useState(false);
-  const [canCreate,      setCanCreate]      = useState(false);
-  const [canManage,      setCanManage]      = useState(false);
+  const [canCreate,         setCanCreate]         = useState(false);
+  const [canManage,         setCanManage]         = useState(false);
+  const [canKeyPairForCtx,  setCanKeyPairForCtx]  = useState<boolean | null>(null);
+  const [keyPairUser,       setKeyPairUser]       = useState<string | null>(null);
   const [propsModal,     setPropsModal]     = useState<{ title: string; rows: main.PropertyPair[] | null; error: string | null } | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
 
@@ -149,28 +153,34 @@ export default function UserManagementPanel() {
     onClick: () => void,
     color?: string,
     disabled?: boolean,
-  ) => (
-    <div
-      key={label}
-      onClick={disabled ? undefined : onClick}
-      style={{
-        padding: "5px 12px",
-        cursor: disabled ? "not-allowed" : "pointer",
-        fontSize: 12,
-        color: disabled ? "var(--text-muted)" : (color ?? "var(--text)"),
-        display: "flex",
-        alignItems: "center",
-        gap: 7,
-        borderRadius: 4,
-        opacity: disabled ? 0.45 : 1,
-      }}
-      onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.background = "var(--bg-hover)"; }}
-      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-    >
-      {icon}
-      {label}
-    </div>
-  );
+    tooltip?: string,
+  ) => {
+    const inner = (
+      <div
+        key={label}
+        onClick={disabled ? undefined : onClick}
+        style={{
+          padding: "5px 12px",
+          cursor: disabled ? "not-allowed" : "pointer",
+          fontSize: 12,
+          color: disabled ? "var(--text-muted)" : (color ?? "var(--text)"),
+          display: "flex",
+          alignItems: "center",
+          gap: 7,
+          borderRadius: 4,
+          opacity: disabled ? 0.45 : 1,
+        }}
+        onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.background = "var(--bg-hover)"; }}
+        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+      >
+        {icon}
+        {label}
+      </div>
+    );
+    return disabled && tooltip
+      ? <Tooltip key={label} title={tooltip} placement="right">{inner}</Tooltip>
+      : inner;
+  };
 
   return (
     <div style={{ borderTop: "1px solid var(--border)", padding: "8px 4px 4px" }}>
@@ -234,10 +244,15 @@ export default function UserManagementPanel() {
               e.preventDefault();
               e.stopPropagation();
               // Clamp inside viewport
-              const menuW = 180, menuH = 100;
+              const menuW = 200, menuH = 140;
               const x = Math.min(e.clientX, window.innerWidth  - menuW - 8);
               const y = Math.min(e.clientY, window.innerHeight - menuH - 8);
               setCtxMenu({ x, y, user: u });
+              // Check per-user key-pair privilege asynchronously.
+              setCanKeyPairForCtx(null);
+              CanModifyUserAuth(u.name)
+                .then(setCanKeyPairForCtx)
+                .catch(() => setCanKeyPairForCtx(false));
             }}
             style={{
               display: "flex",
@@ -297,6 +312,16 @@ export default function UserManagementPanel() {
             !canManage,
           )}
           {menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, () => openUserProperties(ctxMenu.user))}
+          {menuItem(
+            "Configure Key Pair Auth…",
+            <KeyOutlined style={{ fontSize: 12 }} />,
+            () => { setCtxMenu(null); setKeyPairUser(ctxMenu.user.name); },
+            undefined,
+            canKeyPairForCtx !== true,
+            canKeyPairForCtx === null
+              ? "Checking privileges…"
+              : "Requires OWNERSHIP or MODIFY PROGRAMMATIC AUTHENTICATION METHODS on this user",
+          )}
           <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
           {menuItem("Drop…", <DeleteOutlined style={{ fontSize: 12, color: !canManage ? undefined : "#f85149" }} />, () => handleDrop(ctxMenu.user), !canManage ? undefined : "#f85149", !canManage)}
         </div>
@@ -326,6 +351,14 @@ export default function UserManagementPanel() {
           rows={propsModal.rows}
           error={propsModal.error}
           onClose={() => setPropsModal(null)}
+        />
+      )}
+
+      {/* Key pair auth modal */}
+      {keyPairUser && (
+        <KeyPairAuthModal
+          username={keyPairUser}
+          onClose={() => setKeyPairUser(null)}
         />
       )}
     </div>

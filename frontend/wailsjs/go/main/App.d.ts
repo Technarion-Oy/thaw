@@ -34,6 +34,8 @@ export function CanCreateUsers():Promise<boolean>;
 
 export function CanManageUsers():Promise<boolean>;
 
+export function CanModifyUserAuth(arg1:string):Promise<boolean>;
+
 export function CanViewWarehouseMeteringHistory():Promise<boolean>;
 
 export function CancelChat():Promise<void>;
@@ -45,6 +47,8 @@ export function CancelExport():Promise<void>;
 export function CancelMigration():Promise<void>;
 
 export function CancelQuery():Promise<void>;
+
+export function CheckAvailableKeyTools():Promise<Array<string>>;
 
 export function CheckSnowparkEnv():Promise<main.SnowparkCheckResult>;
 
@@ -83,6 +87,8 @@ export function ExportDatabaseDDL(arg1:string,arg2:string):Promise<ddl.ExportRes
 export function ExportTableData(arg1:snowflake.ExportTableParams):Promise<snowflake.ExportTableResult>;
 
 export function FetchNotebookContent(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function GenerateKeyPair(arg1:string,arg2:string,arg3:string):Promise<main.KeyPairResult>;
 
 export function GenerateMigrationScript(arg1:Array<main.MigrationDiffItem>,arg2:string,arg3:main.TableMigrationStrategy):Promise<string>;
 
@@ -281,6 +287,8 @@ export function SetNotebookQueryWarehouse(arg1:string,arg2:string,arg3:string,ar
 export function SetSessionParameter(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function SetSessionVariable(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function SetUserPublicKey(arg1:string,arg2:string):Promise<void>;
 
 export function StartNotebookSession(arg1:string):Promise<void>;
 

@@ -372,6 +372,22 @@ export namespace main {
 	        this.comment = source["comment"];
 	    }
 	}
+	export class KeyPairResult {
+	    privateKeyPath: string;
+	    publicKeyPath: string;
+	    publicKey: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new KeyPairResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.privateKeyPath = source["privateKeyPath"];
+	        this.publicKeyPath = source["publicKeyPath"];
+	        this.publicKey = source["publicKey"];
+	    }
+	}
 	export class MigrationObject {
 	    filePath: string;
 	    database: string;

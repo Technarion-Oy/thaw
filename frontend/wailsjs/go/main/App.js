@@ -50,6 +50,10 @@ export function CanManageUsers() {
   return window['go']['main']['App']['CanManageUsers']();
 }
 
+export function CanModifyUserAuth(arg1) {
+  return window['go']['main']['App']['CanModifyUserAuth'](arg1);
+}
+
 export function CanViewWarehouseMeteringHistory() {
   return window['go']['main']['App']['CanViewWarehouseMeteringHistory']();
 }
@@ -72,6 +76,10 @@ export function CancelMigration() {
 
 export function CancelQuery() {
   return window['go']['main']['App']['CancelQuery']();
+}
+
+export function CheckAvailableKeyTools() {
+  return window['go']['main']['App']['CheckAvailableKeyTools']();
 }
 
 export function CheckSnowparkEnv() {
@@ -148,6 +156,10 @@ export function ExportTableData(arg1) {
 
 export function FetchNotebookContent(arg1, arg2, arg3) {
   return window['go']['main']['App']['FetchNotebookContent'](arg1, arg2, arg3);
+}
+
+export function GenerateKeyPair(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GenerateKeyPair'](arg1, arg2, arg3);
 }
 
 export function GenerateMigrationScript(arg1, arg2, arg3) {
@@ -544,6 +556,10 @@ export function SetSessionParameter(arg1, arg2, arg3) {
 
 export function SetSessionVariable(arg1, arg2, arg3) {
   return window['go']['main']['App']['SetSessionVariable'](arg1, arg2, arg3);
+}
+
+export function SetUserPublicKey(arg1, arg2) {
+  return window['go']['main']['App']['SetUserPublicKey'](arg1, arg2);
 }
 
 export function StartNotebookSession(arg1) {

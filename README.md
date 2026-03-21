@@ -16,6 +16,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - Role dropdown shows only roles the current user can actually `USE ROLE` to — not all account-visible roles
 - Schema dropdown lists only schemas belonging to the currently selected database; resets automatically when the database is switched
 - After any `USE` command runs in the editor, all four toolbar dropdowns (role, warehouse, database, schema) update automatically to reflect the new session state
+- **Current username** — the active Snowflake username (from `SELECT CURRENT_USER()`, preserving the exact case Snowflake stores) is displayed above the toolbar session selectors and above the account · user tag so the connected identity is always visible at a glance
 
 ### SQL editor
 - Monaco editor with full SQL syntax highlighting
@@ -264,6 +265,13 @@ Click the clock icon (⏱) in the Administration panel header to open the **Quer
   - **Enable / Disable** — runs `ALTER USER … SET DISABLED = TRUE/FALSE` immediately
   - **Drop…** — confirmation dialog before `DROP USER`
   - All three actions are greyed out if the current role lacks `MANAGE GRANTS`
+- **Key Pair Auth…** — right-click any user and choose **Key Pair Auth…** to open the key pair authentication dialog (requires OWNERSHIP or MODIFY PROGRAMMATIC AUTHENTICATION METHODS privilege on that user; the menu item is greyed out automatically when the privilege is absent):
+  - Choose a key generation method: **Go built-in crypto** (always available, no passphrase), **OpenSSL** (passphrase-encrypted private key), or **ssh-keygen** (passphrase-encrypted private key); the dropdown lists only the tools that are actually present on PATH
+  - Set the private key output path (type or **Browse…** to pick a directory); the public key is saved alongside with `_pub.pem` appended
+  - Optionally enter a passphrase (disabled for Go built-in)
+  - Click **Generate key pair** to produce an RSA-2048 PKCS#8 PEM key pair; the private key is written with mode `0600`; the stripped public key content (no PEM header/footer) is shown for inspection
+  - Click **Apply to \<username\>** to run `ALTER USER "<name>" SET RSA_PUBLIC_KEY='…'` immediately
+- **Key pair auth in Create User** — the **Create User** dialog includes an **RSA public key** field and a **Generate key pair…** button; clicking the button opens the key pair dialog in "pick" mode so you can generate a key pair and use its public key without leaving the create flow
 - **Drag a user** from the list into the editor to insert a `CREATE USER` DDL statement built from `DESCRIBE USER`
 - The panel hides itself entirely if the current role cannot access `SHOW USERS`
 - All content and privilege buttons **auto-refresh** when the active role is switched — no manual reload needed
@@ -319,6 +327,7 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
 - **General** — comment
 - **Info** — read-only: owner, created_on, resumed_on, updated_on, running/queued query counts
 - All editable fields use inline pencil-click editing (text/number fields) or instant toggle switches (booleans) — each save runs the corresponding `ALTER WAREHOUSE … SET` statement immediately
+- **Inline privilege errors** — if an `ALTER WAREHOUSE` operation fails (e.g. insufficient privileges), the error is shown inline below the field in red rather than silently printed to the log; toggle switches surface the error as a message toast; rename errors appear inline below the name input; the "Insufficient privileges" phrase is extracted from the full Snowflake error string for a concise, readable message
 
 #### Role switching and session state
 

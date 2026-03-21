@@ -13,8 +13,9 @@ import {
   Modal, Form, Input, Select, Checkbox, Space, Typography,
   Divider, InputNumber, Button, message,
 } from "antd";
-import { UserAddOutlined } from "@ant-design/icons";
+import { UserAddOutlined, KeyOutlined } from "@ant-design/icons";
 import { ListWarehouses, ListRoles, ExecuteQuery } from "../../../wailsjs/go/main/App";
+import KeyPairAuthModal from "./KeyPairAuthModal";
 
 const { Text } = Typography;
 
@@ -33,6 +34,7 @@ interface FormState {
   mustChangePassword: boolean;
   daysToExpiry: string;
   disabled: boolean;
+  rsaPublicKey: string;
 }
 
 const DEFAULTS: FormState = {
@@ -50,6 +52,7 @@ const DEFAULTS: FormState = {
   mustChangePassword: true,
   daysToExpiry: "",
   disabled: false,
+  rsaPublicKey: "",
 };
 
 function buildCreateSql(form: FormState): string {
@@ -68,6 +71,7 @@ function buildCreateSql(form: FormState): string {
   if (form.defaultRole.trim())     props.push(`    DEFAULT_ROLE = ${form.defaultRole.trim()}`);
   if (form.defaultNamespace.trim()) props.push(`    DEFAULT_NAMESPACE = ${form.defaultNamespace.trim()}`);
   if (form.comment.trim())         props.push(`    COMMENT = ${sq(form.comment.trim())}`);
+  if (form.rsaPublicKey.trim())    props.push(`    RSA_PUBLIC_KEY = ${sq(form.rsaPublicKey.trim())}`);
   props.push(`    MUST_CHANGE_PASSWORD = ${form.mustChangePassword ? "TRUE" : "FALSE"}`);
   if (form.daysToExpiry.trim())    props.push(`    DAYS_TO_EXPIRY = ${form.daysToExpiry.trim()}`);
   props.push(`    DISABLED = ${form.disabled ? "TRUE" : "FALSE"}`);
@@ -82,10 +86,11 @@ interface Props {
 }
 
 export default function CreateUserModal({ onClose, onSuccess }: Props) {
-  const [form, setForm]         = useState<FormState>(DEFAULTS);
+  const [form, setForm]             = useState<FormState>(DEFAULTS);
   const [warehouses, setWarehouses] = useState<string[]>([]);
   const [roles, setRoles]           = useState<string[]>([]);
   const [saving, setSaving]         = useState(false);
+  const [showKeyPair, setShowKeyPair] = useState(false);
 
   useEffect(() => {
     ListWarehouses().then((w) => setWarehouses(w ?? [])).catch(() => {});
@@ -242,6 +247,35 @@ export default function CreateUserModal({ onClose, onSuccess }: Props) {
           <Input value={form.comment} onChange={(e) => set("comment", e.target.value)} />
         </Form.Item>
 
+        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 10px" }}>
+          Key Pair Authentication
+        </Divider>
+
+        <Form.Item
+          label="RSA public key"
+          style={itemStyle}
+          help={<span style={{ fontSize: 11 }}>Stripped PEM content (no header/footer lines). Leave blank to skip.</span>}
+        >
+          <Space.Compact style={{ width: "100%", alignItems: "flex-start" }}>
+            <Input.TextArea
+              value={form.rsaPublicKey}
+              onChange={(e) => set("rsaPublicKey", e.target.value)}
+              placeholder="Paste public key or generate below…"
+              autoSize={{ minRows: 2, maxRows: 5 }}
+              style={{ fontSize: 11, fontFamily: "monospace" }}
+            />
+          </Space.Compact>
+        </Form.Item>
+        <Form.Item style={{ marginBottom: 12 }}>
+          <Button
+            size="small"
+            icon={<KeyOutlined />}
+            onClick={() => setShowKeyPair(true)}
+          >
+            Generate key pair…
+          </Button>
+        </Form.Item>
+
         {/* Live preview */}
         <div style={{ padding: "10px 12px", background: "var(--bg)", borderRadius: 6, border: "1px solid var(--border)", marginTop: 4 }}>
           <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>Preview</Text>
@@ -251,6 +285,13 @@ export default function CreateUserModal({ onClose, onSuccess }: Props) {
         </div>
 
       </Form>
+
+      {showKeyPair && (
+        <KeyPairAuthModal
+          onKeyPicked={(publicKey) => { set("rsaPublicKey", publicKey); setShowKeyPair(false); }}
+          onClose={() => setShowKeyPair(false)}
+        />
+      )}
     </Modal>
   );
 }

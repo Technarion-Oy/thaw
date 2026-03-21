@@ -740,6 +740,97 @@ func (c *Client) walkRoleHierarchy(
 	return false, nil
 }
 
+// collectRoleHierarchy returns the set of all role names (uppercase) reachable
+// from startRole, including startRole itself. Capped at 30 hops to prevent cycles.
+func (c *Client) collectRoleHierarchy(ctx context.Context, startRole string) (map[string]bool, error) {
+	seen := map[string]bool{}
+	queue := []string{startRole}
+	for len(queue) > 0 && len(seen) <= 30 {
+		role := queue[0]
+		queue = queue[1:]
+		upper := strings.ToUpper(strings.TrimSpace(role))
+		if seen[upper] {
+			continue
+		}
+		seen[upper] = true
+		esc := strings.ReplaceAll(role, `"`, `""`)
+		rows, err := c.db.QueryContext(ctx, fmt.Sprintf(`SHOW GRANTS TO ROLE "%s"`, esc))
+		if err != nil {
+			continue // restricted; skip this role
+		}
+		cols, _ := rows.Columns()
+		idxs := colIndexMap(cols, "granted_on", "name")
+		for rows.Next() {
+			vals, ptrs := makeValPtrs(len(cols))
+			if rows.Scan(ptrs...) != nil {
+				continue
+			}
+			if strings.ToUpper(strVal(vals, idxs["granted_on"])) == "ROLE" {
+				if name := strVal(vals, idxs["name"]); name != "" {
+					queue = append(queue, name)
+				}
+			}
+		}
+		rows.Close() //nolint:errcheck
+	}
+	return seen, nil
+}
+
+// CanModifyUserAuth returns true when the current session role (or any role it
+// inherits) holds OWNERSHIP or MODIFY PROGRAMMATIC AUTHENTICATION METHODS on
+// the named user. System admin roles always have authority.
+func (c *Client) CanModifyUserAuth(ctx context.Context, username string) (bool, error) {
+	c.connector.mu.RLock()
+	role := c.connector.role
+	c.connector.mu.RUnlock()
+	if role == "" {
+		if err := c.db.QueryRowContext(ctx, "SELECT CURRENT_ROLE()").Scan(&role); err != nil {
+			return false, fmt.Errorf("CanModifyUserAuth: %w", err)
+		}
+		role = strings.TrimSpace(role)
+	}
+
+	// Fast-path: built-in admin roles have implicit authority.
+	if userAdminRole(strings.ToUpper(role)) {
+		return true, nil
+	}
+
+	// Collect the full role hierarchy.
+	hierarchy, err := c.collectRoleHierarchy(ctx, role)
+	if err != nil {
+		return false, err
+	}
+	for r := range hierarchy {
+		if userAdminRole(r) {
+			return true, nil
+		}
+	}
+
+	// Check object-level grants on this specific user.
+	esc := strings.ReplaceAll(username, `"`, `""`)
+	rows, err := c.db.QueryContext(ctx, fmt.Sprintf(`SHOW GRANTS ON USER "%s"`, esc))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	cols, _ := rows.Columns()
+	idxs := colIndexMap(cols, "privilege", "grantee_name")
+	for rows.Next() {
+		vals, ptrs := makeValPtrs(len(cols))
+		if rows.Scan(ptrs...) != nil {
+			continue
+		}
+		priv := strings.ToUpper(strVal(vals, idxs["privilege"]))
+		grantee := strings.ToUpper(strings.TrimSpace(strVal(vals, idxs["grantee_name"])))
+		if hierarchy[grantee] &&
+			(priv == "OWNERSHIP" || priv == "MODIFY PROGRAMMATIC AUTHENTICATION METHODS") {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
 // CanCreateUsers returns (true, nil) when the current session role (or any
 // role it inherits) allows creating users.
 func (c *Client) CanCreateUsers(ctx context.Context) (bool, error) {

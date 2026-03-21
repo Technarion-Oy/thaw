@@ -331,6 +331,7 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
 - **Resource & Timeouts** — resource monitor, max concurrency level, statement queued timeout, statement timeout (from `SHOW PARAMETERS IN WAREHOUSE`)
 - **General** — comment
 - Each property saves immediately via `ALTER WAREHOUSE … SET` on confirm
+- **Inline privilege errors** — `ALTER WAREHOUSE` failures (e.g. insufficient privileges) are shown inline below the field in red rather than silently discarded; toggle-switch errors appear as message toasts; rename errors appear below the name input; the "Insufficient privileges" phrase is extracted for a short, readable message
 
 ### User Management
 
@@ -339,6 +340,14 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
 - **Edit User** — pre-populated form that generates only the `ALTER USER … SET/UNSET` statements needed for the changed fields
 - **Enable / Disable / Drop** users with a single right-click action
 - All user management actions are automatically hidden or greyed out when the current role lacks the required privileges
+- **Key Pair Authentication** — right-click any user and choose **Key Pair Auth…** to set up Snowflake key-pair authentication without leaving the app:
+  - Choose a key generation method: **Go built-in crypto** (always available, no passphrase), **OpenSSL** (passphrase-encrypted private key), or **ssh-keygen** (passphrase-encrypted private key); only tools present on PATH are shown
+  - Set the private key output path (type or browse); the public key is saved alongside with `_pub.pem` appended; the private key file is written with mode `0600`
+  - Optionally enter a passphrase (disabled for Go built-in)
+  - Click **Generate key pair** to produce an RSA-2048 PKCS#8 PEM key pair; the stripped public key content (no PEM header/footer) is shown for review
+  - Click **Apply to \<username\>** to run `ALTER USER … SET RSA_PUBLIC_KEY='…'` immediately
+  - The menu item is greyed out automatically when the current role lacks OWNERSHIP or MODIFY PROGRAMMATIC AUTHENTICATION METHODS on that user
+- **Key pair auth in Create User** — the **Create User** dialog includes an **RSA public key** field and a **Generate key pair…** button; clicking the button opens the key pair generator in "pick" mode so you can generate a key pair and auto-fill the public key without leaving the create flow
 
 ---
 
@@ -362,6 +371,7 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
 - Role dropdown shows only roles the current user can actually assume
 - Schema dropdown lists only schemas belonging to the currently selected database; the list resets automatically when the database is changed
 - After any `USE DATABASE`, `USE SCHEMA`, `USE ROLE`, or `USE WAREHOUSE` command runs in the editor, all four toolbar dropdowns update automatically to reflect the resulting session state
+- **Current username** — the active Snowflake username (from `CURRENT_USER()`, preserving exact case) is displayed above the toolbar session selectors and above the account · user tag so the connected identity is always visible
 - **Session state persisted across reloads** — the account · user tag and non-sensitive connection details survive a page reload; credentials (password, passcode, private key passphrase) are never written to storage; the connected state is verified against the backend on every reload so a backend restart correctly shows ConnectModal pre-filled with the last-used parameters rather than a broken UI; the UI waits for state hydration to complete before rendering, preventing a spurious ConnectModal flash on HMR page reloads
 - **Session Properties** — right-click the account · user tag in the toolbar to open a **Session Properties** modal:
   - **Parameters** section — all rows from `SHOW PARAMETERS IN SESSION`; boolean parameters render as a toggle switch (saves immediately); all other parameters show a pencil button that opens an inline input with Save / Cancel; changes apply via `ALTER SESSION SET`
