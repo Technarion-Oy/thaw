@@ -43,6 +43,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Infrastructure** — Database, Schema, Warehouse
   - Live search filters by snippet name across all categories; the first match is auto-selected; clicking **Open in New Tab** loads the SQL into a new scratch tab for review and customisation — not auto-executed
 - **Unsaved-change indicator** — a `•` dot in the tab title shows unsaved work at a glance
+- **Close confirmation** — closing a tab with unsaved changes (via the `×` button or `⌘W` / `Ctrl+W`) shows a dialog with three choices: **Save**, **Close without Saving**, or **Cancel**; for new scratch tabs or files not yet saved to disk, **Save** opens a native Save As dialog first; applies to SQL files, notebooks, and any scratch tab that has been edited
 - **Tab reordering** — drag any tab left or right to rearrange the tab strip; a vertical accent line shows the insertion point
 - **Split view** — right-click any tab and choose **Split with: [tab name]** to view two editors side by side; a draggable vertical divider separates them and the ratio is persisted across sessions; each editor is fully independent with its own completions, hover definitions, and editing history; close the split with the × button in the secondary editor header, via **Close split view** in the right-click menu, or by closing either of the two tabs
 

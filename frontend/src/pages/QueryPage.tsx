@@ -10,11 +10,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, type MenuProps } from "antd";
+import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, Modal, type MenuProps } from "antd";
 import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NewNotebook, NotebookUseContext } from "../../wailsjs/go/main/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NewNotebook, NotebookUseContext, SaveNotebook } from "../../wailsjs/go/main/App";
 import type { main } from "../../wailsjs/go/models";
 import SessionPropertiesModal from "../components/common/SessionPropertiesModal";
 import SnippetsModal from "../components/snippets/SnippetsModal";
@@ -98,6 +98,7 @@ export default function QueryPage() {
   // Stack of recently-closed tabs for ⌘⇧T / Ctrl+Shift+T reopen.
   const closedTabsRef = useRef<Array<{ path: string | null; title: string; sql: string; kind?: string }>>([]);
   const [sessionPropsOpen, setSessionPropsOpen] = useState(false);
+  const [closeConfirm, setCloseConfirm] = useState<{ tabId: string; title: string } | null>(null);
   const [sessionParams, setSessionParams] = useState<main.SessionParam[] | null>(null);
   const [sessionVars, setSessionVars] = useState<main.SessionVar[] | null>(null);
   const [sessionPropsError, setSessionPropsError] = useState<string | null>(null);
@@ -453,6 +454,53 @@ export default function QueryPage() {
     }
   };
 
+  // Save a specific tab by ID. If the tab has no path yet, opens a Save As
+  // dialog first. Returns true when the save succeeded, false on cancel/error.
+  const saveTabById = async (tabId: string): Promise<boolean> => {
+    const { tabs } = useQueryStore.getState();
+    const tab = tabs.find((t) => t.id === tabId);
+    if (!tab) return false;
+
+    let savePath = tab.path;
+    let saveTitle = tab.title;
+
+    if (!savePath) {
+      const defaultName = tab.title === "SQL" ? "untitled.sql" : tab.title;
+      savePath = await PickSaveFile(defaultName);
+      if (!savePath) return false; // user cancelled the dialog
+      saveTitle = savePath.split("/").pop() ?? savePath;
+    }
+
+    try {
+      if (tab.kind === "notebook") {
+        await SaveNotebook(savePath, tab.sql);
+      } else {
+        await SaveFile(savePath, tab.sql);
+      }
+      markSaved(tabId, savePath, saveTitle);
+      return true;
+    } catch (e) {
+      message.error(`Save failed: ${String(e)}`);
+      return false;
+    }
+  };
+
+  // Request to close a tab — shows a confirmation dialog if the tab has
+  // unsaved changes to a file on disk. Scratch tabs close without prompting.
+  const requestClose = (tabId: string) => {
+    const { tabs } = useQueryStore.getState();
+    const tab = tabs.find((t) => t.id === tabId);
+    if (!tab || tabs.length <= 1) return;
+    const isDirty = tab.sql !== tab.savedSql;
+    if (isDirty) {
+      setCloseConfirm({ tabId, title: tab.title });
+    } else {
+      closedTabsRef.current.unshift({ path: tab.path, title: tab.title, sql: tab.sql, kind: tab.kind });
+      if (closedTabsRef.current.length > 15) closedTabsRef.current.pop();
+      useQueryStore.getState().closeTab(tabId);
+    }
+  };
+
   const handleOpen = async () => {
     const filePath = await PickOpenFile();
     if (!filePath) return;
@@ -504,16 +552,11 @@ export default function QueryPage() {
 
       // ── Tab shortcuts ────────────────────────────────────────────────────
 
-      // ⌘W / Ctrl+W — Close current tab
+      // ⌘W / Ctrl+W — Close current tab (with unsaved-changes guard)
       if (cmd && !e.shiftKey && !e.altKey && e.key === "w") {
         e.preventDefault();
-        const { tabs, activeTabId, closeTab } = useQueryStore.getState();
-        const tab = tabs.find((t) => t.id === activeTabId);
-        if (tab) {
-          closedTabsRef.current.unshift({ path: tab.path, title: tab.title, sql: tab.sql, kind: tab.kind });
-          if (closedTabsRef.current.length > 15) closedTabsRef.current.pop();
-          closeTab(tab.id);
-        }
+        const { activeTabId } = useQueryStore.getState();
+        requestClose(activeTabId);
         return;
       }
 
@@ -615,6 +658,15 @@ export default function QueryPage() {
     const handler = () => handleSave();
     window.addEventListener("save-file", handler);
     return () => window.removeEventListener("save-file", handler);
+  });
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { tabId } = (e as CustomEvent<{ tabId: string }>).detail;
+      requestClose(tabId);
+    };
+    window.addEventListener("thaw:request-close-tab", handler);
+    return () => window.removeEventListener("thaw:request-close-tab", handler);
   });
 
   // Wails events — dispatched by the native application menu.
@@ -1303,6 +1355,58 @@ export default function QueryPage() {
           onVarChange={handleVarChange}
         />
       )}
+
+      <Modal
+        open={closeConfirm !== null}
+        title="Unsaved changes"
+        onCancel={() => setCloseConfirm(null)}
+        footer={[
+          <Button key="cancel" onClick={() => setCloseConfirm(null)}>
+            Cancel
+          </Button>,
+          <Button
+            key="discard"
+            danger
+            onClick={() => {
+              if (!closeConfirm) return;
+              const { tabs } = useQueryStore.getState();
+              const tab = tabs.find((t) => t.id === closeConfirm.tabId);
+              if (tab) {
+                closedTabsRef.current.unshift({ path: tab.path, title: tab.title, sql: tab.sql, kind: tab.kind });
+                if (closedTabsRef.current.length > 15) closedTabsRef.current.pop();
+              }
+              useQueryStore.getState().closeTab(closeConfirm.tabId);
+              setCloseConfirm(null);
+            }}
+          >
+            Close without Saving
+          </Button>,
+          <Button
+            key="save"
+            type="primary"
+            onClick={async () => {
+              if (!closeConfirm) return;
+              const saved = await saveTabById(closeConfirm.tabId);
+              if (saved) {
+                const { tabs } = useQueryStore.getState();
+                const tab = tabs.find((t) => t.id === closeConfirm.tabId);
+                if (tab) {
+                  closedTabsRef.current.unshift({ path: tab.path, title: tab.title, sql: tab.sql, kind: tab.kind });
+                  if (closedTabsRef.current.length > 15) closedTabsRef.current.pop();
+                }
+                useQueryStore.getState().closeTab(closeConfirm.tabId);
+                setCloseConfirm(null);
+              }
+            }}
+          >
+            Save
+          </Button>,
+        ]}
+      >
+        <p>
+          <strong>{closeConfirm?.title}</strong> has unsaved changes. Do you want to save before closing?
+        </p>
+      </Modal>
     </div>
   );
 }

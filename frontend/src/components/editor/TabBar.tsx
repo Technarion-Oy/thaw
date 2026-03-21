@@ -23,7 +23,7 @@ export default function TabBar() {
   const tabs        = useQueryStore((s) => s.tabs);
   const activeTabId = useQueryStore((s) => s.activeTabId);
   const activateTab = useQueryStore((s) => s.activateTab);
-  const closeTab    = useQueryStore((s) => s.closeTab);
+  // closeTab is invoked via "thaw:request-close-tab" event handled in QueryPage.
   const moveTab     = useQueryStore((s) => s.moveTab);
   const openScratch = useQueryStore((s) => s.openScratch);
   const splitTabId  = useQueryStore((s) => s.splitTabId);
@@ -147,7 +147,7 @@ export default function TabBar() {
               onClick={(e) => {
                 if (tabs.length <= 1) return;
                 e.stopPropagation();
-                closeTab(tab.id);
+                window.dispatchEvent(new CustomEvent("thaw:request-close-tab", { detail: { tabId: tab.id } }));
               }}
             >
               {tabs.length > 1 && (active || hovered) && (
