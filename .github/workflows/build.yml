@@ -1,0 +1,120 @@
+name: Build Binaries
+
+on:
+  workflow_run:
+    workflows: ["Unit Tests"]
+    types: [completed]
+    branches: ["main"]
+
+jobs:
+  # Compute a 7-character short SHA once, shared across all platform builds.
+  prepare:
+    name: Compute short SHA
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      short_sha: ${{ steps.sha.outputs.short_sha }}
+      full_sha: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - id: sha
+        run: echo "short_sha=$(echo '${{ github.event.workflow_run.head_sha }}' | cut -c1-7)" >> $GITHUB_OUTPUT
+
+  build:
+    name: Build — ${{ matrix.platform }}-${{ matrix.arch }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest   # arm64 (M-series runner)
+            platform: darwin
+            arch: arm64
+          - os: windows-latest
+            platform: windows
+            arch: amd64
+          - os: ubuntu-22.04   # pinned: ubuntu-latest may lack libwebkit2gtk-4.0-dev
+            platform: linux
+            arch: amd64
+
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.full_sha }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
+
+      - name: Download Go dependencies
+        run: go mod download
+
+      - name: Build
+        run: wails build -clean
+
+      # ── Rename / package output with commit hash ───────────────────────────
+      - name: Package macOS app bundle
+        if: matrix.platform == 'darwin'
+        run: |
+          cd build/bin
+          zip -r "thaw-${{ needs.prepare.outputs.short_sha }}-darwin-arm64.zip" thaw.app
+
+      - name: Rename Windows binary
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: Move-Item build/bin/thaw.exe "build/bin/thaw-${{ needs.prepare.outputs.short_sha }}-windows-amd64.exe"
+
+      - name: Rename Linux binary
+        if: matrix.platform == 'linux'
+        run: mv build/bin/thaw "build/bin/thaw-${{ needs.prepare.outputs.short_sha }}-linux-amd64"
+
+      # ── Store artifact ─────────────────────────────────────────────────────
+      # Currently retained as a workflow artifact (30-day expiry).
+      # See the storage placeholder comment below to switch to permanent storage.
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: thaw-${{ needs.prepare.outputs.short_sha }}-${{ matrix.platform }}-${{ matrix.arch }}
+          path: build/bin/thaw-${{ needs.prepare.outputs.short_sha }}-*
+          retention-days: 30
+          if-no-files-found: error
+
+      # ── Storage placeholder ────────────────────────────────────────────────
+      # Replace/supplement upload-artifact above with one of these options once
+      # a permanent distribution target is chosen:
+      #
+      # GitHub Releases (triggered by a version tag):
+      #   - uses: softprops/action-gh-release@v2
+      #     with:
+      #       files: build/bin/thaw-${{ needs.prepare.outputs.short_sha }}-*
+      #
+      # Amazon S3 / Cloudflare R2:
+      #   - run: aws s3 cp build/bin/thaw-${{ needs.prepare.outputs.short_sha }}-* s3://your-bucket/builds/
+      #     env:
+      #       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      #       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      #
+      # Google Cloud Storage:
+      #   - uses: google-github-actions/upload-cloud-storage@v2
+      #     with:
+      #       path: build/bin
+      #       destination: your-gcs-bucket/builds
