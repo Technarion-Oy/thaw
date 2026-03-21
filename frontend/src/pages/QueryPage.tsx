@@ -786,6 +786,11 @@ export default function QueryPage() {
         <Space size={6}>
           {/* ── Session selectors: two rows (role+wh / db+schema) ── */}
           <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            {params && (
+              <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "monospace", lineHeight: 1, paddingLeft: 1 }}>
+                {params.user}
+              </div>
+            )}
             <Space size={6}>
               {/* ── Role selector ───────────────────────────────── */}
               <Tooltip title={role ? `Role: ${role}` : "Active role"}>
