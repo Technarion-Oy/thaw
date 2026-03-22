@@ -12,6 +12,8 @@ import { snowflakeMonarchLanguage, thawDarkTheme, thawLightTheme } from "./snowf
 import { configureMonacoYaml } from "monaco-yaml";
 import YamlWorker from "./yamlWorker?worker";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
+import { loader } from "@monaco-editor/react";
+import * as monacoLib from "monaco-editor";
 
 // Import the bundled dbt JSON schemas.
 // resolveJsonModule: true in tsconfig makes these available as plain objects.
@@ -19,6 +21,14 @@ import dbtProjectSchema from "../../schemas/dbt/dbt_project-latest.json";
 import dbtYmlFilesSchema from "../../schemas/dbt/dbt_yml_files-latest.json";
 import packagesSchema from "../../schemas/dbt/packages-latest.json";
 import selectorsSchema from "../../schemas/dbt/selectors-latest.json";
+
+// ── Use locally bundled Monaco instead of CDN ─────────────────────────────────
+// By default @monaco-editor/loader fetches Monaco from jsDelivr at runtime.
+// In a desktop Wails app (WKWebView) that means CDN Monaco (UMD/AMD bundle)
+// while monaco-yaml and the editor workers are built from the local ESM package
+// — two different module instances that cannot communicate via postMessage.
+// Telling the loader to use the local package fixes the mismatch.
+loader.config({ monaco: monacoLib });
 
 // Set up MonacoEnvironment **before** any editor or language worker is created.
 // The YAML worker is served via Vite's ?worker bundling; the editor worker
@@ -72,9 +82,10 @@ export function ensureMonacoSetup(monaco: unknown): void {
   // the bundled dbt-jsonschema schemas.
   //
   // fileMatch patterns are tested against each model's URI string.  SqlEditor
-  // passes the tab's real file path as the Monaco model path when in YAML
-  // mode, so the URI looks like "/Users/…/dbt_project.yml" — the **/name.yml
-  // glob patterns resolve correctly against absolute paths.
+  // passes the tab's real file path prefixed with "file://" as the Monaco
+  // model path when in YAML mode, so the URI looks like
+  // "file:///Users/…/dbt_project.yml" — the **/name.yml glob patterns
+  // resolve correctly against absolute file URIs.
   //
   // Schema priority (highest → lowest):
   //   1. dbt_project.yml  → dbt_project-latest.json

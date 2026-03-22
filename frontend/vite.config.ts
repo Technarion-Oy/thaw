@@ -9,9 +9,10 @@ export default defineConfig({
       "@": "/src",
     },
   },
-  // Pre-bundle monaco-yaml so Vite doesn't try to transform it on first request.
+  // Pre-bundle Monaco and its YAML plugin so Vite doesn't transform thousands
+  // of ESM files on first request in dev mode.
   optimizeDeps: {
-    include: ["monaco-yaml"],
+    include: ["monaco-editor", "monaco-yaml"],
   },
   server: {
     watch: {
