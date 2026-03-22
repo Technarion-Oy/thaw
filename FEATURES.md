@@ -254,6 +254,12 @@ Open **Tools → Create dbt Project…** to scaffold a complete dbt project pre-
 - Set the **project name** and **profile name** (mirrors the project name by default, independently editable once changed)
 - Choose the **output directory** with a native directory picker or type a path directly
 - Thaw warns when the target `<dir>/<name>` directory already exists to prevent accidental overwrites
+- **Inline view SQL definitions** toggle (off by default) — when enabled, Thaw fetches the `GET_DDL` for each view in the selected schemas and embeds the actual `SELECT` body into the staging stub instead of a generic `{{ source() }}` pass-through; one extra `GET_DDL` call per view is made at generation time
+- **Automatic reference rewriting** (active whenever inline view SQL is enabled) — after all schemas are fetched, Thaw scans every inlined view body for multi-part Snowflake identifiers and rewrites them to correct dbt Jinja calls:
+  - Three-part references to **tables** in selected schemas → `{{ source('db_schema', 'TABLE') }}`
+  - Three-part references to **views** in selected schemas → `{{ ref('stg_model_name') }}`
+  - References to objects **outside** the selected schemas → left unchanged
+  - CTE aliases are excluded to prevent false-positive replacements; single-part names are never replaced to avoid collisions with column aliases
 
 ### Step 2 — Select Sources
 - Databases load lazily from the live Snowflake connection
