@@ -171,6 +171,32 @@ export default function DbtProjectModal({ onClose }: Props) {
     return selectedSchemas[db]?.has(schema) ?? false;
   }
 
+  // Fetch cross-schema deps for (db, schema) unless already cached or in flight.
+  function fetchDepFor(db: string, schema: string) {
+    if (isSystemSchema(schema)) return;
+    const key = `${db}||${schema}`;
+    if (crossDeps[key] !== undefined || fetchingDeps[key]) return;
+    setFetchingDeps((prev) => ({ ...prev, [key]: true }));
+    GetSchemaCrossDeps(db, schema)
+      .then((refs) => {
+        if (!mountedRef.current) return;
+        const depKeys = (refs ?? []).map((r) => `${r.database}||${r.schema}`);
+        setCrossDeps((prev) => ({ ...prev, [key]: depKeys }));
+      })
+      .catch(() => {
+        if (!mountedRef.current) return;
+        setCrossDeps((prev) => ({ ...prev, [key]: [] }));
+      })
+      .finally(() => {
+        if (!mountedRef.current) return;
+        setFetchingDeps((prev) => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+      });
+  }
+
   function toggleSchema(db: string, schema: string, checked: boolean) {
     setSelectedSchemas((prev) => {
       const next = { ...prev };
@@ -184,31 +210,8 @@ export default function DbtProjectModal({ onClose }: Props) {
       return next;
     });
 
-    // When a schema is selected, lazily fetch its cross-schema dependencies
-    // so we can highlight other databases/schemas the user might want to include.
-    if (checked && !isSystemSchema(schema)) {
-      const key = `${db}||${schema}`;
-      if (crossDeps[key] === undefined && !fetchingDeps[key]) {
-        setFetchingDeps((prev) => ({ ...prev, [key]: true }));
-        GetSchemaCrossDeps(db, schema)
-          .then((refs) => {
-            if (!mountedRef.current) return;
-            const depKeys = (refs ?? []).map((r) => `${r.database}||${r.schema}`);
-            setCrossDeps((prev) => ({ ...prev, [key]: depKeys }));
-          })
-          .catch(() => {
-            if (!mountedRef.current) return;
-            setCrossDeps((prev) => ({ ...prev, [key]: [] }));
-          })
-          .finally(() => {
-            if (!mountedRef.current) return;
-            setFetchingDeps((prev) => {
-              const next = { ...prev };
-              delete next[key];
-              return next;
-            });
-          });
-      }
+    if (checked) {
+      fetchDepFor(db, schema);
     }
   }
 
@@ -218,6 +221,8 @@ export default function DbtProjectModal({ onClose }: Props) {
   function selectAllSchemas(db: string) {
     const schemas = (schemasByDb[db] ?? []).filter((s) => !isSystemSchema(s));
     setSelectedSchemas((prev) => ({ ...prev, [db]: new Set(schemas) }));
+    // Trigger dep analysis for every schema being selected.
+    schemas.forEach((schema) => fetchDepFor(db, schema));
   }
 
   function deselectAllSchemas(db: string) {
