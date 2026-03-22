@@ -388,6 +388,36 @@ Right-click the **account · user** tag in the query toolbar to open the **Sessi
 - Export directory can be changed directly from the Export DDL panel without opening the Git section
 - Results list (per-database file counts and errors) can be collapsed/expanded with a caret button; the summary tags (total files, skipped, errors) always remain visible
 
+### dbt Project Scaffolding
+
+Open **Tools → Create dbt Project…** in the menu bar to scaffold a new dbt project pre-wired to the active Snowflake connection — no dbt CLI required during generation.
+
+A 3-step wizard guides the process:
+
+1. **Configure** — set the project name, profile name (mirrors the project name by default, independently editable), and output directory (Browse… uses a native directory picker); Thaw warns if the target directory already exists
+2. **Select Sources** — expand any database to load its schemas on demand; check the schemas to include as dbt sources; `INFORMATION_SCHEMA` is listed but marked as exceptional (warning icon, excluded from "Select all") — when included, Thaw adds it to `_sources.yml` as a system schema entry without generating any staging stubs
+3. **Generate** — shows a summary (project path, database count, schema count, estimated file count); click **Generate Project** to create all files; on success a collapsible file list is shown grouped by directory; on failure a back button returns to Step 1
+
+**Generated file tree** under `<OutputDir>/<ProjectName>/`:
+```
+dbt_project.yml          # project config with profile reference, materialization defaults
+profiles.yml             # pre-filled from the live session (account, user, role, warehouse, database, schema)
+models/
+  staging/
+    _sources.yml         # one source entry per selected (database, schema)
+    stg_<table>.sql      # one CTE stub per table/view
+  marts/
+    .gitkeep
+seeds/
+  .gitkeep
+macros/
+  .gitkeep
+```
+
+When multiple databases or schemas are selected the staging stub filenames are prefixed with `db_schema_` (e.g. `stg_mydb_public_orders.sql`) to avoid collisions.
+
+`profiles.yml` is written to the project root for inspection. Copy it to `~/.dbt/profiles.yml` when you are ready to run dbt commands.
+
 ### Schema Migration
 
 Open **Tools → Schema Migration…** in the menu bar to deploy local `.sql` DDL files to Snowflake with conflict detection, dependency ordering, and safety snapshots. A 5-step wizard guides the process:
@@ -435,7 +465,7 @@ Open **Tools → Schema Migration…** in the menu bar to deploy local `.sql` DD
 - **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane; ratio is persisted across sessions
 - **Object browser height** — the Objects panel is collapsible (click the label or the ▶/▼ chevron) and vertically resizable (drag the handle below the tree, 80 – 800 px); the Administration panel fills the remaining space
 - **Theming** — light, dark, and system-default themes; switch via **View → Appearance** in the native menu bar; preference is persisted across sessions
-- Native application menu bar with **File** (open / save / new tab), **View → Appearance** (System / Light / Dark), **AI → Configure AI…**, **Tools** (**Code Snippets…**, **Export Path Format…**, **Schema Migration…**), **Snowpark** (**Check Environment…**, **Setup Environment…**, **New Notebook…**, **Open Notebook…**), and **Help** (**Function Catalog…**, **Keyboard Shortcuts…**) menus
+- Native application menu bar with **File** (open / save / new tab), **View → Appearance** (System / Light / Dark), **AI → Configure AI…**, **Tools** (**Code Snippets…**, **Export Path Format…**, **Schema Migration…**, **Create dbt Project…**), **Snowpark** (**Check Environment…**, **Setup Environment…**, **New Notebook…**, **Open Notebook…**), and **Help** (**Function Catalog…**, **Keyboard Shortcuts…**) menus
 - Object browser scrolls horizontally when object names are wider than the sidebar
 - Right-click context menu is always clamped inside the viewport — never overflows the screen edges
 - Closing the app while a query is running shows a confirmation dialog; if confirmed, the query is cancelled in Snowflake before exit
@@ -524,6 +554,7 @@ thaw/
 ├── main.go                        # Wails entry point, window config, native menu
 ├── app.go                         # Methods bound to the frontend (Connect, ExecuteQuery, …)
 ├── snowpark.go                    # Snowpark IPC: env check/setup, notebook kernel, SQL cells
+├── dbt.go                         # dbt project scaffolding IPC (CreateDbtProject)
 ├── session.go                     # Window state persistence (WindowState, load/save)
 ├── session_path_dev.go            # Session file path for dev builds (./thaw-session.json)
 ├── session_path_prod.go           # Session file path for production builds (OS-specific)
@@ -545,6 +576,9 @@ thaw/
 │   │   ├── exporter.go            # Parallel DDL export orchestration (cancellable)
 │   │   ├── parser_test.go
 │   │   └── object_test.go
+│   ├── dbt/
+│   │   ├── generator.go           # Pure dbt project file generator (no Snowflake calls)
+│   │   └── generator_test.go      # 56 unit tests for generator, source names, and SQL stubs
 │   ├── filesystem/fs.go           # Directory listing, file reading and writing
 │   ├── gitrepo/repo.go            # Git status, commit/push, pull
 │   ├── integration/
@@ -623,6 +657,7 @@ thaw/
     │       ├── notebook/
     │       │   └── NotebookTab.tsx         # Jupyter-style notebook with Monaco cell editors
     │       ├── migration/MigrationModal.tsx # Schema Migration wizard (Tools menu)
+    │       ├── dbt/DbtProjectModal.tsx     # dbt Project Scaffolding wizard (Tools menu)
     │       ├── snippets/SnippetsModal.tsx  # Code Snippets browser (Tools menu)
     │       ├── help/KeyboardShortcutsModal.tsx  # Searchable keyboard shortcuts reference (Help menu)
     │       ├── task/CreateTaskModal.tsx    # CREATE OR REPLACE TASK dialog
@@ -691,6 +726,19 @@ go tool cover -html=coverage.out
 
 ```bash
 go test -v ./internal/snowflake/ -run "^Test"
+```
+
+### dbt generator tests
+
+`internal/dbt/generator_test.go` contains 56 unit tests for the dbt project generator — no Snowflake connection required:
+
+- **`TestGenerate`** (25 cases) — end-to-end disk I/O tests using `t.TempDir()`: single and multi-scope sources, system/empty schemas, correct file contents, stub naming, `_sources.yml` structure, profiles.yml session values, and `.gitkeep` stubs
+- **`TestSourceName`** (9 cases) — source name construction from (db, schema) pairs
+- **`TestStagingModelPath`** (7 cases) — single-scope vs multi-scope stub path generation
+- **`TestStagingModelSQL`** (4 cases) — CTE structure, Jinja `{{ source(...) }}` references, comment line
+
+```bash
+go test -v ./internal/dbt/
 ```
 
 ### Migration helper tests

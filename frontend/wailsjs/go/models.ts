@@ -100,6 +100,43 @@ export namespace config {
 
 }
 
+export namespace dbt {
+	
+	export class CreateRequest {
+	    projectName: string;
+	    outputDir: string;
+	    profileName: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectName = source["projectName"];
+	        this.outputDir = source["outputDir"];
+	        this.profileName = source["profileName"];
+	    }
+	}
+	export class CreateResult {
+	    projectDir: string;
+	    filesCreated: string[];
+	    warnings: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.projectDir = source["projectDir"];
+	        this.filesCreated = source["filesCreated"];
+	        this.warnings = source["warnings"];
+	    }
+	}
+
+}
+
 export namespace ddl {
 	
 	export class ExportResult {

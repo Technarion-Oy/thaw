@@ -246,6 +246,44 @@ Only applies to TABLE objects that already exist in Snowflake and have rows. Emp
 
 ---
 
+## dbt Project Scaffolding
+
+Open **Tools → Create dbt Project…** to scaffold a complete dbt project pre-wired to the active Snowflake connection — no dbt CLI required during generation.
+
+### Step 1 — Configure
+- Set the **project name** and **profile name** (mirrors the project name by default, independently editable once changed)
+- Choose the **output directory** with a native directory picker or type a path directly
+- Thaw warns when the target `<dir>/<name>` directory already exists to prevent accidental overwrites
+
+### Step 2 — Select Sources
+- Databases load lazily from the live Snowflake connection
+- Expand any database to fetch and display its schemas as a checkbox list
+- **Select all / Deselect all** link per database for quick selection
+- `INFORMATION_SCHEMA` is shown with a warning icon and descriptive tooltip, excluded from **Select all**; when checked, it is added to `_sources.yml` as a system schema entry but no staging stubs or `ListObjects` calls are made — this matches dbt convention for referencing virtual Snowflake schemas
+- At least one schema must be selected to proceed
+
+### Step 3 — Generate
+- Summary shows project path, number of databases and schemas selected, and estimated file count
+- **Generate Project** creates all files on disk; a spinner shows "Creating project files…" while in flight
+- **Success** — collapsible file list grouped by directory; a note below the list reminds you to copy `profiles.yml` to `~/.dbt/` before running dbt commands
+- **Error** — red alert with message and a back button to return to Step 1
+
+### Generated files
+
+| File | Description |
+|------|-------------|
+| `dbt_project.yml` | Project config: name, profile reference, materialization defaults (staging → view, marts → table) |
+| `profiles.yml` | Pre-filled from the live session: account, user, role, warehouse, database, schema |
+| `models/staging/_sources.yml` | One `source:` entry per selected (database, schema) |
+| `models/staging/stg_<table>.sql` | CTE stub per table/view (`with source as … renamed as … select * from renamed`) |
+| `models/marts/.gitkeep` | Directory placeholder |
+| `seeds/.gitkeep` | Directory placeholder |
+| `macros/.gitkeep` | Directory placeholder |
+
+When multiple databases or schemas are selected, stub filenames are prefixed with `db_schema_` (e.g. `stg_mydb_public_orders.sql`) to prevent collisions. Single-scope projects use the shorter `stg_<table>.sql` form.
+
+---
+
 ## Git Integration
 
 - View git status for the working directory (staged and unstaged files)
@@ -492,7 +530,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 
 - **Light, Dark, and System** themes — switch via **View → Appearance**; preference is saved across sessions
 - **Session restoration across app restarts** — all open tabs (scratch SQL, file tabs, notebook tabs) and their SQL content are restored exactly when the app is relaunched; file-backed tabs re-read their content from disk on startup so they always show the current file; if a file has been deleted or moved the tab becomes a scratch tab (prefixed `↺`) so the last-known SQL content is not lost; window size is saved on quit and restored on the next launch
-- **Tools menu** — native menu bar **Tools** entry provides **Code Snippets…**, **Export Path Format…**, and **Schema Migration…**
+- **Tools menu** — native menu bar **Tools** entry provides **Code Snippets…**, **Export Path Format…**, **Schema Migration…**, and **Create dbt Project…**
 - **Snowpark menu** — native menu bar **Snowpark** entry provides **Check Environment…**, **Setup Environment…**, **New Notebook…**, and **Open Notebook…**
 - **Help menu** — **Function Catalog…** opens the built-in Snowflake function reference with an **Ask AI** tab for chatting about any selected function (see below); **Keyboard Shortcuts…** opens a searchable modal listing every shortcut with macOS and Windows columns
 - **Resizable sidebars** — drag either sidebar edge to any width between 160 px and 600 px

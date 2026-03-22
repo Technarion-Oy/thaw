@@ -174,6 +174,10 @@ func buildMenu(app *App) *menu.Menu {
 	toolsMenu.AddText("Schema Migration…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:migration")
 	})
+	toolsMenu.AddSeparator()
+	toolsMenu.AddText("Create dbt Project…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:dbt-create")
+	})
 
 	// ── Snowpark ──────────────────────────────────────────────────────────────
 	snowparkMenu := appMenu.AddSubmenu("Snowpark")

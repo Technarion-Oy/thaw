@@ -14,12 +14,13 @@ import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip,
 import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NewNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser } from "../../wailsjs/go/main/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NewNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion } from "../../wailsjs/go/main/App";
 import type { main } from "../../wailsjs/go/models";
 import SessionPropertiesModal from "../components/common/SessionPropertiesModal";
 import SnippetsModal from "../components/snippets/SnippetsModal";
 import ExportPathFormatModal from "../components/export/ExportPathFormatModal";
 import MigrationModal from "../components/migration/MigrationModal";
+import DbtProjectModal from "../components/dbt/DbtProjectModal";
 import FunctionCatalogModal from "../components/fnmeta/FunctionCatalogModal";
 import KeyboardShortcutsModal from "../components/help/KeyboardShortcutsModal";
 import { usePanelLayoutStore } from "../store/panelLayoutStore";
@@ -92,6 +93,7 @@ export default function QueryPage() {
   const [snippetsOpen, setSnippetsOpen] = useState(false);
   const [exportPathFormatOpen, setExportPathFormatOpen] = useState(false);
   const [migrationOpen, setMigrationOpen] = useState(false);
+  const [dbtCreateOpen, setDbtCreateOpen] = useState(false);
   const [fnCatalogOpen, setFnCatalogOpen] = useState(false);
   const [kbShortcutsOpen, setKbShortcutsOpen] = useState(false);
 
@@ -100,6 +102,7 @@ export default function QueryPage() {
   const [sessionPropsOpen, setSessionPropsOpen] = useState(false);
   const [closeConfirm, setCloseConfirm] = useState<{ tabId: string; title: string } | null>(null);
   const [currentUser, setCurrentUser] = useState<string | null>(null);
+  const [currentRegion, setCurrentRegion] = useState<string | null>(null);
   const [sessionParams, setSessionParams] = useState<main.SessionParam[] | null>(null);
   const [sessionVars, setSessionVars] = useState<main.SessionVar[] | null>(null);
   const [sessionPropsError, setSessionPropsError] = useState<string | null>(null);
@@ -128,6 +131,7 @@ export default function QueryPage() {
   useEffect(() => {
     loadContext();
     GetCurrentUser().then(setCurrentUser).catch(() => {});
+    GetCurrentRegion().then(setCurrentRegion).catch(() => {});
   }, []);
 
   // On mount, re-read file-backed tabs from disk so their content is fresh
@@ -704,6 +708,11 @@ export default function QueryPage() {
   }, []);
 
   useEffect(() => {
+    const off = EventsOn("menu:dbt-create", () => setDbtCreateOpen(true));
+    return () => off();
+  }, []);
+
+  useEffect(() => {
     const off = EventsOn("menu:function-catalog", () => setFnCatalogOpen(true));
     return () => off();
   }, []);
@@ -863,9 +872,9 @@ export default function QueryPage() {
 
           {params && (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-              {currentUser && (
+              {(currentUser || currentRegion) && (
                 <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "monospace", lineHeight: 1 }}>
-                  {currentUser}
+                  {[currentUser, currentRegion].filter(Boolean).join(" · ")}
                 </div>
               )}
               <Dropdown
@@ -1351,6 +1360,7 @@ export default function QueryPage() {
       {snippetsOpen && <SnippetsModal onClose={() => setSnippetsOpen(false)} />}
       {exportPathFormatOpen && <ExportPathFormatModal onClose={() => setExportPathFormatOpen(false)} />}
       {migrationOpen && <MigrationModal onClose={() => setMigrationOpen(false)} />}
+      {dbtCreateOpen && <DbtProjectModal onClose={() => setDbtCreateOpen(false)} />}
       {fnCatalogOpen && <FunctionCatalogModal onClose={() => setFnCatalogOpen(false)} />}
       {kbShortcutsOpen && <KeyboardShortcutsModal onClose={() => setKbShortcutsOpen(false)} />}
 
