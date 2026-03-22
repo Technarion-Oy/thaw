@@ -719,3 +719,168 @@ func assertContainsRef(t *testing.T, refs []sqlRef, want sqlRef) {
 func containsWord(s, word string) bool {
 	return strings.Contains(strings.ToUpper(s), strings.ToUpper(word))
 }
+
+// ── RewriteSQLReferences tests ────────────────────────────────────────────────
+
+func TestRewriteSQLReferences(t *testing.T) {
+	// Lookup helper: maps (db, schema, name) to a fixed Jinja replacement.
+	// Tables → {{ source(...) }}, views → {{ ref(...) }}, unknown → "".
+	makeLookup := func(tables, views map[string]string) func(db, schema, name string) string {
+		return func(db, schema, name string) string {
+			key := strings.ToUpper(db + "." + schema + "." + name)
+			if r, ok := tables[key]; ok {
+				return r
+			}
+			if r, ok := views[key]; ok {
+				return r
+			}
+			return ""
+		}
+	}
+
+	tests := []struct {
+		name         string
+		sql          string
+		defaultDB    string
+		defaultSchema string
+		tables       map[string]string // UPPER(db.schema.name) → replacement
+		views        map[string]string
+		mustContain  []string
+		mustNotContain []string
+	}{
+		{
+			name: "user example: three-part quoted view referencing source table",
+			sql: `SELECT
+    "Order ID" AS CLEAN_ORDER_ID,
+    "SELECT" AS SELECTION_TYPE,
+    "Date-Of-Purchase"
+FROM LINEAGE_SOURCE_DB."Oddly Named Schema!"."Order Details #1"
+WHERE "From" = 'Web'`,
+			defaultDB:    "LINEAGE_TARGET_DB",
+			defaultSchema: "MART",
+			tables: map[string]string{
+				`LINEAGE_SOURCE_DB.ODDLY NAMED SCHEMA!.ORDER DETAILS #1`: `{{ source('lineage_source_db_oddly named schema_', 'Order Details #1') }}`,
+			},
+			mustContain: []string{
+				`{{ source('lineage_source_db_oddly named schema_', 'Order Details #1') }}`,
+				`"Order ID" AS CLEAN_ORDER_ID`, // column aliases preserved
+				`WHERE "From" = 'Web'`,
+			},
+			mustNotContain: []string{
+				`LINEAGE_SOURCE_DB."Oddly Named Schema!"."Order Details #1"`,
+			},
+		},
+		{
+			name: "view referencing another view becomes ref()",
+			sql:  `SELECT * FROM MY_DB.MY_SCHEMA.MY_VIEW`,
+			defaultDB:    "MY_DB",
+			defaultSchema: "MY_SCHEMA",
+			views: map[string]string{
+				"MY_DB.MY_SCHEMA.MY_VIEW": "{{ ref('stg_my_view') }}",
+			},
+			mustContain:    []string{"{{ ref('stg_my_view') }}"},
+			mustNotContain: []string{"MY_DB.MY_SCHEMA.MY_VIEW"},
+		},
+		{
+			name: "unknown reference left unchanged",
+			sql:  `SELECT * FROM EXTERNAL_DB.EXTERNAL_SCHEMA.SOME_TABLE`,
+			defaultDB:    "MY_DB",
+			defaultSchema: "MY_SCHEMA",
+			mustContain:    []string{"EXTERNAL_DB.EXTERNAL_SCHEMA.SOME_TABLE"},
+		},
+		{
+			name: "CTE aliases are not replaced",
+			sql: `WITH orders AS (SELECT * FROM MY_DB.STAGING.RAW_ORDERS)
+SELECT * FROM orders`,
+			defaultDB:    "MY_DB",
+			defaultSchema: "STAGING",
+			tables: map[string]string{
+				"MY_DB.STAGING.RAW_ORDERS": "{{ source('my_db_staging', 'RAW_ORDERS') }}",
+			},
+			mustContain:    []string{"{{ source('my_db_staging', 'RAW_ORDERS') }}"},
+			mustNotContain: []string{"FROM MY_DB.STAGING.RAW_ORDERS"}, // replaced
+			// "FROM orders" must remain (CTE alias, not replaced)
+		},
+		{
+			name: "single-part bare name is not replaced (ambiguous)",
+			sql:  `SELECT * FROM ORDERS`,
+			defaultDB:    "MY_DB",
+			defaultSchema: "MY_SCHEMA",
+			tables: map[string]string{
+				"MY_DB.MY_SCHEMA.ORDERS": "{{ source('my_db_my_schema', 'ORDERS') }}",
+			},
+			// bare single-part name — skip to avoid column/alias false positives
+			mustContain: []string{"FROM ORDERS"},
+		},
+		{
+			name: "two-part schema.table is replaced",
+			sql:  `SELECT * FROM MY_SCHEMA.MY_TABLE`,
+			defaultDB:    "MY_DB",
+			defaultSchema: "MY_SCHEMA",
+			tables: map[string]string{
+				"MY_DB.MY_SCHEMA.MY_TABLE": "{{ source('my_db_my_schema', 'MY_TABLE') }}",
+			},
+			mustContain:    []string{"{{ source('my_db_my_schema', 'MY_TABLE') }}"},
+			mustNotContain: []string{"MY_SCHEMA.MY_TABLE"},
+		},
+		{
+			name: "multiple references in one query",
+			sql: `SELECT a.*, b.*
+FROM DB.S1.TABLE_A a
+JOIN DB.S1.TABLE_B b ON a.id = b.id`,
+			defaultDB:    "DB",
+			defaultSchema: "S1",
+			tables: map[string]string{
+				"DB.S1.TABLE_A": "{{ source('db_s1', 'TABLE_A') }}",
+				"DB.S1.TABLE_B": "{{ source('db_s1', 'TABLE_B') }}",
+			},
+			mustContain: []string{
+				"{{ source('db_s1', 'TABLE_A') }}",
+				"{{ source('db_s1', 'TABLE_B') }}",
+			},
+			mustNotContain: []string{"DB.S1.TABLE_A", "DB.S1.TABLE_B"},
+		},
+		{
+			name: "reference inside comment is also replaced (acceptable side effect)",
+			sql: `-- reads from MY_DB.MY_SCHEMA.MY_TABLE
+SELECT * FROM MY_DB.MY_SCHEMA.MY_TABLE`,
+			defaultDB:    "MY_DB",
+			defaultSchema: "MY_SCHEMA",
+			tables: map[string]string{
+				"MY_DB.MY_SCHEMA.MY_TABLE": "{{ source('my_db_my_schema', 'MY_TABLE') }}",
+			},
+			mustContain:    []string{"{{ source('my_db_my_schema', 'MY_TABLE') }}"},
+			mustNotContain: []string{"FROM MY_DB.MY_SCHEMA.MY_TABLE"},
+		},
+		{
+			name: "no references → SQL unchanged",
+			sql:  `SELECT 1 AS n`,
+			defaultDB: "DB", defaultSchema: "S",
+			mustContain: []string{"SELECT 1 AS n"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tables := tt.tables
+			if tables == nil {
+				tables = map[string]string{}
+			}
+			views := tt.views
+			if views == nil {
+				views = map[string]string{}
+			}
+			got := RewriteSQLReferences(tt.sql, tt.defaultDB, tt.defaultSchema, makeLookup(tables, views))
+			for _, want := range tt.mustContain {
+				if !strings.Contains(got, want) {
+					t.Errorf("expected output to contain %q\ngot:\n%s", want, got)
+				}
+			}
+			for _, notWant := range tt.mustNotContain {
+				if strings.Contains(got, notWant) {
+					t.Errorf("expected output NOT to contain %q\ngot:\n%s", notWant, got)
+				}
+			}
+		})
+	}
+}

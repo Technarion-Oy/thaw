@@ -201,26 +201,34 @@ models:
 	}, nil
 }
 
-// sourceName returns a lower-case identifier for the (db, schema) pair used
-// as the dbt source name, e.g. "mydb_public".
-func sourceName(db, schema string) string {
+// SourceName returns the lower-case dbt source name for the given (db, schema)
+// pair, e.g. "mydb_public".  Exported so IPC callers can build consistent
+// {{ source('...', '...') }} references without duplicating the convention.
+func SourceName(db, schema string) string {
 	return strings.ToLower(db) + "_" + strings.ToLower(schema)
+}
+
+// sourceName is the unexported alias kept for internal use within this file.
+func sourceName(db, schema string) string { return SourceName(db, schema) }
+
+// StagingModelName returns the dbt model name (filename without the .sql
+// extension) for a staging model.  Exported so IPC callers can build
+// consistent {{ ref('...') }} references that match the generated filenames.
+func StagingModelName(db, schema, table string, multiScope bool) string {
+	if multiScope {
+		return fmt.Sprintf("stg_%s_%s_%s",
+			strings.ToLower(db),
+			strings.ToLower(schema),
+			strings.ToLower(table))
+	}
+	return fmt.Sprintf("stg_%s", strings.ToLower(table))
 }
 
 // stagingModelPath returns the relative path for a staging model file.
 // When multiScope is true (multiple db/schema pairs) a db_schema_ prefix is
 // added to avoid collisions.
 func stagingModelPath(db, schema, table string, multiScope bool) string {
-	var name string
-	if multiScope {
-		name = fmt.Sprintf("stg_%s_%s_%s.sql",
-			strings.ToLower(db),
-			strings.ToLower(schema),
-			strings.ToLower(table))
-	} else {
-		name = fmt.Sprintf("stg_%s.sql", strings.ToLower(table))
-	}
-	return filepath.Join("models", "staging", name)
+	return filepath.Join("models", "staging", StagingModelName(db, schema, table, multiScope)+".sql")
 }
 
 // stagingModelSQL returns the body of a staging model stub.

@@ -14,6 +14,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -543,6 +544,96 @@ func parseSQLReferences(sql, defaultDB, defaultSchema string) []sqlRef {
 	}
 
 	return refs
+}
+
+// RewriteSQLReferences rewrites Snowflake object references in a SQL body,
+// replacing each resolved (database, schema, name) triple with the string
+// returned by lookup.  When lookup returns "" the reference is left unchanged.
+//
+// Only multi-part identifiers (two-part or three-part, e.g. SCHEMA.TABLE or
+// DB.SCHEMA.TABLE) are considered for replacement.  Bare single-part names are
+// skipped to avoid false-positive rewrites of column aliases or other tokens
+// that happen to share a table name.
+//
+// Replacement is applied longest-first so that a more-qualified reference such
+// as "MY_DB.MY_SCHEMA.MY_TABLE" is replaced before a shorter "MY_TABLE" if
+// both somehow appear.  String replacement is case-sensitive and uses the
+// original text as it appears in the SQL, which is safe for DDL produced by
+// Snowflake's GET_DDL (which always emits fully-qualified, consistently-cased
+// identifiers).
+func RewriteSQLReferences(sql, defaultDB, defaultSchema string, lookup func(db, schema, name string) string) string {
+	// Strip comments for detection; replacement is applied to the original.
+	noComments := reLineComment.ReplaceAllString(sql, " ")
+	noComments = reBlockComment.ReplaceAllString(noComments, " ")
+
+	// Collect CTE aliases to exclude from replacement.
+	cteNames := map[string]bool{}
+	for _, m := range reCTE.FindAllStringSubmatch(noComments, -1) {
+		if len(m) > 1 {
+			cteNames[strings.ToUpper(stripQuotes(m[1]))] = true
+		}
+	}
+
+	type pair struct{ orig, repl string }
+	var pairs []pair
+	seen := map[string]bool{}
+
+	consider := func(raw string) {
+		if seen[raw] {
+			return
+		}
+		parts := splitIdent(raw)
+		if len(parts) < 2 {
+			// Skip bare single-part names to avoid ambiguous replacements.
+			return
+		}
+		name := parts[len(parts)-1]
+		nameUp := strings.ToUpper(name)
+		if skipNames[nameUp] || cteNames[nameUp] || strings.EqualFold(name, "INFORMATION_SCHEMA") {
+			return
+		}
+
+		var db, schema string
+		switch len(parts) {
+		case 2:
+			db, schema = defaultDB, parts[0]
+		case 3:
+			db, schema = parts[0], parts[1]
+		}
+		if strings.EqualFold(schema, "INFORMATION_SCHEMA") {
+			return
+		}
+
+		repl := lookup(db, schema, name)
+		if repl == "" {
+			return
+		}
+		pairs = append(pairs, pair{raw, repl})
+		seen[raw] = true
+	}
+
+	for _, pat := range []*regexp.Regexp{reFrom, reJoin, reInto, reUpdate, reUsing, reMerge} {
+		for _, m := range pat.FindAllStringSubmatch(noComments, -1) {
+			if len(m) > 1 {
+				consider(m[1])
+			}
+		}
+	}
+
+	if len(pairs) == 0 {
+		return sql
+	}
+
+	// Longest-first so a 3-part "A.B.C" is replaced before "B.C" or "C".
+	sort.Slice(pairs, func(i, j int) bool {
+		return len(pairs[i].orig) > len(pairs[j].orig)
+	})
+
+	result := sql
+	for _, p := range pairs {
+		result = strings.ReplaceAll(result, p.orig, p.repl)
+	}
+	return result
 }
 
 // splitIdent splits a (possibly quoted, possibly multi-part) identifier string

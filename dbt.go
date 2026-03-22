@@ -114,6 +114,67 @@ func (a *App) CreateDbtProject(req dbt.CreateRequest, schemasMap map[string][]st
 		}
 	}
 
+	// ── Rewrite object references in inlined view bodies ──────────────────────
+	// Now that all schema objects are known, do a second pass to replace raw
+	// Snowflake three-part identifiers (DB.SCHEMA.TABLE) with the correct dbt
+	// Jinja calls:
+	//   • tables  → {{ source('source_name', 'TABLE') }}
+	//   • views   → {{ ref('stg_model_name') }}
+	//   • unknown → left unchanged (external reference not in selected schemas)
+	if req.InlineViewDefs {
+		// Build a fast lookup: UPPER(db + \x00 + schema + \x00 + name) → objKind.
+		// Store the original name (as returned by ListObjects) alongside.
+		type objInfo struct {
+			kind   string // "table" or "view"
+			db     string
+			schema string
+			name   string // original case
+		}
+		objLookup := make(map[string]objInfo)
+		for _, so := range schemaObjects {
+			for _, t := range so.Tables {
+				objLookup[strings.ToUpper(so.DB+"\x00"+so.Schema+"\x00"+t)] = objInfo{"table", so.DB, so.Schema, t}
+			}
+			for _, v := range so.Views {
+				objLookup[strings.ToUpper(so.DB+"\x00"+so.Schema+"\x00"+v)] = objInfo{"view", so.DB, so.Schema, v}
+			}
+		}
+
+		// multiScope mirrors the flag used by the generator to decide whether
+		// to prefix stub filenames with db_schema_.
+		multiScope := len(schemaObjects) > 1
+
+		for i := range schemaObjects {
+			if len(schemaObjects[i].ViewDefs) == 0 {
+				continue
+			}
+			newDefs := make(map[string]string, len(schemaObjects[i].ViewDefs))
+			for viewName, body := range schemaObjects[i].ViewDefs {
+				rewritten := snowflake.RewriteSQLReferences(
+					body,
+					schemaObjects[i].DB,
+					schemaObjects[i].Schema,
+					func(db, schema, name string) string {
+						key := strings.ToUpper(db + "\x00" + schema + "\x00" + name)
+						info, ok := objLookup[key]
+						if !ok {
+							return "" // not in selected schemas — leave as-is
+						}
+						sName := dbt.SourceName(info.db, info.schema)
+						if info.kind == "table" {
+							return fmt.Sprintf("{{ source('%s', '%s') }}", sName, info.name)
+						}
+						// view → ref to the generated staging model
+						modelName := dbt.StagingModelName(info.db, info.schema, info.name, multiScope)
+						return fmt.Sprintf("{{ ref('%s') }}", modelName)
+					},
+				)
+				newDefs[viewName] = rewritten
+			}
+			schemaObjects[i].ViewDefs = newDefs
+		}
+	}
+
 	return dbt.Generate(req, session, schemaObjects)
 }
 
