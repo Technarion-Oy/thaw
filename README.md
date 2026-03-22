@@ -592,7 +592,7 @@ thaw/
 │   ├── sfconfig/reader.go         # Snowflake CLI config (~/.snowflake/config.toml)
 │   ├── snowflake/client.go        # Snowflake driver wrapper
 │   ├── snowflake/lineage.go       # DDL-based dependency/lineage parser (recursive, cycle-safe)
-│   ├── snowflake/lineage_test.go  # Unit tests for lineage parser (40 cases; no Snowflake required)
+│   ├── snowflake/lineage_test.go  # Unit tests for lineage parser (56 cases; no Snowflake required)
 │   └── telemetry/telemetry.go     # Anonymous event tracking; remote-send placeholder
 └── frontend/
     ├── index.html
@@ -718,11 +718,13 @@ go tool cover -html=coverage.out
 
 ### Lineage parser tests
 
-`internal/snowflake/lineage_test.go` contains 40 unit tests for the DDL-based dependency engine — no Snowflake connection required:
+`internal/snowflake/lineage_test.go` contains 56 unit tests for the DDL-based dependency engine — no Snowflake connection required:
 
-- **Pure-function tests** — `stripQuotes`, `splitIdent`, `extractArgTypesFromShow`, `depKey`, `depVisited`, `extractDDLBody` for all object kinds
-- **Reference parsing** — `FROM`, `JOIN`, `MERGE INTO`, `UPDATE`, `INSERT INTO`, `CALL`, fully-qualified three-part names, quoted identifiers, CTE exclusion, `INFORMATION_SCHEMA` exclusion, comment stripping, and deduplication
-- **Full pipeline tests** — recursive multi-level dependency graphs, cross-database `MERGE`/`UNION`, complex quoted names, procedures with `CALL` + `SELECT`, commented-out `CALL` statements, and depth-limit clamping
+- **Pure-function tests** — `stripQuotes`, `splitIdent`, `extractArgTypesFromShow`, `depKey`, `depVisited`, `ExtractDDLBody` for all object kinds
+- **`ExtractDDLBody` edge cases** — `SECURE VIEW … COPY GRANTS`, `RECURSIVE VIEW`, many column aliases, semicolons inside string literals, single-quoted procedure bodies, SQL UDFs
+- **Reference parsing** — `FROM`, `JOIN` (all variants: `LEFT`/`RIGHT`/`INNER`/`FULL OUTER`), `MERGE INTO`, `UPDATE … FROM`, `INSERT INTO`, `CALL`, fully-qualified three-part names, quoted identifiers, CTE exclusion, `INFORMATION_SCHEMA` exclusion, comment stripping, and deduplication
+- **`RewriteSQLReferences` complex cases** — mixed `{{ source() }}`/`{{ ref() }}` in one query, same ref three times, `UNION ALL` across four databases, all JOIN variants, deeply nested CTEs, scalar subqueries, `WHERE IN`, case-insensitive lookup, two-part and three-part of the same table, `LATERAL FLATTEN`, `MERGE INTO`, `UPDATE FROM`, external refs left unchanged, and a documented CTE-alias shadowing limitation
+- **Full pipeline tests** — `ExtractDDLBody → RewriteSQLReferences` end-to-end: multi-level dependency graphs, cross-database `MERGE`/`UNION`, complex quoted names, procedures with `CALL` + `SELECT`, commented-out `CALL` statements, ten-table complex view with nested CTEs, window functions, and depth-limit clamping
 
 ```bash
 go test -v ./internal/snowflake/ -run "^Test"
@@ -735,7 +737,8 @@ go test -v ./internal/snowflake/ -run "^Test"
 - **`TestGenerate`** (25 cases) — end-to-end disk I/O tests using `t.TempDir()`: single and multi-scope sources, system/empty schemas, correct file contents, stub naming, `_sources.yml` structure, profiles.yml session values, and `.gitkeep` stubs
 - **`TestSourceName`** (9 cases) — source name construction from (db, schema) pairs
 - **`TestStagingModelPath`** (7 cases) — single-scope vs multi-scope stub path generation
-- **`TestStagingModelSQL`** (4 cases) — CTE structure, Jinja `{{ source(...) }}` references, comment line
+- **`TestStagingModelSQL`** (8 cases) — CTE structure, Jinja `{{ source(...) }}` references, comment line; plus inline-body mode: verbatim SQL embed, pre-rewritten Jinja refs, complex multi-CTE bodies, and empty-body fallback to passthrough stub
+- **`TestGenerate_InlineViewDefs`** (7 cases) — `InlineViewDefs` integration: view with body → inlined stub; view without body → source() passthrough; tables always use source(); partial `ViewDefs` maps; mixed tables + views; multi-scope prefixed filenames; explicit empty body treated as missing
 
 ```bash
 go test -v ./internal/dbt/
