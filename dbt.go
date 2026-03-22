@@ -97,12 +97,21 @@ func (a *App) CreateDbtProject(req dbt.CreateRequest, schemasMap map[string][]st
 }
 
 // GetSchemaCrossDeps returns the unique (database, schema) pairs referenced
-// by views in the given schema that fall outside that schema.  The dbt project
-// wizard calls this when the user selects a schema so it can highlight other
-// databases and schemas that should also be included as sources.
+// by views in the given schema that fall outside that schema.  Called for
+// individual schema selections in the dbt project wizard.
 func (a *App) GetSchemaCrossDeps(db, schema string) ([]snowflake.SchemaRef, error) {
 	if a.client == nil {
 		return nil, ErrNotConnected
 	}
 	return a.client.GetSchemaCrossDeps(a.ctx, db, schema)
+}
+
+// GetDatabaseCrossDeps analyses all given schemas in db sequentially in a
+// single call, avoiding N concurrent IPC goroutines when "Select all" is
+// clicked in the dbt project wizard.
+func (a *App) GetDatabaseCrossDeps(db string, schemas []string) ([]snowflake.SchemaRef, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.GetDatabaseCrossDeps(a.ctx, db, schemas)
 }

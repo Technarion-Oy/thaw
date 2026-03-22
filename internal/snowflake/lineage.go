@@ -149,52 +149,96 @@ func (c *Client) GetObjectDependencies(ctx context.Context, database, schema, ki
 	return root, nil
 }
 
-// GetSchemaCrossDeps returns the unique (database, schema) pairs that are
-// referenced by views in the given schema but fall outside that schema.
+// GetSchemaCrossDeps returns the unique (database, schema) pairs referenced
+// by views in db.schema that fall outside that schema.
 //
-// It reads VIEW_DEFINITION from INFORMATION_SCHEMA.VIEWS in a single query —
-// a fast metadata read, unlike GET_DDL which computes DDL for every object.
-// All view bodies are concatenated and parsed together with parseSQLReferences.
+// It issues a single SHOW VIEWS IN SCHEMA query — one round-trip, no
+// goroutines.  The "text" column returned by SHOW VIEWS contains the full
+// CREATE VIEW DDL, so we can extract the SELECT body with extractDDLBody and
+// scan it with parseSQLReferences without any additional Snowflake calls.
+// An empty schema returns immediately with zero rows.
 func (c *Client) GetSchemaCrossDeps(ctx context.Context, db, schema string) ([]SchemaRef, error) {
-	escVal := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
-	q := fmt.Sprintf(
-		`SELECT COALESCE(VIEW_DEFINITION, '') FROM "%s".INFORMATION_SCHEMA.VIEWS WHERE TABLE_SCHEMA = '%s'`,
-		strings.ReplaceAll(db, `"`, `""`),
-		escVal(strings.ToUpper(schema)),
-	)
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	q := fmt.Sprintf(`SHOW VIEWS IN SCHEMA "%s"."%s"`, esc(db), esc(schema))
+
 	rows, err := c.db.QueryContext(ctx, q)
 	if err != nil {
-		return nil, nil //nolint:nilerr — schema may be inaccessible; not fatal
+		return nil, nil //nolint:nilerr — inaccessible schema is non-fatal
 	}
+	defer rows.Close()
 
-	var buf strings.Builder
-	for rows.Next() {
-		var def string
-		if err := rows.Scan(&def); err != nil {
-			continue
+	// Locate the "text" column that contains the full CREATE VIEW DDL.
+	cols, _ := rows.Columns()
+	textIdx := -1
+	for i, col := range cols {
+		if strings.EqualFold(col, "text") {
+			textIdx = i
+			break
 		}
-		buf.WriteString(def)
-		buf.WriteByte('\n')
 	}
-	rows.Close()
-
-	if buf.Len() == 0 {
+	if textIdx < 0 {
 		return nil, nil
 	}
 
+	vals := make([]any, len(cols))
+	ptrs := make([]any, len(cols))
+	for i := range vals {
+		ptrs[i] = &vals[i]
+	}
+
+	seen := map[string]bool{}
+	var refs []SchemaRef
+
+	for rows.Next() {
+		if ctx.Err() != nil {
+			break
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			continue
+		}
+		viewDDL, _ := vals[textIdx].(string)
+		if viewDDL == "" {
+			continue
+		}
+		body := extractDDLBody(viewDDL, "VIEW")
+		if body == "" {
+			continue
+		}
+		for _, ref := range parseSQLReferences(body, db, schema) {
+			if strings.EqualFold(ref.db, db) && strings.EqualFold(ref.schema, schema) {
+				continue
+			}
+			key := strings.ToUpper(ref.db + "." + ref.schema)
+			if !seen[key] {
+				seen[key] = true
+				refs = append(refs, SchemaRef{
+					Database: strings.ToUpper(ref.db),
+					Schema:   strings.ToUpper(ref.schema),
+				})
+			}
+		}
+	}
+	return refs, nil
+}
+
+// GetDatabaseCrossDeps calls GetSchemaCrossDeps for each schema sequentially
+// and returns the combined unique (database, schema) pairs.  Callers should
+// prefer this over firing N concurrent GetSchemaCrossDeps IPC calls to avoid
+// exhausting Snowflake connection pool when a database has many schemas.
+func (c *Client) GetDatabaseCrossDeps(ctx context.Context, db string, schemas []string) ([]SchemaRef, error) {
 	seen := map[string]bool{}
 	var result []SchemaRef
-	for _, ref := range parseSQLReferences(buf.String(), db, schema) {
-		if strings.EqualFold(ref.db, db) && strings.EqualFold(ref.schema, schema) {
-			continue // self-reference — skip
+	for _, schema := range schemas {
+		if ctx.Err() != nil {
+			break
 		}
-		key := strings.ToUpper(ref.db + "." + ref.schema)
-		if !seen[key] {
-			seen[key] = true
-			result = append(result, SchemaRef{
-				Database: strings.ToUpper(ref.db),
-				Schema:   strings.ToUpper(ref.schema),
-			})
+		refs, _ := c.GetSchemaCrossDeps(ctx, db, schema)
+		for _, r := range refs {
+			key := r.Database + "." + r.Schema
+			if !seen[key] {
+				seen[key] = true
+				result = append(result, r)
+			}
 		}
 	}
 	return result, nil

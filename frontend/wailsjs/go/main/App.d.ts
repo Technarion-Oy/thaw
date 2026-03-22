@@ -113,6 +113,8 @@ export function GetCurrentRegion():Promise<string>;
 
 export function GetCurrentUser():Promise<string>;
 
+export function GetDatabaseCrossDeps(arg1:string,arg2:Array<string>):Promise<Array<snowflake.SchemaRef>>;
+
 export function GetERDiagramData(arg1:string):Promise<snowflake.ERDiagramData>;
 
 export function GetFunctionInfo(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.FunctionInfo>;

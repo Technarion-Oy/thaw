@@ -26,6 +26,7 @@ import {
 import { FolderOpenOutlined, LinkOutlined, WarningOutlined } from "@ant-design/icons";
 import {
   CreateDbtProject,
+  GetDatabaseCrossDeps,
   GetGitConfig,
   GetSchemaCrossDeps,
   ListDatabases,
@@ -60,7 +61,8 @@ export default function DbtProjectModal({ onClose }: Props) {
   const [loadingSchemas, setLoadingSchemas] = useState<Record<string, boolean>>({});
   const [selectedSchemas, setSelectedSchemas] = useState<Record<string, Set<string>>>({});
 
-  // Step 1 — Dependency hints: maps "DB||SCHEMA" → list of "DB||SCHEMA" it references externally
+  // Step 1 — Dependency hints: maps "DB||SCHEMA" → list of "DB||SCHEMA" external refs.
+  // Populated lazily when a schema is selected (one call per schema, cached).
   const [crossDeps, setCrossDeps] = useState<Record<string, string[]>>({});
   const [fetchingDeps, setFetchingDeps] = useState<Record<string, boolean>>({});
 
@@ -70,9 +72,12 @@ export default function DbtProjectModal({ onClose }: Props) {
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [filesExpanded, setFilesExpanded] = useState(false);
 
-  // Track mount state so async callbacks don't update state after unmount
+  // Track mount state so async callbacks don't update state after unmount.
+  // The effect body resets to true to handle React 18 Strict Mode's
+  // mount → unmount → remount cycle (which would otherwise leave the ref false).
   const mountedRef = useRef(true);
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
@@ -157,7 +162,8 @@ export default function DbtProjectModal({ onClose }: Props) {
     setLoadingSchemas((prev) => ({ ...prev, [db]: true }));
     ListSchemas(db)
       .then((schemas) => {
-        setSchemasByDb((prev) => ({ ...prev, [db]: schemas ?? [] }));
+        const list = schemas ?? [];
+        setSchemasByDb((prev) => ({ ...prev, [db]: list }));
       })
       .catch(() => {
         setSchemasByDb((prev) => ({ ...prev, [db]: [] }));
@@ -171,7 +177,8 @@ export default function DbtProjectModal({ onClose }: Props) {
     return selectedSchemas[db]?.has(schema) ?? false;
   }
 
-  // Fetch cross-schema deps for (db, schema) unless already cached or in flight.
+  // Fetch cross-schema deps for a single schema, unless already cached or in flight.
+  // Uses GetObjectDependencies (the existing lineage engine) for each view in the schema.
   function fetchDepFor(db: string, schema: string) {
     if (isSystemSchema(schema)) return;
     const key = `${db}||${schema}`;
@@ -221,8 +228,50 @@ export default function DbtProjectModal({ onClose }: Props) {
   function selectAllSchemas(db: string) {
     const schemas = (schemasByDb[db] ?? []).filter((s) => !isSystemSchema(s));
     setSelectedSchemas((prev) => ({ ...prev, [db]: new Set(schemas) }));
-    // Trigger dep analysis for every schema being selected.
-    schemas.forEach((schema) => fetchDepFor(db, schema));
+    // Use a single batched call (one IPC goroutine, sequential per schema)
+    // rather than N concurrent GetSchemaCrossDeps calls, to avoid exhausting
+    // the Snowflake connection pool.
+    const uncached = schemas.filter((s) => {
+      const key = `${db}||${s}`;
+      return crossDeps[key] === undefined && !fetchingDeps[key];
+    });
+    if (uncached.length === 0) return;
+    // Mark all as fetching immediately so concurrent calls from toggleSchema
+    // don't duplicate the work.
+    setFetchingDeps((prev) => {
+      const next = { ...prev };
+      uncached.forEach((s) => { next[`${db}||${s}`] = true; });
+      return next;
+    });
+    GetDatabaseCrossDeps(db, uncached)
+      .then((refs) => {
+        if (!mountedRef.current) return;
+        // The batch result is the union of refs for all uncached schemas.
+        // Store the same combined list under each schema key so that
+        // suggestedSet and referencedByLabels work correctly.
+        const depKeys = (refs ?? []).map((r) => `${r.database}||${r.schema}`);
+        setCrossDeps((prev) => {
+          const next = { ...prev };
+          uncached.forEach((s) => { next[`${db}||${s}`] = depKeys; });
+          return next;
+        });
+      })
+      .catch(() => {
+        if (!mountedRef.current) return;
+        setCrossDeps((prev) => {
+          const next = { ...prev };
+          uncached.forEach((s) => { next[`${db}||${s}`] = []; });
+          return next;
+        });
+      })
+      .finally(() => {
+        if (!mountedRef.current) return;
+        setFetchingDeps((prev) => {
+          const next = { ...prev };
+          uncached.forEach((s) => { delete next[`${db}||${s}`]; });
+          return next;
+        });
+      });
   }
 
   function deselectAllSchemas(db: string) {

@@ -260,6 +260,7 @@ Open **Tools → Create dbt Project…** to scaffold a complete dbt project pre-
 - Expand any database to fetch and display its schemas as a checkbox list
 - **Select all / Deselect all** link per database for quick selection
 - `INFORMATION_SCHEMA` is shown with a warning icon and descriptive tooltip, excluded from **Select all**; when checked, it is added to `_sources.yml` as a system schema entry but no staging stubs or `ListObjects` calls are made — this matches dbt convention for referencing virtual Snowflake schemas
+- **Cross-schema dependency hints** — checking a schema triggers a background analysis of all views in that schema (via `SHOW VIEWS IN SCHEMA`, which returns the full `CREATE VIEW` DDL); view bodies are scanned for `FROM` / `JOIN` references to other schemas; any referenced schema not yet selected is highlighted in the list with an amber indicator and a tooltip listing the selected schemas that reference it; "Select all" for a database triggers a single batched analysis of all schemas at once; analysis is non-blocking — the spinner shows "Analysing dependencies…" per schema while in flight and disappears silently when done; results are cached for the lifetime of the wizard
 - At least one schema must be selected to proceed
 
 ### Step 3 — Generate
