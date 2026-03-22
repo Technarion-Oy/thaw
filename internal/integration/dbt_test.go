@@ -45,7 +45,7 @@ import (
 //
 // Both temporary databases are dropped via t.Cleanup even when the test fails.
 func TestDbtProjectRoundTrip(t *testing.T) {
-	if _, err := exec.LookPath("dbt"); err != nil {
+	if _, err := osexec.LookPath("dbt"); err != nil {
 		t.Skip("dbt not found in PATH — install dbt-snowflake to run this test")
 	}
 
@@ -232,7 +232,7 @@ func TestDbtProjectRoundTrip(t *testing.T) {
 
 	// `dbt debug` validates the profiles.yml connection before doing any work.
 	// Failures here point to credential or network issues, not dbt model bugs.
-	debugCmd := exec.CommandContext(dbtCtx, "dbt", "debug",
+	debugCmd := osexec.CommandContext(dbtCtx, "dbt", "debug",
 		"--project-dir", result.ProjectDir,
 		"--profiles-dir", result.ProjectDir,
 	)
@@ -242,7 +242,7 @@ func TestDbtProjectRoundTrip(t *testing.T) {
 		t.Fatalf("dbt debug failed — check profiles.yml credentials: %v", debugErr)
 	}
 
-	runCmd := exec.CommandContext(dbtCtx, "dbt", "run",
+	runCmd := osexec.CommandContext(dbtCtx, "dbt", "run",
 		"--project-dir", result.ProjectDir,
 		"--profiles-dir", result.ProjectDir,
 	)
