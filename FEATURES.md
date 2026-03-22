@@ -62,6 +62,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Hover for DDL** — hovering any node shows its DDL definition in a tooltip; content is fetched lazily on first hover and cached for 60 seconds
   - Tables and non-SQL objects (non-SQL procedures, external functions) are shown as leaf nodes
   - The tree is fully expanded on load; nodes can be collapsed and re-expanded manually
+  - **Multi-CTE correctness** — all CTE aliases in a `WITH` clause (first and subsequent `cte_name AS (...)` entries) are correctly excluded from the dependency list; only real table/view references produce dependency nodes
 - **Right-click tables and views** to:
   - Select the top 1,000 rows — opens a new tab and executes immediately
   - **Time Travel Query** — drag a timeline slider to query data at any past point within the retention window

@@ -87,8 +87,11 @@ var (
 	// Procedure calls
 	reCall = regexp.MustCompile(`(?i)\bCALL\s+(` + identPat + `)\s*\(`)
 
-	// CTE names (to be excluded from references)
-	reCTE = regexp.MustCompile(`(?i)\b(?:WITH|,)\s+((?:"[^"]*"|\w+))\s+AS\s*\(`)
+	// CTE names (to be excluded from references).
+	// \bWITH handles the first CTE; bare , handles subsequent ones.
+	// Using \b before the whole alternation would fail after ")" because ")"
+	// is \W, so \b, never fires — hence the split form (?:\bWITH|,).
+	reCTE = regexp.MustCompile(`(?i)(?:\bWITH|,)\s+((?:"[^"]*"|\w+))\s+AS\s*\(`)
 
 	// Language check for procedures/functions
 	reLanguageSQL = regexp.MustCompile(`(?i)\bLANGUAGE\s+SQL\b`)

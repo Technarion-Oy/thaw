@@ -558,6 +558,7 @@ thaw/
 │   ├── sfconfig/reader.go         # Snowflake CLI config (~/.snowflake/config.toml)
 │   ├── snowflake/client.go        # Snowflake driver wrapper
 │   ├── snowflake/lineage.go       # DDL-based dependency/lineage parser (recursive, cycle-safe)
+│   ├── snowflake/lineage_test.go  # Unit tests for lineage parser (40 cases; no Snowflake required)
 │   └── telemetry/telemetry.go     # Anonymous event tracking; remote-send placeholder
 └── frontend/
     ├── index.html
@@ -678,6 +679,18 @@ which exercises the collision resolver under concurrent load.
 ```bash
 go test -coverprofile=coverage.out ./...
 go tool cover -html=coverage.out
+```
+
+### Lineage parser tests
+
+`internal/snowflake/lineage_test.go` contains 40 unit tests for the DDL-based dependency engine — no Snowflake connection required:
+
+- **Pure-function tests** — `stripQuotes`, `splitIdent`, `extractArgTypesFromShow`, `depKey`, `depVisited`, `extractDDLBody` for all object kinds
+- **Reference parsing** — `FROM`, `JOIN`, `MERGE INTO`, `UPDATE`, `INSERT INTO`, `CALL`, fully-qualified three-part names, quoted identifiers, CTE exclusion, `INFORMATION_SCHEMA` exclusion, comment stripping, and deduplication
+- **Full pipeline tests** — recursive multi-level dependency graphs, cross-database `MERGE`/`UNION`, complex quoted names, procedures with `CALL` + `SELECT`, commented-out `CALL` statements, and depth-limit clamping
+
+```bash
+go test -v ./internal/snowflake/ -run "^Test"
 ```
 
 ### Migration helper tests
