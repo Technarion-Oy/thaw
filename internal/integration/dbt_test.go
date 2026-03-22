@@ -16,7 +16,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
