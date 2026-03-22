@@ -157,7 +157,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - Kernel status indicator in the toolbar: "Starting kernel…" spinner, "Kernel ready" tag, or "Kernel error" tag
 
 ### File management
-- **Open…** (`⌘O` / `Ctrl+O`) — native OS open-file dialog filtered to `.sql`; re-activates an existing tab if the file is already open
+- **Open…** (`⌘O` / `Ctrl+O`) — native OS open-file dialog filtered to `.sql`, `.yml`, `.yaml`, and `.py`; opens in the configured export directory by default; re-activates an existing tab if the file is already open; the editor automatically uses YAML or Python syntax highlighting based on the file extension
 - **Save** (`⌘S` / `Ctrl+S`) — writes back to the file's original path
 - **Save As…** (`⌘⇧S` / `Ctrl+Shift+S`) — native OS save dialog with `.sql` filter; also promotes a scratch tab to a named file tab
 - **New Tab** (`⌘T` / `Ctrl+T`) — opens a blank scratch tab

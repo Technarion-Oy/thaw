@@ -166,7 +166,7 @@ Open **AI → Configure AI…** in the menu bar to set your provider, API key, a
 
 ## File Management
 
-- **Open** (`⌘O` / `Ctrl+O`) — native OS file dialog; re-activates an existing tab if the file is already open
+- **Open** (`⌘O` / `Ctrl+O`) — native OS file dialog filtered to `.sql`, `.yml`, `.yaml`, and `.py`; opens in the configured export directory by default; re-activates an existing tab if the file is already open; the editor automatically uses YAML or Python syntax highlighting based on the file extension
 - **Save** (`⌘S` / `Ctrl+S`) — writes back to the file's original path
 - **Save As…** (`⌘⇧S` / `Ctrl+Shift+S`) — native OS save dialog; promotes a scratch tab to a named file
 - **New Tab** (`⌘T` / `Ctrl+T`) — opens a blank scratch tab

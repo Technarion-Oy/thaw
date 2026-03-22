@@ -265,6 +265,8 @@ export const thawDarkTheme = {
     { token: "keyword.logic",    foreground: "79c0ff" },
     // Control flow — lavender   (CASE, WHEN, THEN, ELSE, END, IFF …)
     { token: "keyword.control",  foreground: "d2a8ff" },
+    // Generic keyword fallback — matches any keyword.* token not caught above
+    { token: "keyword",          foreground: "79c0ff" },
     // Constants — amber          (NULL, TRUE, FALSE, CURRENT_DATE …)
     { token: "constant",         foreground: "ffa657", fontStyle: "italic" },
     // Built-in functions — gold  (COUNT, SUM, DATEADD, COALESCE …)
@@ -326,6 +328,8 @@ export const thawLightTheme = {
     { token: "keyword.logic",    foreground: "0550ae" },
     // Control flow — purple
     { token: "keyword.control",  foreground: "8250df" },
+    // Generic keyword fallback — matches any keyword.* token not caught above
+    { token: "keyword",          foreground: "0550ae" },
     // Constants — dark azure
     { token: "constant",         foreground: "0969da", fontStyle: "italic" },
     // Built-in functions — dark amber/brown
