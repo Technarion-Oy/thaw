@@ -9,6 +9,10 @@ export default defineConfig({
       "@": "/src",
     },
   },
+  // Pre-bundle monaco-yaml so Vite doesn't try to transform it on first request.
+  optimizeDeps: {
+    include: ["monaco-yaml"],
+  },
   server: {
     watch: {
       // Wails regenerates these files during dev-mode startup; ignore them so

@@ -574,10 +574,19 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   const setSql = tabId ? (newSql: string) => setSqlForTab(tabId, newSql) : activeSqlSetter;
 
   // Derive Monaco language from the active (or pinned) tab's kind.
-  const activeKind = tabs.find((t) => t.id === (tabId ?? activeTabId))?.kind;
+  const activeTab      = tabs.find((t) => t.id === (tabId ?? activeTabId));
+  const activeKind     = activeTab?.kind;
   const editorLanguage = activeKind === "python" ? "python"
     : activeKind === "yaml"   ? "yaml"
     : "sql";
+  // For YAML files pass the real file path as the Monaco model URI so that
+  // configureMonacoYaml's fileMatch glob patterns (e.g. **/dbt_project.yml)
+  // can match by filename and apply the correct dbt JSON Schema.
+  // Scratch YAML tabs (no saved path) use a synthetic path keyed on the tab
+  // ID so each scratch tab gets its own model and the catch-all schema applies.
+  const yamlModelPath = editorLanguage === "yaml"
+    ? (activeTab?.path ?? `untitled-${tabId ?? activeTabId}.yml`)
+    : undefined;
   const resolved          = useThemeStore((s) => s.resolved);
   const editorFont        = useThemeStore((s) => s.editorFont);
   const editorFontSize    = useThemeStore((s) => s.editorFontSize);
@@ -1839,6 +1848,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       height="100%"
       language={editorLanguage}
       theme={resolved === "dark" ? "thaw-dark" : "thaw-light"}
+      path={yamlModelPath}
       value={sql}
       onChange={(v) => setSql(v ?? "")}
       beforeMount={handleBeforeMount}
