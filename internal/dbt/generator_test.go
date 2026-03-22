@@ -737,7 +737,7 @@ func TestStagingModelSQL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := stagingModelSQL(tt.source, tt.table)
+			got := stagingModelSQL(tt.source, tt.table, "")
 			for _, needle := range tt.mustContain {
 				assertContains(t, got, needle, "stagingModelSQL")
 			}

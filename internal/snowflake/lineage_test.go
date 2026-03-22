@@ -161,7 +161,7 @@ func TestDepVisited(t *testing.T) {
 func TestExtractDDLBody_View_AS_SELECT(t *testing.T) {
 	ddl := `CREATE OR REPLACE VIEW "MY_DB"."MY_SCHEMA"."MY_VIEW" AS
 SELECT a, b FROM base_table WHERE a > 0;`
-	body := extractDDLBody(ddl, "VIEW")
+	body := ExtractDDLBody(ddl, "VIEW")
 	if body == "" {
 		t.Fatal("expected non-empty body")
 	}
@@ -174,7 +174,7 @@ func TestExtractDDLBody_View_AS_WITH(t *testing.T) {
 	ddl := `CREATE VIEW "DB"."SC"."V" AS
 WITH cte AS (SELECT id FROM raw)
 SELECT * FROM cte;`
-	body := extractDDLBody(ddl, "VIEW")
+	body := ExtractDDLBody(ddl, "VIEW")
 	if !containsWord(body, "raw") {
 		t.Errorf("body should contain 'raw'; got:\n%s", body)
 	}
@@ -192,7 +192,7 @@ JOIN "SALES"."PUBLIC"."ORDER_ITEMS" oi ON o.order_id = oi.order_id
 JOIN "SALES"."PUBLIC"."CUSTOMERS" c  ON o.customer_id = c.customer_id
 JOIN "PRODUCT_DB"."CATALOG"."PRODUCTS" p ON oi.product_id = p.product_id
 WHERE o.status = 'COMPLETE';`
-	body := extractDDLBody(ddl, "VIEW")
+	body := ExtractDDLBody(ddl, "VIEW")
 	for _, tbl := range []string{"ORDERS", "ORDER_ITEMS", "CUSTOMERS", "PRODUCTS"} {
 		if !containsWord(body, tbl) {
 			t.Errorf("body should contain %q; got:\n%s", tbl, body)
@@ -210,7 +210,7 @@ BEGIN
   CALL helper_proc();
 END;
 $$;`
-	body := extractDDLBody(ddl, "PROCEDURE")
+	body := ExtractDDLBody(ddl, "PROCEDURE")
 	if body == "" {
 		t.Fatal("expected non-empty body for SQL procedure")
 	}
@@ -221,7 +221,7 @@ $$;`
 
 func TestExtractDDLBody_Procedure_SingleDollar(t *testing.T) {
 	ddl := "CREATE PROCEDURE \"DB\".\"SC\".\"P\"()\nRETURNS VARCHAR\nLANGUAGE SQL\nAS\n$\nBEGIN\n  SELECT * FROM single_dollar_table;\nEND;\n$"
-	body := extractDDLBody(ddl, "PROCEDURE")
+	body := ExtractDDLBody(ddl, "PROCEDURE")
 	if body == "" {
 		t.Fatal("expected non-empty body for single-$ procedure")
 	}
@@ -237,7 +237,7 @@ LANGUAGE JAVASCRIPT
 AS $$
   return snowflake.execute({sqlText: "SELECT 1"});
 $$;`
-	body := extractDDLBody(ddl, "PROCEDURE")
+	body := ExtractDDLBody(ddl, "PROCEDURE")
 	if body != "" {
 		t.Errorf("non-SQL procedure should return empty body; got:\n%s", body)
 	}
@@ -250,7 +250,7 @@ LANGUAGE SQL
 AS $$
 SELECT SUM(amount) FROM "FINANCE"."ACC"."TRANSACTIONS" WHERE id = val
 $$;`
-	body := extractDDLBody(ddl, "FUNCTION")
+	body := ExtractDDLBody(ddl, "FUNCTION")
 	if !containsWord(body, "TRANSACTIONS") {
 		t.Errorf("body should contain TRANSACTIONS; got:\n%s", body)
 	}
@@ -266,7 +266,7 @@ AS $$
 def compute(x):
     return x * 2
 $$;`
-	body := extractDDLBody(ddl, "FUNCTION")
+	body := ExtractDDLBody(ddl, "FUNCTION")
 	if body != "" {
 		t.Errorf("Python function should return empty body; got:\n%s", body)
 	}
@@ -274,7 +274,7 @@ $$;`
 
 func TestExtractDDLBody_UnknownKind_ReturnsEmpty(t *testing.T) {
 	ddl := `CREATE TABLE foo (id INT)`
-	if body := extractDDLBody(ddl, "TABLE"); body != "" {
+	if body := ExtractDDLBody(ddl, "TABLE"); body != "" {
 		t.Errorf("TABLE kind should return empty body; got:\n%s", body)
 	}
 }
@@ -490,7 +490,7 @@ SELECT
 FROM enriched
 GROUP BY 1;`
 
-	body := extractDDLBody(ddl, "VIEW")
+	body := ExtractDDLBody(ddl, "VIEW")
 	if body == "" {
 		t.Fatal("body must not be empty")
 	}
@@ -533,7 +533,7 @@ BEGIN
 END;
 $$;`
 
-	body := extractDDLBody(ddl, "PROCEDURE")
+	body := ExtractDDLBody(ddl, "PROCEDURE")
 	if body == "" {
 		t.Fatal("expected non-empty body")
 	}
@@ -555,7 +555,7 @@ FROM "Sales DB"."Order Mgmt"."Sales Fact" s
 JOIN "Geo DB"."Reference"."Region Dim" r ON s.region_id = r.id
 LEFT JOIN "Sales DB"."Order Mgmt"."Discount Table" d ON s.discount_id = d.id;`
 
-	body := extractDDLBody(ddl, "VIEW")
+	body := ExtractDDLBody(ddl, "VIEW")
 	refs := parseSQLReferences(body, "Analytics DB", "Reporting Schema")
 
 	assertContainsRef(t, refs, sqlRef{db: "Sales DB", schema: "Order Mgmt", name: "Sales Fact"})
@@ -601,7 +601,7 @@ BEGIN
 END;
 $$;`
 
-	body := extractDDLBody(ddl, "PROCEDURE")
+	body := ExtractDDLBody(ddl, "PROCEDURE")
 	if body == "" {
 		t.Fatal("expected non-empty body")
 	}
@@ -632,7 +632,7 @@ UNION ALL
 SELECT user_id, 'purchase' AS event_type, created_at AS ts
 FROM "COMMERCE"."ORDERS"."PURCHASES";`
 
-	body := extractDDLBody(ddl, "VIEW")
+	body := ExtractDDLBody(ddl, "VIEW")
 	refs := parseSQLReferences(body, "BI", "PUBLIC")
 
 	assertContainsRef(t, refs, sqlRef{db: "APP_DB", schema: "EVENTS", name: "CLICK_EVENTS"})
@@ -649,7 +649,7 @@ SELECT
 FROM "DB"."SC"."USERS" u
 WHERE u.id IN (SELECT DISTINCT user_id FROM "DB"."SC"."SESSIONS");`
 
-	body := extractDDLBody(ddl, "VIEW")
+	body := ExtractDDLBody(ddl, "VIEW")
 	refs := parseSQLReferences(body, "DB", "SC")
 	assertContainsRef(t, refs, sqlRef{db: "DB", schema: "SC", name: "LOGIN_EVENTS"})
 	assertContainsRef(t, refs, sqlRef{db: "DB", schema: "SC", name: "USERS"})
@@ -668,7 +668,7 @@ BEGIN
   CALL live_proc();
 END;
 $$;`
-	body := extractDDLBody(ddl, "PROCEDURE")
+	body := ExtractDDLBody(ddl, "PROCEDURE")
 	refs := parseSQLReferences(body, "DB", "SC")
 
 	for _, r := range refs {

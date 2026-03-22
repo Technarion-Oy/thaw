@@ -154,7 +154,7 @@ func (c *Client) GetObjectDependencies(ctx context.Context, database, schema, ki
 //
 // It issues a single SHOW VIEWS IN SCHEMA query — one round-trip, no
 // goroutines.  The "text" column returned by SHOW VIEWS contains the full
-// CREATE VIEW DDL, so we can extract the SELECT body with extractDDLBody and
+// CREATE VIEW DDL, so we can extract the SELECT body with ExtractDDLBody and
 // scan it with parseSQLReferences without any additional Snowflake calls.
 // An empty schema returns immediately with zero rows.
 func (c *Client) GetSchemaCrossDeps(ctx context.Context, db, schema string) ([]SchemaRef, error) {
@@ -200,7 +200,7 @@ func (c *Client) GetSchemaCrossDeps(ctx context.Context, db, schema string) ([]S
 		if viewDDL == "" {
 			continue
 		}
-		body := extractDDLBody(viewDDL, "VIEW")
+		body := ExtractDDLBody(viewDDL, "VIEW")
 		if body == "" {
 			continue
 		}
@@ -251,7 +251,7 @@ func (c *Client) buildChildren(ctx context.Context, ddlText, defaultDB, defaultS
 		return nil
 	}
 
-	body := extractDDLBody(ddlText, kind)
+	body := ExtractDDLBody(ddlText, kind)
 	if body == "" {
 		return nil
 	}
@@ -430,10 +430,14 @@ func extractArgTypesFromShow(s string) string {
 
 // ── DDL body extraction ───────────────────────────────────────────────────────
 
-// extractDDLBody returns the SQL body of a DDL statement that should be
+// ExtractDDLBody returns the SQL body of a DDL statement that should be
 // scanned for object references.  Returns an empty string when the body cannot
 // be extracted (e.g. non-SQL-language procedures).
-func extractDDLBody(ddl, kind string) string {
+//
+// For VIEWs this is the SELECT/WITH clause that follows the final AS keyword.
+// Exported so callers outside the package (e.g. the dbt generator) can inline
+// view definitions without duplicating the extraction logic.
+func ExtractDDLBody(ddl, kind string) string {
 	switch strings.ToUpper(kind) {
 	case "VIEW":
 		// Everything after the final AS that precedes SELECT or WITH.

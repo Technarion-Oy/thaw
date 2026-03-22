@@ -84,12 +84,33 @@ func (a *App) CreateDbtProject(req dbt.CreateRequest, schemasMap map[string][]st
 				}
 			}
 
-			schemaObjects = append(schemaObjects, dbt.SchemaObjects{
+			so := dbt.SchemaObjects{
 				DB:     db,
 				Schema: schema,
 				Tables: tables,
 				Views:  views,
-			})
+			}
+
+			// When the user opted to inline view SQL, fetch the DDL for each
+			// view and extract its SELECT body.  Sequential per-view GET_DDL
+			// calls (no goroutines) to avoid exhausting the connection pool.
+			// Views are typically far fewer than tables, and this path is
+			// opt-in only.
+			if req.InlineViewDefs && len(views) > 0 {
+				viewDefs := make(map[string]string, len(views))
+				for _, v := range views {
+					ddl, err := a.client.GetObjectDDL(a.ctx, db, schema, "VIEW", v, "")
+					if err != nil {
+						continue // non-fatal: fall back to pass-through stub
+					}
+					if body := snowflake.ExtractDDLBody(ddl, "VIEW"); body != "" {
+						viewDefs[v] = body
+					}
+				}
+				so.ViewDefs = viewDefs
+			}
+
+			schemaObjects = append(schemaObjects, so)
 		}
 	}
 

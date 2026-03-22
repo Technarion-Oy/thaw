@@ -19,6 +19,7 @@ import {
   Space,
   Spin,
   Steps,
+  Switch,
   Tag,
   Tooltip,
   Typography,
@@ -65,6 +66,9 @@ export default function DbtProjectModal({ onClose }: Props) {
   // Populated lazily when a schema is selected (one call per schema, cached).
   const [crossDeps, setCrossDeps] = useState<Record<string, string[]>>({});
   const [fetchingDeps, setFetchingDeps] = useState<Record<string, boolean>>({});
+
+  // Step 0 — options
+  const [inlineViewDefs, setInlineViewDefs] = useState(false);
 
   // Step 2 — Generate
   const [generating, setGenerating] = useState(false);
@@ -320,6 +324,7 @@ export default function DbtProjectModal({ onClose }: Props) {
       projectName,
       outputDir,
       profileName,
+      inlineViewDefs,
     };
 
     try {
@@ -412,6 +417,19 @@ export default function DbtProjectModal({ onClose }: Props) {
             description={`A directory named "${projectName}" already exists in the selected output folder. Files will be overwritten.`}
           />
         )}
+
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Switch checked={inlineViewDefs} onChange={setInlineViewDefs} />
+            <Text strong>Inline view SQL definitions</Text>
+          </div>
+          <Text type="secondary" style={{ fontSize: 12, display: "block", marginTop: 4, paddingLeft: 46 }}>
+            Embed the actual <code>SELECT</code> body of each Snowflake view into its staging stub
+            instead of a generic pass-through. Table references remain as raw Snowflake identifiers
+            — replace them with <code>{"{{ source() }}"}</code> or <code>{"{{ ref() }}"}</code> calls
+            as needed. Requires one extra <code>GET_DDL</code> call per view.
+          </Text>
+        </div>
 
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
           <Button type="primary" onClick={handleStep0Next} disabled={!canNext}>
