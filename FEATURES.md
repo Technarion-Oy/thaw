@@ -260,6 +260,7 @@ Open **Tools → Create dbt Project…** to scaffold a complete dbt project pre-
   - Three-part references to **views** in selected schemas → `{{ ref('stg_model_name') }}`
   - References to objects **outside** the selected schemas → left unchanged
   - CTE aliases are excluded to prevent false-positive replacements; single-part names are never replaced to avoid collisions with column aliases
+- **Use dbt variables for database names** toggle (off by default) — when enabled, adds a `vars:` block to `dbt_project.yml` with one entry per selected database (e.g. `db_mydb: MYDB`, sorted alphabetically) and replaces hardcoded database names in `_sources.yml` with `{{ var('db_mydb', 'MYDB') }}` calls; the default value in the var preserves the original database name casing; retargeting the project at a different database then only requires overriding the relevant variable
 
 ### Step 2 — Select Sources
 - Databases load lazily from the live Snowflake connection
@@ -279,7 +280,7 @@ Open **Tools → Create dbt Project…** to scaffold a complete dbt project pre-
 
 | File | Description |
 |------|-------------|
-| `dbt_project.yml` | Project config: name, profile reference, materialization defaults (staging → view, marts → table) |
+| `dbt_project.yml` | Project config: name, profile reference, materialization defaults (staging → view, marts → table); optional `vars:` block when **Use dbt variables** is enabled |
 | `profiles.yml` | Pre-filled from the live session: account, user, role, warehouse, database, schema |
 | `models/staging/_sources.yml` | One `source:` entry per selected (database, schema) |
 | `models/staging/stg_<table>.sql` | CTE stub per table/view (`with source as … renamed as … select * from renamed`) |
