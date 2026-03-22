@@ -150,24 +150,41 @@ func (c *Client) GetObjectDependencies(ctx context.Context, database, schema, ki
 }
 
 // GetSchemaCrossDeps returns the unique (database, schema) pairs that are
-// referenced by objects in the given schema but fall outside that schema.
-// It fetches the entire schema DDL in a single GET_DDL call, then parses it
-// for cross-schema references — much faster than fetching DDL per object.
+// referenced by views in the given schema but fall outside that schema.
+//
+// It reads VIEW_DEFINITION from INFORMATION_SCHEMA.VIEWS in a single query —
+// a fast metadata read, unlike GET_DDL which computes DDL for every object.
+// All view bodies are concatenated and parsed together with parseSQLReferences.
 func (c *Client) GetSchemaCrossDeps(ctx context.Context, db, schema string) ([]SchemaRef, error) {
+	escVal := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
 	q := fmt.Sprintf(
-		`SELECT GET_DDL('SCHEMA', '"%s"."%s"')`,
+		`SELECT COALESCE(VIEW_DEFINITION, '') FROM "%s".INFORMATION_SCHEMA.VIEWS WHERE TABLE_SCHEMA = '%s'`,
 		strings.ReplaceAll(db, `"`, `""`),
-		strings.ReplaceAll(schema, `"`, `""`),
+		escVal(strings.ToUpper(schema)),
 	)
-	var ddl string
-	if err := c.db.QueryRowContext(ctx, q).Scan(&ddl); err != nil {
-		// Schema may be empty or inaccessible — not a fatal error for the wizard.
-		return nil, nil //nolint:nilerr
+	rows, err := c.db.QueryContext(ctx, q)
+	if err != nil {
+		return nil, nil //nolint:nilerr — schema may be inaccessible; not fatal
+	}
+
+	var buf strings.Builder
+	for rows.Next() {
+		var def string
+		if err := rows.Scan(&def); err != nil {
+			continue
+		}
+		buf.WriteString(def)
+		buf.WriteByte('\n')
+	}
+	rows.Close()
+
+	if buf.Len() == 0 {
+		return nil, nil
 	}
 
 	seen := map[string]bool{}
 	var result []SchemaRef
-	for _, ref := range parseSQLReferences(ddl, db, schema) {
+	for _, ref := range parseSQLReferences(buf.String(), db, schema) {
 		if strings.EqualFold(ref.db, db) && strings.EqualFold(ref.schema, schema) {
 			continue // self-reference — skip
 		}
