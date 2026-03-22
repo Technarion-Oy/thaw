@@ -8,7 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Button,
@@ -19,13 +19,15 @@ import {
   Space,
   Spin,
   Steps,
+  Tag,
   Tooltip,
   Typography,
 } from "antd";
-import { FolderOpenOutlined, WarningOutlined } from "@ant-design/icons";
+import { FolderOpenOutlined, LinkOutlined, WarningOutlined } from "@ant-design/icons";
 import {
   CreateDbtProject,
   GetGitConfig,
+  GetSchemaCrossDeps,
   ListDatabases,
   ListDirectory,
   ListSchemas,
@@ -58,11 +60,23 @@ export default function DbtProjectModal({ onClose }: Props) {
   const [loadingSchemas, setLoadingSchemas] = useState<Record<string, boolean>>({});
   const [selectedSchemas, setSelectedSchemas] = useState<Record<string, Set<string>>>({});
 
+  // Step 1 — Dependency hints: maps "DB||SCHEMA" → list of "DB||SCHEMA" it references externally
+  const [crossDeps, setCrossDeps] = useState<Record<string, string[]>>({});
+  const [fetchingDeps, setFetchingDeps] = useState<Record<string, boolean>>({});
+
   // Step 2 — Generate
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<dbt.CreateResult | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [filesExpanded, setFilesExpanded] = useState(false);
+
+  // Track mount state so async callbacks don't update state after unmount
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Pre-fill output dir from git config on mount
   useEffect(() => {
@@ -84,6 +98,27 @@ export default function DbtProjectModal({ onClose }: Props) {
       .then(() => setDirExists(true))
       .catch(() => setDirExists(false));
   }, [outputDir, projectName]);
+
+  // ── Cross-schema dependency hints ──────────────────────────────────────────
+
+  // Compute the set of "DB||SCHEMA" keys that are externally referenced by
+  // any currently selected schema but not yet included in the selection.
+  const suggestedSet = useMemo(() => {
+    const set = new Set<string>();
+    for (const [db, schemas] of Object.entries(selectedSchemas)) {
+      for (const schema of schemas) {
+        for (const dep of crossDeps[`${db}||${schema}`] ?? []) {
+          const [depDb, depSchema] = dep.split("||");
+          if (!selectedSchemas[depDb]?.has(depSchema)) {
+            set.add(dep);
+          }
+        }
+      }
+    }
+    return set;
+  }, [selectedSchemas, crossDeps]);
+
+  const isAnyFetchingDeps = Object.keys(fetchingDeps).length > 0;
 
   // ── Step 0 helpers ─────────────────────────────────────────────────────────
 
@@ -148,6 +183,33 @@ export default function DbtProjectModal({ onClose }: Props) {
       next[db] = set;
       return next;
     });
+
+    // When a schema is selected, lazily fetch its cross-schema dependencies
+    // so we can highlight other databases/schemas the user might want to include.
+    if (checked && !isSystemSchema(schema)) {
+      const key = `${db}||${schema}`;
+      if (crossDeps[key] === undefined && !fetchingDeps[key]) {
+        setFetchingDeps((prev) => ({ ...prev, [key]: true }));
+        GetSchemaCrossDeps(db, schema)
+          .then((refs) => {
+            if (!mountedRef.current) return;
+            const depKeys = (refs ?? []).map((r) => `${r.database}||${r.schema}`);
+            setCrossDeps((prev) => ({ ...prev, [key]: depKeys }));
+          })
+          .catch(() => {
+            if (!mountedRef.current) return;
+            setCrossDeps((prev) => ({ ...prev, [key]: [] }));
+          })
+          .finally(() => {
+            if (!mountedRef.current) return;
+            setFetchingDeps((prev) => {
+              const next = { ...prev };
+              delete next[key];
+              return next;
+            });
+          });
+      }
+    }
   }
 
   const isSystemSchema = (schema: string) =>
@@ -164,6 +226,21 @@ export default function DbtProjectModal({ onClose }: Props) {
 
   function totalSelectedSchemas(): number {
     return Object.values(selectedSchemas).reduce((sum, s) => sum + s.size, 0);
+  }
+
+  // For a given (db, schema), return the list of "SELDB.SELSCHEMA" labels that
+  // reference it — used to build the tooltip text.
+  function referencedByLabels(db: string, schema: string): string[] {
+    const key = `${db}||${schema}`;
+    const labels: string[] = [];
+    for (const [selDb, selSchemas] of Object.entries(selectedSchemas)) {
+      for (const selSchema of selSchemas) {
+        if ((crossDeps[`${selDb}||${selSchema}`] ?? []).includes(key)) {
+          labels.push(`${selDb}.${selSchema}`);
+        }
+      }
+    }
+    return labels;
   }
 
   // Build schemasMap: Record<db, string[]>
@@ -296,10 +373,34 @@ export default function DbtProjectModal({ onClose }: Props) {
 
     return (
       <Space direction="vertical" style={{ width: "100%", gap: 16 }}>
-        <Text type="secondary">
-          Select the schemas to include as dbt sources. Expand a database panel to load its
-          schemas.
-        </Text>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Text type="secondary" style={{ flex: 1 }}>
+            Select the schemas to include as dbt sources. Expand a database panel to load its
+            schemas.
+          </Text>
+          {isAnyFetchingDeps && (
+            <Text type="secondary" style={{ fontSize: 11, whiteSpace: "nowrap" }}>
+              <Spin size="small" style={{ marginRight: 4 }} />
+              Analysing dependencies…
+            </Text>
+          )}
+        </div>
+
+        {suggestedSet.size > 0 && (
+          <Alert
+            type="info"
+            showIcon
+            style={{ fontSize: 12 }}
+            message="Cross-schema dependencies detected"
+            description={
+              <>
+                Your selected schemas reference objects in other schemas (shown with{" "}
+                <LinkOutlined style={{ color: "var(--ant-color-primary)" }} />). Consider
+                including those schemas so all referenced objects are available as dbt sources.
+              </>
+            }
+          />
+        )}
 
         {loadingDbs ? (
           <div style={{ textAlign: "center", padding: 24 }}>
@@ -321,15 +422,35 @@ export default function DbtProjectModal({ onClose }: Props) {
                 regularSchemas.length > 0 &&
                 regularSchemas.every((s) => selected.has(s));
 
+              // Count how many unselected schemas in this DB are suggested
+              const suggestedInDb = [...suggestedSet].filter((k) =>
+                k.startsWith(`${db}||`)
+              );
+
               return {
                 key: db,
                 label: (
-                  <span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                     <strong>{db}</strong>
                     {selected.size > 0 && (
-                      <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
                         ({selected.size} schema{selected.size !== 1 ? "s" : ""} selected)
                       </Text>
+                    )}
+                    {suggestedInDb.length > 0 && (
+                      <Tooltip
+                        title={`${suggestedInDb
+                          .map((k) => k.split("||")[1])
+                          .join(", ")} referenced by your selection`}
+                      >
+                        <Tag
+                          color="blue"
+                          icon={<LinkOutlined />}
+                          style={{ fontSize: 11, cursor: "default", marginLeft: 2 }}
+                        >
+                          {suggestedInDb.length} referenced
+                        </Tag>
+                      </Tooltip>
                     )}
                   </span>
                 ),
@@ -356,22 +477,57 @@ export default function DbtProjectModal({ onClose }: Props) {
                     <Space wrap>
                       {schemas.map((schema) => {
                         const system = isSystemSchema(schema);
-                        return system ? (
-                          <Tooltip
-                            key={schema}
-                            title="System schema — contains Snowflake metadata. Include only if your models reference it directly. No staging stubs will be generated."
-                          >
-                            <Checkbox
-                              checked={isSchemaSelected(db, schema)}
-                              onChange={(e) => toggleSchema(db, schema, e.target.checked)}
+                        const schemaKey = `${db}||${schema}`;
+                        const isSuggested = suggestedSet.has(schemaKey);
+                        const refBy = isSuggested ? referencedByLabels(db, schema) : [];
+
+                        if (system) {
+                          return (
+                            <Tooltip
+                              key={schema}
+                              title="System schema — contains Snowflake metadata. Include only if your models reference it directly. No staging stubs will be generated."
                             >
-                              <Text type="secondary" italic>
-                                <WarningOutlined style={{ marginRight: 4, color: "var(--ant-color-warning)" }} />
-                                {schema}
-                              </Text>
-                            </Checkbox>
-                          </Tooltip>
-                        ) : (
+                              <Checkbox
+                                checked={isSchemaSelected(db, schema)}
+                                onChange={(e) => toggleSchema(db, schema, e.target.checked)}
+                              >
+                                <Text type="secondary" italic>
+                                  <WarningOutlined
+                                    style={{ marginRight: 4, color: "var(--ant-color-warning)" }}
+                                  />
+                                  {schema}
+                                </Text>
+                              </Checkbox>
+                            </Tooltip>
+                          );
+                        }
+
+                        if (isSuggested) {
+                          return (
+                            <Tooltip
+                              key={schema}
+                              title={`Referenced by: ${refBy.join(", ")}`}
+                            >
+                              <Checkbox
+                                checked={isSchemaSelected(db, schema)}
+                                onChange={(e) => toggleSchema(db, schema, e.target.checked)}
+                              >
+                                <span>
+                                  {schema}
+                                  <LinkOutlined
+                                    style={{
+                                      marginLeft: 5,
+                                      fontSize: 11,
+                                      color: "var(--ant-color-primary)",
+                                    }}
+                                  />
+                                </span>
+                              </Checkbox>
+                            </Tooltip>
+                          );
+                        }
+
+                        return (
                           <Checkbox
                             key={schema}
                             checked={isSchemaSelected(db, schema)}

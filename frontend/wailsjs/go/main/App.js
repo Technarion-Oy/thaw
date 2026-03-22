@@ -266,6 +266,10 @@ export function GetRoleDDL(arg1) {
   return window['go']['main']['App']['GetRoleDDL'](arg1);
 }
 
+export function GetSchemaCrossDeps(arg1, arg2) {
+  return window['go']['main']['App']['GetSchemaCrossDeps'](arg1, arg2);
+}
+
 export function GetSchemaForeignKeys(arg1, arg2) {
   return window['go']['main']['App']['GetSchemaForeignKeys'](arg1, arg2);
 }

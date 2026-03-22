@@ -1400,6 +1400,20 @@ export namespace snowflake {
 	        this.queryID = source["queryID"];
 	    }
 	}
+	export class SchemaRef {
+	    database: string;
+	    schema: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SchemaRef(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.database = source["database"];
+	        this.schema = source["schema"];
+	    }
+	}
 	export class SessionContext {
 	    role: string;
 	    warehouse: string;

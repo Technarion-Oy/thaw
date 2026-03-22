@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"thaw/internal/dbt"
+	"thaw/internal/snowflake"
 )
 
 // CreateDbtProject scaffolds a new dbt project pre-wired to the active
@@ -93,4 +94,15 @@ func (a *App) CreateDbtProject(req dbt.CreateRequest, schemasMap map[string][]st
 	}
 
 	return dbt.Generate(req, session, schemaObjects)
+}
+
+// GetSchemaCrossDeps returns the unique (database, schema) pairs referenced
+// by views in the given schema that fall outside that schema.  The dbt project
+// wizard calls this when the user selects a schema so it can highlight other
+// databases and schemas that should also be included as sources.
+func (a *App) GetSchemaCrossDeps(db, schema string) ([]snowflake.SchemaRef, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.GetSchemaCrossDeps(a.ctx, db, schema)
 }

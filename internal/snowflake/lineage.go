@@ -21,6 +21,14 @@ import (
 // recursion on deeply nested or cyclic object graphs.
 const maxDependencyDepth = 8
 
+// SchemaRef identifies a (database, schema) pair.  It is returned by
+// GetSchemaCrossDeps to surface cross-schema lineage hints in the dbt project
+// wizard.
+type SchemaRef struct {
+	Database string `json:"database"`
+	Schema   string `json:"schema"`
+}
+
 // DependencyNode is one node in the recursive dependency tree returned by
 // GetObjectDependencies.
 type DependencyNode struct {
@@ -139,6 +147,64 @@ func (c *Client) GetObjectDependencies(ctx context.Context, database, schema, ki
 	}
 	root.Children = c.buildChildren(ctx, ddlText, database, schema, strings.ToUpper(kind), vis, 0)
 	return root, nil
+}
+
+// GetSchemaCrossDeps returns the unique (database, schema) pairs that are
+// referenced by views in the given schema but fall outside that schema.
+// The analysis is intentionally shallow (depth 1, views only) so the call is
+// fast enough for the dbt wizard to run on every schema the user selects.
+func (c *Client) GetSchemaCrossDeps(ctx context.Context, db, schema string) ([]SchemaRef, error) {
+	escVal := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
+	q := fmt.Sprintf(
+		`SELECT TABLE_NAME FROM "%s".INFORMATION_SCHEMA.VIEWS WHERE TABLE_SCHEMA = '%s'`,
+		strings.ReplaceAll(db, `"`, `""`),
+		escVal(strings.ToUpper(schema)),
+	)
+	rows, err := c.db.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("list views in %s.%s: %w", db, schema, err)
+	}
+
+	var views []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			continue
+		}
+		views = append(views, name)
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		rows.Close()
+		return nil, rowsErr
+	}
+	rows.Close() // close early so GetObjectDDL can reuse the connection
+
+	seen := map[string]bool{}
+	var result []SchemaRef
+	for _, viewName := range views {
+		ddl, err := c.GetObjectDDL(ctx, db, schema, "VIEW", viewName, "")
+		if err != nil {
+			continue
+		}
+		body := extractDDLBody(ddl, "VIEW")
+		if body == "" {
+			continue
+		}
+		for _, ref := range parseSQLReferences(body, db, schema) {
+			if strings.EqualFold(ref.db, db) && strings.EqualFold(ref.schema, schema) {
+				continue // self-reference — skip
+			}
+			key := strings.ToUpper(ref.db + "." + ref.schema)
+			if !seen[key] {
+				seen[key] = true
+				result = append(result, SchemaRef{
+					Database: strings.ToUpper(ref.db),
+					Schema:   strings.ToUpper(ref.schema),
+				})
+			}
+		}
+	}
+	return result, nil
 }
 
 // ── recursive builder ─────────────────────────────────────────────────────────

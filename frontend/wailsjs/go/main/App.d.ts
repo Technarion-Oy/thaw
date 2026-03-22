@@ -143,6 +143,8 @@ export function GetQueryHistory(arg1:string,arg2:string,arg3:string,arg4:string,
 
 export function GetRoleDDL(arg1:string):Promise<string>;
 
+export function GetSchemaCrossDeps(arg1:string,arg2:string):Promise<Array<snowflake.SchemaRef>>;
+
 export function GetSchemaForeignKeys(arg1:string,arg2:string):Promise<Array<snowflake.TableForeignKey>>;
 
 export function GetSessionContext():Promise<snowflake.SessionContext>;
