@@ -1299,8 +1299,12 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     }
 
     editor.onMouseMove((e: any) => {
-      const pos = e.target?.position;
+      // SQL-only overlay: suppress for YAML/Python tabs where the built-in
+      // Monaco hover widget (fed by monaco-yaml or language servers) is used.
       const model = editor.getModel();
+      if (model && model.getLanguageId() !== "sql") return;
+
+      const pos = e.target?.position;
       const parts = (pos && model) ? getQualifiedIdent(model, pos) : null;
       if (!parts || parts.length === 0) {
         // Mouse moved off any recognisable identifier — cancel the pending show
