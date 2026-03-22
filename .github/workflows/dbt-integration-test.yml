@@ -1,0 +1,68 @@
+name: dbt Integration Test
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  dbt-roundtrip:
+    name: dbt project round-trip
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download Go dependencies
+        run: go mod download
+
+      # Python 3.12 is used to match the dbt-snowflake supported range.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Install the dbt Snowflake adapter.  dbt-core is pulled in as a
+      # transitive dependency.  Pin to the 1.x generation which supports
+      # the profiles.yml private_key_path field used by the test.
+      - name: Install dbt-snowflake
+        run: pip install "dbt-snowflake>=1.8,<2"
+
+      - name: Install go-junit-report
+        run: go install github.com/jstemmer/go-junit-report/v2@latest
+
+      # The test creates two temporary Snowflake databases (THAW_DBT_SRC_<rand>
+      # and THAW_DBT_TGT_<rand>), generates a dbt project from the source,
+      # deploys it via `dbt run`, verifies row counts and column shapes, then
+      # drops both databases even on failure.
+      #
+      # The test skips gracefully when SNOWFLAKE_PRIVATE_KEY is not set,
+      # so this job is safe to run on forks that lack the secrets.
+      - name: Run dbt round-trip integration test
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+          SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+        run: >
+          go test -v -tags integration -count=1 -timeout 15m
+          -run TestDbtProjectRoundTrip
+          ./internal/integration/...
+          2>&1 | go-junit-report -set-exit-code > report-dbt.xml
+
+      - name: Publish test results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          files: report-dbt.xml
+          check_name: dbt round-trip test
