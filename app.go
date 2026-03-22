@@ -404,13 +404,16 @@ func sanitizeAccountFilename(name string) string {
 	return b.String()
 }
 
-// PickOpenFile opens a native open-file dialog filtered to SQL files and
-// returns the chosen path, or an empty string if the user cancels.
+// PickOpenFile opens a native open-file dialog filtered to SQL, YAML and
+// Python files and returns the chosen path, or an empty string if cancelled.
 func (a *App) PickOpenFile() string {
 	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
-		Title: "Open SQL file",
+		Title: "Open file",
 		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "Supported Files (*.sql, *.yml, *.yaml, *.py)", Pattern: "*.sql;*.yml;*.yaml;*.py"},
 			{DisplayName: "SQL Files (*.sql)", Pattern: "*.sql"},
+			{DisplayName: "YAML Files (*.yml, *.yaml)", Pattern: "*.yml;*.yaml"},
+			{DisplayName: "Python Files (*.py)", Pattern: "*.py"},
 			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
 		},
 	})
@@ -504,10 +507,12 @@ func (a *App) PickDataFilesByFormat(format string) []string {
 // and returns the chosen path, or an empty string if the user cancels.
 func (a *App) PickSaveFile(defaultName string) string {
 	path, err := wailsruntime.SaveFileDialog(a.ctx, wailsruntime.SaveDialogOptions{
-		Title:           "Save SQL file",
+		Title:           "Save file",
 		DefaultFilename: defaultName,
 		Filters: []wailsruntime.FileFilter{
 			{DisplayName: "SQL Files (*.sql)", Pattern: "*.sql"},
+			{DisplayName: "YAML Files (*.yml, *.yaml)", Pattern: "*.yml;*.yaml"},
+			{DisplayName: "Python Files (*.py)", Pattern: "*.py"},
 			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
 		},
 	})

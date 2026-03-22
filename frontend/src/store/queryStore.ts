@@ -33,7 +33,7 @@ export interface TabDiff {
 
 export interface Tab {
   id: string;
-  kind?: "sql" | "notebook"; // defaults to "sql" when absent (backward compat)
+  kind?: "sql" | "notebook" | "yaml" | "python"; // defaults to "sql" when absent (backward compat)
   path: string | null;   // null = unsaved scratch tab
   title: string;
   sql: string;
@@ -44,6 +44,14 @@ export interface Tab {
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+/** Infer the tab kind from a file path's extension. */
+function kindFromPath(path: string): Tab["kind"] {
+  const ext = path.split(".").pop()?.toLowerCase();
+  if (ext === "py") return "python";
+  if (ext === "yml" || ext === "yaml") return "yaml";
+  return undefined; // treated as "sql"
+}
 
 function makeTab(overrides?: Partial<Tab>): Tab {
   return {
@@ -165,6 +173,7 @@ export const useQueryStore = create<QueryState>()(
       // Open a new tab
       const newTab = makeTab({
         path,
+        kind: kindFromPath(path),
         title: path.split("/").pop() ?? path,
         sql: content,
         savedSql: content,

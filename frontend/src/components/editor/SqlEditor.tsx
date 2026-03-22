@@ -569,8 +569,15 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   const setSqlForTab    = useQueryStore((s) => s.setSqlForTab);
   const setSelectedSql  = useQueryStore((s) => s.setSelectedSql);
 
+  const activeTabId = useQueryStore((s) => s.activeTabId);
   const sql    = tabId ? (tabs.find((t) => t.id === tabId)?.sql ?? "") : activeSql;
   const setSql = tabId ? (newSql: string) => setSqlForTab(tabId, newSql) : activeSqlSetter;
+
+  // Derive Monaco language from the active (or pinned) tab's kind.
+  const activeKind = tabs.find((t) => t.id === (tabId ?? activeTabId))?.kind;
+  const editorLanguage = activeKind === "python" ? "python"
+    : activeKind === "yaml"   ? "yaml"
+    : "sql";
   const resolved          = useThemeStore((s) => s.resolved);
   const editorFont        = useThemeStore((s) => s.editorFont);
   const editorFontSize    = useThemeStore((s) => s.editorFontSize);
@@ -1830,7 +1837,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   <>
     <Editor
       height="100%"
-      defaultLanguage="sql"
+      language={editorLanguage}
       theme={resolved === "dark" ? "thaw-dark" : "thaw-light"}
       value={sql}
       onChange={(v) => setSql(v ?? "")}
