@@ -1869,9 +1869,17 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         selectionHighlight: false,
         // Keep Monaco's word-under-cursor highlight for single clicks.
         occurrencesHighlight: "singleFile",
-        // Disable Monaco's built-in hover widget; we render our own overlay
-        // so we can support scrolling and a copy button.
-        hover: { enabled: false },
+        // SQL: disable Monaco's built-in hover widget; we render our own
+        // overlay so we can support scrolling and a copy button.
+        // YAML: enable the built-in hover so monaco-yaml can show schema
+        // documentation from the bundled dbt-jsonschema schemas.
+        hover: { enabled: editorLanguage === "yaml" },
+        // YAML values are classified as string tokens by Monaco's tokenizer,
+        // so the default quickSuggestions (strings: false) suppresses
+        // schema-driven completions mid-value.  Enable them for YAML only.
+        quickSuggestions: editorLanguage === "yaml"
+          ? { other: true, comments: false, strings: true }
+          : { other: true, comments: false, strings: false },
         folding: true,
         showFoldingControls: "always",
       }}
