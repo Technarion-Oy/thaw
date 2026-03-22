@@ -406,9 +406,15 @@ func sanitizeAccountFilename(name string) string {
 
 // PickOpenFile opens a native open-file dialog filtered to SQL, YAML and
 // Python files and returns the chosen path, or an empty string if cancelled.
+// The dialog opens in the configured export directory when one is set.
 func (a *App) PickOpenFile() string {
+	defaultDir := ""
+	if cfg, err := config.Load(); err == nil {
+		defaultDir = cfg.Git.ExportDir
+	}
 	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
-		Title: "Open file",
+		Title:            "Open file",
+		DefaultDirectory: defaultDir,
 		Filters: []wailsruntime.FileFilter{
 			{DisplayName: "Supported Files (*.sql, *.yml, *.yaml, *.py)", Pattern: "*.sql;*.yml;*.yaml;*.py"},
 			{DisplayName: "SQL Files (*.sql)", Pattern: "*.sql"},
