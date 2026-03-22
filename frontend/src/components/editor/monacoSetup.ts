@@ -75,6 +75,52 @@ export function ensureMonacoSetup(monaco: unknown): void {
   m.editor.defineTheme("thaw-dark",  thawDarkTheme  as any);
   m.editor.defineTheme("thaw-light", thawLightTheme as any);
 
+  // ── Compatibility shim: monaco-worker-manager@2.x ↔ Monaco v0.55.x ────────
+  //
+  // monaco-yaml@5.4.1 uses monaco-worker-manager@2.0.1, which calls
+  //   monaco.editor.createWebWorker({ createData, label, moduleId })
+  // That was the old Monaco API.  In v0.55.x the standalone createWebWorker was
+  // updated: it now expects opts.worker (a Worker or Promise<Worker>).  When
+  // opts.worker is absent the implementation cannot locate the worker and falls
+  // back silently to a local EditorWorker stub — YAML completions/hover/
+  // validation never reach the actual yaml.worker bundle.
+  //
+  // Fix: intercept legacy-style calls (opts.moduleId / opts.createData present
+  // but opts.worker absent) and bridge them to the new API:
+  //   1. Obtain the real Worker via MonacoEnvironment.getWorker (returns our
+  //      Vite-bundled YamlWorker for label "yaml").
+  //   2. Post two bootstrap messages to the raw Worker before handing it off:
+  //      – "ignore": consumed by monaco-worker-manager/worker.js's outer
+  //        self.onmessage, which then installs the vs/common/initialize.js
+  //        handler that waits for the *next* message.
+  //      – createData: consumed by that new handler, which calls start() and
+  //        builds the WebWorkerServer — after this the worker can respond to
+  //        the RPC $initialize message that WebWorkerClient sends.
+  //   3. Pass the Promise<Worker> as opts.worker to the original createWebWorker
+  //      so Monaco's WebWorkerClient/$initialize handshake completes normally.
+  //
+  // This keeps monaco-yaml working without upgrading or forking either package.
+  const origCreateWebWorker = (m.editor.createWebWorker as Function).bind(m.editor);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  m.editor.createWebWorker = (opts: any) => {
+    if (opts && !opts.worker && (opts.moduleId != null || opts.createData != null)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const env = (self as any).MonacoEnvironment;
+      const workerPromise: Promise<Worker> = Promise.resolve(
+        env.getWorker("workerMain.js", opts.label ?? "anonymous") as Worker
+      ).then((w: Worker) => {
+        w.postMessage("ignore");          // triggers outer self.onmessage → installs real handler
+        w.postMessage(opts.createData ?? null); // triggers real handler → calls start() → WebWorkerServer ready
+        return w;
+      });
+      return origCreateWebWorker({
+        worker: workerPromise,
+        keepIdleModels: opts.keepIdleModels ?? false,
+      });
+    }
+    return origCreateWebWorker(opts);
+  };
+
   // ── dbt JSON Schema validation for YAML files ─────────────────────────────
   //
   // configureMonacoYaml wires the YAML language service (running in a web
