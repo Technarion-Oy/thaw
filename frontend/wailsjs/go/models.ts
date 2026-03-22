@@ -107,6 +107,7 @@ export namespace dbt {
 	    outputDir: string;
 	    profileName: string;
 	    inlineViewDefs: boolean;
+	    databaseVars: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new CreateRequest(source);
@@ -118,6 +119,7 @@ export namespace dbt {
 	        this.outputDir = source["outputDir"];
 	        this.profileName = source["profileName"];
 	        this.inlineViewDefs = source["inlineViewDefs"];
+	        this.databaseVars = source["databaseVars"];
 	    }
 	}
 	export class CreateResult {

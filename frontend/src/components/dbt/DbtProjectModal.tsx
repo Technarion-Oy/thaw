@@ -69,6 +69,7 @@ export default function DbtProjectModal({ onClose }: Props) {
 
   // Step 0 — options
   const [inlineViewDefs, setInlineViewDefs] = useState(false);
+  const [databaseVars, setDatabaseVars] = useState(false);
 
   // Step 2 — Generate
   const [generating, setGenerating] = useState(false);
@@ -325,6 +326,7 @@ export default function DbtProjectModal({ onClose }: Props) {
       outputDir,
       profileName,
       inlineViewDefs,
+      databaseVars,
     };
 
     try {
@@ -428,6 +430,20 @@ export default function DbtProjectModal({ onClose }: Props) {
             instead of a generic pass-through. Table references remain as raw Snowflake identifiers
             — replace them with <code>{"{{ source() }}"}</code> or <code>{"{{ ref() }}"}</code> calls
             as needed. Requires one extra <code>GET_DDL</code> call per view.
+          </Text>
+        </div>
+
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Switch checked={databaseVars} onChange={setDatabaseVars} />
+            <Text strong>Use dbt variables for database names</Text>
+          </div>
+          <Text type="secondary" style={{ fontSize: 12, display: "block", marginTop: 4, paddingLeft: 46 }}>
+            Declares a <code>vars:</code> block in <code>dbt_project.yml</code> (e.g.{" "}
+            <code>db_mydb: MYDB</code>) and replaces hardcoded database names in{" "}
+            <code>_sources.yml</code> with{" "}
+            <code>{"{{ var('db_mydb', 'MYDB') }}"}</code> calls. Lets you point the project at a
+            different database by overriding a single variable.
           </Text>
         </div>
 

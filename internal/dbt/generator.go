@@ -16,6 +16,7 @@ package dbt
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"thaw/internal/filesystem"
@@ -27,6 +28,7 @@ type CreateRequest struct {
 	OutputDir      string `json:"outputDir"`
 	ProfileName    string `json:"profileName"`    // defaults to ProjectName when empty
 	InlineViewDefs bool   `json:"inlineViewDefs"` // embed actual SELECT body in view stubs
+	DatabaseVars   bool   `json:"databaseVars"`   // declare vars: for each DB in dbt_project.yml
 }
 
 // SessionInfo carries the live Snowflake session values used to populate
@@ -83,6 +85,38 @@ func Generate(req CreateRequest, session SessionInfo, objects []SchemaObjects) (
 		return nil
 	}
 
+	// ── Pre-scan: build dbVar maps for DatabaseVars mode ─────────────────────
+	// dbVarName  maps UPPER(db) → dbt var name  (e.g. "MYDB" → "db_mydb").
+	// dbVarOrig  maps UPPER(db) → original DB string as received from Snowflake.
+	// Only databases that will produce a source entry are included.
+	dbVarName := make(map[string]string)
+	dbVarOrig := make(map[string]string)
+	if req.DatabaseVars {
+		for _, so := range objects {
+			upper := strings.ToUpper(so.DB)
+			if _, ok := dbVarName[upper]; ok {
+				continue
+			}
+			// System schemas always get a source entry; regular schemas need objects.
+			if !so.IsSystem && len(so.Tables)+len(so.Views) == 0 {
+				continue
+			}
+			dbVarName[upper] = "db_" + strings.ToLower(so.DB)
+			dbVarOrig[upper] = so.DB
+		}
+	}
+
+	// Helper: emit the database: value, using a var reference when requested.
+	dbField := func(db string) string {
+		if req.DatabaseVars {
+			upper := strings.ToUpper(db)
+			if varName, ok := dbVarName[upper]; ok {
+				return fmt.Sprintf("\"{{ var('%s', '%s') }}\"", varName, dbVarOrig[upper])
+			}
+		}
+		return db
+	}
+
 	// ── dbt_project.yml ───────────────────────────────────────────────────────
 	dbtProject := fmt.Sprintf(`name: '%s'
 version: '1.0.0'
@@ -100,6 +134,22 @@ models:
     marts:
       +materialized: table
 `, req.ProjectName, profileName, req.ProjectName)
+
+	if req.DatabaseVars && len(dbVarName) > 0 {
+		// Collect and sort upper-case DB names for deterministic output.
+		dbUppers := make([]string, 0, len(dbVarName))
+		for upper := range dbVarName {
+			dbUppers = append(dbUppers, upper)
+		}
+		sort.Strings(dbUppers)
+
+		var varsBlock strings.Builder
+		varsBlock.WriteString("vars:\n")
+		for _, upper := range dbUppers {
+			fmt.Fprintf(&varsBlock, "  %s: %s\n", dbVarName[upper], dbVarOrig[upper])
+		}
+		dbtProject += varsBlock.String()
+	}
 
 	if err := write("dbt_project.yml", dbtProject); err != nil {
 		return nil, err
@@ -156,7 +206,7 @@ models:
 		// object listing was performed and no staging stubs are generated.
 		if so.IsSystem {
 			fmt.Fprintf(&sourcesBuilder, "  - name: %s\n", sName)
-			fmt.Fprintf(&sourcesBuilder, "    database: %s\n", so.DB)
+			fmt.Fprintf(&sourcesBuilder, "    database: %s\n", dbField(so.DB))
 			fmt.Fprintf(&sourcesBuilder, "    schema: %s\n", so.Schema)
 			sourcesBuilder.WriteString("    description: \"System schema — add individual table entries manually as needed\"\n")
 			sourcesBuilder.WriteString("    tables: []\n")
@@ -169,7 +219,7 @@ models:
 		}
 
 		fmt.Fprintf(&sourcesBuilder, "  - name: %s\n", sName)
-		fmt.Fprintf(&sourcesBuilder, "    database: %s\n", so.DB)
+		fmt.Fprintf(&sourcesBuilder, "    database: %s\n", dbField(so.DB))
 		fmt.Fprintf(&sourcesBuilder, "    schema: %s\n", so.Schema)
 		fmt.Fprintf(&sourcesBuilder, "    description: \"Source tables from %s.%s\"\n", so.DB, so.Schema)
 		sourcesBuilder.WriteString("    tables:\n")

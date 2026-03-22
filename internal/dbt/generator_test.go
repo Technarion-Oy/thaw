@@ -992,3 +992,214 @@ func TestGenerate_InlineViewDefs(t *testing.T) {
 		assertNotContains(t, stub, "view SQL inlined from Snowflake", "empty def must not show inline header")
 	})
 }
+
+// ─── TestGenerate_DatabaseVars ────────────────────────────────────────────────
+
+func TestGenerate_DatabaseVars(t *testing.T) {
+	t.Run("single DB: vars block in dbt_project.yml", func(t *testing.T) {
+		dir := t.TempDir()
+		req := CreateRequest{
+			ProjectName:  "proj",
+			OutputDir:    dir,
+			DatabaseVars: true,
+		}
+		objects := []SchemaObjects{{
+			DB:     "MYDB",
+			Schema: "PUBLIC",
+			Tables: []string{"ORDERS"},
+		}}
+
+		result := mustGenerate(t, req, typicalSession(), objects)
+		proj := readFile(t, result.ProjectDir, "dbt_project.yml")
+
+		assertContains(t, proj, "vars:", "vars block present")
+		assertContains(t, proj, "  db_mydb: MYDB", "var entry for MYDB")
+	})
+
+	t.Run("single DB: _sources.yml uses var() not literal", func(t *testing.T) {
+		dir := t.TempDir()
+		req := CreateRequest{
+			ProjectName:  "proj",
+			OutputDir:    dir,
+			DatabaseVars: true,
+		}
+		objects := []SchemaObjects{{
+			DB:     "MYDB",
+			Schema: "PUBLIC",
+			Tables: []string{"ORDERS"},
+		}}
+
+		result := mustGenerate(t, req, typicalSession(), objects)
+		sources := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "_sources.yml"))
+
+		assertContains(t, sources, "database: \"{{ var('db_mydb', 'MYDB') }}\"", "sources uses var ref")
+		assertNotContains(t, sources, "database: MYDB", "sources must not emit literal database name")
+	})
+
+	t.Run("multiple DBs: all have var entries, sorted", func(t *testing.T) {
+		dir := t.TempDir()
+		req := CreateRequest{
+			ProjectName:  "proj",
+			OutputDir:    dir,
+			DatabaseVars: true,
+		}
+		objects := []SchemaObjects{
+			{DB: "ZEBRA_DB", Schema: "SCH", Tables: []string{"T1"}},
+			{DB: "ALPHA_DB", Schema: "SCH", Tables: []string{"T2"}},
+			{DB: "MIDDLE_DB", Schema: "SCH", Tables: []string{"T3"}},
+		}
+
+		result := mustGenerate(t, req, typicalSession(), objects)
+		proj := readFile(t, result.ProjectDir, "dbt_project.yml")
+
+		assertContains(t, proj, "  db_alpha_db: ALPHA_DB", "alpha_db var present")
+		assertContains(t, proj, "  db_middle_db: MIDDLE_DB", "middle_db var present")
+		assertContains(t, proj, "  db_zebra_db: ZEBRA_DB", "zebra_db var present")
+
+		// Verify alphabetical ordering: ALPHA before MIDDLE before ZEBRA.
+		alphaPos := strings.Index(proj, "db_alpha_db")
+		middlePos := strings.Index(proj, "db_middle_db")
+		zebraPos := strings.Index(proj, "db_zebra_db")
+		if !(alphaPos < middlePos && middlePos < zebraPos) {
+			t.Errorf("vars not sorted alphabetically: alpha=%d middle=%d zebra=%d", alphaPos, middlePos, zebraPos)
+		}
+	})
+
+	t.Run("multiple DBs: each schema uses correct var", func(t *testing.T) {
+		dir := t.TempDir()
+		req := CreateRequest{
+			ProjectName:  "proj",
+			OutputDir:    dir,
+			DatabaseVars: true,
+		}
+		objects := []SchemaObjects{
+			{DB: "RAW", Schema: "INGEST", Tables: []string{"EVENTS"}},
+			{DB: "ANALYTICS", Schema: "CORE", Tables: []string{"FACTS"}},
+		}
+
+		result := mustGenerate(t, req, typicalSession(), objects)
+		sources := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "_sources.yml"))
+
+		assertContains(t, sources, "database: \"{{ var('db_raw', 'RAW') }}\"", "RAW uses db_raw var")
+		assertContains(t, sources, "database: \"{{ var('db_analytics', 'ANALYTICS') }}\"", "ANALYTICS uses db_analytics var")
+		assertNotContains(t, sources, "database: RAW", "literal RAW must not appear")
+		assertNotContains(t, sources, "database: ANALYTICS", "literal ANALYTICS must not appear")
+	})
+
+	t.Run("DatabaseVars=false: no vars block, literal database name", func(t *testing.T) {
+		dir := t.TempDir()
+		req := CreateRequest{
+			ProjectName:  "proj",
+			OutputDir:    dir,
+			DatabaseVars: false,
+		}
+		objects := []SchemaObjects{{
+			DB:     "MYDB",
+			Schema: "PUBLIC",
+			Tables: []string{"ORDERS"},
+		}}
+
+		result := mustGenerate(t, req, typicalSession(), objects)
+		proj := readFile(t, result.ProjectDir, "dbt_project.yml")
+		sources := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "_sources.yml"))
+
+		assertNotContains(t, proj, "vars:", "no vars block when disabled")
+		assertContains(t, sources, "database: MYDB", "literal database name when disabled")
+		assertNotContains(t, sources, "var(", "no var() when disabled")
+	})
+
+	t.Run("empty schemas excluded from vars", func(t *testing.T) {
+		dir := t.TempDir()
+		req := CreateRequest{
+			ProjectName:  "proj",
+			OutputDir:    dir,
+			DatabaseVars: true,
+		}
+		objects := []SchemaObjects{
+			{DB: "GOODDB", Schema: "SCH", Tables: []string{"T1"}},
+			// EMPTYDB has no objects → skipped from source entries and vars.
+			{DB: "EMPTYDB", Schema: "SCH"},
+		}
+
+		result := mustGenerate(t, req, typicalSession(), objects)
+		proj := readFile(t, result.ProjectDir, "dbt_project.yml")
+		sources := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "_sources.yml"))
+
+		assertContains(t, proj, "  db_gooddb: GOODDB", "GOODDB var present")
+		assertNotContains(t, proj, "db_emptydb", "EMPTYDB must not appear in vars (no objects)")
+		assertContains(t, sources, "database: \"{{ var('db_gooddb', 'GOODDB') }}\"", "GOODDB uses var")
+		assertNotContains(t, sources, "EMPTYDB", "EMPTYDB must not appear in sources")
+
+		if len(result.Warnings) != 1 {
+			t.Errorf("expected 1 warning for empty schema, got %d: %v", len(result.Warnings), result.Warnings)
+		}
+	})
+
+	t.Run("system schema included in vars", func(t *testing.T) {
+		dir := t.TempDir()
+		req := CreateRequest{
+			ProjectName:  "proj",
+			OutputDir:    dir,
+			DatabaseVars: true,
+		}
+		objects := []SchemaObjects{
+			{DB: "MYDB", Schema: "PUBLIC", Tables: []string{"ORDERS"}},
+			{DB: "MYDB", Schema: "INFORMATION_SCHEMA", IsSystem: true},
+		}
+
+		result := mustGenerate(t, req, typicalSession(), objects)
+		proj := readFile(t, result.ProjectDir, "dbt_project.yml")
+		sources := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "_sources.yml"))
+
+		// Only one var entry for MYDB (deduped).
+		count := strings.Count(proj, "db_mydb")
+		if count != 1 {
+			t.Errorf("expected exactly 1 db_mydb entry in vars, got %d", count)
+		}
+		// Both source entries use the var.
+		assertContains(t, sources, "database: \"{{ var('db_mydb', 'MYDB') }}\"", "MYDB var in regular schema")
+	})
+
+	t.Run("two DBs same schema name: separate var entries", func(t *testing.T) {
+		dir := t.TempDir()
+		req := CreateRequest{
+			ProjectName:  "proj",
+			OutputDir:    dir,
+			DatabaseVars: true,
+		}
+		objects := []SchemaObjects{
+			{DB: "PROD", Schema: "PUBLIC", Tables: []string{"ORDERS"}},
+			{DB: "DEV", Schema: "PUBLIC", Tables: []string{"ORDERS"}},
+		}
+
+		result := mustGenerate(t, req, typicalSession(), objects)
+		proj := readFile(t, result.ProjectDir, "dbt_project.yml")
+
+		assertContains(t, proj, "  db_prod: PROD", "PROD var")
+		assertContains(t, proj, "  db_dev: DEV", "DEV var")
+	})
+
+	t.Run("var name uses original case of DB for default value", func(t *testing.T) {
+		// Snowflake returns DB names in uppercase; verify the default value in
+		// the var() call preserves the original case from the objects list.
+		dir := t.TempDir()
+		req := CreateRequest{
+			ProjectName:  "proj",
+			OutputDir:    dir,
+			DatabaseVars: true,
+		}
+		objects := []SchemaObjects{{
+			DB:     "MyMixedCaseDb",
+			Schema: "SCH",
+			Tables: []string{"T"},
+		}}
+
+		result := mustGenerate(t, req, typicalSession(), objects)
+		proj := readFile(t, result.ProjectDir, "dbt_project.yml")
+		sources := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "_sources.yml"))
+
+		// Var name is always lowercase; default preserves original DB string.
+		assertContains(t, proj, "  db_mymixedcasedb: MyMixedCaseDb", "var preserves original DB case as default")
+		assertContains(t, sources, "database: \"{{ var('db_mymixedcasedb', 'MyMixedCaseDb') }}\"", "sources var preserves case")
+	})
+}
