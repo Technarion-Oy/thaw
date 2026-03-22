@@ -11,6 +11,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Button } from "antd";
 import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
+import * as monacoLib from "monaco-editor";
 import { ensureMonacoSetup } from "./monacoSetup";
 import { setEditorInstance } from "./editorRef";
 import { useQueryStore } from "../../store/queryStore";
@@ -584,13 +585,14 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   // can match by filename and apply the correct dbt JSON Schema.
   // Scratch YAML tabs (no saved path) use a synthetic path keyed on the tab
   // ID so each scratch tab gets its own model and the catch-all schema applies.
-  // Prefix with file:// so monaco.Uri.parse() produces a proper file URI.
-  // The YAML language worker normalises document URIs before glob matching;
-  // without a scheme the URI looks like a bare path and the worker's
-  // normalisation step prefixes "**/" which breaks the fileMatch patterns.
+  // Use Monaco's Uri.file() to build the model path — it handles
+  // OS-specific separators correctly (C:\... on Windows, /Users/... on
+  // macOS/Linux) and always produces a valid file:///... URI string.
+  // Manual string concatenation (file:// + path) produces malformed URIs on
+  // Windows and causes monaco-yaml's fileMatch glob patterns to fail.
   const yamlModelPath = editorLanguage === "yaml"
     ? (activeTab?.path
-        ? `file://${activeTab.path}`
+        ? monacoLib.Uri.file(activeTab.path).toString()
         : `file:///untitled-${tabId ?? activeTabId}.yml`)
     : undefined;
   const resolved          = useThemeStore((s) => s.resolved);
