@@ -593,6 +593,8 @@ Open **Help → Keyboard Shortcuts…** in the menu bar for a searchable, always
 | `⌘⌥F` | `Ctrl+H` | Find and replace |
 | `⌘D` | `Ctrl+D` | Select next occurrence |
 | `⌃G` | `Ctrl+G` | Go to line |
+| `⌘⌥↑` | `Ctrl+Alt+↑` | Add cursor above |
+| `⌘⌥↓` | `Ctrl+Alt+↓` | Add cursor below |
 | `⌘+` | `Ctrl++` | Increase editor font size |
 | `⌘-` | `Ctrl+-` | Decrease editor font size |
 | `⌘0` | `Ctrl+0` | Reset editor font size to default |

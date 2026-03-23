@@ -875,6 +875,11 @@ function CellView({
       },
     );
 
+    // ⌘⌥↑ / Ctrl+Alt+↑ — add cursor above; ⌘⌥↓ / Ctrl+Alt+↓ — add cursor below.
+    const trigger = (id: string) => editor.trigger("keyboard", id, null);
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.UpArrow,   () => trigger("editor.action.insertCursorAbove"));
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.DownArrow, () => trigger("editor.action.insertCursorBelow"));
+
     // WKWebView clipboard fix — same pattern as SqlEditor.
     const doCopy = async () => {
       const sel = editor.getSelection();

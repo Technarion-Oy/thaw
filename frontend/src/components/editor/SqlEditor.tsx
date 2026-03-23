@@ -828,6 +828,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyL,                       () => { window.dispatchEvent(new Event("thaw:focus-ai-chat")); });
     // ⌘↓ / Ctrl+↓ — focus results panel.
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.DownArrow,                  () => { window.dispatchEvent(new Event("thaw:focus-results")); });
+    // ⌘⌥↑ / Ctrl+Alt+↑ — add cursor above (matches VS Code)
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.UpArrow,   () => trigger("editor.action.insertCursorAbove"));
+    // ⌘⌥↓ / Ctrl+Alt+↓ — add cursor below (matches VS Code)
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.DownArrow, () => trigger("editor.action.insertCursorBelow"));
 
     monaco.languages.registerCompletionItemProvider("sql", {
       triggerCharacters: ["."],
