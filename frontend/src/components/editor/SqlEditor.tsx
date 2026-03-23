@@ -616,12 +616,16 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
   const [ddlHover, setDdlHover] = useState<DdlHover | null>(null);
   const [tooltipCtxMenu, setTooltipCtxMenu] = useState<{ x: number; y: number; sel: string } | null>(null);
-  const hoverTimerRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hoverHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverTimerRef          = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverHideTimerRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const yamlHoverAdjustTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Tracks the word key ("db.schema.table") the hover timer is currently running
   // for, and the latest cursor position under the mouse for that word.
   const lastHoverWordRef  = useRef<string | null>(null);
   const currentHoverPosRef = useRef<any>(null);
+  // Actual mouse-cursor clientY at the last mousemove — used to position the
+  // tooltip below (or above) the pointer, not just below the text line.
+  const currentMouseYRef   = useRef<number>(0);
   // True while the cursor is physically inside the tooltip overlay.
   const isOnTooltipRef    = useRef(false);
   // True while a mouse button is held down (e.g. text selection drag).
@@ -1299,9 +1303,58 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     }
 
     editor.onMouseMove((e: any) => {
-      // SQL-only overlay: suppress for YAML/Python tabs where the built-in
-      // Monaco hover widget (fed by monaco-yaml or language servers) is used.
+      // Track mouse Y for both the SQL custom overlay and the YAML adjuster below.
+      currentMouseYRef.current = (e.event as any).posy ?? 0;
+
+      // YAML hover nudge: Monaco's built-in hover anchors to the token line, so
+      // it can sit under the cursor arrow.  After Monaco's hover delay (≈300 ms)
+      // we find the widget in the DOM, check for overlap, and nudge it clear.
       const model = editor.getModel();
+      if (model?.getLanguageId() === "yaml") {
+        if (yamlHoverAdjustTimerRef.current) clearTimeout(yamlHoverAdjustTimerRef.current);
+
+        // Poll every 50 ms (up to 12 attempts ≈ 600 ms) so we reposition the
+        // widget as soon as Monaco renders it, avoiding a visible jump.
+        const tryAdjust = (attemptsLeft: number) => {
+          const dom = editor.getDomNode();
+          const hoverEl = (
+            dom?.parentElement?.querySelector(".monaco-resizable-hover") ??
+            dom?.querySelector(".monaco-resizable-hover") ??
+            document.querySelector(".monaco-resizable-hover")
+          ) as HTMLElement | null;
+
+          const isVisible = hoverEl
+            && hoverEl.style.display !== "none"
+            && parseFloat(hoverEl.style.top) >= -500;
+
+          if (!isVisible || !hoverEl) {
+            if (attemptsLeft > 0)
+              yamlHoverAdjustTimerRef.current = setTimeout(() => tryAdjust(attemptsLeft - 1), 50);
+            return;
+          }
+
+          const rect = hoverEl.getBoundingClientRect();
+          if (rect.width === 0 || rect.height === 0) {
+            if (attemptsLeft > 0)
+              yamlHoverAdjustTimerRef.current = setTimeout(() => tryAdjust(attemptsLeft - 1), 50);
+            return;
+          }
+
+          const mouseY = currentMouseYRef.current;
+          const CLEAR = 24;
+          const desiredTop = mouseY + CLEAR + rect.height <= window.innerHeight
+            ? mouseY + CLEAR
+            : Math.max(0, mouseY - CLEAR - rect.height);
+          if (Math.abs(rect.top - desiredTop) < 2) return;
+          const styleTop = parseFloat(hoverEl.style.top) || 0;
+          hoverEl.style.top = `${styleTop + (desiredTop - rect.top)}px`;
+        };
+
+        yamlHoverAdjustTimerRef.current = setTimeout(() => tryAdjust(12), 50);
+        return;
+      }
+
+      // SQL-only overlay: suppress for Python/other tabs.
       if (model && model.getLanguageId() !== "sql") return;
 
       const pos = e.target?.position;
@@ -1448,13 +1501,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                 const editorRect2 = editorDom2?.getBoundingClientRect();
                 const scrolledPos2 = editor.getScrolledVisiblePosition(pos);
                 if (scrolledPos2 && editorRect2) {
-                  const lineH2 = scrolledPos2.height ?? 20;
                   const rawX2 = editorRect2.left + scrolledPos2.left;
-                  const belowY2 = editorRect2.top + scrolledPos2.top + lineH2 + 4;
-                  const aboveY2 = editorRect2.top + scrolledPos2.top - 4;
-                  const fitsBelow2 = belowY2 + 320 <= window.innerHeight;
+                  const mouseY2 = currentMouseYRef.current;
+                  const fitsBelow2 = mouseY2 + 24 + 320 <= window.innerHeight;
                   const fnX = Math.min(rawX2, window.innerWidth - 570);
-                  const fnY = fitsBelow2 ? belowY2 : Math.max(0, aboveY2 - 320);
+                  const fnY = fitsBelow2 ? mouseY2 + 24 : Math.max(0, mouseY2 - 24 - 320);
                   if (hoverHideTimerRef.current) { clearTimeout(hoverHideTimerRef.current); hoverHideTimerRef.current = null; }
                   setDdlHover({ ddl: fnDdl, kind: fnKind, db: "", schema: "", name: parts[0].toUpperCase(), x: fnX, y: fnY });
                 }
@@ -1489,13 +1540,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const scrolledPos = editor.getScrolledVisiblePosition(pos);
         if (!scrolledPos || !editorRect) return;
 
-        const lineH   = scrolledPos.height ?? 20;
         const rawX    = editorRect.left + scrolledPos.left;
-        const belowY  = editorRect.top + scrolledPos.top + lineH + 4;
-        const aboveY  = editorRect.top + scrolledPos.top - 4;
-        const fitsBelow = belowY + 320 <= window.innerHeight;
+        const mouseY  = currentMouseYRef.current;
+        const fitsBelow = mouseY + 24 + 320 <= window.innerHeight;
         const x = Math.min(rawX, window.innerWidth - 570);
-        const y = fitsBelow ? belowY : Math.max(0, aboveY - 320);
+        const y = fitsBelow ? mouseY + 24 : Math.max(0, mouseY - 24 - 320);
 
         // Cancel any pending hide before showing — prevents a race where the
         // mouse crossed the word quickly, scheduleHide() was called, and its
@@ -1817,6 +1866,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         editor.pushUndoStop();
         editor.focus();
       });
+
     }
   };
 
