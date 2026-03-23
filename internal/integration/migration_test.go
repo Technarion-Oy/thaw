@@ -858,7 +858,7 @@ func TestMigrationBlueGreenComplexData(t *testing.T) {
 	}
 
 	// Spot-check three rows by product name.
-	for _, tc := range []struct{ id int; product string }{{1, "Widget"}, {7, "Contraption"}, {15, "Item"}} {
+	for _, tc := range []struct{ id int; product string }{{1, "Widget"}, {7, "Apparatus"}, {15, "Item"}} {
 		res := mquery(t, client, fmt.Sprintf("SELECT PRODUCT FROM %s WHERE ID = %d", ref, tc.id))
 		if got := rowStr(res, 0); got != tc.product {
 			t.Errorf("id=%d: PRODUCT = %q, want %q", tc.id, got, tc.product)
