@@ -789,12 +789,24 @@ require a real Snowflake account.
 2. Create a temporary database (`THAW_MIGTEST_<random>` if `SNOWFLAKE_TEST_DATABASE` is
    not set — using `CREATE DATABASE` without `OR REPLACE` to avoid clobbering anything;
    retries with a new random name if the candidate name already exists).
-3. Exercise all four migration strategies against real tables with dummy data:
-   - **Smart In-Place** — `ALTER TABLE ADD/DROP/ALTER COLUMN`; data preserved
-   - **Blue/Green Swap** — temp table + `SWAP WITH`; shared columns preserved
-   - **View-Based Soft Cutover** — rename to `_v1` + new table + compat view
-   - **Destructive Rebuild** — `DROP + CREATE`; data gone
-   - **Empty-table fast path** — zero-row tables always use `DROP + CREATE`
+3. Exercise all four migration strategies against real tables with both data and empty tables:
+   - **Smart In-Place** — `ALTER TABLE ADD/DROP/ALTER COLUMN`; data preserved; covered by:
+     - Basic: single-column changes, data verified in kept columns
+     - Complex schema (8 columns, 20 rows): widen VARCHAR, add/drop columns; row count, spot-checks, NULL validation for new columns, widened column accepts 150-char string
+     - Empty table: schema mutations on 0-row table; insertable after migration
+     - Multiple columns: multiple ADD/DROP in one pass
+   - **Blue/Green Swap** — temp table + `SWAP WITH`; covered by:
+     - Basic: shared columns preserved, non-shared columns discarded
+     - Complex data (7 columns, 15 rows): product/region spot-checks, NULL validation on new columns, dropped columns absent
+     - Empty table: schema swap with zero rows; insertable after swap
+   - **View-Based Soft Cutover** — rename to `_v1` + new table + compat view; covered by:
+     - Basic: archive row count, compat view exposes shared columns
+     - Complex data (6 columns, 12 rows, 4 departments): archive=12, new table=0, compat view=12, dept count spot-checks, new table insertable with updated schema
+     - Empty table: archive/new table/compat view all empty; schema correct
+   - **Destructive Rebuild** — `DROP + CREATE`; covered by:
+     - Basic: data gone, new table exists
+     - Complex schema (10 columns, 25 rows via GENERATOR including VARIANT/ARRAY/OBJECT): new schema completely different; row count=0, new columns present, old columns absent, insertable immediately
+   - **Empty-table fast path** — zero-row tables always use `DROP + CREATE` regardless of strategy
    - **Various column types** — NUMBER, FLOAT, VARIANT, ARRAY, OBJECT, TIMESTAMP_NTZ
 4. Drop the temporary database unconditionally via `t.Cleanup`, even when the test fails.
 

@@ -617,3 +617,585 @@ func TestMigrationInPlaceMultipleColumns(t *testing.T) {
 
 	t.Logf("in-place multiple columns: %v", cols)
 }
+
+// ─── additional complex / empty-table tests ───────────────────────────────────
+
+// rowStr returns the string value of column col in the first row of res.
+func rowStr(res *snowflake.QueryResult, col int) string {
+	if len(res.Rows) == 0 || len(res.Rows[0]) <= col {
+		return ""
+	}
+	s, _ := res.Rows[0][col].(string)
+	return s
+}
+
+// rowInt64 returns the int64 value of column col in the first row of res.
+func rowInt64(res *snowflake.QueryResult, col int) int64 {
+	if len(res.Rows) == 0 || len(res.Rows[0]) <= col {
+		return 0
+	}
+	switch v := res.Rows[0][col].(type) {
+	case int64:
+		return v
+	case float64:
+		return int64(v)
+	case string:
+		var n int64
+		fmt.Sscanf(v, "%d", &n)
+		return n
+	}
+	return 0
+}
+
+// TestMigrationInPlaceComplexSchema verifies that the in-place strategy
+// correctly adds and drops columns on a table with many column types while
+// preserving all 20 existing rows.
+func TestMigrationInPlaceComplexSchema(t *testing.T) {
+	client := keyPairConnFromEnv(t)
+	db, schema := setupMigrationDB(t, client)
+	tbl := randomName("IP_COMPLEX")
+	ref := fqn(db, schema, tbl)
+
+	// Create an 8-column table.
+	exec(t, client, fmt.Sprintf(`
+		CREATE TABLE %s (
+			ID         NUMBER        NOT NULL,
+			NAME       VARCHAR(50)   NOT NULL,
+			SCORE      FLOAT,
+			IS_ACTIVE  BOOLEAN,
+			CREATED_AT DATE,
+			NOTES      TEXT,
+			DROP_X     VARCHAR(20),
+			DROP_Y     NUMBER
+		)`, ref))
+	t.Cleanup(func() { execIgnoreError(client, "DROP TABLE IF EXISTS "+ref) })
+
+	// Insert 20 rows.
+	for i := 1; i <= 20; i++ {
+		exec(t, client, fmt.Sprintf(
+			`INSERT INTO %s (ID, NAME, SCORE, IS_ACTIVE, CREATED_AT, NOTES, DROP_X, DROP_Y)
+			 VALUES (%d, 'name_%d', %f, %t, CURRENT_DATE, 'note_%d', 'x_%d', %d)`,
+			ref, i, i, float64(i)*1.5, i%2 == 0, i, i, i*10,
+		))
+	}
+
+	// Migration: widen NAME, add ADD_A + ADD_B, drop DROP_X + DROP_Y.
+	exec(t, client, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN NAME SET DATA TYPE VARCHAR(200)", ref))
+	exec(t, client, fmt.Sprintf("ALTER TABLE %s ADD COLUMN ADD_A VARCHAR(100)", ref))
+	exec(t, client, fmt.Sprintf("ALTER TABLE %s ADD COLUMN ADD_B NUMBER", ref))
+	exec(t, client, fmt.Sprintf("ALTER TABLE %s DROP COLUMN DROP_X", ref))
+	exec(t, client, fmt.Sprintf("ALTER TABLE %s DROP COLUMN DROP_Y", ref))
+
+	// Validate row count preserved.
+	if n := mrowCount(t, client, ref); n != 20 {
+		t.Errorf("row count = %d, want 20", n)
+	}
+
+	// Validate column presence / absence.
+	cols := mcolumnNames(t, client, ref)
+	for _, want := range []string{"ID", "NAME", "SCORE", "IS_ACTIVE", "CREATED_AT", "NOTES", "ADD_A", "ADD_B"} {
+		if !hasColumn(cols, want) {
+			t.Errorf("expected column %s present; got %v", want, cols)
+		}
+	}
+	for _, gone := range []string{"DROP_X", "DROP_Y"} {
+		if hasColumn(cols, gone) {
+			t.Errorf("expected column %s absent; got %v", gone, cols)
+		}
+	}
+
+	// Spot-check three rows.
+	for _, id := range []int{1, 10, 20} {
+		res := mquery(t, client, fmt.Sprintf("SELECT NAME FROM %s WHERE ID = %d", ref, id))
+		if got := rowStr(res, 0); got != fmt.Sprintf("name_%d", id) {
+			t.Errorf("row id=%d: NAME = %q, want %q", id, got, fmt.Sprintf("name_%d", id))
+		}
+	}
+
+	// New ADD_A column must be NULL for all existing rows.
+	res := mquery(t, client, fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE ADD_A IS NOT NULL", ref))
+	if rowInt64(res, 0) != 0 {
+		t.Errorf("expected ADD_A NULL for all existing rows, got some non-NULL")
+	}
+
+	// Widened NAME must accept a 150-char string.
+	longName := strings.Repeat("x", 150)
+	exec(t, client, fmt.Sprintf(
+		`INSERT INTO %s (ID, NAME) VALUES (999, '%s')`, ref, longName))
+	res2 := mquery(t, client, fmt.Sprintf("SELECT NAME FROM %s WHERE ID = 999", ref))
+	if got := rowStr(res2, 0); got != longName {
+		t.Errorf("widened NAME: got %d chars, want 150", len(got))
+	}
+
+	t.Logf("in-place complex schema: %v", cols)
+}
+
+// TestMigrationInPlaceEmptyTable verifies in-place changes work correctly on a
+// table that starts with zero rows (no data-preservation edge-cases to worry
+// about, but schema mutations must still succeed and the table must remain
+// insertable afterwards).
+func TestMigrationInPlaceEmptyTable(t *testing.T) {
+	client := keyPairConnFromEnv(t)
+	db, schema := setupMigrationDB(t, client)
+	tbl := randomName("IP_EMPTY")
+	ref := fqn(db, schema, tbl)
+
+	exec(t, client, fmt.Sprintf(`
+		CREATE TABLE %s (
+			ID     NUMBER       NOT NULL,
+			LABEL  VARCHAR(20),
+			REMOVE NUMBER
+		)`, ref))
+	t.Cleanup(func() { execIgnoreError(client, "DROP TABLE IF EXISTS "+ref) })
+
+	// Migration on an empty table.
+	exec(t, client, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN LABEL SET DATA TYPE VARCHAR(100)", ref))
+	exec(t, client, fmt.Sprintf("ALTER TABLE %s ADD COLUMN TAG VARCHAR(50)", ref))
+	exec(t, client, fmt.Sprintf("ALTER TABLE %s ADD COLUMN RANK NUMBER", ref))
+	exec(t, client, fmt.Sprintf("ALTER TABLE %s DROP COLUMN REMOVE", ref))
+
+	// Still 0 rows.
+	if n := mrowCount(t, client, ref); n != 0 {
+		t.Errorf("row count = %d, want 0 for empty table", n)
+	}
+
+	// Schema correct.
+	cols := mcolumnNames(t, client, ref)
+	for _, want := range []string{"ID", "LABEL", "TAG", "RANK"} {
+		if !hasColumn(cols, want) {
+			t.Errorf("expected column %s present; got %v", want, cols)
+		}
+	}
+	if hasColumn(cols, "REMOVE") {
+		t.Errorf("expected column REMOVE absent; got %v", cols)
+	}
+
+	// Table is still insertable.
+	exec(t, client, fmt.Sprintf(
+		`INSERT INTO %s (ID, LABEL, TAG, RANK) VALUES (1, 'hello', 'alpha', 42)`, ref))
+	if n := mrowCount(t, client, ref); n != 1 {
+		t.Errorf("row count after insert = %d, want 1", n)
+	}
+
+	t.Logf("in-place empty table: %v", cols)
+}
+
+// TestMigrationBlueGreenComplexData verifies that the blue-green swap strategy
+// preserves all 15 data rows while delivering a completely new schema.
+func TestMigrationBlueGreenComplexData(t *testing.T) {
+	client := keyPairConnFromEnv(t)
+	db, schema := setupMigrationDB(t, client)
+	tbl := randomName("BG_COMPLEX")
+	ref := fqn(db, schema, tbl)
+	tmpTbl := tbl + "_TMP"
+	tmpRef := fqn(db, schema, tmpTbl)
+
+	// Original table.
+	exec(t, client, fmt.Sprintf(`
+		CREATE TABLE %s (
+			ID      NUMBER       NOT NULL,
+			PRODUCT VARCHAR(100) NOT NULL,
+			PRICE   FLOAT,
+			REGION  VARCHAR(50),
+			QTY     NUMBER,
+			DROP_X  VARCHAR(20),
+			DROP_Y  NUMBER
+		)`, ref))
+	t.Cleanup(func() {
+		execIgnoreError(client, "DROP TABLE IF EXISTS "+ref)
+		execIgnoreError(client, "DROP TABLE IF EXISTS "+tmpRef)
+	})
+
+	// Insert 15 rows.
+	products := []string{
+		"Widget", "Gadget", "Doohickey", "Thingamajig", "Gizmo",
+		"Contraption", "Apparatus", "Device", "Module", "Unit",
+		"Component", "Element", "Part", "Piece", "Item",
+	}
+	regions := []string{"NORTH", "SOUTH", "EAST", "WEST", "CENTRAL"}
+	for i, product := range products {
+		exec(t, client, fmt.Sprintf(
+			`INSERT INTO %s (ID, PRODUCT, PRICE, REGION, QTY, DROP_X, DROP_Y)
+			 VALUES (%d, '%s', %f, '%s', %d, 'x_%d', %d)`,
+			ref, i+1, product, float64(i+1)*9.99, regions[i%5], (i+1)*3, i+1, (i+1)*100,
+		))
+	}
+
+	// Blue-green swap: create tmp with new schema, copy shared columns, swap.
+	exec(t, client, fmt.Sprintf(`
+		CREATE TABLE %s (
+			ID          NUMBER       NOT NULL,
+			PRODUCT     VARCHAR(100) NOT NULL,
+			PRICE       FLOAT,
+			REGION      VARCHAR(50),
+			NEW_SKU     VARCHAR(50),
+			NEW_DISCOUNT FLOAT
+		)`, tmpRef))
+	exec(t, client, fmt.Sprintf(
+		`INSERT INTO %s (ID, PRODUCT, PRICE, REGION)
+		 SELECT ID, PRODUCT, PRICE, REGION FROM %s`, tmpRef, ref))
+	exec(t, client, fmt.Sprintf("ALTER TABLE %s SWAP WITH %s", ref, tmpRef))
+
+	// After swap: ref is the new table, tmpRef is the old.
+	execIgnoreError(client, "DROP TABLE IF EXISTS "+tmpRef)
+
+	// Validate 15 rows preserved.
+	if n := mrowCount(t, client, ref); n != 15 {
+		t.Errorf("row count = %d, want 15", n)
+	}
+
+	// Validate new schema.
+	cols := mcolumnNames(t, client, ref)
+	for _, want := range []string{"ID", "PRODUCT", "PRICE", "REGION", "NEW_SKU", "NEW_DISCOUNT"} {
+		if !hasColumn(cols, want) {
+			t.Errorf("expected column %s present; got %v", want, cols)
+		}
+	}
+	for _, gone := range []string{"QTY", "DROP_X", "DROP_Y"} {
+		if hasColumn(cols, gone) {
+			t.Errorf("expected column %s absent; got %v", gone, cols)
+		}
+	}
+
+	// Spot-check three rows by product name.
+	for _, tc := range []struct{ id int; product string }{{1, "Widget"}, {7, "Contraption"}, {15, "Item"}} {
+		res := mquery(t, client, fmt.Sprintf("SELECT PRODUCT FROM %s WHERE ID = %d", ref, tc.id))
+		if got := rowStr(res, 0); got != tc.product {
+			t.Errorf("id=%d: PRODUCT = %q, want %q", tc.id, got, tc.product)
+		}
+	}
+
+	// New columns must be NULL for all 15 rows.
+	for _, col := range []string{"NEW_SKU", "NEW_DISCOUNT"} {
+		res := mquery(t, client, fmt.Sprintf(
+			"SELECT COUNT(*) FROM %s WHERE %s IS NOT NULL", ref, col))
+		if rowInt64(res, 0) != 0 {
+			t.Errorf("expected %s NULL for all rows, got some non-NULL", col)
+		}
+	}
+
+	t.Logf("blue-green complex data: %v", cols)
+}
+
+// TestMigrationBlueGreenEmptyTable verifies the blue-green swap works on an
+// empty table (schema swap, no rows to migrate).
+func TestMigrationBlueGreenEmptyTable(t *testing.T) {
+	client := keyPairConnFromEnv(t)
+	db, schema := setupMigrationDB(t, client)
+	tbl := randomName("BG_EMPTY")
+	ref := fqn(db, schema, tbl)
+	tmpTbl := tbl + "_TMP"
+	tmpRef := fqn(db, schema, tmpTbl)
+
+	exec(t, client, fmt.Sprintf(`
+		CREATE TABLE %s (
+			ID     NUMBER NOT NULL,
+			OLD_A  VARCHAR(30),
+			OLD_B  NUMBER
+		)`, ref))
+	t.Cleanup(func() {
+		execIgnoreError(client, "DROP TABLE IF EXISTS "+ref)
+		execIgnoreError(client, "DROP TABLE IF EXISTS "+tmpRef)
+	})
+
+	// Blue-green swap to completely new schema with empty table.
+	exec(t, client, fmt.Sprintf(`
+		CREATE TABLE %s (
+			ID     NUMBER NOT NULL,
+			NEW_C  VARCHAR(80),
+			NEW_D  FLOAT,
+			NEW_E  BOOLEAN
+		)`, tmpRef))
+	exec(t, client, fmt.Sprintf("ALTER TABLE %s SWAP WITH %s", ref, tmpRef))
+	execIgnoreError(client, "DROP TABLE IF EXISTS "+tmpRef)
+
+	// 0 rows, new schema.
+	if n := mrowCount(t, client, ref); n != 0 {
+		t.Errorf("row count = %d, want 0", n)
+	}
+	cols := mcolumnNames(t, client, ref)
+	for _, want := range []string{"ID", "NEW_C", "NEW_D", "NEW_E"} {
+		if !hasColumn(cols, want) {
+			t.Errorf("expected column %s present; got %v", want, cols)
+		}
+	}
+	for _, gone := range []string{"OLD_A", "OLD_B"} {
+		if hasColumn(cols, gone) {
+			t.Errorf("expected column %s absent; got %v", gone, cols)
+		}
+	}
+
+	// Insertable with new schema.
+	exec(t, client, fmt.Sprintf(
+		`INSERT INTO %s (ID, NEW_C, NEW_D, NEW_E) VALUES (1, 'test', 3.14, TRUE)`, ref))
+	if n := mrowCount(t, client, ref); n != 1 {
+		t.Errorf("row count after insert = %d, want 1", n)
+	}
+
+	t.Logf("blue-green empty table: %v", cols)
+}
+
+// TestMigrationViewAbstractionComplexData verifies the view-abstraction strategy:
+// the original table is renamed to _V1 (archive), a new table is created, and a
+// compatibility view exposes the archived data.  All 12 rows must be visible
+// through the compat view.
+func TestMigrationViewAbstractionComplexData(t *testing.T) {
+	client := keyPairConnFromEnv(t)
+	db, schema := setupMigrationDB(t, client)
+	tbl := randomName("VA_COMPLEX")
+	ref := fqn(db, schema, tbl)
+	archiveTbl := tbl + "_V1"
+	archiveRef := fqn(db, schema, archiveTbl)
+	viewRef := fqn(db, schema, tbl+"_COMPAT")
+
+	exec(t, client, fmt.Sprintf(`
+		CREATE TABLE %s (
+			ID         NUMBER        NOT NULL,
+			FIRST_NAME VARCHAR(50)   NOT NULL,
+			LAST_NAME  VARCHAR(50)   NOT NULL,
+			EMAIL      VARCHAR(100),
+			DEPT       VARCHAR(30),
+			OLD_FLAG   BOOLEAN
+		)`, ref))
+	t.Cleanup(func() {
+		execIgnoreError(client, "DROP VIEW  IF EXISTS "+viewRef)
+		execIgnoreError(client, "DROP TABLE IF EXISTS "+ref)
+		execIgnoreError(client, "DROP TABLE IF EXISTS "+archiveRef)
+	})
+
+	// 12 rows across 4 departments (Eng=3, Dev=4, Arch=2, Res=3).
+	rows := []struct {
+		id                      int
+		first, last, email, dept string
+		flag                    bool
+	}{
+		{1, "Ada", "Lovelace", "ada@example.com", "Eng", true},
+		{2, "Alan", "Turing", "alan@example.com", "Dev", false},
+		{3, "Grace", "Hopper", "grace@example.com", "Dev", true},
+		{4, "John", "von Neumann", "jvn@example.com", "Arch", false},
+		{5, "Claude", "Shannon", "claude@example.com", "Res", true},
+		{6, "Donald", "Knuth", "dk@example.com", "Eng", false},
+		{7, "Barbara", "Liskov", "bl@example.com", "Dev", true},
+		{8, "Edsger", "Dijkstra", "ed@example.com", "Arch", false},
+		{9, "Tony", "Hoare", "th@example.com", "Res", true},
+		{10, "Frances", "Allen", "fa@example.com", "Dev", false},
+		{11, "Linus", "Torvalds", "lt@example.com", "Eng", true},
+		{12, "Dennis", "Ritchie", "dr@example.com", "Res", false},
+	}
+	for _, r := range rows {
+		exec(t, client, fmt.Sprintf(
+			`INSERT INTO %s (ID, FIRST_NAME, LAST_NAME, EMAIL, DEPT, OLD_FLAG)
+			 VALUES (%d, '%s', '%s', '%s', '%s', %t)`,
+			ref, r.id, r.first, r.last, r.email, r.dept, r.flag,
+		))
+	}
+
+	// View-abstraction migration:
+	//  1. Rename original to _V1 (archive).
+	//  2. Create new table with updated schema.
+	//  3. Create compat view over archive.
+	exec(t, client, fmt.Sprintf("ALTER TABLE %s RENAME TO %s", ref, archiveRef))
+	exec(t, client, fmt.Sprintf(`
+		CREATE TABLE %s (
+			ID         NUMBER        NOT NULL,
+			FIRST_NAME VARCHAR(50)   NOT NULL,
+			LAST_NAME  VARCHAR(50)   NOT NULL,
+			EMAIL      VARCHAR(100),
+			DEPT       VARCHAR(30),
+			NEW_LEVEL  NUMBER
+		)`, ref))
+	exec(t, client, fmt.Sprintf(`
+		CREATE VIEW %s AS
+		SELECT ID, FIRST_NAME, LAST_NAME, EMAIL, DEPT, OLD_FLAG
+		FROM %s`, viewRef, archiveRef))
+
+	// Archive has all 12 rows.
+	if n := mrowCount(t, client, archiveRef); n != 12 {
+		t.Errorf("archive row count = %d, want 12", n)
+	}
+	// New table starts empty.
+	if n := mrowCount(t, client, ref); n != 0 {
+		t.Errorf("new table row count = %d, want 0", n)
+	}
+	// Compat view surfaces all 12 rows.
+	if n := mrowCount(t, client, viewRef); n != 12 {
+		t.Errorf("compat view row count = %d, want 12", n)
+	}
+
+	// New table has NEW_LEVEL, not OLD_FLAG.
+	newCols := mcolumnNames(t, client, ref)
+	if !hasColumn(newCols, "NEW_LEVEL") {
+		t.Errorf("expected NEW_LEVEL in new table; got %v", newCols)
+	}
+	if hasColumn(newCols, "OLD_FLAG") {
+		t.Errorf("expected OLD_FLAG absent in new table; got %v", newCols)
+	}
+
+	// Spot-check 3 rows via compat view.
+	for _, tc := range []struct {
+		id   int
+		want string
+	}{{1, "Lovelace"}, {7, "Liskov"}, {12, "Ritchie"}} {
+		res := mquery(t, client, fmt.Sprintf(
+			"SELECT LAST_NAME FROM %s WHERE ID = %d", viewRef, tc.id))
+		if got := rowStr(res, 0); got != tc.want {
+			t.Errorf("compat view id=%d: LAST_NAME = %q, want %q", tc.id, got, tc.want)
+		}
+	}
+
+	// Dev department has exactly 4 people.
+	res := mquery(t, client, fmt.Sprintf(
+		"SELECT COUNT(*) FROM %s WHERE DEPT = 'Dev'", viewRef))
+	if rowInt64(res, 0) != 4 {
+		t.Errorf("Dev dept count via compat view = %d, want 4", rowInt64(res, 0))
+	}
+
+	// New table accepts insert with new schema.
+	exec(t, client, fmt.Sprintf(
+		`INSERT INTO %s (ID, FIRST_NAME, LAST_NAME, NEW_LEVEL) VALUES (100, 'Test', 'User', 5)`, ref))
+	if n := mrowCount(t, client, ref); n != 1 {
+		t.Errorf("new table row count after insert = %d, want 1", n)
+	}
+
+	t.Logf("view-abstraction complex data: archive=%s, new=%s, compat=%s",
+		archiveRef, ref, viewRef)
+}
+
+// TestMigrationViewAbstractionEmptyTable verifies the view-abstraction strategy
+// on an empty source table.
+func TestMigrationViewAbstractionEmptyTable(t *testing.T) {
+	client := keyPairConnFromEnv(t)
+	db, schema := setupMigrationDB(t, client)
+	tbl := randomName("VA_EMPTY")
+	ref := fqn(db, schema, tbl)
+	archiveRef := fqn(db, schema, tbl+"_V1")
+	viewRef := fqn(db, schema, tbl+"_COMPAT")
+
+	exec(t, client, fmt.Sprintf(`
+		CREATE TABLE %s (
+			ID    NUMBER NOT NULL,
+			COL_A VARCHAR(30),
+			COL_B NUMBER
+		)`, ref))
+	t.Cleanup(func() {
+		execIgnoreError(client, "DROP VIEW  IF EXISTS "+viewRef)
+		execIgnoreError(client, "DROP TABLE IF EXISTS "+ref)
+		execIgnoreError(client, "DROP TABLE IF EXISTS "+archiveRef)
+	})
+
+	// Rename → new table → compat view (all empty).
+	exec(t, client, fmt.Sprintf("ALTER TABLE %s RENAME TO %s", ref, archiveRef))
+	exec(t, client, fmt.Sprintf(`
+		CREATE TABLE %s (
+			ID    NUMBER NOT NULL,
+			COL_A VARCHAR(30),
+			COL_C FLOAT
+		)`, ref))
+	exec(t, client, fmt.Sprintf(`
+		CREATE VIEW %s AS
+		SELECT ID, COL_A, COL_B FROM %s`, viewRef, archiveRef))
+
+	for name, tableRef := range map[string]string{
+		"archive": archiveRef, "new table": ref, "compat view": viewRef,
+	} {
+		if n := mrowCount(t, client, tableRef); n != 0 {
+			t.Errorf("%s row count = %d, want 0", name, n)
+		}
+	}
+
+	// New table schema correct.
+	cols := mcolumnNames(t, client, ref)
+	if !hasColumn(cols, "COL_C") {
+		t.Errorf("expected COL_C in new table; got %v", cols)
+	}
+	if hasColumn(cols, "COL_B") {
+		t.Errorf("expected COL_B absent in new table; got %v", cols)
+	}
+
+	t.Logf("view-abstraction empty table: %v", cols)
+}
+
+// TestMigrationDestructiveRebuildComplexSchema verifies the destructive-rebuild
+// strategy: drop the original table (with 25 GENERATOR rows) and create a
+// completely different schema.  No rows should survive; the new table must be
+// immediately usable.
+func TestMigrationDestructiveRebuildComplexSchema(t *testing.T) {
+	client := keyPairConnFromEnv(t)
+	db, schema := setupMigrationDB(t, client)
+	tbl := randomName("DR_COMPLEX")
+	ref := fqn(db, schema, tbl)
+
+	// Original 10-column table.
+	exec(t, client, fmt.Sprintf(`
+		CREATE TABLE %s (
+			ID         NUMBER         NOT NULL,
+			NAME       VARCHAR(100),
+			SCORE      FLOAT,
+			IS_ACTIVE  BOOLEAN,
+			CREATED_AT DATE,
+			UPDATED_AT TIMESTAMP_NTZ,
+			METADATA   VARIANT,
+			TAGS       ARRAY,
+			PROPS      OBJECT,
+			NOTES      TEXT
+		)`, ref))
+	t.Cleanup(func() { execIgnoreError(client, "DROP TABLE IF EXISTS "+ref) })
+
+	// Populate with 25 rows via TABLE(GENERATOR(...)). VARIANT/ARRAY/OBJECT
+	// can't be populated from GENERATOR so we use simple scalars for those.
+	exec(t, client, fmt.Sprintf(`
+		INSERT INTO %s (ID, NAME, SCORE, IS_ACTIVE, CREATED_AT, UPDATED_AT, NOTES)
+		SELECT
+			SEQ4() + 1                             AS ID,
+			'name_' || (SEQ4() + 1)               AS NAME,
+			UNIFORM(1, 100, RANDOM())::FLOAT       AS SCORE,
+			(SEQ4() %% 2 = 0)                      AS IS_ACTIVE,
+			DATEADD(DAY, -(SEQ4()), CURRENT_DATE)  AS CREATED_AT,
+			CURRENT_TIMESTAMP                      AS UPDATED_AT,
+			'note_' || (SEQ4() + 1)               AS NOTES
+		FROM TABLE(GENERATOR(ROWCOUNT => 25))`, ref))
+
+	if n := mrowCount(t, client, ref); n != 25 {
+		t.Fatalf("pre-rebuild row count = %d, want 25", n)
+	}
+
+	// Destructive rebuild: drop and create with completely different schema.
+	exec(t, client, "DROP TABLE "+ref)
+	exec(t, client, fmt.Sprintf(`
+		CREATE TABLE %s (
+			UUID       VARCHAR(36)  NOT NULL,
+			EVENT_TYPE VARCHAR(50)  NOT NULL,
+			VALUE      FLOAT,
+			SOURCE     VARCHAR(100),
+			TS         TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP,
+			IS_ACTIVE  BOOLEAN      DEFAULT TRUE
+		)`, ref))
+
+	// No rows survive a destructive rebuild.
+	if n := mrowCount(t, client, ref); n != 0 {
+		t.Errorf("post-rebuild row count = %d, want 0", n)
+	}
+
+	// New schema must be present; old schema must be gone.
+	cols := mcolumnNames(t, client, ref)
+	for _, want := range []string{"UUID", "EVENT_TYPE", "VALUE", "SOURCE", "TS", "IS_ACTIVE"} {
+		if !hasColumn(cols, want) {
+			t.Errorf("expected column %s present in rebuilt table; got %v", want, cols)
+		}
+	}
+	for _, gone := range []string{"ID", "NAME", "SCORE", "METADATA", "TAGS", "PROPS", "NOTES"} {
+		if hasColumn(cols, gone) {
+			t.Errorf("expected column %s absent in rebuilt table; got %v", gone, cols)
+		}
+	}
+
+	// Rebuilt table is immediately insertable.
+	exec(t, client, fmt.Sprintf(`
+		INSERT INTO %s (UUID, EVENT_TYPE, VALUE, SOURCE)
+		VALUES ('a1b2c3d4-0000-0000-0000-000000000001', 'click', 1.0, 'web')`, ref))
+	if n := mrowCount(t, client, ref); n != 1 {
+		t.Errorf("post-insert row count = %d, want 1", n)
+	}
+
+	t.Logf("destructive rebuild complex schema: %v", cols)
+}
