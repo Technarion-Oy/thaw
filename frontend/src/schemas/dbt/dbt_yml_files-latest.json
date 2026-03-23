@@ -1152,7 +1152,7 @@
       }
     }
   },
-  "additionalProperties": false,
+  "additionalProperties": true,
   "$defs": {
     "aggregation_type_params": {
       "type": "object",

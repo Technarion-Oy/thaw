@@ -619,6 +619,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   const hoverTimerRef          = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverHideTimerRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
   const yamlHoverAdjustTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks the style.top value (px number) we last wrote to the YAML hover widget.
+  // While this value matches the widget's current style.top we skip re-adjustment
+  // so the user can move their cursor onto the tooltip without it running away.
+  const yamlHoverSetTopRef = useRef<number | null>(null);
   // Tracks the word key ("db.schema.table") the hover timer is currently running
   // for, and the latest cursor position under the mouse for that word.
   const lastHoverWordRef  = useRef<string | null>(null);
@@ -1311,6 +1315,26 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       // we find the widget in the DOM, check for overlap, and nudge it clear.
       const model = editor.getModel();
       if (model?.getLanguageId() === "yaml") {
+        // If we already positioned the tooltip and our value is still in effect,
+        // don't restart the timer — this lets the user move their cursor onto the
+        // tooltip without it chasing the pointer.
+        if (yamlHoverSetTopRef.current !== null) {
+          const dom = editor.getDomNode();
+          const hoverEl = (
+            dom?.parentElement?.querySelector(".monaco-resizable-hover") ??
+            dom?.querySelector(".monaco-resizable-hover") ??
+            document.querySelector(".monaco-resizable-hover")
+          ) as HTMLElement | null;
+
+          const currentStyleTop = hoverEl ? (parseFloat(hoverEl.style.top) || 0) : null;
+          if (currentStyleTop !== null && Math.abs(currentStyleTop - yamlHoverSetTopRef.current) < 5) {
+            // Our adjustment is still in effect — leave the tooltip where it is.
+            return;
+          }
+          // Monaco repositioned the widget (new hover instance) — reset and re-adjust.
+          yamlHoverSetTopRef.current = null;
+        }
+
         if (yamlHoverAdjustTimerRef.current) clearTimeout(yamlHoverAdjustTimerRef.current);
 
         // Poll every 50 ms (up to 12 attempts ≈ 600 ms) so we reposition the
@@ -1345,9 +1369,15 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           const desiredTop = mouseY + CLEAR + rect.height <= window.innerHeight
             ? mouseY + CLEAR
             : Math.max(0, mouseY - CLEAR - rect.height);
-          if (Math.abs(rect.top - desiredTop) < 2) return;
+          if (Math.abs(rect.top - desiredTop) < 2) {
+            // Already in position — record it so we don't re-adjust on next mousemove.
+            yamlHoverSetTopRef.current = parseFloat(hoverEl.style.top) || 0;
+            return;
+          }
           const styleTop = parseFloat(hoverEl.style.top) || 0;
-          hoverEl.style.top = `${styleTop + (desiredTop - rect.top)}px`;
+          const newStyleTop = styleTop + (desiredTop - rect.top);
+          hoverEl.style.top = `${newStyleTop}px`;
+          yamlHoverSetTopRef.current = newStyleTop;
         };
 
         yamlHoverAdjustTimerRef.current = setTimeout(() => tryAdjust(12), 50);
@@ -1556,6 +1586,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
     editor.onMouseLeave(() => {
       lastHoverWordRef.current = null;
+      yamlHoverSetTopRef.current = null; // reset so next hover entry triggers fresh positioning
       if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
       if (!isOnTooltipRef.current) scheduleHide();
     });
