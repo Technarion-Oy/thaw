@@ -70,6 +70,8 @@ jobs:
 
       - name: Build
         run: wails build -clean
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
 
       # ── Rename / package output with commit hash ───────────────────────────
       - name: Package macOS app bundle
