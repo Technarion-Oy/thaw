@@ -875,8 +875,13 @@ function CellView({
       },
     );
 
-    // ⌘⌥↑ / Ctrl+Alt+↑ — add cursor above; ⌘⌥↓ / Ctrl+Alt+↓ — add cursor below.
+    // Explicitly bind editing shortcuts so WKWebView doesn't intercept them before Monaco.
     const trigger = (id: string) => editor.trigger("keyboard", id, null);
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Slash,                        () => trigger("editor.action.commentLine"));
+    editor.addCommand(monaco.KeyMod.Shift   | monaco.KeyMod.Alt | monaco.KeyCode.KeyF,     () => trigger("editor.action.formatDocument"));
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyF,                         () => trigger("actions.find"));
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyD,                         () => trigger("editor.action.addSelectionToNextFindMatch"));
+    // ⌘⌥↑ / Ctrl+Alt+↑ — add cursor above; ⌘⌥↓ / Ctrl+Alt+↓ — add cursor below.
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.UpArrow,   () => trigger("editor.action.insertCursorAbove"));
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.DownArrow, () => trigger("editor.action.insertCursorBelow"));
 
@@ -909,6 +914,11 @@ function CellView({
     const editorDom = editor.getDomNode();
     editorDom?.addEventListener("keydown", (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
+      // Intercept in capture phase so Monaco's suggest widget cannot grab these first.
+      if (e.altKey) {
+        if (e.key === "ArrowUp")   { e.preventDefault(); e.stopPropagation(); trigger("editor.action.insertCursorAbove"); return; }
+        if (e.key === "ArrowDown") { e.preventDefault(); e.stopPropagation(); trigger("editor.action.insertCursorBelow"); return; }
+      }
       switch (e.key.toLowerCase()) {
         case "c": e.preventDefault(); e.stopPropagation(); doCopy(); break;
         case "v": e.preventDefault(); e.stopPropagation(); doPaste(); break;
