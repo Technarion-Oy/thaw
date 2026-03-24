@@ -76,7 +76,23 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Select for Comparison** / **Compare with** — side-by-side DDL diff (see [Text Comparison](#text-comparison))
 - **Right-click a database** to export its DDL, generate an ER Diagram, view dropped schemas recoverable via Time Travel, or open **Backup Sets…**
 - **Right-click a schema** to view dropped tables, **Export Data…** or **Import Data…** without needing an existing table (schema-level launch opens the same modals with a table selector or name field), open **Backup Sets…**, or use the **Create Object** cascading submenu (opens left or right depending on available screen space); currently contains **Task…** to create a new Snowflake Task
-- **Right-click a task** to **Execute Task** — issues `EXECUTE TASK` to trigger an immediate single run; a loading indicator is shown while the command is in flight and a success or error message confirms the result
+- **Right-click a task** to:
+  - **Execute Task…** — opens a dialog with two modes:
+    - **Execute** — issues `EXECUTE TASK <name>` immediately; accepts an optional CONFIG JSON override (`USING CONFIG = $json$`); validates JSON on the fly and blocks execution while the input is invalid
+    - **Retry Last** — issues `EXECUTE TASK <name> RETRY LAST` to resume the last failed or cancelled task graph run from the point of failure (requires the run to be `FAILED` or `CANCELED`, the graph to be unchanged, and the original attempt to be within 14 days)
+    - A live SQL preview shows the exact statement before it is sent
+  - **Properties** — opens a dedicated editable modal covering the full `ALTER TASK` syntax:
+    - **Status**: RESUME / SUSPEND
+    - **Compute**: warehouse (select from available warehouses)
+    - **Schedule**: CRON expression or interval (with UNSET)
+    - **Dependencies**: list of predecessor tasks; add with `ADD AFTER` or remove per row with `REMOVE AFTER`
+    - **Condition**: WHEN expression (multi-line editor with Save / Cancel / Remove WHEN)
+    - **SQL Body**: task SQL (multi-line editor with Save / Cancel via `MODIFY AS`)
+    - **Configuration**: CONFIG JSON string (inline edit, UNSET supported)
+    - **Limits**: user task timeout (ms) and overlap policy (ALLOW / DISALLOW)
+    - **Notifications**: ERROR_INTEGRATION and SUCCESS_INTEGRATION selected from dropdowns of available notification integrations (UNSET supported)
+    - **General**: comment (inline edit, UNSET) and EXECUTE AS (caller / user)
+    - Every change is applied immediately via `ALTER TASK IF EXISTS … <clause>` and values reload after each save
 - **Right-click a notebook** to:
   - **Open Notebook** — pulls the latest version from Snowflake using `DESC NOTEBOOK` and `GET`, then opens it in a new unsaved notebook tab
   - **Execute Notebook…** — opens a dialog to run `EXECUTE NOTEBOOK` with optional string parameters (each value is automatically single-quoted); the dialog shows the notebook's current Query Warehouse fetched from `SHOW NOTEBOOKS`; if none is set a warning alert offers a **Set Warehouse** button that opens a separate dialog with a warehouse selector and explicit **Save** / **Cancel** buttons (saves via `ALTER NOTEBOOK … SET QUERY_WAREHOUSE`); the execute dialog updates live once the warehouse is saved; a live SQL preview shows the exact statement that will run
@@ -88,6 +104,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 - **Properties** — opens a key/value panel of object metadata populated from the relevant `SHOW` command; for tables the panel additionally provides two inline-editable sections:
   - **Table Settings** — view and edit cluster key, schema evolution, change tracking, data retention days, max data extension days, default DDL collation, and comment; booleans are toggled with a switch, numeric and text fields open an inline input with Save / Cancel; changes are applied immediately via `ALTER TABLE SET`
   - **Column Comments** — view and edit the comment on every column; each row shows the column name, its current comment (or a dash if empty), and a pencil icon to edit inline
+  - For **tasks** the Properties entry opens the full Task Properties modal described above instead of the generic read-only panel
 - **Refresh** — reload the full object tree with one click
 - **Time Travel / Undrop** — list dropped databases, schemas, and tables within their retention window and restore them with a single click
 - **ER Diagram** — generate an Entity Relationship Diagram for any database; filter by schema, zoom, pan, and copy the Mermaid source

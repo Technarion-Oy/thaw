@@ -193,7 +193,10 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
   - **View Dependencies…** (views, procedures, functions) — opens a modal with a fully recursive dependency tree built by parsing DDL — no dynamic SQL or Snowflake lineage service required; each node shows the object kind (icon + colour-coded tag), fully-qualified name, and optional error/circular badges; hover any node to see its DDL in a tooltip (fetched lazily, cached for 60 seconds); circular references are detected automatically and labelled "already shown" to prevent infinite expansion; SQL-language objects are expanded recursively up to 8 levels deep; tables and non-SQL objects are shown as leaf nodes; the tree is fully expanded on load and can be collapsed/expanded manually
   - **Open Notebook** (notebooks) — downloads the notebook source from Snowflake via `DESC NOTEBOOK` → `GET`, opens it in a new unsaved notebook tab; the `•` unsaved indicator is shown immediately so it's clear the file hasn't been saved locally yet
   - **Execute Notebook…** (notebooks) — opens a dialog to run `EXECUTE NOTEBOOK` with optional string parameters (each value is automatically single-quoted); the dialog fetches the notebook's current `QUERY_WAREHOUSE` via `SHOW NOTEBOOKS` and displays it read-only; if no warehouse is configured a warning alert is shown with a **Set Warehouse** button that opens a separate dialog where the warehouse can be selected from the session warehouse list and saved via `ALTER NOTEBOOK … SET QUERY_WAREHOUSE`; the Set Warehouse dialog has explicit **Save** and **Cancel** buttons and updates the execute dialog live on save; a live SQL preview shows the exact `EXECUTE NOTEBOOK` statement that will be sent
-  - **Execute Task** (tasks) — triggers an immediate single run of the task via `EXECUTE TASK`; a loading indicator is shown while the command is in flight and a success or error message is displayed on completion
+  - **Execute Task…** (tasks) — opens a dialog to run the task with two modes:
+    - **Execute** — issues `EXECUTE TASK <name>` immediately; optionally accepts a CONFIG JSON string (`USING CONFIG = $json$`) to override the task's default configuration at runtime; the CONFIG field validates JSON on the fly and disables the Execute button while the input is invalid
+    - **Retry Last** — issues `EXECUTE TASK <name> RETRY LAST` to re-execute the last failed or cancelled task graph run from where it failed; requires the last run to be in state `FAILED` or `CANCELED`, the graph must not have been modified since, and the first attempt must have run within the last 14 days
+    - A live SQL preview shows the exact statement that will be sent; a success or error toast confirms the result
   - **Insert Full Name** — inserts the fully-qualified `"DB"."SCHEMA"."NAME"` at the current editor cursor position
   - View the DDL definition inline
   - **Rename** the object (`ALTER … RENAME TO`) — available for tables, views, sequences, stages, streams, tasks, file formats, and pipes
@@ -205,6 +208,18 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - **Properties** — right-click any database, schema, or object → **Properties** opens a key/value panel populated by the corresponding `SHOW` command; a **Copy** button copies all rows as `property: value` lines; for **tables** the panel includes two additional inline-editable sections:
   - **Table Settings** — cluster key, schema evolution, change tracking, data retention days, max data extension days, default DDL collation, and comment; booleans are toggled with a switch, other fields open an inline input with Save / Cancel; changes apply via `ALTER TABLE SET`
   - **Column Comments** — lists every column with its current comment; click the pencil icon to edit inline; saving runs `ALTER TABLE … MODIFY COLUMN … COMMENT`
+- **Task Properties** (tasks) — right-clicking a task and selecting **Properties** opens a dedicated editable modal covering the full `ALTER TASK` syntax, organised into sections:
+  - **Status** — RESUME / SUSPEND toggle
+  - **Compute** — warehouse picker (inline select, bare identifier)
+  - **Schedule** — CRON expression or interval string (inline text edit, UNSET supported)
+  - **Dependencies** — lists all predecessor tasks; add new predecessors with `ADD AFTER` and remove existing ones with `REMOVE AFTER` per row
+  - **Condition** — WHEN expression (multi-line textarea with Save / Cancel / Remove WHEN)
+  - **SQL Body** — the task's SQL statement (multi-line textarea with Save / Cancel via `MODIFY AS`)
+  - **Configuration** — CONFIG JSON string (inline text edit, UNSET supported)
+  - **Limits** — user task timeout ms and allowed overlap policy (ALLOW / DISALLOW)
+  - **Notifications** — ERROR_INTEGRATION and SUCCESS_INTEGRATION selected from dropdowns populated by `SHOW NOTIFICATION INTEGRATIONS` (UNSET supported)
+  - **General** — comment (inline text edit, UNSET supported); EXECUTE AS caller/user
+  - Every field applies its change immediately via `ALTER TASK IF EXISTS … <clause>` and reloads the current values; all edits are non-destructive and can be corrected
 - **Text Comparison** — right-click any object, role, warehouse, or file → **Select for Comparison**; then right-click a second item → **Compare with: …** to open a Monaco side-by-side diff view; works across categories (e.g. compare a table DDL against a local `.sql` file); both sides are fetched concurrently and trailing whitespace is trimmed before diffing
 - Tree automatically refreshes the affected database after any rename, drop, or undrop operation
 - **ER Diagram** — right-click a database and choose **ER Diagram…** to generate an Entity Relationship Diagram from `INFORMATION_SCHEMA.COLUMNS`, `SHOW PRIMARY KEYS`, and `SHOW IMPORTED KEYS`; only base tables are shown (views excluded); filter visible schemas with checkboxes, zoom in/out, drag to pan, and copy the Mermaid source to the clipboard
@@ -664,6 +679,8 @@ thaw/
     │       ├── snippets/SnippetsModal.tsx  # Code Snippets browser (Tools menu)
     │       ├── help/KeyboardShortcutsModal.tsx  # Searchable keyboard shortcuts reference (Help menu)
     │       ├── task/CreateTaskModal.tsx    # CREATE OR REPLACE TASK dialog
+    │       ├── task/ExecuteTaskModal.tsx   # Execute Task dialog (Execute / Retry Last, optional CONFIG JSON)
+    │       ├── task/TaskPropertiesModal.tsx # Full ALTER TASK properties editor (all clauses, inline editing)
     │       └── layout/
     │           ├── AppLayout.tsx  # Two-sidebar layout with drag-and-drop panel reordering and resize handles
     │           └── Sidebar.tsx    # Object browser: lazy tree, right-click actions (rename, drop, undrop, DDL)
