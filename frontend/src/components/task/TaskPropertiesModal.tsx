@@ -17,7 +17,7 @@ import {
   ClockCircleOutlined, EditOutlined, CheckOutlined, CloseOutlined,
   PlayCircleOutlined, PauseCircleOutlined, PlusOutlined, DeleteOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterTask } from "../../../wailsjs/go/main/App";
+import { GetObjectProperties, AlterTask, ListNotificationIntegrations } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -333,9 +333,16 @@ interface Props {
 }
 
 export default function TaskPropertiesModal({ db, schema, name, onClose }: Props) {
-  const [rows,       setRows]       = useState<main.PropertyPair[] | null>(null);
-  const [loadError,  setLoadError]  = useState<string | null>(null);
-  const [toggling,   setToggling]   = useState(false);
+  const [rows,         setRows]         = useState<main.PropertyPair[] | null>(null);
+  const [loadError,    setLoadError]    = useState<string | null>(null);
+  const [toggling,     setToggling]     = useState(false);
+  const [integrations, setIntegrations] = useState<{ label: string; value: string }[]>([]);
+
+  useEffect(() => {
+    ListNotificationIntegrations()
+      .then((list) => setIntegrations((list ?? []).map((n) => ({ label: n, value: n }))))
+      .catch(() => {});
+  }, []);
 
   // ── Data loading ────────────────────────────────────────────────────────────
 
@@ -652,13 +659,15 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
           <div style={SECTION_HEAD}>Notifications</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
-              <EditRow label="Error Integration" type="text" canUnset
+              <EditRow label="Error Integration" type="select" canUnset
                 value={get("error_integration")}
+                options={integrations}
                 onSave={setText("ERROR_INTEGRATION")}
                 onUnset={async () => { await alter("UNSET ERROR_INTEGRATION"); await load(); }}
               />
-              <EditRow label="Success Integration" type="text" canUnset
+              <EditRow label="Success Integration" type="select" canUnset
                 value={get("success_integration")}
+                options={integrations}
                 onSave={setText("SUCCESS_INTEGRATION")}
                 onUnset={async () => { await alter("UNSET SUCCESS_INTEGRATION"); await load(); }}
               />
