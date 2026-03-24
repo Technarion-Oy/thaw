@@ -29,7 +29,7 @@ export const snowflakeMonarchLanguage = {
     "LIMIT", "OFFSET", "FETCH", "NEXT", "ONLY", "UNION", "INTERSECT", "EXCEPT",
     "MINUS", "BY", "PARTITION", "OVER", "ROWS", "RANGE", "WINDOW", "UNBOUNDED",
     "PRECEDING", "FOLLOWING", "INTO", "VALUES", "WITH", "RECURSIVE",
-    "EXCLUDE", "AT", "BEFORE",
+    "EXCLUDE", "AT", "BEFORE", "AFTER",
   ],
 
   ddl: [
@@ -43,7 +43,7 @@ export const snowflakeMonarchLanguage = {
     "INTEGRATION", "POLICY", "MASKING", "NETWORK", "USER", "INDEX",
     "CONSTRAINT", "PRIMARY", "KEY", "FOREIGN", "REFERENCES", "UNIQUE",
     "DEFAULT", "IDENTITY", "AUTOINCREMENT", "ENABLE", "DISABLE",
-    "ENFORCE", "NOVALIDATE", "COLUMN", "TAG", "TRANSIENT", "STAGED",
+    "ENFORCE", "NOVALIDATE", "COLUMN", "TAG", "TRANSIENT", "STAGED", "SCHEDULE",
   ],
 
   dcl: [
