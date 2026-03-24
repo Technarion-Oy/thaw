@@ -3,8 +3,26 @@ name: Integration Tests
 on:
   push:
     branches: ["main"]
+    paths:
+      - "internal/integration/basic_test.go"
+      - "internal/integration/export_test.go"
+      - "internal/integration/migration_test.go"
+      - "internal/snowflake/**"
+      - "internal/ddl/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/integration-tests.yml"
   pull_request:
     branches: ["main"]
+    paths:
+      - "internal/integration/basic_test.go"
+      - "internal/integration/export_test.go"
+      - "internal/integration/migration_test.go"
+      - "internal/snowflake/**"
+      - "internal/ddl/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/integration-tests.yml"
 
 jobs:
   test:
