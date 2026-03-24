@@ -29,11 +29,12 @@ export const snowflakeMonarchLanguage = {
     "LIMIT", "OFFSET", "FETCH", "NEXT", "ONLY", "UNION", "INTERSECT", "EXCEPT",
     "MINUS", "BY", "PARTITION", "OVER", "ROWS", "RANGE", "WINDOW", "UNBOUNDED",
     "PRECEDING", "FOLLOWING", "INTO", "VALUES", "WITH", "RECURSIVE",
+    "EXCLUDE", "AT", "BEFORE",
   ],
 
   ddl: [
     "CREATE", "ALTER", "DROP", "TRUNCATE", "RENAME", "REPLACE", "COPY",
-    "GET", "PUT", "REMOVE", "LIST",
+    "GET", "PUT", "REMOVE", "LIST", "CLONE", "UNDROP",
   ],
 
   object: [
@@ -42,7 +43,7 @@ export const snowflakeMonarchLanguage = {
     "INTEGRATION", "POLICY", "MASKING", "NETWORK", "USER", "INDEX",
     "CONSTRAINT", "PRIMARY", "KEY", "FOREIGN", "REFERENCES", "UNIQUE",
     "DEFAULT", "IDENTITY", "AUTOINCREMENT", "ENABLE", "DISABLE",
-    "ENFORCE", "NOVALIDATE", "COLUMN", "TAG",
+    "ENFORCE", "NOVALIDATE", "COLUMN", "TAG", "TRANSIENT", "STAGED",
   ],
 
   dcl: [
@@ -132,7 +133,7 @@ export const snowflakeMonarchLanguage = {
     "ARRAY_SORT", "ARRAY_TO_STRING", "ARRAYS_OVERLAP",
     "OBJECT_KEYS", "OBJECT_INSERT", "OBJECT_DELETE", "OBJECT_PICK",
     "FLATTEN", "GET", "GET_PATH", "IS_ARRAY", "IS_OBJECT",
-    "IS_NULL_VALUE", "JSON_EXTRACT_PATH_TEXT", "TYPEOF", "CHECK_JSON",
+    "IS_NULL_VALUE", "JSON_EXTRACT_PATH_TEXT", "TYPEOF", "CHECK_JSON", "CHECK_XML",
     "STRIP_NULL_VALUE",
     "AS_CHAR", "AS_VARCHAR", "AS_ARRAY", "AS_OBJECT",
     "AS_INTEGER", "AS_DOUBLE", "AS_DECIMAL", "AS_DATE", "AS_TIME",
