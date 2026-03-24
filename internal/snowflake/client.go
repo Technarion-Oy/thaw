@@ -2839,7 +2839,7 @@ func (c *Client) ExecuteNotebook(ctx context.Context, database, schema, name str
 // or have ALLOW_OVERLAPPING_EXECUTION enabled for this to succeed.
 func (c *Client) ExecuteTask(ctx context.Context, database, schema, name string) error {
 	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-	sql := fmt.Sprintf("ALTER TASK %s.%s.%s EXECUTE", q(database), q(schema), q(name))
+	sql := fmt.Sprintf("EXECUTE TASK %s.%s.%s", q(database), q(schema), q(name))
 	_, err := c.Execute(ctx, sql)
 	return err
 }
