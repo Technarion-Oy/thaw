@@ -2834,12 +2834,35 @@ func (c *Client) ExecuteNotebook(ctx context.Context, database, schema, name str
 	return result.QueryID, nil
 }
 
-// ExecuteTask manually triggers a single run of a Snowflake Task via
-// ALTER TASK … EXECUTE. The task must be suspended (not currently running)
-// or have ALLOW_OVERLAPPING_EXECUTION enabled for this to succeed.
-func (c *Client) ExecuteTask(ctx context.Context, database, schema, name string) error {
+// ExecuteTask manually triggers a single run of a Snowflake Task.
+//
+// If retryLast is true the statement becomes:
+//
+//	EXECUTE TASK <ref> RETRY LAST
+//
+// which re-executes the last failed/cancelled task graph run from where it
+// failed. config and retryLast are mutually exclusive — when retryLast is
+// true, config is ignored.
+//
+// If config is a non-empty JSON string and retryLast is false the statement
+// becomes:
+//
+//	EXECUTE TASK <ref> USING CONFIG = $$<config>$$
+//
+// Otherwise a plain EXECUTE TASK <ref> is issued.
+func (c *Client) ExecuteTask(ctx context.Context, database, schema, name, config string, retryLast bool) error {
 	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-	sql := fmt.Sprintf("EXECUTE TASK %s.%s.%s", q(database), q(schema), q(name))
+	ref := fmt.Sprintf("%s.%s.%s", q(database), q(schema), q(name))
+
+	var sql string
+	switch {
+	case retryLast:
+		sql = fmt.Sprintf("EXECUTE TASK %s RETRY LAST", ref)
+	case config != "":
+		sql = fmt.Sprintf("EXECUTE TASK %s USING CONFIG = $$%s$$", ref, config)
+	default:
+		sql = fmt.Sprintf("EXECUTE TASK %s", ref)
+	}
 	_, err := c.Execute(ctx, sql)
 	return err
 }

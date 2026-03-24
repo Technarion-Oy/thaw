@@ -2006,13 +2006,14 @@ func (a *App) ImportTableData(params snowflake.ImportTableParams) (snowflake.Imp
 	return a.client.ImportTableData(a.ctx, params)
 }
 
-// ExecuteTask manually triggers a single run of a Snowflake Task via
-// ALTER TASK … EXECUTE.
-func (a *App) ExecuteTask(database, schema, name string) error {
+// ExecuteTask manually triggers a single run of a Snowflake Task.
+// Pass a non-empty config JSON string to use USING CONFIG, or set
+// retryLast to true to re-execute the last failed run.
+func (a *App) ExecuteTask(database, schema, name, config string, retryLast bool) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	return a.client.ExecuteTask(a.ctx, database, schema, name)
+	return a.client.ExecuteTask(a.ctx, database, schema, name, config, retryLast)
 }
 
 // ExecuteNotebook runs EXECUTE NOTEBOOK against a Snowflake Notebook object and

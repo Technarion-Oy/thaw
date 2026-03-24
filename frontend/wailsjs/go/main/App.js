@@ -150,8 +150,8 @@ export function ExecuteQuery(arg1) {
   return window['go']['main']['App']['ExecuteQuery'](arg1);
 }
 
-export function ExecuteTask(arg1, arg2, arg3) {
-  return window['go']['main']['App']['ExecuteTask'](arg1, arg2, arg3);
+export function ExecuteTask(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['ExecuteTask'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function ExportAccountObjectsDDL(arg1) {

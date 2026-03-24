@@ -46,7 +46,7 @@ import {
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData, FetchNotebookContent, ExecuteTask } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData, FetchNotebookContent } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
@@ -59,6 +59,7 @@ import CallProcedureModal from "../procedure/CallProcedureModal";
 import ExecuteNotebookModal from "../notebook/ExecuteNotebookModal";
 import SelectFunctionModal from "../function/SelectFunctionModal";
 import CreateTaskModal from "../task/CreateTaskModal";
+import ExecuteTaskModal from "../task/ExecuteTaskModal";
 import ERDiagramModal from "../er/ERDiagramModal";
 import ExportTableModal from "../export/ExportTableModal";
 import ImportTableModal from "../export/ImportTableModal";
@@ -295,6 +296,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [selectFunctionModal, setSelectFunctionModal] = useState<{ db: string; schema: string; name: string; rawArgs: string } | null>(null);
   const [executeNotebookModal, setExecuteNotebookModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createTaskModal, setCreateTaskModal] = useState<{ db: string; schema: string } | null>(null);
+  const [executeTaskModal, setExecuteTaskModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [undropModal, setUndropModal] = useState<UndropModal | null>(null);
   const [undropSchemasModal, setUndropSchemasModal] = useState<UndropSchemasModal | null>(null);
   const [undropDatabasesModal, setUndropDatabasesModal] = useState<UndropDatabasesModal | null>(null);
@@ -679,20 +681,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setExecuteNotebookModal({ db, schema, name });
   };
 
-  const executeTask = async () => {
+  const executeTask = () => {
     if (!ctxMenu) return;
     const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
     const name = nameParts.join(":");
     setCtxMenu(null);
-    const hide = message.loading(`Executing task ${name}…`, 0);
-    try {
-      await ExecuteTask(db, schema, name);
-      message.success(`Task ${name} triggered`);
-    } catch (e) {
-      message.error(String(e));
-    } finally {
-      hide();
-    }
+    setExecuteTaskModal({ db, schema, name });
   };
 
   const openCreateTask = () => {
@@ -1388,6 +1382,16 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           <Divider style={{ borderColor: "var(--border)", margin: "8px 0 0" }} />
           <AccountPanel />
         </>
+      )}
+
+      {/* Execute Task modal */}
+      {executeTaskModal && (
+        <ExecuteTaskModal
+          db={executeTaskModal.db}
+          schema={executeTaskModal.schema}
+          name={executeTaskModal.name}
+          onClose={() => setExecuteTaskModal(null)}
+        />
       )}
 
       {/* Execute Notebook modal */}
