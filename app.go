@@ -2006,6 +2006,15 @@ func (a *App) ImportTableData(params snowflake.ImportTableParams) (snowflake.Imp
 	return a.client.ImportTableData(a.ctx, params)
 }
 
+// ExecuteTask manually triggers a single run of a Snowflake Task via
+// ALTER TASK … EXECUTE.
+func (a *App) ExecuteTask(database, schema, name string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	return a.client.ExecuteTask(a.ctx, database, schema, name)
+}
+
 // ExecuteNotebook runs EXECUTE NOTEBOOK against a Snowflake Notebook object and
 // returns the resulting query ID. Each element of params is treated as a string
 // literal value and is automatically single-quoted in the generated SQL.

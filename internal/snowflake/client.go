@@ -2834,6 +2834,16 @@ func (c *Client) ExecuteNotebook(ctx context.Context, database, schema, name str
 	return result.QueryID, nil
 }
 
+// ExecuteTask manually triggers a single run of a Snowflake Task via
+// ALTER TASK … EXECUTE. The task must be suspended (not currently running)
+// or have ALLOW_OVERLAPPING_EXECUTION enabled for this to succeed.
+func (c *Client) ExecuteTask(ctx context.Context, database, schema, name string) error {
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	sql := fmt.Sprintf("ALTER TASK %s.%s.%s EXECUTE", q(database), q(schema), q(name))
+	_, err := c.Execute(ctx, sql)
+	return err
+}
+
 // GetNotebookQueryWarehouse returns the QUERY_WAREHOUSE currently set on a
 // Snowflake Notebook object, or an empty string if none is configured.
 func (c *Client) GetNotebookQueryWarehouse(ctx context.Context, database, schema, name string) (string, error) {

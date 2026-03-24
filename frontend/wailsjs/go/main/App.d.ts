@@ -85,6 +85,8 @@ export function ExecuteNotebook(arg1:string,arg2:string,arg3:string,arg4:Array<s
 
 export function ExecuteQuery(arg1:string):Promise<snowflake.QueryResult>;
 
+export function ExecuteTask(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function ExportAccountObjectsDDL(arg1:string):Promise<main.AccountExportResult>;
 
 export function ExportAllDatabasesDDL(arg1:string,arg2:Array<string>):Promise<Array<ddl.ExportResult>>;

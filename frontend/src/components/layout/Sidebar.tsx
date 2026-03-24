@@ -46,7 +46,7 @@ import {
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData, FetchNotebookContent } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData, FetchNotebookContent, ExecuteTask } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
@@ -679,6 +679,22 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setExecuteNotebookModal({ db, schema, name });
   };
 
+  const executeTask = async () => {
+    if (!ctxMenu) return;
+    const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
+    const name = nameParts.join(":");
+    setCtxMenu(null);
+    const hide = message.loading(`Executing task ${name}…`, 0);
+    try {
+      await ExecuteTask(db, schema, name);
+      message.success(`Task ${name} triggered`);
+    } catch (e) {
+      message.error(String(e));
+    } finally {
+      hide();
+    }
+  };
+
   const openCreateTask = () => {
     if (!ctxMenu) return;
     const [, db, schema] = ctxMenu.nodeKey.split(":");
@@ -1285,6 +1301,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openImportModal)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
             menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TASK" &&
+            menuItem("Execute Task", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeTask)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PROCEDURE" &&
             menuItem("Call Procedure", <PlayCircleOutlined style={{ fontSize: 12 }} />, callProcedure)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "FUNCTION" &&
