@@ -1,0 +1,687 @@
+// Copyright (c) 2026 Technarion Oy. All rights reserved.
+//
+// This software and its source code are proprietary and confidential.
+// Unauthorized copying, distribution, modification, or use of this software,
+// in whole or in part, is strictly prohibited without prior written permission
+// from Technarion Oy.
+//
+// Commercial use of this software is restricted to parties holding a valid
+// license agreement with Technarion Oy.
+
+import { useState, useEffect, useCallback } from "react";
+import {
+  Modal, Spin, Button, Input, InputNumber, Select, Tag, Space,
+  Typography, message, Alert,
+} from "antd";
+import {
+  ClockCircleOutlined, EditOutlined, CheckOutlined, CloseOutlined,
+  PlayCircleOutlined, PauseCircleOutlined, PlusOutlined, DeleteOutlined,
+} from "@ant-design/icons";
+import { GetObjectProperties, AlterTask } from "../../../wailsjs/go/main/App";
+import type { main } from "../../../wailsjs/go/models";
+
+const { Text } = Typography;
+const { TextArea } = Input;
+
+// ─── Styles ──────────────────────────────────────────────────────────────────
+
+const SECTION_HEAD: React.CSSProperties = {
+  fontSize: 11, fontWeight: 600, color: "var(--text-muted)",
+  letterSpacing: "0.05em", textTransform: "uppercase",
+  margin: "20px 0 8px",
+};
+
+const LABEL_TD: React.CSSProperties = {
+  padding: "6px 12px 6px 0", color: "var(--text-muted)",
+  fontSize: 12, whiteSpace: "nowrap", verticalAlign: "middle",
+  width: 220,
+};
+
+// ─── Options ─────────────────────────────────────────────────────────────────
+
+const OVERLAP_OPTIONS = [
+  { label: "No Overlap",         value: "NO_OVERLAP"          },
+  { label: "Allow Child Overlap", value: "ALLOW_CHILD_OVERLAP" },
+  { label: "Allow All Overlap",  value: "ALLOW_ALL_OVERLAP"   },
+];
+
+const SIZE_OPTIONS = [
+  { label: "X-Small",  value: "XSMALL"  },
+  { label: "Small",    value: "SMALL"   },
+  { label: "Medium",   value: "MEDIUM"  },
+  { label: "Large",    value: "LARGE"   },
+  { label: "X-Large",  value: "XLARGE"  },
+  { label: "2X-Large", value: "XXLARGE" },
+];
+
+const LOG_LEVEL_OPTIONS = [
+  { label: "TRACE",   value: "TRACE"   },
+  { label: "DEBUG",   value: "DEBUG"   },
+  { label: "INFO",    value: "INFO"    },
+  { label: "WARNING", value: "WARNING" },
+  { label: "ERROR",   value: "ERROR"   },
+  { label: "FATAL",   value: "FATAL"   },
+  { label: "OFF",     value: "OFF"     },
+];
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function q1(s: string) { return "'" + s.replace(/'/g, "''") + "'"; }
+function isValidJson(s: string) { try { JSON.parse(s); return true; } catch { return false; } }
+
+/** Parse the predecessors column, which may be a JSON array string or empty. */
+function parsePredecessors(raw: string): string[] {
+  if (!raw || raw === "[]") return [];
+  try {
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) return arr.map(String);
+  } catch { /* fall through */ }
+  // comma-separated fallback
+  return raw.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+// ─── EditRow component ────────────────────────────────────────────────────────
+
+interface RowProps {
+  label:     string;
+  value:     string;
+  type:      "text" | "number" | "select" | "textarea";
+  options?:  { label: string; value: string }[];
+  min?:      number;
+  hint?:     string;
+  canUnset?: boolean;
+  onSave:    (val: string) => Promise<void>;
+  onUnset?:  () => Promise<void>;
+}
+
+function EditRow({ label, value, type, options, min, hint, canUnset, onSave, onUnset }: RowProps) {
+  const [editing,   setEditing]   = useState(false);
+  const [editVal,   setEditVal]   = useState(value);
+  const [saving,    setSaving]    = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [unsetting, setUnsetting] = useState(false);
+
+  const startEdit = () => { setEditing(true); setEditVal(value); setEditError(null); };
+  const cancel    = () => { setEditing(false); setEditError(null); };
+
+  const save = async () => {
+    setSaving(true); setEditError(null);
+    try { await onSave(editVal); setEditing(false); }
+    catch (e) {
+      const raw = String(e);
+      const m = raw.match(/Insufficient privileges[^\n]*/i) ?? raw.match(/:\s*(.+)$/s);
+      setEditError(m ? m[0].trim() : raw);
+    } finally { setSaving(false); }
+  };
+
+  const doUnset = async () => {
+    if (!onUnset) return;
+    setUnsetting(true);
+    try { await onUnset(); }
+    catch (e) { message.error(String(e)); }
+    finally { setUnsetting(false); }
+  };
+
+  return (
+    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+      <td style={LABEL_TD}>{label}</td>
+      <td style={{ padding: "4px 0", verticalAlign: "middle" }}>
+        {editing ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+              {type === "select" ? (
+                <Select size="small" value={editVal} onChange={setEditVal}
+                  options={options} style={{ minWidth: 180 }} autoFocus />
+              ) : type === "number" ? (
+                <InputNumber size="small" min={min ?? 0}
+                  value={parseInt(editVal, 10) || 0}
+                  onChange={(v) => setEditVal(String(v ?? 0))}
+                  style={{ width: 130 }} title={hint} />
+              ) : type === "textarea" ? (
+                <TextArea value={editVal} onChange={(e) => setEditVal(e.target.value)}
+                  autoSize={{ minRows: 3, maxRows: 12 }}
+                  style={{ fontFamily: "monospace", fontSize: 12, flex: 1 }}
+                  status={editError ? "error" : undefined} autoFocus />
+              ) : (
+                <Input size="small" value={editVal}
+                  onChange={(e) => setEditVal(e.target.value)}
+                  onPressEnter={save} autoFocus
+                  style={{ fontFamily: "monospace", fontSize: 12 }}
+                  title={hint} status={editError ? "error" : undefined} />
+              )}
+              <Button size="small" type="primary" icon={<CheckOutlined />} loading={saving} onClick={save} />
+              <Button size="small" icon={<CloseOutlined />} disabled={saving} onClick={cancel} />
+            </div>
+            {editError && (
+              <div style={{ color: "#f85149", fontSize: 11, fontFamily: "monospace",
+                lineHeight: 1.4, paddingLeft: 2 }}>
+                {editError}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{
+              fontFamily: type === "select" ? undefined : "monospace",
+              fontSize: 12,
+              color: value ? "var(--text)" : "var(--text-faint)",
+              fontStyle: value ? "normal" : "italic",
+              flex: 1, wordBreak: "break-word",
+              whiteSpace: type === "textarea" ? "pre-wrap" : undefined,
+            }}>
+              {value || "—"}
+            </span>
+            <Button size="small" type="text" icon={<EditOutlined />} onClick={startEdit}
+              style={{ flexShrink: 0, color: "var(--text-faint)" }} />
+            {canUnset && value && onUnset && (
+              <Button size="small" type="text" icon={<CloseOutlined />} loading={unsetting}
+                onClick={doUnset} title="Unset" style={{ color: "var(--text-faint)" }} />
+            )}
+          </div>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+// ─── Predecessor list ─────────────────────────────────────────────────────────
+
+interface PredecessorsProps {
+  predecessors: string[];
+  onAdd:    (name: string) => Promise<void>;
+  onRemove: (name: string) => Promise<void>;
+}
+
+function PredecessorsList({ predecessors, onAdd, onRemove }: PredecessorsProps) {
+  const [addVal, setAddVal] = useState("");
+  const [adding, setAdding] = useState(false);
+
+  const doAdd = async () => {
+    const v = addVal.trim();
+    if (!v) return;
+    setAdding(true);
+    try { await onAdd(v); setAddVal(""); }
+    catch (e) { message.error(String(e)); }
+    finally { setAdding(false); }
+  };
+
+  return (
+    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+      <td style={LABEL_TD}>Predecessors (AFTER)</td>
+      <td style={{ padding: "6px 0", verticalAlign: "top" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {predecessors.length === 0 && (
+            <span style={{ fontSize: 12, color: "var(--text-faint)", fontStyle: "italic" }}>—</span>
+          )}
+          {predecessors.map((p) => (
+            <div key={p} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontFamily: "monospace", fontSize: 12, flex: 1 }}>{p}</span>
+              <Button size="small" type="text" danger icon={<DeleteOutlined />}
+                title={`REMOVE AFTER ${p}`}
+                onClick={async () => {
+                  try { await onRemove(p); }
+                  catch (e) { message.error(String(e)); }
+                }} />
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+            <Input size="small" value={addVal}
+              placeholder="task name to add…"
+              onChange={(e) => setAddVal(e.target.value)}
+              onPressEnter={doAdd}
+              style={{ fontFamily: "monospace", fontSize: 12, flex: 1 }} />
+            <Button size="small" icon={<PlusOutlined />} loading={adding} onClick={doAdd}
+              type="primary" ghost>ADD AFTER</Button>
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// ─── MultilineRow (SQL body / WHEN condition) ─────────────────────────────────
+
+interface MultilineRowProps {
+  label:     string;
+  value:     string;
+  onSave:    (val: string) => Promise<void>;
+  onUnset?:  () => Promise<void>;
+  unsetLabel?: string;
+}
+
+function MultilineRow({ label, value, onSave, onUnset, unsetLabel = "Remove" }: MultilineRowProps) {
+  const [editing,   setEditing]   = useState(false);
+  const [editVal,   setEditVal]   = useState(value);
+  const [saving,    setSaving]    = useState(false);
+  const [unsetting, setUnsetting] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  const startEdit = () => { setEditing(true); setEditVal(value); setEditError(null); };
+  const cancel    = () => { setEditing(false); setEditError(null); };
+
+  const save = async () => {
+    setSaving(true); setEditError(null);
+    try { await onSave(editVal); setEditing(false); }
+    catch (e) {
+      const raw = String(e);
+      const m = raw.match(/:\s*(.+)$/s);
+      setEditError(m ? m[0].trim() : raw);
+    } finally { setSaving(false); }
+  };
+
+  const doUnset = async () => {
+    if (!onUnset) return;
+    setUnsetting(true);
+    try { await onUnset(); setEditing(false); }
+    catch (e) { message.error(String(e)); }
+    finally { setUnsetting(false); }
+  };
+
+  return (
+    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+      <td style={{ ...LABEL_TD, verticalAlign: "top", paddingTop: 10 }}>{label}</td>
+      <td style={{ padding: "6px 0" }}>
+        {editing ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <TextArea value={editVal} onChange={(e) => setEditVal(e.target.value)}
+              autoSize={{ minRows: 4, maxRows: 16 }}
+              style={{ fontFamily: "monospace", fontSize: 12 }}
+              status={editError ? "error" : undefined} autoFocus />
+            <div style={{ display: "flex", gap: 6 }}>
+              <Button size="small" type="primary" icon={<CheckOutlined />}
+                loading={saving} onClick={save}>Save</Button>
+              <Button size="small" icon={<CloseOutlined />} disabled={saving || unsetting}
+                onClick={cancel}>Cancel</Button>
+              {onUnset && (
+                <Button size="small" danger loading={unsetting}
+                  disabled={saving} onClick={doUnset}>{unsetLabel}</Button>
+              )}
+            </div>
+            {editError && (
+              <div style={{ color: "#f85149", fontSize: 11, fontFamily: "monospace" }}>
+                {editError}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+            <pre style={{
+              margin: 0, fontFamily: "monospace", fontSize: 12,
+              color: value ? "var(--text)" : "var(--text-faint)",
+              fontStyle: value ? "normal" : "italic",
+              whiteSpace: "pre-wrap", wordBreak: "break-word", flex: 1,
+              maxHeight: 200, overflow: "auto",
+            }}>
+              {value || "—"}
+            </pre>
+            <Button size="small" type="text" icon={<EditOutlined />} onClick={startEdit}
+              style={{ flexShrink: 0, color: "var(--text-faint)" }} />
+          </div>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+// ─── Main modal ───────────────────────────────────────────────────────────────
+
+interface Props {
+  db: string;
+  schema: string;
+  name: string;
+  onClose: () => void;
+}
+
+export default function TaskPropertiesModal({ db, schema, name, onClose }: Props) {
+  const [rows,       setRows]       = useState<main.PropertyPair[] | null>(null);
+  const [loadError,  setLoadError]  = useState<string | null>(null);
+  const [toggling,   setToggling]   = useState(false);
+
+  // ── Data loading ────────────────────────────────────────────────────────────
+
+  const load = useCallback(async () => {
+    setLoadError(null);
+    try {
+      const r = await GetObjectProperties(db, schema, "TASK", name);
+      setRows(r ?? []);
+    } catch (e) {
+      setLoadError(String(e));
+      setRows([]);
+    }
+  }, [db, schema, name]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // ── Property lookup (case-insensitive) ──────────────────────────────────────
+
+  const get = (key: string): string => {
+    const k = key.toLowerCase();
+    return rows?.find((r) => r.key.toLowerCase() === k)?.value ?? "";
+  };
+
+  // ── ALTER helpers ───────────────────────────────────────────────────────────
+
+  const alter = async (clause: string) => {
+    await AlterTask(db, schema, name, clause);
+    await load();
+  };
+
+  /** SET a text property; UNSET if value is empty and canUnset is set. */
+  const setText = (prop: string, canUnset = true) => async (val: string) => {
+    const v = val.trim();
+    if (!v && canUnset) await alter(`UNSET ${prop}`);
+    else await alter(`SET ${prop} = ${q1(v)}`);
+  };
+
+  /** SET a numeric property. */
+  const setNum = (prop: string) => async (val: string) => {
+    await alter(`SET ${prop} = ${parseInt(val, 10) || 0}`);
+  };
+
+  /** SET a bare-word value (enum, no quotes). */
+  const setEnum = (prop: string) => async (val: string) => {
+    await alter(`SET ${prop} = ${val}`);
+  };
+
+  // ── RESUME / SUSPEND ────────────────────────────────────────────────────────
+
+  const state = get("state").toUpperCase();
+  const isStarted = state === "STARTED" || state === "RUNNING";
+
+  const toggleState = async () => {
+    setToggling(true);
+    try {
+      await alter(isStarted ? "SUSPEND" : "RESUME");
+      message.success(`Task ${isStarted ? "suspended" : "resumed"}`);
+    } catch (e) { message.error(String(e)); }
+    finally { setToggling(false); }
+  };
+
+  // ── Predecessors ─────────────────────────────────────────────────────────────
+
+  const predecessors = parsePredecessors(get("predecessors"));
+
+  const addAfter = async (taskName: string) => {
+    await alter(`ADD AFTER ${q1(taskName)}`);
+  };
+
+  const removeAfter = async (taskName: string) => {
+    await alter(`REMOVE AFTER ${q1(taskName)}`);
+  };
+
+  // ── Overlap policy ────────────────────────────────────────────────────────
+
+  // Snowflake may expose either `overlap_policy` (newer) or
+  // `allow_overlapping_execution` (older boolean).  Normalise to enum value.
+  const rawOverlap = get("overlap_policy") || get("allow_overlapping_execution");
+  const overlapValue = rawOverlap === "true" || rawOverlap === "TRUE"
+    ? "ALLOW_ALL_OVERLAP"
+    : rawOverlap === "false" || rawOverlap === "FALSE"
+    ? "NO_OVERLAP"
+    : rawOverlap || "";
+
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  return (
+    <Modal
+      open
+      title={
+        <Space size={6}>
+          <ClockCircleOutlined style={{ color: "var(--link)" }} />
+          <span>Task Properties</span>
+          <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
+            {db}.{schema}.{name}
+          </Text>
+        </Space>
+      }
+      onCancel={onClose}
+      footer={<Button onClick={onClose}>Close</Button>}
+      width={640}
+      styles={{ body: { maxHeight: "76vh", overflowY: "auto", paddingTop: 12 } }}
+    >
+      {loadError && (
+        <Alert type="error" message={loadError} style={{ marginBottom: 12 }} showIcon />
+      )}
+
+      {rows === null && !loadError && (
+        <div style={{ textAlign: "center", padding: 32 }}>
+          <Spin tip="Loading…" />
+        </div>
+      )}
+
+      {rows !== null && (
+        <>
+          {/* ── Status bar ───────────────────────────────────────────────── */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 12,
+            padding: "10px 12px", borderRadius: 6,
+            border: "1px solid var(--border)", background: "var(--bg)",
+            marginBottom: 8,
+          }}>
+            <Tag color={isStarted ? "green" : "default"} style={{ margin: 0 }}>
+              {state || "UNKNOWN"}
+            </Tag>
+            <Button
+              size="small"
+              icon={isStarted ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
+              onClick={toggleState}
+              loading={toggling}
+            >
+              {isStarted ? "Suspend" : "Resume"}
+            </Button>
+            {get("owner") && (
+              <Text type="secondary" style={{ fontSize: 12, marginLeft: "auto" }}>
+                Owner: {get("owner")}
+              </Text>
+            )}
+          </div>
+
+          {/* ── Read-only info ────────────────────────────────────────────── */}
+          <div style={{ display: "flex", gap: 24, marginBottom: 4 }}>
+            {get("created_on") && (
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                Created: {get("created_on")}
+              </Text>
+            )}
+            {get("last_committed_on") && (
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                Last commit: {get("last_committed_on")}
+              </Text>
+            )}
+          </div>
+
+          {/* ── Compute ──────────────────────────────────────────────────── */}
+          <div style={SECTION_HEAD}>Compute</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <EditRow label="Warehouse" value={get("warehouse")} type="text"
+                hint="Leave blank to use serverless compute" canUnset
+                onSave={async (v) => {
+                  const t = v.trim();
+                  if (!t) await alter("UNSET WAREHOUSE");
+                  else await alter(`SET WAREHOUSE = ${t}`); // bare identifier
+                  await load();
+                }}
+                onUnset={async () => { await alter("UNSET WAREHOUSE"); await load(); }}
+              />
+              <EditRow label="Initial WH Size (serverless)" type="select"
+                value={get("user_task_managed_initial_warehouse_size")}
+                options={SIZE_OPTIONS} canUnset
+                onSave={setEnum("USER_TASK_MANAGED_INITIAL_WAREHOUSE_SIZE")}
+                onUnset={async () => { await alter("UNSET USER_TASK_MANAGED_INITIAL_WAREHOUSE_SIZE"); await load(); }}
+              />
+              <EditRow label="Min Statement Size" type="select"
+                value={get("serverless_task_min_statement_size") || get("serverless_task_min_warehouse_size")}
+                options={SIZE_OPTIONS} canUnset
+                onSave={setEnum("SERVERLESS_TASK_MIN_STATEMENT_SIZE")}
+                onUnset={async () => { await alter("UNSET SERVERLESS_TASK_MIN_STATEMENT_SIZE"); await load(); }}
+              />
+              <EditRow label="Max Statement Size" type="select"
+                value={get("serverless_task_max_statement_size") || get("serverless_task_max_warehouse_size")}
+                options={SIZE_OPTIONS} canUnset
+                onSave={setEnum("SERVERLESS_TASK_MAX_STATEMENT_SIZE")}
+                onUnset={async () => { await alter("UNSET SERVERLESS_TASK_MAX_STATEMENT_SIZE"); await load(); }}
+              />
+              <EditRow label="Min Trigger Interval (s)" type="number" min={0}
+                value={get("user_task_minimum_trigger_interval_in_seconds")}
+                hint="USER_TASK_MINIMUM_TRIGGER_INTERVAL_IN_SECONDS"
+                onSave={setNum("USER_TASK_MINIMUM_TRIGGER_INTERVAL_IN_SECONDS")} />
+            </tbody>
+          </table>
+
+          {/* ── Schedule ─────────────────────────────────────────────────── */}
+          <div style={SECTION_HEAD}>Schedule</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <EditRow label="Schedule" value={get("schedule")} type="text"
+                hint="e.g. '5 MINUTES' or 'USING CRON 0 * * * * UTC'" canUnset
+                onSave={setText("SCHEDULE")}
+                onUnset={async () => { await alter("UNSET SCHEDULE"); await load(); }}
+              />
+              <EditRow label="Overlap Policy" value={overlapValue}
+                type="select" options={OVERLAP_OPTIONS}
+                onSave={setEnum("OVERLAP_POLICY")} />
+              <EditRow label="Target Completion Interval" type="text"
+                value={get("target_completion_interval")}
+                hint="e.g. '1 HOURS'" canUnset
+                onSave={setText("TARGET_COMPLETION_INTERVAL")}
+                onUnset={async () => { await alter("UNSET TARGET_COMPLETION_INTERVAL"); await load(); }}
+              />
+            </tbody>
+          </table>
+
+          {/* ── Dependencies ─────────────────────────────────────────────── */}
+          <div style={SECTION_HEAD}>Dependencies</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <PredecessorsList
+                predecessors={predecessors}
+                onAdd={addAfter}
+                onRemove={removeAfter}
+              />
+              <EditRow label="Finalize Task" value={get("finalize") || get("finalize_task")}
+                type="text" canUnset hint="Task name to run after graph completes"
+                onSave={setText("FINALIZE")}
+                onUnset={async () => { await alter("UNSET FINALIZE"); await load(); }}
+              />
+            </tbody>
+          </table>
+
+          {/* ── Condition (WHEN) ──────────────────────────────────────────── */}
+          <div style={SECTION_HEAD}>Condition</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <MultilineRow
+                label="WHEN condition"
+                value={get("condition") || get("condition_text")}
+                onSave={async (v) => {
+                  const t = v.trim();
+                  if (!t) await alter("REMOVE WHEN");
+                  else await alter(`MODIFY WHEN ${t}`);
+                  await load();
+                }}
+                onUnset={async () => { await alter("REMOVE WHEN"); await load(); }}
+                unsetLabel="Remove WHEN"
+              />
+            </tbody>
+          </table>
+
+          {/* ── SQL Body ─────────────────────────────────────────────────── */}
+          <div style={SECTION_HEAD}>SQL Body</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <MultilineRow
+                label="Definition (AS)"
+                value={get("definition")}
+                onSave={async (v) => {
+                  await alter(`MODIFY AS ${v}`);
+                  await load();
+                }}
+              />
+            </tbody>
+          </table>
+
+          {/* ── Configuration ─────────────────────────────────────────────── */}
+          <div style={SECTION_HEAD}>Configuration</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <EditRow label="Config (JSON)" value={get("config")} type="textarea" canUnset
+                hint="Valid JSON — merged with the task's default config at runtime"
+                onSave={async (v) => {
+                  const t = v.trim();
+                  if (!t) { await alter("UNSET CONFIG"); await load(); return; }
+                  if (!isValidJson(t)) throw new Error("Invalid JSON");
+                  await alter(`SET CONFIG = $$${t}$$`);
+                  await load();
+                }}
+                onUnset={async () => { await alter("UNSET CONFIG"); await load(); }}
+              />
+              <EditRow label="Execute as User" type="text"
+                value={get("execute_as") || get("execute_as_user")} canUnset
+                hint="User name to execute the task as"
+                onSave={async (v) => {
+                  const t = v.trim();
+                  if (!t) await alter("UNSET EXECUTE AS USER");
+                  else await alter(`SET EXECUTE AS USER ${t}`); // identifier, no quotes
+                  await load();
+                }}
+                onUnset={async () => { await alter("UNSET EXECUTE AS USER"); await load(); }}
+              />
+            </tbody>
+          </table>
+
+          {/* ── Limits ───────────────────────────────────────────────────── */}
+          <div style={SECTION_HEAD}>Limits</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <EditRow label="Timeout (ms)" type="number" min={0}
+                value={get("user_task_timeout_ms")}
+                hint="USER_TASK_TIMEOUT_MS — 0 means no timeout"
+                onSave={setNum("USER_TASK_TIMEOUT_MS")} />
+              <EditRow label="Suspend After N Failures" type="number" min={0}
+                value={get("suspend_task_after_num_failures")}
+                hint="0 = never suspend"
+                onSave={setNum("SUSPEND_TASK_AFTER_NUM_FAILURES")} />
+              <EditRow label="Auto-Retry Attempts" type="number" min={0}
+                value={get("task_auto_retry_attempts")}
+                onSave={setNum("TASK_AUTO_RETRY_ATTEMPTS")} />
+            </tbody>
+          </table>
+
+          {/* ── Notifications ─────────────────────────────────────────────── */}
+          <div style={SECTION_HEAD}>Notifications</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <EditRow label="Error Integration" type="text" canUnset
+                value={get("error_integration")}
+                onSave={setText("ERROR_INTEGRATION")}
+                onUnset={async () => { await alter("UNSET ERROR_INTEGRATION"); await load(); }}
+              />
+              <EditRow label="Success Integration" type="text" canUnset
+                value={get("success_integration")}
+                onSave={setText("SUCCESS_INTEGRATION")}
+                onUnset={async () => { await alter("UNSET SUCCESS_INTEGRATION"); await load(); }}
+              />
+              <EditRow label="Log Level" type="select" value={get("log_level")}
+                options={LOG_LEVEL_OPTIONS} canUnset
+                onSave={setText("LOG_LEVEL")}
+                onUnset={async () => { await alter("UNSET LOG_LEVEL"); await load(); }}
+              />
+            </tbody>
+          </table>
+
+          {/* ── General ──────────────────────────────────────────────────── */}
+          <div style={SECTION_HEAD}>General</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              <EditRow label="Comment" type="text" canUnset value={get("comment")}
+                onSave={setText("COMMENT")}
+                onUnset={async () => { await alter("UNSET COMMENT"); await load(); }}
+              />
+            </tbody>
+          </table>
+        </>
+      )}
+    </Modal>
+  );
+}

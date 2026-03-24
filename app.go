@@ -2006,6 +2006,21 @@ func (a *App) ImportTableData(params snowflake.ImportTableParams) (snowflake.Imp
 	return a.client.ImportTableData(a.ctx, params)
 }
 
+// AlterTask runs an ALTER TASK IF EXISTS statement on the given task.
+// clause is everything that follows the task name in the ALTER statement,
+// for example "RESUME", "SUSPEND", "SET COMMENT = 'hello'", or
+// "MODIFY AS SELECT 1". The caller is responsible for correct SQL quoting
+// inside the clause; this method only double-quotes the task identifier.
+func (a *App) AlterTask(database, schema, name, clause string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	sql := fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s %s", q(database), q(schema), q(name), clause)
+	_, err := a.client.Execute(a.ctx, sql)
+	return err
+}
+
 // ExecuteTask manually triggers a single run of a Snowflake Task.
 // Pass a non-empty config JSON string to use USING CONFIG, or set
 // retryLast to true to re-execute the last failed run.

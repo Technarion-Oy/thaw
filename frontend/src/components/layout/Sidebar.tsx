@@ -60,6 +60,7 @@ import ExecuteNotebookModal from "../notebook/ExecuteNotebookModal";
 import SelectFunctionModal from "../function/SelectFunctionModal";
 import CreateTaskModal from "../task/CreateTaskModal";
 import ExecuteTaskModal from "../task/ExecuteTaskModal";
+import TaskPropertiesModal from "../task/TaskPropertiesModal";
 import ERDiagramModal from "../er/ERDiagramModal";
 import ExportTableModal from "../export/ExportTableModal";
 import ImportTableModal from "../export/ImportTableModal";
@@ -297,6 +298,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [executeNotebookModal, setExecuteNotebookModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createTaskModal, setCreateTaskModal] = useState<{ db: string; schema: string } | null>(null);
   const [executeTaskModal, setExecuteTaskModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [taskPropsModal, setTaskPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [undropModal, setUndropModal] = useState<UndropModal | null>(null);
   const [undropSchemasModal, setUndropSchemasModal] = useState<UndropSchemasModal | null>(null);
   const [undropDatabasesModal, setUndropDatabasesModal] = useState<UndropDatabasesModal | null>(null);
@@ -983,6 +985,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       title  = `Properties: ${objKind} — ${db}.${schema}.${name}`;
     }
 
+    // Tasks get a dedicated editable properties modal.
+    if (kind === "TASK") {
+      setTaskPropsModal({ db, schema, name });
+      return;
+    }
+
     const tableContext = kind === "TABLE" ? { db, schema, table: name } : undefined;
     setPropsModal({ title, rows: null, error: null, tableContext });
     try {
@@ -1382,6 +1390,16 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           <Divider style={{ borderColor: "var(--border)", margin: "8px 0 0" }} />
           <AccountPanel />
         </>
+      )}
+
+      {/* Task Properties modal */}
+      {taskPropsModal && (
+        <TaskPropertiesModal
+          db={taskPropsModal.db}
+          schema={taskPropsModal.schema}
+          name={taskPropsModal.name}
+          onClose={() => setTaskPropsModal(null)}
+        />
       )}
 
       {/* Execute Task modal */}

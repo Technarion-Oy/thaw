@@ -18,6 +18,10 @@ export function AlterTableProperty(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['AlterTableProperty'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function AlterTask(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['AlterTask'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterWarehouseAbortAllQueries(arg1) {
   return window['go']['main']['App']['AlterWarehouseAbortAllQueries'](arg1);
 }
