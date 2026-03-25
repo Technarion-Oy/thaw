@@ -19,6 +19,7 @@ import {
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterTask, ListNotificationIntegrations } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
+import WhenConditionBuilder from "./WhenConditionBuilder";
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -337,6 +338,10 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
   const [loadError,    setLoadError]    = useState<string | null>(null);
   const [toggling,     setToggling]     = useState(false);
   const [integrations, setIntegrations] = useState<{ label: string; value: string }[]>([]);
+  const [whenEditing,  setWhenEditing]  = useState(false);
+  const [whenDraft,    setWhenDraft]    = useState("");
+  const [whenSaving,   setWhenSaving]   = useState(false);
+  const [whenError,    setWhenError]    = useState<string | null>(null);
 
   useEffect(() => {
     ListNotificationIntegrations()
@@ -598,18 +603,69 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
           <div style={SECTION_HEAD}>Condition</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
-              <MultilineRow
-                label="WHEN condition"
-                value={get("condition") || get("condition_text")}
-                onSave={async (v) => {
-                  const t = v.trim();
-                  if (!t) await alter("REMOVE WHEN");
-                  else await alter(`MODIFY WHEN ${t}`);
-                  await load();
-                }}
-                onUnset={async () => { await alter("REMOVE WHEN"); await load(); }}
-                unsetLabel="Remove WHEN"
-              />
+              <tr style={{ borderBottom: whenEditing ? "none" : "1px solid var(--border)" }}>
+                <td style={{ ...LABEL_TD, verticalAlign: whenEditing ? "top" : "middle", paddingTop: whenEditing ? 10 : undefined }}>
+                  WHEN condition
+                </td>
+                <td style={{ padding: "6px 0" }}>
+                  {!whenEditing ? (
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                      <pre style={{
+                        margin: 0, fontFamily: "monospace", fontSize: 12, flex: 1,
+                        color: (get("condition") || get("condition_text")) ? "var(--text)" : "var(--text-faint)",
+                        fontStyle: (get("condition") || get("condition_text")) ? "normal" : "italic",
+                        whiteSpace: "pre-wrap", wordBreak: "break-word",
+                        maxHeight: 100, overflow: "auto",
+                      }}>
+                        {get("condition") || get("condition_text") || "—"}
+                      </pre>
+                      <Button size="small" type="text" icon={<EditOutlined />}
+                        style={{ flexShrink: 0, color: "var(--text-faint)" }}
+                        onClick={() => {
+                          setWhenDraft(get("condition") || get("condition_text"));
+                          setWhenError(null);
+                          setWhenEditing(true);
+                        }} />
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <WhenConditionBuilder
+                        db={db} schema={schema}
+                        value={whenDraft}
+                        onChange={setWhenDraft}
+                      />
+                      {whenError && (
+                        <div style={{ color: "#f85149", fontSize: 11, fontFamily: "monospace" }}>{whenError}</div>
+                      )}
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <Button size="small" type="primary" loading={whenSaving}
+                          onClick={async () => {
+                            setWhenSaving(true); setWhenError(null);
+                            try {
+                              const t = whenDraft.trim();
+                              if (!t) await alter("REMOVE WHEN");
+                              else await alter(`MODIFY WHEN ${t}`);
+                              setWhenEditing(false);
+                            } catch (e) {
+                              const raw = String(e);
+                              const m = raw.match(/:\s*(.+)$/s);
+                              setWhenError(m ? m[0].trim() : raw);
+                            } finally { setWhenSaving(false); }
+                          }}>Save</Button>
+                        <Button size="small" disabled={whenSaving}
+                          onClick={() => setWhenEditing(false)}>Cancel</Button>
+                        <Button size="small" danger disabled={whenSaving}
+                          onClick={async () => {
+                            setWhenSaving(true);
+                            try { await alter("REMOVE WHEN"); setWhenEditing(false); }
+                            catch (e) { setWhenError(String(e)); }
+                            finally { setWhenSaving(false); }
+                          }}>Remove WHEN</Button>
+                      </div>
+                    </div>
+                  )}
+                </td>
+              </tr>
             </tbody>
           </table>
 

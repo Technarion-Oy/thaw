@@ -16,6 +16,7 @@ import {
 import { ClockCircleOutlined, PlusOutlined } from "@ant-design/icons";
 import { ListWarehouses, ListNotificationIntegrations, ListObjects } from "../../../wailsjs/go/main/App";
 import { useQueryStore } from "../../store/queryStore";
+import WhenConditionBuilder from "./WhenConditionBuilder";
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -458,10 +459,10 @@ export default function CreateTaskModal({ db, schema, onClose }: Props) {
         </Form.Item>
 
         <Form.Item label="Condition (WHEN)" style={itemStyle}>
-          <Input
+          <WhenConditionBuilder
+            db={db} schema={schema}
             value={cfg.when}
-            onChange={(e) => set("when", e.target.value)}
-            placeholder="SYSTEM$STREAM_HAS_DATA('MY_STREAM')"
+            onChange={(v) => set("when", v)}
           />
         </Form.Item>
 
