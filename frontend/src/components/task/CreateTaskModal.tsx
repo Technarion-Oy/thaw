@@ -11,10 +11,10 @@
 import { useState, useEffect } from "react";
 import {
   Modal, Form, Input, Select, Checkbox, Radio, Space,
-  Typography, Divider, InputNumber, Button,
+  Typography, Divider, InputNumber, Button, Tag,
 } from "antd";
-import { ClockCircleOutlined } from "@ant-design/icons";
-import { ListWarehouses, ListNotificationIntegrations } from "../../../wailsjs/go/main/App";
+import { ClockCircleOutlined, PlusOutlined } from "@ant-design/icons";
+import { ListWarehouses, ListNotificationIntegrations, ListObjects } from "../../../wailsjs/go/main/App";
 import { useQueryStore } from "../../store/queryStore";
 
 const { Text } = Typography;
@@ -53,7 +53,7 @@ interface TaskConfig {
   finalize: string;
   executeAsType: "default" | "caller" | "user";
   executeAsUser: string;
-  after: string;
+  after: string[];
   when: string;
   sql: string;
 }
@@ -87,7 +87,7 @@ const DEFAULTS: TaskConfig = {
   finalize: "",
   executeAsType: "default",
   executeAsUser: "",
-  after: "",
+  after: [],
   when: "",
   sql: "",
 };
@@ -146,9 +146,11 @@ function buildSql(db: string, schema: string, cfg: TaskConfig): string {
   if (cfg.comment.trim()) lines.push(`    COMMENT = '${cfg.comment.trim().replace(/'/g, "''")}'`);
   if (cfg.finalize.trim()) lines.push(`    FINALIZE = ${cfg.finalize.trim()}`);
 
-  // AFTER
-  const afterTasks = cfg.after.split(",").map((s) => s.trim()).filter(Boolean);
-  if (afterTasks.length > 0) lines.push(`AFTER ${afterTasks.join(", ")}`);
+  // AFTER — each entry is a bare task name in this db/schema; emit fully-qualified
+  if (cfg.after.length > 0) {
+    const qn = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    lines.push(`AFTER ${cfg.after.map((n) => `${qn(db)}.${qn(schema)}.${qn(n)}`).join(", ")}`);
+  }
 
   // EXECUTE AS
   if (cfg.executeAsType === "caller") {
@@ -176,12 +178,22 @@ export default function CreateTaskModal({ db, schema, onClose }: Props) {
   const [cfg, setCfg] = useState<TaskConfig>(DEFAULTS);
   const [warehouses, setWarehouses] = useState<string[]>([]);
   const [integrations, setIntegrations] = useState<string[]>([]);
+  const [availableTasks, setAvailableTasks] = useState<string[]>([]);
+  const [taskSearchVal, setTaskSearchVal] = useState<string | undefined>(undefined);
   const executeInNewTab = useQueryStore((s) => s.executeInNewTab);
 
   useEffect(() => {
     ListWarehouses().then((whs) => setWarehouses(whs ?? [])).catch(() => {});
     ListNotificationIntegrations().then((ints) => setIntegrations(ints ?? [])).catch(() => {});
-  }, []);
+    ListObjects(db, schema)
+      .then((objs) => {
+        const tasks = (objs ?? [])
+          .filter((o) => (o.kind || "").toUpperCase() === "TASK")
+          .map((o) => o.name);
+        setAvailableTasks(tasks);
+      })
+      .catch(() => {});
+  }, [db, schema]);
 
   const set = <K extends keyof TaskConfig>(key: K, value: TaskConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
@@ -399,16 +411,50 @@ export default function CreateTaskModal({ db, schema, onClose }: Props) {
 
         {divider("Dependencies")}
 
-        <Form.Item
-          label="Predecessor tasks (AFTER)"
-          style={itemStyle}
-          help={<span style={{ fontSize: 11 }}>Comma-separated fully-qualified task names</span>}
-        >
-          <Input
-            value={cfg.after}
-            onChange={(e) => set("after", e.target.value)}
-            placeholder={`"${db}"."${schema}"."PARENT_TASK"`}
-          />
+        <Form.Item label="Predecessor tasks (AFTER)" style={itemStyle}>
+          <Space.Compact style={{ width: "100%" }}>
+            <Select
+              showSearch
+              value={taskSearchVal}
+              onChange={(v) => setTaskSearchVal(v)}
+              onClear={() => setTaskSearchVal(undefined)}
+              placeholder="Search tasks…"
+              allowClear
+              style={{ flex: 1 }}
+              filterOption={(input, option) =>
+                (option?.value as string ?? "").toLowerCase().includes(input.toLowerCase())
+              }
+              options={availableTasks
+                .filter((t) => !cfg.after.includes(t))
+                .map((t) => ({ value: t, label: t }))}
+              notFoundContent={
+                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>No tasks found</span>
+              }
+            />
+            <Button
+              icon={<PlusOutlined />}
+              disabled={!taskSearchVal}
+              onClick={() => {
+                if (!taskSearchVal) return;
+                set("after", [...cfg.after, taskSearchVal]);
+                setTaskSearchVal(undefined);
+              }}
+            />
+          </Space.Compact>
+          {cfg.after.length > 0 && (
+            <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 4 }}>
+              {cfg.after.map((t) => (
+                <Tag
+                  key={t}
+                  closable
+                  onClose={() => set("after", cfg.after.filter((x) => x !== t))}
+                  style={{ fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace", fontSize: 12 }}
+                >
+                  {t}
+                </Tag>
+              ))}
+            </div>
+          )}
         </Form.Item>
 
         <Form.Item label="Condition (WHEN)" style={itemStyle}>
