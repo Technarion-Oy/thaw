@@ -615,7 +615,8 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
               icon={isStarted ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
               onClick={toggleState}
               loading={toggling}
-              disabled={togglingGraph}
+              disabled={togglingGraph || (!isStarted && !hasTrigger)}
+              title={!isStarted && !hasTrigger ? "Cannot resume: task has no schedule, predecessor, finalize, or WHEN condition" : undefined}
             >
               {isStarted ? "Suspend" : "Resume"}
             </Button>
@@ -625,8 +626,10 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
                 icon={isStarted ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
                 onClick={toggleGraph}
                 loading={togglingGraph}
-                disabled={toggling}
-                title={isStarted
+                disabled={toggling || (!isStarted && !hasTrigger)}
+                title={!isStarted && !hasTrigger
+                  ? "Cannot resume: task has no schedule, predecessor, finalize, or WHEN condition"
+                  : isStarted
                   ? "Suspend this task first, then suspend all child tasks"
                   : "Resume all child tasks first (SYSTEM$TASK_DEPENDENTS_ENABLE), then resume this task"}
               >
