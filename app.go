@@ -2124,7 +2124,7 @@ func (a *App) GetTaskStatuses(database, schema string) (TaskStatusesResult, erro
 	// RESULT_LIMIT => 10000 gives us up to 10 000 recent runs across all tasks.
 	histSQL := fmt.Sprintf(
 		`SELECT * FROM TABLE(%s.INFORMATION_SCHEMA.TASK_HISTORY(`+
-			`SCHEDULED_TIME_RANGE_START => DATEADD('day', -14, CURRENT_TIMESTAMP()),`+
+			`SCHEDULED_TIME_RANGE_START => DATEADD('day', -7, CURRENT_TIMESTAMP()),`+
 			`RESULT_LIMIT => 10000))`+
 			` ORDER BY SCHEDULED_TIME DESC`,
 		q(database))
