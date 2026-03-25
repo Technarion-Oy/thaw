@@ -10,6 +10,7 @@
 
 import { useState } from "react";
 import { Radio, Select, InputNumber, Input, Space } from "antd";
+import { TIMEZONE_OPTIONS } from "../../utils/timezones";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -151,7 +152,7 @@ export default function ScheduleEditor({ value, onChange }: ScheduleEditorProps)
 
       {/* Cron fields */}
       {s.mode === "cron" && (
-        <Space>
+        <Space wrap>
           <Input
             size="small"
             value={s.expr}
@@ -159,15 +160,21 @@ export default function ScheduleEditor({ value, onChange }: ScheduleEditorProps)
             placeholder="0 9 * * *"
             style={{ width: 180, fontFamily: "monospace", fontSize: 12 }}
           />
-          <Input
+          <Select
             size="small"
-            value={s.tz}
-            onChange={(e) => update({ tz: e.target.value })}
-            placeholder="UTC"
-            style={{ width: 120, fontFamily: "monospace", fontSize: 12 }}
+            showSearch
+            value={s.tz || undefined}
+            options={TIMEZONE_OPTIONS}
+            onChange={(v) => update({ tz: v ?? "UTC" })}
+            filterOption={(input, opt) =>
+              String(opt?.label ?? "").toLowerCase().includes(input.toLowerCase())
+            }
+            placeholder="Select timezone…"
+            style={{ width: 260 }}
+            listHeight={300}
           />
           <span style={{ fontSize: 11, color: "var(--text-faint)", fontStyle: "italic" }}>
-            min hr dom mon dow, timezone
+            min hr dom mon dow
           </span>
         </Space>
       )}
