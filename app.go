@@ -2041,10 +2041,12 @@ type TaskStatusesResult struct {
 }
 
 // GetTaskStatuses returns the current state and last-run result for every task
-// ListRootTasks returns the names of all root tasks (no predecessors) visible in
-// the account, scoped to the given database and schema.  It runs SHOW TASKS IN
-// SCHEMA and filters rows whose predecessors column is NULL or empty.
-func (a *App) ListRootTasks(database, schema string) ([]string, error) {
+// ListFinalizableTasks returns the names of tasks that are valid candidates for
+// the FINALIZE clause: they must be completely standalone — no predecessors AND
+// no other task lists them as a predecessor (i.e. no child tasks).
+//
+// Snowflake requires that a finalizer task is not part of any task graph.
+func (a *App) ListFinalizableTasks(database, schema string) ([]string, error) {
 	if a.client == nil {
 		return nil, ErrNotConnected
 	}
@@ -2083,7 +2085,8 @@ func (a *App) ListRootTasks(database, schema string) ([]string, error) {
 		return nil, nil
 	}
 
-	var roots []string
+	type taskRow struct{ name, preds string }
+	rows := make([]taskRow, 0, len(res.Rows))
 	for _, row := range res.Rows {
 		name := ""
 		if nameIdx < len(row) {
@@ -2096,12 +2099,112 @@ func (a *App) ListRootTasks(database, schema string) ([]string, error) {
 		if predsIdx >= 0 && predsIdx < len(row) {
 			preds = toString(row[predsIdx])
 		}
-		// Root task: no predecessors, empty array, or Go nil representation.
-		if preds == "" || preds == "[]" || preds == "<nil>" {
-			roots = append(roots, name)
+		rows = append(rows, taskRow{name, preds})
+	}
+
+	// Build the set of task names that appear as a predecessor of any other task
+	// (meaning those tasks have at least one child and cannot be finalizers).
+	hasChildren := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		p := r.preds
+		if p == "" || p == "[]" || p == "<nil>" {
+			continue
+		}
+		// Strip surrounding brackets, split on comma, take the last dot-separated
+		// segment of each entry (the bare task name), normalised to upper case.
+		p = strings.TrimPrefix(p, "[")
+		p = strings.TrimSuffix(p, "]")
+		for _, part := range strings.Split(p, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			segs := strings.Split(part, ".")
+			bare := strings.Trim(segs[len(segs)-1], `"`)
+			if bare != "" {
+				hasChildren[strings.ToUpper(bare)] = true
+			}
 		}
 	}
-	return roots, nil
+
+	// A valid finalizer task has no predecessors AND no children.
+	var out []string
+	for _, r := range rows {
+		isPredFree := r.preds == "" || r.preds == "[]" || r.preds == "<nil>"
+		if isPredFree && !hasChildren[strings.ToUpper(r.name)] {
+			out = append(out, r.name)
+		}
+	}
+	return out, nil
+}
+
+// ListRootTasks returns the names of root tasks (no predecessors) in the given
+// schema.  Kept for backwards compatibility; new callers should use
+// ListFinalizableTasks.
+func (a *App) ListRootTasks(database, schema string) ([]string, error) {
+	return a.ListFinalizableTasks(database, schema)
+}
+
+// TaskHasChildren reports whether any task in the schema lists taskName as a
+// predecessor (i.e. the task has at least one dependent / child task).
+func (a *App) TaskHasChildren(database, schema, taskName string) (bool, error) {
+	if a.client == nil {
+		return false, ErrNotConnected
+	}
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+
+	res, err := a.client.Execute(a.ctx,
+		fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
+	if err != nil {
+		return false, err
+	}
+
+	toString := func(v interface{}) string {
+		if v == nil {
+			return ""
+		}
+		switch t := v.(type) {
+		case []byte:
+			return string(t)
+		case string:
+			return t
+		default:
+			return fmt.Sprintf("%v", t)
+		}
+	}
+
+	predsIdx := -1
+	for i, col := range res.Columns {
+		if strings.ToLower(col) == "predecessors" || strings.ToLower(col) == "predecessor" {
+			predsIdx = i
+			break
+		}
+	}
+	if predsIdx < 0 {
+		return false, nil
+	}
+
+	upper := strings.ToUpper(taskName)
+	for _, row := range res.Rows {
+		preds := ""
+		if predsIdx < len(row) {
+			preds = toString(row[predsIdx])
+		}
+		if preds == "" || preds == "[]" || preds == "<nil>" {
+			continue
+		}
+		p := strings.TrimPrefix(preds, "[")
+		p = strings.TrimSuffix(p, "]")
+		for _, part := range strings.Split(p, ",") {
+			part = strings.TrimSpace(part)
+			segs := strings.Split(part, ".")
+			bare := strings.ToUpper(strings.Trim(segs[len(segs)-1], `"`))
+			if bare == upper {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // in the given schema.  It runs two queries:

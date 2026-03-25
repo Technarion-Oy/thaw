@@ -231,6 +231,8 @@ export function ListEnvPackages():Promise<Array<main.PackageInfo>>;
 
 export function ListExportableDatabases():Promise<Array<string>>;
 
+export function ListFinalizableTasks(arg1:string,arg2:string):Promise<Array<string>>;
+
 export function ListIntegrations(arg1:string):Promise<Array<snowflake.IntegrationRow>>;
 
 export function ListNotificationIntegrations():Promise<Array<string>>;
@@ -328,6 +330,8 @@ export function StopNotebookSession(arg1:string):Promise<void>;
 export function StopShell():Promise<void>;
 
 export function SuggestImportOptions(arg1:string,arg2:string):Promise<string>;
+
+export function TaskHasChildren(arg1:string,arg2:string,arg3:string):Promise<boolean>;
 
 export function TestAIModel(arg1:string,arg2:string,arg3:string):Promise<string>;
 

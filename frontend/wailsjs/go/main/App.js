@@ -442,6 +442,10 @@ export function ListExportableDatabases() {
   return window['go']['main']['App']['ListExportableDatabases']();
 }
 
+export function ListFinalizableTasks(arg1, arg2) {
+  return window['go']['main']['App']['ListFinalizableTasks'](arg1, arg2);
+}
+
 export function ListIntegrations(arg1) {
   return window['go']['main']['App']['ListIntegrations'](arg1);
 }
@@ -636,6 +640,10 @@ export function StopShell() {
 
 export function SuggestImportOptions(arg1, arg2) {
   return window['go']['main']['App']['SuggestImportOptions'](arg1, arg2);
+}
+
+export function TaskHasChildren(arg1, arg2, arg3) {
+  return window['go']['main']['App']['TaskHasChildren'](arg1, arg2, arg3);
 }
 
 export function TestAIModel(arg1, arg2, arg3) {

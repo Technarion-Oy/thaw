@@ -17,7 +17,7 @@ import {
   ClockCircleOutlined, EditOutlined, CheckOutlined, CloseOutlined,
   PlayCircleOutlined, PauseCircleOutlined, PlusOutlined, DeleteOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterTask, ListNotificationIntegrations, ListRootTasks } from "../../../wailsjs/go/main/App";
+import { GetObjectProperties, AlterTask, ListNotificationIntegrations, ListFinalizableTasks, TaskHasChildren } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 import WhenConditionBuilder from "./WhenConditionBuilder";
 
@@ -327,13 +327,14 @@ function MultilineRow({ label, value, onSave, onUnset, unsetLabel = "Remove" }: 
 // ─── FinalizeTaskRow ──────────────────────────────────────────────────────────
 
 interface FinalizeRowProps {
-  value:    string;
-  options:  { label: string; value: string }[];
-  onSave:   (val: string) => Promise<void>;
-  onUnset:  () => Promise<void>;
+  value:                  string;
+  options:                { label: string; value: string }[];
+  currentTaskHasChildren: boolean;
+  onSave:                 (val: string) => Promise<void>;
+  onUnset:                () => Promise<void>;
 }
 
-function FinalizeTaskRow({ value, options, onSave, onUnset }: FinalizeRowProps) {
+function FinalizeTaskRow({ value, options, currentTaskHasChildren, onSave, onUnset }: FinalizeRowProps) {
   const [editing,   setEditing]   = useState(false);
   const [editVal,   setEditVal]   = useState(value);
   const [saving,    setSaving]    = useState(false);
@@ -364,7 +365,13 @@ function FinalizeTaskRow({ value, options, onSave, onUnset }: FinalizeRowProps) 
     <tr style={{ borderBottom: "1px solid var(--border)" }}>
       <td style={LABEL_TD}>Finalize Task</td>
       <td style={{ padding: "4px 0", verticalAlign: "middle" }}>
-        {editing ? (
+        {currentTaskHasChildren ? (
+          /* This task has child tasks — Snowflake does not allow a task that is
+             part of a graph (has successors) to act as a finalizer root.        */
+          <span style={{ fontSize: 12, color: "var(--text-faint)", fontStyle: "italic" }}>
+            Not available — this task has child tasks
+          </span>
+        ) : editing ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
               <AutoComplete
@@ -376,7 +383,7 @@ function FinalizeTaskRow({ value, options, onSave, onUnset }: FinalizeRowProps) 
                   (opt?.value ?? "").toLowerCase().includes(input.toLowerCase())
                 }
                 style={{ flex: 1, fontFamily: "monospace", fontSize: 12 }}
-                placeholder={options.length > 0 ? "Select or type a root task…" : "Task name…"}
+                placeholder={options.length > 0 ? "Select or type a standalone task…" : "Task name…"}
                 autoFocus
               />
               <Button size="small" type="primary" icon={<CheckOutlined />} loading={saving} onClick={save} />
@@ -387,11 +394,11 @@ function FinalizeTaskRow({ value, options, onSave, onUnset }: FinalizeRowProps) 
                 {editError}
               </div>
             )}
-            {options.length > 0 && (
-              <div style={{ fontSize: 11, color: "var(--text-faint)", paddingLeft: 2 }}>
-                Showing {options.length} root task{options.length !== 1 ? "s" : ""} — type to filter or enter any name
-              </div>
-            )}
+            <div style={{ fontSize: 11, color: "var(--text-faint)", paddingLeft: 2 }}>
+              {options.length > 0
+                ? `${options.length} standalone task${options.length !== 1 ? "s" : ""} available — type to filter or enter any name`
+                : "No standalone tasks found in this schema — type a task name manually"}
+            </div>
           </div>
         ) : (
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -433,14 +440,18 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
   const [whenDraft,    setWhenDraft]    = useState("");
   const [whenSaving,   setWhenSaving]   = useState(false);
   const [whenError,    setWhenError]    = useState<string | null>(null);
-  const [rootTasks,    setRootTasks]    = useState<{ label: string; value: string }[]>([]);
+  const [rootTasks,        setRootTasks]        = useState<{ label: string; value: string }[]>([]);
+  const [hasChildren,      setHasChildren]      = useState(false);
 
   useEffect(() => {
     ListNotificationIntegrations()
       .then((list) => setIntegrations((list ?? []).map((n) => ({ label: n, value: n }))))
       .catch(() => {});
-    ListRootTasks(db, schema)
+    ListFinalizableTasks(db, schema)
       .then((list) => setRootTasks((list ?? []).map((n) => ({ label: n, value: n }))))
+      .catch(() => {});
+    TaskHasChildren(db, schema, name)
+      .then(setHasChildren)
       .catch(() => {});
   }, [db, schema]);
 
@@ -689,6 +700,7 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
               <FinalizeTaskRow
                 value={get("finalize") || get("finalize_task")}
                 options={rootTasks}
+                currentTaskHasChildren={hasChildren}
                 onSave={async (v) => {
                   const t = v.trim();
                   if (!t) await alter("UNSET FINALIZE");
