@@ -171,14 +171,17 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - **Refresh** button (`↺`) in the sidebar header reloads the entire database tree from Snowflake
 - Right-click a **database** to refresh, export its DDL, **insert its name** at the editor cursor, generate an **ER Diagram**, **Show Dropped Schemas…**, or open **Backup Sets…** — lists schemas recoverable via Time Travel with an **Undrop** button for each
 - **Dropped Databases** button (`⏪`) in the sidebar header lists databases within their Time Travel retention window; click **Undrop** to restore any of them
-- Right-click a **schema** to browse dropped tables recoverable via Snowflake Time Travel, **insert its fully-qualified name** at the editor cursor, **Export Data…** or **Import Data…** (opens the same export/import modals with a table selector — no need to expand the schema first), open the **Create Object** cascading submenu, or open **Backup Sets…**; the **Create Object** submenu currently contains **Task…** — opens a dialog to configure and generate a `CREATE OR REPLACE TASK` statement with:
-  - Compute: warehouse (searchable dropdown) or serverless with initial warehouse size
-  - Schedule: none, fixed interval (seconds/minutes/hours), or cron expression with timezone
-  - Dependencies: predecessor tasks (AFTER), boolean condition (WHEN)
-  - Execution: allow overlapping, timeout, suspend-after-failures, auto-retry attempts
-  - Integrations: error and success notification integrations (searchable dropdowns populated from `SHOW NOTIFICATION INTEGRATIONS`; default is none)
-  - Other: comment, finalize task
-  - SQL body (AS); live `CREATE TASK` preview updates as you type
+- Right-click a **schema** to browse dropped tables recoverable via Snowflake Time Travel, **insert its fully-qualified name** at the editor cursor, **Export Data…** or **Import Data…** (opens the same export/import modals with a table selector — no need to expand the schema first), open the **Create Object** cascading submenu, or open **Backup Sets…**; the **Create Object** submenu contains **Task…** — see below
+- Right-click the **Tasks folder** (the Tasks type node inside a schema) to open **Create Task…** directly — same dialog as the schema Create Object submenu entry; the dialog covers the full `CREATE TASK` syntax:
+  - **Create options**: `OR REPLACE` and `IF NOT EXISTS` checkboxes (mutually exclusive)
+  - **Compute**: warehouse (searchable dropdown) or serverless with initial warehouse size and optional `SERVERLESS_TASK_MIN/MAX_STATEMENT_SIZE` selects
+  - **Schedule**: none (triggered/dependent), fixed interval (seconds/minutes/hours), or cron expression with timezone
+  - **Configuration**: `CONFIG` field for a JSON string passed to the task at runtime (dollar-quoted in the generated SQL)
+  - **Dependencies**: predecessor tasks (`AFTER`) — searchable picker loads all tasks in the same schema; select a task and click **+** to add it as a removable tag; already-added tasks are excluded from the dropdown; the SQL preview emits fully-qualified `"db"."schema"."task"` references; boolean condition (`WHEN`) free-text field
+  - **Execution**: overlap policy enum (`NO_OVERLAP` / `ALLOW_CHILD_OVERLAP` / `ALLOW_ALL_OVERLAP`), execute as (Default / Caller / User + username), timeout (ms), suspend-after-failures, auto-retry attempts, minimum trigger interval (seconds), target completion interval (number + unit)
+  - **Notifications**: error and success notification integrations (searchable dropdowns populated from `SHOW NOTIFICATION INTEGRATIONS`; default is none)
+  - **Other**: log level (TRACE…OFF), comment, finalize task
+  - **SQL body** (`AS`): multi-line text area; live `CREATE TASK` preview updates as any field changes
 - Right-click an **object** to:
   - Select the top 1 000 rows (tables and views) — opens in a new tab
   - **Time Travel Query…** (tables) — opens a dialog with a timeline slider spanning the table's full retention window; drag to choose a point in time and run `SELECT … AT(TIMESTAMP => …) LIMIT 1000` in a new tab
@@ -678,7 +681,7 @@ thaw/
     │       ├── dbt/DbtProjectModal.tsx     # dbt Project Scaffolding wizard (Tools menu)
     │       ├── snippets/SnippetsModal.tsx  # Code Snippets browser (Tools menu)
     │       ├── help/KeyboardShortcutsModal.tsx  # Searchable keyboard shortcuts reference (Help menu)
-    │       ├── task/CreateTaskModal.tsx    # CREATE OR REPLACE TASK dialog
+    │       ├── task/CreateTaskModal.tsx    # Full CREATE TASK dialog (all clauses, task picker for AFTER)
     │       ├── task/ExecuteTaskModal.tsx   # Execute Task dialog (Execute / Retry Last, optional CONFIG JSON)
     │       ├── task/TaskPropertiesModal.tsx # Full ALTER TASK properties editor (all clauses, inline editing)
     │       └── layout/

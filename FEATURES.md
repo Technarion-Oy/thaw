@@ -75,7 +75,17 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Drop** the object (with confirmation)
   - **Select for Comparison** / **Compare with** — side-by-side DDL diff (see [Text Comparison](#text-comparison))
 - **Right-click a database** to export its DDL, generate an ER Diagram, view dropped schemas recoverable via Time Travel, or open **Backup Sets…**
-- **Right-click a schema** to view dropped tables, **Export Data…** or **Import Data…** without needing an existing table (schema-level launch opens the same modals with a table selector or name field), open **Backup Sets…**, or use the **Create Object** cascading submenu (opens left or right depending on available screen space); currently contains **Task…** to create a new Snowflake Task
+- **Right-click a schema** to view dropped tables, **Export Data…** or **Import Data…** without needing an existing table (schema-level launch opens the same modals with a table selector or name field), open **Backup Sets…**, or use the **Create Object** cascading submenu (opens left or right depending on available screen space); contains **Task…** to open the Create Task dialog
+- **Right-click the Tasks folder** inside any schema to open **Create Task…** directly — the dialog covers the full `CREATE TASK` syntax:
+  - **Create options**: `OR REPLACE` / `IF NOT EXISTS` checkboxes (mutually exclusive)
+  - **Compute**: warehouse dropdown or serverless with initial size and optional min/max statement size selects
+  - **Schedule**: none, fixed interval (seconds/minutes/hours), or cron with timezone
+  - **Configuration**: `CONFIG` JSON string (dollar-quoted in the generated SQL)
+  - **Dependencies**: predecessor task picker — type to search tasks in the current schema, hit **+** to add each one as a removable tag; already-added tasks are hidden from the dropdown; the preview emits fully-qualified `"db"."schema"."task"` references; `WHEN` condition free-text field
+  - **Execution**: overlap policy (`NO_OVERLAP` / `ALLOW_CHILD_OVERLAP` / `ALLOW_ALL_OVERLAP`), execute as (Default / Caller / User), timeout, suspend-after-failures, auto-retry, minimum trigger interval, target completion interval
+  - **Notifications**: error and success notification integration dropdowns (populated from `SHOW NOTIFICATION INTEGRATIONS`)
+  - **Other**: log level (TRACE…OFF), comment, finalize task
+  - **SQL body** (`AS`) with live `CREATE TASK` preview
 - **Right-click a task** to:
   - **Execute Task…** — opens a dialog with two modes:
     - **Execute** — issues `EXECUTE TASK <name>` immediately; accepts an optional CONFIG JSON override (`USING CONFIG = $json$`); validates JSON on the fly and blocks execution while the input is invalid
