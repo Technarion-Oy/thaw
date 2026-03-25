@@ -239,6 +239,8 @@ export function ListObjects(arg1:string,arg2:string):Promise<Array<snowflake.Sno
 
 export function ListRoles():Promise<Array<string>>;
 
+export function ListRootTasks(arg1:string,arg2:string):Promise<Array<string>>;
+
 export function ListSchemas(arg1:string):Promise<Array<string>>;
 
 export function ListSystemPythons():Promise<Array<main.PythonInfo>>;

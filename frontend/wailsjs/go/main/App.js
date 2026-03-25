@@ -458,6 +458,10 @@ export function ListRoles() {
   return window['go']['main']['App']['ListRoles']();
 }
 
+export function ListRootTasks(arg1, arg2) {
+  return window['go']['main']['App']['ListRootTasks'](arg1, arg2);
+}
+
 export function ListSchemas(arg1) {
   return window['go']['main']['App']['ListSchemas'](arg1);
 }

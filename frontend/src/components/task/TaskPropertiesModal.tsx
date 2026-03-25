@@ -10,14 +10,14 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Spin, Button, Input, InputNumber, Select, Tag, Space,
+  Modal, Spin, Button, Input, InputNumber, Select, AutoComplete, Tag, Space,
   Typography, message, Alert,
 } from "antd";
 import {
   ClockCircleOutlined, EditOutlined, CheckOutlined, CloseOutlined,
   PlayCircleOutlined, PauseCircleOutlined, PlusOutlined, DeleteOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterTask, ListNotificationIntegrations } from "../../../wailsjs/go/main/App";
+import { GetObjectProperties, AlterTask, ListNotificationIntegrations, ListRootTasks } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 import WhenConditionBuilder from "./WhenConditionBuilder";
 
@@ -324,6 +324,97 @@ function MultilineRow({ label, value, onSave, onUnset, unsetLabel = "Remove" }: 
   );
 }
 
+// ─── FinalizeTaskRow ──────────────────────────────────────────────────────────
+
+interface FinalizeRowProps {
+  value:    string;
+  options:  { label: string; value: string }[];
+  onSave:   (val: string) => Promise<void>;
+  onUnset:  () => Promise<void>;
+}
+
+function FinalizeTaskRow({ value, options, onSave, onUnset }: FinalizeRowProps) {
+  const [editing,   setEditing]   = useState(false);
+  const [editVal,   setEditVal]   = useState(value);
+  const [saving,    setSaving]    = useState(false);
+  const [unsetting, setUnsetting] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  const startEdit = () => { setEditing(true); setEditVal(value); setEditError(null); };
+  const cancel    = () => { setEditing(false); setEditError(null); };
+
+  const save = async () => {
+    setSaving(true); setEditError(null);
+    try { await onSave(editVal); setEditing(false); }
+    catch (e) {
+      const raw = String(e);
+      const m = raw.match(/:\s*(.+)$/s);
+      setEditError(m ? m[0].trim() : raw);
+    } finally { setSaving(false); }
+  };
+
+  const doUnset = async () => {
+    setUnsetting(true);
+    try { await onUnset(); setEditing(false); }
+    catch (e) { message.error(String(e)); }
+    finally { setUnsetting(false); }
+  };
+
+  return (
+    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+      <td style={LABEL_TD}>Finalize Task</td>
+      <td style={{ padding: "4px 0", verticalAlign: "middle" }}>
+        {editing ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <AutoComplete
+                size="small"
+                value={editVal}
+                onChange={setEditVal}
+                options={options}
+                filterOption={(input, opt) =>
+                  (opt?.value ?? "").toLowerCase().includes(input.toLowerCase())
+                }
+                style={{ flex: 1, fontFamily: "monospace", fontSize: 12 }}
+                placeholder={options.length > 0 ? "Select or type a root task…" : "Task name…"}
+                autoFocus
+              />
+              <Button size="small" type="primary" icon={<CheckOutlined />} loading={saving} onClick={save} />
+              <Button size="small" icon={<CloseOutlined />} disabled={saving} onClick={cancel} />
+            </div>
+            {editError && (
+              <div style={{ color: "#f85149", fontSize: 11, fontFamily: "monospace", paddingLeft: 2 }}>
+                {editError}
+              </div>
+            )}
+            {options.length > 0 && (
+              <div style={{ fontSize: 11, color: "var(--text-faint)", paddingLeft: 2 }}>
+                Showing {options.length} root task{options.length !== 1 ? "s" : ""} — type to filter or enter any name
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{
+              fontFamily: "monospace", fontSize: 12, flex: 1, wordBreak: "break-word",
+              color: value ? "var(--text)" : "var(--text-faint)",
+              fontStyle: value ? "normal" : "italic",
+            }}>
+              {value || "—"}
+            </span>
+            <Button size="small" type="text" icon={<EditOutlined />} onClick={startEdit}
+              style={{ flexShrink: 0, color: "var(--text-faint)" }} />
+            {value && (
+              <Button size="small" type="text" icon={<CloseOutlined />} loading={unsetting}
+                onClick={doUnset} title="Unset" style={{ color: "var(--text-faint)" }} />
+            )}
+          </div>
+        )}
+      </td>
+    </tr>
+  );
+}
+
 // ─── Main modal ───────────────────────────────────────────────────────────────
 
 interface Props {
@@ -342,12 +433,16 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
   const [whenDraft,    setWhenDraft]    = useState("");
   const [whenSaving,   setWhenSaving]   = useState(false);
   const [whenError,    setWhenError]    = useState<string | null>(null);
+  const [rootTasks,    setRootTasks]    = useState<{ label: string; value: string }[]>([]);
 
   useEffect(() => {
     ListNotificationIntegrations()
       .then((list) => setIntegrations((list ?? []).map((n) => ({ label: n, value: n }))))
       .catch(() => {});
-  }, []);
+    ListRootTasks(db, schema)
+      .then((list) => setRootTasks((list ?? []).map((n) => ({ label: n, value: n }))))
+      .catch(() => {});
+  }, [db, schema]);
 
   // ── Data loading ────────────────────────────────────────────────────────────
 
@@ -591,9 +686,15 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
                 onAdd={addAfter}
                 onRemove={removeAfter}
               />
-              <EditRow label="Finalize Task" value={get("finalize") || get("finalize_task")}
-                type="text" canUnset hint="Task name to run after graph completes"
-                onSave={setText("FINALIZE")}
+              <FinalizeTaskRow
+                value={get("finalize") || get("finalize_task")}
+                options={rootTasks}
+                onSave={async (v) => {
+                  const t = v.trim();
+                  if (!t) await alter("UNSET FINALIZE");
+                  else await alter(`SET FINALIZE = ${t}`);
+                  await load();
+                }}
                 onUnset={async () => { await alter("UNSET FINALIZE"); await load(); }}
               />
             </tbody>

@@ -2041,6 +2041,69 @@ type TaskStatusesResult struct {
 }
 
 // GetTaskStatuses returns the current state and last-run result for every task
+// ListRootTasks returns the names of all root tasks (no predecessors) visible in
+// the account, scoped to the given database and schema.  It runs SHOW TASKS IN
+// SCHEMA and filters rows whose predecessors column is NULL or empty.
+func (a *App) ListRootTasks(database, schema string) ([]string, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+
+	res, err := a.client.Execute(a.ctx,
+		fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
+	if err != nil {
+		return nil, err
+	}
+
+	toString := func(v interface{}) string {
+		if v == nil {
+			return ""
+		}
+		switch t := v.(type) {
+		case []byte:
+			return string(t)
+		case string:
+			return t
+		default:
+			return fmt.Sprintf("%v", t)
+		}
+	}
+
+	nameIdx, predsIdx := -1, -1
+	for i, col := range res.Columns {
+		switch strings.ToLower(col) {
+		case "name":
+			nameIdx = i
+		case "predecessors", "predecessor":
+			predsIdx = i
+		}
+	}
+	if nameIdx < 0 {
+		return nil, nil
+	}
+
+	var roots []string
+	for _, row := range res.Rows {
+		name := ""
+		if nameIdx < len(row) {
+			name = toString(row[nameIdx])
+		}
+		if name == "" {
+			continue
+		}
+		preds := ""
+		if predsIdx >= 0 && predsIdx < len(row) {
+			preds = toString(row[predsIdx])
+		}
+		// Root task: no predecessors, empty array, or Go nil representation.
+		if preds == "" || preds == "[]" || preds == "<nil>" {
+			roots = append(roots, name)
+		}
+	}
+	return roots, nil
+}
+
 // in the given schema.  It runs two queries:
 //  1. SHOW TASKS IN SCHEMA — yields the task list and their STARTED/SUSPENDED state.
 //  2. INFORMATION_SCHEMA.TASK_HISTORY — yields the most-recent run status for
@@ -2090,6 +2153,15 @@ func (a *App) GetTaskStatuses(database, schema string) (TaskStatusesResult, erro
 	nameIdx  := colIdx(showRes.Columns, "name")
 	stateIdx := colIdx(showRes.Columns, "state")
 	predsIdx := colIdx(showRes.Columns, "predecessors", "predecessor")
+
+	// TEMP DEBUG — log SHOW TASKS columns and first-row preds values.
+	logger.L.Debug("SHOW TASKS columns", "cols", showRes.Columns, "predsIdx", predsIdx)
+	for i, row := range showRes.Rows {
+		if i >= 5 { break }
+		nm := ""; if nameIdx >= 0 && nameIdx < len(row) { nm = toString(row[nameIdx]) }
+		pr := ""; if predsIdx >= 0 && predsIdx < len(row) { pr = fmt.Sprintf("%#v", row[predsIdx]) }
+		logger.L.Debug("SHOW TASKS row", "i", i, "name", nm, "preds_raw", pr)
+	}
 
 	type entry struct {
 		name         string
