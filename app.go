@@ -2021,6 +2021,134 @@ func (a *App) AlterTask(database, schema, name, clause string) error {
 	return err
 }
 
+// TaskStatusRow holds the current state and last-run information for a single task.
+type TaskStatusRow struct {
+	Name         string `json:"name"`
+	TaskState    string `json:"taskState"`    // STARTED | SUSPENDED
+	LastRunState string `json:"lastRunState"` // SUCCEEDED | FAILED | RUNNING | SKIPPED | CANCELLED | ""
+	LastRunTime  string `json:"lastRunTime"`  // ISO-8601 timestamp or ""
+	ErrorMsg     string `json:"errorMsg"`     // exception text when last run failed
+}
+
+// GetTaskStatuses returns the current state and last-run result for every task
+// in the given schema.  It runs two queries:
+//  1. SHOW TASKS IN SCHEMA — yields the task list and their STARTED/SUSPENDED state.
+//  2. INFORMATION_SCHEMA.TASK_HISTORY — yields the most-recent run status for
+//     each task within the last 7 days (best-effort; failure here is non-fatal).
+func (a *App) GetTaskStatuses(database, schema string) ([]TaskStatusRow, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+
+	toString := func(v interface{}) string {
+		if v == nil {
+			return ""
+		}
+		switch t := v.(type) {
+		case []byte:
+			return string(t)
+		case string:
+			return t
+		default:
+			return fmt.Sprintf("%v", t)
+		}
+	}
+
+	colIdx := func(cols []string, names ...string) int {
+		for i, c := range cols {
+			lc := strings.ToLower(c)
+			for _, n := range names {
+				if lc == n {
+					return i
+				}
+			}
+		}
+		return -1
+	}
+
+	// ── Step 1: list all tasks and their current state ────────────────────────
+	showRes, err := a.client.Execute(a.ctx,
+		fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
+	if err != nil {
+		return nil, err
+	}
+
+	nameIdx  := colIdx(showRes.Columns, "name")
+	stateIdx := colIdx(showRes.Columns, "state")
+
+	type entry struct {
+		name      string
+		taskState string
+	}
+	var tasks []entry
+	nameMap := map[string]int{} // UPPER(name) → index in tasks
+	for _, row := range showRes.Rows {
+		name := ""
+		if nameIdx >= 0 && nameIdx < len(row) {
+			name = toString(row[nameIdx])
+		}
+		if name == "" {
+			continue
+		}
+		state := ""
+		if stateIdx >= 0 && stateIdx < len(row) {
+			state = toString(row[stateIdx])
+		}
+		nameMap[strings.ToUpper(name)] = len(tasks)
+		tasks = append(tasks, entry{name: name, taskState: strings.ToUpper(state)})
+	}
+
+	result := make([]TaskStatusRow, len(tasks))
+	for i, t := range tasks {
+		result[i] = TaskStatusRow{Name: t.name, TaskState: t.taskState}
+	}
+
+	// ── Step 2: fetch most-recent run per task from task history ─────────────
+	// Errors here are non-fatal — we return the task list without run data.
+	safeSchema := strings.ReplaceAll(schema, "'", "''")
+	histSQL := fmt.Sprintf(`
+SELECT TASK_NAME, RUN_STATUS, COMPLETED_TIME, EXCEPTION_TEXT
+FROM (
+    SELECT TASK_NAME, RUN_STATUS, COMPLETED_TIME, EXCEPTION_TEXT,
+           ROW_NUMBER() OVER (PARTITION BY TASK_NAME ORDER BY SCHEDULED_TIME DESC) AS rn
+    FROM TABLE(%s.INFORMATION_SCHEMA.TASK_HISTORY(
+        SCHEDULED_TIME_RANGE_START => DATEADD('day', -7, CURRENT_TIMESTAMP())
+    ))
+    WHERE UPPER(TASK_SCHEMA) = UPPER('%s')
+) WHERE rn = 1`, q(database), safeSchema)
+
+	histRes, histErr := a.client.Execute(a.ctx, histSQL)
+	if histErr == nil {
+		tnIdx := colIdx(histRes.Columns, "task_name")
+		rsIdx := colIdx(histRes.Columns, "run_status")
+		ctIdx := colIdx(histRes.Columns, "completed_time")
+		exIdx := colIdx(histRes.Columns, "exception_text")
+
+		for _, row := range histRes.Rows {
+			taskName := ""
+			if tnIdx >= 0 && tnIdx < len(row) {
+				taskName = toString(row[tnIdx])
+			}
+			idx, ok := nameMap[strings.ToUpper(taskName)]
+			if !ok {
+				continue
+			}
+			if rsIdx >= 0 && rsIdx < len(row) {
+				result[idx].LastRunState = toString(row[rsIdx])
+			}
+			if ctIdx >= 0 && ctIdx < len(row) {
+				result[idx].LastRunTime = toString(row[ctIdx])
+			}
+			if exIdx >= 0 && exIdx < len(row) {
+				result[idx].ErrorMsg = toString(row[exIdx])
+			}
+		}
+	}
+
+	return result, nil
+}
+
 // ExecuteTask manually triggers a single run of a Snowflake Task.
 // Pass a non-empty config JSON string to use USING CONFIG, or set
 // retryLast to true to re-execute the last failed run.

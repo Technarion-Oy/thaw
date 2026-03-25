@@ -19,6 +19,8 @@ export function AlterBackupSet(arg1:string,arg2:string,arg3:string,arg4:string):
 
 export function AlterTableProperty(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
+export function AlterTask(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
 export function AlterWarehouseAbortAllQueries(arg1:string):Promise<void>;
 
 export function AlterWarehouseProperty(arg1:string,arg2:string,arg3:string):Promise<void>;
@@ -85,7 +87,7 @@ export function ExecuteNotebook(arg1:string,arg2:string,arg3:string,arg4:Array<s
 
 export function ExecuteQuery(arg1:string):Promise<snowflake.QueryResult>;
 
-export function ExecuteTask(arg1:string,arg2:string,arg3:string):Promise<void>;
+export function ExecuteTask(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean):Promise<void>;
 
 export function ExportAccountObjectsDDL(arg1:string):Promise<main.AccountExportResult>;
 
@@ -168,6 +170,8 @@ export function GetTableForeignKeys(arg1:string,arg2:string,arg3:string):Promise
 export function GetTableRetentionDays(arg1:string,arg2:string,arg3:string):Promise<number>;
 
 export function GetTableSettings(arg1:string,arg2:string,arg3:string):Promise<main.TableSettings>;
+
+export function GetTaskStatuses(arg1:string,arg2:string):Promise<Array<main.TaskStatusRow>>;
 
 export function GetUserDDL(arg1:string):Promise<string>;
 

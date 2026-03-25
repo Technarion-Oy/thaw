@@ -42,6 +42,7 @@ import {
   RightOutlined,
   ShareAltOutlined,
   ExperimentOutlined,
+  DashboardOutlined,
 } from "@ant-design/icons";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
@@ -61,6 +62,7 @@ import SelectFunctionModal from "../function/SelectFunctionModal";
 import CreateTaskModal from "../task/CreateTaskModal";
 import ExecuteTaskModal from "../task/ExecuteTaskModal";
 import TaskPropertiesModal from "../task/TaskPropertiesModal";
+import TaskStatusesModal from "../task/TaskStatusesModal";
 import ERDiagramModal from "../er/ERDiagramModal";
 import ExportTableModal from "../export/ExportTableModal";
 import ImportTableModal from "../export/ImportTableModal";
@@ -299,6 +301,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [createTaskModal, setCreateTaskModal] = useState<{ db: string; schema: string } | null>(null);
   const [executeTaskModal, setExecuteTaskModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [taskPropsModal, setTaskPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [taskStatusesModal, setTaskStatusesModal] = useState<{ db: string; schema: string } | null>(null);
   const [undropModal, setUndropModal] = useState<UndropModal | null>(null);
   const [undropSchemasModal, setUndropSchemasModal] = useState<UndropSchemasModal | null>(null);
   const [undropDatabasesModal, setUndropDatabasesModal] = useState<UndropDatabasesModal | null>(null);
@@ -703,6 +706,16 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const schema = parts[2];
     setCtxMenu(null);
     setCreateTaskModal({ db, schema });
+  };
+
+  const openTaskStatuses = () => {
+    if (!ctxMenu) return;
+    // key format: type:DB:SCHEMA:KIND
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setTaskStatusesModal({ db, schema });
   };
 
   const viewDependencies = () => {
@@ -1301,6 +1314,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "schema" && menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets)}
           {ctxMenu.nodeType === "schema" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "TASK" &&
+            menuItem("Task Statuses…", <DashboardOutlined style={{ fontSize: 12 }} />, openTaskStatuses)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "TASK" &&
             menuItem("Create Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)}
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
@@ -1408,6 +1423,15 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={taskPropsModal.schema}
           name={taskPropsModal.name}
           onClose={() => setTaskPropsModal(null)}
+        />
+      )}
+
+      {/* Task Statuses modal */}
+      {taskStatusesModal && (
+        <TaskStatusesModal
+          db={taskStatusesModal.db}
+          schema={taskStatusesModal.schema}
+          onClose={() => setTaskStatusesModal(null)}
         />
       )}
 

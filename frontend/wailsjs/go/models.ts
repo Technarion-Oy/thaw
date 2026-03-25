@@ -795,6 +795,26 @@ export namespace main {
 	        this.comment = source["comment"];
 	    }
 	}
+	export class TaskStatusRow {
+	    name: string;
+	    taskState: string;
+	    lastRunState: string;
+	    lastRunTime: string;
+	    errorMsg: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TaskStatusRow(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.taskState = source["taskState"];
+	        this.lastRunState = source["lastRunState"];
+	        this.lastRunTime = source["lastRunTime"];
+	        this.errorMsg = source["errorMsg"];
+	    }
+	}
 	export class WarehouseMeteringRow {
 	    startTime: string;
 	    endTime: string;
