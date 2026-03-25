@@ -81,6 +81,8 @@ export function DropBackupSet(arg1:string,arg2:string,arg3:string):Promise<void>
 
 export function DropIntegration(arg1:string):Promise<void>;
 
+export function EnableTaskDependents(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function ExecuteMigration(arg1:Array<main.MigrationObject>,arg2:string,arg3:number,arg4:main.TableMigrationStrategy):Promise<Array<main.MigrationExecEvent>>;
 
 export function ExecuteNotebook(arg1:string,arg2:string,arg3:string,arg4:Array<string>):Promise<string>;
@@ -330,6 +332,8 @@ export function StopNotebookSession(arg1:string):Promise<void>;
 export function StopShell():Promise<void>;
 
 export function SuggestImportOptions(arg1:string,arg2:string):Promise<string>;
+
+export function SuspendTaskGraph(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function TaskHasChildren(arg1:string,arg2:string,arg3:string):Promise<boolean>;
 

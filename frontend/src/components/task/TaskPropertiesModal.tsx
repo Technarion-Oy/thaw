@@ -17,7 +17,7 @@ import {
   ClockCircleOutlined, EditOutlined, CheckOutlined, CloseOutlined,
   PlayCircleOutlined, PauseCircleOutlined, PlusOutlined, DeleteOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterTask, ListNotificationIntegrations, ListFinalizableTasks, TaskHasChildren } from "../../../wailsjs/go/main/App";
+import { GetObjectProperties, AlterTask, ListNotificationIntegrations, ListFinalizableTasks, TaskHasChildren, EnableTaskDependents, SuspendTaskGraph } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 import WhenConditionBuilder from "./WhenConditionBuilder";
 import ScheduleEditor from "./ScheduleEditor";
@@ -436,6 +436,7 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
   const [rows,         setRows]         = useState<main.PropertyPair[] | null>(null);
   const [loadError,    setLoadError]    = useState<string | null>(null);
   const [toggling,     setToggling]     = useState(false);
+  const [togglingGraph, setTogglingGraph] = useState(false);
   const [integrations, setIntegrations] = useState<{ label: string; value: string }[]>([]);
   const [whenEditing,  setWhenEditing]  = useState(false);
   const [whenDraft,    setWhenDraft]    = useState("");
@@ -521,6 +522,21 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
     finally { setToggling(false); }
   };
 
+  const toggleGraph = async () => {
+    setTogglingGraph(true);
+    try {
+      if (isStarted) {
+        await SuspendTaskGraph(db, schema, name);
+        message.success("Task and all child tasks suspended");
+      } else {
+        await EnableTaskDependents(db, schema, name);
+        message.success("Task and all child tasks resumed");
+      }
+      await load();
+    } catch (e) { message.error(String(e)); }
+    finally { setTogglingGraph(false); }
+  };
+
   // ── Predecessors ─────────────────────────────────────────────────────────────
 
   const predecessors = parsePredecessors(get("predecessors"));
@@ -599,9 +615,24 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
               icon={isStarted ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
               onClick={toggleState}
               loading={toggling}
+              disabled={togglingGraph}
             >
               {isStarted ? "Suspend" : "Resume"}
             </Button>
+            {hasChildren && (
+              <Button
+                size="small"
+                icon={isStarted ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
+                onClick={toggleGraph}
+                loading={togglingGraph}
+                disabled={toggling}
+                title={isStarted
+                  ? "Suspend this task first, then suspend all child tasks"
+                  : "Resume all child tasks first (SYSTEM$TASK_DEPENDENTS_ENABLE), then resume this task"}
+              >
+                {isStarted ? "Suspend with children" : "Resume with children"}
+              </Button>
+            )}
             {get("owner") && (
               <Text type="secondary" style={{ fontSize: 12, marginLeft: "auto" }}>
                 Owner: {get("owner")}

@@ -2207,6 +2207,135 @@ func (a *App) TaskHasChildren(database, schema, taskName string) (bool, error) {
 	return false, nil
 }
 
+// EnableTaskDependents resumes all dependent (child) tasks recursively, then
+// resumes the root task itself.  It calls SYSTEM$TASK_DEPENDENTS_ENABLE with
+// recursive=true so the entire task graph is enabled in the correct order.
+func (a *App) EnableTaskDependents(database, schema, taskName string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	sq := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
+	fqn := fmt.Sprintf(`"%s"."%s"."%s"`, esc(database), esc(schema), esc(taskName))
+	_, err := a.client.Execute(a.ctx,
+		fmt.Sprintf(`SELECT SYSTEM$TASK_DEPENDENTS_ENABLE('%s', true)`, sq(fqn)))
+	return err
+}
+
+// SuspendTaskGraph suspends the root task first (to stop it from scheduling new
+// runs) and then suspends every descendant task in the graph.  It uses SHOW
+// TASKS IN SCHEMA to build the dependency graph and does a BFS from the root
+// task to find all descendants before issuing ALTER TASK … SUSPEND for each.
+func (a *App) SuspendTaskGraph(database, schema, taskName string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+
+	toString := func(v interface{}) string {
+		if v == nil {
+			return ""
+		}
+		switch t := v.(type) {
+		case []byte:
+			return string(t)
+		case string:
+			return t
+		default:
+			return fmt.Sprintf("%v", t)
+		}
+	}
+
+	// 1. Suspend the root task first so it cannot schedule new child runs.
+	if _, err := a.client.Execute(a.ctx,
+		fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s SUSPEND", q(database), q(schema), q(taskName))); err != nil {
+		return err
+	}
+
+	// 2. Fetch all tasks in the schema to build the dependency graph.
+	res, err := a.client.Execute(a.ctx,
+		fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
+	if err != nil {
+		return err
+	}
+
+	nameIdx, predsIdx := -1, -1
+	for i, col := range res.Columns {
+		switch strings.ToLower(col) {
+		case "name":
+			nameIdx = i
+		case "predecessors", "predecessor":
+			predsIdx = i
+		}
+	}
+	if nameIdx < 0 {
+		return nil // no name column — nothing more to do
+	}
+
+	// Build a children map: parent (upper) → []child names (original case).
+	children := make(map[string][]string)
+	taskNames := make(map[string]string) // upper → original case
+	for _, row := range res.Rows {
+		name := ""
+		if nameIdx < len(row) {
+			name = toString(row[nameIdx])
+		}
+		if name == "" {
+			continue
+		}
+		taskNames[strings.ToUpper(name)] = name
+		if predsIdx < 0 || predsIdx >= len(row) {
+			continue
+		}
+		preds := toString(row[predsIdx])
+		if preds == "" || preds == "[]" || preds == "<nil>" {
+			continue
+		}
+		preds = strings.TrimPrefix(preds, "[")
+		preds = strings.TrimSuffix(preds, "]")
+		for _, part := range strings.Split(preds, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			segs := strings.Split(part, ".")
+			parent := strings.ToUpper(strings.Trim(segs[len(segs)-1], `"`))
+			children[parent] = append(children[parent], name)
+		}
+	}
+
+	// 3. BFS to collect all descendants of the root task.
+	rootUpper := strings.ToUpper(taskName)
+	visited := map[string]bool{rootUpper: true}
+	queue := []string{rootUpper}
+	var descendants []string
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, child := range children[cur] {
+			cu := strings.ToUpper(child)
+			if !visited[cu] {
+				visited[cu] = true
+				descendants = append(descendants, child)
+				queue = append(queue, cu)
+			}
+		}
+	}
+
+	// 4. Suspend each descendant.
+	for _, child := range descendants {
+		// Use the original-case name from SHOW TASKS when available.
+		if orig, ok := taskNames[strings.ToUpper(child)]; ok {
+			child = orig
+		}
+		if _, err := a.client.Execute(a.ctx,
+			fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s SUSPEND", q(database), q(schema), q(child))); err != nil {
+			return fmt.Errorf("suspending child task %q: %w", child, err)
+		}
+	}
+	return nil
+}
+
 // in the given schema.  It runs two queries:
 //  1. SHOW TASKS IN SCHEMA — yields the task list and their STARTED/SUSPENDED state.
 //  2. INFORMATION_SCHEMA.TASK_HISTORY — yields the most-recent run status for

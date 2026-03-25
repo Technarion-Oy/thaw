@@ -142,6 +142,10 @@ export function DropIntegration(arg1) {
   return window['go']['main']['App']['DropIntegration'](arg1);
 }
 
+export function EnableTaskDependents(arg1, arg2, arg3) {
+  return window['go']['main']['App']['EnableTaskDependents'](arg1, arg2, arg3);
+}
+
 export function ExecuteMigration(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['ExecuteMigration'](arg1, arg2, arg3, arg4);
 }
@@ -640,6 +644,10 @@ export function StopShell() {
 
 export function SuggestImportOptions(arg1, arg2) {
   return window['go']['main']['App']['SuggestImportOptions'](arg1, arg2);
+}
+
+export function SuspendTaskGraph(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SuspendTaskGraph'](arg1, arg2, arg3);
 }
 
 export function TaskHasChildren(arg1, arg2, arg3) {
