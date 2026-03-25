@@ -2030,14 +2030,26 @@ type TaskStatusRow struct {
 	ErrorMsg     string `json:"errorMsg"`     // exception text when last run failed
 }
 
+// TaskStatusesResult wraps the per-task rows and an optional history-query
+// error message.  HistoryError is non-empty when INFORMATION_SCHEMA.TASK_HISTORY
+// could not be queried (e.g. insufficient privileges); in that case Rows still
+// contain the task names and STARTED/SUSPENDED states from SHOW TASKS.
+type TaskStatusesResult struct {
+	Rows         []TaskStatusRow `json:"rows"`
+	HistoryError string          `json:"historyError"`
+}
+
 // GetTaskStatuses returns the current state and last-run result for every task
 // in the given schema.  It runs two queries:
 //  1. SHOW TASKS IN SCHEMA — yields the task list and their STARTED/SUSPENDED state.
 //  2. INFORMATION_SCHEMA.TASK_HISTORY — yields the most-recent run status for
-//     each task within the last 7 days (best-effort; failure here is non-fatal).
-func (a *App) GetTaskStatuses(database, schema string) ([]TaskStatusRow, error) {
+//     each task within the last 14 days.  History rows are returned ordered by
+//     SCHEDULED_TIME DESC and deduplicated in Go so no window-function syntax is
+//     required.  A history-query failure is reported in HistoryError rather than
+//     as a hard error, so callers always receive the task list.
+func (a *App) GetTaskStatuses(database, schema string) (TaskStatusesResult, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return TaskStatusesResult{}, ErrNotConnected
 	}
 	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
 
@@ -2071,7 +2083,7 @@ func (a *App) GetTaskStatuses(database, schema string) ([]TaskStatusRow, error) 
 	showRes, err := a.client.Execute(a.ctx,
 		fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
 	if err != nil {
-		return nil, err
+		return TaskStatusesResult{}, err
 	}
 
 	nameIdx  := colIdx(showRes.Columns, "name")
@@ -2082,7 +2094,7 @@ func (a *App) GetTaskStatuses(database, schema string) ([]TaskStatusRow, error) 
 		taskState string
 	}
 	var tasks []entry
-	nameMap := map[string]int{} // UPPER(name) → index in tasks
+	nameMap := map[string]int{} // UPPER(name) → index in tasks slice
 	for _, row := range showRes.Rows {
 		name := ""
 		if nameIdx >= 0 && nameIdx < len(row) {
@@ -2099,54 +2111,61 @@ func (a *App) GetTaskStatuses(database, schema string) ([]TaskStatusRow, error) 
 		tasks = append(tasks, entry{name: name, taskState: strings.ToUpper(state)})
 	}
 
-	result := make([]TaskStatusRow, len(tasks))
+	rows := make([]TaskStatusRow, len(tasks))
 	for i, t := range tasks {
-		result[i] = TaskStatusRow{Name: t.name, TaskState: t.taskState}
+		rows[i] = TaskStatusRow{Name: t.name, TaskState: t.taskState}
 	}
 
-	// ── Step 2: fetch most-recent run per task from task history ─────────────
-	// Errors here are non-fatal — we return the task list without run data.
+	// ── Step 2: fetch run history (best-effort) ───────────────────────────────
+	// Fetch rows ordered by SCHEDULED_TIME DESC and deduplicate in Go — this
+	// avoids ROW_NUMBER / QUALIFY which some Snowflake editions may reject inside
+	// a TABLE() function context.
 	safeSchema := strings.ReplaceAll(schema, "'", "''")
-	histSQL := fmt.Sprintf(`
-SELECT TASK_NAME, RUN_STATUS, COMPLETED_TIME, EXCEPTION_TEXT
-FROM (
-    SELECT TASK_NAME, RUN_STATUS, COMPLETED_TIME, EXCEPTION_TEXT,
-           ROW_NUMBER() OVER (PARTITION BY TASK_NAME ORDER BY SCHEDULED_TIME DESC) AS rn
-    FROM TABLE(%s.INFORMATION_SCHEMA.TASK_HISTORY(
-        SCHEDULED_TIME_RANGE_START => DATEADD('day', -7, CURRENT_TIMESTAMP())
-    ))
-    WHERE UPPER(TASK_SCHEMA) = UPPER('%s')
-) WHERE rn = 1`, q(database), safeSchema)
+	histSQL := fmt.Sprintf(
+		`SELECT TASK_NAME, RUN_STATUS, COMPLETED_TIME, EXCEPTION_TEXT`+
+			` FROM TABLE(%s.INFORMATION_SCHEMA.TASK_HISTORY(`+
+			`SCHEDULED_TIME_RANGE_START => DATEADD('day', -14, CURRENT_TIMESTAMP())))`+
+			` WHERE UPPER(TASK_SCHEMA) = UPPER('%s')`+
+			` ORDER BY SCHEDULED_TIME DESC`,
+		q(database), safeSchema)
 
 	histRes, histErr := a.client.Execute(a.ctx, histSQL)
-	if histErr == nil {
-		tnIdx := colIdx(histRes.Columns, "task_name")
-		rsIdx := colIdx(histRes.Columns, "run_status")
-		ctIdx := colIdx(histRes.Columns, "completed_time")
-		exIdx := colIdx(histRes.Columns, "exception_text")
+	if histErr != nil {
+		return TaskStatusesResult{Rows: rows, HistoryError: histErr.Error()}, nil
+	}
 
-		for _, row := range histRes.Rows {
-			taskName := ""
-			if tnIdx >= 0 && tnIdx < len(row) {
-				taskName = toString(row[tnIdx])
-			}
-			idx, ok := nameMap[strings.ToUpper(taskName)]
-			if !ok {
-				continue
-			}
-			if rsIdx >= 0 && rsIdx < len(row) {
-				result[idx].LastRunState = toString(row[rsIdx])
-			}
-			if ctIdx >= 0 && ctIdx < len(row) {
-				result[idx].LastRunTime = toString(row[ctIdx])
-			}
-			if exIdx >= 0 && exIdx < len(row) {
-				result[idx].ErrorMsg = toString(row[exIdx])
-			}
+	tnIdx := colIdx(histRes.Columns, "task_name")
+	rsIdx := colIdx(histRes.Columns, "run_status")
+	ctIdx := colIdx(histRes.Columns, "completed_time")
+	exIdx := colIdx(histRes.Columns, "exception_text")
+
+	seen := map[string]bool{} // tracks tasks already assigned their most-recent run
+	for _, row := range histRes.Rows {
+		taskName := ""
+		if tnIdx >= 0 && tnIdx < len(row) {
+			taskName = toString(row[tnIdx])
+		}
+		upper := strings.ToUpper(taskName)
+		if seen[upper] {
+			continue // already captured the most-recent run (rows are DESC)
+		}
+		idx, ok := nameMap[upper]
+		if !ok {
+			continue
+		}
+		seen[upper] = true
+		if rsIdx >= 0 && rsIdx < len(row) {
+			rows[idx].LastRunState = toString(row[rsIdx])
+		}
+		if ctIdx >= 0 && ctIdx < len(row) {
+			rows[idx].LastRunTime = toString(row[ctIdx])
+		}
+		if exIdx >= 0 && exIdx < len(row) {
+			rows[idx].ErrorMsg = toString(row[exIdx])
 		}
 	}
 
-	return result, nil
+	return TaskStatusesResult{Rows: rows}, nil
 }
 
 // ExecuteTask manually triggers a single run of a Snowflake Task.

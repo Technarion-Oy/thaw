@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect } from "react";
-import { Modal, Table, Tag, Space, Typography, Spin, Tooltip, Button, Input } from "antd";
+import { Modal, Table, Tag, Space, Typography, Spin, Tooltip, Button, Input, Alert } from "antd";
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
@@ -72,14 +72,19 @@ function formatTime(ts: string): string {
 
 export default function TaskStatusesModal({ db, schema, onClose }: Props) {
   const [rows, setRows] = useState<main.TaskStatusRow[] | null>(null);
+  const [historyError, setHistoryError] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
   const load = () => {
     setRows(null);
     setError(null);
+    setHistoryError("");
     GetTaskStatuses(db, schema)
-      .then((data) => setRows(data ?? []))
+      .then((result) => {
+        setRows(result.rows ?? []);
+        setHistoryError(result.historyError ?? "");
+      })
       .catch((e) => setError(String(e)));
   };
 
@@ -202,6 +207,20 @@ export default function TaskStatusesModal({ db, schema, onClose }: Props) {
           <Tag icon={<CloseCircleOutlined />} color="error">{failedCount} failed</Tag>
           {runningCount > 0 && <Tag icon={<SyncOutlined spin />} color="processing">{runningCount} running</Tag>}
           <Tag color="default">{neverCount} never run</Tag>
+        </div>
+      )}
+
+      {/* History query warning */}
+      {historyError && (
+        <div style={{ padding: "0 24px 12px" }}>
+          <Alert
+            type="warning"
+            showIcon
+            message="Run history unavailable"
+            description={
+              <span style={{ fontSize: 12, fontFamily: "monospace" }}>{historyError}</span>
+            }
+          />
         </div>
       )}
 
