@@ -79,13 +79,13 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 - **Right-click the Tasks folder** inside any schema to open **Create Task…** directly — the dialog covers the full `CREATE TASK` syntax:
   - **Create options**: `OR REPLACE` / `IF NOT EXISTS` checkboxes (mutually exclusive)
   - **Compute**: warehouse dropdown or serverless with initial size and optional min/max statement size selects
-  - **Schedule**: none, fixed interval (seconds/minutes/hours), or cron with timezone
+  - **Schedule**: visual editor — **None**, **Interval** (validated number + unit: seconds `10–691,200`, minutes `1–11,520`, hours `1–192`; out-of-range values highlighted red), or **Cron** (5-field expression + searchable timezone dropdown, ~440 Snowflake-supported timezones)
   - **Configuration**: `CONFIG` JSON string (dollar-quoted in the generated SQL)
-  - **Dependencies**: predecessor task picker — type to search tasks in the current schema, hit **+** to add each one as a removable tag; already-added tasks are hidden from the dropdown; the preview emits fully-qualified `"db"."schema"."task"` references; `WHEN` condition free-text field
+  - **Dependencies**: predecessor task picker — type to search tasks in the current schema, hit **+** to add each one as a removable tag; already-added tasks are hidden from the dropdown; the preview emits fully-qualified `"db"."schema"."task"` references; **WHEN condition** — visual boolean expression builder with `SYSTEM$STREAM_HAS_DATA` (stream selector), `SYSTEM$GET_PREDECESSOR_RETURN_VALUE` (task selector, optional cast to BOOLEAN/FLOAT/STRING, comparison operator + value), and custom SQL condition rows; combine with AND/OR; negate with NOT; Visual/Raw SQL toggle; live WHEN preview below the builder
   - **Execution**: overlap policy (`NO_OVERLAP` / `ALLOW_CHILD_OVERLAP` / `ALLOW_ALL_OVERLAP`), execute as (Default / Caller / User), timeout, suspend-after-failures, auto-retry, minimum trigger interval, target completion interval
   - **Notifications**: error and success notification integration dropdowns (populated from `SHOW NOTIFICATION INTEGRATIONS`)
-  - **Other**: log level (TRACE…OFF), comment, finalize task
-  - **SQL body** (`AS`) with live `CREATE TASK` preview
+  - **Other**: log level (TRACE…OFF), comment; **finalize task** — AutoComplete dropdown listing only standalone tasks (no predecessors, not referenced as predecessor by any other task); disabled with a tooltip when the current task has child tasks
+  - **SQL body** (`AS`) with live `CREATE TASK` preview; a yellow warning alert appears when the task has no trigger defined (no SCHEDULE, AFTER, FINALIZE, or WHEN)
 - **Right-click a task** to:
   - **Execute Task…** — opens a dialog with two modes:
     - **Execute** — issues `EXECUTE TASK <name>` immediately; accepts an optional CONFIG JSON override (`USING CONFIG = $json$`); validates JSON on the fly and blocks execution while the input is invalid
@@ -94,9 +94,9 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Properties** — opens a dedicated editable modal covering the full `ALTER TASK` syntax:
     - **Status**: RESUME / SUSPEND
     - **Compute**: warehouse (select from available warehouses)
-    - **Schedule**: CRON expression or interval (with UNSET)
+    - **Schedule**: inline visual schedule editor (None/Interval/Cron with validated interval ranges and searchable timezone dropdown; UNSET supported)
     - **Dependencies**: list of predecessor tasks; add with `ADD AFTER` or remove per row with `REMOVE AFTER`
-    - **Condition**: WHEN expression (multi-line editor with Save / Cancel / Remove WHEN)
+    - **Condition**: WHEN expression — visual boolean expression builder (`STREAM_HAS_DATA`, `GET_PREDECESSOR_RETURN_VALUE`, custom SQL condition rows; Visual/Raw SQL toggle; Save / Cancel / Remove WHEN)
     - **SQL Body**: task SQL (multi-line editor with Save / Cancel via `MODIFY AS`)
     - **Configuration**: CONFIG JSON string (inline edit, UNSET supported)
     - **Limits**: user task timeout (ms) and overlap policy (ALLOW / DISALLOW)

@@ -175,13 +175,13 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - Right-click the **Tasks folder** (the Tasks type node inside a schema) to open **Create Task…** directly — same dialog as the schema Create Object submenu entry; the dialog covers the full `CREATE TASK` syntax:
   - **Create options**: `OR REPLACE` and `IF NOT EXISTS` checkboxes (mutually exclusive)
   - **Compute**: warehouse (searchable dropdown) or serverless with initial warehouse size and optional `SERVERLESS_TASK_MIN/MAX_STATEMENT_SIZE` selects
-  - **Schedule**: none (triggered/dependent), fixed interval (seconds/minutes/hours), or cron expression with timezone
+  - **Schedule**: visual schedule editor — **None** (triggered/dependent), **Interval** (validated number + unit dropdown: seconds `10–691,200`, minutes `1–11,520`, hours `1–192`; out-of-range values highlighted red), or **Cron** (5-field expression + searchable timezone dropdown covering ~440 Snowflake-supported timezones)
   - **Configuration**: `CONFIG` field for a JSON string passed to the task at runtime (dollar-quoted in the generated SQL)
-  - **Dependencies**: predecessor tasks (`AFTER`) — searchable picker loads all tasks in the same schema; select a task and click **+** to add it as a removable tag; already-added tasks are excluded from the dropdown; the SQL preview emits fully-qualified `"db"."schema"."task"` references; boolean condition (`WHEN`) free-text field
+  - **Dependencies**: predecessor tasks (`AFTER`) — searchable picker loads all tasks in the same schema; select a task and click **+** to add it as a removable tag; already-added tasks are excluded from the dropdown; the SQL preview emits fully-qualified `"db"."schema"."task"` references; **WHEN condition** — visual boolean expression builder with three condition types: `SYSTEM$STREAM_HAS_DATA` (stream selector populated from the current schema), `SYSTEM$GET_PREDECESSOR_RETURN_VALUE` (task selector, optional cast to BOOLEAN/FLOAT/STRING, comparison operator and value), and custom SQL; conditions can be combined with AND/OR and negated with NOT; toggle between Visual and Raw SQL modes at any time; a live WHEN preview is shown below the builder
   - **Execution**: overlap policy enum (`NO_OVERLAP` / `ALLOW_CHILD_OVERLAP` / `ALLOW_ALL_OVERLAP`), execute as (Default / Caller / User + username), timeout (ms), suspend-after-failures, auto-retry attempts, minimum trigger interval (seconds), target completion interval (number + unit)
   - **Notifications**: error and success notification integrations (searchable dropdowns populated from `SHOW NOTIFICATION INTEGRATIONS`; default is none)
-  - **Other**: log level (TRACE…OFF), comment, finalize task
-  - **SQL body** (`AS`): multi-line text area; live `CREATE TASK` preview updates as any field changes
+  - **Other**: log level (TRACE…OFF), comment; **finalize task** — AutoComplete dropdown listing only standalone tasks (no predecessors and not referenced as a predecessor by any other task); disabled with a tooltip explanation when the current task already has child tasks
+  - **SQL body** (`AS`): multi-line text area; live `CREATE TASK` preview updates as any field changes; a yellow warning alert is shown when the task has no trigger defined (no SCHEDULE, no AFTER predecessors, no FINALIZE, and no WHEN condition)
 - Right-click an **object** to:
   - Select the top 1 000 rows (tables and views) — opens in a new tab
   - **Time Travel Query…** (tables) — opens a dialog with a timeline slider spanning the table's full retention window; drag to choose a point in time and run `SELECT … AT(TIMESTAMP => …) LIMIT 1000` in a new tab
@@ -214,9 +214,9 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - **Task Properties** (tasks) — right-clicking a task and selecting **Properties** opens a dedicated editable modal covering the full `ALTER TASK` syntax, organised into sections:
   - **Status** — RESUME / SUSPEND toggle
   - **Compute** — warehouse picker (inline select, bare identifier)
-  - **Schedule** — CRON expression or interval string (inline text edit, UNSET supported)
+  - **Schedule** — inline visual schedule editor (same None/Interval/Cron editor as Create Task, with validated interval ranges and searchable timezone dropdown; UNSET supported)
   - **Dependencies** — lists all predecessor tasks; add new predecessors with `ADD AFTER` and remove existing ones with `REMOVE AFTER` per row
-  - **Condition** — WHEN expression (multi-line textarea with Save / Cancel / Remove WHEN)
+  - **Condition** — WHEN expression with the same visual boolean expression builder as Create Task (Visual/Raw SQL toggle, `STREAM_HAS_DATA` and `GET_PREDECESSOR_RETURN_VALUE` condition rows, custom SQL; Save / Cancel / Remove WHEN)
   - **SQL Body** — the task's SQL statement (multi-line textarea with Save / Cancel via `MODIFY AS`)
   - **Configuration** — CONFIG JSON string (inline text edit, UNSET supported)
   - **Limits** — user task timeout ms and allowed overlap policy (ALLOW / DISALLOW)
