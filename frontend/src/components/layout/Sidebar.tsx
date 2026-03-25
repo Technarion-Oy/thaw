@@ -107,8 +107,8 @@ interface ContextMenu {
   x: number;
   y: number;
   nodeKey: string;
-  nodeType: "db" | "schema" | "obj";
-  objKind?: string;  // set for nodeType === "obj"
+  nodeType: "db" | "schema" | "type" | "obj";
+  objKind?: string;  // set for nodeType === "type" or "obj"
   objArgs?: string;  // parameter type list for PROCEDURE / FUNCTION
 }
 
@@ -560,6 +560,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "db" });
     } else if (key.startsWith("schema:")) {
       setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "schema" });
+    } else if (key.startsWith("type:")) {
+      // key format: type:DB:SCHEMA:KIND
+      const objKind = key.split(":")[3];
+      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "type", objKind });
     } else if (key.startsWith("obj:")) {
       // key format: obj:DB:SCHEMA:KIND:NAME
       const objKind = key.split(":")[3];
@@ -693,7 +697,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
 
   const openCreateTask = () => {
     if (!ctxMenu) return;
-    const [, db, schema] = ctxMenu.nodeKey.split(":");
+    // Works for both schema:DB:SCHEMA and type:DB:SCHEMA:KIND keys
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
     setCtxMenu(null);
     setCreateTaskModal({ db, schema });
   };
@@ -1293,6 +1300,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "schema" && menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openSchemaImportModal)}
           {ctxMenu.nodeType === "schema" && menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets)}
           {ctxMenu.nodeType === "schema" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "TASK" &&
+            menuItem("Create Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)}
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&

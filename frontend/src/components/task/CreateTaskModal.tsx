@@ -21,104 +21,144 @@ const { Text } = Typography;
 const { TextArea } = Input;
 
 const SERVERLESS_SIZES = ["XSMALL", "SMALL", "MEDIUM", "LARGE", "XLARGE", "XXLARGE"];
+const LOG_LEVELS = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL", "OFF"];
 const NO_INTEGRATION = "";
 
 interface TaskConfig {
   name: string;
+  orReplace: boolean;
+  ifNotExists: boolean;
   computeType: "warehouse" | "serverless";
   warehouse: string;
   serverlessSize: string;
+  serverlessMinSize: string;
+  serverlessMaxSize: string;
   scheduleType: "none" | "interval" | "cron";
   intervalNum: string;
   intervalUnit: "HOURS" | "MINUTES" | "SECONDS";
   cronExpr: string;
   cronTimezone: string;
-  after: string;
-  when: string;
-  allowOverlapping: boolean;
+  config: string;
+  overlapPolicy: "" | "NO_OVERLAP" | "ALLOW_CHILD_OVERLAP" | "ALLOW_ALL_OVERLAP";
   timeoutMs: string;
   suspendAfterFailures: string;
   autoRetryAttempts: string;
+  minTriggerIntervalSecs: string;
+  targetCompletionNum: string;
+  targetCompletionUnit: "HOURS" | "MINUTES" | "SECONDS";
   errorIntegration: string;
   successIntegration: string;
+  logLevel: string;
   comment: string;
   finalize: string;
+  executeAsType: "default" | "caller" | "user";
+  executeAsUser: string;
+  after: string;
+  when: string;
   sql: string;
 }
 
 const DEFAULTS: TaskConfig = {
   name: "",
+  orReplace: false,
+  ifNotExists: false,
   computeType: "warehouse",
   warehouse: "",
   serverlessSize: "SMALL",
+  serverlessMinSize: "",
+  serverlessMaxSize: "",
   scheduleType: "none",
   intervalNum: "",
   intervalUnit: "MINUTES",
   cronExpr: "",
   cronTimezone: "UTC",
-  after: "",
-  when: "",
-  allowOverlapping: false,
+  config: "",
+  overlapPolicy: "",
   timeoutMs: "",
   suspendAfterFailures: "",
   autoRetryAttempts: "",
+  minTriggerIntervalSecs: "",
+  targetCompletionNum: "",
+  targetCompletionUnit: "MINUTES",
   errorIntegration: NO_INTEGRATION,
   successIntegration: NO_INTEGRATION,
+  logLevel: "",
   comment: "",
   finalize: "",
+  executeAsType: "default",
+  executeAsUser: "",
+  after: "",
+  when: "",
   sql: "",
 };
 
 function buildSql(db: string, schema: string, cfg: TaskConfig): string {
   const esc = (s: string) => s.replace(/"/g, '""');
+
+  let createClause = "CREATE";
+  if (cfg.orReplace) createClause += " OR REPLACE";
+  createClause += " TASK";
+  if (cfg.ifNotExists && !cfg.orReplace) createClause += " IF NOT EXISTS";
+
   const lines: string[] = [
-    `CREATE OR REPLACE TASK "${esc(db)}"."${esc(schema)}"."${esc(cfg.name || "task_name")}"`,
+    `${createClause} "${esc(db)}"."${esc(schema)}"."${esc(cfg.name || "task_name")}"`,
   ];
 
+  // Compute
   if (cfg.computeType === "warehouse" && cfg.warehouse.trim()) {
     lines.push(`    WAREHOUSE = ${cfg.warehouse.trim()}`);
   } else if (cfg.computeType === "serverless") {
     lines.push(`    USER_TASK_MANAGED_INITIAL_WAREHOUSE_SIZE = '${cfg.serverlessSize}'`);
+    if (cfg.serverlessMinSize) lines.push(`    SERVERLESS_TASK_MIN_STATEMENT_SIZE = '${cfg.serverlessMinSize}'`);
+    if (cfg.serverlessMaxSize) lines.push(`    SERVERLESS_TASK_MAX_STATEMENT_SIZE = '${cfg.serverlessMaxSize}'`);
   }
 
+  // Schedule
   if (cfg.scheduleType === "interval" && cfg.intervalNum.trim()) {
     lines.push(`    SCHEDULE = '${cfg.intervalNum.trim()} ${cfg.intervalUnit}'`);
   } else if (cfg.scheduleType === "cron" && cfg.cronExpr.trim()) {
     lines.push(`    SCHEDULE = 'USING CRON ${cfg.cronExpr.trim()} ${cfg.cronTimezone.trim() || "UTC"}'`);
   }
 
-  if (cfg.allowOverlapping) {
-    lines.push(`    ALLOW_OVERLAPPING_EXECUTION = TRUE`);
-  }
-  if (cfg.timeoutMs.trim()) {
-    lines.push(`    USER_TASK_TIMEOUT_MS = ${cfg.timeoutMs.trim()}`);
-  }
-  if (cfg.suspendAfterFailures.trim()) {
-    lines.push(`    SUSPEND_TASK_AFTER_NUM_FAILURES = ${cfg.suspendAfterFailures.trim()}`);
-  }
-  if (cfg.autoRetryAttempts.trim()) {
-    lines.push(`    TASK_AUTO_RETRY_ATTEMPTS = ${cfg.autoRetryAttempts.trim()}`);
-  }
-  if (cfg.errorIntegration) {
-    lines.push(`    ERROR_INTEGRATION = ${cfg.errorIntegration}`);
-  }
-  if (cfg.successIntegration) {
-    lines.push(`    SUCCESS_INTEGRATION = ${cfg.successIntegration}`);
-  }
-  if (cfg.comment.trim()) {
-    lines.push(`    COMMENT = '${cfg.comment.trim().replace(/'/g, "''")}'`);
-  }
-  if (cfg.finalize.trim()) {
-    lines.push(`    FINALIZE = ${cfg.finalize.trim()}`);
+  // Config
+  if (cfg.config.trim()) {
+    lines.push(`    CONFIG = $$${cfg.config.trim()}$$`);
   }
 
+  // Overlap policy
+  if (cfg.overlapPolicy) {
+    lines.push(`    OVERLAP_POLICY = ${cfg.overlapPolicy}`);
+  }
+
+  // Limits
+  if (cfg.timeoutMs.trim()) lines.push(`    USER_TASK_TIMEOUT_MS = ${cfg.timeoutMs.trim()}`);
+  if (cfg.suspendAfterFailures.trim()) lines.push(`    SUSPEND_TASK_AFTER_NUM_FAILURES = ${cfg.suspendAfterFailures.trim()}`);
+  if (cfg.autoRetryAttempts.trim()) lines.push(`    TASK_AUTO_RETRY_ATTEMPTS = ${cfg.autoRetryAttempts.trim()}`);
+  if (cfg.minTriggerIntervalSecs.trim()) lines.push(`    USER_TASK_MINIMUM_TRIGGER_INTERVAL_IN_SECONDS = ${cfg.minTriggerIntervalSecs.trim()}`);
+  if (cfg.targetCompletionNum.trim()) lines.push(`    TARGET_COMPLETION_INTERVAL = '${cfg.targetCompletionNum.trim()} ${cfg.targetCompletionUnit}'`);
+
+  // Notifications
+  if (cfg.errorIntegration) lines.push(`    ERROR_INTEGRATION = ${cfg.errorIntegration}`);
+  if (cfg.successIntegration) lines.push(`    SUCCESS_INTEGRATION = ${cfg.successIntegration}`);
+
+  // Other
+  if (cfg.logLevel) lines.push(`    LOG_LEVEL = '${cfg.logLevel}'`);
+  if (cfg.comment.trim()) lines.push(`    COMMENT = '${cfg.comment.trim().replace(/'/g, "''")}'`);
+  if (cfg.finalize.trim()) lines.push(`    FINALIZE = ${cfg.finalize.trim()}`);
+
+  // AFTER
   const afterTasks = cfg.after.split(",").map((s) => s.trim()).filter(Boolean);
-  if (afterTasks.length > 0) {
-    lines.push(`AFTER ${afterTasks.join(", ")}`);
+  if (afterTasks.length > 0) lines.push(`AFTER ${afterTasks.join(", ")}`);
+
+  // EXECUTE AS
+  if (cfg.executeAsType === "caller") {
+    lines.push(`EXECUTE AS CALLER`);
+  } else if (cfg.executeAsType === "user" && cfg.executeAsUser.trim()) {
+    lines.push(`EXECUTE AS USER ${cfg.executeAsUser.trim()}`);
   }
-  if (cfg.when.trim()) {
-    lines.push(`WHEN ${cfg.when.trim()}`);
-  }
+
+  // WHEN
+  if (cfg.when.trim()) lines.push(`WHEN ${cfg.when.trim()}`);
 
   lines.push(`AS`);
   lines.push(cfg.sql.trim() || "-- your SQL here");
@@ -156,13 +196,18 @@ export default function CreateTaskModal({ db, schema, onClose }: Props) {
 
   const preview = buildSql(db, schema, cfg);
 
-  const labelStyle: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 };
   const itemStyle: React.CSSProperties = { marginBottom: 12 };
 
   const integrationOptions = [
     { value: NO_INTEGRATION, label: "— None —" },
     ...integrations.map((i) => ({ value: i, label: i })),
   ];
+
+  const divider = (label: string) => (
+    <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 12px" }}>
+      {label}
+    </Divider>
+  );
 
   return (
     <Modal
@@ -190,18 +235,38 @@ export default function CreateTaskModal({ db, schema, onClose }: Props) {
     >
       <Form layout="vertical" size="small">
 
-        {/* Task name */}
-        <Form.Item label="Task name" required style={itemStyle}>
-          <Input
-            value={cfg.name}
-            onChange={(e) => set("name", e.target.value)}
-            placeholder="MY_TASK"
-          />
-        </Form.Item>
+        {/* Task name + create options */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0 16px", alignItems: "end" }}>
+          <Form.Item label="Task name" required style={itemStyle}>
+            <Input
+              value={cfg.name}
+              onChange={(e) => set("name", e.target.value)}
+              placeholder="MY_TASK"
+            />
+          </Form.Item>
+          <Form.Item style={itemStyle}>
+            <Space direction="vertical" size={4}>
+              <Checkbox
+                checked={cfg.orReplace}
+                onChange={(e) => {
+                  set("orReplace", e.target.checked);
+                  if (e.target.checked) set("ifNotExists", false);
+                }}
+              >
+                OR REPLACE
+              </Checkbox>
+              <Checkbox
+                checked={cfg.ifNotExists}
+                disabled={cfg.orReplace}
+                onChange={(e) => set("ifNotExists", e.target.checked)}
+              >
+                IF NOT EXISTS
+              </Checkbox>
+            </Space>
+          </Form.Item>
+        </div>
 
-        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 12px" }}>
-          Compute
-        </Divider>
+        {divider("Compute")}
 
         <Form.Item style={itemStyle}>
           <Radio.Group
@@ -227,19 +292,39 @@ export default function CreateTaskModal({ db, schema, onClose }: Props) {
             />
           </Form.Item>
         ) : (
-          <Form.Item label="Initial warehouse size" style={itemStyle}>
-            <Select
-              value={cfg.serverlessSize}
-              onChange={(v) => set("serverlessSize", v)}
-              options={SERVERLESS_SIZES.map((s) => ({ value: s, label: s }))}
-              style={{ width: 160 }}
-            />
-          </Form.Item>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 16px" }}>
+            <Form.Item label="Initial size" style={itemStyle}>
+              <Select
+                value={cfg.serverlessSize}
+                onChange={(v) => set("serverlessSize", v)}
+                options={SERVERLESS_SIZES.map((s) => ({ value: s, label: s }))}
+                style={{ width: "100%" }}
+              />
+            </Form.Item>
+            <Form.Item label="Min statement size" style={itemStyle}>
+              <Select
+                value={cfg.serverlessMinSize || undefined}
+                onChange={(v) => set("serverlessMinSize", v ?? "")}
+                allowClear
+                placeholder="Default"
+                options={SERVERLESS_SIZES.map((s) => ({ value: s, label: s }))}
+                style={{ width: "100%" }}
+              />
+            </Form.Item>
+            <Form.Item label="Max statement size" style={itemStyle}>
+              <Select
+                value={cfg.serverlessMaxSize || undefined}
+                onChange={(v) => set("serverlessMaxSize", v ?? "")}
+                allowClear
+                placeholder="Default"
+                options={SERVERLESS_SIZES.map((s) => ({ value: s, label: s }))}
+                style={{ width: "100%" }}
+              />
+            </Form.Item>
+          </div>
         )}
 
-        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 12px" }}>
-          Schedule
-        </Divider>
+        {divider("Schedule")}
 
         <Form.Item style={itemStyle}>
           <Radio.Group
@@ -296,12 +381,26 @@ export default function CreateTaskModal({ db, schema, onClose }: Props) {
           </Form.Item>
         )}
 
-        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 12px" }}>
-          Dependencies
-        </Divider>
+        {divider("Configuration")}
 
         <Form.Item
-          label={<span style={labelStyle}>Predecessor tasks (AFTER)</span>}
+          label="CONFIG"
+          style={itemStyle}
+          help={<span style={{ fontSize: 11 }}>JSON string passed to the task at runtime (dollar-quoted)</span>}
+        >
+          <TextArea
+            value={cfg.config}
+            onChange={(e) => set("config", e.target.value)}
+            placeholder={'{"learning_rate": 0.2, "environment": "production"}'}
+            autoSize={{ minRows: 2, maxRows: 5 }}
+            style={{ fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace", fontSize: 12 }}
+          />
+        </Form.Item>
+
+        {divider("Dependencies")}
+
+        <Form.Item
+          label="Predecessor tasks (AFTER)"
           style={itemStyle}
           help={<span style={{ fontSize: 11 }}>Comma-separated fully-qualified task names</span>}
         >
@@ -312,10 +411,7 @@ export default function CreateTaskModal({ db, schema, onClose }: Props) {
           />
         </Form.Item>
 
-        <Form.Item
-          label={<span style={labelStyle}>Condition (WHEN)</span>}
-          style={itemStyle}
-        >
+        <Form.Item label="Condition (WHEN)" style={itemStyle}>
           <Input
             value={cfg.when}
             onChange={(e) => set("when", e.target.value)}
@@ -323,18 +419,43 @@ export default function CreateTaskModal({ db, schema, onClose }: Props) {
           />
         </Form.Item>
 
-        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 12px" }}>
-          Execution
-        </Divider>
+        {divider("Execution")}
 
-        <Form.Item style={{ marginBottom: 12 }}>
-          <Checkbox
-            checked={cfg.allowOverlapping}
-            onChange={(e) => set("allowOverlapping", e.target.checked)}
-          >
-            Allow overlapping execution
-          </Checkbox>
-        </Form.Item>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
+          <Form.Item label="Overlap policy" style={itemStyle}>
+            <Select
+              value={cfg.overlapPolicy || undefined}
+              onChange={(v) => set("overlapPolicy", v ?? "")}
+              allowClear
+              placeholder="Default"
+              options={[
+                { value: "NO_OVERLAP",          label: "NO_OVERLAP" },
+                { value: "ALLOW_CHILD_OVERLAP",  label: "ALLOW_CHILD_OVERLAP" },
+                { value: "ALLOW_ALL_OVERLAP",    label: "ALLOW_ALL_OVERLAP" },
+              ]}
+              style={{ width: "100%" }}
+            />
+          </Form.Item>
+          <Form.Item label="Execute as" style={itemStyle}>
+            <Radio.Group
+              value={cfg.executeAsType}
+              onChange={(e) => set("executeAsType", e.target.value)}
+              size="small"
+            >
+              <Radio value="default">Default</Radio>
+              <Radio value="caller">Caller</Radio>
+              <Radio value="user">User</Radio>
+            </Radio.Group>
+            {cfg.executeAsType === "user" && (
+              <Input
+                value={cfg.executeAsUser}
+                onChange={(e) => set("executeAsUser", e.target.value)}
+                placeholder="USERNAME"
+                style={{ marginTop: 6 }}
+              />
+            )}
+          </Form.Item>
+        </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 16px" }}>
           <Form.Item label="Timeout (ms)" style={itemStyle}>
@@ -367,6 +488,45 @@ export default function CreateTaskModal({ db, schema, onClose }: Props) {
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
+          <Form.Item
+            label="Min trigger interval (s)"
+            style={itemStyle}
+            help={<span style={{ fontSize: 11 }}>USER_TASK_MINIMUM_TRIGGER_INTERVAL_IN_SECONDS</span>}
+          >
+            <InputNumber
+              value={cfg.minTriggerIntervalSecs === "" ? undefined : Number(cfg.minTriggerIntervalSecs)}
+              onChange={(v) => set("minTriggerIntervalSecs", v === null ? "" : String(v))}
+              min={0}
+              placeholder="30"
+              style={{ width: "100%" }}
+            />
+          </Form.Item>
+          <Form.Item label="Target completion interval" style={itemStyle}>
+            <Space>
+              <InputNumber
+                value={cfg.targetCompletionNum === "" ? undefined : Number(cfg.targetCompletionNum)}
+                onChange={(v) => set("targetCompletionNum", v === null ? "" : String(v))}
+                min={1}
+                placeholder="—"
+                style={{ width: 80 }}
+              />
+              <Select
+                value={cfg.targetCompletionUnit}
+                onChange={(v) => set("targetCompletionUnit", v)}
+                options={[
+                  { value: "SECONDS", label: "Seconds" },
+                  { value: "MINUTES", label: "Minutes" },
+                  { value: "HOURS",   label: "Hours" },
+                ]}
+                style={{ width: 110 }}
+              />
+            </Space>
+          </Form.Item>
+        </div>
+
+        {divider("Notifications")}
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
           <Form.Item label="Error integration" style={itemStyle}>
             <Select
               value={cfg.errorIntegration}
@@ -387,11 +547,19 @@ export default function CreateTaskModal({ db, schema, onClose }: Props) {
           </Form.Item>
         </div>
 
-        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 12px" }}>
-          Other
-        </Divider>
+        {divider("Other")}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 16px" }}>
+          <Form.Item label="Log level" style={itemStyle}>
+            <Select
+              value={cfg.logLevel || undefined}
+              onChange={(v) => set("logLevel", v ?? "")}
+              allowClear
+              placeholder="Default"
+              options={LOG_LEVELS.map((l) => ({ value: l, label: l }))}
+              style={{ width: "100%" }}
+            />
+          </Form.Item>
           <Form.Item label="Comment" style={itemStyle}>
             <Input
               value={cfg.comment}
@@ -402,7 +570,7 @@ export default function CreateTaskModal({ db, schema, onClose }: Props) {
           <Form.Item
             label="Finalize task"
             style={itemStyle}
-            help={<span style={{ fontSize: 11 }}>Runs after all tasks in the DAG complete</span>}
+            help={<span style={{ fontSize: 11 }}>Runs after the full DAG completes</span>}
           >
             <Input
               value={cfg.finalize}
@@ -412,9 +580,7 @@ export default function CreateTaskModal({ db, schema, onClose }: Props) {
           </Form.Item>
         </div>
 
-        <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 12px" }}>
-          SQL (AS)
-        </Divider>
+        {divider("SQL (AS)")}
 
         <Form.Item required style={itemStyle}>
           <TextArea
