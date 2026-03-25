@@ -20,6 +20,7 @@ import {
 import { GetObjectProperties, AlterTask, ListNotificationIntegrations, ListFinalizableTasks, TaskHasChildren } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 import WhenConditionBuilder from "./WhenConditionBuilder";
+import ScheduleEditor from "./ScheduleEditor";
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -440,6 +441,11 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
   const [whenDraft,    setWhenDraft]    = useState("");
   const [whenSaving,   setWhenSaving]   = useState(false);
   const [whenError,    setWhenError]    = useState<string | null>(null);
+  const [schedEditing,   setSchedEditing]   = useState(false);
+  const [schedDraft,     setSchedDraft]     = useState("");
+  const [schedEditKey,   setSchedEditKey]   = useState(0);
+  const [schedSaving,    setSchedSaving]    = useState(false);
+  const [schedError,     setSchedError]     = useState<string | null>(null);
   const [rootTasks,        setRootTasks]        = useState<{ label: string; value: string }[]>([]);
   const [hasChildren,      setHasChildren]      = useState(false);
 
@@ -671,11 +677,71 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
           <div style={SECTION_HEAD}>Schedule</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
-              <EditRow label="Schedule" value={get("schedule")} type="text"
-                hint="e.g. '5 MINUTES' or 'USING CRON 0 * * * * UTC'" canUnset
-                onSave={setText("SCHEDULE")}
-                onUnset={async () => { await alter("UNSET SCHEDULE"); await load(); }}
-              />
+              {/* Schedule — inline editor using ScheduleEditor */}
+              <tr style={{ borderBottom: schedEditing ? "none" : "1px solid var(--border)" }}>
+                <td style={{ ...LABEL_TD, verticalAlign: schedEditing ? "top" : "middle", paddingTop: schedEditing ? 10 : undefined }}>
+                  Schedule
+                </td>
+                <td style={{ padding: "6px 0" }}>
+                  {!schedEditing ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{
+                        fontFamily: "monospace", fontSize: 12, flex: 1, wordBreak: "break-word",
+                        color: get("schedule") ? "var(--text)" : "var(--text-faint)",
+                        fontStyle: get("schedule") ? "normal" : "italic",
+                      }}>
+                        {get("schedule") || "—"}
+                      </span>
+                      <Button size="small" type="text" icon={<EditOutlined />}
+                        style={{ flexShrink: 0, color: "var(--text-faint)" }}
+                        onClick={() => {
+                          setSchedDraft(get("schedule"));
+                          setSchedEditKey((k) => k + 1);
+                          setSchedError(null);
+                          setSchedEditing(true);
+                        }} />
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <ScheduleEditor
+                        key={schedEditKey}
+                        value={schedDraft}
+                        onChange={setSchedDraft}
+                      />
+                      {schedError && (
+                        <div style={{ color: "#f85149", fontSize: 11, fontFamily: "monospace" }}>{schedError}</div>
+                      )}
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <Button size="small" type="primary" loading={schedSaving}
+                          onClick={async () => {
+                            setSchedSaving(true); setSchedError(null);
+                            try {
+                              const t = schedDraft.trim();
+                              if (!t) await alter("UNSET SCHEDULE");
+                              else    await alter(`SET SCHEDULE = '${t}'`);
+                              setSchedEditing(false);
+                            } catch (e) {
+                              const raw = String(e);
+                              const m = raw.match(/:\s*(.+)$/s);
+                              setSchedError(m ? m[0].trim() : raw);
+                            } finally { setSchedSaving(false); }
+                          }}>Save</Button>
+                        <Button size="small" disabled={schedSaving}
+                          onClick={() => setSchedEditing(false)}>Cancel</Button>
+                        {get("schedule") && (
+                          <Button size="small" danger disabled={schedSaving}
+                            onClick={async () => {
+                              setSchedSaving(true);
+                              try { await alter("UNSET SCHEDULE"); setSchedEditing(false); }
+                              catch (e) { setSchedError(String(e)); }
+                              finally { setSchedSaving(false); }
+                            }}>Remove</Button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </td>
+              </tr>
               <EditRow label="Overlap Policy" value={overlapValue}
                 type="select" options={OVERLAP_OPTIONS}
                 onSave={setEnum("OVERLAP_POLICY")} />

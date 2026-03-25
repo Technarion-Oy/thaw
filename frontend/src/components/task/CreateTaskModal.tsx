@@ -15,6 +15,7 @@ import {
 } from "antd";
 import { ClockCircleOutlined, PlusOutlined } from "@ant-design/icons";
 import { ListWarehouses, ListNotificationIntegrations, ListObjects } from "../../../wailsjs/go/main/App";
+import ScheduleEditor from "./ScheduleEditor";
 import { useQueryStore } from "../../store/queryStore";
 import WhenConditionBuilder from "./WhenConditionBuilder";
 
@@ -34,11 +35,7 @@ interface TaskConfig {
   serverlessSize: string;
   serverlessMinSize: string;
   serverlessMaxSize: string;
-  scheduleType: "none" | "interval" | "cron";
-  intervalNum: string;
-  intervalUnit: "HOURS" | "MINUTES" | "SECONDS";
-  cronExpr: string;
-  cronTimezone: string;
+  schedule: string;
   config: string;
   overlapPolicy: "" | "NO_OVERLAP" | "ALLOW_CHILD_OVERLAP" | "ALLOW_ALL_OVERLAP";
   timeoutMs: string;
@@ -68,11 +65,7 @@ const DEFAULTS: TaskConfig = {
   serverlessSize: "SMALL",
   serverlessMinSize: "",
   serverlessMaxSize: "",
-  scheduleType: "none",
-  intervalNum: "",
-  intervalUnit: "MINUTES",
-  cronExpr: "",
-  cronTimezone: "UTC",
+  schedule: "",
   config: "",
   overlapPolicy: "",
   timeoutMs: "",
@@ -115,10 +108,8 @@ function buildSql(db: string, schema: string, cfg: TaskConfig): string {
   }
 
   // Schedule
-  if (cfg.scheduleType === "interval" && cfg.intervalNum.trim()) {
-    lines.push(`    SCHEDULE = '${cfg.intervalNum.trim()} ${cfg.intervalUnit}'`);
-  } else if (cfg.scheduleType === "cron" && cfg.cronExpr.trim()) {
-    lines.push(`    SCHEDULE = 'USING CRON ${cfg.cronExpr.trim()} ${cfg.cronTimezone.trim() || "UTC"}'`);
+  if (cfg.schedule.trim()) {
+    lines.push(`    SCHEDULE = '${cfg.schedule.trim()}'`);
   }
 
   // Config
@@ -340,59 +331,11 @@ export default function CreateTaskModal({ db, schema, onClose }: Props) {
         {divider("Schedule")}
 
         <Form.Item style={itemStyle}>
-          <Radio.Group
-            value={cfg.scheduleType}
-            onChange={(e) => set("scheduleType", e.target.value)}
-            size="small"
-          >
-            <Radio value="none">None (triggered / dependent)</Radio>
-            <Radio value="interval">Interval</Radio>
-            <Radio value="cron">Cron</Radio>
-          </Radio.Group>
+          <ScheduleEditor
+            value={cfg.schedule}
+            onChange={(v) => set("schedule", v)}
+          />
         </Form.Item>
-
-        {cfg.scheduleType === "interval" && (
-          <Form.Item label="Interval" style={itemStyle}>
-            <Space>
-              <InputNumber
-                value={cfg.intervalNum === "" ? undefined : Number(cfg.intervalNum)}
-                onChange={(v) => set("intervalNum", v === null ? "" : String(v))}
-                min={1}
-                placeholder="5"
-                style={{ width: 90 }}
-              />
-              <Select
-                value={cfg.intervalUnit}
-                onChange={(v) => set("intervalUnit", v)}
-                options={[
-                  { value: "SECONDS", label: "Seconds" },
-                  { value: "MINUTES", label: "Minutes" },
-                  { value: "HOURS",   label: "Hours" },
-                ]}
-                style={{ width: 110 }}
-              />
-            </Space>
-          </Form.Item>
-        )}
-
-        {cfg.scheduleType === "cron" && (
-          <Form.Item label="Cron expression &amp; timezone" style={itemStyle}>
-            <Space>
-              <Input
-                value={cfg.cronExpr}
-                onChange={(e) => set("cronExpr", e.target.value)}
-                placeholder="0 9 * * *"
-                style={{ width: 200 }}
-              />
-              <Input
-                value={cfg.cronTimezone}
-                onChange={(e) => set("cronTimezone", e.target.value)}
-                placeholder="UTC"
-                style={{ width: 120 }}
-              />
-            </Space>
-          </Form.Item>
-        )}
 
         {divider("Configuration")}
 
