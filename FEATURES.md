@@ -92,7 +92,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
     - **Retry Last** — issues `EXECUTE TASK <name> RETRY LAST` to resume the last failed or cancelled task graph run from the point of failure (requires the run to be `FAILED` or `CANCELED`, the graph to be unchanged, and the original attempt to be within 14 days)
     - A live SQL preview shows the exact statement before it is sent
   - **Properties** — opens a dedicated editable modal covering the full `ALTER TASK` syntax:
-    - **Status**: RESUME / SUSPEND
+    - **Status**: RESUME / SUSPEND; when the task has child tasks, **Resume with children** (calls `SYSTEM$TASK_DEPENDENTS_ENABLE` — resumes descendants first, then the root) and **Suspend with children** (suspends root first, then all descendants) are also shown; Resume buttons are disabled when the task has no trigger configured
     - **Compute**: warehouse (select from available warehouses)
     - **Schedule**: inline visual schedule editor (None/Interval/Cron with validated interval ranges and searchable timezone dropdown; UNSET supported)
     - **Dependencies**: list of predecessor tasks; add with `ADD AFTER` or remove per row with `REMOVE AFTER`

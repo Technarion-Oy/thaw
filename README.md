@@ -212,7 +212,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
   - **Table Settings** — cluster key, schema evolution, change tracking, data retention days, max data extension days, default DDL collation, and comment; booleans are toggled with a switch, other fields open an inline input with Save / Cancel; changes apply via `ALTER TABLE SET`
   - **Column Comments** — lists every column with its current comment; click the pencil icon to edit inline; saving runs `ALTER TABLE … MODIFY COLUMN … COMMENT`
 - **Task Properties** (tasks) — right-clicking a task and selecting **Properties** opens a dedicated editable modal covering the full `ALTER TASK` syntax, organised into sections:
-  - **Status** — RESUME / SUSPEND toggle
+  - **Status** — RESUME / SUSPEND toggle; **Resume with children** / **Suspend with children** buttons appear when the task has child tasks — Resume with children calls `SYSTEM$TASK_DEPENDENTS_ENABLE` to resume all descendants first then the root task; Suspend with children suspends the root task first then recursively suspends every descendant via `SHOW TASKS IN SCHEMA`; Resume buttons are disabled when the task has no trigger configured
   - **Compute** — warehouse picker (inline select, bare identifier)
   - **Schedule** — inline visual schedule editor (same None/Interval/Cron editor as Create Task, with validated interval ranges and searchable timezone dropdown; UNSET supported)
   - **Dependencies** — lists all predecessor tasks; add new predecessors with `ADD AFTER` and remove existing ones with `REMOVE AFTER` per row
