@@ -798,6 +798,7 @@ export namespace main {
 	export class TaskStatusRow {
 	    name: string;
 	    taskState: string;
+	    predecessors: string;
 	    lastRunState: string;
 	    lastRunTime: string;
 	    errorMsg: string;
@@ -810,6 +811,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
 	        this.taskState = source["taskState"];
+	        this.predecessors = source["predecessors"];
 	        this.lastRunState = source["lastRunState"];
 	        this.lastRunTime = source["lastRunTime"];
 	        this.errorMsg = source["errorMsg"];

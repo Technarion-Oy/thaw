@@ -2025,6 +2025,7 @@ func (a *App) AlterTask(database, schema, name, clause string) error {
 type TaskStatusRow struct {
 	Name         string `json:"name"`
 	TaskState    string `json:"taskState"`    // STARTED | SUSPENDED
+	Predecessors string `json:"predecessors"` // raw predecessor string from SHOW TASKS
 	LastRunState string `json:"lastRunState"` // SUCCEEDED | FAILED | RUNNING | SKIPPED | CANCELLED | ""
 	LastRunTime  string `json:"lastRunTime"`  // ISO-8601 timestamp or ""
 	ErrorMsg     string `json:"errorMsg"`     // exception text when last run failed
@@ -2088,10 +2089,12 @@ func (a *App) GetTaskStatuses(database, schema string) (TaskStatusesResult, erro
 
 	nameIdx  := colIdx(showRes.Columns, "name")
 	stateIdx := colIdx(showRes.Columns, "state")
+	predsIdx := colIdx(showRes.Columns, "predecessors", "predecessor")
 
 	type entry struct {
-		name      string
-		taskState string
+		name         string
+		taskState    string
+		predecessors string
 	}
 	var tasks []entry
 	nameMap := map[string]int{} // UPPER(name) → index in tasks slice
@@ -2107,13 +2110,17 @@ func (a *App) GetTaskStatuses(database, schema string) (TaskStatusesResult, erro
 		if stateIdx >= 0 && stateIdx < len(row) {
 			state = toString(row[stateIdx])
 		}
+		preds := ""
+		if predsIdx >= 0 && predsIdx < len(row) {
+			preds = toString(row[predsIdx])
+		}
 		nameMap[strings.ToUpper(name)] = len(tasks)
-		tasks = append(tasks, entry{name: name, taskState: strings.ToUpper(state)})
+		tasks = append(tasks, entry{name: name, taskState: strings.ToUpper(state), predecessors: preds})
 	}
 
 	rows := make([]TaskStatusRow, len(tasks))
 	for i, t := range tasks {
-		rows[i] = TaskStatusRow{Name: t.name, TaskState: t.taskState}
+		rows[i] = TaskStatusRow{Name: t.name, TaskState: t.taskState, Predecessors: t.predecessors}
 	}
 
 	// ── Step 2: fetch run history (best-effort) ───────────────────────────────

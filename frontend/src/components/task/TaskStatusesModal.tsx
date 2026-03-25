@@ -8,7 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Modal, Table, Tag, Space, Typography, Spin, Tooltip, Button, Input, Alert } from "antd";
 import {
   CheckCircleOutlined,
@@ -30,33 +30,115 @@ interface Props {
   onClose: () => void;
 }
 
+// Extend the row type with an optional children array for Ant Design tree table.
+interface TreeRow extends main.TaskStatusRow {
+  children?: TreeRow[];
+}
+
+// ── Predecessor parsing ───────────────────────────────────────────────────────
+// SHOW TASKS returns predecessors as a string that may look like:
+//   ""                                              (no predecessors)
+//   "DB"."SCHEMA"."TASK1"                           (single, unquoted)
+//   ["DB"."SCHEMA"."TASK1","DB"."SCHEMA"."TASK2"]   (array-like)
+function parsePredecessors(raw: string): string[] {
+  if (!raw || raw === "[]") return [];
+  // Try JSON parse (handles proper JSON arrays)
+  try {
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) return arr.map(String);
+  } catch { /* fall through */ }
+  // Strip surrounding brackets if present then split on commas not inside quotes
+  const stripped = raw.replace(/^\[|\]$/g, "");
+  return stripped.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+// Extract the bare task name from a fully-qualified reference like "DB"."SCH"."TASK".
+function extractName(ref: string): string {
+  const parts = ref.split(".");
+  return parts[parts.length - 1].replace(/^"|"$/g, "");
+}
+
+// ── Tree builder ─────────────────────────────────────────────────────────────
+// Builds a nested tree from a flat list.  A task is a child of the first
+// predecessor that also lives in this schema.  Tasks whose predecessor is
+// outside this schema (or who have no predecessors) are placed at the root.
+function buildHierarchy(flat: main.TaskStatusRow[]): TreeRow[] {
+  const byName = new Map<string, main.TaskStatusRow>();
+  for (const r of flat) byName.set(r.name.toUpperCase(), r);
+
+  // Map each task to its parent name within this schema (upper-cased).
+  const parentOf = new Map<string, string>();
+  const childrenOf = new Map<string, string[]>();
+
+  for (const row of flat) {
+    const preds = parsePredecessors(row.predecessors ?? "");
+    const localParent = preds
+      .map((p) => extractName(p).toUpperCase())
+      .find((n) => byName.has(n));
+
+    if (localParent) {
+      parentOf.set(row.name.toUpperCase(), localParent);
+      if (!childrenOf.has(localParent)) childrenOf.set(localParent, []);
+      childrenOf.get(localParent)!.push(row.name);
+    }
+  }
+
+  const inTree = new Set<string>();
+
+  function buildSubTree(name: string): TreeRow {
+    const row = byName.get(name.toUpperCase())!;
+    inTree.add(name.toUpperCase());
+    const kids = childrenOf.get(name.toUpperCase()) ?? [];
+    const node: TreeRow = { ...row };
+    if (kids.length > 0) node.children = kids.map(buildSubTree);
+    return node;
+  }
+
+  const result: TreeRow[] = [];
+  // Root tasks first (no local parent).
+  for (const row of flat) {
+    if (!parentOf.has(row.name.toUpperCase())) {
+      result.push(buildSubTree(row.name));
+    }
+  }
+  // Any task not yet placed (e.g., circular refs) — append as a root.
+  for (const row of flat) {
+    if (!inTree.has(row.name.toUpperCase())) {
+      result.push({ ...row });
+    }
+  }
+  return result;
+}
+
+// Flatten a tree to a plain list (used for search filtering).
+function flattenTree(nodes: TreeRow[]): TreeRow[] {
+  const out: TreeRow[] = [];
+  for (const n of nodes) {
+    out.push(n);
+    if (n.children) out.push(...flattenTree(n.children));
+  }
+  return out;
+}
+
+// ── Tag renderers ─────────────────────────────────────────────────────────────
 function taskStateTag(state: string) {
   switch (state.toUpperCase()) {
-    case "STARTED":
-      return <Tag color="success">STARTED</Tag>;
-    case "SUSPENDED":
-      return <Tag color="default">SUSPENDED</Tag>;
-    default:
-      return <Tag>{state || "—"}</Tag>;
+    case "STARTED":   return <Tag color="success">STARTED</Tag>;
+    case "SUSPENDED": return <Tag color="default">SUSPENDED</Tag>;
+    default:          return <Tag>{state || "—"}</Tag>;
   }
 }
 
 function runStateTag(state: string) {
   if (!state) return <Text type="secondary" style={{ fontSize: 12 }}>Never run</Text>;
   switch (state.toUpperCase()) {
-    case "SUCCEEDED":
-      return <Tag icon={<CheckCircleOutlined />} color="success">SUCCEEDED</Tag>;
-    case "FAILED":
-      return <Tag icon={<CloseCircleOutlined />} color="error">FAILED</Tag>;
-    case "RUNNING":
-      return <Tag icon={<SyncOutlined spin />} color="processing">RUNNING</Tag>;
-    case "SKIPPED":
-      return <Tag icon={<MinusCircleOutlined />} color="gold">SKIPPED</Tag>;
+    case "SUCCEEDED": return <Tag icon={<CheckCircleOutlined />} color="success">SUCCEEDED</Tag>;
+    case "FAILED":    return <Tag icon={<CloseCircleOutlined />} color="error">FAILED</Tag>;
+    case "RUNNING":   return <Tag icon={<SyncOutlined spin />} color="processing">RUNNING</Tag>;
+    case "SKIPPED":   return <Tag icon={<MinusCircleOutlined />} color="gold">SKIPPED</Tag>;
     case "CANCELLED":
-    case "CANCELED":
-      return <Tag icon={<MinusCircleOutlined />} color="default">CANCELLED</Tag>;
-    default:
-      return <Tag>{state}</Tag>;
+    case "CANCELED":  return <Tag icon={<MinusCircleOutlined />} color="default">CANCELLED</Tag>;
+    default:          return <Tag>{state}</Tag>;
   }
 }
 
@@ -70,6 +152,7 @@ function formatTime(ts: string): string {
   });
 }
 
+// ── Component ─────────────────────────────────────────────────────────────────
 export default function TaskStatusesModal({ db, schema, onClose }: Props) {
   const [rows, setRows] = useState<main.TaskStatusRow[] | null>(null);
   const [historyError, setHistoryError] = useState<string>("");
@@ -90,20 +173,30 @@ export default function TaskStatusesModal({ db, schema, onClose }: Props) {
 
   useEffect(() => { load(); }, [db, schema]);
 
-  const filtered = (rows ?? []).filter((r) =>
-    !search || r.name.toLowerCase().includes(search.toLowerCase())
-  );
+  // Build the tree once; flatten only when searching.
+  const treeData = useMemo(() => buildHierarchy(rows ?? []), [rows]);
+
+  const displayData: TreeRow[] = useMemo(() => {
+    if (!search) return treeData;
+    // When searching, show a flat list filtered by name (no tree structure).
+    return flattenTree(treeData).filter((r) =>
+      r.name.toLowerCase().includes(search.toLowerCase())
+    );
+  }, [treeData, search]);
+
+  const allFlat = useMemo(() => flattenTree(treeData), [treeData]);
+  const successCount = allFlat.filter((r) => r.lastRunState?.toUpperCase() === "SUCCEEDED").length;
+  const failedCount  = allFlat.filter((r) => r.lastRunState?.toUpperCase() === "FAILED").length;
+  const runningCount = allFlat.filter((r) => r.lastRunState?.toUpperCase() === "RUNNING").length;
+  const neverCount   = allFlat.filter((r) => !r.lastRunState).length;
 
   const columns = [
     {
       title: "Task",
       dataIndex: "name",
       key: "name",
-      sorter: (a: main.TaskStatusRow, b: main.TaskStatusRow) => a.name.localeCompare(b.name),
       render: (name: string) => (
-        <Text
-          style={{ fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace", fontSize: 12 }}
-        >
+        <Text style={{ fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace", fontSize: 12 }}>
           {name}
         </Text>
       ),
@@ -114,10 +207,10 @@ export default function TaskStatusesModal({ db, schema, onClose }: Props) {
       key: "taskState",
       width: 110,
       filters: [
-        { text: "Started", value: "STARTED" },
+        { text: "Started",   value: "STARTED" },
         { text: "Suspended", value: "SUSPENDED" },
       ],
-      onFilter: (value: unknown, record: main.TaskStatusRow) =>
+      onFilter: (value: unknown, record: TreeRow) =>
         record.taskState.toUpperCase() === String(value),
       render: (state: string) => taskStateTag(state),
     },
@@ -134,7 +227,7 @@ export default function TaskStatusesModal({ db, schema, onClose }: Props) {
         { text: "Cancelled", value: "CANCELLED" },
         { text: "Never run", value: "" },
       ],
-      onFilter: (value: unknown, record: main.TaskStatusRow) => {
+      onFilter: (value: unknown, record: TreeRow) => {
         const v = String(value).toUpperCase();
         const s = (record.lastRunState ?? "").toUpperCase();
         if (v === "") return s === "";
@@ -147,12 +240,8 @@ export default function TaskStatusesModal({ db, schema, onClose }: Props) {
       dataIndex: "lastRunTime",
       key: "lastRunTime",
       width: 190,
-      sorter: (a: main.TaskStatusRow, b: main.TaskStatusRow) =>
-        (a.lastRunTime ?? "").localeCompare(b.lastRunTime ?? ""),
       render: (ts: string) => (
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          {formatTime(ts)}
-        </Text>
+        <Text type="secondary" style={{ fontSize: 12 }}>{formatTime(ts)}</Text>
       ),
     },
     {
@@ -163,18 +252,16 @@ export default function TaskStatusesModal({ db, schema, onClose }: Props) {
         if (!msg) return null;
         const short = msg.length > 60 ? msg.slice(0, 60) + "…" : msg;
         return (
-          <Tooltip title={<pre style={{ margin: 0, fontSize: 11, whiteSpace: "pre-wrap", maxWidth: 420 }}>{msg}</pre>} overlayStyle={{ maxWidth: 460 }}>
+          <Tooltip
+            title={<pre style={{ margin: 0, fontSize: 11, whiteSpace: "pre-wrap", maxWidth: 420 }}>{msg}</pre>}
+            overlayStyle={{ maxWidth: 460 }}
+          >
             <Text type="danger" style={{ fontSize: 12, cursor: "default" }}>{short}</Text>
           </Tooltip>
         );
       },
     },
   ];
-
-  const successCount  = (rows ?? []).filter((r) => r.lastRunState?.toUpperCase() === "SUCCEEDED").length;
-  const failedCount   = (rows ?? []).filter((r) => r.lastRunState?.toUpperCase() === "FAILED").length;
-  const runningCount  = (rows ?? []).filter((r) => r.lastRunState?.toUpperCase() === "RUNNING").length;
-  const neverCount    = (rows ?? []).filter((r) => !r.lastRunState).length;
 
   return (
     <Modal
@@ -254,14 +341,19 @@ export default function TaskStatusesModal({ db, schema, onClose }: Props) {
         </div>
       )}
 
-      {/* Table */}
+      {/* Table — tree when not searching, flat when searching */}
       {rows !== null && !error && (
         <Table
-          dataSource={filtered}
+          dataSource={displayData}
           columns={columns as any}
           rowKey="name"
           size="small"
-          pagination={filtered.length > 20 ? { pageSize: 20, showSizeChanger: false } : false}
+          expandable={
+            !search
+              ? { defaultExpandAllRows: true }
+              : undefined
+          }
+          pagination={allFlat.length > 50 ? { pageSize: 50, showSizeChanger: false } : false}
           rowClassName={(r) =>
             r.lastRunState?.toUpperCase() === "FAILED" ? "task-row-failed" : ""
           }
