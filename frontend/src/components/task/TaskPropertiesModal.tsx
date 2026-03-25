@@ -416,6 +416,15 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
     await alter(`REMOVE AFTER ${q1(taskName)}`);
   };
 
+  // ── Trigger presence check ──────────────────────────────────────────────────
+  // A task with none of SCHEDULE / AFTER / FINALIZE / WHEN has no trigger and
+  // will never run automatically.
+  const hasTrigger =
+    !!get("schedule") ||
+    predecessors.length > 0 ||
+    !!(get("finalize") || get("finalize_task")) ||
+    !!(get("condition") || get("condition_text"));
+
   // ── Overlap policy ────────────────────────────────────────────────────────
 
   // Snowflake may expose either `overlap_policy` (newer) or
@@ -482,6 +491,17 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
               </Text>
             )}
           </div>
+
+          {/* ── Trigger warning ──────────────────────────────────────────── */}
+          {!hasTrigger && (
+            <Alert
+              type="warning"
+              showIcon
+              message="No trigger configured"
+              description="This task has no SCHEDULE, AFTER predecessor, FINALIZE, or WHEN condition set — it will never run automatically."
+              style={{ marginBottom: 8 }}
+            />
+          )}
 
           {/* ── Read-only info ────────────────────────────────────────────── */}
           <div style={{ display: "flex", gap: 24, marginBottom: 4 }}>
