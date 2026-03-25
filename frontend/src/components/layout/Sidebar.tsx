@@ -69,6 +69,7 @@ import ImportTableModal from "../export/ImportTableModal";
 import PropertiesModal from "../common/PropertiesModal";
 import BackupSetsModal from "../backup/BackupSetsModal";
 import DependenciesModal from "../lineage/DependenciesModal";
+import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 
 const { Text } = Typography;
 
@@ -177,6 +178,8 @@ const DDL_CACHE_TTL = 60_000; // ms
 const ddlCache = new Map<string, { ddl: string; ts: number }>();
 
 // Keep only obj: nodes whose title matches the query; prune empty parents.
+// Parent task nodes (obj: keys with children) are included if any descendant
+// matches OR if the node's own title matches.
 function filterTree(nodes: DataNode[], query: string): DataNode[] {
   const lower = query.toLowerCase();
   return nodes.reduce<DataNode[]>((acc, node) => {
@@ -184,7 +187,8 @@ function filterTree(nodes: DataNode[], query: string): DataNode[] {
     const children = (node as any).children as DataNode[] | undefined;
     if (children !== undefined) {
       const filtered = filterTree(children, query);
-      if (filtered.length > 0) acc.push({ ...node, children: filtered });
+      const selfMatch = key.startsWith("obj:") && String(node.title).toLowerCase().includes(lower);
+      if (filtered.length > 0 || selfMatch) acc.push({ ...node, children: filtered });
     } else if (key.startsWith("obj:")) {
       if (String(node.title).toLowerCase().includes(lower)) acc.push(node);
     }
@@ -203,6 +207,59 @@ function getAllParentKeys(nodes: DataNode[]): Key[] {
     }
   }
   return keys;
+}
+
+// Build a hierarchical DataNode tree for TASK objects using predecessor relationships.
+// A task is nested under the first predecessor that also exists in this schema.
+// Tasks with no local predecessor are placed at the root.
+function buildTaskTree(
+  tasks: snowflake.SnowflakeObject[],
+  db: string,
+  schema: string,
+): DataNode[] {
+  const makeNode = (o: snowflake.SnowflakeObject, kids: DataNode[] = []): DataNode => ({
+    title:     o.name,
+    key:       `obj:${db}:${schema}:TASK:${o.name}`,
+    icon:      kindIcon("TASK"),
+    isLeaf:    kids.length === 0,
+    ...(kids.length > 0 ? { children: kids } : {}),
+  } as DataNode);
+
+  const byName = new Map<string, snowflake.SnowflakeObject>();
+  for (const t of tasks) byName.set(t.name.toUpperCase(), t);
+
+  const parentOf = new Map<string, string>();
+  const childrenOf = new Map<string, string[]>();
+
+  for (const t of tasks) {
+    const preds = parsePredecessors(t.predecessors ?? "");
+    const localParent = preds
+      .map((p) => extractName(p).toUpperCase())
+      .find((n) => byName.has(n));
+    if (localParent) {
+      parentOf.set(t.name.toUpperCase(), localParent);
+      if (!childrenOf.has(localParent)) childrenOf.set(localParent, []);
+      childrenOf.get(localParent)!.push(t.name);
+    }
+  }
+
+  const inTree = new Set<string>();
+
+  function buildSubTree(name: string): DataNode {
+    inTree.add(name.toUpperCase());
+    const task = byName.get(name.toUpperCase())!;
+    const kids = (childrenOf.get(name.toUpperCase()) ?? []).map(buildSubTree);
+    return makeNode(task, kids);
+  }
+
+  const result: DataNode[] = [];
+  for (const t of tasks) {
+    if (!parentOf.has(t.name.toUpperCase())) result.push(buildSubTree(t.name));
+  }
+  for (const t of tasks) {
+    if (!inTree.has(t.name.toUpperCase())) result.push(makeNode(t));
+  }
+  return result;
 }
 
 function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
@@ -527,14 +584,16 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           title:    KIND_LABEL[kind] ?? kind,
           key:      `type:${db}:${schema}:${kind}`,
           icon:     <FolderOutlined style={{ color: "var(--text-muted)" }} />,
-          children: groups[kind].map((o) => ({
-            title:     o.name,
-            key:       `obj:${db}:${schema}:${kind}:${o.name}`,
-            icon:      kindIcon(kind),
-            isLeaf:    true,
-            arguments: o.arguments ?? "",
-            rowCount:  o.rowCount,
-          })),
+          children: kind === "TASK"
+            ? buildTaskTree(groups[kind], db, schema)
+            : groups[kind].map((o) => ({
+                title:     o.name,
+                key:       `obj:${db}:${schema}:${kind}:${o.name}`,
+                icon:      kindIcon(kind),
+                isLeaf:    true,
+                arguments: o.arguments ?? "",
+                rowCount:  o.rowCount,
+              })),
         }));
 
         setData((prev) => updateNode(prev, key, typeNodes));

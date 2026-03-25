@@ -21,6 +21,7 @@ import {
 } from "@ant-design/icons";
 import { GetTaskStatuses } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
+import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 
 const { Text } = Typography;
 
@@ -33,29 +34,6 @@ interface Props {
 // Extend the row type with an optional children array for Ant Design tree table.
 interface TreeRow extends main.TaskStatusRow {
   children?: TreeRow[];
-}
-
-// ── Predecessor parsing ───────────────────────────────────────────────────────
-// SHOW TASKS returns predecessors as a string that may look like:
-//   ""                                              (no predecessors)
-//   "DB"."SCHEMA"."TASK1"                           (single, unquoted)
-//   ["DB"."SCHEMA"."TASK1","DB"."SCHEMA"."TASK2"]   (array-like)
-function parsePredecessors(raw: string): string[] {
-  if (!raw || raw === "[]") return [];
-  // Try JSON parse (handles proper JSON arrays)
-  try {
-    const arr = JSON.parse(raw);
-    if (Array.isArray(arr)) return arr.map(String);
-  } catch { /* fall through */ }
-  // Strip surrounding brackets if present then split on commas not inside quotes
-  const stripped = raw.replace(/^\[|\]$/g, "");
-  return stripped.split(",").map((s) => s.trim()).filter(Boolean);
-}
-
-// Extract the bare task name from a fully-qualified reference like "DB"."SCH"."TASK".
-function extractName(ref: string): string {
-  const parts = ref.split(".");
-  return parts[parts.length - 1].replace(/^"|"$/g, "");
 }
 
 // ── Tree builder ─────────────────────────────────────────────────────────────
@@ -195,10 +173,16 @@ export default function TaskStatusesModal({ db, schema, onClose }: Props) {
       title: "Task",
       dataIndex: "name",
       key: "name",
-      render: (name: string) => (
-        <Text style={{ fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace", fontSize: 12 }}>
-          {name}
-        </Text>
+      render: (name: string, record: TreeRow) => (
+        <div>
+          <Text style={{ fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace", fontSize: 12 }}>
+            {name}
+          </Text>
+          {/* TEMP DEBUG — remove once predecessor parsing is confirmed working */}
+          <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "monospace", wordBreak: "break-all" }}>
+            preds: {record.predecessors || "(empty)"}
+          </div>
+        </div>
       ),
     },
     {

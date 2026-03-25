@@ -68,6 +68,9 @@ type SnowflakeObject struct {
 	// SHOW OBJECTS. Nil means the count was unavailable (e.g. views, or
 	// when SHOW OBJECTS does not include a rows column).
 	RowCount  *int64 `json:"rowCount,omitempty"`
+	// Predecessors holds the raw predecessor string from SHOW TASKS.
+	// Only populated for TASK objects; empty for all other kinds.
+	Predecessors string `json:"predecessors,omitempty"`
 }
 
 // QueryResult is the serialisable result of a SQL query.
@@ -1711,7 +1714,7 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 	defer rows.Close()
 
 	cols, _ := rows.Columns()
-	nameIdx, kindIdx, argsIdx, builtinIdx, rowsIdx := -1, -1, -1, -1, -1
+	nameIdx, kindIdx, argsIdx, builtinIdx, rowsIdx, predsIdx := -1, -1, -1, -1, -1, -1
 	for i, col := range cols {
 		switch strings.ToLower(col) {
 		case "name":
@@ -1724,6 +1727,8 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 			builtinIdx = i
 		case "rows":
 			rowsIdx = i
+		case "predecessors", "predecessor":
+			predsIdx = i
 		}
 	}
 	if nameIdx < 0 {
@@ -1786,7 +1791,14 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 				rowCount = &n
 			}
 		}
-		objects = append(objects, SnowflakeObject{Name: name, Kind: kind, Schema: schema, Arguments: argTypes, RowCount: rowCount})
+		var preds string
+		if fixedKind == "TASK" && predsIdx >= 0 && vals[predsIdx] != nil {
+			raw := fmt.Sprintf("%v", vals[predsIdx])
+			if raw != "<nil>" {
+				preds = raw
+			}
+		}
+		objects = append(objects, SnowflakeObject{Name: name, Kind: kind, Schema: schema, Arguments: argTypes, RowCount: rowCount, Predecessors: preds})
 	}
 	return objects, rows.Err()
 }
