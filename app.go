@@ -2117,30 +2117,40 @@ func (a *App) GetTaskStatuses(database, schema string) (TaskStatusesResult, erro
 	}
 
 	// ── Step 2: fetch run history (best-effort) ───────────────────────────────
-	// Fetch rows ordered by SCHEDULED_TIME DESC and deduplicate in Go — this
-	// avoids ROW_NUMBER / QUALIFY which some Snowflake editions may reject inside
-	// a TABLE() function context.
-	safeSchema := strings.ReplaceAll(schema, "'", "''")
+	// Use SELECT * so we never hard-code column names — Snowflake editions differ
+	// on whether columns are called TASK_NAME/RUN_STATUS or NAME/STATE etc.
+	// Schema filtering and deduplication (most-recent run per task) are done in
+	// Go so no WHERE clause column names are assumed either.
+	// RESULT_LIMIT => 10000 gives us up to 10 000 recent runs across all tasks.
 	histSQL := fmt.Sprintf(
-		`SELECT TASK_NAME, RUN_STATUS, COMPLETED_TIME, EXCEPTION_TEXT`+
-			` FROM TABLE(%s.INFORMATION_SCHEMA.TASK_HISTORY(`+
-			`SCHEDULED_TIME_RANGE_START => DATEADD('day', -14, CURRENT_TIMESTAMP())))`+
-			` WHERE UPPER(TASK_SCHEMA) = UPPER('%s')`+
+		`SELECT * FROM TABLE(%s.INFORMATION_SCHEMA.TASK_HISTORY(`+
+			`SCHEDULED_TIME_RANGE_START => DATEADD('day', -14, CURRENT_TIMESTAMP()),`+
+			`RESULT_LIMIT => 10000))`+
 			` ORDER BY SCHEDULED_TIME DESC`,
-		q(database), safeSchema)
+		q(database))
 
 	histRes, histErr := a.client.Execute(a.ctx, histSQL)
 	if histErr != nil {
 		return TaskStatusesResult{Rows: rows, HistoryError: histErr.Error()}, nil
 	}
 
-	tnIdx := colIdx(histRes.Columns, "task_name")
-	rsIdx := colIdx(histRes.Columns, "run_status")
-	ctIdx := colIdx(histRes.Columns, "completed_time")
-	exIdx := colIdx(histRes.Columns, "exception_text")
+	// Locate columns by trying multiple known naming conventions.
+	tnIdx := colIdx(histRes.Columns, "task_name", "name")
+	rsIdx := colIdx(histRes.Columns, "run_status", "state", "status")
+	ctIdx := colIdx(histRes.Columns, "completed_time", "completion_time")
+	exIdx := colIdx(histRes.Columns, "exception_text", "error_message", "error_msg")
+	scIdx := colIdx(histRes.Columns, "task_schema", "schema_name", "schema")
 
 	seen := map[string]bool{} // tracks tasks already assigned their most-recent run
 	for _, row := range histRes.Rows {
+		// Filter to this schema in Go (avoids relying on the WHERE column name).
+		if scIdx >= 0 && scIdx < len(row) {
+			rowSchema := strings.ToUpper(toString(row[scIdx]))
+			if rowSchema != strings.ToUpper(schema) {
+				continue
+			}
+		}
+
 		taskName := ""
 		if tnIdx >= 0 && tnIdx < len(row) {
 			taskName = toString(row[tnIdx])
