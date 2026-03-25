@@ -2218,7 +2218,7 @@ func (a *App) EnableTaskDependents(database, schema, taskName string) error {
 	sq := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
 	fqn := fmt.Sprintf(`"%s"."%s"."%s"`, esc(database), esc(schema), esc(taskName))
 	_, err := a.client.Execute(a.ctx,
-		fmt.Sprintf(`SELECT SYSTEM$TASK_DEPENDENTS_ENABLE('%s', true)`, sq(fqn)))
+		fmt.Sprintf(`SELECT SYSTEM$TASK_DEPENDENTS_ENABLE('%s')`, sq(fqn)))
 	return err
 }
 

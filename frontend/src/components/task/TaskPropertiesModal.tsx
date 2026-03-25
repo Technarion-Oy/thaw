@@ -631,7 +631,7 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
                   ? "Cannot resume: task has no schedule, predecessor, finalize, or WHEN condition"
                   : isStarted
                   ? "Suspend this task first, then suspend all child tasks"
-                  : "Resume all child tasks first (SYSTEM$TASK_DEPENDENTS_ENABLE), then resume this task"}
+                  : "Resume all child tasks first via SYSTEM$TASK_DEPENDENTS_ENABLE, then resume this task"}
               >
                 {isStarted ? "Suspend with children" : "Resume with children"}
               </Button>
