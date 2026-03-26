@@ -2358,6 +2358,14 @@ func (a *App) GetTaskStatuses(database, schema string) (TaskStatusesResult, erro
 			return string(t)
 		case string:
 			return t
+		case time.Time:
+			// Use RFC3339 so JavaScript's Date constructor can parse it reliably.
+			// fmt.Sprintf("%v", t) produces "2006-01-02 15:04:05 +0000 UTC" which
+			// the V8 Date parser rejects due to the trailing " UTC" abbreviation.
+			if t.IsZero() {
+				return ""
+			}
+			return t.UTC().Format(time.RFC3339)
 		default:
 			return fmt.Sprintf("%v", t)
 		}
@@ -2433,11 +2441,17 @@ func (a *App) GetTaskStatuses(database, schema string) (TaskStatusesResult, erro
 	// Schema filtering and deduplication (most-recent run per task) are done in
 	// Go so no WHERE clause column names are assumed either.
 	// RESULT_LIMIT => 10000 gives us up to 10 000 recent runs across all tasks.
+	// Primary sort: SCHEDULED_TIME DESC NULLS FIRST so manually-triggered runs
+	// (EXECUTE TASK sets SCHEDULED_TIME = NULL) appear before older scheduled
+	// runs.  Secondary sort: COMPLETED_TIME DESC NULLS FIRST so that among
+	// multiple manual runs with the same NULL scheduled time the most recently
+	// completed entry wins the deduplication; a currently-executing run (NULL
+	// COMPLETED_TIME) floats to the very top via NULLS FIRST.
 	histSQL := fmt.Sprintf(
 		`SELECT * FROM TABLE(%s.INFORMATION_SCHEMA.TASK_HISTORY(`+
 			`SCHEDULED_TIME_RANGE_START => DATEADD('day', -7, CURRENT_TIMESTAMP()),`+
 			`RESULT_LIMIT => 10000))`+
-			` ORDER BY SCHEDULED_TIME DESC NULLS FIRST`,
+			` ORDER BY SCHEDULED_TIME DESC NULLS FIRST, COMPLETED_TIME DESC NULLS FIRST`,
 		q(database))
 
 	histRes, histErr := a.client.Execute(a.ctx, histSQL)
@@ -2449,10 +2463,33 @@ func (a *App) GetTaskStatuses(database, schema string) (TaskStatusesResult, erro
 	tnIdx := colIdx(histRes.Columns, "task_name", "name")
 	rsIdx := colIdx(histRes.Columns, "run_status", "state", "status")
 	ctIdx := colIdx(histRes.Columns, "completed_time", "completion_time")
+	qsIdx := colIdx(histRes.Columns, "query_start_time", "start_time")
 	exIdx := colIdx(histRes.Columns, "exception_text", "error_message", "error_msg")
 	scIdx := colIdx(histRes.Columns, "task_schema", "schema_name", "schema")
 
-	seen := map[string]bool{} // tracks tasks already assigned their most-recent run
+	// toTime extracts a time.Time from a raw column value (nil → zero time).
+	toTime := func(v interface{}) time.Time {
+		if v == nil {
+			return time.Time{}
+		}
+		if t, ok := v.(time.Time); ok {
+			return t
+		}
+		return time.Time{}
+	}
+
+	// best tracks the most-recently-executed run per task.
+	// sortKey = COMPLETED_TIME if non-zero, else QUERY_START_TIME.
+	// This ensures that graph-summary / never-started rows (both columns NULL)
+	// never shadow a real completed run, even if SQL ORDER BY puts them first.
+	type bestEntry struct {
+		sortKey  time.Time
+		runState string
+		runTime  string
+		errorMsg string
+	}
+	best := map[string]bestEntry{}
+
 	for _, row := range histRes.Rows {
 		// Filter to this schema in Go (avoids relying on the WHERE column name).
 		if scIdx >= 0 && scIdx < len(row) {
@@ -2467,23 +2504,52 @@ func (a *App) GetTaskStatuses(database, schema string) (TaskStatusesResult, erro
 			taskName = toString(row[tnIdx])
 		}
 		upper := strings.ToUpper(taskName)
-		if seen[upper] {
-			continue // already captured the most-recent run (rows are DESC)
+		if _, ok := nameMap[upper]; !ok {
+			continue
 		}
+
+		// Compute recency key: prefer COMPLETED_TIME, fall back to QUERY_START_TIME.
+		var completedAt, queryStartAt time.Time
+		if ctIdx >= 0 && ctIdx < len(row) {
+			completedAt = toTime(row[ctIdx])
+		}
+		if qsIdx >= 0 && qsIdx < len(row) {
+			queryStartAt = toTime(row[qsIdx])
+		}
+		sortKey := completedAt
+		if sortKey.IsZero() {
+			sortKey = queryStartAt
+		}
+
+		prev, hasPrev := best[upper]
+		// Accept this row if:
+		//   • no previous entry exists, OR
+		//   • this row has a non-zero sortKey and it's newer than the previous one.
+		// A zero-sortKey row (meta/summary entry) only wins if nothing else exists.
+		if !hasPrev || (!sortKey.IsZero() && sortKey.After(prev.sortKey)) {
+			e := bestEntry{sortKey: sortKey}
+			if rsIdx >= 0 && rsIdx < len(row) {
+				e.runState = toString(row[rsIdx])
+			}
+			if ctIdx >= 0 && ctIdx < len(row) {
+				e.runTime = toString(row[ctIdx])
+			}
+			if exIdx >= 0 && exIdx < len(row) {
+				e.errorMsg = toString(row[exIdx])
+			}
+			best[upper] = e
+		}
+	}
+
+	// Write best entries into the result rows.
+	for upper, e := range best {
 		idx, ok := nameMap[upper]
 		if !ok {
 			continue
 		}
-		seen[upper] = true
-		if rsIdx >= 0 && rsIdx < len(row) {
-			rows[idx].LastRunState = toString(row[rsIdx])
-		}
-		if ctIdx >= 0 && ctIdx < len(row) {
-			rows[idx].LastRunTime = toString(row[ctIdx])
-		}
-		if exIdx >= 0 && exIdx < len(row) {
-			rows[idx].ErrorMsg = toString(row[exIdx])
-		}
+		rows[idx].LastRunState = e.runState
+		rows[idx].LastRunTime = e.runTime
+		rows[idx].ErrorMsg = e.errorMsg
 	}
 
 	return TaskStatusesResult{Rows: rows}, nil

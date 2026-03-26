@@ -36,7 +36,7 @@ import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 const { Text } = Typography;
 
 const NODE_W = 200;
-const NODE_H = 82;
+const NODE_H = 96;
 const POLL_MS = 3_000;
 
 // ── Status tags ───────────────────────────────────────────────────────────────
@@ -93,19 +93,44 @@ function computeSkippedNodes(byName: Map<string, main.TaskStatusRow>): Set<strin
   return skipped;
 }
 
+// ── Timestamp formatting ──────────────────────────────────────────────────────
+// lastRunTime arrives as RFC3339 (e.g. "2024-01-15T10:30:00Z") after the Go
+// toString fix. Shows HH:MM:SS for today, "Jan 15 HH:MM" for other days.
+
+function formatRunTime(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  return isToday
+    ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    : d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " +
+      d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 // ── Node label (module-level so it can be called during polling) ──────────────
 // overrideRunState replaces lastRunState for display purposes (e.g. "WAITING",
 // inferred "SKIPPED"). Pass undefined to use the real value.
 
 function buildLabel(t: main.TaskStatusRow, isRoot: boolean, overrideRunState?: string) {
-  const started = t.taskState?.toUpperCase() === "STARTED";
+  const started      = t.taskState?.toUpperCase() === "STARTED";
+  const effectiveState = (overrideRunState ?? t.lastRunState ?? "").toUpperCase();
+  // Show timestamp for terminal states; suppress for Waiting/never-run/executing.
+  const showTime     = !!t.lastRunTime &&
+    effectiveState !== "WAITING" &&
+    effectiveState !== "EXECUTING" &&
+    effectiveState !== "RUNNING" &&
+    effectiveState !== "SCHEDULED" &&
+    effectiveState !== "";
+  const timeLabel    = showTime ? formatRunTime(t.lastRunTime!) : null;
+
   return (
     <div style={{ textAlign: "center", lineHeight: 1.3 }}>
       <div style={{
         fontFamily: "monospace", fontSize: 11,
         fontWeight: isRoot ? 700 : 400,
         color: "var(--text)",
-        marginBottom: 5,
+        marginBottom: 4,
         wordBreak: "break-all",
       }}>
         {t.name}
@@ -119,6 +144,11 @@ function buildLabel(t: main.TaskStatusRow, isRoot: boolean, overrideRunState?: s
         </Tag>
         {runStateTag(overrideRunState ?? t.lastRunState ?? "")}
       </div>
+      {timeLabel && (
+        <div style={{ fontSize: 10, color: "var(--text-faint)", marginTop: 3 }}>
+          {timeLabel}
+        </div>
+      )}
     </div>
   );
 }
