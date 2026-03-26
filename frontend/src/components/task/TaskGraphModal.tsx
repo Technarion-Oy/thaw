@@ -10,7 +10,10 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Modal, Spin, Button, Space, Typography, Alert, Tag } from "antd";
-import { ClockCircleOutlined, ReloadOutlined } from "@ant-design/icons";
+import {
+  CheckCircleOutlined, CloseCircleOutlined, SyncOutlined,
+  MinusCircleOutlined, ClockCircleOutlined, ReloadOutlined,
+} from "@ant-design/icons";
 import {
   ReactFlow,
   Background,
@@ -31,7 +34,20 @@ import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 const { Text } = Typography;
 
 const NODE_W = 200;
-const NODE_H = 64;
+const NODE_H = 82;
+
+function runStateTag(state: string) {
+  const s = (state ?? "").toUpperCase();
+  switch (s) {
+    case "SUCCEEDED": return <Tag icon={<CheckCircleOutlined />}  color="success" style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}>Succeeded</Tag>;
+    case "FAILED":    return <Tag icon={<CloseCircleOutlined />}  color="error"   style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}>Failed</Tag>;
+    case "RUNNING":   return <Tag icon={<SyncOutlined spin />}    color="processing" style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}>Running</Tag>;
+    case "SKIPPED":   return <Tag icon={<MinusCircleOutlined />}  color="gold"    style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}>Skipped</Tag>;
+    case "CANCELLED":
+    case "CANCELED":  return <Tag icon={<MinusCircleOutlined />}  color="default" style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}>Cancelled</Tag>;
+    default:          return <Tag color="default" style={{ fontSize: 10, margin: 0, lineHeight: 1.6, color: "var(--text-faint)", fontStyle: "italic" }}>Never run</Tag>;
+  }
+}
 
 // ── Dagre layout ──────────────────────────────────────────────────────────────
 
@@ -117,12 +133,15 @@ function buildGraph(tasks: main.TaskStatusRow[], focusedName: string) {
             }}>
               {t.name}
             </div>
-            <Tag
-              color={started ? "success" : "default"}
-              style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}
-            >
-              {t.taskState || "UNKNOWN"}
-            </Tag>
+            <div style={{ display: "flex", gap: 4, justifyContent: "center", flexWrap: "wrap" }}>
+              <Tag
+                color={started ? "success" : "default"}
+                style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}
+              >
+                {t.taskState || "UNKNOWN"}
+              </Tag>
+              {runStateTag(t.lastRunState ?? "")}
+            </div>
           </div>
         ),
       },
