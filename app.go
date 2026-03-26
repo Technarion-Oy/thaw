@@ -2437,7 +2437,7 @@ func (a *App) GetTaskStatuses(database, schema string) (TaskStatusesResult, erro
 		`SELECT * FROM TABLE(%s.INFORMATION_SCHEMA.TASK_HISTORY(`+
 			`SCHEDULED_TIME_RANGE_START => DATEADD('day', -7, CURRENT_TIMESTAMP()),`+
 			`RESULT_LIMIT => 10000))`+
-			` ORDER BY SCHEDULED_TIME DESC`,
+			` ORDER BY SCHEDULED_TIME DESC NULLS FIRST`,
 		q(database))
 
 	histRes, histErr := a.client.Execute(a.ctx, histSQL)

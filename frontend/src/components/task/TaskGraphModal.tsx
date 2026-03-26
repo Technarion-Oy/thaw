@@ -8,16 +8,18 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useEffect, useCallback } from "react";
-import { Modal, Spin, Button, Space, Typography, Alert, Tag } from "antd";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Modal, Spin, Button, Space, Typography, Alert, Tag, message, Tooltip } from "antd";
 import {
   CheckCircleOutlined, CloseCircleOutlined, SyncOutlined,
   MinusCircleOutlined, ClockCircleOutlined, ReloadOutlined,
+  CaretRightOutlined, RedoOutlined,
 } from "@ant-design/icons";
 import {
   ReactFlow,
   Background,
   Controls,
+  Panel,
   useNodesState,
   useEdgesState,
   Position,
@@ -27,7 +29,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import dagre from "@dagrejs/dagre";
-import { GetTaskStatuses } from "../../../wailsjs/go/main/App";
+import { GetTaskStatuses, ExecuteTask } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 
@@ -35,18 +37,90 @@ const { Text } = Typography;
 
 const NODE_W = 200;
 const NODE_H = 82;
+const POLL_MS = 3_000;
+
+// ── Status tags ───────────────────────────────────────────────────────────────
 
 function runStateTag(state: string) {
   const s = (state ?? "").toUpperCase();
   switch (s) {
-    case "SUCCEEDED": return <Tag icon={<CheckCircleOutlined />}  color="success" style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}>Succeeded</Tag>;
-    case "FAILED":    return <Tag icon={<CloseCircleOutlined />}  color="error"   style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}>Failed</Tag>;
-    case "RUNNING":   return <Tag icon={<SyncOutlined spin />}    color="processing" style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}>Running</Tag>;
-    case "SKIPPED":   return <Tag icon={<MinusCircleOutlined />}  color="gold"    style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}>Skipped</Tag>;
+    case "SUCCEEDED": return <Tag icon={<CheckCircleOutlined />}  color="success"    style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}>Succeeded</Tag>;
+    case "FAILED":
+    case "FAILED_AND_AUTO_SUSPENDED":
+                      return <Tag icon={<CloseCircleOutlined />}  color="error"      style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}>Failed</Tag>;
+    case "RUNNING":
+    case "EXECUTING": return <Tag icon={<SyncOutlined spin />}    color="processing" style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}>Running</Tag>;
+    case "SCHEDULED": return <Tag icon={<ClockCircleOutlined />}  color="processing" style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}>Scheduled</Tag>;
+    case "SKIPPED":   return <Tag icon={<MinusCircleOutlined />}  color="gold"       style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}>Skipped</Tag>;
     case "CANCELLED":
-    case "CANCELED":  return <Tag icon={<MinusCircleOutlined />}  color="default" style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}>Cancelled</Tag>;
+    case "CANCELED":  return <Tag icon={<MinusCircleOutlined />}  color="default"    style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}>Cancelled</Tag>;
+    case "WAITING":   return <Tag color="default" style={{ fontSize: 10, margin: 0, lineHeight: 1.6, color: "var(--text-faint)", fontStyle: "italic" }}>Waiting…</Tag>;
     default:          return <Tag color="default" style={{ fontSize: 10, margin: 0, lineHeight: 1.6, color: "var(--text-faint)", fontStyle: "italic" }}>Never run</Tag>;
   }
+}
+
+// ── Infer SKIPPED state from predecessor failures ─────────────────────────────
+// Snowflake may not create a TASK_HISTORY row for tasks skipped because a
+// predecessor failed. This does a fixed-point walk so transitive skips also
+// propagate (e.g. task_d depends on task_c which was skipped).
+// A task is NOT inferred as skipped if it is currently executing/scheduled/
+// has already succeeded in this round.
+
+const ACTIVE_STATES = new Set(["EXECUTING", "RUNNING", "SCHEDULED", "SUCCEEDED"]);
+
+function computeSkippedNodes(byName: Map<string, main.TaskStatusRow>): Set<string> {
+  const skipped = new Set<string>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const t of byName.values()) {
+      const upper = t.name.toUpperCase();
+      if (skipped.has(upper)) continue;
+      if (ACTIVE_STATES.has((t.lastRunState ?? "").toUpperCase())) continue;
+      for (const p of parsePredecessors(t.predecessors ?? "")) {
+        const pu = extractName(p).toUpperCase();
+        const pred = byName.get(pu);
+        if (!pred) continue;
+        const ps = (pred.lastRunState ?? "").toUpperCase();
+        if (ps === "FAILED" || ps === "FAILED_AND_AUTO_SUSPENDED" || skipped.has(pu)) {
+          skipped.add(upper);
+          changed = true;
+          break;
+        }
+      }
+    }
+  }
+  return skipped;
+}
+
+// ── Node label (module-level so it can be called during polling) ──────────────
+// overrideRunState replaces lastRunState for display purposes (e.g. "WAITING",
+// inferred "SKIPPED"). Pass undefined to use the real value.
+
+function buildLabel(t: main.TaskStatusRow, isRoot: boolean, overrideRunState?: string) {
+  const started = t.taskState?.toUpperCase() === "STARTED";
+  return (
+    <div style={{ textAlign: "center", lineHeight: 1.3 }}>
+      <div style={{
+        fontFamily: "monospace", fontSize: 11,
+        fontWeight: isRoot ? 700 : 400,
+        color: "var(--text)",
+        marginBottom: 5,
+        wordBreak: "break-all",
+      }}>
+        {t.name}
+      </div>
+      <div style={{ display: "flex", gap: 4, justifyContent: "center", flexWrap: "wrap" }}>
+        <Tag
+          color={started ? "success" : "default"}
+          style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}
+        >
+          {t.taskState || "UNKNOWN"}
+        </Tag>
+        {runStateTag(overrideRunState ?? t.lastRunState ?? "")}
+      </div>
+    </div>
+  );
 }
 
 // ── Dagre layout ──────────────────────────────────────────────────────────────
@@ -72,7 +146,8 @@ function buildGraph(tasks: main.TaskStatusRow[], focusedName: string) {
   const byName = new Map<string, main.TaskStatusRow>();
   tasks.forEach((t) => byName.set(t.name.toUpperCase(), t));
 
-  // parent-of and children-of maps (UPPER-CASED keys)
+  const skippedNodes = computeSkippedNodes(byName);
+
   const childrenOf = new Map<string, string[]>();
   const parentOf   = new Map<string, string>();
 
@@ -86,7 +161,7 @@ function buildGraph(tasks: main.TaskStatusRow[], focusedName: string) {
     }
   });
 
-  // Walk up from the focused task to find the root of this graph.
+  // Walk up from the focused task to find the root.
   let rootUpper = focusedName.toUpperCase();
   while (parentOf.has(rootUpper)) rootUpper = parentOf.get(rootUpper)!;
 
@@ -102,8 +177,8 @@ function buildGraph(tasks: main.TaskStatusRow[], focusedName: string) {
     }
   }
 
-  const focusedUpper  = focusedName.toUpperCase();
-  const rootTaskName  = byName.get(rootUpper)?.name ?? focusedName;
+  const focusedUpper = focusedName.toUpperCase();
+  const rootTaskName = byName.get(rootUpper)?.name ?? focusedName;
 
   const nodes: Node[] = [];
   const edges: Edge[] = [];
@@ -114,45 +189,19 @@ function buildGraph(tasks: main.TaskStatusRow[], focusedName: string) {
 
     const isRoot    = upper === rootUpper;
     const isFocused = upper === focusedUpper && upper !== rootUpper;
-    const started   = t.taskState?.toUpperCase() === "STARTED";
 
     nodes.push({
       id: t.name,
-      position: { x: 0, y: 0 }, // overwritten by dagre
+      position: { x: 0, y: 0 },
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
-      data: {
-        label: (
-          <div style={{ textAlign: "center", lineHeight: 1.3 }}>
-            <div style={{
-              fontFamily: "monospace", fontSize: 11,
-              fontWeight: isRoot ? 700 : 400,
-              color: "var(--text)",
-              marginBottom: 5,
-              wordBreak: "break-all",
-            }}>
-              {t.name}
-            </div>
-            <div style={{ display: "flex", gap: 4, justifyContent: "center", flexWrap: "wrap" }}>
-              <Tag
-                color={started ? "success" : "default"}
-                style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}
-              >
-                {t.taskState || "UNKNOWN"}
-              </Tag>
-              {runStateTag(t.lastRunState ?? "")}
-            </div>
-          </div>
-        ),
-      },
+      data: { label: buildLabel(t, isRoot, skippedNodes.has(upper) ? "SKIPPED" : undefined) },
       style: {
         background: isFocused
           ? "var(--accent-bg, #1c3a5e)"
           : "var(--bg-overlay, #252526)",
         border: `1.5px solid ${
-          isRoot    ? "var(--link, #4d9ef7)"
-          : isFocused ? "var(--link, #4d9ef7)"
-          : "var(--border, #444)"
+          isRoot || isFocused ? "var(--link, #4d9ef7)" : "var(--border, #444)"
         }`,
         borderRadius: 8,
         width: NODE_W,
@@ -165,7 +214,6 @@ function buildGraph(tasks: main.TaskStatusRow[], focusedName: string) {
       },
     });
 
-    // One edge per child
     for (const child of childrenOf.get(upper) ?? []) {
       if (!included.has(child.toUpperCase())) continue;
       edges.push({
@@ -179,7 +227,7 @@ function buildGraph(tasks: main.TaskStatusRow[], focusedName: string) {
     }
   });
 
-  return { nodes, edges, rootTaskName };
+  return { nodes, edges, rootTaskName, childrenOf };
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -192,12 +240,21 @@ export interface TaskGraphModalProps {
 }
 
 export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGraphModalProps) {
-  const [loading,   setLoading]   = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [rootName,  setRootName]  = useState(taskName);
+  const [loading,    setLoading]    = useState(true);
+  const [loadError,  setLoadError]  = useState<string | null>(null);
+  const [rootName,   setRootName]   = useState(taskName);
+  const [executing,  setExecuting]  = useState(false);
+  const [retrying,   setRetrying]   = useState(false);
+  const [lastPollAt, setLastPollAt] = useState<Date | null>(null);
+  const [taskRows,   setTaskRows]   = useState<main.TaskStatusRow[]>([]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+
+  // Stable refs so the polling closure doesn't go stale.
+  const rootNameRef  = useRef(taskName);
+  const rootUpperRef = useRef<string>("");
+  const taskRowsRef  = useRef<main.TaskStatusRow[]>([]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -205,15 +262,121 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
     GetTaskStatuses(db, schema)
       .then((r) => {
         const { nodes: n, edges: e, rootTaskName } = buildGraph(r.rows ?? [], taskName);
+        rootNameRef.current  = rootTaskName;
+        rootUpperRef.current = rootTaskName.toUpperCase();
         setRootName(rootTaskName);
         setNodes(applyLayout(n, e));
         setEdges(e);
+        taskRowsRef.current = r.rows ?? [];
+        setTaskRows(r.rows ?? []);
+        setLastPollAt(new Date());
       })
       .catch((err) => setLoadError(String(err)))
       .finally(() => setLoading(false));
   }, [db, schema, taskName]);
 
   useEffect(() => { load(); }, [load]);
+
+  // ── Live polling ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (loading || loadError) return;
+
+    const id = setInterval(() => {
+      GetTaskStatuses(db, schema)
+        .then((r) => {
+          const rows = r.rows ?? [];
+          const byName = new Map<string, main.TaskStatusRow>();
+          rows.forEach((t) => byName.set(t.name.toUpperCase(), t));
+
+          const rootUpper  = rootUpperRef.current;
+          const skipped    = computeSkippedNodes(byName);
+
+          setNodes((prev) =>
+            prev.map((n) => {
+              const t = byName.get(n.id.toUpperCase());
+              if (!t) return n;
+              const isRoot       = n.id.toUpperCase() === rootUpper;
+              const overrideState = skipped.has(n.id.toUpperCase()) ? "SKIPPED" : undefined;
+              return { ...n, data: { ...n.data, label: buildLabel(t, isRoot, overrideState) } };
+            })
+          );
+          taskRowsRef.current = rows;
+          setTaskRows(rows);
+          setLastPollAt(new Date());
+        })
+        .catch(() => { /* silently ignore poll errors */ });
+    }, POLL_MS);
+
+    return () => clearInterval(id);
+  }, [loading, loadError, db, schema]);
+
+  // ── Execute root task ─────────────────────────────────────────────────────
+  const runGraph = useCallback(() => {
+    setExecuting(true);
+    ExecuteTask(db, schema, rootNameRef.current, "", false)
+      .then(() => {
+        message.success(`Task graph started: ${rootNameRef.current}`);
+        // Optimistically mark all child nodes as "Waiting" so stale states
+        // don't linger. The polling loop will replace these with real states.
+        const rootUpper = rootUpperRef.current;
+        const rows      = taskRowsRef.current;
+        setNodes((prev) =>
+          prev.map((n) => {
+            if (n.id.toUpperCase() === rootUpper) return n;
+            const t = rows.find((r) => r.name.toUpperCase() === n.id.toUpperCase());
+            if (!t) return n;
+            return { ...n, data: { ...n.data, label: buildLabel(t, false, "WAITING") } };
+          })
+        );
+      })
+      .catch((err) => {
+        message.error(String(err));
+      })
+      .finally(() => setExecuting(false));
+  }, [db, schema]);
+
+  // ── Retry last failed graph run (root task only) ─────────────────────────
+  const retryFailed = useCallback(async () => {
+    setRetrying(true);
+    try {
+      await ExecuteTask(db, schema, rootNameRef.current, "", true);
+      message.success(`Retrying last failed run of ${rootNameRef.current}`);
+    } catch (err) {
+      message.error(String(err));
+    } finally {
+      setRetrying(false);
+    }
+  }, [db, schema]);
+
+  // ── Retry eligibility (mirrors Snowflake's RETRY LAST conditions) ────────
+  // A graph run is considered failed if ANY task in it failed — the root task
+  // itself may have succeeded while a child task failed.
+  const graphNames      = new Set(nodes.map((n) => n.id.toUpperCase()));
+  const failedGraphRows = taskRows.filter((t) => {
+    const s = (t.lastRunState ?? "").toUpperCase();
+    return graphNames.has(t.name.toUpperCase()) &&
+      (s === "FAILED" || s === "FAILED_AND_AUTO_SUSPENDED" ||
+       s === "CANCELED" || s === "CANCELLED");
+  });
+  const graphRunFailed  = failedGraphRows.length > 0;
+  // 14-day window: measure from the most recently failed/cancelled task.
+  const mostRecentFailMs = failedGraphRows
+    .map((t) => new Date(t.lastRunTime ?? "").getTime())
+    .filter((ms) => !isNaN(ms))
+    .reduce((max, ms) => Math.max(max, ms), 0);
+  const within14Days    = mostRecentFailMs > 0 &&
+    Date.now() - mostRecentFailMs < 14 * 24 * 60 * 60 * 1000;
+  const canRetry        = graphRunFailed && within14Days;
+  const retryTooltip    = !graphRunFailed
+    ? "Last graph run did not fail or get cancelled"
+    : !within14Days
+    ? "Last failed run was more than 14 days ago"
+    : `Retry last failed run of ${rootName}`;
+
+  // ── Formatted last-updated ────────────────────────────────────────────────
+  const lastUpdatedLabel = lastPollAt
+    ? lastPollAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    : null;
 
   return (
     <Modal
@@ -263,6 +426,55 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
         >
           <Background color="var(--border)" gap={20} />
           <Controls showInteractive={false} />
+
+          {/* ── Top-right toolbar ──────────────────────────────────────── */}
+          <Panel position="top-right">
+            <Space direction="vertical" size={6} style={{ alignItems: "flex-end" }}>
+              <Space size={6}>
+                <Tooltip title={`Execute root task: ${rootName}`}>
+                  <Button
+                    type="primary"
+                    icon={<CaretRightOutlined />}
+                    loading={executing}
+                    onClick={runGraph}
+                    size="small"
+                  >
+                    Run Graph
+                  </Button>
+                </Tooltip>
+                <Tooltip title={retryTooltip}>
+                  <Button
+                    danger
+                    icon={<RedoOutlined />}
+                    loading={retrying}
+                    disabled={!canRetry}
+                    onClick={retryFailed}
+                    size="small"
+                  >
+                    Retry Failed
+                  </Button>
+                </Tooltip>
+              </Space>
+              {lastUpdatedLabel && (
+                <Text
+                  type="secondary"
+                  style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 4 }}
+                >
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      background: "#52c41a",
+                      animation: "pulse 2s ease-in-out infinite",
+                    }}
+                  />
+                  Live · {lastUpdatedLabel}
+                </Text>
+              )}
+            </Space>
+          </Panel>
         </ReactFlow>
       )}
     </Modal>
