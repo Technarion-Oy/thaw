@@ -61,6 +61,7 @@ import ExecuteNotebookModal from "../notebook/ExecuteNotebookModal";
 import SelectFunctionModal from "../function/SelectFunctionModal";
 import CreateTaskModal from "../task/CreateTaskModal";
 import ExecuteTaskModal from "../task/ExecuteTaskModal";
+import TaskGraphModal from "../task/TaskGraphModal";
 import TaskPropertiesModal from "../task/TaskPropertiesModal";
 import TaskStatusesModal from "../task/TaskStatusesModal";
 import ERDiagramModal from "../er/ERDiagramModal";
@@ -358,6 +359,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [createTaskModal, setCreateTaskModal] = useState<{ db: string; schema: string } | null>(null);
   const [executeTaskModal, setExecuteTaskModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [taskPropsModal, setTaskPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [taskGraphModal, setTaskGraphModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [taskStatusesModal, setTaskStatusesModal] = useState<{ db: string; schema: string } | null>(null);
   const [undropModal, setUndropModal] = useState<UndropModal | null>(null);
   const [undropSchemasModal, setUndropSchemasModal] = useState<UndropSchemasModal | null>(null);
@@ -755,6 +757,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const name = nameParts.join(":");
     setCtxMenu(null);
     setExecuteTaskModal({ db, schema, name });
+  };
+
+  const openTaskGraph = () => {
+    if (!ctxMenu) return;
+    const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
+    const name = nameParts.join(":");
+    setCtxMenu(null);
+    setTaskGraphModal({ db, schema, name });
   };
 
   const openCreateTask = () => {
@@ -1388,6 +1398,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TASK" &&
             menuItem("Execute Task", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeTask)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TASK" &&
+            menuItem("View Task Graph…", <ShareAltOutlined style={{ fontSize: 12 }} />, openTaskGraph)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PROCEDURE" &&
             menuItem("Call Procedure", <PlayCircleOutlined style={{ fontSize: 12 }} />, callProcedure)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "FUNCTION" &&
@@ -1482,6 +1494,16 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={taskPropsModal.schema}
           name={taskPropsModal.name}
           onClose={() => setTaskPropsModal(null)}
+        />
+      )}
+
+      {/* Task Graph modal */}
+      {taskGraphModal && (
+        <TaskGraphModal
+          db={taskGraphModal.db}
+          schema={taskGraphModal.schema}
+          taskName={taskGraphModal.name}
+          onClose={() => setTaskGraphModal(null)}
         />
       )}
 
