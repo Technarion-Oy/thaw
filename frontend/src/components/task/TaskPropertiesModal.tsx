@@ -717,7 +717,11 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
                   Schedule
                 </td>
                 <td style={{ padding: "6px 0" }}>
-                  {!schedEditing ? (
+                  {predecessors.length > 0 ? (
+                    <span style={{ fontSize: 12, color: "var(--text-faint)", fontStyle: "italic" }}>
+                      Not available — child tasks cannot have a schedule
+                    </span>
+                  ) : !schedEditing ? (
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <span style={{
                         fontFamily: "monospace", fontSize: 12, flex: 1, wordBreak: "break-word",
