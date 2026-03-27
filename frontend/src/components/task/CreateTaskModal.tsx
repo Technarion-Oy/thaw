@@ -135,7 +135,7 @@ function buildSql(db: string, schema: string, cfg: TaskConfig): string {
   // Other
   if (cfg.logLevel) lines.push(`    LOG_LEVEL = '${cfg.logLevel}'`);
   if (cfg.comment.trim()) lines.push(`    COMMENT = '${cfg.comment.trim().replace(/'/g, "''")}'`);
-  if (cfg.finalize.trim()) lines.push(`    FINALIZE = ${cfg.finalize.trim()}`);
+  if (cfg.finalize.trim()) lines.push(`    FINALIZE = "${esc(cfg.finalize.trim())}"`);
 
   // AFTER — each entry is a bare task name in this db/schema; emit fully-qualified
   if (cfg.after.length > 0) {
