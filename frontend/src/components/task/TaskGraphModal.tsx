@@ -31,7 +31,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import dagre from "@dagrejs/dagre";
-import { GetTaskStatuses, ExecuteTask, AlterTask, DropTaskTree, ExecDDL, SuspendTaskGraph, EnableTaskDependents } from "../../../wailsjs/go/main/App";
+import { GetTaskStatuses, ExecuteTask, AlterTask, DropTaskTree, ExecDDL, SuspendTaskGraph, EnableTaskDependents, GetObjectDDL } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 import CreateTaskModal from "./CreateTaskModal";
@@ -41,6 +41,10 @@ const { Text } = Typography;
 const NODE_W = 200;
 const NODE_H = 96;
 const POLL_MS = 3_000;
+
+// Module-level DDL cache — same 60 s TTL pattern used by SqlEditor hover.
+const taskDDLCache = new Map<string, { ddl: string; ts: number }>();
+const DDL_TTL_MS = 60_000;
 
 // ── Status tags ───────────────────────────────────────────────────────────────
 
@@ -370,6 +374,12 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
   const [togglingTask, setTogglingTask] = useState<string | null>(null);
   const [togglingAll,  setTogglingAll]  = useState(false);
 
+  // DDL hover tooltip: fixed-position overlay shown while hovering a node.
+  const [ddlTooltip, setDdlTooltip] = useState<{
+    x: number; y: number; nodeId: string; ddl: string | null; // null = loading
+  } | null>(null);
+  const ddlHoverNode = useRef<string | null>(null); // tracks current hover to discard stale fetches
+
   // Right-click context menu state: viewport-relative position + target task info.
   const [ctxMenu, setCtxMenu] = useState<{
     x: number; y: number; name: string; taskState: string; isFinalizer: boolean;
@@ -517,6 +527,34 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
     setCtxMenu({ x: event.clientX, y: event.clientY, name: t.name, taskState: t.taskState ?? "", isFinalizer });
   }, []);
 
+  const onNodeMouseEnter = useCallback((event: React.MouseEvent, node: Node) => {
+    const id = node.id;
+    ddlHoverNode.current = id;
+    const cached = taskDDLCache.get(id.toUpperCase());
+    if (cached && Date.now() - cached.ts < DDL_TTL_MS) {
+      setDdlTooltip({ x: event.clientX, y: event.clientY, nodeId: id, ddl: cached.ddl });
+      return;
+    }
+    setDdlTooltip({ x: event.clientX, y: event.clientY, nodeId: id, ddl: null });
+    GetObjectDDL(db, schema, "task", id, "")
+      .then((ddl) => {
+        taskDDLCache.set(id.toUpperCase(), { ddl, ts: Date.now() });
+        if (ddlHoverNode.current === id) {
+          setDdlTooltip((prev) => prev?.nodeId === id ? { ...prev, ddl } : prev);
+        }
+      })
+      .catch(() => {
+        if (ddlHoverNode.current === id) {
+          setDdlTooltip((prev) => prev?.nodeId === id ? { ...prev, ddl: "" } : prev);
+        }
+      });
+  }, [db, schema]);
+
+  const onNodeMouseLeave = useCallback(() => {
+    ddlHoverNode.current = null;
+    setDdlTooltip(null);
+  }, []);
+
   const toggleTask = useCallback(async (name: string, action: "SUSPEND" | "RESUME") => {
     setCtxMenu(null);
     setTogglingTask(name);
@@ -627,6 +665,8 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onNodeContextMenu={onNodeCtxMenu}
+          onNodeMouseEnter={onNodeMouseEnter}
+          onNodeMouseLeave={onNodeMouseLeave}
           onPaneClick={() => setCtxMenu(null)}
           onNodeClick={() => setCtxMenu(null)}
           fitView
@@ -783,6 +823,47 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
           </Modal>
         );
       })()}
+
+      {/* ── DDL hover tooltip ────────────────────────────────────────────── */}
+      {ddlTooltip && (
+        <div
+          style={{
+            position: "fixed",
+            left: ddlTooltip.x + 16,
+            top: ddlTooltip.y + 16,
+            zIndex: 9999,
+            maxWidth: 520,
+            maxHeight: 340,
+            overflow: "auto",
+            background: "var(--bg-overlay, #1e1e1e)",
+            border: "1px solid var(--border, #555)",
+            borderRadius: 6,
+            padding: "8px 12px",
+            boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+            pointerEvents: "none",
+          }}
+        >
+          {ddlTooltip.ddl === null ? (
+            <Space size={6} style={{ color: "var(--text-faint)", fontSize: 12 }}>
+              <Spin size="small" />
+              <span>Loading DDL…</span>
+            </Space>
+          ) : ddlTooltip.ddl === "" ? (
+            <Text type="secondary" style={{ fontSize: 12 }}>DDL unavailable</Text>
+          ) : (
+            <pre style={{
+              margin: 0,
+              fontSize: 11,
+              fontFamily: "monospace",
+              whiteSpace: "pre",
+              color: "var(--text)",
+              lineHeight: 1.5,
+            }}>
+              {ddlTooltip.ddl}
+            </pre>
+          )}
+        </div>
+      )}
 
       {/* ── Node right-click context menu ────────────────────────────────── */}
 
