@@ -60,13 +60,20 @@ function runStateTag(state: string) {
 }
 
 // ── Infer SKIPPED state from predecessor failures ─────────────────────────────
-// Snowflake may not create a TASK_HISTORY row for tasks skipped because a
-// predecessor failed. This does a fixed-point walk so transitive skips also
-// propagate (e.g. task_d depends on task_c which was skipped).
-// A task is NOT inferred as skipped if it is currently executing/scheduled/
-// has already succeeded in this round.
+// Snowflake does not create a TASK_HISTORY row for tasks that were skipped
+// because a predecessor failed. This fixed-point walk infers SKIPPED so
+// transitive chains also propagate (task_d → task_c → task_a=FAILED → all SKIPPED).
+//
+// ACTIVE_STATES: tasks actively running in the current graph run are never
+// inferred as skipped. SUCCEEDED is intentionally excluded — it is always from
+// a previous run when a predecessor is currently FAILED (Snowflake cannot
+// schedule a task whose predecessor just failed in the same run).
+//
+// Timestamp guard: if this task's lastRunTime is strictly newer than the
+// predecessor's failure time, the SUCCEEDED belongs to a more-recent graph run
+// (e.g. the predecessor was fixed between runs) — don't override it.
 
-const ACTIVE_STATES = new Set(["EXECUTING", "RUNNING", "SCHEDULED", "SUCCEEDED"]);
+const ACTIVE_STATES = new Set(["EXECUTING", "RUNNING", "SCHEDULED"]);
 
 function computeSkippedNodes(byName: Map<string, main.TaskStatusRow>): Set<string> {
   const skipped = new Set<string>();
@@ -83,6 +90,13 @@ function computeSkippedNodes(byName: Map<string, main.TaskStatusRow>): Set<strin
         if (!pred) continue;
         const ps = (pred.lastRunState ?? "").toUpperCase();
         if (ps === "FAILED" || ps === "FAILED_AND_AUTO_SUSPENDED" || skipped.has(pu)) {
+          // If our last completion is strictly newer than the predecessor's
+          // failure we ran in a more-recent graph run — leave as-is.
+          if (t.lastRunTime && pred.lastRunTime) {
+            const tMs = new Date(t.lastRunTime).getTime();
+            const pMs = new Date(pred.lastRunTime).getTime();
+            if (!isNaN(tMs) && !isNaN(pMs) && tMs > pMs) continue;
+          }
           skipped.add(upper);
           changed = true;
           break;
@@ -116,11 +130,15 @@ function buildLabel(t: main.TaskStatusRow, isRoot: boolean, overrideRunState?: s
   const started      = t.taskState?.toUpperCase() === "STARTED";
   const effectiveState = (overrideRunState ?? t.lastRunState ?? "").toUpperCase();
   // Show timestamp for terminal states; suppress for Waiting/never-run/executing.
+  // Also suppress for SKIPPED: the lastRunTime comes from a previous succeeded
+  // run (Snowflake creates no TASK_HISTORY row for skipped tasks), so showing
+  // it would be misleading.
   const showTime     = !!t.lastRunTime &&
     effectiveState !== "WAITING" &&
     effectiveState !== "EXECUTING" &&
     effectiveState !== "RUNNING" &&
     effectiveState !== "SCHEDULED" &&
+    effectiveState !== "SKIPPED" &&
     effectiveState !== "";
   const timeLabel    = showTime ? formatRunTime(t.lastRunTime!) : null;
 
