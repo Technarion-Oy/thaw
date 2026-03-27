@@ -2413,14 +2413,18 @@ func (a *App) GetTaskStatuses(database, schema string) (TaskStatusesResult, erro
 	// VARIANT value. gosnowflake may decode VARIANT columns as:
 	//   • map[string]interface{} — already-parsed JSON object
 	//   • string / []byte       — raw JSON text
-	// We check both "finalize" and "finalize_task" key names.
+	// Key comparison is case-insensitive to handle Snowflake edition variations.
 	extractFinalize := func(v interface{}) string {
 		if v == nil {
 			return ""
 		}
+		isFinalizeKey := func(k string) bool {
+			lk := strings.ToLower(k)
+			return lk == "finalize" || lk == "finalize_task"
+		}
 		tryMap := func(m map[string]interface{}) string {
-			for _, k := range []string{"finalize", "finalize_task"} {
-				if val, ok := m[k]; ok && val != nil {
+			for k, val := range m {
+				if isFinalizeKey(k) && val != nil {
 					if s := fmt.Sprintf("%v", val); s != "" && s != "<nil>" && s != "null" {
 						return s
 					}
@@ -2447,8 +2451,8 @@ func (a *App) GetTaskStatuses(database, schema string) (TaskStatusesResult, erro
 		if err := json.Unmarshal([]byte(raw), &m); err != nil {
 			return ""
 		}
-		for _, k := range []string{"finalize", "finalize_task"} {
-			if val, ok := m[k]; ok {
+		for k, val := range m {
+			if isFinalizeKey(k) {
 				var s string
 				if err := json.Unmarshal(val, &s); err == nil && s != "" {
 					return s
@@ -2518,6 +2522,82 @@ func (a *App) GetTaskStatuses(database, schema string) (TaskStatusesResult, erro
 	rows := make([]TaskStatusRow, len(tasks))
 	for i, t := range tasks {
 		rows[i] = TaskStatusRow{Name: t.name, TaskState: t.taskState, Predecessors: t.predecessors, Finalize: t.finalize}
+	}
+
+	// ── Optional: detect finalizer tasks via GET_DDL ──────────────────────────
+	// SHOW TASKS may not expose the FINALIZE relationship in all Snowflake
+	// editions (task_relations column absent or in unexpected format). As a
+	// reliable fallback, run GET_DDL for any truly standalone task (no
+	// predecessors, no children) whose finalize field is still empty, and
+	// parse the FINALIZE clause out of the DDL text.
+	{
+		// Build set of task names that appear as predecessors (i.e. have children).
+		hasChildrenSet := make(map[string]bool, len(tasks))
+		for _, t := range tasks {
+			if t.predecessors == "" || t.predecessors == "[]" || t.predecessors == "<nil>" {
+				continue
+			}
+			cleaned := strings.TrimPrefix(strings.TrimSuffix(strings.TrimSpace(t.predecessors), "]"), "[")
+			for _, part := range strings.Split(cleaned, ",") {
+				part = strings.TrimSpace(part)
+				if part == "" {
+					continue
+				}
+				segs := strings.Split(part, ".")
+				bare := strings.Trim(segs[len(segs)-1], `"`)
+				if bare != "" {
+					hasChildrenSet[strings.ToUpper(bare)] = true
+				}
+			}
+		}
+
+		parseFinalizeFromDDL := func(ddl string) string {
+			// Find "FINALIZE" keyword (case-insensitive) followed by "=".
+			upper := strings.ToUpper(ddl)
+			idx := strings.Index(upper, "FINALIZE")
+			if idx < 0 {
+				return ""
+			}
+			rest := strings.TrimSpace(ddl[idx+len("FINALIZE"):])
+			if len(rest) == 0 || rest[0] != '=' {
+				return ""
+			}
+			rest = strings.TrimSpace(rest[1:])
+			// Read until whitespace; strip trailing punctuation.
+			end := strings.IndexAny(rest, " \t\n\r")
+			if end < 0 {
+				end = len(rest)
+			}
+			return strings.TrimRight(rest[:end], ";,")
+		}
+
+		for i, t := range tasks {
+			if rows[i].Finalize != "" {
+				continue // already detected via task_relations column
+			}
+			if t.predecessors != "" && t.predecessors != "[]" && t.predecessors != "<nil>" {
+				continue // has predecessors — cannot be a finalizer
+			}
+			if hasChildrenSet[strings.ToUpper(t.name)] {
+				continue // has children — it is a root/parent task, not a finalizer
+			}
+			// Standalone task: use GET_DDL to check for FINALIZE clause.
+			fqn := fmt.Sprintf(`"%s"."%s"."%s"`,
+				strings.ReplaceAll(database, `"`, `""`),
+				strings.ReplaceAll(schema, `"`, `""`),
+				strings.ReplaceAll(t.name, `"`, `""`),
+			)
+			ddlRes, ddlErr := a.client.Execute(a.ctx,
+				fmt.Sprintf("SELECT GET_DDL('TASK', '%s')", strings.ReplaceAll(fqn, "'", "''")))
+			if ddlErr != nil || len(ddlRes.Rows) == 0 || len(ddlRes.Rows[0]) == 0 {
+				continue
+			}
+			ddl := toString(ddlRes.Rows[0][0])
+			if fin := parseFinalizeFromDDL(ddl); fin != "" {
+				rows[i].Finalize = fin
+				logger.L.Info("finalizer detected via GET_DDL", "task", t.name, "finalize", fin)
+			}
+		}
 	}
 
 	// ── Step 2: fetch run history (best-effort) ───────────────────────────────
