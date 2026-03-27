@@ -580,7 +580,6 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
         </ReactFlow>
       )}
 
-      {/* ── Node right-click context menu ────────────────────────────────── */}
       {/* ── Create child / finalizer task dialog ────────────────────────── */}
       {createTaskDialog && (
         <CreateTaskModal
@@ -590,8 +589,11 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
           predecessorTask={createTaskDialog.mode === "child" ? createTaskDialog.taskName : undefined}
           finalizerForTask={createTaskDialog.mode === "finalizer" ? createTaskDialog.taskName : undefined}
           onClose={() => setCreateTaskDialog(null)}
+          onSuccess={load}
         />
       )}
+
+      {/* ── Node right-click context menu ────────────────────────────────── */}
 
       {ctxMenu && (() => {
         const isStarted = ctxMenu.taskState.toUpperCase() === "STARTED";

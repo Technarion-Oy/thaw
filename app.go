@@ -2011,6 +2011,18 @@ func (a *App) ImportTableData(params snowflake.ImportTableParams) (snowflake.Imp
 // for example "RESUME", "SUSPEND", "SET COMMENT = 'hello'", or
 // "MODIFY AS SELECT 1". The caller is responsible for correct SQL quoting
 // inside the clause; this method only double-quotes the task identifier.
+// ExecDDL executes an arbitrary DDL/DML statement and discards the result set.
+// It is intended for one-shot statements (CREATE, ALTER, DROP, etc.) where the
+// caller needs to know whether the statement succeeded without routing the SQL
+// through the editor's query pipeline.
+func (a *App) ExecDDL(sql string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	_, err := a.client.Execute(a.ctx, sql)
+	return err
+}
+
 func (a *App) AlterTask(database, schema, name, clause string) error {
 	if a.client == nil {
 		return ErrNotConnected

@@ -83,6 +83,8 @@ export function DropIntegration(arg1:string):Promise<void>;
 
 export function EnableTaskDependents(arg1:string,arg2:string,arg3:string):Promise<void>;
 
+export function ExecDDL(arg1:string):Promise<void>;
+
 export function ExecuteMigration(arg1:Array<main.MigrationObject>,arg2:string,arg3:number,arg4:main.TableMigrationStrategy):Promise<Array<main.MigrationExecEvent>>;
 
 export function ExecuteNotebook(arg1:string,arg2:string,arg3:string,arg4:Array<string>):Promise<string>;

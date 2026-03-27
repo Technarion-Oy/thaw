@@ -11,12 +11,11 @@
 import { useState, useEffect } from "react";
 import {
   Modal, Form, Input, Select, Checkbox, Radio, Space,
-  Typography, Divider, InputNumber, Button, Tag,
+  Typography, Divider, InputNumber, Button, Tag, Alert,
 } from "antd";
 import { ClockCircleOutlined, PlusOutlined, InfoCircleOutlined } from "@ant-design/icons";
-import { ListWarehouses, ListNotificationIntegrations, ListObjects } from "../../../wailsjs/go/main/App";
+import { ListWarehouses, ListNotificationIntegrations, ListObjects, ExecDDL } from "../../../wailsjs/go/main/App";
 import ScheduleEditor from "./ScheduleEditor";
-import { useQueryStore } from "../../store/queryStore";
 import WhenConditionBuilder from "./WhenConditionBuilder";
 
 const { Text } = Typography;
@@ -167,6 +166,8 @@ interface Props {
   db: string;
   schema: string;
   onClose: () => void;
+  /** Called after the CREATE TASK statement executes successfully. */
+  onSuccess?: () => void;
   /** Context for the dialog. Defaults to "create" (no pre-population). */
   mode?: CreateTaskMode;
   /** "child" mode: this task name is pre-added to the AFTER (predecessor) list. */
@@ -176,7 +177,7 @@ interface Props {
 }
 
 export default function CreateTaskModal({
-  db, schema, onClose,
+  db, schema, onClose, onSuccess,
   mode = "create", predecessorTask, finalizerForTask,
 }: Props) {
   const [cfg, setCfg] = useState<TaskConfig>(() => {
@@ -184,11 +185,15 @@ export default function CreateTaskModal({
     if (mode === "finalizer" && finalizerForTask) return { ...DEFAULTS, finalize: finalizerForTask };
     return { ...DEFAULTS };
   });
-  const [warehouses, setWarehouses] = useState<string[]>([]);
-  const [integrations, setIntegrations] = useState<string[]>([]);
+  const [warehouses,    setWarehouses]    = useState<string[]>([]);
+  const [integrations,  setIntegrations]  = useState<string[]>([]);
   const [availableTasks, setAvailableTasks] = useState<string[]>([]);
   const [taskSearchVal, setTaskSearchVal] = useState<string | undefined>(undefined);
-  const executeInNewTab = useQueryStore((s) => s.executeInNewTab);
+  const [creating,        setCreating]        = useState(false);
+  const [createError,     setCreateError]     = useState<string | null>(null);
+  // Show warehouse validation error only after the user has touched the field
+  // or attempted to submit — avoids red border on fresh dialog open.
+  const [warehouseTouched, setWarehouseTouched] = useState(false);
 
   useEffect(() => {
     ListWarehouses().then((whs) => setWarehouses(whs ?? [])).catch(() => {});
@@ -206,12 +211,26 @@ export default function CreateTaskModal({
   const set = <K extends keyof TaskConfig>(key: K, value: TaskConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
 
-  const canSubmit = cfg.name.trim() !== "" && cfg.sql.trim() !== "";
+  // Warehouse is mandatory when using the warehouse compute type.
+  const warehouseMissing = cfg.computeType === "warehouse" && cfg.warehouse.trim() === "";
+  const canSubmit = cfg.name.trim() !== "" && cfg.sql.trim() !== "" && !warehouseMissing;
 
-  const handleRun = () => {
+  const handleRun = async () => {
+    // Mark warehouse as touched so validation UI appears if it's missing.
+    setWarehouseTouched(true);
+    if (!canSubmit) return;
     const sql = buildSql(db, schema, cfg);
-    onClose();
-    executeInNewTab(sql);
+    setCreating(true);
+    setCreateError(null);
+    try {
+      await ExecDDL(sql);
+      onSuccess?.();
+      onClose();
+    } catch (err) {
+      setCreateError(String(err));
+    } finally {
+      setCreating(false);
+    }
   };
 
   const preview = buildSql(db, schema, cfg);
@@ -248,8 +267,14 @@ export default function CreateTaskModal({
       onCancel={onClose}
       footer={
         <Space style={{ justifyContent: "flex-end", display: "flex" }}>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button type="primary" icon={<ClockCircleOutlined />} onClick={handleRun} disabled={!canSubmit}>
+          <Button onClick={onClose} disabled={creating}>Cancel</Button>
+          <Button
+            type="primary"
+            icon={<ClockCircleOutlined />}
+            onClick={handleRun}
+            disabled={!canSubmit}
+            loading={creating}
+          >
             Create
           </Button>
         </Space>
@@ -257,6 +282,17 @@ export default function CreateTaskModal({
       width={700}
       styles={{ body: { paddingTop: 16, maxHeight: "72vh", overflowY: "auto" } }}
     >
+      {createError && (
+        <Alert
+          type="error"
+          message="Task creation failed"
+          description={createError}
+          showIcon
+          closable
+          onClose={() => setCreateError(null)}
+          style={{ marginBottom: 16 }}
+        />
+      )}
       <Form layout="vertical" size="small">
 
         {/* Task name + create options */}
@@ -304,15 +340,23 @@ export default function CreateTaskModal({
         </Form.Item>
 
         {cfg.computeType === "warehouse" ? (
-          <Form.Item label="Warehouse" style={itemStyle}>
+          <Form.Item
+            label="Warehouse"
+            required
+            style={itemStyle}
+            validateStatus={warehouseMissing && warehouseTouched ? "error" : ""}
+            help={warehouseMissing && warehouseTouched ? "A warehouse is required" : undefined}
+          >
             <Select
               value={cfg.warehouse || undefined}
-              onChange={(v) => set("warehouse", v ?? "")}
+              onChange={(v) => { set("warehouse", v ?? ""); setWarehouseTouched(true); }}
+              onClear={() => setWarehouseTouched(true)}
               placeholder="Select warehouse"
               showSearch
               allowClear
               options={warehouses.map((w) => ({ value: w, label: w }))}
               style={{ width: "100%" }}
+              status={warehouseMissing && warehouseTouched ? "error" : undefined}
             />
           </Form.Item>
         ) : (
