@@ -13,7 +13,7 @@ import {
   Modal, Form, Input, Select, Checkbox, Radio, Space,
   Typography, Divider, InputNumber, Button, Tag,
 } from "antd";
-import { ClockCircleOutlined, PlusOutlined } from "@ant-design/icons";
+import { ClockCircleOutlined, PlusOutlined, InfoCircleOutlined } from "@ant-design/icons";
 import { ListWarehouses, ListNotificationIntegrations, ListObjects } from "../../../wailsjs/go/main/App";
 import ScheduleEditor from "./ScheduleEditor";
 import { useQueryStore } from "../../store/queryStore";
@@ -160,14 +160,30 @@ function buildSql(db: string, schema: string, cfg: TaskConfig): string {
   return lines.join("\n") + ";";
 }
 
+/** Determines how the dialog is pre-configured when opened from the task graph. */
+export type CreateTaskMode = "create" | "child" | "finalizer";
+
 interface Props {
   db: string;
   schema: string;
   onClose: () => void;
+  /** Context for the dialog. Defaults to "create" (no pre-population). */
+  mode?: CreateTaskMode;
+  /** "child" mode: this task name is pre-added to the AFTER (predecessor) list. */
+  predecessorTask?: string;
+  /** "finalizer" mode: the FINALIZE clause is pre-filled with this root task name. */
+  finalizerForTask?: string;
 }
 
-export default function CreateTaskModal({ db, schema, onClose }: Props) {
-  const [cfg, setCfg] = useState<TaskConfig>(DEFAULTS);
+export default function CreateTaskModal({
+  db, schema, onClose,
+  mode = "create", predecessorTask, finalizerForTask,
+}: Props) {
+  const [cfg, setCfg] = useState<TaskConfig>(() => {
+    if (mode === "child" && predecessorTask) return { ...DEFAULTS, after: [predecessorTask] };
+    if (mode === "finalizer" && finalizerForTask) return { ...DEFAULTS, finalize: finalizerForTask };
+    return { ...DEFAULTS };
+  });
   const [warehouses, setWarehouses] = useState<string[]>([]);
   const [integrations, setIntegrations] = useState<string[]>([]);
   const [availableTasks, setAvailableTasks] = useState<string[]>([]);
@@ -219,7 +235,11 @@ export default function CreateTaskModal({ db, schema, onClose }: Props) {
       title={
         <Space size={6}>
           <ClockCircleOutlined style={{ color: "var(--link)" }} />
-          <span>Create task</span>
+          <span>
+            {mode === "child" ? "Create child task" :
+             mode === "finalizer" ? "Create finalizer task" :
+             "Create task"}
+          </span>
           <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
             {db}.{schema}
           </Text>
@@ -330,12 +350,27 @@ export default function CreateTaskModal({ db, schema, onClose }: Props) {
 
         {divider("Schedule")}
 
-        <Form.Item style={itemStyle}>
-          <ScheduleEditor
-            value={cfg.schedule}
-            onChange={(v) => set("schedule", v)}
-          />
-        </Form.Item>
+        {mode === "create" ? (
+          <Form.Item style={itemStyle}>
+            <ScheduleEditor value={cfg.schedule} onChange={(v) => set("schedule", v)} />
+          </Form.Item>
+        ) : (
+          <Form.Item style={itemStyle}>
+            <div style={{
+              display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12,
+              color: "var(--text-secondary, #888)",
+              background: "var(--bg)", border: "1px solid var(--border)",
+              borderRadius: 6, padding: "8px 12px",
+            }}>
+              <InfoCircleOutlined style={{ marginTop: 2, flexShrink: 0 }} />
+              <span>
+                {mode === "child"
+                  ? "Child tasks cannot have their own schedule — they are triggered automatically when their predecessor(s) complete successfully."
+                  : "Finalizer tasks have no schedule — they run when the root task's DAG completes, including after failures or cancellations."}
+              </span>
+            </div>
+          </Form.Item>
+        )}
 
         {divider("Configuration")}
 
@@ -355,59 +390,88 @@ export default function CreateTaskModal({ db, schema, onClose }: Props) {
 
         {divider("Dependencies")}
 
-        <Form.Item label="Predecessor tasks (AFTER)" style={itemStyle}>
-          <Space.Compact style={{ width: "100%" }}>
-            <Select
-              showSearch
-              value={taskSearchVal}
-              onChange={(v) => setTaskSearchVal(v)}
-              onClear={() => setTaskSearchVal(undefined)}
-              placeholder="Search tasks…"
-              allowClear
-              style={{ flex: 1 }}
-              filterOption={(input, option) =>
-                (option?.value as string ?? "").toLowerCase().includes(input.toLowerCase())
-              }
-              options={availableTasks
-                .filter((t) => !cfg.after.includes(t))
-                .map((t) => ({ value: t, label: t }))}
-              notFoundContent={
-                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>No tasks found</span>
-              }
-            />
-            <Button
-              icon={<PlusOutlined />}
-              disabled={!taskSearchVal}
-              onClick={() => {
-                if (!taskSearchVal) return;
-                set("after", [...cfg.after, taskSearchVal]);
-                setTaskSearchVal(undefined);
-              }}
-            />
-          </Space.Compact>
-          {cfg.after.length > 0 && (
-            <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 4 }}>
-              {cfg.after.map((t) => (
-                <Tag
-                  key={t}
-                  closable
-                  onClose={() => set("after", cfg.after.filter((x) => x !== t))}
-                  style={{ fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace", fontSize: 12 }}
-                >
-                  {t}
-                </Tag>
-              ))}
-            </div>
-          )}
-        </Form.Item>
+        {/* Finalizer tasks use FINALIZE (not AFTER) — show it prominently here */}
+        {mode === "finalizer" && (
+          <Form.Item
+            label="Finalizes root task (FINALIZE)"
+            style={itemStyle}
+            help="This task runs after the named root task's DAG completes — even if upstream tasks fail or are cancelled"
+          >
+            <Input value={cfg.finalize} disabled />
+          </Form.Item>
+        )}
 
-        <Form.Item label="Condition (WHEN)" style={itemStyle}>
-          <WhenConditionBuilder
-            db={db} schema={schema}
-            value={cfg.when}
-            onChange={(v) => set("when", v)}
-          />
-        </Form.Item>
+        {/* AFTER / predecessors — not applicable for finalizer tasks */}
+        {mode !== "finalizer" && (
+          <Form.Item label="Predecessor tasks (AFTER)" style={itemStyle}>
+            {mode === "child" && predecessorTask && (
+              <div style={{
+                display: "flex", alignItems: "center", gap: 6, fontSize: 11,
+                color: "var(--text-secondary, #888)", marginBottom: 6,
+              }}>
+                <InfoCircleOutlined />
+                <span>
+                  <code style={{ fontFamily: "monospace" }}>{predecessorTask}</code> is pre-selected.
+                  Add more predecessors if needed (max 100 per task).
+                </span>
+              </div>
+            )}
+            <Space.Compact style={{ width: "100%" }}>
+              <Select
+                showSearch
+                value={taskSearchVal}
+                onChange={(v) => setTaskSearchVal(v)}
+                onClear={() => setTaskSearchVal(undefined)}
+                placeholder="Search tasks…"
+                allowClear
+                style={{ flex: 1 }}
+                filterOption={(input, option) =>
+                  (option?.value as string ?? "").toLowerCase().includes(input.toLowerCase())
+                }
+                options={availableTasks
+                  .filter((t) => !cfg.after.includes(t))
+                  .map((t) => ({ value: t, label: t }))}
+                notFoundContent={
+                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>No tasks found</span>
+                }
+              />
+              <Button
+                icon={<PlusOutlined />}
+                disabled={!taskSearchVal}
+                onClick={() => {
+                  if (!taskSearchVal) return;
+                  set("after", [...cfg.after, taskSearchVal]);
+                  setTaskSearchVal(undefined);
+                }}
+              />
+            </Space.Compact>
+            {cfg.after.length > 0 && (
+              <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {cfg.after.map((t) => (
+                  <Tag
+                    key={t}
+                    closable
+                    onClose={() => set("after", cfg.after.filter((x) => x !== t))}
+                    style={{ fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace", fontSize: 12 }}
+                  >
+                    {t}
+                  </Tag>
+                ))}
+              </div>
+            )}
+          </Form.Item>
+        )}
+
+        {/* WHEN condition — finalizer tasks always run; condition not applicable */}
+        {mode !== "finalizer" && (
+          <Form.Item label="Condition (WHEN)" style={itemStyle}>
+            <WhenConditionBuilder
+              db={db} schema={schema}
+              value={cfg.when}
+              onChange={(v) => set("when", v)}
+            />
+          </Form.Item>
+        )}
 
         {divider("Execution")}
 
@@ -539,7 +603,11 @@ export default function CreateTaskModal({ db, schema, onClose }: Props) {
 
         {divider("Other")}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 16px" }}>
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: mode === "create" ? "1fr 1fr 1fr" : "1fr 1fr",
+          gap: "0 16px",
+        }}>
           <Form.Item label="Log level" style={itemStyle}>
             <Select
               value={cfg.logLevel || undefined}
@@ -557,17 +625,21 @@ export default function CreateTaskModal({ db, schema, onClose }: Props) {
               placeholder="optional comment"
             />
           </Form.Item>
-          <Form.Item
-            label="Finalize task"
-            style={itemStyle}
-            help={<span style={{ fontSize: 11 }}>Runs after the full DAG completes</span>}
-          >
-            <Input
-              value={cfg.finalize}
-              onChange={(e) => set("finalize", e.target.value)}
-              placeholder="FINALIZE_TASK_NAME"
-            />
-          </Form.Item>
+          {/* Finalize field: only relevant for standalone root tasks in create mode.
+              Finalizer mode shows it in the Dependencies section; child mode hides it. */}
+          {mode === "create" && (
+            <Form.Item
+              label="Finalize task"
+              style={itemStyle}
+              help={<span style={{ fontSize: 11 }}>Runs after the full DAG completes</span>}
+            >
+              <Input
+                value={cfg.finalize}
+                onChange={(e) => set("finalize", e.target.value)}
+                placeholder="FINALIZE_TASK_NAME"
+              />
+            </Form.Item>
+          )}
         </div>
 
         {divider("SQL (AS)")}

@@ -15,6 +15,7 @@ import {
   MinusCircleOutlined, ClockCircleOutlined, ReloadOutlined,
   CaretRightOutlined, RedoOutlined,
   PauseCircleOutlined, PlayCircleOutlined,
+  PlusOutlined, FlagOutlined,
 } from "@ant-design/icons";
 import {
   ReactFlow,
@@ -33,6 +34,7 @@ import dagre from "@dagrejs/dagre";
 import { GetTaskStatuses, ExecuteTask, AlterTask } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
+import CreateTaskModal from "./CreateTaskModal";
 
 const { Text } = Typography;
 
@@ -301,6 +303,11 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
   // Right-click context menu state: viewport-relative position + target task info.
   const [ctxMenu, setCtxMenu] = useState<{
     x: number; y: number; name: string; taskState: string;
+  } | null>(null);
+
+  // Create Task dialog opened from the graph (child or finalizer mode).
+  const [createTaskDialog, setCreateTaskDialog] = useState<{
+    mode: "child" | "finalizer"; taskName: string;
   } | null>(null);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
@@ -574,6 +581,18 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
       )}
 
       {/* ── Node right-click context menu ────────────────────────────────── */}
+      {/* ── Create child / finalizer task dialog ────────────────────────── */}
+      {createTaskDialog && (
+        <CreateTaskModal
+          db={db}
+          schema={schema}
+          mode={createTaskDialog.mode}
+          predecessorTask={createTaskDialog.mode === "child" ? createTaskDialog.taskName : undefined}
+          finalizerForTask={createTaskDialog.mode === "finalizer" ? createTaskDialog.taskName : undefined}
+          onClose={() => setCreateTaskDialog(null)}
+        />
+      )}
+
       {ctxMenu && (() => {
         const isStarted = ctxMenu.taskState.toUpperCase() === "STARTED";
         return (
@@ -601,7 +620,7 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
                     ),
                     disabled: true,
                   },
-                  { type: "divider" },
+                  { type: "divider" as const },
                   isStarted
                     ? {
                         key: "suspend",
@@ -617,6 +636,29 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
                         disabled: togglingTask === ctxMenu.name,
                         onClick: () => toggleTask(ctxMenu.name, "RESUME"),
                       },
+                  { type: "divider" as const },
+                  {
+                    key: "add-child",
+                    icon: <PlusOutlined />,
+                    label: "Add Child Task…",
+                    onClick: () => {
+                      setCreateTaskDialog({ mode: "child", taskName: ctxMenu.name });
+                      setCtxMenu(null);
+                    },
+                  },
+                  {
+                    key: "add-finalizer",
+                    icon: <FlagOutlined />,
+                    label: ctxMenu.name.toUpperCase() !== rootUpperRef.current
+                      ? "Add Finalizer Task… (root only)"
+                      : "Add Finalizer Task…",
+                    disabled: ctxMenu.name.toUpperCase() !== rootUpperRef.current,
+                    onClick: () => {
+                      if (ctxMenu.name.toUpperCase() !== rootUpperRef.current) return;
+                      setCreateTaskDialog({ mode: "finalizer", taskName: ctxMenu.name });
+                      setCtxMenu(null);
+                    },
+                  },
                 ]}
               />
             </div>
