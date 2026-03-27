@@ -2403,19 +2403,80 @@ func (a *App) GetTaskStatuses(database, schema string) (TaskStatusesResult, erro
 		return TaskStatusesResult{}, err
 	}
 
-	nameIdx      := colIdx(showRes.Columns, "name")
-	stateIdx     := colIdx(showRes.Columns, "state")
-	predsIdx     := colIdx(showRes.Columns, "predecessors", "predecessor")
-	finalizeIdx  := colIdx(showRes.Columns, "finalize", "finalize_task")
-	taskRelIdx   := colIdx(showRes.Columns, "task_relations")
+	nameIdx     := colIdx(showRes.Columns, "name")
+	stateIdx    := colIdx(showRes.Columns, "state")
+	predsIdx    := colIdx(showRes.Columns, "predecessors", "predecessor")
+	finalizeIdx := colIdx(showRes.Columns, "finalize", "finalize_task")
+	taskRelIdx  := colIdx(showRes.Columns, "task_relations")
 
-	// TEMP DEBUG — log SHOW TASKS columns and first-row preds values.
-	logger.L.Debug("SHOW TASKS columns", "cols", showRes.Columns, "predsIdx", predsIdx)
+	// extractFinalize reads the finalize root-task reference from a task_relations
+	// VARIANT value. gosnowflake may decode VARIANT columns as:
+	//   • map[string]interface{} — already-parsed JSON object
+	//   • string / []byte       — raw JSON text
+	// We check both "finalize" and "finalize_task" key names.
+	extractFinalize := func(v interface{}) string {
+		if v == nil {
+			return ""
+		}
+		tryMap := func(m map[string]interface{}) string {
+			for _, k := range []string{"finalize", "finalize_task"} {
+				if val, ok := m[k]; ok && val != nil {
+					if s := fmt.Sprintf("%v", val); s != "" && s != "<nil>" && s != "null" {
+						return s
+					}
+				}
+			}
+			return ""
+		}
+		if m, ok := v.(map[string]interface{}); ok {
+			return tryMap(m)
+		}
+		raw := ""
+		switch t := v.(type) {
+		case string:
+			raw = t
+		case []byte:
+			raw = string(t)
+		default:
+			raw = fmt.Sprintf("%v", v)
+		}
+		if raw == "" || raw == "null" {
+			return ""
+		}
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(raw), &m); err != nil {
+			return ""
+		}
+		for _, k := range []string{"finalize", "finalize_task"} {
+			if val, ok := m[k]; ok {
+				var s string
+				if err := json.Unmarshal(val, &s); err == nil && s != "" {
+					return s
+				}
+			}
+		}
+		return ""
+	}
+
+	// Debug: log columns + first few rows so finalizer detection issues are visible.
+	logger.L.Debug("SHOW TASKS columns", "cols", showRes.Columns, "finalizeIdx", finalizeIdx, "taskRelIdx", taskRelIdx)
 	for i, row := range showRes.Rows {
-		if i >= 5 { break }
-		nm := ""; if nameIdx >= 0 && nameIdx < len(row) { nm = toString(row[nameIdx]) }
-		pr := ""; if predsIdx >= 0 && predsIdx < len(row) { pr = fmt.Sprintf("%#v", row[predsIdx]) }
-		logger.L.Debug("SHOW TASKS row", "i", i, "name", nm, "preds_raw", pr)
+		if i >= 5 {
+			break
+		}
+		nm := ""
+		if nameIdx >= 0 && nameIdx < len(row) {
+			nm = toString(row[nameIdx])
+		}
+		tr := ""
+		if taskRelIdx >= 0 && taskRelIdx < len(row) {
+			tr = fmt.Sprintf("%#v", row[taskRelIdx])
+		}
+		fi := ""
+		if finalizeIdx >= 0 && finalizeIdx < len(row) {
+			fi = fmt.Sprintf("%#v", row[finalizeIdx])
+		}
+		logger.L.Debug("SHOW TASKS row", "i", i, "name", nm, "task_relations", tr, "finalize_col", fi)
 	}
 
 	type entry struct {
@@ -2442,24 +2503,13 @@ func (a *App) GetTaskStatuses(database, schema string) (TaskStatusesResult, erro
 		if predsIdx >= 0 && predsIdx < len(row) {
 			preds = toString(row[predsIdx])
 		}
-		// Finalize: try dedicated column first, then parse from task_relations JSON.
+		// Finalize: try dedicated column first, then parse from task_relations VARIANT.
 		finalize := ""
 		if finalizeIdx >= 0 && finalizeIdx < len(row) {
 			finalize = toString(row[finalizeIdx])
 		}
 		if finalize == "" && taskRelIdx >= 0 && taskRelIdx < len(row) {
-			raw := toString(row[taskRelIdx])
-			if raw != "" && raw != "null" {
-				// task_relations is JSON, e.g. {"predecessors":[...],"finalize":"DB.SCHEMA.ROOT"}
-				// Simple key extraction without full JSON decode to avoid import churn.
-				const key = `"finalize":"`
-				if idx := strings.Index(raw, key); idx >= 0 {
-					rest := raw[idx+len(key):]
-					if end := strings.Index(rest, `"`); end >= 0 {
-						finalize = rest[:end]
-					}
-				}
-			}
+			finalize = extractFinalize(row[taskRelIdx])
 		}
 		nameMap[strings.ToUpper(name)] = len(tasks)
 		tasks = append(tasks, entry{name: name, taskState: strings.ToUpper(state), predecessors: preds, finalize: finalize})

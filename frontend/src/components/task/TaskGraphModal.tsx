@@ -518,6 +518,13 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
     }
   }, [db, schema]);
 
+  // ── Finalizer presence check ──────────────────────────────────────────────
+  // True when the current graph already has a finalizer task, so the context
+  // menu item "Add Finalizer Task…" on the root node should be disabled.
+  const rootHasFinalizer = taskRows.some(
+    (t) => t.finalize && extractName(t.finalize).toUpperCase() === rootUpperRef.current,
+  );
+
   // ── Retry eligibility (mirrors Snowflake's RETRY LAST conditions) ────────
   // A graph run is considered failed if ANY task in it failed — the root task
   // itself may have succeeded while a child task failed.
@@ -730,10 +737,12 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
                       ? "Add Finalizer Task… (not for finalizers)"
                       : ctxMenu.name.toUpperCase() !== rootUpperRef.current
                       ? "Add Finalizer Task… (root only)"
+                      : rootHasFinalizer
+                      ? "Add Finalizer Task… (already has one)"
                       : "Add Finalizer Task…",
-                    disabled: ctxMenu.isFinalizer || ctxMenu.name.toUpperCase() !== rootUpperRef.current,
+                    disabled: ctxMenu.isFinalizer || ctxMenu.name.toUpperCase() !== rootUpperRef.current || rootHasFinalizer,
                     onClick: () => {
-                      if (ctxMenu.isFinalizer || ctxMenu.name.toUpperCase() !== rootUpperRef.current) return;
+                      if (ctxMenu.isFinalizer || ctxMenu.name.toUpperCase() !== rootUpperRef.current || rootHasFinalizer) return;
                       setCreateTaskDialog({ mode: "finalizer", taskName: ctxMenu.name });
                       setCtxMenu(null);
                     },
