@@ -31,7 +31,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import dagre from "@dagrejs/dagre";
-import { GetTaskStatuses, ExecuteTask, AlterTask, DropTaskTree } from "../../../wailsjs/go/main/App";
+import { GetTaskStatuses, ExecuteTask, AlterTask, DropTaskTree, ExecDDL } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 import CreateTaskModal from "./CreateTaskModal";
@@ -108,33 +108,6 @@ function computeSkippedNodes(byName: Map<string, main.TaskStatusRow>): Set<strin
     }
   }
   return skipped;
-}
-
-// ── Descendant collection ─────────────────────────────────────────────────────
-// BFS from a task name through the predecessor relationships to collect the
-// full subtree: the task itself plus all descendants (breadth-first order).
-
-function collectDescendants(taskName: string, taskRows: main.TaskStatusRow[]): string[] {
-  const childrenOf = new Map<string, string[]>();
-  taskRows.forEach((t) => {
-    for (const p of parsePredecessors(t.predecessors ?? "")) {
-      const pu = extractName(p).toUpperCase();
-      if (!childrenOf.has(pu)) childrenOf.set(pu, []);
-      childrenOf.get(pu)!.push(t.name);
-    }
-  });
-  const result: string[] = [];
-  const visited = new Set<string>();
-  const queue = [taskName];
-  while (queue.length > 0) {
-    const cur = queue.shift()!;
-    const upper = cur.toUpperCase();
-    if (visited.has(upper)) continue;
-    visited.add(upper);
-    result.push(cur);
-    for (const child of childrenOf.get(upper) ?? []) queue.push(child);
-  }
-  return result;
 }
 
 // ── Timestamp formatting ──────────────────────────────────────────────────────
@@ -398,7 +371,7 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
 
   // Right-click context menu state: viewport-relative position + target task info.
   const [ctxMenu, setCtxMenu] = useState<{
-    x: number; y: number; name: string; taskState: string; isFinalizer: boolean; hasDescendants: boolean;
+    x: number; y: number; name: string; taskState: string; isFinalizer: boolean;
   } | null>(null);
 
   // Create Task dialog opened from the graph (child or finalizer mode).
@@ -406,10 +379,8 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
     mode: "child" | "finalizer"; taskName: string;
   } | null>(null);
 
-  // Delete-tree confirmation dialog.
-  const [deleteTreeDialog, setDeleteTreeDialog] = useState<{
-    taskName: string; descendants: string[];
-  } | null>(null);
+  // Delete-all confirmation dialog.
+  const [deleteAllConfirm, setDeleteAllConfirm] = useState(false);
   const [deletingTree, setDeletingTree] = useState(false);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
@@ -519,12 +490,7 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
     const t = taskRowsRef.current.find((r) => r.name.toUpperCase() === node.id.toUpperCase());
     if (!t) return;
     const isFinalizer = !!(node.data as { isFinalizer?: boolean }).isFinalizer;
-    const hasDescendants = taskRowsRef.current.some((r) =>
-      parsePredecessors(r.predecessors ?? "").some(
-        (p) => extractName(p).toUpperCase() === node.id.toUpperCase(),
-      ),
-    );
-    setCtxMenu({ x: event.clientX, y: event.clientY, name: t.name, taskState: t.taskState ?? "", isFinalizer, hasDescendants });
+    setCtxMenu({ x: event.clientX, y: event.clientY, name: t.name, taskState: t.taskState ?? "", isFinalizer });
   }, []);
 
   const toggleTask = useCallback(async (name: string, action: "SUSPEND" | "RESUME") => {
@@ -672,6 +638,16 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
                     Retry Failed
                   </Button>
                 </Tooltip>
+                <Tooltip title="Delete all tasks in this graph">
+                  <Button
+                    danger
+                    icon={<DeleteOutlined />}
+                    size="small"
+                    onClick={() => setDeleteAllConfirm(true)}
+                  >
+                    Delete All
+                  </Button>
+                </Tooltip>
               </Space>
               {lastUpdatedLabel && (
                 <Text
@@ -709,50 +685,65 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
         />
       )}
 
-      {/* ── Delete-tree confirmation modal ───────────────────────────────── */}
-      {deleteTreeDialog && (
-        <Modal
-          open
-          title={
-            <Space>
-              <DeleteOutlined style={{ color: "#ff4d4f" }} />
-              <span>Delete Task and Descendants</span>
-            </Space>
-          }
-          okText={`Delete ${deleteTreeDialog.descendants.length} task${deleteTreeDialog.descendants.length !== 1 ? "s" : ""}`}
-          okButtonProps={{ danger: true, loading: deletingTree }}
-          cancelButtonProps={{ disabled: deletingTree }}
-          onCancel={() => !deletingTree && setDeleteTreeDialog(null)}
-          onOk={async () => {
-            setDeletingTree(true);
-            try {
-              await DropTaskTree(db, schema, deleteTreeDialog.taskName);
-              message.success(`Deleted ${deleteTreeDialog.descendants.length} task${deleteTreeDialog.descendants.length !== 1 ? "s" : ""}`);
-              setDeleteTreeDialog(null);
-              load();
-            } catch (err) {
-              message.error(String(err));
-            } finally {
-              setDeletingTree(false);
+      {/* ── Delete-all confirmation modal ─────────────────────────────────── */}
+      {deleteAllConfirm && (() => {
+        const escId = (s: string) => s.replace(/"/g, '""');
+        const allNames = nodes.map((n) => n.id);
+        return (
+          <Modal
+            open
+            title={
+              <Space>
+                <DeleteOutlined style={{ color: "#ff4d4f" }} />
+                <span>Delete All Tasks in Graph</span>
+              </Space>
             }
-          }}
-        >
-          <Text>
-            The following tasks in <Text code>{db}.{schema}</Text> will be permanently dropped:
-          </Text>
-          <div style={{
-            maxHeight: 180, overflowY: "auto", margin: "10px 0",
-            border: "1px solid var(--border, #444)", borderRadius: 6, padding: "6px 10px",
-          }}>
-            {deleteTreeDialog.descendants.map((name) => (
-              <div key={name} style={{ fontFamily: "monospace", fontSize: 12, padding: "2px 0" }}>
-                {name}
-              </div>
-            ))}
-          </div>
-          <Alert type="warning" showIcon message="This action cannot be undone." />
-        </Modal>
-      )}
+            okText={`Delete ${allNames.length} task${allNames.length !== 1 ? "s" : ""}`}
+            okButtonProps={{ danger: true, loading: deletingTree }}
+            cancelButtonProps={{ disabled: deletingTree }}
+            onCancel={() => !deletingTree && setDeleteAllConfirm(false)}
+            onOk={async () => {
+              setDeletingTree(true);
+              try {
+                // Drop finalizer nodes first (they have no children).
+                const finalizerIds = nodes
+                  .filter((n) => (n.data as { isFinalizer?: boolean }).isFinalizer)
+                  .map((n) => n.id);
+                for (const name of finalizerIds) {
+                  try { await AlterTask(db, schema, name, "SUSPEND"); } catch { /* ignore */ }
+                  await ExecDDL(
+                    `DROP TASK IF EXISTS "${escId(db)}"."${escId(schema)}"."${escId(name)}"`,
+                  );
+                }
+                // Drop root + all descendants in leaf-first order.
+                await DropTaskTree(db, schema, rootNameRef.current);
+                message.success(`Deleted ${allNames.length} task${allNames.length !== 1 ? "s" : ""}`);
+                setDeleteAllConfirm(false);
+                onClose();
+              } catch (err) {
+                message.error(String(err));
+              } finally {
+                setDeletingTree(false);
+              }
+            }}
+          >
+            <Text>
+              The following tasks in <Text code>{db}.{schema}</Text> will be permanently dropped:
+            </Text>
+            <div style={{
+              maxHeight: 180, overflowY: "auto", margin: "10px 0",
+              border: "1px solid var(--border, #444)", borderRadius: 6, padding: "6px 10px",
+            }}>
+              {allNames.map((name) => (
+                <div key={name} style={{ fontFamily: "monospace", fontSize: 12, padding: "2px 0" }}>
+                  {name}
+                </div>
+              ))}
+            </div>
+            <Alert type="warning" showIcon message="This action cannot be undone." />
+          </Modal>
+        );
+      })()}
 
       {/* ── Node right-click context menu ────────────────────────────────── */}
 
@@ -830,20 +821,6 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
                       setCtxMenu(null);
                     },
                   },
-                  ...(ctxMenu.hasDescendants ? [
-                    { type: "divider" as const },
-                    {
-                      key: "delete-tree",
-                      icon: <DeleteOutlined />,
-                      label: "Delete with Descendants…",
-                      danger: true,
-                      onClick: () => {
-                        const descendants = collectDescendants(ctxMenu.name, taskRowsRef.current);
-                        setDeleteTreeDialog({ taskName: ctxMenu.name, descendants });
-                        setCtxMenu(null);
-                      },
-                    },
-                  ] : []),
                 ]}
               />
             </div>
