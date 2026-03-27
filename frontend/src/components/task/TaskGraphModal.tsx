@@ -31,7 +31,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import dagre from "@dagrejs/dagre";
-import { GetTaskStatuses, ExecuteTask, AlterTask, DropTaskTree, ExecDDL } from "../../../wailsjs/go/main/App";
+import { GetTaskStatuses, ExecuteTask, AlterTask, DropTaskTree, ExecDDL, SuspendTaskGraph, EnableTaskDependents } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 import CreateTaskModal from "./CreateTaskModal";
@@ -368,6 +368,7 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
   const [lastPollAt,   setLastPollAt]   = useState<Date | null>(null);
   const [taskRows,     setTaskRows]     = useState<main.TaskStatusRow[]>([]);
   const [togglingTask, setTogglingTask] = useState<string | null>(null);
+  const [togglingAll,  setTogglingAll]  = useState(false);
 
   // Right-click context menu state: viewport-relative position + target task info.
   const [ctxMenu, setCtxMenu] = useState<{
@@ -484,6 +485,29 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
     }
   }, [db, schema]);
 
+  // ── Suspend / Resume all tasks in the graph ───────────────────────────────
+  const suspendResumeAll = useCallback(async () => {
+    const rootRow = taskRowsRef.current.find(
+      (t) => t.name.toUpperCase() === rootUpperRef.current,
+    );
+    const isStarted = rootRow?.taskState?.toUpperCase() === "STARTED";
+    setTogglingAll(true);
+    try {
+      if (isStarted) {
+        await SuspendTaskGraph(db, schema, rootNameRef.current);
+        message.success(`Graph suspended: ${rootNameRef.current}`);
+      } else {
+        await EnableTaskDependents(db, schema, rootNameRef.current);
+        message.success(`Graph resumed: ${rootNameRef.current}`);
+      }
+      load();
+    } catch (err) {
+      message.error(String(err));
+    } finally {
+      setTogglingAll(false);
+    }
+  }, [db, schema, load]);
+
   // ── Right-click context menu ──────────────────────────────────────────────
   const onNodeCtxMenu = useCallback((event: React.MouseEvent, node: Node) => {
     event.preventDefault();
@@ -547,12 +571,17 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
     .reduce((max, ms) => Math.max(max, ms), 0);
   const within14Days    = mostRecentFailMs > 0 &&
     Date.now() - mostRecentFailMs < 14 * 24 * 60 * 60 * 1000;
-  const canRetry        = graphRunFailed && within14Days;
-  const retryTooltip    = !graphRunFailed
+  const canRetry     = graphRunFailed && within14Days;
+  const retryTooltip = !graphRunFailed
     ? "Last graph run did not fail or get cancelled"
     : !within14Days
     ? "Last failed run was more than 14 days ago"
     : `Retry last failed run of ${rootName}`;
+
+  // ── Root task state (for Suspend/Resume All button label) ────────────────
+  const rootIsStarted = taskRows.find(
+    (t) => t.name.toUpperCase() === rootUpperRef.current,
+  )?.taskState?.toUpperCase() === "STARTED";
 
   // ── Formatted last-updated ────────────────────────────────────────────────
   const lastUpdatedLabel = lastPollAt
@@ -636,6 +665,16 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
                     size="small"
                   >
                     Retry Failed
+                  </Button>
+                </Tooltip>
+                <Tooltip title={rootIsStarted ? "Suspend all tasks in graph" : "Resume all tasks in graph"}>
+                  <Button
+                    icon={rootIsStarted ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
+                    loading={togglingAll}
+                    size="small"
+                    onClick={suspendResumeAll}
+                  >
+                    {rootIsStarted ? "Suspend All" : "Resume All"}
                   </Button>
                 </Tooltip>
                 <Tooltip title="Delete all tasks in this graph">
