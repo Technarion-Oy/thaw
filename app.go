@@ -2349,6 +2349,115 @@ func (a *App) SuspendTaskGraph(database, schema, taskName string) error {
 	return nil
 }
 
+// DropTaskTree suspends and drops the named task and all of its descendants.
+// Tasks are processed in post-order (leaves first, root last) so children are
+// always removed before their parent. Each task is suspended before it is
+// dropped; SUSPEND failures are treated as non-fatal (the task may already be
+// suspended or not exist). The DROP uses IF EXISTS so missing tasks are skipped
+// silently. Returns the first DROP error encountered, if any.
+func (a *App) DropTaskTree(database, schema, taskName string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+
+	toString := func(v interface{}) string {
+		if v == nil {
+			return ""
+		}
+		switch t := v.(type) {
+		case []byte:
+			return string(t)
+		case string:
+			return t
+		default:
+			return fmt.Sprintf("%v", t)
+		}
+	}
+
+	// List all tasks to build the dependency graph.
+	res, err := a.client.Execute(a.ctx,
+		fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
+	if err != nil {
+		return err
+	}
+
+	nameIdx, predsIdx := -1, -1
+	for i, col := range res.Columns {
+		switch strings.ToLower(col) {
+		case "name":
+			nameIdx = i
+		case "predecessors", "predecessor":
+			predsIdx = i
+		}
+	}
+	if nameIdx < 0 {
+		return fmt.Errorf("SHOW TASKS did not return a name column")
+	}
+
+	childrenOf := make(map[string][]string) // UPPER(parent) → []child original-case names
+	taskNames := make(map[string]string)    // UPPER(name) → original-case name
+	for _, row := range res.Rows {
+		name := ""
+		if nameIdx < len(row) {
+			name = toString(row[nameIdx])
+		}
+		if name == "" {
+			continue
+		}
+		taskNames[strings.ToUpper(name)] = name
+		if predsIdx < 0 || predsIdx >= len(row) {
+			continue
+		}
+		preds := toString(row[predsIdx])
+		if preds == "" || preds == "[]" || preds == "<nil>" {
+			continue
+		}
+		preds = strings.TrimPrefix(strings.TrimSuffix(strings.TrimSpace(preds), "]"), "[")
+		for _, part := range strings.Split(preds, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			segs := strings.Split(part, ".")
+			parent := strings.ToUpper(strings.Trim(segs[len(segs)-1], `"`))
+			childrenOf[parent] = append(childrenOf[parent], name)
+		}
+	}
+
+	// Post-order DFS: collect tasks in leaf-first order.
+	var dropOrder []string
+	visited := make(map[string]bool)
+	var dfs func(name string)
+	dfs = func(name string) {
+		upper := strings.ToUpper(name)
+		if visited[upper] {
+			return
+		}
+		visited[upper] = true
+		for _, child := range childrenOf[upper] {
+			dfs(child)
+		}
+		// Use original-case name if known.
+		if orig, ok := taskNames[upper]; ok {
+			name = orig
+		}
+		dropOrder = append(dropOrder, name)
+	}
+	dfs(taskName)
+
+	// Suspend then drop each task (leaves first).
+	for _, name := range dropOrder {
+		_, _ = a.client.Execute(a.ctx,
+			fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s SUSPEND", q(database), q(schema), q(name)))
+		if _, err := a.client.Execute(a.ctx,
+			fmt.Sprintf("DROP TASK IF EXISTS %s.%s.%s", q(database), q(schema), q(name))); err != nil {
+			return fmt.Errorf("dropping task %q: %w", name, err)
+		}
+	}
+	return nil
+}
+
 // in the given schema.  It runs two queries:
 //  1. SHOW TASKS IN SCHEMA — yields the task list and their STARTED/SUSPENDED state.
 //  2. INFORMATION_SCHEMA.TASK_HISTORY — yields the most-recent run status for
