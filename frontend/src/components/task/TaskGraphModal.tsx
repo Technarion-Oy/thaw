@@ -9,11 +9,12 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Modal, Spin, Button, Space, Typography, Alert, Tag, message, Tooltip } from "antd";
+import { Modal, Spin, Button, Space, Typography, Alert, Tag, message, Tooltip, Menu } from "antd";
 import {
   CheckCircleOutlined, CloseCircleOutlined, SyncOutlined,
   MinusCircleOutlined, ClockCircleOutlined, ReloadOutlined,
   CaretRightOutlined, RedoOutlined,
+  PauseCircleOutlined, PlayCircleOutlined,
 } from "@ant-design/icons";
 import {
   ReactFlow,
@@ -29,7 +30,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import dagre from "@dagrejs/dagre";
-import { GetTaskStatuses, ExecuteTask } from "../../../wailsjs/go/main/App";
+import { GetTaskStatuses, ExecuteTask, AlterTask } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 
@@ -288,13 +289,19 @@ export interface TaskGraphModalProps {
 }
 
 export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGraphModalProps) {
-  const [loading,    setLoading]    = useState(true);
-  const [loadError,  setLoadError]  = useState<string | null>(null);
-  const [rootName,   setRootName]   = useState(taskName);
-  const [executing,  setExecuting]  = useState(false);
-  const [retrying,   setRetrying]   = useState(false);
-  const [lastPollAt, setLastPollAt] = useState<Date | null>(null);
-  const [taskRows,   setTaskRows]   = useState<main.TaskStatusRow[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [loadError,    setLoadError]    = useState<string | null>(null);
+  const [rootName,     setRootName]     = useState(taskName);
+  const [executing,    setExecuting]    = useState(false);
+  const [retrying,     setRetrying]     = useState(false);
+  const [lastPollAt,   setLastPollAt]   = useState<Date | null>(null);
+  const [taskRows,     setTaskRows]     = useState<main.TaskStatusRow[]>([]);
+  const [togglingTask, setTogglingTask] = useState<string | null>(null);
+
+  // Right-click context menu state: viewport-relative position + target task info.
+  const [ctxMenu, setCtxMenu] = useState<{
+    x: number; y: number; name: string; taskState: string;
+  } | null>(null);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -396,6 +403,43 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
     }
   }, [db, schema]);
 
+  // ── Right-click context menu ──────────────────────────────────────────────
+  const onNodeCtxMenu = useCallback((event: React.MouseEvent, node: Node) => {
+    event.preventDefault();
+    const t = taskRowsRef.current.find((r) => r.name.toUpperCase() === node.id.toUpperCase());
+    if (!t) return;
+    setCtxMenu({ x: event.clientX, y: event.clientY, name: t.name, taskState: t.taskState ?? "" });
+  }, []);
+
+  const toggleTask = useCallback(async (name: string, action: "SUSPEND" | "RESUME") => {
+    setCtxMenu(null);
+    setTogglingTask(name);
+    try {
+      await AlterTask(db, schema, name, action);
+      message.success(`Task ${action === "SUSPEND" ? "suspended" : "resumed"}: ${name}`);
+      // Optimistically update node label and taskRowsRef so the state badge
+      // changes immediately without waiting for the next poll.
+      const newState = action === "SUSPEND" ? "SUSPENDED" : "STARTED";
+      const updateRow = (r: main.TaskStatusRow) =>
+        r.name.toUpperCase() === name.toUpperCase() ? { ...r, taskState: newState } : r;
+      taskRowsRef.current = taskRowsRef.current.map(updateRow);
+      setTaskRows((prev) => prev.map(updateRow));
+      setNodes((prev) =>
+        prev.map((n) => {
+          if (n.id.toUpperCase() !== name.toUpperCase()) return n;
+          const t = taskRowsRef.current.find((r) => r.name.toUpperCase() === name.toUpperCase());
+          if (!t) return n;
+          const isRoot = n.id.toUpperCase() === rootUpperRef.current;
+          return { ...n, data: { ...n.data, label: buildLabel(t, isRoot, undefined) } };
+        })
+      );
+    } catch (err) {
+      message.error(String(err));
+    } finally {
+      setTogglingTask(null);
+    }
+  }, [db, schema]);
+
   // ── Retry eligibility (mirrors Snowflake's RETRY LAST conditions) ────────
   // A graph run is considered failed if ANY task in it failed — the root task
   // itself may have succeeded while a child task failed.
@@ -464,6 +508,9 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
           edges={edges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
+          onNodeContextMenu={onNodeCtxMenu}
+          onPaneClick={() => setCtxMenu(null)}
+          onNodeClick={() => setCtxMenu(null)}
           fitView
           fitViewOptions={{ padding: 0.18 }}
           nodesDraggable
@@ -525,6 +572,57 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
           </Panel>
         </ReactFlow>
       )}
+
+      {/* ── Node right-click context menu ────────────────────────────────── */}
+      {ctxMenu && (() => {
+        const isStarted = ctxMenu.taskState.toUpperCase() === "STARTED";
+        return (
+          <>
+            {/* Transparent overlay to dismiss the menu on click-away */}
+            <div
+              style={{ position: "fixed", inset: 0, zIndex: 998 }}
+              onClick={() => setCtxMenu(null)}
+            />
+            <div style={{ position: "fixed", top: ctxMenu.y, left: ctxMenu.x, zIndex: 999 }}>
+              <Menu
+                style={{
+                  minWidth: 180,
+                  borderRadius: 6,
+                  boxShadow: "0 4px 16px rgba(0,0,0,0.35)",
+                  border: "1px solid var(--border, #444)",
+                }}
+                items={[
+                  {
+                    key: "label",
+                    label: (
+                      <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--text-faint)" }}>
+                        {ctxMenu.name}
+                      </span>
+                    ),
+                    disabled: true,
+                  },
+                  { type: "divider" },
+                  isStarted
+                    ? {
+                        key: "suspend",
+                        icon: <PauseCircleOutlined />,
+                        label: togglingTask === ctxMenu.name ? "Suspending…" : "Suspend",
+                        disabled: togglingTask === ctxMenu.name,
+                        onClick: () => toggleTask(ctxMenu.name, "SUSPEND"),
+                      }
+                    : {
+                        key: "resume",
+                        icon: <PlayCircleOutlined />,
+                        label: togglingTask === ctxMenu.name ? "Resuming…" : "Resume",
+                        disabled: togglingTask === ctxMenu.name,
+                        onClick: () => toggleTask(ctxMenu.name, "RESUME"),
+                      },
+                ]}
+              />
+            </div>
+          </>
+        );
+      })()}
     </Modal>
   );
 }
