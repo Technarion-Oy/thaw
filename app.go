@@ -2041,6 +2041,7 @@ type TaskStatusRow struct {
 	LastRunState string `json:"lastRunState"` // SUCCEEDED | FAILED | RUNNING | SKIPPED | CANCELLED | ""
 	LastRunTime  string `json:"lastRunTime"`  // ISO-8601 timestamp or ""
 	ErrorMsg     string `json:"errorMsg"`     // exception text when last run failed
+	Finalize     string `json:"finalize"`     // fully-qualified root task name for finalizer tasks, "" otherwise
 }
 
 // TaskStatusesResult wraps the per-task rows and an optional history-query
@@ -2402,9 +2403,11 @@ func (a *App) GetTaskStatuses(database, schema string) (TaskStatusesResult, erro
 		return TaskStatusesResult{}, err
 	}
 
-	nameIdx  := colIdx(showRes.Columns, "name")
-	stateIdx := colIdx(showRes.Columns, "state")
-	predsIdx := colIdx(showRes.Columns, "predecessors", "predecessor")
+	nameIdx      := colIdx(showRes.Columns, "name")
+	stateIdx     := colIdx(showRes.Columns, "state")
+	predsIdx     := colIdx(showRes.Columns, "predecessors", "predecessor")
+	finalizeIdx  := colIdx(showRes.Columns, "finalize", "finalize_task")
+	taskRelIdx   := colIdx(showRes.Columns, "task_relations")
 
 	// TEMP DEBUG — log SHOW TASKS columns and first-row preds values.
 	logger.L.Debug("SHOW TASKS columns", "cols", showRes.Columns, "predsIdx", predsIdx)
@@ -2419,6 +2422,7 @@ func (a *App) GetTaskStatuses(database, schema string) (TaskStatusesResult, erro
 		name         string
 		taskState    string
 		predecessors string
+		finalize     string
 	}
 	var tasks []entry
 	nameMap := map[string]int{} // UPPER(name) → index in tasks slice
@@ -2438,13 +2442,32 @@ func (a *App) GetTaskStatuses(database, schema string) (TaskStatusesResult, erro
 		if predsIdx >= 0 && predsIdx < len(row) {
 			preds = toString(row[predsIdx])
 		}
+		// Finalize: try dedicated column first, then parse from task_relations JSON.
+		finalize := ""
+		if finalizeIdx >= 0 && finalizeIdx < len(row) {
+			finalize = toString(row[finalizeIdx])
+		}
+		if finalize == "" && taskRelIdx >= 0 && taskRelIdx < len(row) {
+			raw := toString(row[taskRelIdx])
+			if raw != "" && raw != "null" {
+				// task_relations is JSON, e.g. {"predecessors":[...],"finalize":"DB.SCHEMA.ROOT"}
+				// Simple key extraction without full JSON decode to avoid import churn.
+				const key = `"finalize":"`
+				if idx := strings.Index(raw, key); idx >= 0 {
+					rest := raw[idx+len(key):]
+					if end := strings.Index(rest, `"`); end >= 0 {
+						finalize = rest[:end]
+					}
+				}
+			}
+		}
 		nameMap[strings.ToUpper(name)] = len(tasks)
-		tasks = append(tasks, entry{name: name, taskState: strings.ToUpper(state), predecessors: preds})
+		tasks = append(tasks, entry{name: name, taskState: strings.ToUpper(state), predecessors: preds, finalize: finalize})
 	}
 
 	rows := make([]TaskStatusRow, len(tasks))
 	for i, t := range tasks {
-		rows[i] = TaskStatusRow{Name: t.name, TaskState: t.taskState, Predecessors: t.predecessors}
+		rows[i] = TaskStatusRow{Name: t.name, TaskState: t.taskState, Predecessors: t.predecessors, Finalize: t.finalize}
 	}
 
 	// ── Step 2: fetch run history (best-effort) ───────────────────────────────

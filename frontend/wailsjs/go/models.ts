@@ -802,6 +802,7 @@ export namespace main {
 	    lastRunState: string;
 	    lastRunTime: string;
 	    errorMsg: string;
+	    finalize: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new TaskStatusRow(source);
@@ -815,6 +816,7 @@ export namespace main {
 	        this.lastRunState = source["lastRunState"];
 	        this.lastRunTime = source["lastRunTime"];
 	        this.errorMsg = source["errorMsg"];
+	        this.finalize = source["finalize"];
 	    }
 	}
 	export class TaskStatusesResult {

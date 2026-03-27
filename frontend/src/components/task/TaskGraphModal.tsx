@@ -129,7 +129,7 @@ function formatRunTime(iso: string): string {
 // overrideRunState replaces lastRunState for display purposes (e.g. "WAITING",
 // inferred "SKIPPED"). Pass undefined to use the real value.
 
-function buildLabel(t: main.TaskStatusRow, isRoot: boolean, overrideRunState?: string) {
+function buildLabel(t: main.TaskStatusRow, isRoot: boolean, overrideRunState?: string, isFinalizer?: boolean) {
   const started      = t.taskState?.toUpperCase() === "STARTED";
   const effectiveState = (overrideRunState ?? t.lastRunState ?? "").toUpperCase();
   // Show timestamp for terminal states; suppress for Waiting/never-run/executing.
@@ -157,12 +157,23 @@ function buildLabel(t: main.TaskStatusRow, isRoot: boolean, overrideRunState?: s
         {t.name}
       </div>
       <div style={{ display: "flex", gap: 4, justifyContent: "center", flexWrap: "wrap" }}>
-        <Tag
-          color={started ? "success" : "default"}
-          style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}
-        >
-          {t.taskState || "UNKNOWN"}
-        </Tag>
+        {isFinalizer && (
+          <Tag
+            icon={<FlagOutlined />}
+            color="purple"
+            style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}
+          >
+            Finalizer
+          </Tag>
+        )}
+        {!isFinalizer && (
+          <Tag
+            color={started ? "success" : "default"}
+            style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}
+          >
+            {t.taskState || "UNKNOWN"}
+          </Tag>
+        )}
         {runStateTag(overrideRunState ?? t.lastRunState ?? "")}
       </div>
       {timeLabel && (
@@ -176,12 +187,17 @@ function buildLabel(t: main.TaskStatusRow, isRoot: boolean, overrideRunState?: s
 
 // ── Dagre layout ──────────────────────────────────────────────────────────────
 
-function applyLayout(nodes: Node[], edges: Edge[]): Node[] {
+function applyLayout(
+  nodes: Node[],
+  edges: Edge[],
+  extraEdges?: Array<{ source: string; target: string }>,
+): Node[] {
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
   g.setGraph({ rankdir: "LR", nodesep: 40, ranksep: 80 });
   nodes.forEach((n) => g.setNode(n.id, { width: NODE_W, height: NODE_H }));
   edges.forEach((e) => g.setEdge(e.source, e.target));
+  extraEdges?.forEach((e) => g.setEdge(e.source, e.target));
   dagre.layout(g);
   return nodes.map((n) => {
     const { x, y } = g.node(n.id);
@@ -228,32 +244,62 @@ function buildGraph(tasks: main.TaskStatusRow[], focusedName: string) {
     }
   }
 
+  // Also include finalizer tasks that reference the root task.
+  const finalizerUpperNames = new Set<string>();
+  tasks.forEach((t) => {
+    if (!t.finalize) return;
+    const finUpper = extractName(t.finalize).toUpperCase();
+    if (finUpper === rootUpper) {
+      included.add(t.name.toUpperCase());
+      finalizerUpperNames.add(t.name.toUpperCase());
+    }
+  });
+
   const focusedUpper = focusedName.toUpperCase();
   const rootTaskName = byName.get(rootUpper)?.name ?? focusedName;
 
+  // Leaf nodes: included non-finalizer nodes that have no included children.
+  // Used as layout-hint sources so Dagre pushes the finalizer to the far right.
+  const leafUpperNames = new Set<string>();
+  included.forEach((upper) => {
+    if (finalizerUpperNames.has(upper)) return;
+    const hasIncludedChild = (childrenOf.get(upper) ?? []).some((c) =>
+      included.has(c.toUpperCase()),
+    );
+    if (!hasIncludedChild) leafUpperNames.add(upper);
+  });
+
   const nodes: Node[] = [];
   const edges: Edge[] = [];
+  const layoutOnlyEdges: Array<{ source: string; target: string }> = [];
 
   included.forEach((upper) => {
     const t = byName.get(upper);
     if (!t) return;
 
-    const isRoot    = upper === rootUpper;
-    const isFocused = upper === focusedUpper && upper !== rootUpper;
+    const isRoot      = upper === rootUpper;
+    const isFinalizer = finalizerUpperNames.has(upper);
+    const isFocused   = upper === focusedUpper && upper !== rootUpper && !isFinalizer;
 
     nodes.push({
       id: t.name,
       position: { x: 0, y: 0 },
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
-      data: { label: buildLabel(t, isRoot, skippedNodes.has(upper) ? "SKIPPED" : undefined) },
+      data: {
+        label: buildLabel(t, isRoot, skippedNodes.has(upper) ? "SKIPPED" : undefined, isFinalizer),
+        isFinalizer,
+      },
       style: {
         background: isFocused
           ? "var(--accent-bg, #1c3a5e)"
           : "var(--bg-overlay, #252526)",
         border: `1.5px solid ${
-          isRoot || isFocused ? "var(--link, #4d9ef7)" : "var(--border, #444)"
+          isFinalizer          ? "#9254de"
+          : isRoot || isFocused ? "var(--link, #4d9ef7)"
+          : "var(--border, #444)"
         }`,
+        borderStyle: isFinalizer ? "dashed" : "solid",
         borderRadius: 8,
         width: NODE_W,
         height: NODE_H,
@@ -265,20 +311,43 @@ function buildGraph(tasks: main.TaskStatusRow[], focusedName: string) {
       },
     });
 
-    for (const child of childrenOf.get(upper) ?? []) {
-      if (!included.has(child.toUpperCase())) continue;
+    if (!isFinalizer) {
+      for (const child of childrenOf.get(upper) ?? []) {
+        if (!included.has(child.toUpperCase())) continue;
+        edges.push({
+          id: `${t.name}→${child}`,
+          source: t.name,
+          target: child,
+          type: "smoothstep",
+          markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: "#888" },
+          style: { stroke: "#888", strokeWidth: 1.5 },
+        });
+      }
+    } else {
+      // Dashed purple edge from root → finalizer.
       edges.push({
-        id: `${t.name}→${child}`,
-        source: t.name,
-        target: child,
+        id: `${rootTaskName}⟶finalizer:${t.name}`,
+        source: rootTaskName,
+        target: t.name,
         type: "smoothstep",
-        markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: "#888" },
-        style: { stroke: "#888", strokeWidth: 1.5 },
+        label: "finalizes",
+        labelStyle: { fontSize: 10, fill: "#9254de" },
+        labelBgStyle: { fill: "var(--bg-overlay, #252526)", fillOpacity: 0.85 },
+        markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: "#9254de" },
+        style: { stroke: "#9254de", strokeWidth: 1.5, strokeDasharray: "5 3" },
       });
+      // Invisible layout edges from every leaf → finalizer so Dagre places it
+      // at the rightmost rank, after all leaf tasks.
+      leafUpperNames.forEach((leafUpper) => {
+        const leaf = byName.get(leafUpper);
+        if (leaf) layoutOnlyEdges.push({ source: leaf.name, target: t.name });
+      });
+      // Always include a layout edge from root for single-task graphs.
+      layoutOnlyEdges.push({ source: rootTaskName, target: t.name });
     }
   });
 
-  return { nodes, edges, rootTaskName, childrenOf };
+  return { nodes, edges, layoutOnlyEdges, rootTaskName, childrenOf };
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -302,7 +371,7 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
 
   // Right-click context menu state: viewport-relative position + target task info.
   const [ctxMenu, setCtxMenu] = useState<{
-    x: number; y: number; name: string; taskState: string;
+    x: number; y: number; name: string; taskState: string; isFinalizer: boolean;
   } | null>(null);
 
   // Create Task dialog opened from the graph (child or finalizer mode).
@@ -323,11 +392,11 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
     setLoadError(null);
     GetTaskStatuses(db, schema)
       .then((r) => {
-        const { nodes: n, edges: e, rootTaskName } = buildGraph(r.rows ?? [], taskName);
+        const { nodes: n, edges: e, layoutOnlyEdges, rootTaskName } = buildGraph(r.rows ?? [], taskName);
         rootNameRef.current  = rootTaskName;
         rootUpperRef.current = rootTaskName.toUpperCase();
         setRootName(rootTaskName);
-        setNodes(applyLayout(n, e));
+        setNodes(applyLayout(n, e, layoutOnlyEdges));
         setEdges(e);
         taskRowsRef.current = r.rows ?? [];
         setTaskRows(r.rows ?? []);
@@ -357,9 +426,10 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
             prev.map((n) => {
               const t = byName.get(n.id.toUpperCase());
               if (!t) return n;
-              const isRoot       = n.id.toUpperCase() === rootUpper;
+              const isRoot        = n.id.toUpperCase() === rootUpper;
               const overrideState = skipped.has(n.id.toUpperCase()) ? "SKIPPED" : undefined;
-              return { ...n, data: { ...n.data, label: buildLabel(t, isRoot, overrideState) } };
+              const isFinalizer   = !!(n.data as { isFinalizer?: boolean }).isFinalizer;
+              return { ...n, data: { ...n.data, label: buildLabel(t, isRoot, overrideState, isFinalizer) } };
             })
           );
           taskRowsRef.current = rows;
@@ -415,7 +485,8 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
     event.preventDefault();
     const t = taskRowsRef.current.find((r) => r.name.toUpperCase() === node.id.toUpperCase());
     if (!t) return;
-    setCtxMenu({ x: event.clientX, y: event.clientY, name: t.name, taskState: t.taskState ?? "" });
+    const isFinalizer = !!(node.data as { isFinalizer?: boolean }).isFinalizer;
+    setCtxMenu({ x: event.clientX, y: event.clientY, name: t.name, taskState: t.taskState ?? "", isFinalizer });
   }, []);
 
   const toggleTask = useCallback(async (name: string, action: "SUSPEND" | "RESUME") => {
@@ -642,8 +713,12 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
                   {
                     key: "add-child",
                     icon: <PlusOutlined />,
-                    label: "Add Child Task…",
+                    label: ctxMenu.isFinalizer
+                      ? "Add Child Task… (not for finalizers)"
+                      : "Add Child Task…",
+                    disabled: ctxMenu.isFinalizer,
                     onClick: () => {
+                      if (ctxMenu.isFinalizer) return;
                       setCreateTaskDialog({ mode: "child", taskName: ctxMenu.name });
                       setCtxMenu(null);
                     },
@@ -651,12 +726,14 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
                   {
                     key: "add-finalizer",
                     icon: <FlagOutlined />,
-                    label: ctxMenu.name.toUpperCase() !== rootUpperRef.current
+                    label: ctxMenu.isFinalizer
+                      ? "Add Finalizer Task… (not for finalizers)"
+                      : ctxMenu.name.toUpperCase() !== rootUpperRef.current
                       ? "Add Finalizer Task… (root only)"
                       : "Add Finalizer Task…",
-                    disabled: ctxMenu.name.toUpperCase() !== rootUpperRef.current,
+                    disabled: ctxMenu.isFinalizer || ctxMenu.name.toUpperCase() !== rootUpperRef.current,
                     onClick: () => {
-                      if (ctxMenu.name.toUpperCase() !== rootUpperRef.current) return;
+                      if (ctxMenu.isFinalizer || ctxMenu.name.toUpperCase() !== rootUpperRef.current) return;
                       setCreateTaskDialog({ mode: "finalizer", taskName: ctxMenu.name });
                       setCtxMenu(null);
                     },
