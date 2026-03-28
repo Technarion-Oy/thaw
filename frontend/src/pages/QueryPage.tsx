@@ -104,6 +104,7 @@ export default function QueryPage() {
   const [currentUser, setCurrentUser] = useState<string | null>(null);
   const [currentRegion, setCurrentRegion] = useState<string | null>(null);
   const [snowsightUrl, setSnowsightUrl] = useState<string | null>(null);
+  const [snowsightModalOpen, setSnowsightModalOpen] = useState(false);
   const [sessionParams, setSessionParams] = useState<main.SessionParam[] | null>(null);
   const [sessionVars, setSessionVars] = useState<main.SessionVar[] | null>(null);
   const [sessionPropsError, setSessionPropsError] = useState<string | null>(null);
@@ -370,6 +371,8 @@ export default function QueryPage() {
       setSessionPropsError(String(e));
     }
   };
+
+  const openSnowsight = () => setSnowsightModalOpen(true);
 
   const handleParamChange = (key: string, value: string) => {
     setSessionParams((prev) => prev ? prev.map((p) => p.key === key ? { ...p, value } : p) : prev);
@@ -879,31 +882,19 @@ export default function QueryPage() {
                   {[currentUser, currentRegion].filter(Boolean).join(" · ")}
                 </div>
               )}
-              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <Dropdown
-                  trigger={["contextMenu"]}
-                  menu={{
-                    items: [
-                      { key: "session-props", label: "Session Properties", onClick: openSessionProperties },
-                    ],
-                  }}
-                >
-                  <Tag color="blue" style={{ fontSize: 11, margin: 0, cursor: "context-menu" }}>
-                    {params.account} · {params.user}
-                  </Tag>
-                </Dropdown>
-                {snowsightUrl && (
-                  <Tooltip title="Open Snowsight">
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<GlobalOutlined style={{ fontSize: 12 }} />}
-                      style={{ padding: "0 2px", height: 18, minWidth: 18, color: "var(--text-muted)" }}
-                      onClick={() => BrowserOpenURL(snowsightUrl)}
-                    />
-                  </Tooltip>
-                )}
-              </div>
+              <Dropdown
+                trigger={["contextMenu"]}
+                menu={{
+                  items: [
+                    { key: "session-props", label: "Session Properties", onClick: openSessionProperties },
+                    { key: "snowsight", label: "Open Snowsight…", onClick: openSnowsight },
+                  ],
+                }}
+              >
+                <Tag color="blue" style={{ fontSize: 11, margin: 0, cursor: "context-menu" }}>
+                  {params.account} · {params.user}
+                </Tag>
+              </Dropdown>
             </div>
           )}
           <Button
@@ -1389,6 +1380,29 @@ export default function QueryPage() {
           onVarChange={handleVarChange}
         />
       )}
+
+      <Modal
+        open={snowsightModalOpen}
+        title="Open Snowsight"
+        onCancel={() => setSnowsightModalOpen(false)}
+        footer={[
+          <Button key="copy" icon={<CopyOutlined />} onClick={() => {
+            if (snowsightUrl) ClipboardSetText(snowsightUrl).then(() => message.success("Link copied"));
+          }}>
+            Copy Link
+          </Button>,
+          <Button key="open" type="primary" icon={<GlobalOutlined />} onClick={() => {
+            if (snowsightUrl) { BrowserOpenURL(snowsightUrl); setSnowsightModalOpen(false); }
+          }}>
+            Open in Browser
+          </Button>,
+          <Button key="cancel" onClick={() => setSnowsightModalOpen(false)}>Cancel</Button>,
+        ]}
+      >
+        {snowsightUrl
+          ? <Typography.Text copyable={{ text: snowsightUrl }} style={{ wordBreak: "break-all" }}>{snowsightUrl}</Typography.Text>
+          : <Spin size="small" />}
+      </Modal>
 
       <Modal
         open={closeConfirm !== null}
