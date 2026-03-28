@@ -17,8 +17,9 @@ import {
   ClockCircleOutlined, EditOutlined, CheckOutlined, CloseOutlined,
   PlayCircleOutlined, PauseCircleOutlined, PlusOutlined, DeleteOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterTask, ListNotificationIntegrations, ListFinalizableTasks, TaskHasChildren, EnableTaskDependents, SuspendTaskGraph } from "../../../wailsjs/go/main/App";
+import { GetObjectProperties, AlterTask, ListNotificationIntegrations, ListFinalizableTasks, TaskHasChildren, GetTaskStatuses, SuspendTaskList, ResumeTaskList } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
+import { parsePredecessors as parsePredecessorsUtil, extractName } from "../../utils/taskHierarchy";
 import WhenConditionBuilder from "./WhenConditionBuilder";
 import ScheduleEditor from "./ScheduleEditor";
 
@@ -525,12 +526,64 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
   const toggleGraph = async () => {
     setTogglingGraph(true);
     try {
+      const result = await GetTaskStatuses(db, schema);
+      const rows = result.rows ?? [];
+
+      // Build parent/children maps using the proven frontend parsePredecessors.
+      const byName = new Map<string, string>(); // UPPER → original name
+      const childrenOf = new Map<string, string[]>();
+      const parentOf   = new Map<string, string>();
+      rows.forEach((t) => {
+        byName.set(t.name.toUpperCase(), t.name);
+        for (const p of parsePredecessorsUtil(t.predecessors ?? "")) {
+          const pu = extractName(p).toUpperCase();
+          if (!childrenOf.has(pu)) childrenOf.set(pu, []);
+          childrenOf.get(pu)!.push(t.name);
+          parentOf.set(t.name.toUpperCase(), pu);
+        }
+      });
+
+      // Walk up from `name` to find the true root of the graph.
+      let rootUpper = name.toUpperCase();
+      while (parentOf.has(rootUpper)) rootUpper = parentOf.get(rootUpper)!;
+      const rootName = byName.get(rootUpper) ?? name;
+
+      // BFS from root → [root, …, leaves].
+      const bfsOrder: string[] = [];
+      const visited = new Set<string>();
+      const queue = [rootName];
+      visited.add(rootUpper);
+      while (queue.length > 0) {
+        const cur = queue.shift()!;
+        bfsOrder.push(cur);
+        for (const child of childrenOf.get(cur.toUpperCase()) ?? []) {
+          if (!visited.has(child.toUpperCase())) {
+            visited.add(child.toUpperCase());
+            queue.push(child);
+          }
+        }
+      }
+
+      // Collect finalizer tasks for this root.
+      const finalizerNames = rows
+        .filter((t) => t.finalize && extractName(t.finalize).toUpperCase() === rootUpper)
+        .map((t) => t.name)
+        .filter((fn) => !visited.has(fn.toUpperCase()));
+
       if (isStarted) {
-        await SuspendTaskGraph(db, schema, name);
-        message.success("Task and all child tasks suspended");
+        // Suspend: root first, then descendants, finalizers last.
+        await SuspendTaskList(db, schema, [...bfsOrder, ...finalizerNames]);
+        message.success("Task graph suspended");
       } else {
-        await EnableTaskDependents(db, schema, name);
-        message.success("Task and all child tasks resumed");
+        // Resume: leaves first (reverse BFS excl. root), finalizers, root last.
+        const reversedBfs = [...bfsOrder].reverse();
+        const resumeOrder = [
+          ...reversedBfs.slice(0, -1),
+          ...finalizerNames,
+          reversedBfs[reversedBfs.length - 1],
+        ];
+        await ResumeTaskList(db, schema, resumeOrder);
+        message.success("Task graph resumed");
       }
       await load();
     } catch (e) { message.error(String(e)); }

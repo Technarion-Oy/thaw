@@ -2243,6 +2243,16 @@ func (a *App) EnableTaskDependents(database, schema, taskName string) error {
 			return string(t)
 		case string:
 			return t
+		case []interface{}:
+			// gosnowflake may decode VARIANT array columns as []interface{}.
+			// Re-encode as a bracket-comma string so the bracket-strip parser below works.
+			parts := make([]string, 0, len(t))
+			for _, el := range t {
+				if el != nil {
+					parts = append(parts, fmt.Sprintf("%v", el))
+				}
+			}
+			return "[" + strings.Join(parts, ",") + "]"
 		default:
 			return fmt.Sprintf("%v", t)
 		}
@@ -2287,7 +2297,7 @@ func (a *App) EnableTaskDependents(database, schema, taskName string) error {
 			continue
 		}
 		preds := toString(row[predsIdx])
-		if preds == "" || preds == "[]" || preds == "<nil>" {
+		if preds == "" || preds == "[]" || preds == "<nil>" || preds == "null" {
 			continue
 		}
 		preds = strings.TrimPrefix(preds, "[")
@@ -2336,6 +2346,45 @@ func (a *App) EnableTaskDependents(database, schema, taskName string) error {
 	return nil
 }
 
+// SuspendTaskList suspends each task in the provided list in order.
+// The caller is responsible for the correct ordering: the root task should
+// appear first so it stops scheduling new runs before its children are touched.
+// This is used by the frontend which already has the full graph state and can
+// compute the correct order without re-parsing SHOW TASKS predecessor columns.
+func (a *App) SuspendTaskList(database, schema string, names []string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	for _, name := range names {
+		if _, err := a.client.Execute(a.ctx,
+			fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s SUSPEND", q(database), q(schema), q(name))); err != nil {
+			return fmt.Errorf("suspending task %q: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// ResumeTaskList resumes each task in the provided list in order.
+// The caller is responsible for the correct ordering: leaf tasks should appear
+// first and the root task last, since Snowflake requires all predecessor tasks
+// to be STARTED before a successor task can be resumed.
+// This is used by the frontend which already has the full graph state and can
+// compute the correct order without re-parsing SHOW TASKS predecessor columns.
+func (a *App) ResumeTaskList(database, schema string, names []string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	for _, name := range names {
+		if _, err := a.client.Execute(a.ctx,
+			fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s RESUME", q(database), q(schema), q(name))); err != nil {
+			return fmt.Errorf("resuming task %q: %w", name, err)
+		}
+	}
+	return nil
+}
+
 // SuspendTaskGraph suspends the root task first (to stop it from scheduling new
 // runs) and then suspends every descendant task in the graph.  It uses SHOW
 // TASKS IN SCHEMA to build the dependency graph and does a BFS from the root
@@ -2355,6 +2404,14 @@ func (a *App) SuspendTaskGraph(database, schema, taskName string) error {
 			return string(t)
 		case string:
 			return t
+		case []interface{}:
+			parts := make([]string, 0, len(t))
+			for _, el := range t {
+				if el != nil {
+					parts = append(parts, fmt.Sprintf("%v", el))
+				}
+			}
+			return "[" + strings.Join(parts, ",") + "]"
 		default:
 			return fmt.Sprintf("%v", t)
 		}
@@ -2402,7 +2459,7 @@ func (a *App) SuspendTaskGraph(database, schema, taskName string) error {
 			continue
 		}
 		preds := toString(row[predsIdx])
-		if preds == "" || preds == "[]" || preds == "<nil>" {
+		if preds == "" || preds == "[]" || preds == "<nil>" || preds == "null" {
 			continue
 		}
 		preds = strings.TrimPrefix(preds, "[")

@@ -289,6 +289,8 @@ export function ResizeShell(arg1:number,arg2:number):Promise<void>;
 
 export function RestoreFromBackup(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
+export function ResumeTaskList(arg1:string,arg2:string,arg3:Array<string>):Promise<void>;
+
 export function RunNotebookCell(arg1:string,arg2:string):Promise<main.NotebookCellOutput>;
 
 export function RunNotebookCellSql(arg1:string,arg2:string):Promise<main.NotebookSqlResult>;
@@ -338,6 +340,8 @@ export function StopShell():Promise<void>;
 export function SuggestImportOptions(arg1:string,arg2:string):Promise<string>;
 
 export function SuspendTaskGraph(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function SuspendTaskList(arg1:string,arg2:string,arg3:Array<string>):Promise<void>;
 
 export function TaskHasChildren(arg1:string,arg2:string,arg3:string):Promise<boolean>;
 

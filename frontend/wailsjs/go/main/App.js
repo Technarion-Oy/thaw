@@ -558,6 +558,10 @@ export function RestoreFromBackup(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['RestoreFromBackup'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function ResumeTaskList(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ResumeTaskList'](arg1, arg2, arg3);
+}
+
 export function RunNotebookCell(arg1, arg2) {
   return window['go']['main']['App']['RunNotebookCell'](arg1, arg2);
 }
@@ -656,6 +660,10 @@ export function SuggestImportOptions(arg1, arg2) {
 
 export function SuspendTaskGraph(arg1, arg2, arg3) {
   return window['go']['main']['App']['SuspendTaskGraph'](arg1, arg2, arg3);
+}
+
+export function SuspendTaskList(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SuspendTaskList'](arg1, arg2, arg3);
 }
 
 export function TaskHasChildren(arg1, arg2, arg3) {

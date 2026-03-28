@@ -31,7 +31,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import dagre from "@dagrejs/dagre";
-import { GetTaskStatuses, ExecuteTask, AlterTask, DropTaskTree, ExecDDL, SuspendTaskGraph, EnableTaskDependents, GetObjectDDL } from "../../../wailsjs/go/main/App";
+import { GetTaskStatuses, ExecuteTask, AlterTask, DropTaskTree, ExecDDL, SuspendTaskList, ResumeTaskList, GetObjectDDL } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 import CreateTaskModal from "./CreateTaskModal";
@@ -170,14 +170,12 @@ function buildLabel(t: main.TaskStatusRow, isRoot: boolean, overrideRunState?: s
             Finalizer
           </Tag>
         )}
-        {!isFinalizer && (
-          <Tag
-            color={started ? "success" : "default"}
-            style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}
-          >
-            {t.taskState || "UNKNOWN"}
-          </Tag>
-        )}
+        <Tag
+          color={started ? "success" : "default"}
+          style={{ fontSize: 10, margin: 0, lineHeight: 1.6 }}
+        >
+          {t.taskState || "UNKNOWN"}
+        </Tag>
         {runStateTag(overrideRunState ?? t.lastRunState ?? "")}
       </div>
       {timeLabel && (
@@ -496,6 +494,8 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
   }, [db, schema]);
 
   // ── Suspend / Resume all tasks in the graph ───────────────────────────────
+  // Uses SuspendTaskList / ResumeTaskList which accept a pre-ordered list of
+  // task names from the frontend, bypassing Go-side predecessor parsing.
   const suspendResumeAll = useCallback(async () => {
     const rootRow = taskRowsRef.current.find(
       (t) => t.name.toUpperCase() === rootUpperRef.current,
@@ -503,11 +503,60 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
     const isStarted = rootRow?.taskState?.toUpperCase() === "STARTED";
     setTogglingAll(true);
     try {
+      // Build childrenOf map from taskRows (same logic as buildGraph, but using
+      // the already-proven parsePredecessors helper so no Go-side parsing needed).
+      const byName = new Map<string, string>(); // UPPER → original name
+      const childrenOf = new Map<string, string[]>(); // UPPER(parent) → [child names]
+      const finalizerNames: string[] = [];
+
+      taskRowsRef.current.forEach((t) => {
+        byName.set(t.name.toUpperCase(), t.name);
+        if (t.finalize && extractName(t.finalize).toUpperCase() === rootUpperRef.current) {
+          finalizerNames.push(t.name);
+        }
+        for (const p of parsePredecessors(t.predecessors ?? "")) {
+          const pu = extractName(p).toUpperCase();
+          if (!childrenOf.has(pu)) childrenOf.set(pu, []);
+          childrenOf.get(pu)!.push(t.name);
+        }
+      });
+
+      // BFS from root → [root, child1, child2, …, leaves].
+      const bfsOrder: string[] = [];
+      const visited = new Set<string>();
+      const queue = [rootNameRef.current];
+      visited.add(rootNameRef.current.toUpperCase());
+      while (queue.length > 0) {
+        const cur = queue.shift()!;
+        bfsOrder.push(byName.get(cur.toUpperCase()) ?? cur);
+        for (const child of childrenOf.get(cur.toUpperCase()) ?? []) {
+          if (!visited.has(child.toUpperCase())) {
+            visited.add(child.toUpperCase());
+            queue.push(child);
+          }
+        }
+      }
+
       if (isStarted) {
-        await SuspendTaskGraph(db, schema, rootNameRef.current);
+        // Suspend: root first (stops scheduling), then BFS descendants, finalizers last.
+        const suspendOrder = [
+          ...bfsOrder,
+          ...finalizerNames.filter((fn) => !visited.has(fn.toUpperCase())),
+        ];
+        await SuspendTaskList(db, schema, suspendOrder);
         message.success(`Graph suspended: ${rootNameRef.current}`);
       } else {
-        await EnableTaskDependents(db, schema, rootNameRef.current);
+        // Resume order: leaves first (reverse BFS excl. root), then finalizers,
+        // then root LAST. Finalizers must be resumed before the root becomes
+        // STARTED, otherwise Snowflake rejects the resume with "root task is
+        // not suspended".
+        const reversedBfs = [...bfsOrder].reverse();
+        const resumeOrder = [
+          ...reversedBfs.slice(0, -1),           // leaves → … → direct-children (all but root)
+          ...finalizerNames.filter((fn) => !visited.has(fn.toUpperCase())),
+          reversedBfs[reversedBfs.length - 1],   // root last
+        ];
+        await ResumeTaskList(db, schema, resumeOrder);
         message.success(`Graph resumed: ${rootNameRef.current}`);
       }
       load();
@@ -573,8 +622,9 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
           if (n.id.toUpperCase() !== name.toUpperCase()) return n;
           const t = taskRowsRef.current.find((r) => r.name.toUpperCase() === name.toUpperCase());
           if (!t) return n;
-          const isRoot = n.id.toUpperCase() === rootUpperRef.current;
-          return { ...n, data: { ...n.data, label: buildLabel(t, isRoot, undefined) } };
+          const isRoot      = n.id.toUpperCase() === rootUpperRef.current;
+          const isFinalizer = !!(n.data as { isFinalizer?: boolean }).isFinalizer;
+          return { ...n, data: { ...n.data, label: buildLabel(t, isRoot, undefined, isFinalizer) } };
         })
       );
     } catch (err) {
