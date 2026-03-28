@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { Tree, Typography, Spin, Empty, Divider, Modal, Button, Input, Tooltip, Slider, message, type InputRef } from "antd";
+import { Tree, Typography, Spin, Empty, Divider, Modal, Button, Input, Tooltip, Slider, Tag, message, type InputRef } from "antd";
 import {
   DatabaseOutlined,
   TableOutlined,
@@ -212,27 +212,43 @@ function getAllParentKeys(nodes: DataNode[]): Key[] {
 
 // Build a hierarchical DataNode tree for TASK objects using predecessor relationships.
 // A task is nested under the first predecessor that also exists in this schema.
-// Tasks with no local predecessor are placed at the root.
+// Finalizer tasks (those with a FINALIZE clause) are placed as the last child
+// of their root task with an isFinalizer marker for titleRender.
+// Tasks with no local predecessor and no finalize relationship are placed at root.
 function buildTaskTree(
   tasks: snowflake.SnowflakeObject[],
   db: string,
   schema: string,
 ): DataNode[] {
-  const makeNode = (o: snowflake.SnowflakeObject, kids: DataNode[] = []): DataNode => ({
-    title:     o.name,
-    key:       `obj:${db}:${schema}:TASK:${o.name}`,
-    icon:      kindIcon("TASK"),
-    isLeaf:    kids.length === 0,
+  const makeNode = (o: snowflake.SnowflakeObject, kids: DataNode[] = [], isFinalizer = false): DataNode => ({
+    title:       o.name,
+    key:         `obj:${db}:${schema}:TASK:${o.name}`,
+    icon:        kindIcon("TASK"),
+    isLeaf:      kids.length === 0,
+    isFinalizer, // consumed by titleRender
     ...(kids.length > 0 ? { children: kids } : {}),
   } as DataNode);
 
   const byName = new Map<string, snowflake.SnowflakeObject>();
   for (const t of tasks) byName.set(t.name.toUpperCase(), t);
 
+  // Build map: rootTaskName.toUpperCase() → finalizer task object
+  const finalizerOf = new Map<string, snowflake.SnowflakeObject>();
+  const finalizerNames = new Set<string>();
+  for (const t of tasks) {
+    if (t.finalize) {
+      const rootName = extractName(t.finalize).toUpperCase();
+      finalizerOf.set(rootName, t);
+      finalizerNames.add(t.name.toUpperCase());
+    }
+  }
+
   const parentOf = new Map<string, string>();
   const childrenOf = new Map<string, string[]>();
 
   for (const t of tasks) {
+    // Finalizer tasks have no AFTER predecessors — skip predecessor parsing for them.
+    if (finalizerNames.has(t.name.toUpperCase())) continue;
     const preds = parsePredecessors(t.predecessors ?? "");
     const localParent = preds
       .map((p) => extractName(p).toUpperCase())
@@ -250,13 +266,22 @@ function buildTaskTree(
     inTree.add(name.toUpperCase());
     const task = byName.get(name.toUpperCase())!;
     const kids = (childrenOf.get(name.toUpperCase()) ?? []).map(buildSubTree);
+    // Attach finalizer task as the last child if this is its designated root task.
+    const finTask = finalizerOf.get(name.toUpperCase());
+    if (finTask) {
+      inTree.add(finTask.name.toUpperCase());
+      kids.push(makeNode(finTask, [], true));
+    }
     return makeNode(task, kids);
   }
 
   const result: DataNode[] = [];
   for (const t of tasks) {
+    // Skip finalizer tasks (placed inside their root) and tasks with a parent.
+    if (finalizerNames.has(t.name.toUpperCase())) continue;
     if (!parentOf.has(t.name.toUpperCase())) result.push(buildSubTree(t.name));
   }
+  // Safety net: orphaned tasks not yet placed (shouldn't normally occur).
   for (const t of tasks) {
     if (!inTree.has(t.name.toUpperCase())) result.push(makeNode(t));
   }
@@ -1294,13 +1319,19 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   const schema = parts[2];
                   const kind   = parts[3];
                   const name   = parts.slice(4).join(":");
-                  const args      = (node as any).arguments ?? "";
-                  const rowCount  = (node as any).rowCount as number | undefined;
-                  const isEmpty   = kind === "TABLE" && rowCount !== undefined && rowCount === 0;
+                  const args        = (node as any).arguments ?? "";
+                  const rowCount    = (node as any).rowCount as number | undefined;
+                  const isEmpty     = kind === "TABLE" && rowCount !== undefined && rowCount === 0;
+                  const isFinalizer = !!(node as any).isFinalizer;
                   const tooltip = (
                     <ObjTooltip cacheKey={key} db={db} schema={schema} kind={kind} name={name} args={args}>
                       <span style={isEmpty ? { color: "var(--text-faint)" } : undefined}>
                         {String(node.title)}
+                        {isFinalizer && (
+                          <Tag color="purple" style={{ marginLeft: 5, fontSize: 10, lineHeight: "14px", padding: "0 4px", verticalAlign: "middle" }}>
+                            Finalizer
+                          </Tag>
+                        )}
                       </span>
                     </ObjTooltip>
                   );

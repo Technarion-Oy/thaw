@@ -16,6 +16,7 @@ import (
 	"crypto/x509"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"net/url"
@@ -71,6 +72,10 @@ type SnowflakeObject struct {
 	// Predecessors holds the raw predecessor string from SHOW TASKS.
 	// Only populated for TASK objects; empty for all other kinds.
 	Predecessors string `json:"predecessors,omitempty"`
+	// Finalize holds the fully-qualified root task name for tasks that use a
+	// FINALIZE clause (e.g. "DB"."SCHEMA"."ROOT_TASK"). Only populated for
+	// TASK objects with a FINALIZE clause; empty for all other kinds and tasks.
+	Finalize string `json:"finalize,omitempty"`
 }
 
 // QueryResult is the serialisable result of a SQL query.
@@ -1714,7 +1719,7 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 	defer rows.Close()
 
 	cols, _ := rows.Columns()
-	nameIdx, kindIdx, argsIdx, builtinIdx, rowsIdx, predsIdx := -1, -1, -1, -1, -1, -1
+	nameIdx, kindIdx, argsIdx, builtinIdx, rowsIdx, predsIdx, taskRelIdx, finalizeColIdx := -1, -1, -1, -1, -1, -1, -1, -1
 	for i, col := range cols {
 		switch strings.ToLower(col) {
 		case "name":
@@ -1729,6 +1734,10 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 			rowsIdx = i
 		case "predecessors", "predecessor":
 			predsIdx = i
+		case "task_relations":
+			taskRelIdx = i
+		case "finalize", "finalize_task":
+			finalizeColIdx = i
 		}
 	}
 	if nameIdx < 0 {
@@ -1798,9 +1807,91 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 				preds = raw
 			}
 		}
-		objects = append(objects, SnowflakeObject{Name: name, Kind: kind, Schema: schema, Arguments: argTypes, RowCount: rowCount, Predecessors: preds})
+		var finalize string
+		if fixedKind == "TASK" {
+			if finalizeColIdx >= 0 && vals[finalizeColIdx] != nil {
+				if s := fmt.Sprintf("%v", vals[finalizeColIdx]); s != "" && s != "<nil>" && s != "null" {
+					finalize = s
+				}
+			}
+			if finalize == "" && taskRelIdx >= 0 && vals[taskRelIdx] != nil {
+				finalize = parseFinalizeFromRelJSON(vals[taskRelIdx])
+			}
+		}
+		objects = append(objects, SnowflakeObject{Name: name, Kind: kind, Schema: schema, Arguments: argTypes, RowCount: rowCount, Predecessors: preds, Finalize: finalize})
 	}
 	return objects, rows.Err()
+}
+
+// parseFinalizeFromRelJSON extracts the root-task name from a task_relations
+// VARIANT column value. gosnowflake may return VARIANT columns as:
+//   - map[string]interface{} — already-parsed JSON object
+//   - string / []byte       — raw JSON text
+//
+// Key comparison is case-insensitive to handle Snowflake edition variations.
+func parseFinalizeFromRelJSON(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	isFinalKey := func(k string) bool {
+		lk := strings.ToLower(k)
+		return lk == "finalize" || lk == "finalize_task"
+	}
+	if m, ok := v.(map[string]interface{}); ok {
+		for k, val := range m {
+			if isFinalKey(k) && val != nil {
+				if s := fmt.Sprintf("%v", val); s != "" && s != "<nil>" && s != "null" {
+					return s
+				}
+			}
+		}
+		return ""
+	}
+	var raw string
+	switch t := v.(type) {
+	case string:
+		raw = t
+	case []byte:
+		raw = string(t)
+	default:
+		raw = fmt.Sprintf("%v", v)
+	}
+	if raw == "" || raw == "null" || raw == "<nil>" {
+		return ""
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return ""
+	}
+	for k, val := range m {
+		if isFinalKey(k) {
+			var s string
+			if err := json.Unmarshal(val, &s); err == nil && s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+// parseFinalizeFromDDLText extracts the FINALIZE = ... value from task DDL
+// text, e.g. from GET_DDL('TASK', ...) output.
+func parseFinalizeFromDDLText(ddl string) string {
+	upper := strings.ToUpper(ddl)
+	idx := strings.Index(upper, "FINALIZE")
+	if idx < 0 {
+		return ""
+	}
+	rest := strings.TrimSpace(ddl[idx+len("FINALIZE"):])
+	if len(rest) == 0 || rest[0] != '=' {
+		return ""
+	}
+	rest = strings.TrimSpace(rest[1:])
+	end := strings.IndexAny(rest, " \t\n\r")
+	if end < 0 {
+		end = len(rest)
+	}
+	return strings.TrimRight(rest[:end], ";,")
 }
 
 // ListObjects returns all objects inside a schema by running multiple SHOW
@@ -1854,6 +1945,63 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 		}
 		all = append(all, r.objs...)
 	}
+
+	// GET_DDL fallback: for Snowflake editions that don't expose the FINALIZE
+	// relationship via SHOW TASKS columns (task_relations / finalize), call
+	// GET_DDL on standalone TASK objects to detect finalizer tasks.
+	// "Standalone" = no predecessors AND no other task depends on it (not a root).
+	{
+		hasChildrenSet := map[string]bool{}
+		for _, o := range all {
+			if o.Kind != "TASK" {
+				continue
+			}
+			preds := strings.TrimSpace(o.Predecessors)
+			if preds == "" || preds == "[]" || preds == "<nil>" {
+				continue
+			}
+			stripped := strings.TrimPrefix(strings.TrimSuffix(preds, "]"), "[")
+			for _, part := range strings.Split(stripped, ",") {
+				part = strings.TrimSpace(part)
+				if part == "" {
+					continue
+				}
+				segs := strings.Split(part, ".")
+				bare := strings.Trim(segs[len(segs)-1], `"`)
+				if bare != "" {
+					hasChildrenSet[strings.ToUpper(bare)] = true
+				}
+			}
+		}
+
+		var enrichWG sync.WaitGroup
+		for i, o := range all {
+			if o.Kind != "TASK" || o.Finalize != "" {
+				continue
+			}
+			preds := strings.TrimSpace(o.Predecessors)
+			if preds != "" && preds != "[]" && preds != "<nil>" {
+				continue
+			}
+			if hasChildrenSet[strings.ToUpper(o.Name)] {
+				continue
+			}
+			i := i // capture for goroutine
+			enrichWG.Add(1)
+			go func() {
+				defer enrichWG.Done()
+				ddl, err := c.GetObjectDDL(ctx, database, schema, "TASK", all[i].Name, "")
+				if err != nil {
+					return
+				}
+				if fin := parseFinalizeFromDDLText(ddl); fin != "" {
+					all[i].Finalize = fin
+				}
+			}()
+		}
+		enrichWG.Wait()
+	}
+
 	return all, nil
 }
 

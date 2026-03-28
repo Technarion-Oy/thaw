@@ -1499,6 +1499,7 @@ export namespace snowflake {
 	    arguments: string;
 	    rowCount?: number;
 	    predecessors?: string;
+	    finalize?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SnowflakeObject(source);
@@ -1512,6 +1513,7 @@ export namespace snowflake {
 	        this.arguments = source["arguments"];
 	        this.rowCount = source["rowCount"];
 	        this.predecessors = source["predecessors"];
+	        this.finalize = source["finalize"];
 	    }
 	}
 	export class SnowflakeUser {
