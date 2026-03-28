@@ -11,10 +11,12 @@
 package logger
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/lumberjack.v2"
 )
@@ -61,7 +63,7 @@ func Init() func() {
 		Level:     level,
 		AddSource: devMode,
 	})
-	L = slog.New(handler)
+	L = slog.New(&driverNoiseFilter{inner: handler})
 	slog.SetDefault(L)
 
 	// gosnowflake v2 defaults to slog.Default(), which is already set to L
@@ -70,4 +72,34 @@ func Init() func() {
 	L.Info("logger initialised", "path", path, "dev", devMode)
 
 	return func() { _ = rot.Close() }
+}
+
+// driverNoiseFilter is a slog.Handler wrapper that suppresses known-noisy
+// ERROR messages emitted by the gosnowflake driver as side-effects of query
+// cancellation or result-row truncation (50 k cap).  These messages are not
+// actionable from the application's perspective and would otherwise mislead
+// users scanning the terminal output.
+type driverNoiseFilter struct{ inner slog.Handler }
+
+func (f *driverNoiseFilter) Enabled(ctx context.Context, level slog.Level) bool {
+	return f.inner.Enabled(ctx, level)
+}
+
+func (f *driverNoiseFilter) Handle(ctx context.Context, r slog.Record) error {
+	// Suppress Arrow chunk download errors that arise when rows.Close() is
+	// called asynchronously after a cancellation or the 50k row cap is hit.
+	// The driver logs these at ERROR even though they are expected and harmless.
+	if r.Level == slog.LevelError &&
+		strings.Contains(r.Message, "failed to extract HTTP response body") {
+		return nil
+	}
+	return f.inner.Handle(ctx, r)
+}
+
+func (f *driverNoiseFilter) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &driverNoiseFilter{inner: f.inner.WithAttrs(attrs)}
+}
+
+func (f *driverNoiseFilter) WithGroup(name string) slog.Handler {
+	return &driverNoiseFilter{inner: f.inner.WithGroup(name)}
 }
