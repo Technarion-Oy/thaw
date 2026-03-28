@@ -1324,6 +1324,23 @@ func (a *App) GetCurrentRegion() (string, error) {
 	return "", nil
 }
 
+// GetSnowsightURL returns the Snowsight login page URL for the current account,
+// formed as https://<org>-<account>.snowflakecomputing.com using
+// CURRENT_ORGANIZATION_NAME() and CURRENT_ACCOUNT_NAME().
+func (a *App) GetSnowsightURL() (string, error) {
+	if a.client == nil {
+		return "", ErrNotConnected
+	}
+	qr, err := a.client.Execute(a.ctx, `SELECT 'https://' || LOWER(CURRENT_ORGANIZATION_NAME()) || '-' || LOWER(CURRENT_ACCOUNT_NAME()) || '.snowflakecomputing.com'`)
+	if err != nil {
+		return "", err
+	}
+	if len(qr.Rows) > 0 && len(qr.Rows[0]) > 0 && qr.Rows[0][0] != nil {
+		return fmt.Sprint(qr.Rows[0][0]), nil
+	}
+	return "", nil
+}
+
 // GetCurrentUser returns the result of SELECT CURRENT_USER(), which reflects
 // the canonical Snowflake username exactly as stored (preserving case).
 func (a *App) GetCurrentUser() (string, error) {

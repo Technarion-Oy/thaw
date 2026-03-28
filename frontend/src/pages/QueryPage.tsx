@@ -11,10 +11,10 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, Modal, type MenuProps } from "antd";
-import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined } from "@ant-design/icons";
+import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
-import { ClipboardSetText } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NewNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion } from "../../wailsjs/go/main/App";
+import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NewNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL } from "../../wailsjs/go/main/App";
 import type { main } from "../../wailsjs/go/models";
 import SessionPropertiesModal from "../components/common/SessionPropertiesModal";
 import SnippetsModal from "../components/snippets/SnippetsModal";
@@ -103,6 +103,7 @@ export default function QueryPage() {
   const [closeConfirm, setCloseConfirm] = useState<{ tabId: string; title: string } | null>(null);
   const [currentUser, setCurrentUser] = useState<string | null>(null);
   const [currentRegion, setCurrentRegion] = useState<string | null>(null);
+  const [snowsightUrl, setSnowsightUrl] = useState<string | null>(null);
   const [sessionParams, setSessionParams] = useState<main.SessionParam[] | null>(null);
   const [sessionVars, setSessionVars] = useState<main.SessionVar[] | null>(null);
   const [sessionPropsError, setSessionPropsError] = useState<string | null>(null);
@@ -132,6 +133,7 @@ export default function QueryPage() {
     loadContext();
     GetCurrentUser().then(setCurrentUser).catch(() => {});
     GetCurrentRegion().then(setCurrentRegion).catch(() => {});
+    GetSnowsightURL().then(setSnowsightUrl).catch(() => {});
   }, []);
 
   // On mount, re-read file-backed tabs from disk so their content is fresh
@@ -877,18 +879,31 @@ export default function QueryPage() {
                   {[currentUser, currentRegion].filter(Boolean).join(" · ")}
                 </div>
               )}
-              <Dropdown
-                trigger={["contextMenu"]}
-                menu={{
-                  items: [
-                    { key: "session-props", label: "Session Properties", onClick: openSessionProperties },
-                  ],
-                }}
-              >
-                <Tag color="blue" style={{ fontSize: 11, margin: 0, cursor: "context-menu" }}>
-                  {params.account} · {params.user}
-                </Tag>
-              </Dropdown>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <Dropdown
+                  trigger={["contextMenu"]}
+                  menu={{
+                    items: [
+                      { key: "session-props", label: "Session Properties", onClick: openSessionProperties },
+                    ],
+                  }}
+                >
+                  <Tag color="blue" style={{ fontSize: 11, margin: 0, cursor: "context-menu" }}>
+                    {params.account} · {params.user}
+                  </Tag>
+                </Dropdown>
+                {snowsightUrl && (
+                  <Tooltip title="Open Snowsight">
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<GlobalOutlined style={{ fontSize: 12 }} />}
+                      style={{ padding: "0 2px", height: 18, minWidth: 18, color: "var(--text-muted)" }}
+                      onClick={() => BrowserOpenURL(snowsightUrl)}
+                    />
+                  </Tooltip>
+                )}
+              </div>
             </div>
           )}
           <Button

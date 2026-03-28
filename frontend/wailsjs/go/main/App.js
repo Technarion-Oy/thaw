@@ -314,6 +314,10 @@ export function GetSnowparkConfig() {
   return window['go']['main']['App']['GetSnowparkConfig']();
 }
 
+export function GetSnowsightURL() {
+  return window['go']['main']['App']['GetSnowsightURL']();
+}
+
 export function GetTableColumns(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetTableColumns'](arg1, arg2, arg3);
 }

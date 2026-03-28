@@ -167,6 +167,8 @@ export function GetSessionVariables():Promise<Array<main.SessionVar>>;
 
 export function GetSnowparkConfig():Promise<main.SnowparkConfigResult>;
 
+export function GetSnowsightURL():Promise<string>;
+
 export function GetTableColumns(arg1:string,arg2:string,arg3:string):Promise<Array<string>>;
 
 export function GetTableColumnsWithTypes(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.ColumnInfo>>;
