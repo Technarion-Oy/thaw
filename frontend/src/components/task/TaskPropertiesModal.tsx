@@ -605,10 +605,20 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
   // ── Trigger presence check ──────────────────────────────────────────────────
   // A task with none of SCHEDULE / AFTER / FINALIZE / WHEN has no trigger and
   // will never run automatically.
+  // Finalizer tasks carry their FINALIZE reference in the `task_relations`
+  // VARIANT column on some Snowflake editions (no dedicated `finalize` column),
+  // so we also check that column for a "finalize" key.
+  const taskRelations = get("task_relations");
+  const finalizeInTaskRelations = (() => {
+    if (!taskRelations || taskRelations === "null") return false;
+    try { const r = JSON.parse(taskRelations); return !!(r?.finalize || r?.finalize_task); }
+    catch { return taskRelations.toLowerCase().includes("finalize"); }
+  })();
   const hasTrigger =
     !!get("schedule") ||
     predecessors.length > 0 ||
     !!(get("finalize") || get("finalize_task")) ||
+    finalizeInTaskRelations ||
     !!(get("condition") || get("condition_text"));
 
   // ── Overlap policy ────────────────────────────────────────────────────────
