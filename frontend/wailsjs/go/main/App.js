@@ -230,6 +230,10 @@ export function GetDatabaseCrossDeps(arg1, arg2) {
   return window['go']['main']['App']['GetDatabaseCrossDeps'](arg1, arg2);
 }
 
+export function GetDatabaseRetentionDays(arg1) {
+  return window['go']['main']['App']['GetDatabaseRetentionDays'](arg1);
+}
+
 export function GetERDiagramData(arg1) {
   return window['go']['main']['App']['GetERDiagramData'](arg1);
 }
@@ -456,6 +460,10 @@ export function ListEnvPackages() {
 
 export function ListExportableDatabases() {
   return window['go']['main']['App']['ListExportableDatabases']();
+}
+
+export function ListExternalVolumes() {
+  return window['go']['main']['App']['ListExternalVolumes']();
 }
 
 export function ListFinalizableTasks(arg1, arg2) {

@@ -125,6 +125,8 @@ export function GetCurrentUser():Promise<string>;
 
 export function GetDatabaseCrossDeps(arg1:string,arg2:Array<string>):Promise<Array<snowflake.SchemaRef>>;
 
+export function GetDatabaseRetentionDays(arg1:string):Promise<number>;
+
 export function GetERDiagramData(arg1:string):Promise<snowflake.ERDiagramData>;
 
 export function GetFunctionInfo(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.FunctionInfo>;
@@ -238,6 +240,8 @@ export function ListDroppedTables(arg1:string,arg2:string):Promise<Array<snowfla
 export function ListEnvPackages():Promise<Array<main.PackageInfo>>;
 
 export function ListExportableDatabases():Promise<Array<string>>;
+
+export function ListExternalVolumes():Promise<Array<string>>;
 
 export function ListFinalizableTasks(arg1:string,arg2:string):Promise<Array<string>>;
 

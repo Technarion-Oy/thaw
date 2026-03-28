@@ -583,6 +583,12 @@ func (c *Client) ListNotificationIntegrations(ctx context.Context) ([]string, er
 	return c.queryStringSlice(ctx, "SHOW NOTIFICATION INTEGRATIONS", 1)
 }
 
+// ListExternalVolumes returns the names of all external volumes visible to the current role.
+func (c *Client) ListExternalVolumes(ctx context.Context) ([]string, error) {
+	// SHOW EXTERNAL VOLUMES columns: created_on, name, ...
+	return c.queryStringSlice(ctx, "SHOW EXTERNAL VOLUMES", 1)
+}
+
 // IntegrationRow holds metadata returned by SHOW <kind> INTEGRATIONS.
 type IntegrationRow struct {
 	Name     string `json:"name"`
@@ -1298,6 +1304,34 @@ func (c *Client) ListDroppedSchemas(ctx context.Context, database string) ([]Dro
 // still within the Time Travel retention window.
 func (c *Client) ListDroppedDatabases(ctx context.Context) ([]DroppedTable, error) {
 	return c.listDroppedHistory(ctx, `SHOW DATABASES HISTORY`)
+}
+
+// GetDatabaseRetentionDays returns the DATA_RETENTION_TIME_IN_DAYS parameter
+// for the given database. Returns 1 if the value cannot be determined.
+func (c *Client) GetDatabaseRetentionDays(ctx context.Context, dbName string) (int, error) {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	query := fmt.Sprintf(`SHOW PARAMETERS LIKE 'DATA_RETENTION_TIME_IN_DAYS' IN DATABASE "%s"`, esc(dbName))
+	rows, err := c.db.QueryContext(ctx, query)
+	if err != nil {
+		return 1, err
+	}
+	defer rows.Close()
+
+	cols, _ := rows.Columns()
+	idxs := colIndexMap(cols, "key", "value")
+
+	if rows.Next() {
+		vals, ptrs := makeValPtrs(len(cols))
+		if err := rows.Scan(ptrs...); err != nil {
+			return 1, err
+		}
+		if s := strVal(vals, idxs["value"]); s != "" {
+			if n, err := strconv.Atoi(s); err == nil {
+				return n, nil
+			}
+		}
+	}
+	return 1, nil // default: 1 day
 }
 
 // GetTableRetentionDays returns the Time Travel data-retention period in days

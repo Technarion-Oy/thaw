@@ -74,7 +74,19 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Rename** the object
   - **Drop** the object (with confirmation)
   - **Select for Comparison** / **Compare with** — side-by-side DDL diff (see [Text Comparison](#text-comparison))
-- **Right-click a database** to export its DDL, generate an ER Diagram, view dropped schemas recoverable via Time Travel, or open **Backup Sets…**
+- **Create Database** — click the **+** button in the Objects section header, or right-click any database node and choose **Create Database…**, to open a dialog covering the full `CREATE DATABASE` syntax:
+  - **Name & case** — free-text name input with a **Case-insensitive / Case-sensitive** radio toggle; case-insensitive emits an unquoted identifier (Snowflake uppercases it), case-sensitive wraps the name in double quotes to preserve exact casing; the insensitive option is automatically forced off and greyed out when the name contains characters that require quoting (spaces, special characters, lowercase letters, or a leading digit)
+  - **Create options** — `OR REPLACE`, `TRANSIENT`, and `IF NOT EXISTS` checkboxes; `OR REPLACE` and `IF NOT EXISTS` are mutually exclusive
+  - **Clone** — clone from any existing database; the AT / BEFORE time-travel slider is automatically bounded by the source database's live `DATA_RETENTION_TIME_IN_DAYS` so you can never select a timestamp beyond what Snowflake can serve; three time-travel modes: TIMESTAMP (interactive slider with start/end date marks), OFFSET (signed integer seconds), and STATEMENT (query ID); `IGNORE TABLES WITH INSUFFICIENT DATA RETENTION` and `IGNORE HYBRID TABLES` flags; a warning is shown when the source database has zero retention days (no time travel available)
+  - **Data Retention** — `DATA_RETENTION_TIME_IN_DAYS` and `MAX_DATA_EXTENSION_TIME_IN_DAYS` with edition-dependent guidance
+  - **Iceberg & External Storage** — `EXTERNAL_VOLUME` (dropdown from `SHOW EXTERNAL VOLUMES`), `CATALOG` (dropdown from catalog-type integrations), `ICEBERG_VERSION_DEFAULT`, `ENABLE_ICEBERG_MERGE_ON_READ`
+  - **Storage Policy** — `REPLACE_INVALID_CHARACTERS`, `DEFAULT_DDL_COLLATION`, `STORAGE_SERIALIZATION_POLICY`, `ENABLE_DATA_COMPACTION`
+  - **Catalog Sync** — `CATALOG_SYNC` integration picker, `CATALOG_SYNC_NAMESPACE_MODE` (NEST / FLATTEN), and a delimiter field (shown only when mode is FLATTEN)
+  - **Tags** — dynamic `name = value` tag list; add or remove rows freely
+  - **Visibility & Comment** — `OBJECT_VISIBILITY` (not set / `PRIVILEGED` / custom YAML block) and a free-text comment
+  - **SQL preview** — live `CREATE DATABASE` statement updates with every field change; copy button sends the SQL to the clipboard
+  - Submitting runs `ExecDDL` and the object browser refreshes automatically on success
+- **Right-click a database** to **Create Database…**, export its DDL, generate an ER Diagram, view dropped schemas recoverable via Time Travel, or open **Backup Sets…**
 - **Right-click a schema** to view dropped tables, **Export Data…** or **Import Data…** without needing an existing table (schema-level launch opens the same modals with a table selector or name field), open **Backup Sets…**, or use the **Create Object** cascading submenu (opens left or right depending on available screen space); contains **Task…** to open the Create Task dialog
 - **Task tree** — tasks inside a schema are displayed as a hierarchy in the sidebar: child tasks appear nested under their predecessor root task; finalizer tasks are shown as the last child of their root task with a purple **Finalizer** badge so the graph structure is visible at a glance without opening the graph modal
 - **Right-click the Tasks folder** inside any schema to open **Create Task…** directly — the dialog covers the full `CREATE TASK` syntax:

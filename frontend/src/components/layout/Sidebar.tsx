@@ -38,6 +38,7 @@ import {
   CopyOutlined,
   DiffOutlined,
   SaveOutlined,
+  PlusOutlined,
   PlusSquareOutlined,
   RightOutlined,
   ShareAltOutlined,
@@ -60,6 +61,7 @@ import CallProcedureModal from "../procedure/CallProcedureModal";
 import ExecuteNotebookModal from "../notebook/ExecuteNotebookModal";
 import SelectFunctionModal from "../function/SelectFunctionModal";
 import CreateTaskModal from "../task/CreateTaskModal";
+import CreateDatabaseModal from "../database/CreateDatabaseModal";
 import ExecuteTaskModal from "../task/ExecuteTaskModal";
 import TaskGraphModal from "../task/TaskGraphModal";
 import TaskPropertiesModal from "../task/TaskPropertiesModal";
@@ -382,6 +384,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [callModal, setCallModal] = useState<{ db: string; schema: string; name: string; rawArgs: string } | null>(null);
   const [selectFunctionModal, setSelectFunctionModal] = useState<{ db: string; schema: string; name: string; rawArgs: string } | null>(null);
   const [executeNotebookModal, setExecuteNotebookModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createDbOpen, setCreateDbOpen] = useState(false);
   const [createTaskModal, setCreateTaskModal] = useState<{ db: string; schema: string } | null>(null);
   const [executeTaskModal, setExecuteTaskModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [taskPropsModal, setTaskPropsModal] = useState<{ db: string; schema: string; name: string; isFinalizer?: boolean } | null>(null);
@@ -1248,6 +1251,15 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             style={{ height: 20, padding: "0 4px", minWidth: 0, color: "var(--text-muted)" }}
           />
         </Tooltip>
+        <Tooltip title="Create database">
+          <Button
+            type="text"
+            size="small"
+            icon={<PlusOutlined style={{ fontSize: 11 }} />}
+            onClick={() => setCreateDbOpen(true)}
+            style={{ height: 20, padding: "0 4px", minWidth: 0, color: "var(--text-muted)" }}
+          />
+        </Tooltip>
         <Tooltip title="Refresh all databases">
           <Button
             type="text"
@@ -1423,6 +1435,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           }}
           onClick={(e) => e.stopPropagation()}
         >
+          {ctxMenu.nodeType === "db" && menuItem("Create Database…", <DatabaseOutlined style={{ fontSize: 12 }} />, () => { setCtxMenu(null); setCreateDbOpen(true); })}
           {ctxMenu.nodeType === "db" && menuItem("Insert Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "db" && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshDatabase)}
           {ctxMenu.nodeType === "db" && menuItem("Show Dropped Schemas…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedSchemas)}
@@ -1615,6 +1628,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           name={selectFunctionModal.name}
           rawArgs={selectFunctionModal.rawArgs}
           onClose={() => setSelectFunctionModal(null)}
+        />
+      )}
+
+      {/* Create Database modal */}
+      {createDbOpen && (
+        <CreateDatabaseModal
+          onClose={() => setCreateDbOpen(false)}
+          onSuccess={refreshAllDatabases}
         />
       )}
 

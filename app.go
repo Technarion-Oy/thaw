@@ -1205,6 +1205,14 @@ func (a *App) ListNotificationIntegrations() ([]string, error) {
 	return a.client.ListNotificationIntegrations(a.ctx)
 }
 
+// ListExternalVolumes returns the names of all external volumes visible to the current role.
+func (a *App) ListExternalVolumes() ([]string, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListExternalVolumes(a.ctx)
+}
+
 // ListIntegrations runs SHOW <kind> INTEGRATIONS and returns structured rows.
 // kind may be "STORAGE", "API", "CATALOG", "EXTERNAL ACCESS", "NOTIFICATION", or "SECURITY".
 func (a *App) ListIntegrations(kind string) ([]snowflake.IntegrationRow, error) {
@@ -1379,6 +1387,15 @@ func (a *App) ListObjects(database, schema string) ([]snowflake.SnowflakeObject,
 		return nil, ErrNotConnected
 	}
 	return a.client.ListObjects(a.ctx, database, schema)
+}
+
+// GetDatabaseRetentionDays returns the DATA_RETENTION_TIME_IN_DAYS parameter
+// for the given database. Returns 1 if the value cannot be determined.
+func (a *App) GetDatabaseRetentionDays(dbName string) (int, error) {
+	if a.client == nil {
+		return 0, ErrNotConnected
+	}
+	return a.client.GetDatabaseRetentionDays(a.ctx, dbName)
 }
 
 // GetTableRetentionDays returns the Time Travel data retention period in days
