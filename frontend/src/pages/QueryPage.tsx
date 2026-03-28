@@ -67,8 +67,9 @@ export default function QueryPage() {
   const [splitW, setSplitW] = useState(splitEditorWidth);
   const [runningQueryId, setRunningQueryId] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
-  const [profileQueryId, setProfileQueryId] = useState<string | null>(null);
-  const [profileIsLive,  setProfileIsLive]  = useState(false);
+  const [profileQueryId,  setProfileQueryId]  = useState<string | null>(null);
+  const [profileIsLive,   setProfileIsLive]   = useState(false);
+  const [profileQuerySql, setProfileQuerySql] = useState<string>("");
   // Multi-statement progress: which statement is running and out of how many.
   const [stmtProgress, setStmtProgress] = useState<{ index: number; total: number; queryID?: string } | null>(null);
   // Zero-based index of the statement currently executing; drives editor highlight.
@@ -1129,7 +1130,7 @@ export default function QueryPage() {
                             size="small"
                             icon={<BarChartOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
                             style={{ height: 16, padding: "0 2px", minWidth: 0 }}
-                            onClick={() => { setProfileQueryId((stmtProgress.queryID || runningQueryId)!); setProfileIsLive(true); }}
+                            onClick={() => { setProfileQueryId((stmtProgress.queryID || runningQueryId)!); setProfileQuerySql(selectedSql.trim() || sql.trim()); setProfileIsLive(true); }}
                           />
                         </Tooltip>
                       </Space>
@@ -1153,7 +1154,7 @@ export default function QueryPage() {
                         size="small"
                         icon={<BarChartOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
                         style={{ height: 16, padding: "0 2px", minWidth: 0 }}
-                        onClick={() => { setProfileQueryId(runningQueryId); setProfileIsLive(true); }}
+                        onClick={() => { setProfileQueryId(runningQueryId); setProfileQuerySql(selectedSql.trim() || sql.trim()); setProfileIsLive(true); }}
                       />
                     </Tooltip>
                   </Space>
@@ -1239,7 +1240,7 @@ export default function QueryPage() {
                             size="small"
                             icon={<BarChartOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
                             style={{ height: 16, padding: "0 2px", minWidth: 0 }}
-                            onClick={() => { setProfileQueryId(displayedResult.queryID!); setProfileIsLive(false); }}
+                            onClick={() => { setProfileQueryId(displayedResult.queryID!); setProfileQuerySql(resultHistory.find((e) => e.id === historyId)?.sql ?? ""); setProfileIsLive(false); }}
                           />
                         </Tooltip>
                       </Space>
@@ -1442,6 +1443,7 @@ export default function QueryPage() {
       {profileQueryId && (
         <QueryProfileModal
           queryId={profileQueryId}
+          sql={profileQuerySql}
           onClose={() => setProfileQueryId(null)}
           liveRefresh={profileIsLive && isRunning}
         />

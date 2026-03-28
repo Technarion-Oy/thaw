@@ -9,10 +9,11 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Modal, Table, Tag, Button, Spin, Alert, Tooltip, Space, Typography } from "antd";
-import { ReloadOutlined } from "@ant-design/icons";
+import { Modal, Table, Tag, Button, Spin, Alert, Tooltip, Space, Typography, Divider } from "antd";
+import { ReloadOutlined, BulbOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { ExecuteQuery } from "../../../wailsjs/go/main/App";
+import { ExecuteQuery, SendChatMessage, GetAIConfig } from "../../../wailsjs/go/main/App";
+import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 
 const { Text } = Typography;
 
@@ -21,6 +22,8 @@ interface Props {
   onClose: () => void;
   /** When true, auto-refreshes every 3 s (used while a query is still running). */
   liveRefresh?: boolean;
+  /** SQL that produced this query ID — enables the AI suggestion button. */
+  sql?: string;
 }
 
 type Row = Record<string, unknown>;
@@ -44,6 +47,62 @@ const OPERATOR_TYPE_COLORS: Record<string, string> = {
 
 const JSON_COLS = new Set(["OPERATOR_STATISTICS", "EXECUTION_TIME_BREAKDOWN", "OPERATOR_ATTRIBUTES"]);
 const HIDDEN_COLS = new Set(["QUERY_ID"]);
+
+// ── AI helpers ──────────────────────────────────────────────────────────────
+
+type Segment = { type: "text" | "code"; content: string; lang?: string };
+
+function parseSegments(text: string): Segment[] {
+  const parts: Segment[] = [];
+  const regex = /```(\w*)\n?([\s\S]*?)```/g;
+  let last = 0;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > last) parts.push({ type: "text", content: text.slice(last, match.index) });
+    parts.push({ type: "code", lang: match[1] || undefined, content: match[2] });
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) parts.push({ type: "text", content: text.slice(last) });
+  return parts;
+}
+
+function buildAiPrompt(sql: string, rows: Row[], columns: string[]): string {
+  const visibleCols = columns.filter((c) => !HIDDEN_COLS.has(c));
+  const header = visibleCols.join(" | ");
+  const body = rows.map((row) =>
+    visibleCols.map((c) => {
+      const v = row[c];
+      if (v == null || v === "") return "—";
+      if (JSON_COLS.has(c)) {
+        try { return JSON.stringify(JSON.parse(String(v))); } catch { return String(v); }
+      }
+      if (c === "PARENT_OPERATORS") {
+        try {
+          const arr = JSON.parse(String(v));
+          return Array.isArray(arr) ? arr.join(",") : String(v);
+        } catch { return String(v); }
+      }
+      return String(v);
+    }).join(" | ")
+  ).join("\n");
+
+  return `You are a Snowflake SQL performance expert. Analyze the query and its execution plan below.
+
+Identify bottlenecks and suggest specific improvements. Show the improved SQL when the query itself can be rewritten. If schema or infrastructure changes would help (clustering keys, materialized views, table restructuring, search optimization service, etc.) describe them with concrete examples.
+
+SQL:
+\`\`\`sql
+${sql.trim()}
+\`\`\`
+
+Execution plan (GET_QUERY_OPERATOR_STATS):
+\`\`\`
+${header}
+${body}
+\`\`\``;
+}
+
+// ── End AI helpers ───────────────────────────────────────────────────────────
 
 function operatorTypeColor(type: string): string {
   const key = (type ?? "").toUpperCase().replace(/[\s_]/g, "");
@@ -115,13 +174,20 @@ function renderCell(col: string, value: unknown): React.ReactNode {
   );
 }
 
-export default function QueryProfileModal({ queryId, onClose, liveRefresh }: Props) {
+export default function QueryProfileModal({ queryId, onClose, liveRefresh, sql }: Props) {
   const [loading,       setLoading]       = useState(false);
   const [columns,       setColumns]       = useState<string[]>([]);
   const [rows,          setRows]          = useState<Row[]>([]);
   const [error,         setError]         = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const [aiEnabled,   setAiEnabled]   = useState(false);
+  const [aiLoading,   setAiLoading]   = useState(false);
+  const [aiSegments,  setAiSegments]  = useState<Segment[] | null>(null);
+  const [aiError,     setAiError]     = useState<string | null>(null);
+  const [copiedIdx,   setCopiedIdx]   = useState<number | null>(null);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchStats = useCallback(async () => {
     setLoading(true);
@@ -152,6 +218,30 @@ export default function QueryProfileModal({ queryId, onClose, liveRefresh }: Pro
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [fetchStats, liveRefresh]);
+
+  // Check whether AI is configured so we can show/hide the suggestion button.
+  useEffect(() => {
+    if (sql) {
+      GetAIConfig().then((cfg) => setAiEnabled(cfg.enabled)).catch(() => {});
+    }
+  }, [sql]);
+
+  const getSuggestions = async () => {
+    if (!sql) return;
+    setAiLoading(true);
+    setAiSegments(null);
+    setAiError(null);
+    try {
+      const prompt = buildAiPrompt(sql, rows, columns);
+      const msgs = await SendChatMessage([], prompt, sql, "", false);
+      const assistant = msgs.find((m) => m.role === "assistant");
+      setAiSegments(parseSegments(assistant?.text ?? ""));
+    } catch (e) {
+      setAiError(String(e));
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   const tableCols: ColumnsType<Row> = columns
     .filter((c) => !HIDDEN_COLS.has(c))
@@ -253,6 +343,103 @@ export default function QueryProfileModal({ queryId, onClose, liveRefresh }: Pro
           pagination={false}
           scroll={{ x: "max-content", y: 500 }}
         />
+      )}
+
+      {/* ── AI Suggestions ─────────────────────────────────────────────── */}
+      {sql && aiEnabled && (
+        <>
+          <Divider style={{ margin: "14px 0 10px" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+            <Text style={{ fontSize: 12, fontWeight: 600 }}>AI Suggestions</Text>
+            <Button
+              size="small"
+              type={aiSegments ? "default" : "primary"}
+              icon={<BulbOutlined />}
+              loading={aiLoading}
+              disabled={rows.length === 0}
+              onClick={getSuggestions}
+            >
+              {aiSegments ? "Re-analyze" : "Analyze & Suggest"}
+            </Button>
+            {rows.length === 0 && (
+              <Text style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                Load profile data first
+              </Text>
+            )}
+          </div>
+
+          {aiError && (
+            <Alert type="error" message={aiError} closable onClose={() => setAiError(null)} style={{ marginBottom: 8 }} />
+          )}
+
+          {aiLoading && !aiSegments && (
+            <div style={{ textAlign: "center", padding: 24 }}>
+              <Spin />
+              <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-muted)" }}>
+                Analyzing execution plan…
+              </div>
+            </div>
+          )}
+
+          {aiSegments && (
+            <div style={{ fontSize: 13, lineHeight: 1.65, color: "var(--text)" }}>
+              {aiSegments.map((seg, i) => {
+                if (seg.type === "code") {
+                  const isSql = !seg.lang || seg.lang.toLowerCase() === "sql";
+                  const copied = copiedIdx === i;
+                  return (
+                    <div key={i} style={{ marginBottom: 10 }}>
+                      <pre style={{
+                        background: "var(--bg-overlay)",
+                        border: "1px solid var(--border)",
+                        borderRadius: 4,
+                        padding: "8px 10px",
+                        fontSize: 12,
+                        fontFamily: "monospace",
+                        overflowX: "auto",
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-all",
+                        margin: 0,
+                        color: "var(--text)",
+                      }}>
+                        {seg.content}
+                      </pre>
+                      <Space size={4} style={{ marginTop: 4 }}>
+                        <button
+                          onClick={() => {
+                            ClipboardSetText(seg.content);
+                            if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+                            setCopiedIdx(i);
+                            copyTimerRef.current = setTimeout(() => setCopiedIdx(null), 1500);
+                          }}
+                          style={{ fontSize: 11, padding: "2px 8px", background: "none", border: "1px solid var(--border)", borderRadius: 3, color: "var(--text-muted)", cursor: "pointer" }}
+                        >
+                          {copied ? "Copied!" : "Copy"}
+                        </button>
+                        {isSql && (
+                          <button
+                            onClick={() => {
+                              window.dispatchEvent(new CustomEvent("run-ai-sql", { detail: { sql: seg.content, run: false } }));
+                              onClose();
+                            }}
+                            style={{ fontSize: 11, padding: "2px 8px", background: "none", border: "1px solid var(--border)", borderRadius: 3, color: "var(--accent)", cursor: "pointer" }}
+                          >
+                            Load in Editor
+                          </button>
+                        )}
+                      </Space>
+                    </div>
+                  );
+                }
+                return (
+                  <span key={i} style={{ whiteSpace: "pre-wrap" }}>
+                    {seg.content}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+        </>
       )}
     </Modal>
   );
