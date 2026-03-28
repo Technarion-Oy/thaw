@@ -430,10 +430,11 @@ interface Props {
   db: string;
   schema: string;
   name: string;
+  isFinalizer?: boolean;
   onClose: () => void;
 }
 
-export default function TaskPropertiesModal({ db, schema, name, onClose }: Props) {
+export default function TaskPropertiesModal({ db, schema, name, isFinalizer = false, onClose }: Props) {
   const [rows,         setRows]         = useState<main.PropertyPair[] | null>(null);
   const [loadError,    setLoadError]    = useState<string | null>(null);
   const [toggling,     setToggling]     = useState(false);
@@ -604,10 +605,11 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
 
   // ── Trigger presence check ──────────────────────────────────────────────────
   // A task with none of SCHEDULE / AFTER / FINALIZE / WHEN has no trigger and
-  // will never run automatically.
-  // Finalizer tasks carry their FINALIZE reference in the `task_relations`
-  // VARIANT column on some Snowflake editions (no dedicated `finalize` column),
-  // so we also check that column for a "finalize" key.
+  // will never run automatically. Finalizer tasks are an exception: their
+  // trigger is the FINALIZE clause itself. The `isFinalizer` prop is set by
+  // the sidebar tree (which detects it reliably via GET_DDL) so we use that
+  // as the authoritative signal rather than trying to parse SHOW TASKS columns
+  // that may not expose the FINALIZE property in all Snowflake editions.
   const taskRelations = get("task_relations");
   const finalizeInTaskRelations = (() => {
     if (!taskRelations || taskRelations === "null") return false;
@@ -615,6 +617,7 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
     catch { return taskRelations.toLowerCase().includes("finalize"); }
   })();
   const hasTrigger =
+    isFinalizer ||
     !!get("schedule") ||
     predecessors.length > 0 ||
     !!(get("finalize") || get("finalize_task")) ||

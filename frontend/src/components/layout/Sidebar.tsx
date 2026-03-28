@@ -112,8 +112,9 @@ interface ContextMenu {
   y: number;
   nodeKey: string;
   nodeType: "db" | "schema" | "type" | "obj";
-  objKind?: string;  // set for nodeType === "type" or "obj"
-  objArgs?: string;  // parameter type list for PROCEDURE / FUNCTION
+  objKind?: string;     // set for nodeType === "type" or "obj"
+  objArgs?: string;     // parameter type list for PROCEDURE / FUNCTION
+  isFinalizer?: boolean; // true when right-clicking a finalizer TASK node
 }
 
 interface UndropModal {
@@ -383,7 +384,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [executeNotebookModal, setExecuteNotebookModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createTaskModal, setCreateTaskModal] = useState<{ db: string; schema: string } | null>(null);
   const [executeTaskModal, setExecuteTaskModal] = useState<{ db: string; schema: string; name: string } | null>(null);
-  const [taskPropsModal, setTaskPropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [taskPropsModal, setTaskPropsModal] = useState<{ db: string; schema: string; name: string; isFinalizer?: boolean } | null>(null);
   const [taskGraphModal, setTaskGraphModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [taskStatusesModal, setTaskStatusesModal] = useState<{ db: string; schema: string } | null>(null);
   const [undropModal, setUndropModal] = useState<UndropModal | null>(null);
@@ -655,9 +656,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "type", objKind });
     } else if (key.startsWith("obj:")) {
       // key format: obj:DB:SCHEMA:KIND:NAME
-      const objKind = key.split(":")[3];
-      const objArgs = (node as any).arguments ?? "";
-      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "obj", objKind, objArgs });
+      const objKind     = key.split(":")[3];
+      const objArgs     = (node as any).arguments ?? "";
+      const isFinalizer = !!(node as any).isFinalizer;
+      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "obj", objKind, objArgs, isFinalizer });
     }
   };
 
@@ -1101,7 +1103,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
 
     // Tasks get a dedicated editable properties modal.
     if (kind === "TASK") {
-      setTaskPropsModal({ db, schema, name });
+      setTaskPropsModal({ db, schema, name, isFinalizer: ctxMenu.isFinalizer });
       return;
     }
 
@@ -1524,6 +1526,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           db={taskPropsModal.db}
           schema={taskPropsModal.schema}
           name={taskPropsModal.name}
+          isFinalizer={taskPropsModal.isFinalizer}
           onClose={() => setTaskPropsModal(null)}
         />
       )}
