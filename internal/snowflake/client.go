@@ -347,18 +347,29 @@ func (c *Client) Execute(ctx context.Context, query string, onProgress ...func(i
 	return last, nil
 }
 
+// ctxErrOrErr returns ctx.Err() when the context is done, otherwise err.
+// Used to normalise gosnowflake driver errors that arise as side-effects of
+// context cancellation (e.g. "Object does not exist" from an S3 pre-signed URL
+// that the driver tried to re-check after the HTTP request was cancelled).
+func ctxErrOrErr(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	return err
+}
+
 // queryOnConn executes a single SQL statement on a pinned *sql.Conn and
 // returns its result set.
 func queryOnConn(ctx context.Context, conn *sql.Conn, query string) (*QueryResult, error) {
 	rows, err := conn.QueryContext(ctx, query)
 	if err != nil {
-		return nil, err
+		return nil, ctxErrOrErr(ctx, err)
 	}
 
 	cols, err := rows.Columns()
 	if err != nil {
 		rows.Close()
-		return nil, err
+		return nil, ctxErrOrErr(ctx, err)
 	}
 	result := &QueryResult{Columns: cols, Rows: [][]interface{}{}}
 	for rows.Next() {
@@ -369,7 +380,7 @@ func queryOnConn(ctx context.Context, conn *sql.Conn, query string) (*QueryResul
 		}
 		if err := rows.Scan(ptrs...); err != nil {
 			rows.Close()
-			return nil, err
+			return nil, ctxErrOrErr(ctx, err)
 		}
 		result.Rows = append(result.Rows, vals)
 	}
@@ -392,13 +403,13 @@ func queryOnConn(ctx context.Context, conn *sql.Conn, query string) (*QueryResul
 func (c *Client) QuerySingle(ctx context.Context, query string) (*QueryResult, error) {
 	rows, err := c.db.QueryContext(ctx, query)
 	if err != nil {
-		return nil, err
+		return nil, ctxErrOrErr(ctx, err)
 	}
 
 	cols, err := rows.Columns()
 	if err != nil {
 		rows.Close()
-		return nil, err
+		return nil, ctxErrOrErr(ctx, err)
 	}
 	result := &QueryResult{Columns: cols, Rows: [][]interface{}{}}
 
@@ -410,7 +421,7 @@ func (c *Client) QuerySingle(ctx context.Context, query string) (*QueryResult, e
 		}
 		if err := rows.Scan(ptrs...); err != nil {
 			rows.Close()
-			return nil, err
+			return nil, ctxErrOrErr(ctx, err)
 		}
 		result.Rows = append(result.Rows, vals)
 	}

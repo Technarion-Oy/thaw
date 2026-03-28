@@ -20,6 +20,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -825,9 +826,24 @@ func (a *App) WaitForQueryResult() (*snowflake.QueryResult, error) {
 	if result != nil && queryID != "" {
 		result.QueryID = queryID
 	}
+	// Backstop: if the query context was cancelled but the driver still
+	// returned a driver-level error (e.g. "Object does not exist" from an
+	// aborted S3 pre-signed URL), replace it with context.Canceled so the
+	// frontend shows a clean "query cancelled" message, not a confusing error.
 	if err != nil {
-		logger.L.Error("query failed", "queryID", queryID, "err", err)
-		telemetry.Track(telemetry.EventQueryFailed, nil)
+		select {
+		case <-ctxDone:
+			err = context.Canceled
+		default:
+		}
+	}
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			logger.L.Info("query cancelled", "queryID", queryID)
+		} else {
+			logger.L.Error("query failed", "queryID", queryID, "err", err)
+			telemetry.Track(telemetry.EventQueryFailed, nil)
+		}
 	} else {
 		logger.L.Info("query completed", "queryID", queryID)
 		telemetry.Track(telemetry.EventQueryCompleted, nil)
