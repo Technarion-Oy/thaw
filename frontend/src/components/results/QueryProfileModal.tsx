@@ -86,9 +86,9 @@ function buildAiPrompt(sql: string, rows: Row[], columns: string[]): string {
     }).join(" | ")
   ).join("\n");
 
-  return `You are a Snowflake SQL performance expert. Analyze the query and its execution plan below.
+  return `You are a Snowflake SQL performance expert. Rewrite the query below to be as fast as possible based on its execution plan.
 
-Identify bottlenecks and suggest specific improvements. Show the improved SQL when the query itself can be rewritten. If schema or infrastructure changes would help (clustering keys, materialized views, table restructuring, search optimization service, etc.) describe them with concrete examples.
+Return only the improved SQL with brief inline comments explaining each change. Do not suggest schema changes, clustering keys, materialized views, or any other infrastructure changes — focus exclusively on rewriting the query itself.
 
 SQL:
 \`\`\`sql
