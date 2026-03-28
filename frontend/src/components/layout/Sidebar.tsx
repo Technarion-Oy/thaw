@@ -47,7 +47,7 @@ import {
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData, FetchNotebookContent } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
@@ -904,6 +904,30 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     });
   };
 
+  const deleteTaskGraph = () => {
+    if (!ctxMenu) return;
+    const { nodeKey } = ctxMenu;
+    setCtxMenu(null);
+    // key format: obj:DB:SCHEMA:KIND:NAME
+    const [, db, schema, , ...nameParts] = nodeKey.split(":");
+    const name = nameParts.join(":");
+    Modal.confirm({
+      title: `Delete task graph "${name}"?`,
+      content: `This will suspend and permanently drop "${name}" and all its child tasks. This action cannot be undone.`,
+      okText: "Delete Graph",
+      okType: "danger",
+      cancelText: "Cancel",
+      onOk: async () => {
+        try {
+          await DropTaskTree(db, schema, name);
+          refreshDatabaseByName(db);
+        } catch (e) {
+          message.error(String(e));
+        }
+      },
+    });
+  };
+
   const renameObject = () => {
     if (!ctxMenu) return;
     const { nodeKey, objKind = "" } = ctxMenu;
@@ -1433,6 +1457,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Execute Task", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeTask)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TASK" &&
             menuItem("View Task Graph…", <ShareAltOutlined style={{ fontSize: 12 }} />, openTaskGraph)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TASK" && !ctxMenu.isFinalizer &&
+            menuItem("Delete Task Graph…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, deleteTaskGraph, "#f85149")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PROCEDURE" &&
             menuItem("Call Procedure", <PlayCircleOutlined style={{ fontSize: 12 }} />, callProcedure)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "FUNCTION" &&

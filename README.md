@@ -210,6 +210,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
       - **Suspend / Resume** — issues `ALTER TASK IF EXISTS … SUSPEND/RESUME`; the schedule state badge updates immediately without waiting for the next poll
       - **Add Child Task…** — opens the Create Task dialog pre-configured for child mode (schedule field hidden, AFTER pre-filled with the right-clicked task); disabled on finalizer nodes
       - **Add Finalizer Task…** — opens the Create Task dialog pre-configured for finalizer mode (schedule hidden, FINALIZE pre-filled with the root task name); enabled only on the root node and only when no finalizer task already exists; shown as "(already has one)" when the root already has a finalizer
+  - **Delete Task Graph…** — shown for any non-finalizer task; after a danger confirmation, suspends and drops all tasks in the graph leaf-first via `DropTaskTree`; the sidebar refreshes on success; finalizer tasks are excluded (use the regular **Delete…** item for those)
   - **Insert Full Name** — inserts the fully-qualified `"DB"."SCHEMA"."NAME"` at the current editor cursor position
   - View the DDL definition inline
   - **Rename** the object (`ALTER … RENAME TO`) — available for tables, views, sequences, stages, streams, tasks, file formats, and pipes
