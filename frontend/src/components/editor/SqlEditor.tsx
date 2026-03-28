@@ -1447,9 +1447,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           if (!hasSchemaInStore && !fetchedSchemaObjects.has(schemaKey)) {
             fetchedSchemaObjects.add(schemaKey);
             try {
-              const fetched = await ListObjects(pDb, pSchema);
+              const fetched = await ListObjects(UC(pDb), UC(pSchema));
               useObjectStore.getState().addObjects(
-                pDb, pSchema,
+                UC(pDb), UC(pSchema),
                 (fetched ?? []).map((o) => ({ name: o.name, kind: (o.kind || "OTHER").toUpperCase() })),
               );
             } catch {

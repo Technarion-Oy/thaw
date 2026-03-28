@@ -1266,6 +1266,11 @@ export default function QueryPage() {
                       <Text style={{ fontSize: 11, color: "var(--text-faint)" }}>
                         {displayedResult.rows.length} row{displayedResult.rows.length !== 1 ? "s" : ""}
                       </Text>
+                      {displayedResult.truncated && (
+                        <Tooltip title="Results capped at 50,000 rows. Add a LIMIT clause or refine your query to see all data.">
+                          <Tag color="orange" style={{ fontSize: 10, lineHeight: "16px", padding: "0 5px", marginInlineEnd: 0 }}>truncated</Tag>
+                        </Tooltip>
+                      )}
                     </div>
                   </div>
                   {/* ── Row 2: compare info, right-aligned (only when active) */}

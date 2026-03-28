@@ -1447,6 +1447,7 @@ export namespace snowflake {
 	    rows: any[][];
 	    rowsAffected: number;
 	    queryID: string;
+	    truncated: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new QueryResult(source);
@@ -1458,6 +1459,7 @@ export namespace snowflake {
 	        this.rows = source["rows"];
 	        this.rowsAffected = source["rowsAffected"];
 	        this.queryID = source["queryID"];
+	        this.truncated = source["truncated"];
 	    }
 	}
 	export class SchemaRef {

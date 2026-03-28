@@ -22,6 +22,7 @@ export interface QueryResult {
   rows: unknown[][];
   rowsAffected: number;
   queryID?: string;
+  truncated?: boolean;
 }
 
 export interface TabDiff {

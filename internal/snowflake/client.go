@@ -79,11 +79,21 @@ type SnowflakeObject struct {
 }
 
 // QueryResult is the serialisable result of a SQL query.
+// maxQueryRows is the maximum number of rows returned in a single query result.
+// Results larger than this are silently truncated; QueryResult.Truncated is set
+// to true so the frontend can warn the user. The cap exists to prevent the Wails
+// IPC layer (JSON serialisation + deserialisation) from blocking the app for
+// tens of seconds on very large result sets.
+const maxQueryRows = 50_000
+
 type QueryResult struct {
 	Columns      []string        `json:"columns"`
 	Rows         [][]interface{} `json:"rows"`
 	RowsAffected int64           `json:"rowsAffected"`
 	QueryID      string          `json:"queryID"`
+	// Truncated is true when the result contained more than maxQueryRows rows
+	// and was capped.  The frontend displays a warning in that case.
+	Truncated bool `json:"truncated"`
 }
 
 // sessionConnector wraps a gosnowflake Connector and applies the current
@@ -383,18 +393,26 @@ func queryOnConn(ctx context.Context, conn *sql.Conn, query string) (*QueryResul
 			return nil, ctxErrOrErr(ctx, err)
 		}
 		result.Rows = append(result.Rows, vals)
+		if len(result.Rows) >= maxQueryRows {
+			result.Truncated = true
+			break
+		}
 	}
-	rowsErr := rows.Err()
 	// When the context was cancelled the gosnowflake driver may stall inside
 	// rows.Close() while draining buffered Arrow chunks over the network.
-	// Fire Close in a goroutine so this function returns immediately and the
-	// caller (and WaitForQueryResult) are not blocked.
+	// When the row limit was hit there may be many remaining Arrow chunks.
+	// In both cases fire Close in a goroutine so this function returns
+	// immediately without blocking the caller.
 	if ctx.Err() != nil {
 		go rows.Close()
 		return nil, ctx.Err()
 	}
+	if result.Truncated {
+		go rows.Close()
+		return result, nil
+	}
 	rows.Close()
-	return result, rowsErr
+	return result, rows.Err()
 }
 
 // QuerySingle executes a single SQL statement without multi-statement mode and
@@ -424,16 +442,22 @@ func (c *Client) QuerySingle(ctx context.Context, query string) (*QueryResult, e
 			return nil, ctxErrOrErr(ctx, err)
 		}
 		result.Rows = append(result.Rows, vals)
+		if len(result.Rows) >= maxQueryRows {
+			result.Truncated = true
+			break
+		}
 	}
-	rowsErr := rows.Err()
-	// Same as queryOnConn: avoid blocking on rows.Close() when the context
-	// is cancelled and the driver may stall draining Arrow data.
+	// Same as queryOnConn: async close when context cancelled or row limit hit.
 	if ctx.Err() != nil {
 		go rows.Close()
 		return nil, ctx.Err()
 	}
+	if result.Truncated {
+		go rows.Close()
+		return result, nil
+	}
 	rows.Close()
-	return result, rowsErr
+	return result, rows.Err()
 }
 
 // splitStatements splits a SQL string into individual statements on semicolons,
