@@ -813,6 +813,15 @@ func (a *App) WaitForQueryResult() (*snowflake.QueryResult, error) {
 	// Read queryID after done fires so multi-statement queries get the last
 	// per-statement qid (updated by wg-tracked goroutines before close(done)).
 	queryID := a.queryID
+	// Snapshot whether the query was explicitly cancelled by the user BEFORE
+	// calling queryCancelFunc: the cancel func also closes ctxDone, so
+	// checking after cleanup would always report "cancelled".
+	var wasExplicitlyCancelled bool
+	select {
+	case <-ctxDone:
+		wasExplicitlyCancelled = true
+	default:
+	}
 	// Clean up so a subsequent call does not re-read stale state.
 	if a.queryCancelFunc != nil {
 		a.queryCancelFunc() // no-op if already cancelled; ensures context resources are freed
@@ -826,16 +835,13 @@ func (a *App) WaitForQueryResult() (*snowflake.QueryResult, error) {
 	if result != nil && queryID != "" {
 		result.QueryID = queryID
 	}
-	// Backstop: if the query context was cancelled but the driver still
-	// returned a driver-level error (e.g. "Object does not exist" from an
-	// aborted S3 pre-signed URL), replace it with context.Canceled so the
-	// frontend shows a clean "query cancelled" message, not a confusing error.
-	if err != nil {
-		select {
-		case <-ctxDone:
-			err = context.Canceled
-		default:
-		}
+	// Backstop: if the query was explicitly cancelled (user called CancelQuery)
+	// but the driver still returned a driver-level error (e.g. "Object does not
+	// exist" from an aborted S3 pre-signed URL), replace it with
+	// context.Canceled so the frontend shows "query cancelled", not a
+	// misleading error message.
+	if err != nil && wasExplicitlyCancelled {
+		err = context.Canceled
 	}
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
