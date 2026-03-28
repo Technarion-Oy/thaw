@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, Modal, type MenuProps } from "antd";
-import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined } from "@ant-design/icons";
+import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
 import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NewNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL } from "../../wailsjs/go/main/App";
@@ -31,6 +31,7 @@ import { DiffEditor } from "@monaco-editor/react";
 import { ensureMonacoSetup } from "../components/editor/monacoSetup";
 import { useThemeStore } from "../store/themeStore";
 import ResultGrid, { type ScrollSyncHandle } from "../components/results/ResultGrid";
+import QueryProfileModal from "../components/results/QueryProfileModal";
 import AiChat from "../components/chat/AiChat";
 import TerminalPanel from "../components/terminal/TerminalPanel";
 import NotebookTab from "../components/notebook/NotebookTab";
@@ -66,6 +67,8 @@ export default function QueryPage() {
   const [splitW, setSplitW] = useState(splitEditorWidth);
   const [runningQueryId, setRunningQueryId] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [profileQueryId, setProfileQueryId] = useState<string | null>(null);
+  const [profileIsLive,  setProfileIsLive]  = useState(false);
   // Multi-statement progress: which statement is running and out of how many.
   const [stmtProgress, setStmtProgress] = useState<{ index: number; total: number; queryID?: string } | null>(null);
   // Zero-based index of the statement currently executing; drives editor highlight.
@@ -1120,6 +1123,15 @@ export default function QueryPage() {
                           style={{ height: 16, padding: "0 2px", minWidth: 0 }}
                           onClick={async () => { await ClipboardSetText((stmtProgress.queryID || runningQueryId)!); message.success("Query ID copied"); }}
                         />
+                        <Tooltip title="Query Profile">
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<BarChartOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
+                            style={{ height: 16, padding: "0 2px", minWidth: 0 }}
+                            onClick={() => { setProfileQueryId((stmtProgress.queryID || runningQueryId)!); setProfileIsLive(true); }}
+                          />
+                        </Tooltip>
                       </Space>
                     )}
                   </div>
@@ -1135,6 +1147,15 @@ export default function QueryPage() {
                       style={{ height: 16, padding: "0 2px", minWidth: 0 }}
                       onClick={async () => { await ClipboardSetText(runningQueryId); message.success("Query ID copied"); }}
                     />
+                    <Tooltip title="Query Profile">
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<BarChartOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
+                        style={{ height: 16, padding: "0 2px", minWidth: 0 }}
+                        onClick={() => { setProfileQueryId(runningQueryId); setProfileIsLive(true); }}
+                      />
+                    </Tooltip>
                   </Space>
                 ) : null}
               </div>
@@ -1212,6 +1233,15 @@ export default function QueryPage() {
                           style={{ height: 16, padding: "0 2px", minWidth: 0 }}
                           onClick={async () => { await ClipboardSetText(displayedResult.queryID!); message.success("Query ID copied"); }}
                         />
+                        <Tooltip title="Query Profile">
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<BarChartOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
+                            style={{ height: 16, padding: "0 2px", minWidth: 0 }}
+                            onClick={() => { setProfileQueryId(displayedResult.queryID!); setProfileIsLive(false); }}
+                          />
+                        </Tooltip>
                       </Space>
                     )}
                     <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
@@ -1403,6 +1433,14 @@ export default function QueryPage() {
           ? <Typography.Text copyable={{ text: snowsightUrl }} style={{ wordBreak: "break-all" }}>{snowsightUrl}</Typography.Text>
           : <Spin size="small" />}
       </Modal>
+
+      {profileQueryId && (
+        <QueryProfileModal
+          queryId={profileQueryId}
+          onClose={() => setProfileQueryId(null)}
+          liveRefresh={profileIsLive && isRunning}
+        />
+      )}
 
       <Modal
         open={closeConfirm !== null}

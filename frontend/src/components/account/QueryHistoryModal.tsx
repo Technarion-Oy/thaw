@@ -25,11 +25,12 @@ import {
   Typography,
   Input,
 } from "antd";
-import { SearchOutlined } from "@ant-design/icons";
+import { SearchOutlined, BarChartOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 import { GetQueryHistory, ListUsers } from "../../../wailsjs/go/main/App";
+import QueryProfileModal from "../results/QueryProfileModal";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { useConnectionStore } from "../../store/connectionStore";
 import { useSessionStore } from "../../store/sessionStore";
@@ -63,6 +64,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
   const [querySearch,     setQuerySearch]     = useState("");
   const [userList,        setUserList]        = useState<string[]>([]);
   const [copiedId,        setCopiedId]        = useState<string | null>(null);
+  const [profileQueryId,  setProfileQueryId]  = useState<string | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const runQuery = async () => {
@@ -179,6 +181,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
   ];
 
   return (
+    <>
     <Modal
       open
       title="Query Activity"
@@ -341,6 +344,15 @@ export default function QueryHistoryModal({ onClose }: Props) {
                       >
                         {copiedId === row.queryId ? "Copied!" : "Copy"}
                       </Button>
+                      {row.queryId && (
+                        <Button
+                          size="small"
+                          icon={<BarChartOutlined />}
+                          onClick={() => setProfileQueryId(row.queryId)}
+                        >
+                          Profile
+                        </Button>
+                      )}
                       {row.errorMessage && (
                         <Text type="danger" style={{ fontSize: 11 }}>{row.errorMessage}</Text>
                       )}
@@ -356,5 +368,13 @@ export default function QueryHistoryModal({ onClose }: Props) {
         </>
       )}
     </Modal>
+
+    {profileQueryId && (
+      <QueryProfileModal
+        queryId={profileQueryId}
+        onClose={() => setProfileQueryId(null)}
+      />
+    )}
+    </>
   );
 }
