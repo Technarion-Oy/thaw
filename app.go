@@ -2220,19 +2220,120 @@ func (a *App) TaskHasChildren(database, schema, taskName string) (bool, error) {
 	return false, nil
 }
 
-// EnableTaskDependents resumes all dependent (child) tasks recursively, then
-// resumes the root task itself.  It calls SYSTEM$TASK_DEPENDENTS_ENABLE with
-// recursive=true so the entire task graph is enabled in the correct order.
+// EnableTaskDependents resumes the named task and all of its descendants.
+// Tasks are resumed in leaf-first (post-order) so that children are active
+// before their parent, which Snowflake requires when enabling a task graph.
+// SYSTEM$TASK_DEPENDENTS_ENABLE is intentionally NOT used here because:
+//   (a) it is unavailable in some Snowflake editions,
+//   (b) in many editions it does not resume the root task itself.
+// Instead we build the dependency graph from SHOW TASKS and issue individual
+// ALTER TASK … RESUME statements in the correct order.
 func (a *App) EnableTaskDependents(database, schema, taskName string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
-	sq := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
-	fqn := fmt.Sprintf(`"%s"."%s"."%s"`, esc(database), esc(schema), esc(taskName))
-	_, err := a.client.Execute(a.ctx,
-		fmt.Sprintf(`SELECT SYSTEM$TASK_DEPENDENTS_ENABLE('%s')`, sq(fqn)))
-	return err
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+
+	toString := func(v interface{}) string {
+		if v == nil {
+			return ""
+		}
+		switch t := v.(type) {
+		case []byte:
+			return string(t)
+		case string:
+			return t
+		default:
+			return fmt.Sprintf("%v", t)
+		}
+	}
+
+	// 1. Fetch all tasks in the schema to build the dependency graph.
+	res, err := a.client.Execute(a.ctx,
+		fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
+	if err != nil {
+		return err
+	}
+
+	nameIdx, predsIdx := -1, -1
+	for i, col := range res.Columns {
+		switch strings.ToLower(col) {
+		case "name":
+			nameIdx = i
+		case "predecessors", "predecessor":
+			predsIdx = i
+		}
+	}
+	if nameIdx < 0 {
+		// No tasks found — just resume the root and return.
+		_, err = a.client.Execute(a.ctx,
+			fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s RESUME", q(database), q(schema), q(taskName)))
+		return err
+	}
+
+	// Build a children map: parent (upper) → []child names (original case).
+	children := make(map[string][]string)
+	taskNames := make(map[string]string) // upper → original case
+	for _, row := range res.Rows {
+		name := ""
+		if nameIdx < len(row) {
+			name = toString(row[nameIdx])
+		}
+		if name == "" {
+			continue
+		}
+		taskNames[strings.ToUpper(name)] = name
+		if predsIdx < 0 || predsIdx >= len(row) {
+			continue
+		}
+		preds := toString(row[predsIdx])
+		if preds == "" || preds == "[]" || preds == "<nil>" {
+			continue
+		}
+		preds = strings.TrimPrefix(preds, "[")
+		preds = strings.TrimSuffix(preds, "]")
+		for _, part := range strings.Split(preds, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			segs := strings.Split(part, ".")
+			parent := strings.ToUpper(strings.Trim(segs[len(segs)-1], `"`))
+			children[parent] = append(children[parent], name)
+		}
+	}
+
+	// 2. Collect all descendants via BFS, then resume in leaf-first (post-order).
+	rootUpper := strings.ToUpper(taskName)
+	visited := map[string]bool{rootUpper: true}
+	bfsOrder := []string{rootUpper}
+	queue := []string{rootUpper}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, child := range children[cur] {
+			cu := strings.ToUpper(child)
+			if !visited[cu] {
+				visited[cu] = true
+				bfsOrder = append(bfsOrder, cu)
+				queue = append(queue, cu)
+			}
+		}
+	}
+
+	// Resume in reverse BFS order (leaves first) so Snowflake accepts each RESUME.
+	for i := len(bfsOrder) - 1; i >= 0; i-- {
+		upper := bfsOrder[i]
+		name := upper
+		if orig, ok := taskNames[upper]; ok {
+			name = orig
+		}
+		if _, err := a.client.Execute(a.ctx,
+			fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s RESUME", q(database), q(schema), q(name))); err != nil {
+			return fmt.Errorf("resuming task %q: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // SuspendTaskGraph suspends the root task first (to stop it from scheduling new

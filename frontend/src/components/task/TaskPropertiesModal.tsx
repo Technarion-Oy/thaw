@@ -620,22 +620,20 @@ export default function TaskPropertiesModal({ db, schema, name, onClose }: Props
             >
               {isStarted ? "Suspend" : "Resume"}
             </Button>
-            {hasChildren && (
-              <Button
-                size="small"
-                icon={isStarted ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
-                onClick={toggleGraph}
-                loading={togglingGraph}
-                disabled={toggling || (!isStarted && !hasTrigger)}
-                title={!isStarted && !hasTrigger
-                  ? "Cannot resume: task has no schedule, predecessor, finalize, or WHEN condition"
-                  : isStarted
-                  ? "Suspend this task first, then suspend all child tasks"
-                  : "Resume all child tasks first via SYSTEM$TASK_DEPENDENTS_ENABLE, then resume this task"}
-              >
-                {isStarted ? "Suspend with children" : "Resume with children"}
-              </Button>
-            )}
+            <Button
+              size="small"
+              icon={isStarted ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
+              onClick={toggleGraph}
+              loading={togglingGraph}
+              disabled={toggling || (!isStarted && !hasTrigger)}
+              title={!isStarted && !hasTrigger
+                ? "Cannot resume: task has no schedule, predecessor, finalize, or WHEN condition"
+                : isStarted
+                ? "Suspend this task and all child tasks"
+                : "Resume all child tasks (leaf-first), then this task"}
+            >
+              {isStarted ? "Suspend Graph" : "Resume Graph"}
+            </Button>
             {get("owner") && (
               <Text type="secondary" style={{ fontSize: 12, marginLeft: "auto" }}>
                 Owner: {get("owner")}
