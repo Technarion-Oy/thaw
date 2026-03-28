@@ -354,10 +354,10 @@ func queryOnConn(ctx context.Context, conn *sql.Conn, query string) (*QueryResul
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
 	cols, err := rows.Columns()
 	if err != nil {
+		rows.Close()
 		return nil, err
 	}
 	result := &QueryResult{Columns: cols, Rows: [][]interface{}{}}
@@ -368,11 +368,22 @@ func queryOnConn(ctx context.Context, conn *sql.Conn, query string) (*QueryResul
 			ptrs[i] = &vals[i]
 		}
 		if err := rows.Scan(ptrs...); err != nil {
+			rows.Close()
 			return nil, err
 		}
 		result.Rows = append(result.Rows, vals)
 	}
-	return result, rows.Err()
+	rowsErr := rows.Err()
+	// When the context was cancelled the gosnowflake driver may stall inside
+	// rows.Close() while draining buffered Arrow chunks over the network.
+	// Fire Close in a goroutine so this function returns immediately and the
+	// caller (and WaitForQueryResult) are not blocked.
+	if ctx.Err() != nil {
+		go rows.Close()
+		return nil, ctx.Err()
+	}
+	rows.Close()
+	return result, rowsErr
 }
 
 // QuerySingle executes a single SQL statement without multi-statement mode and
@@ -383,10 +394,10 @@ func (c *Client) QuerySingle(ctx context.Context, query string) (*QueryResult, e
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
 	cols, err := rows.Columns()
 	if err != nil {
+		rows.Close()
 		return nil, err
 	}
 	result := &QueryResult{Columns: cols, Rows: [][]interface{}{}}
@@ -398,11 +409,20 @@ func (c *Client) QuerySingle(ctx context.Context, query string) (*QueryResult, e
 			ptrs[i] = &vals[i]
 		}
 		if err := rows.Scan(ptrs...); err != nil {
+			rows.Close()
 			return nil, err
 		}
 		result.Rows = append(result.Rows, vals)
 	}
-	return result, rows.Err()
+	rowsErr := rows.Err()
+	// Same as queryOnConn: avoid blocking on rows.Close() when the context
+	// is cancelled and the driver may stall draining Arrow data.
+	if ctx.Err() != nil {
+		go rows.Close()
+		return nil, ctx.Err()
+	}
+	rows.Close()
+	return result, rowsErr
 }
 
 // splitStatements splits a SQL string into individual statements on semicolons,

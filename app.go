@@ -59,12 +59,13 @@ type App struct {
 	savedWindowState *WindowState       // non-nil when a persisted window state was loaded at launch
 
 	// Two-phase query execution (StartQuery / WaitForQueryResult).
-	queryMu         sync.Mutex
-	queryID         string
-	queryDone       chan struct{}
-	queryResult     *snowflake.QueryResult
-	queryErr        error
-	queryCancelFunc context.CancelFunc // cancels the in-flight query context
+	queryMu             sync.Mutex
+	queryID             string
+	queryDone           chan struct{}
+	queryResult         *snowflake.QueryResult
+	queryErr            error
+	queryCancelFunc     context.CancelFunc  // cancels the in-flight query context
+	queryCancelCtxDone  <-chan struct{}      // closed when the in-flight query context is cancelled
 
 	// Embedded terminal (pseudo-terminal).
 	ptyMu  sync.Mutex
@@ -644,6 +645,7 @@ func (a *App) StartQuery(sql string) (string, error) {
 		a.queryCancelFunc() // cancel any still-running previous query
 	}
 	a.queryCancelFunc = cancel
+	a.queryCancelCtxDone = ctx.Done()
 	a.queryDone = nil // clear stale channel from previous query
 	a.queryID = ""
 	a.queryMu.Unlock()
@@ -758,15 +760,51 @@ func (a *App) CancelQuery() {
 
 // WaitForQueryResult blocks until the query submitted by StartQuery completes
 // and returns the result set with the query ID embedded.
+//
+// If CancelQuery is called and the background goroutine does not finish within
+// a 2-second grace period (e.g. the gosnowflake driver stalls while draining
+// Arrow chunks after context cancellation), WaitForQueryResult returns
+// context.Canceled immediately so the UI can reset without waiting for the
+// driver to recover.  The background goroutine continues running and will clean
+// up on its own once the driver eventually releases the connection.
 func (a *App) WaitForQueryResult() (*snowflake.QueryResult, error) {
 	a.queryMu.Lock()
 	done := a.queryDone
+	ctxDone := a.queryCancelCtxDone
 	a.queryMu.Unlock()
 
 	if done == nil {
 		return nil, fmt.Errorf("no query in progress")
 	}
-	<-done
+
+	select {
+	case <-done:
+		// Normal path: background goroutine finished.
+	case <-a.ctx.Done():
+		// App is shutting down.
+		return nil, a.ctx.Err()
+	case <-ctxDone:
+		// CancelQuery was called.  Give the driver a short window to respond
+		// cleanly (it usually does — the Arrow error is logged before returning).
+		select {
+		case <-done:
+			// Finished in time; fall through to the normal result-read below.
+		case <-time.After(2 * time.Second):
+			// Driver is stuck (Arrow chunk drain blocked on network I/O).
+			// Unblock the UI now; the goroutine will clean up asynchronously.
+			logger.L.Warn("query goroutine did not finish after cancellation; unblocking UI")
+			a.queryMu.Lock()
+			if a.queryCancelFunc != nil {
+				a.queryCancelFunc()
+				a.queryCancelFunc = nil
+			}
+			a.queryDone = nil
+			a.queryID = ""
+			a.queryCancelCtxDone = nil
+			a.queryMu.Unlock()
+			return nil, context.Canceled
+		}
+	}
 
 	a.queryMu.Lock()
 	result := a.queryResult
@@ -781,6 +819,7 @@ func (a *App) WaitForQueryResult() (*snowflake.QueryResult, error) {
 	}
 	a.queryDone = nil
 	a.queryID = ""
+	a.queryCancelCtxDone = nil
 	a.queryMu.Unlock()
 
 	if result != nil && queryID != "" {
