@@ -24,6 +24,10 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - Definitions are cached per session and refreshed automatically after 60 seconds
   - **Function tooltips** — hovering over a bare function name (e.g. `DATEADD`, `FLATTEN`, or a UDF) shows all overloads with their full signatures and descriptions in the same overlay; backed by an embedded catalogue of ~320 built-in functions that is always available offline, and refreshed with live metadata after each Snowflake connection
 - **Function call highlighting** — every function call in the editor is syntax-coloured by kind: built-in Snowflake functions appear in **gold** and user-defined functions appear in **teal**, making it easy to distinguish system functions from custom logic at a glance; highlighting updates as you type (200 ms debounce) and is seeded from a local SQLite cache on editor mount so it works without a live connection
+- **Live SQL diagnostics** — squiggly-line markers appear 400 ms after each edit and clear automatically once fixed; no false positives on well-formed Snowflake SQL:
+  - **Syntax errors** (red squiggly) — unclosed string literals, unclosed quoted identifiers, unclosed dollar-quoted strings, unclosed block comments, unmatched parentheses/brackets, and tokens that appear after a semicolon but are not a recognised SQL statement keyword
+  - **Semantic warnings** (yellow squiggly) — `alias.column` references where the column name does not exist in the table, validated against the session column cache (silent when the cache is cold)
+  - **Hover tooltip** — hovering any marker shows a compact `ERROR — …` or `WARNING — …` tooltip with the problem description; works on both identifier tokens and non-identifier characters (e.g. an unmatched parenthesis or an opening quote)
 - **SQL autocomplete** — context-aware completions:
   - `db.` → schemas in that database
   - `db.schema.` → tables, views, functions, and other objects in that schema

@@ -21,6 +21,7 @@ import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs } from "../../../wailsjs/go/main/App";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
+import { DiagMarker, ColInfo, validateSyntax, validateSemantics } from "../../utils/sqlDiagnostics";
 
 // Module-level DDL cache and hover provider handle so we only register once
 // and don't accumulate duplicate providers on editor remounts.
@@ -176,7 +177,7 @@ async function getFKs(db: string, schema: string, table: string): Promise<FKEntr
 
 // ── ColInfo cache for type-compatible JOIN ON suggestions ─────────────────────
 // Keyed "DB\0SCHEMA\0TABLE" → column info with data types.
-interface ColInfo { name: string; dataType: string; }
+// ColInfo is imported from sqlDiagnostics so validateSemantics can share the same type.
 const colInfoCache   = new Map<string, ColInfo[]>();
 const fetchingColInfos = new Set<string>();
 
@@ -619,6 +620,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fnDecRef      = useRef<any>(null);
   const fnDecTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const diagTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [ddlHover, setDdlHover] = useState<DdlHover | null>(null);
   const [tooltipCtxMenu, setTooltipCtxMenu] = useState<{ x: number; y: number; sel: string } | null>(null);
@@ -774,6 +776,62 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       if (fnDecTimerRef.current) clearTimeout(fnDecTimerRef.current);
       fnDecTimerRef.current = setTimeout(refreshFnDecorations, 200);
     });
+
+    // ── SQL diagnostics (syntax + semantic markers) ────────────────────────
+    const runDiagnostics = () => {
+      const model = editor.getModel();
+      if (!model) return;
+      if (model.getLanguageId() !== "sql") {
+        monaco.editor.setModelMarkers(model, "thaw-sql", []);
+        return;
+      }
+      const diagSql = model.getValue();
+      const diagMarkers: DiagMarker[] = [];
+
+      const syntaxErrors = validateSyntax(diagSql);
+      diagMarkers.push(...syntaxErrors);
+
+      if (syntaxErrors.length === 0) {
+        const rawRefs = parseJoinTables(diagSql);
+        const storeObjs = useObjectStore.getState().objects;
+        // Resolve refs without the >= 2 constraint so single-table queries are validated.
+        const resolved = rawRefs
+          .map((ref) => {
+            if (ref.db && ref.schema) {
+              return { db: ref.db, schema: ref.schema, name: ref.name, alias: ref.alias };
+            }
+            const obj = storeObjs.find((o) => {
+              if (o.kind !== "TABLE" && o.kind !== "VIEW") return false;
+              if (UC(o.name) !== UC(ref.name)) return false;
+              if (ref.db     && UC(o.db)     !== UC(ref.db))     return false;
+              if (ref.schema && UC(o.schema) !== UC(ref.schema)) return false;
+              return true;
+            });
+            return obj ? { db: obj.db, schema: obj.schema, name: obj.name, alias: ref.alias } : null;
+          })
+          .filter(Boolean) as Array<{ db: string; schema: string; name: string; alias: string }>;
+
+        if (resolved.length > 0) {
+          diagMarkers.push(...validateSemantics(diagSql, resolved, colInfoCache));
+        }
+      }
+
+      monaco.editor.setModelMarkers(model, "thaw-sql", diagMarkers);
+    };
+
+    editor.getModel()?.onDidChangeContent(() => {
+      if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
+      diagTimerRef.current = setTimeout(runDiagnostics, 400);
+    });
+
+    // Clear markers when language changes (e.g. Python or YAML tab)
+    editor.onDidChangeModelLanguage(() => {
+      const model = editor.getModel();
+      if (model) monaco.editor.setModelMarkers(model, "thaw-sql", []);
+    });
+
+    // Run immediately on mount (catches errors in restored tabs)
+    runDiagnostics();
 
     // ── Clipboard (WKWebView fix) ─────────────────────────────────────────
     // WKWebView blocks navigator.clipboard.readText/writeText (async Clipboard
@@ -1410,9 +1468,20 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
       const pos = e.target?.position;
       const parts = (pos && model) ? getQualifiedIdent(model, pos) : null;
-      if (!parts || parts.length === 0) {
-        // Mouse moved off any recognisable identifier — cancel the pending show
-        // timer so it doesn't fire after the mouse has already left the word.
+
+      // Allow hover timer to fire when the cursor is over a diagnostic marker
+      // even if the position isn't inside a recognised identifier (e.g. a lone
+      // quote character that opens an unclosed string).
+      const diagMarkerAtPos = (pos && model)
+        ? (monaco.editor.getModelMarkers({ owner: "thaw-sql", resource: model.uri }).find((m: any) =>
+            pos.lineNumber >= m.startLineNumber && pos.lineNumber <= m.endLineNumber &&
+            pos.column    >= m.startColumn      && pos.column    <= m.endColumn,
+          ) ?? null)
+        : null;
+
+      if ((!parts || parts.length === 0) && !diagMarkerAtPos) {
+        // Mouse moved off any recognisable identifier or marker — cancel the
+        // pending show timer so it doesn't fire after the mouse has left.
         lastHoverWordRef.current = null;
         if (hoverTimerRef.current) { clearTimeout(hoverTimerRef.current); hoverTimerRef.current = null; }
         if (!isOnTooltipRef.current) scheduleHide();
@@ -1425,10 +1494,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       // mouse currently is, even if it moved within the same word.
       currentHoverPosRef.current = pos;
 
-      // Only restart the timer when the hovered word changes.  Moving
-      // within the same word should NOT reset the clock — otherwise the tooltip
-      // never fires while the mouse is crossing the token.
-      const wordKey = parts.join("\0");
+      // Only restart the timer when the hovered word (or marker) changes.
+      const wordKey = (parts && parts.length > 0)
+        ? parts.join("\0")
+        : `marker:${diagMarkerAtPos!.startLineNumber}:${diagMarkerAtPos!.startColumn}`;
       if (wordKey === lastHoverWordRef.current) return;
       lastHoverWordRef.current = wordKey;
 
@@ -1443,9 +1512,83 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         // the mouse is now (may have moved within the same word).
         const pos = currentHoverPosRef.current;
         if (!pos) return;
+
+        // ── Diagnostic marker tooltip (highest priority) ───────────────────
+        {
+          const mModel = editor.getModel();
+          if (mModel) {
+            const diagMarker = monaco.editor.getModelMarkers({ owner: "thaw-sql", resource: mModel.uri }).find((m: any) =>
+              pos.lineNumber >= m.startLineNumber && pos.lineNumber <= m.endLineNumber &&
+              pos.column    >= m.startColumn      && pos.column    <= m.endColumn,
+            );
+            if (diagMarker) {
+              const editorDom = editor.getDomNode();
+              const editorRect = editorDom?.getBoundingClientRect();
+              const scrolledPos = editor.getScrolledVisiblePosition(pos);
+              if (scrolledPos && editorRect) {
+                const rawX = editorRect.left + scrolledPos.left;
+                const mouseY = currentMouseYRef.current;
+                const fitsBelow = mouseY + 24 + 80 <= window.innerHeight;
+                const x = Math.min(rawX, window.innerWidth - 570);
+                const y = fitsBelow ? mouseY + 24 : Math.max(0, mouseY - 24 - 80);
+                if (hoverHideTimerRef.current) { clearTimeout(hoverHideTimerRef.current); hoverHideTimerRef.current = null; }
+                setDdlHover({
+                  kind: diagMarker.severity === 8 ? "ERROR" : "WARNING",
+                  db: "", schema: "",
+                  name: diagMarker.message,
+                  ddl: "",
+                  x, y,
+                });
+              }
+              return;
+            }
+          }
+        }
+
+        // If we arrived here via a marker-only path (no identifier), nothing
+        // further to show — the marker check above already handled or skipped it.
+        if (!parts || parts.length === 0) return;
+
         const { objects } = useObjectStore.getState();
 
         let db = "", schema = "", kind = "", name = "", ddl = "";
+
+        // ── alias.column hover ─────────────────────────────────────────────
+        if (parts.length === 2) {
+          const rawRefs = parseJoinTables(editor.getModel()?.getValue() ?? "");
+          const resolved = resolveRefs(rawRefs, useObjectStore.getState().objects);
+          const matchedTable = resolved?.find(
+            (r) => r.alias.toUpperCase() === parts[0].toUpperCase(),
+          );
+          if (matchedTable) {
+            const cacheKey = `${UC(matchedTable.db)}\0${UC(matchedTable.schema)}\0${UC(matchedTable.name)}`;
+            const cols = colInfoCache.get(cacheKey);
+            const col = cols?.find((c) => c.name.toUpperCase() === parts[1].toUpperCase());
+            if (col) {
+              const editorDom = editor.getDomNode();
+              const editorRect = editorDom?.getBoundingClientRect();
+              const scrolledPos = editor.getScrolledVisiblePosition(pos);
+              if (scrolledPos && editorRect) {
+                const rawX = editorRect.left + scrolledPos.left;
+                const mouseY = currentMouseYRef.current;
+                const fitsBelow = mouseY + 24 + 320 <= window.innerHeight;
+                const x = Math.min(rawX, window.innerWidth - 570);
+                const y = fitsBelow ? mouseY + 24 : Math.max(0, mouseY - 24 - 320);
+                if (hoverHideTimerRef.current) { clearTimeout(hoverHideTimerRef.current); hoverHideTimerRef.current = null; }
+                setDdlHover({
+                  kind: "COLUMN",
+                  db: matchedTable.db,
+                  schema: matchedTable.schema,
+                  name: `${matchedTable.name}.${col.name}`,
+                  ddl: col.dataType,
+                  x, y,
+                });
+              }
+              return; // handled — skip TABLE DDL lookup
+            }
+          }
+          // alias not recognised or column not in cache → fall through to SCHEMA.TABLE DDL
+        }
 
         if (parts.length >= 3) {
           // 3-part: DB.SCHEMA.TABLE — use last three parts
@@ -2077,22 +2220,25 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       >
         <div style={{
           display: "flex", justifyContent: "space-between", alignItems: "center",
-          padding: "5px 10px", borderBottom: "1px solid var(--border)", flexShrink: 0, gap: 8,
+          padding: "5px 10px", borderBottom: ddlHover.ddl ? "1px solid var(--border)" : "none",
+          flexShrink: 0, gap: 8,
         }}>
           <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
             {ddlHover.db
               ? `${ddlHover.kind} — ${ddlHover.db}.${ddlHover.schema}.${ddlHover.name}`
               : `${ddlHover.kind} — ${ddlHover.name}`}
           </span>
-          <Button size="small" onClick={() => ClipboardSetText(ddlHover.ddl)}>Copy</Button>
+          {ddlHover.ddl && <Button size="small" onClick={() => ClipboardSetText(ddlHover.ddl)}>Copy</Button>}
         </div>
-        <pre style={{
-          margin: 0, padding: "8px 10px", fontSize: 12, overflow: "auto",
-          flex: 1, minWidth: 0, fontFamily: "monospace", whiteSpace: "pre", userSelect: "text",
-          color: "var(--text-primary)",
-        }}>
-          {ddlHover.ddl}
-        </pre>
+        {ddlHover.ddl && (
+          <pre style={{
+            margin: 0, padding: "8px 10px", fontSize: 12, overflow: "auto",
+            flex: 1, minWidth: 0, fontFamily: "monospace", whiteSpace: "pre", userSelect: "text",
+            color: "var(--text-primary)",
+          }}>
+            {ddlHover.ddl}
+          </pre>
+        )}
       </div>
     )}
     {tooltipCtxMenu && (
