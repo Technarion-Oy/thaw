@@ -75,6 +75,30 @@ export namespace config {
 	        this.enabled = source["enabled"];
 	    }
 	}
+	export class EditorPrefs {
+	    keywordCase: string;
+	    identifierCase: string;
+	    functionCase: string;
+	    indentStyle: string;
+	    indentSize: number;
+	    commaPosition: string;
+	    operatorPosition: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new EditorPrefs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.keywordCase = source["keywordCase"];
+	        this.identifierCase = source["identifierCase"];
+	        this.functionCase = source["functionCase"];
+	        this.indentStyle = source["indentStyle"];
+	        this.indentSize = source["indentSize"];
+	        this.commaPosition = source["commaPosition"];
+	        this.operatorPosition = source["operatorPosition"];
+	    }
+	}
 	export class GitConfig {
 	    exportDir: string;
 	    remoteURL: string;

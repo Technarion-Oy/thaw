@@ -19,7 +19,8 @@ import { useObjectStore } from "../../store/objectStore";
 import { useSessionStore } from "../../store/sessionStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames } from "../../../wailsjs/go/main/App";
+import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs } from "../../../wailsjs/go/main/App";
+import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 
 // Module-level DDL cache and hover provider handle so we only register once
 // and don't accumulate duplicate providers on editor remounts.
@@ -28,6 +29,11 @@ const hoverDDLCache = new Map<string, { ddl: string; ts: number }>();
 let hoverProviderDisposable: { dispose(): void } | null = null;
 let inlineCompletionsDisposable: { dispose(): void } | null = null;
 let signatureHelpDisposable: { dispose(): void } | null = null;
+
+// Module-level editor preferences — updated whenever the user saves new prefs.
+// Stored here (not in React state) so the Format SQL action closure always
+// sees the latest value without needing re-registration.
+let editorPrefsRef: EditorPrefs = { ...DEFAULT_EDITOR_PREFS };
 
 // ── Signature-help helpers ─────────────────────────────────────────────────
 
@@ -736,6 +742,17 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       }
       fnDecRef.current?.set(decorations);
     };
+
+    // Load editor prefs on first mount so Format SQL always has a valid reference.
+    GetEditorPrefs().then((p) => {
+      editorPrefsRef = p as EditorPrefs;
+    }).catch(() => { /* best-effort */ });
+
+    // Keep prefs in sync when the user saves from EditorPreferencesModal.
+    const handlePrefsChanged = (e: Event) => {
+      editorPrefsRef = (e as CustomEvent<EditorPrefs>).detail;
+    };
+    window.addEventListener("thaw:editor-prefs-changed", handlePrefsChanged);
 
     // Populate function name sets on first mount, then decorate immediately.
     if (!fnNamesLoaded) {
@@ -1764,6 +1781,45 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       contextMenuGroupId: "1_modification",
       contextMenuOrder: 1,
       run: (ed) => ed.trigger("keyboard", "editor.action.commentLine", null),
+    });
+
+    // Format SQL — applies sql-formatter with the current EditorPrefs.
+    // Formats the selection when text is selected; otherwise formats the whole document.
+    editor.addAction({
+      id: "thaw.formatSQL",
+      label: "Format SQL",
+      contextMenuGroupId: "1_modification",
+      contextMenuOrder: 2,
+      keybindings: [monacoLib.KeyMod.Shift | monacoLib.KeyMod.Alt | monacoLib.KeyCode.KeyF],
+      run: (ed) => {
+        const model = ed.getModel();
+        if (!model) return;
+        const selection = ed.getSelection();
+        const hasSelection = selection && !selection.isEmpty();
+
+        if (hasSelection && selection) {
+          const original = model.getValueInRange(selection);
+          const formatted = formatSQL(original, editorPrefsRef);
+          if (formatted !== original) {
+            ed.executeEdits("thaw.formatSQL", [{
+              range: selection,
+              text: formatted,
+              forceMoveMarkers: true,
+            }]);
+          }
+        } else {
+          const original = model.getValue();
+          const formatted = formatSQL(original, editorPrefsRef);
+          if (formatted !== original) {
+            const fullRange = model.getFullModelRange();
+            ed.executeEdits("thaw.formatSQL", [{
+              range: fullRange,
+              text: formatted,
+              forceMoveMarkers: true,
+            }]);
+          }
+        }
+      },
     });
 
     // thaw:scroll-to-line → jump to a specific line and highlight the match (used by file search)

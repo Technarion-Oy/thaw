@@ -34,6 +34,15 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Ctrl+Space before ON** — pressing `Ctrl+Space` after a JOIN table reference but before typing `ON` opens a full dropdown of `ON <condition>` suggestions covering all three tiers
   - **Function completions** — typing two or more characters outside a dotted context also suggests matching Snowflake built-in and user-defined functions from the local cache; UDFs sort above built-ins so custom functions surface first; instant and available offline
 - **AI inline completions** — ghost-text SQL suggestions powered by OpenAI or Google AI Studios (Gemini); press `Tab` to accept
+- **SQL formatter** — right-click anywhere in the editor and choose **Format SQL** (`⇧⌥F` / `Shift+Alt+F`) to format the selection or the full document; open **View → Editor Preferences…** to customise:
+  - **Keyword casing** — `UPPER`, `lower`, `Title`, or `Preserve` — reserved words (`SELECT`, `FROM`, `WINDOW`, `QUALIFY`, …)
+  - **Identifier casing** — `Preserve`, `UPPER`, or `lower` — unquoted table/column names only; double-quoted identifiers are never modified
+  - **Function casing** — `UPPER` or `lower` — all function calls including UDFs
+  - **Indent style** — Spaces or Tabs; size 2 (recommended for Snowflake) or 4
+  - **Comma position** — Trailing or Leading
+  - **AND / OR position** — Before or After the line break
+  - **Snowflake-specific rules** always applied: `::` and `:` operators kept whitespace-free; `WITH` on its own line; LATERAL FLATTEN treated as a unit
+  - **Live preview** panel in the preferences dialog shows a Snowflake sample query updating in real time
 - **AI Chat** — an agentic assistant in the results area that can query your live Snowflake connection to answer questions about your data (see [AI Features](#ai-features))
 - **Code Snippets** — open **Tools → Code Snippets…** in the menu bar to browse 24 curated `CREATE OR REPLACE` templates across six categories:
   - **Data Objects** — Table, View, Materialized View, Dynamic Table, Sequence
@@ -654,7 +663,7 @@ Open **Help → Keyboard Shortcuts…** in the menu bar for a searchable, always
 |-------|-----------------|--------|
 | `⌘/` | `Ctrl+/` | Toggle line comment |
 | `⇧⌥A` | `Shift+Alt+A` | Toggle block comment |
-| `⇧⌥F` | `Shift+Alt+F` | Format SQL document |
+| `⇧⌥F` | `Shift+Alt+F` | Format SQL (selection or full document) |
 | `Ctrl+Space` | `Ctrl+Space` | Trigger autocomplete |
 | `Tab` | `Tab` | Accept AI suggestion |
 | `⌘F` | `Ctrl+F` | Find in document |

@@ -149,6 +149,11 @@ func buildMenu(app *App) *menu.Menu {
 		wailsruntime.EventsEmit(app.ctx, "menu:customize-layout")
 	})
 
+	viewMenu.AddSeparator()
+	viewMenu.AddText("Editor Preferences…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:editor-preferences")
+	})
+
 	// ── AI ────────────────────────────────────────────────────────────────────
 	aiMenu := appMenu.AddSubmenu("AI")
 	aiMenu.AddText("Configure AI…", nil, func(_ *menu.CallbackData) {

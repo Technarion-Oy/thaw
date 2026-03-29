@@ -238,6 +238,10 @@ export function GetERDiagramData(arg1) {
   return window['go']['main']['App']['GetERDiagramData'](arg1);
 }
 
+export function GetEditorPrefs() {
+  return window['go']['main']['App']['GetEditorPrefs']();
+}
+
 export function GetFunctionInfo(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['GetFunctionInfo'](arg1, arg2, arg3, arg4);
 }
@@ -592,6 +596,10 @@ export function SaveAIConfig(arg1) {
 
 export function SaveBinaryFile(arg1, arg2) {
   return window['go']['main']['App']['SaveBinaryFile'](arg1, arg2);
+}
+
+export function SaveEditorPrefs(arg1) {
+  return window['go']['main']['App']['SaveEditorPrefs'](arg1);
 }
 
 export function SaveFile(arg1, arg2) {

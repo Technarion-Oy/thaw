@@ -54,12 +54,52 @@ type SnowparkConfig struct {
 	PythonPath string `json:"pythonPath"` // explicit python binary for venv creation; empty = auto-detect
 }
 
+// EditorPrefs holds SQL formatting preferences for the Monaco editor.
+type EditorPrefs struct {
+	// KeywordCase controls casing for SQL reserved words (SELECT, FROM, …).
+	// Valid values: "UPPER" | "lower" | "Title" | "Preserve"
+	KeywordCase string `json:"keywordCase"`
+	// IdentifierCase controls casing for unquoted table/column names.
+	// Double-quoted identifiers are never modified.
+	// Valid values: "Preserve" | "UPPER" | "lower"
+	IdentifierCase string `json:"identifierCase"`
+	// FunctionCase controls casing for built-in and user-defined function calls.
+	// Valid values: "UPPER" | "lower"
+	FunctionCase string `json:"functionCase"`
+	// IndentStyle is the character used for indentation.
+	// Valid values: "spaces" | "tabs"
+	IndentStyle string `json:"indentStyle"`
+	// IndentSize is the number of spaces per indent level (ignored when IndentStyle is "tabs").
+	// Valid values: 2 | 4
+	IndentSize int `json:"indentSize"`
+	// CommaPosition controls where commas appear in multi-value lists.
+	// Valid values: "trailing" | "leading"
+	CommaPosition string `json:"commaPosition"`
+	// OperatorPosition controls whether AND/OR operators appear before or after the line break.
+	// Valid values: "before" | "after"
+	OperatorPosition string `json:"operatorPosition"`
+}
+
+// DefaultEditorPrefs returns sensible defaults for SQL editing in Snowflake.
+func DefaultEditorPrefs() EditorPrefs {
+	return EditorPrefs{
+		KeywordCase:      "UPPER",
+		IdentifierCase:   "Preserve",
+		FunctionCase:     "UPPER",
+		IndentStyle:      "spaces",
+		IndentSize:       2,
+		CommaPosition:    "trailing",
+		OperatorPosition: "before",
+	}
+}
+
 // AppConfig is the on-disk configuration for Thaw.
 type AppConfig struct {
 	Connections []Connection   `json:"connections"`
 	Git         GitConfig      `json:"git"`
 	AI          AIConfig       `json:"ai"`
 	Snowpark    SnowparkConfig `json:"snowpark"`
+	Editor      EditorPrefs    `json:"editor"`
 }
 
 // configPath returns the absolute path to the application configuration file,

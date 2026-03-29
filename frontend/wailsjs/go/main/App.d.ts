@@ -129,6 +129,8 @@ export function GetDatabaseRetentionDays(arg1:string):Promise<number>;
 
 export function GetERDiagramData(arg1:string):Promise<snowflake.ERDiagramData>;
 
+export function GetEditorPrefs():Promise<config.EditorPrefs>;
+
 export function GetFunctionInfo(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.FunctionInfo>;
 
 export function GetFunctionSuggestions(arg1:string):Promise<Array<fnmeta.FunctionMeta>>;
@@ -306,6 +308,8 @@ export function RunNotebookSql(arg1:string):Promise<main.NotebookSqlResult>;
 export function SaveAIConfig(arg1:config.AIConfig):Promise<void>;
 
 export function SaveBinaryFile(arg1:string,arg2:string):Promise<void>;
+
+export function SaveEditorPrefs(arg1:config.EditorPrefs):Promise<void>;
 
 export function SaveFile(arg1:string,arg2:string):Promise<void>;
 

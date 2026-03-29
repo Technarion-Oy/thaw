@@ -3287,6 +3287,52 @@ func (a *App) SaveAIConfig(aiCfg config.AIConfig) error {
 	return config.Save(cfg)
 }
 
+// ─── Editor preferences ───────────────────────────────────────────────────────
+
+// GetEditorPrefs returns the persisted SQL editor formatting preferences.
+// Returns sensible defaults when the config does not exist yet.
+func (a *App) GetEditorPrefs() config.EditorPrefs {
+	cfg, err := config.Load()
+	if err != nil {
+		return config.DefaultEditorPrefs()
+	}
+	prefs := cfg.Editor
+	// Back-fill any zero fields with defaults so callers always get a fully populated struct.
+	defaults := config.DefaultEditorPrefs()
+	if prefs.KeywordCase == "" {
+		prefs.KeywordCase = defaults.KeywordCase
+	}
+	if prefs.IdentifierCase == "" {
+		prefs.IdentifierCase = defaults.IdentifierCase
+	}
+	if prefs.FunctionCase == "" {
+		prefs.FunctionCase = defaults.FunctionCase
+	}
+	if prefs.IndentStyle == "" {
+		prefs.IndentStyle = defaults.IndentStyle
+	}
+	if prefs.IndentSize == 0 {
+		prefs.IndentSize = defaults.IndentSize
+	}
+	if prefs.CommaPosition == "" {
+		prefs.CommaPosition = defaults.CommaPosition
+	}
+	if prefs.OperatorPosition == "" {
+		prefs.OperatorPosition = defaults.OperatorPosition
+	}
+	return prefs
+}
+
+// SaveEditorPrefs persists SQL editor formatting preferences to disk.
+func (a *App) SaveEditorPrefs(prefs config.EditorPrefs) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	cfg.Editor = prefs
+	return config.Save(cfg)
+}
+
 // ListAIModels returns the models available for the given provider and API key.
 // Returns nil (not an error) when the key is invalid or the request fails so
 // the frontend can fall back to its static defaults.

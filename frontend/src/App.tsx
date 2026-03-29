@@ -17,6 +17,7 @@ import LayoutSettingsModal from "./components/settings/LayoutSettingsModal";
 import AISettingsModal from "./components/settings/AISettingsModal";
 import SnowparkCheckModal from "./components/snowpark/SnowparkCheckModal";
 import SnowparkSetupModal from "./components/snowpark/SnowparkSetupModal";
+import EditorPreferencesModal from "./components/editor/EditorPreferencesModal";
 import { IsConnected } from "../wailsjs/go/main/App";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../wailsjs/runtime/runtime";
 import { useThemeStore, type ThemePreference } from "./store/themeStore";
@@ -30,10 +31,11 @@ export default function App() {
   const setPreference = useThemeStore((s) => s.setPreference);
   const uiFont        = useThemeStore((s) => s.uiFont);
 
-  const [layoutModalOpen, setLayoutModalOpen] = useState(false);
-  const [aiModalOpen, setAiModalOpen] = useState(false);
-  const [snowparkCheckOpen, setSnowparkCheckOpen] = useState(false);
-  const [snowparkSetupOpen, setSnowparkSetupOpen] = useState(false);
+  const [layoutModalOpen, setLayoutModalOpen]         = useState(false);
+  const [aiModalOpen, setAiModalOpen]                 = useState(false);
+  const [editorPrefsOpen, setEditorPrefsOpen]         = useState(false);
+  const [snowparkCheckOpen, setSnowparkCheckOpen]     = useState(false);
+  const [snowparkSetupOpen, setSnowparkSetupOpen]     = useState(false);
   const diffError    = useDiffStore((s) => s.error);
   const clearDiffError = useDiffStore((s) => s.clearError);
 
@@ -99,6 +101,12 @@ export default function App() {
     const domHandler = () => setAiModalOpen(true);
     window.addEventListener("thaw:configure-ai", domHandler);
     return () => { wailsOff(); window.removeEventListener("thaw:configure-ai", domHandler); };
+  }, []);
+
+  // Listen for "Editor Preferences…" menu event.
+  useEffect(() => {
+    const off = EventsOn("menu:editor-preferences", () => setEditorPrefsOpen(true));
+    return () => off();
   }, []);
 
   // Listen for Snowpark menu events.
@@ -190,6 +198,9 @@ export default function App() {
         <LayoutSettingsModal onClose={() => setLayoutModalOpen(false)} />
       )}
       {aiModalOpen && <AISettingsModal onClose={() => setAiModalOpen(false)} />}
+      {editorPrefsOpen && (
+        <EditorPreferencesModal onClose={() => setEditorPrefsOpen(false)} />
+      )}
       {snowparkCheckOpen && (
         <SnowparkCheckModal
           onClose={() => setSnowparkCheckOpen(false)}

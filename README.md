@@ -54,6 +54,15 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
   - Column lists are fetched once via `DESCRIBE TABLE` and cached for the session; subsequent invocations are instant
   - **Function completions** — typing any two or more characters outside a dotted context also returns matching Snowflake built-in and user-defined functions from the local cache; UDFs are sorted above built-ins so custom functions are easy to find; backed by the same SQLite store as hover tooltips, so results are instant and available offline
 - **AI inline completions** — ghost-text SQL suggestions powered by OpenAI or Google AI Studios (Gemini); appears automatically as you type and is accepted with `Tab`; configure via **AI → Configure AI…** in the menu bar
+- **SQL formatter** — right-click anywhere in the editor and choose **Format SQL** (or press `⇧⌥F` / `Shift+Alt+F`) to format the selection or the entire document; preferences are configurable via **View → Editor Preferences…** and cover:
+  - **Keyword casing** — `UPPER`, `lower`, `Title` (first letter capitalised), or `Preserve` — applied to reserved words: `SELECT`, `FROM`, `WINDOW`, `QUALIFY`, etc.
+  - **Identifier casing** — `Preserve`, `UPPER`, or `lower` — applied to unquoted table and column names only; double-quoted identifiers (`"MyTable"`) are never modified
+  - **Function casing** — `UPPER` or `lower` — applied to all function calls: `TO_DATE()`, `AVG()`, `IFF()`, and user-defined functions
+  - **Indent style** — Spaces or Tabs; indent size 2 or 4 (2 is the default, recommended for Snowflake's deep nesting)
+  - **Comma position** — Trailing (`col1, col2`) or Leading (`, col2` on new line)
+  - **AND / OR position** — operator placed Before or After the line break in `WHERE` / `HAVING` clauses
+  - **Snowflake dialect rules** always applied: no whitespace around `::` (type cast) and `:` (VARIANT path access); `WITH` on its own line with CTE body indented; `LATERAL FLATTEN` blocks treated as single logical units
+  - A **live SQL preview** in the preferences dialog shows a sample Snowflake query reformatting in real time as settings change; preferences are persisted to `~/.config/thaw/config.json`
 - **AI Chat** — agentic chat panel in the results area (Results / AI Chat / Terminal tabs); the assistant operates in **Chat** or **Agent** mode (toggle above the input); in agent mode it calls tools against the live Snowflake connection and the local file system — see [AI Chat](#ai-chat) below
 - **Code Snippets** — open **Tools → Code Snippets…** in the menu bar to browse 24 curated `CREATE OR REPLACE` templates across six categories (Data Objects, Code, Automation, Storage, Governance, Infrastructure); live search filters by name; selecting a snippet shows a read-only preview; clicking **Open in New Tab** loads the SQL into a new scratch tab for review and customisation before running
 - **Function Catalog AI Chat** — open **Help → Function Catalog…** and switch to the **Ask AI** tab to chat with the AI about any selected function; the function's full signatures and descriptions are automatically injected as context so you can ask usage questions, request examples, or compare overloads without pasting anything; for built-in Snowflake functions a **📖 Snowflake documentation** link opens the official docs page in the system browser; chat history resets automatically when switching to a different function
@@ -1014,7 +1023,7 @@ Open **Help → Keyboard Shortcuts…** in the menu bar for a searchable, always
 |-------|-----------------|--------|
 | `⌘/` | `Ctrl+/` | Toggle line comment |
 | `⇧⌥A` | `Shift+Alt+A` | Toggle block comment |
-| `⇧⌥F` | `Shift+Alt+F` | Format SQL document |
+| `⇧⌥F` | `Shift+Alt+F` | Format SQL (selection or full document) |
 | `Ctrl+Space` | `Ctrl+Space` | Trigger autocomplete |
 | `Tab` | `Tab` | Accept AI suggestion |
 | `⌘F` | `Ctrl+F` | Find in document |
