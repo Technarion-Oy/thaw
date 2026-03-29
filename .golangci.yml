@@ -1,0 +1,80 @@
+# golangci-lint v2 configuration
+# https://golangci-lint.run/usage/configuration/
+#
+# Run locally:
+#   golangci-lint run ./...
+#
+# Install golangci-lint (pick one):
+#   brew install golangci-lint          # macOS
+#   go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+#   curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
+
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+  # Integration tests require a live Snowflake connection and the 'integration'
+  # build tag.  Exclude them from local/CI linting to avoid build failures.
+  exclude-dirs:
+    - frontend
+    - internal/integration
+
+linters:
+  # Start from nothing — explicit opt-in avoids surprise breakage when
+  # golangci-lint adds new defaults in future releases.
+  default: none
+
+  enable:
+    - errcheck       # unchecked errors (DB/IO calls returning error)
+    - govet          # go vet: composite literal keys, printf verbs, etc.
+    - staticcheck    # SA* / S1* / QF* checks from staticcheck.io
+    - ineffassign    # assignments whose values are never used
+    - unused         # exported/unexported symbols that are never referenced
+    - misspell       # common spelling mistakes in strings and comments
+    - revive         # practical style checks (superset of golint)
+    - gosimple       # suggest simpler code constructs
+
+  settings:
+    revive:
+      rules:
+        # Exported symbols in a private desktop app don't need godoc comments.
+        - name: exported
+          disabled: true
+        # Handler/callback signatures often accept parameters that are
+        # intentionally unused (e.g. ctx passed to satisfy an interface).
+        - name: unused-parameter
+          disabled: true
+        # Single-character var names are fine in short loops/closures.
+        - name: var-naming
+          disabled: true
+
+    misspell:
+      locale: US
+
+    staticcheck:
+      checks:
+        - "all"
+        # QF1012: use fmt.Fprintf instead of WriteString(fmt.Sprintf).
+        # Tolerate for now — the pattern is clear and not a bug.
+        - "-QF1012"
+
+issues:
+  # Cap the number of issues reported per linter to avoid wall-of-text output.
+  max-issues-per-linter: 50
+  max-same-issues: 10
+
+  exclude-rules:
+    # Test files: unchecked errors on t.Log / helper calls are acceptable.
+    - path: _test\.go
+      linters: [errcheck]
+
+    # The gosnowflake driver's deprecated Exec method is called via the
+    # database/sql interface — we cannot change the call site.
+    - text: "stmt.Exec is deprecated"
+      linters: [staticcheck]
+
+    # Wails IPC methods use interface{} / any interchangeably; the "can be
+    # replaced by any" hint is cosmetic and not a real issue.
+    - text: "interface\\{\\} can be replaced by any"
+      linters: [staticcheck]
