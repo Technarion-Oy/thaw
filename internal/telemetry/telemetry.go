@@ -79,7 +79,7 @@ type Client struct {
 	startedAt time.Time
 }
 
-// Default is the package-level client initialised by Init.
+// Default is the package-level client initialized by Init.
 var Default *Client
 
 // Init creates the default telemetry client. Call once at application startup.

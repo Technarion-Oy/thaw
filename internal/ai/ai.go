@@ -231,7 +231,7 @@ func openAIChat(ctx context.Context, apiKey, model string, history []UIMessage, 
 			return UIMessage{}, err
 		}
 		raw, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		resp.Body.Close() //nolint:errcheck
 		if err != nil {
 			return UIMessage{}, err
 		}
@@ -292,7 +292,7 @@ func openAIChat(ctx context.Context, apiKey, model string, history []UIMessage, 
 			return UIMessage{}, err
 		}
 		raw, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		resp.Body.Close() //nolint:errcheck
 		if err != nil {
 			return UIMessage{}, err
 		}
@@ -422,7 +422,7 @@ func googleChat(ctx context.Context, apiKey, model string, history []UIMessage, 
 			return UIMessage{}, err
 		}
 		rawResp, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		resp.Body.Close() //nolint:errcheck
 		if err != nil {
 			return UIMessage{}, err
 		}
@@ -506,7 +506,7 @@ func googleChat(ctx context.Context, apiKey, model string, history []UIMessage, 
 			return UIMessage{}, err
 		}
 		rawResp, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		resp.Body.Close() //nolint:errcheck
 		if err != nil {
 			return UIMessage{}, err
 		}
@@ -717,7 +717,7 @@ func openAISuggestFormat(apiKey, model, prompt string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -772,7 +772,7 @@ func googleSuggestFormat(apiKey, model, prompt string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -827,7 +827,7 @@ func openAISuggestion(apiKey, model, prompt string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -881,7 +881,7 @@ func listOpenAIModels(apiKey string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -925,7 +925,7 @@ func listGoogleModels(apiKey string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -1010,7 +1010,7 @@ func testOpenAIModel(apiKey, model string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		var errResp struct {
@@ -1050,7 +1050,7 @@ func testGoogleModel(apiKey, model string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		var errResp struct {
@@ -1099,7 +1099,7 @@ func googleSuggestion(apiKey, model, prompt string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {

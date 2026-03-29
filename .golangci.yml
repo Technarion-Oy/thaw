@@ -33,7 +33,6 @@ linters:
     - unused         # exported/unexported symbols that are never referenced
     - misspell       # common spelling mistakes in strings and comments
     - revive         # practical style checks (superset of golint)
-    - gosimple       # suggest simpler code constructs
 
   settings:
     revive:
@@ -58,6 +57,18 @@ linters:
         # QF1012: use fmt.Fprintf instead of WriteString(fmt.Sprintf).
         # Tolerate for now — the pattern is clear and not a bug.
         - "-QF1012"
+        # ST1000: package-level doc comment.  Not required for a private app.
+        - "-ST1000"
+        # ST1003: naming conventions (Sql→SQL, Id→ID, etc.).  Wails IPC method
+        # names are part of the public TypeScript API and cannot be renamed
+        # without regenerating bindings and updating all call sites.
+        - "-ST1003"
+        # ST1020: comment on exported method must start with the method name.
+        # Cosmetic — does not affect correctness.
+        - "-ST1020"
+        # QF1001: apply De Morgan's law.  Style preference; the original form
+        # is often more readable.
+        - "-QF1001"
 
 issues:
   # Cap the number of issues reported per linter to avoid wall-of-text output.
@@ -68,11 +79,6 @@ issues:
     # Test files: unchecked errors on t.Log / helper calls are acceptable.
     - path: _test\.go
       linters: [errcheck]
-
-    # The gosnowflake driver's deprecated Exec method is called via the
-    # database/sql interface — we cannot change the call site.
-    - text: "stmt.Exec is deprecated"
-      linters: [staticcheck]
 
     # Wails IPC methods use interface{} / any interchangeably; the "can be
     # replaced by any" hint is cosmetic and not a real issue.

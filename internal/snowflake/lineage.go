@@ -166,7 +166,7 @@ func (c *Client) GetSchemaCrossDeps(ctx context.Context, db, schema string) ([]S
 	if err != nil {
 		return nil, nil //nolint:nilerr — inaccessible schema is non-fatal
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	// Locate the "text" column that contains the full CREATE VIEW DDL.
 	cols, _ := rows.Columns()
@@ -360,7 +360,7 @@ func (c *Client) resolveProcedureRef(ctx context.Context, ref sqlRef, vis depVis
 		node.Error = err.Error()
 		return node
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
 	argIdx, nameIdx := -1, -1

@@ -69,7 +69,7 @@ func SearchFiles(dir, query string, useRegex bool) ([]SearchMatch, error) {
 		if openErr != nil {
 			return nil // skip unreadable files
 		}
-		defer f.Close()
+		defer f.Close() //nolint:errcheck
 
 		scanner := bufio.NewScanner(f)
 		lineNum := 0

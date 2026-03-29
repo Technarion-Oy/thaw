@@ -41,7 +41,7 @@ func ReadFileHead(path string, maxBytes int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	buf := make([]byte, maxBytes)
 	n, err := io.ReadFull(f, buf)

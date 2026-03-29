@@ -22,7 +22,7 @@ type WindowState struct {
 	Y         int  `json:"y"`
 	Width     int  `json:"width"`
 	Height    int  `json:"height"`
-	Maximised bool `json:"maximised"`
+	Maximized bool `json:"maximised"` //nolint:misspell // JSON tag kept for backward-compat with existing session files
 }
 
 // loadWindowState reads the persisted window state from disk.

@@ -222,7 +222,7 @@ func Parse(sql string) Object {
 // ─── identifier extraction ────────────────────────────────────────────────────
 
 // extractIdent parses the qualified name that opens rest and returns its parts.
-// For FUNCTION / PROCEDURE it also returns a sanitised argument-type signature
+// For FUNCTION / PROCEDURE it also returns a sanitized argument-type signature
 // so that overloaded definitions can coexist as separate files.
 func extractIdent(rest string, k Kind) (db, schema, name, argSig string) {
 	parts, afterName := tokeniseQualifiedIdent(rest)
@@ -323,7 +323,7 @@ func splitParamList(s string) []string {
 	return parts
 }
 
-// parseArgSig extracts a simplified, sanitised argument-type signature from
+// parseArgSig extracts a simplified, sanitized argument-type signature from
 // the text that immediately follows a function/procedure name, e.g.:
 //
 //	"(X FLOAT, Y VARCHAR(256))"  →  "FLOAT_VARCHAR"
@@ -414,7 +414,7 @@ func sanitize(s string) string {
 
 // nameTracker resolves file-path collisions that arise when multiple DDL
 // statements map to the same path (e.g. overloaded functions with identical
-// sanitised argument signatures, or duplicate objects across schemas).
+// sanitized argument signatures, or duplicate objects across schemas).
 //
 // The first occurrence keeps the plain path; subsequent ones get a numeric
 // suffix: foo.sql → foo_2.sql → foo_3.sql …
@@ -423,7 +423,7 @@ type nameTracker struct {
 	seen map[string]struct{}
 }
 
-// newNameTracker returns an initialised nameTracker ready for use.
+// newNameTracker returns an initialized nameTracker ready for use.
 func newNameTracker() *nameTracker {
 	return &nameTracker{seen: make(map[string]struct{})}
 }

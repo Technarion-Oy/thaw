@@ -12,7 +12,7 @@ package fnmeta
 
 import _ "embed"
 
-// fallbackData holds the embedded JSON catalogue of Snowflake built-in
+// fallbackData holds the embedded JSON catalog of Snowflake built-in
 // functions. It is bundled at compile time so the editor has instant
 // completions even before a Snowflake connection is established.
 //

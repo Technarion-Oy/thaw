@@ -220,11 +220,6 @@ func (a *App) AnalyzeMigration(objects []MigrationObject, database string) ([]Mi
 		}
 	}
 
-	dbList := make([]string, 0, len(checkDBs))
-	for db := range checkDBs {
-		dbList = append(dbList, db)
-	}
-
 	// ── Fetch database-level DDL and parse into a remote object map ───────────
 	//
 	// remoteDDLMap: remoteKey → canonical DDL statement text
@@ -540,11 +535,9 @@ func (a *App) ExecuteMigration(selected []MigrationObject, database string, maxP
 			allEvents = append(allEvents, runEvt)
 			wailsruntime.EventsEmit(a.ctx, migrationExecProgressEvent, runEvt)
 
-			// Set database context if known
+			// Set database context if known; non-fatal if it fails.
 			if mo.Database != "" {
-				if _, err := a.client.Execute(ctx, fmt.Sprintf("USE DATABASE %s", migrQuote(mo.Database))); err != nil {
-					// Non-fatal; proceed anyway
-				}
+				_, _ = a.client.Execute(ctx, fmt.Sprintf("USE DATABASE %s", migrQuote(mo.Database)))
 			}
 
 			execErr := a.executeMigrationObject(ctx, mo, strategy)

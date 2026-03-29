@@ -28,7 +28,7 @@ var _ = fetchBuiltins
 // Built-in functions are intentionally NOT synced here. Snowflake's
 // SHOW FUNCTIONS returns type-only signatures (e.g. "ABS(NUMBER) RETURN NUMBER")
 // with no parameter names, which would create duplicate low-quality entries
-// alongside the embedded fallback catalogue that has proper named signatures
+// alongside the embedded fallback catalog that has proper named signatures
 // (e.g. "ABS(expr FLOAT) RETURN FLOAT"). The fallback covers all standard
 // built-ins; UDFs are synced live because Snowflake does include parameter
 // names for user-defined functions.

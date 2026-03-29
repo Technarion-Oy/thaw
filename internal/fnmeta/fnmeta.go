@@ -112,7 +112,7 @@ func (s *Store) Search(prefix string) ([]FunctionMeta, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	return scanRows(rows)
 }
 
@@ -127,7 +127,7 @@ func (s *Store) GetAllNames() ([]FunctionMeta, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	var result []FunctionMeta
 	for rows.Next() {
 		var m FunctionMeta
@@ -151,7 +151,7 @@ func (s *Store) Lookup(name string) ([]FunctionMeta, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 	return scanRows(rows)
 }
 
@@ -178,7 +178,7 @@ func (s *Store) Upsert(metas []FunctionMeta) error {
 		tx.Rollback() //nolint:errcheck
 		return err
 	}
-	defer stmt.Close()
+	defer stmt.Close() //nolint:errcheck
 	for _, m := range metas {
 		if _, err := stmt.Exec(m.FunctionName, m.FunctionSignature, m.Description, m.FunctionType); err != nil {
 			tx.Rollback() //nolint:errcheck

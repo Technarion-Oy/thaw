@@ -83,7 +83,7 @@ func TestSplitIdent(t *testing.T) {
 		{`MY_DB."weird schema".MY_TABLE`, []string{`MY_DB`, `weird schema`, `MY_TABLE`}},
 		// Quoted with dot inside — the dot is inside quotes so it must not be split
 		// Note: splitIdent splits on "." regardless of quoting; this is intentional
-		// behaviour (identPat in the regex already handles the full matched token).
+		// behavior (identPat in the regex already handles the full matched token).
 		// Here we just verify the basic split works for the three legitimate cases.
 		{`DB.SCHEMA.TABLE`, []string{`DB`, `SCHEMA`, `TABLE`}},
 		// Identifier with special chars in quotes
@@ -1132,7 +1132,7 @@ LEFT JOIN INTERNAL_LOOKUP.REF.REGIONS r ON o.region_id = r.id`,
 			// When a CTE is named 'orders', any identifier ending in 'orders'
 			// (including DB.SCHEMA.ORDERS) is excluded from replacement because
 			// RewriteSQLReferences checks only the final name component against
-			// cteNames.  This is a known conservative behaviour.
+			// cteNames.  This is a known conservative behavior.
 			sql: `WITH orders AS (SELECT * FROM PROD.SOURCES.RAW_ORDERS)
 SELECT * FROM PROD.SOURCES.ORDERS`,
 			defaultDB: "PROD", defaultSchema: "SOURCES",

@@ -82,7 +82,7 @@ type SnowflakeObject struct {
 // maxQueryRows is the maximum number of rows returned in a single query result.
 // Results larger than this are silently truncated; QueryResult.Truncated is set
 // to true so the frontend can warn the user. The cap exists to prevent the Wails
-// IPC layer (JSON serialisation + deserialisation) from blocking the app for
+// IPC layer (JSON serialization + deserialization) from blocking the app for
 // tens of seconds on very large result sets.
 const maxQueryRows = 50_000
 
@@ -101,7 +101,7 @@ type QueryResult struct {
 // creates.  This lets the pool keep its normal concurrency (MaxOpenConns=32)
 // while ensuring that each fresh connection immediately reflects the
 // most-recently-switched session state — without requiring a single
-// serialising connection.
+// serializing connection.
 //
 // When UseRole, UseWarehouse, UseDatabase, or UseSchema is called:
 //  1. The SQL statement is executed on whatever connection the pool provides.
@@ -154,8 +154,8 @@ func connExec(conn driver.Conn, query string) {
 	if err != nil {
 		return
 	}
-	defer stmt.Close()
-	stmt.Exec([]driver.Value{}) //nolint:errcheck
+	defer stmt.Close() //nolint:errcheck
+	stmt.Exec([]driver.Value{}) //nolint:errcheck,staticcheck // SA1019: called via driver interface, no modern alternative
 }
 
 // Client wraps a *sql.DB with Snowflake-specific helpers.
@@ -170,7 +170,7 @@ type Client struct {
 }
 
 // NewClient opens a new Snowflake connection. The provided context can be
-// cancelled to abort the login handshake (useful for MFA/browser flows).
+// canceled to abort the login handshake (useful for MFA/browser flows).
 func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 	authMap := map[string]sf.AuthType{
 		"username_password_mfa": sf.AuthTypeUsernamePasswordMFA,
@@ -210,7 +210,7 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 		// when the pool recycles a connection, which would invalidate the
 		// shared Snowflake session and break all other pool connections.
 		ServerSessionKeepAlive: true,
-		// Params must be initialised to a non-nil map.  ParseDSN does this
+		// Params must be initialized to a non-nil map.  ParseDSN does this
 		// automatically, but we construct the Config directly, so we must do
 		// it ourselves — otherwise the driver panics with "assignment to entry
 		// in nil map" when it writes session parameters back into cfg.Params.
@@ -258,7 +258,7 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 	db.SetConnMaxIdleTime(3 * time.Minute)
 
 	if err := db.PingContext(ctx); err != nil {
-		db.Close()
+		db.Close() //nolint:errcheck
 		return nil, err
 	}
 
@@ -335,7 +335,7 @@ func (c *Client) Execute(ctx context.Context, query string, onProgress ...func(i
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
+	defer conn.Close() //nolint:errcheck
 
 	var last *QueryResult
 	for i, stmt := range stmts {
@@ -360,7 +360,7 @@ func (c *Client) Execute(ctx context.Context, query string, onProgress ...func(i
 // ctxErrOrErr returns ctx.Err() when the context is done, otherwise err.
 // Used to normalise gosnowflake driver errors that arise as side-effects of
 // context cancellation (e.g. "Object does not exist" from an S3 pre-signed URL
-// that the driver tried to re-check after the HTTP request was cancelled).
+// that the driver tried to re-check after the HTTP request was canceled).
 func ctxErrOrErr(ctx context.Context, err error) error {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ctxErr
@@ -378,7 +378,7 @@ func queryOnConn(ctx context.Context, conn *sql.Conn, query string) (*QueryResul
 
 	cols, err := rows.Columns()
 	if err != nil {
-		rows.Close()
+		rows.Close() //nolint:errcheck
 		return nil, ctxErrOrErr(ctx, err)
 	}
 	result := &QueryResult{Columns: cols, Rows: [][]interface{}{}}
@@ -389,7 +389,7 @@ func queryOnConn(ctx context.Context, conn *sql.Conn, query string) (*QueryResul
 			ptrs[i] = &vals[i]
 		}
 		if err := rows.Scan(ptrs...); err != nil {
-			rows.Close()
+			rows.Close() //nolint:errcheck
 			return nil, ctxErrOrErr(ctx, err)
 		}
 		result.Rows = append(result.Rows, vals)
@@ -398,20 +398,20 @@ func queryOnConn(ctx context.Context, conn *sql.Conn, query string) (*QueryResul
 			break
 		}
 	}
-	// When the context was cancelled the gosnowflake driver may stall inside
+	// When the context was canceled the gosnowflake driver may stall inside
 	// rows.Close() while draining buffered Arrow chunks over the network.
 	// When the row limit was hit there may be many remaining Arrow chunks.
 	// In both cases fire Close in a goroutine so this function returns
 	// immediately without blocking the caller.
 	if ctx.Err() != nil {
-		go rows.Close()
+		go rows.Close() //nolint:errcheck
 		return nil, ctx.Err()
 	}
 	if result.Truncated {
-		go rows.Close()
+		go rows.Close() //nolint:errcheck
 		return result, nil
 	}
-	rows.Close()
+	rows.Close() //nolint:errcheck
 	return result, rows.Err()
 }
 
@@ -426,7 +426,7 @@ func (c *Client) QuerySingle(ctx context.Context, query string) (*QueryResult, e
 
 	cols, err := rows.Columns()
 	if err != nil {
-		rows.Close()
+		rows.Close() //nolint:errcheck
 		return nil, ctxErrOrErr(ctx, err)
 	}
 	result := &QueryResult{Columns: cols, Rows: [][]interface{}{}}
@@ -438,7 +438,7 @@ func (c *Client) QuerySingle(ctx context.Context, query string) (*QueryResult, e
 			ptrs[i] = &vals[i]
 		}
 		if err := rows.Scan(ptrs...); err != nil {
-			rows.Close()
+			rows.Close() //nolint:errcheck
 			return nil, ctxErrOrErr(ctx, err)
 		}
 		result.Rows = append(result.Rows, vals)
@@ -447,16 +447,16 @@ func (c *Client) QuerySingle(ctx context.Context, query string) (*QueryResult, e
 			break
 		}
 	}
-	// Same as queryOnConn: async close when context cancelled or row limit hit.
+	// Same as queryOnConn: async close when context canceled or row limit hit.
 	if ctx.Err() != nil {
-		go rows.Close()
+		go rows.Close() //nolint:errcheck
 		return nil, ctx.Err()
 	}
 	if result.Truncated {
-		go rows.Close()
+		go rows.Close() //nolint:errcheck
 		return result, nil
 	}
-	rows.Close()
+	rows.Close() //nolint:errcheck
 	return result, rows.Err()
 }
 
@@ -661,7 +661,7 @@ func (c *Client) ListIntegrations(ctx context.Context, kind string) ([]Integrati
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	cols, err := rows.Columns()
 	if err != nil {
@@ -744,7 +744,7 @@ func (c *Client) GetUserDDL(ctx context.Context, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
 	idxs := colIndexMap(cols, "property", "value")
@@ -836,7 +836,7 @@ func (c *Client) roleGrantsPrivilege(
 	if err != nil {
 		return false, nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
 	idxs := colIndexMap(cols, "privilege", "granted_on", "name")
@@ -971,7 +971,7 @@ func (c *Client) CanModifyUserAuth(ctx context.Context, username string) (bool, 
 	if err != nil {
 		return false, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
 	idxs := colIndexMap(cols, "privilege", "grantee_name")
@@ -1054,7 +1054,7 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 				break
 			}
 		}
-		rows.Close()
+		rows.Close() //nolint:errcheck
 	}
 
 	// ── CREATE ROLE ──────────────────────────────────────────────────────────
@@ -1090,7 +1090,7 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 			}
 			sb.WriteString(stmt + ";\n")
 		}
-		rows.Close()
+		rows.Close() //nolint:errcheck
 	}
 
 	// ── SHOW GRANTS ON ROLE → who this role is granted to ────────────────────
@@ -1112,7 +1112,7 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 				escapedIdent, grantedTo,
 				strings.ReplaceAll(grantee, `"`, `""`)))
 		}
-		rows.Close()
+		rows.Close() //nolint:errcheck
 	}
 
 	return sb.String(), nil
@@ -1245,7 +1245,7 @@ func (c *Client) ListExportableDatabases(ctx context.Context) ([]string, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
 	// Locate the "name" and "origin" columns by header name.
@@ -1322,7 +1322,7 @@ func (c *Client) listDroppedHistory(ctx context.Context, query string) ([]Droppe
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
 	idxs := colIndexMap(cols, "name", "dropped_on")
@@ -1370,7 +1370,7 @@ func (c *Client) GetDatabaseRetentionDays(ctx context.Context, dbName string) (i
 	if err != nil {
 		return 1, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
 	idxs := colIndexMap(cols, "key", "value")
@@ -1402,7 +1402,7 @@ func (c *Client) GetTableRetentionDays(ctx context.Context, database, schema, na
 	if err != nil {
 		return 0, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
 	idxs := colIndexMap(cols, "retention_time")
@@ -1449,7 +1449,7 @@ func (c *Client) ListUsers(ctx context.Context) ([]SnowflakeUser, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
 	col := func(name string) int {
@@ -1612,7 +1612,7 @@ func (c *Client) GetTableColumns(ctx context.Context, database, schema, name str
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
 	nameIdx := -1
@@ -1664,7 +1664,7 @@ func (c *Client) GetTableForeignKeys(ctx context.Context, database, schema, tabl
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
 	idxs := colIndexMap(cols,
@@ -1713,7 +1713,7 @@ func (c *Client) GetTableColumnsWithTypes(ctx context.Context, database, schema,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
 	idxs := colIndexMap(cols, "name", "type")
@@ -1747,7 +1747,7 @@ func (c *Client) GetSchemaForeignKeys(ctx context.Context, database, schema stri
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
 	idxs := colIndexMap(cols,
@@ -1805,7 +1805,7 @@ func (c *Client) showInSchema(ctx context.Context, query, fixedKind, schema stri
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
 	nameIdx, kindIdx, argsIdx, builtinIdx, rowsIdx, predsIdx, taskRelIdx, finalizeColIdx := -1, -1, -1, -1, -1, -1, -1, -1
@@ -2265,7 +2265,7 @@ func (c *Client) GetERDiagramData(ctx context.Context, database string) (ERDiagr
 			colErr = err
 			return
 		}
-		defer rows.Close()
+		defer rows.Close() //nolint:errcheck
 		for rows.Next() {
 			var r colRow
 			if err := rows.Scan(&r.tableSchema, &r.tableName, &r.columnName, &r.dataType, &r.isNullable); err != nil {
@@ -2286,7 +2286,7 @@ func (c *Client) GetERDiagramData(ctx context.Context, database string) (ERDiagr
 			pkErr = err
 			return
 		}
-		defer rows.Close()
+		defer rows.Close() //nolint:errcheck
 		cols, _ := rows.Columns()
 		idxs := colIndexMap(cols, "schema_name", "table_name", "column_name")
 		for rows.Next() {
@@ -2312,7 +2312,7 @@ func (c *Client) GetERDiagramData(ctx context.Context, database string) (ERDiagr
 			fkErr = err
 			return
 		}
-		defer rows.Close()
+		defer rows.Close() //nolint:errcheck
 		cols, _ := rows.Columns()
 		idxs := colIndexMap(cols, "fk_schema_name", "fk_table_name", "fk_column_name", "pk_schema_name", "pk_table_name", "pk_column_name")
 		for rows.Next() {
@@ -2407,7 +2407,7 @@ func (c *Client) queryStringSlice(ctx context.Context, query string, colIdx int)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
 	var result []string
@@ -2480,7 +2480,7 @@ func (c *Client) ExportTableData(ctx context.Context, params ExportTableParams) 
 	if copyRows.Next() {
 		_ = copyRows.Scan(&rowsUnloaded) // first column is rows_unloaded
 	}
-	copyRows.Close()
+	copyRows.Close() //nolint:errcheck
 
 	// Create the output sub-directory: <outputDir>/<TABLE>/
 	outDir := filepath.Join(params.OutputDir, params.Table)
@@ -2517,7 +2517,7 @@ func (c *Client) ExportTableData(ctx context.Context, params ExportTableParams) 
 			files = append(files, filepath.Base(fileName))
 		}
 	}
-	getRows.Close()
+	getRows.Close() //nolint:errcheck
 
 	return ExportTableResult{
 		RowsUnloaded: rowsUnloaded,
@@ -2661,7 +2661,7 @@ type ImportTableParams struct {
 	Table     string   `json:"table"`     // target table name
 	FilePaths []string `json:"filePaths"` // one or more absolute local paths
 	Format    string   `json:"format"`    // "CSV", "JSON", "AVRO", "ORC", "PARQUET"
-	// Behaviour
+	// Behavior
 	Overwrite   bool `json:"overwrite"`   // TRUNCATE TABLE before COPY INTO
 	CreateTable bool `json:"createTable"` // CREATE TABLE using INFER_SCHEMA first
 	// Format-specific options (see FormatTypeOptions)
@@ -2710,7 +2710,7 @@ func (c *Client) ImportTableData(ctx context.Context, params ImportTableParams) 
 		if err != nil {
 			return ImportTableResult{}, fmt.Errorf("upload %s to stage: %w", filepath.Base(fp), err)
 		}
-		putRows.Close()
+		putRows.Close() //nolint:errcheck
 	}
 
 	// Optionally create the target table from the file's inferred schema.
@@ -2765,7 +2765,7 @@ func (c *Client) ImportTableData(ctx context.Context, params ImportTableParams) 
 			}
 		}
 	}
-	copyRows.Close()
+	copyRows.Close() //nolint:errcheck
 
 	return ImportTableResult{RowsLoaded: rowsLoaded, FilesLoaded: filesLoaded}, nil
 }
@@ -2975,7 +2975,7 @@ func (c *Client) FetchNotebookContent(ctx context.Context, database, schema, nam
 	if err != nil {
 		return "", fmt.Errorf("describe notebook: %w", err)
 	}
-	defer descRows.Close()
+	defer descRows.Close() //nolint:errcheck
 
 	cols, err := descRows.Columns()
 	if err != nil {
@@ -3009,7 +3009,7 @@ func (c *Client) FetchNotebookContent(ctx context.Context, database, schema, nam
 			break
 		}
 	}
-	descRows.Close()
+	descRows.Close() //nolint:errcheck
 	if stageURI == "" {
 		return "", fmt.Errorf("last_version_location_uri is empty for notebook %s", notebookRef)
 	}
@@ -3019,7 +3019,7 @@ func (c *Client) FetchNotebookContent(ctx context.Context, database, schema, nam
 	if err != nil {
 		return "", fmt.Errorf("create temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer os.RemoveAll(tmpDir) //nolint:errcheck
 
 	dirURL, err := localFileURL(tmpDir)
 	if err != nil {
@@ -3031,7 +3031,7 @@ func (c *Client) FetchNotebookContent(ctx context.Context, database, schema, nam
 	if err != nil {
 		return "", fmt.Errorf("GET notebook file: %w", err)
 	}
-	getRows.Close()
+	getRows.Close() //nolint:errcheck
 
 	// Find the downloaded .ipynb file in the temp directory.
 	entries, err := os.ReadDir(tmpDir)
@@ -3089,7 +3089,7 @@ func (c *Client) ExecuteNotebook(ctx context.Context, database, schema, name str
 //
 //	EXECUTE TASK <ref> RETRY LAST
 //
-// which re-executes the last failed/cancelled task graph run from where it
+// which re-executes the last failed/canceled task graph run from where it
 // failed. config and retryLast are mutually exclusive — when retryLast is
 // true, config is ignored.
 //
@@ -3199,12 +3199,12 @@ func (c *Client) DeployNotebook(ctx context.Context, params DeployNotebookParams
 			return fmt.Errorf("create temp notebook file: %w", err)
 		}
 		tmpPath := tmp.Name()
-		defer os.Remove(tmpPath)
+		defer os.Remove(tmpPath) //nolint:errcheck
 		if _, err := tmp.WriteString(params.Content); err != nil {
-			tmp.Close()
+			tmp.Close() //nolint:errcheck
 			return fmt.Errorf("write temp notebook file: %w", err)
 		}
-		tmp.Close()
+		tmp.Close() //nolint:errcheck
 		params.FilePath = tmpPath
 	}
 
@@ -3229,7 +3229,7 @@ func (c *Client) DeployNotebook(ctx context.Context, params DeployNotebookParams
 	if err != nil {
 		return fmt.Errorf("upload notebook to stage: %w", err)
 	}
-	putRows.Close()
+	putRows.Close() //nolint:errcheck
 
 	// Build the CREATE NOTEBOOK statement.
 	notebookRef := fmt.Sprintf(`"%s"."%s"."%s"`, esc(params.Database), esc(params.Schema), esc(params.Name))

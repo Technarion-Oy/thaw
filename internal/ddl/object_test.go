@@ -584,13 +584,13 @@ func TestParseArgSig(t *testing.T) {
 		// Positional TABLE type with inline column list: fields[1] (not fields[0])
 		// is used when len(fields) >= 2, so the first word after TABLE( is picked up
 		// as a "field" and the actual type extraction gives "FLOAT_" not "TABLE".
-		// This is the documented (if surprising) behaviour for positional TABLE params.
+		// This is the documented (if surprising) behavior for positional TABLE params.
 		{"(TABLE(X FLOAT, Y NUMBER))", "FLOAT_"},
 		// Ten parameters.
 		{"(A VARCHAR, B NUMBER, C FLOAT, D DATE, E BOOLEAN, F TIMESTAMP_NTZ, G VARIANT, H ARRAY, I OBJECT, J BINARY)",
 			"VARCHAR_NUMBER_FLOAT_DATE_BOOLEAN_TIMESTAMP_NTZ_VARIANT_ARRAY_OBJECT_BINARY"},
 		// Comma inside single-quoted DEFAULT value splits at depth 0 —
-		// this is expected (and documented) behaviour: the parser does not track
+		// this is expected (and documented) behavior: the parser does not track
 		// quote context inside parameter lists.
 		{"(X VARCHAR DEFAULT 'hello, world')", "VARCHAR_WORLD_"},
 		// Only-whitespace inner content.

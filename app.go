@@ -66,7 +66,7 @@ type App struct {
 	queryResult         *snowflake.QueryResult
 	queryErr            error
 	queryCancelFunc     context.CancelFunc  // cancels the in-flight query context
-	queryCancelCtxDone  <-chan struct{}      // closed when the in-flight query context is cancelled
+	queryCancelCtxDone  <-chan struct{}      // closed when the in-flight query context is canceled
 
 	// Embedded terminal (pseudo-terminal).
 	ptyMu  sync.Mutex
@@ -80,12 +80,12 @@ func NewApp() *App {
 }
 
 // startup is called by the Wails runtime after the application window is ready.
-// It stores the application context, initialises logging and telemetry.
+// It stores the application context, initializes logging and telemetry.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	if a.savedWindowState != nil {
 		wailsruntime.WindowSetPosition(ctx, a.savedWindowState.X, a.savedWindowState.Y)
-		if a.savedWindowState.Maximised {
+		if a.savedWindowState.Maximized {
 			wailsruntime.WindowMaximise(ctx)
 		}
 	}
@@ -126,7 +126,7 @@ func (a *App) shutdown(_ context.Context) {
 	w, h := wailsruntime.WindowGetSize(a.ctx)
 	x, y := wailsruntime.WindowGetPosition(a.ctx)
 	m := wailsruntime.WindowIsMaximised(a.ctx)
-	_ = saveWindowState(WindowState{X: x, Y: y, Width: w, Height: h, Maximised: m})
+	_ = saveWindowState(WindowState{X: x, Y: y, Width: w, Height: h, Maximized: m})
 
 	// Stop any running terminal process cleanly before the app exits.
 	a.StopShell() //nolint:errcheck
@@ -177,8 +177,8 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 	client, err := snowflake.NewClient(ctx, params)
 	if err != nil {
 		if ctx.Err() != nil {
-			logger.L.Info("connection cancelled by user")
-			return fmt.Errorf("connection cancelled")
+			logger.L.Info("connection canceled by user")
+			return fmt.Errorf("connection canceled")
 		}
 		logger.L.Error("connection failed", "account", params.Account, "err", err)
 		telemetry.Track(telemetry.EventConnectionFailed, nil)
@@ -407,7 +407,7 @@ func sanitizeAccountFilename(name string) string {
 }
 
 // PickOpenFile opens a native open-file dialog filtered to SQL, YAML and
-// Python files and returns the chosen path, or an empty string if cancelled.
+// Python files and returns the chosen path, or an empty string if canceled.
 // The dialog opens in the configured export directory when one is set.
 func (a *App) PickOpenFile() string {
 	defaultDir := ""
@@ -672,7 +672,7 @@ func (a *App) StartQuery(sql string) (string, error) {
 				defer wg.Done()
 				// The gosnowflake driver closes ch after writing the qid, so
 				// this select always terminates.  ctx.Done() is a fallback for
-				// the rare case where the query is cancelled before the driver
+				// the rare case where the query is canceled before the driver
 				// writes to the channel.
 				select {
 				case qid := <-ch:
@@ -701,7 +701,7 @@ func (a *App) StartQuery(sql string) (string, error) {
 
 	// Block until the driver assigns a query ID (arrives with the first HTTP
 	// response), the background goroutine finishes (fast query), or the query
-	// is cancelled.
+	// is canceled.
 	var queryID string
 	select {
 	case qid := <-qidChan:
@@ -735,7 +735,7 @@ func (a *App) StartQuery(sql string) (string, error) {
 }
 
 // CancelQuery cancels the query currently in flight (started by StartQuery).
-// It is a no-op if no query is running. In addition to cancelling the local
+// It is a no-op if no query is running. In addition to canceling the local
 // context, it issues SYSTEM$CANCEL_QUERY so that Snowflake stops the query
 // server-side and stops consuming credits.
 func (a *App) CancelQuery() {
@@ -747,7 +747,7 @@ func (a *App) CancelQuery() {
 		cancel()
 	}
 	if queryID != "" && a.client != nil {
-		logger.L.Info("cancelling query", "queryID", queryID)
+		logger.L.Info("canceling query", "queryID", queryID)
 		telemetry.Track(telemetry.EventQueryCancelled, nil)
 		go func() {
 			ctx, done := context.WithTimeout(a.ctx, 15*time.Second)
@@ -813,9 +813,9 @@ func (a *App) WaitForQueryResult() (*snowflake.QueryResult, error) {
 	// Read queryID after done fires so multi-statement queries get the last
 	// per-statement qid (updated by wg-tracked goroutines before close(done)).
 	queryID := a.queryID
-	// Snapshot whether the query was explicitly cancelled by the user BEFORE
+	// Snapshot whether the query was explicitly canceled by the user BEFORE
 	// calling queryCancelFunc: the cancel func also closes ctxDone, so
-	// checking after cleanup would always report "cancelled".
+	// checking after cleanup would always report "canceled".
 	var wasExplicitlyCancelled bool
 	select {
 	case <-ctxDone:
@@ -824,7 +824,7 @@ func (a *App) WaitForQueryResult() (*snowflake.QueryResult, error) {
 	}
 	// Clean up so a subsequent call does not re-read stale state.
 	if a.queryCancelFunc != nil {
-		a.queryCancelFunc() // no-op if already cancelled; ensures context resources are freed
+		a.queryCancelFunc() // no-op if already canceled; ensures context resources are freed
 		a.queryCancelFunc = nil
 	}
 	a.queryDone = nil
@@ -835,17 +835,17 @@ func (a *App) WaitForQueryResult() (*snowflake.QueryResult, error) {
 	if result != nil && queryID != "" {
 		result.QueryID = queryID
 	}
-	// Backstop: if the query was explicitly cancelled (user called CancelQuery)
+	// Backstop: if the query was explicitly canceled (user called CancelQuery)
 	// but the driver still returned a driver-level error (e.g. "Object does not
 	// exist" from an aborted S3 pre-signed URL), replace it with
-	// context.Canceled so the frontend shows "query cancelled", not a
+	// context.Canceled so the frontend shows "query canceled", not a
 	// misleading error message.
 	if err != nil && wasExplicitlyCancelled {
 		err = context.Canceled
 	}
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			logger.L.Info("query cancelled", "queryID", queryID)
+			logger.L.Info("query canceled", "queryID", queryID)
 		} else {
 			logger.L.Error("query failed", "queryID", queryID, "err", err)
 			telemetry.Track(telemetry.EventQueryFailed, nil)
@@ -2008,7 +2008,7 @@ func (a *App) GetTableSettings(database, schema, table string) (TableSettings, e
 	}
 	parseInt := func(s string) int {
 		var n int
-		fmt.Sscanf(s, "%d", &n)
+		_, _ = fmt.Sscanf(s, "%d", &n)
 		return n
 	}
 
@@ -2133,7 +2133,7 @@ type TaskStatusRow struct {
 	Name         string `json:"name"`
 	TaskState    string `json:"taskState"`    // STARTED | SUSPENDED
 	Predecessors string `json:"predecessors"` // raw predecessor string from SHOW TASKS
-	LastRunState string `json:"lastRunState"` // SUCCEEDED | FAILED | RUNNING | SKIPPED | CANCELLED | ""
+	LastRunState string `json:"lastRunState"` //nolint:misspell // SUCCEEDED | FAILED | RUNNING | SKIPPED | CANCELLED | ""
 	LastRunTime  string `json:"lastRunTime"`  // ISO-8601 timestamp or ""
 	ErrorMsg     string `json:"errorMsg"`     // exception text when last run failed
 	Finalize     string `json:"finalize"`     // fully-qualified root task name for finalizer tasks, "" otherwise
@@ -3219,7 +3219,7 @@ func (a *App) ListExportableDatabases() ([]string, error) {
 
 // ExportAllDatabasesDDL exports DDL for the given databases in parallel.
 // When databases is nil or empty every exportable database owned by the
-// account is exported (same behaviour as before database selection was added).
+// account is exported (same behavior as before database selection was added).
 //
 // Progress events ("ddl:progress") are emitted after each database completes,
 // allowing the frontend to show a live progress bar.
@@ -3622,7 +3622,7 @@ func (a *App) GetAvailableShells() []string {
 	if err != nil {
 		return []string{"/bin/zsh", "/bin/bash", "/bin/sh"}
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	var shells []string
 	sc := bufio.NewScanner(f)
@@ -3645,7 +3645,7 @@ func (a *App) GetAvailableShells() []string {
 // If a shell is already running it is stopped first.
 // dir sets the working directory; when empty the shell inherits the process cwd.
 // Output from the shell is emitted as base64-encoded "terminal:data" events;
-// process exit is signalled by a "terminal:exit" event.
+// process exit is signaled by a "terminal:exit" event.
 func (a *App) StartShell(shell, dir string) error {
 	a.ptyMu.Lock()
 	defer a.ptyMu.Unlock()

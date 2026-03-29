@@ -126,7 +126,7 @@ def _thaw_create_session(ns):
             ns['_thaw_orig_session_sql'] = _orig_sql
             # Patch instance-level sql() so DDL/USE statements execute
             # immediately without an explicit .collect(), matching Snowflake
-            # native notebook behaviour.
+            # native notebook behavior.
             def _auto_collect_sql(_query, *_a, **_kw):
                 _df = _orig_sql(_query, *_a, **_kw)
                 if _THAW_DDL_RE.match(_query.strip()):
@@ -473,10 +473,10 @@ func ensureKernelScript() (string, error) {
 		}
 		if _, err = f.WriteString(kernelPyScript); err != nil {
 			kernelScriptErr = err
-			f.Close()
+			f.Close() //nolint:errcheck
 			return
 		}
-		f.Close()
+		f.Close() //nolint:errcheck
 		kernelScriptPath = f.Name()
 	})
 	return kernelScriptPath, kernelScriptErr

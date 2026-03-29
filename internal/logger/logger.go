@@ -21,7 +21,7 @@ import (
 	"gopkg.in/lumberjack.v2"
 )
 
-// L is the application-wide structured logger. It is initialised by Init and
+// L is the application-wide structured logger. It is initialized by Init and
 // safe to use from multiple goroutines.
 var L *slog.Logger
 
@@ -69,7 +69,7 @@ func Init() func() {
 	// gosnowflake v2 defaults to slog.Default(), which is already set to L
 	// above — no explicit redirect needed.
 
-	L.Info("logger initialised", "path", path, "dev", devMode)
+	L.Info("logger initialized", "path", path, "dev", devMode)
 
 	return func() { _ = rot.Close() }
 }

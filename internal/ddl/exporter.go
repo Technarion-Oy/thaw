@@ -104,7 +104,7 @@ func ExportDatabases(
 		go func(idx int, dbName string) {
 			defer wg.Done()
 
-			// Wait for a semaphore slot, but bail out if the context is cancelled.
+			// Wait for a semaphore slot, but bail out if the context is canceled.
 			select {
 			case sem <- struct{}{}: // acquire
 				defer func() { <-sem }() // release
