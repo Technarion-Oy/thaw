@@ -21,7 +21,7 @@ import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs } from "../../../wailsjs/go/main/App";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
-import { DiagMarker, ColInfo, validateSyntax, validateSemantics } from "../../utils/sqlDiagnostics";
+import { DiagMarker, ColInfo, validateSyntax, validateSemantics, validateWithParser, validateBareColumnRefs } from "../../utils/sqlDiagnostics";
 
 // Module-level DDL cache and hover provider handle so we only register once
 // and don't accumulate duplicate providers on editor remounts.
@@ -792,6 +792,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       diagMarkers.push(...syntaxErrors);
 
       if (syntaxErrors.length === 0) {
+        // Grammar check via node-sql-parser (Snowflake dialect).
+        // Shown as Warnings because some valid Snowflake syntax may not be
+        // supported by the parser and would otherwise produce false positives.
+        diagMarkers.push(...validateWithParser(diagSql));
+
         const rawRefs = parseJoinTables(diagSql);
         const storeObjs = useObjectStore.getState().objects;
         // Resolve refs without the >= 2 constraint so single-table queries are validated.
@@ -811,9 +816,26 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           })
           .filter(Boolean) as Array<{ db: string; schema: string; name: string; alias: string }>;
 
+        // Proactively warm colInfoCache for any resolved FROM table whose columns
+        // haven't been fetched yet.  Once the fetch resolves, re-run diagnostics
+        // immediately so column validation can proceed with a warm cache.
+        for (const ref of resolved) {
+          const warmKey = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
+          if (!colInfoCache.has(warmKey) && !fetchingColInfos.has(warmKey)) {
+            void getColInfos(ref.db, ref.schema, ref.name).then(() => {
+              if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
+              diagTimerRef.current = setTimeout(runDiagnostics, 0);
+            });
+          }
+        }
+
         if (resolved.length > 0) {
           diagMarkers.push(...validateSemantics(diagSql, resolved, colInfoCache));
         }
+
+        // Validate bare and double-quoted column names in SELECT lists against
+        // colInfoCache (catches bare `wrong_col` and `"wrong_col"` typos).
+        diagMarkers.push(...validateBareColumnRefs(diagSql, resolved, colInfoCache));
       }
 
       monaco.editor.setModelMarkers(model, "thaw-sql", diagMarkers);

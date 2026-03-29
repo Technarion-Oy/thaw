@@ -5,6 +5,12 @@
 // in whole or in part, is strictly prohibited without prior written permission
 // from Technarion Oy.
 
+import { Parser as SnowflakeParser } from "node-sql-parser/build/snowflake";
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const UC = (s: string) => s.toUpperCase();
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface ColInfo { name: string; dataType: string; }
@@ -200,6 +206,423 @@ export function validateSyntax(sql: string): DiagMarker[] {
     addError(`Unclosed '${open.char}'`, open.line, open.col, open.line, open.col + 1);
   }
 
+  return markers;
+}
+
+// ── validateWithParser ────────────────────────────────────────────────────────
+
+// Statement-starting keywords whose SQL the Snowflake PEG parser handles
+// correctly (no false positives on valid Snowflake syntax).
+// Keywords NOT in this set — DELETE, MERGE, GRANT, REVOKE, EXPLAIN, BEGIN,
+// COMMIT, ROLLBACK, USE, COPY, PUT, GET, UNSET, DESCRIBE, DECLARE, etc. — all
+// produce parser errors on valid Snowflake SQL and are therefore skipped.
+const PARSEABLE_STMT_KEYWORDS = new Set([
+  "SELECT", "WITH", "INSERT", "UPDATE", "CREATE", "DROP", "ALTER",
+  "TRUNCATE", "CALL", "SHOW", "SET",
+]);
+
+// Within otherwise-parseable statements, these Snowflake-specific constructs
+// also trip up the parser — skip the whole statement if any is detected.
+const SNOWFLAKE_FP_RE =
+  /\bTABLESAMPLE\b|\bSAMPLE\s*\(|\bWITHIN\s+GROUP\b|\bCONNECT\s+BY\b|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b/i;
+
+/** Subset of a statement extracted from the full SQL text. */
+interface SplitStmt {
+  /** Raw slice of `sql` — NOT trimmed, so parser line numbers are accurate. */
+  text:        string;
+  /** Byte offset of `text[0]` within the original `sql` string. */
+  startOffset: number;
+}
+
+/**
+ * Splits `sql` into per-statement chunks (on `;`) while correctly skipping
+ * string literals, quoted identifiers, dollar-quoted strings, and comments.
+ * Because we only call this after `validateSyntax` has confirmed no structural
+ * errors, we don't need to handle malformed input.
+ */
+function splitSqlStatements(sql: string): SplitStmt[] {
+  const stmts: SplitStmt[] = [];
+  let start = 0;
+  let i = 0;
+
+  while (i < sql.length) {
+    const ch = sql[i];
+
+    if (ch === "-" && sql[i + 1] === "-") {
+      i += 2;
+      while (i < sql.length && sql[i] !== "\n") i++;
+      continue;
+    }
+    if (ch === "/" && sql[i + 1] === "*") {
+      i += 2;
+      while (i < sql.length) {
+        if (sql[i] === "*" && sql[i + 1] === "/") { i += 2; break; }
+        else i++;
+      }
+      continue;
+    }
+    if (ch === "'") {
+      i++;
+      while (i < sql.length) {
+        if (sql[i] === "'" && sql[i + 1] === "'") i += 2;
+        else if (sql[i] === "'") { i++; break; }
+        else i++;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      i++;
+      while (i < sql.length) {
+        if (sql[i] === '"' && sql[i + 1] === '"') i += 2;
+        else if (sql[i] === '"') { i++; break; }
+        else i++;
+      }
+      continue;
+    }
+    if (ch === "$") {
+      const m = sql.slice(i).match(/^\$([a-zA-Z0-9_]*)\$/);
+      if (m) {
+        const tag = m[0];
+        i += tag.length;
+        while (i < sql.length && !sql.startsWith(tag, i)) i++;
+        if (i < sql.length) i += tag.length;
+        continue;
+      }
+    }
+    if (ch === ";") {
+      if (sql.slice(start, i).trim()) {
+        stmts.push({ text: sql.slice(start, i), startOffset: start });
+      }
+      start = i + 1;
+      i++;
+      continue;
+    }
+    i++;
+  }
+  if (sql.slice(start).trim()) {
+    stmts.push({ text: sql.slice(start), startOffset: start });
+  }
+  return stmts;
+}
+
+/** Counts how many newlines appear before character offset `offset` in `sql`. */
+function newlinesBefore(sql: string, offset: number): number {
+  let n = 0;
+  for (let i = 0; i < offset && i < sql.length; i++) {
+    if (sql[i] === "\n") n++;
+  }
+  return n;
+}
+
+function cleanParserMessage(raw: string): string {
+  // PEG.js messages are very verbose ("Expected ... but 'X' found.")
+  const m = raw.match(/but\s+"([^"]+)"\s+found/i) ?? raw.match(/but\s+([^\s.]+)\s+found/i);
+  if (m) return `Unexpected: '${m[1]}'`;
+  if (/end of input/i.test(raw)) return "Unexpected end of statement";
+  return raw.length > 100 ? raw.slice(0, 97) + "…" : raw;
+}
+
+/**
+ * Uses the node-sql-parser Snowflake grammar to detect grammatical errors.
+ * Errors are emitted as **Warnings** (severity 4) because the parser may
+ * produce false positives on valid Snowflake-specific syntax.
+ *
+ * Only statements whose first keyword is in `PARSEABLE_STMT_KEYWORDS` are
+ * checked; all others are silently skipped.
+ */
+export function validateWithParser(sql: string): DiagMarker[] {
+  const markers: DiagMarker[] = [];
+  const parser = new SnowflakeParser();
+
+  for (const stmt of splitSqlStatements(sql)) {
+    // Only attempt statements the parser can handle without false positives.
+    const firstToken = stmt.text.trimStart().match(/^[a-zA-Z_]\w*/)?.[0]?.toUpperCase();
+    if (!firstToken || !PARSEABLE_STMT_KEYWORDS.has(firstToken)) continue;
+
+    // Skip statements containing Snowflake syntax the parser chokes on.
+    if (SNOWFLAKE_FP_RE.test(stmt.text)) continue;
+
+    try {
+      parser.parse(stmt.text);
+    } catch (err: unknown) {
+      const e = err as {
+        location?: { start: { line: number; column: number } };
+        message?: string;
+      };
+      if (e?.location?.start) {
+        // stmt.text starts at startOffset in the original sql; translate line.
+        const stmtBaseLine = newlinesBefore(sql, stmt.startOffset) + 1;
+        const errLine = stmtBaseLine + e.location.start.line - 1;
+        const errCol  = e.location.start.column; // 1-indexed (PEG.js convention)
+        markers.push({
+          startLineNumber: errLine,
+          startColumn:     errCol,
+          endLineNumber:   errLine,
+          endColumn:       errCol + 1,
+          message:         cleanParserMessage(e.message ?? "Syntax error"),
+          severity:        4, // Warning — some false positives may remain
+        });
+      }
+    }
+  }
+
+  return markers;
+}
+
+// ── validateBareColumnRefs ────────────────────────────────────────────────────
+
+interface WordToken { name: string; line: number; col: number; endCol: number; }
+
+/**
+ * Walks `sql`, skipping strings/comments/quoted-idents, and returns every
+ * unquoted bare-word token (not preceded by `.`, not followed by `(`) whose
+ * upper-cased form is in `targets`.
+ */
+function findBareWordPositions(sql: string, targets: Set<string>): WordToken[] {
+  const results: WordToken[] = [];
+  let line = 1, col = 1, i = 0;
+
+  while (i < sql.length) {
+    const ch = sql[i];
+    if (ch === "\n") { line++; col = 1; i++; continue; }
+    if (ch === "-" && sql[i + 1] === "-") {
+      i += 2; col += 2;
+      while (i < sql.length && sql[i] !== "\n") { i++; col++; }
+      continue;
+    }
+    if (ch === "/" && sql[i + 1] === "*") {
+      i += 2; col += 2;
+      while (i < sql.length) {
+        if (sql[i] === "\n") { line++; col = 1; i++; }
+        else if (sql[i] === "*" && sql[i + 1] === "/") { i += 2; col += 2; break; }
+        else { i++; col++; }
+      }
+      continue;
+    }
+    if (ch === "'") {
+      i++; col++;
+      while (i < sql.length) {
+        if (sql[i] === "\n") { line++; col = 1; i++; }
+        else if (sql[i] === "'" && sql[i + 1] === "'") { i += 2; col += 2; }
+        else if (sql[i] === "'") { i++; col++; break; }
+        else { i++; col++; }
+      }
+      continue;
+    }
+    if (ch === '"') {
+      i++; col++;
+      while (i < sql.length) {
+        if (sql[i] === "\n") { line++; col = 1; i++; }
+        else if (sql[i] === '"' && sql[i + 1] === '"') { i += 2; col += 2; }
+        else if (sql[i] === '"') { i++; col++; break; }
+        else { i++; col++; }
+      }
+      continue;
+    }
+    if (ch === "$") {
+      const m = sql.slice(i).match(/^\$([a-zA-Z0-9_]*)\$/);
+      if (m) {
+        const tag = m[0]; i += tag.length; col += tag.length;
+        while (i < sql.length && !sql.startsWith(tag, i)) {
+          if (sql[i] === "\n") { line++; col = 1; i++; } else { i++; col++; }
+        }
+        if (i < sql.length) { col += tag.length; i += tag.length; }
+        continue;
+      }
+    }
+    if (/[a-zA-Z_]/.test(ch)) {
+      const wLine = line, wCol = col, wStart = i;
+      while (i < sql.length && /\w/.test(sql[i])) { i++; col++; }
+      const word = sql.slice(wStart, i);
+      const prevCh = wStart > 0 ? sql[wStart - 1] : null;
+      const nextCh = i < sql.length ? sql[i] : null;
+      if (prevCh !== "." && nextCh !== "(" && targets.has(word.toUpperCase())) {
+        results.push({ name: word, line: wLine, col: wCol, endCol: wCol + word.length });
+      }
+      continue;
+    }
+    i++; col++;
+  }
+  return results;
+}
+
+/**
+ * Walks `sql` and returns every double-quoted identifier `"name"` whose
+ * inner name's upper-cased form is in `targets`.
+ * `col` / `endCol` include the surrounding quotes in the span.
+ */
+function findQuotedWordPositions(sql: string, targets: Set<string>): WordToken[] {
+  const results: WordToken[] = [];
+  let line = 1, col = 1, i = 0;
+
+  while (i < sql.length) {
+    const ch = sql[i];
+    if (ch === "\n") { line++; col = 1; i++; continue; }
+    if (ch === "-" && sql[i + 1] === "-") {
+      i += 2; col += 2;
+      while (i < sql.length && sql[i] !== "\n") { i++; col++; }
+      continue;
+    }
+    if (ch === "/" && sql[i + 1] === "*") {
+      i += 2; col += 2;
+      while (i < sql.length) {
+        if (sql[i] === "\n") { line++; col = 1; i++; }
+        else if (sql[i] === "*" && sql[i + 1] === "/") { i += 2; col += 2; break; }
+        else { i++; col++; }
+      }
+      continue;
+    }
+    if (ch === "'") {
+      i++; col++;
+      while (i < sql.length) {
+        if (sql[i] === "\n") { line++; col = 1; i++; }
+        else if (sql[i] === "'" && sql[i + 1] === "'") { i += 2; col += 2; }
+        else if (sql[i] === "'") { i++; col++; break; }
+        else { i++; col++; }
+      }
+      continue;
+    }
+    if (ch === '"') {
+      const startLine = line, startCol = col;
+      i++; col++;
+      let name = ""; let closed = false;
+      while (i < sql.length) {
+        if (sql[i] === "\n") { line++; col = 1; i++; name += "\n"; }
+        else if (sql[i] === '"' && sql[i + 1] === '"') { name += '"'; i += 2; col += 2; }
+        else if (sql[i] === '"') { i++; col++; closed = true; break; }
+        else { name += sql[i]; i++; col++; }
+      }
+      if (closed && targets.has(name.toUpperCase())) {
+        results.push({ name, line: startLine, col: startCol, endCol: col });
+      }
+      continue;
+    }
+    i++; col++;
+  }
+  return results;
+}
+
+/**
+ * Uses the node-sql-parser AST to find bare and double-quoted column names in
+ * SELECT lists, then cross-references them against `colInfoCache`.
+ *
+ * Rules:
+ * - Only runs when the statement is parseable (SELECT / WITH, no Snowflake-FP patterns).
+ * - Only validates when **all** FROM tables have warm cache entries; if any is cold
+ *   (or is a subquery / CTE), the statement is silently skipped (no false positives).
+ * - Covers both unquoted `column_name` and double-quoted `"column_name"` in the
+ *   top-level SELECT list (Snowflake always treats `"..."` as quoted identifiers).
+ */
+export function validateBareColumnRefs(
+  sql:          string,
+  resolvedRefs: ResolvedRef[],
+  colInfoCache: Map<string, ColInfo[]>,
+): DiagMarker[] {
+  const markers: DiagMarker[] = [];
+  const parser = new SnowflakeParser();
+
+  for (const stmt of splitSqlStatements(sql)) {
+    const firstToken = stmt.text.trimStart().match(/^[a-zA-Z_]\w*/)?.[0]?.toUpperCase();
+    if (firstToken !== "SELECT" && firstToken !== "WITH") continue;
+    if (SNOWFLAKE_FP_RE.test(stmt.text)) continue;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let ast: any;
+    try { ast = parser.parse(stmt.text); } catch { continue; }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const stmtAsts: any[] = Array.isArray(ast.ast) ? ast.ast : [ast.ast];
+
+    for (const node of stmtAsts) {
+      if (!node || node.type !== "select") continue;
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const fromTables: any[] = node.from ?? [];
+
+      interface TableCheck { cacheKey: string; tableName: string; }
+      const tableChecks: TableCheck[] = [];
+      let skip = false;
+
+      for (const ft of fromTables) {
+        if (!ft.table) { skip = true; break; } // subquery or lateral in FROM → skip
+
+        const ftDb    = (ft.db ?? ft.catalog) as string | null;
+        const ftSchema = ft.schema as string | null;
+        const ftTable  = ft.table as string;
+
+        let cacheKey: string | undefined;
+        if (ftDb && ftSchema) {
+          // Fully qualified reference — build key directly from AST
+          cacheKey = `${UC(ftDb)}\0${UC(ftSchema)}\0${UC(ftTable)}`;
+        } else {
+          // Unqualified — look up the resolved ref for the db/schema context
+          const ref = resolvedRefs.find((r) =>
+            UC(r.name) === UC(ftTable) &&
+            (!ftDb     || UC(r.db)     === UC(ftDb))     &&
+            (!ftSchema || UC(r.schema) === UC(ftSchema))
+          );
+          if (!ref) { skip = true; break; } // CTE, subquery alias, or unknown table
+          cacheKey = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
+        }
+
+        if (!colInfoCache.has(cacheKey)) { skip = true; break; } // cold cache → skip
+        tableChecks.push({ cacheKey, tableName: ftTable });
+      }
+
+      if (skip || tableChecks.length === 0) continue;
+
+      // Union of all column names across every FROM table
+      const knownCols = new Set<string>();
+      for (const tc of tableChecks) {
+        for (const c of colInfoCache.get(tc.cacheKey)!) knownCols.add(UC(c.name));
+      }
+
+      const unknownBare   = new Set<string>(); // unquoted  column_ref
+      const unknownQuoted = new Set<string>(); // "double_quote_string"
+
+      for (const col of (node.columns ?? [])) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const expr = (col as any)?.expr;
+        if (!expr) continue;
+        if (expr.type === "column_ref" && expr.table === null && expr.column !== "*") {
+          if (!knownCols.has(UC(expr.column as string))) unknownBare.add(expr.column as string);
+        } else if (expr.type === "double_quote_string") {
+          if (!knownCols.has(UC(expr.value as string))) unknownQuoted.add(expr.value as string);
+        }
+      }
+
+      if (unknownBare.size === 0 && unknownQuoted.size === 0) continue;
+
+      const stmtBaseLine = newlinesBefore(sql, stmt.startOffset) + 1;
+      const tableLabel = tableChecks.length === 1 ? tableChecks[0].tableName : "query tables";
+
+      // findBareWordPositions / findQuotedWordPositions do targets.has(word.toUpperCase())
+      // so the targets set must be uppercase to match.
+      const unknownBareUC   = new Set([...unknownBare].map(UC));
+      const unknownQuotedUC = new Set([...unknownQuoted].map(UC));
+
+      for (const t of findBareWordPositions(stmt.text, unknownBareUC)) {
+        markers.push({
+          startLineNumber: stmtBaseLine + t.line - 1,
+          startColumn:     t.col,
+          endLineNumber:   stmtBaseLine + t.line - 1,
+          endColumn:       t.endCol,
+          message:         `Column '${t.name}' not found in ${tableLabel}`,
+          severity:        4,
+        });
+      }
+      for (const t of findQuotedWordPositions(stmt.text, unknownQuotedUC)) {
+        markers.push({
+          startLineNumber: stmtBaseLine + t.line - 1,
+          startColumn:     t.col,
+          endLineNumber:   stmtBaseLine + t.line - 1,
+          endColumn:       t.endCol,
+          message:         `Column '"${t.name}"' not found in ${tableLabel}`,
+          severity:        4,
+        });
+      }
+    }
+  }
   return markers;
 }
 
