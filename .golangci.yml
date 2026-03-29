@@ -8,6 +8,28 @@
 #   brew install golangci-lint          # macOS
 #   go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 #   curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
+#
+# ── govulncheck ──────────────────────────────────────────────────────────────
+# Scans Go modules for known vulnerabilities from the Go vulnerability database.
+#
+# Install:
+#   go install golang.org/x/vuln/cmd/govulncheck@latest
+#
+# Run locally:
+#   govulncheck ./...
+#
+# ── gosec ────────────────────────────────────────────────────────────────────
+# Static analysis for security issues (hardcoded secrets, weak crypto, etc.).
+# Several rules are excluded as false positives for a native desktop app —
+# see .github/workflows/gosec.yml for the rationale.
+#
+# Install:
+#   go install github.com/securego/gosec/v2/cmd/gosec@latest
+#
+# Run locally:
+#   gosec -exclude=G104,G115,G122,G201,G204,G301,G304,G306,G703 \
+#         -exclude-dir=frontend -exclude-dir=internal/integration \
+#         ./...
 
 version: "2"
 

@@ -918,6 +918,57 @@ role has at least `CREATE SCHEMA` and `CREATE TABLE` on that database.
 
 ---
 
+## Code quality & security
+
+Three automated checks run on every push and pull request targeting `main` (triggered only when Go source or module files change). All three can also be run locally.
+
+### golangci-lint — static analysis
+
+Runs a curated set of linters: `errcheck`, `govet`, `staticcheck`, `ineffassign`, `unused`, `misspell`, and `revive`.
+
+```bash
+# Install (pick one)
+brew install golangci-lint
+go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+# Run
+golangci-lint run ./...
+```
+
+Configuration: `.golangci.yml`  ·  Workflow: `.github/workflows/lint.yml`
+
+### govulncheck — vulnerability scanning
+
+Scans the module graph against the [Go vulnerability database](https://vuln.go.dev/). Reports only vulnerabilities that are actually reachable from the compiled code.
+
+```bash
+# Install
+go install golang.org/x/vuln/cmd/govulncheck@latest
+
+# Run
+govulncheck ./...
+```
+
+Workflow: `.github/workflows/govulncheck.yml`
+
+### gosec — security static analysis
+
+Checks for common security issues: hardcoded credentials, weak crypto, TLS misconfigurations, unsafe operations, and more. Several rules are excluded as false positives for a native desktop application — see the workflow for the rationale.
+
+```bash
+# Install
+go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+# Run (same exclusions as CI)
+gosec -exclude=G104,G115,G122,G201,G204,G301,G304,G306,G703 \
+      -exclude-dir=frontend -exclude-dir=internal/integration \
+      ./...
+```
+
+Workflow: `.github/workflows/gosec.yml`
+
+---
+
 ## Development workflow
 
 - **Backend changes** — edit any `.go` file; `wails dev` recompiles automatically.

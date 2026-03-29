@@ -607,6 +607,19 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 
 ---
 
+## Code Quality & CI/CD
+
+Automated checks run on every push and pull request to `main`:
+
+- **golangci-lint** — static analysis: unchecked errors, vet, staticcheck, unused symbols, misspellings, and style (`errcheck`, `govet`, `staticcheck`, `ineffassign`, `unused`, `misspell`, `revive`)
+- **govulncheck** — vulnerability scanning against the Go vulnerability database; reports only vulnerabilities reachable from the compiled binary
+- **gosec** — security static analysis: hardcoded credentials, weak crypto, TLS misconfigurations, unsafe operations
+- **Unit tests** — DDL parser and migration helper tests run on every commit; integration tests (requiring a live Snowflake connection) are gated behind a build tag and run separately
+
+All three security/quality tools can also be run locally — see the `README.md` for install and run commands.
+
+---
+
 ## Keyboard Shortcuts
 
 Open **Help → Keyboard Shortcuts…** in the menu bar for a searchable, always-up-to-date reference.
