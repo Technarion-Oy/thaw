@@ -245,6 +245,8 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 		base: sf.NewConnector(&sf.SnowflakeDriver{}, *cfg),
 		role: strings.TrimSpace(p.Role),
 		wh:   strings.TrimSpace(p.Warehouse),
+		db:   strings.TrimSpace(p.Database), // initialize from profile so Connect() applies it
+		sc:   strings.TrimSpace(p.Schema),   // on connections created after pool recycles
 	}
 
 	db := sql.OpenDB(sc)
@@ -1219,9 +1221,24 @@ func (c *Client) UseDatabase(ctx context.Context, database string) error {
 }
 
 // UseSchema switches the active schema for the current session.
+// The schema is always qualified with the current database (e.g.
+// USE SCHEMA "db"."schema") so that stale pool connections that still carry
+// an old database context execute the command in the correct database.
 func (c *Client) UseSchema(ctx context.Context, schema string) error {
-	escaped := strings.ReplaceAll(schema, `"`, `""`)
-	if _, err := c.db.ExecContext(ctx, fmt.Sprintf(`USE SCHEMA "%s"`, escaped)); err != nil {
+	c.connector.mu.RLock()
+	db := c.connector.db
+	c.connector.mu.RUnlock()
+
+	escapedSc := strings.ReplaceAll(schema, `"`, `""`)
+	var query string
+	if db != "" {
+		escapedDb := strings.ReplaceAll(db, `"`, `""`)
+		query = fmt.Sprintf(`USE SCHEMA "%s"."%s"`, escapedDb, escapedSc)
+	} else {
+		query = fmt.Sprintf(`USE SCHEMA "%s"`, escapedSc)
+	}
+
+	if _, err := c.db.ExecContext(ctx, query); err != nil {
 		return err
 	}
 	c.connector.mu.Lock()
@@ -1279,7 +1296,8 @@ func (c *Client) ListExportableDatabases(ctx context.Context) ([]string, error) 
 
 // ListSchemas returns schemas inside a database.
 func (c *Client) ListSchemas(ctx context.Context, database string) ([]string, error) {
-	return c.queryStringSlice(ctx, fmt.Sprintf("SHOW SCHEMAS IN DATABASE %s", database), 1)
+	escaped := strings.ReplaceAll(database, `"`, `""`)
+	return c.queryStringSlice(ctx, fmt.Sprintf(`SHOW SCHEMAS IN DATABASE "%s"`, escaped), 1)
 }
 
 // extractArgTypes parses the "arguments" column returned by SHOW PROCEDURES /
