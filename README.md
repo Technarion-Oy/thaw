@@ -637,6 +637,7 @@ thaw/
 │   ├── integration/
 │   │   ├── basic_test.go          # Connectivity + result-shape integration tests (key-pair auth)
 │   │   ├── export_test.go         # DDL export end-to-end tests (require live Snowflake account)
+│   │   ├── formatter_test.go      # SQL formatter dialect tests — 18 queries covering ::, :, FLATTEN, CTEs, QUALIFY, PIVOT, SAMPLE, MATCH_RECOGNIZE (no CREATE privileges needed)
 │   │   └── migration_test.go      # Schema migration strategy integration tests (key-pair auth)
 │   ├── logger/
 │   │   ├── logger.go              # slog + lumberjack setup; sets slog.Default so gosnowflake v2 logs flow in automatically
@@ -816,6 +817,35 @@ go test -v -run "^Test(Normalize|SplitTopLevel|MigrQuote|ParseLocal|CommonColumn
 
 ---
 
+### Frontend unit tests (vitest)
+
+TypeScript/React unit tests live in `frontend/src/**/*.test.ts` and run via [vitest](https://vitest.dev/).
+
+```bash
+cd frontend && npm test          # run once
+cd frontend && npm run test:watch  # watch mode
+```
+
+#### SQL formatter tests (`frontend/src/utils/sqlFormatter.test.ts`)
+
+63 unit tests for the Snowflake-dialect SQL formatter — no browser, no Snowflake connection required:
+
+- **Keyword casing** — `UPPER`, `lower`, `Title`, `Preserve` modes; covers `WINDOW`, `QUALIFY`, `DEFINE` (MATCH_RECOGNIZE)
+- **Identifier casing** — `Preserve`, `UPPER`, `lower`; double-quoted identifiers are never modified; escaped `""` inside identifiers handled
+- **Function casing** — `UPPER`, `lower`; built-in Snowflake functions; UDFs (unknown functions); nested function calls
+- **Indent** — spaces/2, spaces/4, tabs
+- **Comma position** — trailing and leading; leading commas do not break inline type-argument commas (`DECIMAL(18, 2)`)
+- **Operator position** — `AND`/`OR` before or after line break
+- **`::` cast operator** — no whitespace after simple column, function result, arithmetic expression, or chained casts; inside function arguments
+- **`:` VARIANT path** — single-level, multi-level, combined with `::` in the same token
+- **CTE formatting** — `WITH` on its own line, CTE body indented, multiple CTEs, complex CTE with window functions + `QUALIFY`
+- **LATERAL FLATTEN** — named `=>` parameter preserved, multiple named params
+- **String literal passthrough** — single-quoted strings, `$$`-quoted bodies, `$tag$`-quoted labels, escaped quotes
+- **Comment passthrough** — line (`--`) and block (`/* */`) comments
+- **Complex queries** — PIVOT, MATCH_RECOGNIZE, GROUP BY ROLLUP, window frames (`ROWS BETWEEN`), LISTAGG WITHIN GROUP, ARRAY_CONSTRUCT / OBJECT_CONSTRUCT, IFF nested in CASE in COALESCE, correlated LATERAL, AT time-travel, TRY_CAST / TRY_TO_DATE, SAMPLE; idempotency (formatting twice produces identical output)
+
+---
+
 ## Integration tests
 
 Integration tests live in `internal/integration/` and are gated behind the
@@ -835,6 +865,8 @@ require a real Snowflake account.
 4. Validate the file-system output: file existence, directory structure,
    content correctness, and that function overloads land at distinct paths.
 5. Drop the temporary database unconditionally, even when the test fails.
+
+**SQL formatter dialect tests** (`formatter_test.go`) execute 18 formatted-SQL patterns that the frontend formatter pipeline produces and verify that Snowflake accepts them without syntax errors.  All queries use inline data (`VALUES`, `PARSE_JSON`, literals) — no `CREATE TABLE` or elevated privileges are needed.  Patterns covered: `::` cast operator (basic, chained, arithmetic, function-result, inside args), `:` VARIANT path (single-level, nested, combined), `LATERAL FLATTEN` (basic, nested VARIANT, `OUTER => TRUE`), simple and multi-CTE, CTE + window + `QUALIFY`, window frames (`ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`, moving average), named `WINDOW` clause, `LISTAGG WITHIN GROUP`, `GROUP BY ROLLUP`, `APPROX_PERCENTILE`, `ARRAY_CONSTRUCT`, `OBJECT_CONSTRUCT`, `IFF` nested in `CASE` in `COALESCE`, `DECODE`/`NULLIF`, string and regexp functions, date/time functions, `TRY_CAST`/`TRY_TO_DATE`, leading-comma style, `AND`/`OR` before and after line break, `PIVOT`, `SAMPLE`, deeply-nested VARIANT with coalesce fallback, and a full stress-test combining LATERAL FLATTEN + `::` casts + window functions + `QUALIFY` in a 3-CTE chain.
 
 **Schema migration tests** (`migration_test.go`) each:
 
@@ -895,6 +927,11 @@ Run a single test by name:
 ```bash
 go test -v -tags integration -timeout 10m \
   -run TestExportDatabase \
+  ./internal/integration/
+
+# SQL formatter dialect tests only (no CREATE DATABASE needed):
+go test -v -tags integration -timeout 5m \
+  -run TestFormatterSQL \
   ./internal/integration/
 ```
 

@@ -623,9 +623,10 @@ Automated checks run on every push and pull request to `main`:
 - **golangci-lint** — static analysis: unchecked errors, vet, staticcheck, unused symbols, misspellings, and style (`errcheck`, `govet`, `staticcheck`, `ineffassign`, `unused`, `misspell`, `revive`)
 - **govulncheck** — vulnerability scanning against the Go vulnerability database; reports only vulnerabilities reachable from the compiled binary
 - **gosec** — security static analysis: hardcoded credentials, weak crypto, TLS misconfigurations, unsafe operations
-- **Unit tests** — DDL parser and migration helper tests run on every commit; integration tests (requiring a live Snowflake connection) are gated behind a build tag and run separately
+- **Unit tests** — DDL parser, lineage parser, dbt generator, migration helper, and **SQL formatter** tests run on every commit; 63 vitest tests for the Snowflake-dialect formatter cover keyword/identifier/function casing, indent styles, comma and operator placement, `::` cast and `:` VARIANT path operators, CTE layout, LATERAL FLATTEN, string/comment passthrough, and 14 complex Snowflake-specific query patterns
+- **Integration tests** — 18 `TestFormatterSQL` cases validate that formatted SQL patterns execute on a real Snowflake account without syntax errors (no `CREATE TABLE` or elevated privileges needed); DDL export and schema migration integration tests are gated behind a build tag and run separately
 
-All three security/quality tools can also be run locally — see the `README.md` for install and run commands.
+All security/quality tools can also be run locally — see the `README.md` for install and run commands.
 
 ---
 

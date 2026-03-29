@@ -42,10 +42,10 @@ const SQL_KEYWORDS = new Set([
   "DEFAULT","DELETE","DESC","DESCRIBE","DISTINCT","DROP","ELSE","END",
   "EXCEPT","EXECUTE","EXISTS","EXPLAIN","EXTRACT","FALSE","FILE","FIRST",
   "FLATTEN","FOLLOWING","FOR","FORCE","FOREIGN","FROM","FULL","FUNCTION",
-  "GRANT","GROUP","GROUPING","HAVING","IF","ILIKE","IN","INDEX","INNER",
-  "INSERT","INTERSECT","INTO","IS","JOIN","KEY","LAST","LATERAL","LEFT",
-  "LIKE","LIMIT","MATCH_RECOGNIZE","MEASURES","MERGE","MINUS","NATURAL",
-  "NOT","NULL","NULLS","OF","OFFSET","ON","OR","ORDER","OUTER","OVER",
+  "DEFINE","GRANT","GROUP","GROUPING","HAVING","IF","ILIKE","IN","INDEX",
+  "INNER","INSERT","INTERSECT","INTO","IS","JOIN","KEY","LAST","LATERAL",
+  "LEFT","LIKE","LIMIT","MATCH_RECOGNIZE","MEASURES","MERGE","MINUS",
+  "NATURAL","NOT","NULL","NULLS","OF","OFFSET","ON","OR","ORDER","OUTER","OVER",
   "OVERWRITE","PARTITION","PATTERN","PIPE","PRECEDING","PRIMARY","PROCEDURE",
   "PURGE","QUALIFY","RANGE","RECURSIVE","REFERENCES","REPLACE","RESTRICT",
   "REVOKE","RIGHT","ROLLBACK","ROW","ROWS","SAMPLE","SCHEMA","SELECT",
@@ -268,8 +268,13 @@ function applyCasing(sql: string, prefs: EditorPrefs): string {
         result = applyCase(word, prefs.identifierCase);
       }
 
+      // For function-call tokens that are NOT pure SQL keywords (i.e. built-in
+      // functions or UDFs), strip any space sql-formatter inserted before "(".
+      // Pure keyword constructs like OVER (...) or IN (...) keep their space.
+      const isFunctionToken =
+        isCall && (!SQL_KEYWORDS.has(upper) || BUILTIN_FUNCTIONS.has(upper));
       out.push(result);
-      i = j;
+      i = isFunctionToken ? k : j;
       continue;
     }
 
@@ -297,8 +302,10 @@ export function formatSQL(sql: string, prefs: EditorPrefs): string {
   try {
     let structured = sfFormat(sql, {
       language: "snowflake",
-      // Always output UPPER from sql-formatter; our casing pass will convert.
-      keywordCase:          "upper",
+      // For "Preserve" mode pass through sql-formatter's own preserve so the
+      // original keyword casing survives before our no-op applyCasing pass.
+      // For all other modes always emit UPPER so applyCasing can identify keywords.
+      keywordCase: prefs.keywordCase === "Preserve" ? "preserve" : "upper",
       tabWidth:             prefs.indentSize,
       useTabs:              prefs.indentStyle === "tabs",
       logicalOperatorNewline: prefs.operatorPosition === "before" ? "before" : "after",
