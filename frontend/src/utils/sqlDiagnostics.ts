@@ -45,6 +45,7 @@ const SQL_STMT_KEYWORDS = new Set([
   "COPY", "PUT", "GET", "LIST", "REMOVE",
   // Snowflake scripting
   "DECLARE", "LET", "FOR", "WHILE", "IF", "CASE", "RAISE",
+  "END", "LOOP",
   // Misc
   "ANALYZE",
 ]);
@@ -291,7 +292,9 @@ function splitSqlStatements(sql: string): SplitStmt[] {
     }
     if (ch === ";") {
       if (sql.slice(start, i).trim()) {
-        stmts.push({ text: sql.slice(start, i), startOffset: start });
+        const rawText = sql.slice(start, i);
+        const trimmedText = rawText.trimStart();
+        stmts.push({ text: trimmedText, startOffset: start + (rawText.length - trimmedText.length) });
       }
       start = i + 1;
       i++;
@@ -300,7 +303,9 @@ function splitSqlStatements(sql: string): SplitStmt[] {
     i++;
   }
   if (sql.slice(start).trim()) {
-    stmts.push({ text: sql.slice(start), startOffset: start });
+    const rawText = sql.slice(start);
+    const trimmedText = rawText.trimStart();
+    stmts.push({ text: trimmedText, startOffset: start + (rawText.length - trimmedText.length) });
   }
   return stmts;
 }

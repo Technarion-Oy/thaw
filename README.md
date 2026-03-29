@@ -849,6 +849,35 @@ cd frontend && npm run test:watch  # watch mode
 - **Comment passthrough** — line (`--`) and block (`/* */`) comments
 - **Complex queries** — PIVOT, MATCH_RECOGNIZE, GROUP BY ROLLUP, window frames (`ROWS BETWEEN`), LISTAGG WITHIN GROUP, ARRAY_CONSTRUCT / OBJECT_CONSTRUCT, IFF nested in CASE in COALESCE, correlated LATERAL, AT time-travel, TRY_CAST / TRY_TO_DATE, SAMPLE; idempotency (formatting twice produces identical output)
 
+#### SQL diagnostics tests (`frontend/src/utils/sqlDiagnostics.test.ts`)
+
+174 unit tests for the SQL diagnostic engine — no browser, no Snowflake connection required:
+
+- **`validateSyntax`** — structural tokenizer:
+  - Clean SQL: simple SELECT, escaped string literals, dollar-quoted strings, block/line comments, nested parens, multiple statements, CTEs; all Snowflake SQL statement keywords (including scripting: `FOR`, `WHILE`, `IF`, `CASE`, `END`) accepted after a semicolon without triggering errors
+  - Unclosed literals → Error: single-quoted string, double-quoted identifier, `$$`-quoted string, named dollar-quoted string, block comment; multi-line opening reports the correct line number
+  - Unmatched parens/brackets → Error: extra closing paren, unclosed opening paren, mismatched bracket/paren, multiple unclosed; parens inside strings and comments are never flagged
+  - Post-semicolon garbage → Error: bare unrecognised token, token on second line, whitespace-only between `;` and keyword OK, content inside a string after `;` OK
+
+- **`validateWithParser`** — Snowflake PEG grammar check:
+  - Valid SQL (no warnings): SELECT with WHERE, JOINs, CTEs, nested CTEs, subqueries in FROM, window functions, QUALIFY, PIVOT, CREATE TABLE, INSERT INTO … SELECT, UPDATE, positional params (`$1`), `$$`-quoted strings, `::` cast, LATERAL FLATTEN, multi-statement scripts
+  - Silently skipped (no false positives): DELETE, MERGE, GRANT, REVOKE, EXPLAIN, BEGIN/COMMIT/ROLLBACK, USE DATABASE, COPY INTO, PUT, UNSET, DESCRIBE TABLE, TABLESAMPLE, `SAMPLE (`, `WITHIN GROUP`, `CONNECT BY`, `AT (`, `BEFORE (`, `SHOW COLUMNS IN TABLE`; mixed DELETE+SELECT scripts only check the SELECT
+  - Grammar errors → Warning (severity 4): truncated FROM clause, missing SELECT expression; correct line numbers for single-line, second-statement (multi-statement script), and deep multi-line queries
+
+- **`validateBareColumnRefs`** — SELECT-list column existence:
+  - Cold cache → silent for all cases (no false positives)
+  - Valid columns: quoted `"COL"`, bare `COL`, `SELECT *`, case-insensitive match, qualified `alias.col` references skipped (not re-checked), function calls, expression aliases
+  - Unknown columns → Warning: bare unquoted, double-quoted, multi-line correct line number, exact column span, multiple unknowns all flagged
+  - JOIN queries: union of both table column lists treated as valid; unknown column flagged when all caches warm; cold cache for any one JOIN table → silent; three-way JOIN
+  - CTEs → skipped without false positives: CTE outer SELECT, CTE followed by real-table SELECT, recursive CTE
+  - Subqueries in FROM → statement skipped; mixed subquery + real table → statement skipped
+  - Snowflake FP patterns (TABLESAMPLE, SAMPLE) → statement skipped
+  - Multi-statement scripts: each statement validated independently; line numbers correct across semicolons
+
+- **`validateSemantics`** — `alias.column` two-part reference check:
+  - Valid: known column, case-insensitive match, three-part reference not checked, cold cache → silent
+  - Unknown column → Warning: marker on the column token (not the alias), multiple unknowns, alias inside string/comment/block comment not flagged, JOIN query
+
 ---
 
 ## Integration tests
