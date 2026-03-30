@@ -10,7 +10,7 @@
 
 import { useState } from "react";
 import { Modal, Spin, Button, Input, Switch, Tooltip, message } from "antd";
-import { CopyOutlined, EditOutlined, CheckOutlined, CloseOutlined } from "@ant-design/icons";
+import { CopyOutlined, EditOutlined, CheckOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { main } from "../../../wailsjs/go/models";
 import { SetSessionParameter, SetSessionVariable } from "../../../wailsjs/go/main/App";
@@ -276,6 +276,11 @@ export default function SessionPropertiesModal({
   onVarChange,
 }: Props) {
   const loading = parameters === null && variables === null && !error;
+  const [search, setSearch] = useState("");
+  const q = search.trim().toLowerCase();
+
+  const filteredParams = parameters ? (q ? parameters.filter((p) => p.key.toLowerCase().includes(q)) : parameters) : null;
+  const filteredVars   = variables  ? (q ? variables.filter((v)  => v.key.toLowerCase().includes(q))  : variables)  : null;
 
   const copyAll = () => {
     const lines: string[] = [];
@@ -318,19 +323,34 @@ export default function SessionPropertiesModal({
       )}
 
       {!loading && !error && (
-        <div style={{ maxHeight: "65vh", overflowY: "auto" }}>
-          <div style={SECTION_HEAD}>Parameters</div>
-          {parameters
-            ? <ParamsTable rows={parameters} onSave={onParamChange} />
-            : <Spin size="small" />}
+        <>
+          <Input
+            prefix={<SearchOutlined style={{ color: "var(--text-faint)" }} />}
+            placeholder="Search by name…"
+            allowClear
+            autoFocus
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{ marginBottom: 12 }}
+          />
+          <div style={{ maxHeight: "60vh", overflowY: "auto" }}>
+            <div style={SECTION_HEAD}>Parameters</div>
+            {filteredParams
+              ? filteredParams.length > 0
+                ? <ParamsTable rows={filteredParams} onSave={onParamChange} />
+                : <div style={{ color: "var(--text-muted)", fontSize: 12, padding: "4px 0 8px" }}>No matches.</div>
+              : <Spin size="small" />}
 
-          <div style={{ ...SECTION_HEAD, marginTop: 20, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
-            Variables
+            <div style={{ ...SECTION_HEAD, marginTop: 20, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+              Variables
+            </div>
+            {filteredVars
+              ? filteredVars.length > 0
+                ? <VarsTable rows={filteredVars} onSave={onVarChange} />
+                : <div style={{ color: "var(--text-muted)", fontSize: 12, padding: "4px 0 8px" }}>No matches.</div>
+              : <Spin size="small" />}
           </div>
-          {variables
-            ? <VarsTable rows={variables} onSave={onVarChange} />
-            : <Spin size="small" />}
-        </div>
+        </>
       )}
     </Modal>
   );

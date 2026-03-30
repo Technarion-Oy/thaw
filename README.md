@@ -413,6 +413,7 @@ Role, warehouse, database, and schema switches (via the toolbar dropdowns) are a
 
 Right-click the **account · user** tag in the query toolbar to open the **Session Properties** modal:
 
+- **Search** — type to filter both Parameters and Variables by name in real time; clear to restore the full list
 - **Parameters** — all rows from `SHOW PARAMETERS IN SESSION`; boolean parameters render as a toggle switch (saves immediately via `ALTER SESSION SET`); other parameters show a pencil button that opens an inline input with Save / Cancel; hovering the parameter name shows its description
 - **Variables** — all rows from `SHOW VARIABLES`; editing works identically; changes apply via `SET variable = value`
 - String-type values are automatically single-quoted in the generated SQL; booleans and numbers are passed through raw
