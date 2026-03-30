@@ -215,17 +215,41 @@ export function validateSyntax(sql: string): DiagMarker[] {
 // Statement-starting keywords whose SQL the Snowflake PEG parser handles
 // correctly (no false positives on valid Snowflake syntax).
 // Keywords NOT in this set — DELETE, MERGE, GRANT, REVOKE, EXPLAIN, BEGIN,
-// COMMIT, ROLLBACK, USE, COPY, PUT, GET, UNSET, DESCRIBE, DECLARE, etc. — all
-// produce parser errors on valid Snowflake SQL and are therefore skipped.
+// COMMIT, ROLLBACK, USE, COPY, PUT, GET, UNSET, DESCRIBE, DECLARE, DROP, etc.
+// all produce parser errors on valid Snowflake SQL and are therefore skipped.
+//
+// DROP is intentionally absent: the parser only handles `DROP TABLE` and fails
+// on DROP VIEW, DROP TASK, DROP STREAM, DROP STAGE, DROP IF EXISTS, etc.
 const PARSEABLE_STMT_KEYWORDS = new Set([
-  "SELECT", "WITH", "INSERT", "UPDATE", "CREATE", "DROP", "ALTER",
+  "SELECT", "WITH", "INSERT", "UPDATE", "CREATE", "ALTER",
   "TRUNCATE", "CALL", "SHOW", "SET",
 ]);
 
 // Within otherwise-parseable statements, these Snowflake-specific constructs
 // also trip up the parser — skip the whole statement if any is detected.
-const SNOWFLAKE_FP_RE =
-  /\bTABLESAMPLE\b|\bSAMPLE\s*\(|\bWITHIN\s+GROUP\b|\bCONNECT\s+BY\b|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b/i;
+//
+// CREATE / ALTER: the parser only handles a subset of object types. Skip any
+// statement that uses a Snowflake-specific object kind it doesn't know about.
+const SNOWFLAKE_FP_RE = new RegExp(
+  // Snowflake SELECT-clause constructs the parser can't handle
+  "\\bTABLESAMPLE\\b|\\bSAMPLE\\s*\\(|\\bWITHIN\\s+GROUP\\b|\\bCONNECT\\s+BY\\b" +
+  "|\\bAT\\s*\\(|\\bBEFORE\\s*\\(|\\bIN\\s+TABLE\\b" +
+  // Snowflake-specific CREATE object types (parser only knows TABLE/VIEW/DATABASE/SCHEMA/SEQUENCE/INDEX)
+  "|CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TASK|STREAM|STAGE|PIPE|FUNCTION|PROCEDURE|AGGREGATE" +
+  "|WAREHOUSE|ROLE|FILE\\s+FORMAT|USER|ALERT|SHARE|EXTERNAL|DYNAMIC|MATERIALIZED" +
+  "|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK|RESOURCE|ROW\\s+ACCESS" +
+  "|SESSION|PASSWORD|REPLICATION|FAILOVER|APPLICATION)\\b" +
+  // Snowflake-specific ALTER object types (parser handles TABLE and SCHEMA/FUNCTION only)
+  "|ALTER\\s+(?:VIEW|TASK|STREAM|WAREHOUSE|DATABASE|SEQUENCE|STAGE|PIPE" +
+  "|USER|ALERT|SHARE|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK" +
+  "|RESOURCE|REPLICATION|FAILOVER)\\b" +
+  // Snowflake-specific clauses/keywords within otherwise-parseable statements
+  "|\\bCLUSTER\\s+(?:BY|KEY)\\b" +   // ALTER TABLE ... CLUSTER BY/KEY
+  "|\\bCLONE\\b" +                    // CREATE TABLE t CLONE src
+  "|INSERT\\s+OVERWRITE\\b" +         // INSERT OVERWRITE INTO
+  "|TRUNCATE\\s+\\S+\\s+IF\\b",       // TRUNCATE TABLE IF EXISTS
+  "i",
+);
 
 /** Subset of a statement extracted from the full SQL text. */
 interface SplitStmt {
@@ -359,12 +383,26 @@ export function validateWithParser(sql: string): DiagMarker[] {
         const stmtBaseLine = newlinesBefore(sql, stmt.startOffset) + 1;
         const errLine = stmtBaseLine + e.location.start.line - 1;
         const errCol  = e.location.start.column; // 1-indexed (PEG.js convention)
+
+        // Extend the squiggly to cover the full word at the error position so
+        // a single mis-placed keyword like 'not' gets a 3-char span rather than
+        // a barely-visible 1-char underline.
+        const errLineText = stmt.text.split("\n")[(e.location.start.line ?? 1) - 1] ?? "";
+        const errColIdx   = errCol - 1; // 0-indexed
+        let wordEndIdx    = errColIdx;
+        while (wordEndIdx < errLineText.length && /\w/.test(errLineText[wordEndIdx])) wordEndIdx++;
+        const wordAtError = errLineText.slice(errColIdx, wordEndIdx);
+        const endCol      = wordEndIdx > errColIdx ? wordEndIdx + 1 : errCol + 1; // 1-indexed
+        const message     = wordAtError.length > 1
+          ? `Unexpected: '${wordAtError}'`
+          : cleanParserMessage(e.message ?? "Syntax error");
+
         markers.push({
           startLineNumber: errLine,
           startColumn:     errCol,
           endLineNumber:   errLine,
-          endColumn:       errCol + 1,
-          message:         cleanParserMessage(e.message ?? "Syntax error"),
+          endColumn:       endCol,
+          message,
           severity:        4, // Warning — some false positives may remain
         });
       }

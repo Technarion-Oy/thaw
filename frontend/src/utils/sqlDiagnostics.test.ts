@@ -365,6 +365,47 @@ describe("validateWithParser", () => {
       ["AT (", "SELECT * FROM t AT (TIMESTAMP => '2023-01-01'::TIMESTAMP)"],
       ["BEFORE (", "SELECT * FROM t BEFORE (STATEMENT => '8e5d')"],
       ["SHOW COLUMNS IN TABLE", "SHOW COLUMNS IN TABLE t"],
+      // DROP: parser only handles DROP TABLE; all other object types are skipped
+      ["DROP TABLE", 'DROP TABLE t'],
+      ["DROP VIEW", 'DROP VIEW v'],
+      ["DROP TASK", 'DROP TASK "DB"."SCH"."Final"'],
+      ["DROP STREAM", "DROP STREAM s"],
+      ["DROP STAGE", "DROP STAGE s"],
+      ["DROP PIPE", "DROP PIPE p"],
+      ["DROP PROCEDURE", "DROP PROCEDURE proc()"],
+      ["DROP FUNCTION", "DROP FUNCTION f(INT)"],
+      ["DROP WAREHOUSE", "DROP WAREHOUSE wh"],
+      ["DROP ROLE", "DROP ROLE r"],
+      ["DROP DATABASE", "DROP DATABASE d"],
+      ["DROP SCHEMA", "DROP SCHEMA s"],
+      // CREATE with Snowflake-specific object types
+      ["CREATE TASK", "CREATE TASK t AS SELECT 1"],
+      ["CREATE OR REPLACE TASK", "CREATE OR REPLACE TASK t AS SELECT 1"],
+      ["CREATE STREAM", "CREATE STREAM s ON TABLE t"],
+      ["CREATE STAGE", "CREATE STAGE s"],
+      ["CREATE PIPE", "CREATE PIPE p AS COPY INTO t FROM @s"],
+      ["CREATE FUNCTION", "CREATE FUNCTION f() RETURNS INT AS $$ 1 $$"],
+      ["CREATE PROCEDURE", "CREATE PROCEDURE p() RETURNS STRING AS $$ BEGIN RETURN 1; END $$"],
+      ["CREATE WAREHOUSE", "CREATE WAREHOUSE wh"],
+      ["CREATE ROLE", "CREATE ROLE r"],
+      ["CREATE FILE FORMAT", "CREATE FILE FORMAT ff TYPE = CSV"],
+      // CREATE with CLONE
+      ["CREATE TABLE CLONE", "CREATE OR REPLACE TABLE t CLONE t2"],
+      // ALTER with Snowflake-specific object types
+      ["ALTER VIEW", "ALTER VIEW v AS SELECT 1"],
+      ["ALTER TASK", "ALTER TASK t RESUME"],
+      ["ALTER STREAM", "ALTER STREAM s SET COMMENT = 'x'"],
+      ["ALTER WAREHOUSE", "ALTER WAREHOUSE wh RESUME"],
+      ["ALTER DATABASE", "ALTER DATABASE d RENAME TO d2"],
+      ["ALTER SEQUENCE", "ALTER SEQUENCE s INCREMENT BY 2"],
+      ["ALTER STAGE", "ALTER STAGE s SET URL = 's3://x'"],
+      ["ALTER PIPE", "ALTER PIPE p SET COMMENT = 'x'"],
+      // ALTER TABLE with Snowflake-specific clauses
+      ["ALTER TABLE CLUSTER BY", "ALTER TABLE t CLUSTER BY (c)"],
+      ["ALTER TABLE CLUSTER KEY", "ALTER TABLE t SET CLUSTER KEY (c)"],
+      // Snowflake-specific INSERT / TRUNCATE variants
+      ["INSERT OVERWRITE", "INSERT OVERWRITE INTO t SELECT 1"],
+      ["TRUNCATE TABLE IF EXISTS", "TRUNCATE TABLE IF EXISTS t"],
     ];
 
     for (const [label, sql] of silentCases) {
