@@ -10,7 +10,7 @@
 
 import { useState, useEffect } from "react";
 import { Modal, Spin, Button, Input, InputNumber, Switch, message } from "antd";
-import { CopyOutlined, EditOutlined, CheckOutlined, CloseOutlined } from "@ant-design/icons";
+import { CopyOutlined, EditOutlined, CheckOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { main } from "../../../wailsjs/go/models";
 import { GetColumnComments, SetColumnComment, GetTableSettings, AlterTableProperty } from "../../../wailsjs/go/main/App";
@@ -331,6 +331,10 @@ function TableSettingsSection({ db, schema, table }: { db: string; schema: strin
 
 export default function PropertiesModal({ title, rows, error, onClose, tableContext }: Props) {
   const loading = rows === null && !error;
+  const [search, setSearch] = useState("");
+  const q = search.trim().toLowerCase();
+
+  const filteredRows = rows ? (q ? rows.filter((r) => r.key.toLowerCase().includes(q)) : rows) : null;
 
   const copyAll = () => {
     if (!rows) return;
@@ -370,6 +374,18 @@ export default function PropertiesModal({ title, rows, error, onClose, tableCont
         </div>
       )}
 
+      {rows && rows.length > 0 && (
+        <Input
+          prefix={<SearchOutlined style={{ color: "var(--text-faint)" }} />}
+          placeholder="Search by name…"
+          allowClear
+          autoFocus
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ marginBottom: 12 }}
+        />
+      )}
+
       {rows && rows.length === 0 && !error && (
         <div style={{ color: "var(--text-muted)", fontSize: 13, padding: 8 }}>
           No properties found.
@@ -377,10 +393,10 @@ export default function PropertiesModal({ title, rows, error, onClose, tableCont
       )}
 
       <div style={{ maxHeight: "65vh", overflowY: "auto" }}>
-        {rows && rows.length > 0 && (
+        {filteredRows && filteredRows.length > 0 && (
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <tbody>
-              {rows.map((row) => (
+              {filteredRows.map((row) => (
                 <tr
                   key={row.key}
                   style={{ borderBottom: "1px solid var(--border)" }}
@@ -413,6 +429,12 @@ export default function PropertiesModal({ title, rows, error, onClose, tableCont
               ))}
             </tbody>
           </table>
+        )}
+
+        {filteredRows && filteredRows.length === 0 && q && (
+          <div style={{ color: "var(--text-muted)", fontSize: 12, padding: "4px 0 8px" }}>
+            No matches.
+          </div>
         )}
 
         {tableContext && <TableSettingsSection {...tableContext} />}

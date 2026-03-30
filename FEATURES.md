@@ -151,7 +151,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 - **Empty table indicator** — table names with zero rows appear in a faded colour so unpopulated tables are immediately visible in the tree
 - **Hover tooltips** — hovering any object in the tree shows its DDL definition
 - **View Definition** — opens the DDL in a modal with a Copy button
-- **Properties** — opens a key/value panel of object metadata populated from the relevant `SHOW` command; for tables the panel additionally provides two inline-editable sections:
+- **Properties** — opens a key/value panel of object metadata populated from the relevant `SHOW` command; a search bar at the top filters properties by name in real time; for tables the panel additionally provides two inline-editable sections:
   - **Table Settings** — view and edit cluster key, schema evolution, change tracking, data retention days, max data extension days, default DDL collation, and comment; booleans are toggled with a switch, numeric and text fields open an inline input with Save / Cancel; changes are applied immediately via `ALTER TABLE SET`
   - **Column Comments** — view and edit the comment on every column; each row shows the column name, its current comment (or a dash if empty), and a pencil icon to edit inline
   - For **tasks** the Properties entry opens the full Task Properties modal described above instead of the generic read-only panel
