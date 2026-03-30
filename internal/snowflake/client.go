@@ -584,6 +584,9 @@ type SessionContext struct {
 }
 
 // GetSessionContext returns the currently active role, warehouse, database, and schema.
+// It also syncs the connector state so that UseSchema/UseWarehouse always use the
+// correct database and schema context, even after USE commands run in the SQL editor
+// bypassed the UseDatabase/UseSchema IPC methods.
 func (c *Client) GetSessionContext(ctx context.Context) (SessionContext, error) {
 	row := c.db.QueryRowContext(ctx,
 		"SELECT CURRENT_ROLE(), CURRENT_WAREHOUSE(), CURRENT_DATABASE(), CURRENT_SCHEMA()")
@@ -591,6 +594,10 @@ func (c *Client) GetSessionContext(ctx context.Context) (SessionContext, error) 
 	if err := row.Scan(&sc.Role, &sc.Warehouse, &sc.Database, &sc.Schema); err != nil {
 		return SessionContext{}, err
 	}
+	c.connector.mu.Lock()
+	c.connector.db = sc.Database
+	c.connector.sc = sc.Schema
+	c.connector.mu.Unlock()
 	return sc, nil
 }
 

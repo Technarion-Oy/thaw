@@ -15,7 +15,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - Switch role, warehouse, database, or schema from the query toolbar without reconnecting
 - Role dropdown shows only roles the current user can actually `USE ROLE` to — not all account-visible roles
 - Schema dropdown lists only schemas belonging to the currently selected database; resets automatically when the database is switched
-- After any `USE` command runs in the editor, all four toolbar dropdowns (role, warehouse, database, schema) update automatically to reflect the new session state
+- After any `USE` command runs in the editor, all four toolbar dropdowns (role, warehouse, database, schema) update automatically to reflect the new session state; the internal connection context is also synced so subsequent toolbar dropdown selections always target the correct database — no "Object does not exist" errors from stale context
 - **Current username** — the active Snowflake username (from `SELECT CURRENT_USER()`, preserving the exact case Snowflake stores) is displayed above the toolbar session selectors and above the account · user tag so the connected identity is always visible at a glance
 
 ### SQL editor
