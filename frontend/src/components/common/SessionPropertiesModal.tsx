@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useState } from "react";
-import { Modal, Spin, Button, Input, Switch, message } from "antd";
+import { Modal, Spin, Button, Input, Switch, Tooltip, message } from "antd";
 import { CopyOutlined, EditOutlined, CheckOutlined, CloseOutlined } from "@ant-design/icons";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { main } from "../../../wailsjs/go/models";
@@ -109,7 +109,11 @@ function ParamsTable({
           const isEditing = editKey === row.key;
           return (
             <tr key={row.key} style={{ borderBottom: "1px solid var(--border)" }}>
-              <td style={LABEL_CELL} title={row.description || undefined}>{row.key}</td>
+              <td style={LABEL_CELL}>
+                <Tooltip title={row.description || undefined} placement="right" mouseEnterDelay={0.3}>
+                  <span style={{ cursor: "help", borderBottom: "1px dotted var(--text-muted)" }}>{row.key}</span>
+                </Tooltip>
+              </td>
               <td style={VALUE_CELL}>
                 {isBool(row.type) ? (
                   <Switch
