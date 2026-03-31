@@ -1039,12 +1039,12 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
                     key: "add-finalizer",
                     icon: <FlagOutlined />,
                     label: ctxMenu.isFinalizer
-                      ? "Add Finalizer Task… (not for finalizers)"
+                      ? "Create Finalizer Task… (not for finalizers)"
                       : ctxMenu.name.toUpperCase() !== rootUpperRef.current
-                      ? "Add Finalizer Task… (root only)"
+                      ? "Create Finalizer Task… (root only)"
                       : rootHasFinalizer
-                      ? "Add Finalizer Task… (already has one)"
-                      : "Add Finalizer Task…",
+                      ? "Create Finalizer Task… (already has one)"
+                      : "Create Finalizer Task…",
                     disabled: ctxMenu.isFinalizer || ctxMenu.name.toUpperCase() !== rootUpperRef.current || rootHasFinalizer,
                     onClick: () => {
                       if (ctxMenu.isFinalizer || ctxMenu.name.toUpperCase() !== rootUpperRef.current || rootHasFinalizer) return;

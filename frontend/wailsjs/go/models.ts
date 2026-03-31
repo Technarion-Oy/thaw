@@ -819,6 +819,20 @@ export namespace main {
 	        this.comment = source["comment"];
 	    }
 	}
+	export class TaskFinalizabilityRow {
+	    name: string;
+	    disabledReason: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TaskFinalizabilityRow(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.disabledReason = source["disabledReason"];
+	    }
+	}
 	export class TaskStatusRow {
 	    name: string;
 	    taskState: string;

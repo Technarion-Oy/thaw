@@ -8,7 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Modal, Spin, Button, Input, InputNumber, Select, AutoComplete, Tag, Space,
   Typography, Tooltip, message, Alert,
@@ -338,7 +338,7 @@ function MultilineRow({ label, value, onSave, onUnset, unsetLabel = "Remove" }: 
 
 interface FinalizeRowProps {
   value:                  string;
-  options:                { label: string; value: string }[];
+  options:                { label: React.ReactNode; value: string; disabled?: boolean }[];
   currentTaskHasChildren: boolean;
   onSave:                 (val: string) => Promise<void>;
   onUnset:                () => Promise<void>;
@@ -397,7 +397,7 @@ function FinalizeTaskRow({ value, options, currentTaskHasChildren, onSave, onUns
                   (opt?.value ?? "").toLowerCase().includes(input.toLowerCase())
                 }
                 style={{ flex: 1, fontFamily: "monospace", fontSize: 12 }}
-                placeholder={options.length > 0 ? "Select or type a standalone task…" : "Task name…"}
+                placeholder={options.length > 0 ? "Select or type a task name…" : "Task name…"}
                 autoFocus
               />
               <Button size="small" type="primary" icon={<CheckOutlined />} loading={saving} onClick={save} />
@@ -410,8 +410,8 @@ function FinalizeTaskRow({ value, options, currentTaskHasChildren, onSave, onUns
             )}
             <div style={{ fontSize: 11, color: "var(--text-faint)", paddingLeft: 2 }}>
               {options.length > 0
-                ? `${options.length} standalone task${options.length !== 1 ? "s" : ""} available — type to filter or enter any name`
-                : "No standalone tasks found in this schema — type a task name manually"}
+                ? "Greyed-out tasks are ineligible (hover for reason) — type to filter"
+                : "No tasks found in this schema — type a task name manually"}
             </div>
           </div>
         ) : (
@@ -461,35 +461,55 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
   const [schedEditKey,   setSchedEditKey]   = useState(0);
   const [schedSaving,    setSchedSaving]    = useState(false);
   const [schedError,     setSchedError]     = useState<string | null>(null);
-  const [rootTasks,           setRootTasks]           = useState<{ label: string; value: string }[]>([]);
+  const [rootTasks,           setRootTasks]           = useState<{ label: React.ReactNode; value: string; disabled?: boolean }[]>([]);
   const [hasChildren,         setHasChildren]         = useState(false);
   const [rootHasFinalizer,    setRootHasFinalizer]    = useState(false);
   const [showCreateFinalizer, setShowCreateFinalizer] = useState(false);
   const [finalizeTarget,      setFinalizeTarget]      = useState("");
+  const [allTaskRows,         setAllTaskRows]         = useState<main.TaskStatusRow[]>([]);
+  const [setFinalizerFor,     setSetFinalizerFor]     = useState("");
+  const [settingFinalizer,    setSettingFinalizer]    = useState(false);
+  const [setFinalizerError,   setSetFinalizerError]   = useState<string | null>(null);
+
+  const loadTaskStatuses = useCallback(() => {
+    GetTaskStatuses(db, schema)
+      .then((result) => {
+        const nameUpper = name.toUpperCase();
+        const rows = result.rows ?? [];
+        setAllTaskRows(rows);
+        setRootHasFinalizer(
+          rows.some((t) => t.finalize && extractName(t.finalize).toUpperCase() === nameUpper),
+        );
+        const own = rows.find((t) => t.name.toUpperCase() === nameUpper);
+        if (own?.finalize) setFinalizeTarget(own.finalize);
+        else setFinalizeTarget("");
+      })
+      .catch(() => {});
+  }, [db, schema, name]);
 
   useEffect(() => {
     ListNotificationIntegrations()
       .then((list) => setIntegrations((list ?? []).map((n) => ({ label: n, value: n }))))
       .catch(() => {});
     ListFinalizableTasks(db, schema)
-      .then((list) => setRootTasks((list ?? []).map((n) => ({ label: n, value: n }))))
+      .then((list) => setRootTasks((list ?? []).map((row) => ({
+        value: row.name,
+        disabled: !!row.disabledReason,
+        label: row.disabledReason ? (
+          <span>
+            {row.name}
+            <span style={{ color: "var(--text-faint)", fontSize: 11, marginLeft: 6 }}>
+              — {row.disabledReason}
+            </span>
+          </span>
+        ) : row.name,
+      }))))
       .catch(() => {});
     TaskHasChildren(db, schema, name)
       .then(setHasChildren)
       .catch(() => {});
-    GetTaskStatuses(db, schema)
-      .then((result) => {
-        const nameUpper = name.toUpperCase();
-        const rows = result.rows ?? [];
-        setRootHasFinalizer(
-          rows.some((t) => t.finalize && extractName(t.finalize).toUpperCase() === nameUpper),
-        );
-        // For finalizer tasks: find this task's own row and capture its finalize value.
-        const own = rows.find((t) => t.name.toUpperCase() === nameUpper);
-        if (own?.finalize) setFinalizeTarget(own.finalize);
-      })
-      .catch(() => {});
-  }, [db, schema, name]);
+    loadTaskStatuses();
+  }, [db, schema, name, loadTaskStatuses]);
 
   // ── Data loading ────────────────────────────────────────────────────────────
 
@@ -669,6 +689,28 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
     !!finalizeValue ||
     finalizeInTaskRelations;
 
+  // ── "Set as Finalizer For" eligibility ──────────────────────────────────────
+  // Evaluated only when the task is NOT already a finalizer.
+  const thisTaskDisabledReason = isThisTaskAFinalizer ? "" : (() => {
+    if (predecessors.length > 0)  return "Already a child task (has predecessors)";
+    if (get("schedule"))          return "Has its own schedule";
+    if (hasChildren)              return "Has child tasks";
+    return "";
+  })();
+
+  // Root tasks that are eligible to receive this task as their finalizer:
+  // no predecessors, not itself a finalizer, and no finalizer assigned yet.
+  const finalizersForRoots = new Set(
+    allTaskRows.filter((t) => t.finalize).map((t) => extractName(t.finalize).toUpperCase()),
+  );
+  const eligibleRootTasks = isThisTaskAFinalizer ? [] : allTaskRows.filter((t) => {
+    const isBlank = (s: string) => !s || s === "[]" || s === "<nil>";
+    return isBlank(t.predecessors)
+      && !t.finalize
+      && !finalizersForRoots.has(t.name.toUpperCase())
+      && t.name.toUpperCase() !== name.toUpperCase();
+  });
+
   const hasTrigger =
     isThisTaskAFinalizer ||
     !!get("schedule") ||
@@ -718,6 +760,13 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
 
       {rows !== null && (
         <>
+          {/* ── Owner line ───────────────────────────────────────────────── */}
+          {get("owner") && (
+            <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 6 }}>
+              Owner: {get("owner")}
+            </Text>
+          )}
+
           {/* ── Status bar ───────────────────────────────────────────────── */}
           <div style={{
             display: "flex", alignItems: "center", gap: 12,
@@ -760,14 +809,9 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
                   disabled={rootHasFinalizer}
                   onClick={() => setShowCreateFinalizer(true)}
                 >
-                  Add Finalizer Task…
+                  Create Finalizer Task…
                 </Button>
               </Tooltip>
-            )}
-            {get("owner") && (
-              <Text type="secondary" style={{ fontSize: 12, marginLeft: "auto" }}>
-                Owner: {get("owner")}
-              </Text>
             )}
           </div>
 
@@ -938,11 +982,96 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
                   onSave={async (v) => {
                     const t = v.trim();
                     if (!t) await alter("UNSET FINALIZE");
-                    else await alter(`SET FINALIZE = ${t}`);
+                    else {
+                      // FINALIZE requires a fully-qualified task identifier.
+                      // If the user typed or selected a bare name, qualify it.
+                      const esc = (s: string) => s.replace(/"/g, '""');
+                      const qualified = (t.startsWith('"') || t.includes('.'))
+                        ? t
+                        : `"${esc(db)}"."${esc(schema)}"."${esc(t)}"`;
+                      await alter(`SET FINALIZE = ${qualified}`);
+                    }
                     await load();
+                    loadTaskStatuses();
                   }}
-                  onUnset={async () => { await alter("UNSET FINALIZE"); await load(); }}
+                  onUnset={async () => {
+                    await alter("UNSET FINALIZE");
+                    await load();
+                    loadTaskStatuses();
+                  }}
                 />
+              )}
+
+              {/* ── Set as Finalizer For — shown for non-finalizer tasks ── */}
+              {!isThisTaskAFinalizer && (
+                <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                  <td style={{ ...LABEL_TD, whiteSpace: "normal", verticalAlign: "top", paddingTop: 8 }}>
+                    <span>Set as Finalizer For</span>
+                    <div style={{ fontSize: 11, color: "var(--text-faint)", fontStyle: "italic", marginTop: 2, lineHeight: 1.3 }}>
+                      Run this task after a root task&apos;s graph completes
+                    </div>
+                  </td>
+                  <td style={{ padding: "6px 0", verticalAlign: "middle" }}>
+                    {thisTaskDisabledReason ? (
+                      <span style={{ fontSize: 12, color: "var(--text-faint)", fontStyle: "italic" }}>
+                        Not eligible — {thisTaskDisabledReason}
+                      </span>
+                    ) : eligibleRootTasks.length === 0 ? (
+                      <span style={{ fontSize: 12, color: "var(--text-faint)", fontStyle: "italic" }}>
+                        No root tasks available — all root tasks already have a finalizer
+                      </span>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <Select
+                            size="small"
+                            value={setFinalizerFor || undefined}
+                            onChange={setSetFinalizerFor}
+                            options={eligibleRootTasks.map((t) => ({ label: t.name, value: t.name }))}
+                            placeholder="Select a root task…"
+                            style={{ flex: 1, fontFamily: "monospace", fontSize: 12 }}
+                            showSearch
+                            filterOption={(input, opt) =>
+                              (opt?.value ?? "").toLowerCase().includes(input.toLowerCase())
+                            }
+                          />
+                          <Button
+                            size="small"
+                            type="primary"
+                            icon={<CheckOutlined />}
+                            loading={settingFinalizer}
+                            disabled={!setFinalizerFor}
+                            onClick={async () => {
+                              if (!setFinalizerFor) return;
+                              setSettingFinalizer(true);
+                              setSetFinalizerError(null);
+                              try {
+                                const esc = (s: string) => s.replace(/"/g, '""');
+                                await alter(`SET FINALIZE = "${esc(db)}"."${esc(schema)}"."${esc(setFinalizerFor)}"`);
+                                message.success(`${name} set as finalizer for ${setFinalizerFor}`);
+                                setSetFinalizerFor("");
+                                loadTaskStatuses();
+                              } catch (e) {
+                                const raw = String(e);
+                                const m = raw.match(/:\s*(.+)$/s);
+                                setSetFinalizerError(m ? m[0].trim() : raw);
+                              } finally {
+                                setSettingFinalizer(false);
+                              }
+                            }}
+                          >
+                            Set
+                          </Button>
+                        </div>
+                        {setFinalizerError && (
+                          <div style={{ color: "#f85149", fontSize: 11, fontFamily: "monospace", paddingLeft: 2 }}>
+                            {setFinalizerError}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>

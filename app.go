@@ -2128,6 +2128,14 @@ func (a *App) AlterTask(database, schema, name, clause string) error {
 	return err
 }
 
+// TaskFinalizabilityRow describes a task and whether it can serve as a finalizer.
+// DisabledReason is empty for eligible tasks; non-empty with a human-readable
+// explanation for tasks that cannot be finalizers.
+type TaskFinalizabilityRow struct {
+	Name           string `json:"name"`
+	DisabledReason string `json:"disabledReason"`
+}
+
 // TaskStatusRow holds the current state and last-run information for a single task.
 type TaskStatusRow struct {
 	Name         string `json:"name"`
@@ -2149,12 +2157,14 @@ type TaskStatusesResult struct {
 }
 
 // GetTaskStatuses returns the current state and last-run result for every task
-// ListFinalizableTasks returns the names of tasks that are valid candidates for
-// the FINALIZE clause: they must be completely standalone — no predecessors AND
-// no other task lists them as a predecessor (i.e. no child tasks).
+// ListFinalizableTasks returns every task in the schema along with an
+// eligibility verdict.  DisabledReason is empty for tasks that can be used as
+// a finalizer; non-empty with a short human-readable reason for tasks that
+// cannot (has predecessors, has a schedule, has child tasks, or is already a
+// finalizer for another root task).
 //
-// Snowflake requires that a finalizer task is not part of any task graph.
-func (a *App) ListFinalizableTasks(database, schema string) ([]string, error) {
+// Eligible tasks are returned first, ineligible tasks sorted after.
+func (a *App) ListFinalizableTasks(database, schema string) ([]TaskFinalizabilityRow, error) {
 	if a.client == nil {
 		return nil, ErrNotConnected
 	}
@@ -2180,21 +2190,30 @@ func (a *App) ListFinalizableTasks(database, schema string) ([]string, error) {
 		}
 	}
 
-	nameIdx, predsIdx := -1, -1
+	nameIdx, predsIdx, schedIdx, finalizeIdx := -1, -1, -1, -1
 	for i, col := range res.Columns {
 		switch strings.ToLower(col) {
 		case "name":
 			nameIdx = i
 		case "predecessors", "predecessor":
 			predsIdx = i
+		case "schedule":
+			schedIdx = i
+		case "finalize", "finalize_task":
+			finalizeIdx = i
 		}
 	}
 	if nameIdx < 0 {
 		return nil, nil
 	}
 
-	type taskRow struct{ name, preds string }
-	rows := make([]taskRow, 0, len(res.Rows))
+	type taskMeta struct {
+		name     string
+		preds    string
+		schedule string
+		finalize string
+	}
+	metas := make([]taskMeta, 0, len(res.Rows))
 	for _, row := range res.Rows {
 		name := ""
 		if nameIdx < len(row) {
@@ -2207,19 +2226,24 @@ func (a *App) ListFinalizableTasks(database, schema string) ([]string, error) {
 		if predsIdx >= 0 && predsIdx < len(row) {
 			preds = toString(row[predsIdx])
 		}
-		rows = append(rows, taskRow{name, preds})
+		sched := ""
+		if schedIdx >= 0 && schedIdx < len(row) {
+			sched = toString(row[schedIdx])
+		}
+		fin := ""
+		if finalizeIdx >= 0 && finalizeIdx < len(row) {
+			fin = toString(row[finalizeIdx])
+		}
+		metas = append(metas, taskMeta{name: name, preds: preds, schedule: sched, finalize: fin})
 	}
 
-	// Build the set of task names that appear as a predecessor of any other task
-	// (meaning those tasks have at least one child and cannot be finalizers).
-	hasChildren := make(map[string]bool, len(rows))
-	for _, r := range rows {
+	// Build the set of task names that appear as a predecessor of any other task.
+	hasChildren := make(map[string]bool, len(metas))
+	for _, r := range metas {
 		p := r.preds
 		if p == "" || p == "[]" || p == "<nil>" {
 			continue
 		}
-		// Strip surrounding brackets, split on comma, take the last dot-separated
-		// segment of each entry (the bare task name), normalised to upper case.
 		p = strings.TrimPrefix(p, "[")
 		p = strings.TrimSuffix(p, "]")
 		for _, part := range strings.Split(p, ",") {
@@ -2235,21 +2259,34 @@ func (a *App) ListFinalizableTasks(database, schema string) ([]string, error) {
 		}
 	}
 
-	// A valid finalizer task has no predecessors AND no children.
-	var out []string
-	for _, r := range rows {
-		isPredFree := r.preds == "" || r.preds == "[]" || r.preds == "<nil>"
-		if isPredFree && !hasChildren[strings.ToUpper(r.name)] {
-			out = append(out, r.name)
+	isBlank := func(s string) bool { return s == "" || s == "[]" || s == "<nil>" }
+
+	var eligible, disabled []TaskFinalizabilityRow
+	for _, r := range metas {
+		var reason string
+		switch {
+		case !isBlank(r.preds):
+			reason = "Already a child task (has predecessors)"
+		case r.schedule != "" && r.schedule != "null":
+			reason = "Has its own schedule"
+		case hasChildren[strings.ToUpper(r.name)]:
+			reason = "Has child tasks"
+		case r.finalize != "" && r.finalize != "null":
+			reason = "Already a finalizer for another task"
+		}
+		row := TaskFinalizabilityRow{Name: r.name, DisabledReason: reason}
+		if reason == "" {
+			eligible = append(eligible, row)
+		} else {
+			disabled = append(disabled, row)
 		}
 	}
-	return out, nil
+	return append(eligible, disabled...), nil
 }
 
-// ListRootTasks returns the names of root tasks (no predecessors) in the given
-// schema.  Kept for backwards compatibility; new callers should use
-// ListFinalizableTasks.
-func (a *App) ListRootTasks(database, schema string) ([]string, error) {
+// ListRootTasks returns task finalizability rows for the given schema.
+// Deprecated: use ListFinalizableTasks directly.
+func (a *App) ListRootTasks(database, schema string) ([]TaskFinalizabilityRow, error) {
 	return a.ListFinalizableTasks(database, schema)
 }
 

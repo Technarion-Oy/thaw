@@ -245,7 +245,7 @@ export function ListExportableDatabases():Promise<Array<string>>;
 
 export function ListExternalVolumes():Promise<Array<string>>;
 
-export function ListFinalizableTasks(arg1:string,arg2:string):Promise<Array<string>>;
+export function ListFinalizableTasks(arg1:string,arg2:string):Promise<Array<main.TaskFinalizabilityRow>>;
 
 export function ListIntegrations(arg1:string):Promise<Array<snowflake.IntegrationRow>>;
 
@@ -255,7 +255,7 @@ export function ListObjects(arg1:string,arg2:string):Promise<Array<snowflake.Sno
 
 export function ListRoles():Promise<Array<string>>;
 
-export function ListRootTasks(arg1:string,arg2:string):Promise<Array<string>>;
+export function ListRootTasks(arg1:string,arg2:string):Promise<Array<main.TaskFinalizabilityRow>>;
 
 export function ListSchemas(arg1:string):Promise<Array<string>>;
 
