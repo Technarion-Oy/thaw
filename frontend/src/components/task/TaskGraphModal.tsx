@@ -392,6 +392,10 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
   const [deleteAllConfirm, setDeleteAllConfirm] = useState(false);
   const [deletingTree, setDeletingTree] = useState(false);
 
+  // Single-task delete confirmation.
+  const [deleteTaskConfirm, setDeleteTaskConfirm] = useState<string | null>(null);
+  const [deletingTask, setDeletingTask] = useState(false);
+
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
@@ -814,6 +818,63 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
         />
       )}
 
+      {/* ── Single-task delete confirmation modal ────────────────────────── */}
+      {deleteTaskConfirm && (() => {
+        const escId = (s: string) => s.replace(/"/g, '""');
+        const isRoot = deleteTaskConfirm.toUpperCase() === rootUpperRef.current;
+        return (
+          <Modal
+            open
+            title={
+              <Space>
+                <DeleteOutlined style={{ color: "#ff4d4f" }} />
+                <span>Delete Task</span>
+              </Space>
+            }
+            okText="Delete"
+            okButtonProps={{ danger: true, loading: deletingTask }}
+            cancelButtonProps={{ disabled: deletingTask }}
+            onCancel={() => !deletingTask && setDeleteTaskConfirm(null)}
+            onOk={async () => {
+              setDeletingTask(true);
+              try {
+                // Suspend first if the task is currently STARTED.
+                const row = taskRows.find((t) => t.name.toUpperCase() === deleteTaskConfirm.toUpperCase());
+                if (row?.taskState?.toUpperCase() === "STARTED") {
+                  try { await AlterTask(db, schema, deleteTaskConfirm, "SUSPEND"); } catch { /* ignore */ }
+                }
+                await ExecDDL(
+                  `DROP TASK IF EXISTS "${escId(db)}"."${escId(schema)}"."${escId(deleteTaskConfirm)}"`,
+                );
+                message.success(`Task deleted: ${deleteTaskConfirm}`);
+                setDeleteTaskConfirm(null);
+                if (isRoot) {
+                  // Deleted the only task in this graph — close the modal.
+                  onClose();
+                } else {
+                  load();
+                }
+              } catch (err) {
+                message.error(String(err));
+              } finally {
+                setDeletingTask(false);
+              }
+            }}
+          >
+            <Text>
+              Permanently drop task <Text code>{deleteTaskConfirm}</Text> from{" "}
+              <Text code>{db}.{schema}</Text>?
+            </Text>
+            <Alert
+              style={{ marginTop: 12 }}
+              type="warning"
+              showIcon
+              message="This action cannot be undone."
+            />
+          </Modal>
+        );
+      })()}
+
       {/* ── Delete-all confirmation modal ─────────────────────────────────── */}
       {deleteAllConfirm && (() => {
         const escId = (s: string) => s.replace(/"/g, '""');
@@ -991,6 +1052,27 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
                       setCtxMenu(null);
                     },
                   },
+                  { type: "divider" as const },
+                  (() => {
+                    // A task can only be dropped if no other task lists it as a predecessor.
+                    const ctxUpper = ctxMenu.name.toUpperCase();
+                    const hasChildren = !ctxMenu.isFinalizer && taskRows.some((t) =>
+                      parsePredecessors(t.predecessors ?? "").some(
+                        (p) => extractName(p).toUpperCase() === ctxUpper,
+                      ),
+                    );
+                    return {
+                      key: "delete-task",
+                      icon: <DeleteOutlined />,
+                      danger: true,
+                      label: hasChildren ? "Delete Task… (remove child tasks first)" : "Delete Task…",
+                      disabled: hasChildren,
+                      onClick: () => {
+                        setDeleteTaskConfirm(ctxMenu.name);
+                        setCtxMenu(null);
+                      },
+                    };
+                  })(),
                 ]}
               />
             </div>
