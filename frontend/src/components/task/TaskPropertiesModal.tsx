@@ -366,13 +366,17 @@ function FinalizeTaskRow({ value, options, currentTaskHasChildren, onSave, onUns
 
   return (
     <tr style={{ borderBottom: "1px solid var(--border)" }}>
-      <td style={LABEL_TD}>Finalize Task</td>
+      <td style={{ ...LABEL_TD, whiteSpace: "normal", verticalAlign: "top", paddingTop: 8 }}>
+        <span>Finalizes root task</span>
+        <div style={{ fontSize: 11, color: "var(--text-faint)", fontStyle: "italic", marginTop: 2, lineHeight: 1.3 }}>
+          This task runs after the named root task&apos;s graph completes
+        </div>
+      </td>
       <td style={{ padding: "4px 0", verticalAlign: "middle" }}>
         {currentTaskHasChildren ? (
-          /* This task has child tasks — Snowflake does not allow a task that is
-             part of a graph (has successors) to act as a finalizer root.        */
+          /* Tasks with successors cannot themselves be finalizers */
           <span style={{ fontSize: 12, color: "var(--text-faint)", fontStyle: "italic" }}>
-            Not available — this task has child tasks
+            Not available — tasks with successors cannot be finalizers
           </span>
         ) : editing ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
