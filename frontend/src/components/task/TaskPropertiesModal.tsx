@@ -192,11 +192,12 @@ function EditRow({ label, value, type, options, min, hint, canUnset, onSave, onU
 
 interface PredecessorsProps {
   predecessors: string[];
-  onAdd:    (name: string) => Promise<void>;
-  onRemove: (name: string) => Promise<void>;
+  onAdd:     (name: string) => Promise<void>;
+  onRemove:  (name: string) => Promise<void>;
+  disabled?: boolean;
 }
 
-function PredecessorsList({ predecessors, onAdd, onRemove }: PredecessorsProps) {
+function PredecessorsList({ predecessors, onAdd, onRemove, disabled = false }: PredecessorsProps) {
   const [addVal, setAddVal] = useState("");
   const [adding, setAdding] = useState(false);
 
@@ -211,33 +212,39 @@ function PredecessorsList({ predecessors, onAdd, onRemove }: PredecessorsProps) 
 
   return (
     <tr style={{ borderBottom: "1px solid var(--border)" }}>
-      <td style={LABEL_TD}>Predecessors (AFTER)</td>
+      <td style={{ ...LABEL_TD, opacity: disabled ? 0.45 : 1 }}>Predecessors (AFTER)</td>
       <td style={{ padding: "6px 0", verticalAlign: "top" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          {predecessors.length === 0 && (
-            <span style={{ fontSize: 12, color: "var(--text-faint)", fontStyle: "italic" }}>—</span>
-          )}
-          {predecessors.map((p) => (
-            <div key={p} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ fontFamily: "monospace", fontSize: 12, flex: 1 }}>{p}</span>
-              <Button size="small" type="text" danger icon={<DeleteOutlined />}
-                title={`REMOVE AFTER ${p}`}
-                onClick={async () => {
-                  try { await onRemove(p); }
-                  catch (e) { message.error(String(e)); }
-                }} />
+        {disabled ? (
+          <span style={{ fontSize: 12, color: "var(--text-faint)", fontStyle: "italic" }}>
+            Not available — tasks with a finalizer cannot have predecessors
+          </span>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {predecessors.length === 0 && (
+              <span style={{ fontSize: 12, color: "var(--text-faint)", fontStyle: "italic" }}>—</span>
+            )}
+            {predecessors.map((p) => (
+              <div key={p} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontFamily: "monospace", fontSize: 12, flex: 1 }}>{p}</span>
+                <Button size="small" type="text" danger icon={<DeleteOutlined />}
+                  title={`REMOVE AFTER ${p}`}
+                  onClick={async () => {
+                    try { await onRemove(p); }
+                    catch (e) { message.error(String(e)); }
+                  }} />
+              </div>
+            ))}
+            <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+              <Input size="small" value={addVal}
+                placeholder="task name to add…"
+                onChange={(e) => setAddVal(e.target.value)}
+                onPressEnter={doAdd}
+                style={{ fontFamily: "monospace", fontSize: 12, flex: 1 }} />
+              <Button size="small" icon={<PlusOutlined />} loading={adding} onClick={doAdd}
+                type="primary" ghost>ADD AFTER</Button>
             </div>
-          ))}
-          <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-            <Input size="small" value={addVal}
-              placeholder="task name to add…"
-              onChange={(e) => setAddVal(e.target.value)}
-              onPressEnter={doAdd}
-              style={{ fontFamily: "monospace", fontSize: 12, flex: 1 }} />
-            <Button size="small" icon={<PlusOutlined />} loading={adding} onClick={doAdd}
-              type="primary" ghost>ADD AFTER</Button>
           </div>
-        </div>
+        )}
       </td>
     </tr>
   );
@@ -921,6 +928,7 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
                 predecessors={predecessors}
                 onAdd={addAfter}
                 onRemove={removeAfter}
+                disabled={rootHasFinalizer}
               />
               {isThisTaskAFinalizer && (
                 <FinalizeTaskRow
