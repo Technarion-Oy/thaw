@@ -628,17 +628,22 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
   // as the authoritative signal rather than trying to parse SHOW TASKS columns
   // that may not expose the FINALIZE property in all Snowflake editions.
   const taskRelations = get("task_relations");
-  const finalizeInTaskRelations = (() => {
-    if (!taskRelations || taskRelations === "null") return false;
-    try { const r = JSON.parse(taskRelations); return !!(r?.finalize || r?.finalize_task); }
-    catch { return taskRelations.toLowerCase().includes("finalize"); }
+  const finalizeFromTaskRelations = (() => {
+    if (!taskRelations || taskRelations === "null") return "";
+    try { const r = JSON.parse(taskRelations); return (r?.finalize || r?.finalize_task) as string || ""; }
+    catch { return ""; }
   })();
+  const finalizeInTaskRelations = !!finalizeFromTaskRelations ||
+    (!finalizeFromTaskRelations && taskRelations?.toLowerCase().includes("finalize"));
+
+  // Resolved finalize value: prefer direct columns, fall back to task_relations JSON.
+  const finalizeValue = get("finalize") || get("finalize_task") || finalizeFromTaskRelations;
   // True when this task IS a finalizer: the isFinalizer prop (sidebar-detected via
   // GET_DDL) is the primary signal; the actual finalize/task_relations properties
   // are fallbacks for cases where the prop was not set.
   const isThisTaskAFinalizer =
     isFinalizer ||
-    !!(get("finalize") || get("finalize_task")) ||
+    !!finalizeValue ||
     finalizeInTaskRelations;
 
   const hasTrigger =
@@ -903,7 +908,7 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
               />
               {isThisTaskAFinalizer && (
                 <FinalizeTaskRow
-                  value={get("finalize") || get("finalize_task")}
+                  value={finalizeValue}
                   options={rootTasks}
                   currentTaskHasChildren={hasChildren}
                   onSave={async (v) => {
