@@ -633,12 +633,18 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
     try { const r = JSON.parse(taskRelations); return !!(r?.finalize || r?.finalize_task); }
     catch { return taskRelations.toLowerCase().includes("finalize"); }
   })();
-  const hasTrigger =
+  // True when this task IS a finalizer: the isFinalizer prop (sidebar-detected via
+  // GET_DDL) is the primary signal; the actual finalize/task_relations properties
+  // are fallbacks for cases where the prop was not set.
+  const isThisTaskAFinalizer =
     isFinalizer ||
+    !!(get("finalize") || get("finalize_task")) ||
+    finalizeInTaskRelations;
+
+  const hasTrigger =
+    isThisTaskAFinalizer ||
     !!get("schedule") ||
     predecessors.length > 0 ||
-    !!(get("finalize") || get("finalize_task")) ||
-    finalizeInTaskRelations ||
     !!(get("condition") || get("condition_text"));
 
   // ── Overlap policy ────────────────────────────────────────────────────────
@@ -718,7 +724,7 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
             >
               {isStarted ? "Suspend Graph" : "Resume Graph"}
             </Button>
-            {!isFinalizer && predecessors.length === 0 && (
+            {!isThisTaskAFinalizer && predecessors.length === 0 && (
               <Tooltip title={rootHasFinalizer ? "This task graph already has a finalizer" : undefined}>
                 <Button
                   size="small"
@@ -895,18 +901,20 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
                 onAdd={addAfter}
                 onRemove={removeAfter}
               />
-              <FinalizeTaskRow
-                value={get("finalize") || get("finalize_task")}
-                options={rootTasks}
-                currentTaskHasChildren={hasChildren}
-                onSave={async (v) => {
-                  const t = v.trim();
-                  if (!t) await alter("UNSET FINALIZE");
-                  else await alter(`SET FINALIZE = ${t}`);
-                  await load();
-                }}
-                onUnset={async () => { await alter("UNSET FINALIZE"); await load(); }}
-              />
+              {isThisTaskAFinalizer && (
+                <FinalizeTaskRow
+                  value={get("finalize") || get("finalize_task")}
+                  options={rootTasks}
+                  currentTaskHasChildren={hasChildren}
+                  onSave={async (v) => {
+                    const t = v.trim();
+                    if (!t) await alter("UNSET FINALIZE");
+                    else await alter(`SET FINALIZE = ${t}`);
+                    await load();
+                  }}
+                  onUnset={async () => { await alter("UNSET FINALIZE"); await load(); }}
+                />
+              )}
             </tbody>
           </table>
 
