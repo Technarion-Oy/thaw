@@ -628,13 +628,25 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
   // as the authoritative signal rather than trying to parse SHOW TASKS columns
   // that may not expose the FINALIZE property in all Snowflake editions.
   const taskRelations = get("task_relations");
-  const finalizeFromTaskRelations = (() => {
-    if (!taskRelations || taskRelations === "null") return "";
-    try { const r = JSON.parse(taskRelations); return (r?.finalize || r?.finalize_task) as string || ""; }
-    catch { return ""; }
+  // Parse task_relations once; extract the finalizer root-task name if present.
+  // The string-search fallback (.includes("finalize")) is only used when JSON
+  // parsing itself fails — NOT when parsing succeeds but has no finalize field,
+  // because a root task's task_relations JSON may contain a null "finalize" key
+  // that would otherwise trigger a false positive.
+  const { finalizeFromTaskRelations, finalizeInTaskRelations } = (() => {
+    if (!taskRelations || taskRelations === "null")
+      return { finalizeFromTaskRelations: "", finalizeInTaskRelations: false };
+    try {
+      const r = JSON.parse(taskRelations);
+      const val = String(r?.finalize || r?.finalize_task || "");
+      return { finalizeFromTaskRelations: val, finalizeInTaskRelations: !!val };
+    } catch {
+      return {
+        finalizeFromTaskRelations: "",
+        finalizeInTaskRelations: taskRelations.toLowerCase().includes("finalize"),
+      };
+    }
   })();
-  const finalizeInTaskRelations = !!finalizeFromTaskRelations ||
-    (!finalizeFromTaskRelations && taskRelations?.toLowerCase().includes("finalize"));
 
   // Resolved finalize value: prefer direct columns, fall back to task_relations JSON.
   const finalizeValue = get("finalize") || get("finalize_task") || finalizeFromTaskRelations;
