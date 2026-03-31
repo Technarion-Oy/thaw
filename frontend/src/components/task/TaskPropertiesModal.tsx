@@ -458,6 +458,7 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
   const [hasChildren,         setHasChildren]         = useState(false);
   const [rootHasFinalizer,    setRootHasFinalizer]    = useState(false);
   const [showCreateFinalizer, setShowCreateFinalizer] = useState(false);
+  const [finalizeTarget,      setFinalizeTarget]      = useState("");
 
   useEffect(() => {
     ListNotificationIntegrations()
@@ -472,11 +473,13 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
     GetTaskStatuses(db, schema)
       .then((result) => {
         const nameUpper = name.toUpperCase();
+        const rows = result.rows ?? [];
         setRootHasFinalizer(
-          (result.rows ?? []).some(
-            (t) => t.finalize && extractName(t.finalize).toUpperCase() === nameUpper,
-          ),
+          rows.some((t) => t.finalize && extractName(t.finalize).toUpperCase() === nameUpper),
         );
+        // For finalizer tasks: find this task's own row and capture its finalize value.
+        const own = rows.find((t) => t.name.toUpperCase() === nameUpper);
+        if (own?.finalize) setFinalizeTarget(own.finalize);
       })
       .catch(() => {});
   }, [db, schema, name]);
@@ -648,8 +651,9 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
     }
   })();
 
-  // Resolved finalize value: prefer direct columns, fall back to task_relations JSON.
-  const finalizeValue = get("finalize") || get("finalize_task") || finalizeFromTaskRelations;
+  // Resolved finalize value: GetTaskStatuses is the most reliable source (same data
+  // used by the task graph); fall back to direct columns and task_relations JSON.
+  const finalizeValue = finalizeTarget || get("finalize") || get("finalize_task") || finalizeFromTaskRelations;
   // True when this task IS a finalizer: the isFinalizer prop (sidebar-detected via
   // GET_DDL) is the primary signal; the actual finalize/task_relations properties
   // are fallbacks for cases where the prop was not set.
