@@ -11,13 +11,14 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Modal, Spin, Button, Input, InputNumber, Select, AutoComplete, Tag, Space,
-  Typography, message, Alert,
+  Typography, Tooltip, message, Alert,
 } from "antd";
 import {
   ClockCircleOutlined, EditOutlined, CheckOutlined, CloseOutlined,
-  PlayCircleOutlined, PauseCircleOutlined, PlusOutlined, DeleteOutlined,
+  PlayCircleOutlined, PauseCircleOutlined, PlusOutlined, DeleteOutlined, FlagOutlined,
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterTask, ListNotificationIntegrations, ListFinalizableTasks, TaskHasChildren, GetTaskStatuses, SuspendTaskList, ResumeTaskList } from "../../../wailsjs/go/main/App";
+import CreateTaskModal from "./CreateTaskModal";
 import type { main } from "../../../wailsjs/go/models";
 import { parsePredecessors as parsePredecessorsUtil, extractName } from "../../utils/taskHierarchy";
 import WhenConditionBuilder from "./WhenConditionBuilder";
@@ -449,8 +450,10 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
   const [schedEditKey,   setSchedEditKey]   = useState(0);
   const [schedSaving,    setSchedSaving]    = useState(false);
   const [schedError,     setSchedError]     = useState<string | null>(null);
-  const [rootTasks,        setRootTasks]        = useState<{ label: string; value: string }[]>([]);
-  const [hasChildren,      setHasChildren]      = useState(false);
+  const [rootTasks,           setRootTasks]           = useState<{ label: string; value: string }[]>([]);
+  const [hasChildren,         setHasChildren]         = useState(false);
+  const [rootHasFinalizer,    setRootHasFinalizer]    = useState(false);
+  const [showCreateFinalizer, setShowCreateFinalizer] = useState(false);
 
   useEffect(() => {
     ListNotificationIntegrations()
@@ -462,7 +465,17 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
     TaskHasChildren(db, schema, name)
       .then(setHasChildren)
       .catch(() => {});
-  }, [db, schema]);
+    GetTaskStatuses(db, schema)
+      .then((result) => {
+        const nameUpper = name.toUpperCase();
+        setRootHasFinalizer(
+          (result.rows ?? []).some(
+            (t) => t.finalize && extractName(t.finalize).toUpperCase() === nameUpper,
+          ),
+        );
+      })
+      .catch(() => {});
+  }, [db, schema, name]);
 
   // ── Data loading ────────────────────────────────────────────────────────────
 
@@ -638,6 +651,7 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
   // ─────────────────────────────────────────────────────────────────────────────
 
   return (
+    <>
     <Modal
       open
       title={
@@ -700,6 +714,18 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
             >
               {isStarted ? "Suspend Graph" : "Resume Graph"}
             </Button>
+            {!isFinalizer && predecessors.length === 0 && (
+              <Tooltip title={rootHasFinalizer ? "This task graph already has a finalizer" : undefined}>
+                <Button
+                  size="small"
+                  icon={<FlagOutlined />}
+                  disabled={rootHasFinalizer}
+                  onClick={() => setShowCreateFinalizer(true)}
+                >
+                  Add Finalizer Task…
+                </Button>
+              </Tooltip>
+            )}
             {get("owner") && (
               <Text type="secondary" style={{ fontSize: 12, marginLeft: "auto" }}>
                 Owner: {get("owner")}
@@ -1049,5 +1075,20 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
         </>
       )}
     </Modal>
+
+    {showCreateFinalizer && (
+      <CreateTaskModal
+        db={db}
+        schema={schema}
+        mode="finalizer"
+        finalizerForTask={name}
+        onClose={() => setShowCreateFinalizer(false)}
+        onSuccess={() => {
+          setShowCreateFinalizer(false);
+          setRootHasFinalizer(true);
+        }}
+      />
+    )}
+    </>
   );
 }
