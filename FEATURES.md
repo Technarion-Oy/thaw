@@ -89,7 +89,9 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
     - **Type conversion** — detects data type mismatches and offers an **Add CAST** button to automatically wrap the source value in a `CAST` expression
     - **Nullability validation** — warns when a nullable source column is mapped to a `NOT NULL` target column; provides an **Add COALESCE** button to inject a `COALESCE` with a type-appropriate default value (e.g. `0`, `FALSE`, `''`, or `CURRENT_TIMESTAMP()`)
     - **Constant values** — map target columns to `NULL` or custom constant literals
-    - **Live SQL preview** — clicking **Generate SQL** creates a complete `INSERT INTO ... SELECT ...` statement in a new tab for review and execution
+    - **Formatted SQL output** — the generated `INSERT INTO … SELECT` statement places each column and each source expression on its own indented line for readability
+    - **Quote identifiers toggle** — on by default; when switched off, double-quotes are omitted for identifiers that are structurally safe (match `^[a-zA-Z_][a-zA-Z0-9_$]*$`), not a Snowflake reserved keyword, and all-uppercase (i.e. were not originally created with a quoted, mixed-case or lowercase name); Snowflake reserved keywords (`START`, `END`, `FAIL`, `MAX`, `MIN`, and others) and case-sensitive names (any identifier containing lowercase letters) are always double-quoted regardless of the toggle setting
+    - **Generate SQL** — clicking **Generate SQL** opens a new tab with the complete statement for review and execution
   - **Insert Full Name** — insert the fully-qualified `"DB"."SCHEMA"."OBJECT"` identifier at the cursor
   - View DDL definition inline
   - **Rename** the object
