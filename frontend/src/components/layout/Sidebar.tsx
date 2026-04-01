@@ -380,6 +380,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [loaded, setLoaded]         = useState(false);
 
   const [ctxMenu, setCtxMenu]     = useState<ContextMenu | null>(null);
+  const [selectedNodeKeys, setSelectedNodeKeys] = useState<Set<string>>(new Set());
   const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
   const [submenuDir, setSubmenuDir] = useState<"left" | "right">("right");
   const submenuTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1200,6 +1201,18 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     addInsertSource({ db, schema, name });
   };
 
+  const addSelectedAsInsertSources = () => {
+    selectedNodeKeys.forEach((key) => {
+      const parts  = key.split(":");
+      const db     = parts[1];
+      const schema = parts[2];
+      const name   = parts.slice(4).join(":");
+      addInsertSource({ db, schema, name });
+    });
+    setSelectedNodeKeys(new Set());
+    setCtxMenu(null);
+  };
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   const menuItem = (label: string, icon: React.ReactNode, onClick: () => void, color?: string) => (
@@ -1352,7 +1365,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           )}
 
           {treeData.length > 0 && (!searchQuery || displayData.length > 0) && (
-            <div style={{ overflowX: "auto" }}>
+            <div
+              style={{ overflowX: "auto" }}
+              onClick={(e) => {
+                // Clear multi-selection on any plain (non-modifier) click that
+                // bubbles up from the tree. Ctrl/Cmd+clicks on TABLE/VIEW nodes
+                // call stopPropagation() so they never reach this handler.
+                if (!e.ctrlKey && !e.metaKey && selectedNodeKeys.size > 0) {
+                  setSelectedNodeKeys(new Set());
+                }
+              }}
+            >
             <Tree
               treeData={displayData}
               onRightClick={onRightClick as any}
@@ -1401,6 +1424,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                     </ObjTooltip>
                   );
                   if (kind === "TABLE" || kind === "VIEW") {
+                    const isSelected    = selectedNodeKeys.has(key);
                     const isInsertSource =
                       insertTarget !== null &&
                       insertSources.some(
@@ -1415,17 +1439,22 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                           e.stopPropagation();
                         }}
                         onClick={(e) => {
-                          if ((e.ctrlKey || e.metaKey) && insertTarget) {
+                          if (e.ctrlKey || e.metaKey) {
                             e.stopPropagation();
-                            addInsertSource({ db, schema, name });
+                            setSelectedNodeKeys((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(key)) next.delete(key); else next.add(key);
+                              return next;
+                            });
                           }
                         }}
-                        style={isInsertSource ? {
-                          background: "color-mix(in srgb, var(--accent) 18%, transparent)",
-                          borderRadius: 3,
-                          outline: "1px solid var(--accent)",
-                          outlineOffset: 1,
-                        } : undefined}
+                        style={
+                          isSelected
+                            ? { background: "color-mix(in srgb, var(--accent) 22%, transparent)", borderRadius: 3, outline: "1px solid var(--accent)", outlineOffset: 1 }
+                            : isInsertSource
+                              ? { borderRadius: 3, outline: "1px dashed var(--accent)", outlineOffset: 1 }
+                              : undefined
+                        }
                       >
                         {tooltip}
                       </span>
@@ -1506,6 +1535,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Select for Insert Target", <SyncOutlined style={{ fontSize: 12 }} />, selectForInsertTarget)}
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") && insertTarget !== null &&
             menuItem(`Add as Insert Source for ${insertTarget.name}`, <SyncOutlined style={{ fontSize: 12, color: "var(--accent)" }} />, selectAsInsertSource)}
+          {selectedNodeKeys.size > 0 && insertTarget !== null &&
+            menuItem(
+              `Add ${selectedNodeKeys.size} selected as Insert Sources for ${insertTarget.name}`,
+              <SyncOutlined style={{ fontSize: 12, color: "var(--accent)" }} />,
+              addSelectedAsInsertSources,
+            )}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
             menuItem("Time Travel Query…", <HistoryOutlined style={{ fontSize: 12 }} />, openTimeTravelModal)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
