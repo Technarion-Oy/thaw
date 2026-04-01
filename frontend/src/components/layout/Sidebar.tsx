@@ -44,6 +44,7 @@ import {
   ShareAltOutlined,
   ExperimentOutlined,
   DashboardOutlined,
+  SyncOutlined,
 } from "@ant-design/icons";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
@@ -56,6 +57,7 @@ import { insertAtCursor } from "../editor/editorRef";
 import { useObjectStore } from "../../store/objectStore";
 import { useGitStore } from "../../store/gitStore";
 import { useDiffStore } from "../../store/diffStore";
+import { useInsertMappingStore } from "../../store/insertMappingStore";
 import AccountPanel from "../account/AccountPanel";
 import CallProcedureModal from "../procedure/CallProcedureModal";
 import ExecuteNotebookModal from "../notebook/ExecuteNotebookModal";
@@ -72,6 +74,7 @@ import ImportTableModal from "../export/ImportTableModal";
 import PropertiesModal from "../common/PropertiesModal";
 import BackupSetsModal from "../backup/BackupSetsModal";
 import DependenciesModal from "../lineage/DependenciesModal";
+import InsertMappingModal from "../database/InsertMappingModal";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 
 const { Text } = Typography;
@@ -424,6 +427,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const pendingDiff   = useDiffStore((s) => s.pending);
   const selectForComp = useDiffStore((s) => s.selectForComparison);
   const compareWith   = useDiffStore((s) => s.compareWith);
+
+  const insertTarget    = useInsertMappingStore((s) => s.target);
+  const setInsertTarget = useInsertMappingStore((s) => s.setTarget);
+  const setInsertSource = useInsertMappingStore((s) => s.setSource);
 
   // Close context menu on outside click
   useEffect(() => {
@@ -1173,6 +1180,25 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     });
   };
 
+  const selectForInsertTarget = () => {
+    if (!ctxMenu) return;
+    const { nodeKey } = ctxMenu;
+    const [, db, schema, , ...nameParts] = nodeKey.split(":");
+    const name = nameParts.join(":");
+    setCtxMenu(null);
+    setInsertTarget({ db, schema, name });
+    message.success(`Selected as insert target: ${name}`);
+  };
+
+  const selectAsInsertSource = () => {
+    if (!ctxMenu) return;
+    const { nodeKey } = ctxMenu;
+    const [, db, schema, , ...nameParts] = nodeKey.split(":");
+    const name = nameParts.join(":");
+    setCtxMenu(null);
+    setInsertSource({ db, schema, name });
+  };
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   const menuItem = (label: string, icon: React.ReactNode, onClick: () => void, color?: string) => (
@@ -1458,6 +1484,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)}
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
+            menuItem("Select for Insert Target", <SyncOutlined style={{ fontSize: 12 }} />, selectForInsertTarget)}
+          {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") && insertTarget !== null &&
+            menuItem(`Select as Insert Source for ${insertTarget.name}`, <SyncOutlined style={{ fontSize: 12, color: "var(--accent)" }} />, selectAsInsertSource)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
             menuItem("Time Travel Query…", <HistoryOutlined style={{ fontSize: 12 }} />, openTimeTravelModal)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
@@ -1936,6 +1966,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           onSuccess={() => refreshDatabaseByName(importModal.db)}
         />
       )}
+
+      <InsertMappingModal />
 
     </div>
   );

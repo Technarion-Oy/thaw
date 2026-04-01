@@ -1727,6 +1727,7 @@ func (c *Client) GetTableForeignKeys(ctx context.Context, database, schema, tabl
 type ColumnInfo struct {
 	Name     string `json:"name"`
 	DataType string `json:"dataType"` // e.g. "VARCHAR(256)", "NUMBER(38,0)"
+	Nullable bool   `json:"nullable"`
 }
 
 // GetTableColumnsWithTypes returns the ordered column list for a table or view
@@ -1741,7 +1742,7 @@ func (c *Client) GetTableColumnsWithTypes(ctx context.Context, database, schema,
 	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
-	idxs := colIndexMap(cols, "name", "type")
+	idxs := colIndexMap(cols, "name", "type", "null?")
 
 	var result []ColumnInfo
 	for rows.Next() {
@@ -1756,6 +1757,7 @@ func (c *Client) GetTableColumnsWithTypes(ctx context.Context, database, schema,
 		result = append(result, ColumnInfo{
 			Name:     n,
 			DataType: strVal(vals, idxs["type"]),
+			Nullable: strVal(vals, idxs["null?"]) == "Y",
 		})
 	}
 	return result, rows.Err()

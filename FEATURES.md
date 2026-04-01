@@ -83,6 +83,13 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Time Travel Query** — drag a timeline slider to query data at any past point within the retention window
   - **Export Data** — download table data as CSV, JSON, or Parquet via a temporary Snowflake stage
   - **Import Data** — upload one or more local files into Snowflake; supports CSV, JSON, AVRO, ORC, and Parquet; exposes all Snowflake `FORMAT_TYPE_OPTIONS` with defaults pre-filled; can create a new table automatically by inferring the schema; **file preview** for CSV and JSON shows the first 10 rows of up to 5 files — CSV offers **Parsed** (table respecting current delimiter and header settings) and **Raw** views; JSON offers **Parsed** (tabular, supports arrays-of-objects and NDJSON) and **Raw** views; multiple files shown in a tabbed layout; **✨ AI Suggest** button (CSV and JSON, requires AI configured) — clicking shows a confirmation dialog disclosing that up to 64 KB of file content will be sent to the configured AI provider and warning against use with sensitive data; on confirmation, format options (delimiter, header detection, quoting, encoding, compression, etc.) are auto-filled and a one-sentence AI explanation is shown; a ⓘ icon next to the button also surfaces the data-sharing notice on hover
+  - **Insert Mapping** — select a table as an **Insert Target** and another table or view as an **Insert Source** to open a column mapping dialog:
+    - **Auto-mapping** — automatically matches columns by name (case-insensitive)
+    - **Heuristic matches** — makes smart guesses based on table names and data types
+    - **Type conversion** — detects data type mismatches and offers an **Add CAST** button to automatically wrap the source value in a `CAST` expression
+    - **Nullability validation** — warns when a nullable source column is mapped to a `NOT NULL` target column; provides an **Add COALESCE** button to inject a `COALESCE` with a type-appropriate default value (e.g. `0`, `FALSE`, `''`, or `CURRENT_TIMESTAMP()`)
+    - **Constant values** — map target columns to `NULL` or custom constant literals
+    - **Live SQL preview** — clicking **Generate SQL** creates a complete `INSERT INTO ... SELECT ...` statement in a new tab for review and execution
   - **Insert Full Name** — insert the fully-qualified `"DB"."SCHEMA"."OBJECT"` identifier at the cursor
   - View DDL definition inline
   - **Rename** the object
