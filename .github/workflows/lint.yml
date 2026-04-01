@@ -1,22 +1,9 @@
 name: Lint
 
 on:
-  push:
-    branches: ["main"]
-    paths:
-      - "**/*.go"
-      - "go.mod"
-      - "go.sum"
-      - ".golangci.yml"
-      - ".github/workflows/lint.yml"
-  pull_request:
-    branches: ["main"]
-    paths:
-      - "**/*.go"
-      - "go.mod"
-      - "go.sum"
-      - ".golangci.yml"
-      - ".github/workflows/lint.yml"
+  schedule:
+    - cron: "0 6 * * 1"  # Every Monday at 06:00 UTC
+  workflow_dispatch:
 
 jobs:
   golangci-lint:

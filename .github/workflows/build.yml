@@ -1,27 +1,14 @@
 name: Build Binaries
 
 on:
-  workflow_run:
-    workflows: ["Unit Tests"]
-    types: [completed]
-    branches: ["main"]
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
 
 jobs:
-  # Compute a 7-character short SHA once, shared across all platform builds.
-  prepare:
-    name: Compute short SHA
-    if: github.event.workflow_run.conclusion == 'success'
-    runs-on: ubuntu-latest
-    outputs:
-      short_sha: ${{ steps.sha.outputs.short_sha }}
-      full_sha: ${{ github.event.workflow_run.head_sha }}
-    steps:
-      - id: sha
-        run: echo "short_sha=$(echo '${{ github.event.workflow_run.head_sha }}' | cut -c1-7)" >> $GITHUB_OUTPUT
-
   build:
     name: Build — ${{ matrix.platform }}-${{ matrix.arch }}
-    needs: prepare
     strategy:
       fail-fast: false
       matrix:
@@ -42,8 +29,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare.outputs.full_sha }}
 
       - uses: actions/setup-go@v5
         with:
@@ -73,21 +58,21 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
-      # ── Rename / package output with commit hash ───────────────────────────
+      # ── Rename / package output with tag version ───────────────────────────
       - name: Package macOS app bundle
         if: matrix.platform == 'darwin'
         run: |
           cd build/bin
-          zip -r "thaw-${{ needs.prepare.outputs.short_sha }}-darwin-arm64.zip" thaw.app
+          zip -r "thaw-${{ github.ref_name }}-darwin-arm64.zip" thaw.app
 
       - name: Rename Windows binary
         if: matrix.platform == 'windows'
         shell: pwsh
-        run: Move-Item build/bin/thaw.exe "build/bin/thaw-${{ needs.prepare.outputs.short_sha }}-windows-amd64.exe"
+        run: Move-Item build/bin/thaw.exe "build/bin/thaw-${{ github.ref_name }}-windows-amd64.exe"
 
       - name: Rename Linux binary
         if: matrix.platform == 'linux'
-        run: mv build/bin/thaw "build/bin/thaw-${{ needs.prepare.outputs.short_sha }}-linux-amd64"
+        run: mv build/bin/thaw "build/bin/thaw-${{ github.ref_name }}-linux-amd64"
 
       # ── Store artifact ─────────────────────────────────────────────────────
       # Currently retained as a workflow artifact (30-day expiry).
@@ -95,8 +80,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: thaw-${{ needs.prepare.outputs.short_sha }}-${{ matrix.platform }}-${{ matrix.arch }}
-          path: build/bin/thaw-${{ needs.prepare.outputs.short_sha }}-*
+          name: thaw-${{ github.ref_name }}-${{ matrix.platform }}-${{ matrix.arch }}
+          path: build/bin/thaw-${{ github.ref_name }}-*
           retention-days: 30
           if-no-files-found: error
 
@@ -104,13 +89,13 @@ jobs:
       # Replace/supplement upload-artifact above with one of these options once
       # a permanent distribution target is chosen:
       #
-      # GitHub Releases (triggered by a version tag):
+      # GitHub Releases (attach binaries to the tag's release page):
       #   - uses: softprops/action-gh-release@v2
       #     with:
-      #       files: build/bin/thaw-${{ needs.prepare.outputs.short_sha }}-*
+      #       files: build/bin/thaw-${{ github.ref_name }}-*
       #
       # Amazon S3 / Cloudflare R2:
-      #   - run: aws s3 cp build/bin/thaw-${{ needs.prepare.outputs.short_sha }}-* s3://your-bucket/builds/
+      #   - run: aws s3 cp build/bin/thaw-${{ github.ref_name }}-* s3://your-bucket/builds/
       #     env:
       #       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       #       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
