@@ -429,6 +429,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const compareWith   = useDiffStore((s) => s.compareWith);
 
   const insertTarget    = useInsertMappingStore((s) => s.target);
+  const insertSources   = useInsertMappingStore((s) => s.sources);
   const setInsertTarget = useInsertMappingStore((s) => s.setTarget);
   const addInsertSource = useInsertMappingStore((s) => s.addSource);
 
@@ -1400,6 +1401,11 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                     </ObjTooltip>
                   );
                   if (kind === "TABLE" || kind === "VIEW") {
+                    const isInsertSource =
+                      insertTarget !== null &&
+                      insertSources.some(
+                        (s) => s.db === db && s.schema === schema && s.name === name,
+                      );
                     return (
                       <span
                         draggable
@@ -1408,6 +1414,18 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                           e.dataTransfer.effectAllowed = "copy";
                           e.stopPropagation();
                         }}
+                        onClick={(e) => {
+                          if ((e.ctrlKey || e.metaKey) && insertTarget) {
+                            e.stopPropagation();
+                            addInsertSource({ db, schema, name });
+                          }
+                        }}
+                        style={isInsertSource ? {
+                          background: "color-mix(in srgb, var(--accent) 18%, transparent)",
+                          borderRadius: 3,
+                          outline: "1px solid var(--accent)",
+                          outlineOffset: 1,
+                        } : undefined}
                       >
                         {tooltip}
                       </span>
