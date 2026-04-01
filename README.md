@@ -181,6 +181,8 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 
 ### Object browser (sidebar)
 - Browse databases → schemas → objects (tables, views, functions, procedures, notebooks, …)
+- **Multi-selection** — hold `⌘` (macOS) or `Ctrl` (Windows/Linux) and click anywhere on an object row to toggle selection; selected objects are highlighted row-wide; click any non-modifier area to clear the selection
+- **Batch deletion** — when multiple objects are selected, right-click any of them and choose **Delete N selected objects…** to drop all of them in one operation; a confirmation dialog lists all objects to be removed
 - **Filter objects** — type in the search box at the top of the sidebar to filter objects by name across all databases and schemas; the tree cascade-loads all schemas and objects automatically and collapses back to the database list when the search is cleared
 - **Refresh** button (`↺`) in the sidebar header reloads the entire database tree from Snowflake
 - **Create Database** button (**+**) in the Objects section header opens the Create Database dialog; also accessible by right-clicking any database node and choosing **Create Database…** — covers the full `CREATE DATABASE` syntax:

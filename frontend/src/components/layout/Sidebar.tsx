@@ -381,6 +381,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
 
   const [ctxMenu, setCtxMenu]     = useState<ContextMenu | null>(null);
   const [selectedNodeKeys, setSelectedNodeKeys] = useState<Set<string>>(new Set());
+  const [selectedNodeArgs, setSelectedNodeArgs] = useState<Map<string, string>>(new Map());
   const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
   const [submenuDir, setSubmenuDir] = useState<"left" | "right">("right");
   const submenuTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1210,7 +1211,70 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       addInsertSource({ db, schema, name });
     });
     setSelectedNodeKeys(new Set());
+    setSelectedNodeArgs(new Map());
     setCtxMenu(null);
+  };
+
+  const deleteSelectedObjects = () => {
+    const items = Array.from(selectedNodeKeys).map((key) => {
+      const parts = key.split(":");
+      return {
+        key,
+        db:   parts[1],
+        schema: parts[2],
+        kind: parts[3],
+        name: parts.slice(4).join(":"),
+        args: selectedNodeArgs.get(key) ?? "",
+      };
+    });
+    setSelectedNodeKeys(new Set());
+    setSelectedNodeArgs(new Map());
+    setCtxMenu(null);
+
+    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const buildDropSql = (db: string, schema: string, kind: string, name: string, args: string): string => {
+      const fullName = `${q(db)}.${q(schema)}.${q(name)}`;
+      switch (kind) {
+        case "TABLE":       return `DROP TABLE ${fullName};`;
+        case "VIEW":        return `DROP VIEW ${fullName};`;
+        case "SEQUENCE":    return `DROP SEQUENCE ${fullName};`;
+        case "STAGE":       return `DROP STAGE ${fullName};`;
+        case "STREAM":      return `DROP STREAM ${fullName};`;
+        case "TASK":        return `DROP TASK ${fullName};`;
+        case "FILE FORMAT": return `DROP FILE FORMAT ${fullName};`;
+        case "PIPE":        return `DROP PIPE ${fullName};`;
+        case "FUNCTION":    return `DROP FUNCTION ${fullName}(${args});`;
+        case "PROCEDURE":   return `DROP PROCEDURE ${fullName}(${args});`;
+        default:            return `DROP ${kind} ${fullName};`;
+      }
+    };
+
+    Modal.confirm({
+      title: `Drop ${items.length} objects?`,
+      content: (
+        <div>
+          <p style={{ marginBottom: 8 }}>This will permanently drop the following objects. This action cannot be undone.</p>
+          <ul style={{ margin: 0, paddingLeft: 20, maxHeight: 200, overflowY: "auto" }}>
+            {items.map((item) => (
+              <li key={item.key} style={{ fontFamily: "monospace", fontSize: 12 }}>
+                {item.kind}: {item.db}.{item.schema}.{item.name}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ),
+      okText: "Drop All",
+      okType: "danger",
+      cancelText: "Cancel",
+      onOk: async () => {
+        const affectedDbs = new Set<string>();
+        for (const item of items) {
+          await useQueryStore.getState().executeWith(buildDropSql(item.db, item.schema, item.kind, item.name, item.args));
+          affectedDbs.add(item.db);
+        }
+        affectedDbs.forEach((db) => refreshDatabaseByName(db));
+      },
+    });
   };
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -1369,16 +1433,43 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               style={{ overflowX: "auto" }}
               onClick={(e) => {
                 // Clear multi-selection on any plain (non-modifier) click that
-                // bubbles up from the tree. Ctrl/Cmd+clicks on TABLE/VIEW nodes
+                // bubbles up from the tree. Ctrl/Cmd+clicks on obj nodes
                 // call stopPropagation() so they never reach this handler.
                 if (!e.ctrlKey && !e.metaKey && selectedNodeKeys.size > 0) {
                   setSelectedNodeKeys(new Set());
+                  setSelectedNodeArgs(new Map());
                 }
               }}
             >
             <Tree
               treeData={displayData}
               onRightClick={onRightClick as any}
+              selectedKeys={Array.from(selectedNodeKeys)}
+              multiple
+              onSelect={(_keys, info) => {
+                const { nativeEvent, node } = info;
+                const key = String(node.key);
+                if (!key.startsWith("obj:")) return;
+
+                if (nativeEvent.ctrlKey || nativeEvent.metaKey) {
+                  nativeEvent.stopPropagation();
+                  setSelectedNodeKeys((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(key)) next.delete(key); else next.add(key);
+                    return next;
+                  });
+                  setSelectedNodeArgs((prev) => {
+                    const next = new Map(prev);
+                    if (next.has(key)) {
+                      next.delete(key);
+                    } else {
+                      const args = (node as any).arguments ?? "";
+                      if (args) next.set(key, args);
+                    }
+                    return next;
+                  });
+                }
+              }}
               expandedKeys={searchQuery ? searchExpandedKeys : expandedKeys}
               expandAction={"click" as any}
               motion={false as any}
@@ -1423,13 +1514,21 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                       </span>
                     </ObjTooltip>
                   );
+                  const isSelected = selectedNodeKeys.has(key);
+                  const isInsertSource =
+                    (kind === "TABLE" || kind === "VIEW") &&
+                    insertTarget !== null &&
+                    insertSources.some(
+                      (s) => s.db === db && s.schema === schema && s.name === name,
+                    );
+                  const selectionStyle: React.CSSProperties | undefined =
+                    isSelected
+                      ? { background: "color-mix(in srgb, var(--accent) 22%, transparent)", borderRadius: 3, outline: "1px solid var(--accent)", outlineOffset: 1 }
+                      : isInsertSource
+                        ? { borderRadius: 3, outline: "1px dashed var(--accent)", outlineOffset: 1 }
+                        : undefined;
+
                   if (kind === "TABLE" || kind === "VIEW") {
-                    const isSelected    = selectedNodeKeys.has(key);
-                    const isInsertSource =
-                      insertTarget !== null &&
-                      insertSources.some(
-                        (s) => s.db === db && s.schema === schema && s.name === name,
-                      );
                     return (
                       <span
                         draggable
@@ -1438,29 +1537,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                           e.dataTransfer.effectAllowed = "copy";
                           e.stopPropagation();
                         }}
-                        onClick={(e) => {
-                          if (e.ctrlKey || e.metaKey) {
-                            e.stopPropagation();
-                            setSelectedNodeKeys((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(key)) next.delete(key); else next.add(key);
-                              return next;
-                            });
-                          }
-                        }}
-                        style={
-                          isSelected
-                            ? { background: "color-mix(in srgb, var(--accent) 22%, transparent)", borderRadius: 3, outline: "1px solid var(--accent)", outlineOffset: 1 }
-                            : isInsertSource
-                              ? { borderRadius: 3, outline: "1px dashed var(--accent)", outlineOffset: 1 }
-                              : undefined
-                        }
+                        style={selectionStyle}
                       >
                         {tooltip}
                       </span>
                     );
                   }
-                  return tooltip;
+                  return (
+                    <span style={selectionStyle}>
+                      {tooltip}
+                    </span>
+                  );
                 }
                 return node.title as React.ReactNode;
               }}
@@ -1577,6 +1664,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Rename…", <EditOutlined style={{ fontSize: 12 }} />, renameObject)}
           {ctxMenu.nodeType === "obj" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
           {ctxMenu.nodeType === "obj" && menuItem("Delete…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, deleteObject, "#f85149")}
+          {selectedNodeKeys.size >= 2 && (
+            <>
+              <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+              {menuItem(
+                `Delete ${selectedNodeKeys.size} selected objects…`,
+                <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />,
+                deleteSelectedObjects,
+                "#f85149",
+              )}
+            </>
+          )}
         </div>
       )}
 

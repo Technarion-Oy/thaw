@@ -29,6 +29,9 @@ Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend +
 - **Modals**: Use `antd` `Modal` with `destroyOnClose`.
 - **Alerts**: `antd` `Alert` does **not** have a `size` property. Use `showIcon` and `message` (can be a `Space` or `Typography` block).
 - **Typography**: Use `Typography.Text` for consistent font styling.
+- **Tree Component**:
+    - To support row-wide interaction, use `blockNode` and handle selection in `onSelect`.
+    - **Gotcha**: In `onSelect(keys, info)`, the `info.event` is a string literal `"select"`. Use `info.nativeEvent` to access `ctrlKey`, `metaKey`, or `stopPropagation()`.
 
 ## 📋 Common Workflows
 ### Adding an IPC Method
@@ -39,6 +42,11 @@ Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend +
 ### Working with Query Tab
 - To open SQL in a new tab without running it: `useQueryStore.getState().loadInNewTab(sql)`.
 - To open and execute immediately: `useQueryStore.getState().executeInNewTab(sql)`.
+
+### Multi-Selection in Sidebar
+- Controlled via `selectedNodeKeys` state (Set of strings).
+- `Tree` component should have `selectedKeys={Array.from(selectedNodeKeys)}` and `multiple` props.
+- Logic for toggling selection resides in the `onSelect` handler (checking `nativeEvent.ctrlKey`/`metaKey`).
 
 ## ⚠️ Gotchas
 - **Logs**: `gosnowflake` driver logs errors to `slog.Default` even when caught.
