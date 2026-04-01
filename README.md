@@ -607,6 +607,12 @@ wails build
 
 The output binary is placed in `build/bin/`.
 
+**CI release builds** are triggered automatically by pushing a version tag to `main`. Artifacts for macOS (arm64), Windows (amd64), and Linux (amd64) are produced and named after the tag:
+
+```bash
+git tag v1.2.3 && git push origin v1.2.3
+```
+
 ---
 
 ## Project structure
@@ -1004,7 +1010,7 @@ role has at least `CREATE SCHEMA` and `CREATE TABLE` on that database.
 
 ## Code quality & security
 
-Three automated checks run on every push and pull request targeting `main` (triggered only when Go source or module files change). All three can also be run locally.
+Three automated checks run on a weekly schedule (every Monday at 06:00 UTC) and can also be triggered manually from the GitHub Actions UI. All three can also be run locally.
 
 ### golangci-lint — static analysis
 
@@ -1013,7 +1019,7 @@ Runs a curated set of linters: `errcheck`, `govet`, `staticcheck`, `ineffassign`
 ```bash
 # Install (pick one)
 brew install golangci-lint
-go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 
 # Run
 golangci-lint run ./...
