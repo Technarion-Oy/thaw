@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect } from "react";
-import { Modal, Table, Select, Input, Button, Space, Typography, Tag, Alert, message } from "antd";
+import { Modal, Table, Select, Input, Button, Space, Typography, Tag, Alert, message, Switch } from "antd";
 import { ArrowRightOutlined, SyncOutlined } from "@ant-design/icons";
 import { GetTableColumnsWithTypes } from "../../../wailsjs/go/main/App";
 import { snowflake } from "../../../wailsjs/go/models";
@@ -18,6 +18,39 @@ import { useQueryStore } from "../../store/queryStore";
 
 const { Text } = Typography;
 const { Option } = Select;
+
+// Identifiers that are structurally safe (no special chars / spaces)
+const SAFE_IDENT = /^[a-zA-Z_][a-zA-Z0-9_$]*$/;
+
+// Snowflake reserved keywords — must always be double-quoted when used as identifiers
+// Source: https://docs.snowflake.com/en/sql-reference/reserved-keywords
+const SNOWFLAKE_RESERVED = new Set([
+  "ACCOUNT", "ALL", "ALTER", "AND", "ANY", "AS",
+  "BETWEEN", "BY",
+  "CASE", "CAST", "CHECK", "COLUMN", "CONNECT", "CONNECTION", "CONSTRAINT",
+  "CREATE", "CROSS", "CURRENT", "CURRENT_DATE", "CURRENT_TIME",
+  "CURRENT_TIMESTAMP", "CURRENT_USER",
+  "DATABASE", "DELETE", "DISTINCT", "DROP",
+  "ELSE", "END", "EXISTS",
+  "FAIL", "FALSE", "FOLLOWING", "FOR", "FOREIGN", "FROM", "FULL",
+  "GRANT", "GROUP", "GSCLUSTER",
+  "HAVING",
+  "ILIKE", "IN", "INCREMENT", "INNER", "INSERT", "INTERSECT", "INTO", "IS", "ISSUE",
+  "JOIN",
+  "LATERAL", "LEFT", "LIKE", "LIMIT", "LOCALTIME", "LOCALTIMESTAMP",
+  "MAX", "MIN",
+  "MINUS",
+  "NATURAL", "NOT", "NULL",
+  "OF", "ON", "OR", "ORDER",
+  "PRECEDING", "PRIMARY",
+  "QUALIFY",
+  "REGEXP", "REVOKE", "RIGHT", "RLIKE", "ROW", "ROWS",
+  "SAMPLE", "SCHEMA", "SELECT", "SET", "SOME", "START",
+  "TABLE", "TABLESAMPLE", "THEN", "TO", "TRIGGER", "TRUE", "TRY_CAST",
+  "UNION", "UNIQUE", "UNPIVOT", "UPDATE", "USING",
+  "VALUES", "VIEW",
+  "WHEN", "WHENEVER", "WHERE", "WITH",
+]);
 
 interface ColumnMapping {
   targetCol: string;
@@ -33,6 +66,23 @@ export default function InsertMappingModal() {
   const [sourceCols, setSourceCols] = useState<snowflake.ColumnInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [mappings, setMappings] = useState<Record<string, ColumnMapping>>({});
+  const [quoteIdentifiers, setQuoteIdentifiers] = useState(true);
+
+  // Quote an identifier.
+  // When the toggle is off, quoting is skipped only when ALL of:
+  //   1. structurally safe (no spaces / special chars)
+  //   2. not a Snowflake reserved keyword
+  //   3. all-uppercase — Snowflake folds unquoted names to uppercase, so any
+  //      lowercase letter means the name was created with quotes and is
+  //      case-sensitive ("my_col" ≠ "MY_COL" ≠ my_col).
+  const q = (s: string) =>
+    quoteIdentifiers ||
+    !SAFE_IDENT.test(s) ||
+    SNOWFLAKE_RESERVED.has(s.toUpperCase()) ||
+    s !== s.toUpperCase()
+      ? `"${s.replace(/"/g, '""')}"`
+      : s;
+
 
   useEffect(() => {
     if (modalOpen && target && source) {
@@ -136,7 +186,7 @@ export default function InsertMappingModal() {
 
     setMappings(prev => ({
       ...prev,
-      [targetCol]: { ...prev[targetCol], sourceExpr: `COALESCE("${m.sourceExpr}", ${defaultVal})`, warnNullable: false }
+      [targetCol]: { ...prev[targetCol], sourceExpr: `COALESCE(${q(m.sourceExpr)}, ${defaultVal})`, warnNullable: false }
     }));
   };
 
@@ -144,30 +194,40 @@ export default function InsertMappingModal() {
     const m = mappings[targetCol];
     const tc = targetCols.find(c => c.name === targetCol);
     if (!tc) return;
-    
+
     setMappings(prev => ({
       ...prev,
-      [targetCol]: { ...prev[targetCol], sourceExpr: `CAST("${m.sourceExpr}" AS ${tc.dataType})`, typeMismatch: false }
+      [targetCol]: { ...prev[targetCol], sourceExpr: `CAST(${q(m.sourceExpr)} AS ${tc.dataType})`, typeMismatch: false }
     }));
   };
 
   const generateSQL = () => {
     if (!target || !source) return "";
-    
-    const quote = (s: string) => `"${s.replace(/"/g, '""')}"`;
-    const targetRef = `${quote(target.db)}.${quote(target.schema)}.${quote(target.name)}`;
-    const sourceRef = `${quote(source.db)}.${quote(source.schema)}.${quote(source.name)}`;
 
-    const cols = targetCols.map(tc => quote(tc.name));
+    const targetRef = `${q(target.db)}.${q(target.schema)}.${q(target.name)}`;
+    const sourceRef = `${q(source.db)}.${q(source.schema)}.${q(source.name)}`;
+
+    const cols = targetCols.map(tc => q(tc.name));
     const exprs = targetCols.map(tc => {
       const m = mappings[tc.name];
       if (m.isConstant) return m.sourceExpr;
-      // If it's already an expression (has COALESCE or CAST), use it as is
+      // Already an expression (COALESCE / CAST / etc.) — pass through as-is
       if (m.sourceExpr.includes("(") || m.sourceExpr.includes(" ")) return m.sourceExpr;
-      return quote(m.sourceExpr);
+      return q(m.sourceExpr);
     });
 
-    return `INSERT INTO ${targetRef} (${cols.join(", ")})\nSELECT ${exprs.join(", ")}\nFROM ${sourceRef};`;
+    const pad = "    ";
+    const colLines  = cols.map(c  => `${pad}${c}`).join(",\n");
+    const exprLines = exprs.map(e => `${pad}${e}`).join(",\n");
+
+    return [
+      `INSERT INTO ${targetRef} (`,
+      colLines,
+      `)`,
+      `SELECT`,
+      exprLines,
+      `FROM ${sourceRef};`,
+    ].join("\n");
   };
 
   const handleInsert = () => {
@@ -272,7 +332,17 @@ export default function InsertMappingModal() {
       okText="Generate SQL"
       destroyOnClose
     >
-      <div style={{ maxHeight: "60vh", overflowY: "auto", marginTop: 16 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+        <Space>
+          <Text type="secondary" style={{ fontSize: 12 }}>Quote identifiers</Text>
+          <Switch
+            size="small"
+            checked={quoteIdentifiers}
+            onChange={setQuoteIdentifiers}
+          />
+        </Space>
+      </div>
+      <div style={{ maxHeight: "60vh", overflowY: "auto" }}>
         <Table
           dataSource={targetCols}
           columns={columns}
