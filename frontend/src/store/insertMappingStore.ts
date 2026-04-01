@@ -18,22 +18,26 @@ export interface TableInfo {
 
 interface InsertMappingState {
   target: TableInfo | null;
-  source: TableInfo | null;
+  sources: TableInfo[];
   modalOpen: boolean;
 
   setTarget: (target: TableInfo) => void;
-  setSource: (source: TableInfo) => void;
+  addSource: (source: TableInfo) => void;
+  removeSource: (index: number) => void;
   setModalOpen: (open: boolean) => void;
   reset: () => void;
 }
 
 export const useInsertMappingStore = create<InsertMappingState>((set) => ({
   target: null,
-  source: null,
+  sources: [],
   modalOpen: false,
 
   setTarget: (target) => set({ target }),
-  setSource: (source) => set({ source, modalOpen: true }),
+  addSource: (source) =>
+    set((s) => ({ sources: [...s.sources, source], modalOpen: true })),
+  removeSource: (index) =>
+    set((s) => ({ sources: s.sources.filter((_, i) => i !== index) })),
   setModalOpen: (modalOpen) => set({ modalOpen }),
-  reset: () => set({ target: null, source: null, modalOpen: false }),
+  reset: () => set({ target: null, sources: [], modalOpen: false }),
 }));

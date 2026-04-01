@@ -430,7 +430,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
 
   const insertTarget    = useInsertMappingStore((s) => s.target);
   const setInsertTarget = useInsertMappingStore((s) => s.setTarget);
-  const setInsertSource = useInsertMappingStore((s) => s.setSource);
+  const addInsertSource = useInsertMappingStore((s) => s.addSource);
 
   // Close context menu on outside click
   useEffect(() => {
@@ -1196,7 +1196,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const [, db, schema, , ...nameParts] = nodeKey.split(":");
     const name = nameParts.join(":");
     setCtxMenu(null);
-    setInsertSource({ db, schema, name });
+    addInsertSource({ db, schema, name });
   };
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -1487,7 +1487,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
             menuItem("Select for Insert Target", <SyncOutlined style={{ fontSize: 12 }} />, selectForInsertTarget)}
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") && insertTarget !== null &&
-            menuItem(`Select as Insert Source for ${insertTarget.name}`, <SyncOutlined style={{ fontSize: 12, color: "var(--accent)" }} />, selectAsInsertSource)}
+            menuItem(`Add as Insert Source for ${insertTarget.name}`, <SyncOutlined style={{ fontSize: 12, color: "var(--accent)" }} />, selectAsInsertSource)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
             menuItem("Time Travel Query…", <HistoryOutlined style={{ fontSize: 12 }} />, openTimeTravelModal)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
