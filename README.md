@@ -197,6 +197,12 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
   - **Visibility & Comment** — `OBJECT_VISIBILITY` (not set / `PRIVILEGED` / custom YAML) and free-text comment
   - **SQL preview** — live-updating `CREATE DATABASE` statement; copy button copies the SQL to the clipboard
   - Submit calls `ExecDDL` and the object browser refreshes on success
+- **Create Table** — right-click any schema and choose **Create Object** → **Table…** to open a comprehensive table designer:
+  - Supports **Permanent**, **Transient**, **Temporary**, and **Volatile** table types
+  - Dynamic **column designer** for defining names, types (searchable), Primary Key, Not Null, and comments
+  - Advanced table options: **Cluster By**, **Data Retention**, **Max Data Extension**, **Change Tracking**, and **Schema Evolution**
+  - **Live SQL Preview** updates as the form is modified
+  - Submitting executes the DDL and refreshes the schema tree automatically
 - Right-click a **database** to **Create Database…**, refresh, export its DDL, **insert its name** at the editor cursor, generate an **ER Diagram**, **Show Dropped Schemas…**, or open **Backup Sets…** — lists schemas recoverable via Time Travel with an **Undrop** button for each
 - **Dropped Databases** button (`⏪`) in the sidebar header lists databases within their Time Travel retention window; click **Undrop** to restore any of them
 - Right-click a **schema** to browse dropped tables recoverable via Snowflake Time Travel, **insert its fully-qualified name** at the editor cursor, **Export Data…** or **Import Data…** (opens the same export/import modals with a table selector — no need to expand the schema first), open the **Create Object** cascading submenu, or open **Backup Sets…**; the **Create Object** submenu contains **Task…** — see below

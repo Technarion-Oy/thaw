@@ -113,6 +113,22 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Visibility & Comment** — `OBJECT_VISIBILITY` (not set / `PRIVILEGED` / custom YAML block) and a free-text comment
   - **SQL preview** — live `CREATE DATABASE` statement updates with every field change; copy button sends the SQL to the clipboard
   - Submitting runs `ExecDDL` and the object browser refreshes automatically on success
+- **Create Table** — right-click any schema and choose **Create Object** → **Table…** to open a comprehensive table designer:
+  - **Name & Type** — specify the table name and choose from **Permanent**, **Transient**, **Temporary**, or **Volatile** table types
+  - **Create Options** — toggle `OR REPLACE` and `IF NOT EXISTS` modifiers
+  - **Column Editor** — dynamic list of columns:
+    - Set name and choose from a searchable list of Snowflake data types
+    - Toggle **Primary Key** and **Not Null** constraints per column
+    - Set **Default Values** and **Comments** for each column
+    - Add, remove, and reorder columns easily
+  - **Table Options** — configure advanced Snowflake table properties:
+    - **Cluster By** — define one or more clustering keys or expressions
+    - **Data Retention** — set `DATA_RETENTION_TIME_IN_DAYS` (0–90)
+    - **Max Data Extension** — set `MAX_DATA_EXTENSION_TIME_IN_DAYS`
+    - **Change Tracking** and **Schema Evolution** toggles
+    - Table-level comment
+  - **Live SQL Preview** — the full `CREATE TABLE` statement updates in real-time as you modify the form
+  - **Execution** — runs `ExecDDL` and refreshes the schema tree automatically on success
 - **Right-click a database** to **Create Database…**, export its DDL, generate an ER Diagram, view dropped schemas recoverable via Time Travel, or open **Backup Sets…**
 - **Right-click a schema** to view dropped tables, **Export Data…** or **Import Data…** without needing an existing table (schema-level launch opens the same modals with a table selector or name field), open **Backup Sets…**, or use the **Create Object** cascading submenu (opens left or right depending on available screen space); contains **Task…** to open the Create Task dialog
 - **Task tree** — tasks inside a schema are displayed as a hierarchy in the sidebar: child tasks appear nested under their predecessor root task; finalizer tasks are shown as the last child of their root task with a purple **Finalizer** badge so the graph structure is visible at a glance without opening the graph modal

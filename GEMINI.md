@@ -18,8 +18,8 @@ Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend +
 - **Surgical Edits**: Prefer `replace` over `write_file` for large files like `app.go` and `Sidebar.tsx`.
 - **Wails Bindings**: After modifying Go method signatures in `app.go`, you MUST run `wails generate module` to update frontend bindings.
 - **New Feature Pattern**:
-    1. Define state in a new `zustand` store in `frontend/src/store/`.
-    2. Create UI components in `frontend/src/components/` (e.g., `database/`, `layout/`).
+    1. Define state in a new `zustand` store in `frontend/src/store/` (optional).
+    2. Create UI components in `frontend/src/components/` (e.g., `database/CreateTableModal.tsx`, `layout/`).
     3. Register context menu actions in `frontend/src/components/layout/Sidebar.tsx`.
 - **SQL Generation**: Use double quotes for identifiers (`"DATABASE"."SCHEMA"."TABLE"`) and handle escaping (`" -> ""`).
 

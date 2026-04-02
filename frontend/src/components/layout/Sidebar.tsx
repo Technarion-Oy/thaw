@@ -64,6 +64,7 @@ import ExecuteNotebookModal from "../notebook/ExecuteNotebookModal";
 import SelectFunctionModal from "../function/SelectFunctionModal";
 import CreateTaskModal from "../task/CreateTaskModal";
 import CreateDatabaseModal from "../database/CreateDatabaseModal";
+import CreateTableModal from "../database/CreateTableModal";
 import ExecuteTaskModal from "../task/ExecuteTaskModal";
 import TaskGraphModal from "../task/TaskGraphModal";
 import TaskPropertiesModal from "../task/TaskPropertiesModal";
@@ -390,6 +391,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [selectFunctionModal, setSelectFunctionModal] = useState<{ db: string; schema: string; name: string; rawArgs: string } | null>(null);
   const [executeNotebookModal, setExecuteNotebookModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createDbOpen, setCreateDbOpen] = useState(false);
+  const [createTableModal, setCreateTableModal] = useState<{ db: string; schema: string } | null>(null);
   const [createTaskModal, setCreateTaskModal] = useState<{ db: string; schema: string } | null>(null);
   const [executeTaskModal, setExecuteTaskModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [taskPropsModal, setTaskPropsModal] = useState<{ db: string; schema: string; name: string; isFinalizer?: boolean } | null>(null);
@@ -805,6 +807,15 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const name = nameParts.join(":");
     setCtxMenu(null);
     setTaskGraphModal({ db, schema, name });
+  };
+
+  const openCreateTable = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateTableModal({ db, schema });
   };
 
   const openCreateTask = () => {
@@ -1605,7 +1616,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "db" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "schema" && menuItem("Insert Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "schema" && menuItemSub("Create Object", <PlusSquareOutlined style={{ fontSize: 12 }} />, "create-object", (
-            menuItem("Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)
+            <>
+              {menuItem("Table…", <TableOutlined style={{ fontSize: 12 }} />, openCreateTable)}
+              {menuItem("Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)}
+            </>
           ))}
           {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
           {ctxMenu.nodeType === "schema" && menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openSchemaExportModal)}
@@ -1817,6 +1831,16 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         <CreateDatabaseModal
           onClose={() => setCreateDbOpen(false)}
           onSuccess={refreshAllDatabases}
+        />
+      )}
+
+      {/* Create Table modal */}
+      {createTableModal && (
+        <CreateTableModal
+          db={createTableModal.db}
+          schema={createTableModal.schema}
+          onClose={() => setCreateTableModal(null)}
+          onSuccess={() => refreshDatabaseByName(createTableModal.db)}
         />
       )}
 
