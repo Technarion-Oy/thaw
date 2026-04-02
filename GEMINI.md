@@ -44,9 +44,15 @@ Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend +
 - To open and execute immediately: `useQueryStore.getState().executeInNewTab(sql)`.
 
 ### Multi-Selection in Sidebar
-- Controlled via `selectedNodeKeys` state (Set of strings).
+- Controlled via `selectedNodeKeys` state (Set of strings) and `selectedNodeArgs` (Map for function/procedure signatures).
 - `Tree` component should have `selectedKeys={Array.from(selectedNodeKeys)}` and `multiple` props.
 - Logic for toggling selection resides in the `onSelect` handler (checking `nativeEvent.ctrlKey`/`metaKey`).
+
+### Insert Mapping
+- State management in `useInsertMappingStore`.
+- Supports one target table and multiple source tables/views.
+- Side-by-side mapping UI allows simultaneous mapping of multiple sources.
+- SQL generation handles `UNION ALL` / `UNION` combinations.
 
 ## ⚠️ Gotchas
 - **Logs**: `gosnowflake` driver logs errors to `slog.Default` even when caught.

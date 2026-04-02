@@ -8,12 +8,13 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import {
   Modal, Table, Select, Input, Button, Space, Typography,
-  Tag, Alert, message, Switch, Tabs, Radio,
+  Tag, message, Switch, Radio, Tooltip,
 } from "antd";
-import { ArrowRightOutlined, SyncOutlined, CloseOutlined } from "@ant-design/icons";
+import type { ColumnsType } from "antd/es/table";
+import { SyncOutlined, DeleteOutlined, InfoCircleOutlined } from "@ant-design/icons";
 import { GetTableColumnsWithTypes } from "../../../wailsjs/go/main/App";
 import { snowflake } from "../../../wailsjs/go/models";
 import { useInsertMappingStore } from "../../store/insertMappingStore";
@@ -27,12 +28,11 @@ const { Option } = Select;
 const SAFE_IDENT = /^[a-zA-Z_][a-zA-Z0-9_$]*$/;
 
 // Snowflake reserved keywords — must always be double-quoted when used as identifiers
-// Source: https://docs.snowflake.com/en/sql-reference/reserved-keywords
 const SNOWFLAKE_RESERVED = new Set([
   "ACCOUNT", "ALL", "ALTER", "AND", "ANY", "AS",
   "BETWEEN", "BY",
   "CASE", "CAST", "CHECK", "COLUMN", "CONNECT", "CONNECTION", "CONSTRAINT",
-  "CREATE", "CROSS", "CURRENT", "CURRENT_DATE", "CURRENT_TIME",
+  "CREATE", "CROSS", "CROSS", "CURRENT", "CURRENT_DATE", "CURRENT_TIME",
   "CURRENT_TIMESTAMP", "CURRENT_USER",
   "DATABASE", "DELETE", "DISTINCT", "DROP",
   "ELSE", "END", "EXISTS",
@@ -73,7 +73,6 @@ export default function InsertMappingModal() {
   // Parallel arrays indexed by source position
   const [allSourceCols, setAllSourceCols] = useState<(snowflake.ColumnInfo[] | undefined)[]>([]);
   const [allMappings, setAllMappings]     = useState<(Record<string, ColumnMapping> | undefined)[]>([]);
-  const [activeTab, setActiveTab]         = useState(0);
   const [unionAll, setUnionAll]           = useState(true);
   const [loadingTarget, setLoadingTarget] = useState(false);
   const [loadingSources, setLoadingSources] = useState(false);
@@ -83,9 +82,6 @@ export default function InsertMappingModal() {
   const loadingIndices = useRef<Set<number>>(new Set());
 
   // ── Quoting helper ──────────────────────────────────────────────────────────
-  // Skip quotes only when ALL of: structurally safe, not a reserved keyword,
-  // and all-uppercase (Snowflake folds unquoted names to uppercase, so any
-  // lowercase letter means the name was created with quotes).
   const q = (s: string) =>
     quoteIdentifiers ||
     !SAFE_IDENT.test(s) ||
@@ -123,7 +119,6 @@ export default function InsertMappingModal() {
     if (!modalOpen || !target) return;
 
     const runLoad = async () => {
-      // Load target columns once
       let tCols = targetCols;
       if (tCols.length === 0) {
         setLoadingTarget(true);
@@ -138,7 +133,6 @@ export default function InsertMappingModal() {
         }
       }
 
-      // Load any source not yet fetched
       const toLoad = sources
         .map((src, i) => ({ src, i }))
         .filter(({ i }) => allSourceCols[i] === undefined && !loadingIndices.current.has(i));
@@ -175,57 +169,51 @@ export default function InsertMappingModal() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modalOpen, target, sources.length]);
 
-  // ── Source management ───────────────────────────────────────────────────────
   const handleRemoveSource = (i: number) => {
     if (sources.length === 1) {
-      // Removing the last source closes the modal
       setModalOpen(false);
       reset();
       return;
     }
     setAllSourceCols((prev) => prev.filter((_, idx) => idx !== i));
     setAllMappings((prev) => prev.filter((_, idx) => idx !== i));
-    setActiveTab((prev) => Math.min(prev, sources.length - 2));
     removeSource(i);
   };
 
   const handleAddFromPicker = (val: string) => {
     const [db, schema, name] = val.split("\0");
-    const newIdx = sources.length; // index after store update
     addSource({ db, schema, name });
-    setTimeout(() => setActiveTab(newIdx), 0);
   };
 
-  // ── Mapping mutations (scoped to a source tab index) ───────────────────────
-  const updateMapping = (tabIdx: number, patch: Record<string, ColumnMapping>) => {
+  const updateMapping = (idx: number, patch: Record<string, ColumnMapping>) => {
     setAllMappings((prev) => {
       const next = [...prev];
-      next[tabIdx] = patch;
+      next[idx] = patch;
       return next;
     });
   };
 
-  const handleSourceChange = (tabIdx: number, targetCol: string, value: string) => {
+  const handleSourceChange = (idx: number, targetCol: string, value: string) => {
     const tc   = targetCols.find((c) => c.name === targetCol);
-    const sCols = allSourceCols[tabIdx] ?? [];
+    const sCols = allSourceCols[idx] ?? [];
     const sc   = sCols.find((c) => c.name === value);
-    const prev = allMappings[tabIdx] ?? {};
+    const prev = allMappings[idx] ?? {};
 
     if (value === "__constant__") {
-      updateMapping(tabIdx, {
+      updateMapping(idx, {
         ...prev,
         [targetCol]: { ...prev[targetCol], isConstant: true, sourceExpr: "''", warnNullable: false, typeMismatch: false },
       });
       return;
     }
     if (value === "NULL") {
-      updateMapping(tabIdx, {
+      updateMapping(idx, {
         ...prev,
         [targetCol]: { ...prev[targetCol], isConstant: true, sourceExpr: "NULL", warnNullable: !!(tc && !tc.nullable), typeMismatch: false },
       });
       return;
     }
-    updateMapping(tabIdx, {
+    updateMapping(idx, {
       ...prev,
       [targetCol]: {
         targetCol,
@@ -237,13 +225,13 @@ export default function InsertMappingModal() {
     });
   };
 
-  const handleConstantChange = (tabIdx: number, targetCol: string, value: string) => {
-    const prev = allMappings[tabIdx] ?? {};
-    updateMapping(tabIdx, { ...prev, [targetCol]: { ...prev[targetCol], sourceExpr: value } });
+  const handleConstantChange = (idx: number, targetCol: string, value: string) => {
+    const prev = allMappings[idx] ?? {};
+    updateMapping(idx, { ...prev, [targetCol]: { ...prev[targetCol], sourceExpr: value } });
   };
 
-  const addCoalesce = (tabIdx: number, targetCol: string) => {
-    const prev = allMappings[tabIdx] ?? {};
+  const addCoalesce = (idx: number, targetCol: string) => {
+    const prev = allMappings[idx] ?? {};
     const m  = prev[targetCol];
     const tc = targetCols.find((c) => c.name === targetCol);
     let defaultVal = "''";
@@ -251,15 +239,15 @@ export default function InsertMappingModal() {
     if (dt.includes("NUMBER") || dt.includes("INT") || dt.includes("FLOAT")) defaultVal = "0";
     else if (dt.includes("BOOLEAN")) defaultVal = "FALSE";
     else if (dt.includes("DATE") || dt.includes("TIME")) defaultVal = "CURRENT_TIMESTAMP()";
-    updateMapping(tabIdx, { ...prev, [targetCol]: { ...m, sourceExpr: `COALESCE(${q(m.sourceExpr)}, ${defaultVal})`, warnNullable: false } });
+    updateMapping(idx, { ...prev, [targetCol]: { ...m, sourceExpr: `COALESCE(${q(m.sourceExpr)}, ${defaultVal})`, warnNullable: false } });
   };
 
-  const addCast = (tabIdx: number, targetCol: string) => {
-    const prev = allMappings[tabIdx] ?? {};
+  const addCast = (idx: number, targetCol: string) => {
+    const prev = allMappings[idx] ?? {};
     const m  = prev[targetCol];
     const tc = targetCols.find((c) => c.name === targetCol);
     if (!tc) return;
-    updateMapping(tabIdx, { ...prev, [targetCol]: { ...m, sourceExpr: `CAST(${q(m.sourceExpr)} AS ${tc.dataType})`, typeMismatch: false } });
+    updateMapping(idx, { ...prev, [targetCol]: { ...m, sourceExpr: `CAST(${q(m.sourceExpr)} AS ${tc.dataType})`, typeMismatch: false } });
   };
 
   // ── SQL generation ──────────────────────────────────────────────────────────
@@ -294,16 +282,15 @@ export default function InsertMappingModal() {
     reset();
   };
 
-  // ── Column table definition (per source tab) ────────────────────────────────
-  const buildColumns = (tabIdx: number) => {
-    const sCols    = allSourceCols[tabIdx] ?? [];
-    const mappings = allMappings[tabIdx]   ?? {};
-
-    return [
+  // ── Column table definition (side-by-side) ────────────────────────────────
+  const tableColumns = useMemo<ColumnsType<snowflake.ColumnInfo>>(() => {
+    const cols: ColumnsType<snowflake.ColumnInfo> = [
       {
         title: "Target Column",
         dataIndex: "name",
         key: "target",
+        fixed: "left" as const,
+        width: 180,
         render: (name: string, record: snowflake.ColumnInfo) => (
           <Space direction="vertical" size={0}>
             <Text strong>{name}</Text>
@@ -314,80 +301,78 @@ export default function InsertMappingModal() {
           </Space>
         ),
       },
-      {
-        title: "",
-        key: "arrow",
-        width: 40,
-        render: () => <ArrowRightOutlined style={{ color: "var(--text-muted)" }} />,
-      },
-      {
-        title: "Source Expression",
-        key: "source",
+    ];
+
+    sources.forEach((src, idx) => {
+      cols.push({
+        title: (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <Tooltip title={`${src.db}.${src.schema}.${src.name}`}>
+              <Text strong style={{ maxWidth: 120 }} ellipsis>{src.name}</Text>
+            </Tooltip>
+            <Button 
+              type="text" 
+              size="small" 
+              icon={<DeleteOutlined style={{ fontSize: 11 }} />} 
+              onClick={() => handleRemoveSource(idx)} 
+            />
+          </div>
+        ),
+        key: `source_${idx}`,
+        width: 300,
         render: (_: unknown, record: snowflake.ColumnInfo) => {
-          const m = mappings[record.name];
-          if (!m) return null;
+          const m = (allMappings[idx] ?? {})[record.name];
+          if (!m) return <div />;
+          const sCols = allSourceCols[idx] ?? [];
           return (
             <Space direction="vertical" style={{ width: "100%" }}>
-              <Space>
+              <Space.Compact style={{ width: "100%" }}>
                 <Select
                   showSearch
-                  style={{ width: 200 }}
+                  style={{ width: "60%" }}
+                  size="small"
                   value={m.isConstant ? (m.sourceExpr === "NULL" ? "NULL" : "__constant__") : m.sourceExpr}
-                  onChange={(val) => handleSourceChange(tabIdx, record.name, val)}
+                  onChange={(val) => handleSourceChange(idx, record.name, val)}
                 >
                   <Option value="NULL"><Text type="secondary">NULL</Text></Option>
-                  <Option value="__constant__"><Text italic>Constant Value...</Text></Option>
+                  <Option value="__constant__"><Text italic>Constant...</Text></Option>
                   {sCols.map((sc) => (
                     <Option key={sc.name} value={sc.name}>
                       {sc.name}{" "}
-                      <Text type="secondary" style={{ fontSize: 11 }}>({sc.dataType})</Text>
+                      <Text type="secondary" style={{ fontSize: 10 }}>({sc.dataType})</Text>
                     </Option>
                   ))}
                 </Select>
                 {m.isConstant && m.sourceExpr !== "NULL" && (
                   <Input
-                    style={{ width: 150 }}
+                    style={{ width: "40%" }}
+                    size="small"
                     value={m.sourceExpr}
-                    onChange={(e) => handleConstantChange(tabIdx, record.name, e.target.value)}
+                    onChange={(e) => handleConstantChange(idx, record.name, e.target.value)}
                   />
                 )}
-              </Space>
+              </Space.Compact>
               {m.warnNullable && (
-                <Alert
-                  type="warning"
-                  showIcon
-                  message={
-                    <Space>
-                      <Text style={{ fontSize: 12 }}>Source may be NULL</Text>
-                      <Button size="small" type="link" onClick={() => addCoalesce(tabIdx, record.name)}>
-                        Add COALESCE
-                      </Button>
-                    </Space>
-                  }
-                />
+                <div style={{ marginTop: 2 }}>
+                  <Tag color="orange" style={{ fontSize: 9, margin: 0 }}>NULLable Source</Tag>
+                  <Button size="small" type="link" style={{ fontSize: 10, padding: "0 4px" }} onClick={() => addCoalesce(idx, record.name)}>COALESCE</Button>
+                </div>
               )}
               {m.typeMismatch && (
-                <Alert
-                  type="info"
-                  showIcon
-                  message={
-                    <Space>
-                      <Text style={{ fontSize: 12 }}>Type mismatch</Text>
-                      <Button size="small" type="link" onClick={() => addCast(tabIdx, record.name)}>
-                        Add CAST
-                      </Button>
-                    </Space>
-                  }
-                />
+                <div style={{ marginTop: 2 }}>
+                  <Tag color="blue" style={{ fontSize: 9, margin: 0 }}>Type Mismatch</Tag>
+                  <Button size="small" type="link" style={{ fontSize: 10, padding: "0 4px" }} onClick={() => addCast(idx, record.name)}>CAST</Button>
+                </div>
               )}
             </Space>
           );
         },
-      },
-    ];
-  };
+      });
+    });
 
-  // ── Searchable table/view picker from objectStore ───────────────────────────
+    return cols;
+  }, [sources, allSourceCols, allMappings, targetCols, quoteIdentifiers, handleRemoveSource, handleSourceChange, handleConstantChange, addCoalesce, addCast, q]);
+
   const tableOptions = allObjects
     .filter((o) => o.kind === "TABLE" || o.kind === "VIEW")
     .map((o) => ({
@@ -395,107 +380,77 @@ export default function InsertMappingModal() {
       value: `${o.db}\0${o.schema}\0${o.name}`,
     }));
 
-  // ── Tab items ───────────────────────────────────────────────────────────────
-  const tabItems = sources.map((src, i) => ({
-    key: String(i),
-    label: (
-      <Space size={4}>
-        <span>{src.name}</span>
-        <CloseOutlined
-          style={{ fontSize: 10, color: "var(--text-muted)" }}
-          onClick={(e) => { e.stopPropagation(); handleRemoveSource(i); }}
-        />
-      </Space>
-    ),
-    children: (
-      <div style={{ maxHeight: "50vh", overflowY: "auto" }}>
-        <Table
-          dataSource={targetCols}
-          columns={buildColumns(i)}
-          rowKey="name"
-          pagination={false}
-          size="small"
-          loading={loadingTarget || (loadingSources && !allSourceCols[i])}
-        />
-      </div>
-    ),
-  }));
-
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <Modal
       title={
         <Space>
           <SyncOutlined />
-          <span>
-            Insert Mapping:{" "}
-            {sources.length === 0 ? "…" : sources.map((s) => s.name).join(", ")}
-            {" → "}
-            {target?.name}
-          </span>
+          <span>Insert Mapping → {target?.name}</span>
         </Space>
       }
       open={modalOpen}
       onCancel={() => { setModalOpen(false); reset(); }}
-      width={880}
+      width="95vw"
+      style={{ top: 20 }}
       onOk={handleInsert}
       okText="Generate SQL"
-      // mask=false keeps the sidebar accessible so users can right-click
-      // additional tables and add them as sources while the modal is open
       mask={false}
       destroyOnHidden
     >
-      {/* ── Toolbar ── */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <Space>
-          {sources.length > 1 && (
-            <>
-              <Text type="secondary" style={{ fontSize: 12 }}>Combine with:</Text>
-              <Radio.Group
-                value={unionAll ? "all" : "distinct"}
-                onChange={(e) => setUnionAll(e.target.value === "all")}
-                size="small"
-                optionType="button"
-                buttonStyle="solid"
-              >
-                <Radio.Button value="all">UNION ALL</Radio.Button>
-                <Radio.Button value="distinct">UNION</Radio.Button>
-              </Radio.Group>
-            </>
-          )}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+        <Space direction="vertical" size={4}>
+          <Space>
+            <Text type="secondary" style={{ fontSize: 12 }}>Combine mode:</Text>
+            <Radio.Group
+              value={unionAll ? "all" : "distinct"}
+              onChange={(e) => setUnionAll(e.target.value === "all")}
+              size="small"
+              optionType="button"
+              buttonStyle="solid"
+            >
+              <Radio.Button value="all">UNION ALL</Radio.Button>
+              <Radio.Button value="distinct">UNION</Radio.Button>
+            </Radio.Group>
+            <Tooltip title={unionAll
+              ? "Multiple rows with the same data are kept (UNION ALL)." 
+              : "Duplicate rows are removed (UNION)."}>
+              <InfoCircleOutlined style={{ fontSize: 12, color: "var(--text-muted)" }} />
+            </Tooltip>
+          </Space>
         </Space>
-        <Space>
-          <Text type="secondary" style={{ fontSize: 12 }}>Quote identifiers</Text>
-          <Switch size="small" checked={quoteIdentifiers} onChange={setQuoteIdentifiers} />
-        </Space>
-      </div>
 
-      {/* ── Source tabs + add-source picker ── */}
-      <Tabs
-        type="card"
-        size="small"
-        activeKey={String(activeTab)}
-        onChange={(k) => setActiveTab(Number(k))}
-        tabBarExtraContent={
+        <Space direction="vertical" align="end" size={4}>
           <Select
             showSearch
             placeholder="+ Add source table"
-            style={{ width: 230, marginLeft: 8 }}
+            style={{ width: 230 }}
+            size="small"
             value={null}
             onChange={handleAddFromPicker}
             options={tableOptions}
-            notFoundContent={
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                Expand schemas in the sidebar to load tables
-              </Text>
-            }
             filterOption={(input, opt) =>
               String(opt?.label ?? "").toLowerCase().includes(input.toLowerCase())
             }
           />
-        }
-        items={tabItems}
-      />
+          <Space>
+            <Text type="secondary" style={{ fontSize: 11 }}>Quote identifiers</Text>
+            <Switch size="small" checked={quoteIdentifiers} onChange={setQuoteIdentifiers} />
+          </Space>
+        </Space>
+      </div>
+
+      <div style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
+        <Table
+          dataSource={targetCols}
+          columns={tableColumns}
+          rowKey="name"
+          pagination={false}
+          size="small"
+          scroll={{ x: "max-content", y: "55vh" }}
+          loading={loadingTarget || loadingSources}
+        />
+      </div>
     </Modal>
   );
 }
