@@ -277,7 +277,7 @@ func (a *App) PickSnowflakeCLIConfigPath() (string, error) {
 
 	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
 		Title:            "Select Snowflake CLI Config",
-		InitialDirectory: initialDir,
+		DefaultDirectory: initialDir,
 		Filters: []wailsruntime.FileFilter{
 			{DisplayName: "Snowflake CLI Config (*.toml)", Pattern: "*.toml"},
 			{DisplayName: "All Files", Pattern: "*.*"},
