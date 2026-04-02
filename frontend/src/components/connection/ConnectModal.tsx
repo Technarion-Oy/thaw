@@ -9,9 +9,12 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect } from "react";
-import { Form, Input, Button, Alert, Space, Typography, Select, Divider } from "antd";
-import { CloudServerOutlined } from "@ant-design/icons";
-import { Connect, CancelConnect, LoadSnowflakeCLIConfig } from "../../../wailsjs/go/main/App";
+import { Form, Input, Button, Alert, Space, Typography, Select, Divider, Tooltip } from "antd";
+import { CloudServerOutlined, FolderOpenOutlined } from "@ant-design/icons";
+import {
+  Connect, CancelConnect, LoadSnowflakeCLIConfig,
+  GetSnowflakeCLIConfigPath, PickSnowflakeCLIConfigPath,
+} from "../../../wailsjs/go/main/App";
 import { useConnectionStore, type ConnectionParams } from "../../store/connectionStore";
 import type { sfconfig } from "../../../wailsjs/go/models";
 
@@ -56,15 +59,35 @@ export default function ConnectModal() {
   const setConnected            = useConnectionStore((s) => s.setConnected);
 
   const [cliConfig, setCliConfig] = useState<sfconfig.Config | null>(null);
+  const [cliConfigPath, setCliConfigPath] = useState<string>("");
 
-  // Load Snowflake CLI connections once on mount — silently ignored if not found.
-  useEffect(() => {
+  const refreshCliConfig = () => {
     LoadSnowflakeCLIConfig()
       .then((cfg) => {
-        if (cfg.connections?.length) setCliConfig(cfg);
+        setCliConfig(cfg.connections?.length ? cfg : null);
       })
-      .catch(() => {}); // missing file is not an error in the UI
+      .catch(() => {
+        setCliConfig(null);
+      });
+  };
+
+  // Load Snowflake CLI config and path once on mount.
+  useEffect(() => {
+    GetSnowflakeCLIConfigPath().then(setCliConfigPath);
+    refreshCliConfig();
   }, []);
+
+  const changeCliConfigPath = async () => {
+    try {
+      const path = await PickSnowflakeCLIConfigPath();
+      if (path) {
+        setCliConfigPath(path);
+        refreshCliConfig();
+      }
+    } catch (e) {
+      console.error("Failed to pick config path", e);
+    }
+  };
 
   const applyCliConnection = (name: string) => {
     const conn = cliConfig?.connections?.find((c) => c.name === name);
@@ -122,11 +145,25 @@ export default function ConnectModal() {
           </Space>
 
           {/* ── Snowflake CLI profiles ──────────────────────────────────── */}
-          {cliConfig && cliConfig.connections?.length > 0 && (
-            <div>
-              <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 6 }}>
-                Load from Snowflake CLI (~/.snowflake/config.toml)
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 6 }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                Snowflake CLI profiles
               </Text>
+              <Tooltip title={cliConfigPath}>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<FolderOpenOutlined />}
+                  onClick={changeCliConfigPath}
+                  style={{ fontSize: 11, padding: 0, height: "auto" }}
+                >
+                  Change config…
+                </Button>
+              </Tooltip>
+            </div>
+
+            {cliConfig && cliConfig.connections?.length > 0 ? (
               <Select
                 style={{ width: "100%" }}
                 placeholder="Select a connection profile…"
@@ -137,9 +174,21 @@ export default function ConnectModal() {
                   label: cliConfig.defaultConnection === c.name ? `${c.name} (default)` : c.name,
                 }))}
               />
-              <Divider style={{ borderColor: "var(--border)", margin: "16px 0 4px" }} />
-            </div>
-          )}
+            ) : (
+              <div style={{ 
+                padding: "8px 12px", 
+                background: "var(--bg-faint)", 
+                border: "1px dashed var(--border)",
+                borderRadius: 6,
+                textAlign: "center"
+              }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  No profiles found in {cliConfigPath.split("/").pop() || "config.toml"}
+                </Text>
+              </div>
+            )}
+            <Divider style={{ borderColor: "var(--border)", margin: "16px 0 4px" }} />
+          </div>
 
           {error && <Alert type="error" message={error} showIcon />}
 

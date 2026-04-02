@@ -224,15 +224,62 @@ func (a *App) CancelChat() {
 	}
 }
 
-// LoadSnowflakeCLIConfig reads ~/.snowflake/config.toml and returns all
-// named connection profiles together with the configured default.
-// Returns an empty config (not an error) when the file does not exist.
+// LoadSnowflakeCLIConfig reads the Snowflake CLI configuration file (either from
+// the custom path set by PickSnowflakeCLIConfigPath or the default location)
+// and returns all named connection profiles together with the default one.
 func (a *App) LoadSnowflakeCLIConfig() (sfconfig.Config, error) {
-	cfg, err := sfconfig.Load()
+	cfg, err := config.Load()
 	if err != nil {
 		return sfconfig.Config{}, err
 	}
-	return *cfg, nil
+	scfg, err := sfconfig.Load(cfg.SnowflakeCLIConfigPath)
+	if err != nil {
+		return sfconfig.Config{}, err
+	}
+	return *scfg, nil
+}
+
+// GetSnowflakeCLIConfigPath returns the current path from which Snowflake CLI
+// connection profiles are being loaded.
+func (a *App) GetSnowflakeCLIConfigPath() (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	if cfg.SnowflakeCLIConfigPath != "" {
+		return cfg.SnowflakeCLIConfigPath, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", nil
+	}
+	return filepath.Join(home, ".snowflake", "config.toml"), nil
+}
+
+// PickSnowflakeCLIConfigPath opens a native file dialog to select a new
+// Snowflake CLI configuration file. The selected path is persisted and
+// used for all subsequent profile loads.
+func (a *App) PickSnowflakeCLIConfigPath() (string, error) {
+	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title: "Select Snowflake CLI Config",
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "Snowflake CLI Config (*.toml)", Pattern: "*.toml"},
+			{DisplayName: "All Files", Pattern: "*.*"},
+		},
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	cfg.SnowflakeCLIConfigPath = path
+	if err := config.Save(cfg); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // ─── Git / export configuration ──────────────────────────────────────────────

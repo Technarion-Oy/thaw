@@ -318,6 +318,10 @@ export function GetSessionVariables() {
   return window['go']['main']['App']['GetSessionVariables']();
 }
 
+export function GetSnowflakeCLIConfigPath() {
+  return window['go']['main']['App']['GetSnowflakeCLIConfigPath']();
+}
+
 export function GetSnowparkConfig() {
   return window['go']['main']['App']['GetSnowparkConfig']();
 }
@@ -552,6 +556,10 @@ export function PickSaveExportFile(arg1, arg2) {
 
 export function PickSaveFile(arg1) {
   return window['go']['main']['App']['PickSaveFile'](arg1);
+}
+
+export function PickSnowflakeCLIConfigPath() {
+  return window['go']['main']['App']['PickSnowflakeCLIConfigPath']();
 }
 
 export function ReadFile(arg1) {

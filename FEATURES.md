@@ -516,7 +516,7 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
 ## Snowflake Connectivity
 
 - Connect with account / user / password / warehouse / role
-- **Auto-fill from Snowflake CLI** — reads `~/.snowflake/config.toml` and populates the connection form from any saved profile, including key-pair (`SNOWFLAKE_JWT`) profiles; authenticator values are matched case-insensitively so both `snowflake_jwt` and `SNOWFLAKE_JWT` work
+- **Auto-fill from Snowflake CLI** — reads Snowflake CLI profiles from `~/.snowflake/config.toml` (or a custom location) and populates the connection form; includes support for key-pair (`SNOWFLAKE_JWT`) profiles; the config file path can be changed during sign-in and is persisted as the new default location for the machine
 - **Cancel connection** — abort an in-progress connection attempt
 - **Switch role, warehouse, database, or schema** from the toolbar without disconnecting — all subsequent queries, privilege checks, and object browsing immediately reflect the new session state
 - Role dropdown shows only roles the current user can actually assume

@@ -4,7 +4,7 @@ Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend +
 
 ## 💡 Critical Context
 - **Nature of App**: This is a **Snowflake SQL Editor** and management tool.
-- **Authentication**: Authentication is handled by parsing connection parameters from the **Snowflake CLI configuration file** (`~/.snowflake/config.toml` or `connections.toml`).
+- **Authentication**: Authentication is handled by parsing connection parameters from the **Snowflake CLI configuration file** (defaults to `~/.snowflake/config.toml` or `connections.toml`). Users can select a custom path during sign-in, which is persisted in the app configuration.
 - **Tech Stack**: Go 1.22, Wails v2, React 18, TypeScript 5.6, Monaco Editor, Ant Design 5, Zustand 5.
 
 ## 🏗 Architecture Overview

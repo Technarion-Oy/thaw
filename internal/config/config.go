@@ -95,11 +95,12 @@ func DefaultEditorPrefs() EditorPrefs {
 
 // AppConfig is the on-disk configuration for Thaw.
 type AppConfig struct {
-	Connections []Connection   `json:"connections"`
-	Git         GitConfig      `json:"git"`
-	AI          AIConfig       `json:"ai"`
-	Snowpark    SnowparkConfig `json:"snowpark"`
-	Editor      EditorPrefs    `json:"editor"`
+	Connections            []Connection   `json:"connections"`
+	Git                    GitConfig      `json:"git"`
+	AI                     AIConfig       `json:"ai"`
+	Snowpark               SnowparkConfig `json:"snowpark"`
+	Editor                 EditorPrefs    `json:"editor"`
+	SnowflakeCLIConfigPath string         `json:"snowflakeCliConfigPath"`
 }
 
 // configPath returns the absolute path to the application configuration file,

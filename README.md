@@ -10,7 +10,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 
 ### Snowflake connectivity
 - Connect with account / user / password / warehouse / role
-- Auto-fill connection form from `~/.snowflake/config.toml` (Snowflake CLI profiles), including key-pair (`SNOWFLAKE_JWT`) profiles; authenticator values are matched case-insensitively
+- Auto-fill connection form from Snowflake CLI profiles (defaults to `~/.snowflake/config.toml`, but any location can be chosen and persisted); includes support for key-pair (`SNOWFLAKE_JWT`) profiles; authenticator values are matched case-insensitively
 - Cancel an in-progress connection attempt
 - Switch role, warehouse, database, or schema from the query toolbar without reconnecting
 - Role dropdown shows only roles the current user can actually `USE ROLE` to — not all account-visible roles

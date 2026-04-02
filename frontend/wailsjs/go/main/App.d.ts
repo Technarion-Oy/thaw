@@ -169,6 +169,8 @@ export function GetSessionParameters():Promise<Array<main.SessionParam>>;
 
 export function GetSessionVariables():Promise<Array<main.SessionVar>>;
 
+export function GetSnowflakeCLIConfigPath():Promise<string>;
+
 export function GetSnowparkConfig():Promise<main.SnowparkConfigResult>;
 
 export function GetSnowsightURL():Promise<string>;
@@ -286,6 +288,8 @@ export function PickOpenFile():Promise<string>;
 export function PickSaveExportFile(arg1:string,arg2:string):Promise<string>;
 
 export function PickSaveFile(arg1:string):Promise<string>;
+
+export function PickSnowflakeCLIConfigPath():Promise<string>;
 
 export function ReadFile(arg1:string):Promise<string>;
 

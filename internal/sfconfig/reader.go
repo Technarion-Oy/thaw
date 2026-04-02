@@ -68,14 +68,16 @@ type rawConnection struct {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Load reads and parses ~/.snowflake/config.toml.
+// Load reads and parses the given Snowflake CLI configuration file.
 // Returns an empty Config (not an error) if the file does not exist.
-func Load() (*Config, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return &Config{}, nil
+func Load(path string) (*Config, error) {
+	if path == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return &Config{}, nil
+		}
+		path = filepath.Join(home, ".snowflake", "config.toml")
 	}
-	path := filepath.Join(home, ".snowflake", "config.toml")
 
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
