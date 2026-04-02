@@ -260,8 +260,24 @@ func (a *App) GetSnowflakeCLIConfigPath() (string, error) {
 // Snowflake CLI configuration file. The selected path is persisted and
 // used for all subsequent profile loads.
 func (a *App) PickSnowflakeCLIConfigPath() (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+
+	initialDir := ""
+	if cfg.SnowflakeCLIConfigPath != "" {
+		initialDir = filepath.Dir(cfg.SnowflakeCLIConfigPath)
+	} else {
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			initialDir = filepath.Join(home, ".snowflake")
+		}
+	}
+
 	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
-		Title: "Select Snowflake CLI Config",
+		Title:            "Select Snowflake CLI Config",
+		InitialDirectory: initialDir,
 		Filters: []wailsruntime.FileFilter{
 			{DisplayName: "Snowflake CLI Config (*.toml)", Pattern: "*.toml"},
 			{DisplayName: "All Files", Pattern: "*.*"},
@@ -271,10 +287,6 @@ func (a *App) PickSnowflakeCLIConfigPath() (string, error) {
 		return "", err
 	}
 
-	cfg, err := config.Load()
-	if err != nil {
-		return "", err
-	}
 	cfg.SnowflakeCLIConfigPath = path
 	if err := config.Save(cfg); err != nil {
 		return "", err
