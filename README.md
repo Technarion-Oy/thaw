@@ -273,7 +273,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
   - Every field applies its change immediately via `ALTER TASK IF EXISTS … <clause>` and reloads the current values; all edits are non-destructive and can be corrected
 - **Text Comparison** — right-click any object, role, warehouse, or file → **Select for Comparison**; then right-click a second item → **Compare with: …** to open a Monaco side-by-side diff view; works across categories (e.g. compare a table DDL against a local `.sql` file); both sides are fetched concurrently and trailing whitespace is trimmed before diffing
 - Tree automatically refreshes the affected database after any rename, drop, or undrop operation
-- **Database Reports** — right-click a database to access a **Reports** cascading menu; includes **Object Summaries** providing aggregate counts of all objects in the database
+- **Database Reports** — right-click a database to access a **Reports** cascading menu; includes **Table Summary** providing detailed metadata for all tables in the database including rows, physical size, owner, retention time, and timestamps
 - **ER Diagram** — right-click a database and choose **ER Diagram…** to generate an Entity Relationship Diagram from `INFORMATION_SCHEMA.COLUMNS`, `SHOW PRIMARY KEYS`, and `SHOW IMPORTED KEYS`; only base tables are shown (views excluded); filter visible schemas with checkboxes, zoom in/out, drag to pan, and copy the Mermaid source to the clipboard
 - **Visual ER Designer** — click **Design Tables…** in the ER Diagram toolbar to open an interactive designer at the database level:
   - Pre-populated with all existing base tables and their columns, data types, primary keys, and foreign keys

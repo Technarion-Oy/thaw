@@ -9,9 +9,10 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect } from "react";
-import { Modal, Table, Typography, Space, Alert } from "antd";
+import { Modal, Table, Typography, Space, Alert, Tag } from "antd";
 import { DashboardOutlined, ReloadOutlined } from "@ant-design/icons";
-import { GetDatabaseObjectSummary } from "../../../wailsjs/go/main/App";
+import { GetDatabaseTableSummary } from "../../../wailsjs/go/main/App";
+import type { main } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
 
@@ -20,32 +21,17 @@ interface ObjectSummariesModalProps {
   onClose: () => void;
 }
 
-interface SummaryRow {
-  kind: string;
-  count: number;
-}
-
 export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesModalProps) {
   const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<SummaryRow[]>([]);
+  const [data, setData] = useState<main.TableSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const fetchSummary = async () => {
     setLoading(true);
     setError(null);
     try {
-      const counts = await GetDatabaseObjectSummary(db);
-      const rows: SummaryRow[] = Object.entries(counts).map(([kind, count]) => ({
-        kind,
-        count,
-      }));
-      // Sort: Tables first, then alphabet
-      rows.sort((a, b) => {
-        if (a.kind === "Tables") return -1;
-        if (b.kind === "Tables") return 1;
-        return a.kind.localeCompare(b.kind);
-      });
-      setData(rows);
+      const tables = await GetDatabaseTableSummary(db);
+      setData(tables);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -57,19 +43,92 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
     fetchSummary();
   }, [db]);
 
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB", "TB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  };
+
   const columns = [
     {
-      title: "Object Type",
-      dataIndex: "kind",
-      key: "kind",
-      render: (text: string) => <Text strong>{text}</Text>,
+      title: "Table Name",
+      dataIndex: "name",
+      key: "name",
+      fixed: "left" as const,
+      width: 200,
+      sorter: (a: main.TableSummary, b: main.TableSummary) => a.name.localeCompare(b.name),
+      render: (name: string, record: main.TableSummary) => (
+        <Space direction="vertical" size={0}>
+          <Text strong>{name}</Text>
+          <Text type="secondary" style={{ fontSize: 11 }}>{record.schema}</Text>
+        </Space>
+      ),
     },
     {
-      title: "Count",
-      dataIndex: "count",
-      key: "count",
+      title: "Type",
+      dataIndex: "kind",
+      key: "kind",
+      width: 120,
+      render: (kind: string) => {
+        let color = "blue";
+        if (kind === "TRANSIENT") color = "orange";
+        if (kind === "TEMPORARY") color = "purple";
+        return <Tag color={color} style={{ fontSize: 10 }}>{kind}</Tag>;
+      },
+    },
+    {
+      title: "Rows",
+      dataIndex: "rows",
+      key: "rows",
       align: "right" as const,
+      sorter: (a: main.TableSummary, b: main.TableSummary) => a.rows - b.rows,
       render: (num: number) => <Text>{num.toLocaleString()}</Text>,
+    },
+    {
+      title: "Size",
+      dataIndex: "bytes",
+      key: "bytes",
+      align: "right" as const,
+      sorter: (a: main.TableSummary, b: main.TableSummary) => a.bytes - b.bytes,
+      render: (bytes: number) => <Text>{formatBytes(bytes)}</Text>,
+    },
+    {
+      title: "Owner",
+      dataIndex: "owner",
+      key: "owner",
+      width: 120,
+      render: (owner: string) => <Tag style={{ fontSize: 10 }}>{owner}</Tag>,
+    },
+    {
+      title: "Retention",
+      dataIndex: "retentionTime",
+      key: "retentionTime",
+      width: 90,
+      align: "center" as const,
+      render: (days: number) => <Text>{days} d</Text>,
+    },
+    {
+      title: "Created",
+      dataIndex: "created",
+      key: "created",
+      width: 150,
+      render: (ts: string) => <Text style={{ fontSize: 11 }}>{new Date(ts).toLocaleString()}</Text>,
+    },
+    {
+      title: "Last Altered",
+      dataIndex: "lastAltered",
+      key: "lastAltered",
+      width: 150,
+      render: (ts: string) => <Text style={{ fontSize: 11 }}>{ts ? new Date(ts).toLocaleString() : "-"}</Text>,
+    },
+    {
+      title: "Comment",
+      dataIndex: "comment",
+      key: "comment",
+      ellipsis: true,
+      render: (text: string) => <Text type="secondary" style={{ fontSize: 11 }}>{text || "-"}</Text>,
     },
   ];
 
@@ -78,19 +137,20 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       title={
         <Space>
           <DashboardOutlined />
-          <span>Database Summary: {db}</span>
+          <span>Table Summary: {db}</span>
         </Space>
       }
       open={!!db}
       onCancel={onClose}
       footer={null}
-      width={400}
-      styles={{ body: { padding: "12px 24px 24px" } }}
+      width="90vw"
+      style={{ top: 20 }}
+      styles={{ body: { padding: "12px 24px 24px", maxHeight: "80vh", overflowY: "auto" } }}
     >
       <Space direction="vertical" style={{ width: "100%" }} size={16}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            Object counts in {db}
+            Found {data.length} tables in {db}
           </Text>
           <ReloadOutlined 
             style={{ cursor: "pointer", fontSize: 12, color: "var(--text-muted)" }} 
@@ -107,7 +167,8 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
           pagination={false}
           size="small"
           loading={loading}
-          rowKey="kind"
+          rowKey={(r) => `${r.schema}.${r.name}`}
+          scroll={{ x: 1200, y: "60vh" }}
           bordered
         />
       </Space>

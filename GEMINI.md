@@ -50,8 +50,8 @@ Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend +
 
 ### Database Reports
 - Cascading menu in sidebar for database nodes.
-- `ObjectSummariesModal` fetches aggregate counts via a complex `UNION ALL` query in `app.go`.
-- Uses `GetDatabaseObjectSummary` backend method.
+- `ObjectSummariesModal` fetches detailed table metadata via `GetDatabaseTableSummary` in `app.go`.
+- **Wails v2 Gotcha**: `time.Time` fields are formatted as RFC3339 strings in Go before being passed to the frontend to avoid "Not found: time.Time" build warnings and ensure clean TypeScript `any` -> `string` bindings.
 
 ### Insert Mapping
 - State management in `useInsertMappingStore`.

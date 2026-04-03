@@ -819,6 +819,36 @@ export namespace main {
 	        this.comment = source["comment"];
 	    }
 	}
+	export class TableSummary {
+	    name: string;
+	    schema: string;
+	    kind: string;
+	    rows: number;
+	    bytes: number;
+	    owner: string;
+	    retentionTime: number;
+	    created: string;
+	    lastAltered: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TableSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.schema = source["schema"];
+	        this.kind = source["kind"];
+	        this.rows = source["rows"];
+	        this.bytes = source["bytes"];
+	        this.owner = source["owner"];
+	        this.retentionTime = source["retentionTime"];
+	        this.created = source["created"];
+	        this.lastAltered = source["lastAltered"];
+	        this.comment = source["comment"];
+	    }
+	}
 	export class TaskFinalizabilityRow {
 	    name: string;
 	    disabledReason: string;
