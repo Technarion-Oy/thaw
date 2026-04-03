@@ -64,6 +64,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 - **Snowflake Scripting Support** — advanced support for Snowflake Scripting (used in Stored Procedures and UDFs):
   - **Syntax Highlighting** — distinct coloring for scripting keywords (`DECLARE`, `BEGIN`, `EXCEPTION`, `END`), control flow (`IF`, `LOOP`, `WHILE`), and async operations (`ASYNC`, `AWAIT`)
   - **Intelligent Snippets** — comprehensive collection of code templates for structural blocks, loops, cursors, and resultsets; triggers include `block`, `if`, `for`, `while`, `cursor_lifecycle`, and more
+  - **Transparent Dollar Quoting** — code inside `$$...$$` or `$tag$...$tag$` is treated as normal SQL for highlighting, diagnostics, and hover tooltips, perfect for Snowflake Scripting development
 
 ---
 

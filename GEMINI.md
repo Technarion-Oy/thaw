@@ -51,6 +51,7 @@ Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend +
 ### Snowflake Scripting Support
 - **Syntax Highlighting**: Custom categories `scripting` and `scripting_loop` added to `snowflakeMonarchLanguage` in `snowflakeSql.ts`.
 - **Snippets**: Registered via `monaco.languages.registerCompletionItemProvider` in `monacoSetup.ts`. Templates defined in `snowflakeSnippets.ts`.
+- **Dollar Quoting**: Treated as transparent delimiters (`delimiter.dollar`) in Monarch and diagnostics (`sqlDiagnostics.ts`) to allow full highlighting and structural error detection inside scripting bodies.
 
 ### Database Reports
 - Cascading menu in sidebar for database nodes.

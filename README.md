@@ -20,7 +20,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 
 ### SQL editor
 - Monaco editor with full SQL syntax highlighting
-- **Snowflake Scripting support** — advanced support for Snowflake Scripting (Stored Procedures/UDFs) with distinct syntax coloring for blocks (`DECLARE`/`BEGIN`), control flow, and async management; includes intelligent code snippets for all structural patterns
+- **Snowflake Scripting support** — advanced support for Snowflake Scripting (Stored Procedures/UDFs) with distinct syntax coloring for blocks (`DECLARE`/`BEGIN`), control flow, and async management; includes intelligent code snippets for all structural patterns; **transparent dollar quoting** treats code inside `$$` as normal SQL for full highlighting and diagnostics
 - Multi-tab editing — each open file gets its own tab; tabs restore their SQL, results and error state when switched back to
 - **Tab reordering** — drag any tab left or right to rearrange the tab strip; a vertical accent line shows the drop position
 - **Split view** — right-click any tab and choose **Split with: [tab name]** to view two editors side by side; a draggable vertical divider separates them and the ratio is persisted across sessions; each editor is fully independent with its own completions, hover definitions, and editing history; close the split with the × button in the secondary editor header, via **Close split view** in the right-click menu, or by closing either of the two tabs

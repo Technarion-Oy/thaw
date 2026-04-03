@@ -172,8 +172,9 @@ export const snowflakeMonarchLanguage = {
       // Single-quoted string literal
       [/'/, { token: "string", next: "@stringSingle" }],
 
-      // Dollar-quoted string (Snowflake JS/Python procedure body)
-      [/\$\$/, { token: "string", next: "@stringDollar" }],
+      // Dollar-quoted markers (Snowflake Scripting / JS / Python bodies)
+      // We treat these as delimiters so the content inside is highlighted as normal SQL.
+      [/\$[a-zA-Z0-9_]*\$/, "delimiter.dollar"],
 
       // Double-quoted identifier
       [/"/, { token: "identifier.quoted", next: "@quotedIdent" }],
@@ -240,12 +241,6 @@ export const snowflakeMonarchLanguage = {
       [/[^']+/, "string"],
       [/''/, "string"],
       [/'/, { token: "string", next: "@pop" }],
-    ],
-
-    stringDollar: [
-      [/[^\$]+/, "string"],
-      [/\$\$/, { token: "string", next: "@pop" }],
-      [/\$/, "string"],
     ],
 
     quotedIdent: [

@@ -137,21 +137,14 @@ export function validateSyntax(sql: string): DiagMarker[] {
       continue;
     }
 
-    // Dollar-quoted string  $tag$...$tag$  (tag may be empty: $$...$$)
+    // Dollar-quoted marker  $tag$...$tag$  (tag may be empty: $$)
+    // We treat these as delimiters and DO NOT skip the content, so the character-by-character
+    // scanner can see structural errors (unclosed parens, etc) inside the scripting block.
     if (ch === "$") {
       const dollarMatch = sql.slice(i).match(/^\$([a-zA-Z0-9_]*)\$/);
       if (dollarMatch) {
-        const openLine = line, openCol = col;
-        const tag = dollarMatch[0]; // e.g. "$$" or "$body$"
+        const tag = dollarMatch[0];
         i += tag.length; col += tag.length;
-        let closed = false;
-        while (i < sql.length) {
-          if (sql[i] === "\n") { line++; col = 1; i++; }
-          else if (sql.startsWith(tag, i)) {
-            i += tag.length; col += tag.length; closed = true; break;
-          } else { i++; col++; }
-        }
-        if (!closed) addError(`Unclosed dollar-quoted string`, openLine, openCol, openLine, openCol + tag.length);
         continue;
       }
     }
@@ -309,8 +302,6 @@ function splitSqlStatements(sql: string): SplitStmt[] {
       if (m) {
         const tag = m[0];
         i += tag.length;
-        while (i < sql.length && !sql.startsWith(tag, i)) i++;
-        if (i < sql.length) i += tag.length;
         continue;
       }
     }
@@ -466,10 +457,6 @@ function findBareWordPositions(sql: string, targets: Set<string>): WordToken[] {
       const m = sql.slice(i).match(/^\$([a-zA-Z0-9_]*)\$/);
       if (m) {
         const tag = m[0]; i += tag.length; col += tag.length;
-        while (i < sql.length && !sql.startsWith(tag, i)) {
-          if (sql[i] === "\n") { line++; col = 1; i++; } else { i++; col++; }
-        }
-        if (i < sql.length) { col += tag.length; i += tag.length; }
         continue;
       }
     }
@@ -754,11 +741,6 @@ export function validateSemantics(
       if (dollarMatch) {
         const tag = dollarMatch[0];
         i += tag.length; col += tag.length;
-        while (i < sql.length) {
-          if (sql[i] === "\n") { line++; col = 1; i++; }
-          else if (sql.startsWith(tag, i)) { i += tag.length; col += tag.length; break; }
-          else { i++; col++; }
-        }
         continue;
       }
     }
