@@ -50,6 +50,15 @@ const SQL_STMT_KEYWORDS = new Set([
   "ANALYZE",
 ]);
 
+// Snowflake scripting keywords that can start a statement inside $$
+const SCRIPT_STMT_KEYWORDS = new Set([
+  "BEGIN", "END", "DECLARE", "IF", "ELSE", "ELSEIF", "THEN", "CASE", "WHEN",
+  "FOR", "WHILE", "LOOP", "REPEAT", "UNTIL", "DO", "RETURN", "RAISE",
+  "EXCEPTION", "CALL", "LET", "VAR", "EXIT", "CONTINUE", "OPEN", "FETCH", "CLOSE",
+  // Normal SQL is also allowed
+  "SELECT", "INSERT", "UPDATE", "DELETE", "MERGE", "CREATE", "ALTER", "DROP", "TRUNCATE",
+]);
+
 // ── validateSyntax ────────────────────────────────────────────────────────────
 
 /**
@@ -60,6 +69,7 @@ const SQL_STMT_KEYWORDS = new Set([
  *   - Unclosed block comments
  *   - Unmatched / extra closing parens and brackets
  *   - Unclosed opening parens and brackets
+ *   - Missing ':' in scripting assignments (var = expr; -> var := expr;)
  *
  * Designed to have no false positives on well-formed Snowflake SQL.
  */
@@ -69,6 +79,9 @@ export function validateSyntax(sql: string): DiagMarker[] {
   // true at the start of the SQL and after each ';' — the next non-whitespace
   // bare-word token must be a recognised SQL statement-starting keyword.
   let atStmtStart = true;
+  // Similarly for statements inside a scripting block ($$)
+  let atScriptStmtStart = false;
+
   const parenStack: Array<{ char: string; line: number; col: number }> = [];
   const dollarStack: string[] = [];
 
@@ -83,6 +96,12 @@ export function validateSyntax(sql: string): DiagMarker[] {
     // Newline
     if (ch === "\n") {
       line++; col = 1; i++;
+      continue;
+    }
+
+    // Whitespace
+    if (ch === " " || ch === "\t" || ch === "\r") {
+      i++; col++;
       continue;
     }
 
@@ -120,6 +139,7 @@ export function validateSyntax(sql: string): DiagMarker[] {
         else { i++; col++; }
       }
       if (!closed) addError("Unclosed string literal", openLine, openCol, openLine, openCol + 1);
+      atStmtStart = false; atScriptStmtStart = false;
       continue;
     }
 
@@ -135,6 +155,21 @@ export function validateSyntax(sql: string): DiagMarker[] {
         else { i++; col++; }
       }
       if (!closed) addError("Unclosed quoted identifier", openLine, openCol, openLine, openCol + 1);
+      
+      // If we are at the start of a script statement and see a quoted identifier,
+      // it's likely a variable assignment. Check for '=' instead of ':='.
+      if (dollarStack.length > 0 && atScriptStmtStart && closed) {
+        let j = i, jCol = col;
+        while (j < sql.length && (sql[j] === " " || sql[j] === "\t" || sql[j] === "\n" || sql[j] === "\r")) {
+          if (sql[j] === "\n") break; // Don't look across lines for simple assignment check
+          j++; jCol++;
+        }
+        if (j < sql.length && sql[j] === "=" && sql[j+1] !== "=" && sql[j-1] !== ":" && sql[j-1] !== "<" && sql[j-1] !== ">" && sql[j-1] !== "!") {
+          addError("Expected ':=' for assignment", line, jCol, line, jCol + 1);
+        }
+      }
+
+      atStmtStart = false; atScriptStmtStart = false;
       continue;
     }
 
@@ -148,8 +183,10 @@ export function validateSyntax(sql: string): DiagMarker[] {
         // Toggle logic for the dollar stack to track if we are inside a script block
         if (dollarStack.length > 0 && dollarStack[dollarStack.length - 1] === tag) {
           dollarStack.pop();
+          atScriptStmtStart = false;
         } else {
           dollarStack.push(tag);
+          atScriptStmtStart = true; // Script body starts
         }
         i += tag.length; col += tag.length;
         continue;
@@ -160,6 +197,7 @@ export function validateSyntax(sql: string): DiagMarker[] {
     if (ch === "(" || ch === "[") {
       parenStack.push({ char: ch, line, col });
       i++; col++;
+      atStmtStart = false; atScriptStmtStart = false;
       continue;
     }
 
@@ -172,37 +210,57 @@ export function validateSyntax(sql: string): DiagMarker[] {
         parenStack.pop();
       }
       i++; col++;
+      atStmtStart = false; atScriptStmtStart = false;
       continue;
     }
 
     // Semicolon: marks end of one statement; next bare word must be a keyword
     if (ch === ";") {
-      // If we are inside dollar quotes, a semicolon is just a statement terminator
-      // within the script, not the end of the top-level SQL statement.
       if (dollarStack.length === 0) {
         atStmtStart = true;
+      } else {
+        atScriptStmtStart = true;
       }
       i++; col++;
       continue;
     }
 
-    // Post-semicolon (or start-of-SQL) word must be a known SQL statement keyword
-    if (atStmtStart && /[a-zA-Z_]/.test(ch)) {
+    // Post-semicolon (or start-of-SQL) word
+    if ((atStmtStart || atScriptStmtStart) && /[a-zA-Z_]/.test(ch)) {
       const wordLine = line, wordCol = col;
       const wordStart = i;
       while (i < sql.length && /\w/.test(sql[i])) { i++; col++; }
-      const word = sql.slice(wordStart, i);
-      atStmtStart = false;
-      if (!SQL_STMT_KEYWORDS.has(word.toUpperCase())) {
-        addError(`Unexpected token '${word}'`, wordLine, wordCol, wordLine, wordCol + word.length);
+      const word = sql.slice(wordStart, i).toUpperCase();
+      
+      if (atStmtStart) {
+        atStmtStart = false;
+        if (!SQL_STMT_KEYWORDS.has(word)) {
+          addError(`Unexpected token '${sql.slice(wordStart, i)}'`, wordLine, wordCol, wordLine, wordCol + word.length);
+        }
+      } else if (atScriptStmtStart) {
+        atScriptStmtStart = false;
+        // Scripting special: some keywords start a new statement context
+        if (word === "BEGIN" || word === "THEN" || word === "ELSE" || word === "DO" || word === "EXCEPTION") {
+          atScriptStmtStart = true;
+        } else if (!SCRIPT_STMT_KEYWORDS.has(word)) {
+          // If it's not a keyword, it's likely a variable assignment.
+          // Peek ahead for '='.
+          let j = i, jCol = col;
+          while (j < sql.length && (sql[j] === " " || sql[j] === "\t" || sql[j] === "\n" || sql[j] === "\r")) {
+            if (sql[j] === "\n") break;
+            j++; jCol++;
+          }
+          if (j < sql.length && sql[j] === "=" && sql[j+1] !== "=" && sql[j-1] !== ":" && sql[j-1] !== "<" && sql[j-1] !== ">" && sql[j-1] !== "!") {
+            addError("Expected ':=' for assignment", line, jCol, line, jCol + 1);
+          }
+        }
       }
       continue;
     }
 
-    // Any other non-whitespace character resets the statement-start flag silently
-    if (atStmtStart && ch !== " " && ch !== "\t" && ch !== "\r") {
-      atStmtStart = false;
-    }
+    // Any other character resets the start flags
+    atStmtStart = false;
+    atScriptStmtStart = false;
     i++; col++;
   }
 
