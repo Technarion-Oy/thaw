@@ -9,6 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { snowflakeMonarchLanguage, thawDarkTheme, thawLightTheme } from "./snowflakeSql";
+import { getSnowflakeSnippets } from "./snowflakeSnippets";
 import { configureMonacoYaml } from "monaco-yaml";
 import YamlWorker from "./yamlWorker?worker";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
@@ -74,6 +75,13 @@ export function ensureMonacoSetup(monaco: unknown): void {
 
   m.editor.defineTheme("thaw-dark",  thawDarkTheme  as any);
   m.editor.defineTheme("thaw-light", thawLightTheme as any);
+
+  // ── Snowflake Scripting Snippets ──────────────────────────────────────────
+  m.languages.registerCompletionItemProvider("sql", {
+    provideCompletionItems: () => ({
+      suggestions: getSnowflakeSnippets(m),
+    }),
+  });
 
   // ── Compatibility shim: monaco-worker-manager@2.x ↔ Monaco v0.55.x ────────
   //

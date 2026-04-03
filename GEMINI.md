@@ -48,6 +48,10 @@ Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend +
 - `Tree` component should have `selectedKeys={Array.from(selectedNodeKeys)}` and `multiple` props.
 - Logic for toggling selection resides in the `onSelect` handler (checking `nativeEvent.ctrlKey`/`metaKey`).
 
+### Snowflake Scripting Support
+- **Syntax Highlighting**: Custom categories `scripting` and `scripting_loop` added to `snowflakeMonarchLanguage` in `snowflakeSql.ts`.
+- **Snippets**: Registered via `monaco.languages.registerCompletionItemProvider` in `monacoSetup.ts`. Templates defined in `snowflakeSnippets.ts`.
+
 ### Database Reports
 - Cascading menu in sidebar for database nodes.
 - `ObjectSummariesModal` fetches detailed table metadata via `GetDatabaseTableSummary` in `app.go`.

@@ -58,7 +58,17 @@ export const snowflakeMonarchLanguage = {
   ],
 
   control: [
-    "CASE", "WHEN", "THEN", "ELSE", "END", "IF", "IFF",
+    "CASE", "WHEN", "THEN", "ELSE", "END", "IF", "IFF", "ELSEIF",
+  ],
+
+  scripting: [
+    "DECLARE", "BEGIN", "EXCEPTION", "END", "EXIT", "RETURN", "CONTINUE",
+    "RAISE", "OPEN", "FETCH", "CLOSE", "DEFAULT", "RESULTSET",
+    "ASYNC", "AWAIT", "CANCEL",
+  ],
+
+  scripting_loop: [
+    "FOR", "IN", "REVERSE", "TO", "DO", "LOOP", "WHILE", "REPEAT", "UNTIL",
   ],
 
   // Special constants (coloured separately from NULL-the-keyword)
@@ -189,6 +199,8 @@ export const snowflakeMonarchLanguage = {
             "@dcl":       "keyword.dcl",
             "@logic":     "keyword.logic",
             "@control":   "keyword.control",
+            "@scripting": "keyword.scripting",
+            "@scripting_loop": "keyword.scripting.loop",
             "@constants": "constant",
             "@datatypes": "type",
             "@builtins":  "predefined",
@@ -266,6 +278,10 @@ export const thawDarkTheme = {
     { token: "keyword.logic",    foreground: "79c0ff" },
     // Control flow — lavender   (CASE, WHEN, THEN, ELSE, END, IFF …)
     { token: "keyword.control",  foreground: "d2a8ff" },
+    // Scripting — lavender, bold (DECLARE, BEGIN, EXCEPTION, END …)
+    { token: "keyword.scripting", foreground: "d2a8ff", fontStyle: "bold" },
+    // Scripting loops — lavender
+    { token: "keyword.scripting.loop", foreground: "d2a8ff" },
     // Generic keyword fallback — matches any keyword.* token not caught above
     { token: "keyword",          foreground: "79c0ff" },
     // Constants — amber          (NULL, TRUE, FALSE, CURRENT_DATE …)
@@ -329,6 +345,10 @@ export const thawLightTheme = {
     { token: "keyword.logic",    foreground: "0550ae" },
     // Control flow — purple
     { token: "keyword.control",  foreground: "8250df" },
+    // Scripting — purple, bold
+    { token: "keyword.scripting", foreground: "8250df", fontStyle: "bold" },
+    // Scripting loops — purple
+    { token: "keyword.scripting.loop", foreground: "8250df" },
     // Generic keyword fallback — matches any keyword.* token not caught above
     { token: "keyword",          foreground: "0550ae" },
     // Constants — dark azure
