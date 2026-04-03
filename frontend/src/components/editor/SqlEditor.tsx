@@ -1977,15 +1977,12 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     );
 
     // ── Code Snippets cascading context menu ──────────────────────────────
-    // Previous attempts used addAction + event delegation (mouseover, pointermove
-    // capture) to open the submenu on hover, but Monaco calls stopPropagation()
-    // on mouse/pointer events inside its own menu items, making every
-    // event-delegation strategy unreliable.
-    //
-    // The guaranteed fix: inject our own <li> element directly into Monaco's
-    // context menu.  Because we create the element, Monaco has zero handlers
-    // on it.  mouseenter/mouseleave are unconditionally delivered by the
-    // browser — stopPropagation() by Monaco on OTHER items cannot affect them.
+    // Strategy: addAction registers "Code Snippets" so Monaco renders the <li>
+    // at the correct position in the context menu.  A MutationObserver then
+    // finds Monaco's rendered <li> and REPLACES it with our own DOM element.
+    // Because the replacement is a brand-new element Monaco knows nothing
+    // about, mouseenter/mouseleave fire unconditionally — Monaco's own
+    // stopPropagation() calls on OTHER items cannot affect our element at all.
 
     let injectedLi: HTMLElement | null = null;
 
@@ -2005,6 +2002,22 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       }
     };
 
+    // Register the action so Monaco renders the item in the correct group.
+    // run() is the click fallback: opens the submenu and closes Monaco's menu.
+    editor.addAction({
+      id: "thaw.snippets",
+      label: "Code Snippets",
+      contextMenuGroupId: "9_snippets",
+      contextMenuOrder: 0,
+      run: () => {
+        activeEditorRef.current = editor;
+        if (injectedLi) {
+          const rect = injectedLi.getBoundingClientRect();
+          setSnippetMenuPos({ x: rect.right - 2, y: rect.top });
+        }
+      },
+    });
+
     const snippetObserver = new MutationObserver(() => {
       const menu = document.querySelector(".monaco-menu-container");
 
@@ -2014,35 +2027,31 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         return;
       }
 
-      if (injectedLi) return; // already injected for this menu instance
+      if (injectedLi) return; // already replaced for this menu instance
 
-      // Monaco renders items inside ul.actions-container (role="menu").
-      const ul = menu.querySelector("ul.actions-container") ??
-                 menu.querySelector("ul[role='menu']") ??
-                 menu.querySelector("ul");
-      if (!ul) return;
+      // Find Monaco's rendered <li> for "Code Snippets".
+      // Monaco renders each action as:  <li class="action-item ...">
+      //                                   <a class="action-label ...">Code Snippets</a>
+      //                                 </li>
+      const allLis = Array.from(menu.querySelectorAll("li.action-item"));
+      const monacoLi = allLis.find((li) => {
+        const a = li.querySelector("a.action-label");
+        return a && a.textContent?.trim() === "Code Snippets";
+      }) as HTMLElement | undefined;
 
-      // ── Build a separator identical to Monaco's own separators ────────────
-      const sep = document.createElement("li");
-      sep.className = "action-item separator";
-      sep.setAttribute("role", "presentation");
-      sep.setAttribute("aria-hidden", "true");
-      const sepA = document.createElement("a");
-      sepA.className = "action-label separator";
-      sep.appendChild(sepA);
+      if (!monacoLi) return;
 
-      // ── Build the "Code Snippets ▶" parent item ───────────────────────────
-      // Reuse Monaco's own CSS classes so it inherits the correct font, padding,
-      // hover-highlight colour, and disabled state visuals automatically.
+      // ── Build our replacement <li> ────────────────────────────────────────
+      // Inherit Monaco's classes so the item looks identical (font, padding,
+      // hover colour) while carrying only our own event handlers.
       const li = document.createElement("li");
-      li.className = "action-item";
+      li.className = monacoLi.className;
       li.setAttribute("role", "presentation");
 
       const a = document.createElement("a");
       a.className = "action-label";
       a.setAttribute("role", "menuitem");
       a.setAttribute("tabindex", "-1");
-      // Flex layout pushes the ▶ arrow to the far right, matching native submenus.
       a.style.cssText = "display:flex;justify-content:space-between;align-items:center;gap:8px";
 
       const labelSpan = document.createElement("span");
@@ -2056,8 +2065,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       a.appendChild(arrowSpan);
       li.appendChild(a);
 
-      // mouseenter/mouseleave on an element WE created are always delivered —
-      // Monaco cannot intercept them.
+      // mouseenter/mouseleave on an element WE created fire unconditionally.
       li.addEventListener("mouseenter", () => {
         clearSnippetHide();
         activeEditorRef.current = editor;
@@ -2069,8 +2077,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         scheduleSnippetHide();
       });
 
-      // Clicking the parent item (rather than hovering) also opens the submenu
-      // and keeps Monaco's menu alive by stopping propagation.
+      // Click also opens the submenu and keeps Monaco's menu alive.
       li.addEventListener("click", (e) => {
         e.stopPropagation();
         clearSnippetHide();
@@ -2079,8 +2086,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         setSnippetMenuPos({ x: rect.right - 2, y: rect.top });
       });
 
-      ul.appendChild(sep);
-      ul.appendChild(li);
+      monacoLi.replaceWith(li);
       injectedLi = li;
     });
 
