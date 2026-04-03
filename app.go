@@ -239,55 +239,86 @@ func (a *App) LoadSnowflakeCLIConfig() (sfconfig.Config, error) {
 	return *scfg, nil
 }
 
-// GetDatabaseObjectSummary returns aggregate counts of various objects in the
+// TableSummary represents detailed information about a table in a database.
+type TableSummary struct {
+	Name          string `json:"name"`
+	Schema        string `json:"schema"`
+	Kind          string `json:"kind"` // BASE TABLE, VIEW, etc.
+	Rows          int64  `json:"rows"`
+	Bytes         int64  `json:"bytes"`
+	Owner         string `json:"owner"`
+	RetentionTime int    `json:"retentionTime"`
+	// Use string for Wails binding compatibility with time.Time
+	Created     string `json:"created"`
+	LastAltered string `json:"lastAltered"`
+	Comment     string `json:"comment"`
+}
+
+// GetDatabaseTableSummary returns detailed information about all tables in the
 // specified database.
-func (a *App) GetDatabaseObjectSummary(dbName string) (map[string]int, error) {
+func (a *App) GetDatabaseTableSummary(dbName string) ([]TableSummary, error) {
 	if a.client == nil {
 		return nil, fmt.Errorf("not connected")
 	}
 
-	// We use a single query with multiple UNION ALL to get all counts at once.
-	// We use IDENTIFIER(?) to safely pass the database name if needed, but here
-	// we just build the query with quoted database name for simplicity since
-	// we are already quoting identifiers elsewhere.
 	qdb := "\"" + strings.ReplaceAll(dbName, "\"", "\"\"") + "\""
-	
 	query := fmt.Sprintf(`
-		SELECT 'Tables' as KIND, COUNT(*) as CNT FROM %s.INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'
-		UNION ALL
-		SELECT 'Views', COUNT(*) FROM %s.INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'VIEW'
-		UNION ALL
-		SELECT 'Materialized Views', COUNT(*) FROM %s.INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'MATERIALIZED VIEW'
-		UNION ALL
-		SELECT 'Functions', COUNT(*) FROM %s.INFORMATION_SCHEMA.FUNCTIONS
-		UNION ALL
-		SELECT 'Procedures', COUNT(*) FROM %s.INFORMATION_SCHEMA.PROCEDURES
-		UNION ALL
-		SELECT 'Tasks', COUNT(*) FROM %s.INFORMATION_SCHEMA.TASKS
-		UNION ALL
-		SELECT 'Pipes', COUNT(*) FROM %s.INFORMATION_SCHEMA.PIPES
-		UNION ALL
-		SELECT 'Stages', COUNT(*) FROM %s.INFORMATION_SCHEMA.STAGES
-		UNION ALL
-		SELECT 'Streams', COUNT(*) FROM %s.INFORMATION_SCHEMA.STREAMS
-	`, qdb, qdb, qdb, qdb, qdb, qdb, qdb, qdb, qdb)
+		SELECT 
+			TABLE_NAME, 
+			TABLE_SCHEMA,
+			TABLE_TYPE, 
+			ROW_COUNT, 
+			BYTES, 
+			TABLE_OWNER, 
+			RETENTION_TIME, 
+			CREATED, 
+			LAST_ALTERED, 
+			COMMENT 
+		FROM %s.INFORMATION_SCHEMA.TABLES 
+		WHERE TABLE_TYPE IN ('BASE TABLE', 'TRANSIENT', 'TEMPORARY')
+		ORDER BY TABLE_SCHEMA, TABLE_NAME
+	`, qdb)
 
 	res, err := a.client.QuerySingle(a.ctx, query)
 	if err != nil {
 		return nil, err
 	}
 
-	counts := make(map[string]int)
+	var tables []TableSummary
 	for _, row := range res.Rows {
-		if len(row) >= 2 {
-			kind := fmt.Sprintf("%v", row[0])
-			cntStr := fmt.Sprintf("%v", row[1])
-			cnt, _ := strconv.Atoi(cntStr)
-			counts[kind] = cnt
+		if len(row) < 10 {
+			continue
 		}
+		t := TableSummary{
+			Name:    fmt.Sprintf("%v", row[0]),
+			Schema:  fmt.Sprintf("%v", row[1]),
+			Kind:    fmt.Sprintf("%v", row[2]),
+			Owner:   fmt.Sprintf("%v", row[5]),
+			Comment: fmt.Sprintf("%v", row[9]),
+		}
+
+		// Parsing numeric values
+		t.Rows, _ = strconv.ParseInt(fmt.Sprintf("%v", row[3]), 10, 64)
+		t.Bytes, _ = strconv.ParseInt(fmt.Sprintf("%v", row[4]), 10, 64)
+		retTime, _ := strconv.Atoi(fmt.Sprintf("%v", row[6]))
+		t.RetentionTime = retTime
+
+		// Parsing times and converting to string for Wails compatibility
+		if row[7] != nil {
+			if ts, ok := row[7].(time.Time); ok {
+				t.Created = ts.Format(time.RFC3339)
+			}
+		}
+		if row[8] != nil {
+			if ts, ok := row[8].(time.Time); ok {
+				t.LastAltered = ts.Format(time.RFC3339)
+			}
+		}
+
+		tables = append(tables, t)
 	}
 
-	return counts, nil
+	return tables, nil
 }
 
 // GetSnowflakeCLIConfigPath returns the current path from which Snowflake CLI
