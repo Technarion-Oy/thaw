@@ -655,6 +655,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   const ctxMenuPosRef       = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const activeEditorRef     = useRef<monacoLib.editor.ICodeEditor | null>(null);
   const snippetHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mirrors snippetMenuPos state so the capture-phase pointermove handler can
+  // read the latest value without stale-closure issues.
+  const snippetMenuPosRef   = useRef<{ x: number; y: number } | null>(null);
+  // Ref to the rendered submenu panel DOM node (used to check hover bounds).
+  const snippetPanelRef     = useRef<HTMLDivElement | null>(null);
 
   const scheduleHide = useCallback(() => {
     if (hoverHideTimerRef.current) clearTimeout(hoverHideTimerRef.current);
@@ -708,6 +713,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     document.addEventListener("click", dismiss);
     return () => document.removeEventListener("click", dismiss);
   }, [tooltipCtxMenu]);
+
+  // Keep snippetMenuPosRef in sync so the pointermove handler (a stable closure
+  // inside handleMount) always sees the current position without re-registration.
+  useEffect(() => { snippetMenuPosRef.current = snippetMenuPos; }, [snippetMenuPos]);
 
   // Dismiss the snippet submenu on any click outside it, or Escape key.
   useEffect(() => {
@@ -1975,14 +1984,21 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     );
 
     // ── Code Snippets cascading context menu ──────────────────────────────
-    // A single "Code Snippets →" entry appears in Monaco's context menu.
-    // A MutationObserver watches for the menu to appear and wires a mouseover
-    // listener on the container — mouseover bubbles from all children, so it
-    // reliably fires even inside Monaco's styled list items.  The addAction
-    // run() callback is the keyboard / direct-click fallback.
+    // A single "Code Snippets →" addAction entry appears in Monaco's right-click
+    // menu.  Opening on hover requires bypassing Monaco's own event handling:
+    // Monaco calls stopPropagation() on pointer/mouse events inside its menu
+    // items, so container-level event delegation (mouseover, mouseenter) never
+    // fires on our listener.
+    //
+    // Solution: document.addEventListener('pointermove', handler, true)
+    // A capture-phase listener fires before ANY element handler in the subtree,
+    // making stopPropagation() calls by Monaco irrelevant.  The handler uses
+    // getBoundingClientRect() to check whether the pointer is over the menu item
+    // or over the submenu panel, and shows/hides accordingly.
+    //
+    // The listener is added only while Monaco's context menu is visible and
+    // removed the moment the menu closes — zero overhead at all other times.
 
-    // Capture the right-click coordinates so run() can fall back to them if
-    // getBoundingClientRect() isn't available yet.
     const snippetDomNode = editor.getDomNode();
     if (snippetDomNode) {
       snippetDomNode.addEventListener("contextmenu", (e: MouseEvent) => {
@@ -1991,22 +2007,80 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     }
 
     let snippetMenuItemEl: HTMLElement | null = null;
-    let openedViaClick = false; // prevents observer from closing a click-opened submenu
+    let openedViaClick    = false; // set by run(); suppresses observer auto-close
+    let pointerMoveActive = false;
+
+    const clearSnippetHide = () => {
+      if (snippetHideTimerRef.current) {
+        clearTimeout(snippetHideTimerRef.current);
+        snippetHideTimerRef.current = null;
+      }
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (!snippetMenuItemEl) return;
+
+      const ir = snippetMenuItemEl.getBoundingClientRect();
+      const overItem =
+        e.clientX >= ir.left && e.clientX <= ir.right &&
+        e.clientY >= ir.top  && e.clientY <= ir.bottom;
+
+      const pr        = snippetPanelRef.current?.getBoundingClientRect();
+      const overPanel = pr != null &&
+        e.clientX >= pr.left && e.clientX <= pr.right &&
+        e.clientY >= pr.top  && e.clientY <= pr.bottom;
+
+      if (overItem) {
+        clearSnippetHide();
+        activeEditorRef.current = editor;
+        const newX = ir.right - 2;
+        const newY = ir.top;
+        // Only call setState when position actually changes to avoid
+        // triggering a re-render on every pointer move.
+        const cur = snippetMenuPosRef.current;
+        if (!cur || cur.x !== newX || cur.y !== newY) {
+          setSnippetMenuPos({ x: newX, y: newY });
+        }
+      } else if (overPanel) {
+        clearSnippetHide();
+      } else {
+        // Pointer is over another menu item or outside both — schedule hide
+        // with a short grace period so the user can slide diagonally from
+        // the menu item into the submenu panel without it disappearing.
+        if (!snippetHideTimerRef.current) {
+          snippetHideTimerRef.current = setTimeout(() => {
+            snippetHideTimerRef.current = null;
+            setSnippetMenuPos(null);
+          }, 120);
+        }
+      }
+    };
+
+    const startPointerTracking = () => {
+      if (pointerMoveActive) return;
+      pointerMoveActive = true;
+      document.addEventListener("pointermove", onPointerMove, true);
+    };
+
+    const stopPointerTracking = () => {
+      if (!pointerMoveActive) return;
+      pointerMoveActive = false;
+      document.removeEventListener("pointermove", onPointerMove, true);
+    };
 
     const snippetObserver = new MutationObserver(() => {
       const menu = document.querySelector(".monaco-menu-container");
 
       if (!menu) {
-        // Context menu was closed — hide submenu unless run() just opened it
         if (!openedViaClick) setSnippetMenuPos(null);
         openedViaClick = false;
         snippetMenuItemEl = null;
+        stopPointerTracking();
         return;
       }
 
       if (snippetMenuItemEl) return; // already wired for this menu instance
 
-      // Find the "Code Snippets →" list item
       for (const el of Array.from(menu.querySelectorAll("span.action-label, a.action-label"))) {
         if (el.textContent?.includes("Code Snippets")) {
           snippetMenuItemEl = (el.closest(".action-item") ?? el) as HTMLElement;
@@ -2015,45 +2089,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       }
       if (!snippetMenuItemEl) return;
 
-      // mouseover bubbles from every child — open submenu when pointer is over
-      // our item; schedule hide when it moves to a different item.
-      menu.addEventListener("mouseover", (e: Event) => {
-        if (!snippetMenuItemEl) return;
-        const target = e.target as Element;
-        const overItem = snippetMenuItemEl === target || snippetMenuItemEl.contains(target);
-        if (overItem) {
-          if (snippetHideTimerRef.current) {
-            clearTimeout(snippetHideTimerRef.current);
-            snippetHideTimerRef.current = null;
-          }
-          activeEditorRef.current = editor;
-          const rect = snippetMenuItemEl.getBoundingClientRect();
-          setSnippetMenuPos({ x: rect.right - 2, y: rect.top });
-        } else {
-          // Pointer moved to another menu item — give a short grace period so
-          // the user can slide diagonally from the item into the submenu panel.
-          if (!snippetHideTimerRef.current) {
-            snippetHideTimerRef.current = setTimeout(() => {
-              snippetHideTimerRef.current = null;
-              setSnippetMenuPos(null);
-            }, 150);
-          }
-        }
-      });
-
-      // Pointer left the context menu entirely
-      menu.addEventListener("mouseleave", () => {
-        if (!snippetHideTimerRef.current) {
-          snippetHideTimerRef.current = setTimeout(() => {
-            snippetHideTimerRef.current = null;
-            setSnippetMenuPos(null);
-          }, 150);
-        }
-      });
+      startPointerTracking();
     });
 
     snippetObserver.observe(document.body, { childList: true, subtree: true });
-    editor.onDidDispose(() => snippetObserver.disconnect());
+    editor.onDidDispose(() => { snippetObserver.disconnect(); stopPointerTracking(); });
 
     editor.addAction({
       id: "thaw.snippets",
@@ -2402,14 +2442,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       );
       return (
         <div
+          ref={snippetPanelRef}
           onClick={(e) => e.stopPropagation()}
-          onMouseEnter={() => {
-            if (snippetHideTimerRef.current) {
-              clearTimeout(snippetHideTimerRef.current);
-              snippetHideTimerRef.current = null;
-            }
-          }}
-          onMouseLeave={() => setSnippetMenuPos(null)}
           style={{
             position: "fixed", left: snippetMenuPos.x, top: snippetMenuPos.y,
             zIndex: 10002, background: "var(--bg-overlay)", border: "1px solid var(--border)",
@@ -2443,6 +2477,14 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                         ed.focus();
                       }
                       setSnippetMenuPos(null);
+                      // When the submenu was opened by hovering (Monaco's context
+                      // menu is still in the DOM), dismiss it with Escape so the
+                      // user doesn't have to close it manually.
+                      if (document.querySelector(".monaco-menu-container")) {
+                        document.dispatchEvent(new KeyboardEvent("keydown", {
+                          key: "Escape", bubbles: true, cancelable: true,
+                        }));
+                      }
                     }}
                   >{label}</div>
                 );
