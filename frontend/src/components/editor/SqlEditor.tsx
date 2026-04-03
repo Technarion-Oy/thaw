@@ -2020,6 +2020,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       run: () => {
         activeEditorRef.current = editor;
         openedByClick = true; // prevent observer from nulling pos on menu close
+        console.log("[thaw/snippets] run() fired, savedItemRect:", savedItemRect, "injectedLi:", !!injectedLi);
         if (savedItemRect) {
           setSnippetMenuPos(savedItemRect);
         }
@@ -2042,6 +2043,16 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
       if (injectedLi) return; // already replaced for this menu instance
 
+      // ── Diagnostics (remove after confirming DOM structure) ───────────────
+      const allItems = Array.from(menu.querySelectorAll("li"));
+      console.log("[thaw/snippets] context menu opened — li count:", allItems.length);
+      allItems.forEach((li, i) => {
+        const a = li.querySelector("a");
+        if (a) {
+          console.log(`[thaw/snippets]  li[${i}] classes="${li.className}" a.textContent="${a.textContent?.trim()}" a.ariaLabel="${a.getAttribute("aria-label")}" a.classes="${a.className}"`);
+        }
+      });
+
       // Find Monaco's rendered <li> for "Code Snippets".
       // Monaco renders: <li class="action-item ...">
       //                   <a class="action-label ...">Code Snippets</a>
@@ -2051,6 +2062,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const a = li.querySelector("a.action-label");
         return a && a.textContent?.trim() === "Code Snippets";
       }) as HTMLElement | undefined;
+
+      console.log("[thaw/snippets] monacoLi found:", !!monacoLi, "savedItemRect:", savedItemRect);
 
       if (!monacoLi) return;
 
