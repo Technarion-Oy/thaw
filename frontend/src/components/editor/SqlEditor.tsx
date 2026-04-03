@@ -20,6 +20,7 @@ import { useSessionStore } from "../../store/sessionStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs } from "../../../wailsjs/go/main/App";
+import { getSnowflakeSnippets } from "./snowflakeSnippets";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { DiagMarker, ColInfo, validateSyntax, validateSemantics, validateWithParser, validateBareColumnRefs } from "../../utils/sqlDiagnostics";
 import { extractDeclaredVariables, isColonRequired } from "../../utils/snowflakeScriptingUtils";
@@ -1956,7 +1957,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     // ── Snowflake Scripting Snippets Context Menu ──────────────────────────
     // Group all snippets together in the context menu.
     const snippets = getSnowflakeSnippets(monaco);
-    snippets.forEach((s, idx) => {
+    snippets.forEach((s: monacoLib.languages.CompletionItem, idx: number) => {
       editor.addAction({
         id: `thaw.snippet.${s.label}`,
         label: `Snippet: ${s.label}`,
