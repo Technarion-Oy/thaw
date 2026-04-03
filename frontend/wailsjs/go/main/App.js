@@ -230,6 +230,10 @@ export function GetDatabaseCrossDeps(arg1, arg2) {
   return window['go']['main']['App']['GetDatabaseCrossDeps'](arg1, arg2);
 }
 
+export function GetDatabaseObjectSummary(arg1) {
+  return window['go']['main']['App']['GetDatabaseObjectSummary'](arg1);
+}
+
 export function GetDatabaseRetentionDays(arg1) {
   return window['go']['main']['App']['GetDatabaseRetentionDays'](arg1);
 }

@@ -239,6 +239,57 @@ func (a *App) LoadSnowflakeCLIConfig() (sfconfig.Config, error) {
 	return *scfg, nil
 }
 
+// GetDatabaseObjectSummary returns aggregate counts of various objects in the
+// specified database.
+func (a *App) GetDatabaseObjectSummary(dbName string) (map[string]int, error) {
+	if a.client == nil {
+		return nil, fmt.Errorf("not connected")
+	}
+
+	// We use a single query with multiple UNION ALL to get all counts at once.
+	// We use IDENTIFIER(?) to safely pass the database name if needed, but here
+	// we just build the query with quoted database name for simplicity since
+	// we are already quoting identifiers elsewhere.
+	qdb := "\"" + strings.ReplaceAll(dbName, "\"", "\"\"") + "\""
+	
+	query := fmt.Sprintf(`
+		SELECT 'Tables' as KIND, COUNT(*) as CNT FROM %s.INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'
+		UNION ALL
+		SELECT 'Views', COUNT(*) FROM %s.INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'VIEW'
+		UNION ALL
+		SELECT 'Materialized Views', COUNT(*) FROM %s.INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'MATERIALIZED VIEW'
+		UNION ALL
+		SELECT 'Functions', COUNT(*) FROM %s.INFORMATION_SCHEMA.FUNCTIONS
+		UNION ALL
+		SELECT 'Procedures', COUNT(*) FROM %s.INFORMATION_SCHEMA.PROCEDURES
+		UNION ALL
+		SELECT 'Tasks', COUNT(*) FROM %s.INFORMATION_SCHEMA.TASKS
+		UNION ALL
+		SELECT 'Pipes', COUNT(*) FROM %s.INFORMATION_SCHEMA.PIPES
+		UNION ALL
+		SELECT 'Stages', COUNT(*) FROM %s.INFORMATION_SCHEMA.STAGES
+		UNION ALL
+		SELECT 'Streams', COUNT(*) FROM %s.INFORMATION_SCHEMA.STREAMS
+	`, qdb, qdb, qdb, qdb, qdb, qdb, qdb, qdb, qdb)
+
+	res, err := a.client.QuerySingle(a.ctx, query)
+	if err != nil {
+		return nil, err
+	}
+
+	counts := make(map[string]int)
+	for _, row := range res.Rows {
+		if len(row) >= 2 {
+			kind := fmt.Sprintf("%v", row[0])
+			cntStr := fmt.Sprintf("%v", row[1])
+			cnt, _ := strconv.Atoi(cntStr)
+			counts[kind] = cnt
+		}
+	}
+
+	return counts, nil
+}
+
 // GetSnowflakeCLIConfigPath returns the current path from which Snowflake CLI
 // connection profiles are being loaded.
 func (a *App) GetSnowflakeCLIConfigPath() (string, error) {

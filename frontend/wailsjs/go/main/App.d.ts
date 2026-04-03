@@ -125,6 +125,8 @@ export function GetCurrentUser():Promise<string>;
 
 export function GetDatabaseCrossDeps(arg1:string,arg2:Array<string>):Promise<Array<snowflake.SchemaRef>>;
 
+export function GetDatabaseObjectSummary(arg1:string):Promise<Record<string, number>>;
+
 export function GetDatabaseRetentionDays(arg1:string):Promise<number>;
 
 export function GetERDiagramData(arg1:string):Promise<snowflake.ERDiagramData>;

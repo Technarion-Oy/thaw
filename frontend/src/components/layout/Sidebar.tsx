@@ -24,6 +24,7 @@ import {
   FolderOutlined,
   ReloadOutlined,
   PlayCircleOutlined,
+  BarChartOutlined,
   CloudUploadOutlined,
   DeleteOutlined,
   RollbackOutlined,
@@ -65,6 +66,7 @@ import SelectFunctionModal from "../function/SelectFunctionModal";
 import CreateTaskModal from "../task/CreateTaskModal";
 import CreateDatabaseModal from "../database/CreateDatabaseModal";
 import CreateTableModal from "../database/CreateTableModal";
+import ObjectSummariesModal from "../database/ObjectSummariesModal";
 import ExecuteTaskModal from "../task/ExecuteTaskModal";
 import TaskGraphModal from "../task/TaskGraphModal";
 import TaskPropertiesModal from "../task/TaskPropertiesModal";
@@ -392,6 +394,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [executeNotebookModal, setExecuteNotebookModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createDbOpen, setCreateDbOpen] = useState(false);
   const [createTableModal, setCreateTableModal] = useState<{ db: string; schema: string } | null>(null);
+  const [objectSummariesModal, setObjectSummariesModal] = useState<string | null>(null);
   const [createTaskModal, setCreateTaskModal] = useState<{ db: string; schema: string } | null>(null);
   const [executeTaskModal, setExecuteTaskModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [taskPropsModal, setTaskPropsModal] = useState<{ db: string; schema: string; name: string; isFinalizer?: boolean } | null>(null);
@@ -816,6 +819,13 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const schema = parts[2];
     setCtxMenu(null);
     setCreateTableModal({ db, schema });
+  };
+
+  const openObjectSummaries = () => {
+    if (!ctxMenu) return;
+    const db = ctxMenu.nodeKey.slice("db:".length);
+    setCtxMenu(null);
+    setObjectSummariesModal(db);
   };
 
   const openCreateTask = () => {
@@ -1612,6 +1622,11 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "db" && menuItem("Show Dropped Schemas…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedSchemas)}
           {ctxMenu.nodeType === "db" && menuItem("Export DDL", <CloudUploadOutlined style={{ fontSize: 12 }} />, exportDatabase)}
           {ctxMenu.nodeType === "db" && menuItem("ER Diagram…", <ApartmentOutlined style={{ fontSize: 12 }} />, generateERDiagram)}
+          {ctxMenu.nodeType === "db" && menuItemSub("Reports", <BarChartOutlined style={{ fontSize: 12 }} />, "db-reports", (
+            <>
+              {menuItem("Object Summaries", <DashboardOutlined style={{ fontSize: 12 }} />, openObjectSummaries)}
+            </>
+          ))}
           {ctxMenu.nodeType === "db" && menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets)}
           {ctxMenu.nodeType === "db" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "schema" && menuItem("Insert Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
@@ -1841,6 +1856,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={createTableModal.schema}
           onClose={() => setCreateTableModal(null)}
           onSuccess={() => refreshDatabaseByName(createTableModal.db)}
+        />
+      )}
+
+      {/* Object Summaries modal */}
+      {objectSummariesModal && (
+        <ObjectSummariesModal
+          db={objectSummariesModal}
+          onClose={() => setObjectSummariesModal(null)}
         />
       )}
 

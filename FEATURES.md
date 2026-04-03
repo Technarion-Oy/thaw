@@ -189,6 +189,8 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 - **Refresh** — reload the full object tree with one click
 - **Time Travel / Undrop** — list dropped databases, schemas, and tables within their retention window and restore them with a single click
 - **ER Diagram** — generate an Entity Relationship Diagram for any database; filter by schema, zoom, pan, and copy the Mermaid source
+- **Database Reports** — right-click a database node to access a **Reports** cascading menu:
+  - **Object Summaries** — provides a high-level snapshot of the selected database's contents; displays aggregate counts of tables, views, materialized views, functions, procedures, tasks, pipes, stages, and streams that the current role has permission to see
 - **Visual ER Designer** — interactively design or modify tables: add columns, set data types, define primary and foreign keys, preview the live Mermaid diagram, then generate and apply the necessary `CREATE TABLE` / `ALTER TABLE` SQL in one step
 
 ---
