@@ -81,9 +81,14 @@ export function validateSyntax(sql: string): DiagMarker[] {
   let atStmtStart = true;
   // Similarly for statements inside a scripting block ($$)
   let atScriptStmtStart = false;
+  // Tracking if we are inside a DECLARE block
+  let inDeclareBlock = false;
 
   const parenStack: Array<{ char: string; line: number; col: number }> = [];
   const dollarStack: string[] = [];
+  
+  // Set of declared variables in the current dollar block (case-insensitive)
+  let declaredVars = new Set<string>();
 
   const addError = (msg: string, sl: number, sc: number, el: number, ec: number): void => {
     markers.push({ startLineNumber: sl, startColumn: sc, endLineNumber: el, endColumn: ec, message: msg, severity: 8 });
@@ -184,9 +189,12 @@ export function validateSyntax(sql: string): DiagMarker[] {
         if (dollarStack.length > 0 && dollarStack[dollarStack.length - 1] === tag) {
           dollarStack.pop();
           atScriptStmtStart = false;
+          inDeclareBlock = false;
+          declaredVars = new Set(); // Reset for next block
         } else {
           dollarStack.push(tag);
           atScriptStmtStart = true; // Script body starts
+          declaredVars = new Set();
         }
         i += tag.length; col += tag.length;
         continue;
@@ -230,28 +238,58 @@ export function validateSyntax(sql: string): DiagMarker[] {
       const wordLine = line, wordCol = col;
       const wordStart = i;
       while (i < sql.length && /\w/.test(sql[i])) { i++; col++; }
-      const word = sql.slice(wordStart, i).toUpperCase();
+      const wordRaw = sql.slice(wordStart, i);
+      const word = wordRaw.toUpperCase();
       
       if (atStmtStart) {
         atStmtStart = false;
         if (!SQL_STMT_KEYWORDS.has(word)) {
-          addError(`Unexpected token '${sql.slice(wordStart, i)}'`, wordLine, wordCol, wordLine, wordCol + word.length);
+          addError(`Unexpected token '${wordRaw}'`, wordLine, wordCol, wordLine, wordCol + wordRaw.length);
         }
       } else if (atScriptStmtStart) {
         atScriptStmtStart = false;
-        // Scripting special: some keywords start a new statement context
-        if (word === "BEGIN" || word === "THEN" || word === "ELSE" || word === "DO" || word === "EXCEPTION") {
+        
+        if (word === "DECLARE") {
+          inDeclareBlock = true;
           atScriptStmtStart = true;
+        } else if (word === "BEGIN") {
+          inDeclareBlock = false;
+          atScriptStmtStart = true;
+        } else if (word === "THEN" || word === "ELSE" || word === "DO" || word === "EXCEPTION") {
+          atScriptStmtStart = true;
+        } else if (word === "LET" || word === "VAR") {
+          // Inline declaration: peek ahead for variable name
+          let j = i;
+          while (j < sql.length && (sql[j] === " " || sql[j] === "\t" || sql[j] === "\n" || sql[j] === "\r")) j++;
+          if (j < sql.length && /[a-zA-Z_]/.test(sql[j])) {
+            const varStart = j;
+            while (j < sql.length && /\w/.test(sql[j])) j++;
+            const varName = sql.slice(varStart, j).toUpperCase();
+            declaredVars.add(varName);
+          }
+        } else if (inDeclareBlock) {
+          // Inside DECLARE, anything that isn't a known keyword is a variable declaration
+          if (!SCRIPT_STMT_KEYWORDS.has(word)) {
+            declaredVars.add(word);
+          }
+          atScriptStmtStart = true; // Every line in DECLARE is a start
         } else if (!SCRIPT_STMT_KEYWORDS.has(word)) {
-          // If it's not a keyword, it's likely a variable assignment.
-          // Peek ahead for '='.
+          // If it's not a keyword, it's likely a variable assignment or usage.
+          // Peek ahead for assignment ':=' or '='
           let j = i, jCol = col;
           while (j < sql.length && (sql[j] === " " || sql[j] === "\t" || sql[j] === "\n" || sql[j] === "\r")) {
             if (sql[j] === "\n") break;
             j++; jCol++;
           }
-          if (j < sql.length && sql[j] === "=" && sql[j+1] !== "=" && sql[j-1] !== ":" && sql[j-1] !== "<" && sql[j-1] !== ">" && sql[j-1] !== "!") {
-            addError("Expected ':=' for assignment", line, jCol, line, jCol + 1);
+          const isAssignment = j < sql.length && ((sql[j] === ":" && sql[j+1] === "=") || (sql[j] === "=" && sql[j+1] !== "="));
+          
+          if (isAssignment) {
+            if (sql[j] === "=" && sql[j+1] !== "=" && sql[j-1] !== ":" && sql[j-1] !== "<" && sql[j-1] !== ">" && sql[j-1] !== "!") {
+              addError("Expected ':=' for assignment", line, jCol, line, jCol + 1);
+            }
+            if (!declaredVars.has(word)) {
+              addError(`Variable '${wordRaw}' is not declared`, wordLine, wordCol, wordLine, wordCol + wordRaw.length);
+            }
           }
         }
       }

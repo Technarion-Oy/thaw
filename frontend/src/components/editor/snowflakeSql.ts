@@ -64,7 +64,7 @@ export const snowflakeMonarchLanguage = {
   scripting: [
     "DECLARE", "BEGIN", "EXCEPTION", "END", "EXIT", "RETURN", "CONTINUE",
     "RAISE", "OPEN", "FETCH", "CLOSE", "DEFAULT", "RESULTSET",
-    "ASYNC", "AWAIT", "CANCEL",
+    "ASYNC", "AWAIT", "CANCEL", "LET", "VAR",
   ],
 
   scripting_loop: [
