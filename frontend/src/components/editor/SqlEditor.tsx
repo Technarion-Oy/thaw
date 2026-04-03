@@ -1977,14 +1977,21 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     );
 
     // ── Code Snippets cascading context menu ──────────────────────────────
-    // Strategy: addAction registers "Code Snippets" so Monaco renders the <li>
-    // at the correct position in the context menu.  A MutationObserver then
-    // finds Monaco's rendered <li> and REPLACES it with our own DOM element.
-    // Because the replacement is a brand-new element Monaco knows nothing
-    // about, mouseenter/mouseleave fire unconditionally — Monaco's own
-    // stopPropagation() calls on OTHER items cannot affect our element at all.
+    // Strategy:
+    //  1. addAction registers "Code Snippets" so Monaco renders the <li> in
+    //     the correct group.
+    //  2. MutationObserver finds Monaco's <li> and REPLACES it with our own
+    //     element — since we own it Monaco never attaches handlers, so
+    //     mouseenter fires unconditionally (hover support).
+    //  3. savedItemRect captures the position while the menu is still in the
+    //     DOM so run() (Monaco's click callback) can open the submenu even
+    //     after Monaco removes the menu.
+    //  4. openedByClick flag prevents the observer's "menu closed" branch
+    //     from nulling snippetMenuPos right after run() set it.
 
     let injectedLi: HTMLElement | null = null;
+    let savedItemRect: { x: number; y: number } | null = null;
+    let openedByClick = false;
 
     const clearSnippetHide = () => {
       if (snippetHideTimerRef.current) {
@@ -2003,7 +2010,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     };
 
     // Register the action so Monaco renders the item in the correct group.
-    // run() is the click fallback: opens the submenu and closes Monaco's menu.
+    // Monaco calls run() when the user clicks our item (before closing the
+    // menu), so savedItemRect is still valid here.
     editor.addAction({
       id: "thaw.snippets",
       label: "Code Snippets",
@@ -2011,9 +2019,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       contextMenuOrder: 0,
       run: () => {
         activeEditorRef.current = editor;
-        if (injectedLi) {
-          const rect = injectedLi.getBoundingClientRect();
-          setSnippetMenuPos({ x: rect.right - 2, y: rect.top });
+        openedByClick = true; // prevent observer from nulling pos on menu close
+        if (savedItemRect) {
+          setSnippetMenuPos(savedItemRect);
         }
       },
     });
@@ -2022,17 +2030,22 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       const menu = document.querySelector(".monaco-menu-container");
 
       if (!menu) {
-        setSnippetMenuPos(null);
+        // Only hide the submenu when it was opened by hover (not by a click
+        // that Monaco handled — in that case openedByClick is true and
+        // snippetMenuPos was just set by run(), so we must not null it).
+        if (!openedByClick) setSnippetMenuPos(null);
+        openedByClick = false;
         injectedLi = null;
+        savedItemRect = null;
         return;
       }
 
       if (injectedLi) return; // already replaced for this menu instance
 
       // Find Monaco's rendered <li> for "Code Snippets".
-      // Monaco renders each action as:  <li class="action-item ...">
-      //                                   <a class="action-label ...">Code Snippets</a>
-      //                                 </li>
+      // Monaco renders: <li class="action-item ...">
+      //                   <a class="action-label ...">Code Snippets</a>
+      //                 </li>
       const allLis = Array.from(menu.querySelectorAll("li.action-item"));
       const monacoLi = allLis.find((li) => {
         const a = li.querySelector("a.action-label");
@@ -2041,9 +2054,13 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
       if (!monacoLi) return;
 
+      // Save position NOW while the element is in the DOM and has a valid
+      // bounding rect — run() may fire after Monaco has removed the element.
+      const rect = monacoLi.getBoundingClientRect();
+      savedItemRect = { x: rect.right - 2, y: rect.top };
+
       // ── Build our replacement <li> ────────────────────────────────────────
-      // Inherit Monaco's classes so the item looks identical (font, padding,
-      // hover colour) while carrying only our own event handlers.
+      // Inherit Monaco's classes for identical styling; carry only our handlers.
       const li = document.createElement("li");
       li.className = monacoLi.className;
       li.setAttribute("role", "presentation");
@@ -2065,29 +2082,33 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       a.appendChild(arrowSpan);
       li.appendChild(a);
 
-      // mouseenter/mouseleave on an element WE created fire unconditionally.
+      // mouseenter/mouseleave on our element fire unconditionally.
       li.addEventListener("mouseenter", () => {
         clearSnippetHide();
         activeEditorRef.current = editor;
-        const rect = li.getBoundingClientRect();
-        setSnippetMenuPos({ x: rect.right - 2, y: rect.top });
+        const r = li.getBoundingClientRect();
+        setSnippetMenuPos({ x: r.right - 2, y: r.top });
       });
 
       li.addEventListener("mouseleave", () => {
         scheduleSnippetHide();
       });
 
-      // Click also opens the submenu and keeps Monaco's menu alive.
+      // Click: open submenu and prevent Monaco from dismissing its own menu.
       li.addEventListener("click", (e) => {
         e.stopPropagation();
+        openedByClick = true; // keep submenu alive if Monaco closes anyway
         clearSnippetHide();
         activeEditorRef.current = editor;
-        const rect = li.getBoundingClientRect();
-        setSnippetMenuPos({ x: rect.right - 2, y: rect.top });
+        const r = li.getBoundingClientRect();
+        setSnippetMenuPos({ x: r.right - 2, y: r.top });
       });
 
       monacoLi.replaceWith(li);
       injectedLi = li;
+      // Refresh savedItemRect from the newly placed replacement element.
+      const r2 = li.getBoundingClientRect();
+      if (r2.width > 0) savedItemRect = { x: r2.right - 2, y: r2.top };
     });
 
     snippetObserver.observe(document.body, { childList: true, subtree: true });
