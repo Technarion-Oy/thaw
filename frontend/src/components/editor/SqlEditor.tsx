@@ -22,6 +22,7 @@ import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/run
 import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs } from "../../../wailsjs/go/main/App";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { DiagMarker, ColInfo, validateSyntax, validateSemantics, validateWithParser, validateBareColumnRefs } from "../../utils/sqlDiagnostics";
+import { extractDeclaredVariables, isColonRequired } from "../../utils/snowflakeScriptingUtils";
 
 // Module-level DDL cache and hover provider handle so we only register once
 // and don't accumulate duplicate providers on editor remounts.
@@ -1273,11 +1274,25 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
         // ── No qualifier → keywords + databases + all object names ────────
         const { databases, schemas, objects } = useObjectStore.getState();
+        const fullContent = model.getValue();
+        const offset = model.getOffsetAt(position);
+        
+        // Extract declared variables from the current document
+        const declaredVars = extractDeclaredVariables(fullContent);
+        const needsColon = isColonRequired(fullContent, offset);
 
         const keywordSuggestions = SNOWFLAKE_KEYWORDS.map((kw) => ({
           label:      kw,
           kind:       monaco.languages.CompletionItemKind.Keyword,
           insertText: kw,
+          range,
+        }));
+
+        const variableSuggestions = Array.from(declaredVars).map((v) => ({
+          label:      needsColon ? ":" + v : v,
+          kind:       monaco.languages.CompletionItemKind.Variable,
+          insertText: needsColon ? ":" + v : v,
+          detail:     "SCRIPT VARIABLE",
           range,
         }));
 
@@ -1393,7 +1408,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         }
 
         return {
-          suggestions: [...contextColSuggestions, ...keywordSuggestions, ...dbSuggestions, ...schemaSuggestions, ...objectSuggestions, ...fnSuggestions],
+          suggestions: [...variableSuggestions, ...contextColSuggestions, ...keywordSuggestions, ...dbSuggestions, ...schemaSuggestions, ...objectSuggestions, ...fnSuggestions],
           // Tell Monaco these results may be incomplete so it re-queries on next invocation
           incomplete: fetchPending,
         };
