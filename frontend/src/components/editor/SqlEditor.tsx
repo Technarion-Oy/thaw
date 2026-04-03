@@ -1953,6 +1953,24 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       () => window.dispatchEvent(new CustomEvent("save-file"))
     );
 
+    // ── Snowflake Scripting Snippets Context Menu ──────────────────────────
+    // Group all snippets together in the context menu.
+    const snippets = getSnowflakeSnippets(monaco);
+    snippets.forEach((s, idx) => {
+      editor.addAction({
+        id: `thaw.snippet.${s.label}`,
+        label: `Snippet: ${s.label}`,
+        contextMenuGroupId: "9_snippets",
+        contextMenuOrder: idx,
+        run: (ed) => {
+          const contribution = ed.getContribution("snippetController2") as any;
+          if (contribution) {
+            contribution.insert(s.insertText);
+          }
+        },
+      });
+    });
+
     // Toggle Line Comment → right-click context menu entry only (no keybinding here;
     // the shortcut is handled via a native keydown listener below to avoid WKWebView capture).
     editor.addAction({
