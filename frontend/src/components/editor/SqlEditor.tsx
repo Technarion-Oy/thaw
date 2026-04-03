@@ -20,7 +20,7 @@ import { useSessionStore } from "../../store/sessionStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs } from "../../../wailsjs/go/main/App";
-import { getSnowflakeSnippets } from "./snowflakeSnippets";
+import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { DiagMarker, ColInfo, validateSyntax, validateSemantics, validateWithParser, validateBareColumnRefs } from "../../utils/sqlDiagnostics";
 import { extractDeclaredVariables, isColonRequired } from "../../utils/snowflakeScriptingUtils";
@@ -650,6 +650,12 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   // can't clear it before onContextMenu fires).
   const savedSelRef       = useRef("");
 
+  // ── Code Snippets cascading submenu state ─────────────────────────────────
+  const [snippetMenuPos,    setSnippetMenuPos]    = useState<{ x: number; y: number } | null>(null);
+  const ctxMenuPosRef       = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const activeEditorRef     = useRef<monacoLib.editor.ICodeEditor | null>(null);
+  const snippetHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const scheduleHide = useCallback(() => {
     if (hoverHideTimerRef.current) clearTimeout(hoverHideTimerRef.current);
     hoverHideTimerRef.current = setTimeout(() => {
@@ -702,6 +708,20 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     document.addEventListener("click", dismiss);
     return () => document.removeEventListener("click", dismiss);
   }, [tooltipCtxMenu]);
+
+  // Dismiss the snippet submenu on any click outside it, or Escape key.
+  useEffect(() => {
+    if (!snippetMenuPos) return;
+    const dismiss = () => setSnippetMenuPos(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") dismiss(); };
+    document.addEventListener("click", dismiss);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("click", dismiss);
+      document.removeEventListener("keydown", onKey, true);
+      if (snippetHideTimerRef.current) clearTimeout(snippetHideTimerRef.current);
+    };
+  }, [snippetMenuPos]);
 
   // Register the custom Snowflake SQL tokenizer and themes exactly once,
   // before the editor instance is created.
@@ -1954,22 +1974,101 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       () => window.dispatchEvent(new CustomEvent("save-file"))
     );
 
-    // ── Snowflake Scripting Snippets Context Menu ──────────────────────────
-    // Group all snippets together in the context menu.
-    const snippets = getSnowflakeSnippets(monaco);
-    snippets.forEach((s: monacoLib.languages.CompletionItem, idx: number) => {
-      editor.addAction({
-        id: `thaw.snippet.${s.label}`,
-        label: `Snippet: ${s.label}`,
-        contextMenuGroupId: "9_snippets",
-        contextMenuOrder: idx,
-        run: (ed) => {
-          const contribution = ed.getContribution("snippetController2") as any;
-          if (contribution) {
-            contribution.insert(s.insertText);
-          }
-        },
+    // ── Code Snippets cascading context menu ──────────────────────────────
+    // A single "Code Snippets →" entry appears in Monaco's context menu.
+    // A MutationObserver watches for the menu to appear and wires a mouseover
+    // listener on the container — mouseover bubbles from all children, so it
+    // reliably fires even inside Monaco's styled list items.  The addAction
+    // run() callback is the keyboard / direct-click fallback.
+
+    // Capture the right-click coordinates so run() can fall back to them if
+    // getBoundingClientRect() isn't available yet.
+    const snippetDomNode = editor.getDomNode();
+    if (snippetDomNode) {
+      snippetDomNode.addEventListener("contextmenu", (e: MouseEvent) => {
+        ctxMenuPosRef.current = { x: e.clientX, y: e.clientY };
       });
+    }
+
+    let snippetMenuItemEl: HTMLElement | null = null;
+    let openedViaClick = false; // prevents observer from closing a click-opened submenu
+
+    const snippetObserver = new MutationObserver(() => {
+      const menu = document.querySelector(".monaco-menu-container");
+
+      if (!menu) {
+        // Context menu was closed — hide submenu unless run() just opened it
+        if (!openedViaClick) setSnippetMenuPos(null);
+        openedViaClick = false;
+        snippetMenuItemEl = null;
+        return;
+      }
+
+      if (snippetMenuItemEl) return; // already wired for this menu instance
+
+      // Find the "Code Snippets →" list item
+      for (const el of Array.from(menu.querySelectorAll("span.action-label, a.action-label"))) {
+        if (el.textContent?.includes("Code Snippets")) {
+          snippetMenuItemEl = (el.closest(".action-item") ?? el) as HTMLElement;
+          break;
+        }
+      }
+      if (!snippetMenuItemEl) return;
+
+      // mouseover bubbles from every child — open submenu when pointer is over
+      // our item; schedule hide when it moves to a different item.
+      menu.addEventListener("mouseover", (e: Event) => {
+        if (!snippetMenuItemEl) return;
+        const target = e.target as Element;
+        const overItem = snippetMenuItemEl === target || snippetMenuItemEl.contains(target);
+        if (overItem) {
+          if (snippetHideTimerRef.current) {
+            clearTimeout(snippetHideTimerRef.current);
+            snippetHideTimerRef.current = null;
+          }
+          activeEditorRef.current = editor;
+          const rect = snippetMenuItemEl.getBoundingClientRect();
+          setSnippetMenuPos({ x: rect.right - 2, y: rect.top });
+        } else {
+          // Pointer moved to another menu item — give a short grace period so
+          // the user can slide diagonally from the item into the submenu panel.
+          if (!snippetHideTimerRef.current) {
+            snippetHideTimerRef.current = setTimeout(() => {
+              snippetHideTimerRef.current = null;
+              setSnippetMenuPos(null);
+            }, 150);
+          }
+        }
+      });
+
+      // Pointer left the context menu entirely
+      menu.addEventListener("mouseleave", () => {
+        if (!snippetHideTimerRef.current) {
+          snippetHideTimerRef.current = setTimeout(() => {
+            snippetHideTimerRef.current = null;
+            setSnippetMenuPos(null);
+          }, 150);
+        }
+      });
+    });
+
+    snippetObserver.observe(document.body, { childList: true, subtree: true });
+    editor.onDidDispose(() => snippetObserver.disconnect());
+
+    editor.addAction({
+      id: "thaw.snippets",
+      label: "Code Snippets \u2192",
+      contextMenuGroupId: "9_snippets",
+      contextMenuOrder: 0,
+      run: (ed) => {
+        openedViaClick = true;
+        activeEditorRef.current = ed;
+        const rect = snippetMenuItemEl?.getBoundingClientRect();
+        const pos = rect && rect.width > 0
+          ? { x: rect.right - 2, y: rect.top }
+          : { ...ctxMenuPosRef.current };
+        setSnippetMenuPos(pos);
+      },
     });
 
     // Toggle Line Comment → right-click context menu entry only (no keybinding here;
@@ -2297,6 +2396,62 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         )}
       </div>
     )}
+    {snippetMenuPos && (() => {
+      const snippetMap = new Map(
+        getSnowflakeSnippets(monacoLib).map((s) => [String(s.label), s])
+      );
+      return (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          onMouseEnter={() => {
+            if (snippetHideTimerRef.current) {
+              clearTimeout(snippetHideTimerRef.current);
+              snippetHideTimerRef.current = null;
+            }
+          }}
+          onMouseLeave={() => setSnippetMenuPos(null)}
+          style={{
+            position: "fixed", left: snippetMenuPos.x, top: snippetMenuPos.y,
+            zIndex: 10002, background: "var(--bg-overlay)", border: "1px solid var(--border)",
+            borderRadius: 4, boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
+            minWidth: 210, maxHeight: 460, overflowY: "auto", padding: "2px 0", fontSize: 12,
+          }}
+        >
+          {SNIPPET_CATEGORIES.map((group) => (
+            <div key={group.header}>
+              <div style={{
+                padding: "5px 10px 2px", fontSize: 10, color: "var(--text-faint)",
+                textTransform: "uppercase", letterSpacing: "0.05em", userSelect: "none",
+              }}>
+                {group.header}
+              </div>
+              {group.labels.map((label) => {
+                const s = snippetMap.get(label);
+                if (!s) return null;
+                return (
+                  <div key={label}
+                    style={{ padding: "5px 14px", cursor: "pointer" }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--bg-raised)"; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ""; }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const ed = activeEditorRef.current;
+                      if (ed) {
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        const ctrl = ed.getContribution("snippetController2") as any;
+                        if (ctrl) ctrl.insert(s.insertText as string);
+                        ed.focus();
+                      }
+                      setSnippetMenuPos(null);
+                    }}
+                  >{label}</div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      );
+    })()}
     {tooltipCtxMenu && (
       <>
         <div

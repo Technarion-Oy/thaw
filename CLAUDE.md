@@ -87,6 +87,14 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 - Schema object cache: module-level `fetchedSchemaObjects` Set — avoids duplicate `ListObjects` calls
 - **Never register completion/hover providers inside the component render** — use module-level disposable refs
 
+### Code Snippets cascading context menu
+- A single **"Code Snippets →"** `addAction` entry appears in Monaco's right-click menu (group `9_snippets`)
+- A `MutationObserver` on `document.body` (subtree) detects `.monaco-menu-container` appearing/disappearing
+- **Use `mouseover` on the container, not `mouseenter` on the item** — `mouseenter` is unreliable on Monaco's styled list items; `mouseover` bubbles from all children and is always delivered to the container listener
+- Position the submenu via `snippetMenuItemEl.getBoundingClientRect()` (not the raw right-click coordinates); use `ctxMenuPosRef` only as a fallback in `run()`
+- `openedViaClick` local variable in `handleMount` prevents the observer's "menu closed" branch from hiding the submenu immediately after `run()` opens it (Monaco closes its menu as part of dispatching the action)
+- Snippet definitions live in `snowflakeSnippets.ts`; `SNIPPET_CATEGORIES` drives the grouped submenu rendering
+
 ## Critical Gotchas
 
 ### gosnowflake driver logs errors before throwing

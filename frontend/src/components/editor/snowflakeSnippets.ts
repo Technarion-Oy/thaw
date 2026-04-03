@@ -219,3 +219,13 @@ export function getSnowflakeSnippets(monaco: typeof monacoLib): monacoLib.langua
     },
   ];
 }
+
+/** Category groups used to render the snippet submenu. */
+export const SNIPPET_CATEGORIES: { header: string; labels: string[] }[] = [
+  { header: "Block Structure",      labels: ["block", "declare"] },
+  { header: "Variables",            labels: ["var", "declare_var"] },
+  { header: "Conditionals",         labels: ["if", "case"] },
+  { header: "Loops",                labels: ["for", "for_reverse", "while", "repeat", "loop"] },
+  { header: "Cursors & Resultsets", labels: ["cursor_lifecycle", "resultset"] },
+  { header: "Async Jobs",           labels: ["async_job", "await_job", "cancel_job"] },
+];
