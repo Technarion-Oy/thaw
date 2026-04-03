@@ -11,6 +11,7 @@
 import { useState, useEffect } from "react";
 import { Form, Input, Button, Alert, Space, Typography, Select, Divider, Tooltip } from "antd";
 import { CloudServerOutlined, FolderOpenOutlined } from "@ant-design/icons";
+import UserAgreementModal from "./UserAgreementModal";
 import {
   Connect, CancelConnect, LoadSnowflakeCLIConfig,
   GetSnowflakeCLIConfigPath, PickSnowflakeCLIConfigPath,
@@ -56,6 +57,7 @@ export default function ConnectModal() {
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
   const [auth, setAuth]         = useState("username_password_mfa");
+  const [agreementOpen, setAgreementOpen] = useState(false);
   const setConnected            = useConnectionStore((s) => s.setConnected);
 
   const [cliConfig, setCliConfig] = useState<sfconfig.Config | null>(null);
@@ -305,7 +307,20 @@ export default function ConnectModal() {
                 </Button>
               )}
             </Form.Item>
+
+            <div style={{ textAlign: "center", marginTop: 12 }}>
+              <Button
+                type="link"
+                size="small"
+                onClick={() => setAgreementOpen(true)}
+                style={{ fontSize: 12, color: "var(--text-muted)" }}
+              >
+                User Agreement
+              </Button>
+            </div>
           </Form>
+
+          <UserAgreementModal open={agreementOpen} onClose={() => setAgreementOpen(false)} />
         </Space>
       </div>
     </div>

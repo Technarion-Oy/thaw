@@ -547,6 +547,7 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
 - Connect with account / user / password / warehouse / role
 - **Auto-fill from Snowflake CLI** — reads Snowflake CLI profiles from `~/.snowflake/config.toml` (or a custom location) and populates the connection form; includes support for key-pair (`SNOWFLAKE_JWT`) profiles; the config file path can be changed during sign-in and is persisted as the new default location for the machine
 - **Cancel connection** — abort an in-progress connection attempt
+- **User Agreement** — a **User Agreement** link at the bottom of the connect screen opens the End User License Agreement in a scrollable modal
 - **Switch role, warehouse, database, or schema** from the toolbar without disconnecting — all subsequent queries, privilege checks, and object browsing immediately reflect the new session state
 - Role dropdown shows only roles the current user can actually assume
 - Schema dropdown lists only schemas belonging to the currently selected database; the list resets automatically when the database is changed
