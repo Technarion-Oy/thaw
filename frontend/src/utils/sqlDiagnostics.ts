@@ -70,6 +70,7 @@ export function validateSyntax(sql: string): DiagMarker[] {
   // bare-word token must be a recognised SQL statement-starting keyword.
   let atStmtStart = true;
   const parenStack: Array<{ char: string; line: number; col: number }> = [];
+  const dollarStack: string[] = [];
 
   const addError = (msg: string, sl: number, sc: number, el: number, ec: number): void => {
     markers.push({ startLineNumber: sl, startColumn: sc, endLineNumber: el, endColumn: ec, message: msg, severity: 8 });
@@ -144,6 +145,12 @@ export function validateSyntax(sql: string): DiagMarker[] {
       const dollarMatch = sql.slice(i).match(/^\$([a-zA-Z0-9_]*)\$/);
       if (dollarMatch) {
         const tag = dollarMatch[0];
+        // Toggle logic for the dollar stack to track if we are inside a script block
+        if (dollarStack.length > 0 && dollarStack[dollarStack.length - 1] === tag) {
+          dollarStack.pop();
+        } else {
+          dollarStack.push(tag);
+        }
         i += tag.length; col += tag.length;
         continue;
       }
@@ -170,7 +177,11 @@ export function validateSyntax(sql: string): DiagMarker[] {
 
     // Semicolon: marks end of one statement; next bare word must be a keyword
     if (ch === ";") {
-      atStmtStart = true;
+      // If we are inside dollar quotes, a semicolon is just a statement terminator
+      // within the script, not the end of the top-level SQL statement.
+      if (dollarStack.length === 0) {
+        atStmtStart = true;
+      }
       i++; col++;
       continue;
     }
@@ -302,6 +313,10 @@ function splitSqlStatements(sql: string): SplitStmt[] {
       if (m) {
         const tag = m[0];
         i += tag.length;
+        // Restore atomic treatment: skip until closing tag so we don't split
+        // the top-level statement on internal semicolons.
+        while (i < sql.length && !sql.startsWith(tag, i)) i++;
+        if (i < sql.length) i += tag.length;
         continue;
       }
     }
