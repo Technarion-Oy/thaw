@@ -294,7 +294,10 @@ func (a *App) GetDatabaseTableSummary(dbName string) ([]TableSummary, error) {
 			Schema:  fmt.Sprintf("%v", row[1]),
 			Kind:    fmt.Sprintf("%v", row[2]),
 			Owner:   fmt.Sprintf("%v", row[5]),
-			Comment: fmt.Sprintf("%v", row[9]),
+		}
+
+		if row[9] != nil {
+			t.Comment = fmt.Sprintf("%v", row[9])
 		}
 
 		// Parsing numeric values

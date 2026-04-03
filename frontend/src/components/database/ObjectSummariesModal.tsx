@@ -128,7 +128,11 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       dataIndex: "comment",
       key: "comment",
       ellipsis: true,
-      render: (text: string) => <Text type="secondary" style={{ fontSize: 11 }}>{text || "-"}</Text>,
+      render: (text: string) => text ? (
+        <Text type="secondary" style={{ fontSize: 11 }}>{text}</Text>
+      ) : (
+        <Text type="secondary" italic style={{ fontSize: 11, opacity: 0.5 }}>NULL</Text>
+      ),
     },
   ];
 
