@@ -236,10 +236,36 @@ export function getSnowflakeSnippets(monaco: typeof monacoLib): monacoLib.langua
   ];
 }
 
-/** Category groups used to render the snippet submenu. */
-export const SNIPPET_CATEGORIES: { header: string; labels: string[] }[] = [
-  { header: "Block Structure",      labels: ["block", "declare"] },
-  { header: "Variables",            labels: ["var", "declare_var", "let_typed", "let"] },
+/**
+ * Category groups used to build the snippet submenu.
+ *
+ * `titles` is an optional per-label display name override.  When present it
+ * is used as the Monaco menu item title instead of the raw label, so the
+ * internal command ID (thaw.snippet.<label>) can stay a clean identifier
+ * while the menu shows a more descriptive string.
+ */
+export const SNIPPET_CATEGORIES: {
+  header: string;
+  labels: string[];
+  titles?: Record<string, string>;
+}[] = [
+  { header: "Block Structure", labels: ["block", "declare"] },
+  {
+    header: "DECLARE Variables",
+    labels: ["var", "declare_var"],
+    titles: {
+      var:         "declare var",
+      declare_var: "declare var (type only)",
+    },
+  },
+  {
+    header: "LET Variables",
+    labels: ["let_typed", "let"],
+    titles: {
+      let_typed: "let (typed)",
+      let:       "let",
+    },
+  },
   { header: "Conditionals",         labels: ["if", "case"] },
   { header: "Loops",                labels: ["for", "for_reverse", "while", "repeat", "loop"] },
   { header: "Cursors & Resultsets", labels: ["cursor_lifecycle", "resultset"] },

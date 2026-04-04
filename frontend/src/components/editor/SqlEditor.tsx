@@ -669,7 +669,7 @@ let _snippetMenuRegistered = false;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (MenuRegistry as any).appendMenuItem(snippetSubMenuId, {
-        command: { id: cmdId, title: lbl },
+        command: { id: cmdId, title: cat.titles?.[lbl] ?? lbl },
         group: `${gi + 1}`,
         order: li,
       });
