@@ -12,6 +12,9 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { Button } from "antd";
 import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
 import * as monacoLib from "monaco-editor";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore – internal Monaco ESM path; no public type declarations
+import { SubmenuAction } from "monaco-editor/esm/vs/base/common/actions.js";
 import { ensureMonacoSetup } from "./monacoSetup";
 import { setEditorInstance } from "./editorRef";
 import { useQueryStore } from "../../store/queryStore";
@@ -1960,31 +1963,27 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     );
 
     // ── Code Snippets cascading context menu ──────────────────────────────
-    // Monaco appends its context menu outside document.body (isolated
-    // container / shadow root), so document.elementsFromPoint() and
-    // document.querySelector(".monaco-menu-container") both return nothing.
-    //
-    // Solution: capture raw mouse coordinates on every mousedown (phase =
-    // capture, fires before Monaco closes the menu).  When our action's
-    // run() fires Monaco has already hidden its menu, but the coordinates
-    // from the last mousedown are still fresh.  We call the internal
-    // _contextMenuService.showContextMenu() with those coordinates to open
-    // a new, native-Monaco-styled submenu right where the user clicked.
+    // Monaco renders its context menu outside document.body, so DOM queries
+    // cannot locate its items.  Instead we:
+    //   1. Register a plain "Code Snippets" action so Monaco includes it in
+    //      the context menu action list.
+    //   2. Patch _contextMenuService.showContextMenu to intercept every
+    //      context-menu open and replace that plain action with a native
+    //      SubmenuAction.  Monaco renders SubmenuAction items as cascading
+    //      entries that open on hover (auto-flipped left/right by Monaco's
+    //      positioning logic when there is no space to the right).
 
-    let savedClickPos: { x: number; y: number } | null = null;
-
-    // Build a flat action list with Separator stubs between category groups.
-    const buildSnippetActions = () => {
+    // Build the flat snippet action list (with Separator stubs between groups).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const buildSnippetActions = (): any[] => {
       const snippetMap = new Map(
         getSnowflakeSnippets(monacoLib).map((s) => [String(s.label), s])
       );
-      const actions: Array<{
-        id: string; label: string; tooltip: string; class?: string;
-        enabled: boolean; checked: boolean; run: () => void;
-      }> = [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const actions: any[] = [];
       SNIPPET_CATEGORIES.forEach((group, gi) => {
         if (gi > 0) {
-          // Monaco detects separators by id === 'vs.actions.separator'.
+          // Monaco identifies separators by action.id === 'vs.actions.separator'.
           actions.push({
             id: "vs.actions.separator", label: "", tooltip: "",
             class: "separator", enabled: false, checked: false, run: () => {},
@@ -2010,41 +2009,38 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       return actions;
     };
 
-    // Register so Monaco renders "Code Snippets" in its context menu group.
-    // run() fires after Monaco has already hidden its context menu (via
-    // onWillRun → hideContextView).  We use savedClickPos set moments
-    // earlier by the capture-phase mousedown listener.
+    // Register the placeholder action so Monaco includes it in the list.
+    // interaction is handled entirely by the showContextMenu patch below.
     editor.addAction({
       id: "thaw.snippets",
       label: "Code Snippets",
       contextMenuGroupId: "9_snippets",
       contextMenuOrder: 0,
-      run: () => {
-        if (!savedClickPos) return;
-        const pos = savedClickPos;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const contrib = (editor as any).getContribution("editor.contrib.contextmenu");
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const svc = (contrib as any)?._contextMenuService;
-        if (!svc) return;
-        svc.showContextMenu({
-          getAnchor: () => pos,
-          getActions: () => buildSnippetActions(),
-          onHide: () => {},
+      run: () => {},
+    });
+
+    // Patch _contextMenuService.showContextMenu to swap the plain action
+    // for a SubmenuAction every time the context menu is about to open.
+    // Monaco's menu renderer calls action instanceof SubmenuAction to decide
+    // whether to render a cascading item, so we need the actual class.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const contrib = (editor as any).getContribution("editor.contrib.contextmenu");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const svc = (contrib as any)?._contextMenuService;
+    if (svc) {
+      const origShow = (svc.showContextMenu as Function).bind(svc);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      svc.showContextMenu = (delegate: any) =>
+        origShow({
+          ...delegate,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          getActions: () => (delegate.getActions() as any[]).map((a: any) =>
+            a.id === "thaw.snippets"
+              ? new SubmenuAction("thaw.snippets", "Code Snippets", buildSnippetActions())
+              : a
+          ),
         });
-      },
-    });
-
-    // Capture mousedown unconditionally — saves coordinates before Monaco's
-    // onWillRun handler removes the menu from the DOM.
-    const onDocMousedown = (e: MouseEvent) => {
-      savedClickPos = { x: e.clientX, y: e.clientY };
-    };
-    document.addEventListener("mousedown", onDocMousedown, true);
-
-    editor.onDidDispose(() => {
-      document.removeEventListener("mousedown", onDocMousedown, true);
-    });
+    }
 
     // Toggle Line Comment → right-click context menu entry only (no keybinding here;
     // the shortcut is handled via a native keydown listener below to avoid WKWebView capture).
