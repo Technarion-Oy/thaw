@@ -2011,7 +2011,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
     // Register the action so Monaco renders the item in the correct group.
     // Monaco calls run() when the user clicks our item (before closing the
-    // menu), so savedItemRect is still valid here.
+    // menu), so the menu container is still in the DOM here.
     editor.addAction({
       id: "thaw.snippets",
       label: "Code Snippets",
@@ -2021,9 +2021,33 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         activeEditorRef.current = editor;
         openedByClick = true; // prevent observer from nulling pos on menu close
         console.log("[thaw/snippets] run() fired, savedItemRect:", savedItemRect, "injectedLi:", !!injectedLi);
-        if (savedItemRect) {
-          setSnippetMenuPos(savedItemRect);
+
+        // Primary: use savedItemRect captured by the observer.
+        let pos: { x: number; y: number } | null = savedItemRect;
+
+        // Fallback: observer may not have found/replaced the item — query the
+        // live DOM directly. The menu is still present when run() fires.
+        if (!pos) {
+          const menuEl = document.querySelector(".monaco-menu-container");
+          console.log("[thaw/snippets] run() fallback: menuEl=", !!menuEl);
+          if (menuEl) {
+            // Monaco sets aria-label on the <a> from the action label
+            const a = menuEl.querySelector("a[aria-label='Code Snippets']") as HTMLElement | null;
+            console.log("[thaw/snippets] run() aria-label match:", !!a);
+            const li = (a?.closest("li") as HTMLElement | null) ??
+              (Array.from(menuEl.querySelectorAll("li")).find(
+                (l) => l.textContent?.includes("Code Snippets")
+              ) as HTMLElement | null);
+            if (li) {
+              const r = li.getBoundingClientRect();
+              console.log("[thaw/snippets] run() fallback rect:", r.right, r.top, "width:", r.width);
+              if (r.width > 0) pos = { x: r.right - 2, y: r.top };
+            }
+          }
         }
+
+        console.log("[thaw/snippets] run() final pos:", pos);
+        if (pos) setSnippetMenuPos(pos);
       },
     });
 
@@ -2113,8 +2137,16 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         openedByClick = true; // keep submenu alive if Monaco closes anyway
         clearSnippetHide();
         activeEditorRef.current = editor;
+        console.log("[thaw/snippets] li.click fired, savedItemRect:", savedItemRect);
+        // Prefer savedItemRect (captured while element was in DOM) over a
+        // fresh getBoundingClientRect() that may return zeros if Monaco
+        // already removed the menu on mousedown.
         const r = li.getBoundingClientRect();
-        setSnippetMenuPos({ x: r.right - 2, y: r.top });
+        const pos = r.width > 0
+          ? { x: r.right - 2, y: r.top }
+          : savedItemRect;
+        console.log("[thaw/snippets] li.click pos:", pos);
+        if (pos) setSnippetMenuPos(pos);
       });
 
       monacoLi.replaceWith(li);
