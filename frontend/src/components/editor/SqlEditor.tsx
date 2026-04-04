@@ -1977,19 +1977,25 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     );
 
     // ── Code Snippets cascading context menu ──────────────────────────────
-    // Strategy:
-    //  1. addAction registers "Code Snippets" so Monaco renders the <li> in
-    //     the correct group.
-    //  2. MutationObserver finds Monaco's <li> and REPLACES it with our own
-    //     element — since we own it Monaco never attaches handlers, so
-    //     mouseenter fires unconditionally (hover support).
-    //  3. savedItemRect captures the position while the menu is still in the
-    //     DOM so run() (Monaco's click callback) can open the submenu even
-    //     after Monaco removes the menu.
-    //  4. openedByClick flag prevents the observer's "menu closed" branch
-    //     from nulling snippetMenuPos right after run() set it.
+    // Root causes discovered via diagnostics:
+    //  • Monaco's contextMenuHandler calls hideContextView() via onWillRun
+    //    (BEFORE run() fires), so the menu DOM is gone inside run().
+    //  • MutationObserver on document.body never saw .monaco-menu-container,
+    //    meaning Monaco appends the context view outside <body>.
+    //
+    // Solution: capture-phase document listeners.  Capture phase fires before
+    // any handler on the target or its ancestors, including Monaco's own
+    // mousedown / click handlers that close the menu.
+    //
+    //  • mouseover  (capture) — hover: detect when mouse enters the item and
+    //    open the submenu while the menu is still in the DOM.
+    //  • mousedown  (capture) — click: save the item's bounding rect before
+    //    Monaco's onWillRun fires and removes the menu.
+    //  • run()      — uses savedItemRect; openedByClick prevents the
+    //    observer from nulling the submenu after Monaco closes the menu.
+    //  • MutationObserver on documentElement — detects menu open/close
+    //    because Monaco may append outside <body>.
 
-    let injectedLi: HTMLElement | null = null;
     let savedItemRect: { x: number; y: number } | null = null;
     let openedByClick = false;
 
@@ -2009,9 +2015,21 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       }
     };
 
-    // Register the action so Monaco renders the item in the correct group.
-    // Monaco calls run() when the user clicks our item (before closing the
-    // menu), so the menu container is still in the DOM here.
+    // Find the "Code Snippets" <li> inside Monaco's active context menu.
+    // Tries aria-label (most reliable) then textContent as fallback.
+    const findSnippetLi = (): HTMLElement | null => {
+      const menu = document.querySelector(".monaco-menu-container");
+      if (!menu) return null;
+      const byAria = menu.querySelector("a[aria-label='Code Snippets']");
+      if (byAria) return byAria.closest("li") as HTMLElement | null;
+      return (Array.from(menu.querySelectorAll("li")).find(
+        (l) => l.textContent?.includes("Code Snippets")
+      ) as HTMLElement | null) ?? null;
+    };
+
+    // Register so Monaco renders the item in the correct context menu group.
+    // run() fires after Monaco already closed the menu (onWillRun ordering),
+    // so we rely on savedItemRect captured by the mousedown handler below.
     editor.addAction({
       id: "thaw.snippets",
       label: "Code Snippets",
@@ -2019,145 +2037,58 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       contextMenuOrder: 0,
       run: () => {
         activeEditorRef.current = editor;
-        openedByClick = true; // prevent observer from nulling pos on menu close
-        console.log("[thaw/snippets] run() fired, savedItemRect:", savedItemRect, "injectedLi:", !!injectedLi);
-
-        // Primary: use savedItemRect captured by the observer.
-        let pos: { x: number; y: number } | null = savedItemRect;
-
-        // Fallback: observer may not have found/replaced the item — query the
-        // live DOM directly. The menu is still present when run() fires.
-        if (!pos) {
-          const menuEl = document.querySelector(".monaco-menu-container");
-          console.log("[thaw/snippets] run() fallback: menuEl=", !!menuEl);
-          if (menuEl) {
-            // Monaco sets aria-label on the <a> from the action label
-            const a = menuEl.querySelector("a[aria-label='Code Snippets']") as HTMLElement | null;
-            console.log("[thaw/snippets] run() aria-label match:", !!a);
-            const li = (a?.closest("li") as HTMLElement | null) ??
-              (Array.from(menuEl.querySelectorAll("li")).find(
-                (l) => l.textContent?.includes("Code Snippets")
-              ) as HTMLElement | null);
-            if (li) {
-              const r = li.getBoundingClientRect();
-              console.log("[thaw/snippets] run() fallback rect:", r.right, r.top, "width:", r.width);
-              if (r.width > 0) pos = { x: r.right - 2, y: r.top };
-            }
-          }
-        }
-
-        console.log("[thaw/snippets] run() final pos:", pos);
-        if (pos) setSnippetMenuPos(pos);
+        openedByClick = true;
+        if (savedItemRect) setSnippetMenuPos(savedItemRect);
       },
     });
 
-    const snippetObserver = new MutationObserver(() => {
-      const menu = document.querySelector(".monaco-menu-container");
-
-      if (!menu) {
-        // Only hide the submenu when it was opened by hover (not by a click
-        // that Monaco handled — in that case openedByClick is true and
-        // snippetMenuPos was just set by run(), so we must not null it).
-        if (!openedByClick) setSnippetMenuPos(null);
-        openedByClick = false;
-        injectedLi = null;
-        savedItemRect = null;
-        return;
-      }
-
-      if (injectedLi) return; // already replaced for this menu instance
-
-      // ── Diagnostics (remove after confirming DOM structure) ───────────────
-      const allItems = Array.from(menu.querySelectorAll("li"));
-      console.log("[thaw/snippets] context menu opened — li count:", allItems.length);
-      allItems.forEach((li, i) => {
-        const a = li.querySelector("a");
-        if (a) {
-          console.log(`[thaw/snippets]  li[${i}] classes="${li.className}" a.textContent="${a.textContent?.trim()}" a.ariaLabel="${a.getAttribute("aria-label")}" a.classes="${a.className}"`);
-        }
-      });
-
-      // Find Monaco's rendered <li> for "Code Snippets".
-      // Monaco renders: <li class="action-item ...">
-      //                   <a class="action-label ...">Code Snippets</a>
-      //                 </li>
-      const allLis = Array.from(menu.querySelectorAll("li.action-item"));
-      const monacoLi = allLis.find((li) => {
-        const a = li.querySelector("a.action-label");
-        return a && a.textContent?.trim() === "Code Snippets";
-      }) as HTMLElement | undefined;
-
-      console.log("[thaw/snippets] monacoLi found:", !!monacoLi, "savedItemRect:", savedItemRect);
-
-      if (!monacoLi) return;
-
-      // Save position NOW while the element is in the DOM and has a valid
-      // bounding rect — run() may fire after Monaco has removed the element.
-      const rect = monacoLi.getBoundingClientRect();
-      savedItemRect = { x: rect.right - 2, y: rect.top };
-
-      // ── Build our replacement <li> ────────────────────────────────────────
-      // Inherit Monaco's classes for identical styling; carry only our handlers.
-      const li = document.createElement("li");
-      li.className = monacoLi.className;
-      li.setAttribute("role", "presentation");
-
-      const a = document.createElement("a");
-      a.className = "action-label";
-      a.setAttribute("role", "menuitem");
-      a.setAttribute("tabindex", "-1");
-      a.style.cssText = "display:flex;justify-content:space-between;align-items:center;gap:8px";
-
-      const labelSpan = document.createElement("span");
-      labelSpan.textContent = "Code Snippets";
-
-      const arrowSpan = document.createElement("span");
-      arrowSpan.textContent = "\u25B6"; // ▶
-      arrowSpan.style.cssText = "font-size:8px;opacity:0.55;flex-shrink:0";
-
-      a.appendChild(labelSpan);
-      a.appendChild(arrowSpan);
-      li.appendChild(a);
-
-      // mouseenter/mouseleave on our element fire unconditionally.
-      li.addEventListener("mouseenter", () => {
+    // ── Capture-phase mouseover: hover opens the submenu ──────────────────
+    // Fires before Monaco's own handlers; the menu is guaranteed in the DOM.
+    const onDocMouseover = (e: MouseEvent) => {
+      const li = findSnippetLi();
+      if (!li) return;
+      if (li.contains(e.target as Node)) {
         clearSnippetHide();
-        activeEditorRef.current = editor;
         const r = li.getBoundingClientRect();
+        savedItemRect = { x: r.right - 2, y: r.top };
+        activeEditorRef.current = editor;
         setSnippetMenuPos({ x: r.right - 2, y: r.top });
-      });
-
-      li.addEventListener("mouseleave", () => {
+      } else {
+        // Mouse moved to a different item — give 120 ms grace period so the
+        // pointer can slide into the submenu panel without it disappearing.
         scheduleSnippetHide();
-      });
+      }
+    };
+    document.addEventListener("mouseover", onDocMouseover, true);
 
-      // Click: open submenu and prevent Monaco from dismissing its own menu.
-      li.addEventListener("click", (e) => {
-        e.stopPropagation();
-        openedByClick = true; // keep submenu alive if Monaco closes anyway
-        clearSnippetHide();
-        activeEditorRef.current = editor;
-        console.log("[thaw/snippets] li.click fired, savedItemRect:", savedItemRect);
-        // Prefer savedItemRect (captured while element was in DOM) over a
-        // fresh getBoundingClientRect() that may return zeros if Monaco
-        // already removed the menu on mousedown.
-        const r = li.getBoundingClientRect();
-        const pos = r.width > 0
-          ? { x: r.right - 2, y: r.top }
-          : savedItemRect;
-        console.log("[thaw/snippets] li.click pos:", pos);
-        if (pos) setSnippetMenuPos(pos);
-      });
+    // ── Capture-phase mousedown: save rect before Monaco removes the menu ──
+    // Monaco's onWillRun fires after click (not mousedown), but mousedown is
+    // still safer to use as the earliest possible capture point.
+    const onDocMousedown = (e: MouseEvent) => {
+      const li = findSnippetLi();
+      if (!li || !li.contains(e.target as Node)) return;
+      const r = li.getBoundingClientRect();
+      savedItemRect = { x: r.right - 2, y: r.top };
+      openedByClick = true;
+      activeEditorRef.current = editor;
+    };
+    document.addEventListener("mousedown", onDocMousedown, true);
 
-      monacoLi.replaceWith(li);
-      injectedLi = li;
-      // Refresh savedItemRect from the newly placed replacement element.
-      const r2 = li.getBoundingClientRect();
-      if (r2.width > 0) savedItemRect = { x: r2.right - 2, y: r2.top };
+    // ── MutationObserver on documentElement: detect menu open/close ───────
+    // Monaco may append outside <body>; watching documentElement catches all.
+    const snippetObserver = new MutationObserver(() => {
+      if (document.querySelector(".monaco-menu-container")) return; // menu still open
+      if (!openedByClick) setSnippetMenuPos(null);
+      openedByClick = false;
+      savedItemRect = null;
     });
+    snippetObserver.observe(document.documentElement, { childList: true, subtree: true });
 
-    snippetObserver.observe(document.body, { childList: true, subtree: true });
-    editor.onDidDispose(() => snippetObserver.disconnect());
+    editor.onDidDispose(() => {
+      snippetObserver.disconnect();
+      document.removeEventListener("mouseover", onDocMouseover, true);
+      document.removeEventListener("mousedown", onDocMousedown, true);
+    });
 
     // Toggle Line Comment → right-click context menu entry only (no keybinding here;
     // the shortcut is handled via a native keydown listener below to avoid WKWebView capture).
