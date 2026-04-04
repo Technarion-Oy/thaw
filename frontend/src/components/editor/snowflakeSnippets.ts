@@ -58,9 +58,9 @@ export function getSnowflakeSnippets(monaco: typeof monacoLib): monacoLib.langua
     {
       label: "declare_var",
       kind: monaco.languages.CompletionItemKind.Snippet,
-      insertText: "${1:variable_name} ${2:type} DEFAULT ${3:expression};",
+      insertText: "${1:variable_name} ${2:type};",
       insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-      documentation: "Snowflake Scripting variable declaration",
+      documentation: "Snowflake Scripting variable declaration (type only, no initializer)",
       range: range as any,
     },
     {
