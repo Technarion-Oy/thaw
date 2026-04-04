@@ -207,6 +207,22 @@ export function getSnowflakeSnippets(monaco: typeof monacoLib): monacoLib.langua
       documentation: "Snowflake Scripting RESULTSET declaration",
       range: range as any,
     },
+    {
+      label: "execute_immediate",
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: "EXECUTE IMMEDIATE '${1:sql_statement}';",
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      documentation: "Execute a SQL string dynamically",
+      range: range as any,
+    },
+    {
+      label: "execute_immediate_using",
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: "EXECUTE IMMEDIATE '${1:sql_statement}' USING (${2:variable});",
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      documentation: "Execute a SQL string dynamically with bound variables",
+      range: range as any,
+    },
 
     // 3.6. Asynchronous Jobs
     {
@@ -268,6 +284,6 @@ export const SNIPPET_CATEGORIES: {
   },
   { header: "Conditionals",         labels: ["if", "case"] },
   { header: "Loops",                labels: ["for", "for_reverse", "while", "repeat", "loop"] },
-  { header: "Cursors & Resultsets", labels: ["cursor_lifecycle", "resultset"] },
+  { header: "Cursors & Resultsets", labels: ["cursor_lifecycle", "resultset", "execute_immediate", "execute_immediate_using"] },
   { header: "Async Jobs",           labels: ["async_job", "await_job", "cancel_job"] },
 ];
