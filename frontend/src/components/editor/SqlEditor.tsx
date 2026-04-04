@@ -1977,27 +1977,20 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     );
 
     // ── Code Snippets cascading context menu ──────────────────────────────
-    // Root causes discovered via diagnostics:
-    //  • Monaco's contextMenuHandler calls hideContextView() via onWillRun
-    //    (BEFORE run() fires), so the menu DOM is gone inside run().
-    //  • MutationObserver on document.body never saw .monaco-menu-container,
-    //    meaning Monaco appends the context view outside <body>.
+    // Diagnostics confirmed two root causes:
+    //  1. Monaco calls hideContextView() via onWillRun BEFORE run() fires —
+    //     the menu DOM is already gone by the time our run() executes.
+    //  2. document.querySelector(".monaco-menu-container") always returns
+    //     null — Monaco's context view is unreachable by class name from our
+    //     code (appended to an isolated container, shadow root, or similar).
     //
-    // Solution: capture-phase document listeners.  Capture phase fires before
-    // any handler on the target or its ancestors, including Monaco's own
-    // mousedown / click handlers that close the menu.
-    //
-    //  • mouseover  (capture) — hover: detect when mouse enters the item and
-    //    open the submenu while the menu is still in the DOM.
-    //  • mousedown  (capture) — click: save the item's bounding rect before
-    //    Monaco's onWillRun fires and removes the menu.
-    //  • run()      — uses savedItemRect; openedByClick prevents the
-    //    observer from nulling the submenu after Monaco closes the menu.
-    //  • MutationObserver on documentElement — detects menu open/close
-    //    because Monaco may append outside <body>.
+    // Solution: document.elementsFromPoint(x, y) at mousedown / mouseover
+    // time.  It works at the pixel level — no class names, no assumptions
+    // about Monaco's internal DOM structure.  Capture-phase listeners fire
+    // before Monaco's own handlers, so the menu is still live and has a
+    // valid bounding rect when we read it.
 
     let savedItemRect: { x: number; y: number } | null = null;
-    let openedByClick = false;
 
     const clearSnippetHide = () => {
       if (snippetHideTimerRef.current) {
@@ -2010,26 +2003,28 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       if (!snippetHideTimerRef.current) {
         snippetHideTimerRef.current = setTimeout(() => {
           snippetHideTimerRef.current = null;
+          savedItemRect = null;
           setSnippetMenuPos(null);
         }, 120);
       }
     };
 
-    // Find the "Code Snippets" <li> inside Monaco's active context menu.
-    // Tries aria-label (most reliable) then textContent as fallback.
-    const findSnippetLi = (): HTMLElement | null => {
-      const menu = document.querySelector(".monaco-menu-container");
-      if (!menu) return null;
-      const byAria = menu.querySelector("a[aria-label='Code Snippets']");
-      if (byAria) return byAria.closest("li") as HTMLElement | null;
-      return (Array.from(menu.querySelectorAll("li")).find(
-        (l) => l.textContent?.includes("Code Snippets")
-      ) as HTMLElement | null) ?? null;
+    // Return the <li> (or innermost element) at screen point (x,y) whose
+    // trimmed textContent is exactly "Code Snippets", ignoring our own panel.
+    // elementsFromPoint returns elements innermost→outermost.
+    const findSnippetElAtPoint = (x: number, y: number): HTMLElement | null => {
+      for (const el of document.elementsFromPoint(x, y)) {
+        if (snippetPanelRef.current?.contains(el)) continue;
+        if (el.textContent?.trim() === "Code Snippets") {
+          return ((el as HTMLElement).closest("li") as HTMLElement) ?? (el as HTMLElement);
+        }
+      }
+      return null;
     };
 
-    // Register so Monaco renders the item in the correct context menu group.
-    // run() fires after Monaco already closed the menu (onWillRun ordering),
-    // so we rely on savedItemRect captured by the mousedown handler below.
+    // Register so Monaco renders "Code Snippets" in its context menu group.
+    // run() fires after the menu is gone (Monaco closed it via onWillRun);
+    // we use savedItemRect captured moments earlier by onDocMousedown.
     editor.addAction({
       id: "thaw.snippets",
       label: "Code Snippets",
@@ -2037,55 +2032,37 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       contextMenuOrder: 0,
       run: () => {
         activeEditorRef.current = editor;
-        openedByClick = true;
         if (savedItemRect) setSnippetMenuPos(savedItemRect);
       },
     });
 
-    // ── Capture-phase mouseover: hover opens the submenu ──────────────────
-    // Fires before Monaco's own handlers; the menu is guaranteed in the DOM.
+    // capture mouseover — open submenu on hover, before Monaco's handlers.
     const onDocMouseover = (e: MouseEvent) => {
-      const li = findSnippetLi();
-      if (!li) return;
-      if (li.contains(e.target as Node)) {
+      const snippetEl = findSnippetElAtPoint(e.clientX, e.clientY);
+      if (snippetEl) {
         clearSnippetHide();
-        const r = li.getBoundingClientRect();
+        const r = snippetEl.getBoundingClientRect();
         savedItemRect = { x: r.right - 2, y: r.top };
         activeEditorRef.current = editor;
         setSnippetMenuPos({ x: r.right - 2, y: r.top });
-      } else {
-        // Mouse moved to a different item — give 120 ms grace period so the
-        // pointer can slide into the submenu panel without it disappearing.
+      } else if (!snippetPanelRef.current?.contains(e.target as Node)) {
+        // Mouse moved to a different item; 120 ms grace to slide into panel.
         scheduleSnippetHide();
       }
     };
     document.addEventListener("mouseover", onDocMouseover, true);
 
-    // ── Capture-phase mousedown: save rect before Monaco removes the menu ──
-    // Monaco's onWillRun fires after click (not mousedown), but mousedown is
-    // still safer to use as the earliest possible capture point.
+    // capture mousedown — save rect BEFORE Monaco's onWillRun removes menu.
     const onDocMousedown = (e: MouseEvent) => {
-      const li = findSnippetLi();
-      if (!li || !li.contains(e.target as Node)) return;
-      const r = li.getBoundingClientRect();
+      const snippetEl = findSnippetElAtPoint(e.clientX, e.clientY);
+      if (!snippetEl) return;
+      const r = snippetEl.getBoundingClientRect();
       savedItemRect = { x: r.right - 2, y: r.top };
-      openedByClick = true;
       activeEditorRef.current = editor;
     };
     document.addEventListener("mousedown", onDocMousedown, true);
 
-    // ── MutationObserver on documentElement: detect menu open/close ───────
-    // Monaco may append outside <body>; watching documentElement catches all.
-    const snippetObserver = new MutationObserver(() => {
-      if (document.querySelector(".monaco-menu-container")) return; // menu still open
-      if (!openedByClick) setSnippetMenuPos(null);
-      openedByClick = false;
-      savedItemRect = null;
-    });
-    snippetObserver.observe(document.documentElement, { childList: true, subtree: true });
-
     editor.onDidDispose(() => {
-      snippetObserver.disconnect();
       document.removeEventListener("mouseover", onDocMouseover, true);
       document.removeEventListener("mousedown", onDocMousedown, true);
     });
