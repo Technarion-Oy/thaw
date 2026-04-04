@@ -89,6 +89,15 @@ jobs:
 
       - name: Obfuscate binary (macOS)
         if: matrix.platform == 'darwin'
+        # CGO_LDFLAGS supplies the UniformTypeIdentifiers framework that Wails
+        # uses for file-type handling (_OBJC_CLASS_$_UTType).  wails build adds
+        # this via its own CGO setup; garble build running standalone only sees
+        # #cgo LDFLAGS directives in the source, which omit this framework,
+        # causing an "Undefined symbols for architecture arm64" linker error.
+        # Go aggregates CGO_LDFLAGS into the external link command alongside
+        # all #cgo LDFLAGS entries, so setting it here is sufficient.
+        env:
+          CGO_LDFLAGS: -framework UniformTypeIdentifiers
         run: |
           garble build \
             -tags desktop,production \
