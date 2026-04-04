@@ -54,30 +54,55 @@ jobs:
         run: go mod download
 
       - name: Install garble
-        # garble obfuscates the compiled Go binary: it hashes package import
-        # paths, replaces all exported and unexported identifiers with random
-        # strings, and strips remaining contextual information so that
-        # decompiled output is unreadable.  Used via -toolexec so that Wails
-        # continues to own the platform-packaging step (macOS .app bundle,
-        # Windows manifest embedding, etc.).
         run: go install mvdan.cc/garble@latest
 
       - name: Build
+        # Run the standard Wails build first.  This step:
+        #   1. Compiles and bundles the React frontend into frontend/dist.
+        #   2. Generates the Wails JS/TS bindings.
+        #   3. Compiles the Go binary (non-obfuscated).
+        # Garble is NOT applied here because GOFLAGS=-toolexec=garble would
+        # be active during step 2 (binding generation), which runs before
+        # frontend/dist exists.  The //go:embed all:frontend/dist directive
+        # then fails with "no matching files found".  The obfuscated binary
+        # is produced in the next step once all embed inputs are present.
+        #
         # -ldflags "-s -w"  strips the symbol table (-s) and DWARF debug info
-        #                   (-w) so function/variable names are not recoverable
-        #                   from the shipped binary.
+        #                   (-w) so function/variable names are not recoverable.
         # -trimpath         removes all local file-system paths embedded by the
-        #                   compiler (source file references, module cache paths)
-        #                   to avoid leaking the build machine's directory layout.
-        # GOFLAGS           passes -toolexec=garble to the go build command that
-        #                   Wails invokes internally.  Wails v2 does not expose a
-        #                   -goflags CLI flag, but Go honours GOFLAGS on every
-        #                   go invocation, so garble intercepts the compilation
-        #                   step transparently without any Wails-specific support.
+        #                   compiler (source file references, module cache paths).
         run: wails build -clean -ldflags "-s -w" -trimpath
         env:
           NODE_OPTIONS: --max-old-space-size=4096
-          GOFLAGS: -toolexec=garble
+
+      # ── Rebuild Go binary with garble ──────────────────────────────────────
+      # frontend/dist is now fully populated, so //go:embed resolves correctly.
+      # garble recompiles the same package with obfuscation (hashed package
+      # paths, mangled identifiers) and overwrites the binary that wails build
+      # produced.  Wails' platform packaging (macOS .app bundle structure,
+      # Windows manifest/icon) is left intact.
+
+      - name: Obfuscate binary (macOS)
+        if: matrix.platform == 'darwin'
+        run: |
+          garble build \
+            -tags desktop,production \
+            -trimpath -ldflags="-s -w" \
+            -o build/bin/thaw.app/Contents/MacOS/thaw \
+            .
+
+      - name: Obfuscate binary (Windows)
+        if: matrix.platform == 'windows'
+        run: garble build -tags desktop,production -trimpath -ldflags="-s -w" -o build/bin/thaw.exe .
+
+      - name: Obfuscate binary (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          garble build \
+            -tags desktop,production \
+            -trimpath -ldflags="-s -w" \
+            -o build/bin/thaw \
+            .
 
       # ── Rename / package output with tag version ───────────────────────────
       - name: Package macOS app bundle
