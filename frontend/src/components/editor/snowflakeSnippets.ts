@@ -63,6 +63,22 @@ export function getSnowflakeSnippets(monaco: typeof monacoLib): monacoLib.langua
       documentation: "Snowflake Scripting variable declaration",
       range: range as any,
     },
+    {
+      label: "let_typed",
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: "LET ${1:variable_name} ${2:type} ${3|DEFAULT,:=|} ${4:expression};",
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      documentation: "LET variable declaration with explicit type",
+      range: range as any,
+    },
+    {
+      label: "let",
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: "LET ${1:variable_name} ${2|DEFAULT,:=|} ${3:expression};",
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      documentation: "LET variable declaration (type inferred)",
+      range: range as any,
+    },
 
     // 3.3. Conditional Statements
     {
@@ -223,7 +239,7 @@ export function getSnowflakeSnippets(monaco: typeof monacoLib): monacoLib.langua
 /** Category groups used to render the snippet submenu. */
 export const SNIPPET_CATEGORIES: { header: string; labels: string[] }[] = [
   { header: "Block Structure",      labels: ["block", "declare"] },
-  { header: "Variables",            labels: ["var", "declare_var"] },
+  { header: "Variables",            labels: ["var", "declare_var", "let_typed", "let"] },
   { header: "Conditionals",         labels: ["if", "case"] },
   { header: "Loops",                labels: ["for", "for_reverse", "while", "repeat", "loop"] },
   { header: "Cursors & Resultsets", labels: ["cursor_lifecycle", "resultset"] },
