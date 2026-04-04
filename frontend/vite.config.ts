@@ -45,64 +45,79 @@ function appObfuscatorPlugin(): Plugin {
         )
           continue;
 
-        chunk.code = obfuscator
-          .obfuscate(chunk.code, {
-            compact: true,
+        try {
+          chunk.code = obfuscator
+            .obfuscate(chunk.code, {
+              compact: true,
 
-            // Control-flow flattening restructures if/switch/for blocks into
-            // switch-based dispatch loops, making static analysis hard.
-            // Threshold 0.3 (vs the default 0.75) processes ~30 % of
-            // functions: enough obfuscation while keeping peak V8 heap
-            // within the 6 GB budget on the macOS arm64 CI runner.
-            // Each flattened function multiplies AST node count several
-            // times, so higher thresholds OOM on 7 GB runners when
-            // Terser is also live in the same Node process.
-            controlFlowFlattening: true,
-            controlFlowFlatteningThreshold: 0.3,
+              // Control-flow flattening restructures if/switch/for blocks into
+              // switch-based dispatch loops, making static analysis hard.
+              // Threshold 0.3 (vs the default 0.75) processes ~30 % of
+              // functions: enough obfuscation while keeping peak V8 heap
+              // within the 6 GB budget on the macOS arm64 CI runner.
+              // Each flattened function multiplies AST node count several
+              // times, so higher thresholds OOM on 7 GB runners when
+              // Terser is also live in the same Node process.
+              controlFlowFlattening: true,
+              controlFlowFlatteningThreshold: 0.3,
 
-            // Dead-code injection inserts unreachable branches so decompilers
-            // cannot cleanly reconstruct the original logic structure.
-            deadCodeInjection: true,
-            deadCodeInjectionThreshold: 0.2,
+              // Dead-code injection inserts unreachable branches so decompilers
+              // cannot cleanly reconstruct the original logic structure.
+              deadCodeInjection: true,
+              deadCodeInjectionThreshold: 0.2,
 
-            // Replace all local identifier names with _0x<hex> sequences.
-            identifierNamesGenerator: "hexadecimal",
+              // Replace all local identifier names with _0x<hex> sequences.
+              identifierNamesGenerator: "hexadecimal",
 
-            // Do NOT rename globals (window, document, React, …) — doing so
-            // breaks runtime references that must resolve in the global scope.
-            renameGlobals: false,
+              // Do NOT rename globals (window, document, React, …) — doing so
+              // breaks runtime references that must resolve in the global scope.
+              renameGlobals: false,
 
-            // String array: all string literals are extracted into a shared
-            // encoded array; accesses go through an indirection function
-            // rather than inline literals, defeating simple string search.
-            stringArray: true,
-            rotateStringArray: true,
-            shuffleStringArray: true,
-            stringArrayCallsTransform: true,
-            stringArrayCallsTransformThreshold: 0.75,
-            stringArrayEncoding: ["base64"],
-            stringArrayIndexShift: true,
-            stringArrayRotate: true,
-            stringArrayShuffle: true,
-            stringArrayThreshold: 0.75,
-            stringArrayWrappersCount: 2,
-            stringArrayWrappersChainedCalls: true,
-            stringArrayWrappersParametersMaxCount: 4,
-            stringArrayWrappersType: "function",
+              // String array: all string literals are extracted into a shared
+              // encoded array; accesses go through an indirection function
+              // rather than inline literals, defeating simple string search.
+              //
+              // RC4 encoding is used instead of base64.  The base64 path in
+              // javascript-obfuscator calls encodeURIComponent internally,
+              // which throws "URI malformed" for any string literal that
+              // contains characters outside Latin-1 (lone surrogates, emoji,
+              // multi-byte codepoints from SQL regexes / Monaco token rules).
+              // RC4 operates on raw bytes and has no such restriction.
+              stringArray: true,
+              rotateStringArray: true,
+              shuffleStringArray: true,
+              stringArrayCallsTransform: true,
+              stringArrayCallsTransformThreshold: 0.75,
+              stringArrayEncoding: ["rc4"],
+              stringArrayIndexShift: true,
+              stringArrayRotate: true,
+              stringArrayShuffle: true,
+              stringArrayThreshold: 0.75,
+              stringArrayWrappersCount: 2,
+              stringArrayWrappersChainedCalls: true,
+              stringArrayWrappersParametersMaxCount: 4,
+              stringArrayWrappersType: "function",
 
-            // Disabled — would break the app or cause unacceptable size growth:
-            //   selfDefending     – eval-loop watchdog breaks in WKWebView's
-            //                       strict CSP environment.
-            //   splitStrings      – multiplies bundle size; SQL keyword strings
-            //                       alone would add hundreds of KB.
-            //   transformObjectKeys – mangles React prop names (className, …).
-            //   unicodeEscapeSequence – makes bundles ~3× larger for no gain.
-            selfDefending: false,
-            splitStrings: false,
-            transformObjectKeys: false,
-            unicodeEscapeSequence: false,
-          })
-          .getObfuscatedCode();
+              // Disabled — would break the app or cause unacceptable size growth:
+              //   selfDefending     – eval-loop watchdog breaks in WKWebView's
+              //                       strict CSP environment.
+              //   splitStrings      – multiplies bundle size; SQL keyword strings
+              //                       alone would add hundreds of KB.
+              //   transformObjectKeys – mangles React prop names (className, …).
+              //   unicodeEscapeSequence – makes bundles ~3× larger for no gain.
+              selfDefending: false,
+              splitStrings: false,
+              transformObjectKeys: false,
+              unicodeEscapeSequence: false,
+            })
+            .getObfuscatedCode();
+        } catch (err) {
+          // Surface the chunk name so it can be investigated, but do not
+          // abort the build — leave the Terser-minified code in place.
+          console.warn(
+            `[thaw:obfuscate-app] skipped "${chunk.fileName}": ${err}`,
+          );
+        }
       }
     },
   };
