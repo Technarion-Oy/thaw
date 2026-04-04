@@ -53,14 +53,28 @@ jobs:
       - name: Download Go dependencies
         run: go mod download
 
+      - name: Install garble
+        # garble obfuscates the compiled Go binary: it hashes package import
+        # paths, replaces all exported and unexported identifiers with random
+        # strings, and strips remaining contextual information so that
+        # decompiled output is unreadable.  Used via -toolexec so that Wails
+        # continues to own the platform-packaging step (macOS .app bundle,
+        # Windows manifest embedding, etc.).
+        run: go install mvdan.cc/garble@latest
+
       - name: Build
-        # -ldflags "-s -w"  strips the symbol table (-s) and DWARF debug info
-        #                   (-w) so function/variable names are not recoverable
-        #                   from the shipped binary.
-        # -trimpath         removes all local file-system paths embedded by the
-        #                   compiler (source file references, module cache paths)
-        #                   to avoid leaking the build machine's directory layout.
-        run: wails build -clean -ldflags "-s -w" -trimpath
+        # -ldflags "-s -w"        strips the symbol table (-s) and DWARF debug
+        #                         info (-w) so function/variable names are not
+        #                         recoverable from the shipped binary.
+        # -trimpath               removes all local file-system paths embedded
+        #                         by the compiler (source file references,
+        #                         module cache paths) to avoid leaking the build
+        #                         machine's directory layout.
+        # -goflags -toolexec=garble  instructs go build to invoke garble as the
+        #                         compiler/linker wrapper for every compilation
+        #                         unit, applying identifier obfuscation on top
+        #                         of the stripping flags above.
+        run: wails build -clean -ldflags "-s -w" -trimpath -goflags="-toolexec=garble"
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
