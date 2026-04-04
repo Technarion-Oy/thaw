@@ -14,6 +14,12 @@ export default defineConfig({
   optimizeDeps: {
     include: ["monaco-editor", "monaco-yaml"],
   },
+  build: {
+    // Never emit source maps in the production bundle.  Source maps embed the
+    // original TypeScript/JSX source, which would be readable inside the
+    // shipped binary even after garble has obfuscated the Go layer.
+    sourcemap: false,
+  },
   server: {
     watch: {
       // Wails regenerates these files during dev-mode startup; ignore them so
