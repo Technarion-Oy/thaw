@@ -444,6 +444,84 @@ func ValidateSyntax(sql string) []DiagMarker {
 					atScriptStmtStart = true
 				case "THEN", "ELSE", "DO", "EXCEPTION":
 					atScriptStmtStart = true
+				case "RETURN", "FOR":
+					// Peek ahead for variable usage
+					j := i
+					jCol := col
+					// Skip whitespace/newlines
+					for j < n && (runes[j] == ' ' || runes[j] == '\t' ||
+						runes[j] == '\n' || runes[j] == '\r') {
+						if runes[j] == '\n' {
+							line++
+							jCol = 1
+						} else {
+							jCol++
+						}
+						j++
+					}
+					if j < n && isAlpha(runes[j]) {
+						varStart := j
+						for j < n && isWordChar(runes[j]) {
+							j++
+							jCol++
+						}
+						varNameRaw := string(runes[varStart:j])
+						varName := strings.ToUpper(varNameRaw)
+
+						if word == "FOR" {
+							// FOR record IN cursor DO
+							declaredVars[varName] = true
+							// Skip IN
+							for j < n && (runes[j] == ' ' || runes[j] == '\t' ||
+								runes[j] == '\n' || runes[j] == '\r') {
+								if runes[j] == '\n' {
+									line++
+									jCol = 1
+								} else {
+									jCol++
+								}
+								j++
+							}
+							if j+2 < n && strings.ToUpper(string(runes[j:j+2])) == "IN" {
+								j += 2
+								jCol += 2
+								// Skip whitespace to cursor name
+								for j < n && (runes[j] == ' ' || runes[j] == '\t' ||
+									runes[j] == '\n' || runes[j] == '\r') {
+									if runes[j] == '\n' {
+										line++
+										jCol = 1
+									} else {
+										jCol++
+									}
+									j++
+								}
+								if j < n && isAlpha(runes[j]) {
+									curStart := j
+									for j < n && isWordChar(runes[j]) {
+										j++
+										jCol++
+									}
+									curNameRaw := string(runes[curStart:j])
+									curName := strings.ToUpper(curNameRaw)
+									if !scriptStmtKeywords[curName] && !declaredVars[curName] {
+										addError("Variable '"+curNameRaw+"' is not declared", line, jCol-len(curNameRaw), line, jCol)
+									}
+								}
+							}
+						} else {
+							// RETURN expr
+							// If it's a known keyword, it's not a variable usage (e.g. RETURN SELECT ...)
+							if !scriptStmtKeywords[varName] && !declaredVars[varName] {
+								addError("Variable '"+varNameRaw+"' is not declared", line, jCol-len(varNameRaw), line, jCol)
+							}
+						}
+						// Advance main loop counters to where we peeked
+						i = j
+						col = jCol
+					}
+					// FOR and RETURN themselves don't start a new statement, but they consume the start position
+					atScriptStmtStart = false
 				case "LET", "VAR":
 					// Peek ahead for the variable name being declared
 					j := i
