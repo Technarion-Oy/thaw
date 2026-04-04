@@ -210,9 +210,9 @@ export function getSnowflakeSnippets(monaco: typeof monacoLib): monacoLib.langua
     {
       label: "execute_immediate",
       kind: monaco.languages.CompletionItemKind.Snippet,
-      insertText: "EXECUTE IMMEDIATE '${1:sql_statement}';",
+      insertText: ["EXECUTE IMMEDIATE $$", "  ${1:sql_statement}", "$$;"].join("\n"),
       insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-      documentation: "Execute a SQL string dynamically",
+      documentation: "Execute a SQL string dynamically (dollar-quoted block)",
       range: range as any,
     },
     {
