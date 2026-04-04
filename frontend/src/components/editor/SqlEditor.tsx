@@ -578,6 +578,35 @@ export function getStatementLineRanges(sql: string): Array<{ startLine: number; 
   return ranges;
 }
 
+/**
+ * Apply EditorPrefs to a Monaco snippet template string before insertion.
+ *
+ * Two transformations:
+ *   1. Indentation — snippets are authored with 2-space indent; replace each
+ *      2-space level with the user's preferred unit (tab or N spaces).
+ *   2. Keyword casing — all-uppercase words (DECLARE, BEGIN, IF …) are
+ *      transformed to match keywordCase.  "Preserve" leaves them as-is.
+ */
+function applyPrefsToSnippet(text: string, prefs: EditorPrefs): string {
+  // 1. Indentation
+  const indentUnit = prefs.indentStyle === "tabs" ? "\t" : " ".repeat(prefs.indentSize);
+  let result = text.replace(/^( {2})+/gm, (m) => indentUnit.repeat(m.length / 2));
+
+  // 2. Keyword casing — matches sequences of A-Z, digits and underscores that
+  //    start with a capital letter (i.e. the all-caps keywords in snippets).
+  if (prefs.keywordCase !== "Preserve") {
+    result = result.replace(/\b([A-Z][A-Z_0-9]*)\b/g, (kw) => {
+      switch (prefs.keywordCase) {
+        case "lower": return kw.toLowerCase();
+        case "Title": return kw.charAt(0) + kw.slice(1).toLowerCase();
+        default:      return kw; // "UPPER" — already uppercase
+      }
+    });
+  }
+
+  return result;
+}
+
 // ── Code Snippets cascading context menu (module-level, one-time setup) ───────
 // Monaco creates SubmenuAction instances INTERNALLY when it builds the context
 // menu from MenuRegistry entries.  Using MenuRegistry.appendMenuItem with a
@@ -626,12 +655,14 @@ let _snippetMenuRegistered = false;
       const cmdId = `thaw.snippet.${lbl}`;
 
       // Handler uses _activeSnippetEditor (set on right-click by handleMount).
+      // applyPrefsToSnippet is called at insertion time so pref changes are
+      // reflected immediately without re-registering commands.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (CommandsRegistry as any).registerCommand(cmdId, () => {
         if (_activeSnippetEditor) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const ctrl = (_activeSnippetEditor as any).getContribution("snippetController2");
-          if (ctrl) ctrl.insert(s.insertText as string);
+          if (ctrl) ctrl.insert(applyPrefsToSnippet(s.insertText as string, editorPrefsRef));
           _activeSnippetEditor.focus();
         }
       });
