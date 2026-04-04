@@ -51,13 +51,19 @@ function appObfuscatorPlugin(): Plugin {
 
             // Control-flow flattening restructures if/switch/for blocks into
             // switch-based dispatch loops, making static analysis hard.
+            // Threshold 0.3 (vs the default 0.75) processes ~30 % of
+            // functions: enough obfuscation while keeping peak V8 heap
+            // within the 6 GB budget on the macOS arm64 CI runner.
+            // Each flattened function multiplies AST node count several
+            // times, so higher thresholds OOM on 7 GB runners when
+            // Terser is also live in the same Node process.
             controlFlowFlattening: true,
-            controlFlowFlatteningThreshold: 0.5,
+            controlFlowFlatteningThreshold: 0.3,
 
             // Dead-code injection inserts unreachable branches so decompilers
             // cannot cleanly reconstruct the original logic structure.
             deadCodeInjection: true,
-            deadCodeInjectionThreshold: 0.3,
+            deadCodeInjectionThreshold: 0.2,
 
             // Replace all local identifier names with _0x<hex> sequences.
             identifierNamesGenerator: "hexadecimal",
@@ -134,9 +140,11 @@ export default defineConfig({
         // messages or breakpoints are present in the shipped binary.
         drop_console: true,
         drop_debugger: true,
-        // Three passes: each pass enables further simplifications exposed by
-        // the previous one (dead branches, constant folding, inlining, …).
-        passes: 3,
+        // Two passes: each pass unlocks further simplifications from the
+        // previous one (dead branches, constant folding, inlining, …).
+        // Reduced from 3 to keep Terser's peak RSS within budget when
+        // javascript-obfuscator is also live in the same Node process.
+        passes: 2,
       },
       // Mangle local variable and function names to short identifiers.
       mangle: true,

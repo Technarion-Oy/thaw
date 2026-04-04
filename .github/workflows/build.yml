@@ -73,7 +73,12 @@ jobs:
         #                   compiler (source file references, module cache paths).
         run: wails build -clean -ldflags "-s -w" -trimpath
         env:
-          NODE_OPTIONS: --max-old-space-size=4096
+          # The macOS arm64 runner has 7 GB RAM.  javascript-obfuscator's
+          # control-flow flattening can multiply the AST size of each
+          # function several times over.  Combined with Terser's multi-pass
+          # compression running in the same Node process, the default 4 GB
+          # limit is insufficient.  6 GB leaves ~1 GB for the OS.
+          NODE_OPTIONS: --max-old-space-size=6144
 
       # ── Rebuild Go binary with garble ──────────────────────────────────────
       # frontend/dist is now fully populated, so //go:embed resolves correctly.
