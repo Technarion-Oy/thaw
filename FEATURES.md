@@ -63,7 +63,15 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 - **Split view** — right-click any tab and choose **Split with: [tab name]** to view two editors side by side; a draggable vertical divider separates them and the ratio is persisted across sessions; each editor is fully independent with its own completions, hover definitions, and editing history; close the split with the × button in the secondary editor header, via **Close split view** in the right-click menu, or by closing either of the two tabs
 - **Snowflake Scripting Support** — advanced support for Snowflake Scripting (used in Stored Procedures and UDFs):
   - **Syntax Highlighting** — distinct coloring for scripting keywords (`DECLARE`, `BEGIN`, `EXCEPTION`, `END`), control flow (`IF`, `LOOP`, `WHILE`), and async operations (`ASYNC`, `AWAIT`)
-  - **Right-click Code Snippets** — right-click anywhere in the SQL editor and hover over **Code Snippets →** to open a cascading submenu of Snowflake Scripting templates grouped into six categories: **Block Structure** (`block`, `declare`), **Variables** (`var`, `declare_var`), **Conditionals** (`if`, `case`), **Loops** (`for`, `for_reverse`, `while`, `repeat`, `loop`), **Cursors & Resultsets** (`cursor_lifecycle`, `resultset`), and **Async Jobs** (`async_job`, `await_job`, `cancel_job`); the submenu opens on hover and closes when you move the cursor away or press Escape; clicking any item inserts the snippet at the cursor
+  - **Right-click Code Snippets** — right-click anywhere in the SQL editor and hover over **Code Snippets →** to open a cascading submenu of Snowflake Scripting templates grouped into seven categories:
+    - **Block Structure** — `block` (DECLARE / BEGIN / EXCEPTION / END with correct `WHEN exception THEN` / `WHEN OTHER THEN` handlers), `declare` (block without EXCEPTION)
+    - **DECLARE Variables** — `declare var` (`variable_name type DEFAULT expression;`), `declare var (type only)` (`variable_name type;` — NULL until assigned)
+    - **LET Variables** — `let (typed)` (`LET variable_name type DEFAULT|:= expression;`), `let` (`LET variable_name DEFAULT|:= expression;` — type inferred)
+    - **Conditionals** — `if` (IF / ELSEIF / ELSE / END IF), `case` (CASE / WHEN / ELSE / END CASE)
+    - **Loops** — `for`, `for_reverse`, `while`, `repeat`, `loop`
+    - **Cursors & Resultsets** — `cursor_lifecycle` (OPEN / FETCH / CLOSE), `resultset`, `execute_immediate` (dollar-quoted `EXECUTE IMMEDIATE $$ … $$;`), `execute_immediate_using` (with USING bind variables)
+    - **Async Jobs** — `async_job`, `await_job`, `cancel_job`
+    - The submenu opens on hover (auto-flips left if there is insufficient space to the right); clicking any item inserts the snippet at the cursor with **keyword casing and indentation** automatically applied from **View → Editor Preferences…** — changing preferences takes effect on the next insertion with no restart required
   - **Autocomplete Snippets** — the same templates are also available as autocomplete suggestions; type the snippet label (e.g. `block`, `if`, `for`) and press Enter or Tab to expand
   - **Transparent Dollar Quoting** — code inside `$$...$$` or `$tag$...$tag$` is treated as normal SQL for highlighting, diagnostics, and hover tooltips, perfect for Snowflake Scripting development
 

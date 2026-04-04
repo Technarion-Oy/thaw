@@ -88,12 +88,15 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 - **Never register completion/hover providers inside the component render** — use module-level disposable refs
 
 ### Code Snippets cascading context menu
-- A single **"Code Snippets →"** `addAction` entry appears in Monaco's right-click menu (group `9_snippets`)
-- A `MutationObserver` on `document.body` (subtree) detects `.monaco-menu-container` appearing/disappearing
-- **Use `mouseover` on the container, not `mouseenter` on the item** — `mouseenter` is unreliable on Monaco's styled list items; `mouseover` bubbles from all children and is always delivered to the container listener
-- Position the submenu via `snippetMenuItemEl.getBoundingClientRect()` (not the raw right-click coordinates); use `ctxMenuPosRef` only as a fallback in `run()`
-- `openedViaClick` local variable in `handleMount` prevents the observer's "menu closed" branch from hiding the submenu immediately after `run()` opens it (Monaco closes its menu as part of dispatching the action)
-- Snippet definitions live in `snowflakeSnippets.ts`; `SNIPPET_CATEGORIES` drives the grouped submenu rendering
+- Implemented via Monaco's internal **`MenuRegistry` + `CommandsRegistry`** (both from `vs/platform/…`); no per-editor patching
+- A module-level IIFE (runs once at load) registers:
+  1. A `{ submenu: MenuId("thaw.snippets.submenu") }` entry in `MenuId.EditorContext` (group `9_snippets`) → Monaco renders the `▶` indicator and hover cascade natively
+  2. Each snippet as a global `CommandsRegistry` command (`thaw.snippet.<label>`)
+  3. Each snippet as a `MenuRegistry` item in the submenu `MenuId` with its display title from `SNIPPET_CATEGORIES.titles`
+- Per-editor: `editor.onContextMenu` sets `_activeSnippetEditor` so commands always insert into the right editor
+- **Snippets respect `editorPrefsRef`** — `applyPrefsToSnippet(text, prefs)` is called at insertion time; handles keyword casing (`keywordCase`) and indentation (`indentStyle` / `indentSize`); no re-registration needed when prefs change
+- Snippet definitions and category groupings live in `snowflakeSnippets.ts`; `SNIPPET_CATEGORIES` drives submenu structure; optional `titles` map per category provides human-readable menu labels distinct from internal command IDs
+- **Do not use `instanceof SubmenuAction` from an external import** — Monaco's `menu.js` checks its own bundled class; external imports are different module instances and always fail the check; use `MenuRegistry` instead and let Monaco create `SubmenuAction` internally
 
 ## Critical Gotchas
 
