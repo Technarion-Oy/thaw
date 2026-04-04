@@ -360,11 +360,13 @@ func ValidateSyntax(sql string) []DiagMarker {
 				if len(dollarStack) > 0 && dollarStack[len(dollarStack)-1] == tag {
 					dollarStack = dollarStack[:len(dollarStack)-1]
 					atScriptStmtStart = false
+					atStmtStart = true // After a $$ block, we are ready for the next SQL statement
 					inDeclareBlock = false
 					declaredVars = map[string]bool{}
 				} else {
 					dollarStack = append(dollarStack, tag)
 					atScriptStmtStart = true
+					atStmtStart = false // Inside $$, we are in scripting context
 					declaredVars = map[string]bool{}
 				}
 				i += len([]rune(tag))
@@ -445,18 +447,53 @@ func ValidateSyntax(sql string) []DiagMarker {
 				case "LET", "VAR":
 					// Peek ahead for the variable name being declared
 					j := i
+					jCol := col
 					for j < n && (runes[j] == ' ' || runes[j] == '\t' ||
 						runes[j] == '\n' || runes[j] == '\r') {
+						if runes[j] == '\n' {
+							line++
+							jCol = 1
+						} else {
+							jCol++
+						}
 						j++
 					}
 					if j < n && isAlpha(runes[j]) {
 						varStart := j
 						for j < n && isWordChar(runes[j]) {
 							j++
+							jCol++
 						}
-						varName := strings.ToUpper(string(runes[varStart:j]))
+						varNameRaw := string(runes[varStart:j])
+						varName := strings.ToUpper(varNameRaw)
 						declaredVars[varName] = true
+
+						// Now check for assignment after the variable name
+						for j < n && (runes[j] == ' ' || runes[j] == '\t' ||
+							runes[j] == '\n' || runes[j] == '\r') {
+							if runes[j] == '\n' {
+								line++
+								jCol = 1
+							} else {
+								jCol++
+							}
+							j++
+						}
+						if j < n && runes[j] == '=' {
+							prev := runes[j-1]
+							next := rune(0)
+							if j+1 < n {
+								next = runes[j+1]
+							}
+							if prev != ':' && next != '=' {
+								addError("Expected ':=' for assignment", line, jCol, line, jCol+1)
+							}
+						}
+						// Advance main loop counters to where we peeked
+						i = j
+						col = jCol
 					}
+
 				default:
 					if inDeclareBlock {
 						// Inside DECLARE every non-keyword identifier is a variable declaration
@@ -559,30 +596,51 @@ func stripQ(s string) string {
 // from the given SQL text.  Three-part (db.schema.table), two-part (schema.table),
 // and one-part (table) references are all recognised.
 func ParseJoinTables(sql string) []JoinTableRef {
-	matches := tableRefRe.FindAllStringSubmatch(sql, -1)
-	result := make([]JoinTableRef, 0, len(matches))
-
-	for _, m := range matches {
-		var db, schema, name string
-
-		if m[1] != "" && m[2] != "" && m[3] != "" {
-			// Three-part: db.schema.table
-			db = normID(m[1])
-			schema = normID(m[2])
-			name = normID(m[3])
-		} else if m[4] != "" && m[5] != "" {
-			// Two-part: schema.table
-			schema = normID(m[4])
-			name = normID(m[5])
-		} else {
-			// One-part: table
-			name = normID(m[6])
+	var result []JoinTableRef
+	start := 0
+	for {
+		m := tableRefRe.FindStringSubmatchIndex(sql[start:])
+		if m == nil {
+			break
 		}
 
-		alias := name
-		rawAlias := stripQ(m[7])
-		if rawAlias != "" && !joinStopKW[strings.ToUpper(rawAlias)] {
-			alias = rawAlias
+		// Adjust indices based on the current search start position
+		for i := range m {
+			if m[i] != -1 {
+				m[i] += start
+			}
+		}
+
+		var db, schema, name, alias string
+
+		if m[2] != -1 && m[4] != -1 && m[6] != -1 {
+			// Three-part: db.schema.table
+			db = normID(sql[m[2]:m[3]])
+			schema = normID(sql[m[4]:m[5]])
+			name = normID(sql[m[6]:m[7]])
+			start = m[7]
+		} else if m[8] != -1 && m[10] != -1 {
+			// Two-part: schema.table
+			schema = normID(sql[m[8]:m[9]])
+			name = normID(sql[m[10]:m[11]])
+			start = m[11]
+		} else if m[12] != -1 {
+			// One-part: table
+			name = normID(sql[m[12]:m[13]])
+			start = m[13]
+		}
+
+		alias = name
+		if m[14] != -1 {
+			rawAlias := stripQ(sql[m[14]:m[15]])
+			if !joinStopKW[strings.ToUpper(rawAlias)] {
+				alias = rawAlias
+				// Successfully matched an alias - continue AFTER the alias
+				start = m[15]
+			} else {
+				// Matched a keyword instead of an alias - continue BEFORE the keyword
+				start = m[14]
+			}
 		}
 
 		result = append(result, JoinTableRef{DB: db, Schema: schema, Name: name, Alias: alias})
@@ -964,7 +1022,12 @@ func ComputeJoinOnConditions(req JoinOnSuggestionsReq) []JoinCondition {
 	seen := map[string]bool{}
 
 	addSugg := func(cond, detail, sortPfx string) {
-		full := prefix + cond
+		pfx := prefix
+		if strings.HasPrefix(cond, "USING") && strings.HasPrefix(prefix, "ON ") {
+			pfx = "USING "
+			cond = cond[len("USING "):]
+		}
+		full := pfx + cond
 		if !seen[full] {
 			seen[full] = true
 			suggestions = append(suggestions, JoinCondition{
@@ -1031,7 +1094,13 @@ func ComputeJoinOnConditions(req JoinOnSuggestionsReq) []JoinCondition {
 				continue
 			}
 			sharedCompatible = append(sharedCompatible, info.Name)
-			cond := lastRef.Alias + "." + info.Name + " = " + otherRef.Alias + "." + info.Name
+
+			// Standardize order: smaller alias first to keep suggestions stable
+			a1, a2 := lastRef.Alias, otherRef.Alias
+			if a1 > a2 {
+				a1, a2 = a2, a1
+			}
+			cond := a1 + "." + info.Name + " = " + a2 + "." + info.Name
 			addSugg(cond, "SAME-NAME COLUMN", "1")
 		}
 		if len(sharedCompatible) > 0 {

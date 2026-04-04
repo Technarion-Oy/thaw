@@ -12,8 +12,9 @@ thaw/
 ├── version.go           # Version string
 ├── internal/
 │   ├── snowflake/       # Snowflake client — connection, query, DDL, lineage
-│   ├── sqleditor/       # SQL diagnostics & JOIN suggestion engine (ValidateSyntax,
-│   │                    #   ParseJoinTables, ComputeJoinOnConditions, ValidateSemantics)
+│   ├── sqleditor/       # SQL diagnostics & JOIN suggestion engine
+│   │   ├── sqleditor.go
+│   │   └── sqleditor_test.go
 │   ├── ddl/             # DDL parsing and git-export pipeline
 │   ├── ai/              # AI provider clients (OpenAI, Google)
 │   ├── config/          # App config (TOML persistence)
