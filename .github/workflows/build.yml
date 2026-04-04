@@ -54,7 +54,13 @@ jobs:
         run: go mod download
 
       - name: Build
-        run: wails build -clean
+        # -ldflags "-s -w"  strips the symbol table (-s) and DWARF debug info
+        #                   (-w) so function/variable names are not recoverable
+        #                   from the shipped binary.
+        # -trimpath         removes all local file-system paths embedded by the
+        #                   compiler (source file references, module cache paths)
+        #                   to avoid leaking the build machine's directory layout.
+        run: wails build -clean -ldflags "-s -w" -trimpath
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
