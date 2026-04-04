@@ -618,6 +618,12 @@ wails build
 
 The output binary is placed in `build/bin/`.
 
+The frontend build pipeline applies two layers of IP protection automatically:
+- **Terser** (2-pass minification, no source maps, dead code and console removal)
+- **javascript-obfuscator** (RC4 string-array encoding, hexadecimal identifier renaming, wrapper chains) — vendor and Monaco chunks are excluded to avoid breaking their internal protocols
+
+The build script allocates 6 GB of Node heap (`--max-old-space-size=6144`) to accommodate the obfuscator's memory usage.
+
 **CI release builds** are triggered automatically by pushing a version tag to `main`. Artifacts for macOS (arm64), Windows (amd64), and Linux (amd64) are produced and named after the tag:
 
 ```bash
@@ -658,6 +664,7 @@ thaw/
 │   ├── dbt/
 │   │   ├── generator.go           # Pure dbt project file generator (no Snowflake calls)
 │   │   └── generator_test.go      # 56 unit tests for generator, source names, and SQL stubs
+│   ├── sqleditor/sqleditor.go     # SQL diagnostics & JOIN condition engine (ValidateSyntax, ParseJoinTables, ComputeJoinOnConditions, ValidateSemantics)
 │   ├── filesystem/fs.go           # Directory listing, file reading and writing
 │   ├── gitrepo/repo.go            # Git status, commit/push, pull
 │   ├── integration/
@@ -872,13 +879,9 @@ cd frontend && npm run test:watch  # watch mode
 
 #### SQL diagnostics tests (`frontend/src/utils/sqlDiagnostics.test.ts`)
 
-174 unit tests for the SQL diagnostic engine — no browser, no Snowflake connection required:
+169 unit tests for the SQL diagnostic engine — no browser, no Snowflake connection required.
 
-- **`validateSyntax`** — structural tokenizer:
-  - Clean SQL: simple SELECT, escaped string literals, dollar-quoted strings, block/line comments, nested parens, multiple statements, CTEs; all Snowflake SQL statement keywords (including scripting: `FOR`, `WHILE`, `IF`, `CASE`, `END`) accepted after a semicolon without triggering errors
-  - Unclosed literals → Error: single-quoted string, double-quoted identifier, `$$`-quoted string, named dollar-quoted string, block comment; multi-line opening reports the correct line number
-  - Unmatched parens/brackets → Error: extra closing paren, unclosed opening paren, mismatched bracket/paren, multiple unclosed; parens inside strings and comments are never flagged
-  - Post-semicolon garbage → Error: bare unrecognised token, token on second line, whitespace-only between `;` and keyword OK, content inside a string after `;` OK
+> **Note:** `validateSyntax` (structural tokenizer) and `validateSemantics` (alias.column validator) have been moved to the Go backend (`internal/sqleditor`). Their logic is exercised through the IPC layer in production; frontend tests cover only the remaining TypeScript-side validators.
 
 - **`validateWithParser`** — Snowflake PEG grammar check:
   - Valid SQL (no warnings): SELECT with WHERE, JOINs, CTEs, nested CTEs, subqueries in FROM, window functions, QUALIFY, PIVOT, CREATE TABLE, INSERT INTO … SELECT, UPDATE, positional params (`$1`), `$$`-quoted strings, `::` cast, LATERAL FLATTEN, multi-statement scripts
@@ -894,10 +897,6 @@ cd frontend && npm run test:watch  # watch mode
   - Subqueries in FROM → statement skipped; mixed subquery + real table → statement skipped
   - Snowflake FP patterns (TABLESAMPLE, SAMPLE) → statement skipped
   - Multi-statement scripts: each statement validated independently; line numbers correct across semicolons
-
-- **`validateSemantics`** — `alias.column` two-part reference check:
-  - Valid: known column, case-insensitive match, three-part reference not checked, cold cache → silent
-  - Unknown column → Warning: marker on the column token (not the alias), multiple unknowns, alias inside string/comment/block comment not flagged, JOIN query
 
 ---
 

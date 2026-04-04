@@ -678,11 +678,12 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 
 ## Code Quality & CI/CD
 
-- **Unit tests** — DDL parser, lineage parser, dbt generator, migration helper, and **SQL formatter** tests run on every commit; 63 vitest tests for the Snowflake-dialect formatter cover keyword/identifier/function casing, indent styles, comma and operator placement, `::` cast and `:` VARIANT path operators, CTE layout, LATERAL FLATTEN, string/comment passthrough, and 14 complex Snowflake-specific query patterns
+- **Unit tests** — DDL parser, lineage parser, dbt generator, migration helper, SQL diagnostics engine (`internal/sqleditor`), and **SQL formatter** tests run on every commit; 169 vitest tests for the frontend diagnostic and formatter layers cover keyword/identifier/function casing, indent styles, comma and operator placement, `::` cast and `:` VARIANT path operators, CTE layout, LATERAL FLATTEN, string/comment passthrough, and 14 complex Snowflake-specific query patterns
 - **Integration tests** — 18 `TestFormatterSQL` cases validate that formatted SQL patterns execute on a real Snowflake account without syntax errors (no `CREATE TABLE` or elevated privileges needed); DDL export and schema migration integration tests are gated behind a build tag and run separately
 - **golangci-lint** — static analysis (weekly, every Monday): unchecked errors, vet, staticcheck, unused symbols, misspellings, and style (`errcheck`, `govet`, `staticcheck`, `ineffassign`, `unused`, `misspell`, `revive`)
 - **govulncheck** — vulnerability scanning against the Go vulnerability database (weekly); reports only vulnerabilities reachable from the compiled binary
 - **gosec** — security static analysis (weekly): hardcoded credentials, weak crypto, TLS misconfigurations, unsafe operations
+- **IP protection** — proprietary SQL analysis algorithms (syntax tokenizer, semantic validator, JOIN condition engine) are implemented in the Go backend (`internal/sqleditor`) and compiled into the binary; the frontend bundle is additionally processed by Terser (2-pass minification, no source maps) and `javascript-obfuscator` (RC4 string-array encoding, hexadecimal identifier renaming) so that app logic is not recoverable from the shipped binary
 - **Release builds** — macOS (arm64), Windows (amd64), and Linux (amd64) binaries are built automatically when a version tag (`v*`) is pushed to `main`; artifacts are named after the tag (e.g. `thaw-v1.2.3-darwin-arm64.zip`)
 
 All security/quality tools can also be run locally — see the `README.md` for install and run commands.

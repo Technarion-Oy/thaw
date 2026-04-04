@@ -25,10 +25,10 @@ import { useObjectStore } from "../../store/objectStore";
 import { useSessionStore } from "../../store/sessionStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs } from "../../../wailsjs/go/main/App";
+import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics } from "../../../wailsjs/go/main/App";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
-import { DiagMarker, ColInfo, validateSyntax, validateSemantics, validateWithParser, validateBareColumnRefs } from "../../utils/sqlDiagnostics";
+import { DiagMarker, ColInfo, validateWithParser, validateBareColumnRefs, ResolvedRef } from "../../utils/sqlDiagnostics";
 import { extractDeclaredVariables, isColonRequired } from "../../utils/snowflakeScriptingUtils";
 
 // Module-level DDL cache and hover provider handle so we only register once
@@ -245,49 +245,7 @@ async function warmUpFKsForSchema(db: string, schema: string): Promise<void> {
 }
 
 // ── JOIN table ref parser ──────────────────────────────────────────────────────
-// Extracts all FROM/JOIN table references (with aliases) from the given SQL text.
-interface JoinTableRef { db?: string; schema?: string; name: string; alias: string; }
-
-const JOIN_STOP_KW = new Set([
-  "ON","WHERE","SET","GROUP","ORDER","HAVING","LIMIT","UNION","EXCEPT",
-  "INTERSECT","CROSS","INNER","LEFT","RIGHT","FULL","OUTER","NATURAL","JOIN",
-  "SELECT","WITH","FROM",
-]);
-
-function parseJoinTables(sql: string): JoinTableRef[] {
-  const ID_PAT = `(?:"[^"]+"|\\w+)`;
-  // Use [ \t]+ (NOT \s+) for the alias separator so the alias group never crosses
-  // a newline and accidentally consumes the JOIN keyword of the next clause.
-  const tableRefRe = new RegExp(
-    `(?:FROM|JOIN)\\s+(?:(${ID_PAT})\\.(${ID_PAT})\\.(${ID_PAT})|(${ID_PAT})\\.(${ID_PAT})|(${ID_PAT}))` +
-    `(?:[ \\t]+(?:AS[ \\t]+)?(${ID_PAT}))?`,
-    "gi",
-  );
-  // Snowflake normalises unquoted identifiers to UPPERCASE; quoted ones preserve case.
-  // normId applies that rule to db/schema/table parts so API calls use the right case.
-  // Aliases are user-defined tokens kept exactly as typed (stripQ only strips quotes).
-  const normId = (s?: string) => {
-    if (!s) return s;
-    return s.startsWith('"') ? s.slice(1, -1) : s.toUpperCase();
-  };
-  const stripQ = (s?: string) => (s && s.startsWith('"') ? s.slice(1, -1) : s);
-  const result: JoinTableRef[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = tableRefRe.exec(sql)) !== null) {
-    let db: string | undefined, schema: string | undefined, name: string;
-    if (m[1] && m[2] && m[3]) {
-      db = normId(m[1])!; schema = normId(m[2])!; name = normId(m[3])!;
-    } else if (m[4] && m[5]) {
-      schema = normId(m[4])!; name = normId(m[5])!;
-    } else {
-      name = normId(m[6])!;
-    }
-    const rawAlias = stripQ(m[7]);
-    const alias = rawAlias && !JOIN_STOP_KW.has(rawAlias.toUpperCase()) ? rawAlias : name;
-    result.push({ db, schema, name, alias });
-  }
-  return result;
-}
+// parseJoinTables has moved to the Go backend — call ParseJoinTableRefs(sql).
 
 function mkColSuggestions(cols: string[], range: any, monaco: any) {
   return cols.map((col) => ({
@@ -300,6 +258,8 @@ function mkColSuggestions(cols: string[], range: any, monaco: any) {
 }
 
 // ── JOIN ON autocomplete helpers ──────────────────────────────────────────────
+// buildCompositeConditions, pkHeuristicConditions, typeCategory have moved to
+// the Go backend — use ComputeJoinOnConditions() IPC call.
 
 /** Build one Monaco completion item for a JOIN ON condition. */
 function makeSugg(label: string, detail: string, sortText: string, range: any, monaco: any) {
@@ -313,74 +273,9 @@ function makeSugg(label: string, detail: string, sortText: string, range: any, m
   };
 }
 
-/**
- * Group FKs by constraintName, sort each group by keySequence, and return one
- * condition string per constraint (multi-column → ANDed pairs).
- */
-function buildCompositeConditions(
-  fks: FKEntry[],
-  fkAlias: string,
-  pkAlias: string,
-): string[] {
-  const groups = new Map<string, FKEntry[]>();
-  for (const fk of fks) {
-    const k = fk.constraintName || fk.fkColumn;
-    if (!groups.has(k)) groups.set(k, []);
-    groups.get(k)!.push(fk);
-  }
-  return [...groups.values()].map((cols) => {
-    cols.sort((a, b) => a.keySequence - b.keySequence);
-    return cols
-      .map((fk) => `${fkAlias}.${fk.fkColumn} = ${pkAlias}.${fk.pkColumn}`)
-      .join(" AND ");
-  });
-}
-
-/**
- * When no FK constraints exist, suggest join conditions using the naming
- * convention TABLE_B.TABLE_A_ID ↔ TABLE_A.ID (or TABLE_A.TABLE_BID).
- */
-function pkHeuristicConditions(
-  lastRef:  { alias: string; name: string },
-  otherRef: { alias: string; name: string },
-  lastCols: string[],
-  otherCols: string[],
-): string[] {
-  const results: string[] = [];
-  const ln = lastRef.name.toUpperCase();
-  const on = otherRef.name.toUpperCase();
-
-  for (const col of lastCols) {
-    const uc = col.toUpperCase();
-    if (uc === `${on}_ID` || uc === `${on}ID`) {
-      const pkCol = otherCols.find((c) => c.toUpperCase() === "ID");
-      if (pkCol) results.push(`${lastRef.alias}.${col} = ${otherRef.alias}.${pkCol}`);
-    }
-  }
-  for (const col of otherCols) {
-    const uc = col.toUpperCase();
-    if (uc === `${ln}_ID` || uc === `${ln}ID`) {
-      const pkCol = lastCols.find((c) => c.toUpperCase() === "ID");
-      if (pkCol) results.push(`${otherRef.alias}.${col} = ${lastRef.alias}.${pkCol}`);
-    }
-  }
-  return results;
-}
-
-/** Map a Snowflake data-type string to a broad category for compatibility checks. */
-function typeCategory(dt: string): string {
-  const t = dt.toUpperCase().replace(/\s*\(.*/, ""); // strip params
-  if (/^(NUMBER|INT|INTEGER|FLOAT|DECIMAL|NUMERIC|BIGINT|SMALLINT|TINYINT|BYTEINT|DOUBLE|REAL)$/.test(t)) return "numeric";
-  if (/^(VARCHAR|CHAR|STRING|TEXT|NCHAR|NVARCHAR|CHARACTER VARYING)$/.test(t)) return "text";
-  if (/^(DATE|TIME|TIMESTAMP|DATETIME|TIMESTAMP_NTZ|TIMESTAMP_LTZ|TIMESTAMP_TZ)$/.test(t)) return "datetime";
-  if (t === "BOOLEAN") return "boolean";
-  if (/^(VARIANT|OBJECT|ARRAY)$/.test(t)) return "semi";
-  return "other";
-}
-
 /** Resolve raw JoinTableRef list to fully-qualified refs via the object store. */
 function resolveRefs(
-  refs: JoinTableRef[],
+  refs: Array<{ db: string; schema: string; name: string; alias: string }>,
   storeObjs: Array<{ db: string; schema: string; name: string; kind: string }>,
 ): Array<{ db: string; schema: string; name: string; alias: string }> | null {
   const resolved = refs.map((ref) => {
@@ -890,7 +785,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     });
 
     // ── SQL diagnostics (syntax + semantic markers) ────────────────────────
-    const runDiagnostics = () => {
+    const runDiagnostics = async () => {
       const model = editor.getModel();
       if (!model) return;
       if (model.getLanguageId() !== "sql") {
@@ -900,8 +795,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       const diagSql = model.getValue();
       const diagMarkers: DiagMarker[] = [];
 
-      const syntaxErrors = validateSyntax(diagSql);
-      diagMarkers.push(...syntaxErrors);
+      // Structural syntax check (unclosed strings, parens, scripting assignments).
+      // Runs in the Go backend to protect the proprietary tokenizer logic.
+      const syntaxErrors = await AnalyzeSqlSyntax(diagSql);
+      diagMarkers.push(...(syntaxErrors as DiagMarker[]));
 
       if (syntaxErrors.length === 0) {
         // Grammar check via node-sql-parser (Snowflake dialect).
@@ -909,10 +806,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         // supported by the parser and would otherwise produce false positives.
         diagMarkers.push(...validateWithParser(diagSql));
 
-        const rawRefs = parseJoinTables(diagSql);
+        const rawRefs = await ParseJoinTableRefs(diagSql);
         const storeObjs = useObjectStore.getState().objects;
         // Resolve refs without the >= 2 constraint so single-table queries are validated.
-        const resolved = rawRefs
+        const resolved: ResolvedRef[] = rawRefs
           .map((ref) => {
             if (ref.db && ref.schema) {
               return { db: ref.db, schema: ref.schema, name: ref.name, alias: ref.alias };
@@ -926,7 +823,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             });
             return obj ? { db: obj.db, schema: obj.schema, name: obj.name, alias: ref.alias } : null;
           })
-          .filter(Boolean) as Array<{ db: string; schema: string; name: string; alias: string }>;
+          .filter(Boolean) as ResolvedRef[];
 
         // Proactively warm colInfoCache for any resolved FROM table whose columns
         // haven't been fetched yet.  Once the fetch resolves, re-run diagnostics
@@ -942,7 +839,13 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         }
 
         if (resolved.length > 0) {
-          diagMarkers.push(...validateSemantics(diagSql, resolved, colInfoCache));
+          // Semantic check (alias.column validation) runs in the Go backend.
+          const colEntries = resolved.map((ref) => {
+            const key = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
+            return { db: ref.db, schema: ref.schema, name: ref.name, cols: colInfoCache.get(key) ?? [] };
+          });
+          const semanticMarkers = await AnalyzeSqlSemantics(diagSql, resolved as any, colEntries as any);
+          diagMarkers.push(...(semanticMarkers as DiagMarker[]));
         }
 
         // Validate bare and double-quoted column names in SELECT lists against
@@ -1201,98 +1104,31 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
         const wordIsOn = word.word.toUpperCase() === "ON";
         if (wordIsOn || isInJoinOnClause) {
-          const refs = parseJoinTables(textToCursor);
-          if (refs.length >= 2) {
-            const storeObjs = useObjectStore.getState().objects;
-            const resolvedRefs = resolveRefs(refs, storeObjs);
-
+          const rawRefs = await ParseJoinTableRefs(textToCursor);
+          if ((rawRefs as any[]).length >= 2) {
+            const resolvedRefs = resolveRefs(rawRefs as any[], useObjectStore.getState().objects);
             if (resolvedRefs && resolvedRefs.length >= 2) {
-              const onSuggestions: any[] = [];
-              const seen = new Set<string>();
-              const lastRef   = resolvedRefs[resolvedRefs.length - 1];
-              const otherRefs = resolvedRefs.slice(0, -1);
-
               // Warm up FKs for all involved schemas (background, non-blocking)
               for (const ref of resolvedRefs) {
                 warmUpFKsForSchema(ref.db, ref.schema).catch(() => {});
               }
-
-              // ── Tier 1a: Explicit FK constraints (composite-aware) ────────
-              const lastFKs = await getFKs(lastRef.db, lastRef.schema, lastRef.name);
-              for (const otherRef of otherRefs) {
-                // lastRef is FK child → otherRef is PK parent
-                const fksForPk = lastFKs.filter((fk) =>
-                  UC(fk.pkTable) === UC(otherRef.name) &&
-                  (!fk.pkSchema   || UC(fk.pkSchema)   === UC(otherRef.schema)) &&
-                  (!fk.pkDatabase || UC(fk.pkDatabase) === UC(otherRef.db)),
-                );
-                for (const cond of buildCompositeConditions(fksForPk, lastRef.alias, otherRef.alias)) {
-                  if (!seen.has(cond)) {
-                    seen.add(cond);
-                    onSuggestions.push(makeSugg(cond, "FK RELATION", `0a${cond}`, range, monaco));
-                  }
-                }
-                // otherRef is FK child → lastRef is PK parent
-                const otherFKs = await getFKs(otherRef.db, otherRef.schema, otherRef.name);
-                const fksForLast = otherFKs.filter((fk) =>
-                  UC(fk.pkTable) === UC(lastRef.name) &&
-                  (!fk.pkSchema   || UC(fk.pkSchema)   === UC(lastRef.schema)) &&
-                  (!fk.pkDatabase || UC(fk.pkDatabase) === UC(lastRef.db)),
-                );
-                for (const cond of buildCompositeConditions(fksForLast, otherRef.alias, lastRef.alias)) {
-                  if (!seen.has(cond)) {
-                    seen.add(cond);
-                    onSuggestions.push(makeSugg(cond, "FK RELATION", `0b${cond}`, range, monaco));
-                  }
-                }
+              // Collect FK and column data for all involved tables
+              const fkEntries: any[] = [];
+              const colEntries: any[] = [];
+              for (const ref of resolvedRefs) {
+                fkEntries.push({ db: ref.db, schema: ref.schema, name: ref.name,
+                  fks: await getFKs(ref.db, ref.schema, ref.name) });
+                colEntries.push({ db: ref.db, schema: ref.schema, name: ref.name,
+                  cols: await getColInfos(ref.db, ref.schema, ref.name) });
               }
-
-              // ── Tier 1b: PK name heuristic (only when no FK suggestions) ─
-              if (onSuggestions.length === 0) {
-                const lastColNames = await getColumns(lastRef.db, lastRef.schema, lastRef.name);
-                for (const otherRef of otherRefs) {
-                  const otherColNames = await getColumns(otherRef.db, otherRef.schema, otherRef.name);
-                  for (const cond of pkHeuristicConditions(lastRef, otherRef, lastColNames, otherColNames)) {
-                    if (!seen.has(cond)) {
-                      seen.add(cond);
-                      onSuggestions.push(makeSugg(cond, "PK HEURISTIC", `0c${cond}`, range, monaco));
-                    }
-                  }
-                }
-              }
-
-              // ── Tier 2: Same-name columns (type-compatible) + USING ───────
-              const lastColInfos = await getColInfos(lastRef.db, lastRef.schema, lastRef.name);
-              const lastColInfoMap = new Map(lastColInfos.map((c) => [UC(c.name), c.dataType]));
-              for (const otherRef of otherRefs) {
-                const otherColInfos = await getColInfos(otherRef.db, otherRef.schema, otherRef.name);
-                const sharedCompatible: string[] = [];
-                for (const info of otherColInfos) {
-                  const dt1 = lastColInfoMap.get(UC(info.name));
-                  if (!dt1) continue;
-                  const cat1 = typeCategory(dt1);
-                  const cat2 = typeCategory(info.dataType);
-                  // Allow if same category or either is "other" (unknown → permissive)
-                  if (cat1 !== "other" && cat2 !== "other" && cat1 !== cat2) continue;
-                  sharedCompatible.push(info.name);
-                  const cond = `${lastRef.alias}.${info.name} = ${otherRef.alias}.${info.name}`;
-                  if (!seen.has(cond)) {
-                    seen.add(cond);
-                    onSuggestions.push(makeSugg(cond, "SAME-NAME COLUMN", `1${cond}`, range, monaco));
-                  }
-                }
-                // USING syntax for type-compatible same-name columns
-                if (sharedCompatible.length > 0) {
-                  const usingCond = `USING (${sharedCompatible.join(", ")})`;
-                  if (!seen.has(usingCond)) {
-                    seen.add(usingCond);
-                    onSuggestions.push(makeSugg(usingCond, "USING", `1.5${usingCond}`, range, monaco));
-                  }
-                }
-              }
-
-              if (onSuggestions.length > 0) {
-                return { suggestions: onSuggestions };
+              const conditions = await ComputeJoinOnConditions({
+                resolvedRefs: resolvedRefs as any, fkEntries, colEntries, prefix: "",
+              } as any);
+              if ((conditions as any[]).length > 0) {
+                return {
+                  suggestions: (conditions as any[]).map((c: any) =>
+                    makeSugg(c.condition, c.detail, c.sortText, range, monaco)),
+                };
               }
             }
           }
@@ -1303,82 +1139,33 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         // Reuses textToCursor computed above.
         {
           const lastJoinSegment = (textToCursor.split(/\bJOIN\b/i).pop() ?? "").trim();
+          const rawRefsC = await ParseJoinTableRefs(textToCursor);
           const hasTriggerC =
             lastJoinSegment.length > 0 &&
             !/\b(?:ON|USING)\b/i.test(lastJoinSegment) &&
-            parseJoinTables(textToCursor).length >= 2;
+            (rawRefsC as any[]).length >= 2;
 
           if (hasTriggerC) {
-            const refsC = parseJoinTables(textToCursor);
-            const resolvedC = resolveRefs(refsC, useObjectStore.getState().objects);
+            const resolvedC = resolveRefs(rawRefsC as any[], useObjectStore.getState().objects);
             if (resolvedC && resolvedC.length >= 2) {
-              const lastR  = resolvedC[resolvedC.length - 1];
-              const others = resolvedC.slice(0, -1);
-              const cSugg: any[] = [];
-              const seenC = new Set<string>();
-
-              // Tier 1a: FK constraints
-              const lastFKsC = await getFKs(lastR.db, lastR.schema, lastR.name);
-              for (const otherR of others) {
-                const fksC = lastFKsC.filter((fk) => UC(fk.pkTable) === UC(otherR.name));
-                for (const cond of buildCompositeConditions(fksC, lastR.alias, otherR.alias)) {
-                  if (!seenC.has(cond)) {
-                    seenC.add(cond);
-                    cSugg.push(makeSugg(`ON ${cond}`, "FK RELATION", `0a${cond}`, range, monaco));
-                  }
-                }
-                const otherFKsC = await getFKs(otherR.db, otherR.schema, otherR.name);
-                const fksForLastC = otherFKsC.filter((fk) => UC(fk.pkTable) === UC(lastR.name));
-                for (const cond of buildCompositeConditions(fksForLastC, otherR.alias, lastR.alias)) {
-                  if (!seenC.has(cond)) {
-                    seenC.add(cond);
-                    cSugg.push(makeSugg(`ON ${cond}`, "FK RELATION", `0b${cond}`, range, monaco));
-                  }
-                }
+              const fkEntriesC: any[] = [];
+              const colEntriesC: any[] = [];
+              for (const ref of resolvedC) {
+                fkEntriesC.push({ db: ref.db, schema: ref.schema, name: ref.name,
+                  fks: await getFKs(ref.db, ref.schema, ref.name) });
+                colEntriesC.push({ db: ref.db, schema: ref.schema, name: ref.name,
+                  cols: await getColInfos(ref.db, ref.schema, ref.name) });
               }
-
-              // Tier 1b: PK name heuristic (only when no FK suggestions)
-              if (cSugg.length === 0) {
-                const lastColsC = await getColumns(lastR.db, lastR.schema, lastR.name);
-                for (const otherR of others) {
-                  const otherColsC = await getColumns(otherR.db, otherR.schema, otherR.name);
-                  for (const cond of pkHeuristicConditions(lastR, otherR, lastColsC, otherColsC)) {
-                    if (!seenC.has(cond)) {
-                      seenC.add(cond);
-                      cSugg.push(makeSugg(`ON ${cond}`, "PK HEURISTIC", `0c${cond}`, range, monaco));
-                    }
-                  }
-                }
+              const conditionsC = await ComputeJoinOnConditions({
+                resolvedRefs: resolvedC as any, fkEntries: fkEntriesC,
+                colEntries: colEntriesC, prefix: "ON ",
+              } as any);
+              if ((conditionsC as any[]).length > 0) {
+                return {
+                  suggestions: (conditionsC as any[]).map((c: any) =>
+                    makeSugg(c.condition, c.detail, c.sortText, range, monaco)),
+                };
               }
-
-              // Tier 2: same-name type-compatible columns + USING
-              const lastInfosC = await getColInfos(lastR.db, lastR.schema, lastR.name);
-              const lastInfoMapC = new Map(lastInfosC.map((c) => [UC(c.name), c.dataType]));
-              for (const otherR of others) {
-                const otherInfosC = await getColInfos(otherR.db, otherR.schema, otherR.name);
-                const sharedC: string[] = [];
-                for (const info of otherInfosC) {
-                  const dt1 = lastInfoMapC.get(UC(info.name));
-                  if (!dt1) continue;
-                  const cat1 = typeCategory(dt1), cat2 = typeCategory(info.dataType);
-                  if (cat1 !== "other" && cat2 !== "other" && cat1 !== cat2) continue;
-                  sharedC.push(info.name);
-                  const cond = `${lastR.alias}.${info.name} = ${otherR.alias}.${info.name}`;
-                  if (!seenC.has(cond)) {
-                    seenC.add(cond);
-                    cSugg.push(makeSugg(`ON ${cond}`, "SAME-NAME COLUMN", `1${cond}`, range, monaco));
-                  }
-                }
-                if (sharedC.length > 0) {
-                  const usingC = `USING (${sharedC.join(", ")})`;
-                  if (!seenC.has(usingC)) {
-                    seenC.add(usingC);
-                    cSugg.push(makeSugg(usingC, "USING", `1.5${usingC}`, range, monaco));
-                  }
-                }
-              }
-
-              if (cSugg.length > 0) return { suggestions: cSugg };
             }
           }
         }
@@ -1703,8 +1490,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
         // ── alias.column hover ─────────────────────────────────────────────
         if (parts.length === 2) {
-          const rawRefs = parseJoinTables(editor.getModel()?.getValue() ?? "");
-          const resolved = resolveRefs(rawRefs, useObjectStore.getState().objects);
+          const rawRefs = await ParseJoinTableRefs(editor.getModel()?.getValue() ?? "");
+          const resolved = resolveRefs(rawRefs as any[], useObjectStore.getState().objects);
           const matchedTable = resolved?.find(
             (r) => r.alias.toUpperCase() === parts[0].toUpperCase(),
           );
@@ -1911,20 +1698,25 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           const prefixFull = model.getValue().slice(0, model.getOffsetAt(position));
           const lastJoinSeg = (prefixFull.split(/\bJOIN\b/i).pop() ?? "").trim();
           if (lastJoinSeg.length > 0 && !/\b(?:ON|USING)\b/i.test(lastJoinSeg)) {
-            const ghostRefs = parseJoinTables(prefixFull);
-            if (ghostRefs.length >= 2) {
-              const resolved = resolveRefs(ghostRefs, useObjectStore.getState().objects);
+            const ghostRefs = await ParseJoinTableRefs(prefixFull);
+            if ((ghostRefs as any[]).length >= 2) {
+              const resolved = resolveRefs(ghostRefs as any[], useObjectStore.getState().objects);
               if (resolved && resolved.length >= 2) {
-                const lr = resolved[resolved.length - 1];
-                const or = resolved[resolved.length - 2];
-                // Use cache only — getFKs returns [] if not yet fetched (non-blocking)
-                const lFKs = fkCache.get(
-                  `${UC(lr.db)}\0${UC(lr.schema)}\0${UC(lr.name)}`,
-                ) ?? [];
-                const relevant = lFKs.filter((fk) => UC(fk.pkTable) === UC(or.name));
-                const conds = buildCompositeConditions(relevant, lr.alias, or.alias);
-                if (conds.length > 0 && !token.isCancellationRequested) {
-                  return { items: [{ insertText: `ON ${conds[0]}` }] };
+                // Use cache only — no network calls for inline ghost text
+                const fkEntries = resolved.map((ref) => ({
+                  db: ref.db, schema: ref.schema, name: ref.name,
+                  fks: fkCache.get(`${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`) ?? [],
+                }));
+                const colEntries = resolved.map((ref) => ({
+                  db: ref.db, schema: ref.schema, name: ref.name,
+                  cols: colInfoCache.get(`${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`) ?? [],
+                }));
+                const conds = await ComputeJoinOnConditions({
+                  resolvedRefs: resolved as any, fkEntries: fkEntries as any,
+                  colEntries: colEntries as any, prefix: "ON ",
+                } as any);
+                if ((conds as any[]).length > 0 && !token.isCancellationRequested) {
+                  return { items: [{ insertText: (conds as any[])[0].condition }] };
                 }
               }
             }

@@ -46,6 +46,14 @@ export function AnalyzeMigration(arg1, arg2) {
   return window['go']['main']['App']['AnalyzeMigration'](arg1, arg2);
 }
 
+export function AnalyzeSqlSemantics(arg1, arg2, arg3) {
+  return window['go']['main']['App']['AnalyzeSqlSemantics'](arg1, arg2, arg3);
+}
+
+export function AnalyzeSqlSyntax(arg1) {
+  return window['go']['main']['App']['AnalyzeSqlSyntax'](arg1);
+}
+
 export function CanCreateIntegration() {
   return window['go']['main']['App']['CanCreateIntegration']();
 }
@@ -92,6 +100,10 @@ export function CheckAvailableKeyTools() {
 
 export function CheckSnowparkEnv() {
   return window['go']['main']['App']['CheckSnowparkEnv']();
+}
+
+export function ComputeJoinOnConditions(arg1) {
+  return window['go']['main']['App']['ComputeJoinOnConditions'](arg1);
 }
 
 export function Connect(arg1) {
@@ -528,6 +540,10 @@ export function NewNotebook() {
 
 export function NotebookUseContext(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['NotebookUseContext'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function ParseJoinTableRefs(arg1) {
+  return window['go']['main']['App']['ParseJoinTableRefs'](arg1);
 }
 
 export function PickDataFile() {

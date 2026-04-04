@@ -7,11 +7,13 @@ Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend +
 ```
 thaw/
 ├── main.go              # Entry point, native menu, Wails runtime setup
-├── app.go               # All Wails IPC bindings (~2700 lines)
+├── app.go               # All Wails IPC bindings (~2750 lines)
 ├── errors.go            # Sentinel errors (ErrNotConnected etc.)
 ├── version.go           # Version string
 ├── internal/
 │   ├── snowflake/       # Snowflake client — connection, query, DDL, lineage
+│   ├── sqleditor/       # SQL diagnostics & JOIN suggestion engine (ValidateSyntax,
+│   │                    #   ParseJoinTables, ComputeJoinOnConditions, ValidateSemantics)
 │   ├── ddl/             # DDL parsing and git-export pipeline
 │   ├── ai/              # AI provider clients (OpenAI, Google)
 │   ├── config/          # App config (TOML persistence)
@@ -87,6 +89,14 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 - Schema object cache: module-level `fetchedSchemaObjects` Set — avoids duplicate `ListObjects` calls
 - **Never register completion/hover providers inside the component render** — use module-level disposable refs
 
+### SQL diagnostics & JOIN suggestions (backend)
+All proprietary analysis logic lives in `internal/sqleditor/sqleditor.go` and is called via IPC:
+- `AnalyzeSqlSyntax(sql)` → character-by-character tokenizer (strings, comments, parens, dollar-quoting, scripting)
+- `ParseJoinTableRefs(sql)` → regex-based FROM/JOIN table-ref extractor (3/2/1-part + alias)
+- `AnalyzeSqlSemantics(sql, resolvedRefs, colEntries)` → alias.column validator
+- `ComputeJoinOnConditions(req)` → three-tier JOIN ON suggestion engine (FK → PK heuristic → type-compatible same-name columns + USING)
+- `validateWithParser` and `validateBareColumnRefs` still run in the frontend (`sqlDiagnostics.ts`) as they depend on `node-sql-parser` which has no Go equivalent
+
 ### Code Snippets cascading context menu
 - Implemented via Monaco's internal **`MenuRegistry` + `CommandsRegistry`** (both from `vs/platform/…`); no per-editor patching
 - A module-level IIFE (runs once at load) registers:
@@ -115,17 +125,29 @@ For multi-statement SQL, `Execute` uses an inner `execCtx` (fresh context). The 
 ### `wailsjs/` is auto-generated
 Never edit files under `frontend/wailsjs/` by hand — they are overwritten by `wails generate module`.
 
+### `frontend/dist/.gitkeep` must stay committed
+Go's `//go:embed all:frontend/dist` directive in `main.go` is evaluated during `wails generate module` (binding generation), which runs **before** the frontend build. If `frontend/dist` is empty or missing, the Go build fails with "contains no embeddable files". The committed `.gitkeep` placeholder satisfies the embed on clean checkouts. Never delete it.
+
+### Frontend bundle obfuscation
+The production frontend build (`npm run build`) runs `javascript-obfuscator` after Terser via `vite.config.ts`. Vendor and Monaco chunks are explicitly skipped. The build script passes `--max-old-space-size=6144` to Node to prevent V8 heap OOM during obfuscation. `controlFlowFlattening` and `deadCodeInjection` are disabled to keep peak memory within budget; RC4 string-array encoding provides the primary IP protection.
+
 ## Testing
 
 ```bash
 # Go unit tests (DDL parser)
 go test ./internal/ddl/...
 
+# Go unit tests (all internal packages)
+go test ./internal/...
+
 # TypeScript type check
 cd frontend && npx tsc --noEmit
+
+# Frontend unit tests (vitest)
+cd frontend && npm test
 ```
 
-No frontend test framework is configured. Integration tests live in `internal/integration/` (require live Snowflake connection).
+Integration tests live in `internal/integration/` (require live Snowflake connection; gated behind `integration` build tag).
 
 ## Tech Stack
 

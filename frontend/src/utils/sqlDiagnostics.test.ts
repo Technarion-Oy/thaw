@@ -2,10 +2,11 @@
  * Unit tests for sqlDiagnostics.ts
  *
  * Coverage:
- *   validateSyntax          – structural tokenizer (unclosed literals, unmatched parens, post-; keyword)
  *   validateWithParser      – Snowflake PEG grammar check (per-statement, skips false-positive patterns)
  *   validateBareColumnRefs  – SELECT-list column existence (bare + quoted, CTEs, JOINs, subqueries)
- *   validateSemantics       – alias.column two-part reference validation
+ *
+ * Note: validateSyntax and validateSemantics have been moved to the Go backend
+ * (internal/sqleditor) and are tested via Go unit tests.
  */
 
 import { describe, expect, it } from "vitest";
@@ -13,16 +14,11 @@ import {
   ColInfo,
   DiagMarker,
   ResolvedRef,
-  validateSyntax,
   validateWithParser,
   validateBareColumnRefs,
-  validateSemantics,
 } from "./sqlDiagnostics";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
-
-/** Return only error (severity 8) markers. */
-const errors = (markers: DiagMarker[]) => markers.filter((m) => m.severity === 8);
 
 /** Return only warning (severity 4) markers. */
 const warnings = (markers: DiagMarker[]) => markers.filter((m) => m.severity === 4);
@@ -44,193 +40,6 @@ const refs = (
   ...items: Array<{ alias: string; db: string; schema: string; name: string }>
 ): ResolvedRef[] => items;
 
-// ── 1. validateSyntax ─────────────────────────────────────────────────────────
-
-describe("validateSyntax", () => {
-  // ── 1a. clean SQL produces no markers ──────────────────────────────────────
-  describe("no markers on valid SQL", () => {
-    it("simple SELECT", () => {
-      expect(validateSyntax("SELECT 1")).toHaveLength(0);
-    });
-
-    it("single-quoted strings with escape", () => {
-      expect(validateSyntax("SELECT 'it''s fine' AS x")).toHaveLength(0);
-    });
-
-    it("double-quoted identifier", () => {
-      expect(validateSyntax('SELECT "My Column" FROM t')).toHaveLength(0);
-    });
-
-    it("dollar-quoted string", () => {
-      expect(validateSyntax("SELECT $$hello world$$ AS x")).toHaveLength(0);
-    });
-
-    it("named dollar-quoted string", () => {
-      expect(validateSyntax("SELECT $body$some text$body$ AS x")).toHaveLength(0);
-    });
-
-    it("block comment", () => {
-      expect(validateSyntax("/* comment */ SELECT 1")).toHaveLength(0);
-    });
-
-    it("line comment", () => {
-      expect(validateSyntax("-- comment\nSELECT 1")).toHaveLength(0);
-    });
-
-    it("nested parens", () => {
-      expect(validateSyntax("SELECT (1 + (2 * 3))")).toHaveLength(0);
-    });
-
-    it("multiple statements separated by semicolons", () => {
-      expect(validateSyntax("SELECT 1;\nSELECT 2;\nSELECT 3")).toHaveLength(0);
-    });
-
-    it("CTE", () => {
-      expect(
-        validateSyntax("WITH cte AS (SELECT 1 AS x) SELECT x FROM cte"),
-      ).toHaveLength(0);
-    });
-
-    it("all SQL_STMT_KEYWORDS are accepted after semicolon", () => {
-      const stmts = [
-        "SELECT 1", "WITH cte AS (SELECT 1) SELECT * FROM cte",
-        "INSERT INTO t VALUES (1)", "UPDATE t SET a = 1",
-        "DELETE FROM t", "MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET t.v = s.v",
-        "CREATE TABLE t (id INT)", "ALTER TABLE t ADD COLUMN c INT",
-        "DROP TABLE t", "TRUNCATE TABLE t", "UNDROP TABLE t",
-        "GRANT SELECT ON t TO ROLE r", "REVOKE SELECT ON t FROM ROLE r",
-        "USE DATABASE mydb", "SET x = 1", "UNSET x",
-        "SHOW TABLES", "DESCRIBE TABLE t", "DESC t", "EXPLAIN SELECT 1",
-        "BEGIN", "COMMIT", "ROLLBACK", "SAVEPOINT sp1",
-        "CALL my_proc()", "EXECUTE IMMEDIATE 'SELECT 1'", "RETURN",
-        "COPY INTO t FROM @stage", "PUT file://local @stage",
-        "GET @stage file://local", "LIST @stage", "REMOVE @stage/file",
-        "DECLARE x INT DEFAULT 0", "LET x := 1",
-        "FOR i IN 1..10 DO SELECT i; END FOR",
-        "WHILE TRUE DO SELECT 1; END WHILE",
-        "IF TRUE THEN SELECT 1; END IF",
-        "CASE WHEN TRUE THEN SELECT 1; END CASE",
-        "RAISE EXCEPTION 'oops'",
-        "ANALYZE TABLE t",
-        "COMMENT ON TABLE t IS 'desc'",
-      ];
-      for (const stmt of stmts) {
-        // prefix each with a semicolon so the "post-; keyword" check fires
-        const sql = `SELECT 0;\n${stmt}`;
-        const markers = validateSyntax(sql).filter((m) => m.severity === 8);
-        expect(markers, `keyword check failed for: ${stmt}`).toHaveLength(0);
-      }
-    });
-  });
-
-  // ── 1b. unclosed literals ──────────────────────────────────────────────────
-  describe("unclosed literals → Error", () => {
-    it("unclosed single-quoted string", () => {
-      const m = validateSyntax("SELECT 'unterminated");
-      expect(errors(m)).toHaveLength(1);
-      expect(errors(m)[0].message).toMatch(/unclosed string/i);
-      expect(errors(m)[0].startLineNumber).toBe(1);
-      expect(errors(m)[0].startColumn).toBe(8); // position of opening '
-    });
-
-    it("unclosed double-quoted identifier", () => {
-      const m = validateSyntax('SELECT "bad ident');
-      expect(errors(m)).toHaveLength(1);
-      expect(errors(m)[0].message).toMatch(/unclosed quoted identifier/i);
-    });
-
-    it("unclosed dollar-quoted string $$", () => {
-      const m = validateSyntax("SELECT $$no close");
-      expect(errors(m)).toHaveLength(1);
-      expect(errors(m)[0].message).toMatch(/unclosed dollar-quoted/i);
-    });
-
-    it("unclosed named dollar-quoted string", () => {
-      const m = validateSyntax("SELECT $tag$no close");
-      expect(errors(m)).toHaveLength(1);
-      expect(errors(m)[0].message).toMatch(/unclosed dollar-quoted/i);
-    });
-
-    it("unclosed block comment", () => {
-      const m = validateSyntax("SELECT 1 /* unclosed");
-      expect(errors(m)).toHaveLength(1);
-      expect(errors(m)[0].message).toMatch(/unclosed block comment/i);
-    });
-
-    it("multi-line unclosed string reports correct opening line", () => {
-      const m = validateSyntax("SELECT 1;\nSELECT 'bad");
-      expect(errors(m)).toHaveLength(1);
-      expect(errors(m)[0].startLineNumber).toBe(2);
-    });
-  });
-
-  // ── 1c. unmatched parentheses ──────────────────────────────────────────────
-  describe("unmatched parentheses → Error", () => {
-    it("extra closing paren", () => {
-      const m = validateSyntax("SELECT (1 + 2))");
-      expect(errors(m)).toHaveLength(1);
-      expect(errors(m)[0].message).toMatch(/unmatched '\)'/i);
-    });
-
-    it("unclosed opening paren", () => {
-      const m = validateSyntax("SELECT (1 + 2");
-      expect(errors(m)).toHaveLength(1);
-      expect(errors(m)[0].message).toMatch(/unclosed '\('/i);
-    });
-
-    it("mismatched bracket vs paren produces two errors (mismatched ) + unclosed [)", () => {
-      const m = validateSyntax("SELECT [1)");
-      expect(errors(m)).toHaveLength(2);
-    });
-
-    it("multiple unclosed parens", () => {
-      const m = validateSyntax("SELECT ((1");
-      expect(errors(m)).toHaveLength(2);
-    });
-
-    it("paren inside string is NOT flagged", () => {
-      expect(validateSyntax("SELECT '(unclosed in string'")).toHaveLength(0);
-    });
-
-    it("paren inside line comment is NOT flagged", () => {
-      expect(validateSyntax("SELECT 1 -- (comment\n+ 2")).toHaveLength(0);
-    });
-
-    it("paren inside block comment is NOT flagged", () => {
-      expect(validateSyntax("SELECT 1 /* ( */ + 2")).toHaveLength(0);
-    });
-  });
-
-  // ── 1d. post-semicolon keyword check ──────────────────────────────────────
-  describe("post-; garbage token → Error", () => {
-    it("bare garbage after semicolon", () => {
-      const m = validateSyntax("SELECT 1; garbage");
-      expect(errors(m)).toHaveLength(1);
-      expect(errors(m)[0].message).toContain("garbage");
-    });
-
-    it("garbage on second line after semicolon", () => {
-      const m = validateSyntax("SELECT 1;\nsdadasd");
-      expect(errors(m)).toHaveLength(1);
-      expect(errors(m)[0].startLineNumber).toBe(2);
-      expect(errors(m)[0].startColumn).toBe(1);
-    });
-
-    it("whitespace-only between semicolon and keyword is OK", () => {
-      expect(validateSyntax("SELECT 1;   \n  SELECT 2")).toHaveLength(0);
-    });
-
-    it("garbage token inside quoted string after ; is NOT flagged", () => {
-      // The semicolon resets atStmtStart but string content is opaque
-      expect(validateSyntax("SELECT 1; SELECT 'garbage_inside'")).toHaveLength(0);
-    });
-
-    it("non-alpha non-whitespace after ; resets flag silently (no false positive)", () => {
-      // e.g. a bare number literal — not a keyword but also not a word token
-      expect(validateSyntax("SELECT 1; SELECT 2")).toHaveLength(0);
-    });
-  });
-});
 
 // ── 2. validateWithParser ─────────────────────────────────────────────────────
 
@@ -723,94 +532,3 @@ describe("validateBareColumnRefs", () => {
   });
 });
 
-// ── 4. validateSemantics ──────────────────────────────────────────────────────
-
-describe("validateSemantics", () => {
-  const cache = makeCache([{
-    db: "DB", schema: "SCH", table: "EMPLOYEES",
-    cols: ["ID", "FIRST_NAME", "LAST_NAME"],
-  }]);
-
-  const resolvedList = refs({
-    alias: "e", db: "DB", schema: "SCH", name: "EMPLOYEES",
-  });
-
-  // ── 4a. no markers on valid references ────────────────────────────────────
-  describe("valid alias.column → no markers", () => {
-    it("known column", () => {
-      expect(
-        validateSemantics("SELECT e.ID FROM t e", resolvedList, cache),
-      ).toHaveLength(0);
-    });
-
-    it("case-insensitive match", () => {
-      expect(
-        validateSemantics("SELECT e.first_name FROM t e", resolvedList, cache),
-      ).toHaveLength(0);
-    });
-
-    it("three-part reference is NOT checked (db.schema.table)", () => {
-      expect(
-        validateSemantics("SELECT DB.SCH.EMPLOYEES FROM t", resolvedList, cache),
-      ).toHaveLength(0);
-    });
-
-    it("cold cache → silent", () => {
-      expect(
-        validateSemantics("SELECT e.bad FROM t e", resolvedList, new Map()),
-      ).toHaveLength(0);
-    });
-  });
-
-  // ── 4b. unknown column → Warning ──────────────────────────────────────────
-  describe("unknown alias.column → Warning", () => {
-    it("unknown column flagged", () => {
-      const m = validateSemantics("SELECT e.nonexistent FROM t e", resolvedList, cache);
-      expect(warnings(m)).toHaveLength(1);
-      expect(warnings(m)[0].message).toMatch(/nonexistent/i);
-      expect(warnings(m)[0].severity).toBe(4);
-    });
-
-    it("marker is on the column token, not the alias", () => {
-      const sql = "SELECT e.bad FROM t e";
-      const m = validateSemantics(sql, resolvedList, cache);
-      expect(warnings(m)[0].startColumn).toBe(10); // 'b' of 'bad'
-    });
-
-    it("multiple unknown columns all flagged", () => {
-      const sql = "SELECT e.bad1, e.ID, e.bad2 FROM t e";
-      const m = validateSemantics(sql, resolvedList, cache);
-      expect(warnings(m)).toHaveLength(2);
-    });
-
-    it("alias inside string is NOT flagged", () => {
-      const sql = "SELECT 'e.bad' FROM t e";
-      expect(validateSemantics(sql, resolvedList, cache)).toHaveLength(0);
-    });
-
-    it("alias inside comment is NOT flagged", () => {
-      const sql = "SELECT e.ID -- e.bad\nFROM t e";
-      expect(validateSemantics(sql, resolvedList, cache)).toHaveLength(0);
-    });
-
-    it("alias inside block comment is NOT flagged", () => {
-      const sql = "SELECT e.ID /* e.bad */ FROM t e";
-      expect(validateSemantics(sql, resolvedList, cache)).toHaveLength(0);
-    });
-
-    it("unknown column in JOIN query", () => {
-      const cache2 = makeCache([
-        { db: "DB", schema: "SCH", table: "EMPLOYEES",   cols: ["ID", "DEPT_ID"] },
-        { db: "DB", schema: "SCH", table: "DEPARTMENTS", cols: ["DEPT_ID", "DEPT_NAME"] },
-      ]);
-      const refList = refs(
-        { alias: "e", db: "DB", schema: "SCH", name: "EMPLOYEES" },
-        { alias: "d", db: "DB", schema: "SCH", name: "DEPARTMENTS" },
-      );
-      const sql = "SELECT e.ID, d.DEPT_NAME, e.no_col FROM t e JOIN t2 d ON e.ID = d.DEPT_ID";
-      const m = validateSemantics(sql, refList, cache2);
-      expect(warnings(m)).toHaveLength(1);
-      expect(warnings(m)[0].message).toMatch(/no_col/i);
-    });
-  });
-});

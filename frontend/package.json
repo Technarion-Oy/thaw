@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc && node --max-old-space-size=6144 node_modules/.bin/vite build",
     "preview": "vite preview",
     "docs": "typedoc --options typedoc.json",
     "test": "vitest run",

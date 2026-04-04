@@ -17,7 +17,8 @@ coverage.out
 
 # ── Frontend ──────────────────────────────────────────────────────────────────
 frontend/node_modules/
-frontend/dist/
+frontend/dist/*
+!frontend/dist/.gitkeep
 
 # ── Credentials / environment ─────────────────────────────────────────────────
 .env

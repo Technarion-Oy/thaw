@@ -1,6 +1,8 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import obfuscator from "javascript-obfuscator";
+import { writeFileSync } from "fs";
+import { join } from "path";
 
 // ── App-code obfuscation plugin ───────────────────────────────────────────────
 //
@@ -52,19 +54,15 @@ function appObfuscatorPlugin(): Plugin {
 
               // Control-flow flattening restructures if/switch/for blocks into
               // switch-based dispatch loops, making static analysis hard.
-              // Threshold 0.3 (vs the default 0.75) processes ~30 % of
-              // functions: enough obfuscation while keeping peak V8 heap
-              // within the 6 GB budget on the macOS arm64 CI runner.
-              // Each flattened function multiplies AST node count several
-              // times, so higher thresholds OOM on 7 GB runners when
-              // Terser is also live in the same Node process.
-              controlFlowFlattening: true,
-              controlFlowFlatteningThreshold: 0.3,
+              // Disabled: each flattened function multiplies AST node count
+              // several times; combined with Terser + string-array transforms
+              // this OOMs the V8 heap even at low thresholds.  String-array
+              // encoding (below) provides the primary IP protection instead.
+              controlFlowFlattening: false,
 
-              // Dead-code injection inserts unreachable branches so decompilers
-              // cannot cleanly reconstruct the original logic structure.
-              deadCodeInjection: true,
-              deadCodeInjectionThreshold: 0.2,
+              // Dead-code injection inserts unreachable branches — disabled
+              // for the same heap-budget reasons as controlFlowFlattening.
+              deadCodeInjection: false,
 
               // Replace all local identifier names with _0x<hex> sequences.
               identifierNamesGenerator: "hexadecimal",
@@ -123,9 +121,26 @@ function appObfuscatorPlugin(): Plugin {
   };
 }
 
+// ── .gitkeep restore plugin ───────────────────────────────────────────────────
+//
+// Vite's emptyOutDir (the default) deletes every file in dist/ before writing
+// the new bundle — including the committed frontend/dist/.gitkeep placeholder.
+// That file must survive so Go's //go:embed all:frontend/dist directive never
+// sees an empty directory on a fresh checkout (binding generation runs before
+// the frontend build).  This plugin re-creates the empty file after each build.
+function restoreGitkeepPlugin(): Plugin {
+  return {
+    name: "thaw:restore-gitkeep",
+    apply: "build",
+    closeBundle() {
+      writeFileSync(join(__dirname, "dist/.gitkeep"), "");
+    },
+  };
+}
+
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react(), appObfuscatorPlugin()],
+  plugins: [react(), appObfuscatorPlugin(), restoreGitkeepPlugin()],
 
   resolve: {
     alias: {

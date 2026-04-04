@@ -43,6 +43,7 @@ import (
 	"thaw/internal/logger"
 	"thaw/internal/sfconfig"
 	"thaw/internal/snowflake"
+	"thaw/internal/sqleditor"
 	"thaw/internal/telemetry"
 )
 
@@ -1683,6 +1684,39 @@ func (a *App) GetSchemaForeignKeys(database, schema string) ([]snowflake.TableFo
 		return nil, ErrNotConnected
 	}
 	return a.client.GetSchemaForeignKeys(a.ctx, database, schema)
+}
+
+// ── SQL editor analysis IPC methods ───────────────────────────────────────────
+// These methods expose the proprietary SQL analysis algorithms (previously in
+// the TypeScript frontend) as backend IPC calls so the logic is protected by
+// Go binary obfuscation rather than being visible in the JS bundle.
+
+// AnalyzeSqlSyntax runs the custom Snowflake SQL tokenizer on the given text
+// and returns structural error markers (unclosed strings, unmatched parens,
+// bad scripting assignments, etc.).  No Snowflake connection is required.
+func (a *App) AnalyzeSqlSyntax(sql string) []sqleditor.DiagMarker {
+	return sqleditor.ValidateSyntax(sql)
+}
+
+// ParseJoinTableRefs extracts all FROM/JOIN table references (with aliases)
+// from the given SQL text.  No Snowflake connection is required.
+func (a *App) ParseJoinTableRefs(sql string) []sqleditor.JoinTableRef {
+	return sqleditor.ParseJoinTables(sql)
+}
+
+// ComputeJoinOnConditions computes JOIN ON / USING condition suggestions using
+// FK constraints, PK naming heuristics, and type-compatible same-name columns.
+// The caller is responsible for fetching and passing FK and column data;
+// no Snowflake connection is required by this method.
+func (a *App) ComputeJoinOnConditions(req sqleditor.JoinOnSuggestionsReq) []sqleditor.JoinCondition {
+	return sqleditor.ComputeJoinOnConditions(req)
+}
+
+// AnalyzeSqlSemantics validates alias.column references in SQL against the
+// provided column info, returning Warning markers for unrecognised column names.
+// No Snowflake connection is required.
+func (a *App) AnalyzeSqlSemantics(sql string, resolvedRefs []sqleditor.ResolvedRef, colEntries []sqleditor.ColEntry) []sqleditor.DiagMarker {
+	return sqleditor.ValidateSemantics(sql, resolvedRefs, colEntries)
 }
 
 // GetFunctionInfo fetches the DDL for a user-defined function and returns its

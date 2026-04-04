@@ -1661,3 +1661,230 @@ export namespace snowflake {
 
 }
 
+export namespace sqleditor {
+	
+	export class ColInfo {
+	    name: string;
+	    dataType: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ColInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.dataType = source["dataType"];
+	    }
+	}
+	export class ColEntry {
+	    db: string;
+	    schema: string;
+	    name: string;
+	    cols: ColInfo[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ColEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.db = source["db"];
+	        this.schema = source["schema"];
+	        this.name = source["name"];
+	        this.cols = this.convertValues(source["cols"], ColInfo);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	export class DiagMarker {
+	    startLineNumber: number;
+	    startColumn: number;
+	    endLineNumber: number;
+	    endColumn: number;
+	    message: string;
+	    severity: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DiagMarker(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.startLineNumber = source["startLineNumber"];
+	        this.startColumn = source["startColumn"];
+	        this.endLineNumber = source["endLineNumber"];
+	        this.endColumn = source["endColumn"];
+	        this.message = source["message"];
+	        this.severity = source["severity"];
+	    }
+	}
+	export class FKEntry {
+	    pkDatabase: string;
+	    pkSchema: string;
+	    pkTable: string;
+	    pkColumn: string;
+	    fkColumn: string;
+	    constraintName: string;
+	    keySequence: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new FKEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.pkDatabase = source["pkDatabase"];
+	        this.pkSchema = source["pkSchema"];
+	        this.pkTable = source["pkTable"];
+	        this.pkColumn = source["pkColumn"];
+	        this.fkColumn = source["fkColumn"];
+	        this.constraintName = source["constraintName"];
+	        this.keySequence = source["keySequence"];
+	    }
+	}
+	export class JoinCondition {
+	    condition: string;
+	    detail: string;
+	    sortText: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new JoinCondition(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.condition = source["condition"];
+	        this.detail = source["detail"];
+	        this.sortText = source["sortText"];
+	    }
+	}
+	export class TableFKEntry {
+	    db: string;
+	    schema: string;
+	    name: string;
+	    fks: FKEntry[];
+	
+	    static createFrom(source: any = {}) {
+	        return new TableFKEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.db = source["db"];
+	        this.schema = source["schema"];
+	        this.name = source["name"];
+	        this.fks = this.convertValues(source["fks"], FKEntry);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ResolvedRef {
+	    alias: string;
+	    db: string;
+	    schema: string;
+	    name: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ResolvedRef(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.alias = source["alias"];
+	        this.db = source["db"];
+	        this.schema = source["schema"];
+	        this.name = source["name"];
+	    }
+	}
+	export class JoinOnSuggestionsReq {
+	    resolvedRefs: ResolvedRef[];
+	    fkEntries: TableFKEntry[];
+	    colEntries: ColEntry[];
+	    prefix: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new JoinOnSuggestionsReq(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.resolvedRefs = this.convertValues(source["resolvedRefs"], ResolvedRef);
+	        this.fkEntries = this.convertValues(source["fkEntries"], TableFKEntry);
+	        this.colEntries = this.convertValues(source["colEntries"], ColEntry);
+	        this.prefix = source["prefix"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class JoinTableRef {
+	    db: string;
+	    schema: string;
+	    name: string;
+	    alias: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new JoinTableRef(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.db = source["db"];
+	        this.schema = source["schema"];
+	        this.name = source["name"];
+	        this.alias = source["alias"];
+	    }
+	}
+	
+
+}
+
