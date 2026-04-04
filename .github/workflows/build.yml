@@ -63,20 +63,21 @@ jobs:
         run: go install mvdan.cc/garble@latest
 
       - name: Build
-        # -ldflags "-s -w"        strips the symbol table (-s) and DWARF debug
-        #                         info (-w) so function/variable names are not
-        #                         recoverable from the shipped binary.
-        # -trimpath               removes all local file-system paths embedded
-        #                         by the compiler (source file references,
-        #                         module cache paths) to avoid leaking the build
-        #                         machine's directory layout.
-        # -goflags -toolexec=garble  instructs go build to invoke garble as the
-        #                         compiler/linker wrapper for every compilation
-        #                         unit, applying identifier obfuscation on top
-        #                         of the stripping flags above.
-        run: wails build -clean -ldflags "-s -w" -trimpath -goflags="-toolexec=garble"
+        # -ldflags "-s -w"  strips the symbol table (-s) and DWARF debug info
+        #                   (-w) so function/variable names are not recoverable
+        #                   from the shipped binary.
+        # -trimpath         removes all local file-system paths embedded by the
+        #                   compiler (source file references, module cache paths)
+        #                   to avoid leaking the build machine's directory layout.
+        # GOFLAGS           passes -toolexec=garble to the go build command that
+        #                   Wails invokes internally.  Wails v2 does not expose a
+        #                   -goflags CLI flag, but Go honours GOFLAGS on every
+        #                   go invocation, so garble intercepts the compilation
+        #                   step transparently without any Wails-specific support.
+        run: wails build -clean -ldflags "-s -w" -trimpath
         env:
           NODE_OPTIONS: --max-old-space-size=4096
+          GOFLAGS: -toolexec=garble
 
       # ── Rename / package output with tag version ───────────────────────────
       - name: Package macOS app bundle
