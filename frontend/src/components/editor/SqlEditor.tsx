@@ -651,12 +651,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   const savedSelRef       = useRef("");
 
   // ── Code Snippets cascading submenu state ─────────────────────────────────
-  const [snippetMenuPos,    setSnippetMenuPos]    = useState<{ x: number; y: number } | null>(null);
-  const activeEditorRef     = useRef<monacoLib.editor.ICodeEditor | null>(null);
-  const snippetHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Ref to the rendered submenu panel DOM node (used to keep the panel open
-  // while the pointer slides from the menu item into the panel).
-  const snippetPanelRef     = useRef<HTMLDivElement | null>(null);
+  // (No React state needed — submenu is rendered via Monaco's native
+  // _contextMenuService.showContextMenu(), not a React overlay.)
 
   const scheduleHide = useCallback(() => {
     if (hoverHideTimerRef.current) clearTimeout(hoverHideTimerRef.current);
@@ -711,19 +707,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     return () => document.removeEventListener("click", dismiss);
   }, [tooltipCtxMenu]);
 
-  // Dismiss the snippet submenu on any click outside it, or Escape key.
-  useEffect(() => {
-    if (!snippetMenuPos) return;
-    const dismiss = () => setSnippetMenuPos(null);
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") dismiss(); };
-    document.addEventListener("click", dismiss);
-    document.addEventListener("keydown", onKey, true);
-    return () => {
-      document.removeEventListener("click", dismiss);
-      document.removeEventListener("keydown", onKey, true);
-      if (snippetHideTimerRef.current) clearTimeout(snippetHideTimerRef.current);
-    };
-  }, [snippetMenuPos]);
 
   // Register the custom Snowflake SQL tokenizer and themes exactly once,
   // before the editor instance is created.
@@ -1977,93 +1960,89 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     );
 
     // ── Code Snippets cascading context menu ──────────────────────────────
-    // Diagnostics confirmed two root causes:
-    //  1. Monaco calls hideContextView() via onWillRun BEFORE run() fires —
-    //     the menu DOM is already gone by the time our run() executes.
-    //  2. document.querySelector(".monaco-menu-container") always returns
-    //     null — Monaco's context view is unreachable by class name from our
-    //     code (appended to an isolated container, shadow root, or similar).
+    // Monaco appends its context menu outside document.body (isolated
+    // container / shadow root), so document.elementsFromPoint() and
+    // document.querySelector(".monaco-menu-container") both return nothing.
     //
-    // Solution: document.elementsFromPoint(x, y) at mousedown / mouseover
-    // time.  It works at the pixel level — no class names, no assumptions
-    // about Monaco's internal DOM structure.  Capture-phase listeners fire
-    // before Monaco's own handlers, so the menu is still live and has a
-    // valid bounding rect when we read it.
+    // Solution: capture raw mouse coordinates on every mousedown (phase =
+    // capture, fires before Monaco closes the menu).  When our action's
+    // run() fires Monaco has already hidden its menu, but the coordinates
+    // from the last mousedown are still fresh.  We call the internal
+    // _contextMenuService.showContextMenu() with those coordinates to open
+    // a new, native-Monaco-styled submenu right where the user clicked.
 
-    let savedItemRect: { x: number; y: number } | null = null;
+    let savedClickPos: { x: number; y: number } | null = null;
 
-    const clearSnippetHide = () => {
-      if (snippetHideTimerRef.current) {
-        clearTimeout(snippetHideTimerRef.current);
-        snippetHideTimerRef.current = null;
-      }
-    };
-
-    const scheduleSnippetHide = () => {
-      if (!snippetHideTimerRef.current) {
-        snippetHideTimerRef.current = setTimeout(() => {
-          snippetHideTimerRef.current = null;
-          savedItemRect = null;
-          setSnippetMenuPos(null);
-        }, 120);
-      }
-    };
-
-    // Return the <li> (or innermost element) at screen point (x,y) whose
-    // trimmed textContent is exactly "Code Snippets", ignoring our own panel.
-    // elementsFromPoint returns elements innermost→outermost.
-    const findSnippetElAtPoint = (x: number, y: number): HTMLElement | null => {
-      for (const el of document.elementsFromPoint(x, y)) {
-        if (snippetPanelRef.current?.contains(el)) continue;
-        if (el.textContent?.trim() === "Code Snippets") {
-          return ((el as HTMLElement).closest("li") as HTMLElement) ?? (el as HTMLElement);
+    // Build a flat action list with Separator stubs between category groups.
+    const buildSnippetActions = () => {
+      const snippetMap = new Map(
+        getSnowflakeSnippets(monacoLib).map((s) => [String(s.label), s])
+      );
+      const actions: Array<{
+        id: string; label: string; tooltip: string; class?: string;
+        enabled: boolean; checked: boolean; run: () => void;
+      }> = [];
+      SNIPPET_CATEGORIES.forEach((group, gi) => {
+        if (gi > 0) {
+          // Monaco detects separators by id === 'vs.actions.separator'.
+          actions.push({
+            id: "vs.actions.separator", label: "", tooltip: "",
+            class: "separator", enabled: false, checked: false, run: () => {},
+          });
         }
-      }
-      return null;
+        group.labels.forEach((lbl) => {
+          const s = snippetMap.get(lbl);
+          if (!s) return;
+          actions.push({
+            id: `thaw.snippet.${lbl}`,
+            label: lbl,
+            tooltip: (s.documentation as string) ?? "",
+            enabled: true, checked: false,
+            run: () => {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const ctrl = (editor as any).getContribution("snippetController2");
+              if (ctrl) ctrl.insert(s.insertText as string);
+              editor.focus();
+            },
+          });
+        });
+      });
+      return actions;
     };
 
     // Register so Monaco renders "Code Snippets" in its context menu group.
-    // run() fires after the menu is gone (Monaco closed it via onWillRun);
-    // we use savedItemRect captured moments earlier by onDocMousedown.
+    // run() fires after Monaco has already hidden its context menu (via
+    // onWillRun → hideContextView).  We use savedClickPos set moments
+    // earlier by the capture-phase mousedown listener.
     editor.addAction({
       id: "thaw.snippets",
       label: "Code Snippets",
       contextMenuGroupId: "9_snippets",
       contextMenuOrder: 0,
       run: () => {
-        activeEditorRef.current = editor;
-        if (savedItemRect) setSnippetMenuPos(savedItemRect);
+        if (!savedClickPos) return;
+        const pos = savedClickPos;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const contrib = (editor as any).getContribution("editor.contrib.contextmenu");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const svc = (contrib as any)?._contextMenuService;
+        if (!svc) return;
+        svc.showContextMenu({
+          getAnchor: () => pos,
+          getActions: () => buildSnippetActions(),
+          onHide: () => {},
+        });
       },
     });
 
-    // capture mouseover — open submenu on hover, before Monaco's handlers.
-    const onDocMouseover = (e: MouseEvent) => {
-      const snippetEl = findSnippetElAtPoint(e.clientX, e.clientY);
-      if (snippetEl) {
-        clearSnippetHide();
-        const r = snippetEl.getBoundingClientRect();
-        savedItemRect = { x: r.right - 2, y: r.top };
-        activeEditorRef.current = editor;
-        setSnippetMenuPos({ x: r.right - 2, y: r.top });
-      } else if (!snippetPanelRef.current?.contains(e.target as Node)) {
-        // Mouse moved to a different item; 120 ms grace to slide into panel.
-        scheduleSnippetHide();
-      }
-    };
-    document.addEventListener("mouseover", onDocMouseover, true);
-
-    // capture mousedown — save rect BEFORE Monaco's onWillRun removes menu.
+    // Capture mousedown unconditionally — saves coordinates before Monaco's
+    // onWillRun handler removes the menu from the DOM.
     const onDocMousedown = (e: MouseEvent) => {
-      const snippetEl = findSnippetElAtPoint(e.clientX, e.clientY);
-      if (!snippetEl) return;
-      const r = snippetEl.getBoundingClientRect();
-      savedItemRect = { x: r.right - 2, y: r.top };
-      activeEditorRef.current = editor;
+      savedClickPos = { x: e.clientX, y: e.clientY };
     };
     document.addEventListener("mousedown", onDocMousedown, true);
 
     editor.onDidDispose(() => {
-      document.removeEventListener("mouseover", onDocMouseover, true);
       document.removeEventListener("mousedown", onDocMousedown, true);
     });
 
@@ -2392,71 +2371,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         )}
       </div>
     )}
-    {snippetMenuPos && (() => {
-      const snippetMap = new Map(
-        getSnowflakeSnippets(monacoLib).map((s) => [String(s.label), s])
-      );
-      return (
-        <div
-          ref={snippetPanelRef}
-          onClick={(e) => e.stopPropagation()}
-          onMouseEnter={() => {
-            if (snippetHideTimerRef.current) {
-              clearTimeout(snippetHideTimerRef.current);
-              snippetHideTimerRef.current = null;
-            }
-          }}
-          onMouseLeave={() => setSnippetMenuPos(null)}
-          style={{
-            position: "fixed", left: snippetMenuPos.x, top: snippetMenuPos.y,
-            zIndex: 10002, background: "var(--bg-overlay)", border: "1px solid var(--border)",
-            borderRadius: 4, boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
-            minWidth: 210, maxHeight: 460, overflowY: "auto", padding: "2px 0", fontSize: 12,
-          }}
-        >
-          {SNIPPET_CATEGORIES.map((group) => (
-            <div key={group.header}>
-              <div style={{
-                padding: "5px 10px 2px", fontSize: 10, color: "var(--text-faint)",
-                textTransform: "uppercase", letterSpacing: "0.05em", userSelect: "none",
-              }}>
-                {group.header}
-              </div>
-              {group.labels.map((label) => {
-                const s = snippetMap.get(label);
-                if (!s) return null;
-                return (
-                  <div key={label}
-                    style={{ padding: "5px 14px", cursor: "pointer" }}
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--bg-raised)"; }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ""; }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const ed = activeEditorRef.current;
-                      if (ed) {
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        const ctrl = ed.getContribution("snippetController2") as any;
-                        if (ctrl) ctrl.insert(s.insertText as string);
-                        ed.focus();
-                      }
-                      setSnippetMenuPos(null);
-                      // When the submenu was opened by hovering (Monaco's context
-                      // menu is still in the DOM), dismiss it with Escape so the
-                      // user doesn't have to close it manually.
-                      if (document.querySelector(".monaco-menu-container")) {
-                        document.dispatchEvent(new KeyboardEvent("keydown", {
-                          key: "Escape", bubbles: true, cancelable: true,
-                        }));
-                      }
-                    }}
-                  >{label}</div>
-                );
-              })}
-            </div>
-          ))}
-        </div>
-      );
-    })()}
     {tooltipCtxMenu && (
       <>
         <div
