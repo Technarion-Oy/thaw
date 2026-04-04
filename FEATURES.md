@@ -678,7 +678,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 
 ## Code Quality & CI/CD
 
-- **Unit tests** — DDL parser, lineage parser, dbt generator, migration helper, SQL diagnostics engine (`internal/sqleditor`), and **SQL formatter** tests run on every commit; 169 vitest tests for the frontend diagnostic and formatter layers cover keyword/identifier/function casing, indent styles, comma and operator placement, `::` cast and `:` VARIANT path operators, CTE layout, LATERAL FLATTEN, string/comment passthrough, and 14 complex Snowflake-specific query patterns
+- **Unit tests** — DDL parser, lineage parser, dbt generator, migration helper, SQL diagnostics engine (`internal/sqleditor`), and **SQL formatter** tests run on every commit; 169 vitest tests cover the frontend diagnostic and formatter layers; Go unit tests for `internal/sqleditor` validate the analysis engine against complex scripting and multi-join patterns; DDL parser, lineage parser, dbt generator, and migration helper tests run on every commit
 - **Integration tests** — 18 `TestFormatterSQL` cases validate that formatted SQL patterns execute on a real Snowflake account without syntax errors (no `CREATE TABLE` or elevated privileges needed); DDL export and schema migration integration tests are gated behind a build tag and run separately
 - **golangci-lint** — static analysis (weekly, every Monday): unchecked errors, vet, staticcheck, unused symbols, misspellings, and style (`errcheck`, `govet`, `staticcheck`, `ineffassign`, `unused`, `misspell`, `revive`)
 - **govulncheck** — vulnerability scanning against the Go vulnerability database (weekly); reports only vulnerabilities reachable from the compiled binary
