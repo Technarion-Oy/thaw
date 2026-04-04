@@ -13,8 +13,11 @@ import { Button } from "antd";
 import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
 import * as monacoLib from "monaco-editor";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore – internal Monaco ESM path; no public type declarations
-import { SubmenuAction } from "monaco-editor/esm/vs/base/common/actions.js";
+// @ts-ignore – internal Monaco paths; no public type declarations
+import { MenuRegistry, MenuId } from "monaco-editor/esm/vs/platform/actions/common/actions.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
+import { CommandsRegistry } from "monaco-editor/esm/vs/platform/commands/common/commands.js";
 import { ensureMonacoSetup } from "./monacoSetup";
 import { setEditorInstance } from "./editorRef";
 import { useQueryStore } from "../../store/queryStore";
@@ -574,6 +577,74 @@ export function getStatementLineRanges(sql: string): Array<{ startLine: number; 
   finishStmt(line); // last statement with no trailing semicolon
   return ranges;
 }
+
+// ── Code Snippets cascading context menu (module-level, one-time setup) ───────
+// Monaco creates SubmenuAction instances INTERNALLY when it builds the context
+// menu from MenuRegistry entries.  Using MenuRegistry.appendMenuItem with a
+// { submenu: MenuId } item makes Monaco do that work itself — no external
+// SubmenuAction import, no per-editor patching.
+
+/** The editor that was right-clicked most recently — used by snippet commands. */
+let _activeSnippetEditor: monacoLib.editor.ICodeEditor | null = null;
+
+// Guard against Vite HMR re-execution adding duplicate entries.
+let _snippetMenuRegistered = false;
+(() => {
+  if (_snippetMenuRegistered) return;
+  _snippetMenuRegistered = true;
+
+  // Create the submenu's MenuId.  Wrap in try/catch because MenuId throws if
+  // the same identifier is registered twice (can happen during Vite HMR).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let snippetSubMenuId: any;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    snippetSubMenuId = new (MenuId as any)("thaw.snippets.submenu");
+  } catch {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    snippetSubMenuId = (MenuId as any)._instances?.get("thaw.snippets.submenu");
+  }
+  if (!snippetSubMenuId) return;
+
+  // Register "Code Snippets ▶" as a submenu entry in the editor context menu.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (MenuRegistry as any).appendMenuItem((MenuId as any).EditorContext, {
+    submenu: snippetSubMenuId,
+    title: "Code Snippets",
+    group: "9_snippets",
+    order: 0,
+  });
+
+  // Register each snippet as a global command + add it to the submenu.
+  const snippetItems = getSnowflakeSnippets(monacoLib);
+  const snippetMap   = new Map(snippetItems.map((s) => [String(s.label), s]));
+
+  SNIPPET_CATEGORIES.forEach((cat, gi) => {
+    cat.labels.forEach((lbl, li) => {
+      const s = snippetMap.get(lbl);
+      if (!s) return;
+      const cmdId = `thaw.snippet.${lbl}`;
+
+      // Handler uses _activeSnippetEditor (set on right-click by handleMount).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (CommandsRegistry as any).registerCommand(cmdId, () => {
+        if (_activeSnippetEditor) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const ctrl = (_activeSnippetEditor as any).getContribution("snippetController2");
+          if (ctrl) ctrl.insert(s.insertText as string);
+          _activeSnippetEditor.focus();
+        }
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (MenuRegistry as any).appendMenuItem(snippetSubMenuId, {
+        command: { id: cmdId, title: lbl },
+        group: `${gi + 1}`,
+        order: li,
+      });
+    });
+  });
+})();
 
 export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {}) {
   const activeSql       = useQueryStore((s) => s.sql);
@@ -1963,84 +2034,14 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     );
 
     // ── Code Snippets cascading context menu ──────────────────────────────
-    // Monaco renders its context menu outside document.body, so DOM queries
-    // cannot locate its items.  Instead we:
-    //   1. Register a plain "Code Snippets" action so Monaco includes it in
-    //      the context menu action list.
-    //   2. Patch _contextMenuService.showContextMenu to intercept every
-    //      context-menu open and replace that plain action with a native
-    //      SubmenuAction.  Monaco renders SubmenuAction items as cascading
-    //      entries that open on hover (auto-flipped left/right by Monaco's
-    //      positioning logic when there is no space to the right).
-
-    // Build the flat snippet action list (with Separator stubs between groups).
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const buildSnippetActions = (): any[] => {
-      const snippetMap = new Map(
-        getSnowflakeSnippets(monacoLib).map((s) => [String(s.label), s])
-      );
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const actions: any[] = [];
-      SNIPPET_CATEGORIES.forEach((group, gi) => {
-        if (gi > 0) {
-          // Monaco identifies separators by action.id === 'vs.actions.separator'.
-          actions.push({
-            id: "vs.actions.separator", label: "", tooltip: "",
-            class: "separator", enabled: false, checked: false, run: () => {},
-          });
-        }
-        group.labels.forEach((lbl) => {
-          const s = snippetMap.get(lbl);
-          if (!s) return;
-          actions.push({
-            id: `thaw.snippet.${lbl}`,
-            label: lbl,
-            tooltip: (s.documentation as string) ?? "",
-            enabled: true, checked: false,
-            run: () => {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const ctrl = (editor as any).getContribution("snippetController2");
-              if (ctrl) ctrl.insert(s.insertText as string);
-              editor.focus();
-            },
-          });
-        });
-      });
-      return actions;
-    };
-
-    // Register the placeholder action so Monaco includes it in the list.
-    // interaction is handled entirely by the showContextMenu patch below.
-    editor.addAction({
-      id: "thaw.snippets",
-      label: "Code Snippets",
-      contextMenuGroupId: "9_snippets",
-      contextMenuOrder: 0,
-      run: () => {},
+    // The submenu is registered at module load time via MenuRegistry, so
+    // Monaco's built-in menu builder handles the ▶ indicator and hover
+    // cascade.  All we need per-editor is to record which editor the user
+    // right-clicked, so the global snippet commands know where to insert.
+    editor.onContextMenu(() => { _activeSnippetEditor = editor; });
+    editor.onDidDispose(() => {
+      if (_activeSnippetEditor === editor) _activeSnippetEditor = null;
     });
-
-    // Patch _contextMenuService.showContextMenu to swap the plain action
-    // for a SubmenuAction every time the context menu is about to open.
-    // Monaco's menu renderer calls action instanceof SubmenuAction to decide
-    // whether to render a cascading item, so we need the actual class.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const contrib = (editor as any).getContribution("editor.contrib.contextmenu");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const svc = (contrib as any)?._contextMenuService;
-    if (svc) {
-      const origShow = (svc.showContextMenu as Function).bind(svc);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      svc.showContextMenu = (delegate: any) =>
-        origShow({
-          ...delegate,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          getActions: () => (delegate.getActions() as any[]).map((a: any) =>
-            a.id === "thaw.snippets"
-              ? new SubmenuAction("thaw.snippets", "Code Snippets", buildSnippetActions())
-              : a
-          ),
-        });
-    }
 
     // Toggle Line Comment → right-click context menu entry only (no keybinding here;
     // the shortcut is handled via a native keydown listener below to avoid WKWebView capture).
