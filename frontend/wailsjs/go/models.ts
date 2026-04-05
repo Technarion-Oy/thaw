@@ -1917,6 +1917,27 @@ export namespace sqleditor {
 	        this.endOffset = source["endOffset"];
 	    }
 	}
+	
+	export class TokenMatch {
+	    name: string;
+	    line: number;
+	    col: number;
+	    endCol: number;
+	    quoted: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new TokenMatch(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.line = source["line"];
+	        this.col = source["col"];
+	        this.endCol = source["endCol"];
+	        this.quoted = source["quoted"];
+	    }
+	}
 
 }
 

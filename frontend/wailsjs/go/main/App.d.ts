@@ -112,6 +112,8 @@ export function ExportTableData(arg1:snowflake.ExportTableParams):Promise<snowfl
 
 export function FetchNotebookContent(arg1:string,arg2:string,arg3:string):Promise<string>;
 
+export function FindSqlTokenPositions(arg1:string,arg2:Array<string>,arg3:Array<string>):Promise<Array<sqleditor.TokenMatch>>;
+
 export function GenerateKeyPair(arg1:string,arg2:string,arg3:string):Promise<main.KeyPairResult>;
 
 export function GenerateMigrationScript(arg1:Array<main.MigrationDiffItem>,arg2:string,arg3:main.TableMigrationStrategy):Promise<string>;

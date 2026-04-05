@@ -597,7 +597,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             diagMarkers.push(...(semanticMarkers as DiagMarker[]));
           }
 
-          diagMarkers.push(...validateBareColumnRefs(diagSql, stmtRanges, resolved, colInfoCache));
+          const bareColMarkers = await validateBareColumnRefs(diagSql, stmtRanges, resolved, colInfoCache);
+          if (model.getVersionId() !== diagVersion) return;
+          diagMarkers.push(...bareColMarkers);
         }
       } catch (err) {
         console.warn("[thaw] SQL diagnostics aborted:", err);

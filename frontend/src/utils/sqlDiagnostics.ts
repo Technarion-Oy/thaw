@@ -7,9 +7,13 @@
 
 import { Parser as SnowflakeParser } from "node-sql-parser/build/snowflake";
 import type { sqleditor } from "../../wailsjs/go/models";
+import { FindSqlTokenPositions } from "../../wailsjs/go/main/App";
 
 /** StatementRange as returned by GetSqlStatementRanges IPC. */
 export type StatementRange = sqleditor.StatementRange;
+
+/** TokenMatch as returned by FindSqlTokenPositions IPC. */
+export type TokenMatch = sqleditor.TokenMatch;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -145,133 +149,6 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
 
 // ── validateBareColumnRefs ────────────────────────────────────────────────────
 
-interface WordToken { name: string; line: number; col: number; endCol: number; }
-
-/**
- * Walks `sql`, skipping strings/comments/quoted-idents, and returns every
- * unquoted bare-word token (not preceded by `.`, not followed by `(`) whose
- * upper-cased form is in `targets`.
- */
-function findBareWordPositions(sql: string, targets: Set<string>): WordToken[] {
-  const results: WordToken[] = [];
-  let line = 1, col = 1, i = 0;
-
-  while (i < sql.length) {
-    const ch = sql[i];
-    if (ch === "\n") { line++; col = 1; i++; continue; }
-    if (ch === "-" && sql[i + 1] === "-") {
-      i += 2; col += 2;
-      while (i < sql.length && sql[i] !== "\n") { i++; col++; }
-      continue;
-    }
-    if (ch === "/" && sql[i + 1] === "*") {
-      i += 2; col += 2;
-      while (i < sql.length) {
-        if (sql[i] === "\n") { line++; col = 1; i++; }
-        else if (sql[i] === "*" && sql[i + 1] === "/") { i += 2; col += 2; break; }
-        else { i++; col++; }
-      }
-      continue;
-    }
-    if (ch === "'") {
-      i++; col++;
-      while (i < sql.length) {
-        if (sql[i] === "\n") { line++; col = 1; i++; }
-        else if (sql[i] === "'" && sql[i + 1] === "'") { i += 2; col += 2; }
-        else if (sql[i] === "'") { i++; col++; break; }
-        else { i++; col++; }
-      }
-      continue;
-    }
-    if (ch === '"') {
-      i++; col++;
-      while (i < sql.length) {
-        if (sql[i] === "\n") { line++; col = 1; i++; }
-        else if (sql[i] === '"' && sql[i + 1] === '"') { i += 2; col += 2; }
-        else if (sql[i] === '"') { i++; col++; break; }
-        else { i++; col++; }
-      }
-      continue;
-    }
-    if (ch === "$") {
-      const m = sql.slice(i).match(/^\$([a-zA-Z0-9_]*)\$/);
-      if (m) {
-        const tag = m[0]; i += tag.length; col += tag.length;
-        continue;
-      }
-    }
-    if (/[a-zA-Z_]/.test(ch)) {
-      const wLine = line, wCol = col, wStart = i;
-      while (i < sql.length && /\w/.test(sql[i])) { i++; col++; }
-      const word = sql.slice(wStart, i);
-      const prevCh = wStart > 0 ? sql[wStart - 1] : null;
-      const nextCh = i < sql.length ? sql[i] : null;
-      if (prevCh !== "." && nextCh !== "(" && targets.has(word.toUpperCase())) {
-        results.push({ name: word, line: wLine, col: wCol, endCol: wCol + word.length });
-      }
-      continue;
-    }
-    i++; col++;
-  }
-  return results;
-}
-
-/**
- * Walks `sql` and returns every double-quoted identifier `"name"` whose
- * inner name's upper-cased form is in `targets`.
- * `col` / `endCol` include the surrounding quotes in the span.
- */
-function findQuotedWordPositions(sql: string, targets: Set<string>): WordToken[] {
-  const results: WordToken[] = [];
-  let line = 1, col = 1, i = 0;
-
-  while (i < sql.length) {
-    const ch = sql[i];
-    if (ch === "\n") { line++; col = 1; i++; continue; }
-    if (ch === "-" && sql[i + 1] === "-") {
-      i += 2; col += 2;
-      while (i < sql.length && sql[i] !== "\n") { i++; col++; }
-      continue;
-    }
-    if (ch === "/" && sql[i + 1] === "*") {
-      i += 2; col += 2;
-      while (i < sql.length) {
-        if (sql[i] === "\n") { line++; col = 1; i++; }
-        else if (sql[i] === "*" && sql[i + 1] === "/") { i += 2; col += 2; break; }
-        else { i++; col++; }
-      }
-      continue;
-    }
-    if (ch === "'") {
-      i++; col++;
-      while (i < sql.length) {
-        if (sql[i] === "\n") { line++; col = 1; i++; }
-        else if (sql[i] === "'" && sql[i + 1] === "'") { i += 2; col += 2; }
-        else if (sql[i] === "'") { i++; col++; break; }
-        else { i++; col++; }
-      }
-      continue;
-    }
-    if (ch === '"') {
-      const startLine = line, startCol = col;
-      i++; col++;
-      let name = ""; let closed = false;
-      while (i < sql.length) {
-        if (sql[i] === "\n") { line++; col = 1; i++; name += "\n"; }
-        else if (sql[i] === '"' && sql[i + 1] === '"') { name += '"'; i += 2; col += 2; }
-        else if (sql[i] === '"') { i++; col++; closed = true; break; }
-        else { name += sql[i]; i++; col++; }
-      }
-      if (closed && targets.has(name.toUpperCase())) {
-        results.push({ name, line: startLine, col: startCol, endCol: col });
-      }
-      continue;
-    }
-    i++; col++;
-  }
-  return results;
-}
-
 /**
  * Uses the node-sql-parser AST to find bare and double-quoted column names in
  * SELECT lists, then cross-references them against `colInfoCache`.
@@ -286,12 +163,12 @@ function findQuotedWordPositions(sql: string, targets: Set<string>): WordToken[]
  * `stmtRanges` must be the result of `GetSqlStatementRanges(sql)` — one
  * range per statement with pre-computed start lines and byte offsets.
  */
-export function validateBareColumnRefs(
+export async function validateBareColumnRefs(
   sql:          string,
   stmtRanges:   StatementRange[],
   resolvedRefs: ResolvedRef[],
   colInfoCache: Map<string, ColInfo[]>,
-): DiagMarker[] {
+): Promise<DiagMarker[]> {
   const markers: DiagMarker[] = [];
   const parser = new SnowflakeParser();
 
@@ -372,28 +249,23 @@ export function validateBareColumnRefs(
 
       const tableLabel = tableChecks.length === 1 ? tableChecks[0].tableName : "query tables";
 
-      // findBareWordPositions / findQuotedWordPositions do targets.has(word.toUpperCase())
-      // so the targets set must be uppercase to match.
-      const unknownBareUC   = new Set([...unknownBare].map(UC));
-      const unknownQuotedUC = new Set([...unknownQuoted].map(UC));
+      // FindSqlTokenPositions matches targets case-insensitively in Go, so pass
+      // uppercase values to match the UC-normalised knownCols set used above.
+      const bareTargets   = [...unknownBare].map(UC);
+      const quotedTargets = [...unknownQuoted].map(UC);
 
-      for (const t of findBareWordPositions(stmtText, unknownBareUC)) {
+      // eslint-disable-next-line no-await-in-loop
+      const tokens = await FindSqlTokenPositions(stmtText, bareTargets, quotedTargets);
+      for (const t of (tokens ?? [])) {
+        const message = t.quoted
+          ? `Column '"${t.name}"' not found in ${tableLabel}`
+          : `Column '${t.name}' not found in ${tableLabel}`;
         markers.push({
           startLineNumber: stmtBaseLine + t.line - 1,
           startColumn:     t.col,
           endLineNumber:   stmtBaseLine + t.line - 1,
           endColumn:       t.endCol,
-          message:         `Column '${t.name}' not found in ${tableLabel}`,
-          severity:        4,
-        });
-      }
-      for (const t of findQuotedWordPositions(stmtText, unknownQuotedUC)) {
-        markers.push({
-          startLineNumber: stmtBaseLine + t.line - 1,
-          startColumn:     t.col,
-          endLineNumber:   stmtBaseLine + t.line - 1,
-          endColumn:       t.endCol,
-          message:         `Column '"${t.name}"' not found in ${tableLabel}`,
+          message,
           severity:        4,
         });
       }

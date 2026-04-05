@@ -97,6 +97,16 @@ type JoinCondition struct {
 	SortText  string `json:"sortText"`
 }
 
+// TokenMatch is a located occurrence of a target token in a SQL string,
+// as returned by FindTokenPositions.
+type TokenMatch struct {
+	Name   string `json:"name"`   // bare word text, or inner content of a double-quoted identifier
+	Line   int    `json:"line"`   // 1-indexed line number
+	Col    int    `json:"col"`    // 1-indexed start column (includes opening '"' for quoted tokens)
+	EndCol int    `json:"endCol"` // 1-indexed end column, exclusive (includes closing '"' for quoted tokens)
+	Quoted bool   `json:"quoted"` // true for double-quoted identifiers, false for bare words
+}
+
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 // SQL statement-starting keywords (outer, non-scripting context).
@@ -435,6 +445,147 @@ func GetIdentifierAtColumn(line string, col int) []string {
 func isWordRune(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
 		(r >= '0' && r <= '9') || r == '_'
+}
+
+// isLetterOrUnderscore reports whether r can start an unquoted SQL identifier.
+func isLetterOrUnderscore(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '_'
+}
+
+// ── FindTokenPositions ────────────────────────────────────────────────────────
+
+// FindTokenPositions walks sql and returns the line/column positions of:
+//   - every unquoted bare word (not preceded by '.', not followed by '(')
+//     whose upper-cased form is in bareTargets
+//   - every double-quoted identifier whose upper-cased inner name is in quotedTargets
+//
+// Single-quoted strings ('...'), line comments (--), and block comments (/* */)
+// are transparently skipped so tokens inside them are never reported.
+// Line and Col are 1-indexed, matching Monaco editor coordinates.
+func FindTokenPositions(sql string, bareTargets []string, quotedTargets []string) []TokenMatch {
+	bareSet := make(map[string]struct{}, len(bareTargets))
+	for _, t := range bareTargets {
+		bareSet[strings.ToUpper(t)] = struct{}{}
+	}
+	quotedSet := make(map[string]struct{}, len(quotedTargets))
+	for _, t := range quotedTargets {
+		quotedSet[strings.ToUpper(t)] = struct{}{}
+	}
+
+	var results []TokenMatch
+	runes := []rune(sql)
+	n := len(runes)
+	line, col := 1, 1
+	i := 0
+
+	for i < n {
+		r := runes[i]
+
+		// Newline
+		if r == '\n' {
+			line++; col = 1; i++
+			continue
+		}
+
+		// Line comment: --
+		if r == '-' && i+1 < n && runes[i+1] == '-' {
+			i += 2; col += 2
+			for i < n && runes[i] != '\n' {
+				i++; col++
+			}
+			continue
+		}
+
+		// Block comment: /* */
+		if r == '/' && i+1 < n && runes[i+1] == '*' {
+			i += 2; col += 2
+			for i < n {
+				if runes[i] == '\n' {
+					line++; col = 1; i++
+				} else if runes[i] == '*' && i+1 < n && runes[i+1] == '/' {
+					i += 2; col += 2; break
+				} else {
+					i++; col++
+				}
+			}
+			continue
+		}
+
+		// Single-quoted string: '...'
+		if r == '\'' {
+			i++; col++
+			for i < n {
+				if runes[i] == '\n' {
+					line++; col = 1; i++
+				} else if runes[i] == '\'' && i+1 < n && runes[i+1] == '\'' {
+					i += 2; col += 2
+				} else if runes[i] == '\'' {
+					i++; col++; break
+				} else {
+					i++; col++
+				}
+			}
+			continue
+		}
+
+		// Double-quoted identifier: "..."
+		if r == '"' {
+			startLine, startCol := line, col
+			i++; col++
+			var name []rune
+			closed := false
+			for i < n {
+				if runes[i] == '\n' {
+					line++; col = 1; i++; name = append(name, '\n')
+				} else if runes[i] == '"' && i+1 < n && runes[i+1] == '"' {
+					name = append(name, '"'); i += 2; col += 2
+				} else if runes[i] == '"' {
+					i++; col++; closed = true; break
+				} else {
+					name = append(name, runes[i]); i++; col++
+				}
+			}
+			if closed && len(quotedSet) > 0 {
+				nameStr := string(name)
+				if _, ok := quotedSet[strings.ToUpper(nameStr)]; ok {
+					results = append(results, TokenMatch{
+						Name: nameStr, Line: startLine, Col: startCol, EndCol: col, Quoted: true,
+					})
+				}
+			}
+			continue
+		}
+
+		// Bare word: [a-zA-Z_]\w*
+		if isLetterOrUnderscore(r) {
+			wLine, wCol, wStart := line, col, i
+			for i < n && isWordRune(runes[i]) {
+				i++; col++
+			}
+			if len(bareSet) > 0 {
+				word := string(runes[wStart:i])
+				prevCh := rune(0)
+				if wStart > 0 {
+					prevCh = runes[wStart-1]
+				}
+				nextCh := rune(0)
+				if i < n {
+					nextCh = runes[i]
+				}
+				if prevCh != '.' && nextCh != '(' {
+					if _, ok := bareSet[strings.ToUpper(word)]; ok {
+						results = append(results, TokenMatch{
+							Name: word, Line: wLine, Col: wCol, EndCol: col, Quoted: false,
+						})
+					}
+				}
+			}
+			continue
+		}
+
+		i++; col++
+	}
+	return results
 }
 
 // ── ValidateSyntax ────────────────────────────────────────────────────────────

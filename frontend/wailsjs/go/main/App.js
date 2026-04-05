@@ -202,6 +202,10 @@ export function FetchNotebookContent(arg1, arg2, arg3) {
   return window['go']['main']['App']['FetchNotebookContent'](arg1, arg2, arg3);
 }
 
+export function FindSqlTokenPositions(arg1, arg2, arg3) {
+  return window['go']['main']['App']['FindSqlTokenPositions'](arg1, arg2, arg3);
+}
+
 export function GenerateKeyPair(arg1, arg2, arg3) {
   return window['go']['main']['App']['GenerateKeyPair'](arg1, arg2, arg3);
 }

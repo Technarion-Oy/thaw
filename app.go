@@ -1740,6 +1740,13 @@ func (a *App) GetIdentifierAtColumn(line string, col int) []string {
 	return sqleditor.GetIdentifierAtColumn(line, col)
 }
 
+// FindSqlTokenPositions walks sql and returns the line/column positions of bare
+// words in bareTargets and double-quoted identifiers in quotedTargets, skipping
+// string literals and comments.  No Snowflake connection is required.
+func (a *App) FindSqlTokenPositions(sql string, bareTargets []string, quotedTargets []string) []sqleditor.TokenMatch {
+	return sqleditor.FindTokenPositions(sql, bareTargets, quotedTargets)
+}
+
 // GetFunctionInfo fetches the DDL for a user-defined function and returns its
 // parameter list together with a flag indicating whether it is a table function.
 func (a *App) GetFunctionInfo(database, schema, name, argTypes string) (*snowflake.FunctionInfo, error) {
