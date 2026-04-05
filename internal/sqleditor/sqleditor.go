@@ -361,6 +361,82 @@ func GetStatementRanges(sql string) []StatementRange {
 	return ranges
 }
 
+// ── GetIdentifierAtColumn ─────────────────────────────────────────────────────
+
+// GetIdentifierAtColumn parses a single line of SQL and returns the
+// dot-separated identifier parts (e.g. ["DB","SCHEMA","TABLE"]) when the
+// zero-indexed cursor column col falls on or between any of those parts,
+// including the dot separators.  Double-quoted identifiers (e.g. "My Table")
+// are unquoted before being returned.  Returns nil when the column is not on
+// any identifier.
+func GetIdentifierAtColumn(line string, col int) []string {
+	runes := []rune(line)
+	n := len(runes)
+	i := 0
+	for i < n {
+		r := runes[i]
+		if r != '"' && !isWordRune(r) {
+			i++
+			continue
+		}
+
+		// Gather one dot-separated identifier chain starting at i.
+		parts := []string{}
+		containsCol := false
+
+		for i < n {
+			partStart := i
+			var partName []rune
+
+			if runes[i] == '"' {
+				i++ // skip opening quote
+				for i < n && runes[i] != '"' {
+					partName = append(partName, runes[i])
+					i++
+				}
+				if i < n {
+					i++ // skip closing quote
+				}
+			} else if isWordRune(runes[i]) {
+				for i < n && isWordRune(runes[i]) {
+					partName = append(partName, runes[i])
+					i++
+				}
+			} else {
+				break
+			}
+
+			parts = append(parts, string(partName))
+			if col >= partStart && col < i {
+				containsCol = true
+			}
+
+			// Continue chain if followed by '.' and then '"' or word rune.
+			if i < n && runes[i] == '.' {
+				if i+1 < n && (runes[i+1] == '"' || isWordRune(runes[i+1])) {
+					if col == i {
+						containsCol = true
+					}
+					i++ // skip '.'
+					continue
+				}
+			}
+			break
+		}
+
+		if containsCol && len(parts) > 0 {
+			return parts
+		}
+	}
+	return nil
+}
+
+// isWordRune reports whether r is a SQL word character (\w equivalent).
+func isWordRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+		(r >= '0' && r <= '9') || r == '_'
+}
+
 // ── ValidateSyntax ────────────────────────────────────────────────────────────
 
 // ValidateSyntax is a character-by-character Snowflake SQL tokenizer that catches

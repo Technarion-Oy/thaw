@@ -15,6 +15,57 @@ import (
 	"testing"
 )
 
+func TestGetIdentifierAtColumn(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		col  int
+		want []string
+	}{
+		// No identifier at all
+		{name: "empty line", line: "", col: 0, want: nil},
+		{name: "only spaces", line: "   ", col: 1, want: nil},
+		{name: "col on operator", line: "a + b", col: 2, want: nil},
+
+		// Bare single-part identifier
+		{name: "bare word col at start", line: "SELECT", col: 0, want: []string{"SELECT"}},
+		{name: "bare word col in middle", line: "SELECT", col: 3, want: []string{"SELECT"}},
+		{name: "bare word col at end", line: "SELECT", col: 5, want: []string{"SELECT"}},
+		{name: "bare word col one past end", line: "SELECT", col: 6, want: nil},
+
+		// Two-part identifier
+		{name: "two-part on first part", line: "db.schema", col: 0, want: []string{"db", "schema"}},
+		{name: "two-part on dot", line: "db.schema", col: 2, want: []string{"db", "schema"}},
+		{name: "two-part on second part", line: "db.schema", col: 4, want: []string{"db", "schema"}},
+
+		// Three-part identifier (db.schema.table)
+		{name: "three-part on first", line: "db.schema.tbl", col: 1, want: []string{"db", "schema", "tbl"}},
+		{name: "three-part on middle", line: "db.schema.tbl", col: 5, want: []string{"db", "schema", "tbl"}},
+		{name: "three-part on last", line: "db.schema.tbl", col: 11, want: []string{"db", "schema", "tbl"}},
+
+		// Quoted identifier
+		{name: "quoted single part", line: `"My Table"`, col: 3, want: []string{"My Table"}},
+		{name: "quoted two-part", line: `"DB"."My Schema"`, col: 5, want: []string{"DB", "My Schema"}},
+		{name: "col before opening quote", line: ` "tbl"`, col: 0, want: nil},
+
+		// Identifier embedded in SQL
+		{name: "ident in query col on ident", line: "SELECT * FROM db.schema.tbl WHERE x=1", col: 20, want: []string{"db", "schema", "tbl"}},
+		{name: "ident in query col on keyword before ident", line: "SELECT * FROM db.schema.tbl WHERE x=1", col: 8, want: nil},
+
+		// Underscore in identifier
+		{name: "identifier with underscores", line: "my_db.my_schema", col: 3, want: []string{"my_db", "my_schema"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GetIdentifierAtColumn(tt.line, tt.col)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("GetIdentifierAtColumn(%q, %d) = %v, want %v", tt.line, tt.col, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestGetStatementRanges(t *testing.T) {
 	tests := []struct {
 		name string

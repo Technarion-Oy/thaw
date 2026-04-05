@@ -25,7 +25,7 @@ import { useObjectStore } from "../../store/objectStore";
 import { useSessionStore } from "../../store/sessionStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges } from "../../../wailsjs/go/main/App";
+import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges, GetIdentifierAtColumn } from "../../../wailsjs/go/main/App";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { DiagMarker, ColInfo, validateWithParser, validateBareColumnRefs, ResolvedRef } from "../../utils/sqlDiagnostics";
@@ -298,52 +298,6 @@ interface DdlHover {
 interface SqlEditorProps {
   tabId?: string;
   activeStmtIdx?: number | null;
-}
-
-function getQualifiedIdent(model: any, pos: any): string[] | null {
-  const line: string = model.getLineContent(pos.lineNumber);
-  const col = pos.column - 1; 
-
-  let i = 0;
-  while (i < line.length) {
-    if (line[i] !== '"' && !/\w/.test(line[i])) { i++; continue; }
-
-    const parts: string[] = [];
-    let containsCol = false;
-
-    while (i < line.length) {
-      const partStart = i;
-      let partName = '';
-
-      if (line[i] === '"') {
-        i++; 
-        while (i < line.length && line[i] !== '"') { partName += line[i]; i++; }
-        if (i < line.length) i++; 
-      } else if (/\w/.test(line[i])) {
-        while (i < line.length && /\w/.test(line[i])) { partName += line[i]; i++; }
-      } else {
-        break;
-      }
-
-      parts.push(partName);
-
-      if (col >= partStart && col < i) containsCol = true;
-
-      if (i < line.length && line[i] === '.') {
-        const next = line[i + 1];
-        if (next !== undefined && (next === '"' || /\w/.test(next))) {
-          if (col === i) containsCol = true; 
-          i++; 
-          continue;
-        }
-      }
-      break;
-    }
-
-    if (containsCol && parts.length > 0) return parts;
-  }
-
-  return null;
 }
 
 
@@ -1173,8 +1127,12 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
       if (model && model.getLanguageId() !== "sql") return;
 
+      void (async () => {
       const pos = e.target?.position;
-      const parts = (pos && model) ? getQualifiedIdent(model, pos) : null;
+      const partsRaw = (pos && model)
+        ? await GetIdentifierAtColumn(model.getLineContent(pos.lineNumber), pos.column - 1)
+        : null;
+      const parts = (partsRaw && partsRaw.length > 0) ? partsRaw : null;
 
       const diagMarkerAtPos = (pos && model)
         ? (monaco.editor.getModelMarkers({ owner: "thaw-sql", resource: model.uri }).find((m: any) =>
@@ -1418,6 +1376,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         if (hoverHideTimerRef.current) { clearTimeout(hoverHideTimerRef.current); hoverHideTimerRef.current = null; }
         setDdlHover({ ddl, kind, db, schema, name, x, y });
       }, 200);
+      })();
     });
 
     editor.onMouseLeave(() => {

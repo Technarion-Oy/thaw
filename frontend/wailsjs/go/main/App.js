@@ -274,6 +274,10 @@ export function GetGitConfig() {
   return window['go']['main']['App']['GetGitConfig']();
 }
 
+export function GetIdentifierAtColumn(arg1, arg2) {
+  return window['go']['main']['App']['GetIdentifierAtColumn'](arg1, arg2);
+}
+
 export function GetIntegrationProperties(arg1) {
   return window['go']['main']['App']['GetIntegrationProperties'](arg1);
 }

@@ -1732,6 +1732,14 @@ func (a *App) GetSqlStatementRanges(sql string) []sqleditor.StatementRange {
 	return sqleditor.GetStatementRanges(sql)
 }
 
+// GetIdentifierAtColumn parses the dot-separated identifier (e.g. db.schema.table)
+// under the zero-indexed cursor column col within a single line of SQL.
+// Returns nil when the column is not on any identifier.
+// No Snowflake connection is required.
+func (a *App) GetIdentifierAtColumn(line string, col int) []string {
+	return sqleditor.GetIdentifierAtColumn(line, col)
+}
+
 // GetFunctionInfo fetches the DDL for a user-defined function and returns its
 // parameter list together with a flag indicating whether it is a table function.
 func (a *App) GetFunctionInfo(database, schema, name, argTypes string) (*snowflake.FunctionInfo, error) {

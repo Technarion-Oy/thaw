@@ -148,6 +148,8 @@ export function GetFunctionTooltip(arg1:string):Promise<Array<fnmeta.FunctionMet
 
 export function GetGitConfig():Promise<config.GitConfig>;
 
+export function GetIdentifierAtColumn(arg1:string,arg2:number):Promise<Array<string>>;
+
 export function GetIntegrationProperties(arg1:string):Promise<Array<main.PropertyPair>>;
 
 export function GetNotebookCompletions(arg1:string,arg2:string,arg3:number,arg4:number):Promise<Array<main.NotebookCompletion>>;
