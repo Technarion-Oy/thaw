@@ -1,27 +1,37 @@
 // Copyright (c) 2026 Technarion Oy. All rights reserved.
-//
-// This software and its source code are proprietary and confidential.
-// Unauthorized copying, distribution, modification, or use of this software,
-// in whole or in part, is strictly prohibited without prior written permission
-// from Technarion Oy.
-//
-// Commercial use of this software is restricted to parties holding a valid
-// license agreement with Technarion Oy.
 
 /**
  * Extracts all script variables declared in a Snowflake SQL document via:
  * - DECLARE blocks
  * - LET/VAR assignments
  * - FOR ... IN loops
+ * * Scoped to the current block (e.g., inside $$ ... $$) and only parses
+ * declarations that appear *before* the cursor.
  */
-export function extractDeclaredVariables(sql: string): Set<string> {
+export function extractDeclaredVariables(sql: string, cursorOffset: number): Set<string> {
   const vars = new Set<string>();
 
-  // 1. Match DECLARE blocks robustly (handles missing BEGIN while typing)
-  const declareParts = sql.split(/\bDECLARE\b/gi);
+  // 1. Determine if the cursor is actually inside a $$ ... $$ block.
+  // We count the number of $$ tags before the cursor. If it's an odd number (1, 3, 5),
+  // the block is open. If even (0, 2, 4), the block is closed and we are in standard SQL.
+  const textBeforeCursor = sql.substring(0, cursorOffset);
+  const dollarMatches = textBeforeCursor.match(/\$\$/g);
+  const isInsideBlock = dollarMatches && dollarMatches.length % 2 !== 0;
+
+  // If we are outside a block, return empty set so variables don't leak into standard SQL
+  if (!isInsideBlock) {
+    return vars;
+  }
+
+  // 2. Isolate the text from the start of the current block up to the cursor.
+  const blockStart = sql.lastIndexOf("$$", cursorOffset - 1);
+  const textToScan = sql.substring(blockStart, cursorOffset);
+
+  // 3. Match DECLARE blocks
+  const declareParts = textToScan.split(/\bDECLARE\b/gi);
   for (let i = 1; i < declareParts.length; i++) {
-    // Take text up to BEGIN, END, or $$
-    const blockContent = declareParts[i].split(/\b(?:BEGIN|END)\b|\$\$/gi)[0];
+    // Only take text up to a BEGIN or END keyword
+    const blockContent = declareParts[i].split(/\b(?:BEGIN|END)\b/gi)[0];
     const lines = blockContent.split(";");
     for (const line of lines) {
       const cleanLine = line
@@ -31,11 +41,9 @@ export function extractDeclaredVariables(sql: string): Set<string> {
 
       if (!cleanLine) continue;
 
-      // No '^' anchor, bypasses any invisible characters
       const wordMatch = cleanLine.match(/[a-zA-Z0-9_$]+/);
       if (wordMatch) {
         const varName = wordMatch[0].toUpperCase();
-        // Exclude common keywords that might appear as the first word
         if (!["CURSOR", "EXCEPTION", "TYPE", "LET", "VAR"].includes(varName)) {
           vars.add(varName);
         }
@@ -43,16 +51,16 @@ export function extractDeclaredVariables(sql: string): Set<string> {
     }
   }
 
-  // 2. Match LET / VAR assignments
+  // 4. Match LET / VAR assignments
   const inlineRegex = /\b(?:LET|VAR)\s+([a-zA-Z0-9_$]+)/gi;
   let match;
-  while ((match = inlineRegex.exec(sql)) !== null) {
+  while ((match = inlineRegex.exec(textToScan)) !== null) {
     vars.add(match[1].toUpperCase());
   }
 
-  // 3. Match FOR loops
+  // 5. Match FOR loops
   const forRegex = /\bFOR\s+([a-zA-Z0-9_$]+)\s+IN\b/gi;
-  while ((match = forRegex.exec(sql)) !== null) {
+  while ((match = forRegex.exec(textToScan)) !== null) {
     vars.add(match[1].toUpperCase());
   }
 
@@ -90,7 +98,6 @@ export function isColonRequired(sql: string, offset: number): boolean {
   if (!currentSegment) return false;
 
   // 4. Look at the very first word of the current statement segment
-  // (Removed the '^' anchor so invisible spaces don't break keyword detection)
   const firstWordMatch = currentSegment.match(/[a-zA-Z0-9_$]+/);
   if (!firstWordMatch) return false;
 

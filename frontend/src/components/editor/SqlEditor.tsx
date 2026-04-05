@@ -676,7 +676,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           if (model.getVersionId() !== diagVersion) return;
           const storeObjs = useObjectStore.getState().objects;
           
-          // CRITICAL FIX: Add fallback || [] to avoid mapping over null
           const resolved: ResolvedRef[] = (rawRefs || [])
             .map((ref) => {
               if (ref.db && ref.schema) {
@@ -932,7 +931,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const wordIsOn = word.word.toUpperCase() === "ON";
         if (wordIsOn || isInJoinOnClause) {
           const rawRefs = await ParseJoinTableRefs(textToCursor);
-          // CRITICAL FIX: Add null check before accessing length
           if (rawRefs && (rawRefs as any[]).length >= 2) {
             const resolvedRefs = resolveRefs(rawRefs as any[], useObjectStore.getState().objects);
             if (resolvedRefs && resolvedRefs.length >= 2) {
@@ -963,7 +961,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         {
           const lastJoinSegment = (textToCursor.split(/\bJOIN\b/i).pop() ?? "").trim();
           const rawRefsC = await ParseJoinTableRefs(textToCursor);
-          // CRITICAL FIX: Add null check to rawRefsC
           const hasTriggerC =
             lastJoinSegment.length > 0 &&
             !/\b(?:ON|USING)\b/i.test(lastJoinSegment) &&
@@ -998,7 +995,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const fullContent = model.getValue();
         const offset = model.getOffsetAt(position);
         
-        const declaredVars = extractDeclaredVariables(fullContent);
+        const declaredVars = extractDeclaredVariables(fullContent, offset);
         const needsColon = isColonRequired(fullContent, offset);
 
         const keywordSuggestions = SNOWFLAKE_KEYWORDS.map((kw) => ({
@@ -1041,7 +1038,16 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           range,
         }));
 
-        const fullTextToCursor = model.getValue();
+        // Isolate the current statement for context columns so tables from other queries don't bleed in
+        const ranges = getStatementLineRanges(fullContent);
+        let currentStmtText = fullContent;
+        for (const r of ranges) {
+          if (position.lineNumber >= r.startLine && position.lineNumber <= r.endLine) {
+            const lines = model.getLinesContent().slice(r.startLine - 1, r.endLine);
+            currentStmtText = lines.join("\n");
+            break;
+          }
+        }
 
         const ID_PAT = `(?:"[^"]+"|\\w+)`;
         const tableRefRe = new RegExp(
@@ -1055,7 +1061,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const contextColSuggestions: any[] = [];
         let fetchPending = false;
         let tm: RegExpExecArray | null;
-        while ((tm = tableRefRe.exec(fullTextToCursor)) !== null) {
+        
+        while ((tm = tableRefRe.exec(currentStmtText)) !== null) {
           let refDb: string | undefined, refSchema: string | undefined, refName: string;
           if (tm[1] && tm[2] && tm[3]) {
             [refDb, refSchema, refName] = [stripQ(tm[1])!, stripQ(tm[2])!, stripQ(tm[3])!];
@@ -1065,16 +1072,37 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             refName = stripQ(tm[6])!;
           }
 
-          const matchedObjs = objects.filter((o) => {
-            if (o.kind !== "TABLE" && o.kind !== "VIEW") return false;
-            if (UC(o.name) !== UC(refName)) return false;
-            if (refDb && UC(o.db) !== UC(refDb)) return false;
-            if (refSchema && UC(o.schema) !== UC(refSchema)) return false;
-            return true;
-          });
+          const refsToFetch: {db: string, schema: string, name: string}[] = [];
 
-          for (const obj of matchedObjs) {
-            const cacheKey = `${UC(obj.db)}\0${UC(obj.schema)}\0${UC(obj.name)}`;
+          if (refDb && refSchema && refName) {
+            // Fully qualified: trust the name and attempt fetch directly without requiring it in objectStore
+            refsToFetch.push({ db: refDb, schema: refSchema, name: refName });
+          } else {
+            // Partial: Try to resolve via objects store
+            const matchedObjs = objects.filter((o) => {
+              if (o.kind !== "TABLE" && o.kind !== "VIEW") return false;
+              if (UC(o.name) !== UC(refName)) return false;
+              if (refDb && UC(o.db) !== UC(refDb)) return false;
+              if (refSchema && UC(o.schema) !== UC(refSchema)) return false;
+              return true;
+            });
+            for (const obj of matchedObjs) {
+              refsToFetch.push({ db: obj.db, schema: obj.schema, name: obj.name });
+            }
+            
+            // Fallback to session store defaults if not found in cache
+            if (matchedObjs.length === 0) {
+              const sess = useSessionStore.getState();
+              if (sess.database && sess.schema && refName && !refDb && !refSchema) {
+                refsToFetch.push({ db: sess.database, schema: sess.schema, name: refName });
+              } else if (sess.database && refSchema && refName && !refDb) {
+                refsToFetch.push({ db: sess.database, schema: refSchema, name: refName });
+              }
+            }
+          }
+
+          for (const ref of refsToFetch) {
+            const cacheKey = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
             if (columnCache.has(cacheKey)) {
               for (const col of columnCache.get(cacheKey)!) {
                 if (!seenColKeys.has(UC(col))) {
@@ -1083,13 +1111,13 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                     label:      col,
                     kind:       monaco.languages.CompletionItemKind.Field,
                     insertText: col,
-                    detail:     `COLUMN · ${obj.name}`,
+                    detail:     `COLUMN · ${ref.name}`,
                     range,
                   });
                 }
               }
             } else {
-              getColumns(obj.db, obj.schema, obj.name);
+              getColumns(ref.db, ref.schema, ref.name);
               fetchPending = true;
             }
           }
@@ -1116,18 +1144,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           }
         }
 
-        const testSuggestion = {
-          label:      "my_value",
-          kind:       monaco.languages.CompletionItemKind.Text,
-          insertText: "my_value",
-          filterText: "my_value",
-          detail:     "HARDCODED TEST",
-          range,
-        };
-
         return {
           suggestions: [
-            testSuggestion,
             ...variableSuggestions, 
             ...contextColSuggestions, 
             ...keywordSuggestions, 
@@ -1285,7 +1303,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
         if (parts.length === 2) {
           const rawRefs = await ParseJoinTableRefs(editor.getModel()?.getValue() ?? "");
-          // CRITICAL FIX: Add fallback array
           const resolved = resolveRefs((rawRefs || []) as any[], useObjectStore.getState().objects);
           const matchedTable = resolved?.find(
             (r) => r.alias.toUpperCase() === parts[0].toUpperCase(),
@@ -1476,7 +1493,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           const lastJoinSeg = (prefixFull.split(/\bJOIN\b/i).pop() ?? "").trim();
           if (lastJoinSeg.length > 0 && !/\b(?:ON|USING)\b/i.test(lastJoinSeg)) {
             const ghostRefs = await ParseJoinTableRefs(prefixFull);
-            // CRITICAL FIX: Add null check
             if (ghostRefs && (ghostRefs as any[]).length >= 2) {
               const resolved = resolveRefs(ghostRefs as any[], useObjectStore.getState().objects);
               if (resolved && resolved.length >= 2) {
