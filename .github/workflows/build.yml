@@ -59,7 +59,11 @@ jobs:
 
       - name: Install NSIS (Windows only)
         if: matrix.platform == 'windows'
-        run: choco install nsis
+        shell: bash
+        run: |
+          choco install nsis
+          # Explicitly add NSIS to the GitHub runner's PATH for subsequent steps
+          echo "C:\Program Files (x86)\NSIS" >> $GITHUB_PATH
 
       - name: Prepare version string
         id: prep
@@ -69,7 +73,10 @@ jobs:
           CLEAN_REF=$(echo "${{ github.ref_name }}" | sed 's/\//-/g')
           echo "version=${CLEAN_REF}" >> $GITHUB_OUTPUT
 
-      - name: Build
+      # ── Standard Wails Builds ──────────────────────────────────────────────
+
+      - name: Build (macOS & Linux)
+        if: matrix.platform != 'windows'
         # Run the standard Wails build first.  This step:
         #   1. Compiles and bundles the React frontend into frontend/dist.
         #   2. Generates the Wails JS/TS bindings.
@@ -84,7 +91,6 @@ jobs:
         #                   (-w) so function/variable names are not recoverable.
         # -trimpath         removes all local file-system paths embedded by the
         #                   compiler (source file references, module cache paths).
-        # Note for Windows: This remains the final Go compilation (no garble).
         run: wails build -clean -ldflags "-s -w" -trimpath
         env:
           # The macOS arm64 runner has 7 GB RAM.  javascript-obfuscator's
@@ -92,6 +98,14 @@ jobs:
           # function several times over.  Combined with Terser's multi-pass
           # compression running in the same Node process, the default 4 GB
           # limit is insufficient.  6 GB leaves ~1 GB for the OS.
+          NODE_OPTIONS: --max-old-space-size=6144
+
+      - name: Build & Package Installer (Windows)
+        if: matrix.platform == 'windows'
+        # Since we dropped garble for Windows, we can let Wails handle 
+        # both the compilation AND the NSIS installer generation natively!
+        run: wails build -clean -nsis -ldflags "-s -w" -trimpath
+        env:
           NODE_OPTIONS: --max-old-space-size=6144
 
       # ── Rebuild Go binary with garble ──────────────────────────────────────
@@ -128,13 +142,6 @@ jobs:
             -o build/bin/thaw \
             .
 
-      # ── Build Installer (Windows) ──────────────────────────────────────────
-      
-      - name: Build NSIS Installer (Windows)
-        if: matrix.platform == 'windows'
-        # Wails auto-generates the NSIS script. We compile it into an installer here.
-        run: makensis build/windows/installer/project.nsi
-
       # ── Rename / package output with tag version ───────────────────────────
       - name: Package macOS app bundle
         if: matrix.platform == 'darwin'
@@ -145,7 +152,7 @@ jobs:
       - name: Rename Windows binaries
         if: matrix.platform == 'windows'
         shell: pwsh
-        # We rename both the raw executable (as a portable version) and the installer
+        # Wails natively outputted both the raw executable and the installer, we rename both
         run: |
           Move-Item build/bin/thaw.exe "build/bin/thaw-${{ steps.prep.outputs.version }}-windows-amd64-portable.exe"
           Move-Item build/bin/thaw-amd64-installer.exe "build/bin/thaw-${{ steps.prep.outputs.version }}-windows-amd64-installer.exe"
