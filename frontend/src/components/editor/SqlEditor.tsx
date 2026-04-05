@@ -231,6 +231,7 @@ function mkColSuggestions(cols: string[], range: any, monaco: any) {
     label:      col,
     kind:       monaco.languages.CompletionItemKind.Field,
     insertText: col,
+    sortText:   "02_" + col,
     detail:     "COLUMN",
     range,
   }));
@@ -849,6 +850,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                 label:      o.name,
                 kind:       monacoKind(monaco, o.kind),
                 insertText: o.name,
+                sortText:   "03_" + o.name,
                 detail:     o.kind,
                 range,
               })),
@@ -879,6 +881,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                   label:      s.name,
                   kind:       monaco.languages.CompletionItemKind.Module,
                   insertText: s.name,
+                  sortText:   "04_" + s.name,
                   detail:     "SCHEMA",
                   range,
                 })),
@@ -892,6 +895,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                 label:      o.name,
                 kind:       monacoKind(monaco, o.kind),
                 insertText: o.name,
+                sortText:   "03_" + o.name,
                 detail:     o.kind,
                 range,
               })),
@@ -1002,6 +1006,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           label:      kw,
           kind:       monaco.languages.CompletionItemKind.Keyword,
           insertText: kw,
+          sortText:   "08_" + kw,
           range,
         }));
 
@@ -1010,6 +1015,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           kind:       monaco.languages.CompletionItemKind.Variable,
           insertText: needsColon ? ":" + v : v,
           filterText: needsColon ? ":" + v : v, 
+          sortText:   "01_" + v,
           detail:     "SCRIPT VARIABLE",
           range,
         }));
@@ -1018,6 +1024,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           label:      db,
           kind:       monaco.languages.CompletionItemKind.Module,
           insertText: db,
+          sortText:   "05_" + db,
           detail:     "DATABASE",
           range,
         }));
@@ -1026,6 +1033,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           label:      s.name,
           kind:       monaco.languages.CompletionItemKind.Module,
           insertText: s.name,
+          sortText:   "04_" + s.name,
           detail:     `SCHEMA · ${s.db}`,
           range,
         }));
@@ -1034,6 +1042,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           label:      o.name,
           kind:       monacoKind(monaco, o.kind),
           insertText: o.name,
+          sortText:   "03_" + o.name,
           detail:     `${o.kind} · ${o.db}.${o.schema}`,
           range,
         }));
@@ -1111,6 +1120,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                     label:      col,
                     kind:       monaco.languages.CompletionItemKind.Field,
                     insertText: col,
+                    sortText:   "02_" + col,
                     detail:     `COLUMN · ${ref.name}`,
                     range,
                   });
@@ -1135,7 +1145,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                 documentation:    fn.description || fn.functionSignature,
                 insertText:       fn.functionName,
                 filterText:       fn.functionName,
-                sortText:         fn.functionType === "UDF" ? "0" + fn.functionName : "1" + fn.functionName,
+                sortText:         fn.functionType === "UDF" ? "06_" + fn.functionName : "07_" + fn.functionName,
                 range,
               }));
             }
