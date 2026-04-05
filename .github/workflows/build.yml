@@ -56,6 +56,13 @@ jobs:
       - name: Install garble
         run: go install mvdan.cc/garble@latest
 
+      - name: Prepare version string
+        id: prep
+        run: |
+          # Replace / with - in branch names to avoid path issues in filenames
+          CLEAN_REF=$(echo "${{ github.ref_name }}" | sed 's/\//-/g')
+          echo "version=${CLEAN_REF}" >> $GITHUB_OUTPUT
+
       - name: Build
         # Run the standard Wails build first.  This step:
         #   1. Compiles and bundles the React frontend into frontend/dist.
@@ -123,16 +130,16 @@ jobs:
         if: matrix.platform == 'darwin'
         run: |
           cd build/bin
-          zip -r "thaw-${{ github.ref_name }}-darwin-arm64.zip" thaw.app
+          zip -r "thaw-${{ steps.prep.outputs.version }}-darwin-arm64.zip" thaw.app
 
       - name: Rename Windows binary
         if: matrix.platform == 'windows'
         shell: pwsh
-        run: Move-Item build/bin/thaw.exe "build/bin/thaw-${{ github.ref_name }}-windows-amd64.exe"
+        run: Move-Item build/bin/thaw.exe "build/bin/thaw-${{ steps.prep.outputs.version }}-windows-amd64.exe"
 
       - name: Rename Linux binary
         if: matrix.platform == 'linux'
-        run: mv build/bin/thaw "build/bin/thaw-${{ github.ref_name }}-linux-amd64"
+        run: mv build/bin/thaw "build/bin/thaw-${{ steps.prep.outputs.version }}-linux-amd64"
 
       # ── Store artifact ─────────────────────────────────────────────────────
       # Currently retained as a workflow artifact (30-day expiry).
@@ -140,8 +147,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: thaw-${{ github.ref_name }}-${{ matrix.platform }}-${{ matrix.arch }}
-          path: build/bin/thaw-${{ github.ref_name }}-*
+          name: thaw-${{ steps.prep.outputs.version }}-${{ matrix.platform }}-${{ matrix.arch }}
+          path: build/bin/thaw-${{ steps.prep.outputs.version }}-*
           retention-days: 30
           if-no-files-found: error
 
@@ -152,10 +159,10 @@ jobs:
       # GitHub Releases (attach binaries to the tag's release page):
       #   - uses: softprops/action-gh-release@v2
       #     with:
-      #       files: build/bin/thaw-${{ github.ref_name }}-*
+      #       files: build/bin/thaw-${{ steps.prep.outputs.version }}-*
       #
       # Amazon S3 / Cloudflare R2:
-      #   - run: aws s3 cp build/bin/thaw-${{ github.ref_name }}-* s3://your-bucket/builds/
+      #   - run: aws s3 cp build/bin/thaw-${{ steps.prep.outputs.version }}-* s3://your-bucket/builds/
       #     env:
       #       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       #       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
