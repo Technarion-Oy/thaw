@@ -58,6 +58,7 @@ jobs:
 
       - name: Prepare version string
         id: prep
+        shell: bash
         run: |
           # Replace / with - in branch names to avoid path issues in filenames
           CLEAN_REF=$(echo "${{ github.ref_name }}" | sed 's/\//-/g')
