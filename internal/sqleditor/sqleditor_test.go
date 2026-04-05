@@ -54,6 +54,39 @@ func TestGetIdentifierAtColumn(t *testing.T) {
 
 		// Underscore in identifier
 		{name: "identifier with underscores", line: "my_db.my_schema", col: 3, want: []string{"my_db", "my_schema"}},
+
+		// Digits in identifier
+		{name: "identifier with digits", line: "table1.col2", col: 4, want: []string{"table1", "col2"}},
+		// Digit-led tokens: \w matches digits, so "123abc" is treated as one token (same as original TS /\w/)
+		{name: "identifier starting with digit matched as token", line: "123abc", col: 0, want: []string{"123abc"}},
+
+		// Two separate identifiers on the same line
+		{name: "two idents on line - col on first", line: "t1.c1, t2.c2", col: 1, want: []string{"t1", "c1"}},
+		{name: "two idents on line - col on second", line: "t1.c1, t2.c2", col: 8, want: []string{"t2", "c2"}},
+		{name: "two idents on line - col on comma", line: "t1.c1, t2.c2", col: 5, want: nil},
+		{name: "two idents on line - col on space", line: "t1.c1, t2.c2", col: 6, want: nil},
+
+		// Trailing dot — cursor before/on the dangling dot
+		{name: "trailing dot - col on word before dot", line: "db.", col: 1, want: []string{"db"}},
+		{name: "trailing dot - col on dangling dot", line: "db.", col: 2, want: nil},
+
+		// Leading dot — scanner skips the dot; "schema" is returned as a 1-part identifier
+		{name: "leading dot - col on word after dot", line: ".schema", col: 1, want: []string{"schema"}},
+		// Leading dot — col on the dot itself is not on any identifier
+		{name: "leading dot - col on the dot", line: ".schema", col: 0, want: nil},
+
+		// Mixed quoted and bare parts
+		{name: "quoted-dot-bare col on quoted", line: `"My DB".schema`, col: 3, want: []string{"My DB", "schema"}},
+		{name: "quoted-dot-bare col on bare", line: `"My DB".schema`, col: 9, want: []string{"My DB", "schema"}},
+
+		// col at very last character of identifier
+		{name: "col at last char of three-part", line: "a.b.c", col: 4, want: []string{"a", "b", "c"}},
+
+		// col past end of line
+		{name: "col past end of line", line: "abc", col: 10, want: nil},
+
+		// Identifier immediately after opening paren
+		{name: "ident after paren", line: "(db.schema)", col: 4, want: []string{"db", "schema"}},
 	}
 
 	for _, tt := range tests {
