@@ -613,6 +613,11 @@ func ValidateSyntax(sql string) []DiagMarker {
 								addError("Variable '"+wordRaw+"' is not declared",
 									wordLine, wordCol, wordLine, wordCol+len(wordRaw))
 							}
+						} else {
+							// Not a scripting keyword and not an assignment —
+							// bare unrecognised identifier at statement start.
+							addError("Unexpected token '"+wordRaw+"'",
+								wordLine, wordCol, wordLine, wordCol+len(wordRaw))
 						}
 					}
 				}
