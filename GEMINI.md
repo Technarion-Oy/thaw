@@ -39,6 +39,12 @@ Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend +
 2. Run `wails generate module`.
 3. Import and use the method in the React component from `../../../wailsjs/go/main/App`.
 
+### Pull Request Workflow
+- **Feature Branches**: Always work in a dedicated branch (`feat/`, `fix/`, etc.).
+- **Submission**: Use GitHub CLI (`gh`) to create pull requests.
+- **Target**: Ensure PRs target `Technarion-Oy/thaw:main`.
+- **Command**: `gh pr create --repo Technarion-Oy/thaw --base main --title "..." --body "..."`
+
 ### Working with Query Tab
 - To open SQL in a new tab without running it: `useQueryStore.getState().loadInNewTab(sql)`.
 - To open and execute immediately: `useQueryStore.getState().executeInNewTab(sql)`.

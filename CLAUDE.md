@@ -2,6 +2,21 @@
 
 Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend + React/TypeScript frontend embedded as a single binary).
 
+## Development Workflow
+
+- **Branching**: All changes must be made in a feature branch (e.g., `feat/`, `fix/`, `chore/`).
+- **Commits**: Use descriptive commit messages with conventional prefixes.
+- **Pull Requests**: Create PRs using the GitHub CLI (`gh`). Target the `upstream` repository (`Technarion-Oy/thaw`) if working from a fork.
+- **PR Commands**:
+  ```bash
+  git checkout -b feat/my-new-feature
+  # ... make changes ...
+  git add .
+  git commit -m "feat: my new feature"
+  git push -u origin feat/my-new-feature
+  gh pr create --repo Technarion-Oy/thaw --base main --title "feat: my new feature" --body "Description..."
+  ```
+
 ## Architecture
 
 ```
@@ -92,7 +107,7 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 
 ### SQL diagnostics & JOIN suggestions (backend)
 All proprietary analysis logic lives in `internal/sqleditor/sqleditor.go` and is called via IPC:
-- `AnalyzeSqlSyntax(sql)` → character-by-character tokenizer (strings, comments, parens, dollar-quoting, scripting)
+- `AnalyzeSqlSyntax(sql)` → character-by-character tokenizer (strings, comments, parens, dollar-quoting, scripting); inside `$$` blocks it also flags: placeholder tokens (`<>{}` at statement-start), bare unrecognised identifiers at statement-start, and wrong `:=`/`=` assignment syntax
 - `ParseJoinTableRefs(sql)` → regex-based FROM/JOIN table-ref extractor (3/2/1-part + alias)
 - `AnalyzeSqlSemantics(sql, resolvedRefs, colEntries)` → alias.column validator
 - `ComputeJoinOnConditions(req)` → three-tier JOIN ON suggestion engine (FK → PK heuristic → type-compatible same-name columns + USING)
@@ -128,6 +143,12 @@ Never edit files under `frontend/wailsjs/` by hand — they are overwritten by `
 
 ### `frontend/dist/.gitkeep` must stay committed
 Go's `//go:embed all:frontend/dist` directive in `main.go` is evaluated during `wails generate module` (binding generation), which runs **before** the frontend build. If `frontend/dist` is empty or missing, the Go build fails with "contains no embeddable files". The committed `.gitkeep` placeholder satisfies the embed on clean checkouts. Never delete it.
+
+### `runDiagnostics` must stay race-safe and exception-safe
+`runDiagnostics` in `SqlEditor.tsx` is an async function with three IPC `await` points. Two invariants must hold:
+1. **Race safety** — capture `model.getVersionId()` before any async work and check it after each `await`; `return` early if the version advanced (user edited mid-flight). The `return` still executes `finally`, but the version check inside `finally` prevents overwriting a newer run's markers.
+2. **Exception safety** — wrap the entire body in `try/catch/finally`. If any IPC call rejects, `catch` logs it and `finally` guarantees `setModelMarkers` is called with whatever was collected (possibly empty), so stale markers are never left stuck.
+Also use `editor.onDidChangeModelContent` (not `editor.getModel()?.onDidChangeContent`) — the latter silently skips registration if the model is null at mount time.
 
 ### Frontend bundle obfuscation
 The production frontend build (`npm run build`) runs `javascript-obfuscator` after Terser via `vite.config.ts`. Vendor and Monaco chunks are explicitly skipped. The build script passes `--max-old-space-size=6144` to Node to prevent V8 heap OOM during obfuscation. `controlFlowFlattening` and `deadCodeInjection` are disabled to keep peak memory within budget; RC4 string-array encoding provides the primary IP protection.

@@ -90,6 +90,21 @@ END;
 $$;`,
 			want: nil,
 		},
+		{
+			name: "Undeclared variable in RETURN and FOR",
+			sql: `$$
+BEGIN
+  RETURN missing_var;
+  FOR r IN missing_cursor DO
+    NULL;
+  END FOR;
+END;
+$$`,
+			want: []DiagMarker{
+				{StartLineNumber: 3, StartColumn: 10, EndLineNumber: 3, EndColumn: 21, Message: "Variable 'missing_var' is not declared", Severity: 8},
+				{StartLineNumber: 4, StartColumn: 12, EndLineNumber: 4, EndColumn: 26, Message: "Variable 'missing_cursor' is not declared", Severity: 8},
+			},
+		},
 	}
 
 	for _, tt := range tests {
