@@ -134,6 +134,7 @@ var scriptStmtKeywords = map[string]bool{
 	"CONTINUE": true, "OPEN": true, "FETCH": true, "CLOSE": true,
 	"SELECT": true, "INSERT": true, "UPDATE": true, "DELETE": true,
 	"MERGE": true, "CREATE": true, "ALTER": true, "DROP": true, "TRUNCATE": true,
+	"EXECUTE": true, "NULL": true,
 }
 
 // JOIN clause stop keywords used to detect accidental alias capture.
