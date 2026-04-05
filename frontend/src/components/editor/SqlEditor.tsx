@@ -779,7 +779,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     }
 
     // Re-decorate on every content change (debounced).
-    editor.getModel()?.onDidChangeContent(() => {
+    // Use editor.onDidChangeModelContent (not model.onDidChangeContent) so the
+    // listener is always registered regardless of model availability at mount.
+    editor.onDidChangeModelContent(() => {
       if (fnDecTimerRef.current) clearTimeout(fnDecTimerRef.current);
       fnDecTimerRef.current = setTimeout(refreshFnDecorations, 200);
     });
@@ -864,7 +866,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       monaco.editor.setModelMarkers(model, "thaw-sql", diagMarkers);
     };
 
-    editor.getModel()?.onDidChangeContent(() => {
+    editor.onDidChangeModelContent(() => {
       if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
       diagTimerRef.current = setTimeout(runDiagnostics, 400);
     });
