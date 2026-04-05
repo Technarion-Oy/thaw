@@ -802,68 +802,80 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       const diagSql = model.getValue();
       const diagMarkers: DiagMarker[] = [];
 
-      // Structural syntax check (unclosed strings, parens, scripting assignments).
-      // Runs in the Go backend to protect the proprietary tokenizer logic.
-      const syntaxErrors = await AnalyzeSqlSyntax(diagSql);
-      if (model.getVersionId() !== diagVersion) return;
-      diagMarkers.push(...(syntaxErrors as DiagMarker[]));
-
-      if (syntaxErrors.length === 0) {
-        // Grammar check via node-sql-parser (Snowflake dialect).
-        // Shown as Warnings because some valid Snowflake syntax may not be
-        // supported by the parser and would otherwise produce false positives.
-        diagMarkers.push(...validateWithParser(diagSql));
-
-        const rawRefs = await ParseJoinTableRefs(diagSql);
+      try {
+        // Structural syntax check (unclosed strings, parens, scripting assignments).
+        // Runs in the Go backend to protect the proprietary tokenizer logic.
+        const syntaxErrors = await AnalyzeSqlSyntax(diagSql);
         if (model.getVersionId() !== diagVersion) return;
-        const storeObjs = useObjectStore.getState().objects;
-        // Resolve refs without the >= 2 constraint so single-table queries are validated.
-        const resolved: ResolvedRef[] = rawRefs
-          .map((ref) => {
-            if (ref.db && ref.schema) {
-              return { db: ref.db, schema: ref.schema, name: ref.name, alias: ref.alias };
-            }
-            const obj = storeObjs.find((o) => {
-              if (o.kind !== "TABLE" && o.kind !== "VIEW") return false;
-              if (UC(o.name) !== UC(ref.name)) return false;
-              if (ref.db     && UC(o.db)     !== UC(ref.db))     return false;
-              if (ref.schema && UC(o.schema) !== UC(ref.schema)) return false;
-              return true;
-            });
-            return obj ? { db: obj.db, schema: obj.schema, name: obj.name, alias: ref.alias } : null;
-          })
-          .filter(Boolean) as ResolvedRef[];
+        diagMarkers.push(...(syntaxErrors as DiagMarker[]));
 
-        // Proactively warm colInfoCache for any resolved FROM table whose columns
-        // haven't been fetched yet.  Once the fetch resolves, re-run diagnostics
-        // immediately so column validation can proceed with a warm cache.
-        for (const ref of resolved) {
-          const warmKey = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
-          if (!colInfoCache.has(warmKey) && !fetchingColInfos.has(warmKey)) {
-            void getColInfos(ref.db, ref.schema, ref.name).then(() => {
-              if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
-              diagTimerRef.current = setTimeout(runDiagnostics, 0);
-            });
-          }
-        }
+        if (syntaxErrors.length === 0) {
+          // Grammar check via node-sql-parser (Snowflake dialect).
+          // Shown as Warnings because some valid Snowflake syntax may not be
+          // supported by the parser and would otherwise produce false positives.
+          diagMarkers.push(...validateWithParser(diagSql));
 
-        if (resolved.length > 0) {
-          // Semantic check (alias.column validation) runs in the Go backend.
-          const colEntries = resolved.map((ref) => {
-            const key = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
-            return { db: ref.db, schema: ref.schema, name: ref.name, cols: colInfoCache.get(key) ?? [] };
-          });
-          const semanticMarkers = await AnalyzeSqlSemantics(diagSql, resolved as any, colEntries as any);
+          const rawRefs = await ParseJoinTableRefs(diagSql);
           if (model.getVersionId() !== diagVersion) return;
-          diagMarkers.push(...(semanticMarkers as DiagMarker[]));
+          const storeObjs = useObjectStore.getState().objects;
+          // Resolve refs without the >= 2 constraint so single-table queries are validated.
+          const resolved: ResolvedRef[] = rawRefs
+            .map((ref) => {
+              if (ref.db && ref.schema) {
+                return { db: ref.db, schema: ref.schema, name: ref.name, alias: ref.alias };
+              }
+              const obj = storeObjs.find((o) => {
+                if (o.kind !== "TABLE" && o.kind !== "VIEW") return false;
+                if (UC(o.name) !== UC(ref.name)) return false;
+                if (ref.db     && UC(o.db)     !== UC(ref.db))     return false;
+                if (ref.schema && UC(o.schema) !== UC(ref.schema)) return false;
+                return true;
+              });
+              return obj ? { db: obj.db, schema: obj.schema, name: obj.name, alias: ref.alias } : null;
+            })
+            .filter(Boolean) as ResolvedRef[];
+
+          // Proactively warm colInfoCache for any resolved FROM table whose columns
+          // haven't been fetched yet.  Once the fetch resolves, re-run diagnostics
+          // immediately so column validation can proceed with a warm cache.
+          for (const ref of resolved) {
+            const warmKey = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
+            if (!colInfoCache.has(warmKey) && !fetchingColInfos.has(warmKey)) {
+              void getColInfos(ref.db, ref.schema, ref.name).then(() => {
+                if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
+                diagTimerRef.current = setTimeout(runDiagnostics, 0);
+              });
+            }
+          }
+
+          if (resolved.length > 0) {
+            // Semantic check (alias.column validation) runs in the Go backend.
+            const colEntries = resolved.map((ref) => {
+              const key = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
+              return { db: ref.db, schema: ref.schema, name: ref.name, cols: colInfoCache.get(key) ?? [] };
+            });
+            const semanticMarkers = await AnalyzeSqlSemantics(diagSql, resolved as any, colEntries as any);
+            if (model.getVersionId() !== diagVersion) return;
+            diagMarkers.push(...(semanticMarkers as DiagMarker[]));
+          }
+
+          // Validate bare and double-quoted column names in SELECT lists against
+          // colInfoCache (catches bare `wrong_col` and `"wrong_col"` typos).
+          diagMarkers.push(...validateBareColumnRefs(diagSql, resolved, colInfoCache));
         }
-
-        // Validate bare and double-quoted column names in SELECT lists against
-        // colInfoCache (catches bare `wrong_col` and `"wrong_col"` typos).
-        diagMarkers.push(...validateBareColumnRefs(diagSql, resolved, colInfoCache));
+      } catch (err) {
+        // A backend IPC call rejected or a parser threw.  Log and fall through
+        // to finally so stale markers are cleared rather than left stuck.
+        console.warn("[thaw] SQL diagnostics aborted:", err);
+      } finally {
+        // Guarantee setModelMarkers fires whether validation succeeded, threw,
+        // or an early return (version mismatch) triggered it.
+        // Early returns inside the try block still execute finally — the version
+        // check here ensures we do NOT overwrite a newer run's results.
+        if (model.getVersionId() === diagVersion) {
+          monaco.editor.setModelMarkers(model, "thaw-sql", diagMarkers);
+        }
       }
-
-      monaco.editor.setModelMarkers(model, "thaw-sql", diagMarkers);
     };
 
     editor.onDidChangeModelContent(() => {
