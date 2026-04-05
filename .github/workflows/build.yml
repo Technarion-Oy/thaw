@@ -53,8 +53,13 @@ jobs:
       - name: Download Go dependencies
         run: go mod download
 
-      - name: Install garble
+      - name: Install garble (macOS & Linux only)
+        if: matrix.platform != 'windows'
         run: go install mvdan.cc/garble@latest
+
+      - name: Install NSIS (Windows only)
+        if: matrix.platform == 'windows'
+        run: choco install nsis
 
       - name: Prepare version string
         id: prep
@@ -79,6 +84,7 @@ jobs:
         #                   (-w) so function/variable names are not recoverable.
         # -trimpath         removes all local file-system paths embedded by the
         #                   compiler (source file references, module cache paths).
+        # Note for Windows: This remains the final Go compilation (no garble).
         run: wails build -clean -ldflags "-s -w" -trimpath
         env:
           # The macOS arm64 runner has 7 GB RAM.  javascript-obfuscator's
@@ -113,10 +119,6 @@ jobs:
             -o build/bin/thaw.app/Contents/MacOS/thaw \
             .
 
-      - name: Obfuscate binary (Windows)
-        if: matrix.platform == 'windows'
-        run: garble build -tags desktop,production -trimpath -ldflags="-s -w" -o build/bin/thaw.exe .
-
       - name: Obfuscate binary (Linux)
         if: matrix.platform == 'linux'
         run: |
@@ -126,6 +128,13 @@ jobs:
             -o build/bin/thaw \
             .
 
+      # ── Build Installer (Windows) ──────────────────────────────────────────
+      
+      - name: Build NSIS Installer (Windows)
+        if: matrix.platform == 'windows'
+        # Wails auto-generates the NSIS script. We compile it into an installer here.
+        run: makensis build/windows/installer/project.nsi
+
       # ── Rename / package output with tag version ───────────────────────────
       - name: Package macOS app bundle
         if: matrix.platform == 'darwin'
@@ -133,10 +142,13 @@ jobs:
           cd build/bin
           zip -r "thaw-${{ steps.prep.outputs.version }}-darwin-arm64.zip" thaw.app
 
-      - name: Rename Windows binary
+      - name: Rename Windows binaries
         if: matrix.platform == 'windows'
         shell: pwsh
-        run: Move-Item build/bin/thaw.exe "build/bin/thaw-${{ steps.prep.outputs.version }}-windows-amd64.exe"
+        # We rename both the raw executable (as a portable version) and the installer
+        run: |
+          Move-Item build/bin/thaw.exe "build/bin/thaw-${{ steps.prep.outputs.version }}-windows-amd64-portable.exe"
+          Move-Item build/bin/thaw-amd64-installer.exe "build/bin/thaw-${{ steps.prep.outputs.version }}-windows-amd64-installer.exe"
 
       - name: Rename Linux binary
         if: matrix.platform == 'linux'
