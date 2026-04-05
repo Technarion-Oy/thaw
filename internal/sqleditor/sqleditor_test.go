@@ -130,6 +130,145 @@ $$`,
 				{StartLineNumber: 4, StartColumn: 12, EndLineNumber: 4, EndColumn: 26, Message: "Variable 'missing_cursor' is not declared", Severity: 8},
 			},
 		},
+	{
+		name: "Named dollar tag with block comment and escaped quote",
+		sql: `EXECUTE IMMEDIATE $body$
+DECLARE
+    base_val FLOAT DEFAULT 10.0;
+    str_val  VARCHAR;
+BEGIN
+    str_val := /* inline comment */ 'It''s a valid string';
+    RETURN str_val;
+END;
+$body$;`,
+		want: nil,
+	},
+	{
+		// Tokenizer limitation: comment before keyword masks missing expression
+		name: "Named dollar tag comment-masked missing expression",
+		sql: `EXECUTE IMMEDIATE $body$
+DECLARE
+    base_val FLOAT DEFAULT 10.0;
+BEGIN
+    base_val :=
+
+    -- comment
+    IF (base_val > 5.0) THEN
+        RETURN base_val;
+    END IF;
+END;
+$body$;`,
+		want: nil,
+	},
+	{
+		name: "FOR loop with declared cursor",
+		sql: `EXECUTE IMMEDIATE $$
+DECLARE
+    my_cursor CURSOR FOR SELECT id FROM t;
+    total INTEGER DEFAULT 0;
+BEGIN
+    FOR rec IN my_cursor DO
+        total := total + 1;
+    END FOR;
+    RETURN total;
+END;
+$$;`,
+		want: nil,
+	},
+	{
+		name: "FOR loop with undeclared cursor",
+		sql: `EXECUTE IMMEDIATE $$
+DECLARE
+    total INTEGER DEFAULT 0;
+BEGIN
+    FOR rec IN ghost_cursor DO
+        total := total + 1;
+    END FOR;
+    RETURN total;
+END;
+$$;`,
+		want: []DiagMarker{
+			{StartLineNumber: 5, StartColumn: 16, EndLineNumber: 5, EndColumn: 28, Message: "Variable 'ghost_cursor' is not declared", Severity: 8},
+		},
+	},
+	{
+		name: "Unmatched bracket with unclosed bracket and paren",
+		sql: `EXECUTE IMMEDIATE $$
+DECLARE
+    json_data VARIANT;
+BEGIN
+    LET my_array ARRAY := [1, 2, (3 + 4];
+END;
+$$;`,
+		want: []DiagMarker{
+			{StartLineNumber: 5, StartColumn: 40, EndLineNumber: 5, EndColumn: 41, Message: "Unmatched ']'", Severity: 8},
+			{StartLineNumber: 5, StartColumn: 27, EndLineNumber: 5, EndColumn: 28, Message: "Unclosed '['", Severity: 8},
+			{StartLineNumber: 5, StartColumn: 34, EndLineNumber: 5, EndColumn: 35, Message: "Unclosed '('", Severity: 8},
+		},
+	},
+	{
+		name: "Unclosed string literal",
+		sql: `EXECUTE IMMEDIATE $$
+BEGIN
+    LET bad_string VARCHAR := 'This string has no end;
+END;
+$$;`,
+		want: []DiagMarker{
+			{StartLineNumber: 3, StartColumn: 31, EndLineNumber: 3, EndColumn: 32, Message: "Unclosed string literal", Severity: 8},
+		},
+	},
+	{
+		name: "Unclosed block comment",
+		sql: `EXECUTE IMMEDIATE $$
+BEGIN
+    LET x INTEGER := 1;
+    /* This block comment never closes
+    RETURN x;
+END;
+$$;`,
+		want: []DiagMarker{
+			{StartLineNumber: 4, StartColumn: 5, EndLineNumber: 4, EndColumn: 7, Message: "Unclosed block comment", Severity: 8},
+		},
+	},
+	{
+		name: "LET with subquery in parens",
+		sql: `EXECUTE IMMEDIATE $$
+BEGIN
+    LET user_count INTEGER := (
+        SELECT COUNT(*)
+        FROM users
+        WHERE status = 'ACTIVE'
+    );
+    RETURN user_count;
+END;
+$$;`,
+		want: nil,
+	},
+	{
+		name: "Bare equals assignment error",
+		sql: `EXECUTE IMMEDIATE $$
+BEGIN
+    LET n INTEGER := 0;
+    n = n + 1;
+    RETURN n;
+END;
+$$;`,
+		want: []DiagMarker{
+			{StartLineNumber: 4, StartColumn: 7, EndLineNumber: 4, EndColumn: 8, Message: "Expected ':=' for assignment", Severity: 8},
+		},
+	},
+	{
+		name: "Template injection brace at statement start",
+		sql: `EXECUTE IMMEDIATE $$
+BEGIN
+    {TEMPLATE_INJECTION_ERROR}
+    RETURN 1;
+END;
+$$;`,
+		want: []DiagMarker{
+			{StartLineNumber: 3, StartColumn: 5, EndLineNumber: 3, EndColumn: 6, Message: "Unexpected token '{'", Severity: 8},
+		},
+	},
 	}
 
 	for _, tt := range tests {
