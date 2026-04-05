@@ -1747,6 +1747,21 @@ func (a *App) FindSqlTokenPositions(sql string, bareTargets []string, quotedTarg
 	return sqleditor.FindTokenPositions(sql, bareTargets, quotedTargets)
 }
 
+// GetActiveFunctionCall parses the SQL prefix (text from document start to
+// cursor) and returns the innermost open function call with its active parameter
+// index.  Returns nil when the cursor is not inside a named function call.
+// No Snowflake connection is required.
+func (a *App) GetActiveFunctionCall(prefix string) *sqleditor.FunctionCallContext {
+	return sqleditor.GetActiveFunctionCall(prefix)
+}
+
+// ParseSignatureParams extracts the byte spans of each parameter within a
+// function signature string for Monaco parameter-label highlighting.
+// No Snowflake connection is required.
+func (a *App) ParseSignatureParams(sig string) []sqleditor.SignatureParam {
+	return sqleditor.ParseSignatureParams(sig)
+}
+
 // GetFunctionInfo fetches the DDL for a user-defined function and returns its
 // parameter list together with a flag indicating whether it is a table function.
 func (a *App) GetFunctionInfo(database, schema, name, argTypes string) (*snowflake.FunctionInfo, error) {

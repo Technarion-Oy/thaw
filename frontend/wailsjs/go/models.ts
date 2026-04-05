@@ -1760,6 +1760,20 @@ export namespace sqleditor {
 	        this.keySequence = source["keySequence"];
 	    }
 	}
+	export class FunctionCallContext {
+	    name: string;
+	    paramIndex: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new FunctionCallContext(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.paramIndex = source["paramIndex"];
+	    }
+	}
 	export class JoinCondition {
 	    condition: string;
 	    detail: string;
@@ -1897,6 +1911,20 @@ export namespace sqleditor {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.variables = source["variables"];
 	        this.needsColon = source["needsColon"];
+	    }
+	}
+	export class SignatureParam {
+	    start: number;
+	    end: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SignatureParam(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.start = source["start"];
+	        this.end = source["end"];
 	    }
 	}
 	export class StatementRange {

@@ -99,6 +99,110 @@ func TestGetIdentifierAtColumn(t *testing.T) {
 	}
 }
 
+func TestGetActiveFunctionCall(t *testing.T) {
+	type want = *FunctionCallContext // nil means "expect nil"
+	fc := func(name string, idx int) *FunctionCallContext {
+		return &FunctionCallContext{Name: name, ParamIndex: idx}
+	}
+
+	tests := []struct {
+		name   string
+		prefix string
+		want   want
+	}{
+		// ── not inside any call ──────────────────────────────────────────────
+		{name: "empty prefix", prefix: "", want: nil},
+		{name: "no parens", prefix: "SELECT a, b FROM t", want: nil},
+		{name: "closed call", prefix: "SELECT ABS(x)", want: nil},
+
+		// ── basic single-argument calls ───────────────────────────────────
+		{name: "first param", prefix: "SELECT ABS(", want: fc("ABS", 0)},
+		{name: "second param via comma", prefix: "SELECT CONCAT('hi', ", want: fc("CONCAT", 1)},
+		{name: "third param", prefix: "SELECT DATEADD(year, 1, ", want: fc("DATEADD", 2)},
+
+		// ── nested calls — innermost wins ────────────────────────────────
+		{name: "nested: cursor in inner call", prefix: "SELECT OUTER(INNER(", want: fc("INNER", 0)},
+		{name: "nested: cursor back in outer", prefix: "SELECT OUTER(INNER(x), ", want: fc("OUTER", 1)},
+
+		// ── string handling ──────────────────────────────────────────────
+		{name: "comma inside single-quoted string not counted", prefix: "SELECT F('a,b', ", want: fc("F", 1)},
+		{name: "single-quote '' escape handled", prefix: "SELECT F('it''s', ", want: fc("F", 1)},
+		{name: "paren inside string not counted", prefix: "SELECT F('(not a call)', ", want: fc("F", 1)},
+
+		// ── comment handling ─────────────────────────────────────────────
+		{name: "comma in line comment not counted", prefix: "SELECT F(x -- , extra\n, ", want: fc("F", 1)},
+		{name: "comma in block comment not counted", prefix: "SELECT F(x /* , */ , ", want: fc("F", 1)},
+
+		// ── double-quoted identifiers ────────────────────────────────────
+		{name: "double-quoted ident in arg does not break stack", prefix: `SELECT F("col,name", `, want: fc("F", 1)},
+
+		// ── nameless paren (subexpression) ───────────────────────────────
+		// "SELECT (" — "SELECT" is the word before '(' so it is captured as the
+		// function name.  GetFunctionTooltip("SELECT") returns nothing, so
+		// signature help is still nil end-to-end.
+		{name: "keyword before paren treated as fn name", prefix: "SELECT (1 + ", want: fc("SELECT", 0)},
+		// Inner nameless '(' captures the ',' — outer F() frame doesn't see it.
+		{name: "comma inside nameless subexpr not propagated to outer", prefix: "SELECT F(x + (1, ", want: nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GetActiveFunctionCall(tt.prefix)
+			if tt.want == nil {
+				if got != nil {
+					t.Errorf("GetActiveFunctionCall(%q) = %+v, want nil", tt.prefix, got)
+				}
+			} else {
+				if got == nil {
+					t.Errorf("GetActiveFunctionCall(%q) = nil, want %+v", tt.prefix, tt.want)
+				} else if *got != *tt.want {
+					t.Errorf("GetActiveFunctionCall(%q) = %+v, want %+v", tt.prefix, got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+func TestParseSignatureParams(t *testing.T) {
+	tests := []struct {
+		name string
+		sig  string
+		want []SignatureParam
+	}{
+		// ── no / empty params ────────────────────────────────────────────
+		{name: "no opening paren", sig: "GETDATE", want: nil},
+		{name: "empty params", sig: "GETDATE()", want: nil},
+		{name: "no closing paren", sig: "F(a, b", want: nil},
+
+		// ── single param ─────────────────────────────────────────────────
+		{name: "single param", sig: "ABS(numeric_expr)",
+			want: []SignatureParam{{Start: 4, End: 16}}},
+
+		// ── multiple params ───────────────────────────────────────────────
+		{name: "two params", sig: "CONCAT(str1, str2)",
+			want: []SignatureParam{{Start: 7, End: 11}, {Start: 13, End: 17}}},
+		{name: "three params", sig: "DATEADD(date_part, value, date_expr)",
+			want: []SignatureParam{{Start: 8, End: 17}, {Start: 19, End: 24}, {Start: 26, End: 35}}},
+
+		// ── nested parens inside signature (type annotation) ─────────────
+		{name: "nested parens in type", sig: "F(a ARRAY(INT), b VARCHAR)",
+			want: []SignatureParam{{Start: 2, End: 14}, {Start: 16, End: 25}}},
+
+		// ── whitespace trimming ───────────────────────────────────────────
+		{name: "extra spaces trimmed", sig: "F(  param1  ,  param2  )",
+			want: []SignatureParam{{Start: 4, End: 10}, {Start: 15, End: 21}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseSignatureParams(tt.sig)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ParseSignatureParams(%q)\n  got  %v\n  want %v", tt.sig, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFindTokenPositions(t *testing.T) {
 	type tm = TokenMatch // shorthand
 

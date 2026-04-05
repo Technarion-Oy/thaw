@@ -222,6 +222,10 @@ export function GetAISuggestion(arg1) {
   return window['go']['main']['App']['GetAISuggestion'](arg1);
 }
 
+export function GetActiveFunctionCall(arg1) {
+  return window['go']['main']['App']['GetActiveFunctionCall'](arg1);
+}
+
 export function GetAllFunctionNames() {
   return window['go']['main']['App']['GetAllFunctionNames']();
 }
@@ -560,6 +564,10 @@ export function NotebookUseContext(arg1, arg2, arg3, arg4, arg5) {
 
 export function ParseJoinTableRefs(arg1) {
   return window['go']['main']['App']['ParseJoinTableRefs'](arg1);
+}
+
+export function ParseSignatureParams(arg1) {
+  return window['go']['main']['App']['ParseSignatureParams'](arg1);
 }
 
 export function PickDataFile() {

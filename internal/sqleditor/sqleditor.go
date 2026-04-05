@@ -107,6 +107,20 @@ type TokenMatch struct {
 	Quoted bool   `json:"quoted"` // true for double-quoted identifiers, false for bare words
 }
 
+// FunctionCallContext is returned by GetActiveFunctionCall and identifies the
+// innermost open function call at the cursor position.
+type FunctionCallContext struct {
+	Name       string `json:"name"`       // function name (unquoted identifier)
+	ParamIndex int    `json:"paramIndex"` // 0-indexed parameter the cursor is on
+}
+
+// SignatureParam is the [Start, End) byte span of one parameter within a
+// function signature string, as returned by ParseSignatureParams.
+type SignatureParam struct {
+	Start int `json:"start"`
+	End   int `json:"end"`
+}
+
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 // SQL statement-starting keywords (outer, non-scripting context).
@@ -586,6 +600,193 @@ func FindTokenPositions(sql string, bareTargets []string, quotedTargets []string
 		i++; col++
 	}
 	return results
+}
+
+// ── GetActiveFunctionCall ─────────────────────────────────────────────────────
+
+// GetActiveFunctionCall parses prefix — the SQL text from the document start up
+// to the cursor — and returns the innermost function call that is still open,
+// together with which parameter (0-indexed) the cursor is on.
+// Returns nil when the cursor is not inside any named function call.
+//
+// Improvements over the original TypeScript implementation:
+//   - Handles '' escaped single quotes correctly (no false string-close)
+//   - Skips double-quoted identifiers so they never pollute the paren stack
+//   - Skips -- line comments and /* */ block comments so commas inside them
+//     are not counted as parameter separators
+func GetActiveFunctionCall(prefix string) *FunctionCallContext {
+	type frame struct {
+		name   string
+		commas int
+	}
+	var stack []frame
+	runes := []rune(prefix)
+	n := len(runes)
+	i := 0
+
+	for i < n {
+		r := runes[i]
+
+		// Line comment: --
+		if r == '-' && i+1 < n && runes[i+1] == '-' {
+			i += 2
+			for i < n && runes[i] != '\n' {
+				i++
+			}
+			continue
+		}
+
+		// Block comment: /* */
+		if r == '/' && i+1 < n && runes[i+1] == '*' {
+			i += 2
+			for i < n {
+				if runes[i] == '*' && i+1 < n && runes[i+1] == '/' {
+					i += 2
+					break
+				}
+				i++
+			}
+			continue
+		}
+
+		// Single-quoted string '...' with '' escape
+		if r == '\'' {
+			i++
+			for i < n {
+				if runes[i] == '\'' && i+1 < n && runes[i+1] == '\'' {
+					i += 2 // escaped quote
+				} else if runes[i] == '\'' {
+					i++
+					break
+				} else {
+					i++
+				}
+			}
+			continue
+		}
+
+		// Double-quoted identifier "..." — skip without affecting the paren stack
+		if r == '"' {
+			i++
+			for i < n {
+				if runes[i] == '"' && i+1 < n && runes[i+1] == '"' {
+					i += 2
+				} else if runes[i] == '"' {
+					i++
+					break
+				} else {
+					i++
+				}
+			}
+			continue
+		}
+
+		if r == '(' {
+			// Scan backwards past whitespace to find the function name.
+			name := ""
+			j := i - 1
+			for j >= 0 && (runes[j] == ' ' || runes[j] == '\t' || runes[j] == '\n' || runes[j] == '\r') {
+				j--
+			}
+			if j >= 0 && isWordRune(runes[j]) {
+				end := j + 1
+				for j >= 0 && isWordRune(runes[j]) {
+					j--
+				}
+				start := j + 1
+				if isLetterOrUnderscore(runes[start]) {
+					name = string(runes[start:end])
+				}
+			}
+			stack = append(stack, frame{name: name})
+			i++
+			continue
+		}
+
+		if r == ')' {
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+			i++
+			continue
+		}
+
+		if r == ',' && len(stack) > 0 {
+			stack[len(stack)-1].commas++
+			i++
+			continue
+		}
+
+		i++
+	}
+
+	if len(stack) == 0 {
+		return nil
+	}
+	top := stack[len(stack)-1]
+	if top.name == "" {
+		return nil
+	}
+	return &FunctionCallContext{Name: top.name, ParamIndex: top.commas}
+}
+
+// ── ParseSignatureParams ──────────────────────────────────────────────────────
+
+// ParseSignatureParams extracts the byte spans of each parameter in a function
+// signature string such as "CONCAT(str1, str2)" or "DATEADD(datepart, val, dt)".
+// The returned [Start, End) offsets index directly into the signature string,
+// matching the format expected by Monaco's parameter-label highlighting.
+// Returns nil when the signature has no '(' or no parameters.
+func ParseSignatureParams(sig string) []SignatureParam {
+	openIdx := strings.IndexByte(sig, '(')
+	if openIdx < 0 {
+		return nil
+	}
+
+	// Find the matching closing ')'.
+	depth, closeIdx := 0, -1
+	for i := openIdx; i < len(sig); i++ {
+		if sig[i] == '(' {
+			depth++
+		} else if sig[i] == ')' {
+			depth--
+			if depth == 0 {
+				closeIdx = i
+				break
+			}
+		}
+	}
+	if closeIdx < 0 || closeIdx == openIdx+1 {
+		return nil
+	}
+
+	var params []SignatureParam
+	start := openIdx + 1
+	d := 0
+	for i := openIdx + 1; i <= closeIdx; i++ {
+		ch := sig[i]
+		if ch == '(' {
+			d++
+		} else if ch == ')' {
+			d--
+		}
+
+		if (ch == ',' && d == 0) || i == closeIdx {
+			rawEnd := i
+			ps, pe := start, rawEnd
+			for ps < pe && sig[ps] == ' ' {
+				ps++
+			}
+			for pe > ps && sig[pe-1] == ' ' {
+				pe--
+			}
+			if ps < pe {
+				params = append(params, SignatureParam{Start: ps, End: pe})
+			}
+			start = i + 1
+		}
+	}
+	return params
 }
 
 // ── ValidateSyntax ────────────────────────────────────────────────────────────

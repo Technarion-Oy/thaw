@@ -122,6 +122,8 @@ export function GetAIConfig():Promise<config.AIConfig>;
 
 export function GetAISuggestion(arg1:string):Promise<string>;
 
+export function GetActiveFunctionCall(arg1:string):Promise<sqleditor.FunctionCallContext>;
+
 export function GetAllFunctionNames():Promise<Array<fnmeta.FunctionMeta>>;
 
 export function GetAvailableShells():Promise<Array<string>>;
@@ -291,6 +293,8 @@ export function NewNotebook():Promise<string>;
 export function NotebookUseContext(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
 export function ParseJoinTableRefs(arg1:string):Promise<Array<sqleditor.JoinTableRef>>;
+
+export function ParseSignatureParams(arg1:string):Promise<Array<sqleditor.SignatureParam>>;
 
 export function PickDataFile():Promise<string>;
 

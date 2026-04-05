@@ -25,7 +25,7 @@ import { useObjectStore } from "../../store/objectStore";
 import { useSessionStore } from "../../store/sessionStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges, GetIdentifierAtColumn } from "../../../wailsjs/go/main/App";
+import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams } from "../../../wailsjs/go/main/App";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { DiagMarker, ColInfo, validateWithParser, validateBareColumnRefs, ResolvedRef } from "../../utils/sqlDiagnostics";
@@ -43,64 +43,6 @@ let signatureHelpDisposable: { dispose(): void } | null = null;
 // sees the latest value without needing re-registration.
 let editorPrefsRef: EditorPrefs = { ...DEFAULT_EDITOR_PREFS };
 
-// ── Signature-help helpers ─────────────────────────────────────────────────
-
-function getActiveFunctionCall(prefix: string): { name: string; paramIndex: number } | null {
-  const stack: Array<{ name: string; commas: number }> = [];
-  let inStr = false;
-
-  for (let i = 0; i < prefix.length; i++) {
-    const ch = prefix[i];
-    if (ch === "'") { inStr = !inStr; continue; }
-    if (inStr) continue;
-
-    if (ch === "(") {
-      const nm = prefix.slice(0, i).trimEnd().match(/([A-Za-z_][A-Za-z0-9_$]*)$/);
-      stack.push({ name: nm ? nm[1] : "", commas: 0 });
-    } else if (ch === ")") {
-      stack.pop();
-    } else if (ch === "," && stack.length > 0) {
-      stack[stack.length - 1].commas++;
-    }
-  }
-
-  if (stack.length === 0) return null;
-  const top = stack[stack.length - 1];
-  if (!top.name) return null;
-  return { name: top.name, paramIndex: top.commas };
-}
-
-function parseSignatureParams(sig: string): Array<[number, number]> {
-  const openIdx = sig.indexOf("(");
-  if (openIdx < 0) return [];
-
-  let depth = 0, closeIdx = -1;
-  for (let i = openIdx; i < sig.length; i++) {
-    if (sig[i] === "(") depth++;
-    else if (sig[i] === ")") { depth--; if (depth === 0) { closeIdx = i; break; } }
-  }
-  if (closeIdx < 0 || closeIdx === openIdx + 1) return [];
-
-  const params: Array<[number, number]> = [];
-  let start = openIdx + 1;
-  let d = 0;
-
-  for (let i = openIdx + 1; i <= closeIdx; i++) {
-    const ch = sig[i];
-    if (ch === "(" ) d++;
-    else if (ch === ")") d--;
-
-    if ((ch === "," && d === 0) || i === closeIdx) {
-      const rawEnd = i === closeIdx ? closeIdx : i;
-      let ps = start, pe = rawEnd;
-      while (ps < pe && sig[ps] === " ") ps++;
-      while (pe > ps && sig[pe - 1] === " ") pe--;
-      if (ps < pe) params.push([ps, pe]);
-      start = i + 1;
-    }
-  }
-  return params;
-}
 
 const builtinFns = new Set<string>();
 const udfFns     = new Set<string>();
@@ -1445,17 +1387,20 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             endLineNumber:   position.lineNumber, endColumn: position.column,
           });
 
-          const call = getActiveFunctionCall(prefix);
+          const call = await GetActiveFunctionCall(prefix);
           if (!call) return null;
 
           let overloads: any[] | null = null;
           try { overloads = await GetFunctionTooltip(call.name); } catch { return null; }
           if (!overloads || overloads.length === 0) return null;
 
-          const signatures = overloads.map((fn: any) => ({
+          const sigParamsList = await Promise.all(
+            overloads.map((fn: any) => ParseSignatureParams(fn.functionSignature))
+          );
+          const signatures = overloads.map((fn: any, idx: number) => ({
             label:         fn.functionSignature,
             documentation: fn.description ? { value: fn.description } : undefined,
-            parameters:    parseSignatureParams(fn.functionSignature).map(([s, e]) => ({ label: [s, e] as [number, number] })),
+            parameters:    (sigParamsList[idx] ?? []).map((p) => ({ label: [p.start, p.end] as [number, number] })),
           }));
 
           let activeSignature = context?.activeSignatureHelp?.activeSignature ?? 0;
