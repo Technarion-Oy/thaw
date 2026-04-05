@@ -25,7 +25,7 @@ import { useObjectStore } from "../../store/objectStore";
 import { useSessionStore } from "../../store/sessionStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions } from "../../../wailsjs/go/main/App";
+import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges } from "../../../wailsjs/go/main/App";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { DiagMarker, ColInfo, validateWithParser, validateBareColumnRefs, ResolvedRef } from "../../utils/sqlDiagnostics";
@@ -346,77 +346,6 @@ function getQualifiedIdent(model: any, pos: any): string[] | null {
   return null;
 }
 
-export function getStatementLineRanges(sql: string): Array<{ startLine: number; endLine: number }> {
-  const ranges: Array<{ startLine: number; endLine: number }> = [];
-  let line = 1;
-  let stmtStartLine = -1; 
-  let inSingleQuote = false;
-  let inDoubleQuote = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-  let dollarTag = "";
-
-  const finishStmt = (endLine: number) => {
-    if (stmtStartLine > 0) {
-      ranges.push({ startLine: stmtStartLine, endLine });
-      stmtStartLine = -1;
-    }
-  };
-
-  for (let i = 0; i < sql.length; i++) {
-    const ch = sql[i];
-
-    if (ch === "\n") {
-      if (inLineComment) inLineComment = false;
-      line++;
-      continue;
-    }
-
-    if (inLineComment) continue;
-
-    if (inBlockComment) {
-      if (ch === "*" && sql[i + 1] === "/") { inBlockComment = false; i++; }
-      continue;
-    }
-
-    if (inSingleQuote) {
-      if (ch === "'" && sql[i + 1] === "'") { i++; } 
-      else if (ch === "'") { inSingleQuote = false; }
-      continue;
-    }
-
-    if (inDoubleQuote) {
-      if (ch === '"') inDoubleQuote = false;
-      continue;
-    }
-
-    if (dollarTag) {
-      if (sql.startsWith(dollarTag, i)) { i += dollarTag.length - 1; dollarTag = ""; }
-      continue;
-    }
-
-    if (stmtStartLine < 0) {
-      const ws  = ch === " " || ch === "\t" || ch === "\r";
-      const cmt = (ch === "-" && sql[i + 1] === "-") || (ch === "/" && sql[i + 1] === "*");
-      if (!ws && !cmt) stmtStartLine = line;
-    }
-
-    if (ch === "-" && sql[i + 1] === "-") { inLineComment = true; i++; continue; }
-    if (ch === "/" && sql[i + 1] === "*") { inBlockComment = true; i++; continue; }
-    if (ch === "'") { inSingleQuote = true; continue; }
-    if (ch === '"') { inDoubleQuote = true; continue; }
-
-    if (ch === "$") {
-      const m = sql.slice(i).match(/^\$([a-zA-Z0-9_]*)\$/);
-      if (m) { dollarTag = m[0]; i += dollarTag.length - 1; continue; }
-    }
-
-    if (ch === ";") { finishStmt(line); continue; }
-  }
-
-  finishStmt(line); 
-  return ranges;
-}
 
 function applyPrefsToSnippet(text: string, prefs: EditorPrefs): string {
   const indentUnit = prefs.indentStyle === "tabs" ? "\t" : " ".repeat(prefs.indentSize);
@@ -670,7 +599,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         diagMarkers.push(...(syntaxErrors as DiagMarker[]));
 
         if (syntaxErrors.length === 0) {
-          diagMarkers.push(...validateWithParser(diagSql));
+          const stmtRanges = await GetSqlStatementRanges(diagSql);
+          if (model.getVersionId() !== diagVersion) return;
+          diagMarkers.push(...validateWithParser(diagSql, stmtRanges));
 
           const rawRefs = await ParseJoinTableRefs(diagSql);
           if (model.getVersionId() !== diagVersion) return;
@@ -712,7 +643,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             diagMarkers.push(...(semanticMarkers as DiagMarker[]));
           }
 
-          diagMarkers.push(...validateBareColumnRefs(diagSql, resolved, colInfoCache));
+          diagMarkers.push(...validateBareColumnRefs(diagSql, stmtRanges, resolved, colInfoCache));
         }
       } catch (err) {
         console.warn("[thaw] SQL diagnostics aborted:", err);
@@ -1048,7 +979,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         }));
 
         // Isolate the current statement for context columns so tables from other queries don't bleed in
-        const ranges = getStatementLineRanges(fullContent);
+        const ranges = await GetSqlStatementRanges(fullContent);
         let currentStmtText = fullContent;
         for (const r of ranges) {
           if (position.lineNumber >= r.startLine && position.lineNumber <= r.endLine) {
@@ -1821,29 +1752,28 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       dec.clear();
       return;
     }
-    const ranges = getStatementLineRanges(sql);
-    const range  = ranges[activeStmtIdx];
-    if (!range) {
-      dec.clear();
-      return;
-    }
-    dec.set([{
-      range: {
-        startLineNumber: range.startLine,
-        startColumn:     1,
-        endLineNumber:   range.endLine,
-        endColumn:       1,
-      },
-      options: {
-        isWholeLine:              true,
-        className:                "sql-active-stmt-bg",
-        linesDecorationsClassName: "sql-active-stmt-indicator",
-        overviewRuler: {
-          color:    "rgba(210, 153, 34, 0.8)",
-          position: 4, 
+    void (async () => {
+      const ranges = await GetSqlStatementRanges(sql);
+      const range  = ranges[activeStmtIdx];
+      if (!range) { dec.clear(); return; }
+      dec.set([{
+        range: {
+          startLineNumber: range.startLine,
+          startColumn:     1,
+          endLineNumber:   range.endLine,
+          endColumn:       1,
         },
-      },
-    }]);
+        options: {
+          isWholeLine:              true,
+          className:                "sql-active-stmt-bg",
+          linesDecorationsClassName: "sql-active-stmt-indicator",
+          overviewRuler: {
+            color:    "rgba(210, 153, 34, 0.8)",
+            position: 4,
+          },
+        },
+      }]);
+    })();
   }, [activeStmtIdx, sql]);
 
   return (

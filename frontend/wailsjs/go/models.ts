@@ -1899,6 +1899,24 @@ export namespace sqleditor {
 	        this.needsColon = source["needsColon"];
 	    }
 	}
+	export class StatementRange {
+	    startLine: number;
+	    endLine: number;
+	    startOffset: number;
+	    endOffset: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new StatementRange(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.startLine = source["startLine"];
+	        this.endLine = source["endLine"];
+	        this.startOffset = source["startOffset"];
+	        this.endOffset = source["endOffset"];
+	    }
+	}
 
 }
 

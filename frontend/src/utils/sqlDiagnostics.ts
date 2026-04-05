@@ -6,6 +6,10 @@
 // from Technarion Oy.
 
 import { Parser as SnowflakeParser } from "node-sql-parser/build/snowflake";
+import type { sqleditor } from "../../wailsjs/go/models";
+
+/** StatementRange as returned by GetSqlStatementRanges IPC. */
+export type StatementRange = sqleditor.StatementRange;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -66,99 +70,6 @@ const SNOWFLAKE_FP_RE = new RegExp(
   "i",
 );
 
-/** Subset of a statement extracted from the full SQL text. */
-interface SplitStmt {
-  /** Raw slice of `sql` — NOT trimmed, so parser line numbers are accurate. */
-  text:        string;
-  /** Byte offset of `text[0]` within the original `sql` string. */
-  startOffset: number;
-}
-
-/**
- * Splits `sql` into per-statement chunks (on `;`) while correctly skipping
- * string literals, quoted identifiers, dollar-quoted strings, and comments.
- * Because we only call this after `validateSyntax` has confirmed no structural
- * errors, we don't need to handle malformed input.
- */
-function splitSqlStatements(sql: string): SplitStmt[] {
-  const stmts: SplitStmt[] = [];
-  let start = 0;
-  let i = 0;
-
-  while (i < sql.length) {
-    const ch = sql[i];
-
-    if (ch === "-" && sql[i + 1] === "-") {
-      i += 2;
-      while (i < sql.length && sql[i] !== "\n") i++;
-      continue;
-    }
-    if (ch === "/" && sql[i + 1] === "*") {
-      i += 2;
-      while (i < sql.length) {
-        if (sql[i] === "*" && sql[i + 1] === "/") { i += 2; break; }
-        else i++;
-      }
-      continue;
-    }
-    if (ch === "'") {
-      i++;
-      while (i < sql.length) {
-        if (sql[i] === "'" && sql[i + 1] === "'") i += 2;
-        else if (sql[i] === "'") { i++; break; }
-        else i++;
-      }
-      continue;
-    }
-    if (ch === '"') {
-      i++;
-      while (i < sql.length) {
-        if (sql[i] === '"' && sql[i + 1] === '"') i += 2;
-        else if (sql[i] === '"') { i++; break; }
-        else i++;
-      }
-      continue;
-    }
-    if (ch === "$") {
-      const m = sql.slice(i).match(/^\$([a-zA-Z0-9_]*)\$/);
-      if (m) {
-        const tag = m[0];
-        i += tag.length;
-        // Restore atomic treatment: skip until closing tag so we don't split
-        // the top-level statement on internal semicolons.
-        while (i < sql.length && !sql.startsWith(tag, i)) i++;
-        if (i < sql.length) i += tag.length;
-        continue;
-      }
-    }
-    if (ch === ";") {
-      if (sql.slice(start, i).trim()) {
-        const rawText = sql.slice(start, i);
-        const trimmedText = rawText.trimStart();
-        stmts.push({ text: trimmedText, startOffset: start + (rawText.length - trimmedText.length) });
-      }
-      start = i + 1;
-      i++;
-      continue;
-    }
-    i++;
-  }
-  if (sql.slice(start).trim()) {
-    const rawText = sql.slice(start);
-    const trimmedText = rawText.trimStart();
-    stmts.push({ text: trimmedText, startOffset: start + (rawText.length - trimmedText.length) });
-  }
-  return stmts;
-}
-
-/** Counts how many newlines appear before character offset `offset` in `sql`. */
-function newlinesBefore(sql: string, offset: number): number {
-  let n = 0;
-  for (let i = 0; i < offset && i < sql.length; i++) {
-    if (sql[i] === "\n") n++;
-  }
-  return n;
-}
 
 function cleanParserMessage(raw: string): string {
   // PEG.js messages are very verbose ("Expected ... but 'X' found.")
@@ -175,36 +86,39 @@ function cleanParserMessage(raw: string): string {
  *
  * Only statements whose first keyword is in `PARSEABLE_STMT_KEYWORDS` are
  * checked; all others are silently skipped.
+ *
+ * `stmtRanges` must be the result of `GetSqlStatementRanges(sql)` — one
+ * range per statement with pre-computed start lines and byte offsets.
  */
-export function validateWithParser(sql: string): DiagMarker[] {
+export function validateWithParser(sql: string, stmtRanges: StatementRange[]): DiagMarker[] {
   const markers: DiagMarker[] = [];
   const parser = new SnowflakeParser();
 
-  for (const stmt of splitSqlStatements(sql)) {
+  for (const r of stmtRanges) {
+    const stmtText = sql.slice(r.startOffset, r.endOffset).trimStart();
     // Only attempt statements the parser can handle without false positives.
-    const firstToken = stmt.text.trimStart().match(/^[a-zA-Z_]\w*/)?.[0]?.toUpperCase();
+    const firstToken = stmtText.match(/^[a-zA-Z_]\w*/)?.[0]?.toUpperCase();
     if (!firstToken || !PARSEABLE_STMT_KEYWORDS.has(firstToken)) continue;
 
     // Skip statements containing Snowflake syntax the parser chokes on.
-    if (SNOWFLAKE_FP_RE.test(stmt.text)) continue;
+    if (SNOWFLAKE_FP_RE.test(stmtText)) continue;
 
     try {
-      parser.parse(stmt.text);
+      parser.parse(stmtText);
     } catch (err: unknown) {
       const e = err as {
         location?: { start: { line: number; column: number } };
         message?: string;
       };
       if (e?.location?.start) {
-        // stmt.text starts at startOffset in the original sql; translate line.
-        const stmtBaseLine = newlinesBefore(sql, stmt.startOffset) + 1;
+        const stmtBaseLine = r.startLine;
         const errLine = stmtBaseLine + e.location.start.line - 1;
         const errCol  = e.location.start.column; // 1-indexed (PEG.js convention)
 
         // Extend the squiggly to cover the full word at the error position so
         // a single mis-placed keyword like 'not' gets a 3-char span rather than
         // a barely-visible 1-char underline.
-        const errLineText = stmt.text.split("\n")[(e.location.start.line ?? 1) - 1] ?? "";
+        const errLineText = stmtText.split("\n")[(e.location.start.line ?? 1) - 1] ?? "";
         const errColIdx   = errCol - 1; // 0-indexed
         let wordEndIdx    = errColIdx;
         while (wordEndIdx < errLineText.length && /\w/.test(errLineText[wordEndIdx])) wordEndIdx++;
@@ -368,26 +282,33 @@ function findQuotedWordPositions(sql: string, targets: Set<string>): WordToken[]
  *   (or is a subquery / CTE), the statement is silently skipped (no false positives).
  * - Covers both unquoted `column_name` and double-quoted `"column_name"` in the
  *   top-level SELECT list (Snowflake always treats `"..."` as quoted identifiers).
+ *
+ * `stmtRanges` must be the result of `GetSqlStatementRanges(sql)` — one
+ * range per statement with pre-computed start lines and byte offsets.
  */
 export function validateBareColumnRefs(
   sql:          string,
+  stmtRanges:   StatementRange[],
   resolvedRefs: ResolvedRef[],
   colInfoCache: Map<string, ColInfo[]>,
 ): DiagMarker[] {
   const markers: DiagMarker[] = [];
   const parser = new SnowflakeParser();
 
-  for (const stmt of splitSqlStatements(sql)) {
-    const firstToken = stmt.text.trimStart().match(/^[a-zA-Z_]\w*/)?.[0]?.toUpperCase();
+  for (const r of stmtRanges) {
+    const stmtText = sql.slice(r.startOffset, r.endOffset).trimStart();
+    const firstToken = stmtText.match(/^[a-zA-Z_]\w*/)?.[0]?.toUpperCase();
     if (firstToken !== "SELECT" && firstToken !== "WITH") continue;
-    if (SNOWFLAKE_FP_RE.test(stmt.text)) continue;
+    if (SNOWFLAKE_FP_RE.test(stmtText)) continue;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let ast: any;
-    try { ast = parser.parse(stmt.text); } catch { continue; }
+    try { ast = parser.parse(stmtText); } catch { continue; }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const stmtAsts: any[] = Array.isArray(ast.ast) ? ast.ast : [ast.ast];
+
+    const stmtBaseLine = r.startLine;
 
     for (const node of stmtAsts) {
       if (!node || node.type !== "select") continue;
@@ -412,10 +333,10 @@ export function validateBareColumnRefs(
           cacheKey = `${UC(ftDb)}\0${UC(ftSchema)}\0${UC(ftTable)}`;
         } else {
           // Unqualified — look up the resolved ref for the db/schema context
-          const ref = resolvedRefs.find((r) =>
-            UC(r.name) === UC(ftTable) &&
-            (!ftDb     || UC(r.db)     === UC(ftDb))     &&
-            (!ftSchema || UC(r.schema) === UC(ftSchema))
+          const ref = resolvedRefs.find((rr) =>
+            UC(rr.name) === UC(ftTable) &&
+            (!ftDb     || UC(rr.db)     === UC(ftDb))     &&
+            (!ftSchema || UC(rr.schema) === UC(ftSchema))
           );
           if (!ref) { skip = true; break; } // CTE, subquery alias, or unknown table
           cacheKey = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
@@ -449,7 +370,6 @@ export function validateBareColumnRefs(
 
       if (unknownBare.size === 0 && unknownQuoted.size === 0) continue;
 
-      const stmtBaseLine = newlinesBefore(sql, stmt.startOffset) + 1;
       const tableLabel = tableChecks.length === 1 ? tableChecks[0].tableName : "query tables";
 
       // findBareWordPositions / findQuotedWordPositions do targets.has(word.toUpperCase())
@@ -457,7 +377,7 @@ export function validateBareColumnRefs(
       const unknownBareUC   = new Set([...unknownBare].map(UC));
       const unknownQuotedUC = new Set([...unknownQuoted].map(UC));
 
-      for (const t of findBareWordPositions(stmt.text, unknownBareUC)) {
+      for (const t of findBareWordPositions(stmtText, unknownBareUC)) {
         markers.push({
           startLineNumber: stmtBaseLine + t.line - 1,
           startColumn:     t.col,
@@ -467,7 +387,7 @@ export function validateBareColumnRefs(
           severity:        4,
         });
       }
-      for (const t of findQuotedWordPositions(stmt.text, unknownQuotedUC)) {
+      for (const t of findQuotedWordPositions(stmtText, unknownQuotedUC)) {
         markers.push({
           startLineNumber: stmtBaseLine + t.line - 1,
           startColumn:     t.col,

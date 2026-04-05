@@ -177,6 +177,190 @@ type parenEntry struct {
 	col  int
 }
 
+// ── StatementRange / GetStatementRanges ───────────────────────────────────────
+
+// StatementRange is the position of one SQL statement within a multi-statement string.
+type StatementRange struct {
+	StartLine   int `json:"startLine"`   // 1-indexed line of trimmed statement start
+	EndLine     int `json:"endLine"`     // 1-indexed line of trailing ';' (or last char)
+	StartOffset int `json:"startOffset"` // rune offset of trimmed statement start
+	EndOffset   int `json:"endOffset"`   // rune offset just past ';' (or end of string)
+}
+
+// GetStatementRanges splits sql into per-statement ranges by scanning
+// character-by-character.  Semicolons inside string literals, quoted
+// identifiers, block comments, line comments, and dollar-quoted blocks are
+// correctly ignored.  No Snowflake connection is required.
+func GetStatementRanges(sql string) []StatementRange {
+	var ranges []StatementRange
+
+	runes := []rune(sql)
+	n := len(runes)
+
+	line := 1 // current 1-indexed line number
+
+	// Position of the current statement's trimmed start (-1 = not yet started).
+	stmtStartLine := -1
+	stmtStartOffset := 0
+	inStmt := false
+
+	// Record the start of a new statement at rune index i.
+	// Called once per statement on the first non-whitespace, non-comment char.
+	startStmt := func(i int) {
+		if !inStmt {
+			stmtStartLine = line
+			stmtStartOffset = i
+			inStmt = true
+		}
+	}
+
+	// Emit the current statement ending at rune index endOffset (exclusive).
+	emit := func(endLine, endOffset int) {
+		if inStmt {
+			ranges = append(ranges, StatementRange{
+				StartLine:   stmtStartLine,
+				EndLine:     endLine,
+				StartOffset: stmtStartOffset,
+				EndOffset:   endOffset,
+			})
+			inStmt = false
+			stmtStartLine = -1
+		}
+	}
+
+	i := 0
+	for i < n {
+		ch := runes[i]
+
+		// ── Newline ────────────────────────────────────────────────────────
+		if ch == '\n' {
+			line++
+			i++
+			continue
+		}
+
+		// ── Whitespace ────────────────────────────────────────────────────
+		if ch == ' ' || ch == '\t' || ch == '\r' || ch == '\u00a0' {
+			i++
+			continue
+		}
+
+		// ── Line comment -- ───────────────────────────────────────────────
+		if ch == '-' && i+1 < n && runes[i+1] == '-' {
+			i += 2
+			for i < n && runes[i] != '\n' {
+				i++
+			}
+			continue
+		}
+
+		// ── Block comment /* */ ───────────────────────────────────────────
+		if ch == '/' && i+1 < n && runes[i+1] == '*' {
+			i += 2
+			for i < n {
+				if runes[i] == '\n' {
+					line++
+					i++
+				} else if runes[i] == '*' && i+1 < n && runes[i+1] == '/' {
+					i += 2
+					break
+				} else {
+					i++
+				}
+			}
+			continue
+		}
+
+		// All remaining chars belong to a statement; record its start.
+		startStmt(i)
+
+		// ── Single-quoted string '...' ────────────────────────────────────
+		if ch == '\'' {
+			i++
+			for i < n {
+				if runes[i] == '\n' {
+					line++
+					i++
+				} else if runes[i] == '\'' && i+1 < n && runes[i+1] == '\'' {
+					i += 2
+				} else if runes[i] == '\'' {
+					i++
+					break
+				} else {
+					i++
+				}
+			}
+			continue
+		}
+
+		// ── Double-quoted identifier "..." ────────────────────────────────
+		if ch == '"' {
+			i++
+			for i < n {
+				if runes[i] == '\n' {
+					line++
+					i++
+				} else if runes[i] == '"' && i+1 < n && runes[i+1] == '"' {
+					i += 2
+				} else if runes[i] == '"' {
+					i++
+					break
+				} else {
+					i++
+				}
+			}
+			continue
+		}
+
+		// ── Dollar-quoted block $tag$...$tag$ ─────────────────────────────
+		if ch == '$' {
+			tag := extractDollarTag(runes, i)
+			if tag != "" {
+				tagRunes := []rune(tag)
+				tagLen := len(tagRunes)
+				i += tagLen // skip opening tag
+				// Scan for the matching closing tag.
+				for i < n {
+					if runes[i] == '\n' {
+						line++
+						i++
+					} else if runes[i] == tagRunes[0] && i+tagLen <= n {
+						match := true
+						for k := 1; k < tagLen; k++ {
+							if runes[i+k] != tagRunes[k] {
+								match = false
+								break
+							}
+						}
+						if match {
+							i += tagLen
+							break
+						}
+						i++
+					} else {
+						i++
+					}
+				}
+				continue
+			}
+		}
+
+		// ── Semicolon: end of statement ───────────────────────────────────
+		if ch == ';' {
+			emit(line, i+1)
+			i++
+			continue
+		}
+
+		i++
+	}
+
+	// Emit trailing statement with no semicolon.
+	emit(line, n)
+
+	return ranges
+}
+
 // ── ValidateSyntax ────────────────────────────────────────────────────────────
 
 // ValidateSyntax is a character-by-character Snowflake SQL tokenizer that catches

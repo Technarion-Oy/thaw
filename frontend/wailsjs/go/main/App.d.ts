@@ -186,6 +186,8 @@ export function GetSnowparkConfig():Promise<main.SnowparkConfigResult>;
 
 export function GetSnowsightURL():Promise<string>;
 
+export function GetSqlStatementRanges(arg1:string):Promise<Array<sqleditor.StatementRange>>;
+
 export function GetTableColumns(arg1:string,arg2:string,arg3:string):Promise<Array<string>>;
 
 export function GetTableColumnsWithTypes(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.ColumnInfo>>;

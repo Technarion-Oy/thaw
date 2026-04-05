@@ -15,6 +15,107 @@ import (
 	"testing"
 )
 
+func TestGetStatementRanges(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+		want []StatementRange
+	}{
+		{
+			name: "Empty string",
+			sql:  "",
+			want: nil,
+		},
+		{
+			name: "Only whitespace",
+			sql:  "  \n  \t  ",
+			want: nil,
+		},
+		{
+			name: "Single statement no semicolon",
+			sql:  "SELECT 1",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 1, StartOffset: 0, EndOffset: 8},
+			},
+		},
+		{
+			name: "Single statement with semicolon",
+			sql:  "SELECT 1;",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 1, StartOffset: 0, EndOffset: 9},
+			},
+		},
+		{
+			name: "Two statements separated by semicolon",
+			sql:  "SELECT 1;\nSELECT 2",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 1, StartOffset: 0, EndOffset: 9},
+				{StartLine: 2, EndLine: 2, StartOffset: 10, EndOffset: 18},
+			},
+		},
+		{
+			name: "Leading whitespace skipped in StartOffset",
+			sql:  "  SELECT 1",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 1, StartOffset: 2, EndOffset: 10},
+			},
+		},
+		{
+			name: "Dollar-quoted block treated as single statement",
+			sql:  "$$\nBEGIN\n  LET x := 1;\nEND;\n$$;",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 5, StartOffset: 0, EndOffset: 31},
+			},
+		},
+		{
+			name: "Line comment before statement does not affect StartLine",
+			sql:  "-- comment\nSELECT 1",
+			want: []StatementRange{
+				{StartLine: 2, EndLine: 2, StartOffset: 11, EndOffset: 19},
+			},
+		},
+		{
+			name: "Semicolons inside line comments ignored",
+			sql:  "SELECT 1 -- this; is a comment\nFROM t",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 2, StartOffset: 0, EndOffset: 37},
+			},
+		},
+		{
+			name: "Semicolons inside block comments ignored",
+			sql:  "SELECT /* ; */ 1",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 1, StartOffset: 0, EndOffset: 16},
+			},
+		},
+		{
+			name: "Semicolons inside single-quoted strings ignored",
+			sql:  "SELECT 'a;b'",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 1, StartOffset: 0, EndOffset: 12},
+			},
+		},
+		{
+			name: "Three statements",
+			sql:  "SELECT 1;\nSELECT 2;\nSELECT 3",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 1, StartOffset: 0, EndOffset: 9},
+				{StartLine: 2, EndLine: 2, StartOffset: 10, EndOffset: 19},
+				{StartLine: 3, EndLine: 3, StartOffset: 20, EndOffset: 28},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GetStatementRanges(tt.sql)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("GetStatementRanges() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateSyntax(t *testing.T) {
 	tests := []struct {
 		name string

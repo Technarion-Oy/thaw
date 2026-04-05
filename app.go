@@ -1726,6 +1726,12 @@ func (a *App) GetScriptingCompletions(sql string, cursorOffset int) sqleditor.Sc
 	return sqleditor.GetScriptingCompletions(sql, cursorOffset)
 }
 
+// GetSqlStatementRanges splits sql into per-statement line ranges and byte offsets.
+// No Snowflake connection is required.
+func (a *App) GetSqlStatementRanges(sql string) []sqleditor.StatementRange {
+	return sqleditor.GetStatementRanges(sql)
+}
+
 // GetFunctionInfo fetches the DDL for a user-defined function and returns its
 // parameter list together with a flag indicating whether it is a table function.
 func (a *App) GetFunctionInfo(database, schema, name, argTypes string) (*snowflake.FunctionInfo, error) {
