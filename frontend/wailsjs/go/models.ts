@@ -1885,6 +1885,20 @@ export namespace sqleditor {
 	    }
 	}
 	
+	export class ScriptingCompletionResult {
+	    variables: string[];
+	    needsColon: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ScriptingCompletionResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.variables = source["variables"];
+	        this.needsColon = source["needsColon"];
+	    }
+	}
 
 }
 

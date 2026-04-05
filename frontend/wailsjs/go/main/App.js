@@ -322,6 +322,10 @@ export function GetSchemaForeignKeys(arg1, arg2) {
   return window['go']['main']['App']['GetSchemaForeignKeys'](arg1, arg2);
 }
 
+export function GetScriptingCompletions(arg1, arg2) {
+  return window['go']['main']['App']['GetScriptingCompletions'](arg1, arg2);
+}
+
 export function GetSessionContext() {
   return window['go']['main']['App']['GetSessionContext']();
 }

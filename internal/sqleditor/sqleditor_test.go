@@ -91,6 +91,31 @@ $$;`,
 			want: nil,
 		},
 		{
+			name: "LET with type annotation and missing expression",
+			sql: `$$
+BEGIN
+  LET temp_calc FLOAT := ;
+  LET typed_varchar VARCHAR(100) := ;
+  LET no_type := ;
+END;
+$$`,
+			want: []DiagMarker{
+				{StartLineNumber: 3, StartColumn: 23, EndLineNumber: 3, EndColumn: 25, Message: "Missing expression after assignment", Severity: 8},
+				{StartLineNumber: 4, StartColumn: 34, EndLineNumber: 4, EndColumn: 36, Message: "Missing expression after assignment", Severity: 8},
+				{StartLineNumber: 5, StartColumn: 15, EndLineNumber: 5, EndColumn: 17, Message: "Missing expression after assignment", Severity: 8},
+			},
+		},
+		{
+			name: "LET with type annotation valid",
+			sql: `$$
+BEGIN
+  LET x FLOAT := 1.5;
+  LET s VARCHAR(100) := 'hello';
+END;
+$$`,
+			want: nil,
+		},
+		{
 			name: "Undeclared variable in RETURN and FOR",
 			sql: `$$
 BEGIN

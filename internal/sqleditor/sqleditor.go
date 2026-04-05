@@ -547,7 +547,7 @@ func ValidateSyntax(sql string) []DiagMarker {
 						varName := strings.ToUpper(varNameRaw)
 						declaredVars[varName] = true
 
-						// Now check for assignment after the variable name
+						// Skip whitespace after the variable name.
 						for j < n && (runes[j] == ' ' || runes[j] == '\t' ||
 							runes[j] == '\n' || runes[j] == '\r' || runes[j] == '\u00a0') {
 							if runes[j] == '\n' {
@@ -558,20 +558,67 @@ func ValidateSyntax(sql string) []DiagMarker {
 							}
 							j++
 						}
-						if j < n && runes[j] == '=' {
-							prev := runes[j-1]
-							next := rune(0)
-							if j+1 < n {
-								next = runes[j+1]
+
+						// Skip optional type annotation (e.g. FLOAT, VARCHAR(100))
+						// that may appear between the variable name and ':' or '='.
+						if j < n && isAlpha(runes[j]) {
+							typeStart := j
+							for j < n && isWordChar(runes[j]) {
+								j++
+								jCol++
 							}
-							if prev != ':' && next != '=' {
+							typeWord := strings.ToUpper(string(runes[typeStart:j]))
+							if typeWord != "DEFAULT" {
+								// Skip optional parenthesised type parameters: VARCHAR(100), NUMBER(10,2)
+								for j < n && (runes[j] == ' ' || runes[j] == '\t' || runes[j] == '\u00a0') {
+									j++
+									jCol++
+								}
+								if j < n && runes[j] == '(' {
+									depth := 1
+									j++
+									jCol++
+									for j < n && depth > 0 {
+										if runes[j] == '(' {
+											depth++
+										} else if runes[j] == ')' {
+											depth--
+										}
+										if runes[j] == '\n' {
+											line++
+											jCol = 1
+										} else {
+											jCol++
+										}
+										j++
+									}
+								}
+								// Skip whitespace before the assignment operator.
+								for j < n && (runes[j] == ' ' || runes[j] == '\t' ||
+									runes[j] == '\n' || runes[j] == '\r' || runes[j] == '\u00a0') {
+									if runes[j] == '\n' {
+										line++
+										jCol = 1
+									} else {
+										jCol++
+									}
+									j++
+								}
+							}
+						}
+
+						// Check for := (valid) or bare = (error) and detect missing expression.
+						isLetColon := j < n && runes[j] == ':' && j+1 < n && runes[j+1] == '='
+						isLetBareEq := j < n && runes[j] == '=' && (j == 0 || runes[j-1] != ':')
+						if isLetColon || isLetBareEq {
+							if isLetBareEq {
 								addError("Expected ':=' for assignment", line, jCol, line, jCol+1)
 							}
 
 							// --- Missing expression check ---
 							opEnd := j + 1
-							if next == '=' {
-								opEnd++
+							if isLetColon {
+								opEnd = j + 2 // skip both : and =
 							}
 							k := opEnd
 							for k < n && (runes[k] == ' ' || runes[k] == '\t' || runes[k] == '\n' || runes[k] == '\r' || runes[k] == '\u00a0') {
@@ -882,6 +929,156 @@ func PkHeuristicConditions(
 		}
 	}
 	return results
+}
+
+// ── GetScriptingCompletions ───────────────────────────────────────────────────
+
+// ScriptingCompletionResult is the combined result of variable-extraction and
+// colon-detection for Snowflake Scripting autocompletion at a cursor position.
+type ScriptingCompletionResult struct {
+	Variables  []string `json:"variables"`   // Uppercased declared variable names in scope
+	NeedsColon bool     `json:"needsColon"`  // Whether variables need a ':' prefix in SQL context
+}
+
+// GetScriptingCompletions extracts declared Snowflake Scripting variables visible
+// at cursorOffset and determines whether a ':' prefix is required. Both results
+// are returned together to avoid two IPC round-trips. No Snowflake connection
+// is required. cursorOffset is a Unicode codepoint count (matches Monaco's
+// model.getOffsetAt for ASCII SQL).
+func GetScriptingCompletions(sql string, cursorOffset int) ScriptingCompletionResult {
+	return ScriptingCompletionResult{
+		Variables:  scriptingExtractVars(sql, cursorOffset),
+		NeedsColon: scriptingNeedsColon(sql, cursorOffset),
+	}
+}
+
+// scriptingExtractVars mirrors extractDeclaredVariables from snowflakeScriptingUtils.ts.
+// Returns uppercased variable names declared before cursorOffset inside the current $$ block.
+func scriptingExtractVars(sql string, cursorOffset int) []string {
+	runes := []rune(sql)
+	n := len(runes)
+	if cursorOffset > n {
+		cursorOffset = n
+	}
+	beforeCursor := string(runes[:cursorOffset])
+
+	// Count $$ occurrences before cursor to determine if we are inside a block.
+	ddCount := strings.Count(beforeCursor, "$$")
+	if ddCount%2 == 0 {
+		return nil // cursor is in plain SQL, not inside a $$ block
+	}
+
+	// Isolate text from the opening $$ to the cursor.
+	blockStart := strings.LastIndex(beforeCursor, "$$")
+	textToScan := beforeCursor[blockStart:]
+
+	seen := make(map[string]struct{})
+	var vars []string
+	addVar := func(name string) {
+		up := strings.ToUpper(name)
+		if _, ok := seen[up]; !ok {
+			seen[up] = struct{}{}
+			vars = append(vars, up)
+		}
+	}
+
+	skipWords := map[string]bool{
+		"CURSOR": true, "EXCEPTION": true, "TYPE": true,
+		"LET": true, "VAR": true,
+	}
+
+	// 1. DECLARE … BEGIN blocks
+	declareRe := regexp.MustCompile(`(?i)\bDECLARE\b`)
+	blockBoundRe := regexp.MustCompile(`(?i)\b(?:BEGIN|END)\b`)
+	for _, loc := range declareRe.FindAllStringIndex(textToScan, -1) {
+		after := textToScan[loc[1]:]
+		if bound := blockBoundRe.FindStringIndex(after); bound != nil {
+			after = after[:bound[0]]
+		}
+		for _, seg := range strings.Split(after, ";") {
+			// Strip line comments and block comments
+			clean := regexp.MustCompile(`--[^\n]*`).ReplaceAllString(seg, "")
+			clean = regexp.MustCompile(`(?s)/\*.*?\*/`).ReplaceAllString(clean, "")
+			clean = strings.TrimSpace(clean)
+			if clean == "" {
+				continue
+			}
+			wordRe := regexp.MustCompile(`[a-zA-Z0-9_$]+`)
+			if m := wordRe.FindString(clean); m != "" {
+				up := strings.ToUpper(m)
+				if !skipWords[up] {
+					addVar(m)
+				}
+			}
+		}
+	}
+
+	// 2. LET / VAR declarations
+	letVarRe := regexp.MustCompile(`(?i)\b(?:LET|VAR)\s+([a-zA-Z0-9_$]+)`)
+	for _, m := range letVarRe.FindAllStringSubmatch(textToScan, -1) {
+		addVar(m[1])
+	}
+
+	// 3. FOR loop variables
+	forRe := regexp.MustCompile(`(?i)\bFOR\s+([a-zA-Z0-9_$]+)\s+IN\b`)
+	for _, m := range forRe.FindAllStringSubmatch(textToScan, -1) {
+		addVar(m[1])
+	}
+
+	return vars
+}
+
+// colonRequiredKeywords is the set of SQL DQL/DML/DDL keywords that require a
+// ':' prefix on scripting variable references (mirrors isColonRequired in TS).
+var colonRequiredKeywords = map[string]bool{
+	"SELECT": true, "INSERT": true, "UPDATE": true, "DELETE": true, "MERGE": true,
+	"CREATE": true, "ALTER": true, "DROP": true, "TRUNCATE": true, "COPY": true,
+	"CALL": true, "WITH": true, "SHOW": true, "DESCRIBE": true,
+	"GRANT": true, "REVOKE": true,
+}
+
+// scriptingNeedsColon mirrors isColonRequired from snowflakeScriptingUtils.ts.
+func scriptingNeedsColon(sql string, offset int) bool {
+	runes := []rune(sql)
+	n := len(runes)
+	if offset > n {
+		offset = n
+	}
+	beforeCursor := string(runes[:offset])
+
+	// 1. Find where the current word starts and check for a preceding colon.
+	wordStartRe := regexp.MustCompile(`[a-zA-Z0-9_$]+$`)
+	wordLoc := wordStartRe.FindStringIndex(beforeCursor)
+	posToEval := len(beforeCursor)
+	if wordLoc != nil {
+		posToEval = wordLoc[0]
+	}
+	textBeforeWord := strings.TrimRight(beforeCursor[:posToEval], " \t\r\n")
+	if strings.HasSuffix(textBeforeWord, ":") {
+		return false
+	}
+
+	// 2. Strip comments and quoted strings.
+	clean := regexp.MustCompile(`--[^\n]*`).ReplaceAllString(textBeforeWord, " ")
+	clean = regexp.MustCompile(`(?s)/\*.*?\*/`).ReplaceAllString(clean, " ")
+	clean = regexp.MustCompile(`'[^']*'`).ReplaceAllString(clean, " ")
+	clean = regexp.MustCompile(`"[^"]*"`).ReplaceAllString(clean, " ")
+
+	// 3. Split by statement boundaries and take the last segment.
+	segRe := regexp.MustCompile(`(?i);|\bBEGIN\b|\bTHEN\b|\bELSE\b|\bDO\b|\bLOOP\b`)
+	segs := segRe.Split(clean, -1)
+	currentSeg := strings.TrimSpace(segs[len(segs)-1])
+	if currentSeg == "" {
+		return false
+	}
+
+	// 4. Check the first word of the current segment.
+	firstWordRe := regexp.MustCompile(`[a-zA-Z0-9_$]+`)
+	m := firstWordRe.FindString(currentSeg)
+	if m == "" {
+		return false
+	}
+	return colonRequiredKeywords[strings.ToUpper(m)]
 }
 
 // ── TypeCategory ──────────────────────────────────────────────────────────────

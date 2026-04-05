@@ -25,11 +25,10 @@ import { useObjectStore } from "../../store/objectStore";
 import { useSessionStore } from "../../store/sessionStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics } from "../../../wailsjs/go/main/App";
+import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions } from "../../../wailsjs/go/main/App";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 import { DiagMarker, ColInfo, validateWithParser, validateBareColumnRefs, ResolvedRef } from "../../utils/sqlDiagnostics";
-import { extractDeclaredVariables, isColonRequired } from "../../utils/snowflakeScriptingUtils";
 
 // Module-level DDL cache and hover provider handle so we only register once
 // and don't accumulate duplicate providers on editor remounts.
@@ -999,8 +998,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const fullContent = model.getValue();
         const offset = model.getOffsetAt(position);
         
-        const declaredVars = extractDeclaredVariables(fullContent, offset);
-        const needsColon = isColonRequired(fullContent, offset);
+        const scriptingResult = await GetScriptingCompletions(fullContent, offset);
+        const declaredVars: string[] = scriptingResult?.variables ?? [];
+        const needsColon: boolean = scriptingResult?.needsColon ?? false;
 
         const keywordSuggestions = SNOWFLAKE_KEYWORDS.map((kw) => ({
           label:      kw,
@@ -1010,7 +1010,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           range,
         }));
 
-        const variableSuggestions = Array.from(declaredVars).map((v) => ({
+        const variableSuggestions = declaredVars.map((v) => ({
           label:      needsColon ? ":" + v : v,
           kind:       monaco.languages.CompletionItemKind.Variable,
           insertText: needsColon ? ":" + v : v,

@@ -1719,6 +1719,13 @@ func (a *App) AnalyzeSqlSemantics(sql string, resolvedRefs []sqleditor.ResolvedR
 	return sqleditor.ValidateSemantics(sql, resolvedRefs, colEntries)
 }
 
+// GetScriptingCompletions extracts declared Snowflake Scripting variables
+// visible at cursorOffset and determines whether a ':' prefix is required for
+// completions. No Snowflake connection is required.
+func (a *App) GetScriptingCompletions(sql string, cursorOffset int) sqleditor.ScriptingCompletionResult {
+	return sqleditor.GetScriptingCompletions(sql, cursorOffset)
+}
+
 // GetFunctionInfo fetches the DDL for a user-defined function and returns its
 // parameter list together with a flag indicating whether it is a table function.
 func (a *App) GetFunctionInfo(database, schema, name, argTypes string) (*snowflake.FunctionInfo, error) {
