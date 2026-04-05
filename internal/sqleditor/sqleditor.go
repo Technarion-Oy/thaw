@@ -220,7 +220,7 @@ func ValidateSyntax(sql string) []DiagMarker {
 		}
 
 		// Whitespace
-		if ch == ' ' || ch == '\t' || ch == '\r' {
+		if ch == ' ' || ch == '\t' || ch == '\r' || ch == '\u00a0' {
 			i++
 			col++
 			continue
@@ -327,7 +327,7 @@ func ValidateSyntax(sql string) []DiagMarker {
 			// In script context after a statement start, look for bare '=' (should be ':=')
 			if len(dollarStack) > 0 && atScriptStmtStart && closed {
 				j, jCol := i, col
-				for j < n && (runes[j] == ' ' || runes[j] == '\t' || runes[j] == '\r') {
+				for j < n && (runes[j] == ' ' || runes[j] == '\t' || runes[j] == '\r' || runes[j] == '\u00a0') {
 					if runes[j] == '\n' {
 						break
 					}
@@ -451,7 +451,7 @@ func ValidateSyntax(sql string) []DiagMarker {
 					jCol := col
 					// Skip whitespace/newlines
 					for j < n && (runes[j] == ' ' || runes[j] == '\t' ||
-						runes[j] == '\n' || runes[j] == '\r') {
+						runes[j] == '\n' || runes[j] == '\r' || runes[j] == '\u00a0') {
 						if runes[j] == '\n' {
 							line++
 							jCol = 1
@@ -474,7 +474,7 @@ func ValidateSyntax(sql string) []DiagMarker {
 							declaredVars[varName] = true
 							// Skip IN
 							for j < n && (runes[j] == ' ' || runes[j] == '\t' ||
-								runes[j] == '\n' || runes[j] == '\r') {
+								runes[j] == '\n' || runes[j] == '\r' || runes[j] == '\u00a0') {
 								if runes[j] == '\n' {
 									line++
 									jCol = 1
@@ -488,7 +488,7 @@ func ValidateSyntax(sql string) []DiagMarker {
 								jCol += 2
 								// Skip whitespace to cursor name
 								for j < n && (runes[j] == ' ' || runes[j] == '\t' ||
-									runes[j] == '\n' || runes[j] == '\r') {
+									runes[j] == '\n' || runes[j] == '\r' || runes[j] == '\u00a0') {
 									if runes[j] == '\n' {
 										line++
 										jCol = 1
@@ -528,7 +528,7 @@ func ValidateSyntax(sql string) []DiagMarker {
 					j := i
 					jCol := col
 					for j < n && (runes[j] == ' ' || runes[j] == '\t' ||
-						runes[j] == '\n' || runes[j] == '\r') {
+						runes[j] == '\n' || runes[j] == '\r' || runes[j] == '\u00a0') {
 						if runes[j] == '\n' {
 							line++
 							jCol = 1
@@ -549,7 +549,7 @@ func ValidateSyntax(sql string) []DiagMarker {
 
 						// Now check for assignment after the variable name
 						for j < n && (runes[j] == ' ' || runes[j] == '\t' ||
-							runes[j] == '\n' || runes[j] == '\r') {
+							runes[j] == '\n' || runes[j] == '\r' || runes[j] == '\u00a0') {
 							if runes[j] == '\n' {
 								line++
 								jCol = 1
@@ -567,6 +567,35 @@ func ValidateSyntax(sql string) []DiagMarker {
 							if prev != ':' && next != '=' {
 								addError("Expected ':=' for assignment", line, jCol, line, jCol+1)
 							}
+
+							// --- Missing expression check ---
+							opEnd := j + 1
+							if next == '=' {
+								opEnd++
+							}
+							k := opEnd
+							for k < n && (runes[k] == ' ' || runes[k] == '\t' || runes[k] == '\n' || runes[k] == '\r' || runes[k] == '\u00a0') {
+								k++
+							}
+
+							missingExpr := false
+							if k >= n || runes[k] == ';' {
+								missingExpr = true
+							} else if isAlpha(runes[k]) {
+								wordStart := k
+								for k < n && isWordChar(runes[k]) {
+									k++
+								}
+								firstWord := strings.ToUpper(string(runes[wordStart:k]))
+								switch firstWord {
+								case "LET", "DECLARE", "BEGIN", "RETURN", "FOR", "WHILE", "LOOP", "IF":
+									missingExpr = true
+								}
+							}
+
+							if missingExpr {
+								addError("Missing expression after assignment", line, jCol, line, jCol+(opEnd-j))
+							}
 						}
 						// Advance main loop counters to where we peeked
 						i = j
@@ -583,7 +612,7 @@ func ValidateSyntax(sql string) []DiagMarker {
 					} else if !scriptStmtKeywords[word] {
 						// Look ahead for assignment operator
 						j, jCol := i, col
-						for j < n && (runes[j] == ' ' || runes[j] == '\t' || runes[j] == '\r') {
+						for j < n && (runes[j] == ' ' || runes[j] == '\t' || runes[j] == '\r' || runes[j] == '\u00a0') {
 							if runes[j] == '\n' {
 								break
 							}
@@ -614,6 +643,39 @@ func ValidateSyntax(sql string) []DiagMarker {
 								addError("Variable '"+wordRaw+"' is not declared",
 									wordLine, wordCol, wordLine, wordCol+len(wordRaw))
 							}
+
+							// --- Missing expression check ---
+							opEnd := j
+							if isColonAssign {
+								opEnd += 2
+							} else {
+								opEnd += 1
+							}
+
+							k := opEnd
+							for k < n && (runes[k] == ' ' || runes[k] == '\t' || runes[k] == '\n' || runes[k] == '\r' || runes[k] == '\u00a0') {
+								k++
+							}
+
+							missingExpr := false
+							if k >= n || runes[k] == ';' {
+								missingExpr = true
+							} else if isAlpha(runes[k]) {
+								wordStart := k
+								for k < n && isWordChar(runes[k]) {
+									k++
+								}
+								firstWord := strings.ToUpper(string(runes[wordStart:k]))
+								switch firstWord {
+								case "LET", "DECLARE", "BEGIN", "RETURN", "FOR", "WHILE", "LOOP", "IF":
+									missingExpr = true
+								}
+							}
+
+							if missingExpr {
+								addError("Missing expression after assignment", line, jCol, line, jCol+(opEnd-j))
+							}
+
 						} else {
 							// Not a scripting keyword and not an assignment —
 							// bare unrecognised identifier at statement start.
