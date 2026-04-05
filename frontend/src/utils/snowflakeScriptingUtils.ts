@@ -9,86 +9,99 @@
 // license agreement with Technarion Oy.
 
 /**
- * Extracts all declared variables from a Snowflake Scripting block.
- * Looks for DECLARE blocks and LET/VAR keywords.
+ * Extracts all script variables declared in a Snowflake SQL document via:
+ * - DECLARE blocks
+ * - LET/VAR assignments
+ * - FOR ... IN loops
  */
 export function extractDeclaredVariables(sql: string): Set<string> {
   const vars = new Set<string>();
-  
-  // 1. Find all DECLARE ... BEGIN blocks and extract variables from DECLARE
-  const declareRegex = /DECLARE\s+([\s\S]*?)\s+BEGIN/gi;
-  let m: RegExpExecArray | null;
-  while ((m = declareRegex.exec(sql)) !== null) {
-    const declareBody = m[1];
-    // Each line in declare body that isn't a comment or empty is likely a var
-    // radius_of_circle FLOAT DEFAULT 3;
-    // c1 CURSOR FOR ...;
-    // Simple regex for name followed by type/CURSOR
-    const lines = declareBody.split("\n");
+
+  // 1. Match DECLARE blocks robustly (handles missing BEGIN while typing)
+  const declareParts = sql.split(/\bDECLARE\b/gi);
+  for (let i = 1; i < declareParts.length; i++) {
+    // Take text up to BEGIN, END, or $$
+    const blockContent = declareParts[i].split(/\b(?:BEGIN|END)\b|\$\$/gi)[0];
+    const lines = blockContent.split(";");
     for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("--") || trimmed.startsWith("//")) continue;
-      // Match identifier at start of line
-      const nameMatch = trimmed.match(/^([a-zA-Z_]\w*)/);
-      if (nameMatch) {
-        vars.add(nameMatch[1].toUpperCase());
+      const cleanLine = line
+        .replace(/--.*/g, "")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .trim();
+
+      if (!cleanLine) continue;
+
+      // No '^' anchor, bypasses any invisible characters
+      const wordMatch = cleanLine.match(/[a-zA-Z0-9_$]+/);
+      if (wordMatch) {
+        const varName = wordMatch[0].toUpperCase();
+        // Exclude common keywords that might appear as the first word
+        if (!["CURSOR", "EXCEPTION", "TYPE", "LET", "VAR"].includes(varName)) {
+          vars.add(varName);
+        }
       }
     }
   }
 
-  // 2. Find all inline LET/VAR declarations
-  // let x := 1;
-  // var y FLOAT;
-  const inlineRegex = /\b(?:LET|VAR)\s+([a-zA-Z_]\w*)\b/gi;
-  while ((m = inlineRegex.exec(sql)) !== null) {
-    vars.add(m[1].toUpperCase());
+  // 2. Match LET / VAR assignments
+  const inlineRegex = /\b(?:LET|VAR)\s+([a-zA-Z0-9_$]+)/gi;
+  let match;
+  while ((match = inlineRegex.exec(sql)) !== null) {
+    vars.add(match[1].toUpperCase());
+  }
+
+  // 3. Match FOR loops
+  const forRegex = /\bFOR\s+([a-zA-Z0-9_$]+)\s+IN\b/gi;
+  while ((match = forRegex.exec(sql)) !== null) {
+    vars.add(match[1].toUpperCase());
   }
 
   return vars;
 }
 
 /**
- * Determines if the current position requires a colon prefix for variables.
- * In Snowflake Scripting:
- * - Inside SQL statements (SELECT, INSERT, etc.) -> YES
- * - Inside EXECUTE IMMEDIATE strings -> NO (it's part of the string)
- * - Inside procedural expressions (x := y + 1) -> NO
- * - In session variables (SET x = :y) -> YES
+ * Determines if a colon prefix (:) is required for a variable at the given cursor offset.
  */
 export function isColonRequired(sql: string, offset: number): boolean {
-  const textToCursor = sql.slice(0, offset);
-  
-  // Find if we are inside a dollar-quoted block (Scripting context)
-  const dollarMatches = [...textToCursor.matchAll(/\$([a-zA-Z0-9_]*)\$/g)];
-  const inScripting = dollarMatches.length % 2 !== 0;
+  const textBeforeCursor = sql.slice(0, offset);
 
-  if (!inScripting) {
-    // Outside scripting, check if we are in a SET command
-    const lastSet = textToCursor.lastIndexOf("SET");
-    const lastSemicolon = textToCursor.lastIndexOf(";");
-    if (lastSet > lastSemicolon) {
-      // We are in a SET command. Is it after the '='?
-      const lastEq = textToCursor.lastIndexOf("=");
-      return lastEq > lastSet;
-    }
+  // 1. Guard check: If the user already typed a colon (e.g. `SELECT :are`), we 
+  // don't need to add another one, otherwise Monaco will insert `::AREA_OF_CIRCLE`.
+  const wordMatchStart = textBeforeCursor.search(/[a-zA-Z0-9_$]+$/);
+  const posToEval = wordMatchStart >= 0 ? wordMatchStart : offset;
+  const textBeforeWord = textBeforeCursor.slice(0, posToEval).trimEnd();
+  
+  if (textBeforeWord.endsWith(":")) {
     return false;
   }
 
-  // Inside scripting ($$).
-  // Check if we are inside a SQL statement.
-  // This is a heuristic: check the last "keyword" that isn't a scripting keyword.
-  const keywords = textToCursor.match(/\b([a-zA-Z_]\w*)\b/gi) || [];
-  if (keywords.length === 0) return false;
+  // 2. Clean the string backward to find the true statement start (ignoring comments/strings)
+  const cleanText = textBeforeWord
+    .replace(/--.*/g, " ")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/'([^']*)'/g, " ")
+    .replace(/"([^"]*)"/g, " ");
 
-  const SQL_KEYWORDS = ["SELECT", "FROM", "INSERT", "UPDATE", "DELETE", "MERGE", "CREATE", "ALTER", "DROP", "TRUNCATE", "CALL", "LIMIT"];
-  const SCRIPTING_KEYWORDS = ["DECLARE", "BEGIN", "END", "IF", "THEN", "ELSE", "ELSEIF", "CASE", "WHEN", "FOR", "WHILE", "LOOP", "REPEAT", "UNTIL", "DO", "RETURN", "RAISE", "EXCEPTION", "LET", "VAR"];
+  // 3. Split by common Snowflake statement boundaries
+  const segments = cleanText.split(/;|\bBEGIN\b|\bTHEN\b|\bELSE\b|\bDO\b|\bLOOP\b/i);
+  const currentSegment = segments[segments.length - 1].trim();
 
-  // Search backwards for the last significant keyword
-  for (let i = keywords.length - 1; i >= 0; i--) {
-    const kw = keywords[i].toUpperCase();
-    if (SQL_KEYWORDS.includes(kw)) return true;
-    if (SCRIPTING_KEYWORDS.includes(kw)) return false;
-  }
+  // If we are at the very beginning of a new statement, no colon is needed yet.
+  if (!currentSegment) return false;
 
-  return false;
+  // 4. Look at the very first word of the current statement segment
+  // (Removed the '^' anchor so invisible spaces don't break keyword detection)
+  const firstWordMatch = currentSegment.match(/[a-zA-Z0-9_$]+/);
+  if (!firstWordMatch) return false;
+
+  const firstWord = firstWordMatch[0].toUpperCase();
+
+  // 5. If the statement starts with a standard SQL DQL/DML/DDL keyword, a colon is required
+  const sqlKeywords = new Set([
+    "SELECT", "INSERT", "UPDATE", "DELETE", "MERGE",
+    "CREATE", "ALTER", "DROP", "TRUNCATE", "COPY",
+    "CALL", "WITH", "SHOW", "DESCRIBE", "GRANT", "REVOKE",
+  ]);
+
+  return sqlKeywords.has(firstWord);
 }

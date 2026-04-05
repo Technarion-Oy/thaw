@@ -46,10 +46,6 @@ let editorPrefsRef: EditorPrefs = { ...DEFAULT_EDITOR_PREFS };
 
 // ── Signature-help helpers ─────────────────────────────────────────────────
 
-// Scan a SQL prefix string forwards, tracking paren nesting and single-quoted
-// strings, to find the innermost unclosed function call.  Returns the function
-// name and the 0-based index of the currently active parameter (= number of
-// top-level commas seen so far inside the call).
 function getActiveFunctionCall(prefix: string): { name: string; paramIndex: number } | null {
   const stack: Array<{ name: string; commas: number }> = [];
   let inStr = false;
@@ -75,9 +71,6 @@ function getActiveFunctionCall(prefix: string): { name: string; paramIndex: numb
   return { name: top.name, paramIndex: top.commas };
 }
 
-// Parse a Snowflake function signature string (e.g. "DATEADD(part TEXT, n NUMBER, d DATE) RETURN DATE")
-// and return character-offset pairs [start, end) for each parameter within the label string.
-// The offsets are suitable for Monaco's ParameterInformation.label: [number, number].
 function parseSignatureParams(sig: string): Array<[number, number]> {
   const openIdx = sig.indexOf("(");
   if (openIdx < 0) return [];
@@ -110,22 +103,16 @@ function parseSignatureParams(sig: string): Array<[number, number]> {
   return params;
 }
 
-// Function name sets for decoration-based highlighting.
-// Populated once from the local SQLite cache; shared across all editor instances.
 const builtinFns = new Set<string>();
 const udfFns     = new Set<string>();
 let fnNamesLoaded = false;
 
-// Track which db/schema pairs and databases have already been lazy-fetched by
-// the completion provider so we don't fire duplicate requests.
-const fetchedSchemaObjects   = new Set<string>(); // "DB\0SCHEMA"
-const fetchedDatabaseSchemas = new Set<string>(); // "DB"
+const fetchedSchemaObjects   = new Set<string>(); 
+const fetchedDatabaseSchemas = new Set<string>(); 
 
-// Shared case-fold helper used by module-level cache functions.
 const UC = (s: string) => s.toUpperCase();
 
 // ── Column-level completion cache ─────────────────────────────────────────────
-// Keyed "DB\0SCHEMA\0TABLE". Populated lazily on first dot-trigger.
 const columnCache  = new Map<string, string[]>();
 const fetchingCols = new Set<string>();
 
@@ -147,7 +134,6 @@ async function getColumns(db: string, schema: string, table: string): Promise<st
 }
 
 // ── FK cache for JOIN ON autocomplete ─────────────────────────────────────────
-// Keyed "DB\0SCHEMA\0TABLE" → imported FKs (where the table is the child side).
 interface FKEntry {
   pkDatabase: string; pkSchema: string; pkTable: string; pkColumn: string;
   fkColumn: string;
@@ -184,8 +170,6 @@ async function getFKs(db: string, schema: string, table: string): Promise<FKEntr
 }
 
 // ── ColInfo cache for type-compatible JOIN ON suggestions ─────────────────────
-// Keyed "DB\0SCHEMA\0TABLE" → column info with data types.
-// ColInfo is imported from sqlDiagnostics so validateSemantics can share the same type.
 const colInfoCache   = new Map<string, ColInfo[]>();
 const fetchingColInfos = new Set<string>();
 
@@ -211,8 +195,7 @@ async function getColInfos(db: string, schema: string, table: string): Promise<C
 }
 
 // ── Schema-level FK warm-up ────────────────────────────────────────────────────
-// Bulk-fetch all FKs in a schema from INFORMATION_SCHEMA and populate fkCache.
-const fetchedFKSchemas = new Set<string>(); // "DB\0SCHEMA"
+const fetchedFKSchemas = new Set<string>(); 
 
 async function warmUpFKsForSchema(db: string, schema: string): Promise<void> {
   const key = `${db.toUpperCase()}\0${schema.toUpperCase()}`;
@@ -221,7 +204,6 @@ async function warmUpFKsForSchema(db: string, schema: string): Promise<void> {
   try {
     const rows = await GetSchemaForeignKeys(db, schema);
     if (!rows) return;
-    // Group by FK table and populate fkCache (don't overwrite existing per-table entries)
     const grouped = new Map<string, FKEntry[]>();
     for (const r of rows as any[]) {
       const k = `${UC(r.fkDatabase)}\0${UC(r.fkSchema)}\0${UC(r.fkTable)}`;
@@ -240,12 +222,9 @@ async function warmUpFKsForSchema(db: string, schema: string): Promise<void> {
       if (!fkCache.has(k)) fkCache.set(k, entries);
     }
   } catch {
-    fetchedFKSchemas.delete(key); // allow retry
+    fetchedFKSchemas.delete(key); 
   }
 }
-
-// ── JOIN table ref parser ──────────────────────────────────────────────────────
-// parseJoinTables has moved to the Go backend — call ParseJoinTableRefs(sql).
 
 function mkColSuggestions(cols: string[], range: any, monaco: any) {
   return cols.map((col) => ({
@@ -257,11 +236,6 @@ function mkColSuggestions(cols: string[], range: any, monaco: any) {
   }));
 }
 
-// ── JOIN ON autocomplete helpers ──────────────────────────────────────────────
-// buildCompositeConditions, pkHeuristicConditions, typeCategory have moved to
-// the Go backend — use ComputeJoinOnConditions() IPC call.
-
-/** Build one Monaco completion item for a JOIN ON condition. */
 function makeSugg(label: string, detail: string, sortText: string, range: any, monaco: any) {
   return {
     label,
@@ -273,7 +247,6 @@ function makeSugg(label: string, detail: string, sortText: string, range: any, m
   };
 }
 
-/** Resolve raw JoinTableRef list to fully-qualified refs via the object store. */
 function resolveRefs(
   refs: Array<{ db: string; schema: string; name: string; alias: string }>,
   storeObjs: Array<{ db: string; schema: string; name: string; kind: string }>,
@@ -305,7 +278,6 @@ const SNOWFLAKE_KEYWORDS = [
   "PRECEDING", "FOLLOWING", "CURRENT ROW", "FLATTEN", "LATERAL",
 ];
 
-// Map Snowflake object kinds to Monaco completion item kinds.
 function monacoKind(monaco: any, kind: string): number {
   const K = monaco.languages.CompletionItemKind;
   switch (kind) {
@@ -325,48 +297,29 @@ interface DdlHover {
 
 interface SqlEditorProps {
   tabId?: string;
-  /** Zero-based index of the statement currently executing; null when idle. */
   activeStmtIdx?: number | null;
 }
 
-// ── Qualified identifier extractor ────────────────────────────────────────
-// Given a Monaco model and cursor position, finds the full dot-separated
-// identifier that contains the cursor (e.g. "DB.SCHEMA.TABLE" when the cursor
-// is over any of the three parts) and returns its unquoted parts.
 function getQualifiedIdent(model: any, pos: any): string[] | null {
   const line: string = model.getLineContent(pos.lineNumber);
-  const col = pos.column - 1; // 0-based
+  const col = pos.column - 1; 
 
-  // Scan the line left-to-right, building each dot-separated qualified
-  // identifier (which may contain quoted parts like "MY_TABLE"), and return
-  // the one whose character span contains `col`.
-  //
-  // This forward-scanning approach correctly handles all combinations:
-  //   MY_TABLE        "MY_TABLE"        DB.SCHEMA.TABLE
-  //   "DB"."SCHEMA"."TABLE"     SCHEMA."TABLE"
-  // It avoids the ambiguity of bidirectional expansion, which struggled to
-  // distinguish opening vs closing double-quotes for cursors inside a quoted
-  // identifier.
   let i = 0;
   while (i < line.length) {
-    // Skip characters that cannot begin an identifier part.
     if (line[i] !== '"' && !/\w/.test(line[i])) { i++; continue; }
 
     const parts: string[] = [];
     let containsCol = false;
 
-    // Parse one dot-separated qualified identifier.
     while (i < line.length) {
       const partStart = i;
       let partName = '';
 
       if (line[i] === '"') {
-        // Quoted identifier: consume everything between the double-quotes.
-        i++; // past opening '"'
+        i++; 
         while (i < line.length && line[i] !== '"') { partName += line[i]; i++; }
-        if (i < line.length) i++; // past closing '"'
+        if (i < line.length) i++; 
       } else if (/\w/.test(line[i])) {
-        // Bare (unquoted) identifier.
         while (i < line.length && /\w/.test(line[i])) { partName += line[i]; i++; }
       } else {
         break;
@@ -374,15 +327,13 @@ function getQualifiedIdent(model: any, pos: any): string[] | null {
 
       parts.push(partName);
 
-      // `col` falls inside this part (including any surrounding quote chars).
       if (col >= partStart && col < i) containsCol = true;
 
-      // Continue only if followed by '.' and another identifier part.
       if (i < line.length && line[i] === '.') {
         const next = line[i + 1];
         if (next !== undefined && (next === '"' || /\w/.test(next))) {
-          if (col === i) containsCol = true; // cursor is on the '.'
-          i++; // past '.'
+          if (col === i) containsCol = true; 
+          i++; 
           continue;
         }
       }
@@ -395,15 +346,10 @@ function getQualifiedIdent(model: any, pos: any): string[] | null {
   return null;
 }
 
-// ── Statement range parser ─────────────────────────────────────────────────
-// Returns [{startLine, endLine}] (1-indexed Monaco line numbers) for each
-// semicolon-separated statement in the SQL.  Mirrors the backend's
-// splitStatements logic for consistent statement counting.
-// Exported so QueryPage can compute statement offsets for selection runs.
 export function getStatementLineRanges(sql: string): Array<{ startLine: number; endLine: number }> {
   const ranges: Array<{ startLine: number; endLine: number }> = [];
   let line = 1;
-  let stmtStartLine = -1; // -1 = not yet started (waiting for first non-ws char)
+  let stmtStartLine = -1; 
   let inSingleQuote = false;
   let inDoubleQuote = false;
   let inLineComment = false;
@@ -434,7 +380,7 @@ export function getStatementLineRanges(sql: string): Array<{ startLine: number; 
     }
 
     if (inSingleQuote) {
-      if (ch === "'" && sql[i + 1] === "'") { i++; } // '' escape
+      if (ch === "'" && sql[i + 1] === "'") { i++; } 
       else if (ch === "'") { inSingleQuote = false; }
       continue;
     }
@@ -449,7 +395,6 @@ export function getStatementLineRanges(sql: string): Array<{ startLine: number; 
       continue;
     }
 
-    // Mark the start of a new statement on the first real (non-ws, non-comment-open) character.
     if (stmtStartLine < 0) {
       const ws  = ch === " " || ch === "\t" || ch === "\r";
       const cmt = (ch === "-" && sql[i + 1] === "-") || (ch === "/" && sql[i + 1] === "*");
@@ -469,32 +414,20 @@ export function getStatementLineRanges(sql: string): Array<{ startLine: number; 
     if (ch === ";") { finishStmt(line); continue; }
   }
 
-  finishStmt(line); // last statement with no trailing semicolon
+  finishStmt(line); 
   return ranges;
 }
 
-/**
- * Apply EditorPrefs to a Monaco snippet template string before insertion.
- *
- * Two transformations:
- *   1. Indentation — snippets are authored with 2-space indent; replace each
- *      2-space level with the user's preferred unit (tab or N spaces).
- *   2. Keyword casing — all-uppercase words (DECLARE, BEGIN, IF …) are
- *      transformed to match keywordCase.  "Preserve" leaves them as-is.
- */
 function applyPrefsToSnippet(text: string, prefs: EditorPrefs): string {
-  // 1. Indentation
   const indentUnit = prefs.indentStyle === "tabs" ? "\t" : " ".repeat(prefs.indentSize);
   let result = text.replace(/^( {2})+/gm, (m) => indentUnit.repeat(m.length / 2));
 
-  // 2. Keyword casing — matches sequences of A-Z, digits and underscores that
-  //    start with a capital letter (i.e. the all-caps keywords in snippets).
   if (prefs.keywordCase !== "Preserve") {
     result = result.replace(/\b([A-Z][A-Z_0-9]*)\b/g, (kw) => {
       switch (prefs.keywordCase) {
         case "lower": return kw.toLowerCase();
         case "Title": return kw.charAt(0) + kw.slice(1).toLowerCase();
-        default:      return kw; // "UPPER" — already uppercase
+        default:      return kw; 
       }
     });
   }
@@ -502,23 +435,12 @@ function applyPrefsToSnippet(text: string, prefs: EditorPrefs): string {
   return result;
 }
 
-// ── Code Snippets cascading context menu (module-level, one-time setup) ───────
-// Monaco creates SubmenuAction instances INTERNALLY when it builds the context
-// menu from MenuRegistry entries.  Using MenuRegistry.appendMenuItem with a
-// { submenu: MenuId } item makes Monaco do that work itself — no external
-// SubmenuAction import, no per-editor patching.
-
-/** The editor that was right-clicked most recently — used by snippet commands. */
 let _activeSnippetEditor: monacoLib.editor.ICodeEditor | null = null;
-
-// Guard against Vite HMR re-execution adding duplicate entries.
 let _snippetMenuRegistered = false;
 (() => {
   if (_snippetMenuRegistered) return;
   _snippetMenuRegistered = true;
 
-  // Create the submenu's MenuId.  Wrap in try/catch because MenuId throws if
-  // the same identifier is registered twice (can happen during Vite HMR).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let snippetSubMenuId: any;
   try {
@@ -530,7 +452,6 @@ let _snippetMenuRegistered = false;
   }
   if (!snippetSubMenuId) return;
 
-  // Register "Code Snippets ▶" as a submenu entry in the editor context menu.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (MenuRegistry as any).appendMenuItem((MenuId as any).EditorContext, {
     submenu: snippetSubMenuId,
@@ -539,7 +460,6 @@ let _snippetMenuRegistered = false;
     order: 0,
   });
 
-  // Register each snippet as a global command + add it to the submenu.
   const snippetItems = getSnowflakeSnippets(monacoLib);
   const snippetMap   = new Map(snippetItems.map((s) => [String(s.label), s]));
 
@@ -549,9 +469,6 @@ let _snippetMenuRegistered = false;
       if (!s) return;
       const cmdId = `thaw.snippet.${lbl}`;
 
-      // Handler uses _activeSnippetEditor (set on right-click by handleMount).
-      // applyPrefsToSnippet is called at insertion time so pref changes are
-      // reflected immediately without re-registering commands.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (CommandsRegistry as any).registerCommand(cmdId, () => {
         if (_activeSnippetEditor) {
@@ -583,22 +500,12 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   const sql    = tabId ? (tabs.find((t) => t.id === tabId)?.sql ?? "") : activeSql;
   const setSql = tabId ? (newSql: string) => setSqlForTab(tabId, newSql) : activeSqlSetter;
 
-  // Derive Monaco language from the active (or pinned) tab's kind.
   const activeTab      = tabs.find((t) => t.id === (tabId ?? activeTabId));
   const activeKind     = activeTab?.kind;
   const editorLanguage = activeKind === "python" ? "python"
     : activeKind === "yaml"   ? "yaml"
     : "sql";
-  // For YAML files pass the real file path as the Monaco model URI so that
-  // configureMonacoYaml's fileMatch glob patterns (e.g. **/dbt_project.yml)
-  // can match by filename and apply the correct dbt JSON Schema.
-  // Scratch YAML tabs (no saved path) use a synthetic path keyed on the tab
-  // ID so each scratch tab gets its own model and the catch-all schema applies.
-  // Use Monaco's Uri.file() to build the model path — it handles
-  // OS-specific separators correctly (C:\... on Windows, /Users/... on
-  // macOS/Linux) and always produces a valid file:///... URI string.
-  // Manual string concatenation (file:// + path) produces malformed URIs on
-  // Windows and causes monaco-yaml's fileMatch glob patterns to fail.
+
   const yamlModelPath = editorLanguage === "yaml"
     ? (activeTab?.path
         ? monacoLib.Uri.file(activeTab.path).toString()
@@ -608,17 +515,13 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   const editorFont        = useThemeStore((s) => s.editorFont);
   const editorFontSize    = useThemeStore((s) => s.editorFontSize);
   const setEditorFontSize = useThemeStore((s) => s.setEditorFontSize);
-  // Ref so the native keydown listener always sees the current font size
-  // without being re-registered on every render.
+
   const fontSizeRef = useRef(editorFontSize);
   useEffect(() => { fontSizeRef.current = editorFontSize; }, [editorFontSize]);
 
-  // Decoration collection for the currently-running statement highlight.
-  // Set inside handleMount; read by the useEffect below.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const activeStmtDecRef = useRef<any>(null);
 
-  // Decoration collection for function-call token highlighting.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fnDecRef      = useRef<any>(null);
   const fnDecTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -629,30 +532,14 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   const hoverTimerRef          = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverHideTimerRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
   const yamlHoverAdjustTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Tracks the style.top value (px number) we last wrote to the YAML hover widget.
-  // While this value matches the widget's current style.top we skip re-adjustment
-  // so the user can move their cursor onto the tooltip without it running away.
   const yamlHoverSetTopRef = useRef<number | null>(null);
-  // Tracks the word key ("db.schema.table") the hover timer is currently running
-  // for, and the latest cursor position under the mouse for that word.
   const lastHoverWordRef  = useRef<string | null>(null);
   const currentHoverPosRef = useRef<any>(null);
-  // Actual mouse-cursor clientY at the last mousemove — used to position the
-  // tooltip below (or above) the pointer, not just below the text line.
   const currentMouseYRef   = useRef<number>(0);
-  // True while the cursor is physically inside the tooltip overlay.
   const isOnTooltipRef    = useRef(false);
-  // True while a mouse button is held down (e.g. text selection drag).
   const isMouseDownRef    = useRef(false);
-  // True while the right-click context menu is open (prevents tooltip hiding).
   const isCtxMenuOpenRef  = useRef(false);
-  // Last text selection made inside the tooltip (saved on mouseup so right-click
-  // can't clear it before onContextMenu fires).
   const savedSelRef       = useRef("");
-
-  // ── Code Snippets cascading submenu state ─────────────────────────────────
-  // (No React state needed — submenu is rendered via Monaco's native
-  // _contextMenuService.showContextMenu(), not a React overlay.)
 
   const scheduleHide = useCallback(() => {
     if (hoverHideTimerRef.current) clearTimeout(hoverHideTimerRef.current);
@@ -665,8 +552,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     if (hoverHideTimerRef.current) clearTimeout(hoverHideTimerRef.current);
   }, []);
 
-  // Hide tooltip on mouseup if cursor has left the overlay (handles text-selection drags
-  // that temporarily move the cursor outside the tooltip bounds).
   useEffect(() => {
     const handleMouseUp = () => {
       isMouseDownRef.current = false;
@@ -676,9 +561,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     return () => document.removeEventListener("mouseup", handleMouseUp);
   }, []);
 
-  // While the tooltip is open, intercept Cmd+C / Ctrl+C at capture phase so it
-  // fires before Monaco's global key handler. Copies the current text selection
-  // (if any) via the Wails clipboard API which works reliably in WKWebView.
   useEffect(() => {
     if (!ddlHover) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -694,9 +576,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     return () => document.removeEventListener("keydown", handleKeyDown, true);
   }, [ddlHover]);
 
-  // Dismiss the right-click context menu on the next left-click anywhere.
-  // Using a document click listener avoids needing a backdrop div, which would
-  // cause mouseleave to fire on the tooltip and hide it.
   useEffect(() => {
     if (!tooltipCtxMenu) return;
     const dismiss = () => {
@@ -708,8 +587,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   }, [tooltipCtxMenu]);
 
 
-  // Register the custom Snowflake SQL tokenizer and themes exactly once,
-  // before the editor instance is created.
   const handleBeforeMount: BeforeMount = (monaco) => {
     ensureMonacoSetup(monaco);
   };
@@ -720,13 +597,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       editor.onDidDispose(() => setEditorInstance(null));
     }
 
-    // Create the decoration collection used to highlight the active statement.
     activeStmtDecRef.current = editor.createDecorationsCollection([]);
-
-    // ── Function-call token highlighting ──────────────────────────────────
     fnDecRef.current = editor.createDecorationsCollection([]);
 
-    // Regex: matches identifiers immediately followed by '(' — i.e. function calls.
     const fnCallRe = /\b([A-Za-z_][A-Za-z0-9_$]*)\s*(?=\()/g;
 
     const refreshFnDecorations = () => {
@@ -752,18 +625,15 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       fnDecRef.current?.set(decorations);
     };
 
-    // Load editor prefs on first mount so Format SQL always has a valid reference.
     GetEditorPrefs().then((p) => {
       editorPrefsRef = p as EditorPrefs;
     }).catch(() => { /* best-effort */ });
 
-    // Keep prefs in sync when the user saves from EditorPreferencesModal.
     const handlePrefsChanged = (e: Event) => {
       editorPrefsRef = (e as CustomEvent<EditorPrefs>).detail;
     };
     window.addEventListener("thaw:editor-prefs-changed", handlePrefsChanged);
 
-    // Populate function name sets on first mount, then decorate immediately.
     if (!fnNamesLoaded) {
       GetAllFunctionNames().then((fns) => {
         if (!fns) return;
@@ -778,15 +648,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       refreshFnDecorations();
     }
 
-    // Re-decorate on every content change (debounced).
-    // Use editor.onDidChangeModelContent (not model.onDidChangeContent) so the
-    // listener is always registered regardless of model availability at mount.
     editor.onDidChangeModelContent(() => {
       if (fnDecTimerRef.current) clearTimeout(fnDecTimerRef.current);
       fnDecTimerRef.current = setTimeout(refreshFnDecorations, 200);
     });
 
-    // ── SQL diagnostics (syntax + semantic markers) ────────────────────────
     const runDiagnostics = async () => {
       const model = editor.getModel();
       if (!model) return;
@@ -794,32 +660,24 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         monaco.editor.setModelMarkers(model, "thaw-sql", []);
         return;
       }
-      // Snapshot the model version before any async work.  Each await point
-      // checks this version; if the user has edited since we started, we
-      // discard the stale results rather than overwriting the markers that a
-      // newer run has already (or will soon) set.
       const diagVersion = model.getVersionId();
       const diagSql = model.getValue();
       const diagMarkers: DiagMarker[] = [];
 
       try {
-        // Structural syntax check (unclosed strings, parens, scripting assignments).
-        // Runs in the Go backend to protect the proprietary tokenizer logic.
         const syntaxErrors = await AnalyzeSqlSyntax(diagSql);
         if (model.getVersionId() !== diagVersion) return;
         diagMarkers.push(...(syntaxErrors as DiagMarker[]));
 
         if (syntaxErrors.length === 0) {
-          // Grammar check via node-sql-parser (Snowflake dialect).
-          // Shown as Warnings because some valid Snowflake syntax may not be
-          // supported by the parser and would otherwise produce false positives.
           diagMarkers.push(...validateWithParser(diagSql));
 
           const rawRefs = await ParseJoinTableRefs(diagSql);
           if (model.getVersionId() !== diagVersion) return;
           const storeObjs = useObjectStore.getState().objects;
-          // Resolve refs without the >= 2 constraint so single-table queries are validated.
-          const resolved: ResolvedRef[] = rawRefs
+          
+          // CRITICAL FIX: Add fallback || [] to avoid mapping over null
+          const resolved: ResolvedRef[] = (rawRefs || [])
             .map((ref) => {
               if (ref.db && ref.schema) {
                 return { db: ref.db, schema: ref.schema, name: ref.name, alias: ref.alias };
@@ -835,9 +693,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             })
             .filter(Boolean) as ResolvedRef[];
 
-          // Proactively warm colInfoCache for any resolved FROM table whose columns
-          // haven't been fetched yet.  Once the fetch resolves, re-run diagnostics
-          // immediately so column validation can proceed with a warm cache.
           for (const ref of resolved) {
             const warmKey = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
             if (!colInfoCache.has(warmKey) && !fetchingColInfos.has(warmKey)) {
@@ -849,7 +704,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           }
 
           if (resolved.length > 0) {
-            // Semantic check (alias.column validation) runs in the Go backend.
             const colEntries = resolved.map((ref) => {
               const key = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
               return { db: ref.db, schema: ref.schema, name: ref.name, cols: colInfoCache.get(key) ?? [] };
@@ -859,19 +713,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             diagMarkers.push(...(semanticMarkers as DiagMarker[]));
           }
 
-          // Validate bare and double-quoted column names in SELECT lists against
-          // colInfoCache (catches bare `wrong_col` and `"wrong_col"` typos).
           diagMarkers.push(...validateBareColumnRefs(diagSql, resolved, colInfoCache));
         }
       } catch (err) {
-        // A backend IPC call rejected or a parser threw.  Log and fall through
-        // to finally so stale markers are cleared rather than left stuck.
         console.warn("[thaw] SQL diagnostics aborted:", err);
       } finally {
-        // Guarantee setModelMarkers fires whether validation succeeded, threw,
-        // or an early return (version mismatch) triggered it.
-        // Early returns inside the try block still execute finally — the version
-        // check here ensures we do NOT overwrite a newer run's results.
         if (model.getVersionId() === diagVersion) {
           monaco.editor.setModelMarkers(model, "thaw-sql", diagMarkers);
         }
@@ -883,22 +729,13 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       diagTimerRef.current = setTimeout(runDiagnostics, 400);
     });
 
-    // Clear markers when language changes (e.g. Python or YAML tab)
     editor.onDidChangeModelLanguage(() => {
       const model = editor.getModel();
       if (model) monaco.editor.setModelMarkers(model, "thaw-sql", []);
     });
 
-    // Run immediately on mount (catches errors in restored tabs)
     runDiagnostics();
 
-    // ── Clipboard (WKWebView fix) ─────────────────────────────────────────
-    // WKWebView blocks navigator.clipboard.readText/writeText (async Clipboard
-    // API), so Monaco's built-in copy/paste silently fails.
-    // Override the three clipboard keybindings inside Monaco's own command
-    // system so Monaco never reaches its async clipboard code.
-
-    // Shared implementations used by both keyboard and context-menu paths.
     const doPaste = async () => {
       const text = await ClipboardGetText();
       if (!text) return;
@@ -927,13 +764,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       editor.pushUndoStop();
     };
 
-    // Context-menu paste: Monaco's context menu calls commandService.executeCommand()
-    // directly. Patch the editor's internal command service so paste/copy/cut from
-    // the context menu use the Wails native clipboard.
-    // Only patch for the primary editor: _commandService is shared across all Monaco
-    // editor instances in the same window. The keyboard shortcuts (Cmd+V/C/X) are
-    // handled via a capture-phase DOM listener below, which is per-editor and does
-    // not have this sharing problem.
     if (!tabId) {
       const cs = (editor as any)._commandService;
       if (cs && typeof cs.executeCommand === "function") {
@@ -949,8 +779,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       }
     }
 
-    // ── Editor keyboard shortcuts ──────────────────────────────────────────
-    // Explicitly bind these so WKWebView doesn't intercept them before Monaco.
     const trigger = (id: string) => editor.trigger("keyboard", id, null);
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Slash,                      () => trigger("editor.action.commentLine"));
     editor.addCommand(monaco.KeyMod.Shift   | monaco.KeyMod.Alt | monaco.KeyCode.KeyA,   () => trigger("editor.action.blockComment"));
@@ -958,13 +786,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyF,                       () => trigger("actions.find"));
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyD,                       () => trigger("editor.action.addSelectionToNextFindMatch"));
     editor.addCommand(monaco.KeyMod.WinCtrl | monaco.KeyCode.KeyG,                       () => trigger("editor.action.gotoLine"));
-    // ⌘L / Ctrl+L — focus AI chat (overrides Monaco's "select line" in the editor).
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyL,                       () => { window.dispatchEvent(new Event("thaw:focus-ai-chat")); });
-    // ⌘↓ / Ctrl+↓ — focus results panel.
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.DownArrow,                  () => { window.dispatchEvent(new Event("thaw:focus-results")); });
-    // ⌘⌥↑ / Ctrl+Alt+↑ — add cursor above (matches VS Code)
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.UpArrow,   () => trigger("editor.action.insertCursorAbove"));
-    // ⌘⌥↓ / Ctrl+Alt+↓ — add cursor below (matches VS Code)
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.DownArrow, () => trigger("editor.action.insertCursorBelow"));
 
     monaco.languages.registerCompletionItemProvider("sql", {
@@ -978,26 +802,21 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           endColumn:       word.endColumn,
         };
 
-        // Text on the current line up to (but not including) the current word —
-        // used to detect whether the user is typing after a dot qualifier.
         const lineUpToWord = model
           .getLineContent(position.lineNumber)
           .substring(0, word.startColumn - 1);
 
-        // ── db.schema.table. → suggest columns ──────────────────────────
         const threePartMatch = lineUpToWord.match(/\b(\w+)\.(\w+)\.(\w+)\.\s*$/i);
         if (threePartMatch) {
           const [, db, schema, table] = threePartMatch;
           return { suggestions: mkColSuggestions(await getColumns(db, schema, table), range, monaco) };
         }
 
-        // ── db.schema. → suggest objects in that schema ──────────────────
         const twoPartMatch = lineUpToWord.match(/\b(\w+)\.(\w+)\.\s*$/i);
         if (twoPartMatch) {
           const [, db, schema] = twoPartMatch;
           const schemaKey = `${UC(db)}\0${UC(schema)}`;
 
-          // If `db` is not a known database, treat this as schema.table. → columns
           if (!useObjectStore.getState().databases.some((d) => UC(d) === UC(db))) {
             const colObj = useObjectStore.getState().objects.find(
               (o) => UC(o.schema) === UC(db) && UC(o.name) === UC(schema) &&
@@ -1020,7 +839,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                 (fetched ?? []).map((o) => ({ name: o.name, kind: (o.kind || "OTHER").toUpperCase() })),
               );
             } catch {
-              fetchedSchemaObjects.delete(schemaKey); // allow retry on next keystroke
+              fetchedSchemaObjects.delete(schemaKey); 
             }
           }
 
@@ -1037,13 +856,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           };
         }
 
-        // ── db. → suggest schemas of that database ────────────────────────
         const onePartMatch = lineUpToWord.match(/\b(\w+)\.\s*$/i);
         if (onePartMatch) {
           const [, qualifier] = onePartMatch;
           const { databases, schemas, objects } = useObjectStore.getState();
 
-          // Is the qualifier a known database?
           const isKnownDb = databases.some((db) => UC(db) === UC(qualifier));
           if (isKnownDb) {
             const dbSchemas = schemas.filter((s) => UC(s.db) === UC(qualifier));
@@ -1069,7 +886,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             };
           }
 
-          // Is the qualifier a known schema? → suggest its objects
           const schemaObjs = objects.filter((o) => UC(o.schema) === UC(qualifier));
           if (schemaObjs.length > 0) {
             return {
@@ -1083,7 +899,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             };
           }
 
-          // Is the qualifier a known table/view? → suggest its columns
           const colObjs = objects.filter(
             (o) => UC(o.name) === UC(qualifier) && (o.kind === "TABLE" || o.kind === "VIEW")
           );
@@ -1100,18 +915,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           }
         }
 
-        // ── JOIN ON → suggest FK / same-name-column conditions ──────────────
-        // Detect whether the cursor is inside a JOIN … ON clause.
-        // Strategy: scan full text-to-cursor rather than relying on
-        // getWordUntilPosition, which behaves unpredictably after `"` (quoted
-        // identifier start) and varies across Monaco versions.
-        // When no alias is used, ref.alias defaults to the table name, so
-        // suggestions appear as  TABLE1.col = TABLE2.col  rather than a.col = b.col.
         const cursorOffset = model.getOffsetAt(position);
         const textToCursor = model.getValue().slice(0, cursorOffset);
 
-        // Find the last JOIN keyword in the text, then check whether ON appears
-        // after it with no intervening clause keyword (WHERE, GROUP, ORDER, …).
         const isInJoinOnClause = (() => {
           const joinMatches = [...textToCursor.matchAll(/\bJOIN\b/gi)];
           if (joinMatches.length === 0) return false;
@@ -1120,21 +926,19 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           const onMatch = afterLastJoin.match(/\bON\b/i);
           if (!onMatch) return false;
           const afterOn = afterLastJoin.slice(onMatch.index! + onMatch[0].length);
-          // Still in ON clause if no JOIN/WHERE/GROUP/ORDER/HAVING/UNION/… follows
           return !/\b(?:JOIN|WHERE|GROUP|ORDER|HAVING|UNION|INTERSECT|EXCEPT)\b/i.test(afterOn);
         })();
 
         const wordIsOn = word.word.toUpperCase() === "ON";
         if (wordIsOn || isInJoinOnClause) {
           const rawRefs = await ParseJoinTableRefs(textToCursor);
-          if ((rawRefs as any[]).length >= 2) {
+          // CRITICAL FIX: Add null check before accessing length
+          if (rawRefs && (rawRefs as any[]).length >= 2) {
             const resolvedRefs = resolveRefs(rawRefs as any[], useObjectStore.getState().objects);
             if (resolvedRefs && resolvedRefs.length >= 2) {
-              // Warm up FKs for all involved schemas (background, non-blocking)
               for (const ref of resolvedRefs) {
                 warmUpFKsForSchema(ref.db, ref.schema).catch(() => {});
               }
-              // Collect FK and column data for all involved tables
               const fkEntries: any[] = [];
               const colEntries: any[] = [];
               for (const ref of resolvedRefs) {
@@ -1156,16 +960,14 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           }
         }
 
-        // ── Trigger C: Ctrl+Space after JOIN table (before ON is typed) ─────
-        // Detect: last JOIN clause in text-to-cursor has no ON / USING yet.
-        // Reuses textToCursor computed above.
         {
           const lastJoinSegment = (textToCursor.split(/\bJOIN\b/i).pop() ?? "").trim();
           const rawRefsC = await ParseJoinTableRefs(textToCursor);
+          // CRITICAL FIX: Add null check to rawRefsC
           const hasTriggerC =
             lastJoinSegment.length > 0 &&
             !/\b(?:ON|USING)\b/i.test(lastJoinSegment) &&
-            (rawRefsC as any[]).length >= 2;
+            rawRefsC && (rawRefsC as any[]).length >= 2;
 
           if (hasTriggerC) {
             const resolvedC = resolveRefs(rawRefsC as any[], useObjectStore.getState().objects);
@@ -1192,12 +994,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           }
         }
 
-        // ── No qualifier → keywords + databases + all object names ────────
         const { databases, schemas, objects } = useObjectStore.getState();
         const fullContent = model.getValue();
         const offset = model.getOffsetAt(position);
         
-        // Extract declared variables from the current document
         const declaredVars = extractDeclaredVariables(fullContent);
         const needsColon = isColonRequired(fullContent, offset);
 
@@ -1212,6 +1012,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           label:      needsColon ? ":" + v : v,
           kind:       monaco.languages.CompletionItemKind.Variable,
           insertText: needsColon ? ":" + v : v,
+          filterText: needsColon ? ":" + v : v, 
           detail:     "SCRIPT VARIABLE",
           range,
         }));
@@ -1240,22 +1041,13 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           range,
         }));
 
-        // ── Context columns: scan FROM/JOIN refs in the current query ────
-        // Use the column cache SYNCHRONOUSLY so Monaco sees results immediately.
-        // If a table's columns are not yet cached, fire a background fetch so
-        // the NEXT Ctrl+Space press will find them in the cache.
-        // Scan the full editor text so FROM/JOIN refs below the cursor
-        // (e.g. when completing inside a SELECT list) are also found.
         const fullTextToCursor = model.getValue();
 
-        // Matches quoted ("IDENT") and unquoted identifiers in FROM/JOIN clauses.
-        // Handles: db.schema.table | schema.table | table (each part quoted or unquoted)
         const ID_PAT = `(?:"[^"]+"|\\w+)`;
         const tableRefRe = new RegExp(
           `(?:FROM|JOIN)\\s+(?:(${ID_PAT})\\.(${ID_PAT})\\.(${ID_PAT})|(${ID_PAT})\\.(${ID_PAT})|(${ID_PAT}))`,
           "gi"
         );
-        // Strip surrounding double-quotes from a captured identifier group.
         const stripQ = (s: string | undefined) =>
           s ? (s.startsWith('"') ? s.slice(1, -1) : s) : undefined;
 
@@ -1284,7 +1076,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           for (const obj of matchedObjs) {
             const cacheKey = `${UC(obj.db)}\0${UC(obj.schema)}\0${UC(obj.name)}`;
             if (columnCache.has(cacheKey)) {
-              // Columns already cached — add synchronously
               for (const col of columnCache.get(cacheKey)!) {
                 if (!seenColKeys.has(UC(col))) {
                   seenColKeys.add(UC(col));
@@ -1298,14 +1089,12 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                 }
               }
             } else {
-              // Not cached yet — fire background fetch; columns appear on next Ctrl+Space
               getColumns(obj.db, obj.schema, obj.name);
               fetchPending = true;
             }
           }
         }
 
-        // ── Function completions (only when not inside a dotted context) ────
         let fnSuggestions: any[] = [];
         if (word.word.length >= 2 && !lineUpToWord.trim().endsWith(".")) {
           try {
@@ -1323,37 +1112,45 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
               }));
             }
           } catch {
-            // best-effort — silently ignore if store is not ready
+            // best-effort
           }
         }
 
+        const testSuggestion = {
+          label:      "my_value",
+          kind:       monaco.languages.CompletionItemKind.Text,
+          insertText: "my_value",
+          filterText: "my_value",
+          detail:     "HARDCODED TEST",
+          range,
+        };
+
         return {
-          suggestions: [...variableSuggestions, ...contextColSuggestions, ...keywordSuggestions, ...dbSuggestions, ...schemaSuggestions, ...objectSuggestions, ...fnSuggestions],
-          // Tell Monaco these results may be incomplete so it re-queries on next invocation
+          suggestions: [
+            testSuggestion,
+            ...variableSuggestions, 
+            ...contextColSuggestions, 
+            ...keywordSuggestions, 
+            ...dbSuggestions, 
+            ...schemaSuggestions, 
+            ...objectSuggestions, 
+            ...fnSuggestions
+          ],
           incomplete: fetchPending,
         };
       },
     });
 
-    // ── Object definition hover (custom React overlay) ───────────────────
-    // Dispose any previously registered Monaco hover provider from a prior mount.
     if (hoverProviderDisposable) {
       hoverProviderDisposable.dispose();
       hoverProviderDisposable = null;
     }
 
     editor.onMouseMove((e: any) => {
-      // Track mouse Y for both the SQL custom overlay and the YAML adjuster below.
       currentMouseYRef.current = (e.event as any).posy ?? 0;
 
-      // YAML hover nudge: Monaco's built-in hover anchors to the token line, so
-      // it can sit under the cursor arrow.  After Monaco's hover delay (≈300 ms)
-      // we find the widget in the DOM, check for overlap, and nudge it clear.
       const model = editor.getModel();
       if (model?.getLanguageId() === "yaml") {
-        // If we already positioned the tooltip and our value is still in effect,
-        // don't restart the timer — this lets the user move their cursor onto the
-        // tooltip without it chasing the pointer.
         if (yamlHoverSetTopRef.current !== null) {
           const dom = editor.getDomNode();
           const hoverEl = (
@@ -1364,17 +1161,13 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
           const currentStyleTop = hoverEl ? (parseFloat(hoverEl.style.top) || 0) : null;
           if (currentStyleTop !== null && Math.abs(currentStyleTop - yamlHoverSetTopRef.current) < 5) {
-            // Our adjustment is still in effect — leave the tooltip where it is.
             return;
           }
-          // Monaco repositioned the widget (new hover instance) — reset and re-adjust.
           yamlHoverSetTopRef.current = null;
         }
 
         if (yamlHoverAdjustTimerRef.current) clearTimeout(yamlHoverAdjustTimerRef.current);
 
-        // Poll every 50 ms (up to 12 attempts ≈ 600 ms) so we reposition the
-        // widget as soon as Monaco renders it, avoiding a visible jump.
         const tryAdjust = (attemptsLeft: number) => {
           const dom = editor.getDomNode();
           const hoverEl = (
@@ -1406,7 +1199,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             ? mouseY + CLEAR
             : Math.max(0, mouseY - CLEAR - rect.height);
           if (Math.abs(rect.top - desiredTop) < 2) {
-            // Already in position — record it so we don't re-adjust on next mousemove.
             yamlHoverSetTopRef.current = parseFloat(hoverEl.style.top) || 0;
             return;
           }
@@ -1420,15 +1212,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         return;
       }
 
-      // SQL-only overlay: suppress for Python/other tabs.
       if (model && model.getLanguageId() !== "sql") return;
 
       const pos = e.target?.position;
       const parts = (pos && model) ? getQualifiedIdent(model, pos) : null;
 
-      // Allow hover timer to fire when the cursor is over a diagnostic marker
-      // even if the position isn't inside a recognised identifier (e.g. a lone
-      // quote character that opens an unclosed string).
       const diagMarkerAtPos = (pos && model)
         ? (monaco.editor.getModelMarkers({ owner: "thaw-sql", resource: model.uri }).find((m: any) =>
             pos.lineNumber >= m.startLineNumber && pos.lineNumber <= m.endLineNumber &&
@@ -1437,8 +1225,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         : null;
 
       if ((!parts || parts.length === 0) && !diagMarkerAtPos) {
-        // Mouse moved off any recognisable identifier or marker — cancel the
-        // pending show timer so it doesn't fire after the mouse has left.
         lastHoverWordRef.current = null;
         if (hoverTimerRef.current) { clearTimeout(hoverTimerRef.current); hoverTimerRef.current = null; }
         if (!isOnTooltipRef.current) scheduleHide();
@@ -1446,12 +1232,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       }
 
       cancelHide();
-
-      // Always update the latest position so the tooltip appears where the
-      // mouse currently is, even if it moved within the same word.
       currentHoverPosRef.current = pos;
 
-      // Only restart the timer when the hovered word (or marker) changes.
       const wordKey = (parts && parts.length > 0)
         ? parts.join("\0")
         : `marker:${diagMarkerAtPos!.startLineNumber}:${diagMarkerAtPos!.startColumn}`;
@@ -1461,16 +1243,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
 
       hoverTimerRef.current = setTimeout(async () => {
-        // Bail if the mouse has already moved to a different word (or off-word)
-        // since this timer was scheduled.
         if (lastHoverWordRef.current !== wordKey) return;
-
-        // Use the most recent position so the tooltip is anchored to wherever
-        // the mouse is now (may have moved within the same word).
         const pos = currentHoverPosRef.current;
         if (!pos) return;
 
-        // ── Diagnostic marker tooltip (highest priority) ───────────────────
         {
           const mModel = editor.getModel();
           if (mModel) {
@@ -1502,18 +1278,15 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           }
         }
 
-        // If we arrived here via a marker-only path (no identifier), nothing
-        // further to show — the marker check above already handled or skipped it.
         if (!parts || parts.length === 0) return;
 
         const { objects } = useObjectStore.getState();
-
         let db = "", schema = "", kind = "", name = "", ddl = "";
 
-        // ── alias.column hover ─────────────────────────────────────────────
         if (parts.length === 2) {
           const rawRefs = await ParseJoinTableRefs(editor.getModel()?.getValue() ?? "");
-          const resolved = resolveRefs(rawRefs as any[], useObjectStore.getState().objects);
+          // CRITICAL FIX: Add fallback array
+          const resolved = resolveRefs((rawRefs || []) as any[], useObjectStore.getState().objects);
           const matchedTable = resolved?.find(
             (r) => r.alias.toUpperCase() === parts[0].toUpperCase(),
           );
@@ -1541,23 +1314,17 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                   x, y,
                 });
               }
-              return; // handled — skip TABLE DDL lookup
+              return; 
             }
           }
-          // alias not recognised or column not in cache → fall through to SCHEMA.TABLE DDL
         }
 
         if (parts.length >= 3) {
-          // 3-part: DB.SCHEMA.TABLE — use last three parts
           const [pDb, pSchema, pName] = [
             parts[parts.length - 3],
             parts[parts.length - 2],
             parts[parts.length - 1],
           ];
-          // If this schema's objects aren't loaded yet, fetch them now so we
-          // know the kind before calling GET_DDL. This avoids a failed
-          // GET_DDL('TABLE',...) attempt on a VIEW (and vice versa) which the
-          // gosnowflake driver logs at ERROR level even when caught gracefully.
           const schemaKey = `${UC(pDb)}\0${UC(pSchema)}`;
           const hasSchemaInStore = useObjectStore.getState().objects
             .some((o) => UC(o.db) === UC(pDb) && UC(o.schema) === UC(pSchema));
@@ -1583,15 +1350,12 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             setDdlHover(null); return;
           }
         } else if (parts.length === 2) {
-          // 2-part: SCHEMA.TABLE
           const [qualifier, pName] = [parts[0], parts[1]];
           let inStore = objects.find(
             (o) => UC(o.schema) === UC(qualifier) && UC(o.name) === UC(pName) &&
                    (o.kind === "TABLE" || o.kind === "VIEW"),
           );
           if (!inStore) {
-            // Objects for this schema may not be loaded yet — try auto-loading
-            // using the current session database.
             const sessDb = useSessionStore.getState().database;
             if (sessDb) {
               const schemaKey = `${UC(sessDb)}\0${UC(qualifier)}`;
@@ -1614,8 +1378,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           if (!inStore) { setDdlHover(null); return; }
           db = inStore.db; schema = inStore.schema; kind = inStore.kind; name = inStore.name;
         } else {
-          // 1-part: name only — look in any loaded schema first, then auto-load
-          // from the current session's database+schema if needed.
           let inStore = objects.find(
             (o) => UC(o.name) === UC(parts[0]) && (o.kind === "TABLE" || o.kind === "VIEW"),
           );
@@ -1640,7 +1402,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             }
           }
           if (!inStore) {
-            // Not a TABLE/VIEW — check if it's a known Snowflake function.
             try {
               const fns = await GetFunctionTooltip(parts[0]);
               if (fns && fns.length > 0) {
@@ -1669,7 +1430,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           db = inStore.db; schema = inStore.schema; kind = inStore.kind; name = inStore.name;
         }
 
-        // Fetch DDL from cache or API (skip if already resolved by direct 3-part fetch above)
         if (!ddl) {
           const cacheKey = `${db}\0${schema}\0${kind}\0${name}`;
           const cached = hoverDDLCache.get(cacheKey);
@@ -1697,9 +1457,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const x = Math.min(rawX, window.innerWidth - 570);
         const y = fitsBelow ? mouseY + 24 : Math.max(0, mouseY - 24 - 320);
 
-        // Cancel any pending hide before showing — prevents a race where the
-        // mouse crossed the word quickly, scheduleHide() was called, and its
-        // 400 ms timer would dismiss the tooltip right after it appears.
         if (hoverHideTimerRef.current) { clearTimeout(hoverHideTimerRef.current); hoverHideTimerRef.current = null; }
         setDdlHover({ ddl, kind, db, schema, name, x, y });
       }, 200);
@@ -1707,24 +1464,22 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
     editor.onMouseLeave(() => {
       lastHoverWordRef.current = null;
-      yamlHoverSetTopRef.current = null; // reset so next hover entry triggers fresh positioning
+      yamlHoverSetTopRef.current = null; 
       if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
       if (!isOnTooltipRef.current) scheduleHide();
     });
 
-    // ── AI inline completions ─────────────────────────────────────────────
     if (!inlineCompletionsDisposable) {
       inlineCompletionsDisposable = monaco.languages.registerInlineCompletionsProvider("sql", {
         provideInlineCompletions: async (model: any, position: any, _ctx: any, token: any) => {
-          // ── Trigger A: ghost text after JOIN table (before ON is typed) ───
           const prefixFull = model.getValue().slice(0, model.getOffsetAt(position));
           const lastJoinSeg = (prefixFull.split(/\bJOIN\b/i).pop() ?? "").trim();
           if (lastJoinSeg.length > 0 && !/\b(?:ON|USING)\b/i.test(lastJoinSeg)) {
             const ghostRefs = await ParseJoinTableRefs(prefixFull);
-            if ((ghostRefs as any[]).length >= 2) {
+            // CRITICAL FIX: Add null check
+            if (ghostRefs && (ghostRefs as any[]).length >= 2) {
               const resolved = resolveRefs(ghostRefs as any[], useObjectStore.getState().objects);
               if (resolved && resolved.length >= 2) {
-                // Use cache only — no network calls for inline ghost text
                 const fkEntries = resolved.map((ref) => ({
                   db: ref.db, schema: ref.schema, name: ref.name,
                   fks: fkCache.get(`${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`) ?? [],
@@ -1743,7 +1498,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
               }
             }
           }
-          // fall through to AI suggestion ─────────────────────────────────────
 
           const prefix = model.getValueInRange({
             startLineNumber: Math.max(1, position.lineNumber - 30),
@@ -1763,9 +1517,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       });
     }
 
-    // ── Parameter signature help ──────────────────────────────────────────
-    // Shows the function signature popup with the active parameter bolded
-    // when the user types '(' or ',' inside a known Snowflake function call.
     if (!signatureHelpDisposable) {
       signatureHelpDisposable = monaco.languages.registerSignatureHelpProvider("sql", {
         signatureHelpTriggerCharacters:   ["(", ","],
@@ -1789,8 +1540,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             parameters:    parseSignatureParams(fn.functionSignature).map(([s, e]) => ({ label: [s, e] as [number, number] })),
           }));
 
-          // Preserve the user's overload choice on retrigger; otherwise pick
-          // the overload with the fewest params that still covers paramIndex.
           let activeSignature = context?.activeSignatureHelp?.activeSignature ?? 0;
           if (!context?.activeSignatureHelp) {
             let best = Infinity;
@@ -1808,9 +1557,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       });
     }
 
-    // ── Selection highlight ───────────────────────────────────────────────
-    // When text is selected, find every other occurrence in the document and
-    // decorate it with a coloured background so they are easy to spot.
     const occurrences = editor.createDecorationsCollection([]);
 
     const refreshOccurrences = () => {
@@ -1824,7 +1570,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
       const selectedText = model.getValueInRange(selection);
 
-      // Ignore whitespace-only or single-character selections.
       if (selectedText.trim().length < 2) {
         occurrences.clear();
         return;
@@ -1832,16 +1577,15 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
       const matches = model.findMatches(
         selectedText,
-        true,   // searchOnlyEditableRange
-        false,  // isRegex
-        true,   // matchCase
-        null,   // wordSeparators (null = substring, no word boundary)
-        false,  // captureMatches
+        true,   
+        false,  
+        true,   
+        null,   
+        false,  
       );
 
       occurrences.set(
         matches
-          // Exclude the range the user has actively selected.
           .filter((m) => !selection.equalsRange(m.range))
           .map((m) => ({
             range: m.range,
@@ -1856,7 +1600,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       );
     };
 
-    // Track selection so QueryPage knows what to run, and refresh highlights.
     editor.onDidChangeCursorSelection(() => {
       const selection = editor.getSelection();
       const selected  = selection && !selection.isEmpty()
@@ -1866,30 +1609,21 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       refreshOccurrences();
     });
 
-    // Cmd+Enter / Ctrl+Enter → run query
     editor.addCommand(
       monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
       () => window.dispatchEvent(new CustomEvent("run-query"))
     );
 
-    // Cmd+S / Ctrl+S → save file
     editor.addCommand(
       monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
       () => window.dispatchEvent(new CustomEvent("save-file"))
     );
 
-    // ── Code Snippets cascading context menu ──────────────────────────────
-    // The submenu is registered at module load time via MenuRegistry, so
-    // Monaco's built-in menu builder handles the ▶ indicator and hover
-    // cascade.  All we need per-editor is to record which editor the user
-    // right-clicked, so the global snippet commands know where to insert.
     editor.onContextMenu(() => { _activeSnippetEditor = editor; });
     editor.onDidDispose(() => {
       if (_activeSnippetEditor === editor) _activeSnippetEditor = null;
     });
 
-    // Toggle Line Comment → right-click context menu entry only (no keybinding here;
-    // the shortcut is handled via a native keydown listener below to avoid WKWebView capture).
     editor.addAction({
       id: "thaw.toggleLineComment",
       label: "Toggle Line Comment",
@@ -1898,8 +1632,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       run: (ed) => ed.trigger("keyboard", "editor.action.commentLine", null),
     });
 
-    // Format SQL — applies sql-formatter with the current EditorPrefs.
-    // Formats the selection when text is selected; otherwise formats the whole document.
     editor.addAction({
       id: "thaw.formatSQL",
       label: "Format SQL",
@@ -1937,14 +1669,12 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       },
     });
 
-    // thaw:scroll-to-line → jump to a specific line and highlight the match (used by file search)
     const handleScrollToLine = (e: Event) => {
       const { line, matchStart, matchEnd } =
         (e as CustomEvent<{ line: number; matchStart?: number; matchEnd?: number }>).detail;
       if (typeof line !== "number") return;
       editor.revealLineInCenter(line);
       if (typeof matchStart === "number" && typeof matchEnd === "number") {
-        // Monaco columns are 1-based; matchStart/matchEnd are 0-based byte offsets.
         editor.setSelection({
           startLineNumber: line,
           startColumn:     matchStart + 1,
@@ -1957,42 +1687,26 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     };
     window.addEventListener("thaw:scroll-to-line", handleScrollToLine);
 
-    // ── Drag-and-drop from sidebar / panels ──────────────────────────────
-    // TABLE/VIEW nodes set "thaw/table"; user rows set "thaw/user".
     const editorDom = editor.getDomNode();
     if (editorDom) {
-      // Native keydown listener — handles shortcuts that WKWebView intercepts
-      // before Monaco's own keybinding layer sees them.
-      // Font-size shortcuts use e.key (the printed character) so they work
-      // correctly on non-US keyboard layouts such as Finnish, where e.code
-      // positions differ from the US layout (e.g. Finnish "+" is e.code=Minus).
       editorDom.addEventListener("keydown", (e: KeyboardEvent) => {
         if (!(e.metaKey || e.ctrlKey)) return;
-        // Cmd++ / Cmd+= → increase font size
         if (e.key === "+" || e.key === "=") {
           e.preventDefault();
           setEditorFontSize(Math.min(fontSizeRef.current + 1, 32));
           return;
         }
-        // Cmd+- → decrease font size
         if (e.key === "-") {
           e.preventDefault();
           setEditorFontSize(Math.max(fontSizeRef.current - 1, 8));
           return;
         }
-        // Cmd+0 → reset font size to default
         if (e.key === "0") {
           e.preventDefault();
           setEditorFontSize(14);
         }
       });
 
-      // Clipboard shortcuts — use a capture-phase listener so this fires before
-      // Monaco's internal keyboard handler (which runs on the textarea inside
-      // editorDom). stopPropagation() prevents the event from reaching the
-      // textarea, so Monaco never sees Cmd+V/C/X and doesn't call the shared
-      // _commandService. Each editor's editorDom is a separate DOM node, so
-      // capture listeners here are definitively per-editor instance.
       editorDom.addEventListener("keydown", (e: KeyboardEvent) => {
         if (!(e.metaKey || e.ctrlKey)) return;
         switch (e.key.toLowerCase()) {
@@ -2010,7 +1724,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         }
       });
 
-      // ── user DDL drop ─────────────────────────────────────────────────
       editorDom.addEventListener("drop", async (e: DragEvent) => {
         const rawUser = e.dataTransfer?.getData("thaw/user");
         if (rawUser) {
@@ -2041,7 +1754,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         }
       });
 
-      // ── table/view SELECT drop ────────────────────────────────────────
       editorDom.addEventListener("drop", async (e: DragEvent) => {
         const raw = e.dataTransfer?.getData("thaw/table");
         if (!raw) return;
@@ -2076,8 +1788,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     }
   };
 
-  // ── Active-statement decoration ──────────────────────────────────────────
-  // Highlights the statement currently being executed in a multi-statement run.
   useEffect(() => {
     const dec = activeStmtDecRef.current;
     if (!dec) return;
@@ -2104,7 +1814,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         linesDecorationsClassName: "sql-active-stmt-indicator",
         overviewRuler: {
           color:    "rgba(210, 153, 34, 0.8)",
-          position: 4, // monaco.editor.OverviewRulerLane.Full
+          position: 4, 
         },
       },
     }]);
@@ -2132,19 +1842,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         wordWrap: "on",
         tabSize: 2,
         automaticLayout: true,
-        // Disable Monaco's built-in outline-only selection highlight; we use
-        // our own filled-background decorations via refreshOccurrences().
         selectionHighlight: false,
-        // Keep Monaco's word-under-cursor highlight for single clicks.
         occurrencesHighlight: "singleFile",
-        // SQL: disable Monaco's built-in hover widget; we render our own
-        // overlay so we can support scrolling and a copy button.
-        // YAML: enable the built-in hover so monaco-yaml can show schema
-        // documentation from the bundled dbt-jsonschema schemas.
         hover: { enabled: editorLanguage === "yaml" },
-        // YAML values are classified as string tokens by Monaco's tokenizer,
-        // so the default quickSuggestions (strings: false) suppresses
-        // schema-driven completions mid-value.  Enable them for YAML only.
         quickSuggestions: editorLanguage === "yaml"
           ? { other: true, comments: false, strings: true }
           : { other: true, comments: false, strings: false },
@@ -2159,13 +1859,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         onMouseEnter={() => { isOnTooltipRef.current = true; cancelHide(); }}
         onMouseDown={() => { isMouseDownRef.current = true; }}
         onMouseUp={() => {
-          // Save selection now, before a right-click can clear window.getSelection().
           const sel = window.getSelection()?.toString() ?? "";
           if (sel) savedSelRef.current = sel;
         }}
         onMouseLeave={() => {
           isOnTooltipRef.current = false;
-          // Don't hide while selecting text or context menu is open.
           if (!isMouseDownRef.current && !isCtxMenuOpenRef.current) setDdlHover(null);
         }}
         onContextMenu={(e) => {
@@ -2242,8 +1940,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
               if (tooltipCtxMenu.sel) ClipboardSetText(tooltipCtxMenu.sel);
               savedSelRef.current = "";
               setTooltipCtxMenu(null);
-              // Defer so the mouseleave fired when the menu div disappears is
-              // still guarded by isCtxMenuOpenRef before we clear it.
               setTimeout(() => { isCtxMenuOpenRef.current = false; }, 50);
             }}
           >
