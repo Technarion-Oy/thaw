@@ -620,7 +620,20 @@ func ValidateSyntax(sql string) []DiagMarker {
 			continue
 		}
 
-		// Any other character resets statement-start flags
+		// Any other character resets statement-start flags.
+		// If we are at a statement-start position and encounter a character that
+		// can never open a SQL or Snowflake Scripting statement, flag it as an
+		// error.  This catches placeholder/template text like <wrong_text> or
+		// {placeholder} that is accidentally left inside a script body.
+		//
+		// Angle brackets and curly braces are chosen because they are
+		// syntactically invalid at statement level in both outer SQL and
+		// Snowflake Scripting, yet common in template/placeholder patterns.
+		if (atStmtStart || atScriptStmtStart) &&
+			(ch == '<' || ch == '>' || ch == '{' || ch == '}') {
+			addError("Unexpected token '"+string(ch)+"'",
+				line, col, line, col+1)
+		}
 		atStmtStart = false
 		atScriptStmtStart = false
 		i++
