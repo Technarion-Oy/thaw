@@ -112,6 +112,8 @@ export function ExportTableData(arg1:snowflake.ExportTableParams):Promise<snowfl
 
 export function FetchNotebookContent(arg1:string,arg2:string,arg3:string):Promise<string>;
 
+export function FindSqlTokenPositions(arg1:string,arg2:Array<string>,arg3:Array<string>):Promise<Array<sqleditor.TokenMatch>>;
+
 export function GenerateKeyPair(arg1:string,arg2:string,arg3:string):Promise<main.KeyPairResult>;
 
 export function GenerateMigrationScript(arg1:Array<main.MigrationDiffItem>,arg2:string,arg3:main.TableMigrationStrategy):Promise<string>;
@@ -119,6 +121,8 @@ export function GenerateMigrationScript(arg1:Array<main.MigrationDiffItem>,arg2:
 export function GetAIConfig():Promise<config.AIConfig>;
 
 export function GetAISuggestion(arg1:string):Promise<string>;
+
+export function GetActiveFunctionCall(arg1:string):Promise<sqleditor.FunctionCallContext>;
 
 export function GetAllFunctionNames():Promise<Array<fnmeta.FunctionMeta>>;
 
@@ -148,6 +152,8 @@ export function GetFunctionTooltip(arg1:string):Promise<Array<fnmeta.FunctionMet
 
 export function GetGitConfig():Promise<config.GitConfig>;
 
+export function GetIdentifierAtColumn(arg1:string,arg2:number):Promise<Array<string>>;
+
 export function GetIntegrationProperties(arg1:string):Promise<Array<main.PropertyPair>>;
 
 export function GetNotebookCompletions(arg1:string,arg2:string,arg3:number,arg4:number):Promise<Array<main.NotebookCompletion>>;
@@ -172,6 +178,8 @@ export function GetSchemaCrossDeps(arg1:string,arg2:string):Promise<Array<snowfl
 
 export function GetSchemaForeignKeys(arg1:string,arg2:string):Promise<Array<snowflake.TableForeignKey>>;
 
+export function GetScriptingCompletions(arg1:string,arg2:number):Promise<sqleditor.ScriptingCompletionResult>;
+
 export function GetSessionContext():Promise<snowflake.SessionContext>;
 
 export function GetSessionParameters():Promise<Array<main.SessionParam>>;
@@ -183,6 +191,8 @@ export function GetSnowflakeCLIConfigPath():Promise<string>;
 export function GetSnowparkConfig():Promise<main.SnowparkConfigResult>;
 
 export function GetSnowsightURL():Promise<string>;
+
+export function GetSqlStatementRanges(arg1:string):Promise<Array<sqleditor.StatementRange>>;
 
 export function GetTableColumns(arg1:string,arg2:string,arg3:string):Promise<Array<string>>;
 
@@ -283,6 +293,8 @@ export function NewNotebook():Promise<string>;
 export function NotebookUseContext(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
 export function ParseJoinTableRefs(arg1:string):Promise<Array<sqleditor.JoinTableRef>>;
+
+export function ParseSignatureParams(arg1:string):Promise<Array<sqleditor.SignatureParam>>;
 
 export function PickDataFile():Promise<string>;
 

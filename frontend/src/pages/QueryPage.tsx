@@ -14,7 +14,7 @@ import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip,
 import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NewNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL } from "../../wailsjs/go/main/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NewNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, GetSqlStatementRanges } from "../../wailsjs/go/main/App";
 import type { main } from "../../wailsjs/go/models";
 import SessionPropertiesModal from "../components/common/SessionPropertiesModal";
 import SnippetsModal from "../components/snippets/SnippetsModal";
@@ -25,7 +25,7 @@ import FunctionCatalogModal from "../components/fnmeta/FunctionCatalogModal";
 import KeyboardShortcutsModal from "../components/help/KeyboardShortcutsModal";
 import { usePanelLayoutStore } from "../store/panelLayoutStore";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
-import SqlEditor, { getStatementLineRanges } from "../components/editor/SqlEditor";
+import SqlEditor from "../components/editor/SqlEditor";
 import TabBar from "../components/editor/TabBar";
 import { DiffEditor } from "@monaco-editor/react";
 import { ensureMonacoSetup } from "../components/editor/monacoSetup";
@@ -279,7 +279,7 @@ export default function QueryPage() {
       const offset = sql.indexOf(selectedSql);
       if (offset >= 0) {
         const linesBefore = sql.slice(0, offset).split("\n").length; // 1-based
-        const fullRanges = getStatementLineRanges(sql);
+        const fullRanges = await GetSqlStatementRanges(sql);
         const baseIdx = fullRanges.findIndex((r) => r.startLine >= linesBefore);
         selectionBaseStmtIdxRef.current = baseIdx >= 0 ? baseIdx : 0;
       } else {

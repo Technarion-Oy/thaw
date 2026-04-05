@@ -97,6 +97,30 @@ type JoinCondition struct {
 	SortText  string `json:"sortText"`
 }
 
+// TokenMatch is a located occurrence of a target token in a SQL string,
+// as returned by FindTokenPositions.
+type TokenMatch struct {
+	Name   string `json:"name"`   // bare word text, or inner content of a double-quoted identifier
+	Line   int    `json:"line"`   // 1-indexed line number
+	Col    int    `json:"col"`    // 1-indexed start column (includes opening '"' for quoted tokens)
+	EndCol int    `json:"endCol"` // 1-indexed end column, exclusive (includes closing '"' for quoted tokens)
+	Quoted bool   `json:"quoted"` // true for double-quoted identifiers, false for bare words
+}
+
+// FunctionCallContext is returned by GetActiveFunctionCall and identifies the
+// innermost open function call at the cursor position.
+type FunctionCallContext struct {
+	Name       string `json:"name"`       // function name (unquoted identifier)
+	ParamIndex int    `json:"paramIndex"` // 0-indexed parameter the cursor is on
+}
+
+// SignatureParam is the [Start, End) byte span of one parameter within a
+// function signature string, as returned by ParseSignatureParams.
+type SignatureParam struct {
+	Start int `json:"start"`
+	End   int `json:"end"`
+}
+
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 // SQL statement-starting keywords (outer, non-scripting context).
@@ -175,6 +199,594 @@ type parenEntry struct {
 	char string
 	line int
 	col  int
+}
+
+// ── StatementRange / GetStatementRanges ───────────────────────────────────────
+
+// StatementRange is the position of one SQL statement within a multi-statement string.
+type StatementRange struct {
+	StartLine   int `json:"startLine"`   // 1-indexed line of trimmed statement start
+	EndLine     int `json:"endLine"`     // 1-indexed line of trailing ';' (or last char)
+	StartOffset int `json:"startOffset"` // rune offset of trimmed statement start
+	EndOffset   int `json:"endOffset"`   // rune offset just past ';' (or end of string)
+}
+
+// GetStatementRanges splits sql into per-statement ranges by scanning
+// character-by-character.  Semicolons inside string literals, quoted
+// identifiers, block comments, line comments, and dollar-quoted blocks are
+// correctly ignored.  No Snowflake connection is required.
+func GetStatementRanges(sql string) []StatementRange {
+	var ranges []StatementRange
+
+	runes := []rune(sql)
+	n := len(runes)
+
+	line := 1 // current 1-indexed line number
+
+	// Position of the current statement's trimmed start (-1 = not yet started).
+	stmtStartLine := -1
+	stmtStartOffset := 0
+	inStmt := false
+
+	// Record the start of a new statement at rune index i.
+	// Called once per statement on the first non-whitespace, non-comment char.
+	startStmt := func(i int) {
+		if !inStmt {
+			stmtStartLine = line
+			stmtStartOffset = i
+			inStmt = true
+		}
+	}
+
+	// Emit the current statement ending at rune index endOffset (exclusive).
+	emit := func(endLine, endOffset int) {
+		if inStmt {
+			ranges = append(ranges, StatementRange{
+				StartLine:   stmtStartLine,
+				EndLine:     endLine,
+				StartOffset: stmtStartOffset,
+				EndOffset:   endOffset,
+			})
+			inStmt = false
+			stmtStartLine = -1
+		}
+	}
+
+	i := 0
+	for i < n {
+		ch := runes[i]
+
+		// ── Newline ────────────────────────────────────────────────────────
+		if ch == '\n' {
+			line++
+			i++
+			continue
+		}
+
+		// ── Whitespace ────────────────────────────────────────────────────
+		if ch == ' ' || ch == '\t' || ch == '\r' || ch == '\u00a0' {
+			i++
+			continue
+		}
+
+		// ── Line comment -- ───────────────────────────────────────────────
+		if ch == '-' && i+1 < n && runes[i+1] == '-' {
+			i += 2
+			for i < n && runes[i] != '\n' {
+				i++
+			}
+			continue
+		}
+
+		// ── Block comment /* */ ───────────────────────────────────────────
+		if ch == '/' && i+1 < n && runes[i+1] == '*' {
+			i += 2
+			for i < n {
+				if runes[i] == '\n' {
+					line++
+					i++
+				} else if runes[i] == '*' && i+1 < n && runes[i+1] == '/' {
+					i += 2
+					break
+				} else {
+					i++
+				}
+			}
+			continue
+		}
+
+		// All remaining chars belong to a statement; record its start.
+		startStmt(i)
+
+		// ── Single-quoted string '...' ────────────────────────────────────
+		if ch == '\'' {
+			i++
+			for i < n {
+				if runes[i] == '\n' {
+					line++
+					i++
+				} else if runes[i] == '\'' && i+1 < n && runes[i+1] == '\'' {
+					i += 2
+				} else if runes[i] == '\'' {
+					i++
+					break
+				} else {
+					i++
+				}
+			}
+			continue
+		}
+
+		// ── Double-quoted identifier "..." ────────────────────────────────
+		if ch == '"' {
+			i++
+			for i < n {
+				if runes[i] == '\n' {
+					line++
+					i++
+				} else if runes[i] == '"' && i+1 < n && runes[i+1] == '"' {
+					i += 2
+				} else if runes[i] == '"' {
+					i++
+					break
+				} else {
+					i++
+				}
+			}
+			continue
+		}
+
+		// ── Dollar-quoted block $tag$...$tag$ ─────────────────────────────
+		if ch == '$' {
+			tag := extractDollarTag(runes, i)
+			if tag != "" {
+				tagRunes := []rune(tag)
+				tagLen := len(tagRunes)
+				i += tagLen // skip opening tag
+				// Scan for the matching closing tag.
+				for i < n {
+					if runes[i] == '\n' {
+						line++
+						i++
+					} else if runes[i] == tagRunes[0] && i+tagLen <= n {
+						match := true
+						for k := 1; k < tagLen; k++ {
+							if runes[i+k] != tagRunes[k] {
+								match = false
+								break
+							}
+						}
+						if match {
+							i += tagLen
+							break
+						}
+						i++
+					} else {
+						i++
+					}
+				}
+				continue
+			}
+		}
+
+		// ── Semicolon: end of statement ───────────────────────────────────
+		if ch == ';' {
+			emit(line, i+1)
+			i++
+			continue
+		}
+
+		i++
+	}
+
+	// Emit trailing statement with no semicolon.
+	emit(line, n)
+
+	return ranges
+}
+
+// ── GetIdentifierAtColumn ─────────────────────────────────────────────────────
+
+// GetIdentifierAtColumn parses a single line of SQL and returns the
+// dot-separated identifier parts (e.g. ["DB","SCHEMA","TABLE"]) when the
+// zero-indexed cursor column col falls on or between any of those parts,
+// including the dot separators.  Double-quoted identifiers (e.g. "My Table")
+// are unquoted before being returned.  Returns nil when the column is not on
+// any identifier.
+func GetIdentifierAtColumn(line string, col int) []string {
+	runes := []rune(line)
+	n := len(runes)
+	i := 0
+	for i < n {
+		r := runes[i]
+		if r != '"' && !isWordRune(r) {
+			i++
+			continue
+		}
+
+		// Gather one dot-separated identifier chain starting at i.
+		parts := []string{}
+		containsCol := false
+
+		for i < n {
+			partStart := i
+			var partName []rune
+
+			if runes[i] == '"' {
+				i++ // skip opening quote
+				for i < n && runes[i] != '"' {
+					partName = append(partName, runes[i])
+					i++
+				}
+				if i < n {
+					i++ // skip closing quote
+				}
+			} else if isWordRune(runes[i]) {
+				for i < n && isWordRune(runes[i]) {
+					partName = append(partName, runes[i])
+					i++
+				}
+			} else {
+				break
+			}
+
+			parts = append(parts, string(partName))
+			if col >= partStart && col < i {
+				containsCol = true
+			}
+
+			// Continue chain if followed by '.' and then '"' or word rune.
+			if i < n && runes[i] == '.' {
+				if i+1 < n && (runes[i+1] == '"' || isWordRune(runes[i+1])) {
+					if col == i {
+						containsCol = true
+					}
+					i++ // skip '.'
+					continue
+				}
+			}
+			break
+		}
+
+		if containsCol && len(parts) > 0 {
+			return parts
+		}
+	}
+	return nil
+}
+
+// isWordRune reports whether r is a SQL word character (\w equivalent).
+func isWordRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+		(r >= '0' && r <= '9') || r == '_'
+}
+
+// isLetterOrUnderscore reports whether r can start an unquoted SQL identifier.
+func isLetterOrUnderscore(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '_'
+}
+
+// ── FindTokenPositions ────────────────────────────────────────────────────────
+
+// FindTokenPositions walks sql and returns the line/column positions of:
+//   - every unquoted bare word (not preceded by '.', not followed by '(')
+//     whose upper-cased form is in bareTargets
+//   - every double-quoted identifier whose upper-cased inner name is in quotedTargets
+//
+// Single-quoted strings ('...'), line comments (--), and block comments (/* */)
+// are transparently skipped so tokens inside them are never reported.
+// Line and Col are 1-indexed, matching Monaco editor coordinates.
+func FindTokenPositions(sql string, bareTargets []string, quotedTargets []string) []TokenMatch {
+	bareSet := make(map[string]struct{}, len(bareTargets))
+	for _, t := range bareTargets {
+		bareSet[strings.ToUpper(t)] = struct{}{}
+	}
+	quotedSet := make(map[string]struct{}, len(quotedTargets))
+	for _, t := range quotedTargets {
+		quotedSet[strings.ToUpper(t)] = struct{}{}
+	}
+
+	var results []TokenMatch
+	runes := []rune(sql)
+	n := len(runes)
+	line, col := 1, 1
+	i := 0
+
+	for i < n {
+		r := runes[i]
+
+		// Newline
+		if r == '\n' {
+			line++; col = 1; i++
+			continue
+		}
+
+		// Line comment: --
+		if r == '-' && i+1 < n && runes[i+1] == '-' {
+			i += 2; col += 2
+			for i < n && runes[i] != '\n' {
+				i++; col++
+			}
+			continue
+		}
+
+		// Block comment: /* */
+		if r == '/' && i+1 < n && runes[i+1] == '*' {
+			i += 2; col += 2
+			for i < n {
+				if runes[i] == '\n' {
+					line++; col = 1; i++
+				} else if runes[i] == '*' && i+1 < n && runes[i+1] == '/' {
+					i += 2; col += 2; break
+				} else {
+					i++; col++
+				}
+			}
+			continue
+		}
+
+		// Single-quoted string: '...'
+		if r == '\'' {
+			i++; col++
+			for i < n {
+				if runes[i] == '\n' {
+					line++; col = 1; i++
+				} else if runes[i] == '\'' && i+1 < n && runes[i+1] == '\'' {
+					i += 2; col += 2
+				} else if runes[i] == '\'' {
+					i++; col++; break
+				} else {
+					i++; col++
+				}
+			}
+			continue
+		}
+
+		// Double-quoted identifier: "..."
+		if r == '"' {
+			startLine, startCol := line, col
+			i++; col++
+			var name []rune
+			closed := false
+			for i < n {
+				if runes[i] == '\n' {
+					line++; col = 1; i++; name = append(name, '\n')
+				} else if runes[i] == '"' && i+1 < n && runes[i+1] == '"' {
+					name = append(name, '"'); i += 2; col += 2
+				} else if runes[i] == '"' {
+					i++; col++; closed = true; break
+				} else {
+					name = append(name, runes[i]); i++; col++
+				}
+			}
+			if closed && len(quotedSet) > 0 {
+				nameStr := string(name)
+				if _, ok := quotedSet[strings.ToUpper(nameStr)]; ok {
+					results = append(results, TokenMatch{
+						Name: nameStr, Line: startLine, Col: startCol, EndCol: col, Quoted: true,
+					})
+				}
+			}
+			continue
+		}
+
+		// Bare word: [a-zA-Z_]\w*
+		if isLetterOrUnderscore(r) {
+			wLine, wCol, wStart := line, col, i
+			for i < n && isWordRune(runes[i]) {
+				i++; col++
+			}
+			if len(bareSet) > 0 {
+				word := string(runes[wStart:i])
+				prevCh := rune(0)
+				if wStart > 0 {
+					prevCh = runes[wStart-1]
+				}
+				nextCh := rune(0)
+				if i < n {
+					nextCh = runes[i]
+				}
+				if prevCh != '.' && nextCh != '(' {
+					if _, ok := bareSet[strings.ToUpper(word)]; ok {
+						results = append(results, TokenMatch{
+							Name: word, Line: wLine, Col: wCol, EndCol: col, Quoted: false,
+						})
+					}
+				}
+			}
+			continue
+		}
+
+		i++; col++
+	}
+	return results
+}
+
+// ── GetActiveFunctionCall ─────────────────────────────────────────────────────
+
+// GetActiveFunctionCall parses prefix — the SQL text from the document start up
+// to the cursor — and returns the innermost function call that is still open,
+// together with which parameter (0-indexed) the cursor is on.
+// Returns nil when the cursor is not inside any named function call.
+//
+// Improvements over the original TypeScript implementation:
+//   - Handles '' escaped single quotes correctly (no false string-close)
+//   - Skips double-quoted identifiers so they never pollute the paren stack
+//   - Skips -- line comments and /* */ block comments so commas inside them
+//     are not counted as parameter separators
+func GetActiveFunctionCall(prefix string) *FunctionCallContext {
+	type frame struct {
+		name   string
+		commas int
+	}
+	var stack []frame
+	runes := []rune(prefix)
+	n := len(runes)
+	i := 0
+
+	for i < n {
+		r := runes[i]
+
+		// Line comment: --
+		if r == '-' && i+1 < n && runes[i+1] == '-' {
+			i += 2
+			for i < n && runes[i] != '\n' {
+				i++
+			}
+			continue
+		}
+
+		// Block comment: /* */
+		if r == '/' && i+1 < n && runes[i+1] == '*' {
+			i += 2
+			for i < n {
+				if runes[i] == '*' && i+1 < n && runes[i+1] == '/' {
+					i += 2
+					break
+				}
+				i++
+			}
+			continue
+		}
+
+		// Single-quoted string '...' with '' escape
+		if r == '\'' {
+			i++
+			for i < n {
+				if runes[i] == '\'' && i+1 < n && runes[i+1] == '\'' {
+					i += 2 // escaped quote
+				} else if runes[i] == '\'' {
+					i++
+					break
+				} else {
+					i++
+				}
+			}
+			continue
+		}
+
+		// Double-quoted identifier "..." — skip without affecting the paren stack
+		if r == '"' {
+			i++
+			for i < n {
+				if runes[i] == '"' && i+1 < n && runes[i+1] == '"' {
+					i += 2
+				} else if runes[i] == '"' {
+					i++
+					break
+				} else {
+					i++
+				}
+			}
+			continue
+		}
+
+		if r == '(' {
+			// Scan backwards past whitespace to find the function name.
+			name := ""
+			j := i - 1
+			for j >= 0 && (runes[j] == ' ' || runes[j] == '\t' || runes[j] == '\n' || runes[j] == '\r') {
+				j--
+			}
+			if j >= 0 && isWordRune(runes[j]) {
+				end := j + 1
+				for j >= 0 && isWordRune(runes[j]) {
+					j--
+				}
+				start := j + 1
+				if isLetterOrUnderscore(runes[start]) {
+					name = string(runes[start:end])
+				}
+			}
+			stack = append(stack, frame{name: name})
+			i++
+			continue
+		}
+
+		if r == ')' {
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+			i++
+			continue
+		}
+
+		if r == ',' && len(stack) > 0 {
+			stack[len(stack)-1].commas++
+			i++
+			continue
+		}
+
+		i++
+	}
+
+	if len(stack) == 0 {
+		return nil
+	}
+	top := stack[len(stack)-1]
+	if top.name == "" {
+		return nil
+	}
+	return &FunctionCallContext{Name: top.name, ParamIndex: top.commas}
+}
+
+// ── ParseSignatureParams ──────────────────────────────────────────────────────
+
+// ParseSignatureParams extracts the byte spans of each parameter in a function
+// signature string such as "CONCAT(str1, str2)" or "DATEADD(datepart, val, dt)".
+// The returned [Start, End) offsets index directly into the signature string,
+// matching the format expected by Monaco's parameter-label highlighting.
+// Returns nil when the signature has no '(' or no parameters.
+func ParseSignatureParams(sig string) []SignatureParam {
+	openIdx := strings.IndexByte(sig, '(')
+	if openIdx < 0 {
+		return nil
+	}
+
+	// Find the matching closing ')'.
+	depth, closeIdx := 0, -1
+	for i := openIdx; i < len(sig); i++ {
+		if sig[i] == '(' {
+			depth++
+		} else if sig[i] == ')' {
+			depth--
+			if depth == 0 {
+				closeIdx = i
+				break
+			}
+		}
+	}
+	if closeIdx < 0 || closeIdx == openIdx+1 {
+		return nil
+	}
+
+	var params []SignatureParam
+	start := openIdx + 1
+	d := 0
+	for i := openIdx + 1; i <= closeIdx; i++ {
+		ch := sig[i]
+		if ch == '(' {
+			d++
+		} else if ch == ')' {
+			d--
+		}
+
+		if (ch == ',' && d == 0) || i == closeIdx {
+			rawEnd := i
+			ps, pe := start, rawEnd
+			for ps < pe && sig[ps] == ' ' {
+				ps++
+			}
+			for pe > ps && sig[pe-1] == ' ' {
+				pe--
+			}
+			if ps < pe {
+				params = append(params, SignatureParam{Start: ps, End: pe})
+			}
+			start = i + 1
+		}
+	}
+	return params
 }
 
 // ── ValidateSyntax ────────────────────────────────────────────────────────────
@@ -547,7 +1159,7 @@ func ValidateSyntax(sql string) []DiagMarker {
 						varName := strings.ToUpper(varNameRaw)
 						declaredVars[varName] = true
 
-						// Now check for assignment after the variable name
+						// Skip whitespace after the variable name.
 						for j < n && (runes[j] == ' ' || runes[j] == '\t' ||
 							runes[j] == '\n' || runes[j] == '\r' || runes[j] == '\u00a0') {
 							if runes[j] == '\n' {
@@ -558,20 +1170,67 @@ func ValidateSyntax(sql string) []DiagMarker {
 							}
 							j++
 						}
-						if j < n && runes[j] == '=' {
-							prev := runes[j-1]
-							next := rune(0)
-							if j+1 < n {
-								next = runes[j+1]
+
+						// Skip optional type annotation (e.g. FLOAT, VARCHAR(100))
+						// that may appear between the variable name and ':' or '='.
+						if j < n && isAlpha(runes[j]) {
+							typeStart := j
+							for j < n && isWordChar(runes[j]) {
+								j++
+								jCol++
 							}
-							if prev != ':' && next != '=' {
+							typeWord := strings.ToUpper(string(runes[typeStart:j]))
+							if typeWord != "DEFAULT" {
+								// Skip optional parenthesised type parameters: VARCHAR(100), NUMBER(10,2)
+								for j < n && (runes[j] == ' ' || runes[j] == '\t' || runes[j] == '\u00a0') {
+									j++
+									jCol++
+								}
+								if j < n && runes[j] == '(' {
+									depth := 1
+									j++
+									jCol++
+									for j < n && depth > 0 {
+										if runes[j] == '(' {
+											depth++
+										} else if runes[j] == ')' {
+											depth--
+										}
+										if runes[j] == '\n' {
+											line++
+											jCol = 1
+										} else {
+											jCol++
+										}
+										j++
+									}
+								}
+								// Skip whitespace before the assignment operator.
+								for j < n && (runes[j] == ' ' || runes[j] == '\t' ||
+									runes[j] == '\n' || runes[j] == '\r' || runes[j] == '\u00a0') {
+									if runes[j] == '\n' {
+										line++
+										jCol = 1
+									} else {
+										jCol++
+									}
+									j++
+								}
+							}
+						}
+
+						// Check for := (valid) or bare = (error) and detect missing expression.
+						isLetColon := j < n && runes[j] == ':' && j+1 < n && runes[j+1] == '='
+						isLetBareEq := j < n && runes[j] == '=' && (j == 0 || runes[j-1] != ':')
+						if isLetColon || isLetBareEq {
+							if isLetBareEq {
 								addError("Expected ':=' for assignment", line, jCol, line, jCol+1)
 							}
 
 							// --- Missing expression check ---
 							opEnd := j + 1
-							if next == '=' {
-								opEnd++
+							if isLetColon {
+								opEnd = j + 2 // skip both : and =
 							}
 							k := opEnd
 							for k < n && (runes[k] == ' ' || runes[k] == '\t' || runes[k] == '\n' || runes[k] == '\r' || runes[k] == '\u00a0') {
@@ -882,6 +1541,156 @@ func PkHeuristicConditions(
 		}
 	}
 	return results
+}
+
+// ── GetScriptingCompletions ───────────────────────────────────────────────────
+
+// ScriptingCompletionResult is the combined result of variable-extraction and
+// colon-detection for Snowflake Scripting autocompletion at a cursor position.
+type ScriptingCompletionResult struct {
+	Variables  []string `json:"variables"`   // Uppercased declared variable names in scope
+	NeedsColon bool     `json:"needsColon"`  // Whether variables need a ':' prefix in SQL context
+}
+
+// GetScriptingCompletions extracts declared Snowflake Scripting variables visible
+// at cursorOffset and determines whether a ':' prefix is required. Both results
+// are returned together to avoid two IPC round-trips. No Snowflake connection
+// is required. cursorOffset is a Unicode codepoint count (matches Monaco's
+// model.getOffsetAt for ASCII SQL).
+func GetScriptingCompletions(sql string, cursorOffset int) ScriptingCompletionResult {
+	return ScriptingCompletionResult{
+		Variables:  scriptingExtractVars(sql, cursorOffset),
+		NeedsColon: scriptingNeedsColon(sql, cursorOffset),
+	}
+}
+
+// scriptingExtractVars mirrors extractDeclaredVariables from snowflakeScriptingUtils.ts.
+// Returns uppercased variable names declared before cursorOffset inside the current $$ block.
+func scriptingExtractVars(sql string, cursorOffset int) []string {
+	runes := []rune(sql)
+	n := len(runes)
+	if cursorOffset > n {
+		cursorOffset = n
+	}
+	beforeCursor := string(runes[:cursorOffset])
+
+	// Count $$ occurrences before cursor to determine if we are inside a block.
+	ddCount := strings.Count(beforeCursor, "$$")
+	if ddCount%2 == 0 {
+		return nil // cursor is in plain SQL, not inside a $$ block
+	}
+
+	// Isolate text from the opening $$ to the cursor.
+	blockStart := strings.LastIndex(beforeCursor, "$$")
+	textToScan := beforeCursor[blockStart:]
+
+	seen := make(map[string]struct{})
+	var vars []string
+	addVar := func(name string) {
+		up := strings.ToUpper(name)
+		if _, ok := seen[up]; !ok {
+			seen[up] = struct{}{}
+			vars = append(vars, up)
+		}
+	}
+
+	skipWords := map[string]bool{
+		"CURSOR": true, "EXCEPTION": true, "TYPE": true,
+		"LET": true, "VAR": true,
+	}
+
+	// 1. DECLARE … BEGIN blocks
+	declareRe := regexp.MustCompile(`(?i)\bDECLARE\b`)
+	blockBoundRe := regexp.MustCompile(`(?i)\b(?:BEGIN|END)\b`)
+	for _, loc := range declareRe.FindAllStringIndex(textToScan, -1) {
+		after := textToScan[loc[1]:]
+		if bound := blockBoundRe.FindStringIndex(after); bound != nil {
+			after = after[:bound[0]]
+		}
+		for _, seg := range strings.Split(after, ";") {
+			// Strip line comments and block comments
+			clean := regexp.MustCompile(`--[^\n]*`).ReplaceAllString(seg, "")
+			clean = regexp.MustCompile(`(?s)/\*.*?\*/`).ReplaceAllString(clean, "")
+			clean = strings.TrimSpace(clean)
+			if clean == "" {
+				continue
+			}
+			wordRe := regexp.MustCompile(`[a-zA-Z0-9_$]+`)
+			if m := wordRe.FindString(clean); m != "" {
+				up := strings.ToUpper(m)
+				if !skipWords[up] {
+					addVar(m)
+				}
+			}
+		}
+	}
+
+	// 2. LET / VAR declarations
+	letVarRe := regexp.MustCompile(`(?i)\b(?:LET|VAR)\s+([a-zA-Z0-9_$]+)`)
+	for _, m := range letVarRe.FindAllStringSubmatch(textToScan, -1) {
+		addVar(m[1])
+	}
+
+	// 3. FOR loop variables
+	forRe := regexp.MustCompile(`(?i)\bFOR\s+([a-zA-Z0-9_$]+)\s+IN\b`)
+	for _, m := range forRe.FindAllStringSubmatch(textToScan, -1) {
+		addVar(m[1])
+	}
+
+	return vars
+}
+
+// colonRequiredKeywords is the set of SQL DQL/DML/DDL keywords that require a
+// ':' prefix on scripting variable references (mirrors isColonRequired in TS).
+var colonRequiredKeywords = map[string]bool{
+	"SELECT": true, "INSERT": true, "UPDATE": true, "DELETE": true, "MERGE": true,
+	"CREATE": true, "ALTER": true, "DROP": true, "TRUNCATE": true, "COPY": true,
+	"CALL": true, "WITH": true, "SHOW": true, "DESCRIBE": true,
+	"GRANT": true, "REVOKE": true,
+}
+
+// scriptingNeedsColon mirrors isColonRequired from snowflakeScriptingUtils.ts.
+func scriptingNeedsColon(sql string, offset int) bool {
+	runes := []rune(sql)
+	n := len(runes)
+	if offset > n {
+		offset = n
+	}
+	beforeCursor := string(runes[:offset])
+
+	// 1. Find where the current word starts and check for a preceding colon.
+	wordStartRe := regexp.MustCompile(`[a-zA-Z0-9_$]+$`)
+	wordLoc := wordStartRe.FindStringIndex(beforeCursor)
+	posToEval := len(beforeCursor)
+	if wordLoc != nil {
+		posToEval = wordLoc[0]
+	}
+	textBeforeWord := strings.TrimRight(beforeCursor[:posToEval], " \t\r\n")
+	if strings.HasSuffix(textBeforeWord, ":") {
+		return false
+	}
+
+	// 2. Strip comments and quoted strings.
+	clean := regexp.MustCompile(`--[^\n]*`).ReplaceAllString(textBeforeWord, " ")
+	clean = regexp.MustCompile(`(?s)/\*.*?\*/`).ReplaceAllString(clean, " ")
+	clean = regexp.MustCompile(`'[^']*'`).ReplaceAllString(clean, " ")
+	clean = regexp.MustCompile(`"[^"]*"`).ReplaceAllString(clean, " ")
+
+	// 3. Split by statement boundaries and take the last segment.
+	segRe := regexp.MustCompile(`(?i);|\bBEGIN\b|\bTHEN\b|\bELSE\b|\bDO\b|\bLOOP\b`)
+	segs := segRe.Split(clean, -1)
+	currentSeg := strings.TrimSpace(segs[len(segs)-1])
+	if currentSeg == "" {
+		return false
+	}
+
+	// 4. Check the first word of the current segment.
+	firstWordRe := regexp.MustCompile(`[a-zA-Z0-9_$]+`)
+	m := firstWordRe.FindString(currentSeg)
+	if m == "" {
+		return false
+	}
+	return colonRequiredKeywords[strings.ToUpper(m)]
 }
 
 // ── TypeCategory ──────────────────────────────────────────────────────────────

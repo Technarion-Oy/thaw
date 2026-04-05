@@ -1719,6 +1719,49 @@ func (a *App) AnalyzeSqlSemantics(sql string, resolvedRefs []sqleditor.ResolvedR
 	return sqleditor.ValidateSemantics(sql, resolvedRefs, colEntries)
 }
 
+// GetScriptingCompletions extracts declared Snowflake Scripting variables
+// visible at cursorOffset and determines whether a ':' prefix is required for
+// completions. No Snowflake connection is required.
+func (a *App) GetScriptingCompletions(sql string, cursorOffset int) sqleditor.ScriptingCompletionResult {
+	return sqleditor.GetScriptingCompletions(sql, cursorOffset)
+}
+
+// GetSqlStatementRanges splits sql into per-statement line ranges and byte offsets.
+// No Snowflake connection is required.
+func (a *App) GetSqlStatementRanges(sql string) []sqleditor.StatementRange {
+	return sqleditor.GetStatementRanges(sql)
+}
+
+// GetIdentifierAtColumn parses the dot-separated identifier (e.g. db.schema.table)
+// under the zero-indexed cursor column col within a single line of SQL.
+// Returns nil when the column is not on any identifier.
+// No Snowflake connection is required.
+func (a *App) GetIdentifierAtColumn(line string, col int) []string {
+	return sqleditor.GetIdentifierAtColumn(line, col)
+}
+
+// FindSqlTokenPositions walks sql and returns the line/column positions of bare
+// words in bareTargets and double-quoted identifiers in quotedTargets, skipping
+// string literals and comments.  No Snowflake connection is required.
+func (a *App) FindSqlTokenPositions(sql string, bareTargets []string, quotedTargets []string) []sqleditor.TokenMatch {
+	return sqleditor.FindTokenPositions(sql, bareTargets, quotedTargets)
+}
+
+// GetActiveFunctionCall parses the SQL prefix (text from document start to
+// cursor) and returns the innermost open function call with its active parameter
+// index.  Returns nil when the cursor is not inside a named function call.
+// No Snowflake connection is required.
+func (a *App) GetActiveFunctionCall(prefix string) *sqleditor.FunctionCallContext {
+	return sqleditor.GetActiveFunctionCall(prefix)
+}
+
+// ParseSignatureParams extracts the byte spans of each parameter within a
+// function signature string for Monaco parameter-label highlighting.
+// No Snowflake connection is required.
+func (a *App) ParseSignatureParams(sig string) []sqleditor.SignatureParam {
+	return sqleditor.ParseSignatureParams(sig)
+}
+
 // GetFunctionInfo fetches the DDL for a user-defined function and returns its
 // parameter list together with a flag indicating whether it is a table function.
 func (a *App) GetFunctionInfo(database, schema, name, argTypes string) (*snowflake.FunctionInfo, error) {

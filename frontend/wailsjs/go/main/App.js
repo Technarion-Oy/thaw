@@ -202,6 +202,10 @@ export function FetchNotebookContent(arg1, arg2, arg3) {
   return window['go']['main']['App']['FetchNotebookContent'](arg1, arg2, arg3);
 }
 
+export function FindSqlTokenPositions(arg1, arg2, arg3) {
+  return window['go']['main']['App']['FindSqlTokenPositions'](arg1, arg2, arg3);
+}
+
 export function GenerateKeyPair(arg1, arg2, arg3) {
   return window['go']['main']['App']['GenerateKeyPair'](arg1, arg2, arg3);
 }
@@ -216,6 +220,10 @@ export function GetAIConfig() {
 
 export function GetAISuggestion(arg1) {
   return window['go']['main']['App']['GetAISuggestion'](arg1);
+}
+
+export function GetActiveFunctionCall(arg1) {
+  return window['go']['main']['App']['GetActiveFunctionCall'](arg1);
 }
 
 export function GetAllFunctionNames() {
@@ -274,6 +282,10 @@ export function GetGitConfig() {
   return window['go']['main']['App']['GetGitConfig']();
 }
 
+export function GetIdentifierAtColumn(arg1, arg2) {
+  return window['go']['main']['App']['GetIdentifierAtColumn'](arg1, arg2);
+}
+
 export function GetIntegrationProperties(arg1) {
   return window['go']['main']['App']['GetIntegrationProperties'](arg1);
 }
@@ -322,6 +334,10 @@ export function GetSchemaForeignKeys(arg1, arg2) {
   return window['go']['main']['App']['GetSchemaForeignKeys'](arg1, arg2);
 }
 
+export function GetScriptingCompletions(arg1, arg2) {
+  return window['go']['main']['App']['GetScriptingCompletions'](arg1, arg2);
+}
+
 export function GetSessionContext() {
   return window['go']['main']['App']['GetSessionContext']();
 }
@@ -344,6 +360,10 @@ export function GetSnowparkConfig() {
 
 export function GetSnowsightURL() {
   return window['go']['main']['App']['GetSnowsightURL']();
+}
+
+export function GetSqlStatementRanges(arg1) {
+  return window['go']['main']['App']['GetSqlStatementRanges'](arg1);
 }
 
 export function GetTableColumns(arg1, arg2, arg3) {
@@ -544,6 +564,10 @@ export function NotebookUseContext(arg1, arg2, arg3, arg4, arg5) {
 
 export function ParseJoinTableRefs(arg1) {
   return window['go']['main']['App']['ParseJoinTableRefs'](arg1);
+}
+
+export function ParseSignatureParams(arg1) {
+  return window['go']['main']['App']['ParseSignatureParams'](arg1);
 }
 
 export function PickDataFile() {

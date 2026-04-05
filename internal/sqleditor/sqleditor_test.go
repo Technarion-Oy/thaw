@@ -15,6 +15,421 @@ import (
 	"testing"
 )
 
+func TestGetIdentifierAtColumn(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		col  int
+		want []string
+	}{
+		// No identifier at all
+		{name: "empty line", line: "", col: 0, want: nil},
+		{name: "only spaces", line: "   ", col: 1, want: nil},
+		{name: "col on operator", line: "a + b", col: 2, want: nil},
+
+		// Bare single-part identifier
+		{name: "bare word col at start", line: "SELECT", col: 0, want: []string{"SELECT"}},
+		{name: "bare word col in middle", line: "SELECT", col: 3, want: []string{"SELECT"}},
+		{name: "bare word col at end", line: "SELECT", col: 5, want: []string{"SELECT"}},
+		{name: "bare word col one past end", line: "SELECT", col: 6, want: nil},
+
+		// Two-part identifier
+		{name: "two-part on first part", line: "db.schema", col: 0, want: []string{"db", "schema"}},
+		{name: "two-part on dot", line: "db.schema", col: 2, want: []string{"db", "schema"}},
+		{name: "two-part on second part", line: "db.schema", col: 4, want: []string{"db", "schema"}},
+
+		// Three-part identifier (db.schema.table)
+		{name: "three-part on first", line: "db.schema.tbl", col: 1, want: []string{"db", "schema", "tbl"}},
+		{name: "three-part on middle", line: "db.schema.tbl", col: 5, want: []string{"db", "schema", "tbl"}},
+		{name: "three-part on last", line: "db.schema.tbl", col: 11, want: []string{"db", "schema", "tbl"}},
+
+		// Quoted identifier
+		{name: "quoted single part", line: `"My Table"`, col: 3, want: []string{"My Table"}},
+		{name: "quoted two-part", line: `"DB"."My Schema"`, col: 5, want: []string{"DB", "My Schema"}},
+		{name: "col before opening quote", line: ` "tbl"`, col: 0, want: nil},
+
+		// Identifier embedded in SQL
+		{name: "ident in query col on ident", line: "SELECT * FROM db.schema.tbl WHERE x=1", col: 20, want: []string{"db", "schema", "tbl"}},
+		{name: "ident in query col on keyword before ident", line: "SELECT * FROM db.schema.tbl WHERE x=1", col: 8, want: nil},
+
+		// Underscore in identifier
+		{name: "identifier with underscores", line: "my_db.my_schema", col: 3, want: []string{"my_db", "my_schema"}},
+
+		// Digits in identifier
+		{name: "identifier with digits", line: "table1.col2", col: 4, want: []string{"table1", "col2"}},
+		// Digit-led tokens: \w matches digits, so "123abc" is treated as one token (same as original TS /\w/)
+		{name: "identifier starting with digit matched as token", line: "123abc", col: 0, want: []string{"123abc"}},
+
+		// Two separate identifiers on the same line
+		{name: "two idents on line - col on first", line: "t1.c1, t2.c2", col: 1, want: []string{"t1", "c1"}},
+		{name: "two idents on line - col on second", line: "t1.c1, t2.c2", col: 8, want: []string{"t2", "c2"}},
+		{name: "two idents on line - col on comma", line: "t1.c1, t2.c2", col: 5, want: nil},
+		{name: "two idents on line - col on space", line: "t1.c1, t2.c2", col: 6, want: nil},
+
+		// Trailing dot — cursor before/on the dangling dot
+		{name: "trailing dot - col on word before dot", line: "db.", col: 1, want: []string{"db"}},
+		{name: "trailing dot - col on dangling dot", line: "db.", col: 2, want: nil},
+
+		// Leading dot — scanner skips the dot; "schema" is returned as a 1-part identifier
+		{name: "leading dot - col on word after dot", line: ".schema", col: 1, want: []string{"schema"}},
+		// Leading dot — col on the dot itself is not on any identifier
+		{name: "leading dot - col on the dot", line: ".schema", col: 0, want: nil},
+
+		// Mixed quoted and bare parts
+		{name: "quoted-dot-bare col on quoted", line: `"My DB".schema`, col: 3, want: []string{"My DB", "schema"}},
+		{name: "quoted-dot-bare col on bare", line: `"My DB".schema`, col: 9, want: []string{"My DB", "schema"}},
+
+		// col at very last character of identifier
+		{name: "col at last char of three-part", line: "a.b.c", col: 4, want: []string{"a", "b", "c"}},
+
+		// col past end of line
+		{name: "col past end of line", line: "abc", col: 10, want: nil},
+
+		// Identifier immediately after opening paren
+		{name: "ident after paren", line: "(db.schema)", col: 4, want: []string{"db", "schema"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GetIdentifierAtColumn(tt.line, tt.col)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("GetIdentifierAtColumn(%q, %d) = %v, want %v", tt.line, tt.col, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetActiveFunctionCall(t *testing.T) {
+	type want = *FunctionCallContext // nil means "expect nil"
+	fc := func(name string, idx int) *FunctionCallContext {
+		return &FunctionCallContext{Name: name, ParamIndex: idx}
+	}
+
+	tests := []struct {
+		name   string
+		prefix string
+		want   want
+	}{
+		// ── not inside any call ──────────────────────────────────────────────
+		{name: "empty prefix", prefix: "", want: nil},
+		{name: "no parens", prefix: "SELECT a, b FROM t", want: nil},
+		{name: "closed call", prefix: "SELECT ABS(x)", want: nil},
+
+		// ── basic single-argument calls ───────────────────────────────────
+		{name: "first param", prefix: "SELECT ABS(", want: fc("ABS", 0)},
+		{name: "second param via comma", prefix: "SELECT CONCAT('hi', ", want: fc("CONCAT", 1)},
+		{name: "third param", prefix: "SELECT DATEADD(year, 1, ", want: fc("DATEADD", 2)},
+
+		// ── nested calls — innermost wins ────────────────────────────────
+		{name: "nested: cursor in inner call", prefix: "SELECT OUTER(INNER(", want: fc("INNER", 0)},
+		{name: "nested: cursor back in outer", prefix: "SELECT OUTER(INNER(x), ", want: fc("OUTER", 1)},
+
+		// ── string handling ──────────────────────────────────────────────
+		{name: "comma inside single-quoted string not counted", prefix: "SELECT F('a,b', ", want: fc("F", 1)},
+		{name: "single-quote '' escape handled", prefix: "SELECT F('it''s', ", want: fc("F", 1)},
+		{name: "paren inside string not counted", prefix: "SELECT F('(not a call)', ", want: fc("F", 1)},
+
+		// ── comment handling ─────────────────────────────────────────────
+		{name: "comma in line comment not counted", prefix: "SELECT F(x -- , extra\n, ", want: fc("F", 1)},
+		{name: "comma in block comment not counted", prefix: "SELECT F(x /* , */ , ", want: fc("F", 1)},
+
+		// ── double-quoted identifiers ────────────────────────────────────
+		{name: "double-quoted ident in arg does not break stack", prefix: `SELECT F("col,name", `, want: fc("F", 1)},
+
+		// ── nameless paren (subexpression) ───────────────────────────────
+		// "SELECT (" — "SELECT" is the word before '(' so it is captured as the
+		// function name.  GetFunctionTooltip("SELECT") returns nothing, so
+		// signature help is still nil end-to-end.
+		{name: "keyword before paren treated as fn name", prefix: "SELECT (1 + ", want: fc("SELECT", 0)},
+		// Inner nameless '(' captures the ',' — outer F() frame doesn't see it.
+		{name: "comma inside nameless subexpr not propagated to outer", prefix: "SELECT F(x + (1, ", want: nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GetActiveFunctionCall(tt.prefix)
+			if tt.want == nil {
+				if got != nil {
+					t.Errorf("GetActiveFunctionCall(%q) = %+v, want nil", tt.prefix, got)
+				}
+			} else {
+				if got == nil {
+					t.Errorf("GetActiveFunctionCall(%q) = nil, want %+v", tt.prefix, tt.want)
+				} else if *got != *tt.want {
+					t.Errorf("GetActiveFunctionCall(%q) = %+v, want %+v", tt.prefix, got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+func TestParseSignatureParams(t *testing.T) {
+	tests := []struct {
+		name string
+		sig  string
+		want []SignatureParam
+	}{
+		// ── no / empty params ────────────────────────────────────────────
+		{name: "no opening paren", sig: "GETDATE", want: nil},
+		{name: "empty params", sig: "GETDATE()", want: nil},
+		{name: "no closing paren", sig: "F(a, b", want: nil},
+
+		// ── single param ─────────────────────────────────────────────────
+		{name: "single param", sig: "ABS(numeric_expr)",
+			want: []SignatureParam{{Start: 4, End: 16}}},
+
+		// ── multiple params ───────────────────────────────────────────────
+		{name: "two params", sig: "CONCAT(str1, str2)",
+			want: []SignatureParam{{Start: 7, End: 11}, {Start: 13, End: 17}}},
+		{name: "three params", sig: "DATEADD(date_part, value, date_expr)",
+			want: []SignatureParam{{Start: 8, End: 17}, {Start: 19, End: 24}, {Start: 26, End: 35}}},
+
+		// ── nested parens inside signature (type annotation) ─────────────
+		{name: "nested parens in type", sig: "F(a ARRAY(INT), b VARCHAR)",
+			want: []SignatureParam{{Start: 2, End: 14}, {Start: 16, End: 25}}},
+
+		// ── whitespace trimming ───────────────────────────────────────────
+		{name: "extra spaces trimmed", sig: "F(  param1  ,  param2  )",
+			want: []SignatureParam{{Start: 4, End: 10}, {Start: 15, End: 21}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseSignatureParams(tt.sig)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ParseSignatureParams(%q)\n  got  %v\n  want %v", tt.sig, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFindTokenPositions(t *testing.T) {
+	type tm = TokenMatch // shorthand
+
+	tests := []struct {
+		name         string
+		sql          string
+		bareTargets  []string
+		quotedTargets []string
+		want         []TokenMatch
+	}{
+		// ── nil / empty inputs ──────────────────────────────────────────────
+		{name: "empty sql", sql: "", bareTargets: []string{"X"}, want: nil},
+		{name: "no targets", sql: "SELECT col FROM t", want: nil},
+		{name: "target not present", sql: "SELECT a FROM t", bareTargets: []string{"MISSING"}, want: nil},
+
+		// ── bare word matches ───────────────────────────────────────────────
+		{
+			name:        "single bare word match",
+			sql:         "SELECT bad_col FROM t",
+			bareTargets: []string{"BAD_COL"},
+			want:        []tm{{Name: "bad_col", Line: 1, Col: 8, EndCol: 15, Quoted: false}},
+		},
+		{
+			name:        "case-insensitive bare match",
+			sql:         "SELECT Bad_Col FROM t",
+			bareTargets: []string{"BAD_COL"},
+			want:        []tm{{Name: "Bad_Col", Line: 1, Col: 8, EndCol: 15, Quoted: false}},
+		},
+		{
+			name:        "bare word on line 3",
+			sql:         "SELECT\n  x,\n  bad_col\nFROM t",
+			bareTargets: []string{"BAD_COL"},
+			want:        []tm{{Name: "bad_col", Line: 3, Col: 3, EndCol: 10, Quoted: false}},
+		},
+		{
+			name:        "bare word after dot is not matched (qualified ref)",
+			sql:         "SELECT t.bad_col FROM t",
+			bareTargets: []string{"BAD_COL"},
+			want:        nil,
+		},
+		{
+			name:        "bare word before '(' is not matched (function call)",
+			sql:         "SELECT bad_col() FROM t",
+			bareTargets: []string{"BAD_COL"},
+			want:        nil,
+		},
+		{
+			name:        "multiple bare word matches",
+			sql:         "SELECT w1, w2, x FROM t",
+			bareTargets: []string{"W1", "W2"},
+			want: []tm{
+				{Name: "w1", Line: 1, Col: 8, EndCol: 10, Quoted: false},
+				{Name: "w2", Line: 1, Col: 12, EndCol: 14, Quoted: false},
+			},
+		},
+
+		// ── quoted identifier matches ────────────────────────────────────────
+		{
+			name:          "single quoted match",
+			sql:           `SELECT "WRONG_COL" FROM t`,
+			quotedTargets: []string{"WRONG_COL"},
+			want:          []tm{{Name: "WRONG_COL", Line: 1, Col: 8, EndCol: 19, Quoted: true}},
+		},
+		{
+			name:          "quoted match case-insensitive",
+			sql:           `SELECT "wrong_col" FROM t`,
+			quotedTargets: []string{"WRONG_COL"},
+			want:          []tm{{Name: "wrong_col", Line: 1, Col: 8, EndCol: 19, Quoted: true}},
+		},
+		{
+			name:          "quoted not in targets → not matched",
+			sql:           `SELECT "other_col" FROM t`,
+			quotedTargets: []string{"WRONG_COL"},
+			want:          nil,
+		},
+
+		// ── tokens inside skipped regions are not reported ──────────────────
+		{
+			name:        "token inside line comment skipped",
+			sql:         "SELECT x -- bad_col\nFROM t",
+			bareTargets: []string{"BAD_COL"},
+			want:        nil,
+		},
+		{
+			name:        "token inside block comment skipped",
+			sql:         "SELECT x /* bad_col */ FROM t",
+			bareTargets: []string{"BAD_COL"},
+			want:        nil,
+		},
+		{
+			name:        "token inside single-quoted string skipped",
+			sql:         "SELECT 'bad_col' FROM t",
+			bareTargets: []string{"BAD_COL"},
+			want:        nil,
+		},
+		{
+			name:          "quoted ident inside single-quoted string not collected",
+			sql:           `SELECT '"WRONG_COL"' FROM t`,
+			quotedTargets: []string{"WRONG_COL"},
+			want:          nil,
+		},
+
+		// ── both bare and quoted in same call ────────────────────────────────
+		{
+			name:          "bare and quoted targets together",
+			sql:           `SELECT w1, "WRONG2", x FROM t`,
+			bareTargets:   []string{"W1"},
+			quotedTargets: []string{"WRONG2"},
+			want: []tm{
+				{Name: "w1",     Line: 1, Col: 8,  EndCol: 10, Quoted: false},
+				{Name: "WRONG2", Line: 1, Col: 12, EndCol: 20, Quoted: true},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FindTokenPositions(tt.sql, tt.bareTargets, tt.quotedTargets)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("FindTokenPositions(%q, %v, %v)\n  got  %+v\n  want %+v",
+					tt.sql, tt.bareTargets, tt.quotedTargets, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetStatementRanges(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+		want []StatementRange
+	}{
+		{
+			name: "Empty string",
+			sql:  "",
+			want: nil,
+		},
+		{
+			name: "Only whitespace",
+			sql:  "  \n  \t  ",
+			want: nil,
+		},
+		{
+			name: "Single statement no semicolon",
+			sql:  "SELECT 1",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 1, StartOffset: 0, EndOffset: 8},
+			},
+		},
+		{
+			name: "Single statement with semicolon",
+			sql:  "SELECT 1;",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 1, StartOffset: 0, EndOffset: 9},
+			},
+		},
+		{
+			name: "Two statements separated by semicolon",
+			sql:  "SELECT 1;\nSELECT 2",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 1, StartOffset: 0, EndOffset: 9},
+				{StartLine: 2, EndLine: 2, StartOffset: 10, EndOffset: 18},
+			},
+		},
+		{
+			name: "Leading whitespace skipped in StartOffset",
+			sql:  "  SELECT 1",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 1, StartOffset: 2, EndOffset: 10},
+			},
+		},
+		{
+			name: "Dollar-quoted block treated as single statement",
+			sql:  "$$\nBEGIN\n  LET x := 1;\nEND;\n$$;",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 5, StartOffset: 0, EndOffset: 31},
+			},
+		},
+		{
+			name: "Line comment before statement does not affect StartLine",
+			sql:  "-- comment\nSELECT 1",
+			want: []StatementRange{
+				{StartLine: 2, EndLine: 2, StartOffset: 11, EndOffset: 19},
+			},
+		},
+		{
+			name: "Semicolons inside line comments ignored",
+			sql:  "SELECT 1 -- this; is a comment\nFROM t",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 2, StartOffset: 0, EndOffset: 37},
+			},
+		},
+		{
+			name: "Semicolons inside block comments ignored",
+			sql:  "SELECT /* ; */ 1",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 1, StartOffset: 0, EndOffset: 16},
+			},
+		},
+		{
+			name: "Semicolons inside single-quoted strings ignored",
+			sql:  "SELECT 'a;b'",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 1, StartOffset: 0, EndOffset: 12},
+			},
+		},
+		{
+			name: "Three statements",
+			sql:  "SELECT 1;\nSELECT 2;\nSELECT 3",
+			want: []StatementRange{
+				{StartLine: 1, EndLine: 1, StartOffset: 0, EndOffset: 9},
+				{StartLine: 2, EndLine: 2, StartOffset: 10, EndOffset: 19},
+				{StartLine: 3, EndLine: 3, StartOffset: 20, EndOffset: 28},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GetStatementRanges(tt.sql)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("GetStatementRanges() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateSyntax(t *testing.T) {
 	tests := []struct {
 		name string
@@ -91,6 +506,31 @@ $$;`,
 			want: nil,
 		},
 		{
+			name: "LET with type annotation and missing expression",
+			sql: `$$
+BEGIN
+  LET temp_calc FLOAT := ;
+  LET typed_varchar VARCHAR(100) := ;
+  LET no_type := ;
+END;
+$$`,
+			want: []DiagMarker{
+				{StartLineNumber: 3, StartColumn: 23, EndLineNumber: 3, EndColumn: 25, Message: "Missing expression after assignment", Severity: 8},
+				{StartLineNumber: 4, StartColumn: 34, EndLineNumber: 4, EndColumn: 36, Message: "Missing expression after assignment", Severity: 8},
+				{StartLineNumber: 5, StartColumn: 15, EndLineNumber: 5, EndColumn: 17, Message: "Missing expression after assignment", Severity: 8},
+			},
+		},
+		{
+			name: "LET with type annotation valid",
+			sql: `$$
+BEGIN
+  LET x FLOAT := 1.5;
+  LET s VARCHAR(100) := 'hello';
+END;
+$$`,
+			want: nil,
+		},
+		{
 			name: "Undeclared variable in RETURN and FOR",
 			sql: `$$
 BEGIN
@@ -105,6 +545,145 @@ $$`,
 				{StartLineNumber: 4, StartColumn: 12, EndLineNumber: 4, EndColumn: 26, Message: "Variable 'missing_cursor' is not declared", Severity: 8},
 			},
 		},
+	{
+		name: "Named dollar tag with block comment and escaped quote",
+		sql: `EXECUTE IMMEDIATE $body$
+DECLARE
+    base_val FLOAT DEFAULT 10.0;
+    str_val  VARCHAR;
+BEGIN
+    str_val := /* inline comment */ 'It''s a valid string';
+    RETURN str_val;
+END;
+$body$;`,
+		want: nil,
+	},
+	{
+		// Tokenizer limitation: comment before keyword masks missing expression
+		name: "Named dollar tag comment-masked missing expression",
+		sql: `EXECUTE IMMEDIATE $body$
+DECLARE
+    base_val FLOAT DEFAULT 10.0;
+BEGIN
+    base_val :=
+
+    -- comment
+    IF (base_val > 5.0) THEN
+        RETURN base_val;
+    END IF;
+END;
+$body$;`,
+		want: nil,
+	},
+	{
+		name: "FOR loop with declared cursor",
+		sql: `EXECUTE IMMEDIATE $$
+DECLARE
+    my_cursor CURSOR FOR SELECT id FROM t;
+    total INTEGER DEFAULT 0;
+BEGIN
+    FOR rec IN my_cursor DO
+        total := total + 1;
+    END FOR;
+    RETURN total;
+END;
+$$;`,
+		want: nil,
+	},
+	{
+		name: "FOR loop with undeclared cursor",
+		sql: `EXECUTE IMMEDIATE $$
+DECLARE
+    total INTEGER DEFAULT 0;
+BEGIN
+    FOR rec IN ghost_cursor DO
+        total := total + 1;
+    END FOR;
+    RETURN total;
+END;
+$$;`,
+		want: []DiagMarker{
+			{StartLineNumber: 5, StartColumn: 16, EndLineNumber: 5, EndColumn: 28, Message: "Variable 'ghost_cursor' is not declared", Severity: 8},
+		},
+	},
+	{
+		name: "Unmatched bracket with unclosed bracket and paren",
+		sql: `EXECUTE IMMEDIATE $$
+DECLARE
+    json_data VARIANT;
+BEGIN
+    LET my_array ARRAY := [1, 2, (3 + 4];
+END;
+$$;`,
+		want: []DiagMarker{
+			{StartLineNumber: 5, StartColumn: 40, EndLineNumber: 5, EndColumn: 41, Message: "Unmatched ']'", Severity: 8},
+			{StartLineNumber: 5, StartColumn: 27, EndLineNumber: 5, EndColumn: 28, Message: "Unclosed '['", Severity: 8},
+			{StartLineNumber: 5, StartColumn: 34, EndLineNumber: 5, EndColumn: 35, Message: "Unclosed '('", Severity: 8},
+		},
+	},
+	{
+		name: "Unclosed string literal",
+		sql: `EXECUTE IMMEDIATE $$
+BEGIN
+    LET bad_string VARCHAR := 'This string has no end;
+END;
+$$;`,
+		want: []DiagMarker{
+			{StartLineNumber: 3, StartColumn: 31, EndLineNumber: 3, EndColumn: 32, Message: "Unclosed string literal", Severity: 8},
+		},
+	},
+	{
+		name: "Unclosed block comment",
+		sql: `EXECUTE IMMEDIATE $$
+BEGIN
+    LET x INTEGER := 1;
+    /* This block comment never closes
+    RETURN x;
+END;
+$$;`,
+		want: []DiagMarker{
+			{StartLineNumber: 4, StartColumn: 5, EndLineNumber: 4, EndColumn: 7, Message: "Unclosed block comment", Severity: 8},
+		},
+	},
+	{
+		name: "LET with subquery in parens",
+		sql: `EXECUTE IMMEDIATE $$
+BEGIN
+    LET user_count INTEGER := (
+        SELECT COUNT(*)
+        FROM users
+        WHERE status = 'ACTIVE'
+    );
+    RETURN user_count;
+END;
+$$;`,
+		want: nil,
+	},
+	{
+		name: "Bare equals assignment error",
+		sql: `EXECUTE IMMEDIATE $$
+BEGIN
+    LET n INTEGER := 0;
+    n = n + 1;
+    RETURN n;
+END;
+$$;`,
+		want: []DiagMarker{
+			{StartLineNumber: 4, StartColumn: 7, EndLineNumber: 4, EndColumn: 8, Message: "Expected ':=' for assignment", Severity: 8},
+		},
+	},
+	{
+		name: "Template injection brace at statement start",
+		sql: `EXECUTE IMMEDIATE $$
+BEGIN
+    {TEMPLATE_INJECTION_ERROR}
+    RETURN 1;
+END;
+$$;`,
+		want: []DiagMarker{
+			{StartLineNumber: 3, StartColumn: 5, EndLineNumber: 3, EndColumn: 6, Message: "Unexpected token '{'", Severity: 8},
+		},
+	},
 	}
 
 	for _, tt := range tests {

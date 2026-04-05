@@ -1760,6 +1760,20 @@ export namespace sqleditor {
 	        this.keySequence = source["keySequence"];
 	    }
 	}
+	export class FunctionCallContext {
+	    name: string;
+	    paramIndex: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new FunctionCallContext(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.paramIndex = source["paramIndex"];
+	    }
+	}
 	export class JoinCondition {
 	    condition: string;
 	    detail: string;
@@ -1885,6 +1899,73 @@ export namespace sqleditor {
 	    }
 	}
 	
+	export class ScriptingCompletionResult {
+	    variables: string[];
+	    needsColon: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ScriptingCompletionResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.variables = source["variables"];
+	        this.needsColon = source["needsColon"];
+	    }
+	}
+	export class SignatureParam {
+	    start: number;
+	    end: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SignatureParam(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.start = source["start"];
+	        this.end = source["end"];
+	    }
+	}
+	export class StatementRange {
+	    startLine: number;
+	    endLine: number;
+	    startOffset: number;
+	    endOffset: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new StatementRange(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.startLine = source["startLine"];
+	        this.endLine = source["endLine"];
+	        this.startOffset = source["startOffset"];
+	        this.endOffset = source["endOffset"];
+	    }
+	}
+	
+	export class TokenMatch {
+	    name: string;
+	    line: number;
+	    col: number;
+	    endCol: number;
+	    quoted: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new TokenMatch(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.line = source["line"];
+	        this.col = source["col"];
+	        this.endCol = source["endCol"];
+	        this.quoted = source["quoted"];
+	    }
+	}
 
 }
 
