@@ -792,12 +792,18 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         monaco.editor.setModelMarkers(model, "thaw-sql", []);
         return;
       }
+      // Snapshot the model version before any async work.  Each await point
+      // checks this version; if the user has edited since we started, we
+      // discard the stale results rather than overwriting the markers that a
+      // newer run has already (or will soon) set.
+      const diagVersion = model.getVersionId();
       const diagSql = model.getValue();
       const diagMarkers: DiagMarker[] = [];
 
       // Structural syntax check (unclosed strings, parens, scripting assignments).
       // Runs in the Go backend to protect the proprietary tokenizer logic.
       const syntaxErrors = await AnalyzeSqlSyntax(diagSql);
+      if (model.getVersionId() !== diagVersion) return;
       diagMarkers.push(...(syntaxErrors as DiagMarker[]));
 
       if (syntaxErrors.length === 0) {
@@ -807,6 +813,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         diagMarkers.push(...validateWithParser(diagSql));
 
         const rawRefs = await ParseJoinTableRefs(diagSql);
+        if (model.getVersionId() !== diagVersion) return;
         const storeObjs = useObjectStore.getState().objects;
         // Resolve refs without the >= 2 constraint so single-table queries are validated.
         const resolved: ResolvedRef[] = rawRefs
@@ -845,6 +852,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             return { db: ref.db, schema: ref.schema, name: ref.name, cols: colInfoCache.get(key) ?? [] };
           });
           const semanticMarkers = await AnalyzeSqlSemantics(diagSql, resolved as any, colEntries as any);
+          if (model.getVersionId() !== diagVersion) return;
           diagMarkers.push(...(semanticMarkers as DiagMarker[]));
         }
 
