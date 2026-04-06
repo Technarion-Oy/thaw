@@ -842,6 +842,13 @@ var sqlFormatterKeywords = map[string]bool{
 	"REPLICATION": true, "RESUME": true, "ROLE": true, "SCHEDULE": true,
 	"SECURE": true, "SHARE": true, "SUSPEND": true, "TABULAR": true,
 	"TRANSIENT": true, "TRIGGER": true, "UNDROP": true,
+	// Additional Snowflake / Standard keywords
+	"IMMEDIATE": true, "NUMBER": true, "VARCHAR": true, "BOOLEAN": true, "DATE": true, "STRING": true, "FLOAT": true, "INTEGER": true, "INT": true,
+	"DOUBLE": true, "REAL": true, "DECIMAL": true, "NUMERIC": true, "BIGINT": true, "SMALLINT": true, "TINYINT": true, "BYTEINT": true,
+	"TIMESTAMP_NTZ": true, "TIMESTAMP_LTZ": true, "TIMESTAMP_TZ": true, "VARIANT": true, "OBJECT": true, "ARRAY": true,
+	"GEOGRAPHY": true, "GEOMETRY": true, "INPUT": true,
+	// Snowflake Scripting keywords
+	"DECLARE": true, "BEGIN": true, "LET": true, "RETURN": true, "VAR": true, "WHILE": true, "REPEAT": true, "LOOP": true, "EXCEPTION": true,
 }
 
 // builtinFunctions is the set of Snowflake built-in function names.
@@ -1037,7 +1044,7 @@ func ApplyCasing(sql, keywordCase, identifierCase, functionCase string) string {
 			continue
 		}
 
-		// ── Dollar-quoted string — pass through unchanged ──────────────────────
+		// ── Dollar-quoted string — recursively apply casing unless tag is $query$ ──
 		if ch == '$' {
 			tagEnd := i + 1
 			for tagEnd < n && runes[tagEnd] != '$' && runes[tagEnd] != '\n' {
@@ -1048,10 +1055,24 @@ func ApplyCasing(sql, keywordCase, identifierCase, functionCase string) string {
 				rest := string(runes[tagEnd+1:])
 				closeByteIdx := strings.Index(rest, tag)
 				if closeByteIdx >= 0 {
+					innerStart := tagEnd + 1
 					closeRuneOff := len([]rune(rest[:closeByteIdx]))
-					endRune := tagEnd + 1 + closeRuneOff + len([]rune(tag))
-					sb.WriteString(string(runes[i:endRune]))
-					i = endRune
+					innerEnd := innerStart + closeRuneOff
+					innerSql := string(runes[innerStart:innerEnd])
+
+					sb.WriteString(tag)
+					tagUpper := strings.ToUpper(tag)
+					if tagUpper == "$QUERY$" {
+						// Pass through $query$ blocks unchanged (likely contains a query string literal)
+						sb.WriteString(innerSql)
+					} else {
+						// Recursively process scripting bodies ($$, $body$, etc.)
+						sb.WriteString(ApplyCasing(innerSql, keywordCase, identifierCase, functionCase))
+					}
+
+					sb.WriteString(tag)
+
+					i = innerEnd + len([]rune(tag))
 					continue
 				}
 			}
@@ -1102,7 +1123,7 @@ func ApplyCasing(sql, keywordCase, identifierCase, functionCase string) string {
 
 			// Peek past whitespace to determine if this is a function call.
 			k := j
-			for k < n && (runes[k] == ' ' || runes[k] == '\t') {
+			for k < n && (runes[k] == ' ' || runes[k] == '\t' || runes[k] == '\n' || runes[k] == '\r') {
 				k++
 			}
 			isCall := k < n && runes[k] == '('
