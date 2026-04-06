@@ -877,3 +877,158 @@ func TestComputeJoinOnConditions(t *testing.T) {
 		}
 	})
 }
+
+func TestApplyCasing(t *testing.T) {
+	tests := []struct {
+		name          string
+		sql           string
+		keywordCase   string
+		identifierCase string
+		functionCase  string
+		want          string
+	}{
+		// ── keywordCase ───────────────────────────────────────────────────────
+		{name: "UPPER keyword", sql: "select id from t", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "UPPER", want: "SELECT id FROM t"},
+		{name: "lower keyword", sql: "SELECT id FROM t", keywordCase: "lower", identifierCase: "Preserve", functionCase: "lower", want: "select id from t"},
+		{name: "Title keyword", sql: "SELECT id FROM t", keywordCase: "Title", identifierCase: "Preserve", functionCase: "UPPER", want: "Select id From t"},
+		{name: "Preserve keyword", sql: "SeLeCt id FrOm t", keywordCase: "Preserve", identifierCase: "Preserve", functionCase: "UPPER", want: "SeLeCt id FrOm t"},
+
+		// ── identifierCase ────────────────────────────────────────────────────
+		{name: "identifier UPPER", sql: "SELECT MyCol FROM MyTable", keywordCase: "UPPER", identifierCase: "UPPER", functionCase: "UPPER", want: "SELECT MYCOL FROM MYTABLE"},
+		{name: "identifier lower", sql: "SELECT MyCol FROM MyTable", keywordCase: "UPPER", identifierCase: "lower", functionCase: "UPPER", want: "SELECT mycol FROM mytable"},
+		{name: "identifier Preserve", sql: "SELECT MyCol FROM MyTable", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "UPPER", want: "SELECT MyCol FROM MyTable"},
+
+		// ── functionCase ──────────────────────────────────────────────────────
+		{name: "function UPPER", sql: "select count(id) from t", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "UPPER", want: "SELECT COUNT(id) FROM t"},
+		{name: "function lower", sql: "select COUNT(id) from t", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "lower", want: "SELECT count(id) FROM t"},
+		{name: "UDF gets functionCase", sql: "select my_udf(x) from t", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "UPPER", want: "SELECT MY_UDF(x) FROM t"},
+
+		// ── pass-through sections ─────────────────────────────────────────────
+		{name: "single-quoted string unchanged", sql: "select 'SELECT from' from t", keywordCase: "lower", identifierCase: "Preserve", functionCase: "lower", want: "select 'SELECT from' from t"},
+		{name: "double-quoted ident unchanged", sql: `select "MyCol" from t`, keywordCase: "UPPER", identifierCase: "lower", functionCase: "UPPER", want: `SELECT "MyCol" FROM t`},
+		{name: "line comment unchanged", sql: "-- SELECT\nselect 1", keywordCase: "lower", identifierCase: "Preserve", functionCase: "lower", want: "-- SELECT\nselect 1"},
+		{name: "block comment unchanged", sql: "/* SELECT */ select 1", keywordCase: "lower", identifierCase: "Preserve", functionCase: "lower", want: "/* SELECT */ select 1"},
+		{name: "dollar-quoted block RECURSIVE", sql: "CREATE FUNCTION f() AS $$SELECT 1$$", keywordCase: "lower", identifierCase: "Preserve", functionCase: "lower", want: "create function f() as $$select 1$$"},
+		{name: "$query$ block UNCHANGED", sql: "LET s := $query$ SELECT 1 $query$", keywordCase: "lower", identifierCase: "Preserve", functionCase: "lower", want: "let s := $query$ SELECT 1 $query$"},
+
+		// ── edge cases ────────────────────────────────────────────────────────
+		{name: "empty string", sql: "", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "UPPER", want: ""},
+		{name: "function space before paren stripped", sql: "SELECT COUNT (id) FROM t", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "UPPER", want: "SELECT COUNT(id) FROM t"},
+		{name: "keyword OVER keeps space before paren", sql: "SELECT id, ROW_NUMBER () OVER (ORDER BY id) FROM t", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "UPPER", want: "SELECT id, ROW_NUMBER() OVER (ORDER BY id) FROM t"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ApplyCasing(tt.sql, tt.keywordCase, tt.identifierCase, tt.functionCase)
+			if got != tt.want {
+				t.Errorf("ApplyCasing(%q, %q, %q, %q)\n  got  %q\n  want %q",
+					tt.sql, tt.keywordCase, tt.identifierCase, tt.functionCase, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestApplyCasingComplexScenarios(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+		want string
+	}{
+		{
+			name: "Complex SELECT with window functions",
+			sql: ` sElEcT Coalesce( a.First_Name, b.First_Name ) aS fName,
+       count( * ) Over (pArTiTiOn By a.dept_id oRdEr By a.joined_date DeSc) as dept_count
+FrOm my_schema.Employees A
+LeFt oUtEr jOiN my_schema.Contractors b On a.id = b.emp_id
+wHeRe a.Status = 'active'; `,
+			want: ` SELECT Coalesce( a.first_name, b.first_name ) AS fname,
+       Count( * ) OVER (PARTITION BY a.dept_id ORDER BY a.joined_date DESC) AS dept_count
+FROM my_schema.employees a
+LEFT OUTER JOIN my_schema.contractors b ON a.id = b.emp_id
+WHERE a.status = 'active'; `,
+		},
+		{
+			name: "CREATE TABLE with quoted identifiers and literals",
+			sql: `CrEaTe Or RePlAcE tAbLe "My WeIrD TaBlE" (
+    "ColA" VaRcHaR DeFaUlT 'It''s a "SELECT" statement inside a string',
+    "cAsE_sEnSiTiVe_CoL" nUmBeR(10, 2) cOmMeNt 'Keywords like fRoM and WhErE should be untouched',
+    "Col""With""Quotes" BoOlEaN
+);`,
+			want: `CREATE OR REPLACE TABLE "My WeIrD TaBlE" (
+    "ColA" VARCHAR DEFAULT 'It''s a "SELECT" statement inside a string',
+    "cAsE_sEnSiTiVe_CoL" NUMBER(10, 2) COMMENT 'Keywords like fRoM and WhErE should be untouched',
+    "Col""With""Quotes" BOOLEAN
+);`,
+		},
+		{
+			name: "Nested functions and UDFs",
+			sql: `SeLeCt CAST    ( my_date_col aS DaTe ),
+       TrY_pArSe_JsOn ( raw_payload ),
+       current_timestamp(),
+       my_custom_udf_function
+       (
+           'input_string'
+       )
+FrOm events;`,
+			want: `SELECT Cast( my_date_col AS DATE ),
+       Try_parse_json( raw_payload ),
+       CURRENT_TIMESTAMP(),
+       My_custom_udf_function(
+           'input_string'
+       )
+FROM events;`,
+		},
+		{
+			name: "EXECUTE IMMEDIATE with dollar quoting",
+			sql: `eXeCuTe iMmEdIaTe $$
+dEcLaRe
+    my_var InTeGeR dEfAuLt 0;
+BeGiN
+    -- This is a comment with SELECT and COUNT() that should NOT be upper/lowercased
+    /* Block comment testing lowercase keywords
+       sElEcT * fRoM "table" 
+    */
+    LET query_str VARCHAR := $query$ sElEcT * fRoM mY_tAbLe WhErE iD = 1; $query$;
+    my_var := 1;
+    ReTuRn my_var;
+EnD;
+$$;`,
+			want: `EXECUTE IMMEDIATE $$
+DECLARE
+    my_var INTEGER DEFAULT 0;
+BEGIN
+    -- This is a comment with SELECT and COUNT() that should NOT be upper/lowercased
+    /* Block comment testing lowercase keywords
+       sElEcT * fRoM "table" 
+    */
+    LET query_str VARCHAR := $query$ sElEcT * fRoM mY_tAbLe WhErE iD = 1; $query$;
+    my_var := 1;
+    RETURN my_var;
+END;
+$$;`,
+		},
+		{
+			name: "JSON path and Lateral Flatten",
+			sql: `SeLeCt f.VaLuE:id::StRiNg As Id,
+       f.VaLuE:name::VaRcHaR aS nAmE
+fRoM my_db.my_schema.raw_json j,
+LaTeRaL FlAtTeN ( InPuT => j.PaYlOaD:users ) f
+wHeRe IdEnTiFiEr('user_id') = 123;`,
+			want: `SELECT f.value:id::STRING AS id,
+       f.value:name::VARCHAR AS name
+FROM my_db.my_schema.raw_json j,
+LATERAL Flatten( INPUT => j.payload:users ) f
+WHERE Identifier('user_id') = 123;`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Using common preferences for complex tests: Keywords UPPER, Identifiers lower, Functions Title
+			got := ApplyCasing(tt.sql, "UPPER", "lower", "Title")
+			if got != tt.want {
+				t.Errorf("ApplyCasing(%s) failure\n  got:  %q\n  want: %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}

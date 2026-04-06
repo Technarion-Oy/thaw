@@ -1762,6 +1762,14 @@ func (a *App) ParseSignatureParams(sig string) []sqleditor.SignatureParam {
 	return sqleditor.ParseSignatureParams(sig)
 }
 
+// ApplySqlCasing applies token-level keyword/identifier/function casing to a
+// formatted SQL string.  Quoted identifiers, string literals, dollar-quoted
+// blocks, and comments are passed through unchanged.
+// No Snowflake connection is required.
+func (a *App) ApplySqlCasing(sql, keywordCase, identifierCase, functionCase string) string {
+	return sqleditor.ApplyCasing(sql, keywordCase, identifierCase, functionCase)
+}
+
 // GetFunctionInfo fetches the DDL for a user-defined function and returns its
 // parameter list together with a flag indicating whether it is a table function.
 func (a *App) GetFunctionInfo(database, schema, name, argTypes string) (*snowflake.FunctionInfo, error) {

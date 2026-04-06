@@ -791,6 +791,378 @@ func ParseSignatureParams(sig string) []SignatureParam {
 
 // ── ValidateSyntax ────────────────────────────────────────────────────────────
 
+// ── Token-level casing ────────────────────────────────────────────────────────
+
+// sqlFormatterKeywords is the complete set of SQL reserved words for the
+// token-level casing pass (ApplyCasing).  Tokens in this set receive
+// keywordCase treatment unless they are also in builtinFunctions.
+var sqlFormatterKeywords = map[string]bool{
+	"ADD": true, "ALL": true, "ALTER": true, "AND": true, "ANY": true,
+	"AS": true, "ASC": true, "AT": true, "BEFORE": true, "BETWEEN": true,
+	"BY": true, "CALL": true, "CASCADE": true, "CASE": true, "CAST": true,
+	"CHANGES": true, "CLUSTER": true, "COLUMN": true, "COMMENT": true,
+	"COMMIT": true, "CONNECT": true, "CONSTRAINT": true, "COPY": true,
+	"CREATE": true, "CROSS": true, "CURRENT": true, "CURRENT_DATE": true,
+	"CURRENT_ROLE": true, "CURRENT_SCHEMA": true, "CURRENT_TIME": true,
+	"CURRENT_TIMESTAMP": true, "CURRENT_USER": true, "CURRENT_WAREHOUSE": true,
+	"DATABASE": true, "DEFAULT": true, "DELETE": true, "DESC": true,
+	"DESCRIBE": true, "DISTINCT": true, "DROP": true, "ELSE": true,
+	"END": true, "EXCEPT": true, "EXECUTE": true, "EXISTS": true,
+	"EXPLAIN": true, "EXTRACT": true, "FALSE": true, "FILE": true,
+	"FIRST": true, "FLATTEN": true, "FOLLOWING": true, "FOR": true,
+	"FORCE": true, "FOREIGN": true, "FROM": true, "FULL": true,
+	"FUNCTION": true, "DEFINE": true, "GRANT": true, "GROUP": true,
+	"GROUPING": true, "HAVING": true, "IF": true, "ILIKE": true,
+	"IN": true, "INDEX": true, "INNER": true, "INSERT": true,
+	"INTERSECT": true, "INTO": true, "IS": true, "JOIN": true,
+	"KEY": true, "LAST": true, "LATERAL": true, "LEFT": true,
+	"LIKE": true, "LIMIT": true, "MATCH_RECOGNIZE": true, "MEASURES": true,
+	"MERGE": true, "MINUS": true, "NATURAL": true, "NOT": true,
+	"NULL": true, "NULLS": true, "OF": true, "OFFSET": true,
+	"ON": true, "OR": true, "ORDER": true, "OUTER": true, "OVER": true,
+	"OVERWRITE": true, "PARTITION": true, "PATTERN": true, "PIPE": true,
+	"PRECEDING": true, "PRIMARY": true, "PROCEDURE": true, "PURGE": true,
+	"QUALIFY": true, "RANGE": true, "RECURSIVE": true, "REFERENCES": true,
+	"REPLACE": true, "RESTRICT": true, "REVOKE": true, "RIGHT": true,
+	"ROLLBACK": true, "ROW": true, "ROWS": true, "SAMPLE": true,
+	"SCHEMA": true, "SELECT": true, "SEMI": true, "SEQUENCE": true,
+	"SET": true, "SHOW": true, "SOME": true, "STAGE": true,
+	"START": true, "STREAM": true, "TABLE": true, "TABLESAMPLE": true,
+	"TASK": true, "THEN": true, "TO": true, "TOP": true,
+	"TRANSACTION": true, "TRUE": true, "TRUNCATE": true, "UNBOUNDED": true,
+	"UNION": true, "UNIQUE": true, "UPDATE": true, "USING": true,
+	"VALUES": true, "VIEW": true, "VOLATILE": true, "WAREHOUSE": true,
+	"WHEN": true, "WHERE": true, "WINDOW": true, "WITH": true,
+	"WITHIN": true, "WITHOUT": true,
+	// Snowflake-specific
+	"ANTI": true, "ASOF": true, "CLONE": true, "CRON": true,
+	"DYNAMIC": true, "ENABLE": true, "EXTERNAL": true, "FINALIZE": true,
+	"FORMAT": true, "ICEBERG": true, "MASKING": true, "NETWORK": true,
+	"NOTIFY": true, "POLICY": true, "PROJECTION": true, "RECOVER": true,
+	"REPLICATION": true, "RESUME": true, "ROLE": true, "SCHEDULE": true,
+	"SECURE": true, "SHARE": true, "SUSPEND": true, "TABULAR": true,
+	"TRANSIENT": true, "TRIGGER": true, "UNDROP": true,
+	// Additional Snowflake / Standard keywords
+	"IMMEDIATE": true, "NUMBER": true, "VARCHAR": true, "BOOLEAN": true, "DATE": true, "STRING": true, "FLOAT": true, "INTEGER": true, "INT": true,
+	"DOUBLE": true, "REAL": true, "DECIMAL": true, "NUMERIC": true, "BIGINT": true, "SMALLINT": true, "TINYINT": true, "BYTEINT": true,
+	"TIMESTAMP_NTZ": true, "TIMESTAMP_LTZ": true, "TIMESTAMP_TZ": true, "VARIANT": true, "OBJECT": true, "ARRAY": true,
+	"GEOGRAPHY": true, "GEOMETRY": true, "INPUT": true,
+	// Snowflake Scripting keywords
+	"DECLARE": true, "BEGIN": true, "LET": true, "RETURN": true, "VAR": true, "WHILE": true, "REPEAT": true, "LOOP": true, "EXCEPTION": true,
+}
+
+// builtinFunctions is the set of Snowflake built-in function names.
+// A token that is in both sqlFormatterKeywords and builtinFunctions and is
+// followed by "(" receives functionCase treatment (not keywordCase).
+var builtinFunctions = map[string]bool{
+	"ABS": true, "ACOS": true, "ACOSH": true, "ADD_MONTHS": true,
+	"ANY_VALUE": true, "APPROX_COUNT_DISTINCT": true, "APPROX_PERCENTILE": true,
+	"APPROX_TOP_K": true, "ARRAY_AGG": true, "ARRAY_APPEND": true,
+	"ARRAY_CAT": true, "ARRAY_COMPACT": true, "ARRAY_CONSTRUCT": true,
+	"ARRAY_CONTAINS": true, "ARRAY_DISTINCT": true, "ARRAY_EXCEPT": true,
+	"ARRAY_FLATTEN": true, "ARRAY_GENERATE_RANGE": true, "ARRAY_INSERT": true,
+	"ARRAY_INTERSECTION": true, "ARRAY_MAX": true, "ARRAY_MIN": true,
+	"ARRAY_PREPEND": true, "ARRAY_REMOVE": true, "ARRAY_REMOVE_AT": true,
+	"ARRAY_SIZE": true, "ARRAY_SLICE": true, "ARRAY_SORT": true,
+	"ARRAY_TO_STRING": true, "ARRAY_UNION_AGG": true, "ARRAY_UNIQUE_AGG": true,
+	"AS_ARRAY": true, "AS_BINARY": true, "AS_BOOLEAN": true, "AS_CHAR": true,
+	"AS_DATE": true, "AS_DECIMAL": true, "AS_DOUBLE": true, "AS_INTEGER": true,
+	"AS_NUMBER": true, "AS_OBJECT": true, "AS_REAL": true, "AS_TIME": true,
+	"AS_TIMESTAMP_LTZ": true, "AS_TIMESTAMP_NTZ": true, "AS_TIMESTAMP_TZ": true,
+	"AS_TINYINT": true, "AS_VARCHAR": true, "ASIN": true, "ASINH": true,
+	"ATAN": true, "ATAN2": true, "ATANH": true, "AVG": true,
+	"BASE64_DECODE_STRING": true, "BASE64_ENCODE": true, "BITNOT": true,
+	"BITSHIFTLEFT": true, "BITSHIFTRIGHT": true, "BITAND": true,
+	"BITOR": true, "BITXOR": true, "BOOLAND": true, "BOOLAND_AGG": true,
+	"BOOLNOT": true, "BOOLOR": true, "BOOLOR_AGG": true, "BOOLXOR": true,
+	"BOOLXOR_AGG": true,
+	"CASE": true, "CAST": true, "CBRT": true, "CEIL": true, "CEILING": true,
+	"CHARINDEX": true, "CHR": true, "CHAR": true, "COALESCE": true,
+	"COLLATE": true, "COLLATION": true, "COMPRESS": true, "CONCAT": true,
+	"CONCAT_WS": true, "CONDITIONAL_CHANGE_EVENT": true,
+	"CONDITIONAL_TRUE_EVENT": true, "CONTAINS": true, "CONVERT_TIMEZONE": true,
+	"COS": true, "COSH": true, "COUNT": true, "COUNT_IF": true,
+	"COVAR_POP": true, "COVAR_SAMP": true, "CUME_DIST": true,
+	"DATE_FROM_PARTS": true, "DATE_PART": true, "DATE_TRUNC": true,
+	"DATEADD": true, "DATEDIFF": true, "DAYNAME": true, "DAYOFMONTH": true,
+	"DAYOFWEEK": true, "DAYOFWEEKISO": true, "DAYOFYEAR": true,
+	"DECODE": true, "DECOMPRESS": true, "DENSE_RANK": true, "DIV0": true,
+	"DIV0NULL": true,
+	"EDITDISTANCE": true, "ENDSWITH": true, "EQUAL_NULL": true, "EXP": true,
+	"FIRST_VALUE": true, "FLATTEN": true, "FLOOR": true, "FORMAT_DATE": true,
+	"FORMAT_NUMBER": true,
+	"GENERATOR": true, "GET": true, "GET_ABSOLUTE_PATH": true, "GET_DDL": true,
+	"GET_PATH": true, "GET_PRESIGNED_URL": true, "GET_STAGE_LOCATION": true,
+	"GETBIT": true, "GREATEST": true, "GROUPING": true, "GROUPING_ID": true,
+	"HASH": true, "HASH_AGG": true, "HAVERSINE": true,
+	"HEX_DECODE_BINARY": true, "HEX_DECODE_STRING": true, "HEX_ENCODE": true,
+	"HOUR": true, "HOURS": true,
+	"IFF": true, "IFNULL": true, "IN": true, "INITCAP": true,
+	"INSERT": true, "IS_ARRAY": true, "IS_BINARY": true, "IS_BOOLEAN": true,
+	"IS_CHAR": true, "IS_DATE": true, "IS_DATE_VALUE": true,
+	"IS_DECIMAL": true, "IS_DOUBLE": true, "IS_GRANTED_TO_INVOKER_ROLE": true,
+	"IS_INTEGER": true, "IS_NULL_VALUE": true, "IS_OBJECT": true,
+	"IS_REAL": true, "IS_TIME": true, "IS_TIMESTAMP_LTZ": true,
+	"IS_TIMESTAMP_NTZ": true, "IS_TIMESTAMP_TZ": true, "IS_VARCHAR": true,
+	"JAROWINKLER_SIMILARITY": true, "JSON_EXTRACT_PATH_TEXT": true,
+	"KURTOSIS": true, "LAG": true, "LAST_DAY": true, "LAST_VALUE": true,
+	"LEAD": true, "LEAST": true, "LEFT": true, "LENGTH": true, "LEN": true,
+	"LISTAGG": true, "LN": true, "LOG": true, "LOWER": true, "LPAD": true,
+	"LTRIM": true,
+	"MAX": true, "MAX_BY": true, "MEDIAN": true, "MIN": true, "MIN_BY": true,
+	"MINUTE": true, "MINUTES": true, "MOD": true, "MODE": true,
+	"MONTH": true, "MONTHNAME": true, "MONTHS_BETWEEN": true,
+	"NORMAL": true, "NTH_VALUE": true, "NTILE": true, "NULLIF": true,
+	"NULLIFZERO": true, "NVL": true, "NVL2": true,
+	"OBJECT_AGG": true, "OBJECT_CONSTRUCT": true,
+	"OBJECT_CONSTRUCT_KEEP_NULL": true, "OBJECT_DELETE": true,
+	"OBJECT_INSERT": true, "OBJECT_KEYS": true, "OBJECT_PICK": true,
+	"PARSE_IP": true, "PARSE_JSON": true, "PARSE_URL": true,
+	"PARSE_XML": true, "PERCENT_RANK": true, "PERCENTILE_CONT": true,
+	"PERCENTILE_DISC": true, "PI": true, "POSITION": true, "POW": true,
+	"POWER": true,
+	"RANDSTR": true, "RANDOM": true, "RANK": true, "RATIO_TO_REPORT": true,
+	"REGEXP": true, "REGEXP_COUNT": true, "REGEXP_EXTRACT": true,
+	"REGEXP_EXTRACT_ALL": true, "REGEXP_INSTR": true, "REGEXP_LIKE": true,
+	"REGEXP_REPLACE": true, "REGEXP_SUBSTR": true, "REPEAT": true,
+	"REPLACE": true, "REVERSE": true, "RIGHT": true, "ROUND": true,
+	"ROW_NUMBER": true, "RPAD": true, "RTRIM": true,
+	"SECOND": true, "SECONDS": true, "SHA1": true, "SHA1_BINARY": true,
+	"SHA1_HEX": true, "SHA2": true, "SHA2_BINARY": true, "SHA2_HEX": true,
+	"SIGN": true, "SIN": true, "SINH": true, "SKEW": true,
+	"SOUNDEX": true, "SPACE": true, "SPLIT": true, "SPLIT_PART": true,
+	"SPLIT_TO_TABLE": true, "SQL_VARIANT_PROPERTY": true, "SQRT": true,
+	"SQUARE": true, "STARTSWITH": true, "STDDEV": true, "STDDEV_POP": true,
+	"STDDEV_SAMP": true, "STRIP_NULL_VALUE": true, "STRTOK": true,
+	"STRTOK_SPLIT_TO_TABLE": true, "STRTOK_TO_ARRAY": true,
+	"SUBSTR": true, "SUBSTRING": true, "SUM": true,
+	"SYSTEM$ABORT_TRANSACTION": true, "SYSTEM$CANCEL_ALL_QUERIES": true,
+	"SYSTEM$CANCEL_QUERY": true, "SYSTEM$CLUSTERING_DEPTH": true,
+	"SYSTEM$CLUSTERING_INFORMATION": true,
+	"SYSTEM$GET_PREDECESSOR_RETURN_VALUE": true,
+	"SYSTEM$STREAM_GET_TABLE_TIMESTAMP": true, "SYSTEM$STREAM_HAS_DATA": true,
+	"SYSTEM$TASK_DEPENDENTS_ENABLE": true, "SYSTEM$TYPEOF": true,
+	"SYSTEM$WAIT": true,
+	"TAN": true, "TANH": true, "TIME_FROM_PARTS": true, "TIMEADD": true,
+	"TIMEDIFF": true, "TIMESTAMPADD": true, "TIMESTAMPDIFF": true,
+	"TIMESTAMP_FROM_PARTS": true, "TIMESTAMP_LTZ_FROM_PARTS": true,
+	"TIMESTAMP_NTZ_FROM_PARTS": true, "TIMESTAMP_TZ_FROM_PARTS": true,
+	"TO_ARRAY": true, "TO_BINARY": true, "TO_BOOLEAN": true,
+	"TO_CHAR": true, "TO_DATE": true, "TO_DECIMAL": true, "TO_DOUBLE": true,
+	"TO_GEOGRAPHY": true, "TO_GEOMETRY": true, "TO_JSON": true,
+	"TO_NUMBER": true, "TO_OBJECT": true, "TO_REAL": true,
+	"TO_TIME": true, "TO_TIMESTAMP": true, "TO_TIMESTAMP_LTZ": true,
+	"TO_TIMESTAMP_NTZ": true, "TO_TIMESTAMP_TZ": true, "TO_VARIANT": true,
+	"TO_VARCHAR": true, "TO_XML": true, "TRANSLATE": true, "TRIM": true,
+	"TRUNCATE": true, "TRUNC": true, "TRY_BASE64_DECODE_BINARY": true,
+	"TRY_BASE64_DECODE_STRING": true, "TRY_CAST": true,
+	"TRY_HEX_DECODE_BINARY": true, "TRY_HEX_DECODE_STRING": true,
+	"TRY_PARSE_JSON": true, "TRY_TO_BINARY": true, "TRY_TO_BOOLEAN": true,
+	"TRY_TO_DATE": true, "TRY_TO_DECIMAL": true, "TRY_TO_DOUBLE": true,
+	"TRY_TO_NUMBER": true, "TRY_TO_TIME": true, "TRY_TO_TIMESTAMP": true,
+	"TRY_TO_TIMESTAMP_LTZ": true, "TRY_TO_TIMESTAMP_NTZ": true,
+	"TRY_TO_TIMESTAMP_TZ": true, "TYPEOF": true,
+	"UNIFORM": true, "UPPER": true, "UNISTR": true,
+	"VAR_POP": true, "VAR_SAMP": true, "VARIANCE": true,
+	"VARIANCE_POP": true, "VARIANCE_SAMP": true,
+	"WEEK": true, "WEEKISO": true, "WEEKOFYEAR": true,
+	"XMLGET": true, "YEAR": true, "YEAROFWEEK": true,
+	"YEAROFWEEKISO": true, "ZEROIFNULL": true,
+}
+
+// ApplyCasing walks a formatted SQL string token by token and applies
+// per-role casing preferences.  Double-quoted identifiers, single-quoted
+// strings, dollar-quoted strings, and comments are passed through unchanged.
+// keywordCase: "UPPER" | "lower" | "Title" | "Preserve"
+// identifierCase: "Preserve" | "UPPER" | "lower"
+// functionCase: "UPPER" | "lower"
+func ApplyCasing(sql, keywordCase, identifierCase, functionCase string) string {
+	if sql == "" {
+		return sql
+	}
+	runes := []rune(sql)
+	n := len(runes)
+	var sb strings.Builder
+	sb.Grow(len(sql))
+
+	applyCase := func(word, casing string) string {
+		switch casing {
+		case "UPPER":
+			return strings.ToUpper(word)
+		case "lower":
+			return strings.ToLower(word)
+		case "Title":
+			r := []rune(word)
+			if len(r) == 0 {
+				return word
+			}
+			return strings.ToUpper(string(r[:1])) + strings.ToLower(string(r[1:]))
+		default: // "Preserve"
+			return word
+		}
+	}
+
+	i := 0
+	for i < n {
+		ch := runes[i]
+
+		// ── Double-quoted identifier — pass through unchanged ──────────────────
+		if ch == '"' {
+			j := i + 1
+			for j < n {
+				if runes[j] == '"' {
+					if j+1 < n && runes[j+1] == '"' {
+						j += 2
+						continue
+					}
+					j++
+					break
+				}
+				j++
+			}
+			sb.WriteString(string(runes[i:j]))
+			i = j
+			continue
+		}
+
+		// ── Single-quoted string — pass through unchanged ──────────────────────
+		if ch == '\'' {
+			j := i + 1
+			for j < n {
+				if runes[j] == '\'' {
+					if j+1 < n && runes[j+1] == '\'' {
+						j += 2
+						continue
+					}
+					j++
+					break
+				}
+				j++
+			}
+			sb.WriteString(string(runes[i:j]))
+			i = j
+			continue
+		}
+
+		// ── Dollar-quoted string — recursively apply casing unless tag is $query$ ──
+		if ch == '$' {
+			tagEnd := i + 1
+			for tagEnd < n && runes[tagEnd] != '$' && runes[tagEnd] != '\n' {
+				tagEnd++
+			}
+			if tagEnd < n && runes[tagEnd] == '$' {
+				tag := string(runes[i : tagEnd+1]) // e.g. "$$" or "$body$"
+				rest := string(runes[tagEnd+1:])
+				closeByteIdx := strings.Index(rest, tag)
+				if closeByteIdx >= 0 {
+					innerStart := tagEnd + 1
+					closeRuneOff := len([]rune(rest[:closeByteIdx]))
+					innerEnd := innerStart + closeRuneOff
+					innerSql := string(runes[innerStart:innerEnd])
+
+					sb.WriteString(tag)
+					tagUpper := strings.ToUpper(tag)
+					if tagUpper == "$QUERY$" {
+						// Pass through $query$ blocks unchanged (likely contains a query string literal)
+						sb.WriteString(innerSql)
+					} else {
+						// Recursively process scripting bodies ($$, $body$, etc.)
+						sb.WriteString(ApplyCasing(innerSql, keywordCase, identifierCase, functionCase))
+					}
+
+					sb.WriteString(tag)
+
+					i = innerEnd + len([]rune(tag))
+					continue
+				}
+			}
+			// Not a valid dollar-quoted string — pass the '$' through.
+			sb.WriteRune(ch)
+			i++
+			continue
+		}
+
+		// ── Line comment -- … newline — pass through unchanged ─────────────────
+		if ch == '-' && i+1 < n && runes[i+1] == '-' {
+			j := i
+			for j < n && runes[j] != '\n' {
+				j++
+			}
+			if j < n {
+				j++ // include the newline
+			}
+			sb.WriteString(string(runes[i:j]))
+			i = j
+			continue
+		}
+
+		// ── Block comment /* … */ — pass through unchanged ─────────────────────
+		if ch == '/' && i+1 < n && runes[i+1] == '*' {
+			j := i + 2
+			for j+1 < n && !(runes[j] == '*' && runes[j+1] == '/') {
+				j++
+			}
+			if j+1 < n {
+				j += 2 // skip past */
+			} else {
+				j = n // unclosed comment — consume to end
+			}
+			sb.WriteString(string(runes[i:j]))
+			i = j
+			continue
+		}
+
+		// ── Word token (identifier / keyword / function name) ──────────────────
+		if isAlpha(ch) {
+			j := i + 1
+			for j < n && (isWordChar(runes[j]) || runes[j] == '$') {
+				j++
+			}
+			word := string(runes[i:j])
+			upper := strings.ToUpper(word)
+
+			// Peek past whitespace to determine if this is a function call.
+			k := j
+			for k < n && (runes[k] == ' ' || runes[k] == '\t' || runes[k] == '\n' || runes[k] == '\r') {
+				k++
+			}
+			isCall := k < n && runes[k] == '('
+
+			var result string
+			if isCall {
+				// Keywords that use '(' structurally (OVER, IN, …) keep keyword casing.
+				// Built-in functions and UDFs get function casing.
+				if sqlFormatterKeywords[upper] && !builtinFunctions[upper] {
+					result = applyCase(word, keywordCase)
+				} else {
+					result = applyCase(word, functionCase)
+				}
+			} else if sqlFormatterKeywords[upper] {
+				result = applyCase(word, keywordCase)
+			} else {
+				result = applyCase(word, identifierCase)
+			}
+
+			// For function tokens (not pure keyword constructs), strip the space
+			// sql-formatter inserted before '(' so e.g. "COUNT (" → "COUNT(".
+			isFunctionToken := isCall && (!sqlFormatterKeywords[upper] || builtinFunctions[upper])
+			sb.WriteString(result)
+			if isFunctionToken {
+				i = k // advance past the whitespace before '('
+			} else {
+				i = j
+			}
+			continue
+		}
+
+		// Numbers, operators, whitespace, punctuation — pass through unchanged.
+		sb.WriteRune(ch)
+		i++
+	}
+
+	return sb.String()
+}
+
 // ValidateSyntax is a character-by-character Snowflake SQL tokenizer that catches
 // structural errors:
 //   - Unclosed single-quoted strings

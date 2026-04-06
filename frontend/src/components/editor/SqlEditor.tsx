@@ -39,10 +39,7 @@ let inlineCompletionsDisposable: { dispose(): void } | null = null;
 let signatureHelpDisposable: { dispose(): void } | null = null;
 
 // Module-level editor preferences — updated whenever the user saves new prefs.
-// Stored here (not in React state) so the Format SQL action closure always
-// sees the latest value without needing re-registration.
 let editorPrefsRef: EditorPrefs = { ...DEFAULT_EDITOR_PREFS };
-
 
 const builtinFns = new Set<string>();
 const udfFns     = new Set<string>();
@@ -241,7 +238,6 @@ interface SqlEditorProps {
   tabId?: string;
   activeStmtIdx?: number | null;
 }
-
 
 function applyPrefsToSnippet(text: string, prefs: EditorPrefs): string {
   const indentUnit = prefs.indentStyle === "tabs" ? "\t" : " ".repeat(prefs.indentSize);
@@ -890,62 +886,58 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const seenColKeys = new Set<string>();
         const contextColSuggestions: any[] = [];
         let fetchPending = false;
+        
+        const rawRefs = await ParseJoinTableRefs(currentStmtText);
+        const refsToFetch: {db: string, schema: string, name: string}[] = [];
 
-        const rawTableRefs = await ParseJoinTableRefs(currentStmtText);
-        for (const rawRef of rawTableRefs ?? []) {
-          const refDb     = rawRef.db;
-          const refSchema = rawRef.schema;
-          const refName   = rawRef.name;
-
-          const refsToFetch: {db: string, schema: string, name: string}[] = [];
-
-          if (refDb && refSchema && refName) {
+        for (const ref of (rawRefs || [])) {
+          if (ref.db && ref.schema && ref.name) {
             // Fully qualified: trust the name and attempt fetch directly without requiring it in objectStore
-            refsToFetch.push({ db: refDb, schema: refSchema, name: refName });
+            refsToFetch.push({ db: ref.db, schema: ref.schema, name: ref.name });
           } else {
             // Partial: Try to resolve via objects store
             const matchedObjs = objects.filter((o) => {
               if (o.kind !== "TABLE" && o.kind !== "VIEW") return false;
-              if (UC(o.name) !== UC(refName)) return false;
-              if (refDb && UC(o.db) !== UC(refDb)) return false;
-              if (refSchema && UC(o.schema) !== UC(refSchema)) return false;
+              if (UC(o.name) !== UC(ref.name)) return false;
+              if (ref.db && UC(o.db) !== UC(ref.db)) return false;
+              if (ref.schema && UC(o.schema) !== UC(ref.schema)) return false;
               return true;
             });
             for (const obj of matchedObjs) {
               refsToFetch.push({ db: obj.db, schema: obj.schema, name: obj.name });
             }
-
+            
             // Fallback to session store defaults if not found in cache
             if (matchedObjs.length === 0) {
               const sess = useSessionStore.getState();
-              if (sess.database && sess.schema && refName && !refDb && !refSchema) {
-                refsToFetch.push({ db: sess.database, schema: sess.schema, name: refName });
-              } else if (sess.database && refSchema && refName && !refDb) {
-                refsToFetch.push({ db: sess.database, schema: refSchema, name: refName });
+              if (sess.database && sess.schema && ref.name && !ref.db && !ref.schema) {
+                refsToFetch.push({ db: sess.database, schema: sess.schema, name: ref.name });
+              } else if (sess.database && ref.schema && ref.name && !ref.db) {
+                refsToFetch.push({ db: sess.database, schema: ref.schema, name: ref.name });
               }
             }
           }
+        }
 
-          for (const ref of refsToFetch) {
-            const cacheKey = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
-            if (columnCache.has(cacheKey)) {
-              for (const col of columnCache.get(cacheKey)!) {
-                if (!seenColKeys.has(UC(col))) {
-                  seenColKeys.add(UC(col));
-                  contextColSuggestions.push({
-                    label:      col,
-                    kind:       monaco.languages.CompletionItemKind.Field,
-                    insertText: col,
-                    sortText:   "02_" + col,
-                    detail:     `COLUMN · ${ref.name}`,
-                    range,
-                  });
-                }
+        for (const ref of refsToFetch) {
+          const cacheKey = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
+          if (columnCache.has(cacheKey)) {
+            for (const col of columnCache.get(cacheKey)!) {
+              if (!seenColKeys.has(UC(col))) {
+                seenColKeys.add(UC(col));
+                contextColSuggestions.push({
+                  label:      col,
+                  kind:       monaco.languages.CompletionItemKind.Field,
+                  insertText: col,
+                  sortText:   "02_" + col,
+                  detail:     `COLUMN · ${ref.name}`,
+                  range,
+                });
               }
-            } else {
-              getColumns(ref.db, ref.schema, ref.name);
-              fetchPending = true;
             }
+          } else {
+            getColumns(ref.db, ref.schema, ref.name);
+            fetchPending = true;
           }
         }
 
@@ -1488,7 +1480,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       contextMenuGroupId: "1_modification",
       contextMenuOrder: 2,
       keybindings: [monacoLib.KeyMod.Shift | monacoLib.KeyMod.Alt | monacoLib.KeyCode.KeyF],
-      run: (ed) => {
+      run: async (ed) => {
         const model = ed.getModel();
         if (!model) return;
         const selection = ed.getSelection();
@@ -1496,7 +1488,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
         if (hasSelection && selection) {
           const original = model.getValueInRange(selection);
-          const formatted = formatSQL(original, editorPrefsRef);
+          const formatted = await formatSQL(original, editorPrefsRef);
           if (formatted !== original) {
             ed.executeEdits("thaw.formatSQL", [{
               range: selection,
@@ -1506,7 +1498,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           }
         } else {
           const original = model.getValue();
-          const formatted = formatSQL(original, editorPrefsRef);
+          const formatted = await formatSQL(original, editorPrefsRef);
           if (formatted !== original) {
             const fullRange = model.getFullModelRange();
             ed.executeEdits("thaw.formatSQL", [{
