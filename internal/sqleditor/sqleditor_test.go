@@ -877,3 +877,52 @@ func TestComputeJoinOnConditions(t *testing.T) {
 		}
 	})
 }
+
+func TestApplyCasing(t *testing.T) {
+	tests := []struct {
+		name          string
+		sql           string
+		keywordCase   string
+		identifierCase string
+		functionCase  string
+		want          string
+	}{
+		// ── keywordCase ───────────────────────────────────────────────────────
+		{name: "UPPER keyword", sql: "select id from t", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "UPPER", want: "SELECT id FROM t"},
+		{name: "lower keyword", sql: "SELECT id FROM t", keywordCase: "lower", identifierCase: "Preserve", functionCase: "lower", want: "select id from t"},
+		{name: "Title keyword", sql: "SELECT id FROM t", keywordCase: "Title", identifierCase: "Preserve", functionCase: "UPPER", want: "Select id From t"},
+		{name: "Preserve keyword", sql: "SeLeCt id FrOm t", keywordCase: "Preserve", identifierCase: "Preserve", functionCase: "UPPER", want: "SeLeCt id FrOm t"},
+
+		// ── identifierCase ────────────────────────────────────────────────────
+		{name: "identifier UPPER", sql: "SELECT MyCol FROM MyTable", keywordCase: "UPPER", identifierCase: "UPPER", functionCase: "UPPER", want: "SELECT MYCOL FROM MYTABLE"},
+		{name: "identifier lower", sql: "SELECT MyCol FROM MyTable", keywordCase: "UPPER", identifierCase: "lower", functionCase: "UPPER", want: "SELECT mycol FROM mytable"},
+		{name: "identifier Preserve", sql: "SELECT MyCol FROM MyTable", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "UPPER", want: "SELECT MyCol FROM MyTable"},
+
+		// ── functionCase ──────────────────────────────────────────────────────
+		{name: "function UPPER", sql: "select count(id) from t", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "UPPER", want: "SELECT COUNT(id) FROM t"},
+		{name: "function lower", sql: "select COUNT(id) from t", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "lower", want: "SELECT count(id) FROM t"},
+		{name: "UDF gets functionCase", sql: "select my_udf(x) from t", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "UPPER", want: "SELECT MY_UDF(x) FROM t"},
+
+		// ── pass-through sections ─────────────────────────────────────────────
+		{name: "single-quoted string unchanged", sql: "select 'SELECT from' from t", keywordCase: "lower", identifierCase: "Preserve", functionCase: "lower", want: "select 'SELECT from' from t"},
+		{name: "double-quoted ident unchanged", sql: `select "MyCol" from t`, keywordCase: "UPPER", identifierCase: "lower", functionCase: "UPPER", want: `SELECT "MyCol" FROM t`},
+		{name: "line comment unchanged", sql: "-- SELECT\nselect 1", keywordCase: "lower", identifierCase: "Preserve", functionCase: "lower", want: "-- SELECT\nselect 1"},
+		{name: "block comment unchanged", sql: "/* SELECT */ select 1", keywordCase: "lower", identifierCase: "Preserve", functionCase: "lower", want: "/* SELECT */ select 1"},
+		{name: "dollar-quoted block unchanged", sql: "CREATE FUNCTION f() AS $$SELECT 1$$", keywordCase: "lower", identifierCase: "Preserve", functionCase: "lower", want: "create function f() as $$SELECT 1$$"},
+
+		// ── edge cases ────────────────────────────────────────────────────────
+		{name: "empty string", sql: "", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "UPPER", want: ""},
+		{name: "function space before paren stripped", sql: "SELECT COUNT (id) FROM t", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "UPPER", want: "SELECT COUNT(id) FROM t"},
+		{name: "keyword OVER keeps space before paren", sql: "SELECT id, ROW_NUMBER () OVER (ORDER BY id) FROM t", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "UPPER", want: "SELECT id, ROW_NUMBER() OVER (ORDER BY id) FROM t"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ApplyCasing(tt.sql, tt.keywordCase, tt.identifierCase, tt.functionCase)
+			if got != tt.want {
+				t.Errorf("ApplyCasing(%q, %q, %q, %q)\n  got  %q\n  want %q",
+					tt.sql, tt.keywordCase, tt.identifierCase, tt.functionCase, got, tt.want)
+			}
+		})
+	}
+}

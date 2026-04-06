@@ -54,6 +54,10 @@ export function AnalyzeSqlSyntax(arg1) {
   return window['go']['main']['App']['AnalyzeSqlSyntax'](arg1);
 }
 
+export function ApplySqlCasing(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ApplySqlCasing'](arg1, arg2, arg3, arg4);
+}
+
 export function CanCreateIntegration() {
   return window['go']['main']['App']['CanCreateIntegration']();
 }

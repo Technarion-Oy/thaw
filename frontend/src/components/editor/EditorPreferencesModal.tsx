@@ -58,16 +58,20 @@ interface Props {
 }
 
 export default function EditorPreferencesModal({ onClose }: Props) {
-  const [prefs, setPrefs]     = useState<EditorPrefs>(DEFAULT_EDITOR_PREFS);
-  const [saving, setSaving]   = useState(false);
-  const [error, setError]     = useState<string | null>(null);
+  const [prefs, setPrefs]       = useState<EditorPrefs>(DEFAULT_EDITOR_PREFS);
+  const [saving, setSaving]     = useState(false);
+  const [error, setError]       = useState<string | null>(null);
+  const [preview, setPreview]   = useState("");
 
   // Load persisted prefs on mount.
   useEffect(() => {
     GetEditorPrefs().then((p) => setPrefs(p as unknown as EditorPrefs)).catch(() => {});
   }, []);
 
-  const preview = formatSQL(SAMPLE_SQL, prefs);
+  // Recompute preview whenever prefs change.
+  useEffect(() => {
+    void formatSQL(SAMPLE_SQL, prefs).then(setPreview);
+  }, [prefs]);
 
   function set<K extends keyof EditorPrefs>(key: K, value: EditorPrefs[K]) {
     setPrefs((p) => ({ ...p, [key]: value }));

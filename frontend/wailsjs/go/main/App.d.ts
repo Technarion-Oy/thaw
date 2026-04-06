@@ -38,6 +38,8 @@ export function AnalyzeSqlSemantics(arg1:string,arg2:Array<sqleditor.ResolvedRef
 
 export function AnalyzeSqlSyntax(arg1:string):Promise<Array<sqleditor.DiagMarker>>;
 
+export function ApplySqlCasing(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
+
 export function CanCreateIntegration():Promise<boolean>;
 
 export function CanCreateUsers():Promise<boolean>;

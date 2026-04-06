@@ -1488,7 +1488,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       contextMenuGroupId: "1_modification",
       contextMenuOrder: 2,
       keybindings: [monacoLib.KeyMod.Shift | monacoLib.KeyMod.Alt | monacoLib.KeyCode.KeyF],
-      run: (ed) => {
+      run: async (ed) => {
         const model = ed.getModel();
         if (!model) return;
         const selection = ed.getSelection();
@@ -1496,7 +1496,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
         if (hasSelection && selection) {
           const original = model.getValueInRange(selection);
-          const formatted = formatSQL(original, editorPrefsRef);
+          const formatted = await formatSQL(original, editorPrefsRef);
           if (formatted !== original) {
             ed.executeEdits("thaw.formatSQL", [{
               range: selection,
@@ -1506,7 +1506,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           }
         } else {
           const original = model.getValue();
-          const formatted = formatSQL(original, editorPrefsRef);
+          const formatted = await formatSQL(original, editorPrefsRef);
           if (formatted !== original) {
             const fullRange = model.getFullModelRange();
             ed.executeEdits("thaw.formatSQL", [{
