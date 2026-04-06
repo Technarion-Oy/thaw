@@ -17,6 +17,7 @@ import {
   StatementRange,
   validateWithParser,
   validateBareColumnRefs,
+  validateTablesExist,
 } from "./sqlDiagnostics";
 
 // ── Mock FindSqlTokenPositions IPC (no Wails runtime in tests) ────────────────
@@ -710,4 +711,126 @@ describe("validateBareColumnRefs", async () => {
       expect(warnings(m)[0].message).not.toMatch(/bad_col_literal/i);
     });
   });
+
+  // ── 4. validateTablesExist ────────────────────────────────────────────────────
+
+describe("validateTablesExist", () => {
+  // Helper to grab only fatal errors (severity 8)
+  const errors = (markers: DiagMarker[]) => markers.filter((m) => m.severity === 8);
+
+  // Helper to generate mock ranges for multi-statement scripts
+  function multiRange(statements: string[]): { sql: string; ranges: StatementRange[] } {
+    let offset = 0;
+    let line = 1;
+    const ranges: StatementRange[] = statements.map((stmt) => {
+      const startOffset = offset;
+      const endOffset = offset + stmt.length;
+      const startLine = line;
+      const endLine = line + stmt.split("\n").length - 1;
+
+      offset = endOffset + 1; // +1 for the \n joining them
+      line = endLine + 1;
+      return { startLine, endLine, startOffset, endOffset };
+    });
+    return { sql: statements.join("\n"), ranges };
+  }
+
+  // Mock live database cache
+  const LIVE_REFS = refs({ alias: "l", db: "DB", schema: "SCH", name: "LIVE_TABLE" });
+
+  describe("valid tables → no errors", () => {
+    it("returns no errors when table exists in the live cache", async () => {
+      const sql = "SELECT * FROM LIVE_TABLE";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("ignores CTEs within the same statement", async () => {
+      const sql = "WITH my_cte AS (SELECT 1 AS id) SELECT * FROM my_cte";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("ignores subqueries in the FROM clause", async () => {
+      const sql = "SELECT sub.id FROM (SELECT 1 AS id) sub";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("recognizes locally created tables from prior statements (Pre-Pass)", async () => {
+      const { sql, ranges } = multiRange([
+        "CREATE TEMPORARY TABLE local_tab AS SELECT 1;",
+        "SELECT * FROM local_tab;"
+      ]);
+      const m = await validateTablesExist(sql, ranges, LIVE_REFS);
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("recognizes locally created views", async () => {
+      const { sql, ranges } = multiRange([
+        "CREATE OR REPLACE VIEW my_view AS SELECT 1;",
+        "SELECT * FROM my_view;"
+      ]);
+      const m = await validateTablesExist(sql, ranges, LIVE_REFS);
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("handles fully-qualified and double-quoted names in CREATE pre-pass", async () => {
+      const { sql, ranges } = multiRange([
+        'CREATE TRANSIENT TABLE IF NOT EXISTS "MY_DB"."MY_SCHEMA"."Crazy Table!" (id INT);',
+        'SELECT * FROM "Crazy Table!";'
+      ]);
+      const m = await validateTablesExist(sql, ranges, LIVE_REFS);
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("handles case insensitivity between CREATE and SELECT", async () => {
+      const { sql, ranges } = multiRange([
+        "CREATE TABLE MyTaBlE (id int);",
+        "SELECT * FROM mytable;"
+      ]);
+      const m = await validateTablesExist(sql, ranges, LIVE_REFS);
+      expect(errors(m)).toHaveLength(0);
+    });
+  });
+
+  describe("missing tables → Fatal Error (Severity 8)", () => {
+    it("returns an error when the table is completely unknown", async () => {
+      const sql = "SELECT * FROM MISSING_TABLE";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].severity).toBe(8);
+      expect(errors(m)[0].message).toMatch(/MISSING_TABLE/i);
+    });
+
+    it("flags missing table in a JOIN while allowing the valid table", async () => {
+      const sql = "SELECT * FROM LIVE_TABLE JOIN NOPE_TABLE ON a=b";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/NOPE_TABLE/i);
+    });
+
+    it("CTE scope does not leak between separate statements", async () => {
+      const { sql, ranges } = multiRange([
+        "WITH my_cte AS (SELECT 1) SELECT * FROM my_cte;", // Valid
+        "SELECT * FROM my_cte;" // Invalid! CTE doesn't exist anymore
+      ]);
+      const m = await validateTablesExist(sql, ranges, LIVE_REFS);
+      
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].startLineNumber).toBe(2);
+      expect(errors(m)[0].message).toMatch(/my_cte/i);
+    });
+
+    it("marker column span covers the full unknown token", async () => {
+      const sql = 'SELECT * FROM "MISSING_TABLE"';
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      expect(errors(m)[0].startColumn).toBe(15); // Starts at the quote
+      expect(errors(m)[0].endColumn).toBe(15 + '"MISSING_TABLE"'.length);
+    });
+  });
+});
 });

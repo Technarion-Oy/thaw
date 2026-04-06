@@ -7,17 +7,53 @@
 
 import { Parser as SnowflakeParser } from "node-sql-parser/build/snowflake";
 import type { sqleditor } from "../../wailsjs/go/models";
-import { FindSqlTokenPositions } from "../../wailsjs/go/main/App";
 
 /** StatementRange as returned by GetSqlStatementRanges IPC. */
 export type StatementRange = sqleditor.StatementRange;
 
-/** TokenMatch as returned by FindSqlTokenPositions IPC. */
-export type TokenMatch = sqleditor.TokenMatch;
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const UC = (s: string) => s.toUpperCase();
+
+// Helper to safely extract the first SQL keyword, completely ignoring
+// leading newlines, spaces, and SQL comments.
+function getFirstToken(sql: string): string | null {
+  const stripped = sql.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").trimStart();
+  return stripped.match(/^[a-zA-Z_]\w*/)?.[0]?.toUpperCase() ?? null;
+}
+
+// Local token finder that guarantees accurate line/col offsets without relying
+// on the backend, completely immune to Go EOF tokenizer bugs.
+function findTokensLocally(stmtText: string, targets: string[], baseLine: number) {
+  const tokens: Array<{ name: string; line: number; col: number; endCol: number; quoted: boolean }> = [];
+  const lines = stmtText.split("\n");
+  const targetSet = new Set(targets.map(UC));
+  
+  for (let i = 0; i < lines.length; i++) {
+    const lineStr = lines[i];
+    // Match valid Snowflake identifiers: bare words or double-quoted strings
+    const regex = /[a-zA-Z0-9_$]+|"[^"]+"/g;
+    let match;
+    while ((match = regex.exec(lineStr)) !== null) {
+      let word = match[0];
+      let quoted = false;
+      if (word.startsWith('"') && word.endsWith('"')) {
+        word = word.slice(1, -1);
+        quoted = true;
+      }
+      if (targetSet.has(UC(word))) {
+        tokens.push({
+          name: word,
+          line: baseLine + i,
+          col: match.index + 1,
+          endCol: match.index + 1 + match[0].length,
+          quoted
+        });
+      }
+    }
+  }
+  return tokens;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -25,55 +61,37 @@ export interface ColInfo { name: string; dataType: string; }
 
 /** Subset of monaco.editor.IMarkerData used for SQL diagnostics. */
 export interface DiagMarker {
-  startLineNumber: number; // 1-indexed (Monaco convention)
+  startLineNumber: number; 
   startColumn:     number;
   endLineNumber:   number;
   endColumn:       number;
   message:         string;
-  severity:        8 | 4;  // 8 = Error (red), 4 = Warning (yellow)
+  severity:        8 | 4;  
 }
 
 // ── validateWithParser ────────────────────────────────────────────────────────
 
-// Statement-starting keywords whose SQL the Snowflake PEG parser handles
-// correctly (no false positives on valid Snowflake syntax).
-// Keywords NOT in this set — DELETE, MERGE, GRANT, REVOKE, EXPLAIN, BEGIN,
-// COMMIT, ROLLBACK, USE, COPY, PUT, GET, UNSET, DESCRIBE, DECLARE, DROP, etc.
-// all produce parser errors on valid Snowflake SQL and are therefore skipped.
-//
-// DROP is intentionally absent: the parser only handles `DROP TABLE` and fails
-// on DROP VIEW, DROP TASK, DROP STREAM, DROP STAGE, DROP IF EXISTS, etc.
 const PARSEABLE_STMT_KEYWORDS = new Set([
   "SELECT", "WITH", "INSERT", "UPDATE", "CREATE", "ALTER",
   "TRUNCATE", "CALL", "SHOW", "SET",
 ]);
 
-// Within otherwise-parseable statements, these Snowflake-specific constructs
-// also trip up the parser — skip the whole statement if any is detected.
-//
-// CREATE / ALTER: the parser only handles a subset of object types. Skip any
-// statement that uses a Snowflake-specific object kind it doesn't know about.
 const SNOWFLAKE_FP_RE = new RegExp(
-  // Snowflake SELECT-clause constructs the parser can't handle
   "\\bTABLESAMPLE\\b|\\bSAMPLE\\s*\\(|\\bWITHIN\\s+GROUP\\b|\\bCONNECT\\s+BY\\b" +
   "|\\bAT\\s*\\(|\\bBEFORE\\s*\\(|\\bIN\\s+TABLE\\b" +
-  // Snowflake-specific CREATE object types (parser only knows TABLE/VIEW/DATABASE/SCHEMA/SEQUENCE/INDEX)
   "|CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TASK|STREAM|STAGE|PIPE|FUNCTION|PROCEDURE|AGGREGATE" +
   "|WAREHOUSE|ROLE|FILE\\s+FORMAT|USER|ALERT|SHARE|EXTERNAL|DYNAMIC|MATERIALIZED" +
   "|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK|RESOURCE|ROW\\s+ACCESS" +
   "|SESSION|PASSWORD|REPLICATION|FAILOVER|APPLICATION)\\b" +
-  // Snowflake-specific ALTER object types (parser handles TABLE and SCHEMA/FUNCTION only)
   "|ALTER\\s+(?:VIEW|TASK|STREAM|WAREHOUSE|DATABASE|SEQUENCE|STAGE|PIPE" +
   "|USER|ALERT|SHARE|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK" +
   "|RESOURCE|REPLICATION|FAILOVER)\\b" +
-  // Snowflake-specific clauses/keywords within otherwise-parseable statements
-  "|\\bCLUSTER\\s+(?:BY|KEY)\\b" +   // ALTER TABLE ... CLUSTER BY/KEY
-  "|\\bCLONE\\b" +                    // CREATE TABLE t CLONE src
-  "|INSERT\\s+OVERWRITE\\b" +         // INSERT OVERWRITE INTO
-  "|TRUNCATE\\s+\\S+\\s+IF\\b",       // TRUNCATE TABLE IF EXISTS
+  "|\\bCLUSTER\\s+(?:BY|KEY)\\b" +   
+  "|\\bCLONE\\b" +                    
+  "|INSERT\\s+OVERWRITE\\b" +         
+  "|TRUNCATE\\s+\\S+\\s+IF\\b",       
   "i",
 );
-
 
 function cleanParserMessage(raw: string): string {
   // PEG.js messages are very verbose ("Expected ... but 'X' found.")
@@ -83,32 +101,21 @@ function cleanParserMessage(raw: string): string {
   return raw.length > 100 ? raw.slice(0, 97) + "…" : raw;
 }
 
-/**
- * Uses the node-sql-parser Snowflake grammar to detect grammatical errors.
- * Errors are emitted as **Warnings** (severity 4) because the parser may
- * produce false positives on valid Snowflake-specific syntax.
- *
- * Only statements whose first keyword is in `PARSEABLE_STMT_KEYWORDS` are
- * checked; all others are silently skipped.
- *
- * `stmtRanges` must be the result of `GetSqlStatementRanges(sql)` — one
- * range per statement with pre-computed start lines and byte offsets.
- */
 export function validateWithParser(sql: string, stmtRanges: StatementRange[]): DiagMarker[] {
   const markers: DiagMarker[] = [];
-  const parser = new SnowflakeParser();
 
   for (const r of stmtRanges) {
-    const stmtText = sql.slice(r.startOffset, r.endOffset).trimStart();
-    // Only attempt statements the parser can handle without false positives.
-    const firstToken = stmtText.match(/^[a-zA-Z_]\w*/)?.[0]?.toUpperCase();
+    const parser = new SnowflakeParser();
+    const rawStmtText = sql.slice(r.startOffset, r.endOffset);
+    
+    const firstToken = getFirstToken(rawStmtText);
     if (!firstToken || !PARSEABLE_STMT_KEYWORDS.has(firstToken)) continue;
+    if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
 
-    // Skip statements containing Snowflake syntax the parser chokes on.
-    if (SNOWFLAKE_FP_RE.test(stmtText)) continue;
+    const parseText = rawStmtText.replace(/;+\s*$/, "");
 
     try {
-      parser.parse(stmtText);
+      parser.parse(parseText);
     } catch (err: unknown) {
       const e = err as {
         location?: { start: { line: number; column: number } };
@@ -117,13 +124,10 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
       if (e?.location?.start) {
         const stmtBaseLine = r.startLine;
         const errLine = stmtBaseLine + e.location.start.line - 1;
-        const errCol  = e.location.start.column; // 1-indexed (PEG.js convention)
+        const errCol  = e.location.start.column;
 
-        // Extend the squiggly to cover the full word at the error position so
-        // a single mis-placed keyword like 'not' gets a 3-char span rather than
-        // a barely-visible 1-char underline.
-        const errLineText = stmtText.split("\n")[(e.location.start.line ?? 1) - 1] ?? "";
-        const errColIdx   = errCol - 1; // 0-indexed
+        const errLineText = rawStmtText.split("\n")[(e.location.start.line ?? 1) - 1] ?? "";
+        const errColIdx   = errCol - 1;
         let wordEndIdx    = errColIdx;
         while (wordEndIdx < errLineText.length && /\w/.test(errLineText[wordEndIdx])) wordEndIdx++;
         const wordAtError = errLineText.slice(errColIdx, wordEndIdx);
@@ -170,22 +174,22 @@ export async function validateBareColumnRefs(
   colInfoCache: Map<string, ColInfo[]>,
 ): Promise<DiagMarker[]> {
   const markers: DiagMarker[] = [];
-  const parser = new SnowflakeParser();
 
   for (const r of stmtRanges) {
-    const stmtText = sql.slice(r.startOffset, r.endOffset).trimStart();
-    const firstToken = stmtText.match(/^[a-zA-Z_]\w*/)?.[0]?.toUpperCase();
+    const parser = new SnowflakeParser();
+    const rawStmtText = sql.slice(r.startOffset, r.endOffset);
+    const firstToken = getFirstToken(rawStmtText);
     if (firstToken !== "SELECT" && firstToken !== "WITH") continue;
-    if (SNOWFLAKE_FP_RE.test(stmtText)) continue;
+    if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
+
+    const parseText = rawStmtText.replace(/;+\s*$/, "");
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let ast: any;
-    try { ast = parser.parse(stmtText); } catch { continue; }
+    try { ast = parser.parse(parseText); } catch { continue; }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const stmtAsts: any[] = Array.isArray(ast.ast) ? ast.ast : [ast.ast];
-
-    const stmtBaseLine = r.startLine;
 
     for (const node of stmtAsts) {
       if (!node || node.type !== "select") continue;
@@ -225,7 +229,6 @@ export async function validateBareColumnRefs(
 
       if (skip || tableChecks.length === 0) continue;
 
-      // Union of all column names across every FROM table
       const knownCols = new Set<string>();
       for (const tc of tableChecks) {
         for (const c of colInfoCache.get(tc.cacheKey)!) knownCols.add(UC(c.name));
@@ -248,26 +251,113 @@ export async function validateBareColumnRefs(
       if (unknownBare.size === 0 && unknownQuoted.size === 0) continue;
 
       const tableLabel = tableChecks.length === 1 ? tableChecks[0].tableName : "query tables";
-
-      // FindSqlTokenPositions matches targets case-insensitively in Go, so pass
-      // uppercase values to match the UC-normalised knownCols set used above.
-      // We pass ALL unknowns to BOTH bare and quoted targets, because node-sql-parser
-      // sometimes categorizes double-quoted columns ("MY_COL") as standard column_refs.
       const allUnknown = [...new Set([...unknownBare, ...unknownQuoted])].map(UC);
 
-      // eslint-disable-next-line no-await-in-loop
-      const tokens = await FindSqlTokenPositions(stmtText, allUnknown, allUnknown);
-      for (const t of (tokens ?? [])) {
+      const tokens = findTokensLocally(rawStmtText, allUnknown, r.startLine);
+      for (const t of tokens) {
         const message = t.quoted
           ? `Column '"${t.name}"' not found in ${tableLabel}`
           : `Column '${t.name}' not found in ${tableLabel}`;
         markers.push({
-          startLineNumber: stmtBaseLine + t.line - 1,
+          startLineNumber: t.line,
           startColumn:     t.col,
-          endLineNumber:   stmtBaseLine + t.line - 1,
+          endLineNumber:   t.line,
           endColumn:       t.endCol,
           message,
           severity:        4,
+        });
+      }
+    }
+  }
+  return markers;
+}
+
+// ── validateTablesExist ───────────────────────────────────────────────────────
+
+export async function validateTablesExist(
+  sql: string,
+  stmtRanges: StatementRange[],
+  resolvedRefs: ResolvedRef[],
+): Promise<DiagMarker[]> {
+  const markers: DiagMarker[] = [];
+  const scriptCreatedTables = new Set<string>();
+
+  // 1. PRE-PASS: Collect locally created tables
+  for (const r of stmtRanges) {
+    const rawStmtText = sql.slice(r.startOffset, r.endOffset);
+    const createMatch = rawStmtText.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+|TEMPORARY\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    
+    if (createMatch) {
+      const parts = [...createMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0]);
+      if (parts.length > 0) {
+        const newTableName = parts[parts.length - 1].replace(/^"|"$/g, "").toUpperCase();
+        scriptCreatedTables.add(newTableName);
+      }
+    }
+  }
+
+  // 2. PARSE & VALIDATE
+  for (const r of stmtRanges) {
+    const parser = new SnowflakeParser();
+    const rawStmtText = sql.slice(r.startOffset, r.endOffset);
+    const firstToken = getFirstToken(rawStmtText);
+    if (firstToken !== "SELECT" && firstToken !== "WITH") continue;
+    if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
+
+    const parseText = rawStmtText.replace(/;+\s*$/, "");
+
+    let ast: any;
+    try { ast = parser.parse(parseText); } catch { continue; }
+
+    const stmtAsts: any[] = Array.isArray(ast.ast) ? ast.ast : [ast.ast];
+
+    for (const node of stmtAsts) {
+      if (!node || node.type !== "select") continue;
+
+      const currentCTEs = new Set<string>();
+      
+      if (firstToken === "WITH" && node.with && Array.isArray(node.with)) {
+        for (const cte of node.with) {
+          const cteName = typeof cte.name === "string" ? cte.name : cte.name?.value;
+          if (cteName) currentCTEs.add(UC(String(cteName)));
+        }
+      }
+
+      const fromTables: any[] = node.from ?? [];
+      const missingBare = new Set<string>();
+      const missingQuoted = new Set<string>();
+
+      for (const ft of fromTables) {
+        if (!ft.table) continue; 
+        
+        const ftTable = String(ft.table);
+        const ftTableUC = UC(ftTable);
+
+        if (currentCTEs.has(ftTableUC)) continue;
+        if (scriptCreatedTables.has(ftTableUC)) continue;
+        
+        const isLive = resolvedRefs.some(ref => UC(ref.name) === ftTableUC);
+        if (isLive) continue;
+
+        missingBare.add(ftTable);
+        missingQuoted.add(ftTable);
+      }
+
+      if (missingBare.size === 0 && missingQuoted.size === 0) continue;
+
+      const allUnknown = [...new Set([...missingBare, ...missingQuoted])].map(UC);
+      
+      // Use the local typescript token finder!
+      const tokens = findTokensLocally(rawStmtText, allUnknown, r.startLine);
+      
+      for (const t of tokens) {
+        markers.push({
+          startLineNumber: t.line,
+          startColumn:     t.col,
+          endLineNumber:   t.line,
+          endColumn:       t.endCol,
+          message:         `Object '${t.name}' does not exist or is not authorized.`,
+          severity:        8, 
         });
       }
     }

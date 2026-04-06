@@ -28,7 +28,7 @@ import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/run
 import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams } from "../../../wailsjs/go/main/App";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
-import { DiagMarker, ColInfo, validateWithParser, validateBareColumnRefs, ResolvedRef } from "../../utils/sqlDiagnostics";
+import { DiagMarker, ColInfo, validateWithParser, validateBareColumnRefs, validateTablesExist, ResolvedRef } from "../../utils/sqlDiagnostics";
 
 // Module-level DDL cache and hover provider handle so we only register once
 // and don't accumulate duplicate providers on editor remounts.
@@ -486,59 +486,63 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       const diagMarkers: DiagMarker[] = [];
 
       try {
+        // ADD || [] to prevent spreading null from Go's nil slices!
         const syntaxErrors = await AnalyzeSqlSyntax(diagSql);
         if (model.getVersionId() !== diagVersion) return;
-        diagMarkers.push(...(syntaxErrors as DiagMarker[]));
+        diagMarkers.push(...((syntaxErrors || []) as DiagMarker[]));
 
-        if (syntaxErrors.length === 0) {
-          const stmtRanges = await GetSqlStatementRanges(diagSql);
-          if (model.getVersionId() !== diagVersion) return;
-          diagMarkers.push(...validateWithParser(diagSql, stmtRanges));
+        const stmtRanges = (await GetSqlStatementRanges(diagSql)) || [];
+        if (model.getVersionId() !== diagVersion) return;
+        diagMarkers.push(...(validateWithParser(diagSql, stmtRanges) || []));
 
-          const rawRefs = await ParseJoinTableRefs(diagSql);
-          if (model.getVersionId() !== diagVersion) return;
-          const storeObjs = useObjectStore.getState().objects;
-          
-          const resolved: ResolvedRef[] = (rawRefs || [])
-            .map((ref) => {
-              if (ref.db && ref.schema) {
-                return { db: ref.db, schema: ref.schema, name: ref.name, alias: ref.alias };
-              }
-              const obj = storeObjs.find((o) => {
-                if (o.kind !== "TABLE" && o.kind !== "VIEW") return false;
-                if (UC(o.name) !== UC(ref.name)) return false;
-                if (ref.db     && UC(o.db)     !== UC(ref.db))     return false;
-                if (ref.schema && UC(o.schema) !== UC(ref.schema)) return false;
-                return true;
-              });
-              return obj ? { db: obj.db, schema: obj.schema, name: obj.name, alias: ref.alias } : null;
-            })
-            .filter(Boolean) as ResolvedRef[];
-
-          for (const ref of resolved) {
-            const warmKey = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
-            if (!colInfoCache.has(warmKey) && !fetchingColInfos.has(warmKey)) {
-              void getColInfos(ref.db, ref.schema, ref.name).then(() => {
-                if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
-                diagTimerRef.current = setTimeout(runDiagnostics, 0);
-              });
+        const rawRefs = await ParseJoinTableRefs(diagSql);
+        if (model.getVersionId() !== diagVersion) return;
+        const storeObjs = useObjectStore.getState().objects;
+        
+        const resolved: ResolvedRef[] = (rawRefs || [])
+          .map((ref) => {
+            if (ref.db && ref.schema) {
+              return { db: ref.db, schema: ref.schema, name: ref.name, alias: ref.alias };
             }
-          }
-
-          if (resolved.length > 0) {
-            const colEntries = resolved.map((ref) => {
-              const key = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
-              return { db: ref.db, schema: ref.schema, name: ref.name, cols: colInfoCache.get(key) ?? [] };
+            const obj = storeObjs.find((o) => {
+              if (o.kind !== "TABLE" && o.kind !== "VIEW") return false;
+              if (UC(o.name) !== UC(ref.name)) return false;
+              if (ref.db     && UC(o.db)     !== UC(ref.db))     return false;
+              if (ref.schema && UC(o.schema) !== UC(ref.schema)) return false;
+              return true;
             });
-            const semanticMarkers = await AnalyzeSqlSemantics(diagSql, resolved as any, colEntries as any);
-            if (model.getVersionId() !== diagVersion) return;
-            diagMarkers.push(...(semanticMarkers as DiagMarker[]));
-          }
+            return obj ? { db: obj.db, schema: obj.schema, name: obj.name, alias: ref.alias } : null;
+          })
+          .filter(Boolean) as ResolvedRef[];
 
-          const bareColMarkers = await validateBareColumnRefs(diagSql, stmtRanges, resolved, colInfoCache);
-          if (model.getVersionId() !== diagVersion) return;
-          diagMarkers.push(...bareColMarkers);
+        const tableMarkers = await validateTablesExist(diagSql, stmtRanges, resolved);
+        if (model.getVersionId() !== diagVersion) return;
+        diagMarkers.push(...(tableMarkers || []));
+
+        for (const ref of resolved) {
+          const warmKey = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
+          if (!colInfoCache.has(warmKey) && !fetchingColInfos.has(warmKey)) {
+            void getColInfos(ref.db, ref.schema, ref.name).then(() => {
+              if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
+              diagTimerRef.current = setTimeout(runDiagnostics, 0);
+            });
+          }
         }
+
+        if (resolved.length > 0) {
+          const colEntries = resolved.map((ref) => {
+            const key = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
+            return { db: ref.db, schema: ref.schema, name: ref.name, cols: colInfoCache.get(key) ?? [] };
+          });
+          const semanticMarkers = await AnalyzeSqlSemantics(diagSql, resolved as any, colEntries as any);
+          if (model.getVersionId() !== diagVersion) return;
+          diagMarkers.push(...((semanticMarkers || []) as DiagMarker[]));
+        }
+
+        const bareColMarkers = await validateBareColumnRefs(diagSql, stmtRanges, resolved, colInfoCache);
+        if (model.getVersionId() !== diagVersion) return;
+        diagMarkers.push(...(bareColMarkers || []));
+        
       } catch (err) {
         console.warn("[thaw] SQL diagnostics aborted:", err);
       } finally {
