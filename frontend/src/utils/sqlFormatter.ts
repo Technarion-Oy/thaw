@@ -44,8 +44,13 @@ export const DEFAULT_EDITOR_PREFS: EditorPrefs = {
 export async function formatSQL(sql: string, prefs: EditorPrefs): Promise<string> {
   if (!sql.trim()) return sql;
 
+  // Structural pass: indentation, line breaks, CTE layout, operator placement.
+  // sql-formatter does not handle bare $…$ dollar-quoting (only $$…$$), so it
+  // throws on EXECUTE IMMEDIATE $…$; — in that case skip structural formatting
+  // and fall through to the casing-only pass on the original SQL.
+  let structured = sql;
   try {
-    let structured = sfFormat(sql, {
+    let sfResult = sfFormat(sql, {
       language: "snowflake",
       // For "Preserve" mode pass through sql-formatter's own preserve so the
       // original keyword casing survives before our no-op ApplySqlCasing pass.
@@ -62,13 +67,17 @@ export async function formatSQL(sql: string, prefs: EditorPrefs): Promise<string
     // commas as a post-processing step: move each trailing comma to the
     // start of the following line so `col1,\n  col2` → `col1\n, col2`.
     if (prefs.commaPosition === "leading") {
-      structured = structured.replace(/,\n\s*/g, "\n, ");
+      sfResult = sfResult.replace(/,\n\s*/g, "\n, ");
     }
 
+    structured = sfResult;
+  } catch {
+    // Structural formatting failed — apply casing-only to the original SQL.
+  }
+
+  try {
     return await ApplySqlCasing(structured, prefs.keywordCase, prefs.identifierCase, prefs.functionCase);
   } catch {
-    // If the formatter fails (e.g. on a partial/invalid statement), return the
-    // original SQL unchanged so the editor never ends up with corrupted content.
     return sql;
   }
 }
