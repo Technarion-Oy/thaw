@@ -53,10 +53,30 @@ jobs:
       - name: Download Go dependencies
         run: go mod download
 
-      - name: Install garble
+      - name: Install garble (macOS & Linux only)
+        if: matrix.platform != 'windows'
         run: go install mvdan.cc/garble@latest
 
-      - name: Build
+      - name: Install NSIS (Windows only)
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          choco install nsis
+          # Explicitly add NSIS to the GitHub runner's PATH for subsequent steps
+          echo "C:\Program Files (x86)\NSIS" >> $GITHUB_PATH
+
+      - name: Prepare version string
+        id: prep
+        shell: bash
+        run: |
+          # Replace / with - in branch names to avoid path issues in filenames
+          CLEAN_REF=$(echo "${{ github.ref_name }}" | sed 's/\//-/g')
+          echo "version=${CLEAN_REF}" >> $GITHUB_OUTPUT
+
+      # ── Standard Wails Builds ──────────────────────────────────────────────
+
+      - name: Build (macOS & Linux)
+        if: matrix.platform != 'windows'
         # Run the standard Wails build first.  This step:
         #   1. Compiles and bundles the React frontend into frontend/dist.
         #   2. Generates the Wails JS/TS bindings.
@@ -78,6 +98,14 @@ jobs:
           # function several times over.  Combined with Terser's multi-pass
           # compression running in the same Node process, the default 4 GB
           # limit is insufficient.  6 GB leaves ~1 GB for the OS.
+          NODE_OPTIONS: --max-old-space-size=6144
+
+      - name: Build & Package Installer (Windows)
+        if: matrix.platform == 'windows'
+        # Since we dropped garble for Windows, we can let Wails handle 
+        # both the compilation AND the NSIS installer generation natively!
+        run: wails build -clean -nsis -ldflags "-s -w" -trimpath
+        env:
           NODE_OPTIONS: --max-old-space-size=6144
 
       # ── Rebuild Go binary with garble ──────────────────────────────────────
@@ -105,10 +133,6 @@ jobs:
             -o build/bin/thaw.app/Contents/MacOS/thaw \
             .
 
-      - name: Obfuscate binary (Windows)
-        if: matrix.platform == 'windows'
-        run: garble build -tags desktop,production -trimpath -ldflags="-s -w" -o build/bin/thaw.exe .
-
       - name: Obfuscate binary (Linux)
         if: matrix.platform == 'linux'
         run: |
@@ -123,16 +147,19 @@ jobs:
         if: matrix.platform == 'darwin'
         run: |
           cd build/bin
-          zip -r "thaw-${{ github.ref_name }}-darwin-arm64.zip" thaw.app
+          zip -r "thaw-${{ steps.prep.outputs.version }}-darwin-arm64.zip" thaw.app
 
-      - name: Rename Windows binary
+      - name: Rename Windows binaries
         if: matrix.platform == 'windows'
         shell: pwsh
-        run: Move-Item build/bin/thaw.exe "build/bin/thaw-${{ github.ref_name }}-windows-amd64.exe"
+        # Wails natively outputted both the raw executable and the installer, we rename both
+        run: |
+          Move-Item build/bin/thaw.exe "build/bin/thaw-${{ steps.prep.outputs.version }}-windows-amd64-portable.exe"
+          Move-Item build/bin/thaw-amd64-installer.exe "build/bin/thaw-${{ steps.prep.outputs.version }}-windows-amd64-installer.exe"
 
       - name: Rename Linux binary
         if: matrix.platform == 'linux'
-        run: mv build/bin/thaw "build/bin/thaw-${{ github.ref_name }}-linux-amd64"
+        run: mv build/bin/thaw "build/bin/thaw-${{ steps.prep.outputs.version }}-linux-amd64"
 
       # ── Store artifact ─────────────────────────────────────────────────────
       # Currently retained as a workflow artifact (30-day expiry).
@@ -140,8 +167,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: thaw-${{ github.ref_name }}-${{ matrix.platform }}-${{ matrix.arch }}
-          path: build/bin/thaw-${{ github.ref_name }}-*
+          name: thaw-${{ steps.prep.outputs.version }}-${{ matrix.platform }}-${{ matrix.arch }}
+          path: build/bin/thaw-${{ steps.prep.outputs.version }}-*
           retention-days: 30
           if-no-files-found: error
 
@@ -152,10 +179,10 @@ jobs:
       # GitHub Releases (attach binaries to the tag's release page):
       #   - uses: softprops/action-gh-release@v2
       #     with:
-      #       files: build/bin/thaw-${{ github.ref_name }}-*
+      #       files: build/bin/thaw-${{ steps.prep.outputs.version }}-*
       #
       # Amazon S3 / Cloudflare R2:
-      #   - run: aws s3 cp build/bin/thaw-${{ github.ref_name }}-* s3://your-bucket/builds/
+      #   - run: aws s3 cp build/bin/thaw-${{ steps.prep.outputs.version }}-* s3://your-bucket/builds/
       #     env:
       #       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       #       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
