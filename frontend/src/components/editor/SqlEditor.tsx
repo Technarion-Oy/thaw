@@ -887,28 +887,15 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           }
         }
 
-        const ID_PAT = `(?:"[^"]+"|\\w+)`;
-        const tableRefRe = new RegExp(
-          `(?:FROM|JOIN)\\s+(?:(${ID_PAT})\\.(${ID_PAT})\\.(${ID_PAT})|(${ID_PAT})\\.(${ID_PAT})|(${ID_PAT}))`,
-          "gi"
-        );
-        const stripQ = (s: string | undefined) =>
-          s ? (s.startsWith('"') ? s.slice(1, -1) : s) : undefined;
-
         const seenColKeys = new Set<string>();
         const contextColSuggestions: any[] = [];
         let fetchPending = false;
-        let tm: RegExpExecArray | null;
-        
-        while ((tm = tableRefRe.exec(currentStmtText)) !== null) {
-          let refDb: string | undefined, refSchema: string | undefined, refName: string;
-          if (tm[1] && tm[2] && tm[3]) {
-            [refDb, refSchema, refName] = [stripQ(tm[1])!, stripQ(tm[2])!, stripQ(tm[3])!];
-          } else if (tm[4] && tm[5]) {
-            [refSchema, refName] = [stripQ(tm[4])!, stripQ(tm[5])!];
-          } else {
-            refName = stripQ(tm[6])!;
-          }
+
+        const rawTableRefs = await ParseJoinTableRefs(currentStmtText);
+        for (const rawRef of rawTableRefs ?? []) {
+          const refDb     = rawRef.db;
+          const refSchema = rawRef.schema;
+          const refName   = rawRef.name;
 
           const refsToFetch: {db: string, schema: string, name: string}[] = [];
 
@@ -927,7 +914,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             for (const obj of matchedObjs) {
               refsToFetch.push({ db: obj.db, schema: obj.schema, name: obj.name });
             }
-            
+
             // Fallback to session store defaults if not found in cache
             if (matchedObjs.length === 0) {
               const sess = useSessionStore.getState();
