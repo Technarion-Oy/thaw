@@ -926,3 +926,13 @@ func TestApplyCasing(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyCasingBareScripting(t *testing.T) {
+	sql := "execute immediate $\nDECLARE\n  loop_counter INTEGER DEFAULT 0;\nBEGIN\n  loop_counter := LOOP_COUNTER;\n  RETURN loop_counter;\nEND;\n$;"
+	got := ApplyCasing(sql, "lower", "lower", "lower")
+	t.Logf("Input:  %s", sql)
+	t.Logf("Output: %s", got)
+	if got == sql {
+		t.Errorf("ApplyCasing returned unchanged input — keywords were not lowercased")
+	}
+}
