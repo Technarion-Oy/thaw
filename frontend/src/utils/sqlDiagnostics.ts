@@ -156,9 +156,9 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
  * Rules:
  * - Only runs when the statement is parseable (SELECT / WITH, no Snowflake-FP patterns).
  * - Only validates when **all** FROM tables have warm cache entries; if any is cold
- *   (or is a subquery / CTE), the statement is silently skipped (no false positives).
+ * (or is a subquery / CTE), the statement is silently skipped (no false positives).
  * - Covers both unquoted `column_name` and double-quoted `"column_name"` in the
- *   top-level SELECT list (Snowflake always treats `"..."` as quoted identifiers).
+ * top-level SELECT list (Snowflake always treats `"..."` as quoted identifiers).
  *
  * `stmtRanges` must be the result of `GetSqlStatementRanges(sql)` — one
  * range per statement with pre-computed start lines and byte offsets.
@@ -251,11 +251,12 @@ export async function validateBareColumnRefs(
 
       // FindSqlTokenPositions matches targets case-insensitively in Go, so pass
       // uppercase values to match the UC-normalised knownCols set used above.
-      const bareTargets   = [...unknownBare].map(UC);
-      const quotedTargets = [...unknownQuoted].map(UC);
+      // We pass ALL unknowns to BOTH bare and quoted targets, because node-sql-parser
+      // sometimes categorizes double-quoted columns ("MY_COL") as standard column_refs.
+      const allUnknown = [...new Set([...unknownBare, ...unknownQuoted])].map(UC);
 
       // eslint-disable-next-line no-await-in-loop
-      const tokens = await FindSqlTokenPositions(stmtText, bareTargets, quotedTargets);
+      const tokens = await FindSqlTokenPositions(stmtText, allUnknown, allUnknown);
       for (const t of (tokens ?? [])) {
         const message = t.quoted
           ? `Column '"${t.name}"' not found in ${tableLabel}`
@@ -280,4 +281,3 @@ export interface ResolvedRef {
   schema: string;
   name:   string;
 }
-

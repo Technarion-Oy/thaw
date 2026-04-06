@@ -2,8 +2,8 @@
  * Unit tests for sqlDiagnostics.ts
  *
  * Coverage:
- *   validateWithParser      – Snowflake PEG grammar check (per-statement, skips false-positive patterns)
- *   validateBareColumnRefs  – SELECT-list column existence (bare + quoted, CTEs, JOINs, subqueries)
+ * validateWithParser      – Snowflake PEG grammar check (per-statement, skips false-positive patterns)
+ * validateBareColumnRefs  – SELECT-list column existence (bare + quoted, CTEs, JOINs, subqueries)
  *
  * Note: validateSyntax and validateSemantics have been moved to the Go backend
  * (internal/sqleditor) and are tested via Go unit tests.
@@ -293,10 +293,6 @@ describe("validateWithParser", () => {
   describe("grammar errors → Warning", () => {
     it("bare non-keyword token alone", () => {
       const m = validateWithParser("sdadasd", singleRange("sdadasd"));
-      // 'sdadasd' is not a recognisable SQL statement keyword →
-      // validateSyntax would catch it, but validateWithParser skips it
-      // (its firstToken is not in PARSEABLE_STMT_KEYWORDS).
-      // Confirm: zero warnings from validateWithParser alone.
       expect(m).toHaveLength(0);
     });
 
@@ -331,6 +327,57 @@ describe("validateWithParser", () => {
       const m = validateWithParser(sql, singleRange(sql));
       expect(warnings(m).length).toBeGreaterThanOrEqual(1);
       expect(warnings(m)[0].startLineNumber).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  // ── 2d. Complex Queries & Snowflake Edge Cases ────────────────────────────
+  describe("complex queries and edge cases", () => {
+    it("deeply nested subqueries with set operators", () => {
+      const sql = `
+        WITH cte1 AS (
+          SELECT id FROM t1
+          UNION ALL
+          SELECT id FROM t2
+        ),
+        cte2 AS (
+          SELECT id FROM cte1
+          UNION
+          SELECT id FROM t3
+        )
+        SELECT id FROM cte2
+      `;
+      expect(validateWithParser(sql, singleRange(sql))).toHaveLength(0);
+    });
+
+    it("Snowflake specific operators (ILIKE, RLIKE, REGEXP)", () => {
+      const sql = "SELECT * FROM t WHERE name ILIKE '%john%' OR title REGEXP '.*manager.*'";
+      expect(validateWithParser(sql, singleRange(sql))).toHaveLength(0);
+    });
+
+    it("array and object constructors", () => {
+      const sql = "SELECT ARRAY_CONSTRUCT(1, 2, 3), OBJECT_CONSTRUCT('key', 'value') FROM t";
+      expect(validateWithParser(sql, singleRange(sql))).toHaveLength(0);
+    });
+
+    it("catches typo in structural keywords mid-query", () => {
+      // The statement starts with SELECT (valid), but 'FRO' is a syntax error.
+      // We use '*' because 'SELECT id, name FRO' makes the parser think 'FRO' is a column alias!
+      const sql = "SELECT * FRO my_table";
+      const m = validateWithParser(sql, singleRange(sql));
+      expect(warnings(m)).toHaveLength(1);
+      // Ensure the error highlights the bad 'FRO' token
+      expect(warnings(m)[0].message).toMatch(/FRO/i);
+    });
+
+    it("handles multiple statements where the first is skipped but the second is malformed", () => {
+      const sql = "DROP TABLE IF EXISTS t;\nSELECT id FRO my_table;";
+      const ranges = [
+        { startLine: 1, endLine: 1, startOffset: 0, endOffset: 23 }, // Correctly scoped to before \n
+        { startLine: 2, endLine: 2, startOffset: 24, endOffset: sql.length }
+      ];
+      const m = validateWithParser(sql, ranges);
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].startLineNumber).toBe(2);
     });
   });
 });
@@ -591,5 +638,76 @@ describe("validateBareColumnRefs", async () => {
       expect(warnings(m)[0].startLineNumber).toBe(1);
     });
   });
-});
 
+  // ── 3i. AST Traversal Boundaries (Intentional Limitations) ────────────────
+  describe("AST traversal boundaries (shallow checking)", async () => {
+    it("ignores columns wrapped in functions (AST expr.type = aggr_func)", async () => {
+      // Because the current AST check only looks at top-level column_ref,
+      // it intentionally ignores bad columns wrapped in functions.
+      const sql = 'SELECT MAX(bad_col) FROM "DB"."SCH"."EMPLOYEES"';
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
+      expect(m).toHaveLength(0); // Validates current known limitation
+    });
+
+    it("ignores columns inside math expressions (AST expr.type = binary_expr)", async () => {
+      const sql = 'SELECT bad_col + 100 FROM "DB"."SCH"."EMPLOYEES"';
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
+      expect(m).toHaveLength(0); 
+    });
+
+    it("ignores columns inside CASE statements", async () => {
+      const sql = 'SELECT CASE WHEN bad_col = 1 THEN "OTHER_BAD" ELSE 0 END FROM "DB"."SCH"."EMPLOYEES"';
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
+      expect(m).toHaveLength(0);
+    });
+  });
+
+  // ── 3j. Complex FROM clauses & Fallbacks ──────────────────────────────────
+  describe("complex FROM clauses and fallbacks", async () => {
+    it("resolves fully qualified table directly from AST without ResolvedRefs", async () => {
+      // Even if resolvedRefs is empty, if the AST parses the DB and SCHEMA, it builds the cache key.
+      const sql = 'SELECT bad_col FROM DB.SCH.EMPLOYEES';
+      const m = await validateBareColumnRefs(sql, singleRange(sql), [], EMPLOYEES_CACHE);
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/bad_col/i);
+    });
+
+    it("CROSS JOIN works exactly like normal JOINs", async () => {
+      const sql = "SELECT bad_col FROM DB.SCH.EMPLOYEES CROSS JOIN DB.SCH.DEPARTMENTS";
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empRef, deptRef), BOTH_CACHE);
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/bad_col/i);
+    });
+
+    it("skips whole query if ANY table in a complex JOIN is a subquery", async () => {
+      // e is a real table, but sub is a subquery. The presence of 'sub' skips the whole check.
+      const sql = `
+        SELECT e.ID, bad_col 
+        FROM DB.SCH.EMPLOYEES e 
+        JOIN (SELECT 1 AS x) sub ON e.ID = sub.x
+      `;
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empRef), EMPLOYEES_CACHE);
+      expect(m).toHaveLength(0); 
+    });
+  });
+
+  // ── 3k. Quoted Edge Cases ──────────────────────────────────────────────────
+  describe("quoted edge cases", async () => {
+    it("catches double-quoted columns with spaces", async () => {
+      // Removed special characters (!, #) that may cause node-sql-parser to reject the entire query.
+      const sql = 'SELECT "Bad Column 1" FROM "DB"."SCH"."EMPLOYEES"';
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/Bad Column 1/i);
+    });
+
+    it("ignores single-quoted strings entirely (treated as literal values)", async () => {
+      // 'bad_col' is a string literal, "bad_col" is an identifier
+      const sql = `SELECT 'bad_col_literal', "BAD_QUOTED_IDENT" FROM "DB"."SCH"."EMPLOYEES"`;
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/BAD_QUOTED_IDENT/i);
+      expect(warnings(m)[0].message).not.toMatch(/bad_col_literal/i);
+    });
+  });
+});
