@@ -13,7 +13,8 @@ export type StatementRange = sqleditor.StatementRange;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const UC = (s: string) => s.toUpperCase();
+// Safe Uppercase: Prevents crashes if the backend sends null/undefined db or schema refs
+const UC = (s: any) => (typeof s === "string" ? s.toUpperCase() : "");
 
 // Helper to safely extract the first SQL keyword, completely ignoring
 // leading newlines, spaces, and SQL comments.
@@ -53,6 +54,60 @@ function findTokensLocally(stmtText: string, targets: string[], baseLine: number
     }
   }
   return tokens;
+}
+
+// Surgically precise AST table path extractor
+// Ensures no properties are swallowed or redundantly aliased by the parser
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function extractTablePath(ft: any): { db: string | null; schema: string | null; table: string | null } {
+  const parts: string[] = [];
+  
+  // 1. Safely gather all potential path fragments from the AST
+  if (ft.catalog) parts.push(String(ft.catalog));
+  
+  if (ft.db && ft.db !== ft.catalog) {
+    parts.push(String(ft.db));
+  } else if (ft.database && ft.database !== ft.catalog) {
+    parts.push(String(ft.database));
+  }
+  
+  if (ft.schema && ft.schema !== ft.db && ft.schema !== ft.catalog && ft.schema !== ft.database) {
+    parts.push(String(ft.schema));
+  }
+  
+  if (ft.table) parts.push(String(ft.table));
+
+  if (parts.length === 0) return { db: null, schema: null, table: null };
+
+  // 2. Re-combine and cleanly extract exactly the valid identifiers
+  const combined = parts.join(".");
+  const matches = [...combined.matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0]);
+  const clean = (s: string | undefined) => s ? s.replace(/^"|"$/g, "") : null;
+
+  const len = matches.length;
+  
+  // 3. Extract purely by index position (Right-to-Left) to ignore parser aliasing quirks
+  if (len >= 3) {
+    return {
+      db: clean(matches[len - 3]),
+      schema: clean(matches[len - 2]),
+      table: clean(matches[len - 1]),
+    };
+  } else if (len === 2) {
+    return {
+      db: null,
+      schema: clean(matches[0]),
+      table: clean(matches[1]),
+    };
+  } else if (len === 1) {
+    return {
+      db: null,
+      schema: null,
+      table: clean(matches[0]),
+    };
+  }
+
+  return { db: null, schema: null, table: null };
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -153,20 +208,6 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
 
 // ── validateBareColumnRefs ────────────────────────────────────────────────────
 
-/**
- * Uses the node-sql-parser AST to find bare and double-quoted column names in
- * SELECT lists, then cross-references them against `colInfoCache`.
- *
- * Rules:
- * - Only runs when the statement is parseable (SELECT / WITH, no Snowflake-FP patterns).
- * - Only validates when **all** FROM tables have warm cache entries; if any is cold
- * (or is a subquery / CTE), the statement is silently skipped (no false positives).
- * - Covers both unquoted `column_name` and double-quoted `"column_name"` in the
- * top-level SELECT list (Snowflake always treats `"..."` as quoted identifiers).
- *
- * `stmtRanges` must be the result of `GetSqlStatementRanges(sql)` — one
- * range per statement with pre-computed start lines and byte offsets.
- */
 export async function validateBareColumnRefs(
   sql:          string,
   stmtRanges:   StatementRange[],
@@ -204,9 +245,9 @@ export async function validateBareColumnRefs(
       for (const ft of fromTables) {
         if (!ft.table) { skip = true; break; } // subquery or lateral in FROM → skip
 
-        const ftDb    = (ft.db ?? ft.catalog) as string | null;
-        const ftSchema = ft.schema as string | null;
-        const ftTable  = ft.table as string;
+        const { db: ftDb, schema: ftSchema, table: rawTable } = extractTablePath(ft);
+        if (!rawTable) { skip = true; break; }
+        const ftTable = rawTable;
 
         let cacheKey: string | undefined;
         if (ftDb && ftSchema) {
@@ -237,16 +278,37 @@ export async function validateBareColumnRefs(
       const unknownBare   = new Set<string>(); // unquoted  column_ref
       const unknownQuoted = new Set<string>(); // "double_quote_string"
 
-      for (const col of (node.columns ?? [])) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const expr = (col as any)?.expr;
-        if (!expr) continue;
+      // ────────────────────────────────────────────────────────────────────────
+      // RECURSIVE AST TRAVERSAL FOR EXPRESSIONS
+      // ────────────────────────────────────────────────────────────────────────
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      function extractColumnsFromExpr(expr: any) {
+        if (!expr || typeof expr !== 'object') return;
+
+        // Skip traversing into nested subqueries to avoid cross-scope false positives
+        if (expr.type === 'select' || expr.type === 'sub_select' || expr.ast !== undefined) return;
+
         if (expr.type === "column_ref" && expr.table === null && expr.column !== "*") {
           if (!knownCols.has(UC(expr.column as string))) unknownBare.add(expr.column as string);
+          return; // No need to recurse inside a column_ref
         } else if (expr.type === "double_quote_string") {
           if (!knownCols.has(UC(expr.value as string))) unknownQuoted.add(expr.value as string);
+          return; // No need to recurse inside a string literal
+        }
+
+        // Recursively walk Arrays and Objects
+        if (Array.isArray(expr)) {
+          for (const item of expr) extractColumnsFromExpr(item);
+        } else {
+          for (const key of Object.keys(expr)) extractColumnsFromExpr(expr[key]);
         }
       }
+
+      for (const col of (node.columns ?? [])) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        extractColumnsFromExpr((col as any)?.expr);
+      }
+      // ────────────────────────────────────────────────────────────────────────
 
       if (unknownBare.size === 0 && unknownQuoted.size === 0) continue;
 
@@ -278,6 +340,8 @@ export async function validateTablesExist(
   sql: string,
   stmtRanges: StatementRange[],
   resolvedRefs: ResolvedRef[],
+  knownDatabases: string[] = [], // NEW: Accepts global DB list
+  knownSchemas: { db: string, name: string }[] = [], // NEW: Accepts global Schema list
 ): Promise<DiagMarker[]> {
   const markers: DiagMarker[] = [];
   const scriptCreatedTables = new Set<string>();
@@ -306,9 +370,11 @@ export async function validateTablesExist(
 
     const parseText = rawStmtText.replace(/;+\s*$/, "");
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let ast: any;
     try { ast = parser.parse(parseText); } catch { continue; }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const stmtAsts: any[] = Array.isArray(ast.ast) ? ast.ast : [ast.ast];
 
     for (const node of stmtAsts) {
@@ -323,31 +389,71 @@ export async function validateTablesExist(
         }
       }
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const fromTables: any[] = node.from ?? [];
-      const missingBare = new Set<string>();
-      const missingQuoted = new Set<string>();
+      const missingTokens = new Map<string, string>(); // Maps the exact bad token to a precise error message
 
       for (const ft of fromTables) {
         if (!ft.table) continue; 
         
-        const ftTable = String(ft.table);
+        const { db: ftDb, schema: ftSchema, table: rawTable } = extractTablePath(ft);
+        if (!rawTable) continue;
+        
+        const ftTable = rawTable;
         const ftTableUC = UC(ftTable);
 
         if (currentCTEs.has(ftTableUC)) continue;
         if (scriptCreatedTables.has(ftTableUC)) continue;
         
-        const isLive = resolvedRefs.some(ref => UC(ref.name) === ftTableUC);
+        // Exact Match
+        const isLive = resolvedRefs.some(ref => 
+          UC(ref.name) === ftTableUC &&
+          (!ftDb || UC(ref.db) === UC(ftDb)) &&
+          (!ftSchema || UC(ref.schema) === UC(ftSchema))
+        );
+        
         if (isLive) continue;
 
-        missingBare.add(ftTable);
-        missingQuoted.add(ftTable);
+        // Hierarchy Check (DB -> Schema -> Table)
+        let badToken = ftTable;
+        let msg = `Table or View '${ftTable}' does not exist or is not authorized.`;
+
+        if (ftDb) {
+          // Check global stores if provided, otherwise fallback to refs (for tests)
+          const dbExists = knownDatabases.length > 0 
+            ? knownDatabases.some(d => UC(d) === UC(ftDb))
+            : resolvedRefs.some(ref => UC(ref.db) === UC(ftDb));
+
+          if (!dbExists) {
+            badToken = ftDb;
+            msg = `Database '${ftDb}' does not exist or is not authorized.`;
+          } else if (ftSchema) {
+            const dbSchemas = knownSchemas.filter(s => UC(s.db) === UC(ftDb));
+            const schemaExists = dbSchemas.length > 0
+              ? dbSchemas.some(s => UC(s.name) === UC(ftSchema))
+              : resolvedRefs.some(ref => UC(ref.db) === UC(ftDb) && UC(ref.schema) === UC(ftSchema));
+
+            if (!schemaExists) {
+              badToken = ftSchema;
+              msg = `Schema '${ftSchema}' does not exist or is not authorized.`;
+            }
+          }
+        } else if (ftSchema) {
+          const schemaExists = knownSchemas.length > 0
+            ? knownSchemas.some(s => UC(s.name) === UC(ftSchema))
+            : resolvedRefs.some(ref => UC(ref.schema) === UC(ftSchema));
+          if (!schemaExists) {
+            badToken = ftSchema;
+            msg = `Schema '${ftSchema}' does not exist or is not authorized.`;
+          }
+        }
+
+        missingTokens.set(UC(badToken), msg);
       }
 
-      if (missingBare.size === 0 && missingQuoted.size === 0) continue;
+      if (missingTokens.size === 0) continue;
 
-      const allUnknown = [...new Set([...missingBare, ...missingQuoted])].map(UC);
-      
-      // Use the local typescript token finder!
+      const allUnknown = Array.from(missingTokens.keys());
       const tokens = findTokensLocally(rawStmtText, allUnknown, r.startLine);
       
       for (const t of tokens) {
@@ -356,7 +462,7 @@ export async function validateTablesExist(
           startColumn:     t.col,
           endLineNumber:   t.line,
           endColumn:       t.endCol,
-          message:         `Object '${t.name}' does not exist or is not authorized.`,
+          message:         missingTokens.get(UC(t.name)) || `Object '${t.name}' does not exist or is not authorized.`,
           severity:        8, 
         });
       }

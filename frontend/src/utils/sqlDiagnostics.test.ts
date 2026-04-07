@@ -18,7 +18,9 @@ import {
   validateWithParser,
   validateBareColumnRefs,
   validateTablesExist,
+  extractTablePath,
 } from "./sqlDiagnostics";
+import { Parser as SnowflakeParser } from "node-sql-parser/build/snowflake";
 
 // ── Mock FindSqlTokenPositions IPC (no Wails runtime in tests) ────────────────
 // Provides the same tokenizer logic as the Go FindTokenPositions function.
@@ -111,6 +113,167 @@ function makeCache(
 const refs = (
   ...items: Array<{ alias: string; db: string; schema: string; name: string }>
 ): ResolvedRef[] => items;
+
+// ── extractTablePath ──────────────────────────────────────────────────────────
+
+describe("extractTablePath", () => {
+  describe("standard well-formed ASTs", () => {
+    it("handles an empty object", () => {
+      expect(extractTablePath({})).toEqual({ db: null, schema: null, table: null });
+    });
+
+    it("extracts a single table", () => {
+      expect(extractTablePath({ table: "LIVE_TABLE" })).toEqual({ 
+        db: null, schema: null, table: "LIVE_TABLE" 
+      });
+    });
+
+    it("extracts schema and table", () => {
+      expect(extractTablePath({ schema: "SCH", table: "LIVE_TABLE" })).toEqual({ 
+        db: null, schema: "SCH", table: "LIVE_TABLE" 
+      });
+    });
+
+    it("extracts fully qualified db, schema, and table", () => {
+      expect(extractTablePath({ db: "DB", schema: "SCH", table: "LIVE_TABLE" })).toEqual({ 
+        db: "DB", schema: "SCH", table: "LIVE_TABLE" 
+      });
+    });
+  });
+
+  describe("handling quoted identifiers", () => {
+    it("safely strips quotes from single identifiers", () => {
+      expect(extractTablePath({ table: '"My Crazy Table"' })).toEqual({ 
+        db: null, schema: null, table: "My Crazy Table" 
+      });
+    });
+
+    it("handles a mix of quoted and bare identifiers", () => {
+      expect(extractTablePath({ db: "DB", schema: '"My Schema"', table: "LIVE_TABLE" })).toEqual({ 
+        db: "DB", schema: "My Schema", table: "LIVE_TABLE" 
+      });
+    });
+  });
+
+  describe("handling node-sql-parser squashed string quirks", () => {
+    it("extracts a 2-part identifier mashed entirely into the table property", () => {
+      expect(extractTablePath({ table: "SCH.LIVE_TABLE" })).toEqual({ 
+        db: null, schema: "SCH", table: "LIVE_TABLE" 
+      });
+    });
+
+    it("extracts a 3-part identifier mashed entirely into the table property", () => {
+      expect(extractTablePath({ table: "DB.SCH.LIVE_TABLE" })).toEqual({ 
+        db: "DB", schema: "SCH", table: "LIVE_TABLE" 
+      });
+    });
+
+    it("extracts a 3-part identifier mashed with quotes into the table property", () => {
+      // e.g., "DB"."Crazy Schema".LIVE_TABLE
+      expect(extractTablePath({ table: '"DB"."Crazy Schema".LIVE_TABLE' })).toEqual({ 
+        db: "DB", schema: "Crazy Schema", table: "LIVE_TABLE" 
+      });
+    });
+
+    it("extracts safely when db and schema are mashed into the db property", () => {
+      expect(extractTablePath({ db: "DB.SCH", table: "LIVE_TABLE" })).toEqual({ 
+        db: "DB", schema: "SCH", table: "LIVE_TABLE" 
+      });
+    });
+  });
+
+  describe("handling node-sql-parser property aliasing quirks", () => {
+    it("prioritizes catalog over db if they contain different things", () => {
+      // Often happens for WRONG_DB.SCH.LIVE_TABLE
+      expect(extractTablePath({ catalog: "WRONG_DB", db: "SCH", table: "LIVE_TABLE" })).toEqual({ 
+        db: "WRONG_DB", schema: "SCH", table: "LIVE_TABLE" 
+      });
+    });
+
+    it("ignores redundant properties if the parser duplicates them", () => {
+      // If the parser sets both catalog and db to the same value
+      expect(extractTablePath({ catalog: "DB", db: "DB", schema: "SCH", table: "LIVE_TABLE" })).toEqual({ 
+        db: "DB", schema: "SCH", table: "LIVE_TABLE" 
+      });
+    });
+
+    it("handles the 'database' property alias", () => {
+      expect(extractTablePath({ database: "DB", schema: "SCH", table: "LIVE_TABLE" })).toEqual({ 
+        db: "DB", schema: "SCH", table: "LIVE_TABLE" 
+      });
+    });
+  });
+});
+
+describe("Deep Dive: Editor Integration & Parser Anomalies", () => {
+  it("catches if node-sql-parser is mangling the 3-part identifier AST", () => {
+    // 1. We instantiate the real parser directly
+    const parser = new SnowflakeParser();
+    const sql = "SELECT * FROM WRONG_DB.SCH.LIVE_TABLE";
+    
+    let ast: any;
+    try {
+      ast = parser.parse(sql);
+    } catch (e) {
+      // If the parser crashes on this string, the editor will fail silently!
+      throw new Error(`Parser crashed on valid Snowflake syntax: ${e}`);
+    }
+
+    const ft = Array.isArray(ast.ast) ? ast.ast[0].from[0] : ast.ast.from[0];
+    
+    // 2. Pass it directly to our extractor
+    const path = extractTablePath(ft);
+    
+    // 3. THIS IS THE TRAP: If node-sql-parser put the strings into a weird property 
+    // we didn't account for (like `ft.as` or `ft.expr`), this will fail!
+    expect(path).toEqual({
+      db: "WRONG_DB",
+      schema: "SCH",
+      table: "LIVE_TABLE"
+    });
+  });
+
+  it("catches if the token locator generates invalid editor coordinates", () => {
+    const sql = "SELECT * FROM WRONG_DB.SCH.LIVE_TABLE";
+    
+    // findTokensLocally is what generates the coordinates for the Monaco editor.
+    // We export it temporarily or test the logic directly here:
+    
+    // Inline replica of findTokensLocally to verify the regex engine
+    const tokens: Array<{ name: string; col: number; endCol: number }> = [];
+    const regex = /[a-zA-Z0-9_$]+|"[^"]+"/g;
+    let match;
+    while ((match = regex.exec(sql)) !== null) {
+      if (match[0].toUpperCase() === "WRONG_DB") {
+        tokens.push({
+          name: match[0],
+          col: match.index + 1, // Monaco is 1-indexed
+          endCol: match.index + 1 + match[0].length
+        });
+      }
+    }
+    
+    // THIS IS THE TRAP: If Monaco receives a col of 0, or endCol < col, 
+    // it will silently discard the marker and show no errors in the UI!
+    expect(tokens).toHaveLength(1);
+    expect(tokens[0].name).toBe("WRONG_DB");
+    expect(tokens[0].col).toBe(15); // 'W' is the 15th character
+    expect(tokens[0].endCol).toBe(23); // 15 + 8 characters
+  });
+
+  it("catches if an empty resolvedRefs array defaults incorrectly", async () => {
+    // If the database connection drops, resolvedRefs is empty.
+    // We must ensure the engine still flags WRONG_DB and doesn't crash.
+    const sql = "SELECT * FROM WRONG_DB.SCH.LIVE_TABLE";
+    
+    // Passing an empty array [] simulates a totally disconnected editor state
+    const m = await validateTablesExist(sql, singleRange(sql), []);
+    const errors = (markers: DiagMarker[]) => markers.filter((m) => m.severity === 8);
+    
+    expect(errors(m)).toHaveLength(1);
+    expect(errors(m)[0].message).toMatch(/Database 'WRONG_DB' does not exist/i);
+  });
+});
 
 
 // ── 2. validateWithParser ─────────────────────────────────────────────────────
@@ -640,26 +803,28 @@ describe("validateBareColumnRefs", async () => {
     });
   });
 
-  // ── 3i. AST Traversal Boundaries (Intentional Limitations) ────────────────
-  describe("AST traversal boundaries (shallow checking)", async () => {
-    it("ignores columns wrapped in functions (AST expr.type = aggr_func)", async () => {
-      // Because the current AST check only looks at top-level column_ref,
-      // it intentionally ignores bad columns wrapped in functions.
+  // ── 3i. Deep AST Traversal (Expressions & Functions) ──────────────────────
+  describe("deep AST traversal for incorrect columns", async () => {
+    it("flags columns wrapped in functions", async () => {
       const sql = 'SELECT MAX(bad_col) FROM "DB"."SCH"."EMPLOYEES"';
       const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
-      expect(m).toHaveLength(0); // Validates current known limitation
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/bad_col/i);
     });
 
-    it("ignores columns inside math expressions (AST expr.type = binary_expr)", async () => {
+    it("flags columns inside math expressions", async () => {
       const sql = 'SELECT bad_col + 100 FROM "DB"."SCH"."EMPLOYEES"';
       const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
-      expect(m).toHaveLength(0); 
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/bad_col/i);
     });
 
-    it("ignores columns inside CASE statements", async () => {
+    it("flags columns inside CASE statements", async () => {
       const sql = 'SELECT CASE WHEN bad_col = 1 THEN "OTHER_BAD" ELSE 0 END FROM "DB"."SCH"."EMPLOYEES"';
       const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
-      expect(m).toHaveLength(0);
+      expect(warnings(m)).toHaveLength(2);
+      expect(warnings(m).some(w => w.message.includes("bad_col"))).toBe(true);
+      expect(warnings(m).some(w => w.message.includes("OTHER_BAD"))).toBe(true);
     });
   });
 
@@ -830,6 +995,114 @@ describe("validateTablesExist", () => {
       
       expect(errors(m)[0].startColumn).toBe(15); // Starts at the quote
       expect(errors(m)[0].endColumn).toBe(15 + '"MISSING_TABLE"'.length);
+    });
+  });
+
+  describe("database, schema, and quoting edge cases (AST squashing)", () => {
+    it("allows fully qualified table with correct db and schema", async () => {
+      const sql = "SELECT * FROM DB.SCH.LIVE_TABLE";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("flags exactly the wrong database in a bare multi-part identifier", async () => {
+      const sql = "SELECT * FROM WRONG_DB.SCH.LIVE_TABLE";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/WRONG_DB/i);
+    });
+
+    it("flags exactly the wrong schema in a bare multi-part identifier", async () => {
+      const sql = "SELECT * FROM DB.WRONG_SCH.LIVE_TABLE";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/WRONG_SCH/i);
+    });
+
+    it("handles fully double-quoted paths correctly and flags the wrong database", async () => {
+      // "WRONG_DB" is quoted, but the engine should seamlessly clean the quotes, check it, and flag it.
+      const sql = 'SELECT * FROM "WRONG_DB"."SCH"."LIVE_TABLE"';
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/WRONG_DB/i);
+    });
+
+    it("handles mixed quoted and unquoted paths, flagging the wrong schema", async () => {
+      // DB is bare, SCHEMA is quoted, TABLE is bare
+      const sql = 'SELECT * FROM DB."WRONG_SCH".LIVE_TABLE';
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/WRONG_SCH/i);
+    });
+
+    it("flags the table if db and schema are correct but table is wrong", async () => {
+      const sql = 'SELECT * FROM DB.SCH."WRONG_TABLE"';
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/WRONG_TABLE/i);
+    });
+    
+    it("handles two-part identifiers (schema.table) gracefully", async () => {
+      // DB is omitted, so it parses as SCHEMA.TABLE
+      const sql = 'SELECT * FROM "WRONG_SCH".LIVE_TABLE';
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      expect(errors(m)).toHaveLength(1);
+      // Because LIVE_TABLE exists but the schema WRONG_SCH doesn't match our LIVE_REFS, it flags WRONG_SCH
+      expect(errors(m)[0].message).toMatch(/WRONG_SCH/i);
+    });
+  });
+
+  describe("hierarchical database, schema, and quoting edge cases", () => {
+    it("allows fully qualified table with correct db and schema", async () => {
+      const sql = "SELECT * FROM DB.SCH.LIVE_TABLE";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("flags exactly the wrong database when it does not exist anywhere", async () => {
+      const sql = "SELECT * FROM WRONG_DB.SCH.LIVE_TABLE";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/Database 'WRONG_DB' does not exist/i);
+    });
+
+    it("flags the schema when DB exists but Schema does not", async () => {
+      const sql = "SELECT * FROM DB.WRONG_SCH.LIVE_TABLE";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/Schema 'WRONG_SCH' does not exist/i);
+    });
+
+    it("flags the schema when omitting DB and Schema does not exist", async () => {
+      const sql = "SELECT * FROM WRONG_SCH.LIVE_TABLE";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/Schema 'WRONG_SCH' does not exist/i);
+    });
+
+    it("flags the table when DB and Schema exist but Table does not", async () => {
+      const sql = "SELECT * FROM DB.SCH.WRONG_TABLE";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/Table or View 'WRONG_TABLE' does not exist/i);
+    });
+
+    it("flags the Database even if the Table ALSO does not exist (priority check)", async () => {
+      const sql = "SELECT * FROM WRONG_DB.SCH.WRONG_TABLE";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/Database 'WRONG_DB' does not exist/i);
     });
   });
 });

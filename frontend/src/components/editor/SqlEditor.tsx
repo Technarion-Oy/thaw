@@ -498,12 +498,32 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const rawRefs = await ParseJoinTableRefs(diagSql);
         if (model.getVersionId() !== diagVersion) return;
         const storeObjs = useObjectStore.getState().objects;
+
+        const storeDbs = useObjectStore.getState().databases;
+        const storeSchemas = useObjectStore.getState().schemas;
         
         const resolved: ResolvedRef[] = (rawRefs || [])
           .map((ref) => {
             if (ref.db && ref.schema) {
+              // Stop blindly trusting the AST! Verify against the global cache first.
+              if (storeDbs.length > 0 && !storeDbs.some(d => UC(d) === UC(ref.db!))) {
+                return null; // The DB is a typo! Drop it so validation catches it.
+              }
+              // Only check the schema if we have actively fetched schemas for this DB
+              if (fetchedDatabaseSchemas.has(UC(ref.db!))) {
+                const schemaExists = storeSchemas.some(s => UC(s.db) === UC(ref.db!) && UC(s.name) === UC(ref.schema!));
+                if (!schemaExists) return null; // The Schema is a typo!
+              }
+              // Only check the table if we have actively fetched objects for this Schema
+              const schemaKey = `${UC(ref.db!)}\0${UC(ref.schema!)}`;
+              if (fetchedSchemaObjects.has(schemaKey)) {
+                const tableExists = storeObjs.some(o => UC(o.db) === UC(ref.db!) && UC(o.schema) === UC(ref.schema!) && UC(o.name) === UC(ref.name));
+                if (!tableExists) return null; // The Table is a typo!
+              }
+              
               return { db: ref.db, schema: ref.schema, name: ref.name, alias: ref.alias };
             }
+
             const obj = storeObjs.find((o) => {
               if (o.kind !== "TABLE" && o.kind !== "VIEW") return false;
               if (UC(o.name) !== UC(ref.name)) return false;
@@ -515,7 +535,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           })
           .filter(Boolean) as ResolvedRef[];
 
-        const tableMarkers = await validateTablesExist(diagSql, stmtRanges, resolved);
+        const tableMarkers = await validateTablesExist(diagSql, stmtRanges, resolved, storeDbs, storeSchemas);
         if (model.getVersionId() !== diagVersion) return;
         diagMarkers.push(...(tableMarkers || []));
 
