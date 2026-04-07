@@ -340,22 +340,34 @@ export async function validateTablesExist(
   sql: string,
   stmtRanges: StatementRange[],
   resolvedRefs: ResolvedRef[],
-  knownDatabases: string[] = [], // NEW: Accepts global DB list
-  knownSchemas: { db: string, name: string }[] = [], // NEW: Accepts global Schema list
+  knownDatabases: string[] = [], 
+  knownSchemas: { db: string, name: string }[] = [], 
 ): Promise<DiagMarker[]> {
   const markers: DiagMarker[] = [];
   const scriptCreatedTables = new Set<string>();
+  const scriptCreatedDbsAndSchemas = new Set<string>();
 
-  // 1. PRE-PASS: Collect locally created tables
+  // 1. PRE-PASS: Collect locally created tables, databases, and schemas!
   for (const r of stmtRanges) {
     const rawStmtText = sql.slice(r.startOffset, r.endOffset);
-    const createMatch = rawStmtText.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+|TEMPORARY\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
     
-    if (createMatch) {
-      const parts = [...createMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0]);
+    // Check for TABLE or VIEW creation
+    const createTableViewMatch = rawStmtText.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+|TEMPORARY\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    if (createTableViewMatch) {
+      const parts = [...createTableViewMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0]);
       if (parts.length > 0) {
         const newTableName = parts[parts.length - 1].replace(/^"|"$/g, "").toUpperCase();
         scriptCreatedTables.add(newTableName);
+      }
+    }
+
+    // NEW: Robustly check for DATABASE or SCHEMA creation (handles multi-part names)
+    const createDbSchemaMatch = rawStmtText.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:DATABASE|SCHEMA)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    if (createDbSchemaMatch) {
+      const parts = [...createDbSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0]);
+      if (parts.length > 0) {
+        const newEntityName = parts[parts.length - 1].replace(/^"|"$/g, "").toUpperCase();
+        scriptCreatedDbsAndSchemas.add(newEntityName);
       }
     }
   }
@@ -391,7 +403,7 @@ export async function validateTablesExist(
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const fromTables: any[] = node.from ?? [];
-      const missingTokens = new Map<string, string>(); // Maps the exact bad token to a precise error message
+      const missingTokens = new Map<string, string>(); 
 
       for (const ft of fromTables) {
         if (!ft.table) continue; 
@@ -419,19 +431,20 @@ export async function validateTablesExist(
         let msg = `Table or View '${ftTable}' does not exist or is not authorized.`;
 
         if (ftDb) {
-          // Check global stores if provided, otherwise fallback to refs (for tests)
-          const dbExists = knownDatabases.length > 0 
+          // Verify if it exists, treating script-created DBs as instantly valid
+          const dbExists = scriptCreatedDbsAndSchemas.has(UC(ftDb)) || (knownDatabases.length > 0 
             ? knownDatabases.some(d => UC(d) === UC(ftDb))
-            : resolvedRefs.some(ref => UC(ref.db) === UC(ftDb));
+            : resolvedRefs.some(ref => UC(ref.db) === UC(ftDb)));
 
           if (!dbExists) {
             badToken = ftDb;
             msg = `Database '${ftDb}' does not exist or is not authorized.`;
           } else if (ftSchema) {
+            // Verify if schema exists, treating script-created schemas as instantly valid
             const dbSchemas = knownSchemas.filter(s => UC(s.db) === UC(ftDb));
-            const schemaExists = dbSchemas.length > 0
+            const schemaExists = scriptCreatedDbsAndSchemas.has(UC(ftSchema)) || (dbSchemas.length > 0
               ? dbSchemas.some(s => UC(s.name) === UC(ftSchema))
-              : resolvedRefs.some(ref => UC(ref.db) === UC(ftDb) && UC(ref.schema) === UC(ftSchema));
+              : resolvedRefs.some(ref => UC(ref.db) === UC(ftDb) && UC(ref.schema) === UC(ftSchema)));
 
             if (!schemaExists) {
               badToken = ftSchema;
@@ -439,9 +452,11 @@ export async function validateTablesExist(
             }
           }
         } else if (ftSchema) {
-          const schemaExists = knownSchemas.length > 0
+          // Handle schema verification when DB is omitted
+          const schemaExists = scriptCreatedDbsAndSchemas.has(UC(ftSchema)) || (knownSchemas.length > 0
             ? knownSchemas.some(s => UC(s.name) === UC(ftSchema))
-            : resolvedRefs.some(ref => UC(ref.schema) === UC(ftSchema));
+            : resolvedRefs.some(ref => UC(ref.schema) === UC(ftSchema)));
+            
           if (!schemaExists) {
             badToken = ftSchema;
             msg = `Schema '${ftSchema}' does not exist or is not authorized.`;
