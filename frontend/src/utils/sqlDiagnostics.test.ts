@@ -203,6 +203,23 @@ describe("extractTablePath", () => {
       });
     });
   });
+
+  describe("handling identifiers with unusual characters", () => {
+    it("extracts identifiers starting with underscores or dollars", () => {
+      expect(extractTablePath({ table: "_MY_TABLE" })).toEqual({ 
+        db: null, schema: null, table: "_MY_TABLE" 
+      });
+      expect(extractTablePath({ table: "$MY_TABLE" })).toEqual({ 
+        db: null, schema: null, table: "$MY_TABLE" 
+      });
+    });
+
+    it("extracts identifiers containing numbers", () => {
+      expect(extractTablePath({ table: "TABLE123" })).toEqual({ 
+        db: null, schema: null, table: "TABLE123" 
+      });
+    });
+  });
 });
 
 describe("Deep Dive: Editor Integration & Parser Anomalies", () => {
@@ -813,18 +830,39 @@ describe("validateBareColumnRefs", async () => {
     });
 
     it("flags columns inside math expressions", async () => {
-      const sql = 'SELECT bad_col + 100 FROM "DB"."SCH"."EMPLOYEES"';
+      const sql = 'SELECT (ID * bad_col) + (SALARY / 100) FROM "DB"."SCH"."EMPLOYEES"';
       const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
       expect(warnings(m)).toHaveLength(1);
       expect(warnings(m)[0].message).toMatch(/bad_col/i);
     });
 
-    it("flags columns inside CASE statements", async () => {
-      const sql = 'SELECT CASE WHEN bad_col = 1 THEN "OTHER_BAD" ELSE 0 END FROM "DB"."SCH"."EMPLOYEES"';
+    it("flags columns inside complex CASE statements", async () => {
+      const sql = `
+        SELECT CASE 
+          WHEN SALARY > 1000 THEN bad_col_1
+          WHEN ID = 1 THEN 'ok'
+          ELSE "OTHER_BAD"
+        END 
+        FROM "DB"."SCH"."EMPLOYEES"
+      `;
       const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
       expect(warnings(m)).toHaveLength(2);
-      expect(warnings(m).some(w => w.message.includes("bad_col"))).toBe(true);
+      expect(warnings(m).some(w => w.message.includes("bad_col_1"))).toBe(true);
       expect(warnings(m).some(w => w.message.includes("OTHER_BAD"))).toBe(true);
+    });
+
+    it("flags columns in nested function calls", async () => {
+      const sql = 'SELECT COALESCE(FIRST_NAME, UPPER(bad_col)) FROM "DB"."SCH"."EMPLOYEES"';
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/bad_col/i);
+    });
+
+    it("does not flag columns in nested subqueries (scope isolation)", async () => {
+      // bad_col is in a subquery, so it should be ignored by the top-level validator
+      const sql = 'SELECT ID, (SELECT bad_col FROM other_table) FROM "DB"."SCH"."EMPLOYEES"';
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
+      expect(m).toHaveLength(0);
     });
   });
 
@@ -1103,6 +1141,56 @@ describe("validateTablesExist", () => {
       
       expect(errors(m)).toHaveLength(1);
       expect(errors(m)[0].message).toMatch(/Database 'WRONG_DB' does not exist/i);
+    });
+  });
+
+  describe("advanced script scenarios", () => {
+    it("recognizes interleaved CREATE and SELECT across multiple schemas", async () => {
+      const { sql, ranges } = multiRange([
+        "CREATE SCHEMA S1;",
+        "CREATE TABLE S1.T1 (id int);",
+        "CREATE SCHEMA S2;",
+        "CREATE TABLE S2.T2 (id int);",
+        "SELECT * FROM S1.T1 JOIN S2.T2 ON S1.T1.id = S2.T2.id;"
+      ]);
+      const m = await validateTablesExist(sql, ranges, LIVE_REFS);
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("CTE shadowing: CTE name same as a real table name", async () => {
+      // LIVE_TABLE exists in LIVE_REFS, but here it is a CTE
+      const sql = "WITH LIVE_TABLE AS (SELECT 1 AS id) SELECT * FROM LIVE_TABLE";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("handles identifiers inside comments (ignores them)", async () => {
+      const sql = `
+        SELECT * 
+        FROM -- MISSING_TABLE 
+        LIVE_TABLE
+      `;
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("flags missing table even if its name appears in a comment", async () => {
+      const sql = `
+        SELECT * 
+        FROM MISSING_TABLE -- LIVE_TABLE
+      `;
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/MISSING_TABLE/i);
+    });
+
+    it("identifies tables when using IF NOT EXISTS in CREATE", async () => {
+      const { sql, ranges } = multiRange([
+        "CREATE TABLE IF NOT EXISTS local_tab (id int);",
+        "SELECT * FROM local_tab;"
+      ]);
+      const m = await validateTablesExist(sql, ranges, LIVE_REFS);
+      expect(errors(m)).toHaveLength(0);
     });
   });
 });
