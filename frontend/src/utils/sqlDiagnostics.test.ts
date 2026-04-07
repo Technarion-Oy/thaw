@@ -561,6 +561,119 @@ describe("validateWithParser", () => {
       expect(warnings(m)[0].startLineNumber).toBe(2);
     });
   });
+
+  // ── 2e. Snowflake-specific CREATE DATABASE modifiers ──────────────────────
+  describe("Snowflake-specific CREATE DATABASE modifiers", () => {
+    const validDbQueries = [
+      // 1. Core Modifiers
+      "CREATE TRANSIENT DATABASE my_db",
+      "CREATE OR REPLACE DATABASE my_db",
+      "CREATE OR REPLACE TRANSIENT DATABASE IF NOT EXISTS my_db",
+
+      // 2. Cloning & Time Travel
+      "CREATE DATABASE my_db CLONE source_db",
+      "CREATE DATABASE my_db CLONE source_db AT (TIMESTAMP => '2026-04-07 11:49:54'::TIMESTAMP)",
+      "CREATE DATABASE my_db CLONE source_db BEFORE (STATEMENT => '8e5d')",
+      "CREATE DATABASE my_db CLONE source_db IGNORE TABLES WITH INSUFFICIENT DATA RETENTION",
+      "CREATE DATABASE my_db CLONE source_db IGNORE HYBRID TABLES",
+      "CREATE DATABASE my_db CLONE source_db AT (OFFSET => -3600) IGNORE TABLES WITH INSUFFICIENT DATA RETENTION IGNORE HYBRID TABLES",
+
+      // 3. Retention & Extension Policies
+      "CREATE DATABASE my_db DATA_RETENTION_TIME_IN_DAYS = 90",
+      "CREATE DATABASE my_db MAX_DATA_EXTENSION_TIME_IN_DAYS = 14",
+      "CREATE DATABASE my_db DATA_RETENTION_TIME_IN_DAYS = 30 MAX_DATA_EXTENSION_TIME_IN_DAYS = 7",
+
+      // 4. Iceberg & External Volumes
+      "CREATE DATABASE my_db EXTERNAL_VOLUME = my_ext_vol",
+      "CREATE DATABASE my_db CATALOG = my_catalog",
+      "CREATE DATABASE my_db ICEBERG_VERSION_DEFAULT = 1",
+      "CREATE DATABASE my_db ENABLE_ICEBERG_MERGE_ON_READ = TRUE",
+      "CREATE DATABASE my_db EXTERNAL_VOLUME = ext_vol CATALOG = my_cat ICEBERG_VERSION_DEFAULT = 2 ENABLE_ICEBERG_MERGE_ON_READ = FALSE",
+
+      // 5. Collation & Serialization
+      "CREATE DATABASE my_db REPLACE_INVALID_CHARACTERS = TRUE",
+      "CREATE DATABASE my_db DEFAULT_DDL_COLLATION = 'en-ci'",
+      "CREATE DATABASE my_db STORAGE_SERIALIZATION_POLICY = OPTIMIZED",
+      "CREATE DATABASE my_db STORAGE_SERIALIZATION_POLICY = COMPATIBLE DEFAULT_DDL_COLLATION = 'utf8'",
+
+      // 6. Catalog Sync & Comments
+      "CREATE DATABASE my_db COMMENT = 'This is a production database'",
+      "CREATE DATABASE my_db CATALOG_SYNC = 'open_cat_integration'",
+      "CREATE DATABASE my_db CATALOG_SYNC_NAMESPACE_MODE = NEST",
+      "CREATE DATABASE my_db CATALOG_SYNC_NAMESPACE_MODE = FLATTEN CATALOG_SYNC_NAMESPACE_FLATTEN_DELIMITER = '_'",
+
+      // 7. Tags and Contacts (Object Metadata)
+      "CREATE DATABASE my_db WITH TAG (cost_center = 'sales', env = 'prod')",
+      "CREATE DATABASE my_db TAG (department = 'hr')", // WITHOUT the 'WITH' keyword
+      "CREATE DATABASE my_db WITH CONTACT (owner = 'admin@example.com', security = 'sec@example.com')",
+      "CREATE DATABASE my_db WITH TAG (a='b') WITH CONTACT (owner='c')",
+
+      // 8. Visibility & Compaction
+      "CREATE DATABASE my_db OBJECT_VISIBILITY = PRIVILEGED",
+      "CREATE DATABASE my_db ENABLE_DATA_COMPACTION = TRUE",
+
+      // 9. The "Everything Everywhere All At Once" Mega-Query
+      `CREATE OR REPLACE TRANSIENT DATABASE IF NOT EXISTS mega_db 
+         CLONE source_db AT (OFFSET => -3600) IGNORE HYBRID TABLES
+         DATA_RETENTION_TIME_IN_DAYS = 30 
+         MAX_DATA_EXTENSION_TIME_IN_DAYS = 14
+         EXTERNAL_VOLUME = my_vol 
+         CATALOG = my_cat 
+         ENABLE_ICEBERG_MERGE_ON_READ = TRUE
+         DEFAULT_DDL_COLLATION = 'en-ci'
+         STORAGE_SERIALIZATION_POLICY = OPTIMIZED
+         COMMENT = 'The ultimate database'
+         CATALOG_SYNC_NAMESPACE_MODE = FLATTEN
+         WITH TAG (tier = 'tier1') 
+         WITH CONTACT (owner = 'boss')
+         OBJECT_VISIBILITY = PRIVILEGED
+         ENABLE_DATA_COMPACTION = FALSE`
+    ];
+
+    for (const sql of validDbQueries) {
+      it(`should silently skip Snowflake CREATE DATABASE syntax: ${sql.slice(0, 40)}...`, () => {
+        const m = validateWithParser(sql, singleRange(sql));
+        
+        // Asserting that exactly ZERO markers are generated. 
+        // This will currently FAIL until we update SNOWFLAKE_FP_RE.
+        expect(warnings(m)).toHaveLength(0);
+      });
+    }
+  });
+
+  // ── 2f. Incorrect CREATE DATABASE syntax ────────────────────────────────
+  describe("Incorrect CREATE DATABASE syntax -> Warning", () => {
+    const invalidDbQueries = [
+      // 1. Missing database name entirely
+      "CREATE DATABASE",
+      
+      // 2. Missing '=' in property assignment
+      "CREATE DATABASE my_db DATA_RETENTION_TIME_IN_DAYS 10",
+      
+      // 3. Completely made-up Snowflake properties
+      "CREATE DATABASE my_db EXTREME_MODE = TRUE",
+      "CREATE DATABASE my_db WITH NONSENSE = 'sales'",
+      
+      // 4. Malformed CLONE / Time Travel clauses
+      "CREATE DATABASE my_db CLONE other_db AT (TIME => '2026-04-07')", // Should be TIMESTAMP
+      "CREATE DATABASE my_db CLONE source_db IGNORE EVERYTHING",
+      
+      // 5. Misplaced core modifiers
+      "CREATE TRANSIENT OR REPLACE DATABASE my_db", // Wrong order
+      "CREATE DATABASE TRANSIENT my_db", // Modifier after DATABASE
+    ];
+
+    for (const sql of invalidDbQueries) {
+      it(`should flag syntax errors in: ${sql.slice(0, 40)}`, () => {
+        const m = validateWithParser(sql, singleRange(sql));
+        
+        // THIS WILL FAIL for most queries! 
+        // Because the regex blindfold triggers on the first few words, 
+        // the engine silently skips the garbage at the end and returns 0 warnings.
+        expect(warnings(m).length).toBeGreaterThan(0);
+      });
+    }
+  });
 });
 
 // ── 3. validateBareColumnRefs ─────────────────────────────────────────────────

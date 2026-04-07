@@ -131,10 +131,12 @@ const PARSEABLE_STMT_KEYWORDS = new Set([
   "TRUNCATE", "CALL", "SHOW", "SET",
 ]);
 
+// Note: DATABASE and SCHEMA are intentionally removed from this list, 
+// so they can be handled by the Custom Validator inside the function!
 const SNOWFLAKE_FP_RE = new RegExp(
   "\\bTABLESAMPLE\\b|\\bSAMPLE\\s*\\(|\\bWITHIN\\s+GROUP\\b|\\bCONNECT\\s+BY\\b" +
   "|\\bAT\\s*\\(|\\bBEFORE\\s*\\(|\\bIN\\s+TABLE\\b" +
-  "|CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TASK|STREAM|STAGE|PIPE|FUNCTION|PROCEDURE|AGGREGATE" +
+  "|CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TRANSIENT\\s+)?(?:TASK|STREAM|STAGE|PIPE|FUNCTION|PROCEDURE|AGGREGATE" +
   "|WAREHOUSE|ROLE|FILE\\s+FORMAT|USER|ALERT|SHARE|EXTERNAL|DYNAMIC|MATERIALIZED" +
   "|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK|RESOURCE|ROW\\s+ACCESS" +
   "|SESSION|PASSWORD|REPLICATION|FAILOVER|APPLICATION)\\b" +
@@ -165,9 +167,53 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
     
     const firstToken = getFirstToken(rawStmtText);
     if (!firstToken || !PARSEABLE_STMT_KEYWORDS.has(firstToken)) continue;
-    if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
 
     const parseText = rawStmtText.replace(/;+\s*$/, "");
+
+    // --- NEW: Custom Syntax Validator for CREATE DATABASE / SCHEMA ---
+    const createDbSchemaMatch = parseText.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(DATABASE|SCHEMA)\b/i);
+    if (createDbSchemaMatch) {
+      const createDbProps = [
+        `CLONE\\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s+(?:AT|BEFORE)\\s*\\(\\s*(?:TIMESTAMP|OFFSET|STATEMENT)\\s*=>\\s*[^)]+\\))?(?:\\s+IGNORE\\s+TABLES\\s+WITH\\s+INSUFFICIENT\\s+DATA\\s+RETENTION)?(?:\\s+IGNORE\\s+HYBRID\\s+TABLES)?`,
+        `(?:DATA_RETENTION_TIME_IN_DAYS|MAX_DATA_EXTENSION_TIME_IN_DAYS|ICEBERG_VERSION_DEFAULT)\\s*=\\s*\\d+`,
+        `(?:ENABLE_ICEBERG_MERGE_ON_READ|REPLACE_INVALID_CHARACTERS|ENABLE_DATA_COMPACTION)\\s*=\\s*(?:TRUE|FALSE)`,
+        `(?:EXTERNAL_VOLUME|CATALOG)\\s*=\\s*(?:[a-zA-Z0-9_$]+|"[^"]+")`,
+        `DEFAULT_DDL_COLLATION\\s*=\\s*'(?:[^']|'')*'`,
+        `STORAGE_SERIALIZATION_POLICY\\s*=\\s*(?:COMPATIBLE|OPTIMIZED)`,
+        `COMMENT\\s*=\\s*'(?:[^']|'')*'`,
+        `CATALOG_SYNC\\s*=\\s*'(?:[^']|'')*'`,
+        `CATALOG_SYNC_NAMESPACE_MODE\\s*=\\s*(?:NEST|FLATTEN)`,
+        `CATALOG_SYNC_NAMESPACE_FLATTEN_DELIMITER\\s*=\\s*'(?:[^']|'')*'`,
+        `(?:WITH\\s+)?TAG\\s*\\([^)]+\\)`,
+        `(?:WITH\\s+)?CONTACT\\s*\\([^)]+\\)`,
+        `OBJECT_VISIBILITY\\s*=\\s*(?:PRIVILEGED|[a-zA-Z0-9_$]+|"[^"]+")`
+      ].join("|");
+
+      // Validates exactly against Snowflake's strict property spec
+      const validCreateDbSchemaRe = new RegExp(
+        `^CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TRANSIENT\\s+)?(?:DATABASE|SCHEMA)\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s+(?:${createDbProps}))*\\s*$`,
+        "i"
+      );
+
+      if (validCreateDbSchemaRe.test(parseText)) {
+        continue; // Valid Snowflake syntax, safely bypass the PEG parser
+      } else {
+        // Invalid syntax! Throw a diagnostic marker immediately.
+        markers.push({
+          startLineNumber: r.startLine,
+          startColumn: 1,
+          endLineNumber: r.endLine,
+          endColumn: 100, // Safe default fallback length
+          message: `Unexpected syntax in CREATE ${createDbSchemaMatch[1].toUpperCase()} statement.`,
+          severity: 4
+        });
+        continue; 
+      }
+    }
+    // --- END Custom Syntax Validator ---
+
+    // Standard parser FP skip
+    if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
 
     try {
       parser.parse(parseText);
@@ -361,8 +407,8 @@ export async function validateTablesExist(
       }
     }
 
-    // NEW: Robustly check for DATABASE or SCHEMA creation (handles multi-part names)
-    const createDbSchemaMatch = rawStmtText.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:DATABASE|SCHEMA)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    // Robustly check for DATABASE or SCHEMA creation (handles multi-part names)
+    const createDbSchemaMatch = rawStmtText.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:DATABASE|SCHEMA)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
     if (createDbSchemaMatch) {
       const parts = [...createDbSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0]);
       if (parts.length > 0) {
