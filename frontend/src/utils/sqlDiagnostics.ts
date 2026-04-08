@@ -128,11 +128,11 @@ export interface DiagMarker {
 
 const PARSEABLE_STMT_KEYWORDS = new Set([
   "SELECT", "WITH", "INSERT", "UPDATE", "CREATE", "ALTER",
-  "TRUNCATE", "CALL", "SHOW", "SET",
+  "TRUNCATE", "CALL", "SHOW", "SET", "DROP", // ADDED: "DROP" so the parser handles it!
 ]);
 
 // Note: DATABASE and SCHEMA are intentionally removed from this list, 
-// so they can be handled by the Custom Validator inside the function!
+// so they can be handled by the Custom Validators inside the function!
 const SNOWFLAKE_FP_RE = new RegExp(
   "\\bTABLESAMPLE\\b|\\bSAMPLE\\s*\\(|\\bWITHIN\\s+GROUP\\b|\\bCONNECT\\s+BY\\b" +
   "|\\bAT\\s*\\(|\\bBEFORE\\s*\\(|\\bIN\\s+TABLE\\b" +
@@ -143,6 +143,7 @@ const SNOWFLAKE_FP_RE = new RegExp(
   "|ALTER\\s+(?:VIEW|TASK|STREAM|WAREHOUSE|DATABASE|SEQUENCE|STAGE|PIPE" +
   "|USER|ALERT|SHARE|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK" +
   "|RESOURCE|REPLICATION|FAILOVER)\\b" +
+  "|DROP\\s+(?:TABLE|VIEW|TASK|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|WAREHOUSE|ROLE|SCHEMA)\\b" + // ADDED: Fallback skips for unsupported Drops
   "|\\bCLUSTER\\s+(?:BY|KEY)\\b" +   
   "|\\bCLONE\\b" +                    
   "|INSERT\\s+OVERWRITE\\b" +         
@@ -170,7 +171,7 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
 
     const parseText = rawStmtText.replace(/;+\s*$/, "");
 
-    // --- NEW: Custom Syntax Validator for CREATE DATABASE / SCHEMA ---
+    // --- Custom Syntax Validator for CREATE DATABASE / SCHEMA ---
     const createDbSchemaMatch = parseText.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(DATABASE|SCHEMA)\b/i);
     if (createDbSchemaMatch) {
       const createDbProps = [
@@ -212,7 +213,28 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
         continue; 
       }
     }
-    // --- END Custom Syntax Validator ---
+
+    // --- NEW: Custom Syntax Validator for DROP DATABASE ---
+    const dropDbMatch = parseText.match(/^DROP\s+DATABASE\b/i);
+    if (dropDbMatch) {
+      // Rigidly matches DROP DATABASE [IF EXISTS] name [CASCADE|RESTRICT]
+      const validDropDbRe = /^DROP\s+DATABASE\s+(?:IF\s+EXISTS\s+)?(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\s+(?:CASCADE|RESTRICT))?\s*$/i;
+      
+      if (validDropDbRe.test(parseText)) {
+        continue;
+      } else {
+        markers.push({
+          startLineNumber: r.startLine,
+          startColumn: 1,
+          endLineNumber: r.endLine,
+          endColumn: 100,
+          message: `Unexpected syntax in DROP DATABASE statement.`,
+          severity: 4
+        });
+        continue; 
+      }
+    }
+    // --- END Custom Syntax Validators ---
 
     // Standard parser FP skip
     if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
@@ -444,7 +466,6 @@ export async function validateTablesExist(
       
       if (parts.length === 1) {
         // 1-part identifier requires a database context
-        // UPDATED: Include `resolvedRefs` as a valid DB fallback indicator for our mock test environments!
         const hasGlobalDb = knownDatabases.length > 0 || resolvedRefs.some(ref => !!ref.db);
         
         if (!hasGlobalDb && !scriptHasActiveDb) {
@@ -457,6 +478,36 @@ export async function validateTablesExist(
               endColumn:       t.endCol,
               message:         `No database selected. Cannot create schema '${t.name}'.`,
               severity:        8, // Fatal error
+            });
+          }
+        }
+      }
+    }
+    // ----------------------------------------------------
+
+    // --- Context-aware DROP DATABASE validation ---
+    const dropDbMatch = rawStmtText.match(/^DROP\s+DATABASE\s+(IF\s+EXISTS\s+)?([a-zA-Z0-9_$]+|"[^"]+")/i);
+    if (dropDbMatch) {
+      const ifExists = !!dropDbMatch[1];
+      const dbName = dropDbMatch[2].replace(/^"|"$/g, "");
+      const dbNameUC = UC(dbName);
+
+      if (!ifExists) {
+        const dbExists = scriptCreatedDbsAndSchemas.has(dbNameUC) || 
+                         (knownDatabases.length > 0 
+                           ? knownDatabases.some(d => UC(d) === dbNameUC) 
+                           : resolvedRefs.some(ref => UC(ref.db) === dbNameUC));
+                           
+        if (!dbExists) {
+          const tokens = findTokensLocally(rawStmtText, [dbName], r.startLine);
+          for (const t of tokens) {
+            markers.push({
+              startLineNumber: t.line,
+              startColumn:     t.col,
+              endLineNumber:   t.line,
+              endColumn:       t.endCol,
+              message:         `Database '${t.name}' does not exist or is not authorized.`,
+              severity:        8,
             });
           }
         }

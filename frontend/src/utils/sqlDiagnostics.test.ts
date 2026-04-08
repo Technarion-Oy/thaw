@@ -761,6 +761,44 @@ describe("validateWithParser", () => {
       });
     }
   });
+
+  // ── 2i. Snowflake-specific DROP DATABASE modifiers ────────────────────────
+  describe("Snowflake-specific DROP DATABASE modifiers", () => {
+    const validDropDbQueries = [
+      "DROP DATABASE my_db",
+      "DROP DATABASE IF EXISTS my_db",
+      "DROP DATABASE my_db CASCADE",
+      "DROP DATABASE my_db RESTRICT",
+      "DROP DATABASE IF EXISTS my_db CASCADE",
+      "DROP DATABASE IF EXISTS my_db RESTRICT"
+    ];
+
+    for (const sql of validDropDbQueries) {
+      it(`should silently accept valid DROP DATABASE syntax: ${sql}`, () => {
+        const m = validateWithParser(sql, singleRange(sql));
+        
+        // This will likely FAIL because node-sql-parser doesn't know what to do with CASCADE!
+        expect(warnings(m)).toHaveLength(0);
+      });
+    }
+  });
+
+  // ── 2j. Incorrect DROP DATABASE syntax ────────────────────────────────────
+  describe("Incorrect DROP DATABASE syntax -> Warning", () => {
+    const invalidDropDbQueries = [
+      "DROP DATABASE", // Missing name
+      "DROP DATABASE my_db CASCADE RESTRICT", // Cannot have both modifiers
+      "DROP DATABASE my_db WITH CASCADE", // Invalid keyword 'WITH'
+      "DROP DATABASE IF my_db", // Incomplete IF EXISTS
+    ];
+
+    for (const sql of invalidDropDbQueries) {
+      it(`should flag syntax errors in: ${sql}`, () => {
+        const m = validateWithParser(sql, singleRange(sql));
+        expect(warnings(m).length).toBeGreaterThan(0);
+      });
+    }
+  });
 });
 
 // ── 3. validateBareColumnRefs ─────────────────────────────────────────────────
@@ -1437,5 +1475,63 @@ describe("validateTablesExist", () => {
       expect(errors(m)).toHaveLength(0);
     });
   });
+
+  describe("Context-aware DDL validation (DROP DATABASE)", () => {
+    it("flags a missing database in a standard DROP DATABASE statement", async () => {
+      const sql = "DROP DATABASE missing_db;";
+      
+      // Empty context: database doesn't exist
+      const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
+      
+      // THIS WILL FAIL: validateTablesExist currently skips DROP statements entirely.
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/Database 'MISSING_DB' does not exist/i);
+    });
+
+    it("allows DROP DATABASE if the database exists in the global context", async () => {
+      const sql = "DROP DATABASE existing_db;";
+      
+      const m = await validateTablesExist(sql, singleRange(sql), [], ["EXISTING_DB"], []);
+      
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("silently allows DROP DATABASE IF EXISTS even when the database is missing", async () => {
+      const sql = "DROP DATABASE IF EXISTS missing_db;";
+      
+      const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
+      
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("allows DROP DATABASE if it was created earlier in the script", async () => {
+      const { sql, ranges } = multiRange([
+        "CREATE DATABASE local_db;",
+        "DROP DATABASE local_db;"
+      ]);
+      
+      const m = await validateTablesExist(sql, ranges, [], [], []);
+      
+      expect(errors(m)).toHaveLength(0);
+    });
+  });
+
+  it("flags missing database even when CASCADE or RESTRICT is appended", async () => {
+      const sql1 = "DROP DATABASE missing_db CASCADE;";
+      const m1 = await validateTablesExist(sql1, singleRange(sql1), [], [], []);
+      expect(errors(m1)).toHaveLength(1);
+      expect(errors(m1)[0].message).toMatch(/Database 'MISSING_DB' does not exist/i);
+
+      const sql2 = "DROP DATABASE missing_db RESTRICT;";
+      const m2 = await validateTablesExist(sql2, singleRange(sql2), [], [], []);
+      expect(errors(m2)).toHaveLength(1);
+      expect(errors(m2)[0].message).toMatch(/Database 'MISSING_DB' does not exist/i);
+    });
+
+    it("silently allows DROP DATABASE IF EXISTS with CASCADE or RESTRICT", async () => {
+      const sql = "DROP DATABASE IF EXISTS missing_db CASCADE;";
+      const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
+      expect(errors(m)).toHaveLength(0);
+    });
 });
 });
