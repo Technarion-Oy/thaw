@@ -143,7 +143,7 @@ const SNOWFLAKE_FP_RE = new RegExp(
   "|ALTER\\s+(?:VIEW|TASK|STREAM|WAREHOUSE|DATABASE|SEQUENCE|STAGE|PIPE" +
   "|USER|ALERT|SHARE|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK" +
   "|RESOURCE|REPLICATION|FAILOVER)\\b" +
-  "|DROP\\s+(?:TABLE|VIEW|TASK|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|WAREHOUSE|ROLE)\\b" + // REMOVED: SCHEMA so the custom validator catches it
+  "|DROP\\s+(?:TABLE|VIEW|TASK|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|WAREHOUSE|ROLE)\\b" + 
   "|\\bCLUSTER\\s+(?:BY|KEY)\\b" +   
   "|\\bCLONE\\b" +                    
   "|INSERT\\s+OVERWRITE\\b" +         
@@ -214,8 +214,6 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
     // --- Custom Syntax Validator for DROP DATABASE / SCHEMA ---
     const dropDbSchemaMatch = parseText.match(/^DROP\s+(DATABASE|SCHEMA)\b/i);
     if (dropDbSchemaMatch) {
-      // Rigidly matches DROP DATABASE|SCHEMA [IF EXISTS] name [CASCADE|RESTRICT]
-      // Allows 1 or 2 part identifiers for SCHEMA
       const validDropDbSchemaRe = /^DROP\s+(?:DATABASE|SCHEMA)\s+(?:IF\s+EXISTS\s+)?(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+"))?(?:\s+(?:CASCADE|RESTRICT))?\s*$/i;
       
       if (validDropDbSchemaRe.test(parseText)) {
@@ -283,12 +281,68 @@ export async function validateBareColumnRefs(
   colInfoCache: Map<string, ColInfo[]>,
 ): Promise<DiagMarker[]> {
   const markers: DiagMarker[] = [];
+  const localColCache = new Map<string, ColInfo[]>();
 
+  // 1. PRE-PASS: Extract locally created tables and their columns!
+  for (const r of stmtRanges) {
+    const rawStmtText = sql.slice(r.startOffset, r.endOffset);
+    
+    const createMatch = rawStmtText.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+|TEMPORARY\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})\s*\(([^;]+)\)/i);
+    if (createMatch) {
+      const parts = [...createMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0].replace(/^"|"$/g, "").toUpperCase());
+      const localTableName = parts[parts.length - 1];
+      
+      const colsRaw = createMatch[2];
+      const columns: ColInfo[] = [];
+      
+      // Parenthesis-aware splitting to safely extract column names
+      let depth = 0;
+      let currentDef = "";
+      const defs: string[] = [];
+      for (let i = 0; i < colsRaw.length; i++) {
+          const char = colsRaw[i];
+          if (char === '(') depth++;
+          else if (char === ')') {
+            if (depth > 0) depth--;
+            if (depth < 0) break; // Hit the end parenthesis of the CREATE TABLE
+          }
+          else if (char === ',' && depth === 0) {
+              defs.push(currentDef);
+              currentDef = "";
+              continue;
+          }
+          currentDef += char;
+      }
+      if (currentDef) defs.push(currentDef);
+
+      for (const def of defs) {
+          const trimmed = def.trim();
+          if (!trimmed) continue;
+          const identMatch = trimmed.match(/^([a-zA-Z0-9_$]+|"[^"]+")/);
+          if (identMatch) {
+              columns.push({ name: identMatch[1].replace(/^"|"$/g, "").toUpperCase(), dataType: "UNKNOWN" });
+          }
+      }
+
+      let db = null, schema = null;
+      if (parts.length === 3) { db = parts[0]; schema = parts[1]; }
+      else if (parts.length === 2) { schema = parts[0]; }
+      
+      // Register in local cache
+      localColCache.set(`\0\0${localTableName}`, columns);
+      if (schema) localColCache.set(`\0${schema}\0${localTableName}`, columns);
+      if (db && schema) localColCache.set(`${db}\0${schema}\0${localTableName}`, columns);
+    }
+  }
+
+  // 2. PARSE & VALIDATE
   for (const r of stmtRanges) {
     const parser = new SnowflakeParser();
     const rawStmtText = sql.slice(r.startOffset, r.endOffset);
     const firstToken = getFirstToken(rawStmtText);
-    if (firstToken !== "SELECT" && firstToken !== "WITH") continue;
+    
+    // UPDATED: Now allows INSERT statements to pass through the gatekeeper!
+    if (firstToken !== "SELECT" && firstToken !== "WITH" && firstToken !== "INSERT") continue;
     if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
 
     const parseText = rawStmtText.replace(/;+\s*$/, "");
@@ -301,12 +355,19 @@ export async function validateBareColumnRefs(
     const stmtAsts: any[] = Array.isArray(ast.ast) ? ast.ast : [ast.ast];
 
     for (const node of stmtAsts) {
-      if (!node || node.type !== "select") continue;
+      // UPDATED: Allow INSERT nodes
+      if (!node || (node.type !== "select" && node.type !== "insert")) continue;
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const fromTables: any[] = node.from ?? [];
+      // Extract Target Tables depending on AST structure
+      let fromTables: any[] = [];
+      if (node.type === "select") {
+        fromTables = node.from ?? [];
+      } else if (node.type === "insert") {
+        // PEG parser puts the INSERT target table in `table`
+        fromTables = node.table ? (Array.isArray(node.table) ? node.table : [node.table]) : [];
+      }
 
-      interface TableCheck { cacheKey: string; tableName: string; }
+      interface TableCheck { cacheKey: string; tableName: string; cols: ColInfo[]; }
       const tableChecks: TableCheck[] = [];
       let skip = false;
 
@@ -318,9 +379,12 @@ export async function validateBareColumnRefs(
         const ftTable = rawTable;
 
         let cacheKey: string | undefined;
+        let cols: ColInfo[] | undefined;
+
         if (ftDb && ftSchema) {
-          // Fully qualified reference — build key directly from AST
+          // Fully qualified reference
           cacheKey = `${UC(ftDb)}\0${UC(ftSchema)}\0${UC(ftTable)}`;
+          cols = colInfoCache.get(cacheKey) || localColCache.get(cacheKey);
         } else {
           // Unqualified — look up the resolved ref for the db/schema context
           const ref = resolvedRefs.find((rr) =>
@@ -328,26 +392,41 @@ export async function validateBareColumnRefs(
             (!ftDb     || UC(rr.db)     === UC(ftDb))     &&
             (!ftSchema || UC(rr.schema) === UC(ftSchema))
           );
-          if (!ref) { skip = true; break; } // CTE, subquery alias, or unknown table
-          cacheKey = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
+          if (ref) { 
+            cacheKey = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
+            cols = colInfoCache.get(cacheKey) || localColCache.get(cacheKey);
+          } else {
+            // No ref found (possibly a CTE, subquery alias, or a LOCAL table)
+            const localKey = `\0\0${UC(ftTable)}`;
+            if (localColCache.has(localKey)) {
+              cacheKey = localKey;
+              cols = localColCache.get(localKey);
+            } else if (ftSchema) {
+              const localSchKey = `\0${UC(ftSchema)}\0${UC(ftTable)}`;
+              if (localColCache.has(localSchKey)) {
+                cacheKey = localSchKey;
+                cols = localColCache.get(localSchKey);
+              }
+            }
+          }
         }
 
-        if (!colInfoCache.has(cacheKey)) { skip = true; break; } // cold cache → skip
-        tableChecks.push({ cacheKey, tableName: ftTable });
+        if (!cols) { skip = true; break; } // cold cache → skip
+        tableChecks.push({ cacheKey: cacheKey as string, tableName: ftTable, cols });
       }
 
       if (skip || tableChecks.length === 0) continue;
 
       const knownCols = new Set<string>();
       for (const tc of tableChecks) {
-        for (const c of colInfoCache.get(tc.cacheKey)!) knownCols.add(UC(c.name));
+        for (const c of tc.cols) knownCols.add(UC(c.name));
       }
 
       const unknownBare   = new Set<string>(); // unquoted  column_ref
       const unknownQuoted = new Set<string>(); // "double_quote_string"
 
       // ────────────────────────────────────────────────────────────────────────
-      // RECURSIVE AST TRAVERSAL FOR EXPRESSIONS
+      // RECURSIVE AST TRAVERSAL FOR EXPRESSIONS (SELECT)
       // ────────────────────────────────────────────────────────────────────────
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       function extractColumnsFromExpr(expr: any) {
@@ -372,11 +451,29 @@ export async function validateBareColumnRefs(
         }
       }
 
-      for (const col of (node.columns ?? [])) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        extractColumnsFromExpr((col as any)?.expr);
+      // Extract columns based on AST type
+      if (node.type === "select") {
+        for (const col of (node.columns ?? [])) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          extractColumnsFromExpr((col as any)?.expr);
+        }
+      } else if (node.type === "insert") {
+        for (const col of (node.columns ?? [])) {
+          // INSERT target columns are often returned as bare strings or simple objects by the parser
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const colName = typeof col === "string" ? col : String((col as any).column || (col as any).name || col);
+          if (colName && colName !== "*") {
+            const cleanCol = colName.replace(/^"|"$/g, "");
+            if (!knownCols.has(UC(cleanCol))) {
+              if (colName.startsWith('"')) {
+                unknownQuoted.add(cleanCol);
+              } else {
+                unknownBare.add(colName);
+              }
+            }
+          }
+        }
       }
-      // ────────────────────────────────────────────────────────────────────────
 
       if (unknownBare.size === 0 && unknownQuoted.size === 0) continue;
 

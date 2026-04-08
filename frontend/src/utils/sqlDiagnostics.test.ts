@@ -1193,6 +1193,123 @@ describe("validateBareColumnRefs", async () => {
     });
   });
 
+  // ── 3l. Locally Created Tables (Script Pre-Pass) ──────────────────────────
+  describe("Locally created tables (Script Pre-Pass)", async () => {
+    // Helper to generate mock ranges for multi-statement scripts
+    function multiRange(statements: string[]): { sql: string; ranges: StatementRange[] } {
+      let offset = 0;
+      let line = 1;
+      const ranges: StatementRange[] = statements.map((stmt) => {
+        const startOffset = offset;
+        const endOffset = offset + stmt.length;
+        const startLine = line;
+        const endLine = line + stmt.split("\n").length - 1;
+
+        offset = endOffset + 1; 
+        line = endLine + 1;
+        return { startLine, endLine, startOffset, endOffset };
+      });
+      return { sql: statements.join("\n"), ranges };
+    }
+
+    it("flags an unknown column on a locally created table", async () => {
+      const { sql, ranges } = multiRange([
+        "CREATE TABLE local_tab (amount NUMBER);",
+        "SELECT amountdd FROM local_tab;"
+      ]);
+      
+      // Empty refs and empty cache — the table only exists in the script!
+      const m = await validateBareColumnRefs(sql, ranges, [], new Map());
+      
+      // THIS WILL FAIL: The engine currently skips column validation if the table isn't in the global cache
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/amountdd/i);
+    });
+
+    it("silently allows a valid column on a locally created table", async () => {
+      const { sql, ranges } = multiRange([
+        "CREATE TABLE local_tab (amount NUMBER);",
+        "SELECT amount FROM local_tab;"
+      ]);
+      
+      const m = await validateBareColumnRefs(sql, ranges, [], new Map());
+      expect(warnings(m)).toHaveLength(0);
+    });
+
+    it("flags an unknown column but allows valid ones in a multi-column local table", async () => {
+      const { sql, ranges } = multiRange([
+        "CREATE TABLE local_tab (amount NUMBER, status VARCHAR);",
+        "SELECT amount, bad_col, status FROM local_tab;"
+      ]);
+      
+      const m = await validateBareColumnRefs(sql, ranges, [], new Map());
+      
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/bad_col/i);
+    });
+  });
+
+  // ── 3m. INSERT Statements (Target Column Validation) ────────────────────────
+  describe("INSERT statements (Target Column Validation)", async () => {
+    // Helper to generate mock ranges for multi-statement scripts
+    function multiRange(statements: string[]): { sql: string; ranges: StatementRange[] } {
+      let offset = 0;
+      let line = 1;
+      const ranges: StatementRange[] = statements.map((stmt) => {
+        const startOffset = offset;
+        const endOffset = offset + stmt.length;
+        const startLine = line;
+        const endLine = line + stmt.split("\n").length - 1;
+
+        offset = endOffset + 1; 
+        line = endLine + 1;
+        return { startLine, endLine, startOffset, endOffset };
+      });
+      return { sql: statements.join("\n"), ranges };
+    }
+
+    it("flags an unknown target column in an INSERT statement (global table)", async () => {
+      const sql = 'INSERT INTO "DB"."SCH"."EMPLOYEES" (ID, FAKE_COL) SELECT 1, 2;';
+      
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
+      
+      // THIS WILL FAIL: validateBareColumnRefs currently skips INSERT statements entirely!
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/FAKE_COL/i);
+    });
+
+    it("flags an unknown target column in an INSERT statement (locally created table)", async () => {
+      const { sql, ranges } = multiRange([
+        "CREATE TABLE my_table (a varchar);",
+        "INSERT INTO my_table (aaa) SELECT '1';"
+      ]);
+      
+      const m = await validateBareColumnRefs(sql, ranges, [], new Map());
+      
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/aaa/i);
+    });
+
+    it("silently allows valid target columns in an INSERT statement", async () => {
+      const { sql, ranges } = multiRange([
+        "CREATE TABLE my_table (a varchar);",
+        "INSERT INTO my_table (a) SELECT '1';"
+      ]);
+      
+      const m = await validateBareColumnRefs(sql, ranges, [], new Map());
+      expect(warnings(m)).toHaveLength(0);
+    });
+
+    it("silently allows INSERT without a target column list", async () => {
+      // If the user doesn't specify columns (e.g. INSERT INTO tab SELECT *), 
+      // there are no target columns to validate here.
+      const sql = 'INSERT INTO "DB"."SCH"."EMPLOYEES" SELECT * FROM OTHER_TAB;';
+      
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
+      expect(warnings(m)).toHaveLength(0);
+    });
+  });
+
   // ── 4. validateTablesExist ────────────────────────────────────────────────────
 
 describe("validateTablesExist", () => {
