@@ -674,6 +674,93 @@ describe("validateWithParser", () => {
       });
     }
   });
+
+  // ── 2g. Snowflake-specific CREATE SCHEMA modifiers ────────────────────────
+  describe("Snowflake-specific CREATE SCHEMA modifiers", () => {
+    const validSchemaQueries = [
+      // 1. Core Modifiers
+      "CREATE TRANSIENT SCHEMA my_sch",
+      "CREATE OR REPLACE SCHEMA my_sch",
+      "CREATE OR REPLACE TRANSIENT SCHEMA IF NOT EXISTS my_sch",
+
+      // 2. Cloning & Time Travel
+      "CREATE SCHEMA my_sch CLONE source_sch",
+      "CREATE SCHEMA my_sch CLONE source_sch AT (TIMESTAMP => '2026-04-07 11:49:54'::TIMESTAMP)",
+      "CREATE SCHEMA my_sch CLONE source_sch IGNORE TABLES WITH INSUFFICIENT DATA RETENTION",
+
+      // 3. Schema-Exclusive: Managed Access
+      "CREATE SCHEMA my_sch WITH MANAGED ACCESS",
+      "CREATE SCHEMA my_sch WITH MANAGED ACCESS DATA_RETENTION_TIME_IN_DAYS = 90",
+
+      // 4. Schema-Exclusive: Classification Profile
+      "CREATE SCHEMA my_sch CLASSIFICATION_PROFILE = 'my_security_profile'",
+
+      // 5. Shared Modifiers (Retention, Catalog, Collation, etc.)
+      "CREATE SCHEMA my_sch DATA_RETENTION_TIME_IN_DAYS = 30 MAX_DATA_EXTENSION_TIME_IN_DAYS = 7",
+      "CREATE SCHEMA my_sch EXTERNAL_VOLUME = my_ext_vol CATALOG = my_catalog",
+      "CREATE SCHEMA my_sch ENABLE_ICEBERG_MERGE_ON_READ = TRUE REPLACE_INVALID_CHARACTERS = FALSE",
+      "CREATE SCHEMA my_sch DEFAULT_DDL_COLLATION = 'en-ci' STORAGE_SERIALIZATION_POLICY = OPTIMIZED",
+      "CREATE SCHEMA my_sch COMMENT = 'This is a production schema'",
+      "CREATE SCHEMA my_sch WITH TAG (cost_center = 'sales') WITH CONTACT (owner = 'admin')",
+
+      // 6. The "Everything Everywhere All At Once" Mega-Query for Schemas
+      `CREATE OR REPLACE TRANSIENT SCHEMA IF NOT EXISTS mega_sch 
+         CLONE source_sch AT (OFFSET => -3600) IGNORE HYBRID TABLES
+         WITH MANAGED ACCESS
+         DATA_RETENTION_TIME_IN_DAYS = 30 
+         MAX_DATA_EXTENSION_TIME_IN_DAYS = 14
+         EXTERNAL_VOLUME = my_vol 
+         CATALOG = my_cat 
+         ENABLE_ICEBERG_MERGE_ON_READ = TRUE
+         DEFAULT_DDL_COLLATION = 'en-ci'
+         STORAGE_SERIALIZATION_POLICY = OPTIMIZED
+         CLASSIFICATION_PROFILE = 'strict_profile'
+         COMMENT = 'The ultimate schema'
+         WITH TAG (tier = 'tier1') 
+         WITH CONTACT (owner = 'boss')
+         OBJECT_VISIBILITY = PRIVILEGED
+         ENABLE_DATA_COMPACTION = FALSE`
+    ];
+
+    for (const sql of validSchemaQueries) {
+      it(`should silently accept Snowflake CREATE SCHEMA syntax: ${sql.slice(0, 40)}...`, () => {
+        const m = validateWithParser(sql, singleRange(sql));
+        
+        // Asserting that exactly ZERO markers are generated. 
+        // This will currently FAIL because the regex doesn't support WITH MANAGED ACCESS, etc.
+        expect(warnings(m)).toHaveLength(0);
+      });
+    }
+  });
+
+  // ── 2h. Incorrect CREATE SCHEMA syntax ──────────────────────────────────
+  describe("Incorrect CREATE SCHEMA syntax -> Warning", () => {
+    const invalidSchemaQueries = [
+      // 1. Missing schema name entirely
+      "CREATE SCHEMA",
+      
+      // 2. Malformed Schema-Exclusive properties
+      "CREATE SCHEMA my_sch WITH MANAGED ACCESS = TRUE", // Should not have an equals sign
+      "CREATE SCHEMA my_sch CLASSIFICATION_PROFILE 10", // Missing equals and quotes
+      
+      // 3. Completely made-up Snowflake properties
+      "CREATE SCHEMA my_sch EXTREME_MODE = TRUE",
+      "CREATE SCHEMA my_sch WITH NONSENSE = 'sales'",
+      
+      // 4. Misplaced core modifiers
+      "CREATE TRANSIENT OR REPLACE SCHEMA my_sch", // Wrong order
+      "CREATE SCHEMA TRANSIENT my_sch", // Modifier after SCHEMA
+    ];
+
+    for (const sql of invalidSchemaQueries) {
+      it(`should flag syntax errors in: ${sql.slice(0, 40)}`, () => {
+        const m = validateWithParser(sql, singleRange(sql));
+        
+        // This asserts that an error IS thrown for garbage syntax.
+        expect(warnings(m).length).toBeGreaterThan(0);
+      });
+    }
+  });
 });
 
 // ── 3. validateBareColumnRefs ─────────────────────────────────────────────────
@@ -1303,6 +1390,50 @@ describe("validateTablesExist", () => {
         "SELECT * FROM local_tab;"
       ]);
       const m = await validateTablesExist(sql, ranges, LIVE_REFS);
+      expect(errors(m)).toHaveLength(0);
+    });
+  });
+
+  describe("Context-aware DDL validation (CREATE SCHEMA)", () => {
+    it("flags 1-part CREATE SCHEMA when no database is in context", async () => {
+      const sql = "CREATE SCHEMA mschema WITH MANAGED ACCESS;";
+      
+      // Simulating a completely empty context: no knownDatabases, no resolvedRefs
+      // This MUST fail because Snowflake doesn't know where to put 'mschema'
+      const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
+      
+      // THIS WILL FAIL with length 0, because validateTablesExist currently ignores CREATE statements!
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/No database selected/i);
+    });
+
+    it("allows 1-part CREATE SCHEMA when a database IS in the global context", async () => {
+      const sql = "CREATE SCHEMA mschema WITH MANAGED ACCESS;";
+      
+      // Simulating a context where 'MY_SESSION_DB' is the active database
+      const m = await validateTablesExist(sql, singleRange(sql), [], ["MY_SESSION_DB"], []);
+      
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("allows 1-part CREATE SCHEMA if a database was created earlier in the script", async () => {
+      const { sql, ranges } = multiRange([
+        "CREATE DATABASE local_db;",
+        "USE DATABASE local_db;",
+        "CREATE SCHEMA mschema WITH MANAGED ACCESS;"
+      ]);
+      
+      const m = await validateTablesExist(sql, ranges, [], [], []);
+      
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("allows 2-part CREATE SCHEMA regardless of context", async () => {
+      // Because it explicitly defines the database (my_db), it doesn't need a session context
+      const sql = "CREATE SCHEMA my_db.mschema WITH MANAGED ACCESS;";
+      
+      const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
+      
       expect(errors(m)).toHaveLength(0);
     });
   });

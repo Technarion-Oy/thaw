@@ -175,11 +175,13 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
     if (createDbSchemaMatch) {
       const createDbProps = [
         `CLONE\\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s+(?:AT|BEFORE)\\s*\\(\\s*(?:TIMESTAMP|OFFSET|STATEMENT)\\s*=>\\s*[^)]+\\))?(?:\\s+IGNORE\\s+TABLES\\s+WITH\\s+INSUFFICIENT\\s+DATA\\s+RETENTION)?(?:\\s+IGNORE\\s+HYBRID\\s+TABLES)?`,
+        `WITH\\s+MANAGED\\s+ACCESS`, // NEW for SCHEMA
         `(?:DATA_RETENTION_TIME_IN_DAYS|MAX_DATA_EXTENSION_TIME_IN_DAYS|ICEBERG_VERSION_DEFAULT)\\s*=\\s*\\d+`,
         `(?:ENABLE_ICEBERG_MERGE_ON_READ|REPLACE_INVALID_CHARACTERS|ENABLE_DATA_COMPACTION)\\s*=\\s*(?:TRUE|FALSE)`,
         `(?:EXTERNAL_VOLUME|CATALOG)\\s*=\\s*(?:[a-zA-Z0-9_$]+|"[^"]+")`,
         `DEFAULT_DDL_COLLATION\\s*=\\s*'(?:[^']|'')*'`,
         `STORAGE_SERIALIZATION_POLICY\\s*=\\s*(?:COMPATIBLE|OPTIMIZED)`,
+        `CLASSIFICATION_PROFILE\\s*=\\s*'(?:[^']|'')*'`, // NEW for SCHEMA
         `COMMENT\\s*=\\s*'(?:[^']|'')*'`,
         `CATALOG_SYNC\\s*=\\s*'(?:[^']|'')*'`,
         `CATALOG_SYNC_NAMESPACE_MODE\\s*=\\s*(?:NEST|FLATTEN)`,
@@ -419,10 +421,49 @@ export async function validateTablesExist(
   }
 
   // 2. PARSE & VALIDATE
+  let scriptHasActiveDb = false; // Track session state across statements
+
   for (const r of stmtRanges) {
     const parser = new SnowflakeParser();
     const rawStmtText = sql.slice(r.startOffset, r.endOffset);
     const firstToken = getFirstToken(rawStmtText);
+
+    // Update active DB state based on script commands
+    if (/^USE\s+DATABASE\s+/i.test(rawStmtText)) {
+      scriptHasActiveDb = true;
+    }
+    // Creating a DB implicitly sets it as the active session database
+    if (/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?DATABASE\b/i.test(rawStmtText)) {
+      scriptHasActiveDb = true;
+    }
+
+    // --- Context-aware CREATE SCHEMA validation ---
+    const createSchemaMatch = rawStmtText.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?SCHEMA\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    if (createSchemaMatch) {
+      const parts = [...createSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0]);
+      
+      if (parts.length === 1) {
+        // 1-part identifier requires a database context
+        // UPDATED: Include `resolvedRefs` as a valid DB fallback indicator for our mock test environments!
+        const hasGlobalDb = knownDatabases.length > 0 || resolvedRefs.some(ref => !!ref.db);
+        
+        if (!hasGlobalDb && !scriptHasActiveDb) {
+          const tokens = findTokensLocally(rawStmtText, [parts[0]], r.startLine);
+          for (const t of tokens) {
+            markers.push({
+              startLineNumber: t.line,
+              startColumn:     t.col,
+              endLineNumber:   t.line,
+              endColumn:       t.endCol,
+              message:         `No database selected. Cannot create schema '${t.name}'.`,
+              severity:        8, // Fatal error
+            });
+          }
+        }
+      }
+    }
+    // ----------------------------------------------------
+
     if (firstToken !== "SELECT" && firstToken !== "WITH") continue;
     if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
 
