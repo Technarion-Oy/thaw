@@ -128,7 +128,7 @@ export interface DiagMarker {
 
 const PARSEABLE_STMT_KEYWORDS = new Set([
   "SELECT", "WITH", "INSERT", "UPDATE", "CREATE", "ALTER",
-  "TRUNCATE", "CALL", "SHOW", "SET", "DROP", // ADDED: "DROP" so the parser handles it!
+  "TRUNCATE", "CALL", "SHOW", "SET", "DROP", 
 ]);
 
 // Note: DATABASE and SCHEMA are intentionally removed from this list, 
@@ -143,7 +143,7 @@ const SNOWFLAKE_FP_RE = new RegExp(
   "|ALTER\\s+(?:VIEW|TASK|STREAM|WAREHOUSE|DATABASE|SEQUENCE|STAGE|PIPE" +
   "|USER|ALERT|SHARE|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK" +
   "|RESOURCE|REPLICATION|FAILOVER)\\b" +
-  "|DROP\\s+(?:TABLE|VIEW|TASK|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|WAREHOUSE|ROLE|SCHEMA)\\b" + // ADDED: Fallback skips for unsupported Drops
+  "|DROP\\s+(?:TABLE|VIEW|TASK|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|WAREHOUSE|ROLE)\\b" + // REMOVED: SCHEMA so the custom validator catches it
   "|\\bCLUSTER\\s+(?:BY|KEY)\\b" +   
   "|\\bCLONE\\b" +                    
   "|INSERT\\s+OVERWRITE\\b" +         
@@ -152,7 +152,6 @@ const SNOWFLAKE_FP_RE = new RegExp(
 );
 
 function cleanParserMessage(raw: string): string {
-  // PEG.js messages are very verbose ("Expected ... but 'X' found.")
   const m = raw.match(/but\s+"([^"]+)"\s+found/i) ?? raw.match(/but\s+([^\s.]+)\s+found/i);
   if (m) return `Unexpected: '${m[1]}'`;
   if (/end of input/i.test(raw)) return "Unexpected end of statement";
@@ -176,13 +175,13 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
     if (createDbSchemaMatch) {
       const createDbProps = [
         `CLONE\\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s+(?:AT|BEFORE)\\s*\\(\\s*(?:TIMESTAMP|OFFSET|STATEMENT)\\s*=>\\s*[^)]+\\))?(?:\\s+IGNORE\\s+TABLES\\s+WITH\\s+INSUFFICIENT\\s+DATA\\s+RETENTION)?(?:\\s+IGNORE\\s+HYBRID\\s+TABLES)?`,
-        `WITH\\s+MANAGED\\s+ACCESS`, // NEW for SCHEMA
+        `WITH\\s+MANAGED\\s+ACCESS`, 
         `(?:DATA_RETENTION_TIME_IN_DAYS|MAX_DATA_EXTENSION_TIME_IN_DAYS|ICEBERG_VERSION_DEFAULT)\\s*=\\s*\\d+`,
         `(?:ENABLE_ICEBERG_MERGE_ON_READ|REPLACE_INVALID_CHARACTERS|ENABLE_DATA_COMPACTION)\\s*=\\s*(?:TRUE|FALSE)`,
         `(?:EXTERNAL_VOLUME|CATALOG)\\s*=\\s*(?:[a-zA-Z0-9_$]+|"[^"]+")`,
         `DEFAULT_DDL_COLLATION\\s*=\\s*'(?:[^']|'')*'`,
         `STORAGE_SERIALIZATION_POLICY\\s*=\\s*(?:COMPATIBLE|OPTIMIZED)`,
-        `CLASSIFICATION_PROFILE\\s*=\\s*'(?:[^']|'')*'`, // NEW for SCHEMA
+        `CLASSIFICATION_PROFILE\\s*=\\s*'(?:[^']|'')*'`, 
         `COMMENT\\s*=\\s*'(?:[^']|'')*'`,
         `CATALOG_SYNC\\s*=\\s*'(?:[^']|'')*'`,
         `CATALOG_SYNC_NAMESPACE_MODE\\s*=\\s*(?:NEST|FLATTEN)`,
@@ -192,21 +191,19 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
         `OBJECT_VISIBILITY\\s*=\\s*(?:PRIVILEGED|[a-zA-Z0-9_$]+|"[^"]+")`
       ].join("|");
 
-      // Validates exactly against Snowflake's strict property spec
       const validCreateDbSchemaRe = new RegExp(
         `^CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TRANSIENT\\s+)?(?:DATABASE|SCHEMA)\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s+(?:${createDbProps}))*\\s*$`,
         "i"
       );
 
       if (validCreateDbSchemaRe.test(parseText)) {
-        continue; // Valid Snowflake syntax, safely bypass the PEG parser
+        continue; 
       } else {
-        // Invalid syntax! Throw a diagnostic marker immediately.
         markers.push({
           startLineNumber: r.startLine,
           startColumn: 1,
           endLineNumber: r.endLine,
-          endColumn: 100, // Safe default fallback length
+          endColumn: 100, 
           message: `Unexpected syntax in CREATE ${createDbSchemaMatch[1].toUpperCase()} statement.`,
           severity: 4
         });
@@ -214,13 +211,14 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
       }
     }
 
-    // --- NEW: Custom Syntax Validator for DROP DATABASE ---
-    const dropDbMatch = parseText.match(/^DROP\s+DATABASE\b/i);
-    if (dropDbMatch) {
-      // Rigidly matches DROP DATABASE [IF EXISTS] name [CASCADE|RESTRICT]
-      const validDropDbRe = /^DROP\s+DATABASE\s+(?:IF\s+EXISTS\s+)?(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\s+(?:CASCADE|RESTRICT))?\s*$/i;
+    // --- Custom Syntax Validator for DROP DATABASE / SCHEMA ---
+    const dropDbSchemaMatch = parseText.match(/^DROP\s+(DATABASE|SCHEMA)\b/i);
+    if (dropDbSchemaMatch) {
+      // Rigidly matches DROP DATABASE|SCHEMA [IF EXISTS] name [CASCADE|RESTRICT]
+      // Allows 1 or 2 part identifiers for SCHEMA
+      const validDropDbSchemaRe = /^DROP\s+(?:DATABASE|SCHEMA)\s+(?:IF\s+EXISTS\s+)?(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+"))?(?:\s+(?:CASCADE|RESTRICT))?\s*$/i;
       
-      if (validDropDbRe.test(parseText)) {
+      if (validDropDbSchemaRe.test(parseText)) {
         continue;
       } else {
         markers.push({
@@ -228,7 +226,7 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
           startColumn: 1,
           endLineNumber: r.endLine,
           endColumn: 100,
-          message: `Unexpected syntax in DROP DATABASE statement.`,
+          message: `Unexpected syntax in DROP ${dropDbSchemaMatch[1].toUpperCase()} statement.`,
           severity: 4
         });
         continue; 
@@ -256,7 +254,7 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
         let wordEndIdx    = errColIdx;
         while (wordEndIdx < errLineText.length && /\w/.test(errLineText[wordEndIdx])) wordEndIdx++;
         const wordAtError = errLineText.slice(errColIdx, wordEndIdx);
-        const endCol      = wordEndIdx > errColIdx ? wordEndIdx + 1 : errCol + 1; // 1-indexed
+        const endCol      = wordEndIdx > errColIdx ? wordEndIdx + 1 : errCol + 1; 
         const message     = wordAtError.length > 1
           ? `Unexpected: '${wordAtError}'`
           : cleanParserMessage(e.message ?? "Syntax error");
@@ -267,7 +265,7 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
           endLineNumber:   errLine,
           endColumn:       endCol,
           message,
-          severity:        4, // Warning — some false positives may remain
+          severity:        4, 
         });
       }
     }
@@ -436,6 +434,10 @@ export async function validateTablesExist(
     if (createDbSchemaMatch) {
       const parts = [...createDbSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0]);
       if (parts.length > 0) {
+        // Add full parts path (e.g. "DB.SCH") to the created set to bypass global checks later
+        const newEntityPath = parts.map(p => p.replace(/^"|"$/g, "").toUpperCase()).join(".");
+        scriptCreatedDbsAndSchemas.add(newEntityPath);
+        // Also add just the schema/db name for simple existence checks
         const newEntityName = parts[parts.length - 1].replace(/^"|"$/g, "").toUpperCase();
         scriptCreatedDbsAndSchemas.add(newEntityName);
       }
@@ -443,7 +445,7 @@ export async function validateTablesExist(
   }
 
   // 2. PARSE & VALIDATE
-  let scriptHasActiveDb = false; // Track session state across statements
+  let scriptHasActiveDb = false; 
 
   for (const r of stmtRanges) {
     const parser = new SnowflakeParser();
@@ -477,7 +479,7 @@ export async function validateTablesExist(
               endLineNumber:   t.line,
               endColumn:       t.endCol,
               message:         `No database selected. Cannot create schema '${t.name}'.`,
-              severity:        8, // Fatal error
+              severity:        8, 
             });
           }
         }
@@ -510,6 +512,106 @@ export async function validateTablesExist(
               severity:        8,
             });
           }
+        }
+      }
+    }
+    // ----------------------------------------------------
+
+    // --- Context-aware DROP SCHEMA validation ---
+    const dropSchemaMatch = rawStmtText.match(/^DROP\s+SCHEMA\s+(IF\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+"))?)/i);
+    if (dropSchemaMatch) {
+      const ifExists = !!dropSchemaMatch[1];
+      if (!ifExists) {
+        const parts = [...dropSchemaMatch[2].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0].replace(/^"|"$/g, ""));
+        
+        let targetDb: string | null = null;
+        let targetSch: string;
+
+        if (parts.length === 2) {
+          targetDb = UC(parts[0]);
+          targetSch = UC(parts[1]);
+        } else {
+          targetSch = UC(parts[0]);
+        }
+
+        const hasGlobalDb = knownDatabases.length > 0 || resolvedRefs.some(ref => !!ref.db);
+        
+        if (targetDb) {
+           // 2-part identifier: Validate DB exists, then validate Schema exists
+           const dbExists = scriptCreatedDbsAndSchemas.has(targetDb) ||
+                            (knownDatabases.length > 0
+                              ? knownDatabases.some(d => UC(d) === targetDb)
+                              : resolvedRefs.some(ref => UC(ref.db) === targetDb));
+                              
+           if (!dbExists) {
+              const tokens = findTokensLocally(rawStmtText, [parts[0]], r.startLine);
+              for (const t of tokens) {
+                markers.push({
+                  startLineNumber: t.line,
+                  startColumn:     t.col,
+                  endLineNumber:   t.line,
+                  endColumn:       t.endCol,
+                  message:         `Database '${t.name}' does not exist or is not authorized.`,
+                  severity:        8,
+                });
+              }
+           } else {
+             const schemaPath = `${targetDb}.${targetSch}`;
+             const dbSchemas = knownSchemas.filter(s => UC(s.db) === targetDb);
+             const schemaExists = scriptCreatedDbsAndSchemas.has(targetSch) || scriptCreatedDbsAndSchemas.has(schemaPath) ||
+                                  (dbSchemas.length > 0
+                                    ? dbSchemas.some(s => UC(s.name) === targetSch)
+                                    : resolvedRefs.some(ref => UC(ref.db) === targetDb && UC(ref.schema) === targetSch));
+                                    
+             if (!schemaExists) {
+               const tokens = findTokensLocally(rawStmtText, [parts[1]], r.startLine);
+               for (const t of tokens) {
+                  markers.push({
+                    startLineNumber: t.line,
+                    startColumn:     t.col,
+                    endLineNumber:   t.line,
+                    endColumn:       t.endCol,
+                    message:         `Schema '${t.name}' does not exist or is not authorized.`,
+                    severity:        8,
+                  });
+               }
+             }
+           }
+        } else {
+           // 1-part identifier: Needs DB context
+           if (!hasGlobalDb && !scriptHasActiveDb) {
+              const tokens = findTokensLocally(rawStmtText, [parts[0]], r.startLine);
+              for (const t of tokens) {
+                markers.push({
+                  startLineNumber: t.line,
+                  startColumn:     t.col,
+                  endLineNumber:   t.line,
+                  endColumn:       t.endCol,
+                  message:         `No database selected. Cannot drop schema '${t.name}'.`,
+                  severity:        8, 
+                });
+              }
+           } else {
+             // DB context exists, just check schema
+             const schemaExists = scriptCreatedDbsAndSchemas.has(targetSch) ||
+                                  (knownSchemas.length > 0
+                                    ? knownSchemas.some(s => UC(s.name) === targetSch)
+                                    : resolvedRefs.some(ref => UC(ref.schema) === targetSch));
+                                    
+             if (!schemaExists) {
+               const tokens = findTokensLocally(rawStmtText, [parts[0]], r.startLine);
+               for (const t of tokens) {
+                  markers.push({
+                    startLineNumber: t.line,
+                    startColumn:     t.col,
+                    endLineNumber:   t.line,
+                    endColumn:       t.endCol,
+                    message:         `Schema '${t.name}' does not exist or is not authorized.`,
+                    severity:        8,
+                  });
+               }
+             }
+           }
         }
       }
     }

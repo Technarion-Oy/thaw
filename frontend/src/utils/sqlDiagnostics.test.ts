@@ -799,6 +799,46 @@ describe("validateWithParser", () => {
       });
     }
   });
+
+  // ── 2k. Snowflake-specific DROP SCHEMA modifiers ────────────────────────
+  describe("Snowflake-specific DROP SCHEMA modifiers", () => {
+    const validDropSchQueries = [
+      "DROP SCHEMA my_sch",
+      "DROP SCHEMA IF EXISTS my_sch",
+      "DROP SCHEMA my_sch CASCADE",
+      "DROP SCHEMA my_sch RESTRICT",
+      "DROP SCHEMA IF EXISTS my_sch CASCADE",
+      "DROP SCHEMA IF EXISTS my_sch RESTRICT",
+      "DROP SCHEMA my_db.my_sch CASCADE" // 2-part identifier
+    ];
+
+    for (const sql of validDropSchQueries) {
+      it(`should silently accept valid DROP SCHEMA syntax: ${sql}`, () => {
+        const m = validateWithParser(sql, singleRange(sql));
+        expect(warnings(m)).toHaveLength(0);
+      });
+    }
+  });
+
+  // ── 2l. Incorrect DROP SCHEMA syntax ────────────────────────────────────
+  describe("Incorrect DROP SCHEMA syntax -> Warning", () => {
+    const invalidDropSchQueries = [
+      "DROP SCHEMA", // Missing name
+      "DROP SCHEMA my_sch CASCADE RESTRICT", // Cannot have both modifiers
+      "DROP SCHEMA my_sch WITH CASCADE", // Invalid keyword 'WITH'
+      "DROP SCHEMA IF my_sch", // Incomplete IF EXISTS
+    ];
+
+    for (const sql of invalidDropSchQueries) {
+      it(`should flag syntax errors in: ${sql}`, () => {
+        const m = validateWithParser(sql, singleRange(sql));
+        
+        // THIS WILL FAIL: Because our parser blindfold ignores everything starting with DROP SCHEMA,
+        // it will completely ignore these garbage strings and return 0 errors!
+        expect(warnings(m).length).toBeGreaterThan(0);
+      });
+    }
+  });
 });
 
 // ── 3. validateBareColumnRefs ─────────────────────────────────────────────────
@@ -1533,5 +1573,84 @@ describe("validateTablesExist", () => {
       const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
       expect(errors(m)).toHaveLength(0);
     });
+
+    describe("Context-aware DDL validation (DROP SCHEMA)", () => {
+    it("flags 1-part DROP SCHEMA when no database is in context", async () => {
+      const sql = "DROP SCHEMA missing_sch;";
+      const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
+      
+      // THIS WILL FAIL: validateTablesExist currently skips DROP SCHEMA statements entirely.
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/No database selected|does not exist/i);
+    });
+
+    it("flags a missing schema in a 1-part DROP SCHEMA statement with global DB context", async () => {
+      const sql = "DROP SCHEMA missing_sch;";
+      const m = await validateTablesExist(sql, singleRange(sql), [], ["EXISTING_DB"], []);
+      
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/Schema 'MISSING_SCH' does not exist/i);
+    });
+
+    it("allows 1-part DROP SCHEMA if the schema exists in the global context", async () => {
+      const sql = "DROP SCHEMA existing_sch;";
+      const m = await validateTablesExist(sql, singleRange(sql), [], ["EXISTING_DB"], [{ db: "EXISTING_DB", name: "EXISTING_SCH" }]);
+      
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("flags a missing database in a 2-part DROP SCHEMA statement", async () => {
+      const sql = "DROP SCHEMA missing_db.missing_sch;";
+      const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
+      
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/Database 'MISSING_DB' does not exist/i);
+    });
+
+    it("flags a missing schema in a 2-part DROP SCHEMA statement when DB exists", async () => {
+      const sql = "DROP SCHEMA existing_db.missing_sch;";
+      const m = await validateTablesExist(sql, singleRange(sql), [], ["EXISTING_DB"], []);
+      
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/Schema 'MISSING_SCH' does not exist/i);
+    });
+
+    it("silently allows DROP SCHEMA IF EXISTS even when the schema is missing", async () => {
+      const sql = "DROP SCHEMA IF EXISTS missing_sch;";
+      const m = await validateTablesExist(sql, singleRange(sql), [], ["EXISTING_DB"], []);
+      
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("allows DROP SCHEMA if it was created earlier in the script", async () => {
+      const { sql, ranges } = multiRange([
+        "CREATE DATABASE local_db;",
+        "CREATE SCHEMA local_db.local_sch;",
+        "DROP SCHEMA local_db.local_sch;"
+      ]);
+      const m = await validateTablesExist(sql, ranges, [], [], []);
+      
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("flags missing schema even when CASCADE or RESTRICT is appended", async () => {
+      const sql1 = "DROP SCHEMA missing_sch CASCADE;";
+      const m1 = await validateTablesExist(sql1, singleRange(sql1), [], ["EXISTING_DB"], []);
+      expect(errors(m1)).toHaveLength(1);
+      expect(errors(m1)[0].message).toMatch(/Schema 'MISSING_SCH' does not exist/i);
+
+      const sql2 = "DROP SCHEMA missing_sch RESTRICT;";
+      const m2 = await validateTablesExist(sql2, singleRange(sql2), [], ["EXISTING_DB"], []);
+      expect(errors(m2)).toHaveLength(1);
+      expect(errors(m2)[0].message).toMatch(/Schema 'MISSING_SCH' does not exist/i);
+    });
+
+    it("silently allows DROP SCHEMA IF EXISTS with CASCADE or RESTRICT", async () => {
+      const sql = "DROP SCHEMA IF EXISTS missing_sch CASCADE;";
+      const m = await validateTablesExist(sql, singleRange(sql), [], ["EXISTING_DB"], []);
+      
+      expect(errors(m)).toHaveLength(0);
+    });
+  });
 });
 });
