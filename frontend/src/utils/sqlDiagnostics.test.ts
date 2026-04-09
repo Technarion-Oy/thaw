@@ -232,7 +232,7 @@ describe("Deep Dive: Editor Integration & Parser Anomalies", () => {
     try {
       ast = parser.parse(sql);
     } catch (e) {
-      // If the parser crashes on this string, the editor will fail silently!
+      // If the parser crashed on this string, the editor would fail silently!
       throw new Error(`Parser crashed on valid Snowflake syntax: ${e}`);
     }
 
@@ -633,9 +633,6 @@ describe("validateWithParser", () => {
     for (const sql of validDbQueries) {
       it(`should silently skip Snowflake CREATE DATABASE syntax: ${sql.slice(0, 40)}...`, () => {
         const m = validateWithParser(sql, singleRange(sql));
-        
-        // Asserting that exactly ZERO markers are generated. 
-        // This will currently FAIL until we update SNOWFLAKE_FP_RE.
         expect(warnings(m)).toHaveLength(0);
       });
     }
@@ -666,10 +663,6 @@ describe("validateWithParser", () => {
     for (const sql of invalidDbQueries) {
       it(`should flag syntax errors in: ${sql.slice(0, 40)}`, () => {
         const m = validateWithParser(sql, singleRange(sql));
-        
-        // THIS WILL FAIL for most queries! 
-        // Because the regex blindfold triggers on the first few words, 
-        // the engine silently skips the garbage at the end and returns 0 warnings.
         expect(warnings(m).length).toBeGreaterThan(0);
       });
     }
@@ -725,9 +718,6 @@ describe("validateWithParser", () => {
     for (const sql of validSchemaQueries) {
       it(`should silently accept Snowflake CREATE SCHEMA syntax: ${sql.slice(0, 40)}...`, () => {
         const m = validateWithParser(sql, singleRange(sql));
-        
-        // Asserting that exactly ZERO markers are generated. 
-        // This will currently FAIL because the regex doesn't support WITH MANAGED ACCESS, etc.
         expect(warnings(m)).toHaveLength(0);
       });
     }
@@ -755,8 +745,6 @@ describe("validateWithParser", () => {
     for (const sql of invalidSchemaQueries) {
       it(`should flag syntax errors in: ${sql.slice(0, 40)}`, () => {
         const m = validateWithParser(sql, singleRange(sql));
-        
-        // This asserts that an error IS thrown for garbage syntax.
         expect(warnings(m).length).toBeGreaterThan(0);
       });
     }
@@ -776,8 +764,6 @@ describe("validateWithParser", () => {
     for (const sql of validDropDbQueries) {
       it(`should silently accept valid DROP DATABASE syntax: ${sql}`, () => {
         const m = validateWithParser(sql, singleRange(sql));
-        
-        // This will likely FAIL because node-sql-parser doesn't know what to do with CASCADE!
         expect(warnings(m)).toHaveLength(0);
       });
     }
@@ -832,9 +818,6 @@ describe("validateWithParser", () => {
     for (const sql of invalidDropSchQueries) {
       it(`should flag syntax errors in: ${sql}`, () => {
         const m = validateWithParser(sql, singleRange(sql));
-        
-        // THIS WILL FAIL: Because our parser blindfold ignores everything starting with DROP SCHEMA,
-        // it will completely ignore these garbage strings and return 0 errors!
         expect(warnings(m).length).toBeGreaterThan(0);
       });
     }
@@ -1218,10 +1201,7 @@ describe("validateBareColumnRefs", async () => {
         "SELECT amountdd FROM local_tab;"
       ]);
       
-      // Empty refs and empty cache — the table only exists in the script!
       const m = await validateBareColumnRefs(sql, ranges, [], new Map());
-      
-      // THIS WILL FAIL: The engine currently skips column validation if the table isn't in the global cache
       expect(warnings(m)).toHaveLength(1);
       expect(warnings(m)[0].message).toMatch(/amountdd/i);
     });
@@ -1247,11 +1227,30 @@ describe("validateBareColumnRefs", async () => {
       expect(warnings(m)).toHaveLength(1);
       expect(warnings(m)[0].message).toMatch(/bad_col/i);
     });
+
+    it("flags missing column when created with lowercase quotes but queried unquoted", async () => {
+      const { sql, ranges } = multiRange([
+        'CREATE TABLE local_tab ("amount" NUMBER);',
+        'SELECT amount FROM local_tab;'
+      ]);
+      const m = await validateBareColumnRefs(sql, ranges, [], new Map());
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/amount/i);
+    });
+
+    it("flags missing column when created unquoted but queried with lowercase quotes", async () => {
+      const { sql, ranges } = multiRange([
+        'CREATE TABLE local_tab (amount NUMBER);',
+        'SELECT "amount" FROM local_tab;'
+      ]);
+      const m = await validateBareColumnRefs(sql, ranges, [], new Map());
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/amount/i);
+    });
   });
 
   // ── 3m. INSERT Statements (Target Column Validation) ────────────────────────
   describe("INSERT statements (Target Column Validation)", async () => {
-    // Helper to generate mock ranges for multi-statement scripts
     function multiRange(statements: string[]): { sql: string; ranges: StatementRange[] } {
       let offset = 0;
       let line = 1;
@@ -1270,10 +1269,8 @@ describe("validateBareColumnRefs", async () => {
 
     it("flags an unknown target column in an INSERT statement (global table)", async () => {
       const sql = 'INSERT INTO "DB"."SCH"."EMPLOYEES" (ID, FAKE_COL) SELECT 1, 2;';
-      
       const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
       
-      // THIS WILL FAIL: validateBareColumnRefs currently skips INSERT statements entirely!
       expect(warnings(m)).toHaveLength(1);
       expect(warnings(m)[0].message).toMatch(/FAKE_COL/i);
     });
@@ -1285,7 +1282,6 @@ describe("validateBareColumnRefs", async () => {
       ]);
       
       const m = await validateBareColumnRefs(sql, ranges, [], new Map());
-      
       expect(warnings(m)).toHaveLength(1);
       expect(warnings(m)[0].message).toMatch(/aaa/i);
     });
@@ -1301,12 +1297,19 @@ describe("validateBareColumnRefs", async () => {
     });
 
     it("silently allows INSERT without a target column list", async () => {
-      // If the user doesn't specify columns (e.g. INSERT INTO tab SELECT *), 
-      // there are no target columns to validate here.
       const sql = 'INSERT INTO "DB"."SCH"."EMPLOYEES" SELECT * FROM OTHER_TAB;';
-      
       const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
       expect(warnings(m)).toHaveLength(0);
+    });
+
+    it("flags missing target column in INSERT when cases mismatch due to quotes", async () => {
+      const { sql, ranges } = multiRange([
+        'CREATE TABLE my_table ("aaa" varchar);',
+        'INSERT INTO my_table (aaa) SELECT \'1\';'
+      ]);
+      const m = await validateBareColumnRefs(sql, ranges, [], new Map());
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/aaa/i);
     });
   });
 
@@ -1382,7 +1385,7 @@ describe("validateTablesExist", () => {
       expect(errors(m)).toHaveLength(0);
     });
 
-    it("handles case insensitivity between CREATE and SELECT", async () => {
+    it("handles case insensitivity between CREATE and SELECT (both unquoted)", async () => {
       const { sql, ranges } = multiRange([
         "CREATE TABLE MyTaBlE (id int);",
         "SELECT * FROM mytable;"
@@ -1428,6 +1431,26 @@ describe("validateTablesExist", () => {
       
       expect(errors(m)[0].startColumn).toBe(15); // Starts at the quote
       expect(errors(m)[0].endColumn).toBe(15 + '"MISSING_TABLE"'.length);
+    });
+
+    it("flags missing table when created with lowercase quotes but queried unquoted", async () => {
+      const { sql, ranges } = multiRange([
+        'CREATE TABLE "my_table" (a varchar);',
+        'SELECT * FROM my_table;'
+      ]);
+      const m = await validateTablesExist(sql, ranges, LIVE_REFS);
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/my_table/i);
+    });
+
+    it("flags missing table when created unquoted but queried with lowercase quotes", async () => {
+      const { sql, ranges } = multiRange([
+        'CREATE TABLE my_table (a varchar);',
+        'SELECT * FROM "my_table";'
+      ]);
+      const m = await validateTablesExist(sql, ranges, LIVE_REFS);
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/my_table/i);
     });
   });
 
@@ -1488,6 +1511,14 @@ describe("validateTablesExist", () => {
       expect(errors(m)).toHaveLength(1);
       // Because LIVE_TABLE exists but the schema WRONG_SCH doesn't match our LIVE_REFS, it flags WRONG_SCH
       expect(errors(m)[0].message).toMatch(/WRONG_SCH/i);
+    });
+
+    it("flags valid global table if queried with mismatched lowercase quotes", async () => {
+      // LIVE_TABLE exists as uppercase in LIVE_REFS
+      const sql = 'SELECT * FROM "live_table"';
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/live_table/i);
     });
   });
 
@@ -1561,8 +1592,7 @@ describe("validateTablesExist", () => {
 
     it("handles identifiers inside comments (ignores them)", async () => {
       const sql = `
-        SELECT * 
-        FROM -- MISSING_TABLE 
+        SELECT * FROM -- MISSING_TABLE 
         LIVE_TABLE
       `;
       const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
@@ -1571,8 +1601,7 @@ describe("validateTablesExist", () => {
 
     it("flags missing table even if its name appears in a comment", async () => {
       const sql = `
-        SELECT * 
-        FROM MISSING_TABLE -- LIVE_TABLE
+        SELECT * FROM MISSING_TABLE -- LIVE_TABLE
       `;
       const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
       expect(errors(m)).toHaveLength(1);
@@ -1592,22 +1621,14 @@ describe("validateTablesExist", () => {
   describe("Context-aware DDL validation (CREATE SCHEMA)", () => {
     it("flags 1-part CREATE SCHEMA when no database is in context", async () => {
       const sql = "CREATE SCHEMA mschema WITH MANAGED ACCESS;";
-      
-      // Simulating a completely empty context: no knownDatabases, no resolvedRefs
-      // This MUST fail because Snowflake doesn't know where to put 'mschema'
       const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
-      
-      // THIS WILL FAIL with length 0, because validateTablesExist currently ignores CREATE statements!
       expect(errors(m)).toHaveLength(1);
       expect(errors(m)[0].message).toMatch(/No database selected/i);
     });
 
     it("allows 1-part CREATE SCHEMA when a database IS in the global context", async () => {
       const sql = "CREATE SCHEMA mschema WITH MANAGED ACCESS;";
-      
-      // Simulating a context where 'MY_SESSION_DB' is the active database
       const m = await validateTablesExist(sql, singleRange(sql), [], ["MY_SESSION_DB"], []);
-      
       expect(errors(m)).toHaveLength(0);
     });
 
@@ -1617,47 +1638,102 @@ describe("validateTablesExist", () => {
         "USE DATABASE local_db;",
         "CREATE SCHEMA mschema WITH MANAGED ACCESS;"
       ]);
-      
       const m = await validateTablesExist(sql, ranges, [], [], []);
-      
       expect(errors(m)).toHaveLength(0);
     });
 
     it("allows 2-part CREATE SCHEMA regardless of context", async () => {
-      // Because it explicitly defines the database (my_db), it doesn't need a session context
       const sql = "CREATE SCHEMA my_db.mschema WITH MANAGED ACCESS;";
-      
       const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
-      
       expect(errors(m)).toHaveLength(0);
+    });
+
+    it("flags 2-part CREATE SCHEMA when database case mismatches due to quotes", async () => {
+      const sql = 'CREATE SCHEMA "my_db".mschema;';
+      // Global context knows MY_DB (uppercase)
+      const m = await validateTablesExist(sql, singleRange(sql), [], ["MY_DB"], []);
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/my_db/i);
+    });
+  });
+
+  describe("Context-aware DDL validation (CREATE TABLE)", () => {
+    it("flags 1-part CREATE TABLE when no database or schema is in context", async () => {
+      const sql = "CREATE TABLE my_table (a varchar);";
+      const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/No database selected/i);
+    });
+
+    it("flags 1-part CREATE TABLE when database exists but no schema is in context", async () => {
+      const sql = "CREATE TABLE my_table (a varchar);";
+      const m = await validateTablesExist(sql, singleRange(sql), [], ["EXISTING_DB"], []);
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/No schema selected/i);
+    });
+
+    it("flags 2-part CREATE TABLE when no database is in context", async () => {
+      const sql = "CREATE TABLE my_sch.my_table (a varchar);";
+      const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/No database selected/i);
+    });
+
+    it("allows 1-part CREATE TABLE if database and schema are in global context", async () => {
+      const sql = "CREATE TABLE my_table (a varchar);";
+      const mockRefs = [{ alias: "", db: "EXISTING_DB", schema: "EXISTING_SCH", name: "" }];
+      const m = await validateTablesExist(sql, singleRange(sql), mockRefs, ["EXISTING_DB"], [{ db: "EXISTING_DB", name: "EXISTING_SCH" }]);
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("allows 2-part CREATE TABLE if database is in global context", async () => {
+      const sql = "CREATE TABLE existing_sch.my_table (a varchar);";
+      const m = await validateTablesExist(sql, singleRange(sql), [], ["EXISTING_DB"], []);
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("allows 3-part CREATE TABLE regardless of context", async () => {
+      const sql = "CREATE TABLE my_db.my_sch.my_table (a varchar);";
+      const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("allows 1-part CREATE TABLE if context is created earlier in the script", async () => {
+      const { sql, ranges } = multiRange([
+        "CREATE DATABASE local_db;",
+        "CREATE SCHEMA local_sch;", 
+        "CREATE TABLE my_table (a varchar);"
+      ]);
+      const m = await validateTablesExist(sql, ranges, [], [], []);
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("flags 2-part CREATE TABLE when schema case mismatches due to quotes", async () => {
+      const sql = 'CREATE TABLE "my_sch".my_table (a varchar);';
+      // Global context knows MY_SCH (uppercase)
+      const m = await validateTablesExist(sql, singleRange(sql), [], ["EXISTING_DB"], [{ db: "EXISTING_DB", name: "MY_SCH" }]);
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/my_sch/i);
     });
   });
 
   describe("Context-aware DDL validation (DROP DATABASE)", () => {
     it("flags a missing database in a standard DROP DATABASE statement", async () => {
       const sql = "DROP DATABASE missing_db;";
-      
-      // Empty context: database doesn't exist
       const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
-      
-      // THIS WILL FAIL: validateTablesExist currently skips DROP statements entirely.
       expect(errors(m)).toHaveLength(1);
       expect(errors(m)[0].message).toMatch(/Database 'MISSING_DB' does not exist/i);
     });
 
     it("allows DROP DATABASE if the database exists in the global context", async () => {
       const sql = "DROP DATABASE existing_db;";
-      
       const m = await validateTablesExist(sql, singleRange(sql), [], ["EXISTING_DB"], []);
-      
       expect(errors(m)).toHaveLength(0);
     });
 
     it("silently allows DROP DATABASE IF EXISTS even when the database is missing", async () => {
       const sql = "DROP DATABASE IF EXISTS missing_db;";
-      
       const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
-      
       expect(errors(m)).toHaveLength(0);
     });
 
@@ -1666,14 +1742,11 @@ describe("validateTablesExist", () => {
         "CREATE DATABASE local_db;",
         "DROP DATABASE local_db;"
       ]);
-      
       const m = await validateTablesExist(sql, ranges, [], [], []);
-      
       expect(errors(m)).toHaveLength(0);
     });
-  });
 
-  it("flags missing database even when CASCADE or RESTRICT is appended", async () => {
+    it("flags missing database even when CASCADE or RESTRICT is appended", async () => {
       const sql1 = "DROP DATABASE missing_db CASCADE;";
       const m1 = await validateTablesExist(sql1, singleRange(sql1), [], [], []);
       expect(errors(m1)).toHaveLength(1);
@@ -1691,12 +1764,18 @@ describe("validateTablesExist", () => {
       expect(errors(m)).toHaveLength(0);
     });
 
-    describe("Context-aware DDL validation (DROP SCHEMA)", () => {
+    it("flags DROP DATABASE when case mismatches due to quotes", async () => {
+      const sql = 'DROP DATABASE "my_db";';
+      const m = await validateTablesExist(sql, singleRange(sql), [], ["MY_DB"], []);
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/my_db/i);
+    });
+  });
+
+  describe("Context-aware DDL validation (DROP SCHEMA)", () => {
     it("flags 1-part DROP SCHEMA when no database is in context", async () => {
       const sql = "DROP SCHEMA missing_sch;";
       const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
-      
-      // THIS WILL FAIL: validateTablesExist currently skips DROP SCHEMA statements entirely.
       expect(errors(m)).toHaveLength(1);
       expect(errors(m)[0].message).toMatch(/No database selected|does not exist/i);
     });
@@ -1704,7 +1783,6 @@ describe("validateTablesExist", () => {
     it("flags a missing schema in a 1-part DROP SCHEMA statement with global DB context", async () => {
       const sql = "DROP SCHEMA missing_sch;";
       const m = await validateTablesExist(sql, singleRange(sql), [], ["EXISTING_DB"], []);
-      
       expect(errors(m)).toHaveLength(1);
       expect(errors(m)[0].message).toMatch(/Schema 'MISSING_SCH' does not exist/i);
     });
@@ -1712,14 +1790,12 @@ describe("validateTablesExist", () => {
     it("allows 1-part DROP SCHEMA if the schema exists in the global context", async () => {
       const sql = "DROP SCHEMA existing_sch;";
       const m = await validateTablesExist(sql, singleRange(sql), [], ["EXISTING_DB"], [{ db: "EXISTING_DB", name: "EXISTING_SCH" }]);
-      
       expect(errors(m)).toHaveLength(0);
     });
 
     it("flags a missing database in a 2-part DROP SCHEMA statement", async () => {
       const sql = "DROP SCHEMA missing_db.missing_sch;";
       const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
-      
       expect(errors(m)).toHaveLength(1);
       expect(errors(m)[0].message).toMatch(/Database 'MISSING_DB' does not exist/i);
     });
@@ -1727,7 +1803,6 @@ describe("validateTablesExist", () => {
     it("flags a missing schema in a 2-part DROP SCHEMA statement when DB exists", async () => {
       const sql = "DROP SCHEMA existing_db.missing_sch;";
       const m = await validateTablesExist(sql, singleRange(sql), [], ["EXISTING_DB"], []);
-      
       expect(errors(m)).toHaveLength(1);
       expect(errors(m)[0].message).toMatch(/Schema 'MISSING_SCH' does not exist/i);
     });
@@ -1735,7 +1810,6 @@ describe("validateTablesExist", () => {
     it("silently allows DROP SCHEMA IF EXISTS even when the schema is missing", async () => {
       const sql = "DROP SCHEMA IF EXISTS missing_sch;";
       const m = await validateTablesExist(sql, singleRange(sql), [], ["EXISTING_DB"], []);
-      
       expect(errors(m)).toHaveLength(0);
     });
 
@@ -1746,7 +1820,6 @@ describe("validateTablesExist", () => {
         "DROP SCHEMA local_db.local_sch;"
       ]);
       const m = await validateTablesExist(sql, ranges, [], [], []);
-      
       expect(errors(m)).toHaveLength(0);
     });
 
@@ -1765,8 +1838,14 @@ describe("validateTablesExist", () => {
     it("silently allows DROP SCHEMA IF EXISTS with CASCADE or RESTRICT", async () => {
       const sql = "DROP SCHEMA IF EXISTS missing_sch CASCADE;";
       const m = await validateTablesExist(sql, singleRange(sql), [], ["EXISTING_DB"], []);
-      
       expect(errors(m)).toHaveLength(0);
+    });
+
+    it("flags DROP SCHEMA when case mismatches due to quotes", async () => {
+      const sql = 'DROP SCHEMA "my_sch";';
+      const m = await validateTablesExist(sql, singleRange(sql), [], ["EXISTING_DB"], [{ db: "EXISTING_DB", name: "MY_SCH" }]);
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/my_sch/i);
     });
   });
 });
