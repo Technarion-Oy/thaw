@@ -1568,6 +1568,20 @@ describe("validateTablesExist", () => {
       expect(errors(m)).toHaveLength(1);
       expect(errors(m)[0].message).toMatch(/my_table/i);
     });
+
+    it("flags missing tables inside CTE definitions of a standard SELECT", async () => {
+      const sql = `
+        WITH my_cte AS (
+            SELECT * FROM MISSING_CTE_TABLE
+        )
+        SELECT * FROM my_cte;
+      `;
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      // THIS WILL FAIL: The engine currently ignores FROM clauses hiding inside node.with
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/MISSING_CTE_TABLE/i);
+    });
   });
 
   describe("database, schema, and quoting edge cases (AST squashing)", () => {
@@ -1770,6 +1784,21 @@ describe("validateTablesExist", () => {
       const m = await validateTablesExist(sql, singleRange(sql), [], ["MY_DB"], []);
       expect(errors(m)).toHaveLength(1);
       expect(errors(m)[0].message).toMatch(/my_db/i);
+    });
+
+    it("flags missing tables inside CTE definitions within a CREATE VIEW", async () => {
+      const sql = `
+        CREATE OR REPLACE VIEW vw_vip AS
+        WITH CustomerTotals AS (
+            SELECT * FROM MISSING_ORDERS_TABLE
+        )
+        SELECT * FROM CustomerTotals JOIN LIVE_TABLE ON a = b;
+      `;
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      // THIS WILL FAIL: The engine misses the inner CTE tables inside views too
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/MISSING_ORDERS_TABLE/i);
     });
   });
 
@@ -1988,6 +2017,18 @@ describe("validateTablesExist", () => {
       
       expect(errors(m)).toHaveLength(1);
       expect(errors(m)[0].message).toMatch(/NOPE_TABLE/i);
+    });
+
+    it("allows CTEs inside the SELECT of a CREATE VIEW statement", async () => {
+      const sql = `
+        CREATE OR REPLACE VIEW vw_with_cte AS
+        WITH my_cte AS (SELECT 1 AS id)
+        SELECT * FROM my_cte JOIN LIVE_TABLE ON my_cte.id = LIVE_TABLE.id;
+      `;
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      // THIS WILL FAIL: The engine currently misses CTEs if the statement starts with CREATE
+      expect(errors(m)).toHaveLength(0);
     });
   });
 

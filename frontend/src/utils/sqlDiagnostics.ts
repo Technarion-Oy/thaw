@@ -429,13 +429,37 @@ export async function validateBareColumnRefs(
 
       if (!node || (node.type !== "select" && node.type !== "insert")) continue;
 
-      // Extract Target Tables depending on AST structure
-      let fromTables: any[] = [];
-      if (node.type === "select") {
-        fromTables = node.from ?? [];
-      } else if (node.type === "insert") {
-        fromTables = node.table ? (Array.isArray(node.table) ? node.table : [node.table]) : [];
+      const currentCTEs = new Set<string>();
+      const fromTables: any[] = [];
+
+      // Universal AST Traverser: Finds all FROM clauses and CTE definitions safely
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      function traverseAST(n: any) {
+        if (!n || typeof n !== 'object') return;
+        
+        if (n.type === "select") {
+          fromTables.push(...(n.from ?? []));
+        } else if (n.type === "insert") {
+          fromTables.push(...(n.table ? (Array.isArray(n.table) ? n.table : [n.table]) : []));
+        }
+        
+        if (n.with && Array.isArray(n.with)) {
+          for (const cte of n.with) {
+            const cteName = typeof cte.name === "string" ? cte.name : cte.name?.value;
+            if (cteName) currentCTEs.add(NORM(String(cteName), quotedIdentifiersIgnoreCase));
+          }
+        }
+        
+        if (Array.isArray(n)) {
+          for (const item of n) traverseAST(item);
+        } else {
+          for (const key of Object.keys(n)) {
+            if (key !== 'loc') traverseAST(n[key]);
+          }
+        }
       }
+
+      traverseAST(node);
 
       interface TableCheck { cacheKey: string; tableName: string; cols: ColInfo[]; }
       const tableChecks: TableCheck[] = [];
@@ -500,7 +524,6 @@ export async function validateBareColumnRefs(
 
         if (expr.type === 'select' || expr.type === 'sub_select' || expr.ast !== undefined) return;
 
-        // REMOVED `expr.table === null` to allow validation of aliased columns!
         if (expr.type === "column_ref" && expr.column !== "*") {
           const normCol = NORM(String(expr.column), quotedIdentifiersIgnoreCase);
           if (!knownCols.has(normCol)) missingNormCols.add(normCol);
@@ -869,16 +892,37 @@ export async function validateTablesExist(
       if (!node || node.type !== "select") continue;
 
       const currentCTEs = new Set<string>();
-      
-      if (firstToken === "WITH" && node.with && Array.isArray(node.with)) {
-        for (const cte of node.with) {
-          const cteName = typeof cte.name === "string" ? cte.name : cte.name?.value;
-          if (cteName) currentCTEs.add(NORM(String(cteName), quotedIdentifiersIgnoreCase));
+      const fromTables: any[] = [];
+
+      // Universal AST Traverser: Finds all FROM clauses and CTE definitions safely
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      function traverseAST(n: any) {
+        if (!n || typeof n !== 'object') return;
+        
+        if (n.type === "select") {
+          fromTables.push(...(n.from ?? []));
+        } else if (n.type === "insert") {
+          fromTables.push(...(n.table ? (Array.isArray(n.table) ? n.table : [n.table]) : []));
+        }
+        
+        if (n.with && Array.isArray(n.with)) {
+          for (const cte of n.with) {
+            const cteName = typeof cte.name === "string" ? cte.name : cte.name?.value;
+            if (cteName) currentCTEs.add(NORM(String(cteName), quotedIdentifiersIgnoreCase));
+          }
+        }
+        
+        if (Array.isArray(n)) {
+          for (const item of n) traverseAST(item);
+        } else {
+          for (const key of Object.keys(n)) {
+            if (key !== 'loc') traverseAST(n[key]);
+          }
         }
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const fromTables: any[] = node.from ?? [];
+      traverseAST(node);
+
       const missingTokens = new Map<string, string>(); 
 
       for (const ft of fromTables) {
