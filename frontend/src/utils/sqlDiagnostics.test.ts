@@ -1313,6 +1313,38 @@ describe("validateBareColumnRefs", async () => {
     });
   });
 
+  // ── 3n. CREATE VIEW Statements (Inner SELECT Validation) ──────────────────
+  describe("CREATE VIEW statements (Inner SELECT Validation)", async () => {
+    it("flags unknown columns inside a CREATE VIEW statement", async () => {
+      const sql = `CREATE OR REPLACE VIEW my_view AS SELECT bad_col FROM "DB"."SCH"."EMPLOYEES"`;
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
+      
+      // THIS WILL FAIL: The engine currently ignores the CREATE keyword entirely
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/bad_col/i);
+    });
+
+    it("silently allows valid columns inside a CREATE VIEW statement", async () => {
+      const sql = `CREATE VIEW my_view AS SELECT FIRST_NAME, LAST_NAME FROM "DB"."SCH"."EMPLOYEES"`;
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
+      
+      expect(warnings(m)).toHaveLength(0);
+    });
+
+    it("flags columns from JOINs inside a CREATE VIEW statement", async () => {
+      const sql = `
+        CREATE SECURE VIEW vw_high_value AS
+        SELECT e.FIRST_NAME, d.fake_col
+        FROM DB.SCH.EMPLOYEES e
+        JOIN DB.SCH.DEPARTMENTS d ON e.DEPT_ID = d.DEPT_ID
+      `;
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empRef, deptRef), BOTH_CACHE);
+      
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/fake_col/i);
+    });
+  });
+
   // ── 4. validateTablesExist ────────────────────────────────────────────────────
 
 describe("validateTablesExist", () => {
@@ -1846,6 +1878,32 @@ describe("validateTablesExist", () => {
       const m = await validateTablesExist(sql, singleRange(sql), [], ["EXISTING_DB"], [{ db: "EXISTING_DB", name: "MY_SCH" }]);
       expect(errors(m)).toHaveLength(1);
       expect(errors(m)[0].message).toMatch(/my_sch/i);
+    });
+  });
+
+  describe("Context-aware DDL validation (CREATE VIEW Inner SELECT)", () => {
+    it("flags a missing table inside a CREATE VIEW statement", async () => {
+      const sql = "CREATE VIEW my_view AS SELECT * FROM MISSING_TABLE;";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      // THIS WILL FAIL: The engine ignores the CREATE keyword
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/MISSING_TABLE/i);
+    });
+
+    it("allows a CREATE VIEW statement if the inner table exists", async () => {
+      const sql = "CREATE OR REPLACE VIEW my_view AS SELECT * FROM LIVE_TABLE;";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("flags missing table in a JOIN inside a CREATE VIEW statement", async () => {
+      const sql = "CREATE VIEW my_view AS SELECT * FROM LIVE_TABLE JOIN NOPE_TABLE ON a=b;";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/NOPE_TABLE/i);
     });
   });
 

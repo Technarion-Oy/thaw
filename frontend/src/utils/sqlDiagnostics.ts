@@ -190,7 +190,10 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
     const firstToken = getFirstToken(rawStmtText);
     if (!firstToken || !PARSEABLE_STMT_KEYWORDS.has(firstToken)) continue;
 
-    const parseText = rawStmtText.replace(/;+\s*$/, "");
+    let parseText = rawStmtText.replace(/;+\s*$/, "");
+    
+    // Normalize CREATE VIEW so the parser doesn't choke on Snowflake-specific keywords (like SECURE)
+    parseText = parseText.replace(/CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?VIEW\b/i, "CREATE VIEW");
 
     // --- Custom Syntax Validator for CREATE DATABASE / SCHEMA ---
     const createDbSchemaMatch = parseText.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(DATABASE|SCHEMA)\b/i);
@@ -365,10 +368,13 @@ export async function validateBareColumnRefs(
     const rawStmtText = sql.slice(r.startOffset, r.endOffset);
     const firstToken = getFirstToken(rawStmtText);
     
-    if (firstToken !== "SELECT" && firstToken !== "WITH" && firstToken !== "INSERT") continue;
+    // UPDATED: Now allows CREATE statements to pass through to parse embedded queries
+    if (firstToken !== "SELECT" && firstToken !== "WITH" && firstToken !== "INSERT" && firstToken !== "CREATE") continue;
     if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
 
-    const parseText = rawStmtText.replace(/;+\s*$/, "");
+    let parseText = rawStmtText.replace(/;+\s*$/, "");
+    // Normalize CREATE VIEW so the parser doesn't choke on Snowflake-specific keywords
+    parseText = parseText.replace(/CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?VIEW\b/i, "CREATE VIEW");
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let ast: any;
@@ -377,7 +383,14 @@ export async function validateBareColumnRefs(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const stmtAsts: any[] = Array.isArray(ast.ast) ? ast.ast : [ast.ast];
 
-    for (const node of stmtAsts) {
+    for (let node of stmtAsts) {
+      // Intercept and extract the inner SELECT statement embedded within CREATE Views / Tables
+      if (node && node.type === "create") {
+        if (node.as && node.as.type === "select") node = node.as;
+        else if (node.select && node.select.type === "select") node = node.select;
+        else if (node.query && node.query.type === "select") node = node.query;
+      }
+
       if (!node || (node.type !== "select" && node.type !== "insert")) continue;
 
       // Extract Target Tables depending on AST structure
@@ -451,7 +464,8 @@ export async function validateBareColumnRefs(
 
         if (expr.type === 'select' || expr.type === 'sub_select' || expr.ast !== undefined) return;
 
-        if (expr.type === "column_ref" && expr.table === null && expr.column !== "*") {
+        // REMOVED `expr.table === null` to allow validation of aliased columns!
+        if (expr.type === "column_ref" && expr.column !== "*") {
           const normCol = NORM(String(expr.column), quotedIdentifiersIgnoreCase);
           if (!knownCols.has(normCol)) missingNormCols.add(normCol);
           return;
@@ -791,10 +805,13 @@ export async function validateTablesExist(
     }
     // ----------------------------------------------------
 
-    if (firstToken !== "SELECT" && firstToken !== "WITH") continue;
+    // UPDATED: Now allows CREATE statements to pass through to parse embedded queries
+    if (firstToken !== "SELECT" && firstToken !== "WITH" && firstToken !== "CREATE") continue;
     if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
 
-    const parseText = rawStmtText.replace(/;+\s*$/, "");
+    let parseText = rawStmtText.replace(/;+\s*$/, "");
+    // Normalize CREATE VIEW so the parser doesn't choke on Snowflake-specific keywords
+    parseText = parseText.replace(/CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?VIEW\b/i, "CREATE VIEW");
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let ast: any;
@@ -803,7 +820,14 @@ export async function validateTablesExist(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const stmtAsts: any[] = Array.isArray(ast.ast) ? ast.ast : [ast.ast];
 
-    for (const node of stmtAsts) {
+    for (let node of stmtAsts) {
+      // Intercept and extract the inner SELECT statement embedded within CREATE Views / Tables
+      if (node && node.type === "create") {
+        if (node.as && node.as.type === "select") node = node.as;
+        else if (node.select && node.select.type === "select") node = node.select;
+        else if (node.query && node.query.type === "select") node = node.query;
+      }
+
       if (!node || node.type !== "select") continue;
 
       const currentCTEs = new Set<string>();
