@@ -13,10 +13,6 @@ export type StatementRange = sqleditor.StatementRange;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// Smart Normalizer: Emulates Snowflake's exact identifier behavior
-// - Bare identifiers are UPPERCASED
-// - Double-quoted identifiers PRESERVE case (with quotes stripped)
-// - If ignoreCase is true, double-quoted identifiers are ALSO UPPERCASED
 const NORM = (s: any, ignoreCase: boolean = false): string => {
   if (typeof s !== "string") return "";
   if (s.startsWith('"') && s.endsWith('"')) {
@@ -26,32 +22,25 @@ const NORM = (s: any, ignoreCase: boolean = false): string => {
   return s.toUpperCase();
 };
 
-// Helper to safely extract the first SQL keyword, completely ignoring
-// leading newlines, spaces, and SQL comments.
 function getFirstToken(sql: string): string | null {
   const stripped = sql.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").trimStart();
   return stripped.match(/^[a-zA-Z_]\w*/)?.[0]?.toUpperCase() ?? null;
 }
 
-// Local token finder that guarantees accurate line/col offsets without relying
-// on the backend, completely immune to Go EOF tokenizer bugs.
 function findTokensLocally(stmtText: string, targets: string[], baseLine: number, ignoreCase: boolean = false) {
   const tokens: Array<{ name: string; line: number; col: number; endCol: number; quoted: boolean }> = [];
   const lines = stmtText.split("\n");
   
-  // Targets must already be passed through NORM()
   const targetSet = new Set(targets);
   
   for (let i = 0; i < lines.length; i++) {
     const lineStr = lines[i];
-    // Match valid Snowflake identifiers: bare words or double-quoted strings
     const regex = /[a-zA-Z0-9_$]+|"[^"]+"/g;
     let match;
     while ((match = regex.exec(lineStr)) !== null) {
       const rawWord = match[0];
       const isQuoted = rawWord.startsWith('"') && rawWord.endsWith('"');
       
-      // We normalize the token found in the text to see if it matches any of our normalized targets
       let normalizedWord = isQuoted ? rawWord.slice(1, -1) : rawWord.toUpperCase();
       if (isQuoted && ignoreCase) normalizedWord = normalizedWord.toUpperCase();
       
@@ -69,45 +58,28 @@ function findTokensLocally(stmtText: string, targets: string[], baseLine: number
   return tokens;
 }
 
-// Surgically precise AST table path extractor
-// Ensures no properties are swallowed or redundantly aliased by the parser.
-// Cross-references with the raw string to recover quote-driven case sensitivity
-// lost when node-sql-parser strips quotes from the AST.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function extractTablePath(ft: any, rawSql: string = "", ignoreCase: boolean = false): { db: string | null; schema: string | null; table: string | null } {
   const parts: string[] = [];
   
-  // 1. Safely gather all potential path fragments from the AST
   if (ft.catalog) parts.push(String(ft.catalog));
-  
-  if (ft.db && ft.db !== ft.catalog) {
-    parts.push(String(ft.db));
-  } else if (ft.database && ft.database !== ft.catalog) {
-    parts.push(String(ft.database));
-  }
-  
-  if (ft.schema && ft.schema !== ft.db && ft.schema !== ft.catalog && ft.schema !== ft.database) {
-    parts.push(String(ft.schema));
-  }
-  
+  if (ft.db && ft.db !== ft.catalog) parts.push(String(ft.db));
+  else if (ft.database && ft.database !== ft.catalog) parts.push(String(ft.database));
+  if (ft.schema && ft.schema !== ft.db && ft.schema !== ft.catalog && ft.schema !== ft.database) parts.push(String(ft.schema));
   if (ft.table) parts.push(String(ft.table));
 
   if (parts.length === 0) return { db: null, schema: null, table: null };
 
-  // 2. Safely unpack squashed AST strings (e.g. "DB.SCH.TABLE")
   const combined = parts.join(".");
   const matches = [...combined.matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0]);
 
-  // 3. Re-combine, strip, and dynamically recover original quotes from the raw string
   const cleanParts = matches.map(p => {
     const stripped = p.replace(/^"|"$/g, "");
-    if (!rawSql) return NORM(p, ignoreCase); // Fallback for pure unit tests
+    if (!rawSql) return NORM(p, ignoreCase); 
 
     const regex = /[a-zA-Z0-9_$]+|"[^"]+"/g;
     let match;
     let foundNorm = null;
     
-    // Scan the string to find the exact token the user typed to recover quote context
     while ((match = regex.exec(rawSql)) !== null) {
       const rawWord = match[0];
       const isQuoted = rawWord.startsWith('"') && rawWord.endsWith('"');
@@ -115,8 +87,6 @@ export function extractTablePath(ft: any, rawSql: string = "", ignoreCase: boole
       
       if (inner.toUpperCase() === stripped.toUpperCase()) {
         foundNorm = NORM(rawWord, ignoreCase);
-        // Do not break; if there are multiple matches (e.g. column vs table), 
-        // the table is usually the later one in the FROM clause.
       }
     }
     return foundNorm !== null ? foundNorm : NORM(p, ignoreCase);
@@ -124,15 +94,12 @@ export function extractTablePath(ft: any, rawSql: string = "", ignoreCase: boole
 
   const len = cleanParts.length;
   
-  // 4. Extract purely by index position (Right-to-Left)
   if (len >= 3) return { db: cleanParts[len - 3], schema: cleanParts[len - 2], table: cleanParts[len - 1] };
   if (len === 2) return { db: null, schema: cleanParts[0], table: cleanParts[1] };
   if (len === 1) return { db: null, schema: null, table: cleanParts[0] };
   
   return { db: null, schema: null, table: null };
 }
-
-// ── Global Custom Syntax Definitions ──────────────────────────────────────────
 
 const balancedParens = "\\([^()]*(?:(?:\\([^()]*\\))[^()]*)*\\)";
 const viewProps = [
@@ -151,11 +118,8 @@ const VALID_CREATE_VIEW_PREAMBLE_RE = new RegExp(
   "i"
 );
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
 export interface ColInfo { name: string; dataType: string; }
 
-/** Subset of monaco.editor.IMarkerData used for SQL diagnostics. */
 export interface DiagMarker {
   startLineNumber: number; 
   startColumn:     number;
@@ -165,15 +129,11 @@ export interface DiagMarker {
   severity:        8 | 4;  
 }
 
-// ── validateWithParser ────────────────────────────────────────────────────────
-
 const PARSEABLE_STMT_KEYWORDS = new Set([
   "SELECT", "WITH", "INSERT", "UPDATE", "CREATE", "ALTER",
-  "TRUNCATE", "CALL", "SHOW", "SET", "DROP", 
+  "TRUNCATE", "CALL", "SHOW", "SET", "DROP", "UNDROP"
 ]);
 
-// Note: DATABASE and SCHEMA are intentionally removed from this list, 
-// so they can be handled by the Custom Validators inside the function!
 const SNOWFLAKE_FP_RE = new RegExp(
   "\\bTABLESAMPLE\\b|\\bSAMPLE\\s*\\(|\\bWITHIN\\s+GROUP\\b|\\bCONNECT\\s+BY\\b" +
   "|\\bAT\\s*\\(|\\bBEFORE\\s*\\(|\\bIN\\s+TABLE\\b" +
@@ -185,6 +145,7 @@ const SNOWFLAKE_FP_RE = new RegExp(
   "|USER|ALERT|SHARE|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK" +
   "|RESOURCE|REPLICATION|FAILOVER)\\b" +
   "|DROP\\s+(?:TABLE|VIEW|TASK|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|WAREHOUSE|ROLE)\\b" + 
+  "|UNDROP\\s+(?:DATABASE|SCHEMA|TABLE)\\b" + 
   "|\\bCLUSTER\\s+(?:BY|KEY)\\b" +   
   "|\\bCLONE\\b" +                    
   "|INSERT\\s+OVERWRITE\\b" +         
@@ -211,7 +172,6 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
 
     let parseText = rawStmtText.replace(/;+\s*$/, "");
     
-    // --- Custom Syntax Validator for CREATE VIEW ---
     const createViewMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE)\s+)?(?:RECURSIVE\s+)?VIEW\b/i);
     if (createViewMatch) {
       if (VALID_CREATE_VIEW_PREAMBLE_RE.test(parseText)) {
@@ -229,7 +189,6 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
       }
     }
 
-    // --- Custom Syntax Validator for CREATE DATABASE / SCHEMA ---
     const createDbSchemaMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(DATABASE|SCHEMA)\b/i);
     if (createDbSchemaMatch) {
       const createDbProps = [
@@ -270,7 +229,6 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
       }
     }
 
-    // --- Custom Syntax Validator for DROP DATABASE / SCHEMA ---
     const dropDbSchemaMatch = parseText.match(/^\s*DROP\s+(DATABASE|SCHEMA)\b/i);
     if (dropDbSchemaMatch) {
       const validDropDbSchemaRe = /^\s*DROP\s+(?:DATABASE|SCHEMA)\s+(?:IF\s+EXISTS\s+)?(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+"))?(?:\s+(?:CASCADE|RESTRICT))?\s*$/i;
@@ -289,9 +247,7 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
         continue; 
       }
     }
-    // --- END Custom Syntax Validators ---
 
-    // Standard parser FP skip
     if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
 
     try {
@@ -331,8 +287,6 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
   return markers;
 }
 
-// ── validateBareColumnRefs ────────────────────────────────────────────────────
-
 export async function validateBareColumnRefs(
   sql:          string,
   stmtRanges:   StatementRange[],
@@ -344,7 +298,6 @@ export async function validateBareColumnRefs(
   const markers: DiagMarker[] = [];
   const localColCache = new Map<string, ColInfo[]>();
 
-  // 1. PRE-PASS: Extract locally created tables and their columns!
   for (const r of stmtRanges) {
     const rawStmtText = sql.slice(r.startOffset, r.endOffset);
     
@@ -356,7 +309,6 @@ export async function validateBareColumnRefs(
       const colsRaw = createMatch[2];
       const columns: ColInfo[] = [];
       
-      // Parenthesis-aware splitting to safely extract column names
       let depth = 0;
       let currentDef = "";
       const defs: string[] = [];
@@ -365,7 +317,7 @@ export async function validateBareColumnRefs(
           if (char === '(') depth++;
           else if (char === ')') {
             if (depth > 0) depth--;
-            if (depth < 0) break; // Hit the end parenthesis of the CREATE TABLE
+            if (depth < 0) break;
           }
           else if (char === ',' && depth === 0) {
               defs.push(currentDef);
@@ -389,21 +341,18 @@ export async function validateBareColumnRefs(
       if (parts.length === 3) { db = parts[0]; schema = parts[1]; }
       else if (parts.length === 2) { schema = parts[0]; }
       
-      // Register in local cache
       localColCache.set(`\0\0${localTableName}`, columns);
       if (schema) localColCache.set(`\0${schema}\0${localTableName}`, columns);
       if (db && schema) localColCache.set(`${db}\0${schema}\0${localTableName}`, columns);
     }
   }
 
-  // 2. PARSE & VALIDATE
   for (const r of stmtRanges) {
     const parser = new SnowflakeParser();
     const rawStmtText = sql.slice(r.startOffset, r.endOffset);
     const firstToken = getFirstToken(rawStmtText);
     
-    // UPDATED: Now allows CREATE statements to pass through to parse embedded queries
-    if (firstToken !== "SELECT" && firstToken !== "WITH" && firstToken !== "INSERT" && firstToken !== "CREATE") continue;
+    if (firstToken !== "SELECT" && firstToken !== "WITH" && firstToken !== "INSERT" && firstToken !== "CREATE" && firstToken !== "UNDROP") continue;
     if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
 
     let parseText = rawStmtText.replace(/;+\s*$/, "");
@@ -412,15 +361,12 @@ export async function validateBareColumnRefs(
       parseText = parseText.replace(VALID_CREATE_VIEW_PREAMBLE_RE, "CREATE VIEW V AS ");
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let ast: any;
     try { ast = parser.parse(parseText); } catch { continue; }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const stmtAsts: any[] = Array.isArray(ast.ast) ? ast.ast : [ast.ast];
 
     for (let node of stmtAsts) {
-      // Intercept and extract the inner SELECT statement embedded within CREATE Views / Tables
       if (node && node.type === "create") {
         if (node.as && node.as.type === "select") node = node.as;
         else if (node.select && node.select.type === "select") node = node.select;
@@ -432,8 +378,6 @@ export async function validateBareColumnRefs(
       const currentCTEs = new Set<string>();
       const fromTables: any[] = [];
 
-      // Universal AST Traverser: Finds all FROM clauses and CTE definitions safely
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       function traverseAST(n: any) {
         if (!n || typeof n !== 'object') return;
         
@@ -502,7 +446,7 @@ export async function validateBareColumnRefs(
           }
         }
 
-        if (!cols) { skip = true; break; } // cold cache → skip
+        if (!cols) { skip = true; break; } 
         tableChecks.push({ cacheKey: cacheKey as string, tableName: ftTable, cols });
       }
 
@@ -515,10 +459,6 @@ export async function validateBareColumnRefs(
 
       const missingNormCols = new Set<string>();
 
-      // ────────────────────────────────────────────────────────────────────────
-      // RECURSIVE AST TRAVERSAL FOR EXPRESSIONS (SELECT)
-      // ────────────────────────────────────────────────────────────────────────
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       function extractColumnsFromExpr(expr: any) {
         if (!expr || typeof expr !== 'object') return;
 
@@ -548,15 +488,12 @@ export async function validateBareColumnRefs(
         }
       }
 
-      // Extract columns based on AST type
       if (node.type === "select") {
         for (const col of (node.columns ?? [])) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           extractColumnsFromExpr((col as any)?.expr);
         }
       } else if (node.type === "insert") {
         for (const col of (node.columns ?? [])) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const colName = typeof col === "string" ? col : String((col as any).column || (col as any).name || col);
           if (colName && colName !== "*") {
             const normCol = NORM(colName, quotedIdentifiersIgnoreCase);
@@ -591,46 +528,84 @@ export async function validateBareColumnRefs(
   return markers;
 }
 
-// ── validateTablesExist ───────────────────────────────────────────────────────
-
 export async function validateTablesExist(
   sql: string,
   stmtRanges: StatementRange[],
   resolvedRefs: ResolvedRef[],
   knownDatabases: string[] = [], 
   knownSchemas: { db: string, name: string }[] = [], 
-  quotedIdentifiersIgnoreCase: boolean = false
+  quotedIdentifiersIgnoreCase: boolean = false,
+  droppedDatabases: string[] = [],
+  droppedSchemas: { db: string, name: string }[] = [],
+  droppedTables: { db: string, schema: string, name: string }[] = []
 ): Promise<DiagMarker[]> {
   const checkEq = (a: string, b: string) => quotedIdentifiersIgnoreCase ? a.toUpperCase() === b.toUpperCase() : a === b;
   const markers: DiagMarker[] = [];
   const scriptCreatedTables = new Set<string>();
   const scriptCreatedDbsAndSchemas = new Set<string>();
+  const scriptDroppedTables = new Set<string>();
+  const scriptDroppedDbsAndSchemas = new Set<string>();
 
-  // 1. PRE-PASS: Collect locally created tables, databases, and schemas!
+  // 1. PRE-PASS: Collect locally created and dropped tables, databases, and schemas!
   for (const r of stmtRanges) {
     const rawStmtText = sql.slice(r.startOffset, r.endOffset);
     
-    // Check for TABLE or VIEW creation
     const createTableViewMatch = rawStmtText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+|TEMPORARY\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
     if (createTableViewMatch) {
       const parts = [...createTableViewMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
       if (parts.length > 0) {
         const newTableName = parts[parts.length - 1];
         scriptCreatedTables.add(newTableName);
+        scriptCreatedTables.add(parts.join("."));
       }
     }
 
-    // Robustly check for DATABASE or SCHEMA creation (handles multi-part names)
     const createDbSchemaMatch = rawStmtText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:DATABASE|SCHEMA)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
     if (createDbSchemaMatch) {
       const parts = [...createDbSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
       if (parts.length > 0) {
-        // Add full parts path (e.g. "DB.SCH") to the created set to bypass global checks later
         const newEntityPath = parts.join(".");
         scriptCreatedDbsAndSchemas.add(newEntityPath);
-        // Also add just the schema/db name for simple existence checks
         const newEntityName = parts[parts.length - 1];
         scriptCreatedDbsAndSchemas.add(newEntityName);
+      }
+    }
+
+    // Track Drops
+    const dropTableMatch = rawStmtText.match(/^\s*DROP\s+(?:TABLE)\s+(?:IF\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    if (dropTableMatch) {
+      const parts = [...dropTableMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
+      if (parts.length > 0) {
+        scriptDroppedTables.add(parts[parts.length - 1]);
+        scriptDroppedTables.add(parts.join("."));
+      }
+    }
+
+    const dropDbSchemaMatch = rawStmtText.match(/^\s*DROP\s+(?:DATABASE|SCHEMA)\s+(?:IF\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+"))?)/i);
+    if (dropDbSchemaMatch) {
+      const parts = [...dropDbSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
+      if (parts.length > 0) {
+        scriptDroppedDbsAndSchemas.add(parts[parts.length - 1]);
+        scriptDroppedDbsAndSchemas.add(parts.join("."));
+      }
+    }
+
+    // Track Undrops
+    const undropTableMatch = rawStmtText.match(/^\s*UNDROP\s+TABLE\s+((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    if (undropTableMatch) {
+      const parts = [...undropTableMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
+      if (parts.length > 0) {
+        scriptCreatedTables.add(parts[parts.length - 1]);
+        scriptCreatedTables.add(parts.join("."));
+      }
+    }
+
+    const undropDbSchemaMatch = rawStmtText.match(/^\s*UNDROP\s+(?:DATABASE|SCHEMA)\s+((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+"))?)/i);
+    if (undropDbSchemaMatch) {
+      const parts = [...undropDbSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
+      if (parts.length > 0) {
+        scriptCreatedDbsAndSchemas.add(parts[parts.length - 1]);
+        scriptCreatedDbsAndSchemas.add(parts.join("."));
       }
     }
   }
@@ -644,14 +619,12 @@ export async function validateTablesExist(
     const rawStmtText = sql.slice(r.startOffset, r.endOffset);
     const firstToken = getFirstToken(rawStmtText);
 
-    // Update active DB/SCHEMA state based on script commands
     if (/^\s*USE\s+DATABASE\s+/i.test(rawStmtText)) scriptHasActiveDb = true;
     if (/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?DATABASE\b/i.test(rawStmtText)) scriptHasActiveDb = true;
     
     if (/^\s*USE\s+SCHEMA\s+/i.test(rawStmtText)) scriptHasActiveSchema = true;
     if (/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?SCHEMA\b/i.test(rawStmtText)) scriptHasActiveSchema = true;
 
-    // --- Context-aware CREATE TABLE/VIEW validation ---
     const createTableCtxMatch = rawStmtText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+|TEMPORARY\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
     if (createTableCtxMatch) {
       const parts = [...createTableCtxMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0]);
@@ -690,7 +663,6 @@ export async function validateTablesExist(
             });
           }
         } else {
-          // Only validate schema existence if a global schema context is actually provided
           if (hasGlobalSchema) {
             const schemaExists = scriptCreatedDbsAndSchemas.has(schemaNorm) ||
                                  (knownSchemas.length > 0 
@@ -709,9 +681,7 @@ export async function validateTablesExist(
         }
       }
     }
-    // ----------------------------------------------------
 
-    // --- Context-aware CREATE SCHEMA validation ---
     const createSchemaMatch = rawStmtText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?SCHEMA\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
     if (createSchemaMatch) {
       const parts = [...createSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0]);
@@ -730,7 +700,6 @@ export async function validateTablesExist(
         }
       } else if (parts.length === 2) {
         const dbNorm = normParts[0];
-        // Only validate DB existence if a global DB context is actually provided
         if (hasGlobalDb) {
           const dbExists = scriptCreatedDbsAndSchemas.has(dbNorm) ||
                            (knownDatabases.length > 0 
@@ -748,9 +717,7 @@ export async function validateTablesExist(
         }
       }
     }
-    // ----------------------------------------------------
 
-    // --- Context-aware DROP DATABASE validation ---
     const dropDbMatch = rawStmtText.match(/^\s*DROP\s+DATABASE\s+(?:IF\s+EXISTS\s+)?([a-zA-Z0-9_$]+|"[^"]+")/i);
     if (dropDbMatch) {
       const ifExists = /IF\s+EXISTS/i.test(rawStmtText);
@@ -778,9 +745,7 @@ export async function validateTablesExist(
         }
       }
     }
-    // ----------------------------------------------------
 
-    // --- Context-aware DROP SCHEMA validation ---
     const dropSchemaMatch = rawStmtText.match(/^\s*DROP\s+SCHEMA\s+(?:IF\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+"))?)/i);
     if (dropSchemaMatch) {
       const ifExists = /IF\s+EXISTS/i.test(rawStmtText);
@@ -800,7 +765,6 @@ export async function validateTablesExist(
         const hasGlobalDb = knownDatabases.length > 0 || resolvedRefs.some(ref => !!ref.db);
         
         if (targetDb) {
-           // 2-part identifier: Validate DB exists, then validate Schema exists
            const dbExists = scriptCreatedDbsAndSchemas.has(targetDb) ||
                             (knownDatabases.length > 0
                               ? knownDatabases.some(d => checkEq(d, targetDb))
@@ -833,7 +797,6 @@ export async function validateTablesExist(
              }
            }
         } else {
-           // 1-part identifier: Needs DB context
            if (!hasGlobalDb && !scriptHasActiveDb) {
               const tokens = findTokensLocally(rawStmtText, [targetSch], r.startLine, quotedIdentifiersIgnoreCase);
               for (const t of tokens) {
@@ -843,7 +806,6 @@ export async function validateTablesExist(
                 });
               }
            } else {
-             // DB context exists, just check schema
              const schemaExists = scriptCreatedDbsAndSchemas.has(targetSch) ||
                                   (knownSchemas.length > 0
                                     ? knownSchemas.some(s => checkEq(s.name, targetSch))
@@ -862,10 +824,63 @@ export async function validateTablesExist(
         }
       }
     }
-    // ----------------------------------------------------
 
-    // UPDATED: Now allows CREATE statements to pass through to parse embedded queries
-    if (firstToken !== "SELECT" && firstToken !== "WITH" && firstToken !== "CREATE") continue;
+    // --- UNDROP DATABASE validation ---
+    const undropDbMatch = rawStmtText.match(/^\s*UNDROP\s+DATABASE\s+([a-zA-Z0-9_$]+|"[^"]+")/i);
+    if (undropDbMatch) {
+      const rawDbName = undropDbMatch[1];
+      const dbNameNorm = NORM(rawDbName, quotedIdentifiersIgnoreCase);
+
+      const isDropped = scriptDroppedDbsAndSchemas.has(dbNameNorm) || droppedDatabases.some(d => checkEq(d, dbNameNorm));
+                       
+      if (!isDropped) {
+        const tokens = findTokensLocally(rawStmtText, [dbNameNorm], r.startLine, quotedIdentifiersIgnoreCase);
+        for (const t of tokens) {
+          markers.push({
+            startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+            message: `Database '${t.name}' is not available to undrop.`, severity: 8
+          });
+        }
+      }
+    }
+
+    // --- UNDROP SCHEMA validation ---
+    const undropSchemaMatch = rawStmtText.match(/^\s*UNDROP\s+SCHEMA\s+((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+"))?)/i);
+    if (undropSchemaMatch) {
+      const parts = [...undropSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
+      let targetSch = parts[parts.length - 1];
+      
+      const isDropped = scriptDroppedDbsAndSchemas.has(targetSch) || scriptDroppedDbsAndSchemas.has(parts.join(".")) || droppedSchemas.some(s => checkEq(s.name, targetSch));
+      if (!isDropped) {
+         const tokens = findTokensLocally(rawStmtText, [targetSch], r.startLine, quotedIdentifiersIgnoreCase);
+         for (const t of tokens) {
+            markers.push({
+              startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+              message: `Schema '${t.name}' is not available to undrop.`, severity: 8
+            });
+         }
+      }
+    }
+
+    // --- UNDROP TABLE validation ---
+    const undropTableMatch2 = rawStmtText.match(/^\s*UNDROP\s+TABLE\s+((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    if (undropTableMatch2) {
+      const parts = [...undropTableMatch2[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
+      let targetTab = parts[parts.length - 1];
+      
+      const isDropped = scriptDroppedTables.has(targetTab) || scriptDroppedTables.has(parts.join(".")) || droppedTables.some(t => checkEq(t.name, targetTab));
+      if (!isDropped) {
+         const tokens = findTokensLocally(rawStmtText, [targetTab], r.startLine, quotedIdentifiersIgnoreCase);
+         for (const t of tokens) {
+            markers.push({
+              startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+              message: `Table '${t.name}' is not available to undrop.`, severity: 8
+            });
+         }
+      }
+    }
+
+    if (firstToken !== "SELECT" && firstToken !== "WITH" && firstToken !== "CREATE" && firstToken !== "UNDROP") continue;
     if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
 
     let parseText = rawStmtText.replace(/;+\s*$/, "");
@@ -874,15 +889,12 @@ export async function validateTablesExist(
       parseText = parseText.replace(VALID_CREATE_VIEW_PREAMBLE_RE, "CREATE VIEW V AS ");
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let ast: any;
     try { ast = parser.parse(parseText); } catch { continue; }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const stmtAsts: any[] = Array.isArray(ast.ast) ? ast.ast : [ast.ast];
 
     for (let node of stmtAsts) {
-      // Intercept and extract the inner SELECT statement embedded within CREATE Views / Tables
       if (node && node.type === "create") {
         if (node.as && node.as.type === "select") node = node.as;
         else if (node.select && node.select.type === "select") node = node.select;
@@ -894,8 +906,6 @@ export async function validateTablesExist(
       const currentCTEs = new Set<string>();
       const fromTables: any[] = [];
 
-      // Universal AST Traverser: Finds all FROM clauses and CTE definitions safely
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       function traverseAST(n: any) {
         if (!n || typeof n !== 'object') return;
         
@@ -936,7 +946,6 @@ export async function validateTablesExist(
         if (currentCTEs.has(ftTable)) continue;
         if (scriptCreatedTables.has(ftTable)) continue;
         
-        // Exact Match against backend refs
         const isLive = resolvedRefs.some(ref => 
           checkEq(ref.name, ftTable) &&
           (!ftDb || checkEq(ref.db, ftDb)) &&
@@ -945,12 +954,10 @@ export async function validateTablesExist(
         
         if (isLive) continue;
 
-        // Hierarchy Check (DB -> Schema -> Table)
         let badToken = ftTable;
         let msg = `Table or View '${ftTable}' does not exist or is not authorized.`;
 
         if (ftDb) {
-          // Verify if it exists, treating script-created DBs as instantly valid
           const dbExists = scriptCreatedDbsAndSchemas.has(ftDb) || (knownDatabases.length > 0 
             ? knownDatabases.some(d => checkEq(d, ftDb))
             : resolvedRefs.some(ref => checkEq(ref.db, ftDb)));
@@ -959,7 +966,6 @@ export async function validateTablesExist(
             badToken = ftDb;
             msg = `Database '${ftDb}' does not exist or is not authorized.`;
           } else if (ftSchema) {
-            // Verify if schema exists, treating script-created schemas as instantly valid
             const dbSchemas = knownSchemas.filter(s => checkEq(s.db, ftDb));
             const schemaExists = scriptCreatedDbsAndSchemas.has(ftSchema) || (dbSchemas.length > 0
               ? dbSchemas.some(s => checkEq(s.name, ftSchema))
@@ -971,7 +977,6 @@ export async function validateTablesExist(
             }
           }
         } else if (ftSchema) {
-          // Handle schema verification when DB is omitted
           const schemaExists = scriptCreatedDbsAndSchemas.has(ftSchema) || (knownSchemas.length > 0
             ? knownSchemas.some(s => checkEq(s.name, ftSchema))
             : resolvedRefs.some(ref => checkEq(ref.schema, ftSchema)));

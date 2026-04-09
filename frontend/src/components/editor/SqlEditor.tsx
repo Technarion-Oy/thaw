@@ -534,8 +534,16 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             return obj ? { db: obj.db, schema: obj.schema, name: obj.name, alias: ref.alias } : null;
           })
           .filter(Boolean) as ResolvedRef[];
+        
+        const droppedDbs: string[] = [];
+        const droppedSchemas: { db: string, name: string }[] = [];
+        const droppedTables: { db: string, schema: string, name: string }[] = [];
 
-        const tableMarkers = await validateTablesExist(diagSql, stmtRanges, resolved, storeDbs, storeSchemas);
+        const tableMarkers = await validateTablesExist(
+           diagSql, stmtRanges, resolved, storeDbs, storeSchemas, 
+           false, // quotedIdentifiersIgnoreCase placeholder
+           droppedDbs, droppedSchemas, droppedTables
+        );
         if (model.getVersionId() !== diagVersion) return;
         diagMarkers.push(...(tableMarkers || []));
 

@@ -1,13 +1,9 @@
-/**
- * Unit tests for sqlDiagnostics.ts
- *
- * Coverage:
- * validateWithParser      – Snowflake PEG grammar check (per-statement, skips false-positive patterns)
- * validateBareColumnRefs  – SELECT-list column existence (bare + quoted, CTEs, JOINs, subqueries)
- *
- * Note: validateSyntax and validateSemantics have been moved to the Go backend
- * (internal/sqleditor) and are tested via Go unit tests.
- */
+// Copyright (c) 2026 Technarion Oy. All rights reserved.
+//
+// This software and its source code are proprietary and confidential.
+// Unauthorized copying, distribution, modification, or use of this software,
+// in whole or in part, is strictly prohibited without prior written permission
+// from Technarion Oy.
 
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -23,7 +19,6 @@ import {
 import { Parser as SnowflakeParser } from "node-sql-parser/build/snowflake";
 
 // ── Mock FindSqlTokenPositions IPC (no Wails runtime in tests) ────────────────
-// Provides the same tokenizer logic as the Go FindTokenPositions function.
 vi.mock("../../wailsjs/go/main/App", () => ({
   FindSqlTokenPositions: (sql: string, bareTargets: string[], quotedTargets: string[]) => {
     const bareSet   = new Set(bareTargets.map((s) => s.toUpperCase()));
@@ -89,15 +84,12 @@ vi.mock("../../wailsjs/go/main/App", () => ({
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-/** Return only warning (severity 4) markers. */
 const warnings = (markers: DiagMarker[]) => markers.filter((m) => m.severity === 4);
 
-/** Build a single StatementRange covering the whole sql string. */
 function singleRange(sql: string): StatementRange[] {
   return [{ startLine: 1, endLine: sql.split("\n").length, startOffset: 0, endOffset: sql.length }];
 }
 
-/** Convenience: build a colInfoCache from (db, schema, table) -> column names. */
 function makeCache(
   entries: Array<{ db: string; schema: string; table: string; cols: string[] }>,
 ): Map<string, ColInfo[]> {
@@ -109,7 +101,6 @@ function makeCache(
   return cache;
 }
 
-/** Convenience: build a ResolvedRef array. */
 const refs = (
   ...items: Array<{ alias: string; db: string; schema: string; name: string }>
 ): ResolvedRef[] => items;
@@ -169,7 +160,6 @@ describe("extractTablePath", () => {
     });
 
     it("extracts a 3-part identifier mashed with quotes into the table property", () => {
-      // e.g., "DB"."Crazy Schema".LIVE_TABLE
       expect(extractTablePath({ table: '"DB"."Crazy Schema".LIVE_TABLE' })).toEqual({ 
         db: "DB", schema: "Crazy Schema", table: "LIVE_TABLE" 
       });
@@ -184,14 +174,12 @@ describe("extractTablePath", () => {
 
   describe("handling node-sql-parser property aliasing quirks", () => {
     it("prioritizes catalog over db if they contain different things", () => {
-      // Often happens for WRONG_DB.SCH.LIVE_TABLE
       expect(extractTablePath({ catalog: "WRONG_DB", db: "SCH", table: "LIVE_TABLE" })).toEqual({ 
         db: "WRONG_DB", schema: "SCH", table: "LIVE_TABLE" 
       });
     });
 
     it("ignores redundant properties if the parser duplicates them", () => {
-      // If the parser sets both catalog and db to the same value
       expect(extractTablePath({ catalog: "DB", db: "DB", schema: "SCH", table: "LIVE_TABLE" })).toEqual({ 
         db: "DB", schema: "SCH", table: "LIVE_TABLE" 
       });
@@ -224,7 +212,6 @@ describe("extractTablePath", () => {
 
 describe("Deep Dive: Editor Integration & Parser Anomalies", () => {
   it("catches if node-sql-parser is mangling the 3-part identifier AST", () => {
-    // 1. We instantiate the real parser directly
     const parser = new SnowflakeParser();
     const sql = "SELECT * FROM WRONG_DB.SCH.LIVE_TABLE";
     
@@ -232,17 +219,11 @@ describe("Deep Dive: Editor Integration & Parser Anomalies", () => {
     try {
       ast = parser.parse(sql);
     } catch (e) {
-      // If the parser crashed on this string, the editor would fail silently!
       throw new Error(`Parser crashed on valid Snowflake syntax: ${e}`);
     }
 
     const ft = Array.isArray(ast.ast) ? ast.ast[0].from[0] : ast.ast.from[0];
-    
-    // 2. Pass it directly to our extractor
     const path = extractTablePath(ft);
-    
-    // 3. THIS IS THE TRAP: If node-sql-parser put the strings into a weird property 
-    // we didn't account for (like `ft.as` or `ft.expr`), this will fail!
     expect(path).toEqual({
       db: "WRONG_DB",
       schema: "SCH",
@@ -252,11 +233,6 @@ describe("Deep Dive: Editor Integration & Parser Anomalies", () => {
 
   it("catches if the token locator generates invalid editor coordinates", () => {
     const sql = "SELECT * FROM WRONG_DB.SCH.LIVE_TABLE";
-    
-    // findTokensLocally is what generates the coordinates for the Monaco editor.
-    // We export it temporarily or test the logic directly here:
-    
-    // Inline replica of findTokensLocally to verify the regex engine
     const tokens: Array<{ name: string; col: number; endCol: number }> = [];
     const regex = /[a-zA-Z0-9_$]+|"[^"]+"/g;
     let match;
@@ -264,26 +240,20 @@ describe("Deep Dive: Editor Integration & Parser Anomalies", () => {
       if (match[0].toUpperCase() === "WRONG_DB") {
         tokens.push({
           name: match[0],
-          col: match.index + 1, // Monaco is 1-indexed
+          col: match.index + 1, 
           endCol: match.index + 1 + match[0].length
         });
       }
     }
     
-    // THIS IS THE TRAP: If Monaco receives a col of 0, or endCol < col, 
-    // it will silently discard the marker and show no errors in the UI!
     expect(tokens).toHaveLength(1);
     expect(tokens[0].name).toBe("WRONG_DB");
-    expect(tokens[0].col).toBe(15); // 'W' is the 15th character
-    expect(tokens[0].endCol).toBe(23); // 15 + 8 characters
+    expect(tokens[0].col).toBe(15); 
+    expect(tokens[0].endCol).toBe(23); 
   });
 
   it("catches if an empty resolvedRefs array defaults incorrectly", async () => {
-    // If the database connection drops, resolvedRefs is empty.
-    // We must ensure the engine still flags WRONG_DB and doesn't crash.
     const sql = "SELECT * FROM WRONG_DB.SCH.LIVE_TABLE";
-    
-    // Passing an empty array [] simulates a totally disconnected editor state
     const m = await validateTablesExist(sql, singleRange(sql), []);
     const errors = (markers: DiagMarker[]) => markers.filter((m) => m.severity === 8);
     
@@ -291,7 +261,6 @@ describe("Deep Dive: Editor Integration & Parser Anomalies", () => {
     expect(errors(m)[0].message).toMatch(/Database 'WRONG_DB' does not exist/i);
   });
 });
-
 
 // ── 2. validateWithParser ─────────────────────────────────────────────────────
 
@@ -414,7 +383,6 @@ describe("validateWithParser", () => {
       ["AT (", "SELECT * FROM t AT (TIMESTAMP => '2023-01-01'::TIMESTAMP)"],
       ["BEFORE (", "SELECT * FROM t BEFORE (STATEMENT => '8e5d')"],
       ["SHOW COLUMNS IN TABLE", "SHOW COLUMNS IN TABLE t"],
-      // DROP: parser only handles DROP TABLE; all other object types are skipped
       ["DROP TABLE", 'DROP TABLE t'],
       ["DROP VIEW", 'DROP VIEW v'],
       ["DROP TASK", 'DROP TASK "DB"."SCH"."Final"'],
@@ -427,7 +395,6 @@ describe("validateWithParser", () => {
       ["DROP ROLE", "DROP ROLE r"],
       ["DROP DATABASE", "DROP DATABASE d"],
       ["DROP SCHEMA", "DROP SCHEMA s"],
-      // CREATE with Snowflake-specific object types
       ["CREATE TASK", "CREATE TASK t AS SELECT 1"],
       ["CREATE OR REPLACE TASK", "CREATE OR REPLACE TASK t AS SELECT 1"],
       ["CREATE STREAM", "CREATE STREAM s ON TABLE t"],
@@ -438,9 +405,7 @@ describe("validateWithParser", () => {
       ["CREATE WAREHOUSE", "CREATE WAREHOUSE wh"],
       ["CREATE ROLE", "CREATE ROLE r"],
       ["CREATE FILE FORMAT", "CREATE FILE FORMAT ff TYPE = CSV"],
-      // CREATE with CLONE
       ["CREATE TABLE CLONE", "CREATE OR REPLACE TABLE t CLONE t2"],
-      // ALTER with Snowflake-specific object types
       ["ALTER VIEW", "ALTER VIEW v AS SELECT 1"],
       ["ALTER TASK", "ALTER TASK t RESUME"],
       ["ALTER STREAM", "ALTER STREAM s SET COMMENT = 'x'"],
@@ -449,10 +414,8 @@ describe("validateWithParser", () => {
       ["ALTER SEQUENCE", "ALTER SEQUENCE s INCREMENT BY 2"],
       ["ALTER STAGE", "ALTER STAGE s SET URL = 's3://x'"],
       ["ALTER PIPE", "ALTER PIPE p SET COMMENT = 'x'"],
-      // ALTER TABLE with Snowflake-specific clauses
       ["ALTER TABLE CLUSTER BY", "ALTER TABLE t CLUSTER BY (c)"],
       ["ALTER TABLE CLUSTER KEY", "ALTER TABLE t SET CLUSTER KEY (c)"],
-      // Snowflake-specific INSERT / TRUNCATE variants
       ["INSERT OVERWRITE", "INSERT OVERWRITE INTO t SELECT 1"],
       ["TRUNCATE TABLE IF EXISTS", "TRUNCATE TABLE IF EXISTS t"],
     ];
@@ -465,7 +428,6 @@ describe("validateWithParser", () => {
 
     it("mixed: DELETE and SELECT in same script — only SELECT is checked", () => {
       const sql = "DELETE FROM t;\nSELECT * FROM t";
-      // The DELETE is first token → skipped by PARSEABLE_STMT_KEYWORDS
       expect(validateWithParser(sql, singleRange(sql))).toHaveLength(0);
     });
   });
@@ -499,7 +461,6 @@ describe("validateWithParser", () => {
       const sql = "SELECT 1;\nSELECT FROM t";
       const m = validateWithParser(sql, singleRange(sql));
       expect(warnings(m).length).toBeGreaterThanOrEqual(1);
-      // The SELECT FROM t is on line 2; error should be on line 2 or beyond
       expect(warnings(m)[0].startLineNumber).toBeGreaterThanOrEqual(2);
     });
 
@@ -541,19 +502,16 @@ describe("validateWithParser", () => {
     });
 
     it("catches typo in structural keywords mid-query", () => {
-      // The statement starts with SELECT (valid), but 'FRO' is a syntax error.
-      // We use '*' because 'SELECT id, name FRO' makes the parser think 'FRO' is a column alias!
       const sql = "SELECT * FRO my_table";
       const m = validateWithParser(sql, singleRange(sql));
       expect(warnings(m)).toHaveLength(1);
-      // Ensure the error highlights the bad 'FRO' token
       expect(warnings(m)[0].message).toMatch(/FRO/i);
     });
 
     it("handles multiple statements where the first is skipped but the second is malformed", () => {
       const sql = "DROP TABLE IF EXISTS t;\nSELECT id FRO my_table;";
       const ranges = [
-        { startLine: 1, endLine: 1, startOffset: 0, endOffset: 23 }, // Correctly scoped to before \n
+        { startLine: 1, endLine: 1, startOffset: 0, endOffset: 23 }, 
         { startLine: 2, endLine: 2, startOffset: 24, endOffset: sql.length }
       ];
       const m = validateWithParser(sql, ranges);
@@ -565,54 +523,37 @@ describe("validateWithParser", () => {
   // ── 2e. Snowflake-specific CREATE DATABASE modifiers ──────────────────────
   describe("Snowflake-specific CREATE DATABASE modifiers", () => {
     const validDbQueries = [
-      // 1. Core Modifiers
       "CREATE TRANSIENT DATABASE my_db",
       "CREATE OR REPLACE DATABASE my_db",
       "CREATE OR REPLACE TRANSIENT DATABASE IF NOT EXISTS my_db",
-
-      // 2. Cloning & Time Travel
       "CREATE DATABASE my_db CLONE source_db",
       "CREATE DATABASE my_db CLONE source_db AT (TIMESTAMP => '2026-04-07 11:49:54'::TIMESTAMP)",
       "CREATE DATABASE my_db CLONE source_db BEFORE (STATEMENT => '8e5d')",
       "CREATE DATABASE my_db CLONE source_db IGNORE TABLES WITH INSUFFICIENT DATA RETENTION",
       "CREATE DATABASE my_db CLONE source_db IGNORE HYBRID TABLES",
       "CREATE DATABASE my_db CLONE source_db AT (OFFSET => -3600) IGNORE TABLES WITH INSUFFICIENT DATA RETENTION IGNORE HYBRID TABLES",
-
-      // 3. Retention & Extension Policies
       "CREATE DATABASE my_db DATA_RETENTION_TIME_IN_DAYS = 90",
       "CREATE DATABASE my_db MAX_DATA_EXTENSION_TIME_IN_DAYS = 14",
       "CREATE DATABASE my_db DATA_RETENTION_TIME_IN_DAYS = 30 MAX_DATA_EXTENSION_TIME_IN_DAYS = 7",
-
-      // 4. Iceberg & External Volumes
       "CREATE DATABASE my_db EXTERNAL_VOLUME = my_ext_vol",
       "CREATE DATABASE my_db CATALOG = my_catalog",
       "CREATE DATABASE my_db ICEBERG_VERSION_DEFAULT = 1",
       "CREATE DATABASE my_db ENABLE_ICEBERG_MERGE_ON_READ = TRUE",
       "CREATE DATABASE my_db EXTERNAL_VOLUME = ext_vol CATALOG = my_cat ICEBERG_VERSION_DEFAULT = 2 ENABLE_ICEBERG_MERGE_ON_READ = FALSE",
-
-      // 5. Collation & Serialization
       "CREATE DATABASE my_db REPLACE_INVALID_CHARACTERS = TRUE",
       "CREATE DATABASE my_db DEFAULT_DDL_COLLATION = 'en-ci'",
       "CREATE DATABASE my_db STORAGE_SERIALIZATION_POLICY = OPTIMIZED",
       "CREATE DATABASE my_db STORAGE_SERIALIZATION_POLICY = COMPATIBLE DEFAULT_DDL_COLLATION = 'utf8'",
-
-      // 6. Catalog Sync & Comments
       "CREATE DATABASE my_db COMMENT = 'This is a production database'",
       "CREATE DATABASE my_db CATALOG_SYNC = 'open_cat_integration'",
       "CREATE DATABASE my_db CATALOG_SYNC_NAMESPACE_MODE = NEST",
       "CREATE DATABASE my_db CATALOG_SYNC_NAMESPACE_MODE = FLATTEN CATALOG_SYNC_NAMESPACE_FLATTEN_DELIMITER = '_'",
-
-      // 7. Tags and Contacts (Object Metadata)
       "CREATE DATABASE my_db WITH TAG (cost_center = 'sales', env = 'prod')",
-      "CREATE DATABASE my_db TAG (department = 'hr')", // WITHOUT the 'WITH' keyword
+      "CREATE DATABASE my_db TAG (department = 'hr')", 
       "CREATE DATABASE my_db WITH CONTACT (owner = 'admin@example.com', security = 'sec@example.com')",
       "CREATE DATABASE my_db WITH TAG (a='b') WITH CONTACT (owner='c')",
-
-      // 8. Visibility & Compaction
       "CREATE DATABASE my_db OBJECT_VISIBILITY = PRIVILEGED",
       "CREATE DATABASE my_db ENABLE_DATA_COMPACTION = TRUE",
-
-      // 9. The "Everything Everywhere All At Once" Mega-Query
       `CREATE OR REPLACE TRANSIENT DATABASE IF NOT EXISTS mega_db 
          CLONE source_db AT (OFFSET => -3600) IGNORE HYBRID TABLES
          DATA_RETENTION_TIME_IN_DAYS = 30 
@@ -641,23 +582,14 @@ describe("validateWithParser", () => {
   // ── 2f. Incorrect CREATE DATABASE syntax ────────────────────────────────
   describe("Incorrect CREATE DATABASE syntax -> Warning", () => {
     const invalidDbQueries = [
-      // 1. Missing database name entirely
       "CREATE DATABASE",
-      
-      // 2. Missing '=' in property assignment
       "CREATE DATABASE my_db DATA_RETENTION_TIME_IN_DAYS 10",
-      
-      // 3. Completely made-up Snowflake properties
       "CREATE DATABASE my_db EXTREME_MODE = TRUE",
       "CREATE DATABASE my_db WITH NONSENSE = 'sales'",
-      
-      // 4. Malformed CLONE / Time Travel clauses
-      "CREATE DATABASE my_db CLONE other_db AT (TIME => '2026-04-07')", // Should be TIMESTAMP
+      "CREATE DATABASE my_db CLONE other_db AT (TIME => '2026-04-07')", 
       "CREATE DATABASE my_db CLONE source_db IGNORE EVERYTHING",
-      
-      // 5. Misplaced core modifiers
-      "CREATE TRANSIENT OR REPLACE DATABASE my_db", // Wrong order
-      "CREATE DATABASE TRANSIENT my_db", // Modifier after DATABASE
+      "CREATE TRANSIENT OR REPLACE DATABASE my_db", 
+      "CREATE DATABASE TRANSIENT my_db", 
     ];
 
     for (const sql of invalidDbQueries) {
@@ -671,32 +603,21 @@ describe("validateWithParser", () => {
   // ── 2g. Snowflake-specific CREATE SCHEMA modifiers ────────────────────────
   describe("Snowflake-specific CREATE SCHEMA modifiers", () => {
     const validSchemaQueries = [
-      // 1. Core Modifiers
       "CREATE TRANSIENT SCHEMA my_sch",
       "CREATE OR REPLACE SCHEMA my_sch",
       "CREATE OR REPLACE TRANSIENT SCHEMA IF NOT EXISTS my_sch",
-
-      // 2. Cloning & Time Travel
       "CREATE SCHEMA my_sch CLONE source_sch",
       "CREATE SCHEMA my_sch CLONE source_sch AT (TIMESTAMP => '2026-04-07 11:49:54'::TIMESTAMP)",
       "CREATE SCHEMA my_sch CLONE source_sch IGNORE TABLES WITH INSUFFICIENT DATA RETENTION",
-
-      // 3. Schema-Exclusive: Managed Access
       "CREATE SCHEMA my_sch WITH MANAGED ACCESS",
       "CREATE SCHEMA my_sch WITH MANAGED ACCESS DATA_RETENTION_TIME_IN_DAYS = 90",
-
-      // 4. Schema-Exclusive: Classification Profile
       "CREATE SCHEMA my_sch CLASSIFICATION_PROFILE = 'my_security_profile'",
-
-      // 5. Shared Modifiers (Retention, Catalog, Collation, etc.)
       "CREATE SCHEMA my_sch DATA_RETENTION_TIME_IN_DAYS = 30 MAX_DATA_EXTENSION_TIME_IN_DAYS = 7",
       "CREATE SCHEMA my_sch EXTERNAL_VOLUME = my_ext_vol CATALOG = my_catalog",
       "CREATE SCHEMA my_sch ENABLE_ICEBERG_MERGE_ON_READ = TRUE REPLACE_INVALID_CHARACTERS = FALSE",
       "CREATE SCHEMA my_sch DEFAULT_DDL_COLLATION = 'en-ci' STORAGE_SERIALIZATION_POLICY = OPTIMIZED",
       "CREATE SCHEMA my_sch COMMENT = 'This is a production schema'",
       "CREATE SCHEMA my_sch WITH TAG (cost_center = 'sales') WITH CONTACT (owner = 'admin')",
-
-      // 6. The "Everything Everywhere All At Once" Mega-Query for Schemas
       `CREATE OR REPLACE TRANSIENT SCHEMA IF NOT EXISTS mega_sch 
          CLONE source_sch AT (OFFSET => -3600) IGNORE HYBRID TABLES
          WITH MANAGED ACCESS
@@ -726,20 +647,13 @@ describe("validateWithParser", () => {
   // ── 2h. Incorrect CREATE SCHEMA syntax ──────────────────────────────────
   describe("Incorrect CREATE SCHEMA syntax -> Warning", () => {
     const invalidSchemaQueries = [
-      // 1. Missing schema name entirely
       "CREATE SCHEMA",
-      
-      // 2. Malformed Schema-Exclusive properties
-      "CREATE SCHEMA my_sch WITH MANAGED ACCESS = TRUE", // Should not have an equals sign
-      "CREATE SCHEMA my_sch CLASSIFICATION_PROFILE 10", // Missing equals and quotes
-      
-      // 3. Completely made-up Snowflake properties
+      "CREATE SCHEMA my_sch WITH MANAGED ACCESS = TRUE", 
+      "CREATE SCHEMA my_sch CLASSIFICATION_PROFILE 10", 
       "CREATE SCHEMA my_sch EXTREME_MODE = TRUE",
       "CREATE SCHEMA my_sch WITH NONSENSE = 'sales'",
-      
-      // 4. Misplaced core modifiers
-      "CREATE TRANSIENT OR REPLACE SCHEMA my_sch", // Wrong order
-      "CREATE SCHEMA TRANSIENT my_sch", // Modifier after SCHEMA
+      "CREATE TRANSIENT OR REPLACE SCHEMA my_sch", 
+      "CREATE SCHEMA TRANSIENT my_sch", 
     ];
 
     for (const sql of invalidSchemaQueries) {
@@ -753,7 +667,6 @@ describe("validateWithParser", () => {
   // ── 2i. Snowflake-specific CREATE VIEW modifiers ──────────────────────────
   describe("Snowflake-specific CREATE VIEW modifiers", () => {
     const validViewQueries = [
-      // 1. Core Modifiers & Temp Types
       "CREATE VIEW v AS SELECT 1 FROM t",
       "CREATE OR REPLACE SECURE VIEW v AS SELECT 1 FROM t",
       "CREATE LOCAL TEMP VIEW v AS SELECT 1 FROM t",
@@ -761,32 +674,22 @@ describe("validateWithParser", () => {
       "CREATE VOLATILE VIEW v AS SELECT 1 FROM t",
       "CREATE RECURSIVE VIEW v AS SELECT 1 FROM t",
       "CREATE OR REPLACE SECURE GLOBAL TEMPORARY RECURSIVE VIEW IF NOT EXISTS v AS SELECT 1 FROM t",
-
-      // 2. Column lists and column-level policies
       "CREATE VIEW v (c1, c2) AS SELECT a, b FROM t",
       "CREATE VIEW v (c1 MASKING POLICY mp1, c2 PROJECTION POLICY pp1) AS SELECT a, b FROM t",
       "CREATE VIEW v (c1 WITH MASKING POLICY mp1 USING (c1, c2), c2 WITH TAG (t1='v1', t2='v2')) AS SELECT a, b FROM t",
-
-      // 3. View-level properties
       "CREATE VIEW v COPY GRANTS AS SELECT 1 FROM t",
       "CREATE VIEW v COMMENT = 'Test view comment' AS SELECT 1 FROM t",
       "CREATE VIEW v CHANGE_TRACKING = TRUE AS SELECT 1 FROM t",
       "CREATE VIEW v CHANGE_TRACKING = FALSE AS SELECT 1 FROM t",
-
-      // 4. View-level policies
       "CREATE VIEW v ROW ACCESS POLICY rap ON (c1) AS SELECT 1 FROM t",
       "CREATE VIEW v WITH ROW ACCESS POLICY rap ON (c1, c2) AS SELECT 1 FROM t",
       "CREATE VIEW v AGGREGATION POLICY ap AS SELECT 1 FROM t",
       "CREATE VIEW v WITH AGGREGATION POLICY ap ENTITY KEY (c1, c2) AS SELECT 1 FROM t",
       "CREATE VIEW v JOIN POLICY jp AS SELECT 1 FROM t",
       "CREATE VIEW v WITH JOIN POLICY jp ALLOWED JOIN KEYS (c1, c2) AS SELECT 1 FROM t",
-
-      // 5. Tags and contacts
       "CREATE VIEW v TAG (t1='v1') AS SELECT 1 FROM t",
       "CREATE VIEW v WITH TAG (t1='v1', t2='v2') AS SELECT 1 FROM t",
       "CREATE VIEW v WITH CONTACT (owner='admin@example.com', support='help@example.com') AS SELECT 1 FROM t",
-
-      // 6. The "Everything Everywhere All At Once" Mega-Query
       `CREATE OR REPLACE SECURE VOLATILE RECURSIVE VIEW IF NOT EXISTS mega_view (
         id MASKING POLICY my_mask,
         name WITH PROJECTION POLICY my_proj,
@@ -814,16 +717,11 @@ describe("validateWithParser", () => {
   // ── 2j. Incorrect CREATE VIEW syntax ────────────────────────────────────
   describe("Incorrect CREATE VIEW syntax -> Warning", () => {
     const invalidViewQueries = [
-      // Missing required keywords
       "CREATE VIEW", 
-      "CREATE VIEW v SELECT 1", // Missing AS
-      
-      // Bad property types
-      "CREATE VIEW v CHANGE_TRACKING = MAYBE AS SELECT 1", // Must be TRUE/FALSE
-      
-      // Missing parens in structural definitions
-      "CREATE VIEW v WITH TAG t1='v1' AS SELECT 1", // Missing parenthesis for TAG
-      "CREATE VIEW v ROW ACCESS POLICY rap ON c1 AS SELECT 1", // Missing parenthesis for ON
+      "CREATE VIEW v SELECT 1", 
+      "CREATE VIEW v CHANGE_TRACKING = MAYBE AS SELECT 1", 
+      "CREATE VIEW v WITH TAG t1='v1' AS SELECT 1", 
+      "CREATE VIEW v ROW ACCESS POLICY rap ON c1 AS SELECT 1", 
     ];
 
     for (const sql of invalidViewQueries) {
@@ -964,8 +862,8 @@ describe("validateBareColumnRefs", async () => {
       expect(await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE)).toHaveLength(0);
     });
 
-    it("qualified alias.column references are not re-checked here", async () => {
-      // alias.col has table != null → ignored by validateBareColumnRefs
+    it("qualified alias.column references are checked when table restriction is lifted", async () => {
+      // Because we enabled aliased column validation, e.ID and e.FIRST_NAME are valid.
       const sql = "SELECT e.ID, e.FIRST_NAME FROM DB.SCH.EMPLOYEES e";
       expect(await validateBareColumnRefs(sql, singleRange(sql), refs(empRef), EMPLOYEES_CACHE)).toHaveLength(0);
     });
@@ -1403,7 +1301,6 @@ describe("validateBareColumnRefs", async () => {
       const sql = `CREATE OR REPLACE VIEW my_view AS SELECT bad_col FROM "DB"."SCH"."EMPLOYEES"`;
       const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
       
-      // THIS WILL FAIL: The engine currently ignores the CREATE keyword entirely
       expect(warnings(m)).toHaveLength(1);
       expect(warnings(m)[0].message).toMatch(/bad_col/i);
     });
@@ -1426,6 +1323,17 @@ describe("validateBareColumnRefs", async () => {
       
       expect(warnings(m)).toHaveLength(1);
       expect(warnings(m)[0].message).toMatch(/fake_col/i);
+    });
+
+    it("allows CTE columns inside a CREATE VIEW statement", async () => {
+      const sql = `
+        CREATE OR REPLACE VIEW vw_with_cte AS
+        WITH my_cte AS (SELECT 1 AS fake_col)
+        SELECT fake_col FROM my_cte;
+      `;
+      const m = await validateBareColumnRefs(sql, singleRange(sql), [], new Map());
+      
+      expect(warnings(m)).toHaveLength(0);
     });
   });
 
@@ -1578,7 +1486,6 @@ describe("validateTablesExist", () => {
       `;
       const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
       
-      // THIS WILL FAIL: The engine currently ignores FROM clauses hiding inside node.with
       expect(errors(m)).toHaveLength(1);
       expect(errors(m)[0].message).toMatch(/MISSING_CTE_TABLE/i);
     });
@@ -1796,7 +1703,6 @@ describe("validateTablesExist", () => {
       `;
       const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
       
-      // THIS WILL FAIL: The engine misses the inner CTE tables inside views too
       expect(errors(m)).toHaveLength(1);
       expect(errors(m)[0].message).toMatch(/MISSING_ORDERS_TABLE/i);
     });
@@ -1999,7 +1905,6 @@ describe("validateTablesExist", () => {
       const sql = "CREATE VIEW my_view AS SELECT * FROM MISSING_TABLE;";
       const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
       
-      // THIS WILL FAIL: The engine ignores the CREATE keyword
       expect(errors(m)).toHaveLength(1);
       expect(errors(m)[0].message).toMatch(/MISSING_TABLE/i);
     });
@@ -2027,13 +1932,51 @@ describe("validateTablesExist", () => {
       `;
       const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
       
-      // THIS WILL FAIL: The engine currently misses CTEs if the statement starts with CREATE
       expect(errors(m)).toHaveLength(0);
     });
   });
 
+  describe("Context-aware DDL validation (UNDROP)", () => {
+    it("flags missing dropped table in UNDROP TABLE", async () => {
+      const sql = "UNDROP TABLE my_missing_table;";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/is not available to undrop/i);
+    });
+
+    it("allows UNDROP TABLE if it was dropped earlier in the script", async () => {
+      const { sql, ranges } = multiRange([
+        "CREATE TABLE t1 (id int);",
+        "DROP TABLE t1;",
+        "UNDROP TABLE t1;"
+      ]);
+      const m = await validateTablesExist(sql, ranges, LIVE_REFS);
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("allows UNDROP TABLE if it is in the global dropped list", async () => {
+      const sql = "UNDROP TABLE my_dropped_table;";
+      const droppedTables = [{ db: "DB", schema: "SCH", name: "MY_DROPPED_TABLE" }];
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS, ["DB"], [{ db: "DB", name: "SCH" }], false, [], [], droppedTables);
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("flags missing dropped schema in UNDROP SCHEMA", async () => {
+      const sql = "UNDROP SCHEMA my_missing_schema;";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS, ["DB"]);
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/is not available to undrop/i);
+    });
+
+    it("flags missing dropped database in UNDROP DATABASE", async () => {
+      const sql = "UNDROP DATABASE my_missing_db;";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/is not available to undrop/i);
+    });
+  });
+
   describe("QUOTED_IDENTIFIERS_IGNORE_CASE session parameter (Columns)", async () => {
-    // Helper to generate mock ranges for multi-statement scripts
     function multiRange(statements: string[]): { sql: string; ranges: StatementRange[] } {
       let offset = 0;
       let line = 1;
@@ -2055,10 +1998,8 @@ describe("validateTablesExist", () => {
         'CREATE TABLE local_tab ("amount" NUMBER);',
         'SELECT amount FROM local_tab;'
       ]);
-      // The 5th argument is quotedIdentifiersIgnoreCase = true
       const m = await validateBareColumnRefs(sql, ranges, [], new Map(), true);
       
-      // THIS WILL FAIL until logic is implemented in sqlDiagnostics.ts!
       expect(warnings(m)).toHaveLength(0); 
     });
 
@@ -2069,13 +2010,11 @@ describe("validateTablesExist", () => {
       ]);
       const m = await validateBareColumnRefs(sql, ranges, [], new Map(), true);
       
-      // THIS WILL FAIL until logic is implemented in sqlDiagnostics.ts!
       expect(warnings(m)).toHaveLength(0);
     });
   });
 
   describe("QUOTED_IDENTIFIERS_IGNORE_CASE session parameter (Tables)", () => {
-    // Helper to generate mock ranges for multi-statement scripts
     function multiRange(statements: string[]): { sql: string; ranges: StatementRange[] } {
       let offset = 0;
       let line = 1;
@@ -2092,15 +2031,12 @@ describe("validateTablesExist", () => {
       return { sql: statements.join("\n"), ranges };
     }
     
-    // Mock live database cache (table exists as uppercase LIVE_TABLE)
     const LIVE_REFS = refs({ alias: "l", db: "DB", schema: "SCH", name: "LIVE_TABLE" });
 
     it("allows querying valid global table with mismatched lowercase quotes if ignoreCase is true", async () => {
       const sql = 'SELECT * FROM "live_table"';
-      // The 6th argument is quotedIdentifiersIgnoreCase = true
       const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS, [], [], true);
       
-      // THIS WILL FAIL until logic is implemented in sqlDiagnostics.ts!
       expect(errors(m)).toHaveLength(0);
     });
 
@@ -2111,7 +2047,6 @@ describe("validateTablesExist", () => {
       ]);
       const m = await validateTablesExist(sql, ranges, LIVE_REFS, [], [], true);
       
-      // THIS WILL FAIL until logic is implemented in sqlDiagnostics.ts!
       expect(errors(m)).toHaveLength(0);
     });
   });
