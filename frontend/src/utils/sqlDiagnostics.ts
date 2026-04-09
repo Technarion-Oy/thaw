@@ -132,6 +132,25 @@ export function extractTablePath(ft: any, rawSql: string = "", ignoreCase: boole
   return { db: null, schema: null, table: null };
 }
 
+// ── Global Custom Syntax Definitions ──────────────────────────────────────────
+
+const balancedParens = "\\([^()]*(?:(?:\\([^()]*\\))[^()]*)*\\)";
+const viewProps = [
+  `COPY\\s+GRANTS`,
+  `COMMENT\\s*=\\s*'(?:[^']|'')*'`,
+  `CHANGE_TRACKING\\s*=\\s*(?:TRUE|FALSE)`,
+  `(?:WITH\\s+)?ROW\\s+ACCESS\\s+POLICY\\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}\\s+ON\\s*${balancedParens}`,
+  `(?:WITH\\s+)?AGGREGATION\\s+POLICY\\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s+ENTITY\\s+KEY\\s*${balancedParens})?`,
+  `(?:WITH\\s+)?JOIN\\s+POLICY\\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s+ALLOWED\\s+JOIN\\s+KEYS\\s*${balancedParens})?`,
+  `(?:WITH\\s+)?TAG\\s*${balancedParens}`,
+  `WITH\\s+CONTACT\\s*${balancedParens}`
+].join("|");
+
+const VALID_CREATE_VIEW_PREAMBLE_RE = new RegExp(
+  `^\\s*CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:SECURE\\s+)?(?:(?:(?:LOCAL|GLOBAL)\\s+)?(?:TEMP|TEMPORARY|VOLATILE)\\s+)?(?:RECURSIVE\\s+)?VIEW\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s*${balancedParens})?(?:\\s+(?:${viewProps}))*\\s+AS\\s+`,
+  "i"
+);
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface ColInfo { name: string; dataType: string; }
@@ -192,11 +211,26 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
 
     let parseText = rawStmtText.replace(/;+\s*$/, "");
     
-    // Normalize CREATE VIEW so the parser doesn't choke on Snowflake-specific keywords (like SECURE)
-    parseText = parseText.replace(/CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?VIEW\b/i, "CREATE VIEW");
+    // --- Custom Syntax Validator for CREATE VIEW ---
+    const createViewMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE)\s+)?(?:RECURSIVE\s+)?VIEW\b/i);
+    if (createViewMatch) {
+      if (VALID_CREATE_VIEW_PREAMBLE_RE.test(parseText)) {
+        parseText = parseText.replace(VALID_CREATE_VIEW_PREAMBLE_RE, "CREATE VIEW V AS ");
+      } else {
+        markers.push({
+          startLineNumber: r.startLine,
+          startColumn: 1,
+          endLineNumber: r.endLine,
+          endColumn: 100, 
+          message: `Unexpected syntax in CREATE VIEW statement.`,
+          severity: 4
+        });
+        continue; 
+      }
+    }
 
     // --- Custom Syntax Validator for CREATE DATABASE / SCHEMA ---
-    const createDbSchemaMatch = parseText.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(DATABASE|SCHEMA)\b/i);
+    const createDbSchemaMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(DATABASE|SCHEMA)\b/i);
     if (createDbSchemaMatch) {
       const createDbProps = [
         `CLONE\\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s+(?:AT|BEFORE)\\s*\\(\\s*(?:TIMESTAMP|OFFSET|STATEMENT)\\s*=>\\s*[^)]+\\))?(?:\\s+IGNORE\\s+TABLES\\s+WITH\\s+INSUFFICIENT\\s+DATA\\s+RETENTION)?(?:\\s+IGNORE\\s+HYBRID\\s+TABLES)?`,
@@ -217,7 +251,7 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
       ].join("|");
 
       const validCreateDbSchemaRe = new RegExp(
-        `^CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TRANSIENT\\s+)?(?:DATABASE|SCHEMA)\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s+(?:${createDbProps}))*\\s*$`,
+        `^\\s*CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TRANSIENT\\s+)?(?:DATABASE|SCHEMA)\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s+(?:${createDbProps}))*\\s*$`,
         "i"
       );
 
@@ -237,9 +271,9 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
     }
 
     // --- Custom Syntax Validator for DROP DATABASE / SCHEMA ---
-    const dropDbSchemaMatch = parseText.match(/^DROP\s+(DATABASE|SCHEMA)\b/i);
+    const dropDbSchemaMatch = parseText.match(/^\s*DROP\s+(DATABASE|SCHEMA)\b/i);
     if (dropDbSchemaMatch) {
-      const validDropDbSchemaRe = /^DROP\s+(?:DATABASE|SCHEMA)\s+(?:IF\s+EXISTS\s+)?(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+"))?(?:\s+(?:CASCADE|RESTRICT))?\s*$/i;
+      const validDropDbSchemaRe = /^\s*DROP\s+(?:DATABASE|SCHEMA)\s+(?:IF\s+EXISTS\s+)?(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+"))?(?:\s+(?:CASCADE|RESTRICT))?\s*$/i;
       
       if (validDropDbSchemaRe.test(parseText)) {
         continue;
@@ -314,7 +348,7 @@ export async function validateBareColumnRefs(
   for (const r of stmtRanges) {
     const rawStmtText = sql.slice(r.startOffset, r.endOffset);
     
-    const createMatch = rawStmtText.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+|TEMPORARY\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})\s*\(([^;]+)\)/i);
+    const createMatch = rawStmtText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+|TEMPORARY\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})\s*\(([^;]+)\)/i);
     if (createMatch) {
       const parts = [...createMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
       const localTableName = parts[parts.length - 1];
@@ -373,8 +407,10 @@ export async function validateBareColumnRefs(
     if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
 
     let parseText = rawStmtText.replace(/;+\s*$/, "");
-    // Normalize CREATE VIEW so the parser doesn't choke on Snowflake-specific keywords
-    parseText = parseText.replace(/CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?VIEW\b/i, "CREATE VIEW");
+    const createViewMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE)\s+)?(?:RECURSIVE\s+)?VIEW\b/i);
+    if (createViewMatch) {
+      parseText = parseText.replace(VALID_CREATE_VIEW_PREAMBLE_RE, "CREATE VIEW V AS ");
+    }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let ast: any;
@@ -552,7 +588,7 @@ export async function validateTablesExist(
     const rawStmtText = sql.slice(r.startOffset, r.endOffset);
     
     // Check for TABLE or VIEW creation
-    const createTableViewMatch = rawStmtText.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+|TEMPORARY\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    const createTableViewMatch = rawStmtText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+|TEMPORARY\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
     if (createTableViewMatch) {
       const parts = [...createTableViewMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
       if (parts.length > 0) {
@@ -562,7 +598,7 @@ export async function validateTablesExist(
     }
 
     // Robustly check for DATABASE or SCHEMA creation (handles multi-part names)
-    const createDbSchemaMatch = rawStmtText.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:DATABASE|SCHEMA)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    const createDbSchemaMatch = rawStmtText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:DATABASE|SCHEMA)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
     if (createDbSchemaMatch) {
       const parts = [...createDbSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
       if (parts.length > 0) {
@@ -586,14 +622,14 @@ export async function validateTablesExist(
     const firstToken = getFirstToken(rawStmtText);
 
     // Update active DB/SCHEMA state based on script commands
-    if (/^USE\s+DATABASE\s+/i.test(rawStmtText)) scriptHasActiveDb = true;
-    if (/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?DATABASE\b/i.test(rawStmtText)) scriptHasActiveDb = true;
+    if (/^\s*USE\s+DATABASE\s+/i.test(rawStmtText)) scriptHasActiveDb = true;
+    if (/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?DATABASE\b/i.test(rawStmtText)) scriptHasActiveDb = true;
     
-    if (/^USE\s+SCHEMA\s+/i.test(rawStmtText)) scriptHasActiveSchema = true;
-    if (/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?SCHEMA\b/i.test(rawStmtText)) scriptHasActiveSchema = true;
+    if (/^\s*USE\s+SCHEMA\s+/i.test(rawStmtText)) scriptHasActiveSchema = true;
+    if (/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?SCHEMA\b/i.test(rawStmtText)) scriptHasActiveSchema = true;
 
     // --- Context-aware CREATE TABLE/VIEW validation ---
-    const createTableCtxMatch = rawStmtText.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+|TEMPORARY\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    const createTableCtxMatch = rawStmtText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+|TEMPORARY\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
     if (createTableCtxMatch) {
       const parts = [...createTableCtxMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0]);
       const normParts = parts.map(p => NORM(p, quotedIdentifiersIgnoreCase));
@@ -653,7 +689,7 @@ export async function validateTablesExist(
     // ----------------------------------------------------
 
     // --- Context-aware CREATE SCHEMA validation ---
-    const createSchemaMatch = rawStmtText.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?SCHEMA\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    const createSchemaMatch = rawStmtText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?SCHEMA\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
     if (createSchemaMatch) {
       const parts = [...createSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0]);
       const normParts = parts.map(p => NORM(p, quotedIdentifiersIgnoreCase));
@@ -692,7 +728,7 @@ export async function validateTablesExist(
     // ----------------------------------------------------
 
     // --- Context-aware DROP DATABASE validation ---
-    const dropDbMatch = rawStmtText.match(/^DROP\s+DATABASE\s+(?:IF\s+EXISTS\s+)?([a-zA-Z0-9_$]+|"[^"]+")/i);
+    const dropDbMatch = rawStmtText.match(/^\s*DROP\s+DATABASE\s+(?:IF\s+EXISTS\s+)?([a-zA-Z0-9_$]+|"[^"]+")/i);
     if (dropDbMatch) {
       const ifExists = /IF\s+EXISTS/i.test(rawStmtText);
       const rawDbName = dropDbMatch[1];
@@ -722,7 +758,7 @@ export async function validateTablesExist(
     // ----------------------------------------------------
 
     // --- Context-aware DROP SCHEMA validation ---
-    const dropSchemaMatch = rawStmtText.match(/^DROP\s+SCHEMA\s+(?:IF\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+"))?)/i);
+    const dropSchemaMatch = rawStmtText.match(/^\s*DROP\s+SCHEMA\s+(?:IF\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+"))?)/i);
     if (dropSchemaMatch) {
       const ifExists = /IF\s+EXISTS/i.test(rawStmtText);
       if (!ifExists) {
@@ -810,8 +846,10 @@ export async function validateTablesExist(
     if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
 
     let parseText = rawStmtText.replace(/;+\s*$/, "");
-    // Normalize CREATE VIEW so the parser doesn't choke on Snowflake-specific keywords
-    parseText = parseText.replace(/CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?VIEW\b/i, "CREATE VIEW");
+    const createViewMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE)\s+)?(?:RECURSIVE\s+)?VIEW\b/i);
+    if (createViewMatch) {
+      parseText = parseText.replace(VALID_CREATE_VIEW_PREAMBLE_RE, "CREATE VIEW V AS ");
+    }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let ast: any;

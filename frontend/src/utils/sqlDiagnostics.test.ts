@@ -750,7 +750,91 @@ describe("validateWithParser", () => {
     }
   });
 
-  // ── 2i. Snowflake-specific DROP DATABASE modifiers ────────────────────────
+  // ── 2i. Snowflake-specific CREATE VIEW modifiers ──────────────────────────
+  describe("Snowflake-specific CREATE VIEW modifiers", () => {
+    const validViewQueries = [
+      // 1. Core Modifiers & Temp Types
+      "CREATE VIEW v AS SELECT 1 FROM t",
+      "CREATE OR REPLACE SECURE VIEW v AS SELECT 1 FROM t",
+      "CREATE LOCAL TEMP VIEW v AS SELECT 1 FROM t",
+      "CREATE GLOBAL TEMPORARY VIEW v AS SELECT 1 FROM t",
+      "CREATE VOLATILE VIEW v AS SELECT 1 FROM t",
+      "CREATE RECURSIVE VIEW v AS SELECT 1 FROM t",
+      "CREATE OR REPLACE SECURE GLOBAL TEMPORARY RECURSIVE VIEW IF NOT EXISTS v AS SELECT 1 FROM t",
+
+      // 2. Column lists and column-level policies
+      "CREATE VIEW v (c1, c2) AS SELECT a, b FROM t",
+      "CREATE VIEW v (c1 MASKING POLICY mp1, c2 PROJECTION POLICY pp1) AS SELECT a, b FROM t",
+      "CREATE VIEW v (c1 WITH MASKING POLICY mp1 USING (c1, c2), c2 WITH TAG (t1='v1', t2='v2')) AS SELECT a, b FROM t",
+
+      // 3. View-level properties
+      "CREATE VIEW v COPY GRANTS AS SELECT 1 FROM t",
+      "CREATE VIEW v COMMENT = 'Test view comment' AS SELECT 1 FROM t",
+      "CREATE VIEW v CHANGE_TRACKING = TRUE AS SELECT 1 FROM t",
+      "CREATE VIEW v CHANGE_TRACKING = FALSE AS SELECT 1 FROM t",
+
+      // 4. View-level policies
+      "CREATE VIEW v ROW ACCESS POLICY rap ON (c1) AS SELECT 1 FROM t",
+      "CREATE VIEW v WITH ROW ACCESS POLICY rap ON (c1, c2) AS SELECT 1 FROM t",
+      "CREATE VIEW v AGGREGATION POLICY ap AS SELECT 1 FROM t",
+      "CREATE VIEW v WITH AGGREGATION POLICY ap ENTITY KEY (c1, c2) AS SELECT 1 FROM t",
+      "CREATE VIEW v JOIN POLICY jp AS SELECT 1 FROM t",
+      "CREATE VIEW v WITH JOIN POLICY jp ALLOWED JOIN KEYS (c1, c2) AS SELECT 1 FROM t",
+
+      // 5. Tags and contacts
+      "CREATE VIEW v TAG (t1='v1') AS SELECT 1 FROM t",
+      "CREATE VIEW v WITH TAG (t1='v1', t2='v2') AS SELECT 1 FROM t",
+      "CREATE VIEW v WITH CONTACT (owner='admin@example.com', support='help@example.com') AS SELECT 1 FROM t",
+
+      // 6. The "Everything Everywhere All At Once" Mega-Query
+      `CREATE OR REPLACE SECURE VOLATILE RECURSIVE VIEW IF NOT EXISTS mega_view (
+        id MASKING POLICY my_mask,
+        name WITH PROJECTION POLICY my_proj,
+        email TAG (pii='true')
+      )
+      COPY GRANTS
+      COMMENT = 'Mega View'
+      CHANGE_TRACKING = TRUE
+      WITH ROW ACCESS POLICY my_rap ON (id)
+      WITH AGGREGATION POLICY my_agg ENTITY KEY (id)
+      WITH JOIN POLICY my_join ALLOWED JOIN KEYS (id)
+      WITH TAG (env='prod')
+      WITH CONTACT (owner='boss')
+      AS SELECT id, name, email FROM employees`
+    ];
+
+    for (const sql of validViewQueries) {
+      it(`should silently accept Snowflake CREATE VIEW syntax: ${sql.slice(0, 50)}...`, () => {
+        const m = validateWithParser(sql, singleRange(sql));
+        expect(warnings(m)).toHaveLength(0);
+      });
+    }
+  });
+
+  // ── 2j. Incorrect CREATE VIEW syntax ────────────────────────────────────
+  describe("Incorrect CREATE VIEW syntax -> Warning", () => {
+    const invalidViewQueries = [
+      // Missing required keywords
+      "CREATE VIEW", 
+      "CREATE VIEW v SELECT 1", // Missing AS
+      
+      // Bad property types
+      "CREATE VIEW v CHANGE_TRACKING = MAYBE AS SELECT 1", // Must be TRUE/FALSE
+      
+      // Missing parens in structural definitions
+      "CREATE VIEW v WITH TAG t1='v1' AS SELECT 1", // Missing parenthesis for TAG
+      "CREATE VIEW v ROW ACCESS POLICY rap ON c1 AS SELECT 1", // Missing parenthesis for ON
+    ];
+
+    for (const sql of invalidViewQueries) {
+      it(`should flag syntax errors in: ${sql.slice(0, 40)}...`, () => {
+        const m = validateWithParser(sql, singleRange(sql));
+        expect(warnings(m).length).toBeGreaterThan(0);
+      });
+    }
+  });
+
+  // ── 2k. Snowflake-specific DROP DATABASE modifiers ────────────────────────
   describe("Snowflake-specific DROP DATABASE modifiers", () => {
     const validDropDbQueries = [
       "DROP DATABASE my_db",
@@ -769,7 +853,7 @@ describe("validateWithParser", () => {
     }
   });
 
-  // ── 2j. Incorrect DROP DATABASE syntax ────────────────────────────────────
+  // ── 2l. Incorrect DROP DATABASE syntax ────────────────────────────────────
   describe("Incorrect DROP DATABASE syntax -> Warning", () => {
     const invalidDropDbQueries = [
       "DROP DATABASE", // Missing name
@@ -786,7 +870,7 @@ describe("validateWithParser", () => {
     }
   });
 
-  // ── 2k. Snowflake-specific DROP SCHEMA modifiers ────────────────────────
+  // ── 2m. Snowflake-specific DROP SCHEMA modifiers ────────────────────────
   describe("Snowflake-specific DROP SCHEMA modifiers", () => {
     const validDropSchQueries = [
       "DROP SCHEMA my_sch",
@@ -806,7 +890,7 @@ describe("validateWithParser", () => {
     }
   });
 
-  // ── 2l. Incorrect DROP SCHEMA syntax ────────────────────────────────────
+  // ── 2n. Incorrect DROP SCHEMA syntax ────────────────────────────────────
   describe("Incorrect DROP SCHEMA syntax -> Warning", () => {
     const invalidDropSchQueries = [
       "DROP SCHEMA", // Missing name
