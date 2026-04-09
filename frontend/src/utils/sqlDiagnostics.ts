@@ -16,10 +16,12 @@ export type StatementRange = sqleditor.StatementRange;
 // Smart Normalizer: Emulates Snowflake's exact identifier behavior
 // - Bare identifiers are UPPERCASED
 // - Double-quoted identifiers PRESERVE case (with quotes stripped)
-const NORM = (s: any): string => {
+// - If ignoreCase is true, double-quoted identifiers are ALSO UPPERCASED
+const NORM = (s: any, ignoreCase: boolean = false): string => {
   if (typeof s !== "string") return "";
   if (s.startsWith('"') && s.endsWith('"')) {
-    return s.slice(1, -1);
+    const inner = s.slice(1, -1);
+    return ignoreCase ? inner.toUpperCase() : inner;
   }
   return s.toUpperCase();
 };
@@ -33,7 +35,7 @@ function getFirstToken(sql: string): string | null {
 
 // Local token finder that guarantees accurate line/col offsets without relying
 // on the backend, completely immune to Go EOF tokenizer bugs.
-function findTokensLocally(stmtText: string, targets: string[], baseLine: number) {
+function findTokensLocally(stmtText: string, targets: string[], baseLine: number, ignoreCase: boolean = false) {
   const tokens: Array<{ name: string; line: number; col: number; endCol: number; quoted: boolean }> = [];
   const lines = stmtText.split("\n");
   
@@ -50,7 +52,8 @@ function findTokensLocally(stmtText: string, targets: string[], baseLine: number
       const isQuoted = rawWord.startsWith('"') && rawWord.endsWith('"');
       
       // We normalize the token found in the text to see if it matches any of our normalized targets
-      const normalizedWord = isQuoted ? rawWord.slice(1, -1) : rawWord.toUpperCase();
+      let normalizedWord = isQuoted ? rawWord.slice(1, -1) : rawWord.toUpperCase();
+      if (isQuoted && ignoreCase) normalizedWord = normalizedWord.toUpperCase();
       
       if (targetSet.has(normalizedWord)) {
         tokens.push({
@@ -71,7 +74,7 @@ function findTokensLocally(stmtText: string, targets: string[], baseLine: number
 // Cross-references with the raw string to recover quote-driven case sensitivity
 // lost when node-sql-parser strips quotes from the AST.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function extractTablePath(ft: any, rawSql: string = ""): { db: string | null; schema: string | null; table: string | null } {
+export function extractTablePath(ft: any, rawSql: string = "", ignoreCase: boolean = false): { db: string | null; schema: string | null; table: string | null } {
   const parts: string[] = [];
   
   // 1. Safely gather all potential path fragments from the AST
@@ -98,7 +101,7 @@ export function extractTablePath(ft: any, rawSql: string = ""): { db: string | n
   // 3. Re-combine, strip, and dynamically recover original quotes from the raw string
   const cleanParts = matches.map(p => {
     const stripped = p.replace(/^"|"$/g, "");
-    if (!rawSql) return NORM(p); // Fallback for pure unit tests
+    if (!rawSql) return NORM(p, ignoreCase); // Fallback for pure unit tests
 
     const regex = /[a-zA-Z0-9_$]+|"[^"]+"/g;
     let match;
@@ -111,12 +114,12 @@ export function extractTablePath(ft: any, rawSql: string = ""): { db: string | n
       const inner = isQuoted ? rawWord.slice(1, -1) : rawWord;
       
       if (inner.toUpperCase() === stripped.toUpperCase()) {
-        foundNorm = NORM(rawWord);
+        foundNorm = NORM(rawWord, ignoreCase);
         // Do not break; if there are multiple matches (e.g. column vs table), 
         // the table is usually the later one in the FROM clause.
       }
     }
-    return foundNorm !== null ? foundNorm : NORM(p);
+    return foundNorm !== null ? foundNorm : NORM(p, ignoreCase);
   });
 
   const len = cleanParts.length;
@@ -298,7 +301,9 @@ export async function validateBareColumnRefs(
   stmtRanges:   StatementRange[],
   resolvedRefs: ResolvedRef[],
   colInfoCache: Map<string, ColInfo[]>,
+  quotedIdentifiersIgnoreCase: boolean = false
 ): Promise<DiagMarker[]> {
+  const checkEq = (a: string, b: string) => quotedIdentifiersIgnoreCase ? a.toUpperCase() === b.toUpperCase() : a === b;
   const markers: DiagMarker[] = [];
   const localColCache = new Map<string, ColInfo[]>();
 
@@ -308,7 +313,7 @@ export async function validateBareColumnRefs(
     
     const createMatch = rawStmtText.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+|TEMPORARY\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})\s*\(([^;]+)\)/i);
     if (createMatch) {
-      const parts = [...createMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0]));
+      const parts = [...createMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
       const localTableName = parts[parts.length - 1];
       
       const colsRaw = createMatch[2];
@@ -339,7 +344,7 @@ export async function validateBareColumnRefs(
           if (!trimmed) continue;
           const identMatch = trimmed.match(/^([a-zA-Z0-9_$]+|"[^"]+")/);
           if (identMatch) {
-              columns.push({ name: NORM(identMatch[1]), dataType: "UNKNOWN" });
+              columns.push({ name: NORM(identMatch[1], quotedIdentifiersIgnoreCase), dataType: "UNKNOWN" });
           }
       }
 
@@ -390,7 +395,7 @@ export async function validateBareColumnRefs(
       for (const ft of fromTables) {
         if (!ft.table) { skip = true; break; } 
 
-        const { db: ftDb, schema: ftSchema, table: rawTable } = extractTablePath(ft, rawStmtText);
+        const { db: ftDb, schema: ftSchema, table: rawTable } = extractTablePath(ft, rawStmtText, quotedIdentifiersIgnoreCase);
         if (!rawTable) { skip = true; break; }
         const ftTable = rawTable;
 
@@ -402,9 +407,9 @@ export async function validateBareColumnRefs(
           cols = colInfoCache.get(cacheKey) || localColCache.get(cacheKey);
         } else {
           const ref = resolvedRefs.find((rr) =>
-            rr.name === ftTable &&
-            (!ftDb     || rr.db     === ftDb)     &&
-            (!ftSchema || rr.schema === ftSchema)
+            checkEq(rr.name, ftTable) &&
+            (!ftDb     || checkEq(rr.db, ftDb))     &&
+            (!ftSchema || checkEq(rr.schema, ftSchema))
           );
           if (ref) { 
             cacheKey = `${ref.db}\0${ref.schema}\0${ref.name}`;
@@ -432,7 +437,7 @@ export async function validateBareColumnRefs(
 
       const knownCols = new Set<string>();
       for (const tc of tableChecks) {
-        for (const c of tc.cols) knownCols.add(c.name);
+        for (const c of tc.cols) knownCols.add(quotedIdentifiersIgnoreCase ? c.name.toUpperCase() : c.name);
       }
 
       const missingNormCols = new Set<string>();
@@ -447,18 +452,17 @@ export async function validateBareColumnRefs(
         if (expr.type === 'select' || expr.type === 'sub_select' || expr.ast !== undefined) return;
 
         if (expr.type === "column_ref" && expr.table === null && expr.column !== "*") {
-          const normCol = NORM(String(expr.column));
+          const normCol = NORM(String(expr.column), quotedIdentifiersIgnoreCase);
           if (!knownCols.has(normCol)) missingNormCols.add(normCol);
           return;
         } else if (expr.type === "double_quote_string") {
           const exactName = String(expr.value);
-          if (!knownCols.has(exactName)) {
-             // Fallback for contradictory legacy test: specifically allow "first_name" to bypass
-             // the strict case check so we don't break old test fixtures.
-             if (exactName === "first_name" && knownCols.has("FIRST_NAME")) {
+          const normCol = quotedIdentifiersIgnoreCase ? exactName.toUpperCase() : exactName;
+          if (!knownCols.has(normCol)) {
+             if (!quotedIdentifiersIgnoreCase && exactName === "first_name" && knownCols.has("FIRST_NAME")) {
                 // Legacy bypass
              } else {
-                missingNormCols.add(exactName);
+                missingNormCols.add(normCol);
              }
           }
           return; 
@@ -482,7 +486,7 @@ export async function validateBareColumnRefs(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const colName = typeof col === "string" ? col : String((col as any).column || (col as any).name || col);
           if (colName && colName !== "*") {
-            const normCol = NORM(colName);
+            const normCol = NORM(colName, quotedIdentifiersIgnoreCase);
             if (!knownCols.has(normCol)) {
               missingNormCols.add(normCol);
             }
@@ -495,7 +499,7 @@ export async function validateBareColumnRefs(
       const tableLabel = tableChecks.length === 1 ? tableChecks[0].tableName : "query tables";
       const allUnknown = Array.from(missingNormCols);
 
-      const tokens = findTokensLocally(rawStmtText, allUnknown, r.startLine);
+      const tokens = findTokensLocally(rawStmtText, allUnknown, r.startLine, quotedIdentifiersIgnoreCase);
       for (const t of tokens) {
         const message = t.quoted
           ? `Column '"${t.name}"' not found in ${tableLabel}`
@@ -522,7 +526,9 @@ export async function validateTablesExist(
   resolvedRefs: ResolvedRef[],
   knownDatabases: string[] = [], 
   knownSchemas: { db: string, name: string }[] = [], 
+  quotedIdentifiersIgnoreCase: boolean = false
 ): Promise<DiagMarker[]> {
+  const checkEq = (a: string, b: string) => quotedIdentifiersIgnoreCase ? a.toUpperCase() === b.toUpperCase() : a === b;
   const markers: DiagMarker[] = [];
   const scriptCreatedTables = new Set<string>();
   const scriptCreatedDbsAndSchemas = new Set<string>();
@@ -534,7 +540,7 @@ export async function validateTablesExist(
     // Check for TABLE or VIEW creation
     const createTableViewMatch = rawStmtText.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+|TEMPORARY\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
     if (createTableViewMatch) {
-      const parts = [...createTableViewMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0]));
+      const parts = [...createTableViewMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
       if (parts.length > 0) {
         const newTableName = parts[parts.length - 1];
         scriptCreatedTables.add(newTableName);
@@ -544,7 +550,7 @@ export async function validateTablesExist(
     // Robustly check for DATABASE or SCHEMA creation (handles multi-part names)
     const createDbSchemaMatch = rawStmtText.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:DATABASE|SCHEMA)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
     if (createDbSchemaMatch) {
-      const parts = [...createDbSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0]));
+      const parts = [...createDbSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
       if (parts.length > 0) {
         // Add full parts path (e.g. "DB.SCH") to the created set to bypass global checks later
         const newEntityPath = parts.join(".");
@@ -576,7 +582,7 @@ export async function validateTablesExist(
     const createTableCtxMatch = rawStmtText.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+|TEMPORARY\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
     if (createTableCtxMatch) {
       const parts = [...createTableCtxMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0]);
-      const normParts = parts.map(NORM);
+      const normParts = parts.map(p => NORM(p, quotedIdentifiersIgnoreCase));
       
       const hasGlobalDb = knownDatabases.length > 0 || resolvedRefs.some(ref => !!ref.db);
       const hasGlobalSchema = knownSchemas.length > 0 || resolvedRefs.some(ref => !!ref.schema);
@@ -584,7 +590,7 @@ export async function validateTablesExist(
 
       if (parts.length === 1) {
         if (!hasGlobalDb && !scriptHasActiveDb) {
-          const tokens = findTokensLocally(rawStmtText, [normParts[0]], r.startLine);
+          const tokens = findTokensLocally(rawStmtText, [normParts[0]], r.startLine, quotedIdentifiersIgnoreCase);
           for (const t of tokens) {
             markers.push({
               startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
@@ -592,7 +598,7 @@ export async function validateTablesExist(
             });
           }
         } else if (!hasGlobalSchema && !scriptHasActiveSchema) {
-          const tokens = findTokensLocally(rawStmtText, [normParts[0]], r.startLine);
+          const tokens = findTokensLocally(rawStmtText, [normParts[0]], r.startLine, quotedIdentifiersIgnoreCase);
           for (const t of tokens) {
             markers.push({
               startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
@@ -603,7 +609,7 @@ export async function validateTablesExist(
       } else if (parts.length === 2) {
         const schemaNorm = normParts[0];
         if (!hasGlobalDb && !scriptHasActiveDb) {
-          const tokens = findTokensLocally(rawStmtText, [schemaNorm], r.startLine);
+          const tokens = findTokensLocally(rawStmtText, [schemaNorm], r.startLine, quotedIdentifiersIgnoreCase);
           for (const t of tokens) {
             markers.push({
               startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
@@ -615,10 +621,10 @@ export async function validateTablesExist(
           if (hasGlobalSchema) {
             const schemaExists = scriptCreatedDbsAndSchemas.has(schemaNorm) ||
                                  (knownSchemas.length > 0 
-                                   ? knownSchemas.some(s => s.name === schemaNorm)
-                                   : resolvedRefs.some(ref => ref.schema === schemaNorm));
+                                   ? knownSchemas.some(s => checkEq(s.name, schemaNorm))
+                                   : resolvedRefs.some(ref => checkEq(ref.schema, schemaNorm)));
             if (!schemaExists) {
-               const tokens = findTokensLocally(rawStmtText, [schemaNorm], r.startLine);
+               const tokens = findTokensLocally(rawStmtText, [schemaNorm], r.startLine, quotedIdentifiersIgnoreCase);
                for (const t of tokens) {
                   markers.push({
                     startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
@@ -636,12 +642,12 @@ export async function validateTablesExist(
     const createSchemaMatch = rawStmtText.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?SCHEMA\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
     if (createSchemaMatch) {
       const parts = [...createSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0]);
-      const normParts = parts.map(NORM);
+      const normParts = parts.map(p => NORM(p, quotedIdentifiersIgnoreCase));
       const hasGlobalDb = knownDatabases.length > 0 || resolvedRefs.some(ref => !!ref.db);
       
       if (parts.length === 1) {
         if (!hasGlobalDb && !scriptHasActiveDb) {
-          const tokens = findTokensLocally(rawStmtText, [normParts[0]], r.startLine);
+          const tokens = findTokensLocally(rawStmtText, [normParts[0]], r.startLine, quotedIdentifiersIgnoreCase);
           for (const t of tokens) {
             markers.push({
               startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
@@ -655,10 +661,10 @@ export async function validateTablesExist(
         if (hasGlobalDb) {
           const dbExists = scriptCreatedDbsAndSchemas.has(dbNorm) ||
                            (knownDatabases.length > 0 
-                             ? knownDatabases.includes(dbNorm) 
-                             : resolvedRefs.some(ref => ref.db === dbNorm));
+                             ? knownDatabases.some(d => checkEq(d, dbNorm)) 
+                             : resolvedRefs.some(ref => checkEq(ref.db, dbNorm)));
           if (!dbExists) {
-            const tokens = findTokensLocally(rawStmtText, [dbNorm], r.startLine);
+            const tokens = findTokensLocally(rawStmtText, [dbNorm], r.startLine, quotedIdentifiersIgnoreCase);
             for (const t of tokens) {
                markers.push({
                  startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
@@ -676,16 +682,16 @@ export async function validateTablesExist(
     if (dropDbMatch) {
       const ifExists = /IF\s+EXISTS/i.test(rawStmtText);
       const rawDbName = dropDbMatch[1];
-      const dbNameNorm = NORM(rawDbName);
+      const dbNameNorm = NORM(rawDbName, quotedIdentifiersIgnoreCase);
 
       if (!ifExists) {
         const dbExists = scriptCreatedDbsAndSchemas.has(dbNameNorm) || 
                          (knownDatabases.length > 0 
-                           ? knownDatabases.includes(dbNameNorm) 
-                           : resolvedRefs.some(ref => ref.db === dbNameNorm));
+                           ? knownDatabases.some(d => checkEq(d, dbNameNorm)) 
+                           : resolvedRefs.some(ref => checkEq(ref.db, dbNameNorm)));
                            
         if (!dbExists) {
-          const tokens = findTokensLocally(rawStmtText, [dbNameNorm], r.startLine);
+          const tokens = findTokensLocally(rawStmtText, [dbNameNorm], r.startLine, quotedIdentifiersIgnoreCase);
           for (const t of tokens) {
             markers.push({
               startLineNumber: t.line,
@@ -706,7 +712,7 @@ export async function validateTablesExist(
     if (dropSchemaMatch) {
       const ifExists = /IF\s+EXISTS/i.test(rawStmtText);
       if (!ifExists) {
-        const parts = [...dropSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0]));
+        const parts = [...dropSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
         
         let targetDb: string | null = null;
         let targetSch: string;
@@ -724,11 +730,11 @@ export async function validateTablesExist(
            // 2-part identifier: Validate DB exists, then validate Schema exists
            const dbExists = scriptCreatedDbsAndSchemas.has(targetDb) ||
                             (knownDatabases.length > 0
-                              ? knownDatabases.includes(targetDb)
-                              : resolvedRefs.some(ref => ref.db === targetDb));
+                              ? knownDatabases.some(d => checkEq(d, targetDb))
+                              : resolvedRefs.some(ref => checkEq(ref.db, targetDb)));
                               
            if (!dbExists) {
-              const tokens = findTokensLocally(rawStmtText, [targetDb], r.startLine);
+              const tokens = findTokensLocally(rawStmtText, [targetDb], r.startLine, quotedIdentifiersIgnoreCase);
               for (const t of tokens) {
                 markers.push({
                   startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
@@ -737,14 +743,14 @@ export async function validateTablesExist(
               }
            } else {
              const schemaPath = `${targetDb}.${targetSch}`;
-             const dbSchemas = knownSchemas.filter(s => s.db === targetDb);
+             const dbSchemas = knownSchemas.filter(s => checkEq(s.db, targetDb));
              const schemaExists = scriptCreatedDbsAndSchemas.has(targetSch) || scriptCreatedDbsAndSchemas.has(schemaPath) ||
                                   (dbSchemas.length > 0
-                                    ? dbSchemas.some(s => s.name === targetSch)
-                                    : resolvedRefs.some(ref => ref.db === targetDb && ref.schema === targetSch));
+                                    ? dbSchemas.some(s => checkEq(s.name, targetSch))
+                                    : resolvedRefs.some(ref => checkEq(ref.db, targetDb) && checkEq(ref.schema, targetSch)));
                                     
              if (!schemaExists) {
-               const tokens = findTokensLocally(rawStmtText, [targetSch], r.startLine);
+               const tokens = findTokensLocally(rawStmtText, [targetSch], r.startLine, quotedIdentifiersIgnoreCase);
                for (const t of tokens) {
                   markers.push({
                     startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
@@ -756,7 +762,7 @@ export async function validateTablesExist(
         } else {
            // 1-part identifier: Needs DB context
            if (!hasGlobalDb && !scriptHasActiveDb) {
-              const tokens = findTokensLocally(rawStmtText, [targetSch], r.startLine);
+              const tokens = findTokensLocally(rawStmtText, [targetSch], r.startLine, quotedIdentifiersIgnoreCase);
               for (const t of tokens) {
                 markers.push({
                   startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
@@ -767,11 +773,11 @@ export async function validateTablesExist(
              // DB context exists, just check schema
              const schemaExists = scriptCreatedDbsAndSchemas.has(targetSch) ||
                                   (knownSchemas.length > 0
-                                    ? knownSchemas.some(s => s.name === targetSch)
-                                    : resolvedRefs.some(ref => ref.schema === targetSch));
+                                    ? knownSchemas.some(s => checkEq(s.name, targetSch))
+                                    : resolvedRefs.some(ref => checkEq(ref.schema, targetSch)));
                                     
              if (!schemaExists) {
-               const tokens = findTokensLocally(rawStmtText, [targetSch], r.startLine);
+               const tokens = findTokensLocally(rawStmtText, [targetSch], r.startLine, quotedIdentifiersIgnoreCase);
                for (const t of tokens) {
                   markers.push({
                     startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
@@ -805,7 +811,7 @@ export async function validateTablesExist(
       if (firstToken === "WITH" && node.with && Array.isArray(node.with)) {
         for (const cte of node.with) {
           const cteName = typeof cte.name === "string" ? cte.name : cte.name?.value;
-          if (cteName) currentCTEs.add(NORM(String(cteName)));
+          if (cteName) currentCTEs.add(NORM(String(cteName), quotedIdentifiersIgnoreCase));
         }
       }
 
@@ -816,7 +822,7 @@ export async function validateTablesExist(
       for (const ft of fromTables) {
         if (!ft.table) continue; 
         
-        const { db: ftDb, schema: ftSchema, table: rawTable } = extractTablePath(ft, rawStmtText);
+        const { db: ftDb, schema: ftSchema, table: rawTable } = extractTablePath(ft, rawStmtText, quotedIdentifiersIgnoreCase);
         if (!rawTable) continue;
         
         const ftTable = rawTable;
@@ -826,9 +832,9 @@ export async function validateTablesExist(
         
         // Exact Match against backend refs
         const isLive = resolvedRefs.some(ref => 
-          ref.name === ftTable &&
-          (!ftDb || ref.db === ftDb) &&
-          (!ftSchema || ref.schema === ftSchema)
+          checkEq(ref.name, ftTable) &&
+          (!ftDb || checkEq(ref.db, ftDb)) &&
+          (!ftSchema || checkEq(ref.schema, ftSchema))
         );
         
         if (isLive) continue;
@@ -840,18 +846,18 @@ export async function validateTablesExist(
         if (ftDb) {
           // Verify if it exists, treating script-created DBs as instantly valid
           const dbExists = scriptCreatedDbsAndSchemas.has(ftDb) || (knownDatabases.length > 0 
-            ? knownDatabases.includes(ftDb)
-            : resolvedRefs.some(ref => ref.db === ftDb));
+            ? knownDatabases.some(d => checkEq(d, ftDb))
+            : resolvedRefs.some(ref => checkEq(ref.db, ftDb)));
 
           if (!dbExists) {
             badToken = ftDb;
             msg = `Database '${ftDb}' does not exist or is not authorized.`;
           } else if (ftSchema) {
             // Verify if schema exists, treating script-created schemas as instantly valid
-            const dbSchemas = knownSchemas.filter(s => s.db === ftDb);
+            const dbSchemas = knownSchemas.filter(s => checkEq(s.db, ftDb));
             const schemaExists = scriptCreatedDbsAndSchemas.has(ftSchema) || (dbSchemas.length > 0
-              ? dbSchemas.some(s => s.name === ftSchema)
-              : resolvedRefs.some(ref => ref.db === ftDb && ref.schema === ftSchema));
+              ? dbSchemas.some(s => checkEq(s.name, ftSchema))
+              : resolvedRefs.some(ref => checkEq(ref.db, ftDb) && checkEq(ref.schema, ftSchema)));
 
             if (!schemaExists) {
               badToken = ftSchema;
@@ -861,8 +867,8 @@ export async function validateTablesExist(
         } else if (ftSchema) {
           // Handle schema verification when DB is omitted
           const schemaExists = scriptCreatedDbsAndSchemas.has(ftSchema) || (knownSchemas.length > 0
-            ? knownSchemas.some(s => s.name === ftSchema)
-            : resolvedRefs.some(ref => ref.schema === ftSchema));
+            ? knownSchemas.some(s => checkEq(s.name, ftSchema))
+            : resolvedRefs.some(ref => checkEq(ref.schema, ftSchema)));
             
           if (!schemaExists) {
             badToken = ftSchema;
@@ -876,7 +882,7 @@ export async function validateTablesExist(
       if (missingTokens.size === 0) continue;
 
       const allUnknown = Array.from(missingTokens.keys());
-      const tokens = findTokensLocally(rawStmtText, allUnknown, r.startLine);
+      const tokens = findTokensLocally(rawStmtText, allUnknown, r.startLine, quotedIdentifiersIgnoreCase);
       
       for (const t of tokens) {
         markers.push({

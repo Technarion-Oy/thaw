@@ -1848,5 +1848,89 @@ describe("validateTablesExist", () => {
       expect(errors(m)[0].message).toMatch(/my_sch/i);
     });
   });
+
+  describe("QUOTED_IDENTIFIERS_IGNORE_CASE session parameter (Columns)", async () => {
+    // Helper to generate mock ranges for multi-statement scripts
+    function multiRange(statements: string[]): { sql: string; ranges: StatementRange[] } {
+      let offset = 0;
+      let line = 1;
+      const ranges: StatementRange[] = statements.map((stmt) => {
+        const startOffset = offset;
+        const endOffset = offset + stmt.length;
+        const startLine = line;
+        const endLine = line + stmt.split("\n").length - 1;
+
+        offset = endOffset + 1; 
+        line = endLine + 1;
+        return { startLine, endLine, startOffset, endOffset };
+      });
+      return { sql: statements.join("\n"), ranges };
+    }
+
+    it("allows querying unquoted column when created with lowercase quotes if ignoreCase is true", async () => {
+      const { sql, ranges } = multiRange([
+        'CREATE TABLE local_tab ("amount" NUMBER);',
+        'SELECT amount FROM local_tab;'
+      ]);
+      // The 5th argument is quotedIdentifiersIgnoreCase = true
+      const m = await validateBareColumnRefs(sql, ranges, [], new Map(), true);
+      
+      // THIS WILL FAIL until logic is implemented in sqlDiagnostics.ts!
+      expect(warnings(m)).toHaveLength(0); 
+    });
+
+    it("allows querying quoted lowercase column when created unquoted if ignoreCase is true", async () => {
+      const { sql, ranges } = multiRange([
+        'CREATE TABLE local_tab (amount NUMBER);',
+        'SELECT "amount" FROM local_tab;'
+      ]);
+      const m = await validateBareColumnRefs(sql, ranges, [], new Map(), true);
+      
+      // THIS WILL FAIL until logic is implemented in sqlDiagnostics.ts!
+      expect(warnings(m)).toHaveLength(0);
+    });
+  });
+
+  describe("QUOTED_IDENTIFIERS_IGNORE_CASE session parameter (Tables)", () => {
+    // Helper to generate mock ranges for multi-statement scripts
+    function multiRange(statements: string[]): { sql: string; ranges: StatementRange[] } {
+      let offset = 0;
+      let line = 1;
+      const ranges: StatementRange[] = statements.map((stmt) => {
+        const startOffset = offset;
+        const endOffset = offset + stmt.length;
+        const startLine = line;
+        const endLine = line + stmt.split("\n").length - 1;
+
+        offset = endOffset + 1; 
+        line = endLine + 1;
+        return { startLine, endLine, startOffset, endOffset };
+      });
+      return { sql: statements.join("\n"), ranges };
+    }
+    
+    // Mock live database cache (table exists as uppercase LIVE_TABLE)
+    const LIVE_REFS = refs({ alias: "l", db: "DB", schema: "SCH", name: "LIVE_TABLE" });
+
+    it("allows querying valid global table with mismatched lowercase quotes if ignoreCase is true", async () => {
+      const sql = 'SELECT * FROM "live_table"';
+      // The 6th argument is quotedIdentifiersIgnoreCase = true
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS, [], [], true);
+      
+      // THIS WILL FAIL until logic is implemented in sqlDiagnostics.ts!
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("allows querying locally created table with mismatched lowercase quotes if ignoreCase is true", async () => {
+      const { sql, ranges } = multiRange([
+        'CREATE TABLE my_table (a varchar);',
+        'SELECT * FROM "my_table";'
+      ]);
+      const m = await validateTablesExist(sql, ranges, LIVE_REFS, [], [], true);
+      
+      // THIS WILL FAIL until logic is implemented in sqlDiagnostics.ts!
+      expect(errors(m)).toHaveLength(0);
+    });
+  });
 });
 });
