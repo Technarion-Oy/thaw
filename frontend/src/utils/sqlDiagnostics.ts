@@ -109,12 +109,13 @@ const viewProps = [
   `(?:WITH\\s+)?ROW\\s+ACCESS\\s+POLICY\\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}\\s+ON\\s*${balancedParens}`,
   `(?:WITH\\s+)?AGGREGATION\\s+POLICY\\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s+ENTITY\\s+KEY\\s*${balancedParens})?`,
   `(?:WITH\\s+)?JOIN\\s+POLICY\\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s+ALLOWED\\s+JOIN\\s+KEYS\\s*${balancedParens})?`,
+  `CLUSTER\\s+BY\\s*${balancedParens}`,
   `(?:WITH\\s+)?TAG\\s*${balancedParens}`,
   `WITH\\s+CONTACT\\s*${balancedParens}`
 ].join("|");
 
 const VALID_CREATE_VIEW_PREAMBLE_RE = new RegExp(
-  `^\\s*CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:SECURE\\s+)?(?:(?:(?:LOCAL|GLOBAL)\\s+)?(?:TEMP|TEMPORARY|VOLATILE)\\s+)?(?:RECURSIVE\\s+)?VIEW\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s*${balancedParens})?(?:\\s+(?:${viewProps}))*\\s+AS\\s+`,
+  `^\\s*CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:SECURE\\s+)?(?:(?:(?:LOCAL|GLOBAL)\\s+)?(?:TEMP|TEMPORARY|VOLATILE)\\s+)?(?:RECURSIVE\\s+)?(?:INTERACTIVE\\s+)?(?:MATERIALIZED\\s+)?VIEW\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s*${balancedParens})?(?:\\s+(?:${viewProps}))*\\s+AS\\s+`,
   "i"
 );
 
@@ -138,7 +139,7 @@ const SNOWFLAKE_FP_RE = new RegExp(
   "\\bTABLESAMPLE\\b|\\bSAMPLE\\s*\\(|\\bWITHIN\\s+GROUP\\b|\\bCONNECT\\s+BY\\b" +
   "|\\bAT\\s*\\(|\\bBEFORE\\s*\\(|\\bIN\\s+TABLE\\b" +
   "|CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TRANSIENT\\s+)?(?:TASK|STREAM|STAGE|PIPE|FUNCTION|PROCEDURE|AGGREGATE" +
-  "|WAREHOUSE|ROLE|FILE\\s+FORMAT|USER|ALERT|SHARE|EXTERNAL|DYNAMIC|MATERIALIZED" +
+  "|WAREHOUSE|ROLE|FILE\\s+FORMAT|USER|ALERT|SHARE|EXTERNAL|DYNAMIC" +
   "|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK|RESOURCE|ROW\\s+ACCESS" +
   "|SESSION|PASSWORD|REPLICATION|FAILOVER|APPLICATION)\\b" +
   "|ALTER\\s+(?:VIEW|TASK|STREAM|WAREHOUSE|DATABASE|SEQUENCE|STAGE|PIPE" +
@@ -172,7 +173,7 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
 
     let parseText = rawStmtText.replace(/;+\s*$/, "");
     
-    const createViewMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE)\s+)?(?:RECURSIVE\s+)?VIEW\b/i);
+    const createViewMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE)\s+)?(?:RECURSIVE\s+)?(?:INTERACTIVE\s+)?(?:MATERIALIZED\s+)?VIEW\b/i);
     if (createViewMatch) {
       if (VALID_CREATE_VIEW_PREAMBLE_RE.test(parseText)) {
         parseText = parseText.replace(VALID_CREATE_VIEW_PREAMBLE_RE, "CREATE VIEW V AS ");
@@ -356,7 +357,7 @@ export async function validateBareColumnRefs(
     if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
 
     let parseText = rawStmtText.replace(/;+\s*$/, "");
-    const createViewMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE)\s+)?(?:RECURSIVE\s+)?VIEW\b/i);
+    const createViewMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE)\s+)?(?:RECURSIVE\s+)?(?:INTERACTIVE\s+)?(?:MATERIALIZED\s+)?VIEW\b/i);
     if (createViewMatch) {
       parseText = parseText.replace(VALID_CREATE_VIEW_PREAMBLE_RE, "CREATE VIEW V AS ");
     }
@@ -550,7 +551,7 @@ export async function validateTablesExist(
   for (const r of stmtRanges) {
     const rawStmtText = sql.slice(r.startOffset, r.endOffset);
     
-    const createTableViewMatch = rawStmtText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+|TEMPORARY\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    const createTableViewMatch = rawStmtText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:INTERACTIVE\s+)?(?:TRANSIENT\s+|TEMPORARY\s+|LOCAL\s+TEMP\s+|GLOBAL\s+TEMPORARY\s+|VOLATILE\s+)?(?:RECURSIVE\s+)?(?:MATERIALIZED\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
     if (createTableViewMatch) {
       const parts = [...createTableViewMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
       if (parts.length > 0) {
@@ -571,7 +572,6 @@ export async function validateTablesExist(
       }
     }
 
-    // Track Drops
     const dropTableMatch = rawStmtText.match(/^\s*DROP\s+(?:TABLE)\s+(?:IF\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
     if (dropTableMatch) {
       const parts = [...dropTableMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
@@ -590,7 +590,6 @@ export async function validateTablesExist(
       }
     }
 
-    // Track Undrops
     const undropTableMatch = rawStmtText.match(/^\s*UNDROP\s+TABLE\s+((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
     if (undropTableMatch) {
       const parts = [...undropTableMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
@@ -625,7 +624,7 @@ export async function validateTablesExist(
     if (/^\s*USE\s+SCHEMA\s+/i.test(rawStmtText)) scriptHasActiveSchema = true;
     if (/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?SCHEMA\b/i.test(rawStmtText)) scriptHasActiveSchema = true;
 
-    const createTableCtxMatch = rawStmtText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+|TEMPORARY\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    const createTableCtxMatch = rawStmtText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:INTERACTIVE\s+)?(?:TRANSIENT\s+|TEMPORARY\s+|LOCAL\s+TEMP\s+|GLOBAL\s+TEMPORARY\s+|VOLATILE\s+)?(?:RECURSIVE\s+)?(?:MATERIALIZED\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
     if (createTableCtxMatch) {
       const parts = [...createTableCtxMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0]);
       const normParts = parts.map(p => NORM(p, quotedIdentifiersIgnoreCase));
@@ -825,7 +824,6 @@ export async function validateTablesExist(
       }
     }
 
-    // --- UNDROP DATABASE validation ---
     const undropDbMatch = rawStmtText.match(/^\s*UNDROP\s+DATABASE\s+([a-zA-Z0-9_$]+|"[^"]+")/i);
     if (undropDbMatch) {
       const rawDbName = undropDbMatch[1];
@@ -844,7 +842,6 @@ export async function validateTablesExist(
       }
     }
 
-    // --- UNDROP SCHEMA validation ---
     const undropSchemaMatch = rawStmtText.match(/^\s*UNDROP\s+SCHEMA\s+((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+"))?)/i);
     if (undropSchemaMatch) {
       const parts = [...undropSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
@@ -862,7 +859,6 @@ export async function validateTablesExist(
       }
     }
 
-    // --- UNDROP TABLE validation ---
     const undropTableMatch2 = rawStmtText.match(/^\s*UNDROP\s+TABLE\s+((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
     if (undropTableMatch2) {
       const parts = [...undropTableMatch2[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
@@ -884,7 +880,7 @@ export async function validateTablesExist(
     if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
 
     let parseText = rawStmtText.replace(/;+\s*$/, "");
-    const createViewMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE)\s+)?(?:RECURSIVE\s+)?VIEW\b/i);
+    const createViewMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE)\s+)?(?:RECURSIVE\s+)?(?:INTERACTIVE\s+)?(?:MATERIALIZED\s+)?VIEW\b/i);
     if (createViewMatch) {
       parseText = parseText.replace(VALID_CREATE_VIEW_PREAMBLE_RE, "CREATE VIEW V AS ");
     }
