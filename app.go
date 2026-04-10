@@ -1048,28 +1048,78 @@ func (a *App) AlterWarehouseProperty(name, property, value string) error {
 	escId  := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
 	escStr := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
 	wh     := fmt.Sprintf(`"%s"`, escId(name))
+
+	// allowlist checks for enum-typed values that are interpolated unquoted into SQL.
+	checkEnum := func(v string, allowed ...string) (string, error) {
+		u := strings.ToUpper(strings.TrimSpace(v))
+		for _, a := range allowed {
+			if u == a {
+				return u, nil
+			}
+		}
+		return "", fmt.Errorf("invalid value %q for warehouse property %q", v, property)
+	}
+	// validateInt parses v as a non-negative integer and returns it as a string safe for SQL interpolation.
+	validateInt := func(v string) (string, error) {
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil || n < 0 {
+			return "", fmt.Errorf("invalid integer value %q for warehouse property %q", v, property)
+		}
+		return strconv.Itoa(n), nil
+	}
+
 	var query string
 	switch property {
 	case "size":
-		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET WAREHOUSE_SIZE = %s`, wh, strings.ToUpper(value))
+		v, err := checkEnum(value,
+			"X-SMALL", "SMALL", "MEDIUM", "LARGE", "X-LARGE",
+			"2X-LARGE", "3X-LARGE", "4X-LARGE", "5X-LARGE", "6X-LARGE")
+		if err != nil {
+			return err
+		}
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET WAREHOUSE_SIZE = %s`, wh, v)
 	case "warehouseType":
-		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET WAREHOUSE_TYPE = %s`, wh, strings.ToUpper(value))
+		v, err := checkEnum(value, "STANDARD", "SNOWPARK-OPTIMIZED")
+		if err != nil {
+			return err
+		}
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET WAREHOUSE_TYPE = %s`, wh, v)
 	case "autoSuspend":
 		if value == "0" || value == "" {
 			query = fmt.Sprintf(`ALTER WAREHOUSE %s SET AUTO_SUSPEND = NULL`, wh)
 		} else {
-			query = fmt.Sprintf(`ALTER WAREHOUSE %s SET AUTO_SUSPEND = %s`, wh, value)
+			v, err := validateInt(value)
+			if err != nil {
+				return err
+			}
+			query = fmt.Sprintf(`ALTER WAREHOUSE %s SET AUTO_SUSPEND = %s`, wh, v)
 		}
 	case "autoResume":
-		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET AUTO_RESUME = %s`, wh, strings.ToUpper(value))
+		v, err := checkEnum(value, "TRUE", "FALSE")
+		if err != nil {
+			return err
+		}
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET AUTO_RESUME = %s`, wh, v)
 	case "comment":
 		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET COMMENT = '%s'`, wh, escStr(value))
 	case "maxClusterCount":
-		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET MAX_CLUSTER_COUNT = %s`, wh, value)
+		v, err := validateInt(value)
+		if err != nil {
+			return err
+		}
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET MAX_CLUSTER_COUNT = %s`, wh, v)
 	case "minClusterCount":
-		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET MIN_CLUSTER_COUNT = %s`, wh, value)
+		v, err := validateInt(value)
+		if err != nil {
+			return err
+		}
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET MIN_CLUSTER_COUNT = %s`, wh, v)
 	case "scalingPolicy":
-		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET SCALING_POLICY = %s`, wh, strings.ToUpper(value))
+		v, err := checkEnum(value, "STANDARD", "ECONOMY")
+		if err != nil {
+			return err
+		}
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET SCALING_POLICY = %s`, wh, v)
 	case "resourceMonitor":
 		if strings.TrimSpace(value) == "" {
 			query = fmt.Sprintf(`ALTER WAREHOUSE %s SET RESOURCE_MONITOR = NULL`, wh)
@@ -1077,15 +1127,35 @@ func (a *App) AlterWarehouseProperty(name, property, value string) error {
 			query = fmt.Sprintf(`ALTER WAREHOUSE %s SET RESOURCE_MONITOR = "%s"`, wh, escId(value))
 		}
 	case "enableQueryAcceleration":
-		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET ENABLE_QUERY_ACCELERATION = %s`, wh, strings.ToUpper(value))
+		v, err := checkEnum(value, "TRUE", "FALSE")
+		if err != nil {
+			return err
+		}
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET ENABLE_QUERY_ACCELERATION = %s`, wh, v)
 	case "queryAccelerationMaxScaleFactor":
-		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET QUERY_ACCELERATION_MAX_SCALE_FACTOR = %s`, wh, value)
+		v, err := validateInt(value)
+		if err != nil {
+			return err
+		}
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET QUERY_ACCELERATION_MAX_SCALE_FACTOR = %s`, wh, v)
 	case "maxConcurrencyLevel":
-		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET MAX_CONCURRENCY_LEVEL = %s`, wh, value)
+		v, err := validateInt(value)
+		if err != nil {
+			return err
+		}
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET MAX_CONCURRENCY_LEVEL = %s`, wh, v)
 	case "statementQueuedTimeout":
-		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET STATEMENT_QUEUED_TIMEOUT_IN_SECONDS = %s`, wh, value)
+		v, err := validateInt(value)
+		if err != nil {
+			return err
+		}
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET STATEMENT_QUEUED_TIMEOUT_IN_SECONDS = %s`, wh, v)
 	case "statementTimeout":
-		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET STATEMENT_TIMEOUT_IN_SECONDS = %s`, wh, value)
+		v, err := validateInt(value)
+		if err != nil {
+			return err
+		}
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET STATEMENT_TIMEOUT_IN_SECONDS = %s`, wh, v)
 	default:
 		return fmt.Errorf("unknown warehouse property: %s", property)
 	}
@@ -1820,7 +1890,8 @@ func (a *App) GetObjectProperties(database, schema, kind, name string) ([]Proper
 	}
 
 	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-	like := strings.ReplaceAll(name, "'", "''")
+	like := strings.ReplaceAll(name, `\`, `\\`)
+	like = strings.ReplaceAll(like, "'", "''")
 
 	var query string
 	switch strings.ToUpper(kind) {
