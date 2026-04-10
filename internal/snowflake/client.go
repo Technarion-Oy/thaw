@@ -666,7 +666,15 @@ type IntegrationRow struct {
 // kind may be "STORAGE", "API", "CATALOG", "EXTERNAL ACCESS", "NOTIFICATION", or "SECURITY".
 // Column layouts differ by integration type; we use column names for resilience.
 func (c *Client) ListIntegrations(ctx context.Context, kind string) ([]IntegrationRow, error) {
-	rows, err := c.db.QueryContext(ctx, fmt.Sprintf("SHOW %s INTEGRATIONS", kind))
+	upper := strings.ToUpper(strings.TrimSpace(kind))
+	validKinds := map[string]bool{
+		"STORAGE": true, "API": true, "CATALOG": true,
+		"EXTERNAL ACCESS": true, "NOTIFICATION": true, "SECURITY": true,
+	}
+	if !validKinds[upper] {
+		return nil, fmt.Errorf("unknown integration kind: %q", kind)
+	}
+	rows, err := c.db.QueryContext(ctx, fmt.Sprintf("SHOW %s INTEGRATIONS", upper))
 	if err != nil {
 		return nil, err
 	}
