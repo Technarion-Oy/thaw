@@ -139,7 +139,7 @@ const SNOWFLAKE_FP_RE = new RegExp(
   "\\bTABLESAMPLE\\b|\\bSAMPLE\\s*\\(|\\bWITHIN\\s+GROUP\\b|\\bCONNECT\\s+BY\\b" +
   "|\\bAT\\s*\\(|\\bBEFORE\\s*\\(|\\bIN\\s+TABLE\\b" +
   "|CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TRANSIENT\\s+)?(?:TASK|STREAM|STAGE|PIPE|FUNCTION|PROCEDURE|AGGREGATE" +
-  "|WAREHOUSE|ROLE|FILE\\s+FORMAT|USER|ALERT|SHARE|EXTERNAL|DYNAMIC" +
+  "|WAREHOUSE|ROLE|FILE\\s+FORMAT|USER|ALERT|SHARE|EXTERNAL" +
   "|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK|RESOURCE|ROW\\s+ACCESS" +
   "|SESSION|PASSWORD|REPLICATION|FAILOVER|APPLICATION)\\b" +
   "|ALTER\\s+(?:VIEW|TASK|STREAM|WAREHOUSE|DATABASE|SEQUENCE|STAGE|PIPE" +
@@ -187,6 +187,91 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
           severity: 4
         });
         continue; 
+      }
+    }
+
+    const createTableMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?TABLE\b/i);
+    if (createTableMatch) {
+      let isValid = false;
+      const preambleRegex = /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}/i;
+      const preambleMatch = parseText.match(preambleRegex);
+      
+      if (preambleMatch) {
+        const rest = parseText.slice(preambleMatch[0].length).trim();
+        const cleanedRest = rest.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").trim();
+        
+        const backupSetRegex = /^FROM\s+BACKUP\s+SET\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}\s+IDENTIFIER\s+'[^']+'\s*$/i;
+        const ctasRegex = /^AS\s+(?:SELECT|WITH)\b/i;
+        const cloneRegex = /^(?:CLONE|LIKE)\b/i;
+        
+        if (backupSetRegex.test(cleanedRest)) {
+          isValid = true;
+        } else if (ctasRegex.test(cleanedRest)) {
+          isValid = true;
+        } else if (cloneRegex.test(cleanedRest)) {
+          isValid = true;
+        } else if (cleanedRest.startsWith("(")) {
+          let depth = 0;
+          let endIdx = -1;
+          let inString = false;
+          let inDouble = false;
+          for (let i = 0; i < cleanedRest.length; i++) {
+            const c = cleanedRest[i];
+            if (c === "'" && !inDouble) inString = !inString;
+            else if (c === '"' && !inString) inDouble = !inDouble;
+            else if (!inString && !inDouble) {
+              if (c === '(') depth++;
+              else if (c === ')') {
+                depth--;
+                if (depth === 0) {
+                  endIdx = i;
+                  break;
+                }
+              }
+            }
+          }
+          if (endIdx !== -1) {
+            const afterParens = cleanedRest.slice(endIdx + 1).trim();
+            const tableProps = [
+              `CLUSTER\\s+BY\\s*${balancedParens}`,
+              `ENABLE_SCHEMA_EVOLUTION\\s*=\\s*(?:TRUE|FALSE)`,
+              `DATA_RETENTION_TIME_IN_DAYS\\s*=\\s*\\d+`,
+              `MAX_DATA_EXTENSION_TIME_IN_DAYS\\s*=\\s*\\d+`,
+              `CHANGE_TRACKING\\s*=\\s*(?:TRUE|FALSE)`,
+              `DEFAULT_DDL_COLLATION\\s*=\\s*'(?:[^']|'')*'`,
+              `COPY\\s+GRANTS`,
+              `ERROR_LOGGING\\s*=\\s*(?:TRUE|FALSE)`,
+              `COPY\\s+TAGS`,
+              `COMMENT\\s*=\\s*'(?:[^']|'')*'`,
+              `ROW_TIMESTAMP\\s*=\\s*(?:TRUE|FALSE)`,
+              `(?:WITH\\s+)?ROW\\s+ACCESS\\s+POLICY\\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}\\s+ON\\s*${balancedParens}`,
+              `(?:WITH\\s+)?AGGREGATION\\s+POLICY\\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s+ENTITY\\s+KEY\\s*${balancedParens})?`,
+              `(?:WITH\\s+)?JOIN\\s+POLICY\\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s+ALLOWED\\s+JOIN\\s+KEYS\\s*${balancedParens})?`,
+              `(?:WITH\\s+)?STORAGE\\s+LIFECYCLE\\s+POLICY\\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}\\s+ON\\s*${balancedParens}`,
+              `(?:WITH\\s+)?TAG\\s*${balancedParens}`,
+              `WITH\\s+CONTACT\\s*${balancedParens}`
+            ].join("|");
+            
+            const propsRegex = new RegExp(`^(?:(?:${tableProps})(?:\\s+|$))*$`, "i");
+            if (afterParens === "" || propsRegex.test(afterParens) || ctasRegex.test(afterParens)) {
+              isValid = true;
+            }
+          }
+        }
+      }
+      
+      if (isValid) {
+        continue;
+      } else {
+        markers.push({
+          startLineNumber: r.startLine,
+          startColumn: 1,
+          endLineNumber: r.endLine,
+          endColumn: 100, 
+          message: `Unexpected syntax in CREATE TABLE statement.`,
+          severity: 4
+        });
+        continue;
       }
     }
 
@@ -247,6 +332,21 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
         });
         continue; 
       }
+    }
+
+    const createDynamicTableMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?DYNAMIC\s+TABLE\b/i);
+    if (createDynamicTableMatch) {
+      const hasTargetLag = /\bTARGET_LAG\s*=/i.test(parseText);
+      const hasWarehouse = /\bWAREHOUSE\s*=/i.test(parseText);
+      const hasAs = /\bAS\s+(?:SELECT|WITH)\b/i.test(parseText);
+      if (hasTargetLag && hasWarehouse && hasAs) continue;
+      markers.push({
+        startLineNumber: r.startLine, startColumn: 1,
+        endLineNumber: r.endLine, endColumn: 100,
+        message: "Unexpected syntax in CREATE DYNAMIC TABLE statement.",
+        severity: 4,
+      });
+      continue;
     }
 
     if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
@@ -360,6 +460,12 @@ export async function validateBareColumnRefs(
     const createViewMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE)\s+)?(?:RECURSIVE\s+)?(?:INTERACTIVE\s+)?(?:MATERIALIZED\s+)?VIEW\b/i);
     if (createViewMatch) {
       parseText = parseText.replace(VALID_CREATE_VIEW_PREAMBLE_RE, "CREATE VIEW V AS ");
+    }
+
+    if (/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?DYNAMIC\s+TABLE\b/i.test(parseText)) {
+      const asMatch = /\bAS\s+(?=SELECT\b|WITH\b)/i.exec(parseText);
+      if (!asMatch) continue;
+      parseText = parseText.slice(asMatch.index + asMatch[0].length);
     }
 
     let ast: any;
@@ -559,7 +665,7 @@ export async function validateTablesExist(
   for (const r of stmtRanges) {
     const rawStmtText = sql.slice(r.startOffset, r.endOffset);
     
-    const createTableViewMatch = rawStmtText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:INTERACTIVE\s+)?(?:TRANSIENT\s+|TEMPORARY\s+|LOCAL\s+TEMP\s+|GLOBAL\s+TEMPORARY\s+|VOLATILE\s+)?(?:RECURSIVE\s+)?(?:MATERIALIZED\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    const createTableViewMatch = rawStmtText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:INTERACTIVE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?(?:RECURSIVE\s+)?(?:MATERIALIZED\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
     if (createTableViewMatch) {
       const parts = [...createTableViewMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
       if (parts.length > 0) {
@@ -627,11 +733,18 @@ export async function validateTablesExist(
 
     if (/^\s*USE\s+DATABASE\s+/i.test(rawStmtText)) scriptHasActiveDb = true;
     if (/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?DATABASE\b/i.test(rawStmtText)) scriptHasActiveDb = true;
-    
+    // USE SCHEMA db.schema → the db qualifier counts as an active database
+    if (/^\s*USE\s+SCHEMA\s+[a-zA-Z0-9_$"]+\.[a-zA-Z0-9_$"]+/i.test(rawStmtText)) scriptHasActiveDb = true;
+    // bare USE db.schema (no DATABASE/SCHEMA/ROLE/WAREHOUSE keyword) → sets both active db and schema
+    if (/^\s*USE\s+(?!DATABASE\b|SCHEMA\b|ROLE\b|WAREHOUSE\b)[a-zA-Z0-9_$"]+\.[a-zA-Z0-9_$"]+/i.test(rawStmtText)) {
+      scriptHasActiveDb = true;
+      scriptHasActiveSchema = true;
+    }
+
     if (/^\s*USE\s+SCHEMA\s+/i.test(rawStmtText)) scriptHasActiveSchema = true;
     if (/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?SCHEMA\b/i.test(rawStmtText)) scriptHasActiveSchema = true;
 
-    const createTableCtxMatch = rawStmtText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:INTERACTIVE\s+)?(?:TRANSIENT\s+|TEMPORARY\s+|LOCAL\s+TEMP\s+|GLOBAL\s+TEMPORARY\s+|VOLATILE\s+)?(?:RECURSIVE\s+)?(?:MATERIALIZED\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    const createTableCtxMatch = rawStmtText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:INTERACTIVE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?(?:RECURSIVE\s+)?(?:MATERIALIZED\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
     if (createTableCtxMatch) {
       const parts = [...createTableCtxMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0]);
       const normParts = parts.map(p => NORM(p, quotedIdentifiersIgnoreCase));
@@ -890,6 +1003,12 @@ export async function validateTablesExist(
     const createViewMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE)\s+)?(?:RECURSIVE\s+)?(?:INTERACTIVE\s+)?(?:MATERIALIZED\s+)?VIEW\b/i);
     if (createViewMatch) {
       parseText = parseText.replace(VALID_CREATE_VIEW_PREAMBLE_RE, "CREATE VIEW V AS ");
+    }
+
+    if (/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?DYNAMIC\s+TABLE\b/i.test(parseText)) {
+      const asMatch = /\bAS\s+(?=SELECT\b|WITH\b)/i.exec(parseText);
+      if (!asMatch) continue;
+      parseText = parseText.slice(asMatch.index + asMatch[0].length);
     }
 
     let ast: any;

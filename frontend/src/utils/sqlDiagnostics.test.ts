@@ -787,13 +787,44 @@ describe("validateWithParser", () => {
     for (const sql of invalidMatViewQueries) {
       it(`should flag syntax errors in: ${sql.slice(0, 40)}...`, () => {
         const m = validateWithParser(sql, singleRange(sql));
-        // THIS WILL FAIL: The engine currently ignores MATERIALIZED VIEW validation
         expect(warnings(m).length).toBeGreaterThan(0);
       });
     }
   });
 
-  // ── 2l. Snowflake-specific DROP DATABASE modifiers ────────────────────────
+  // ── 2m. Snowflake-specific CREATE DYNAMIC TABLE modifiers ─────────────
+  describe("Snowflake-specific CREATE DYNAMIC TABLE modifiers", () => {
+    const validDynamicTableQueries = [
+      "CREATE DYNAMIC TABLE dt TARGET_LAG = '1 minute' WAREHOUSE = wh AS SELECT 1 FROM t",
+      "CREATE OR REPLACE DYNAMIC TABLE dt TARGET_LAG = DOWNSTREAM WAREHOUSE = wh COMMENT = 'test' AS SELECT 1 FROM t"
+    ];
+
+    for (const sql of validDynamicTableQueries) {
+      it(`should silently accept Snowflake CREATE DYNAMIC TABLE syntax: ${sql.slice(0, 50).replace(/\n/g, " ")}...`, () => {
+        const m = validateWithParser(sql, singleRange(sql));
+        expect(warnings(m)).toHaveLength(0);
+      });
+    }
+  });
+
+  // ── 2n. Incorrect CREATE DYNAMIC TABLE syntax ────────────────────────
+  describe("Incorrect CREATE DYNAMIC TABLE syntax -> Warning", () => {
+    const invalidDynamicTableQueries = [
+      "CREATE DYNAMIC TABLE dt AS SELECT 1", // Missing TARGET_LAG and WAREHOUSE
+      "CREATE DYNAMIC TABLE dt TARGET_LAG = '1 minute' AS SELECT 1", // Missing WAREHOUSE
+      "CREATE DYNAMIC TABLE dt WAREHOUSE = wh AS SELECT 1", // Missing TARGET_LAG
+    ];
+
+    for (const sql of invalidDynamicTableQueries) {
+      it(`should flag syntax errors in: ${sql.slice(0, 40)}...`, () => {
+        const m = validateWithParser(sql, singleRange(sql));
+        // THIS WILL FAIL: Engine doesn't support DYNAMIC TABLE syntax validation yet
+        expect(warnings(m).length).toBeGreaterThan(0);
+      });
+    }
+  });
+
+  // ── 2o. Snowflake-specific DROP DATABASE modifiers ────────────────────────
   describe("Snowflake-specific DROP DATABASE modifiers", () => {
     const validDropDbQueries = [
       "DROP DATABASE my_db",
@@ -812,7 +843,7 @@ describe("validateWithParser", () => {
     }
   });
 
-  // ── 2m. Incorrect DROP DATABASE syntax ────────────────────────────────────
+  // ── 2p. Incorrect DROP DATABASE syntax ────────────────────────────────────
   describe("Incorrect DROP DATABASE syntax -> Warning", () => {
     const invalidDropDbQueries = [
       "DROP DATABASE", // Missing name
@@ -829,7 +860,7 @@ describe("validateWithParser", () => {
     }
   });
 
-  // ── 2n. Snowflake-specific DROP SCHEMA modifiers ────────────────────────
+  // ── 2q. Snowflake-specific DROP SCHEMA modifiers ────────────────────────
   describe("Snowflake-specific DROP SCHEMA modifiers", () => {
     const validDropSchQueries = [
       "DROP SCHEMA my_sch",
@@ -849,7 +880,7 @@ describe("validateWithParser", () => {
     }
   });
 
-  // ── 2o. Incorrect DROP SCHEMA syntax ────────────────────────────────────
+  // ── 2r. Incorrect DROP SCHEMA syntax ────────────────────────────────────
   describe("Incorrect DROP SCHEMA syntax -> Warning", () => {
     const invalidDropSchQueries = [
       "DROP SCHEMA", // Missing name
@@ -864,6 +895,287 @@ describe("validateWithParser", () => {
         expect(warnings(m).length).toBeGreaterThan(0);
       });
     }
+  });
+
+  // ── 2s. Snowflake-specific CREATE TABLE modifiers ─────────────────────────
+  describe("Snowflake-specific CREATE TABLE modifiers", () => {
+    // Each entry: [label, sql].  All are valid Snowflake SQL → 0 warnings expected.
+    const validTableQueries: Array<[string, string]> = [
+      // 1.1 — basic form with 3-part qualified name and IF NOT EXISTS
+      [
+        "basic CREATE TABLE IF NOT EXISTS with 3-part name",
+        `CREATE TABLE IF NOT EXISTS my_database.public.basic_employees (
+    emp_id NUMBER,
+    first_name VARCHAR,
+    last_name VARCHAR
+)`,
+      ],
+
+      // 1.2 — OR REPLACE + TRANSIENT modifier (currently produces a false-positive
+      //        "WARNING — Unexpected: 'TRANSIENT'" in the live editor)
+      [
+        "CREATE OR REPLACE TRANSIENT TABLE with AUTOINCREMENT, COLLATE, DEFAULT, CHECK, and out-of-line PRIMARY KEY",
+        `CREATE OR REPLACE TRANSIENT TABLE temporary_ledger (
+    transaction_id NUMBER AUTOINCREMENT START 1 INCREMENT 1,
+    account_code VARCHAR(10) NOT NULL COLLATE 'en-ci',
+    amount NUMBER(10, 2) DEFAULT 0.00,
+    created_at TIMESTAMP_LTZ DEFAULT CURRENT_TIMESTAMP(),
+    status VARCHAR CHECK (status IN ('PENDING', 'CLEARED', 'FAILED')),
+    CONSTRAINT pk_trans PRIMARY KEY (transaction_id)
+)`,
+      ],
+
+      // 1.3 — GLOBAL TEMPORARY + out-of-line FOREIGN KEY + CLUSTER BY
+      [
+        "CREATE GLOBAL TEMPORARY TABLE with out-of-line FOREIGN KEY and CLUSTER BY",
+        `CREATE GLOBAL TEMPORARY TABLE session_events (
+    session_id VARCHAR,
+    event_time TIMESTAMP_NTZ,
+    event_type VARCHAR,
+    user_id NUMBER,
+    CONSTRAINT pk_session PRIMARY KEY (session_id, event_time),
+    CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES basic_employees (emp_id)
+)
+CLUSTER BY (DATE_TRUNC('DAY', event_time), event_type)`,
+      ],
+
+      // 1.4 — VOLATILE modifier + full set of table-level options (currently produces
+      //        a false-positive "WARNING — Unexpected: 'VOLATILE'" in the live editor)
+      [
+        "CREATE VOLATILE TABLE with MASKING POLICY, WITH TAG, ENABLE_SCHEMA_EVOLUTION, DATA_RETENTION, COPY GRANTS, ROW ACCESS POLICY, AGGREGATION POLICY, TAG",
+        `CREATE VOLATILE TABLE secure_patient_data (
+    ssn VARCHAR MASKING POLICY ssn_mask USING (ssn, 'US'),
+    patient_name VARCHAR WITH TAG (phi_level = 'high', department = 'oncology'),
+    dob DATE COMMENT 'Patient Date of Birth',
+    blood_type VARCHAR
+)
+ENABLE_SCHEMA_EVOLUTION = TRUE
+DATA_RETENTION_TIME_IN_DAYS = 90
+CHANGE_TRACKING = TRUE
+DEFAULT_DDL_COLLATION = 'en-ci'
+COPY GRANTS
+ERROR_LOGGING = TRUE
+COMMENT = 'Highly sensitive patient records'
+WITH ROW ACCESS POLICY patient_access_policy ON (patient_name, dob)
+WITH AGGREGATION POLICY strict_agg_policy ENTITY KEY (ssn)
+WITH TAG (data_classification = 'restricted')`,
+      ],
+
+      // 1.5 — FROM BACKUP SET syntax (currently produces a false-positive
+      //        "WARNING — Unexpected: 'FROM'" in the live editor)
+      [
+        "CREATE TABLE ... FROM BACKUP SET ... IDENTIFIER ...",
+        "CREATE TABLE restored_archive FROM BACKUP SET my_backup_set IDENTIFIER 'backup_id_12345'",
+      ],
+
+      // Additional valid forms from the Snowflake CREATE TABLE syntax reference
+      ["CREATE LOCAL TEMP TABLE",           "CREATE LOCAL TEMP TABLE t (id INT, name VARCHAR)"],
+      ["CREATE TEMPORARY TABLE",            "CREATE TEMPORARY TABLE t (id INT)"],
+      ["CREATE OR REPLACE TEMP TABLE",      "CREATE OR REPLACE TEMP TABLE t (id INT)"],
+      ["CREATE TABLE with DATA_RETENTION_TIME_IN_DAYS",
+        "CREATE TABLE t (id INT) DATA_RETENTION_TIME_IN_DAYS = 7"],
+      ["CREATE TABLE with ENABLE_SCHEMA_EVOLUTION = FALSE",
+        "CREATE TABLE t (id INT) ENABLE_SCHEMA_EVOLUTION = FALSE"],
+      ["CREATE TABLE with CHANGE_TRACKING and MAX_DATA_EXTENSION_TIME_IN_DAYS",
+        "CREATE TABLE t (id INT) CHANGE_TRACKING = TRUE MAX_DATA_EXTENSION_TIME_IN_DAYS = 14"],
+      ["CREATE TABLE with COPY GRANTS and ERROR_LOGGING",
+        "CREATE TABLE t (id INT) COPY GRANTS ERROR_LOGGING = FALSE"],
+      ["CREATE TABLE with COMMENT",
+        "CREATE TABLE t (id INT) COMMENT = 'A table'"],
+      ["CREATE TABLE with ROW ACCESS POLICY",
+        "CREATE TABLE t (id INT) WITH ROW ACCESS POLICY rap ON (id)"],
+      ["CREATE TABLE with AGGREGATION POLICY and ENTITY KEY",
+        "CREATE TABLE t (id INT) WITH AGGREGATION POLICY agg_pol ENTITY KEY (id)"],
+      ["CREATE TABLE with TAG",
+        "CREATE TABLE t (id INT) WITH TAG (env = 'prod', cost_center = 'sales')"],
+    ];
+
+    for (const [label, sql] of validTableQueries) {
+      it(`should silently accept Snowflake CREATE TABLE syntax: ${label}`, () => {
+        const m = validateWithParser(sql, singleRange(sql));
+        expect(warnings(m)).toHaveLength(0);
+      });
+    }
+  });
+
+  // ── 2t. Incorrect CREATE TABLE syntax ────────────────────────────────────
+  describe("Incorrect CREATE TABLE syntax -> Warning", () => {
+    const invalidTableQueries = [
+      // Missing name and column list
+      "CREATE TABLE",
+      // Wrong modifier order (TRANSIENT must precede TABLE, not after OR REPLACE in reversed order)
+      "CREATE TRANSIENT OR REPLACE TABLE foo (id INT)",
+      // Modifier placed after TABLE keyword instead of before it
+      "CREATE TABLE TRANSIENT foo (id INT)",
+      // Unrecognised table-level option
+      "CREATE TABLE foo (id INT) NONEXISTENT_OPTION = TRUE",
+      // Missing = sign on a numeric property
+      "CREATE TABLE foo (id INT) DATA_RETENTION_TIME_IN_DAYS 10",
+    ];
+
+    for (const sql of invalidTableQueries) {
+      it(`should flag syntax errors in: ${sql}`, () => {
+        const m = validateWithParser(sql, singleRange(sql));
+        expect(warnings(m).length).toBeGreaterThan(0);
+      });
+    }
+  });
+
+  // ── 2u. CREATE TABLE — one test per temp.sql entry ───────────────────────
+  describe("CREATE TABLE — temp.sql numbered test cases", () => {
+    // test_1: standard create — no modifier, expected clean
+    it("test_1: standard CREATE TABLE", () => {
+      const sql = "CREATE TABLE test_1 (id INT)";
+      expect(validateWithParser(sql, singleRange(sql))).toHaveLength(0);
+    });
+
+    // test_2: OR REPLACE without any table-kind modifier
+    it("test_2: CREATE OR REPLACE TABLE", () => {
+      const sql = "CREATE OR REPLACE TABLE test_2 (id INT)";
+      expect(validateWithParser(sql, singleRange(sql))).toHaveLength(0);
+    });
+
+    // test_3: IF NOT EXISTS guard
+    it("test_3: CREATE TABLE IF NOT EXISTS", () => {
+      const sql = "CREATE TABLE IF NOT EXISTS test_3 (id INT)";
+      expect(validateWithParser(sql, singleRange(sql))).toHaveLength(0);
+    });
+
+    // test_4: false positive — "WARNING — Unexpected: 'LOCAL'"
+    it("test_4: CREATE LOCAL TEMP TABLE — no false positive on LOCAL", () => {
+      const sql = "CREATE LOCAL TEMP TABLE test_4 (id INT)";
+      expect(warnings(validateWithParser(sql, singleRange(sql)))).toHaveLength(0);
+    });
+
+    // test_5: false positive — "WARNING — Unexpected: 'GLOBAL'"
+    it("test_5: CREATE GLOBAL TEMPORARY TABLE — no false positive on GLOBAL", () => {
+      const sql = "CREATE GLOBAL TEMPORARY TABLE test_5 (id INT)";
+      expect(warnings(validateWithParser(sql, singleRange(sql)))).toHaveLength(0);
+    });
+
+    // test_6: false positive — "WARNING — Unexpected: 'VOLATILE'"
+    it("test_6: CREATE VOLATILE TABLE — no false positive on VOLATILE", () => {
+      const sql = "CREATE VOLATILE TABLE test_6 (id INT)";
+      expect(warnings(validateWithParser(sql, singleRange(sql)))).toHaveLength(0);
+    });
+
+    // test_7: false positive — "WARNING — Unexpected: 'TRANSIENT'"
+    it("test_7: CREATE TRANSIENT TABLE — no false positive on TRANSIENT", () => {
+      const sql = "CREATE TRANSIENT TABLE test_7 (id INT)";
+      expect(warnings(validateWithParser(sql, singleRange(sql)))).toHaveLength(0);
+    });
+
+    // test_8: DEFAULT string literal — expected clean
+    it("test_8: CREATE TABLE with DEFAULT string literal column value", () => {
+      const sql = "CREATE TABLE test_8 (status VARCHAR DEFAULT 'ACTIVE')";
+      expect(validateWithParser(sql, singleRange(sql))).toHaveLength(0);
+    });
+
+    // test_9: false positive — "WARNING — Unexpected: 'AUTOINCREMENT'"
+    it("test_9: CREATE TABLE with bare AUTOINCREMENT — no false positive", () => {
+      const sql = "CREATE TABLE test_9 (id INT AUTOINCREMENT)";
+      expect(warnings(validateWithParser(sql, singleRange(sql)))).toHaveLength(0);
+    });
+
+    // test_10: false positive — "WARNING — Unexpected: 'IDENTITY'"
+    it("test_10: CREATE TABLE with IDENTITY (start, step) — no false positive", () => {
+      const sql = "CREATE TABLE test_10 (id INT IDENTITY (100, 5))";
+      expect(warnings(validateWithParser(sql, singleRange(sql)))).toHaveLength(0);
+    });
+
+    // test_11: false positive — "WARNING — Unexpected: 'AUTOINCREMENT'"
+    it("test_11: CREATE TABLE with AUTOINCREMENT START 1 INCREMENT 1 — no false positive", () => {
+      const sql = "CREATE TABLE test_11 (id INT AUTOINCREMENT START 1 INCREMENT 1)";
+      expect(warnings(validateWithParser(sql, singleRange(sql)))).toHaveLength(0);
+    });
+
+    // test_12: false positive — "WARNING — Unexpected: 'IDENTITY'"
+    it("test_12: CREATE TABLE with IDENTITY ORDER — no false positive", () => {
+      const sql = "CREATE TABLE test_12 (id INT IDENTITY ORDER)";
+      expect(warnings(validateWithParser(sql, singleRange(sql)))).toHaveLength(0);
+    });
+
+    // test_13: false positive — "WARNING — Unexpected: 'AUTOINCREMENT'"
+    it("test_13: CREATE TABLE with AUTOINCREMENT NOORDER — no false positive", () => {
+      const sql = "CREATE TABLE test_13 (id INT AUTOINCREMENT NOORDER)";
+      expect(warnings(validateWithParser(sql, singleRange(sql)))).toHaveLength(0);
+    });
+
+    // test_15: false positive — "WARNING — Unexpected: 'CONSTRAINT'"
+    it("test_15: CREATE TABLE with named inline CONSTRAINT PRIMARY KEY — no false positive", () => {
+      const sql = "CREATE TABLE test_15 (id INT CONSTRAINT pk_inline PRIMARY KEY)";
+      expect(warnings(validateWithParser(sql, singleRange(sql)))).toHaveLength(0);
+    });
+
+    // test_17: false positive — "WARNING — Unexpected: 'CHECK'"
+    it("test_17: CREATE TABLE with inline CHECK constraint — no false positive", () => {
+      const sql = "CREATE TABLE test_17 (age INT CHECK (age >= 18))";
+      expect(warnings(validateWithParser(sql, singleRange(sql)))).toHaveLength(0);
+    });
+
+    // test_19: false positive — "WARNING — Unexpected: 'WITH'"
+    it("test_19: CREATE TABLE with column WITH MASKING POLICY USING — no false positive", () => {
+      const sql = "CREATE TABLE test_19 (ssn VARCHAR WITH MASKING POLICY ssn_mask USING (ssn, 'US'))";
+      expect(warnings(validateWithParser(sql, singleRange(sql)))).toHaveLength(0);
+    });
+
+    // test_20: false positive — "WARNING — Unexpected: 'PROJECTION'"
+    it("test_20: CREATE TABLE with column PROJECTION POLICY — no false positive", () => {
+      const sql = "CREATE TABLE test_20 (revenue NUMBER PROJECTION POLICY revenue_proj)";
+      expect(warnings(validateWithParser(sql, singleRange(sql)))).toHaveLength(0);
+    });
+
+    // test_21: false positive — "WARNING — Unexpected: 'WITH'"
+    it("test_21: CREATE TABLE with column WITH TAG — no false positive", () => {
+      const sql = "CREATE TABLE test_21 (email VARCHAR WITH TAG (pii_level = 'high'))";
+      expect(warnings(validateWithParser(sql, singleRange(sql)))).toHaveLength(0);
+    });
+
+    // test_26: false positive — "WARNING — Unexpected: 'DATA_RETENTION_TIME_IN_DAYS'"
+    it("test_26: CREATE TABLE with DATA_RETENTION_TIME_IN_DAYS and MAX_DATA_EXTENSION_TIME_IN_DAYS — no false positive", () => {
+      const sql = `CREATE TABLE test_26 (id INT)
+    DATA_RETENTION_TIME_IN_DAYS = 90
+    MAX_DATA_EXTENSION_TIME_IN_DAYS = 14`;
+      expect(warnings(validateWithParser(sql, singleRange(sql)))).toHaveLength(0);
+    });
+
+    // test_27: false positive — "WARNING — Unexpected: 'ENABLE_SCHEMA_EVOLUTION'"
+    it("test_27: CREATE TABLE with ENABLE_SCHEMA_EVOLUTION and CHANGE_TRACKING — no false positive", () => {
+      const sql = `CREATE TABLE test_27 (id INT)
+    ENABLE_SCHEMA_EVOLUTION = TRUE
+    CHANGE_TRACKING = TRUE`;
+      expect(warnings(validateWithParser(sql, singleRange(sql)))).toHaveLength(0);
+    });
+
+    // test_28: false positive — "WARNING — Unexpected: 'DEFAULT_DDL_COLLATION'"
+    it("test_28: CREATE TABLE with DEFAULT_DDL_COLLATION, COPY GRANTS, ERROR_LOGGING, COPY TAGS, COMMENT, ROW_TIMESTAMP — no false positive", () => {
+      const sql = `CREATE TABLE test_28 (id INT, ts TIMESTAMP)
+    DEFAULT_DDL_COLLATION = 'utf8'
+    COPY GRANTS
+    ERROR_LOGGING = TRUE
+    COPY TAGS
+    COMMENT = 'Audit table'
+    ROW_TIMESTAMP = TRUE`;
+      expect(warnings(validateWithParser(sql, singleRange(sql)))).toHaveLength(0);
+    });
+
+    // test_29: false positive — "WARNING — Unexpected: 'ACCESS'"
+    it("test_29: CREATE TABLE with ROW ACCESS POLICY, AGGREGATION POLICY, JOIN POLICY, STORAGE LIFECYCLE POLICY, TAG, CONTACT — no false positive", () => {
+      const sql = `CREATE TABLE test_29 (id INT, user_id INT, group_id INT)
+    WITH ROW ACCESS POLICY row_pol ON (user_id)
+    WITH AGGREGATION POLICY agg_pol ENTITY KEY (user_id, group_id)
+    WITH JOIN POLICY join_pol ALLOWED JOIN KEYS (id)
+    WITH STORAGE LIFECYCLE POLICY life_pol ON (id)
+    WITH TAG (department = 'finance', cost_center = '123')
+    WITH CONTACT (owner = 'admin@company.com', business_steward = 'manager@company.com')`;
+      expect(warnings(validateWithParser(sql, singleRange(sql)))).toHaveLength(0);
+    });
+
+    // test_30: false positive noted as "WARNING — Unexpected: 'ACCESS'" in editor
+    it("test_30: CREATE TABLE FROM BACKUP SET ... IDENTIFIER ... — no false positive", () => {
+      const sql = "CREATE TABLE test_30 FROM BACKUP SET my_disaster_recovery_set IDENTIFIER 'backup_2026_04_10'";
+      expect(warnings(validateWithParser(sql, singleRange(sql)))).toHaveLength(0);
+    });
   });
 });
 
@@ -1395,6 +1707,41 @@ describe("validateBareColumnRefs", async () => {
       const m = await validateBareColumnRefs(sql, singleRange(sql), [], new Map());
       
       expect(warnings(m)).toHaveLength(0);
+    });
+  });
+
+  describe("CREATE MATERIALIZED VIEW statements (Inner SELECT Validation)", async () => {
+    it("flags unknown columns inside a CREATE MATERIALIZED VIEW statement", async () => {
+      const sql = `CREATE OR REPLACE MATERIALIZED VIEW my_mv AS SELECT bad_col FROM "DB"."SCH"."EMPLOYEES"`;
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
+      
+      // THIS WILL FAIL: Engine doesn't convert MATERIALIZED VIEW to a parsable AST
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/bad_col/i);
+    });
+
+    it("flags columns from JOINs inside a CREATE MATERIALIZED VIEW statement", async () => {
+      const sql = `
+        CREATE SECURE INTERACTIVE MATERIALIZED VIEW vw_high_value AS
+        SELECT e.FIRST_NAME, d.fake_col
+        FROM DB.SCH.EMPLOYEES e
+        JOIN DB.SCH.DEPARTMENTS d ON e.DEPT_ID = d.DEPT_ID
+      `;
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empRef, deptRef), BOTH_CACHE);
+      
+      // THIS WILL FAIL
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/fake_col/i);
+    });
+  });
+
+  describe("CREATE DYNAMIC TABLE statements (Inner SELECT Validation)", async () => {
+    it("flags unknown columns inside a CREATE DYNAMIC TABLE statement", async () => {
+      const sql = `CREATE DYNAMIC TABLE dt TARGET_LAG = '1 day' WAREHOUSE = wh AS SELECT bad_col FROM "DB"."SCH"."EMPLOYEES"`;
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
+      // THIS WILL FAIL
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/bad_col/i);
     });
   });
 
@@ -2072,6 +2419,23 @@ describe("validateTablesExist", () => {
     });
   });
 
+  describe("Context-aware DDL validation (CREATE DYNAMIC TABLE Inner SELECT)", () => {
+    it("flags a missing table inside a CREATE DYNAMIC TABLE statement", async () => {
+      const sql = "CREATE DYNAMIC TABLE dt TARGET_LAG = DOWNSTREAM WAREHOUSE = wh AS SELECT * FROM MISSING_TABLE;";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      // THIS WILL FAIL
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/MISSING_TABLE/i);
+    });
+
+    it("allows a CREATE DYNAMIC TABLE statement if the inner table exists", async () => {
+      const sql = "CREATE DYNAMIC TABLE dt TARGET_LAG = '1 minute' WAREHOUSE = wh AS SELECT * FROM LIVE_TABLE;";
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      // THIS WILL FAIL until engine is updated
+      expect(errors(m)).toHaveLength(0);
+    });
+  });
+
   describe("Context-aware DDL validation (UNDROP)", () => {
     it("flags missing dropped table in UNDROP TABLE", async () => {
       const sql = "UNDROP TABLE my_missing_table;";
@@ -2109,6 +2473,44 @@ describe("validateTablesExist", () => {
       const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
       expect(errors(m)).toHaveLength(1);
       expect(errors(m)[0].message).toMatch(/is not available to undrop/i);
+    });
+  });
+
+  describe("Context-aware DDL validation (USE statements)", () => {
+    function multiRange(statements: string[]): { sql: string; ranges: StatementRange[] } {
+      let offset = 0;
+      let line = 1;
+      const ranges: StatementRange[] = statements.map((stmt) => {
+        const startOffset = offset;
+        const endOffset = offset + stmt.length;
+        const startLine = line;
+        const endLine = line + stmt.split("\n").length - 1;
+
+        offset = endOffset + 1; 
+        line = endLine + 1;
+        return { startLine, endLine, startOffset, endOffset };
+      });
+      return { sql: statements.join("\n"), ranges };
+    }
+
+    it("allows 1-part CREATE TABLE when preceded by USE SCHEMA db.schema", async () => {
+      const { sql, ranges } = multiRange([
+        "USE SCHEMA LINEAGE_SOURCE_DB.PUBLIC;",
+        "CREATE TABLE test_1 (id INT);"
+      ]);
+      const m = await validateTablesExist(sql, ranges, []);
+      // THIS WILL FAIL until engine supports USE SCHEMA setting DB
+      expect(errors(m)).toHaveLength(0);
+    });
+
+    it("allows 1-part CREATE TABLE when preceded by bare USE db.schema", async () => {
+      const { sql, ranges } = multiRange([
+        "use LINEAGE_SOURCE_DB.PUBLIC;",
+        "CREATE TABLE test_1 (id INT);"
+      ]);
+      const m = await validateTablesExist(sql, ranges, []);
+      // THIS WILL FAIL until engine supports bare USE setting DB & Schema
+      expect(errors(m)).toHaveLength(0);
     });
   });
 
@@ -2186,5 +2588,5 @@ describe("validateTablesExist", () => {
       expect(errors(m)).toHaveLength(0);
     });
   });
-});
+})
 });
