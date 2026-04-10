@@ -1398,6 +1398,61 @@ describe("validateBareColumnRefs", async () => {
     });
   });
 
+  // ── 3o. Columns in WHERE, GROUP BY, ORDER BY, HAVING ──────────────────────
+  describe("Columns in WHERE, GROUP BY, ORDER BY, and HAVING clauses", async () => {
+    it("flags an unaliased unknown column in a WHERE clause", async () => {
+      const sql = "SELECT ID FROM DB.SCH.EMPLOYEES WHERE bad_where = 1";
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
+      
+      // THIS WILL FAIL: Engine currently ignores node.where
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/bad_where/i);
+    });
+
+    it("flags an aliased unknown column in a WHERE clause", async () => {
+      const sql = "SELECT e.ID FROM DB.SCH.EMPLOYEES e WHERE e.bad_where = 'John'";
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empRef), EMPLOYEES_CACHE);
+      
+      // THIS WILL FAIL
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/bad_where/i);
+    });
+
+    it("silently allows valid aliased and unaliased columns in a WHERE clause", async () => {
+      const sql = "SELECT e.ID FROM DB.SCH.EMPLOYEES e WHERE e.FIRST_NAME = 'John' AND SALARY > 1000";
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empRef), EMPLOYEES_CACHE);
+      
+      expect(warnings(m)).toHaveLength(0);
+    });
+
+    it("flags an unknown column in a GROUP BY clause", async () => {
+      const sql = "SELECT DEPT_ID, COUNT(ID) FROM DB.SCH.EMPLOYEES GROUP BY bad_group";
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
+      
+      // THIS WILL FAIL: Engine currently ignores node.groupby
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/bad_group/i);
+    });
+
+    it("flags an unknown column in a HAVING clause", async () => {
+      const sql = "SELECT DEPT_ID, COUNT(ID) FROM DB.SCH.EMPLOYEES GROUP BY DEPT_ID HAVING MAX(bad_having) > 100";
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
+      
+      // THIS WILL FAIL: Engine currently ignores node.having
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/bad_having/i);
+    });
+
+    it("flags an unknown column in an ORDER BY clause", async () => {
+      const sql = "SELECT ID FROM DB.SCH.EMPLOYEES ORDER BY bad_order DESC";
+      const m = await validateBareColumnRefs(sql, singleRange(sql), refs(empFullRef), EMPLOYEES_CACHE);
+      
+      // THIS WILL FAIL: Engine currently ignores node.orderby
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/bad_order/i);
+    });
+  });
+
   // ── 4. validateTablesExist ────────────────────────────────────────────────────
 
 describe("validateTablesExist", () => {

@@ -493,6 +493,15 @@ export async function validateBareColumnRefs(
         for (const col of (node.columns ?? [])) {
           extractColumnsFromExpr((col as any)?.expr);
         }
+        if (node.where) extractColumnsFromExpr(node.where);
+        if (node.groupby) extractColumnsFromExpr(node.groupby);
+        if (node.having) extractColumnsFromExpr(node.having);
+        if (node.orderby) extractColumnsFromExpr(node.orderby);
+        if (Array.isArray(node.from)) {
+          for (const f of node.from) {
+            if (f.on) extractColumnsFromExpr(f.on);
+          }
+        }
       } else if (node.type === "insert") {
         for (const col of (node.columns ?? [])) {
           const colName = typeof col === "string" ? col : String((col as any).column || (col as any).name || col);
@@ -547,7 +556,6 @@ export async function validateTablesExist(
   const scriptDroppedTables = new Set<string>();
   const scriptDroppedDbsAndSchemas = new Set<string>();
 
-  // 1. PRE-PASS: Collect locally created and dropped tables, databases, and schemas!
   for (const r of stmtRanges) {
     const rawStmtText = sql.slice(r.startOffset, r.endOffset);
     
@@ -609,7 +617,6 @@ export async function validateTablesExist(
     }
   }
 
-  // 2. PARSE & VALIDATE
   let scriptHasActiveDb = false; 
   let scriptHasActiveSchema = false;
 
