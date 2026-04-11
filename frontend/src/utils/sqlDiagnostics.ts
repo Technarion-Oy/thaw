@@ -836,33 +836,26 @@ export async function validateTablesExist(
             });
           }
         } else {
-          if (hasGlobalSchema) {
-            const schemaExists = scriptCreatedDbsAndSchemas.has(schemaNorm) ||
-                                 (knownSchemas.length > 0 
-                                   ? knownSchemas.some(s => checkEq(s.name, schemaNorm))
-                                   : resolvedRefs.some(ref => checkEq(ref.schema, schemaNorm)));
-            if (!schemaExists) {
-               const tokens = findTokensLocally(rawStmtText, [schemaNorm], r.startLine, quotedIdentifiersIgnoreCase);
-               for (const t of tokens) {
-                  markers.push({
-                    startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
-                    message: `Schema '${t.name}' does not exist or is not authorized.`, severity: 8
-                  });
-               }
-            }
+          const schemaExists = scriptCreatedDbsAndSchemas.has(schemaNorm) ||
+                               (knownSchemas.length > 0 
+                                 ? knownSchemas.some(s => checkEq(s.name, schemaNorm))
+                                 : resolvedRefs.some(ref => checkEq(ref.schema, schemaNorm)));
+          if (!schemaExists) {
+             const tokens = findTokensLocally(rawStmtText, [schemaNorm], r.startLine, quotedIdentifiersIgnoreCase);
+             for (const t of tokens) {
+                markers.push({
+                  startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+                  message: `Schema '${t.name}' does not exist or is not authorized.`, severity: 8
+                });
+             }
           }
         }
       } else if (parts.length === 3) {
         const dbNorm = normParts[0];
-        // When no explicit database list is provided, fall back to resolvedRefs to
-        // determine if the database is known. If resolvedRefs is also empty (no
-        // connection context), treat the db as missing. If resolvedRefs has entries
-        // for other databases, we can't conclude this specific db doesn't exist —
-        // the user may be authorized to create in it but it's simply not in our cache.
         const dbExists = scriptCreatedDbsAndSchemas.has(dbNorm) ||
-                         (knownDatabases.length > 0
-                           ? knownDatabases.some(d => checkEq(d, dbNorm))
-                           : resolvedRefs.length > 0);
+                         (knownDatabases.length > 0 
+                           ? knownDatabases.some(d => checkEq(d, dbNorm)) 
+                           : resolvedRefs.some(ref => checkEq(ref.db, dbNorm)));
         if (!dbExists) {
           const tokens = findTokensLocally(rawStmtText, [dbNorm], r.startLine, quotedIdentifiersIgnoreCase);
           for (const t of tokens) {
@@ -875,14 +868,10 @@ export async function validateTablesExist(
            const schemaNorm = normParts[1];
            const schemaPath = `${dbNorm}.${schemaNorm}`;
            const dbSchemas = knownSchemas.filter(s => checkEq(s.db, dbNorm));
-           // Same principle for schema: if we have explicit schema info use it;
-           // if resolvedRefs gives us context but no schemas for this specific db,
-           // skip schema validation rather than produce a false positive.
            const schemaExists = scriptCreatedDbsAndSchemas.has(schemaNorm) || scriptCreatedDbsAndSchemas.has(schemaPath) ||
                                 (dbSchemas.length > 0
                                   ? dbSchemas.some(s => checkEq(s.name, schemaNorm))
-                                  : resolvedRefs.length > 0 ||
-                                    resolvedRefs.some(ref => checkEq(ref.db, dbNorm) && checkEq(ref.schema, schemaNorm)));
+                                  : resolvedRefs.some(ref => checkEq(ref.db, dbNorm) && checkEq(ref.schema, schemaNorm)));
            if (!schemaExists) {
              const tokens = findTokensLocally(rawStmtText, [schemaNorm], r.startLine, quotedIdentifiersIgnoreCase);
              for (const t of tokens) {

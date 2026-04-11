@@ -2075,7 +2075,7 @@ describe("validateTablesExist", () => {
 
     it("handles fully-qualified and double-quoted names in CREATE pre-pass", async () => {
       const { sql, ranges } = multiRange([
-        'CREATE TRANSIENT TABLE IF NOT EXISTS "MY_DB"."MY_SCHEMA"."Crazy Table!" (id INT);',
+        'CREATE TRANSIENT TABLE IF NOT EXISTS "DB"."SCH"."Crazy Table!" (id INT);',
         'SELECT * FROM "Crazy Table!";'
       ]);
       const m = await validateTablesExist(sql, ranges, LIVE_REFS);
@@ -2395,6 +2395,44 @@ describe("validateTablesExist", () => {
   });
 
   describe("Context-aware DDL validation (CREATE TABLE)", () => {
+    it("flags missing database in a 3-part CREATE TABLE IF NOT EXISTS statement (from snippet)", async () => {
+      const sql = `CREATE TABLE IF NOT EXISTS my_database.public.basic_employees (
+          empp_id NUMBER,
+          first_name VARCHAR,
+          last_name VARCHAR
+      );`;
+      const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/Database 'MY_DATABASE' does not exist/i);
+    });
+
+    it("flags missing database context for a 2-part CREATE TABLE IF NOT EXISTS statement", async () => {
+      const sql = `CREATE TABLE IF NOT EXISTS public.basic_employees (
+          empp_id NUMBER,
+          first_name VARCHAR,
+          last_name VARCHAR
+      );`;
+      const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
+      
+      // 2-part identifier lacks a database. If none is selected globally, it should flag the missing DB context.
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/No database selected\. Cannot create table using schema 'PUBLIC'/i);
+    });
+
+    it("flags missing schema for a 2-part CREATE TABLE IF NOT EXISTS statement", async () => {
+      const sql = `CREATE TABLE IF NOT EXISTS missing_schema.basic_employees (
+          empp_id NUMBER,
+          first_name VARCHAR,
+          last_name VARCHAR
+      );`;
+      
+      // Provide a known database so the DB context passes, but pass a different known schema so schema validation runs
+      const m = await validateTablesExist(sql, singleRange(sql), [], ["MY_DB"], [{db: "MY_DB", name: "PUBLIC"}]);
+      
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/Schema 'MISSING_SCHEMA' does not exist/i);
+    });
+
     it("flags 1-part CREATE TABLE when no database or schema is in context", async () => {
       const sql = "CREATE TABLE my_table (a varchar);";
       const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
@@ -2423,9 +2461,9 @@ describe("validateTablesExist", () => {
       expect(errors(m)).toHaveLength(0);
     });
 
-    it("allows 2-part CREATE TABLE if database is in global context", async () => {
+    it("allows 2-part CREATE TABLE if database and schema are in global context", async () => {
       const sql = "CREATE TABLE existing_sch.my_table (a varchar);";
-      const m = await validateTablesExist(sql, singleRange(sql), [], ["EXISTING_DB"], []);
+      const m = await validateTablesExist(sql, singleRange(sql), [], ["EXISTING_DB"], [{ db: "EXISTING_DB", name: "EXISTING_SCH" }]);
       expect(errors(m)).toHaveLength(0);
     });
 
