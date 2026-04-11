@@ -142,7 +142,7 @@ const SNOWFLAKE_FP_RE = new RegExp(
   "|WAREHOUSE|ROLE|FILE\\s+FORMAT|USER|ALERT|SHARE|EXTERNAL" +
   "|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK|RESOURCE|ROW\\s+ACCESS" +
   "|SESSION|PASSWORD|REPLICATION|FAILOVER|APPLICATION)\\b" +
-  "|ALTER\\s+(?:VIEW|TASK|STREAM|WAREHOUSE|DATABASE|SEQUENCE|STAGE|PIPE" +
+  "|ALTER\\s+(?:TABLE|VIEW|TASK|STREAM|WAREHOUSE|DATABASE|SEQUENCE|STAGE|PIPE" +
   "|USER|ALERT|SHARE|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK" +
   "|RESOURCE|REPLICATION|FAILOVER)\\b" +
   "|DROP\\s+(?:TABLE|VIEW|TASK|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|WAREHOUSE|ROLE)\\b" + 
@@ -469,9 +469,37 @@ export async function validateBareColumnRefs(
     }
 
     let ast: any;
-    try { ast = parser.parse(parseText); } catch { continue; }
+    let parsedOk = false;
+    try { ast = parser.parse(parseText); parsedOk = true; } catch { }
 
-    const stmtAsts: any[] = Array.isArray(ast.ast) ? ast.ast : [ast.ast];
+    const stmtAsts: any[] = parsedOk && ast ? (Array.isArray(ast.ast) ? ast.ast : [ast.ast]) : [];
+
+    if (/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?TABLE\b/i.test(parseText)) {
+      const refRegex = /\bREFERENCES\s+((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})\s*(?:\(\s*([^)]+)\s*\))?/gi;
+      let m;
+      while ((m = refRegex.exec(parseText)) !== null) {
+        const refTableStr = m[1];
+        const colsRaw = m[2];
+        const parts = [...refTableStr.matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(x => x[0]);
+        if (parts.length > 0) {
+          let db = null, schema = null, table = parts[parts.length - 1];
+          if (parts.length === 3) { db = parts[0]; schema = parts[1]; }
+          else if (parts.length === 2) { schema = parts[0]; }
+          
+          const synthNode: any = {
+            type: "select",
+            from: [{ db, schema, table }]
+          };
+          if (colsRaw) {
+            const cols = [...colsRaw.matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(x => x[0]);
+            synthNode.columns = cols.map((c: string) => ({ expr: { type: "column_ref", column: c } }));
+          }
+          stmtAsts.push(synthNode);
+        }
+      }
+    }
+
+    if (stmtAsts.length === 0) continue;
 
     for (let node of stmtAsts) {
       if (node && node.type === "create") {
@@ -798,6 +826,42 @@ export async function validateTablesExist(
             }
           }
         }
+      } else if (parts.length === 3) {
+        const dbNorm = normParts[0];
+        const isIfNotExists = /IF\s+NOT\s+EXISTS/i.test(rawStmtText);
+        
+        if (!isIfNotExists) {
+          const dbExists = scriptCreatedDbsAndSchemas.has(dbNorm) ||
+                           (knownDatabases.length > 0 
+                             ? knownDatabases.some(d => checkEq(d, dbNorm)) 
+                             : resolvedRefs.some(ref => checkEq(ref.db, dbNorm)));
+          if (!dbExists) {
+            const tokens = findTokensLocally(rawStmtText, [dbNorm], r.startLine, quotedIdentifiersIgnoreCase);
+            for (const t of tokens) {
+               markers.push({
+                 startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+                 message: `Database '${t.name}' does not exist or is not authorized.`, severity: 8
+               });
+            }
+          } else {
+             const schemaNorm = normParts[1];
+             const schemaPath = `${dbNorm}.${schemaNorm}`;
+             const dbSchemas = knownSchemas.filter(s => checkEq(s.db, dbNorm));
+             const schemaExists = scriptCreatedDbsAndSchemas.has(schemaNorm) || scriptCreatedDbsAndSchemas.has(schemaPath) ||
+                                  (dbSchemas.length > 0
+                                    ? dbSchemas.some(s => checkEq(s.name, schemaNorm))
+                                    : resolvedRefs.some(ref => checkEq(ref.db, dbNorm) && checkEq(ref.schema, schemaNorm)));
+             if (!schemaExists) {
+               const tokens = findTokensLocally(rawStmtText, [schemaNorm], r.startLine, quotedIdentifiersIgnoreCase);
+               for (const t of tokens) {
+                  markers.push({
+                    startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+                    message: `Schema '${t.name}' does not exist or is not authorized.`, severity: 8
+                  });
+               }
+             }
+          }
+        }
       }
     }
 
@@ -819,7 +883,7 @@ export async function validateTablesExist(
         }
       } else if (parts.length === 2) {
         const dbNorm = normParts[0];
-        if (hasGlobalDb) {
+        if (hasGlobalDb || scriptHasActiveDb) {
           const dbExists = scriptCreatedDbsAndSchemas.has(dbNorm) ||
                            (knownDatabases.length > 0 
                              ? knownDatabases.some(d => checkEq(d, dbNorm)) 
@@ -1012,9 +1076,37 @@ export async function validateTablesExist(
     }
 
     let ast: any;
-    try { ast = parser.parse(parseText); } catch { continue; }
+    let parsedOk = false;
+    try { ast = parser.parse(parseText); parsedOk = true; } catch { }
 
-    const stmtAsts: any[] = Array.isArray(ast.ast) ? ast.ast : [ast.ast];
+    const stmtAsts: any[] = parsedOk && ast ? (Array.isArray(ast.ast) ? ast.ast : [ast.ast]) : [];
+
+    if (/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?TABLE\b/i.test(parseText)) {
+      const refRegex = /\bREFERENCES\s+((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})\s*(?:\(\s*([^)]+)\s*\))?/gi;
+      let m;
+      while ((m = refRegex.exec(parseText)) !== null) {
+        const refTableStr = m[1];
+        const colsRaw = m[2];
+        const parts = [...refTableStr.matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(x => x[0]);
+        if (parts.length > 0) {
+          let db = null, schema = null, table = parts[parts.length - 1];
+          if (parts.length === 3) { db = parts[0]; schema = parts[1]; }
+          else if (parts.length === 2) { schema = parts[0]; }
+          
+          const synthNode: any = {
+            type: "select",
+            from: [{ db, schema, table }]
+          };
+          if (colsRaw) {
+            const cols = [...colsRaw.matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(x => x[0]);
+            synthNode.columns = cols.map((c: string) => ({ expr: { type: "column_ref", column: c } }));
+          }
+          stmtAsts.push(synthNode);
+        }
+      }
+    }
+
+    if (stmtAsts.length === 0) continue;
 
     for (let node of stmtAsts) {
       if (node && node.type === "create") {

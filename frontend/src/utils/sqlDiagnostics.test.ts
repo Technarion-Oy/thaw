@@ -85,6 +85,7 @@ vi.mock("../../wailsjs/go/main/App", () => ({
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 const warnings = (markers: DiagMarker[]) => markers.filter((m) => m.severity === 4);
+const errors = (markers: DiagMarker[]) => markers.filter((m) => m.severity === 8);
 
 function singleRange(sql: string): StatementRange[] {
   return [{ startLine: 1, endLine: sql.split("\n").length, startOffset: 0, endOffset: sql.length }];
@@ -1021,6 +1022,23 @@ WITH TAG (data_classification = 'restricted')`,
     }
   });
 
+  // ── Snowflake-specific ALTER TABLE constraint modifiers ───────────────────
+  describe("Snowflake-specific ALTER TABLE constraint modifiers", () => {
+    const validAlterQueries = [
+      "ALTER TABLE existing_table ADD COLUMN new_id INT NOT NULL CONSTRAINT pk_new PRIMARY KEY DEFERRABLE RELY;",
+      "ALTER TABLE existing_table ADD COLUMN new_parent_id INT FOREIGN KEY REFERENCES parent (id) ON DELETE CASCADE NOT ENFORCED;",
+      "ALTER TABLE existing_table ADD COLUMN new_flag BOOLEAN CHECK (new_flag = TRUE) ENABLE NOVALIDATE;"
+    ];
+
+    for (const sql of validAlterQueries) {
+      it(`should silently accept ALTER TABLE constraint syntax: ${sql.slice(0, 45)}...`, () => {
+        const m = validateWithParser(sql, singleRange(sql));
+        // THESE WILL FAIL: The parser currently doesn't bypass or understand these constraint properties
+        expect(warnings(m)).toHaveLength(0);
+      });
+    }
+  });
+
   // ── 2u. CREATE TABLE — one test per temp.sql entry ───────────────────────
   describe("CREATE TABLE — temp.sql numbered test cases", () => {
     // test_1: standard create — no modifier, expected clean
@@ -1710,6 +1728,9 @@ describe("validateBareColumnRefs", async () => {
     });
   });
 
+  // Mock live database cache
+  const LIVE_REFS = refs({ alias: "l", db: "DB", schema: "SCH", name: "LIVE_TABLE" });
+
   describe("CREATE MATERIALIZED VIEW statements (Inner SELECT Validation)", async () => {
     it("flags unknown columns inside a CREATE MATERIALIZED VIEW statement", async () => {
       const sql = `CREATE OR REPLACE MATERIALIZED VIEW my_mv AS SELECT bad_col FROM "DB"."SCH"."EMPLOYEES"`;
@@ -1733,6 +1754,29 @@ describe("validateBareColumnRefs", async () => {
       expect(warnings(m)).toHaveLength(1);
       expect(warnings(m)[0].message).toMatch(/fake_col/i);
     });
+
+    it("flags missing database in a 3-part CREATE TABLE statement", async () => {
+      const sql = "CREATE TABLE my_database.public.basic_employees (id INT);";
+      const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
+      
+      // THIS WILL FAIL: The engine currently ignores context checks if parts.length === 3
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/Database 'MY_DATABASE' does not exist/i);
+    });
+
+    it("flags missing referenced table in an out-of-line FOREIGN KEY constraint", async () => {
+      const sql = `
+        CREATE TABLE session_events (
+            user_id NUMBER,
+            CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES missing_fk_table (id)
+        );
+      `;
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      // THIS WILL FAIL: The engine doesn't scan CREATE TABLE constraints for table references
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/MISSING_FK_TABLE/i);
+    });
   });
 
   describe("CREATE DYNAMIC TABLE statements (Inner SELECT Validation)", async () => {
@@ -1742,6 +1786,30 @@ describe("validateBareColumnRefs", async () => {
       // THIS WILL FAIL
       expect(warnings(m)).toHaveLength(1);
       expect(warnings(m)[0].message).toMatch(/bad_col/i);
+    });
+  });
+
+  // ── CREATE TABLE statements (Constraint Column Validation) ────────────────
+  describe("CREATE TABLE statements (Constraint Column Validation)", async () => {
+    it("flags an unknown column in an out-of-line FOREIGN KEY REFERENCES constraint", async () => {
+      const sql = `
+        CREATE GLOBAL TEMPORARY TABLE session_events (
+            user_id NUMBER,
+            CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES basic_employees (emp_id)
+        );
+      `;
+      // Mock cache for basic_employees without 'emp_id'
+      const BASIC_EMP_CACHE = makeCache([{
+        db: "DB", schema: "SCH", table: "BASIC_EMPLOYEES",
+        cols: ["WRONG_ID", "FIRST_NAME"],
+      }]);
+      const basicEmpRef = { alias: "", db: "DB", schema: "SCH", name: "BASIC_EMPLOYEES" };
+      
+      const m = await validateBareColumnRefs(sql, singleRange(sql), [basicEmpRef], BASIC_EMP_CACHE);
+      
+      // THIS WILL FAIL: The engine currently doesn't parse column references inside CREATE TABLE constraints
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/emp_id/i);
     });
   });
 
@@ -2206,10 +2274,27 @@ describe("validateTablesExist", () => {
       expect(errors(m)).toHaveLength(0);
     });
 
-    it("allows 3-part CREATE TABLE regardless of context", async () => {
-      const sql = "CREATE TABLE my_db.my_sch.my_table (a varchar);";
+    it("flags missing database in a 3-part CREATE TABLE statement", async () => {
+      const sql = "CREATE TABLE my_database.public.basic_employees (id INT);";
       const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
-      expect(errors(m)).toHaveLength(0);
+      
+      // THIS WILL FAIL: The engine currently ignores context checks if parts.length === 3
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/Database 'MY_DATABASE' does not exist/i);
+    });
+
+    it("flags missing referenced table in an out-of-line FOREIGN KEY constraint", async () => {
+      const sql = `
+        CREATE TABLE session_events (
+            user_id NUMBER,
+            CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES missing_fk_table (id)
+        );
+      `;
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      // THIS WILL FAIL: The engine doesn't scan CREATE TABLE constraints for table references
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/MISSING_FK_TABLE/i);
     });
 
     it("allows 1-part CREATE TABLE if context is created earlier in the script", async () => {
