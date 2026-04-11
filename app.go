@@ -3673,8 +3673,9 @@ func (a *App) SaveEditorPrefs(prefs config.EditorPrefs) error {
 // ListAIModels returns the models available for the given provider and API key.
 // Returns nil (not an error) when the key is invalid or the request fails so
 // the frontend can fall back to its static defaults.
-func (a *App) ListAIModels(provider, apiKey string) []string {
-	models, err := ai.ListModels(provider, apiKey)
+// ollamaPort is the Ollama server port (0 = default 11434); ignored for other providers.
+func (a *App) ListAIModels(provider, apiKey string, ollamaPort int) []string {
+	models, err := ai.ListModels(provider, apiKey, ollamaPort)
 	if err != nil {
 		logger.L.Warn("failed to list AI models", "provider", provider, "err", err)
 		return nil
@@ -3685,8 +3686,9 @@ func (a *App) ListAIModels(provider, apiKey string) []string {
 // TestAIModel makes a minimal one-token API call to verify that the given
 // provider/key/model combination is valid and reachable.
 // Returns an empty string on success or a human-readable error message.
-func (a *App) TestAIModel(provider, apiKey, model string) string {
-	if err := ai.TestModel(provider, apiKey, model); err != nil {
+// ollamaPort is the Ollama server port (0 = default 11434); ignored for other providers.
+func (a *App) TestAIModel(provider, apiKey, model string, ollamaPort int) string {
+	if err := ai.TestModel(provider, apiKey, model, ollamaPort); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -3822,7 +3824,7 @@ func (a *App) SendChatMessage(
 		return "unknown tool", true
 	}
 
-	msg, err := ai.Chat(chatCtx, cfg.AI.Provider, cfg.AI.APIKey, cfg.AI.Model,
+	msg, err := ai.Chat(chatCtx, cfg.AI.Provider, cfg.AI.APIKey, cfg.AI.Model, cfg.AI.OllamaPort,
 		history, userText, currentSQL, lastResultSummary, agentMode, workDir, executor)
 	if err != nil {
 		return nil, err
@@ -3923,19 +3925,19 @@ func formatChatQueryResult(res *snowflake.QueryResult) string {
 
 // GetAISuggestion calls the configured AI provider and returns an inline SQL
 // completion for the given prefix text. Returns an empty string when AI is
-// disabled, when no API key is set, or when the provider returns an error.
+// disabled, when no API key is set (non-Ollama), or when the provider returns an error.
 func (a *App) GetAISuggestion(prefix string) string {
 	cfg, err := config.Load()
 	if err != nil {
 		return ""
 	}
-	if !cfg.AI.Enabled || cfg.AI.APIKey == "" {
+	if !cfg.AI.Enabled || (cfg.AI.Provider != "ollama" && cfg.AI.APIKey == "") {
 		return ""
 	}
 
 	prompt := "Complete this Snowflake SQL query. Return ONLY the completion text to insert at the cursor — no explanation, no markdown, no repetition of existing text. Keep it to 1–2 lines.\n\n" + prefix
 
-	suggestion, err := ai.GetSuggestion(cfg.AI.Provider, cfg.AI.APIKey, cfg.AI.Model, prompt)
+	suggestion, err := ai.GetSuggestion(cfg.AI.Provider, cfg.AI.APIKey, cfg.AI.Model, prompt, cfg.AI.OllamaPort)
 	if err != nil {
 		logger.L.Debug("AI suggestion failed", "provider", cfg.AI.Provider, "err", err)
 		return ""
@@ -3952,11 +3954,11 @@ func (a *App) SuggestImportOptions(format, sampleContent string) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("failed to load config: %w", err)
 	}
-	if !cfg.AI.Enabled || cfg.AI.APIKey == "" {
+	if !cfg.AI.Enabled || (cfg.AI.Provider != "ollama" && cfg.AI.APIKey == "") {
 		return "", fmt.Errorf("AI is not configured — enable it in Settings → AI")
 	}
 
-	result, err := ai.SuggestFormatOptions(cfg.AI.Provider, cfg.AI.APIKey, cfg.AI.Model, format, sampleContent)
+	result, err := ai.SuggestFormatOptions(cfg.AI.Provider, cfg.AI.APIKey, cfg.AI.Model, format, sampleContent, cfg.AI.OllamaPort)
 	if err != nil {
 		logger.L.Debug("AI format suggestion failed", "provider", cfg.AI.Provider, "err", err)
 		return "", fmt.Errorf("AI suggestion failed: %w", err)

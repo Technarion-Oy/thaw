@@ -62,6 +62,7 @@ export namespace config {
 	    apiKey: string;
 	    model: string;
 	    enabled: boolean;
+	    ollamaPort?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new AIConfig(source);
@@ -73,6 +74,7 @@ export namespace config {
 	        this.apiKey = source["apiKey"];
 	        this.model = source["model"];
 	        this.enabled = source["enabled"];
+	        this.ollamaPort = source["ollamaPort"];
 	    }
 	}
 	export class EditorPrefs {
