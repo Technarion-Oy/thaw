@@ -2020,6 +2020,19 @@ describe("validateTablesExist", () => {
       expect(errors(m)).toHaveLength(1);
       expect(errors(m)[0].message).toMatch(/MISSING_CTE_TABLE/i);
     });
+
+    it("flags a missing table in an ALTER TABLE ADD COLUMN statement", async () => {
+      const sql = `ALTER TABLE existing_table ADD COLUMN 
+    new_id INT NOT NULL CONSTRAINT pk_new PRIMARY KEY DEFERRABLE RELY;`;
+      
+      // LIVE_REFS only contains 'LIVE_TABLE', so 'existing_table' should trigger a missing table error
+      const m = await validateTablesExist(sql, singleRange(sql), LIVE_REFS);
+      
+      // Expect exactly 1 fatal error (severity 8) complaining about the missing table
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].severity).toBe(8);
+      expect(errors(m)[0].message).toMatch(/Table or View 'EXISTING_TABLE' does not exist|EXISTING_TABLE/i);
+    });
   });
 
   describe("database, schema, and quoting edge cases (AST squashing)", () => {

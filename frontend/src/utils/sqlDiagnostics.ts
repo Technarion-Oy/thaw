@@ -1060,6 +1060,61 @@ export async function validateTablesExist(
       }
     }
 
+    const alterMatch = rawStmtText.match(/^\s*ALTER\s+(TABLE|VIEW)\s+(?:IF\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    if (alterMatch) {
+      const ifExists = /IF\s+EXISTS/i.test(rawStmtText);
+      if (!ifExists) {
+        const parts = [...alterMatch[2].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
+        const ftTable = parts[parts.length - 1];
+        const ftDb = parts.length === 3 ? parts[0] : null;
+        const ftSchema = parts.length === 3 ? parts[1] : (parts.length === 2 ? parts[0] : null);
+        if (!scriptCreatedTables.has(ftTable) && !scriptCreatedTables.has(parts.join("."))) {
+          const isLive = resolvedRefs.some(ref => 
+            checkEq(ref.name, ftTable) &&
+            (!ftDb || checkEq(ref.db, ftDb)) &&
+            (!ftSchema || checkEq(ref.schema, ftSchema))
+          );
+          if (!isLive) {
+            let badToken = ftTable;
+            let msgFn = (tName: string) => `Table or View '${tName}' does not exist or is not authorized.`;
+            if (ftDb) {
+              const dbExists = scriptCreatedDbsAndSchemas.has(ftDb) || (knownDatabases.length > 0 
+                ? knownDatabases.some(d => checkEq(d, ftDb))
+                : resolvedRefs.some(ref => checkEq(ref.db, ftDb)));
+              if (!dbExists) {
+                badToken = ftDb;
+                msgFn = (tName: string) => `Database '${tName}' does not exist or is not authorized.`;
+              } else if (ftSchema) {
+                const dbSchemas = knownSchemas.filter(s => checkEq(s.db, ftDb));
+                const schemaExists = scriptCreatedDbsAndSchemas.has(ftSchema) || (dbSchemas.length > 0
+                  ? dbSchemas.some(s => checkEq(s.name, ftSchema))
+                  : resolvedRefs.some(ref => checkEq(ref.db, ftDb) && checkEq(ref.schema, ftSchema)));
+                if (!schemaExists) {
+                  badToken = ftSchema;
+                  msgFn = (tName: string) => `Schema '${tName}' does not exist or is not authorized.`;
+                }
+              }
+            } else if (ftSchema) {
+              const schemaExists = scriptCreatedDbsAndSchemas.has(ftSchema) || (knownSchemas.length > 0
+                ? knownSchemas.some(s => checkEq(s.name, ftSchema))
+                : resolvedRefs.some(ref => checkEq(ref.schema, ftSchema)));
+              if (!schemaExists) {
+                badToken = ftSchema;
+                msgFn = (tName: string) => `Schema '${tName}' does not exist or is not authorized.`;
+              }
+            }
+            const tokens = findTokensLocally(rawStmtText, [badToken], r.startLine, quotedIdentifiersIgnoreCase);
+            for (const t of tokens) {
+              markers.push({
+                startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+                message: msgFn(t.quoted ? t.name : t.name.toUpperCase()), severity: 8
+              });
+            }
+          }
+        }
+      }
+    }
+
     if (firstToken !== "SELECT" && firstToken !== "WITH" && firstToken !== "CREATE" && firstToken !== "UNDROP") continue;
     if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
 
