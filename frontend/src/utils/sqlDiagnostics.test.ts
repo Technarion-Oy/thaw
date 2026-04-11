@@ -475,6 +475,18 @@ describe("validateWithParser", () => {
 
   // ── 2d. Complex Queries & Snowflake Edge Cases ────────────────────────────
   describe("complex queries and edge cases", () => {
+    it("flags structural error: QUALIFY after ORDER BY", () => {
+      const sql = "SELECT id FROM t ORDER BY id QUALIFY ROW_NUMBER() OVER(ORDER BY id) = 1";
+      const m = validateWithParser(sql, singleRange(sql));
+      expect(warnings(m).length).toBeGreaterThan(0);
+      expect(warnings(m)[0].message).toMatch(/Unexpected: 'QUALIFY'/i);
+    });
+
+    it("flags missing LATERAL keyword before FLATTEN", () => {
+      const sql = "SELECT f.value FROM my_table, FLATTEN(input => col) f";
+      const m = validateWithParser(sql, singleRange(sql));
+      expect(warnings(m).length).toBeGreaterThan(0);
+    });
     it("deeply nested subqueries with set operators", () => {
       const sql = `
         WITH cte1 AS (
@@ -1861,6 +1873,15 @@ describe("validateBareColumnRefs", async () => {
       expect(warnings(m)[0].message).toMatch(/fake_col/i);
     });
 
+    it("flags missing database in a 3-part CREATE TABLE IF NOT EXISTS statement", async () => {
+      const sql = "CREATE TABLE IF NOT EXISTS missing_database.public.basic_employees (id INT);";
+      const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
+      
+      // THIS WILL FAIL: The engine incorrectly lets IF NOT EXISTS bypass database/schema checks
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/Database 'MISSING_DATABASE' does not exist/i);
+    });
+
     it("flags missing database in a 3-part CREATE TABLE statement", async () => {
       const sql = "CREATE TABLE my_database.public.basic_employees (id INT);";
       const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
@@ -1897,6 +1918,21 @@ describe("validateBareColumnRefs", async () => {
 
   // ── CREATE TABLE statements (Constraint Column Validation) ────────────────
   describe("CREATE TABLE statements (Constraint Column Validation)", async () => {
+    it("flags an unknown column in a FOREIGN KEY constraint even with CLUSTER BY present", async () => {
+      const sql = `\n        CREATE GLOBAL TEMPORARY TABLE session_events (\n            user_id NUMBER,\n            CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES basic_employees (emp_id)\n        )\n        CLUSTER BY (user_id);\n      `;
+      const BASIC_EMP_CACHE = makeCache([{
+        db: "DB", schema: "SCH", table: "BASIC_EMPLOYEES",
+        cols: ["WRONG_ID", "FIRST_NAME"],
+      }]);
+      const basicEmpRef = { alias: "", db: "DB", schema: "SCH", name: "BASIC_EMPLOYEES" };
+      
+      const m = await validateBareColumnRefs(sql, singleRange(sql), [basicEmpRef], BASIC_EMP_CACHE);
+      
+      // THIS WILL FAIL: The engine bails out completely because CLUSTER BY hits the false-positive regex
+      expect(warnings(m)).toHaveLength(1);
+      expect(warnings(m)[0].message).toMatch(/emp_id/i);
+    });
+
     it("flags an unknown column in an out-of-line FOREIGN KEY REFERENCES constraint", async () => {
       const sql = `
         CREATE GLOBAL TEMPORARY TABLE session_events (
@@ -2391,6 +2427,15 @@ describe("validateTablesExist", () => {
       const sql = "CREATE TABLE existing_sch.my_table (a varchar);";
       const m = await validateTablesExist(sql, singleRange(sql), [], ["EXISTING_DB"], []);
       expect(errors(m)).toHaveLength(0);
+    });
+
+    it("flags missing database in a 3-part CREATE TABLE IF NOT EXISTS statement", async () => {
+      const sql = "CREATE TABLE IF NOT EXISTS missing_database.public.basic_employees (id INT);";
+      const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
+      
+      // THIS WILL FAIL: The engine incorrectly lets IF NOT EXISTS bypass database/schema checks
+      expect(errors(m)).toHaveLength(1);
+      expect(errors(m)[0].message).toMatch(/Database 'MISSING_DATABASE' does not exist/i);
     });
 
     it("flags missing database in a 3-part CREATE TABLE statement", async () => {

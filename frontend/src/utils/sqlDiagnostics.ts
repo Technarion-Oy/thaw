@@ -58,7 +58,7 @@ function findTokensLocally(stmtText: string, targets: string[], baseLine: number
   return tokens;
 }
 
-export function extractTablePath(ft: any, rawSql: string = "", ignoreCase: boolean = false): { db: string | null; schema: string | null; table: string | null } {
+export function extractTablePath(ft: any, _rawSql: string = "", ignoreCase: boolean = false): { db: string | null; schema: string | null; table: string | null } {
   const parts: string[] = [];
   
   if (ft.catalog) parts.push(String(ft.catalog));
@@ -72,25 +72,7 @@ export function extractTablePath(ft: any, rawSql: string = "", ignoreCase: boole
   const combined = parts.join(".");
   const matches = [...combined.matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0]);
 
-  const cleanParts = matches.map(p => {
-    const stripped = p.replace(/^"|"$/g, "");
-    if (!rawSql) return NORM(p, ignoreCase); 
-
-    const regex = /[a-zA-Z0-9_$]+|"[^"]+"/g;
-    let match;
-    let foundNorm = null;
-    
-    while ((match = regex.exec(rawSql)) !== null) {
-      const rawWord = match[0];
-      const isQuoted = rawWord.startsWith('"') && rawWord.endsWith('"');
-      const inner = isQuoted ? rawWord.slice(1, -1) : rawWord;
-      
-      if (inner.toUpperCase() === stripped.toUpperCase()) {
-        foundNorm = NORM(rawWord, ignoreCase);
-      }
-    }
-    return foundNorm !== null ? foundNorm : NORM(p, ignoreCase);
-  });
+  const cleanParts = matches.map(p => NORM(p, ignoreCase));
 
   const len = cleanParts.length;
   
@@ -147,10 +129,10 @@ const SNOWFLAKE_FP_RE = new RegExp(
   "|RESOURCE|REPLICATION|FAILOVER)\\b" +
   "|DROP\\s+(?:TABLE|VIEW|TASK|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|WAREHOUSE|ROLE)\\b" + 
   "|UNDROP\\s+(?:DATABASE|SCHEMA|TABLE)\\b" + 
-  "|\\bCLUSTER\\s+(?:BY|KEY)\\b" +   
   "|\\bCLONE\\b" +                    
   "|INSERT\\s+OVERWRITE\\b" +         
-  "|TRUNCATE\\s+\\S+\\s+IF\\b",       
+  "|TRUNCATE\\s+\\S+\\s+IF\\b" +
+  "|\\\\bLATERAL\\\\s+FLATTEN\\\\b",
   "i",
 );
 
@@ -378,6 +360,21 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
 
     if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
 
+    // In Snowflake, FLATTEN used as a table function requires the LATERAL keyword
+    // (or TABLE() wrapper). Flag a warning when it appears bare in a FROM/JOIN clause.
+    if (/(?:FROM|JOIN|,)\s+FLATTEN\s*\(/i.test(parseText) &&
+        !/\bLATERAL\s+FLATTEN\s*\(/i.test(parseText) &&
+        !/\bTABLE\s*\(\s*FLATTEN\s*\(/i.test(parseText)) {
+      markers.push({
+        startLineNumber: r.startLine,
+        startColumn: 1,
+        endLineNumber: r.endLine,
+        endColumn: 100,
+        message: "FLATTEN used as a table function requires LATERAL. Use LATERAL FLATTEN(...) or TABLE(FLATTEN(...)).",
+        severity: 4
+      });
+    }
+
     try {
       parser.parse(parseText);
     } catch (err: unknown) {
@@ -481,7 +478,9 @@ export async function validateBareColumnRefs(
     const firstToken = getFirstToken(rawStmtText);
     
     if (firstToken !== "SELECT" && firstToken !== "WITH" && firstToken !== "INSERT" && firstToken !== "CREATE" && firstToken !== "UNDROP") continue;
-    if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
+    
+    const checkTextCol = rawStmtText.replace(/\\bCLUSTER\\s+BY\\s*\\([^)]+\\)/i, "");
+    if (SNOWFLAKE_FP_RE.test(checkTextCol)) continue;
 
     let parseText = rawStmtText.replace(/;+\s*$/, "");
     const createViewMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE)\s+)?(?:RECURSIVE\s+)?(?:INTERACTIVE\s+)?(?:MATERIALIZED\s+)?VIEW\b/i);
@@ -855,39 +854,44 @@ export async function validateTablesExist(
         }
       } else if (parts.length === 3) {
         const dbNorm = normParts[0];
-        const isIfNotExists = /IF\s+NOT\s+EXISTS/i.test(rawStmtText);
-        
-        if (!isIfNotExists) {
-          const dbExists = scriptCreatedDbsAndSchemas.has(dbNorm) ||
-                           (knownDatabases.length > 0 
-                             ? knownDatabases.some(d => checkEq(d, dbNorm)) 
-                             : resolvedRefs.some(ref => checkEq(ref.db, dbNorm)));
-          if (!dbExists) {
-            const tokens = findTokensLocally(rawStmtText, [dbNorm], r.startLine, quotedIdentifiersIgnoreCase);
-            for (const t of tokens) {
-               markers.push({
-                 startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
-                 message: `Database '${t.name}' does not exist or is not authorized.`, severity: 8
-               });
-            }
-          } else {
-             const schemaNorm = normParts[1];
-             const schemaPath = `${dbNorm}.${schemaNorm}`;
-             const dbSchemas = knownSchemas.filter(s => checkEq(s.db, dbNorm));
-             const schemaExists = scriptCreatedDbsAndSchemas.has(schemaNorm) || scriptCreatedDbsAndSchemas.has(schemaPath) ||
-                                  (dbSchemas.length > 0
-                                    ? dbSchemas.some(s => checkEq(s.name, schemaNorm))
-                                    : resolvedRefs.some(ref => checkEq(ref.db, dbNorm) && checkEq(ref.schema, schemaNorm)));
-             if (!schemaExists) {
-               const tokens = findTokensLocally(rawStmtText, [schemaNorm], r.startLine, quotedIdentifiersIgnoreCase);
-               for (const t of tokens) {
-                  markers.push({
-                    startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
-                    message: `Schema '${t.name}' does not exist or is not authorized.`, severity: 8
-                  });
-               }
-             }
+        // When no explicit database list is provided, fall back to resolvedRefs to
+        // determine if the database is known. If resolvedRefs is also empty (no
+        // connection context), treat the db as missing. If resolvedRefs has entries
+        // for other databases, we can't conclude this specific db doesn't exist —
+        // the user may be authorized to create in it but it's simply not in our cache.
+        const dbExists = scriptCreatedDbsAndSchemas.has(dbNorm) ||
+                         (knownDatabases.length > 0
+                           ? knownDatabases.some(d => checkEq(d, dbNorm))
+                           : resolvedRefs.length > 0);
+        if (!dbExists) {
+          const tokens = findTokensLocally(rawStmtText, [dbNorm], r.startLine, quotedIdentifiersIgnoreCase);
+          for (const t of tokens) {
+             markers.push({
+               startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+               message: `Database '${t.name}' does not exist or is not authorized.`, severity: 8
+             });
           }
+        } else {
+           const schemaNorm = normParts[1];
+           const schemaPath = `${dbNorm}.${schemaNorm}`;
+           const dbSchemas = knownSchemas.filter(s => checkEq(s.db, dbNorm));
+           // Same principle for schema: if we have explicit schema info use it;
+           // if resolvedRefs gives us context but no schemas for this specific db,
+           // skip schema validation rather than produce a false positive.
+           const schemaExists = scriptCreatedDbsAndSchemas.has(schemaNorm) || scriptCreatedDbsAndSchemas.has(schemaPath) ||
+                                (dbSchemas.length > 0
+                                  ? dbSchemas.some(s => checkEq(s.name, schemaNorm))
+                                  : resolvedRefs.length > 0 ||
+                                    resolvedRefs.some(ref => checkEq(ref.db, dbNorm) && checkEq(ref.schema, schemaNorm)));
+           if (!schemaExists) {
+             const tokens = findTokensLocally(rawStmtText, [schemaNorm], r.startLine, quotedIdentifiersIgnoreCase);
+             for (const t of tokens) {
+                markers.push({
+                  startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+                  message: `Schema '${t.name}' does not exist or is not authorized.`, severity: 8
+                });
+             }
+           }
         }
       }
     }
@@ -1143,7 +1147,9 @@ export async function validateTablesExist(
     }
 
     if (firstToken !== "SELECT" && firstToken !== "WITH" && firstToken !== "CREATE" && firstToken !== "UNDROP") continue;
-    if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
+    
+    const checkTextCtx = rawStmtText.replace(/\\bCLUSTER\\s+BY\\s*\\([^)]+\\)/i, "");
+    if (SNOWFLAKE_FP_RE.test(checkTextCtx)) continue;
 
     let parseText = rawStmtText.replace(/;+\s*$/, "");
     const createViewMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE)\s+)?(?:RECURSIVE\s+)?(?:INTERACTIVE\s+)?(?:MATERIALIZED\s+)?VIEW\b/i);
@@ -1239,19 +1245,29 @@ export async function validateTablesExist(
         
         const ftTable = rawTable;
 
-        if (currentCTEs.has(ftTable)) continue;
-        if (scriptCreatedTables.has(ftTable)) continue;
-        
-        const isLive = resolvedRefs.some(ref => 
-          checkEq(ref.name, ftTable) &&
+        // Detect double-quoted references to enable case-sensitive matching.
+        // In Snowflake, "my_table" (quoted lowercase) ≠ MY_TABLE (unquoted, normalized).
+        // node-sql-parser gives ft.table without outer quotes, so we check rawStmtText
+        // to determine whether the original reference was double-quoted.
+        const rawFtTable = String(ft.table);
+        const isQuotedRef = !quotedIdentifiersIgnoreCase &&
+          rawFtTable !== ftTable &&
+          rawStmtText.includes(`"${rawFtTable}"`);
+        const compareTable = isQuotedRef ? rawFtTable : ftTable;
+
+        if (currentCTEs.has(compareTable)) continue;
+        if (scriptCreatedTables.has(compareTable)) continue;
+
+        const isLive = resolvedRefs.some(ref =>
+          checkEq(ref.name, compareTable) &&
           (!ftDb || checkEq(ref.db, ftDb)) &&
           (!ftSchema || checkEq(ref.schema, ftSchema))
         );
-        
+
         if (isLive) continue;
 
-        let badToken = ftTable;
-        let msg = `Table or View '${ftTable}' does not exist or is not authorized.`;
+        let badToken = compareTable;
+        let msg = `Table or View '${compareTable}' does not exist or is not authorized.`;
 
         if (ftDb) {
           const dbExists = scriptCreatedDbsAndSchemas.has(ftDb) || (knownDatabases.length > 0 
