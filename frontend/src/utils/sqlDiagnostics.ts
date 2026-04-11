@@ -142,7 +142,7 @@ const SNOWFLAKE_FP_RE = new RegExp(
   "|WAREHOUSE|ROLE|FILE\\s+FORMAT|USER|ALERT|SHARE|EXTERNAL" +
   "|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK|RESOURCE|ROW\\s+ACCESS" +
   "|SESSION|PASSWORD|REPLICATION|FAILOVER|APPLICATION)\\b" +
-  "|ALTER\\s+(?:TABLE|VIEW|TASK|STREAM|WAREHOUSE|DATABASE|SEQUENCE|STAGE|PIPE" +
+  "|ALTER\\s+(?:TABLE|VIEW|TASK|STREAM|WAREHOUSE|DATABASE|STAGE|PIPE" +
   "|USER|ALERT|SHARE|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK" +
   "|RESOURCE|REPLICATION|FAILOVER)\\b" +
   "|DROP\\s+(?:TABLE|VIEW|TASK|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|WAREHOUSE|ROLE)\\b" + 
@@ -332,6 +332,33 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
         });
         continue; 
       }
+    }
+
+    const createSeqMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SEQUENCE\b/i);
+    if (createSeqMatch) {
+      const createSeqProps = "(?:START(?:\\s+WITH|\\s*=)?\\s+-?\\d+|INCREMENT(?:\\s+BY|\\s*=)?\\s+-?\\d+|ORDER|NOORDER|COMMENT\\s*=\\s*'(?:[^']|'')*')";
+      const validCreateSeqRe = new RegExp("^\\s*CREATE\\s+(?:OR\\s+REPLACE\\s+)?SEQUENCE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:[a-zA-Z0-9_$]+|\"[^\"]+\")(?:\\.(?:[a-zA-Z0-9_$]+|\"[^\"]+\")){0,2}(?:\\s+WITH)?(?:\\s+" + createSeqProps + ")*\\s*$", "i");
+      const unquoted = parseText.replace(/"[^"]+"/g, "");
+      if (validCreateSeqRe.test(parseText) && !(/\bORDER\b/i.test(unquoted) && /\bNOORDER\b/i.test(unquoted))) continue;
+      markers.push({ startLineNumber: r.startLine, startColumn: 1, endLineNumber: r.endLine, endColumn: 100, message: "Unexpected syntax in CREATE SEQUENCE statement.", severity: 4 });
+      continue;
+    }
+
+    const alterSeqMatch = parseText.match(/^\s*ALTER\s+SEQUENCE\b/i);
+    if (alterSeqMatch) {
+      const validAlterSeqRe = new RegExp("^\\s*ALTER\\s+SEQUENCE\\s+(?:IF\\s+EXISTS\\s+)?(?:[a-zA-Z0-9_$]+|\"[^\"]+\")(?:\\.(?:[a-zA-Z0-9_$]+|\"[^\"]+\")){0,2}\\s+(?:RENAME\\s+TO\\s+(?:[a-zA-Z0-9_$]+|\"[^\"]+\")(?:\\.(?:[a-zA-Z0-9_$]+|\"[^\"]+\")){0,2}|(?:SET\\s+)?INCREMENT(?:\\s+BY|\\s*=)?\\s+-?\\d+|SET(?:\\s+(?:ORDER|NOORDER|COMMENT\\s*=\\s*'(?:[^']|'')*'))+|UNSET\\s+COMMENT)\\s*$", "i");
+      const unquoted = parseText.replace(/"[^"]+"/g, "");
+      if (validAlterSeqRe.test(parseText) && !(/\bORDER\b/i.test(unquoted) && /\bNOORDER\b/i.test(unquoted))) continue;
+      markers.push({ startLineNumber: r.startLine, startColumn: 1, endLineNumber: r.endLine, endColumn: 100, message: "Unexpected syntax in ALTER SEQUENCE statement.", severity: 4 });
+      continue;
+    }
+
+    const dropSeqMatch = parseText.match(/^\s*DROP\s+SEQUENCE\b/i);
+    if (dropSeqMatch) {
+      const validDropSeqRe = new RegExp("^\\s*DROP\\s+SEQUENCE\\s+(?:IF\\s+EXISTS\\s+)?(?:[a-zA-Z0-9_$]+|\"[^\"]+\")(?:\\.(?:[a-zA-Z0-9_$]+|\"[^\"]+\")){0,2}(?:\\s+(?:CASCADE|RESTRICT))?\\s*$", "i");
+      if (validDropSeqRe.test(parseText)) continue;
+      markers.push({ startLineNumber: r.startLine, startColumn: 1, endLineNumber: r.endLine, endColumn: 100, message: "Unexpected syntax in DROP SEQUENCE statement.", severity: 4 });
+      continue;
     }
 
     const createDynamicTableMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?DYNAMIC\s+TABLE\b/i);

@@ -898,6 +898,112 @@ describe("validateWithParser", () => {
     }
   });
 
+  // ── Snowflake-specific CREATE SEQUENCE modifiers ──────────────────────────
+  describe("Snowflake-specific CREATE SEQUENCE modifiers", () => {
+    const validSeqQueries = [
+      "CREATE SEQUENCE my_seq",
+      "CREATE OR REPLACE SEQUENCE IF NOT EXISTS my_seq",
+      "CREATE SEQUENCE my_seq START WITH 1",
+      "CREATE SEQUENCE my_seq INCREMENT BY 2",
+      "CREATE SEQUENCE my_seq START = 1 INCREMENT = 2",
+      "CREATE SEQUENCE my_seq ORDER",
+      "CREATE SEQUENCE my_seq NOORDER",
+      "CREATE SEQUENCE my_seq COMMENT = 'My sequence'"
+    ];
+
+    for (const sql of validSeqQueries) {
+      it(`should silently accept valid CREATE SEQUENCE syntax: ${sql}`, () => {
+        const m = validateWithParser(sql, singleRange(sql));
+        expect(warnings(m)).toHaveLength(0);
+      });
+    }
+  });
+
+  // ── Incorrect CREATE SEQUENCE syntax -> Warning ─────────────────────────
+  describe("Incorrect CREATE SEQUENCE syntax -> Warning", () => {
+    const invalidSeqQueries = [
+      "CREATE SEQUENCE",
+      "CREATE SEQUENCE my_seq START WITH 'abc'",
+      "CREATE SEQUENCE my_seq ORDER NOORDER"
+    ];
+
+    for (const sql of invalidSeqQueries) {
+      it(`should flag syntax errors in: ${sql}`, () => {
+        const m = validateWithParser(sql, singleRange(sql));
+        expect(warnings(m).length).toBeGreaterThan(0);
+      });
+    }
+  });
+
+  // ── Snowflake-specific ALTER SEQUENCE modifiers ───────────────────────────
+  describe("Snowflake-specific ALTER SEQUENCE modifiers", () => {
+    const validAlterSeqQueries = [
+      "ALTER SEQUENCE my_seq RENAME TO new_seq",
+      "ALTER SEQUENCE IF EXISTS my_seq SET INCREMENT BY 5",
+      "ALTER SEQUENCE my_seq INCREMENT = 10",
+      "ALTER SEQUENCE my_seq SET ORDER",
+      "ALTER SEQUENCE my_seq SET NOORDER COMMENT = 'updated'",
+      "ALTER SEQUENCE my_seq UNSET COMMENT"
+    ];
+
+    for (const sql of validAlterSeqQueries) {
+      it(`should silently accept valid ALTER SEQUENCE syntax: ${sql}`, () => {
+        const m = validateWithParser(sql, singleRange(sql));
+        expect(warnings(m)).toHaveLength(0);
+      });
+    }
+  });
+
+  // ── Incorrect ALTER SEQUENCE syntax -> Warning ──────────────────────────
+  describe("Incorrect ALTER SEQUENCE syntax -> Warning", () => {
+    const invalidAlterSeqQueries = [
+      "ALTER SEQUENCE",
+      "ALTER SEQUENCE my_seq SET NOTHING",
+      "ALTER SEQUENCE my_seq UNSET INCREMENT"
+    ];
+
+    for (const sql of invalidAlterSeqQueries) {
+      it(`should flag syntax errors in: ${sql}`, () => {
+        const m = validateWithParser(sql, singleRange(sql));
+        expect(warnings(m).length).toBeGreaterThan(0);
+      });
+    }
+  });
+
+  // ── Snowflake-specific DROP SEQUENCE modifiers ────────────────────────────
+  describe("Snowflake-specific DROP SEQUENCE modifiers", () => {
+    const validDropSeqQueries = [
+      "DROP SEQUENCE my_seq",
+      "DROP SEQUENCE IF EXISTS my_seq",
+      "DROP SEQUENCE my_seq CASCADE",
+      "DROP SEQUENCE my_seq RESTRICT",
+      "DROP SEQUENCE IF EXISTS my_seq CASCADE"
+    ];
+
+    for (const sql of validDropSeqQueries) {
+      it(`should silently accept valid DROP SEQUENCE syntax: ${sql}`, () => {
+        const m = validateWithParser(sql, singleRange(sql));
+        expect(warnings(m)).toHaveLength(0);
+      });
+    }
+  });
+
+  // ── Incorrect DROP SEQUENCE syntax -> Warning ───────────────────────────
+  describe("Incorrect DROP SEQUENCE syntax -> Warning", () => {
+    const invalidDropSeqQueries = [
+      "DROP SEQUENCE",
+      "DROP SEQUENCE my_seq CASCADE RESTRICT",
+      "DROP SEQUENCE my_seq WITH CASCADE"
+    ];
+
+    for (const sql of invalidDropSeqQueries) {
+      it(`should flag syntax errors in: ${sql}`, () => {
+        const m = validateWithParser(sql, singleRange(sql));
+        expect(warnings(m).length).toBeGreaterThan(0);
+      });
+    }
+  });
+
   // ── 2s. Snowflake-specific CREATE TABLE modifiers ─────────────────────────
   describe("Snowflake-specific CREATE TABLE modifiers", () => {
     // Each entry: [label, sql].  All are valid Snowflake SQL → 0 warnings expected.
