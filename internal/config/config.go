@@ -94,6 +94,12 @@ func DefaultEditorPrefs() EditorPrefs {
 	}
 }
 
+// FeatureFlags holds toggles for optional or experimental features.
+// Add new flags here as boolean fields — disabled by default.
+type FeatureFlags struct {
+	// No flags defined yet. Add new flags as bool fields here.
+}
+
 // AppConfig is the on-disk configuration for Thaw.
 type AppConfig struct {
 	Connections            []Connection   `json:"connections"`
@@ -102,6 +108,7 @@ type AppConfig struct {
 	Snowpark               SnowparkConfig `json:"snowpark"`
 	Editor                 EditorPrefs    `json:"editor"`
 	SnowflakeCLIConfigPath string         `json:"snowflakeCliConfigPath"`
+	FeatureFlags           FeatureFlags   `json:"featureFlags"`
 }
 
 // configPath returns the absolute path to the application configuration file,

@@ -183,6 +183,10 @@ func buildMenu(app *App) *menu.Menu {
 	toolsMenu.AddText("Create dbt Project…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:dbt-create")
 	})
+	toolsMenu.AddSeparator()
+	toolsMenu.AddText("Feature Flags…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:feature-flags")
+	})
 
 	// ── Snowpark ──────────────────────────────────────────────────────────────
 	snowparkMenu := appMenu.AddSubmenu("Snowpark")

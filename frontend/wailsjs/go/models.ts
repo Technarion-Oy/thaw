@@ -101,6 +101,18 @@ export namespace config {
 	        this.operatorPosition = source["operatorPosition"];
 	    }
 	}
+	export class FeatureFlags {
+	
+	
+	    static createFrom(source: any = {}) {
+	        return new FeatureFlags(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	
+	    }
+	}
 	export class GitConfig {
 	    exportDir: string;
 	    remoteURL: string;

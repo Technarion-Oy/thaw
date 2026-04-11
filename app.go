@@ -3670,6 +3670,27 @@ func (a *App) SaveEditorPrefs(prefs config.EditorPrefs) error {
 	return config.Save(cfg)
 }
 
+// ─── Feature flags ────────────────────────────────────────────────────────────
+
+// GetFeatureFlags returns the persisted feature flag settings.
+func (a *App) GetFeatureFlags() config.FeatureFlags {
+	cfg, err := config.Load()
+	if err != nil {
+		return config.FeatureFlags{}
+	}
+	return cfg.FeatureFlags
+}
+
+// SaveFeatureFlags persists feature flag settings to disk.
+func (a *App) SaveFeatureFlags(flags config.FeatureFlags) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	cfg.FeatureFlags = flags
+	return config.Save(cfg)
+}
+
 // ListAIModels returns the models available for the given provider and API key.
 // Returns nil (not an error) when the key is invalid or the request fails so
 // the frontend can fall back to its static defaults.
