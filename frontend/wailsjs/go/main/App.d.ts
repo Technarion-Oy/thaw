@@ -242,7 +242,7 @@ export function IsAppleSilicon():Promise<boolean>;
 
 export function IsConnected():Promise<boolean>;
 
-export function ListAIModels(arg1:string,arg2:string):Promise<Array<string>>;
+export function ListAIModels(arg1:string,arg2:string,arg3:number):Promise<Array<string>>;
 
 export function ListAvailableRoles():Promise<Array<string>>;
 
@@ -384,7 +384,7 @@ export function SuspendTaskList(arg1:string,arg2:string,arg3:Array<string>):Prom
 
 export function TaskHasChildren(arg1:string,arg2:string,arg3:string):Promise<boolean>;
 
-export function TestAIModel(arg1:string,arg2:string,arg3:string):Promise<string>;
+export function TestAIModel(arg1:string,arg2:string,arg3:string,arg4:number):Promise<string>;
 
 export function UninstallEnvPackage(arg1:string):Promise<void>;
 

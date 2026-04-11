@@ -143,12 +143,16 @@ var chatTools = []map[string]any{
 // When agentMode is true the AI may invoke tools (explore schema, run SQL) over
 // up to 8 iterations. When false a single plain-text response is returned with
 // no tool access.
-func Chat(ctx context.Context, provider, apiKey, model string, history []UIMessage, userText, currentSQL, lastResultSummary string, agentMode bool, workDir string, exec ToolExecutor) (UIMessage, error) {
+// ollamaPort is the port number for the local Ollama instance (0 = default 11434);
+// it is ignored for non-Ollama providers.
+func Chat(ctx context.Context, provider, apiKey, model string, ollamaPort int, history []UIMessage, userText, currentSQL, lastResultSummary string, agentMode bool, workDir string, exec ToolExecutor) (UIMessage, error) {
 	switch provider {
 	case "openai":
 		return openAIChat(ctx, apiKey, model, history, userText, currentSQL, lastResultSummary, agentMode, workDir, exec)
 	case "google":
 		return googleChat(ctx, apiKey, model, history, userText, currentSQL, lastResultSummary, agentMode, workDir, exec)
+	case "ollama":
+		return ollamaChat(ctx, ollamaBaseURL(ollamaPort), model, history, userText, currentSQL, lastResultSummary, agentMode, workDir, exec)
 	default:
 		return UIMessage{}, fmt.Errorf("unknown AI provider: %s", provider)
 	}
@@ -594,13 +598,17 @@ func googleChat(ctx context.Context, apiKey, model string, history []UIMessage, 
 }
 
 // GetSuggestion requests an inline SQL completion from the configured provider.
-// provider must be "openai" or "google". Returns the trimmed completion text.
-func GetSuggestion(provider, apiKey, model, prompt string) (string, error) {
+// provider must be "openai", "google", or "ollama". Returns the trimmed completion text.
+// ollamaPort is the port number for the local Ollama instance (0 = default 11434);
+// it is ignored for non-Ollama providers.
+func GetSuggestion(provider, apiKey, model, prompt string, ollamaPort int) (string, error) {
 	switch provider {
 	case "openai":
 		return openAISuggestion(apiKey, model, prompt)
 	case "google":
 		return googleSuggestion(apiKey, model, prompt)
+	case "ollama":
+		return ollamaSuggestion(ollamaBaseURL(ollamaPort), model, prompt)
 	default:
 		return "", fmt.Errorf("unknown AI provider: %s", provider)
 	}
@@ -611,7 +619,9 @@ func GetSuggestion(provider, apiKey, model, prompt string) (string, error) {
 // format should be "CSV" or "JSON". Code fences are stripped and the result
 // is validated before being returned; an error is returned if the AI response
 // cannot be parsed as JSON.
-func SuggestFormatOptions(provider, apiKey, model, format, sampleContent string) (string, error) {
+// ollamaPort is the port number for the local Ollama instance (0 = default 11434);
+// it is ignored for non-Ollama providers.
+func SuggestFormatOptions(provider, apiKey, model, format, sampleContent string, ollamaPort int) (string, error) {
 	prompt := buildFormatSuggestionPrompt(format, sampleContent)
 	var raw string
 	var err error
@@ -620,6 +630,8 @@ func SuggestFormatOptions(provider, apiKey, model, format, sampleContent string)
 		raw, err = openAISuggestFormat(apiKey, model, prompt)
 	case "google":
 		raw, err = googleSuggestFormat(apiKey, model, prompt)
+	case "ollama":
+		raw, err = ollamaSuggestFormat(ollamaBaseURL(ollamaPort), model, prompt)
 	default:
 		return "", fmt.Errorf("unknown AI provider: %s", provider)
 	}
@@ -855,14 +867,18 @@ func openAISuggestion(apiKey, model, prompt string) (string, error) {
 
 // ── Model listing ─────────────────────────────────────────────────────────────
 
-// ListModels returns the models available to the given API key for the
-// specified provider. provider must be "openai" or "google".
-func ListModels(provider, apiKey string) ([]string, error) {
+// ListModels returns the models available for the specified provider.
+// provider must be "openai", "google", or "ollama".
+// ollamaPort is the port number for the local Ollama instance (0 = default 11434);
+// it is ignored for non-Ollama providers.
+func ListModels(provider, apiKey string, ollamaPort int) ([]string, error) {
 	switch provider {
 	case "openai":
 		return listOpenAIModels(apiKey)
 	case "google":
 		return listGoogleModels(apiKey)
+	case "ollama":
+		return listOllamaModels(ollamaBaseURL(ollamaPort))
 	default:
 		return nil, fmt.Errorf("unknown AI provider: %s", provider)
 	}
@@ -977,12 +993,16 @@ var testHttpClient = &http.Client{Timeout: 10 * time.Second}
 // TestModel sends a minimal one-token request to verify that the given
 // provider / API key / model combination is reachable and valid.
 // Returns nil on success or a user-readable error.
-func TestModel(provider, apiKey, model string) error {
+// ollamaPort is the port number for the local Ollama instance (0 = default 11434);
+// it is ignored for non-Ollama providers.
+func TestModel(provider, apiKey, model string, ollamaPort int) error {
 	switch provider {
 	case "openai":
 		return testOpenAIModel(apiKey, model)
 	case "google":
 		return testGoogleModel(apiKey, model)
+	case "ollama":
+		return testOllamaModel(ollamaBaseURL(ollamaPort), model)
 	default:
 		return fmt.Errorf("unknown provider: %s", provider)
 	}
@@ -1064,6 +1084,315 @@ func testGoogleModel(apiKey, model string) error {
 		return fmt.Errorf("status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// ── Ollama (local) ────────────────────────────────────────────────────────────
+
+// ollamaBaseURL returns the Ollama API base URL for the configured port.
+// If port is 0 or negative the default port 11434 is used.
+func ollamaBaseURL(port int) string {
+	if port <= 0 {
+		return "http://localhost:11434"
+	}
+	return fmt.Sprintf("http://localhost:%d", port)
+}
+
+// listOllamaModels fetches locally available models from the Ollama /api/tags endpoint.
+func listOllamaModels(base string) ([]string, error) {
+	req, err := http.NewRequest(http.MethodGet, base+"/api/tags", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ollama not reachable: %w", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ollama: status %d: %s", resp.StatusCode, raw)
+	}
+	var result struct {
+		Models []struct {
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	models := make([]string, 0, len(result.Models))
+	for _, m := range result.Models {
+		models = append(models, m.Name)
+	}
+	sort.Strings(models)
+	return models, nil
+}
+
+// testOllamaModel sends a minimal generate request to verify the model is available.
+func testOllamaModel(base, model string) error {
+	body, err := json.Marshal(map[string]any{
+		"model":       model,
+		"prompt":      "hi",
+		"stream":      false,
+		"num_predict": 1,
+	})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost, base+"/api/generate", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := testHttpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("ollama not reachable: %w", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(raw, &errResp) == nil && errResp.Error != "" {
+			return fmt.Errorf("%s", errResp.Error)
+		}
+		return fmt.Errorf("status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// ollamaSuggestion requests an inline SQL completion from the local Ollama /api/generate endpoint.
+func ollamaSuggestion(base, model, prompt string) (string, error) {
+	body, err := json.Marshal(map[string]any{
+		"model":       model,
+		"prompt":      prompt,
+		"stream":      false,
+		"num_predict": 150,
+	})
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequest(http.MethodPost, base+"/api/generate", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := suggestHttpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("ollama not reachable: %w", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("ollama: status %d: %s", resp.StatusCode, raw)
+	}
+	var result struct {
+		Response string `json:"response"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(result.Response), nil
+}
+
+// ollamaSuggestFormat requests format option suggestions from the local Ollama /api/generate endpoint.
+func ollamaSuggestFormat(base, model, prompt string) (string, error) {
+	body, err := json.Marshal(map[string]any{
+		"model":       model,
+		"prompt":      prompt,
+		"stream":      false,
+		"num_predict": 600,
+	})
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequest(http.MethodPost, base+"/api/generate", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := suggestHttpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("ollama not reachable: %w", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("ollama: status %d: %s", resp.StatusCode, raw)
+	}
+	var result struct {
+		Response string `json:"response"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(result.Response), nil
+}
+
+// ollamaChat handles a single chat turn using the local Ollama /api/chat endpoint.
+// In agent mode it runs a tool-calling loop (up to 8 iterations) using Ollama's
+// OpenAI-compatible tool format; otherwise it performs a single round-trip.
+func ollamaChat(ctx context.Context, base, model string, history []UIMessage, userText, currentSQL, lastResultSummary string, agentMode bool, workDir string, exec ToolExecutor) (UIMessage, error) {
+	systemPrompt := buildSystemPrompt(currentSQL, lastResultSummary, agentMode, workDir)
+
+	messages := []map[string]any{
+		{"role": "system", "content": systemPrompt},
+	}
+	for _, m := range history {
+		messages = append(messages, map[string]any{"role": m.Role, "content": m.Text})
+	}
+	messages = append(messages, map[string]any{"role": "user", "content": userText})
+
+	// Chat mode: single round-trip, no tools.
+	if !agentMode {
+		body, err := json.Marshal(map[string]any{
+			"model":    model,
+			"messages": messages,
+			"stream":   false,
+		})
+		if err != nil {
+			return UIMessage{}, err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/api/chat", bytes.NewReader(body))
+		if err != nil {
+			return UIMessage{}, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := chatHttpClient.Do(req)
+		if err != nil {
+			return UIMessage{}, fmt.Errorf("ollama not reachable: %w", err)
+		}
+		raw, err := io.ReadAll(resp.Body)
+		resp.Body.Close() //nolint:errcheck
+		if err != nil {
+			return UIMessage{}, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			return UIMessage{}, fmt.Errorf("ollama: status %d: %s", resp.StatusCode, raw)
+		}
+		var result struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal(raw, &result); err != nil {
+			return UIMessage{}, err
+		}
+		return UIMessage{Role: "assistant", Text: strings.TrimSpace(result.Message.Content)}, nil
+	}
+
+	// Agent mode: tool-calling loop.
+	ollamaTools := make([]map[string]any, len(chatTools))
+	for i, t := range chatTools {
+		ollamaTools[i] = map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        t["name"],
+				"description": t["description"],
+				"parameters":  t["parameters"],
+			},
+		}
+	}
+
+	var accumulated []UIToolCall
+	const maxIter = 8
+
+	for iter := 0; iter < maxIter; iter++ {
+		body, err := json.Marshal(map[string]any{
+			"model":    model,
+			"messages": messages,
+			"tools":    ollamaTools,
+			"stream":   false,
+		})
+		if err != nil {
+			return UIMessage{}, err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/api/chat", bytes.NewReader(body))
+		if err != nil {
+			return UIMessage{}, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := chatHttpClient.Do(req)
+		if err != nil {
+			return UIMessage{}, fmt.Errorf("ollama not reachable: %w", err)
+		}
+		raw, err := io.ReadAll(resp.Body)
+		resp.Body.Close() //nolint:errcheck
+		if err != nil {
+			return UIMessage{}, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			return UIMessage{}, fmt.Errorf("ollama: status %d: %s", resp.StatusCode, raw)
+		}
+
+		var result struct {
+			Message struct {
+				Role      string `json:"role"`
+				Content   string `json:"content"`
+				ToolCalls []struct {
+					Function struct {
+						Name      string         `json:"name"`
+						Arguments map[string]any `json:"arguments"`
+					} `json:"function"`
+				} `json:"tool_calls"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal(raw, &result); err != nil {
+			return UIMessage{}, err
+		}
+
+		if len(result.Message.ToolCalls) == 0 {
+			return UIMessage{
+				Role:      "assistant",
+				Text:      strings.TrimSpace(result.Message.Content),
+				ToolCalls: accumulated,
+			}, nil
+		}
+
+		// Echo the assistant message back with its tool_calls.
+		toolCallMaps := make([]map[string]any, len(result.Message.ToolCalls))
+		for i, tc := range result.Message.ToolCalls {
+			toolCallMaps[i] = map[string]any{
+				"function": map[string]any{
+					"name":      tc.Function.Name,
+					"arguments": tc.Function.Arguments,
+				},
+			}
+		}
+		messages = append(messages, map[string]any{
+			"role":       result.Message.Role,
+			"content":    result.Message.Content,
+			"tool_calls": toolCallMaps,
+		})
+
+		// Execute each tool and append results.
+		for _, tc := range result.Message.ToolCalls {
+			argsJSON, _ := json.Marshal(tc.Function.Arguments)
+			output, isErr := exec(tc.Function.Name, string(argsJSON))
+			accumulated = append(accumulated, UIToolCall{
+				Name:    tc.Function.Name,
+				Input:   string(argsJSON),
+				Output:  output,
+				IsError: isErr,
+			})
+			messages = append(messages, map[string]any{
+				"role":    "tool",
+				"content": output,
+			})
+		}
+	}
+
+	return UIMessage{}, fmt.Errorf("ollama: exceeded max tool-calling iterations")
 }
 
 // ── Google AI Studios (Gemini) ────────────────────────────────────────────────

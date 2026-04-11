@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useEffect, useRef, useState } from "react";
-import { Button, Input, Modal, Radio, Select, Switch, Typography, message } from "antd";
+import { Button, Input, Modal, Radio, Select, Switch, Tag, Typography, message } from "antd";
 import { GetAIConfig, ListAIModels, SaveAIConfig, TestAIModel } from "../../../wailsjs/go/main/App";
 
 const { Text } = Typography;
@@ -18,33 +18,46 @@ interface Props {
   onClose: () => void;
 }
 
-type Provider = "openai" | "google";
+type Provider = "openai" | "google" | "ollama";
 
 interface AIState {
-  enabled:  boolean;
-  provider: Provider;
-  apiKey:   string;
-  model:    string;
+  enabled:    boolean;
+  provider:   Provider;
+  apiKey:     string;
+  model:      string;
+  ollamaPort: number; // 0 means default (11434)
 }
+
+const PROVIDER_LABEL: Record<Provider, string> = {
+  openai: "OpenAI",
+  google: "Google AI Studios",
+  ollama: "Ollama (Local)",
+};
 
 const FALLBACK_MODELS: Record<Provider, string[]> = {
   openai: ["gpt-4o-mini", "gpt-4o"],
   google: ["gemini-2.0-flash-lite", "gemini-2.0-flash", "gemini-1.5-pro"],
+  ollama: [],
 };
 
 const DEFAULT_MODEL: Record<Provider, string> = {
   openai: "gpt-4o-mini",
   google: "gemini-2.0-flash-lite",
+  ollama: "",
 };
 
 export default function AISettingsModal({ onClose }: Props) {
   const [state, setState] = useState<AIState>({
-    enabled:  false,
-    provider: "openai",
-    apiKey:   "",
-    model:    DEFAULT_MODEL.openai,
+    enabled:    false,
+    provider:   "openai",
+    apiKey:     "",
+    model:      DEFAULT_MODEL.openai,
+    ollamaPort: 0,
   });
   const [saving, setSaving] = useState(false);
+
+  // Tracks the last-saved config so we can show "currently in use" info.
+  const [savedConfig, setSavedConfig] = useState<{ provider: Provider; model: string } | null>(null);
 
   // Dynamic model list fetched from the provider API.
   const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
@@ -62,26 +75,36 @@ export default function AISettingsModal({ onClose }: Props) {
   useEffect(() => {
     GetAIConfig().then((cfg) => {
       const provider = (cfg.provider as Provider) || "openai";
+      const model = cfg.model || DEFAULT_MODEL[provider];
       setState({
-        enabled:  cfg.enabled ?? false,
+        enabled:    cfg.enabled ?? false,
         provider,
-        apiKey:   cfg.apiKey ?? "",
-        model:    cfg.model || DEFAULT_MODEL[provider],
+        apiKey:     cfg.apiKey ?? "",
+        model,
+        ollamaPort: cfg.ollamaPort ?? 0,
       });
+      setSavedConfig({ provider, model });
     });
   }, []);
 
   // Fetch available models whenever provider or apiKey changes (debounced).
+  // For Ollama (local), no API key is required — fetch immediately.
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     setFetchedModels(null);
 
-    if (state.apiKey.length < 8) return; // key too short to be valid
+    const isLocal = state.provider === "ollama";
+    if (!isLocal && state.apiKey.length < 8) return; // key too short to be valid
+
+    // cancelled flag prevents a stale in-flight fetch (e.g. a slow Google
+    // request) from overwriting the model list after the provider was switched.
+    let cancelled = false;
 
     debounceRef.current = setTimeout(async () => {
       setModelsFetching(true);
       try {
-        const models = await ListAIModels(state.provider, state.apiKey);
+        const models = await ListAIModels(state.provider, state.apiKey, state.ollamaPort);
+        if (cancelled) return;
         if (models && models.length > 0) {
           setFetchedModels(models);
           // If the currently selected model isn't in the fetched list, reset to
@@ -92,14 +115,15 @@ export default function AISettingsModal({ onClose }: Props) {
           }));
         }
       } finally {
-        setModelsFetching(false);
+        if (!cancelled) setModelsFetching(false);
       }
-    }, 700);
+    }, isLocal ? 0 : 700);
 
     return () => {
+      cancelled = true;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [state.provider, state.apiKey]);
+  }, [state.provider, state.apiKey, state.ollamaPort]);
 
   // Test model connectivity whenever provider, apiKey, or model changes.
   useEffect(() => {
@@ -107,12 +131,17 @@ export default function AISettingsModal({ onClose }: Props) {
     setModelTest("idle");
     setModelTestMsg("");
 
-    if (state.apiKey.length < 8 || !state.model) return;
+    const isLocal = state.provider === "ollama";
+    if (!isLocal && state.apiKey.length < 8) return;
+    if (!state.model) return;
+
+    let cancelledTest = false;
 
     testDebounceRef.current = setTimeout(async () => {
       setModelTest("testing");
       try {
-        const errMsg = await TestAIModel(state.provider, state.apiKey, state.model);
+        const errMsg = await TestAIModel(state.provider, state.apiKey, state.model, state.ollamaPort);
+        if (cancelledTest) return;
         if (errMsg) {
           setModelTest("error");
           setModelTestMsg(errMsg);
@@ -121,12 +150,15 @@ export default function AISettingsModal({ onClose }: Props) {
           setModelTestMsg("");
         }
       } catch (e) {
-        setModelTest("error");
-        setModelTestMsg(String(e));
+        if (!cancelledTest) {
+          setModelTest("error");
+          setModelTestMsg(String(e));
+        }
       }
     }, 800);
 
     return () => {
+      cancelledTest = true;
       if (testDebounceRef.current) clearTimeout(testDebounceRef.current);
     };
   }, [state.provider, state.apiKey, state.model]);
@@ -145,11 +177,13 @@ export default function AISettingsModal({ onClose }: Props) {
     setSaving(true);
     try {
       await SaveAIConfig({
-        enabled:  state.enabled,
-        provider: state.provider,
-        apiKey:   state.apiKey,
-        model:    state.model,
+        enabled:    state.enabled,
+        provider:   state.provider,
+        apiKey:     state.apiKey,
+        model:      state.model,
+        ollamaPort: state.ollamaPort,
       } as any);
+      setSavedConfig({ provider: state.provider, model: state.model });
       message.success("AI settings saved");
       onClose();
     } catch (err) {
@@ -181,6 +215,17 @@ export default function AISettingsModal({ onClose }: Props) {
           />
         </div>
 
+        {/* Currently in use */}
+        {savedConfig && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>In use:</Text>
+            <Tag color="blue" style={{ margin: 0 }}>{PROVIDER_LABEL[savedConfig.provider]}</Tag>
+            {savedConfig.model && (
+              <Text type="secondary" style={{ fontSize: 12 }}>{savedConfig.model}</Text>
+            )}
+          </div>
+        )}
+
         {/* Provider */}
         <div>
           <Text type="secondary" style={{ display: "block", marginBottom: 6 }}>Provider</Text>
@@ -190,18 +235,38 @@ export default function AISettingsModal({ onClose }: Props) {
           >
             <Radio value="openai">OpenAI</Radio>
             <Radio value="google">Google AI Studios</Radio>
+            <Radio value="ollama">Ollama (Local)</Radio>
           </Radio.Group>
         </div>
 
-        {/* API Key */}
-        <div>
-          <Text type="secondary" style={{ display: "block", marginBottom: 6 }}>API Key</Text>
-          <Input.Password
-            value={state.apiKey}
-            onChange={(e) => setState((s) => ({ ...s, apiKey: e.target.value }))}
-            placeholder="Paste your API key here"
-          />
-        </div>
+        {/* API Key — hidden for local Ollama */}
+        {state.provider !== "ollama" && (
+          <div>
+            <Text type="secondary" style={{ display: "block", marginBottom: 6 }}>API Key</Text>
+            <Input.Password
+              value={state.apiKey}
+              onChange={(e) => setState((s) => ({ ...s, apiKey: e.target.value }))}
+              placeholder="Paste your API key here"
+            />
+          </div>
+        )}
+
+        {/* Ollama port — shown only for local Ollama */}
+        {state.provider === "ollama" && (
+          <div>
+            <Text type="secondary" style={{ display: "block", marginBottom: 6 }}>Port</Text>
+            <Input
+              style={{ width: 120 }}
+              value={state.ollamaPort || ""}
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10);
+                setState((s) => ({ ...s, ollamaPort: isNaN(v) ? 0 : v }));
+              }}
+              placeholder="11434"
+              suffix={<Text type="secondary" style={{ fontSize: 11 }}>default 11434</Text>}
+            />
+          </div>
+        )}
 
         {/* Model */}
         <div>
@@ -243,11 +308,18 @@ export default function AISettingsModal({ onClose }: Props) {
         </div>
 
         {/* Storage note */}
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          Your API key is stored locally in{" "}
-          <Text code style={{ fontSize: 12 }}>~/.config/thaw/config.json</Text>{" "}
-          (permissions: 0600).
-        </Text>
+        {state.provider === "ollama" ? (
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            Ollama runs locally — no API key required. Make sure Ollama is running
+            at <Text code style={{ fontSize: 12 }}>http://localhost:11434</Text>.
+          </Text>
+        ) : (
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            Your API key is stored locally in{" "}
+            <Text code style={{ fontSize: 12 }}>~/.config/thaw/config.json</Text>{" "}
+            (permissions: 0600).
+          </Text>
+        )}
       </div>
     </Modal>
   );

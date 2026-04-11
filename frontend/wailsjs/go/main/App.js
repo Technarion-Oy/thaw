@@ -462,8 +462,8 @@ export function IsConnected() {
   return window['go']['main']['App']['IsConnected']();
 }
 
-export function ListAIModels(arg1, arg2) {
-  return window['go']['main']['App']['ListAIModels'](arg1, arg2);
+export function ListAIModels(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ListAIModels'](arg1, arg2, arg3);
 }
 
 export function ListAvailableRoles() {
@@ -746,8 +746,8 @@ export function TaskHasChildren(arg1, arg2, arg3) {
   return window['go']['main']['App']['TaskHasChildren'](arg1, arg2, arg3);
 }
 
-export function TestAIModel(arg1, arg2, arg3) {
-  return window['go']['main']['App']['TestAIModel'](arg1, arg2, arg3);
+export function TestAIModel(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['TestAIModel'](arg1, arg2, arg3, arg4);
 }
 
 export function UninstallEnvPackage(arg1) {
