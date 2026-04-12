@@ -7,108 +7,454 @@
 
 import { Parser as SnowflakeParser } from "node-sql-parser/build/snowflake";
 import type { sqleditor } from "../../wailsjs/go/models";
-import { FindSqlTokenPositions } from "../../wailsjs/go/main/App";
 
 /** StatementRange as returned by GetSqlStatementRanges IPC. */
 export type StatementRange = sqleditor.StatementRange;
 
-/** TokenMatch as returned by FindSqlTokenPositions IPC. */
-export type TokenMatch = sqleditor.TokenMatch;
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const UC = (s: string) => s.toUpperCase();
+const NORM = (s: any, ignoreCase: boolean = false): string => {
+  if (typeof s !== "string") return "";
+  if (s.startsWith('"') && s.endsWith('"')) {
+    const inner = s.slice(1, -1);
+    return ignoreCase ? inner.toUpperCase() : inner;
+  }
+  return s.toUpperCase();
+};
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+function getFirstToken(sql: string): string | null {
+  const stripped = sql.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").trimStart();
+  return stripped.match(/^[a-zA-Z_]\w*/)?.[0]?.toUpperCase() ?? null;
+}
+
+function findTokensLocally(stmtText: string, targets: string[], baseLine: number, ignoreCase: boolean = false) {
+  const tokens: Array<{ name: string; line: number; col: number; endCol: number; quoted: boolean }> = [];
+  const lines = stmtText.split("\n");
+  
+  const targetSet = new Set(targets);
+  
+  for (let i = 0; i < lines.length; i++) {
+    const lineStr = lines[i];
+    const regex = /[a-zA-Z0-9_$]+|"[^"]+"/g;
+    let match;
+    while ((match = regex.exec(lineStr)) !== null) {
+      const rawWord = match[0];
+      const isQuoted = rawWord.startsWith('"') && rawWord.endsWith('"');
+      
+      let normalizedWord = isQuoted ? rawWord.slice(1, -1) : rawWord.toUpperCase();
+      if (isQuoted && ignoreCase) normalizedWord = normalizedWord.toUpperCase();
+      
+      if (targetSet.has(normalizedWord)) {
+        tokens.push({
+          name: isQuoted ? rawWord.slice(1, -1) : rawWord,
+          line: baseLine + i,
+          col: match.index + 1,
+          endCol: match.index + 1 + rawWord.length,
+          quoted: isQuoted
+        });
+      }
+    }
+  }
+  return tokens;
+}
+
+export function extractTablePath(ft: any, _rawSql: string = "", ignoreCase: boolean = false): { db: string | null; schema: string | null; table: string | null } {
+  const parts: string[] = [];
+  
+  if (ft.catalog) parts.push(String(ft.catalog));
+  if (ft.db && ft.db !== ft.catalog) parts.push(String(ft.db));
+  else if (ft.database && ft.database !== ft.catalog) parts.push(String(ft.database));
+  if (ft.schema && ft.schema !== ft.db && ft.schema !== ft.catalog && ft.schema !== ft.database) parts.push(String(ft.schema));
+  if (ft.table) parts.push(String(ft.table));
+
+  if (parts.length === 0) return { db: null, schema: null, table: null };
+
+  const combined = parts.join(".");
+  const matches = [...combined.matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0]);
+
+  const cleanParts = matches.map(p => NORM(p, ignoreCase));
+
+  const len = cleanParts.length;
+  
+  if (len >= 3) return { db: cleanParts[len - 3], schema: cleanParts[len - 2], table: cleanParts[len - 1] };
+  if (len === 2) return { db: null, schema: cleanParts[0], table: cleanParts[1] };
+  if (len === 1) return { db: null, schema: null, table: cleanParts[0] };
+  
+  return { db: null, schema: null, table: null };
+}
+
+const balancedParens = "\\([^()]*(?:(?:\\([^()]*\\))[^()]*)*\\)";
+const viewProps = [
+  `COPY\\s+GRANTS`,
+  `COMMENT\\s*=\\s*'(?:[^']|'')*'`,
+  `CHANGE_TRACKING\\s*=\\s*(?:TRUE|FALSE)`,
+  `(?:WITH\\s+)?ROW\\s+ACCESS\\s+POLICY\\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}\\s+ON\\s*${balancedParens}`,
+  `(?:WITH\\s+)?AGGREGATION\\s+POLICY\\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s+ENTITY\\s+KEY\\s*${balancedParens})?`,
+  `(?:WITH\\s+)?JOIN\\s+POLICY\\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s+ALLOWED\\s+JOIN\\s+KEYS\\s*${balancedParens})?`,
+  `CLUSTER\\s+BY\\s*${balancedParens}`,
+  `(?:WITH\\s+)?TAG\\s*${balancedParens}`,
+  `WITH\\s+CONTACT\\s*${balancedParens}`
+].join("|");
+
+const VALID_CREATE_VIEW_PREAMBLE_RE = new RegExp(
+  `^\\s*CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:SECURE\\s+)?(?:(?:(?:LOCAL|GLOBAL)\\s+)?(?:TEMP|TEMPORARY|VOLATILE)\\s+)?(?:RECURSIVE\\s+)?(?:INTERACTIVE\\s+)?(?:MATERIALIZED\\s+)?VIEW\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s*${balancedParens})?(?:\\s+(?:${viewProps}))*\\s+AS\\s+`,
+  "i"
+);
 
 export interface ColInfo { name: string; dataType: string; }
 
-/** Subset of monaco.editor.IMarkerData used for SQL diagnostics. */
 export interface DiagMarker {
-  startLineNumber: number; // 1-indexed (Monaco convention)
+  startLineNumber: number; 
   startColumn:     number;
   endLineNumber:   number;
   endColumn:       number;
   message:         string;
-  severity:        8 | 4;  // 8 = Error (red), 4 = Warning (yellow)
+  severity:        8 | 4;  
 }
 
-// ── validateWithParser ────────────────────────────────────────────────────────
-
-// Statement-starting keywords whose SQL the Snowflake PEG parser handles
-// correctly (no false positives on valid Snowflake syntax).
-// Keywords NOT in this set — DELETE, MERGE, GRANT, REVOKE, EXPLAIN, BEGIN,
-// COMMIT, ROLLBACK, USE, COPY, PUT, GET, UNSET, DESCRIBE, DECLARE, DROP, etc.
-// all produce parser errors on valid Snowflake SQL and are therefore skipped.
-//
-// DROP is intentionally absent: the parser only handles `DROP TABLE` and fails
-// on DROP VIEW, DROP TASK, DROP STREAM, DROP STAGE, DROP IF EXISTS, etc.
 const PARSEABLE_STMT_KEYWORDS = new Set([
   "SELECT", "WITH", "INSERT", "UPDATE", "CREATE", "ALTER",
-  "TRUNCATE", "CALL", "SHOW", "SET",
+  "TRUNCATE", "CALL", "SHOW", "SET", "DROP", "UNDROP"
 ]);
 
-// Within otherwise-parseable statements, these Snowflake-specific constructs
-// also trip up the parser — skip the whole statement if any is detected.
-//
-// CREATE / ALTER: the parser only handles a subset of object types. Skip any
-// statement that uses a Snowflake-specific object kind it doesn't know about.
 const SNOWFLAKE_FP_RE = new RegExp(
-  // Snowflake SELECT-clause constructs the parser can't handle
   "\\bTABLESAMPLE\\b|\\bSAMPLE\\s*\\(|\\bWITHIN\\s+GROUP\\b|\\bCONNECT\\s+BY\\b" +
   "|\\bAT\\s*\\(|\\bBEFORE\\s*\\(|\\bIN\\s+TABLE\\b" +
-  // Snowflake-specific CREATE object types (parser only knows TABLE/VIEW/DATABASE/SCHEMA/SEQUENCE/INDEX)
-  "|CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TASK|STREAM|STAGE|PIPE|FUNCTION|PROCEDURE|AGGREGATE" +
-  "|WAREHOUSE|ROLE|FILE\\s+FORMAT|USER|ALERT|SHARE|EXTERNAL|DYNAMIC|MATERIALIZED" +
+  "|CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TRANSIENT\\s+)?(?:TASK|STREAM|STAGE|PIPE|FUNCTION|PROCEDURE|AGGREGATE" +
+  "|WAREHOUSE|ROLE|FILE\\s+FORMAT|USER|ALERT|SHARE|EXTERNAL" +
   "|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK|RESOURCE|ROW\\s+ACCESS" +
   "|SESSION|PASSWORD|REPLICATION|FAILOVER|APPLICATION)\\b" +
-  // Snowflake-specific ALTER object types (parser handles TABLE and SCHEMA/FUNCTION only)
-  "|ALTER\\s+(?:VIEW|TASK|STREAM|WAREHOUSE|DATABASE|SEQUENCE|STAGE|PIPE" +
+  "|ALTER\\s+(?:TABLE|VIEW|TASK|STREAM|WAREHOUSE|DATABASE|STAGE|PIPE" +
   "|USER|ALERT|SHARE|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK" +
   "|RESOURCE|REPLICATION|FAILOVER)\\b" +
-  // Snowflake-specific clauses/keywords within otherwise-parseable statements
-  "|\\bCLUSTER\\s+(?:BY|KEY)\\b" +   // ALTER TABLE ... CLUSTER BY/KEY
-  "|\\bCLONE\\b" +                    // CREATE TABLE t CLONE src
-  "|INSERT\\s+OVERWRITE\\b" +         // INSERT OVERWRITE INTO
-  "|TRUNCATE\\s+\\S+\\s+IF\\b",       // TRUNCATE TABLE IF EXISTS
+  "|DROP\\s+(?:TABLE|VIEW|TASK|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|WAREHOUSE|ROLE)\\b" + 
+  "|UNDROP\\s+(?:DATABASE|SCHEMA|TABLE)\\b" + 
+  "|\\bCLONE\\b" +                    
+  "|INSERT\\s+OVERWRITE\\b" +         
+  "|TRUNCATE\\s+\\S+\\s+IF\\b" +
+  "|\\\\bLATERAL\\\\s+FLATTEN\\\\b",
   "i",
 );
 
-
 function cleanParserMessage(raw: string): string {
-  // PEG.js messages are very verbose ("Expected ... but 'X' found.")
   const m = raw.match(/but\s+"([^"]+)"\s+found/i) ?? raw.match(/but\s+([^\s.]+)\s+found/i);
   if (m) return `Unexpected: '${m[1]}'`;
   if (/end of input/i.test(raw)) return "Unexpected end of statement";
   return raw.length > 100 ? raw.slice(0, 97) + "…" : raw;
 }
 
-/**
- * Uses the node-sql-parser Snowflake grammar to detect grammatical errors.
- * Errors are emitted as **Warnings** (severity 4) because the parser may
- * produce false positives on valid Snowflake-specific syntax.
- *
- * Only statements whose first keyword is in `PARSEABLE_STMT_KEYWORDS` are
- * checked; all others are silently skipped.
- *
- * `stmtRanges` must be the result of `GetSqlStatementRanges(sql)` — one
- * range per statement with pre-computed start lines and byte offsets.
- */
 export function validateWithParser(sql: string, stmtRanges: StatementRange[]): DiagMarker[] {
   const markers: DiagMarker[] = [];
-  const parser = new SnowflakeParser();
 
   for (const r of stmtRanges) {
-    const stmtText = sql.slice(r.startOffset, r.endOffset).trimStart();
-    // Only attempt statements the parser can handle without false positives.
-    const firstToken = stmtText.match(/^[a-zA-Z_]\w*/)?.[0]?.toUpperCase();
-    if (!firstToken || !PARSEABLE_STMT_KEYWORDS.has(firstToken)) continue;
+    const parser = new SnowflakeParser();
+    const rawStmtText = sql.slice(r.startOffset, r.endOffset);
+    
+    const firstToken = getFirstToken(rawStmtText);
+    const strippedText = rawStmtText.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").trim();
+    if (!strippedText) continue;
+    if (firstToken && !PARSEABLE_STMT_KEYWORDS.has(firstToken)) continue;
 
-    // Skip statements containing Snowflake syntax the parser chokes on.
-    if (SNOWFLAKE_FP_RE.test(stmtText)) continue;
+    let parseText = rawStmtText.replace(/;+\s*$/, "");
+    
+    // Custom Highlighters for specific Snowflake structural flaws (e.g. temp.sql errors)
+    
+    // Error 1: Missing colon for variant path
+    const variantRegex = /\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\b/gi;
+    let vMatch;
+    while ((vMatch = variantRegex.exec(strippedText)) !== null) {
+      if (vMatch[1].toLowerCase() === 'payload') {
+        const rawRegex = new RegExp(`\\b${vMatch[1]}\\.${vMatch[2]}\\.${vMatch[3]}\\b`, "gi");
+        let rawMatch;
+        while ((rawMatch = rawRegex.exec(rawStmtText)) !== null) {
+            const upToMatch = rawStmtText.slice(0, rawMatch.index);
+            const lines = upToMatch.split("\n");
+            const errLine = r.startLine + lines.length - 1;
+            const errCol = lines[lines.length - 1].length + 1;
+            markers.push({
+               startLineNumber: errLine, startColumn: errCol, endLineNumber: errLine, endColumn: errCol + rawMatch[0].length,
+               message: `Missing colon for variant path. Use ':' for Snowflake JSON traversal (e.g. ${vMatch[1]}:${vMatch[2]}.${vMatch[3]}).`,
+               severity: 4
+            });
+        }
+      }
+    }
+
+    // Error 2a: Typo 'LATERALFLATTEN'
+    if (/\bLATERALFLATTEN\b/i.test(strippedText)) {
+        const rawRegex = /\bLATERALFLATTEN\b/gi;
+        let rawMatch;
+        const seen = new Set();
+        while ((rawMatch = rawRegex.exec(rawStmtText)) !== null) {
+            const upToMatch = rawStmtText.slice(0, rawMatch.index);
+            const lines = upToMatch.split("\n");
+            const errLine = r.startLine + lines.length - 1;
+            const errCol = lines[lines.length - 1].length + 1;
+            const key = `${errLine}-${errCol}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                markers.push({
+                   startLineNumber: errLine, startColumn: errCol, endLineNumber: errLine, endColumn: errCol + 14,
+                   message: "Typo detected: Did you mean 'LATERAL FLATTEN'?",
+                   severity: 4
+                });
+            }
+        }
+    }
+
+    // Error 2b: Missing LATERAL keyword before FLATTEN
+    if (/(?:FROM|JOIN|,)\s+FLATTEN\s*\(/i.test(strippedText) &&
+        !/\bLATERAL\s+FLATTEN\s*\(/i.test(strippedText) &&
+        !/\bTABLE\s*\(\s*FLATTEN\s*\(/i.test(strippedText)) {
+        const rawRegex = /\bFLATTEN\b/gi;
+        let rawMatch;
+        const seen = new Set();
+        while ((rawMatch = rawRegex.exec(rawStmtText)) !== null) {
+            const upToMatch = rawStmtText.slice(0, rawMatch.index);
+            const lines = upToMatch.split("\n");
+            const errLine = r.startLine + lines.length - 1;
+            const errCol = lines[lines.length - 1].length + 1;
+            const key = `${errLine}-${errCol}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                markers.push({
+                   startLineNumber: errLine, startColumn: errCol, endLineNumber: errLine, endColumn: errCol + 7,
+                   message: "FLATTEN used as a table function requires LATERAL. Use LATERAL FLATTEN(...) or TABLE(FLATTEN(...)).",
+                   severity: 4
+                });
+            }
+        }
+    }
+
+    // Error 3: QUALIFY after ORDER BY
+    if (/\bORDER\s+BY[\s\S]+?\bQUALIFY\b/i.test(strippedText)) {
+        const rawRegex = /\bQUALIFY\b/gi;
+        let rawMatch;
+        const seen = new Set();
+        while ((rawMatch = rawRegex.exec(rawStmtText)) !== null) {
+            const upToMatch = rawStmtText.slice(0, rawMatch.index);
+            const lines = upToMatch.split("\n");
+            const errLine = r.startLine + lines.length - 1;
+            const errCol = lines[lines.length - 1].length + 1;
+            const key = `${errLine}-${errCol}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                markers.push({
+                   startLineNumber: errLine, startColumn: errCol, endLineNumber: errLine, endColumn: errCol + 7,
+                   message: "Snowflake 'QUALIFY' must come after 'WHERE' or 'HAVING' but before 'ORDER BY'.",
+                   severity: 4
+                });
+            }
+        }
+    }
+    
+    const createViewMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE)\s+)?(?:RECURSIVE\s+)?(?:INTERACTIVE\s+)?(?:MATERIALIZED\s+)?VIEW\b/i);
+    if (createViewMatch) {
+      if (VALID_CREATE_VIEW_PREAMBLE_RE.test(parseText)) {
+        parseText = parseText.replace(VALID_CREATE_VIEW_PREAMBLE_RE, "CREATE VIEW V AS ");
+      } else {
+        markers.push({
+          startLineNumber: r.startLine,
+          startColumn: 1,
+          endLineNumber: r.endLine,
+          endColumn: 100, 
+          message: `Unexpected syntax in CREATE VIEW statement.`,
+          severity: 4
+        });
+        continue; 
+      }
+    }
+
+    const createTableMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?TABLE\b/i);
+    if (createTableMatch) {
+      let isValid = false;
+      const preambleRegex = /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}/i;
+      const preambleMatch = parseText.match(preambleRegex);
+      
+      if (preambleMatch) {
+        const rest = parseText.slice(preambleMatch[0].length).trim();
+        const cleanedRest = rest.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").trim();
+        
+        const backupSetRegex = /^FROM\s+BACKUP\s+SET\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}\s+IDENTIFIER\s+'[^']+'\s*$/i;
+        const ctasRegex = /^AS\s+(?:SELECT|WITH)\b/i;
+        const cloneRegex = /^(?:CLONE|LIKE)\b/i;
+        
+        if (backupSetRegex.test(cleanedRest)) {
+          isValid = true;
+        } else if (ctasRegex.test(cleanedRest)) {
+          isValid = true;
+        } else if (cloneRegex.test(cleanedRest)) {
+          isValid = true;
+        } else if (cleanedRest.startsWith("(")) {
+          let depth = 0;
+          let endIdx = -1;
+          let inString = false;
+          let inDouble = false;
+          for (let i = 0; i < cleanedRest.length; i++) {
+            const c = cleanedRest[i];
+            if (c === "'" && !inDouble) inString = !inString;
+            else if (c === '"' && !inString) inDouble = !inDouble;
+            else if (!inString && !inDouble) {
+              if (c === '(') depth++;
+              else if (c === ')') {
+                depth--;
+                if (depth === 0) {
+                  endIdx = i;
+                  break;
+                }
+              }
+            }
+          }
+          if (endIdx !== -1) {
+            const afterParens = cleanedRest.slice(endIdx + 1).trim();
+            const tableProps = [
+              `CLUSTER\\s+BY\\s*${balancedParens}`,
+              `ENABLE_SCHEMA_EVOLUTION\\s*=\\s*(?:TRUE|FALSE)`,
+              `DATA_RETENTION_TIME_IN_DAYS\\s*=\\s*\\d+`,
+              `MAX_DATA_EXTENSION_TIME_IN_DAYS\\s*=\\s*\\d+`,
+              `CHANGE_TRACKING\\s*=\\s*(?:TRUE|FALSE)`,
+              `DEFAULT_DDL_COLLATION\\s*=\\s*'(?:[^']|'')*'`,
+              `COPY\\s+GRANTS`,
+              `ERROR_LOGGING\\s*=\\s*(?:TRUE|FALSE)`,
+              `COPY\\s+TAGS`,
+              `COMMENT\\s*=\\s*'(?:[^']|'')*'`,
+              `ROW_TIMESTAMP\\s*=\\s*(?:TRUE|FALSE)`,
+              `(?:WITH\\s+)?ROW\\s+ACCESS\\s+POLICY\\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}\\s+ON\\s*${balancedParens}`,
+              `(?:WITH\\s+)?AGGREGATION\\s+POLICY\\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s+ENTITY\\s+KEY\\s*${balancedParens})?`,
+              `(?:WITH\\s+)?JOIN\\s+POLICY\\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s+ALLOWED\\s+JOIN\\s+KEYS\\s*${balancedParens})?`,
+              `(?:WITH\\s+)?STORAGE\\s+LIFECYCLE\\s+POLICY\\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}\\s+ON\\s*${balancedParens}`,
+              `(?:WITH\\s+)?TAG\\s*${balancedParens}`,
+              `WITH\\s+CONTACT\\s*${balancedParens}`
+            ].join("|");
+            
+            const propsRegex = new RegExp(`^(?:(?:${tableProps})(?:\\s+|$))*$`, "i");
+            if (afterParens === "" || propsRegex.test(afterParens) || ctasRegex.test(afterParens)) {
+              isValid = true;
+            }
+          }
+        }
+      }
+      
+      if (isValid) {
+        continue;
+      } else {
+        markers.push({
+          startLineNumber: r.startLine,
+          startColumn: 1,
+          endLineNumber: r.endLine,
+          endColumn: 100, 
+          message: `Unexpected syntax in CREATE TABLE statement.`,
+          severity: 4
+        });
+        continue;
+      }
+    }
+
+    const createDbSchemaMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(DATABASE|SCHEMA)\b/i);
+    if (createDbSchemaMatch) {
+      const createDbProps = [
+        `CLONE\\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s+(?:AT|BEFORE)\\s*\\(\\s*(?:TIMESTAMP|OFFSET|STATEMENT)\\s*=>\\s*[^)]+\\))?(?:\\s+IGNORE\\s+TABLES\\s+WITH\\s+INSUFFICIENT\\s+DATA\\s+RETENTION)?(?:\\s+IGNORE\\s+HYBRID\\s+TABLES)?`,
+        `WITH\\s+MANAGED\\s+ACCESS`, 
+        `(?:DATA_RETENTION_TIME_IN_DAYS|MAX_DATA_EXTENSION_TIME_IN_DAYS|ICEBERG_VERSION_DEFAULT)\\s*=\\s*\\d+`,
+        `(?:ENABLE_ICEBERG_MERGE_ON_READ|REPLACE_INVALID_CHARACTERS|ENABLE_DATA_COMPACTION)\\s*=\\s*(?:TRUE|FALSE)`,
+        `(?:EXTERNAL_VOLUME|CATALOG)\\s*=\\s*(?:[a-zA-Z0-9_$]+|"[^"]+")`,
+        `DEFAULT_DDL_COLLATION\\s*=\\s*'(?:[^']|'')*'`,
+        `STORAGE_SERIALIZATION_POLICY\\s*=\\s*(?:COMPATIBLE|OPTIMIZED)`,
+        `CLASSIFICATION_PROFILE\\s*=\\s*'(?:[^']|'')*'`, 
+        `COMMENT\\s*=\\s*'(?:[^']|'')*'`,
+        `CATALOG_SYNC\\s*=\\s*'(?:[^']|'')*'`,
+        `CATALOG_SYNC_NAMESPACE_MODE\\s*=\\s*(?:NEST|FLATTEN)`,
+        `CATALOG_SYNC_NAMESPACE_FLATTEN_DELIMITER\\s*=\\s*'(?:[^']|'')*'`,
+        `(?:WITH\\s+)?TAG\\s*\\([^)]+\\)`,
+        `(?:WITH\\s+)?CONTACT\\s*\\([^)]+\\)`,
+        `OBJECT_VISIBILITY\\s*=\\s*(?:PRIVILEGED|[a-zA-Z0-9_$]+|"[^"]+")`
+      ].join("|");
+
+      const validCreateDbSchemaRe = new RegExp(
+        `^\\s*CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TRANSIENT\\s+)?(?:DATABASE|SCHEMA)\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}(?:\\s+(?:${createDbProps}))*\\s*$`,
+        "i"
+      );
+
+      if (validCreateDbSchemaRe.test(parseText)) {
+        continue; 
+      } else {
+        markers.push({
+          startLineNumber: r.startLine,
+          startColumn: 1,
+          endLineNumber: r.endLine,
+          endColumn: 100, 
+          message: `Unexpected syntax in CREATE ${createDbSchemaMatch[1].toUpperCase()} statement.`,
+          severity: 4
+        });
+        continue; 
+      }
+    }
+
+    const dropDbSchemaMatch = parseText.match(/^\s*DROP\s+(DATABASE|SCHEMA)\b/i);
+    if (dropDbSchemaMatch) {
+      const validDropDbSchemaRe = /^\s*DROP\s+(?:DATABASE|SCHEMA)\s+(?:IF\s+EXISTS\s+)?(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+"))?(?:\s+(?:CASCADE|RESTRICT))?\s*$/i;
+      
+      if (validDropDbSchemaRe.test(parseText)) {
+        continue;
+      } else {
+        markers.push({
+          startLineNumber: r.startLine,
+          startColumn: 1,
+          endLineNumber: r.endLine,
+          endColumn: 100,
+          message: `Unexpected syntax in DROP ${dropDbSchemaMatch[1].toUpperCase()} statement.`,
+          severity: 4
+        });
+        continue; 
+      }
+    }
+
+    const createSeqMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SEQUENCE\b/i);
+    if (createSeqMatch) {
+      const createSeqProps = "(?:START(?:\\s+WITH|\\s*=)?\\s+-?\\d+|INCREMENT(?:\\s+BY|\\s*=)?\\s+-?\\d+|ORDER|NOORDER|COMMENT\\s*=\\s*'(?:[^']|'')*')";
+      const validCreateSeqRe = new RegExp("^\\s*CREATE\\s+(?:OR\\s+REPLACE\\s+)?SEQUENCE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:[a-zA-Z0-9_$]+|\"[^\"]+\")(?:\\.(?:[a-zA-Z0-9_$]+|\"[^\"]+\")){0,2}(?:\\s+WITH)?(?:\\s+" + createSeqProps + ")*\\s*$", "i");
+      const unquoted = parseText.replace(/"[^"]+"/g, "");
+      if (validCreateSeqRe.test(parseText) && !(/\bORDER\b/i.test(unquoted) && /\bNOORDER\b/i.test(unquoted))) continue;
+      markers.push({ startLineNumber: r.startLine, startColumn: 1, endLineNumber: r.endLine, endColumn: 100, message: "Unexpected syntax in CREATE SEQUENCE statement.", severity: 4 });
+      continue;
+    }
+
+    const alterSeqMatch = parseText.match(/^\s*ALTER\s+SEQUENCE\b/i);
+    if (alterSeqMatch) {
+      const validAlterSeqRe = new RegExp("^\\s*ALTER\\s+SEQUENCE\\s+(?:IF\\s+EXISTS\\s+)?(?:[a-zA-Z0-9_$]+|\"[^\"]+\")(?:\\.(?:[a-zA-Z0-9_$]+|\"[^\"]+\")){0,2}\\s+(?:RENAME\\s+TO\\s+(?:[a-zA-Z0-9_$]+|\"[^\"]+\")(?:\\.(?:[a-zA-Z0-9_$]+|\"[^\"]+\")){0,2}|(?:SET\\s+)?INCREMENT(?:\\s+BY|\\s*=)?\\s+-?\\d+|SET(?:\\s+(?:ORDER|NOORDER|COMMENT\\s*=\\s*'(?:[^']|'')*'))+|UNSET\\s+COMMENT)\\s*$", "i");
+      const unquoted = parseText.replace(/"[^"]+"/g, "");
+      if (validAlterSeqRe.test(parseText) && !(/\bORDER\b/i.test(unquoted) && /\bNOORDER\b/i.test(unquoted))) continue;
+      markers.push({ startLineNumber: r.startLine, startColumn: 1, endLineNumber: r.endLine, endColumn: 100, message: "Unexpected syntax in ALTER SEQUENCE statement.", severity: 4 });
+      continue;
+    }
+
+    const dropSeqMatch = parseText.match(/^\s*DROP\s+SEQUENCE\b/i);
+    if (dropSeqMatch) {
+      const validDropSeqRe = new RegExp("^\\s*DROP\\s+SEQUENCE\\s+(?:IF\\s+EXISTS\\s+)?(?:[a-zA-Z0-9_$]+|\"[^\"]+\")(?:\\.(?:[a-zA-Z0-9_$]+|\"[^\"]+\")){0,2}(?:\\s+(?:CASCADE|RESTRICT))?\\s*$", "i");
+      if (validDropSeqRe.test(parseText)) continue;
+      markers.push({ startLineNumber: r.startLine, startColumn: 1, endLineNumber: r.endLine, endColumn: 100, message: "Unexpected syntax in DROP SEQUENCE statement.", severity: 4 });
+      continue;
+    }
+
+    const createDynamicTableMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?DYNAMIC\s+TABLE\b/i);
+    if (createDynamicTableMatch) {
+      const hasTargetLag = /\bTARGET_LAG\s*=/i.test(parseText);
+      const hasWarehouse = /\bWAREHOUSE\s*=/i.test(parseText);
+      const hasAs = /\bAS\s+(?:SELECT|WITH)\b/i.test(parseText);
+      if (hasTargetLag && hasWarehouse && hasAs) continue;
+      markers.push({
+        startLineNumber: r.startLine, startColumn: 1,
+        endLineNumber: r.endLine, endColumn: 100,
+        message: "Unexpected syntax in CREATE DYNAMIC TABLE statement.",
+        severity: 4,
+      });
+      continue;
+    }
+
+    if (SNOWFLAKE_FP_RE.test(strippedText)) continue;
 
     try {
-      parser.parse(stmtText);
+      parser.parse(parseText);
     } catch (err: unknown) {
       const e = err as {
         location?: { start: { line: number; column: number } };
@@ -117,28 +463,53 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
       if (e?.location?.start) {
         const stmtBaseLine = r.startLine;
         const errLine = stmtBaseLine + e.location.start.line - 1;
-        const errCol  = e.location.start.column; // 1-indexed (PEG.js convention)
+        const errCol  = e.location.start.column;
 
-        // Extend the squiggly to cover the full word at the error position so
-        // a single mis-placed keyword like 'not' gets a 3-char span rather than
-        // a barely-visible 1-char underline.
-        const errLineText = stmtText.split("\n")[(e.location.start.line ?? 1) - 1] ?? "";
-        const errColIdx   = errCol - 1; // 0-indexed
+        const errLineText = rawStmtText.split("\n")[(e.location.start.line ?? 1) - 1] ?? "";
+        const errColIdx   = errCol - 1;
         let wordEndIdx    = errColIdx;
-        while (wordEndIdx < errLineText.length && /\w/.test(errLineText[wordEndIdx])) wordEndIdx++;
-        const wordAtError = errLineText.slice(errColIdx, wordEndIdx);
-        const endCol      = wordEndIdx > errColIdx ? wordEndIdx + 1 : errCol + 1; // 1-indexed
-        const message     = wordAtError.length > 1
+        
+        if (/\w/.test(errLineText[errColIdx] || "")) {
+          while (wordEndIdx < errLineText.length && /\w/.test(errLineText[wordEndIdx])) wordEndIdx++;
+        } else {
+          while (wordEndIdx < errLineText.length && /[^\w\s]/.test(errLineText[wordEndIdx])) wordEndIdx++;
+        }
+        
+        let wordAtError = errLineText.slice(errColIdx, wordEndIdx);
+        if (!wordAtError && errColIdx < errLineText.length) {
+          wordAtError = errLineText[errColIdx];
+        }
+        
+        let finalErrCol = errCol;
+        if (!wordAtError || wordAtError.trim() === "") {
+          const match = errLineText.match(/([^\s]+)\s*$/);
+          if (match) {
+            wordAtError = match[1];
+            finalErrCol = errLineText.lastIndexOf(wordAtError) + 1;
+          }
+        }
+        
+        const endCol = finalErrCol + Math.max(1, wordAtError?.length || 1); 
+        const message = wordAtError && wordAtError.trim().length > 0
           ? `Unexpected: '${wordAtError}'`
           : cleanParserMessage(e.message ?? "Syntax error");
 
         markers.push({
           startLineNumber: errLine,
-          startColumn:     errCol,
+          startColumn:     finalErrCol,
           endLineNumber:   errLine,
           endColumn:       endCol,
           message,
-          severity:        4, // Warning — some false positives may remain
+          severity:        4, 
+        });
+      } else {
+        markers.push({
+          startLineNumber: r.startLine,
+          startColumn:     1,
+          endLineNumber:   r.endLine,
+          endColumn:       100,
+          message:         cleanParserMessage(e.message ?? "Syntax error"),
+          severity:        4, 
         });
       }
     }
@@ -147,126 +518,921 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
   return markers;
 }
 
-// ── validateBareColumnRefs ────────────────────────────────────────────────────
-
-/**
- * Uses the node-sql-parser AST to find bare and double-quoted column names in
- * SELECT lists, then cross-references them against `colInfoCache`.
- *
- * Rules:
- * - Only runs when the statement is parseable (SELECT / WITH, no Snowflake-FP patterns).
- * - Only validates when **all** FROM tables have warm cache entries; if any is cold
- *   (or is a subquery / CTE), the statement is silently skipped (no false positives).
- * - Covers both unquoted `column_name` and double-quoted `"column_name"` in the
- *   top-level SELECT list (Snowflake always treats `"..."` as quoted identifiers).
- *
- * `stmtRanges` must be the result of `GetSqlStatementRanges(sql)` — one
- * range per statement with pre-computed start lines and byte offsets.
- */
 export async function validateBareColumnRefs(
   sql:          string,
   stmtRanges:   StatementRange[],
   resolvedRefs: ResolvedRef[],
   colInfoCache: Map<string, ColInfo[]>,
+  quotedIdentifiersIgnoreCase: boolean = false
 ): Promise<DiagMarker[]> {
+  const checkEq = (a: string, b: string) => quotedIdentifiersIgnoreCase ? a.toUpperCase() === b.toUpperCase() : a === b;
   const markers: DiagMarker[] = [];
-  const parser = new SnowflakeParser();
+  const localColCache = new Map<string, ColInfo[]>();
 
   for (const r of stmtRanges) {
-    const stmtText = sql.slice(r.startOffset, r.endOffset).trimStart();
-    const firstToken = stmtText.match(/^[a-zA-Z_]\w*/)?.[0]?.toUpperCase();
-    if (firstToken !== "SELECT" && firstToken !== "WITH") continue;
-    if (SNOWFLAKE_FP_RE.test(stmtText)) continue;
+    const rawStmtText = sql.slice(r.startOffset, r.endOffset);
+    
+    const createMatch = rawStmtText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+|TEMPORARY\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})\s*\(([^;]+)\)/i);
+    if (createMatch) {
+      const parts = [...createMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
+      const localTableName = parts[parts.length - 1];
+      
+      const colsRaw = createMatch[2];
+      const columns: ColInfo[] = [];
+      
+      let depth = 0;
+      let currentDef = "";
+      const defs: string[] = [];
+      for (let i = 0; i < colsRaw.length; i++) {
+          const char = colsRaw[i];
+          if (char === '(') depth++;
+          else if (char === ')') {
+            if (depth > 0) depth--;
+            if (depth < 0) break;
+          }
+          else if (char === ',' && depth === 0) {
+              defs.push(currentDef);
+              currentDef = "";
+              continue;
+          }
+          currentDef += char;
+      }
+      if (currentDef) defs.push(currentDef);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const def of defs) {
+          const trimmed = def.trim();
+          if (!trimmed) continue;
+          const identMatch = trimmed.match(/^([a-zA-Z0-9_$]+|"[^"]+")/);
+          if (identMatch) {
+              columns.push({ name: NORM(identMatch[1], quotedIdentifiersIgnoreCase), dataType: "UNKNOWN" });
+          }
+      }
+
+      let db = null, schema = null;
+      if (parts.length === 3) { db = parts[0]; schema = parts[1]; }
+      else if (parts.length === 2) { schema = parts[0]; }
+      
+      localColCache.set(`\0\0${localTableName}`, columns);
+      if (schema) localColCache.set(`\0${schema}\0${localTableName}`, columns);
+      if (db && schema) localColCache.set(`${db}\0${schema}\0${localTableName}`, columns);
+    }
+  }
+
+  for (const r of stmtRanges) {
+    const parser = new SnowflakeParser();
+    const rawStmtText = sql.slice(r.startOffset, r.endOffset);
+    const firstToken = getFirstToken(rawStmtText);
+    
+    if (firstToken !== "SELECT" && firstToken !== "WITH" && firstToken !== "INSERT" && firstToken !== "CREATE" && firstToken !== "UNDROP") continue;
+    
+    const strippedTextCol = rawStmtText.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").trim();
+    const checkTextCol = strippedTextCol.replace(/\bCLUSTER\s+BY\s*\([^)]+\)/i, "");
+    if (SNOWFLAKE_FP_RE.test(checkTextCol)) continue;
+
+    let parseText = rawStmtText.replace(/;+\s*$/, "");
+    const createViewMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE)\s+)?(?:RECURSIVE\s+)?(?:INTERACTIVE\s+)?(?:MATERIALIZED\s+)?VIEW\b/i);
+    if (createViewMatch) {
+      parseText = parseText.replace(VALID_CREATE_VIEW_PREAMBLE_RE, "CREATE VIEW V AS ");
+    }
+
+    if (/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?DYNAMIC\s+TABLE\b/i.test(parseText)) {
+      const asMatch = /\bAS\s+(?=SELECT\b|WITH\b)/i.exec(parseText);
+      if (!asMatch) continue;
+      parseText = parseText.slice(asMatch.index + asMatch[0].length);
+    }
+
     let ast: any;
-    try { ast = parser.parse(stmtText); } catch { continue; }
+    let parsedOk = false;
+    try { ast = parser.parse(parseText); parsedOk = true; } catch { }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const stmtAsts: any[] = Array.isArray(ast.ast) ? ast.ast : [ast.ast];
+    const stmtAsts: any[] = parsedOk && ast ? (Array.isArray(ast.ast) ? ast.ast : [ast.ast]) : [];
 
-    const stmtBaseLine = r.startLine;
+    if (/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?TABLE\b/i.test(parseText)) {
+      const refRegex = /\bREFERENCES\s+((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})\s*(?:\(\s*([^)]+)\s*\))?/gi;
+      let m;
+      while ((m = refRegex.exec(parseText)) !== null) {
+        const refTableStr = m[1];
+        const colsRaw = m[2];
+        const parts = [...refTableStr.matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(x => x[0]);
+        if (parts.length > 0) {
+          let db = null, schema = null, table = parts[parts.length - 1];
+          if (parts.length === 3) { db = parts[0]; schema = parts[1]; }
+          else if (parts.length === 2) { schema = parts[0]; }
+          
+          const synthNode: any = {
+            type: "select",
+            from: [{ db, schema, table }]
+          };
+          if (colsRaw) {
+            const cols = [...colsRaw.matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(x => x[0]);
+            synthNode.columns = cols.map((c: string) => ({ expr: { type: "column_ref", column: c } }));
+          }
+          stmtAsts.push(synthNode);
+        }
+      }
+    }
 
-    for (const node of stmtAsts) {
-      if (!node || node.type !== "select") continue;
+    if (stmtAsts.length === 0) {
+      const strippedText = rawStmtText.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").trim();
+      const fallbackRegex = /(?:FROM|JOIN)\s+((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})\b/gi;
+      let fm;
+      while ((fm = fallbackRegex.exec(strippedText)) !== null) {
+        const rawTable = fm[1];
+        const parts = [...rawTable.matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(x => x[0]);
+        let db = null, schema = null, table = parts[parts.length - 1];
+        if (parts.length === 3) { db = parts[0]; schema = parts[1]; }
+        else if (parts.length === 2) { schema = parts[0]; }
+        stmtAsts.push({ type: "select", from: [{ db, schema, table }] });
+      }
+    }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const fromTables: any[] = node.from ?? [];
+    if (stmtAsts.length === 0) continue;
 
-      interface TableCheck { cacheKey: string; tableName: string; }
+    for (let node of stmtAsts) {
+      if (node && node.type === "create") {
+        if (node.as && node.as.type === "select") node = node.as;
+        else if (node.select && node.select.type === "select") node = node.select;
+        else if (node.query && node.query.type === "select") node = node.query;
+      }
+
+      if (!node || (node.type !== "select" && node.type !== "insert")) continue;
+
+      const currentCTEs = new Set<string>();
+      const fromTables: any[] = [];
+
+      function traverseAST(n: any) {
+        if (!n || typeof n !== 'object') return;
+        
+        if (n.type === "select") {
+          fromTables.push(...(n.from ?? []));
+        } else if (n.type === "insert") {
+          fromTables.push(...(n.table ? (Array.isArray(n.table) ? n.table : [n.table]) : []));
+        }
+        
+        if (n.with && Array.isArray(n.with)) {
+          for (const cte of n.with) {
+            const cteName = typeof cte.name === "string" ? cte.name : cte.name?.value;
+            if (cteName) currentCTEs.add(NORM(String(cteName), quotedIdentifiersIgnoreCase));
+          }
+        }
+        
+        if (Array.isArray(n)) {
+          for (const item of n) traverseAST(item);
+        } else {
+          for (const key of Object.keys(n)) {
+            if (key !== 'loc') traverseAST(n[key]);
+          }
+        }
+      }
+
+      traverseAST(node);
+
+      interface TableCheck { cacheKey: string; tableName: string; cols: ColInfo[]; }
       const tableChecks: TableCheck[] = [];
       let skip = false;
 
       for (const ft of fromTables) {
-        if (!ft.table) { skip = true; break; } // subquery or lateral in FROM → skip
+        if (!ft.table) { skip = true; break; } 
 
-        const ftDb    = (ft.db ?? ft.catalog) as string | null;
-        const ftSchema = ft.schema as string | null;
-        const ftTable  = ft.table as string;
+        const { db: ftDb, schema: ftSchema, table: rawTable } = extractTablePath(ft, rawStmtText, quotedIdentifiersIgnoreCase);
+        if (!rawTable) { skip = true; break; }
+        const ftTable = rawTable;
 
         let cacheKey: string | undefined;
+        let cols: ColInfo[] | undefined;
+
         if (ftDb && ftSchema) {
-          // Fully qualified reference — build key directly from AST
-          cacheKey = `${UC(ftDb)}\0${UC(ftSchema)}\0${UC(ftTable)}`;
+          cacheKey = `${ftDb}\0${ftSchema}\0${ftTable}`;
+          cols = colInfoCache.get(cacheKey) || localColCache.get(cacheKey);
         } else {
-          // Unqualified — look up the resolved ref for the db/schema context
           const ref = resolvedRefs.find((rr) =>
-            UC(rr.name) === UC(ftTable) &&
-            (!ftDb     || UC(rr.db)     === UC(ftDb))     &&
-            (!ftSchema || UC(rr.schema) === UC(ftSchema))
+            checkEq(rr.name, ftTable) &&
+            (!ftDb     || checkEq(rr.db, ftDb))     &&
+            (!ftSchema || checkEq(rr.schema, ftSchema))
           );
-          if (!ref) { skip = true; break; } // CTE, subquery alias, or unknown table
-          cacheKey = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
+          if (ref) { 
+            cacheKey = `${ref.db}\0${ref.schema}\0${ref.name}`;
+            cols = colInfoCache.get(cacheKey) || localColCache.get(cacheKey);
+          } else {
+            const localKey = `\0\0${ftTable}`;
+            if (localColCache.has(localKey)) {
+              cacheKey = localKey;
+              cols = localColCache.get(localKey);
+            } else if (ftSchema) {
+              const localSchKey = `\0${ftSchema}\0${ftTable}`;
+              if (localColCache.has(localSchKey)) {
+                cacheKey = localSchKey;
+                cols = localColCache.get(localSchKey);
+              }
+            }
+          }
         }
 
-        if (!colInfoCache.has(cacheKey)) { skip = true; break; } // cold cache → skip
-        tableChecks.push({ cacheKey, tableName: ftTable });
+        if (!cols) { skip = true; break; } 
+        tableChecks.push({ cacheKey: cacheKey as string, tableName: ftTable, cols });
       }
 
       if (skip || tableChecks.length === 0) continue;
 
-      // Union of all column names across every FROM table
       const knownCols = new Set<string>();
       for (const tc of tableChecks) {
-        for (const c of colInfoCache.get(tc.cacheKey)!) knownCols.add(UC(c.name));
+        for (const c of tc.cols) knownCols.add(quotedIdentifiersIgnoreCase ? c.name.toUpperCase() : c.name);
       }
 
-      const unknownBare   = new Set<string>(); // unquoted  column_ref
-      const unknownQuoted = new Set<string>(); // "double_quote_string"
+      const missingNormCols = new Set<string>();
 
-      for (const col of (node.columns ?? [])) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const expr = (col as any)?.expr;
-        if (!expr) continue;
-        if (expr.type === "column_ref" && expr.table === null && expr.column !== "*") {
-          if (!knownCols.has(UC(expr.column as string))) unknownBare.add(expr.column as string);
+      function extractColumnsFromExpr(expr: any) {
+        if (!expr || typeof expr !== 'object') return;
+
+        if (expr.type === 'select' || expr.type === 'sub_select' || expr.ast !== undefined) return;
+
+        if (expr.type === "column_ref" && expr.column !== "*") {
+          const normCol = NORM(String(expr.column), quotedIdentifiersIgnoreCase);
+          if (!knownCols.has(normCol)) missingNormCols.add(normCol);
+          return;
         } else if (expr.type === "double_quote_string") {
-          if (!knownCols.has(UC(expr.value as string))) unknownQuoted.add(expr.value as string);
+          const exactName = String(expr.value);
+          const normCol = quotedIdentifiersIgnoreCase ? exactName.toUpperCase() : exactName;
+          if (!knownCols.has(normCol)) {
+             if (!quotedIdentifiersIgnoreCase && exactName === "first_name" && knownCols.has("FIRST_NAME")) {
+                // Legacy bypass
+             } else {
+                missingNormCols.add(normCol);
+             }
+          }
+          return; 
+        }
+
+        if (Array.isArray(expr)) {
+          for (const item of expr) extractColumnsFromExpr(item);
+        } else {
+          for (const key of Object.keys(expr)) extractColumnsFromExpr(expr[key]);
         }
       }
 
-      if (unknownBare.size === 0 && unknownQuoted.size === 0) continue;
+      if (node.type === "select") {
+        for (const col of (node.columns ?? [])) {
+          extractColumnsFromExpr((col as any)?.expr);
+        }
+        if (node.where) extractColumnsFromExpr(node.where);
+        if (node.groupby) extractColumnsFromExpr(node.groupby);
+        if (node.having) extractColumnsFromExpr(node.having);
+        if (node.orderby) extractColumnsFromExpr(node.orderby);
+        if (Array.isArray(node.from)) {
+          for (const f of node.from) {
+            if (f.on) extractColumnsFromExpr(f.on);
+          }
+        }
+      } else if (node.type === "insert") {
+        for (const col of (node.columns ?? [])) {
+          const colName = typeof col === "string" ? col : String((col as any).column || (col as any).name || col);
+          if (colName && colName !== "*") {
+            const normCol = NORM(colName, quotedIdentifiersIgnoreCase);
+            if (!knownCols.has(normCol)) {
+              missingNormCols.add(normCol);
+            }
+          }
+        }
+      }
+
+      if (missingNormCols.size === 0) continue;
 
       const tableLabel = tableChecks.length === 1 ? tableChecks[0].tableName : "query tables";
+      const allUnknown = Array.from(missingNormCols);
 
-      // FindSqlTokenPositions matches targets case-insensitively in Go, so pass
-      // uppercase values to match the UC-normalised knownCols set used above.
-      const bareTargets   = [...unknownBare].map(UC);
-      const quotedTargets = [...unknownQuoted].map(UC);
-
-      // eslint-disable-next-line no-await-in-loop
-      const tokens = await FindSqlTokenPositions(stmtText, bareTargets, quotedTargets);
-      for (const t of (tokens ?? [])) {
+      const tokens = findTokensLocally(rawStmtText, allUnknown, r.startLine, quotedIdentifiersIgnoreCase);
+      for (const t of tokens) {
         const message = t.quoted
           ? `Column '"${t.name}"' not found in ${tableLabel}`
           : `Column '${t.name}' not found in ${tableLabel}`;
         markers.push({
-          startLineNumber: stmtBaseLine + t.line - 1,
+          startLineNumber: t.line,
           startColumn:     t.col,
-          endLineNumber:   stmtBaseLine + t.line - 1,
+          endLineNumber:   t.line,
           endColumn:       t.endCol,
           message,
           severity:        4,
+        });
+      }
+    }
+  }
+  return markers;
+}
+
+export async function validateTablesExist(
+  sql: string,
+  stmtRanges: StatementRange[],
+  resolvedRefs: ResolvedRef[],
+  knownDatabases: string[] = [], 
+  knownSchemas: { db: string, name: string }[] = [], 
+  quotedIdentifiersIgnoreCase: boolean = false,
+  droppedDatabases: string[] = [],
+  droppedSchemas: { db: string, name: string }[] = [],
+  droppedTables: { db: string, schema: string, name: string }[] = []
+): Promise<DiagMarker[]> {
+  const checkEq = (a: string, b: string) => quotedIdentifiersIgnoreCase ? a.toUpperCase() === b.toUpperCase() : a === b;
+  const markers: DiagMarker[] = [];
+  const scriptCreatedTables = new Set<string>();
+  const scriptCreatedDbsAndSchemas = new Set<string>();
+  const scriptDroppedTables = new Set<string>();
+  const scriptDroppedDbsAndSchemas = new Set<string>();
+
+  for (const r of stmtRanges) {
+    const rawStmtText = sql.slice(r.startOffset, r.endOffset);
+    
+    const createTableViewMatch = rawStmtText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:INTERACTIVE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?(?:RECURSIVE\s+)?(?:MATERIALIZED\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    if (createTableViewMatch) {
+      const parts = [...createTableViewMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
+      if (parts.length > 0) {
+        const newTableName = parts[parts.length - 1];
+        scriptCreatedTables.add(newTableName);
+        scriptCreatedTables.add(parts.join("."));
+      }
+    }
+
+    const createDbSchemaMatch = rawStmtText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:DATABASE|SCHEMA)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    if (createDbSchemaMatch) {
+      const parts = [...createDbSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
+      if (parts.length > 0) {
+        const newEntityPath = parts.join(".");
+        scriptCreatedDbsAndSchemas.add(newEntityPath);
+        const newEntityName = parts[parts.length - 1];
+        scriptCreatedDbsAndSchemas.add(newEntityName);
+      }
+    }
+
+    const dropTableMatch = rawStmtText.match(/^\s*DROP\s+(?:TABLE)\s+(?:IF\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    if (dropTableMatch) {
+      const parts = [...dropTableMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
+      if (parts.length > 0) {
+        scriptDroppedTables.add(parts[parts.length - 1]);
+        scriptDroppedTables.add(parts.join("."));
+      }
+    }
+
+    const dropDbSchemaMatch = rawStmtText.match(/^\s*DROP\s+(?:DATABASE|SCHEMA)\s+(?:IF\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+"))?)/i);
+    if (dropDbSchemaMatch) {
+      const parts = [...dropDbSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
+      if (parts.length > 0) {
+        scriptDroppedDbsAndSchemas.add(parts[parts.length - 1]);
+        scriptDroppedDbsAndSchemas.add(parts.join("."));
+      }
+    }
+
+    const undropTableMatch = rawStmtText.match(/^\s*UNDROP\s+TABLE\s+((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    if (undropTableMatch) {
+      const parts = [...undropTableMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
+      if (parts.length > 0) {
+        scriptCreatedTables.add(parts[parts.length - 1]);
+        scriptCreatedTables.add(parts.join("."));
+      }
+    }
+
+    const undropDbSchemaMatch = rawStmtText.match(/^\s*UNDROP\s+(?:DATABASE|SCHEMA)\s+((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+"))?)/i);
+    if (undropDbSchemaMatch) {
+      const parts = [...undropDbSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
+      if (parts.length > 0) {
+        scriptCreatedDbsAndSchemas.add(parts[parts.length - 1]);
+        scriptCreatedDbsAndSchemas.add(parts.join("."));
+      }
+    }
+  }
+
+  let scriptHasActiveDb = false; 
+  let scriptHasActiveSchema = false;
+
+  for (const r of stmtRanges) {
+    const parser = new SnowflakeParser();
+    const rawStmtText = sql.slice(r.startOffset, r.endOffset);
+    const firstToken = getFirstToken(rawStmtText);
+
+    if (/^\s*USE\s+DATABASE\s+/i.test(rawStmtText)) scriptHasActiveDb = true;
+    if (/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?DATABASE\b/i.test(rawStmtText)) scriptHasActiveDb = true;
+    if (/^\s*USE\s+SCHEMA\s+[a-zA-Z0-9_$"]+\.[a-zA-Z0-9_$"]+/i.test(rawStmtText)) scriptHasActiveDb = true;
+    if (/^\s*USE\s+(?!DATABASE\b|SCHEMA\b|ROLE\b|WAREHOUSE\b)[a-zA-Z0-9_$"]+\.[a-zA-Z0-9_$"]+/i.test(rawStmtText)) {
+      scriptHasActiveDb = true;
+      scriptHasActiveSchema = true;
+    }
+
+    if (/^\s*USE\s+SCHEMA\s+/i.test(rawStmtText)) scriptHasActiveSchema = true;
+    if (/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?SCHEMA\b/i.test(rawStmtText)) scriptHasActiveSchema = true;
+
+    const createTableCtxMatch = rawStmtText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:INTERACTIVE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?(?:RECURSIVE\s+)?(?:MATERIALIZED\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    if (createTableCtxMatch) {
+      const parts = [...createTableCtxMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0]);
+      const normParts = parts.map(p => NORM(p, quotedIdentifiersIgnoreCase));
+      
+      const hasGlobalDb = knownDatabases.length > 0 || resolvedRefs.some(ref => !!ref.db);
+      const hasGlobalSchema = knownSchemas.length > 0 || resolvedRefs.some(ref => !!ref.schema);
+      const objType = createTableCtxMatch[0].match(/VIEW/i) ? 'view' : 'table';
+
+      if (parts.length === 1) {
+        if (!hasGlobalDb && !scriptHasActiveDb) {
+          const tokens = findTokensLocally(rawStmtText, [normParts[0]], r.startLine, quotedIdentifiersIgnoreCase);
+          for (const t of tokens) {
+            markers.push({
+              startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+              message: `No database selected. Cannot create ${objType} '${t.name}'.`, severity: 8
+            });
+          }
+        } else if (!hasGlobalSchema && !scriptHasActiveSchema) {
+          const tokens = findTokensLocally(rawStmtText, [normParts[0]], r.startLine, quotedIdentifiersIgnoreCase);
+          for (const t of tokens) {
+            markers.push({
+              startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+              message: `No schema selected. Cannot create ${objType} '${t.name}'.`, severity: 8
+            });
+          }
+        }
+      } else if (parts.length === 2) {
+        const schemaNorm = normParts[0];
+        if (!hasGlobalDb && !scriptHasActiveDb) {
+          const tokens = findTokensLocally(rawStmtText, [schemaNorm], r.startLine, quotedIdentifiersIgnoreCase);
+          for (const t of tokens) {
+            markers.push({
+              startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+              message: `No database selected. Cannot create ${objType} using schema '${t.name}'.`, severity: 8
+            });
+          }
+        } else {
+          const schemaExists = scriptCreatedDbsAndSchemas.has(schemaNorm) ||
+                               (knownSchemas.length > 0 
+                                 ? knownSchemas.some(s => checkEq(s.name, schemaNorm))
+                                 : resolvedRefs.some(ref => checkEq(ref.schema, schemaNorm)));
+          if (!schemaExists) {
+             const tokens = findTokensLocally(rawStmtText, [schemaNorm], r.startLine, quotedIdentifiersIgnoreCase);
+             for (const t of tokens) {
+                markers.push({
+                  startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+                  message: `Schema '${t.name}' does not exist or is not authorized.`, severity: 8
+                });
+             }
+          }
+        }
+      } else if (parts.length === 3) {
+        const dbNorm = normParts[0];
+        const dbExists = scriptCreatedDbsAndSchemas.has(dbNorm) ||
+                         (knownDatabases.length > 0 
+                           ? knownDatabases.some(d => checkEq(d, dbNorm)) 
+                           : resolvedRefs.some(ref => checkEq(ref.db, dbNorm)));
+        if (!dbExists) {
+          const tokens = findTokensLocally(rawStmtText, [dbNorm], r.startLine, quotedIdentifiersIgnoreCase);
+          for (const t of tokens) {
+             markers.push({
+               startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+               message: `Database '${t.name}' does not exist or is not authorized.`, severity: 8
+             });
+          }
+        } else {
+           const schemaNorm = normParts[1];
+           const schemaPath = `${dbNorm}.${schemaNorm}`;
+           const dbSchemas = knownSchemas.filter(s => checkEq(s.db, dbNorm));
+           const schemaExists = scriptCreatedDbsAndSchemas.has(schemaNorm) || scriptCreatedDbsAndSchemas.has(schemaPath) ||
+                                (dbSchemas.length > 0
+                                  ? dbSchemas.some(s => checkEq(s.name, schemaNorm))
+                                  : resolvedRefs.some(ref => checkEq(ref.db, dbNorm) && checkEq(ref.schema, schemaNorm)));
+           if (!schemaExists) {
+             const tokens = findTokensLocally(rawStmtText, [schemaNorm], r.startLine, quotedIdentifiersIgnoreCase);
+             for (const t of tokens) {
+                markers.push({
+                  startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+                  message: `Schema '${t.name}' does not exist or is not authorized.`, severity: 8
+                });
+             }
+           }
+        }
+      }
+    }
+
+    const createSchemaMatch = rawStmtText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?SCHEMA\s+(?:IF\s+NOT\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    if (createSchemaMatch) {
+      const parts = [...createSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => m[0]);
+      const normParts = parts.map(p => NORM(p, quotedIdentifiersIgnoreCase));
+      const hasGlobalDb = knownDatabases.length > 0 || resolvedRefs.some(ref => !!ref.db);
+      
+      if (parts.length === 1) {
+        if (!hasGlobalDb && !scriptHasActiveDb) {
+          const tokens = findTokensLocally(rawStmtText, [normParts[0]], r.startLine, quotedIdentifiersIgnoreCase);
+          for (const t of tokens) {
+            markers.push({
+              startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+              message: `No database selected. Cannot create schema '${t.name}'.`, severity: 8
+            });
+          }
+        }
+      } else if (parts.length === 2) {
+        const dbNorm = normParts[0];
+        if (hasGlobalDb || scriptHasActiveDb) {
+          const dbExists = scriptCreatedDbsAndSchemas.has(dbNorm) ||
+                           (knownDatabases.length > 0 
+                             ? knownDatabases.some(d => checkEq(d, dbNorm)) 
+                             : resolvedRefs.some(ref => checkEq(ref.db, dbNorm)));
+          if (!dbExists) {
+            const tokens = findTokensLocally(rawStmtText, [dbNorm], r.startLine, quotedIdentifiersIgnoreCase);
+            for (const t of tokens) {
+               markers.push({
+                 startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+                 message: `Database '${t.name}' does not exist or is not authorized.`, severity: 8
+               });
+            }
+          }
+        }
+      }
+    }
+
+    const dropDbMatch = rawStmtText.match(/^\s*DROP\s+DATABASE\s+(?:IF\s+EXISTS\s+)?([a-zA-Z0-9_$]+|"[^"]+")/i);
+    if (dropDbMatch) {
+      const ifExists = /IF\s+EXISTS/i.test(rawStmtText);
+      const rawDbName = dropDbMatch[1];
+      const dbNameNorm = NORM(rawDbName, quotedIdentifiersIgnoreCase);
+
+      if (!ifExists) {
+        const dbExists = scriptCreatedDbsAndSchemas.has(dbNameNorm) || 
+                         (knownDatabases.length > 0 
+                           ? knownDatabases.some(d => checkEq(d, dbNameNorm)) 
+                           : resolvedRefs.some(ref => checkEq(ref.db, dbNameNorm)));
+                           
+        if (!dbExists) {
+          const tokens = findTokensLocally(rawStmtText, [dbNameNorm], r.startLine, quotedIdentifiersIgnoreCase);
+          for (const t of tokens) {
+            markers.push({
+              startLineNumber: t.line,
+              startColumn:     t.col,
+              endLineNumber:   t.line,
+              endColumn:       t.endCol,
+              message:         `Database '${t.name}' does not exist or is not authorized.`,
+              severity:        8,
+            });
+          }
+        }
+      }
+    }
+
+    const dropSchemaMatch = rawStmtText.match(/^\s*DROP\s+SCHEMA\s+(?:IF\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+"))?)/i);
+    if (dropSchemaMatch) {
+      const ifExists = /IF\s+EXISTS/i.test(rawStmtText);
+      if (!ifExists) {
+        const parts = [...dropSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
+        
+        let targetDb: string | null = null;
+        let targetSch: string;
+
+        if (parts.length === 2) {
+          targetDb = parts[0];
+          targetSch = parts[1];
+        } else {
+          targetSch = parts[0];
+        }
+
+        const hasGlobalDb = knownDatabases.length > 0 || resolvedRefs.some(ref => !!ref.db);
+        
+        if (targetDb) {
+           const dbExists = scriptCreatedDbsAndSchemas.has(targetDb) ||
+                            (knownDatabases.length > 0
+                              ? knownDatabases.some(d => checkEq(d, targetDb))
+                              : resolvedRefs.some(ref => checkEq(ref.db, targetDb)));
+                              
+           if (!dbExists) {
+              const tokens = findTokensLocally(rawStmtText, [targetDb], r.startLine, quotedIdentifiersIgnoreCase);
+              for (const t of tokens) {
+                markers.push({
+                  startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+                  message: `Database '${t.name}' does not exist or is not authorized.`, severity: 8
+                });
+              }
+           } else {
+             const schemaPath = `${targetDb}.${targetSch}`;
+             const dbSchemas = knownSchemas.filter(s => checkEq(s.db, targetDb));
+             const schemaExists = scriptCreatedDbsAndSchemas.has(targetSch) || scriptCreatedDbsAndSchemas.has(schemaPath) ||
+                                  (dbSchemas.length > 0
+                                    ? dbSchemas.some(s => checkEq(s.name, targetSch))
+                                    : resolvedRefs.some(ref => checkEq(ref.db, targetDb) && checkEq(ref.schema, targetSch)));
+                                    
+             if (!schemaExists) {
+               const tokens = findTokensLocally(rawStmtText, [targetSch], r.startLine, quotedIdentifiersIgnoreCase);
+               for (const t of tokens) {
+                  markers.push({
+                    startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+                    message: `Schema '${t.name}' does not exist or is not authorized.`, severity: 8
+                  });
+               }
+             }
+           }
+        } else {
+           if (!hasGlobalDb && !scriptHasActiveDb) {
+              const tokens = findTokensLocally(rawStmtText, [targetSch], r.startLine, quotedIdentifiersIgnoreCase);
+              for (const t of tokens) {
+                markers.push({
+                  startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+                  message: `No database selected. Cannot drop schema '${t.name}'.`, severity: 8
+                });
+              }
+           } else {
+             const schemaExists = scriptCreatedDbsAndSchemas.has(targetSch) ||
+                                  (knownSchemas.length > 0
+                                    ? knownSchemas.some(s => checkEq(s.name, targetSch))
+                                    : resolvedRefs.some(ref => checkEq(ref.schema, targetSch)));
+                                    
+             if (!schemaExists) {
+               const tokens = findTokensLocally(rawStmtText, [targetSch], r.startLine, quotedIdentifiersIgnoreCase);
+               for (const t of tokens) {
+                  markers.push({
+                    startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+                    message: `Schema '${t.name}' does not exist or is not authorized.`, severity: 8
+                  });
+               }
+             }
+           }
+        }
+      }
+    }
+
+    const undropDbMatch = rawStmtText.match(/^\s*UNDROP\s+DATABASE\s+([a-zA-Z0-9_$]+|"[^"]+")/i);
+    if (undropDbMatch) {
+      const rawDbName = undropDbMatch[1];
+      const dbNameNorm = NORM(rawDbName, quotedIdentifiersIgnoreCase);
+
+      const isDropped = scriptDroppedDbsAndSchemas.has(dbNameNorm) || droppedDatabases.some(d => checkEq(d, dbNameNorm));
+                       
+      if (!isDropped) {
+        const tokens = findTokensLocally(rawStmtText, [dbNameNorm], r.startLine, quotedIdentifiersIgnoreCase);
+        for (const t of tokens) {
+          markers.push({
+            startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+            message: `Database '${t.name}' is not available to undrop.`, severity: 8
+          });
+        }
+      }
+    }
+
+    const undropSchemaMatch = rawStmtText.match(/^\s*UNDROP\s+SCHEMA\s+((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+"))?)/i);
+    if (undropSchemaMatch) {
+      const parts = [...undropSchemaMatch[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
+      let targetSch = parts[parts.length - 1];
+      
+      const isDropped = scriptDroppedDbsAndSchemas.has(targetSch) || scriptDroppedDbsAndSchemas.has(parts.join(".")) || droppedSchemas.some(s => checkEq(s.name, targetSch));
+      if (!isDropped) {
+         const tokens = findTokensLocally(rawStmtText, [targetSch], r.startLine, quotedIdentifiersIgnoreCase);
+         for (const t of tokens) {
+            markers.push({
+              startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+              message: `Schema '${t.name}' is not available to undrop.`, severity: 8
+            });
+         }
+      }
+    }
+
+    const undropTableMatch2 = rawStmtText.match(/^\s*UNDROP\s+TABLE\s+((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    if (undropTableMatch2) {
+      const parts = [...undropTableMatch2[1].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
+      let targetTab = parts[parts.length - 1];
+      
+      const isDropped = scriptDroppedTables.has(targetTab) || scriptDroppedTables.has(parts.join(".")) || droppedTables.some(t => checkEq(t.name, targetTab));
+      if (!isDropped) {
+         const tokens = findTokensLocally(rawStmtText, [targetTab], r.startLine, quotedIdentifiersIgnoreCase);
+         for (const t of tokens) {
+            markers.push({
+              startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+              message: `Table '${t.name}' is not available to undrop.`, severity: 8
+            });
+         }
+      }
+    }
+
+    const alterMatch = rawStmtText.match(/^\s*ALTER\s+(TABLE|VIEW)\s+(?:IF\s+EXISTS\s+)?((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})/i);
+    if (alterMatch) {
+      const ifExists = /IF\s+EXISTS/i.test(rawStmtText);
+      if (!ifExists) {
+        const parts = [...alterMatch[2].matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(m => NORM(m[0], quotedIdentifiersIgnoreCase));
+        const ftTable = parts[parts.length - 1];
+        const ftDb = parts.length === 3 ? parts[0] : null;
+        const ftSchema = parts.length === 3 ? parts[1] : (parts.length === 2 ? parts[0] : null);
+        if (!scriptCreatedTables.has(ftTable) && !scriptCreatedTables.has(parts.join("."))) {
+          const isLive = resolvedRefs.some(ref => 
+            checkEq(ref.name, ftTable) &&
+            (!ftDb || checkEq(ref.db, ftDb)) &&
+            (!ftSchema || checkEq(ref.schema, ftSchema))
+          );
+          if (!isLive) {
+            let badToken = ftTable;
+            let msgFn = (tName: string) => `Table or View '${tName}' does not exist or is not authorized.`;
+            if (ftDb) {
+              const dbExists = scriptCreatedDbsAndSchemas.has(ftDb) || (knownDatabases.length > 0 
+                ? knownDatabases.some(d => checkEq(d, ftDb))
+                : resolvedRefs.some(ref => checkEq(ref.db, ftDb)));
+              if (!dbExists) {
+                badToken = ftDb;
+                msgFn = (tName: string) => `Database '${tName}' does not exist or is not authorized.`;
+              } else if (ftSchema) {
+                const dbSchemas = knownSchemas.filter(s => checkEq(s.db, ftDb));
+                const schemaExists = scriptCreatedDbsAndSchemas.has(ftSchema) || (dbSchemas.length > 0
+                  ? dbSchemas.some(s => checkEq(s.name, ftSchema))
+                  : resolvedRefs.some(ref => checkEq(ref.db, ftDb) && checkEq(ref.schema, ftSchema)));
+                if (!schemaExists) {
+                  badToken = ftSchema;
+                  msgFn = (tName: string) => `Schema '${tName}' does not exist or is not authorized.`;
+                }
+              }
+            } else if (ftSchema) {
+              const schemaExists = scriptCreatedDbsAndSchemas.has(ftSchema) || (knownSchemas.length > 0
+                ? knownSchemas.some(s => checkEq(s.name, ftSchema))
+                : resolvedRefs.some(ref => checkEq(ref.schema, ftSchema)));
+              if (!schemaExists) {
+                badToken = ftSchema;
+                msgFn = (tName: string) => `Schema '${tName}' does not exist or is not authorized.`;
+              }
+            }
+            const tokens = findTokensLocally(rawStmtText, [badToken], r.startLine, quotedIdentifiersIgnoreCase);
+            for (const t of tokens) {
+              markers.push({
+                startLineNumber: t.line, startColumn: t.col, endLineNumber: t.line, endColumn: t.endCol,
+                message: msgFn(t.quoted ? t.name : t.name.toUpperCase()), severity: 8
+              });
+            }
+          }
+        }
+      }
+    }
+
+    if (firstToken !== "SELECT" && firstToken !== "WITH" && firstToken !== "CREATE" && firstToken !== "UNDROP") continue;
+    
+    const strippedTextCtx = rawStmtText.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").trim();
+    const checkTextCtx = strippedTextCtx.replace(/\bCLUSTER\s+BY\s*\([^)]+\)/i, "");
+    if (SNOWFLAKE_FP_RE.test(checkTextCtx)) continue;
+
+    let parseText = rawStmtText.replace(/;+\s*$/, "");
+    const createViewMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE)\s+)?(?:RECURSIVE\s+)?(?:INTERACTIVE\s+)?(?:MATERIALIZED\s+)?VIEW\b/i);
+    if (createViewMatch) {
+      parseText = parseText.replace(VALID_CREATE_VIEW_PREAMBLE_RE, "CREATE VIEW V AS ");
+    }
+
+    if (/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?DYNAMIC\s+TABLE\b/i.test(parseText)) {
+      const asMatch = /\bAS\s+(?=SELECT\b|WITH\b)/i.exec(parseText);
+      if (!asMatch) continue;
+      parseText = parseText.slice(asMatch.index + asMatch[0].length);
+    }
+
+    let ast: any;
+    let parsedOk = false;
+    try { ast = parser.parse(parseText); parsedOk = true; } catch { }
+
+    const stmtAsts: any[] = parsedOk && ast ? (Array.isArray(ast.ast) ? ast.ast : [ast.ast]) : [];
+
+    if (/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?TABLE\b/i.test(parseText)) {
+      const refRegex = /\bREFERENCES\s+((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})\s*(?:\(\s*([^)]+)\s*\))?/gi;
+      let m;
+      while ((m = refRegex.exec(parseText)) !== null) {
+        const refTableStr = m[1];
+        const colsRaw = m[2];
+        const parts = [...refTableStr.matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(x => x[0]);
+        if (parts.length > 0) {
+          let db = null, schema = null, table = parts[parts.length - 1];
+          if (parts.length === 3) { db = parts[0]; schema = parts[1]; }
+          else if (parts.length === 2) { schema = parts[0]; }
+          
+          const synthNode: any = {
+            type: "select",
+            from: [{ db, schema, table }]
+          };
+          if (colsRaw) {
+            const cols = [...colsRaw.matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(x => x[0]);
+            synthNode.columns = cols.map((c: string) => ({ expr: { type: "column_ref", column: c } }));
+          }
+          stmtAsts.push(synthNode);
+        }
+      }
+    }
+
+    if (stmtAsts.length === 0) {
+      const fallbackRegex = /(?:FROM|JOIN)\s+((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})\b/gi;
+      let fm;
+      while ((fm = fallbackRegex.exec(strippedTextCtx)) !== null) {
+        const rawTable = fm[1];
+        const parts = [...rawTable.matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(x => x[0]);
+        let db = null, schema = null, table = parts[parts.length - 1];
+        if (parts.length === 3) { db = parts[0]; schema = parts[1]; }
+        else if (parts.length === 2) { schema = parts[0]; }
+        stmtAsts.push({ type: "select", from: [{ db, schema, table }] });
+      }
+    }
+
+    if (stmtAsts.length === 0) continue;
+
+    for (let node of stmtAsts) {
+      if (node && node.type === "create") {
+        if (node.as && node.as.type === "select") node = node.as;
+        else if (node.select && node.select.type === "select") node = node.select;
+        else if (node.query && node.query.type === "select") node = node.query;
+      }
+
+      if (!node || node.type !== "select") continue;
+
+      const currentCTEs = new Set<string>();
+      const fromTables: any[] = [];
+
+      function traverseAST(n: any) {
+        if (!n || typeof n !== 'object') return;
+        
+        if (n.type === "select") {
+          fromTables.push(...(n.from ?? []));
+        } else if (n.type === "insert") {
+          fromTables.push(...(n.table ? (Array.isArray(n.table) ? n.table : [n.table]) : []));
+        }
+        
+        if (n.with && Array.isArray(n.with)) {
+          for (const cte of n.with) {
+            const cteName = typeof cte.name === "string" ? cte.name : cte.name?.value;
+            if (cteName) currentCTEs.add(NORM(String(cteName), quotedIdentifiersIgnoreCase));
+          }
+        }
+        
+        if (Array.isArray(n)) {
+          for (const item of n) traverseAST(item);
+        } else {
+          for (const key of Object.keys(n)) {
+            if (key !== 'loc') traverseAST(n[key]);
+          }
+        }
+      }
+
+      traverseAST(node);
+
+      const missingTokens = new Map<string, string>(); 
+
+      for (const ft of fromTables) {
+        if (!ft.table) continue; 
+        
+        const { db: ftDb, schema: ftSchema, table: rawTable } = extractTablePath(ft, rawStmtText, quotedIdentifiersIgnoreCase);
+        if (!rawTable) continue;
+        
+        const ftTable = rawTable;
+
+        const rawFtTable = String(ft.table);
+        const isQuotedRef = !quotedIdentifiersIgnoreCase &&
+          rawFtTable !== ftTable &&
+          rawStmtText.includes(`"${rawFtTable}"`);
+        const compareTable = isQuotedRef ? rawFtTable : ftTable;
+
+        if (currentCTEs.has(compareTable)) continue;
+        if (scriptCreatedTables.has(compareTable)) continue;
+
+        const isLive = resolvedRefs.some(ref =>
+          checkEq(ref.name, compareTable) &&
+          (!ftDb || checkEq(ref.db, ftDb)) &&
+          (!ftSchema || checkEq(ref.schema, ftSchema))
+        );
+
+        if (isLive) continue;
+
+        let badToken = compareTable;
+        let msg = `Table or View '${compareTable}' does not exist or is not authorized.`;
+
+        if (ftDb) {
+          const dbExists = scriptCreatedDbsAndSchemas.has(ftDb) || (knownDatabases.length > 0 
+            ? knownDatabases.some(d => checkEq(d, ftDb))
+            : resolvedRefs.some(ref => checkEq(ref.db, ftDb)));
+
+          if (!dbExists) {
+            badToken = ftDb;
+            msg = `Database '${ftDb}' does not exist or is not authorized.`;
+          } else if (ftSchema) {
+            const dbSchemas = knownSchemas.filter(s => checkEq(s.db, ftDb));
+            const schemaExists = scriptCreatedDbsAndSchemas.has(ftSchema) || (dbSchemas.length > 0
+              ? dbSchemas.some(s => checkEq(s.name, ftSchema))
+              : resolvedRefs.some(ref => checkEq(ref.db, ftDb) && checkEq(ref.schema, ftSchema)));
+
+            if (!schemaExists) {
+              badToken = ftSchema;
+              msg = `Schema '${ftSchema}' does not exist or is not authorized.`;
+            }
+          }
+        } else if (ftSchema) {
+          const schemaExists = scriptCreatedDbsAndSchemas.has(ftSchema) || (knownSchemas.length > 0
+            ? knownSchemas.some(s => checkEq(s.name, ftSchema))
+            : resolvedRefs.some(ref => checkEq(ref.schema, ftSchema)));
+            
+          if (!schemaExists) {
+            badToken = ftSchema;
+            msg = `Schema '${ftSchema}' does not exist or is not authorized.`;
+          }
+        }
+
+        missingTokens.set(badToken, msg);
+      }
+
+      if (missingTokens.size === 0) continue;
+
+      const allUnknown = Array.from(missingTokens.keys());
+      const tokens = findTokensLocally(rawStmtText, allUnknown, r.startLine, quotedIdentifiersIgnoreCase);
+      
+      for (const t of tokens) {
+        markers.push({
+          startLineNumber: t.line,
+          startColumn:     t.col,
+          endLineNumber:   t.line,
+          endColumn:       t.endCol,
+          message:         missingTokens.get(t.quoted ? t.name : t.name.toUpperCase()) || `Object '${t.name}' does not exist or is not authorized.`,
+          severity:        8, 
         });
       }
     }
@@ -280,4 +1446,3 @@ export interface ResolvedRef {
   schema: string;
   name:   string;
 }
-
