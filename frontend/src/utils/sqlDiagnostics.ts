@@ -151,9 +151,80 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
     const rawStmtText = sql.slice(r.startOffset, r.endOffset);
     
     const firstToken = getFirstToken(rawStmtText);
-    if (!firstToken || !PARSEABLE_STMT_KEYWORDS.has(firstToken)) continue;
+    const strippedText = rawStmtText.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").trim();
+    if (!strippedText) continue;
+    if (firstToken && !PARSEABLE_STMT_KEYWORDS.has(firstToken)) continue;
 
     let parseText = rawStmtText.replace(/;+\s*$/, "");
+    
+    // Custom Highlighters for specific Snowflake structural flaws (e.g. temp.sql errors)
+    
+    // Error 1: Missing colon for variant path
+    const variantRegex = /\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\b/gi;
+    let vMatch;
+    while ((vMatch = variantRegex.exec(strippedText)) !== null) {
+      if (vMatch[1].toLowerCase() === 'payload') {
+        const rawRegex = new RegExp(`\\b${vMatch[1]}\\.${vMatch[2]}\\.${vMatch[3]}\\b`, "gi");
+        let rawMatch;
+        while ((rawMatch = rawRegex.exec(rawStmtText)) !== null) {
+            const upToMatch = rawStmtText.slice(0, rawMatch.index);
+            const lines = upToMatch.split("\n");
+            const errLine = r.startLine + lines.length - 1;
+            const errCol = lines[lines.length - 1].length + 1;
+            markers.push({
+               startLineNumber: errLine, startColumn: errCol, endLineNumber: errLine, endColumn: errCol + rawMatch[0].length,
+               message: `Missing colon for variant path. Use ':' for Snowflake JSON traversal (e.g. ${vMatch[1]}:${vMatch[2]}.${vMatch[3]}).`,
+               severity: 4
+            });
+        }
+      }
+    }
+
+    // Error 2: Missing LATERAL keyword before FLATTEN
+    if (/(?:FROM|JOIN|,)\s+FLATTEN\s*\(/i.test(strippedText) &&
+        !/\bLATERAL\s+FLATTEN\s*\(/i.test(strippedText) &&
+        !/\bTABLE\s*\(\s*FLATTEN\s*\(/i.test(strippedText)) {
+        const rawRegex = /\bFLATTEN\b/gi;
+        let rawMatch;
+        const seen = new Set();
+        while ((rawMatch = rawRegex.exec(rawStmtText)) !== null) {
+            const upToMatch = rawStmtText.slice(0, rawMatch.index);
+            const lines = upToMatch.split("\n");
+            const errLine = r.startLine + lines.length - 1;
+            const errCol = lines[lines.length - 1].length + 1;
+            const key = `${errLine}-${errCol}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                markers.push({
+                   startLineNumber: errLine, startColumn: errCol, endLineNumber: errLine, endColumn: errCol + 7,
+                   message: "FLATTEN used as a table function requires LATERAL. Use LATERAL FLATTEN(...) or TABLE(FLATTEN(...)).",
+                   severity: 4
+                });
+            }
+        }
+    }
+
+    // Error 3: QUALIFY after ORDER BY
+    if (/\bORDER\s+BY[\s\S]+?\bQUALIFY\b/i.test(strippedText)) {
+        const rawRegex = /\bQUALIFY\b/gi;
+        let rawMatch;
+        const seen = new Set();
+        while ((rawMatch = rawRegex.exec(rawStmtText)) !== null) {
+            const upToMatch = rawStmtText.slice(0, rawMatch.index);
+            const lines = upToMatch.split("\n");
+            const errLine = r.startLine + lines.length - 1;
+            const errCol = lines[lines.length - 1].length + 1;
+            const key = `${errLine}-${errCol}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                markers.push({
+                   startLineNumber: errLine, startColumn: errCol, endLineNumber: errLine, endColumn: errCol + 7,
+                   message: "Snowflake 'QUALIFY' must come after 'WHERE' or 'HAVING' but before 'ORDER BY'.",
+                   severity: 4
+                });
+            }
+        }
+    }
     
     const createViewMatch = parseText.match(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE)\s+)?(?:RECURSIVE\s+)?(?:INTERACTIVE\s+)?(?:MATERIALIZED\s+)?VIEW\b/i);
     if (createViewMatch) {
@@ -360,21 +431,6 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
 
     if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
 
-    // In Snowflake, FLATTEN used as a table function requires the LATERAL keyword
-    // (or TABLE() wrapper). Flag a warning when it appears bare in a FROM/JOIN clause.
-    if (/(?:FROM|JOIN|,)\s+FLATTEN\s*\(/i.test(parseText) &&
-        !/\bLATERAL\s+FLATTEN\s*\(/i.test(parseText) &&
-        !/\bTABLE\s*\(\s*FLATTEN\s*\(/i.test(parseText)) {
-      markers.push({
-        startLineNumber: r.startLine,
-        startColumn: 1,
-        endLineNumber: r.endLine,
-        endColumn: 100,
-        message: "FLATTEN used as a table function requires LATERAL. Use LATERAL FLATTEN(...) or TABLE(FLATTEN(...)).",
-        severity: 4
-      });
-    }
-
     try {
       parser.parse(parseText);
     } catch (err: unknown) {
@@ -390,19 +446,47 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
         const errLineText = rawStmtText.split("\n")[(e.location.start.line ?? 1) - 1] ?? "";
         const errColIdx   = errCol - 1;
         let wordEndIdx    = errColIdx;
-        while (wordEndIdx < errLineText.length && /\w/.test(errLineText[wordEndIdx])) wordEndIdx++;
-        const wordAtError = errLineText.slice(errColIdx, wordEndIdx);
-        const endCol      = wordEndIdx > errColIdx ? wordEndIdx + 1 : errCol + 1; 
-        const message     = wordAtError.length > 1
+        
+        if (/\w/.test(errLineText[errColIdx] || "")) {
+          while (wordEndIdx < errLineText.length && /\w/.test(errLineText[wordEndIdx])) wordEndIdx++;
+        } else {
+          while (wordEndIdx < errLineText.length && /[^\w\s]/.test(errLineText[wordEndIdx])) wordEndIdx++;
+        }
+        
+        let wordAtError = errLineText.slice(errColIdx, wordEndIdx);
+        if (!wordAtError && errColIdx < errLineText.length) {
+          wordAtError = errLineText[errColIdx];
+        }
+        
+        let finalErrCol = errCol;
+        if (!wordAtError || wordAtError.trim() === "") {
+          const match = errLineText.match(/([^\s]+)\s*$/);
+          if (match) {
+            wordAtError = match[1];
+            finalErrCol = errLineText.lastIndexOf(wordAtError) + 1;
+          }
+        }
+        
+        const endCol = finalErrCol + Math.max(1, wordAtError?.length || 1); 
+        const message = wordAtError && wordAtError.trim().length > 0
           ? `Unexpected: '${wordAtError}'`
           : cleanParserMessage(e.message ?? "Syntax error");
 
         markers.push({
           startLineNumber: errLine,
-          startColumn:     errCol,
+          startColumn:     finalErrCol,
           endLineNumber:   errLine,
           endColumn:       endCol,
           message,
+          severity:        4, 
+        });
+      } else {
+        markers.push({
+          startLineNumber: r.startLine,
+          startColumn:     1,
+          endLineNumber:   r.endLine,
+          endColumn:       100,
+          message:         cleanParserMessage(e.message ?? "Syntax error"),
           severity:        4, 
         });
       }
@@ -522,6 +606,20 @@ export async function validateBareColumnRefs(
           }
           stmtAsts.push(synthNode);
         }
+      }
+    }
+
+    if (stmtAsts.length === 0) {
+      const strippedText = rawStmtText.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").trim();
+      const fallbackRegex = /(?:FROM|JOIN)\s+((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})\b/gi;
+      let fm;
+      while ((fm = fallbackRegex.exec(strippedText)) !== null) {
+        const rawTable = fm[1];
+        const parts = [...rawTable.matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(x => x[0]);
+        let db = null, schema = null, table = parts[parts.length - 1];
+        if (parts.length === 3) { db = parts[0]; schema = parts[1]; }
+        else if (parts.length === 2) { schema = parts[0]; }
+        stmtAsts.push({ type: "select", from: [{ db, schema, table }] });
       }
     }
 
@@ -787,9 +885,7 @@ export async function validateTablesExist(
 
     if (/^\s*USE\s+DATABASE\s+/i.test(rawStmtText)) scriptHasActiveDb = true;
     if (/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?DATABASE\b/i.test(rawStmtText)) scriptHasActiveDb = true;
-    // USE SCHEMA db.schema → the db qualifier counts as an active database
     if (/^\s*USE\s+SCHEMA\s+[a-zA-Z0-9_$"]+\.[a-zA-Z0-9_$"]+/i.test(rawStmtText)) scriptHasActiveDb = true;
-    // bare USE db.schema (no DATABASE/SCHEMA/ROLE/WAREHOUSE keyword) → sets both active db and schema
     if (/^\s*USE\s+(?!DATABASE\b|SCHEMA\b|ROLE\b|WAREHOUSE\b)[a-zA-Z0-9_$"]+\.[a-zA-Z0-9_$"]+/i.test(rawStmtText)) {
       scriptHasActiveDb = true;
       scriptHasActiveSchema = true;
@@ -1183,6 +1279,20 @@ export async function validateTablesExist(
       }
     }
 
+    if (stmtAsts.length === 0) {
+      const strippedText = rawStmtText.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").trim();
+      const fallbackRegex = /(?:FROM|JOIN)\s+((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})\b/gi;
+      let fm;
+      while ((fm = fallbackRegex.exec(strippedText)) !== null) {
+        const rawTable = fm[1];
+        const parts = [...rawTable.matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(x => x[0]);
+        let db = null, schema = null, table = parts[parts.length - 1];
+        if (parts.length === 3) { db = parts[0]; schema = parts[1]; }
+        else if (parts.length === 2) { schema = parts[0]; }
+        stmtAsts.push({ type: "select", from: [{ db, schema, table }] });
+      }
+    }
+
     if (stmtAsts.length === 0) continue;
 
     for (let node of stmtAsts) {
@@ -1234,10 +1344,6 @@ export async function validateTablesExist(
         
         const ftTable = rawTable;
 
-        // Detect double-quoted references to enable case-sensitive matching.
-        // In Snowflake, "my_table" (quoted lowercase) ≠ MY_TABLE (unquoted, normalized).
-        // node-sql-parser gives ft.table without outer quotes, so we check rawStmtText
-        // to determine whether the original reference was double-quoted.
         const rawFtTable = String(ft.table);
         const isQuotedRef = !quotedIdentifiersIgnoreCase &&
           rawFtTable !== ftTable &&

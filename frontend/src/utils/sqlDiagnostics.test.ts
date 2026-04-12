@@ -479,7 +479,7 @@ describe("validateWithParser", () => {
       const sql = "SELECT id FROM t ORDER BY id QUALIFY ROW_NUMBER() OVER(ORDER BY id) = 1";
       const m = validateWithParser(sql, singleRange(sql));
       expect(warnings(m).length).toBeGreaterThan(0);
-      expect(warnings(m)[0].message).toMatch(/Unexpected: 'QUALIFY'/i);
+      expect(warnings(m)[0].message).toMatch(/must come after 'WHERE' or 'HAVING'/i);
     });
 
     it("flags missing LATERAL keyword before FLATTEN", () => {
@@ -2876,4 +2876,81 @@ describe("validateTablesExist", () => {
     });
   });
 })
+});
+
+
+describe("Engine Resilience & Fallback Mechanics (Pre-Fix Failure Cases)", () => {
+  it("Fallback: Extracts and validates tables even when the AST parser crashes completely", async () => {
+    // The trailing ',' causes a fatal AST syntax error.
+    // BEFORE: The engine would return 0 errors because the AST failed to build, skipping table checks.
+    // AFTER: The regex fallback forcefully extracts 'missing_db.schema.table' despite the crash.
+    const sql = "SELECT * FROM missing_db.schema.table WHERE id = 1, ";
+    const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
+    expect(errors(m)).toHaveLength(1);
+    expect(errors(m)[0].message).toMatch(/Database 'MISSING_DB' does not exist/i);
+  });
+
+  it("Comment Immunity: Ignores structural error keywords if they are inside comments", () => {
+    // BEFORE: Regexes ran on raw text, causing false positives if users wrote comments about Snowflake features.
+    // AFTER: The engine strips comments before searching for missing LATERAL or QUALIFY ordering.
+    const sql = "SELECT 1; -- Don't forget to use LATERAL FLATTEN or ORDER BY before QUALIFY";
+    const m = validateWithParser(sql, singleRange(sql));
+    expect(warnings(m)).toHaveLength(0);
+  });
+
+  it("Specific Linter: Flags missing colons in variant paths", () => {
+    // BEFORE: 'payload.metadata.source' was quietly parsed as a standard 3-part column reference.
+    // AFTER: The engine explicitly catches the 'payload.' pattern and suggests 'payload:'
+    const sql = "SELECT payload.metadata.source FROM t";
+    const m = validateWithParser(sql, singleRange(sql));
+    expect(warnings(m).length).toBeGreaterThan(0);
+    expect(warnings(m)[0].message).toMatch(/Missing colon for variant path/i);
+  });
+
+  it("Error Extraction: Captures non-word stray symbols instead of 'Unexpected end of statement'", () => {
+    // BEFORE: The \w regex would fail to extract the '^', resulting in an empty string and a generic EOF error.
+    // AFTER: The engine detects the non-word symbol and explicitly flags it.
+    const sql = "SELECT * FROM t; ^";
+    const ranges = [
+      { startLine: 1, endLine: 1, startOffset: 0, endOffset: 16 },
+      { startLine: 1, endLine: 1, startOffset: 17, endOffset: 18 }
+    ];
+    const m = validateWithParser(sql, ranges);
+    expect(warnings(m).length).toBeGreaterThan(0);
+    expect(warnings(m)[0].message).toMatch(/Unexpected: '\^'/);
+  });
+});
+
+describe("temp.sql Real-World Analysis", () => {
+  it("flags schema existence error for raw_data.events when no database is selected", async () => {
+    const sql = "SELECT * FROM raw_data.events";
+    const m = await validateTablesExist(sql, singleRange(sql), [], [], []);
+    expect(errors(m)).toHaveLength(1);
+    expect(errors(m)[0].message).toMatch(/Schema 'RAW_DATA' does not exist/i);
+  });
+
+  it("flags missing LATERAL keyword before FLATTEN", () => {
+    const sql = "SELECT * FROM raw_events, FLATTEN(input => doc)";
+    const m = validateWithParser(sql, singleRange(sql));
+    expect(warnings(m).length).toBeGreaterThan(0);
+    expect(warnings(m)[0].message).toMatch(/FLATTEN used as a table function requires LATERAL/i);
+  });
+
+  it("flags structural error: QUALIFY after ORDER BY", () => {
+    const sql = "SELECT user_id FROM t ORDER BY user_id DESC QUALIFY ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY event_timestamp) = 1";
+    const m = validateWithParser(sql, singleRange(sql));
+    expect(warnings(m).length).toBeGreaterThan(0);
+    expect(warnings(m)[0].message).toMatch(/must come after 'WHERE' or 'HAVING'/i);
+  });
+
+  it("flags unexpected character at the end of the script", () => {
+    const sql = "SELECT * FROM t; $";
+    const ranges = [
+      { startLine: 1, endLine: 1, startOffset: 0, endOffset: 16 },
+      { startLine: 1, endLine: 1, startOffset: 17, endOffset: 18 }
+    ];
+    const m = validateWithParser(sql, ranges);
+    expect(warnings(m).length).toBeGreaterThan(0);
+    expect(warnings(m)[0].message).toContain("Unexpected: '" + String.fromCharCode(36) + "'");
+  });
 });
