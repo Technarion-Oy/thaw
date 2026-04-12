@@ -505,7 +505,7 @@ export default function QueryPage() {
   const requestClose = (tabId: string) => {
     const { tabs } = useQueryStore.getState();
     const tab = tabs.find((t) => t.id === tabId);
-    if (!tab || tabs.length <= 1) return;
+    if (!tab) return;
     const isDirty = tab.sql !== tab.savedSql;
     if (isDirty) {
       setCloseConfirm({ tabId, title: tab.title });

@@ -331,9 +331,24 @@ export const useQueryStore = create<QueryState>()(
 
   closeTab: (id) =>
     set((state) => {
-      if (state.tabs.length <= 1) return {};
       const idx = state.tabs.findIndex((t) => t.id === id);
+      if (idx === -1) return {};
       const newTabs = state.tabs.filter((t) => t.id !== id);
+
+      // Closing the last tab — replace with a fresh scratch tab.
+      if (newTabs.length === 0) {
+        const freshTab = makeTab();
+        return {
+          tabs: [freshTab],
+          activeTabId: freshTab.id,
+          sql: freshTab.sql,
+          selectedSql: "",
+          currentFile: null,
+          result: null,
+          error: null,
+          splitTabId: null,
+        };
+      }
 
       let next: Partial<QueryState>;
       if (id !== state.activeTabId) {
