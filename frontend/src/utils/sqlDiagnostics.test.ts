@@ -2936,6 +2936,25 @@ describe("temp.sql Comments Analysis", () => {
   });
 });
 
+describe("temp.sql False Alerts (TABLE function & USING TEMPLATE)", () => {
+  it("does not flag syntax errors for INFER_SCHEMA named arguments", () => {
+    const sql = "SELECT ARRAY_AGG(OBJECT_CONSTRUCT(*)) FROM TABLE(INFER_SCHEMA(LOCATION=>'@my_stage', FILE_FORMAT=>'my_ff'));";
+    const m = validateWithParser(sql, singleRange(sql));
+    expect(warnings(m)).toHaveLength(0);
+  });
+  it("does not flag 'TABLE' as a missing table when using TABLE() generator", async () => {
+    const sql = "SELECT * FROM TABLE(INFER_SCHEMA(LOCATION=>'@my_stage'))";
+    const m = await validateTablesExist(sql, singleRange(sql), []);
+    expect(errors(m)).toHaveLength(0);
+  });
+
+  it("does not flag 'USING TEMPLATE' as unexpected syntax in CREATE TABLE", () => {
+    const sql = "CREATE TABLE my_table USING TEMPLATE (SELECT ARRAY_AGG(OBJECT_CONSTRUCT(*)) FROM TABLE(INFER_SCHEMA(LOCATION=>'@stage')))";
+    const m = validateWithParser(sql, singleRange(sql));
+    expect(warnings(m)).toHaveLength(0);
+  });
+});
+
 describe("temp.sql Real-World Analysis", () => {
   it("flags schema existence error for raw_data.events when no database is selected", async () => {
     const sql = "SELECT * FROM raw_data.events";
