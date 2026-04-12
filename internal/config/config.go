@@ -41,11 +41,12 @@ type GitConfig struct {
 // AIConfig holds AI provider settings.
 // APIKey is stored in ~/.config/thaw/config.json (mode 0600).
 type AIConfig struct {
-	Provider   string `json:"provider"`             // "openai" | "google" | "ollama"
-	APIKey     string `json:"apiKey"`
-	Model      string `json:"model"`
-	Enabled    bool   `json:"enabled"`
-	OllamaPort int    `json:"ollamaPort,omitempty"` // 0 means default (11434)
+	Provider     string `json:"provider"`               // "openai" | "google" | "ollama"
+	APIKey       string `json:"apiKey"`
+	Model        string `json:"model"`
+	Enabled      bool   `json:"enabled"`
+	OllamaPort   int    `json:"ollamaPort,omitempty"`   // 0 means default (11434)
+	OllamaNumCtx int    `json:"ollamaNumCtx,omitempty"` // 0 means let Ollama decide (usually 4096)
 }
 
 // SnowparkConfig holds Snowpark environment settings.

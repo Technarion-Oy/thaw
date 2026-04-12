@@ -374,6 +374,10 @@ export function GetSqlStatementRanges(arg1) {
   return window['go']['main']['App']['GetSqlStatementRanges'](arg1);
 }
 
+export function GetSystemRAMGB() {
+  return window['go']['main']['App']['GetSystemRAMGB']();
+}
+
 export function GetTableColumns(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetTableColumns'](arg1, arg2, arg3);
 }
@@ -754,8 +758,8 @@ export function TaskHasChildren(arg1, arg2, arg3) {
   return window['go']['main']['App']['TaskHasChildren'](arg1, arg2, arg3);
 }
 
-export function TestAIModel(arg1, arg2, arg3, arg4) {
-  return window['go']['main']['App']['TestAIModel'](arg1, arg2, arg3, arg4);
+export function TestAIModel(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['TestAIModel'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function UninstallEnvPackage(arg1) {
