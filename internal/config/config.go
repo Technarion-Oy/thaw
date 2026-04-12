@@ -94,6 +94,29 @@ func DefaultEditorPrefs() EditorPrefs {
 	}
 }
 
+// FeatureFlags holds toggles for optional or experimental features.
+//
+// Adding a new flag:
+//  1. Add a bool field here with a json tag.
+//  2. Set it to true in DefaultFeatureFlags so it is on by default.
+//  3. Add a Switch row in FeatureFlagsModal.tsx.
+//  4. Read it from featureFlagsStore in whichever component needs gating.
+//
+// Initialized is a sentinel: when false the config file predates feature flags
+// and GetFeatureFlags returns DefaultFeatureFlags instead of the zero struct.
+type FeatureFlags struct {
+	Initialized     bool `json:"initialized"`
+	ExportTableData bool `json:"exportTableData"`
+}
+
+// DefaultFeatureFlags returns a FeatureFlags with every feature enabled.
+func DefaultFeatureFlags() FeatureFlags {
+	return FeatureFlags{
+		Initialized:     true,
+		ExportTableData: true,
+	}
+}
+
 // AppConfig is the on-disk configuration for Thaw.
 type AppConfig struct {
 	Connections            []Connection   `json:"connections"`
@@ -102,6 +125,7 @@ type AppConfig struct {
 	Snowpark               SnowparkConfig `json:"snowpark"`
 	Editor                 EditorPrefs    `json:"editor"`
 	SnowflakeCLIConfigPath string         `json:"snowflakeCliConfigPath"`
+	FeatureFlags           FeatureFlags   `json:"featureFlags"`
 }
 
 // configPath returns the absolute path to the application configuration file,

@@ -59,6 +59,7 @@ import { useObjectStore } from "../../store/objectStore";
 import { useGitStore } from "../../store/gitStore";
 import { useDiffStore } from "../../store/diffStore";
 import { useInsertMappingStore } from "../../store/insertMappingStore";
+import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import AccountPanel from "../account/AccountPanel";
 import CallProcedureModal from "../procedure/CallProcedureModal";
 import ExecuteNotebookModal from "../notebook/ExecuteNotebookModal";
@@ -434,6 +435,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const pendingDiff   = useDiffStore((s) => s.pending);
   const selectForComp = useDiffStore((s) => s.selectForComparison);
   const compareWith   = useDiffStore((s) => s.compareWith);
+
+  const featureFlags = useFeatureFlagsStore((s) => s.flags);
 
   const insertTarget    = useInsertMappingStore((s) => s.target);
   const insertSources   = useInsertMappingStore((s) => s.sources);
@@ -1300,17 +1303,27 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
-  const menuItem = (label: string, icon: React.ReactNode, onClick: () => void, color?: string) => (
-    <div
-      style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", fontSize: 13, cursor: "pointer", color: color ?? "var(--text)" }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
-      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-      onClick={onClick}
-    >
-      {icon}
-      {label}
-    </div>
-  );
+  const menuItem = (label: string, icon: React.ReactNode, onClick: () => void, color?: string, disabled?: boolean, disabledReason?: string) => {
+    const el = (
+      <div
+        style={{
+          display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", fontSize: 13,
+          cursor: disabled ? "default" : "pointer",
+          color: disabled ? "var(--text-muted)" : (color ?? "var(--text)"),
+          opacity: disabled ? 0.45 : 1,
+        }}
+        onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.background = "var(--border)"; }}
+        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+        onClick={disabled ? undefined : onClick}
+      >
+        {icon}
+        {label}
+      </div>
+    );
+    return disabled && disabledReason
+      ? <Tooltip title={disabledReason} placement="right" mouseEnterDelay={0.4}>{el}</Tooltip>
+      : el;
+  };
 
   // A menu item that reveals a cascading submenu on hover.
   // Uses a 150 ms hide-delay so the mouse can travel into the submenu panel
@@ -1637,7 +1650,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             </>
           ))}
           {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
-          {ctxMenu.nodeType === "schema" && menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openSchemaExportModal)}
+          {ctxMenu.nodeType === "schema" && menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openSchemaExportModal, undefined, !featureFlags.exportTableData, "Export Table Data is disabled. Enable it under File → Settings → Enabled Features.")}
           {ctxMenu.nodeType === "schema" && menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openSchemaImportModal)}
           {ctxMenu.nodeType === "schema" && menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets)}
           {ctxMenu.nodeType === "schema" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
@@ -1660,7 +1673,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
             menuItem("Time Travel Query…", <HistoryOutlined style={{ fontSize: 12 }} />, openTimeTravelModal)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
-            menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openExportModal)}
+            menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openExportModal, undefined, !featureFlags.exportTableData, "Export Table Data is disabled. Enable it under File → Settings → Enabled Features.")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
             menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openImportModal)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&

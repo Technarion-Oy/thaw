@@ -101,6 +101,20 @@ export namespace config {
 	        this.operatorPosition = source["operatorPosition"];
 	    }
 	}
+	export class FeatureFlags {
+	    initialized: boolean;
+	    exportTableData: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new FeatureFlags(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.initialized = source["initialized"];
+	        this.exportTableData = source["exportTableData"];
+	    }
+	}
 	export class GitConfig {
 	    exportDir: string;
 	    remoteURL: string;

@@ -18,10 +18,12 @@ import AISettingsModal from "./components/settings/AISettingsModal";
 import SnowparkCheckModal from "./components/snowpark/SnowparkCheckModal";
 import SnowparkSetupModal from "./components/snowpark/SnowparkSetupModal";
 import EditorPreferencesModal from "./components/editor/EditorPreferencesModal";
+import FeatureFlagsModal from "./components/settings/FeatureFlagsModal";
 import { IsConnected } from "../wailsjs/go/main/App";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../wailsjs/runtime/runtime";
 import { useThemeStore, type ThemePreference } from "./store/themeStore";
 import { useDiffStore } from "./store/diffStore";
+import { useFeatureFlagsStore } from "./store/featureFlagsStore";
 
 export default function App() {
   const isConnected    = useConnectionStore((s) => s.isConnected);
@@ -36,6 +38,7 @@ export default function App() {
   const [editorPrefsOpen, setEditorPrefsOpen]         = useState(false);
   const [snowparkCheckOpen, setSnowparkCheckOpen]     = useState(false);
   const [snowparkSetupOpen, setSnowparkSetupOpen]     = useState(false);
+  const [featureFlagsOpen, setFeatureFlagsOpen]       = useState(false);
   const diffError    = useDiffStore((s) => s.error);
   const clearDiffError = useDiffStore((s) => s.clearError);
 
@@ -70,6 +73,10 @@ export default function App() {
       setIsConnected(alive);
     });
   }, []);
+
+  // Load feature flags from persisted config on startup.
+  const loadFeatureFlags = useFeatureFlagsStore((s) => s.load);
+  useEffect(() => { void loadFeatureFlags(); }, []);
 
   // Listen for system-level color-scheme changes and update the resolved theme.
   useEffect(() => {
@@ -114,6 +121,12 @@ export default function App() {
     const offCheck = EventsOn("menu:snowpark-check", () => setSnowparkCheckOpen(true));
     const offSetup = EventsOn("menu:snowpark-setup", () => setSnowparkSetupOpen(true));
     return () => { (offCheck as () => void)(); (offSetup as () => void)(); };
+  }, []);
+
+  // Listen for "Feature Flags…" menu event.
+  useEffect(() => {
+    const off = EventsOn("menu:feature-flags", () => setFeatureFlagsOpen(true));
+    return () => off();
   }, []);
 
   // Global clipboard fix for WKWebView on macOS.
@@ -209,6 +222,9 @@ export default function App() {
       )}
       {snowparkSetupOpen && (
         <SnowparkSetupModal onClose={() => setSnowparkSetupOpen(false)} />
+      )}
+      {featureFlagsOpen && (
+        <FeatureFlagsModal onClose={() => setFeatureFlagsOpen(false)} />
       )}
     </ConfigProvider>
   );

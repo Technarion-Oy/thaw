@@ -270,6 +270,10 @@ export function GetEditorPrefs() {
   return window['go']['main']['App']['GetEditorPrefs']();
 }
 
+export function GetFeatureFlags() {
+  return window['go']['main']['App']['GetFeatureFlags']();
+}
+
 export function GetFunctionInfo(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['GetFunctionInfo'](arg1, arg2, arg3, arg4);
 }
@@ -656,6 +660,10 @@ export function SaveBinaryFile(arg1, arg2) {
 
 export function SaveEditorPrefs(arg1) {
   return window['go']['main']['App']['SaveEditorPrefs'](arg1);
+}
+
+export function SaveFeatureFlags(arg1) {
+  return window['go']['main']['App']['SaveFeatureFlags'](arg1);
 }
 
 export function SaveFile(arg1, arg2) {
