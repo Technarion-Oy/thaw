@@ -23,6 +23,7 @@ import { IsConnected } from "../wailsjs/go/main/App";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../wailsjs/runtime/runtime";
 import { useThemeStore, type ThemePreference } from "./store/themeStore";
 import { useDiffStore } from "./store/diffStore";
+import { useFeatureFlagsStore } from "./store/featureFlagsStore";
 
 export default function App() {
   const isConnected    = useConnectionStore((s) => s.isConnected);
@@ -72,6 +73,10 @@ export default function App() {
       setIsConnected(alive);
     });
   }, []);
+
+  // Load feature flags from persisted config on startup.
+  const loadFeatureFlags = useFeatureFlagsStore((s) => s.load);
+  useEffect(() => { void loadFeatureFlags(); }, []);
 
   // Listen for system-level color-scheme changes and update the resolved theme.
   useEffect(() => {

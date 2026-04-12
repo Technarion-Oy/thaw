@@ -102,7 +102,8 @@ export namespace config {
 	    }
 	}
 	export class FeatureFlags {
-	
+	    initialized: boolean;
+	    exportTableData: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new FeatureFlags(source);
@@ -110,7 +111,8 @@ export namespace config {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	
+	        this.initialized = source["initialized"];
+	        this.exportTableData = source["exportTableData"];
 	    }
 	}
 	export class GitConfig {

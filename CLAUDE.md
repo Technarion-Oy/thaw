@@ -113,6 +113,61 @@ All proprietary analysis logic lives in `internal/sqleditor/sqleditor.go` and is
 - `ComputeJoinOnConditions(req)` → three-tier JOIN ON suggestion engine (FK → PK heuristic → type-compatible same-name columns + USING)
 - `validateWithParser` and `validateBareColumnRefs` still run in the frontend (`sqlDiagnostics.ts`) as they depend on `node-sql-parser` which has no Go equivalent
 
+### Adding a feature flag (Enabled Features)
+
+Feature flags live in `internal/config/config.go` (`FeatureFlags` struct) and are surfaced to users via **File → Settings → Enabled Features**. All flags default to enabled — the `Initialized` sentinel prevents Go's zero-value `false` from silently disabling features on a fresh install.
+
+**Steps to add a new flag:**
+
+1. **`internal/config/config.go`** — add a `bool` field to `FeatureFlags` and set it `true` in `DefaultFeatureFlags()`:
+   ```go
+   type FeatureFlags struct {
+       Initialized  bool `json:"initialized"`
+       ExportTableData bool `json:"exportTableData"`
+       MyNewFeature bool `json:"myNewFeature"` // ← add here
+   }
+
+   func DefaultFeatureFlags() FeatureFlags {
+       return FeatureFlags{
+           Initialized:     true,
+           ExportTableData: true,
+           MyNewFeature:    true, // ← and here
+       }
+   }
+   ```
+
+2. **Run `wails generate module`** — regenerates `frontend/wailsjs/go/models.ts` with the new field.
+
+3. **`frontend/src/components/settings/FeatureFlagsModal.tsx`** — add a `<FlagRow>` inside the modal's column:
+   ```tsx
+   <FlagRow
+     label="My New Feature"
+     description="One-line description shown in the modal."
+     checked={flags.myNewFeature}
+     onChange={(v) => set("myNewFeature", v)}
+   />
+   ```
+
+4. **In the component that needs gating** — read the flag from `featureFlagsStore` and pass `disabled` + `disabledReason` to `menuItem` (Sidebar), or conditionally render/disable your own UI element:
+   ```tsx
+   const featureFlags = useFeatureFlagsStore((s) => s.flags);
+
+   // Sidebar context-menu item:
+   menuItem("My Action…", <Icon />, handler, undefined,
+     !featureFlags.myNewFeature,
+     "My New Feature is disabled. Enable it under File → Settings → Enabled Features.")
+
+   // Or for a button:
+   <Button disabled={!featureFlags.myNewFeature}>…</Button>
+   ```
+
+**Key files:**
+- `internal/config/config.go` — `FeatureFlags` struct + `DefaultFeatureFlags()`
+- `app.go` — `GetFeatureFlags()` / `SaveFeatureFlags()` IPC methods
+- `frontend/src/store/featureFlagsStore.ts` — Zustand store (loaded on startup, reloaded after modal save)
+- `frontend/src/components/settings/FeatureFlagsModal.tsx` — toggle UI (`<FlagRow>` per flag)
+- `frontend/src/components/layout/Sidebar.tsx` — `menuItem()` 5th param `disabled`, 6th param `disabledReason`
+
 ### Code Snippets cascading context menu
 - Implemented via Monaco's internal **`MenuRegistry` + `CommandsRegistry`** (both from `vs/platform/…`); no per-editor patching
 - A module-level IIFE (runs once at load) registers:
