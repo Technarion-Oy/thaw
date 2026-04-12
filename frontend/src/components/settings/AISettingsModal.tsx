@@ -182,7 +182,7 @@ export default function AISettingsModal({ onClose }: Props) {
       cancelledTest = true;
       if (testDebounceRef.current) clearTimeout(testDebounceRef.current);
     };
-  }, [state.provider, state.apiKey, state.model]);
+  }, [state.provider, state.apiKey, state.model, state.ollamaNumCtx]);
 
   function setProvider(provider: Provider) {
     setState((s) => ({ ...s, provider, model: DEFAULT_MODEL[provider] }));
