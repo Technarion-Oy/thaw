@@ -41,9 +41,53 @@ func inspectCSVContent(content string, maxLines int) *csvFormat {
 
 	delim := detectDelimiter(lines)
 	quote := detectQuoteChar(lines, delim)
+
 	skipHeader := 0
 	if detectHeader(lines, delim) {
 		skipHeader = 1
+	} else if len(lines) > 1 {
+		// HEURISTIC: Compare first line with other rows.
+		// If a column in row 0 is text, but the same column in row N is a number, it's likely a header.
+		firstRow := strings.Split(lines[0], string(delim))
+
+		for i := 1; i < len(lines); i++ {
+			currentRow := strings.Split(lines[i], string(delim))
+
+			minCols := len(firstRow)
+			if len(currentRow) < minCols {
+				minCols = len(currentRow)
+			}
+
+			foundHeader := false
+			for col := 0; col < minCols; col++ {
+				// Clean first row value (trim spaces and quotes)
+				val1 := strings.TrimSpace(firstRow[col])
+				if quote != 0 {
+					val1 = strings.Trim(val1, string(quote))
+				}
+
+				// Clean current row value (trim spaces and quotes)
+				val2 := strings.TrimSpace(currentRow[col])
+				if quote != 0 {
+					val2 = strings.Trim(val2, string(quote))
+				}
+
+				// Check if they are numbers
+				_, err1 := strconv.ParseFloat(val1, 64)
+				_, err2 := strconv.ParseFloat(val2, 64)
+
+				// If row 0 is NOT a number, but row N IS a number -> We found a header
+				if err1 != nil && err2 == nil {
+					skipHeader = 1
+					foundHeader = true
+					break
+				}
+			}
+
+			if foundHeader {
+				break
+			}
+		}
 	}
 
 	delimStr := string(delim)
