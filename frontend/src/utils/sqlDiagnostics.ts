@@ -132,7 +132,8 @@ const SNOWFLAKE_FP_RE = new RegExp(
   "|\\bCLONE\\b" +                    
   "|INSERT\\s+OVERWRITE\\b" +         
   "|TRUNCATE\\s+\\S+\\s+IF\\b" +
-  "|\\\\bLATERAL\\\\s+FLATTEN\\\\b",
+  "|\\bLATERAL\\s+FLATTEN\\b" +
+  "|\\bINFER_SCHEMA\\b",
   "i",
 );
 
@@ -278,12 +279,15 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
         const backupSetRegex = /^FROM\s+BACKUP\s+SET\s+(?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2}\s+IDENTIFIER\s+'[^']+'\s*$/i;
         const ctasRegex = /^AS\s+(?:SELECT|WITH)\b/i;
         const cloneRegex = /^(?:CLONE|LIKE)\b/i;
+        const usingTemplateRegex = /^USING\s+TEMPLATE\s*\(/i;
         
         if (backupSetRegex.test(cleanedRest)) {
           isValid = true;
         } else if (ctasRegex.test(cleanedRest)) {
           isValid = true;
         } else if (cloneRegex.test(cleanedRest)) {
+          isValid = true;
+        } else if (usingTemplateRegex.test(cleanedRest)) {
           isValid = true;
         } else if (cleanedRest.startsWith("(")) {
           let depth = 0;
@@ -633,10 +637,9 @@ export async function validateBareColumnRefs(
     }
 
     if (stmtAsts.length === 0) {
-      const strippedText = rawStmtText.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").trim();
       const fallbackRegex = /(?:FROM|JOIN)\s+((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})\b/gi;
       let fm;
-      while ((fm = fallbackRegex.exec(strippedText)) !== null) {
+      while ((fm = fallbackRegex.exec(strippedTextCol)) !== null) {
         const rawTable = fm[1];
         const parts = [...rawTable.matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(x => x[0]);
         let db = null, schema = null, table = parts[parts.length - 1];
@@ -697,6 +700,7 @@ export async function validateBareColumnRefs(
         const { db: ftDb, schema: ftSchema, table: rawTable } = extractTablePath(ft, rawStmtText, quotedIdentifiersIgnoreCase);
         if (!rawTable) { skip = true; break; }
         const ftTable = rawTable;
+        if (ftTable.toUpperCase() === 'TABLE' && !ftDb && !ftSchema) { skip = true; break; }
 
         let cacheKey: string | undefined;
         let cols: ColInfo[] | undefined;
@@ -1372,6 +1376,7 @@ export async function validateTablesExist(
           rawFtTable !== ftTable &&
           rawStmtText.includes(`"${rawFtTable}"`);
         const compareTable = isQuotedRef ? rawFtTable : ftTable;
+        if (compareTable.toUpperCase() === 'TABLE' && !ftDb && !ftSchema) continue;
 
         if (currentCTEs.has(compareTable)) continue;
         if (scriptCreatedTables.has(compareTable)) continue;
