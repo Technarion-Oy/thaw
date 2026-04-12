@@ -180,7 +180,29 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
       }
     }
 
-    // Error 2: Missing LATERAL keyword before FLATTEN
+    // Error 2a: Typo 'LATERALFLATTEN'
+    if (/\bLATERALFLATTEN\b/i.test(strippedText)) {
+        const rawRegex = /\bLATERALFLATTEN\b/gi;
+        let rawMatch;
+        const seen = new Set();
+        while ((rawMatch = rawRegex.exec(rawStmtText)) !== null) {
+            const upToMatch = rawStmtText.slice(0, rawMatch.index);
+            const lines = upToMatch.split("\n");
+            const errLine = r.startLine + lines.length - 1;
+            const errCol = lines[lines.length - 1].length + 1;
+            const key = `${errLine}-${errCol}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                markers.push({
+                   startLineNumber: errLine, startColumn: errCol, endLineNumber: errLine, endColumn: errCol + 14,
+                   message: "Typo detected: Did you mean 'LATERAL FLATTEN'?",
+                   severity: 4
+                });
+            }
+        }
+    }
+
+    // Error 2b: Missing LATERAL keyword before FLATTEN
     if (/(?:FROM|JOIN|,)\s+FLATTEN\s*\(/i.test(strippedText) &&
         !/\bLATERAL\s+FLATTEN\s*\(/i.test(strippedText) &&
         !/\bTABLE\s*\(\s*FLATTEN\s*\(/i.test(strippedText)) {
@@ -429,7 +451,7 @@ export function validateWithParser(sql: string, stmtRanges: StatementRange[]): D
       continue;
     }
 
-    if (SNOWFLAKE_FP_RE.test(rawStmtText)) continue;
+    if (SNOWFLAKE_FP_RE.test(strippedText)) continue;
 
     try {
       parser.parse(parseText);
@@ -563,7 +585,8 @@ export async function validateBareColumnRefs(
     
     if (firstToken !== "SELECT" && firstToken !== "WITH" && firstToken !== "INSERT" && firstToken !== "CREATE" && firstToken !== "UNDROP") continue;
     
-    const checkTextCol = rawStmtText.replace(/\\bCLUSTER\\s+BY\\s*\\([^)]+\\)/i, "");
+    const strippedTextCol = rawStmtText.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").trim();
+    const checkTextCol = strippedTextCol.replace(/\bCLUSTER\s+BY\s*\([^)]+\)/i, "");
     if (SNOWFLAKE_FP_RE.test(checkTextCol)) continue;
 
     let parseText = rawStmtText.replace(/;+\s*$/, "");
@@ -1233,7 +1256,8 @@ export async function validateTablesExist(
 
     if (firstToken !== "SELECT" && firstToken !== "WITH" && firstToken !== "CREATE" && firstToken !== "UNDROP") continue;
     
-    const checkTextCtx = rawStmtText.replace(/\\bCLUSTER\\s+BY\\s*\\([^)]+\\)/i, "");
+    const strippedTextCtx = rawStmtText.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").trim();
+    const checkTextCtx = strippedTextCtx.replace(/\bCLUSTER\s+BY\s*\([^)]+\)/i, "");
     if (SNOWFLAKE_FP_RE.test(checkTextCtx)) continue;
 
     let parseText = rawStmtText.replace(/;+\s*$/, "");
@@ -1280,10 +1304,9 @@ export async function validateTablesExist(
     }
 
     if (stmtAsts.length === 0) {
-      const strippedText = rawStmtText.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").trim();
       const fallbackRegex = /(?:FROM|JOIN)\s+((?:[a-zA-Z0-9_$]+|"[^"]+")(?:\.(?:[a-zA-Z0-9_$]+|"[^"]+")){0,2})\b/gi;
       let fm;
-      while ((fm = fallbackRegex.exec(strippedText)) !== null) {
+      while ((fm = fallbackRegex.exec(strippedTextCtx)) !== null) {
         const rawTable = fm[1];
         const parts = [...rawTable.matchAll(/[a-zA-Z0-9_$]+|"[^"]+"/g)].map(x => x[0]);
         let db = null, schema = null, table = parts[parts.length - 1];

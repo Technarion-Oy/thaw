@@ -2921,6 +2921,21 @@ describe("Engine Resilience & Fallback Mechanics (Pre-Fix Failure Cases)", () =>
   });
 });
 
+describe("temp.sql Comments Analysis", () => {
+  it("flags LATERALFLATTEN as a typo", () => {
+    const sql = "SELECT * FROM t, LATERALFLATTEN(input => doc)";
+    const m = validateWithParser(sql, singleRange(sql));
+    expect(warnings(m).length).toBeGreaterThan(0);
+    expect(warnings(m).some(w => w.message.includes("Did you mean 'LATERAL FLATTEN'"))).toBe(true);
+  });
+
+  it("does not skip queries if SNOWFLAKE_FP_RE matches inside a comment", () => {
+    const sql = "SELECT FROM t -- LATERAL FLATTEN"; // syntax error: SELECT FROM
+    const m = validateWithParser(sql, singleRange(sql));
+    expect(warnings(m).length).toBeGreaterThan(0);
+  });
+});
+
 describe("temp.sql Real-World Analysis", () => {
   it("flags schema existence error for raw_data.events when no database is selected", async () => {
     const sql = "SELECT * FROM raw_data.events";
