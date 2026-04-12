@@ -629,7 +629,25 @@ func GetSuggestion(provider, apiKey, model, prompt string, ollamaPort, ollamaNum
 // ollamaNumCtx is the context window size sent to Ollama (0 = let Ollama decide);
 // both are ignored for non-Ollama providers.
 func SuggestFormatOptions(provider, apiKey, model, format, sampleContent string, ollamaPort, ollamaNumCtx int) (string, error) {
-	prompt := buildFormatSuggestionPrompt(format, sampleContent)
+	// Run the local CSV sniffer to give the AI reliable anchors and reduce
+	// hallucination.  We pass only a few lines so the sniffer is fast; the
+	// full sample is still embedded in the prompt for the AI to verify.
+	var hints []string
+	if format == "CSV" {
+		if det := inspectCSVContent(sampleContent, 20); det != nil {
+			hints = append(hints, fmt.Sprintf("  fieldDelimiter: %q", det.FieldDelimiter))
+			if det.SkipHeader > 0 {
+				hints = append(hints, "  parseHeader: true")
+			} else {
+				hints = append(hints, "  parseHeader: false")
+			}
+			if det.FieldOptionallyEnclosed != "" {
+				hints = append(hints, fmt.Sprintf("  fieldOptionallyEnclosedBy: %q", det.FieldOptionallyEnclosed))
+			}
+		}
+	}
+
+	prompt := buildFormatSuggestionPrompt(format, sampleContent, hints)
 	var raw string
 	var err error
 	switch provider {
@@ -669,9 +687,27 @@ func extractFormatJSON(raw string) (string, error) {
 
 	// Find the outermost JSON object
 	start := strings.Index(raw, "{")
+	if start == -1 {
+		return "", fmt.Errorf("AI returned no JSON object: %.120s", raw)
+	}
 	end := strings.LastIndex(raw, "}")
-	if start != -1 && end > start {
+	if end > start {
 		raw = raw[start : end+1]
+	} else {
+		// No closing brace — response was likely truncated; take from '{' to end.
+		raw = raw[start:]
+	}
+
+	// Defensively remove the "explanation" key: the AI sometimes includes it
+	// with unescaped double quotes in the value, which invalidates the JSON.
+	raw = stripJSONStringKey(raw, "explanation")
+
+	if !json.Valid([]byte(raw)) {
+		// Attempt to recover from a truncated response (e.g. Gemini cuts off
+		// before the closing '}' when the response hits the token limit).
+		if rec := recoverTruncatedJSON(raw); rec != "" {
+			raw = rec
+		}
 	}
 
 	if !json.Valid([]byte(raw)) {
@@ -680,11 +716,114 @@ func extractFormatJSON(raw string) (string, error) {
 	return raw, nil
 }
 
-func buildFormatSuggestionPrompt(format, sample string) string {
-	const maxSample = 3000
-	if len(sample) > maxSample {
-		sample = sample[:maxSample] + "\n...(truncated)"
+// recoverTruncatedJSON tries to salvage a JSON object whose closing '}' was
+// cut off by a token limit. It attempts two strategies:
+//  1. Append '}' directly — works when only the brace is missing.
+//  2. Trim back to the last top-level ',' — discards the incomplete final
+//     key-value pair — then append '}'. Works when truncation happened
+//     mid-key or mid-value.
+func recoverTruncatedJSON(s string) string {
+	trimmed := strings.TrimRight(s, " \t\r\n")
+
+	// Strategy 1: just close the object.
+	if candidate := trimmed + "}"; json.Valid([]byte(candidate)) {
+		return candidate
 	}
+
+	// Strategy 2: drop the incomplete trailing field and close.
+	// Using strings.LastIndex is safe for our constrained, flat JSON output:
+	// the last ',' in the string is overwhelmingly the separator between the
+	// last two complete key-value pairs (not a ',' inside a field value).
+	if i := strings.LastIndex(trimmed, ","); i != -1 {
+		candidate := strings.TrimRight(trimmed[:i], " \t\r\n") + "\n}"
+		if json.Valid([]byte(candidate)) {
+			return candidate
+		}
+	}
+	return ""
+}
+
+// stripJSONStringKey removes a string-valued key-value pair from a raw JSON
+// object. It handles values that contain unescaped double quotes by treating
+// the first `"` followed (after optional whitespace) by `,` or `}` as the
+// end of the value — a heuristic that is safe for our constrained output.
+func stripJSONStringKey(s, key string) string {
+	keyPos := strings.Index(s, `"`+key+`"`)
+	if keyPos == -1 {
+		return s
+	}
+
+	// Advance past the key to the colon.
+	p := keyPos + len(key) + 2 // +2 for the surrounding quotes
+	for p < len(s) && isJSONWS(s[p]) {
+		p++
+	}
+	if p >= len(s) || s[p] != ':' {
+		return s
+	}
+	p++
+
+	// Advance to the opening quote of the value.
+	for p < len(s) && isJSONWS(s[p]) {
+		p++
+	}
+	if p >= len(s) || s[p] != '"' {
+		return s // not a string value; bail safely
+	}
+	p++ // skip opening quote
+
+	// Scan for the closing quote using the heuristic described above.
+	for p < len(s) {
+		if s[p] == '"' {
+			rest := p + 1
+			for rest < len(s) && isJSONWS(s[rest]) {
+				rest++
+			}
+			if rest >= len(s) || s[rest] == ',' || s[rest] == '}' {
+				return spliceJSONPair(s, keyPos, p+1)
+			}
+		}
+		p++
+	}
+	return s
+}
+
+// spliceJSONPair removes the characters [pairStart, valueEnd) from s and
+// eliminates exactly one surrounding comma to keep the JSON valid.
+func spliceJSONPair(s string, pairStart, valueEnd int) string {
+	// Prefer removing the leading comma.
+	check := pairStart - 1
+	for check >= 0 && isJSONWS(s[check]) {
+		check--
+	}
+	if check >= 0 && s[check] == ',' {
+		return strings.TrimRight(s[:check], " \t\r\n") + s[valueEnd:]
+	}
+	// No leading comma: try trailing.
+	tail := valueEnd
+	for tail < len(s) && isJSONWS(s[tail]) {
+		tail++
+	}
+	if tail < len(s) && s[tail] == ',' {
+		return s[:pairStart] + s[tail+1:]
+	}
+	// Only field: just remove it.
+	return s[:pairStart] + s[valueEnd:]
+}
+
+func isJSONWS(c byte) bool { return c == ' ' || c == '\t' || c == '\r' || c == '\n' }
+
+func buildFormatSuggestionPrompt(format, sample string, hints []string) string {
+	// Keep only ~600 bytes, trimmed to a whole line, to limit token usage.
+	const maxSample = 600
+	if len(sample) > maxSample {
+		trimmed := sample[:maxSample]
+		if nl := strings.LastIndex(trimmed, "\n"); nl > 0 {
+			trimmed = trimmed[:nl]
+		}
+		sample = trimmed + "\n...(truncated)"
+	}
+
 	var fieldHint string
 	if format == "CSV" {
 		fieldHint = `- fieldDelimiter: string (e.g. "," or "\\t" or "|")
@@ -700,17 +839,23 @@ func buildFormatSuggestionPrompt(format, sample string) string {
 - compression: string (e.g. "AUTO", "GZIP", "NONE")
 `
 	}
-	return fmt.Sprintf(`Analyze this %s file sample and return Snowflake COPY INTO format option suggestions.
 
+	var hintSection string
+	if len(hints) > 0 {
+		hintSection = "\nLocal analysis detected these probable values (verify against the sample below):\n" +
+			strings.Join(hints, "\n") + "\n"
+	}
+
+	return fmt.Sprintf(`Analyze this %s file sample and return Snowflake COPY INTO format option suggestions.
+%s
 File sample:
 ---
 %s
 ---
 
-Return ONLY a compact JSON object. Include only fields you are confident about:
-%s- explanation: string (brief, max 15 words)
-
-Output the JSON object only. No prose, no markdown fences.`, format, sample, fieldHint)
+Return ONLY a compact JSON object with no explanation or commentary. Include only fields you are confident about:
+%s
+Output the JSON object only. No prose, no markdown fences, no extra keys.`, format, hintSection, sample, fieldHint)
 }
 
 func openAISuggestFormat(apiKey, model, prompt string) (string, error) {
@@ -773,7 +918,7 @@ func googleSuggestFormat(apiKey, model, prompt string) (string, error) {
 			{"parts": []map[string]string{{"text": prompt}}},
 		},
 		"generationConfig": map[string]any{
-			"maxOutputTokens": 600,
+			"maxOutputTokens": 2000,
 			"temperature":     0.1,
 		},
 	})
