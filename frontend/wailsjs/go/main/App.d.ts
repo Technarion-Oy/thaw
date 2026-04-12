@@ -198,6 +198,8 @@ export function GetSnowsightURL():Promise<string>;
 
 export function GetSqlStatementRanges(arg1:string):Promise<Array<sqleditor.StatementRange>>;
 
+export function GetSystemRAMGB():Promise<number>;
+
 export function GetTableColumns(arg1:string,arg2:string,arg3:string):Promise<Array<string>>;
 
 export function GetTableColumnsWithTypes(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.ColumnInfo>>;
@@ -388,7 +390,7 @@ export function SuspendTaskList(arg1:string,arg2:string,arg3:Array<string>):Prom
 
 export function TaskHasChildren(arg1:string,arg2:string,arg3:string):Promise<boolean>;
 
-export function TestAIModel(arg1:string,arg2:string,arg3:string,arg4:number):Promise<string>;
+export function TestAIModel(arg1:string,arg2:string,arg3:string,arg4:number,arg5:number):Promise<string>;
 
 export function UninstallEnvPackage(arg1:string):Promise<void>;
 

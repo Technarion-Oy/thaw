@@ -63,6 +63,7 @@ export namespace config {
 	    model: string;
 	    enabled: boolean;
 	    ollamaPort?: number;
+	    ollamaNumCtx?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new AIConfig(source);
@@ -75,6 +76,7 @@ export namespace config {
 	        this.model = source["model"];
 	        this.enabled = source["enabled"];
 	        this.ollamaPort = source["ollamaPort"];
+	        this.ollamaNumCtx = source["ollamaNumCtx"];
 	    }
 	}
 	export class EditorPrefs {

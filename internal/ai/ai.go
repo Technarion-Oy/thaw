@@ -31,14 +31,14 @@ var suggestHttpClient = &http.Client{Timeout: 15 * time.Second}
 // UIToolCall holds one tool invocation and its result, for the frontend.
 type UIToolCall struct {
 	Name    string `json:"name"`
-	Input   string `json:"input"`   // raw JSON the AI sent
-	Output  string `json:"output"`  // formatted result or error
+	Input   string `json:"input"`  // raw JSON the AI sent
+	Output  string `json:"output"` // formatted result or error
 	IsError bool   `json:"isError"`
 }
 
 // UIMessage is the display-facing message format shared between Go and the frontend.
 type UIMessage struct {
-	Role      string       `json:"role"`                       // "user" | "assistant"
+	Role      string       `json:"role"` // "user" | "assistant"
 	Text      string       `json:"text"`
 	ToolCalls []UIToolCall `json:"toolCalls,omitempty"`
 }
@@ -144,15 +144,16 @@ var chatTools = []map[string]any{
 // up to 8 iterations. When false a single plain-text response is returned with
 // no tool access.
 // ollamaPort is the port number for the local Ollama instance (0 = default 11434);
-// it is ignored for non-Ollama providers.
-func Chat(ctx context.Context, provider, apiKey, model string, ollamaPort int, history []UIMessage, userText, currentSQL, lastResultSummary string, agentMode bool, workDir string, exec ToolExecutor) (UIMessage, error) {
+// ollamaNumCtx is the context window size sent to Ollama (0 = let Ollama decide);
+// both are ignored for non-Ollama providers.
+func Chat(ctx context.Context, provider, apiKey, model string, ollamaPort, ollamaNumCtx int, history []UIMessage, userText, currentSQL, lastResultSummary string, agentMode bool, workDir string, exec ToolExecutor) (UIMessage, error) {
 	switch provider {
 	case "openai":
 		return openAIChat(ctx, apiKey, model, history, userText, currentSQL, lastResultSummary, agentMode, workDir, exec)
 	case "google":
 		return googleChat(ctx, apiKey, model, history, userText, currentSQL, lastResultSummary, agentMode, workDir, exec)
 	case "ollama":
-		return ollamaChat(ctx, ollamaBaseURL(ollamaPort), model, history, userText, currentSQL, lastResultSummary, agentMode, workDir, exec)
+		return ollamaChat(ctx, ollamaBaseURL(ollamaPort), model, ollamaNumCtx, history, userText, currentSQL, lastResultSummary, agentMode, workDir, exec)
 	default:
 		return UIMessage{}, fmt.Errorf("unknown AI provider: %s", provider)
 	}
@@ -244,7 +245,9 @@ func openAIChat(ctx context.Context, apiKey, model string, history []UIMessage, 
 		}
 		var result struct {
 			Choices []struct {
-				Message struct{ Content string `json:"content"` } `json:"message"`
+				Message struct {
+					Content string `json:"content"`
+				} `json:"message"`
 			} `json:"choices"`
 		}
 		if err := json.Unmarshal(raw, &result); err != nil {
@@ -436,7 +439,9 @@ func googleChat(ctx context.Context, apiKey, model string, history []UIMessage, 
 		var result struct {
 			Candidates []struct {
 				Content struct {
-					Parts []struct{ Text string `json:"text"` } `json:"parts"`
+					Parts []struct {
+						Text string `json:"text"`
+					} `json:"parts"`
 				} `json:"content"`
 			} `json:"candidates"`
 		}
@@ -600,15 +605,16 @@ func googleChat(ctx context.Context, apiKey, model string, history []UIMessage, 
 // GetSuggestion requests an inline SQL completion from the configured provider.
 // provider must be "openai", "google", or "ollama". Returns the trimmed completion text.
 // ollamaPort is the port number for the local Ollama instance (0 = default 11434);
-// it is ignored for non-Ollama providers.
-func GetSuggestion(provider, apiKey, model, prompt string, ollamaPort int) (string, error) {
+// ollamaNumCtx is the context window size sent to Ollama (0 = let Ollama decide);
+// both are ignored for non-Ollama providers.
+func GetSuggestion(provider, apiKey, model, prompt string, ollamaPort, ollamaNumCtx int) (string, error) {
 	switch provider {
 	case "openai":
 		return openAISuggestion(apiKey, model, prompt)
 	case "google":
 		return googleSuggestion(apiKey, model, prompt)
 	case "ollama":
-		return ollamaSuggestion(ollamaBaseURL(ollamaPort), model, prompt)
+		return ollamaSuggestion(ollamaBaseURL(ollamaPort), model, prompt, ollamaNumCtx)
 	default:
 		return "", fmt.Errorf("unknown AI provider: %s", provider)
 	}
@@ -620,8 +626,9 @@ func GetSuggestion(provider, apiKey, model, prompt string, ollamaPort int) (stri
 // is validated before being returned; an error is returned if the AI response
 // cannot be parsed as JSON.
 // ollamaPort is the port number for the local Ollama instance (0 = default 11434);
-// it is ignored for non-Ollama providers.
-func SuggestFormatOptions(provider, apiKey, model, format, sampleContent string, ollamaPort int) (string, error) {
+// ollamaNumCtx is the context window size sent to Ollama (0 = let Ollama decide);
+// both are ignored for non-Ollama providers.
+func SuggestFormatOptions(provider, apiKey, model, format, sampleContent string, ollamaPort, ollamaNumCtx int) (string, error) {
 	prompt := buildFormatSuggestionPrompt(format, sampleContent)
 	var raw string
 	var err error
@@ -631,7 +638,7 @@ func SuggestFormatOptions(provider, apiKey, model, format, sampleContent string,
 	case "google":
 		raw, err = googleSuggestFormat(apiKey, model, prompt)
 	case "ollama":
-		raw, err = ollamaSuggestFormat(ollamaBaseURL(ollamaPort), model, prompt)
+		raw, err = ollamaSuggestFormat(ollamaBaseURL(ollamaPort), model, prompt, ollamaNumCtx)
 	default:
 		return "", fmt.Errorf("unknown AI provider: %s", provider)
 	}
@@ -994,15 +1001,16 @@ var testHttpClient = &http.Client{Timeout: 10 * time.Second}
 // provider / API key / model combination is reachable and valid.
 // Returns nil on success or a user-readable error.
 // ollamaPort is the port number for the local Ollama instance (0 = default 11434);
-// it is ignored for non-Ollama providers.
-func TestModel(provider, apiKey, model string, ollamaPort int) error {
+// ollamaNumCtx is the context window size sent to Ollama (0 = let Ollama decide);
+// both are ignored for non-Ollama providers.
+func TestModel(provider, apiKey, model string, ollamaPort, ollamaNumCtx int) error {
 	switch provider {
 	case "openai":
 		return testOpenAIModel(apiKey, model)
 	case "google":
 		return testGoogleModel(apiKey, model)
 	case "ollama":
-		return testOllamaModel(ollamaBaseURL(ollamaPort), model)
+		return testOllamaModel(ollamaBaseURL(ollamaPort), model, ollamaNumCtx)
 	default:
 		return fmt.Errorf("unknown provider: %s", provider)
 	}
@@ -1132,13 +1140,19 @@ func listOllamaModels(base string) ([]string, error) {
 }
 
 // testOllamaModel sends a minimal generate request to verify the model is available.
-func testOllamaModel(base, model string) error {
-	body, err := json.Marshal(map[string]any{
+// numCtx mirrors the context-window setting the user configured so the test
+// exercises the same load path as real inference (important for Gemma 4 etc.).
+func testOllamaModel(base, model string, numCtx int) error {
+	payload := map[string]any{
 		"model":       model,
 		"prompt":      "hi",
 		"stream":      false,
 		"num_predict": 1,
-	})
+	}
+	if numCtx > 0 {
+		payload["options"] = map[string]any{"num_ctx": numCtx, "keep_alive": 300}
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
@@ -1166,13 +1180,18 @@ func testOllamaModel(base, model string) error {
 }
 
 // ollamaSuggestion requests an inline SQL completion from the local Ollama /api/generate endpoint.
-func ollamaSuggestion(base, model, prompt string) (string, error) {
-	body, err := json.Marshal(map[string]any{
+// numCtx sets the context window size; 0 means use Ollama's default.
+func ollamaSuggestion(base, model, prompt string, numCtx int) (string, error) {
+	payload := map[string]any{
 		"model":       model,
 		"prompt":      prompt,
 		"stream":      false,
 		"num_predict": 150,
-	})
+	}
+	if numCtx > 0 {
+		payload["options"] = map[string]any{"num_ctx": numCtx}
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
 	}
@@ -1203,13 +1222,18 @@ func ollamaSuggestion(base, model, prompt string) (string, error) {
 }
 
 // ollamaSuggestFormat requests format option suggestions from the local Ollama /api/generate endpoint.
-func ollamaSuggestFormat(base, model, prompt string) (string, error) {
-	body, err := json.Marshal(map[string]any{
+// numCtx sets the context window size; 0 means use Ollama's default.
+func ollamaSuggestFormat(base, model, prompt string, numCtx int) (string, error) {
+	payload := map[string]any{
 		"model":       model,
 		"prompt":      prompt,
 		"stream":      false,
 		"num_predict": 600,
-	})
+	}
+	if numCtx > 0 {
+		payload["options"] = map[string]any{"num_ctx": numCtx}
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
 	}
@@ -1242,7 +1266,8 @@ func ollamaSuggestFormat(base, model, prompt string) (string, error) {
 // ollamaChat handles a single chat turn using the local Ollama /api/chat endpoint.
 // In agent mode it runs a tool-calling loop (up to 8 iterations) using Ollama's
 // OpenAI-compatible tool format; otherwise it performs a single round-trip.
-func ollamaChat(ctx context.Context, base, model string, history []UIMessage, userText, currentSQL, lastResultSummary string, agentMode bool, workDir string, exec ToolExecutor) (UIMessage, error) {
+// numCtx sets the context window size; 0 means use Ollama's default.
+func ollamaChat(ctx context.Context, base, model string, numCtx int, history []UIMessage, userText, currentSQL, lastResultSummary string, agentMode bool, workDir string, exec ToolExecutor) (UIMessage, error) {
 	systemPrompt := buildSystemPrompt(currentSQL, lastResultSummary, agentMode, workDir)
 
 	messages := []map[string]any{
@@ -1255,11 +1280,15 @@ func ollamaChat(ctx context.Context, base, model string, history []UIMessage, us
 
 	// Chat mode: single round-trip, no tools.
 	if !agentMode {
-		body, err := json.Marshal(map[string]any{
+		chatPayload := map[string]any{
 			"model":    model,
 			"messages": messages,
 			"stream":   false,
-		})
+		}
+		if numCtx > 0 {
+			chatPayload["options"] = map[string]any{"num_ctx": numCtx}
+		}
+		body, err := json.Marshal(chatPayload)
 		if err != nil {
 			return UIMessage{}, err
 		}
@@ -1308,12 +1337,16 @@ func ollamaChat(ctx context.Context, base, model string, history []UIMessage, us
 	const maxIter = 8
 
 	for iter := 0; iter < maxIter; iter++ {
-		body, err := json.Marshal(map[string]any{
+		agentPayload := map[string]any{
 			"model":    model,
 			"messages": messages,
 			"tools":    ollamaTools,
 			"stream":   false,
-		})
+		}
+		if numCtx > 0 {
+			agentPayload["options"] = map[string]any{"num_ctx": numCtx}
+		}
+		body, err := json.Marshal(agentPayload)
 		if err != nil {
 			return UIMessage{}, err
 		}

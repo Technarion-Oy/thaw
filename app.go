@@ -3624,6 +3624,27 @@ func (a *App) SaveAIConfig(aiCfg config.AIConfig) error {
 	return config.Save(cfg)
 }
 
+// GetSystemRAMGB returns the total physical RAM in gigabytes (rounded down).
+// Returns 0 if the value cannot be determined (e.g. unsupported platform).
+// Used by the frontend to suggest a sensible Ollama context-window size.
+func (a *App) GetSystemRAMGB() int {
+	// macOS / Linux: sysctl -n hw.memsize (macOS) or hw.physmem (some BSDs)
+	for _, key := range []string{"hw.memsize", "hw.physmem"} {
+		out, err := exec.Command("sysctl", "-n", key).Output()
+		if err != nil {
+			continue
+		}
+		var bytes uint64
+		if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &bytes); err != nil {
+			continue
+		}
+		if bytes > 0 {
+			return int(bytes / (1024 * 1024 * 1024))
+		}
+	}
+	return 0
+}
+
 // ─── Editor preferences ───────────────────────────────────────────────────────
 
 // GetEditorPrefs returns the persisted SQL editor formatting preferences.
@@ -3712,8 +3733,10 @@ func (a *App) ListAIModels(provider, apiKey string, ollamaPort int) []string {
 // provider/key/model combination is valid and reachable.
 // Returns an empty string on success or a human-readable error message.
 // ollamaPort is the Ollama server port (0 = default 11434); ignored for other providers.
-func (a *App) TestAIModel(provider, apiKey, model string, ollamaPort int) string {
-	if err := ai.TestModel(provider, apiKey, model, ollamaPort); err != nil {
+// ollamaNumCtx mirrors the configured context window so the test uses the same
+// load path as real inference (important for large models like Gemma 4).
+func (a *App) TestAIModel(provider, apiKey, model string, ollamaPort, ollamaNumCtx int) string {
+	if err := ai.TestModel(provider, apiKey, model, ollamaPort, ollamaNumCtx); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -3849,7 +3872,7 @@ func (a *App) SendChatMessage(
 		return "unknown tool", true
 	}
 
-	msg, err := ai.Chat(chatCtx, cfg.AI.Provider, cfg.AI.APIKey, cfg.AI.Model, cfg.AI.OllamaPort,
+	msg, err := ai.Chat(chatCtx, cfg.AI.Provider, cfg.AI.APIKey, cfg.AI.Model, cfg.AI.OllamaPort, cfg.AI.OllamaNumCtx,
 		history, userText, currentSQL, lastResultSummary, agentMode, workDir, executor)
 	if err != nil {
 		return nil, err
@@ -3962,7 +3985,7 @@ func (a *App) GetAISuggestion(prefix string) string {
 
 	prompt := "Complete this Snowflake SQL query. Return ONLY the completion text to insert at the cursor — no explanation, no markdown, no repetition of existing text. Keep it to 1–2 lines.\n\n" + prefix
 
-	suggestion, err := ai.GetSuggestion(cfg.AI.Provider, cfg.AI.APIKey, cfg.AI.Model, prompt, cfg.AI.OllamaPort)
+	suggestion, err := ai.GetSuggestion(cfg.AI.Provider, cfg.AI.APIKey, cfg.AI.Model, prompt, cfg.AI.OllamaPort, cfg.AI.OllamaNumCtx)
 	if err != nil {
 		logger.L.Debug("AI suggestion failed", "provider", cfg.AI.Provider, "err", err)
 		return ""
@@ -3983,7 +4006,7 @@ func (a *App) SuggestImportOptions(format, sampleContent string) (string, error)
 		return "", fmt.Errorf("AI is not configured — enable it in Settings → AI")
 	}
 
-	result, err := ai.SuggestFormatOptions(cfg.AI.Provider, cfg.AI.APIKey, cfg.AI.Model, format, sampleContent, cfg.AI.OllamaPort)
+	result, err := ai.SuggestFormatOptions(cfg.AI.Provider, cfg.AI.APIKey, cfg.AI.Model, format, sampleContent, cfg.AI.OllamaPort, cfg.AI.OllamaNumCtx)
 	if err != nil {
 		logger.L.Debug("AI format suggestion failed", "provider", cfg.AI.Provider, "err", err)
 		return "", fmt.Errorf("AI suggestion failed: %w", err)

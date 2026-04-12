@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Button, Input, Modal, Radio, Select, Switch, Tag, Typography, message } from "antd";
-import { GetAIConfig, ListAIModels, SaveAIConfig, TestAIModel } from "../../../wailsjs/go/main/App";
+import { GetAIConfig, GetSystemRAMGB, ListAIModels, SaveAIConfig, TestAIModel } from "../../../wailsjs/go/main/App";
 
 const { Text } = Typography;
 
@@ -21,11 +21,28 @@ interface Props {
 type Provider = "openai" | "google" | "ollama";
 
 interface AIState {
-  enabled:    boolean;
-  provider:   Provider;
-  apiKey:     string;
-  model:      string;
-  ollamaPort: number; // 0 means default (11434)
+  enabled:       boolean;
+  provider:      Provider;
+  apiKey:        string;
+  model:         string;
+  ollamaPort:    number; // 0 means default (11434)
+  ollamaNumCtx:  number; // 0 means let Ollama decide (usually 4096)
+}
+
+// Context-window presets for Ollama. 0 = auto (Ollama default, usually 4K).
+const CTX_OPTIONS = [
+  { value: 0,      label: "Auto (Ollama default, ~4K)" },
+  { value: 8192,   label: "8K" },
+  { value: 16384,  label: "16K" },
+  { value: 32768,  label: "32K  —  recommended for 8–16 GB RAM" },
+  { value: 65536,  label: "64K" },
+  { value: 131072, label: "128K  —  recommended for 32+ GB RAM" },
+];
+
+function recommendedNumCtx(ramGB: number): number {
+  if (ramGB >= 32) return 131072;
+  if (ramGB >= 8)  return 32768;
+  return 8192;
 }
 
 const PROVIDER_LABEL: Record<Provider, string> = {
@@ -48,13 +65,15 @@ const DEFAULT_MODEL: Record<Provider, string> = {
 
 export default function AISettingsModal({ onClose }: Props) {
   const [state, setState] = useState<AIState>({
-    enabled:    false,
-    provider:   "openai",
-    apiKey:     "",
-    model:      DEFAULT_MODEL.openai,
-    ollamaPort: 0,
+    enabled:      false,
+    provider:     "openai",
+    apiKey:       "",
+    model:        DEFAULT_MODEL.openai,
+    ollamaPort:   0,
+    ollamaNumCtx: 0,
   });
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving]       = useState(false);
+  const [detectedRAM, setDetectedRAM] = useState(0);
 
   // Tracks the last-saved config so we can show "currently in use" info.
   const [savedConfig, setSavedConfig] = useState<{ provider: Provider; model: string } | null>(null);
@@ -71,20 +90,22 @@ export default function AISettingsModal({ onClose }: Props) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const testDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load saved config on open.
+  // Load saved config and detect system RAM on open.
   useEffect(() => {
     GetAIConfig().then((cfg) => {
       const provider = (cfg.provider as Provider) || "openai";
       const model = cfg.model || DEFAULT_MODEL[provider];
       setState({
-        enabled:    cfg.enabled ?? false,
+        enabled:      cfg.enabled ?? false,
         provider,
-        apiKey:     cfg.apiKey ?? "",
+        apiKey:       cfg.apiKey ?? "",
         model,
-        ollamaPort: cfg.ollamaPort ?? 0,
+        ollamaPort:   cfg.ollamaPort ?? 0,
+        ollamaNumCtx: cfg.ollamaNumCtx ?? 0,
       });
       setSavedConfig({ provider, model });
     });
+    GetSystemRAMGB().then((gb) => setDetectedRAM(gb));
   }, []);
 
   // Fetch available models whenever provider or apiKey changes (debounced).
@@ -140,7 +161,7 @@ export default function AISettingsModal({ onClose }: Props) {
     testDebounceRef.current = setTimeout(async () => {
       setModelTest("testing");
       try {
-        const errMsg = await TestAIModel(state.provider, state.apiKey, state.model, state.ollamaPort);
+        const errMsg = await TestAIModel(state.provider, state.apiKey, state.model, state.ollamaPort, state.ollamaNumCtx);
         if (cancelledTest) return;
         if (errMsg) {
           setModelTest("error");
@@ -177,11 +198,12 @@ export default function AISettingsModal({ onClose }: Props) {
     setSaving(true);
     try {
       await SaveAIConfig({
-        enabled:    state.enabled,
-        provider:   state.provider,
-        apiKey:     state.apiKey,
-        model:      state.model,
-        ollamaPort: state.ollamaPort,
+        enabled:      state.enabled,
+        provider:     state.provider,
+        apiKey:       state.apiKey,
+        model:        state.model,
+        ollamaPort:   state.ollamaPort,
+        ollamaNumCtx: state.ollamaNumCtx,
       } as any);
       setSavedConfig({ provider: state.provider, model: state.model });
       message.success("AI settings saved");
@@ -265,6 +287,37 @@ export default function AISettingsModal({ onClose }: Props) {
               placeholder="11434"
               suffix={<Text type="secondary" style={{ fontSize: 11 }}>default 11434</Text>}
             />
+          </div>
+        )}
+
+        {/* Ollama context window — shown only for local Ollama */}
+        {state.provider === "ollama" && (
+          <div>
+            <Text type="secondary" style={{ display: "block", marginBottom: 6 }}>
+              Context window (num_ctx)
+            </Text>
+            <Select
+              style={{ width: "100%" }}
+              value={state.ollamaNumCtx}
+              onChange={(v) => setState((s) => ({ ...s, ollamaNumCtx: v }))}
+              options={CTX_OPTIONS}
+            />
+            {detectedRAM > 0 && (
+              <Text type="secondary" style={{ fontSize: 11, display: "block", marginTop: 5 }}>
+                Detected RAM: {detectedRAM} GB
+                {" — "}recommended:{" "}
+                <Text
+                  style={{ fontSize: 11, cursor: "pointer", color: "var(--link)" }}
+                  onClick={() => setState((s) => ({ ...s, ollamaNumCtx: recommendedNumCtx(detectedRAM) }))}
+                >
+                  {(recommendedNumCtx(detectedRAM) / 1024).toFixed(0)}K (click to apply)
+                </Text>
+              </Text>
+            )}
+            <Text type="secondary" style={{ fontSize: 11, display: "block", marginTop: 4 }}>
+              Gemma 4 and other large models need a higher value than Ollama's default 4K.
+              Higher values use more RAM/VRAM.
+            </Text>
           </div>
         )}
 
