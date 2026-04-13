@@ -765,9 +765,10 @@ func ParseSignatureParams(sig string) []SignatureParam {
 	d := 0
 	for i := openIdx + 1; i <= closeIdx; i++ {
 		ch := sig[i]
-		if ch == '(' {
+		switch ch {
+		case '(':
 			d++
-		} else if ch == ')' {
+		case ')':
 			d--
 		}
 
@@ -1563,9 +1564,10 @@ func ValidateSyntax(sql string) []DiagMarker {
 									j++
 									jCol++
 									for j < n && depth > 0 {
-										if runes[j] == '(' {
+										switch runes[j] {
+										case '(':
 											depth++
-										} else if runes[j] == ')' {
+										case ')':
 											depth--
 										}
 										if runes[j] == '\n' {
@@ -1709,7 +1711,7 @@ func ValidateSyntax(sql string) []DiagMarker {
 
 						} else {
 							// Not a scripting keyword and not an assignment —
-							// bare unrecognised identifier at statement start.
+							// bare unrecognized identifier at statement start.
 							addError("Unexpected token '"+wordRaw+"'",
 								wordLine, wordCol, wordLine, wordCol+len(wordRaw))
 						}
@@ -1784,7 +1786,7 @@ func stripQ(s string) string {
 
 // ParseJoinTables extracts all FROM/JOIN table references (with optional aliases)
 // from the given SQL text.  Three-part (db.schema.table), two-part (schema.table),
-// and one-part (table) references are all recognised.
+// and one-part (table) references are all recognized.
 func ParseJoinTables(sql string) []JoinTableRef {
 	var result []JoinTableRef
 	start := 0
