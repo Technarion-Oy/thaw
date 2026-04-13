@@ -546,6 +546,21 @@ $$`,
 			},
 		},
 	{
+		// RETURN TABLE(resultset) is valid Snowflake Scripting syntax for returning
+		// a resultset from a stored procedure.  TABLE is not a variable — it must
+		// not be flagged as "Variable 'TABLE' is not declared".
+		name: "RETURN TABLE resultset — no false positive",
+		sql: `EXECUTE IMMEDIATE $$
+  DECLARE
+    res RESULTSET;
+  BEGIN
+    res := (SELECT region, SUM(revenue) AS total FROM regional_sales GROUP BY region);
+    RETURN TABLE(res);
+  END;
+$$;`,
+		want: nil,
+	},
+	{
 		name: "Named dollar tag with block comment and escaped quote",
 		sql: `EXECUTE IMMEDIATE $body$
 DECLARE

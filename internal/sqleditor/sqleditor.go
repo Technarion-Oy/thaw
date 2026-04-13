@@ -159,6 +159,8 @@ var scriptStmtKeywords = map[string]bool{
 	"SELECT": true, "INSERT": true, "UPDATE": true, "DELETE": true,
 	"MERGE": true, "CREATE": true, "ALTER": true, "DROP": true, "TRUNCATE": true,
 	"EXECUTE": true, "NULL": true,
+	// TABLE is valid after RETURN (RETURN TABLE(resultset)) — not a variable.
+	"TABLE": true,
 }
 
 // JOIN clause stop keywords used to detect accidental alias capture.
