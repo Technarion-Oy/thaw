@@ -499,29 +499,39 @@ func FindTokenPositions(sql string, bareTargets []string, quotedTargets []string
 
 		// Newline
 		if r == '\n' {
-			line++; col = 1; i++
+			line++
+			col = 1
+			i++
 			continue
 		}
 
 		// Line comment: --
 		if r == '-' && i+1 < n && runes[i+1] == '-' {
-			i += 2; col += 2
+			i += 2
+			col += 2
 			for i < n && runes[i] != '\n' {
-				i++; col++
+				i++
+				col++
 			}
 			continue
 		}
 
 		// Block comment: /* */
 		if r == '/' && i+1 < n && runes[i+1] == '*' {
-			i += 2; col += 2
+			i += 2
+			col += 2
 			for i < n {
 				if runes[i] == '\n' {
-					line++; col = 1; i++
+					line++
+					col = 1
+					i++
 				} else if runes[i] == '*' && i+1 < n && runes[i+1] == '/' {
-					i += 2; col += 2; break
+					i += 2
+					col += 2
+					break
 				} else {
-					i++; col++
+					i++
+					col++
 				}
 			}
 			continue
@@ -529,16 +539,23 @@ func FindTokenPositions(sql string, bareTargets []string, quotedTargets []string
 
 		// Single-quoted string: '...'
 		if r == '\'' {
-			i++; col++
+			i++
+			col++
 			for i < n {
 				if runes[i] == '\n' {
-					line++; col = 1; i++
+					line++
+					col = 1
+					i++
 				} else if runes[i] == '\'' && i+1 < n && runes[i+1] == '\'' {
-					i += 2; col += 2
+					i += 2
+					col += 2
 				} else if runes[i] == '\'' {
-					i++; col++; break
+					i++
+					col++
+					break
 				} else {
-					i++; col++
+					i++
+					col++
 				}
 			}
 			continue
@@ -547,18 +564,29 @@ func FindTokenPositions(sql string, bareTargets []string, quotedTargets []string
 		// Double-quoted identifier: "..."
 		if r == '"' {
 			startLine, startCol := line, col
-			i++; col++
+			i++
+			col++
 			var name []rune
 			closed := false
 			for i < n {
 				if runes[i] == '\n' {
-					line++; col = 1; i++; name = append(name, '\n')
+					line++
+					col = 1
+					i++
+					name = append(name, '\n')
 				} else if runes[i] == '"' && i+1 < n && runes[i+1] == '"' {
-					name = append(name, '"'); i += 2; col += 2
+					name = append(name, '"')
+					i += 2
+					col += 2
 				} else if runes[i] == '"' {
-					i++; col++; closed = true; break
+					i++
+					col++
+					closed = true
+					break
 				} else {
-					name = append(name, runes[i]); i++; col++
+					name = append(name, runes[i])
+					i++
+					col++
 				}
 			}
 			if closed && len(quotedSet) > 0 {
@@ -576,7 +604,8 @@ func FindTokenPositions(sql string, bareTargets []string, quotedTargets []string
 		if isLetterOrUnderscore(r) {
 			wLine, wCol, wStart := line, col, i
 			for i < n && isWordRune(runes[i]) {
-				i++; col++
+				i++
+				col++
 			}
 			if len(bareSet) > 0 {
 				word := string(runes[wStart:i])
@@ -599,7 +628,8 @@ func FindTokenPositions(sql string, bareTargets []string, quotedTargets []string
 			continue
 		}
 
-		i++; col++
+		i++
+		col++
 	}
 	return results
 }
@@ -612,7 +642,7 @@ func FindTokenPositions(sql string, bareTargets []string, quotedTargets []string
 // Returns nil when the cursor is not inside any named function call.
 //
 // Improvements over the original TypeScript implementation:
-//   - Handles '' escaped single quotes correctly (no false string-close)
+//   - Handles ” escaped single quotes correctly (no false string-close)
 //   - Skips double-quoted identifiers so they never pollute the paren stack
 //   - Skips -- line comments and /* */ block comments so commas inside them
 //     are not counted as parameter separators
@@ -879,7 +909,7 @@ var builtinFunctions = map[string]bool{
 	"BITOR": true, "BITXOR": true, "BOOLAND": true, "BOOLAND_AGG": true,
 	"BOOLNOT": true, "BOOLOR": true, "BOOLOR_AGG": true, "BOOLXOR": true,
 	"BOOLXOR_AGG": true,
-	"CASE": true, "CAST": true, "CBRT": true, "CEIL": true, "CEILING": true,
+	"CASE":        true, "CAST": true, "CBRT": true, "CEIL": true, "CEILING": true,
 	"CHARINDEX": true, "CHR": true, "CHAR": true, "COALESCE": true,
 	"COLLATE": true, "COLLATION": true, "COMPRESS": true, "CONCAT": true,
 	"CONCAT_WS": true, "CONDITIONAL_CHANGE_EVENT": true,
@@ -890,11 +920,11 @@ var builtinFunctions = map[string]bool{
 	"DATEADD": true, "DATEDIFF": true, "DAYNAME": true, "DAYOFMONTH": true,
 	"DAYOFWEEK": true, "DAYOFWEEKISO": true, "DAYOFYEAR": true,
 	"DECODE": true, "DECOMPRESS": true, "DENSE_RANK": true, "DIV0": true,
-	"DIV0NULL": true,
+	"DIV0NULL":     true,
 	"EDITDISTANCE": true, "ENDSWITH": true, "EQUAL_NULL": true, "EXP": true,
 	"FIRST_VALUE": true, "FLATTEN": true, "FLOOR": true, "FORMAT_DATE": true,
 	"FORMAT_NUMBER": true,
-	"GENERATOR": true, "GET": true, "GET_ABSOLUTE_PATH": true, "GET_DDL": true,
+	"GENERATOR":     true, "GET": true, "GET_ABSOLUTE_PATH": true, "GET_DDL": true,
 	"GET_PATH": true, "GET_PRESIGNED_URL": true, "GET_STAGE_LOCATION": true,
 	"GETBIT": true, "GREATEST": true, "GROUPING": true, "GROUPING_ID": true,
 	"HASH": true, "HASH_AGG": true, "HAVERSINE": true,
@@ -912,7 +942,7 @@ var builtinFunctions = map[string]bool{
 	"LEAD": true, "LEAST": true, "LEFT": true, "LENGTH": true, "LEN": true,
 	"LISTAGG": true, "LN": true, "LOG": true, "LOWER": true, "LPAD": true,
 	"LTRIM": true,
-	"MAX": true, "MAX_BY": true, "MEDIAN": true, "MIN": true, "MIN_BY": true,
+	"MAX":   true, "MAX_BY": true, "MEDIAN": true, "MIN": true, "MIN_BY": true,
 	"MINUTE": true, "MINUTES": true, "MOD": true, "MODE": true,
 	"MONTH": true, "MONTHNAME": true, "MONTHS_BETWEEN": true,
 	"NORMAL": true, "NTH_VALUE": true, "NTILE": true, "NULLIF": true,
@@ -923,7 +953,7 @@ var builtinFunctions = map[string]bool{
 	"PARSE_IP": true, "PARSE_JSON": true, "PARSE_URL": true,
 	"PARSE_XML": true, "PERCENT_RANK": true, "PERCENTILE_CONT": true,
 	"PERCENTILE_DISC": true, "PI": true, "POSITION": true, "POW": true,
-	"POWER": true,
+	"POWER":   true,
 	"RANDSTR": true, "RANDOM": true, "RANK": true, "RATIO_TO_REPORT": true,
 	"REGEXP": true, "REGEXP_COUNT": true, "REGEXP_EXTRACT": true,
 	"REGEXP_EXTRACT_ALL": true, "REGEXP_INSTR": true, "REGEXP_LIKE": true,
@@ -941,12 +971,12 @@ var builtinFunctions = map[string]bool{
 	"SUBSTR": true, "SUBSTRING": true, "SUM": true,
 	"SYSTEM$ABORT_TRANSACTION": true, "SYSTEM$CANCEL_ALL_QUERIES": true,
 	"SYSTEM$CANCEL_QUERY": true, "SYSTEM$CLUSTERING_DEPTH": true,
-	"SYSTEM$CLUSTERING_INFORMATION": true,
+	"SYSTEM$CLUSTERING_INFORMATION":       true,
 	"SYSTEM$GET_PREDECESSOR_RETURN_VALUE": true,
-	"SYSTEM$STREAM_GET_TABLE_TIMESTAMP": true, "SYSTEM$STREAM_HAS_DATA": true,
+	"SYSTEM$STREAM_GET_TABLE_TIMESTAMP":   true, "SYSTEM$STREAM_HAS_DATA": true,
 	"SYSTEM$TASK_DEPENDENTS_ENABLE": true, "SYSTEM$TYPEOF": true,
 	"SYSTEM$WAIT": true,
-	"TAN": true, "TANH": true, "TIME_FROM_PARTS": true, "TIMEADD": true,
+	"TAN":         true, "TANH": true, "TIME_FROM_PARTS": true, "TIMEADD": true,
 	"TIMEDIFF": true, "TIMESTAMPADD": true, "TIMESTAMPDIFF": true,
 	"TIMESTAMP_FROM_PARTS": true, "TIMESTAMP_LTZ_FROM_PARTS": true,
 	"TIMESTAMP_NTZ_FROM_PARTS": true, "TIMESTAMP_TZ_FROM_PARTS": true,
@@ -1924,8 +1954,8 @@ func PkHeuristicConditions(
 // ScriptingCompletionResult is the combined result of variable-extraction and
 // colon-detection for Snowflake Scripting autocompletion at a cursor position.
 type ScriptingCompletionResult struct {
-	Variables  []string `json:"variables"`   // Uppercased declared variable names in scope
-	NeedsColon bool     `json:"needsColon"`  // Whether variables need a ':' prefix in SQL context
+	Variables  []string `json:"variables"`  // Uppercased declared variable names in scope
+	NeedsColon bool     `json:"needsColon"` // Whether variables need a ':' prefix in SQL context
 }
 
 // GetScriptingCompletions extracts declared Snowflake Scripting variables visible
@@ -2052,21 +2082,19 @@ func scriptingNeedsColon(sql string, offset int) bool {
 	clean = regexp.MustCompile(`'[^']*'`).ReplaceAllString(clean, " ")
 	clean = regexp.MustCompile(`"[^"]*"`).ReplaceAllString(clean, " ")
 
-	// 3. Split by statement boundaries and take the last segment.
-	segRe := regexp.MustCompile(`(?i);|\bBEGIN\b|\bTHEN\b|\bELSE\b|\bDO\b|\bLOOP\b`)
-	segs := segRe.Split(clean, -1)
-	currentSeg := strings.TrimSpace(segs[len(segs)-1])
-	if currentSeg == "" {
+	// 3. Find the most recent context-setting token.
+	// SQL statement keywords require a colon. Scripting assignments/control-flow do not.
+	contextRe := regexp.MustCompile(`(?i)(:=|;|\b(?:SELECT|INSERT|UPDATE|DELETE|MERGE|CREATE|ALTER|DROP|TRUNCATE|COPY|CALL|WITH|SHOW|DESCRIBE|GRANT|REVOKE|LET|RETURN|IF|WHILE|UNTIL|DO|LOOP|BEGIN)\b)`)
+
+	matches := contextRe.FindAllString(clean, -1)
+	if len(matches) == 0 {
 		return false
 	}
 
-	// 4. Check the first word of the current segment.
-	firstWordRe := regexp.MustCompile(`[a-zA-Z0-9_$]+`)
-	m := firstWordRe.FindString(currentSeg)
-	if m == "" {
-		return false
-	}
-	return colonRequiredKeywords[strings.ToUpper(m)]
+	lastMatch := strings.ToUpper(matches[len(matches)-1])
+
+	// If the last context setter is a standard SQL keyword, it needs a colon.
+	return colonRequiredKeywords[lastMatch]
 }
 
 // ── TypeCategory ──────────────────────────────────────────────────────────────
