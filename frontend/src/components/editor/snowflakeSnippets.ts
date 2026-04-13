@@ -252,6 +252,40 @@ export function getSnowflakeSnippets(monaco: typeof monacoLib): monacoLib.langua
       documentation: "Snowflake Scripting CANCEL job execution",
       range: range as any,
     },
+
+    // 3.7. Generic DDL Statements
+    {
+      label: "create",
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: "CREATE OR REPLACE ${1|TABLE,VIEW,SCHEMA,DATABASE,STAGE,PROCEDURE,FUNCTION|}",
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      documentation: "Create or replace a database object",
+      range: range as any,
+    },
+    {
+      label: "alter",
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: "ALTER ${1|TABLE,VIEW,SCHEMA,DATABASE,USER,ROLE,WAREHOUSE|}",
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      documentation: "Alter a database object",
+      range: range as any,
+    },
+    {
+      label: "drop",
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: "DROP ${1|TABLE,VIEW,SCHEMA,DATABASE,USER,ROLE,WAREHOUSE|} IF EXISTS",
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      documentation: "Safely drop a database object",
+      range: range as any,
+    },
+    {
+      label: "describe",
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: "DESCRIBE ${1|TABLE,VIEW,SCHEMA,DATABASE,USER,ROLE,WAREHOUSE|}",
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      documentation: "Describe the structure of a database object",
+      range: range as any,
+    },
   ];
 }
 
@@ -289,4 +323,15 @@ export const SNIPPET_CATEGORIES: {
   { header: "Loops",                labels: ["for", "for_reverse", "while", "repeat", "loop"] },
   { header: "Cursors & Resultsets", labels: ["cursor_lifecycle", "resultset", "execute_immediate", "execute_immediate_using"] },
   { header: "Async Jobs",           labels: ["async_job", "await_job", "cancel_job"] },
+  
+  { 
+    header: "DDL Statements", 
+    labels: ["create", "alter", "drop", "describe"],
+    titles: {
+      create: "CREATE OR REPLACE ...",
+      alter: "ALTER ...",
+      drop: "DROP IF EXISTS ...",
+      describe: "DESCRIBE ..."
+    } 
+  },
 ];
