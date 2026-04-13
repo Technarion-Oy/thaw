@@ -239,14 +239,16 @@ FROM
   data`,
 		},
 		{
+			// Snowflake requires OVER (window_name) with parentheses; bare OVER w
+			// (SQL standard form) is rejected by the Snowflake parser.
 			name: "window_named_clause",
 			sql: `SELECT
   column1 AS id,
   column2 AS grp,
   column3 AS val,
-  ROW_NUMBER() OVER w AS rn,
-  RANK() OVER w AS rnk,
-  DENSE_RANK() OVER w AS dense_rnk
+  ROW_NUMBER() OVER (w) AS rn,
+  RANK() OVER (w) AS rnk,
+  DENSE_RANK() OVER (w) AS dense_rnk
 FROM
   VALUES (1, 'a', 10), (2, 'a', 20), (3, 'b', 5) AS t (column1, column2, column3)
 WINDOW
