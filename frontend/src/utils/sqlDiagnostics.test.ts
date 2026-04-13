@@ -2953,6 +2953,25 @@ describe("temp.sql False Alerts (TABLE function & USING TEMPLATE)", () => {
     const m = validateWithParser(sql, singleRange(sql));
     expect(warnings(m)).toHaveLength(0);
   });
+
+  it("does not flag EXECUTE IMMEDIATE $$ RETURN TABLE(res) $$ — EXECUTE is not parsed by validateWithParser", () => {
+    // validateWithParser skips EXECUTE statements (not in PARSEABLE_STMT_KEYWORDS).
+    // The false-positive "Variable 'TABLE' is not declared" is caught and fixed in the
+    // Go backend (sqleditor.go scriptStmtKeywords).  This test guards against any
+    // future frontend regression that might start processing EXECUTE IMMEDIATE blocks.
+    const sql = [
+      "EXECUTE IMMEDIATE $$",
+      "  DECLARE",
+      "    res RESULTSET;",
+      "  BEGIN",
+      "    res := (SELECT 1 AS n);",
+      "    RETURN TABLE(res);",
+      "  END;",
+      "$$;",
+    ].join("\n");
+    const m = validateWithParser(sql, singleRange(sql));
+    expect(warnings(m)).toHaveLength(0);
+  });
 });
 
 describe("temp.sql Real-World Analysis", () => {

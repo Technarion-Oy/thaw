@@ -207,11 +207,11 @@ func TestFindTokenPositions(t *testing.T) {
 	type tm = TokenMatch // shorthand
 
 	tests := []struct {
-		name         string
-		sql          string
-		bareTargets  []string
+		name          string
+		sql           string
+		bareTargets   []string
 		quotedTargets []string
-		want         []TokenMatch
+		want          []TokenMatch
 	}{
 		// ── nil / empty inputs ──────────────────────────────────────────────
 		{name: "empty sql", sql: "", bareTargets: []string{"X"}, want: nil},
@@ -312,7 +312,7 @@ func TestFindTokenPositions(t *testing.T) {
 			bareTargets:   []string{"W1"},
 			quotedTargets: []string{"WRONG2"},
 			want: []tm{
-				{Name: "w1",     Line: 1, Col: 8,  EndCol: 10, Quoted: false},
+				{Name: "w1", Line: 1, Col: 8, EndCol: 10, Quoted: false},
 				{Name: "WRONG2", Line: 1, Col: 12, EndCol: 20, Quoted: true},
 			},
 		},
@@ -545,9 +545,24 @@ $$`,
 				{StartLineNumber: 4, StartColumn: 12, EndLineNumber: 4, EndColumn: 26, Message: "Variable 'missing_cursor' is not declared", Severity: 8},
 			},
 		},
-	{
-		name: "Named dollar tag with block comment and escaped quote",
-		sql: `EXECUTE IMMEDIATE $body$
+		{
+			// RETURN TABLE(resultset) is valid Snowflake Scripting syntax for returning
+			// a resultset from a stored procedure.  TABLE is not a variable — it must
+			// not be flagged as "Variable 'TABLE' is not declared".
+			name: "RETURN TABLE resultset — no false positive",
+			sql: `EXECUTE IMMEDIATE $$
+  DECLARE
+    res RESULTSET;
+  BEGIN
+    res := (SELECT region, SUM(revenue) AS total FROM regional_sales GROUP BY region);
+    RETURN TABLE(res);
+  END;
+$$;`,
+			want: nil,
+		},
+		{
+			name: "Named dollar tag with block comment and escaped quote",
+			sql: `EXECUTE IMMEDIATE $body$
 DECLARE
     base_val FLOAT DEFAULT 10.0;
     str_val  VARCHAR;
@@ -556,12 +571,12 @@ BEGIN
     RETURN str_val;
 END;
 $body$;`,
-		want: nil,
-	},
-	{
-		// Tokenizer limitation: comment before keyword masks missing expression
-		name: "Named dollar tag comment-masked missing expression",
-		sql: `EXECUTE IMMEDIATE $body$
+			want: nil,
+		},
+		{
+			// Tokenizer limitation: comment before keyword masks missing expression
+			name: "Named dollar tag comment-masked missing expression",
+			sql: `EXECUTE IMMEDIATE $body$
 DECLARE
     base_val FLOAT DEFAULT 10.0;
 BEGIN
@@ -573,11 +588,11 @@ BEGIN
     END IF;
 END;
 $body$;`,
-		want: nil,
-	},
-	{
-		name: "FOR loop with declared cursor",
-		sql: `EXECUTE IMMEDIATE $$
+			want: nil,
+		},
+		{
+			name: "FOR loop with declared cursor",
+			sql: `EXECUTE IMMEDIATE $$
 DECLARE
     my_cursor CURSOR FOR SELECT id FROM t;
     total INTEGER DEFAULT 0;
@@ -588,11 +603,11 @@ BEGIN
     RETURN total;
 END;
 $$;`,
-		want: nil,
-	},
-	{
-		name: "FOR loop with undeclared cursor",
-		sql: `EXECUTE IMMEDIATE $$
+			want: nil,
+		},
+		{
+			name: "FOR loop with undeclared cursor",
+			sql: `EXECUTE IMMEDIATE $$
 DECLARE
     total INTEGER DEFAULT 0;
 BEGIN
@@ -602,52 +617,52 @@ BEGIN
     RETURN total;
 END;
 $$;`,
-		want: []DiagMarker{
-			{StartLineNumber: 5, StartColumn: 16, EndLineNumber: 5, EndColumn: 28, Message: "Variable 'ghost_cursor' is not declared", Severity: 8},
+			want: []DiagMarker{
+				{StartLineNumber: 5, StartColumn: 16, EndLineNumber: 5, EndColumn: 28, Message: "Variable 'ghost_cursor' is not declared", Severity: 8},
+			},
 		},
-	},
-	{
-		name: "Unmatched bracket with unclosed bracket and paren",
-		sql: `EXECUTE IMMEDIATE $$
+		{
+			name: "Unmatched bracket with unclosed bracket and paren",
+			sql: `EXECUTE IMMEDIATE $$
 DECLARE
     json_data VARIANT;
 BEGIN
     LET my_array ARRAY := [1, 2, (3 + 4];
 END;
 $$;`,
-		want: []DiagMarker{
-			{StartLineNumber: 5, StartColumn: 40, EndLineNumber: 5, EndColumn: 41, Message: "Unmatched ']'", Severity: 8},
-			{StartLineNumber: 5, StartColumn: 27, EndLineNumber: 5, EndColumn: 28, Message: "Unclosed '['", Severity: 8},
-			{StartLineNumber: 5, StartColumn: 34, EndLineNumber: 5, EndColumn: 35, Message: "Unclosed '('", Severity: 8},
+			want: []DiagMarker{
+				{StartLineNumber: 5, StartColumn: 40, EndLineNumber: 5, EndColumn: 41, Message: "Unmatched ']'", Severity: 8},
+				{StartLineNumber: 5, StartColumn: 27, EndLineNumber: 5, EndColumn: 28, Message: "Unclosed '['", Severity: 8},
+				{StartLineNumber: 5, StartColumn: 34, EndLineNumber: 5, EndColumn: 35, Message: "Unclosed '('", Severity: 8},
+			},
 		},
-	},
-	{
-		name: "Unclosed string literal",
-		sql: `EXECUTE IMMEDIATE $$
+		{
+			name: "Unclosed string literal",
+			sql: `EXECUTE IMMEDIATE $$
 BEGIN
     LET bad_string VARCHAR := 'This string has no end;
 END;
 $$;`,
-		want: []DiagMarker{
-			{StartLineNumber: 3, StartColumn: 31, EndLineNumber: 3, EndColumn: 32, Message: "Unclosed string literal", Severity: 8},
+			want: []DiagMarker{
+				{StartLineNumber: 3, StartColumn: 31, EndLineNumber: 3, EndColumn: 32, Message: "Unclosed string literal", Severity: 8},
+			},
 		},
-	},
-	{
-		name: "Unclosed block comment",
-		sql: `EXECUTE IMMEDIATE $$
+		{
+			name: "Unclosed block comment",
+			sql: `EXECUTE IMMEDIATE $$
 BEGIN
     LET x INTEGER := 1;
     /* This block comment never closes
     RETURN x;
 END;
 $$;`,
-		want: []DiagMarker{
-			{StartLineNumber: 4, StartColumn: 5, EndLineNumber: 4, EndColumn: 7, Message: "Unclosed block comment", Severity: 8},
+			want: []DiagMarker{
+				{StartLineNumber: 4, StartColumn: 5, EndLineNumber: 4, EndColumn: 7, Message: "Unclosed block comment", Severity: 8},
+			},
 		},
-	},
-	{
-		name: "LET with subquery in parens",
-		sql: `EXECUTE IMMEDIATE $$
+		{
+			name: "LET with subquery in parens",
+			sql: `EXECUTE IMMEDIATE $$
 BEGIN
     LET user_count INTEGER := (
         SELECT COUNT(*)
@@ -657,33 +672,33 @@ BEGIN
     RETURN user_count;
 END;
 $$;`,
-		want: nil,
-	},
-	{
-		name: "Bare equals assignment error",
-		sql: `EXECUTE IMMEDIATE $$
+			want: nil,
+		},
+		{
+			name: "Bare equals assignment error",
+			sql: `EXECUTE IMMEDIATE $$
 BEGIN
     LET n INTEGER := 0;
     n = n + 1;
     RETURN n;
 END;
 $$;`,
-		want: []DiagMarker{
-			{StartLineNumber: 4, StartColumn: 7, EndLineNumber: 4, EndColumn: 8, Message: "Expected ':=' for assignment", Severity: 8},
+			want: []DiagMarker{
+				{StartLineNumber: 4, StartColumn: 7, EndLineNumber: 4, EndColumn: 8, Message: "Expected ':=' for assignment", Severity: 8},
+			},
 		},
-	},
-	{
-		name: "Template injection brace at statement start",
-		sql: `EXECUTE IMMEDIATE $$
+		{
+			name: "Template injection brace at statement start",
+			sql: `EXECUTE IMMEDIATE $$
 BEGIN
     {TEMPLATE_INJECTION_ERROR}
     RETURN 1;
 END;
 $$;`,
-		want: []DiagMarker{
-			{StartLineNumber: 3, StartColumn: 5, EndLineNumber: 3, EndColumn: 6, Message: "Unexpected token '{'", Severity: 8},
+			want: []DiagMarker{
+				{StartLineNumber: 3, StartColumn: 5, EndLineNumber: 3, EndColumn: 6, Message: "Unexpected token '{'", Severity: 8},
+			},
 		},
-	},
 	}
 
 	for _, tt := range tests {
@@ -880,12 +895,12 @@ func TestComputeJoinOnConditions(t *testing.T) {
 
 func TestApplyCasing(t *testing.T) {
 	tests := []struct {
-		name          string
-		sql           string
-		keywordCase   string
+		name           string
+		sql            string
+		keywordCase    string
 		identifierCase string
-		functionCase  string
-		want          string
+		functionCase   string
+		want           string
 	}{
 		// ── keywordCase ───────────────────────────────────────────────────────
 		{name: "UPPER keyword", sql: "select id from t", keywordCase: "UPPER", identifierCase: "Preserve", functionCase: "UPPER", want: "SELECT id FROM t"},
@@ -1028,6 +1043,149 @@ WHERE Identifier('user_id') = 123;`,
 			got := ApplyCasing(tt.sql, "UPPER", "lower", "Title")
 			if got != tt.want {
 				t.Errorf("ApplyCasing(%s) failure\n  got:  %q\n  want: %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestScriptingNeedsColon(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+		want bool
+	}{
+		// ── Standard working scenarios ──────────────────────────────────────
+		{
+			name: "Standard SQL context (SELECT)",
+			sql:  "SELECT * FROM t WHERE id = ",
+			want: true,
+		},
+		{
+			name: "Standard assignment context (LET)",
+			sql:  "LET min_revenue NUMBER := ",
+			want: false,
+		},
+		{
+			name: "Procedural assignment without LET",
+			sql:  "target_status := ",
+			want: false,
+		},
+		{
+			name: "Inside IF condition",
+			sql:  "IF (revenue > ",
+			want: false,
+		},
+		{
+			name: "Already prefixed with colon",
+			sql:  "SELECT * FROM t WHERE id = :",
+			want: false,
+		},
+
+		// ── The Buggy Scenarios (Nested Contexts) ───────────────────────────
+		{
+			name: "Scenario: SELECT inside procedural assignment",
+			sql: `res := (
+      select REGION, sum(REVENUE) as total_revenue
+      from REGIONAL_SALES
+      group by REGION
+      HAVING SUM(REVENUE) >= `,
+			want: true, // Currently fails (returns false) because the parser thinks "res" is the start of the statement
+		},
+		{
+			name: "Scenario: SELECT inside LET assignment",
+			sql:  "LET user_count INTEGER := (SELECT COUNT(*) FROM users WHERE status = ",
+			want: true, // Currently fails
+		},
+		{
+			name: "Scenario: SELECT inside RETURN expression",
+			sql:  "RETURN (SELECT COUNT(*) FROM t WHERE col = ",
+			want: true, // Currently fails
+		},
+		{
+			name: "Scenario: Cursor inside WITH CTE assignment",
+			sql:  "res := (WITH cte AS (SELECT * FROM t WHERE col = ",
+			want: true, // Currently fails
+		},
+		// ── DML and DDL Statements (Needs Colon = true) ─────────────────────
+		{
+			name: "UPDATE statement WHERE clause",
+			sql:  "UPDATE users SET status = 'ACTIVE' WHERE user_id = ",
+			want: true,
+		},
+		{
+			name: "INSERT statement values",
+			sql:  "INSERT INTO logs (level, message) VALUES ('INFO', ",
+			want: true,
+		},
+		{
+			name: "DELETE statement",
+			sql:  "DELETE FROM sessions WHERE last_active < ",
+			want: true,
+		},
+		{
+			name: "CALL stored procedure",
+			sql:  "CALL my_procedure('param', ",
+			want: true, // CALL is a SQL-level command
+		},
+
+		// ── Control Flow and Scripting (Needs Colon = false) ────────────────
+		{
+			name: "WHILE loop condition",
+			sql:  "WHILE (retry_count < ",
+			want: false, // Last context is WHILE
+		},
+		{
+			name: "FOR loop bound",
+			sql:  "FOR i IN 1 TO ",
+			want: false, // Last context is FOR
+		},
+		{
+			name: "CASE statement inside scripting",
+			sql:  "CASE WHEN current_state = 'ERROR' THEN error_count := ",
+			want: false, // Last context is :=
+		},
+		{
+			name: "Just after BEGIN",
+			sql:  "BEGIN\n  ",
+			want: false, // Context is BEGIN
+		},
+
+		// ── Sneaky Edge Cases (Masking and Resets) ──────────────────────────
+		{
+			name: "Semicolon resets context",
+			sql:  "SELECT * FROM t; counter := ",
+			want: false, // The ; closed the SELECT, the new context is :=
+		},
+		{
+			name: "String masking a context setter",
+			sql:  "res := (SELECT id FROM t WHERE name = 'ignore := this string' AND val = ",
+			want: true, // The := inside the string is ignored; last context is SELECT
+		},
+		{
+			name: "Line comment masking a SQL keyword",
+			sql:  "LET x := 1; -- SELECT something to trick the parser\ny := ",
+			want: false, // The SELECT is ignored; last context is :=
+		},
+		{
+			name: "Block comment masking a scripting operator",
+			sql:  "SELECT * FROM t WHERE id = /* := */ ",
+			want: true, // The := is ignored; last context is SELECT
+		},
+		{
+			name: "Deeply nested subqueries",
+			sql:  "res := (SELECT a FROM t WHERE b IN (SELECT c FROM t2 WHERE d = ",
+			want: true, // Both := and the first SELECT are overridden by the inner SELECT
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate the cursor being exactly at the end of the SQL string
+			offset := len([]rune(tt.sql))
+
+			got := scriptingNeedsColon(tt.sql, offset)
+			if got != tt.want {
+				t.Errorf("scriptingNeedsColon() = %v, want %v\nSQL Context: %q", got, tt.want, tt.sql)
 			}
 		})
 	}
