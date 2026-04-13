@@ -1783,7 +1783,7 @@ func (a *App) ComputeJoinOnConditions(req sqleditor.JoinOnSuggestionsReq) []sqle
 }
 
 // AnalyzeSqlSemantics validates alias.column references in SQL against the
-// provided column info, returning Warning markers for unrecognised column names.
+// provided column info, returning Warning markers for unrecognized column names.
 // No Snowflake connection is required.
 func (a *App) AnalyzeSqlSemantics(sql string, resolvedRefs []sqleditor.ResolvedRef, colEntries []sqleditor.ColEntry) []sqleditor.DiagMarker {
 	return sqleditor.ValidateSemantics(sql, resolvedRefs, colEntries)
