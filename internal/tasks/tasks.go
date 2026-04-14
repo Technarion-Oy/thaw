@@ -76,17 +76,25 @@ func q(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
 }
 
+// bareIdent strips exactly one surrounding double-quote pair from a Snowflake
+// identifier segment and unescapes any internal "" → ".
+// Input examples: `"MY_TASK"` → `MY_TASK`, `"my""task"` → `my"task`.
+func bareIdent(s string) string {
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		s = s[1 : len(s)-1]
+	}
+	return strings.ReplaceAll(s, `""`, `"`)
+}
+
 // CloneChildTask clones a task and replaces its predecessors.
 func CloneChildTask(ctx context.Context, client *snowflake.Client, database, schema, oldName, newName string, newPredecessors []string) error {
 	escStr := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
 	formatPred := func(p string) string {
 		p = strings.TrimSpace(p)
-		p = strings.TrimPrefix(p, `"`)
-		p = strings.TrimSuffix(p, `"`)
 		parts := strings.Split(p, ".")
 		var quotedParts []string
 		for _, part := range parts {
-			if cleanPart := strings.Trim(part, `"`); cleanPart != "" {
+			if cleanPart := bareIdent(part); cleanPart != "" {
 				quotedParts = append(quotedParts, q(cleanPart))
 			}
 		}
@@ -158,6 +166,155 @@ func CloneChildTask(ctx context.Context, client *snowflake.Client, database, sch
 	return nil
 }
 
+// suspendIfRunning suspends the named task if its current state is STARTED.
+// Snowflake requires a task to be suspended before its AFTER list can be modified.
+func suspendIfRunning(ctx context.Context, client *snowflake.Client, database, schema, taskName string) error {
+	escName := strings.ReplaceAll(taskName, `'`, `''`)
+	res, err := client.Execute(ctx, fmt.Sprintf(
+		"SHOW TASKS LIKE '%s' IN SCHEMA %s.%s", escName, q(database), q(schema)))
+	if err != nil {
+		return fmt.Errorf("failed to check state for task %q: %w", taskName, err)
+	}
+	nameIdx := colIdx(res.Columns, "name")
+	stateIdx := colIdx(res.Columns, "state")
+	if nameIdx < 0 || stateIdx < 0 {
+		return nil
+	}
+	for _, row := range res.Rows {
+		if nameIdx >= len(row) || stateIdx >= len(row) {
+			continue
+		}
+		if !strings.EqualFold(toString(row[nameIdx]), taskName) {
+			continue
+		}
+		if strings.ToUpper(toString(row[stateIdx])) == "STARTED" {
+			fqn := fmt.Sprintf("%s.%s.%s", q(database), q(schema), q(taskName))
+			if _, err := client.Execute(ctx, fmt.Sprintf("ALTER TASK IF EXISTS %s SUSPEND", fqn)); err != nil {
+				return fmt.Errorf("failed to suspend task %q: %w", taskName, err)
+			}
+		}
+		break
+	}
+	return nil
+}
+
+// RemoveParents removes the given parent tasks from the AFTER list of taskName via
+// ALTER TASK … REMOVE AFTER.  The task is suspended first if it is currently running;
+// the caller is responsible for resuming it afterwards if desired.
+func RemoveParents(ctx context.Context, client *snowflake.Client, database, schema, taskName string, parents []string) error {
+	if len(parents) == 0 {
+		return nil
+	}
+	fqn := fmt.Sprintf("%s.%s.%s", q(database), q(schema), q(taskName))
+	if err := suspendIfRunning(ctx, client, database, schema, taskName); err != nil {
+		return err
+	}
+	preds := make([]string, 0, len(parents))
+	for _, p := range parents {
+		preds = append(preds, fmt.Sprintf("%s.%s.%s", q(database), q(schema), q(p)))
+	}
+	if _, err := client.Execute(ctx, fmt.Sprintf("ALTER TASK %s REMOVE AFTER %s", fqn, strings.Join(preds, ", "))); err != nil {
+		return fmt.Errorf("failed to remove predecessors from task %q: %w", taskName, err)
+	}
+	return nil
+}
+
+// AddParents appends the given parent tasks to the AFTER list of taskName via
+// ALTER TASK … ADD AFTER.  The task is suspended first if it is currently running;
+// the caller is responsible for resuming it afterwards if desired.
+func AddParents(ctx context.Context, client *snowflake.Client, database, schema, taskName string, parents []string) error {
+	if len(parents) == 0 {
+		return nil
+	}
+	fqn := fmt.Sprintf("%s.%s.%s", q(database), q(schema), q(taskName))
+	if err := suspendIfRunning(ctx, client, database, schema, taskName); err != nil {
+		return err
+	}
+	preds := make([]string, 0, len(parents))
+	for _, p := range parents {
+		preds = append(preds, fmt.Sprintf("%s.%s.%s", q(database), q(schema), q(p)))
+	}
+	if _, err := client.Execute(ctx, fmt.Sprintf("ALTER TASK %s ADD AFTER %s", fqn, strings.Join(preds, ", "))); err != nil {
+		return fmt.Errorf("failed to add predecessors to task %q: %w", taskName, err)
+	}
+	return nil
+}
+
+// SuspendGraph suspends the root task first (to stop new run scheduling), then
+// suspends every descendant found via BFS over SHOW TASKS.
+func SuspendGraph(ctx context.Context, client *snowflake.Client, database, schema, taskName string) error {
+	fqn := fmt.Sprintf("%s.%s.%s", q(database), q(schema), q(taskName))
+	if _, err := client.Execute(ctx, fmt.Sprintf("ALTER TASK IF EXISTS %s SUSPEND", fqn)); err != nil {
+		return err
+	}
+
+	res, err := client.Execute(ctx, fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
+	if err != nil {
+		return err
+	}
+
+	nameIdx := colIdx(res.Columns, "name")
+	predsIdx := colIdx(res.Columns, "predecessors", "predecessor")
+	if nameIdx < 0 {
+		return nil
+	}
+
+	children := make(map[string][]string)
+	taskNames := make(map[string]string)
+	for _, row := range res.Rows {
+		name := toString(row[nameIdx])
+		if name == "" {
+			continue
+		}
+		taskNames[strings.ToUpper(name)] = name
+		if predsIdx < 0 || predsIdx >= len(row) {
+			continue
+		}
+		preds := toString(row[predsIdx])
+		if preds == "" || preds == "[]" || preds == "<nil>" || preds == "null" {
+			continue
+		}
+		preds = strings.TrimSuffix(strings.TrimPrefix(preds, "["), "]")
+		for _, part := range strings.Split(preds, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			segs := strings.Split(part, ".")
+			parent := strings.ToUpper(bareIdent(segs[len(segs)-1]))
+			children[parent] = append(children[parent], name)
+		}
+	}
+
+	rootUpper := strings.ToUpper(taskName)
+	visited := map[string]bool{rootUpper: true}
+	queue := []string{rootUpper}
+	var descendants []string
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, child := range children[cur] {
+			cu := strings.ToUpper(child)
+			if !visited[cu] {
+				visited[cu] = true
+				descendants = append(descendants, child)
+				queue = append(queue, cu)
+			}
+		}
+	}
+
+	for _, child := range descendants {
+		if orig, ok := taskNames[strings.ToUpper(child)]; ok {
+			child = orig
+		}
+		if _, err := client.Execute(ctx, fmt.Sprintf(
+			"ALTER TASK IF EXISTS %s.%s.%s SUSPEND", q(database), q(schema), q(child))); err != nil {
+			return fmt.Errorf("suspending child task %q: %w", child, err)
+		}
+	}
+	return nil
+}
+
 // ListFinalizableTasks returns every task in the schema along with an eligibility verdict.
 func ListFinalizableTasks(ctx context.Context, client *snowflake.Client, database, schema string) ([]FinalizabilityRow, error) {
 	res, err := client.Execute(ctx, fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
@@ -204,7 +361,7 @@ func ListFinalizableTasks(ctx context.Context, client *snowflake.Client, databas
 				continue
 			}
 			segs := strings.Split(part, ".")
-			bare := strings.Trim(segs[len(segs)-1], `"`)
+			bare := bareIdent(segs[len(segs)-1])
 			if bare != "" {
 				hasChildren[strings.ToUpper(bare)] = true
 			}
@@ -255,7 +412,7 @@ func HasChildren(ctx context.Context, client *snowflake.Client, database, schema
 		p := strings.TrimSuffix(strings.TrimPrefix(preds, "["), "]")
 		for _, part := range strings.Split(p, ",") {
 			segs := strings.Split(strings.TrimSpace(part), ".")
-			if strings.ToUpper(strings.Trim(segs[len(segs)-1], `"`)) == upper {
+			if strings.ToUpper(bareIdent(segs[len(segs)-1])) == upper {
 				return true, nil
 			}
 		}
@@ -300,7 +457,7 @@ func EnableDependents(ctx context.Context, client *snowflake.Client, database, s
 				continue
 			}
 			segs := strings.Split(part, ".")
-			parent := strings.ToUpper(strings.Trim(segs[len(segs)-1], `"`))
+			parent := strings.ToUpper(bareIdent(segs[len(segs)-1]))
 			children[parent] = append(children[parent], name)
 		}
 	}
@@ -370,7 +527,7 @@ func DropTree(ctx context.Context, client *snowflake.Client, database, schema, t
 				continue
 			}
 			segs := strings.Split(part, ".")
-			parent := strings.ToUpper(strings.Trim(segs[len(segs)-1], `"`))
+			parent := strings.ToUpper(bareIdent(segs[len(segs)-1]))
 			childrenOf[parent] = append(childrenOf[parent], name)
 		}
 	}
@@ -416,13 +573,16 @@ func GetStatuses(ctx context.Context, client *snowflake.Client, database, schema
 	finalizeIdx := colIdx(showRes.Columns, "finalize", "finalize_task")
 	taskRelIdx := colIdx(showRes.Columns, "task_relations")
 
-	extractFinalize := func(v interface{}) string {
+	// extractTaskRelField extracts the value of a named key from a task_relations
+	// VARIANT column, returned by gosnowflake as either a map or a JSON string.
+	extractTaskRelField := func(v interface{}, key string) string {
 		if v == nil {
 			return ""
 		}
+		lkey := strings.ToLower(key)
 		if m, ok := v.(map[string]interface{}); ok {
 			for k, val := range m {
-				if (strings.ToLower(k) == "finalize" || strings.ToLower(k) == "finalize_task") && val != nil {
+				if strings.ToLower(k) == lkey && val != nil {
 					if s := fmt.Sprintf("%v", val); s != "" && s != "<nil>" && s != "null" {
 						return s
 					}
@@ -441,7 +601,7 @@ func GetStatuses(ctx context.Context, client *snowflake.Client, database, schema
 		var m map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(raw), &m); err == nil {
 			for k, val := range m {
-				if strings.ToLower(k) == "finalize" || strings.ToLower(k) == "finalize_task" {
+				if strings.ToLower(k) == lkey {
 					var s string
 					if err := json.Unmarshal(val, &s); err == nil && s != "" {
 						return s
@@ -452,6 +612,21 @@ func GetStatuses(ctx context.Context, client *snowflake.Client, database, schema
 		return ""
 	}
 
+	extractFinalize := func(v interface{}) string {
+		// Snowflake stores the root-task FQN that a finalizer task finalizes under
+		// both "finalize" and (in some versions) "finalize_task".
+		if s := extractTaskRelField(v, "finalize"); s != "" {
+			return s
+		}
+		return extractTaskRelField(v, "finalize_task")
+	}
+
+	// finalizerByRootUpper maps UPPER(finalizer task bare-name) → root task name.
+	// Populated from root tasks' task_relations.finalizerTask field. Used as a
+	// fallback when the finalizer task's own finalize column is not populated
+	// (occurs in some Snowflake versions).
+	finalizerByRootUpper := map[string]string{}
+
 	var rows []StatusRow
 	nameMap := map[string]int{}
 	for _, row := range showRes.Rows {
@@ -461,10 +636,26 @@ func GetStatuses(ctx context.Context, client *snowflake.Client, database, schema
 		}
 		finalize := ""
 		if finalizeIdx >= 0 && finalizeIdx < len(row) {
-			finalize = toString(row[finalizeIdx])
+			val := toString(row[finalizeIdx])
+			// gosnowflake may return the string "null" for SQL NULL VARIANT columns;
+			// treat it the same as an empty value so the task_relations fallback fires.
+			if val != "null" {
+				finalize = val
+			}
 		}
 		if finalize == "" && taskRelIdx >= 0 && taskRelIdx < len(row) {
 			finalize = extractFinalize(row[taskRelIdx])
+		}
+		// Always check task_relations for the finalizerTask field so we can identify
+		// the finalizer from the ROOT task's perspective (fallback for older Snowflake).
+		if taskRelIdx >= 0 && taskRelIdx < len(row) {
+			if ft := extractTaskRelField(row[taskRelIdx], "finalizertask"); ft != "" {
+				segs := strings.Split(ft, ".")
+				ftName := bareIdent(segs[len(segs)-1])
+				if ftName != "" {
+					finalizerByRootUpper[strings.ToUpper(ftName)] = name
+				}
+			}
 		}
 		nameMap[strings.ToUpper(name)] = len(rows)
 		rows = append(rows, StatusRow{
@@ -473,6 +664,15 @@ func GetStatuses(ctx context.Context, client *snowflake.Client, database, schema
 			Predecessors: toString(row[predsIdx]),
 			Finalize:     finalize,
 		})
+	}
+
+	// Second pass: fill in Finalize for finalizer tasks that were identified
+	// from the root task's task_relations.finalizerTask but whose own finalize
+	// column was empty (handles older Snowflake versions / missing columns).
+	for ftUpper, rootName := range finalizerByRootUpper {
+		if idx, ok := nameMap[ftUpper]; ok && rows[idx].Finalize == "" {
+			rows[idx].Finalize = rootName
+		}
 	}
 
 	// Fetch run history

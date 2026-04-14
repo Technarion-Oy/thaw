@@ -2443,33 +2443,6 @@ func (a *App) AlterTask(database, schema, name, clause string) error {
 	return err
 }
 
-// TaskFinalizabilityRow describes a task and whether it can serve as a finalizer.
-// DisabledReason is empty for eligible tasks; non-empty with a human-readable
-// explanation for tasks that cannot be finalizers.
-type TaskFinalizabilityRow struct {
-	Name           string `json:"name"`
-	DisabledReason string `json:"disabledReason"`
-}
-
-// TaskStatusRow holds the current state and last-run information for a single task.
-type TaskStatusRow struct {
-	Name         string `json:"name"`
-	TaskState    string `json:"taskState"`    // STARTED | SUSPENDED
-	Predecessors string `json:"predecessors"` // raw predecessor string from SHOW TASKS
-	LastRunState string `json:"lastRunState"` //nolint:misspell // SUCCEEDED | FAILED | RUNNING | SKIPPED | CANCELLED | ""
-	LastRunTime  string `json:"lastRunTime"`  // ISO-8601 timestamp or ""
-	ErrorMsg     string `json:"errorMsg"`     // exception text when last run failed
-	Finalize     string `json:"finalize"`     // fully-qualified root task name for finalizer tasks, "" otherwise
-}
-
-// TaskStatusesResult wraps the per-task rows and an optional history-query
-// error message.  HistoryError is non-empty when INFORMATION_SCHEMA.TASK_HISTORY
-// could not be queried (e.g. insufficient privileges); in that case Rows still
-// contain the task names and STARTED/SUSPENDED states from SHOW TASKS.
-type TaskStatusesResult struct {
-	Rows         []TaskStatusRow `json:"rows"`
-	HistoryError string          `json:"historyError"`
-}
 
 // ListFinalizableTasks returns every task in the schema along with an eligibility verdict.
 func (a *App) ListFinalizableTasks(database, schema string) ([]tasks.FinalizabilityRow, error) {
@@ -2509,188 +2482,17 @@ func (a *App) TaskHasChildren(database, schema, taskName string) (bool, error) {
 	if a.client == nil {
 		return false, ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-
-	res, err := a.client.Execute(a.ctx,
-		fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
-	if err != nil {
-		return false, err
-	}
-
-	toString := func(v interface{}) string {
-		if v == nil {
-			return ""
-		}
-		switch t := v.(type) {
-		case []byte:
-			return string(t)
-		case string:
-			return t
-		default:
-			return fmt.Sprintf("%v", t)
-		}
-	}
-
-	predsIdx := -1
-	for i, col := range res.Columns {
-		if strings.ToLower(col) == "predecessors" || strings.ToLower(col) == "predecessor" {
-			predsIdx = i
-			break
-		}
-	}
-	if predsIdx < 0 {
-		return false, nil
-	}
-
-	upper := strings.ToUpper(taskName)
-	for _, row := range res.Rows {
-		preds := ""
-		if predsIdx < len(row) {
-			preds = toString(row[predsIdx])
-		}
-		if preds == "" || preds == "[]" || preds == "<nil>" {
-			continue
-		}
-		p := strings.TrimPrefix(preds, "[")
-		p = strings.TrimSuffix(p, "]")
-		for _, part := range strings.Split(p, ",") {
-			part = strings.TrimSpace(part)
-			segs := strings.Split(part, ".")
-			bare := strings.ToUpper(strings.Trim(segs[len(segs)-1], `"`))
-			if bare == upper {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
+	return tasks.HasChildren(a.ctx, a.client, database, schema, taskName)
 }
 
 // EnableTaskDependents resumes the named task and all of its descendants.
 // Tasks are resumed in leaf-first (post-order) so that children are active
 // before their parent, which Snowflake requires when enabling a task graph.
-// SYSTEM$TASK_DEPENDENTS_ENABLE is intentionally NOT used here because:
-//
-//	(a) it is unavailable in some Snowflake editions,
-//	(b) in many editions it does not resume the root task itself.
-//
-// Instead we build the dependency graph from SHOW TASKS and issue individual
-// ALTER TASK … RESUME statements in the correct order.
 func (a *App) EnableTaskDependents(database, schema, taskName string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-
-	toString := func(v interface{}) string {
-		if v == nil {
-			return ""
-		}
-		switch t := v.(type) {
-		case []byte:
-			return string(t)
-		case string:
-			return t
-		case []interface{}:
-			// gosnowflake may decode VARIANT array columns as []interface{}.
-			// Re-encode as a bracket-comma string so the bracket-strip parser below works.
-			parts := make([]string, 0, len(t))
-			for _, el := range t {
-				if el != nil {
-					parts = append(parts, fmt.Sprintf("%v", el))
-				}
-			}
-			return "[" + strings.Join(parts, ",") + "]"
-		default:
-			return fmt.Sprintf("%v", t)
-		}
-	}
-
-	// 1. Fetch all tasks in the schema to build the dependency graph.
-	res, err := a.client.Execute(a.ctx,
-		fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
-	if err != nil {
-		return err
-	}
-
-	nameIdx, predsIdx := -1, -1
-	for i, col := range res.Columns {
-		switch strings.ToLower(col) {
-		case "name":
-			nameIdx = i
-		case "predecessors", "predecessor":
-			predsIdx = i
-		}
-	}
-	if nameIdx < 0 {
-		// No tasks found — just resume the root and return.
-		_, err = a.client.Execute(a.ctx,
-			fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s RESUME", q(database), q(schema), q(taskName)))
-		return err
-	}
-
-	// Build a children map: parent (upper) → []child names (original case).
-	children := make(map[string][]string)
-	taskNames := make(map[string]string) // upper → original case
-	for _, row := range res.Rows {
-		name := ""
-		if nameIdx < len(row) {
-			name = toString(row[nameIdx])
-		}
-		if name == "" {
-			continue
-		}
-		taskNames[strings.ToUpper(name)] = name
-		if predsIdx < 0 || predsIdx >= len(row) {
-			continue
-		}
-		preds := toString(row[predsIdx])
-		if preds == "" || preds == "[]" || preds == "<nil>" || preds == "null" {
-			continue
-		}
-		preds = strings.TrimPrefix(preds, "[")
-		preds = strings.TrimSuffix(preds, "]")
-		for _, part := range strings.Split(preds, ",") {
-			part = strings.TrimSpace(part)
-			if part == "" {
-				continue
-			}
-			segs := strings.Split(part, ".")
-			parent := strings.ToUpper(strings.Trim(segs[len(segs)-1], `"`))
-			children[parent] = append(children[parent], name)
-		}
-	}
-
-	// 2. Collect all descendants via BFS, then resume in leaf-first (post-order).
-	rootUpper := strings.ToUpper(taskName)
-	visited := map[string]bool{rootUpper: true}
-	bfsOrder := []string{rootUpper}
-	queue := []string{rootUpper}
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		for _, child := range children[cur] {
-			cu := strings.ToUpper(child)
-			if !visited[cu] {
-				visited[cu] = true
-				bfsOrder = append(bfsOrder, cu)
-				queue = append(queue, cu)
-			}
-		}
-	}
-
-	// Resume in reverse BFS order (leaves first) so Snowflake accepts each RESUME.
-	for i := len(bfsOrder) - 1; i >= 0; i-- {
-		upper := bfsOrder[i]
-		name := upper
-		if orig, ok := taskNames[upper]; ok {
-			name = orig
-		}
-		if _, err := a.client.Execute(a.ctx,
-			fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s RESUME", q(database), q(schema), q(name))); err != nil {
-			return fmt.Errorf("resuming task %q: %w", name, err)
-		}
-	}
-	return nil
+	return tasks.EnableDependents(a.ctx, a.client, database, schema, taskName)
 }
 
 // SuspendTaskList suspends each task in the provided list in order.
@@ -2733,234 +2535,21 @@ func (a *App) ResumeTaskList(database, schema string, names []string) error {
 }
 
 // SuspendTaskGraph suspends the root task first (to stop it from scheduling new
-// runs) and then suspends every descendant task in the graph.  It uses SHOW
-// TASKS IN SCHEMA to build the dependency graph and does a BFS from the root
-// task to find all descendants before issuing ALTER TASK … SUSPEND for each.
+// runs) and then suspends every descendant task in the graph.
 func (a *App) SuspendTaskGraph(database, schema, taskName string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-
-	toString := func(v interface{}) string {
-		if v == nil {
-			return ""
-		}
-		switch t := v.(type) {
-		case []byte:
-			return string(t)
-		case string:
-			return t
-		case []interface{}:
-			parts := make([]string, 0, len(t))
-			for _, el := range t {
-				if el != nil {
-					parts = append(parts, fmt.Sprintf("%v", el))
-				}
-			}
-			return "[" + strings.Join(parts, ",") + "]"
-		default:
-			return fmt.Sprintf("%v", t)
-		}
-	}
-
-	// 1. Suspend the root task first so it cannot schedule new child runs.
-	if _, err := a.client.Execute(a.ctx,
-		fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s SUSPEND", q(database), q(schema), q(taskName))); err != nil {
-		return err
-	}
-
-	// 2. Fetch all tasks in the schema to build the dependency graph.
-	res, err := a.client.Execute(a.ctx,
-		fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
-	if err != nil {
-		return err
-	}
-
-	nameIdx, predsIdx := -1, -1
-	for i, col := range res.Columns {
-		switch strings.ToLower(col) {
-		case "name":
-			nameIdx = i
-		case "predecessors", "predecessor":
-			predsIdx = i
-		}
-	}
-	if nameIdx < 0 {
-		return nil // no name column — nothing more to do
-	}
-
-	// Build a children map: parent (upper) → []child names (original case).
-	children := make(map[string][]string)
-	taskNames := make(map[string]string) // upper → original case
-	for _, row := range res.Rows {
-		name := ""
-		if nameIdx < len(row) {
-			name = toString(row[nameIdx])
-		}
-		if name == "" {
-			continue
-		}
-		taskNames[strings.ToUpper(name)] = name
-		if predsIdx < 0 || predsIdx >= len(row) {
-			continue
-		}
-		preds := toString(row[predsIdx])
-		if preds == "" || preds == "[]" || preds == "<nil>" || preds == "null" {
-			continue
-		}
-		preds = strings.TrimPrefix(preds, "[")
-		preds = strings.TrimSuffix(preds, "]")
-		for _, part := range strings.Split(preds, ",") {
-			part = strings.TrimSpace(part)
-			if part == "" {
-				continue
-			}
-			segs := strings.Split(part, ".")
-			parent := strings.ToUpper(strings.Trim(segs[len(segs)-1], `"`))
-			children[parent] = append(children[parent], name)
-		}
-	}
-
-	// 3. BFS to collect all descendants of the root task.
-	rootUpper := strings.ToUpper(taskName)
-	visited := map[string]bool{rootUpper: true}
-	queue := []string{rootUpper}
-	var descendants []string
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		for _, child := range children[cur] {
-			cu := strings.ToUpper(child)
-			if !visited[cu] {
-				visited[cu] = true
-				descendants = append(descendants, child)
-				queue = append(queue, cu)
-			}
-		}
-	}
-
-	// 4. Suspend each descendant.
-	for _, child := range descendants {
-		// Use the original-case name from SHOW TASKS when available.
-		if orig, ok := taskNames[strings.ToUpper(child)]; ok {
-			child = orig
-		}
-		if _, err := a.client.Execute(a.ctx,
-			fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s SUSPEND", q(database), q(schema), q(child))); err != nil {
-			return fmt.Errorf("suspending child task %q: %w", child, err)
-		}
-	}
-	return nil
+	return tasks.SuspendGraph(a.ctx, a.client, database, schema, taskName)
 }
 
 // DropTaskTree suspends and drops the named task and all of its descendants.
-// Tasks are processed in post-order (leaves first, root last) so children are
-// always removed before their parent. Each task is suspended before it is
-// dropped; SUSPEND failures are treated as non-fatal (the task may already be
-// suspended or not exist). The DROP uses IF EXISTS so missing tasks are skipped
-// silently. Returns the first DROP error encountered, if any.
+// Tasks are processed in post-order (leaves first, root last).
 func (a *App) DropTaskTree(database, schema, taskName string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-
-	toString := func(v interface{}) string {
-		if v == nil {
-			return ""
-		}
-		switch t := v.(type) {
-		case []byte:
-			return string(t)
-		case string:
-			return t
-		default:
-			return fmt.Sprintf("%v", t)
-		}
-	}
-
-	// List all tasks to build the dependency graph.
-	res, err := a.client.Execute(a.ctx,
-		fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
-	if err != nil {
-		return err
-	}
-
-	nameIdx, predsIdx := -1, -1
-	for i, col := range res.Columns {
-		switch strings.ToLower(col) {
-		case "name":
-			nameIdx = i
-		case "predecessors", "predecessor":
-			predsIdx = i
-		}
-	}
-	if nameIdx < 0 {
-		return fmt.Errorf("SHOW TASKS did not return a name column")
-	}
-
-	childrenOf := make(map[string][]string) // UPPER(parent) → []child original-case names
-	taskNames := make(map[string]string)    // UPPER(name) → original-case name
-	for _, row := range res.Rows {
-		name := ""
-		if nameIdx < len(row) {
-			name = toString(row[nameIdx])
-		}
-		if name == "" {
-			continue
-		}
-		taskNames[strings.ToUpper(name)] = name
-		if predsIdx < 0 || predsIdx >= len(row) {
-			continue
-		}
-		preds := toString(row[predsIdx])
-		if preds == "" || preds == "[]" || preds == "<nil>" {
-			continue
-		}
-		preds = strings.TrimPrefix(strings.TrimSuffix(strings.TrimSpace(preds), "]"), "[")
-		for _, part := range strings.Split(preds, ",") {
-			part = strings.TrimSpace(part)
-			if part == "" {
-				continue
-			}
-			segs := strings.Split(part, ".")
-			parent := strings.ToUpper(strings.Trim(segs[len(segs)-1], `"`))
-			childrenOf[parent] = append(childrenOf[parent], name)
-		}
-	}
-
-	// Post-order DFS: collect tasks in leaf-first order.
-	var dropOrder []string
-	visited := make(map[string]bool)
-	var dfs func(name string)
-	dfs = func(name string) {
-		upper := strings.ToUpper(name)
-		if visited[upper] {
-			return
-		}
-		visited[upper] = true
-		for _, child := range childrenOf[upper] {
-			dfs(child)
-		}
-		// Use original-case name if known.
-		if orig, ok := taskNames[upper]; ok {
-			name = orig
-		}
-		dropOrder = append(dropOrder, name)
-	}
-	dfs(taskName)
-
-	// Suspend then drop each task (leaves first).
-	for _, name := range dropOrder {
-		_, _ = a.client.Execute(a.ctx,
-			fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s SUSPEND", q(database), q(schema), q(name)))
-		if _, err := a.client.Execute(a.ctx,
-			fmt.Sprintf("DROP TASK IF EXISTS %s.%s.%s", q(database), q(schema), q(name))); err != nil {
-			return fmt.Errorf("dropping task %q: %w", name, err)
-		}
-	}
-	return nil
+	return tasks.DropTree(a.ctx, a.client, database, schema, taskName)
 }
 
 // ExecuteTask manually triggers a single run of a Snowflake Task.

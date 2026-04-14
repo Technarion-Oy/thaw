@@ -16,7 +16,7 @@ import {
   CaretRightOutlined, RedoOutlined,
   PauseCircleOutlined, PlayCircleOutlined,
   PlusOutlined, FlagOutlined, DeleteOutlined,
-  CopyOutlined, BranchesOutlined,
+  CopyOutlined, BranchesOutlined, ScissorOutlined,
 } from "@ant-design/icons";
 import {
   ReactFlow,
@@ -38,6 +38,7 @@ import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 import CreateTaskModal from "./CreateTaskModal";
 import CopyTaskModal from "./CopyTaskModal";
 import AddExistingChildModal from "./AddExistingChildModal";
+import RemoveChildLinksModal from "./RemoveChildLinksModal";
 
 const { Text } = Typography;
 
@@ -397,6 +398,9 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
   // Add Existing Task as Child dialog — parent task name.
   const [addChildDialog, setAddChildDialog] = useState<string | null>(null);
 
+  // Remove Child Task Links dialog — parent task name.
+  const [removeChildLinksDialog, setRemoveChildLinksDialog] = useState<string | null>(null);
+
   // Delete-all confirmation dialog.
   const [deleteAllConfirm, setDeleteAllConfirm] = useState(false);
   const [deletingTree, setDeletingTree] = useState(false);
@@ -435,10 +439,11 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
   useEffect(() => { load(); }, [load]);
 
   const isDialogOpen = !!(
-    createTaskDialog || 
-    copyTaskSource || 
-    addChildDialog || 
-    deleteTaskConfirm || 
+    createTaskDialog ||
+    copyTaskSource ||
+    addChildDialog ||
+    removeChildLinksDialog ||
+    deleteTaskConfirm ||
     deleteAllConfirm
   );
 
@@ -859,6 +864,18 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
         />
       )}
 
+      {/* ── Remove Child Task Links dialog ───────────────────────────────── */}
+      {removeChildLinksDialog && (
+        <RemoveChildLinksModal
+          db={db}
+          schema={schema}
+          parentTaskName={removeChildLinksDialog}
+          taskRows={taskRows}
+          onClose={() => setRemoveChildLinksDialog(null)}
+          onSuccess={load}
+        />
+      )}
+
       {/* ── Single-task delete confirmation modal ────────────────────────── */}
       {deleteTaskConfirm && (() => {
         const escId = (s: string) => s.replace(/"/g, '""');
@@ -1089,6 +1106,27 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
                       setCtxMenu(null);
                     },
                   },
+                  (() => {
+                    const ctxUpper   = ctxMenu.name.toUpperCase();
+                    const hasChildren = !ctxMenu.isFinalizer && taskRows.some((t) =>
+                      parsePredecessors(t.predecessors ?? "").some(
+                        (p) => extractName(p).toUpperCase() === ctxUpper,
+                      ),
+                    );
+                    return {
+                      key: "remove-child-links",
+                      icon: <ScissorOutlined />,
+                      label: !hasChildren
+                        ? "Remove Child Task Links… (no children)"
+                        : "Remove Child Task Links…",
+                      disabled: !hasChildren,
+                      onClick: () => {
+                        if (!hasChildren) return;
+                        setRemoveChildLinksDialog(ctxMenu.name);
+                        setCtxMenu(null);
+                      },
+                    };
+                  })(),
                   {
                     key: "copy-task",
                     icon: <CopyOutlined />,
