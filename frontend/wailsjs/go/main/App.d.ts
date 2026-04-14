@@ -64,6 +64,8 @@ export function CheckAvailableKeyTools():Promise<Array<string>>;
 
 export function CheckSnowparkEnv():Promise<main.SnowparkCheckResult>;
 
+export function CloneChildTask(arg1:string,arg2:string,arg3:string,arg4:string,arg5:Array<string>):Promise<void>;
+
 export function ComputeJoinOnConditions(arg1:sqleditor.JoinOnSuggestionsReq):Promise<Array<sqleditor.JoinCondition>>;
 
 export function Connect(arg1:snowflake.ConnectParams):Promise<void>;

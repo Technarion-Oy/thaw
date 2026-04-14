@@ -16,6 +16,7 @@ import {
   CaretRightOutlined, RedoOutlined,
   PauseCircleOutlined, PlayCircleOutlined,
   PlusOutlined, FlagOutlined, DeleteOutlined,
+  CopyOutlined, BranchesOutlined,
 } from "@ant-design/icons";
 import {
   ReactFlow,
@@ -35,6 +36,8 @@ import { GetTaskStatuses, ExecuteTask, AlterTask, DropTaskTree, ExecDDL, Suspend
 import type { main } from "../../../wailsjs/go/models";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 import CreateTaskModal from "./CreateTaskModal";
+import CopyTaskModal from "./CopyTaskModal";
+import AddExistingChildModal from "./AddExistingChildModal";
 
 const { Text } = Typography;
 
@@ -388,6 +391,12 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
     mode: "child" | "finalizer"; taskName: string;
   } | null>(null);
 
+  // Copy Task dialog — source task name.
+  const [copyTaskSource, setCopyTaskSource] = useState<string | null>(null);
+
+  // Add Existing Task as Child dialog — parent task name.
+  const [addChildDialog, setAddChildDialog] = useState<string | null>(null);
+
   // Delete-all confirmation dialog.
   const [deleteAllConfirm, setDeleteAllConfirm] = useState(false);
   const [deletingTree, setDeletingTree] = useState(false);
@@ -425,9 +434,17 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
 
   useEffect(() => { load(); }, [load]);
 
+  const isDialogOpen = !!(
+    createTaskDialog || 
+    copyTaskSource || 
+    addChildDialog || 
+    deleteTaskConfirm || 
+    deleteAllConfirm
+  );
+
   // ── Live polling ─────────────────────────────────────────────────────────
   useEffect(() => {
-    if (loading || loadError) return;
+    if (loading || loadError || isDialogOpen) return;
 
     const id = setInterval(() => {
       GetTaskStatuses(db, schema)
@@ -457,7 +474,7 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
     }, POLL_MS);
 
     return () => clearInterval(id);
-  }, [loading, loadError, db, schema]);
+  }, [loading, loadError, db, schema, isDialogOpen]);
 
   // ── Execute root task ─────────────────────────────────────────────────────
   const runGraph = useCallback(() => {
@@ -818,6 +835,30 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
         />
       )}
 
+      {/* ── Copy Task dialog ────────────────────────────────────────────── */}
+      {copyTaskSource && (
+        <CopyTaskModal
+          db={db}
+          schema={schema}
+          sourceTaskName={copyTaskSource}
+          graphTaskNames={nodes.map((n) => n.id)}
+          onClose={() => setCopyTaskSource(null)}
+          onSuccess={load}
+        />
+      )}
+
+      {/* ── Add Existing Task as Child dialog ────────────────────────────── */}
+      {addChildDialog && (
+        <AddExistingChildModal
+          db={db}
+          schema={schema}
+          parentTaskName={addChildDialog}
+          taskRows={taskRows}
+          onClose={() => setAddChildDialog(null)}
+          onSuccess={load}
+        />
+      )}
+
       {/* ── Single-task delete confirmation modal ────────────────────────── */}
       {deleteTaskConfirm && (() => {
         const escId = (s: string) => s.replace(/"/g, '""');
@@ -1032,6 +1073,35 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
                     onClick: () => {
                       if (ctxMenu.isFinalizer) return;
                       setCreateTaskDialog({ mode: "child", taskName: ctxMenu.name });
+                      setCtxMenu(null);
+                    },
+                  },
+                  {
+                    key: "add-existing-child",
+                    icon: <BranchesOutlined />,
+                    label: ctxMenu.isFinalizer
+                      ? "Add Existing Task as Child… (not for finalizers)"
+                      : "Add Existing Task as Child…",
+                    disabled: ctxMenu.isFinalizer,
+                    onClick: () => {
+                      if (ctxMenu.isFinalizer) return;
+                      setAddChildDialog(ctxMenu.name);
+                      setCtxMenu(null);
+                    },
+                  },
+                  {
+                    key: "copy-task",
+                    icon: <CopyOutlined />,
+                    label: (() => {
+                      const isRoot = ctxMenu.name.toUpperCase() === rootUpperRef.current;
+                      if (ctxMenu.isFinalizer) return "Copy Task… (not for finalizer tasks)";
+                      if (isRoot)              return "Copy Task… (not for root tasks)";
+                      return "Copy Task…";
+                    })(),
+                    disabled: ctxMenu.isFinalizer || ctxMenu.name.toUpperCase() === rootUpperRef.current,
+                    onClick: () => {
+                      if (ctxMenu.isFinalizer || ctxMenu.name.toUpperCase() === rootUpperRef.current) return;
+                      setCopyTaskSource(ctxMenu.name);
                       setCtxMenu(null);
                     },
                   },

@@ -106,6 +106,10 @@ export function CheckSnowparkEnv() {
   return window['go']['main']['App']['CheckSnowparkEnv']();
 }
 
+export function CloneChildTask(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['CloneChildTask'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function ComputeJoinOnConditions(arg1) {
   return window['go']['main']['App']['ComputeJoinOnConditions'](arg1);
 }

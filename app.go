@@ -49,25 +49,25 @@ import (
 
 // App is the main application struct. Methods bound here are callable from the frontend.
 type App struct {
-	ctx           context.Context
-	client        *snowflake.Client
-	connectParams *snowflake.ConnectParams // stored after a successful Connect for notebook session init
-	cancelConnect    context.CancelFunc
+	ctx                 context.Context
+	client              *snowflake.Client
+	connectParams       *snowflake.ConnectParams // stored after a successful Connect for notebook session init
+	cancelConnect       context.CancelFunc
 	exportCancelFunc    context.CancelFunc // cancels an in-flight DDL export
 	migrationCancelFunc context.CancelFunc // cancels an in-flight schema migration
 	cancelChat          context.CancelFunc // cancels an in-flight AI chat request
-	fnStore          *fnmeta.Store      // local SQLite cache for Snowflake function metadata
-	logCleanup       func()             // closes the log rotation file on shutdown
-	savedWindowState *WindowState       // non-nil when a persisted window state was loaded at launch
+	fnStore             *fnmeta.Store      // local SQLite cache for Snowflake function metadata
+	logCleanup          func()             // closes the log rotation file on shutdown
+	savedWindowState    *WindowState       // non-nil when a persisted window state was loaded at launch
 
 	// Two-phase query execution (StartQuery / WaitForQueryResult).
-	queryMu             sync.Mutex
-	queryID             string
-	queryDone           chan struct{}
-	queryResult         *snowflake.QueryResult
-	queryErr            error
-	queryCancelFunc     context.CancelFunc  // cancels the in-flight query context
-	queryCancelCtxDone  <-chan struct{}      // closed when the in-flight query context is canceled
+	queryMu            sync.Mutex
+	queryID            string
+	queryDone          chan struct{}
+	queryResult        *snowflake.QueryResult
+	queryErr           error
+	queryCancelFunc    context.CancelFunc // cancels the in-flight query context
+	queryCancelCtxDone <-chan struct{}    // closed when the in-flight query context is canceled
 
 	// Embedded terminal (pseudo-terminal).
 	ptyMu  sync.Mutex
@@ -291,10 +291,10 @@ func (a *App) GetDatabaseTableSummary(dbName string) ([]TableSummary, error) {
 			continue
 		}
 		t := TableSummary{
-			Name:    fmt.Sprintf("%v", row[0]),
-			Schema:  fmt.Sprintf("%v", row[1]),
-			Kind:    fmt.Sprintf("%v", row[2]),
-			Owner:   fmt.Sprintf("%v", row[5]),
+			Name:   fmt.Sprintf("%v", row[0]),
+			Schema: fmt.Sprintf("%v", row[1]),
+			Kind:   fmt.Sprintf("%v", row[2]),
+			Owner:  fmt.Sprintf("%v", row[5]),
 		}
 
 		if row[9] != nil {
@@ -1045,9 +1045,9 @@ func (a *App) AlterWarehouseProperty(name, property, value string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	escId  := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	escId := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
 	escStr := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
-	wh     := fmt.Sprintf(`"%s"`, escId(name))
+	wh := fmt.Sprintf(`"%s"`, escId(name))
 
 	// allowlist checks for enum-typed values that are interpolated unquoted into SQL.
 	checkEnum := func(v string, allowed ...string) (string, error) {
@@ -2006,8 +2006,8 @@ type BackupPolicyRow struct {
 
 // BackupRow holds one row from SHOW BACKUPS IN BACKUP SET.
 type BackupRow struct {
-	ID        string `json:"id"`        // UUID used in IDENTIFIER clause of CREATE ... FROM BACKUP SET
-	Name      string `json:"name"`      // human-readable name / timestamp label
+	ID        string `json:"id"`   // UUID used in IDENTIFIER clause of CREATE ... FROM BACKUP SET
+	Name      string `json:"name"` // human-readable name / timestamp label
 	CreatedOn string `json:"createdOn"`
 	Status    string `json:"status"`
 	SizeBytes int64  `json:"sizeBytes"`
@@ -2095,18 +2095,26 @@ func (a *App) GetSessionParameters() ([]SessionParam, error) {
 	}
 
 	// SHOW PARAMETERS columns: key, value, default, level, description, type
-	keyIdx  := colIdx(res.Columns, "key", "name")
-	valIdx  := colIdx(res.Columns, "value")
-	typIdx  := colIdx(res.Columns, "type")
+	keyIdx := colIdx(res.Columns, "key", "name")
+	valIdx := colIdx(res.Columns, "value")
+	typIdx := colIdx(res.Columns, "type")
 	descIdx := colIdx(res.Columns, "description")
 
 	var params []SessionParam
 	for _, row := range res.Rows {
 		key, val, typ, desc := "", "", "", ""
-		if keyIdx >= 0 && keyIdx < len(row) { key = toString(row[keyIdx]) }
-		if valIdx >= 0 && valIdx < len(row)  { val = toString(row[valIdx]) }
-		if typIdx >= 0 && typIdx < len(row)  { typ = toString(row[typIdx]) }
-		if descIdx >= 0 && descIdx < len(row) { desc = toString(row[descIdx]) }
+		if keyIdx >= 0 && keyIdx < len(row) {
+			key = toString(row[keyIdx])
+		}
+		if valIdx >= 0 && valIdx < len(row) {
+			val = toString(row[valIdx])
+		}
+		if typIdx >= 0 && typIdx < len(row) {
+			typ = toString(row[typIdx])
+		}
+		if descIdx >= 0 && descIdx < len(row) {
+			desc = toString(row[descIdx])
+		}
 		if key != "" {
 			params = append(params, SessionParam{Key: key, Value: val, Type: typ, Description: desc})
 		}
@@ -2143,15 +2151,21 @@ func (a *App) GetSessionVariables() ([]SessionVar, error) {
 
 	// SHOW VARIABLES columns: name, value, default, type, ...
 	nameIdx := colIdx(res.Columns, "name", "key")
-	valIdx  := colIdx(res.Columns, "value")
-	typIdx  := colIdx(res.Columns, "type")
+	valIdx := colIdx(res.Columns, "value")
+	typIdx := colIdx(res.Columns, "type")
 
 	var vars []SessionVar
 	for _, row := range res.Rows {
 		name, val, typ := "", "", ""
-		if nameIdx >= 0 && nameIdx < len(row) { name = toString(row[nameIdx]) }
-		if valIdx >= 0 && valIdx < len(row)   { val = toString(row[valIdx]) }
-		if typIdx >= 0 && typIdx < len(row)   { typ = toString(row[typIdx]) }
+		if nameIdx >= 0 && nameIdx < len(row) {
+			name = toString(row[nameIdx])
+		}
+		if valIdx >= 0 && valIdx < len(row) {
+			val = toString(row[valIdx])
+		}
+		if typIdx >= 0 && typIdx < len(row) {
+			typ = toString(row[typIdx])
+		}
 		if name != "" {
 			vars = append(vars, SessionVar{Key: name, Value: val, Type: typ})
 		}
@@ -2428,6 +2442,123 @@ func (a *App) AlterTask(database, schema, name, clause string) error {
 	return err
 }
 
+// CloneChildTask clones a task and replaces its predecessors.
+// Snowflake's CLONE copies existing predecessors, so this function fetches
+// the old predecessors, removes them from the clone, and adds the new ones.
+func (a *App) CloneChildTask(database, schema, oldName, newName string, newPredecessors []string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+
+	// Escaping functions to prevent SQL injection
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	escStr := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
+
+	// Helper to safely format any predecessor string into "DB"."SCHEMA"."TASK"
+	formatPred := func(p string) string {
+		// Strip out the wrapping quotes that SHOW TASKS might add (e.g. "DB.SCHEMA.TASK")
+		p = strings.TrimSpace(p)
+		p = strings.TrimPrefix(p, `"`)
+		p = strings.TrimSuffix(p, `"`)
+
+		parts := strings.Split(p, ".")
+		var quotedParts []string
+		for _, part := range parts {
+			// Clean any internal quotes the frontend or Snowflake might have sent
+			cleanPart := strings.Trim(part, `"`)
+			if cleanPart != "" {
+				quotedParts = append(quotedParts, q(cleanPart))
+			}
+		}
+
+		// If it's just a bare task name, prepend current DB and Schema
+		if len(quotedParts) == 1 {
+			return fmt.Sprintf("%s.%s.%s", q(database), q(schema), quotedParts[0])
+		}
+		// Otherwise, join the safely quoted parts back together (e.g., "DB"."SCHEMA"."TASK")
+		return strings.Join(quotedParts, ".")
+	}
+
+	fqnOld := fmt.Sprintf("%s.%s.%s", q(database), q(schema), q(oldName))
+	fqnNew := fmt.Sprintf("%s.%s.%s", q(database), q(schema), q(newName))
+
+	// 1. Find existing predecessors of the old task so we can remove them from the clone
+	showSQL := fmt.Sprintf("SHOW TASKS LIKE '%s' IN SCHEMA %s.%s", escStr(oldName), q(database), q(schema))
+	res, err := a.client.Execute(a.ctx, showSQL)
+	if err != nil {
+		return fmt.Errorf("failed to fetch original task details: %w", err)
+	}
+
+	var oldPredecessors []string
+	predsIdx, nameIdx := -1, -1
+	for i, col := range res.Columns {
+		lowerCol := strings.ToLower(col)
+		switch lowerCol {
+		case "predecessors", "predecessor":
+			predsIdx = i
+		case "name":
+			nameIdx = i
+		}
+	}
+
+	if predsIdx >= 0 && nameIdx >= 0 {
+		for _, row := range res.Rows {
+			// Ensure we matched the exact task name (LIKE can return partial matches)
+			if nameIdx < len(row) && row[nameIdx] != nil && strings.EqualFold(fmt.Sprint(row[nameIdx]), oldName) {
+				if predsIdx < len(row) && row[predsIdx] != nil {
+					predsStr := strings.TrimSpace(fmt.Sprint(row[predsIdx]))
+					if predsStr != "" && predsStr != "[]" && predsStr != "<nil>" && predsStr != "null" {
+						// Parse the bracketed array format returned by SHOW TASKS
+						predsStr = strings.TrimPrefix(predsStr, "[")
+						predsStr = strings.TrimSuffix(predsStr, "]")
+						for _, p := range strings.Split(predsStr, ",") {
+							if formatted := formatPred(p); formatted != "" {
+								oldPredecessors = append(oldPredecessors, formatted)
+							}
+						}
+					}
+				}
+				break
+			}
+		}
+	}
+
+	// 2. Clone the task
+	cloneSQL := fmt.Sprintf("CREATE TASK %s CLONE %s", fqnNew, fqnOld)
+	if _, err := a.client.Execute(a.ctx, cloneSQL); err != nil {
+		return fmt.Errorf("failed to clone task %q: %w", oldName, err)
+	}
+
+	// 3. Remove old predecessors from the clone if there are any
+	if len(oldPredecessors) > 0 {
+		removeSQL := fmt.Sprintf("ALTER TASK %s REMOVE AFTER %s", fqnNew, strings.Join(oldPredecessors, ", "))
+		if _, err := a.client.Execute(a.ctx, removeSQL); err != nil {
+			// Best-effort rollback
+			_, _ = a.client.Execute(a.ctx, fmt.Sprintf("DROP TASK IF EXISTS %s", fqnNew))
+			return fmt.Errorf("failed to remove original predecessors from cloned task: %w", err)
+		}
+	}
+
+	// 4. Add new predecessors
+	if len(newPredecessors) > 0 {
+		var preds []string
+		for _, p := range newPredecessors {
+			if formatted := formatPred(p); formatted != "" {
+				preds = append(preds, formatted)
+			}
+		}
+
+		alterSQL := fmt.Sprintf("ALTER TASK %s ADD AFTER %s", fqnNew, strings.Join(preds, ", "))
+		if _, err := a.client.Execute(a.ctx, alterSQL); err != nil {
+			// Best-effort rollback
+			_, _ = a.client.Execute(a.ctx, fmt.Sprintf("DROP TASK IF EXISTS %s", fqnNew))
+			return fmt.Errorf("failed to attach new predecessors to cloned task: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // TaskFinalizabilityRow describes a task and whether it can serve as a finalizer.
 // DisabledReason is empty for eligible tasks; non-empty with a human-readable
 // explanation for tasks that cannot be finalizers.
@@ -2656,8 +2787,10 @@ func (a *App) TaskHasChildren(database, schema, taskName string) (bool, error) {
 // Tasks are resumed in leaf-first (post-order) so that children are active
 // before their parent, which Snowflake requires when enabling a task graph.
 // SYSTEM$TASK_DEPENDENTS_ENABLE is intentionally NOT used here because:
-//   (a) it is unavailable in some Snowflake editions,
-//   (b) in many editions it does not resume the root task itself.
+//
+//	(a) it is unavailable in some Snowflake editions,
+//	(b) in many editions it does not resume the root task itself.
+//
 // Instead we build the dependency graph from SHOW TASKS and issue individual
 // ALTER TASK … RESUME statements in the correct order.
 func (a *App) EnableTaskDependents(database, schema, taskName string) error {
@@ -3102,11 +3235,11 @@ func (a *App) GetTaskStatuses(database, schema string) (TaskStatusesResult, erro
 		return TaskStatusesResult{}, err
 	}
 
-	nameIdx     := colIdx(showRes.Columns, "name")
-	stateIdx    := colIdx(showRes.Columns, "state")
-	predsIdx    := colIdx(showRes.Columns, "predecessors", "predecessor")
+	nameIdx := colIdx(showRes.Columns, "name")
+	stateIdx := colIdx(showRes.Columns, "state")
+	predsIdx := colIdx(showRes.Columns, "predecessors", "predecessor")
 	finalizeIdx := colIdx(showRes.Columns, "finalize", "finalize_task")
-	taskRelIdx  := colIdx(showRes.Columns, "task_relations")
+	taskRelIdx := colIdx(showRes.Columns, "task_relations")
 
 	// extractFinalize reads the finalize root-task reference from a task_relations
 	// VARIANT value. gosnowflake may decode VARIANT columns as:
@@ -3495,8 +3628,8 @@ const ddlProgressEvent = "ddl:progress"
 
 // DDLProgressPayload is the structure emitted with each ddl:progress event.
 type DDLProgressPayload struct {
-	Done   int            `json:"done"`
-	Total  int            `json:"total"`
+	Done   int              `json:"done"`
+	Total  int              `json:"total"`
 	Result ddl.ExportResult `json:"result"`
 }
 
@@ -4085,7 +4218,7 @@ func (a *App) StartShell(shell, dir string) error {
 
 	// Stop any previously running shell (already locked, so call internals directly).
 	if a.ptmx != nil {
-		a.ptmx.Close()  //nolint:errcheck
+		a.ptmx.Close() //nolint:errcheck
 		if a.ptyCmd != nil && a.ptyCmd.Process != nil {
 			a.ptyCmd.Process.Kill() //nolint:errcheck
 		}
@@ -4230,10 +4363,10 @@ ORDER BY START_TIME ASC`, where)
 	}
 
 	startIdx := colIdx(res.Columns, "start_time")
-	endIdx   := colIdx(res.Columns, "end_time")
-	nameIdx  := colIdx(res.Columns, "warehouse_name")
-	usedIdx  := colIdx(res.Columns, "credits_used")
-	compIdx  := colIdx(res.Columns, "credits_used_compute")
+	endIdx := colIdx(res.Columns, "end_time")
+	nameIdx := colIdx(res.Columns, "warehouse_name")
+	usedIdx := colIdx(res.Columns, "credits_used")
+	compIdx := colIdx(res.Columns, "credits_used_compute")
 	cloudIdx := colIdx(res.Columns, "credits_used_cloud_services")
 
 	toString := func(v interface{}) string {
@@ -4391,20 +4524,20 @@ ORDER BY START_TIME DESC`, funcName, argClause)
 		return 0
 	}
 
-	qidIdx  := colIdx(res.Columns, "query_id")
+	qidIdx := colIdx(res.Columns, "query_id")
 	qtxtIdx := colIdx(res.Columns, "query_text")
 	qtypIdx := colIdx(res.Columns, "query_type")
 	userIdx := colIdx(res.Columns, "user_name")
-	whIdx   := colIdx(res.Columns, "warehouse_name")
-	dbIdx   := colIdx(res.Columns, "database_name")
-	schIdx  := colIdx(res.Columns, "schema_name")
-	stIdx   := colIdx(res.Columns, "start_time")
-	etIdx   := colIdx(res.Columns, "end_time")
-	elIdx   := colIdx(res.Columns, "total_elapsed_time")
+	whIdx := colIdx(res.Columns, "warehouse_name")
+	dbIdx := colIdx(res.Columns, "database_name")
+	schIdx := colIdx(res.Columns, "schema_name")
+	stIdx := colIdx(res.Columns, "start_time")
+	etIdx := colIdx(res.Columns, "end_time")
+	elIdx := colIdx(res.Columns, "total_elapsed_time")
 	statIdx := colIdx(res.Columns, "execution_status")
-	errIdx  := colIdx(res.Columns, "error_message")
-	rpIdx   := colIdx(res.Columns, "rows_produced")
-	bsIdx   := colIdx(res.Columns, "bytes_scanned")
+	errIdx := colIdx(res.Columns, "error_message")
+	rpIdx := colIdx(res.Columns, "rows_produced")
+	bsIdx := colIdx(res.Columns, "bytes_scanned")
 
 	get := func(row []interface{}, idx int) interface{} {
 		if idx < 0 || idx >= len(row) {
@@ -4483,15 +4616,15 @@ func (a *App) ListBackupSets(scopeType, db, schema, table string) ([]BackupSetRo
 		}
 	}
 
-	nameIdx    := colIdx(res.Columns, "name")
-	bsDbIdx    := colIdx(res.Columns, "database_name")
-	bsSchIdx   := colIdx(res.Columns, "schema_name")
+	nameIdx := colIdx(res.Columns, "name")
+	bsDbIdx := colIdx(res.Columns, "database_name")
+	bsSchIdx := colIdx(res.Columns, "schema_name")
 	createdIdx := colIdx(res.Columns, "created_on")
-	otypeIdx   := colIdx(res.Columns, "object_kind")
-	onameIdx   := colIdx(res.Columns, "object_name")
-	objDbIdx   := colIdx(res.Columns, "object_database_name")
-	objSchIdx  := colIdx(res.Columns, "object_schema_name")
-	statusIdx  := colIdx(res.Columns, "backup_policy_state", "status")
+	otypeIdx := colIdx(res.Columns, "object_kind")
+	onameIdx := colIdx(res.Columns, "object_name")
+	objDbIdx := colIdx(res.Columns, "object_database_name")
+	objSchIdx := colIdx(res.Columns, "object_schema_name")
+	statusIdx := colIdx(res.Columns, "backup_policy_state", "status")
 	commentIdx := colIdx(res.Columns, "comment")
 
 	get := func(row []interface{}, idx int) interface{} {
@@ -4504,9 +4637,9 @@ func (a *App) ListBackupSets(scopeType, db, schema, table string) ([]BackupSetRo
 	upperScope := strings.ToUpper(scopeType)
 	rows := make([]BackupSetRow, 0, len(res.Rows))
 	for _, row := range res.Rows {
-		otype  := strings.ToUpper(toString(get(row, otypeIdx)))
-		oname  := toString(get(row, onameIdx))
-		objDb  := toString(get(row, objDbIdx))
+		otype := strings.ToUpper(toString(get(row, otypeIdx)))
+		oname := toString(get(row, onameIdx))
+		objDb := toString(get(row, objDbIdx))
 		objSch := toString(get(row, objSchIdx))
 
 		// Post-filter: only include backup sets whose backed-up object matches
@@ -4531,7 +4664,7 @@ func (a *App) ListBackupSets(scopeType, db, schema, table string) ([]BackupSetRo
 			continue
 		}
 
-		rowBsDb  := toString(get(row, bsDbIdx))
+		rowBsDb := toString(get(row, bsDbIdx))
 		rowBsSch := toString(get(row, bsSchIdx))
 		if rowBsDb == "" {
 			rowBsDb = db
@@ -4658,12 +4791,12 @@ func (a *App) ListBackupPolicies() ([]BackupPolicyRow, error) {
 		return s == "TRUE" || s == "YES" || s == "1"
 	}
 
-	nameIdx    := colIdx(res.Columns, "name")
+	nameIdx := colIdx(res.Columns, "name")
 	createdIdx := colIdx(res.Columns, "created_on")
-	ownerIdx   := colIdx(res.Columns, "owner")
-	schedIdx   := colIdx(res.Columns, "schedule")
-	expireIdx  := colIdx(res.Columns, "expire_after_days")
-	lockIdx    := colIdx(res.Columns, "retention_lock", "with_retention_lock")
+	ownerIdx := colIdx(res.Columns, "owner")
+	schedIdx := colIdx(res.Columns, "schedule")
+	expireIdx := colIdx(res.Columns, "expire_after_days")
+	lockIdx := colIdx(res.Columns, "retention_lock", "with_retention_lock")
 	commentIdx := colIdx(res.Columns, "comment")
 
 	get := func(row []interface{}, idx int) interface{} {
@@ -4809,11 +4942,11 @@ func (a *App) ListBackups(backupSetName, bsDb, bsSchema string) ([]BackupRow, er
 	}
 
 	// Snowflake internally uses "snapshot" terminology; column names vary by version.
-	idIdx      := colIdx(res.Columns, "backup_id", "snapshot_id", "id", "identifier", "uuid")
-	nameIdx    := colIdx(res.Columns, "name", "backup_name", "snapshot_name", "backup", "snapshot")
+	idIdx := colIdx(res.Columns, "backup_id", "snapshot_id", "id", "identifier", "uuid")
+	nameIdx := colIdx(res.Columns, "name", "backup_name", "snapshot_name", "backup", "snapshot")
 	createdIdx := colIdx(res.Columns, "created_on")
-	statusIdx  := colIdx(res.Columns, "status")
-	sizeIdx    := colIdx(res.Columns, "size_bytes", "size")
+	statusIdx := colIdx(res.Columns, "status")
+	sizeIdx := colIdx(res.Columns, "size_bytes", "size")
 	commentIdx := colIdx(res.Columns, "comment")
 
 	get := func(row []interface{}, idx int) interface{} {
@@ -4825,7 +4958,7 @@ func (a *App) ListBackups(backupSetName, bsDb, bsSchema string) ([]BackupRow, er
 
 	rows := make([]BackupRow, 0, len(res.Rows))
 	for _, row := range res.Rows {
-		idVal   := toString(get(row, idIdx))
+		idVal := toString(get(row, idIdx))
 		nameVal := toString(get(row, nameIdx))
 		// If no dedicated name column was found, fall back to created_on — Snowflake
 		// uses the creation timestamp as the backup identifier in DROP BACKUP.
@@ -4942,8 +5075,8 @@ func (a *App) DeleteOldestBackup(backupSetName, bsDb, bsSchema string) error {
 		return row[idx]
 	}
 
-	idIdx        := colIdx(res.Columns, "backup_id", "snapshot_id", "id", "identifier", "uuid")
-	createdIdx   := colIdx(res.Columns, "created_on")
+	idIdx := colIdx(res.Columns, "backup_id", "snapshot_id", "id", "identifier", "uuid")
+	createdIdx := colIdx(res.Columns, "created_on")
 	legalHoldIdx := colIdx(res.Columns, "is_under_legal_hold", "legal_hold", "under_legal_hold")
 
 	type candidate struct {
