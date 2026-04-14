@@ -509,7 +509,7 @@ func GetStatuses(ctx context.Context, client *snowflake.Client, database, schema
 	best := map[string]bestEntry{}
 
 	for _, row := range histRes.Rows {
-		if scIdx >= 0 && scIdx < len(row) && strings.ToUpper(toString(row[scIdx])) != strings.ToUpper(schema) {
+		if scIdx >= 0 && scIdx < len(row) && !strings.EqualFold(toString(row[scIdx]), schema) {
 			continue
 		}
 		upper := strings.ToUpper(toString(row[tnIdx]))
