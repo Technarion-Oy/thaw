@@ -33,7 +33,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import dagre from "@dagrejs/dagre";
 import { GetTaskStatuses, ExecuteTask, AlterTask, DropTaskTree, ExecDDL, SuspendTaskList, ResumeTaskList, GetObjectDDL } from "../../../wailsjs/go/main/App";
-import type { main } from "../../../wailsjs/go/models";
+import type { tasks } from "../../../wailsjs/go/models";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 import CreateTaskModal from "./CreateTaskModal";
 import CopyTaskModal from "./CopyTaskModal";
@@ -85,7 +85,7 @@ function runStateTag(state: string) {
 
 const ACTIVE_STATES = new Set(["EXECUTING", "RUNNING", "SCHEDULED"]);
 
-function computeSkippedNodes(byName: Map<string, main.TaskStatusRow>): Set<string> {
+function computeSkippedNodes(byName: Map<string, tasks.StatusRow>): Set<string> {
   const skipped = new Set<string>();
   let changed = true;
   while (changed) {
@@ -136,7 +136,7 @@ function formatRunTime(iso: string): string {
 // overrideRunState replaces lastRunState for display purposes (e.g. "WAITING",
 // inferred "SKIPPED"). Pass undefined to use the real value.
 
-function buildLabel(t: main.TaskStatusRow, isRoot: boolean, overrideRunState?: string, isFinalizer?: boolean) {
+function buildLabel(t: tasks.StatusRow, isRoot: boolean, overrideRunState?: string, isFinalizer?: boolean) {
   const started      = t.taskState?.toUpperCase() === "STARTED";
   const effectiveState = (overrideRunState ?? t.lastRunState ?? "").toUpperCase();
   // Show timestamp for terminal states; suppress for Waiting/never-run/executing.
@@ -214,8 +214,8 @@ function applyLayout(
 // Finds the root of the connected component containing `focusedName`, then
 // collects all descendants via BFS to render the full task graph.
 
-function buildGraph(tasks: main.TaskStatusRow[], focusedName: string) {
-  const byName = new Map<string, main.TaskStatusRow>();
+function buildGraph(tasks: tasks.StatusRow[], focusedName: string) {
+  const byName = new Map<string, tasks.StatusRow>();
   tasks.forEach((t) => byName.set(t.name.toUpperCase(), t));
 
   const skippedNodes = computeSkippedNodes(byName);
@@ -371,7 +371,7 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
   const [executing,    setExecuting]    = useState(false);
   const [retrying,     setRetrying]     = useState(false);
   const [lastPollAt,   setLastPollAt]   = useState<Date | null>(null);
-  const [taskRows,     setTaskRows]     = useState<main.TaskStatusRow[]>([]);
+  const [taskRows,     setTaskRows]     = useState<tasks.StatusRow[]>([]);
   const [togglingTask, setTogglingTask] = useState<string | null>(null);
   const [togglingAll,  setTogglingAll]  = useState(false);
 
@@ -411,7 +411,7 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
   // Stable refs so the polling closure doesn't go stale.
   const rootNameRef  = useRef(taskName);
   const rootUpperRef = useRef<string>("");
-  const taskRowsRef  = useRef<main.TaskStatusRow[]>([]);
+  const taskRowsRef  = useRef<tasks.StatusRow[]>([]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -450,7 +450,7 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
       GetTaskStatuses(db, schema)
         .then((r) => {
           const rows = r.rows ?? [];
-          const byName = new Map<string, main.TaskStatusRow>();
+          const byName = new Map<string, tasks.StatusRow>();
           rows.forEach((t) => byName.set(t.name.toUpperCase(), t));
 
           const rootUpper  = rootUpperRef.current;
@@ -634,7 +634,7 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
       // Optimistically update node label and taskRowsRef so the state badge
       // changes immediately without waiting for the next poll.
       const newState = action === "SUSPEND" ? "SUSPENDED" : "STARTED";
-      const updateRow = (r: main.TaskStatusRow) =>
+      const updateRow = (r: tasks.StatusRow) =>
         r.name.toUpperCase() === name.toUpperCase() ? { ...r, taskState: newState } : r;
       taskRowsRef.current = taskRowsRef.current.map(updateRow);
       setTaskRows((prev) => prev.map(updateRow));

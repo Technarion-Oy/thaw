@@ -19,7 +19,7 @@ import {
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterTask, ListNotificationIntegrations, ListFinalizableTasks, TaskHasChildren, GetTaskStatuses, SuspendTaskList, ResumeTaskList } from "../../../wailsjs/go/main/App";
 import CreateTaskModal from "./CreateTaskModal";
-import type { main } from "../../../wailsjs/go/models";
+import type { main, tasks } from "../../../wailsjs/go/models";
 import { parsePredecessors as parsePredecessorsUtil, extractName } from "../../utils/taskHierarchy";
 import WhenConditionBuilder from "./WhenConditionBuilder";
 import ScheduleEditor from "./ScheduleEditor";
@@ -466,7 +466,7 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
   const [rootHasFinalizer,    setRootHasFinalizer]    = useState(false);
   const [showCreateFinalizer, setShowCreateFinalizer] = useState(false);
   const [finalizeTarget,      setFinalizeTarget]      = useState("");
-  const [allTaskRows,         setAllTaskRows]         = useState<main.TaskStatusRow[]>([]);
+  const [allTaskRows,         setAllTaskRows]         = useState<tasks.StatusRow[]>([]);
   const [setFinalizerFor,     setSetFinalizerFor]     = useState("");
   const [settingFinalizer,    setSettingFinalizer]    = useState(false);
   const [setFinalizerError,   setSetFinalizerError]   = useState<string | null>(null);

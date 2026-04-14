@@ -867,76 +867,6 @@ export namespace main {
 	        this.comment = source["comment"];
 	    }
 	}
-	export class TaskFinalizabilityRow {
-	    name: string;
-	    disabledReason: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new TaskFinalizabilityRow(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.disabledReason = source["disabledReason"];
-	    }
-	}
-	export class TaskStatusRow {
-	    name: string;
-	    taskState: string;
-	    predecessors: string;
-	    lastRunState: string;
-	    lastRunTime: string;
-	    errorMsg: string;
-	    finalize: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new TaskStatusRow(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.taskState = source["taskState"];
-	        this.predecessors = source["predecessors"];
-	        this.lastRunState = source["lastRunState"];
-	        this.lastRunTime = source["lastRunTime"];
-	        this.errorMsg = source["errorMsg"];
-	        this.finalize = source["finalize"];
-	    }
-	}
-	export class TaskStatusesResult {
-	    rows: TaskStatusRow[];
-	    historyError: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new TaskStatusesResult(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.rows = this.convertValues(source["rows"], TaskStatusRow);
-	        this.historyError = source["historyError"];
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
 	export class WarehouseMeteringRow {
 	    startTime: string;
 	    endTime: string;
@@ -1983,6 +1913,81 @@ export namespace sqleditor {
 	        this.endCol = source["endCol"];
 	        this.quoted = source["quoted"];
 	    }
+	}
+
+}
+
+export namespace tasks {
+	
+	export class FinalizabilityRow {
+	    name: string;
+	    disabledReason: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FinalizabilityRow(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.disabledReason = source["disabledReason"];
+	    }
+	}
+	export class StatusRow {
+	    name: string;
+	    taskState: string;
+	    predecessors: string;
+	    lastRunState: string;
+	    lastRunTime: string;
+	    errorMsg: string;
+	    finalize: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new StatusRow(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.taskState = source["taskState"];
+	        this.predecessors = source["predecessors"];
+	        this.lastRunState = source["lastRunState"];
+	        this.lastRunTime = source["lastRunTime"];
+	        this.errorMsg = source["errorMsg"];
+	        this.finalize = source["finalize"];
+	    }
+	}
+	export class StatusesResult {
+	    rows: StatusRow[];
+	    historyError: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new StatusesResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.rows = this.convertValues(source["rows"], StatusRow);
+	        this.historyError = source["historyError"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

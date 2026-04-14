@@ -12,7 +12,7 @@ import { useState } from "react";
 import { Modal, Select, Typography, Space, Alert, message } from "antd";
 import { BranchesOutlined } from "@ant-design/icons";
 import { AlterTask } from "../../../wailsjs/go/main/App";
-import type { main } from "../../../wailsjs/go/models";
+import type { tasks } from "../../../wailsjs/go/models";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 
 const { Text } = Typography;
@@ -22,7 +22,7 @@ interface Props {
   schema: string;
   /** The task that will become the parent (predecessor). */
   parentTaskName: string;
-  taskRows: main.TaskStatusRow[];
+  taskRows: tasks.StatusRow[];
   onClose: () => void;
   onSuccess?: () => void;
 }
