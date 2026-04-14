@@ -184,3 +184,18 @@ body,
 .ctx-item:hover {
   background: var(--bg-raised);
 }
+
+/* ── ReactFlow Controls theme bridge ───────────────────────────────────────
+   ReactFlow switches its built-in --xy-controls-* defaults via
+   prefers-color-scheme, but this app manages theme manually via
+   [data-theme="light"].  Override the variables directly so the Controls
+   buttons pick up the app's palette in both modes.
+   ─────────────────────────────────────────────────────────────────────── */
+.react-flow__controls {
+  --xy-controls-button-background-color: var(--bg-overlay);
+  --xy-controls-button-background-color-hover: var(--bg-raised);
+  --xy-controls-button-color: var(--text);
+  --xy-controls-button-color-hover: var(--text);
+  --xy-controls-button-border-color: var(--border);
+  --xy-controls-box-shadow: 0 0 0 1px var(--border);
+}
