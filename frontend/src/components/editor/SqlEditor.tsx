@@ -1274,6 +1274,22 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           }
           if (!inStore) {
             try {
+              // Prevent keywords (REPLACE, LEFT, RIGHT) from showing function tooltips 
+              // when they are being used as SQL keywords rather than function calls.
+              const wordInfo = model?.getWordAtPosition(pos);
+              if (wordInfo) {
+                const textAfterWord = model?.getLineContent(pos.lineNumber).substring(wordInfo.endColumn - 1);
+                const isFollowedByParen = /^\s*\(/.test(textAfterWord || "");
+                
+                // Snowflake has a few parameterless context functions that don't need parentheses
+                const upperWord = parts[0].toUpperCase();
+                const isContextFn = upperWord.startsWith("CURRENT_") || upperWord === "LOCALTIMESTAMP";
+                
+                if (!isFollowedByParen && !isContextFn) {
+                  setDdlHover(null);
+                  return;
+                }
+              }
               const fns = await GetFunctionTooltip(parts[0]);
               if (fns && fns.length > 0) {
                 const sigs = fns.map((fn: any) => fn.functionSignature).join("\n");
