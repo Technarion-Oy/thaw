@@ -234,6 +234,10 @@ export function GetActiveFunctionCall(arg1) {
   return window['go']['main']['App']['GetActiveFunctionCall'](arg1);
 }
 
+export function GetAllDataTypes() {
+  return window['go']['main']['App']['GetAllDataTypes']();
+}
+
 export function GetAllFunctionNames() {
   return window['go']['main']['App']['GetAllFunctionNames']();
 }
@@ -784,6 +788,18 @@ export function UseSchema(arg1) {
 
 export function UseWarehouse(arg1) {
   return window['go']['main']['App']['UseWarehouse'](arg1);
+}
+
+export function ValidateBareColumnRefs(arg1) {
+  return window['go']['main']['App']['ValidateBareColumnRefs'](arg1);
+}
+
+export function ValidateSnowflakePatterns(arg1, arg2) {
+  return window['go']['main']['App']['ValidateSnowflakePatterns'](arg1, arg2);
+}
+
+export function ValidateTablesExist(arg1) {
+  return window['go']['main']['App']['ValidateTablesExist'](arg1);
 }
 
 export function WaitForQueryResult() {
