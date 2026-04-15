@@ -362,6 +362,132 @@ func TestValidateTablesExist_Invalid(t *testing.T) {
 	}
 }
 
+// ── 4. ValidateSyntax Tests (Tokenization & Scripting) ────────────────────────
+
+func TestValidateSyntax_Scripting(t *testing.T) {
+	tests := []struct {
+		name          string
+		sql           string
+		expectedError string // Empty string means we expect 0 errors
+	}{
+		{
+			name: "EXECUTE IMMEDIATE with RETURN TABLE (temp.sql)",
+			sql: `
+execute immediate $$
+  declare
+    -- variable and cursor declarations
+    target_status varchar default 'ACTIVE';
+    min_revenue number default 50000;
+    res resultset;
+  begin
+    -- Snowflake Scripting and sql statements
+    res := (
+        select region, sum(revenue) as total_revenue
+        from regional_sales
+        where account_status = :target_status
+        group by region
+        having sum(revenue) >= :min_revenue
+    );
+  return table(res);
+  end;
+$$;
+			`,
+			expectedError: "", // Should be perfectly valid, no "Variable 'TABLE' is not declared"
+		},
+		{
+			name: "Valid DECLARE with type annotations",
+			sql: `
+execute immediate $$
+  declare
+    my_str varchar(100);
+    my_num number(10, 2) default 0;
+  begin
+    my_num := 10;
+  end;
+$$;
+			`,
+			expectedError: "",
+		},
+		{
+			name: "Undeclared variable returned",
+			sql: `
+execute immediate $$
+  begin
+    return undeclared_var;
+  end;
+$$;
+			`,
+			expectedError: "Variable 'undeclared_var' is not declared",
+		},
+		{
+			name: "Undeclared variable assigned",
+			sql: `
+execute immediate $$
+  begin
+    undeclared_var := 1;
+  end;
+$$;
+			`,
+			expectedError: "Variable 'undeclared_var' is not declared",
+		},
+		{
+			name: "Missing expression after assignment",
+			sql: `
+execute immediate $$
+  declare
+    my_var number;
+  begin
+    my_var := ;
+  end;
+$$;
+			`,
+			expectedError: "Missing expression after assignment",
+		},
+		{
+			name: "Incorrect assignment operator",
+			sql: `
+execute immediate $$
+  declare
+    my_var number;
+  begin
+    my_var = 10;
+  end;
+$$;
+			`,
+			expectedError: "Expected ':=' for assignment",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// ValidateSyntax operates directly on the raw SQL string
+			markers := ValidateSyntax(tt.sql)
+			errs := getErrors(markers)
+
+			if tt.expectedError == "" {
+				if len(errs) > 0 {
+					t.Errorf("Expected 0 errors for %q, got %d: %v", tt.name, len(errs), errs)
+				}
+			} else {
+				if len(errs) == 0 {
+					t.Fatalf("Expected error containing %q, but got 0 errors", tt.expectedError)
+				}
+
+				found := false
+				for _, e := range errs {
+					if strings.Contains(strings.ToLower(e.Message), strings.ToLower(tt.expectedError)) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected error matching %q, but got: %v", tt.expectedError, errs[0].Message)
+				}
+			}
+		})
+	}
+}
+
 // ── Helpers for tests ─────────────────────────────────────────────────────────
 
 func min(a, b int) int {
