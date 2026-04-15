@@ -29,6 +29,16 @@ type ValidateBareColsRequest struct {
 // ── Precompiled regexes ───────────────────────────────────────────────────────
 
 var (
+	// FROM keyword at start (for SELECT clause extraction)
+	reFromKW = regexp.MustCompile(`(?i)^FROM\b`)
+	// SELECT keyword (to locate start of SELECT clause)
+	reSelectKW = regexp.MustCompile(`(?i)\bSELECT\b`)
+	// AS <alias> pattern (to mark alias names for skipping)
+	reAsAliasSel = regexp.MustCompile(`(?i)\bAS\s+([a-zA-Z0-9_$]+|"[^"]+")`)
+	// FROM/JOIN without trailing \b – handles quoted identifiers like "DB"."SCH"."TABLE"
+	// (reFromJoinFallback in tableexist.go has \b which fails after closing '"')
+	reFromJoinSel = regexp.MustCompile(`(?i)(?:FROM|JOIN)\s+(` + _identPath + `)`)
+
 	// CREATE TABLE (for pre-scan): capture name + column block.
 	// The column block is captured as everything after the opening paren;
 	// balanced-paren matching is done in Go code.
@@ -160,9 +170,15 @@ func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {
 		case "CREATE":
 			markers = append(markers,
 				validateReferencesCols(raw, r, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
+			if reIsCreateView.MatchString(raw) {
+				markers = append(markers,
+					validateSelectCols(raw, r, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
+			}
+
+		case "SELECT", "WITH":
+			markers = append(markers,
+				validateSelectCols(raw, r, req.ResolvedRefs, colInfoCache, localColCache, checkEq, ic)...)
 		}
-		// SELECT / WITH / UNDROP: skip — SELECT column validation requires an
-		// AST to avoid false-positives from table aliases and AS aliases.
 	}
 
 	return markers
@@ -424,6 +440,160 @@ func buildKnownColSet(cols []ColInfo, ic bool) map[string]struct{} {
 		m[key] = struct{}{}
 	}
 	return m
+}
+
+// extractSelectClause returns the text immediately after a SELECT keyword up to
+// (but not including) the first FROM keyword found at paren depth 0.
+// The input s is the text AFTER the SELECT keyword has been consumed.
+// If no FROM is found at depth 0, the whole input is returned.
+func extractSelectClause(s string) string {
+	depth := 0
+	inSingle := false
+	inDouble := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '\'' && !inDouble {
+			inSingle = !inSingle
+			continue
+		}
+		if c == '"' && !inSingle {
+			inDouble = !inDouble
+			continue
+		}
+		if inSingle || inDouble {
+			continue
+		}
+		switch c {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth == 0 && (c == 'F' || c == 'f') {
+				if reFromKW.MatchString(s[i:]) {
+					return s[:i]
+				}
+			}
+		}
+	}
+	return s
+}
+
+// scanSelectClauseForUnknownCols finds identifiers in the SELECT clause that
+// are not qualified (preceded/followed by "."), not function calls (followed
+// by "("), not AS aliases, and not numeric literals.  It returns each unknown
+// name normalised to uppercase (for use as a lookup key and search target).
+func scanSelectClauseForUnknownCols(clause string, knownCols map[string]struct{}) []string {
+	locs := reIdentOrQuoted.FindAllStringIndex(clause, -1)
+	if len(locs) == 0 {
+		return nil
+	}
+
+	// Build set of start positions that are AS aliases (or the AS keyword itself).
+	aliasStarts := make(map[int]struct{})
+	for _, m := range reAsAliasSel.FindAllStringSubmatchIndex(clause, -1) {
+		aliasStarts[m[0]] = struct{}{} // the AS keyword start
+		aliasStarts[m[2]] = struct{}{} // the alias identifier start
+	}
+
+	var missing []string
+	seen := make(map[string]struct{})
+	for _, loc := range locs {
+		start, end := loc[0], loc[1]
+
+		// Skip AS keyword and AS aliases
+		if _, skip := aliasStarts[start]; skip {
+			continue
+		}
+		raw := clause[start:end]
+		// Skip numeric literals (can't be column names)
+		if raw[0] >= '0' && raw[0] <= '9' {
+			continue
+		}
+		// Skip if preceded by "." (qualified column reference)
+		if start > 0 && clause[start-1] == '.' {
+			continue
+		}
+		// Skip if followed by "." (schema/table qualifier)
+		if end < len(clause) && clause[end] == '.' {
+			continue
+		}
+		// Skip if followed by "(" possibly with whitespace (function call)
+		after := strings.TrimLeft(clause[end:], " \t\r\n")
+		if len(after) > 0 && after[0] == '(' {
+			continue
+		}
+
+		// Normalize to uppercase for case-insensitive column lookup
+		normName := strings.ToUpper(normIdent(raw, false))
+		if _, found := knownCols[normName]; !found {
+			if _, already := seen[normName]; !already {
+				seen[normName] = struct{}{}
+				missing = append(missing, normName)
+			}
+		}
+	}
+	return missing
+}
+
+// validateSelectCols validates column references in SELECT clauses (and in
+// CREATE VIEW ... AS SELECT).
+func validateSelectCols(
+	raw string, r StatementRange,
+	resolvedRefs []ResolvedRef,
+	colInfoCache, localColCache map[string][]ColInfo,
+	checkEq func(string, string) bool, ic bool,
+) []DiagMarker {
+	stripped := stripCommentsSQL(raw)
+
+	// Find the SELECT keyword in the statement.
+	selLoc := reSelectKW.FindStringIndex(stripped)
+	if selLoc == nil {
+		return nil
+	}
+
+	// Extract FROM/JOIN table refs from the full stripped statement.
+	type tableRef struct{ db, schema, name string }
+	var tables []tableRef
+	for _, fm := range reFromJoinSel.FindAllStringSubmatch(stripped, -1) {
+		parts := extractIdentParts(fm[1], ic)
+		switch len(parts) {
+		case 3:
+			tables = append(tables, tableRef{parts[0], parts[1], parts[2]})
+		case 2:
+			tables = append(tables, tableRef{"", parts[0], parts[1]})
+		case 1:
+			tables = append(tables, tableRef{"", "", parts[0]})
+		}
+	}
+
+	// Build combined known columns from all FROM/JOIN tables.
+	knownCols := make(map[string]struct{})
+	foundAnyTable := false
+	for _, t := range tables {
+		cols, ok := lookupColsForRef(t.name, t.db, t.schema, resolvedRefs, colInfoCache, localColCache, checkEq)
+		if ok {
+			foundAnyTable = true
+			for _, c := range cols {
+				knownCols[strings.ToUpper(c.Name)] = struct{}{}
+			}
+		}
+	}
+	if !foundAnyTable {
+		return nil // No table metadata; skip to avoid false positives.
+	}
+
+	// Extract the SELECT clause (text between SELECT and the first depth-0 FROM).
+	selectClause := extractSelectClause(stripped[selLoc[1]:])
+
+	// Scan for unknown column refs.
+	missing := scanSelectClauseForUnknownCols(selectClause, knownCols)
+	if len(missing) == 0 {
+		return nil
+	}
+	return colRefMarkers(raw, r, missing, "query", ic)
 }
 
 // colRefMarkers locates tokens in raw for each missing column and returns

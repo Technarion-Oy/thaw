@@ -131,66 +131,36 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 
 	var markers []DiagMarker
 
-	// ── First pass: collect script-created / script-dropped objects ───────
+	// ── Single sequential pass ─────────────────────────────────────────────
+	// createdTables/createdDbsAndSchemas track what currently exists in the
+	// script (updated at the START of each iteration for CREATE, at the END
+	// for DROP/UNDROP so DROP validations see the pre-drop state).
+	// droppedTables/droppedDbsAndSchemas are append-only ("ever dropped")
+	// and are used only for UNDROP validation.
 	scriptCreatedTables        := make(map[string]struct{})
 	scriptCreatedDbsAndSchemas := make(map[string]struct{})
 	scriptDroppedTables        := make(map[string]struct{})
 	scriptDroppedDbsAndSchemas := make(map[string]struct{})
 
-	addAll := func(m map[string]struct{}, keys ...string) {
-		for _, k := range keys {
-			m[k] = struct{}{}
-		}
-	}
-
-	for _, r := range req.StmtRanges {
-		raw := sqlStmt(req.SQL, r)
-
-		if m := reCreateTVMatch.FindStringSubmatch(raw); m != nil {
-			parts := extractIdentParts(m[1], ic)
-			if len(parts) > 0 {
-				addAll(scriptCreatedTables, parts[len(parts)-1])
-				addAll(scriptCreatedTables, strings.Join(parts, "."))
-			}
-		}
-		if m := reCreateDbSchMatch.FindStringSubmatch(raw); m != nil {
-			parts := extractIdentParts(m[1], ic)
-			if len(parts) > 0 {
-				addAll(scriptCreatedDbsAndSchemas, parts[len(parts)-1], strings.Join(parts, "."))
-			}
-		}
-		if m := reDropTableMatch.FindStringSubmatch(raw); m != nil {
-			parts := extractIdentParts(m[1], ic)
-			if len(parts) > 0 {
-				addAll(scriptDroppedTables, parts[len(parts)-1], strings.Join(parts, "."))
-			}
-		}
-		if m := reDropDbSchMatch.FindStringSubmatch(raw); m != nil {
-			parts := extractIdentParts(m[1], ic)
-			if len(parts) > 0 {
-				addAll(scriptDroppedDbsAndSchemas, parts[len(parts)-1], strings.Join(parts, "."))
-			}
-		}
-		if m := reUndropTableMatch.FindStringSubmatch(raw); m != nil {
-			parts := extractIdentParts(m[1], ic)
-			if len(parts) > 0 {
-				addAll(scriptCreatedTables, parts[len(parts)-1], strings.Join(parts, "."))
-			}
-		}
-		if m := reUndropDbSchMatch.FindStringSubmatch(raw); m != nil {
-			parts := extractIdentParts(m[1], ic)
-			if len(parts) > 0 {
-				addAll(scriptCreatedDbsAndSchemas, parts[len(parts)-1], strings.Join(parts, "."))
-			}
-		}
-	}
-
-	// ── Second pass: validate each statement ─────────────────────────────
 	scriptHasActiveDB     := false
 	scriptHasActiveSchema := false
 
 	for _, r := range req.StmtRanges {
 		raw := sqlStmt(req.SQL, r)
+
+		// ── (a) Apply CREATE effects before validation ─────────────
+		if m := reCreateTVMatch.FindStringSubmatch(raw); m != nil {
+			if parts := extractIdentParts(m[1], ic); len(parts) > 0 {
+				scriptCreatedTables[parts[len(parts)-1]] = struct{}{}
+				scriptCreatedTables[strings.Join(parts, ".")] = struct{}{}
+			}
+		}
+		if m := reCreateDbSchMatch.FindStringSubmatch(raw); m != nil {
+			if parts := extractIdentParts(m[1], ic); len(parts) > 0 {
+				scriptCreatedDbsAndSchemas[parts[len(parts)-1]] = struct{}{}
+				scriptCreatedDbsAndSchemas[strings.Join(parts, ".")] = struct{}{}
+			}
+		}
 
 		// Track USE/CREATE statements that establish an active DB/schema
 		if reUseDatabase.MatchString(raw) || reCreateAnyDb.MatchString(raw) {
@@ -263,7 +233,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 					if !schemaExistsForDB(dbNorm, schemaNorm, schemaPath, scriptCreatedDbsAndSchemas, req.KnownSchemas, req.ResolvedRefs, checkEq) {
 						for _, t := range findTokensLocally(raw, []string{schemaNorm}, r.StartLine, ic) {
 							markers = append(markers, diagMarkerAt(t,
-								"Schema '"+t.name+"' does not exist or is not authorized.", 8))
+								"Schema '"+dbNorm+"."+t.name+"' does not exist or is not authorized.", 8))
 						}
 					}
 				}
@@ -424,6 +394,40 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 						}
 					}
 				}
+			}
+		}
+
+		// ── (d) Apply DROP/UNDROP effects after validation ─────────
+		// Runs before the SELECT/WITH continue so DROP TABLE etc. always
+		// update state even though DROP is not in the SELECT/WITH list.
+		if m := reDropTableMatch.FindStringSubmatch(raw); m != nil {
+			if parts := extractIdentParts(m[1], ic); len(parts) > 0 {
+				name, path := parts[len(parts)-1], strings.Join(parts, ".")
+				scriptDroppedTables[name] = struct{}{}
+				scriptDroppedTables[path] = struct{}{}
+				delete(scriptCreatedTables, name)
+				delete(scriptCreatedTables, path)
+			}
+		}
+		if m := reDropDbSchMatch.FindStringSubmatch(raw); m != nil {
+			if parts := extractIdentParts(m[1], ic); len(parts) > 0 {
+				name, path := parts[len(parts)-1], strings.Join(parts, ".")
+				scriptDroppedDbsAndSchemas[name] = struct{}{}
+				scriptDroppedDbsAndSchemas[path] = struct{}{}
+				delete(scriptCreatedDbsAndSchemas, name)
+				delete(scriptCreatedDbsAndSchemas, path)
+			}
+		}
+		if m := reUndropTableMatch.FindStringSubmatch(raw); m != nil {
+			if parts := extractIdentParts(m[1], ic); len(parts) > 0 {
+				scriptCreatedTables[parts[len(parts)-1]] = struct{}{}
+				scriptCreatedTables[strings.Join(parts, ".")] = struct{}{}
+			}
+		}
+		if m := reUndropDbSchMatch.FindStringSubmatch(raw); m != nil {
+			if parts := extractIdentParts(m[1], ic); len(parts) > 0 {
+				scriptCreatedDbsAndSchemas[parts[len(parts)-1]] = struct{}{}
+				scriptCreatedDbsAndSchemas[strings.Join(parts, ".")] = struct{}{}
 			}
 		}
 
