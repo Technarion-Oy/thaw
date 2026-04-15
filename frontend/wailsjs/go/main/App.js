@@ -486,8 +486,8 @@ export function ListBackupPolicies() {
   return window['go']['main']['App']['ListBackupPolicies']();
 }
 
-export function ListBackupSets(arg1, arg2, arg3, arg4) {
-  return window['go']['main']['App']['ListBackupSets'](arg1, arg2, arg3, arg4);
+export function ListBackupSets(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['ListBackupSets'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function ListBackups(arg1, arg2, arg3) {

@@ -2443,7 +2443,6 @@ func (a *App) AlterTask(database, schema, name, clause string) error {
 	return err
 }
 
-
 // ListFinalizableTasks returns every task in the schema along with an eligibility verdict.
 func (a *App) ListFinalizableTasks(database, schema string) ([]tasks.FinalizabilityRow, error) {
 	if a.client == nil {
@@ -3587,15 +3586,29 @@ func bsFQN(q func(string) string, name, bsDb, bsSchema string) string {
 // It uses SHOW BACKUP SETS IN DATABASE <db> and post-filters by object_kind / object_name /
 // object_database_name / object_schema_name so that only backup sets actually covering the
 // specified database, schema, or table are returned — not all backup sets stored there.
-func (a *App) ListBackupSets(scopeType, db, schema, table string) ([]BackupSetRow, error) {
+// ListBackupSets returns backup sets whose backed-up object matches the right-clicked item.
+// It searches the entire account to find the backups, optionally filtering by the backup set's name.
+func (a *App) ListBackupSets(scopeType, db, schema, table, nameFilter string) ([]BackupSetRow, error) {
 	if a.client == nil {
 		return nil, ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
 
-	// Always query at the database level; the object columns tell us what is backed up.
-	query := fmt.Sprintf("SHOW BACKUP SETS IN DATABASE %s", q(db))
-	res, err := a.client.Execute(a.ctx, query)
+	// 1. Build the base query
+	var queryBuilder strings.Builder
+	queryBuilder.WriteString("SHOW BACKUP SETS")
+
+	// 2. Apply the optional name filter using LIKE
+	if strings.TrimSpace(nameFilter) != "" {
+		// Escape single quotes in the filter to prevent SQL injection/syntax errors
+		escapedFilter := strings.ReplaceAll(nameFilter, "'", "''")
+		// Wrap in % wildcards for a 'contains' search, e.g., LIKE '%my_backup%'
+		queryBuilder.WriteString(fmt.Sprintf(" LIKE '%%%s%%'", escapedFilter))
+	}
+
+	// 3. Append the scope (from your previous fix)
+	queryBuilder.WriteString(" IN ACCOUNT")
+
+	res, err := a.client.Execute(a.ctx, queryBuilder.String())
 	if err != nil {
 		return nil, err
 	}
