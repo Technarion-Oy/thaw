@@ -18,6 +18,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	sf "thaw/internal/snowflake"
 )
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -2099,35 +2101,52 @@ func scriptingNeedsColon(sql string, offset int) bool {
 
 // ── TypeCategory ──────────────────────────────────────────────────────────────
 
-var (
-	numericRe  = regexp.MustCompile(`^(NUMBER|INT|INTEGER|FLOAT|DECIMAL|NUMERIC|BIGINT|SMALLINT|TINYINT|BYTEINT|DOUBLE|REAL)$`)
-	textRe     = regexp.MustCompile(`^(VARCHAR|CHAR|STRING|TEXT|NCHAR|NVARCHAR|CHARACTER VARYING)$`)
-	datetimeRe = regexp.MustCompile(`^(DATE|TIME|TIMESTAMP|DATETIME|TIMESTAMP_NTZ|TIMESTAMP_LTZ|TIMESTAMP_TZ)$`)
-	semiRe     = regexp.MustCompile(`^(VARIANT|OBJECT|ARRAY)$`)
-)
+// typeCategoryMap maps canonical upper-case Snowflake type names to the broad
+// JOIN-suggestion compatibility category used by ComputeJoinOnConditions.
+// It is built once from snowflake.AllDataTypes so that any type added to the
+// authoritative registry is automatically visible here (defaulting to "other").
+var typeCategoryMap = func() map[string]string {
+	// Category assignment is sqleditor-specific (JOIN compatibility buckets).
+	// Types absent from this map fall through to "other".
+	explicit := map[string]string{
+		"NUMBER": "numeric", "DECIMAL": "numeric", "NUMERIC": "numeric",
+		"INT": "numeric", "INTEGER": "numeric", "BIGINT": "numeric",
+		"SMALLINT": "numeric", "TINYINT": "numeric", "BYTEINT": "numeric",
+		"FLOAT": "numeric", "FLOAT4": "numeric", "FLOAT8": "numeric",
+		"DOUBLE": "numeric", "DOUBLE PRECISION": "numeric", "REAL": "numeric",
+		"VARCHAR": "text", "CHAR": "text", "CHARACTER": "text",
+		"STRING": "text", "TEXT": "text",
+		"BINARY": "text", "VARBINARY": "text",
+		"BOOLEAN": "boolean",
+		"DATE": "datetime", "DATETIME": "datetime", "TIME": "datetime",
+		"TIMESTAMP": "datetime", "TIMESTAMP_LTZ": "datetime",
+		"TIMESTAMP_NTZ": "datetime", "TIMESTAMP_TZ": "datetime",
+		"VARIANT": "semi", "OBJECT": "semi", "ARRAY": "semi",
+	}
+	m := make(map[string]string, len(sf.AllDataTypes()))
+	for _, dt := range sf.AllDataTypes() {
+		if cat, ok := explicit[dt.Name]; ok {
+			m[dt.Name] = cat
+		} else {
+			m[dt.Name] = "other"
+		}
+	}
+	return m
+}()
 
-// TypeCategory maps a Snowflake data-type string to a broad compatibility category.
+// TypeCategory maps a Snowflake data-type string to a broad compatibility
+// category used by the JOIN suggestion engine.
 // Returns one of: "numeric", "text", "datetime", "boolean", "semi", "other".
 func TypeCategory(dt string) string {
 	t := strings.ToUpper(dt)
-	// Strip type parameters (e.g. VARCHAR(255) → VARCHAR)
+	// Strip type parameters (e.g. VARCHAR(255) → VARCHAR).
 	if idx := strings.Index(t, "("); idx >= 0 {
 		t = strings.TrimSpace(t[:idx])
 	}
-	switch {
-	case numericRe.MatchString(t):
-		return "numeric"
-	case textRe.MatchString(t):
-		return "text"
-	case datetimeRe.MatchString(t):
-		return "datetime"
-	case t == "BOOLEAN":
-		return "boolean"
-	case semiRe.MatchString(t):
-		return "semi"
-	default:
-		return "other"
+	if cat, ok := typeCategoryMap[t]; ok {
+		return cat
 	}
+	return "other"
 }
 
 // ── ValidateSemantics ─────────────────────────────────────────────────────────

@@ -129,6 +129,8 @@ export function GetAISuggestion(arg1:string):Promise<string>;
 
 export function GetActiveFunctionCall(arg1:string):Promise<sqleditor.FunctionCallContext>;
 
+export function GetAllDataTypes():Promise<Array<snowflake.DataTypeInfo>>;
+
 export function GetAllFunctionNames():Promise<Array<fnmeta.FunctionMeta>>;
 
 export function GetAvailableShells():Promise<Array<string>>;
@@ -404,6 +406,12 @@ export function UseRole(arg1:string):Promise<void>;
 export function UseSchema(arg1:string):Promise<void>;
 
 export function UseWarehouse(arg1:string):Promise<void>;
+
+export function ValidateBareColumnRefs(arg1:sqleditor.ValidateBareColsRequest):Promise<Array<sqleditor.DiagMarker>>;
+
+export function ValidateSnowflakePatterns(arg1:string,arg2:Array<sqleditor.StatementRange>):Promise<Array<sqleditor.DiagMarker>>;
+
+export function ValidateTablesExist(arg1:sqleditor.ValidateTablesExistRequest):Promise<Array<sqleditor.DiagMarker>>;
 
 export function WaitForQueryResult():Promise<snowflake.QueryResult>;
 

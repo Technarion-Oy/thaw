@@ -56,6 +56,39 @@ jobs:
           files: report-ddl.xml
           check_name: DDL unit tests
 
+  # ── SQLEditor parser & validation tests (no system deps, fast) ─────────────
+  sqleditor-unit-tests:
+    name: SQLEditor unit tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Install go-junit-report
+        run: go install github.com/jstemmer/go-junit-report/v2@latest
+
+      - name: Run SQLEditor unit tests
+        run: go test -v -race -count=1 ./internal/sqleditor/... 2>&1 | go-junit-report -set-exit-code > report-sqleditor.xml
+
+      - name: Publish test results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          files: report-sqleditor.xml
+          check_name: SQLEditor unit tests
+
   # ── Migration helper tests (package main, requires GTK/WebKit) ────────────
   migration-unit-tests:
     name: Migration unit tests

@@ -1017,6 +1017,22 @@ export namespace snowflake {
 	        this.privateKeyPassphrase = source["privateKeyPassphrase"];
 	    }
 	}
+	export class DataTypeInfo {
+	    Name: string;
+	    Kind: number;
+	    ParamHint: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DataTypeInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Name = source["Name"];
+	        this.Kind = source["Kind"];
+	        this.ParamHint = source["ParamHint"];
+	    }
+	}
 	export class DependencyNode {
 	    name: string;
 	    schema: string;
@@ -1847,6 +1863,20 @@ export namespace sqleditor {
 	    }
 	}
 	
+	export class SchemaEntry {
+	    db: string;
+	    name: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SchemaEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.db = source["db"];
+	        this.name = source["name"];
+	    }
+	}
 	export class ScriptingCompletionResult {
 	    variables: string[];
 	    needsColon: boolean;
@@ -1913,6 +1943,90 @@ export namespace sqleditor {
 	        this.endCol = source["endCol"];
 	        this.quoted = source["quoted"];
 	    }
+	}
+	export class ValidateBareColsRequest {
+	    sql: string;
+	    stmtRanges: StatementRange[];
+	    resolvedRefs: ResolvedRef[];
+	    colEntries: ColEntry[];
+	    quotedIdentifiersIgnoreCase: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ValidateBareColsRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sql = source["sql"];
+	        this.stmtRanges = this.convertValues(source["stmtRanges"], StatementRange);
+	        this.resolvedRefs = this.convertValues(source["resolvedRefs"], ResolvedRef);
+	        this.colEntries = this.convertValues(source["colEntries"], ColEntry);
+	        this.quotedIdentifiersIgnoreCase = source["quotedIdentifiersIgnoreCase"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ValidateTablesExistRequest {
+	    sql: string;
+	    stmtRanges: StatementRange[];
+	    resolvedRefs: ResolvedRef[];
+	    knownDatabases: string[];
+	    knownSchemas: SchemaEntry[];
+	    quotedIdentifiersIgnoreCase: boolean;
+	    droppedDatabases: string[];
+	    droppedSchemas: SchemaEntry[];
+	    droppedTables: ResolvedRef[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ValidateTablesExistRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sql = source["sql"];
+	        this.stmtRanges = this.convertValues(source["stmtRanges"], StatementRange);
+	        this.resolvedRefs = this.convertValues(source["resolvedRefs"], ResolvedRef);
+	        this.knownDatabases = source["knownDatabases"];
+	        this.knownSchemas = this.convertValues(source["knownSchemas"], SchemaEntry);
+	        this.quotedIdentifiersIgnoreCase = source["quotedIdentifiersIgnoreCase"];
+	        this.droppedDatabases = source["droppedDatabases"];
+	        this.droppedSchemas = this.convertValues(source["droppedSchemas"], SchemaEntry);
+	        this.droppedTables = this.convertValues(source["droppedTables"], ResolvedRef);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

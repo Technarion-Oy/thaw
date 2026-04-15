@@ -1790,6 +1790,30 @@ func (a *App) AnalyzeSqlSemantics(sql string, resolvedRefs []sqleditor.ResolvedR
 	return sqleditor.ValidateSemantics(sql, resolvedRefs, colEntries)
 }
 
+// ValidateSnowflakePatterns runs custom Snowflake anti-pattern checks and
+// statement preamble validation.  It is the Go port of validateWithParser from
+// sqlDiagnostics.ts (minus the node-sql-parser AST call, which is covered by
+// AnalyzeSqlSyntax).  No Snowflake connection is required.
+func (a *App) ValidateSnowflakePatterns(sql string, stmtRanges []sqleditor.StatementRange) []sqleditor.DiagMarker {
+	return sqleditor.ValidateSnowflakePatterns(sql, stmtRanges)
+}
+
+// ValidateTablesExist checks SELECT/CREATE/ALTER/DROP/UNDROP statements for
+// references to databases, schemas, or tables that are absent from the resolved
+// references or known catalogs.  No Snowflake connection is required.
+func (a *App) ValidateTablesExist(req sqleditor.ValidateTablesExistRequest) []sqleditor.DiagMarker {
+	return sqleditor.ValidateTablesExist(req)
+}
+
+// ValidateBareColumnRefs checks INSERT column lists and CREATE TABLE REFERENCES
+// column lists against the column info cache.  It also builds an in-script
+// column cache from CREATE TABLE statements so that subsequent INSERTs can
+// validate against tables created earlier in the same script.
+// No Snowflake connection is required.
+func (a *App) ValidateBareColumnRefs(req sqleditor.ValidateBareColsRequest) []sqleditor.DiagMarker {
+	return sqleditor.ValidateBareColumnRefs(req)
+}
+
 // GetScriptingCompletions extracts declared Snowflake Scripting variables
 // visible at cursorOffset and determines whether a ':' prefix is required for
 // completions. No Snowflake connection is required.
@@ -3176,6 +3200,14 @@ func (a *App) GetFunctionTooltip(name string) ([]fnmeta.FunctionMeta, error) {
 		return nil, nil
 	}
 	return a.fnStore.Lookup(strings.ToUpper(name))
+}
+
+// GetAllDataTypes returns the complete list of supported Snowflake data types
+// with their canonical names and autocompletion hints.  The list is static and
+// derived from the same registry that ValidateDataType uses, so the editor
+// completion list and the validator always agree.
+func (a *App) GetAllDataTypes() []snowflake.DataTypeInfo {
+	return snowflake.AllDataTypes()
 }
 
 // ─── Embedded terminal ────────────────────────────────────────────────────────

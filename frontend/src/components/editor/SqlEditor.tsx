@@ -25,10 +25,32 @@ import { useObjectStore } from "../../store/objectStore";
 import { useSessionStore } from "../../store/sessionStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams } from "../../../wailsjs/go/main/App";
+import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, GetAllDataTypes, ValidateSnowflakePatterns, ValidateTablesExist, ValidateBareColumnRefs } from "../../../wailsjs/go/main/App";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
-import { DiagMarker, ColInfo, validateWithParser, validateBareColumnRefs, validateTablesExist, ResolvedRef } from "../../utils/sqlDiagnostics";
+
+// ── Types migrated from sqlDiagnostics.ts ────────────────────────────────────
+export interface DiagMarker {
+  startLineNumber: number;
+  startColumn: number;
+  endLineNumber: number;
+  endColumn: number;
+  message: string;
+  severity: number;
+}
+
+export interface ColInfo {
+  name: string;
+  dataType: string;
+}
+
+export interface ResolvedRef {
+  alias: string;
+  db: string;
+  schema: string;
+  name: string;
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Module-level DDL cache and hover provider handle so we only register once
 // and don't accumulate duplicate providers on editor remounts.
@@ -45,8 +67,23 @@ const builtinFns = new Set<string>();
 const udfFns     = new Set<string>();
 let fnNamesLoaded = false;
 
-const fetchedSchemaObjects   = new Set<string>(); 
-const fetchedDatabaseSchemas = new Set<string>(); 
+const fetchedSchemaObjects   = new Set<string>();
+const fetchedDatabaseSchemas = new Set<string>();
+
+// ── Datatype completion cache ──────────────────────────────────────────────────
+// Fetched once from the Go registry (snowflake.AllDataTypes) so the editor and
+// the backend validator always share the same type list.
+type DataTypeEntry = { Name: string; Kind: number; ParamHint: string };
+let cachedDataTypes: DataTypeEntry[] | null = null;
+let dataTypesFetchPromise: Promise<void> | null = null;
+function ensureDataTypesLoaded(): Promise<void> {
+  if (cachedDataTypes !== null) return Promise.resolve();
+  if (dataTypesFetchPromise) return dataTypesFetchPromise;
+  dataTypesFetchPromise = GetAllDataTypes()
+    .then((dts) => { cachedDataTypes = (dts as DataTypeEntry[]) ?? []; })
+    .catch(() => { cachedDataTypes = []; dataTypesFetchPromise = null; });
+  return dataTypesFetchPromise;
+}
 
 const UC = (s: string) => s.toUpperCase();
 
@@ -493,7 +530,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
         const stmtRanges = (await GetSqlStatementRanges(diagSql)) || [];
         if (model.getVersionId() !== diagVersion) return;
-        diagMarkers.push(...(validateWithParser(diagSql, stmtRanges) || []));
+
+        const patternMarkers = await ValidateSnowflakePatterns(diagSql, stmtRanges);
+        if (model.getVersionId() !== diagVersion) return;
+        diagMarkers.push(...((patternMarkers || []) as DiagMarker[]));
 
         const rawRefs = await ParseJoinTableRefs(diagSql);
         if (model.getVersionId() !== diagVersion) return;
@@ -501,7 +541,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
         const storeDbs = useObjectStore.getState().databases;
         const storeSchemas = useObjectStore.getState().schemas;
-        
+
         const resolved: ResolvedRef[] = (rawRefs || [])
           .map((ref) => {
             if (ref.db && ref.schema) {
@@ -520,7 +560,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                 const tableExists = storeObjs.some(o => UC(o.db) === UC(ref.db!) && UC(o.schema) === UC(ref.schema!) && UC(o.name) === UC(ref.name));
                 if (!tableExists) return null; // The Table is a typo!
               }
-              
+
               return { db: ref.db, schema: ref.schema, name: ref.name, alias: ref.alias };
             }
 
@@ -534,18 +574,26 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             return obj ? { db: obj.db, schema: obj.schema, name: obj.name, alias: ref.alias } : null;
           })
           .filter(Boolean) as ResolvedRef[];
-        
-        const droppedDbs: string[] = [];
-        const droppedSchemas: { db: string, name: string }[] = [];
-        const droppedTables: { db: string, schema: string, name: string }[] = [];
 
-        const tableMarkers = await validateTablesExist(
-           diagSql, stmtRanges, resolved, storeDbs, storeSchemas, 
-           false, // quotedIdentifiersIgnoreCase placeholder
-           droppedDbs, droppedSchemas, droppedTables
-        );
+        const tableMarkers = await ValidateTablesExist({
+          sql: diagSql,
+          stmtRanges,
+          resolvedRefs: resolved,
+          knownDatabases: storeDbs,
+          knownSchemas: storeSchemas,
+          quotedIdentifiersIgnoreCase: false,
+          droppedDatabases: [],
+          droppedSchemas: [],
+          droppedTables: [],
+        } as any);
         if (model.getVersionId() !== diagVersion) return;
-        diagMarkers.push(...(tableMarkers || []));
+        diagMarkers.push(...((tableMarkers || []) as DiagMarker[]));
+
+        // Build column entries for resolved refs (also used by ValidateBareColumnRefs).
+        const colEntries = resolved.map((ref) => {
+          const key = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
+          return { db: ref.db, schema: ref.schema, name: ref.name, cols: colInfoCache.get(key) ?? [] };
+        });
 
         for (const ref of resolved) {
           const warmKey = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
@@ -558,18 +606,20 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         }
 
         if (resolved.length > 0) {
-          const colEntries = resolved.map((ref) => {
-            const key = `${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`;
-            return { db: ref.db, schema: ref.schema, name: ref.name, cols: colInfoCache.get(key) ?? [] };
-          });
           const semanticMarkers = await AnalyzeSqlSemantics(diagSql, resolved as any, colEntries as any);
           if (model.getVersionId() !== diagVersion) return;
           diagMarkers.push(...((semanticMarkers || []) as DiagMarker[]));
         }
 
-        const bareColMarkers = await validateBareColumnRefs(diagSql, stmtRanges, resolved, colInfoCache);
+        const bareColMarkers = await ValidateBareColumnRefs({
+          sql: diagSql,
+          stmtRanges,
+          resolvedRefs: resolved,
+          colEntries,
+          quotedIdentifiersIgnoreCase: false,
+        } as any);
         if (model.getVersionId() !== diagVersion) return;
-        diagMarkers.push(...(bareColMarkers || []));
+        diagMarkers.push(...((bareColMarkers || []) as DiagMarker[]));
         
       } catch (err) {
         console.warn("[thaw] SQL diagnostics aborted:", err);
@@ -661,6 +711,42 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const lineUpToWord = model
           .getLineContent(position.lineNumber)
           .substring(0, word.startColumn - 1);
+
+        // ── Datatype context ──────────────────────────────────────────────
+        // Offer Snowflake type names when the cursor is in a position that
+        // syntactically expects a data type:
+        //   • x::| — type-cast shorthand
+        //   • CAST(x AS |  /  TRY_CAST(x AS |
+        //   • DECLARE varname | — Snowflake Scripting variable declaration
+        //   • CREATE/ALTER TABLE (..., col_name | — DDL column type
+        const isDatatypeContext = (
+          /::$/.test(lineUpToWord) ||
+          /\b(?:TRY_)?CAST\s*\([^)]*\bAS\s*$/i.test(lineUpToWord) ||
+          /\bDECLARE\b[^;]*\b\w+\s*$/i.test(model.getValue().slice(0, model.getOffsetAt(position))) ||
+          /\b(?:CREATE|ALTER)\b[^;]*\(\s*(?:.*,\s*)?\w+\s*$/is.test(model.getValue().slice(0, model.getOffsetAt(position)))
+        );
+        if (isDatatypeContext) {
+          await ensureDataTypesLoaded();
+          if (cachedDataTypes && cachedDataTypes.length > 0) {
+            return {
+              suggestions: cachedDataTypes.map((dt, i) => {
+                const hasParams = dt.ParamHint !== "";
+                return {
+                  label:      dt.Name,
+                  kind:       monaco.languages.CompletionItemKind.TypeParameter,
+                  insertText: hasParams ? `${dt.Name}($1)` : dt.Name,
+                  insertTextRules: hasParams
+                    ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+                    : 0,
+                  detail:    hasParams ? `Type ${dt.ParamHint}` : "Type",
+                  sortText:  "00_dt_" + String(i).padStart(3, "0"),
+                  range,
+                };
+              }),
+            };
+          }
+        }
+        // ─────────────────────────────────────────────────────────────────
 
         const threePartMatch = lineUpToWord.match(/\b(\w+)\.(\w+)\.(\w+)\.\s*$/i);
         if (threePartMatch) {
