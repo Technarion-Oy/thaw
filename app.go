@@ -4010,11 +4010,11 @@ func (a *App) AddBackup(backupSetName, bsDb, bsSchema string) error {
 //	  FROM BACKUP SET <backupSetName>
 //	  IDENTIFIER '<backupID>'
 //
-// Snowflake does not support OR REPLACE for this form — the target must be a new name.
+// RestoreFromBackup executes RESTORE [OR REPLACE] <objectType> <targetName> FROM BACKUP <backupName>.
 // db must be non-empty; it is used to set a current database context first.
 // targetName is used as-is (caller provides the identifier, quoted or unquoted).
 // backupID is the UUID returned by SHOW BACKUPS (stored as a single-quoted string literal).
-func (a *App) RestoreFromBackup(objectType, targetName, backupSetName, backupID, db string) error {
+func (a *App) RestoreFromBackup(objectType, targetName, backupSetName, bsDb, bsSchema, backupID, db string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
@@ -4034,16 +4034,21 @@ func (a *App) RestoreFromBackup(objectType, targetName, backupSetName, backupID,
 			return err
 		}
 	}
+
+	// Safely construct the fully qualified name (e.g. "DB"."SCHEMA"."BACKUP_SET")
+	fqn := bsFQN(q, backupSetName, bsDb, bsSchema)
+
 	var sb strings.Builder
 	sb.WriteString("CREATE ")
 	sb.WriteString(objType)
 	sb.WriteString(" ")
 	sb.WriteString(targetName)
 	sb.WriteString(" FROM BACKUP SET ")
-	sb.WriteString(q(backupSetName))
+	sb.WriteString(fqn) // Inject the fully qualified name here
 	sb.WriteString(" IDENTIFIER '")
 	sb.WriteString(strings.ReplaceAll(backupID, "'", "''"))
 	sb.WriteString("'")
+
 	// Must use QuerySingle (plain db.QueryContext) — multi-statement mode breaks
 	// the FROM BACKUP SET ... IDENTIFIER syntax just like TABLE() function calls.
 	_, err := a.client.QuerySingle(a.ctx, sb.String())

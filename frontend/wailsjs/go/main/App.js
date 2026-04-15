@@ -638,8 +638,8 @@ export function ResizeShell(arg1, arg2) {
   return window['go']['main']['App']['ResizeShell'](arg1, arg2);
 }
 
-export function RestoreFromBackup(arg1, arg2, arg3, arg4, arg5) {
-  return window['go']['main']['App']['RestoreFromBackup'](arg1, arg2, arg3, arg4, arg5);
+export function RestoreFromBackup(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
+  return window['go']['main']['App']['RestoreFromBackup'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 }
 
 export function ResumeTaskList(arg1, arg2, arg3) {
