@@ -28,7 +28,29 @@ import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/run
 import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, GetAllDataTypes, ValidateSnowflakePatterns, ValidateTablesExist, ValidateBareColumnRefs } from "../../../wailsjs/go/main/App";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
-import { DiagMarker, ColInfo, ResolvedRef } from "../../utils/sqlDiagnostics";
+
+// ── Types migrated from sqlDiagnostics.ts ────────────────────────────────────
+export interface DiagMarker {
+  startLineNumber: number;
+  startColumn: number;
+  endLineNumber: number;
+  endColumn: number;
+  message: string;
+  severity: number;
+}
+
+export interface ColInfo {
+  name: string;
+  dataType: string;
+}
+
+export interface ResolvedRef {
+  alias: string;
+  db: string;
+  schema: string;
+  name: string;
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Module-level DDL cache and hover provider handle so we only register once
 // and don't accumulate duplicate providers on editor remounts.
