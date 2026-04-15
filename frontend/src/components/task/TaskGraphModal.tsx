@@ -16,6 +16,7 @@ import {
   CaretRightOutlined, RedoOutlined,
   PauseCircleOutlined, PlayCircleOutlined,
   PlusOutlined, FlagOutlined, DeleteOutlined,
+  CopyOutlined, BranchesOutlined, ScissorOutlined,
 } from "@ant-design/icons";
 import {
   ReactFlow,
@@ -32,9 +33,12 @@ import {
 import "@xyflow/react/dist/style.css";
 import dagre from "@dagrejs/dagre";
 import { GetTaskStatuses, ExecuteTask, AlterTask, DropTaskTree, ExecDDL, SuspendTaskList, ResumeTaskList, GetObjectDDL } from "../../../wailsjs/go/main/App";
-import type { main } from "../../../wailsjs/go/models";
+import type { tasks } from "../../../wailsjs/go/models";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 import CreateTaskModal from "./CreateTaskModal";
+import CopyTaskModal from "./CopyTaskModal";
+import AddExistingChildModal from "./AddExistingChildModal";
+import RemoveChildLinksModal from "./RemoveChildLinksModal";
 
 const { Text } = Typography;
 
@@ -82,7 +86,7 @@ function runStateTag(state: string) {
 
 const ACTIVE_STATES = new Set(["EXECUTING", "RUNNING", "SCHEDULED"]);
 
-function computeSkippedNodes(byName: Map<string, main.TaskStatusRow>): Set<string> {
+function computeSkippedNodes(byName: Map<string, tasks.StatusRow>): Set<string> {
   const skipped = new Set<string>();
   let changed = true;
   while (changed) {
@@ -133,7 +137,7 @@ function formatRunTime(iso: string): string {
 // overrideRunState replaces lastRunState for display purposes (e.g. "WAITING",
 // inferred "SKIPPED"). Pass undefined to use the real value.
 
-function buildLabel(t: main.TaskStatusRow, isRoot: boolean, overrideRunState?: string, isFinalizer?: boolean) {
+function buildLabel(t: tasks.StatusRow, isRoot: boolean, overrideRunState?: string, isFinalizer?: boolean) {
   const started      = t.taskState?.toUpperCase() === "STARTED";
   const effectiveState = (overrideRunState ?? t.lastRunState ?? "").toUpperCase();
   // Show timestamp for terminal states; suppress for Waiting/never-run/executing.
@@ -211,8 +215,8 @@ function applyLayout(
 // Finds the root of the connected component containing `focusedName`, then
 // collects all descendants via BFS to render the full task graph.
 
-function buildGraph(tasks: main.TaskStatusRow[], focusedName: string) {
-  const byName = new Map<string, main.TaskStatusRow>();
+function buildGraph(tasks: tasks.StatusRow[], focusedName: string) {
+  const byName = new Map<string, tasks.StatusRow>();
   tasks.forEach((t) => byName.set(t.name.toUpperCase(), t));
 
   const skippedNodes = computeSkippedNodes(byName);
@@ -368,7 +372,7 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
   const [executing,    setExecuting]    = useState(false);
   const [retrying,     setRetrying]     = useState(false);
   const [lastPollAt,   setLastPollAt]   = useState<Date | null>(null);
-  const [taskRows,     setTaskRows]     = useState<main.TaskStatusRow[]>([]);
+  const [taskRows,     setTaskRows]     = useState<tasks.StatusRow[]>([]);
   const [togglingTask, setTogglingTask] = useState<string | null>(null);
   const [togglingAll,  setTogglingAll]  = useState(false);
 
@@ -388,6 +392,15 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
     mode: "child" | "finalizer"; taskName: string;
   } | null>(null);
 
+  // Copy Task dialog — source task name.
+  const [copyTaskSource, setCopyTaskSource] = useState<string | null>(null);
+
+  // Add Existing Task as Child dialog — parent task name.
+  const [addChildDialog, setAddChildDialog] = useState<string | null>(null);
+
+  // Remove Child Task Links dialog — parent task name.
+  const [removeChildLinksDialog, setRemoveChildLinksDialog] = useState<string | null>(null);
+
   // Delete-all confirmation dialog.
   const [deleteAllConfirm, setDeleteAllConfirm] = useState(false);
   const [deletingTree, setDeletingTree] = useState(false);
@@ -402,7 +415,7 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
   // Stable refs so the polling closure doesn't go stale.
   const rootNameRef  = useRef(taskName);
   const rootUpperRef = useRef<string>("");
-  const taskRowsRef  = useRef<main.TaskStatusRow[]>([]);
+  const taskRowsRef  = useRef<tasks.StatusRow[]>([]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -425,15 +438,24 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
 
   useEffect(() => { load(); }, [load]);
 
+  const isDialogOpen = !!(
+    createTaskDialog ||
+    copyTaskSource ||
+    addChildDialog ||
+    removeChildLinksDialog ||
+    deleteTaskConfirm ||
+    deleteAllConfirm
+  );
+
   // ── Live polling ─────────────────────────────────────────────────────────
   useEffect(() => {
-    if (loading || loadError) return;
+    if (loading || loadError || isDialogOpen) return;
 
     const id = setInterval(() => {
       GetTaskStatuses(db, schema)
         .then((r) => {
           const rows = r.rows ?? [];
-          const byName = new Map<string, main.TaskStatusRow>();
+          const byName = new Map<string, tasks.StatusRow>();
           rows.forEach((t) => byName.set(t.name.toUpperCase(), t));
 
           const rootUpper  = rootUpperRef.current;
@@ -457,7 +479,7 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
     }, POLL_MS);
 
     return () => clearInterval(id);
-  }, [loading, loadError, db, schema]);
+  }, [loading, loadError, db, schema, isDialogOpen]);
 
   // ── Execute root task ─────────────────────────────────────────────────────
   const runGraph = useCallback(() => {
@@ -617,7 +639,7 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
       // Optimistically update node label and taskRowsRef so the state badge
       // changes immediately without waiting for the next poll.
       const newState = action === "SUSPEND" ? "SUSPENDED" : "STARTED";
-      const updateRow = (r: main.TaskStatusRow) =>
+      const updateRow = (r: tasks.StatusRow) =>
         r.name.toUpperCase() === name.toUpperCase() ? { ...r, taskState: newState } : r;
       taskRowsRef.current = taskRowsRef.current.map(updateRow);
       setTaskRows((prev) => prev.map(updateRow));
@@ -814,6 +836,42 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
           predecessorTask={createTaskDialog.mode === "child" ? createTaskDialog.taskName : undefined}
           finalizerForTask={createTaskDialog.mode === "finalizer" ? createTaskDialog.taskName : undefined}
           onClose={() => setCreateTaskDialog(null)}
+          onSuccess={load}
+        />
+      )}
+
+      {/* ── Copy Task dialog ────────────────────────────────────────────── */}
+      {copyTaskSource && (
+        <CopyTaskModal
+          db={db}
+          schema={schema}
+          sourceTaskName={copyTaskSource}
+          graphTaskNames={nodes.map((n) => n.id)}
+          onClose={() => setCopyTaskSource(null)}
+          onSuccess={load}
+        />
+      )}
+
+      {/* ── Add Existing Task as Child dialog ────────────────────────────── */}
+      {addChildDialog && (
+        <AddExistingChildModal
+          db={db}
+          schema={schema}
+          parentTaskName={addChildDialog}
+          taskRows={taskRows}
+          onClose={() => setAddChildDialog(null)}
+          onSuccess={load}
+        />
+      )}
+
+      {/* ── Remove Child Task Links dialog ───────────────────────────────── */}
+      {removeChildLinksDialog && (
+        <RemoveChildLinksModal
+          db={db}
+          schema={schema}
+          parentTaskName={removeChildLinksDialog}
+          taskRows={taskRows}
+          onClose={() => setRemoveChildLinksDialog(null)}
           onSuccess={load}
         />
       )}
@@ -1032,6 +1090,56 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
                     onClick: () => {
                       if (ctxMenu.isFinalizer) return;
                       setCreateTaskDialog({ mode: "child", taskName: ctxMenu.name });
+                      setCtxMenu(null);
+                    },
+                  },
+                  {
+                    key: "add-existing-child",
+                    icon: <BranchesOutlined />,
+                    label: ctxMenu.isFinalizer
+                      ? "Add Existing Task as Child… (not for finalizers)"
+                      : "Add Existing Task as Child…",
+                    disabled: ctxMenu.isFinalizer,
+                    onClick: () => {
+                      if (ctxMenu.isFinalizer) return;
+                      setAddChildDialog(ctxMenu.name);
+                      setCtxMenu(null);
+                    },
+                  },
+                  (() => {
+                    const ctxUpper   = ctxMenu.name.toUpperCase();
+                    const hasChildren = !ctxMenu.isFinalizer && taskRows.some((t) =>
+                      parsePredecessors(t.predecessors ?? "").some(
+                        (p) => extractName(p).toUpperCase() === ctxUpper,
+                      ),
+                    );
+                    return {
+                      key: "remove-child-links",
+                      icon: <ScissorOutlined />,
+                      label: !hasChildren
+                        ? "Remove Child Task Links… (no children)"
+                        : "Remove Child Task Links…",
+                      disabled: !hasChildren,
+                      onClick: () => {
+                        if (!hasChildren) return;
+                        setRemoveChildLinksDialog(ctxMenu.name);
+                        setCtxMenu(null);
+                      },
+                    };
+                  })(),
+                  {
+                    key: "copy-task",
+                    icon: <CopyOutlined />,
+                    label: (() => {
+                      const isRoot = ctxMenu.name.toUpperCase() === rootUpperRef.current;
+                      if (ctxMenu.isFinalizer) return "Copy Task… (not for finalizer tasks)";
+                      if (isRoot)              return "Copy Task… (not for root tasks)";
+                      return "Copy Task…";
+                    })(),
+                    disabled: ctxMenu.isFinalizer || ctxMenu.name.toUpperCase() === rootUpperRef.current,
+                    onClick: () => {
+                      if (ctxMenu.isFinalizer || ctxMenu.name.toUpperCase() === rootUpperRef.current) return;
+                      setCopyTaskSource(ctxMenu.name);
                       setCtxMenu(null);
                     },
                   },

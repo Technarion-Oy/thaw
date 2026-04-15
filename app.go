@@ -44,30 +44,31 @@ import (
 	"thaw/internal/sfconfig"
 	"thaw/internal/snowflake"
 	"thaw/internal/sqleditor"
+	"thaw/internal/tasks"
 	"thaw/internal/telemetry"
 )
 
 // App is the main application struct. Methods bound here are callable from the frontend.
 type App struct {
-	ctx           context.Context
-	client        *snowflake.Client
-	connectParams *snowflake.ConnectParams // stored after a successful Connect for notebook session init
-	cancelConnect    context.CancelFunc
+	ctx                 context.Context
+	client              *snowflake.Client
+	connectParams       *snowflake.ConnectParams // stored after a successful Connect for notebook session init
+	cancelConnect       context.CancelFunc
 	exportCancelFunc    context.CancelFunc // cancels an in-flight DDL export
 	migrationCancelFunc context.CancelFunc // cancels an in-flight schema migration
 	cancelChat          context.CancelFunc // cancels an in-flight AI chat request
-	fnStore          *fnmeta.Store      // local SQLite cache for Snowflake function metadata
-	logCleanup       func()             // closes the log rotation file on shutdown
-	savedWindowState *WindowState       // non-nil when a persisted window state was loaded at launch
+	fnStore             *fnmeta.Store      // local SQLite cache for Snowflake function metadata
+	logCleanup          func()             // closes the log rotation file on shutdown
+	savedWindowState    *WindowState       // non-nil when a persisted window state was loaded at launch
 
 	// Two-phase query execution (StartQuery / WaitForQueryResult).
-	queryMu             sync.Mutex
-	queryID             string
-	queryDone           chan struct{}
-	queryResult         *snowflake.QueryResult
-	queryErr            error
-	queryCancelFunc     context.CancelFunc  // cancels the in-flight query context
-	queryCancelCtxDone  <-chan struct{}      // closed when the in-flight query context is canceled
+	queryMu            sync.Mutex
+	queryID            string
+	queryDone          chan struct{}
+	queryResult        *snowflake.QueryResult
+	queryErr           error
+	queryCancelFunc    context.CancelFunc // cancels the in-flight query context
+	queryCancelCtxDone <-chan struct{}    // closed when the in-flight query context is canceled
 
 	// Embedded terminal (pseudo-terminal).
 	ptyMu  sync.Mutex
@@ -291,10 +292,10 @@ func (a *App) GetDatabaseTableSummary(dbName string) ([]TableSummary, error) {
 			continue
 		}
 		t := TableSummary{
-			Name:    fmt.Sprintf("%v", row[0]),
-			Schema:  fmt.Sprintf("%v", row[1]),
-			Kind:    fmt.Sprintf("%v", row[2]),
-			Owner:   fmt.Sprintf("%v", row[5]),
+			Name:   fmt.Sprintf("%v", row[0]),
+			Schema: fmt.Sprintf("%v", row[1]),
+			Kind:   fmt.Sprintf("%v", row[2]),
+			Owner:  fmt.Sprintf("%v", row[5]),
 		}
 
 		if row[9] != nil {
@@ -1045,9 +1046,9 @@ func (a *App) AlterWarehouseProperty(name, property, value string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	escId  := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	escId := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
 	escStr := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
-	wh     := fmt.Sprintf(`"%s"`, escId(name))
+	wh := fmt.Sprintf(`"%s"`, escId(name))
 
 	// allowlist checks for enum-typed values that are interpolated unquoted into SQL.
 	checkEnum := func(v string, allowed ...string) (string, error) {
@@ -2006,8 +2007,8 @@ type BackupPolicyRow struct {
 
 // BackupRow holds one row from SHOW BACKUPS IN BACKUP SET.
 type BackupRow struct {
-	ID        string `json:"id"`        // UUID used in IDENTIFIER clause of CREATE ... FROM BACKUP SET
-	Name      string `json:"name"`      // human-readable name / timestamp label
+	ID        string `json:"id"`   // UUID used in IDENTIFIER clause of CREATE ... FROM BACKUP SET
+	Name      string `json:"name"` // human-readable name / timestamp label
 	CreatedOn string `json:"createdOn"`
 	Status    string `json:"status"`
 	SizeBytes int64  `json:"sizeBytes"`
@@ -2095,18 +2096,26 @@ func (a *App) GetSessionParameters() ([]SessionParam, error) {
 	}
 
 	// SHOW PARAMETERS columns: key, value, default, level, description, type
-	keyIdx  := colIdx(res.Columns, "key", "name")
-	valIdx  := colIdx(res.Columns, "value")
-	typIdx  := colIdx(res.Columns, "type")
+	keyIdx := colIdx(res.Columns, "key", "name")
+	valIdx := colIdx(res.Columns, "value")
+	typIdx := colIdx(res.Columns, "type")
 	descIdx := colIdx(res.Columns, "description")
 
 	var params []SessionParam
 	for _, row := range res.Rows {
 		key, val, typ, desc := "", "", "", ""
-		if keyIdx >= 0 && keyIdx < len(row) { key = toString(row[keyIdx]) }
-		if valIdx >= 0 && valIdx < len(row)  { val = toString(row[valIdx]) }
-		if typIdx >= 0 && typIdx < len(row)  { typ = toString(row[typIdx]) }
-		if descIdx >= 0 && descIdx < len(row) { desc = toString(row[descIdx]) }
+		if keyIdx >= 0 && keyIdx < len(row) {
+			key = toString(row[keyIdx])
+		}
+		if valIdx >= 0 && valIdx < len(row) {
+			val = toString(row[valIdx])
+		}
+		if typIdx >= 0 && typIdx < len(row) {
+			typ = toString(row[typIdx])
+		}
+		if descIdx >= 0 && descIdx < len(row) {
+			desc = toString(row[descIdx])
+		}
 		if key != "" {
 			params = append(params, SessionParam{Key: key, Value: val, Type: typ, Description: desc})
 		}
@@ -2143,15 +2152,21 @@ func (a *App) GetSessionVariables() ([]SessionVar, error) {
 
 	// SHOW VARIABLES columns: name, value, default, type, ...
 	nameIdx := colIdx(res.Columns, "name", "key")
-	valIdx  := colIdx(res.Columns, "value")
-	typIdx  := colIdx(res.Columns, "type")
+	valIdx := colIdx(res.Columns, "value")
+	typIdx := colIdx(res.Columns, "type")
 
 	var vars []SessionVar
 	for _, row := range res.Rows {
 		name, val, typ := "", "", ""
-		if nameIdx >= 0 && nameIdx < len(row) { name = toString(row[nameIdx]) }
-		if valIdx >= 0 && valIdx < len(row)   { val = toString(row[valIdx]) }
-		if typIdx >= 0 && typIdx < len(row)   { typ = toString(row[typIdx]) }
+		if nameIdx >= 0 && nameIdx < len(row) {
+			name = toString(row[nameIdx])
+		}
+		if valIdx >= 0 && valIdx < len(row) {
+			val = toString(row[valIdx])
+		}
+		if typIdx >= 0 && typIdx < len(row) {
+			typ = toString(row[typIdx])
+		}
 		if name != "" {
 			vars = append(vars, SessionVar{Key: name, Value: val, Type: typ})
 		}
@@ -2428,165 +2443,36 @@ func (a *App) AlterTask(database, schema, name, clause string) error {
 	return err
 }
 
-// TaskFinalizabilityRow describes a task and whether it can serve as a finalizer.
-// DisabledReason is empty for eligible tasks; non-empty with a human-readable
-// explanation for tasks that cannot be finalizers.
-type TaskFinalizabilityRow struct {
-	Name           string `json:"name"`
-	DisabledReason string `json:"disabledReason"`
-}
 
-// TaskStatusRow holds the current state and last-run information for a single task.
-type TaskStatusRow struct {
-	Name         string `json:"name"`
-	TaskState    string `json:"taskState"`    // STARTED | SUSPENDED
-	Predecessors string `json:"predecessors"` // raw predecessor string from SHOW TASKS
-	LastRunState string `json:"lastRunState"` //nolint:misspell // SUCCEEDED | FAILED | RUNNING | SKIPPED | CANCELLED | ""
-	LastRunTime  string `json:"lastRunTime"`  // ISO-8601 timestamp or ""
-	ErrorMsg     string `json:"errorMsg"`     // exception text when last run failed
-	Finalize     string `json:"finalize"`     // fully-qualified root task name for finalizer tasks, "" otherwise
-}
-
-// TaskStatusesResult wraps the per-task rows and an optional history-query
-// error message.  HistoryError is non-empty when INFORMATION_SCHEMA.TASK_HISTORY
-// could not be queried (e.g. insufficient privileges); in that case Rows still
-// contain the task names and STARTED/SUSPENDED states from SHOW TASKS.
-type TaskStatusesResult struct {
-	Rows         []TaskStatusRow `json:"rows"`
-	HistoryError string          `json:"historyError"`
-}
-
-// GetTaskStatuses returns the current state and last-run result for every task
-// ListFinalizableTasks returns every task in the schema along with an
-// eligibility verdict.  DisabledReason is empty for tasks that can be used as
-// a finalizer; non-empty with a short human-readable reason for tasks that
-// cannot (has predecessors, has a schedule, has child tasks, or is already a
-// finalizer for another root task).
-//
-// Eligible tasks are returned first, ineligible tasks sorted after.
-func (a *App) ListFinalizableTasks(database, schema string) ([]TaskFinalizabilityRow, error) {
+// ListFinalizableTasks returns every task in the schema along with an eligibility verdict.
+func (a *App) ListFinalizableTasks(database, schema string) ([]tasks.FinalizabilityRow, error) {
 	if a.client == nil {
 		return nil, ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-
-	res, err := a.client.Execute(a.ctx,
-		fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
-	if err != nil {
-		return nil, err
-	}
-
-	toString := func(v interface{}) string {
-		if v == nil {
-			return ""
-		}
-		switch t := v.(type) {
-		case []byte:
-			return string(t)
-		case string:
-			return t
-		default:
-			return fmt.Sprintf("%v", t)
-		}
-	}
-
-	nameIdx, predsIdx, schedIdx, finalizeIdx := -1, -1, -1, -1
-	for i, col := range res.Columns {
-		switch strings.ToLower(col) {
-		case "name":
-			nameIdx = i
-		case "predecessors", "predecessor":
-			predsIdx = i
-		case "schedule":
-			schedIdx = i
-		case "finalize", "finalize_task":
-			finalizeIdx = i
-		}
-	}
-	if nameIdx < 0 {
-		return nil, nil
-	}
-
-	type taskMeta struct {
-		name     string
-		preds    string
-		schedule string
-		finalize string
-	}
-	metas := make([]taskMeta, 0, len(res.Rows))
-	for _, row := range res.Rows {
-		name := ""
-		if nameIdx < len(row) {
-			name = toString(row[nameIdx])
-		}
-		if name == "" {
-			continue
-		}
-		preds := ""
-		if predsIdx >= 0 && predsIdx < len(row) {
-			preds = toString(row[predsIdx])
-		}
-		sched := ""
-		if schedIdx >= 0 && schedIdx < len(row) {
-			sched = toString(row[schedIdx])
-		}
-		fin := ""
-		if finalizeIdx >= 0 && finalizeIdx < len(row) {
-			fin = toString(row[finalizeIdx])
-		}
-		metas = append(metas, taskMeta{name: name, preds: preds, schedule: sched, finalize: fin})
-	}
-
-	// Build the set of task names that appear as a predecessor of any other task.
-	hasChildren := make(map[string]bool, len(metas))
-	for _, r := range metas {
-		p := r.preds
-		if p == "" || p == "[]" || p == "<nil>" {
-			continue
-		}
-		p = strings.TrimPrefix(p, "[")
-		p = strings.TrimSuffix(p, "]")
-		for _, part := range strings.Split(p, ",") {
-			part = strings.TrimSpace(part)
-			if part == "" {
-				continue
-			}
-			segs := strings.Split(part, ".")
-			bare := strings.Trim(segs[len(segs)-1], `"`)
-			if bare != "" {
-				hasChildren[strings.ToUpper(bare)] = true
-			}
-		}
-	}
-
-	isBlank := func(s string) bool { return s == "" || s == "[]" || s == "<nil>" }
-
-	var eligible, disabled []TaskFinalizabilityRow
-	for _, r := range metas {
-		var reason string
-		switch {
-		case !isBlank(r.preds):
-			reason = "Already a child task (has predecessors)"
-		case r.schedule != "" && r.schedule != "null":
-			reason = "Has its own schedule"
-		case hasChildren[strings.ToUpper(r.name)]:
-			reason = "Has child tasks"
-		case r.finalize != "" && r.finalize != "null":
-			reason = "Already a finalizer for another task"
-		}
-		row := TaskFinalizabilityRow{Name: r.name, DisabledReason: reason}
-		if reason == "" {
-			eligible = append(eligible, row)
-		} else {
-			disabled = append(disabled, row)
-		}
-	}
-	return append(eligible, disabled...), nil
+	return tasks.ListFinalizableTasks(a.ctx, a.client, database, schema)
 }
+
+// CloneChildTask clones a task and replaces its predecessors.
+func (a *App) CloneChildTask(database, schema, oldName, newName string, newPredecessors []string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	return tasks.CloneChildTask(a.ctx, a.client, database, schema, oldName, newName, newPredecessors)
+}
+
+// GetTaskStatuses returns the current state and last-run result for every task in the given schema.
+func (a *App) GetTaskStatuses(database, schema string) (tasks.StatusesResult, error) {
+	if a.client == nil {
+		return tasks.StatusesResult{}, ErrNotConnected
+	}
+	return tasks.GetStatuses(a.ctx, a.client, database, schema)
+}
+
+// ... and identically wrap DropTree, EnableDependents, HasChildren, etc.
 
 // ListRootTasks returns task finalizability rows for the given schema.
 // Deprecated: use ListFinalizableTasks directly.
-func (a *App) ListRootTasks(database, schema string) ([]TaskFinalizabilityRow, error) {
+func (a *App) ListRootTasks(database, schema string) ([]tasks.FinalizabilityRow, error) {
 	return a.ListFinalizableTasks(database, schema)
 }
 
@@ -2596,186 +2482,17 @@ func (a *App) TaskHasChildren(database, schema, taskName string) (bool, error) {
 	if a.client == nil {
 		return false, ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-
-	res, err := a.client.Execute(a.ctx,
-		fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
-	if err != nil {
-		return false, err
-	}
-
-	toString := func(v interface{}) string {
-		if v == nil {
-			return ""
-		}
-		switch t := v.(type) {
-		case []byte:
-			return string(t)
-		case string:
-			return t
-		default:
-			return fmt.Sprintf("%v", t)
-		}
-	}
-
-	predsIdx := -1
-	for i, col := range res.Columns {
-		if strings.ToLower(col) == "predecessors" || strings.ToLower(col) == "predecessor" {
-			predsIdx = i
-			break
-		}
-	}
-	if predsIdx < 0 {
-		return false, nil
-	}
-
-	upper := strings.ToUpper(taskName)
-	for _, row := range res.Rows {
-		preds := ""
-		if predsIdx < len(row) {
-			preds = toString(row[predsIdx])
-		}
-		if preds == "" || preds == "[]" || preds == "<nil>" {
-			continue
-		}
-		p := strings.TrimPrefix(preds, "[")
-		p = strings.TrimSuffix(p, "]")
-		for _, part := range strings.Split(p, ",") {
-			part = strings.TrimSpace(part)
-			segs := strings.Split(part, ".")
-			bare := strings.ToUpper(strings.Trim(segs[len(segs)-1], `"`))
-			if bare == upper {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
+	return tasks.HasChildren(a.ctx, a.client, database, schema, taskName)
 }
 
 // EnableTaskDependents resumes the named task and all of its descendants.
 // Tasks are resumed in leaf-first (post-order) so that children are active
 // before their parent, which Snowflake requires when enabling a task graph.
-// SYSTEM$TASK_DEPENDENTS_ENABLE is intentionally NOT used here because:
-//   (a) it is unavailable in some Snowflake editions,
-//   (b) in many editions it does not resume the root task itself.
-// Instead we build the dependency graph from SHOW TASKS and issue individual
-// ALTER TASK … RESUME statements in the correct order.
 func (a *App) EnableTaskDependents(database, schema, taskName string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-
-	toString := func(v interface{}) string {
-		if v == nil {
-			return ""
-		}
-		switch t := v.(type) {
-		case []byte:
-			return string(t)
-		case string:
-			return t
-		case []interface{}:
-			// gosnowflake may decode VARIANT array columns as []interface{}.
-			// Re-encode as a bracket-comma string so the bracket-strip parser below works.
-			parts := make([]string, 0, len(t))
-			for _, el := range t {
-				if el != nil {
-					parts = append(parts, fmt.Sprintf("%v", el))
-				}
-			}
-			return "[" + strings.Join(parts, ",") + "]"
-		default:
-			return fmt.Sprintf("%v", t)
-		}
-	}
-
-	// 1. Fetch all tasks in the schema to build the dependency graph.
-	res, err := a.client.Execute(a.ctx,
-		fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
-	if err != nil {
-		return err
-	}
-
-	nameIdx, predsIdx := -1, -1
-	for i, col := range res.Columns {
-		switch strings.ToLower(col) {
-		case "name":
-			nameIdx = i
-		case "predecessors", "predecessor":
-			predsIdx = i
-		}
-	}
-	if nameIdx < 0 {
-		// No tasks found — just resume the root and return.
-		_, err = a.client.Execute(a.ctx,
-			fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s RESUME", q(database), q(schema), q(taskName)))
-		return err
-	}
-
-	// Build a children map: parent (upper) → []child names (original case).
-	children := make(map[string][]string)
-	taskNames := make(map[string]string) // upper → original case
-	for _, row := range res.Rows {
-		name := ""
-		if nameIdx < len(row) {
-			name = toString(row[nameIdx])
-		}
-		if name == "" {
-			continue
-		}
-		taskNames[strings.ToUpper(name)] = name
-		if predsIdx < 0 || predsIdx >= len(row) {
-			continue
-		}
-		preds := toString(row[predsIdx])
-		if preds == "" || preds == "[]" || preds == "<nil>" || preds == "null" {
-			continue
-		}
-		preds = strings.TrimPrefix(preds, "[")
-		preds = strings.TrimSuffix(preds, "]")
-		for _, part := range strings.Split(preds, ",") {
-			part = strings.TrimSpace(part)
-			if part == "" {
-				continue
-			}
-			segs := strings.Split(part, ".")
-			parent := strings.ToUpper(strings.Trim(segs[len(segs)-1], `"`))
-			children[parent] = append(children[parent], name)
-		}
-	}
-
-	// 2. Collect all descendants via BFS, then resume in leaf-first (post-order).
-	rootUpper := strings.ToUpper(taskName)
-	visited := map[string]bool{rootUpper: true}
-	bfsOrder := []string{rootUpper}
-	queue := []string{rootUpper}
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		for _, child := range children[cur] {
-			cu := strings.ToUpper(child)
-			if !visited[cu] {
-				visited[cu] = true
-				bfsOrder = append(bfsOrder, cu)
-				queue = append(queue, cu)
-			}
-		}
-	}
-
-	// Resume in reverse BFS order (leaves first) so Snowflake accepts each RESUME.
-	for i := len(bfsOrder) - 1; i >= 0; i-- {
-		upper := bfsOrder[i]
-		name := upper
-		if orig, ok := taskNames[upper]; ok {
-			name = orig
-		}
-		if _, err := a.client.Execute(a.ctx,
-			fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s RESUME", q(database), q(schema), q(name))); err != nil {
-			return fmt.Errorf("resuming task %q: %w", name, err)
-		}
-	}
-	return nil
+	return tasks.EnableDependents(a.ctx, a.client, database, schema, taskName)
 }
 
 // SuspendTaskList suspends each task in the provided list in order.
@@ -2818,605 +2535,21 @@ func (a *App) ResumeTaskList(database, schema string, names []string) error {
 }
 
 // SuspendTaskGraph suspends the root task first (to stop it from scheduling new
-// runs) and then suspends every descendant task in the graph.  It uses SHOW
-// TASKS IN SCHEMA to build the dependency graph and does a BFS from the root
-// task to find all descendants before issuing ALTER TASK … SUSPEND for each.
+// runs) and then suspends every descendant task in the graph.
 func (a *App) SuspendTaskGraph(database, schema, taskName string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-
-	toString := func(v interface{}) string {
-		if v == nil {
-			return ""
-		}
-		switch t := v.(type) {
-		case []byte:
-			return string(t)
-		case string:
-			return t
-		case []interface{}:
-			parts := make([]string, 0, len(t))
-			for _, el := range t {
-				if el != nil {
-					parts = append(parts, fmt.Sprintf("%v", el))
-				}
-			}
-			return "[" + strings.Join(parts, ",") + "]"
-		default:
-			return fmt.Sprintf("%v", t)
-		}
-	}
-
-	// 1. Suspend the root task first so it cannot schedule new child runs.
-	if _, err := a.client.Execute(a.ctx,
-		fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s SUSPEND", q(database), q(schema), q(taskName))); err != nil {
-		return err
-	}
-
-	// 2. Fetch all tasks in the schema to build the dependency graph.
-	res, err := a.client.Execute(a.ctx,
-		fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
-	if err != nil {
-		return err
-	}
-
-	nameIdx, predsIdx := -1, -1
-	for i, col := range res.Columns {
-		switch strings.ToLower(col) {
-		case "name":
-			nameIdx = i
-		case "predecessors", "predecessor":
-			predsIdx = i
-		}
-	}
-	if nameIdx < 0 {
-		return nil // no name column — nothing more to do
-	}
-
-	// Build a children map: parent (upper) → []child names (original case).
-	children := make(map[string][]string)
-	taskNames := make(map[string]string) // upper → original case
-	for _, row := range res.Rows {
-		name := ""
-		if nameIdx < len(row) {
-			name = toString(row[nameIdx])
-		}
-		if name == "" {
-			continue
-		}
-		taskNames[strings.ToUpper(name)] = name
-		if predsIdx < 0 || predsIdx >= len(row) {
-			continue
-		}
-		preds := toString(row[predsIdx])
-		if preds == "" || preds == "[]" || preds == "<nil>" || preds == "null" {
-			continue
-		}
-		preds = strings.TrimPrefix(preds, "[")
-		preds = strings.TrimSuffix(preds, "]")
-		for _, part := range strings.Split(preds, ",") {
-			part = strings.TrimSpace(part)
-			if part == "" {
-				continue
-			}
-			segs := strings.Split(part, ".")
-			parent := strings.ToUpper(strings.Trim(segs[len(segs)-1], `"`))
-			children[parent] = append(children[parent], name)
-		}
-	}
-
-	// 3. BFS to collect all descendants of the root task.
-	rootUpper := strings.ToUpper(taskName)
-	visited := map[string]bool{rootUpper: true}
-	queue := []string{rootUpper}
-	var descendants []string
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		for _, child := range children[cur] {
-			cu := strings.ToUpper(child)
-			if !visited[cu] {
-				visited[cu] = true
-				descendants = append(descendants, child)
-				queue = append(queue, cu)
-			}
-		}
-	}
-
-	// 4. Suspend each descendant.
-	for _, child := range descendants {
-		// Use the original-case name from SHOW TASKS when available.
-		if orig, ok := taskNames[strings.ToUpper(child)]; ok {
-			child = orig
-		}
-		if _, err := a.client.Execute(a.ctx,
-			fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s SUSPEND", q(database), q(schema), q(child))); err != nil {
-			return fmt.Errorf("suspending child task %q: %w", child, err)
-		}
-	}
-	return nil
+	return tasks.SuspendGraph(a.ctx, a.client, database, schema, taskName)
 }
 
 // DropTaskTree suspends and drops the named task and all of its descendants.
-// Tasks are processed in post-order (leaves first, root last) so children are
-// always removed before their parent. Each task is suspended before it is
-// dropped; SUSPEND failures are treated as non-fatal (the task may already be
-// suspended or not exist). The DROP uses IF EXISTS so missing tasks are skipped
-// silently. Returns the first DROP error encountered, if any.
+// Tasks are processed in post-order (leaves first, root last).
 func (a *App) DropTaskTree(database, schema, taskName string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-
-	toString := func(v interface{}) string {
-		if v == nil {
-			return ""
-		}
-		switch t := v.(type) {
-		case []byte:
-			return string(t)
-		case string:
-			return t
-		default:
-			return fmt.Sprintf("%v", t)
-		}
-	}
-
-	// List all tasks to build the dependency graph.
-	res, err := a.client.Execute(a.ctx,
-		fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
-	if err != nil {
-		return err
-	}
-
-	nameIdx, predsIdx := -1, -1
-	for i, col := range res.Columns {
-		switch strings.ToLower(col) {
-		case "name":
-			nameIdx = i
-		case "predecessors", "predecessor":
-			predsIdx = i
-		}
-	}
-	if nameIdx < 0 {
-		return fmt.Errorf("SHOW TASKS did not return a name column")
-	}
-
-	childrenOf := make(map[string][]string) // UPPER(parent) → []child original-case names
-	taskNames := make(map[string]string)    // UPPER(name) → original-case name
-	for _, row := range res.Rows {
-		name := ""
-		if nameIdx < len(row) {
-			name = toString(row[nameIdx])
-		}
-		if name == "" {
-			continue
-		}
-		taskNames[strings.ToUpper(name)] = name
-		if predsIdx < 0 || predsIdx >= len(row) {
-			continue
-		}
-		preds := toString(row[predsIdx])
-		if preds == "" || preds == "[]" || preds == "<nil>" {
-			continue
-		}
-		preds = strings.TrimPrefix(strings.TrimSuffix(strings.TrimSpace(preds), "]"), "[")
-		for _, part := range strings.Split(preds, ",") {
-			part = strings.TrimSpace(part)
-			if part == "" {
-				continue
-			}
-			segs := strings.Split(part, ".")
-			parent := strings.ToUpper(strings.Trim(segs[len(segs)-1], `"`))
-			childrenOf[parent] = append(childrenOf[parent], name)
-		}
-	}
-
-	// Post-order DFS: collect tasks in leaf-first order.
-	var dropOrder []string
-	visited := make(map[string]bool)
-	var dfs func(name string)
-	dfs = func(name string) {
-		upper := strings.ToUpper(name)
-		if visited[upper] {
-			return
-		}
-		visited[upper] = true
-		for _, child := range childrenOf[upper] {
-			dfs(child)
-		}
-		// Use original-case name if known.
-		if orig, ok := taskNames[upper]; ok {
-			name = orig
-		}
-		dropOrder = append(dropOrder, name)
-	}
-	dfs(taskName)
-
-	// Suspend then drop each task (leaves first).
-	for _, name := range dropOrder {
-		_, _ = a.client.Execute(a.ctx,
-			fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s SUSPEND", q(database), q(schema), q(name)))
-		if _, err := a.client.Execute(a.ctx,
-			fmt.Sprintf("DROP TASK IF EXISTS %s.%s.%s", q(database), q(schema), q(name))); err != nil {
-			return fmt.Errorf("dropping task %q: %w", name, err)
-		}
-	}
-	return nil
-}
-
-// in the given schema.  It runs two queries:
-//  1. SHOW TASKS IN SCHEMA — yields the task list and their STARTED/SUSPENDED state.
-//  2. INFORMATION_SCHEMA.TASK_HISTORY — yields the most-recent run status for
-//     each task within the last 14 days.  History rows are returned ordered by
-//     SCHEDULED_TIME DESC and deduplicated in Go so no window-function syntax is
-//     required.  A history-query failure is reported in HistoryError rather than
-//     as a hard error, so callers always receive the task list.
-func (a *App) GetTaskStatuses(database, schema string) (TaskStatusesResult, error) {
-	if a.client == nil {
-		return TaskStatusesResult{}, ErrNotConnected
-	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-
-	toString := func(v interface{}) string {
-		if v == nil {
-			return ""
-		}
-		switch t := v.(type) {
-		case []byte:
-			return string(t)
-		case string:
-			return t
-		case time.Time:
-			// Use RFC3339 so JavaScript's Date constructor can parse it reliably.
-			// fmt.Sprintf("%v", t) produces "2006-01-02 15:04:05 +0000 UTC" which
-			// the V8 Date parser rejects due to the trailing " UTC" abbreviation.
-			if t.IsZero() {
-				return ""
-			}
-			return t.UTC().Format(time.RFC3339)
-		default:
-			return fmt.Sprintf("%v", t)
-		}
-	}
-
-	colIdx := func(cols []string, names ...string) int {
-		for i, c := range cols {
-			lc := strings.ToLower(c)
-			for _, n := range names {
-				if lc == n {
-					return i
-				}
-			}
-		}
-		return -1
-	}
-
-	// ── Step 1: list all tasks and their current state ────────────────────────
-	showRes, err := a.client.Execute(a.ctx,
-		fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
-	if err != nil {
-		return TaskStatusesResult{}, err
-	}
-
-	nameIdx     := colIdx(showRes.Columns, "name")
-	stateIdx    := colIdx(showRes.Columns, "state")
-	predsIdx    := colIdx(showRes.Columns, "predecessors", "predecessor")
-	finalizeIdx := colIdx(showRes.Columns, "finalize", "finalize_task")
-	taskRelIdx  := colIdx(showRes.Columns, "task_relations")
-
-	// extractFinalize reads the finalize root-task reference from a task_relations
-	// VARIANT value. gosnowflake may decode VARIANT columns as:
-	//   • map[string]interface{} — already-parsed JSON object
-	//   • string / []byte       — raw JSON text
-	// Key comparison is case-insensitive to handle Snowflake edition variations.
-	extractFinalize := func(v interface{}) string {
-		if v == nil {
-			return ""
-		}
-		isFinalizeKey := func(k string) bool {
-			lk := strings.ToLower(k)
-			return lk == "finalize" || lk == "finalize_task"
-		}
-		tryMap := func(m map[string]interface{}) string {
-			for k, val := range m {
-				if isFinalizeKey(k) && val != nil {
-					if s := fmt.Sprintf("%v", val); s != "" && s != "<nil>" && s != "null" {
-						return s
-					}
-				}
-			}
-			return ""
-		}
-		if m, ok := v.(map[string]interface{}); ok {
-			return tryMap(m)
-		}
-		raw := ""
-		switch t := v.(type) {
-		case string:
-			raw = t
-		case []byte:
-			raw = string(t)
-		default:
-			raw = fmt.Sprintf("%v", v)
-		}
-		if raw == "" || raw == "null" {
-			return ""
-		}
-		var m map[string]json.RawMessage
-		if err := json.Unmarshal([]byte(raw), &m); err != nil {
-			return ""
-		}
-		for k, val := range m {
-			if isFinalizeKey(k) {
-				var s string
-				if err := json.Unmarshal(val, &s); err == nil && s != "" {
-					return s
-				}
-			}
-		}
-		return ""
-	}
-
-	// Debug: log columns + first few rows so finalizer detection issues are visible.
-	logger.L.Debug("SHOW TASKS columns", "cols", showRes.Columns, "finalizeIdx", finalizeIdx, "taskRelIdx", taskRelIdx)
-	for i, row := range showRes.Rows {
-		if i >= 5 {
-			break
-		}
-		nm := ""
-		if nameIdx >= 0 && nameIdx < len(row) {
-			nm = toString(row[nameIdx])
-		}
-		tr := ""
-		if taskRelIdx >= 0 && taskRelIdx < len(row) {
-			tr = fmt.Sprintf("%#v", row[taskRelIdx])
-		}
-		fi := ""
-		if finalizeIdx >= 0 && finalizeIdx < len(row) {
-			fi = fmt.Sprintf("%#v", row[finalizeIdx])
-		}
-		logger.L.Debug("SHOW TASKS row", "i", i, "name", nm, "task_relations", tr, "finalize_col", fi)
-	}
-
-	type entry struct {
-		name         string
-		taskState    string
-		predecessors string
-		finalize     string
-	}
-	var tasks []entry
-	nameMap := map[string]int{} // UPPER(name) → index in tasks slice
-	for _, row := range showRes.Rows {
-		name := ""
-		if nameIdx >= 0 && nameIdx < len(row) {
-			name = toString(row[nameIdx])
-		}
-		if name == "" {
-			continue
-		}
-		state := ""
-		if stateIdx >= 0 && stateIdx < len(row) {
-			state = toString(row[stateIdx])
-		}
-		preds := ""
-		if predsIdx >= 0 && predsIdx < len(row) {
-			preds = toString(row[predsIdx])
-		}
-		// Finalize: try dedicated column first, then parse from task_relations VARIANT.
-		finalize := ""
-		if finalizeIdx >= 0 && finalizeIdx < len(row) {
-			finalize = toString(row[finalizeIdx])
-		}
-		if finalize == "" && taskRelIdx >= 0 && taskRelIdx < len(row) {
-			finalize = extractFinalize(row[taskRelIdx])
-		}
-		nameMap[strings.ToUpper(name)] = len(tasks)
-		tasks = append(tasks, entry{name: name, taskState: strings.ToUpper(state), predecessors: preds, finalize: finalize})
-	}
-
-	rows := make([]TaskStatusRow, len(tasks))
-	for i, t := range tasks {
-		rows[i] = TaskStatusRow{Name: t.name, TaskState: t.taskState, Predecessors: t.predecessors, Finalize: t.finalize}
-	}
-
-	// ── Optional: detect finalizer tasks via GET_DDL ──────────────────────────
-	// SHOW TASKS may not expose the FINALIZE relationship in all Snowflake
-	// editions (task_relations column absent or in unexpected format). As a
-	// reliable fallback, run GET_DDL for any truly standalone task (no
-	// predecessors, no children) whose finalize field is still empty, and
-	// parse the FINALIZE clause out of the DDL text.
-	{
-		// Build set of task names that appear as predecessors (i.e. have children).
-		hasChildrenSet := make(map[string]bool, len(tasks))
-		for _, t := range tasks {
-			if t.predecessors == "" || t.predecessors == "[]" || t.predecessors == "<nil>" {
-				continue
-			}
-			cleaned := strings.TrimPrefix(strings.TrimSuffix(strings.TrimSpace(t.predecessors), "]"), "[")
-			for _, part := range strings.Split(cleaned, ",") {
-				part = strings.TrimSpace(part)
-				if part == "" {
-					continue
-				}
-				segs := strings.Split(part, ".")
-				bare := strings.Trim(segs[len(segs)-1], `"`)
-				if bare != "" {
-					hasChildrenSet[strings.ToUpper(bare)] = true
-				}
-			}
-		}
-
-		parseFinalizeFromDDL := func(ddl string) string {
-			// Find "FINALIZE" keyword (case-insensitive) followed by "=".
-			upper := strings.ToUpper(ddl)
-			idx := strings.Index(upper, "FINALIZE")
-			if idx < 0 {
-				return ""
-			}
-			rest := strings.TrimSpace(ddl[idx+len("FINALIZE"):])
-			if len(rest) == 0 || rest[0] != '=' {
-				return ""
-			}
-			rest = strings.TrimSpace(rest[1:])
-			// Read until whitespace; strip trailing punctuation.
-			end := strings.IndexAny(rest, " \t\n\r")
-			if end < 0 {
-				end = len(rest)
-			}
-			return strings.TrimRight(rest[:end], ";,")
-		}
-
-		for i, t := range tasks {
-			if rows[i].Finalize != "" {
-				continue // already detected via task_relations column
-			}
-			if t.predecessors != "" && t.predecessors != "[]" && t.predecessors != "<nil>" {
-				continue // has predecessors — cannot be a finalizer
-			}
-			if hasChildrenSet[strings.ToUpper(t.name)] {
-				continue // has children — it is a root/parent task, not a finalizer
-			}
-			// Standalone task: use GET_DDL to check for FINALIZE clause.
-			fqn := fmt.Sprintf(`"%s"."%s"."%s"`,
-				strings.ReplaceAll(database, `"`, `""`),
-				strings.ReplaceAll(schema, `"`, `""`),
-				strings.ReplaceAll(t.name, `"`, `""`),
-			)
-			ddlRes, ddlErr := a.client.Execute(a.ctx,
-				fmt.Sprintf("SELECT GET_DDL('TASK', '%s')", strings.ReplaceAll(fqn, "'", "''")))
-			if ddlErr != nil || len(ddlRes.Rows) == 0 || len(ddlRes.Rows[0]) == 0 {
-				continue
-			}
-			ddl := toString(ddlRes.Rows[0][0])
-			if fin := parseFinalizeFromDDL(ddl); fin != "" {
-				rows[i].Finalize = fin
-				logger.L.Info("finalizer detected via GET_DDL", "task", t.name, "finalize", fin)
-			}
-		}
-	}
-
-	// ── Step 2: fetch run history (best-effort) ───────────────────────────────
-	// Use SELECT * so we never hard-code column names — Snowflake editions differ
-	// on whether columns are called TASK_NAME/RUN_STATUS or NAME/STATE etc.
-	// Schema filtering and deduplication (most-recent run per task) are done in
-	// Go so no WHERE clause column names are assumed either.
-	// RESULT_LIMIT => 10000 gives us up to 10 000 recent runs across all tasks.
-	// Primary sort: SCHEDULED_TIME DESC NULLS FIRST so manually-triggered runs
-	// (EXECUTE TASK sets SCHEDULED_TIME = NULL) appear before older scheduled
-	// runs.  Secondary sort: COMPLETED_TIME DESC NULLS FIRST so that among
-	// multiple manual runs with the same NULL scheduled time the most recently
-	// completed entry wins the deduplication; a currently-executing run (NULL
-	// COMPLETED_TIME) floats to the very top via NULLS FIRST.
-	histSQL := fmt.Sprintf(
-		`SELECT * FROM TABLE(%s.INFORMATION_SCHEMA.TASK_HISTORY(`+
-			`SCHEDULED_TIME_RANGE_START => DATEADD('day', -7, CURRENT_TIMESTAMP()),`+
-			`RESULT_LIMIT => 10000))`+
-			` ORDER BY SCHEDULED_TIME DESC NULLS FIRST, COMPLETED_TIME DESC NULLS FIRST`,
-		q(database))
-
-	histRes, histErr := a.client.Execute(a.ctx, histSQL)
-	if histErr != nil {
-		return TaskStatusesResult{Rows: rows, HistoryError: histErr.Error()}, nil
-	}
-
-	// Locate columns by trying multiple known naming conventions.
-	tnIdx := colIdx(histRes.Columns, "task_name", "name")
-	rsIdx := colIdx(histRes.Columns, "run_status", "state", "status")
-	ctIdx := colIdx(histRes.Columns, "completed_time", "completion_time")
-	qsIdx := colIdx(histRes.Columns, "query_start_time", "start_time")
-	exIdx := colIdx(histRes.Columns, "exception_text", "error_message", "error_msg")
-	scIdx := colIdx(histRes.Columns, "task_schema", "schema_name", "schema")
-
-	// toTime extracts a time.Time from a raw column value (nil → zero time).
-	toTime := func(v interface{}) time.Time {
-		if v == nil {
-			return time.Time{}
-		}
-		if t, ok := v.(time.Time); ok {
-			return t
-		}
-		return time.Time{}
-	}
-
-	// best tracks the most-recently-executed run per task.
-	// sortKey = COMPLETED_TIME if non-zero, else QUERY_START_TIME.
-	// This ensures that graph-summary / never-started rows (both columns NULL)
-	// never shadow a real completed run, even if SQL ORDER BY puts them first.
-	type bestEntry struct {
-		sortKey  time.Time
-		runState string
-		runTime  string
-		errorMsg string
-	}
-	best := map[string]bestEntry{}
-
-	for _, row := range histRes.Rows {
-		// Filter to this schema in Go (avoids relying on the WHERE column name).
-		if scIdx >= 0 && scIdx < len(row) {
-			rowSchema := strings.ToUpper(toString(row[scIdx]))
-			if rowSchema != strings.ToUpper(schema) {
-				continue
-			}
-		}
-
-		taskName := ""
-		if tnIdx >= 0 && tnIdx < len(row) {
-			taskName = toString(row[tnIdx])
-		}
-		upper := strings.ToUpper(taskName)
-		if _, ok := nameMap[upper]; !ok {
-			continue
-		}
-
-		// Compute recency key: prefer COMPLETED_TIME, fall back to QUERY_START_TIME.
-		var completedAt, queryStartAt time.Time
-		if ctIdx >= 0 && ctIdx < len(row) {
-			completedAt = toTime(row[ctIdx])
-		}
-		if qsIdx >= 0 && qsIdx < len(row) {
-			queryStartAt = toTime(row[qsIdx])
-		}
-		sortKey := completedAt
-		if sortKey.IsZero() {
-			sortKey = queryStartAt
-		}
-
-		prev, hasPrev := best[upper]
-		// Accept this row if:
-		//   • no previous entry exists, OR
-		//   • this row has a non-zero sortKey and it's newer than the previous one.
-		// A zero-sortKey row (meta/summary entry) only wins if nothing else exists.
-		if !hasPrev || (!sortKey.IsZero() && sortKey.After(prev.sortKey)) {
-			e := bestEntry{sortKey: sortKey}
-			if rsIdx >= 0 && rsIdx < len(row) {
-				e.runState = toString(row[rsIdx])
-			}
-			if ctIdx >= 0 && ctIdx < len(row) {
-				e.runTime = toString(row[ctIdx])
-			}
-			if exIdx >= 0 && exIdx < len(row) {
-				e.errorMsg = toString(row[exIdx])
-			}
-			best[upper] = e
-		}
-	}
-
-	// Write best entries into the result rows.
-	for upper, e := range best {
-		idx, ok := nameMap[upper]
-		if !ok {
-			continue
-		}
-		rows[idx].LastRunState = e.runState
-		rows[idx].LastRunTime = e.runTime
-		rows[idx].ErrorMsg = e.errorMsg
-	}
-
-	return TaskStatusesResult{Rows: rows}, nil
+	return tasks.DropTree(a.ctx, a.client, database, schema, taskName)
 }
 
 // ExecuteTask manually triggers a single run of a Snowflake Task.
@@ -3495,8 +2628,8 @@ const ddlProgressEvent = "ddl:progress"
 
 // DDLProgressPayload is the structure emitted with each ddl:progress event.
 type DDLProgressPayload struct {
-	Done   int            `json:"done"`
-	Total  int            `json:"total"`
+	Done   int              `json:"done"`
+	Total  int              `json:"total"`
 	Result ddl.ExportResult `json:"result"`
 }
 
@@ -4085,7 +3218,7 @@ func (a *App) StartShell(shell, dir string) error {
 
 	// Stop any previously running shell (already locked, so call internals directly).
 	if a.ptmx != nil {
-		a.ptmx.Close()  //nolint:errcheck
+		a.ptmx.Close() //nolint:errcheck
 		if a.ptyCmd != nil && a.ptyCmd.Process != nil {
 			a.ptyCmd.Process.Kill() //nolint:errcheck
 		}
@@ -4230,10 +3363,10 @@ ORDER BY START_TIME ASC`, where)
 	}
 
 	startIdx := colIdx(res.Columns, "start_time")
-	endIdx   := colIdx(res.Columns, "end_time")
-	nameIdx  := colIdx(res.Columns, "warehouse_name")
-	usedIdx  := colIdx(res.Columns, "credits_used")
-	compIdx  := colIdx(res.Columns, "credits_used_compute")
+	endIdx := colIdx(res.Columns, "end_time")
+	nameIdx := colIdx(res.Columns, "warehouse_name")
+	usedIdx := colIdx(res.Columns, "credits_used")
+	compIdx := colIdx(res.Columns, "credits_used_compute")
 	cloudIdx := colIdx(res.Columns, "credits_used_cloud_services")
 
 	toString := func(v interface{}) string {
@@ -4391,20 +3524,20 @@ ORDER BY START_TIME DESC`, funcName, argClause)
 		return 0
 	}
 
-	qidIdx  := colIdx(res.Columns, "query_id")
+	qidIdx := colIdx(res.Columns, "query_id")
 	qtxtIdx := colIdx(res.Columns, "query_text")
 	qtypIdx := colIdx(res.Columns, "query_type")
 	userIdx := colIdx(res.Columns, "user_name")
-	whIdx   := colIdx(res.Columns, "warehouse_name")
-	dbIdx   := colIdx(res.Columns, "database_name")
-	schIdx  := colIdx(res.Columns, "schema_name")
-	stIdx   := colIdx(res.Columns, "start_time")
-	etIdx   := colIdx(res.Columns, "end_time")
-	elIdx   := colIdx(res.Columns, "total_elapsed_time")
+	whIdx := colIdx(res.Columns, "warehouse_name")
+	dbIdx := colIdx(res.Columns, "database_name")
+	schIdx := colIdx(res.Columns, "schema_name")
+	stIdx := colIdx(res.Columns, "start_time")
+	etIdx := colIdx(res.Columns, "end_time")
+	elIdx := colIdx(res.Columns, "total_elapsed_time")
 	statIdx := colIdx(res.Columns, "execution_status")
-	errIdx  := colIdx(res.Columns, "error_message")
-	rpIdx   := colIdx(res.Columns, "rows_produced")
-	bsIdx   := colIdx(res.Columns, "bytes_scanned")
+	errIdx := colIdx(res.Columns, "error_message")
+	rpIdx := colIdx(res.Columns, "rows_produced")
+	bsIdx := colIdx(res.Columns, "bytes_scanned")
 
 	get := func(row []interface{}, idx int) interface{} {
 		if idx < 0 || idx >= len(row) {
@@ -4483,15 +3616,15 @@ func (a *App) ListBackupSets(scopeType, db, schema, table string) ([]BackupSetRo
 		}
 	}
 
-	nameIdx    := colIdx(res.Columns, "name")
-	bsDbIdx    := colIdx(res.Columns, "database_name")
-	bsSchIdx   := colIdx(res.Columns, "schema_name")
+	nameIdx := colIdx(res.Columns, "name")
+	bsDbIdx := colIdx(res.Columns, "database_name")
+	bsSchIdx := colIdx(res.Columns, "schema_name")
 	createdIdx := colIdx(res.Columns, "created_on")
-	otypeIdx   := colIdx(res.Columns, "object_kind")
-	onameIdx   := colIdx(res.Columns, "object_name")
-	objDbIdx   := colIdx(res.Columns, "object_database_name")
-	objSchIdx  := colIdx(res.Columns, "object_schema_name")
-	statusIdx  := colIdx(res.Columns, "backup_policy_state", "status")
+	otypeIdx := colIdx(res.Columns, "object_kind")
+	onameIdx := colIdx(res.Columns, "object_name")
+	objDbIdx := colIdx(res.Columns, "object_database_name")
+	objSchIdx := colIdx(res.Columns, "object_schema_name")
+	statusIdx := colIdx(res.Columns, "backup_policy_state", "status")
 	commentIdx := colIdx(res.Columns, "comment")
 
 	get := func(row []interface{}, idx int) interface{} {
@@ -4504,9 +3637,9 @@ func (a *App) ListBackupSets(scopeType, db, schema, table string) ([]BackupSetRo
 	upperScope := strings.ToUpper(scopeType)
 	rows := make([]BackupSetRow, 0, len(res.Rows))
 	for _, row := range res.Rows {
-		otype  := strings.ToUpper(toString(get(row, otypeIdx)))
-		oname  := toString(get(row, onameIdx))
-		objDb  := toString(get(row, objDbIdx))
+		otype := strings.ToUpper(toString(get(row, otypeIdx)))
+		oname := toString(get(row, onameIdx))
+		objDb := toString(get(row, objDbIdx))
 		objSch := toString(get(row, objSchIdx))
 
 		// Post-filter: only include backup sets whose backed-up object matches
@@ -4531,7 +3664,7 @@ func (a *App) ListBackupSets(scopeType, db, schema, table string) ([]BackupSetRo
 			continue
 		}
 
-		rowBsDb  := toString(get(row, bsDbIdx))
+		rowBsDb := toString(get(row, bsDbIdx))
 		rowBsSch := toString(get(row, bsSchIdx))
 		if rowBsDb == "" {
 			rowBsDb = db
@@ -4658,12 +3791,12 @@ func (a *App) ListBackupPolicies() ([]BackupPolicyRow, error) {
 		return s == "TRUE" || s == "YES" || s == "1"
 	}
 
-	nameIdx    := colIdx(res.Columns, "name")
+	nameIdx := colIdx(res.Columns, "name")
 	createdIdx := colIdx(res.Columns, "created_on")
-	ownerIdx   := colIdx(res.Columns, "owner")
-	schedIdx   := colIdx(res.Columns, "schedule")
-	expireIdx  := colIdx(res.Columns, "expire_after_days")
-	lockIdx    := colIdx(res.Columns, "retention_lock", "with_retention_lock")
+	ownerIdx := colIdx(res.Columns, "owner")
+	schedIdx := colIdx(res.Columns, "schedule")
+	expireIdx := colIdx(res.Columns, "expire_after_days")
+	lockIdx := colIdx(res.Columns, "retention_lock", "with_retention_lock")
 	commentIdx := colIdx(res.Columns, "comment")
 
 	get := func(row []interface{}, idx int) interface{} {
@@ -4809,11 +3942,11 @@ func (a *App) ListBackups(backupSetName, bsDb, bsSchema string) ([]BackupRow, er
 	}
 
 	// Snowflake internally uses "snapshot" terminology; column names vary by version.
-	idIdx      := colIdx(res.Columns, "backup_id", "snapshot_id", "id", "identifier", "uuid")
-	nameIdx    := colIdx(res.Columns, "name", "backup_name", "snapshot_name", "backup", "snapshot")
+	idIdx := colIdx(res.Columns, "backup_id", "snapshot_id", "id", "identifier", "uuid")
+	nameIdx := colIdx(res.Columns, "name", "backup_name", "snapshot_name", "backup", "snapshot")
 	createdIdx := colIdx(res.Columns, "created_on")
-	statusIdx  := colIdx(res.Columns, "status")
-	sizeIdx    := colIdx(res.Columns, "size_bytes", "size")
+	statusIdx := colIdx(res.Columns, "status")
+	sizeIdx := colIdx(res.Columns, "size_bytes", "size")
 	commentIdx := colIdx(res.Columns, "comment")
 
 	get := func(row []interface{}, idx int) interface{} {
@@ -4825,7 +3958,7 @@ func (a *App) ListBackups(backupSetName, bsDb, bsSchema string) ([]BackupRow, er
 
 	rows := make([]BackupRow, 0, len(res.Rows))
 	for _, row := range res.Rows {
-		idVal   := toString(get(row, idIdx))
+		idVal := toString(get(row, idIdx))
 		nameVal := toString(get(row, nameIdx))
 		// If no dedicated name column was found, fall back to created_on — Snowflake
 		// uses the creation timestamp as the backup identifier in DROP BACKUP.
@@ -4942,8 +4075,8 @@ func (a *App) DeleteOldestBackup(backupSetName, bsDb, bsSchema string) error {
 		return row[idx]
 	}
 
-	idIdx        := colIdx(res.Columns, "backup_id", "snapshot_id", "id", "identifier", "uuid")
-	createdIdx   := colIdx(res.Columns, "created_on")
+	idIdx := colIdx(res.Columns, "backup_id", "snapshot_id", "id", "identifier", "uuid")
+	createdIdx := colIdx(res.Columns, "created_on")
 	legalHoldIdx := colIdx(res.Columns, "is_under_legal_hold", "legal_hold", "under_legal_hold")
 
 	type candidate struct {

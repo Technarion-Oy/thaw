@@ -7,6 +7,7 @@ import {dbt} from '../models';
 import {ddl} from '../models';
 import {config} from '../models';
 import {fnmeta} from '../models';
+import {tasks} from '../models';
 import {gitrepo} from '../models';
 import {filesystem} from '../models';
 import {sfconfig} from '../models';
@@ -63,6 +64,8 @@ export function CancelQuery():Promise<void>;
 export function CheckAvailableKeyTools():Promise<Array<string>>;
 
 export function CheckSnowparkEnv():Promise<main.SnowparkCheckResult>;
+
+export function CloneChildTask(arg1:string,arg2:string,arg3:string,arg4:string,arg5:Array<string>):Promise<void>;
 
 export function ComputeJoinOnConditions(arg1:sqleditor.JoinOnSuggestionsReq):Promise<Array<sqleditor.JoinCondition>>;
 
@@ -210,7 +213,7 @@ export function GetTableRetentionDays(arg1:string,arg2:string,arg3:string):Promi
 
 export function GetTableSettings(arg1:string,arg2:string,arg3:string):Promise<main.TableSettings>;
 
-export function GetTaskStatuses(arg1:string,arg2:string):Promise<main.TaskStatusesResult>;
+export function GetTaskStatuses(arg1:string,arg2:string):Promise<tasks.StatusesResult>;
 
 export function GetUserDDL(arg1:string):Promise<string>;
 
@@ -272,7 +275,7 @@ export function ListExportableDatabases():Promise<Array<string>>;
 
 export function ListExternalVolumes():Promise<Array<string>>;
 
-export function ListFinalizableTasks(arg1:string,arg2:string):Promise<Array<main.TaskFinalizabilityRow>>;
+export function ListFinalizableTasks(arg1:string,arg2:string):Promise<Array<tasks.FinalizabilityRow>>;
 
 export function ListIntegrations(arg1:string):Promise<Array<snowflake.IntegrationRow>>;
 
@@ -282,7 +285,7 @@ export function ListObjects(arg1:string,arg2:string):Promise<Array<snowflake.Sno
 
 export function ListRoles():Promise<Array<string>>;
 
-export function ListRootTasks(arg1:string,arg2:string):Promise<Array<main.TaskFinalizabilityRow>>;
+export function ListRootTasks(arg1:string,arg2:string):Promise<Array<tasks.FinalizabilityRow>>;
 
 export function ListSchemas(arg1:string):Promise<Array<string>>;
 

@@ -20,7 +20,7 @@ import {
   ReloadOutlined,
 } from "@ant-design/icons";
 import { GetTaskStatuses } from "../../../wailsjs/go/main/App";
-import type { main } from "../../../wailsjs/go/models";
+import type { tasks } from "../../../wailsjs/go/models";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 
 const { Text } = Typography;
@@ -32,7 +32,7 @@ interface Props {
 }
 
 // Extend the row type with an optional children array for Ant Design tree table.
-interface TreeRow extends main.TaskStatusRow {
+interface TreeRow extends tasks.StatusRow {
   children?: TreeRow[];
 }
 
@@ -40,8 +40,8 @@ interface TreeRow extends main.TaskStatusRow {
 // Builds a nested tree from a flat list.  A task is a child of the first
 // predecessor that also lives in this schema.  Tasks whose predecessor is
 // outside this schema (or who have no predecessors) are placed at the root.
-function buildHierarchy(flat: main.TaskStatusRow[]): TreeRow[] {
-  const byName = new Map<string, main.TaskStatusRow>();
+function buildHierarchy(flat: tasks.StatusRow[]): TreeRow[] {
+  const byName = new Map<string, tasks.StatusRow>();
   for (const r of flat) byName.set(r.name.toUpperCase(), r);
 
   // Map each task to its parent name within this schema (upper-cased).
@@ -132,7 +132,7 @@ function formatTime(ts: string): string {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function TaskStatusesModal({ db, schema, onClose }: Props) {
-  const [rows, setRows] = useState<main.TaskStatusRow[] | null>(null);
+  const [rows, setRows] = useState<tasks.StatusRow[] | null>(null);
   const [historyError, setHistoryError] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
