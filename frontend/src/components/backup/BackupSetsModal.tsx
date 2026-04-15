@@ -68,6 +68,8 @@ interface CreateState {
 
 interface RestoreState {
   backupSetName: string;  // name of the backup set
+  backupSetDb: string;
+  backupSetSchema: string;
   backupID: string;       // UUID identifier of the specific backup
   objectType: "DATABASE" | "SCHEMA" | "TABLE";
   objectName: string;     // original FQN (shown for reference, not used as target)
@@ -112,6 +114,9 @@ export default function BackupSetsModal(props: Props) {
   const [rows,    setRows]    = useState<main.BackupSetRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
+
+  // New state for the search filter
+  const [nameFilter, setNameFilter] = useState("");
 
   const [alterState, setAlterState] = useState<AlterState | null>(null);
   const [alterLoading, setAlterLoading] = useState(false);
@@ -233,6 +238,8 @@ export default function BackupSetsModal(props: Props) {
         restoreState.objectType,
         targetName,
         restoreState.backupSetName,
+        restoreState.backupSetDb,
+        restoreState.backupSetSchema,
         restoreState.backupID,
         db,
       );
@@ -270,7 +277,7 @@ export default function BackupSetsModal(props: Props) {
     error: null,
   });
 
-  const loadRows = async () => {
+  const loadRows = async (filterTerm: string = nameFilter) => {
     setLoading(true);
     setError(null);
     setRows(null);
@@ -278,11 +285,9 @@ export default function BackupSetsModal(props: Props) {
     setBackupErrors({});
     try {
       const [sType, sDb, sSchema, sTable] = listScopeArgs(props);
-      const data = await ListBackupSets(sType, sDb, sSchema, sTable);
+      const data = await ListBackupSets(sType, sDb, sSchema, sTable, filterTerm);
       const sets = data ?? [];
       setRows(sets);
-      // Pre-load backups for all sets in the background so the "delete oldest"
-      // button can be greyed out immediately when a set has no backups.
       for (const record of sets) {
         loadBackups(record);
       }
@@ -293,13 +298,13 @@ export default function BackupSetsModal(props: Props) {
     }
   };
 
-  useEffect(() => { loadRows(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadRows(nameFilter); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDrop = async (row: main.BackupSetRow) => {
     try {
       await DropBackupSet(row.name, row.backupSetDb, row.backupSetSchema);
       message.success(`Backup set "${row.name}" dropped.`);
-      loadRows();
+      loadRows(nameFilter);
     } catch (e) {
       message.error(String(e));
     }
@@ -334,7 +339,7 @@ export default function BackupSetsModal(props: Props) {
       await AlterBackupSet(alterState.name, alterState.backupSetDb, alterState.backupSetSchema, alteration);
       message.success("Backup set updated.");
       setAlterState(null);
-      loadRows();
+      loadRows(nameFilter);
     } catch (e) {
       message.error(String(e));
     } finally {
@@ -359,13 +364,12 @@ export default function BackupSetsModal(props: Props) {
         createState.orReplace,
         createState.ifNotExists,
       );
-      // Apply backup policy after creation if one was selected
       if (createState.backupPolicy.trim()) {
         await AlterBackupSet(createState.name, createState.nameDb, createState.nameSchema, `APPLY BACKUP POLICY ${createState.backupPolicy.trim()}`);
       }
       message.success(`Backup set "${createState.name}" created.`);
       setCreateState((s) => ({ ...s, open: false, name: "", backupPolicy: "", loading: false }));
-      loadRows();
+      loadRows(nameFilter);
     } catch (e) {
       setCreateState((s) => ({ ...s, loading: false, error: String(e) }));
     }
@@ -392,11 +396,9 @@ export default function BackupSetsModal(props: Props) {
       title: "Name",
       dataIndex: "name",
       render: (v: string, row: main.BackupSetRow) => {
-        const parts = [row.backupSetDb, row.backupSetSchema, v].filter(Boolean);
-        const fullName = parts.join(".");
         return (
           <div style={{ display: "flex", alignItems: "center", gap: 4, overflow: "hidden" }}>
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fullName}</span>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>{v}</span>
             <Button
               size="small"
               type="text"
@@ -411,10 +413,18 @@ export default function BackupSetsModal(props: Props) {
       },
     },
     {
+      key: "location",
+      title: "Location",
+      render: (_: unknown, row: main.BackupSetRow) => {
+        const loc = [row.backupSetDb, row.backupSetSchema].filter(Boolean).join(".");
+        return loc ? <Text type="secondary" style={{ fontSize: 12 }}>{loc}</Text> : <Text type="secondary">—</Text>;
+      }
+    },
+    {
       key: "objectType",
       title: "For",
       dataIndex: "objectType",
-      width: 90,
+      width: 100,
     },
     {
       key: "objectName",
@@ -426,14 +436,14 @@ export default function BackupSetsModal(props: Props) {
       key: "status",
       title: "Status",
       dataIndex: "status",
-      width: 90,
+      width: 100,
       render: (v: string) => v ? <Tag color={statusColor(v)}>{v}</Tag> : null,
     },
     {
       key: "createdOn",
       title: "Created",
       dataIndex: "createdOn",
-      width: 130,
+      width: 120,
       render: (v: string) => v ? dayjs(v).format("DD MMM YYYY") : "—",
     },
     {
@@ -446,7 +456,8 @@ export default function BackupSetsModal(props: Props) {
     {
       key: "actions",
       title: "",
-      width: 108,
+      width: 120,
+      fixed: "right", // Keeps actions visible while scrolling
       render: (_: unknown, row: main.BackupSetRow) => (
         <Space size={4}>
           <Button
@@ -515,18 +526,28 @@ export default function BackupSetsModal(props: Props) {
         open
         title={titleText}
         onCancel={onClose}
-        width={820}
+        width={1100} // Increased width so columns have room to breathe
         footer={null}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <Text style={{ fontSize: 12, color: "var(--text-muted)" }}>
             {rows !== null ? `${rows.length} backup set${rows.length !== 1 ? "s" : ""} for ${showScope(props)}` : ""}
           </Text>
-          <Space size={4}>
+          <Space size={8}>
+            <Input.Search
+              placeholder="Filter by name..."
+              allowClear
+              onSearch={(val) => {
+                setNameFilter(val);
+                loadRows(val);
+              }}
+              style={{ width: 200 }}
+              size="small"
+            />
             <Button
               size="small"
               icon={<ReloadOutlined />}
-              onClick={loadRows}
+              onClick={() => loadRows(nameFilter)}
               loading={loading}
             >
               Refresh
@@ -566,8 +587,6 @@ export default function BackupSetsModal(props: Props) {
           <Table<main.BackupSetRow>
             dataSource={rows.map(row => ({
               ...row,
-              // _rev changes when the backup cache for this row changes, which
-              // causes Ant Design Table to re-render the expanded row content.
               _rev: Array.isArray(backupCache[row.name])
                 ? (backupCache[row.name] as main.BackupRow[]).length
                 : backupCache[row.name] === "loading" ? -1 : -2,
@@ -575,6 +594,7 @@ export default function BackupSetsModal(props: Props) {
             columns={columns}
             rowKey="name"
             size="small"
+            scroll={{ x: 'max-content' }} // Allows columns to expand horizontally beyond modal width
             pagination={{ pageSize: 20, showSizeChanger: false, hideOnSinglePage: true }}
             locale={{ emptyText: "No backup sets found." }}
             expandable={{
@@ -598,7 +618,7 @@ export default function BackupSetsModal(props: Props) {
                     key: "status",
                     title: "Status",
                     dataIndex: "status",
-                    width: 90,
+                    width: 100,
                     render: (v: string) => v ? <Tag color={statusColor(v)} style={{ fontSize: 11 }}>{v}</Tag> : null,
                   },
                   {
@@ -612,7 +632,7 @@ export default function BackupSetsModal(props: Props) {
                     key: "sizeBytes",
                     title: "Size",
                     dataIndex: "sizeBytes",
-                    width: 90,
+                    width: 100,
                     render: (v: number) => fmtBytes(v),
                   },
                   {
@@ -625,7 +645,8 @@ export default function BackupSetsModal(props: Props) {
                   {
                     key: "actions",
                     title: "",
-                    width: 40,
+                    width: 60,
+                    fixed: "right", // Keeps actions visible while scrolling
                     render: (_: unknown, backup: main.BackupRow) => (
                       <Button
                         size="small"
@@ -638,6 +659,8 @@ export default function BackupSetsModal(props: Props) {
                           ) || scopeType;
                           setRestoreState({
                             backupSetName: record.name,
+                            backupSetDb: record.backupSetDb,
+                            backupSetSchema: record.backupSetSchema,
                             backupID: backup.id || backup.name,
                             objectType: inferredType,
                             objectName: record.objectName,
@@ -678,6 +701,7 @@ export default function BackupSetsModal(props: Props) {
                         columns={backupCols}
                         rowKey="name"
                         size="small"
+                        scroll={{ x: 'max-content' }} // Apply scroll to inner table too
                         pagination={false}
                         locale={{ emptyText: "No backups in this set." }}
                       />
