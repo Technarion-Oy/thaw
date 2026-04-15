@@ -62,7 +62,7 @@ type DataTypeInfo struct {
 }
 
 // snowflakeDataTypes is the single source of truth for every Snowflake type
-// recognised by this package.  AllDataTypes returns a copy; ValidateDataType
+// recognized by this package.  AllDataTypes returns a copy; ValidateDataType
 // dispatches via dataTypeMap which is built from this slice at init time.
 var snowflakeDataTypes = []DataTypeInfo{
 	// ── Numeric — exact ──────────────────────────────────────────────────
@@ -136,7 +136,7 @@ func AllDataTypes() []DataTypeInfo {
 // ── DataTypeError ─────────────────────────────────────────────────────────────
 
 // DataTypeError is returned by ValidateDataType when the input is not a
-// recognised or syntactically valid Snowflake data type.
+// recognized or syntactically valid Snowflake data type.
 type DataTypeError struct {
 	Input   string
 	Message string
@@ -167,7 +167,7 @@ func ValidateDataType(s string) (string, error) {
 
 	info, ok := dataTypeMap[upperBase]
 	if !ok {
-		return "", &DataTypeError{Input: s, Message: "unrecognised data type"}
+		return "", &DataTypeError{Input: s, Message: "unrecognized data type"}
 	}
 
 	switch info.Kind {
@@ -273,7 +273,7 @@ func ValidateDataType(s string) (string, error) {
 		return fmt.Sprintf("VECTOR(%s, %d)", elemNorm, dim), nil
 	}
 
-	return "", &DataTypeError{Input: s, Message: "unrecognised data type"}
+	return "", &DataTypeError{Input: s, Message: "unrecognized data type"}
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────

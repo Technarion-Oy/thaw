@@ -80,7 +80,7 @@ var (
 //
 // SELECT column validation is intentionally skipped: without an AST it cannot
 // be done reliably (table-alias false-positives, AS aliases, sub-selects, etc.)
-// — matching the TS fallback behaviour when node-sql-parser fails to parse.
+// — matching the TS fallback behavior when node-sql-parser fails to parse.
 //
 // Severity: 4 = Monaco Warning (yellow squiggles).
 func ValidateBareColumnRefs(req ValidateBareColsRequest) []DiagMarker {

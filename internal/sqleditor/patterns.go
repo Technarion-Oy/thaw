@@ -19,8 +19,8 @@ import (
 // ── Precompiled regexes for ValidateSnowflakePatterns ─────────────────────────
 
 const (
-	_ident        = `(?:[a-zA-Z0-9_$]+|"[^"]+")`
-	_identPath    = _ident + `(?:\.` + _ident + `){0,2}`
+	_ident          = `(?:[a-zA-Z0-9_$]+|"[^"]+")`
+	_identPath      = _ident + `(?:\.` + _ident + `){0,2}`
 	_balancedParens = `\([^()]*(?:(?:\([^()]*\))[^()]*)*\)`
 )
 
@@ -138,7 +138,7 @@ var (
 	reValidDropDbSchema = regexp.MustCompile(`(?i)^\s*DROP\s+(?:DATABASE|SCHEMA)\s+(?:IF\s+EXISTS\s+)?` + _identPath + `(?:\s+(?:CASCADE|RESTRICT))?\s*$`)
 
 	// ── CREATE SEQUENCE ───────────────────────────────────────────────────────
-	reIsCreateSeq = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SEQUENCE\b`)
+	reIsCreateSeq    = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SEQUENCE\b`)
 	reValidCreateSeq = regexp.MustCompile(
 		`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SEQUENCE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath +
 			`(?:\s+WITH)?(?:\s+(?:` +
@@ -149,7 +149,7 @@ var (
 			`))*\s*$`)
 
 	// ── ALTER SEQUENCE ────────────────────────────────────────────────────────
-	reIsAlterSeq = regexp.MustCompile(`(?i)^\s*ALTER\s+SEQUENCE\b`)
+	reIsAlterSeq    = regexp.MustCompile(`(?i)^\s*ALTER\s+SEQUENCE\b`)
 	reValidAlterSeq = regexp.MustCompile(
 		`(?i)^\s*ALTER\s+SEQUENCE\s+(?:IF\s+EXISTS\s+)?` + _identPath + `\s+` +
 			`(?:RENAME\s+TO\s+` + _identPath +
@@ -439,9 +439,10 @@ func findMatchingParen(s string) int {
 		} else if c == '"' && !inSingle {
 			inDouble = !inDouble
 		} else if !inSingle && !inDouble {
-			if c == '(' {
+			switch c {
+			case '(':
 				depth++
-			} else if c == ')' {
+			case ')':
 				depth--
 				if depth == 0 {
 					return i
