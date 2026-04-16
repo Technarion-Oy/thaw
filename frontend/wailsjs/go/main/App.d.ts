@@ -181,6 +181,8 @@ export function GetProcedureParams(arg1:string,arg2:string,arg3:string,arg4:stri
 
 export function GetQueryHistory(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:number,arg8:boolean):Promise<Array<main.QueryHistoryRow>>;
 
+export function GetQuotedIdentifiersIgnoreCase():Promise<boolean>;
+
 export function GetRoleDDL(arg1:string):Promise<string>;
 
 export function GetSchemaCrossDeps(arg1:string,arg2:string):Promise<Array<snowflake.SchemaRef>>;

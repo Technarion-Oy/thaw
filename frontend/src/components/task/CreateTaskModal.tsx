@@ -14,7 +14,8 @@ import {
   Typography, Divider, InputNumber, Button, Tag, Alert,
 } from "antd";
 import { ClockCircleOutlined, PlusOutlined, InfoCircleOutlined } from "@ant-design/icons";
-import { ListWarehouses, ListNotificationIntegrations, ListObjects, ExecDDL } from "../../../wailsjs/go/main/App";
+import { ListWarehouses, ListNotificationIntegrations, ListObjects, ExecDDL, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/main/App";
+import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import ScheduleEditor from "./ScheduleEditor";
 import WhenConditionBuilder from "./WhenConditionBuilder";
 
@@ -27,6 +28,7 @@ const NO_INTEGRATION = "";
 
 interface TaskConfig {
   name: string;
+  caseSensitive: boolean;
   orReplace: boolean;
   ifNotExists: boolean;
   computeType: "warehouse" | "serverless";
@@ -57,6 +59,7 @@ interface TaskConfig {
 
 const DEFAULTS: TaskConfig = {
   name: "",
+  caseSensitive: false,
   orReplace: false,
   ifNotExists: false,
   computeType: "warehouse",
@@ -93,8 +96,9 @@ function buildSql(db: string, schema: string, cfg: TaskConfig): string {
   createClause += " TASK";
   if (cfg.ifNotExists && !cfg.orReplace) createClause += " IF NOT EXISTS";
 
+  const nameToken = identToken(cfg.name || "task_name", cfg.caseSensitive);
   const lines: string[] = [
-    `${createClause} "${esc(db)}"."${esc(schema)}"."${esc(cfg.name || "task_name")}"`,
+    `${createClause} "${esc(db)}"."${esc(schema)}".${nameToken}`,
   ];
 
   // Compute
@@ -191,6 +195,7 @@ export default function CreateTaskModal({
   const [taskSearchVal, setTaskSearchVal] = useState<string | undefined>(undefined);
   const [creating,        setCreating]        = useState(false);
   const [createError,     setCreateError]     = useState<string | null>(null);
+  const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
   // Show warehouse validation error only after the user has touched the field
   // or attempted to submit — avoids red border on fresh dialog open.
   const [warehouseTouched, setWarehouseTouched] = useState(false);
@@ -198,6 +203,10 @@ export default function CreateTaskModal({
   useEffect(() => {
     ListWarehouses().then((whs) => setWarehouses(whs ?? [])).catch(() => {});
     ListNotificationIntegrations().then((ints) => setIntegrations(ints ?? [])).catch(() => {});
+    Promise.resolve()
+      .then(() => GetQuotedIdentifiersIgnoreCase())
+      .then((v) => setQuotedIdentifiersIgnoreCase(v ?? false))
+      .catch(() => {});
     ListObjects(db, schema)
       .then((objs) => {
         const tasks = (objs ?? [])
@@ -297,14 +306,14 @@ export default function CreateTaskModal({
 
         {/* Task name + create options */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0 16px", alignItems: "end" }}>
-          <Form.Item label="Task name" required style={itemStyle}>
+          <Form.Item label="Task name" required style={{ marginBottom: 4 }}>
             <Input
               value={cfg.name}
               onChange={(e) => set("name", e.target.value)}
               placeholder="MY_TASK"
             />
           </Form.Item>
-          <Form.Item style={itemStyle}>
+          <Form.Item style={{ marginBottom: 4 }}>
             <Space direction="vertical" size={4}>
               <Checkbox
                 checked={cfg.orReplace}
@@ -325,6 +334,14 @@ export default function CreateTaskModal({
             </Space>
           </Form.Item>
         </div>
+        <Form.Item style={itemStyle}>
+          <ObjectNameCaseControl
+            name={cfg.name}
+            caseSensitive={cfg.caseSensitive}
+            onCaseSensitiveChange={(v) => set("caseSensitive", v)}
+            quotedIdentifiersIgnoreCase={quotedIdentifiersIgnoreCase}
+          />
+        </Form.Item>
 
         {divider("Compute")}
 

@@ -14,13 +14,15 @@ import {
   Divider, InputNumber, Button, message,
 } from "antd";
 import { UserAddOutlined, KeyOutlined } from "@ant-design/icons";
-import { ListWarehouses, ListRoles, ExecuteQuery } from "../../../wailsjs/go/main/App";
+import { ListWarehouses, ListRoles, ExecuteQuery, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/main/App";
+import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import KeyPairAuthModal from "./KeyPairAuthModal";
 
 const { Text } = Typography;
 
 interface FormState {
   name: string;
+  caseSensitive: boolean;
   password: string;
   loginName: string;
   displayName: string;
@@ -39,6 +41,7 @@ interface FormState {
 
 const DEFAULTS: FormState = {
   name: "",
+  caseSensitive: false,
   password: "",
   loginName: "",
   displayName: "",
@@ -56,7 +59,6 @@ const DEFAULTS: FormState = {
 };
 
 function buildCreateSql(form: FormState): string {
-  const esc = (s: string) => s.replace(/"/g, '""');
   const sq  = (s: string) => `'${s.replace(/'/g, "''")}'`;
 
   const props: string[] = [];
@@ -76,8 +78,8 @@ function buildCreateSql(form: FormState): string {
   if (form.daysToExpiry.trim())    props.push(`    DAYS_TO_EXPIRY = ${form.daysToExpiry.trim()}`);
   props.push(`    DISABLED = ${form.disabled ? "TRUE" : "FALSE"}`);
 
-  const name = form.name.trim() || "NEW_USER";
-  return `CREATE USER "${esc(name)}"\n${props.join("\n")};`;
+  const nameToken = identToken(form.name.trim() || "NEW_USER", form.caseSensitive);
+  return `CREATE USER ${nameToken}\n${props.join("\n")};`;
 }
 
 interface Props {
@@ -91,10 +93,15 @@ export default function CreateUserModal({ onClose, onSuccess }: Props) {
   const [roles, setRoles]           = useState<string[]>([]);
   const [saving, setSaving]         = useState(false);
   const [showKeyPair, setShowKeyPair] = useState(false);
+  const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
 
   useEffect(() => {
     ListWarehouses().then((w) => setWarehouses(w ?? [])).catch(() => {});
     ListRoles().then((r)      => setRoles(r ?? [])).catch(() => {});
+    Promise.resolve()
+      .then(() => GetQuotedIdentifiersIgnoreCase())
+      .then((v) => setQuotedIdentifiersIgnoreCase(v ?? false))
+      .catch(() => {});
   }, []);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -140,11 +147,19 @@ export default function CreateUserModal({ onClose, onSuccess }: Props) {
     >
       <Form layout="vertical" size="small">
 
-        <Form.Item label="Username" required style={itemStyle}>
+        <Form.Item label="Username" required style={{ marginBottom: 4 }}>
           <Input
             value={form.name}
             onChange={(e) => set("name", e.target.value)}
             placeholder="JOHN_DOE"
+          />
+        </Form.Item>
+        <Form.Item style={itemStyle}>
+          <ObjectNameCaseControl
+            name={form.name}
+            caseSensitive={form.caseSensitive}
+            onCaseSensitiveChange={(v) => set("caseSensitive", v)}
+            quotedIdentifiersIgnoreCase={quotedIdentifiersIgnoreCase}
           />
         </Form.Item>
 

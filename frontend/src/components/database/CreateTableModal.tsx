@@ -8,14 +8,15 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Modal, Form, Input, Select, Checkbox, Radio, Space,
   Typography, Divider, InputNumber, Button, Table, Tooltip, Alert,
 } from "antd";
 import { TableOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { ExecDDL } from "../../../wailsjs/go/main/App";
+import { ExecDDL, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/main/App";
+import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 
 const { Text } = Typography;
 
@@ -32,6 +33,7 @@ interface ColumnDef {
 
 interface TableConfig {
   name: string;
+  caseSensitive: boolean;
   orReplace: boolean;
   ifNotExists: boolean;
   tableType: "PERMANENT" | "TRANSIENT" | "TEMPORARY" | "VOLATILE";
@@ -46,6 +48,7 @@ interface TableConfig {
 
 const DEFAULTS: TableConfig = {
   name: "",
+  caseSensitive: false,
   orReplace: false,
   ifNotExists: false,
   tableType: "PERMANENT",
@@ -66,16 +69,17 @@ function buildSql(db: string, schema: string, cfg: TableConfig): string {
 
   let createClause = "CREATE";
   if (cfg.orReplace) createClause += " OR REPLACE";
-  
+
   if (cfg.tableType !== "PERMANENT") {
     createClause += ` ${cfg.tableType}`;
   }
-  
+
   createClause += " TABLE";
   if (cfg.ifNotExists && !cfg.orReplace) createClause += " IF NOT EXISTS";
 
+  const nameToken = identToken(cfg.name || "table_name", cfg.caseSensitive);
   const lines: string[] = [
-    `${createClause} "${esc(db)}"."${esc(schema)}"."${esc(cfg.name || "table_name")}" (`,
+    `${createClause} "${esc(db)}"."${esc(schema)}".${nameToken} (`,
   ];
 
   // Columns
@@ -114,6 +118,14 @@ export default function CreateTableModal({ db, schema, onClose, onSuccess }: Pro
   const [cfg, setCfg] = useState<TableConfig>(DEFAULTS);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
+
+  useEffect(() => {
+    Promise.resolve()
+      .then(() => GetQuotedIdentifiersIgnoreCase())
+      .then((v) => setQuotedIdentifiersIgnoreCase(v ?? false))
+      .catch(() => {});
+  }, []);
 
   const set = <K extends keyof TableConfig>(key: K, value: TableConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
@@ -301,14 +313,14 @@ export default function CreateTableModal({ db, schema, onClose, onSuccess }: Pro
 
       <Form layout="vertical" size="small">
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0 16px", alignItems: "end" }}>
-          <Form.Item label="Table name" required style={{ marginBottom: 12 }}>
+          <Form.Item label="Table name" required style={{ marginBottom: 4 }}>
             <Input
               value={cfg.name}
               onChange={(e) => set("name", e.target.value)}
               placeholder="MY_TABLE"
             />
           </Form.Item>
-          <Form.Item style={{ marginBottom: 12 }}>
+          <Form.Item style={{ marginBottom: 4 }}>
             <Space direction="vertical" size={4}>
               <Checkbox
                 checked={cfg.orReplace}
@@ -329,6 +341,14 @@ export default function CreateTableModal({ db, schema, onClose, onSuccess }: Pro
             </Space>
           </Form.Item>
         </div>
+        <Form.Item style={{ marginBottom: 12 }}>
+          <ObjectNameCaseControl
+            name={cfg.name}
+            caseSensitive={cfg.caseSensitive}
+            onCaseSensitiveChange={(v) => set("caseSensitive", v)}
+            quotedIdentifiersIgnoreCase={quotedIdentifiersIgnoreCase}
+          />
+        </Form.Item>
 
         <Form.Item label="Table type" style={{ marginBottom: 12 }}>
           <Radio.Group

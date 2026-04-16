@@ -1011,6 +1011,17 @@ func (a *App) GetSessionContext() (snowflake.SessionContext, error) {
 	return a.client.GetSessionContext(a.ctx)
 }
 
+// GetQuotedIdentifiersIgnoreCase returns true when the current session's
+// QUOTED_IDENTIFIERS_IGNORE_CASE parameter is TRUE, meaning Snowflake treats
+// quoted identifiers as case-insensitive (double-quoting does not preserve
+// case). The frontend uses this to warn users when creating objects.
+func (a *App) GetQuotedIdentifiersIgnoreCase() (bool, error) {
+	if a.client == nil {
+		return false, ErrNotConnected
+	}
+	return a.client.GetQuotedIdentifiersIgnoreCase(a.ctx)
+}
+
 // ListRoles returns all roles visible to the current role (SHOW ROLES).
 // Used for informational displays and user-management role pickers.
 func (a *App) ListRoles() ([]string, error) {

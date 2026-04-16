@@ -10,7 +10,8 @@
 
 import { useState, useEffect } from "react";
 import { Modal, Form, Input, Select, Switch, Button, Alert, InputNumber } from "antd";
-import { ExecuteQuery, GetCurrentRegion } from "../../../wailsjs/go/main/App";
+import { ExecuteQuery, GetCurrentRegion, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/main/App";
+import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 
 const { TextArea } = Input;
 
@@ -30,7 +31,7 @@ function ident(s: string): string {
 }
 
 function buildStorageSql(vals: Record<string, unknown>): string {
-  const name = ident(String(vals.name ?? ""));
+  const name = identToken(String(vals.name ?? ""), Boolean(vals.caseSensitive));
   const provider = String(vals.provider ?? "S3");
   const enabled = vals.enabled !== false ? "TRUE" : "FALSE";
   const lines: string[] = [
@@ -59,7 +60,7 @@ function buildStorageSql(vals: Record<string, unknown>): string {
 }
 
 function buildApiSql(vals: Record<string, unknown>): string {
-  const name = ident(String(vals.name ?? ""));
+  const name = identToken(String(vals.name ?? ""), Boolean(vals.caseSensitive));
   const provider = String(vals.provider ?? "aws_api_gateway");
   const enabled = vals.enabled !== false ? "TRUE" : "FALSE";
   const lines: string[] = [
@@ -86,7 +87,7 @@ function buildApiSql(vals: Record<string, unknown>): string {
 }
 
 function buildCatalogSql(vals: Record<string, unknown>): string {
-  const name = ident(String(vals.name ?? ""));
+  const name = identToken(String(vals.name ?? ""), Boolean(vals.caseSensitive));
   const source = String(vals.source ?? "GLUE");
   const enabled = vals.enabled !== false ? "TRUE" : "FALSE";
   const lines: string[] = [
@@ -135,7 +136,7 @@ function buildCatalogSql(vals: Record<string, unknown>): string {
 }
 
 function buildExternalAccessSql(vals: Record<string, unknown>): string {
-  const name = ident(String(vals.name ?? ""));
+  const name = identToken(String(vals.name ?? ""), Boolean(vals.caseSensitive));
   const enabled = vals.enabled !== false ? "TRUE" : "FALSE";
   const lines: string[] = [
     `CREATE EXTERNAL ACCESS INTEGRATION ${name}`,
@@ -160,7 +161,7 @@ function buildExternalAccessSql(vals: Record<string, unknown>): string {
 }
 
 function buildNotificationSql(vals: Record<string, unknown>): string {
-  const name = ident(String(vals.name ?? ""));
+  const name = identToken(String(vals.name ?? ""), Boolean(vals.caseSensitive));
   const subtype = String(vals.subtype ?? "EMAIL");
   const lines: string[] = [`CREATE NOTIFICATION INTEGRATION ${name}`];
 
@@ -211,7 +212,7 @@ function buildNotificationSql(vals: Record<string, unknown>): string {
 }
 
 function buildSecuritySql(vals: Record<string, unknown>): string {
-  const name = ident(String(vals.name ?? ""));
+  const name = identToken(String(vals.name ?? ""), Boolean(vals.caseSensitive));
   const secType = String(vals.secType ?? "OAUTH");
   const enabled = vals.enabled !== false ? "TRUE" : "FALSE";
   const lines: string[] = [`CREATE SECURITY INTEGRATION ${name}`];
@@ -747,12 +748,15 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState<string | null>(null);
+  const [caseSensitive, setCaseSensitive] = useState(false);
+  const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
 
   // Provider / subtype state tracked as watched form value
-  const provider = Form.useWatch("provider", form) as string | undefined;
-  const source   = Form.useWatch("source",   form) as string | undefined;
-  const subtype  = Form.useWatch("subtype",  form) as string | undefined;
-  const secType  = Form.useWatch("secType",  form) as string | undefined;
+  const provider  = Form.useWatch("provider", form) as string | undefined;
+  const source    = Form.useWatch("source",   form) as string | undefined;
+  const subtype   = Form.useWatch("subtype",  form) as string | undefined;
+  const secType   = Form.useWatch("secType",  form) as string | undefined;
+  const nameValue = (Form.useWatch("name",    form) as string | undefined) ?? "";
 
   useEffect(() => {
     GetCurrentRegion()
@@ -764,6 +768,10 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
         }
       })
       .catch(() => {});
+    Promise.resolve()
+      .then(() => GetQuotedIdentifiersIgnoreCase())
+      .then((v) => setQuotedIdentifiersIgnoreCase(v ?? false))
+      .catch(() => {});
   }, [kind, form]);
 
   const submit = async () => {
@@ -773,6 +781,7 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
     } catch {
       return;
     }
+    vals.caseSensitive = caseSensitive;
     setLoading(true);
     setError(null);
     try {
@@ -808,8 +817,16 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
     >
       <div style={{ maxHeight: "65vh", overflowY: "auto", paddingRight: 8 }}>
         <Form form={form} layout="vertical" size="small">
-          <Form.Item name="name" label="Integration Name" rules={[{ required: true, message: "Required" }]}>
+          <Form.Item name="name" label="Integration Name" rules={[{ required: true, message: "Required" }]} style={{ marginBottom: 4 }}>
             <Input placeholder="MY_INTEGRATION" />
+          </Form.Item>
+          <Form.Item style={{ marginBottom: 12 }}>
+            <ObjectNameCaseControl
+              name={nameValue}
+              caseSensitive={caseSensitive}
+              onCaseSensitiveChange={setCaseSensitive}
+              quotedIdentifiersIgnoreCase={quotedIdentifiersIgnoreCase}
+            />
           </Form.Item>
 
           <Form.Item name="enabled" label="Enabled" valuePropName="checked" initialValue={true}>
