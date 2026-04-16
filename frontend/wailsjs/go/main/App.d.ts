@@ -65,7 +65,7 @@ export function CheckAvailableKeyTools():Promise<Array<string>>;
 
 export function CheckSnowparkEnv():Promise<main.SnowparkCheckResult>;
 
-export function CloneChildTask(arg1:string,arg2:string,arg3:string,arg4:string,arg5:Array<string>):Promise<void>;
+export function CloneChildTask(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean,arg6:Array<string>):Promise<void>;
 
 export function ComputeJoinOnConditions(arg1:sqleditor.JoinOnSuggestionsReq):Promise<Array<sqleditor.JoinCondition>>;
 
@@ -73,7 +73,7 @@ export function Connect(arg1:snowflake.ConnectParams):Promise<void>;
 
 export function CreateBackupPolicy(arg1:string,arg2:string,arg3:number,arg4:boolean,arg5:string,arg6:string,arg7:boolean,arg8:boolean):Promise<void>;
 
-export function CreateBackupSet(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:boolean,arg8:boolean):Promise<void>;
+export function CreateBackupSet(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:boolean,arg8:boolean,arg9:boolean):Promise<void>;
 
 export function CreateDbtProject(arg1:dbt.CreateRequest,arg2:Record<string, Array<string>>):Promise<dbt.CreateResult>;
 

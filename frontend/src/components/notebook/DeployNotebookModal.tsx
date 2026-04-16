@@ -13,8 +13,9 @@ import {
   Modal, Form, Input, Select, InputNumber, Checkbox, Space, Typography, Divider, message,
 } from "antd";
 import { CloudUploadOutlined } from "@ant-design/icons";
-import { DeployNotebook, ListSchemas } from "../../../wailsjs/go/main/App";
+import { DeployNotebook, ListSchemas, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/main/App";
 import { useSessionStore } from "../../store/sessionStore";
+import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 
 const { Text } = Typography;
 
@@ -33,6 +34,9 @@ interface Props {
 export default function DeployNotebookModal({ open, filePath, content, defaultName, onClose, onDeployed }: Props) {
   const [form] = Form.useForm();
   const [deploying, setDeploying] = useState(false);
+  const [caseSensitive, setCaseSensitive] = useState(false);
+  const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
+  const nameValue: string = Form.useWatch("name", form) ?? "";
 
   const [schemas, setSchemas]       = useState<string[]>([]);
   const [loadingSchemas, setLoadingSchemas] = useState(false);
@@ -52,6 +56,8 @@ export default function DeployNotebookModal({ open, filePath, content, defaultNa
     if (!open) return;
     loadDatabases();
     loadWarehouses();
+    setCaseSensitive(false);
+    GetQuotedIdentifiersIgnoreCase().then((v) => setQuotedIdentifiersIgnoreCase(v ?? false)).catch(() => {});
 
     form.setFieldsValue({
       name: baseName,
@@ -101,6 +107,7 @@ export default function DeployNotebookModal({ open, filePath, content, defaultNa
         database:                values.database as string,
         schema:                  values.schema as string,
         name:                    values.name as string,
+        caseSensitive,
         filePath,
         content,
         orReplace:               (values.orReplace as boolean) ?? false,
@@ -111,7 +118,7 @@ export default function DeployNotebookModal({ open, filePath, content, defaultNa
         runtimeName:             (values.runtimeName as string) ?? "",
         computePool:             (values.computePool as string) ?? "",
         warehouse:               (values.warehouse as string) ?? "",
-      });
+      } as any);
       message.success(`Notebook "${values.name}" deployed to Snowflake`);
       onDeployed();
       onClose();
@@ -169,8 +176,16 @@ export default function DeployNotebookModal({ open, filePath, content, defaultNa
           />
         </Form.Item>
 
-        <Form.Item label="Notebook name" name="name" rules={[{ required: true, message: "Required" }]}>
+        <Form.Item label="Notebook name" name="name" rules={[{ required: true, message: "Required" }]} style={{ marginBottom: 4 }}>
           <Input placeholder="MY_NOTEBOOK" />
+        </Form.Item>
+        <Form.Item style={{ marginBottom: 12 }}>
+          <ObjectNameCaseControl
+            name={nameValue}
+            caseSensitive={caseSensitive}
+            onCaseSensitiveChange={setCaseSensitive}
+            quotedIdentifiersIgnoreCase={quotedIdentifiersIgnoreCase}
+          />
         </Form.Item>
 
         <Space>

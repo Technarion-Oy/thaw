@@ -73,6 +73,21 @@ func NeedsQuoting(name string) bool {
 	return reserved
 }
 
+// QuoteIdent wraps name in double-quotes, escaping any embedded double-quotes.
+func QuoteIdent(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+// QuoteOrBare returns a double-quoted identifier when caseSensitive is true or
+// when the name requires quoting (invalid bare identifier or reserved keyword);
+// otherwise it returns the name unquoted (Snowflake will uppercase it).
+func QuoteOrBare(name string, caseSensitive bool) string {
+	if caseSensitive || NeedsQuoting(name) {
+		return QuoteIdent(name)
+	}
+	return name
+}
+
 // GetQuotedIdentifiersIgnoreCase returns the current session value of the
 // QUOTED_IDENTIFIERS_IGNORE_CASE parameter. When true, Snowflake treats
 // identifiers as case-insensitive regardless of whether they are quoted,

@@ -3196,13 +3196,14 @@ func (c *Client) SetNotebookQueryWarehouse(ctx context.Context, database, schema
 // DeployNotebookParams holds the parameters for deploying a local .ipynb
 // notebook to Snowflake via a temporary internal stage.
 type DeployNotebookParams struct {
-	Database    string `json:"database"`
-	Schema      string `json:"schema"`
-	Name        string `json:"name"`        // notebook object name in Snowflake
-	FilePath    string `json:"filePath"`    // absolute local path to the .ipynb file; mutually exclusive with Content
-	Content     string `json:"content"`     // raw nbformat JSON; used when FilePath is empty (unsaved notebooks)
-	OrReplace   bool   `json:"orReplace"`
-	IfNotExists bool   `json:"ifNotExists"`
+	Database      string `json:"database"`
+	Schema        string `json:"schema"`
+	Name          string `json:"name"`          // notebook object name in Snowflake
+	CaseSensitive bool   `json:"caseSensitive"` // when true, Name is double-quoted exactly; otherwise unquoted if valid
+	FilePath      string `json:"filePath"`      // absolute local path to the .ipynb file; mutually exclusive with Content
+	Content       string `json:"content"`       // raw nbformat JSON; used when FilePath is empty (unsaved notebooks)
+	OrReplace     bool   `json:"orReplace"`
+	IfNotExists   bool   `json:"ifNotExists"`
 	// Optional CREATE NOTEBOOK clauses
 	Comment                 string `json:"comment"`
 	QueryWarehouse          string `json:"queryWarehouse"`          // warehouse for SQL queries inside the notebook
@@ -3267,7 +3268,7 @@ func (c *Client) DeployNotebook(ctx context.Context, params DeployNotebookParams
 	putRows.Close() //nolint:errcheck
 
 	// Build the CREATE NOTEBOOK statement.
-	notebookRef := fmt.Sprintf(`"%s"."%s"."%s"`, esc(params.Database), esc(params.Schema), esc(params.Name))
+	notebookRef := fmt.Sprintf(`"%s"."%s".%s`, esc(params.Database), esc(params.Schema), QuoteOrBare(params.Name, params.CaseSensitive))
 	mainFile := filepath.Base(params.FilePath)
 
 	var sb strings.Builder

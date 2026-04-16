@@ -1,10 +1,11 @@
 // Copyright (c) 2026 Technarion Oy. All rights reserved.
 // ... (license header remains the same)
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Modal, Form, Input, Select, Button, Space, Typography, Alert } from "antd";
 import { CopyOutlined } from "@ant-design/icons";
-import { CloneChildTask } from "../../../wailsjs/go/main/App";
+import { CloneChildTask, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/main/App";
+import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 
 const { Text } = Typography;
 
@@ -21,9 +22,15 @@ export default function CopyTaskModal({
   db, schema, sourceTaskName, graphTaskNames, onClose, onSuccess,
 }: Props) {
   const [newName,     setNewName]     = useState("");
+  const [caseSensitive, setCaseSensitive] = useState(false);
+  const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
   const [afterTasks,  setAfterTasks]  = useState<string[]>([]);
   const [submitting,  setSubmitting]  = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  useEffect(() => {
+    GetQuotedIdentifiersIgnoreCase().then((v) => setQuotedIdentifiersIgnoreCase(v ?? false)).catch(() => {});
+  }, []);
 
   // Duplicate-name check against all tasks currently visible in the graph.
   const isDuplicate =
@@ -37,7 +44,7 @@ export default function CopyTaskModal({
     setSubmitting(true);
     setSubmitError(null);
     try {
-      await CloneChildTask(db, schema, sourceTaskName, newName.trim(), afterTasks);
+      await CloneChildTask(db, schema, sourceTaskName, newName.trim(), caseSensitive, afterTasks);
       onSuccess?.();
       onClose();
     } catch (err) {
@@ -93,7 +100,7 @@ export default function CopyTaskModal({
         <Form.Item
           label="New task name"
           required
-          style={{ marginBottom: 12 }}
+          style={{ marginBottom: 4 }}
           validateStatus={isDuplicate ? "error" : ""}
           help={
             isDuplicate
@@ -108,6 +115,14 @@ export default function CopyTaskModal({
             autoFocus
             onPressEnter={handleSubmit}
             status={isDuplicate ? "error" : ""}
+          />
+        </Form.Item>
+        <Form.Item style={{ marginBottom: 12 }}>
+          <ObjectNameCaseControl
+            name={newName}
+            caseSensitive={caseSensitive}
+            onCaseSensitiveChange={setCaseSensitive}
+            quotedIdentifiersIgnoreCase={quotedIdentifiersIgnoreCase}
           />
         </Form.Item>
 

@@ -2487,11 +2487,13 @@ func (a *App) ListFinalizableTasks(database, schema string) ([]tasks.Finalizabil
 }
 
 // CloneChildTask clones a task and replaces its predecessors.
-func (a *App) CloneChildTask(database, schema, oldName, newName string, newPredecessors []string) error {
+// caseSensitive controls whether newName is double-quoted (preserving exact case)
+// or left unquoted when it is a valid bare identifier (Snowflake uppercases it).
+func (a *App) CloneChildTask(database, schema, oldName, newName string, caseSensitive bool, newPredecessors []string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	return tasks.CloneChildTask(a.ctx, a.client, database, schema, oldName, newName, newPredecessors)
+	return tasks.CloneChildTask(a.ctx, a.client, database, schema, oldName, newName, caseSensitive, newPredecessors)
 }
 
 // GetTaskStatuses returns the current state and last-run result for every task in the given schema.
@@ -3746,7 +3748,10 @@ func (a *App) ListBackupSets(scopeType, db, schema, table, nameFilter string) ([
 // nameDb and nameSchema locate the backup set object itself (its fully-qualified name).
 // db is the database name used to set the session context before the CREATE.
 // objectFQN is the fully-qualified target object, e.g. "MY_DB" or "MY_DB"."MY_SCHEMA"."MY_TABLE".
-func (a *App) CreateBackupSet(name, nameDb, nameSchema, forType, objectFQN, db string, orReplace, ifNotExists bool) error {
+// CreateBackupSet creates a new backup set for a DATABASE, SCHEMA, or TABLE.
+// caseSensitive controls whether the backup set name is double-quoted (preserving
+// exact case) or left unquoted when it is a valid bare identifier.
+func (a *App) CreateBackupSet(name, nameDb, nameSchema, forType, objectFQN, db string, orReplace, ifNotExists, caseSensitive bool) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
@@ -3761,14 +3766,15 @@ func (a *App) CreateBackupSet(name, nameDb, nameSchema, forType, objectFQN, db s
 	}
 
 	// Build the (optionally fully-qualified) backup set name.
+	nameToken := snowflake.QuoteOrBare(name, caseSensitive)
 	var nameFQN string
 	switch {
 	case nameDb != "" && nameSchema != "":
-		nameFQN = q(nameDb) + "." + q(nameSchema) + "." + q(name)
+		nameFQN = q(nameDb) + "." + q(nameSchema) + "." + nameToken
 	case nameDb != "":
-		nameFQN = q(nameDb) + "." + q(name)
+		nameFQN = q(nameDb) + "." + nameToken
 	default:
-		nameFQN = q(name)
+		nameFQN = nameToken
 	}
 
 	var sb strings.Builder
