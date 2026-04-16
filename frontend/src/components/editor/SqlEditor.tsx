@@ -25,7 +25,7 @@ import { useObjectStore } from "../../store/objectStore";
 import { useSessionStore } from "../../store/sessionStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, GetAllDataTypes, ValidateSnowflakePatterns, ValidateTablesExist, ValidateBareColumnRefs } from "../../../wailsjs/go/main/App";
+import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, GetAllDataTypes, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs } from "../../../wailsjs/go/main/App";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 
@@ -534,6 +534,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const patternMarkers = await ValidateSnowflakePatterns(diagSql, stmtRanges);
         if (model.getVersionId() !== diagVersion) return;
         diagMarkers.push(...((patternMarkers || []) as DiagMarker[]));
+
+        const dataTypeMarkers = await ValidateDataTypes(diagSql, stmtRanges);
+        if (model.getVersionId() !== diagVersion) return;
+        diagMarkers.push(...((dataTypeMarkers || []) as DiagMarker[]));
 
         const rawRefs = await ParseJoinTableRefs(diagSql);
         if (model.getVersionId() !== diagVersion) return;

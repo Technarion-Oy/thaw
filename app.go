@@ -1798,6 +1798,13 @@ func (a *App) ValidateSnowflakePatterns(sql string, stmtRanges []sqleditor.State
 	return sqleditor.ValidateSnowflakePatterns(sql, stmtRanges)
 }
 
+// ValidateDataTypes checks CREATE TABLE, ALTER TABLE ADD COLUMN, CAST(), and
+// shorthand cast (::) expressions for unrecognized Snowflake data type names.
+// No Snowflake connection is required.
+func (a *App) ValidateDataTypes(sql string, stmtRanges []sqleditor.StatementRange) []sqleditor.DiagMarker {
+	return sqleditor.ValidateDataTypes(sql, stmtRanges)
+}
+
 // ValidateTablesExist checks SELECT/CREATE/ALTER/DROP/UNDROP statements for
 // references to databases, schemas, or tables that are absent from the resolved
 // references or known catalogs.  No Snowflake connection is required.

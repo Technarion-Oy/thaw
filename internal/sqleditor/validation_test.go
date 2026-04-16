@@ -284,12 +284,16 @@ func TestValidateTablesExist_Valid(t *testing.T) {
 		"CREATE TABLE local_t (id INT);\nDROP TABLE local_t;\nUNDROP TABLE local_t;\nSELECT * FROM local_t;",
 		"CREATE DATABASE local_db;\nDROP DATABASE local_db;\nUNDROP DATABASE local_db;\nCREATE SCHEMA local_db.sch;",
 		"CREATE DATABASE local_db;\nCREATE SCHEMA local_db.sch;\nDROP SCHEMA local_db.sch;\nUNDROP SCHEMA local_db.sch;\nCREATE TABLE local_db.sch.t1 (id INT);",
+
+		// USE bare two-part: db.schema (no keyword) with known db and schema
+		"use GOVERNANCE.public;",
+		"use GOVERNANCE.public;\nCREATE TABLE test_1 (id INT);",
 	}
 
 	req := ValidateTablesExistRequest{
 		ResolvedRefs:   getLiveRefs(),
-		KnownDatabases: []string{"DB"},
-		KnownSchemas:   []SchemaEntry{{DB: "DB", Name: "SCH"}},
+		KnownDatabases: []string{"DB", "GOVERNANCE"},
+		KnownSchemas:   []SchemaEntry{{DB: "DB", Name: "SCH"}, {DB: "GOVERNANCE", Name: "PUBLIC"}},
 	}
 
 	for _, sql := range validQueries {
@@ -339,7 +343,7 @@ func TestValidateTablesExist_Invalid(t *testing.T) {
 	req := ValidateTablesExistRequest{
 		ResolvedRefs:   getLiveRefs(),
 		KnownDatabases: []string{"DB", "GOVERNANCE"},
-		KnownSchemas:   []SchemaEntry{{DB: "DB", Name: "SCH"}},
+		KnownSchemas:   []SchemaEntry{{DB: "DB", Name: "SCH"}, {DB: "GOVERNANCE", Name: "PUBLIC"}},
 	}
 
 	for _, tt := range tests {
@@ -519,6 +523,16 @@ create table my_table (
   my_codffsf varchard
 );`,
 			expectedError: "Unknown data type 'VARCHARD'",
+		},
+		{
+			name: "Invalid datatype after USE, comment in column list, no trailing semicolon",
+			sql: `use GOVERNANCE.public;
+
+create table my_table (
+  -- Should complain about incorrect datatype
+  my_codffsf varchardc
+)`,
+			expectedError: "Unknown data type 'VARCHARDC'",
 		},
 		{
 			name:          "Invalid datatype in ALTER TABLE",
