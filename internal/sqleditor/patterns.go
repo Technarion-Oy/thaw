@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	sf "thaw/internal/snowflake"
 )
 
 // ── Precompiled regexes for ValidateSnowflakePatterns ─────────────────────────
@@ -183,18 +185,6 @@ var (
 // errors.  It is a pure Go replacement for the validateWithParser function in
 // sqlDiagnostics.ts; the node-sql-parser dependency is dropped because
 // ValidateSyntax already covers generic syntax errors via its tokenizer.
-//
-// Checks performed (all return severity 4 = Monaco Warning):
-//   - LATERALFLATTEN typo
-//   - FLATTEN used without LATERAL / TABLE(FLATTEN)
-//   - Variant path written with dots instead of colon (payload.x.y)
-//   - QUALIFY clause placed after ORDER BY
-//   - Invalid CREATE VIEW preamble
-//   - Invalid CREATE TABLE preamble
-//   - Invalid CREATE DATABASE / SCHEMA statement
-//   - Invalid DROP DATABASE / SCHEMA statement
-//   - Invalid CREATE / ALTER / DROP SEQUENCE statement
-//   - Invalid CREATE DYNAMIC TABLE (missing TARGET_LAG / WAREHOUSE / AS SELECT)
 func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
@@ -451,4 +441,220 @@ func findMatchingParen(s string) int {
 		}
 	}
 	return -1
+}
+
+// ── ValidateDataTypes ─────────────────────────────────────────────────────────
+
+var (
+	reCastShorthand  = regexp.MustCompile(`::\s*([a-zA-Z_][a-zA-Z0-9_]*)`)
+	reCastFunction   = regexp.MustCompile(`(?i)\b(?:TRY_)?CAST\s*\([\s\S]+?\bAS\s+([a-zA-Z_][a-zA-Z0-9_]+)`)
+	reAlterTableAdd  = regexp.MustCompile(`(?i)\bALTER\s+TABLE\s+` + _identPath + `\s+ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?` + _ident + `\s+([a-zA-Z_][a-zA-Z0-9_]*)`)
+	reCreateTableExt = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath + `\s*\(`)
+)
+
+// ValidateDataTypes checks that explicit data type declarations within
+// CREATE TABLE, ALTER TABLE, and CAST() functions exist in Snowflake's registry.
+func ValidateDataTypes(sql string, stmtRanges []StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	validTypes := make(map[string]bool)
+	for _, dt := range sf.AllDataTypes() {
+		validTypes[strings.ToUpper(dt.Name)] = true
+	}
+
+	offsetToLineCol := func(offset int) (int, int) {
+		line, col := 1, 1
+		for i := 0; i < offset && i < len(sql); i++ {
+			if sql[i] == '\n' {
+				line++
+				col = 1
+			} else {
+				col++
+			}
+		}
+		return line, col
+	}
+
+	checkType := func(typeName string, typeOffset int) {
+		up := strings.ToUpper(typeName)
+		if !validTypes[up] {
+			line, col := offsetToLineCol(typeOffset)
+			markers = append(markers, DiagMarker{
+				StartLineNumber: line,
+				StartColumn:     col,
+				EndLineNumber:   line,
+				EndColumn:       col + len(typeName),
+				Message:         fmt.Sprintf("Unknown data type '%s'", up),
+				Severity:        4, // Warning
+			})
+		}
+	}
+
+	for _, r := range stmtRanges {
+		rawText := sqlStmt(sql, r)
+		stmtOffset := r.StartOffset
+
+		// 1. Shorthand cast (::)
+		for _, m := range reCastShorthand.FindAllStringSubmatchIndex(rawText, -1) {
+			if len(m) >= 4 && m[2] != -1 {
+				typeName := rawText[m[2]:m[3]]
+				checkType(typeName, stmtOffset+m[2])
+			}
+		}
+
+		// 2. CAST / TRY_CAST function
+		for _, m := range reCastFunction.FindAllStringSubmatchIndex(rawText, -1) {
+			if len(m) >= 4 && m[2] != -1 {
+				typeName := rawText[m[2]:m[3]]
+				checkType(typeName, stmtOffset+m[2])
+			}
+		}
+
+		// 3. ALTER TABLE ... ADD
+		for _, m := range reAlterTableAdd.FindAllStringSubmatchIndex(rawText, -1) {
+			if len(m) >= 4 && m[2] != -1 {
+				typeName := rawText[m[2]:m[3]]
+				checkType(typeName, stmtOffset+m[2])
+			}
+		}
+
+		// 4. CREATE TABLE
+		if m := reCreateTableExt.FindStringSubmatchIndex(rawText); m != nil {
+			parenStart := m[1] - 1
+			colsRaw := extractBalancedBlockPat(rawText, parenStart)
+			if len(colsRaw) >= 2 {
+				colsContent := colsRaw[1 : len(colsRaw)-1] // strip the outer ()
+				contentOffset := stmtOffset + parenStart + 1
+
+				parseColumnDefs(colsContent, contentOffset, checkType)
+			}
+		}
+	}
+
+	return markers
+}
+
+// extractBalancedBlockPat returns the balanced substring starting at openIdx.
+func extractBalancedBlockPat(s string, openIdx int) string {
+	if openIdx < 0 || openIdx >= len(s) || s[openIdx] != '(' {
+		return ""
+	}
+	depth := 0
+	inSingle := false
+	inDouble := false
+	for i := openIdx; i < len(s); i++ {
+		c := s[i]
+		if c == '\'' && !inDouble {
+			inSingle = !inSingle
+		} else if c == '"' && !inSingle {
+			inDouble = !inDouble
+		} else if !inSingle && !inDouble {
+			switch c {
+			case '(':
+				depth++
+			case ')':
+				depth--
+				if depth == 0 {
+					return s[openIdx : i+1]
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func parseColumnDefs(colsContent string, contentOffset int, onTypeFound func(string, int)) {
+	depth := 0
+	inSingle := false
+	inDouble := false
+
+	startIdx := 0
+	for i := 0; i <= len(colsContent); i++ {
+		var c byte
+		if i < len(colsContent) {
+			c = colsContent[i]
+		} else {
+			c = ',' // force end of last segment
+		}
+
+		if c == '\'' && !inDouble {
+			inSingle = !inSingle
+		} else if c == '"' && !inSingle {
+			inDouble = !inDouble
+		} else if !inSingle && !inDouble {
+			switch c {
+			case '(':
+				depth++
+			case ')':
+				depth--
+			case ',':
+				if depth == 0 {
+					seg := colsContent[startIdx:i]
+					processColumnDef(seg, contentOffset+startIdx, onTypeFound)
+					startIdx = i + 1
+				}
+			}
+		}
+	}
+}
+
+func processColumnDef(seg string, segOffset int, onTypeFound func(string, int)) {
+	reWord := regexp.MustCompile(`(?i)^[a-zA-Z_][a-zA-Z0-9_]*|"[^"]+"`)
+
+	var tokens []struct {
+		text   string
+		offset int
+	}
+
+	i := 0
+	for i < len(seg) {
+		c := seg[i]
+		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+			i++
+			continue
+		}
+		// Strip line comments
+		if c == '-' && i+1 < len(seg) && seg[i+1] == '-' {
+			for i < len(seg) && seg[i] != '\n' {
+				i++
+			}
+			continue
+		}
+		// Strip block comments
+		if c == '/' && i+1 < len(seg) && seg[i+1] == '*' {
+			i += 2
+			for i < len(seg) {
+				if i+1 < len(seg) && seg[i] == '*' && seg[i+1] == '/' {
+					i += 2
+					break
+				}
+				i++
+			}
+			continue
+		}
+
+		if m := reWord.FindStringIndex(seg[i:]); m != nil {
+			tokens = append(tokens, struct {
+				text   string
+				offset int
+			}{seg[i : i+m[1]], segOffset + i})
+			i += m[1]
+			continue
+		}
+
+		i++ // skip over parens or unrecognized characters
+	}
+
+	// We need at least the column name and the datatype token
+	if len(tokens) >= 2 {
+		first := strings.ToUpper(tokens[0].text)
+		// Ignore constraint definitions
+		if first == "CONSTRAINT" || first == "PRIMARY" || first == "UNIQUE" || first == "FOREIGN" || first == "INDEX" || first == "CHECK" {
+			return
+		}
+		typeToken := tokens[1]
+		if !strings.HasPrefix(typeToken.text, `"`) {
+			onTypeFound(typeToken.text, typeToken.offset)
+		}
+	}
 }

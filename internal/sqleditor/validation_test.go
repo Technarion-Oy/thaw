@@ -488,6 +488,95 @@ $$;
 	}
 }
 
+// ── 5. ValidateDataTypes Tests ────────────────────────────────────────────────
+
+func TestValidateDataTypes(t *testing.T) {
+	tests := []struct {
+		name          string
+		sql           string
+		expectedError string // Empty string means we expect 0 errors
+	}{
+		{
+			name: "Valid datatypes in CREATE TABLE",
+			sql: `CREATE TABLE my_table (
+				id NUMBER,
+				name VARCHAR(255),
+				is_active BOOLEAN,
+				created_at TIMESTAMP_LTZ
+			);`,
+			expectedError: "",
+		},
+		{
+			name: "Invalid datatype in CREATE TABLE",
+			sql: `
+USE GOVERNANCE.PUBLIC;
+create table my_table (
+  my_codffsf varchard
+);`,
+			expectedError: "Unknown data type 'VARCHARD'",
+		},
+		{
+			name:          "Invalid datatype in ALTER TABLE",
+			sql:           `ALTER TABLE my_table ADD COLUMN new_col NUMBR;`,
+			expectedError: "Unknown data type 'NUMBR'",
+		},
+		{
+			name:          "Invalid datatype in CAST function",
+			sql:           `SELECT CAST(id AS INTT) FROM my_table;`,
+			expectedError: "Unknown data type 'INTT'",
+		},
+		{
+			name:          "Invalid datatype in shorthand cast (::)",
+			sql:           `SELECT id::FLOT FROM my_table;`,
+			expectedError: "Unknown data type 'FLOT'",
+		},
+		{
+			name:          "Valid parameterized datatype",
+			sql:           `CREATE TABLE t (price NUMBER(10, 2));`,
+			expectedError: "",
+		},
+		{
+			name:          "Valid array/object types",
+			sql:           `CREATE TABLE t (tags ARRAY, metadata OBJECT);`,
+			expectedError: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ranges := GetStatementRanges(tt.sql)
+
+			// NOTE: You will need to implement ValidateDataTypes in sqleditor.go
+			// or patterns.go for these tests to pass!
+			markers := ValidateDataTypes(tt.sql, ranges)
+
+			// Assuming we treat unknown data types as warnings (severity 4)
+			errs := getWarnings(markers)
+
+			if tt.expectedError == "" {
+				if len(errs) > 0 {
+					t.Errorf("Expected 0 errors for %q, got %d: %v", tt.name, len(errs), errs)
+				}
+			} else {
+				if len(errs) == 0 {
+					t.Fatalf("Expected error containing %q, but got 0 errors", tt.expectedError)
+				}
+
+				found := false
+				for _, e := range errs {
+					if strings.Contains(strings.ToLower(e.Message), strings.ToLower(tt.expectedError)) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected error matching %q, but got: %v", tt.expectedError, errs[0].Message)
+				}
+			}
+		})
+	}
+}
+
 // ── Helpers for tests ─────────────────────────────────────────────────────────
 
 func min(a, b int) int {
