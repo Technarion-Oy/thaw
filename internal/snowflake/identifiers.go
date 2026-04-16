@@ -13,6 +13,7 @@ package snowflake
 import (
 	"context"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -71,6 +72,18 @@ func NeedsQuoting(name string) bool {
 	}
 	_, reserved := snowflakeReservedKeywords[strings.ToUpper(name)]
 	return reserved
+}
+
+// ReservedKeywords returns the full list of Snowflake reserved keywords.
+// The returned slice is sorted alphabetically. Callers must not modify it.
+func ReservedKeywords() []string {
+	out := make([]string, 0, len(snowflakeReservedKeywords))
+	for kw := range snowflakeReservedKeywords {
+		out = append(out, kw)
+	}
+	// Sort for deterministic ordering (map iteration is random in Go).
+	sort.Strings(out)
+	return out
 }
 
 // QuoteIdent wraps name in double-quotes, escaping any embedded double-quotes.

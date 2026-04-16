@@ -183,6 +183,8 @@ export function GetQueryHistory(arg1:string,arg2:string,arg3:string,arg4:string,
 
 export function GetQuotedIdentifiersIgnoreCase():Promise<boolean>;
 
+export function GetReservedKeywords():Promise<Array<string>>;
+
 export function GetRoleDDL(arg1:string):Promise<string>;
 
 export function GetSchemaCrossDeps(arg1:string,arg2:string):Promise<Array<snowflake.SchemaRef>>;

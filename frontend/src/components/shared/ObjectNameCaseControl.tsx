@@ -9,6 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { Alert, Radio } from "antd";
+import { GetReservedKeywords } from "../../../wailsjs/go/main/App";
 
 // ── Identifier helpers ────────────────────────────────────────────────────────
 
@@ -20,11 +21,36 @@ import { Alert, Radio } from "antd";
 export const UNQUOTED_IDENT_RE = /^[A-Za-z_][A-Za-z0-9_$]{0,254}$/;
 
 /**
+ * Module-level cache of Snowflake reserved keywords (uppercased).
+ * Loaded once from the backend via GetReservedKeywords() so that
+ * needsQuoting() uses the same list as the Go NeedsQuoting() function.
+ * Starts empty; populated asynchronously on first module import.
+ */
+let _reservedKeywords: Set<string> = new Set();
+
+(function loadReservedKeywords() {
+  GetReservedKeywords()
+    .then((kws) => {
+      _reservedKeywords = new Set((kws ?? []).map((k) => k.toUpperCase()));
+    })
+    .catch(() => {
+      // Non-fatal: falls back to character-only check until next load attempt
+    });
+})();
+
+/**
  * Returns true when `name` cannot be expressed as a bare (unquoted)
  * Snowflake identifier and therefore MUST be double-quoted.
+ *
+ * Mirrors the Go backend NeedsQuoting() function: checks both the character
+ * pattern (must match UNQUOTED_IDENT_RE) and whether the name is a Snowflake
+ * reserved keyword. The reserved keyword list is loaded from the backend on
+ * first module import; until it arrives the character-pattern check alone
+ * is used (adequate for the vast majority of inputs).
  */
 export function needsQuoting(name: string): boolean {
-  return name.length === 0 || !UNQUOTED_IDENT_RE.test(name);
+  if (name.length === 0 || !UNQUOTED_IDENT_RE.test(name)) return true;
+  return _reservedKeywords.has(name.toUpperCase());
 }
 
 /**
@@ -125,9 +151,9 @@ export default function ObjectNameCaseControl({
         >
           <span>⚠</span>
           <span>
-            Name requires quoting — it contains characters not allowed in unquoted
-            identifiers (must start with a letter or _, contain only letters, digits,
-            _ or $). Case-insensitive mode is unavailable.
+            Name requires quoting — it is a reserved keyword or contains characters
+            not allowed in unquoted identifiers (must start with a letter or _,
+            contain only letters, digits, _ or $). Case-insensitive mode is unavailable.
           </span>
         </div>
       )}

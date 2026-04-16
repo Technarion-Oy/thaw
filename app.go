@@ -1022,6 +1022,16 @@ func (a *App) GetQuotedIdentifiersIgnoreCase() (bool, error) {
 	return a.client.GetQuotedIdentifiersIgnoreCase(a.ctx)
 }
 
+// GetReservedKeywords returns the canonical list of Snowflake SQL reserved
+// keywords from the backend. The frontend uses this list to replicate the same
+// quoting logic as the Go NeedsQuoting function — an identifier that matches
+// one of these keywords (case-insensitively) must be double-quoted even when
+// its characters would otherwise form a valid bare identifier.
+// No active connection is required; the list is static.
+func (a *App) GetReservedKeywords() []string {
+	return snowflake.ReservedKeywords()
+}
+
 // ListRoles returns all roles visible to the current role (SHOW ROLES).
 // Used for informational displays and user-management role pickers.
 func (a *App) ListRoles() ([]string, error) {

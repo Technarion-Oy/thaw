@@ -342,6 +342,10 @@ export function GetQuotedIdentifiersIgnoreCase() {
   return window['go']['main']['App']['GetQuotedIdentifiersIgnoreCase']();
 }
 
+export function GetReservedKeywords() {
+  return window['go']['main']['App']['GetReservedKeywords']();
+}
+
 export function GetRoleDDL(arg1) {
   return window['go']['main']['App']['GetRoleDDL'](arg1);
 }
