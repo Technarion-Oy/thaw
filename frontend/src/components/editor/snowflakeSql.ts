@@ -287,6 +287,8 @@ export const thawDarkTheme = {
     { token: "type",             foreground: "7ee787" },
     // String literals — pale blue
     { token: "string",           foreground: "a5d6ff" },
+    // f-string delimiters (Python string.escape tokens) — same pale blue
+    { token: "string.escape",    foreground: "a5d6ff" },
     // Numbers — same azure as clauses (digits are never confused with words)
     { token: "number",           foreground: "79c0ff" },
     { token: "number.float",     foreground: "79c0ff" },
@@ -294,6 +296,8 @@ export const thawDarkTheme = {
     // Comments — muted gray, italic
     { token: "comment",          foreground: "6e7681", fontStyle: "italic" },
     { token: "comment.block",    foreground: "6e7681", fontStyle: "italic" },
+    // Decorators (Python @tag tokens) — gold, same as built-in functions
+    { token: "tag",              foreground: "e3b341" },
     // Quoted identifiers — near white (same as plain identifiers)
     { token: "identifier.quoted", foreground: "e6edf3" },
     { token: "identifier",        foreground: "e6edf3" },
@@ -354,6 +358,8 @@ export const thawLightTheme = {
     { token: "type",             foreground: "0a7266" },
     // String literals — dark red
     { token: "string",           foreground: "a31515" },
+    // f-string delimiters (Python string.escape tokens) — same dark red
+    { token: "string.escape",    foreground: "a31515" },
     // Numbers — dark green
     { token: "number",           foreground: "098658" },
     { token: "number.float",     foreground: "098658" },
@@ -361,6 +367,8 @@ export const thawLightTheme = {
     // Comments — muted green, italic
     { token: "comment",          foreground: "6a737d", fontStyle: "italic" },
     { token: "comment.block",    foreground: "6a737d", fontStyle: "italic" },
+    // Decorators (Python @tag tokens) — dark amber, same as built-in functions
+    { token: "tag",              foreground: "953800" },
     // Identifiers
     { token: "identifier.quoted", foreground: "1f2328" },
     { token: "identifier",        foreground: "1f2328" },

@@ -16,6 +16,152 @@ import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import { loader } from "@monaco-editor/react";
 import * as monacoLib from "monaco-editor";
 
+// ── Inline Python Monarch grammar ─────────────────────────────────────────────
+// Defined inline instead of importing from monaco-editor/esm/vs/basic-languages/python/python.js
+// because that file begins with ~70 side-effect imports (identical to _.contribution.js)
+// which can interfere with module initialisation order in Vite's ESM bundle.
+// The grammar below is a faithful port of Monaco's built-in Python tokeniser.
+const PYTHON_MONARCH_LANGUAGE = {
+  defaultToken: "",
+  tokenPostfix: ".python",
+  keywords: [
+    "False", "None", "True", "_", "and", "as", "assert", "async", "await",
+    "break", "case", "class", "continue", "def", "del", "elif", "else",
+    "except", "exec", "finally", "for", "from", "global", "if", "import",
+    "in", "is", "lambda", "match", "nonlocal", "not", "or", "pass", "print",
+    "raise", "return", "try", "type", "while", "with", "yield",
+    // builtins treated as keywords by Monaco's built-in grammar:
+    "int", "float", "long", "complex", "hex", "abs", "all", "any", "apply",
+    "basestring", "bin", "bool", "buffer", "bytearray", "callable", "chr",
+    "classmethod", "cmp", "coerce", "compile", "complex", "delattr", "dict",
+    "dir", "divmod", "enumerate", "eval", "execfile", "file", "filter",
+    "format", "frozenset", "getattr", "globals", "hasattr", "hash", "help",
+    "id", "input", "intern", "isinstance", "issubclass", "iter", "len",
+    "locals", "list", "map", "max", "memoryview", "min", "next", "object",
+    "oct", "open", "ord", "pow", "print", "property", "reversed", "range",
+    "raw_input", "reduce", "reload", "repr", "reversed", "round", "self",
+    "set", "setattr", "slice", "sorted", "staticmethod", "str", "sum",
+    "super", "tuple", "type", "unichr", "unicode", "vars", "xrange", "zip",
+    "__dict__", "__methods__", "__members__", "__class__", "__bases__",
+    "__name__", "__mro__", "__subclasses__", "__init__", "__import__",
+  ],
+  brackets: [
+    { open: "{", close: "}", token: "delimiter.curly" },
+    { open: "[", close: "]", token: "delimiter.bracket" },
+    { open: "(", close: ")", token: "delimiter.parenthesis" },
+  ],
+  tokenizer: {
+    root: [
+      { include: "@whitespace" },
+      { include: "@numbers" },
+      { include: "@strings" },
+      [/[,:;]/, "delimiter"],
+      [/[{}\[\]()]/, "@brackets"],
+      [/@[a-zA-Z_]\w*/, "tag"],
+      [/[a-zA-Z_]\w*/, { cases: { "@keywords": "keyword", "@default": "identifier" } }],
+    ],
+    whitespace: [
+      [/\s+/, "white"],
+      [/(^#.*$)/, "comment"],
+      [/'''/, "string", "@endDocString"],
+      [/"""/, "string", "@endDblDocString"],
+    ],
+    endDocString: [
+      [/[^']+/, "string"],
+      [/\\'/, "string"],
+      [/'''/, "string", "@popall"],
+      [/'/, "string"],
+    ],
+    endDblDocString: [
+      [/[^"]+/, "string"],
+      [/\\"/, "string"],
+      [/"""/, "string", "@popall"],
+      [/"/, "string"],
+    ],
+    numbers: [
+      [/-?0x([abcdef]|[ABCDEF]|\d)+[lL]?/, "number.hex"],
+      [/-?(\d*\.)?\d+([eE][+\-]?\d+)?[jJ]?[lL]?/, "number"],
+    ],
+    strings: [
+      [/'$/, "string.escape", "@popall"],
+      [/f'{1,3}/, "string.escape", "@fStringBody"],
+      [/'/, "string.escape", "@stringBody"],
+      [/"$/, "string.escape", "@popall"],
+      [/f"{1,3}/, "string.escape", "@fDblStringBody"],
+      [/"/, "string.escape", "@dblStringBody"],
+    ],
+    fStringBody: [
+      [/[^\\'\{\}]+$/, "string", "@popall"],
+      [/[^\\'\{\}]+/, "string"],
+      [/\{[^\}':!=]+/, "identifier", "@fStringDetail"],
+      [/\\./, "string"],
+      [/'/, "string.escape", "@popall"],
+      [/\\$/, "string"],
+    ],
+    stringBody: [
+      [/[^\\']+$/, "string", "@popall"],
+      [/[^\\']+/, "string"],
+      [/\\./, "string"],
+      [/'/, "string.escape", "@popall"],
+      [/\\$/, "string"],
+    ],
+    fDblStringBody: [
+      [/[^\\"\{\}]+$/, "string", "@popall"],
+      [/[^\\"\{\}]+/, "string"],
+      [/\{[^\}':!=]+/, "identifier", "@fStringDetail"],
+      [/\\./, "string"],
+      [/"/, "string.escape", "@popall"],
+      [/\\$/, "string"],
+    ],
+    dblStringBody: [
+      [/[^\\"]+$/, "string", "@popall"],
+      [/[^\\"]+/, "string"],
+      [/\\./, "string"],
+      [/"/, "string.escape", "@popall"],
+      [/\\$/, "string"],
+    ],
+    fStringDetail: [
+      [/[:][^}]+/, "string"],
+      [/[!][ars]/, "string"],
+      [/=/, "string"],
+      [/\}/, "identifier", "@pop"],
+    ],
+  },
+} as const;
+
+const PYTHON_LANGUAGE_CONF = {
+  comments: {
+    lineComment: "#",
+    blockComment: ["'''", "'''"] as [string, string],
+  },
+  brackets: [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"],
+  ] as [string, string][],
+  autoClosingPairs: [
+    { open: "{", close: "}" },
+    { open: "[", close: "]" },
+    { open: "(", close: ")" },
+    { open: '"', close: '"', notIn: ["string"] },
+    { open: "'", close: "'", notIn: ["string", "comment"] },
+  ],
+  surroundingPairs: [
+    { open: "{", close: "}" },
+    { open: "[", close: "]" },
+    { open: "(", close: ")" },
+    { open: '"', close: '"' },
+    { open: "'", close: "'" },
+  ],
+  folding: {
+    offSide: true,
+    markers: {
+      start: /^\s*#region\b/,
+      end: /^\s*#endregion\b/,
+    },
+  },
+};
+
 // Import the bundled dbt JSON schemas.
 // resolveJsonModule: true in tsconfig makes these available as plain objects.
 import dbtProjectSchema from "../../schemas/dbt/dbt_project-latest.json";
@@ -75,6 +221,16 @@ export function ensureMonacoSetup(monaco: unknown): void {
 
   m.editor.defineTheme("thaw-dark",  thawDarkTheme  as any);
   m.editor.defineTheme("thaw-light", thawLightTheme as any);
+
+  // ── Python tokenizer (eager, inline grammar) ─────────────────────────────
+  // python.contribution.js registers a *lazy* factory that fires only when the
+  // first Python model is created.  We register our own compiled tokenizer
+  // synchronously here so that Python cells are highlighted on first render.
+  // The inline grammar (defined at the top of this file) avoids importing
+  // python.js directly, which starts with ~70 side-effect contrib imports that
+  // can disrupt module initialisation order in Vite's ESM bundle.
+  m.languages.setMonarchTokensProvider("python", PYTHON_MONARCH_LANGUAGE);
+  m.languages.setLanguageConfiguration("python", PYTHON_LANGUAGE_CONF);
 
   // ── Snowflake Scripting Snippets ──────────────────────────────────────────
   m.languages.registerCompletionItemProvider("sql", {

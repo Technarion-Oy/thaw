@@ -2643,6 +2643,18 @@ func (a *App) SetNotebookQueryWarehouse(database, schema, name, warehouse string
 	return a.client.SetNotebookQueryWarehouse(a.ctx, database, schema, name, warehouse)
 }
 
+// MakeNotebookLive promotes the latest saved version of the notebook to the
+// live version via ALTER NOTEBOOK … ADD LIVE VERSION FROM LAST.
+func (a *App) MakeNotebookLive(database, schema, name string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	sql := fmt.Sprintf(`ALTER NOTEBOOK "%s"."%s"."%s" ADD LIVE VERSION FROM LAST`, esc(database), esc(schema), esc(name))
+	_, err := a.client.Execute(a.ctx, sql)
+	return err
+}
+
 // FetchNotebookContent retrieves the content of a Snowflake Notebook object.
 // It describes the notebook to find its stage URI, downloads the .ipynb file
 // to a temporary local directory, reads the file, and returns the nbformat JSON.

@@ -582,6 +582,10 @@ export function LoadSnowflakeCLIConfig() {
   return window['go']['main']['App']['LoadSnowflakeCLIConfig']();
 }
 
+export function MakeNotebookLive(arg1, arg2, arg3) {
+  return window['go']['main']['App']['MakeNotebookLive'](arg1, arg2, arg3);
+}
+
 export function NewNotebook() {
   return window['go']['main']['App']['NewNotebook']();
 }

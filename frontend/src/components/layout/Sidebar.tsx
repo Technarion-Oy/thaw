@@ -50,7 +50,7 @@ import {
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -800,6 +800,19 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const name = nameParts.join(":");
     setCtxMenu(null);
     setExecuteNotebookModal({ db, schema, name });
+  };
+
+  const makeNotebookLive = async () => {
+    if (!ctxMenu) return;
+    const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
+    const name = nameParts.join(":");
+    setCtxMenu(null);
+    try {
+      await MakeNotebookLive(db, schema, name);
+      message.success(`Notebook "${name}" is now live.`);
+    } catch (e) {
+      message.error(`Failed to make notebook live: ${String(e)}`);
+    }
   };
 
   const executeTask = () => {
@@ -1697,6 +1710,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Open Notebook", <ExperimentOutlined style={{ fontSize: 12 }} />, openNotebookFromSnowflake)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "NOTEBOOK" &&
             menuItem("Execute Notebook…", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeNotebook)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "NOTEBOOK" &&
+            menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive)}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && menuItem("View Definition", null, viewDefinition)}
           {ctxMenu.nodeType === "obj" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
