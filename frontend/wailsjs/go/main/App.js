@@ -794,6 +794,10 @@ export function ValidateBareColumnRefs(arg1) {
   return window['go']['main']['App']['ValidateBareColumnRefs'](arg1);
 }
 
+export function ValidateDataTypes(arg1, arg2) {
+  return window['go']['main']['App']['ValidateDataTypes'](arg1, arg2);
+}
+
 export function ValidateSnowflakePatterns(arg1, arg2) {
   return window['go']['main']['App']['ValidateSnowflakePatterns'](arg1, arg2);
 }

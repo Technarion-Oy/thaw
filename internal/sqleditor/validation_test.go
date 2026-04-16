@@ -284,12 +284,16 @@ func TestValidateTablesExist_Valid(t *testing.T) {
 		"CREATE TABLE local_t (id INT);\nDROP TABLE local_t;\nUNDROP TABLE local_t;\nSELECT * FROM local_t;",
 		"CREATE DATABASE local_db;\nDROP DATABASE local_db;\nUNDROP DATABASE local_db;\nCREATE SCHEMA local_db.sch;",
 		"CREATE DATABASE local_db;\nCREATE SCHEMA local_db.sch;\nDROP SCHEMA local_db.sch;\nUNDROP SCHEMA local_db.sch;\nCREATE TABLE local_db.sch.t1 (id INT);",
+
+		// USE bare two-part: db.schema (no keyword) with known db and schema
+		"use GOVERNANCE.public;",
+		"use GOVERNANCE.public;\nCREATE TABLE test_1 (id INT);",
 	}
 
 	req := ValidateTablesExistRequest{
 		ResolvedRefs:   getLiveRefs(),
-		KnownDatabases: []string{"DB"},
-		KnownSchemas:   []SchemaEntry{{DB: "DB", Name: "SCH"}},
+		KnownDatabases: []string{"DB", "GOVERNANCE"},
+		KnownSchemas:   []SchemaEntry{{DB: "DB", Name: "SCH"}, {DB: "GOVERNANCE", Name: "PUBLIC"}},
 	}
 
 	for _, sql := range validQueries {
@@ -329,12 +333,17 @@ func TestValidateTablesExist_Invalid(t *testing.T) {
 		{"Undrop Non-existent Table", "UNDROP TABLE never_existed;", "never_existed"},
 		{"Undrop Non-existent Database", "UNDROP DATABASE never_existed;", "never_existed"},
 		{"Undrop Non-existent Schema", "UNDROP SCHEMA never_existed;", "never_existed"},
+
+		// USE statement — unknown database or schema
+		{"USE unknown DB two-part bare", "use database_that_not_exists.PUBLIC;", "database_that_not_exists"},
+		{"USE unknown DB bare one-part", "use database_that_not_exists", "database_that_not_exists"},
+		{"USE known DB unknown schema", "use GOVERNANCE.schema_that_doesnt_exists;", "schema_that_doesnt_exists"},
 	}
 
 	req := ValidateTablesExistRequest{
 		ResolvedRefs:   getLiveRefs(),
-		KnownDatabases: []string{"DB"},
-		KnownSchemas:   []SchemaEntry{{DB: "DB", Name: "SCH"}},
+		KnownDatabases: []string{"DB", "GOVERNANCE"},
+		KnownSchemas:   []SchemaEntry{{DB: "DB", Name: "SCH"}, {DB: "GOVERNANCE", Name: "PUBLIC"}},
 	}
 
 	for _, tt := range tests {
@@ -463,6 +472,105 @@ $$;
 			// ValidateSyntax operates directly on the raw SQL string
 			markers := ValidateSyntax(tt.sql)
 			errs := getErrors(markers)
+
+			if tt.expectedError == "" {
+				if len(errs) > 0 {
+					t.Errorf("Expected 0 errors for %q, got %d: %v", tt.name, len(errs), errs)
+				}
+			} else {
+				if len(errs) == 0 {
+					t.Fatalf("Expected error containing %q, but got 0 errors", tt.expectedError)
+				}
+
+				found := false
+				for _, e := range errs {
+					if strings.Contains(strings.ToLower(e.Message), strings.ToLower(tt.expectedError)) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected error matching %q, but got: %v", tt.expectedError, errs[0].Message)
+				}
+			}
+		})
+	}
+}
+
+// ── 5. ValidateDataTypes Tests ────────────────────────────────────────────────
+
+func TestValidateDataTypes(t *testing.T) {
+	tests := []struct {
+		name          string
+		sql           string
+		expectedError string // Empty string means we expect 0 errors
+	}{
+		{
+			name: "Valid datatypes in CREATE TABLE",
+			sql: `CREATE TABLE my_table (
+				id NUMBER,
+				name VARCHAR(255),
+				is_active BOOLEAN,
+				created_at TIMESTAMP_LTZ
+			);`,
+			expectedError: "",
+		},
+		{
+			name: "Invalid datatype in CREATE TABLE",
+			sql: `
+USE GOVERNANCE.PUBLIC;
+create table my_table (
+  my_codffsf varchard
+);`,
+			expectedError: "Unknown data type 'VARCHARD'",
+		},
+		{
+			name: "Invalid datatype after USE, comment in column list, no trailing semicolon",
+			sql: `use GOVERNANCE.public;
+
+create table my_table (
+  -- Should complain about incorrect datatype
+  my_codffsf varchardc
+)`,
+			expectedError: "Unknown data type 'VARCHARDC'",
+		},
+		{
+			name:          "Invalid datatype in ALTER TABLE",
+			sql:           `ALTER TABLE my_table ADD COLUMN new_col NUMBR;`,
+			expectedError: "Unknown data type 'NUMBR'",
+		},
+		{
+			name:          "Invalid datatype in CAST function",
+			sql:           `SELECT CAST(id AS INTT) FROM my_table;`,
+			expectedError: "Unknown data type 'INTT'",
+		},
+		{
+			name:          "Invalid datatype in shorthand cast (::)",
+			sql:           `SELECT id::FLOT FROM my_table;`,
+			expectedError: "Unknown data type 'FLOT'",
+		},
+		{
+			name:          "Valid parameterized datatype",
+			sql:           `CREATE TABLE t (price NUMBER(10, 2));`,
+			expectedError: "",
+		},
+		{
+			name:          "Valid array/object types",
+			sql:           `CREATE TABLE t (tags ARRAY, metadata OBJECT);`,
+			expectedError: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ranges := GetStatementRanges(tt.sql)
+
+			// NOTE: You will need to implement ValidateDataTypes in sqleditor.go
+			// or patterns.go for these tests to pass!
+			markers := ValidateDataTypes(tt.sql, ranges)
+
+			// Assuming we treat unknown data types as warnings (severity 4)
+			errs := getWarnings(markers)
 
 			if tt.expectedError == "" {
 				if len(errs) > 0 {
