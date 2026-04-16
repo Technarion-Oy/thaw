@@ -18,6 +18,9 @@ import { MenuRegistry, MenuId } from "monaco-editor/esm/vs/platform/actions/comm
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 import { CommandsRegistry } from "monaco-editor/esm/vs/platform/commands/common/commands.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
+import { ContextKeyExpr } from "monaco-editor/esm/vs/platform/contextkey/common/contextkey.js";
 import { ensureMonacoSetup } from "./monacoSetup";
 import { setEditorInstance } from "./editorRef";
 import { useQueryStore } from "../../store/queryStore";
@@ -294,6 +297,12 @@ function applyPrefsToSnippet(text: string, prefs: EditorPrefs): string {
 }
 
 let _activeSnippetEditor: monacoLib.editor.ICodeEditor | null = null;
+
+/** Shared — called by any Monaco editor (SQL or notebook cell) on context menu open. */
+export function setActiveSnippetEditor(editor: monacoLib.editor.ICodeEditor | null): void {
+  _activeSnippetEditor = editor;
+}
+
 let _snippetMenuRegistered = false;
 (() => {
   if (_snippetMenuRegistered) return;
@@ -313,9 +322,10 @@ let _snippetMenuRegistered = false;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (MenuRegistry as any).appendMenuItem((MenuId as any).EditorContext, {
     submenu: snippetSubMenuId,
-    title: "Code Snippets",
+    title: "SQL Snippets",
     group: "9_snippets",
     order: 0,
+    when: ContextKeyExpr.equals("editorLangId", "sql"),
   });
 
   const snippetItems = getSnowflakeSnippets(monacoLib);

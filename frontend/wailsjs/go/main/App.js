@@ -706,6 +706,10 @@ export function SaveSnowparkPythonPath(arg1) {
   return window['go']['main']['App']['SaveSnowparkPythonPath'](arg1);
 }
 
+export function SaveSnowparkVenvPath(arg1) {
+  return window['go']['main']['App']['SaveSnowparkVenvPath'](arg1);
+}
+
 export function ScanMigrationSource(arg1) {
   return window['go']['main']['App']['ScanMigrationSource'](arg1);
 }
@@ -812,6 +816,10 @@ export function ValidateSnowflakePatterns(arg1, arg2) {
 
 export function ValidateTablesExist(arg1) {
   return window['go']['main']['App']['ValidateTablesExist'](arg1);
+}
+
+export function VenvFolderExists() {
+  return window['go']['main']['App']['VenvFolderExists']();
 }
 
 export function WaitForQueryResult() {

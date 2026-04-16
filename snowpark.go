@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -491,6 +492,22 @@ func (a *App) IsAppleSilicon() bool {
 
 // ─── venv helpers ─────────────────────────────────────────────────────────────
 
+// pythonVersionAtLeast reports whether a "major.minor" version string satisfies
+// the given minimum (e.g. atLeastPythonVersion("3.13", 3, 9) → true).
+// Returns false if the string cannot be parsed.
+func pythonVersionAtLeast(version string, wantMajor, wantMinor int) bool {
+	parts := strings.SplitN(version, ".", 2)
+	if len(parts) < 2 {
+		return false
+	}
+	major, err1 := strconv.Atoi(parts[0])
+	minor, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return major > wantMajor || (major == wantMajor && minor >= wantMinor)
+}
+
 // defaultVenvPath returns the default venv location.
 // Prefers <exportDir>/snowpark_venv so the env lives next to the project files;
 // falls back to ~/snowpark_venv when no export directory is configured.
@@ -570,6 +587,27 @@ func (a *App) SaveSnowparkConfig(backend string) error {
 	}
 	cfg.Snowpark.Backend = backend
 	return config.Save(cfg)
+}
+
+// SaveSnowparkVenvPath persists the custom venv directory path.
+func (a *App) SaveSnowparkVenvPath(path string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	cfg.Snowpark.VenvPath = path
+	return config.Save(cfg)
+}
+
+// VenvFolderExists reports whether the configured venv directory exists on disk.
+func (a *App) VenvFolderExists() bool {
+	cfg, _ := config.Load()
+	venvPath := cfg.Snowpark.VenvPath
+	if venvPath == "" {
+		venvPath = defaultVenvPath()
+	}
+	_, err := os.Stat(venvPath)
+	return err == nil
 }
 
 // SaveSnowparkPythonPath persists the chosen Python binary path for venv creation.
@@ -707,7 +745,7 @@ func (a *App) checkCondaEnv(result *SnowparkCheckResult) SnowparkCheckResult {
 	if m := re.FindStringSubmatch(string(verOut)); len(m) >= 2 {
 		result.Version = m[1]
 	}
-	if result.Version != "" && result.Version < "3.9" {
+	if result.Version != "" && !pythonVersionAtLeast(result.Version, 3, 9) {
 		result.Details = fmt.Sprintf("Python %s in the env is too old (need 3.9+).", result.Version)
 		return *result
 	}
@@ -752,7 +790,7 @@ func (a *App) checkVenvEnv(result *SnowparkCheckResult, cfg *config.AppConfig) S
 	if m := re.FindStringSubmatch(string(verOut)); len(m) >= 2 {
 		result.Version = m[1]
 	}
-	if result.Version != "" && result.Version < "3.9" {
+	if result.Version != "" && !pythonVersionAtLeast(result.Version, 3, 9) {
 		result.Details = fmt.Sprintf("Python %s in the venv is too old (need 3.9+).", result.Version)
 		return *result
 	}

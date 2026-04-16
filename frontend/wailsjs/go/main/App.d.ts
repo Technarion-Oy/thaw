@@ -365,6 +365,8 @@ export function SaveSnowparkConfig(arg1:string):Promise<void>;
 
 export function SaveSnowparkPythonPath(arg1:string):Promise<void>;
 
+export function SaveSnowparkVenvPath(arg1:string):Promise<void>;
+
 export function ScanMigrationSource(arg1:string):Promise<Array<main.MigrationObject>>;
 
 export function SearchFiles(arg1:string,arg2:string,arg3:boolean):Promise<Array<filesystem.SearchMatch>>;
@@ -418,6 +420,8 @@ export function ValidateDataTypes(arg1:string,arg2:Array<sqleditor.StatementRang
 export function ValidateSnowflakePatterns(arg1:string,arg2:Array<sqleditor.StatementRange>):Promise<Array<sqleditor.DiagMarker>>;
 
 export function ValidateTablesExist(arg1:sqleditor.ValidateTablesExistRequest):Promise<Array<sqleditor.DiagMarker>>;
+
+export function VenvFolderExists():Promise<boolean>;
 
 export function WaitForQueryResult():Promise<snowflake.QueryResult>;
 

@@ -11,6 +11,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Editor, { type BeforeMount, type OnMount, type Monaco } from "@monaco-editor/react";
 import { ensureMonacoSetup } from "../editor/monacoSetup";
+import { setActiveSnippetEditor } from "../editor/SqlEditor";
+import { getPythonSnippets, PYTHON_SNIPPET_CATEGORIES } from "../editor/snowflakeSnippets";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
+import { MenuRegistry, MenuId } from "monaco-editor/esm/vs/platform/actions/common/actions.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
+import { CommandsRegistry } from "monaco-editor/esm/vs/platform/commands/common/commands.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
+import { ContextKeyExpr } from "monaco-editor/esm/vs/platform/contextkey/common/contextkey.js";
+import * as monacoLib from "monaco-editor";
 import { Button, Modal, Space, Spin, Tooltip, Typography, Select, Tag, message } from "antd";
 import {
   PlayCircleOutlined,
@@ -59,6 +71,66 @@ function installCopyHandler(containerEl: HTMLElement): () => void {
   document.addEventListener("keydown", handler, true);
   return () => document.removeEventListener("keydown", handler, true);
 }
+// ─── Python snippet context menu (registered once at module load) ─────────────
+let _pythonSnippetMenuRegistered = false;
+(() => {
+  if (_pythonSnippetMenuRegistered) return;
+  _pythonSnippetMenuRegistered = true;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let pySubMenuId: any;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    pySubMenuId = new (MenuId as any)("thaw.python.snippets.submenu");
+  } catch {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    pySubMenuId = (MenuId as any)._instances?.get("thaw.python.snippets.submenu");
+  }
+  if (!pySubMenuId) return;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (MenuRegistry as any).appendMenuItem((MenuId as any).EditorContext, {
+    submenu: pySubMenuId,
+    title: "Python Snippets",
+    group: "9_snippets",
+    order: 1,
+    when: ContextKeyExpr.equals("editorLangId", "python"),
+  });
+
+  const snippetItems = getPythonSnippets(monacoLib);
+  const snippetMap   = new Map(snippetItems.map((s) => [String(s.label), s]));
+
+  PYTHON_SNIPPET_CATEGORIES.forEach((cat, gi) => {
+    cat.labels.forEach((lbl, li) => {
+      const s = snippetMap.get(lbl);
+      if (!s) return;
+      const cmdId = `thaw.python.snippet.${lbl}`;
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (CommandsRegistry as any).registerCommand(cmdId, () => {
+        // _activeSnippetEditor is set by the cell editor's onContextMenu handler.
+        // We access it via setActiveSnippetEditor's closure in SqlEditor.tsx; since
+        // we can't import the private var we keep a local shadow updated below.
+        if (!_lastPythonEditor) return;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ctrl = (_lastPythonEditor as any).getContribution("snippetController2");
+        if (ctrl) ctrl.insert(s.insertText as string);
+        _lastPythonEditor.focus();
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (MenuRegistry as any).appendMenuItem(pySubMenuId, {
+        command: { id: cmdId, title: cat.titles?.[lbl] ?? lbl },
+        group: `${gi + 1}`,
+        order: li,
+      });
+    });
+  });
+})();
+
+/** Tracks the most-recently right-clicked Python cell editor for snippet insertion. */
+let _lastPythonEditor: monacoLib.editor.ICodeEditor | null = null;
+
 import { useQueryStore } from "../../store/queryStore";
 import { useThemeStore } from "../../store/themeStore";
 import { useSessionStore } from "../../store/sessionStore";
@@ -860,6 +932,17 @@ function CellView({
     editor.onDidFocusEditorWidget(() => { setFocused(true); onSelectRef.current(); });
     editor.onDidBlurEditorWidget(() => setFocused(false));
 
+    // Track which cell editor was last right-clicked so snippet commands insert
+    // into the correct editor.  setActiveSnippetEditor keeps the shared SQL
+    // snippet machinery in sync; _lastPythonEditor drives Python snippet commands.
+    editor.onContextMenu(() => {
+      setActiveSnippetEditor(editor);
+      if (cell.kind === "code") _lastPythonEditor = editor;
+    });
+    editor.onDidDispose(() => {
+      if (_lastPythonEditor === editor) _lastPythonEditor = null;
+    });
+
     // Shift+Enter: run selection if text is selected, otherwise run full cell.
     editor.addCommand(
       monaco.KeyMod.Shift | monaco.KeyCode.Enter,
@@ -1071,7 +1154,6 @@ function CellView({
               overviewRulerBorder: false,
               renderLineHighlight: "none",
               padding: { top: 8, bottom: 8 },
-              contextmenu: false,
               automaticLayout: true,
               fixedOverflowWidgets: true,
             }}
