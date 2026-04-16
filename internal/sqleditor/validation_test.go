@@ -329,11 +329,16 @@ func TestValidateTablesExist_Invalid(t *testing.T) {
 		{"Undrop Non-existent Table", "UNDROP TABLE never_existed;", "never_existed"},
 		{"Undrop Non-existent Database", "UNDROP DATABASE never_existed;", "never_existed"},
 		{"Undrop Non-existent Schema", "UNDROP SCHEMA never_existed;", "never_existed"},
+
+		// USE statement — unknown database or schema
+		{"USE unknown DB two-part bare", "use database_that_not_exists.PUBLIC;", "database_that_not_exists"},
+		{"USE unknown DB bare one-part", "use database_that_not_exists", "database_that_not_exists"},
+		{"USE known DB unknown schema", "use GOVERNANCE.schema_that_doesnt_exists;", "schema_that_doesnt_exists"},
 	}
 
 	req := ValidateTablesExistRequest{
 		ResolvedRefs:   getLiveRefs(),
-		KnownDatabases: []string{"DB"},
+		KnownDatabases: []string{"DB", "GOVERNANCE"},
 		KnownSchemas:   []SchemaEntry{{DB: "DB", Name: "SCH"}},
 	}
 

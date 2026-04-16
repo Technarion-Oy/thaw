@@ -75,6 +75,18 @@ var (
 	// Go regexp does not support negative lookaheads, so capture the first
 	// token and reject DATABASE/SCHEMA/ROLE/WAREHOUSE in code.
 	reUseTwoPart = regexp.MustCompile(`(?i)^\s*USE\s+(` + _ident + `)\.` + _ident)
+
+	// Capturing variants used for existence validation.
+	// reUseDatabaseIdent: captures DB name from USE DATABASE <name>
+	reUseDatabaseIdent = regexp.MustCompile(`(?i)^\s*USE\s+DATABASE\s+(` + _ident + `)`)
+	// reUseSchemaIdents: captures (db, schema) from USE SCHEMA <db>.<schema>
+	reUseSchemaIdents = regexp.MustCompile(`(?i)^\s*USE\s+SCHEMA\s+(` + _ident + `)\.(` + _ident + `)`)
+	// reUseSchemaIdent: captures schema from USE SCHEMA <schema> (one-part, no dot)
+	reUseSchemaIdent = regexp.MustCompile(`(?i)^\s*USE\s+SCHEMA\s+(` + _ident + `)[;\s]*$`)
+	// reUseTwoPartIdents: captures (db, schema) from bare USE <db>.<schema> (no keyword)
+	reUseTwoPartIdents = regexp.MustCompile(`(?i)^\s*USE\s+(` + _ident + `)\.(` + _ident + `)`)
+	// reUseOnePartIdent: captures name from bare USE <name> (no keyword, no dot)
+	reUseOnePartIdent = regexp.MustCompile(`(?i)^\s*USE\s+(` + _ident + `)[;\s]*$`)
 	reCreateAnyDb      = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?DATABASE\b`)
 	reCreateAnySchema  = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?SCHEMA\b`)
 
@@ -178,6 +190,13 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		}
 		if reUseSchema.MatchString(raw) || reCreateAnySchema.MatchString(raw) {
 			scriptHasActiveSchema = true
+		}
+		// Bare USE <name> (no keyword, no dot) is equivalent to USE DATABASE.
+		if m := reUseOnePartIdent.FindStringSubmatch(raw); m != nil {
+			first := strings.ToUpper(m[1])
+			if first != "DATABASE" && first != "SCHEMA" && first != "ROLE" && first != "WAREHOUSE" {
+				scriptHasActiveDB = true
+			}
 		}
 
 		hasGlobalDB     := len(req.KnownDatabases) > 0 || anyHasDB(req.ResolvedRefs)
@@ -392,6 +411,87 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 						for _, t := range findTokensLocally(raw, []string{badToken}, r.StartLine, ic) {
 							markers = append(markers, diagMarkerAt(t, msgFn(t.name), 8))
 						}
+					}
+				}
+			}
+		}
+
+		// ── Validate USE DATABASE <name> ──────────────────────────────────────
+		if m := reUseDatabaseIdent.FindStringSubmatch(raw); m != nil {
+			dbNorm := normIdent(m[1], ic)
+			if !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
+				for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
+					markers = append(markers, diagMarkerAt(t,
+						"Database '"+t.name+"' does not exist or is not authorized.", 8))
+				}
+			}
+		}
+
+		// ── Validate USE SCHEMA <db>.<schema> ─────────────────────────────────
+		if m := reUseSchemaIdents.FindStringSubmatch(raw); m != nil {
+			dbNorm := normIdent(m[1], ic)
+			schNorm := normIdent(m[2], ic)
+			if !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
+				for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
+					markers = append(markers, diagMarkerAt(t,
+						"Database '"+t.name+"' does not exist or is not authorized.", 8))
+				}
+			} else {
+				schPath := dbNorm + "." + schNorm
+				if !schemaExistsForDB(dbNorm, schNorm, schPath, scriptCreatedDbsAndSchemas, req.KnownSchemas, req.ResolvedRefs, checkEq) {
+					for _, t := range findTokensLocally(raw, []string{schNorm}, r.StartLine, ic) {
+						markers = append(markers, diagMarkerAt(t,
+							"Schema '"+t.name+"' does not exist or is not authorized.", 8))
+					}
+				}
+			}
+		}
+
+		// ── Validate USE SCHEMA <schema> (one-part, no dot) ───────────────────
+		if m := reUseSchemaIdent.FindStringSubmatch(raw); m != nil {
+			schNorm := normIdent(m[1], ic)
+			if len(req.KnownSchemas) > 0 || anyHasSchema(req.ResolvedRefs) {
+				if !schemaExists(schNorm, "", scriptCreatedDbsAndSchemas, req.KnownSchemas, req.ResolvedRefs, checkEq) {
+					for _, t := range findTokensLocally(raw, []string{schNorm}, r.StartLine, ic) {
+						markers = append(markers, diagMarkerAt(t,
+							"Schema '"+t.name+"' does not exist or is not authorized.", 8))
+					}
+				}
+			}
+		}
+
+		// ── Validate bare USE <db>.<schema> (no keyword) ──────────────────────
+		if m := reUseTwoPartIdents.FindStringSubmatch(raw); m != nil {
+			first := strings.ToUpper(m[1])
+			if first != "DATABASE" && first != "SCHEMA" && first != "ROLE" && first != "WAREHOUSE" {
+				dbNorm := normIdent(m[1], ic)
+				schNorm := normIdent(m[2], ic)
+				if !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
+					for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
+						markers = append(markers, diagMarkerAt(t,
+							"Database '"+t.name+"' does not exist or is not authorized.", 8))
+					}
+				} else {
+					schPath := dbNorm + "." + schNorm
+					if !schemaExistsForDB(dbNorm, schNorm, schPath, scriptCreatedDbsAndSchemas, req.KnownSchemas, req.ResolvedRefs, checkEq) {
+						for _, t := range findTokensLocally(raw, []string{schNorm}, r.StartLine, ic) {
+							markers = append(markers, diagMarkerAt(t,
+								"Schema '"+t.name+"' does not exist or is not authorized.", 8))
+						}
+					}
+				}
+			}
+		}
+
+		// ── Validate bare USE <name> (no keyword, no dot) → USE DATABASE ──────
+		if m := reUseOnePartIdent.FindStringSubmatch(raw); m != nil {
+			first := strings.ToUpper(m[1])
+			if first != "DATABASE" && first != "SCHEMA" && first != "ROLE" && first != "WAREHOUSE" {
+				dbNorm := normIdent(m[1], ic)
+				if !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
+					for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
+						markers = append(markers, diagMarkerAt(t,
+							"Database '"+t.name+"' does not exist or is not authorized.", 8))
 					}
 				}
 			}
