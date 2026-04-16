@@ -8,7 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Button,
   Table,
@@ -39,8 +39,10 @@ import {
   CreateBackupPolicy,
   DropBackupPolicy,
   AlterBackupPolicy,
+  GetQuotedIdentifiersIgnoreCase,
 } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
+import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import dayjs from "dayjs";
 
 const { Text } = Typography;
@@ -58,10 +60,12 @@ interface AlterState {
   name: string;
   action: AlterAction;
   value: string;
+  caseSensitive: boolean; // only relevant for rename action
 }
 
 interface CreateForm {
   name: string;
+  caseSensitive: boolean;
   schedule: string;
   expireAfterDays: number | null;
   retentionLock: boolean;
@@ -73,6 +77,7 @@ interface CreateForm {
 
 const DEFAULT_CREATE: CreateForm = {
   name: "",
+  caseSensitive: false,
   schedule: "",
   expireAfterDays: null,
   retentionLock: false,
@@ -88,6 +93,8 @@ export default function BackupPoliciesPanel() {
   const [error,   setError]   = useState<string | null>(null);
   const [loaded,  setLoaded]  = useState(false);
 
+  const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
+
   const [createOpen,    setCreateOpen]    = useState(false);
   const [createForm,    setCreateForm]    = useState<CreateForm>(DEFAULT_CREATE);
   const [createLoading, setCreateLoading] = useState(false);
@@ -95,6 +102,10 @@ export default function BackupPoliciesPanel() {
 
   const [alterState,   setAlterState]   = useState<AlterState | null>(null);
   const [alterLoading, setAlterLoading] = useState(false);
+
+  useEffect(() => {
+    GetQuotedIdentifiersIgnoreCase().then((v) => setQuotedIdentifiersIgnoreCase(v ?? false)).catch(() => {});
+  }, []);
 
   const load = async () => {
     setLoading(true);
@@ -137,6 +148,7 @@ export default function BackupPoliciesPanel() {
         createForm.tags.trim(),
         createForm.orReplace,
         createForm.ifNotExists,
+        createForm.caseSensitive,
       );
       message.success(`Backup policy "${createForm.name}" created.`);
       setCreateOpen(false);
@@ -157,7 +169,7 @@ export default function BackupPoliciesPanel() {
       let alteration = "";
       switch (alterState.action) {
         case "rename":
-          alteration = `RENAME TO "${alterState.value.replace(/"/g, '""')}"`;
+          alteration = `RENAME TO ${identToken(alterState.value, alterState.caseSensitive)}`;
           break;
         case "set-schedule":
           alteration = `SET SCHEDULE = '${esc(alterState.value)}'`;
@@ -248,7 +260,7 @@ export default function BackupPoliciesPanel() {
             type="text"
             icon={<EditOutlined />}
             title="Alter…"
-            onClick={() => setAlterState({ name: row.name, action: "rename", value: row.name })}
+            onClick={() => setAlterState({ name: row.name, action: "rename", value: row.name, caseSensitive: false })}
           />
           <Popconfirm
             title={`Drop backup policy "${row.name}"?`}
@@ -354,11 +366,19 @@ export default function BackupPoliciesPanel() {
         width={540}
       >
         <Form layout="vertical" style={{ marginTop: 8 }}>
-          <Form.Item label="Policy name" required>
+          <Form.Item label="Policy name" required style={{ marginBottom: 4 }}>
             <Input
               value={createForm.name}
               onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
               placeholder="my_backup_policy"
+            />
+          </Form.Item>
+          <Form.Item style={{ marginBottom: 12 }}>
+            <ObjectNameCaseControl
+              name={createForm.name}
+              caseSensitive={createForm.caseSensitive}
+              onCaseSensitiveChange={(v) => setCreateForm((f) => ({ ...f, caseSensitive: v }))}
+              quotedIdentifiersIgnoreCase={quotedIdentifiersIgnoreCase}
             />
           </Form.Item>
           <Form.Item
@@ -439,7 +459,7 @@ export default function BackupPoliciesPanel() {
                 value={alterState.action}
                 onChange={(v) =>
                   setAlterState((s) =>
-                    s ? { ...s, action: v, value: v === "rename" ? s.name : "" } : s
+                    s ? { ...s, action: v, value: v === "rename" ? s.name : "", caseSensitive: false } : s
                   )
                 }
                 options={[
@@ -454,11 +474,21 @@ export default function BackupPoliciesPanel() {
               />
             </Form.Item>
             {needsValue && (
-              <Form.Item label={valueLabel[alterState.action]}>
+              <Form.Item label={valueLabel[alterState.action]} style={{ marginBottom: alterState.action === "rename" ? 4 : undefined }}>
                 <Input
                   value={alterState.value}
                   onChange={(e) => setAlterState((s) => s ? { ...s, value: e.target.value } : s)}
                   placeholder={valuePlaceholder[alterState.action]}
+                />
+              </Form.Item>
+            )}
+            {alterState.action === "rename" && (
+              <Form.Item style={{ marginBottom: 12 }}>
+                <ObjectNameCaseControl
+                  name={alterState.value}
+                  caseSensitive={alterState.caseSensitive}
+                  onCaseSensitiveChange={(v) => setAlterState((s) => s ? { ...s, caseSensitive: v } : s)}
+                  quotedIdentifiersIgnoreCase={quotedIdentifiersIgnoreCase}
                 />
               </Form.Item>
             )}

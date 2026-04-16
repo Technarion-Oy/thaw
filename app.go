@@ -3908,11 +3908,12 @@ func (a *App) ListBackupPolicies() ([]BackupPolicyRow, error) {
 // schedule: optional, e.g. "60 MINUTE", "6 HOUR", "USING CRON 0 2 * * * UTC"
 // expireAfterDays: 0 means not set
 // tags: optional raw tag expression e.g. `"MY_TAG" = 'value'`
-func (a *App) CreateBackupPolicy(name, schedule string, expireAfterDays int64, retentionLock bool, comment, tags string, orReplace, ifNotExists bool) error {
+// caseSensitive: when true the policy name is double-quoted (preserving exact
+// case); when false the name is left unquoted if it is a valid bare identifier.
+func (a *App) CreateBackupPolicy(name, schedule string, expireAfterDays int64, retentionLock bool, comment, tags string, orReplace, ifNotExists, caseSensitive bool) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
 
 	var sb strings.Builder
@@ -3924,7 +3925,7 @@ func (a *App) CreateBackupPolicy(name, schedule string, expireAfterDays int64, r
 	if ifNotExists && !orReplace {
 		sb.WriteString("IF NOT EXISTS ")
 	}
-	sb.WriteString(q(name))
+	sb.WriteString(snowflake.QuoteOrBare(name, caseSensitive))
 	if tags != "" {
 		sb.WriteString(fmt.Sprintf(" WITH TAG (%s)", tags))
 	}
