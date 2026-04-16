@@ -50,7 +50,8 @@ import {
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/main/App";
+import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
@@ -150,6 +151,7 @@ interface RenameModal {
   kind: string;
   oldName: string;
   newName: string;
+  caseSensitive: boolean;
 }
 
 interface TimeTravelModal {
@@ -405,6 +407,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [undropSchemasModal, setUndropSchemasModal] = useState<UndropSchemasModal | null>(null);
   const [undropDatabasesModal, setUndropDatabasesModal] = useState<UndropDatabasesModal | null>(null);
   const [renameModal, setRenameModal] = useState<RenameModal | null>(null);
+  const [renameQiic, setRenameQiic]   = useState(false);
   const [timeTravelModal, setTimeTravelModal] = useState<TimeTravelModal | null>(null);
   const [erModal, setErModal] = useState<{ database: string; data: snowflake.ERDiagramData } | null>(null);
   const [propsModal, setPropsModal] = useState<{ title: string; rows: main.PropertyPair[] | null; error: string | null; tableContext?: { db: string; schema: string; table: string } } | null>(null);
@@ -972,12 +975,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     // key format: obj:DB:SCHEMA:KIND:NAME
     const [, db, schema, , ...nameParts] = nodeKey.split(":");
     const oldName = nameParts.join(":");
-    setRenameModal({ db, schema, kind: objKind, oldName, newName: oldName });
+    setRenameModal({ db, schema, kind: objKind, oldName, newName: oldName, caseSensitive: false });
+    setRenameQiic(false);
+    GetQuotedIdentifiersIgnoreCase().then((v) => setRenameQiic(v ?? false)).catch(() => {});
   };
 
   const executeRename = async () => {
     if (!renameModal) return;
-    const { db, schema, kind, oldName, newName } = renameModal;
+    const { db, schema, kind, oldName, newName, caseSensitive } = renameModal;
     const trimmed = newName.trim();
     if (!trimmed || trimmed === oldName) {
       setRenameModal(null);
@@ -985,7 +990,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     }
     const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
     const fullOld = `${q(db)}.${q(schema)}.${q(oldName)}`;
-    const fullNew = `${q(db)}.${q(schema)}.${q(trimmed)}`;
+    const fullNew = `${q(db)}.${q(schema)}.${identToken(trimmed, caseSensitive)}`;
 
     let sql: string;
     switch (kind) {
@@ -2123,15 +2128,22 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         onOk={executeRename}
         onCancel={() => setRenameModal(null)}
         okText="Rename"
-        width={420}
+        width={460}
       >
         <div style={{ padding: "8px 0" }}>
-          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>New name</div>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>New name</div>
           <Input
             value={renameModal?.newName ?? ""}
             onChange={(e) => setRenameModal((prev) => prev ? { ...prev, newName: e.target.value } : null)}
             onPressEnter={executeRename}
             autoFocus
+            style={{ marginBottom: 8 }}
+          />
+          <ObjectNameCaseControl
+            name={renameModal?.newName ?? ""}
+            caseSensitive={renameModal?.caseSensitive ?? false}
+            onCaseSensitiveChange={(v) => setRenameModal((prev) => prev ? { ...prev, caseSensitive: v } : null)}
+            quotedIdentifiersIgnoreCase={renameQiic}
           />
         </div>
       </Modal>

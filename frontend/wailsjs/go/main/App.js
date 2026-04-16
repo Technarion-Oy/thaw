@@ -106,8 +106,8 @@ export function CheckSnowparkEnv() {
   return window['go']['main']['App']['CheckSnowparkEnv']();
 }
 
-export function CloneChildTask(arg1, arg2, arg3, arg4, arg5) {
-  return window['go']['main']['App']['CloneChildTask'](arg1, arg2, arg3, arg4, arg5);
+export function CloneChildTask(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['CloneChildTask'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function ComputeJoinOnConditions(arg1) {
@@ -118,12 +118,12 @@ export function Connect(arg1) {
   return window['go']['main']['App']['Connect'](arg1);
 }
 
-export function CreateBackupPolicy(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
-  return window['go']['main']['App']['CreateBackupPolicy'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+export function CreateBackupPolicy(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) {
+  return window['go']['main']['App']['CreateBackupPolicy'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9);
 }
 
-export function CreateBackupSet(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
-  return window['go']['main']['App']['CreateBackupSet'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+export function CreateBackupSet(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) {
+  return window['go']['main']['App']['CreateBackupSet'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9);
 }
 
 export function CreateDbtProject(arg1, arg2) {
@@ -336,6 +336,14 @@ export function GetProcedureParams(arg1, arg2, arg3, arg4) {
 
 export function GetQueryHistory(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
   return window['go']['main']['App']['GetQueryHistory'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+}
+
+export function GetQuotedIdentifiersIgnoreCase() {
+  return window['go']['main']['App']['GetQuotedIdentifiersIgnoreCase']();
+}
+
+export function GetReservedKeywords() {
+  return window['go']['main']['App']['GetReservedKeywords']();
 }
 
 export function GetRoleDDL(arg1) {

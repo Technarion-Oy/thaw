@@ -87,7 +87,8 @@ func bareIdent(s string) string {
 }
 
 // CloneChildTask clones a task and replaces its predecessors.
-func CloneChildTask(ctx context.Context, client *snowflake.Client, database, schema, oldName, newName string, newPredecessors []string) error {
+// caseSensitive controls whether newName is double-quoted (true) or left unquoted when valid (false).
+func CloneChildTask(ctx context.Context, client *snowflake.Client, database, schema, oldName, newName string, caseSensitive bool, newPredecessors []string) error {
 	escStr := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
 	formatPred := func(p string) string {
 		p = strings.TrimSpace(p)
@@ -105,7 +106,7 @@ func CloneChildTask(ctx context.Context, client *snowflake.Client, database, sch
 	}
 
 	fqnOld := fmt.Sprintf("%s.%s.%s", q(database), q(schema), q(oldName))
-	fqnNew := fmt.Sprintf("%s.%s.%s", q(database), q(schema), q(newName))
+	fqnNew := fmt.Sprintf("%s.%s.%s", q(database), q(schema), snowflake.QuoteOrBare(newName, caseSensitive))
 
 	showSQL := fmt.Sprintf("SHOW TASKS LIKE '%s' IN SCHEMA %s.%s", escStr(oldName), q(database), q(schema))
 	res, err := client.Execute(ctx, showSQL)

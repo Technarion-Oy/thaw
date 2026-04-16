@@ -1011,6 +1011,27 @@ func (a *App) GetSessionContext() (snowflake.SessionContext, error) {
 	return a.client.GetSessionContext(a.ctx)
 }
 
+// GetQuotedIdentifiersIgnoreCase returns true when the current session's
+// QUOTED_IDENTIFIERS_IGNORE_CASE parameter is TRUE, meaning Snowflake treats
+// quoted identifiers as case-insensitive (double-quoting does not preserve
+// case). The frontend uses this to warn users when creating objects.
+func (a *App) GetQuotedIdentifiersIgnoreCase() (bool, error) {
+	if a.client == nil {
+		return false, ErrNotConnected
+	}
+	return a.client.GetQuotedIdentifiersIgnoreCase(a.ctx)
+}
+
+// GetReservedKeywords returns the canonical list of Snowflake SQL reserved
+// keywords from the backend. The frontend uses this list to replicate the same
+// quoting logic as the Go NeedsQuoting function — an identifier that matches
+// one of these keywords (case-insensitively) must be double-quoted even when
+// its characters would otherwise form a valid bare identifier.
+// No active connection is required; the list is static.
+func (a *App) GetReservedKeywords() []string {
+	return snowflake.ReservedKeywords()
+}
+
 // ListRoles returns all roles visible to the current role (SHOW ROLES).
 // Used for informational displays and user-management role pickers.
 func (a *App) ListRoles() ([]string, error) {
@@ -2483,11 +2504,13 @@ func (a *App) ListFinalizableTasks(database, schema string) ([]tasks.Finalizabil
 }
 
 // CloneChildTask clones a task and replaces its predecessors.
-func (a *App) CloneChildTask(database, schema, oldName, newName string, newPredecessors []string) error {
+// caseSensitive controls whether newName is double-quoted (preserving exact case)
+// or left unquoted when it is a valid bare identifier (Snowflake uppercases it).
+func (a *App) CloneChildTask(database, schema, oldName, newName string, caseSensitive bool, newPredecessors []string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	return tasks.CloneChildTask(a.ctx, a.client, database, schema, oldName, newName, newPredecessors)
+	return tasks.CloneChildTask(a.ctx, a.client, database, schema, oldName, newName, caseSensitive, newPredecessors)
 }
 
 // GetTaskStatuses returns the current state and last-run result for every task in the given schema.
@@ -3742,7 +3765,10 @@ func (a *App) ListBackupSets(scopeType, db, schema, table, nameFilter string) ([
 // nameDb and nameSchema locate the backup set object itself (its fully-qualified name).
 // db is the database name used to set the session context before the CREATE.
 // objectFQN is the fully-qualified target object, e.g. "MY_DB" or "MY_DB"."MY_SCHEMA"."MY_TABLE".
-func (a *App) CreateBackupSet(name, nameDb, nameSchema, forType, objectFQN, db string, orReplace, ifNotExists bool) error {
+// CreateBackupSet creates a new backup set for a DATABASE, SCHEMA, or TABLE.
+// caseSensitive controls whether the backup set name is double-quoted (preserving
+// exact case) or left unquoted when it is a valid bare identifier.
+func (a *App) CreateBackupSet(name, nameDb, nameSchema, forType, objectFQN, db string, orReplace, ifNotExists, caseSensitive bool) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
@@ -3757,14 +3783,15 @@ func (a *App) CreateBackupSet(name, nameDb, nameSchema, forType, objectFQN, db s
 	}
 
 	// Build the (optionally fully-qualified) backup set name.
+	nameToken := snowflake.QuoteOrBare(name, caseSensitive)
 	var nameFQN string
 	switch {
 	case nameDb != "" && nameSchema != "":
-		nameFQN = q(nameDb) + "." + q(nameSchema) + "." + q(name)
+		nameFQN = q(nameDb) + "." + q(nameSchema) + "." + nameToken
 	case nameDb != "":
-		nameFQN = q(nameDb) + "." + q(name)
+		nameFQN = q(nameDb) + "." + nameToken
 	default:
-		nameFQN = q(name)
+		nameFQN = nameToken
 	}
 
 	var sb strings.Builder
@@ -3888,11 +3915,12 @@ func (a *App) ListBackupPolicies() ([]BackupPolicyRow, error) {
 // schedule: optional, e.g. "60 MINUTE", "6 HOUR", "USING CRON 0 2 * * * UTC"
 // expireAfterDays: 0 means not set
 // tags: optional raw tag expression e.g. `"MY_TAG" = 'value'`
-func (a *App) CreateBackupPolicy(name, schedule string, expireAfterDays int64, retentionLock bool, comment, tags string, orReplace, ifNotExists bool) error {
+// caseSensitive: when true the policy name is double-quoted (preserving exact
+// case); when false the name is left unquoted if it is a valid bare identifier.
+func (a *App) CreateBackupPolicy(name, schedule string, expireAfterDays int64, retentionLock bool, comment, tags string, orReplace, ifNotExists, caseSensitive bool) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
 
 	var sb strings.Builder
@@ -3904,7 +3932,7 @@ func (a *App) CreateBackupPolicy(name, schedule string, expireAfterDays int64, r
 	if ifNotExists && !orReplace {
 		sb.WriteString("IF NOT EXISTS ")
 	}
-	sb.WriteString(q(name))
+	sb.WriteString(snowflake.QuoteOrBare(name, caseSensitive))
 	if tags != "" {
 		sb.WriteString(fmt.Sprintf(" WITH TAG (%s)", tags))
 	}

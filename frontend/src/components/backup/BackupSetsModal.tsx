@@ -27,8 +27,9 @@ import {
 } from "antd";
 import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, MinusCircleOutlined, ReloadOutlined, RollbackOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { ListBackupSets, CreateBackupSet, DropBackupSet, AlterBackupSet, ListBackupPolicies, ListBackups, AddBackup, DeleteOldestBackup, RestoreFromBackup, ListDatabases, ListSchemas } from "../../../wailsjs/go/main/App";
+import { ListBackupSets, CreateBackupSet, DropBackupSet, AlterBackupSet, ListBackupPolicies, ListBackups, AddBackup, DeleteOldestBackup, RestoreFromBackup, ListDatabases, ListSchemas, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
+import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import dayjs from "dayjs";
 
 const { Text } = Typography;
@@ -50,11 +51,13 @@ interface AlterState {
   backupSetSchema: string;
   action: AlterAction;
   value: string;          // for rename / set-comment / apply-policy
+  caseSensitive: boolean; // only relevant for rename action
 }
 
 interface CreateState {
   open: boolean;
   name: string;
+  caseSensitive: boolean;
   nameDb: string;    // database component of the backup set's own fully-qualified name
   nameSchema: string; // schema component — empty until user selects for DATABASE scope
   forType: "DATABASE" | "SCHEMA" | "TABLE";
@@ -114,6 +117,7 @@ export default function BackupSetsModal(props: Props) {
   const [rows,    setRows]    = useState<main.BackupSetRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
+  const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
 
   // New state for the search filter
   const [nameFilter, setNameFilter] = useState("");
@@ -266,6 +270,7 @@ export default function BackupSetsModal(props: Props) {
   const [createState, setCreateState] = useState<CreateState>({
     open: false,
     name: "",
+    caseSensitive: false,
     nameDb: db,
     nameSchema: scopeType === "DATABASE" ? "" : schema,
     forType: defaultForType(scopeType),
@@ -298,7 +303,10 @@ export default function BackupSetsModal(props: Props) {
     }
   };
 
-  useEffect(() => { loadRows(nameFilter); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    loadRows(nameFilter);
+    GetQuotedIdentifiersIgnoreCase().then((v) => setQuotedIdentifiersIgnoreCase(v ?? false)).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDrop = async (row: main.BackupSetRow) => {
     try {
@@ -318,7 +326,7 @@ export default function BackupSetsModal(props: Props) {
       const esc = (s: string) => s.replace(/'/g, "''");
       switch (alterState.action) {
         case "rename":
-          alteration = `RENAME TO "${alterState.value.replace(/"/g, '""')}"`;
+          alteration = `RENAME TO ${identToken(alterState.value, alterState.caseSensitive)}`;
           break;
         case "set-comment":
           alteration = `SET COMMENT = '${esc(alterState.value)}'`;
@@ -363,6 +371,7 @@ export default function BackupSetsModal(props: Props) {
         db,
         createState.orReplace,
         createState.ifNotExists,
+        createState.caseSensitive,
       );
       if (createState.backupPolicy.trim()) {
         await AlterBackupSet(createState.name, createState.nameDb, createState.nameSchema, `APPLY BACKUP POLICY ${createState.backupPolicy.trim()}`);
@@ -465,7 +474,7 @@ export default function BackupSetsModal(props: Props) {
             type="text"
             icon={<EditOutlined />}
             title="Alter…"
-            onClick={() => setAlterState({ name: row.name, backupSetDb: row.backupSetDb, backupSetSchema: row.backupSetSchema, action: "rename", value: row.name })}
+            onClick={() => setAlterState({ name: row.name, backupSetDb: row.backupSetDb, backupSetSchema: row.backupSetSchema, action: "rename", value: row.name, caseSensitive: false })}
           />
           {(() => {
             const cached = backupCache[row.name];
@@ -564,6 +573,7 @@ export default function BackupSetsModal(props: Props) {
                 setCreateState({
                   open: true,
                   name: "",
+                  caseSensitive: false,
                   nameDb: db,
                   nameSchema: defaultNameSchema,
                   forType: defaultForType(scopeType),
@@ -766,6 +776,16 @@ export default function BackupSetsModal(props: Props) {
                 />
               </Form.Item>
             )}
+            {alterState.action === "rename" && (
+              <Form.Item style={{ marginBottom: 0 }}>
+                <ObjectNameCaseControl
+                  name={alterState.value}
+                  caseSensitive={alterState.caseSensitive}
+                  onCaseSensitiveChange={(v) => setAlterState((s) => s ? { ...s, caseSensitive: v } : s)}
+                  quotedIdentifiersIgnoreCase={quotedIdentifiersIgnoreCase}
+                />
+              </Form.Item>
+            )}
           </Form>
         </Modal>
       )}
@@ -918,11 +938,19 @@ export default function BackupSetsModal(props: Props) {
                 style={{ width: "100%" }}
               />
             </Form.Item>
-            <Form.Item label="Backup set name" required>
+            <Form.Item label="Backup set name" required style={{ marginBottom: 4 }}>
               <Input
                 value={createState.name}
                 onChange={(e) => setCreateState((s) => ({ ...s, name: e.target.value }))}
                 placeholder="my_backup_set"
+              />
+            </Form.Item>
+            <Form.Item style={{ marginBottom: 12 }}>
+              <ObjectNameCaseControl
+                name={createState.name}
+                caseSensitive={createState.caseSensitive}
+                onCaseSensitiveChange={(v) => setCreateState((s) => ({ ...s, caseSensitive: v }))}
+                quotedIdentifiersIgnoreCase={quotedIdentifiersIgnoreCase}
               />
             </Form.Item>
             <Form.Item label="For type" required>

@@ -18,15 +18,15 @@ import {
   ListIntegrations,
   ExecDDL,
   GetDatabaseRetentionDays,
+  GetQuotedIdentifiersIgnoreCase,
 } from "../../../wailsjs/go/main/App";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 
 interface Tag {
   name: string;
   value: string;
 }
-
-const UNQUOTED_IDENT_RE = /^[A-Za-z_][A-Za-z0-9_$]{0,254}$/;
 
 interface DbConfig {
   name: string;
@@ -115,6 +115,10 @@ function sq(s: string): string {
   return "'" + s.replace(/'/g, "''") + "'";
 }
 
+// q() is kept for tag names, clone source, and other already-existing
+// identifier references. identToken() from the shared helper is used for the
+// newly-created object name so that case sensitivity is respected.
+
 function formatTs(unix: number): string {
   return new Date(unix * 1000).toISOString().replace("T", " ").replace("Z", "");
 }
@@ -122,10 +126,7 @@ function formatTs(unix: number): string {
 function buildSql(cfg: DbConfig): string {
   const lines: string[] = [];
 
-  // Use double-quotes when explicitly case-sensitive OR when the name cannot be
-  // expressed as an unquoted Snowflake identifier.
-  const requiresQuotes = cfg.name.length > 0 && !UNQUOTED_IDENT_RE.test(cfg.name);
-  const nameToken = (cfg.caseSensitive || requiresQuotes) ? q(cfg.name) : cfg.name;
+  const nameToken = identToken(cfg.name, cfg.caseSensitive);
 
   const parts = ["CREATE"];
   if (cfg.orReplace) parts.push("OR REPLACE");
@@ -238,6 +239,7 @@ export default function CreateDatabaseModal({ onClose, onSuccess }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cloneSourceRetentionDays, setCloneSourceRetentionDays] = useState<number | null>(null);
+  const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
 
   useEffect(() => {
     // Use Promise.resolve().then() so synchronous throws (e.g. method not yet
@@ -254,6 +256,10 @@ export default function CreateDatabaseModal({ onClose, onSuccess }: Props) {
     Promise.resolve()
       .then(() => ListIntegrations("CATALOG"))
       .then((rows) => setCatalogIntegrations((rows ?? []).map((r) => r.name)))
+      .catch(() => {});
+    Promise.resolve()
+      .then(() => GetQuotedIdentifiersIgnoreCase())
+      .then((v) => setQuotedIdentifiersIgnoreCase(v ?? false))
       .catch(() => {});
   }, []);
 
@@ -289,9 +295,6 @@ export default function CreateDatabaseModal({ onClose, onSuccess }: Props) {
     setCfg((prev) => ({ ...prev, [key]: value }));
   }
 
-  // Derived: does the current name require quoting regardless of user preference?
-  const nameRequiresQuotes = cfg.name.length > 0 && !UNQUOTED_IDENT_RE.test(cfg.name);
-  const effectiveCaseSensitive = cfg.caseSensitive || nameRequiresQuotes;
 
   // Clone time-travel slider bounds derived from the source DB's retention period.
   const retentionDays = cloneSourceRetentionDays ?? 1;
@@ -376,34 +379,14 @@ export default function CreateDatabaseModal({ onClose, onSuccess }: Props) {
             IF NOT EXISTS
           </Checkbox>
         </div>
-        <Form.Item label="Identifier case" style={{ marginBottom: 4 }}>
-          <Radio.Group
-            value={effectiveCaseSensitive ? "sensitive" : "insensitive"}
-            onChange={(e) => patch("caseSensitive", e.target.value === "sensitive")}
-          >
-            <Radio value="insensitive" disabled={nameRequiresQuotes}>
-              Case insensitive
-              <span style={{ marginLeft: 4, color: "var(--text-muted)", fontSize: 11 }}>
-                (unquoted, stored as uppercase)
-              </span>
-            </Radio>
-            <Radio value="sensitive">
-              Case sensitive
-              <span style={{ marginLeft: 4, color: "var(--text-muted)", fontSize: 11 }}>
-                (double-quoted, preserves case)
-              </span>
-            </Radio>
-          </Radio.Group>
+        <Form.Item label="Identifier case" style={{ marginBottom: 12 }}>
+          <ObjectNameCaseControl
+            name={cfg.name}
+            caseSensitive={cfg.caseSensitive}
+            onCaseSensitiveChange={(v) => patch("caseSensitive", v)}
+            quotedIdentifiersIgnoreCase={quotedIdentifiersIgnoreCase}
+          />
         </Form.Item>
-        {nameRequiresQuotes && (
-          <div style={{ fontSize: 12, color: "#faad14", marginBottom: 12, display: "flex", gap: 6 }}>
-            <span>⚠</span>
-            <span>
-              Name requires quoting (must start with a letter or _ and contain only letters, digits, _ or $).
-              Case-insensitive mode is unavailable.
-            </span>
-          </div>
-        )}
 
         {/* ── Clone ── */}
         {sectionHeader("Clone")}

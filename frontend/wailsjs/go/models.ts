@@ -1079,6 +1079,7 @@ export namespace snowflake {
 	    database: string;
 	    schema: string;
 	    name: string;
+	    caseSensitive: boolean;
 	    filePath: string;
 	    content: string;
 	    orReplace: boolean;
@@ -1099,6 +1100,7 @@ export namespace snowflake {
 	        this.database = source["database"];
 	        this.schema = source["schema"];
 	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
 	        this.filePath = source["filePath"];
 	        this.content = source["content"];
 	        this.orReplace = source["orReplace"];
