@@ -19,11 +19,13 @@ import SnowparkCheckModal from "./components/snowpark/SnowparkCheckModal";
 import SnowparkSetupModal from "./components/snowpark/SnowparkSetupModal";
 import EditorPreferencesModal from "./components/editor/EditorPreferencesModal";
 import FeatureFlagsModal from "./components/settings/FeatureFlagsModal";
+import NotebookPrefsModal from "./components/notebook/NotebookPrefsModal";
 import { IsConnected } from "../wailsjs/go/main/App";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../wailsjs/runtime/runtime";
 import { useThemeStore, type ThemePreference } from "./store/themeStore";
 import { useDiffStore } from "./store/diffStore";
 import { useFeatureFlagsStore } from "./store/featureFlagsStore";
+import { useNotebookPrefsStore } from "./store/notebookPrefsStore";
 
 export default function App() {
   const isConnected    = useConnectionStore((s) => s.isConnected);
@@ -36,9 +38,10 @@ export default function App() {
   const [layoutModalOpen, setLayoutModalOpen]         = useState(false);
   const [aiModalOpen, setAiModalOpen]                 = useState(false);
   const [editorPrefsOpen, setEditorPrefsOpen]         = useState(false);
-  const [snowparkCheckOpen, setSnowparkCheckOpen]     = useState(false);
-  const [snowparkSetupOpen, setSnowparkSetupOpen]     = useState(false);
-  const [featureFlagsOpen, setFeatureFlagsOpen]       = useState(false);
+  const [snowparkCheckOpen, setSnowparkCheckOpen]       = useState(false);
+  const [snowparkSetupOpen, setSnowparkSetupOpen]       = useState(false);
+  const [featureFlagsOpen, setFeatureFlagsOpen]         = useState(false);
+  const [notebookPrefsOpen, setNotebookPrefsOpen]       = useState(false);
   const diffError    = useDiffStore((s) => s.error);
   const clearDiffError = useDiffStore((s) => s.clearError);
 
@@ -77,6 +80,10 @@ export default function App() {
   // Load feature flags from persisted config on startup.
   const loadFeatureFlags = useFeatureFlagsStore((s) => s.load);
   useEffect(() => { void loadFeatureFlags(); }, []);
+
+  // Load notebook preferences from persisted config on startup.
+  const loadNotebookPrefs = useNotebookPrefsStore((s) => s.load);
+  useEffect(() => { void loadNotebookPrefs(); }, []);
 
   // Listen for system-level color-scheme changes and update the resolved theme.
   useEffect(() => {
@@ -126,6 +133,12 @@ export default function App() {
   // Listen for "Feature Flags…" menu event.
   useEffect(() => {
     const off = EventsOn("menu:feature-flags", () => setFeatureFlagsOpen(true));
+    return () => off();
+  }, []);
+
+  // Listen for "Notebook Preferences…" menu event.
+  useEffect(() => {
+    const off = EventsOn("menu:notebook-preferences", () => setNotebookPrefsOpen(true));
     return () => off();
   }, []);
 
@@ -225,6 +238,9 @@ export default function App() {
       )}
       {featureFlagsOpen && (
         <FeatureFlagsModal onClose={() => setFeatureFlagsOpen(false)} />
+      )}
+      {notebookPrefsOpen && (
+        <NotebookPrefsModal onClose={() => setNotebookPrefsOpen(false)} />
       )}
     </ConfigProvider>
   );

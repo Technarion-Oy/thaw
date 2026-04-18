@@ -48,6 +48,7 @@ import {
 } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
+import { useNotebookPrefsStore } from "../../store/notebookPrefsStore";
 
 // Install a document-level capture-phase Cmd+C handler that routes clipboard
 // writes through the Wails native API.  WKWebView blocks all web-content
@@ -277,6 +278,7 @@ export default function NotebookTab({ tabId }: Props) {
   const setSql      = useQueryStore((s) => s.setSql);
   const markSaved   = useQueryStore((s) => s.markSaved);
   const loadContext = useSessionStore((s) => s.loadContext);
+  const syntaxMode  = useNotebookPrefsStore((s) => s.prefs.syntaxMode);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -307,6 +309,14 @@ export default function NotebookTab({ tabId }: Props) {
   useEffect(() => {
     if (!kernelReady) return;
 
+    // When diagnostics are disabled, clear any stale markers and bail out.
+    if (syntaxMode === "off") {
+      for (const model of cellModelsRef.current.values()) {
+        monacoLib.editor.setModelMarkers(model, "python-syntax", []);
+      }
+      return;
+    }
+
     const timer = setTimeout(async () => {
       let fullCode = "";
       let currentLineCount = 0;
@@ -326,7 +336,7 @@ export default function NotebookTab({ tabId }: Props) {
       }
 
       try {
-        const errors = await CheckPythonSyntax(tabId, fullCode);
+        const errors = await CheckPythonSyntax(tabId, fullCode, syntaxMode);
         if (!errors) return;
 
         const markersByCell = new Map<string, monacoLib.editor.IMarkerData[]>();
@@ -372,7 +382,7 @@ export default function NotebookTab({ tabId }: Props) {
     }, 750);
 
     return () => clearTimeout(timer);
-  }, [cells, kernelReady, tabId]);
+  }, [cells, kernelReady, tabId, syntaxMode]);
   
   useEffect(() => { cellsRef.current = cells; }, [cells]);
 

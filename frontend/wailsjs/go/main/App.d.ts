@@ -63,7 +63,7 @@ export function CancelQuery():Promise<void>;
 
 export function CheckAvailableKeyTools():Promise<Array<string>>;
 
-export function CheckPythonSyntax(arg1:string,arg2:string):Promise<Array<main.NotebookSyntaxError>>;
+export function CheckPythonSyntax(arg1:string,arg2:string,arg3:string):Promise<Array<main.NotebookSyntaxError>>;
 
 export function CheckSnowparkEnv():Promise<main.SnowparkCheckResult>;
 
@@ -170,6 +170,8 @@ export function GetIntegrationProperties(arg1:string):Promise<Array<main.Propert
 export function GetNotebookCompletions(arg1:string,arg2:string,arg3:number,arg4:number):Promise<Array<main.NotebookCompletion>>;
 
 export function GetNotebookHover(arg1:string,arg2:string,arg3:number,arg4:number):Promise<string>;
+
+export function GetNotebookPrefs():Promise<config.NotebookPrefs>;
 
 export function GetNotebookQueryWarehouse(arg1:string,arg2:string,arg3:string):Promise<string>;
 
@@ -364,6 +366,8 @@ export function SaveFile(arg1:string,arg2:string):Promise<void>;
 export function SaveGitConfig(arg1:config.GitConfig):Promise<void>;
 
 export function SaveNotebook(arg1:string,arg2:string):Promise<void>;
+
+export function SaveNotebookPrefs(arg1:config.NotebookPrefs):Promise<void>;
 
 export function SaveSnowparkConfig(arg1:string):Promise<void>;
 

@@ -2914,6 +2914,32 @@ func (a *App) SaveFeatureFlags(flags config.FeatureFlags) error {
 	return config.Save(cfg)
 }
 
+// ─── Notebook preferences ────────────────────────────────────────────────────
+
+// GetNotebookPrefs returns the persisted notebook editor preferences.
+// Returns sensible defaults when the config does not exist yet.
+func (a *App) GetNotebookPrefs() config.NotebookPrefs {
+	cfg, err := config.Load()
+	if err != nil {
+		return config.DefaultNotebookPrefs()
+	}
+	prefs := cfg.NotebookPrefs
+	if prefs.SyntaxMode == "" {
+		prefs.SyntaxMode = config.DefaultNotebookPrefs().SyntaxMode
+	}
+	return prefs
+}
+
+// SaveNotebookPrefs persists notebook editor preferences to disk.
+func (a *App) SaveNotebookPrefs(prefs config.NotebookPrefs) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	cfg.NotebookPrefs = prefs
+	return config.Save(cfg)
+}
+
 // ListAIModels returns the models available for the given provider and API key.
 // Returns nil (not an error) when the key is invalid or the request fails so
 // the frontend can fall back to its static defaults.

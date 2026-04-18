@@ -1,0 +1,28 @@
+// Copyright (c) 2026 Technarion Oy. All rights reserved.
+//
+// This software and its source code are proprietary and confidential.
+// Unauthorized copying, distribution, modification, or use of this software,
+// in whole or in part, is strictly prohibited without prior written permission
+// from Technarion Oy.
+//
+// Commercial use of this software is restricted to parties holding a valid
+// license agreement with Technarion Oy.
+
+import { create } from "zustand";
+import { GetNotebookPrefs } from "../../wailsjs/go/main/App";
+import type { config } from "../../wailsjs/go/models";
+
+interface NotebookPrefsState {
+  prefs: config.NotebookPrefs;
+  /** Reload prefs from the backend (call after SaveNotebookPrefs). */
+  load: () => Promise<void>;
+}
+
+export const useNotebookPrefsStore = create<NotebookPrefsState>((set) => ({
+  // Optimistic default: kernel-aware mode until the backend responds.
+  prefs: { syntaxMode: "kernel" },
+  load: async () => {
+    const prefs = await GetNotebookPrefs();
+    set({ prefs });
+  },
+}));

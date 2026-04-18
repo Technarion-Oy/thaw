@@ -139,6 +139,18 @@ export namespace config {
 	        this.exportPathTemplate = source["exportPathTemplate"];
 	    }
 	}
+	export class NotebookPrefs {
+	    syntaxMode: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new NotebookPrefs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.syntaxMode = source["syntaxMode"];
+	    }
+	}
 
 }
 

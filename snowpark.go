@@ -222,12 +222,24 @@ def _thaw_handle_hover(req_json):
         return _j.dumps({"hover": "", "error": str(_ex)})
 
 def _thaw_handle_syntax(req_json):
-    """Check Python syntax + undefined names, using the live kernel namespace."""
+    """Check Python syntax + undefined names.
+
+    mode controls analysis depth (passed in the JSON request):
+      "off"    — return no errors (Go side already guards, but handle here too)
+      "static" — ast.parse + pyflakes without kernel namespace stubs
+      "kernel" — ast.parse + pyflakes with live namespace stubs from g (default)
+    """
     import ast as _ast, json as _json
     try:
-        code = _json.loads(req_json).get("code", "")
+        _req = _json.loads(req_json)
+        code = _req.get("code", "")
+        mode = _req.get("mode", "kernel")
     except Exception:
         code = req_json.strip()
+        mode = "kernel"
+
+    if mode == "off":
+        return _json.dumps({"errors": []})
 
     # ── 1. Syntax check ───────────────────────────────────────────────────────
     try:
@@ -246,18 +258,33 @@ def _thaw_handle_syntax(req_json):
         return _json.dumps({"errors": []})
 
     # ── 2. Pyflakes: undefined names + import errors ─────────────────────────
-    # Prepend stub assignments (name = None at lineno 0) for every name that
-    # currently lives in the kernel namespace g.  Because g is only populated
-    # by cells that have actually been run, pyflakes gets real module-scope
-    # bindings for cross-cell names and never raises UndefinedName for them.
-    # Module-scope bindings are more reliable than the builtins= parameter,
-    # which places names in the lowest-priority scope and can still trigger
-    # warnings in certain code patterns.
     try:
         from pyflakes import checker as _pfc, messages as _pfm
-        _w = _pfc.Checker(tree, "<cell>")
+        if mode == "kernel":
+            # Prepend stub assignments (name = None at lineno 0) for every name
+            # in the live kernel namespace g.  g is only populated by cells that
+            # have actually been executed, so pyflakes will not flag cross-cell
+            # variables as undefined as long as the user has run those cells.
+            _stubs = []
+            for _name in g:
+                if isinstance(_name, str) and _name.isidentifier():
+                    _stub = _ast.Assign(
+                        targets=[_ast.Name(id=_name, ctx=_ast.Store())],
+                        value=_ast.Constant(value=None),
+                        lineno=0, col_offset=0,
+                    )
+                    _ast.fix_missing_locations(_stub)
+                    _stubs.append(_stub)
+            _aug = _ast.Module(body=_stubs + tree.body, type_ignores=tree.type_ignores)
+            _ast.fix_missing_locations(_aug)
+            _w = _pfc.Checker(_aug, "<cell>")
+        else:
+            # "static" mode: analyse the cell in isolation, no kernel state
+            _w = _pfc.Checker(tree, "<cell>")
         errors = []
         for _msg in _w.messages:
+            if getattr(_msg, "lineno", 1) < 1:
+                continue  # skip stub-injected lines (lineno 0)
             _is_err = isinstance(_msg, (_pfm.UndefinedName, _pfm.UndefinedLocal))
             errors.append({
                 "severity": "error" if _is_err else "warning",
@@ -1693,10 +1720,17 @@ type NotebookSyntaxError struct {
 	Msg      string `json:"msg"`
 }
 
-// CheckPythonSyntax asks the running Python kernel to parse code with ast.parse()
-// and returns any SyntaxError it finds.  Returns nil (no error) when no kernel is
-// running for the tab — the caller should silently skip in that case.
-func (a *App) CheckPythonSyntax(tabId, code string) ([]NotebookSyntaxError, error) {
+// CheckPythonSyntax asks the running Python kernel to analyse code and return
+// diagnostics.  mode controls the analysis depth:
+//   - "off"    — always returns nil (caller should skip, but Go side handles it too)
+//   - "static" — ast.parse + pyflakes without kernel namespace stubs
+//   - "kernel" — ast.parse + pyflakes with live namespace stubs (default)
+//
+// Returns nil (no error) when no kernel is running for the tab.
+func (a *App) CheckPythonSyntax(tabId, code, mode string) ([]NotebookSyntaxError, error) {
+	if mode == "off" {
+		return nil, nil
+	}
 	val, ok := notebookSessions.Load(tabId)
 	if !ok {
 		return nil, nil
@@ -1705,7 +1739,7 @@ func (a *App) CheckPythonSyntax(tabId, code string) ([]NotebookSyntaxError, erro
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	req, _ := json.Marshal(map[string]any{"code": code})
+	req, _ := json.Marshal(map[string]any{"code": code, "mode": mode})
 	payload := fmt.Sprintf("%s\n%s\n%s\n", kernelSyntaxMarker, string(req), kernelRunMarker)
 	resultJSON, err := kernelRPC(s, payload)
 	if err != nil {

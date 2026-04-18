@@ -102,8 +102,8 @@ export function CheckAvailableKeyTools() {
   return window['go']['main']['App']['CheckAvailableKeyTools']();
 }
 
-export function CheckPythonSyntax(arg1, arg2) {
-  return window['go']['main']['App']['CheckPythonSyntax'](arg1, arg2);
+export function CheckPythonSyntax(arg1, arg2, arg3) {
+  return window['go']['main']['App']['CheckPythonSyntax'](arg1, arg2, arg3);
 }
 
 export function CheckSnowparkEnv() {
@@ -316,6 +316,10 @@ export function GetNotebookCompletions(arg1, arg2, arg3, arg4) {
 
 export function GetNotebookHover(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['GetNotebookHover'](arg1, arg2, arg3, arg4);
+}
+
+export function GetNotebookPrefs() {
+  return window['go']['main']['App']['GetNotebookPrefs']();
 }
 
 export function GetNotebookQueryWarehouse(arg1, arg2, arg3) {
@@ -704,6 +708,10 @@ export function SaveGitConfig(arg1) {
 
 export function SaveNotebook(arg1, arg2) {
   return window['go']['main']['App']['SaveNotebook'](arg1, arg2);
+}
+
+export function SaveNotebookPrefs(arg1) {
+  return window['go']['main']['App']['SaveNotebookPrefs'](arg1);
 }
 
 export function SaveSnowparkConfig(arg1) {
