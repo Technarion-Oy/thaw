@@ -95,6 +95,21 @@ func DefaultEditorPrefs() EditorPrefs {
 	}
 }
 
+// NotebookPrefs holds user preferences for the notebook editor.
+type NotebookPrefs struct {
+	// SyntaxMode controls how Python diagnostics are produced.
+	// "off"    — diagnostics disabled entirely.
+	// "static" — ast.parse + pyflakes on the cell text only; no kernel state used.
+	// "kernel" — ast.parse + pyflakes with live kernel namespace stubs so that
+	//            variables from previously-run cells are not flagged as undefined.
+	SyntaxMode string `json:"syntaxMode"`
+}
+
+// DefaultNotebookPrefs returns the out-of-the-box notebook preference values.
+func DefaultNotebookPrefs() NotebookPrefs {
+	return NotebookPrefs{SyntaxMode: "kernel"}
+}
+
 // FeatureFlags holds toggles for optional or experimental features.
 //
 // Adding a new flag:
@@ -125,6 +140,7 @@ type AppConfig struct {
 	AI                     AIConfig       `json:"ai"`
 	Snowpark               SnowparkConfig `json:"snowpark"`
 	Editor                 EditorPrefs    `json:"editor"`
+	NotebookPrefs          NotebookPrefs  `json:"notebookPrefs"`
 	SnowflakeCLIConfigPath string         `json:"snowflakeCliConfigPath"`
 	FeatureFlags           FeatureFlags   `json:"featureFlags"`
 }

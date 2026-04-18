@@ -14,7 +14,7 @@ import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip,
 import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NewNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, GetSqlStatementRanges } from "../../wailsjs/go/main/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, GetSqlStatementRanges } from "../../wailsjs/go/main/App";
 import type { main } from "../../wailsjs/go/models";
 import SessionPropertiesModal from "../components/common/SessionPropertiesModal";
 import SnippetsModal from "../components/snippets/SnippetsModal";
@@ -42,7 +42,7 @@ import { useSessionStore } from "../store/sessionStore";
 const { Text } = Typography;
 
 export default function QueryPage() {
-  const { sql, selectedSql, isRunning, error, setResult, setRunning, setError, markSaved, openScratch, openFile, setSql, openNotebook, refreshFileTab, orphanFileTab } = useQueryStore();
+  const { sql, selectedSql, isRunning, error, setResult, setRunning, setError, markSaved, openScratch, openFile, setSql, openNotebook, openNotebookUnsaved, refreshFileTab, orphanFileTab } = useQueryStore();
   const activeTabId    = useQueryStore((s) => s.activeTabId);
   const isNotebookTab  = useQueryStore((s) => (s.tabs.find((t) => t.id === s.activeTabId)?.kind ?? "sql") === "notebook");
   const activeDiff     = useQueryStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.diff ?? null);
@@ -205,20 +205,22 @@ export default function QueryPage() {
     return () => (off as () => void)();
   }, [openNotebook]);
 
-  // New notebook from Snowpark menu
+  // New notebook from Snowpark menu — open a blank tab immediately, no file dialog
   useEffect(() => {
-    const off = EventsOn("menu:snowpark-new-notebook", async () => {
-      try {
-        const path = await NewNotebook();
-        if (!path) return;
-        const content = await ReadNotebook(path);
-        openNotebook(path, content);
-      } catch (e) {
-        message.error(String(e));
-      }
+    const off = EventsOn("menu:snowpark-new-notebook", () => {
+      const blank = JSON.stringify({
+        nbformat: 4,
+        nbformat_minor: 5,
+        metadata: {
+          kernelspec: { display_name: "Python 3", language: "python", name: "python3" },
+          language_info: { name: "python", version: "3.12.0" },
+        },
+        cells: [{ cell_type: "code", execution_count: null, metadata: {}, outputs: [], source: [] }],
+      }, null, 1);
+      openNotebookUnsaved("Untitled Notebook", blank);
     });
     return () => (off as () => void)();
-  }, [openNotebook]);
+  }, [openNotebookUnsaved]);
 
   // Listen for per-statement progress events emitted by the Go backend while
   // executing a multi-statement script.  Update the spinner label and highlight

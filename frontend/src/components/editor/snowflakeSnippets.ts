@@ -289,6 +289,160 @@ export function getSnowflakeSnippets(monaco: typeof monacoLib): monacoLib.langua
   ];
 }
 
+// ─── Python / Snowpark snippets ───────────────────────────────────────────────
+
+export function getPythonSnippets(monaco: typeof monacoLib): monacoLib.languages.CompletionItem[] {
+  const range = { startLineNumber: 0, startColumn: 0, endLineNumber: 0, endColumn: 0 };
+  return [
+    {
+      label: "hello_world",
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: 'print("Hello, World!")',
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      documentation: "Print Hello World",
+      range: range as any,
+    },
+    {
+      label: "imports",
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: [
+        "import pandas as pd",
+        "import numpy as np",
+        "from snowflake.snowpark.functions import col, lit, when",
+      ].join("\n"),
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      documentation: "Common Snowpark imports",
+      range: range as any,
+    },
+    {
+      label: "load_table",
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: 'df = session.table("${1:DB.SCHEMA.TABLE_NAME}")',
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      documentation: "Load a Snowflake table into a Snowpark DataFrame",
+      range: range as any,
+    },
+    {
+      label: "show_df",
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: "${1:df}.show()",
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      documentation: "Print DataFrame rows to output",
+      range: range as any,
+    },
+    {
+      label: "select_cols",
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: '${1:df}.select(col("${2:col1}"), col("${3:col2}"))',
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      documentation: "Select specific columns from a DataFrame",
+      range: range as any,
+    },
+    {
+      label: "filter_df",
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: '${1:df}.filter(col("${2:column_name}") ${3|==,!=,>,<,>=,<=|} "${4:value}")',
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      documentation: "Filter a Snowpark DataFrame by a column condition",
+      range: range as any,
+    },
+    {
+      label: "groupby",
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: [
+        '${1:df}.group_by(col("${2:group_col}"))',
+        '    .agg({"${3:value_col}": "${4|avg,sum,count,min,max|}"})',
+        ".show()",
+      ].join("\n"),
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      documentation: "Group by and aggregate a Snowpark DataFrame",
+      range: range as any,
+    },
+    {
+      label: "join_df",
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: '${1:df1}.join(${2:df2}, ${1:df1}["${3:key}"] == ${2:df2}["${3:key}"], "${4|inner,left,right,full|}")',
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      documentation: "Join two Snowpark DataFrames",
+      range: range as any,
+    },
+    {
+      label: "write_table",
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: '${1:df}.write.save_as_table("${2:DB.SCHEMA.TABLE_NAME}", mode="${3|append,overwrite,truncate,errorifexists|}")',
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      documentation: "Write a Snowpark DataFrame to a Snowflake table",
+      range: range as any,
+    },
+    {
+      label: "run_sql",
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: 'df = session.sql("${1:SELECT * FROM MYTABLE}")\ndf.show()',
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      documentation: "Run a SQL statement via the Snowpark session",
+      range: range as any,
+    },
+    {
+      label: "create_session",
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: [
+        "from snowflake.snowpark import Session",
+        "",
+        "connection_params = {",
+        '    "account": "${1:account}",',
+        '    "user": "${2:user}",',
+        '    "password": "${3:password}",',
+        '    "role": "${4:role}",',
+        '    "warehouse": "${5:warehouse}",',
+        '    "database": "${6:database}",',
+        '    "schema": "${7:schema}",',
+        "}",
+        "",
+        "session = Session.builder.configs(connection_params).create()",
+      ].join("\n"),
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      documentation: "Create a Snowpark session manually (Thaw auto-creates one on kernel start)",
+      range: range as any,
+    },
+  ];
+}
+
+export const PYTHON_SNIPPET_CATEGORIES: {
+  header: string;
+  labels: string[];
+  titles?: Record<string, string>;
+}[] = [
+  {
+    header: "Basics",
+    labels: ["hello_world", "imports"],
+    titles: {
+      hello_world: "print('Hello, World!')",
+      imports:     "common imports",
+    },
+  },
+  {
+    header: "DataFrames",
+    labels: ["load_table", "show_df", "select_cols", "filter_df", "groupby", "join_df", "write_table"],
+    titles: {
+      load_table:  "load table → df",
+      show_df:     "df.show()",
+      select_cols: "df.select(cols)",
+      filter_df:   "df.filter(condition)",
+      groupby:     "df.group_by().agg()",
+      join_df:     "df.join(other)",
+      write_table: "df.write.save_as_table()",
+    },
+  },
+  {
+    header: "SQL & Session",
+    labels: ["run_sql", "create_session"],
+    titles: {
+      run_sql:        "session.sql(...).show()",
+      create_session: "Session.builder.create()",
+    },
+  },
+];
+
 /**
  * Category groups used to build the snippet submenu.
  *

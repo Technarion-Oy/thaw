@@ -139,6 +139,18 @@ export namespace config {
 	        this.exportPathTemplate = source["exportPathTemplate"];
 	    }
 	}
+	export class NotebookPrefs {
+	    syntaxMode: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new NotebookPrefs(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.syntaxMode = source["syntaxMode"];
+	    }
+	}
 
 }
 
@@ -647,6 +659,26 @@ export namespace main {
 	        this.rows = source["rows"];
 	        this.rowCount = source["rowCount"];
 	        this.queryID = source["queryID"];
+	    }
+	}
+	export class NotebookSyntaxError {
+	    severity: string;
+	    line: number;
+	    col: number;
+	    endCol?: number;
+	    msg: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new NotebookSyntaxError(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.severity = source["severity"];
+	        this.line = source["line"];
+	        this.col = source["col"];
+	        this.endCol = source["endCol"];
+	        this.msg = source["msg"];
 	    }
 	}
 	export class PackageInfo {

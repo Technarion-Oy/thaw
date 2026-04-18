@@ -12,16 +12,20 @@ package main
 
 import (
 	"bufio"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"thaw/internal/config"
 
@@ -32,20 +36,33 @@ import (
 const SnowparkCondaEnv = "thaw_snowpark"
 
 // Markers used by the embedded Python kernel to delimit cell execution.
-const kernelSentinel       = "<<<THAW_CELL_DONE>>>"
-const kernelRunMarker      = "<<<THAW_RUN>>>"
+const kernelSentinel = "<<<THAW_CELL_DONE>>>"
+const kernelRunMarker = "<<<THAW_RUN>>>"
 const kernelCompleteMarker = "<<<THAW_COMPLETE>>>"
-const kernelHoverMarker    = "<<<THAW_HOVER>>>"
-const kernelSqlMarker      = "<<<THAW_SQL>>>"
+const kernelHoverMarker = "<<<THAW_HOVER>>>"
+const kernelSqlMarker = "<<<THAW_SQL>>>"
+const kernelSyntaxMarker = "<<<THAW_SYNTAX>>>"
+const kernelDebugMarker = "<<<THAW_DEBUG_RUN>>>"
+const kernelDebugResultMarker = "<<<THAW_DEBUG_RESULT>>>"
+
+// Global state for the Debug Adapter Protocol (DAP) connection
+var (
+	dapConn      net.Conn
+	dapMutex     sync.Mutex
+	dapProxyOnce sync.Once
+)
 
 // kernelPyScript is a minimal stateful Python kernel.  It reads code blocks
 // from stdin (terminated by kernelRunMarker), executes them in a shared
 // namespace, captures stdout/stderr, captures matplotlib figures as base64
 // PNGs, and writes a JSON result + sentinel line.
 const kernelPyScript = `import sys, io, traceback, json, base64, warnings, os
+import ast as _ast
 
 SENTINEL   = "<<<THAW_CELL_DONE>>>"
 RUN_MARKER = "<<<THAW_RUN>>>"
+DEBUG_MARKER = "<<<THAW_DEBUG_RUN>>>"
+DEBUG_RESULT_MARKER = "<<<THAW_DEBUG_RESULT>>>"
 
 # Force matplotlib to use the non-interactive Agg backend so that show()
 # does not try to open a GUI window.
@@ -65,6 +82,9 @@ _THAW_DDL_RE = _re.compile(
     _re.IGNORECASE,
 )
 
+# Private state for internal kernel use, completely isolated from user code.
+_THAW_INTERNAL_STATE = {}
+# User namespace
 g = {}
 
 # ── Auto-create Snowpark session matching the Thaw app connection ──────────────
@@ -120,10 +140,9 @@ def _thaw_create_session(ns):
         _old_out, sys.stdout = sys.stdout, io.StringIO()
         try:
             _sess = _Session.builder.configs(cfg).create()
-            # Store original sql() before patching so _thaw_run_sql_cell can
-            # call it directly and avoid double-executing DDL statements.
+            # Store original sql() before patching into INTERNAL STATE (not the user namespace).
             _orig_sql = _sess.sql
-            ns['_thaw_orig_session_sql'] = _orig_sql
+            _THAW_INTERNAL_STATE['orig_sql'] = _orig_sql
             # Patch instance-level sql() so DDL/USE statements execute
             # immediately without an explicit .collect(), matching Snowflake
             # native notebook behavior.
@@ -136,6 +155,7 @@ def _thaw_create_session(ns):
                         pass
                 return _df
             _sess.sql = _auto_collect_sql
+            #ns['session'] = _sess
         finally:
             sys.stdout = _old_out
     except Exception as _e:
@@ -152,6 +172,7 @@ del _thaw_create_session
 COMPLETE_MARKER = "<<<THAW_COMPLETE>>>"
 HOVER_MARKER    = "<<<THAW_HOVER>>>"
 SQL_MARKER      = "<<<THAW_SQL>>>"
+SYNTAX_MARKER   = "<<<THAW_SYNTAX>>>"
 
 def _thaw_handle_complete(req_json):
     """Return jedi completions as JSON, using the live kernel namespace."""
@@ -167,6 +188,10 @@ def _thaw_handle_complete(req_json):
             _s = _jedi.Script(_src)
         _items = []
         for _c in _s.complete(_ln, _col)[:200]:
+            # Obfuscation: Filter out any internal variables or functions starting with _ or containing 'thaw'
+            if _c.name.startswith('_') or 'thaw' in _c.name.lower():
+                continue
+
             try:    _doc = _c.docstring(raw=True)[:1000]
             except: _doc = ""
             _items.append({
@@ -217,6 +242,109 @@ def _thaw_handle_hover(req_json):
     except Exception as _ex:
         import json as _j
         return _j.dumps({"hover": "", "error": str(_ex)})
+
+def _thaw_handle_syntax(req_json):
+    """Check Python syntax + undefined names."""
+    try:
+        import json as _json
+        _req = _json.loads(req_json)
+        code = _req.get("code", "")
+        mode = _req.get("mode", "kernel")
+    except Exception:
+        import json as _json
+        code = req_json.strip()
+        mode = "kernel"
+
+    if mode == "off":
+        return _json.dumps({"errors": []})
+
+    # ── 1. Syntax check ───────────────────────────────────────────────────────
+    try:
+        tree = _ast.parse(code)
+    except SyntaxError as _e:
+        err = {
+            "severity": "error",
+            "line":     _e.lineno or 1,
+            "col":      (_e.offset or 1) - 1,
+            "msg":      _e.msg,
+        }
+        if getattr(_e, "end_offset", None) is not None:
+            err["endCol"] = _e.end_offset - 1
+        return _json.dumps({"errors": [err]})
+    except Exception:
+        return _json.dumps({"errors": []})
+
+    # ── 2. Pyflakes: undefined names + import errors ─────────────────────────
+    try:
+        from pyflakes import checker as _pfc, messages as _pfm
+        if mode == "kernel":
+            # Prepend stub assignments (name = None at lineno 0) for every name
+            # in the live kernel namespace g.  g is only populated by cells that
+            # have actually been executed, so pyflakes will not flag cross-cell
+            # variables as undefined as long as the user has run those cells.
+            _stubs = []
+            for _name in g:
+                if isinstance(_name, str) and _name.isidentifier():
+                    _stub = _ast.Assign(
+                        targets=[_ast.Name(id=_name, ctx=_ast.Store())],
+                        value=_ast.Constant(value=None),
+                        lineno=0, col_offset=0,
+                    )
+                    _ast.fix_missing_locations(_stub)
+                    _stubs.append(_stub)
+            _aug = _ast.Module(body=_stubs + tree.body, type_ignores=tree.type_ignores)
+            _ast.fix_missing_locations(_aug)
+            _w = _pfc.Checker(_aug, "<cell>")
+        else:
+            # "static" mode: analyze the cell in isolation, no kernel state
+            _w = _pfc.Checker(tree, "<cell>")
+        errors = []
+        for _msg in _w.messages:
+            if getattr(_msg, "lineno", 1) < 1:
+                continue  # skip stub-injected lines (lineno 0)
+            _is_err = isinstance(_msg, (_pfm.UndefinedName, _pfm.UndefinedLocal))
+            errors.append({
+                "severity": "error" if _is_err else "warning",
+                "line":     _msg.lineno,
+                "col":      getattr(_msg, "col", 0),
+                "msg":      _msg.message % _msg.message_args,
+            })
+        return _json.dumps({"errors": errors})
+    except ImportError:
+        pass  # pyflakes not available; fall back to import-existence check
+
+    # ── 3. Fallback: importlib.util.find_spec for missing top-level modules ────
+    import importlib.util as _ilu
+    errors = []
+    for _node in _ast.walk(tree):
+        if isinstance(_node, _ast.Import):
+            for _alias in _node.names:
+                _top = _alias.name.split(".")[0]
+                try:
+                    _found = _ilu.find_spec(_top)
+                except (ModuleNotFoundError, ValueError):
+                    _found = None
+                if _found is None:
+                    errors.append({
+                        "severity": "warning",
+                        "line": _node.lineno,
+                        "col": _node.col_offset,
+                        "msg": "Module not found: '" + _alias.name + "'",
+                    })
+        elif isinstance(_node, _ast.ImportFrom) and _node.module:
+            _top = _node.module.split(".")[0]
+            try:
+                _found = _ilu.find_spec(_top)
+            except (ModuleNotFoundError, ValueError):
+                _found = None
+            if _found is None:
+                errors.append({
+                    "severity": "warning",
+                    "line": _node.lineno,
+                    "col": _node.col_offset,
+                    "msg": "Module not found: '" + _node.module + "'",
+                })
+    return _json.dumps({"errors": errors})
 
 def _capture_figures():
     """Return a list of base64-encoded PNG strings for all open figures."""
@@ -295,7 +423,7 @@ def _thaw_run_sql_cell(sql_str):
         return str(v)
 
     # Use the original (unpatched) sql() to avoid double-collecting DDL.
-    _sql_fn = g.get('_thaw_orig_session_sql')
+    _sql_fn = _THAW_INTERNAL_STATE.get('orig_sql')
     if _sql_fn is None:
         try:
             from snowflake.snowpark.context import get_active_session as _gas
@@ -350,7 +478,82 @@ while True:
         print(_thaw_run_sql_cell(code[len(SQL_MARKER) + 1:]), flush=True)
         print(SENTINEL, flush=True)
         continue
+    if code.startswith(SYNTAX_MARKER + "\n"):
+        print(_thaw_handle_syntax(code[len(SYNTAX_MARKER) + 1:]), flush=True)
+        print(SENTINEL, flush=True)
+        continue
 
+    # ── Debug Execution (DAP/debugpy) ─────────────────────────────────────────
+    if code.startswith(DEBUG_MARKER + "\n"):
+        import tempfile
+        import debugpy
+        import runpy
+
+        parts = code.split("\n", 2)
+        cell_id = parts[1].strip() if len(parts) > 1 else "unknown"
+        cell_code = parts[2] if len(parts) > 2 else ""
+
+        # Write code to a physical file so debugpy has a path to set breakpoints.
+        # A trailing 'pass' sentinel gives debugpy a line to land on after the
+        # last real line executes, so breakpoints on the final line fire correctly.
+        debug_filepath = os.path.join(tempfile.gettempdir(), f"thaw_cell_{cell_id}.py")
+        with open(debug_filepath, "w", encoding="utf-8") as f:
+            f.write(cell_code)
+            if not cell_code.endswith("\n"):
+                f.write("\n")
+            f.write("pass  # _thaw_end\n")
+
+        _debug_first_sentinel_done = False
+        try:
+            try:
+                # Start the debugger (ignores if already listening)
+                debugpy.listen(("127.0.0.1", 5678))
+            except RuntimeError:
+                pass
+
+            # Signal to Go proxy that debugpy is waiting AND send the filepath
+            print(json.dumps({
+                "status": "DEBUG_READY",
+                "filepath": debug_filepath
+            }), flush=True)
+            print(SENTINEL, flush=True)
+            _debug_first_sentinel_done = True
+
+            # Freeze until the frontend completes the DAP handshake (configurationDone).
+            # Closing the TCP connection (via StopDapProxy) will unblock this if the
+            # frontend gives up early.
+            debugpy.wait_for_client()
+
+            # Redirect only stderr; leave stdout un-redirected so that print()
+            # calls flow directly to the kernel pipe and Go can stream them to
+            # the frontend in real-time while the debugger is paused.
+            buf_err = io.StringIO()
+            old_err = sys.stderr
+            sys.stderr = buf_err
+            err_info = None
+
+            try:
+                runpy.run_path(debug_filepath, init_globals=g)
+            except Exception:
+                err_info = traceback.format_exc()
+            finally:
+                sys.stderr = old_err
+
+            sys.stdout.flush()
+            images = _capture_figures()
+            result = {"stdout": "", "stderr": buf_err.getvalue(), "error": err_info, "images": images, "session_context": _thaw_get_session_context()}
+            print(DEBUG_RESULT_MARKER + json.dumps(result), flush=True)
+            print(SENTINEL, flush=True)
+        except Exception as e:
+            if not _debug_first_sentinel_done:
+                print(json.dumps({"error": str(e)}), flush=True)
+            else:
+                print(DEBUG_RESULT_MARKER + json.dumps({"error": str(e)}), flush=True)
+            print(SENTINEL, flush=True)
+            
+        continue
+
+    # ── Standard Execution ────────────────────────────────────────────────────
     buf_out = io.StringIO()
     buf_err = io.StringIO()
     # Drain any deferred session-init errors into the first cell's stderr.
@@ -360,8 +563,16 @@ while True:
     sys.stdout = buf_out
     sys.stderr = buf_err
     err_info   = None
+    
     try:
-        exec(compile(code, "<cell>", "exec"), g)
+        # Obfuscation: AST Security Check. Prevent users from reassigning session or accessing internal dicts.
+        tree = compile(code, "<cell>", "exec", flags=_ast.PyCF_ONLY_AST)
+        for node in _ast.walk(tree):
+            if isinstance(node, _ast.Name) and node.id in ['_THAW_INTERNAL_STATE', 'kernelRPC', 'SENTINEL', 'RUN_MARKER']:
+                raise NameError(f"Access denied: '{node.id}' is a reserved internal variable.")
+                         
+        bytecode = compile(tree, "<cell>", "exec")
+        exec(bytecode, g)
     except Exception:
         err_info = traceback.format_exc()
     finally:
@@ -386,8 +597,8 @@ type SnowparkCheckResult struct {
 	Backend             string `json:"backend"`             // "conda" | "venv"
 	VenvPath            string `json:"venvPath"`            // effective venv path when backend=venv
 	HasConda            bool   `json:"hasConda"`
-	HasEnv              bool   `json:"hasEnv"`              // conda env exists
-	HasVenv             bool   `json:"hasVenv"`             // venv exists
+	HasEnv              bool   `json:"hasEnv"`  // conda env exists
+	HasVenv             bool   `json:"hasVenv"` // venv exists
 	HasSnowpark         bool   `json:"hasSnowpark"`
 	HasNotebook         bool   `json:"hasNotebook"`
 }
@@ -417,11 +628,11 @@ type NotebookSessionContext struct {
 
 // NotebookCellOutput is the result of running a single notebook cell.
 type NotebookCellOutput struct {
-	Stdout          string                  `json:"stdout"`
-	Stderr          string                  `json:"stderr"`
-	Error           string                  `json:"error"`
-	Images          []string                `json:"images"`          // base64-encoded PNG figures (e.g. matplotlib plots)
-	SessionContext  *NotebookSessionContext  `json:"session_context"` // current kernel session state
+	Stdout         string                  `json:"stdout"`
+	Stderr         string                  `json:"stderr"`
+	Error          string                  `json:"error"`
+	Images         []string                `json:"images"`          // base64-encoded PNG figures (e.g. matplotlib plots)
+	SessionContext *NotebookSessionContext `json:"session_context"` // current kernel session state
 }
 
 // NotebookSqlResult is returned by RunNotebookSql.
@@ -458,10 +669,10 @@ type notebookSession struct {
 }
 
 var (
-	notebookSessions   sync.Map   // tabId (string) → *notebookSession
-	kernelScriptOnce   sync.Once
-	kernelScriptPath   string
-	kernelScriptErr    error
+	notebookSessions sync.Map // tabId (string) → *notebookSession
+	kernelScriptOnce sync.Once
+	kernelScriptPath string
+	kernelScriptErr  error
 )
 
 func ensureKernelScript() (string, error) {
@@ -490,6 +701,22 @@ func (a *App) IsAppleSilicon() bool {
 }
 
 // ─── venv helpers ─────────────────────────────────────────────────────────────
+
+// pythonVersionAtLeast reports whether a "major.minor" version string satisfies
+// the given minimum (e.g. atLeastPythonVersion("3.13", 3, 9) → true).
+// Returns false if the string cannot be parsed.
+func pythonVersionAtLeast(version string, wantMajor, wantMinor int) bool {
+	parts := strings.SplitN(version, ".", 2)
+	if len(parts) < 2 {
+		return false
+	}
+	major, err1 := strconv.Atoi(parts[0])
+	minor, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return major > wantMajor || (major == wantMajor && minor >= wantMinor)
+}
 
 // defaultVenvPath returns the default venv location.
 // Prefers <exportDir>/snowpark_venv so the env lives next to the project files;
@@ -570,6 +797,27 @@ func (a *App) SaveSnowparkConfig(backend string) error {
 	}
 	cfg.Snowpark.Backend = backend
 	return config.Save(cfg)
+}
+
+// SaveSnowparkVenvPath persists the custom venv directory path.
+func (a *App) SaveSnowparkVenvPath(path string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	cfg.Snowpark.VenvPath = path
+	return config.Save(cfg)
+}
+
+// VenvFolderExists reports whether the configured venv directory exists on disk.
+func (a *App) VenvFolderExists() bool {
+	cfg, _ := config.Load()
+	venvPath := cfg.Snowpark.VenvPath
+	if venvPath == "" {
+		venvPath = defaultVenvPath()
+	}
+	_, err := os.Stat(venvPath)
+	return err == nil
 }
 
 // SaveSnowparkPythonPath persists the chosen Python binary path for venv creation.
@@ -707,7 +955,7 @@ func (a *App) checkCondaEnv(result *SnowparkCheckResult) SnowparkCheckResult {
 	if m := re.FindStringSubmatch(string(verOut)); len(m) >= 2 {
 		result.Version = m[1]
 	}
-	if result.Version != "" && result.Version < "3.9" {
+	if result.Version != "" && !pythonVersionAtLeast(result.Version, 3, 9) {
 		result.Details = fmt.Sprintf("Python %s in the env is too old (need 3.9+).", result.Version)
 		return *result
 	}
@@ -752,7 +1000,7 @@ func (a *App) checkVenvEnv(result *SnowparkCheckResult, cfg *config.AppConfig) S
 	if m := re.FindStringSubmatch(string(verOut)); len(m) >= 2 {
 		result.Version = m[1]
 	}
-	if result.Version != "" && result.Version < "3.9" {
+	if result.Version != "" && !pythonVersionAtLeast(result.Version, 3, 9) {
 		result.Details = fmt.Sprintf("Python %s in the venv is too old (need 3.9+).", result.Version)
 		return *result
 	}
@@ -1000,14 +1248,14 @@ func (a *App) InstallSnowparkPackage() error {
 	return nil
 }
 
-// InstallJupyterNotebook installs notebook, ipython-sql and sqlalchemy via pip.
+// InstallJupyterNotebook installs notebook, ipython-sql, sqlalchemy and pyflakes via pip.
 func (a *App) InstallJupyterNotebook() error {
 	condaPath, err := exec.LookPath("conda")
 	if err != nil {
 		return fmt.Errorf("conda not found: %w", err)
 	}
 	cmd := exec.Command(condaPath, "run", "-n", SnowparkCondaEnv,
-		"pip", "install", "notebook", "ipython-sql", "sqlalchemy")
+		"pip", "install", "notebook", "ipython-sql", "sqlalchemy", "pyflakes", "debugpy", "cryptography<44.0.0")
 	if err := a.streamCommand(cmd); err != nil {
 		return fmt.Errorf("notebook install failed: %w", err)
 	}
@@ -1087,14 +1335,14 @@ func (a *App) DeleteVenvFolder() error {
 	return os.RemoveAll(venvPath)
 }
 
-// InstallJupyterVenv installs notebook, ipython-sql and sqlalchemy into the venv.
+// InstallJupyterVenv installs notebook, ipython-sql, sqlalchemy and pyflakes into the venv.
 func (a *App) InstallJupyterVenv() error {
 	cfg, _ := config.Load()
 	venvPath := cfg.Snowpark.VenvPath
 	if venvPath == "" {
 		venvPath = defaultVenvPath()
 	}
-	cmd := exec.Command(venvPipBin(venvPath), "install", "notebook", "ipython-sql", "sqlalchemy")
+	cmd := exec.Command(venvPipBin(venvPath), "install", "notebook", "ipython-sql", "sqlalchemy", "pyflakes", "debugpy", "cryptography<44.0.0")
 	if err := a.streamCommand(cmd); err != nil {
 		return fmt.Errorf("notebook venv install failed: %w", err)
 	}
@@ -1168,6 +1416,43 @@ func (a *App) SaveNotebook(path string, content string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
+// bpFilePath returns the companion breakpoints file path for a notebook.
+func bpFilePath(notebookPath string) string {
+	return notebookPath + ".thaw-bp.json"
+}
+
+// SaveNotebookBreakpoints persists breakpoints (cellId → sorted line numbers)
+// to a companion file next to the notebook. An empty map deletes the file.
+func (a *App) SaveNotebookBreakpoints(notebookPath string, bps map[string][]int) error {
+	p := bpFilePath(notebookPath)
+	if len(bps) == 0 {
+		_ = os.Remove(p) // best-effort delete when no breakpoints remain
+		return nil
+	}
+	data, err := json.Marshal(bps)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(p, data, 0o644)
+}
+
+// LoadNotebookBreakpoints reads the companion breakpoints file for a notebook.
+// Returns an empty map (no error) when the file does not exist.
+func (a *App) LoadNotebookBreakpoints(notebookPath string) (map[string][]int, error) {
+	data, err := os.ReadFile(bpFilePath(notebookPath))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string][]int{}, nil
+		}
+		return nil, err
+	}
+	var bps map[string][]int
+	if err := json.Unmarshal(data, &bps); err != nil {
+		return map[string][]int{}, nil // corrupt file → treat as empty
+	}
+	return bps, nil
+}
+
 // RunNotebookSql executes a SQL query via the active Snowflake connection and
 // returns the result as columns + rows, suitable for table display in a notebook.
 func (a *App) RunNotebookSql(sql string) (NotebookSqlResult, error) {
@@ -1203,23 +1488,23 @@ func (a *App) notebookKernelEnv() []string {
 	ctx, err := a.client.GetSessionContext(a.ctx)
 	if err != nil {
 		// Fall back to original params if the query fails.
-		ctx.Role      = p.Role
+		ctx.Role = p.Role
 		ctx.Warehouse = p.Warehouse
-		ctx.Database  = p.Database
-		ctx.Schema    = p.Schema
+		ctx.Database = p.Database
+		ctx.Schema = p.Schema
 	}
 	return []string{
-		"THAW_SF_ACCOUNT="               + p.Account,
-		"THAW_SF_USER="                  + p.User,
-		"THAW_SF_PASSWORD="              + p.Password,
-		"THAW_SF_AUTHENTICATOR="         + p.Authenticator,
-		"THAW_SF_OKTA_URL="              + p.OktaURL,
-		"THAW_SF_PRIVATE_KEY_PATH="      + p.PrivateKeyPath,
-		"THAW_SF_PRIVATE_KEY_PASSPHRASE="+ p.PrivateKeyPassphrase,
-		"THAW_SF_ROLE="                  + ctx.Role,
-		"THAW_SF_WAREHOUSE="             + ctx.Warehouse,
-		"THAW_SF_DATABASE="              + ctx.Database,
-		"THAW_SF_SCHEMA="                + ctx.Schema,
+		"THAW_SF_ACCOUNT=" + p.Account,
+		"THAW_SF_USER=" + p.User,
+		"THAW_SF_PASSWORD=" + p.Password,
+		"THAW_SF_AUTHENTICATOR=" + p.Authenticator,
+		"THAW_SF_OKTA_URL=" + p.OktaURL,
+		"THAW_SF_PRIVATE_KEY_PATH=" + p.PrivateKeyPath,
+		"THAW_SF_PRIVATE_KEY_PASSPHRASE=" + p.PrivateKeyPassphrase,
+		"THAW_SF_ROLE=" + ctx.Role,
+		"THAW_SF_WAREHOUSE=" + ctx.Warehouse,
+		"THAW_SF_DATABASE=" + ctx.Database,
+		"THAW_SF_SCHEMA=" + ctx.Schema,
 	}
 }
 
@@ -1327,6 +1612,164 @@ func (a *App) RunNotebookCell(tabId string, code string) (NotebookCellOutput, er
 	return out, nil
 }
 
+// ─── DAP Proxy Methods ────────────────────────────────────────────────────────
+
+// StartDapProxy connects to debugpy and starts shuttling messages.
+func (a *App) StartDapProxy() error {
+	dapMutex.Lock()
+	defer dapMutex.Unlock()
+
+	// Add retry loop to guarantee connection succeeds even if python is slow
+	var conn net.Conn
+	var err error
+	for i := 0; i < 20; i++ {
+		conn, err = net.Dial("tcp", "127.0.0.1:5678")
+		if err == nil {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to connect to debugpy: %w", err)
+	}
+	dapConn = conn
+
+	// CRITICAL: Wrap inside sync.Once to prevent duplicate listeners/memory leaks!
+	dapProxyOnce.Do(func() {
+		wailsruntime.EventsOn(a.ctx, "dap:client-to-backend", func(optionalData ...interface{}) {
+			dapMutex.Lock()
+			defer dapMutex.Unlock()
+			if len(optionalData) > 0 {
+				if msg, ok := optionalData[0].(string); ok {
+					if dapConn != nil {
+						_, _ = dapConn.Write([]byte(msg))
+					}
+				}
+			}
+		})
+	})
+
+	// Listen for DAP messages from Python, send them to React
+	go func() {
+		buf := make([]byte, 8192)
+		for dapConn != nil {
+
+			n, err := dapConn.Read(buf)
+			if err != nil {
+				wailsruntime.EventsEmit(a.ctx, "dap:disconnected", err.Error())
+				break
+			}
+			// Encode to Base64 to guarantee that binary data/multi-byte chars are never corrupted!
+			wailsruntime.EventsEmit(a.ctx, "dap:backend-to-client", base64.StdEncoding.EncodeToString(buf[:n]))
+		}
+	}()
+
+	return nil
+}
+
+// StopDapProxy closes the connection when debugging is done
+func (a *App) StopDapProxy() {
+	dapMutex.Lock()
+	defer dapMutex.Unlock()
+	if dapConn != nil {
+		_ = dapConn.Close()
+		dapConn = nil
+	}
+}
+
+// DebugNotebookCell executes the cell using debugpy and shuttles the output back to React
+func (a *App) DebugNotebookCell(tabId string, cellId string, code string) (NotebookCellOutput, error) {
+	val, ok := notebookSessions.Load(tabId)
+	if !ok {
+		return NotebookCellOutput{}, fmt.Errorf("no kernel running")
+	}
+	s := val.(*notebookSession)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 1. Send the debug command to Python
+	payload := fmt.Sprintf("%s\n%s\n%s\n%s\n", kernelDebugMarker, cellId, code, kernelRunMarker)
+
+	if _, err := fmt.Fprint(s.stdin, payload); err != nil {
+		return NotebookCellOutput{}, err
+	}
+
+	// 2. Read the "DEBUG_READY" response
+	for {
+		line, err := s.stdout.ReadString('\n')
+		if err != nil {
+			return NotebookCellOutput{}, err
+		}
+		line = strings.TrimRight(line, "\n\r")
+
+		if line == kernelSentinel {
+			break // Setup sentinel reached
+		}
+
+		if strings.Contains(line, "DEBUG_READY") {
+			// Parse the JSON to get the physical filepath Python created
+			var payload struct {
+				Filepath string `json:"filepath"`
+			}
+			_ = json.Unmarshal([]byte(line), &payload)
+
+			// 1. Tell React what the filepath is so it can set breakpoints
+			wailsruntime.EventsEmit(a.ctx, "dap:debug-ready", map[string]string{
+				"filepath": payload.Filepath,
+			})
+
+			// 2. Start the TCP Proxy in a goroutine and tell React it's open (or failed!)
+			go func() {
+				if err := a.StartDapProxy(); err != nil {
+					wailsruntime.EventsEmit(a.ctx, "dap:proxy-ready", err.Error())
+				} else {
+					wailsruntime.EventsEmit(a.ctx, "dap:proxy-ready", "")
+				}
+			}()
+		} else if strings.Contains(line, "error") {
+			// Handle failure to start debugpy
+			var out NotebookCellOutput
+			_ = json.Unmarshal([]byte(line), &out)
+			return out, nil
+		}
+	}
+
+	// 4. Now wait for the ACTUAL execution result (after the DAP client resumes the debugger)
+	var lastJSON string
+	for {
+		line, err := s.stdout.ReadString('\n')
+		if err != nil {
+			return NotebookCellOutput{}, fmt.Errorf("read from kernel: %w", err)
+		}
+		line = strings.TrimRight(line, "\n\r")
+		if line == kernelSentinel {
+			break
+		}
+		if strings.HasPrefix(line, kernelDebugResultMarker) {
+			// Prefixed result JSON — extract and store for parsing below.
+			lastJSON = strings.TrimPrefix(line, kernelDebugResultMarker)
+		} else if line != "" {
+			// Non-empty, non-sentinel, non-result line → real-time user stdout.
+			wailsruntime.EventsEmit(a.ctx, "notebook:debug:output", line)
+		}
+	}
+
+	// 5. Clean up the DAP proxy after execution is finished
+	a.StopDapProxy()
+
+	var out NotebookCellOutput
+	if lastJSON != "" {
+		if err := json.Unmarshal([]byte(lastJSON), &out); err != nil {
+			out.Stdout = lastJSON
+		}
+	}
+
+	a.syncKernelContext(s, out.SessionContext)
+
+	return out, nil
+}
+
 // syncKernelContext compares a newly-returned kernel context against the last
 // known context stored in s, applies any USE commands to the main connection,
 // emits a context-changed event when something changed, and updates s.lastCtx.
@@ -1393,11 +1836,11 @@ func (a *App) RunNotebookCellSql(tabId, sql string) (NotebookSqlResult, error) {
 	}
 
 	var raw struct {
-		Columns        []string               `json:"columns"`
-		Rows           [][]any                `json:"rows"`
-		RowCount       int64                  `json:"rowCount"`
-		Error          *string                `json:"error"`
-		QueryID        string                 `json:"queryID"`
+		Columns        []string                `json:"columns"`
+		Rows           [][]any                 `json:"rows"`
+		RowCount       int64                   `json:"rowCount"`
+		Error          *string                 `json:"error"`
+		QueryID        string                  `json:"queryID"`
 		SessionContext *NotebookSessionContext `json:"session_context"`
 	}
 	if resultJSON != "" {
@@ -1555,6 +1998,51 @@ func (a *App) GetNotebookHover(tabId, code string, line, col int) (string, error
 		_ = json.Unmarshal([]byte(resultJSON), &resp)
 	}
 	return resp.Hover, nil
+}
+
+// NotebookSyntaxError describes a single Python diagnostic returned by CheckPythonSyntax.
+// Line is 1-indexed; Col and EndCol are 0-indexed (Monaco adds 1 when applying markers).
+// Severity is "error" (syntax errors) or "warning" (e.g. module-not-found).
+type NotebookSyntaxError struct {
+	Severity string `json:"severity"`
+	Line     int    `json:"line"`
+	Col      int    `json:"col"`
+	EndCol   *int   `json:"endCol"`
+	Msg      string `json:"msg"`
+}
+
+// CheckPythonSyntax asks the running Python kernel to analyze code and return
+// diagnostics.  mode controls the analysis depth:
+//   - "off"    — always returns nil (caller should skip, but Go side handles it too)
+//   - "static" — ast.parse + pyflakes without kernel namespace stubs
+//   - "kernel" — ast.parse + pyflakes with live namespace stubs (default)
+//
+// Returns nil (no error) when no kernel is running for the tab.
+func (a *App) CheckPythonSyntax(tabId, code, mode string) ([]NotebookSyntaxError, error) {
+	if mode == "off" {
+		return nil, nil
+	}
+	val, ok := notebookSessions.Load(tabId)
+	if !ok {
+		return nil, nil
+	}
+	s := val.(*notebookSession)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	req, _ := json.Marshal(map[string]any{"code": code, "mode": mode})
+	payload := fmt.Sprintf("%s\n%s\n%s\n", kernelSyntaxMarker, string(req), kernelRunMarker)
+	resultJSON, err := kernelRPC(s, payload)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Errors []NotebookSyntaxError `json:"errors"`
+	}
+	if resultJSON != "" {
+		_ = json.Unmarshal([]byte(resultJSON), &resp)
+	}
+	return resp.Errors, nil
 }
 
 // StopNotebookSession kills the Python kernel for a notebook tab.

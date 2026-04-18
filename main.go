@@ -206,6 +206,10 @@ func buildMenu(app *App) *menu.Menu {
 	snowparkMenu.AddText("Open Notebook…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:snowpark-open-notebook")
 	})
+	snowparkMenu.AddSeparator()
+	snowparkMenu.AddText("Notebook Preferences…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:notebook-preferences")
+	})
 
 	// ── Help ──────────────────────────────────────────────────────────────────
 	helpMenu := appMenu.AddSubmenu("Help")

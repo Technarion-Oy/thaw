@@ -2643,6 +2643,18 @@ func (a *App) SetNotebookQueryWarehouse(database, schema, name, warehouse string
 	return a.client.SetNotebookQueryWarehouse(a.ctx, database, schema, name, warehouse)
 }
 
+// MakeNotebookLive promotes the latest saved version of the notebook to the
+// live version via ALTER NOTEBOOK … ADD LIVE VERSION FROM LAST.
+func (a *App) MakeNotebookLive(database, schema, name string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	sql := fmt.Sprintf(`ALTER NOTEBOOK "%s"."%s"."%s" ADD LIVE VERSION FROM LAST`, esc(database), esc(schema), esc(name))
+	_, err := a.client.Execute(a.ctx, sql)
+	return err
+}
+
 // FetchNotebookContent retrieves the content of a Snowflake Notebook object.
 // It describes the notebook to find its stage URI, downloads the .ipynb file
 // to a temporary local directory, reads the file, and returns the nbformat JSON.
@@ -2899,6 +2911,32 @@ func (a *App) SaveFeatureFlags(flags config.FeatureFlags) error {
 	}
 	flags.Initialized = true
 	cfg.FeatureFlags = flags
+	return config.Save(cfg)
+}
+
+// ─── Notebook preferences ────────────────────────────────────────────────────
+
+// GetNotebookPrefs returns the persisted notebook editor preferences.
+// Returns sensible defaults when the config does not exist yet.
+func (a *App) GetNotebookPrefs() config.NotebookPrefs {
+	cfg, err := config.Load()
+	if err != nil {
+		return config.DefaultNotebookPrefs()
+	}
+	prefs := cfg.NotebookPrefs
+	if prefs.SyntaxMode == "" {
+		prefs.SyntaxMode = config.DefaultNotebookPrefs().SyntaxMode
+	}
+	return prefs
+}
+
+// SaveNotebookPrefs persists notebook editor preferences to disk.
+func (a *App) SaveNotebookPrefs(prefs config.NotebookPrefs) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	cfg.NotebookPrefs = prefs
 	return config.Save(cfg)
 }
 

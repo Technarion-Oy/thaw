@@ -30,6 +30,8 @@ import {
   InstallSnowparkVenv,
   InstallJupyterVenv,
   DeleteVenvFolder,
+  SaveSnowparkVenvPath,
+  VenvFolderExists,
   ListEnvPackages,
   InstallEnvPackage,
   UninstallEnvPackage,
@@ -79,8 +81,8 @@ function condaSteps(isM1: boolean): StepDef[] {
     },
     {
       title: "Install Jupyter & SQL",
-      description: "notebook  ·  ipython-sql  ·  sqlalchemy  (via pip)",
-      command: "conda run -n thaw_snowpark pip install notebook ipython-sql sqlalchemy",
+      description: "notebook  ·  ipython-sql  ·  sqlalchemy  ·  pyflakes  (via pip)",
+      command: "conda run -n thaw_snowpark pip install notebook ipython-sql sqlalchemy pyflakes",
     },
   ];
 }
@@ -103,8 +105,8 @@ function venvSteps(venvPath: string, withPandas: boolean, pythonBin: string): St
     },
     {
       title: "Install Jupyter & SQL",
-      description: "notebook  ·  ipython-sql  ·  sqlalchemy  (via pip)",
-      command: `"${venvPath}/bin/pip" install notebook ipython-sql sqlalchemy`,
+      description: "notebook  ·  ipython-sql  ·  sqlalchemy  ·  pyflakes  (via pip)",
+      command: `"${venvPath}/bin/pip" install notebook ipython-sql sqlalchemy pyflakes`,
     },
   ];
 }
@@ -119,6 +121,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
   const [current, setCurrent]       = useState(0);
   const [steps, setSteps]           = useState<StepState[]>([makeStepState(), makeStepState(), makeStepState()]);
   const [, setConfigLoaded] = useState(false);
+  const [venvFolderExists, setVenvFolderExists] = useState(false);
   const logEndRef = useRef<HTMLDivElement | null>(null);
 
   // Package management (step 3)
@@ -159,6 +162,12 @@ export default function SnowparkSetupModal({ onClose }: Props) {
       }
     });
   }, []);
+
+  // Check whether the venv folder exists on disk.
+  useEffect(() => {
+    if (backend !== "venv") return;
+    VenvFolderExists().then(setVenvFolderExists).catch(() => setVenvFolderExists(false));
+  }, [backend, venvPath]);
 
   // Reset steps when backend changes.
   const handleBackendChange = (b: Backend) => {
@@ -227,6 +236,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
         await venvRunners[idx]();
       }
       patch(idx, { status: "done" });
+      if (backend === "venv" && idx === 0) VenvFolderExists().then(setVenvFolderExists).catch(() => {});
       if (idx < 2) setCurrent(idx + 1);
     } catch (e) {
       patch(idx, { status: "error", error: String(e) });
@@ -242,6 +252,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
       okButtonProps: { danger: true },
       onOk: async () => {
         await DeleteVenvFolder();
+        setVenvFolderExists(false);
         setCurrent(0);
         setSteps([makeStepState(), makeStepState(), makeStepState()]);
       },
@@ -365,6 +376,26 @@ export default function SnowparkSetupModal({ onClose }: Props) {
           </div>
         )}
 
+        {/* ── Venv location (venv only) ──────────────────────────────────── */}
+        {backend === "venv" && (
+          <div>
+            <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 6 }}>
+              Virtual environment location
+            </Text>
+            <Input
+              size="small"
+              value={venvPath}
+              disabled={anyRunning || steps[0].status === "done"}
+              style={{ fontFamily: "monospace", fontSize: 12 }}
+              onChange={(e) => setVenvPath(e.target.value)}
+              onBlur={() => SaveSnowparkVenvPath(venvPath).catch(() => {})}
+              onPressEnter={(e) => {
+                (e.target as HTMLInputElement).blur();
+              }}
+            />
+          </div>
+        )}
+
         {/* ── Python interpreter (venv only) ─────────────────────────────── */}
         {backend === "venv" && (
           <div>
@@ -437,7 +468,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
             <Button
               danger
               size="small"
-              disabled={anyRunning}
+              disabled={anyRunning || !venvFolderExists}
               onClick={handleDeleteVenv}
             >
               Delete venv folder…

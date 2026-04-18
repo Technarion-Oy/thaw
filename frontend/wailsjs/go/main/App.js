@@ -102,6 +102,10 @@ export function CheckAvailableKeyTools() {
   return window['go']['main']['App']['CheckAvailableKeyTools']();
 }
 
+export function CheckPythonSyntax(arg1, arg2, arg3) {
+  return window['go']['main']['App']['CheckPythonSyntax'](arg1, arg2, arg3);
+}
+
 export function CheckSnowparkEnv() {
   return window['go']['main']['App']['CheckSnowparkEnv']();
 }
@@ -132,6 +136,10 @@ export function CreateDbtProject(arg1, arg2) {
 
 export function CreateMigrationSnapshot(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
   return window['go']['main']['App']['CreateMigrationSnapshot'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+}
+
+export function DebugNotebookCell(arg1, arg2, arg3) {
+  return window['go']['main']['App']['DebugNotebookCell'](arg1, arg2, arg3);
 }
 
 export function DeleteOldestBackup(arg1, arg2, arg3) {
@@ -312,6 +320,10 @@ export function GetNotebookCompletions(arg1, arg2, arg3, arg4) {
 
 export function GetNotebookHover(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['GetNotebookHover'](arg1, arg2, arg3, arg4);
+}
+
+export function GetNotebookPrefs() {
+  return window['go']['main']['App']['GetNotebookPrefs']();
 }
 
 export function GetNotebookQueryWarehouse(arg1, arg2, arg3) {
@@ -578,8 +590,16 @@ export function ListWarehouses() {
   return window['go']['main']['App']['ListWarehouses']();
 }
 
+export function LoadNotebookBreakpoints(arg1) {
+  return window['go']['main']['App']['LoadNotebookBreakpoints'](arg1);
+}
+
 export function LoadSnowflakeCLIConfig() {
   return window['go']['main']['App']['LoadSnowflakeCLIConfig']();
+}
+
+export function MakeNotebookLive(arg1, arg2, arg3) {
+  return window['go']['main']['App']['MakeNotebookLive'](arg1, arg2, arg3);
 }
 
 export function NewNotebook() {
@@ -698,12 +718,24 @@ export function SaveNotebook(arg1, arg2) {
   return window['go']['main']['App']['SaveNotebook'](arg1, arg2);
 }
 
+export function SaveNotebookBreakpoints(arg1, arg2) {
+  return window['go']['main']['App']['SaveNotebookBreakpoints'](arg1, arg2);
+}
+
+export function SaveNotebookPrefs(arg1) {
+  return window['go']['main']['App']['SaveNotebookPrefs'](arg1);
+}
+
 export function SaveSnowparkConfig(arg1) {
   return window['go']['main']['App']['SaveSnowparkConfig'](arg1);
 }
 
 export function SaveSnowparkPythonPath(arg1) {
   return window['go']['main']['App']['SaveSnowparkPythonPath'](arg1);
+}
+
+export function SaveSnowparkVenvPath(arg1) {
+  return window['go']['main']['App']['SaveSnowparkVenvPath'](arg1);
 }
 
 export function ScanMigrationSource(arg1) {
@@ -738,6 +770,10 @@ export function SetUserPublicKey(arg1, arg2) {
   return window['go']['main']['App']['SetUserPublicKey'](arg1, arg2);
 }
 
+export function StartDapProxy() {
+  return window['go']['main']['App']['StartDapProxy']();
+}
+
 export function StartNotebookSession(arg1) {
   return window['go']['main']['App']['StartNotebookSession'](arg1);
 }
@@ -748,6 +784,10 @@ export function StartQuery(arg1) {
 
 export function StartShell(arg1, arg2) {
   return window['go']['main']['App']['StartShell'](arg1, arg2);
+}
+
+export function StopDapProxy() {
+  return window['go']['main']['App']['StopDapProxy']();
 }
 
 export function StopNotebookSession(arg1) {
@@ -812,6 +852,10 @@ export function ValidateSnowflakePatterns(arg1, arg2) {
 
 export function ValidateTablesExist(arg1) {
   return window['go']['main']['App']['ValidateTablesExist'](arg1);
+}
+
+export function VenvFolderExists() {
+  return window['go']['main']['App']['VenvFolderExists']();
 }
 
 export function WaitForQueryResult() {
