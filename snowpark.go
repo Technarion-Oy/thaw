@@ -43,6 +43,7 @@ const kernelHoverMarker = "<<<THAW_HOVER>>>"
 const kernelSqlMarker = "<<<THAW_SQL>>>"
 const kernelSyntaxMarker = "<<<THAW_SYNTAX>>>"
 const kernelDebugMarker = "<<<THAW_DEBUG_RUN>>>"
+const kernelDebugResultMarker = "<<<THAW_DEBUG_RESULT>>>"
 
 // Global state for the Debug Adapter Protocol (DAP) connection
 var (
@@ -61,6 +62,7 @@ import ast as _ast
 SENTINEL   = "<<<THAW_CELL_DONE>>>"
 RUN_MARKER = "<<<THAW_RUN>>>"
 DEBUG_MARKER = "<<<THAW_DEBUG_RUN>>>"
+DEBUG_RESULT_MARKER = "<<<THAW_DEBUG_RESULT>>>"
 
 # Force matplotlib to use the non-interactive Agg backend so that show()
 # does not try to open a GUI window.
@@ -491,11 +493,17 @@ while True:
         cell_id = parts[1].strip() if len(parts) > 1 else "unknown"
         cell_code = parts[2] if len(parts) > 2 else ""
 
-        # Write code to a physical file so debugpy has a path to set breakpoints
+        # Write code to a physical file so debugpy has a path to set breakpoints.
+        # A trailing 'pass' sentinel gives debugpy a line to land on after the
+        # last real line executes, so breakpoints on the final line fire correctly.
         debug_filepath = os.path.join(tempfile.gettempdir(), f"thaw_cell_{cell_id}.py")
         with open(debug_filepath, "w", encoding="utf-8") as f:
             f.write(cell_code)
+            if not cell_code.endswith("\n"):
+                f.write("\n")
+            f.write("pass  # _thaw_end\n")
 
+        _debug_first_sentinel_done = False
         try:
             try:
                 # Start the debugger (ignores if already listening)
@@ -509,34 +517,38 @@ while True:
                 "filepath": debug_filepath
             }), flush=True)
             print(SENTINEL, flush=True)
+            _debug_first_sentinel_done = True
 
             # Freeze until the frontend completes the DAP handshake (configurationDone).
             # Closing the TCP connection (via StopDapProxy) will unblock this if the
             # frontend gives up early.
             debugpy.wait_for_client()
 
-            buf_out = io.StringIO()
+            # Redirect only stderr; leave stdout un-redirected so that print()
+            # calls flow directly to the kernel pipe and Go can stream them to
+            # the frontend in real-time while the debugger is paused.
             buf_err = io.StringIO()
-            old_out, old_err = sys.stdout, sys.stderr
-            sys.stdout = buf_out
+            old_err = sys.stderr
             sys.stderr = buf_err
             err_info = None
 
             try:
-                # Run the file via runpy to get full debug tracking, executing in 'g'
                 runpy.run_path(debug_filepath, init_globals=g)
             except Exception:
                 err_info = traceback.format_exc()
             finally:
-                sys.stdout = old_out
                 sys.stderr = old_err
 
+            sys.stdout.flush()
             images = _capture_figures()
-            result = {"stdout": buf_out.getvalue(), "stderr": buf_err.getvalue(), "error": err_info, "images": images, "session_context": _thaw_get_session_context()}
-            print(json.dumps(result), flush=True)
+            result = {"stdout": "", "stderr": buf_err.getvalue(), "error": err_info, "images": images, "session_context": _thaw_get_session_context()}
+            print(DEBUG_RESULT_MARKER + json.dumps(result), flush=True)
             print(SENTINEL, flush=True)
         except Exception as e:
-            print(json.dumps({"error": str(e)}), flush=True)
+            if not _debug_first_sentinel_done:
+                print(json.dumps({"error": str(e)}), flush=True)
+            else:
+                print(DEBUG_RESULT_MARKER + json.dumps({"error": str(e)}), flush=True)
             print(SENTINEL, flush=True)
             
         continue
@@ -1404,6 +1416,43 @@ func (a *App) SaveNotebook(path string, content string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
+// bpFilePath returns the companion breakpoints file path for a notebook.
+func bpFilePath(notebookPath string) string {
+	return notebookPath + ".thaw-bp.json"
+}
+
+// SaveNotebookBreakpoints persists breakpoints (cellId → sorted line numbers)
+// to a companion file next to the notebook. An empty map deletes the file.
+func (a *App) SaveNotebookBreakpoints(notebookPath string, bps map[string][]int) error {
+	p := bpFilePath(notebookPath)
+	if len(bps) == 0 {
+		_ = os.Remove(p) // best-effort delete when no breakpoints remain
+		return nil
+	}
+	data, err := json.Marshal(bps)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(p, data, 0o644)
+}
+
+// LoadNotebookBreakpoints reads the companion breakpoints file for a notebook.
+// Returns an empty map (no error) when the file does not exist.
+func (a *App) LoadNotebookBreakpoints(notebookPath string) (map[string][]int, error) {
+	data, err := os.ReadFile(bpFilePath(notebookPath))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string][]int{}, nil
+		}
+		return nil, err
+	}
+	var bps map[string][]int
+	if err := json.Unmarshal(data, &bps); err != nil {
+		return map[string][]int{}, nil // corrupt file → treat as empty
+	}
+	return bps, nil
+}
+
 // RunNotebookSql executes a SQL query via the active Snowflake connection and
 // returns the result as columns + rows, suitable for table display in a notebook.
 func (a *App) RunNotebookSql(sql string) (NotebookSqlResult, error) {
@@ -1699,7 +1748,13 @@ func (a *App) DebugNotebookCell(tabId string, cellId string, code string) (Noteb
 		if line == kernelSentinel {
 			break
 		}
-		lastJSON = line
+		if strings.HasPrefix(line, kernelDebugResultMarker) {
+			// Prefixed result JSON — extract and store for parsing below.
+			lastJSON = strings.TrimPrefix(line, kernelDebugResultMarker)
+		} else if line != "" {
+			// Non-empty, non-sentinel, non-result line → real-time user stdout.
+			wailsruntime.EventsEmit(a.ctx, "notebook:debug:output", line)
+		}
 	}
 
 	// 5. Clean up the DAP proxy after execution is finished

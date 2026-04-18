@@ -36,8 +36,10 @@ export class DapClient {
   private pending = new Map<number, { resolve: (body: any) => void; reject: (err: Error) => void }>();
   private offListener: (() => void) | null = null;
 
-  /** Called when execution pauses at a breakpoint. */
-  onStopped?: (variables: DebugVariable[]) => void;
+  /** Called when execution pauses at a breakpoint.
+   *  @param variables  Local variables captured at the paused frame.
+   *  @param currentLine  1-indexed source line where execution is paused (from stackTrace). */
+  onStopped?: (variables: DebugVariable[], currentLine?: number) => void;
   /** Called when execution resumes after Continue. */
   onContinued?: () => void;
 
@@ -208,9 +210,11 @@ export class DapClient {
         startFrame: 0,
         levels: 1,
       });
-      const frameId: number | undefined = stackTrace?.stackFrames?.[0]?.id;
+      const topFrame = stackTrace?.stackFrames?.[0];
+      const frameId: number | undefined = topFrame?.id;
+      const currentLine: number | undefined = topFrame?.line;
       if (frameId === undefined) {
-        this.onStopped?.([]);
+        this.onStopped?.([], currentLine);
         return;
       }
 
@@ -239,9 +243,9 @@ export class DapClient {
           type: String(v.type || ""),
         }));
 
-      this.onStopped?.(variables);
+      this.onStopped?.(variables, currentLine);
     } catch {
-      this.onStopped?.([]);
+      this.onStopped?.([], undefined);
     }
   }
 

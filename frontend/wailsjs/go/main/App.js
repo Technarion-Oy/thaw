@@ -590,6 +590,10 @@ export function ListWarehouses() {
   return window['go']['main']['App']['ListWarehouses']();
 }
 
+export function LoadNotebookBreakpoints(arg1) {
+  return window['go']['main']['App']['LoadNotebookBreakpoints'](arg1);
+}
+
 export function LoadSnowflakeCLIConfig() {
   return window['go']['main']['App']['LoadSnowflakeCLIConfig']();
 }
@@ -712,6 +716,10 @@ export function SaveGitConfig(arg1) {
 
 export function SaveNotebook(arg1, arg2) {
   return window['go']['main']['App']['SaveNotebook'](arg1, arg2);
+}
+
+export function SaveNotebookBreakpoints(arg1, arg2) {
+  return window['go']['main']['App']['SaveNotebookBreakpoints'](arg1, arg2);
 }
 
 export function SaveNotebookPrefs(arg1) {

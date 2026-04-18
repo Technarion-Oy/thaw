@@ -307,6 +307,8 @@ export function ListUsers():Promise<Array<snowflake.SnowflakeUser>>;
 
 export function ListWarehouses():Promise<Array<string>>;
 
+export function LoadNotebookBreakpoints(arg1:string):Promise<Record<string, Array<number>>>;
+
 export function LoadSnowflakeCLIConfig():Promise<sfconfig.Config>;
 
 export function MakeNotebookLive(arg1:string,arg2:string,arg3:string):Promise<void>;
@@ -368,6 +370,8 @@ export function SaveFile(arg1:string,arg2:string):Promise<void>;
 export function SaveGitConfig(arg1:config.GitConfig):Promise<void>;
 
 export function SaveNotebook(arg1:string,arg2:string):Promise<void>;
+
+export function SaveNotebookBreakpoints(arg1:string,arg2:Record<string, Array<number>>):Promise<void>;
 
 export function SaveNotebookPrefs(arg1:config.NotebookPrefs):Promise<void>;
 
