@@ -45,6 +45,7 @@ const kernelSyntaxMarker = "<<<THAW_SYNTAX>>>"
 // namespace, captures stdout/stderr, captures matplotlib figures as base64
 // PNGs, and writes a JSON result + sentinel line.
 const kernelPyScript = `import sys, io, traceback, json, base64, warnings, os
+import ast as _ast
 
 SENTINEL   = "<<<THAW_CELL_DONE>>>"
 RUN_MARKER = "<<<THAW_RUN>>>"
@@ -67,6 +68,9 @@ _THAW_DDL_RE = _re.compile(
     _re.IGNORECASE,
 )
 
+# Private state for internal kernel use, completely isolated from user code.
+_THAW_INTERNAL_STATE = {}
+# User namespace
 g = {}
 
 # ── Auto-create Snowpark session matching the Thaw app connection ──────────────
@@ -122,10 +126,9 @@ def _thaw_create_session(ns):
         _old_out, sys.stdout = sys.stdout, io.StringIO()
         try:
             _sess = _Session.builder.configs(cfg).create()
-            # Store original sql() before patching so _thaw_run_sql_cell can
-            # call it directly and avoid double-executing DDL statements.
+            # Store original sql() before patching into INTERNAL STATE (not the user namespace).
             _orig_sql = _sess.sql
-            ns['_thaw_orig_session_sql'] = _orig_sql
+            _THAW_INTERNAL_STATE['orig_sql'] = _orig_sql
             # Patch instance-level sql() so DDL/USE statements execute
             # immediately without an explicit .collect(), matching Snowflake
             # native notebook behavior.
@@ -138,6 +141,7 @@ def _thaw_create_session(ns):
                         pass
                 return _df
             _sess.sql = _auto_collect_sql
+            #ns['session'] = _sess
         finally:
             sys.stdout = _old_out
     except Exception as _e:
@@ -170,6 +174,10 @@ def _thaw_handle_complete(req_json):
             _s = _jedi.Script(_src)
         _items = []
         for _c in _s.complete(_ln, _col)[:200]:
+            # Obfuscation: Filter out any internal variables or functions starting with _ or containing 'thaw'
+            if _c.name.startswith('_') or 'thaw' in _c.name.lower():
+                continue
+
             try:    _doc = _c.docstring(raw=True)[:1000]
             except: _doc = ""
             _items.append({
@@ -222,19 +230,14 @@ def _thaw_handle_hover(req_json):
         return _j.dumps({"hover": "", "error": str(_ex)})
 
 def _thaw_handle_syntax(req_json):
-    """Check Python syntax + undefined names.
-
-    mode controls analysis depth (passed in the JSON request):
-      "off"    — return no errors (Go side already guards, but handle here too)
-      "static" — ast.parse + pyflakes without kernel namespace stubs
-      "kernel" — ast.parse + pyflakes with live namespace stubs from g (default)
-    """
-    import ast as _ast, json as _json
+    """Check Python syntax + undefined names."""
     try:
+        import json as _json
         _req = _json.loads(req_json)
         code = _req.get("code", "")
         mode = _req.get("mode", "kernel")
     except Exception:
+        import json as _json
         code = req_json.strip()
         mode = "kernel"
 
@@ -406,7 +409,7 @@ def _thaw_run_sql_cell(sql_str):
         return str(v)
 
     # Use the original (unpatched) sql() to avoid double-collecting DDL.
-    _sql_fn = g.get('_thaw_orig_session_sql')
+    _sql_fn = _THAW_INTERNAL_STATE.get('orig_sql')
     if _sql_fn is None:
         try:
             from snowflake.snowpark.context import get_active_session as _gas
@@ -475,8 +478,20 @@ while True:
     sys.stdout = buf_out
     sys.stderr = buf_err
     err_info   = None
+    
     try:
-        exec(compile(code, "<cell>", "exec"), g)
+        # Obfuscation: AST Security Check. Prevent users from reassigning session or accessing internal dicts.
+        tree = compile(code, "<cell>", "exec", flags=_ast.PyCF_ONLY_AST)
+        for node in _ast.walk(tree):
+            if isinstance(node, _ast.Name) and node.id in ['_THAW_INTERNAL_STATE', 'kernelRPC', 'SENTINEL', 'RUN_MARKER']:
+                raise NameError(f"Access denied: '{node.id}' is a reserved internal variable.")
+            if isinstance(node, _ast.Assign):
+                for target in node.targets:
+                    if getattr(target, 'id', '') == 'session':
+                         raise Exception("Access denied: You cannot reassign the global 'session' object.")
+                         
+        bytecode = compile(tree, "<cell>", "exec")
+        exec(bytecode, g)
     except Exception:
         err_info = traceback.format_exc()
     finally:
