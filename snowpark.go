@@ -296,7 +296,7 @@ def _thaw_handle_syntax(req_json):
             _ast.fix_missing_locations(_aug)
             _w = _pfc.Checker(_aug, "<cell>")
         else:
-            # "static" mode: analyse the cell in isolation, no kernel state
+            # "static" mode: analyze the cell in isolation, no kernel state
             _w = _pfc.Checker(tree, "<cell>")
         errors = []
         for _msg in _w.messages:
@@ -1653,10 +1653,8 @@ func (a *App) StartDapProxy() error {
 	// Listen for DAP messages from Python, send them to React
 	go func() {
 		buf := make([]byte, 8192)
-		for {
-			if dapConn == nil {
-				break
-			}
+		for dapConn != nil {
+
 			n, err := dapConn.Read(buf)
 			if err != nil {
 				wailsruntime.EventsEmit(a.ctx, "dap:disconnected", err.Error())
@@ -2013,7 +2011,7 @@ type NotebookSyntaxError struct {
 	Msg      string `json:"msg"`
 }
 
-// CheckPythonSyntax asks the running Python kernel to analyse code and return
+// CheckPythonSyntax asks the running Python kernel to analyze code and return
 // diagnostics.  mode controls the analysis depth:
 //   - "off"    — always returns nil (caller should skip, but Go side handles it too)
 //   - "static" — ast.parse + pyflakes without kernel namespace stubs
