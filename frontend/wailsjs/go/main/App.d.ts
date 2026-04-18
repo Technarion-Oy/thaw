@@ -63,6 +63,8 @@ export function CancelQuery():Promise<void>;
 
 export function CheckAvailableKeyTools():Promise<Array<string>>;
 
+export function CheckPythonSyntax(arg1:string,arg2:string):Promise<Array<main.NotebookSyntaxError>>;
+
 export function CheckSnowparkEnv():Promise<main.SnowparkCheckResult>;
 
 export function CloneChildTask(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean,arg6:Array<string>):Promise<void>;

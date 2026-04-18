@@ -33,11 +33,12 @@ import (
 const SnowparkCondaEnv = "thaw_snowpark"
 
 // Markers used by the embedded Python kernel to delimit cell execution.
-const kernelSentinel       = "<<<THAW_CELL_DONE>>>"
-const kernelRunMarker      = "<<<THAW_RUN>>>"
+const kernelSentinel = "<<<THAW_CELL_DONE>>>"
+const kernelRunMarker = "<<<THAW_RUN>>>"
 const kernelCompleteMarker = "<<<THAW_COMPLETE>>>"
-const kernelHoverMarker    = "<<<THAW_HOVER>>>"
-const kernelSqlMarker      = "<<<THAW_SQL>>>"
+const kernelHoverMarker = "<<<THAW_HOVER>>>"
+const kernelSqlMarker = "<<<THAW_SQL>>>"
+const kernelSyntaxMarker = "<<<THAW_SYNTAX>>>"
 
 // kernelPyScript is a minimal stateful Python kernel.  It reads code blocks
 // from stdin (terminated by kernelRunMarker), executes them in a shared
@@ -153,6 +154,7 @@ del _thaw_create_session
 COMPLETE_MARKER = "<<<THAW_COMPLETE>>>"
 HOVER_MARKER    = "<<<THAW_HOVER>>>"
 SQL_MARKER      = "<<<THAW_SQL>>>"
+SYNTAX_MARKER   = "<<<THAW_SYNTAX>>>"
 
 def _thaw_handle_complete(req_json):
     """Return jedi completions as JSON, using the live kernel namespace."""
@@ -218,6 +220,87 @@ def _thaw_handle_hover(req_json):
     except Exception as _ex:
         import json as _j
         return _j.dumps({"hover": "", "error": str(_ex)})
+
+def _thaw_handle_syntax(req_json):
+    """Check Python syntax + undefined names, using the live kernel namespace."""
+    import ast as _ast, json as _json
+    try:
+        code = _json.loads(req_json).get("code", "")
+    except Exception:
+        code = req_json.strip()
+
+    # ── 1. Syntax check ───────────────────────────────────────────────────────
+    try:
+        tree = _ast.parse(code)
+    except SyntaxError as _e:
+        err = {
+            "severity": "error",
+            "line":     _e.lineno or 1,
+            "col":      (_e.offset or 1) - 1,
+            "msg":      _e.msg,
+        }
+        if getattr(_e, "end_offset", None) is not None:
+            err["endCol"] = _e.end_offset - 1
+        return _json.dumps({"errors": [err]})
+    except Exception:
+        return _json.dumps({"errors": []})
+
+    # ── 2. Pyflakes: undefined names + import errors ─────────────────────────
+    # Prepend stub assignments (name = None at lineno 0) for every name that
+    # currently lives in the kernel namespace g.  Because g is only populated
+    # by cells that have actually been run, pyflakes gets real module-scope
+    # bindings for cross-cell names and never raises UndefinedName for them.
+    # Module-scope bindings are more reliable than the builtins= parameter,
+    # which places names in the lowest-priority scope and can still trigger
+    # warnings in certain code patterns.
+    try:
+        from pyflakes import checker as _pfc, messages as _pfm
+        _w = _pfc.Checker(tree, "<cell>")
+        errors = []
+        for _msg in _w.messages:
+            _is_err = isinstance(_msg, (_pfm.UndefinedName, _pfm.UndefinedLocal))
+            errors.append({
+                "severity": "error" if _is_err else "warning",
+                "line":     _msg.lineno,
+                "col":      getattr(_msg, "col", 0),
+                "msg":      _msg.message % _msg.message_args,
+            })
+        return _json.dumps({"errors": errors})
+    except ImportError:
+        pass  # pyflakes not available; fall back to import-existence check
+
+    # ── 3. Fallback: importlib.util.find_spec for missing top-level modules ────
+    import importlib.util as _ilu
+    errors = []
+    for _node in _ast.walk(tree):
+        if isinstance(_node, _ast.Import):
+            for _alias in _node.names:
+                _top = _alias.name.split(".")[0]
+                try:
+                    _found = _ilu.find_spec(_top)
+                except (ModuleNotFoundError, ValueError):
+                    _found = None
+                if _found is None:
+                    errors.append({
+                        "severity": "warning",
+                        "line": _node.lineno,
+                        "col": _node.col_offset,
+                        "msg": "Module not found: '" + _alias.name + "'",
+                    })
+        elif isinstance(_node, _ast.ImportFrom) and _node.module:
+            _top = _node.module.split(".")[0]
+            try:
+                _found = _ilu.find_spec(_top)
+            except (ModuleNotFoundError, ValueError):
+                _found = None
+            if _found is None:
+                errors.append({
+                    "severity": "warning",
+                    "line": _node.lineno,
+                    "col": _node.col_offset,
+                    "msg": "Module not found: '" + _node.module + "'",
+                })
+    return _json.dumps({"errors": errors})
 
 def _capture_figures():
     """Return a list of base64-encoded PNG strings for all open figures."""
@@ -351,6 +434,10 @@ while True:
         print(_thaw_run_sql_cell(code[len(SQL_MARKER) + 1:]), flush=True)
         print(SENTINEL, flush=True)
         continue
+    if code.startswith(SYNTAX_MARKER + "\n"):
+        print(_thaw_handle_syntax(code[len(SYNTAX_MARKER) + 1:]), flush=True)
+        print(SENTINEL, flush=True)
+        continue
 
     buf_out = io.StringIO()
     buf_err = io.StringIO()
@@ -387,8 +474,8 @@ type SnowparkCheckResult struct {
 	Backend             string `json:"backend"`             // "conda" | "venv"
 	VenvPath            string `json:"venvPath"`            // effective venv path when backend=venv
 	HasConda            bool   `json:"hasConda"`
-	HasEnv              bool   `json:"hasEnv"`              // conda env exists
-	HasVenv             bool   `json:"hasVenv"`             // venv exists
+	HasEnv              bool   `json:"hasEnv"`  // conda env exists
+	HasVenv             bool   `json:"hasVenv"` // venv exists
 	HasSnowpark         bool   `json:"hasSnowpark"`
 	HasNotebook         bool   `json:"hasNotebook"`
 }
@@ -418,11 +505,11 @@ type NotebookSessionContext struct {
 
 // NotebookCellOutput is the result of running a single notebook cell.
 type NotebookCellOutput struct {
-	Stdout          string                  `json:"stdout"`
-	Stderr          string                  `json:"stderr"`
-	Error           string                  `json:"error"`
-	Images          []string                `json:"images"`          // base64-encoded PNG figures (e.g. matplotlib plots)
-	SessionContext  *NotebookSessionContext  `json:"session_context"` // current kernel session state
+	Stdout         string                  `json:"stdout"`
+	Stderr         string                  `json:"stderr"`
+	Error          string                  `json:"error"`
+	Images         []string                `json:"images"`          // base64-encoded PNG figures (e.g. matplotlib plots)
+	SessionContext *NotebookSessionContext `json:"session_context"` // current kernel session state
 }
 
 // NotebookSqlResult is returned by RunNotebookSql.
@@ -459,10 +546,10 @@ type notebookSession struct {
 }
 
 var (
-	notebookSessions   sync.Map   // tabId (string) → *notebookSession
-	kernelScriptOnce   sync.Once
-	kernelScriptPath   string
-	kernelScriptErr    error
+	notebookSessions sync.Map // tabId (string) → *notebookSession
+	kernelScriptOnce sync.Once
+	kernelScriptPath string
+	kernelScriptErr  error
 )
 
 func ensureKernelScript() (string, error) {
@@ -1038,14 +1125,14 @@ func (a *App) InstallSnowparkPackage() error {
 	return nil
 }
 
-// InstallJupyterNotebook installs notebook, ipython-sql and sqlalchemy via pip.
+// InstallJupyterNotebook installs notebook, ipython-sql, sqlalchemy and pyflakes via pip.
 func (a *App) InstallJupyterNotebook() error {
 	condaPath, err := exec.LookPath("conda")
 	if err != nil {
 		return fmt.Errorf("conda not found: %w", err)
 	}
 	cmd := exec.Command(condaPath, "run", "-n", SnowparkCondaEnv,
-		"pip", "install", "notebook", "ipython-sql", "sqlalchemy")
+		"pip", "install", "notebook", "ipython-sql", "sqlalchemy", "pyflakes")
 	if err := a.streamCommand(cmd); err != nil {
 		return fmt.Errorf("notebook install failed: %w", err)
 	}
@@ -1125,14 +1212,14 @@ func (a *App) DeleteVenvFolder() error {
 	return os.RemoveAll(venvPath)
 }
 
-// InstallJupyterVenv installs notebook, ipython-sql and sqlalchemy into the venv.
+// InstallJupyterVenv installs notebook, ipython-sql, sqlalchemy and pyflakes into the venv.
 func (a *App) InstallJupyterVenv() error {
 	cfg, _ := config.Load()
 	venvPath := cfg.Snowpark.VenvPath
 	if venvPath == "" {
 		venvPath = defaultVenvPath()
 	}
-	cmd := exec.Command(venvPipBin(venvPath), "install", "notebook", "ipython-sql", "sqlalchemy")
+	cmd := exec.Command(venvPipBin(venvPath), "install", "notebook", "ipython-sql", "sqlalchemy", "pyflakes")
 	if err := a.streamCommand(cmd); err != nil {
 		return fmt.Errorf("notebook venv install failed: %w", err)
 	}
@@ -1241,23 +1328,23 @@ func (a *App) notebookKernelEnv() []string {
 	ctx, err := a.client.GetSessionContext(a.ctx)
 	if err != nil {
 		// Fall back to original params if the query fails.
-		ctx.Role      = p.Role
+		ctx.Role = p.Role
 		ctx.Warehouse = p.Warehouse
-		ctx.Database  = p.Database
-		ctx.Schema    = p.Schema
+		ctx.Database = p.Database
+		ctx.Schema = p.Schema
 	}
 	return []string{
-		"THAW_SF_ACCOUNT="               + p.Account,
-		"THAW_SF_USER="                  + p.User,
-		"THAW_SF_PASSWORD="              + p.Password,
-		"THAW_SF_AUTHENTICATOR="         + p.Authenticator,
-		"THAW_SF_OKTA_URL="              + p.OktaURL,
-		"THAW_SF_PRIVATE_KEY_PATH="      + p.PrivateKeyPath,
-		"THAW_SF_PRIVATE_KEY_PASSPHRASE="+ p.PrivateKeyPassphrase,
-		"THAW_SF_ROLE="                  + ctx.Role,
-		"THAW_SF_WAREHOUSE="             + ctx.Warehouse,
-		"THAW_SF_DATABASE="              + ctx.Database,
-		"THAW_SF_SCHEMA="                + ctx.Schema,
+		"THAW_SF_ACCOUNT=" + p.Account,
+		"THAW_SF_USER=" + p.User,
+		"THAW_SF_PASSWORD=" + p.Password,
+		"THAW_SF_AUTHENTICATOR=" + p.Authenticator,
+		"THAW_SF_OKTA_URL=" + p.OktaURL,
+		"THAW_SF_PRIVATE_KEY_PATH=" + p.PrivateKeyPath,
+		"THAW_SF_PRIVATE_KEY_PASSPHRASE=" + p.PrivateKeyPassphrase,
+		"THAW_SF_ROLE=" + ctx.Role,
+		"THAW_SF_WAREHOUSE=" + ctx.Warehouse,
+		"THAW_SF_DATABASE=" + ctx.Database,
+		"THAW_SF_SCHEMA=" + ctx.Schema,
 	}
 }
 
@@ -1431,11 +1518,11 @@ func (a *App) RunNotebookCellSql(tabId, sql string) (NotebookSqlResult, error) {
 	}
 
 	var raw struct {
-		Columns        []string               `json:"columns"`
-		Rows           [][]any                `json:"rows"`
-		RowCount       int64                  `json:"rowCount"`
-		Error          *string                `json:"error"`
-		QueryID        string                 `json:"queryID"`
+		Columns        []string                `json:"columns"`
+		Rows           [][]any                 `json:"rows"`
+		RowCount       int64                   `json:"rowCount"`
+		Error          *string                 `json:"error"`
+		QueryID        string                  `json:"queryID"`
 		SessionContext *NotebookSessionContext `json:"session_context"`
 	}
 	if resultJSON != "" {
@@ -1593,6 +1680,44 @@ func (a *App) GetNotebookHover(tabId, code string, line, col int) (string, error
 		_ = json.Unmarshal([]byte(resultJSON), &resp)
 	}
 	return resp.Hover, nil
+}
+
+// NotebookSyntaxError describes a single Python diagnostic returned by CheckPythonSyntax.
+// Line is 1-indexed; Col and EndCol are 0-indexed (Monaco adds 1 when applying markers).
+// Severity is "error" (syntax errors) or "warning" (e.g. module-not-found).
+type NotebookSyntaxError struct {
+	Severity string `json:"severity"`
+	Line     int    `json:"line"`
+	Col      int    `json:"col"`
+	EndCol   *int   `json:"endCol"`
+	Msg      string `json:"msg"`
+}
+
+// CheckPythonSyntax asks the running Python kernel to parse code with ast.parse()
+// and returns any SyntaxError it finds.  Returns nil (no error) when no kernel is
+// running for the tab — the caller should silently skip in that case.
+func (a *App) CheckPythonSyntax(tabId, code string) ([]NotebookSyntaxError, error) {
+	val, ok := notebookSessions.Load(tabId)
+	if !ok {
+		return nil, nil
+	}
+	s := val.(*notebookSession)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	req, _ := json.Marshal(map[string]any{"code": code})
+	payload := fmt.Sprintf("%s\n%s\n%s\n", kernelSyntaxMarker, string(req), kernelRunMarker)
+	resultJSON, err := kernelRPC(s, payload)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Errors []NotebookSyntaxError `json:"errors"`
+	}
+	if resultJSON != "" {
+		_ = json.Unmarshal([]byte(resultJSON), &resp)
+	}
+	return resp.Errors, nil
 }
 
 // StopNotebookSession kills the Python kernel for a notebook tab.

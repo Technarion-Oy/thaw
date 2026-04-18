@@ -81,8 +81,8 @@ function condaSteps(isM1: boolean): StepDef[] {
     },
     {
       title: "Install Jupyter & SQL",
-      description: "notebook  ·  ipython-sql  ·  sqlalchemy  (via pip)",
-      command: "conda run -n thaw_snowpark pip install notebook ipython-sql sqlalchemy",
+      description: "notebook  ·  ipython-sql  ·  sqlalchemy  ·  pyflakes  (via pip)",
+      command: "conda run -n thaw_snowpark pip install notebook ipython-sql sqlalchemy pyflakes",
     },
   ];
 }
@@ -105,8 +105,8 @@ function venvSteps(venvPath: string, withPandas: boolean, pythonBin: string): St
     },
     {
       title: "Install Jupyter & SQL",
-      description: "notebook  ·  ipython-sql  ·  sqlalchemy  (via pip)",
-      command: `"${venvPath}/bin/pip" install notebook ipython-sql sqlalchemy`,
+      description: "notebook  ·  ipython-sql  ·  sqlalchemy  ·  pyflakes  (via pip)",
+      command: `"${venvPath}/bin/pip" install notebook ipython-sql sqlalchemy pyflakes`,
     },
   ];
 }

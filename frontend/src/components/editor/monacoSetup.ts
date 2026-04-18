@@ -62,7 +62,7 @@ const PYTHON_MONARCH_LANGUAGE = {
     ],
     whitespace: [
       [/\s+/, "white"],
-      [/(^#.*$)/, "comment"],
+      [/(#.*$)/, "comment"],
       [/'''/, "string", "@endDocString"],
       [/"""/, "string", "@endDblDocString"],
     ],

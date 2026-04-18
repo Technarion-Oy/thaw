@@ -102,6 +102,10 @@ export function CheckAvailableKeyTools() {
   return window['go']['main']['App']['CheckAvailableKeyTools']();
 }
 
+export function CheckPythonSyntax(arg1, arg2) {
+  return window['go']['main']['App']['CheckPythonSyntax'](arg1, arg2);
+}
+
 export function CheckSnowparkEnv() {
   return window['go']['main']['App']['CheckSnowparkEnv']();
 }

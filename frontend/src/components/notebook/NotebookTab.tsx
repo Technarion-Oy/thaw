@@ -44,6 +44,7 @@ import {
   GetTableColumns,
   GetNotebookCompletions,
   GetNotebookHover,
+  CheckPythonSyntax,
 } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
@@ -299,6 +300,80 @@ export default function NotebookTab({ tabId }: Props) {
 
   // Track current cells in a ref to avoid stale closures in the serializer.
   const cellsRef = useRef(cells);
+  // Tracks all Monaco models so the global syntax checker can apply markers to them
+  const cellModelsRef = useRef<Map<string, monacoLib.editor.ITextModel>>(new Map());
+  
+  // ── Global cross-cell Python syntax check ─────────────────────────────────
+  useEffect(() => {
+    if (!kernelReady) return;
+
+    const timer = setTimeout(async () => {
+      let fullCode = "";
+      let currentLineCount = 0;
+
+      // 1. Build the full notebook source string
+      for (const c of cells) {
+        if (c.kind !== "code") continue;
+        fullCode += c.source + "\n";
+        currentLineCount += c.source.split("\n").length;
+      }
+
+      if (!fullCode.trim()) {
+         for (const model of cellModelsRef.current.values()) {
+           monacoLib.editor.setModelMarkers(model, "python-syntax", []);
+         }
+         return;
+      }
+
+      try {
+        const errors = await CheckPythonSyntax(tabId, fullCode);
+        if (!errors) return;
+
+        const markersByCell = new Map<string, monacoLib.editor.IMarkerData[]>();
+
+        // 2. Map the global line numbers back to their specific cells
+        for (const err of errors) {
+          let targetCellId = "";
+          let offset = 0;
+          let lineAccum = 0;
+
+          for (const c of cells) {
+            if (c.kind !== "code") continue;
+            const cellLines = c.source.split("\n").length;
+            if (err.line > lineAccum && err.line <= lineAccum + cellLines) {
+              targetCellId = c.id;
+              offset = lineAccum;
+              break;
+            }
+            lineAccum += cellLines;
+          }
+
+          if (targetCellId) {
+            if (!markersByCell.has(targetCellId)) markersByCell.set(targetCellId, []);
+            markersByCell.get(targetCellId)!.push({
+              severity: err.severity === "error" ? monacoLib.MarkerSeverity.Error : monacoLib.MarkerSeverity.Warning,
+              message: err.msg,
+              startLineNumber: err.line - offset,
+              startColumn: err.col + 1,
+              endLineNumber: err.line - offset,
+              endColumn: err.endCol != null ? err.endCol + 1 : err.col + 2,
+            });
+          }
+        }
+
+        // 3. Paint the markers onto the individual cell editors
+        for (const [id, model] of cellModelsRef.current.entries()) {
+           const markers = markersByCell.get(id) || [];
+           monacoLib.editor.setModelMarkers(model, "python-syntax", markers);
+        }
+      } catch (e) {
+        // ignore
+      }
+    }, 750);
+
+    return () => clearTimeout(timer);
+  }, [cells, kernelReady, tabId]);
+  
   useEffect(() => { cellsRef.current = cells; }, [cells]);
 
   // ── copy handler for output areas ────────────────────────────────────────
@@ -690,6 +765,8 @@ export default function NotebookTab({ tabId }: Props) {
             onKindChange={(k) => setCellKind(cell.id, k)}
             onAddAfter={() => addCell(cell.id)}
             onSelect={() => setSelectedCellId(cell.id)}
+            onModelReady={(model) => cellModelsRef.current.set(cell.id, model)}
+            onModelDispose={() => cellModelsRef.current.delete(cell.id)}
           />
         ))}
       </div>
@@ -885,19 +962,21 @@ interface CellViewProps {
   onKindChange: (k: Cell["kind"]) => void;
   onAddAfter: () => void;
   onSelect: () => void;
+  onModelReady?: (model: monacoLib.editor.ITextModel) => void;
+  onModelDispose?: () => void;
 }
 
 function CellView({
   tabId, cell, isFirst, isLast, kernelReady, isDark, border, bgRaised, textMuted,
-  isSelected, onRun, onDelete, onMoveUp, onMoveDown, onSourceChange, onKindChange, onAddAfter, onSelect,
+  isSelected, onRun, onDelete, onMoveUp, onMoveDown, onSourceChange, onKindChange, onAddAfter, onSelect, onModelReady, onModelDispose,
 }: CellViewProps) {
   const [focused, setFocused] = useState(false);
   const accentColor = isDark ? "#40c8fc" : "#0969da";
 
   // ── Monaco editor setup ───────────────────────────────────────────────────
-  const editorRef    = useRef<any>(null);
-  const onRunRef     = useRef(onRun);
-  const onSelectRef  = useRef(onSelect);
+  const editorRef       = useRef<any>(null);
+  const onRunRef        = useRef(onRun);
+  const onSelectRef     = useRef(onSelect);
   useEffect(() => { onRunRef.current = onRun; }, [onRun]);
   useEffect(() => { onSelectRef.current = onSelect; }, [onSelect]);
 
@@ -918,7 +997,12 @@ function CellView({
       if (model) {
         const uri = model.uri.toString();
         cellModelTabIds.set(uri, tabId);
-        editor.onDidDispose(() => cellModelTabIds.delete(uri));
+        onModelReady?.(model);
+
+        editor.onDidDispose(() => {
+          cellModelTabIds.delete(uri);
+          onModelDispose?.();
+        });
       }
     }
 
