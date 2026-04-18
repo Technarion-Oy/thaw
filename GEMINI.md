@@ -74,3 +74,75 @@ Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend +
 - **Logs**: `gosnowflake` driver logs errors to `slog.Default` even when caught.
 - **Wails Generate**: If `wails generate module` fails, check Go syntax errors first.
 - **Persistence**: App state is persisted in `~/.config/thaw/config.json`. Frontend store persistence uses `localStorage`.
+
+## 🚀 Pull Request Generation with Gemini CLI
+
+Thaw uses **Gemini CLI** as the mandated tool for generating PR titles and bodies. All squash-merged PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/) — they drive automated semantic versioning via `semantic-release`.
+
+### Install & Auth
+
+```bash
+# Install
+npm install -g @google/generative-ai-cli   # or: pip install gemini-cli
+
+# Authenticate (first run)
+gemini auth login
+```
+
+### Prompt: PR Title Only
+
+Use this when you only need a Conventional Commit title (single line):
+
+```
+You are a commit message expert. Given the following git diff or description of changes,
+produce ONE Conventional Commit PR title (max 72 characters, no period at the end).
+Use one of: feat, fix, perf, refactor, chore, docs, style, test, build, ci.
+Append "!" after the type for breaking changes (e.g. "feat!:").
+Output ONLY the title, nothing else.
+
+Changes:
+<paste diff or description here>
+```
+
+### Prompt: Full PR Body (with optional BREAKING CHANGE footer)
+
+```
+You are a pull request expert. Given the following changes, produce a GitHub PR body in
+this exact format:
+
+## Summary
+- <bullet 1>
+- <bullet 2>
+- <bullet 3 if needed>
+
+## Test plan
+- [ ] <manual test step 1>
+- [ ] <manual test step 2>
+
+If the changes are breaking, append this footer (otherwise omit it entirely):
+BREAKING CHANGE: <one-line description of what breaks and how to migrate>
+
+Changes:
+<paste diff or description here>
+```
+
+### Version Bump Mapping
+
+| Commit type | Release | Version bump |
+|-------------|---------|--------------|
+| `feat` | ✅ | **minor** (0.X.0) |
+| `feat!` / `BREAKING CHANGE` footer | ✅ | **major** (X.0.0) |
+| `fix`, `perf` | ✅ | **patch** (0.0.X) |
+| `refactor`, `chore`, `docs`, `style`, `test`, `build`, `ci` | ❌ | no release |
+
+### ⛔ Never Tag Manually
+
+Do **not** create or push `v*` tags by hand. The `manual-release.yml` workflow runs
+`semantic-release`, which:
+1. Analyses commits since the last tag.
+2. Determines the correct next version.
+3. Updates `wails.json` and `CHANGELOG.md`.
+4. Pushes a signed version-bump commit and the `vX.Y.Z` tag.
+5. Creates the GitHub Release.
+
+Manual tags bypass the changelog and version-file update, breaking the pipeline.

@@ -25,7 +25,7 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     permissions:
-      contents: read
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -69,9 +69,15 @@ jobs:
         id: prep
         shell: bash
         run: |
-          # Replace / with - in branch names to avoid path issues in filenames
-          CLEAN_REF=$(echo "${{ github.ref_name }}" | sed 's/\//-/g')
-          echo "version=${CLEAN_REF}" >> $GITHUB_OUTPUT
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            # Strip the leading "v" from semantic version tags (v1.2.3 → 1.2.3)
+            VERSION="${{ github.ref_name }}"
+            VERSION="${VERSION#v}"
+          else
+            # Replace / with - in branch names to avoid path issues in filenames
+            VERSION=$(echo "${{ github.ref_name }}" | sed 's/\//-/g')
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
       # ── Standard Wails Builds ──────────────────────────────────────────────
 
@@ -91,7 +97,7 @@ jobs:
         #                   (-w) so function/variable names are not recoverable.
         # -trimpath         removes all local file-system paths embedded by the
         #                   compiler (source file references, module cache paths).
-        run: wails build -clean -ldflags "-s -w" -trimpath
+        run: wails build -clean -ldflags "-s -w -X main.Version=${{ steps.prep.outputs.version }}" -trimpath
         env:
           # The macOS arm64 runner has 7 GB RAM.  javascript-obfuscator's
           # control-flow flattening can multiply the AST size of each
@@ -104,7 +110,7 @@ jobs:
         if: matrix.platform == 'windows'
         # Since we dropped garble for Windows, we can let Wails handle 
         # both the compilation AND the NSIS installer generation natively!
-        run: wails build -clean -nsis -ldflags "-s -w" -trimpath
+        run: wails build -clean -nsis -ldflags "-s -w -X main.Version=${{ steps.prep.outputs.version }}" -trimpath
         env:
           NODE_OPTIONS: --max-old-space-size=6144
 
@@ -129,7 +135,7 @@ jobs:
         run: |
           garble build \
             -tags desktop,production \
-            -trimpath -ldflags="-s -w" \
+            -trimpath -ldflags="-s -w -X main.Version=${{ steps.prep.outputs.version }}" \
             -o build/bin/thaw.app/Contents/MacOS/thaw \
             .
 
@@ -138,7 +144,7 @@ jobs:
         run: |
           garble build \
             -tags desktop,production \
-            -trimpath -ldflags="-s -w" \
+            -trimpath -ldflags="-s -w -X main.Version=${{ steps.prep.outputs.version }}" \
             -o build/bin/thaw \
             .
 
@@ -161,10 +167,10 @@ jobs:
         if: matrix.platform == 'linux'
         run: mv build/bin/thaw "build/bin/thaw-${{ steps.prep.outputs.version }}-linux-amd64"
 
-      # ── Store artifact ─────────────────────────────────────────────────────
-      # Currently retained as a workflow artifact (30-day expiry).
-      # See the storage placeholder comment below to switch to permanent storage.
+      # ── Store artifact (non-tag runs) ──────────────────────────────────────
+      # On tag runs binaries are attached directly to the GitHub Release below.
       - name: Upload artifact
+        if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v4
         with:
           name: thaw-${{ steps.prep.outputs.version }}-${{ matrix.platform }}-${{ matrix.arch }}
@@ -172,23 +178,14 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      # ── Storage placeholder ────────────────────────────────────────────────
-      # Replace/supplement upload-artifact above with one of these options once
-      # a permanent distribution target is chosen:
-      #
-      # GitHub Releases (attach binaries to the tag's release page):
-      #   - uses: softprops/action-gh-release@v2
-      #     with:
-      #       files: build/bin/thaw-${{ steps.prep.outputs.version }}-*
-      #
-      # Amazon S3 / Cloudflare R2:
-      #   - run: aws s3 cp build/bin/thaw-${{ steps.prep.outputs.version }}-* s3://your-bucket/builds/
-      #     env:
-      #       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      #       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      #
-      # Google Cloud Storage:
-      #   - uses: google-github-actions/upload-cloud-storage@v2
-      #     with:
-      #       path: build/bin
-      #       destination: your-gcs-bucket/builds
+      # ── Attach binaries to GitHub Release (tag runs only) ──────────────────
+      # The release itself (notes + tag) is created by manual-release.yml via
+      # semantic-release.  This step appends the platform binary to it.
+      - name: Upload binaries to GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          append_body: false
+          fail_on_unmatched_files: true
+          files: build/bin/thaw-${{ steps.prep.outputs.version }}-*
