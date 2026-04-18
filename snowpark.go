@@ -12,9 +12,11 @@ package main
 
 import (
 	"bufio"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"thaw/internal/config"
 
@@ -39,6 +42,14 @@ const kernelCompleteMarker = "<<<THAW_COMPLETE>>>"
 const kernelHoverMarker = "<<<THAW_HOVER>>>"
 const kernelSqlMarker = "<<<THAW_SQL>>>"
 const kernelSyntaxMarker = "<<<THAW_SYNTAX>>>"
+const kernelDebugMarker = "<<<THAW_DEBUG_RUN>>>"
+
+// Global state for the Debug Adapter Protocol (DAP) connection
+var (
+	dapConn      net.Conn
+	dapMutex     sync.Mutex
+	dapProxyOnce sync.Once
+)
 
 // kernelPyScript is a minimal stateful Python kernel.  It reads code blocks
 // from stdin (terminated by kernelRunMarker), executes them in a shared
@@ -49,6 +60,7 @@ import ast as _ast
 
 SENTINEL   = "<<<THAW_CELL_DONE>>>"
 RUN_MARKER = "<<<THAW_RUN>>>"
+DEBUG_MARKER = "<<<THAW_DEBUG_RUN>>>"
 
 # Force matplotlib to use the non-interactive Agg backend so that show()
 # does not try to open a GUI window.
@@ -469,6 +481,67 @@ while True:
         print(SENTINEL, flush=True)
         continue
 
+    # ── Debug Execution (DAP/debugpy) ─────────────────────────────────────────
+    if code.startswith(DEBUG_MARKER + "\n"):
+        import tempfile
+        import debugpy
+        import runpy
+
+        parts = code.split("\n", 2)
+        cell_id = parts[1].strip() if len(parts) > 1 else "unknown"
+        cell_code = parts[2] if len(parts) > 2 else ""
+
+        # Write code to a physical file so debugpy has a path to set breakpoints
+        debug_filepath = os.path.join(tempfile.gettempdir(), f"thaw_cell_{cell_id}.py")
+        with open(debug_filepath, "w", encoding="utf-8") as f:
+            f.write(cell_code)
+
+        try:
+            try:
+                # Start the debugger (ignores if already listening)
+                debugpy.listen(("127.0.0.1", 5678))
+            except RuntimeError:
+                pass
+
+            # Signal to Go proxy that debugpy is waiting AND send the filepath
+            print(json.dumps({
+                "status": "DEBUG_READY",
+                "filepath": debug_filepath
+            }), flush=True)
+            print(SENTINEL, flush=True)
+
+            # Freeze until the frontend completes the DAP handshake (configurationDone).
+            # Closing the TCP connection (via StopDapProxy) will unblock this if the
+            # frontend gives up early.
+            debugpy.wait_for_client()
+
+            buf_out = io.StringIO()
+            buf_err = io.StringIO()
+            old_out, old_err = sys.stdout, sys.stderr
+            sys.stdout = buf_out
+            sys.stderr = buf_err
+            err_info = None
+
+            try:
+                # Run the file via runpy to get full debug tracking, executing in 'g'
+                runpy.run_path(debug_filepath, init_globals=g)
+            except Exception:
+                err_info = traceback.format_exc()
+            finally:
+                sys.stdout = old_out
+                sys.stderr = old_err
+
+            images = _capture_figures()
+            result = {"stdout": buf_out.getvalue(), "stderr": buf_err.getvalue(), "error": err_info, "images": images, "session_context": _thaw_get_session_context()}
+            print(json.dumps(result), flush=True)
+            print(SENTINEL, flush=True)
+        except Exception as e:
+            print(json.dumps({"error": str(e)}), flush=True)
+            print(SENTINEL, flush=True)
+            
+        continue
+
+    # ── Standard Execution ────────────────────────────────────────────────────
     buf_out = io.StringIO()
     buf_err = io.StringIO()
     # Drain any deferred session-init errors into the first cell's stderr.
@@ -485,10 +558,6 @@ while True:
         for node in _ast.walk(tree):
             if isinstance(node, _ast.Name) and node.id in ['_THAW_INTERNAL_STATE', 'kernelRPC', 'SENTINEL', 'RUN_MARKER']:
                 raise NameError(f"Access denied: '{node.id}' is a reserved internal variable.")
-            if isinstance(node, _ast.Assign):
-                for target in node.targets:
-                    if getattr(target, 'id', '') == 'session':
-                         raise Exception("Access denied: You cannot reassign the global 'session' object.")
                          
         bytecode = compile(tree, "<cell>", "exec")
         exec(bytecode, g)
@@ -1174,7 +1243,7 @@ func (a *App) InstallJupyterNotebook() error {
 		return fmt.Errorf("conda not found: %w", err)
 	}
 	cmd := exec.Command(condaPath, "run", "-n", SnowparkCondaEnv,
-		"pip", "install", "notebook", "ipython-sql", "sqlalchemy", "pyflakes")
+		"pip", "install", "notebook", "ipython-sql", "sqlalchemy", "pyflakes", "debugpy", "cryptography<44.0.0")
 	if err := a.streamCommand(cmd); err != nil {
 		return fmt.Errorf("notebook install failed: %w", err)
 	}
@@ -1261,7 +1330,7 @@ func (a *App) InstallJupyterVenv() error {
 	if venvPath == "" {
 		venvPath = defaultVenvPath()
 	}
-	cmd := exec.Command(venvPipBin(venvPath), "install", "notebook", "ipython-sql", "sqlalchemy", "pyflakes")
+	cmd := exec.Command(venvPipBin(venvPath), "install", "notebook", "ipython-sql", "sqlalchemy", "pyflakes", "debugpy", "cryptography<44.0.0")
 	if err := a.streamCommand(cmd); err != nil {
 		return fmt.Errorf("notebook venv install failed: %w", err)
 	}
@@ -1489,6 +1558,160 @@ func (a *App) RunNotebookCell(tabId string, code string) (NotebookCellOutput, er
 	}
 
 	// Sync session context changes back to the main connection (see syncKernelContext).
+	a.syncKernelContext(s, out.SessionContext)
+
+	return out, nil
+}
+
+// ─── DAP Proxy Methods ────────────────────────────────────────────────────────
+
+// StartDapProxy connects to debugpy and starts shuttling messages.
+func (a *App) StartDapProxy() error {
+	dapMutex.Lock()
+	defer dapMutex.Unlock()
+
+	// Add retry loop to guarantee connection succeeds even if python is slow
+	var conn net.Conn
+	var err error
+	for i := 0; i < 20; i++ {
+		conn, err = net.Dial("tcp", "127.0.0.1:5678")
+		if err == nil {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to connect to debugpy: %w", err)
+	}
+	dapConn = conn
+
+	// CRITICAL: Wrap inside sync.Once to prevent duplicate listeners/memory leaks!
+	dapProxyOnce.Do(func() {
+		wailsruntime.EventsOn(a.ctx, "dap:client-to-backend", func(optionalData ...interface{}) {
+			dapMutex.Lock()
+			defer dapMutex.Unlock()
+			if len(optionalData) > 0 {
+				if msg, ok := optionalData[0].(string); ok {
+					if dapConn != nil {
+						_, _ = dapConn.Write([]byte(msg))
+					}
+				}
+			}
+		})
+	})
+
+	// Listen for DAP messages from Python, send them to React
+	go func() {
+		buf := make([]byte, 8192)
+		for {
+			if dapConn == nil {
+				break
+			}
+			n, err := dapConn.Read(buf)
+			if err != nil {
+				wailsruntime.EventsEmit(a.ctx, "dap:disconnected", err.Error())
+				break
+			}
+			// Encode to Base64 to guarantee that binary data/multi-byte chars are never corrupted!
+			wailsruntime.EventsEmit(a.ctx, "dap:backend-to-client", base64.StdEncoding.EncodeToString(buf[:n]))
+		}
+	}()
+
+	return nil
+}
+
+// StopDapProxy closes the connection when debugging is done
+func (a *App) StopDapProxy() {
+	dapMutex.Lock()
+	defer dapMutex.Unlock()
+	if dapConn != nil {
+		_ = dapConn.Close()
+		dapConn = nil
+	}
+}
+
+// DebugNotebookCell executes the cell using debugpy and shuttles the output back to React
+func (a *App) DebugNotebookCell(tabId string, cellId string, code string) (NotebookCellOutput, error) {
+	val, ok := notebookSessions.Load(tabId)
+	if !ok {
+		return NotebookCellOutput{}, fmt.Errorf("no kernel running")
+	}
+	s := val.(*notebookSession)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 1. Send the debug command to Python
+	payload := fmt.Sprintf("%s\n%s\n%s\n%s\n", kernelDebugMarker, cellId, code, kernelRunMarker)
+
+	if _, err := fmt.Fprint(s.stdin, payload); err != nil {
+		return NotebookCellOutput{}, err
+	}
+
+	// 2. Read the "DEBUG_READY" response
+	for {
+		line, err := s.stdout.ReadString('\n')
+		if err != nil {
+			return NotebookCellOutput{}, err
+		}
+		line = strings.TrimRight(line, "\n\r")
+
+		if line == kernelSentinel {
+			break // Setup sentinel reached
+		}
+
+		if strings.Contains(line, "DEBUG_READY") {
+			// Parse the JSON to get the physical filepath Python created
+			var payload struct {
+				Filepath string `json:"filepath"`
+			}
+			_ = json.Unmarshal([]byte(line), &payload)
+
+			// 1. Tell React what the filepath is so it can set breakpoints
+			wailsruntime.EventsEmit(a.ctx, "dap:debug-ready", map[string]string{
+				"filepath": payload.Filepath,
+			})
+
+			// 2. Start the TCP Proxy in a goroutine and tell React it's open (or failed!)
+			go func() {
+				if err := a.StartDapProxy(); err != nil {
+					wailsruntime.EventsEmit(a.ctx, "dap:proxy-ready", err.Error())
+				} else {
+					wailsruntime.EventsEmit(a.ctx, "dap:proxy-ready", "")
+				}
+			}()
+		} else if strings.Contains(line, "error") {
+			// Handle failure to start debugpy
+			var out NotebookCellOutput
+			_ = json.Unmarshal([]byte(line), &out)
+			return out, nil
+		}
+	}
+
+	// 4. Now wait for the ACTUAL execution result (after the DAP client resumes the debugger)
+	var lastJSON string
+	for {
+		line, err := s.stdout.ReadString('\n')
+		if err != nil {
+			return NotebookCellOutput{}, fmt.Errorf("read from kernel: %w", err)
+		}
+		line = strings.TrimRight(line, "\n\r")
+		if line == kernelSentinel {
+			break
+		}
+		lastJSON = line
+	}
+
+	// 5. Clean up the DAP proxy after execution is finished
+	a.StopDapProxy()
+
+	var out NotebookCellOutput
+	if lastJSON != "" {
+		if err := json.Unmarshal([]byte(lastJSON), &out); err != nil {
+			out.Stdout = lastJSON
+		}
+	}
+
 	a.syncKernelContext(s, out.SessionContext)
 
 	return out, nil

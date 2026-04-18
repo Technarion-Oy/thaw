@@ -23,9 +23,12 @@ import { CommandsRegistry } from "monaco-editor/esm/vs/platform/commands/common/
 // @ts-ignore
 import { ContextKeyExpr } from "monaco-editor/esm/vs/platform/contextkey/common/contextkey.js";
 import * as monacoLib from "monaco-editor";
-import { Button, Modal, Space, Spin, Tooltip, Typography, Select, Tag, message } from "antd";
+import { Button, Dropdown, Modal, Space, Spin, Tooltip, Typography, Select, Tag, message } from "antd";
+import type { MenuProps } from "antd";
 import {
   PlayCircleOutlined,
+  BugOutlined,
+  DownOutlined,
   PlusOutlined,
   DeleteOutlined,
   CaretUpOutlined,
@@ -45,7 +48,10 @@ import {
   GetNotebookCompletions,
   GetNotebookHover,
   CheckPythonSyntax,
+  DebugNotebookCell,
+  StopDapProxy,
 } from "../../../wailsjs/go/main/App";
+import { DapClient, type DebugVariable } from "./debugClient";
 import type { main } from "../../../wailsjs/go/models";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import { useNotebookPrefsStore } from "../../store/notebookPrefsStore";
@@ -304,6 +310,17 @@ export default function NotebookTab({ tabId }: Props) {
   const cellsRef = useRef(cells);
   // Tracks all Monaco models so the global syntax checker can apply markers to them
   const cellModelsRef = useRef<Map<string, monacoLib.editor.ITextModel>>(new Map());
+
+  // ── Debug state ──────────────────────────────────────────────────────────
+  // breakpoints: cellId → set of 1-indexed line numbers that have a breakpoint
+  const [breakpoints, setBreakpoints] = useState<Map<string, Set<number>>>(new Map());
+  // Active debug session state (null = not debugging)
+  const [debugState, setDebugState] = useState<{
+    cellId: string;
+    stopped: boolean;
+    variables: DebugVariable[];
+  } | null>(null);
+  const dapClientRef = useRef<DapClient | null>(null);
   
   // ── Global cross-cell Python syntax check ─────────────────────────────────
   useEffect(() => {
@@ -501,6 +518,106 @@ export default function NotebookTab({ tabId }: Props) {
       if (cell.kind === "code") await runCell(cell);
     }
   }, [runCell]);
+
+  // Toggle a breakpoint line for a specific cell.
+  const toggleBreakpoint = useCallback((cellId: string, line: number) => {
+    setBreakpoints((prev) => {
+      const next = new Map(prev);
+      const set = new Set(next.get(cellId) ?? []);
+      if (set.has(line)) set.delete(line);
+      else set.add(line);
+      next.set(cellId, set);
+      return next;
+    });
+  }, []);
+
+  // Debug a code cell using debugpy via the DAP proxy.
+  const debugCell = useCallback(async (cell: Cell) => {
+    if (!kernelReady || cell.running || cell.kind !== "code") return;
+
+    const cellBreakpoints = breakpoints.get(cell.id) ?? new Set<number>();
+
+    patchCell(cell.id, { running: true, outputs: [], images: [], sqlResult: null });
+    setDebugState({ cellId: cell.id, stopped: false, variables: [] });
+
+    let debugFilepath = "";
+    let offProxyReady: (() => void) | null = null;
+    let offDebugReady: (() => void) | null = null;
+    let offDapMessage: (() => void) | null = null;
+
+    try {
+      // 1. Listen for the DAP proxy-ready event before calling DebugNotebookCell
+      //    so we don't miss it if Go starts the proxy before the listeners register.
+      let resolveProxy!: () => void;
+      let rejectProxy!: (err: Error) => void;
+      const proxyReadyPromise = new Promise<void>((res, rej) => { resolveProxy = res; rejectProxy = rej; });
+
+      // If Go proxy fails to attach, it will pass the error string here
+      offProxyReady = EventsOn("dap:proxy-ready", (errMsg?: string) => {
+        if (errMsg) rejectProxy(new Error(errMsg));
+        else resolveProxy();
+      }) as () => void;
+      
+      offDebugReady = EventsOn("dap:debug-ready", (data: { filepath?: string }) => {
+        debugFilepath = data?.filepath ?? "";
+      }) as () => void;
+
+      // 2. Start the long-running IPC call (resolves only when the session ends)
+      const debugPromise = DebugNotebookCell(tabId, cell.id, cell.source);
+
+      // 3. Wait for the proxy to be up, then start the DAP handshake
+      await proxyReadyPromise;
+      offProxyReady();  offProxyReady = null;
+      offDebugReady(); offDebugReady = null;
+
+      // 4. Create the DAP client and wire it to events
+      const dap = new DapClient(cellBreakpoints, debugFilepath);
+      dapClientRef.current = dap;
+
+      dap.onStopped = (variables) => {
+        setDebugState({ cellId: cell.id, stopped: true, variables });
+      };
+      dap.onContinued = () => {
+        setDebugState({ cellId: cell.id, stopped: false, variables: [] });
+      };
+
+      dap.start();
+      offDapMessage = () => dap.stop();
+
+      // 5. Run the DAP handshake (initialize → attach → setBreakpoints → configurationDone)
+      await dap.initialize();
+
+      // 6. Await the execution result
+      const out = await debugPromise;
+
+      const outputs: CellOutput[] = [];
+      if (out.stdout) outputs.push({ type: "stdout", text: out.stdout });
+      if (out.stderr) outputs.push({ type: "stderr", text: out.stderr });
+      if (out.error)  outputs.push({ type: "error",  text: out.error  });
+
+      setCells((prev) => {
+        const updated = prev.map((c) =>
+          c.id === cell.id
+            ? { ...c, running: false, outputs, images: out.images ?? [], executionCount: (c.executionCount ?? 0) + 1 }
+            : c,
+        );
+        syncToStore(updated);
+        return updated;
+      });
+    } catch (e) {
+      patchCell(cell.id, { running: false, outputs: [{ type: "error", text: String(e) }] });
+    } finally {
+      offProxyReady?.();
+      offDebugReady?.();
+      offDapMessage?.();
+      dapClientRef.current?.stop();
+      dapClientRef.current = null;
+      setDebugState(null);
+      // Close the TCP proxy so Python's wait_for_client() unblocks and Go releases s.mu.
+      // This is a no-op if Go already called StopDapProxy() on a clean exit.
+      await StopDapProxy().catch(() => {});
+    }
+  }, [kernelReady, breakpoints, tabId, patchCell, syncToStore]);
 
   const restartKernel = useCallback(async () => {
     await StopNotebookSession(tabId).catch(() => {});
@@ -768,6 +885,7 @@ export default function NotebookTab({ tabId }: Props) {
             textMuted={textMuted}
             isSelected={selectedCellId === cell.id}
             onRun={(code) => runCell(cell, code)}
+            onDebug={() => debugCell(cell)}
             onDelete={() => confirmDeleteCell(cell.id)}
             onMoveUp={() => moveCell(cell.id, -1)}
             onMoveDown={() => moveCell(cell.id, 1)}
@@ -777,6 +895,14 @@ export default function NotebookTab({ tabId }: Props) {
             onSelect={() => setSelectedCellId(cell.id)}
             onModelReady={(model) => cellModelsRef.current.set(cell.id, model)}
             onModelDispose={() => cellModelsRef.current.delete(cell.id)}
+            breakpoints={breakpoints.get(cell.id) ?? new Set()}
+            onBreakpointToggle={(line) => toggleBreakpoint(cell.id, line)}
+            debugStopped={debugState?.cellId === cell.id && debugState.stopped}
+            debugVariables={debugState?.cellId === cell.id ? debugState.variables : []}
+            onDebugContinue={() => dapClientRef.current?.continue()}
+            onDebugStepOver={() => dapClientRef.current?.stepOver()}
+            onDebugStepInto={() => dapClientRef.current?.stepInto()}
+            onDebugStop={() => dapClientRef.current?.disconnect()}
           />
         ))}
       </div>
@@ -965,6 +1091,7 @@ interface CellViewProps {
   textMuted: string;
   isSelected: boolean;
   onRun: (code?: string) => void;
+  onDebug?: () => void;
   onDelete: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
@@ -974,14 +1101,34 @@ interface CellViewProps {
   onSelect: () => void;
   onModelReady?: (model: monacoLib.editor.ITextModel) => void;
   onModelDispose?: () => void;
+  /** Line numbers (1-indexed) that have active breakpoints for this cell. */
+  breakpoints?: Set<number>;
+  /** Called when the user clicks the gutter margin to toggle a breakpoint. */
+  onBreakpointToggle?: (line: number) => void;
+  /** True while execution is paused at a breakpoint in this cell. */
+  debugStopped?: boolean;
+  /** Variable snapshot captured when paused at a breakpoint. */
+  debugVariables?: DebugVariable[];
+  /** Called when the user clicks Continue in the debug variables panel. */
+  onDebugContinue?: () => void;
+  onDebugStepOver?: () => void;
+  onDebugStepInto?: () => void;
+  onDebugStop?: () => void;
 }
 
 function CellView({
   tabId, cell, isFirst, isLast, kernelReady, isDark, border, bgRaised, textMuted,
-  isSelected, onRun, onDelete, onMoveUp, onMoveDown, onSourceChange, onKindChange, onAddAfter, onSelect, onModelReady, onModelDispose,
+  isSelected, onRun, onDebug, onDelete, onMoveUp, onMoveDown, onSourceChange, onKindChange,
+  onAddAfter, onSelect, onModelReady, onModelDispose,
+  breakpoints = new Set(), onBreakpointToggle,
+  debugStopped = false, debugVariables = [], onDebugContinue,
+  onDebugStepOver, onDebugStepInto, onDebugStop,
 }: CellViewProps) {
   const [focused, setFocused] = useState(false);
   const accentColor = isDark ? "#40c8fc" : "#0969da";
+
+  // Decorations collection for breakpoint glyphs in the Monaco gutter.
+  const decorationsRef = useRef<monacoLib.editor.IEditorDecorationsCollection | null>(null);
 
   // ── Monaco editor setup ───────────────────────────────────────────────────
   const editorRef       = useRef<any>(null);
@@ -989,6 +1136,20 @@ function CellView({
   const onSelectRef     = useRef(onSelect);
   useEffect(() => { onRunRef.current = onRun; }, [onRun]);
   useEffect(() => { onSelectRef.current = onSelect; }, [onSelect]);
+
+  // Sync breakpoint decorations into the Monaco editor whenever the set changes.
+  useEffect(() => {
+    if (!decorationsRef.current) return;
+    decorationsRef.current.set(
+      Array.from(breakpoints).map((line) => ({
+        range: new monacoLib.Range(line, 1, line, 1),
+        options: {
+          glyphMarginClassName: "thaw-debug-breakpoint",
+          glyphMarginHoverMessage: { value: `Breakpoint at line ${line}` },
+        },
+      })),
+    );
+  }, [breakpoints]);
 
   const [editorHeight, setEditorHeight] = useState(60);
 
@@ -1014,6 +1175,30 @@ function CellView({
           onModelDispose?.();
         });
       }
+
+      // Set up breakpoint glyph decorations collection.
+      decorationsRef.current = editor.createDecorationsCollection([]);
+      // Apply any breakpoints that were set before the editor mounted.
+      if (breakpoints.size > 0) {
+        decorationsRef.current.set(
+          Array.from(breakpoints).map((line) => ({
+            range: new monacoLib.Range(line, 1, line, 1),
+            options: {
+              glyphMarginClassName: "thaw-debug-breakpoint",
+              glyphMarginHoverMessage: { value: `Breakpoint at line ${line}` },
+            },
+          })),
+        );
+      }
+
+      // Toggle breakpoints on glyph-margin clicks.
+      editor.onMouseDown((e) => {
+        // MouseTargetType.GUTTER_GLYPH_MARGIN === 2
+        if (e.target.type === 2 && onBreakpointToggle) {
+          const line = e.target.position?.lineNumber;
+          if (line != null) onBreakpointToggle(line);
+        }
+      });
     }
 
     // Auto-size height to content.
@@ -1195,17 +1380,43 @@ function CellView({
 
           <div style={{ flex: 1 }} />
 
-          {/* Actions */}
-          <Tooltip title="Run cell (Shift+Enter) · Run selection (select text, then Shift+Enter)">
-            <Button
-              type="text"
-              size="small"
-              icon={cell.running ? <Spin size="small" /> : <PlayCircleOutlined />}
-              disabled={cell.kind === "markdown" || (cell.kind === "code" && !kernelReady)}
-              onClick={() => onRun()}
-              style={{ color: accentColor }}
-            />
-          </Tooltip>
+          {/* Run + optional debug dropdown (code cells only) */}
+          <Button.Group>
+            <Tooltip title="Run cell (Shift+Enter) · Run selection (select text, then Shift+Enter)">
+              <Button
+                type="text"
+                size="small"
+                icon={cell.running ? <Spin size="small" /> : <PlayCircleOutlined />}
+                disabled={cell.kind === "markdown" || (cell.kind === "code" && !kernelReady)}
+                onClick={() => onRun()}
+                style={{ color: accentColor }}
+              />
+            </Tooltip>
+            {cell.kind === "code" && onDebug && (
+              <Dropdown
+                trigger={["click"]}
+                disabled={!kernelReady || cell.running}
+                menu={{
+                  items: [
+                    {
+                      key: "debug",
+                      label: "Debug cell",
+                      icon: <BugOutlined />,
+                      onClick: onDebug,
+                    },
+                  ] satisfies MenuProps["items"],
+                }}
+              >
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<DownOutlined style={{ fontSize: 8 }} />}
+                  style={{ padding: "0 3px", color: textMuted }}
+                  disabled={!kernelReady || cell.running}
+                />
+              </Dropdown>
+            )}
+          </Button.Group>
           <Tooltip title="Move up">
             <Button type="text" size="small" icon={<CaretUpOutlined />}
               disabled={isFirst} onClick={onMoveUp} />
@@ -1236,7 +1447,9 @@ function CellView({
               fontSize: 13,
               fontFamily: "\"JetBrains Mono\", \"Fira Code\", \"Cascadia Code\", monospace",
               minimap: { enabled: false },
-              lineNumbers: "off",
+              lineNumbers: cell.kind === "code" ? "on" : "off",
+              lineNumbersMinChars: 2,
+              glyphMargin: cell.kind === "code",
               scrollBeyondLastLine: false,
               wordWrap: "on",
               scrollbar: {
@@ -1294,6 +1507,54 @@ function CellView({
                 />
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Debug variables panel — shown when paused at a breakpoint */}
+        {cell.kind === "code" && debugStopped && (
+          <div style={{
+            borderTop: `1px solid ${border}`,
+            background: isDark ? "#0d2137" : "#eff6ff",
+            padding: "8px 12px 10px",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: isDark ? "#7dd3fc" : "#1d4ed8" }}>
+                ⏸ Paused at breakpoint
+              </span>
+              <Space.Compact size="small">
+                <Button type="primary" onClick={onDebugContinue} title="Continue">▶</Button>
+                <Button onClick={onDebugStepOver} title="Step Over">⤵</Button>
+                <Button onClick={onDebugStepInto} title="Step Into">⬇</Button>
+                <Button danger onClick={onDebugStop} title="Stop Debugging">⏹</Button>
+              </Space.Compact>
+            </div>
+            {debugVariables.length === 0 ? (
+              <span style={{ fontSize: 11, color: textMuted }}>No local variables</span>
+            ) : (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {debugVariables.map((v) => (
+                  <div key={v.name} style={{
+                    background: isDark ? "#0a1929" : "#ffffff",
+                    border: `1px solid ${border}`,
+                    borderRadius: 4,
+                    padding: "2px 8px",
+                    fontFamily: "monospace",
+                    fontSize: 11,
+                    maxWidth: 320,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}>
+                    <span style={{ color: isDark ? "#93c5fd" : "#1e40af" }}>{v.name}</span>
+                    <span style={{ color: textMuted }}> = </span>
+                    <span style={{ color: isDark ? "#d4d4d4" : "#1f2328" }}>{v.value}</span>
+                    {v.type && (
+                      <span style={{ color: textMuted, fontSize: 10 }}> ({v.type})</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

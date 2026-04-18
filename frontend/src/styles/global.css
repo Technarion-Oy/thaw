@@ -199,3 +199,22 @@ body,
   --xy-controls-button-border-color: var(--border);
   --xy-controls-box-shadow: 0 0 0 1px var(--border);
 }
+
+/* ── Notebook debug breakpoint glyph ────────────────────────────────────── */
+.thaw-debug-breakpoint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.thaw-debug-breakpoint::before {
+  content: "⬤";
+  color: #e03131;
+  font-size: 11px;
+  line-height: 1;
+}
+
+/* Glyph margin — make it clickable-looking on hover */
+.monaco-editor .margin-view-overlays .cgmr {
+  cursor: pointer;
+}

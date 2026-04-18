@@ -138,6 +138,10 @@ export function CreateMigrationSnapshot(arg1, arg2, arg3, arg4, arg5, arg6, arg7
   return window['go']['main']['App']['CreateMigrationSnapshot'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 }
 
+export function DebugNotebookCell(arg1, arg2, arg3) {
+  return window['go']['main']['App']['DebugNotebookCell'](arg1, arg2, arg3);
+}
+
 export function DeleteOldestBackup(arg1, arg2, arg3) {
   return window['go']['main']['App']['DeleteOldestBackup'](arg1, arg2, arg3);
 }
@@ -758,6 +762,10 @@ export function SetUserPublicKey(arg1, arg2) {
   return window['go']['main']['App']['SetUserPublicKey'](arg1, arg2);
 }
 
+export function StartDapProxy() {
+  return window['go']['main']['App']['StartDapProxy']();
+}
+
 export function StartNotebookSession(arg1) {
   return window['go']['main']['App']['StartNotebookSession'](arg1);
 }
@@ -768,6 +776,10 @@ export function StartQuery(arg1) {
 
 export function StartShell(arg1, arg2) {
   return window['go']['main']['App']['StartShell'](arg1, arg2);
+}
+
+export function StopDapProxy() {
+  return window['go']['main']['App']['StopDapProxy']();
 }
 
 export function StopNotebookSession(arg1) {

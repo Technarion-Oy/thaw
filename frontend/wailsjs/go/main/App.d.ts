@@ -81,6 +81,8 @@ export function CreateDbtProject(arg1:dbt.CreateRequest,arg2:Record<string, Arra
 
 export function CreateMigrationSnapshot(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean,arg6:string,arg7:boolean):Promise<void>;
 
+export function DebugNotebookCell(arg1:string,arg2:string,arg3:string):Promise<main.NotebookCellOutput>;
+
 export function DeleteOldestBackup(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function DeleteVenvFolder():Promise<void>;
@@ -391,11 +393,15 @@ export function SetSessionVariable(arg1:string,arg2:string,arg3:string):Promise<
 
 export function SetUserPublicKey(arg1:string,arg2:string):Promise<void>;
 
+export function StartDapProxy():Promise<void>;
+
 export function StartNotebookSession(arg1:string):Promise<void>;
 
 export function StartQuery(arg1:string):Promise<string>;
 
 export function StartShell(arg1:string,arg2:string):Promise<void>;
+
+export function StopDapProxy():Promise<void>;
 
 export function StopNotebookSession(arg1:string):Promise<void>;
 
