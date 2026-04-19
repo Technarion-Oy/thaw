@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Modal, Input, Button, Tag, Spin, Segmented, Empty, Typography } from "antd";
+import { Modal, Input, Button, Tag, Spin, Segmented, Empty, Typography, Tooltip } from "antd";
 import { SearchOutlined, FunctionOutlined, EnterOutlined, SendOutlined, StopOutlined } from "@ant-design/icons";
 import { GetAllFunctionNames, GetFunctionTooltip, SendChatMessage, GetAIConfig, CancelChat } from "../../../wailsjs/go/main/App";
 import { ClipboardSetText, BrowserOpenURL } from "../../../wailsjs/runtime/runtime";
@@ -144,33 +144,8 @@ function FnChat({ fn, overloads }: FnChatProps) {
     );
   }
 
-  const docsUrl = fn.functionType === "BUILTIN"
-    ? `https://docs.snowflake.com/en/sql-reference/functions/${fn.functionName.toLowerCase()}`
-    : null;
-
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
-      {/* Docs link (built-ins only) */}
-      {docsUrl && (
-        <div style={{ padding: "6px 14px", borderBottom: "1px solid var(--border-color, #303030)", flexShrink: 0 }}>
-          <button
-            onClick={() => BrowserOpenURL(docsUrl)}
-            style={{
-              background: "none",
-              border: "none",
-              padding: 0,
-              cursor: "pointer",
-              fontSize: 12,
-              color: "var(--ant-color-primary, #177ddc)",
-              textDecoration: "underline",
-              textUnderlineOffset: 2,
-            }}
-          >
-            📖 Snowflake documentation for {fn.functionName}
-          </button>
-        </div>
-      )}
-
       {/* Message list */}
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "12px 14px" }}>
         {messages.length === 0 && !loading && (
@@ -235,6 +210,7 @@ export default function FunctionCatalogModal({ onClose }: Props) {
   const [overloads, setOverloads]     = useState<FnMeta[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [activeTab, setActiveTab]     = useState<"details" | "ask-ai">("details");
+  const latestSelectRef               = useRef<string | null>(null);
 
   // Load full name list once on mount
   useEffect(() => {
@@ -242,21 +218,21 @@ export default function FunctionCatalogModal({ onClose }: Props) {
       .then((fns) => {
         const sorted = [...fns].sort((a, b) => a.functionName.localeCompare(b.functionName));
         setAllFns(sorted);
-        if (sorted.length > 0) selectFn(sorted[0]);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function selectFn(fn: FnMeta) {
+    const name = fn.functionName;
+    latestSelectRef.current = name;
     setSelected(fn);
     setOverloads([]);
     setDetailLoading(true);
-    GetFunctionTooltip(fn.functionName)
-      .then((ol) => setOverloads(ol ?? []))
-      .catch(() => setOverloads([]))
-      .finally(() => setDetailLoading(false));
+    GetFunctionTooltip(name)
+      .then((ol)  => { if (latestSelectRef.current === name) setOverloads(ol ?? []); })
+      .catch(()   => { if (latestSelectRef.current === name) setOverloads([]); })
+      .finally(() => { if (latestSelectRef.current === name) setDetailLoading(false); });
   }
 
   const filtered = useMemo(() => {
@@ -264,9 +240,19 @@ export default function FunctionCatalogModal({ onClose }: Props) {
     return allFns.filter((fn) => {
       if (typeFilter === "BUILTIN" && fn.functionType !== "BUILTIN") return false;
       if (typeFilter === "UDF"     && fn.functionType !== "UDF")     return false;
-      return q === "" || fn.functionName.includes(q);
+      return q === "" || fn.functionName.startsWith(q);
     });
   }, [allFns, search, typeFilter]);
+
+  // Always select the first visible item when the filter changes.
+  // This also resets selection when the search is cleared, avoiding stale state.
+  useEffect(() => {
+    if (filtered.length === 0) return;
+    const first = filtered[0];
+    if (selected?.functionName === first.functionName && selected?.functionType === first.functionType) return;
+    selectFn(first);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered]);
 
   function handleInsert() {
     if (!selected) return;
@@ -336,10 +322,10 @@ export default function FunctionCatalogModal({ onClose }: Props) {
               </div>
             ) : (
               filtered.map((fn) => {
-                const isSelected = selected?.functionName === fn.functionName;
+                const isSelected = selected?.functionName === fn.functionName && selected?.functionType === fn.functionType;
                 return (
                   <div
-                    key={fn.functionName}
+                    key={fn.functionName + "::" + fn.functionType}
                     onClick={() => selectFn(fn)}
                     style={{
                       padding: "5px 10px",
@@ -476,15 +462,33 @@ export default function FunctionCatalogModal({ onClose }: Props) {
                       borderTop: "1px solid var(--border-color, #303030)",
                       display: "flex",
                       alignItems: "center",
-                      justifyContent: "space-between",
+                      justifyContent: "flex-end",
                       flexShrink: 0,
                     }}>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        Inserts <code style={{ fontSize: 11 }}>{selected.functionName}(</code> at the cursor position
-                      </Text>
-                      <Button type="primary" icon={<EnterOutlined />} onClick={handleInsert}>
-                        Insert into Editor
-                      </Button>
+                      {selected.functionType === "BUILTIN" && (
+                        <button
+                          onClick={() => BrowserOpenURL(`https://docs.snowflake.com/en/sql-reference/functions/${selected.functionName.toLowerCase()}`)}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            padding: 0,
+                            cursor: "pointer",
+                            fontSize: 12,
+                            color: "var(--ant-color-primary, #177ddc)",
+                            textDecoration: "underline",
+                            textUnderlineOffset: 2,
+                            textAlign: "left",
+                            marginRight: "auto",
+                          }}
+                        >
+                          📖 Snowflake documentation for {selected.functionName}
+                        </button>
+                      )}
+                      <Tooltip title={<>Inserts <code style={{ fontSize: 11 }}>{selected.functionName}(</code> at the cursor position</>}>
+                        <Button type="primary" icon={<EnterOutlined />} onClick={handleInsert}>
+                          Insert into Editor
+                        </Button>
+                      </Tooltip>
                     </div>
                   </div>
                 )}
