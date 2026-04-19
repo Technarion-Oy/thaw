@@ -70,5 +70,5 @@ jobs:
           # 3. Upload the generic version.txt (to track current latest)
           aws s3 cp version.txt s3://thaw-s3-bucket-for-website/release/version.txt
           
-          # 4. Upload the changelog with the version in the name (e.g., CHANGELOG-v0.1.0.md)
-          aws s3 cp CHANGELOG.md s3://thaw-s3-bucket-for-website/release/CHANGELOG-${VERSION}.md
+          # 4. Upload the changelog
+          aws s3 cp CHANGELOG.md s3://thaw-s3-bucket-for-website/release/CHANGELOG.md
