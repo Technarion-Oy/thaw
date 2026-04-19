@@ -53,7 +53,3 @@ jobs:
           # We swap out the default GITHUB_TOKEN for our App Token.
           # This gives the semantic-release API calls the power to bypass the ruleset.
           GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
-          GIT_AUTHOR_NAME: github-actions[bot]
-          GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
-          GIT_COMMITTER_NAME: github-actions[bot]
-          GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
