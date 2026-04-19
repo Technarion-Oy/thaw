@@ -17,9 +17,12 @@ jobs:
   release:
     name: Semantic Release
     runs-on: ubuntu-latest
+    # Export the new version so the build jobs know what to compile
+    outputs:
+      published: ${{ steps.check-version.outputs.published }}
+      version: ${{ steps.check-version.outputs.version }}
 
     steps:
-      # 1. GENERATE THE BOT TOKEN FIRST
       - name: Generate Bot Token
         id: generate-token
         uses: actions/create-github-app-token@v1
@@ -27,11 +30,15 @@ jobs:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
-      # 2. CHECKOUT WITH THE BOT TOKEN
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ steps.generate-token.outputs.token }}
+
+      # Capture the current latest tag before semantic-release runs
+      - name: Get pre-release tag
+        id: pre-release
+        run: echo "old_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo '')" >> $GITHUB_OUTPUT
 
       - uses: actions/setup-node@v4
         with:
@@ -41,34 +48,163 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # 3. RUN SEMANTIC RELEASE
       - name: Run semantic-release
         run: npx semantic-release ${{ inputs.dry_run && '--dry-run' || '' }}
         env:
           GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
 
-      # 4. CONFIGURE AWS CREDENTIALS
+      # Check if a new tag was created to conditionally trigger S3 upload and builds
+      - name: Check if new release was created
+        id: check-version
+        run: |
+          NEW_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo '')
+          if [ "$NEW_TAG" != "${{ steps.pre-release.outputs.old_tag }}" ] && [ "${{ inputs.dry_run }}" != "true" ]; then
+            echo "published=true" >> $GITHUB_OUTPUT
+            # Strip the 'v' prefix for the binaries (v1.2.3 -> 1.2.3)
+            echo "version=${NEW_TAG#v}" >> $GITHUB_OUTPUT 
+          else
+            echo "published=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Configure AWS Credentials
-        # We only run this if it's NOT a dry run, so we don't upload fake/test data to S3
-        if: ${{ !inputs.dry_run }}
+        if: ${{ steps.check-version.outputs.published == 'true' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: eu-north-1 
 
-      # 5. UPLOAD TO S3
       - name: Upload Changelog and Version to S3
-        if: ${{ !inputs.dry_run }}
+        if: ${{ steps.check-version.outputs.published == 'true' }}
         run: |
-          # 1. Get the latest tag (e.g., v0.1.0)
-          VERSION=$(git describe --tags --abbrev=0)
-          
-          # 2. Save the version to a local file
-          echo $VERSION > version.txt
-          
-          # 3. Upload the generic version.txt (to track current latest)
+          echo "v${{ steps.check-version.outputs.version }}" > version.txt
           aws s3 cp version.txt s3://thaw-s3-bucket-for-website/release/version.txt
-          
-          # 4. Upload the changelog
           aws s3 cp CHANGELOG.md s3://thaw-s3-bucket-for-website/release/CHANGELOG.md
+
+  build:
+    name: Build — ${{ matrix.platform }}-${{ matrix.arch }}
+    needs: release
+    # Only run the build matrix if a new release was actually published
+    if: ${{ needs.release.outputs.published == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: darwin
+            arch: arm64
+          - os: windows-latest
+            platform: windows
+            arch: amd64
+          - os: ubuntu-22.04
+            platform: linux
+            arch: amd64
+
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Explicitly checkout the newly created tag
+          ref: v${{ needs.release.outputs.version }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
+
+      - name: Download Go dependencies
+        run: go mod download
+
+      - name: Install garble (macOS & Linux only)
+        if: matrix.platform != 'windows'
+        run: go install mvdan.cc/garble@latest
+
+      - name: Install NSIS (Windows only)
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          choco install nsis
+          echo "C:\Program Files (x86)\NSIS" >> $GITHUB_PATH
+
+      # ── Standard Wails Builds ──────────────────────────────────────────────
+
+      - name: Build (macOS & Linux)
+        if: matrix.platform != 'windows'
+        run: wails build -clean -ldflags "-s -w -X main.Version=${{ needs.release.outputs.version }}" -trimpath
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+
+      - name: Build & Package Installer (Windows)
+        if: matrix.platform == 'windows'
+        run: wails build -clean -nsis -ldflags "-s -w -X main.Version=${{ needs.release.outputs.version }}" -trimpath
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+
+      # ── Rebuild Go binary with garble ──────────────────────────────────────
+
+      - name: Obfuscate binary (macOS)
+        if: matrix.platform == 'darwin'
+        env:
+          CGO_LDFLAGS: -framework UniformTypeIdentifiers
+        run: |
+          garble build \
+            -tags desktop,production \
+            -trimpath -ldflags="-s -w -X main.Version=${{ needs.release.outputs.version }}" \
+            -o build/bin/thaw.app/Contents/MacOS/thaw \
+            .
+
+      - name: Obfuscate binary (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          garble build \
+            -tags desktop,production \
+            -trimpath -ldflags="-s -w -X main.Version=${{ needs.release.outputs.version }}" \
+            -o build/bin/thaw \
+            .
+
+      # ── Rename / package output ────────────────────────────────────────────
+      
+      - name: Package macOS app bundle
+        if: matrix.platform == 'darwin'
+        run: |
+          cd build/bin
+          zip -r "thaw-${{ needs.release.outputs.version }}-darwin-arm64.zip" thaw.app
+
+      - name: Rename Windows binaries
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          Move-Item build/bin/thaw.exe "build/bin/thaw-${{ needs.release.outputs.version }}-windows-amd64-portable.exe"
+          Move-Item build/bin/thaw-amd64-installer.exe "build/bin/thaw-${{ needs.release.outputs.version }}-windows-amd64-installer.exe"
+
+      - name: Rename Linux binary
+        if: matrix.platform == 'linux'
+        run: mv build/bin/thaw "build/bin/thaw-${{ needs.release.outputs.version }}-linux-amd64"
+
+      # ── Attach binaries to GitHub Release ──────────────────────────────────
+      
+      - name: Upload binaries to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.release.outputs.version }}
+          append_body: false
+          fail_on_unmatched_files: true
+          files: build/bin/thaw-${{ needs.release.outputs.version }}-*
