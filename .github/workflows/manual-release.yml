@@ -8,8 +8,6 @@ on:
         type: boolean
         default: false
 
-# You can optionally remove the permissions block below if you strictly use the App token, 
-# but it is safe to leave it as a fallback for the default GITHUB_TOKEN.
 permissions:
   contents: write
   issues: write
@@ -22,7 +20,6 @@ jobs:
 
     steps:
       # 1. GENERATE THE BOT TOKEN FIRST
-      # We must do this before checkout so Git uses the App's identity.
       - name: Generate Bot Token
         id: generate-token
         uses: actions/create-github-app-token@v1
@@ -34,8 +31,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # We swap out your old secrets.RELEASE_TOKEN for the App token.
-          # Because this App has 'Workflows: Read and write', it WILL trigger build.yml!
           token: ${{ steps.generate-token.outputs.token }}
 
       - uses: actions/setup-node@v4
@@ -46,10 +41,29 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # 3. RUN SEMANTIC RELEASE WITH THE BOT TOKEN
+      # 3. RUN SEMANTIC RELEASE
       - name: Run semantic-release
         run: npx semantic-release ${{ inputs.dry_run && '--dry-run' || '' }}
         env:
-          # We swap out the default GITHUB_TOKEN for our App Token.
-          # This gives the semantic-release API calls the power to bypass the ruleset.
           GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+
+      # 4. CONFIGURE AWS CREDENTIALS
+      - name: Configure AWS Credentials
+        # We only run this if it's NOT a dry run, so we don't upload fake/test data to S3
+        if: ${{ !inputs.dry_run }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-north-1 
+
+      # 5. UPLOAD TO S3
+      - name: Upload Changelog and Version to S3
+        if: ${{ !inputs.dry_run }}
+        run: |
+          # Extract the latest Git tag (the new version) and save it to a text file
+          git describe --tags --abbrev=0 > version.txt
+          
+          # Upload both the CHANGELOG.md and the new version.txt to your S3 bucket
+          aws s3 cp CHANGELOG.md s3://thaw-s3-bucket-for-website/release/CHANGELOG.md
+          aws s3 cp version.txt s3://thaw-s3-bucket-for-website/release/version.txt
