@@ -151,6 +151,72 @@ export namespace config {
 	        this.syntaxMode = source["syntaxMode"];
 	    }
 	}
+	export class PipRegistryCredential {
+	    registry: string;
+	    username: string;
+	    password: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PipRegistryCredential(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.registry = source["registry"];
+	        this.username = source["username"];
+	        this.password = source["password"];
+	    }
+	}
+	export class PipRegistryConfig {
+	    primaryURL: string;
+	    additionalRegistries: string[];
+	    behavior: string;
+	    credentials: PipRegistryCredential[];
+	    enableProxy: boolean;
+	    proxyURL: string;
+	    proxyUsername: string;
+	    proxyPassword: string;
+	    proxyBypassHosts: string;
+	    trustedHosts: string;
+	    customCACertPath: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PipRegistryConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.primaryURL = source["primaryURL"];
+	        this.additionalRegistries = source["additionalRegistries"];
+	        this.behavior = source["behavior"];
+	        this.credentials = this.convertValues(source["credentials"], PipRegistryCredential);
+	        this.enableProxy = source["enableProxy"];
+	        this.proxyURL = source["proxyURL"];
+	        this.proxyUsername = source["proxyUsername"];
+	        this.proxyPassword = source["proxyPassword"];
+	        this.proxyBypassHosts = source["proxyBypassHosts"];
+	        this.trustedHosts = source["trustedHosts"];
+	        this.customCACertPath = source["customCACertPath"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 
 }
 

@@ -56,6 +56,32 @@ type SnowparkConfig struct {
 	PythonPath string `json:"pythonPath"` // explicit python binary for venv creation; empty = auto-detect
 }
 
+// PipRegistryCredential holds Basic Auth credentials for a single pip registry URL.
+// The password is stored in config.json (mode 0600) and embedded into the URL
+// at pip-call time — no keychain or .netrc file writes are performed.
+type PipRegistryCredential struct {
+	Registry string `json:"registry"` // URL the credentials apply to
+	Username string `json:"username"`
+	Password string `json:"password"` // stored in config.json (0600); embedded in URL at pip-call time
+}
+
+// PipRegistryConfig holds corporate/private pip registry settings.
+// When PrimaryURL is non-empty the configured flags are appended automatically
+// to every pip install invocation.
+type PipRegistryConfig struct {
+	PrimaryURL           string                  `json:"primaryURL"`
+	AdditionalRegistries []string                `json:"additionalRegistries"`
+	Behavior             string                  `json:"behavior"`         // "override" | "extra"
+	Credentials          []PipRegistryCredential `json:"credentials"`
+	EnableProxy          bool                    `json:"enableProxy"`
+	ProxyURL             string                  `json:"proxyURL"`
+	ProxyUsername        string                  `json:"proxyUsername"`
+	ProxyPassword        string                  `json:"proxyPassword"`
+	ProxyBypassHosts     string                  `json:"proxyBypassHosts"` // comma-separated
+	TrustedHosts         string                  `json:"trustedHosts"`    // comma-separated
+	CustomCACertPath     string                  `json:"customCACertPath"`
+}
+
 // EditorPrefs holds SQL formatting preferences for the Monaco editor.
 type EditorPrefs struct {
 	// KeywordCase controls casing for SQL reserved words (SELECT, FROM, …).
@@ -135,14 +161,15 @@ func DefaultFeatureFlags() FeatureFlags {
 
 // AppConfig is the on-disk configuration for Thaw.
 type AppConfig struct {
-	Connections            []Connection   `json:"connections"`
-	Git                    GitConfig      `json:"git"`
-	AI                     AIConfig       `json:"ai"`
-	Snowpark               SnowparkConfig `json:"snowpark"`
-	Editor                 EditorPrefs    `json:"editor"`
-	NotebookPrefs          NotebookPrefs  `json:"notebookPrefs"`
-	SnowflakeCLIConfigPath string         `json:"snowflakeCliConfigPath"`
-	FeatureFlags           FeatureFlags   `json:"featureFlags"`
+	Connections            []Connection      `json:"connections"`
+	Git                    GitConfig         `json:"git"`
+	AI                     AIConfig          `json:"ai"`
+	Snowpark               SnowparkConfig    `json:"snowpark"`
+	PipRegistry            PipRegistryConfig `json:"pipRegistry"`
+	Editor                 EditorPrefs       `json:"editor"`
+	NotebookPrefs          NotebookPrefs     `json:"notebookPrefs"`
+	SnowflakeCLIConfigPath string            `json:"snowflakeCliConfigPath"`
+	FeatureFlags           FeatureFlags      `json:"featureFlags"`
 }
 
 // configPath returns the absolute path to the application configuration file,

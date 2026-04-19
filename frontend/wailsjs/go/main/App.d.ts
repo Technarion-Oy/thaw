@@ -187,6 +187,8 @@ export function GetObjectDependencies(arg1:string,arg2:string,arg3:string,arg4:s
 
 export function GetObjectProperties(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<main.PropertyPair>>;
 
+export function GetPipRegistryConfig():Promise<config.PipRegistryConfig>;
+
 export function GetProcedureParams(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.ProcParam>>;
 
 export function GetQueryHistory(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:number,arg8:boolean):Promise<Array<main.QueryHistoryRow>>;
@@ -327,6 +329,8 @@ export function ParseJoinTableRefs(arg1:string):Promise<Array<sqleditor.JoinTabl
 
 export function ParseSignatureParams(arg1:string):Promise<Array<sqleditor.SignatureParam>>;
 
+export function PickCACertFile():Promise<string>;
+
 export function PickDataFile():Promise<string>;
 
 export function PickDataFileByFormat(arg1:string):Promise<string>;
@@ -350,6 +354,8 @@ export function ReadFile(arg1:string):Promise<string>;
 export function ReadFileHead(arg1:string,arg2:number):Promise<string>;
 
 export function ReadNotebook(arg1:string):Promise<string>;
+
+export function ResetPipRegistryConfig():Promise<void>;
 
 export function ResizeShell(arg1:number,arg2:number):Promise<void>;
 
@@ -380,6 +386,8 @@ export function SaveNotebook(arg1:string,arg2:string):Promise<void>;
 export function SaveNotebookBreakpoints(arg1:string,arg2:Record<string, Array<number>>):Promise<void>;
 
 export function SaveNotebookPrefs(arg1:config.NotebookPrefs):Promise<void>;
+
+export function SavePipRegistryConfig(arg1:config.PipRegistryConfig):Promise<void>;
 
 export function SaveSnowparkConfig(arg1:string):Promise<void>;
 

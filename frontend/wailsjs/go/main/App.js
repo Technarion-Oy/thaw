@@ -350,6 +350,10 @@ export function GetObjectProperties(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['GetObjectProperties'](arg1, arg2, arg3, arg4);
 }
 
+export function GetPipRegistryConfig() {
+  return window['go']['main']['App']['GetPipRegistryConfig']();
+}
+
 export function GetProcedureParams(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['GetProcedureParams'](arg1, arg2, arg3, arg4);
 }
@@ -630,6 +634,10 @@ export function ParseSignatureParams(arg1) {
   return window['go']['main']['App']['ParseSignatureParams'](arg1);
 }
 
+export function PickCACertFile() {
+  return window['go']['main']['App']['PickCACertFile']();
+}
+
 export function PickDataFile() {
   return window['go']['main']['App']['PickDataFile']();
 }
@@ -676,6 +684,10 @@ export function ReadFileHead(arg1, arg2) {
 
 export function ReadNotebook(arg1) {
   return window['go']['main']['App']['ReadNotebook'](arg1);
+}
+
+export function ResetPipRegistryConfig() {
+  return window['go']['main']['App']['ResetPipRegistryConfig']();
 }
 
 export function ResizeShell(arg1, arg2) {
@@ -736,6 +748,10 @@ export function SaveNotebookBreakpoints(arg1, arg2) {
 
 export function SaveNotebookPrefs(arg1) {
   return window['go']['main']['App']['SaveNotebookPrefs'](arg1);
+}
+
+export function SavePipRegistryConfig(arg1) {
+  return window['go']['main']['App']['SavePipRegistryConfig'](arg1);
 }
 
 export function SaveSnowparkConfig(arg1) {

@@ -14,8 +14,10 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   LoadingOutlined,
+  SettingOutlined,
   WarningOutlined,
 } from "@ant-design/icons";
+import PipRegistryModal from "./PipRegistryModal";
 import {
   IsAppleSilicon,
   GetSnowparkConfig,
@@ -112,8 +114,9 @@ function venvSteps(venvPath: string, withPandas: boolean, pythonBin: string): St
 }
 
 export default function SnowparkSetupModal({ onClose }: Props) {
-  const [backend, setBackend]       = useState<Backend>("conda");
-  const [withPandas, setWithPandas] = useState(true);
+  const [backend, setBackend]         = useState<Backend>("conda");
+  const [withPandas, setWithPandas]   = useState(true);
+  const [registryOpen, setRegistryOpen] = useState(false);
   const [isAppleSilicon, setIsAppleSilicon] = useState(false);
   const [venvPath, setVenvPath]     = useState("");
   const [pythonPath, setPythonPath] = useState("");
@@ -422,6 +425,17 @@ export default function SnowparkSetupModal({ onClose }: Props) {
           </div>
         )}
 
+        {/* ── pip Registry ────────────────────────────────────────────── */}
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <Button
+            size="small"
+            icon={<SettingOutlined />}
+            onClick={() => setRegistryOpen(true)}
+          >
+            Configure pip Registry…
+          </Button>
+        </div>
+
         <Divider style={{ margin: "2px 0" }} />
 
         {/* ── Apple Silicon warning (conda only) ─────────────────────────── */}
@@ -666,6 +680,8 @@ export default function SnowparkSetupModal({ onClose }: Props) {
         )}
 
       </Space>
+
+      <PipRegistryModal open={registryOpen} onClose={() => setRegistryOpen(false)} />
     </Modal>
   );
 }
