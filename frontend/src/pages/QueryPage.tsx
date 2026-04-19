@@ -133,27 +133,20 @@ export default function QueryPage() {
   useEffect(() => { setSplitPct(editorSplit); }, [editorSplit]);
   useEffect(() => { setSplitW(splitEditorWidth); }, [splitEditorWidth]);
 
-  // Load current role/warehouse on mount.
+  // Load current user/region/url on mount.
   useEffect(() => {
-    loadContext(activeTabId);
     GetCurrentUser().then(setCurrentUser).catch(() => {});
     GetCurrentRegion().then(setCurrentRegion).catch(() => {});
     GetSnowsightURL().then(setSnowsightUrl).catch(() => {});
   }, []);
 
-  // When the active tab changes, restore its saved context (or load it from Go).
-  const prevTabIdRef = useRef<string>(activeTabId);
+  // When the active tab changes (including on mount), immediately reflect its
+  // context in the toolbar: setActiveTab gives instant feedback from cache,
+  // loadContext fetches fresh state from Go.
   useEffect(() => {
-    if (activeTabId === prevTabIdRef.current) return;
-    prevTabIdRef.current = activeTabId;
-    const { tabContexts, setActiveTab } = useSessionStore.getState();
-    if (tabContexts[activeTabId]) {
-      setActiveTab(activeTabId);
-    } else {
-      // Init the session eagerly so the connection is ready before the first query.
-      InitTabSession(activeTabId).catch(() => {});
-      loadContext(activeTabId);
-    }
+    const store = useSessionStore.getState();
+    store.setActiveTab(activeTabId);
+    store.loadContext(activeTabId);
   }, [activeTabId]);
 
   // Track tab additions/removals to init new sessions and close stale ones.

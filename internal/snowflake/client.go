@@ -590,9 +590,16 @@ type SessionContext struct {
 func (c *Client) GetSessionContext(ctx context.Context) (SessionContext, error) {
 	row := c.db.QueryRowContext(ctx,
 		"SELECT CURRENT_ROLE(), CURRENT_WAREHOUSE(), CURRENT_DATABASE(), CURRENT_SCHEMA()")
-	var sc SessionContext
-	if err := row.Scan(&sc.Role, &sc.Warehouse, &sc.Database, &sc.Schema); err != nil {
+	// Warehouse, database and schema can be SQL NULL when not set in the session.
+	var role, warehouse, database, schema sql.NullString
+	if err := row.Scan(&role, &warehouse, &database, &schema); err != nil {
 		return SessionContext{}, err
+	}
+	sc := SessionContext{
+		Role:      role.String,
+		Warehouse: warehouse.String,
+		Database:  database.String,
+		Schema:    schema.String,
 	}
 	c.connector.mu.Lock()
 	c.connector.db = sc.Database

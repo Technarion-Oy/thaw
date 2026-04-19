@@ -101,7 +101,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       };
       const prev = get();
       const isActiveTab = useQueryStore.getState().activeTabId === tabId;
-      const dbChanged = isActiveTab && ctx.database && ctx.database !== prev.database;
+      const dbChanged = isActiveTab && ctx.database !== prev.database;
       set((s) => ({
         tabContexts: { ...s.tabContexts, [tabId]: tabCtx },
         ...(isActiveTab ? {
