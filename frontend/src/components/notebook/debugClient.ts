@@ -38,8 +38,9 @@ export class DapClient {
 
   /** Called when execution pauses at a breakpoint.
    *  @param variables  Local variables captured at the paused frame.
-   *  @param currentLine  1-indexed source line where execution is paused (from stackTrace). */
-  onStopped?: (variables: DebugVariable[], currentLine?: number) => void;
+   *  @param currentLine  1-indexed source line where execution is paused (from stackTrace).
+   *  @param currentFile  Absolute path of the source file where execution is paused. */
+  onStopped?: (variables: DebugVariable[], currentLine?: number, currentFile?: string) => void;
   /** Called when execution resumes after Continue. */
   onContinued?: () => void;
 
@@ -213,8 +214,9 @@ export class DapClient {
       const topFrame = stackTrace?.stackFrames?.[0];
       const frameId: number | undefined = topFrame?.id;
       const currentLine: number | undefined = topFrame?.line;
+      const currentFile: string | undefined = topFrame?.source?.path;
       if (frameId === undefined) {
-        this.onStopped?.([], currentLine);
+        this.onStopped?.([], currentLine, currentFile);
         return;
       }
 
@@ -224,7 +226,7 @@ export class DapClient {
       const scope = (scopesResp?.scopes ?? []).find((s: any) => s.name === "Locals")
         ?? scopesResp?.scopes?.[0];
       if (!scope) {
-        this.onStopped?.([]);
+        this.onStopped?.([], undefined, currentFile);
         return;
       }
 
@@ -243,7 +245,7 @@ export class DapClient {
           type: String(v.type || ""),
         }));
 
-      this.onStopped?.(variables, currentLine);
+      this.onStopped?.(variables, currentLine, currentFile);
     } catch {
       this.onStopped?.([], undefined);
     }

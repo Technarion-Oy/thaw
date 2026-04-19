@@ -322,10 +322,15 @@ export default function NotebookTab({ tabId }: Props) {
   useEffect(() => { notebookPathRef.current = tab?.path ?? ""; }, [tab?.path]);
   // Active debug session state (null = not debugging)
   const [debugState, setDebugState] = useState<{
+    /** ID of the cell whose editor should show the highlight and debug panel.
+     *  Normally the cell being debugged; switches to another cell when the
+     *  debugger steps into a function defined there. */
     cellId: string;
     stopped: boolean;
     variables: DebugVariable[];
     currentLine?: number;
+    /** True when paused inside a function from a different cell (not the debug cell itself). */
+    inOtherCell?: boolean;
   } | null>(null);
   const dapClientRef = useRef<DapClient | null>(null);
 
@@ -512,7 +517,7 @@ export default function NotebookTab({ tabId }: Props) {
     if (!kernelReady) return;
     patchCell(cell.id, { running: true, outputs: [], images: [], sqlResult: null });
     try {
-      const out = await RunNotebookCell(tabId, codeToRun);
+      const out = await RunNotebookCell(tabId, cell.id, codeToRun);
       const outputs: CellOutput[] = [];
       if (out.stdout) outputs.push({ type: "stdout", text: out.stdout });
       if (out.stderr) outputs.push({ type: "stderr", text: out.stderr });
@@ -622,14 +627,29 @@ export default function NotebookTab({ tabId }: Props) {
       // sentinel that was appended to the debug file by Go.
       const cellLineCount = cell.source.split("\n").length;
 
-      dap.onStopped = (variables, currentLine) => {
-        // If the debugger landed on the sentinel line (beyond the cell source),
-        // auto-continue so the user never sees a phantom pause.
-        if (currentLine != null && currentLine > cellLineCount) {
+      dap.onStopped = (variables, currentLine, currentFile) => {
+        // Only auto-continue for the trailing sentinel line when we are still
+        // inside the debug cell's own file.  If we stepped into a function
+        // defined in another cell, currentFile will differ and we must NOT
+        // auto-continue (the line number comparison would be meaningless there).
+        const inDebugFile = !currentFile || currentFile === debugFilepath;
+        if (inDebugFile && currentLine != null && currentLine > cellLineCount) {
           dap.continue();
           return;
         }
-        setDebugState({ cellId: cell.id, stopped: true, variables, currentLine });
+
+        // When paused inside a function from another cell, extract that cell's
+        // ID from the temp-file path (/tmp/thaw_cell_<cellId>.py) and move the
+        // line highlight + debug controls into that cell's editor so the user
+        // can see exactly which line they are on.
+        let pausedCellId = cell.id;
+        const inOtherCell = !inDebugFile;
+        if (inOtherCell && currentFile) {
+          const m = currentFile.match(/thaw_cell_([^/\\]+)\.py$/);
+          if (m) pausedCellId = m[1];
+        }
+
+        setDebugState({ cellId: pausedCellId, stopped: true, variables, currentLine, inOtherCell });
       };
       dap.onContinued = () => {
         setDebugState({ cellId: cell.id, stopped: false, variables: [], currentLine: undefined });
@@ -961,6 +981,7 @@ export default function NotebookTab({ tabId }: Props) {
             debugStopped={debugState?.cellId === cell.id && debugState.stopped}
             debugVariables={debugState?.cellId === cell.id ? debugState.variables : []}
             debugCurrentLine={debugState?.cellId === cell.id && debugState.stopped ? debugState.currentLine : undefined}
+            debugInOtherCell={debugState?.cellId === cell.id && debugState.stopped && !!debugState.inOtherCell}
             onDebugContinue={() => dapClientRef.current?.continue()}
             onDebugStepOver={() => dapClientRef.current?.stepOver()}
             onDebugStepInto={() => dapClientRef.current?.stepInto()}
@@ -1173,6 +1194,8 @@ interface CellViewProps {
   debugVariables?: DebugVariable[];
   /** 1-indexed line number where the debugger is currently paused (from DAP stackTrace). */
   debugCurrentLine?: number;
+  /** True when execution is paused inside a function that lives in a different cell's file. */
+  debugInOtherCell?: boolean;
   /** Called when the user clicks Continue in the debug variables panel. */
   onDebugContinue?: () => void;
   onDebugStepOver?: () => void;
@@ -1185,7 +1208,7 @@ function CellView({
   isSelected, onRun, onDebug, onDelete, onMoveUp, onMoveDown, onSourceChange, onKindChange,
   onAddAfter, onSelect, onModelReady, onModelDispose,
   breakpoints = new Set(), onBreakpointToggle,
-  debugStopped = false, debugVariables = [], debugCurrentLine,
+  debugStopped = false, debugVariables = [], debugCurrentLine, debugInOtherCell = false,
   onDebugContinue, onDebugStepOver, onDebugStepInto, onDebugStop,
 }: CellViewProps) {
   const [focused, setFocused] = useState(false);
@@ -1616,7 +1639,7 @@ function CellView({
                 }}
               >
                 <span style={{ fontSize: 9, display: "inline-block", transform: varPanelCollapsed ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform 0.15s" }}>▼</span>
-                ⏸ Paused{debugCurrentLine != null ? ` at line ${debugCurrentLine}` : " at breakpoint"}
+                ⏸ {debugInOtherCell ? "Paused inside function" : `Paused${debugCurrentLine != null ? ` at line ${debugCurrentLine}` : " at breakpoint"}`}
               </button>
               <Space.Compact size="small">
                 <Button type="primary" onClick={onDebugContinue} title="Continue">▶</Button>

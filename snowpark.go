@@ -45,6 +45,7 @@ const kernelSqlMarker = "<<<THAW_SQL>>>"
 const kernelSyntaxMarker = "<<<THAW_SYNTAX>>>"
 const kernelDebugMarker = "<<<THAW_DEBUG_RUN>>>"
 const kernelDebugResultMarker = "<<<THAW_DEBUG_RESULT>>>"
+const kernelExecMarker = "<<<THAW_EXEC_CELL>>>"
 
 // Global state for the Debug Adapter Protocol (DAP) connection
 var (
@@ -64,6 +65,7 @@ SENTINEL   = "<<<THAW_CELL_DONE>>>"
 RUN_MARKER = "<<<THAW_RUN>>>"
 DEBUG_MARKER = "<<<THAW_DEBUG_RUN>>>"
 DEBUG_RESULT_MARKER = "<<<THAW_DEBUG_RESULT>>>"
+EXEC_MARKER = "<<<THAW_EXEC_CELL>>>"
 
 # Force matplotlib to use the non-interactive Agg backend so that show()
 # does not try to open a GUI window.
@@ -555,6 +557,23 @@ while True:
         continue
 
     # ── Standard Execution ────────────────────────────────────────────────────
+    # Optionally prefixed with EXEC_MARKER + cellId so the code is written to
+    # a physical temp file.  This gives any functions defined here a real
+    # co_filename so debugpy can step into them from a later debug session.
+    _exec_filepath = None
+    if code.startswith(EXEC_MARKER + "\n"):
+        import tempfile as _tempfile
+        parts = code.split("\n", 2)
+        _exec_cell_id = parts[1].strip() if len(parts) > 1 else None
+        code = parts[2] if len(parts) > 2 else ""
+        if _exec_cell_id:
+            try:
+                _exec_filepath = os.path.join(_tempfile.gettempdir(), f"thaw_cell_{_exec_cell_id}.py")
+                with open(_exec_filepath, "w", encoding="utf-8") as _f:
+                    _f.write(code)
+            except Exception:
+                _exec_filepath = None
+
     buf_out = io.StringIO()
     buf_err = io.StringIO()
     # Drain any deferred session-init errors into the first cell's stderr.
@@ -564,15 +583,17 @@ while True:
     sys.stdout = buf_out
     sys.stderr = buf_err
     err_info   = None
-    
+
     try:
         # Obfuscation: AST Security Check. Prevent users from reassigning session or accessing internal dicts.
         tree = compile(code, "<cell>", "exec", flags=_ast.PyCF_ONLY_AST)
         for node in _ast.walk(tree):
             if isinstance(node, _ast.Name) and node.id in ['_THAW_INTERNAL_STATE', 'kernelRPC', 'SENTINEL', 'RUN_MARKER']:
                 raise NameError(f"Access denied: '{node.id}' is a reserved internal variable.")
-                         
-        bytecode = compile(tree, "<cell>", "exec")
+
+        # Compile with the real file path when available so that functions
+        # defined here have a valid co_filename that debugpy can step into.
+        bytecode = compile(tree, _exec_filepath or "<cell>", "exec")
         exec(bytecode, g)
     except Exception:
         err_info = traceback.format_exc()
@@ -1750,7 +1771,7 @@ func (a *App) StartNotebookSession(tabId string) error {
 
 // RunNotebookCell sends code to the kernel and returns its output.
 // StartNotebookSession must have been called for this tabId first.
-func (a *App) RunNotebookCell(tabId string, code string) (NotebookCellOutput, error) {
+func (a *App) RunNotebookCell(tabId string, cellId string, code string) (NotebookCellOutput, error) {
 	val, ok := notebookSessions.Load(tabId)
 	if !ok {
 		return NotebookCellOutput{}, fmt.Errorf("no kernel for tab %s — call StartNotebookSession first", tabId)
@@ -1759,8 +1780,12 @@ func (a *App) RunNotebookCell(tabId string, code string) (NotebookCellOutput, er
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Write code block + run marker.
-	if _, err := fmt.Fprintf(s.stdin, "%s\n%s\n", code, kernelRunMarker); err != nil {
+	// Write code block + run marker, prefixed with the exec marker + cellId so
+	// the kernel can write the code to a physical temp file.  This gives any
+	// functions defined in this cell a real co_filename that debugpy can
+	// navigate to when stepping in from a later debug session.
+	payload := fmt.Sprintf("%s\n%s\n%s\n%s\n", kernelExecMarker, cellId, code, kernelRunMarker)
+	if _, err := fmt.Fprint(s.stdin, payload); err != nil {
 		return NotebookCellOutput{}, fmt.Errorf("write to kernel: %w", err)
 	}
 
