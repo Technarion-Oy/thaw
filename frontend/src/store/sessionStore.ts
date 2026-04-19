@@ -20,6 +20,14 @@ import {
   UseDatabase,
   UseSchema,
 } from "../../wailsjs/go/main/App";
+import { useQueryStore } from "./queryStore";
+
+export interface TabSessionContext {
+  role: string;
+  warehouse: string;
+  database: string;
+  schema: string;
+}
 
 interface SessionState {
   role: string;
@@ -42,7 +50,11 @@ interface SessionState {
   switchingSchema: boolean;
   error: string | null;
 
-  loadContext: () => Promise<void>;
+  // Per-tab session contexts.
+  tabContexts: Record<string, TabSessionContext>;
+
+  loadContext: (tabId: string) => Promise<void>;
+  setActiveTab: (tabId: string) => void;
   loadRoles: () => Promise<void>;
   loadWarehouses: () => Promise<void>;
   loadDatabases: () => Promise<void>;
@@ -75,23 +87,49 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   switchingSchema: false,
   error: null,
 
-  loadContext: async () => {
+  tabContexts: {},
+
+  loadContext: async (tabId: string) => {
     set({ loadingContext: true });
     try {
-      const ctx = await GetSessionContext();
-      const prev = get();
-      const dbChanged = ctx.database && ctx.database !== prev.database;
-      set({
-        role: ctx.role,
-        warehouse: ctx.warehouse,
+      const ctx = await GetSessionContext(tabId);
+      const tabCtx: TabSessionContext = {
+        role: ctx.role ?? "",
+        warehouse: ctx.warehouse ?? "",
         database: ctx.database ?? "",
         schema: ctx.schema ?? "",
-        ...(dbChanged ? { schemas: [], schemasForDatabase: "" } : {}),
-      });
+      };
+      const prev = get();
+      const isActiveTab = useQueryStore.getState().activeTabId === tabId;
+      const dbChanged = isActiveTab && ctx.database && ctx.database !== prev.database;
+      set((s) => ({
+        tabContexts: { ...s.tabContexts, [tabId]: tabCtx },
+        ...(isActiveTab ? {
+          role: ctx.role ?? "",
+          warehouse: ctx.warehouse ?? "",
+          database: ctx.database ?? "",
+          schema: ctx.schema ?? "",
+          ...(dbChanged ? { schemas: [], schemasForDatabase: "" } : {}),
+        } : {}),
+      }));
     } catch {
       // silently ignore — might not be connected yet
     } finally {
       set({ loadingContext: false });
+    }
+  },
+
+  setActiveTab: (tabId: string) => {
+    const ctx = get().tabContexts[tabId];
+    if (ctx) {
+      const dbChanged = ctx.database !== get().database;
+      set({
+        role: ctx.role,
+        warehouse: ctx.warehouse,
+        database: ctx.database,
+        schema: ctx.schema,
+        ...(dbChanged ? { schemas: [], schemasForDatabase: "" } : {}),
+      });
     }
   },
 
@@ -150,10 +188,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   switchRole: async (role) => {
+    const tabId = useQueryStore.getState().activeTabId;
     set({ switchingRole: true, error: null });
     try {
-      await UseRole(role);
-      set({ role });
+      await UseRole(tabId, role);
+      set((s) => ({
+        role,
+        tabContexts: { ...s.tabContexts, [tabId]: { ...(s.tabContexts[tabId] ?? { role: "", warehouse: "", database: "", schema: "" }), role } },
+      }));
     } catch (e) {
       set({ error: String(e) });
     } finally {
@@ -162,10 +204,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   switchWarehouse: async (warehouse) => {
+    const tabId = useQueryStore.getState().activeTabId;
     set({ switchingWarehouse: true, error: null });
     try {
-      await UseWarehouse(warehouse);
-      set({ warehouse });
+      await UseWarehouse(tabId, warehouse);
+      set((s) => ({
+        warehouse,
+        tabContexts: { ...s.tabContexts, [tabId]: { ...(s.tabContexts[tabId] ?? { role: "", warehouse: "", database: "", schema: "" }), warehouse } },
+      }));
     } catch (e) {
       set({ error: String(e) });
     } finally {
@@ -174,10 +220,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   switchDatabase: async (database) => {
+    const tabId = useQueryStore.getState().activeTabId;
     set({ switchingDatabase: true, error: null });
     try {
-      await UseDatabase(database);
-      set({ database, schemas: [], schemasForDatabase: "", schema: "" });
+      await UseDatabase(tabId, database);
+      set((s) => ({
+        database,
+        schemas: [],
+        schemasForDatabase: "",
+        schema: "",
+        tabContexts: { ...s.tabContexts, [tabId]: { ...(s.tabContexts[tabId] ?? { role: "", warehouse: "", database: "", schema: "" }), database, schema: "" } },
+      }));
     } catch (e) {
       set({ error: String(e) });
     } finally {
@@ -186,10 +239,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   switchSchema: async (schema) => {
+    const tabId = useQueryStore.getState().activeTabId;
     set({ switchingSchema: true, error: null });
     try {
-      await UseSchema(schema);
-      set({ schema });
+      await UseSchema(tabId, schema);
+      set((s) => ({
+        schema,
+        tabContexts: { ...s.tabContexts, [tabId]: { ...(s.tabContexts[tabId] ?? { role: "", warehouse: "", database: "", schema: "" }), schema } },
+      }));
     } catch (e) {
       set({ error: String(e) });
     } finally {

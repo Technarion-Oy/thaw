@@ -14,7 +14,7 @@ import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip,
 import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, GetSqlStatementRanges } from "../../wailsjs/go/main/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, GetSqlStatementRanges, InitTabSession, CloseTabSession } from "../../wailsjs/go/main/App";
 import type { main } from "../../wailsjs/go/models";
 import SessionPropertiesModal from "../components/common/SessionPropertiesModal";
 import SnippetsModal from "../components/snippets/SnippetsModal";
@@ -135,11 +135,46 @@ export default function QueryPage() {
 
   // Load current role/warehouse on mount.
   useEffect(() => {
-    loadContext();
+    loadContext(activeTabId);
     GetCurrentUser().then(setCurrentUser).catch(() => {});
     GetCurrentRegion().then(setCurrentRegion).catch(() => {});
     GetSnowsightURL().then(setSnowsightUrl).catch(() => {});
   }, []);
+
+  // When the active tab changes, restore its saved context (or load it from Go).
+  const prevTabIdRef = useRef<string>(activeTabId);
+  useEffect(() => {
+    if (activeTabId === prevTabIdRef.current) return;
+    prevTabIdRef.current = activeTabId;
+    const { tabContexts, setActiveTab } = useSessionStore.getState();
+    if (tabContexts[activeTabId]) {
+      setActiveTab(activeTabId);
+    } else {
+      // Init the session eagerly so the connection is ready before the first query.
+      InitTabSession(activeTabId).catch(() => {});
+      loadContext(activeTabId);
+    }
+  }, [activeTabId]);
+
+  // Track tab additions/removals to init new sessions and close stale ones.
+  const tabs = useQueryStore((s) => s.tabs);
+  const prevTabIdsRef = useRef<Set<string>>(new Set(tabs.map((t) => t.id)));
+  useEffect(() => {
+    const currentIds = new Set(tabs.map((t) => t.id));
+    // New tabs.
+    currentIds.forEach((id) => {
+      if (!prevTabIdsRef.current.has(id)) {
+        InitTabSession(id).catch(() => {});
+      }
+    });
+    // Removed tabs.
+    prevTabIdsRef.current.forEach((id) => {
+      if (!currentIds.has(id)) {
+        CloseTabSession(id).catch(() => {});
+      }
+    });
+    prevTabIdsRef.current = currentIds;
+  }, [tabs]);
 
   // On mount, re-read file-backed tabs from disk so their content is fresh
   // after an app restart (they were persisted with cleared sql/savedSql).
@@ -158,12 +193,16 @@ export default function QueryPage() {
     });
   }, []);
 
-  // Keep the Snowpark kernel in sync with the shared session whenever role,
-  // warehouse, database or schema changes, or when switching to a notebook tab.
+  // Keep the Snowpark kernel in sync with the tab's session context whenever
+  // role, warehouse, database or schema changes, or when switching notebook tabs.
+  const tabContexts = useSessionStore((s) => s.tabContexts);
+  const activeTabCtx = tabContexts[activeTabId];
   useEffect(() => {
     if (!isNotebookTab) return;
-    NotebookUseContext(activeTabId, role, warehouse, database, schema).catch(() => {});
-  }, [role, warehouse, database, schema, activeTabId]);
+    const ctx = useSessionStore.getState().tabContexts[activeTabId] ?? { role, warehouse, database, schema };
+    NotebookUseContext(activeTabId, ctx.role, ctx.warehouse, ctx.database, ctx.schema).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTabCtx, activeTabId, isNotebookTab]);
 
   // Load AI config on mount
   useEffect(() => {
@@ -298,7 +337,7 @@ export default function QueryPage() {
     setRunning(true);
     try {
       // Phase 1: submit and get query ID.
-      const qid = await StartQuery(query);
+      const qid = await StartQuery(activeTabId, query);
       // For single-statement queries, commit the query ID synchronously so the
       // spinner shows it for at least one frame before results arrive.
       // For multi-statement (qid = ""), skip the overwrite — runningQueryId may
@@ -306,7 +345,7 @@ export default function QueryPage() {
       if (qid) flushSync(() => setRunningQueryId(qid));
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       // Phase 2: block until results are ready.
-      const res = await WaitForQueryResult();
+      const res = await WaitForQueryResult(activeTabId);
       setResult(res);
       const newId = crypto.randomUUID();
       setResultHistory((prev) => {
@@ -329,7 +368,7 @@ export default function QueryPage() {
       setIsCancelling(false);
       setStmtProgress(null);
       setActiveStmtIdx(null);
-      loadContext(); // refresh database/schema (and role/warehouse) after any USE command
+      loadContext(activeTabId); // refresh database/schema (and role/warehouse) after any USE command
     }
   };
 
@@ -338,7 +377,7 @@ export default function QueryPage() {
     cancelRequestedRef.current = true;
     setIsCancelling(true);
     try {
-      await CancelQuery();
+      await CancelQuery(activeTabId);
     } catch (_) {
       // ignore — WaitForQueryResult will return an error regardless
     }

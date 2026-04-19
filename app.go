@@ -48,6 +48,23 @@ import (
 	"thaw/internal/telemetry"
 )
 
+// tabSession holds the per-tab Snowflake client and the two-phase query
+// execution state that was previously global on App.
+type tabSession struct {
+	client             *snowflake.Client
+	queryMu            sync.Mutex
+	queryID            string
+	queryDone          chan struct{}
+	queryResult        *snowflake.QueryResult
+	queryErr           error
+	queryCancelFunc    context.CancelFunc
+	queryCancelCtxDone <-chan struct{}
+}
+
+// tabSessionInitMu serialises lazy creation of new tab sessions so that two
+// concurrent calls for the same tabId do not both open a connection.
+var tabSessionInitMu sync.Mutex
+
 // App is the main application struct. Methods bound here are callable from the frontend.
 type App struct {
 	ctx                 context.Context
@@ -61,14 +78,8 @@ type App struct {
 	logCleanup          func()             // closes the log rotation file on shutdown
 	savedWindowState    *WindowState       // non-nil when a persisted window state was loaded at launch
 
-	// Two-phase query execution (StartQuery / WaitForQueryResult).
-	queryMu            sync.Mutex
-	queryID            string
-	queryDone          chan struct{}
-	queryResult        *snowflake.QueryResult
-	queryErr           error
-	queryCancelFunc    context.CancelFunc // cancels the in-flight query context
-	queryCancelCtxDone <-chan struct{}    // closed when the in-flight query context is canceled
+	// Per-tab isolated Snowflake sessions.
+	tabSessions sync.Map // string (tabId) → *tabSession
 
 	// Embedded terminal (pseudo-terminal).
 	ptyMu  sync.Mutex
@@ -113,11 +124,69 @@ func (a *App) startup(ctx context.Context) {
 	}
 }
 
-// isQueryRunning reports whether a query submitted by StartQuery is still in flight.
+// isQueryRunning reports whether any tab has a query submitted by StartQuery still in flight.
 func (a *App) isQueryRunning() bool {
-	a.queryMu.Lock()
-	defer a.queryMu.Unlock()
-	return a.queryID != ""
+	found := false
+	a.tabSessions.Range(func(_, val any) bool {
+		ts := val.(*tabSession)
+		ts.queryMu.Lock()
+		if ts.queryID != "" {
+			found = true
+		}
+		ts.queryMu.Unlock()
+		return !found
+	})
+	return found
+}
+
+// getOrInitTabSession returns the existing tab session for tabId, or lazily
+// creates a new one (opening a fresh Snowflake connection that inherits the
+// current connect params).
+func (a *App) getOrInitTabSession(tabId string) (*tabSession, error) {
+	if val, ok := a.tabSessions.Load(tabId); ok {
+		return val.(*tabSession), nil
+	}
+	tabSessionInitMu.Lock()
+	defer tabSessionInitMu.Unlock()
+	// Double-check after acquiring the lock.
+	if val, ok := a.tabSessions.Load(tabId); ok {
+		return val.(*tabSession), nil
+	}
+	if a.connectParams == nil {
+		return nil, ErrNotConnected
+	}
+	client, err := snowflake.NewClient(a.ctx, *a.connectParams)
+	if err != nil {
+		return nil, err
+	}
+	ts := &tabSession{client: client}
+	a.tabSessions.Store(tabId, ts)
+	return ts, nil
+}
+
+// InitTabSession eagerly opens a dedicated Snowflake connection for the given
+// tab ID.  Calling this after Connect ensures the tab session exists before the
+// first query runs; subsequent calls for the same ID are no-ops.
+func (a *App) InitTabSession(tabId string) error {
+	_, err := a.getOrInitTabSession(tabId)
+	return err
+}
+
+// CloseTabSession cancels any in-flight query and closes the Snowflake
+// connection for the given tab, then removes it from the session map.
+// It is a no-op when no session exists for tabId.
+func (a *App) CloseTabSession(tabId string) {
+	val, ok := a.tabSessions.LoadAndDelete(tabId)
+	if !ok {
+		return
+	}
+	ts := val.(*tabSession)
+	ts.queryMu.Lock()
+	if ts.queryCancelFunc != nil {
+		ts.queryCancelFunc()
+	}
+	ts.queryMu.Unlock()
+	go ts.client.Close() //nolint:errcheck
 }
 
 // shutdown is called by the Wails runtime just before the application exits.
@@ -133,16 +202,26 @@ func (a *App) shutdown(_ context.Context) {
 	// Stop any running terminal process cleanly before the app exits.
 	a.StopShell() //nolint:errcheck
 
-	// Cancel any in-flight query so it stops consuming credits in Snowflake.
-	// CancelQuery issues SYSTEM$CANCEL_QUERY in a goroutine; give it a moment
-	// to fire before the process exits.
-	a.queryMu.Lock()
-	hasQuery := a.queryID != ""
-	a.queryMu.Unlock()
-	if hasQuery {
-		a.CancelQuery()
+	// Cancel any in-flight queries across all tab sessions so they stop
+	// consuming Snowflake credits.  CancelQuery issues SYSTEM$CANCEL_QUERY in
+	// a goroutine; give them a moment to fire before the process exits.
+	if a.isQueryRunning() {
+		var tabIds []string
+		a.tabSessions.Range(func(key, _ any) bool {
+			tabIds = append(tabIds, key.(string))
+			return true
+		})
+		for _, tid := range tabIds {
+			a.CancelQuery(tid)
+		}
 		time.Sleep(500 * time.Millisecond)
 	}
+
+	// Close all tab session clients asynchronously.
+	a.tabSessions.Range(func(_, val any) bool {
+		go val.(*tabSession).client.Close() //nolint:errcheck
+		return true
+	})
 
 	if a.client != nil {
 		// Close asynchronously — the gosnowflake driver sends an HTTP DELETE
@@ -736,13 +815,24 @@ func (a *App) PickDirectory() string {
 	return path
 }
 
-// Disconnect closes the active Snowflake connection.
+// Disconnect closes the active Snowflake connection and all per-tab sessions.
 func (a *App) Disconnect() error {
+	// Close all tab sessions first.
+	var tabIds []string
+	a.tabSessions.Range(func(key, _ any) bool {
+		tabIds = append(tabIds, key.(string))
+		return true
+	})
+	for _, tid := range tabIds {
+		a.CloseTabSession(tid)
+	}
+
 	if a.client == nil {
 		return nil
 	}
 	err := a.client.Close()
 	a.client = nil
+	a.connectParams = nil
 	telemetry.Track(telemetry.EventDisconnected, nil)
 	return err
 }
@@ -779,23 +869,24 @@ func (a *App) ExecuteQuery(sql string) (*snowflake.QueryResult, error) {
 // giving the frontend a chance to display the query ID in the loading spinner.
 // Call WaitForQueryResult afterwards to obtain the actual rows.
 // An in-flight query can be stopped with CancelQuery.
-func (a *App) StartQuery(sql string) (string, error) {
-	if a.client == nil {
-		return "", ErrNotConnected
+func (a *App) StartQuery(tabId string, sql string) (string, error) {
+	ts, err := a.getOrInitTabSession(tabId)
+	if err != nil {
+		return "", err
 	}
 
 	// Create a per-query cancellable context and replace any previous one.
 	ctx, cancel := context.WithCancel(a.ctx)
 
-	a.queryMu.Lock()
-	if a.queryCancelFunc != nil {
-		a.queryCancelFunc() // cancel any still-running previous query
+	ts.queryMu.Lock()
+	if ts.queryCancelFunc != nil {
+		ts.queryCancelFunc() // cancel any still-running previous query
 	}
-	a.queryCancelFunc = cancel
-	a.queryCancelCtxDone = ctx.Done()
-	a.queryDone = nil // clear stale channel from previous query
-	a.queryID = ""
-	a.queryMu.Unlock()
+	ts.queryCancelFunc = cancel
+	ts.queryCancelCtxDone = ctx.Done()
+	ts.queryDone = nil // clear stale channel from previous query
+	ts.queryID = ""
+	ts.queryMu.Unlock()
 
 	qidChan := make(chan string, 1)
 	ctx = sf.WithQueryIDChan(ctx, qidChan)
@@ -806,7 +897,7 @@ func (a *App) StartQuery(sql string) (string, error) {
 	// as soon as the query ID arrives (before results are ready).
 	var wg sync.WaitGroup
 	go func() {
-		result, err := a.client.Execute(ctx, sql, func(idx, total int, stmtQidChan <-chan string) {
+		result, err := ts.client.Execute(ctx, sql, func(idx, total int, stmtQidChan <-chan string) {
 			// Notify the frontend which statement is about to run.
 			wailsruntime.EventsEmit(a.ctx, "query:statement-start",
 				map[string]int{"index": idx, "total": total})
@@ -823,11 +914,11 @@ func (a *App) StartQuery(sql string) (string, error) {
 				select {
 				case qid := <-ch:
 					if qid != "" {
-						// Keep a.queryID up to date so WaitForQueryResult can
+						// Keep ts.queryID up to date so WaitForQueryResult can
 						// embed the last statement's query ID in the result.
-						a.queryMu.Lock()
-						a.queryID = qid
-						a.queryMu.Unlock()
+						ts.queryMu.Lock()
+						ts.queryID = qid
+						ts.queryMu.Unlock()
 						wailsruntime.EventsEmit(a.ctx, "query:statement-qid",
 							map[string]interface{}{"index": i, "queryID": qid})
 					}
@@ -836,12 +927,12 @@ func (a *App) StartQuery(sql string) (string, error) {
 			}(idx, stmtQidChan)
 		})
 		// Wait for every per-statement qid goroutine to finish before
-		// closing done, so WaitForQueryResult always reads a complete a.queryID.
+		// closing done, so WaitForQueryResult always reads a complete ts.queryID.
 		wg.Wait()
-		a.queryMu.Lock()
-		a.queryResult = result
-		a.queryErr = err
-		a.queryMu.Unlock()
+		ts.queryMu.Lock()
+		ts.queryResult = result
+		ts.queryErr = err
+		ts.queryMu.Unlock()
 		close(done)
 	}()
 
@@ -863,50 +954,55 @@ func (a *App) StartQuery(sql string) (string, error) {
 		return "", ctx.Err()
 	}
 
-	a.queryMu.Lock()
+	ts.queryMu.Lock()
 	// For single-statement queries, queryID comes from the outer qidChan
 	// (async mode) and should be stored.  For multi-statement queries the
-	// outer qidChan never fires (queryID = ""), so we leave a.queryID as-is:
+	// outer qidChan never fires (queryID = ""), so we leave ts.queryID as-is:
 	// the per-statement qid goroutines (guarded by wg.Wait before close(done))
-	// have already written the last statement's query ID into a.queryID.
+	// have already written the last statement's query ID into ts.queryID.
 	if queryID != "" {
-		a.queryID = queryID
+		ts.queryID = queryID
 	}
-	a.queryDone = done
-	a.queryMu.Unlock()
+	ts.queryDone = done
+	ts.queryMu.Unlock()
 
 	logger.L.Info("query started", "queryID", queryID)
 	telemetry.Track(telemetry.EventQueryStarted, nil)
 	return queryID, nil
 }
 
-// CancelQuery cancels the query currently in flight (started by StartQuery).
-// It is a no-op if no query is running. In addition to canceling the local
-// context, it issues SYSTEM$CANCEL_QUERY so that Snowflake stops the query
-// server-side and stops consuming credits.
-func (a *App) CancelQuery() {
-	a.queryMu.Lock()
-	cancel := a.queryCancelFunc
-	queryID := a.queryID
-	a.queryMu.Unlock()
+// CancelQuery cancels the query currently in flight for tabId (started by
+// StartQuery).  It is a no-op if no query is running for that tab.  In addition
+// to canceling the local context, it issues SYSTEM$CANCEL_QUERY so that
+// Snowflake stops the query server-side and stops consuming credits.
+func (a *App) CancelQuery(tabId string) {
+	val, ok := a.tabSessions.Load(tabId)
+	if !ok {
+		return
+	}
+	ts := val.(*tabSession)
+	ts.queryMu.Lock()
+	cancel := ts.queryCancelFunc
+	queryID := ts.queryID
+	ts.queryMu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
-	if queryID != "" && a.client != nil {
+	if queryID != "" && ts.client != nil {
 		logger.L.Info("canceling query", "queryID", queryID)
 		telemetry.Track(telemetry.EventQueryCancelled, nil)
 		go func() {
 			ctx, done := context.WithTimeout(a.ctx, 15*time.Second)
 			defer done()
-			if err := a.client.CancelSnowflakeQuery(ctx, queryID); err != nil {
+			if err := ts.client.CancelSnowflakeQuery(ctx, queryID); err != nil {
 				logger.L.Warn("SYSTEM$CANCEL_QUERY failed", "queryID", queryID, "err", err)
 			}
 		}()
 	}
 }
 
-// WaitForQueryResult blocks until the query submitted by StartQuery completes
-// and returns the result set with the query ID embedded.
+// WaitForQueryResult blocks until the query submitted by StartQuery for tabId
+// completes and returns the result set with the query ID embedded.
 //
 // If CancelQuery is called and the background goroutine does not finish within
 // a 2-second grace period (e.g. the gosnowflake driver stalls while draining
@@ -914,11 +1010,17 @@ func (a *App) CancelQuery() {
 // context.Canceled immediately so the UI can reset without waiting for the
 // driver to recover.  The background goroutine continues running and will clean
 // up on its own once the driver eventually releases the connection.
-func (a *App) WaitForQueryResult() (*snowflake.QueryResult, error) {
-	a.queryMu.Lock()
-	done := a.queryDone
-	ctxDone := a.queryCancelCtxDone
-	a.queryMu.Unlock()
+func (a *App) WaitForQueryResult(tabId string) (*snowflake.QueryResult, error) {
+	val, ok := a.tabSessions.Load(tabId)
+	if !ok {
+		return nil, fmt.Errorf("no query in progress")
+	}
+	ts := val.(*tabSession)
+
+	ts.queryMu.Lock()
+	done := ts.queryDone
+	ctxDone := ts.queryCancelCtxDone
+	ts.queryMu.Unlock()
 
 	if done == nil {
 		return nil, fmt.Errorf("no query in progress")
@@ -940,25 +1042,25 @@ func (a *App) WaitForQueryResult() (*snowflake.QueryResult, error) {
 			// Driver is stuck (Arrow chunk drain blocked on network I/O).
 			// Unblock the UI now; the goroutine will clean up asynchronously.
 			logger.L.Warn("query goroutine did not finish after cancellation; unblocking UI")
-			a.queryMu.Lock()
-			if a.queryCancelFunc != nil {
-				a.queryCancelFunc()
-				a.queryCancelFunc = nil
+			ts.queryMu.Lock()
+			if ts.queryCancelFunc != nil {
+				ts.queryCancelFunc()
+				ts.queryCancelFunc = nil
 			}
-			a.queryDone = nil
-			a.queryID = ""
-			a.queryCancelCtxDone = nil
-			a.queryMu.Unlock()
+			ts.queryDone = nil
+			ts.queryID = ""
+			ts.queryCancelCtxDone = nil
+			ts.queryMu.Unlock()
 			return nil, context.Canceled
 		}
 	}
 
-	a.queryMu.Lock()
-	result := a.queryResult
-	err := a.queryErr
+	ts.queryMu.Lock()
+	result := ts.queryResult
+	err := ts.queryErr
 	// Read queryID after done fires so multi-statement queries get the last
 	// per-statement qid (updated by wg-tracked goroutines before close(done)).
-	queryID := a.queryID
+	queryID := ts.queryID
 	// Snapshot whether the query was explicitly canceled by the user BEFORE
 	// calling queryCancelFunc: the cancel func also closes ctxDone, so
 	// checking after cleanup would always report "canceled".
@@ -969,14 +1071,14 @@ func (a *App) WaitForQueryResult() (*snowflake.QueryResult, error) {
 	default:
 	}
 	// Clean up so a subsequent call does not re-read stale state.
-	if a.queryCancelFunc != nil {
-		a.queryCancelFunc() // no-op if already canceled; ensures context resources are freed
-		a.queryCancelFunc = nil
+	if ts.queryCancelFunc != nil {
+		ts.queryCancelFunc() // no-op if already canceled; ensures context resources are freed
+		ts.queryCancelFunc = nil
 	}
-	a.queryDone = nil
-	a.queryID = ""
-	a.queryCancelCtxDone = nil
-	a.queryMu.Unlock()
+	ts.queryDone = nil
+	ts.queryID = ""
+	ts.queryCancelCtxDone = nil
+	ts.queryMu.Unlock()
 
 	if result != nil && queryID != "" {
 		result.QueryID = queryID
@@ -1003,12 +1105,14 @@ func (a *App) WaitForQueryResult() (*snowflake.QueryResult, error) {
 	return result, err
 }
 
-// GetSessionContext returns the currently active role, warehouse, database and schema.
-func (a *App) GetSessionContext() (snowflake.SessionContext, error) {
-	if a.client == nil {
-		return snowflake.SessionContext{}, ErrNotConnected
+// GetSessionContext returns the currently active role, warehouse, database and
+// schema for the given tab's isolated session.
+func (a *App) GetSessionContext(tabId string) (snowflake.SessionContext, error) {
+	ts, err := a.getOrInitTabSession(tabId)
+	if err != nil {
+		return snowflake.SessionContext{}, err
 	}
-	return a.client.GetSessionContext(a.ctx)
+	return ts.client.GetSessionContext(a.ctx)
 }
 
 // GetQuotedIdentifiersIgnoreCase returns true when the current session's
@@ -1581,36 +1685,40 @@ func (a *App) CanCreateIntegration() (bool, error) {
 	return a.client.CanCreateIntegration(a.ctx)
 }
 
-// UseRole switches the session to the given role.
-func (a *App) UseRole(role string) error {
-	if a.client == nil {
-		return ErrNotConnected
+// UseRole switches the given tab's isolated session to the specified role.
+func (a *App) UseRole(tabId string, role string) error {
+	ts, err := a.getOrInitTabSession(tabId)
+	if err != nil {
+		return err
 	}
-	return a.client.UseRole(a.ctx, role)
+	return ts.client.UseRole(a.ctx, role)
 }
 
-// UseWarehouse switches the session to the given warehouse.
-func (a *App) UseWarehouse(warehouse string) error {
-	if a.client == nil {
-		return ErrNotConnected
+// UseWarehouse switches the given tab's isolated session to the specified warehouse.
+func (a *App) UseWarehouse(tabId string, warehouse string) error {
+	ts, err := a.getOrInitTabSession(tabId)
+	if err != nil {
+		return err
 	}
-	return a.client.UseWarehouse(a.ctx, warehouse)
+	return ts.client.UseWarehouse(a.ctx, warehouse)
 }
 
-// UseDatabase switches the session to the given database.
-func (a *App) UseDatabase(database string) error {
-	if a.client == nil {
-		return ErrNotConnected
+// UseDatabase switches the given tab's isolated session to the specified database.
+func (a *App) UseDatabase(tabId string, database string) error {
+	ts, err := a.getOrInitTabSession(tabId)
+	if err != nil {
+		return err
 	}
-	return a.client.UseDatabase(a.ctx, database)
+	return ts.client.UseDatabase(a.ctx, database)
 }
 
-// UseSchema switches the session to the given schema.
-func (a *App) UseSchema(schema string) error {
-	if a.client == nil {
-		return ErrNotConnected
+// UseSchema switches the given tab's isolated session to the specified schema.
+func (a *App) UseSchema(tabId string, schema string) error {
+	ts, err := a.getOrInitTabSession(tabId)
+	if err != nil {
+		return err
 	}
-	return a.client.UseSchema(a.ctx, schema)
+	return ts.client.UseSchema(a.ctx, schema)
 }
 
 // GetCurrentRegion returns the result of SELECT CURRENT_REGION(), which

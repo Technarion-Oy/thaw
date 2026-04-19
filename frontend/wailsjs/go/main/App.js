@@ -94,8 +94,8 @@ export function CancelMigration() {
   return window['go']['main']['App']['CancelMigration']();
 }
 
-export function CancelQuery() {
-  return window['go']['main']['App']['CancelQuery']();
+export function CancelQuery(arg1) {
+  return window['go']['main']['App']['CancelQuery'](arg1);
 }
 
 export function CheckAvailableKeyTools() {
@@ -112,6 +112,10 @@ export function CheckSnowparkEnv() {
 
 export function CloneChildTask(arg1, arg2, arg3, arg4, arg5, arg6) {
   return window['go']['main']['App']['CloneChildTask'](arg1, arg2, arg3, arg4, arg5, arg6);
+}
+
+export function CloseTabSession(arg1) {
+  return window['go']['main']['App']['CloseTabSession'](arg1);
 }
 
 export function ComputeJoinOnConditions(arg1) {
@@ -374,8 +378,8 @@ export function GetScriptingCompletions(arg1, arg2) {
   return window['go']['main']['App']['GetScriptingCompletions'](arg1, arg2);
 }
 
-export function GetSessionContext() {
-  return window['go']['main']['App']['GetSessionContext']();
+export function GetSessionContext(arg1) {
+  return window['go']['main']['App']['GetSessionContext'](arg1);
 }
 
 export function GetSessionParameters() {
@@ -460,6 +464,10 @@ export function GitStatus(arg1) {
 
 export function ImportTableData(arg1) {
   return window['go']['main']['App']['ImportTableData'](arg1);
+}
+
+export function InitTabSession(arg1) {
+  return window['go']['main']['App']['InitTabSession'](arg1);
 }
 
 export function InstallCondaEnv() {
@@ -778,8 +786,8 @@ export function StartNotebookSession(arg1) {
   return window['go']['main']['App']['StartNotebookSession'](arg1);
 }
 
-export function StartQuery(arg1) {
-  return window['go']['main']['App']['StartQuery'](arg1);
+export function StartQuery(arg1, arg2) {
+  return window['go']['main']['App']['StartQuery'](arg1, arg2);
 }
 
 export function StartShell(arg1, arg2) {
@@ -822,20 +830,20 @@ export function UninstallEnvPackage(arg1) {
   return window['go']['main']['App']['UninstallEnvPackage'](arg1);
 }
 
-export function UseDatabase(arg1) {
-  return window['go']['main']['App']['UseDatabase'](arg1);
+export function UseDatabase(arg1, arg2) {
+  return window['go']['main']['App']['UseDatabase'](arg1, arg2);
 }
 
-export function UseRole(arg1) {
-  return window['go']['main']['App']['UseRole'](arg1);
+export function UseRole(arg1, arg2) {
+  return window['go']['main']['App']['UseRole'](arg1, arg2);
 }
 
-export function UseSchema(arg1) {
-  return window['go']['main']['App']['UseSchema'](arg1);
+export function UseSchema(arg1, arg2) {
+  return window['go']['main']['App']['UseSchema'](arg1, arg2);
 }
 
-export function UseWarehouse(arg1) {
-  return window['go']['main']['App']['UseWarehouse'](arg1);
+export function UseWarehouse(arg1, arg2) {
+  return window['go']['main']['App']['UseWarehouse'](arg1, arg2);
 }
 
 export function ValidateBareColumnRefs(arg1) {
@@ -858,8 +866,8 @@ export function VenvFolderExists() {
   return window['go']['main']['App']['VenvFolderExists']();
 }
 
-export function WaitForQueryResult() {
-  return window['go']['main']['App']['WaitForQueryResult']();
+export function WaitForQueryResult(arg1) {
+  return window['go']['main']['App']['WaitForQueryResult'](arg1);
 }
 
 export function WriteShell(arg1) {

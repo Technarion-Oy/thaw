@@ -1606,8 +1606,8 @@ func (a *App) RunNotebookCell(tabId string, code string) (NotebookCellOutput, er
 		}
 	}
 
-	// Sync session context changes back to the main connection (see syncKernelContext).
-	a.syncKernelContext(s, out.SessionContext)
+	// Sync session context changes back to the tab's isolated session.
+	a.syncKernelContext(tabId, s, out.SessionContext)
 
 	return out, nil
 }
@@ -1765,16 +1765,16 @@ func (a *App) DebugNotebookCell(tabId string, cellId string, code string) (Noteb
 		}
 	}
 
-	a.syncKernelContext(s, out.SessionContext)
+	a.syncKernelContext(tabId, s, out.SessionContext)
 
 	return out, nil
 }
 
 // syncKernelContext compares a newly-returned kernel context against the last
-// known context stored in s, applies any USE commands to the main connection,
-// emits a context-changed event when something changed, and updates s.lastCtx.
-// The caller must hold s.mu.
-func (a *App) syncKernelContext(s *notebookSession, ctx *NotebookSessionContext) {
+// known context stored in s, applies any USE commands to the tab's isolated
+// session, emits a context-changed event when something changed, and updates
+// s.lastCtx.  The caller must hold s.mu.
+func (a *App) syncKernelContext(tabId string, s *notebookSession, ctx *NotebookSessionContext) {
 	if ctx == nil {
 		return
 	}
@@ -1795,18 +1795,21 @@ func (a *App) syncKernelContext(s *notebookSession, ctx *NotebookSessionContext)
 		Database:  strip(s.lastCtx.Database),
 		Schema:    strip(s.lastCtx.Schema),
 	}
-	if newCtx != oldCtx && a.client != nil {
-		if newCtx.Role != oldCtx.Role && newCtx.Role != "" {
-			_ = a.client.UseRole(a.ctx, newCtx.Role)
-		}
-		if newCtx.Warehouse != oldCtx.Warehouse && newCtx.Warehouse != "" {
-			_ = a.client.UseWarehouse(a.ctx, newCtx.Warehouse)
-		}
-		if newCtx.Database != oldCtx.Database && newCtx.Database != "" {
-			_ = a.client.UseDatabase(a.ctx, newCtx.Database)
-		}
-		if newCtx.Schema != oldCtx.Schema && newCtx.Schema != "" {
-			_ = a.client.UseSchema(a.ctx, newCtx.Schema)
+	if newCtx != oldCtx {
+		if val, ok := a.tabSessions.Load(tabId); ok {
+			ts := val.(*tabSession)
+			if newCtx.Role != oldCtx.Role && newCtx.Role != "" {
+				_ = ts.client.UseRole(a.ctx, newCtx.Role)
+			}
+			if newCtx.Warehouse != oldCtx.Warehouse && newCtx.Warehouse != "" {
+				_ = ts.client.UseWarehouse(a.ctx, newCtx.Warehouse)
+			}
+			if newCtx.Database != oldCtx.Database && newCtx.Database != "" {
+				_ = ts.client.UseDatabase(a.ctx, newCtx.Database)
+			}
+			if newCtx.Schema != oldCtx.Schema && newCtx.Schema != "" {
+				_ = ts.client.UseSchema(a.ctx, newCtx.Schema)
+			}
 		}
 		s.lastCtx = newCtx
 		wailsruntime.EventsEmit(a.ctx, "notebook:session:context:changed", newCtx)
@@ -1852,7 +1855,7 @@ func (a *App) RunNotebookCellSql(tabId, sql string) (NotebookSqlResult, error) {
 		return NotebookSqlResult{}, fmt.Errorf("%s", *raw.Error)
 	}
 
-	a.syncKernelContext(s, raw.SessionContext)
+	a.syncKernelContext(tabId, s, raw.SessionContext)
 
 	rows := raw.Rows
 	if rows == nil {
