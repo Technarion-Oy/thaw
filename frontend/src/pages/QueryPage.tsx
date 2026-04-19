@@ -14,7 +14,7 @@ import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip,
 import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, GetSqlStatementRanges } from "../../wailsjs/go/main/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, GetSqlStatementRanges, InitTabSession, CloseTabSession } from "../../wailsjs/go/main/App";
 import type { main } from "../../wailsjs/go/models";
 import SessionPropertiesModal from "../components/common/SessionPropertiesModal";
 import SnippetsModal from "../components/snippets/SnippetsModal";
@@ -42,7 +42,7 @@ import { useSessionStore } from "../store/sessionStore";
 const { Text } = Typography;
 
 export default function QueryPage() {
-  const { sql, selectedSql, isRunning, error, setResult, setRunning, setError, markSaved, openScratch, openFile, setSql, openNotebook, openNotebookUnsaved, refreshFileTab, orphanFileTab } = useQueryStore();
+  const { sql, selectedSql, isRunning, error, setResult, setError, markSaved, openScratch, openFile, setSql, openNotebook, openNotebookUnsaved, refreshFileTab, orphanFileTab } = useQueryStore();
   const activeTabId    = useQueryStore((s) => s.activeTabId);
   const isNotebookTab  = useQueryStore((s) => (s.tabs.find((t) => t.id === s.activeTabId)?.kind ?? "sql") === "notebook");
   const activeDiff     = useQueryStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.diff ?? null);
@@ -104,7 +104,7 @@ export default function QueryPage() {
   // Stack of recently-closed tabs for ⌘⇧T / Ctrl+Shift+T reopen.
   const closedTabsRef = useRef<Array<{ path: string | null; title: string; sql: string; kind?: string }>>([]);
   const [sessionPropsOpen, setSessionPropsOpen] = useState(false);
-  const [closeConfirm, setCloseConfirm] = useState<{ tabId: string; title: string } | null>(null);
+  const [closeConfirm, setCloseConfirm] = useState<{ tabId: string; title: string; isRunning: boolean; isDirty: boolean } | null>(null);
   const [currentUser, setCurrentUser] = useState<string | null>(null);
   const [currentRegion, setCurrentRegion] = useState<string | null>(null);
   const [snowsightUrl, setSnowsightUrl] = useState<string | null>(null);
@@ -133,13 +133,41 @@ export default function QueryPage() {
   useEffect(() => { setSplitPct(editorSplit); }, [editorSplit]);
   useEffect(() => { setSplitW(splitEditorWidth); }, [splitEditorWidth]);
 
-  // Load current role/warehouse on mount.
+  // Load current user/region/url on mount.
   useEffect(() => {
-    loadContext();
     GetCurrentUser().then(setCurrentUser).catch(() => {});
     GetCurrentRegion().then(setCurrentRegion).catch(() => {});
     GetSnowsightURL().then(setSnowsightUrl).catch(() => {});
   }, []);
+
+  // When the active tab changes (including on mount), immediately reflect its
+  // context in the toolbar: setActiveTab gives instant feedback from cache,
+  // loadContext fetches fresh state from Go.
+  useEffect(() => {
+    const store = useSessionStore.getState();
+    store.setActiveTab(activeTabId);
+    store.loadContext(activeTabId);
+  }, [activeTabId]);
+
+  // Track tab additions/removals to init new sessions and close stale ones.
+  const tabs = useQueryStore((s) => s.tabs);
+  const prevTabIdsRef = useRef<Set<string>>(new Set(tabs.map((t) => t.id)));
+  useEffect(() => {
+    const currentIds = new Set(tabs.map((t) => t.id));
+    // New tabs.
+    currentIds.forEach((id) => {
+      if (!prevTabIdsRef.current.has(id)) {
+        InitTabSession(id).catch(() => {});
+      }
+    });
+    // Removed tabs.
+    prevTabIdsRef.current.forEach((id) => {
+      if (!currentIds.has(id)) {
+        CloseTabSession(id).catch(() => {});
+      }
+    });
+    prevTabIdsRef.current = currentIds;
+  }, [tabs]);
 
   // On mount, re-read file-backed tabs from disk so their content is fresh
   // after an app restart (they were persisted with cleared sql/savedSql).
@@ -158,12 +186,16 @@ export default function QueryPage() {
     });
   }, []);
 
-  // Keep the Snowpark kernel in sync with the shared session whenever role,
-  // warehouse, database or schema changes, or when switching to a notebook tab.
+  // Keep the Snowpark kernel in sync with the tab's session context whenever
+  // role, warehouse, database or schema changes, or when switching notebook tabs.
+  const tabContexts = useSessionStore((s) => s.tabContexts);
+  const activeTabCtx = tabContexts[activeTabId];
   useEffect(() => {
     if (!isNotebookTab) return;
-    NotebookUseContext(activeTabId, role, warehouse, database, schema).catch(() => {});
-  }, [role, warehouse, database, schema, activeTabId]);
+    const ctx = useSessionStore.getState().tabContexts[activeTabId] ?? { role, warehouse, database, schema };
+    NotebookUseContext(activeTabId, ctx.role, ctx.warehouse, ctx.database, ctx.schema).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTabCtx, activeTabId, isNotebookTab]);
 
   // Load AI config on mount
   useEffect(() => {
@@ -273,6 +305,10 @@ export default function QueryPage() {
   const runQuery = async (overrideSql?: string) => {
     const query = overrideSql ?? (selectedSql.trim() || sql.trim());
     if (!query) return;
+    // Capture the tab that owns this query execution. The user may switch tabs
+    // while the query runs; all state updates below use runTabId, not the
+    // (potentially stale) activeTabId.
+    const runTabId = activeTabId;
     cancelRequestedRef.current = false;
     isSelectionRunRef.current  = !overrideSql && selectedSql.trim() !== "";
     // For selection runs, find which full-buffer statement index the selection
@@ -295,10 +331,10 @@ export default function QueryPage() {
     setStmtProgress(null);
     setActiveStmtIdx(null);
     setResultPane("results");
-    setRunning(true);
+    useQueryStore.getState().setTabRunning(runTabId, true);
     try {
       // Phase 1: submit and get query ID.
-      const qid = await StartQuery(query);
+      const qid = await StartQuery(runTabId, query);
       // For single-statement queries, commit the query ID synchronously so the
       // spinner shows it for at least one frame before results arrive.
       // For multi-statement (qid = ""), skip the overwrite — runningQueryId may
@@ -306,7 +342,7 @@ export default function QueryPage() {
       if (qid) flushSync(() => setRunningQueryId(qid));
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       // Phase 2: block until results are ready.
-      const res = await WaitForQueryResult();
+      const res = await WaitForQueryResult(runTabId);
       setResult(res);
       const newId = crypto.randomUUID();
       setResultHistory((prev) => {
@@ -320,16 +356,20 @@ export default function QueryPage() {
     } catch (e) {
       // Suppress the error when the user explicitly cancelled — keep whatever
       // result was previously shown rather than replacing it with an error.
+      // Also suppress if the tab was closed while the query was running.
       if (!cancelRequestedRef.current) {
-        setError(String(e));
-        setHistoryId(null); // hide the grid; let the user re-select from history
+        const tabStillOpen = useQueryStore.getState().tabs.some((t) => t.id === runTabId);
+        if (tabStillOpen) {
+          setError(String(e));
+          setHistoryId(null); // hide the grid; let the user re-select from history
+        }
       }
     } finally {
-      setRunning(false);
+      useQueryStore.getState().setTabRunning(runTabId, false);
       setIsCancelling(false);
       setStmtProgress(null);
       setActiveStmtIdx(null);
-      loadContext(); // refresh database/schema (and role/warehouse) after any USE command
+      loadContext(runTabId); // refresh database/schema (and role/warehouse) after any USE command
     }
   };
 
@@ -338,7 +378,7 @@ export default function QueryPage() {
     cancelRequestedRef.current = true;
     setIsCancelling(true);
     try {
-      await CancelQuery();
+      await CancelQuery(activeTabId);
     } catch (_) {
       // ignore — WaitForQueryResult will return an error regardless
     }
@@ -502,15 +542,16 @@ export default function QueryPage() {
     }
   };
 
-  // Request to close a tab — shows a confirmation dialog if the tab has
-  // unsaved changes to a file on disk. Scratch tabs close without prompting.
+  // Request to close a tab — confirms if the tab has a running query or
+  // unsaved changes. Scratch tabs with no running query close without prompting.
   const requestClose = (tabId: string) => {
     const { tabs } = useQueryStore.getState();
     const tab = tabs.find((t) => t.id === tabId);
     if (!tab) return;
     const isDirty = tab.sql !== tab.savedSql;
-    if (isDirty) {
-      setCloseConfirm({ tabId, title: tab.title });
+    const isTabRunning = tab.isRunning ?? false;
+    if (isTabRunning || isDirty) {
+      setCloseConfirm({ tabId, title: tab.title, isRunning: isTabRunning, isDirty });
     } else {
       closedTabsRef.current.unshift({ path: tab.path, title: tab.title, sql: tab.sql, kind: tab.kind });
       if (closedTabsRef.current.length > 15) closedTabsRef.current.pop();
@@ -1453,17 +1494,22 @@ export default function QueryPage() {
 
       <Modal
         open={closeConfirm !== null}
-        title="Unsaved changes"
+        title={closeConfirm?.isRunning ? "Running query" : "Unsaved changes"}
         onCancel={() => setCloseConfirm(null)}
         footer={[
           <Button key="cancel" onClick={() => setCloseConfirm(null)}>
             Cancel
           </Button>,
+          // "Discard / Stop & Discard" — always shown
           <Button
             key="discard"
             danger
             onClick={() => {
               if (!closeConfirm) return;
+              if (closeConfirm.isRunning) {
+                // Fire-and-forget cancel; CloseTabSession (lifecycle effect) finishes cleanup.
+                CancelQuery(closeConfirm.tabId).catch(() => {});
+              }
               const { tabs } = useQueryStore.getState();
               const tab = tabs.find((t) => t.id === closeConfirm.tabId);
               if (tab) {
@@ -1474,32 +1520,43 @@ export default function QueryPage() {
               setCloseConfirm(null);
             }}
           >
-            Close without Saving
+            {closeConfirm?.isRunning ? (closeConfirm.isDirty ? "Stop & Discard" : "Stop & Close") : "Close without Saving"}
           </Button>,
-          <Button
-            key="save"
-            type="primary"
-            onClick={async () => {
-              if (!closeConfirm) return;
-              const saved = await saveTabById(closeConfirm.tabId);
-              if (saved) {
-                const { tabs } = useQueryStore.getState();
-                const tab = tabs.find((t) => t.id === closeConfirm.tabId);
-                if (tab) {
-                  closedTabsRef.current.unshift({ path: tab.path, title: tab.title, sql: tab.sql, kind: tab.kind });
-                  if (closedTabsRef.current.length > 15) closedTabsRef.current.pop();
+          // "Save" — only shown when there are unsaved changes
+          ...(closeConfirm?.isDirty ? [
+            <Button
+              key="save"
+              type="primary"
+              onClick={async () => {
+                if (!closeConfirm) return;
+                if (closeConfirm.isRunning) {
+                  CancelQuery(closeConfirm.tabId).catch(() => {});
                 }
-                useQueryStore.getState().closeTab(closeConfirm.tabId);
-                setCloseConfirm(null);
-              }
-            }}
-          >
-            Save
-          </Button>,
+                const saved = await saveTabById(closeConfirm.tabId);
+                if (saved) {
+                  const { tabs } = useQueryStore.getState();
+                  const tab = tabs.find((t) => t.id === closeConfirm.tabId);
+                  if (tab) {
+                    closedTabsRef.current.unshift({ path: tab.path, title: tab.title, sql: tab.sql, kind: tab.kind });
+                    if (closedTabsRef.current.length > 15) closedTabsRef.current.pop();
+                  }
+                  useQueryStore.getState().closeTab(closeConfirm.tabId);
+                  setCloseConfirm(null);
+                }
+              }}
+            >
+              {closeConfirm?.isRunning ? "Stop & Save" : "Save"}
+            </Button>,
+          ] : []),
         ]}
       >
         <p>
-          <strong>{closeConfirm?.title}</strong> has unsaved changes. Do you want to save before closing?
+          {closeConfirm?.isRunning && closeConfirm.isDirty
+            ? <><strong>{closeConfirm.title}</strong> has a running query and unsaved changes. Stop the query and close?</>
+            : closeConfirm?.isRunning
+            ? <><strong>{closeConfirm.title}</strong> has a running query. Stop the query and close?</>
+            : <><strong>{closeConfirm?.title}</strong> has unsaved changes. Do you want to save before closing?</>
+          }
         </p>
       </Modal>
     </div>

@@ -59,7 +59,7 @@ export function CancelExport():Promise<void>;
 
 export function CancelMigration():Promise<void>;
 
-export function CancelQuery():Promise<void>;
+export function CancelQuery(arg1:string):Promise<void>;
 
 export function CheckAvailableKeyTools():Promise<Array<string>>;
 
@@ -68,6 +68,8 @@ export function CheckPythonSyntax(arg1:string,arg2:string,arg3:string):Promise<A
 export function CheckSnowparkEnv():Promise<main.SnowparkCheckResult>;
 
 export function CloneChildTask(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean,arg6:Array<string>):Promise<void>;
+
+export function CloseTabSession(arg1:string):Promise<void>;
 
 export function ComputeJoinOnConditions(arg1:sqleditor.JoinOnSuggestionsReq):Promise<Array<sqleditor.JoinCondition>>;
 
@@ -199,7 +201,7 @@ export function GetSchemaForeignKeys(arg1:string,arg2:string):Promise<Array<snow
 
 export function GetScriptingCompletions(arg1:string,arg2:number):Promise<sqleditor.ScriptingCompletionResult>;
 
-export function GetSessionContext():Promise<snowflake.SessionContext>;
+export function GetSessionContext(arg1:string):Promise<snowflake.SessionContext>;
 
 export function GetSessionParameters():Promise<Array<main.SessionParam>>;
 
@@ -242,6 +244,8 @@ export function GitPull(arg1:gitrepo.PullParams):Promise<void>;
 export function GitStatus(arg1:string):Promise<gitrepo.RepoStatus>;
 
 export function ImportTableData(arg1:snowflake.ImportTableParams):Promise<snowflake.ImportTableResult>;
+
+export function InitTabSession(arg1:string):Promise<void>;
 
 export function InstallCondaEnv():Promise<void>;
 
@@ -401,7 +405,7 @@ export function StartDapProxy():Promise<void>;
 
 export function StartNotebookSession(arg1:string):Promise<void>;
 
-export function StartQuery(arg1:string):Promise<string>;
+export function StartQuery(arg1:string,arg2:string):Promise<string>;
 
 export function StartShell(arg1:string,arg2:string):Promise<void>;
 
@@ -423,13 +427,13 @@ export function TestAIModel(arg1:string,arg2:string,arg3:string,arg4:number,arg5
 
 export function UninstallEnvPackage(arg1:string):Promise<void>;
 
-export function UseDatabase(arg1:string):Promise<void>;
+export function UseDatabase(arg1:string,arg2:string):Promise<void>;
 
-export function UseRole(arg1:string):Promise<void>;
+export function UseRole(arg1:string,arg2:string):Promise<void>;
 
-export function UseSchema(arg1:string):Promise<void>;
+export function UseSchema(arg1:string,arg2:string):Promise<void>;
 
-export function UseWarehouse(arg1:string):Promise<void>;
+export function UseWarehouse(arg1:string,arg2:string):Promise<void>;
 
 export function ValidateBareColumnRefs(arg1:sqleditor.ValidateBareColsRequest):Promise<Array<sqleditor.DiagMarker>>;
 
@@ -441,6 +445,6 @@ export function ValidateTablesExist(arg1:sqleditor.ValidateTablesExistRequest):P
 
 export function VenvFolderExists():Promise<boolean>;
 
-export function WaitForQueryResult():Promise<snowflake.QueryResult>;
+export function WaitForQueryResult(arg1:string):Promise<snowflake.QueryResult>;
 
 export function WriteShell(arg1:string):Promise<void>;

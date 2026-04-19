@@ -460,13 +460,14 @@ export default function NotebookTab({ tabId }: Props) {
 
   // ── sync session context changes from Python cells back to the toolbar ────
   // When a Python cell runs session.sql("USE DATABASE X"), the Go backend syncs
-  // the change to the main connection and emits this event so the toolbar reflects it.
+  // the change to the tab's isolated session and emits this event so the toolbar
+  // reflects it.
   useEffect(() => {
     const off = EventsOn("notebook:session:context:changed", () => {
-      loadContext();
+      loadContext(tabId);
     });
     return off;
-  }, [loadContext]);
+  }, [loadContext, tabId]);
 
   // ── helpers ───────────────────────────────────────────────────────────────
 
@@ -503,7 +504,7 @@ export default function NotebookTab({ tabId }: Props) {
           outputs: [{ type: "error", text: String(e) }],
         });
       } finally {
-        loadContext(); // refresh toolbar after USE commands
+        loadContext(tabId); // refresh toolbar after USE commands
       }
       return;
     }
