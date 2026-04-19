@@ -42,6 +42,7 @@ export interface Tab {
   result: QueryResult | null;
   error: string | null;
   diff?: TabDiff | null; // populated for diff tabs; absent for regular SQL tabs
+  isRunning?: boolean;   // per-tab running state; never persisted
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -112,6 +113,7 @@ interface QueryState {
   setSelectedSql: (selected: string) => void;
   setResult: (result: QueryResult) => void;
   setRunning: (isRunning: boolean) => void;
+  setTabRunning: (tabId: string, running: boolean) => void;
   setError: (error: string | null) => void;
   executeWith: (sql: string) => Promise<void>;
   executeInNewTab: (sql: string) => void;
@@ -152,6 +154,7 @@ export const useQueryStore = create<QueryState>()(
         currentFile: target.path,
         result: target.result,
         error: target.error,
+        isRunning: target.isRunning ?? false,
       };
     }),
 
@@ -364,6 +367,7 @@ export const useQueryStore = create<QueryState>()(
           currentFile: nextTab.path,
           result: nextTab.result,
           error: nextTab.error,
+          isRunning: nextTab.isRunning ?? false,
         };
       }
 
@@ -403,6 +407,13 @@ export const useQueryStore = create<QueryState>()(
     })),
 
   setRunning: (isRunning) => set({ isRunning }),
+
+  setTabRunning: (tabId, running) =>
+    set((state) => ({
+      // Update flat isRunning only when the tab being updated is the active one.
+      isRunning: state.activeTabId === tabId ? running : state.isRunning,
+      tabs: patchTab(state.tabs, tabId, { isRunning: running }),
+    })),
 
   setError: (error) =>
     set((state) => ({
@@ -485,6 +496,7 @@ export const useQueryStore = create<QueryState>()(
   partialize: (state) => ({
     tabs: state.tabs.map((t) => ({
       ...t,
+      isRunning: false,  // never persist running state
       result: null,
       diff: null,
       sql:      (t.kind === "notebook" && t.path) ? "" : t.sql,
