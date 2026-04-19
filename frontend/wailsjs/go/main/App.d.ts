@@ -139,6 +139,8 @@ export function GetAllDataTypes():Promise<Array<snowflake.DataTypeInfo>>;
 
 export function GetAllFunctionNames():Promise<Array<fnmeta.FunctionMeta>>;
 
+export function GetAppInfo():Promise<main.AppInfo>;
+
 export function GetAvailableShells():Promise<Array<string>>;
 
 export function GetColumnComments(arg1:string,arg2:string,arg3:string):Promise<Array<main.ColumnComment>>;

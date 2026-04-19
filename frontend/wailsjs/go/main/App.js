@@ -254,6 +254,10 @@ export function GetAllFunctionNames() {
   return window['go']['main']['App']['GetAllFunctionNames']();
 }
 
+export function GetAppInfo() {
+  return window['go']['main']['App']['GetAppInfo']();
+}
+
 export function GetAvailableShells() {
   return window['go']['main']['App']['GetAvailableShells']();
 }

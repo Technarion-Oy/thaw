@@ -4342,3 +4342,25 @@ func (a *App) DeleteOldestBackup(backupSetName, bsDb, bsSchema string) error {
 	))
 	return err
 }
+
+// ── App Info ──────────────────────────────────────────────────────────────────
+
+// AppInfo holds the application metadata shown in the About dialog.
+type AppInfo struct {
+	CompanyName    string `json:"companyName"`
+	ProductName    string `json:"productName"`
+	ProductVersion string `json:"productVersion"`
+	Copyright      string `json:"copyright"`
+	Comments       string `json:"comments"`
+}
+
+// GetAppInfo returns static application metadata for display in the About dialog.
+func (a *App) GetAppInfo() AppInfo {
+	return AppInfo{
+		CompanyName:    "Technarion Oy",
+		ProductName:    "Thaw",
+		ProductVersion: Version,
+		Copyright:      "Copyright \u00a9 2026 Technarion Oy. All rights reserved.",
+		Comments:       "Snowflake Manager",
+	}
+}
