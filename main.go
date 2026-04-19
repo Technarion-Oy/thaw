@@ -213,6 +213,10 @@ func buildMenu(app *App) *menu.Menu {
 
 	// ── Help ──────────────────────────────────────────────────────────────────
 	helpMenu := appMenu.AddSubmenu("Help")
+	helpMenu.AddText("About Thaw…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:about")
+	})
+	helpMenu.AddSeparator()
 	helpMenu.AddText("Function Catalog…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:function-catalog")
 	})

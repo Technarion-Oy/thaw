@@ -23,6 +23,7 @@ import MigrationModal from "../components/migration/MigrationModal";
 import DbtProjectModal from "../components/dbt/DbtProjectModal";
 import FunctionCatalogModal from "../components/fnmeta/FunctionCatalogModal";
 import KeyboardShortcutsModal from "../components/help/KeyboardShortcutsModal";
+import AboutModal from "../components/help/AboutModal";
 import { usePanelLayoutStore } from "../store/panelLayoutStore";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import SqlEditor from "../components/editor/SqlEditor";
@@ -100,6 +101,7 @@ export default function QueryPage() {
   const [dbtCreateOpen, setDbtCreateOpen] = useState(false);
   const [fnCatalogOpen, setFnCatalogOpen] = useState(false);
   const [kbShortcutsOpen, setKbShortcutsOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
 
   // Stack of recently-closed tabs for ⌘⇧T / Ctrl+Shift+T reopen.
   const closedTabsRef = useRef<Array<{ path: string | null; title: string; sql: string; kind?: string }>>([]);
@@ -771,6 +773,11 @@ export default function QueryPage() {
 
   useEffect(() => {
     const off = EventsOn("menu:keyboard-shortcuts", () => setKbShortcutsOpen(true));
+    return () => off();
+  }, []);
+
+  useEffect(() => {
+    const off = EventsOn("menu:about", () => setAboutOpen(true));
     return () => off();
   }, []);
 
@@ -1448,6 +1455,7 @@ export default function QueryPage() {
       {dbtCreateOpen && <DbtProjectModal onClose={() => setDbtCreateOpen(false)} />}
       {fnCatalogOpen && <FunctionCatalogModal onClose={() => setFnCatalogOpen(false)} />}
       {kbShortcutsOpen && <KeyboardShortcutsModal onClose={() => setKbShortcutsOpen(false)} />}
+      {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
 
       {sessionPropsOpen && (
         <SessionPropertiesModal

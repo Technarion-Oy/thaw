@@ -377,6 +377,26 @@ export namespace main {
 	        this.errors = source["errors"];
 	    }
 	}
+	export class AppInfo {
+	    companyName: string;
+	    productName: string;
+	    productVersion: string;
+	    copyright: string;
+	    comments: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AppInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.companyName = source["companyName"];
+	        this.productName = source["productName"];
+	        this.productVersion = source["productVersion"];
+	        this.copyright = source["copyright"];
+	        this.comments = source["comments"];
+	    }
+	}
 	export class BackupPolicyRow {
 	    name: string;
 	    createdOn: string;
