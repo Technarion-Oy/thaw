@@ -5,7 +5,14 @@ Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend +
 ## Development Workflow
 
 - **Branching**: All changes must be made in a feature branch (e.g., `feat/`, `fix/`, `chore/`).
-- **Commits**: Use descriptive commit messages with conventional prefixes.
+- **Commits**: Use descriptive commit messages with conventional prefixes. The commit type determines whether a release is triggered and what version component is bumped:
+
+  | Commit type | Release | Version bump |
+  |-------------|---------|--------------|
+  | `feat` | ✅ | **minor** (0.X.0) |
+  | `feat!` / `BREAKING CHANGE` footer | ✅ | **major** (X.0.0) |
+  | `fix`, `perf` | ✅ | **patch** (0.0.X) |
+  | `refactor`, `chore`, `docs`, `style`, `test`, `build`, `ci` | ❌ | no release |
 - **Pull Requests**: Create PRs using the GitHub CLI (`gh`). Target the `upstream` repository (`Technarion-Oy/thaw`) if working from a fork.
 - **PR Commands**:
   ```bash
