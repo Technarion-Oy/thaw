@@ -8,7 +8,7 @@
 				"s3:PutObject",
 				"s3:DeleteObject"
 			],
-			"Resource": "arn:aws:s3:::thaw-s3-bucket-for-website/release"
+			"Resource": "arn:aws:s3:::thaw-s3-bucket-for-website/release/*"
 		},
         {
 			"Sid": "VisualEditor1",
