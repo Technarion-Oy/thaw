@@ -8,6 +8,8 @@ on:
         type: boolean
         default: false
 
+# You can optionally remove the permissions block below if you strictly use the App token, 
+# but it is safe to leave it as a fallback for the default GITHUB_TOKEN.
 permissions:
   contents: write
   issues: write
@@ -19,13 +21,22 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. GENERATE THE BOT TOKEN FIRST
+      # We must do this before checkout so Git uses the App's identity.
+      - name: Generate Bot Token
+        id: generate-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      # 2. CHECKOUT WITH THE BOT TOKEN
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # PAT with repo + workflow scope so the version-bump commit & tag
-          # pushed by @semantic-release/git can trigger build.yml.
-          # GITHUB_TOKEN pushes are blocked from triggering downstream workflows.
-          token: ${{ secrets.RELEASE_TOKEN }}
+          # We swap out your old secrets.RELEASE_TOKEN for the App token.
+          # Because this App has 'Workflows: Read and write', it WILL trigger build.yml!
+          token: ${{ steps.generate-token.outputs.token }}
 
       - uses: actions/setup-node@v4
         with:
@@ -35,10 +46,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # 3. RUN SEMANTIC RELEASE WITH THE BOT TOKEN
       - name: Run semantic-release
         run: npx semantic-release ${{ inputs.dry_run && '--dry-run' || '' }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # We swap out the default GITHUB_TOKEN for our App Token.
+          # This gives the semantic-release API calls the power to bypass the ruleset.
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
           GIT_AUTHOR_NAME: github-actions[bot]
           GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
           GIT_COMMITTER_NAME: github-actions[bot]
