@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -830,6 +831,162 @@ func (a *App) SaveSnowparkPythonPath(pythonPath string) error {
 	return config.Save(cfg)
 }
 
+// ─── pip registry IPC ─────────────────────────────────────────────────────────
+
+// GetPipRegistryConfig returns the persisted pip registry configuration.
+func (a *App) GetPipRegistryConfig() (config.PipRegistryConfig, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return config.PipRegistryConfig{}, err
+	}
+	return cfg.PipRegistry, nil
+}
+
+// SavePipRegistryConfig persists the pip registry configuration to disk.
+func (a *App) SavePipRegistryConfig(cfg config.PipRegistryConfig) error {
+	appCfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	appCfg.PipRegistry = cfg
+	return config.Save(appCfg)
+}
+
+// ResetPipRegistryConfig clears the pip registry configuration.
+func (a *App) ResetPipRegistryConfig() error {
+	appCfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	appCfg.PipRegistry = config.PipRegistryConfig{}
+	return config.Save(appCfg)
+}
+
+// PickCACertFile opens a file picker for certificate files and returns the chosen path.
+func (a *App) PickCACertFile() (string, error) {
+	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title: "Select CA Certificate",
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "Certificate Files (*.pem, *.crt, *.cer)", Pattern: "*.pem;*.crt;*.cer"},
+		},
+	})
+	return path, err
+}
+
+// ─── pip registry helpers ──────────────────────────────────────────────────────
+
+// pipRegistrySetup holds the pip CLI flags and env vars generated from PipRegistryConfig.
+type pipRegistrySetup struct {
+	Args []string // pip CLI flags to append to every install command
+	Env  []string // "KEY=VALUE" environment variables (e.g. NO_PROXY)
+}
+
+// embedCredsInURL inserts user:pass@ into rawURL before the host.
+// Returns rawURL unchanged when user is empty or rawURL cannot be parsed.
+func embedCredsInURL(rawURL, user, pass string) string {
+	if user == "" {
+		return rawURL
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	u.User = url.UserPassword(user, pass)
+	return u.String()
+}
+
+// buildProxyURL returns proxyURL with credentials embedded if proxyUser is non-empty.
+func buildProxyURL(proxyURL, proxyUser, proxyPass string) string {
+	return embedCredsInURL(proxyURL, proxyUser, proxyPass)
+}
+
+// findCredForRegistry returns the first credential whose Registry matches registry,
+// or nil if none is found.
+func findCredForRegistry(creds []config.PipRegistryCredential, registry string) *config.PipRegistryCredential {
+	for i := range creds {
+		if creds[i].Registry == registry {
+			return &creds[i]
+		}
+	}
+	return nil
+}
+
+// splitHosts splits a comma-separated host list and trims whitespace.
+// Returns nil when s is empty.
+func splitHosts(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		h := strings.TrimSpace(part)
+		if h != "" {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// buildPipRegistrySetup converts the persisted PipRegistryConfig into concrete
+// pip CLI flags and environment variables.  It is called immediately before
+// every pip install invocation.
+func (a *App) buildPipRegistrySetup() pipRegistrySetup {
+	appCfg, err := config.Load()
+	if err != nil {
+		return pipRegistrySetup{}
+	}
+	rc := appCfg.PipRegistry
+
+	var args []string
+	var env []string
+
+	// Primary registry.
+	if rc.PrimaryURL != "" {
+		registryURL := rc.PrimaryURL
+		if cred := findCredForRegistry(rc.Credentials, rc.PrimaryURL); cred != nil {
+			registryURL = embedCredsInURL(rc.PrimaryURL, cred.Username, cred.Password)
+		}
+		if rc.Behavior == "override" {
+			args = append(args, "--index-url", registryURL)
+		} else {
+			args = append(args, "--extra-index-url", registryURL)
+		}
+	}
+
+	// Additional registries — always --extra-index-url.
+	for _, reg := range rc.AdditionalRegistries {
+		if reg == "" {
+			continue
+		}
+		registryURL := reg
+		if cred := findCredForRegistry(rc.Credentials, reg); cred != nil {
+			registryURL = embedCredsInURL(reg, cred.Username, cred.Password)
+		}
+		args = append(args, "--extra-index-url", registryURL)
+	}
+
+	// Proxy.
+	if rc.EnableProxy && rc.ProxyURL != "" {
+		proxyURL := buildProxyURL(rc.ProxyURL, rc.ProxyUsername, rc.ProxyPassword)
+		args = append(args, "--proxy", proxyURL)
+		if rc.ProxyBypassHosts != "" {
+			env = append(env, "NO_PROXY="+rc.ProxyBypassHosts)
+		}
+	}
+
+	// Trusted hosts.
+	for _, host := range splitHosts(rc.TrustedHosts) {
+		args = append(args, "--trusted-host", host)
+	}
+
+	// CA certificate.
+	if rc.CustomCACertPath != "" {
+		args = append(args, "--cert", rc.CustomCACertPath)
+	}
+
+	return pipRegistrySetup{Args: args, Env: env}
+}
+
 // ListSystemPythons returns all Python interpreters found on the system.
 func (a *App) ListSystemPythons() []PythonInfo {
 	seen := map[string]bool{}
@@ -1136,20 +1293,26 @@ func (a *App) InstallEnvPackage(pkg string) error {
 		backend = "conda"
 	}
 
+	setup := a.buildPipRegistrySetup()
 	var cmd *exec.Cmd
 	if backend == "venv" {
 		pip, err := a.pipBinForEnv()
 		if err != nil {
 			return err
 		}
-		cmd = exec.Command(pip, "install", pkg)
+		args := append([]string{"install", pkg}, setup.Args...)
+		cmd = exec.Command(pip, args...)
 	} else {
 		condaPath, err := exec.LookPath("conda")
 		if err != nil {
 			return fmt.Errorf("conda not found: %w", err)
 		}
-		cmd = exec.Command(condaPath, "run", "-n", SnowparkCondaEnv,
-			"pip", "install", pkg)
+		baseArgs := []string{"run", "-n", SnowparkCondaEnv, "pip", "install", pkg}
+		args := append(baseArgs, setup.Args...)
+		cmd = exec.Command(condaPath, args...)
+	}
+	if len(setup.Env) > 0 {
+		cmd.Env = append(os.Environ(), setup.Env...)
 	}
 
 	if err := a.streamCommandTo(cmd, "snowpark:package-output"); err != nil {
@@ -1254,8 +1417,13 @@ func (a *App) InstallJupyterNotebook() error {
 	if err != nil {
 		return fmt.Errorf("conda not found: %w", err)
 	}
-	cmd := exec.Command(condaPath, "run", "-n", SnowparkCondaEnv,
-		"pip", "install", "notebook", "ipython-sql", "sqlalchemy", "pyflakes", "debugpy", "cryptography<44.0.0")
+	setup := a.buildPipRegistrySetup()
+	baseArgs := []string{"run", "-n", SnowparkCondaEnv, "pip", "install", "notebook", "ipython-sql", "sqlalchemy", "pyflakes", "debugpy", "cryptography<44.0.0"}
+	args := append(baseArgs, setup.Args...)
+	cmd := exec.Command(condaPath, args...)
+	if len(setup.Env) > 0 {
+		cmd.Env = append(os.Environ(), setup.Env...)
+	}
 	if err := a.streamCommand(cmd); err != nil {
 		return fmt.Errorf("notebook install failed: %w", err)
 	}
@@ -1315,7 +1483,12 @@ func (a *App) InstallSnowparkVenv(withPandas bool) error {
 	if withPandas {
 		pkg = "snowflake-snowpark-python[pandas]"
 	}
-	cmd := exec.Command(venvPipBin(venvPath), "install", pkg)
+	setup := a.buildPipRegistrySetup()
+	args := append([]string{"install", pkg}, setup.Args...)
+	cmd := exec.Command(venvPipBin(venvPath), args...)
+	if len(setup.Env) > 0 {
+		cmd.Env = append(os.Environ(), setup.Env...)
+	}
 	if err := a.streamCommand(cmd); err != nil {
 		return fmt.Errorf("snowpark venv install failed: %w", err)
 	}
@@ -1342,7 +1515,13 @@ func (a *App) InstallJupyterVenv() error {
 	if venvPath == "" {
 		venvPath = defaultVenvPath()
 	}
-	cmd := exec.Command(venvPipBin(venvPath), "install", "notebook", "ipython-sql", "sqlalchemy", "pyflakes", "debugpy", "cryptography<44.0.0")
+	setup := a.buildPipRegistrySetup()
+	baseArgs := []string{"install", "notebook", "ipython-sql", "sqlalchemy", "pyflakes", "debugpy", "cryptography<44.0.0"}
+	args := append(baseArgs, setup.Args...)
+	cmd := exec.Command(venvPipBin(venvPath), args...)
+	if len(setup.Env) > 0 {
+		cmd.Env = append(os.Environ(), setup.Env...)
+	}
 	if err := a.streamCommand(cmd); err != nil {
 		return fmt.Errorf("notebook venv install failed: %w", err)
 	}
