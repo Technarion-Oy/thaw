@@ -61,7 +61,7 @@ type tabSession struct {
 	queryCancelCtxDone <-chan struct{}
 }
 
-// tabSessionInitMu serialises lazy creation of new tab sessions so that two
+// tabSessionInitMu serializes lazy creation of new tab sessions so that two
 // concurrent calls for the same tabId do not both open a connection.
 var tabSessionInitMu sync.Mutex
 
