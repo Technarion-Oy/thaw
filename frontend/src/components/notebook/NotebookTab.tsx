@@ -333,6 +333,8 @@ export default function NotebookTab({ tabId }: Props) {
     inOtherCell?: boolean;
   } | null>(null);
   const dapClientRef = useRef<DapClient | null>(null);
+  // Whether the sticky debug variables panel is collapsed.
+  const [debugVarsCollapsed, setDebugVarsCollapsed] = useState(false);
 
   // Load persisted breakpoints whenever the notebook file changes.
   useEffect(() => {
@@ -991,17 +993,74 @@ export default function NotebookTab({ tabId }: Props) {
             onModelDispose={() => cellModelsRef.current.delete(cell.id)}
             breakpoints={breakpoints.get(cell.id) ?? new Set()}
             onBreakpointToggle={(line) => toggleBreakpoint(cell.id, line)}
-            debugStopped={debugState?.cellId === cell.id && debugState.stopped}
-            debugVariables={debugState?.cellId === cell.id ? debugState.variables : []}
             debugCurrentLine={debugState?.cellId === cell.id && debugState.stopped ? debugState.currentLine : undefined}
-            debugInOtherCell={debugState?.cellId === cell.id && debugState.stopped && !!debugState.inOtherCell}
-            onDebugContinue={() => dapClientRef.current?.continue()}
-            onDebugStepOver={() => dapClientRef.current?.stepOver()}
-            onDebugStepInto={() => dapClientRef.current?.stepInto()}
-            onDebugStop={() => dapClientRef.current?.disconnect()}
           />
         ))}
       </div>
+
+      {/* Sticky debug bar — always visible at the bottom while a debug session is paused */}
+      {debugState?.stopped && (
+        <div style={{
+          flexShrink: 0,
+          borderTop: `1px solid ${border}`,
+          background: isDark ? "#0d2137" : "#eff6ff",
+          padding: "8px 12px 10px",
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: debugVarsCollapsed ? 0 : 8 }}>
+            <button
+              onClick={() => setDebugVarsCollapsed((c) => !c)}
+              title={debugVarsCollapsed ? "Expand variables" : "Collapse variables"}
+              style={{
+                background: "none", border: "none", cursor: "pointer", padding: "0 4px 0 0",
+                display: "flex", alignItems: "center", gap: 4,
+                fontSize: 11, fontWeight: 600, color: isDark ? "#7dd3fc" : "#1d4ed8",
+              }}
+            >
+              <span style={{ fontSize: 9, display: "inline-block", transform: debugVarsCollapsed ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform 0.15s" }}>▼</span>
+              ⏸ {debugState.inOtherCell ? "Paused inside function" : `Paused${debugState.currentLine != null ? ` at line ${debugState.currentLine}` : " at breakpoint"}`}
+            </button>
+            <Space.Compact size="small">
+              <Button type="primary" onClick={() => dapClientRef.current?.continue()} title="Continue">▶</Button>
+              <Button onClick={() => dapClientRef.current?.stepOver()} title="Step Over">⤵</Button>
+              <Button onClick={() => dapClientRef.current?.stepInto()} title="Step Into">⬇</Button>
+              <Button danger onClick={() => dapClientRef.current?.disconnect()} title="Stop Debugging">⏹</Button>
+            </Space.Compact>
+          </div>
+          {!debugVarsCollapsed && (debugState.variables.length === 0 ? (
+            <span style={{ fontSize: 11, color: textMuted }}>No local variables</span>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, maxHeight: 120, overflowY: "auto" }}>
+              {debugState.variables.map((v) => (
+                <Tooltip key={v.name} title="Click to copy value">
+                  <div
+                    onClick={() => { ClipboardSetText(`${v.name} = ${v.value}`); message.success("Copied!", 1); }}
+                    style={{
+                      background: isDark ? "#0a1929" : "#ffffff",
+                      border: `1px solid ${border}`,
+                      borderRadius: 4,
+                      padding: "2px 8px",
+                      fontFamily: "monospace",
+                      fontSize: 11,
+                      maxWidth: 320,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span style={{ color: isDark ? "#93c5fd" : "#1e40af" }}>{v.name}</span>
+                    <span style={{ color: textMuted }}> = </span>
+                    <span style={{ color: isDark ? "#d4d4d4" : "#1f2328" }}>{v.value}</span>
+                    {v.type && (
+                      <span style={{ color: textMuted, fontSize: 10 }}> ({v.type})</span>
+                    )}
+                  </div>
+                </Tooltip>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
 
       <DeployNotebookModal
         open={deployOpen}
@@ -1201,19 +1260,8 @@ interface CellViewProps {
   breakpoints?: Set<number>;
   /** Called when the user clicks the gutter margin to toggle a breakpoint. */
   onBreakpointToggle?: (line: number) => void;
-  /** True while execution is paused at a breakpoint in this cell. */
-  debugStopped?: boolean;
-  /** Variable snapshot captured when paused at a breakpoint. */
-  debugVariables?: DebugVariable[];
   /** 1-indexed line number where the debugger is currently paused (from DAP stackTrace). */
   debugCurrentLine?: number;
-  /** True when execution is paused inside a function that lives in a different cell's file. */
-  debugInOtherCell?: boolean;
-  /** Called when the user clicks Continue in the debug variables panel. */
-  onDebugContinue?: () => void;
-  onDebugStepOver?: () => void;
-  onDebugStepInto?: () => void;
-  onDebugStop?: () => void;
 }
 
 function CellView({
@@ -1221,8 +1269,7 @@ function CellView({
   isSelected, onRun, onDebug, onDelete, onMoveUp, onMoveDown, onSourceChange, onKindChange,
   onAddAfter, onSelect, onModelReady, onModelDispose,
   breakpoints = new Set(), onBreakpointToggle,
-  debugStopped = false, debugVariables = [], debugCurrentLine, debugInOtherCell = false,
-  onDebugContinue, onDebugStepOver, onDebugStepInto, onDebugStop,
+  debugCurrentLine,
 }: CellViewProps) {
   const [focused, setFocused] = useState(false);
   const accentColor = isDark ? "#40c8fc" : "#0969da";
@@ -1231,9 +1278,6 @@ function CellView({
   const decorationsRef = useRef<monacoLib.editor.IEditorDecorationsCollection | null>(null);
   // Decorations collection for the current debug line highlight.
   const debugLineDecRef = useRef<monacoLib.editor.IEditorDecorationsCollection | null>(null);
-  // Whether the debug variables panel is collapsed.
-  const [varPanelCollapsed, setVarPanelCollapsed] = useState(false);
-
   // ── Monaco editor setup ───────────────────────────────────────────────────
   const editorRef       = useRef<any>(null);
   const onRunRef        = useRef(onRun);
@@ -1629,69 +1673,6 @@ function CellView({
                   alt={`plot ${i + 1}`}
                   style={{ maxWidth: "100%", display: "block", borderRadius: 4 }}
                 />
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Debug variables panel — shown when paused at a breakpoint */}
-        {cell.kind === "code" && debugStopped && (
-          <div style={{
-            borderTop: `1px solid ${border}`,
-            background: isDark ? "#0d2137" : "#eff6ff",
-            padding: "8px 12px 10px",
-          }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: varPanelCollapsed ? 0 : 8 }}>
-              <button
-                onClick={() => setVarPanelCollapsed((c) => !c)}
-                title={varPanelCollapsed ? "Expand variables" : "Collapse variables"}
-                style={{
-                  background: "none", border: "none", cursor: "pointer", padding: "0 4px 0 0",
-                  display: "flex", alignItems: "center", gap: 4,
-                  fontSize: 11, fontWeight: 600, color: isDark ? "#7dd3fc" : "#1d4ed8",
-                }}
-              >
-                <span style={{ fontSize: 9, display: "inline-block", transform: varPanelCollapsed ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform 0.15s" }}>▼</span>
-                ⏸ {debugInOtherCell ? "Paused inside function" : `Paused${debugCurrentLine != null ? ` at line ${debugCurrentLine}` : " at breakpoint"}`}
-              </button>
-              <Space.Compact size="small">
-                <Button type="primary" onClick={onDebugContinue} title="Continue">▶</Button>
-                <Button onClick={onDebugStepOver} title="Step Over">⤵</Button>
-                <Button onClick={onDebugStepInto} title="Step Into">⬇</Button>
-                <Button danger onClick={onDebugStop} title="Stop Debugging">⏹</Button>
-              </Space.Compact>
-            </div>
-            {!varPanelCollapsed && (debugVariables.length === 0 ? (
-              <span style={{ fontSize: 11, color: textMuted }}>No local variables</span>
-            ) : (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                {debugVariables.map((v) => (
-                  <Tooltip key={v.name} title="Click to copy value">
-                    <div
-                      onClick={() => { ClipboardSetText(`${v.name} = ${v.value}`); message.success("Copied!", 1); }}
-                      style={{
-                        background: isDark ? "#0a1929" : "#ffffff",
-                        border: `1px solid ${border}`,
-                        borderRadius: 4,
-                        padding: "2px 8px",
-                        fontFamily: "monospace",
-                        fontSize: 11,
-                        maxWidth: 320,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        cursor: "pointer",
-                      }}
-                    >
-                      <span style={{ color: isDark ? "#93c5fd" : "#1e40af" }}>{v.name}</span>
-                      <span style={{ color: textMuted }}> = </span>
-                      <span style={{ color: isDark ? "#d4d4d4" : "#1f2328" }}>{v.value}</span>
-                      {v.type && (
-                        <span style={{ color: textMuted, fontSize: 10 }}> ({v.type})</span>
-                      )}
-                    </div>
-                  </Tooltip>
-                ))}
               </div>
             ))}
           </div>
