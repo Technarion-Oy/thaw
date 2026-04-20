@@ -53,7 +53,7 @@ import {
   SaveNotebookBreakpoints,
   LoadNotebookBreakpoints,
 } from "../../../wailsjs/go/main/App";
-import { DapClient, type DebugVariable } from "./debugClient";
+import { DapClient, type CellBreakpoints, type DebugVariable } from "./debugClient";
 import type { main } from "../../../wailsjs/go/models";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import { useNotebookPrefsStore } from "../../store/notebookPrefsStore";
@@ -571,8 +571,6 @@ export default function NotebookTab({ tabId }: Props) {
   const debugCell = useCallback(async (cell: Cell) => {
     if (!kernelReady || cell.running || cell.kind !== "code") return;
 
-    const cellBreakpoints = breakpoints.get(cell.id) ?? new Set<number>();
-
     patchCell(cell.id, { running: true, outputs: [], images: [], sqlResult: null });
     setDebugState({ cellId: cell.id, stopped: false, variables: [] });
 
@@ -619,8 +617,23 @@ export default function NotebookTab({ tabId }: Props) {
       offProxyReady();  offProxyReady = null;
       offDebugReady();  offDebugReady = null;
 
-      // 4. Create the DAP client and wire it to events
-      const dap = new DapClient(cellBreakpoints, debugFilepath);
+      // 4. Build breakpoint list for ALL cells that have breakpoints.
+      //    debugpy needs to know about every file it might stop in, not just
+      //    the cell being debugged.  Other cells' temp files follow the same
+      //    naming convention as the debug cell: thaw_cell_<cellId>.py in the
+      //    same temp directory.
+      const tempDir = debugFilepath.replace(/[/\\][^/\\]+$/, ""); // dirname
+      const allBreakpoints: CellBreakpoints[] = [];
+      for (const [bpCellId, lines] of breakpoints) {
+        if (lines.size === 0) continue;
+        const filepath = bpCellId === cell.id
+          ? debugFilepath
+          : `${tempDir}/thaw_cell_${bpCellId}.py`;
+        allBreakpoints.push({ filepath, lines });
+      }
+
+      // Create the DAP client and wire it to events
+      const dap = new DapClient(allBreakpoints);
       dapClientRef.current = dap;
 
       // Number of source lines in this cell; used to detect the trailing 'pass'

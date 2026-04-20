@@ -305,6 +305,14 @@ def _thaw_handle_syntax(req_json):
         for _msg in _w.messages:
             if getattr(_msg, "lineno", 1) < 1:
                 continue  # skip stub-injected lines (lineno 0)
+            # "redefinition of unused X from line 0" is a false positive: the
+            # original "definition" is one of the kernel-namespace stubs injected
+            # above (lineno=0).  Suppress it so re-running a cell that defines a
+            # function or variable doesn't produce a spurious warning.
+            if isinstance(_msg, _pfm.RedefinedWhileUnused):
+                _orig_line = _msg.message_args[1] if len(_msg.message_args) >= 2 else 1
+                if _orig_line <= 0:
+                    continue
             _is_err = isinstance(_msg, (_pfm.UndefinedName, _pfm.UndefinedLocal))
             errors.append({
                 "severity": "error" if _is_err else "warning",

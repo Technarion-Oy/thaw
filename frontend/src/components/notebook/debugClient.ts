@@ -26,6 +26,13 @@ export interface DebugVariable {
   type: string;
 }
 
+export interface CellBreakpoints {
+  /** Absolute path to the cell's temp file (/tmp/thaw_cell_<cellId>.py). */
+  filepath: string;
+  /** 1-indexed line numbers with breakpoints set. */
+  lines: Set<number>;
+}
+
 // ─── DAP Client ───────────────────────────────────────────────────────────────
 
 export class DapClient {
@@ -44,12 +51,11 @@ export class DapClient {
   /** Called when execution resumes after Continue. */
   onContinued?: () => void;
 
-  private breakpoints: Set<number>;
-  private filepath: string;
+  /** Breakpoints for every cell whose temp file debugpy should know about. */
+  private allBreakpoints: CellBreakpoints[];
 
-  constructor(breakpoints: Set<number>, filepath: string) {
-    this.breakpoints = breakpoints;
-    this.filepath = filepath;
+  constructor(allBreakpoints: CellBreakpoints[]) {
+    this.allBreakpoints = allBreakpoints;
   }
 
   private offDisconnected: (() => void) | null = null;
@@ -280,13 +286,17 @@ export class DapClient {
       arguments: { justMyCode: false },
     });
 
-    // 3. Set breakpoints (if any) — sent while attach is in-flight.
-    if (this.filepath && this.breakpoints.size > 0) {
-      await this.request("setBreakpoints", {
-        source: { path: this.filepath },
-        breakpoints: Array.from(this.breakpoints).sort((a, b) => a - b).map((line) => ({ line })),
-        sourceModified: false,
-      });
+    // 3. Set breakpoints for every cell that has them — sent while attach is
+    //    in-flight.  This covers both the cell being debugged and any other
+    //    cells whose functions the user may step into.
+    for (const { filepath, lines } of this.allBreakpoints) {
+      if (filepath && lines.size > 0) {
+        await this.request("setBreakpoints", {
+          source: { path: filepath },
+          breakpoints: Array.from(lines).sort((a, b) => a - b).map((line) => ({ line })),
+          sourceModified: false,
+        });
+      }
     }
 
     // 4. configurationDone arrives at debugpy while attach is still being handled
