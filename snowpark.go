@@ -533,7 +533,16 @@ while True:
             # Freeze until the frontend completes the DAP handshake (configurationDone).
             # Closing the TCP connection (via StopDapProxy) will unblock this if the
             # frontend gives up early.
-            debugpy.wait_for_client()
+            # If the server is unavailable (internal state reset after a previous
+            # session), re-listen once and retry before giving up.
+            try:
+                debugpy.wait_for_client()
+            except RuntimeError as _wfc_e:
+                if "not available" in str(_wfc_e).lower():
+                    debugpy.listen(("127.0.0.1", 5678))
+                    debugpy.wait_for_client()
+                else:
+                    raise
 
             # Redirect only stderr; leave stdout un-redirected so that print()
             # calls flow directly to the kernel pipe and Go can stream them to
