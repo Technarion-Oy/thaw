@@ -702,8 +702,8 @@ export function ResumeTaskList(arg1, arg2, arg3) {
   return window['go']['main']['App']['ResumeTaskList'](arg1, arg2, arg3);
 }
 
-export function RunNotebookCell(arg1, arg2) {
-  return window['go']['main']['App']['RunNotebookCell'](arg1, arg2);
+export function RunNotebookCell(arg1, arg2, arg3) {
+  return window['go']['main']['App']['RunNotebookCell'](arg1, arg2, arg3);
 }
 
 export function RunNotebookCellSql(arg1, arg2) {

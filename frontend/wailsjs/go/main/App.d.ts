@@ -363,7 +363,7 @@ export function RestoreFromBackup(arg1:string,arg2:string,arg3:string,arg4:strin
 
 export function ResumeTaskList(arg1:string,arg2:string,arg3:Array<string>):Promise<void>;
 
-export function RunNotebookCell(arg1:string,arg2:string):Promise<main.NotebookCellOutput>;
+export function RunNotebookCell(arg1:string,arg2:string,arg3:string):Promise<main.NotebookCellOutput>;
 
 export function RunNotebookCellSql(arg1:string,arg2:string):Promise<main.NotebookSqlResult>;
 
