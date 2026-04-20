@@ -333,6 +333,12 @@ export default function NotebookTab({ tabId }: Props) {
     inOtherCell?: boolean;
   } | null>(null);
   const dapClientRef = useRef<DapClient | null>(null);
+  // Temp dir used by the active debug session (e.g. /tmp). Set when a debug
+  // session is running; cleared in finally. Used by toggleBreakpoint to push
+  // live breakpoint updates to debugpy via the open DAP connection.
+  const debugTempDirRef = useRef<string>("");
+  // Ref so debugCell can trigger a kernel restart without being a dep of useCallback.
+  const restartKernelRef = useRef<() => void>(() => {});
   // Whether the sticky debug variables panel is collapsed.
   const [debugVarsCollapsed, setDebugVarsCollapsed] = useState(false);
 
@@ -549,6 +555,8 @@ export default function NotebookTab({ tabId }: Props) {
   }, [runCell]);
 
   // Toggle a breakpoint line for a specific cell and persist to disk.
+  // Also updates the live DAP session (if any) so debugpy immediately reflects
+  // the change — this allows removing a breakpoint on the currently-paused line.
   const toggleBreakpoint = useCallback((cellId: string, line: number) => {
     setBreakpoints((prev) => {
       const next = new Map(prev);
@@ -564,6 +572,14 @@ export default function NotebookTab({ tabId }: Props) {
           if (ls.size > 0) toSave[cId] = Array.from(ls).sort((a, b) => a - b);
         }
         SaveNotebookBreakpoints(notebookPathRef.current, toSave).catch(() => {});
+      }
+      // Push the updated breakpoint set to the live debugpy session so changes
+      // are reflected immediately without requiring a restart.
+      const dap = dapClientRef.current;
+      const tempDir = debugTempDirRef.current;
+      if (dap && tempDir) {
+        const filepath = `${tempDir}/thaw_cell_${cellId}.py`;
+        dap.updateBreakpoints({ filepath, lines: set });
       }
       return next;
     });
@@ -625,6 +641,7 @@ export default function NotebookTab({ tabId }: Props) {
       //    naming convention as the debug cell: thaw_cell_<cellId>.py in the
       //    same temp directory.
       const tempDir = debugFilepath.replace(/[/\\][^/\\]+$/, ""); // dirname
+      debugTempDirRef.current = tempDir;
       const allBreakpoints: CellBreakpoints[] = [];
       for (const [bpCellId, lines] of breakpoints) {
         if (lines.size === 0) continue;
@@ -684,7 +701,16 @@ export default function NotebookTab({ tabId }: Props) {
       const finalOutputs: CellOutput[] = [];
       if (debugStdout)  finalOutputs.push({ type: "stdout", text: debugStdout });
       if (out.stderr)   finalOutputs.push({ type: "stderr", text: out.stderr  });
-      if (out.error)    finalOutputs.push({ type: "error",  text: out.error   });
+      if (out.error) {
+        const isServerErr = /not available|failed to connect to debugpy/i.test(out.error);
+        finalOutputs.push({
+          type: "error",
+          text: isServerErr
+            ? out.error + "\n\nKernel is restarting — try again in a moment."
+            : out.error,
+        });
+        if (isServerErr) restartKernelRef.current();
+      }
 
       // Dismiss the debug panel BEFORE showing outputs so the panel never
       // visually overlaps the output area.
@@ -700,7 +726,18 @@ export default function NotebookTab({ tabId }: Props) {
         return updated;
       });
     } catch (e) {
-      patchCell(cell.id, { running: false, outputs: [{ type: "error", text: String(e) }] });
+      const msg = String(e);
+      const isServerErr = /not available|failed to connect to debugpy/i.test(msg);
+      patchCell(cell.id, {
+        running: false,
+        outputs: [{
+          type: "error",
+          text: isServerErr
+            ? msg + "\n\nKernel is restarting — try again in a moment."
+            : msg,
+        }],
+      });
+      if (isServerErr) restartKernelRef.current();
     } finally {
       offProxyReady?.();
       offDebugReady?.();
@@ -708,6 +745,7 @@ export default function NotebookTab({ tabId }: Props) {
       offDebugOutput?.();
       dapClientRef.current?.stop();
       dapClientRef.current = null;
+      debugTempDirRef.current = "";
       setDebugState(null); // no-op if already cleared in try, safety net for catch path
       // Close the TCP proxy so Python's wait_for_client() unblocks and Go releases s.mu.
       // This is a no-op if Go already called StopDapProxy() on a clean exit.
@@ -724,6 +762,7 @@ export default function NotebookTab({ tabId }: Props) {
       .then(() => { setKernelReady(true); setKernelStarting(false); })
       .catch((e) => { setKernelError(String(e)); setKernelStarting(false); });
   }, [tabId]);
+  useEffect(() => { restartKernelRef.current = restartKernel; }, [restartKernel]);
 
   const saveNotebook = useCallback(async () => {
     if (!tab?.path) { message.warning("No file path — use File > Save As to save."); return; }

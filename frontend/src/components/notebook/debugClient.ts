@@ -334,4 +334,24 @@ export class DapClient {
     this.sendRaw({ seq: this.seq++, type: "request", command: "disconnect", arguments: { terminateDebuggee: false } });
     this.onContinued?.();
   }
+
+  /**
+   * Update the breakpoints for a single source file while a session is in progress.
+   * Sends a DAP setBreakpoints request fire-and-forget so the live debugpy session
+   * reflects the change immediately (e.g. when the user toggles a breakpoint while
+   * paused at that line).
+   */
+  updateBreakpoints(entry: CellBreakpoints): void {
+    // Keep allBreakpoints in sync so initialize() would also be correct if called again.
+    const idx = this.allBreakpoints.findIndex((b) => b.filepath === entry.filepath);
+    if (idx >= 0) this.allBreakpoints[idx] = entry;
+    else this.allBreakpoints.push(entry);
+
+    // Fire-and-forget — errors are ignored (session may be tearing down).
+    this.request("setBreakpoints", {
+      source: { path: entry.filepath },
+      breakpoints: Array.from(entry.lines).sort((a, b) => a - b).map((line) => ({ line })),
+      sourceModified: false,
+    }).catch(() => {});
+  }
 }
