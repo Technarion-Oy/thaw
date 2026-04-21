@@ -34,16 +34,18 @@ function useResize(
   direction: "left" | "right",
   onCommit: (w: number) => void,
 ) {
-  const [width, setWidth]     = useState(initialWidth);
+  const [width, setWidth]       = useState(initialWidth);
   const [resizing, setResizing] = useState(false);
-  const startX     = useRef(0);
-  const startWidth = useRef(0);
+  const startX      = useRef(0);
+  const startWidth  = useRef(0);
+  const liveWidth   = useRef(initialWidth);
+  const elRef       = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { setWidth(initialWidth); }, [initialWidth]);
+  useEffect(() => { setWidth(initialWidth); liveWidth.current = initialWidth; }, [initialWidth]);
 
   const onMouseDown = (e: React.MouseEvent) => {
     startX.current     = e.clientX;
-    startWidth.current = width;
+    startWidth.current = liveWidth.current;
     setResizing(true);
     e.preventDefault();
   };
@@ -58,15 +60,19 @@ function useResize(
       const w = direction === "left"
         ? startWidth.current + delta
         : startWidth.current - delta;
-      setWidth(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, w)));
+      const clamped = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, w));
+      liveWidth.current = clamped;
+      if (elRef.current) {
+        elRef.current.style.width    = `${clamped}px`;
+        elRef.current.style.minWidth = `${clamped}px`;
+        elRef.current.style.maxWidth = `${clamped}px`;
+      }
     };
-    const onUp = (e: MouseEvent) => {
+    const onUp = () => {
       setResizing(false);
-      const delta = e.clientX - startX.current;
-      const w = direction === "left"
-        ? startWidth.current + delta
-        : startWidth.current - delta;
-      onCommit(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, w)));
+      const w = liveWidth.current;
+      setWidth(w);
+      onCommit(w);
     };
 
     window.addEventListener("mousemove", onMove);
@@ -79,7 +85,7 @@ function useResize(
     };
   }, [resizing]);
 
-  return { width, resizing, onMouseDown };
+  return { width, resizing, onMouseDown, elRef };
 }
 
 function ResizeHandle({ resizing, onMouseDown }: { resizing: boolean; onMouseDown: (e: React.MouseEvent) => void }) {
@@ -258,7 +264,7 @@ export default function AppLayout() {
 
       {/* Left sidebar — hidden when ⌘B is toggled */}
       {!leftHidden && (
-        <div style={sidebarStyle(left.width)}>
+        <div ref={left.elRef} style={sidebarStyle(left.width)}>
           {leftPanels.map((id) => <PanelWrapper key={id} id={id} sidebar="left" />)}
           <SidebarDropZone sidebar="left" />
         </div>
@@ -295,7 +301,7 @@ export default function AppLayout() {
       <ResizeHandle resizing={right.resizing} onMouseDown={right.onMouseDown} />
 
       {/* Right sidebar */}
-      <div style={sidebarStyle(right.width)}>
+      <div ref={right.elRef} style={sidebarStyle(right.width)}>
         {rightPanels.map((id) => <PanelWrapper key={id} id={id} sidebar="right" />)}
         <SidebarDropZone sidebar="right" />
       </div>
