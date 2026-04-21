@@ -11,6 +11,7 @@
 package sqleditor
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -116,7 +117,7 @@ var (
 
 	// FROM/JOIN regex for fallback table extraction
 	reFromJoinFallback = regexp.MustCompile(
-		`(?i)(?:FROM|JOIN|MERGE\s+INTO|USING|INSERT\s+INTO|UPDATE|CLONE|LIKE)\s+(` + _identPath + `)\b`)
+		`(?i)(?:FROM|JOIN|MERGE\s+INTO|USING|INSERT\s+INTO|UPDATE|CLONE|LIKE)\s+(` + _identPath + `)`)
 
 	// CREATE DYNAMIC TABLE → extract SELECT portion.
 	// Go regexp has no lookahead; capture SELECT|WITH so the caller can slice
@@ -657,6 +658,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 
 			badToken, msgFn := resolveErrorToken(ftTable, ft.db, ft.schema,
 				scriptCreatedDbsAndSchemas, req.KnownDatabases, req.KnownSchemas, req.ResolvedRefs, checkEq)
+			fmt.Printf("DEBUG: ft={db:%s, sch:%s, name:%s} badToken=%s\n", ft.db, ft.schema, ft.name, badToken)
 			missingTokens[badToken] = msgFn
 		}
 
