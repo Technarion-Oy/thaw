@@ -11,6 +11,7 @@
 package sqleditor
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -116,7 +117,7 @@ var (
 
 	// FROM/JOIN regex for fallback table extraction
 	reFromJoinFallback = regexp.MustCompile(
-		`(?i)(?:FROM|JOIN)\s+(` + _identPath + `)\b`)
+		`(?i)(?:FROM|JOIN|MERGE\s+INTO|USING|INSERT\s+INTO|UPDATE|CLONE|LIKE)\s+(` + _identPath + `)`)
 
 	// CREATE DYNAMIC TABLE → extract SELECT portion.
 	// Go regexp has no lookahead; capture SELECT|WITH so the caller can slice
@@ -153,6 +154,13 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 	scriptCreatedDbsAndSchemas := make(map[string]struct{})
 	scriptDroppedTables        := make(map[string]struct{})
 	scriptDroppedDbsAndSchemas := make(map[string]struct{})
+	// scriptEverCreatedSchemasByDB tracks every DB for which a 2-part
+	// CREATE SCHEMA db.sch appeared in the script (append-only; not cleared by
+	// DROP).  Used to decide whether to validate schema references in a
+	// 3-part CREATE TABLE — if we've seen "CREATE SCHEMA DB.SCH" earlier in
+	// the same script, we have enough context to validate that the schema still
+	// exists (and catch "schema was dropped" errors).
+	scriptEverCreatedSchemasByDB := make(map[string]struct{})
 
 	scriptHasActiveDB     := false
 	scriptHasActiveSchema := false
@@ -171,6 +179,11 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			if parts := extractIdentParts(m[1], ic); len(parts) > 0 {
 				scriptCreatedDbsAndSchemas[parts[len(parts)-1]] = struct{}{}
 				scriptCreatedDbsAndSchemas[strings.Join(parts, ".")] = struct{}{}
+				// Track 2-part CREATE SCHEMA <db>.<sch> so we can validate
+				// schema references in subsequent 3-part CREATE TABLE statements.
+				if len(parts) == 2 {
+					scriptEverCreatedSchemasByDB[parts[0]] = struct{}{}
+				}
 			}
 		}
 
@@ -240,6 +253,13 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 					}
 				}
 			case 3:
+				// A 3-part identifier (DB.SCH.TABLE) is fully self-contained.
+				// Only validate if we actually have DB/schema catalog data —
+				// otherwise we'd produce false alarms when no session context
+				// is set (empty KnownDatabases / KnownSchemas).
+				if !hasGlobalDB && !scriptHasActiveDB {
+					break
+				}
 				dbNorm := parts[0]
 				if !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
 					for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
@@ -249,7 +269,28 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				} else {
 					schemaNorm := parts[1]
 					schemaPath := dbNorm + "." + schemaNorm
-					if !schemaExistsForDB(dbNorm, schemaNorm, schemaPath, scriptCreatedDbsAndSchemas, req.KnownSchemas, req.ResolvedRefs, checkEq) {
+					// Only validate the schema if we have actual schema data for
+					// this specific DB. Without data we cannot distinguish
+					// "schema doesn't exist" from "schema list not yet loaded",
+					// which would produce false alarms when no session context
+					// is set.  Three sources count as "having schema data":
+					//   1. KnownSchemas has at least one entry for this DB
+					//   2. ResolvedRefs has at least one ref for this DB
+					//   3. The script itself issued CREATE SCHEMA <db>.<sch> for
+					//      this DB (tracked in scriptEverCreatedSchemasByDB)
+					hasSchemaDataForDB :=
+						len(schemasForDB(req.KnownSchemas, dbNorm, checkEq)) > 0 ||
+							isIn(scriptEverCreatedSchemasByDB, dbNorm)
+					if !hasSchemaDataForDB {
+						for _, ref := range req.ResolvedRefs {
+							if checkEq(ref.DB, dbNorm) {
+								hasSchemaDataForDB = true
+								break
+							}
+						}
+					}
+					if hasSchemaDataForDB &&
+						!schemaExistsForDB(dbNorm, schemaNorm, schemaPath, scriptCreatedDbsAndSchemas, req.KnownSchemas, req.ResolvedRefs, checkEq) {
 						for _, t := range findTokensLocally(raw, []string{schemaNorm}, r.StartLine, ic) {
 							markers = append(markers, diagMarkerAt(t,
 								"Schema '"+dbNorm+"."+t.name+"' does not exist or is not authorized.", 8))
@@ -533,7 +574,8 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 
 		// ── SELECT / WITH / CREATE AS SELECT: table existence ─────────
 		firstTok := getFirstSQLToken(raw)
-		if firstTok != "SELECT" && firstTok != "WITH" && firstTok != "CREATE" && firstTok != "UNDROP" {
+		if firstTok != "SELECT" && firstTok != "WITH" && firstTok != "CREATE" && firstTok != "UNDROP" &&
+			firstTok != "MERGE" && firstTok != "INSERT" && firstTok != "UPDATE" && firstTok != "DELETE" {
 			continue
 		}
 		strippedCtx := strings.TrimSpace(stripCommentsSQL(raw))
@@ -598,8 +640,8 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 
 		for _, ft := range fromTables {
 			ftTable := ft.name
-			compareTable := ftTable
-			if strings.ToUpper(compareTable) == "TABLE" && ft.db == "" && ft.schema == "" {
+			compareTable := strings.ToUpper(ftTable)
+			if (compareTable == "TABLE" || joinStopKW[compareTable]) && ft.db == "" && ft.schema == "" {
 				continue
 			}
 			if _, isCTE := cteNames[compareTable]; isCTE {
@@ -616,6 +658,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 
 			badToken, msgFn := resolveErrorToken(ftTable, ft.db, ft.schema,
 				scriptCreatedDbsAndSchemas, req.KnownDatabases, req.KnownSchemas, req.ResolvedRefs, checkEq)
+			fmt.Printf("DEBUG: ft={db:%s, sch:%s, name:%s} badToken=%s\n", ft.db, ft.schema, ft.name, badToken)
 			missingTokens[badToken] = msgFn
 		}
 

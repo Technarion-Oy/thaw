@@ -71,6 +71,18 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE TABLE t1 USING TEMPLATE (SELECT * FROM t2)",
 		"CREATE TABLE t1 FROM BACKUP SET 'backup_id'",
 		"CREATE TABLE t1 (id INT) CLUSTER BY (id) ENABLE_SCHEMA_EVOLUTION = TRUE ROW_ACCESS_POLICY p1 ON (id)",
+		"CREATE TRANSIENT TABLE t (id INT) DATA_RETENTION_TIME_IN_DAYS = 1",
+		"CREATE TABLE t CLONE s AT (TIMESTAMP => TO_TIMESTAMP_TZ('2023-01-01 00:00:00'))",
+		"CREATE TABLE t (id INT) COMMENT = 'my table' TAG (tag1 = 'val1')",
+		"CREATE OR ALTER TABLE t (id INT, val VARCHAR)",
+		// Integrations
+		"CREATE STORAGE INTEGRATION my_storage_int TYPE=EXTERNAL_STAGE STORAGE_PROVIDER='S3' ENABLED=TRUE STORAGE_AWS_ROLE_ARN='arn:aws:iam::123456789012:role/my_role' STORAGE_ALLOWED_LOCATIONS=('s3://my-bucket/')",
+		"CREATE STAGE my_s3_stage URL='s3://bucket/' STORAGE_INTEGRATION=s3_int DIRECTORY=(ENABLE=TRUE)",
+		"CREATE WAREHOUSE my_wh WAREHOUSE_SIZE='X-LARGE' WAREHOUSE_TYPE='STANDARD' AUTO_SUSPEND=300",
+		// MERGE statements
+		"MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET t.val = s.val WHEN NOT MATCHED THEN INSERT (id, val) VALUES (s.id, s.val)",
+		"MERGE INTO t USING (SELECT * FROM s) AS src ON t.id = src.id WHEN MATCHED AND t.v <> src.v THEN UPDATE SET v = src.v WHEN MATCHED THEN DELETE WHEN NOT MATCHED THEN INSERT ALL BY NAME",
+		"MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE ALL BY NAME",
 	}
 
 	for _, sql := range validQueries {
@@ -106,6 +118,38 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Invalid Drop DB", "DROP DATABASE my_db CASCADE RESTRICT", "Unexpected syntax"},      // Conflicting modifiers
 		{"Invalid Sequence", "CREATE SEQUENCE my_seq START WITH 'abc'", "Unexpected syntax"},
 		{"Invalid Table", "CREATE TRANSIENT OR REPLACE TABLE foo (id INT)", "Unexpected syntax"}, // Wrong modifier order
+		{"Table Replace IF NOT EXISTS", "CREATE OR REPLACE TABLE foo IF NOT EXISTS (id INT)", "Conflict between OR REPLACE and IF NOT EXISTS"},
+		{"Table CLUSTER BY no parens", "CREATE TABLE foo (id INT) CLUSTER BY id", "Unexpected syntax"},
+		{"Table Retention invalid", "CREATE TABLE foo (id INT) DATA_RETENTION_TIME_IN_DAYS = 'abc'", "Unexpected syntax"},
+
+		// Invalid MERGE
+		{"MERGE INSERT in MATCHED", "MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN INSERT (id) VALUES (s.id)", "not allowed in WHEN MATCHED"},
+		{"MERGE UPDATE in NOT MATCHED", "MERGE INTO t USING s ON t.id = s.id WHEN NOT MATCHED THEN UPDATE SET val = s.val", "not allowed in WHEN NOT MATCHED"},
+		{"MERGE NOT MATCHED BY SOURCE", "MERGE INTO t USING s ON t.id = s.id WHEN NOT MATCHED BY SOURCE THEN DELETE", "not supported by Snowflake"},
+
+		// Invalid Integrations
+		{"Integration with prefix", "CREATE STORAGE INTEGRATION MY_DB.PUBLIC.MY_INT TYPE=EXTERNAL_STAGE STORAGE_PROVIDER='S3' ENABLED=TRUE STORAGE_AWS_ROLE_ARN='arn:aws:iam::123456789012:role/bad_role' STORAGE_ALLOWED_LOCATIONS=('s3://bad-bucket/')", "account-level objects"},
+		{"API Integration missing provider", "CREATE API INTEGRATION bad_api_int API_AWS_ROLE_ARN='arn:aws:iam::123456789012:role/snowflake_api_role' API_ALLOWED_PREFIXES=('https://xyz.execute-api.us-west-2.amazonaws.com/prod/') ENABLED=TRUE", "Missing required parameter API_PROVIDER"},
+		{"Notification Integration invalid type", "CREATE NOTIFICATION INTEGRATION bad_notify_int TYPE=WEBHOOK ENABLED=TRUE WEBHOOK_URL='https://my-slack-webhook.com'", "Invalid TYPE for Notification Integration"},
+		{"Security Integration missing type", "CREATE SECURITY INTEGRATION bad_sec_int ENABLED=TRUE OAUTH_CLIENT=CUSTOM OAUTH_CLIENT_TYPE='CONFIDENTIAL'", "Missing required parameter TYPE"},
+		{"External Access Integration invalid property", "CREATE EXTERNAL ACCESS INTEGRATION bad_ext_access ALLOWED_NETWORK_RULES=(github_api_network_rule) MAX_RETRIES=5 ENABLED=TRUE", "Unexpected property 'MAX_RETRIES'"},
+
+		// Account-level prefix checks
+		{"Warehouse with prefix", "CREATE WAREHOUSE MY_DB.PUBLIC.BAD_WH WITH WAREHOUSE_SIZE = 'SMALL'", "cannot have a database or schema prefix"},
+		{"Role with prefix", "CREATE ROLE MY_DB.PUBLIC.BAD_ROLE", "cannot have a database or schema prefix"},
+		{"User with prefix", "CREATE USER MY_DB.PUBLIC.BAD_USER PASSWORD='abc'", "cannot have a database or schema prefix"},
+
+		// Property validation
+		{"Warehouse invalid param", "CREATE WAREHOUSE broken_wh WITH WAREHOUSE_SIZE='MEDIUM' AUTO_SHUTDOWN=600", "Unexpected property 'AUTO_SHUTDOWN'"},
+		{"Resource Monitor invalid param", "CREATE RESOURCE MONITOR bad_rm WITH MAX_CREDITS=500", "Unexpected property 'MAX_CREDITS'"},
+		{"Stage invalid param", "CREATE STAGE my_stage BUCKET_URL='s3://bucket/'", "Unexpected property 'BUCKET_URL'"},
+		{"Task invalid param", "CREATE TASK my_task WAREHOUSE=WH SCHEDULE='10 MINUTE' RETRY_LIMIT=5 AS SELECT 1", "Unexpected property 'RETRY_LIMIT'"},
+		{"User invalid param", "CREATE USER bad_user IS_ACTIVE=TRUE", "Unexpected property 'IS_ACTIVE'"},
+		{"User with Warehouse param", "CREATE USER bad_user WAREHOUSE_SIZE='SMALL'", "Unexpected property 'WAREHOUSE_SIZE'"},
+
+		// Other syntax
+		{"Grant role to table", "GRANT ROLE my_role TO TABLE my_table", "Unexpected syntax"},
+		{"Masking policy missing returns", "CREATE MASKING POLICY bad_mask AS (val string) -> CASE WHEN 1=1 THEN val END", "Missing RETURNS clause"},
 	}
 
 	for _, tt := range tests {
@@ -288,6 +332,10 @@ func TestValidateTablesExist_Valid(t *testing.T) {
 		// USE bare two-part: db.schema (no keyword) with known db and schema
 		"use GOVERNANCE.public;",
 		"use GOVERNANCE.public;\nCREATE TABLE test_1 (id INT);",
+
+		// MERGE statements
+		"MERGE INTO LIVE_TABLE USING (SELECT 1) AS s ON 1=1 WHEN MATCHED THEN UPDATE SET a=1",
+		"CREATE TABLE local_t (id INT);\nMERGE INTO local_t USING LIVE_TABLE AS s ON local_t.id = s.id WHEN NOT MATCHED THEN INSERT (id) VALUES (s.id)",
 	}
 
 	req := ValidateTablesExistRequest{
@@ -338,6 +386,15 @@ func TestValidateTablesExist_Invalid(t *testing.T) {
 		{"USE unknown DB two-part bare", "use database_that_not_exists.PUBLIC;", "database_that_not_exists"},
 		{"USE unknown DB bare one-part", "use database_that_not_exists", "database_that_not_exists"},
 		{"USE known DB unknown schema", "use GOVERNANCE.schema_that_doesnt_exists;", "schema_that_doesnt_exists"},
+
+		// MERGE missing tables
+		{"MERGE Missing Target", "MERGE INTO NOPE_TABLE USING (SELECT 1) AS s ON 1=1 WHEN MATCHED THEN UPDATE SET a=1", "NOPE_TABLE"},
+		{"MERGE Missing Source", "MERGE INTO LIVE_TABLE USING NOPE_SOURCE ON 1=1 WHEN MATCHED THEN UPDATE SET a=1", "NOPE_SOURCE"},
+
+		// CREATE TABLE missing sources
+		{"CREATE TABLE CLONE missing", "CREATE TABLE t CLONE NOPE_TABLE", "NOPE_TABLE"},
+		{"CREATE TABLE LIKE missing", "CREATE TABLE t LIKE NOPE_TABLE", "NOPE_TABLE"},
+		{"CREATE TABLE AS SELECT missing", "CREATE TABLE t AS SELECT * FROM NOPE_TABLE", "NOPE_TABLE"},
 	}
 
 	req := ValidateTablesExistRequest{
@@ -591,6 +648,82 @@ create table my_table (
 				if !found {
 					t.Errorf("Expected error matching %q, but got: %v", tt.expectedError, errs[0].Message)
 				}
+			}
+		})
+	}
+}
+
+// ── 6. ValidateTablesExist — 3-part CREATE TABLE false-alarm regression ───────
+
+// Regression: a CREATE TABLE with a fully-qualified 3-part identifier
+// (DB.SCH.TABLE) must never produce false-alarm errors regardless of whether
+// the database or schema appears in KnownDatabases / KnownSchemas, because the
+// fully-qualified path is self-sufficient and requires no session context.
+func TestValidateTablesExist_ThreePartCreateTable_NoFalseAlarms(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+		req  ValidateTablesExistRequest
+	}{
+		{
+			// Exact reproduction of the reported bug: long random-looking names
+			// that don't appear in the empty known lists.
+			name: "long random names, empty known lists",
+			sql: `create or replace TABLE RAND_DB_7F42E14F3D1E4268BEA3249D68FCCEC6.RAND_SCH_10.OBJ_0CA0A246E2574193A2E18CF1FB92CE94 (
+				ID NUMBER(38,0)
+			);`,
+			req: ValidateTablesExistRequest{
+				KnownDatabases: []string{},
+				KnownSchemas:   []SchemaEntry{},
+				ResolvedRefs:   []ResolvedRef{},
+			},
+		},
+		{
+			// DB is known but no schemas are loaded for it — this was the exact
+			// false alarm: "Schema 'RAND_DB_....RAND_SCH_10' does not exist or
+			// is not authorized." even though the schema does exist in Snowflake.
+			name: "DB known, no schemas loaded for it",
+			sql: `create or replace TABLE RAND_DB_7F42E14F3D1E4268BEA3249D68FCCEC6.RAND_SCH_10.OBJ_0CA0A246E2574193A2E18CF1FB92CE94 (
+				ID NUMBER(38,0)
+			);`,
+			req: ValidateTablesExistRequest{
+				KnownDatabases: []string{"RAND_DB_7F42E14F3D1E4268BEA3249D68FCCEC6"},
+				KnownSchemas:   []SchemaEntry{},
+				ResolvedRefs:   []ResolvedRef{},
+			},
+		},
+		{
+			// Simple names; same logic should hold.
+			name: "simple 3-part name, no session context",
+			sql:  `CREATE TABLE mydb.myschema.mytable (id INT);`,
+			req: ValidateTablesExistRequest{
+				KnownDatabases: []string{},
+				KnownSchemas:   []SchemaEntry{},
+				ResolvedRefs:   []ResolvedRef{},
+			},
+		},
+		{
+			// DB is known, schemas for OTHER databases are loaded, but none for
+			// this specific DB — must not produce a false schema error.
+			// Note: unquoted identifiers are normalised to uppercase internally.
+			name: "DB known, schemas loaded only for other DBs",
+			sql:  `CREATE OR REPLACE TABLE MYDB.MYSCHEMA.MYTABLE (id INT);`,
+			req: ValidateTablesExistRequest{
+				KnownDatabases: []string{"MYDB", "OTHERDB"},
+				KnownSchemas:   []SchemaEntry{{DB: "OTHERDB", Name: "PUBLIC"}},
+				ResolvedRefs:   []ResolvedRef{},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.req.SQL = tt.sql
+			tt.req.StmtRanges = GetStatementRanges(tt.sql)
+			markers := ValidateTablesExist(tt.req)
+			errs := getErrors(markers)
+			if len(errs) > 0 {
+				t.Errorf("Expected 0 errors for fully-qualified 3-part CREATE TABLE, got %d: %v", len(errs), errs)
 			}
 		})
 	}
