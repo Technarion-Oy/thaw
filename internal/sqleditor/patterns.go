@@ -175,6 +175,7 @@ var (
 		"SELECT": true, "WITH": true, "INSERT": true, "UPDATE": true,
 		"CREATE": true, "ALTER": true, "TRUNCATE": true, "CALL": true,
 		"SHOW": true, "SET": true, "DROP": true, "UNDROP": true,
+		"MERGE": true,
 	}
 )
 
@@ -287,6 +288,61 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 						StartLineNumber: errLine, StartColumn: errCol,
 						EndLineNumber: errLine, EndColumn: errCol + 7,
 						Message:  "Snowflake 'QUALIFY' must come after 'WHERE' or 'HAVING' but before 'ORDER BY'.",
+						Severity: 4,
+					})
+				}
+			}
+		}
+
+		// ── Custom check 5: MERGE statement rules ─────────────────────────
+		if firstTok == "MERGE" {
+			// Find all WHEN clauses
+			reWhen := regexp.MustCompile(`(?i)\bWHEN\s+`)
+			locs := reWhen.FindAllStringIndex(rawText, -1)
+			for i, loc := range locs {
+				start := loc[0]
+				end := len(rawText)
+				if i+1 < len(locs) {
+					end = locs[i+1][0]
+				}
+				clause := rawText[start:end]
+				clauseStripped := strings.TrimSpace(stripCommentsSQL(clause))
+
+				lines := strings.Split(rawText[:start], "\n")
+				errLine := r.StartLine + len(lines) - 1
+				errCol := len(lines[len(lines)-1]) + 1
+
+				// 1. WHEN MATCHED (but NOT 'NOT MATCHED')
+				if regexp.MustCompile(`(?i)^WHEN\s+MATCHED\b`).MatchString(clauseStripped) {
+					if regexp.MustCompile(`(?i)\bTHEN\s+INSERT\b`).MatchString(clauseStripped) {
+						markers = append(markers, DiagMarker{
+							StartLineNumber: errLine, StartColumn: errCol,
+							EndLineNumber: errLine, EndColumn: errCol + 12,
+							Message:  "INSERT action is not allowed in WHEN MATCHED clause. Use UPDATE or DELETE.",
+							Severity: 4,
+						})
+					}
+				}
+
+				// 2. WHEN NOT MATCHED (specifically NOT 'BY SOURCE')
+				if regexp.MustCompile(`(?i)^WHEN\s+NOT\s+MATCHED\b`).MatchString(clauseStripped) &&
+					!regexp.MustCompile(`(?i)\bBY\s+SOURCE\b`).MatchString(clauseStripped) {
+					if regexp.MustCompile(`(?i)\bTHEN\s+(UPDATE|DELETE)\b`).MatchString(clauseStripped) {
+						markers = append(markers, DiagMarker{
+							StartLineNumber: errLine, StartColumn: errCol,
+							EndLineNumber: errLine, EndColumn: errCol + 16,
+							Message:  "UPDATE or DELETE action is not allowed in WHEN NOT MATCHED clause. Use INSERT.",
+							Severity: 4,
+						})
+					}
+				}
+
+				// 3. WHEN NOT MATCHED BY SOURCE (Not supported by Snowflake)
+				if regexp.MustCompile(`(?i)^WHEN\s+NOT\s+MATCHED\s+BY\s+SOURCE\b`).MatchString(clauseStripped) {
+					markers = append(markers, DiagMarker{
+						StartLineNumber: errLine, StartColumn: errCol,
+						EndLineNumber: errLine, EndColumn: errCol + 26,
+						Message:  "WHEN NOT MATCHED BY SOURCE is not supported by Snowflake. Use a subquery with a LEFT JOIN as your source to identify missing rows.",
 						Severity: 4,
 					})
 				}

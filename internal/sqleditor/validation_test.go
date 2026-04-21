@@ -71,6 +71,10 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE TABLE t1 USING TEMPLATE (SELECT * FROM t2)",
 		"CREATE TABLE t1 FROM BACKUP SET 'backup_id'",
 		"CREATE TABLE t1 (id INT) CLUSTER BY (id) ENABLE_SCHEMA_EVOLUTION = TRUE ROW_ACCESS_POLICY p1 ON (id)",
+		// MERGE statements
+		"MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET t.val = s.val WHEN NOT MATCHED THEN INSERT (id, val) VALUES (s.id, s.val)",
+		"MERGE INTO t USING (SELECT * FROM s) AS src ON t.id = src.id WHEN MATCHED AND t.v <> src.v THEN UPDATE SET v = src.v WHEN MATCHED THEN DELETE WHEN NOT MATCHED THEN INSERT ALL BY NAME",
+		"MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE ALL BY NAME",
 	}
 
 	for _, sql := range validQueries {
@@ -106,6 +110,11 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Invalid Drop DB", "DROP DATABASE my_db CASCADE RESTRICT", "Unexpected syntax"},      // Conflicting modifiers
 		{"Invalid Sequence", "CREATE SEQUENCE my_seq START WITH 'abc'", "Unexpected syntax"},
 		{"Invalid Table", "CREATE TRANSIENT OR REPLACE TABLE foo (id INT)", "Unexpected syntax"}, // Wrong modifier order
+
+		// Invalid MERGE
+		{"MERGE INSERT in MATCHED", "MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN INSERT (id) VALUES (s.id)", "not allowed in WHEN MATCHED"},
+		{"MERGE UPDATE in NOT MATCHED", "MERGE INTO t USING s ON t.id = s.id WHEN NOT MATCHED THEN UPDATE SET val = s.val", "not allowed in WHEN NOT MATCHED"},
+		{"MERGE NOT MATCHED BY SOURCE", "MERGE INTO t USING s ON t.id = s.id WHEN NOT MATCHED BY SOURCE THEN DELETE", "not supported by Snowflake"},
 	}
 
 	for _, tt := range tests {
@@ -288,6 +297,10 @@ func TestValidateTablesExist_Valid(t *testing.T) {
 		// USE bare two-part: db.schema (no keyword) with known db and schema
 		"use GOVERNANCE.public;",
 		"use GOVERNANCE.public;\nCREATE TABLE test_1 (id INT);",
+
+		// MERGE statements
+		"MERGE INTO LIVE_TABLE USING (SELECT 1) AS s ON 1=1 WHEN MATCHED THEN UPDATE SET a=1",
+		"CREATE TABLE local_t (id INT);\nMERGE INTO local_t USING LIVE_TABLE AS s ON local_t.id = s.id WHEN NOT MATCHED THEN INSERT (id) VALUES (s.id)",
 	}
 
 	req := ValidateTablesExistRequest{
@@ -338,6 +351,10 @@ func TestValidateTablesExist_Invalid(t *testing.T) {
 		{"USE unknown DB two-part bare", "use database_that_not_exists.PUBLIC;", "database_that_not_exists"},
 		{"USE unknown DB bare one-part", "use database_that_not_exists", "database_that_not_exists"},
 		{"USE known DB unknown schema", "use GOVERNANCE.schema_that_doesnt_exists;", "schema_that_doesnt_exists"},
+
+		// MERGE missing tables
+		{"MERGE Missing Target", "MERGE INTO NOPE_TABLE USING (SELECT 1) AS s ON 1=1 WHEN MATCHED THEN UPDATE SET a=1", "NOPE_TABLE"},
+		{"MERGE Missing Source", "MERGE INTO LIVE_TABLE USING NOPE_SOURCE ON 1=1 WHEN MATCHED THEN UPDATE SET a=1", "NOPE_SOURCE"},
 	}
 
 	req := ValidateTablesExistRequest{

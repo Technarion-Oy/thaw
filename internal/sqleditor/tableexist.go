@@ -116,7 +116,7 @@ var (
 
 	// FROM/JOIN regex for fallback table extraction
 	reFromJoinFallback = regexp.MustCompile(
-		`(?i)(?:FROM|JOIN)\s+(` + _identPath + `)\b`)
+		`(?i)(?:FROM|JOIN|MERGE\s+INTO|USING|INSERT\s+INTO|UPDATE)\s+(` + _identPath + `)\b`)
 
 	// CREATE DYNAMIC TABLE → extract SELECT portion.
 	// Go regexp has no lookahead; capture SELECT|WITH so the caller can slice
@@ -573,7 +573,8 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 
 		// ── SELECT / WITH / CREATE AS SELECT: table existence ─────────
 		firstTok := getFirstSQLToken(raw)
-		if firstTok != "SELECT" && firstTok != "WITH" && firstTok != "CREATE" && firstTok != "UNDROP" {
+		if firstTok != "SELECT" && firstTok != "WITH" && firstTok != "CREATE" && firstTok != "UNDROP" &&
+			firstTok != "MERGE" && firstTok != "INSERT" && firstTok != "UPDATE" && firstTok != "DELETE" {
 			continue
 		}
 		strippedCtx := strings.TrimSpace(stripCommentsSQL(raw))
@@ -638,8 +639,8 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 
 		for _, ft := range fromTables {
 			ftTable := ft.name
-			compareTable := ftTable
-			if strings.ToUpper(compareTable) == "TABLE" && ft.db == "" && ft.schema == "" {
+			compareTable := strings.ToUpper(ftTable)
+			if (compareTable == "TABLE" || joinStopKW[compareTable]) && ft.db == "" && ft.schema == "" {
 				continue
 			}
 			if _, isCTE := cteNames[compareTable]; isCTE {

@@ -1788,7 +1788,7 @@ func ValidateSyntax(sql string) []DiagMarker {
 const idPat = `(?:"[^"]+"|` + `\w+)`
 
 var tableRefRe = regexp.MustCompile(
-	`(?i)(?:FROM|JOIN)\s+` +
+	`(?i)(?:FROM|JOIN|MERGE\s+INTO|USING)\s+` +
 		`(?:` +
 		`(` + idPat + `)\.(` + idPat + `)\.(` + idPat + `)` +
 		`|(` + idPat + `)\.(` + idPat + `)` +
