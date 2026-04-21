@@ -596,6 +596,82 @@ create table my_table (
 	}
 }
 
+// ── 6. ValidateTablesExist — 3-part CREATE TABLE false-alarm regression ───────
+
+// Regression: a CREATE TABLE with a fully-qualified 3-part identifier
+// (DB.SCH.TABLE) must never produce false-alarm errors regardless of whether
+// the database or schema appears in KnownDatabases / KnownSchemas, because the
+// fully-qualified path is self-sufficient and requires no session context.
+func TestValidateTablesExist_ThreePartCreateTable_NoFalseAlarms(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+		req  ValidateTablesExistRequest
+	}{
+		{
+			// Exact reproduction of the reported bug: long random-looking names
+			// that don't appear in the empty known lists.
+			name: "long random names, empty known lists",
+			sql: `create or replace TABLE RAND_DB_7F42E14F3D1E4268BEA3249D68FCCEC6.RAND_SCH_10.OBJ_0CA0A246E2574193A2E18CF1FB92CE94 (
+				ID NUMBER(38,0)
+			);`,
+			req: ValidateTablesExistRequest{
+				KnownDatabases: []string{},
+				KnownSchemas:   []SchemaEntry{},
+				ResolvedRefs:   []ResolvedRef{},
+			},
+		},
+		{
+			// DB is known but no schemas are loaded for it — this was the exact
+			// false alarm: "Schema 'RAND_DB_....RAND_SCH_10' does not exist or
+			// is not authorized." even though the schema does exist in Snowflake.
+			name: "DB known, no schemas loaded for it",
+			sql: `create or replace TABLE RAND_DB_7F42E14F3D1E4268BEA3249D68FCCEC6.RAND_SCH_10.OBJ_0CA0A246E2574193A2E18CF1FB92CE94 (
+				ID NUMBER(38,0)
+			);`,
+			req: ValidateTablesExistRequest{
+				KnownDatabases: []string{"RAND_DB_7F42E14F3D1E4268BEA3249D68FCCEC6"},
+				KnownSchemas:   []SchemaEntry{},
+				ResolvedRefs:   []ResolvedRef{},
+			},
+		},
+		{
+			// Simple names; same logic should hold.
+			name: "simple 3-part name, no session context",
+			sql:  `CREATE TABLE mydb.myschema.mytable (id INT);`,
+			req: ValidateTablesExistRequest{
+				KnownDatabases: []string{},
+				KnownSchemas:   []SchemaEntry{},
+				ResolvedRefs:   []ResolvedRef{},
+			},
+		},
+		{
+			// DB is known, schemas for OTHER databases are loaded, but none for
+			// this specific DB — must not produce a false schema error.
+			// Note: unquoted identifiers are normalised to uppercase internally.
+			name: "DB known, schemas loaded only for other DBs",
+			sql:  `CREATE OR REPLACE TABLE MYDB.MYSCHEMA.MYTABLE (id INT);`,
+			req: ValidateTablesExistRequest{
+				KnownDatabases: []string{"MYDB", "OTHERDB"},
+				KnownSchemas:   []SchemaEntry{{DB: "OTHERDB", Name: "PUBLIC"}},
+				ResolvedRefs:   []ResolvedRef{},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.req.SQL = tt.sql
+			tt.req.StmtRanges = GetStatementRanges(tt.sql)
+			markers := ValidateTablesExist(tt.req)
+			errs := getErrors(markers)
+			if len(errs) > 0 {
+				t.Errorf("Expected 0 errors for fully-qualified 3-part CREATE TABLE, got %d: %v", len(errs), errs)
+			}
+		})
+	}
+}
+
 // ── Helpers for tests ─────────────────────────────────────────────────────────
 
 func min(a, b int) int {
