@@ -61,10 +61,14 @@ export default function QueryPage() {
   const splitResizing  = useRef(false);
   const splitStartY    = useRef(0);
   const splitStartPct  = useRef(0);
+  const splitLivePct   = useRef(editorSplit);
+  const editorAreaRef  = useRef<HTMLDivElement>(null);
   // Vertical (left/right) split state
-  const vSplitResizing  = useRef(false);
-  const vSplitStartX    = useRef(0);
-  const vSplitStartW    = useRef(0);
+  const vSplitResizing    = useRef(false);
+  const vSplitStartX      = useRef(0);
+  const vSplitStartW      = useRef(0);
+  const splitWLive        = useRef(splitEditorWidth);
+  const primaryEditorRef  = useRef<HTMLDivElement>(null);
   const [splitW, setSplitW] = useState(splitEditorWidth);
   const [runningQueryId, setRunningQueryId] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
@@ -287,14 +291,20 @@ export default function QueryPage() {
       if (!parent) return;
       const delta = e.clientX - vSplitStartX.current;
       const pct = vSplitStartW.current + delta / parent.clientWidth;
-      setSplitW(Math.min(0.85, Math.max(0.15, pct)));
+      const clamped = Math.min(0.85, Math.max(0.15, pct));
+      splitWLive.current = clamped;
+      if (primaryEditorRef.current) {
+        primaryEditorRef.current.style.flex = `0 0 ${clamped * 100}%`;
+      }
     };
     const onUp = () => {
       if (!vSplitResizing.current) return;
       vSplitResizing.current = false;
       document.body.style.cursor     = "";
       document.body.style.userSelect = "";
-      setSplitW((w) => { setSplitEditorWidth(w); return w; });
+      const w = splitWLive.current;
+      setSplitW(w);
+      setSplitEditorWidth(w);
     };
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup",   onUp);
@@ -1033,11 +1043,12 @@ export default function QueryPage() {
       {/* SQL Editor — top portion (resizable) */}
       {!activeDiff && !isNotebookTab && (
         <div
+          ref={editorAreaRef}
           className="editor-area"
           style={{ flex: `0 0 ${splitPct * 100}%`, borderBottom: "1px solid var(--border)", overflow: "hidden", display: "flex" }}
         >
           {/* Primary editor */}
-          <div style={{ flex: splitTabId ? `0 0 ${splitW * 100}%` : "1 1 100%", overflow: "hidden" }}>
+          <div ref={primaryEditorRef} style={{ flex: splitTabId ? `0 0 ${splitW * 100}%` : "1 1 100%", overflow: "hidden" }}>
             <SqlEditor activeStmtIdx={activeStmtIdx} />
           </div>
 
@@ -1052,7 +1063,7 @@ export default function QueryPage() {
               onMouseDown={(e) => {
                 vSplitResizing.current = true;
                 vSplitStartX.current  = e.clientX;
-                vSplitStartW.current  = splitW;
+                vSplitStartW.current  = splitWLive.current;
                 document.body.style.cursor     = "col-resize";
                 document.body.style.userSelect = "none";
                 e.preventDefault();
@@ -1100,7 +1111,7 @@ export default function QueryPage() {
           onMouseDown={(e) => {
             splitResizing.current = true;
             splitStartY.current   = e.clientY;
-            splitStartPct.current = splitPct;
+            splitStartPct.current = splitLivePct.current;
             document.body.style.cursor     = "row-resize";
             document.body.style.userSelect = "none";
             e.preventDefault();
@@ -1109,17 +1120,19 @@ export default function QueryPage() {
               if (!parent) return;
               const delta = ev.clientY - splitStartY.current;
               const pct = splitStartPct.current + delta / parent.clientHeight;
-              setSplitPct(Math.min(0.85, Math.max(0.15, pct)));
+              const clamped = Math.min(0.85, Math.max(0.15, pct));
+              splitLivePct.current = clamped;
+              if (editorAreaRef.current) {
+                editorAreaRef.current.style.flex = `0 0 ${clamped * 100}%`;
+              }
             };
-            const onUp = (ev: MouseEvent) => {
+            const onUp = () => {
               splitResizing.current = false;
               document.body.style.cursor     = "";
               document.body.style.userSelect = "";
-              if (parent) {
-                const delta = ev.clientY - splitStartY.current;
-                const pct = splitStartPct.current + delta / parent.clientHeight;
-                setEditorSplit(Math.min(0.85, Math.max(0.15, pct)));
-              }
+              const pct = splitLivePct.current;
+              setSplitPct(pct);
+              setEditorSplit(pct);
               window.removeEventListener("mousemove", onMove);
               window.removeEventListener("mouseup",   onUp);
             };
