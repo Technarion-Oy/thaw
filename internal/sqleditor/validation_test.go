@@ -77,6 +77,8 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE OR ALTER TABLE t (id INT, val VARCHAR)",
 		// Integrations
 		"CREATE STORAGE INTEGRATION my_storage_int TYPE=EXTERNAL_STAGE STORAGE_PROVIDER='S3' ENABLED=TRUE STORAGE_AWS_ROLE_ARN='arn:aws:iam::123456789012:role/my_role' STORAGE_ALLOWED_LOCATIONS=('s3://my-bucket/')",
+		"CREATE STAGE my_s3_stage URL='s3://bucket/' STORAGE_INTEGRATION=s3_int DIRECTORY=(ENABLE=TRUE)",
+		"CREATE WAREHOUSE my_wh WAREHOUSE_SIZE='X-LARGE' WAREHOUSE_TYPE='STANDARD' AUTO_SUSPEND=300",
 		// MERGE statements
 		"MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET t.val = s.val WHEN NOT MATCHED THEN INSERT (id, val) VALUES (s.id, s.val)",
 		"MERGE INTO t USING (SELECT * FROM s) AS src ON t.id = src.id WHEN MATCHED AND t.v <> src.v THEN UPDATE SET v = src.v WHEN MATCHED THEN DELETE WHEN NOT MATCHED THEN INSERT ALL BY NAME",
@@ -131,6 +133,23 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Notification Integration invalid type", "CREATE NOTIFICATION INTEGRATION bad_notify_int TYPE=WEBHOOK ENABLED=TRUE WEBHOOK_URL='https://my-slack-webhook.com'", "Invalid TYPE for Notification Integration"},
 		{"Security Integration missing type", "CREATE SECURITY INTEGRATION bad_sec_int ENABLED=TRUE OAUTH_CLIENT=CUSTOM OAUTH_CLIENT_TYPE='CONFIDENTIAL'", "Missing required parameter TYPE"},
 		{"External Access Integration invalid property", "CREATE EXTERNAL ACCESS INTEGRATION bad_ext_access ALLOWED_NETWORK_RULES=(github_api_network_rule) MAX_RETRIES=5 ENABLED=TRUE", "Unexpected property 'MAX_RETRIES'"},
+
+		// Account-level prefix checks
+		{"Warehouse with prefix", "CREATE WAREHOUSE MY_DB.PUBLIC.BAD_WH WITH WAREHOUSE_SIZE = 'SMALL'", "cannot have a database or schema prefix"},
+		{"Role with prefix", "CREATE ROLE MY_DB.PUBLIC.BAD_ROLE", "cannot have a database or schema prefix"},
+		{"User with prefix", "CREATE USER MY_DB.PUBLIC.BAD_USER PASSWORD='abc'", "cannot have a database or schema prefix"},
+
+		// Property validation
+		{"Warehouse invalid param", "CREATE WAREHOUSE broken_wh WITH WAREHOUSE_SIZE='MEDIUM' AUTO_SHUTDOWN=600", "Unexpected property 'AUTO_SHUTDOWN'"},
+		{"Resource Monitor invalid param", "CREATE RESOURCE MONITOR bad_rm WITH MAX_CREDITS=500", "Unexpected property 'MAX_CREDITS'"},
+		{"Stage invalid param", "CREATE STAGE my_stage BUCKET_URL='s3://bucket/'", "Unexpected property 'BUCKET_URL'"},
+		{"Task invalid param", "CREATE TASK my_task WAREHOUSE=WH SCHEDULE='10 MINUTE' RETRY_LIMIT=5 AS SELECT 1", "Unexpected property 'RETRY_LIMIT'"},
+		{"User invalid param", "CREATE USER bad_user IS_ACTIVE=TRUE", "Unexpected property 'IS_ACTIVE'"},
+		{"User with Warehouse param", "CREATE USER bad_user WAREHOUSE_SIZE='SMALL'", "Unexpected property 'WAREHOUSE_SIZE'"},
+
+		// Other syntax
+		{"Grant role to table", "GRANT ROLE my_role TO TABLE my_table", "Unexpected syntax"},
+		{"Masking policy missing returns", "CREATE MASKING POLICY bad_mask AS (val string) -> CASE WHEN 1=1 THEN val END", "Missing RETURNS clause"},
 	}
 
 	for _, tt := range tests {

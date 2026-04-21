@@ -34,14 +34,14 @@ var (
 	reSnowflakeFP = regexp.MustCompile(
 		`(?i)\bTABLESAMPLE\b|\bSAMPLE\s*\(|\bWITHIN\s+GROUP\b|\bCONNECT\s+BY\b` +
 			`|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b` +
-			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:TASK|STREAM|STAGE|PIPE|FUNCTION|PROCEDURE|AGGREGATE` +
-			`|WAREHOUSE|ROLE|FILE\s+FORMAT|USER|ALERT|SHARE` +
-			`|MASKING|NETWORK|RESOURCE|ROW\s+ACCESS` +
+			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:STREAM|STAGE|PIPE|FUNCTION|PROCEDURE|AGGREGATE` +
+			`|FILE\s+FORMAT|ALERT|SHARE` +
+			`|NETWORK|ROW\s+ACCESS` +
 			`|SESSION|PASSWORD|REPLICATION|FAILOVER|APPLICATION)\b` +
-			`|ALTER\s+(?:TABLE|VIEW|TASK|STREAM|WAREHOUSE|DATABASE|STAGE|PIPE` +
-			`|USER|ALERT|SHARE|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK` +
-			`|RESOURCE|REPLICATION|FAILOVER)\b` +
-			`|DROP\s+(?:TABLE|VIEW|TASK|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|WAREHOUSE|ROLE)\b` +
+			`|ALTER\s+(?:TABLE|VIEW|STREAM|DATABASE|STAGE|PIPE` +
+			`|ALERT|SHARE|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK` +
+			`|REPLICATION|FAILOVER)\b` +
+			`|DROP\s+(?:TABLE|VIEW|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION)\b` +
 			`|UNDROP\s+(?:DATABASE|SCHEMA|TABLE)\b` +
 			`|INSERT\s+OVERWRITE\b` +
 			`|TRUNCATE\s+\S+\s+IF\b` +
@@ -175,12 +175,60 @@ var (
 	reIntegrationType    = regexp.MustCompile(`(?i)\bTYPE\s*=\s*([a-zA-Z_0-9]+)`)
 	reIntegrationProvider = regexp.MustCompile(`(?i)\b(?:STORAGE|API)_PROVIDER\s*=\s*('[^']+'|[a-zA-Z_0-9]+)`)
 
+	// ── CREATE WAREHOUSE ──────────────────────────────────────────────────────
+	reIsCreateWarehouse = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?WAREHOUSE\b`)
+	whProps             = strings.Join([]string{
+		`WAREHOUSE_SIZE`, `WAREHOUSE_TYPE`, `MAX_CLUSTER_COUNT`, `MIN_CLUSTER_COUNT`, `SCALING_POLICY`,
+		`AUTO_SUSPEND`, `AUTO_RESUME`, `RESOURCE_MONITOR`, `COMMENT`,
+		`ENABLE_QUERY_ACCELERATION`, `QUERY_ACCELERATION_MAX_SCALE_FACTOR`,
+		`MAX_CONCURRENCY_LEVEL`, `STATEMENT_QUEUED_TIMEOUT_IN_SECONDS`, `STATEMENT_TIMEOUT_IN_SECONDS`,
+	}, "|")
+
+	// ── CREATE RESOURCE MONITOR ───────────────────────────────────────────────
+	reIsCreateResourceMonitor = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?RESOURCE\s+MONITOR\b`)
+	rmProps                   = strings.Join([]string{
+		`CREDIT_QUOTA`, `FREQUENCY`, `START_TIMESTAMP`, `END_TIMESTAMP`, `NOTIFY_USERS`,
+	}, "|")
+
+	// ── CREATE TASK ───────────────────────────────────────────────────────────
+	reIsCreateTask = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TASK\b`)
+	taskProps      = strings.Join([]string{
+		`WAREHOUSE`, `USER_TASK_MANAGED_INITIAL_WAREHOUSE_SIZE`, `SCHEDULE`, `CONFIG`,
+		`ALLOW_OVERLAPPING_EXECUTION`, `USER_TASK_TIMEOUT_MS`, `SUSPEND_TASK_AFTER_NUM_FAILURES`,
+		`ERROR_INTEGRATION`, `COMMENT`, `AFTER`, `WHEN`,
+	}, "|")
+
+	// ── CREATE USER ───────────────────────────────────────────────────────────
+	reIsCreateUser = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?USER\b`)
+	userProps      = strings.Join([]string{
+		`PASSWORD`, `LOGIN_NAME`, `DISPLAY_NAME`, `FIRST_NAME`, `MIDDLE_NAME`, `LAST_NAME`,
+		`EMAIL`, `MUST_CHANGE_PASSWORD`, `DISABLED`, `DAYS_TO_EXPIRY`, `MINS_TO_UNLOCK`,
+		`DEFAULT_WAREHOUSE`, `DEFAULT_NAMESPACE`, `DEFAULT_ROLE`, `RSA_PUBLIC_KEY`,
+		`RSA_PUBLIC_KEY_2`, `COMMENT`, `TYPE`,
+	}, "|")
+
+	// ── CREATE ROLE ───────────────────────────────────────────────────────────
+	reIsCreateRole = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?ROLE\b`)
+
+	// ── CREATE MASKING POLICY ─────────────────────────────────────────────────
+	reIsCreateMaskingPolicy = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?MASKING\s+POLICY\b`)
+
+	// ── GRANT ─────────────────────────────────────────────────────────────────
+	reIsGrantRole = regexp.MustCompile(`(?i)^\s*GRANT\s+ROLE\b`)
+
+	// ── CREATE STAGE ──────────────────────────────────────────────────────────
+	reIsCreateStage = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?STAGE\b`)
+	stageProps      = strings.Join([]string{
+		`URL`, `STORAGE_INTEGRATION`, `FILE_FORMAT`, `COPY_OPTIONS`, `COMMENT`, `ENCRYPTION`,
+		`DIRECTORY`, `ENABLE`, `REFRESH_ON_CREATE`, `AUTO_REFRESH`, `MASTER_KEY`,
+	}, "|")
+
 	// ── Parseable keywords ────────────────────────────────────────────────────
 	parseableKWs = map[string]bool{
 		"SELECT": true, "WITH": true, "INSERT": true, "UPDATE": true,
 		"CREATE": true, "ALTER": true, "TRUNCATE": true, "CALL": true,
 		"SHOW": true, "SET": true, "DROP": true, "UNDROP": true,
-		"MERGE": true,
+		"MERGE": true, "GRANT": true, "REVOKE": true,
 	}
 )
 
@@ -501,6 +549,77 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
+		// ── Preamble: CREATE WAREHOUSE ────────────────────────────────────
+		if reIsCreateWarehouse.MatchString(parseText) {
+			if m := regexp.MustCompile(`(?i)WAREHOUSE\s+(` + _identPath + `)`).FindStringSubmatch(parseText); m != nil {
+				if strings.Contains(m[1], ".") {
+					markers = append(markers, diagMarkerSpan(r, "Warehouses are account-level objects and cannot have a database or schema prefix.", 4))
+				}
+			}
+			validateProperties(parseText, whProps, r, &markers)
+			continue
+		}
+
+		// ── Preamble: CREATE RESOURCE MONITOR ────────────────────────────
+		if reIsCreateResourceMonitor.MatchString(parseText) {
+			validateProperties(parseText, rmProps, r, &markers)
+			continue
+		}
+
+		// ── Preamble: CREATE TASK ────────────────────────────────────────
+		if reIsCreateTask.MatchString(parseText) {
+			// Tasks ARE schema objects, so they CAN have prefixes. No account-level check.
+			// Validate properties up to the AS keyword
+			asIdx := regexp.MustCompile(`(?i)\bAS\b`).FindStringIndex(parseText)
+			if asIdx != nil {
+				validateProperties(parseText[:asIdx[0]], taskProps, r, &markers)
+			}
+			continue
+		}
+
+		// ── Preamble: CREATE USER ────────────────────────────────────────
+		if reIsCreateUser.MatchString(parseText) {
+			if m := regexp.MustCompile(`(?i)USER\s+(` + _identPath + `)`).FindStringSubmatch(parseText); m != nil {
+				if strings.Contains(m[1], ".") {
+					markers = append(markers, diagMarkerSpan(r, "Users are account-level objects and cannot have a database or schema prefix.", 4))
+				}
+			}
+			validateProperties(parseText, userProps, r, &markers)
+			continue
+		}
+
+		// ── Preamble: CREATE ROLE ────────────────────────────────────────
+		if reIsCreateRole.MatchString(parseText) {
+			if m := regexp.MustCompile(`(?i)ROLE\s+(` + _identPath + `)`).FindStringSubmatch(parseText); m != nil {
+				if strings.Contains(m[1], ".") {
+					markers = append(markers, diagMarkerSpan(r, "Roles are account-level objects and cannot have a database or schema prefix.", 4))
+				}
+			}
+			continue
+		}
+
+		// ── Preamble: CREATE MASKING POLICY ──────────────────────────────
+		if reIsCreateMaskingPolicy.MatchString(parseText) {
+			if !regexp.MustCompile(`(?i)\bRETURNS\b`).MatchString(parseText) {
+				markers = append(markers, diagMarkerSpan(r, "Missing RETURNS clause in Masking Policy definition.", 4))
+			}
+			continue
+		}
+
+		// ── Preamble: CREATE STAGE ───────────────────────────────────────
+		if reIsCreateStage.MatchString(parseText) {
+			validateProperties(parseText, stageProps, r, &markers)
+			continue
+		}
+
+		// ── GRANT ────────────────────────────────────────────────────────
+		if reIsGrantRole.MatchString(parseText) {
+			if regexp.MustCompile(`(?i)\bTO\s+TABLE\b`).MatchString(parseText) {
+				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: Roles can be granted to other roles or users, but not directly to tables.", 4))
+			}
+			continue
+		}
+
 		// ── Skip Snowflake false-positive statements ──────────────────────
 		// (statements with Snowflake-specific syntax that the parser can't
 		// handle; we emit no error for these)
@@ -759,6 +878,20 @@ func processColumnDef(seg string, segOffset int, onTypeFound func(string, int)) 
 		typeToken := tokens[1]
 		if !strings.HasPrefix(typeToken.text, `"`) {
 			onTypeFound(typeToken.text, typeToken.offset)
+		}
+	}
+}
+
+// validateProperties scans s for words that look like property keys (KEY =)
+// and checks if they match the pipe-separated list of validProps.
+func validateProperties(s string, validProps string, r StatementRange, markers *[]DiagMarker) {
+	reProp := regexp.MustCompile(`(?i)\b([a-zA-Z_0-9]+)\s*=`)
+	reValid := regexp.MustCompile(`(?i)^(` + validProps + `)$`)
+
+	for _, m := range reProp.FindAllStringSubmatch(s, -1) {
+		key := m[1]
+		if !reValid.MatchString(key) {
+			*markers = append(*markers, diagMarkerSpan(r, fmt.Sprintf("Unexpected property '%s' in statement.", key), 4))
 		}
 	}
 }
