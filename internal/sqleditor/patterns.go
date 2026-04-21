@@ -35,8 +35,8 @@ var (
 		`(?i)\bTABLESAMPLE\b|\bSAMPLE\s*\(|\bWITHIN\s+GROUP\b|\bCONNECT\s+BY\b` +
 			`|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b` +
 			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:TASK|STREAM|STAGE|PIPE|FUNCTION|PROCEDURE|AGGREGATE` +
-			`|WAREHOUSE|ROLE|FILE\s+FORMAT|USER|ALERT|SHARE|EXTERNAL` +
-			`|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK|RESOURCE|ROW\s+ACCESS` +
+			`|WAREHOUSE|ROLE|FILE\s+FORMAT|USER|ALERT|SHARE` +
+			`|MASKING|NETWORK|RESOURCE|ROW\s+ACCESS` +
 			`|SESSION|PASSWORD|REPLICATION|FAILOVER|APPLICATION)\b` +
 			`|ALTER\s+(?:TABLE|VIEW|TASK|STREAM|WAREHOUSE|DATABASE|STAGE|PIPE` +
 			`|USER|ALERT|SHARE|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK` +
@@ -168,6 +168,12 @@ var (
 	reDynHasTargetLag  = regexp.MustCompile(`(?i)\bTARGET_LAG\s*=`)
 	reDynHasWarehouse  = regexp.MustCompile(`(?i)\bWAREHOUSE\s*=`)
 	reDynHasAs         = regexp.MustCompile(`(?i)\bAS\s+(?:SELECT|WITH)\b`)
+
+	// ── CREATE INTEGRATION ────────────────────────────────────────────────────
+	reIsCreateIntegration = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:STORAGE|API|NOTIFICATION|SECURITY|EXTERNAL\s+ACCESS)\s+INTEGRATION\b`)
+	reIntegrationName    = regexp.MustCompile(`(?i)INTEGRATION\s+(` + _identPath + `)`)
+	reIntegrationType    = regexp.MustCompile(`(?i)\bTYPE\s*=\s*([a-zA-Z_0-9]+)`)
+	reIntegrationProvider = regexp.MustCompile(`(?i)\b(?:STORAGE|API)_PROVIDER\s*=\s*('[^']+'|[a-zA-Z_0-9]+)`)
 
 	// ── Parseable keywords ────────────────────────────────────────────────────
 	parseableKWs = map[string]bool{
@@ -455,6 +461,42 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 				!reDynHasWarehouse.MatchString(parseText) ||
 				!reDynHasAs.MatchString(parseText) {
 				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE DYNAMIC TABLE statement.", 4))
+			}
+			continue
+		}
+
+		// ── Preamble: CREATE INTEGRATION ─────────────────────────────────
+		if reIsCreateIntegration.MatchString(parseText) {
+			// 1. Account-level check: no prefix allowed
+			if m := reIntegrationName.FindStringSubmatch(parseText); m != nil {
+				name := m[1]
+				if strings.Contains(name, ".") {
+					markers = append(markers, diagMarkerSpan(r, "Integrations are account-level objects and cannot have a database or schema prefix.", 4))
+				}
+			}
+
+			// 2. Type-specific checks
+			upper := strings.ToUpper(parseText)
+			switch {
+			case strings.Contains(upper, "API INTEGRATION"):
+				if !reIntegrationProvider.MatchString(parseText) {
+					markers = append(markers, diagMarkerSpan(r, "Missing required parameter API_PROVIDER for API Integration.", 4))
+				}
+			case strings.Contains(upper, "NOTIFICATION INTEGRATION"):
+				if m := reIntegrationType.FindStringSubmatch(parseText); m != nil {
+					t := strings.ToUpper(m[1])
+					if t != "EMAIL" && t != "QUEUE" {
+						markers = append(markers, diagMarkerSpan(r, "Invalid TYPE for Notification Integration. Valid types are EMAIL, QUEUE.", 4))
+					}
+				}
+			case strings.Contains(upper, "SECURITY INTEGRATION"):
+				if !reIntegrationType.MatchString(parseText) {
+					markers = append(markers, diagMarkerSpan(r, "Missing required parameter TYPE for Security Integration.", 4))
+				}
+			case strings.Contains(upper, "EXTERNAL ACCESS INTEGRATION"):
+				if regexp.MustCompile(`(?i)\bMAX_RETRIES\s*=`).MatchString(parseText) {
+					markers = append(markers, diagMarkerSpan(r, "Unexpected property 'MAX_RETRIES' for External Access Integration.", 4))
+				}
 			}
 			continue
 		}
