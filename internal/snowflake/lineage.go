@@ -33,17 +33,17 @@ type SchemaRef struct {
 // DependencyNode is one node in the recursive dependency tree returned by
 // GetObjectDependencies.
 type DependencyNode struct {
-	Name     string           `json:"name"`
-	Schema   string           `json:"schema"`
-	Database string           `json:"database"`
+	Name     string `json:"name"`
+	Schema   string `json:"schema"`
+	Database string `json:"database"`
 	// Kind is one of TABLE, VIEW, PROCEDURE, FUNCTION, UNKNOWN.
 	Kind     string           `json:"kind"`
 	Children []DependencyNode `json:"children"`
 	// Circular is true when this node was already encountered in the current
 	// tree (prevents infinite expansion of cyclic or shared dependencies).
-	Circular bool             `json:"circular,omitempty"`
+	Circular bool `json:"circular,omitempty"`
 	// Error contains a short description when the object could not be resolved.
-	Error    string           `json:"error,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 // sqlRef is an unresolved reference extracted from a SQL body.
@@ -88,10 +88,15 @@ var (
 	reInto   = regexp.MustCompile(`(?i)\bINTO\s+(` + identPat + `)`)
 	reUpdate = regexp.MustCompile(`(?i)\bUPDATE\s+(` + identPat + `)`)
 	reMerge  = regexp.MustCompile(`(?i)\bMERGE\s+INTO\s+(` + identPat + `)`)
+	reClone  = regexp.MustCompile(`(?i)\bCLONE\s+(` + identPat + `)`)
 	// USING captures the source table/view in MERGE ... USING <source>.
 	// In JOIN ... USING (col) the token after USING starts with "(" which
 	// does not match identPat, so JOIN columns are never picked up here.
 	reUsing = regexp.MustCompile(`(?i)\bUSING\s+(` + identPat + `)`)
+
+	// reNextTable matches comma-separated identifiers in a FROM clause,
+	// accounting for optional aliases.
+	reNextTable = regexp.MustCompile(`(?i)^(?:\s+(?:AS\s+)?(?:"[^"]*"|\w+))?\s*,\s*(` + identPat + `)`)
 
 	// Procedure calls
 	reCall = regexp.MustCompile(`(?i)\bCALL\s+(` + identPat + `)\s*\(`)
@@ -530,13 +535,27 @@ func parseSQLReferences(sql, defaultDB, defaultSchema string) []sqlRef {
 	}
 
 	// Table / view patterns (order does not matter; deduplication runs later).
-	for _, pat := range []*regexp.Regexp{reFrom, reJoin, reInto, reUpdate, reUsing} {
-		for _, m := range pat.FindAllStringSubmatch(sql, -1) {
-			addRef(m[1], false)
+	for _, pat := range []*regexp.Regexp{reFrom, reJoin, reInto, reUpdate, reUsing, reMerge, reClone} {
+		if pat == reFrom {
+			for _, m := range pat.FindAllStringSubmatchIndex(sql, -1) {
+				addRef(sql[m[2]:m[3]], false)
+				rest := sql[m[1]:]
+				for {
+					nm := reNextTable.FindStringSubmatchIndex(rest)
+					if nm == nil {
+						break
+					}
+					addRef(rest[nm[2]:nm[3]], false)
+					rest = rest[nm[1]:]
+				}
+			}
+		} else {
+			for _, m := range pat.FindAllStringSubmatch(sql, -1) {
+				if len(m) > 1 {
+					addRef(m[1], false)
+				}
+			}
 		}
-	}
-	for _, m := range reMerge.FindAllStringSubmatch(sql, -1) {
-		addRef(m[1], false)
 	}
 	// Procedure calls.
 	for _, m := range reCall.FindAllStringSubmatch(sql, -1) {
@@ -612,10 +631,25 @@ func RewriteSQLReferences(sql, defaultDB, defaultSchema string, lookup func(db, 
 		seen[raw] = true
 	}
 
-	for _, pat := range []*regexp.Regexp{reFrom, reJoin, reInto, reUpdate, reUsing, reMerge} {
-		for _, m := range pat.FindAllStringSubmatch(noComments, -1) {
-			if len(m) > 1 {
-				consider(m[1])
+	for _, pat := range []*regexp.Regexp{reFrom, reJoin, reInto, reUpdate, reUsing, reMerge, reClone} {
+		if pat == reFrom {
+			for _, m := range pat.FindAllStringSubmatchIndex(noComments, -1) {
+				consider(noComments[m[2]:m[3]])
+				rest := noComments[m[1]:]
+				for {
+					nm := reNextTable.FindStringSubmatchIndex(rest)
+					if nm == nil {
+						break
+					}
+					consider(rest[nm[2]:nm[3]])
+					rest = rest[nm[1]:]
+				}
+			}
+		} else {
+			for _, m := range pat.FindAllStringSubmatch(noComments, -1) {
+				if len(m) > 1 {
+					consider(m[1])
+				}
 			}
 		}
 	}

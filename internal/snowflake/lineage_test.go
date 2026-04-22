@@ -49,10 +49,10 @@ func TestStripQuotes(t *testing.T) {
 		{`"table with spaces"`, `table with spaces`},
 		{`"dot.in.name"`, `dot.in.name`},
 		{`"mixed CASE Table"`, `mixed CASE Table`},
-		{`  "padded"  `, `padded`},           // TrimSpace applied before stripping
-		{`""`, ``},                             // empty quoted ident
-		{`"`, `"`},                             // single quote — not valid, returned as-is
-		{`"unclosed`, `"unclosed`},             // no closing quote
+		{`  "padded"  `, `padded`},                               // TrimSpace applied before stripping
+		{`""`, ``},                                               // empty quoted ident
+		{`"`, `"`},                                               // single quote — not valid, returned as-is
+		{`"unclosed`, `"unclosed`},                               // no closing quote
 		{`"""double-quote-inside"""`, `""double-quote-inside""`}, // one outer pair stripped, inner pair remains
 		{`SCHEMA`, `SCHEMA`},
 	}
@@ -739,13 +739,13 @@ func TestRewriteSQLReferences(t *testing.T) {
 	}
 
 	tests := []struct {
-		name         string
-		sql          string
-		defaultDB    string
-		defaultSchema string
-		tables       map[string]string // UPPER(db.schema.name) → replacement
-		views        map[string]string
-		mustContain  []string
+		name           string
+		sql            string
+		defaultDB      string
+		defaultSchema  string
+		tables         map[string]string // UPPER(db.schema.name) → replacement
+		views          map[string]string
+		mustContain    []string
 		mustNotContain []string
 	}{
 		{
@@ -756,7 +756,7 @@ func TestRewriteSQLReferences(t *testing.T) {
     "Date-Of-Purchase"
 FROM LINEAGE_SOURCE_DB."Oddly Named Schema!"."Order Details #1"
 WHERE "From" = 'Web'`,
-			defaultDB:    "LINEAGE_TARGET_DB",
+			defaultDB:     "LINEAGE_TARGET_DB",
 			defaultSchema: "MART",
 			tables: map[string]string{
 				`LINEAGE_SOURCE_DB.ODDLY NAMED SCHEMA!.ORDER DETAILS #1`: `{{ source('lineage_source_db_oddly named schema_', 'Order Details #1') }}`,
@@ -771,9 +771,9 @@ WHERE "From" = 'Web'`,
 			},
 		},
 		{
-			name: "view referencing another view becomes ref()",
-			sql:  `SELECT * FROM MY_DB.MY_SCHEMA.MY_VIEW`,
-			defaultDB:    "MY_DB",
+			name:          "view referencing another view becomes ref()",
+			sql:           `SELECT * FROM MY_DB.MY_SCHEMA.MY_VIEW`,
+			defaultDB:     "MY_DB",
 			defaultSchema: "MY_SCHEMA",
 			views: map[string]string{
 				"MY_DB.MY_SCHEMA.MY_VIEW": "{{ ref('stg_my_view') }}",
@@ -782,17 +782,17 @@ WHERE "From" = 'Web'`,
 			mustNotContain: []string{"MY_DB.MY_SCHEMA.MY_VIEW"},
 		},
 		{
-			name: "unknown reference left unchanged",
-			sql:  `SELECT * FROM EXTERNAL_DB.EXTERNAL_SCHEMA.SOME_TABLE`,
-			defaultDB:    "MY_DB",
+			name:          "unknown reference left unchanged",
+			sql:           `SELECT * FROM EXTERNAL_DB.EXTERNAL_SCHEMA.SOME_TABLE`,
+			defaultDB:     "MY_DB",
 			defaultSchema: "MY_SCHEMA",
-			mustContain:    []string{"EXTERNAL_DB.EXTERNAL_SCHEMA.SOME_TABLE"},
+			mustContain:   []string{"EXTERNAL_DB.EXTERNAL_SCHEMA.SOME_TABLE"},
 		},
 		{
 			name: "CTE aliases are not replaced",
 			sql: `WITH orders AS (SELECT * FROM MY_DB.STAGING.RAW_ORDERS)
 SELECT * FROM orders`,
-			defaultDB:    "MY_DB",
+			defaultDB:     "MY_DB",
 			defaultSchema: "STAGING",
 			tables: map[string]string{
 				"MY_DB.STAGING.RAW_ORDERS": "{{ source('my_db_staging', 'RAW_ORDERS') }}",
@@ -802,9 +802,9 @@ SELECT * FROM orders`,
 			// "FROM orders" must remain (CTE alias, not replaced)
 		},
 		{
-			name: "single-part bare name is not replaced (ambiguous)",
-			sql:  `SELECT * FROM ORDERS`,
-			defaultDB:    "MY_DB",
+			name:          "single-part bare name is not replaced (ambiguous)",
+			sql:           `SELECT * FROM ORDERS`,
+			defaultDB:     "MY_DB",
 			defaultSchema: "MY_SCHEMA",
 			tables: map[string]string{
 				"MY_DB.MY_SCHEMA.ORDERS": "{{ source('my_db_my_schema', 'ORDERS') }}",
@@ -813,9 +813,9 @@ SELECT * FROM orders`,
 			mustContain: []string{"FROM ORDERS"},
 		},
 		{
-			name: "two-part schema.table is replaced",
-			sql:  `SELECT * FROM MY_SCHEMA.MY_TABLE`,
-			defaultDB:    "MY_DB",
+			name:          "two-part schema.table is replaced",
+			sql:           `SELECT * FROM MY_SCHEMA.MY_TABLE`,
+			defaultDB:     "MY_DB",
 			defaultSchema: "MY_SCHEMA",
 			tables: map[string]string{
 				"MY_DB.MY_SCHEMA.MY_TABLE": "{{ source('my_db_my_schema', 'MY_TABLE') }}",
@@ -828,7 +828,7 @@ SELECT * FROM orders`,
 			sql: `SELECT a.*, b.*
 FROM DB.S1.TABLE_A a
 JOIN DB.S1.TABLE_B b ON a.id = b.id`,
-			defaultDB:    "DB",
+			defaultDB:     "DB",
 			defaultSchema: "S1",
 			tables: map[string]string{
 				"DB.S1.TABLE_A": "{{ source('db_s1', 'TABLE_A') }}",
@@ -844,7 +844,7 @@ JOIN DB.S1.TABLE_B b ON a.id = b.id`,
 			name: "reference inside comment is also replaced (acceptable side effect)",
 			sql: `-- reads from MY_DB.MY_SCHEMA.MY_TABLE
 SELECT * FROM MY_DB.MY_SCHEMA.MY_TABLE`,
-			defaultDB:    "MY_DB",
+			defaultDB:     "MY_DB",
 			defaultSchema: "MY_SCHEMA",
 			tables: map[string]string{
 				"MY_DB.MY_SCHEMA.MY_TABLE": "{{ source('my_db_my_schema', 'MY_TABLE') }}",
@@ -853,8 +853,8 @@ SELECT * FROM MY_DB.MY_SCHEMA.MY_TABLE`,
 			mustNotContain: []string{"FROM MY_DB.MY_SCHEMA.MY_TABLE"},
 		},
 		{
-			name: "no references → SQL unchanged",
-			sql:  `SELECT 1 AS n`,
+			name:      "no references → SQL unchanged",
+			sql:       `SELECT 1 AS n`,
 			defaultDB: "DB", defaultSchema: "S",
 			mustContain: []string{"SELECT 1 AS n"},
 		},
@@ -909,10 +909,10 @@ UNION ALL
 SELECT user_id, 'signup'   AS kind FROM AUTH_DB.ACCOUNTS.SIGNUPS`,
 			defaultDB: "BI", defaultSchema: "PUBLIC",
 			tables: map[string]string{
-				"TRACK_DB.EVENTS.CLICKS":        "{{ source('track_db_events', 'CLICKS') }}",
-				"TRACK_DB.EVENTS.PAGEVIEWS":     "{{ source('track_db_events', 'PAGEVIEWS') }}",
-				"COMMERCE_DB.ORDERS.PURCHASES":  "{{ source('commerce_db_orders', 'PURCHASES') }}",
-				"AUTH_DB.ACCOUNTS.SIGNUPS":      "{{ source('auth_db_accounts', 'SIGNUPS') }}",
+				"TRACK_DB.EVENTS.CLICKS":       "{{ source('track_db_events', 'CLICKS') }}",
+				"TRACK_DB.EVENTS.PAGEVIEWS":    "{{ source('track_db_events', 'PAGEVIEWS') }}",
+				"COMMERCE_DB.ORDERS.PURCHASES": "{{ source('commerce_db_orders', 'PURCHASES') }}",
+				"AUTH_DB.ACCOUNTS.SIGNUPS":     "{{ source('auth_db_accounts', 'SIGNUPS') }}",
 			},
 			mustContain: []string{
 				"{{ source('track_db_events', 'CLICKS') }}",
@@ -981,9 +981,9 @@ SELECT * FROM enriched`,
 			mustContain: []string{
 				"{{ source('prod_sources', 'EVENTS') }}",
 				"{{ source('prod_sources', 'USERS') }}",
-				"FROM raw_data",    // CTE alias: single-part, not replaced
-				"FROM filtered f",  // CTE alias: single-part, not replaced
-				"FROM enriched",    // CTE alias: single-part, not replaced
+				"FROM raw_data",   // CTE alias: single-part, not replaced
+				"FROM filtered f", // CTE alias: single-part, not replaced
+				"FROM enriched",   // CTE alias: single-part, not replaced
 			},
 			mustNotContain: []string{
 				"PROD.SOURCES.EVENTS",
@@ -1018,8 +1018,8 @@ WHERE u.id IN (
 			},
 		},
 		{
-			name: "case-insensitive lookup: lowercase SQL ref matches uppercase key",
-			sql:  `SELECT * FROM mydb.myschema.mytable`,
+			name:      "case-insensitive lookup: lowercase SQL ref matches uppercase key",
+			sql:       `SELECT * FROM mydb.myschema.mytable`,
 			defaultDB: "MYDB", defaultSchema: "MYSCHEMA",
 			tables: map[string]string{
 				"MYDB.MYSCHEMA.MYTABLE": "{{ source('mydb_myschema', 'MYTABLE') }}",
@@ -1048,7 +1048,7 @@ JOIN DB.PUBLIC.MY_TABLE t ON t.id = 1`,
 				"DB.PUBLIC.MY_TABLE": "{{ source('db_public', 'MY_TABLE') }}",
 			},
 			mustContain: []string{
-				"DB.INFORMATION_SCHEMA.TABLES",      // left unchanged
+				"DB.INFORMATION_SCHEMA.TABLES",          // left unchanged
 				"{{ source('db_public', 'MY_TABLE') }}", // known ref replaced
 			},
 			mustNotContain: []string{"DB.PUBLIC.MY_TABLE"},
@@ -1149,8 +1149,8 @@ SELECT * FROM PROD.SOURCES.ORDERS`,
 			mustNotContain: []string{"PROD.SOURCES.RAW_ORDERS"},
 		},
 		{
-			name: "mixed two-part schema.table replaced via defaultDB resolution",
-			sql:  `SELECT * FROM SALES.ORDERS o JOIN SALES.CUSTOMERS c ON o.cust_id = c.id`,
+			name:      "mixed two-part schema.table replaced via defaultDB resolution",
+			sql:       `SELECT * FROM SALES.ORDERS o JOIN SALES.CUSTOMERS c ON o.cust_id = c.id`,
 			defaultDB: "MYDB", defaultSchema: "SALES",
 			tables: map[string]string{
 				"MYDB.SALES.ORDERS":    "{{ source('mydb_sales', 'ORDERS') }}",
@@ -1169,7 +1169,7 @@ SELECT action, CURRENT_TIMESTAMP
 FROM STAGING.EVENTS.RAW_ACTIONS`,
 			defaultDB: "PROD", defaultSchema: "AUDIT",
 			tables: map[string]string{
-				"PROD.AUDIT.EVENT_LOG":        "{{ source('prod_audit', 'EVENT_LOG') }}",
+				"PROD.AUDIT.EVENT_LOG":       "{{ source('prod_audit', 'EVENT_LOG') }}",
 				"STAGING.EVENTS.RAW_ACTIONS": "{{ source('staging_events', 'RAW_ACTIONS') }}",
 			},
 			mustContain: []string{
@@ -1361,12 +1361,12 @@ GROUP BY 1, 2, 3, 4;`
 	// Build a lookup covering the six real tables; enriched/orders/returns/net/
 	// customers/products/brands/regions are CTEs and must be excluded.
 	knownTables := map[string]string{
-		"DW.CORE.FACT_ORDERS":   "{{ source('dw_core', 'FACT_ORDERS') }}",
-		"DW.CORE.FACT_RETURNS":  "{{ source('dw_core', 'FACT_RETURNS') }}",
-		"DW.DIMS.DIM_CUSTOMER":  "{{ source('dw_dims', 'DIM_CUSTOMER') }}",
-		"DW.DIMS.DIM_PRODUCT":   "{{ source('dw_dims', 'DIM_PRODUCT') }}",
-		"DW.DIMS.DIM_BRAND":     "{{ source('dw_dims', 'DIM_BRAND') }}",
-		"DW.DIMS.DIM_REGION":    "{{ source('dw_dims', 'DIM_REGION') }}",
+		"DW.CORE.FACT_ORDERS":  "{{ source('dw_core', 'FACT_ORDERS') }}",
+		"DW.CORE.FACT_RETURNS": "{{ source('dw_core', 'FACT_RETURNS') }}",
+		"DW.DIMS.DIM_CUSTOMER": "{{ source('dw_dims', 'DIM_CUSTOMER') }}",
+		"DW.DIMS.DIM_PRODUCT":  "{{ source('dw_dims', 'DIM_PRODUCT') }}",
+		"DW.DIMS.DIM_BRAND":    "{{ source('dw_dims', 'DIM_BRAND') }}",
+		"DW.DIMS.DIM_REGION":   "{{ source('dw_dims', 'DIM_REGION') }}",
 	}
 	lookup := func(db, schema, name string) string {
 		return knownTables[strings.ToUpper(db+"."+schema+"."+name)]
@@ -1384,14 +1384,14 @@ GROUP BY 1, 2, 3, 4;`
 	// CTE aliases used as single-part table references must survive unchanged
 	// (single-part names are never replaced by RewriteSQLReferences).
 	for _, alias := range []string{
-		"FROM orders o",         // net CTE's FROM
-		"LEFT JOIN returns r",   // net CTE's JOIN
-		"FROM net n",            // enriched CTE's FROM
-		"JOIN customers cust",   // enriched CTE's JOINs
+		"FROM orders o",       // net CTE's FROM
+		"LEFT JOIN returns r", // net CTE's JOIN
+		"FROM net n",          // enriched CTE's FROM
+		"JOIN customers cust", // enriched CTE's JOINs
 		"JOIN products prod",
 		"JOIN brands br",
 		"JOIN regions reg",
-		"FROM enriched",         // final SELECT
+		"FROM enriched", // final SELECT
 	} {
 		if !strings.Contains(got, alias) {
 			t.Errorf("CTE alias reference %q must remain: got:\n%s", alias, got)
@@ -1560,6 +1560,67 @@ WHERE u.active = TRUE;`
 		switch strings.ToUpper(r.name) {
 		case "OVER", "PARTITION", "ORDER", "ROW_NUMBER", "LAG", "SUM":
 			t.Errorf("window function keyword %q must not appear as a reference", r.name)
+		}
+	}
+}
+
+func TestPipeline_ImplicitJoins(t *testing.T) {
+	ddl := `CREATE OR REPLACE VIEW "DB"."SC"."OLD_SCHOOL_JOIN" AS
+SELECT a.id, b.name, c.status
+FROM "DB"."SC"."TABLE_A" a, "DB"."SC"."TABLE_B" b, "DB"."SC"."TABLE_C" c
+WHERE a.id = b.id AND b.id = c.id;`
+
+	body := ExtractDDLBody(ddl, "VIEW")
+	refs := parseSQLReferences(body, "DB", "SC")
+
+	// The parser easily finds TABLE_A because it follows the "FROM" keyword
+	assertContainsRef(t, refs, sqlRef{db: "DB", schema: "SC", name: "TABLE_A"})
+
+	// Now it also finds TABLE_B and TABLE_C by parsing the comma-separated list
+	assertContainsRef(t, refs, sqlRef{db: "DB", schema: "SC", name: "TABLE_B"})
+	assertContainsRef(t, refs, sqlRef{db: "DB", schema: "SC", name: "TABLE_C"})
+}
+
+func TestPipeline_CloneDependency(t *testing.T) {
+	ddl := `CREATE OR REPLACE PROCEDURE "DB"."SC"."BACKUP_PROC"()
+RETURNS VARCHAR
+LANGUAGE SQL
+AS $$
+BEGIN
+  -- The procedure creates a backup from production
+  CREATE TRANSIENT TABLE "DB"."SC"."USERS_BACKUP" 
+  CLONE "PROD"."CORE"."USERS";
+END;
+$$;`
+
+	body := ExtractDDLBody(ddl, "PROCEDURE")
+	refs := parseSQLReferences(body, "DB", "SC")
+
+	// The regex parser now looks for the "CLONE" keyword, picking up USERS
+	assertContainsRef(t, refs, sqlRef{db: "PROD", schema: "CORE", name: "USERS"})
+}
+func TestPipeline_StageFalsePositive(t *testing.T) {
+	ddl := `CREATE OR REPLACE PROCEDURE "DB"."SC"."EXPORT_DATA"()
+RETURNS VARCHAR
+LANGUAGE SQL
+AS $$
+BEGIN
+  -- Exporting data to an internal Snowflake stage
+  COPY INTO @my_export_stage/daily_run/
+  FROM "DB"."SC"."EVENTS";
+END;
+$$;`
+
+	body := ExtractDDLBody(ddl, "PROCEDURE")
+	refs := parseSQLReferences(body, "DB", "SC")
+
+	// The real table dependency is found successfully
+	assertContainsRef(t, refs, sqlRef{db: "DB", schema: "SC", name: "EVENTS"})
+
+	// Snowflake stages (@stage_name) are correctly ignored by the parser
+	for _, r := range refs {
+		if strings.HasPrefix(r.name, "@") {
+			t.Errorf("Lineage failure: falsely identified Snowflake stage %q as a table", r.name)
 		}
 	}
 }
