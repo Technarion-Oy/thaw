@@ -1624,3 +1624,71 @@ $$;`
 		}
 	}
 }
+
+func TestPipeline_KnownLimitation_IdentifierFunction(t *testing.T) {
+	ddl := `CREATE OR REPLACE VIEW "DB"."SC"."DYNAMIC_REF" AS
+SELECT a.id, a.status
+FROM IDENTIFIER('"PROD_DB"."CORE"."USERS"');`
+
+	body := ExtractDDLBody(ddl, "VIEW")
+	refs := parseSQLReferences(body, "DB", "SC")
+
+	// ACTUAL BEHAVIOR (Flawed): The parser stops at the word IDENTIFIER.
+	// It never looks inside the parentheses to find the real table.
+	for _, r := range refs {
+		if r.name == "USERS" {
+			t.Errorf("Parser surprisingly resolved the IDENTIFIER() function. Has it been upgraded?")
+		}
+	}
+}
+
+func TestPipeline_KnownLimitation_SpacedIdentifiers(t *testing.T) {
+	ddl := `CREATE OR REPLACE VIEW "DB"."SC"."SPACED_OUT" AS
+SELECT * FROM "PROD_DB" . "CORE" . "USERS";`
+
+	body := ExtractDDLBody(ddl, "VIEW")
+	refs := parseSQLReferences(body, "DB", "SC")
+
+	// ACTUAL BEHAVIOR (Flawed): The regex `identPat` requires strict dots.
+	// When it sees `FROM "PROD_DB" .`, it stops at "PROD_DB" and treats it as a single-part
+	// table name in the default DB/Schema, completely missing "CORE" and "USERS".
+
+	// Ensure the real 3-part dependency is NOT found, proving the bug exists.
+	assertNotContainsRef(t, refs, sqlRef{db: "PROD_DB", schema: "CORE", name: "USERS"})
+}
+
+// Helper for the tests to assert absence
+func assertNotContainsRef(t *testing.T, refs []sqlRef, want sqlRef) {
+	t.Helper()
+	for _, r := range refs {
+		if strings.EqualFold(r.db, want.db) &&
+			strings.EqualFold(r.schema, want.schema) &&
+			strings.EqualFold(r.name, want.name) &&
+			r.isCall == want.isCall {
+			t.Errorf("expected ref %+v to NOT be found, but it was", want)
+		}
+	}
+}
+
+func TestPipeline_KnownLimitation_TableFunctions(t *testing.T) {
+	ddl := `CREATE OR REPLACE PROCEDURE "DB"."SC"."PARSE_DATA"()
+RETURNS VARCHAR
+LANGUAGE SQL
+AS $$
+BEGIN
+  -- Calling a User-Defined Table Function (UDTF)
+  INSERT INTO "DB"."SC"."LOGS"
+  SELECT * FROM TABLE("PROD"."UTILS"."PARSE_JSON_FUNC"(payload));
+END;
+$$;`
+
+	body := ExtractDDLBody(ddl, "PROCEDURE")
+	refs := parseSQLReferences(body, "DB", "SC")
+
+	// It successfully finds the INSERT target
+	assertContainsRef(t, refs, sqlRef{db: "DB", schema: "SC", name: "LOGS"})
+
+	// ACTUAL BEHAVIOR (Flawed): Because "PARSE_JSON_FUNC" is wrapped in "TABLE()",
+	// it doesn't directly follow FROM/JOIN, so the regex engine misses it entirely.
+	assertNotContainsRef(t, refs, sqlRef{db: "PROD", schema: "UTILS", name: "PARSE_JSON_FUNC"})
+}
