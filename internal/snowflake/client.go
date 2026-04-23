@@ -1740,9 +1740,11 @@ func (c *Client) GetTableForeignKeys(ctx context.Context, database, schema, tabl
 // It is returned by GetTableColumnsWithTypes and used by the editor's JOIN ON
 // autocomplete to filter same-name suggestions by type compatibility.
 type ColumnInfo struct {
-	Name     string `json:"name"`
-	DataType string `json:"dataType"` // e.g. "VARCHAR(256)", "NUMBER(38,0)"
-	Nullable bool   `json:"nullable"`
+	Name         string `json:"name"`
+	DataType     string `json:"dataType"` // e.g. "VARCHAR(256)", "NUMBER(38,0)"
+	Nullable     bool   `json:"nullable"`
+	IsPrimaryKey bool   `json:"isPrimaryKey"`
+	IsUnique     bool   `json:"isUnique"`
 }
 
 // GetTableColumnsWithTypes returns the ordered column list for a table or view
@@ -1757,7 +1759,7 @@ func (c *Client) GetTableColumnsWithTypes(ctx context.Context, database, schema,
 	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
-	idxs := colIndexMap(cols, "name", "type", "null?")
+	idxs := colIndexMap(cols, "name", "type", "null?", "primary key", "unique key")
 
 	var result []ColumnInfo
 	for rows.Next() {
@@ -1770,9 +1772,11 @@ func (c *Client) GetTableColumnsWithTypes(ctx context.Context, database, schema,
 			continue
 		}
 		result = append(result, ColumnInfo{
-			Name:     n,
-			DataType: strVal(vals, idxs["type"]),
-			Nullable: strVal(vals, idxs["null?"]) == "Y",
+			Name:         n,
+			DataType:     strVal(vals, idxs["type"]),
+			Nullable:     strVal(vals, idxs["null?"]) == "Y",
+			IsPrimaryKey: strVal(vals, idxs["primary key"]) == "Y",
+			IsUnique:     strVal(vals, idxs["unique key"]) == "Y",
 		})
 	}
 	return result, rows.Err()

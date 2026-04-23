@@ -1089,6 +1089,8 @@ export namespace snowflake {
 	    name: string;
 	    dataType: string;
 	    nullable: boolean;
+	    isPrimaryKey: boolean;
+	    isUnique: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new ColumnInfo(source);
@@ -1099,6 +1101,8 @@ export namespace snowflake {
 	        this.name = source["name"];
 	        this.dataType = source["dataType"];
 	        this.nullable = source["nullable"];
+	        this.isPrimaryKey = source["isPrimaryKey"];
+	        this.isUnique = source["isUnique"];
 	    }
 	}
 	export class ConnectParams {
