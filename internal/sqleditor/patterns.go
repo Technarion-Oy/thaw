@@ -21,6 +21,10 @@ import (
 // ── Precompiled regexes for ValidateSnowflakePatterns ─────────────────────────
 
 const (
+	// ReIdentifier matches a Snowflake identifier part: either a double-quoted
+	// string with escaped quotes (""""), or a bare word containing [a-zA-Z0-9_$].
+	ReIdentifier = `(?:"(?:""|[^"])*"|[\w$]+)`
+
 	_ident          = `(?:[a-zA-Z0-9_$]+|"[^"]+")`
 	_identPath      = _ident + `(?:\.` + _ident + `){0,2}`
 	_balancedParens = `\([^()]*(?:(?:\([^()]*\))[^()]*)*\)`

@@ -28,7 +28,7 @@ import { useObjectStore } from "../../store/objectStore";
 import { useSessionStore } from "../../store/sessionStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, GetAllDataTypes, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs } from "../../../wailsjs/go/main/App";
+import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, GetAllDataTypes, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords } from "../../../wailsjs/go/main/App";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 
@@ -88,7 +88,34 @@ function ensureDataTypesLoaded(): Promise<void> {
   return dataTypesFetchPromise;
 }
 
+let snowflakeKeywords: Set<string> | null = null;
+let snowflakeKeywordsArray: string[] = [];
+let keywordsFetchPromise: Promise<void> | null = null;
+function ensureKeywordsLoaded(): Promise<void> {
+  if (snowflakeKeywords !== null) return Promise.resolve();
+  if (keywordsFetchPromise) return keywordsFetchPromise;
+  keywordsFetchPromise = (async () => {
+    try {
+      const kws = await GetSnowflakeKeywords();
+      snowflakeKeywordsArray = (kws as string[]) ?? [];
+      snowflakeKeywords = new Set(snowflakeKeywordsArray.map(k => k.toUpperCase()));
+    } catch {
+      snowflakeKeywords = new Set();
+      snowflakeKeywordsArray = [];
+    } finally {
+      keywordsFetchPromise = null;
+    }
+  })();
+  return keywordsFetchPromise;
+}
+
 const UC = (s: string) => s.toUpperCase();
+
+function quoteIfNecessary(name: string): string {
+  if (!name) return name;
+  const needsQuoting = !/^[A-Z_][A-Z0-9_$]*$/.test(name) || (snowflakeKeywords?.has(name.toUpperCase()) ?? false);
+  return needsQuoting ? `"${name.replace(/"/g, '""')}"` : name;
+}
 
 // ── Column-level completion cache ─────────────────────────────────────────────
 const columnCache  = new Map<string, string[]>();
@@ -208,7 +235,7 @@ function mkColSuggestions(cols: string[], range: any, monaco: any) {
   return cols.map((col) => ({
     label:      col,
     kind:       monaco.languages.CompletionItemKind.Field,
-    insertText: col,
+    insertText: quoteIfNecessary(col),
     sortText:   "02_" + col,
     detail:     "COLUMN",
     range,
@@ -245,17 +272,6 @@ function resolveRefs(
   }).filter(Boolean) as Array<{ db: string; schema: string; name: string; alias: string }>;
   return resolved.length >= 2 ? resolved : null;
 }
-
-const SNOWFLAKE_KEYWORDS = [
-  "SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER",
-  "GROUP BY", "ORDER BY", "HAVING", "LIMIT", "INSERT", "UPDATE", "DELETE",
-  "CREATE", "ALTER", "DROP", "TABLE", "VIEW", "SCHEMA", "DATABASE",
-  "WAREHOUSE", "ROLE", "GRANT", "REVOKE", "SHOW", "DESCRIBE", "USE",
-  "WITH", "AS", "ON", "AND", "OR", "NOT", "IN", "IS", "NULL", "LIKE",
-  "ILIKE", "BETWEEN", "CASE", "WHEN", "THEN", "ELSE", "END", "DISTINCT",
-  "QUALIFY", "OVER", "PARTITION BY", "ROWS", "RANGE", "UNBOUNDED",
-  "PRECEDING", "FOLLOWING", "CURRENT ROW", "FLATTEN", "LATERAL",
-];
 
 function monacoKind(monaco: any, kind: string): number {
   const K = monaco.languages.CompletionItemKind;
@@ -714,6 +730,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     monaco.languages.registerCompletionItemProvider("sql", {
       triggerCharacters: ["."],
       provideCompletionItems: async (model: any, position: any) => {
+        await ensureKeywordsLoaded();
         const word = model.getWordUntilPosition(position);
         const range = {
           startLineNumber: position.lineNumber,
@@ -762,120 +779,163 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         }
         // ─────────────────────────────────────────────────────────────────
 
-        const threePartMatch = lineUpToWord.match(/\b(\w+)\.(\w+)\.(\w+)\.\s*$/i);
-        if (threePartMatch) {
-          const [, db, schema, table] = threePartMatch;
-          return { suggestions: mkColSuggestions(await getColumns(db, schema, table), range, monaco) };
-        }
-
-        const twoPartMatch = lineUpToWord.match(/\b(\w+)\.(\w+)\.\s*$/i);
-        if (twoPartMatch) {
-          const [, db, schema] = twoPartMatch;
-          const schemaKey = `${UC(db)}\0${UC(schema)}`;
-
-          if (!useObjectStore.getState().databases.some((d) => UC(d) === UC(db))) {
-            const colObj = useObjectStore.getState().objects.find(
-              (o) => UC(o.schema) === UC(db) && UC(o.name) === UC(schema) &&
-                     (o.kind === "TABLE" || o.kind === "VIEW")
-            );
-            if (colObj) {
-              return { suggestions: mkColSuggestions(await getColumns(colObj.db, colObj.schema, colObj.name), range, monaco) };
-            }
-          }
-
-          const hasObjects = useObjectStore.getState().objects
-            .some((o) => UC(o.db) === UC(db) && UC(o.schema) === UC(schema));
-
-          if (!hasObjects && !fetchedSchemaObjects.has(schemaKey)) {
-            fetchedSchemaObjects.add(schemaKey);
-            try {
-              const fetched = await ListObjects(db, schema);
-              useObjectStore.getState().addObjects(
-                db, schema,
-                (fetched ?? []).map((o) => ({ name: o.name, kind: (o.kind || "OTHER").toUpperCase() })),
-              );
-            } catch {
-              fetchedSchemaObjects.delete(schemaKey); 
-            }
-          }
-
-          return {
-            suggestions: useObjectStore.getState().objects
-              .filter((o) => UC(o.db) === UC(db) && UC(o.schema) === UC(schema))
-              .map((o) => ({
-                label:      o.name,
-                kind:       monacoKind(monaco, o.kind),
-                insertText: o.name,
-                sortText:   "03_" + o.name,
-                detail:     o.kind,
-                range,
-              })),
-          };
-        }
-
-        const onePartMatch = lineUpToWord.match(/\b(\w+)\.\s*$/i);
-        if (onePartMatch) {
-          const [, qualifier] = onePartMatch;
-          const { databases, schemas, objects } = useObjectStore.getState();
-
-          const isKnownDb = databases.some((db) => UC(db) === UC(qualifier));
-          if (isKnownDb) {
-            const dbSchemas = schemas.filter((s) => UC(s.db) === UC(qualifier));
-            if (dbSchemas.length === 0 && !fetchedDatabaseSchemas.has(UC(qualifier))) {
-              fetchedDatabaseSchemas.add(UC(qualifier));
-              try {
-                const fetched = await ListSchemas(qualifier);
-                useObjectStore.getState().addSchemas(qualifier, fetched ?? []);
-              } catch {
-                fetchedDatabaseSchemas.delete(UC(qualifier));
-              }
-            }
-            return {
-              suggestions: useObjectStore.getState().schemas
-                .filter((s) => UC(s.db) === UC(qualifier))
-                .map((s) => ({
-                  label:      s.name,
-                  kind:       monaco.languages.CompletionItemKind.Module,
-                  insertText: s.name,
-                  sortText:   "04_" + s.name,
-                  detail:     "SCHEMA",
-                  range,
-                })),
-            };
-          }
-
-          const schemaObjs = objects.filter((o) => UC(o.schema) === UC(qualifier));
-          if (schemaObjs.length > 0) {
-            return {
-              suggestions: schemaObjs.map((o) => ({
-                label:      o.name,
-                kind:       monacoKind(monaco, o.kind),
-                insertText: o.name,
-                sortText:   "03_" + o.name,
-                detail:     o.kind,
-                range,
-              })),
-            };
-          }
-
-          const colObjs = objects.filter(
-            (o) => UC(o.name) === UC(qualifier) && (o.kind === "TABLE" || o.kind === "VIEW")
-          );
-          if (colObjs.length > 0) {
-            const allCols = new Set<string>();
-            await Promise.all(
-              colObjs.map(async (o) => {
-                (await getColumns(o.db, o.schema, o.name)).forEach((c) => allCols.add(c));
-              })
-            );
-            if (allCols.size > 0) {
-              return { suggestions: mkColSuggestions(Array.from(allCols), range, monaco) };
-            }
-          }
-        }
-
+        const fullLine = model.getLineContent(position.lineNumber);
         const cursorOffset = model.getOffsetAt(position);
         const textToCursor = model.getValue().slice(0, cursorOffset);
+
+        // Scan backwards from word start to see if we're triggered by a dot
+        let charBefore = "";
+        for (let i = word.startColumn - 2; i >= 0; i--) {
+          if (fullLine[i] !== " " && fullLine[i] !== "\t") {
+            charBefore = fullLine[i];
+            break;
+          }
+        }
+
+        if (charBefore === ".") {
+          const contextParts = await GetIdentifierAtColumn(fullLine, word.startColumn - 1);
+          if (contextParts && contextParts.length > 0) {
+            // Case: db.schema.table.
+            if (contextParts.length === 3) {
+              const [db, schema, table] = contextParts;
+              return { suggestions: mkColSuggestions(await getColumns(db, schema, table), range, monaco) };
+            }
+
+            // Case: db.schema.
+            if (contextParts.length === 2) {
+              const [db, schema] = contextParts;
+              const schemaKey = `${UC(db)}\0${UC(schema)}`;
+
+              // If db/schema matches an existing table/view in objectStore, offer columns (alias-like behavior)
+              if (!useObjectStore.getState().databases.some((d) => UC(d) === UC(db))) {
+                const colObj = useObjectStore.getState().objects.find(
+                  (o) => UC(o.schema) === UC(db) && UC(o.name) === UC(schema) &&
+                         (o.kind === "TABLE" || o.kind === "VIEW")
+                );
+                if (colObj) {
+                  return { suggestions: mkColSuggestions(await getColumns(colObj.db, colObj.schema, colObj.name), range, monaco) };
+                }
+              }
+
+              const hasObjects = useObjectStore.getState().objects
+                .some((o) => UC(o.db) === UC(db) && UC(o.schema) === UC(schema));
+
+              if (!hasObjects && !fetchedSchemaObjects.has(schemaKey)) {
+                fetchedSchemaObjects.add(schemaKey);
+                try {
+                  const fetched = await ListObjects(db, schema);
+                  useObjectStore.getState().addObjects(
+                    db, schema,
+                    (fetched ?? []).map((o) => ({ name: o.name, kind: (o.kind || "OTHER").toUpperCase() })),
+                  );
+                } catch {
+                  fetchedSchemaObjects.delete(schemaKey);
+                }
+              }
+
+              return {
+                suggestions: useObjectStore.getState().objects
+                  .filter((o) => UC(o.db) === UC(db) && UC(o.schema) === UC(schema))
+                  .map((o) => ({
+                    label:      o.name,
+                    kind:       monacoKind(monaco, o.kind),
+                    insertText: quoteIfNecessary(o.name),
+                    sortText:   "03_" + o.name,
+                    detail:     o.kind,
+                    range,
+                  })),
+              };
+            }
+
+            // Case: qualifier.
+            if (contextParts.length === 1) {
+              const [qualifier] = contextParts;
+              const { databases, schemas, objects } = useObjectStore.getState();
+
+              // 1. Is it a known database? -> suggest schemas
+              const isKnownDb = databases.some((db) => UC(db) === UC(qualifier));
+              if (isKnownDb) {
+                const dbSchemas = schemas.filter((s) => UC(s.db) === UC(qualifier));
+                if (dbSchemas.length === 0 && !fetchedDatabaseSchemas.has(UC(qualifier))) {
+                  fetchedDatabaseSchemas.add(UC(qualifier));
+                  try {
+                    const fetched = await ListSchemas(qualifier);
+                    useObjectStore.getState().addSchemas(qualifier, fetched ?? []);
+                  } catch {
+                    fetchedDatabaseSchemas.delete(UC(qualifier));
+                  }
+                }
+                return {
+                  suggestions: useObjectStore.getState().schemas
+                    .filter((s) => UC(s.db) === UC(qualifier))
+                    .map((s) => ({
+                      label:      s.name,
+                      kind:       monaco.languages.CompletionItemKind.Module,
+                      insertText: quoteIfNecessary(s.name),
+                      sortText:   "04_" + s.name,
+                      detail:     "SCHEMA",
+                      range,
+                    })),
+                };
+              }
+
+              // 2. Is it an alias in the current query? -> suggest columns
+              const rawRefs = await ParseJoinTableRefs(textToCursor);
+              if (rawRefs) {
+                const aliasMatch = (rawRefs as any[]).find((r) => UC(r.alias) === UC(qualifier));
+                if (aliasMatch) {
+                  // Resolve the alias to a real table
+                  let resolvedTable = { db: aliasMatch.db, schema: aliasMatch.schema, name: aliasMatch.name };
+                  if (!resolvedTable.db || !resolvedTable.schema) {
+                    const found = objects.find(o =>
+                      (o.kind === "TABLE" || o.kind === "VIEW") &&
+                      UC(o.name) === UC(aliasMatch.name) &&
+                      (!aliasMatch.db     || UC(o.db)     === UC(aliasMatch.db)) &&
+                      (!aliasMatch.schema || UC(o.schema) === UC(aliasMatch.schema))
+                    );
+                    if (found) {
+                      resolvedTable = { db: found.db, schema: found.schema, name: found.name };
+                    }
+                  }
+                  if (resolvedTable.db && resolvedTable.schema) {
+                    return { suggestions: mkColSuggestions(await getColumns(resolvedTable.db, resolvedTable.schema, resolvedTable.name), range, monaco) };
+                  }
+                }
+              }
+
+              // 3. Is it a schema name (in current context)? -> suggest objects
+              const schemaObjs = objects.filter((o) => UC(o.schema) === UC(qualifier));
+              if (schemaObjs.length > 0) {
+                return {
+                  suggestions: schemaObjs.map((o) => ({
+                    label:      o.name,
+                    kind:       monacoKind(monaco, o.kind),
+                    insertText: quoteIfNecessary(o.name),
+                    sortText:   "03_" + o.name,
+                    detail:     o.kind,
+                    range,
+                  })),
+                };
+              }
+
+              // 4. Is it a table/view name? -> suggest columns
+              const colObjs = objects.filter(
+                (o) => UC(o.name) === UC(qualifier) && (o.kind === "TABLE" || o.kind === "VIEW")
+              );
+              if (colObjs.length > 0) {
+                const allCols = new Set<string>();
+                await Promise.all(
+                  colObjs.map(async (o) => {
+                    (await getColumns(o.db, o.schema, o.name)).forEach((c) => allCols.add(c));
+                  })
+                );
+                if (allCols.size > 0) {
+                  return { suggestions: mkColSuggestions(Array.from(allCols), range, monaco) };
+                }
+              }
+            }
+          }
+        }
 
         const isInJoinOnClause = (() => {
           const joinMatches = [...textToCursor.matchAll(/\bJOIN\b/gi)];
@@ -959,7 +1019,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const declaredVars: string[] = scriptingResult?.variables ?? [];
         const needsColon: boolean = scriptingResult?.needsColon ?? false;
 
-        const keywordSuggestions = SNOWFLAKE_KEYWORDS.map((kw) => ({
+        const keywordSuggestions = snowflakeKeywordsArray.map((kw) => ({
           label:      kw,
           kind:       monaco.languages.CompletionItemKind.Keyword,
           insertText: kw,
@@ -980,7 +1040,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const dbSuggestions = databases.map((db) => ({
           label:      db,
           kind:       monaco.languages.CompletionItemKind.Module,
-          insertText: db,
+          insertText: quoteIfNecessary(db),
           sortText:   "05_" + db,
           detail:     "DATABASE",
           range,
@@ -989,7 +1049,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const schemaSuggestions = schemas.map((s) => ({
           label:      s.name,
           kind:       monaco.languages.CompletionItemKind.Module,
-          insertText: s.name,
+          insertText: quoteIfNecessary(s.name),
           sortText:   "04_" + s.name,
           detail:     `SCHEMA · ${s.db}`,
           range,
@@ -998,7 +1058,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const objectSuggestions = objects.map((o) => ({
           label:      o.name,
           kind:       monacoKind(monaco, o.kind),
-          insertText: o.name,
+          insertText: quoteIfNecessary(o.name),
           sortText:   "03_" + o.name,
           detail:     `${o.kind} · ${o.db}.${o.schema}`,
           range,
@@ -1060,7 +1120,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                 contextColSuggestions.push({
                   label:      col,
                   kind:       monaco.languages.CompletionItemKind.Field,
-                  insertText: col,
+                  insertText: quoteIfNecessary(col),
                   sortText:   "02_" + col,
                   detail:     `COLUMN · ${ref.name}`,
                   range,

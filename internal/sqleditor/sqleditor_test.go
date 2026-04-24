@@ -34,14 +34,14 @@ func TestGetIdentifierAtColumn(t *testing.T) {
 		{name: "bare word col one past end", line: "SELECT", col: 6, want: nil},
 
 		// Two-part identifier
-		{name: "two-part on first part", line: "db.schema", col: 0, want: []string{"db", "schema"}},
-		{name: "two-part on dot", line: "db.schema", col: 2, want: []string{"db", "schema"}},
-		{name: "two-part on second part", line: "db.schema", col: 4, want: []string{"db", "schema"}},
+		{name: "two-part on first part", line: "db.schema", col: 0, want: []string{"DB", "SCHEMA"}},
+		{name: "two-part on dot", line: "db.schema", col: 2, want: []string{"DB", "SCHEMA"}},
+		{name: "two-part on second part", line: "db.schema", col: 4, want: []string{"DB", "SCHEMA"}},
 
 		// Three-part identifier (db.schema.table)
-		{name: "three-part on first", line: "db.schema.tbl", col: 1, want: []string{"db", "schema", "tbl"}},
-		{name: "three-part on middle", line: "db.schema.tbl", col: 5, want: []string{"db", "schema", "tbl"}},
-		{name: "three-part on last", line: "db.schema.tbl", col: 11, want: []string{"db", "schema", "tbl"}},
+		{name: "three-part on first", line: "db.schema.tbl", col: 1, want: []string{"DB", "SCHEMA", "TBL"}},
+		{name: "three-part on middle", line: "db.schema.tbl", col: 5, want: []string{"DB", "SCHEMA", "TBL"}},
+		{name: "three-part on last", line: "db.schema.tbl", col: 11, want: []string{"DB", "SCHEMA", "TBL"}},
 
 		// Quoted identifier
 		{name: "quoted single part", line: `"My Table"`, col: 3, want: []string{"My Table"}},
@@ -49,44 +49,45 @@ func TestGetIdentifierAtColumn(t *testing.T) {
 		{name: "col before opening quote", line: ` "tbl"`, col: 0, want: nil},
 
 		// Identifier embedded in SQL
-		{name: "ident in query col on ident", line: "SELECT * FROM db.schema.tbl WHERE x=1", col: 20, want: []string{"db", "schema", "tbl"}},
+		{name: "ident in query col on ident", line: "SELECT * FROM db.schema.tbl WHERE x=1", col: 20, want: []string{"DB", "SCHEMA", "TBL"}},
 		{name: "ident in query col on keyword before ident", line: "SELECT * FROM db.schema.tbl WHERE x=1", col: 8, want: nil},
 
 		// Underscore in identifier
-		{name: "identifier with underscores", line: "my_db.my_schema", col: 3, want: []string{"my_db", "my_schema"}},
+		{name: "identifier with underscores", line: "my_db.my_schema", col: 3, want: []string{"MY_DB", "MY_SCHEMA"}},
 
 		// Digits in identifier
-		{name: "identifier with digits", line: "table1.col2", col: 4, want: []string{"table1", "col2"}},
+		{name: "identifier with digits", line: "table1.col2", col: 4, want: []string{"TABLE1", "COL2"}},
 		// Digit-led tokens: \w matches digits, so "123abc" is treated as one token (same as original TS /\w/)
-		{name: "identifier starting with digit matched as token", line: "123abc", col: 0, want: []string{"123abc"}},
+		{name: "identifier starting with digit matched as token", line: "123abc", col: 0, want: []string{"123ABC"}},
 
 		// Two separate identifiers on the same line
-		{name: "two idents on line - col on first", line: "t1.c1, t2.c2", col: 1, want: []string{"t1", "c1"}},
-		{name: "two idents on line - col on second", line: "t1.c1, t2.c2", col: 8, want: []string{"t2", "c2"}},
+		{name: "two idents on line - col on first", line: "t1.c1, t2.c2", col: 1, want: []string{"T1", "C1"}},
+		{name: "two idents on line - col on second", line: "t1.c1, t2.c2", col: 8, want: []string{"T2", "C2"}},
 		{name: "two idents on line - col on comma", line: "t1.c1, t2.c2", col: 5, want: nil},
 		{name: "two idents on line - col on space", line: "t1.c1, t2.c2", col: 6, want: nil},
 
 		// Trailing dot — cursor before/on the dangling dot
-		{name: "trailing dot - col on word before dot", line: "db.", col: 1, want: []string{"db"}},
-		{name: "trailing dot - col on dangling dot", line: "db.", col: 2, want: nil},
+		{name: "trailing dot - col on word before dot", line: "db.", col: 1, want: []string{"DB"}},
+		{name: "trailing dot - col on dangling dot", line: "db.", col: 2, want: []string{"DB"}},
+		{name: "quoted trailing dot", line: `"db".`, col: 5, want: []string{"db"}},
 
 		// Leading dot — scanner skips the dot; "schema" is returned as a 1-part identifier
-		{name: "leading dot - col on word after dot", line: ".schema", col: 1, want: []string{"schema"}},
+		{name: "leading dot - col on word after dot", line: ".schema", col: 1, want: []string{"SCHEMA"}},
 		// Leading dot — col on the dot itself is not on any identifier
 		{name: "leading dot - col on the dot", line: ".schema", col: 0, want: nil},
 
 		// Mixed quoted and bare parts
-		{name: "quoted-dot-bare col on quoted", line: `"My DB".schema`, col: 3, want: []string{"My DB", "schema"}},
-		{name: "quoted-dot-bare col on bare", line: `"My DB".schema`, col: 9, want: []string{"My DB", "schema"}},
+		{name: "quoted-dot-bare col on quoted", line: `"My DB".schema`, col: 3, want: []string{"My DB", "SCHEMA"}},
+		{name: "quoted-dot-bare col on bare", line: `"My DB".schema`, col: 9, want: []string{"My DB", "SCHEMA"}},
 
 		// col at very last character of identifier
-		{name: "col at last char of three-part", line: "a.b.c", col: 4, want: []string{"a", "b", "c"}},
+		{name: "col at last char of three-part", line: "a.b.c", col: 4, want: []string{"A", "B", "C"}},
 
 		// col past end of line
 		{name: "col past end of line", line: "abc", col: 10, want: nil},
 
 		// Identifier immediately after opening paren
-		{name: "ident after paren", line: "(db.schema)", col: 4, want: []string{"db", "schema"}},
+		{name: "ident after paren", line: "(db.schema)", col: 4, want: []string{"DB", "SCHEMA"}},
 	}
 
 	for _, tt := range tests {
@@ -763,6 +764,20 @@ func TestParseJoinTables(t *testing.T) {
 				{Name: "T2", Alias: "T2"},
 			},
 		},
+		{
+			name: "Three-part quoted names with spaces and dollar",
+			sql:  `SELECT * FROM "DB-1"."SCHEMA$1"."TABLE 1" AS "T 1"`,
+			want: []JoinTableRef{
+				{DB: "DB-1", Schema: "SCHEMA$1", Name: "TABLE 1", Alias: "T 1"},
+			},
+		},
+		{
+			name: "Escaped quotes in table name",
+			sql:  `FROM "My ""Quoted"" Table"`,
+			want: []JoinTableRef{
+				{Name: `My "Quoted" Table`, Alias: `My "Quoted" Table`},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -832,8 +847,8 @@ func TestComputeJoinOnConditions(t *testing.T) {
 	t.Run("PK Heuristic Tier", func(t *testing.T) {
 		got := ComputeJoinOnConditions(req)
 		want := []JoinCondition{
-			{Condition: "ON B.TABLE_A_ID = A.ID", Detail: "PK HEURISTIC", SortText: "0cON B.TABLE_A_ID = A.ID"},
-			{Condition: "ON A.ID = B.ID", Detail: "SAME-NAME COLUMN", SortText: "1ON A.ID = B.ID"},
+			{Condition: `ON "B".TABLE_A_ID = "A".ID`, Detail: "PK HEURISTIC", SortText: `0cON "B".TABLE_A_ID = "A".ID`},
+			{Condition: `ON "A".ID = "B".ID`, Detail: "SAME-NAME COLUMN", SortText: `1ON "A".ID = "B".ID`},
 			{Condition: "USING (ID)", Detail: "USING", SortText: "1.5USING (ID)"},
 		}
 		if !reflect.DeepEqual(got, want) {
@@ -853,8 +868,8 @@ func TestComputeJoinOnConditions(t *testing.T) {
 		}
 		got := ComputeJoinOnConditions(reqWithFK)
 		want := []JoinCondition{
-			{Condition: "ON B.TABLE_A_ID = A.ID", Detail: "FK RELATION", SortText: "0aON B.TABLE_A_ID = A.ID"},
-			{Condition: "ON A.ID = B.ID", Detail: "SAME-NAME COLUMN", SortText: "1ON A.ID = B.ID"},
+			{Condition: `ON "B".TABLE_A_ID = "A".ID`, Detail: "FK RELATION", SortText: `0aON "B".TABLE_A_ID = "A".ID`},
+			{Condition: `ON "A".ID = "B".ID`, Detail: "SAME-NAME COLUMN", SortText: `1ON "A".ID = "B".ID`},
 			{Condition: "USING (ID)", Detail: "USING", SortText: "1.5USING (ID)"},
 		}
 		if !reflect.DeepEqual(got, want) {
@@ -885,7 +900,7 @@ func TestComputeJoinOnConditions(t *testing.T) {
 		}
 		got := ComputeJoinOnConditions(reqComp)
 		want := []JoinCondition{
-			{Condition: "ON C.FK1 = P.K1 AND C.FK2 = P.K2", Detail: "FK RELATION", SortText: "0aON C.FK1 = P.K1 AND C.FK2 = P.K2"},
+			{Condition: `ON "C".FK1 = "P".K1 AND "C".FK2 = "P".K2`, Detail: "FK RELATION", SortText: `0aON "C".FK1 = "P".K1 AND "C".FK2 = "P".K2`},
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("ComputeJoinOnConditions() Composite = %v, want %v", got, want)

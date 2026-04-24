@@ -418,36 +418,49 @@ func GetIdentifierAtColumn(line string, col int) []string {
 
 			if runes[i] == '"' {
 				i++ // skip opening quote
-				for i < n && runes[i] != '"' {
+				for i < n {
+					if runes[i] == '"' {
+						if i+1 < n && runes[i+1] == '"' {
+							partName = append(partName, '"')
+							i += 2
+							continue
+						}
+						i++ // skip closing quote
+						break
+					}
 					partName = append(partName, runes[i])
 					i++
 				}
-				if i < n {
-					i++ // skip closing quote
-				}
+				parts = append(parts, string(partName))
 			} else if isWordRune(runes[i]) {
 				for i < n && isWordRune(runes[i]) {
 					partName = append(partName, runes[i])
 					i++
 				}
+				parts = append(parts, strings.ToUpper(string(partName)))
 			} else {
 				break
 			}
-
-			parts = append(parts, string(partName))
 			if col >= partStart && col < i {
 				containsCol = true
 			}
 
-			// Continue chain if followed by '.' and then '"' or word rune.
+			// Continue chain if followed by '.'
 			if i < n && runes[i] == '.' {
-				if i+1 < n && (runes[i+1] == '"' || isWordRune(runes[i+1])) {
-					if col == i {
-						containsCol = true
-					}
-					i++ // skip '.'
+				if col == i {
+					containsCol = true
+				}
+				i++ // skip '.'
+
+				// If cursor is exactly after the dot, it also belongs to this chain.
+				if col == i {
+					containsCol = true
+				}
+
+				if i < n && (runes[i] == '"' || isWordRune(runes[i])) {
 					continue
 				}
+				break
 			}
 			break
 		}
@@ -462,7 +475,7 @@ func GetIdentifierAtColumn(line string, col int) []string {
 // isWordRune reports whether r is a SQL word character (\w equivalent).
 func isWordRune(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-		(r >= '0' && r <= '9') || r == '_'
+		(r >= '0' && r <= '9') || r == '_' || r == '$'
 }
 
 // isLetterOrUnderscore reports whether r can start an unquoted SQL identifier.
@@ -1785,35 +1798,35 @@ func ValidateSyntax(sql string) []DiagMarker {
 
 // ── ParseJoinTables ───────────────────────────────────────────────────────────
 
-const idPat = `(?:"[^"]+"|` + `\w+)`
-
 var tableRefRe = regexp.MustCompile(
 	`(?i)(?:FROM|JOIN|MERGE\s+INTO|USING)\s+` +
 		`(?:` +
-		`(` + idPat + `)\.(` + idPat + `)\.(` + idPat + `)` +
-		`|(` + idPat + `)\.(` + idPat + `)` +
-		`|(` + idPat + `)` +
+		`(` + ReIdentifier + `)\.(` + ReIdentifier + `)\.(` + ReIdentifier + `)` +
+		`|(` + ReIdentifier + `)\.(` + ReIdentifier + `)` +
+		`|(` + ReIdentifier + `)` +
 		`)` +
-		`(?:[ \t]+(?:AS[ \t]+)?(` + idPat + `))?`,
+		`(?:[ \t]+(?:AS[ \t]+)?(` + ReIdentifier + `))?`,
 )
 
 // normID normalises a raw captured identifier:
-//   - Quoted identifiers ("name") have quotes stripped and case preserved.
+//   - Quoted identifiers ("name") have quotes stripped, escaped quotes unescaped, and case preserved.
 //   - Unquoted identifiers are uppercased (Snowflake convention).
 func normID(s string) string {
 	if s == "" {
 		return ""
 	}
 	if strings.HasPrefix(s, `"`) {
-		return s[1 : len(s)-1]
+		inner := s[1 : len(s)-1]
+		return strings.ReplaceAll(inner, `""`, `"`)
 	}
 	return strings.ToUpper(s)
 }
 
-// stripQ strips surrounding double-quotes from an identifier, leaving case intact.
+// stripQ strips surrounding double-quotes from an identifier and unescapes embedded quotes, leaving case intact.
 func stripQ(s string) string {
 	if strings.HasPrefix(s, `"`) {
-		return s[1 : len(s)-1]
+		inner := s[1 : len(s)-1]
+		return strings.ReplaceAll(inner, `""`, `"`)
 	}
 	return s
 }
@@ -1907,7 +1920,8 @@ func BuildCompositeConditions(fks []FKEntry, fkAlias, pkAlias string) []string {
 		})
 		parts := make([]string, len(cols))
 		for idx, fk := range cols {
-			parts[idx] = fkAlias + "." + fk.FKColumn + " = " + pkAlias + "." + fk.PKColumn
+			parts[idx] = sf.QuoteIdent(fkAlias) + "." + sf.QuoteOrBare(fk.FKColumn, false) +
+				" = " + sf.QuoteIdent(pkAlias) + "." + sf.QuoteOrBare(fk.PKColumn, false)
 		}
 		result = append(result, strings.Join(parts, " AND "))
 	}
@@ -1931,7 +1945,7 @@ func PkHeuristicConditions(
 		if uc == on+"_ID" || uc == on+"ID" {
 			for _, pkCol := range otherCols {
 				if strings.ToUpper(pkCol) == "ID" {
-					results = append(results, lastAlias+"."+col+" = "+otherAlias+"."+pkCol)
+					results = append(results, sf.QuoteIdent(lastAlias)+"."+sf.QuoteOrBare(col, false)+" = "+sf.QuoteIdent(otherAlias)+"."+sf.QuoteOrBare(pkCol, false))
 					break
 				}
 			}
@@ -1942,7 +1956,7 @@ func PkHeuristicConditions(
 		if uc == ln+"_ID" || uc == ln+"ID" {
 			for _, pkCol := range lastCols {
 				if strings.ToUpper(pkCol) == "ID" {
-					results = append(results, otherAlias+"."+col+" = "+lastAlias+"."+pkCol)
+					results = append(results, sf.QuoteIdent(otherAlias)+"."+sf.QuoteOrBare(col, false)+" = "+sf.QuoteIdent(lastAlias)+"."+sf.QuoteOrBare(pkCol, false))
 					break
 				}
 			}
@@ -2484,14 +2498,14 @@ func ComputeJoinOnConditions(req JoinOnSuggestionsReq) []JoinCondition {
 			if cat1 != "other" && cat2 != "other" && cat1 != cat2 {
 				continue
 			}
-			sharedCompatible = append(sharedCompatible, info.Name)
+			sharedCompatible = append(sharedCompatible, sf.QuoteOrBare(info.Name, false))
 
 			// Standardize order: smaller alias first to keep suggestions stable
 			a1, a2 := lastRef.Alias, otherRef.Alias
 			if a1 > a2 {
 				a1, a2 = a2, a1
 			}
-			cond := a1 + "." + info.Name + " = " + a2 + "." + info.Name
+			cond := sf.QuoteIdent(a1) + "." + sf.QuoteOrBare(info.Name, false) + " = " + sf.QuoteIdent(a2) + "." + sf.QuoteOrBare(info.Name, false)
 			addSugg(cond, "SAME-NAME COLUMN", "1")
 		}
 		if len(sharedCompatible) > 0 {

@@ -402,6 +402,10 @@ export function GetSnowflakeCLIConfigPath() {
   return window['go']['main']['App']['GetSnowflakeCLIConfigPath']();
 }
 
+export function GetSnowflakeKeywords() {
+  return window['go']['main']['App']['GetSnowflakeKeywords']();
+}
+
 export function GetSnowparkConfig() {
   return window['go']['main']['App']['GetSnowparkConfig']();
 }

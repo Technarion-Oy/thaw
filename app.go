@@ -2001,6 +2001,12 @@ func (a *App) ApplySqlCasing(sql, keywordCase, identifierCase, functionCase stri
 	return sqleditor.ApplyCasing(sql, keywordCase, identifierCase, functionCase)
 }
 
+// GetSnowflakeKeywords returns the full list of Snowflake SQL reserved keywords.
+// No Snowflake connection is required.
+func (a *App) GetSnowflakeKeywords() []string {
+	return snowflake.ReservedKeywords()
+}
+
 // GetFunctionInfo fetches the DDL for a user-defined function and returns its
 // parameter list together with a flag indicating whether it is a table function.
 func (a *App) GetFunctionInfo(database, schema, name, argTypes string) (*snowflake.FunctionInfo, error) {

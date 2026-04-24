@@ -213,6 +213,8 @@ export function GetSessionVariables():Promise<Array<main.SessionVar>>;
 
 export function GetSnowflakeCLIConfigPath():Promise<string>;
 
+export function GetSnowflakeKeywords():Promise<Array<string>>;
+
 export function GetSnowparkConfig():Promise<main.SnowparkConfigResult>;
 
 export function GetSnowsightURL():Promise<string>;
