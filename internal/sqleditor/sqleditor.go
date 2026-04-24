@@ -1922,7 +1922,8 @@ func BuildCompositeConditions(fks []FKEntry, fkAlias, pkAlias string) []string {
 		})
 		parts := make([]string, len(cols))
 		for idx, fk := range cols {
-			parts[idx] = fkAlias + "." + fk.FKColumn + " = " + pkAlias + "." + fk.PKColumn
+			parts[idx] = sf.QuoteIdent(fkAlias) + "." + sf.QuoteOrBare(fk.FKColumn, false) +
+				" = " + sf.QuoteIdent(pkAlias) + "." + sf.QuoteOrBare(fk.PKColumn, false)
 		}
 		result = append(result, strings.Join(parts, " AND "))
 	}
@@ -1946,7 +1947,7 @@ func PkHeuristicConditions(
 		if uc == on+"_ID" || uc == on+"ID" {
 			for _, pkCol := range otherCols {
 				if strings.ToUpper(pkCol) == "ID" {
-					results = append(results, lastAlias+"."+col+" = "+otherAlias+"."+pkCol)
+					results = append(results, sf.QuoteIdent(lastAlias)+"."+sf.QuoteOrBare(col, false)+" = "+sf.QuoteIdent(otherAlias)+"."+sf.QuoteOrBare(pkCol, false))
 					break
 				}
 			}
@@ -1957,7 +1958,7 @@ func PkHeuristicConditions(
 		if uc == ln+"_ID" || uc == ln+"ID" {
 			for _, pkCol := range lastCols {
 				if strings.ToUpper(pkCol) == "ID" {
-					results = append(results, otherAlias+"."+col+" = "+lastAlias+"."+pkCol)
+					results = append(results, sf.QuoteIdent(otherAlias)+"."+sf.QuoteOrBare(col, false)+" = "+sf.QuoteIdent(lastAlias)+"."+sf.QuoteOrBare(pkCol, false))
 					break
 				}
 			}
@@ -2499,14 +2500,14 @@ func ComputeJoinOnConditions(req JoinOnSuggestionsReq) []JoinCondition {
 			if cat1 != "other" && cat2 != "other" && cat1 != cat2 {
 				continue
 			}
-			sharedCompatible = append(sharedCompatible, info.Name)
+			sharedCompatible = append(sharedCompatible, sf.QuoteOrBare(info.Name, false))
 
 			// Standardize order: smaller alias first to keep suggestions stable
 			a1, a2 := lastRef.Alias, otherRef.Alias
 			if a1 > a2 {
 				a1, a2 = a2, a1
 			}
-			cond := a1 + "." + info.Name + " = " + a2 + "." + info.Name
+			cond := sf.QuoteIdent(a1) + "." + sf.QuoteOrBare(info.Name, false) + " = " + sf.QuoteIdent(a2) + "." + sf.QuoteOrBare(info.Name, false)
 			addSugg(cond, "SAME-NAME COLUMN", "1")
 		}
 		if len(sharedCompatible) > 0 {

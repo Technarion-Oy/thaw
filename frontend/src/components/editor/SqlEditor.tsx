@@ -205,14 +205,18 @@ async function warmUpFKsForSchema(db: string, schema: string): Promise<void> {
 }
 
 function mkColSuggestions(cols: string[], range: any, monaco: any) {
-  return cols.map((col) => ({
-    label:      col,
-    kind:       monaco.languages.CompletionItemKind.Field,
-    insertText: col,
-    sortText:   "02_" + col,
-    detail:     "COLUMN",
-    range,
-  }));
+  return cols.map((col) => {
+    const needsQuoting = !/^[A-Z_][A-Z0-9_$]*$/.test(col) || SNOWFLAKE_KEYWORDS.includes(col.toUpperCase());
+    const insertText = needsQuoting ? `"${col.replace(/"/g, '""')}"` : col;
+    return {
+      label:      col,
+      kind:       monaco.languages.CompletionItemKind.Field,
+      insertText: insertText,
+      sortText:   "02_" + col,
+      detail:     "COLUMN",
+      range,
+    };
+  });
 }
 
 function makeSugg(label: string, detail: string, sortText: string, range: any, monaco: any) {
