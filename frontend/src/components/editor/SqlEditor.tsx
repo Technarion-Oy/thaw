@@ -28,7 +28,7 @@ import { useObjectStore } from "../../store/objectStore";
 import { useSessionStore } from "../../store/sessionStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, GetAllDataTypes, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs } from "../../../wailsjs/go/main/App";
+import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, GetAllDataTypes, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords } from "../../../wailsjs/go/main/App";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 
@@ -89,13 +89,23 @@ function ensureDataTypesLoaded(): Promise<void> {
 }
 
 let snowflakeKeywords: Set<string> | null = null;
+let snowflakeKeywordsArray: string[] = [];
 let keywordsFetchPromise: Promise<void> | null = null;
 function ensureKeywordsLoaded(): Promise<void> {
   if (snowflakeKeywords !== null) return Promise.resolve();
   if (keywordsFetchPromise) return keywordsFetchPromise;
-  keywordsFetchPromise = GetSnowflakeKeywords()
-    .then((kws) => { snowflakeKeywords = new Set((kws as string[])?.map(k => k.toUpperCase()) ?? []); })
-    .catch(() => { snowflakeKeywords = new Set(); keywordsFetchPromise = null; });
+  keywordsFetchPromise = (async () => {
+    try {
+      const kws = await GetSnowflakeKeywords();
+      snowflakeKeywordsArray = (kws as string[]) ?? [];
+      snowflakeKeywords = new Set(snowflakeKeywordsArray.map(k => k.toUpperCase()));
+    } catch {
+      snowflakeKeywords = new Set();
+      snowflakeKeywordsArray = [];
+    } finally {
+      keywordsFetchPromise = null;
+    }
+  })();
   return keywordsFetchPromise;
 }
 
@@ -1009,7 +1019,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const declaredVars: string[] = scriptingResult?.variables ?? [];
         const needsColon: boolean = scriptingResult?.needsColon ?? false;
 
-        const keywordSuggestions = SNOWFLAKE_KEYWORDS.map((kw) => ({
+        const keywordSuggestions = snowflakeKeywordsArray.map((kw) => ({
           label:      kw,
           kind:       monaco.languages.CompletionItemKind.Keyword,
           insertText: kw,
