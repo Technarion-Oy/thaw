@@ -294,10 +294,6 @@ export function GetEditorPrefs() {
   return window['go']['main']['App']['GetEditorPrefs']();
 }
 
-export function GetExplainDiagnostics(arg1) {
-  return window['go']['main']['App']['GetExplainDiagnostics'](arg1);
-}
-
 export function GetFeatureFlags() {
   return window['go']['main']['App']['GetFeatureFlags']();
 }
@@ -708,6 +704,10 @@ export function RestoreFromBackup(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
 
 export function ResumeTaskList(arg1, arg2, arg3) {
   return window['go']['main']['App']['ResumeTaskList'](arg1, arg2, arg3);
+}
+
+export function RunExplain(arg1) {
+  return window['go']['main']['App']['RunExplain'](arg1);
 }
 
 export function RunNotebookCell(arg1, arg2, arg3) {

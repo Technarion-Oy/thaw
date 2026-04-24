@@ -160,8 +160,6 @@ export function GetERDiagramData(arg1:string):Promise<snowflake.ERDiagramData>;
 
 export function GetEditorPrefs():Promise<config.EditorPrefs>;
 
-export function GetExplainDiagnostics(arg1:string):Promise<Array<queryprofile.ExplainMarker>>;
-
 export function GetFeatureFlags():Promise<config.FeatureFlags>;
 
 export function GetFunctionInfo(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.FunctionInfo>;
@@ -367,6 +365,8 @@ export function ResizeShell(arg1:number,arg2:number):Promise<void>;
 export function RestoreFromBackup(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:string):Promise<void>;
 
 export function ResumeTaskList(arg1:string,arg2:string,arg3:Array<string>):Promise<void>;
+
+export function RunExplain(arg1:string):Promise<queryprofile.ExplainResult>;
 
 export function RunNotebookCell(arg1:string,arg2:string,arg3:string):Promise<main.NotebookCellOutput>;
 
