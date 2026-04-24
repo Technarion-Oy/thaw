@@ -41,16 +41,20 @@ import {
   SaveOutlined,
   PlusOutlined,
   PlusSquareOutlined,
+  MinusSquareOutlined,
   RightOutlined,
   ShareAltOutlined,
   ExperimentOutlined,
   DashboardOutlined,
   SyncOutlined,
+  KeyOutlined,
+  LinkOutlined,
+  LineOutlined,
 } from "@ant-design/icons";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -642,7 +646,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                 title:     o.name,
                 key:       `obj:${db}:${schema}:${kind}:${o.name}`,
                 icon:      kindIcon(kind),
-                isLeaf:    true,
+                isLeaf:    kind !== "TABLE" && kind !== "VIEW",
                 arguments: o.arguments ?? "",
                 rowCount:  o.rowCount,
               })),
@@ -653,6 +657,60 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       } catch {
         // Schema not accessible — mark as empty so the cascade doesn't retry.
         setData((prev) => updateNode(prev, key, []));
+      }
+    } else if (parts[0] === "obj") {
+      const db     = parts[1];
+      const schema = parts[2];
+      const kind   = parts[3];
+      const name   = parts.slice(4).join(":");
+
+      if (kind === "TABLE" || kind === "VIEW") {
+        try {
+          const [columns, fks] = await Promise.all([
+            GetTableColumnsWithTypes(db, schema, name),
+            kind === "TABLE" ? GetTableForeignKeys(db, schema, name) : Promise.resolve([]),
+          ]);
+
+          const fkMap = new Map<string, snowflake.TableForeignKey>();
+          if (fks) {
+            for (const fk of fks) {
+              fkMap.set(fk.fkColumn, fk);
+            }
+          }
+
+          const colNodes: DataNode[] = (columns || []).map((c) => {
+            const isPK = c.isPrimaryKey;
+            const fk = fkMap.get(c.name);
+
+            let icon = <LineOutlined style={{ color: "var(--text-muted)", fontSize: "10px" }} />;
+            if (isPK) icon = <KeyOutlined style={{ color: "#faad14" }} />;
+            else if (fk) icon = <LinkOutlined style={{ color: "#1890ff" }} />;
+
+            const title = (
+              <span style={{ display: "flex", alignItems: "center", width: "100%", overflow: "hidden" }}>
+                <Text style={{ fontSize: "12px" }} ellipsis>
+                  {c.name}
+                  <Text type="secondary" style={{ fontSize: "10px", marginLeft: "4px", fontStyle: "italic" }}>
+                    ({c.dataType.toLowerCase().replace("(16777216)", "")})
+                    {fk && ` → ${fk.pkTable}`}
+                  </Text>
+                </Text>
+              </span>
+            );
+
+            return {
+              title,
+              key: `col:${db}:${schema}:${name}:${c.name}`,
+              icon,
+              isLeaf: true,
+            };
+          });
+
+          setData((prev) => updateNode(prev, key, colNodes));
+        } catch (e) {
+          console.error(e);
+          setData((prev) => updateNode(prev, key, []));
+        }
       }
     }
   };
@@ -1494,12 +1552,15 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               }}
             >
             <Tree
-              treeData={displayData}
-              onRightClick={onRightClick as any}
-              selectedKeys={Array.from(selectedNodeKeys)}
-              multiple
-              onSelect={(_keys, info) => {
-                const { nativeEvent, node } = info;
+               treeData={displayData}
+               onRightClick={onRightClick as any}
+               selectedKeys={Array.from(selectedNodeKeys)}
+               multiple
+               switcherIcon={(props: any) => {
+                 if (props.isLeaf) return null;
+                 return props.expanded ? <MinusSquareOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} /> : <PlusSquareOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} />;
+               }}
+               onSelect={(_keys, info) => {                const { nativeEvent, node } = info;
                 const key = String(node.key);
                 if (!key.startsWith("obj:")) return;
 
@@ -1528,6 +1589,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               onExpand={(keys, { expanded, node }) => {
                 if (searchQuery) {
                   setSearchExpandedKeys(keys as Key[]);
+                  // Trigger lazy load when a node without children is expanded during search.
+                  if (expanded && !(node as any).children) {
+                    onLoadData(node as unknown as DataNode & { children?: DataNode[] }, setSearchResults);
+                  }
                 } else {
                   setExpandedKeys(keys as Key[]);
                   // Trigger lazy load when a node without children is expanded.
@@ -1538,8 +1603,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                     onLoadData(node as unknown as DataNode & { children?: DataNode[] });
                   }
                 }
-              }}
-              showIcon
+              }}              showIcon
               blockNode
               style={{ background: "transparent", color: "var(--text)" }}
               titleRender={(node) => {
