@@ -186,6 +186,26 @@ type ExplainMarker struct {
 	ExplainData     *ExplainData `json:"explainData,omitempty"`
 }
 
+// ExplainResult combines the full plan tree and performance diagnostics so
+// the front-end Explain modal can display everything from a single IPC call.
+type ExplainResult struct {
+	Plan        *ExplainPlan    `json:"plan"`
+	Diagnostics []ExplainMarker `json:"diagnostics"`
+}
+
+// RunExplain runs EXPLAIN USING JSON for sql and returns both the parsed plan
+// tree (for display) and any detected performance issues (for highlighting).
+func RunExplain(ctx context.Context, client *snowflake.Client, sql string) (*ExplainResult, error) {
+	plan, err := GetExplainPlan(ctx, client, sql)
+	if err != nil {
+		return nil, err
+	}
+	return &ExplainResult{
+		Plan:        plan,
+		Diagnostics: analyzePlan(plan, sql),
+	}, nil
+}
+
 // GetExplainDiagnostics runs EXPLAIN USING JSON for sql and walks the
 // resulting plan to emit performance markers (full table scans, cartesian
 // joins).  Returns nil (not an error) when no issues are found.
@@ -194,7 +214,13 @@ func GetExplainDiagnostics(ctx context.Context, client *snowflake.Client, sql st
 	if err != nil {
 		return nil, err
 	}
+	return analyzePlan(plan, sql), nil
+}
 
+// analyzePlan walks plan nodes and emits performance markers.
+// Extracted so RunExplain and GetExplainDiagnostics share the analysis
+// without calling EXPLAIN twice.
+func analyzePlan(plan *ExplainPlan, sql string) []ExplainMarker {
 	var markers []ExplainMarker
 	for _, step := range plan.Operations {
 		for _, node := range step {
@@ -243,7 +269,7 @@ func GetExplainDiagnostics(ctx context.Context, client *snowflake.Client, sql st
 			}
 		}
 	}
-	return markers, nil
+	return markers
 }
 
 // isTableScanOp returns true for plan operations that represent a table scan.

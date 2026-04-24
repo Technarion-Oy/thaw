@@ -876,14 +876,14 @@ func (a *App) GetQueryOperatorStats(queryID string) ([]queryprofile.OperatorStat
 	return queryprofile.GetOperatorStats(a.ctx, a.client, queryID)
 }
 
-// GetExplainDiagnostics runs EXPLAIN USING JSON for the provided SQL and
-// analyses the plan for performance issues (full table scans, cartesian joins).
-// Returns typed markers with enriched ExplainData for the editor hover tooltips.
-func (a *App) GetExplainDiagnostics(sql string) ([]queryprofile.ExplainMarker, error) {
+// RunExplain runs EXPLAIN USING JSON for the provided SQL and returns both
+// the parsed plan tree and detected performance issues in a single response.
+// Used by the editor context-menu "Explain SQL" action.
+func (a *App) RunExplain(sql string) (*queryprofile.ExplainResult, error) {
 	if a.client == nil {
 		return nil, ErrNotConnected
 	}
-	return queryprofile.GetExplainDiagnostics(a.ctx, a.client, sql)
+	return queryprofile.RunExplain(a.ctx, a.client, sql)
 }
 
 // StartQuery submits a SQL statement and returns the Snowflake query ID as
