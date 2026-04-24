@@ -160,6 +160,8 @@ export function GetERDiagramData(arg1:string):Promise<snowflake.ERDiagramData>;
 
 export function GetEditorPrefs():Promise<config.EditorPrefs>;
 
+export function GetExplainDiagnostics(arg1:string):Promise<Array<queryprofile.ExplainMarker>>;
+
 export function GetFeatureFlags():Promise<config.FeatureFlags>;
 
 export function GetFunctionInfo(arg1:string,arg2:string,arg3:string,arg4:string):Promise<snowflake.FunctionInfo>;

@@ -876,6 +876,16 @@ func (a *App) GetQueryOperatorStats(queryID string) ([]queryprofile.OperatorStat
 	return queryprofile.GetOperatorStats(a.ctx, a.client, queryID)
 }
 
+// GetExplainDiagnostics runs EXPLAIN USING JSON for the provided SQL and
+// analyses the plan for performance issues (full table scans, cartesian joins).
+// Returns typed markers with enriched ExplainData for the editor hover tooltips.
+func (a *App) GetExplainDiagnostics(sql string) ([]queryprofile.ExplainMarker, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return queryprofile.GetExplainDiagnostics(a.ctx, a.client, sql)
+}
+
 // StartQuery submits a SQL statement and returns the Snowflake query ID as
 // soon as Snowflake assigns one.  For queries that need more than one HTTP
 // round-trip (slow queries) this returns while execution is still in progress,

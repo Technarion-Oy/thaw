@@ -12,7 +12,7 @@
 //
 // It wraps the GET_QUERY_OPERATOR_STATS table function and returns typed
 // [OperatorStat] rows so callers never have to deal with raw column indices or
-// JSON string parsing.
+// JSON string parsing. It also provides tools to parse EXPLAIN USING JSON outputs.
 package queryprofile
 
 import (
@@ -24,6 +24,40 @@ import (
 	"thaw/internal/snowflake"
 )
 
+// ── Diagnostic Messages ──────────────────────────────────────────────────────
+
+// DiagCode represents a unique identifier for a diagnostic message.
+type DiagCode string
+
+const (
+	CodeFullTableScan DiagCode = "FULL_TABLE_SCAN"
+	CodeCartesianJoin DiagCode = "CARTESIAN_JOIN"
+)
+
+// diagMessageTemplates holds the raw string templates for all diagnostics.
+var diagMessageTemplates = map[DiagCode]string{
+	CodeFullTableScan: "Full Table Scan: %s\nScanning %d partitions. Consider adding a filter.",
+	CodeCartesianJoin: "Cartesian Join Detected: This will multiply rows exponentially.",
+}
+
+// GetDiagMessage retrieves the message template for the given code and formats
+// it with any optional arguments provided.
+func GetDiagMessage(code DiagCode, args ...any) string {
+	template, exists := diagMessageTemplates[code]
+	if !exists {
+		// Fallback for missing definitions during development
+		return fmt.Sprintf("Unknown diagnostic code: %s", string(code))
+	}
+
+	// If arguments are provided, format the string; otherwise return it raw.
+	if len(args) > 0 {
+		return fmt.Sprintf(template, args...)
+	}
+	return template
+}
+
+// ── Query Operator Stats ─────────────────────────────────────────────────────
+
 // OperatorStat is one row returned by GET_QUERY_OPERATOR_STATS.
 //
 // The three JSON object columns (OperatorStatistics, ExecutionTimeBreakdown,
@@ -31,14 +65,14 @@ import (
 // returns and stored as Go values so they serialize as JSON objects (not
 // strings) when sent to the frontend over the Wails IPC layer.
 type OperatorStat struct {
-	QueryID                string `json:"queryId"`
-	StepID                 int64  `json:"stepId"`
-	OperatorID             int64  `json:"operatorId"`
+	QueryID                string  `json:"queryId"`
+	StepID                 int64   `json:"stepId"`
+	OperatorID             int64   `json:"operatorId"`
 	ParentOperators        []int64 `json:"parentOperators"`
-	OperatorType           string `json:"operatorType"`
-	OperatorStatistics     any    `json:"operatorStatistics,omitempty"`
-	ExecutionTimeBreakdown any    `json:"executionTimeBreakdown,omitempty"`
-	OperatorAttributes     any    `json:"operatorAttributes,omitempty"`
+	OperatorType           string  `json:"operatorType"`
+	OperatorStatistics     any     `json:"operatorStatistics,omitempty"`
+	ExecutionTimeBreakdown any     `json:"executionTimeBreakdown,omitempty"`
+	OperatorAttributes     any     `json:"operatorAttributes,omitempty"`
 }
 
 // GetOperatorStats runs GET_QUERY_OPERATOR_STATS for the given Snowflake
@@ -59,6 +93,198 @@ func GetOperatorStats(ctx context.Context, client *snowflake.Client, queryID str
 	}
 	return parseResult(result)
 }
+
+// ── Explain Plan ─────────────────────────────────────────────────────────────
+
+// ExplainPlan represents the parsed JSON output from Snowflake's EXPLAIN command.
+type ExplainPlan struct {
+	GlobalStats ExplainGlobalStats `json:"GlobalStats"`
+	// Operations is a 2D array. The outer array represents execution steps,
+	// and the inner array represents the flat list of nodes in that step.
+	Operations [][]ExplainNode `json:"Operations"`
+}
+
+// ExplainGlobalStats contains the top-level execution estimates.
+type ExplainGlobalStats struct {
+	PartitionsTotal   int64 `json:"partitionsTotal"`
+	PartitionsScanned int64 `json:"partitionsScanned"`
+	BytesAssigned     int64 `json:"bytesAssigned"`
+}
+
+// ExplainNode represents a single logical operation in the query plan.
+type ExplainNode struct {
+	ID                int64    `json:"id"`
+	Parent            *int64   `json:"parent,omitempty"`  // Pointer because root nodes have null parents
+	Operation         string   `json:"operation"`         // e.g., "TableScan", "Join"
+	Objects           []string `json:"objects,omitempty"` // e.g., ["MY_DB.MY_SCHEMA.SALES_DATA"]
+	PartitionsScanned int64    `json:"partitionsScanned,omitempty"`
+	PartitionsTotal   int64    `json:"partitionsTotal,omitempty"`
+	JoinType          string   `json:"joinType,omitempty"` // e.g., "Inner", "Cartesian"
+}
+
+// GetExplainPlan runs EXPLAIN USING JSON for the provided SQL query
+// and parses the result into a typed ExplainPlan.
+func GetExplainPlan(ctx context.Context, client *snowflake.Client, query string) (*ExplainPlan, error) {
+	// 1. Wrap the raw query
+	explainQuery := "EXPLAIN USING JSON " + query
+
+	// 2. Execute against Snowflake
+	result, err := client.Execute(ctx, explainQuery)
+	if err != nil {
+		// If the SQL is invalid, Snowflake returns an error here
+		return nil, err
+	}
+
+	// 3. Extract the JSON string from the result
+	if len(result.Rows) == 0 {
+		return nil, fmt.Errorf("queryprofile: explain returned no rows")
+	}
+
+	row := result.Rows[0]
+	if len(row) == 0 {
+		return nil, fmt.Errorf("queryprofile: explain returned empty row")
+	}
+
+	// EXPLAIN USING JSON always returns the JSON string in the first column
+	jsonStr := asString(row, 0)
+	if jsonStr == "" {
+		return nil, fmt.Errorf("queryprofile: explain returned empty JSON string")
+	}
+
+	// 4. Unmarshal into our typed structs
+	var plan ExplainPlan
+	if err := json.Unmarshal([]byte(jsonStr), &plan); err != nil {
+		return nil, fmt.Errorf("queryprofile: failed to parse explain JSON: %w", err)
+	}
+
+	return &plan, nil
+}
+
+// ── Explain Diagnostics ──────────────────────────────────────────────────────
+
+// ExplainData carries structured data from EXPLAIN USING JSON for rich
+// hover tooltips in the editor. Fields mirror the TypeScript spec interface.
+type ExplainData struct {
+	Operation         string `json:"operation"`
+	ObjectName        string `json:"objectName,omitempty"`
+	BytesAssigned     int64  `json:"bytesAssigned,omitempty"`
+	PartitionsScanned int64  `json:"partitionsScanned,omitempty"`
+	PartitionsTotal   int64  `json:"partitionsTotal,omitempty"`
+	JoinType          string `json:"joinType,omitempty"`
+	EstimatedRows     int64  `json:"estimatedRows,omitempty"`
+}
+
+// ExplainMarker is a Monaco editor marker (DiagMarker-compatible) enriched
+// with optional structured EXPLAIN data for the tooltip hover provider.
+type ExplainMarker struct {
+	StartLineNumber int          `json:"startLineNumber"`
+	StartColumn     int          `json:"startColumn"`
+	EndLineNumber   int          `json:"endLineNumber"`
+	EndColumn       int          `json:"endColumn"`
+	Message         string       `json:"message"`
+	Severity        int          `json:"severity"` // 8 = Error, 4 = Warning, 2 = Info
+	ExplainData     *ExplainData `json:"explainData,omitempty"`
+}
+
+// GetExplainDiagnostics runs EXPLAIN USING JSON for sql and walks the
+// resulting plan to emit performance markers (full table scans, cartesian
+// joins).  Returns nil (not an error) when no issues are found.
+func GetExplainDiagnostics(ctx context.Context, client *snowflake.Client, sql string) ([]ExplainMarker, error) {
+	plan, err := GetExplainPlan(ctx, client, sql)
+	if err != nil {
+		return nil, err
+	}
+
+	var markers []ExplainMarker
+	for _, step := range plan.Operations {
+		for _, node := range step {
+			// ── Full table scan ──────────────────────────────────────────
+			if isTableScanOp(node.Operation) && node.PartitionsTotal >= 10 {
+				pct := float64(node.PartitionsScanned) / float64(node.PartitionsTotal)
+				if pct >= 0.5 {
+					objName := ""
+					if len(node.Objects) > 0 {
+						objName = node.Objects[0]
+					}
+					shortName := lastPart(objName)
+					sl, sc, el, ec := findTokenPos(sql, shortName)
+					severity := 4 // Warning
+					if pct >= 0.9 {
+						severity = 8 // Error for near-full scans
+					}
+					markers = append(markers, ExplainMarker{
+						StartLineNumber: sl, StartColumn: sc,
+						EndLineNumber: el, EndColumn: ec,
+						Message:  GetDiagMessage(CodeFullTableScan, shortName, node.PartitionsScanned),
+						Severity: severity,
+						ExplainData: &ExplainData{
+							Operation:         node.Operation,
+							ObjectName:        objName,
+							BytesAssigned:     plan.GlobalStats.BytesAssigned,
+							PartitionsScanned: node.PartitionsScanned,
+							PartitionsTotal:   node.PartitionsTotal,
+						},
+					})
+				}
+			}
+
+			// ── Cartesian join ───────────────────────────────────────────
+			if strings.EqualFold(node.JoinType, "cartesian") {
+				markers = append(markers, ExplainMarker{
+					StartLineNumber: 1, StartColumn: 1,
+					EndLineNumber: 1, EndColumn: 9999,
+					Message:  GetDiagMessage(CodeCartesianJoin),
+					Severity: 8,
+					ExplainData: &ExplainData{
+						Operation: node.Operation,
+						JoinType:  node.JoinType,
+					},
+				})
+			}
+		}
+	}
+	return markers, nil
+}
+
+// isTableScanOp returns true for plan operations that represent a table scan.
+func isTableScanOp(op string) bool {
+	up := strings.ToUpper(op)
+	return up == "TABLESCAN" || up == "INMEMTABLESCAN" || strings.HasSuffix(up, "SCAN")
+}
+
+// lastPart extracts the table name from a fully-qualified dotted identifier,
+// stripping surrounding double-quotes.
+// "MY_DB.MY_SCHEMA.MY_TABLE" → "MY_TABLE"
+func lastPart(dotted string) string {
+	parts := strings.Split(dotted, ".")
+	return strings.Trim(parts[len(parts)-1], `"`)
+}
+
+// findTokenPos searches for token (case-insensitive) in sql and returns the
+// 1-based line/column range of the first occurrence.  Falls back to (1,1,1,9999)
+// when the token is empty or not found.
+func findTokenPos(sql, token string) (sl, sc, el, ec int) {
+	if token == "" {
+		return 1, 1, 1, 9999
+	}
+	tokenUpper := strings.ToUpper(token)
+	line := 1
+	lineStart := 0
+	sqlUpper := strings.ToUpper(sql)
+	for i := range sql {
+		if i+len(tokenUpper) <= len(sqlUpper) && sqlUpper[i:i+len(tokenUpper)] == tokenUpper {
+			col := i - lineStart + 1
+			return line, col, line, col + len(token)
+		}
+		if sql[i] == '\n' {
+			line++
+			lineStart = i + 1
+		}
+	}
+	return 1, 1, 1, 9999
+}
+
+// ── helpers ──────────────────────────────────────────────────────────────────
 
 // isValidQueryID returns true when s consists entirely of hex digits and
 // hyphens — the standard format Snowflake uses for query IDs.
@@ -114,8 +340,6 @@ func parseResult(result *snowflake.QueryResult) ([]OperatorStat, error) {
 	}
 	return stats, nil
 }
-
-// ── helpers ──────────────────────────────────────────────────────────────────
 
 func asString(row []any, i int) string {
 	if i >= len(row) || row[i] == nil {

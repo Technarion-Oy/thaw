@@ -28,7 +28,8 @@ import { useObjectStore } from "../../store/objectStore";
 import { useSessionStore } from "../../store/sessionStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, GetAllDataTypes, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs } from "../../../wailsjs/go/main/App";
+import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, GetAllDataTypes, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs, GetExplainDiagnostics } from "../../../wailsjs/go/main/App";
+import type { queryprofile } from "../../../wailsjs/go/models";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 
@@ -72,6 +73,11 @@ let fnNamesLoaded = false;
 
 const fetchedSchemaObjects   = new Set<string>();
 const fetchedDatabaseSchemas = new Set<string>();
+
+// Module-level store for the latest EXPLAIN diagnostic markers. Kept here so
+// the custom hover handler (onMouseMove) can look up ExplainData without going
+// through Monaco's stripped IMarkerData (which drops unknown fields).
+let lastExplainMarkers: queryprofile.ExplainMarker[] = [];
 
 // ── Datatype completion cache ──────────────────────────────────────────────────
 // Fetched once from the Go registry (snowflake.AllDataTypes) so the editor and
@@ -391,9 +397,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   const activeStmtDecRef = useRef<any>(null);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fnDecRef      = useRef<any>(null);
-  const fnDecTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const diagTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fnDecRef       = useRef<any>(null);
+  const fnDecTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const diagTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const explainTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [ddlHover, setDdlHover] = useState<DdlHover | null>(null);
   const [tooltipCtxMenu, setTooltipCtxMenu] = useState<{ x: number; y: number; sel: string } | null>(null);
@@ -454,6 +461,51 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     return () => document.removeEventListener("click", dismiss);
   }, [tooltipCtxMenu]);
 
+
+  // ── EXPLAIN hover helpers ────────────────────────────────────────────────
+
+  function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1_048_576) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1_073_741_824) return `${(bytes / 1_048_576).toFixed(1)} MB`;
+    return `${(bytes / 1_073_741_824).toFixed(2)} GB`;
+  }
+
+  function formatExplainTitle(marker: queryprofile.ExplainMarker): string {
+    const d = marker.explainData;
+    if (!d) return marker.message.split("\n")[0];
+    const shortName = d.objectName ? d.objectName.split(".").pop() ?? d.objectName : "";
+    if (shortName) return `${d.operation}: ${shortName}`;
+    return d.operation;
+  }
+
+  function formatExplainDetails(marker: queryprofile.ExplainMarker): string {
+    const d = marker.explainData;
+    if (!d) return marker.message;
+    const lines: string[] = [];
+    if (d.partitionsTotal && d.partitionsTotal > 0) {
+      const pct = Math.round(((d.partitionsScanned ?? 0) / d.partitionsTotal) * 100);
+      const icon = pct >= 90 ? "⚠️" : "ℹ️";
+      lines.push(`${icon} Partitions Scanned: ${d.partitionsScanned} / ${d.partitionsTotal} (${pct}%)`);
+    }
+    if (d.bytesAssigned && d.bytesAssigned > 0) {
+      lines.push(`   Estimated Bytes:   ${formatBytes(d.bytesAssigned)}`);
+    }
+    if (d.joinType) {
+      lines.push(`   Join Type:         ${d.joinType}`);
+    }
+    if (d.estimatedRows && d.estimatedRows > 0) {
+      lines.push(`   Estimated Rows:    ${d.estimatedRows.toLocaleString()}`);
+    }
+    // Append the tip line from the message (everything after the first line)
+    const tip = marker.message.split("\n").slice(1).join("\n").trim();
+    if (tip) {
+      lines.push("", tip);
+    }
+    return lines.join("\n");
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
 
   const handleBeforeMount: BeforeMount = (monaco) => {
     ensureMonacoSetup(monaco);
@@ -644,14 +696,55 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       }
     };
 
+    // Runs EXPLAIN USING JSON and emits performance markers (full table scans,
+    // cartesian joins). Only runs when there are no syntax errors and the SQL
+    // is stable (debounced at 2 s to avoid hammering Snowflake Cloud Services).
+    const runExplainDiagnostics = async (model: any) => {
+      if (!model || model.getLanguageId() !== "sql") return;
+      const explainVersion = model.getVersionId();
+      const sql = model.getValue().trim();
+      if (!sql) return;
+
+      // Skip if syntax checker already found errors.
+      const syntaxMarkers = monaco.editor.getModelMarkers({ owner: "thaw-sql", resource: model.uri });
+      if (syntaxMarkers.some((m: any) => m.severity === 8)) return;
+
+      try {
+        const results = await GetExplainDiagnostics(sql);
+        if (model.getVersionId() !== explainVersion) return;
+        lastExplainMarkers = results ?? [];
+        monaco.editor.setModelMarkers(model, "thaw-explain", lastExplainMarkers.map((m) => ({
+          startLineNumber: m.startLineNumber,
+          startColumn: m.startColumn,
+          endLineNumber: m.endLineNumber,
+          endColumn: m.endColumn,
+          message: m.message,
+          severity: m.severity,
+        })));
+      } catch {
+        // Best-effort — not connected, or SQL is not explainable. Stay silent.
+      }
+    };
+
     editor.onDidChangeModelContent(() => {
       if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
       diagTimerRef.current = setTimeout(runDiagnostics, 400);
+
+      // Clear explain markers immediately so stale highlights don't persist.
+      const model = editor.getModel();
+      if (model) monaco.editor.setModelMarkers(model, "thaw-explain", []);
+      lastExplainMarkers = [];
+      if (explainTimerRef.current) clearTimeout(explainTimerRef.current);
+      explainTimerRef.current = setTimeout(() => runExplainDiagnostics(editor.getModel()), 2000);
     });
 
     editor.onDidChangeModelLanguage(() => {
       const model = editor.getModel();
-      if (model) monaco.editor.setModelMarkers(model, "thaw-sql", []);
+      if (model) {
+        monaco.editor.setModelMarkers(model, "thaw-sql", []);
+        monaco.editor.setModelMarkers(model, "thaw-explain", []);
+        lastExplainMarkers = [];
+      }
     });
 
     runDiagnostics();
@@ -1196,7 +1289,14 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           ) ?? null)
         : null;
 
-      if ((!parts || parts.length === 0) && !diagMarkerAtPos) {
+      const explainMarkerAtPos = pos
+        ? (lastExplainMarkers.find((m) =>
+            pos.lineNumber >= m.startLineNumber && pos.lineNumber <= m.endLineNumber &&
+            pos.column    >= m.startColumn      && pos.column    <= m.endColumn,
+          ) ?? null)
+        : null;
+
+      if ((!parts || parts.length === 0) && !diagMarkerAtPos && !explainMarkerAtPos) {
         lastHoverWordRef.current = null;
         if (hoverTimerRef.current) { clearTimeout(hoverTimerRef.current); hoverTimerRef.current = null; }
         if (!isOnTooltipRef.current) scheduleHide();
@@ -1208,7 +1308,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
       const wordKey = (parts && parts.length > 0)
         ? parts.join("\0")
-        : `marker:${diagMarkerAtPos!.startLineNumber}:${diagMarkerAtPos!.startColumn}`;
+        : diagMarkerAtPos
+          ? `marker:${diagMarkerAtPos.startLineNumber}:${diagMarkerAtPos.startColumn}`
+          : `explain:${explainMarkerAtPos!.startLineNumber}:${explainMarkerAtPos!.startColumn}`;
       if (wordKey === lastHoverWordRef.current) return;
       lastHoverWordRef.current = wordKey;
 
@@ -1222,6 +1324,35 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         {
           const mModel = editor.getModel();
           if (mModel) {
+            // ── EXPLAIN markers (richer tooltip with structured data) ───────
+            const explainMarker = lastExplainMarkers.find((m) =>
+              pos.lineNumber >= m.startLineNumber && pos.lineNumber <= m.endLineNumber &&
+              pos.column    >= m.startColumn      && pos.column    <= m.endColumn,
+            );
+            if (explainMarker) {
+              const editorDom = editor.getDomNode();
+              const editorRect = editorDom?.getBoundingClientRect();
+              const scrolledPos = editor.getScrolledVisiblePosition(pos);
+              if (scrolledPos && editorRect) {
+                const rawX = editorRect.left + scrolledPos.left;
+                const mouseY = currentMouseYRef.current;
+                const details = formatExplainDetails(explainMarker);
+                const fitsBelow = mouseY + 24 + (details ? 120 : 60) <= window.innerHeight;
+                const x = Math.min(rawX, window.innerWidth - 570);
+                const y = fitsBelow ? mouseY + 24 : Math.max(0, mouseY - 24 - (details ? 120 : 60));
+                if (hoverHideTimerRef.current) { clearTimeout(hoverHideTimerRef.current); hoverHideTimerRef.current = null; }
+                setDdlHover({
+                  kind: explainMarker.severity === 8 ? "⚠️ Performance Issue" : "💡 Performance Tip",
+                  db: "", schema: "",
+                  name: formatExplainTitle(explainMarker),
+                  ddl: details,
+                  x, y,
+                });
+              }
+              return;
+            }
+
+            // ── Syntax / validation markers (plain message) ─────────────────
             const diagMarker = monaco.editor.getModelMarkers({ owner: "thaw-sql", resource: mModel.uri }).find((m: any) =>
               pos.lineNumber >= m.startLineNumber && pos.lineNumber <= m.endLineNumber &&
               pos.column    >= m.startColumn      && pos.column    <= m.endColumn,

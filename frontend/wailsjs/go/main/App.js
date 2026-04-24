@@ -294,6 +294,10 @@ export function GetEditorPrefs() {
   return window['go']['main']['App']['GetEditorPrefs']();
 }
 
+export function GetExplainDiagnostics(arg1) {
+  return window['go']['main']['App']['GetExplainDiagnostics'](arg1);
+}
+
 export function GetFeatureFlags() {
   return window['go']['main']['App']['GetFeatureFlags']();
 }
