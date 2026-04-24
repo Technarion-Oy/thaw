@@ -1798,16 +1798,14 @@ func ValidateSyntax(sql string) []DiagMarker {
 
 // ── ParseJoinTables ───────────────────────────────────────────────────────────
 
-const idPat = `(?:"(?:""|[^"])*"|[\w$]+)`
-
 var tableRefRe = regexp.MustCompile(
 	`(?i)(?:FROM|JOIN|MERGE\s+INTO|USING)\s+` +
 		`(?:` +
-		`(` + idPat + `)\.(` + idPat + `)\.(` + idPat + `)` +
-		`|(` + idPat + `)\.(` + idPat + `)` +
-		`|(` + idPat + `)` +
+		`(` + ReIdentifier + `)\.(` + ReIdentifier + `)\.(` + ReIdentifier + `)` +
+		`|(` + ReIdentifier + `)\.(` + ReIdentifier + `)` +
+		`|(` + ReIdentifier + `)` +
 		`)` +
-		`(?:[ \t]+(?:AS[ \t]+)?(` + idPat + `))?`,
+		`(?:[ \t]+(?:AS[ \t]+)?(` + ReIdentifier + `))?`,
 )
 
 // normID normalises a raw captured identifier:

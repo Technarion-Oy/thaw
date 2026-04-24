@@ -88,22 +88,22 @@ function ensureDataTypesLoaded(): Promise<void> {
   return dataTypesFetchPromise;
 }
 
-const SNOWFLAKE_KEYWORDS = [
-  "SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER",
-  "GROUP BY", "ORDER BY", "HAVING", "LIMIT", "INSERT", "UPDATE", "DELETE",
-  "CREATE", "ALTER", "DROP", "TABLE", "VIEW", "SCHEMA", "DATABASE",
-  "WAREHOUSE", "ROLE", "GRANT", "REVOKE", "SHOW", "DESCRIBE", "USE",
-  "WITH", "AS", "ON", "AND", "OR", "NOT", "IN", "IS", "NULL", "LIKE",
-  "ILIKE", "BETWEEN", "CASE", "WHEN", "THEN", "ELSE", "END", "DISTINCT",
-  "QUALIFY", "OVER", "PARTITION BY", "ROWS", "RANGE", "UNBOUNDED",
-  "PRECEDING", "FOLLOWING", "CURRENT ROW", "FLATTEN", "LATERAL", "FAIL",
-];
+let snowflakeKeywords: Set<string> | null = null;
+let keywordsFetchPromise: Promise<void> | null = null;
+function ensureKeywordsLoaded(): Promise<void> {
+  if (snowflakeKeywords !== null) return Promise.resolve();
+  if (keywordsFetchPromise) return keywordsFetchPromise;
+  keywordsFetchPromise = GetSnowflakeKeywords()
+    .then((kws) => { snowflakeKeywords = new Set((kws as string[])?.map(k => k.toUpperCase()) ?? []); })
+    .catch(() => { snowflakeKeywords = new Set(); keywordsFetchPromise = null; });
+  return keywordsFetchPromise;
+}
 
 const UC = (s: string) => s.toUpperCase();
 
 function quoteIfNecessary(name: string): string {
   if (!name) return name;
-  const needsQuoting = !/^[A-Z_][A-Z0-9_$]*$/.test(name) || SNOWFLAKE_KEYWORDS.includes(name.toUpperCase());
+  const needsQuoting = !/^[A-Z_][A-Z0-9_$]*$/.test(name) || (snowflakeKeywords?.has(name.toUpperCase()) ?? false);
   return needsQuoting ? `"${name.replace(/"/g, '""')}"` : name;
 }
 
@@ -720,6 +720,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     monaco.languages.registerCompletionItemProvider("sql", {
       triggerCharacters: ["."],
       provideCompletionItems: async (model: any, position: any) => {
+        await ensureKeywordsLoaded();
         const word = model.getWordUntilPosition(position);
         const range = {
           startLineNumber: position.lineNumber,
