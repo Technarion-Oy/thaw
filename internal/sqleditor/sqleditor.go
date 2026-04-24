@@ -418,36 +418,49 @@ func GetIdentifierAtColumn(line string, col int) []string {
 
 			if runes[i] == '"' {
 				i++ // skip opening quote
-				for i < n && runes[i] != '"' {
+				for i < n {
+					if runes[i] == '"' {
+						if i+1 < n && runes[i+1] == '"' {
+							partName = append(partName, '"')
+							i += 2
+							continue
+						}
+						i++ // skip closing quote
+						break
+					}
 					partName = append(partName, runes[i])
 					i++
 				}
-				if i < n {
-					i++ // skip closing quote
-				}
+				parts = append(parts, string(partName))
 			} else if isWordRune(runes[i]) {
 				for i < n && isWordRune(runes[i]) {
 					partName = append(partName, runes[i])
 					i++
 				}
+				parts = append(parts, strings.ToUpper(string(partName)))
 			} else {
 				break
 			}
-
-			parts = append(parts, string(partName))
 			if col >= partStart && col < i {
 				containsCol = true
 			}
 
-			// Continue chain if followed by '.' and then '"' or word rune.
+			// Continue chain if followed by '.'
 			if i < n && runes[i] == '.' {
-				if i+1 < n && (runes[i+1] == '"' || isWordRune(runes[i+1])) {
-					if col == i {
-						containsCol = true
-					}
-					i++ // skip '.'
+				if col == i {
+					containsCol = true
+				}
+				i++ // skip '.'
+
+				// If cursor is exactly after the dot, it also belongs to this chain.
+				if col == i {
+					containsCol = true
+				}
+
+				if i < n && (runes[i] == '"' || isWordRune(runes[i])) {
 					continue
 				}
+				break
 			}
 			break
 		}
@@ -462,7 +475,7 @@ func GetIdentifierAtColumn(line string, col int) []string {
 // isWordRune reports whether r is a SQL word character (\w equivalent).
 func isWordRune(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-		(r >= '0' && r <= '9') || r == '_'
+		(r >= '0' && r <= '9') || r == '_' || r == '$'
 }
 
 // isLetterOrUnderscore reports whether r can start an unquoted SQL identifier.
@@ -1785,7 +1798,7 @@ func ValidateSyntax(sql string) []DiagMarker {
 
 // ── ParseJoinTables ───────────────────────────────────────────────────────────
 
-const idPat = `(?:"[^"]+"|` + `\w+)`
+const idPat = `(?:"(?:""|[^"])*"|[\w$]+)`
 
 var tableRefRe = regexp.MustCompile(
 	`(?i)(?:FROM|JOIN|MERGE\s+INTO|USING)\s+` +
@@ -1798,22 +1811,24 @@ var tableRefRe = regexp.MustCompile(
 )
 
 // normID normalises a raw captured identifier:
-//   - Quoted identifiers ("name") have quotes stripped and case preserved.
+//   - Quoted identifiers ("name") have quotes stripped, escaped quotes unescaped, and case preserved.
 //   - Unquoted identifiers are uppercased (Snowflake convention).
 func normID(s string) string {
 	if s == "" {
 		return ""
 	}
 	if strings.HasPrefix(s, `"`) {
-		return s[1 : len(s)-1]
+		inner := s[1 : len(s)-1]
+		return strings.ReplaceAll(inner, `""`, `"`)
 	}
 	return strings.ToUpper(s)
 }
 
-// stripQ strips surrounding double-quotes from an identifier, leaving case intact.
+// stripQ strips surrounding double-quotes from an identifier and unescapes embedded quotes, leaving case intact.
 func stripQ(s string) string {
 	if strings.HasPrefix(s, `"`) {
-		return s[1 : len(s)-1]
+		inner := s[1 : len(s)-1]
+		return strings.ReplaceAll(inner, `""`, `"`)
 	}
 	return s
 }
