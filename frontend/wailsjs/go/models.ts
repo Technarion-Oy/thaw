@@ -1010,6 +1010,37 @@ export namespace main {
 
 }
 
+export namespace queryprofile {
+	
+	export class OperatorStat {
+	    queryId: string;
+	    stepId: number;
+	    operatorId: number;
+	    parentOperators: number[];
+	    operatorType: string;
+	    operatorStatistics?: any;
+	    executionTimeBreakdown?: any;
+	    operatorAttributes?: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new OperatorStat(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.queryId = source["queryId"];
+	        this.stepId = source["stepId"];
+	        this.operatorId = source["operatorId"];
+	        this.parentOperators = source["parentOperators"];
+	        this.operatorType = source["operatorType"];
+	        this.operatorStatistics = source["operatorStatistics"];
+	        this.executionTimeBreakdown = source["executionTimeBreakdown"];
+	        this.operatorAttributes = source["operatorAttributes"];
+	    }
+	}
+
+}
+
 export namespace sfconfig {
 	
 	export class Connection {

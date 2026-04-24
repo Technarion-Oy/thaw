@@ -41,6 +41,7 @@ import (
 	"thaw/internal/fnmeta"
 	"thaw/internal/gitrepo"
 	"thaw/internal/logger"
+	"thaw/internal/queryprofile"
 	"thaw/internal/sfconfig"
 	"thaw/internal/snowflake"
 	"thaw/internal/sqleditor"
@@ -861,6 +862,18 @@ func (a *App) ExecuteQuery(sql string) (*snowflake.QueryResult, error) {
 		}
 	}
 	return result, err
+}
+
+// GetQueryOperatorStats runs GET_QUERY_OPERATOR_STATS for the given Snowflake
+// query ID and returns the typed execution-plan operator statistics.  The JSON
+// object columns (operator_statistics, execution_time_breakdown,
+// operator_attributes) are pre-parsed so the frontend receives them as JSON
+// objects rather than raw strings.
+func (a *App) GetQueryOperatorStats(queryID string) ([]queryprofile.OperatorStat, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return queryprofile.GetOperatorStats(a.ctx, a.client, queryID)
 }
 
 // StartQuery submits a SQL statement and returns the Snowflake query ID as

@@ -12,7 +12,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Modal, Table, Tag, Button, Spin, Alert, Tooltip, Space, Typography, Divider } from "antd";
 import { ReloadOutlined, BulbOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { ExecuteQuery, SendChatMessage, GetAIConfig } from "../../../wailsjs/go/main/App";
+import { GetQueryOperatorStats, SendChatMessage, GetAIConfig } from "../../../wailsjs/go/main/App";
+import type { queryprofile } from "../../../wailsjs/go/models";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 
 const { Text } = Typography;
@@ -25,8 +26,6 @@ interface Props {
   /** SQL that produced this query ID — enables the AI suggestion button. */
   sql?: string;
 }
-
-type Row = Record<string, unknown>;
 
 const OPERATOR_TYPE_COLORS: Record<string, string> = {
   RESULT: "blue",
@@ -44,9 +43,6 @@ const OPERATOR_TYPE_COLORS: Record<string, string> = {
   UNION: "gold",
   LIMIT: "lime",
 };
-
-const JSON_COLS = new Set(["OPERATOR_STATISTICS", "EXECUTION_TIME_BREAKDOWN", "OPERATOR_ATTRIBUTES"]);
-const HIDDEN_COLS = new Set(["QUERY_ID"]);
 
 // ── AI helpers ──────────────────────────────────────────────────────────────
 
@@ -66,24 +62,18 @@ function parseSegments(text: string): Segment[] {
   return parts;
 }
 
-function buildAiPrompt(sql: string, rows: Row[], columns: string[]): string {
-  const visibleCols = columns.filter((c) => !HIDDEN_COLS.has(c));
-  const header = visibleCols.join(" | ");
-  const body = rows.map((row) =>
-    visibleCols.map((c) => {
-      const v = row[c];
-      if (v == null || v === "") return "—";
-      if (JSON_COLS.has(c)) {
-        try { return JSON.stringify(JSON.parse(String(v))); } catch { return String(v); }
-      }
-      if (c === "PARENT_OPERATORS") {
-        try {
-          const arr = JSON.parse(String(v));
-          return Array.isArray(arr) ? arr.join(",") : String(v);
-        } catch { return String(v); }
-      }
-      return String(v);
-    }).join(" | ")
+function buildAiPrompt(sql: string, rows: queryprofile.OperatorStat[]): string {
+  const header = "step_id | operator_id | parent_operators | operator_type | operator_statistics | execution_time_breakdown | operator_attributes";
+  const body = rows.map((r) =>
+    [
+      r.stepId ?? "—",
+      r.operatorId ?? "—",
+      r.parentOperators?.length ? r.parentOperators.join(",") : "—",
+      r.operatorType || "—",
+      r.operatorStatistics != null ? JSON.stringify(r.operatorStatistics) : "—",
+      r.executionTimeBreakdown != null ? JSON.stringify(r.executionTimeBreakdown) : "—",
+      r.operatorAttributes != null ? JSON.stringify(r.operatorAttributes) : "—",
+    ].join(" | ")
   ).join("\n");
 
   return `You are a Snowflake SQL performance expert. Rewrite the query below to be as fast as possible based on its execution plan.
@@ -109,75 +99,105 @@ function operatorTypeColor(type: string): string {
   return OPERATOR_TYPE_COLORS[key] ?? "default";
 }
 
-function prettyJson(value: unknown): string {
-  if (value == null) return "";
-  if (typeof value === "string") {
-    try { return JSON.stringify(JSON.parse(value), null, 2); }
-    catch { return value; }
-  }
-  return JSON.stringify(value, null, 2);
-}
-
-function renderCell(col: string, value: unknown): React.ReactNode {
-  if (value == null || value === "") return <span style={{ color: "var(--text-faint)" }}>—</span>;
-
-  if (col === "OPERATOR_TYPE") {
-    const s = String(value);
-    return (
-      <Tag
-        color={operatorTypeColor(s)}
-        style={{ fontFamily: "monospace", fontSize: 10, margin: 0, lineHeight: "18px" }}
-      >
-        {s}
-      </Tag>
-    );
-  }
-
-  if (JSON_COLS.has(col)) {
-    const text = prettyJson(value);
-    if (!text) return <span style={{ color: "var(--text-faint)" }}>—</span>;
-    return (
-      <pre
-        style={{
-          fontFamily: "monospace",
-          fontSize: 10,
-          margin: 0,
-          maxHeight: 130,
-          overflow: "auto",
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-          background: "var(--bg-subtle, rgba(0,0,0,0.03))",
-          padding: "2px 5px",
-          borderRadius: 3,
-          lineHeight: 1.45,
-        }}
-      >
-        {text}
-      </pre>
-    );
-  }
-
-  if (col === "PARENT_OPERATORS") {
-    let arr: unknown = value;
-    if (typeof value === "string") {
-      try { arr = JSON.parse(value); } catch { /* leave */ }
-    }
-    if (Array.isArray(arr)) return <span>{arr.join(", ") || "—"}</span>;
-    return <span>{String(value)}</span>;
-  }
-
-  const mono = col === "STEP_ID" || col === "OPERATOR_ID";
+function renderJsonCell(value: unknown): React.ReactNode {
+  if (value == null) return <span style={{ color: "var(--text-faint)" }}>—</span>;
+  const text = JSON.stringify(value, null, 2);
+  if (!text || text === "null") return <span style={{ color: "var(--text-faint)" }}>—</span>;
   return (
-    <span style={{ fontFamily: mono ? "monospace" : undefined, fontSize: mono ? 11 : undefined }}>
-      {String(value)}
-    </span>
+    <pre
+      style={{
+        fontFamily: "monospace",
+        fontSize: 10,
+        margin: 0,
+        maxHeight: 130,
+        overflow: "auto",
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+        background: "var(--bg-subtle, rgba(0,0,0,0.03))",
+        padding: "2px 5px",
+        borderRadius: 3,
+        lineHeight: 1.45,
+      }}
+    >
+      {text}
+    </pre>
   );
 }
 
+const TABLE_COLS: ColumnsType<queryprofile.OperatorStat> = [
+  {
+    key: "stepId",
+    title: <span style={{ fontSize: 11 }}>step&nbsp;id</span>,
+    dataIndex: "stepId",
+    width: 65,
+    render: (v: number) => (
+      <span style={{ fontFamily: "monospace", fontSize: 11 }}>{v ?? "—"}</span>
+    ),
+  },
+  {
+    key: "operatorId",
+    title: <span style={{ fontSize: 11 }}>operator&nbsp;id</span>,
+    dataIndex: "operatorId",
+    width: 65,
+    render: (v: number) => (
+      <span style={{ fontFamily: "monospace", fontSize: 11 }}>{v ?? "—"}</span>
+    ),
+  },
+  {
+    key: "parentOperators",
+    title: <span style={{ fontSize: 11 }}>parent&nbsp;operators</span>,
+    dataIndex: "parentOperators",
+    width: 110,
+    render: (v: number[]) =>
+      v?.length ? (
+        <span>{v.join(", ")}</span>
+      ) : (
+        <span style={{ color: "var(--text-faint)" }}>—</span>
+      ),
+  },
+  {
+    key: "operatorType",
+    title: <span style={{ fontSize: 11 }}>operator&nbsp;type</span>,
+    dataIndex: "operatorType",
+    width: 165,
+    render: (v: string) =>
+      v ? (
+        <Tag
+          color={operatorTypeColor(v)}
+          style={{ fontFamily: "monospace", fontSize: 10, margin: 0, lineHeight: "18px" }}
+        >
+          {v}
+        </Tag>
+      ) : (
+        <span style={{ color: "var(--text-faint)" }}>—</span>
+      ),
+  },
+  {
+    key: "operatorStatistics",
+    title: <span style={{ fontSize: 11 }}>operator&nbsp;statistics</span>,
+    dataIndex: "operatorStatistics",
+    width: 290,
+    render: renderJsonCell,
+  },
+  {
+    key: "executionTimeBreakdown",
+    title: <span style={{ fontSize: 11 }}>execution&nbsp;time&nbsp;breakdown</span>,
+    dataIndex: "executionTimeBreakdown",
+    width: 260,
+    render: renderJsonCell,
+  },
+  {
+    key: "operatorAttributes",
+    title: <span style={{ fontSize: 11 }}>operator&nbsp;attributes</span>,
+    dataIndex: "operatorAttributes",
+    width: 290,
+    render: renderJsonCell,
+  },
+];
+
 export default function QueryProfileModal({ queryId, onClose, liveRefresh, sql }: Props) {
   const [loading,       setLoading]       = useState(false);
-  const [columns,       setColumns]       = useState<string[]>([]);
-  const [rows,          setRows]          = useState<Row[]>([]);
+  const [rows,          setRows]          = useState<queryprofile.OperatorStat[]>([]);
   const [error,         setError]         = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -192,16 +212,8 @@ export default function QueryProfileModal({ queryId, onClose, liveRefresh, sql }
   const fetchStats = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await ExecuteQuery(
-        `SELECT * FROM TABLE(GET_QUERY_OPERATOR_STATS('${queryId}'))`
-      );
-      const cols = result.columns ?? [];
-      setColumns(cols);
-      setRows(
-        (result.rows ?? []).map((row) =>
-          Object.fromEntries(cols.map((col, i) => [col, (row as unknown[])[i]]))
-        )
-      );
+      const stats = await GetQueryOperatorStats(queryId);
+      setRows(stats ?? []);
       setError(null);
       setLastRefreshed(new Date());
     } catch (e) {
@@ -232,7 +244,7 @@ export default function QueryProfileModal({ queryId, onClose, liveRefresh, sql }
     setAiSegments(null);
     setAiError(null);
     try {
-      const prompt = buildAiPrompt(sql, rows, columns);
+      const prompt = buildAiPrompt(sql, rows);
       const msgs = await SendChatMessage([], prompt, sql, "", false);
       const assistant = msgs.find((m) => m.role === "assistant");
       setAiSegments(parseSegments(assistant?.text ?? ""));
@@ -242,28 +254,6 @@ export default function QueryProfileModal({ queryId, onClose, liveRefresh, sql }
       setAiLoading(false);
     }
   };
-
-  const tableCols: ColumnsType<Row> = columns
-    .filter((c) => !HIDDEN_COLS.has(c))
-    .map((col) => {
-      const colDef: ColumnsType<Row>[number] = {
-        key: col,
-        title: (
-          <span style={{ fontSize: 11 }}>
-            {col.toLowerCase().replace(/_/g, "\u00A0")}
-          </span>
-        ),
-        dataIndex: col,
-        render: (v: unknown) => renderCell(col, v),
-      };
-      if      (col === "STEP_ID" || col === "OPERATOR_ID") colDef.width = 65;
-      else if (col === "PARENT_OPERATORS")                 colDef.width = 110;
-      else if (col === "OPERATOR_TYPE")                    colDef.width = 165;
-      else if (col === "OPERATOR_STATISTICS")              colDef.width = 290;
-      else if (col === "EXECUTION_TIME_BREAKDOWN")         colDef.width = 260;
-      else if (col === "OPERATOR_ATTRIBUTES")              colDef.width = 290;
-      return colDef;
-    });
 
   const shortQid =
     queryId.length > 36 ? `${queryId.slice(0, 16)}…${queryId.slice(-16)}` : queryId;
@@ -335,10 +325,10 @@ export default function QueryProfileModal({ queryId, onClose, liveRefresh, sql }
           style={{ marginBottom: 8 }}
         />
       ) : (
-        <Table<Row>
+        <Table<queryprofile.OperatorStat>
           dataSource={rows}
-          columns={tableCols}
-          rowKey={(_, idx) => String(idx)}
+          columns={TABLE_COLS}
+          rowKey={(r) => `${r.stepId}-${r.operatorId}`}
           size="small"
           pagination={false}
           scroll={{ x: "max-content", y: 500 }}

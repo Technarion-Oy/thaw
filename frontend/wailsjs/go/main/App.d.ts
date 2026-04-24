@@ -7,6 +7,7 @@ import {dbt} from '../models';
 import {ddl} from '../models';
 import {config} from '../models';
 import {fnmeta} from '../models';
+import {queryprofile} from '../models';
 import {tasks} from '../models';
 import {gitrepo} from '../models';
 import {filesystem} from '../models';
@@ -192,6 +193,8 @@ export function GetPipRegistryConfig():Promise<config.PipRegistryConfig>;
 export function GetProcedureParams(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.ProcParam>>;
 
 export function GetQueryHistory(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:number,arg8:boolean):Promise<Array<main.QueryHistoryRow>>;
+
+export function GetQueryOperatorStats(arg1:string):Promise<Array<queryprofile.OperatorStat>>;
 
 export function GetQuotedIdentifiersIgnoreCase():Promise<boolean>;
 
