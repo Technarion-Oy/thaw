@@ -88,7 +88,24 @@ function ensureDataTypesLoaded(): Promise<void> {
   return dataTypesFetchPromise;
 }
 
+const SNOWFLAKE_KEYWORDS = [
+  "SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER",
+  "GROUP BY", "ORDER BY", "HAVING", "LIMIT", "INSERT", "UPDATE", "DELETE",
+  "CREATE", "ALTER", "DROP", "TABLE", "VIEW", "SCHEMA", "DATABASE",
+  "WAREHOUSE", "ROLE", "GRANT", "REVOKE", "SHOW", "DESCRIBE", "USE",
+  "WITH", "AS", "ON", "AND", "OR", "NOT", "IN", "IS", "NULL", "LIKE",
+  "ILIKE", "BETWEEN", "CASE", "WHEN", "THEN", "ELSE", "END", "DISTINCT",
+  "QUALIFY", "OVER", "PARTITION BY", "ROWS", "RANGE", "UNBOUNDED",
+  "PRECEDING", "FOLLOWING", "CURRENT ROW", "FLATTEN", "LATERAL", "FAIL",
+];
+
 const UC = (s: string) => s.toUpperCase();
+
+function quoteIfNecessary(name: string): string {
+  if (!name) return name;
+  const needsQuoting = !/^[A-Z_][A-Z0-9_$]*$/.test(name) || SNOWFLAKE_KEYWORDS.includes(name.toUpperCase());
+  return needsQuoting ? `"${name.replace(/"/g, '""')}"` : name;
+}
 
 // ── Column-level completion cache ─────────────────────────────────────────────
 const columnCache  = new Map<string, string[]>();
@@ -205,18 +222,14 @@ async function warmUpFKsForSchema(db: string, schema: string): Promise<void> {
 }
 
 function mkColSuggestions(cols: string[], range: any, monaco: any) {
-  return cols.map((col) => {
-    const needsQuoting = !/^[A-Z_][A-Z0-9_$]*$/.test(col) || SNOWFLAKE_KEYWORDS.includes(col.toUpperCase());
-    const insertText = needsQuoting ? `"${col.replace(/"/g, '""')}"` : col;
-    return {
-      label:      col,
-      kind:       monaco.languages.CompletionItemKind.Field,
-      insertText: insertText,
-      sortText:   "02_" + col,
-      detail:     "COLUMN",
-      range,
-    };
-  });
+  return cols.map((col) => ({
+    label:      col,
+    kind:       monaco.languages.CompletionItemKind.Field,
+    insertText: quoteIfNecessary(col),
+    sortText:   "02_" + col,
+    detail:     "COLUMN",
+    range,
+  }));
 }
 
 function makeSugg(label: string, detail: string, sortText: string, range: any, monaco: any) {
@@ -249,17 +262,6 @@ function resolveRefs(
   }).filter(Boolean) as Array<{ db: string; schema: string; name: string; alias: string }>;
   return resolved.length >= 2 ? resolved : null;
 }
-
-const SNOWFLAKE_KEYWORDS = [
-  "SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER",
-  "GROUP BY", "ORDER BY", "HAVING", "LIMIT", "INSERT", "UPDATE", "DELETE",
-  "CREATE", "ALTER", "DROP", "TABLE", "VIEW", "SCHEMA", "DATABASE",
-  "WAREHOUSE", "ROLE", "GRANT", "REVOKE", "SHOW", "DESCRIBE", "USE",
-  "WITH", "AS", "ON", "AND", "OR", "NOT", "IN", "IS", "NULL", "LIKE",
-  "ILIKE", "BETWEEN", "CASE", "WHEN", "THEN", "ELSE", "END", "DISTINCT",
-  "QUALIFY", "OVER", "PARTITION BY", "ROWS", "RANGE", "UNBOUNDED",
-  "PRECEDING", "FOLLOWING", "CURRENT ROW", "FLATTEN", "LATERAL",
-];
 
 function monacoKind(monaco: any, kind: string): number {
   const K = monaco.languages.CompletionItemKind;
@@ -826,7 +828,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                   .map((o) => ({
                     label:      o.name,
                     kind:       monacoKind(monaco, o.kind),
-                    insertText: o.name,
+                    insertText: quoteIfNecessary(o.name),
                     sortText:   "03_" + o.name,
                     detail:     o.kind,
                     range,
@@ -858,7 +860,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                     .map((s) => ({
                       label:      s.name,
                       kind:       monaco.languages.CompletionItemKind.Module,
-                      insertText: s.name,
+                      insertText: quoteIfNecessary(s.name),
                       sortText:   "04_" + s.name,
                       detail:     "SCHEMA",
                       range,
@@ -897,7 +899,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                   suggestions: schemaObjs.map((o) => ({
                     label:      o.name,
                     kind:       monacoKind(monaco, o.kind),
-                    insertText: o.name,
+                    insertText: quoteIfNecessary(o.name),
                     sortText:   "03_" + o.name,
                     detail:     o.kind,
                     range,
@@ -1027,7 +1029,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const dbSuggestions = databases.map((db) => ({
           label:      db,
           kind:       monaco.languages.CompletionItemKind.Module,
-          insertText: db,
+          insertText: quoteIfNecessary(db),
           sortText:   "05_" + db,
           detail:     "DATABASE",
           range,
@@ -1036,7 +1038,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const schemaSuggestions = schemas.map((s) => ({
           label:      s.name,
           kind:       monaco.languages.CompletionItemKind.Module,
-          insertText: s.name,
+          insertText: quoteIfNecessary(s.name),
           sortText:   "04_" + s.name,
           detail:     `SCHEMA · ${s.db}`,
           range,
@@ -1045,7 +1047,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const objectSuggestions = objects.map((o) => ({
           label:      o.name,
           kind:       monacoKind(monaco, o.kind),
-          insertText: o.name,
+          insertText: quoteIfNecessary(o.name),
           sortText:   "03_" + o.name,
           detail:     `${o.kind} · ${o.db}.${o.schema}`,
           range,
@@ -1107,7 +1109,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                 contextColSuggestions.push({
                   label:      col,
                   kind:       monaco.languages.CompletionItemKind.Field,
-                  insertText: col,
+                  insertText: quoteIfNecessary(col),
                   sortText:   "02_" + col,
                   detail:     `COLUMN · ${ref.name}`,
                   range,
