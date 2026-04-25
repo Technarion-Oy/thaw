@@ -1852,15 +1852,6 @@ func normID(s string) string {
 	return strings.ToUpper(s)
 }
 
-// stripQ strips surrounding double-quotes from an identifier and unescapes embedded quotes, leaving case intact.
-func stripQ(s string) string {
-	if strings.HasPrefix(s, `"`) {
-		inner := s[1 : len(s)-1]
-		return strings.ReplaceAll(inner, `""`, `"`)
-	}
-	return s
-}
-
 // ParseJoinTables extracts all FROM/JOIN table references (with optional aliases)
 // from the given SQL text.  Three-part (db.schema.table), two-part (schema.table),
 // and one-part (table) references are all recognized.
