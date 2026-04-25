@@ -631,10 +631,15 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			}
 		}
 
-		// CTE names (built from WITH ... AS (...) patterns)
+		// CTE names — every identifier that appears as `name AS (` is a CTE
+		// definition.  Using a simple "ident AS (" pattern (without requiring
+		// the preceding WITH keyword) captures all CTEs in a multi-CTE query
+		// such as:
+		//   WITH cte1 AS (...), cte2 AS (...) SELECT ...
+		// where the old WITH-anchored regex only found the first CTE name.
 		cteNames := make(map[string]struct{})
-		reCTE := regexp.MustCompile(`(?i)\bWITH\b[\s\S]*?\b(` + _ident + `)\s+AS\s*\(`)
-		for _, cm := range reCTE.FindAllStringSubmatch(strippedCtx, -1) {
+		reCTEName := regexp.MustCompile(`(?i)\b(` + _ident + `)\s+AS\s*\(`)
+		for _, cm := range reCTEName.FindAllStringSubmatch(strippedCtx, -1) {
 			cteNames[normIdent(cm[1], ic)] = struct{}{}
 		}
 

@@ -22,7 +22,7 @@ import (
 var (
 	reLineCommentDH  = regexp.MustCompile(`(?m)--[^\n]*`)
 	reBlockCommentDH = regexp.MustCompile(`(?s)/\*.*?\*/`)
-	reIdentOrQuoted  = regexp.MustCompile(`[a-zA-Z0-9_$]+|"[^"]+"`)
+	reIdentOrQuoted  = regexp.MustCompile(`[a-zA-Z_][a-zA-Z0-9_$]*|"[^"]+"`)
 	reFirstToken     = regexp.MustCompile(`^[a-zA-Z_]\w*`)
 )
 
