@@ -1973,6 +1973,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           : { other: true, comments: false, strings: false },
         folding: true,
         showFoldingControls: "always",
+        fixedOverflowWidgets: true,
       }}
     />
     {ddlHover && (

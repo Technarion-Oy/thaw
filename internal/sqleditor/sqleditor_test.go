@@ -728,7 +728,7 @@ func TestParseJoinTables(t *testing.T) {
 			name: "Two-part name with alias",
 			sql:  "SELECT * FROM schema1.table1 AS t1",
 			want: []JoinTableRef{
-				{Schema: "SCHEMA1", Name: "TABLE1", Alias: "t1"},
+				{Schema: "SCHEMA1", Name: "TABLE1", Alias: "T1"},
 			},
 		},
 		{
@@ -736,35 +736,34 @@ func TestParseJoinTables(t *testing.T) {
 			sql:  "SELECT * FROM db1.schema1.table1 JOIN table2 t2",
 			want: []JoinTableRef{
 				{DB: "DB1", Schema: "SCHEMA1", Name: "TABLE1", Alias: "TABLE1"},
-				{Name: "TABLE2", Alias: "t2"},
+				{Name: "TABLE2", Alias: "T2"},
 			},
 		},
 		{
 			name: "Multi-JOIN mix",
 			sql: `SELECT *
-                  FROM db1.s1.t1
-                  JOIN s1.t2 AS alias2 ON t1.id = alias2.t1_id
-                  LEFT JOIN t3 alias3 ON alias2.id = alias3.t2_id
-                  FULL OUTER JOIN db2.s2.t4 ON t4.id = alias3.t4_id`,
+		  FROM db1.s1.t1
+		  JOIN s1.t2 AS alias2 ON t1.id = alias2.t1_id
+		  LEFT JOIN t3 alias3 ON alias2.id = alias3.t2_id
+		  FULL OUTER JOIN db2.s2.t4 ON t4.id = alias3.t4_id`,
 			want: []JoinTableRef{
 				{DB: "DB1", Schema: "S1", Name: "T1", Alias: "T1"},
-				{Schema: "S1", Name: "T2", Alias: "alias2"},
-				{Name: "T3", Alias: "alias3"},
+				{Schema: "S1", Name: "T2", Alias: "ALIAS2"},
+				{Name: "T3", Alias: "ALIAS3"},
 				{DB: "DB2", Schema: "S2", Name: "T4", Alias: "T4"},
 			},
 		},
 		{
 			name: "Subquery and CTE",
 			sql: `WITH cte AS (SELECT * FROM t1)
-                  SELECT * FROM cte c1
-                  JOIN (SELECT * FROM t2) sub ON c1.id = sub.id`,
+		  SELECT * FROM cte c1
+		  JOIN (SELECT * FROM t2) sub ON c1.id = sub.id`,
 			want: []JoinTableRef{
 				{Name: "T1", Alias: "T1"},
-				{Name: "CTE", Alias: "c1"},
+				{Name: "CTE", Alias: "C1"},
 				{Name: "T2", Alias: "T2"},
 			},
-		},
-		{
+		},		{
 			name: "Three-part quoted names with spaces and dollar",
 			sql:  `SELECT * FROM "DB-1"."SCHEMA$1"."TABLE 1" AS "T 1"`,
 			want: []JoinTableRef{
@@ -847,8 +846,8 @@ func TestComputeJoinOnConditions(t *testing.T) {
 	t.Run("PK Heuristic Tier", func(t *testing.T) {
 		got := ComputeJoinOnConditions(req)
 		want := []JoinCondition{
-			{Condition: `ON "B".TABLE_A_ID = "A".ID`, Detail: "PK HEURISTIC", SortText: `0cON "B".TABLE_A_ID = "A".ID`},
-			{Condition: `ON "A".ID = "B".ID`, Detail: "SAME-NAME COLUMN", SortText: `1ON "A".ID = "B".ID`},
+			{Condition: `ON B.TABLE_A_ID = A.ID`, Detail: "PK HEURISTIC", SortText: `0cON B.TABLE_A_ID = A.ID`},
+			{Condition: `ON A.ID = B.ID`, Detail: "SAME-NAME COLUMN", SortText: `1ON A.ID = B.ID`},
 			{Condition: "USING (ID)", Detail: "USING", SortText: "1.5USING (ID)"},
 		}
 		if !reflect.DeepEqual(got, want) {
@@ -868,8 +867,8 @@ func TestComputeJoinOnConditions(t *testing.T) {
 		}
 		got := ComputeJoinOnConditions(reqWithFK)
 		want := []JoinCondition{
-			{Condition: `ON "B".TABLE_A_ID = "A".ID`, Detail: "FK RELATION", SortText: `0aON "B".TABLE_A_ID = "A".ID`},
-			{Condition: `ON "A".ID = "B".ID`, Detail: "SAME-NAME COLUMN", SortText: `1ON "A".ID = "B".ID`},
+			{Condition: `ON B.TABLE_A_ID = A.ID`, Detail: "FK RELATION", SortText: `0aON B.TABLE_A_ID = A.ID`},
+			{Condition: `ON A.ID = B.ID`, Detail: "SAME-NAME COLUMN", SortText: `1ON A.ID = B.ID`},
 			{Condition: "USING (ID)", Detail: "USING", SortText: "1.5USING (ID)"},
 		}
 		if !reflect.DeepEqual(got, want) {
@@ -900,10 +899,33 @@ func TestComputeJoinOnConditions(t *testing.T) {
 		}
 		got := ComputeJoinOnConditions(reqComp)
 		want := []JoinCondition{
-			{Condition: `ON "C".FK1 = "P".K1 AND "C".FK2 = "P".K2`, Detail: "FK RELATION", SortText: `0aON "C".FK1 = "P".K1 AND "C".FK2 = "P".K2`},
+			{Condition: `ON C.FK1 = P.K1 AND C.FK2 = P.K2`, Detail: "FK RELATION", SortText: `0aON C.FK1 = P.K1 AND C.FK2 = P.K2`},
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("ComputeJoinOnConditions() Composite = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("Case-Sensitive Lowercase Aliases", func(t *testing.T) {
+		reqLowercase := JoinOnSuggestionsReq{
+			ResolvedRefs: []ResolvedRef{
+				{Alias: "a", DB: "DB", Schema: "S", Name: "TABLE_A"},
+				{Alias: "b", DB: "DB", Schema: "S", Name: "TABLE_B"},
+			},
+			Prefix: "ON ",
+			ColEntries: []ColEntry{
+				{DB: "DB", Schema: "S", Name: "TABLE_A", Cols: []ColInfo{{Name: "ID", DataType: "NUMBER"}, {Name: "A_NAME", DataType: "VARCHAR"}}},
+				{DB: "DB", Schema: "S", Name: "TABLE_B", Cols: []ColInfo{{Name: "ID", DataType: "NUMBER"}, {Name: "TABLE_A_ID", DataType: "NUMBER"}}},
+			},
+		}
+		got := ComputeJoinOnConditions(reqLowercase)
+		want := []JoinCondition{
+			{Condition: `ON "b".TABLE_A_ID = "a".ID`, Detail: "PK HEURISTIC", SortText: `0cON "b".TABLE_A_ID = "a".ID`},
+			{Condition: `ON "a".ID = "b".ID`, Detail: "SAME-NAME COLUMN", SortText: `1ON "a".ID = "b".ID`},
+			{Condition: "USING (ID)", Detail: "USING", SortText: "1.5USING (ID)"},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("ComputeJoinOnConditions() Lowercase Aliases = %v, want %v", got, want)
 		}
 	})
 }
