@@ -33,12 +33,14 @@ type DiagCode string
 const (
 	CodeFullTableScan DiagCode = "FULL_TABLE_SCAN"
 	CodeCartesianJoin DiagCode = "CARTESIAN_JOIN"
+	CodeRowExplosion  DiagCode = "ROW_EXPLOSION"
 )
 
 // diagMessageTemplates holds the raw string templates for all diagnostics.
 var diagMessageTemplates = map[DiagCode]string{
 	CodeFullTableScan: "Full Table Scan: %s\nScanning %d partitions. Consider adding a filter.",
 	CodeCartesianJoin: "Cartesian Join Detected: This will multiply rows exponentially.",
+	CodeRowExplosion:  "Row Explosion Warning: This join is estimated to produce %d rows. Verify your ON conditions are selective enough.",
 }
 
 // GetDiagMessage retrieves the message template for the given code and formats
@@ -120,7 +122,8 @@ type ExplainNode struct {
 	Objects           []string `json:"objects,omitempty"` // e.g., ["MY_DB.MY_SCHEMA.SALES_DATA"]
 	PartitionsScanned int64    `json:"partitionsScanned,omitempty"`
 	PartitionsTotal   int64    `json:"partitionsTotal,omitempty"`
-	JoinType          string   `json:"joinType,omitempty"` // e.g., "Inner", "Cartesian"
+	JoinType          string   `json:"joinType,omitempty"`    // e.g., "Inner", "Cartesian"
+	EstimatedRows     int64    `json:"estimatedRows,omitempty"` // Snowflake compiler row estimate
 }
 
 // GetExplainPlan runs EXPLAIN USING JSON for the provided SQL query
@@ -319,6 +322,34 @@ func analyzePlan(plan *ExplainPlan, sql string) []ExplainMarker {
 					ExplainData: &ExplainData{
 						Operation: node.Operation,
 						JoinType:  node.JoinType,
+					},
+				})
+			}
+
+			// ── Row explosion (Many-to-Many equi-join) ───────────────────
+			// Catches equi-joins on low-cardinality columns where Snowflake
+			// plans an InnerJoin (not Cartesian) but the output is enormous.
+			// Only fire when the node isn't already flagged as Cartesian to
+			// avoid duplicate markers on the same JOIN keyword.
+			const rowExplosionThreshold = 10_000_000
+			if !isCartesian &&
+				strings.Contains(opUpper, "JOIN") &&
+				node.EstimatedRows > rowExplosionThreshold {
+
+				sl, sc, el, ec := findTokenPos(sql, "JOIN")
+				severity := 4 // Warning
+				if node.EstimatedRows > 1_000_000_000 {
+					severity = 8 // Error for truly catastrophic estimates
+				}
+				markers = append(markers, ExplainMarker{
+					StartLineNumber: sl, StartColumn: sc,
+					EndLineNumber:   el, EndColumn: ec,
+					Message:  GetDiagMessage(CodeRowExplosion, node.EstimatedRows),
+					Severity: severity,
+					ExplainData: &ExplainData{
+						Operation:     node.Operation,
+						JoinType:      node.JoinType,
+						EstimatedRows: node.EstimatedRows,
 					},
 				})
 			}
