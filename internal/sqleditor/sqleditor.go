@@ -1901,7 +1901,7 @@ func ParseJoinTables(sql string) []JoinTableRef {
 
 		alias = name
 		if m[14] != -1 {
-			rawAlias := stripQ(sql[m[14]:m[15]])
+			rawAlias := normID(sql[m[14]:m[15]])
 			if !joinStopKW[strings.ToUpper(rawAlias)] {
 				alias = rawAlias
 				// Successfully matched an alias - continue AFTER the alias
@@ -1950,8 +1950,8 @@ func BuildCompositeConditions(fks []FKEntry, fkAlias, pkAlias string) []string {
 		})
 		parts := make([]string, len(cols))
 		for idx, fk := range cols {
-			parts[idx] = sf.QuoteOrBare(fkAlias, false) + "." + sf.QuoteOrBare(fk.FKColumn, false) +
-				" = " + sf.QuoteOrBare(pkAlias, false) + "." + sf.QuoteOrBare(fk.PKColumn, false)
+			parts[idx] = sf.QuoteOrBare(fkAlias, fkAlias != strings.ToUpper(fkAlias)) + "." + sf.QuoteOrBare(fk.FKColumn, false) +
+				" = " + sf.QuoteOrBare(pkAlias, pkAlias != strings.ToUpper(pkAlias)) + "." + sf.QuoteOrBare(fk.PKColumn, false)
 		}
 		result = append(result, strings.Join(parts, " AND "))
 	}
@@ -1975,7 +1975,7 @@ func PkHeuristicConditions(
 		if uc == on+"_ID" || uc == on+"ID" {
 			for _, pkCol := range otherCols {
 				if strings.ToUpper(pkCol) == "ID" {
-					results = append(results, sf.QuoteOrBare(lastAlias, false)+"."+sf.QuoteOrBare(col, false)+" = "+sf.QuoteOrBare(otherAlias, false)+"."+sf.QuoteOrBare(pkCol, false))
+					results = append(results, sf.QuoteOrBare(lastAlias, lastAlias != strings.ToUpper(lastAlias))+"."+sf.QuoteOrBare(col, false)+" = "+sf.QuoteOrBare(otherAlias, otherAlias != strings.ToUpper(otherAlias))+"."+sf.QuoteOrBare(pkCol, false))
 					break
 				}
 			}
@@ -1986,7 +1986,7 @@ func PkHeuristicConditions(
 		if uc == ln+"_ID" || uc == ln+"ID" {
 			for _, pkCol := range lastCols {
 				if strings.ToUpper(pkCol) == "ID" {
-					results = append(results, sf.QuoteOrBare(otherAlias, false)+"."+sf.QuoteOrBare(col, false)+" = "+sf.QuoteOrBare(lastAlias, false)+"."+sf.QuoteOrBare(pkCol, false))
+					results = append(results, sf.QuoteOrBare(otherAlias, otherAlias != strings.ToUpper(otherAlias))+"."+sf.QuoteOrBare(col, false)+" = "+sf.QuoteOrBare(lastAlias, lastAlias != strings.ToUpper(lastAlias))+"."+sf.QuoteOrBare(pkCol, false))
 					break
 				}
 			}
@@ -3034,7 +3034,7 @@ func ComputeJoinOnConditions(req JoinOnSuggestionsReq) []JoinCondition {
 			if a1 > a2 {
 				a1, a2 = a2, a1
 			}
-			cond := sf.QuoteOrBare(a1, false) + "." + sf.QuoteOrBare(info.Name, false) + " = " + sf.QuoteOrBare(a2, false) + "." + sf.QuoteOrBare(info.Name, false)
+			cond := sf.QuoteOrBare(a1, a1 != strings.ToUpper(a1)) + "." + sf.QuoteOrBare(info.Name, false) + " = " + sf.QuoteOrBare(a2, a2 != strings.ToUpper(a2)) + "." + sf.QuoteOrBare(info.Name, false)
 			addSugg(cond, "SAME-NAME COLUMN", "1")
 		}
 		if len(sharedCompatible) > 0 {

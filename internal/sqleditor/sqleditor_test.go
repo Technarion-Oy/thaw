@@ -906,6 +906,29 @@ func TestComputeJoinOnConditions(t *testing.T) {
 			t.Errorf("ComputeJoinOnConditions() Composite = %v, want %v", got, want)
 		}
 	})
+
+	t.Run("Case-Sensitive Lowercase Aliases", func(t *testing.T) {
+		reqLowercase := JoinOnSuggestionsReq{
+			ResolvedRefs: []ResolvedRef{
+				{Alias: "a", DB: "DB", Schema: "S", Name: "TABLE_A"},
+				{Alias: "b", DB: "DB", Schema: "S", Name: "TABLE_B"},
+			},
+			Prefix: "ON ",
+			ColEntries: []ColEntry{
+				{DB: "DB", Schema: "S", Name: "TABLE_A", Cols: []ColInfo{{Name: "ID", DataType: "NUMBER"}, {Name: "A_NAME", DataType: "VARCHAR"}}},
+				{DB: "DB", Schema: "S", Name: "TABLE_B", Cols: []ColInfo{{Name: "ID", DataType: "NUMBER"}, {Name: "TABLE_A_ID", DataType: "NUMBER"}}},
+			},
+		}
+		got := ComputeJoinOnConditions(reqLowercase)
+		want := []JoinCondition{
+			{Condition: `ON "b".TABLE_A_ID = "a".ID`, Detail: "PK HEURISTIC", SortText: `0cON "b".TABLE_A_ID = "a".ID`},
+			{Condition: `ON "a".ID = "b".ID`, Detail: "SAME-NAME COLUMN", SortText: `1ON "a".ID = "b".ID`},
+			{Condition: "USING (ID)", Detail: "USING", SortText: "1.5USING (ID)"},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("ComputeJoinOnConditions() Lowercase Aliases = %v, want %v", got, want)
+		}
+	})
 }
 
 func TestApplyCasing(t *testing.T) {
