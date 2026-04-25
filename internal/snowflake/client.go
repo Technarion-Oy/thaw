@@ -33,42 +33,43 @@ import (
 
 // ConnectParams holds all fields needed to open a Snowflake connection.
 // Authenticator values:
-//   "snowflake"            – password (+ optional TOTP passcode)
-//   "username_password_mfa" – password + MFA push notification
-//   "externalbrowser"      – browser-based SSO (no password needed)
-//   "okta"                 – Okta native SSO (requires OktaURL)
-//   "snowflake_jwt"        – key-pair / JWT (requires PrivateKeyPath)
+//
+//	"snowflake"            – password (+ optional TOTP passcode)
+//	"username_password_mfa" – password + MFA push notification
+//	"externalbrowser"      – browser-based SSO (no password needed)
+//	"okta"                 – Okta native SSO (requires OktaURL)
+//	"snowflake_jwt"        – key-pair / JWT (requires PrivateKeyPath)
 type ConnectParams struct {
-	Account              string `json:"account"`
-	User                 string `json:"user"`
-	Password             string `json:"password"`
-	Role                 string `json:"role"`
-	Warehouse            string `json:"warehouse"`
-	Database             string `json:"database"`
-	Schema               string `json:"schema"`
-	Authenticator        string `json:"authenticator"`
+	Account       string `json:"account"`
+	User          string `json:"user"`
+	Password      string `json:"password"`
+	Role          string `json:"role"`
+	Warehouse     string `json:"warehouse"`
+	Database      string `json:"database"`
+	Schema        string `json:"schema"`
+	Authenticator string `json:"authenticator"`
 	// Passcode is a TOTP/hardware-token code; used with "snowflake" authenticator.
-	Passcode             string `json:"passcode"`
+	Passcode string `json:"passcode"`
 	// OktaURL is the Okta account URL; required for "okta" authenticator.
-	OktaURL              string `json:"oktaUrl"`
+	OktaURL string `json:"oktaUrl"`
 	// PrivateKeyPath is the path to a PEM-encoded private key; required for "snowflake_jwt".
-	PrivateKeyPath       string `json:"privateKeyPath"`
+	PrivateKeyPath string `json:"privateKeyPath"`
 	// PrivateKeyPassphrase decrypts the private key if it is encrypted.
 	PrivateKeyPassphrase string `json:"privateKeyPassphrase"`
 }
 
 // SnowflakeObject represents a database object (table, view, etc.).
 type SnowflakeObject struct {
-	Name      string `json:"name"`
-	Kind      string `json:"kind"`
-	Schema    string `json:"schema"`
+	Name   string `json:"name"`
+	Kind   string `json:"kind"`
+	Schema string `json:"schema"`
 	// Arguments holds the parameter type list for procedures and functions,
 	// e.g. "NUMBER, VARCHAR". Empty for all other object kinds.
 	Arguments string `json:"arguments"`
 	// RowCount is populated for TABLE objects from the "rows" column of
 	// SHOW OBJECTS. Nil means the count was unavailable (e.g. views, or
 	// when SHOW OBJECTS does not include a rows column).
-	RowCount  *int64 `json:"rowCount,omitempty"`
+	RowCount *int64 `json:"rowCount,omitempty"`
 	// Predecessors holds the raw predecessor string from SHOW TASKS.
 	// Only populated for TASK objects; empty for all other kinds.
 	Predecessors string `json:"predecessors,omitempty"`
@@ -129,17 +130,27 @@ func (sc *sessionConnector) Connect(ctx context.Context) (driver.Conn, error) {
 	sc.mu.RLock()
 	role, wh, db, schema := sc.role, sc.wh, sc.db, sc.sc
 	sc.mu.RUnlock()
+
+	// Helper for escaping identifiers
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+
 	if role != "" {
-		connExec(conn, fmt.Sprintf(`USE ROLE "%s"`, strings.ReplaceAll(role, `"`, `""`)))
+		connExec(conn, fmt.Sprintf(`USE ROLE "%s"`, esc(role)))
 	}
 	if wh != "" {
-		connExec(conn, fmt.Sprintf(`USE WAREHOUSE "%s"`, strings.ReplaceAll(wh, `"`, `""`)))
+		connExec(conn, fmt.Sprintf(`USE WAREHOUSE "%s"`, esc(wh)))
 	}
 	if db != "" {
-		connExec(conn, fmt.Sprintf(`USE DATABASE "%s"`, strings.ReplaceAll(db, `"`, `""`)))
+		connExec(conn, fmt.Sprintf(`USE DATABASE "%s"`, esc(db)))
 	}
 	if schema != "" {
-		connExec(conn, fmt.Sprintf(`USE SCHEMA "%s"`, strings.ReplaceAll(schema, `"`, `""`)))
+		// Use fully qualified name to be robust against database switches
+		// resetting the schema context.
+		if db != "" {
+			connExec(conn, fmt.Sprintf(`USE SCHEMA "%s"."%s"`, esc(db), esc(schema)))
+		} else {
+			connExec(conn, fmt.Sprintf(`USE SCHEMA "%s"`, esc(schema)))
+		}
 	}
 	return conn, nil
 }
@@ -154,7 +165,7 @@ func connExec(conn driver.Conn, query string) {
 	if err != nil {
 		return
 	}
-	defer stmt.Close() //nolint:errcheck
+	defer stmt.Close()          //nolint:errcheck
 	stmt.Exec([]driver.Value{}) //nolint:errcheck,staticcheck // SA1019: called via driver interface, no modern alternative
 }
 
@@ -286,6 +297,66 @@ func (c *Client) Close() error {
 	return c.db.Close()
 }
 
+// GetConn returns a pinned connection from the pool. The caller MUST call
+// conn.Close() when finished.
+func (c *Client) GetConn(ctx context.Context) (*sql.Conn, error) {
+	return c.db.Conn(ctx)
+}
+
+// refreshConnectorState updates the stored session state and flushes the
+// connection pool ONLY if a change occurred that would affect future
+// connections (role, warehouse, or a database switch that resets schema).
+// database name or schema name changes are synced to the connector but
+// do not require a pool flush as new connections will inherit them anyway.
+func (c *Client) refreshConnectorState(role, wh, db, sc string) {
+	c.connector.mu.Lock()
+	// Only flush if role or warehouse changed, or if database changed.
+	// We don't flush for schema-only changes as they are cheap.
+	flushNeeded := (role != "" && c.connector.role != role) ||
+		(wh != "" && c.connector.wh != wh) ||
+		(db != "" && c.connector.db != db)
+
+	if role != "" {
+		c.connector.role = role
+	}
+	if wh != "" {
+		c.connector.wh = wh
+	}
+	if db != "" {
+		c.connector.db = db
+	}
+	if sc != "" {
+		c.connector.sc = sc
+	}
+	c.connector.mu.Unlock()
+
+	if flushNeeded {
+		// Flush idle connections so they are re-created (and go through
+		// Connect()) with the new state.
+		c.db.SetMaxIdleConns(0)
+		c.db.SetMaxIdleConns(2)
+	}
+}
+
+// isContextChangingQuery returns true if the SQL statement appears to be one
+// that changes the session's role, warehouse, database, or schema.
+func isContextChangingQuery(sql string) bool {
+	s := strings.TrimSpace(sql)
+	if len(s) < 3 {
+		return false
+	}
+	up := strings.ToUpper(s)
+	// Covers USE ROLE, USE WAREHOUSE, USE DATABASE, USE SCHEMA, and bare USE <db>.<sch>.
+	if strings.HasPrefix(up, "USE") {
+		return true
+	}
+	// Covers ALTER SESSION SET ...
+	if strings.HasPrefix(up, "ALTER") && strings.Contains(up, "SESSION") {
+		return true
+	}
+	return false
+}
+
 // Execute runs one or more semicolon-separated SQL statements sequentially and
 // returns the last result set.
 //
@@ -303,6 +374,7 @@ func (c *Client) Close() error {
 //     then deadlocks waiting for the conn to become free. Running without
 //     async mode means each statement blocks until its results arrive, which
 //     is exactly what sequential scripts need.
+//
 // Execute runs one or more semicolon-separated SQL statements sequentially and
 // returns the last result set.
 //
@@ -356,6 +428,17 @@ func (c *Client) Execute(ctx context.Context, query string, onProgress ...func(i
 		}
 		last = result
 	}
+
+	// Sync session context while the connection is still pinned so the
+	// connector's state correctly reflects any USE statements just executed.
+	// Only do this if at least one statement might have changed the context,
+	// or if it's a multi-statement script (safer).
+	if len(stmts) > 1 || isContextChangingQuery(query) {
+		// execCtx was built with context.WithCancel(context.Background())
+		// so it does NOT have any async mode flags.
+		_, _ = c.GetSessionContextOnConn(execCtx, conn)
+	}
+
 	return last, nil
 }
 
@@ -421,45 +504,35 @@ func queryOnConn(ctx context.Context, conn *sql.Conn, query string) (*QueryResul
 // returns the result set. Use this instead of Execute for TABLE() function calls
 // and other queries that are incompatible with the multi-statement API.
 func (c *Client) QuerySingle(ctx context.Context, query string) (*QueryResult, error) {
-	rows, err := c.db.QueryContext(ctx, query)
+	conn, err := c.db.Conn(ctx)
 	if err != nil {
-		return nil, ctxErrOrErr(ctx, err)
+		return nil, err
+	}
+	defer func() { _ = conn.Close() }()
+
+	result, err := queryOnConn(ctx, conn, query)
+	if err != nil {
+		return nil, err
 	}
 
-	cols, err := rows.Columns()
-	if err != nil {
-		rows.Close() //nolint:errcheck
-		return nil, ctxErrOrErr(ctx, err)
+	// Sync session context while the connection is still pinned so the
+	// connector's state correctly reflects any USE statements just executed.
+	if isContextChangingQuery(query) {
+		// To ensure the sync query is NOT async, we use a background context
+		// that inherits cancellation from ctx but carries no Snowflake flags.
+		syncCtx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go func() {
+			select {
+			case <-ctx.Done():
+				cancel()
+			case <-syncCtx.Done():
+			}
+		}()
+		_, _ = c.GetSessionContextOnConn(syncCtx, conn)
 	}
-	result := &QueryResult{Columns: cols, Rows: [][]interface{}{}}
 
-	for rows.Next() {
-		vals := make([]interface{}, len(cols))
-		ptrs := make([]interface{}, len(cols))
-		for i := range vals {
-			ptrs[i] = &vals[i]
-		}
-		if err := rows.Scan(ptrs...); err != nil {
-			rows.Close() //nolint:errcheck
-			return nil, ctxErrOrErr(ctx, err)
-		}
-		result.Rows = append(result.Rows, vals)
-		if len(result.Rows) >= maxQueryRows {
-			result.Truncated = true
-			break
-		}
-	}
-	// Same as queryOnConn: async close when context canceled or row limit hit.
-	if ctx.Err() != nil {
-		go rows.Close() //nolint:errcheck
-		return nil, ctx.Err()
-	}
-	if result.Truncated {
-		go rows.Close() //nolint:errcheck
-		return result, nil
-	}
-	rows.Close() //nolint:errcheck
-	return result, rows.Err()
+	return result, nil
 }
 
 // splitStatements splits a SQL string into individual statements on semicolons,
@@ -588,7 +661,28 @@ type SessionContext struct {
 // correct database and schema context, even after USE commands run in the SQL editor
 // bypassed the UseDatabase/UseSchema IPC methods.
 func (c *Client) GetSessionContext(ctx context.Context) (SessionContext, error) {
-	row := c.db.QueryRowContext(ctx,
+	conn, err := c.db.Conn(ctx)
+	if err != nil {
+		return SessionContext{}, err
+	}
+	defer func() { _ = conn.Close() }()
+	return c.GetSessionContextOnConn(ctx, conn)
+}
+
+// GetSessionContextOnConn is the same as GetSessionContext but runs on a pinned connection.
+func (c *Client) GetSessionContextOnConn(ctx context.Context, conn *sql.Conn) (SessionContext, error) {
+	// Ensure sync query is NOT async even if the parent context is.
+	syncCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		select {
+		case <-ctx.Done():
+			cancel()
+		case <-syncCtx.Done():
+		}
+	}()
+
+	row := conn.QueryRowContext(syncCtx,
 		"SELECT CURRENT_ROLE(), CURRENT_WAREHOUSE(), CURRENT_DATABASE(), CURRENT_SCHEMA()")
 	// Warehouse, database and schema can be SQL NULL when not set in the session.
 	var role, warehouse, database, schema sql.NullString
@@ -601,11 +695,31 @@ func (c *Client) GetSessionContext(ctx context.Context) (SessionContext, error) 
 		Database:  database.String,
 		Schema:    schema.String,
 	}
-	c.connector.mu.Lock()
-	c.connector.db = sc.Database
-	c.connector.sc = sc.Schema
-	c.connector.mu.Unlock()
+	c.refreshConnectorState(sc.Role, sc.Warehouse, sc.Database, sc.Schema)
 	return sc, nil
+}
+
+// ExecuteOnConn runs one or more SQL statements on a pinned connection and
+// returns the last result set. It also syncs the session context.
+func (c *Client) ExecuteOnConn(ctx context.Context, conn *sql.Conn, query string) (*QueryResult, error) {
+	stmts := splitStatements(query)
+	if len(stmts) == 0 {
+		return &QueryResult{Rows: [][]interface{}{}}, nil
+	}
+
+	var last *QueryResult
+	for _, stmt := range stmts {
+		result, err := queryOnConn(ctx, conn, stmt)
+		if err != nil {
+			return nil, err
+		}
+		last = result
+	}
+
+	// Sync session context while the connection is still pinned.
+	_, _ = c.GetSessionContextOnConn(ctx, conn)
+
+	return last, nil
 }
 
 // ListRoles returns all roles visible to the current role via SHOW ROLES.
@@ -1059,7 +1173,7 @@ func (c *Client) CanManageUsers(ctx context.Context) (bool, error) {
 //   - SHOW GRANTS TO ROLE "<name>"   → GRANT <priv> ON … TO ROLE statements
 //   - SHOW GRANTS ON ROLE "<name>"   → GRANT ROLE … TO ROLE/USER statements
 func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
-	escapedLike  := strings.ReplaceAll(name, "'", "''")
+	escapedLike := strings.ReplaceAll(name, "'", "''")
 	escapedIdent := strings.ReplaceAll(name, `"`, `""`)
 
 	// ── Comment from SHOW ROLES LIKE ────────────────────────────────────────
@@ -1100,10 +1214,10 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 			if rows.Scan(ptrs...) != nil {
 				continue
 			}
-			priv   := strVal(vals, idxs["privilege"])
+			priv := strVal(vals, idxs["privilege"])
 			onType := strVal(vals, idxs["granted_on"])
-			obj    := strVal(vals, idxs["name"])
-			opt    := strings.EqualFold(strVal(vals, idxs["grant_option"]), "true")
+			obj := strVal(vals, idxs["name"])
+			opt := strings.EqualFold(strVal(vals, idxs["grant_option"]), "true")
 			if priv == "" || onType == "" {
 				continue
 			}
@@ -1128,7 +1242,7 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 				continue
 			}
 			grantedTo := strVal(vals, idxs["granted_to"])
-			grantee   := strVal(vals, idxs["grantee_name"])
+			grantee := strVal(vals, idxs["grantee_name"])
 			if grantedTo == "" || grantee == "" {
 				continue
 			}
@@ -2659,33 +2773,33 @@ func localFileURLForFile(path string) (string, error) {
 // Keyword values (AUTO, NONE, HEX, …) are stored as their uppercase names.
 type FormatTypeOptions struct {
 	// ── Common ───────────────────────────────────────────────────────────────
-	Compression              string   `json:"compression"`              // AUTO | GZIP | BZ2 | …
+	Compression              string   `json:"compression"` // AUTO | GZIP | BZ2 | …
 	TrimSpace                bool     `json:"trimSpace"`
 	ReplaceInvalidCharacters bool     `json:"replaceInvalidCharacters"`
 	NullIf                   []string `json:"nullIf"` // list of null-indicator strings
 
 	// ── CSV + JSON ───────────────────────────────────────────────────────────
-	DateFormat      string `json:"dateFormat"`      // AUTO | format-string
-	TimeFormat      string `json:"timeFormat"`
-	TimestampFormat string `json:"timestampFormat"`
-	BinaryFormat    string `json:"binaryFormat"`    // HEX | BASE64 | UTF8
-	FileExtension   string `json:"fileExtension"`   // NONE or extension string
-	MultiLine       bool   `json:"multiLine"`
-	SkipByteOrderMark bool `json:"skipByteOrderMark"`
-	IgnoreUtf8Errors  bool `json:"ignoreUtf8Errors"` // JSON
+	DateFormat        string `json:"dateFormat"` // AUTO | format-string
+	TimeFormat        string `json:"timeFormat"`
+	TimestampFormat   string `json:"timestampFormat"`
+	BinaryFormat      string `json:"binaryFormat"`  // HEX | BASE64 | UTF8
+	FileExtension     string `json:"fileExtension"` // NONE or extension string
+	MultiLine         bool   `json:"multiLine"`
+	SkipByteOrderMark bool   `json:"skipByteOrderMark"`
+	IgnoreUtf8Errors  bool   `json:"ignoreUtf8Errors"` // JSON
 
 	// ── CSV ──────────────────────────────────────────────────────────────────
-	RecordDelimiter           string `json:"recordDelimiter"`
-	FieldDelimiter            string `json:"fieldDelimiter"`
-	ParseHeader               bool   `json:"parseHeader"`
-	SkipHeader                int    `json:"skipHeader"`
-	SkipBlankLines            bool   `json:"skipBlankLines"`
-	Escape                    string `json:"escape"`                    // NONE or char
-	EscapeUnenclosedField     string `json:"escapeUnenclosedField"`
-	FieldOptionallyEnclosedBy string `json:"fieldOptionallyEnclosedBy"` // NONE or char
-	ErrorOnColumnCountMismatch bool  `json:"errorOnColumnCountMismatch"`
-	EmptyFieldAsNull           bool  `json:"emptyFieldAsNull"`
-	Encoding                  string `json:"encoding"` // UTF8 | …
+	RecordDelimiter            string `json:"recordDelimiter"`
+	FieldDelimiter             string `json:"fieldDelimiter"`
+	ParseHeader                bool   `json:"parseHeader"`
+	SkipHeader                 int    `json:"skipHeader"`
+	SkipBlankLines             bool   `json:"skipBlankLines"`
+	Escape                     string `json:"escape"` // NONE or char
+	EscapeUnenclosedField      string `json:"escapeUnenclosedField"`
+	FieldOptionallyEnclosedBy  string `json:"fieldOptionallyEnclosedBy"` // NONE or char
+	ErrorOnColumnCountMismatch bool   `json:"errorOnColumnCountMismatch"`
+	EmptyFieldAsNull           bool   `json:"emptyFieldAsNull"`
+	Encoding                   string `json:"encoding"` // UTF8 | …
 
 	// ── JSON-only ────────────────────────────────────────────────────────────
 	EnableOctal     bool `json:"enableOctal"`
@@ -2735,9 +2849,9 @@ func (c *Client) ImportTableData(ctx context.Context, params ImportTableParams) 
 	}
 
 	stageName := fmt.Sprintf("THAW_IMPORT_%d", time.Now().UnixNano())
-	stageRef  := fmt.Sprintf(`"%s"."%s".%s`, esc(params.Database), esc(params.Schema), stageName)
-	stageAt   := "@" + stageRef
-	tableRef  := fmt.Sprintf(`"%s"."%s"."%s"`, esc(params.Database), esc(params.Schema), esc(params.Table))
+	stageRef := fmt.Sprintf(`"%s"."%s".%s`, esc(params.Database), esc(params.Schema), stageName)
+	stageAt := "@" + stageRef
+	tableRef := fmt.Sprintf(`"%s"."%s"."%s"`, esc(params.Database), esc(params.Schema), esc(params.Table))
 
 	if _, err := c.db.ExecContext(ctx, "CREATE TEMPORARY STAGE "+stageRef); err != nil {
 		return ImportTableResult{}, fmt.Errorf("create import stage: %w", err)

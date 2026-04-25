@@ -20,6 +20,7 @@ const { Text } = Typography;
 interface Props {
   /** The SQL statement (selection or active statement) to EXPLAIN. */
   sql: string;
+  tabId?: string;
   onClose: () => void;
 }
 
@@ -167,7 +168,7 @@ const NODE_COLS: ColumnsType<FlatNode> = [
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function ExplainModal({ sql, onClose }: Props) {
+export default function ExplainModal({ sql, tabId, onClose }: Props) {
   const [loading, setLoading] = useState(true);
   const [result, setResult] = useState<queryprofile.ExplainResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -175,11 +176,11 @@ export default function ExplainModal({ sql, onClose }: Props) {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    RunExplain(sql)
+    RunExplain(tabId || "", sql)
       .then((r) => setResult(r))
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [sql]);
+  }, [sql, tabId]);
 
   const shortSql = sql.length > 80 ? `${sql.slice(0, 78)}…` : sql;
   const flatNodes = result?.plan ? flattenNodes(result.plan.Operations ?? []) : [];

@@ -526,7 +526,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
     window.addEventListener("thaw:explain-sql", handleExplain);
     return () => window.removeEventListener("thaw:explain-sql", handleExplain);
-  }, []);
+  }, [tabId, activeTabId]);
 
   const handleBeforeMount: BeforeMount = (monaco) => {
     ensureMonacoSetup(monaco);
@@ -1977,7 +1977,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       </div>
     )}
     {explainSql && (
-      <ExplainModal sql={explainSql} onClose={() => setExplainSql(null)} />
+      <ExplainModal sql={explainSql} tabId={tabId ?? activeTabId} onClose={() => setExplainSql(null)} />
     )}
     {tooltipCtxMenu && (
       <>

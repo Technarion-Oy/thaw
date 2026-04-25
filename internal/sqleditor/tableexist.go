@@ -11,7 +11,6 @@
 package sqleditor
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
 )
@@ -257,7 +256,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				// Only validate if we actually have DB/schema catalog data —
 				// otherwise we'd produce false alarms when no session context
 				// is set (empty KnownDatabases / KnownSchemas).
-				if !hasGlobalDB && !scriptHasActiveDB {
+				if len(req.KnownDatabases) == 0 {
 					break
 				}
 				dbNorm := parts[0]
@@ -315,7 +314,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				}
 			case 2:
 				dbNorm := parts[0]
-				if hasGlobalDBHere || scriptHasActiveDB {
+				if len(req.KnownDatabases) > 0 {
 					if !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
 						for _, t := range findTokensLocally(raw, []string{normIdent(rawParts[0], ic)}, r.StartLine, ic) {
 							markers = append(markers, diagMarkerAt(t,
@@ -328,7 +327,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 
 		// ── DROP DATABASE ─────────────────────────────────────────────
 		if m := reDropDbMatch.FindStringSubmatch(raw); m != nil {
-			if !reIfExists.MatchString(raw) {
+			if !reIfExists.MatchString(raw) && len(req.KnownDatabases) > 0 {
 				dbNorm := normIdent(m[1], ic)
 				if !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
 					for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
@@ -447,6 +446,9 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				if !isIn(scriptCreatedTables, ftTable) && !isIn(scriptCreatedTables, path) {
 					isLive := anyRefMatch(req.ResolvedRefs, ftTable, ftDB, ftSchema, checkEq)
 					if !isLive {
+						if ftDB != "" && len(req.KnownDatabases) == 0 {
+							continue
+						}
 						badToken, msgFn := resolveErrorToken(ftTable, ftDB, ftSchema,
 							scriptCreatedDbsAndSchemas, req.KnownDatabases, req.KnownSchemas, req.ResolvedRefs, checkEq)
 						for _, t := range findTokensLocally(raw, []string{badToken}, r.StartLine, ic) {
@@ -460,7 +462,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		// ── Validate USE DATABASE <name> ──────────────────────────────────────
 		if m := reUseDatabaseIdent.FindStringSubmatch(raw); m != nil {
 			dbNorm := normIdent(m[1], ic)
-			if !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
+			if len(req.KnownDatabases) > 0 && !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
 				for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
 					markers = append(markers, diagMarkerAt(t,
 						"Database '"+t.name+"' does not exist or is not authorized.", 8))
@@ -472,7 +474,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 		if m := reUseSchemaIdents.FindStringSubmatch(raw); m != nil {
 			dbNorm := normIdent(m[1], ic)
 			schNorm := normIdent(m[2], ic)
-			if !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
+			if len(req.KnownDatabases) > 0 && !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
 				for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
 					markers = append(markers, diagMarkerAt(t,
 						"Database '"+t.name+"' does not exist or is not authorized.", 8))
@@ -507,7 +509,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			if first != "DATABASE" && first != "SCHEMA" && first != "ROLE" && first != "WAREHOUSE" {
 				dbNorm := normIdent(m[1], ic)
 				schNorm := normIdent(m[2], ic)
-				if !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
+				if len(req.KnownDatabases) > 0 && !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
 					for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
 						markers = append(markers, diagMarkerAt(t,
 							"Database '"+t.name+"' does not exist or is not authorized.", 8))
@@ -529,7 +531,7 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			first := strings.ToUpper(m[1])
 			if first != "DATABASE" && first != "SCHEMA" && first != "ROLE" && first != "WAREHOUSE" {
 				dbNorm := normIdent(m[1], ic)
-				if !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
+				if len(req.KnownDatabases) > 0 && !dbExists(dbNorm, scriptCreatedDbsAndSchemas, req.KnownDatabases, req.ResolvedRefs, checkEq) {
 					for _, t := range findTokensLocally(raw, []string{dbNorm}, r.StartLine, ic) {
 						markers = append(markers, diagMarkerAt(t,
 							"Database '"+t.name+"' does not exist or is not authorized.", 8))
@@ -656,9 +658,16 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 				continue
 			}
 
+			// A 3-part identifier (DB.SCH.TABLE) is fully self-contained.
+			// Only validate if we actually have database catalog data —
+			// otherwise we'd produce false alarms when no session context
+			// is set (empty KnownDatabases).
+			if ft.db != "" && len(req.KnownDatabases) == 0 {
+				continue
+			}
+
 			badToken, msgFn := resolveErrorToken(ftTable, ft.db, ft.schema,
 				scriptCreatedDbsAndSchemas, req.KnownDatabases, req.KnownSchemas, req.ResolvedRefs, checkEq)
-			fmt.Printf("DEBUG: ft={db:%s, sch:%s, name:%s} badToken=%s\n", ft.db, ft.schema, ft.name, badToken)
 			missingTokens[badToken] = msgFn
 		}
 

@@ -17,6 +17,7 @@ package queryprofile
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -134,7 +135,23 @@ func GetExplainPlan(ctx context.Context, client *snowflake.Client, query string)
 		// If the SQL is invalid, Snowflake returns an error here
 		return nil, err
 	}
+	return parseExplainResult(result)
+}
 
+// GetExplainPlanOnConn is the same as GetExplainPlan but runs on a pinned connection.
+func GetExplainPlanOnConn(ctx context.Context, client *snowflake.Client, conn *sql.Conn, query string) (*ExplainPlan, error) {
+	// 1. Wrap the raw query
+	explainQuery := "EXPLAIN USING JSON " + query
+
+	// 2. Execute against Snowflake on the pinned connection
+	result, err := client.ExecuteOnConn(ctx, conn, explainQuery)
+	if err != nil {
+		return nil, err
+	}
+	return parseExplainResult(result)
+}
+
+func parseExplainResult(result *snowflake.QueryResult) (*ExplainPlan, error) {
 	// 3. Extract the JSON string from the result
 	if len(result.Rows) == 0 {
 		return nil, fmt.Errorf("queryprofile: explain returned no rows")
@@ -206,6 +223,18 @@ func RunExplain(ctx context.Context, client *snowflake.Client, sql string) (*Exp
 	}, nil
 }
 
+// RunExplainOnConn is the same as RunExplain but runs on a pinned connection.
+func RunExplainOnConn(ctx context.Context, client *snowflake.Client, conn *sql.Conn, sql string) (*ExplainResult, error) {
+	plan, err := GetExplainPlanOnConn(ctx, client, conn, sql)
+	if err != nil {
+		return nil, err
+	}
+	return &ExplainResult{
+		Plan:        plan,
+		Diagnostics: analyzePlan(plan, sql),
+	}, nil
+}
+
 // GetExplainDiagnostics runs EXPLAIN USING JSON for sql and walks the
 // resulting plan to emit performance markers (full table scans, cartesian
 // joins).  Returns nil (not an error) when no issues are found.
@@ -220,13 +249,18 @@ func GetExplainDiagnostics(ctx context.Context, client *snowflake.Client, sql st
 // analyzePlan walks plan nodes and emits performance markers.
 // Extracted so RunExplain and GetExplainDiagnostics share the analysis
 // without calling EXPLAIN twice.
+// analyzePlan walks plan nodes and emits performance markers.
 func analyzePlan(plan *ExplainPlan, sql string) []ExplainMarker {
 	var markers []ExplainMarker
 	for _, step := range plan.Operations {
 		for _, node := range step {
 			// ── Full table scan ──────────────────────────────────────────
+			// ── Full table scan ──────────────────────────────────────────
 			if isTableScanOp(node.Operation) && node.PartitionsTotal >= 10 {
+
+				// Trust the math: only warn if it EXPLICITLY plans to scan >= 50%
 				pct := float64(node.PartitionsScanned) / float64(node.PartitionsTotal)
+
 				if pct >= 0.5 {
 					objName := ""
 					if len(node.Objects) > 0 {
@@ -234,10 +268,12 @@ func analyzePlan(plan *ExplainPlan, sql string) []ExplainMarker {
 					}
 					shortName := lastPart(objName)
 					sl, sc, el, ec := findTokenPos(sql, shortName)
+
 					severity := 4 // Warning
 					if pct >= 0.9 {
-						severity = 8 // Error for near-full scans
+						severity = 8 // Error
 					}
+
 					markers = append(markers, ExplainMarker{
 						StartLineNumber: sl, StartColumn: sc,
 						EndLineNumber: el, EndColumn: ec,
@@ -255,12 +291,31 @@ func analyzePlan(plan *ExplainPlan, sql string) []ExplainMarker {
 			}
 
 			// ── Cartesian join ───────────────────────────────────────────
-			if strings.EqualFold(node.JoinType, "cartesian") {
+			opUpper := strings.ToUpper(node.Operation)
+			jtUpper := strings.ToUpper(node.JoinType)
+
+			// Catch any variation of Cartesian or Cross joins in either field
+			isCartesian := strings.Contains(opUpper, "CARTESIAN") || strings.Contains(opUpper, "CROSS") ||
+				strings.Contains(jtUpper, "CARTESIAN") || strings.Contains(jtUpper, "CROSS")
+
+			if isCartesian {
+				// Try to attach the red squiggly to a relevant keyword
+				sl, sc, el, ec := findTokenPos(sql, "JOIN")
+
+				if sl == 1 && sc == 1 && ec == 9999 { // Fallback hit, try CROSS
+					sl, sc, el, ec = findTokenPos(sql, "CROSS")
+				}
+				if sl == 1 && sc == 1 && ec == 9999 { // Fallback hit, try FROM (for comma joins)
+					sl, sc, el, ec = findTokenPos(sql, "FROM")
+				}
+
 				markers = append(markers, ExplainMarker{
-					StartLineNumber: 1, StartColumn: 1,
-					EndLineNumber: 1, EndColumn: 9999,
-					Message:  GetDiagMessage(CodeCartesianJoin),
-					Severity: 8,
+					StartLineNumber: sl,
+					StartColumn:     sc,
+					EndLineNumber:   el,
+					EndColumn:       ec,
+					Message:         GetDiagMessage(CodeCartesianJoin),
+					Severity:        8,
 					ExplainData: &ExplainData{
 						Operation: node.Operation,
 						JoinType:  node.JoinType,

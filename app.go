@@ -879,11 +879,33 @@ func (a *App) GetQueryOperatorStats(queryID string) ([]queryprofile.OperatorStat
 // RunExplain runs EXPLAIN USING JSON for the provided SQL and returns both
 // the parsed plan tree and detected performance issues in a single response.
 // Used by the editor context-menu "Explain SQL" action.
-func (a *App) RunExplain(sql string) (*queryprofile.ExplainResult, error) {
-	if a.client == nil {
+func (a *App) RunExplain(tabId string, sql string) (*queryprofile.ExplainResult, error) {
+	client := a.client
+	if tabId != "" {
+		if ts, err := a.getOrInitTabSession(tabId); err == nil {
+			client = ts.client
+		}
+	}
+	if client == nil {
 		return nil, ErrNotConnected
 	}
-	return queryprofile.RunExplain(a.ctx, a.client, sql)
+
+	// Use a single pinned connection for the entire explain operation.
+	// This ensures that the context sync and the EXPLAIN command share
+	// the same session and see the same database/schema context.
+	conn, err := client.GetConn(a.ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = conn.Close() }()
+
+	// 1. Sync session context on the pinned connection.
+	if _, err := client.GetSessionContextOnConn(a.ctx, conn); err != nil {
+		logger.L.Warn("RunExplain: failed to sync session context", "err", err)
+	}
+
+	// 2. Run EXPLAIN on the same pinned connection.
+	return queryprofile.RunExplainOnConn(a.ctx, client, conn, sql)
 }
 
 // StartQuery submits a SQL statement and returns the Snowflake query ID as
