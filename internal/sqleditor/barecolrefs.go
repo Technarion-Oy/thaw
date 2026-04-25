@@ -481,15 +481,46 @@ func extractSelectClause(s string) string {
 	return s
 }
 
+// buildSingleQuoteMask returns a boolean slice where true indicates the byte
+// position is inside a single-quoted SQL string literal (including the quotes
+// themselves).  Handles SQL-style escaped quotes ('').
+func buildSingleQuoteMask(s string) []bool {
+	mask := make([]bool, len(s))
+	inSingle := false
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\'' {
+			if inSingle && i+1 < len(s) && s[i+1] == '\'' {
+				// Escaped quote '' — mark both bytes and skip ahead.
+				mask[i] = true
+				mask[i+1] = true
+				i++
+			} else {
+				// Opening or closing quote.
+				mask[i] = true
+				inSingle = !inSingle
+			}
+		} else if inSingle {
+			mask[i] = true
+		}
+	}
+	return mask
+}
+
 // scanSelectClauseForUnknownCols finds identifiers in the SELECT clause that
 // are not qualified (preceded/followed by "."), not function calls (followed
-// by "("), not AS aliases, and not numeric literals.  It returns each unknown
-// name normalised to uppercase (for use as a lookup key and search target).
+// by "("), not AS aliases, not numeric literals, and not inside single-quoted
+// string literals.  It returns each unknown name normalised to uppercase (for
+// use as a lookup key and search target).
 func scanSelectClauseForUnknownCols(clause string, knownCols map[string]struct{}) []string {
 	locs := reIdentOrQuoted.FindAllStringIndex(clause, -1)
 	if len(locs) == 0 {
 		return nil
 	}
+
+	// Pre-compute which positions are inside single-quoted string literals so
+	// that e.g. 'month' in DATE_TRUNC('month', col) is not flagged as an
+	// unknown column reference.
+	inStr := buildSingleQuoteMask(clause)
 
 	// Build set of start positions that are AS aliases (or the AS keyword itself).
 	aliasStarts := make(map[int]struct{})
@@ -502,6 +533,11 @@ func scanSelectClauseForUnknownCols(clause string, knownCols map[string]struct{}
 	seen := make(map[string]struct{})
 	for _, loc := range locs {
 		start, end := loc[0], loc[1]
+
+		// Skip identifiers inside single-quoted string literals.
+		if start < len(inStr) && inStr[start] {
+			continue
+		}
 
 		// Skip AS keyword and AS aliases
 		if _, skip := aliasStarts[start]; skip {

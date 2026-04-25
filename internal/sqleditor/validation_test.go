@@ -228,6 +228,11 @@ func TestValidateBareColumnRefs_Valid(t *testing.T) {
 		"CREATE TABLE my_table (a varchar);\nINSERT INTO my_table (a) SELECT '1';",
 		// Views
 		`CREATE VIEW my_view AS SELECT FIRST_NAME, LAST_NAME FROM "DB"."SCH"."EMPLOYEES"`,
+
+		// String literals containing identifier-like words must not be flagged
+		// as unknown column refs (e.g. 'month' in DATE_TRUNC('month', ID)).
+		`SELECT DATE_TRUNC('month', ID) AS m FROM DB.SCH.EMPLOYEES`,
+		`SELECT TO_CHAR(ID, 'YYYY-MM-DD') AS d, FIRST_NAME FROM DB.SCH.EMPLOYEES`,
 	}
 
 	req := ValidateBareColsRequest{
@@ -336,6 +341,10 @@ func TestValidateTablesExist_Valid(t *testing.T) {
 		// MERGE statements
 		"MERGE INTO LIVE_TABLE USING (SELECT 1) AS s ON 1=1 WHEN MATCHED THEN UPDATE SET a=1",
 		"CREATE TABLE local_t (id INT);\nMERGE INTO local_t USING LIVE_TABLE AS s ON local_t.id = s.id WHEN NOT MATCHED THEN INSERT (id) VALUES (s.id)",
+
+		// Multi-CTE: all CTE names must be recognised, even those after the first comma
+		"WITH cte1 AS (SELECT 1 AS id), cte2 AS (SELECT * FROM LIVE_TABLE) SELECT * FROM cte1 JOIN cte2 ON 1=1",
+		"WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT 3) SELECT * FROM a JOIN b ON 1=1 JOIN c ON 1=1",
 	}
 
 	req := ValidateTablesExistRequest{
