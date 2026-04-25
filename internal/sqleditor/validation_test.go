@@ -1203,6 +1203,56 @@ LIMIT 100;`
 	}
 }
 
+// TestValidateSemantics_MultiByteCharacters ensures that multi-byte Unicode
+// characters (like em-dashes or emojis) do not corrupt the string slicing
+// used to look backward for function contexts.
+func TestValidateSemantics_MultiByteCharacters(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+	}{
+		{
+			name: "Em-dash in comment before DATEADD",
+			sql: `
+			CREATE TABLE my_table (id INT);
+			-- Incorrect warning "WARNING — Column 'month' not found in any of the tables in scope."
+			SELECT DATEADD(month, -1, CURRENT_DATE()) FROM my_table;
+			`,
+		},
+		{
+			name: "Emoji in comment before EXTRACT",
+			sql: `
+			CREATE TABLE my_table (id INT);
+			/* Checking for year 📅🚀 */
+			SELECT EXTRACT(year FROM CURRENT_DATE()) FROM my_table;
+			`,
+		},
+		{
+			name: "Multi-byte string literal before function",
+			sql: `
+			CREATE TABLE my_table (id INT);
+			SELECT 'こんにちは' AS greeting, DATE_TRUNC('month', CURRENT_DATE()) FROM my_table;
+			`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			markers := ValidateSemantics(tt.sql, nil, nil)
+			warns := getWarnings(markers)
+
+			for _, w := range warns {
+				// If the slicing bug is present, the parser won't see the date function,
+				// and it will flag 'month' or 'year' as missing columns.
+				if strings.Contains(strings.ToLower(w.Message), "month") ||
+					strings.Contains(strings.ToLower(w.Message), "year") {
+					t.Errorf("Multi-byte slicing bug detected! Got false warning: %q", w.Message)
+				}
+			}
+		})
+	}
+}
+
 // ── Helpers for tests ─────────────────────────────────────────────────────────
 
 func min(a, b int) int {
