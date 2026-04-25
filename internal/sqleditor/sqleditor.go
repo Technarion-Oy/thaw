@@ -22,6 +22,19 @@ import (
 	sf "thaw/internal/snowflake"
 )
 
+var dateParts = map[string]bool{
+	"YEAR": true, "MONTH": true, "DAY": true, "HOUR": true, "MINUTE": true,
+	"SECOND": true, "QUARTER": true, "WEEK": true, "MILLISECOND": true,
+	"MICROSECOND": true, "NANOSECOND": true, "DAYOFWEEK": true,
+	"DAYOFMONTH": true, "DAYOFYEAR": true, "EPOCH": true,
+}
+
+var dateFunctions = map[string]bool{
+	"DATEADD": true, "DATEDIFF": true, "DATE_TRUNC": true, "DATE_PART": true,
+	"EXTRACT": true, "TIMEADD": true, "TIMEDIFF": true, "TIMESTAMPADD": true,
+	"TIMESTAMPDIFF": true,
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 // DiagMarker represents a Monaco editor marker (error or warning).
@@ -2823,7 +2836,19 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 							isFunction = true
 						}
 
-						if !isFunction && ctx.bareColValidation {
+						// NEW: Skip if it is a date part used as the first argument of a date function
+						isDatePartUsage := false
+						if dateParts[word1Norm] {
+							// Check the function context just before this word
+							if fn := GetActiveFunctionCall(sql[:word1Start]); fn != nil {
+								if dateFunctions[strings.ToUpper(fn.Name)] && fn.ParamIndex == 0 {
+									isDatePartUsage = true
+								}
+							}
+						}
+
+						// Updated to ignore isDatePartUsage
+						if !isFunction && !isDatePartUsage && ctx.bareColValidation {
 							// Check if this column exists in ANY of the active tables.
 							foundInAny := false
 							for _, cacheKey := range ctx.activeKeys {
