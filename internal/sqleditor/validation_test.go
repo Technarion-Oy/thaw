@@ -830,7 +830,7 @@ func TestValidateSemantics_CTEAliasColumns(t *testing.T) {
 			wantCol: "y",
 		},
 		{
-			name: "User reported failing query (Issue #73)",
+			name: "User reported failing query (Issue #73) - bare column",
 			sql: `
 use LINEAGE_SOURCE_DB.RAW_DATA;
 
@@ -842,47 +842,11 @@ CREATE OR REPLACE TABLE BIG_SALES_DATA (
     notes VARCHAR
 ) CLUSTER BY (sale_date);
 
-
-INSERT INTO BIG_SALES_DATA
-SELECT
-    SEQ4(),
-    UNIFORM(1, 100000, RANDOM()),
-    DATEADD(day, UNIFORM(1, 3650, RANDOM()), '2015-01-01'),
-    UNIFORM(100, 100000, RANDOM()) / 100.0, 
-    RANDSTR(500, RANDOM()) 
-FROM TABLE(GENERATOR(ROWCOUNT => 5000000));
-
 CREATE OR REPLACE TABLE CUSTOMERS (
     customer_id NUMBER,
     customer_name VARCHAR,
     region VARCHAR
 );
-
-INSERT INTO CUSTOMERS
-SELECT
-    SEQ4(),
-    'Customer ' || TO_VARCHAR(SEQ4()),
-    DECODE(MOD(SEQ4(), 4), 0, 'NORTH', 1, 'SOUTH', 2, 'EAST', 3, 'WEST')
-FROM TABLE(GENERATOR(ROWCOUNT => 100000));
-
-SELECT 
-    sale_id,
-    amount,
-    notes
-FROM BIG_SALES_DATA;
-
-SELECT 
-    sale_id,
-    amount
-FROM BIG_SALES_DATA
-WHERE sale_date = '2024-01-01';
-
-SELECT 
-    s.sale_id,
-    c.customer_name
-FROM BIG_SALES_DATA s
-JOIN CUSTOMERS c;
-
 
 WITH Monthly_Sales_Summary AS (
     SELECT 
@@ -895,14 +859,15 @@ WITH Monthly_Sales_Summary AS (
 VIP_Customers AS (
     SELECT 
         customer_id,
-        customer_name,
-        region
-    FROM CUSTOMERS
+        -- In the next line it should complain about incorrect customer_name1
+        customer_name1,
+        -- In the next line validation works correctly
+        c.region1
+    FROM CUSTOMERS c
     WHERE region = 'NORTH'
 )
 SELECT 
--- The next row should complain about incorrect column name
-    vc.incorrect_column_name,
+    vc.customer_name,
     vc.region,
     mss.sales_month,
     mss.total_revenue
@@ -910,7 +875,7 @@ FROM VIP_Customers vc
 CROSS JOIN Monthly_Sales_Summary mss
 ORDER BY mss.total_revenue DESC
 LIMIT 100;`,
-			wantCol: "incorrect_column_name",
+			wantCol: "customer_name1",
 		},
 	}
 	for _, tt := range invalidCases {
