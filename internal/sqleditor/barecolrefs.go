@@ -26,7 +26,7 @@ type ValidateBareColsRequest struct {
 	QuotedIdentifiersIgnoreCase bool             `json:"quotedIdentifiersIgnoreCase"`
 }
 
-// ── Precompiled regexes ───────────────────────────────────────────────────────
+// ── Precompiled regexes & Maps ────────────────────────────────────────────────
 
 var (
 	// FROM keyword at start (for SELECT clause extraction)
@@ -70,6 +70,20 @@ var (
 
 	// CLUSTER BY (...) – remove before FP check
 	reClusterBy = regexp.MustCompile(`(?i)\bCLUSTER\s+BY\s*\([^)]+\)`)
+
+	// Date parts and functions for context-aware bare column skipping
+	bcrDateParts = map[string]bool{
+		"YEAR": true, "MONTH": true, "DAY": true, "HOUR": true, "MINUTE": true,
+		"SECOND": true, "QUARTER": true, "WEEK": true, "MILLISECOND": true,
+		"MICROSECOND": true, "NANOSECOND": true, "DAYOFWEEK": true,
+		"DAYOFMONTH": true, "DAYOFYEAR": true, "EPOCH": true,
+	}
+
+	bcrDateFuncs = map[string]bool{
+		"DATEADD": true, "DATEDIFF": true, "DATE_TRUNC": true, "DATE_PART": true,
+		"EXTRACT": true, "TIMEADD": true, "TIMEDIFF": true, "TIMESTAMPADD": true,
+		"TIMESTAMPDIFF": true,
+	}
 )
 
 // ── ValidateBareColumnRefs ────────────────────────────────────────────────────
@@ -281,7 +295,6 @@ func parseFirstIdentAsCol(def string, ic bool) (ColInfo, bool) {
 	return ColInfo{Name: normIdent(m, ic), DataType: "UNKNOWN"}, true
 }
 
-
 // lookupColsForRef finds the ColInfo slice for a table identified by
 // (name, db, schema).  It checks the caller-supplied colInfoCache first
 // (populated from Snowflake metadata), then the script-local localColCache.
@@ -492,7 +505,7 @@ func extractSelectClause(s string) string {
 
 // buildSingleQuoteMask returns a boolean slice where true indicates the byte
 // position is inside a single-quoted SQL string literal (including the quotes
-// themselves).  Handles SQL-style escaped quotes ('').
+// themselves).  Handles SQL-style escaped quotes (”).
 func buildSingleQuoteMask(s string) []bool {
 	mask := make([]bool, len(s))
 	inSingle := false
@@ -573,6 +586,21 @@ func scanSelectClauseForUnknownCols(clause string, knownCols map[string]struct{}
 
 		// Normalize to uppercase for case-insensitive column lookup
 		normName := strings.ToUpper(normIdent(raw, false))
+
+		// NEW: Skip known SQL keywords to prevent flagging things like FROM, WHERE, etc.
+		if sqlAllKeywords[normName] {
+			continue
+		}
+
+		// NEW: Skip date parts used as the first argument of date functions
+		if bcrDateParts[normName] {
+			if fn := GetActiveFunctionCall(clause[:start]); fn != nil {
+				if bcrDateFuncs[strings.ToUpper(fn.Name)] && fn.ParamIndex == 0 {
+					continue
+				}
+			}
+		}
+
 		if _, found := knownCols[normName]; !found {
 			if _, already := seen[normName]; !already {
 				seen[normName] = struct{}{}

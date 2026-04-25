@@ -2823,7 +2823,21 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 							isFunction = true
 						}
 
-						if !isFunction && ctx.bareColValidation {
+						// NEW: Skip if it is a date part used as the first argument of a date function
+						isDatePartUsage := false
+						// Note: Reusing bcrDateParts and bcrDateFuncs defined in barecolrefs.go
+						if bcrDateParts[word1Norm] {
+							// CRITICAL FIX: Slice the 'runes' array, not the 'sql' byte string,
+							// to prevent multi-byte characters (like emojis or em-dashes) from
+							// misaligning the index and truncating the function prefix.
+							if fn := GetActiveFunctionCall(string(runes[:word1Start])); fn != nil {
+								if bcrDateFuncs[strings.ToUpper(fn.Name)] && fn.ParamIndex == 0 {
+									isDatePartUsage = true
+								}
+							}
+						}
+
+						if !isFunction && !isDatePartUsage && ctx.bareColValidation {
 							// Check if this column exists in ANY of the active tables.
 							foundInAny := false
 							for _, cacheKey := range ctx.activeKeys {
@@ -2845,10 +2859,6 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 							// we only emit if there is an active context and it doesn't match an alias.
 							if !foundInAny {
 								if _, isAlias := ctx.aliasMap[word1Norm]; !isAlias {
-									// Additional guard: check if it looks like a column that *should* be there.
-									// For now, we only emit if it's definitely NOT a keyword.
-									// (Refining this could involve checking the surrounding SELECT context).
-									// Kalle's request: "customer_name1" should be complained about.
 									markers = append(markers, DiagMarker{
 										StartLineNumber: word1Line,
 										StartColumn:     word1Col,

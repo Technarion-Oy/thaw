@@ -236,6 +236,11 @@ func TestValidateBareColumnRefs_Valid(t *testing.T) {
 		// as unknown column refs (e.g. 'month' in DATE_TRUNC('month', ID)).
 		`SELECT DATE_TRUNC('month', ID) AS m FROM DB.SCH.EMPLOYEES`,
 		`SELECT TO_CHAR(ID, 'YYYY-MM-DD') AS d, FIRST_NAME FROM DB.SCH.EMPLOYEES`,
+		// Regression tests for Issue: Date parts inside date functions triggering false warnings
+		"SELECT DATEADD(month, -1, CURRENT_DATE()) FROM DB.SCH.EMPLOYEES",
+		"SELECT DATE_TRUNC('month', CURRENT_DATE()) FROM DB.SCH.EMPLOYEES",
+		"SELECT TIMESTAMPDIFF(second, CURRENT_DATE(), CURRENT_DATE()) FROM DB.SCH.EMPLOYEES",
+		"SELECT EXTRACT(year FROM CURRENT_DATE()) FROM DB.SCH.EMPLOYEES",
 	}
 
 	req := ValidateBareColsRequest{
@@ -275,6 +280,9 @@ func TestValidateBareColumnRefs_Invalid(t *testing.T) {
 		{"Qualified alias unknown", `SELECT e.bad_col FROM DB.SCH.EMPLOYEES e`, []string{"bad_col"}},
 		// Qualified refs (alias.column) — unknown column via local CREATE TABLE pre-scan
 		{"Local table qualified unknown", "CREATE TABLE local_t (id NUMBER, name VARCHAR);\nSELECT t.wrong_col FROM local_t t;", []string{"wrong_col"}},
+		// Regression: Ensure date parts are still validated if used as normal columns outside date functions
+		{"Bare date part outside function", `SELECT month FROM "DB"."SCH"."EMPLOYEES"`, []string{"month"}},
+		{"Date part as 2nd param", `SELECT DATEADD(day, month, CURRENT_DATE()) FROM "DB"."SCH"."EMPLOYEES"`, []string{"month"}},
 	}
 
 	req := ValidateBareColsRequest{
@@ -370,6 +378,31 @@ func TestValidateTablesExist_Valid(t *testing.T) {
 				t.Errorf("Expected 0 errors for %q, got %d: %v", sql, len(errs), errs)
 			}
 		})
+	}
+}
+
+// Regression test for Issue: USE statements containing underscores failing to set context
+func TestValidateTablesExist_UseWithUnderscores(t *testing.T) {
+	sql := `use LINEAGE_SOURCE_DB.RAW_DATA;
+SELECT * FROM GLOBAL_SHIPMENTS;`
+
+	req := ValidateTablesExistRequest{
+		ResolvedRefs: []ResolvedRef{
+			// The frontend/parser will resolve this as a known table reference
+			{Alias: "GLOBAL_SHIPMENTS", DB: "LINEAGE_SOURCE_DB", Schema: "RAW_DATA", Name: "GLOBAL_SHIPMENTS"},
+		},
+		KnownDatabases: []string{"LINEAGE_SOURCE_DB"},
+		KnownSchemas:   []SchemaEntry{{DB: "LINEAGE_SOURCE_DB", Name: "RAW_DATA"}},
+	}
+
+	req.SQL = sql
+	req.StmtRanges = GetStatementRanges(sql)
+
+	markers := ValidateTablesExist(req)
+	errs := getErrors(markers)
+
+	if len(errs) > 0 {
+		t.Errorf("Expected 0 errors for USE statement with underscores, got %d: %v", len(errs), errs)
 	}
 }
 
@@ -825,8 +858,8 @@ func TestValidateSemantics_CTEAliasColumns(t *testing.T) {
 			wantCol: "col2",
 		},
 		{
-			name: "Quoted CTE alias",
-			sql: `WITH "my_cte" AS (SELECT 1 AS x) SELECT "my_cte".y FROM "my_cte"`,
+			name:    "Quoted CTE alias",
+			sql:     `WITH "my_cte" AS (SELECT 1 AS x) SELECT "my_cte".y FROM "my_cte"`,
 			wantCol: "y",
 		},
 		{
@@ -1167,6 +1200,56 @@ LIMIT 100;`
 				t.Errorf("Got unexpected warning mentioning %q: %q", col, w.Message)
 			}
 		}
+	}
+}
+
+// TestValidateSemantics_MultiByteCharacters ensures that multi-byte Unicode
+// characters (like em-dashes or emojis) do not corrupt the string slicing
+// used to look backward for function contexts.
+func TestValidateSemantics_MultiByteCharacters(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+	}{
+		{
+			name: "Em-dash in comment before DATEADD",
+			sql: `
+			CREATE TABLE my_table (id INT);
+			-- Incorrect warning "WARNING — Column 'month' not found in any of the tables in scope."
+			SELECT DATEADD(month, -1, CURRENT_DATE()) FROM my_table;
+			`,
+		},
+		{
+			name: "Emoji in comment before EXTRACT",
+			sql: `
+			CREATE TABLE my_table (id INT);
+			/* Checking for year 📅🚀 */
+			SELECT EXTRACT(year FROM CURRENT_DATE()) FROM my_table;
+			`,
+		},
+		{
+			name: "Multi-byte string literal before function",
+			sql: `
+			CREATE TABLE my_table (id INT);
+			SELECT 'こんにちは' AS greeting, DATE_TRUNC('month', CURRENT_DATE()) FROM my_table;
+			`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			markers := ValidateSemantics(tt.sql, nil, nil)
+			warns := getWarnings(markers)
+
+			for _, w := range warns {
+				// If the slicing bug is present, the parser won't see the date function,
+				// and it will flag 'month' or 'year' as missing columns.
+				if strings.Contains(strings.ToLower(w.Message), "month") ||
+					strings.Contains(strings.ToLower(w.Message), "year") {
+					t.Errorf("Multi-byte slicing bug detected! Got false warning: %q", w.Message)
+				}
+			}
+		})
 	}
 }
 
