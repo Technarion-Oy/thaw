@@ -389,7 +389,7 @@ func asInt64(row []any, i int) int64 {
 		return int64(v)
 	case string:
 		var n int64
-		fmt.Sscan(v, &n)
+		_, _ = fmt.Sscan(v, &n)
 		return n
 	default:
 		return 0
