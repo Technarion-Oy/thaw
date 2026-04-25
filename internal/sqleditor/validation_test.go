@@ -745,6 +745,95 @@ func TestValidateTablesExist_ThreePartCreateTable_NoFalseAlarms(t *testing.T) {
 	}
 }
 
+// ── 5. ValidateSemantics Tests ────────────────────────────────────────────────
+
+// TestValidateSemantics_CTEAliasColumns verifies that column references via
+// CTE aliases are validated against the CTE's projected columns even though
+// CTEs are absent from resolvedRefs (the frontend drops them because they are
+// not in the global Snowflake object store).
+func TestValidateSemantics_CTEAliasColumns(t *testing.T) {
+	// ── Valid cases: no warnings expected ─────────────────────────────────
+	validCases := []struct {
+		name string
+		sql  string
+	}{
+		{
+			name: "CTE alias valid columns",
+			sql:  `WITH vip AS (SELECT customer_id, customer_name FROM t) SELECT vc.customer_id, vc.customer_name FROM vip vc`,
+		},
+		{
+			name: "CTE used directly - valid columns",
+			sql:  `WITH vip AS (SELECT id, name FROM t) SELECT vip.id, vip.name FROM vip`,
+		},
+		{
+			name: "Multiple CTEs - all valid columns",
+			sql:  `WITH a AS (SELECT x, y FROM t), b AS (SELECT p, q FROM s) SELECT a.x, b.p FROM a JOIN b ON a.x = b.p`,
+		},
+		{
+			name: "CTE with AS-aliased expressions",
+			sql:  `WITH summary AS (SELECT COUNT(*) AS cnt, SUM(amount) AS total FROM t) SELECT s.cnt, s.total FROM summary s`,
+		},
+	}
+	for _, tt := range validCases {
+		t.Run(tt.name, func(t *testing.T) {
+			markers := ValidateSemantics(tt.sql, nil, nil)
+			if warns := getWarnings(markers); len(warns) > 0 {
+				t.Errorf("Expected no warnings, got %d: %v", len(warns), warns)
+			}
+		})
+	}
+
+	// ── Invalid cases: warning for unknown column expected ─────────────────
+	invalidCases := []struct {
+		name    string
+		sql     string
+		wantCol string
+	}{
+		{
+			name:    "CTE alias unknown column",
+			sql:     `WITH vip AS (SELECT customer_id, customer_name FROM t) SELECT vc.customer_id, vc.bad_col FROM vip vc`,
+			wantCol: "bad_col",
+		},
+		{
+			name:    "CTE used directly - unknown column",
+			sql:     `WITH vip AS (SELECT id, name FROM t) SELECT vip.bad_col FROM vip`,
+			wantCol: "bad_col",
+		},
+		{
+			name:    "Second CTE alias unknown column",
+			sql:     `WITH a AS (SELECT x, y FROM t), b AS (SELECT p, q FROM s) SELECT a.x, b.wrong FROM a JOIN b ON a.x = b.p`,
+			wantCol: "wrong",
+		},
+		{
+			name: "Issue-72 example query",
+			sql: `WITH VIP_Customers AS (
+				SELECT customer_id, customer_name, region
+				FROM CUSTOMERS
+				WHERE total_purchases > 500
+			)
+			SELECT vc.customer_id, vc.customer_name, vc.incorrect_column_name
+			FROM VIP_Customers vc`,
+			wantCol: "incorrect_column_name",
+		},
+	}
+	for _, tt := range invalidCases {
+		t.Run(tt.name, func(t *testing.T) {
+			markers := ValidateSemantics(tt.sql, nil, nil)
+			warns := getWarnings(markers)
+			found := false
+			for _, w := range warns {
+				if strings.Contains(strings.ToLower(w.Message), strings.ToLower(tt.wantCol)) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Expected warning for column %q but got markers: %v", tt.wantCol, warns)
+			}
+		})
+	}
+}
+
 // ── Helpers for tests ─────────────────────────────────────────────────────────
 
 func min(a, b int) int {

@@ -2163,6 +2163,168 @@ func TypeCategory(dt string) string {
 	return "other"
 }
 
+// ── CTE projection helpers ────────────────────────────────────────────────────
+
+// reCTEDef matches a CTE definition of the form:  <name> AS (
+// Used to locate CTE names and their opening parenthesis.
+var reCTEDef = regexp.MustCompile(`(?i)\b(` + _ident + `)\s+AS\s*\(`)
+
+// reAsAliasExpr matches a trailing "AS <alias>" at the end of a SELECT-list
+// expression (anchored with $).
+var reAsAliasExpr = regexp.MustCompile(`(?i)\bAS\s+(` + _ident + `)\s*$`)
+
+// reSimpleQualifiedIdent matches a simple (optionally dot-qualified) identifier
+// with no operators, parens, or spaces — e.g. "col", "t.col", "db.sch.col".
+var reSimpleQualifiedIdent = regexp.MustCompile(`^(` + _ident + `)(\.` + _ident + `){0,2}\s*$`)
+
+// splitTopLevelCommas splits s by commas that are not nested inside
+// parentheses or string literals.
+func splitTopLevelCommas(s string) []string {
+	var parts []string
+	depth := 0
+	inSingle := false
+	inDouble := false
+	start := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '\'' && !inDouble {
+			inSingle = !inSingle
+		} else if c == '"' && !inSingle {
+			inDouble = !inDouble
+		} else if !inSingle && !inDouble {
+			switch c {
+			case '(':
+				depth++
+			case ')':
+				if depth > 0 {
+					depth--
+				}
+			case ',':
+				if depth == 0 {
+					parts = append(parts, s[start:i])
+					start = i + 1
+				}
+			}
+		}
+	}
+	parts = append(parts, s[start:])
+	return parts
+}
+
+// extractProjectedColName returns the column name that a SELECT-list expression
+// projects, or "" if it cannot be determined without a full AST.
+//
+// Rules (in order):
+//  1. Trailing "AS alias" → use alias.
+//  2. Simple bare/qualified identifier (no operators, no parens) → use last part.
+//  3. Everything else (functions without alias, arithmetic, etc.) → "".
+func extractProjectedColName(expr string) string {
+	expr = strings.TrimSpace(expr)
+	// Rule 1: explicit AS alias at the end of the expression.
+	if m := reAsAliasExpr.FindStringSubmatch(expr); m != nil {
+		return strings.ToUpper(normIdent(m[1], true))
+	}
+	// Rule 2: simple identifier — must not contain operators or function calls.
+	if strings.ContainsAny(expr, "()+-*/%|&^!<>=") {
+		return ""
+	}
+	if reSimpleQualifiedIdent.MatchString(expr) {
+		// Use the last dot-component as the column name.
+		parts := strings.Split(expr, ".")
+		return strings.ToUpper(normIdent(strings.TrimSpace(parts[len(parts)-1]), true))
+	}
+	return ""
+}
+
+// extractSelectProjections returns the projected column names from a SELECT
+// statement by parsing its SELECT-list.  Only items that can be named without
+// a full AST are returned: AS-aliased expressions, bare identifiers, and
+// qualified identifiers (last component is used).  Complex expressions without
+// an alias (e.g. COUNT(*)) are silently skipped.
+func extractSelectProjections(sql string) []ColInfo {
+	stripped := stripCommentsSQL(sql)
+	selLoc := reSelectKW.FindStringIndex(stripped)
+	if selLoc == nil {
+		return nil
+	}
+	afterSelect := strings.TrimSpace(stripped[selLoc[1]:])
+	// Skip optional DISTINCT keyword.
+	upAfter := strings.ToUpper(afterSelect)
+	if strings.HasPrefix(upAfter, "DISTINCT ") || strings.HasPrefix(upAfter, "DISTINCT\t") || strings.HasPrefix(upAfter, "DISTINCT\n") {
+		afterSelect = strings.TrimSpace(afterSelect[8:])
+	}
+	selectClause := extractSelectClause(afterSelect)
+	var cols []ColInfo
+	for _, expr := range splitTopLevelCommas(selectClause) {
+		if name := extractProjectedColName(strings.TrimSpace(expr)); name != "" && name != "*" {
+			cols = append(cols, ColInfo{Name: name, DataType: "UNKNOWN"})
+		}
+	}
+	return cols
+}
+
+// extractNextAlias reads past optional whitespace (and an optional AS keyword)
+// from position afterIdx in s and returns the next bare identifier, or "" if
+// none is present.  This is used to find explicit table aliases that appear
+// directly after a FROM/JOIN table path.
+func extractNextAlias(s string, afterIdx int) string {
+	rest := s[afterIdx:]
+	// Skip leading whitespace.
+	i := 0
+	for i < len(rest) && (rest[i] == ' ' || rest[i] == '\t' || rest[i] == '\r' || rest[i] == '\n') {
+		i++
+	}
+	if i == len(rest) {
+		return ""
+	}
+	// Skip optional AS keyword.
+	if i+2 <= len(rest) && strings.ToUpper(rest[i:i+2]) == "AS" {
+		if i+2 == len(rest) || !isWordChar(rune(rest[i+2])) {
+			i += 2
+			for i < len(rest) && (rest[i] == ' ' || rest[i] == '\t') {
+				i++
+			}
+		}
+	}
+	if i == len(rest) || !isAlpha(rune(rest[i])) {
+		return ""
+	}
+	// Scan the identifier.
+	j := i
+	for j < len(rest) && isWordChar(rune(rest[j])) {
+		j++
+	}
+	return rest[i:j]
+}
+
+// extractCTEProjections pre-scans comment-stripped SQL for CTE definitions
+// (patterns of the form  name AS ( ... )  where the body begins with SELECT)
+// and returns a map from UPPERCASE CTE name → []ColInfo (the projected columns).
+func extractCTEProjections(stripped string) map[string][]ColInfo {
+	result := make(map[string][]ColInfo)
+	for _, m := range reCTEDef.FindAllStringSubmatchIndex(stripped, -1) {
+		cteName := stripped[m[2]:m[3]]
+		// The opening paren is the last byte of the match (m[1]-1).
+		parenStart := m[1] - 1
+		body := extractBalancedBlock(stripped, parenStart)
+		if len(body) < 2 {
+			continue
+		}
+		inner := strings.TrimSpace(body[1 : len(body)-1])
+		// Only treat this as a CTE if the body starts with SELECT (not a
+		// window/CASE/type-cast or similar construct).
+		firstTok := getFirstSQLToken(inner)
+		if firstTok != "SELECT" {
+			continue
+		}
+		cols := extractSelectProjections(inner)
+		if len(cols) > 0 {
+			result[strings.ToUpper(normIdent(cteName, true))] = cols
+		}
+	}
+	return result
+}
+
 // ── ValidateSemantics ─────────────────────────────────────────────────────────
 
 // ValidateSemantics walks the SQL text and for every alias.column two-part
@@ -2183,6 +2345,54 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 	for _, ref := range resolvedRefs {
 		key := strings.ToUpper(ref.DB) + "\x00" + strings.ToUpper(ref.Schema) + "\x00" + strings.ToUpper(ref.Name)
 		aliasMap[strings.ToUpper(ref.Alias)] = key
+	}
+
+	// ── CTE transient context ─────────────────────────────────────────────
+	// Pre-scan the SQL for CTE definitions and add transient entries so that
+	// alias.column patterns in the outer query can be validated even though
+	// CTEs are absent from resolvedRefs (the frontend drops them because they
+	// are not in the global Snowflake object store).
+	strippedForCTE := stripCommentsSQL(sql)
+	cteProjMap := extractCTEProjections(strippedForCTE)
+	// Populate colInfoCache and build a lookup from UC(CTE name) → cache key.
+	cteCacheKeys := make(map[string]string, len(cteProjMap))
+	for cteNameU, cols := range cteProjMap {
+		cacheKey := "__cte__\x00\x00" + cteNameU
+		colInfoCache[cacheKey] = cols
+		cteCacheKeys[cteNameU] = cacheKey
+	}
+	// Walk FROM/JOIN references in the stripped SQL using reFromJoinSel
+	// (captures only the table path, not the alias) to avoid the greedy-alias
+	// problem where "FROM a JOIN" consumes "JOIN" as an alias and skips the
+	// next "JOIN b" occurrence.  For each reference whose table name is a CTE,
+	// register the CTE name itself and any explicit alias in aliasMap.
+	for _, idx := range reFromJoinSel.FindAllStringSubmatchIndex(strippedForCTE, -1) {
+		tablePath := strippedForCTE[idx[2]:idx[3]]
+		parts := extractIdentParts(tablePath, true)
+		if len(parts) == 0 {
+			continue
+		}
+		tableNameU := parts[len(parts)-1]
+		cacheKey, isCTE := cteCacheKeys[tableNameU]
+		if !isCTE {
+			continue
+		}
+		// Register the bare CTE name as an alias (e.g. SELECT cte.col FROM cte).
+		if _, already := aliasMap[tableNameU]; !already {
+			aliasMap[tableNameU] = cacheKey
+		}
+		// Extract an explicit alias from the text immediately after the table path.
+		// The alias is the next bare word if it is not a SQL stop-keyword.
+		afterTableIdx := idx[3]
+		alias := extractNextAlias(strippedForCTE, afterTableIdx)
+		if alias != "" {
+			aliasU := strings.ToUpper(alias)
+			if !joinStopKW[aliasU] {
+				if _, already := aliasMap[aliasU]; !already {
+					aliasMap[aliasU] = cacheKey
+				}
+			}
+		}
 	}
 
 	runes := []rune(sql)
