@@ -2162,7 +2162,7 @@ var typeCategoryMap = func() map[string]string {
 		"STRING": "text", "TEXT": "text",
 		"BINARY": "text", "VARBINARY": "text",
 		"BOOLEAN": "boolean",
-		"DATE": "datetime", "DATETIME": "datetime", "TIME": "datetime",
+		"DATE":    "datetime", "DATETIME": "datetime", "TIME": "datetime",
 		"TIMESTAMP": "datetime", "TIMESTAMP_LTZ": "datetime",
 		"TIMESTAMP_NTZ": "datetime", "TIMESTAMP_TZ": "datetime",
 		"VARIANT": "semi", "OBJECT": "semi", "ARRAY": "semi",
@@ -2814,13 +2814,7 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 								}
 							}
 						}
-					} else {
-						// It's a three-part name; we don't handle those yet in this simplified walker.
-						// But we must NOT 'continue' here, let the main loop progress.
 					}
-				} else {
-					// Word followed by dot but no second word (e.g. "alias.")
-					// Nothing to validate here.
 				}
 			} else {
 				// Bare identifier without dot. Validate against ALL tables in scope.
