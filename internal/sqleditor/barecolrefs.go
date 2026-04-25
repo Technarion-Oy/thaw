@@ -39,6 +39,14 @@ var (
 	// (reFromJoinFallback in tableexist.go has \b which fails after closing '"')
 	reFromJoinSel = regexp.MustCompile(`(?i)(?:FROM|JOIN)\s+(` + _identPath + `)`)
 
+	// reFromJoinWithAlias captures (tablePath, optional_alias) from FROM/JOIN.
+	// The optional alias may be preceded by AS or appear bare (e.g. FROM t AS a
+	// or FROM t a).  SQL stop-words that look like aliases (ON, WHERE, …) are
+	// filtered out in Go code using joinStopKW.
+	reFromJoinWithAlias = regexp.MustCompile(
+		`(?i)(?:FROM|JOIN)\s+(` + _identPath + `)` +
+			`(?:\s+(?:AS\s+)?(` + _ident + `))?`)
+
 	// CREATE TABLE (for pre-scan): capture name + column block.
 	// The column block is captured as everything after the opening paren;
 	// balanced-paren matching is done in Go code.
@@ -574,6 +582,68 @@ func scanSelectClauseForUnknownCols(clause string, knownCols map[string]struct{}
 	return missing
 }
 
+// scanAliasedColRefs scans clause for alias.column occurrences and returns
+// the column names that are NOT found in the alias's known-column set.
+// aliasColMap maps UPPERCASE alias → set of UPPERCASE known column names.
+// Only aliases that appear in aliasColMap are checked; all others are silently
+// skipped so that CTE aliases (whose column lists are unknown without an AST)
+// never produce false positives.
+func scanAliasedColRefs(clause string, aliasColMap map[string]map[string]struct{}) []string {
+	locs := reIdentOrQuoted.FindAllStringIndex(clause, -1)
+	if len(locs) == 0 {
+		return nil
+	}
+	inStr := buildSingleQuoteMask(clause)
+	var missing []string
+	seen := make(map[string]struct{})
+
+	for i, loc := range locs {
+		start, end := loc[0], loc[1]
+		// Skip positions inside single-quoted string literals.
+		if start < len(inStr) && inStr[start] {
+			continue
+		}
+		// We want tokens that are directly preceded by a dot (the column part
+		// of alias.column).
+		if start == 0 || clause[start-1] != '.' {
+			continue
+		}
+		// The previous identifier token must be immediately before the dot
+		// (i.e., its end == start-1) so we know it is the alias token, not
+		// a different token that happens to sit near a dot.
+		if i == 0 || locs[i-1][1] != start-1 {
+			continue
+		}
+		// Skip three-part qualifiers like db.schema.table — the token before
+		// the alias would itself be preceded by a dot.
+		prevStart := locs[i-1][0]
+		if prevStart > 0 && clause[prevStart-1] == '.' {
+			continue
+		}
+		// Skip if the column itself is followed by a dot (e.g. schema.table.col
+		// where this token is not the final component).
+		if end < len(clause) && clause[end] == '.' {
+			continue
+		}
+		prevRaw := clause[prevStart:locs[i-1][1]]
+		aliasU := strings.ToUpper(normIdent(prevRaw, false))
+		knownCols, hasAlias := aliasColMap[aliasU]
+		if !hasAlias {
+			continue // Alias not resolved to a cached table; skip.
+		}
+		colRaw := clause[start:end]
+		normName := strings.ToUpper(normIdent(colRaw, false))
+		key := aliasU + "\x00" + normName
+		if _, found := knownCols[normName]; !found {
+			if _, already := seen[key]; !already {
+				seen[key] = struct{}{}
+				missing = append(missing, normName)
+			}
+		}
+	}
+	return missing
+}
+
 // validateSelectCols validates column references in SELECT clauses (and in
 // CREATE VIEW ... AS SELECT).
 func validateSelectCols(
@@ -624,8 +694,44 @@ func validateSelectCols(
 	// Extract the SELECT clause (text between SELECT and the first depth-0 FROM).
 	selectClause := extractSelectClause(stripped[selLoc[1]:])
 
-	// Scan for unknown column refs.
+	// Scan for unknown bare (unqualified) column refs.
 	missing := scanSelectClauseForUnknownCols(selectClause, knownCols)
+
+	// Also validate qualified column refs (alias.column) for aliases whose
+	// tables are in the column cache.  Build alias → per-table column set.
+	aliasColMap := make(map[string]map[string]struct{})
+	for _, fm := range reFromJoinWithAlias.FindAllStringSubmatch(stripped, -1) {
+		rawAlias := fm[2]
+		if rawAlias == "" {
+			continue
+		}
+		aliasU := strings.ToUpper(normIdent(rawAlias, ic))
+		// Filter out SQL keywords that the regex may capture as aliases.
+		if joinStopKW[aliasU] {
+			continue
+		}
+		parts := extractIdentParts(fm[1], ic)
+		var tRef struct{ db, schema, name string }
+		switch len(parts) {
+		case 3:
+			tRef = struct{ db, schema, name string }{parts[0], parts[1], parts[2]}
+		case 2:
+			tRef = struct{ db, schema, name string }{"", parts[0], parts[1]}
+		case 1:
+			tRef = struct{ db, schema, name string }{"", "", parts[0]}
+		default:
+			continue
+		}
+		cols, ok := lookupColsForRef(tRef.name, tRef.db, tRef.schema, resolvedRefs, colInfoCache, localColCache, checkEq)
+		if !ok {
+			continue // Table not cached; cannot validate — skip to avoid false positives.
+		}
+		aliasColMap[aliasU] = buildKnownColSet(cols, ic)
+	}
+	if len(aliasColMap) > 0 {
+		missing = append(missing, scanAliasedColRefs(selectClause, aliasColMap)...)
+	}
+
 	if len(missing) == 0 {
 		return nil
 	}

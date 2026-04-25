@@ -215,8 +215,11 @@ func TestValidateBareColumnRefs_Valid(t *testing.T) {
 		`SELECT * FROM "DB"."SCH"."EMPLOYEES"`,
 		// Case insensitivity inside quotes
 		`SELECT "first_name", salary FROM "DB"."SCH"."EMPLOYEES"`,
-		// Aliased
+		// Aliased — qualified refs with valid columns must not warn
 		"SELECT e.ID, e.FIRST_NAME FROM DB.SCH.EMPLOYEES e",
+		"SELECT e.ID, d.DEPT_NAME FROM DB.SCH.EMPLOYEES e JOIN DB.SCH.DEPARTMENTS d ON e.DEPT_ID = d.DEPT_ID",
+		// Local table via alias — valid qualified refs
+		"CREATE TABLE local_t (id NUMBER, name VARCHAR);\nSELECT t.id, t.name FROM local_t t;",
 		// Expressions & Functions
 		"SELECT COUNT(ID), MAX(SALARY) FROM DB.SCH.EMPLOYEES e",
 		"SELECT FIRST_NAME AS fn FROM DB.SCH.EMPLOYEES e",
@@ -268,6 +271,10 @@ func TestValidateBareColumnRefs_Invalid(t *testing.T) {
 		{"Script pre-pass unknown", "CREATE TABLE local_tab (amount NUMBER);\nSELECT amountdd FROM local_tab;", []string{"amountdd"}},
 		{"INSERT target unknown", `INSERT INTO "DB"."SCH"."EMPLOYEES" (ID, FAKE_COL) SELECT 1, 2;`, []string{"FAKE_COL"}},
 		{"CREATE VIEW unknown", `CREATE OR REPLACE VIEW my_view AS SELECT bad_col FROM "DB"."SCH"."EMPLOYEES"`, []string{"bad_col"}},
+		// Qualified refs (alias.column) — unknown column via Snowflake metadata
+		{"Qualified alias unknown", `SELECT e.bad_col FROM DB.SCH.EMPLOYEES e`, []string{"bad_col"}},
+		// Qualified refs (alias.column) — unknown column via local CREATE TABLE pre-scan
+		{"Local table qualified unknown", "CREATE TABLE local_t (id NUMBER, name VARCHAR);\nSELECT t.wrong_col FROM local_t t;", []string{"wrong_col"}},
 	}
 
 	req := ValidateBareColsRequest{
@@ -342,7 +349,7 @@ func TestValidateTablesExist_Valid(t *testing.T) {
 		"MERGE INTO LIVE_TABLE USING (SELECT 1) AS s ON 1=1 WHEN MATCHED THEN UPDATE SET a=1",
 		"CREATE TABLE local_t (id INT);\nMERGE INTO local_t USING LIVE_TABLE AS s ON local_t.id = s.id WHEN NOT MATCHED THEN INSERT (id) VALUES (s.id)",
 
-		// Multi-CTE: all CTE names must be recognised, even those after the first comma
+		// Multi-CTE: all CTE names must be recognized, even those after the first comma
 		"WITH cte1 AS (SELECT 1 AS id), cte2 AS (SELECT * FROM LIVE_TABLE) SELECT * FROM cte1 JOIN cte2 ON 1=1",
 		"WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT 3) SELECT * FROM a JOIN b ON 1=1 JOIN c ON 1=1",
 	}
