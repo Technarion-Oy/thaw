@@ -847,8 +847,8 @@ func TestComputeJoinOnConditions(t *testing.T) {
 	t.Run("PK Heuristic Tier", func(t *testing.T) {
 		got := ComputeJoinOnConditions(req)
 		want := []JoinCondition{
-			{Condition: `ON "B".TABLE_A_ID = "A".ID`, Detail: "PK HEURISTIC", SortText: `0cON "B".TABLE_A_ID = "A".ID`},
-			{Condition: `ON "A".ID = "B".ID`, Detail: "SAME-NAME COLUMN", SortText: `1ON "A".ID = "B".ID`},
+			{Condition: `ON B.TABLE_A_ID = A.ID`, Detail: "PK HEURISTIC", SortText: `0cON B.TABLE_A_ID = A.ID`},
+			{Condition: `ON A.ID = B.ID`, Detail: "SAME-NAME COLUMN", SortText: `1ON A.ID = B.ID`},
 			{Condition: "USING (ID)", Detail: "USING", SortText: "1.5USING (ID)"},
 		}
 		if !reflect.DeepEqual(got, want) {
@@ -868,8 +868,8 @@ func TestComputeJoinOnConditions(t *testing.T) {
 		}
 		got := ComputeJoinOnConditions(reqWithFK)
 		want := []JoinCondition{
-			{Condition: `ON "B".TABLE_A_ID = "A".ID`, Detail: "FK RELATION", SortText: `0aON "B".TABLE_A_ID = "A".ID`},
-			{Condition: `ON "A".ID = "B".ID`, Detail: "SAME-NAME COLUMN", SortText: `1ON "A".ID = "B".ID`},
+			{Condition: `ON B.TABLE_A_ID = A.ID`, Detail: "FK RELATION", SortText: `0aON B.TABLE_A_ID = A.ID`},
+			{Condition: `ON A.ID = B.ID`, Detail: "SAME-NAME COLUMN", SortText: `1ON A.ID = B.ID`},
 			{Condition: "USING (ID)", Detail: "USING", SortText: "1.5USING (ID)"},
 		}
 		if !reflect.DeepEqual(got, want) {
@@ -900,7 +900,7 @@ func TestComputeJoinOnConditions(t *testing.T) {
 		}
 		got := ComputeJoinOnConditions(reqComp)
 		want := []JoinCondition{
-			{Condition: `ON "C".FK1 = "P".K1 AND "C".FK2 = "P".K2`, Detail: "FK RELATION", SortText: `0aON "C".FK1 = "P".K1 AND "C".FK2 = "P".K2`},
+			{Condition: `ON C.FK1 = P.K1 AND C.FK2 = P.K2`, Detail: "FK RELATION", SortText: `0aON C.FK1 = P.K1 AND C.FK2 = P.K2`},
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("ComputeJoinOnConditions() Composite = %v, want %v", got, want)
