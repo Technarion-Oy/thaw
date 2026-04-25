@@ -30,6 +30,7 @@ import { useThemeStore } from "../../store/themeStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, GetAllDataTypes, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords } from "../../../wailsjs/go/main/App";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
+import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 
 // ── Types migrated from sqlDiagnostics.ts ────────────────────────────────────
@@ -373,6 +374,42 @@ let _snippetMenuRegistered = false;
   });
 })();
 
+// ── "Explain SQL" context menu item ──────────────────────────────────────────
+// Registered once at module load. The command dispatches a custom event so the
+// React component can handle async statement detection and show the modal.
+let _explainMenuRegistered = false;
+(() => {
+  if (_explainMenuRegistered) return;
+  _explainMenuRegistered = true;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (CommandsRegistry as any).registerCommand("thaw.explain.sql", () => {
+    if (!_activeSnippetEditor) return;
+    const editor = _activeSnippetEditor;
+    const selection = editor.getSelection();
+    const model = editor.getModel();
+    const selectedText =
+      selection && !selection.isEmpty() ? (model?.getValueInRange(selection) ?? null) : null;
+    window.dispatchEvent(
+      new CustomEvent("thaw:explain-sql", {
+        detail: {
+          selectedText,
+          fullSql: model?.getValue() ?? "",
+          cursorLine: editor.getPosition()?.lineNumber ?? 1,
+        },
+      })
+    );
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (MenuRegistry as any).appendMenuItem((MenuId as any).EditorContext, {
+    command: { id: "thaw.explain.sql", title: "Explain SQL" },
+    group: "z_thaw_explain",
+    order: 0,
+    when: ContextKeyExpr.equals("editorLangId", "sql"),
+  });
+})();
+
 export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {}) {
   const activeSql       = useQueryStore((s) => s.sql);
   const activeSqlSetter = useQueryStore((s) => s.setSql);
@@ -407,9 +444,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   const activeStmtDecRef = useRef<any>(null);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fnDecRef      = useRef<any>(null);
-  const fnDecTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const diagTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fnDecRef       = useRef<any>(null);
+  const fnDecTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const diagTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [explainSql, setExplainSql] = useState<string | null>(null);
 
   const [ddlHover, setDdlHover] = useState<DdlHover | null>(null);
   const [tooltipCtxMenu, setTooltipCtxMenu] = useState<{ x: number; y: number; sel: string } | null>(null);
@@ -470,6 +509,40 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     return () => document.removeEventListener("click", dismiss);
   }, [tooltipCtxMenu]);
 
+  // ── "Explain SQL" context menu handler ───────────────────────────────────
+  useEffect(() => {
+    const handleExplain = async (e: Event) => {
+      const { selectedText, fullSql, cursorLine } = (e as CustomEvent).detail as {
+        selectedText: string | null;
+        fullSql: string;
+        cursorLine: number;
+      };
+
+      // Priority 1: use the selection verbatim.
+      if (selectedText?.trim()) {
+        setExplainSql(selectedText.trim());
+        return;
+      }
+
+      // Priority 2: resolve the statement the cursor sits inside.
+      try {
+        const ranges = await GetSqlStatementRanges(fullSql);
+        for (const r of (ranges || [])) {
+          if (cursorLine >= r.startLine && cursorLine <= r.endLine) {
+            const lines = fullSql.split("\n").slice(r.startLine - 1, r.endLine);
+            const stmt = lines.join("\n").trim();
+            if (stmt) { setExplainSql(stmt); return; }
+          }
+        }
+      } catch { /* fall through */ }
+
+      // Fallback: full editor content.
+      if (fullSql.trim()) setExplainSql(fullSql.trim());
+    };
+
+    window.addEventListener("thaw:explain-sql", handleExplain);
+    return () => window.removeEventListener("thaw:explain-sql", handleExplain);
+  }, [tabId, activeTabId]);
 
   const handleBeforeMount: BeforeMount = (monaco) => {
     ensureMonacoSetup(monaco);
@@ -667,7 +740,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
     editor.onDidChangeModelLanguage(() => {
       const model = editor.getModel();
-      if (model) monaco.editor.setModelMarkers(model, "thaw-sql", []);
+      if (model) {
+        monaco.editor.setModelMarkers(model, "thaw-sql", []);
+      }
     });
 
     runDiagnostics();
@@ -1282,6 +1357,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         {
           const mModel = editor.getModel();
           if (mModel) {
+            // ── Syntax / validation markers (plain message) ─────────────────
             const diagMarker = monaco.editor.getModelMarkers({ owner: "thaw-sql", resource: mModel.uri }).find((m: any) =>
               pos.lineNumber >= m.startLineNumber && pos.lineNumber <= m.endLineNumber &&
               pos.column    >= m.startColumn      && pos.column    <= m.endColumn,
@@ -1959,6 +2035,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           </pre>
         )}
       </div>
+    )}
+    {explainSql && (
+      <ExplainModal sql={explainSql} tabId={tabId ?? activeTabId} onClose={() => setExplainSql(null)} />
     )}
     {tooltipCtxMenu && (
       <>

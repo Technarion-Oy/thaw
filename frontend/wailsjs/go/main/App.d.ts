@@ -7,6 +7,7 @@ import {dbt} from '../models';
 import {ddl} from '../models';
 import {config} from '../models';
 import {fnmeta} from '../models';
+import {queryprofile} from '../models';
 import {tasks} from '../models';
 import {gitrepo} from '../models';
 import {filesystem} from '../models';
@@ -193,6 +194,8 @@ export function GetProcedureParams(arg1:string,arg2:string,arg3:string,arg4:stri
 
 export function GetQueryHistory(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:number,arg8:boolean):Promise<Array<main.QueryHistoryRow>>;
 
+export function GetQueryOperatorStats(arg1:string):Promise<Array<queryprofile.OperatorStat>>;
+
 export function GetQuotedIdentifiersIgnoreCase():Promise<boolean>;
 
 export function GetReservedKeywords():Promise<Array<string>>;
@@ -364,6 +367,8 @@ export function ResizeShell(arg1:number,arg2:number):Promise<void>;
 export function RestoreFromBackup(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:string):Promise<void>;
 
 export function ResumeTaskList(arg1:string,arg2:string,arg3:Array<string>):Promise<void>;
+
+export function RunExplain(arg1:string,arg2:string):Promise<queryprofile.ExplainResult>;
 
 export function RunNotebookCell(arg1:string,arg2:string,arg3:string):Promise<main.NotebookCellOutput>;
 

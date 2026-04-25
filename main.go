@@ -94,6 +94,10 @@ func buildMenu(app *App) *menu.Menu {
 	// This must come first so that macOS renders subsequent submenus correctly.
 	appMenu.Append(menu.AppMenu())
 
+	// Standard Edit menu (Cut, Copy, Paste, Select All, Undo, Redo).
+	// Required for Cmd+C/V/X/A to work inside WKWebView text inputs.
+	appMenu.Append(menu.EditMenu())
+
 	// ── File ─────────────────────────────────────────────────────────────────
 	fileMenu := appMenu.AddSubmenu("File")
 

@@ -362,6 +362,10 @@ export function GetQueryHistory(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) 
   return window['go']['main']['App']['GetQueryHistory'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
 }
 
+export function GetQueryOperatorStats(arg1) {
+  return window['go']['main']['App']['GetQueryOperatorStats'](arg1);
+}
+
 export function GetQuotedIdentifiersIgnoreCase() {
   return window['go']['main']['App']['GetQuotedIdentifiersIgnoreCase']();
 }
@@ -704,6 +708,10 @@ export function RestoreFromBackup(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
 
 export function ResumeTaskList(arg1, arg2, arg3) {
   return window['go']['main']['App']['ResumeTaskList'](arg1, arg2, arg3);
+}
+
+export function RunExplain(arg1, arg2) {
+  return window['go']['main']['App']['RunExplain'](arg1, arg2);
 }
 
 export function RunNotebookCell(arg1, arg2, arg3) {

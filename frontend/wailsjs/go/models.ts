@@ -1010,6 +1010,207 @@ export namespace main {
 
 }
 
+export namespace queryprofile {
+	
+	export class ExplainData {
+	    operation: string;
+	    objectName?: string;
+	    bytesAssigned?: number;
+	    partitionsScanned?: number;
+	    partitionsTotal?: number;
+	    joinType?: string;
+	    estimatedRows?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExplainData(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.operation = source["operation"];
+	        this.objectName = source["objectName"];
+	        this.bytesAssigned = source["bytesAssigned"];
+	        this.partitionsScanned = source["partitionsScanned"];
+	        this.partitionsTotal = source["partitionsTotal"];
+	        this.joinType = source["joinType"];
+	        this.estimatedRows = source["estimatedRows"];
+	    }
+	}
+	export class ExplainGlobalStats {
+	    partitionsTotal: number;
+	    partitionsScanned: number;
+	    bytesAssigned: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExplainGlobalStats(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.partitionsTotal = source["partitionsTotal"];
+	        this.partitionsScanned = source["partitionsScanned"];
+	        this.bytesAssigned = source["bytesAssigned"];
+	    }
+	}
+	export class ExplainMarker {
+	    startLineNumber: number;
+	    startColumn: number;
+	    endLineNumber: number;
+	    endColumn: number;
+	    message: string;
+	    severity: number;
+	    explainData?: ExplainData;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExplainMarker(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.startLineNumber = source["startLineNumber"];
+	        this.startColumn = source["startColumn"];
+	        this.endLineNumber = source["endLineNumber"];
+	        this.endColumn = source["endColumn"];
+	        this.message = source["message"];
+	        this.severity = source["severity"];
+	        this.explainData = this.convertValues(source["explainData"], ExplainData);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ExplainNode {
+	    id: number;
+	    parent?: number;
+	    operation: string;
+	    objects?: string[];
+	    partitionsScanned?: number;
+	    partitionsTotal?: number;
+	    joinType?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExplainNode(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.parent = source["parent"];
+	        this.operation = source["operation"];
+	        this.objects = source["objects"];
+	        this.partitionsScanned = source["partitionsScanned"];
+	        this.partitionsTotal = source["partitionsTotal"];
+	        this.joinType = source["joinType"];
+	    }
+	}
+	export class ExplainPlan {
+	    GlobalStats: ExplainGlobalStats;
+	    Operations: ExplainNode[][];
+	
+	    static createFrom(source: any = {}) {
+	        return new ExplainPlan(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.GlobalStats = this.convertValues(source["GlobalStats"], ExplainGlobalStats);
+	        this.Operations = this.convertValues(source["Operations"], ExplainNode);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ExplainResult {
+	    plan?: ExplainPlan;
+	    diagnostics: ExplainMarker[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ExplainResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.plan = this.convertValues(source["plan"], ExplainPlan);
+	        this.diagnostics = this.convertValues(source["diagnostics"], ExplainMarker);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class OperatorStat {
+	    queryId: string;
+	    stepId: number;
+	    operatorId: number;
+	    parentOperators: number[];
+	    operatorType: string;
+	    operatorStatistics?: any;
+	    executionTimeBreakdown?: any;
+	    operatorAttributes?: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new OperatorStat(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.queryId = source["queryId"];
+	        this.stepId = source["stepId"];
+	        this.operatorId = source["operatorId"];
+	        this.parentOperators = source["parentOperators"];
+	        this.operatorType = source["operatorType"];
+	        this.operatorStatistics = source["operatorStatistics"];
+	        this.executionTimeBreakdown = source["executionTimeBreakdown"];
+	        this.operatorAttributes = source["operatorAttributes"];
+	    }
+	}
+
+}
+
 export namespace sfconfig {
 	
 	export class Connection {
