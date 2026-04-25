@@ -708,11 +708,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           }
         }
 
-        if (resolved.length > 0) {
-          const semanticMarkers = await AnalyzeSqlSemantics(diagSql, resolved as any, colEntries as any);
-          if (model.getVersionId() !== diagVersion) return;
-          diagMarkers.push(...((semanticMarkers || []) as DiagMarker[]));
-        }
+        const semanticMarkers = await AnalyzeSqlSemantics(diagSql, resolved as any, colEntries as any);
+        if (model.getVersionId() !== diagVersion) return;
+        diagMarkers.push(...((semanticMarkers || []) as DiagMarker[]));
 
         const bareColMarkers = await ValidateBareColumnRefs({
           sql: diagSql,

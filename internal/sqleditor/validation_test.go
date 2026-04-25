@@ -1094,6 +1094,117 @@ JOIN TEST_ORDERS o ON u.user_id = o.user_id`
 	}
 }
 
+// TestValidateSemantics_UserEditorSQL tests the exact multi-statement script the
+// user pasted from their editor, which begins with USE and includes INSERT INTO
+// statements using TABLE(GENERATOR(...)).
+func TestValidateSemantics_UserEditorSQL(t *testing.T) {
+	sql := `USE LINEAGE_SOURCE_DB.RAW_DATA;
+
+CREATE OR REPLACE TABLE BIG_SALES_DATA (
+    sale_id NUMBER,
+    customer_id NUMBER,
+    sale_date DATE,
+    amount NUMBER(10,2),
+    notes VARCHAR
+) CLUSTER BY (sale_date);
+
+
+INSERT INTO BIG_SALES_DATA
+SELECT
+    SEQ4(),
+    UNIFORM(1, 100000, RANDOM()),
+    DATEADD(day, UNIFORM(1, 3650, RANDOM()), '2015-01-01'),
+    UNIFORM(100, 100000, RANDOM()) / 100.0,
+    RANDSTR(500, RANDOM())
+FROM TABLE(GENERATOR(ROWCOUNT => 5000000));
+
+CREATE OR REPLACE TABLE CUSTOMERS (
+    customer_id NUMBER,
+    customer_name VARCHAR,
+    region VARCHAR
+);
+
+INSERT INTO CUSTOMERS
+SELECT
+    SEQ4(),
+    'Customer ' || TO_VARCHAR(SEQ4()),
+    DECODE(MOD(SEQ4(), 4), 0, 'NORTH', 1, 'SOUTH', 2, 'EAST', 3, 'WEST')
+FROM TABLE(GENERATOR(ROWCOUNT => 100000));
+
+SELECT
+    sale_id,
+    amount,
+    notes
+FROM BIG_SALES_DATA;
+
+SELECT
+    sale_id,
+    amount
+FROM BIG_SALES_DATA
+WHERE sale_date = '2024-01-01';
+
+SELECT
+    s.sale_id,
+    c.customer_name
+FROM BIG_SALES_DATA s
+JOIN CUSTOMERS c;
+
+
+WITH Monthly_Sales_Summary AS (
+    SELECT
+        DATE_TRUNC('month', sale_date) AS sales_month,
+        SUM(amount) AS total_revenue,
+        COUNT(sale_id) AS total_transactions
+    FROM BIG_SALES_DATA
+    GROUP BY DATE_TRUNC('month', sale_date)
+),
+VIP_Customers AS (
+    SELECT
+        customer_id,
+        customer_name,
+        region
+    FROM CUSTOMERS
+    WHERE region = 'NORTH'
+)
+SELECT
+-- The next row should complain about incorrect column name
+    vc.incorrect_column_name,
+    vc.region,
+    mss.sales_month,
+    mss.total_revenue
+FROM VIP_Customers vc
+CROSS JOIN Monthly_Sales_Summary mss
+ORDER BY mss.total_revenue DESC
+LIMIT 100;`
+
+	markers := ValidateSemantics(sql, nil, nil)
+	warns := getWarnings(markers)
+
+	t.Logf("All warnings (%d):", len(warns))
+	for _, w := range warns {
+		t.Logf("  Line %d col %d-%d: %q", w.StartLineNumber, w.StartColumn, w.EndColumn, w.Message)
+	}
+
+	found := false
+	for _, w := range warns {
+		if strings.Contains(strings.ToLower(w.Message), "incorrect_column_name") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("Expected warning for 'incorrect_column_name' but got none")
+	}
+
+	for _, col := range []string{"sale_id", "amount", "notes", "customer_name", "region",
+		"sales_month", "total_revenue"} {
+		for _, w := range warns {
+			if strings.Contains(strings.ToLower(w.Message), col) {
+				t.Errorf("Got unexpected warning mentioning %q: %q", col, w.Message)
+			}
+		}
+	}
+}
+
 // ── Helpers for tests ─────────────────────────────────────────────────────────
 
 func min(a, b int) int {
