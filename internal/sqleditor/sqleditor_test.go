@@ -728,7 +728,7 @@ func TestParseJoinTables(t *testing.T) {
 			name: "Two-part name with alias",
 			sql:  "SELECT * FROM schema1.table1 AS t1",
 			want: []JoinTableRef{
-				{Schema: "SCHEMA1", Name: "TABLE1", Alias: "t1"},
+				{Schema: "SCHEMA1", Name: "TABLE1", Alias: "T1"},
 			},
 		},
 		{
@@ -736,35 +736,34 @@ func TestParseJoinTables(t *testing.T) {
 			sql:  "SELECT * FROM db1.schema1.table1 JOIN table2 t2",
 			want: []JoinTableRef{
 				{DB: "DB1", Schema: "SCHEMA1", Name: "TABLE1", Alias: "TABLE1"},
-				{Name: "TABLE2", Alias: "t2"},
+				{Name: "TABLE2", Alias: "T2"},
 			},
 		},
 		{
 			name: "Multi-JOIN mix",
 			sql: `SELECT *
-                  FROM db1.s1.t1
-                  JOIN s1.t2 AS alias2 ON t1.id = alias2.t1_id
-                  LEFT JOIN t3 alias3 ON alias2.id = alias3.t2_id
-                  FULL OUTER JOIN db2.s2.t4 ON t4.id = alias3.t4_id`,
+		  FROM db1.s1.t1
+		  JOIN s1.t2 AS alias2 ON t1.id = alias2.t1_id
+		  LEFT JOIN t3 alias3 ON alias2.id = alias3.t2_id
+		  FULL OUTER JOIN db2.s2.t4 ON t4.id = alias3.t4_id`,
 			want: []JoinTableRef{
 				{DB: "DB1", Schema: "S1", Name: "T1", Alias: "T1"},
-				{Schema: "S1", Name: "T2", Alias: "alias2"},
-				{Name: "T3", Alias: "alias3"},
+				{Schema: "S1", Name: "T2", Alias: "ALIAS2"},
+				{Name: "T3", Alias: "ALIAS3"},
 				{DB: "DB2", Schema: "S2", Name: "T4", Alias: "T4"},
 			},
 		},
 		{
 			name: "Subquery and CTE",
 			sql: `WITH cte AS (SELECT * FROM t1)
-                  SELECT * FROM cte c1
-                  JOIN (SELECT * FROM t2) sub ON c1.id = sub.id`,
+		  SELECT * FROM cte c1
+		  JOIN (SELECT * FROM t2) sub ON c1.id = sub.id`,
 			want: []JoinTableRef{
 				{Name: "T1", Alias: "T1"},
-				{Name: "CTE", Alias: "c1"},
+				{Name: "CTE", Alias: "C1"},
 				{Name: "T2", Alias: "T2"},
 			},
-		},
-		{
+		},		{
 			name: "Three-part quoted names with spaces and dollar",
 			sql:  `SELECT * FROM "DB-1"."SCHEMA$1"."TABLE 1" AS "T 1"`,
 			want: []JoinTableRef{
