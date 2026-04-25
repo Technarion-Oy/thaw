@@ -37,14 +37,14 @@ var (
 	reAsAliasSel = regexp.MustCompile(`(?i)\bAS\s+([a-zA-Z0-9_$]+|"[^"]+")`)
 	// FROM/JOIN without trailing \b – handles quoted identifiers like "DB"."SCH"."TABLE"
 	// (reFromJoinFallback in tableexist.go has \b which fails after closing '"')
-	reFromJoinSel = regexp.MustCompile(`(?i)(?:FROM|JOIN)\s+(` + _identPath + `)`)
+	reFromJoinSel = regexp.MustCompile(`(?i)(?:FROM|JOIN|CROSS\s+JOIN)\s+(` + _ident + `(?:\.` + _ident + `){0,2})`)
 
 	// reFromJoinWithAlias captures (tablePath, optional_alias) from FROM/JOIN.
 	// The optional alias may be preceded by AS or appear bare (e.g. FROM t AS a
 	// or FROM t a).  SQL stop-words that look like aliases (ON, WHERE, …) are
 	// filtered out in Go code using joinStopKW.
 	reFromJoinWithAlias = regexp.MustCompile(
-		`(?i)(?:FROM|JOIN)\s+(` + _identPath + `)` +
+		`(?i)(?:FROM|JOIN|CROSS\s+JOIN)\s+(` + _ident + `(?:\.` + _ident + `){0,2})` +
 			`(?:\s+(?:AS\s+)?(` + _ident + `))?`)
 
 	// CREATE TABLE (for pre-scan): capture name + column block.
@@ -280,6 +280,7 @@ func parseFirstIdentAsCol(def string, ic bool) (ColInfo, bool) {
 	}
 	return ColInfo{Name: normIdent(m, ic), DataType: "UNKNOWN"}, true
 }
+
 
 // lookupColsForRef finds the ColInfo slice for a table identified by
 // (name, db, schema).  It checks the caller-supplied colInfoCache first

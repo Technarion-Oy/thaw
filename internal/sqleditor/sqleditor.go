@@ -2167,7 +2167,7 @@ func TypeCategory(dt string) string {
 
 // reCTEDef matches a CTE definition of the form:  <name> AS (
 // Used to locate CTE names and their opening parenthesis.
-var reCTEDef = regexp.MustCompile(`(?i)\b(` + _ident + `)\s+AS\s*\(`)
+var reCTEDef = regexp.MustCompile(`(?i)(?:^|[^a-zA-Z0-9_$])(` + _ident + `)\s+AS\s*\(`)
 
 // reAsAliasExpr matches a trailing "AS <alias>" at the end of a SELECT-list
 // expression (anchored with $).
@@ -2237,26 +2237,50 @@ func extractProjectedColName(expr string) string {
 }
 
 // extractSelectProjections returns the projected column names from a SELECT
-// statement by parsing its SELECT-list.  Only items that can be named without
-// a full AST are returned: AS-aliased expressions, bare identifiers, and
-// qualified identifiers (last component is used).  Complex expressions without
-// an alias (e.g. COUNT(*)) are silently skipped.
-func extractSelectProjections(sql string) []ColInfo {
+// statement by parsing its SELECT-list.
+//
+// If the statement is SELECT *, it attempts to expand columns based on the
+// table(s) found in the immediate FROM/JOIN of this SELECT block.
+func extractSelectProjections(sql string, localScope map[string][]ColInfo) []ColInfo {
 	stripped := stripCommentsSQL(sql)
 	selLoc := reSelectKW.FindStringIndex(stripped)
 	if selLoc == nil {
 		return nil
 	}
+
+	// 1. Determine the context for this SELECT (Step A: Source Resolution)
+	// We extract table references only from THIS select block.
+	activeContext := make(map[string][]ColInfo)
+	for _, fm := range reFromJoinSel.FindAllStringSubmatch(stripped, -1) {
+		tablePath := fm[1]
+		parts := extractIdentParts(tablePath, true)
+		if len(parts) > 0 {
+			tableNameU := parts[len(parts)-1]
+			if cols, ok := localScope[tableNameU]; ok {
+				activeContext[tableNameU] = cols
+			}
+		}
+	}
+
+	// 2. Evaluate the SELECT clause (Step C: Output Registration)
 	afterSelect := strings.TrimSpace(stripped[selLoc[1]:])
-	// Skip optional DISTINCT keyword.
 	upAfter := strings.ToUpper(afterSelect)
 	if strings.HasPrefix(upAfter, "DISTINCT ") || strings.HasPrefix(upAfter, "DISTINCT\t") || strings.HasPrefix(upAfter, "DISTINCT\n") {
 		afterSelect = strings.TrimSpace(afterSelect[8:])
 	}
 	selectClause := extractSelectClause(afterSelect)
+
 	var cols []ColInfo
 	for _, expr := range splitTopLevelCommas(selectClause) {
-		if name := extractProjectedColName(strings.TrimSpace(expr)); name != "" && name != "*" {
+		trimmed := strings.TrimSpace(expr)
+		if trimmed == "*" {
+			// Resolve wildcard expansions
+			for _, tableCols := range activeContext {
+				cols = append(cols, tableCols...)
+			}
+			continue
+		}
+		if name := extractProjectedColName(trimmed); name != "" {
 			cols = append(cols, ColInfo{Name: name, DataType: "UNKNOWN"})
 		}
 	}
@@ -2297,30 +2321,57 @@ func extractNextAlias(s string, afterIdx int) string {
 	return rest[i:j]
 }
 
-// extractCTEProjections pre-scans comment-stripped SQL for CTE definitions
-// (patterns of the form  name AS ( ... )  where the body begins with SELECT)
-// and returns a map from UPPERCASE CTE name → []ColInfo (the projected columns).
-func extractCTEProjections(stripped string) map[string][]ColInfo {
+// extractCTEProjections processes a WITH clause sequentially (Step 3).
+func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo) map[string][]ColInfo {
+	localScope := make(map[string][]ColInfo)
+	for k, v := range globalRegistry {
+		localScope[k] = v
+	}
+
 	result := make(map[string][]ColInfo)
-	for _, m := range reCTEDef.FindAllStringSubmatchIndex(stripped, -1) {
-		cteName := stripped[m[2]:m[3]]
-		// The opening paren is the last byte of the match (m[1]-1).
-		parenStart := m[1] - 1
-		body := extractBalancedBlock(stripped, parenStart)
-		if len(body) < 2 {
+	
+	// We want to process CTEs in order so that later CTEs can reference earlier ones.
+	// We iterate through the whole string finding ALL CTE definitions.
+	remaining := stripped
+	for {
+		m := reCTEDef.FindStringSubmatchIndex(remaining)
+		if m == nil {
+			break
+		}
+		
+		cteName := remaining[m[2]:m[3]]
+		
+		// Find opening paren after the name match.
+		// We know it must exist because reCTEDef matched.
+		relParenStart := strings.Index(remaining[m[3]:], "(")
+		if relParenStart == -1 {
+			remaining = remaining[m[3]:]
 			continue
 		}
-		inner := strings.TrimSpace(body[1 : len(body)-1])
-		// Only treat this as a CTE if the body starts with SELECT (not a
-		// window/CASE/type-cast or similar construct).
-		firstTok := getFirstSQLToken(inner)
-		if firstTok != "SELECT" {
+		parenStart := m[3] + relParenStart
+		
+		bodyBlock := extractBalancedBlock(remaining, parenStart)
+		if len(bodyBlock) < 2 {
+			remaining = remaining[parenStart+1:]
 			continue
 		}
-		cols := extractSelectProjections(inner)
-		if len(cols) > 0 {
-			result[strings.ToUpper(normIdent(cteName, true))] = cols
+		innerSQL := strings.TrimSpace(bodyBlock[1 : len(bodyBlock)-1])
+
+		// Process this CTE using current localScope
+		firstTok := getFirstSQLToken(innerSQL)
+		var cteCols []ColInfo
+		if firstTok == "SELECT" || firstTok == "WITH" || firstTok == "VALUES" {
+			cteCols = extractSelectProjections(innerSQL, localScope)
 		}
+
+		if len(cteCols) > 0 {
+			nameU := strings.ToUpper(normIdent(cteName, true))
+			result[nameU] = cteCols
+			localScope[nameU] = cteCols // Update local scope for next CTE in sequence
+		}
+
+		// Advance past this CTE definition
+		remaining = remaining[parenStart+len(bodyBlock):]
 	}
 	return result
 }
@@ -2332,77 +2383,131 @@ func extractCTEProjections(stripped string) map[string][]ColInfo {
 // in the cached column list.  Unknown columns emit Warning markers.
 func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColEntry) []DiagMarker {
 	var markers []DiagMarker
+	stmtRanges := GetStatementRanges(sql)
 
-	// Build colInfoCache: "UC(DB)\x00UC(SCHEMA)\x00UC(NAME)" → []ColInfo
-	colInfoCache := map[string][]ColInfo{}
+	// colInfoCacheGlobal: "DB\x00SCHEMA\x00NAME" -> []ColInfo
+	colInfoCacheGlobal := map[string][]ColInfo{}
 	for _, e := range colEntries {
 		key := strings.ToUpper(e.DB) + "\x00" + strings.ToUpper(e.Schema) + "\x00" + strings.ToUpper(e.Name)
-		colInfoCache[key] = e.Cols
+		colInfoCacheGlobal[key] = e.Cols
 	}
 
-	// Build aliasMap: UC(alias) → cache key
-	aliasMap := map[string]string{}
+	// globalAliasMap for objects already resolved by frontend.
+	globalAliasMap := map[string]string{}
 	for _, ref := range resolvedRefs {
 		key := strings.ToUpper(ref.DB) + "\x00" + strings.ToUpper(ref.Schema) + "\x00" + strings.ToUpper(ref.Name)
-		aliasMap[strings.ToUpper(ref.Alias)] = key
+		globalAliasMap[strings.ToUpper(ref.Alias)] = key
 	}
 
-	// ── CTE transient context ─────────────────────────────────────────────
-	// Pre-scan the SQL for CTE definitions and add transient entries so that
-	// alias.column patterns in the outer query can be validated even though
-	// CTEs are absent from resolvedRefs (the frontend drops them because they
-	// are not in the global Snowflake object store).
-	strippedForCTE := stripCommentsSQL(sql)
-	cteProjMap := extractCTEProjections(strippedForCTE)
-	// Populate colInfoCache and build a lookup from UC(CTE name) → cache key.
-	cteCacheKeys := make(map[string]string, len(cteProjMap))
-	for cteNameU, cols := range cteProjMap {
-		cacheKey := "__cte__\x00\x00" + cteNameU
-		colInfoCache[cacheKey] = cols
-		cteCacheKeys[cteNameU] = cacheKey
+	// ── Pre-calculate per-statement context ──────────────────────────────
+	type stmtContext struct {
+		aliasMap     map[string]string
+		colInfoCache map[string][]ColInfo
 	}
-	// Walk FROM/JOIN references in the stripped SQL using reFromJoinSel
-	// (captures only the table path, not the alias) to avoid the greedy-alias
-	// problem where "FROM a JOIN" consumes "JOIN" as an alias and skips the
-	// next "JOIN b" occurrence.  For each reference whose table name is a CTE,
-	// register the CTE name itself and any explicit alias in aliasMap.
-	for _, idx := range reFromJoinSel.FindAllStringSubmatchIndex(strippedForCTE, -1) {
-		tablePath := strippedForCTE[idx[2]:idx[3]]
-		parts := extractIdentParts(tablePath, true)
-		if len(parts) == 0 {
-			continue
-		}
-		tableNameU := parts[len(parts)-1]
-		cacheKey, isCTE := cteCacheKeys[tableNameU]
-		if !isCTE {
-			continue
-		}
-		// Register the bare CTE name as an alias (e.g. SELECT cte.col FROM cte).
-		if _, already := aliasMap[tableNameU]; !already {
-			aliasMap[tableNameU] = cacheKey
-		}
-		// Extract an explicit alias from the text immediately after the table path.
-		// The alias is the next bare word if it is not a SQL stop-keyword.
-		afterTableIdx := idx[3]
-		alias := extractNextAlias(strippedForCTE, afterTableIdx)
-		if alias != "" {
-			aliasU := strings.ToUpper(alias)
-			if !joinStopKW[aliasU] {
-				if _, already := aliasMap[aliasU]; !already {
-					aliasMap[aliasU] = cacheKey
+	stmtContexts := make([]stmtContext, len(stmtRanges))
+	localColCache := make(map[string][]ColInfo)
+
+	for idx, r := range stmtRanges {
+		raw := sqlStmt(sql, r)
+		stripped := stripCommentsSQL(raw)
+
+		// 1. Update localColCache if this is a CREATE TABLE
+		if m := reCreateTablePreScan.FindStringSubmatchIndex(raw); m != nil {
+			nameStr := raw[m[2]:m[3]]
+			parts := extractIdentParts(nameStr, true)
+			if len(parts) > 0 {
+				parenStart := m[1] - 1
+				colsRaw := extractBalancedBlock(raw, parenStart)
+				if len(colsRaw) >= 2 {
+					colsRaw = colsRaw[1 : len(colsRaw)-1]
+					columns := parseCreateTableColDefs(colsRaw, true)
+					tableNameU := strings.ToUpper(parts[len(parts)-1])
+					localColCache[tableNameU] = columns
 				}
 			}
 		}
+
+		// 2. CTE projections in this statement
+		var cteProjMap map[string][]ColInfo
+		if strings.Contains(strings.ToUpper(stripped), "WITH") {
+			cteProjMap = extractCTEProjections(stripped, localColCache)
+		}
+
+		// 3. Build stmtContext
+		ctx := stmtContext{
+			aliasMap:     make(map[string]string),
+			colInfoCache: make(map[string][]ColInfo),
+		}
+		// Inherit global state
+		for k, v := range globalAliasMap {
+			ctx.aliasMap[k] = v
+		}
+		for k, v := range colInfoCacheGlobal {
+			ctx.colInfoCache[k] = v
+		}
+
+		// Add CTEs
+		for cteNameU, cols := range cteProjMap {
+			cacheKey := "__cte__\x00\x00" + cteNameU
+			ctx.colInfoCache[cacheKey] = cols
+			ctx.aliasMap[cteNameU] = cacheKey
+		}
+
+		// 4. Resolve FROM/JOIN aliases against local tables and CTEs
+		for _, mIdx := range reFromJoinSel.FindAllStringSubmatchIndex(stripped, -1) {
+			tablePath := stripped[mIdx[2]:mIdx[3]]
+			parts := extractIdentParts(tablePath, true)
+			if len(parts) == 0 {
+				continue
+			}
+			tableNameU := parts[len(parts)-1]
+
+			cacheKey := ""
+			// Priority: 1. CTE, 2. Local Table, 3. Global resolvedRef (already in aliasMap)
+			if key, isCTE := ctx.aliasMap[tableNameU]; isCTE && strings.HasPrefix(key, "__cte__") {
+				cacheKey = key
+			} else if cols, isLocal := localColCache[tableNameU]; isLocal {
+				cacheKey = "__local__\x00\x00" + tableNameU
+				ctx.colInfoCache[cacheKey] = cols
+				if _, already := ctx.aliasMap[tableNameU]; !already {
+					ctx.aliasMap[tableNameU] = cacheKey
+				}
+			}
+
+			if cacheKey != "" {
+				// Extract an explicit alias from the text immediately after the table path.
+				afterTableIdx := mIdx[3]
+				alias := extractNextAlias(stripped, afterTableIdx)
+				if alias != "" {
+					aliasU := strings.ToUpper(alias)
+					if !joinStopKW[aliasU] {
+						ctx.aliasMap[aliasU] = cacheKey
+					}
+				} else {
+					// Use table name as implicit alias if not already taken
+					if _, already := ctx.aliasMap[tableNameU]; !already {
+						ctx.aliasMap[tableNameU] = cacheKey
+					}
+				}
+			}
+		}
+
+		stmtContexts[idx] = ctx
 	}
 
 	runes := []rune(sql)
 	n := len(runes)
 	line, col := 1, 1
 	i := 0
+	stmtIdx := 0
 
 	for i < n {
-		ch := runes[i]
+		// Advance to the current statement context
+		for stmtIdx < len(stmtRanges) && i >= stmtRanges[stmtIdx].EndOffset {
+			stmtIdx++
+		}
 
+		ch := runes[i]
 		if ch == '\n' {
 			line++
 			col = 1
@@ -2466,30 +2571,6 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 			continue
 		}
 
-		// Skip double-quoted identifiers (not treated as alias words)
-		if ch == '"' {
-			i++
-			col++
-			for i < n {
-				if runes[i] == '\n' {
-					line++
-					col = 1
-					i++
-				} else if runes[i] == '"' && i+1 < n && runes[i+1] == '"' {
-					i += 2
-					col += 2
-				} else if runes[i] == '"' {
-					i++
-					col++
-					break
-				} else {
-					i++
-					col++
-				}
-			}
-			continue
-		}
-
 		// Skip dollar-quoted tag delimiters
 		if ch == '$' {
 			tag := extractDollarTag(runes, i)
@@ -2500,58 +2581,125 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 			}
 		}
 
-		// Bare word — look for alias.column patterns
-		if isAlpha(ch) {
+		// Identifier (bare or quoted)
+		if ch == '"' || isAlpha(ch) {
 			word1Start := i
-			for i < n && isWordChar(runes[i]) {
+			word1Quoted := (ch == '"')
+
+			// Extract first identifier
+			if word1Quoted {
 				i++
 				col++
-			}
-			word1 := string(runes[word1Start:i])
-
-			j, jCol := i, col
-			if j < n && runes[j] == '.' {
-				afterDot := j + 1
-				afterDotCol := jCol + 1
-				if afterDot < n && isAlpha(runes[afterDot]) {
-					word2Col := afterDotCol
-					word2Line := line
-					k, kCol := afterDot, afterDotCol
-					for k < n && isWordChar(runes[k]) {
-						k++
-						kCol++
+				for i < n {
+					if runes[i] == '"' && i+1 < n && runes[i+1] == '"' {
+						i += 2
+						col += 2
+					} else if runes[i] == '"' {
+						i++
+						col++
+						break
+					} else if runes[i] == '\n' {
+						line++
+						col = 1
+						i++
+					} else {
+						i++
+						col++
 					}
-					word2 := string(runes[afterDot:k])
+				}
+			} else {
+				for i < n && isWordChar(runes[i]) {
+					i++
+					col++
+				}
+			}
+			word1Raw := string(runes[word1Start:i])
+			word1Norm := normIdent(word1Raw, true)
 
-					// Only validate two-part references (skip three-part db.schema.col)
-					if !(k < n && runes[k] == '.') {
-						if cacheKey, ok := aliasMap[strings.ToUpper(word1)]; ok {
-							if cols, ok := colInfoCache[cacheKey]; ok {
-								found := false
-								for _, c := range cols {
-									if strings.EqualFold(c.Name, word2) {
-										found = true
-										break
+			// Look for dot
+			if i < n && runes[i] == '.' {
+				i++
+				col++
+
+				// Look for second identifier
+				if i < n && (runes[i] == '"' || isAlpha(runes[i])) {
+					word2Start := i
+					word2Line := line
+					word2Col := col
+					word2Quoted := (runes[i] == '"')
+
+					if word2Quoted {
+						i++
+						col++
+						for i < n {
+							if runes[i] == '"' && i+1 < n && runes[i+1] == '"' {
+								i += 2
+								col += 2
+							} else if runes[i] == '"' {
+								i++
+								col++
+								break
+							} else if runes[i] == '\n' {
+								line++
+								col = 1
+								i++
+							} else {
+								i++
+								col++
+							}
+						}
+					} else {
+						for i < n && isWordChar(runes[i]) {
+							i++
+							col++
+						}
+					}
+					word2Raw := string(runes[word2Start:i])
+					word2Norm := normIdent(word2Raw, true)
+
+					// Only validate two-part references (skip db.schema.col)
+					if !(i < n && runes[i] == '.') {
+						if stmtIdx < len(stmtContexts) {
+							ctx := stmtContexts[stmtIdx]
+							if cacheKey, ok := ctx.aliasMap[word1Norm]; ok {
+								if cols, ok := ctx.colInfoCache[cacheKey]; ok {
+									found := false
+									for _, c := range cols {
+										if strings.EqualFold(c.Name, word2Norm) {
+											found = true
+											break
+										}
 									}
-								}
-								if !found {
-									tableName := cacheKey
-									if parts := strings.Split(cacheKey, "\x00"); len(parts) == 3 {
-										tableName = parts[2]
+									if !found {
+										tableName := cacheKey
+										if parts := strings.Split(cacheKey, "\x00"); len(parts) == 3 {
+											tableName = parts[2]
+										} else if strings.HasPrefix(cacheKey, "__cte__") || strings.HasPrefix(cacheKey, "__local__") {
+											parts := strings.Split(cacheKey, "\x00")
+											tableName = parts[len(parts)-1]
+										}
+										markers = append(markers, DiagMarker{
+											StartLineNumber: word2Line,
+											StartColumn:     word2Col,
+											EndLineNumber:   word2Line,
+											EndColumn:       word2Col + len(word2Raw),
+											Message:         "Column '" + word2Raw + "' does not exist in " + tableName,
+											Severity:        4,
+										})
 									}
-									markers = append(markers, DiagMarker{
-										StartLineNumber: word2Line,
-										StartColumn:     word2Col,
-										EndLineNumber:   word2Line,
-										EndColumn:       word2Col + len(word2),
-										Message:         "Column '" + word2 + "' does not exist in " + tableName,
-										Severity:        4,
-									})
 								}
 							}
 						}
+					} else {
+						// It's a three-part name; we don't handle those yet in this simplified walker.
+						// But we must NOT 'continue' here, let the main loop progress.
 					}
+				} else {
+					// Word followed by dot but no second word (e.g. "alias.")
+					// Nothing to validate here.
 				}
+			} else {
+				// Bare identifier without dot. Not a two-part reference.
 			}
 			continue
 		}

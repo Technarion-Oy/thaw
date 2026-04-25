@@ -805,14 +805,111 @@ func TestValidateSemantics_CTEAliasColumns(t *testing.T) {
 			wantCol: "wrong",
 		},
 		{
-			name: "Issue-72 example query",
-			sql: `WITH VIP_Customers AS (
-				SELECT customer_id, customer_name, region
-				FROM CUSTOMERS
-				WHERE total_purchases > 500
+			name: "Complex CTE projections",
+			sql: `WITH Monthly_Sales_Summary AS (
+				SELECT
+					DATE_TRUNC('month', sale_date) AS sales_month,
+					SUM(amount) AS total_revenue,
+					COUNT(sale_id) AS total_transactions
+				FROM BIG_SALES_DATA
+				GROUP BY 1
 			)
-			SELECT vc.customer_id, vc.customer_name, vc.incorrect_column_name
-			FROM VIP_Customers vc`,
+			SELECT mss.sales_month, mss.missing_col
+			FROM Monthly_Sales_Summary mss`,
+			wantCol: "missing_col",
+		},
+		{
+			name: "Local table created in script",
+			sql: `CREATE TABLE local_tab (col1 INT);
+			SELECT t.col1, t.col2 FROM local_tab t;`,
+			wantCol: "col2",
+		},
+		{
+			name: "Quoted CTE alias",
+			sql: `WITH "my_cte" AS (SELECT 1 AS x) SELECT "my_cte".y FROM "my_cte"`,
+			wantCol: "y",
+		},
+		{
+			name: "User reported failing query (Issue #73)",
+			sql: `
+use LINEAGE_SOURCE_DB.RAW_DATA;
+
+CREATE OR REPLACE TABLE BIG_SALES_DATA (
+    sale_id NUMBER,
+    customer_id NUMBER,
+    sale_date DATE,
+    amount NUMBER(10,2),
+    notes VARCHAR
+) CLUSTER BY (sale_date);
+
+
+INSERT INTO BIG_SALES_DATA
+SELECT
+    SEQ4(),
+    UNIFORM(1, 100000, RANDOM()),
+    DATEADD(day, UNIFORM(1, 3650, RANDOM()), '2015-01-01'),
+    UNIFORM(100, 100000, RANDOM()) / 100.0, 
+    RANDSTR(500, RANDOM()) 
+FROM TABLE(GENERATOR(ROWCOUNT => 5000000));
+
+CREATE OR REPLACE TABLE CUSTOMERS (
+    customer_id NUMBER,
+    customer_name VARCHAR,
+    region VARCHAR
+);
+
+INSERT INTO CUSTOMERS
+SELECT
+    SEQ4(),
+    'Customer ' || TO_VARCHAR(SEQ4()),
+    DECODE(MOD(SEQ4(), 4), 0, 'NORTH', 1, 'SOUTH', 2, 'EAST', 3, 'WEST')
+FROM TABLE(GENERATOR(ROWCOUNT => 100000));
+
+SELECT 
+    sale_id,
+    amount,
+    notes
+FROM BIG_SALES_DATA;
+
+SELECT 
+    sale_id,
+    amount
+FROM BIG_SALES_DATA
+WHERE sale_date = '2024-01-01';
+
+SELECT 
+    s.sale_id,
+    c.customer_name
+FROM BIG_SALES_DATA s
+JOIN CUSTOMERS c;
+
+
+WITH Monthly_Sales_Summary AS (
+    SELECT 
+        DATE_TRUNC('month', sale_date) AS sales_month,
+        SUM(amount) AS total_revenue,
+        COUNT(sale_id) AS total_transactions
+    FROM BIG_SALES_DATA
+    GROUP BY DATE_TRUNC('month', sale_date)
+),
+VIP_Customers AS (
+    SELECT 
+        customer_id,
+        customer_name,
+        region
+    FROM CUSTOMERS
+    WHERE region = 'NORTH'
+)
+SELECT 
+-- The next row should complain about incorrect column name
+    vc.incorrect_column_name,
+    vc.region,
+    mss.sales_month,
+    mss.total_revenue
+FROM VIP_Customers vc
+CROSS JOIN Monthly_Sales_Summary mss
+ORDER BY mss.total_revenue DESC
+LIMIT 100;`,
 			wantCol: "incorrect_column_name",
 		},
 	}
@@ -831,6 +928,169 @@ func TestValidateSemantics_CTEAliasColumns(t *testing.T) {
 				t.Errorf("Expected warning for column %q but got markers: %v", tt.wantCol, warns)
 			}
 		})
+	}
+}
+
+// TestValidateSemantics_LocalTableAliasColumns verifies that alias.column
+// references against script-local CREATE TABLE tables are validated.
+func TestValidateSemantics_LocalTableAliasColumns(t *testing.T) {
+	validCases := []struct {
+		name string
+		sql  string
+	}{
+		{
+			name: "local table alias valid columns",
+			sql: "CREATE OR REPLACE TABLE TEST_USERS (user_id NUMBER, user_name VARCHAR, country VARCHAR);\n" +
+				"CREATE OR REPLACE TABLE TEST_ORDERS (order_id NUMBER, product_name VARCHAR, user_id NUMBER, country VARCHAR);\n" +
+				"SELECT u.user_id, o.product_name, u.country FROM TEST_USERS u JOIN TEST_ORDERS o ON u.user_id = o.user_id",
+		},
+		{
+			name: "local table alias from a single-table query",
+			sql:  "CREATE TABLE foo (a NUMBER, b VARCHAR);\nSELECT f.a, f.b FROM foo f",
+		},
+	}
+	for _, tt := range validCases {
+		t.Run(tt.name, func(t *testing.T) {
+			if warns := getWarnings(ValidateSemantics(tt.sql, nil, nil)); len(warns) > 0 {
+				t.Errorf("Expected no warnings, got %d: %v", len(warns), warns)
+			}
+		})
+	}
+
+	invalidCases := []struct {
+		name    string
+		sql     string
+		wantCol string
+	}{
+		{
+			name: "local table alias unknown column",
+			sql: "CREATE OR REPLACE TABLE TEST_USERS (user_id NUMBER, user_name VARCHAR, country VARCHAR);\n" +
+				"CREATE OR REPLACE TABLE TEST_ORDERS (order_id NUMBER, product_name VARCHAR, user_id NUMBER, country VARCHAR);\n" +
+				"SELECT u.this_should_complain, o.product_name, u.country FROM TEST_USERS u JOIN TEST_ORDERS o ON u.user_id = o.user_id",
+			wantCol: "this_should_complain",
+		},
+		{
+			name:    "single-table alias unknown column",
+			sql:     "CREATE TABLE foo (a NUMBER, b VARCHAR);\nSELECT f.bad_col FROM foo f",
+			wantCol: "bad_col",
+		},
+	}
+	for _, tt := range invalidCases {
+		t.Run(tt.name, func(t *testing.T) {
+			warns := getWarnings(ValidateSemantics(tt.sql, nil, nil))
+			found := false
+			for _, w := range warns {
+				if strings.Contains(strings.ToLower(w.Message), strings.ToLower(tt.wantCol)) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Expected warning for column %q but got: %v", tt.wantCol, warns)
+			}
+		})
+	}
+}
+
+// TestValidateSemantics_FullCommentScript tests the exact SQL patterns from
+// PR #73 comment 4318612732, which reported two false-negative cases:
+//   - vc.incorrect_column_name (CTE alias with unknown column)
+//   - u.this_should_complain   (local table alias with unknown column)
+func TestValidateSemantics_FullCommentScript(t *testing.T) {
+	// SQL approximating the full script from the PR comment.
+	fullSQL := `
+CREATE OR REPLACE TABLE BIG_SALES_DATA (
+    sale_id NUMBER,
+    customer_id NUMBER,
+    sale_date DATE,
+    amount NUMBER(10,2),
+    notes VARCHAR
+) CLUSTER BY (sale_date);
+
+CREATE OR REPLACE TABLE CUSTOMERS (
+    customer_id NUMBER,
+    customer_name VARCHAR,
+    region VARCHAR
+);
+
+SELECT sale_id, amount, notes FROM BIG_SALES_DATA;
+
+SELECT sale_id, amount FROM BIG_SALES_DATA WHERE sale_date = '2024-01-01';
+
+SELECT s.sale_id, c.customer_name FROM BIG_SALES_DATA s JOIN CUSTOMERS c ON s.customer_id = c.customer_id;
+
+WITH Monthly_Sales_Summary AS (
+    SELECT
+        DATE_TRUNC('month', sale_date) AS sales_month,
+        SUM(amount) AS total_revenue,
+        COUNT(sale_id) AS total_transactions
+    FROM BIG_SALES_DATA
+    GROUP BY DATE_TRUNC('month', sale_date)
+),
+VIP_Customers AS (
+    SELECT
+        customer_id,
+        customer_name,
+        region
+    FROM CUSTOMERS
+    WHERE region = 'NORTH'
+)
+SELECT
+    vc.incorrect_column_name,
+    vc.region,
+    mss.sales_month,
+    mss.total_revenue
+FROM VIP_Customers vc
+CROSS JOIN Monthly_Sales_Summary mss
+ORDER BY mss.total_revenue DESC
+LIMIT 100;
+
+CREATE OR REPLACE TABLE TEST_USERS (
+    user_id NUMBER,
+    user_name VARCHAR,
+    country VARCHAR
+);
+
+CREATE OR REPLACE TABLE TEST_ORDERS (
+    order_id NUMBER,
+    product_name VARCHAR,
+    user_id NUMBER,
+    country VARCHAR
+);
+
+SELECT
+    u.this_should_complain,
+    o.product_name,
+    u.country
+FROM TEST_USERS u
+JOIN TEST_ORDERS o ON u.user_id = o.user_id`
+
+	markers := ValidateSemantics(fullSQL, nil, nil)
+	warns := getWarnings(markers)
+
+	mustWarn := []string{"incorrect_column_name", "this_should_complain"}
+	mustNotWarn := []string{"sale_id", "amount", "notes", "customer_name", "region",
+		"sales_month", "total_revenue", "product_name", "country"}
+
+	for _, col := range mustWarn {
+		found := false
+		for _, w := range warns {
+			if strings.Contains(strings.ToLower(w.Message), col) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected warning for %q but did not get it. Warnings: %v", col, warns)
+		}
+	}
+
+	for _, col := range mustNotWarn {
+		for _, w := range warns {
+			if strings.Contains(strings.ToLower(w.Message), col) {
+				t.Errorf("Got unexpected warning mentioning %q: %v", col, w)
+			}
+		}
 	}
 }
 
