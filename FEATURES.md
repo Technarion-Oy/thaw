@@ -29,6 +29,11 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Grammar warnings** (yellow squiggly) — Snowflake-dialect PEG parser checks full grammatical structure of SELECT, INSERT, UPDATE, CREATE, DROP, ALTER, and related statements; Snowflake-specific constructs unsupported by the parser are skipped to avoid false positives
   - **Column existence warnings** (yellow squiggly) — bare unquoted and double-quoted column names in SELECT lists are validated against the table's column list; `alias.column` two-part references are also checked; column metadata is fetched automatically on first use and cached; silent while cache is cold
   - **Hover tooltip** — hovering any marker shows a compact `ERROR — …` or `WARNING — …` tooltip with the problem description; works on both identifier tokens and non-identifier characters (e.g. an unmatched parenthesis or an opening quote)
+- **Explain SQL** — right-click any query and choose **Explain SQL** to see the Snowflake execution plan before running it; detects and highlights performance anti-patterns directly in the editor:
+  - **Full Table Scans** (Yellow/Red) — warns when a large table is scanned without selective filters; the tooltip shows exactly how many partitions are being scanned
+  - **Cartesian Joins** (Red) — flags joins that produce a cross-product of rows, preventing catastrophic query runs
+  - **Row Explosion** (Yellow/Red) — warns when an equi-join is estimated to produce more than 10M rows (Warning) or 1B rows (Error)
+  - Hovering over a performance marker shows a detailed tooltip with the specific operation (e.g. `TableScan`, `Join`), object name, and estimated row/partition counts
 - **SQL autocomplete** — context-aware completions:
   - `db.` → schemas in that database
   - `db.schema.` → tables, views, functions, and other objects in that schema
@@ -278,7 +283,8 @@ Open **Help → Function Catalog…** and select any function to get:
 
 ### Model Validation
 
-When configuring AI, a live **model status indicator** appears next to the model selector: a green `● Model OK` confirms the model is reachable, while a red indicator shows the exact API error — so misconfigured model names are caught immediately rather than at runtime.
+- **Model Validation** — when configuring AI, a live **model status indicator** appears next to the model selector: a green `● Model OK` confirms the model is reachable, while a red indicator shows the exact API error — so misconfigured model names are caught immediately rather than at runtime.
+- **Query Profile** — click the graph icon in the results status bar (visible for successful runs) to see the execution profile for the query; shows Operator Statistics, Execution Time Breakdown, and Operator Attributes sourced from `GET_QUERY_OPERATOR_STATS`.
 
 ### Configuration
 
@@ -549,12 +555,11 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
 - **Export results** — CSV (RFC 4180) and Excel (`.xlsx`) export with a native save dialog; exports always reflect whichever result is currently selected in the history dropdown
 - Column sorting and horizontal scrolling
 
----
-
-## Snowflake Connectivity
+### Snowflake Connectivity
 
 - Connect with account / user / password / warehouse / role
 - **Auto-fill from Snowflake CLI** — reads Snowflake CLI profiles from `~/.snowflake/config.toml` (or a custom location) and populates the connection form; includes support for key-pair (`SNOWFLAKE_JWT`) profiles; the config file path can be changed during sign-in and is persisted as the new default location for the machine
+- **Offline-first startup** — the app launches instantly without waiting for a Snowflake connection; connection parameters are validated and the session is established on demand when you first run a query or browse objects, rather than blocking the UI at launch.
 - **Cancel connection** — abort an in-progress connection attempt
 - **User Agreement** — a **User Agreement** link at the bottom of the connect screen opens the End User License Agreement in a scrollable modal
 - **Switch role, warehouse, database, or schema** from the toolbar without disconnecting — all subsequent queries, privilege checks, and object browsing immediately reflect the new session state
@@ -605,6 +610,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
   - **Install** — enter any package name and press Install or hit Enter; output streams line-by-line into a log panel; the package list refreshes automatically on success
   - **Uninstall** — all installed packages are listed with their versions; click Uninstall on any row (with confirmation) to remove it; the list refreshes after removal
   - Backed by `pip list --format=json` and `pip install` / `pip uninstall -y` inside the active conda or venv environment
+- **Private Pip Registries** — configure corporate or private pip repositories (including credentials) in the Snowpark setup wizard; Thaw automatically injects them into all `pip install` commands.
 
 ### Notebook tabs
 
@@ -622,6 +628,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - Editor auto-sizes vertically to its content
 - Native undo/redo (`⌘Z` / `⌘⇧Z`) and clipboard (`⌘C` / `⌘V` / `⌘X`) via Monaco and Wails native APIs
 - `Shift+Enter` runs the current cell; cell kind (Code / SQL / Markdown) can be changed at any time
+- **Multi-cell Debugger** — set breakpoints in Python cells and debug your Snowpark logic with a live variable explorer and call stack.
 
 ### Python code cells
 
@@ -656,6 +663,54 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
   - `D D` — delete the selected cell (a confirmation dialog is always shown)
   - `Y` / `M` / `S` — change the selected cell's type to Code / Markdown / SQL
 - Kernel status indicator: starting spinner → "Kernel ready" → "Kernel error"
+
+---
+
+## Optional Features (Feature Flags)
+
+Thaw allows toggling specific features to optimize performance or simplify the UI. These can be configured in **View → Enabled Features…**:
+
+- **Export Table Data** — allow exporting table data to local files (CSV, JSON, Parquet).
+
+### Feasible Optional Features
+
+The following features are identified as feasible to be turned off via feature flags if needed, offering fine-grained control over the application's capabilities:
+
+**Data Export & Import**
+- **Resultset Export** (CSV and Excel downloads from query results)
+- **Table Data Export** (Bulk data export to local files via Snowflake stages)
+- **Table Data Import** (Bulk data ingestion from local CSV/JSON/Parquet files)
+- **DDL Export** (Parallel database schema export to local disk)
+
+**Governance & Administration**
+- **User & Role Management** (Create, edit, and drop users; manage key-pair authentication)
+- **Warehouse Management** (Edit properties, suspend/resume, abort queries)
+- **Warehouse Credit Usage** (Visual charts for `ACCOUNT_USAGE` metering)
+- **Query Activity History** (Searchable logs for session, user, or warehouse queries)
+- **Integrations Management** (Manage Storage, API, Security, and other integrations)
+- **Backup Policies & Sets** (Manage account-level backup policies and object-scoped backup sets)
+
+**AI & Assistance**
+- **AI Chat & Assistant** (Agentic SQL helper in the results pane and function catalog)
+- **AI Inline Completions** (Ghost-text suggestions in the editor)
+- **AI Import Suggest** (Automatic inference of file formats during data import)
+
+**Advanced Tools & Data Engineering**
+- **Schema Migration** (DDL diffing and deployment wizard)
+- **dbt Project Scaffolding** (Automated dbt project generation)
+- **ER Diagram & Designer** (Visual database modeling and `ALTER TABLE` generation)
+- **Task Graph Visualizer** (Interactive DAG viewer and manager for Snowflake tasks)
+- **Insert Mapping** (Visual side-by-side mapping for `INSERT INTO ... SELECT` with UNIONs)
+- **Code Snippets** (Library of curated `CREATE OR REPLACE` templates)
+
+**Developer Environments**
+- **Snowpark & Notebooks** (Embedded Python kernel and environment manager)
+- **Embedded Terminal** (xterm.js OS shell panel)
+- **Git Integration** (Git status, commit, and push/pull UI)
+
+**Performance & Diagnostics**
+- **Query Profile** (Operator statistics and execution time breakdown graphs)
+- **Explain SQL** (Pre-execution linter for full table scans and cartesian joins)
 
 ---
 

@@ -5,6 +5,7 @@ Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend +
 ## Development Workflow
 
 - **Branching**: All changes must be made in a feature branch (e.g., `feat/`, `fix/`, `chore/`).
+- **Git History**: NEVER alter git branch history. Do not use `git commit --amend`, `git rebase`, or `git push --force`. Always create new commits for updates.
 - **Commits**: Use descriptive commit messages with conventional prefixes. The commit type determines whether a release is triggered and what version component is bumped:
 
   | Commit type | Release | Version bump |
@@ -123,6 +124,8 @@ All proprietary analysis logic lives in `internal/sqleditor/sqleditor.go` and is
 ### Adding a feature flag (Enabled Features)
 
 Feature flags live in `internal/config/config.go` (`FeatureFlags` struct) and are surfaced to users via **File → Settings → Enabled Features**. All flags default to enabled — the `Initialized` sentinel prevents Go's zero-value `false` from silently disabling features on a fresh install.
+
+**When implementing a new feature (regardless of whether it has a flag yet), you MUST update the feature list in `FEATURES.md`. If it is a toggleable feature, also add it to the "Feasible Optional Features" section in `FEATURES.md`.**
 
 **Steps to add a new flag:**
 
