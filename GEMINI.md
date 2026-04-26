@@ -22,6 +22,7 @@ Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend +
     2. Create UI components in `frontend/src/components/` (e.g., `database/CreateTableModal.tsx`, `layout/`).
     3. Register context menu actions in `frontend/src/components/layout/Sidebar.tsx`.
 - **SQL Generation**: Use double quotes for identifiers (`"DATABASE"."SCHEMA"."TABLE"`) and handle escaping (`" -> ""`).
+- **Feature Documentation**: When implementing or updating a feature, you MUST update the feature list in `FEATURES.md`. If the feature can be toggled, also add it to the **Feasible Optional Features** section in `FEATURES.md`.
 
 ## 🎨 UI & Ant Design Standards
 - **Icons**: Use `@ant-design/icons` (e.g., `SyncOutlined`, `TableOutlined`).

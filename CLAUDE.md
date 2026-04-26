@@ -124,6 +124,8 @@ All proprietary analysis logic lives in `internal/sqleditor/sqleditor.go` and is
 
 Feature flags live in `internal/config/config.go` (`FeatureFlags` struct) and are surfaced to users via **File → Settings → Enabled Features**. All flags default to enabled — the `Initialized` sentinel prevents Go's zero-value `false` from silently disabling features on a fresh install.
 
+**When implementing a new feature (regardless of whether it has a flag yet), you MUST update the feature list in `FEATURES.md`. If it is a toggleable feature, also add it to the "Feasible Optional Features" section in `FEATURES.md`.**
+
 **Steps to add a new flag:**
 
 1. **`internal/config/config.go`** — add a `bool` field to `FeatureFlags` and set it `true` in `DefaultFeatureFlags()`:

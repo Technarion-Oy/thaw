@@ -12,6 +12,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - Connect with account / user / password / warehouse / role
 - Auto-fill connection form from Snowflake CLI profiles (defaults to `~/.snowflake/config.toml`, but any location can be chosen and persisted); includes support for key-pair (`SNOWFLAKE_JWT`) profiles; authenticator values are matched case-insensitively
 - Cancel an in-progress connection attempt
+- **Offline-first startup** — the app launches instantly without waiting for a Snowflake connection; connection parameters are validated and the session is established on demand when you first run a query or browse objects
 - **User Agreement** — a **User Agreement** link at the bottom of the connect screen opens the End User License Agreement in a scrollable modal
 - Switch role, warehouse, database, or schema from the query toolbar without reconnecting
 - Role dropdown shows only roles the current user can actually `USE ROLE` to — not all account-visible roles
@@ -48,6 +49,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - **Live SQL diagnostics** — real-time squiggly-line markers appear 400 ms after each edit; no false positives on well-formed Snowflake SQL:
   - **Syntax errors** (red) — character-by-character Snowflake SQL tokenizer validates unclosed string literals (`'…`), unclosed quoted identifiers (`"…`), unclosed dollar-quoted strings (`$$…`), unclosed block comments (`/*…`), unmatched or extra closing parentheses/brackets, and bare-word tokens that appear after a semicolon but are not a recognised SQL statement keyword (e.g. `SELECT 1; garbage`); also validates Snowflake Scripting assignment syntax (`:=` vs `=`) and variable declarations; inside `$$` scripting blocks, placeholder text (`<wrong_text>`, `{placeholder}`), bare unrecognised identifiers, and other tokens that cannot open a valid statement are all flagged
   - **Grammar warnings** (yellow) — a Snowflake-dialect PEG parser (`node-sql-parser`) validates the full grammatical structure of SELECT, INSERT, UPDATE, CREATE, DROP, ALTER, and related statements; Snowflake-specific constructs not yet covered by the parser (e.g. `TABLESAMPLE`, `AT (TIMESTAMP =>…)`, `WITHIN GROUP`) are silently skipped to avoid false positives
+- **Explain SQL** — right-click any query and choose **Explain SQL** to see the Snowflake execution plan before running it; detects and highlights performance anti-patterns (full table scans, cartesian joins, row explosions) directly in the editor with detailed tooltips
 - **SQL analysis engine** — character-by-character Snowflake SQL tokenizer (syntax/parentheses/scripting), FROM/JOIN table-ref extractor, and a three-tier JOIN condition suggestion engine (FKs, PK naming heuristics, and type-compatible columns) are implemented in the Go backend (`internal/sqleditor`) to protect proprietary analysis logic; the frontend calls these via IPC for real-time diagnostics and autocomplete
   - **Column existence warnings** (yellow) — bare unquoted (`wrong_col`) and double-quoted (`"wrong_col"`) column names in SELECT lists are validated against the table's actual column list; `alias.column` two-part references are also checked; column metadata is fetched automatically the first time a table appears in a query and cached for the session; all checks are silent while the cache is cold
   - **Hover tooltip** — moving the cursor over any squiggly-line marker shows a compact `ERROR — …` or `WARNING — …` tooltip describing the problem; works for both identifier tokens and non-identifier characters (e.g. an opening quote)
@@ -72,6 +74,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
   - **Snowflake dialect rules** always applied: no whitespace around `::` (type cast) and `:` (VARIANT path access); `WITH` on its own line with CTE body indented; `LATERAL FLATTEN` blocks treated as single logical units
   - A **live SQL preview** in the preferences dialog shows a sample Snowflake query reformatting in real time as settings change; preferences are persisted to `~/.config/thaw/config.json`
 - **AI Chat** — agentic chat panel in the results area (Results / AI Chat / Terminal tabs); the assistant operates in **Chat** or **Agent** mode (toggle above the input); in agent mode it calls tools against the live Snowflake connection and the local file system — see [AI Chat](#ai-chat) below
+- **Query Profile** — click the graph icon in the results status bar (visible for successful runs) to see the execution profile for the query (Operator Statistics, Time Breakdown, and Attributes)
 - **Code Snippets** — open **Tools → Code Snippets…** in the menu bar to browse 24 curated `CREATE OR REPLACE` templates across six categories (Data Objects, Code, Automation, Storage, Governance, Infrastructure); live search filters by name; selecting a snippet shows a read-only preview; clicking **Open in New Tab** loads the SQL into a new scratch tab for review and customisation before running
 - **Function Catalog AI Chat** — open **Help → Function Catalog…** and switch to the **Ask AI** tab to chat with the AI about any selected function; the function's full signatures and descriptions are automatically injected as context so you can ask usage questions, request examples, or compare overloads without pasting anything; for built-in Snowflake functions a **📖 Snowflake documentation** link opens the official docs page in the system browser; chat history resets automatically when switching to a different function
 - Results displayed in a virtualised Ag-Grid table
@@ -108,6 +111,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - Each step streams its output line-by-line into a scrollable log panel as the command runs; errors are surfaced immediately with retry support
 - The project directory (same location used for DDL export and the embedded terminal) is shown in the setup dialog for reference
 - Environment and backend settings are persisted to `~/.config/thaw/config.json`
+- **Private Pip Registries** — configure corporate or private pip repositories (including credentials) in the Snowpark setup wizard; Thaw automatically injects them into all `pip install` commands.
 - **Manage Packages** — a 4th step in the setup wizard (always accessible via the stepper or the "Manage Packages" footer button) provides a persistent package manager for the Snowpark environment:
   - **Install** — type any package name (e.g. `scikit-learn`) and press Install or Enter; installation streams line-by-line output into a scrollable log and refreshes the package list on completion
   - **Uninstall** — every installed package is listed with its version and an Uninstall button; a confirmation dialog is shown before removal
@@ -131,6 +135,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - Native undo/redo (`⌘Z` / `⌘⇧Z`) via Monaco's built-in history
 - Clipboard operations (`⌘C` / `⌘V` / `⌘X`) routed through the Wails native API to work correctly inside WKWebView
 - `Shift+Enter` runs the current cell (code and SQL cells)
+- **Multi-cell Debugger** — set breakpoints in Python cells and debug your Snowpark logic with a live variable explorer and call stack.
 - Cell kind (Code / SQL / Markdown) can be changed at any time via a dropdown in the cell header
 
 #### Python code cells
