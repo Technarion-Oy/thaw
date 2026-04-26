@@ -260,6 +260,8 @@ export function GitGetHeadFileContent(arg1:string):Promise<string>;
 
 export function GitListBranches(arg1:string):Promise<Array<gitrepo.BranchInfo>>;
 
+export function GitLoginWithOAuth(arg1:string):Promise<string>;
+
 export function GitLookupCredentials(arg1:string):Promise<gitrepo.CredentialResult>;
 
 export function GitPull(arg1:gitrepo.PullParams):Promise<void>;

@@ -7,6 +7,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/danieljoos/wincred v1.2.2
 	github.com/go-git/go-git/v5 v5.18.0
+	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/snowflakedb/gosnowflake/v2 v2.0.0
 	github.com/wailsapp/wails/v2 v2.11.0
 	golang.org/x/sys v0.42.0
@@ -64,6 +65,7 @@ require (
 	github.com/gsterjov/go-libsecret v0.0.0-20161001094733-a6f4afe4910c // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/jchv/go-winloader v0.0.0-20210711035445-715c2860da7e // indirect
+	github.com/joho/godotenv v1.5.1
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.11 // indirect
@@ -79,7 +81,6 @@ require (
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/pjbgf/sha1cd v0.3.2 // indirect
-	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect

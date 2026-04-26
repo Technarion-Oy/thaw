@@ -11,18 +11,18 @@
 import { useState, useMemo, useEffect } from "react";
 import {
   Modal, Tabs, Button, Input, Checkbox, Space, Tag, Typography, Divider, Alert,
-  List, Badge, Tooltip, Radio,
+  List, Badge, Tooltip, Radio, message,
 } from "antd";
 import {
   CloudUploadOutlined, CloudDownloadOutlined, CheckSquareOutlined,
   CloseSquareOutlined, FolderOpenOutlined, ReloadOutlined,
-  BranchesOutlined, PlusOutlined, SearchOutlined,
+  BranchesOutlined, PlusOutlined, SearchOutlined, GithubOutlined,
 } from "@ant-design/icons";
 import { useGitStore } from "../../store/gitStore";
 import type { CredentialResult } from "../../store/gitStore";
 import { PickDirectory } from "../../../wailsjs/go/main/App";
 
-type AuthMethod = "pat" | "bearer" | "stored";
+type AuthMethod = "pat" | "bearer" | "stored" | "oauth";
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -52,9 +52,10 @@ function AuthSelector({
   onTokenChange: (v: string) => void;
   remoteURL?: string;
 }) {
-  const { lookupCredentials } = useGitStore();
+  const { lookupCredentials, loginWithOAuth } = useGitStore();
   const [checking, setChecking] = useState(false);
   const [probeResult, setProbeResult] = useState<CredentialResult | null>(null);
+  const [oauthLoading, setOauthLoading] = useState(false);
 
   const handleProbe = async () => {
     if (!remoteURL) return;
@@ -65,12 +66,27 @@ function AuthSelector({
     setChecking(false);
   };
 
+  const handleOAuthLogin = async () => {
+    setOauthLoading(true);
+    try {
+      // For now, default to github. We could parse remoteURL to detect gitlab vs github.
+      const provider = remoteURL?.includes("gitlab.com") ? "gitlab" : "github";
+      const obtainedToken = await loginWithOAuth(provider);
+      onTokenChange(obtainedToken);
+      message.success(`Successfully authenticated with ${provider === "gitlab" ? "GitLab" : "GitHub"}`);
+    } catch (e) {
+      // Error is handled in the store, just clear loading
+    } finally {
+      setOauthLoading(false);
+    }
+  };
+
   // Reset probe result when switching auth methods or remoteURL changes
   useEffect(() => { setProbeResult(null); }, [authMethod, remoteURL]);
 
   const placeholder =
     authMethod === "bearer"
-      ? "Bearer / OAuth token (ey…)"
+      ? "Bearer token (ey…)"
       : "Personal Access Token (ghp_…, glpat-…) — not saved";
 
   return (
@@ -82,11 +98,12 @@ function AuthSelector({
         style={{ display: "flex", gap: 4, flexWrap: "wrap" }}
       >
         <Radio.Button value="pat">PAT / Password</Radio.Button>
-        <Radio.Button value="bearer">Bearer / OAuth</Radio.Button>
-        <Radio.Button value="stored">Stored credentials</Radio.Button>
+        <Radio.Button value="oauth">OAuth Browser Flow</Radio.Button>
+        <Radio.Button value="bearer">Bearer Token</Radio.Button>
+        <Radio.Button value="stored">Stored Credentials</Radio.Button>
       </Radio.Group>
 
-      {authMethod !== "stored" && (
+      {authMethod !== "stored" && authMethod !== "oauth" && (
         <Input.Password
           size="small"
           placeholder={placeholder}
@@ -95,6 +112,38 @@ function AuthSelector({
           style={{ fontSize: 12 }}
           visibilityToggle
         />
+      )}
+
+      {authMethod === "oauth" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {token ? (
+            <Alert
+              type="success"
+              showIcon
+              style={{ fontSize: 12 }}
+              message="Authenticated! Token securely captured in memory."
+              action={
+                <Button size="small" type="link" onClick={() => onTokenChange("")}>
+                  Clear
+                </Button>
+              }
+            />
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <Button
+                icon={<GithubOutlined />}
+                loading={oauthLoading}
+                onClick={handleOAuthLogin}
+                size="small"
+              >
+                Connect to Provider
+              </Button>
+              <Text style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                Opens your browser. Token is kept in memory.
+              </Text>
+            </div>
+          )}
+        </div>
       )}
 
       {authMethod === "stored" && (

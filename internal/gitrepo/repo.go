@@ -81,10 +81,23 @@ type CloneParams struct {
 	Token      string `json:"token"`
 }
 
-// normaliseHTTPS converts git@github.com:org/repo.git to https form.
+// normaliseHTTPS converts SSH URLs (like git@github.com:org/repo.git) to 
+// HTTPS form. This is required when using token-based authentication (PAT/OAuth),
+// as those credentials only apply to the HTTPS transport.
 func normaliseHTTPS(remoteURL string) string {
-	if strings.HasPrefix(remoteURL, "git@github.com:") {
-		return "https://github.com/" + strings.TrimPrefix(remoteURL, "git@github.com:")
+	if remoteURL == "" {
+		return ""
+	}
+	// Handle git@host:path/repo.git
+	if strings.HasPrefix(remoteURL, "git@") && strings.Contains(remoteURL, ":") {
+		parts := strings.SplitN(strings.TrimPrefix(remoteURL, "git@"), ":", 2)
+		if len(parts) == 2 {
+			return "https://" + parts[0] + "/" + parts[1]
+		}
+	}
+	// Handle ssh://git@host/path/repo.git
+	if strings.HasPrefix(remoteURL, "ssh://git@") {
+		return "https://" + strings.TrimPrefix(remoteURL, "ssh://git@")
 	}
 	return remoteURL
 }
@@ -233,20 +246,29 @@ func CommitAndPush(ctx context.Context, p PushParams) error {
 		return fmt.Errorf("write .gitignore: %w", err)
 	}
 
+	remoteURL := p.RemoteURL
+	if remoteURL == "" {
+		if remote, err := repo.Remote("origin"); err == nil && remote != nil {
+			if urls := remote.Config().URLs; len(urls) > 0 {
+				remoteURL = urls[0]
+			}
+		}
+	}
+
 	// Set or update origin remote (plain URL — token injected only for push).
 	if p.RemoteURL != "" {
-		remoteURL := normaliseHTTPS(p.RemoteURL)
+		normalised := normaliseHTTPS(p.RemoteURL)
 		existing, err := repo.Remote("origin")
 		if err == nil {
 			// Update URL if different.
-			if len(existing.Config().URLs) == 0 || existing.Config().URLs[0] != remoteURL {
+			if len(existing.Config().URLs) == 0 || existing.Config().URLs[0] != normalised {
 				_ = repo.DeleteRemote("origin")
-				if _, err := repo.CreateRemote(&config.RemoteConfig{Name: "origin", URLs: []string{remoteURL}}); err != nil {
+				if _, err := repo.CreateRemote(&config.RemoteConfig{Name: "origin", URLs: []string{normalised}}); err != nil {
 					return fmt.Errorf("set remote: %w", err)
 				}
 			}
 		} else {
-			if _, err := repo.CreateRemote(&config.RemoteConfig{Name: "origin", URLs: []string{remoteURL}}); err != nil {
+			if _, err := repo.CreateRemote(&config.RemoteConfig{Name: "origin", URLs: []string{normalised}}); err != nil {
 				return fmt.Errorf("add remote: %w", err)
 			}
 		}
@@ -321,7 +343,12 @@ func CommitAndPush(ctx context.Context, p PushParams) error {
 	pushOpts := &gogit.PushOptions{
 		RemoteName: "origin",
 		RefSpecs:   []config.RefSpec{config.RefSpec(fmt.Sprintf("refs/heads/%s:refs/heads/%s", branch, branch))},
-		Auth:       resolveAuth(normaliseHTTPS(p.RemoteURL), p.AuthMethod, p.Token),
+		Auth:       resolveAuth(normaliseHTTPS(remoteURL), p.AuthMethod, p.Token),
+	}
+	// Force using the normalised (HTTPS) URL if we resolved one, 
+	// even if the remote "origin" is SSH.
+	if remoteURL != "" {
+		pushOpts.RemoteURL = normaliseHTTPS(remoteURL)
 	}
 
 	err = repo.PushContext(ctx, pushOpts)
@@ -348,13 +375,22 @@ func Pull(ctx context.Context, p PullParams) error {
 		branch = "main"
 	}
 
+	remoteURL := p.RemoteURL
+	if remoteURL == "" {
+		if remote, err := repo.Remote("origin"); err == nil && remote != nil {
+			if urls := remote.Config().URLs; len(urls) > 0 {
+				remoteURL = urls[0]
+			}
+		}
+	}
+
 	pullOpts := &gogit.PullOptions{
 		RemoteName:    "origin",
 		ReferenceName: plumbing.NewBranchReferenceName(branch),
-		Auth:          resolveAuth(normaliseHTTPS(p.RemoteURL), p.AuthMethod, p.Token),
+		Auth:          resolveAuth(normaliseHTTPS(remoteURL), p.AuthMethod, p.Token),
 	}
-	if p.RemoteURL != "" {
-		pullOpts.RemoteURL = normaliseHTTPS(p.RemoteURL)
+	if remoteURL != "" {
+		pullOpts.RemoteURL = normaliseHTTPS(remoteURL)
 	}
 
 	err = wt.PullContext(ctx, pullOpts)
@@ -366,9 +402,10 @@ func Pull(ctx context.Context, p PullParams) error {
 
 // Clone clones a remote repository into the given local path.
 func Clone(ctx context.Context, p CloneParams) error {
+	url := normaliseHTTPS(p.URL)
 	_, err := gogit.PlainCloneContext(ctx, p.Path, false, &gogit.CloneOptions{
-		URL:      p.URL,
-		Auth:     resolveAuth(p.URL, p.AuthMethod, p.Token),
+		URL:      url,
+		Auth:     resolveAuth(url, p.AuthMethod, p.Token),
 		Progress: nil,
 	})
 	if err != nil {

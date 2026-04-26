@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { create } from "zustand";
-import { GitStatus, GitCommitAndPush, GitPull, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCreateBranch, GitLookupCredentials } from "../../wailsjs/go/main/App";
+import { GitStatus, GitCommitAndPush, GitPull, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCreateBranch, GitLookupCredentials, GitLoginWithOAuth } from "../../wailsjs/go/main/App";
 import type { gitrepo } from "../../wailsjs/go/models";
 
 export type RepoStatus = gitrepo.RepoStatus;
@@ -57,6 +57,7 @@ interface GitState {
   push: (params: { authMethod?: string; token: string; message: string; files?: string[] }) => Promise<void>;
   pull: (params: { authMethod?: string; token: string }) => Promise<void>;
   lookupCredentials: (remoteURL: string) => Promise<CredentialResult>;
+  loginWithOAuth: (provider: string) => Promise<string>;
   clearError: () => void;
 
   // Dialog actions
@@ -191,6 +192,15 @@ export const useGitStore = create<GitState>((set, get) => ({
       return await GitLookupCredentials(remoteURL);
     } catch {
       return { found: false, username: "", source: "" } as CredentialResult;
+    }
+  },
+
+  loginWithOAuth: async (provider: string) => {
+    try {
+      return await GitLoginWithOAuth(provider);
+    } catch (e) {
+      set({ error: String(e) });
+      throw e;
     }
   },
 

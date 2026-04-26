@@ -494,6 +494,10 @@ export function GitListBranches(arg1) {
   return window['go']['main']['App']['GitListBranches'](arg1);
 }
 
+export function GitLoginWithOAuth(arg1) {
+  return window['go']['main']['App']['GitLoginWithOAuth'](arg1);
+}
+
 export function GitLookupCredentials(arg1) {
   return window['go']['main']['App']['GitLookupCredentials'](arg1);
 }

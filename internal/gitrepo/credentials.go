@@ -39,13 +39,18 @@ type storedCreds struct {
 
 // resolveAuth returns the appropriate go-git AuthMethod for the given parameters.
 //
-//   - "bearer"  → http.TokenAuth (Authorization: Bearer <token>), required by Azure DevOps Entra OAuth
+//   - "bearer" / "oauth" → http.TokenAuth (Authorization: Bearer <token>), required by Azure DevOps Entra OAuth
 //   - "stored"  → http.BasicAuth with credentials from OS keychain / ~/.git-credentials / ~/.netrc
 //   - "pat" / "" → http.BasicAuth{Username: "x-access-token", Password: token}
 func resolveAuth(remoteURL, authMethod, token string) transport.AuthMethod {
 	switch authMethod {
-	case "bearer":
+	case "bearer", "oauth":
 		if token != "" {
+			// GitHub's Git over HTTPS server does not support the Bearer header.
+			// If we are on github.com, we must use Basic Auth even for OAuth tokens.
+			if strings.Contains(remoteURL, "github.com") {
+				return &gogithttp.BasicAuth{Username: "x-access-token", Password: token}
+			}
 			return &gogithttp.TokenAuth{Token: token}
 		}
 	case "stored":

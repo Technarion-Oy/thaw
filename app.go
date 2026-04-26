@@ -537,6 +537,12 @@ func (a *App) GitLookupCredentials(remoteURL string) (gitrepo.CredentialResult, 
 	return gitrepo.LookupCredentials(remoteURL), nil
 }
 
+// GitLoginWithOAuth starts the local loopback OAuth flow for the specified provider
+// ("github", "gitlab", etc.) and returns the obtained access token.
+func (a *App) GitLoginWithOAuth(provider string) (string, error) {
+	return gitrepo.PerformOAuthFlow(a.ctx, provider)
+}
+
 // ListDirectory returns the direct children of path (dirs first, then files).
 func (a *App) ListDirectory(path string) ([]filesystem.FileEntry, error) {
 	return filesystem.ListDir(path)
