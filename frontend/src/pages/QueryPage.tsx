@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, Modal, type MenuProps } from "antd";
-import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined } from "@ant-design/icons";
+import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, LinkOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
 import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, GetSqlStatementRanges, InitTabSession, CloseTabSession } from "../../wailsjs/go/main/App";
@@ -124,7 +124,11 @@ export default function QueryPage() {
   // Scroll-sync handles for the side-by-side grid split.
   const primarySyncRef = useRef<ScrollSyncHandle | null>(null);
   const compareSyncRef = useRef<ScrollSyncHandle | null>(null);
-  const { params, disconnect } = useConnectionStore();
+  const { params, disconnect, isConnected } = useConnectionStore();
+  // Pending query stored when the user runs SQL while disconnected.
+  const pendingQueryRef = useRef<string | null>(null);
+  // Tracks previous isConnected value to detect connect transitions.
+  const prevConnectedRef = useRef(isConnected);
   const {
     role, warehouse, database, schema,
     roles, warehouses, databases, schemas,
@@ -315,6 +319,12 @@ export default function QueryPage() {
   }, [setSplitEditorWidth]);
 
   const runQuery = async (overrideSql?: string) => {
+    if (!isConnected) {
+      const q = overrideSql ?? (selectedSql.trim() || sql.trim());
+      if (q) pendingQueryRef.current = q;
+      window.dispatchEvent(new Event("thaw:connect"));
+      return;
+    }
     const query = overrideSql ?? (selectedSql.trim() || sql.trim());
     if (!query) return;
     // Capture the tab that owns this query execution. The user may switch tabs
@@ -410,6 +420,23 @@ export default function QueryPage() {
     window.addEventListener(EXECUTE_IN_TAB_EVENT, handler);
     return () => window.removeEventListener(EXECUTE_IN_TAB_EVENT, handler);
   }, []);
+
+  // When a connection is established after being disconnected, reload session
+  // context and auto-run any pending query that was deferred.
+  useEffect(() => {
+    if (isConnected && !prevConnectedRef.current) {
+      useSessionStore.getState().loadContext(activeTabId);
+      GetCurrentUser().then(setCurrentUser).catch(() => {});
+      GetCurrentRegion().then(setCurrentRegion).catch(() => {});
+      GetSnowsightURL().then(setSnowsightUrl).catch(() => {});
+      if (pendingQueryRef.current) {
+        const q = pendingQueryRef.current;
+        pendingQueryRef.current = null;
+        setTimeout(() => runQueryRef.current(q), 300);
+      }
+    }
+    prevConnectedRef.current = isConnected;
+  }, [isConnected, activeTabId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDisconnect = async () => {
     await Disconnect();
@@ -845,14 +872,17 @@ export default function QueryPage() {
               {isCancelling ? "Cancelling…" : "Cancel"}
             </Button>
           ) : (
-            <Button
-              type="primary"
-              icon={<PlayCircleOutlined />}
-              onClick={() => runQuery()}
-              size="small"
-            >
-              Run
-            </Button>
+            <Tooltip title={!isConnected ? "Connect to Snowflake to run queries" : undefined}>
+              <Button
+                type="primary"
+                icon={<PlayCircleOutlined />}
+                onClick={() => runQuery()}
+                size="small"
+                disabled={!isConnected}
+              >
+                Run
+              </Button>
+            </Tooltip>
           )}
           <Text type="secondary" style={{ fontSize: 11, whiteSpace: "nowrap" }}>
             {isRunning
@@ -863,7 +893,17 @@ export default function QueryPage() {
           </Text>
         </Space>
 
-        <Space size={6}>
+        {!isConnected ? (
+          <Button
+            icon={<LinkOutlined />}
+            type="primary"
+            size="small"
+            onClick={() => window.dispatchEvent(new Event("thaw:connect"))}
+          >
+            Connect to Snowflake
+          </Button>
+        ) : null}
+        <Space size={6} style={{ display: isConnected ? undefined : "none" }}>
           {/* ── Session selectors: two rows (role+wh / db+schema) ── */}
           <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
             <Space size={6}>

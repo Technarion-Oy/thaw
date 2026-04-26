@@ -50,6 +50,7 @@ import {
   KeyOutlined,
   LinkOutlined,
   LineOutlined,
+  DisconnectOutlined,
 } from "@ant-design/icons";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
@@ -61,6 +62,7 @@ import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
 import { insertAtCursor } from "../editor/editorRef";
 import { useObjectStore } from "../../store/objectStore";
+import { useConnectionStore } from "../../store/connectionStore";
 import { useGitStore } from "../../store/gitStore";
 import { useDiffStore } from "../../store/diffStore";
 import { useInsertMappingStore } from "../../store/insertMappingStore";
@@ -445,6 +447,16 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
 
   const featureFlags = useFeatureFlagsStore((s) => s.flags);
 
+  const isConnected = useConnectionStore((s) => s.isConnected);
+  const prevConnectedRef = useRef(isConnected);
+  useEffect(() => {
+    if (isConnected && !prevConnectedRef.current) {
+      refreshAllDatabases();
+    }
+    prevConnectedRef.current = isConnected;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected]);
+
   const insertTarget    = useInsertMappingStore((s) => s.target);
   const insertSources   = useInsertMappingStore((s) => s.sources);
   const setInsertTarget = useInsertMappingStore((s) => s.setTarget);
@@ -565,6 +577,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       );
       useObjectStore.getState().setDatabases(dbs);
       setLoaded(true);
+      window.dispatchEvent(new Event("thaw:refresh-diagnostics"));
     } catch (e) {
       console.error(e);
     } finally {
@@ -1486,7 +1499,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         </Tooltip>
       </div>
 
-      {!treeCollapsed && (
+      {!treeCollapsed && !isConnected && (
+        <div style={{ padding: "24px 16px", textAlign: "center", color: "var(--text-muted)" }}>
+          <DisconnectOutlined style={{ fontSize: 24, marginBottom: 8, display: "block", margin: "0 auto 8px" }} />
+          <div style={{ fontSize: 13, marginBottom: 12 }}>Not connected to Snowflake</div>
+          <Button size="small" type="primary" onClick={() => window.dispatchEvent(new Event("thaw:connect"))}>
+            Connect to browse objects
+          </Button>
+        </div>
+      )}
+
+      {!treeCollapsed && isConnected && (
         <div style={{ height: treeHeight, overflow: "auto" }}>
           <div style={{ padding: "0 8px 8px" }}>
             <Input
@@ -1674,7 +1697,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       )}
 
       {/* Resize handle */}
-      {!treeCollapsed && (
+      {!treeCollapsed && isConnected && (
         <div
           style={{
             height: 5,

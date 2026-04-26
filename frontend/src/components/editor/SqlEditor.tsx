@@ -778,6 +778,15 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
     runDiagnostics();
 
+    // Re-run diagnostics when the object store is refreshed after a new
+    // connection (e.g. offline-first startup: databases load post-connect).
+    const refreshDiagnosticsHandler = () => {
+      if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
+      diagTimerRef.current = setTimeout(runDiagnostics, 0);
+    };
+    window.addEventListener("thaw:refresh-diagnostics", refreshDiagnosticsHandler);
+    editor.onDidDispose(() => window.removeEventListener("thaw:refresh-diagnostics", refreshDiagnosticsHandler));
+
     const doPaste = async () => {
       const text = await ClipboardGetText();
       if (!text) return;
