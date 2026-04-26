@@ -123,24 +123,24 @@ All proprietary analysis logic lives in `internal/sqleditor/sqleditor.go` and is
 
 ### Adding a feature flag (Enabled Features)
 
-Feature flags live in `internal/config/config.go` (`FeatureFlags` struct) and are surfaced to users via **File → Settings → Enabled Features**. All flags default to enabled — the `Initialized` sentinel prevents Go's zero-value `false` from silently disabling features on a fresh install.
+Feature flags live in `internal/config/config.go` (`FeatureFlags` struct) and are surfaced to users via **View → Enabled Features…**. All flags default to enabled — the `Initialized` sentinel prevents Go's zero-value `false` from silently disabling features on a fresh install.
 
 **When implementing a new feature (regardless of whether it has a flag yet), you MUST update the feature list in `FEATURES.md`. If it is a toggleable feature, also add it to the "Feasible Optional Features" section in `FEATURES.md`.**
 
 **Steps to add a new flag:**
 
-1. **`internal/config/config.go`** — add a `bool` field to `FeatureFlags` and set it `true` in `DefaultFeatureFlags()`:
+1. **`internal/config/config.go`** — add a `bool` field to `FeatureFlags`, set it `true` in `DefaultFeatureFlags()`, bump `flagsVersion`, and add migration logic to `MigrateFlags()`:
    ```go
    type FeatureFlags struct {
        Initialized  bool `json:"initialized"`
-       ExportTableData bool `json:"exportTableData"`
+       Version      int  `json:"version"`
        MyNewFeature bool `json:"myNewFeature"` // ← add here
    }
 
    func DefaultFeatureFlags() FeatureFlags {
        return FeatureFlags{
            Initialized:     true,
-           ExportTableData: true,
+           Version:         flagsVersion,
            MyNewFeature:    true, // ← and here
        }
    }
@@ -148,32 +148,42 @@ Feature flags live in `internal/config/config.go` (`FeatureFlags` struct) and ar
 
 2. **Run `wails generate module`** — regenerates `frontend/wailsjs/go/models.ts` with the new field.
 
-3. **`frontend/src/components/settings/FeatureFlagsModal.tsx`** — add a `<FlagRow>` inside the modal's column:
+3. **`frontend/src/components/settings/FeatureFlagsModal.tsx`** — add a `<FlagRow>` inside the modal's appropriate category:
    ```tsx
    <FlagRow
      label="My New Feature"
      description="One-line description shown in the modal."
      checked={flags.myNewFeature}
+     locked={locked.myNewFeature} // ← pass the locked state
      onChange={(v) => set("myNewFeature", v)}
    />
    ```
 
-4. **In the component that needs gating** — read the flag from `featureFlagsStore` and pass `disabled` + `disabledReason` to `menuItem` (Sidebar), or conditionally render/disable your own UI element:
+4. **In the component that needs gating** — read the flag from `featureFlagsStore` and pass `disabled` + `disabledReason` to `menuItem` (Sidebar), or conditionally render/disable your own UI element. When a flag is `false`, the feature should be HIDDEN or DISABLED in the app UI:
    ```tsx
    const featureFlags = useFeatureFlagsStore((s) => s.flags);
 
    // Sidebar context-menu item:
    menuItem("My Action…", <Icon />, handler, undefined,
      !featureFlags.myNewFeature,
-     "My New Feature is disabled. Enable it under File → Settings → Enabled Features.")
+     "My New Feature is disabled. Enable it under View → Enabled Features…")
 
    // Or for a button:
-   <Button disabled={!featureFlags.myNewFeature}>…</Button>
+   {featureFlags.myNewFeature && <Button onClick={...}>…</Button>}
    ```
+
+### IT Admin Management (Enforced Policies)
+
+IT administrators can enforce feature policies via platform-specific mechanisms. When a feature is locked by an admin, it appears with a lock icon in the UI and cannot be changed by the user.
+
+- **macOS**: Managed Plist (`Disable<FeatureName> = true`) in `/Library/Managed Preferences/com.thaw.app.plist`.
+- **Windows**: Group Policy Registry (`Disable<FeatureName> = 1`) in `HKLM\SOFTWARE\Policies\Thaw\Features`.
+- **Linux**: `features.json` in `/etc/thaw/features.json`.
 
 **Key files:**
 - `internal/config/config.go` — `FeatureFlags` struct + `DefaultFeatureFlags()`
-- `app.go` — `GetFeatureFlags()` / `SaveFeatureFlags()` IPC methods
+- `internal/config/adminconfig.go` — hierarchy and JSON loading logic
+- `app.go` — `GetFeatureFlags()` / `GetAdminLockedFlags()` / `SaveFeatureFlags()` IPC methods
 - `frontend/src/store/featureFlagsStore.ts` — Zustand store (loaded on startup, reloaded after modal save)
 - `frontend/src/components/settings/FeatureFlagsModal.tsx` — toggle UI (`<FlagRow>` per flag)
 - `frontend/src/components/layout/Sidebar.tsx` — `menuItem()` 5th param `disabled`, 6th param `disabledReason`

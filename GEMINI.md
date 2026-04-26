@@ -21,8 +21,29 @@ Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend +
     1. Define state in a new `zustand` store in `frontend/src/store/` (optional).
     2. Create UI components in `frontend/src/components/` (e.g., `database/CreateTableModal.tsx`, `layout/`).
     3. Register context menu actions in `frontend/src/components/layout/Sidebar.tsx`.
+    4. If the feature is optional, add a boolean flag to `FeatureFlags` in `internal/config/config.go`, add it to `DefaultFeatureFlags()`, and bump the `flagsVersion`.
+    5. Gate all related UI elements (sidebar items, buttons, tabs) using `useFeatureFlagsStore.getState().flags`. When a flag is `false`, the corresponding feature MUST be hidden or disabled across the entire application.
 - **SQL Generation**: Use double quotes for identifiers (`"DATABASE"."SCHEMA"."TABLE"`) and handle escaping (`" -> ""`).
 - **Feature Documentation**: When implementing or updating a feature, you MUST update the feature list in `FEATURES.md`. If the feature can be toggled, also add it to the **Feasible Optional Features** section in `FEATURES.md`.
+
+## 🛠 Feature Flags & IT Admin Management
+Thaw uses a centralized feature flag system to gate optional or experimental capabilities. Features are managed via **View → Enabled Features…**.
+
+### Adding a New Flag
+1. **Go Backend**: Add a `bool` field to the `FeatureFlags` struct in `internal/config/config.go`.
+2. **Defaults**: Update `DefaultFeatureFlags()` to set the new flag's default state (usually `true`).
+3. **Migration**: Bump `flagsVersion` in `config.go` and update `MigrateFlags()` to ensure existing users receive the default value for the new flag.
+4. **Wails Bindings**: Run `wails generate module` to update frontend TypeScript models.
+5. **UI**: Add a corresponding `<FlagRow />` to `frontend/src/components/settings/FeatureFlagsModal.tsx` in the appropriate category.
+
+### IT Admin Overrides (Enforced Policies)
+IT administrators can enforce feature policies (enabling or disabling features) via system-level configuration, making them "locked" (unchangeable) for the end user.
+- **Priority**: MDM/Registry/Plist (Highest) > `features.json` (System-level) > User Preferences (Lowest).
+- **macOS**: Managed Plist (`Disable<FeatureName> = true`) in `/Library/Managed Preferences/com.thaw.app.plist`.
+- **Windows**: Group Policy Registry (`Disable<FeatureName> = 1`) in `HKLM\SOFTWARE\Policies\Thaw\Features`.
+- **Linux / Cross-platform**: `features.json` in `/etc/thaw/features.json` or `%PROGRAMDATA%\Thaw\features.json`.
+
+When a feature is admin-controlled, the toggle in **Enabled Features** is automatically greyed out and shows a lock icon.
 
 ## 🎨 UI & Ant Design Standards
 - **Icons**: Use `@ant-design/icons` (e.g., `SyncOutlined`, `TableOutlined`).
