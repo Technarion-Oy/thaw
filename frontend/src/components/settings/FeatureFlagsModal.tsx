@@ -31,9 +31,10 @@ interface FlagRowProps {
   checked: boolean;
   locked: boolean;
   onChange: (v: boolean) => void;
+  preview?: boolean;
 }
 
-function FlagRow({ label, description, checked, locked, onChange }: FlagRowProps) {
+function FlagRow({ label, description, checked, locked, onChange, preview }: FlagRowProps) {
   const switchEl = (
     <Switch
       checked={checked}
@@ -53,7 +54,26 @@ function FlagRow({ label, description, checked, locked, onChange }: FlagRowProps
           </Tooltip>
         )}
         <div>
-          <Text style={{ fontSize: 13 }}>{label}</Text>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Text style={{ fontSize: 13 }}>{label}</Text>
+            {preview && (
+              <span style={{
+                fontSize: 10,
+                fontWeight: 600,
+                lineHeight: "16px",
+                padding: "0 5px",
+                borderRadius: 3,
+                background: "color-mix(in srgb, var(--accent) 15%, transparent)",
+                color: "var(--accent)",
+                border: "1px solid color-mix(in srgb, var(--accent) 35%, transparent)",
+                letterSpacing: "0.03em",
+                textTransform: "uppercase",
+                flexShrink: 0,
+              }}>
+                Preview
+              </span>
+            )}
+          </div>
           {description && (
             <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{description}</div>
           )}
@@ -314,6 +334,7 @@ export default function FeatureFlagsModal({ onClose }: Props) {
             checked={flags.gitIntegration}
             locked={locked.gitIntegration}
             onChange={(v) => set("gitIntegration", v)}
+            preview
           />
         </Category>
 
