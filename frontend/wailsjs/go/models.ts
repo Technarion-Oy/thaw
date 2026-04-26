@@ -105,7 +105,34 @@ export namespace config {
 	}
 	export class FeatureFlags {
 	    initialized: boolean;
+	    version: number;
+	    resultsetExport: boolean;
 	    exportTableData: boolean;
+	    tableDataImport: boolean;
+	    ddlExport: boolean;
+	    userRoleManagement: boolean;
+	    warehouseManagement: boolean;
+	    warehouseCreditUsage: boolean;
+	    queryActivityHistory: boolean;
+	    integrationsManagement: boolean;
+	    backupPoliciesAndSets: boolean;
+	    aiChat: boolean;
+	    aiInlineCompletions: boolean;
+	    aiImportSuggest: boolean;
+	    schemaMigration: boolean;
+	    dbtScaffolding: boolean;
+	    erDiagramDesigner: boolean;
+	    taskGraphVisualizer: boolean;
+	    insertMapping: boolean;
+	    codeSnippets: boolean;
+	    snowparkNotebooks: boolean;
+	    embeddedTerminal: boolean;
+	    gitIntegration: boolean;
+	    queryProfile: boolean;
+	    explainSql: boolean;
+	    sqlDiagnostics: boolean;
+	    schemaAutocomplete: boolean;
+	    ddlHoverTooltips: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new FeatureFlags(source);
@@ -114,7 +141,34 @@ export namespace config {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.initialized = source["initialized"];
+	        this.version = source["version"];
+	        this.resultsetExport = source["resultsetExport"];
 	        this.exportTableData = source["exportTableData"];
+	        this.tableDataImport = source["tableDataImport"];
+	        this.ddlExport = source["ddlExport"];
+	        this.userRoleManagement = source["userRoleManagement"];
+	        this.warehouseManagement = source["warehouseManagement"];
+	        this.warehouseCreditUsage = source["warehouseCreditUsage"];
+	        this.queryActivityHistory = source["queryActivityHistory"];
+	        this.integrationsManagement = source["integrationsManagement"];
+	        this.backupPoliciesAndSets = source["backupPoliciesAndSets"];
+	        this.aiChat = source["aiChat"];
+	        this.aiInlineCompletions = source["aiInlineCompletions"];
+	        this.aiImportSuggest = source["aiImportSuggest"];
+	        this.schemaMigration = source["schemaMigration"];
+	        this.dbtScaffolding = source["dbtScaffolding"];
+	        this.erDiagramDesigner = source["erDiagramDesigner"];
+	        this.taskGraphVisualizer = source["taskGraphVisualizer"];
+	        this.insertMapping = source["insertMapping"];
+	        this.codeSnippets = source["codeSnippets"];
+	        this.snowparkNotebooks = source["snowparkNotebooks"];
+	        this.embeddedTerminal = source["embeddedTerminal"];
+	        this.gitIntegration = source["gitIntegration"];
+	        this.queryProfile = source["queryProfile"];
+	        this.explainSql = source["explainSql"];
+	        this.sqlDiagnostics = source["sqlDiagnostics"];
+	        this.schemaAutocomplete = source["schemaAutocomplete"];
+	        this.ddlHoverTooltips = source["ddlHoverTooltips"];
 	    }
 	}
 	export class GitConfig {

@@ -246,6 +246,10 @@ export function GetActiveFunctionCall(arg1) {
   return window['go']['main']['App']['GetActiveFunctionCall'](arg1);
 }
 
+export function GetAdminLockedFlags() {
+  return window['go']['main']['App']['GetAdminLockedFlags']();
+}
+
 export function GetAllDataTypes() {
   return window['go']['main']['App']['GetAllDataTypes']();
 }

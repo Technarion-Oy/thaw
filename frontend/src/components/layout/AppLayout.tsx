@@ -18,6 +18,7 @@ import FileBrowser from "../files/FileBrowser";
 import GitPanel from "../git/GitPanel";
 import AccountPanel from "../account/AccountPanel";
 import { usePanelLayoutStore, type PanelId, type SidebarId } from "../../store/panelLayoutStore";
+import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 
 const { Content } = Layout;
 
@@ -113,11 +114,19 @@ function ResizeHandle({ resizing, onMouseDown }: { resizing: boolean; onMouseDow
 // PanelWrappers can avoid showing drop indicators when nothing is in flight.
 let _draggingId: PanelId | null = null;
 
-function renderPanelContent(id: PanelId) {
+function DisabledPanelPlaceholder({ label }: { label: string }) {
+  return (
+    <div style={{ padding: "16px 12px", fontSize: 12, color: "var(--text-muted)", textAlign: "center" }}>
+      {label} is disabled. Enable it under <strong>View → Enabled Features…</strong>
+    </div>
+  );
+}
+
+function renderPanelContent(id: PanelId, gitEnabled: boolean) {
   switch (id) {
     case "export":  return <ExportPanel />;
     case "files":   return <FileBrowser />;
-    case "git":     return <GitPanel />;
+    case "git":     return gitEnabled ? <GitPanel /> : <DisabledPanelPlaceholder label="Git Integration" />;
     case "objects": return <Sidebar hideAccountPanel />;
     case "account": return <AccountPanel />;
   }
@@ -125,6 +134,7 @@ function renderPanelContent(id: PanelId) {
 
 function PanelWrapper({ id, sidebar }: { id: PanelId; sidebar: SidebarId }) {
   const movePanel = usePanelLayoutStore((s) => s.movePanel);
+  const gitEnabled = useFeatureFlagsStore((s) => s.flags.gitIntegration);
   const [dropPos, setDropPos] = useState<"before" | "after" | null>(null);
 
   return (
@@ -184,7 +194,7 @@ function PanelWrapper({ id, sidebar }: { id: PanelId; sidebar: SidebarId }) {
         <HolderOutlined style={{ fontSize: 11, color: "var(--text-muted)", opacity: 0.75 }} />
       </div>
 
-      {renderPanelContent(id)}
+      {renderPanelContent(id, gitEnabled)}
 
       {/* Drop indicator — after */}
       {dropPos === "after" && (

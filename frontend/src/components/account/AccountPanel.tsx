@@ -37,6 +37,7 @@ import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { useGitStore } from "../../store/gitStore";
 import { useDiffStore } from "../../store/diffStore";
 import { useConnectionStore } from "../../store/connectionStore";
+import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import UserManagementPanel from "./UserManagementPanel";
 import PropertiesModal from "../common/PropertiesModal";
 import WarehousePropertiesModal from "./WarehousePropertiesModal";
@@ -96,6 +97,7 @@ function buildTree(roles: string[], warehouses: string[]): DataNode[] {
 export default function AccountPanel() {
   const exportDir = useGitStore((s) => s.exportDir);
   const isConnected = useConnectionStore((s) => s.isConnected);
+  const featureFlags = useFeatureFlagsStore((s) => s.flags);
 
   const [loaded,     setLoaded]     = useState(false);
   const [loading,    setLoading]    = useState(false);
@@ -298,15 +300,17 @@ export default function AccountPanel() {
           style: { border: "none" },
           extra: (
             <Space size={2} onClick={(e) => e.stopPropagation()}>
-              <Button
-                size="small"
-                type="text"
-                icon={<HistoryOutlined style={{ fontSize: 11 }} />}
-                title="Query Activity"
-                onClick={() => setHistoryOpen(true)}
-                style={{ height: 18, padding: "0 4px", minWidth: 0 }}
-              />
-              {canViewMetering && (
+              {featureFlags.queryActivityHistory && (
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<HistoryOutlined style={{ fontSize: 11 }} />}
+                  title="Query Activity"
+                  onClick={() => setHistoryOpen(true)}
+                  style={{ height: 18, padding: "0 4px", minWidth: 0 }}
+                />
+              )}
+              {canViewMetering && featureFlags.warehouseCreditUsage && (
                 <Button
                   size="small"
                   type="text"
@@ -363,9 +367,9 @@ export default function AccountPanel() {
                 </div>
               )}
 
-              {loaded && <UserManagementPanel />}
-              {loaded && <BackupPoliciesPanel />}
-              {loaded && <IntegrationsPanel />}
+              {loaded && featureFlags.userRoleManagement && <UserManagementPanel />}
+              {loaded && featureFlags.backupPoliciesAndSets && <BackupPoliciesPanel />}
+              {loaded && featureFlags.integrationsManagement && <IntegrationsPanel />}
             </div>
           ),
         }]}

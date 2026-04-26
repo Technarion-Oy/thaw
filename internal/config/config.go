@@ -141,22 +141,145 @@ func DefaultNotebookPrefs() NotebookPrefs {
 // Adding a new flag:
 //  1. Add a bool field here with a json tag.
 //  2. Set it to true in DefaultFeatureFlags so it is on by default.
-//  3. Add a Switch row in FeatureFlagsModal.tsx.
-//  4. Read it from featureFlagsStore in whichever component needs gating.
+//  3. Bump flagsVersion and add migration logic in MigrateFlags.
+//  4. Add a Switch row in FeatureFlagsModal.tsx.
+//  5. Read it from featureFlagsStore in whichever component needs gating.
 //
 // Initialized is a sentinel: when false the config file predates feature flags
 // and GetFeatureFlags returns DefaultFeatureFlags instead of the zero struct.
+//
+// Version tracks the schema revision so new flags introduced after an initial
+// save can be filled with their defaults rather than the zero value (false).
+// Current version: 2 (added SQL editor flags: SqlDiagnostics, SchemaAutocomplete, DdlHoverTooltips).
+const flagsVersion = 2
+
 type FeatureFlags struct {
-	Initialized     bool `json:"initialized"`
-	ExportTableData bool `json:"exportTableData"`
+	Initialized bool `json:"initialized"`
+	Version     int  `json:"version"`
+
+	// Data Export & Import
+	ResultsetExport bool `json:"resultsetExport"`
+	ExportTableData bool `json:"exportTableData"` // Table Data Export
+	TableDataImport bool `json:"tableDataImport"`
+	DDLExport       bool `json:"ddlExport"`
+
+	// Governance & Administration
+	UserRoleManagement     bool `json:"userRoleManagement"`
+	WarehouseManagement    bool `json:"warehouseManagement"`
+	WarehouseCreditUsage   bool `json:"warehouseCreditUsage"`
+	QueryActivityHistory   bool `json:"queryActivityHistory"`
+	IntegrationsManagement bool `json:"integrationsManagement"`
+	BackupPoliciesAndSets  bool `json:"backupPoliciesAndSets"`
+
+	// AI & Assistance
+	AIChat              bool `json:"aiChat"`
+	AIInlineCompletions bool `json:"aiInlineCompletions"`
+	AIImportSuggest     bool `json:"aiImportSuggest"`
+
+	// Advanced Tools & Data Engineering
+	SchemaMigration     bool `json:"schemaMigration"`
+	DbtScaffolding      bool `json:"dbtScaffolding"`
+	ERDiagramDesigner   bool `json:"erDiagramDesigner"`
+	TaskGraphVisualizer bool `json:"taskGraphVisualizer"`
+	InsertMapping       bool `json:"insertMapping"`
+	CodeSnippets        bool `json:"codeSnippets"`
+
+	// Developer Environments
+	SnowparkNotebooks bool `json:"snowparkNotebooks"`
+	EmbeddedTerminal  bool `json:"embeddedTerminal"`
+	GitIntegration    bool `json:"gitIntegration"`
+
+	// Performance & Diagnostics
+	QueryProfile bool `json:"queryProfile"`
+	ExplainSQL   bool `json:"explainSql"`
+
+	// SQL Editor
+	SqlDiagnostics    bool `json:"sqlDiagnostics"`
+	SchemaAutocomplete bool `json:"schemaAutocomplete"`
+	DdlHoverTooltips  bool `json:"ddlHoverTooltips"`
 }
 
 // DefaultFeatureFlags returns a FeatureFlags with every feature enabled.
 func DefaultFeatureFlags() FeatureFlags {
 	return FeatureFlags{
-		Initialized:     true,
-		ExportTableData: true,
+		Initialized:            true,
+		Version:                flagsVersion,
+		ResultsetExport:        true,
+		ExportTableData:        true,
+		TableDataImport:        true,
+		DDLExport:              true,
+		UserRoleManagement:     true,
+		WarehouseManagement:    true,
+		WarehouseCreditUsage:   true,
+		QueryActivityHistory:   true,
+		IntegrationsManagement: true,
+		BackupPoliciesAndSets:  true,
+		AIChat:                 true,
+		AIInlineCompletions:    true,
+		AIImportSuggest:        true,
+		SchemaMigration:        true,
+		DbtScaffolding:         true,
+		ERDiagramDesigner:      true,
+		TaskGraphVisualizer:    true,
+		InsertMapping:          true,
+		CodeSnippets:           true,
+		SnowparkNotebooks:      true,
+		EmbeddedTerminal:       true,
+		GitIntegration:         true,
+		QueryProfile:           true,
+		ExplainSQL:             true,
+		SqlDiagnostics:         true,
+		SchemaAutocomplete:     true,
+		DdlHoverTooltips:       true,
 	}
+}
+
+// MigrateFlags fills in zero-value fields for flags that were added after an
+// existing config was saved. When Version < flagsVersion, flags that are false
+// (the zero value) but have a default of true are set to true.
+// This is safe because false = "not set" for any flag not present in the
+// config file at the time it was written; explicitly user-disabled flags will
+// be re-enabled only if the user upgrades — they can turn them off again.
+func MigrateFlags(f FeatureFlags) FeatureFlags {
+	if f.Version >= flagsVersion {
+		return f
+	}
+	// Version 0 → 1: 21 new flags added; all default to true.
+	defaults := DefaultFeatureFlags()
+	setIfZero := func(field *bool, def bool) {
+		if !*field {
+			*field = def
+		}
+	}
+	setIfZero(&f.ResultsetExport, defaults.ResultsetExport)
+	setIfZero(&f.TableDataImport, defaults.TableDataImport)
+	setIfZero(&f.DDLExport, defaults.DDLExport)
+	setIfZero(&f.UserRoleManagement, defaults.UserRoleManagement)
+	setIfZero(&f.WarehouseManagement, defaults.WarehouseManagement)
+	setIfZero(&f.WarehouseCreditUsage, defaults.WarehouseCreditUsage)
+	setIfZero(&f.QueryActivityHistory, defaults.QueryActivityHistory)
+	setIfZero(&f.IntegrationsManagement, defaults.IntegrationsManagement)
+	setIfZero(&f.BackupPoliciesAndSets, defaults.BackupPoliciesAndSets)
+	setIfZero(&f.AIChat, defaults.AIChat)
+	setIfZero(&f.AIInlineCompletions, defaults.AIInlineCompletions)
+	setIfZero(&f.AIImportSuggest, defaults.AIImportSuggest)
+	setIfZero(&f.SchemaMigration, defaults.SchemaMigration)
+	setIfZero(&f.DbtScaffolding, defaults.DbtScaffolding)
+	setIfZero(&f.ERDiagramDesigner, defaults.ERDiagramDesigner)
+	setIfZero(&f.TaskGraphVisualizer, defaults.TaskGraphVisualizer)
+	setIfZero(&f.InsertMapping, defaults.InsertMapping)
+	setIfZero(&f.CodeSnippets, defaults.CodeSnippets)
+	setIfZero(&f.SnowparkNotebooks, defaults.SnowparkNotebooks)
+	setIfZero(&f.EmbeddedTerminal, defaults.EmbeddedTerminal)
+	setIfZero(&f.GitIntegration, defaults.GitIntegration)
+	setIfZero(&f.QueryProfile, defaults.QueryProfile)
+	setIfZero(&f.ExplainSQL, defaults.ExplainSQL)
+	// Version 1 → 2: SQL editor flags added; all default to true.
+	setIfZero(&f.SqlDiagnostics, defaults.SqlDiagnostics)
+	setIfZero(&f.SchemaAutocomplete, defaults.SchemaAutocomplete)
+	setIfZero(&f.DdlHoverTooltips, defaults.DdlHoverTooltips)
+	f.Version = flagsVersion
+	return f
 }
 
 // AppConfig is the on-disk configuration for Thaw.

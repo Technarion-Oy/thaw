@@ -121,13 +121,6 @@ func buildMenu(app *App) *menu.Menu {
 		wailsruntime.EventsEmit(app.ctx, "menu:save-as")
 	})
 
-	fileMenu.AddSeparator()
-
-	settingsMenu := fileMenu.AddSubmenu("Settings")
-	settingsMenu.AddText("Enabled Features…", nil, func(_ *menu.CallbackData) {
-		wailsruntime.EventsEmit(app.ctx, "menu:feature-flags")
-	})
-
 	// ── View ──────────────────────────────────────────────────────────────────
 	viewMenu := appMenu.AddSubmenu("View")
 
@@ -163,6 +156,9 @@ func buildMenu(app *App) *menu.Menu {
 	viewMenu.AddSeparator()
 	viewMenu.AddText("Editor Preferences…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:editor-preferences")
+	})
+	viewMenu.AddText("Enabled Features…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:feature-flags")
 	})
 
 	// ── AI ────────────────────────────────────────────────────────────────────

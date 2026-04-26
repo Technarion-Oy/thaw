@@ -39,6 +39,7 @@ import NotebookTab from "../components/notebook/NotebookTab";
 import { useQueryStore, type QueryResult, EXECUTE_IN_TAB_EVENT } from "../store/queryStore";
 import { useConnectionStore } from "../store/connectionStore";
 import { useSessionStore } from "../store/sessionStore";
+import { useFeatureFlagsStore } from "../store/featureFlagsStore";
 
 const { Text } = Typography;
 
@@ -88,6 +89,7 @@ export default function QueryPage() {
   const [resultPane, setResultPane] = useState<"results" | "chat" | "terminal">("results");
   const [aiEnabled, setAiEnabled] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
+  const featureFlags = useFeatureFlagsStore((s) => s.flags);
 
   // ── Result history (last 10 unpinned + all pinned, most-recent-first) ────
   interface HistoryEntry { id: string; queryID: string; sql: string; result: QueryResult; pinned: boolean; }
@@ -789,16 +791,17 @@ export default function QueryPage() {
 
   useEffect(() => {
     const off = EventsOn("menu:open-terminal", () => {
+      if (!featureFlags.embeddedTerminal) return;
       setTerminalOpen(true);
       setResultPane("terminal");
     });
     return () => off();
-  }, []);
+  }, [featureFlags.embeddedTerminal]);
 
   useEffect(() => {
-    const off = EventsOn("menu:code-snippets", () => setSnippetsOpen(true));
+    const off = EventsOn("menu:code-snippets", () => { if (featureFlags.codeSnippets) setSnippetsOpen(true); });
     return () => off();
-  }, []);
+  }, [featureFlags.codeSnippets]);
 
   useEffect(() => {
     const off = EventsOn("menu:export-path-format", () => setExportPathFormatOpen(true));
@@ -806,14 +809,14 @@ export default function QueryPage() {
   }, []);
 
   useEffect(() => {
-    const off = EventsOn("menu:migration", () => setMigrationOpen(true));
+    const off = EventsOn("menu:migration", () => { if (featureFlags.schemaMigration) setMigrationOpen(true); });
     return () => off();
-  }, []);
+  }, [featureFlags.schemaMigration]);
 
   useEffect(() => {
-    const off = EventsOn("menu:dbt-create", () => setDbtCreateOpen(true));
+    const off = EventsOn("menu:dbt-create", () => { if (featureFlags.dbtScaffolding) setDbtCreateOpen(true); });
     return () => off();
-  }, []);
+  }, [featureFlags.dbtScaffolding]);
 
   useEffect(() => {
     const off = EventsOn("menu:function-catalog", () => setFnCatalogOpen(true));
@@ -832,7 +835,7 @@ export default function QueryPage() {
 
   // ⌘E / Ctrl+E — Export current results as CSV (wired from keyboard handler).
   useEffect(() => {
-    const handler = () => exportCSV();
+    const handler = () => { if (featureFlags.resultsetExport) exportCSV(); };
     window.addEventListener("thaw:export-csv", handler);
     return () => window.removeEventListener("thaw:export-csv", handler);
   });
@@ -1199,7 +1202,7 @@ export default function QueryPage() {
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {/* Tab bar */}
         <div style={{ display: "flex", background: "var(--bg-raised)", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-          {(["results", ...(aiEnabled ? ["chat"] : []), ...(terminalOpen ? ["terminal"] : [])] as Array<"results" | "chat" | "terminal">).map((tab) => (
+          {(["results", ...(aiEnabled && featureFlags.aiChat ? ["chat"] : []), ...(terminalOpen && featureFlags.embeddedTerminal ? ["terminal"] : [])] as Array<"results" | "chat" | "terminal">).map((tab) => (
             <button
               key={tab}
               onClick={() => setResultPane(tab)}
@@ -1239,15 +1242,17 @@ export default function QueryPage() {
                           style={{ height: 16, padding: "0 2px", minWidth: 0 }}
                           onClick={async () => { await ClipboardSetText((stmtProgress.queryID || runningQueryId)!); message.success("Query ID copied"); }}
                         />
-                        <Tooltip title="Query Profile">
-                          <Button
-                            type="text"
-                            size="small"
-                            icon={<BarChartOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
-                            style={{ height: 16, padding: "0 2px", minWidth: 0 }}
-                            onClick={() => { setProfileQueryId((stmtProgress.queryID || runningQueryId)!); setProfileQuerySql(selectedSql.trim() || sql.trim()); setProfileIsLive(true); }}
-                          />
-                        </Tooltip>
+                        {featureFlags.queryProfile && (
+                          <Tooltip title="Query Profile">
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<BarChartOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
+                              style={{ height: 16, padding: "0 2px", minWidth: 0 }}
+                              onClick={() => { setProfileQueryId((stmtProgress.queryID || runningQueryId)!); setProfileQuerySql(selectedSql.trim() || sql.trim()); setProfileIsLive(true); }}
+                            />
+                          </Tooltip>
+                        )}
                       </Space>
                     )}
                   </div>
@@ -1263,15 +1268,17 @@ export default function QueryPage() {
                       style={{ height: 16, padding: "0 2px", minWidth: 0 }}
                       onClick={async () => { await ClipboardSetText(runningQueryId); message.success("Query ID copied"); }}
                     />
-                    <Tooltip title="Query Profile">
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<BarChartOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
-                        style={{ height: 16, padding: "0 2px", minWidth: 0 }}
-                        onClick={() => { setProfileQueryId(runningQueryId); setProfileQuerySql(selectedSql.trim() || sql.trim()); setProfileIsLive(true); }}
-                      />
-                    </Tooltip>
+                    {featureFlags.queryProfile && (
+                      <Tooltip title="Query Profile">
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<BarChartOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
+                          style={{ height: 16, padding: "0 2px", minWidth: 0 }}
+                          onClick={() => { setProfileQueryId(runningQueryId); setProfileQuerySql(selectedSql.trim() || sql.trim()); setProfileIsLive(true); }}
+                        />
+                      </Tooltip>
+                    )}
                   </Space>
                 ) : null}
               </div>
@@ -1349,36 +1356,42 @@ export default function QueryPage() {
                           style={{ height: 16, padding: "0 2px", minWidth: 0 }}
                           onClick={async () => { await ClipboardSetText(displayedResult.queryID!); message.success("Query ID copied"); }}
                         />
-                        <Tooltip title="Query Profile">
-                          <Button
-                            type="text"
-                            size="small"
-                            icon={<BarChartOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
-                            style={{ height: 16, padding: "0 2px", minWidth: 0 }}
-                            onClick={() => { setProfileQueryId(displayedResult.queryID!); setProfileQuerySql(resultHistory.find((e) => e.id === historyId)?.sql ?? ""); setProfileIsLive(false); }}
-                          />
-                        </Tooltip>
+                        {featureFlags.queryProfile && (
+                          <Tooltip title="Query Profile">
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<BarChartOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
+                              style={{ height: 16, padding: "0 2px", minWidth: 0 }}
+                              onClick={() => { setProfileQueryId(displayedResult.queryID!); setProfileQuerySql(resultHistory.find((e) => e.id === historyId)?.sql ?? ""); setProfileIsLive(false); }}
+                            />
+                          </Tooltip>
+                        )}
                       </Space>
                     )}
                     <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
-                      <Tooltip title="Export as CSV">
-                        <Button
-                          type="text"
-                          size="small"
-                          icon={<FileTextOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} />}
-                          style={{ height: 18, padding: "0 4px", minWidth: 0 }}
-                          onClick={exportCSV}
-                        />
-                      </Tooltip>
-                      <Tooltip title="Export as Excel">
-                        <Button
-                          type="text"
-                          size="small"
-                          icon={<FileExcelOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} />}
-                          style={{ height: 18, padding: "0 4px", minWidth: 0 }}
-                          onClick={exportExcel}
-                        />
-                      </Tooltip>
+                      {featureFlags.resultsetExport && (
+                        <Tooltip title="Export as CSV">
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<FileTextOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} />}
+                            style={{ height: 18, padding: "0 4px", minWidth: 0 }}
+                            onClick={exportCSV}
+                          />
+                        </Tooltip>
+                      )}
+                      {featureFlags.resultsetExport && (
+                        <Tooltip title="Export as Excel">
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<FileExcelOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} />}
+                            style={{ height: 18, padding: "0 4px", minWidth: 0 }}
+                            onClick={exportExcel}
+                          />
+                        </Tooltip>
+                      )}
                       <Text style={{ fontSize: 11, color: "var(--text-faint)" }}>
                         {displayedResult.rows.length} row{displayedResult.rows.length !== 1 ? "s" : ""}
                       </Text>
