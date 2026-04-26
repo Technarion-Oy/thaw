@@ -1152,7 +1152,16 @@ func (a *App) WaitForQueryResult(tabId string) (*snowflake.QueryResult, error) {
 
 // GetSessionContext returns the currently active role, warehouse, database and
 // schema for the given tab's isolated session.
+// Fast path: if the tab session hasn't been created yet but the shared client
+// is available (i.e. immediately after Connect()), use a.client to avoid
+// triggering a full NewClient re-login just to read session variables.
 func (a *App) GetSessionContext(tabId string) (snowflake.SessionContext, error) {
+	if _, ok := a.tabSessions.Load(tabId); !ok {
+		if a.client != nil {
+			return a.client.GetSessionContext(a.ctx)
+		}
+		return snowflake.SessionContext{}, ErrNotConnected
+	}
 	ts, err := a.getOrInitTabSession(tabId)
 	if err != nil {
 		return snowflake.SessionContext{}, err
