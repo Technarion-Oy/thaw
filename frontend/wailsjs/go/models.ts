@@ -1102,6 +1102,7 @@ export namespace queryprofile {
 	    partitionsScanned?: number;
 	    partitionsTotal?: number;
 	    joinType?: string;
+	    estimatedRows?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new ExplainNode(source);
@@ -1116,6 +1117,7 @@ export namespace queryprofile {
 	        this.partitionsScanned = source["partitionsScanned"];
 	        this.partitionsTotal = source["partitionsTotal"];
 	        this.joinType = source["joinType"];
+	        this.estimatedRows = source["estimatedRows"];
 	    }
 	}
 	export class ExplainPlan {

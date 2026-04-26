@@ -1838,6 +1838,14 @@ var tableRefRe = regexp.MustCompile(
 		`(?:[ \t]+(?:AS[ \t]+)?(` + ReIdentifier + `))?`,
 )
 
+var useStmtRe = regexp.MustCompile(
+	`(?i)\bUSE\s+(?:(DATABASE|SCHEMA|ROLE|WAREHOUSE)\s+)?` +
+		`(?:` +
+		`(` + ReIdentifier + `)\.(` + ReIdentifier + `)` +
+		`|(` + ReIdentifier + `)` +
+		`)`,
+)
+
 // normID normalises a raw captured identifier:
 //   - Quoted identifiers ("name") have quotes stripped, escaped quotes unescaped, and case preserved.
 //   - Unquoted identifiers are uppercased (Snowflake convention).
@@ -1853,11 +1861,14 @@ func normID(s string) string {
 }
 
 // ParseJoinTables extracts all FROM/JOIN table references (with optional aliases)
-// from the given SQL text.  Three-part (db.schema.table), two-part (schema.table),
-// and one-part (table) references are all recognized.
+// AND database/schema references from USE statements from the given SQL text.
+// Three-part (db.schema.table), two-part (schema.table), and one-part (table)
+// references are all recognized.
 func ParseJoinTables(sql string) []JoinTableRef {
 	var result []JoinTableRef
 	start := 0
+
+	// 1. Extract FROM/JOIN/MERGE/USING references
 	for {
 		m := tableRefRe.FindStringSubmatchIndex(sql[start:])
 		if m == nil {
@@ -1905,6 +1916,55 @@ func ParseJoinTables(sql string) []JoinTableRef {
 
 		result = append(result, JoinTableRef{DB: db, Schema: schema, Name: name, Alias: alias})
 	}
+
+	// 2. Extract USE statement references
+	start = 0
+	for {
+		m := useStmtRe.FindStringSubmatchIndex(sql[start:])
+		if m == nil {
+			break
+		}
+		for i := range m {
+			if m[i] != -1 {
+				m[i] += start
+			}
+		}
+
+		var db, schema string
+		keyword := ""
+		if m[2] != -1 {
+			keyword = strings.ToUpper(sql[m[2]:m[3]])
+		}
+
+		if keyword == "ROLE" || keyword == "WAREHOUSE" {
+			start = m[1]
+			continue
+		}
+
+		if m[4] != -1 && m[6] != -1 {
+			// Two-part: USE [SCHEMA] db.schema
+			db = normID(sql[m[4]:m[5]])
+			schema = normID(sql[m[6]:m[7]])
+			start = m[7]
+		} else if m[8] != -1 {
+			// One-part: USE [DATABASE|SCHEMA] name
+			val := normID(sql[m[8]:m[9]])
+			if keyword == "SCHEMA" {
+				schema = val
+			} else {
+				// USE DATABASE <db> or bare USE <db>
+				db = val
+			}
+			start = m[9]
+		} else {
+			start = m[1]
+		}
+
+		if db != "" || schema != "" {
+			result = append(result, JoinTableRef{DB: db, Schema: schema, Name: "", Alias: ""})
+		}
+	}
+
 	return result
 }
 
