@@ -40,6 +40,9 @@ const allEnabled: config.FeatureFlags = {
   gitIntegration: true,
   queryProfile: true,
   explainSql: true,
+  sqlDiagnostics: true,
+  schemaAutocomplete: true,
+  ddlHoverTooltips: true,
 };
 
 // allLocked default: nothing is admin-locked.
@@ -70,6 +73,9 @@ const nothingLocked: config.FeatureFlags = {
   gitIntegration: false,
   queryProfile: false,
   explainSql: false,
+  sqlDiagnostics: false,
+  schemaAutocomplete: false,
+  ddlHoverTooltips: false,
 };
 
 interface FeatureFlagsState {

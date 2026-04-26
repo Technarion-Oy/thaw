@@ -130,6 +130,9 @@ export namespace config {
 	    gitIntegration: boolean;
 	    queryProfile: boolean;
 	    explainSql: boolean;
+	    sqlDiagnostics: boolean;
+	    schemaAutocomplete: boolean;
+	    ddlHoverTooltips: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new FeatureFlags(source);
@@ -163,6 +166,9 @@ export namespace config {
 	        this.gitIntegration = source["gitIntegration"];
 	        this.queryProfile = source["queryProfile"];
 	        this.explainSql = source["explainSql"];
+	        this.sqlDiagnostics = source["sqlDiagnostics"];
+	        this.schemaAutocomplete = source["schemaAutocomplete"];
+	        this.ddlHoverTooltips = source["ddlHoverTooltips"];
 	    }
 	}
 	export class GitConfig {

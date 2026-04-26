@@ -356,6 +356,31 @@ export default function FeatureFlagsModal({ onClose }: Props) {
           />
         </Category>
 
+        {/* ── SQL Editor ── */}
+        <Category title="SQL Editor">
+          <FlagRow
+            label="SQL Diagnostics"
+            description="Real-time linting for syntax errors, anti-patterns, bad type casts, and missing tables."
+            checked={flags.sqlDiagnostics}
+            locked={locked.sqlDiagnostics}
+            onChange={(v) => set("sqlDiagnostics", v)}
+          />
+          <FlagRow
+            label="Schema Autocomplete"
+            description="Schema-aware completions for databases, schemas, tables, columns, and JOIN conditions (requires Snowflake connection)."
+            checked={flags.schemaAutocomplete}
+            locked={locked.schemaAutocomplete}
+            onChange={(v) => set("schemaAutocomplete", v)}
+          />
+          <FlagRow
+            label="DDL Hover Tooltips"
+            description="Hover over a table, view, or function name to see its DDL definition inline."
+            checked={flags.ddlHoverTooltips}
+            locked={locked.ddlHoverTooltips}
+            onChange={(v) => set("ddlHoverTooltips", v)}
+          />
+        </Category>
+
       </div>
     </Modal>
   );

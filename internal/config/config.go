@@ -150,8 +150,8 @@ func DefaultNotebookPrefs() NotebookPrefs {
 //
 // Version tracks the schema revision so new flags introduced after an initial
 // save can be filled with their defaults rather than the zero value (false).
-// Current version: 1 (added 21 new flags in the feature-flag management release).
-const flagsVersion = 1
+// Current version: 2 (added SQL editor flags: SqlDiagnostics, SchemaAutocomplete, DdlHoverTooltips).
+const flagsVersion = 2
 
 type FeatureFlags struct {
 	Initialized bool `json:"initialized"`
@@ -192,6 +192,11 @@ type FeatureFlags struct {
 	// Performance & Diagnostics
 	QueryProfile bool `json:"queryProfile"`
 	ExplainSQL   bool `json:"explainSql"`
+
+	// SQL Editor
+	SqlDiagnostics    bool `json:"sqlDiagnostics"`
+	SchemaAutocomplete bool `json:"schemaAutocomplete"`
+	DdlHoverTooltips  bool `json:"ddlHoverTooltips"`
 }
 
 // DefaultFeatureFlags returns a FeatureFlags with every feature enabled.
@@ -223,6 +228,9 @@ func DefaultFeatureFlags() FeatureFlags {
 		GitIntegration:         true,
 		QueryProfile:           true,
 		ExplainSQL:             true,
+		SqlDiagnostics:         true,
+		SchemaAutocomplete:     true,
+		DdlHoverTooltips:       true,
 	}
 }
 
@@ -266,6 +274,10 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	setIfZero(&f.GitIntegration, defaults.GitIntegration)
 	setIfZero(&f.QueryProfile, defaults.QueryProfile)
 	setIfZero(&f.ExplainSQL, defaults.ExplainSQL)
+	// Version 1 → 2: SQL editor flags added; all default to true.
+	setIfZero(&f.SqlDiagnostics, defaults.SqlDiagnostics)
+	setIfZero(&f.SchemaAutocomplete, defaults.SchemaAutocomplete)
+	setIfZero(&f.DdlHoverTooltips, defaults.DdlHoverTooltips)
 	f.Version = flagsVersion
 	return f
 }

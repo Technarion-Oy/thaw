@@ -615,6 +615,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     const runDiagnostics = async () => {
       const model = editor.getModel();
       if (!model) return;
+      if (!useFeatureFlagsStore.getState().flags.sqlDiagnostics) {
+        monaco.editor.setModelMarkers(model, "thaw-sql", []);
+        return;
+      }
       if (model.getLanguageId() !== "sql") {
         monaco.editor.setModelMarkers(model, "thaw-sql", []);
         return;
@@ -896,6 +900,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         }
         // ─────────────────────────────────────────────────────────────────
 
+        const schemaAutocompleteEnabled = useFeatureFlagsStore.getState().flags.schemaAutocomplete;
+
         const fullLine = model.getLineContent(position.lineNumber);
         const cursorOffset = model.getOffsetAt(position);
         const textToCursor = model.getValue().slice(0, cursorOffset);
@@ -909,7 +915,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           }
         }
 
-        if (charBefore === ".") {
+        if (charBefore === "." && schemaAutocompleteEnabled) {
           const contextParts = await GetIdentifierAtColumn(fullLine, word.startColumn - 1);
           if (contextParts && contextParts.length > 0) {
             // Case: db.schema.table.
@@ -1066,7 +1072,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         })();
 
         const wordIsOn = word.word.toUpperCase() === "ON";
-        if (wordIsOn || isInJoinOnClause) {
+        if ((wordIsOn || isInJoinOnClause) && schemaAutocompleteEnabled) {
           const rawRefs = await ParseJoinTableRefs(textToCursor);
           if (rawRefs && (rawRefs as any[]).length >= 2) {
             const resolvedRefs = resolveRefs(rawRefs as any[], useObjectStore.getState().objects);
@@ -1095,7 +1101,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           }
         }
 
-        {
+        if (schemaAutocompleteEnabled) {
           const lastJoinSegment = (textToCursor.split(/\bJOIN\b/i).pop() ?? "").trim();
           const rawRefsC = await ParseJoinTableRefs(textToCursor);
           const hasTriggerC =
@@ -1192,10 +1198,12 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           }
         }
 
-        const seenColKeys = new Set<string>();
         const contextColSuggestions: any[] = [];
         let fetchPending = false;
-        
+
+        if (schemaAutocompleteEnabled) {
+        const seenColKeys = new Set<string>();
+
         const rawRefs = await ParseJoinTableRefs(currentStmtText);
         const refsToFetch: {db: string, schema: string, name: string}[] = [];
 
@@ -1249,6 +1257,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             fetchPending = true;
           }
         }
+        } // end schemaAutocompleteEnabled (context columns)
 
         let fnSuggestions: any[] = [];
         if (word.word.length >= 2 && !lineUpToWord.trim().endsWith(".")) {
@@ -1273,13 +1282,13 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
         return {
           suggestions: [
-            ...variableSuggestions, 
-            ...contextColSuggestions, 
-            ...keywordSuggestions, 
-            ...dbSuggestions, 
-            ...schemaSuggestions, 
-            ...objectSuggestions, 
-            ...fnSuggestions
+            ...variableSuggestions,
+            ...contextColSuggestions,
+            ...keywordSuggestions,
+            ...(schemaAutocompleteEnabled ? dbSuggestions      : []),
+            ...(schemaAutocompleteEnabled ? schemaSuggestions  : []),
+            ...(schemaAutocompleteEnabled ? objectSuggestions  : []),
+            ...fnSuggestions,
           ],
           incomplete: fetchPending,
         };
@@ -1358,6 +1367,12 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       }
 
       if (model && model.getLanguageId() !== "sql") return;
+
+      if (!useFeatureFlagsStore.getState().flags.ddlHoverTooltips) {
+        if (hoverTimerRef.current) { clearTimeout(hoverTimerRef.current); hoverTimerRef.current = null; }
+        scheduleHide();
+        return;
+      }
 
       void (async () => {
       const pos = e.target?.position;
