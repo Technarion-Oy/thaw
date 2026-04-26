@@ -35,6 +35,7 @@ export default function App() {
   const setPreference = useThemeStore((s) => s.setPreference);
   const uiFont        = useThemeStore((s) => s.uiFont);
 
+  const [connectModalOpen, setConnectModalOpen]         = useState(false);
   const [layoutModalOpen, setLayoutModalOpen]         = useState(false);
   const [aiModalOpen, setAiModalOpen]                 = useState(false);
   const [editorPrefsOpen, setEditorPrefsOpen]         = useState(false);
@@ -46,10 +47,9 @@ export default function App() {
   const clearDiffError = useDiffStore((s) => s.clearError);
 
   // Whether the Zustand persist store has finished hydrating from sessionStorage.
-  // We hold off rendering ConnectModal vs AppLayout until we know the true
-  // persisted state, otherwise the modal flashes briefly on every page reload
-  // (even when the backend is still connected) while Zustand is async-reading
-  // sessionStorage for the first time.
+  // We hold off rendering AppLayout until we know the true persisted state so
+  // the UI initialises with the correct connection/theme/session values, avoiding
+  // a flash of incorrect state on reload.
   const [hydrated, setHydrated] = useState(
     () => useConnectionStore.persist.hasHydrated()
   );
@@ -142,6 +142,24 @@ export default function App() {
     return () => off();
   }, []);
 
+  // Open the connect modal on cold startup when not yet connected.
+  // Depends only on [hydrated] so disconnecting during a session does NOT reopen it.
+  useEffect(() => {
+    if (hydrated && !isConnected) setConnectModalOpen(true);
+  }, [hydrated]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-close the connect modal once a connection is established.
+  useEffect(() => {
+    if (isConnected) setConnectModalOpen(false);
+  }, [isConnected]);
+
+  // Allow any component to open the connect modal via a custom DOM event.
+  useEffect(() => {
+    const handler = () => setConnectModalOpen(true);
+    window.addEventListener("thaw:connect", handler);
+    return () => window.removeEventListener("thaw:connect", handler);
+  }, []);
+
   // Global clipboard fix for WKWebView on macOS.
   // navigator.clipboard.readText() is blocked, so Cmd+V in regular <input> /
   // <textarea> elements fails silently. We intercept keydown and manually
@@ -219,7 +237,8 @@ export default function App() {
         },
       }}
     >
-      {hydrated && (isConnected ? <AppLayout /> : <ConnectModal />)}
+      {hydrated && <AppLayout />}
+      {connectModalOpen && <ConnectModal onClose={() => setConnectModalOpen(false)} />}
       {layoutModalOpen && (
         <LayoutSettingsModal onClose={() => setLayoutModalOpen(false)} />
       )}

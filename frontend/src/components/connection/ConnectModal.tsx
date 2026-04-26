@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect } from "react";
-import { Form, Input, Button, Alert, Space, Typography, Select, Divider, Tooltip } from "antd";
+import { Form, Input, Button, Alert, Space, Typography, Select, Divider, Tooltip, Modal } from "antd";
 import { CloudServerOutlined, FolderOpenOutlined } from "@ant-design/icons";
 import UserAgreementModal from "./UserAgreementModal";
 import {
@@ -52,7 +52,7 @@ const AUTH_OPTIONS = [
 const needsPassword = (auth: string) =>
   auth !== "externalbrowser" && auth !== "snowflake_jwt";
 
-export default function ConnectModal() {
+export default function ConnectModal({ onClose }: { onClose?: () => void }) {
   const [form] = Form.useForm<ConnectionParams>();
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
@@ -128,17 +128,16 @@ export default function ConnectModal() {
   };
 
   return (
-    <div
-      style={{
-        height: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "var(--bg)",
-      }}
+    <Modal
+      open
+      centered
+      footer={null}
+      width={540}
+      maskClosable={false}
+      closable={!!onClose}
+      onCancel={onClose}
     >
-      <div style={{ width: 460 }}>
-        <Space direction="vertical" size={24} style={{ width: "100%" }}>
+      <Space direction="vertical" size={24} style={{ width: "100%" }}>
           <Space align="center">
             <CloudServerOutlined style={{ fontSize: 28, color: "#29B6F6" }} />
             <Title level={3} style={{ margin: 0, color: "var(--text)" }}>
@@ -321,8 +320,7 @@ export default function ConnectModal() {
           </Form>
 
           <UserAgreementModal open={agreementOpen} onClose={() => setAgreementOpen(false)} />
-        </Space>
-      </div>
-    </div>
+      </Space>
+    </Modal>
   );
 }

@@ -24,6 +24,7 @@ import {
   ListExportableDatabases,
 } from "../../../wailsjs/go/main/App";
 import { useGitStore } from "../../store/gitStore";
+import { useConnectionStore } from "../../store/connectionStore";
 import type { ddl } from "../../../wailsjs/go/models";
 
 type ExportResult = ddl.ExportResult;
@@ -38,6 +39,7 @@ const { Text } = Typography;
 
 export default function ExportPanel() {
   const { exportDir, pickExportDir } = useGitStore();
+  const isConnected = useConnectionStore((s) => s.isConnected);
 
   // ── database selection ────────────────────────────────────────────────────
   const [dbs, setDbs]               = useState<string[]>([]);
@@ -227,17 +229,19 @@ export default function ExportPanel() {
 
       {/* Export / Cancel buttons */}
       <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
-        <Button
-          size="small"
-          type="primary"
-          icon={<CloudUploadOutlined />}
-          disabled={!exportDir || running || (dbs.length > 0 && noneChecked)}
-          loading={running}
-          onClick={exportSelected}
-          style={{ flex: 1 }}
-        >
-          {exportLabel}
-        </Button>
+        <Tooltip title={!isConnected ? "Connect to Snowflake to export" : undefined}>
+          <Button
+            size="small"
+            type="primary"
+            icon={<CloudUploadOutlined />}
+            disabled={!isConnected || !exportDir || running || (dbs.length > 0 && noneChecked)}
+            loading={running}
+            onClick={exportSelected}
+            style={{ flex: 1 }}
+          >
+            {exportLabel}
+          </Button>
+        </Tooltip>
         {running && (
           <Button size="small" danger onClick={() => CancelExport()}>
             Cancel

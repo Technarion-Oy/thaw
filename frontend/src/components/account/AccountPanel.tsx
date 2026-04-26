@@ -20,6 +20,7 @@ import {
   DiffOutlined,
   HistoryOutlined,
   BarChartOutlined,
+  DisconnectOutlined,
 } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
@@ -35,6 +36,7 @@ import {
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { useGitStore } from "../../store/gitStore";
 import { useDiffStore } from "../../store/diffStore";
+import { useConnectionStore } from "../../store/connectionStore";
 import UserManagementPanel from "./UserManagementPanel";
 import PropertiesModal from "../common/PropertiesModal";
 import WarehousePropertiesModal from "./WarehousePropertiesModal";
@@ -93,6 +95,7 @@ function buildTree(roles: string[], warehouses: string[]): DataNode[] {
 
 export default function AccountPanel() {
   const exportDir = useGitStore((s) => s.exportDir);
+  const isConnected = useConnectionStore((s) => s.isConnected);
 
   const [loaded,     setLoaded]     = useState(false);
   const [loading,    setLoading]    = useState(false);
@@ -266,6 +269,15 @@ export default function AccountPanel() {
 
   return (
     <div style={{ borderTop: `1px solid ${CLR_BORDER}` }}>
+      {!isConnected ? (
+        <div style={{ padding: "24px 16px", textAlign: "center", color: "var(--text-muted)" }}>
+          <DisconnectOutlined style={{ fontSize: 24, display: "block", margin: "0 auto 8px" }} />
+          <div style={{ fontSize: 13, marginBottom: 12 }}>Not connected to Snowflake</div>
+          <Button size="small" type="primary" onClick={() => window.dispatchEvent(new Event("thaw:connect"))}>
+            Connect to browse objects
+          </Button>
+        </div>
+      ) : (
       <Collapse
         ghost
         defaultActiveKey={[]}
@@ -358,6 +370,7 @@ export default function AccountPanel() {
           ),
         }]}
       />
+      )}
 
       {/* Account object context menu */}
       {ctxMenu && (
