@@ -42,6 +42,7 @@ Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend +
 
 ### Pull Request Workflow
 - **Feature Branches**: Always work in a dedicated branch (`feat/`, `fix/`, etc.).
+- **Git History**: NEVER alter git branch history. Do not use `git commit --amend`, `git rebase`, or `git push --force`. Always create new commits and push them normally to update a PR.
 - **Submission**: Use GitHub CLI (`gh`) to create pull requests.
 - **Target**: Ensure PRs target `Technarion-Oy/thaw:main`.
 - **Command**: `gh pr create --repo Technarion-Oy/thaw --base main --title "..." --body "..."`

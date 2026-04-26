@@ -5,6 +5,7 @@ Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend +
 ## Development Workflow
 
 - **Branching**: All changes must be made in a feature branch (e.g., `feat/`, `fix/`, `chore/`).
+- **Git History**: NEVER alter git branch history. Do not use `git commit --amend`, `git rebase`, or `git push --force`. Always create new commits for updates.
 - **Commits**: Use descriptive commit messages with conventional prefixes. The commit type determines whether a release is triggered and what version component is bumped:
 
   | Commit type | Release | Version bump |
