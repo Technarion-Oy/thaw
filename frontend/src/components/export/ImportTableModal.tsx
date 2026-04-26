@@ -19,6 +19,7 @@ import {
 } from "@ant-design/icons";
 import { ImportTableData, PickDataFilesByFormat, ReadFileHead, SuggestImportOptions } from "../../../wailsjs/go/main/App";
 import { snowflake } from "../../../wailsjs/go/models";
+import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 
 const { Text } = Typography;
 
@@ -728,6 +729,7 @@ function ParquetOptions({ o, set }: { o: FormatOptions; set: (k: keyof FormatOpt
 // ── Main modal ────────────────────────────────────────────────────────────────
 
 export default function ImportTableModal({ db, schema, table, onClose, onSuccess }: Props) {
+  const aiImportSuggestEnabled = useFeatureFlagsStore((s) => s.flags.aiImportSuggest);
   const [filePaths, setFilePaths]     = useState<string[]>([]);
   const [format, setFormat]           = useState<Format>("CSV");
   const [options, setOptions]         = useState<FormatOptions>(() => defaultOptions("CSV"));
@@ -1079,7 +1081,7 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
                   </Text>
                 </Space>
               ),
-              extra: (format === "CSV" || format === "JSON") && filePaths.length > 0 ? (
+              extra: (format === "CSV" || format === "JSON") && filePaths.length > 0 && aiImportSuggestEnabled ? (
                 <Space size={4} onClick={(e) => e.stopPropagation()}>
                   <Tooltip title="Analyze file content with AI and apply suggested format options">
                     <Button

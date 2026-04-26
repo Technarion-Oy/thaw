@@ -27,6 +27,7 @@ import { useQueryStore } from "../../store/queryStore";
 import { useObjectStore } from "../../store/objectStore";
 import { useSessionStore } from "../../store/sessionStore";
 import { useThemeStore } from "../../store/themeStore";
+import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, GetAllDataTypes, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords } from "../../../wailsjs/go/main/App";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
@@ -512,6 +513,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   // ── "Explain SQL" context menu handler ───────────────────────────────────
   useEffect(() => {
     const handleExplain = async (e: Event) => {
+      if (!useFeatureFlagsStore.getState().flags.explainSql) return;
       const { selectedText, fullSql, cursorLine } = (e as CustomEvent).detail as {
         selectedText: string | null;
         fullSql: string;
@@ -1670,6 +1672,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           });
           const trimmed = prefix.length > 800 ? prefix.slice(-800) : prefix;
           if (trimmed.trim().length < 3) return { items: [] };
+          if (!useFeatureFlagsStore.getState().flags.aiInlineCompletions) return { items: [] };
 
           const suggestion = await GetAISuggestion(trimmed);
           if (token.isCancellationRequested || !suggestion) return { items: [] };
