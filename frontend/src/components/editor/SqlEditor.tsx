@@ -645,6 +645,39 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const storeDbs = useObjectStore.getState().databases;
         const storeSchemas = useObjectStore.getState().schemas;
 
+        // Warm up databases/schemas from rawRefs (including USE statements)
+        for (const ref of rawRefs || []) {
+          if (ref.db) {
+            const db = ref.db;
+            const dbSchemas = storeSchemas.filter((s) => UC(s.db) === UC(db));
+            if (dbSchemas.length === 0 && !fetchedDatabaseSchemas.has(UC(db))) {
+              fetchedDatabaseSchemas.add(UC(db));
+              void ListSchemas(db).then((fetched) => {
+                useObjectStore.getState().addSchemas(db, fetched ?? []);
+                if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
+                diagTimerRef.current = setTimeout(runDiagnostics, 0);
+              }).catch(() => { fetchedDatabaseSchemas.delete(UC(db)); });
+            }
+          }
+          if (ref.db && ref.schema) {
+            const db = ref.db;
+            const schema = ref.schema;
+            const schemaKey = `${UC(db)}\0${UC(schema)}`;
+            const hasObjects = storeObjs.some((o) => UC(o.db) === UC(db) && UC(o.schema) === UC(schema));
+            if (!hasObjects && !fetchedSchemaObjects.has(schemaKey)) {
+              fetchedSchemaObjects.add(schemaKey);
+              void ListObjects(db, schema).then((fetched) => {
+                useObjectStore.getState().addObjects(
+                  db, schema,
+                  (fetched ?? []).map((o) => ({ name: o.name, kind: (o.kind || "OTHER").toUpperCase() })),
+                );
+                if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
+                diagTimerRef.current = setTimeout(runDiagnostics, 0);
+              }).catch(() => { fetchedSchemaObjects.delete(schemaKey); });
+            }
+          }
+        }
+
         const resolved: ResolvedRef[] = (rawRefs || [])
           .map((ref) => {
             if (ref.db && ref.schema) {

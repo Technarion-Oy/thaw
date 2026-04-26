@@ -777,6 +777,15 @@ func TestParseJoinTables(t *testing.T) {
 				{Name: `My "Quoted" Table`, Alias: `My "Quoted" Table`},
 			},
 		},
+		{
+			name: "USE statements",
+			sql:  `USE DATABASE db1; USE SCHEMA sch1; USE db2.sch2; USE ROLE r1; USE WAREHOUSE w1;`,
+			want: []JoinTableRef{
+				{DB: "DB1"},
+				{Schema: "SCH1"},
+				{DB: "DB2", Schema: "SCH2"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
