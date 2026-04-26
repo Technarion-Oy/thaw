@@ -301,6 +301,12 @@ export default function NotebookTab({ tabId }: Props) {
   // Used for unsaved notebooks that have no on-disk file path.
   const [deployContent, setDeployContent] = useState("");
 
+  // Sync any-cell-running into the queryStore tab so the disconnect guard works.
+  const anyCellRunning = cells.some((c) => c.running);
+  useEffect(() => {
+    useQueryStore.getState().setTabRunning(tabId, anyCellRunning);
+  }, [tabId, anyCellRunning]);
+
   // Command-mode cell selection.
   const [selectedCellId, setSelectedCellId] = useState<string | null>(null);
   const selectedCellIdRef = useRef<string | null>(null);

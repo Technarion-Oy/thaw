@@ -438,9 +438,21 @@ export default function QueryPage() {
     prevConnectedRef.current = isConnected;
   }, [isConnected, activeTabId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleDisconnect = async () => {
-    await Disconnect();
-    disconnect();
+  const handleDisconnect = () => {
+    const anyRunning = useQueryStore.getState().tabs.some((t) => t.isRunning);
+    const doDisconnect = async () => { await Disconnect(); disconnect(); };
+    if (anyRunning) {
+      Modal.confirm({
+        title: "Disconnect while query is running?",
+        content: "A query is currently running. Disconnecting will cancel it and discard any pending results.",
+        okText: "Disconnect",
+        okButtonProps: { danger: true },
+        cancelText: "Cancel",
+        onOk: doDisconnect,
+      });
+    } else {
+      void doDisconnect();
+    }
   };
 
   const openSessionProperties = async () => {
