@@ -136,6 +136,8 @@ export function GetAISuggestion(arg1:string):Promise<string>;
 
 export function GetActiveFunctionCall(arg1:string):Promise<sqleditor.FunctionCallContext>;
 
+export function GetAdminLockedFlags():Promise<config.FeatureFlags>;
+
 export function GetAllDataTypes():Promise<Array<snowflake.DataTypeInfo>>;
 
 export function GetAllFunctionNames():Promise<Array<fnmeta.FunctionMeta>>;

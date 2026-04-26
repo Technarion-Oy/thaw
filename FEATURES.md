@@ -668,9 +668,53 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 
 ## Optional Features (Feature Flags)
 
-Thaw allows toggling specific features to optimize performance or simplify the UI. These can be configured in **View → Enabled Features…**:
+Thaw allows toggling specific features to optimize performance or simplify the UI. Open **View → Enabled Features…** to manage them.
 
-- **Export Table Data** — allow exporting table data to local files (CSV, JSON, Parquet).
+Features are organized into six categories, each with individual toggles:
+
+**Data Export & Import** — Resultset Export, Table Data Export, Table Data Import, DDL Export
+
+**Governance & Administration** — User & Role Management, Warehouse Management, Warehouse Credit Usage, Query Activity History, Integrations Management, Backup Policies & Sets
+
+**AI & Assistance** — AI Chat & Assistant, AI Inline Completions, AI Import Suggest
+
+**Advanced Tools & Data Engineering** — Schema Migration, dbt Project Scaffolding, ER Diagram & Designer, Task Graph Visualizer, Insert Mapping, Code Snippets
+
+**Developer Environments** — Snowpark & Notebooks, Embedded Terminal, Git Integration
+
+**Performance & Diagnostics** — Query Profile, Explain SQL
+
+### IT Admin Management
+
+Enterprise deployments can enforce feature policies without user interaction. The Go backend evaluates configuration sources in a strict priority hierarchy:
+
+1. **MDM / OS Registry (Highest)** — pushed by enterprise management tools
+2. **System-Level Config** — a global JSON file installed by IT on each machine
+3. **User-Level Config** — the user's personal preferences (modified via the UI)
+4. **Hardcoded Defaults (Lowest)** — all features enabled
+
+**System config file locations:**
+- macOS: `/Library/Application Support/Thaw/features.json`
+- Windows: `%PROGRAMDATA%\Thaw\features.json`
+- Linux: `/etc/thaw/features.json`
+
+**MDM / OS-native mechanisms:**
+- macOS: Managed Preferences plist at `/Library/Managed Preferences/com.thaw.app.plist` or `~/Library/Preferences/com.thaw.app.plist`; keys use `Disable<FeatureName>` (e.g. `DisableDDLExport = true`)
+- Windows: Group Policy / Registry at `HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Thaw\Features` or `HKEY_CURRENT_USER\SOFTWARE\Policies\Thaw\Features`; DWORD values use `Disable<FeatureName> = 1`
+
+**Config schema (JSON file):**
+```json
+{
+  "dataExportImport":         { "ddlExport": false, "tableDataExport": false },
+  "governanceAdministration": { "userRoleManagement": false },
+  "ai":                       { "aiChat": false, "aiInlineCompletions": false },
+  "advancedTools":            { "schemaMigration": false },
+  "developerEnvironments":    { "snowparkNotebooks": false },
+  "performanceDiagnostics":   { "explainSql": false }
+}
+```
+
+When a feature is admin-controlled, its toggle in **View → Enabled Features…** is greyed out with a lock icon and the tooltip *"This setting is managed by your IT Administrator."*
 
 ### Feasible Optional Features
 

@@ -9,20 +9,82 @@
 // license agreement with Technarion Oy.
 
 import { create } from "zustand";
-import { GetFeatureFlags } from "../../wailsjs/go/main/App";
+import { GetAdminLockedFlags, GetFeatureFlags } from "../../wailsjs/go/main/App";
 import type { config } from "../../wailsjs/go/models";
+
+// Optimistic defaults: every feature enabled until the backend responds.
+const allEnabled: config.FeatureFlags = {
+  initialized: true,
+  version: 1,
+  resultsetExport: true,
+  exportTableData: true,
+  tableDataImport: true,
+  ddlExport: true,
+  userRoleManagement: true,
+  warehouseManagement: true,
+  warehouseCreditUsage: true,
+  queryActivityHistory: true,
+  integrationsManagement: true,
+  backupPoliciesAndSets: true,
+  aiChat: true,
+  aiInlineCompletions: true,
+  aiImportSuggest: true,
+  schemaMigration: true,
+  dbtScaffolding: true,
+  erDiagramDesigner: true,
+  taskGraphVisualizer: true,
+  insertMapping: true,
+  codeSnippets: true,
+  snowparkNotebooks: true,
+  embeddedTerminal: true,
+  gitIntegration: true,
+  queryProfile: true,
+  explainSql: true,
+};
+
+// allLocked default: nothing is admin-locked.
+const nothingLocked: config.FeatureFlags = {
+  initialized: false,
+  version: 0,
+  resultsetExport: false,
+  exportTableData: false,
+  tableDataImport: false,
+  ddlExport: false,
+  userRoleManagement: false,
+  warehouseManagement: false,
+  warehouseCreditUsage: false,
+  queryActivityHistory: false,
+  integrationsManagement: false,
+  backupPoliciesAndSets: false,
+  aiChat: false,
+  aiInlineCompletions: false,
+  aiImportSuggest: false,
+  schemaMigration: false,
+  dbtScaffolding: false,
+  erDiagramDesigner: false,
+  taskGraphVisualizer: false,
+  insertMapping: false,
+  codeSnippets: false,
+  snowparkNotebooks: false,
+  embeddedTerminal: false,
+  gitIntegration: false,
+  queryProfile: false,
+  explainSql: false,
+};
 
 interface FeatureFlagsState {
   flags: config.FeatureFlags;
+  /** Which flags are controlled by IT admin and cannot be changed by the user. */
+  locked: config.FeatureFlags;
   /** Reload flags from the backend (call after SaveFeatureFlags). */
   load: () => Promise<void>;
 }
 
 export const useFeatureFlagsStore = create<FeatureFlagsState>((set) => ({
-  // Optimistic default: every feature enabled until the backend responds.
-  flags: { initialized: true, exportTableData: true },
+  flags: allEnabled,
+  locked: nothingLocked,
   load: async () => {
-    const flags = await GetFeatureFlags();
-    set({ flags });
+    const [flags, locked] = await Promise.all([GetFeatureFlags(), GetAdminLockedFlags()]);
+    set({ flags, locked });
   },
 }));

@@ -3059,18 +3059,36 @@ func (a *App) SaveEditorPrefs(prefs config.EditorPrefs) error {
 
 // ─── Feature flags ────────────────────────────────────────────────────────────
 
-// GetFeatureFlags returns the persisted feature flag settings.
-// When the config predates feature flags (Initialized == false) the defaults
-// are returned so every feature is enabled out of the box.
-func (a *App) GetFeatureFlags() config.FeatureFlags {
+// loadUserFeatureFlags returns the raw user-persisted flags (or defaults when
+// the config predates feature flags). Runs MigrateFlags so that new flags
+// added after an existing config was written are filled with their defaults.
+func loadUserFeatureFlags() config.FeatureFlags {
 	cfg, err := config.Load()
 	if err != nil || !cfg.FeatureFlags.Initialized {
 		return config.DefaultFeatureFlags()
 	}
-	return cfg.FeatureFlags
+	return config.MigrateFlags(cfg.FeatureFlags)
+}
+
+// GetFeatureFlags returns the effective feature flag settings with IT admin
+// overrides applied on top of the user's saved preferences.
+func (a *App) GetFeatureFlags() config.FeatureFlags {
+	user := loadUserFeatureFlags()
+	effective, _ := config.LoadAdminConfig(user)
+	return effective
+}
+
+// GetAdminLockedFlags returns a FeatureFlags mask where true means the field
+// is controlled by an IT admin configuration and cannot be changed by the user.
+func (a *App) GetAdminLockedFlags() config.FeatureFlags {
+	user := loadUserFeatureFlags()
+	_, locked := config.LoadAdminConfig(user)
+	return locked
 }
 
 // SaveFeatureFlags persists feature flag settings to disk.
+// Admin-locked fields in flags are silently ignored — the admin value is
+// preserved so a rogue client cannot bypass IT policy.
 // Initialized is always set to true so subsequent loads use the saved values.
 func (a *App) SaveFeatureFlags(flags config.FeatureFlags) error {
 	cfg, err := config.Load()
@@ -3078,6 +3096,84 @@ func (a *App) SaveFeatureFlags(flags config.FeatureFlags) error {
 		return err
 	}
 	flags.Initialized = true
+
+	// Preserve admin-locked values: restore the admin-controlled fields from
+	// the effective flags so a user cannot bypass policy via the API.
+	_, locked := config.LoadAdminConfig(flags)
+	effective, _ := config.LoadAdminConfig(flags)
+	if locked.ResultsetExport {
+		flags.ResultsetExport = effective.ResultsetExport
+	}
+	if locked.ExportTableData {
+		flags.ExportTableData = effective.ExportTableData
+	}
+	if locked.TableDataImport {
+		flags.TableDataImport = effective.TableDataImport
+	}
+	if locked.DDLExport {
+		flags.DDLExport = effective.DDLExport
+	}
+	if locked.UserRoleManagement {
+		flags.UserRoleManagement = effective.UserRoleManagement
+	}
+	if locked.WarehouseManagement {
+		flags.WarehouseManagement = effective.WarehouseManagement
+	}
+	if locked.WarehouseCreditUsage {
+		flags.WarehouseCreditUsage = effective.WarehouseCreditUsage
+	}
+	if locked.QueryActivityHistory {
+		flags.QueryActivityHistory = effective.QueryActivityHistory
+	}
+	if locked.IntegrationsManagement {
+		flags.IntegrationsManagement = effective.IntegrationsManagement
+	}
+	if locked.BackupPoliciesAndSets {
+		flags.BackupPoliciesAndSets = effective.BackupPoliciesAndSets
+	}
+	if locked.AIChat {
+		flags.AIChat = effective.AIChat
+	}
+	if locked.AIInlineCompletions {
+		flags.AIInlineCompletions = effective.AIInlineCompletions
+	}
+	if locked.AIImportSuggest {
+		flags.AIImportSuggest = effective.AIImportSuggest
+	}
+	if locked.SchemaMigration {
+		flags.SchemaMigration = effective.SchemaMigration
+	}
+	if locked.DbtScaffolding {
+		flags.DbtScaffolding = effective.DbtScaffolding
+	}
+	if locked.ERDiagramDesigner {
+		flags.ERDiagramDesigner = effective.ERDiagramDesigner
+	}
+	if locked.TaskGraphVisualizer {
+		flags.TaskGraphVisualizer = effective.TaskGraphVisualizer
+	}
+	if locked.InsertMapping {
+		flags.InsertMapping = effective.InsertMapping
+	}
+	if locked.CodeSnippets {
+		flags.CodeSnippets = effective.CodeSnippets
+	}
+	if locked.SnowparkNotebooks {
+		flags.SnowparkNotebooks = effective.SnowparkNotebooks
+	}
+	if locked.EmbeddedTerminal {
+		flags.EmbeddedTerminal = effective.EmbeddedTerminal
+	}
+	if locked.GitIntegration {
+		flags.GitIntegration = effective.GitIntegration
+	}
+	if locked.QueryProfile {
+		flags.QueryProfile = effective.QueryProfile
+	}
+	if locked.ExplainSQL {
+		flags.ExplainSQL = effective.ExplainSQL
+	}
+
 	cfg.FeatureFlags = flags
 	return config.Save(cfg)
 }
