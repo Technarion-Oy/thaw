@@ -9,11 +9,14 @@
 // license agreement with Technarion Oy.
 
 import { create } from "zustand";
-import { GitStatus, GitCommitAndPush, GitPull, PickDirectory, GetGitConfig, SaveGitConfig } from "../../wailsjs/go/main/App";
+import { GitStatus, GitCommitAndPush, GitPull, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCreateBranch, GitLookupCredentials } from "../../wailsjs/go/main/App";
 import type { gitrepo } from "../../wailsjs/go/models";
 
 export type RepoStatus = gitrepo.RepoStatus;
 export type PushParams = gitrepo.PushParams;
+export type BranchInfo = gitrepo.BranchInfo;
+export type CloneParams = gitrepo.CloneParams;
+export type CredentialResult = gitrepo.CredentialResult;
 
 interface GitState {
   // Persistent config (saved to disk, excluding token)
@@ -30,7 +33,14 @@ interface GitState {
   loading: boolean;
   pushing: boolean;
   pulling: boolean;
+  cloning: boolean;
   error: string | null;
+
+  // Dialog state
+  gitOpsOpen: boolean;
+
+  // Branch state
+  branches: BranchInfo[];
 
   // Actions
   loadConfig: () => Promise<void>;
@@ -44,9 +54,22 @@ interface GitState {
   }>) => Promise<void>;
   pickExportDir: () => Promise<void>;
   refreshStatus: () => Promise<void>;
-  push: (params: { token: string; message: string; files?: string[] }) => Promise<void>;
-  pull: (params: { token: string }) => Promise<void>;
+  push: (params: { authMethod?: string; token: string; message: string; files?: string[] }) => Promise<void>;
+  pull: (params: { authMethod?: string; token: string }) => Promise<void>;
+  lookupCredentials: (remoteURL: string) => Promise<CredentialResult>;
   clearError: () => void;
+
+  // Dialog actions
+  openGitOps: () => void;
+  closeGitOps: () => void;
+
+  // Branch actions
+  listBranches: () => Promise<void>;
+  checkoutBranch: (name: string) => Promise<void>;
+  createBranch: (name: string) => Promise<void>;
+
+  // Clone action
+  clone: (params: CloneParams) => Promise<void>;
 }
 
 export const useGitStore = create<GitState>((set, get) => ({
@@ -62,7 +85,11 @@ export const useGitStore = create<GitState>((set, get) => ({
   loading: false,
   pushing: false,
   pulling: false,
+  cloning: false,
   error: null,
+
+  gitOpsOpen: false,
+  branches: [],
 
   loadConfig: async () => {
     try {
@@ -115,7 +142,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
-  push: async ({ token, message, files }) => {
+  push: async ({ authMethod, token, message, files }) => {
     const { exportDir, remoteURL, branch, authorName, authorEmail } = get();
     if (!exportDir) return;
     set({ pushing: true, error: null });
@@ -124,12 +151,13 @@ export const useGitStore = create<GitState>((set, get) => ({
         dir:         exportDir,
         remoteURL:   remoteURL,
         branch:      branch || "main",
+        authMethod:  authMethod ?? "pat",
         token,
         message:     message || "chore: export Snowflake DDL",
         authorName,
         authorEmail,
         files:       files ?? [],
-      });
+      } as any);
       await get().refreshStatus();
     } catch (e) {
       set({ error: String(e) });
@@ -138,17 +166,18 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
-  pull: async ({ token }) => {
+  pull: async ({ authMethod, token }) => {
     const { exportDir, remoteURL, branch } = get();
     if (!exportDir) return;
     set({ pulling: true, error: null });
     try {
       await GitPull({
-        dir:       exportDir,
-        remoteURL: remoteURL,
-        branch:    branch || "main",
+        dir:        exportDir,
+        remoteURL:  remoteURL,
+        branch:     branch || "main",
+        authMethod: authMethod ?? "pat",
         token,
-      });
+      } as any);
       await get().refreshStatus();
     } catch (e) {
       set({ error: String(e) });
@@ -157,5 +186,65 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
+  lookupCredentials: async (remoteURL: string) => {
+    try {
+      return await GitLookupCredentials(remoteURL);
+    } catch {
+      return { found: false, username: "", source: "" } as CredentialResult;
+    }
+  },
+
   clearError: () => set({ error: null }),
+
+  openGitOps: () => set({ gitOpsOpen: true }),
+  closeGitOps: () => set({ gitOpsOpen: false }),
+
+  listBranches: async () => {
+    const { exportDir } = get();
+    if (!exportDir) return;
+    try {
+      const branches = await GitListBranches(exportDir);
+      set({ branches: branches ?? [] });
+    } catch {
+      set({ branches: [] });
+    }
+  },
+
+  checkoutBranch: async (name: string) => {
+    const { exportDir } = get();
+    if (!exportDir) return;
+    set({ error: null });
+    try {
+      await GitCheckoutBranch(exportDir, name);
+      await get().refreshStatus();
+      await get().listBranches();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  createBranch: async (name: string) => {
+    const { exportDir } = get();
+    if (!exportDir) return;
+    set({ error: null });
+    try {
+      await GitCreateBranch(exportDir, name);
+      await get().refreshStatus();
+      await get().listBranches();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  clone: async (params: CloneParams) => {
+    set({ cloning: true, error: null });
+    try {
+      await GitClone(params as any);
+    } catch (e) {
+      set({ error: String(e) });
+      throw e;
+    } finally {
+      set({ cloning: false });
+    }
+  },
 }));

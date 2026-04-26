@@ -248,7 +248,19 @@ export function GetWarehouseMeteringHistory(arg1:string,arg2:string,arg3:string)
 
 export function GetWarehouseParameters(arg1:string):Promise<Array<main.PropertyPair>>;
 
+export function GitCheckoutBranch(arg1:string,arg2:string):Promise<void>;
+
+export function GitClone(arg1:gitrepo.CloneParams):Promise<void>;
+
 export function GitCommitAndPush(arg1:gitrepo.PushParams):Promise<void>;
+
+export function GitCreateBranch(arg1:string,arg2:string):Promise<void>;
+
+export function GitGetHeadFileContent(arg1:string):Promise<string>;
+
+export function GitListBranches(arg1:string):Promise<Array<gitrepo.BranchInfo>>;
+
+export function GitLookupCredentials(arg1:string):Promise<gitrepo.CredentialResult>;
 
 export function GitPull(arg1:gitrepo.PullParams):Promise<void>;
 

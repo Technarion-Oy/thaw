@@ -503,6 +503,40 @@ func (a *App) GitPull(params gitrepo.PullParams) error {
 	return gitrepo.Pull(a.ctx, params)
 }
 
+// GitClone clones a remote repository into the given local path.
+// The Token field is used only in-memory and is never persisted.
+func (a *App) GitClone(params gitrepo.CloneParams) error {
+	return gitrepo.Clone(a.ctx, params)
+}
+
+// GitListBranches returns all local and remote branches for the repository at dir.
+func (a *App) GitListBranches(dir string) ([]gitrepo.BranchInfo, error) {
+	return gitrepo.ListBranches(dir)
+}
+
+// GitCheckoutBranch checks out an existing local branch in the repository at dir.
+func (a *App) GitCheckoutBranch(dir string, branchName string) error {
+	return gitrepo.CheckoutBranch(dir, branchName)
+}
+
+// GitCreateBranch creates and checks out a new branch in the repository at dir.
+func (a *App) GitCreateBranch(dir string, branchName string) error {
+	return gitrepo.CreateBranch(dir, branchName)
+}
+
+// GitGetHeadFileContent returns the content of filePath as stored in the HEAD commit.
+// Returns an empty string (no error) when the file is not yet tracked in HEAD.
+func (a *App) GitGetHeadFileContent(filePath string) (string, error) {
+	return gitrepo.GetHeadFileContent(filePath)
+}
+
+// GitLookupCredentials probes OS credential stores (keychain, credential manager,
+// ~/.git-credentials, ~/.netrc) for the given remote URL.
+// The result never contains the secret — only discovery metadata safe for the UI.
+func (a *App) GitLookupCredentials(remoteURL string) (gitrepo.CredentialResult, error) {
+	return gitrepo.LookupCredentials(remoteURL), nil
+}
+
 // ListDirectory returns the direct children of path (dirs first, then files).
 func (a *App) ListDirectory(path string) ([]filesystem.FileEntry, error) {
 	return filesystem.ListDir(path)

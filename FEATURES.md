@@ -423,10 +423,19 @@ When multiple databases or schemas are selected, stub filenames are prefixed wit
 
 ## Git Integration
 
-- View git status for the working directory (staged and unstaged files)
-- **Pull** — fetch and merge from the configured remote branch
-- **Commit & Push** — select individual files to stage, filter by extension, enter a commit message and personal access token
-- Git credentials are **never saved to disk** — the token is held in memory only for the duration of the push
+- **Embedded `go-git`** — all git operations run without a system `git` installation; no external binary dependency
+- **Git Operations Dialog** — open via **Git → Git Operations…** (`⌘G` / `Ctrl+G`) or the "Git Operations…" button in the sidebar Git panel; provides four tabs:
+  - **Commit & Push** — file checklist with checkboxes (added/modified/deleted colour-coded), select all / none / by extension, commit message textarea, personal access token input (ephemeral, never saved)
+  - **Pull** — shows current remote URL and branch; PAT input; pull from configured remote branch
+  - **Clone** — remote URL input, local path picker (native OS dialog), optional PAT (for private repos), clone progress feedback
+  - **Branches** — lists all local and remote branches with the current branch highlighted; Switch button per local branch; create new branch with name input and **Create Branch** button; refresh button to reload branch list
+- **Git gutter indicators** — when a tracked file is open in the SQL editor, VS Code-style coloured bars appear in the gutter:
+  - **Green bar** — lines added since the last HEAD commit
+  - **Blue bar** — lines modified since the last HEAD commit
+  - **Red chevron** — deletion point where lines were removed
+  - Indicators update 400 ms after each keystroke; clear automatically when a scratch tab (no file path) is active
+- View git status for the working directory (staged and unstaged files shown in the sidebar panel)
+- Git credentials are **never saved to disk** — tokens are held in memory only for the duration of the operation
 - OS junk files (`.DS_Store`, `Thumbs.db`, `desktop.ini`) are automatically excluded and added to `.gitignore`
 
 ---
@@ -845,6 +854,7 @@ Open **Help → Keyboard Shortcuts…** in the menu bar for a searchable, always
 | `⌘\` | `Ctrl+\` | Toggle split editor view |
 | `⌘L` | `Ctrl+L` | Focus AI Chat |
 | `⌘\`` | `Ctrl+\`` | Open embedded terminal |
+| `⌘G` | `Ctrl+G` | Open Git Operations… |
 
 ### Notebook (Command Mode — no cell editor focused)
 

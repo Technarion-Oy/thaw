@@ -470,8 +470,32 @@ export function GetWarehouseParameters(arg1) {
   return window['go']['main']['App']['GetWarehouseParameters'](arg1);
 }
 
+export function GitCheckoutBranch(arg1, arg2) {
+  return window['go']['main']['App']['GitCheckoutBranch'](arg1, arg2);
+}
+
+export function GitClone(arg1) {
+  return window['go']['main']['App']['GitClone'](arg1);
+}
+
 export function GitCommitAndPush(arg1) {
   return window['go']['main']['App']['GitCommitAndPush'](arg1);
+}
+
+export function GitCreateBranch(arg1, arg2) {
+  return window['go']['main']['App']['GitCreateBranch'](arg1, arg2);
+}
+
+export function GitGetHeadFileContent(arg1) {
+  return window['go']['main']['App']['GitGetHeadFileContent'](arg1);
+}
+
+export function GitListBranches(arg1) {
+  return window['go']['main']['App']['GitListBranches'](arg1);
+}
+
+export function GitLookupCredentials(arg1) {
+  return window['go']['main']['App']['GitLookupCredentials'](arg1);
 }
 
 export function GitPull(arg1) {
