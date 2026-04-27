@@ -1810,12 +1810,13 @@ func (a *App) DropIntegration(name string) error {
 }
 
 // CanCreateIntegration returns true when the current role can create integrations.
-// If tabId is non-empty the tab's isolated session is used (reflects any USE ROLE
-// that has been applied to that tab), otherwise the main shared connection is used.
+// If tabId is non-empty and the tab already has an isolated session (i.e. at least
+// one query has been run on it), that session is used so that any USE ROLE applied
+// to the tab is reflected. Otherwise the main shared connection is used.
 func (a *App) CanCreateIntegration(tabId string) (bool, error) {
 	if tabId != "" {
-		if ts, err := a.getOrInitTabSession(tabId); err == nil {
-			return ts.client.CanCreateIntegration(a.ctx)
+		if val, ok := a.tabSessions.Load(tabId); ok {
+			return val.(*tabSession).client.CanCreateIntegration(a.ctx)
 		}
 	}
 	if a.client == nil {
