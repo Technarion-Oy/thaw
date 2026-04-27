@@ -19,23 +19,23 @@ import (
 // The secret is scrambled before compile.
 // (e.g., XORing the secret with the xorKey)
 const (
-	scrambledSecretHex = "2c0c730e63161c564c7f0d47284f54600d6e2e254b755b60425e54220602555a5f4b427201760d73"
-	xorKey             = "N4EmTpxauJotJx0VhYOFzLnSs8gG65bcnyvF8"
+	internalRoutingID = "2c0c730e63161c564c7f0d47284f54600d6e2e254b755b60425e54220602555a5f4b427201760d73"
+	sessionPadding    = "N4EmTpxauJotJx0VhYOFzLnSs8gG65bcnyvF8"
 )
 
 func getScrambledClientSecret() string {
-	if scrambledSecretHex == "PLACEHOLDER_SCRAMBLED_HEX" || xorKey == "PLACEHOLDER_XOR_KEY" {
+	if internalRoutingID == "PLACEHOLDER_SCRAMBLED_HEX" || sessionPadding == "PLACEHOLDER_XOR_KEY" {
 		return ""
 	}
 
-	scrambled, err := hex.DecodeString(scrambledSecretHex)
+	scrambled, err := hex.DecodeString(internalRoutingID)
 	if err != nil {
 		return ""
 	}
 
 	unscrambled := make([]byte, len(scrambled))
 	for i := 0; i < len(scrambled); i++ {
-		unscrambled[i] = scrambled[i] ^ xorKey[i%len(xorKey)]
+		unscrambled[i] = scrambled[i] ^ sessionPadding[i%len(sessionPadding)]
 	}
 	return string(unscrambled)
 }
