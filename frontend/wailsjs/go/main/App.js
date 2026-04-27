@@ -474,6 +474,10 @@ export function GitCheckoutBranch(arg1, arg2) {
   return window['go']['main']['App']['GitCheckoutBranch'](arg1, arg2);
 }
 
+export function GitCheckoutRemoteBranch(arg1, arg2) {
+  return window['go']['main']['App']['GitCheckoutRemoteBranch'](arg1, arg2);
+}
+
 export function GitClone(arg1) {
   return window['go']['main']['App']['GitClone'](arg1);
 }
@@ -484,6 +488,18 @@ export function GitCommitAndPush(arg1) {
 
 export function GitCreateBranch(arg1, arg2) {
   return window['go']['main']['App']['GitCreateBranch'](arg1, arg2);
+}
+
+export function GitDeleteBranch(arg1, arg2) {
+  return window['go']['main']['App']['GitDeleteBranch'](arg1, arg2);
+}
+
+export function GitDeleteRemoteBranch(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GitDeleteRemoteBranch'](arg1, arg2, arg3);
+}
+
+export function GitFetch(arg1, arg2) {
+  return window['go']['main']['App']['GitFetch'](arg1, arg2);
 }
 
 export function GitGetHeadFileContent(arg1) {
@@ -506,8 +522,20 @@ export function GitPull(arg1) {
   return window['go']['main']['App']['GitPull'](arg1);
 }
 
+export function GitPushBranch(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GitPushBranch'](arg1, arg2, arg3);
+}
+
+export function GitResetHard(arg1) {
+  return window['go']['main']['App']['GitResetHard'](arg1);
+}
+
 export function GitStatus(arg1) {
   return window['go']['main']['App']['GitStatus'](arg1);
+}
+
+export function GitUpdateRemoteURL(arg1, arg2) {
+  return window['go']['main']['App']['GitUpdateRemoteURL'](arg1, arg2);
 }
 
 export function ImportTableData(arg1) {

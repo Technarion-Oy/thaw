@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { create } from "zustand";
-import { GitStatus, GitCommitAndPush, GitPull, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCreateBranch, GitLookupCredentials, GitLoginWithOAuth } from "../../wailsjs/go/main/App";
+import { GitStatus, GitCommitAndPush, GitPull, GitFetch, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCheckoutRemoteBranch, GitCreateBranch, GitDeleteBranch, GitDeleteRemoteBranch, GitResetHard, GitUpdateRemoteURL, GitPushBranch, GitLoginWithOAuth } from "../../wailsjs/go/main/App";
 import type { gitrepo } from "../../wailsjs/go/models";
 
 export type RepoStatus = gitrepo.RepoStatus;
@@ -34,7 +34,11 @@ interface GitState {
   pushing: boolean;
   pulling: boolean;
   cloning: boolean;
+  resetting: boolean;
   error: string | null;
+
+  // OAuth token (in-memory only, never persisted)
+  oauthToken: string;
 
   // Dialog state
   gitOpsOpen: boolean;
@@ -54,10 +58,10 @@ interface GitState {
   }>) => Promise<void>;
   pickExportDir: () => Promise<void>;
   refreshStatus: () => Promise<void>;
-  push: (params: { authMethod?: string; token: string; message: string; files?: string[] }) => Promise<void>;
-  pull: (params: { authMethod?: string; token: string }) => Promise<void>;
-  lookupCredentials: (remoteURL: string) => Promise<CredentialResult>;
+  push: (params: { message: string; files?: string[] }) => Promise<void>;
+  pull: () => Promise<void>;
   loginWithOAuth: (provider: string) => Promise<string>;
+  setOAuthToken: (token: string) => void;
   clearError: () => void;
 
   // Dialog actions
@@ -67,7 +71,16 @@ interface GitState {
   // Branch actions
   listBranches: () => Promise<void>;
   checkoutBranch: (name: string) => Promise<void>;
+  checkoutRemoteBranch: (remoteName: string) => Promise<void>;
   createBranch: (name: string) => Promise<void>;
+  deleteBranch: (name: string) => Promise<void>;
+  deleteRemoteBranch: (remoteName: string) => Promise<void>;
+  pushBranch: (branch: string) => Promise<void>;
+  pullBranch: (branch: string) => Promise<void>;
+
+  // Reset / remote actions
+  resetHard: () => Promise<void>;
+  updateRemoteURL: (remoteURL: string) => Promise<void>;
 
   // Clone action
   clone: (params: CloneParams) => Promise<void>;
@@ -87,7 +100,10 @@ export const useGitStore = create<GitState>((set, get) => ({
   pushing: false,
   pulling: false,
   cloning: false,
+  resetting: false,
   error: null,
+
+  oauthToken: "",
 
   gitOpsOpen: false,
   branches: [],
@@ -143,8 +159,8 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
-  push: async ({ authMethod, token, message, files }) => {
-    const { exportDir, remoteURL, branch, authorName, authorEmail } = get();
+  push: async ({ message, files }) => {
+    const { exportDir, remoteURL, branch, authorName, authorEmail, oauthToken } = get();
     if (!exportDir) return;
     set({ pushing: true, error: null });
     try {
@@ -152,8 +168,8 @@ export const useGitStore = create<GitState>((set, get) => ({
         dir:         exportDir,
         remoteURL:   remoteURL,
         branch:      branch || "main",
-        authMethod:  authMethod ?? "pat",
-        token,
+        authMethod:  "oauth",
+        token:       oauthToken,
         message:     message || "chore: export Snowflake DDL",
         authorName,
         authorEmail,
@@ -167,8 +183,8 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
-  pull: async ({ authMethod, token }) => {
-    const { exportDir, remoteURL, branch } = get();
+  pull: async () => {
+    const { exportDir, remoteURL, branch, oauthToken } = get();
     if (!exportDir) return;
     set({ pulling: true, error: null });
     try {
@@ -176,8 +192,8 @@ export const useGitStore = create<GitState>((set, get) => ({
         dir:        exportDir,
         remoteURL:  remoteURL,
         branch:     branch || "main",
-        authMethod: authMethod ?? "pat",
-        token,
+        authMethod: "oauth",
+        token:      oauthToken,
       } as any);
       await get().refreshStatus();
     } catch (e) {
@@ -187,22 +203,18 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
-  lookupCredentials: async (remoteURL: string) => {
-    try {
-      return await GitLookupCredentials(remoteURL);
-    } catch {
-      return { found: false, username: "", source: "" } as CredentialResult;
-    }
-  },
-
   loginWithOAuth: async (provider: string) => {
     try {
-      return await GitLoginWithOAuth(provider);
+      const token = await GitLoginWithOAuth(provider);
+      set({ oauthToken: token });
+      return token;
     } catch (e) {
       set({ error: String(e) });
       throw e;
     }
   },
+
+  setOAuthToken: (token: string) => set({ oauthToken: token }),
 
   clearError: () => set({ error: null }),
 
@@ -210,8 +222,12 @@ export const useGitStore = create<GitState>((set, get) => ({
   closeGitOps: () => set({ gitOpsOpen: false }),
 
   listBranches: async () => {
-    const { exportDir } = get();
+    const { exportDir, oauthToken } = get();
     if (!exportDir) return;
+    // Fetch from remote first so remote-tracking refs are current.
+    // Fetch errors are intentionally swallowed — offline / no remote is fine,
+    // we still want to show the local branches.
+    try { await GitFetch(exportDir, oauthToken); } catch { /* offline or no remote */ }
     try {
       const branches = await GitListBranches(exportDir);
       set({ branches: branches ?? [] });
@@ -233,6 +249,19 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
+  checkoutRemoteBranch: async (remoteName: string) => {
+    const { exportDir } = get();
+    if (!exportDir) return;
+    set({ error: null });
+    try {
+      await GitCheckoutRemoteBranch(exportDir, remoteName);
+      await get().refreshStatus();
+      await get().listBranches();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
   createBranch: async (name: string) => {
     const { exportDir } = get();
     if (!exportDir) return;
@@ -241,6 +270,91 @@ export const useGitStore = create<GitState>((set, get) => ({
       await GitCreateBranch(exportDir, name);
       await get().refreshStatus();
       await get().listBranches();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  deleteBranch: async (name: string) => {
+    const { exportDir } = get();
+    if (!exportDir) return;
+    set({ error: null });
+    try {
+      await GitDeleteBranch(exportDir, name);
+      await get().listBranches();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  deleteRemoteBranch: async (remoteName: string) => {
+    const { exportDir, oauthToken } = get();
+    if (!exportDir) return;
+    set({ error: null });
+    // remoteName is "origin/branch-name" — strip the remote prefix for the IPC call
+    const idx = remoteName.indexOf("/");
+    const branch = idx >= 0 ? remoteName.slice(idx + 1) : remoteName;
+    try {
+      await GitDeleteRemoteBranch(exportDir, branch, oauthToken);
+      await get().listBranches();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  pushBranch: async (branch: string) => {
+    const { exportDir, oauthToken } = get();
+    if (!exportDir) return;
+    set({ error: null });
+    try {
+      await GitPushBranch(exportDir, branch, oauthToken);
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  pullBranch: async (branch: string) => {
+    const { exportDir, remoteURL, oauthToken } = get();
+    if (!exportDir) return;
+    set({ pulling: true, error: null });
+    try {
+      await GitPull({
+        dir:        exportDir,
+        remoteURL:  remoteURL,
+        branch,
+        authMethod: "oauth",
+        token:      oauthToken,
+      } as any);
+      await get().refreshStatus();
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      set({ pulling: false });
+    }
+  },
+
+  resetHard: async () => {
+    const { exportDir } = get();
+    if (!exportDir) return;
+    set({ resetting: true, error: null });
+    try {
+      await GitResetHard(exportDir);
+      await get().refreshStatus();
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      set({ resetting: false });
+    }
+  },
+
+  updateRemoteURL: async (remoteURL: string) => {
+    const { exportDir } = get();
+    if (!exportDir) return;
+    set({ error: null });
+    try {
+      await GitUpdateRemoteURL(exportDir, remoteURL);
+      await get().saveConfig({ remoteURL });
+      await get().refreshStatus();
     } catch (e) {
       set({ error: String(e) });
     }

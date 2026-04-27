@@ -400,6 +400,39 @@ func Pull(ctx context.Context, p PullParams) error {
 	return nil
 }
 
+// Fetch updates all remote-tracking refs from "origin".
+// "already up-to-date" is treated as success.
+// If token is empty the repo's stored credentials (if any) are tried.
+func Fetch(ctx context.Context, dir, token string) error {
+	repo, err := gogit.PlainOpen(dir)
+	if err != nil {
+		return fmt.Errorf("not a git repository")
+	}
+
+	remote, err := repo.Remote("origin")
+	if err != nil || remote == nil {
+		return fmt.Errorf("no remote 'origin' configured")
+	}
+	remoteURL := ""
+	if urls := remote.Config().URLs; len(urls) > 0 {
+		remoteURL = urls[0]
+	}
+
+	fetchOpts := &gogit.FetchOptions{
+		RemoteName: "origin",
+		Auth:       resolveAuth(normaliseHTTPS(remoteURL), "oauth", token),
+	}
+	if remoteURL != "" {
+		fetchOpts.RemoteURL = normaliseHTTPS(remoteURL)
+	}
+
+	err = repo.FetchContext(ctx, fetchOpts)
+	if err != nil && !errors.Is(err, gogit.NoErrAlreadyUpToDate) {
+		return fmt.Errorf("git fetch: %w", err)
+	}
+	return nil
+}
+
 // Clone clones a remote repository into the given local path.
 func Clone(ctx context.Context, p CloneParams) error {
 	url := normaliseHTTPS(p.URL)
@@ -500,6 +533,165 @@ func CreateBranch(dir, name string) error {
 		Branch: plumbing.NewBranchReferenceName(name),
 		Create: true,
 	})
+}
+
+// CheckoutRemoteBranch creates a local branch from a remote-tracking ref and
+// checks it out. remoteName must be in "origin/<branch>" form (the format
+// returned by ListBranches for remote entries).
+func CheckoutRemoteBranch(dir, remoteName string) error {
+	repo, err := gogit.PlainOpenWithOptions(dir, &gogit.PlainOpenOptions{DetectDotGit: true})
+	if err != nil {
+		return fmt.Errorf("not a git repository")
+	}
+
+	// Split "origin/feature/xyz" → remote="origin", local="feature/xyz"
+	idx := strings.IndexByte(remoteName, '/')
+	if idx < 0 {
+		return fmt.Errorf("expected remote branch in '<remote>/<branch>' form, got %q", remoteName)
+	}
+	remotePart := remoteName[:idx]
+	localName := remoteName[idx+1:]
+
+	remoteRef, err := repo.Reference(plumbing.NewRemoteReferenceName(remotePart, localName), true)
+	if err != nil {
+		return fmt.Errorf("remote branch not found: %w", err)
+	}
+
+	wt, err := repo.Worktree()
+	if err != nil {
+		return fmt.Errorf("worktree: %w", err)
+	}
+
+	return wt.Checkout(&gogit.CheckoutOptions{
+		Branch: plumbing.NewBranchReferenceName(localName),
+		Hash:   remoteRef.Hash(),
+		Create: true,
+	})
+}
+
+// DeleteRemoteBranch deletes a branch on the "origin" remote by pushing a
+// delete refspec (equivalent to git push origin --delete <branch>).
+// branch must be the short local name (e.g. "feature/xyz", not "origin/feature/xyz").
+func DeleteRemoteBranch(ctx context.Context, dir, branch, token string) error {
+	repo, err := gogit.PlainOpen(dir)
+	if err != nil {
+		return fmt.Errorf("not a git repository")
+	}
+
+	remote, err := repo.Remote("origin")
+	if err != nil || remote == nil {
+		return fmt.Errorf("no remote 'origin' configured")
+	}
+	remoteURL := ""
+	if urls := remote.Config().URLs; len(urls) > 0 {
+		remoteURL = urls[0]
+	}
+
+	pushOpts := &gogit.PushOptions{
+		RemoteName: "origin",
+		RefSpecs:   []config.RefSpec{config.RefSpec(":refs/heads/" + branch)},
+		Auth:       resolveAuth(normaliseHTTPS(remoteURL), "oauth", token),
+	}
+	if remoteURL != "" {
+		pushOpts.RemoteURL = normaliseHTTPS(remoteURL)
+	}
+
+	err = repo.PushContext(ctx, pushOpts)
+	if err != nil && !errors.Is(err, gogit.NoErrAlreadyUpToDate) {
+		return fmt.Errorf("delete remote branch: %w", err)
+	}
+	return nil
+}
+
+// DeleteBranch deletes a local branch by name.
+// Returns an error if the branch is currently checked out.
+func DeleteBranch(dir, name string) error {
+	repo, err := gogit.PlainOpenWithOptions(dir, &gogit.PlainOpenOptions{DetectDotGit: true})
+	if err != nil {
+		return fmt.Errorf("not a git repository")
+	}
+
+	head, err := repo.Head()
+	if err == nil && head.Name().Short() == name {
+		return fmt.Errorf("cannot delete the currently checked-out branch")
+	}
+
+	if err := repo.Storer.RemoveReference(plumbing.NewBranchReferenceName(name)); err != nil {
+		return fmt.Errorf("delete branch: %w", err)
+	}
+	return nil
+}
+
+// ResetHard discards all uncommitted working-tree changes,
+// resetting the worktree to the HEAD commit (git reset --hard HEAD).
+func ResetHard(dir string) error {
+	repo, err := gogit.PlainOpenWithOptions(dir, &gogit.PlainOpenOptions{DetectDotGit: true})
+	if err != nil {
+		return fmt.Errorf("not a git repository")
+	}
+
+	head, err := repo.Head()
+	if err != nil {
+		return fmt.Errorf("no commits yet: %w", err)
+	}
+
+	wt, err := repo.Worktree()
+	if err != nil {
+		return fmt.Errorf("worktree: %w", err)
+	}
+
+	return wt.Reset(&gogit.ResetOptions{
+		Commit: head.Hash(),
+		Mode:   gogit.HardReset,
+	})
+}
+
+// UpdateRemoteURL sets or replaces the "origin" remote URL for the repo at dir.
+func UpdateRemoteURL(dir, remoteURL string) error {
+	repo, err := gogit.PlainOpenWithOptions(dir, &gogit.PlainOpenOptions{DetectDotGit: true})
+	if err != nil {
+		return fmt.Errorf("not a git repository")
+	}
+
+	normalised := normaliseHTTPS(remoteURL)
+	_ = repo.DeleteRemote("origin")
+	_, err = repo.CreateRemote(&config.RemoteConfig{
+		Name: "origin",
+		URLs: []string{normalised},
+	})
+	return err
+}
+
+// PushBranch pushes the given branch to "origin" without staging or committing.
+func PushBranch(ctx context.Context, dir, branch, token string) error {
+	repo, err := gogit.PlainOpen(dir)
+	if err != nil {
+		return fmt.Errorf("not a git repository")
+	}
+
+	remote, err := repo.Remote("origin")
+	if err != nil || remote == nil {
+		return fmt.Errorf("no remote 'origin' configured")
+	}
+	remoteURL := ""
+	if urls := remote.Config().URLs; len(urls) > 0 {
+		remoteURL = urls[0]
+	}
+
+	pushOpts := &gogit.PushOptions{
+		RemoteName: "origin",
+		RefSpecs:   []config.RefSpec{config.RefSpec(fmt.Sprintf("refs/heads/%s:refs/heads/%s", branch, branch))},
+		Auth:       resolveAuth(normaliseHTTPS(remoteURL), "oauth", token),
+	}
+	if remoteURL != "" {
+		pushOpts.RemoteURL = normaliseHTTPS(remoteURL)
+	}
+
+	err = repo.PushContext(ctx, pushOpts)
+	if err != nil && !errors.Is(err, gogit.NoErrAlreadyUpToDate) {
+		return fmt.Errorf("git push: %w", err)
+	}
+	return nil
 }
 
 // GetHeadFileContent returns the content of filePath as it exists in the HEAD
