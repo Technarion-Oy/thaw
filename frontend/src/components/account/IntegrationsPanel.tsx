@@ -163,12 +163,17 @@ export default function IntegrationsPanel() {
   };
 
   const onRightClick = ({ event, node }: { event: React.MouseEvent; node: DataNode }) => {
-    event.preventDefault();
-    const key = String(node.key);
+  event.preventDefault();
+  const key = String(node.key);
+  
     if (key.startsWith("category:")) {
       const kind = key.slice("category:".length);
+      
+      // FETCH FRESH STATE HERE
+      refreshCanCreate(); 
+      
       setCtxMenu({ x: event.clientX, y: event.clientY, type: "category", kind });
-    } else if (key.startsWith("integration:")) {
+  } else if (key.startsWith("integration:")) {
       // key = "integration:{KIND}:{name}"
       const rest = key.slice("integration:".length);
       // kind may contain spaces (e.g. "EXTERNAL ACCESS"), name follows the second ":"
