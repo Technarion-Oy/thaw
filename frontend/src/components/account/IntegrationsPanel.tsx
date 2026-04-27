@@ -9,7 +9,6 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
-import { useConnectionStore } from "../../store/connectionStore";
 import { Collapse, Space, Typography, Tree, Spin, Popconfirm, message } from "antd";
 import {
   ApiOutlined,
@@ -92,7 +91,6 @@ export default function IntegrationsPanel() {
   const [canCreate, setCanCreate] = useState(false);
   const [ctxMenu,   setCtxMenu]   = useState<CtxMenuState | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
-  const isConnected = useConnectionStore((s) => s.isConnected);
 
   // Modal state
   const [createOpen,    setCreateOpen]    = useState<{ kind: string } | null>(null);
@@ -102,9 +100,13 @@ export default function IntegrationsPanel() {
   const [dropConfirm,   setDropConfirm]   = useState<string | null>(null);
   const [dropKind,      setDropKind]      = useState<string>("");
 
+  // Check permission once on mount (best-effort; may be stale if client not ready yet).
   useEffect(() => {
     CanCreateIntegration().then(setCanCreate).catch(() => {});
-  }, [isConnected]);
+  }, []);
+
+  const refreshCanCreate = () =>
+    CanCreateIntegration().then(setCanCreate).catch(() => {});
 
   // Clamp context menu in viewport before paint
   useLayoutEffect(() => {
@@ -222,6 +224,9 @@ export default function IntegrationsPanel() {
         ghost
         defaultActiveKey={[]}
         style={{ background: "transparent" }}
+        onChange={(keys) => {
+          if ((keys as string[]).includes("integrations")) refreshCanCreate();
+        }}
         items={[{
           key:   "integrations",
           label: (
@@ -242,7 +247,7 @@ export default function IntegrationsPanel() {
               onClick={(e) => {
                 e.stopPropagation();
                 loadedKinds.forEach((k) => reloadKind(k));
-                CanCreateIntegration().then(setCanCreate).catch(() => {});
+                refreshCanCreate();
               }}
             />
           ),
