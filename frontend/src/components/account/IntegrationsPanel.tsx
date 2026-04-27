@@ -10,6 +10,7 @@
 
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { useSessionStore } from "../../store/sessionStore";
+import { useQueryStore } from "../../store/queryStore";
 import { Collapse, Space, Typography, Tree, Spin, Popconfirm, message } from "antd";
 import {
   ApiOutlined,
@@ -92,7 +93,8 @@ export default function IntegrationsPanel() {
   const [canCreate, setCanCreate] = useState(false);
   const [ctxMenu,   setCtxMenu]   = useState<CtxMenuState | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
-  const role = useSessionStore((s) => s.role);
+  const role      = useSessionStore((s) => s.role);
+  const activeTabId = useQueryStore((s) => s.activeTabId);
 
   // Modal state
   const [createOpen,    setCreateOpen]    = useState<{ kind: string } | null>(null);
@@ -102,14 +104,16 @@ export default function IntegrationsPanel() {
   const [dropConfirm,   setDropConfirm]   = useState<string | null>(null);
   const [dropKind,      setDropKind]      = useState<string>("");
 
-  // Re-check whenever the active role changes (covers role switches and initial connect).
+  // Re-check whenever the active role changes. Pass the tab ID so the backend
+  // checks the tab's isolated session (which reflects any USE ROLE applied there)
+  // rather than the main shared connection.
   useEffect(() => {
     if (!role) { setCanCreate(false); return; }
-    CanCreateIntegration().then(setCanCreate).catch(() => {});
-  }, [role]);
+    CanCreateIntegration(activeTabId).then(setCanCreate).catch(() => {});
+  }, [role, activeTabId]);
 
   const refreshCanCreate = () =>
-    CanCreateIntegration().then(setCanCreate).catch(() => {});
+    CanCreateIntegration(activeTabId).then(setCanCreate).catch(() => {});
 
   // Clamp context menu in viewport before paint
   useLayoutEffect(() => {
