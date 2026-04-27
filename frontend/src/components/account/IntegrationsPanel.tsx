@@ -9,6 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
+import { useConnectionStore } from "../../store/connectionStore";
 import { Collapse, Space, Typography, Tree, Spin, Popconfirm, message } from "antd";
 import {
   ApiOutlined,
@@ -91,6 +92,7 @@ export default function IntegrationsPanel() {
   const [canCreate, setCanCreate] = useState(false);
   const [ctxMenu,   setCtxMenu]   = useState<CtxMenuState | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
+  const isConnected = useConnectionStore((s) => s.isConnected);
 
   // Modal state
   const [createOpen,    setCreateOpen]    = useState<{ kind: string } | null>(null);
@@ -102,7 +104,7 @@ export default function IntegrationsPanel() {
 
   useEffect(() => {
     CanCreateIntegration().then(setCanCreate).catch(() => {});
-  }, []);
+  }, [isConnected]);
 
   // Clamp context menu in viewport before paint
   useLayoutEffect(() => {
