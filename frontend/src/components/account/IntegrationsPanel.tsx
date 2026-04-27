@@ -240,6 +240,7 @@ export default function IntegrationsPanel() {
               onClick={(e) => {
                 e.stopPropagation();
                 loadedKinds.forEach((k) => reloadKind(k));
+                CanCreateIntegration().then(setCanCreate).catch(() => {});
               }}
             />
           ),
