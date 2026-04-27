@@ -108,7 +108,6 @@ function computeGitLineDiff(headLines: string[], currentLines: string[]): {
 
   // Backtrack to find diff operations.
   const added: number[] = [];
-  const modified: number[] = [];
   const deleted: number[] = [];
   let i = 0, j = 0;
   while (i < H || j < C) {
@@ -124,9 +123,19 @@ function computeGitLineDiff(headLines: string[], currentLines: string[]): {
     }
   }
 
-  // Reclassify consecutive add+delete pairs at same position as modified.
-  // Build result using a simpler approach for correctness.
-  return { added, modified, deleted };
+  // Reclassify: a line in current that appears in both `added` and `deleted`
+  // at the same position was in HEAD but changed — show it as "modified".
+  const deletedSet = new Set(deleted);
+  const addedSet   = new Set(added);
+  const modifiedLines: number[] = [];
+  for (const line of added) {
+    if (deletedSet.has(line)) modifiedLines.push(line);
+  }
+  return {
+    added:    added.filter(l => !deletedSet.has(l)),
+    modified: modifiedLines,
+    deleted:  deleted.filter(l => !addedSet.has(l)),
+  };
 }
 
 // ── Datatype completion cache ──────────────────────────────────────────────────
@@ -503,6 +512,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const gitGutterDecRef   = useRef<any>(null);
   const gitGutterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Ref holding the current file path — updated synchronously on every render
+  // so that the stable handleMount closure always reads the latest value.
+  const activeFilePathRef    = useRef<string | null>(null);
+  const refreshGitGutterRef  = useRef<(() => Promise<void>) | null>(null);
+  activeFilePathRef.current  = activeTab?.path ?? null;
   const fnDecTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const diagTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -574,10 +588,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       // Evict cached HEAD content so the next refresh re-fetches from go-git.
       headContentCache.delete(activeFilePath);
     }
-    // Clear gutter immediately on tab switch; refreshGitGutter runs again
-    // inside handleMount for the new tab's model.
+    // Clear immediately, then schedule a fresh run for the new tab's content.
     gitGutterDecRef.current?.set([]);
     if (gitGutterTimerRef.current) clearTimeout(gitGutterTimerRef.current);
+    gitGutterTimerRef.current = setTimeout(() => { refreshGitGutterRef.current?.(); }, 0);
   }, [tabId ?? activeTabId]);
 
   // ── "Explain SQL" context menu handler ───────────────────────────────────
@@ -868,7 +882,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     const refreshGitGutter = async () => {
       const model = editor.getModel();
       if (!model) return;
-      const filePath = activeTab?.path;
+      // Read from the ref so we always get the current tab's path, not the
+      // path that was active when handleMount first ran (stale closure fix).
+      const filePath = activeFilePathRef.current;
       if (!filePath) {
         // Scratch tab — clear any stale decorations.
         gitGutterDecRef.current?.set([]);
@@ -890,13 +906,19 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       const headLines    = (headContent ?? "").split("\n");
       const currentLines = currentText.split("\n");
 
-      const { added, deleted } = computeGitLineDiff(headLines, currentLines);
+      const { added, modified, deleted } = computeGitLineDiff(headLines, currentLines);
 
       const decorations: any[] = [];
       for (const lineNum of added) {
         decorations.push({
           range: new monaco.Range(lineNum, 1, lineNum, 1),
           options: { linesDecorationsClassName: "git-gutter-added" },
+        });
+      }
+      for (const lineNum of modified) {
+        decorations.push({
+          range: new monaco.Range(lineNum, 1, lineNum, 1),
+          options: { linesDecorationsClassName: "git-gutter-modified" },
         });
       }
       for (const lineNum of deleted) {
@@ -907,6 +929,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       }
       gitGutterDecRef.current?.set(decorations);
     };
+    // Store so the tab-switch effect can trigger a refresh outside handleMount.
+    refreshGitGutterRef.current = refreshGitGutter;
 
     // Initial run and debounced re-run on content change.
     refreshGitGutter();
