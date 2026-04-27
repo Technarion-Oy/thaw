@@ -128,7 +128,9 @@ func PerformOAuthFlow(ctx context.Context, provider string) (string, error) {
 		}
 
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, "<html><body><h2>Authentication successful!</h2><p>You can close this tab and return to Thaw.</p><script>window.close()</script></body></html>")
+		if _, err := fmt.Fprintf(w, "<html><body><h2>Authentication successful!</h2><p>You can close this tab and return to Thaw.</p><script>window.close()</script></body></html>"); err != nil {
+			fmt.Printf("failed to write HTML response: %v", err)
+		}
 		codeChan <- code
 	})
 
@@ -137,8 +139,11 @@ func PerformOAuthFlow(ctx context.Context, provider string) (string, error) {
 			errChan <- fmt.Errorf("local server error: %w", err)
 		}
 	}()
-	defer server.Shutdown(context.Background())
-
+	defer func() {
+		if err := server.Shutdown(context.Background()); err != nil {
+			fmt.Printf("failed to shutdown server: %v", err)
+		}
+	}()
 	redirectURI := "http://127.0.0.1:3456/callback"
 
 	authURL, err := url.Parse(cfg.AuthURL)
@@ -193,7 +198,11 @@ func exchangeCodeForToken(cfg OAuthConfig, code, redirectURI string) (string, er
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			fmt.Printf("failed to close response body: %v", err)
+		}
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

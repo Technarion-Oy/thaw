@@ -12,13 +12,14 @@ package gitrepo
 
 import (
 	"bufio"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 
-	gogithttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/plumbing/transport"
+	gogithttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 )
 
 // CredentialResult is the IPC-safe credential lookup result.
@@ -103,7 +104,11 @@ func readGitCredentialsFile(host string) *storedCreds {
 	if err != nil {
 		return nil
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			fmt.Printf("failed to close file: %v\n", err)
+		}
+	}()
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -139,7 +144,11 @@ func readNetrc(host string) *storedCreds {
 	if err != nil {
 		return nil
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			fmt.Printf("failed to close file: %v\n", err)
+		}
+	}()
 
 	type parseState int
 	const (
