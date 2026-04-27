@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"thaw/internal/config"
 
@@ -18,7 +19,11 @@ import (
 
 // The secret is scrambled before compile.
 // (e.g., XORing the secret with the xorKey)
+// This is the industry standard for storing oauth keys.
+// For reference check src/shared/GitHub/GitHubConstants.cs
+// in https://github.com/git-ecosystem/git-credential-manager
 const (
+	// #nosec G101 // Justification: OAuth2 public client application 'secrets' are required and permitted to be public
 	internalRoutingID = "2c0c730e63161c564c7f0d47284f54600d6e2e254b755b60425e54220602555a5f4b427201760d73"
 	sessionPadding    = "N4EmTpxauJotJx0VhYOFzLnSs8gG65bcnyvF8"
 )
@@ -64,6 +69,7 @@ func GetProviderConfig(provider string) OAuthConfig {
 			secret = cfg.OAuth.GithubClientSecret
 		}
 
+		// #nosec G101 // Justification: OAuth2 public client application 'secrets' are required and permitted to be public
 		return OAuthConfig{
 			ProviderName: "GitHub",
 			AuthURL:      "https://github.com/login/oauth/authorize",
@@ -73,6 +79,7 @@ func GetProviderConfig(provider string) OAuthConfig {
 			Scopes:       "repo",
 		}
 	case "gitlab":
+		// #nosec G101 // Justification: OAuth2 public client application 'secrets' are required and permitted to be public
 		return OAuthConfig{
 			ProviderName: "GitLab",
 			AuthURL:      "https://gitlab.com/oauth/authorize",
@@ -103,7 +110,14 @@ func PerformOAuthFlow(ctx context.Context, provider string) (string, error) {
 	errChan := make(chan error)
 
 	mux := http.NewServeMux()
-	server := &http.Server{Addr: "127.0.0.1:3456", Handler: mux}
+	server := &http.Server{
+		Addr:              "127.0.0.1:3456",
+		Handler:           mux,
+		ReadHeaderTimeout: 3 * time.Second,  // Time allowed to read headers
+		ReadTimeout:       10 * time.Second, // Maximum duration for reading the entire request
+		WriteTimeout:      10 * time.Second, // Maximum duration before timing out writes of the response
+		IdleTimeout:       30 * time.Second, // Maximum amount of time to wait for the next request when keep-alives are enabled
+	}
 
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		queryState := r.URL.Query().Get("state")
