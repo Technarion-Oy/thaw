@@ -8,36 +8,28 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useEffect } from "react";
-import { Button, Input, Typography, Spin, Alert, Badge, Collapse, Space, Tooltip } from "antd";
+import { useEffect } from "react";
+import { Button, Typography, Alert, Collapse, Space, Badge, Tooltip } from "antd";
 import {
   FolderOpenOutlined,
   ReloadOutlined,
   BranchesOutlined,
-  CloudUploadOutlined,
-  CloudDownloadOutlined,
 } from "@ant-design/icons";
 import { useGitStore } from "../../store/gitStore";
-import CommitModal from "./CommitModal";
 
 const { Text } = Typography;
 
 const CLR_BORDER    = "var(--border)";
 const CLR_SECONDARY = "var(--text-muted)";
-const CLR_ADDED     = "#3fb950";
 const CLR_MODIFIED  = "#d29922";
-const CLR_DELETED   = "#f85149";
 
 export default function GitPanel() {
   const {
-    exportDir, remoteURL, branch, authorName, authorEmail,
-    configLoaded, status, loading, pushing, pulling, error,
-    loadConfig, saveConfig, pickExportDir, refreshStatus, push, pull, clearError,
+    exportDir,
+    configLoaded, status, loading, error,
+    loadConfig, pickExportDir, refreshStatus, clearError,
+    openGitOps,
   } = useGitStore();
-
-  // Token is ephemeral — shared between pull and the commit modal
-  const [token, setToken] = useState("");
-  const [commitOpen, setCommitOpen] = useState(false);
 
   useEffect(() => {
     if (!configLoaded) {
@@ -45,25 +37,12 @@ export default function GitPanel() {
     }
   }, []);
 
-  const totalChanged =
-    (status?.modified?.length ?? 0) +
-    (status?.added?.length   ?? 0) +
-    (status?.deleted?.length ?? 0);
-
-  const handlePull = async () => {
-    await pull({ token });
-  };
-
-  const handleCommit = async (files: string[], message: string, commitToken: string) => {
-    await push({ token: commitToken, message, files });
-    if (!useGitStore.getState().error) {
-      setCommitOpen(false);
-    }
-  };
+  // Use the exact total from the backend (may exceed the capped array lengths).
+  const totalChanged = status?.totalChanged ?? 0;
 
   const headerLabel = (() => {
     if (!status?.isRepo) return "Git";
-    const b = branch || "main";
+    const b = status.branch || "main";
     return status.ahead > 0 ? `Git · ${b} (↑${status.ahead})` : `Git · ${b}`;
   })();
 
@@ -122,124 +101,27 @@ export default function GitPanel() {
                 )}
               </div>
 
-              {/* ── Status ──────────────────────────────────────── */}
-              {exportDir && loading && (
-                <Spin size="small" style={{ display: "block", margin: "4px auto" }} />
-              )}
-
+              {/* ── Status summary ───────────────────────────────── */}
               {exportDir && status && !loading && (
-                <>
-                  {!status.isRepo && (
-                    <Text style={{ fontSize: 11, color: CLR_SECONDARY }}>
-                      Not a git repository — will be initialised on push.
-                    </Text>
-                  )}
-                  {status.isRepo && totalChanged === 0 && (
-                    <Text style={{ fontSize: 11, color: CLR_SECONDARY }}>
-                      Working tree clean.
-                      {status.ahead > 0 && ` ${status.ahead} commit(s) not yet pushed.`}
-                    </Text>
-                  )}
-                  {totalChanged > 0 && (
-                    <div style={{ maxHeight: 140, overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
-                      {status.added?.map((f) => (
-                        <Text key={f} style={{ fontSize: 11, fontFamily: "monospace", color: CLR_ADDED }}>+ {f}</Text>
-                      ))}
-                      {status.modified?.map((f) => (
-                        <Text key={f} style={{ fontSize: 11, fontFamily: "monospace", color: CLR_MODIFIED }}>~ {f}</Text>
-                      ))}
-                      {status.deleted?.map((f) => (
-                        <Text key={f} style={{ fontSize: 11, fontFamily: "monospace", color: CLR_DELETED }}>- {f}</Text>
-                      ))}
-                    </div>
-                  )}
-                </>
+                <Text style={{ fontSize: 11, color: CLR_SECONDARY }}>
+                  {!status.isRepo
+                    ? "Not a git repository — will be initialised on push."
+                    : totalChanged === 0
+                      ? `Working tree clean.${status.ahead > 0 ? ` ${status.ahead} commit(s) not yet pushed.` : ""}`
+                      : `${totalChanged.toLocaleString()} changed file${totalChanged !== 1 ? "s" : ""}.`}
+                </Text>
               )}
 
-              {/* ── Remote + Branch + Auth ───────────────────────── */}
+              {/* ── Git Operations button ────────────────────────── */}
               {exportDir && (
-                <>
-                  <Input
-                    size="small"
-                    placeholder="https://github.com/org/repo.git"
-                    value={remoteURL}
-                    onChange={(e) => saveConfig({ remoteURL: e.target.value })}
-                    style={{ fontSize: 12 }}
-                    addonBefore={<Text style={{ fontSize: 11, color: CLR_SECONDARY }}>Remote</Text>}
-                  />
-                  <Input
-                    size="small"
-                    placeholder="main"
-                    value={branch}
-                    onChange={(e) => saveConfig({ branch: e.target.value })}
-                    style={{ fontSize: 12 }}
-                    addonBefore={<Text style={{ fontSize: 11, color: CLR_SECONDARY }}>Branch</Text>}
-                  />
-
-                  <Collapse
-                    ghost
-                    size="small"
-                    style={{ background: "transparent", marginLeft: -8 }}
-                    items={[{
-                      key: "auth",
-                      label: <Text style={{ fontSize: 11, color: CLR_SECONDARY }}>Author & token</Text>,
-                      style: { border: "none" },
-                      children: (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                          <Input
-                            size="small"
-                            placeholder="Your Name"
-                            value={authorName}
-                            onChange={(e) => saveConfig({ authorName: e.target.value })}
-                            style={{ fontSize: 12 }}
-                            addonBefore={<Text style={{ fontSize: 11, color: CLR_SECONDARY }}>Name</Text>}
-                          />
-                          <Input
-                            size="small"
-                            placeholder="you@example.com"
-                            value={authorEmail}
-                            onChange={(e) => saveConfig({ authorEmail: e.target.value })}
-                            style={{ fontSize: 12 }}
-                            addonBefore={<Text style={{ fontSize: 11, color: CLR_SECONDARY }}>Email</Text>}
-                          />
-                          <Input.Password
-                            size="small"
-                            placeholder="GitHub PAT (ghp_…) — not saved"
-                            value={token}
-                            onChange={(e) => setToken(e.target.value)}
-                            style={{ fontSize: 12 }}
-                            visibilityToggle
-                          />
-                        </div>
-                      ),
-                    }]}
-                  />
-
-                  {/* ── Action buttons ──────────────────────────── */}
-                  <Space.Compact block>
-                    <Button
-                      size="small"
-                      icon={<CloudDownloadOutlined />}
-                      loading={pulling}
-                      disabled={loading || pushing || !status?.isRepo}
-                      onClick={handlePull}
-                      style={{ width: "40%" }}
-                    >
-                      {pulling ? "Pulling…" : "Pull"}
-                    </Button>
-                    <Button
-                      type="primary"
-                      size="small"
-                      icon={<CloudUploadOutlined />}
-                      loading={pushing}
-                      disabled={loading || pulling}
-                      onClick={() => setCommitOpen(true)}
-                      style={{ width: "60%" }}
-                    >
-                      {pushing ? "Pushing…" : "Commit & Push"}
-                    </Button>
-                  </Space.Compact>
-                </>
+                <Button
+                  size="small"
+                  type="default"
+                  onClick={openGitOps}
+                  style={{ marginTop: 2 }}
+                >
+                  Git Operations…
+                </Button>
               )}
 
               {/* ── Error ──────────────────────────────────────────── */}
@@ -257,16 +139,6 @@ export default function GitPanel() {
           ),
         }]}
       />
-
-      {/* ── Commit modal ───────────────────────────────────────── */}
-      {commitOpen && status && (
-        <CommitModal
-          status={status}
-          pushing={pushing}
-          onClose={() => setCommitOpen(false)}
-          onCommit={handleCommit}
-        />
-      )}
     </div>
   );
 }

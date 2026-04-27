@@ -16,9 +16,12 @@ import QueryPage from "../../pages/QueryPage";
 import ExportPanel from "../export/ExportPanel";
 import FileBrowser from "../files/FileBrowser";
 import GitPanel from "../git/GitPanel";
+import GitOperationsDialog from "../git/GitOperationsDialog";
 import AccountPanel from "../account/AccountPanel";
 import { usePanelLayoutStore, type PanelId, type SidebarId } from "../../store/panelLayoutStore";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
+import { useGitStore } from "../../store/gitStore";
+import { EventsOn } from "../../../wailsjs/runtime/runtime";
 
 const { Content } = Layout;
 
@@ -251,6 +254,13 @@ export default function AppLayout() {
 
   const anyResizing = left.resizing || right.resizing;
 
+  // Listen for "Git Operations…" menu item
+  const openGitOps = useGitStore((s) => s.openGitOps);
+  useEffect(() => {
+    const cleanup = EventsOn("menu:git-operations", () => openGitOps());
+    return cleanup;
+  }, [openGitOps]);
+
   const sidebarStyle = (width: number): React.CSSProperties => ({
     width,
     minWidth: width,
@@ -315,6 +325,9 @@ export default function AppLayout() {
         {rightPanels.map((id) => <PanelWrapper key={id} id={id} sidebar="right" />)}
         <SidebarDropZone sidebar="right" />
       </div>
+
+      {/* Git Operations Dialog — rendered at layout root so it floats above all panels */}
+      <GitOperationsDialog />
     </Layout>
   );
 }

@@ -29,7 +29,7 @@ import { useSessionStore } from "../../store/sessionStore";
 import { useThemeStore } from "../../store/themeStore";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, GetAllDataTypes, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords } from "../../../wailsjs/go/main/App";
+import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, GetAllDataTypes, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GitGetHeadFileContent } from "../../../wailsjs/go/main/App";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
@@ -74,6 +74,69 @@ let fnNamesLoaded = false;
 
 const fetchedSchemaObjects   = new Set<string>();
 const fetchedDatabaseSchemas = new Set<string>();
+
+// ── Git gutter: HEAD content cache ────────────────────────────────────────────
+// Maps absolute file path → HEAD content string (empty = new file).
+const headContentCache = new Map<string, string>();
+
+// Maximum lines to diff — beyond this, gutter decorators are skipped to
+// avoid O(H×C) DP memory / time blowup on very large files.
+const MAX_DIFF_LINES = 3000;
+
+// Compute line-level diff between HEAD and current content.
+// Returns 1-based line numbers for added, modified, and deleted regions.
+function computeGitLineDiff(headLines: string[], currentLines: string[]): {
+  added: number[];
+  modified: number[];
+  deleted: number[];
+} {
+  if (headLines.length > MAX_DIFF_LINES || currentLines.length > MAX_DIFF_LINES) {
+    return { added: [], modified: [], deleted: [] };
+  }
+
+  // DP LCS on line arrays.
+  const H = headLines.length;
+  const C = currentLines.length;
+  const dp: number[][] = Array.from({ length: H + 1 }, () => new Array(C + 1).fill(0));
+  for (let i = H - 1; i >= 0; i--) {
+    for (let j = C - 1; j >= 0; j--) {
+      dp[i][j] = headLines[i] === currentLines[j]
+        ? 1 + dp[i + 1][j + 1]
+        : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+
+  // Backtrack to find diff operations.
+  const added: number[] = [];
+  const deleted: number[] = [];
+  let i = 0, j = 0;
+  while (i < H || j < C) {
+    if (i < H && j < C && headLines[i] === currentLines[j]) {
+      i++; j++;
+    } else if (j < C && (i >= H || dp[i + 1][j] <= dp[i][j + 1])) {
+      added.push(j + 1);
+      j++;
+    } else {
+      // Head line i was deleted. Record deletion point in current as line j (insertion point).
+      deleted.push(Math.max(1, j));
+      i++;
+    }
+  }
+
+  // Reclassify: a line in current that appears in both `added` and `deleted`
+  // at the same position was in HEAD but changed — show it as "modified".
+  const deletedSet = new Set(deleted);
+  const addedSet   = new Set(added);
+  const modifiedLines: number[] = [];
+  for (const line of added) {
+    if (deletedSet.has(line)) modifiedLines.push(line);
+  }
+  return {
+    added:    added.filter(l => !deletedSet.has(l)),
+    modified: modifiedLines,
+    deleted:  deleted.filter(l => !addedSet.has(l)),
+  };
+}
 
 // ── Datatype completion cache ──────────────────────────────────────────────────
 // Fetched once from the Go registry (snowflake.AllDataTypes) so the editor and
@@ -445,7 +508,15 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
   const activeStmtDecRef = useRef<any>(null);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fnDecRef       = useRef<any>(null);
+  const fnDecRef          = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const gitGutterDecRef   = useRef<any>(null);
+  const gitGutterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Ref holding the current file path — updated synchronously on every render
+  // so that the stable handleMount closure always reads the latest value.
+  const activeFilePathRef    = useRef<string | null>(null);
+  const refreshGitGutterRef  = useRef<(() => Promise<void>) | null>(null);
+  activeFilePathRef.current  = activeTab?.path ?? null;
   const fnDecTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const diagTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -510,6 +581,19 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     return () => document.removeEventListener("click", dismiss);
   }, [tooltipCtxMenu]);
 
+  // ── Git gutter: clear HEAD cache and re-run when active tab changes ───────
+  const activeFilePath = activeTab?.path ?? null;
+  useEffect(() => {
+    if (activeFilePath) {
+      // Evict cached HEAD content so the next refresh re-fetches from go-git.
+      headContentCache.delete(activeFilePath);
+    }
+    // Clear immediately, then schedule a fresh run for the new tab's content.
+    gitGutterDecRef.current?.set([]);
+    if (gitGutterTimerRef.current) clearTimeout(gitGutterTimerRef.current);
+    gitGutterTimerRef.current = setTimeout(() => { refreshGitGutterRef.current?.(); }, 0);
+  }, [tabId ?? activeTabId]);
+
   // ── "Explain SQL" context menu handler ───────────────────────────────────
   useEffect(() => {
     const handleExplain = async (e: Event) => {
@@ -557,7 +641,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     }
 
     activeStmtDecRef.current = editor.createDecorationsCollection([]);
-    fnDecRef.current = editor.createDecorationsCollection([]);
+    fnDecRef.current         = editor.createDecorationsCollection([]);
+    gitGutterDecRef.current  = editor.createDecorationsCollection([]);
 
     const fnCallRe = /\b([A-Za-z_][A-Za-z0-9_$]*)\s*(?=\()/g;
 
@@ -792,6 +877,67 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     };
     window.addEventListener("thaw:refresh-diagnostics", refreshDiagnosticsHandler);
     editor.onDidDispose(() => window.removeEventListener("thaw:refresh-diagnostics", refreshDiagnosticsHandler));
+
+    // ── Git gutter decorators ────────────────────────────────────────────────
+    const refreshGitGutter = async () => {
+      const model = editor.getModel();
+      if (!model) return;
+      // Read from the ref so we always get the current tab's path, not the
+      // path that was active when handleMount first ran (stale closure fix).
+      const filePath = activeFilePathRef.current;
+      if (!filePath) {
+        // Scratch tab — clear any stale decorations.
+        gitGutterDecRef.current?.set([]);
+        return;
+      }
+
+      let headContent = headContentCache.get(filePath);
+      if (headContent === undefined) {
+        try {
+          headContent = await GitGetHeadFileContent(filePath);
+          headContentCache.set(filePath, headContent ?? "");
+        } catch {
+          headContentCache.set(filePath, "");
+          headContent = "";
+        }
+      }
+
+      const currentText = model.getValue();
+      const headLines    = (headContent ?? "").split("\n");
+      const currentLines = currentText.split("\n");
+
+      const { added, modified, deleted } = computeGitLineDiff(headLines, currentLines);
+
+      const decorations: any[] = [];
+      for (const lineNum of added) {
+        decorations.push({
+          range: new monaco.Range(lineNum, 1, lineNum, 1),
+          options: { linesDecorationsClassName: "git-gutter-added" },
+        });
+      }
+      for (const lineNum of modified) {
+        decorations.push({
+          range: new monaco.Range(lineNum, 1, lineNum, 1),
+          options: { linesDecorationsClassName: "git-gutter-modified" },
+        });
+      }
+      for (const lineNum of deleted) {
+        decorations.push({
+          range: new monaco.Range(lineNum, 1, lineNum, 1),
+          options: { linesDecorationsClassName: "git-gutter-deleted" },
+        });
+      }
+      gitGutterDecRef.current?.set(decorations);
+    };
+    // Store so the tab-switch effect can trigger a refresh outside handleMount.
+    refreshGitGutterRef.current = refreshGitGutter;
+
+    // Initial run and debounced re-run on content change.
+    refreshGitGutter();
+    editor.onDidChangeModelContent(() => {
+      if (gitGutterTimerRef.current) clearTimeout(gitGutterTimerRef.current);
+      gitGutterTimerRef.current = setTimeout(refreshGitGutter, 400);
+    });
 
     const doPaste = async () => {
       const text = await ClipboardGetText();

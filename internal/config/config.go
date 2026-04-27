@@ -38,6 +38,14 @@ type GitConfig struct {
 	ExportPathTemplate string `json:"exportPathTemplate"`
 }
 
+// OAuthConfig holds the OAuth client IDs and secrets for Git providers.
+type OAuthConfig struct {
+	GithubClientID     string `json:"githubClientId"`
+	GithubClientSecret string `json:"githubClientSecret"`
+	GitlabClientID     string `json:"gitlabClientId"`
+	GitlabClientSecret string `json:"gitlabClientSecret"`
+}
+
 // AIConfig holds AI provider settings.
 // APIKey is stored in ~/.config/thaw/config.json (mode 0600).
 type AIConfig struct {
@@ -286,6 +294,7 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 type AppConfig struct {
 	Connections            []Connection      `json:"connections"`
 	Git                    GitConfig         `json:"git"`
+	OAuth                  OAuthConfig       `json:"oauth"`
 	AI                     AIConfig          `json:"ai"`
 	Snowpark               SnowparkConfig    `json:"snowpark"`
 	PipRegistry            PipRegistryConfig `json:"pipRegistry"`
@@ -314,7 +323,9 @@ func Load() (*AppConfig, error) {
 
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return &AppConfig{}, nil
+		cfg := &AppConfig{}
+		cfg.OAuth.GithubClientID = "Ov23liqwbGA6HHQ1za1a"
+		return cfg, nil
 	}
 	if err != nil {
 		return nil, err
@@ -324,6 +335,12 @@ func Load() (*AppConfig, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
+	
+	// Populate default OAuth client ID if missing
+	if cfg.OAuth.GithubClientID == "" {
+		cfg.OAuth.GithubClientID = "Ov23liqwbGA6HHQ1za1a"
+	}
+	
 	return &cfg, nil
 }
 

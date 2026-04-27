@@ -248,11 +248,39 @@ export function GetWarehouseMeteringHistory(arg1:string,arg2:string,arg3:string)
 
 export function GetWarehouseParameters(arg1:string):Promise<Array<main.PropertyPair>>;
 
+export function GitCheckoutBranch(arg1:string,arg2:string):Promise<void>;
+
+export function GitCheckoutRemoteBranch(arg1:string,arg2:string):Promise<void>;
+
+export function GitClone(arg1:gitrepo.CloneParams):Promise<void>;
+
 export function GitCommitAndPush(arg1:gitrepo.PushParams):Promise<void>;
+
+export function GitCreateBranch(arg1:string,arg2:string):Promise<void>;
+
+export function GitDeleteBranch(arg1:string,arg2:string):Promise<void>;
+
+export function GitDeleteRemoteBranch(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function GitFetch(arg1:string,arg2:string):Promise<void>;
+
+export function GitGetHeadFileContent(arg1:string):Promise<string>;
+
+export function GitListBranches(arg1:string):Promise<Array<gitrepo.BranchInfo>>;
+
+export function GitLoginWithOAuth(arg1:string):Promise<string>;
+
+export function GitLookupCredentials(arg1:string):Promise<gitrepo.CredentialResult>;
 
 export function GitPull(arg1:gitrepo.PullParams):Promise<void>;
 
+export function GitPushBranch(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function GitResetHard(arg1:string):Promise<void>;
+
 export function GitStatus(arg1:string):Promise<gitrepo.RepoStatus>;
+
+export function GitUpdateRemoteURL(arg1:string,arg2:string):Promise<void>;
 
 export function ImportTableData(arg1:snowflake.ImportTableParams):Promise<snowflake.ImportTableResult>;
 

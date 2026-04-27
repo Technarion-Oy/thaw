@@ -173,6 +173,12 @@ func buildMenu(app *App) *menu.Menu {
 		wailsruntime.EventsEmit(app.ctx, "menu:open-terminal")
 	})
 
+	// ── Git ───────────────────────────────────────────────────────────────────
+	gitMenu := appMenu.AddSubmenu("Git")
+	gitMenu.AddText("Git Operations…", keys.CmdOrCtrl("g"), func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:git-operations")
+	})
+
 	// ── Tools ─────────────────────────────────────────────────────────────────
 	toolsMenu := appMenu.AddSubmenu("Tools")
 	toolsMenu.AddText("Code Snippets…", nil, func(_ *menu.CallbackData) {

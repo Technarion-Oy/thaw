@@ -406,10 +406,61 @@ export namespace fnmeta {
 
 export namespace gitrepo {
 	
+	export class BranchInfo {
+	    name: string;
+	    isRemote: boolean;
+	    isCurrent: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new BranchInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.isRemote = source["isRemote"];
+	        this.isCurrent = source["isCurrent"];
+	    }
+	}
+	export class CloneParams {
+	    url: string;
+	    path: string;
+	    authMethod: string;
+	    token: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CloneParams(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.url = source["url"];
+	        this.path = source["path"];
+	        this.authMethod = source["authMethod"];
+	        this.token = source["token"];
+	    }
+	}
+	export class CredentialResult {
+	    found: boolean;
+	    username: string;
+	    source: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CredentialResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.found = source["found"];
+	        this.username = source["username"];
+	        this.source = source["source"];
+	    }
+	}
 	export class PullParams {
 	    dir: string;
 	    remoteURL: string;
 	    branch: string;
+	    authMethod: string;
 	    token: string;
 	
 	    static createFrom(source: any = {}) {
@@ -421,6 +472,7 @@ export namespace gitrepo {
 	        this.dir = source["dir"];
 	        this.remoteURL = source["remoteURL"];
 	        this.branch = source["branch"];
+	        this.authMethod = source["authMethod"];
 	        this.token = source["token"];
 	    }
 	}
@@ -428,6 +480,7 @@ export namespace gitrepo {
 	    dir: string;
 	    remoteURL: string;
 	    branch: string;
+	    authMethod: string;
 	    token: string;
 	    message: string;
 	    authorName: string;
@@ -443,6 +496,7 @@ export namespace gitrepo {
 	        this.dir = source["dir"];
 	        this.remoteURL = source["remoteURL"];
 	        this.branch = source["branch"];
+	        this.authMethod = source["authMethod"];
 	        this.token = source["token"];
 	        this.message = source["message"];
 	        this.authorName = source["authorName"];
@@ -459,6 +513,7 @@ export namespace gitrepo {
 	    hasRemote: boolean;
 	    remoteURL: string;
 	    ahead: number;
+	    totalChanged: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new RepoStatus(source);
@@ -474,6 +529,7 @@ export namespace gitrepo {
 	        this.hasRemote = source["hasRemote"];
 	        this.remoteURL = source["remoteURL"];
 	        this.ahead = source["ahead"];
+	        this.totalChanged = source["totalChanged"];
 	    }
 	}
 
