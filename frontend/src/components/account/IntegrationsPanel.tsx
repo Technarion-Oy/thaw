@@ -9,6 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
+import { useSessionStore } from "../../store/sessionStore";
 import { Collapse, Space, Typography, Tree, Spin, Popconfirm, message } from "antd";
 import {
   ApiOutlined,
@@ -91,6 +92,7 @@ export default function IntegrationsPanel() {
   const [canCreate, setCanCreate] = useState(false);
   const [ctxMenu,   setCtxMenu]   = useState<CtxMenuState | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
+  const role = useSessionStore((s) => s.role);
 
   // Modal state
   const [createOpen,    setCreateOpen]    = useState<{ kind: string } | null>(null);
@@ -100,10 +102,11 @@ export default function IntegrationsPanel() {
   const [dropConfirm,   setDropConfirm]   = useState<string | null>(null);
   const [dropKind,      setDropKind]      = useState<string>("");
 
-  // Check permission once on mount (best-effort; may be stale if client not ready yet).
+  // Re-check whenever the active role changes (covers role switches and initial connect).
   useEffect(() => {
+    if (!role) { setCanCreate(false); return; }
     CanCreateIntegration().then(setCanCreate).catch(() => {});
-  }, []);
+  }, [role]);
 
   const refreshCanCreate = () =>
     CanCreateIntegration().then(setCanCreate).catch(() => {});
