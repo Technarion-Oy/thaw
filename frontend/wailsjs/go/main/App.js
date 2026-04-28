@@ -614,8 +614,16 @@ export function IsAppleSilicon() {
   return window['go']['main']['App']['IsAppleSilicon']();
 }
 
+export function IsBoolean(arg1) {
+  return window['go']['main']['App']['IsBoolean'](arg1);
+}
+
 export function IsConnected() {
   return window['go']['main']['App']['IsConnected']();
+}
+
+export function IsNumeric(arg1) {
+  return window['go']['main']['App']['IsNumeric'](arg1);
 }
 
 export function ListAIModels(arg1, arg2, arg3) {
@@ -720,6 +728,10 @@ export function LoadSnowflakeCLIConfig() {
 
 export function MakeNotebookLive(arg1, arg2, arg3) {
   return window['go']['main']['App']['MakeNotebookLive'](arg1, arg2, arg3);
+}
+
+export function NeedsQuotes(arg1) {
+  return window['go']['main']['App']['NeedsQuotes'](arg1);
 }
 
 export function NewNotebook() {

@@ -322,7 +322,11 @@ export function InstallVenvEnv():Promise<void>;
 
 export function IsAppleSilicon():Promise<boolean>;
 
+export function IsBoolean(arg1:string):Promise<boolean>;
+
 export function IsConnected():Promise<boolean>;
+
+export function IsNumeric(arg1:string):Promise<boolean>;
 
 export function ListAIModels(arg1:string,arg2:string,arg3:number):Promise<Array<string>>;
 
@@ -375,6 +379,8 @@ export function LoadNotebookBreakpoints(arg1:string):Promise<Record<string, Arra
 export function LoadSnowflakeCLIConfig():Promise<sfconfig.Config>;
 
 export function MakeNotebookLive(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function NeedsQuotes(arg1:string):Promise<boolean>;
 
 export function NewNotebook():Promise<string>;
 

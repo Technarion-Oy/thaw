@@ -4677,6 +4677,21 @@ func (a *App) BuildFunctionSelectStatement(db, schema, name string, args []proce
 	return procedure.BuildFunctionSelectStatement(db, schema, name, args, isTableFunction)
 }
 
+// IsBoolean reports whether the given Snowflake data type is a boolean.
+func (a *App) IsBoolean(dataType string) bool {
+	return snowflake.IsBoolean(dataType)
+}
+
+// IsNumeric reports whether the given Snowflake data type is a numeric type.
+func (a *App) IsNumeric(dataType string) bool {
+	return snowflake.IsNumeric(dataType)
+}
+
+// NeedsQuotes reports whether a value of the given data type should be quoted in SQL.
+func (a *App) NeedsQuotes(dataType string) bool {
+	return snowflake.NeedsQuotes(dataType)
+}
+
 // ── App Info ──────────────────────────────────────────────────────────────────
 
 // AppInfo holds the application metadata shown in the About dialog.

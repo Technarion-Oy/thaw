@@ -9,8 +9,9 @@ package procedure
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
+
+	"thaw/internal/snowflake"
 )
 
 // Argument represents a procedure or function argument with its metadata and value.
@@ -20,27 +21,12 @@ type Argument struct {
 	Value    string `json:"value"`
 }
 
-var (
-	reScale = regexp.MustCompile(`\(.*\)$`)
-	reNumeric = regexp.MustCompile(`^(NUMBER|INT|INTEGER|BIGINT|SMALLINT|TINYINT|BYTEINT|FLOAT|DOUBLE|DECIMAL|NUMERIC|REAL)$`)
-)
-
-func isBoolean(dataType string) bool {
-	base := strings.ToUpper(strings.TrimSpace(reScale.ReplaceAllString(dataType, "")))
-	return base == "BOOLEAN" || base == "BOOL"
-}
-
-func isNumeric(dataType string) bool {
-	base := strings.ToUpper(strings.TrimSpace(reScale.ReplaceAllString(dataType, "")))
-	return reNumeric.MatchString(base)
-}
-
 func formatValue(arg Argument) string {
 	val := strings.TrimSpace(arg.Value)
 	if val == "" {
 		return "NULL"
 	}
-	if isBoolean(arg.DataType) || isNumeric(arg.DataType) {
+	if snowflake.IsBoolean(arg.DataType) || snowflake.IsNumeric(arg.DataType) {
 		return val
 	}
 	return fmt.Sprintf("'%s'", strings.ReplaceAll(val, "'", "''"))
