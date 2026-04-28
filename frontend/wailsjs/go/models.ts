@@ -535,6 +535,309 @@ export namespace gitrepo {
 
 }
 
+export namespace integrations {
+	
+	export class ApiIntegrationParams {
+	    name: string;
+	    caseSensitive: boolean;
+	    enabled: boolean;
+	    provider: string;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    allowedPrefixes: string;
+	    blockedPrefixes: string;
+	    awsRoleArn: string;
+	    apiKey: string;
+	    azureTenantId: string;
+	    azureAdAppId: string;
+	    googleAudience: string;
+	    gitAuthMode: string;
+	    githubAppPath: string;
+	    allowedAuthSecrets: string[];
+	    oauthClientId: string;
+	    oauthClientSecret: string;
+	    oauthTokenEndpoint: string;
+	    oauthScopes: string;
+	    usePrivateLink: boolean;
+	    tlsCertificates: string[];
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ApiIntegrationParams(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.enabled = source["enabled"];
+	        this.provider = source["provider"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.allowedPrefixes = source["allowedPrefixes"];
+	        this.blockedPrefixes = source["blockedPrefixes"];
+	        this.awsRoleArn = source["awsRoleArn"];
+	        this.apiKey = source["apiKey"];
+	        this.azureTenantId = source["azureTenantId"];
+	        this.azureAdAppId = source["azureAdAppId"];
+	        this.googleAudience = source["googleAudience"];
+	        this.gitAuthMode = source["gitAuthMode"];
+	        this.githubAppPath = source["githubAppPath"];
+	        this.allowedAuthSecrets = source["allowedAuthSecrets"];
+	        this.oauthClientId = source["oauthClientId"];
+	        this.oauthClientSecret = source["oauthClientSecret"];
+	        this.oauthTokenEndpoint = source["oauthTokenEndpoint"];
+	        this.oauthScopes = source["oauthScopes"];
+	        this.usePrivateLink = source["usePrivateLink"];
+	        this.tlsCertificates = source["tlsCertificates"];
+	        this.comment = source["comment"];
+	    }
+	}
+	export class CatalogIntegrationParams {
+	    name: string;
+	    caseSensitive: boolean;
+	    enabled: boolean;
+	    source: string;
+	    glueAwsRoleArn: string;
+	    glueCatalogId: string;
+	    glueRegion: string;
+	    tableFormat: string;
+	    catalogUri: string;
+	    catalogName: string;
+	    catalogNamespace: string;
+	    catalogApiType: string;
+	    accessDelegationMode: string;
+	    prefix: string;
+	    oauthTokenUri: string;
+	    oauthClientId: string;
+	    oauthClientSecret: string;
+	    oauthScopes: string;
+	    icebergAuthType: string;
+	    bearerToken: string;
+	    sapInvitationLink: string;
+	    refreshInterval: number;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CatalogIntegrationParams(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.enabled = source["enabled"];
+	        this.source = source["source"];
+	        this.glueAwsRoleArn = source["glueAwsRoleArn"];
+	        this.glueCatalogId = source["glueCatalogId"];
+	        this.glueRegion = source["glueRegion"];
+	        this.tableFormat = source["tableFormat"];
+	        this.catalogUri = source["catalogUri"];
+	        this.catalogName = source["catalogName"];
+	        this.catalogNamespace = source["catalogNamespace"];
+	        this.catalogApiType = source["catalogApiType"];
+	        this.accessDelegationMode = source["accessDelegationMode"];
+	        this.prefix = source["prefix"];
+	        this.oauthTokenUri = source["oauthTokenUri"];
+	        this.oauthClientId = source["oauthClientId"];
+	        this.oauthClientSecret = source["oauthClientSecret"];
+	        this.oauthScopes = source["oauthScopes"];
+	        this.icebergAuthType = source["icebergAuthType"];
+	        this.bearerToken = source["bearerToken"];
+	        this.sapInvitationLink = source["sapInvitationLink"];
+	        this.refreshInterval = source["refreshInterval"];
+	        this.comment = source["comment"];
+	    }
+	}
+	export class ExternalAccessIntegrationParams {
+	    name: string;
+	    caseSensitive: boolean;
+	    enabled: boolean;
+	    allowedNetworkRules: string;
+	    allowedApiAuthIntegrations: string;
+	    allowedAuthSecrets: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExternalAccessIntegrationParams(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.enabled = source["enabled"];
+	        this.allowedNetworkRules = source["allowedNetworkRules"];
+	        this.allowedApiAuthIntegrations = source["allowedApiAuthIntegrations"];
+	        this.allowedAuthSecrets = source["allowedAuthSecrets"];
+	        this.comment = source["comment"];
+	    }
+	}
+	export class NotificationIntegrationParams {
+	    name: string;
+	    caseSensitive: boolean;
+	    enabled: boolean;
+	    subtype: string;
+	    azureQueueUri: string;
+	    azureTenantId: string;
+	    usePrivatelink: boolean;
+	    gcpSubName: string;
+	    awsSnsTopicArn: string;
+	    awsSnsRoleArn: string;
+	    azureTopicEndpoint: string;
+	    gcpTopicName: string;
+	    allowedRecipients: string;
+	    defaultRecipients: string;
+	    defaultSubject: string;
+	    webhookUrl: string;
+	    webhookSecret: string;
+	    webhookBodyTemplate: string;
+	    webhookHeaders: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new NotificationIntegrationParams(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.enabled = source["enabled"];
+	        this.subtype = source["subtype"];
+	        this.azureQueueUri = source["azureQueueUri"];
+	        this.azureTenantId = source["azureTenantId"];
+	        this.usePrivatelink = source["usePrivatelink"];
+	        this.gcpSubName = source["gcpSubName"];
+	        this.awsSnsTopicArn = source["awsSnsTopicArn"];
+	        this.awsSnsRoleArn = source["awsSnsRoleArn"];
+	        this.azureTopicEndpoint = source["azureTopicEndpoint"];
+	        this.gcpTopicName = source["gcpTopicName"];
+	        this.allowedRecipients = source["allowedRecipients"];
+	        this.defaultRecipients = source["defaultRecipients"];
+	        this.defaultSubject = source["defaultSubject"];
+	        this.webhookUrl = source["webhookUrl"];
+	        this.webhookSecret = source["webhookSecret"];
+	        this.webhookBodyTemplate = source["webhookBodyTemplate"];
+	        this.webhookHeaders = source["webhookHeaders"];
+	        this.comment = source["comment"];
+	    }
+	}
+	export class SecurityIntegrationParams {
+	    name: string;
+	    caseSensitive: boolean;
+	    enabled: boolean;
+	    secType: string;
+	    authType: string;
+	    awsRoleArn: string;
+	    oauthGrant: string;
+	    oauthTokenEndpoint: string;
+	    oauthClientId: string;
+	    oauthClientSecret: string;
+	    oauthScopes: string;
+	    externalOauthType: string;
+	    issuer: string;
+	    tokenUserMappingClaim: string;
+	    snowflakeUserMappingAttr: string;
+	    jwsKeysUrl: string;
+	    audienceList: string;
+	    anyRoleMode: string;
+	    networkPolicy: string;
+	    oauthClient: string;
+	    oauthClientType: string;
+	    oauthRedirectUri: string;
+	    oauthIssueRefreshTokens: boolean;
+	    oauthRefreshTokenValidity: number;
+	    samlIdpMetadataUrl: string;
+	    samlIdpEntityId: string;
+	    samlIdpSsoUrl: string;
+	    samlIdpCert: string;
+	    samlAllowedUserDomains: string;
+	    samlSignRequest: boolean;
+	    samlForceAuthn: boolean;
+	    scimClient: string;
+	    runAsRole: string;
+	    syncPassword: boolean;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SecurityIntegrationParams(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.enabled = source["enabled"];
+	        this.secType = source["secType"];
+	        this.authType = source["authType"];
+	        this.awsRoleArn = source["awsRoleArn"];
+	        this.oauthGrant = source["oauthGrant"];
+	        this.oauthTokenEndpoint = source["oauthTokenEndpoint"];
+	        this.oauthClientId = source["oauthClientId"];
+	        this.oauthClientSecret = source["oauthClientSecret"];
+	        this.oauthScopes = source["oauthScopes"];
+	        this.externalOauthType = source["externalOauthType"];
+	        this.issuer = source["issuer"];
+	        this.tokenUserMappingClaim = source["tokenUserMappingClaim"];
+	        this.snowflakeUserMappingAttr = source["snowflakeUserMappingAttr"];
+	        this.jwsKeysUrl = source["jwsKeysUrl"];
+	        this.audienceList = source["audienceList"];
+	        this.anyRoleMode = source["anyRoleMode"];
+	        this.networkPolicy = source["networkPolicy"];
+	        this.oauthClient = source["oauthClient"];
+	        this.oauthClientType = source["oauthClientType"];
+	        this.oauthRedirectUri = source["oauthRedirectUri"];
+	        this.oauthIssueRefreshTokens = source["oauthIssueRefreshTokens"];
+	        this.oauthRefreshTokenValidity = source["oauthRefreshTokenValidity"];
+	        this.samlIdpMetadataUrl = source["samlIdpMetadataUrl"];
+	        this.samlIdpEntityId = source["samlIdpEntityId"];
+	        this.samlIdpSsoUrl = source["samlIdpSsoUrl"];
+	        this.samlIdpCert = source["samlIdpCert"];
+	        this.samlAllowedUserDomains = source["samlAllowedUserDomains"];
+	        this.samlSignRequest = source["samlSignRequest"];
+	        this.samlForceAuthn = source["samlForceAuthn"];
+	        this.scimClient = source["scimClient"];
+	        this.runAsRole = source["runAsRole"];
+	        this.syncPassword = source["syncPassword"];
+	        this.comment = source["comment"];
+	    }
+	}
+	export class StorageIntegrationParams {
+	    name: string;
+	    caseSensitive: boolean;
+	    enabled: boolean;
+	    provider: string;
+	    awsRoleArn: string;
+	    awsExternalId: string;
+	    allowedLocations: string;
+	    blockedLocations: string;
+	    usePrivatelink: boolean;
+	    azureTenantId: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new StorageIntegrationParams(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.enabled = source["enabled"];
+	        this.provider = source["provider"];
+	        this.awsRoleArn = source["awsRoleArn"];
+	        this.awsExternalId = source["awsExternalId"];
+	        this.allowedLocations = source["allowedLocations"];
+	        this.blockedLocations = source["blockedLocations"];
+	        this.usePrivatelink = source["usePrivatelink"];
+	        this.azureTenantId = source["azureTenantId"];
+	        this.comment = source["comment"];
+	    }
+	}
+
+}
+
 export namespace main {
 	
 	export class AccountExportResult {

@@ -8,10 +8,20 @@
 // Commercial use of this software is restricted to parties   holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Modal, Form, Input, Select, Switch, Button, Alert, InputNumber, Radio, Checkbox, Divider, Typography } from "antd";
-import { ExecuteQuery, GetCurrentRegion, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/main/App";
-import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
+import {
+  GetCurrentRegion,
+  GetQuotedIdentifiersIgnoreCase,
+  CreateStorageIntegration,
+  CreateApiIntegration,
+  CreateCatalogIntegration,
+  CreateExternalAccessIntegration,
+  CreateNotificationIntegration,
+  CreateSecurityIntegration,
+  BuildApiIntegrationPreviewSQL,
+} from "../../../wailsjs/go/main/App";
+import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 
 const { TextArea } = Input;
 
@@ -19,353 +29,6 @@ interface Props {
   kind: string;
   onClose: () => void;
   onSuccess: () => void;
-}
-
-// ── SQL builder ───────────────────────────────────────────────────────────────
-
-function sq(s: string): string {
-  return "'" + s.replace(/'/g, "''") + "'";
-}
-function ident(s: string): string {
-  return '"' + s.replace(/"/g, '""') + '"';
-}
-
-function buildStorageSql(vals: Record<string, unknown>): string {
-  const name = identToken(String(vals.name ?? ""), Boolean(vals.caseSensitive));
-  const provider = String(vals.provider ?? "S3");
-  const enabled = vals.enabled !== false ? "TRUE" : "FALSE";
-  const lines: string[] = [
-    `CREATE STORAGE INTEGRATION ${name}`,
-    `  TYPE = EXTERNAL_STAGE`,
-    `  STORAGE_PROVIDER = '${provider}'`,
-    `  ENABLED = ${enabled}`,
-  ];
-  if (provider === "S3" || provider === "S3GOV") {
-    if (vals.awsRoleArn) lines.push(`  STORAGE_AWS_ROLE_ARN = ${sq(String(vals.awsRoleArn))}`);
-    if (vals.allowedLocations) lines.push(`  STORAGE_ALLOWED_LOCATIONS = (${splitLocations(String(vals.allowedLocations))})`);
-    if (vals.blockedLocations) lines.push(`  STORAGE_BLOCKED_LOCATIONS = (${splitLocations(String(vals.blockedLocations))})`);
-    if (vals.awsExternalId) lines.push(`  STORAGE_AWS_EXTERNAL_ID = ${sq(String(vals.awsExternalId))}`);
-    if (vals.usePrivatelink) lines.push(`  USE_PRIVATELINK_ENDPOINT = TRUE`);
-  } else if (provider === "GCS") {
-    if (vals.allowedLocations) lines.push(`  STORAGE_ALLOWED_LOCATIONS = (${splitLocations(String(vals.allowedLocations))})`);
-    if (vals.blockedLocations) lines.push(`  STORAGE_BLOCKED_LOCATIONS = (${splitLocations(String(vals.blockedLocations))})`);
-  } else if (provider === "AZURE") {
-    if (vals.azureTenantId) lines.push(`  AZURE_TENANT_ID = ${sq(String(vals.azureTenantId))}`);
-    if (vals.allowedLocations) lines.push(`  STORAGE_ALLOWED_LOCATIONS = (${splitLocations(String(vals.allowedLocations))})`);
-    if (vals.blockedLocations) lines.push(`  STORAGE_BLOCKED_LOCATIONS = (${splitLocations(String(vals.blockedLocations))})`);
-    if (vals.usePrivatelink) lines.push(`  USE_PRIVATELINK_ENDPOINT = TRUE`);
-  }
-  if (vals.comment) lines.push(`  COMMENT = ${sq(String(vals.comment))}`);
-  return lines.join("\n");
-}
-
-function buildApiSql(vals: Record<string, unknown>): string {
-  const provider = String(vals.provider ?? "aws_api_gateway");
-  // Delegate git_https_api to its own builder with full mode support
-  if (provider === "git_https_api") {
-    return buildGitHttpsApiSql(vals);
-  }
-  const name = identToken(String(vals.name ?? ""), Boolean(vals.caseSensitive));
-  const enabled = vals.enabled !== false ? "TRUE" : "FALSE";
-  const lines: string[] = [
-    `CREATE API INTEGRATION ${name}`,
-    `  API_PROVIDER = ${provider}`,
-    `  ENABLED = ${enabled}`,
-  ];
-  if (vals.allowedPrefixes) lines.push(`  API_ALLOWED_PREFIXES = (${splitLocations(String(vals.allowedPrefixes))})`);
-  if (vals.blockedPrefixes) lines.push(`  API_BLOCKED_PREFIXES = (${splitLocations(String(vals.blockedPrefixes))})`);
-  if (provider === "aws_api_gateway" || provider === "aws_private_api_gateway") {
-    if (vals.awsRoleArn) lines.push(`  API_AWS_ROLE_ARN = ${sq(String(vals.awsRoleArn))}`);
-    if (vals.apiKey) lines.push(`  API_KEY = ${sq(String(vals.apiKey))}`);
-  } else if (provider === "azure_api_management") {
-    if (vals.azureTenantId) lines.push(`  AZURE_TENANT_ID = ${sq(String(vals.azureTenantId))}`);
-    if (vals.azureAdAppId) lines.push(`  AZURE_AD_APPLICATION_ID = ${sq(String(vals.azureAdAppId))}`);
-    if (vals.apiKey) lines.push(`  API_KEY = ${sq(String(vals.apiKey))}`);
-  } else if (provider === "google_api_gateway") {
-    if (vals.googleAudience) lines.push(`  GOOGLE_AUDIENCE = ${sq(String(vals.googleAudience))}`);
-  }
-  if (vals.comment) lines.push(`  COMMENT = ${sq(String(vals.comment))}`);
-  return lines.join("\n");
-}
-
-function buildGitHttpsApiSql(vals: Record<string, unknown>): string {
-  const name = identToken(String(vals.name ?? ""), Boolean(vals.caseSensitive));
-  const enabled = vals.enabled !== false ? "TRUE" : "FALSE";
-
-  let createClause = "CREATE";
-  if (vals.orReplace) createClause += " OR REPLACE";
-  createClause += " API INTEGRATION";
-  if (!vals.orReplace && vals.ifNotExists) createClause += " IF NOT EXISTS";
-
-  const lines: string[] = [
-    `${createClause} ${name}`,
-    `  API_PROVIDER = git_https_api`,
-  ];
-
-  const mode = String(vals.gitAuthMode ?? "TOKEN");
-
-  if (mode === "GITHUB_APP") {
-    // githubAppPath holds only the path after https://github.com/
-    const path = vals.githubAppPath ? String(vals.githubAppPath).trim().replace(/^\/+/, "") : "";
-    lines.push(`  API_ALLOWED_PREFIXES = (${sq("https://github.com/" + path)})`);
-  } else {
-    const rawPrefixes = vals.allowedPrefixes ? String(vals.allowedPrefixes).trim() : "";
-    if (rawPrefixes) lines.push(`  API_ALLOWED_PREFIXES = (${splitLocations(rawPrefixes)})`);
-  }
-  if (vals.blockedPrefixes) {
-    lines.push(`  API_BLOCKED_PREFIXES = (${splitLocations(String(vals.blockedPrefixes))})`);
-  }
-
-  // ALLOWED_AUTHENTICATION_SECRETS applies to TOKEN and PRIVATELINK modes
-  if (mode === "TOKEN" || mode === "PRIVATELINK") {
-    const rawSecrets = vals.allowedAuthSecrets;
-    if (rawSecrets !== undefined && rawSecrets !== null) {
-      const secretArr = Array.isArray(rawSecrets)
-        ? (rawSecrets as string[]).map(String)
-        : [String(rawSecrets)];
-      const filtered = secretArr.map((s) => s.trim()).filter(Boolean);
-      if (filtered.length === 1 && (filtered[0].toUpperCase() === "ALL" || filtered[0].toUpperCase() === "NONE")) {
-        lines.push(`  ALLOWED_AUTHENTICATION_SECRETS = ${filtered[0].toUpperCase()}`);
-      } else if (filtered.length > 0) {
-        lines.push(`  ALLOWED_AUTHENTICATION_SECRETS = (${filtered.join(", ")})`);
-      }
-    }
-  }
-
-  if (mode === "GITHUB_APP") {
-    lines.push(`  API_USER_AUTHENTICATION = (`);
-    lines.push(`    TYPE = SNOWFLAKE_GITHUB_APP`);
-    lines.push(`  )`);
-  } else if (mode === "OAUTH2") {
-    const oauthParams: string[] = ["    TYPE = OAUTH2"];
-    if (vals.oauthClientId) oauthParams.push(`    OAUTH_CLIENT_ID = ${sq(String(vals.oauthClientId))}`);
-    if (vals.oauthClientSecret) oauthParams.push(`    OAUTH_CLIENT_SECRET = ${sq(String(vals.oauthClientSecret))}`);
-    if (vals.oauthTokenEndpoint) oauthParams.push(`    OAUTH_TOKEN_ENDPOINT = ${sq(String(vals.oauthTokenEndpoint))}`);
-    if (vals.oauthScopes) {
-      const scopes = String(vals.oauthScopes)
-        .split(",")
-        .map((s) => sq(s.trim()))
-        .filter((s) => s !== "''");
-      if (scopes.length > 0) oauthParams.push(`    OAUTH_ALLOWED_SCOPES = (${scopes.join(", ")})`);
-    }
-    lines.push(`  API_USER_AUTHENTICATION = (`);
-    oauthParams.forEach((l) => lines.push(l));
-    lines.push(`  )`);
-  } else if (mode === "PRIVATELINK") {
-    lines.push(`  USE_PRIVATELINK_ENDPOINT = ${vals.usePrivateLink ? "TRUE" : "FALSE"}`);
-    const rawCerts = vals.tlsCertificates;
-    if (rawCerts !== undefined && rawCerts !== null) {
-      const certArr = Array.isArray(rawCerts)
-        ? (rawCerts as string[]).map(String)
-        : [String(rawCerts)];
-      const filtered = certArr.map((s) => s.trim()).filter(Boolean);
-      if (filtered.length > 0) {
-        lines.push(`  TLS_TRUSTED_CERTIFICATES = (${filtered.join(", ")})`);
-      }
-    }
-  }
-
-  lines.push(`  ENABLED = ${enabled}`);
-  if (vals.comment) lines.push(`  COMMENT = ${sq(String(vals.comment))}`);
-  return lines.join("\n");
-}
-
-function buildCatalogSql(vals: Record<string, unknown>): string {
-  const name = identToken(String(vals.name ?? ""), Boolean(vals.caseSensitive));
-  const source = String(vals.source ?? "GLUE");
-  const enabled = vals.enabled !== false ? "TRUE" : "FALSE";
-  const lines: string[] = [
-    `CREATE CATALOG INTEGRATION ${name}`,
-    `  CATALOG_SOURCE = ${source}`,
-    `  ENABLED = ${enabled}`,
-  ];
-  if (source === "GLUE") {
-    if (vals.glueAwsRoleArn) lines.push(`  GLUE_AWS_ROLE_ARN = ${sq(String(vals.glueAwsRoleArn))}`);
-    if (vals.glueCatalogId) lines.push(`  GLUE_CATALOG_ID = ${sq(String(vals.glueCatalogId))}`);
-    if (vals.glueRegion) lines.push(`  GLUE_REGION = ${sq(String(vals.glueRegion))}`);
-    if (vals.catalogNamespace) lines.push(`  CATALOG_NAMESPACE = ${sq(String(vals.catalogNamespace))}`);
-  } else if (source === "OBJECT_STORE") {
-    if (vals.tableFormat) lines.push(`  TABLE_FORMAT = ${String(vals.tableFormat)}`);
-  } else if (source === "POLARIS" || source === "ICEBERG_REST") {
-    if (vals.catalogUri) lines.push(`  CATALOG_URI = ${sq(String(vals.catalogUri))}`);
-    if (vals.catalogName) lines.push(`  CATALOG_NAME = ${sq(String(vals.catalogName))}`);
-    if (vals.catalogNamespace) lines.push(`  CATALOG_NAMESPACE = ${sq(String(vals.catalogNamespace))}`);
-    if (vals.catalogApiType) lines.push(`  CATALOG_API_TYPE = ${String(vals.catalogApiType)}`);
-    if (vals.accessDelegationMode) lines.push(`  ACCESS_DELEGATION_MODE = ${String(vals.accessDelegationMode)}`);
-    if (source === "POLARIS") {
-      if (vals.oauthTokenUri) lines.push(`  OAUTH_TOKEN_URI = ${sq(String(vals.oauthTokenUri))}`);
-      if (vals.oauthClientId) lines.push(`  OAUTH_CLIENT_ID = ${sq(String(vals.oauthClientId))}`);
-      if (vals.oauthClientSecret) lines.push(`  OAUTH_CLIENT_SECRET = ${sq(String(vals.oauthClientSecret))}`);
-      if (vals.oauthScopes) lines.push(`  OAUTH_ALLOWED_SCOPES = (${splitLocations(String(vals.oauthScopes))})`);
-    } else {
-      const authType = String(vals.icebergAuthType ?? "OAUTH");
-      lines.push(`  AUTH_TYPE = ${authType}`);
-      if (authType === "OAUTH") {
-        if (vals.oauthTokenUri) lines.push(`  OAUTH_TOKEN_URI = ${sq(String(vals.oauthTokenUri))}`);
-        if (vals.oauthClientId) lines.push(`  OAUTH_CLIENT_ID = ${sq(String(vals.oauthClientId))}`);
-        if (vals.oauthClientSecret) lines.push(`  OAUTH_CLIENT_SECRET = ${sq(String(vals.oauthClientSecret))}`);
-        if (vals.oauthScopes) lines.push(`  OAUTH_ALLOWED_SCOPES = (${splitLocations(String(vals.oauthScopes))})`);
-      } else if (authType === "BEARER") {
-        if (vals.bearerToken) lines.push(`  BEARER_TOKEN = ${sq(String(vals.bearerToken))}`);
-      }
-    }
-    if (vals.prefix) lines.push(`  PREFIX = ${sq(String(vals.prefix))}`);
-  } else if (source === "SAP_BDC") {
-    if (vals.sapInvitationLink) lines.push(`  SAP_BDC_INVITATION_LINK = ${sq(String(vals.sapInvitationLink))}`);
-    if (vals.accessDelegationMode) lines.push(`  ACCESS_DELEGATION_MODE = ${String(vals.accessDelegationMode)}`);
-  }
-  if (vals.refreshInterval) lines.push(`  REFRESH_INTERVAL_SECONDS = ${vals.refreshInterval}`);
-  if (vals.comment) lines.push(`  COMMENT = ${sq(String(vals.comment))}`);
-  return lines.join("\n");
-}
-
-function buildExternalAccessSql(vals: Record<string, unknown>): string {
-  const name = identToken(String(vals.name ?? ""), Boolean(vals.caseSensitive));
-  const enabled = vals.enabled !== false ? "TRUE" : "FALSE";
-  const lines: string[] = [
-    `CREATE EXTERNAL ACCESS INTEGRATION ${name}`,
-  ];
-  if (vals.allowedNetworkRules) {
-    lines.push(`  ALLOWED_NETWORK_RULES = (${String(vals.allowedNetworkRules)})`);
-  }
-  if (vals.allowedApiAuthIntegrations) {
-    lines.push(`  ALLOWED_API_AUTHENTICATION_INTEGRATIONS = (${String(vals.allowedApiAuthIntegrations)})`);
-  }
-  if (vals.allowedAuthSecrets) {
-    const sec = String(vals.allowedAuthSecrets).trim().toLowerCase();
-    if (sec === "all" || sec === "none") {
-      lines.push(`  ALLOWED_AUTHENTICATION_SECRETS = ${sec.toUpperCase()}`);
-    } else {
-      lines.push(`  ALLOWED_AUTHENTICATION_SECRETS = (${String(vals.allowedAuthSecrets)})`);
-    }
-  }
-  lines.push(`  ENABLED = ${enabled}`);
-  if (vals.comment) lines.push(`  COMMENT = ${sq(String(vals.comment))}`);
-  return lines.join("\n");
-}
-
-function buildNotificationSql(vals: Record<string, unknown>): string {
-  const name = identToken(String(vals.name ?? ""), Boolean(vals.caseSensitive));
-  const subtype = String(vals.subtype ?? "EMAIL");
-  const lines: string[] = [`CREATE NOTIFICATION INTEGRATION ${name}`];
-
-  if (subtype === "AZURE_STORAGE_QUEUE_INBOUND") {
-    lines.push(`  TYPE = QUEUE`);
-    lines.push(`  NOTIFICATION_PROVIDER = AZURE_STORAGE_QUEUE`);
-    lines.push(`  DIRECTION = INBOUND`);
-    if (vals.azureQueueUri) lines.push(`  AZURE_STORAGE_QUEUE_PRIMARY_URI = ${sq(String(vals.azureQueueUri))}`);
-    if (vals.azureTenantId) lines.push(`  AZURE_TENANT_ID = ${sq(String(vals.azureTenantId))}`);
-    if (vals.usePrivatelink) lines.push(`  USE_PRIVATELINK_ENDPOINT = TRUE`);
-  } else if (subtype === "GCP_PUBSUB_INBOUND") {
-    lines.push(`  TYPE = QUEUE`);
-    lines.push(`  NOTIFICATION_PROVIDER = GCP_PUBSUB`);
-    lines.push(`  DIRECTION = INBOUND`);
-    if (vals.gcpSubName) lines.push(`  GCP_PUBSUB_SUBSCRIPTION_NAME = ${sq(String(vals.gcpSubName))}`);
-  } else if (subtype === "AWS_SNS_OUTBOUND") {
-    lines.push(`  TYPE = QUEUE`);
-    lines.push(`  NOTIFICATION_PROVIDER = AWS_SNS`);
-    lines.push(`  DIRECTION = OUTBOUND`);
-    if (vals.awsSnsTopicArn) lines.push(`  AWS_SNS_TOPIC_ARN = ${sq(String(vals.awsSnsTopicArn))}`);
-    if (vals.awsSnsRoleArn) lines.push(`  AWS_SNS_ROLE_ARN = ${sq(String(vals.awsSnsRoleArn))}`);
-  } else if (subtype === "AZURE_EVENT_GRID_OUTBOUND") {
-    lines.push(`  TYPE = QUEUE`);
-    lines.push(`  NOTIFICATION_PROVIDER = AZURE_EVENT_GRID`);
-    lines.push(`  DIRECTION = OUTBOUND`);
-    if (vals.azureTopicEndpoint) lines.push(`  AZURE_EVENT_GRID_TOPIC_ENDPOINT = ${sq(String(vals.azureTopicEndpoint))}`);
-    if (vals.azureTenantId) lines.push(`  AZURE_TENANT_ID = ${sq(String(vals.azureTenantId))}`);
-  } else if (subtype === "GCP_PUBSUB_OUTBOUND") {
-    lines.push(`  TYPE = QUEUE`);
-    lines.push(`  NOTIFICATION_PROVIDER = GCP_PUBSUB`);
-    lines.push(`  DIRECTION = OUTBOUND`);
-    if (vals.gcpTopicName) lines.push(`  GCP_PUBSUB_TOPIC_NAME = ${sq(String(vals.gcpTopicName))}`);
-  } else if (subtype === "EMAIL") {
-    lines.push(`  TYPE = EMAIL`);
-    if (vals.allowedRecipients) lines.push(`  ALLOWED_RECIPIENTS = (${splitLocations(String(vals.allowedRecipients))})`);
-    if (vals.defaultRecipients) lines.push(`  DEFAULT_RECIPIENTS = (${splitLocations(String(vals.defaultRecipients))})`);
-    if (vals.defaultSubject) lines.push(`  DEFAULT_SUBJECT = ${sq(String(vals.defaultSubject))}`);
-  } else if (subtype === "WEBHOOK") {
-    lines.push(`  TYPE = WEBHOOK`);
-    if (vals.webhookUrl) lines.push(`  WEBHOOK_URL = ${sq(String(vals.webhookUrl))}`);
-    if (vals.webhookSecret) lines.push(`  WEBHOOK_SECRET = ${sq(String(vals.webhookSecret))}`);
-    if (vals.webhookBodyTemplate) lines.push(`  WEBHOOK_BODY_TEMPLATE = ${sq(String(vals.webhookBodyTemplate))}`);
-    if (vals.webhookHeaders) lines.push(`  WEBHOOK_HEADERS = (${String(vals.webhookHeaders)})`);
-  }
-  lines.push(`  ENABLED = ${vals.enabled !== false ? "TRUE" : "FALSE"}`);
-  if (vals.comment) lines.push(`  COMMENT = ${sq(String(vals.comment))}`);
-  return lines.join("\n");
-}
-
-function buildSecuritySql(vals: Record<string, unknown>): string {
-  const name = identToken(String(vals.name ?? ""), Boolean(vals.caseSensitive));
-  const secType = String(vals.secType ?? "OAUTH");
-  const enabled = vals.enabled !== false ? "TRUE" : "FALSE";
-  const lines: string[] = [`CREATE SECURITY INTEGRATION ${name}`];
-
-  if (secType === "API_AUTHENTICATION") {
-    lines.push(`  TYPE = API_AUTHENTICATION`);
-    const authType = String(vals.authType ?? "OAUTH2");
-    lines.push(`  AUTH_TYPE = ${authType}`);
-    if (authType === "AWS_IAM") {
-      if (vals.awsRoleArn) lines.push(`  AWS_ROLE_ARN = ${sq(String(vals.awsRoleArn))}`);
-    } else {
-      const grant = String(vals.oauthGrant ?? "CLIENT_CREDENTIALS");
-      lines.push(`  OAUTH_GRANT = ${grant}`);
-      if (vals.oauthTokenEndpoint) lines.push(`  OAUTH_TOKEN_ENDPOINT = ${sq(String(vals.oauthTokenEndpoint))}`);
-      if (vals.oauthClientId) lines.push(`  OAUTH_CLIENT_ID = ${sq(String(vals.oauthClientId))}`);
-      if (vals.oauthClientSecret) lines.push(`  OAUTH_CLIENT_SECRET = ${sq(String(vals.oauthClientSecret))}`);
-      if (vals.oauthScopes) lines.push(`  OAUTH_ALLOWED_SCOPES = (${splitLocations(String(vals.oauthScopes))})`);
-    }
-  } else if (secType === "EXTERNAL_OAUTH") {
-    lines.push(`  TYPE = EXTERNAL_OAUTH`);
-    if (vals.externalOauthType) lines.push(`  EXTERNAL_OAUTH_TYPE = ${String(vals.externalOauthType)}`);
-    if (vals.issuer) lines.push(`  EXTERNAL_OAUTH_ISSUER = ${sq(String(vals.issuer))}`);
-    if (vals.tokenUserMappingClaim) lines.push(`  EXTERNAL_OAUTH_TOKEN_USER_MAPPING_CLAIM = ${sq(String(vals.tokenUserMappingClaim))}`);
-    if (vals.snowflakeUserMappingAttr) lines.push(`  EXTERNAL_OAUTH_SNOWFLAKE_USER_MAPPING_ATTRIBUTE = ${sq(String(vals.snowflakeUserMappingAttr))}`);
-    if (vals.jwsKeysUrl) lines.push(`  EXTERNAL_OAUTH_JWS_KEYS_URL = ${sq(String(vals.jwsKeysUrl))}`);
-    if (vals.audienceList) lines.push(`  EXTERNAL_OAUTH_AUDIENCE_LIST = (${splitLocations(String(vals.audienceList))})`);
-    if (vals.anyRoleMode) lines.push(`  EXTERNAL_OAUTH_ANY_ROLE_MODE = ${String(vals.anyRoleMode)}`);
-    if (vals.networkPolicy) lines.push(`  NETWORK_POLICY = ${ident(String(vals.networkPolicy))}`);
-  } else if (secType === "OAUTH_PARTNER") {
-    lines.push(`  TYPE = OAUTH`);
-    if (vals.oauthClient) lines.push(`  OAUTH_CLIENT = ${String(vals.oauthClient)}`);
-    if (vals.oauthRedirectUri) lines.push(`  OAUTH_REDIRECT_URI = ${sq(String(vals.oauthRedirectUri))}`);
-    if (vals.oauthIssueRefreshTokens !== undefined) lines.push(`  OAUTH_ISSUE_REFRESH_TOKENS = ${vals.oauthIssueRefreshTokens ? "TRUE" : "FALSE"}`);
-    if (vals.oauthRefreshTokenValidity) lines.push(`  OAUTH_REFRESH_TOKEN_VALIDITY = ${vals.oauthRefreshTokenValidity}`);
-  } else if (secType === "OAUTH_CUSTOM") {
-    lines.push(`  TYPE = OAUTH`);
-    lines.push(`  OAUTH_CLIENT = CUSTOM`);
-    if (vals.oauthClientType) lines.push(`  OAUTH_CLIENT_TYPE = ${String(vals.oauthClientType)}`);
-    if (vals.oauthRedirectUri) lines.push(`  OAUTH_REDIRECT_URI = ${sq(String(vals.oauthRedirectUri))}`);
-    if (vals.oauthIssueRefreshTokens !== undefined) lines.push(`  OAUTH_ISSUE_REFRESH_TOKENS = ${vals.oauthIssueRefreshTokens ? "TRUE" : "FALSE"}`);
-    if (vals.oauthRefreshTokenValidity) lines.push(`  OAUTH_REFRESH_TOKEN_VALIDITY = ${vals.oauthRefreshTokenValidity}`);
-    if (vals.networkPolicy) lines.push(`  NETWORK_POLICY = ${ident(String(vals.networkPolicy))}`);
-  } else if (secType === "SAML2") {
-    lines.push(`  TYPE = SAML2`);
-    if (vals.samlIdpMetadataUrl) {
-      lines.push(`  SAML2_IDP_METADATA_URL = ${sq(String(vals.samlIdpMetadataUrl))}`);
-    } else {
-      if (vals.samlIdpEntityId) lines.push(`  SAML2_IDP_ENTITY_ID = ${sq(String(vals.samlIdpEntityId))}`);
-      if (vals.samlIdpSsoUrl) lines.push(`  SAML2_IDP_SSO_URL = ${sq(String(vals.samlIdpSsoUrl))}`);
-      if (vals.samlIdpCert) lines.push(`  SAML2_IDP_CERTIFICATE = ${sq(String(vals.samlIdpCert))}`);
-    }
-    if (vals.samlAllowedUserDomains) lines.push(`  SAML2_ALLOWED_EMAIL_PATTERNS = (${splitLocations(String(vals.samlAllowedUserDomains))})`);
-    if (vals.samlSignRequest !== undefined) lines.push(`  SAML2_SIGN_REQUEST = ${vals.samlSignRequest ? "TRUE" : "FALSE"}`);
-    if (vals.samlForceAuthn !== undefined) lines.push(`  SAML2_FORCE_AUTHN = ${vals.samlForceAuthn ? "TRUE" : "FALSE"}`);
-  } else if (secType === "SCIM") {
-    lines.push(`  TYPE = SCIM`);
-    if (vals.scimClient) lines.push(`  SCIM_CLIENT = ${sq(String(vals.scimClient))}`);
-    if (vals.runAsRole) lines.push(`  RUN_AS_SERVICE_USER = ${ident(String(vals.runAsRole))}`);
-    if (vals.networkPolicy) lines.push(`  NETWORK_POLICY = ${ident(String(vals.networkPolicy))}`);
-    if (vals.syncPassword !== undefined) lines.push(`  SYNC_PASSWORD = ${vals.syncPassword ? "TRUE" : "FALSE"}`);
-  }
-
-  lines.push(`  ENABLED = ${enabled}`);
-  if (vals.comment) lines.push(`  COMMENT = ${sq(String(vals.comment))}`);
-  return lines.join("\n");
-}
-
-function splitLocations(s: string): string {
-  return s.split(/[\n,]/).map((x) => x.trim()).filter(Boolean).map(sq).join(", ");
 }
 
 // ── Form sections ──────────────────────────────────────────────────────────────
@@ -959,29 +622,41 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
 
   const isGitHttps = kind === "API" && provider === "git_https_api";
 
-  // Live SQL preview for git_https_api — recomputed whenever any relevant field changes
-  const sqlPreview = useMemo(() => {
-    if (!isGitHttps) return "";
-    return buildApiSql({
-      name:               nameValue,
-      caseSensitive,
-      provider:           "git_https_api",
-      orReplace,
-      ifNotExists,
-      enabled:            enabledVal,
-      githubAppPath:      githubAppPath,
-      allowedPrefixes:    gitAllowedPrefixes,
-      blockedPrefixes:    gitBlockedPrefixes,
-      gitAuthMode:        gitAuthMode ?? "TOKEN",
-      allowedAuthSecrets: gitAllowedSecrets,
-      oauthClientId:      gitOauthClientId,
-      oauthClientSecret:  gitOauthClientSecret,
-      oauthTokenEndpoint: gitOauthTokenEndpoint,
-      oauthScopes:        gitOauthScopes,
-      usePrivateLink:     gitUsePrivateLink,
-      tlsCertificates:    gitTlsCertificates,
-      comment:            commentVal,
-    });
+  // Live SQL preview for git_https_api — debounced call to Go backend
+  const [sqlPreview, setSqlPreview] = useState("");
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    if (!isGitHttps) { setSqlPreview(""); return; }
+    clearTimeout(previewTimerRef.current);
+    previewTimerRef.current = setTimeout(async () => {
+      try {
+        const sql = await BuildApiIntegrationPreviewSQL({
+          name:               nameValue,
+          caseSensitive,
+          provider:           "git_https_api",
+          orReplace:          orReplace ?? false,
+          ifNotExists:        ifNotExists ?? false,
+          enabled:            enabledVal ?? true,
+          githubAppPath:      githubAppPath ?? "",
+          allowedPrefixes:    gitAllowedPrefixes ?? "",
+          blockedPrefixes:    gitBlockedPrefixes ?? "",
+          gitAuthMode:        gitAuthMode ?? "TOKEN",
+          allowedAuthSecrets: gitAllowedSecrets ?? [],
+          oauthClientId:      gitOauthClientId ?? "",
+          oauthClientSecret:  gitOauthClientSecret ?? "",
+          oauthTokenEndpoint: gitOauthTokenEndpoint ?? "",
+          oauthScopes:        gitOauthScopes ?? "",
+          usePrivateLink:     gitUsePrivateLink ?? false,
+          tlsCertificates:    gitTlsCertificates ?? [],
+          comment:            commentVal ?? "",
+        } as any);
+        setSqlPreview(sql ?? "");
+      } catch {
+        setSqlPreview("");
+      }
+    }, 300);
+    return () => clearTimeout(previewTimerRef.current);
   }, [
     isGitHttps, nameValue, caseSensitive, orReplace, ifNotExists, enabledVal,
     githubAppPath, gitAllowedPrefixes, gitBlockedPrefixes, gitAllowedSecrets, gitAuthMode,
@@ -1016,14 +691,18 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
     setLoading(true);
     setError(null);
     try {
-      let sql = "";
-      if (kind === "STORAGE")          sql = buildStorageSql(vals);
-      else if (kind === "API")         sql = buildApiSql(vals);
-      else if (kind === "CATALOG")     sql = buildCatalogSql(vals);
-      else if (kind === "EXTERNAL ACCESS") sql = buildExternalAccessSql(vals);
-      else if (kind === "NOTIFICATION") sql = buildNotificationSql(vals);
-      else if (kind === "SECURITY")    sql = buildSecuritySql(vals);
-      await ExecuteQuery(sql);
+      if (kind === "STORAGE")
+        await CreateStorageIntegration(vals as any);
+      else if (kind === "API")
+        await CreateApiIntegration(vals as any);
+      else if (kind === "CATALOG")
+        await CreateCatalogIntegration(vals as any);
+      else if (kind === "EXTERNAL ACCESS")
+        await CreateExternalAccessIntegration(vals as any);
+      else if (kind === "NOTIFICATION")
+        await CreateNotificationIntegration(vals as any);
+      else if (kind === "SECURITY")
+        await CreateSecurityIntegration(vals as any);
       onSuccess();
       onClose();
     } catch (e) {

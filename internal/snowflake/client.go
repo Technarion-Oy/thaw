@@ -853,6 +853,14 @@ func (c *Client) DropIntegration(ctx context.Context, name string) error {
 	return err
 }
 
+// ExecDDL executes a pre-built DDL statement (e.g. CREATE INTEGRATION …).
+// The caller is responsible for ensuring the SQL is safe; use the integrations
+// package helpers to build injection-safe DDL before calling this method.
+func (c *Client) ExecDDL(ctx context.Context, sql string) error {
+	_, err := c.db.ExecContext(ctx, sql)
+	return err
+}
+
 // CanCreateIntegration returns (true, nil) when the current session role (or any
 // role it inherits) allows creating integrations.
 func (c *Client) CanCreateIntegration(ctx context.Context) (bool, error) {
