@@ -178,7 +178,7 @@ func TestBuildStorageIntegrationSQL_SQLInjectionComment(t *testing.T) {
 		Comment:  "'; DROP TABLE foo; --",
 	}
 	sql := must(BuildStorageIntegrationSQL(p))
-	// The single-quote doubling neutralises the injection: the payload is safely
+	// The single-quote doubling neutralizes the injection: the payload is safely
 	// embedded as a string literal and cannot escape the quotes.
 	assertContains(t, sql, `COMMENT = '''; DROP TABLE foo; --'`)
 }
@@ -455,7 +455,7 @@ func TestBuildSecurityIntegrationSQL_NetworkPolicyInjection(t *testing.T) {
 		NetworkPolicy: `"; DROP TABLE policies; --`,
 	}
 	sql := must(BuildSecurityIntegrationSQL(p))
-	// The double-quote doubling neutralises the injection: the payload is safely
+	// The double-quote doubling neutralizes the injection: the payload is safely
 	// embedded as a double-quoted identifier and cannot escape the quotes.
 	assertContains(t, sql, `"""`)
 }

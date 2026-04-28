@@ -52,7 +52,7 @@ type ApiIntegrationParams struct {
 	// Provider is the lowercase Snowflake API_PROVIDER value.
 	Provider string `json:"provider"` // aws_api_gateway, aws_private_api_gateway, azure_api_management, google_api_gateway, git_https_api
 
-	// OR REPLACE / IF NOT EXISTS (only honoured for git_https_api)
+	// OR REPLACE / IF NOT EXISTS (only honored for git_https_api)
 	OrReplace   bool `json:"orReplace"`
 	IfNotExists bool `json:"ifNotExists"`
 
@@ -72,8 +72,8 @@ type ApiIntegrationParams struct {
 	GoogleAudience string `json:"googleAudience"`
 
 	// git_https_api — auth mode: TOKEN | GITHUB_APP | OAUTH2 | PRIVATELINK
-	GitAuthMode   string   `json:"gitAuthMode"`
-	GithubAppPath string   `json:"githubAppPath"`    // path after https://github.com/
+	GitAuthMode    string   `json:"gitAuthMode"`
+	GithubAppPath  string   `json:"githubAppPath"`      // path after https://github.com/
 	AllowedSecrets []string `json:"allowedAuthSecrets"` // ALL | NONE | secret names
 
 	// OAuth2 mode
@@ -113,10 +113,10 @@ type CatalogIntegrationParams struct {
 	Prefix               string `json:"prefix"`
 
 	// OAuth (shared by POLARIS and ICEBERG_REST with OAUTH auth type)
-	OauthTokenUri    string `json:"oauthTokenUri"`
-	OauthClientId    string `json:"oauthClientId"`
+	OauthTokenUri     string `json:"oauthTokenUri"`
+	OauthClientId     string `json:"oauthClientId"`
 	OauthClientSecret string `json:"oauthClientSecret"`
-	OauthScopes      string `json:"oauthScopes"` // comma-separated
+	OauthScopes       string `json:"oauthScopes"` // comma-separated
 
 	// ICEBERG_REST auth type (OAUTH | BEARER | SIGV4)
 	IcebergAuthType string `json:"icebergAuthType"`
@@ -135,9 +135,9 @@ type ExternalAccessIntegrationParams struct {
 	CaseSensitive bool   `json:"caseSensitive"`
 	Enabled       bool   `json:"enabled"`
 
-	AllowedNetworkRules       string `json:"allowedNetworkRules"`
+	AllowedNetworkRules        string `json:"allowedNetworkRules"`
 	AllowedApiAuthIntegrations string `json:"allowedApiAuthIntegrations"`
-	AllowedAuthSecrets        string `json:"allowedAuthSecrets"` // "all", "none", or comma-separated names
+	AllowedAuthSecrets         string `json:"allowedAuthSecrets"` // "all", "none", or comma-separated names
 
 	Comment string `json:"comment"`
 }
@@ -200,35 +200,35 @@ type SecurityIntegrationParams struct {
 	OauthScopes        string `json:"oauthScopes"` // comma-separated
 
 	// EXTERNAL_OAUTH
-	ExternalOauthType            string `json:"externalOauthType"`
-	Issuer                       string `json:"issuer"`
-	TokenUserMappingClaim        string `json:"tokenUserMappingClaim"`
-	SnowflakeUserMappingAttr     string `json:"snowflakeUserMappingAttr"`
-	JwsKeysUrl                   string `json:"jwsKeysUrl"`
-	AudienceList                 string `json:"audienceList"`
-	AnyRoleMode                  string `json:"anyRoleMode"`
-	NetworkPolicy                string `json:"networkPolicy"`
+	ExternalOauthType        string `json:"externalOauthType"`
+	Issuer                   string `json:"issuer"`
+	TokenUserMappingClaim    string `json:"tokenUserMappingClaim"`
+	SnowflakeUserMappingAttr string `json:"snowflakeUserMappingAttr"`
+	JwsKeysUrl               string `json:"jwsKeysUrl"`
+	AudienceList             string `json:"audienceList"`
+	AnyRoleMode              string `json:"anyRoleMode"`
+	NetworkPolicy            string `json:"networkPolicy"`
 
 	// OAUTH_PARTNER / OAUTH_CUSTOM
-	OauthClient              string `json:"oauthClient"`
-	OauthClientType          string `json:"oauthClientType"`
-	OauthRedirectUri         string `json:"oauthRedirectUri"`
-	OauthIssueRefreshTokens  bool   `json:"oauthIssueRefreshTokens"`
+	OauthClient               string `json:"oauthClient"`
+	OauthClientType           string `json:"oauthClientType"`
+	OauthRedirectUri          string `json:"oauthRedirectUri"`
+	OauthIssueRefreshTokens   bool   `json:"oauthIssueRefreshTokens"`
 	OauthRefreshTokenValidity int    `json:"oauthRefreshTokenValidity"` // seconds; 0 = omit
 
 	// SAML2
-	SamlIdpMetadataUrl    string `json:"samlIdpMetadataUrl"`
-	SamlIdpEntityId       string `json:"samlIdpEntityId"`
-	SamlIdpSsoUrl         string `json:"samlIdpSsoUrl"`
-	SamlIdpCert           string `json:"samlIdpCert"`
+	SamlIdpMetadataUrl     string `json:"samlIdpMetadataUrl"`
+	SamlIdpEntityId        string `json:"samlIdpEntityId"`
+	SamlIdpSsoUrl          string `json:"samlIdpSsoUrl"`
+	SamlIdpCert            string `json:"samlIdpCert"`
 	SamlAllowedUserDomains string `json:"samlAllowedUserDomains"` // comma-separated
-	SamlSignRequest       bool   `json:"samlSignRequest"`
-	SamlForceAuthn        bool   `json:"samlForceAuthn"`
+	SamlSignRequest        bool   `json:"samlSignRequest"`
+	SamlForceAuthn         bool   `json:"samlForceAuthn"`
 
 	// SCIM
-	ScimClient      string `json:"scimClient"`
-	RunAsRole       string `json:"runAsRole"`
-	SyncPassword    bool   `json:"syncPassword"`
+	ScimClient   string `json:"scimClient"`
+	RunAsRole    string `json:"runAsRole"`
+	SyncPassword bool   `json:"syncPassword"`
 
 	Comment string `json:"comment"`
 }
