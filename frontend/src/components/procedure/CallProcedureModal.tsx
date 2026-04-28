@@ -11,7 +11,7 @@
 import { useState, useEffect } from "react";
 import { Modal, Form, Input, Select, Button, Space, Typography, Tag, Spin } from "antd";
 import { PlayCircleOutlined } from "@ant-design/icons";
-import { GetProcedureParams } from "../../../wailsjs/go/main/App";
+import { GetProcedureParams, BuildCallStatement, IsBoolean, IsNumeric, NeedsQuotes } from "../../../wailsjs/go/main/App";
 import { useQueryStore } from "../../store/queryStore";
 
 const { Text } = Typography;
@@ -21,32 +21,10 @@ interface Param {
   dataType: string;
 }
 
-function isBoolean(dataType: string): boolean {
-  const base = dataType.replace(/\(.*\)/, "").trim().toUpperCase();
-  return base === "BOOLEAN" || base === "BOOL";
-}
-
-function isNumeric(dataType: string): boolean {
-  const base = dataType.replace(/\(.*\)/, "").trim().toUpperCase();
-  return /^(NUMBER|INT|INTEGER|BIGINT|SMALLINT|TINYINT|BYTEINT|FLOAT|DOUBLE|DECIMAL|NUMERIC|REAL)$/.test(base);
-}
-
-function needsQuotes(dataType: string): boolean {
-  return !isBoolean(dataType) && !isNumeric(dataType);
-}
-
-function buildCallSql(db: string, schema: string, name: string, params: Param[], values: string[]): string {
-  const esc = (s: string) => s.replace(/"/g, '""');
-  const args = params
-    .map((p, i) => {
-      const val = (values[i] ?? "").trim();
-      if (val === "") return "NULL";
-      if (isBoolean(p.dataType)) return val;
-      if (isNumeric(p.dataType)) return val;
-      return `'${val.replace(/'/g, "''")}'`;
-    })
-    .join(", ");
-  return `CALL "${esc(db)}"."${esc(schema)}"."${esc(name)}"(${args});`;
+interface ParamTypeInfo {
+  isBoolean: boolean;
+  isNumeric: boolean;
+  needsQuotes: boolean;
 }
 
 interface Props {
@@ -59,33 +37,51 @@ interface Props {
 
 export default function CallProcedureModal({ db, schema, name, rawArgs, onClose }: Props) {
   const [params, setParams] = useState<Param[] | null>(null);
+  const [paramTypes, setParamTypes] = useState<ParamTypeInfo[]>([]);
   const [values, setValues] = useState<string[]>([]);
+  const [preview, setPreview] = useState("");
   const executeInNewTab = useQueryStore((s) => s.executeInNewTab);
 
   useEffect(() => {
     GetProcedureParams(db, schema, name, rawArgs)
-      .then((result) => {
-        setParams(result ?? []);
-        setValues((result ?? []).map(() => ""));
+      .then(async (result) => {
+        const p = result ?? [];
+        setParams(p);
+        setValues(p.map(() => ""));
+        
+        // Fetch type info from backend for all params
+        const types = await Promise.all(p.map(async (item) => ({
+          isBoolean: await IsBoolean(item.dataType),
+          isNumeric: await IsNumeric(item.dataType),
+          needsQuotes: await NeedsQuotes(item.dataType),
+        })));
+        setParamTypes(types);
       })
       .catch(() => {
-        // Fallback: no params available
         setParams([]);
         setValues([]);
+        setParamTypes([]);
       });
   }, [db, schema, name, rawArgs]);
+
+  useEffect(() => {
+    if (!params) return;
+    const args = params.map((p, i) => ({
+      name: p.name,
+      dataType: p.dataType,
+      value: values[i] || ""
+    }));
+    BuildCallStatement(db, schema, name, args).then(setPreview);
+  }, [db, schema, name, params, values]);
 
   const setValue = (i: number, v: string) =>
     setValues((prev) => { const next = [...prev]; next[i] = v; return next; });
 
   const handleExecute = () => {
-    if (!params) return;
-    const sql = buildCallSql(db, schema, name, params, values);
+    if (!params || !preview) return;
     onClose();
-    executeInNewTab(sql);
+    executeInNewTab(preview);
   };
-
-  const preview = params ? buildCallSql(db, schema, name, params, values) : "";
 
   return (
     <Modal
@@ -130,7 +126,7 @@ export default function CallProcedureModal({ db, schema, name, rawArgs, onClose 
               }
               style={{ marginBottom: 12 }}
             >
-              {isBoolean(p.dataType) ? (
+              {paramTypes[i]?.isBoolean ? (
                 <Select
                   value={values[i] || undefined}
                   placeholder="Select value"
@@ -145,7 +141,7 @@ export default function CallProcedureModal({ db, schema, name, rawArgs, onClose 
                 <Input
                   value={values[i]}
                   onChange={(e) => setValue(i, e.target.value)}
-                  placeholder={needsQuotes(p.dataType) ? "text — quotes added automatically" : "numeric value"}
+                  placeholder={paramTypes[i]?.needsQuotes ? "text — quotes added automatically" : "numeric value"}
                   onPressEnter={handleExecute}
                 />
               )}

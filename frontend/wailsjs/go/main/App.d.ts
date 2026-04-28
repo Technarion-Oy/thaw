@@ -3,6 +3,7 @@
 import {main} from '../models';
 import {sqleditor} from '../models';
 import {integrations} from '../models';
+import {procedure} from '../models';
 import {snowflake} from '../models';
 import {dbt} from '../models';
 import {ddl} from '../models';
@@ -44,6 +45,10 @@ export function AnalyzeSqlSyntax(arg1:string):Promise<Array<sqleditor.DiagMarker
 export function ApplySqlCasing(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
 
 export function BuildApiIntegrationPreviewSQL(arg1:integrations.ApiIntegrationParams):Promise<string>;
+
+export function BuildCallStatement(arg1:string,arg2:string,arg3:string,arg4:Array<procedure.Argument>):Promise<string>;
+
+export function BuildFunctionSelectStatement(arg1:string,arg2:string,arg3:string,arg4:Array<procedure.Argument>,arg5:boolean):Promise<string>;
 
 export function CanCreateIntegration(arg1:string):Promise<boolean>;
 
@@ -317,7 +322,11 @@ export function InstallVenvEnv():Promise<void>;
 
 export function IsAppleSilicon():Promise<boolean>;
 
+export function IsBoolean(arg1:string):Promise<boolean>;
+
 export function IsConnected():Promise<boolean>;
+
+export function IsNumeric(arg1:string):Promise<boolean>;
 
 export function ListAIModels(arg1:string,arg2:string,arg3:number):Promise<Array<string>>;
 
@@ -370,6 +379,8 @@ export function LoadNotebookBreakpoints(arg1:string):Promise<Record<string, Arra
 export function LoadSnowflakeCLIConfig():Promise<sfconfig.Config>;
 
 export function MakeNotebookLive(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function NeedsQuotes(arg1:string):Promise<boolean>;
 
 export function NewNotebook():Promise<string>;
 
