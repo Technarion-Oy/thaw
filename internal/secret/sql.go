@@ -19,7 +19,9 @@ const (
 	SecretTypeOAuth2             SecretType = "OAUTH2"
 	SecretTypeCloudProviderToken SecretType = "CLOUD_PROVIDER_TOKEN"
 	SecretTypePassword           SecretType = "PASSWORD"
+	// #nosec G101 -- False positive: these are Snowflake Secret TYPE enum values, not actual secrets.
 	SecretTypeGenericString      SecretType = "GENERIC_STRING"
+	// #nosec G101 -- False positive: these are Snowflake Secret TYPE enum values, not actual secrets.
 	SecretTypeSymmetricKey       SecretType = "SYMMETRIC_KEY"
 )
 
