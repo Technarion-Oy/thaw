@@ -102,14 +102,17 @@ function buildGitHttpsApiSql(vals: Record<string, unknown>): string {
     `  API_PROVIDER = git_https_api`,
   ];
 
-  if (vals.allowedPrefixes) {
-    lines.push(`  API_ALLOWED_PREFIXES = (${splitLocations(String(vals.allowedPrefixes))})`);
+  const mode = String(vals.gitAuthMode ?? "TOKEN");
+
+  // For GitHub App, fall back to the base GitHub URL if the user left the field empty.
+  const rawPrefixes = vals.allowedPrefixes ? String(vals.allowedPrefixes).trim() : "";
+  const effectivePrefixes = mode === "GITHUB_APP" && !rawPrefixes ? "https://github.com/" : rawPrefixes;
+  if (effectivePrefixes) {
+    lines.push(`  API_ALLOWED_PREFIXES = (${splitLocations(effectivePrefixes)})`);
   }
   if (vals.blockedPrefixes) {
     lines.push(`  API_BLOCKED_PREFIXES = (${splitLocations(String(vals.blockedPrefixes))})`);
   }
-
-  const mode = String(vals.gitAuthMode ?? "TOKEN");
 
   // ALLOWED_AUTHENTICATION_SECRETS applies to TOKEN and PRIVATELINK modes
   if (mode === "TOKEN" || mode === "PRIVATELINK") {
@@ -422,7 +425,19 @@ const GIT_SECRET_SPECIAL_OPTIONS = [
 ];
 
 function GitHttpsApiForm({ gitAuthMode }: { gitAuthMode: string }) {
+  const form = Form.useFormInstance();
   const allowedPrefixesVal = Form.useWatch("allowedPrefixes") as string | undefined;
+
+  // When switching to GitHub App mode, pre-fill the base prefix so the user
+  // only has to type the org/repo path.
+  useEffect(() => {
+    if (gitAuthMode === "GITHUB_APP") {
+      const current = ((form.getFieldValue("allowedPrefixes") as string | undefined) ?? "").trim();
+      if (!current) {
+        form.setFieldValue("allowedPrefixes", "https://github.com/");
+      }
+    }
+  }, [gitAuthMode, form]);
 
   // Warn when GitHub App mode has non-github.com prefixes
   const githubPrefixWarning = useMemo(() => {
@@ -437,7 +452,9 @@ function GitHttpsApiForm({ gitAuthMode }: { gitAuthMode: string }) {
         name="allowedPrefixes"
         label="API Allowed Prefixes"
         rules={[
-          { required: true, message: "Required" },
+          // GitHub App always has https://github.com/ at minimum, so the field
+          // is effectively optional — the SQL builder fills in the base URL.
+          ...(gitAuthMode !== "GITHUB_APP" ? [{ required: true, message: "Required" }] : []),
           ...(gitAuthMode === "GITHUB_APP"
             ? [
                 {
@@ -457,9 +474,13 @@ function GitHttpsApiForm({ gitAuthMode }: { gitAuthMode: string }) {
               ]
             : []),
         ]}
-        help="One per line or comma-separated"
+        help={
+          gitAuthMode === "GITHUB_APP"
+            ? "Optional — defaults to https://github.com/. Add specific org/repo paths on separate lines."
+            : "One per line or comma-separated"
+        }
       >
-        <TextArea rows={3} placeholder={gitAuthMode === "GITHUB_APP" ? "https://github.com/my-org/" : "https://example.com/"} />
+        <TextArea rows={3} placeholder={gitAuthMode === "GITHUB_APP" ? "https://github.com/my-org/my-repo/" : "https://example.com/"} />
       </Form.Item>
 
       {githubPrefixWarning && (
