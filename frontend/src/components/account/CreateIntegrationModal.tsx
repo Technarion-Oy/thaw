@@ -104,11 +104,13 @@ function buildGitHttpsApiSql(vals: Record<string, unknown>): string {
 
   const mode = String(vals.gitAuthMode ?? "TOKEN");
 
-  // For GitHub App, fall back to the base GitHub URL if the user left the field empty.
-  const rawPrefixes = vals.allowedPrefixes ? String(vals.allowedPrefixes).trim() : "";
-  const effectivePrefixes = mode === "GITHUB_APP" && !rawPrefixes ? "https://github.com/" : rawPrefixes;
-  if (effectivePrefixes) {
-    lines.push(`  API_ALLOWED_PREFIXES = (${splitLocations(effectivePrefixes)})`);
+  if (mode === "GITHUB_APP") {
+    // githubAppPath holds only the path after https://github.com/
+    const path = vals.githubAppPath ? String(vals.githubAppPath).trim().replace(/^\/+/, "") : "";
+    lines.push(`  API_ALLOWED_PREFIXES = (${sq("https://github.com/" + path)})`);
+  } else {
+    const rawPrefixes = vals.allowedPrefixes ? String(vals.allowedPrefixes).trim() : "";
+    if (rawPrefixes) lines.push(`  API_ALLOWED_PREFIXES = (${splitLocations(rawPrefixes)})`);
   }
   if (vals.blockedPrefixes) {
     lines.push(`  API_BLOCKED_PREFIXES = (${splitLocations(String(vals.blockedPrefixes))})`);
@@ -425,71 +427,26 @@ const GIT_SECRET_SPECIAL_OPTIONS = [
 ];
 
 function GitHttpsApiForm({ gitAuthMode }: { gitAuthMode: string }) {
-  const form = Form.useFormInstance();
-  const allowedPrefixesVal = Form.useWatch("allowedPrefixes") as string | undefined;
-
-  // When switching to GitHub App mode, pre-fill the base prefix so the user
-  // only has to type the org/repo path.
-  useEffect(() => {
-    if (gitAuthMode === "GITHUB_APP") {
-      const current = ((form.getFieldValue("allowedPrefixes") as string | undefined) ?? "").trim();
-      if (!current) {
-        form.setFieldValue("allowedPrefixes", "https://github.com/");
-      }
-    }
-  }, [gitAuthMode, form]);
-
-  // Warn when GitHub App mode has non-github.com prefixes
-  const githubPrefixWarning = useMemo(() => {
-    if (gitAuthMode !== "GITHUB_APP" || !allowedPrefixesVal) return false;
-    const prefixes = allowedPrefixesVal.split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
-    return prefixes.some((p) => !p.startsWith("https://github.com/"));
-  }, [gitAuthMode, allowedPrefixesVal]);
-
   return (
     <>
-      <Form.Item
-        name="allowedPrefixes"
-        label="API Allowed Prefixes"
-        rules={[
-          // GitHub App always has https://github.com/ at minimum, so the field
-          // is effectively optional — the SQL builder fills in the base URL.
-          ...(gitAuthMode !== "GITHUB_APP" ? [{ required: true, message: "Required" }] : []),
-          ...(gitAuthMode === "GITHUB_APP"
-            ? [
-                {
-                  validator: (_: unknown, value: string) => {
-                    const prefixes = (value ?? "")
-                      .split(/[\n,]/)
-                      .map((s: string) => s.trim())
-                      .filter(Boolean);
-                    const invalid = prefixes.filter(
-                      (p: string) => !p.startsWith("https://github.com/")
-                    );
-                    return invalid.length > 0
-                      ? Promise.reject("GitHub App prefixes must begin with https://github.com/")
-                      : Promise.resolve();
-                  },
-                },
-              ]
-            : []),
-        ]}
-        help={
-          gitAuthMode === "GITHUB_APP"
-            ? "Optional — defaults to https://github.com/. Add specific org/repo paths on separate lines."
-            : "One per line or comma-separated"
-        }
-      >
-        <TextArea rows={3} placeholder={gitAuthMode === "GITHUB_APP" ? "https://github.com/my-org/my-repo/" : "https://example.com/"} />
-      </Form.Item>
-
-      {githubPrefixWarning && (
-        <Alert
-          type="warning"
-          showIcon
-          message="All prefixes must start with https://github.com/ for GitHub App authentication."
-          style={{ marginBottom: 12, fontSize: 12 }}
-        />
+      {/* Allowed Prefixes — locked addonBefore for GitHub App, free TextArea for other modes */}
+      {gitAuthMode === "GITHUB_APP" ? (
+        <Form.Item
+          name="githubAppPath"
+          label="API Allowed Prefix"
+          help="Optional — leave blank to allow all github.com repos, or enter an org/repo path"
+        >
+          <Input addonBefore="https://github.com/" placeholder="my-org/my-repo/" />
+        </Form.Item>
+      ) : (
+        <Form.Item
+          name="allowedPrefixes"
+          label="API Allowed Prefixes"
+          rules={[{ required: true, message: "Required" }]}
+          help="One per line or comma-separated"
+        >
+          <TextArea rows={3} placeholder="https://example.com/" />
+        </Form.Item>
       )}
 
       <Form.Item name="blockedPrefixes" label="API Blocked Prefixes (optional)" help="One per line or comma-separated">
@@ -987,6 +944,7 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
   const ifNotExists = Form.useWatch("ifNotExists", form) as boolean | undefined;
 
   // Additional watches for the live git_https_api SQL preview
+  const githubAppPath         = Form.useWatch("githubAppPath",      form) as string   | undefined;
   const gitAllowedPrefixes    = Form.useWatch("allowedPrefixes",   form) as string   | undefined;
   const gitBlockedPrefixes    = Form.useWatch("blockedPrefixes",    form) as string   | undefined;
   const gitAllowedSecrets     = Form.useWatch("allowedAuthSecrets", form) as string[] | undefined;
@@ -1011,6 +969,7 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
       orReplace,
       ifNotExists,
       enabled:            enabledVal,
+      githubAppPath:      githubAppPath,
       allowedPrefixes:    gitAllowedPrefixes,
       blockedPrefixes:    gitBlockedPrefixes,
       gitAuthMode:        gitAuthMode ?? "TOKEN",
@@ -1025,7 +984,7 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
     });
   }, [
     isGitHttps, nameValue, caseSensitive, orReplace, ifNotExists, enabledVal,
-    gitAllowedPrefixes, gitBlockedPrefixes, gitAllowedSecrets, gitAuthMode,
+    githubAppPath, gitAllowedPrefixes, gitBlockedPrefixes, gitAllowedSecrets, gitAuthMode,
     gitOauthClientId, gitOauthClientSecret, gitOauthTokenEndpoint, gitOauthScopes,
     gitUsePrivateLink, gitTlsCertificates, commentVal,
   ]);
