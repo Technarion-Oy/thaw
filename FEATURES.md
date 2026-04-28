@@ -428,7 +428,7 @@ When multiple databases or schemas are selected, stub filenames are prefixed wit
   - **Commit & Push** — file checklist with checkboxes (added/modified/deleted colour-coded), select all / none / by extension, commit message textarea, personal access token input (ephemeral, never saved)
   - **Pull** — shows current remote URL and branch; PAT input; pull from configured remote branch
   - **Clone** — remote URL input, local path picker (native OS dialog), optional PAT (for private repos), clone progress feedback
-  - **Branches** — lists all local and remote branches with the current branch highlighted; Switch button per local branch; create new branch with name input and **Create Branch** button; refresh button to reload branch list
+  - **Branches** — lists all local and remote branches with the current branch highlighted; Switch button per local branch; **Merge branch** button to merge any local branch into the current one (Fast-Forward only); create new branch with name input and **Create Branch** button; refresh button to reload branch list
 - **Git gutter indicators** — when a tracked file is open in the SQL editor, VS Code-style coloured bars appear in the gutter:
   - **Green bar** — lines added since the last HEAD commit
   - **Blue bar** — lines modified since the last HEAD commit

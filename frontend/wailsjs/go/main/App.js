@@ -554,6 +554,10 @@ export function GitLookupCredentials(arg1) {
   return window['go']['main']['App']['GitLookupCredentials'](arg1);
 }
 
+export function GitMergeBranch(arg1, arg2) {
+  return window['go']['main']['App']['GitMergeBranch'](arg1, arg2);
+}
+
 export function GitPull(arg1) {
   return window['go']['main']['App']['GitPull'](arg1);
 }

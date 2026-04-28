@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { create } from "zustand";
-import { GitStatus, GitCommitAndPush, GitPull, GitFetch, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCheckoutRemoteBranch, GitCreateBranch, GitDeleteBranch, GitDeleteRemoteBranch, GitResetHard, GitUpdateRemoteURL, GitPushBranch, GitLoginWithOAuth } from "../../wailsjs/go/main/App";
+import { GitStatus, GitCommitAndPush, GitPull, GitFetch, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCheckoutRemoteBranch, GitCreateBranch, GitDeleteBranch, GitDeleteRemoteBranch, GitMergeBranch, GitResetHard, GitUpdateRemoteURL, GitPushBranch, GitLoginWithOAuth } from "../../wailsjs/go/main/App";
 import type { gitrepo } from "../../wailsjs/go/models";
 
 export type RepoStatus = gitrepo.RepoStatus;
@@ -74,6 +74,7 @@ interface GitState {
   checkoutRemoteBranch: (remoteName: string) => Promise<void>;
   createBranch: (name: string) => Promise<void>;
   deleteBranch: (name: string) => Promise<void>;
+  mergeBranch: (name: string) => Promise<void>;
   deleteRemoteBranch: (remoteName: string) => Promise<void>;
   pushBranch: (branch: string) => Promise<void>;
   pullBranch: (branch: string) => Promise<void>;
@@ -281,6 +282,19 @@ export const useGitStore = create<GitState>((set, get) => ({
     set({ error: null });
     try {
       await GitDeleteBranch(exportDir, name);
+      await get().listBranches();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  mergeBranch: async (name: string) => {
+    const { exportDir } = get();
+    if (!exportDir) return;
+    set({ error: null });
+    try {
+      await GitMergeBranch(exportDir, name);
+      await get().refreshStatus();
       await get().listBranches();
     } catch (e) {
       set({ error: String(e) });

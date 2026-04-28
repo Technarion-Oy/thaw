@@ -622,6 +622,27 @@ func DeleteBranch(dir, name string) error {
 	return nil
 }
 
+// MergeBranch merges sourceBranch into the current branch of the repository at dir.
+func MergeBranch(dir, sourceBranch string) error {
+	repo, err := gogit.PlainOpenWithOptions(dir, &gogit.PlainOpenOptions{DetectDotGit: true})
+	if err != nil {
+		return fmt.Errorf("not a git repository")
+	}
+
+	srcRef, err := repo.Reference(plumbing.NewBranchReferenceName(sourceBranch), true)
+	if err != nil {
+		return fmt.Errorf("source branch %q not found: %w", sourceBranch, err)
+	}
+
+	err = repo.Merge(*srcRef, gogit.MergeOptions{
+		Strategy: gogit.FastForwardMerge,
+	})
+	if err != nil {
+		return fmt.Errorf("git merge: %w", err)
+	}
+	return nil
+}
+
 // ResetHard discards all uncommitted working-tree changes,
 // resetting the worktree to the HEAD commit (git reset --hard HEAD).
 func ResetHard(dir string) error {
