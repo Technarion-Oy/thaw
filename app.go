@@ -40,6 +40,7 @@ import (
 	"thaw/internal/filesystem"
 	"thaw/internal/fnmeta"
 	"thaw/internal/gitrepo"
+	"thaw/internal/integrations"
 	"thaw/internal/logger"
 	"thaw/internal/queryprofile"
 	"thaw/internal/sfconfig"
@@ -1823,6 +1824,86 @@ func (a *App) CanCreateIntegration(tabId string) (bool, error) {
 		return false, ErrNotConnected
 	}
 	return a.client.CanCreateIntegration(a.ctx)
+}
+
+// ── Integration SQL builders (IPC) ────────────────────────────────────────────
+
+// CreateStorageIntegration builds and executes a CREATE STORAGE INTEGRATION DDL.
+func (a *App) CreateStorageIntegration(params integrations.StorageIntegrationParams) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	sql, err := integrations.BuildStorageIntegrationSQL(params)
+	if err != nil {
+		return err
+	}
+	return a.client.ExecDDL(a.ctx, sql)
+}
+
+// CreateApiIntegration builds and executes a CREATE API INTEGRATION DDL.
+func (a *App) CreateApiIntegration(params integrations.ApiIntegrationParams) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	sql, err := integrations.BuildApiIntegrationSQL(params)
+	if err != nil {
+		return err
+	}
+	return a.client.ExecDDL(a.ctx, sql)
+}
+
+// CreateCatalogIntegration builds and executes a CREATE CATALOG INTEGRATION DDL.
+func (a *App) CreateCatalogIntegration(params integrations.CatalogIntegrationParams) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	sql, err := integrations.BuildCatalogIntegrationSQL(params)
+	if err != nil {
+		return err
+	}
+	return a.client.ExecDDL(a.ctx, sql)
+}
+
+// CreateExternalAccessIntegration builds and executes a CREATE EXTERNAL ACCESS INTEGRATION DDL.
+func (a *App) CreateExternalAccessIntegration(params integrations.ExternalAccessIntegrationParams) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	sql, err := integrations.BuildExternalAccessIntegrationSQL(params)
+	if err != nil {
+		return err
+	}
+	return a.client.ExecDDL(a.ctx, sql)
+}
+
+// CreateNotificationIntegration builds and executes a CREATE NOTIFICATION INTEGRATION DDL.
+func (a *App) CreateNotificationIntegration(params integrations.NotificationIntegrationParams) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	sql, err := integrations.BuildNotificationIntegrationSQL(params)
+	if err != nil {
+		return err
+	}
+	return a.client.ExecDDL(a.ctx, sql)
+}
+
+// CreateSecurityIntegration builds and executes a CREATE SECURITY INTEGRATION DDL.
+func (a *App) CreateSecurityIntegration(params integrations.SecurityIntegrationParams) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	sql, err := integrations.BuildSecurityIntegrationSQL(params)
+	if err != nil {
+		return err
+	}
+	return a.client.ExecDDL(a.ctx, sql)
+}
+
+// BuildApiIntegrationPreviewSQL returns the DDL that would be executed for the
+// given API integration parameters, without executing it. Used for live SQL preview.
+func (a *App) BuildApiIntegrationPreviewSQL(params integrations.ApiIntegrationParams) (string, error) {
+	return integrations.BuildApiIntegrationSQL(params)
 }
 
 // UseRole switches the given tab's isolated session to the specified role.

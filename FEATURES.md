@@ -487,7 +487,7 @@ Browse, create, modify, and drop all six Snowflake integration types from a lazy
 | Kind | Supported Subtypes / Providers |
 |------|-------------------------------|
 | **Storage** | Amazon S3, S3 GovCloud, Google Cloud Storage, Azure Blob Storage |
-| **API** | AWS API Gateway, AWS Private API Gateway, Azure API Management, Google API Gateway, Git HTTPS API |
+| **API** | AWS API Gateway, AWS Private API Gateway, Azure API Management, Google API Gateway, Git HTTPS API (Token/Secret, GitHub App, OAuth2, Private Link) |
 | **Catalog** | AWS Glue, Object Store, Polaris, Iceberg REST, SAP BDC |
 | **External Access** | Network-rule-based (allowed network rules + optional authentication secrets) |
 | **Notification** | Email, Webhook, Azure Storage Queue (inbound), GCP Pub/Sub (inbound/outbound), AWS SNS (outbound), Azure Event Grid (outbound) |

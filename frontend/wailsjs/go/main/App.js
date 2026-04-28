@@ -58,6 +58,10 @@ export function ApplySqlCasing(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['ApplySqlCasing'](arg1, arg2, arg3, arg4);
 }
 
+export function BuildApiIntegrationPreviewSQL(arg1) {
+  return window['go']['main']['App']['BuildApiIntegrationPreviewSQL'](arg1);
+}
+
 export function CanCreateIntegration(arg1) {
   return window['go']['main']['App']['CanCreateIntegration'](arg1);
 }
@@ -126,6 +130,10 @@ export function Connect(arg1) {
   return window['go']['main']['App']['Connect'](arg1);
 }
 
+export function CreateApiIntegration(arg1) {
+  return window['go']['main']['App']['CreateApiIntegration'](arg1);
+}
+
 export function CreateBackupPolicy(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) {
   return window['go']['main']['App']['CreateBackupPolicy'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9);
 }
@@ -134,12 +142,32 @@ export function CreateBackupSet(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, 
   return window['go']['main']['App']['CreateBackupSet'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9);
 }
 
+export function CreateCatalogIntegration(arg1) {
+  return window['go']['main']['App']['CreateCatalogIntegration'](arg1);
+}
+
 export function CreateDbtProject(arg1, arg2) {
   return window['go']['main']['App']['CreateDbtProject'](arg1, arg2);
 }
 
+export function CreateExternalAccessIntegration(arg1) {
+  return window['go']['main']['App']['CreateExternalAccessIntegration'](arg1);
+}
+
 export function CreateMigrationSnapshot(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
   return window['go']['main']['App']['CreateMigrationSnapshot'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+}
+
+export function CreateNotificationIntegration(arg1) {
+  return window['go']['main']['App']['CreateNotificationIntegration'](arg1);
+}
+
+export function CreateSecurityIntegration(arg1) {
+  return window['go']['main']['App']['CreateSecurityIntegration'](arg1);
+}
+
+export function CreateStorageIntegration(arg1) {
+  return window['go']['main']['App']['CreateStorageIntegration'](arg1);
 }
 
 export function DebugNotebookCell(arg1, arg2, arg3) {

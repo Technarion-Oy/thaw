@@ -8,10 +8,20 @@
 // Commercial use of this software is restricted to parties   holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useEffect } from "react";
-import { Modal, Form, Input, Select, Switch, Button, Alert, InputNumber } from "antd";
-import { ExecuteQuery, GetCurrentRegion, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/main/App";
-import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
+import { useState, useEffect, useRef } from "react";
+import { Modal, Form, Input, Select, Switch, Button, Alert, InputNumber, Radio, Checkbox, Divider, Typography } from "antd";
+import {
+  GetCurrentRegion,
+  GetQuotedIdentifiersIgnoreCase,
+  CreateStorageIntegration,
+  CreateApiIntegration,
+  CreateCatalogIntegration,
+  CreateExternalAccessIntegration,
+  CreateNotificationIntegration,
+  CreateSecurityIntegration,
+  BuildApiIntegrationPreviewSQL,
+} from "../../../wailsjs/go/main/App";
+import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 
 const { TextArea } = Input;
 
@@ -19,269 +29,6 @@ interface Props {
   kind: string;
   onClose: () => void;
   onSuccess: () => void;
-}
-
-// ── SQL builder ───────────────────────────────────────────────────────────────
-
-function sq(s: string): string {
-  return "'" + s.replace(/'/g, "''") + "'";
-}
-function ident(s: string): string {
-  return '"' + s.replace(/"/g, '""') + '"';
-}
-
-function buildStorageSql(vals: Record<string, unknown>): string {
-  const name = identToken(String(vals.name ?? ""), Boolean(vals.caseSensitive));
-  const provider = String(vals.provider ?? "S3");
-  const enabled = vals.enabled !== false ? "TRUE" : "FALSE";
-  const lines: string[] = [
-    `CREATE STORAGE INTEGRATION ${name}`,
-    `  TYPE = EXTERNAL_STAGE`,
-    `  STORAGE_PROVIDER = '${provider}'`,
-    `  ENABLED = ${enabled}`,
-  ];
-  if (provider === "S3" || provider === "S3GOV") {
-    if (vals.awsRoleArn) lines.push(`  STORAGE_AWS_ROLE_ARN = ${sq(String(vals.awsRoleArn))}`);
-    if (vals.allowedLocations) lines.push(`  STORAGE_ALLOWED_LOCATIONS = (${splitLocations(String(vals.allowedLocations))})`);
-    if (vals.blockedLocations) lines.push(`  STORAGE_BLOCKED_LOCATIONS = (${splitLocations(String(vals.blockedLocations))})`);
-    if (vals.awsExternalId) lines.push(`  STORAGE_AWS_EXTERNAL_ID = ${sq(String(vals.awsExternalId))}`);
-    if (vals.usePrivatelink) lines.push(`  USE_PRIVATELINK_ENDPOINT = TRUE`);
-  } else if (provider === "GCS") {
-    if (vals.allowedLocations) lines.push(`  STORAGE_ALLOWED_LOCATIONS = (${splitLocations(String(vals.allowedLocations))})`);
-    if (vals.blockedLocations) lines.push(`  STORAGE_BLOCKED_LOCATIONS = (${splitLocations(String(vals.blockedLocations))})`);
-  } else if (provider === "AZURE") {
-    if (vals.azureTenantId) lines.push(`  AZURE_TENANT_ID = ${sq(String(vals.azureTenantId))}`);
-    if (vals.allowedLocations) lines.push(`  STORAGE_ALLOWED_LOCATIONS = (${splitLocations(String(vals.allowedLocations))})`);
-    if (vals.blockedLocations) lines.push(`  STORAGE_BLOCKED_LOCATIONS = (${splitLocations(String(vals.blockedLocations))})`);
-    if (vals.usePrivatelink) lines.push(`  USE_PRIVATELINK_ENDPOINT = TRUE`);
-  }
-  if (vals.comment) lines.push(`  COMMENT = ${sq(String(vals.comment))}`);
-  return lines.join("\n");
-}
-
-function buildApiSql(vals: Record<string, unknown>): string {
-  const name = identToken(String(vals.name ?? ""), Boolean(vals.caseSensitive));
-  const provider = String(vals.provider ?? "aws_api_gateway");
-  const enabled = vals.enabled !== false ? "TRUE" : "FALSE";
-  const lines: string[] = [
-    `CREATE API INTEGRATION ${name}`,
-    `  API_PROVIDER = ${provider}`,
-    `  ENABLED = ${enabled}`,
-  ];
-  if (vals.allowedPrefixes) lines.push(`  API_ALLOWED_PREFIXES = (${splitLocations(String(vals.allowedPrefixes))})`);
-  if (vals.blockedPrefixes) lines.push(`  API_BLOCKED_PREFIXES = (${splitLocations(String(vals.blockedPrefixes))})`);
-  if (provider === "aws_api_gateway" || provider === "aws_private_api_gateway") {
-    if (vals.awsRoleArn) lines.push(`  API_AWS_ROLE_ARN = ${sq(String(vals.awsRoleArn))}`);
-    if (vals.apiKey) lines.push(`  API_KEY = ${sq(String(vals.apiKey))}`);
-  } else if (provider === "azure_api_management") {
-    if (vals.azureTenantId) lines.push(`  AZURE_TENANT_ID = ${sq(String(vals.azureTenantId))}`);
-    if (vals.azureAdAppId) lines.push(`  AZURE_AD_APPLICATION_ID = ${sq(String(vals.azureAdAppId))}`);
-    if (vals.apiKey) lines.push(`  API_KEY = ${sq(String(vals.apiKey))}`);
-  } else if (provider === "google_api_gateway") {
-    if (vals.googleAudience) lines.push(`  GOOGLE_AUDIENCE = ${sq(String(vals.googleAudience))}`);
-  } else if (provider === "git_https_api") {
-    if (vals.allowedAuthSecrets) lines.push(`  ALLOWED_AUTHENTICATION_SECRETS = (${String(vals.allowedAuthSecrets)})`);
-  }
-  if (vals.comment) lines.push(`  COMMENT = ${sq(String(vals.comment))}`);
-  return lines.join("\n");
-}
-
-function buildCatalogSql(vals: Record<string, unknown>): string {
-  const name = identToken(String(vals.name ?? ""), Boolean(vals.caseSensitive));
-  const source = String(vals.source ?? "GLUE");
-  const enabled = vals.enabled !== false ? "TRUE" : "FALSE";
-  const lines: string[] = [
-    `CREATE CATALOG INTEGRATION ${name}`,
-    `  CATALOG_SOURCE = ${source}`,
-    `  ENABLED = ${enabled}`,
-  ];
-  if (source === "GLUE") {
-    if (vals.glueAwsRoleArn) lines.push(`  GLUE_AWS_ROLE_ARN = ${sq(String(vals.glueAwsRoleArn))}`);
-    if (vals.glueCatalogId) lines.push(`  GLUE_CATALOG_ID = ${sq(String(vals.glueCatalogId))}`);
-    if (vals.glueRegion) lines.push(`  GLUE_REGION = ${sq(String(vals.glueRegion))}`);
-    if (vals.catalogNamespace) lines.push(`  CATALOG_NAMESPACE = ${sq(String(vals.catalogNamespace))}`);
-  } else if (source === "OBJECT_STORE") {
-    if (vals.tableFormat) lines.push(`  TABLE_FORMAT = ${String(vals.tableFormat)}`);
-  } else if (source === "POLARIS" || source === "ICEBERG_REST") {
-    if (vals.catalogUri) lines.push(`  CATALOG_URI = ${sq(String(vals.catalogUri))}`);
-    if (vals.catalogName) lines.push(`  CATALOG_NAME = ${sq(String(vals.catalogName))}`);
-    if (vals.catalogNamespace) lines.push(`  CATALOG_NAMESPACE = ${sq(String(vals.catalogNamespace))}`);
-    if (vals.catalogApiType) lines.push(`  CATALOG_API_TYPE = ${String(vals.catalogApiType)}`);
-    if (vals.accessDelegationMode) lines.push(`  ACCESS_DELEGATION_MODE = ${String(vals.accessDelegationMode)}`);
-    if (source === "POLARIS") {
-      if (vals.oauthTokenUri) lines.push(`  OAUTH_TOKEN_URI = ${sq(String(vals.oauthTokenUri))}`);
-      if (vals.oauthClientId) lines.push(`  OAUTH_CLIENT_ID = ${sq(String(vals.oauthClientId))}`);
-      if (vals.oauthClientSecret) lines.push(`  OAUTH_CLIENT_SECRET = ${sq(String(vals.oauthClientSecret))}`);
-      if (vals.oauthScopes) lines.push(`  OAUTH_ALLOWED_SCOPES = (${splitLocations(String(vals.oauthScopes))})`);
-    } else {
-      const authType = String(vals.icebergAuthType ?? "OAUTH");
-      lines.push(`  AUTH_TYPE = ${authType}`);
-      if (authType === "OAUTH") {
-        if (vals.oauthTokenUri) lines.push(`  OAUTH_TOKEN_URI = ${sq(String(vals.oauthTokenUri))}`);
-        if (vals.oauthClientId) lines.push(`  OAUTH_CLIENT_ID = ${sq(String(vals.oauthClientId))}`);
-        if (vals.oauthClientSecret) lines.push(`  OAUTH_CLIENT_SECRET = ${sq(String(vals.oauthClientSecret))}`);
-        if (vals.oauthScopes) lines.push(`  OAUTH_ALLOWED_SCOPES = (${splitLocations(String(vals.oauthScopes))})`);
-      } else if (authType === "BEARER") {
-        if (vals.bearerToken) lines.push(`  BEARER_TOKEN = ${sq(String(vals.bearerToken))}`);
-      }
-    }
-    if (vals.prefix) lines.push(`  PREFIX = ${sq(String(vals.prefix))}`);
-  } else if (source === "SAP_BDC") {
-    if (vals.sapInvitationLink) lines.push(`  SAP_BDC_INVITATION_LINK = ${sq(String(vals.sapInvitationLink))}`);
-    if (vals.accessDelegationMode) lines.push(`  ACCESS_DELEGATION_MODE = ${String(vals.accessDelegationMode)}`);
-  }
-  if (vals.refreshInterval) lines.push(`  REFRESH_INTERVAL_SECONDS = ${vals.refreshInterval}`);
-  if (vals.comment) lines.push(`  COMMENT = ${sq(String(vals.comment))}`);
-  return lines.join("\n");
-}
-
-function buildExternalAccessSql(vals: Record<string, unknown>): string {
-  const name = identToken(String(vals.name ?? ""), Boolean(vals.caseSensitive));
-  const enabled = vals.enabled !== false ? "TRUE" : "FALSE";
-  const lines: string[] = [
-    `CREATE EXTERNAL ACCESS INTEGRATION ${name}`,
-  ];
-  if (vals.allowedNetworkRules) {
-    lines.push(`  ALLOWED_NETWORK_RULES = (${String(vals.allowedNetworkRules)})`);
-  }
-  if (vals.allowedApiAuthIntegrations) {
-    lines.push(`  ALLOWED_API_AUTHENTICATION_INTEGRATIONS = (${String(vals.allowedApiAuthIntegrations)})`);
-  }
-  if (vals.allowedAuthSecrets) {
-    const sec = String(vals.allowedAuthSecrets).trim().toLowerCase();
-    if (sec === "all" || sec === "none") {
-      lines.push(`  ALLOWED_AUTHENTICATION_SECRETS = ${sec.toUpperCase()}`);
-    } else {
-      lines.push(`  ALLOWED_AUTHENTICATION_SECRETS = (${String(vals.allowedAuthSecrets)})`);
-    }
-  }
-  lines.push(`  ENABLED = ${enabled}`);
-  if (vals.comment) lines.push(`  COMMENT = ${sq(String(vals.comment))}`);
-  return lines.join("\n");
-}
-
-function buildNotificationSql(vals: Record<string, unknown>): string {
-  const name = identToken(String(vals.name ?? ""), Boolean(vals.caseSensitive));
-  const subtype = String(vals.subtype ?? "EMAIL");
-  const lines: string[] = [`CREATE NOTIFICATION INTEGRATION ${name}`];
-
-  if (subtype === "AZURE_STORAGE_QUEUE_INBOUND") {
-    lines.push(`  TYPE = QUEUE`);
-    lines.push(`  NOTIFICATION_PROVIDER = AZURE_STORAGE_QUEUE`);
-    lines.push(`  DIRECTION = INBOUND`);
-    if (vals.azureQueueUri) lines.push(`  AZURE_STORAGE_QUEUE_PRIMARY_URI = ${sq(String(vals.azureQueueUri))}`);
-    if (vals.azureTenantId) lines.push(`  AZURE_TENANT_ID = ${sq(String(vals.azureTenantId))}`);
-    if (vals.usePrivatelink) lines.push(`  USE_PRIVATELINK_ENDPOINT = TRUE`);
-  } else if (subtype === "GCP_PUBSUB_INBOUND") {
-    lines.push(`  TYPE = QUEUE`);
-    lines.push(`  NOTIFICATION_PROVIDER = GCP_PUBSUB`);
-    lines.push(`  DIRECTION = INBOUND`);
-    if (vals.gcpSubName) lines.push(`  GCP_PUBSUB_SUBSCRIPTION_NAME = ${sq(String(vals.gcpSubName))}`);
-  } else if (subtype === "AWS_SNS_OUTBOUND") {
-    lines.push(`  TYPE = QUEUE`);
-    lines.push(`  NOTIFICATION_PROVIDER = AWS_SNS`);
-    lines.push(`  DIRECTION = OUTBOUND`);
-    if (vals.awsSnsTopicArn) lines.push(`  AWS_SNS_TOPIC_ARN = ${sq(String(vals.awsSnsTopicArn))}`);
-    if (vals.awsSnsRoleArn) lines.push(`  AWS_SNS_ROLE_ARN = ${sq(String(vals.awsSnsRoleArn))}`);
-  } else if (subtype === "AZURE_EVENT_GRID_OUTBOUND") {
-    lines.push(`  TYPE = QUEUE`);
-    lines.push(`  NOTIFICATION_PROVIDER = AZURE_EVENT_GRID`);
-    lines.push(`  DIRECTION = OUTBOUND`);
-    if (vals.azureTopicEndpoint) lines.push(`  AZURE_EVENT_GRID_TOPIC_ENDPOINT = ${sq(String(vals.azureTopicEndpoint))}`);
-    if (vals.azureTenantId) lines.push(`  AZURE_TENANT_ID = ${sq(String(vals.azureTenantId))}`);
-  } else if (subtype === "GCP_PUBSUB_OUTBOUND") {
-    lines.push(`  TYPE = QUEUE`);
-    lines.push(`  NOTIFICATION_PROVIDER = GCP_PUBSUB`);
-    lines.push(`  DIRECTION = OUTBOUND`);
-    if (vals.gcpTopicName) lines.push(`  GCP_PUBSUB_TOPIC_NAME = ${sq(String(vals.gcpTopicName))}`);
-  } else if (subtype === "EMAIL") {
-    lines.push(`  TYPE = EMAIL`);
-    if (vals.allowedRecipients) lines.push(`  ALLOWED_RECIPIENTS = (${splitLocations(String(vals.allowedRecipients))})`);
-    if (vals.defaultRecipients) lines.push(`  DEFAULT_RECIPIENTS = (${splitLocations(String(vals.defaultRecipients))})`);
-    if (vals.defaultSubject) lines.push(`  DEFAULT_SUBJECT = ${sq(String(vals.defaultSubject))}`);
-  } else if (subtype === "WEBHOOK") {
-    lines.push(`  TYPE = WEBHOOK`);
-    if (vals.webhookUrl) lines.push(`  WEBHOOK_URL = ${sq(String(vals.webhookUrl))}`);
-    if (vals.webhookSecret) lines.push(`  WEBHOOK_SECRET = ${sq(String(vals.webhookSecret))}`);
-    if (vals.webhookBodyTemplate) lines.push(`  WEBHOOK_BODY_TEMPLATE = ${sq(String(vals.webhookBodyTemplate))}`);
-    if (vals.webhookHeaders) lines.push(`  WEBHOOK_HEADERS = (${String(vals.webhookHeaders)})`);
-  }
-  lines.push(`  ENABLED = ${vals.enabled !== false ? "TRUE" : "FALSE"}`);
-  if (vals.comment) lines.push(`  COMMENT = ${sq(String(vals.comment))}`);
-  return lines.join("\n");
-}
-
-function buildSecuritySql(vals: Record<string, unknown>): string {
-  const name = identToken(String(vals.name ?? ""), Boolean(vals.caseSensitive));
-  const secType = String(vals.secType ?? "OAUTH");
-  const enabled = vals.enabled !== false ? "TRUE" : "FALSE";
-  const lines: string[] = [`CREATE SECURITY INTEGRATION ${name}`];
-
-  if (secType === "API_AUTHENTICATION") {
-    lines.push(`  TYPE = API_AUTHENTICATION`);
-    const authType = String(vals.authType ?? "OAUTH2");
-    lines.push(`  AUTH_TYPE = ${authType}`);
-    if (authType === "AWS_IAM") {
-      if (vals.awsRoleArn) lines.push(`  AWS_ROLE_ARN = ${sq(String(vals.awsRoleArn))}`);
-    } else {
-      const grant = String(vals.oauthGrant ?? "CLIENT_CREDENTIALS");
-      lines.push(`  OAUTH_GRANT = ${grant}`);
-      if (vals.oauthTokenEndpoint) lines.push(`  OAUTH_TOKEN_ENDPOINT = ${sq(String(vals.oauthTokenEndpoint))}`);
-      if (vals.oauthClientId) lines.push(`  OAUTH_CLIENT_ID = ${sq(String(vals.oauthClientId))}`);
-      if (vals.oauthClientSecret) lines.push(`  OAUTH_CLIENT_SECRET = ${sq(String(vals.oauthClientSecret))}`);
-      if (vals.oauthScopes) lines.push(`  OAUTH_ALLOWED_SCOPES = (${splitLocations(String(vals.oauthScopes))})`);
-    }
-  } else if (secType === "EXTERNAL_OAUTH") {
-    lines.push(`  TYPE = EXTERNAL_OAUTH`);
-    if (vals.externalOauthType) lines.push(`  EXTERNAL_OAUTH_TYPE = ${String(vals.externalOauthType)}`);
-    if (vals.issuer) lines.push(`  EXTERNAL_OAUTH_ISSUER = ${sq(String(vals.issuer))}`);
-    if (vals.tokenUserMappingClaim) lines.push(`  EXTERNAL_OAUTH_TOKEN_USER_MAPPING_CLAIM = ${sq(String(vals.tokenUserMappingClaim))}`);
-    if (vals.snowflakeUserMappingAttr) lines.push(`  EXTERNAL_OAUTH_SNOWFLAKE_USER_MAPPING_ATTRIBUTE = ${sq(String(vals.snowflakeUserMappingAttr))}`);
-    if (vals.jwsKeysUrl) lines.push(`  EXTERNAL_OAUTH_JWS_KEYS_URL = ${sq(String(vals.jwsKeysUrl))}`);
-    if (vals.audienceList) lines.push(`  EXTERNAL_OAUTH_AUDIENCE_LIST = (${splitLocations(String(vals.audienceList))})`);
-    if (vals.anyRoleMode) lines.push(`  EXTERNAL_OAUTH_ANY_ROLE_MODE = ${String(vals.anyRoleMode)}`);
-    if (vals.networkPolicy) lines.push(`  NETWORK_POLICY = ${ident(String(vals.networkPolicy))}`);
-  } else if (secType === "OAUTH_PARTNER") {
-    lines.push(`  TYPE = OAUTH`);
-    if (vals.oauthClient) lines.push(`  OAUTH_CLIENT = ${String(vals.oauthClient)}`);
-    if (vals.oauthRedirectUri) lines.push(`  OAUTH_REDIRECT_URI = ${sq(String(vals.oauthRedirectUri))}`);
-    if (vals.oauthIssueRefreshTokens !== undefined) lines.push(`  OAUTH_ISSUE_REFRESH_TOKENS = ${vals.oauthIssueRefreshTokens ? "TRUE" : "FALSE"}`);
-    if (vals.oauthRefreshTokenValidity) lines.push(`  OAUTH_REFRESH_TOKEN_VALIDITY = ${vals.oauthRefreshTokenValidity}`);
-  } else if (secType === "OAUTH_CUSTOM") {
-    lines.push(`  TYPE = OAUTH`);
-    lines.push(`  OAUTH_CLIENT = CUSTOM`);
-    if (vals.oauthClientType) lines.push(`  OAUTH_CLIENT_TYPE = ${String(vals.oauthClientType)}`);
-    if (vals.oauthRedirectUri) lines.push(`  OAUTH_REDIRECT_URI = ${sq(String(vals.oauthRedirectUri))}`);
-    if (vals.oauthIssueRefreshTokens !== undefined) lines.push(`  OAUTH_ISSUE_REFRESH_TOKENS = ${vals.oauthIssueRefreshTokens ? "TRUE" : "FALSE"}`);
-    if (vals.oauthRefreshTokenValidity) lines.push(`  OAUTH_REFRESH_TOKEN_VALIDITY = ${vals.oauthRefreshTokenValidity}`);
-    if (vals.networkPolicy) lines.push(`  NETWORK_POLICY = ${ident(String(vals.networkPolicy))}`);
-  } else if (secType === "SAML2") {
-    lines.push(`  TYPE = SAML2`);
-    if (vals.samlIdpMetadataUrl) {
-      lines.push(`  SAML2_IDP_METADATA_URL = ${sq(String(vals.samlIdpMetadataUrl))}`);
-    } else {
-      if (vals.samlIdpEntityId) lines.push(`  SAML2_IDP_ENTITY_ID = ${sq(String(vals.samlIdpEntityId))}`);
-      if (vals.samlIdpSsoUrl) lines.push(`  SAML2_IDP_SSO_URL = ${sq(String(vals.samlIdpSsoUrl))}`);
-      if (vals.samlIdpCert) lines.push(`  SAML2_IDP_CERTIFICATE = ${sq(String(vals.samlIdpCert))}`);
-    }
-    if (vals.samlAllowedUserDomains) lines.push(`  SAML2_ALLOWED_EMAIL_PATTERNS = (${splitLocations(String(vals.samlAllowedUserDomains))})`);
-    if (vals.samlSignRequest !== undefined) lines.push(`  SAML2_SIGN_REQUEST = ${vals.samlSignRequest ? "TRUE" : "FALSE"}`);
-    if (vals.samlForceAuthn !== undefined) lines.push(`  SAML2_FORCE_AUTHN = ${vals.samlForceAuthn ? "TRUE" : "FALSE"}`);
-  } else if (secType === "SCIM") {
-    lines.push(`  TYPE = SCIM`);
-    if (vals.scimClient) lines.push(`  SCIM_CLIENT = ${sq(String(vals.scimClient))}`);
-    if (vals.runAsRole) lines.push(`  RUN_AS_SERVICE_USER = ${ident(String(vals.runAsRole))}`);
-    if (vals.networkPolicy) lines.push(`  NETWORK_POLICY = ${ident(String(vals.networkPolicy))}`);
-    if (vals.syncPassword !== undefined) lines.push(`  SYNC_PASSWORD = ${vals.syncPassword ? "TRUE" : "FALSE"}`);
-  }
-
-  lines.push(`  ENABLED = ${enabled}`);
-  if (vals.comment) lines.push(`  COMMENT = ${sq(String(vals.comment))}`);
-  return lines.join("\n");
-}
-
-function splitLocations(s: string): string {
-  return s.split(/[\n,]/).map((x) => x.trim()).filter(Boolean).map(sq).join(", ");
 }
 
 // ── Form sections ──────────────────────────────────────────────────────────────
@@ -336,7 +83,115 @@ function StorageForm({ provider }: { provider: string }) {
   );
 }
 
-function ApiForm({ provider }: { provider: string }) {
+// Special options for the secrets tag-select
+const GIT_SECRET_SPECIAL_OPTIONS = [
+  { value: "ALL",  label: "ALL"  },
+  { value: "NONE", label: "NONE" },
+];
+
+function GitHttpsApiForm({ gitAuthMode }: { gitAuthMode: string }) {
+  return (
+    <>
+      {/* Allowed Prefixes — locked addonBefore for GitHub App, free TextArea for other modes */}
+      {gitAuthMode === "GITHUB_APP" ? (
+        <Form.Item
+          name="githubAppPath"
+          label="API Allowed Prefix"
+          help="Optional — leave blank to allow all github.com repos, or enter an org/repo path"
+        >
+          <Input addonBefore="https://github.com/" placeholder="my-org/my-repo/" />
+        </Form.Item>
+      ) : (
+        <Form.Item
+          name="allowedPrefixes"
+          label="API Allowed Prefixes"
+          rules={[{ required: true, message: "Required" }]}
+          help="One per line or comma-separated"
+        >
+          <TextArea rows={3} placeholder="https://example.com/" />
+        </Form.Item>
+      )}
+
+      <Form.Item name="blockedPrefixes" label="API Blocked Prefixes (optional)" help="One per line or comma-separated">
+        <TextArea rows={2} />
+      </Form.Item>
+
+      <Form.Item name="gitAuthMode" label="Git Authentication Mode" initialValue="TOKEN" style={{ marginBottom: 8 }}>
+        <Radio.Group>
+          <Radio.Button value="TOKEN">Token / Secret</Radio.Button>
+          <Radio.Button value="GITHUB_APP">GitHub App</Radio.Button>
+          <Radio.Button value="OAUTH2">OAuth2</Radio.Button>
+          <Radio.Button value="PRIVATELINK">Private Link</Radio.Button>
+        </Radio.Group>
+      </Form.Item>
+
+      {(gitAuthMode === "TOKEN" || gitAuthMode === "PRIVATELINK") && (
+        <Form.Item
+          name="allowedAuthSecrets"
+          label="Allowed Authentication Secrets (optional)"
+          help='Enter "ALL", "NONE", or type secret names and press Enter'
+        >
+          <Select
+            mode="tags"
+            options={GIT_SECRET_SPECIAL_OPTIONS}
+            placeholder='ALL, NONE, or secret names'
+            maxTagCount="responsive"
+          />
+        </Form.Item>
+      )}
+
+      {gitAuthMode === "GITHUB_APP" && (
+        <Alert
+          type="info"
+          showIcon
+          message="GitHub App authentication is managed automatically by Snowflake. No additional credentials are required here."
+          style={{ marginBottom: 12, fontSize: 12 }}
+        />
+      )}
+
+      {gitAuthMode === "OAUTH2" && (
+        <>
+          <Form.Item name="oauthClientId" label="OAuth Client ID (optional)">
+            <Input />
+          </Form.Item>
+          <Form.Item name="oauthClientSecret" label="OAuth Client Secret (optional)">
+            <Input.Password />
+          </Form.Item>
+          <Form.Item name="oauthTokenEndpoint" label="OAuth Token Endpoint (optional)">
+            <Input placeholder="https://..." />
+          </Form.Item>
+          <Form.Item name="oauthScopes" label="OAuth Allowed Scopes (optional)" help="Comma-separated">
+            <Input placeholder="read:user, repo" />
+          </Form.Item>
+        </>
+      )}
+
+      {gitAuthMode === "PRIVATELINK" && (
+        <>
+          <Form.Item name="usePrivateLink" label="Use PrivateLink Endpoint" valuePropName="checked">
+            <Switch size="small" />
+          </Form.Item>
+          <Form.Item
+            name="tlsCertificates"
+            label="TLS Trusted Certificates (optional)"
+            help="Secret names for TLS certificates — type names and press Enter"
+          >
+            <Select
+              mode="tags"
+              placeholder="Secret names"
+              maxTagCount="responsive"
+            />
+          </Form.Item>
+        </>
+      )}
+    </>
+  );
+}
+
+function ApiForm({ provider, gitAuthMode }: { provider: string; gitAuthMode: string }) {
+  if (provider === "git_https_api") {
+    return <GitHttpsApiForm gitAuthMode={gitAuthMode} />;
+  }
   return (
     <>
       <Form.Item name="allowedPrefixes" label="API Allowed Prefixes" rules={[{ required: true, message: "Required" }]} help="One per line or comma-separated">
@@ -375,16 +230,6 @@ function ApiForm({ provider }: { provider: string }) {
           </Form.Item>
           <Form.Item name="blockedPrefixes" label="API Blocked Prefixes (optional)">
             <TextArea rows={2} />
-          </Form.Item>
-        </>
-      )}
-      {provider === "git_https_api" && (
-        <>
-          <Form.Item name="blockedPrefixes" label="API Blocked Prefixes (optional)">
-            <TextArea rows={2} />
-          </Form.Item>
-          <Form.Item name="allowedAuthSecrets" label="Allowed Authentication Secrets (optional)">
-            <Input />
           </Form.Item>
         </>
       )}
@@ -751,12 +596,73 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
 
-  // Provider / subtype state tracked as watched form value
-  const provider  = Form.useWatch("provider", form) as string | undefined;
-  const source    = Form.useWatch("source",   form) as string | undefined;
-  const subtype   = Form.useWatch("subtype",  form) as string | undefined;
-  const secType   = Form.useWatch("secType",  form) as string | undefined;
-  const nameValue = (Form.useWatch("name",    form) as string | undefined) ?? "";
+  // Provider / subtype state tracked as watched form values
+  const provider    = Form.useWatch("provider",    form) as string  | undefined;
+  const source      = Form.useWatch("source",      form) as string  | undefined;
+  const subtype     = Form.useWatch("subtype",     form) as string  | undefined;
+  const secType     = Form.useWatch("secType",     form) as string  | undefined;
+  const nameValue   = (Form.useWatch("name",       form) as string  | undefined) ?? "";
+  const gitAuthMode = Form.useWatch("gitAuthMode", form) as string  | undefined;
+  const orReplace   = Form.useWatch("orReplace",   form) as boolean | undefined;
+  const ifNotExists = Form.useWatch("ifNotExists", form) as boolean | undefined;
+
+  // Additional watches for the live git_https_api SQL preview
+  const githubAppPath         = Form.useWatch("githubAppPath",      form) as string   | undefined;
+  const gitAllowedPrefixes    = Form.useWatch("allowedPrefixes",   form) as string   | undefined;
+  const gitBlockedPrefixes    = Form.useWatch("blockedPrefixes",    form) as string   | undefined;
+  const gitAllowedSecrets     = Form.useWatch("allowedAuthSecrets", form) as string[] | undefined;
+  const gitOauthClientId      = Form.useWatch("oauthClientId",      form) as string   | undefined;
+  const gitOauthClientSecret  = Form.useWatch("oauthClientSecret",  form) as string   | undefined;
+  const gitOauthTokenEndpoint = Form.useWatch("oauthTokenEndpoint", form) as string   | undefined;
+  const gitOauthScopes        = Form.useWatch("oauthScopes",        form) as string   | undefined;
+  const gitUsePrivateLink     = Form.useWatch("usePrivateLink",     form) as boolean  | undefined;
+  const gitTlsCertificates    = Form.useWatch("tlsCertificates",    form) as string[] | undefined;
+  const enabledVal            = Form.useWatch("enabled",            form) as boolean  | undefined;
+  const commentVal            = Form.useWatch("comment",            form) as string   | undefined;
+
+  const isGitHttps = kind === "API" && provider === "git_https_api";
+
+  // Live SQL preview for git_https_api — debounced call to Go backend
+  const [sqlPreview, setSqlPreview] = useState("");
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    if (!isGitHttps) { setSqlPreview(""); return; }
+    clearTimeout(previewTimerRef.current);
+    previewTimerRef.current = setTimeout(async () => {
+      try {
+        const sql = await BuildApiIntegrationPreviewSQL({
+          name:               nameValue,
+          caseSensitive,
+          provider:           "git_https_api",
+          orReplace:          orReplace ?? false,
+          ifNotExists:        ifNotExists ?? false,
+          enabled:            enabledVal ?? true,
+          githubAppPath:      githubAppPath ?? "",
+          allowedPrefixes:    gitAllowedPrefixes ?? "",
+          blockedPrefixes:    gitBlockedPrefixes ?? "",
+          gitAuthMode:        gitAuthMode ?? "TOKEN",
+          allowedAuthSecrets: gitAllowedSecrets ?? [],
+          oauthClientId:      gitOauthClientId ?? "",
+          oauthClientSecret:  gitOauthClientSecret ?? "",
+          oauthTokenEndpoint: gitOauthTokenEndpoint ?? "",
+          oauthScopes:        gitOauthScopes ?? "",
+          usePrivateLink:     gitUsePrivateLink ?? false,
+          tlsCertificates:    gitTlsCertificates ?? [],
+          comment:            commentVal ?? "",
+        } as any);
+        setSqlPreview(sql ?? "");
+      } catch {
+        setSqlPreview("");
+      }
+    }, 300);
+    return () => clearTimeout(previewTimerRef.current);
+  }, [
+    isGitHttps, nameValue, caseSensitive, orReplace, ifNotExists, enabledVal,
+    githubAppPath, gitAllowedPrefixes, gitBlockedPrefixes, gitAllowedSecrets, gitAuthMode,
+    gitOauthClientId, gitOauthClientSecret, gitOauthTokenEndpoint, gitOauthScopes,
+    gitUsePrivateLink, gitTlsCertificates, commentVal,
+  ]);
 
   useEffect(() => {
     GetCurrentRegion()
@@ -785,14 +691,18 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
     setLoading(true);
     setError(null);
     try {
-      let sql = "";
-      if (kind === "STORAGE")          sql = buildStorageSql(vals);
-      else if (kind === "API")         sql = buildApiSql(vals);
-      else if (kind === "CATALOG")     sql = buildCatalogSql(vals);
-      else if (kind === "EXTERNAL ACCESS") sql = buildExternalAccessSql(vals);
-      else if (kind === "NOTIFICATION") sql = buildNotificationSql(vals);
-      else if (kind === "SECURITY")    sql = buildSecuritySql(vals);
-      await ExecuteQuery(sql);
+      if (kind === "STORAGE")
+        await CreateStorageIntegration(vals as any);
+      else if (kind === "API")
+        await CreateApiIntegration(vals as any);
+      else if (kind === "CATALOG")
+        await CreateCatalogIntegration(vals as any);
+      else if (kind === "EXTERNAL ACCESS")
+        await CreateExternalAccessIntegration(vals as any);
+      else if (kind === "NOTIFICATION")
+        await CreateNotificationIntegration(vals as any);
+      else if (kind === "SECURITY")
+        await CreateSecurityIntegration(vals as any);
       onSuccess();
       onClose();
     } catch (e) {
@@ -809,7 +719,7 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
       open
       title={`Create ${kindLabel} Integration`}
       onCancel={onClose}
-      width={600}
+      width={620}
       footer={[
         <Button key="cancel" onClick={onClose} disabled={loading}>Cancel</Button>,
         <Button key="create" type="primary" loading={loading} onClick={submit}>Create</Button>,
@@ -886,9 +796,23 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
             </Form.Item>
           )}
 
+          {/* OR REPLACE / IF NOT EXISTS — shown only for git_https_api */}
+          {isGitHttps && (
+            <Form.Item label="Create Options" style={{ marginBottom: 8 }}>
+              <div style={{ display: "flex", gap: 16 }}>
+                <Form.Item name="orReplace" valuePropName="checked" noStyle>
+                  <Checkbox disabled={!!ifNotExists}>OR REPLACE</Checkbox>
+                </Form.Item>
+                <Form.Item name="ifNotExists" valuePropName="checked" noStyle>
+                  <Checkbox disabled={!!orReplace}>IF NOT EXISTS</Checkbox>
+                </Form.Item>
+              </div>
+            </Form.Item>
+          )}
+
           {/* Type-specific fields */}
           {kind === "STORAGE"          && <StorageForm provider={provider ?? "S3"} />}
-          {kind === "API"              && <ApiForm provider={provider ?? "aws_api_gateway"} />}
+          {kind === "API"              && <ApiForm provider={provider ?? "aws_api_gateway"} gitAuthMode={gitAuthMode ?? "TOKEN"} />}
           {kind === "CATALOG"          && <CatalogForm source={source ?? "GLUE"} />}
           {kind === "EXTERNAL ACCESS"  && (
             <>
@@ -910,6 +834,25 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
             <Input />
           </Form.Item>
         </Form>
+
+        {/* Live SQL preview for git_https_api */}
+        {isGitHttps && sqlPreview && (
+          <>
+            <Divider style={{ margin: "8px 0" }} />
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>SQL Preview</Typography.Text>
+            <pre style={{
+              fontSize: 11,
+              fontFamily: "monospace",
+              background: "rgba(0,0,0,0.04)",
+              padding: 8,
+              borderRadius: 4,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              marginTop: 4,
+              marginBottom: 0,
+            }}>{sqlPreview}</pre>
+          </>
+        )}
 
         {error && (
           <Alert
