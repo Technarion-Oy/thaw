@@ -9,6 +9,8 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
+import { useSessionStore } from "../../store/sessionStore";
+import { useQueryStore } from "../../store/queryStore";
 import { Collapse, Space, Typography, Tree, Spin, Popconfirm, message } from "antd";
 import {
   ApiOutlined,
@@ -91,6 +93,8 @@ export default function IntegrationsPanel() {
   const [canCreate, setCanCreate] = useState(false);
   const [ctxMenu,   setCtxMenu]   = useState<CtxMenuState | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
+  const role      = useSessionStore((s) => s.role);
+  const activeTabId = useQueryStore((s) => s.activeTabId);
 
   // Modal state
   const [createOpen,    setCreateOpen]    = useState<{ kind: string } | null>(null);
@@ -100,9 +104,16 @@ export default function IntegrationsPanel() {
   const [dropConfirm,   setDropConfirm]   = useState<string | null>(null);
   const [dropKind,      setDropKind]      = useState<string>("");
 
+  // Re-check whenever the active role changes. Pass the tab ID so the backend
+  // checks the tab's isolated session (which reflects any USE ROLE applied there)
+  // rather than the main shared connection.
   useEffect(() => {
-    CanCreateIntegration().then(setCanCreate).catch(() => {});
-  }, []);
+    if (!role) { setCanCreate(false); return; }
+    CanCreateIntegration(activeTabId).then(setCanCreate).catch(() => {});
+  }, [role, activeTabId]);
+
+  const refreshCanCreate = () =>
+    CanCreateIntegration(activeTabId).then(setCanCreate).catch(() => {});
 
   // Clamp context menu in viewport before paint
   useLayoutEffect(() => {
@@ -152,12 +163,17 @@ export default function IntegrationsPanel() {
   };
 
   const onRightClick = ({ event, node }: { event: React.MouseEvent; node: DataNode }) => {
-    event.preventDefault();
-    const key = String(node.key);
+  event.preventDefault();
+  const key = String(node.key);
+  
     if (key.startsWith("category:")) {
       const kind = key.slice("category:".length);
+      
+      // FETCH FRESH STATE HERE
+      refreshCanCreate(); 
+      
       setCtxMenu({ x: event.clientX, y: event.clientY, type: "category", kind });
-    } else if (key.startsWith("integration:")) {
+  } else if (key.startsWith("integration:")) {
       // key = "integration:{KIND}:{name}"
       const rest = key.slice("integration:".length);
       // kind may contain spaces (e.g. "EXTERNAL ACCESS"), name follows the second ":"
@@ -220,6 +236,9 @@ export default function IntegrationsPanel() {
         ghost
         defaultActiveKey={[]}
         style={{ background: "transparent" }}
+        onChange={(keys) => {
+          if ((keys as string[]).includes("integrations")) refreshCanCreate();
+        }}
         items={[{
           key:   "integrations",
           label: (
@@ -240,6 +259,7 @@ export default function IntegrationsPanel() {
               onClick={(e) => {
                 e.stopPropagation();
                 loadedKinds.forEach((k) => reloadKind(k));
+                refreshCanCreate();
               }}
             />
           ),
