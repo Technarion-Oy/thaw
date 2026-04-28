@@ -562,6 +562,11 @@ func (a *App) GitDeleteBranch(dir string, branchName string) error {
 	return gitrepo.DeleteBranch(dir, branchName)
 }
 
+// GitMergeBranch merges sourceBranch into the current branch in the repository at dir.
+func (a *App) GitMergeBranch(dir string, sourceBranch string) error {
+	return gitrepo.MergeBranch(dir, sourceBranch)
+}
+
 // GitResetHard discards all uncommitted changes, resetting the worktree to HEAD.
 func (a *App) GitResetHard(dir string) error {
 	return gitrepo.ResetHard(dir)

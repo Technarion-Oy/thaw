@@ -17,7 +17,7 @@ import {
   CloudUploadOutlined, CloudDownloadOutlined, CheckSquareOutlined,
   CloseSquareOutlined, FolderOpenOutlined, ReloadOutlined,
   BranchesOutlined, PlusOutlined, GithubOutlined, WarningOutlined,
-  EditOutlined, CheckOutlined, CloseOutlined,
+  EditOutlined, CheckOutlined, CloseOutlined, MergeOutlined,
 } from "@ant-design/icons";
 import { useGitStore } from "../../store/gitStore";
 import { PickDirectory } from "../../../wailsjs/go/main/App";
@@ -465,7 +465,7 @@ function WorkingTreeSection() {
 function BranchesSection() {
   const {
     branches, listBranches, checkoutBranch, checkoutRemoteBranch, createBranch,
-    deleteBranch, deleteRemoteBranch, pushBranch, pullBranch,
+    deleteBranch, deleteRemoteBranch, pushBranch, pullBranch, mergeBranch,
     exportDir, error, clearError, oauthToken,
   } = useGitStore();
 
@@ -577,13 +577,23 @@ function BranchesSection() {
 
                     {/* Switch — only local, non-current */}
                     {!b.isRemote && !b.isCurrent && (
-                      <Button
-                        size="small"
-                        loading={isLoading("switch")}
-                        onClick={() => act(`${b.name}:switch`, () => checkoutBranch(b.name))}
-                      >
-                        Switch
-                      </Button>
+                      <>
+                        <Tooltip title={`Merge ${b.name} into current branch`}>
+                          <Button
+                            size="small"
+                            icon={<MergeOutlined />}
+                            loading={isLoading("merge")}
+                            onClick={() => act(`${b.name}:merge`, () => mergeBranch(b.name))}
+                          />
+                        </Tooltip>
+                        <Button
+                          size="small"
+                          loading={isLoading("switch")}
+                          onClick={() => act(`${b.name}:switch`, () => checkoutBranch(b.name))}
+                        >
+                          Switch
+                        </Button>
+                      </>
                     )}
 
                     {/* Push */}

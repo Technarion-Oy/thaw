@@ -292,6 +292,8 @@ export function GitLoginWithOAuth(arg1:string):Promise<string>;
 
 export function GitLookupCredentials(arg1:string):Promise<gitrepo.CredentialResult>;
 
+export function GitMergeBranch(arg1:string,arg2:string):Promise<void>;
+
 export function GitPull(arg1:gitrepo.PullParams):Promise<void>;
 
 export function GitPushBranch(arg1:string,arg2:string,arg3:string):Promise<void>;
