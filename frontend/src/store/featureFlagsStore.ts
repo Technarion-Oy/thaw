@@ -15,7 +15,7 @@ import type { config } from "../../wailsjs/go/models";
 // Optimistic defaults: every feature enabled until the backend responds.
 const allEnabled: config.FeatureFlags = {
   initialized: true,
-  version: 1,
+  version: 3,
   resultsetExport: true,
   exportTableData: true,
   tableDataImport: true,
@@ -35,6 +35,7 @@ const allEnabled: config.FeatureFlags = {
   taskGraphVisualizer: true,
   insertMapping: true,
   codeSnippets: true,
+  cloneTable: true,
   snowparkNotebooks: true,
   embeddedTerminal: true,
   gitIntegration: true,
@@ -68,6 +69,7 @@ const nothingLocked: config.FeatureFlags = {
   taskGraphVisualizer: false,
   insertMapping: false,
   codeSnippets: false,
+  cloneTable: false,
   snowparkNotebooks: false,
   embeddedTerminal: false,
   gitIntegration: false,

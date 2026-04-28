@@ -159,7 +159,7 @@ func DefaultNotebookPrefs() NotebookPrefs {
 // Version tracks the schema revision so new flags introduced after an initial
 // save can be filled with their defaults rather than the zero value (false).
 // Current version: 2 (added SQL editor flags: SqlDiagnostics, SchemaAutocomplete, DdlHoverTooltips).
-const flagsVersion = 2
+const flagsVersion = 3
 
 type FeatureFlags struct {
 	Initialized bool `json:"initialized"`
@@ -191,6 +191,7 @@ type FeatureFlags struct {
 	TaskGraphVisualizer bool `json:"taskGraphVisualizer"`
 	InsertMapping       bool `json:"insertMapping"`
 	CodeSnippets        bool `json:"codeSnippets"`
+	CloneTable          bool `json:"cloneTable"`
 
 	// Developer Environments
 	SnowparkNotebooks bool `json:"snowparkNotebooks"`
@@ -231,6 +232,7 @@ func DefaultFeatureFlags() FeatureFlags {
 		TaskGraphVisualizer:    true,
 		InsertMapping:          true,
 		CodeSnippets:           true,
+		CloneTable:             true,
 		SnowparkNotebooks:      true,
 		EmbeddedTerminal:       true,
 		GitIntegration:         true,
@@ -286,6 +288,8 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	setIfZero(&f.SqlDiagnostics, defaults.SqlDiagnostics)
 	setIfZero(&f.SchemaAutocomplete, defaults.SchemaAutocomplete)
 	setIfZero(&f.DdlHoverTooltips, defaults.DdlHoverTooltips)
+	// Version 2 → 3: CloneTable flag added.
+	setIfZero(&f.CloneTable, defaults.CloneTable)
 	f.Version = flagsVersion
 	return f
 }

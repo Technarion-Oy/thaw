@@ -310,6 +310,13 @@ export default function FeatureFlagsModal({ onClose }: Props) {
             locked={locked.codeSnippets}
             onChange={(v) => set("codeSnippets", v)}
           />
+          <FlagRow
+            label="Clone Table"
+            description="Quickly create a clone of an existing table within the same or a different schema."
+            checked={flags.cloneTable}
+            locked={locked.cloneTable}
+            onChange={(v) => set("cloneTable", v)}
+          />
         </Category>
 
         {/* ── Developer Environments ── */}

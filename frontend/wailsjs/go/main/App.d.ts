@@ -78,6 +78,8 @@ export function CheckSnowparkEnv():Promise<main.SnowparkCheckResult>;
 
 export function CloneChildTask(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean,arg6:Array<string>):Promise<void>;
 
+export function CloneTable(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
+
 export function CloseTabSession(arg1:string):Promise<void>;
 
 export function ComputeJoinOnConditions(arg1:sqleditor.JoinOnSuggestionsReq):Promise<Array<sqleditor.JoinCondition>>;

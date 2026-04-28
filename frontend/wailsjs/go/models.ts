@@ -125,6 +125,7 @@ export namespace config {
 	    taskGraphVisualizer: boolean;
 	    insertMapping: boolean;
 	    codeSnippets: boolean;
+	    cloneTable: boolean;
 	    snowparkNotebooks: boolean;
 	    embeddedTerminal: boolean;
 	    gitIntegration: boolean;
@@ -161,6 +162,7 @@ export namespace config {
 	        this.taskGraphVisualizer = source["taskGraphVisualizer"];
 	        this.insertMapping = source["insertMapping"];
 	        this.codeSnippets = source["codeSnippets"];
+	        this.cloneTable = source["cloneTable"];
 	        this.snowparkNotebooks = source["snowparkNotebooks"];
 	        this.embeddedTerminal = source["embeddedTerminal"];
 	        this.gitIntegration = source["gitIntegration"];

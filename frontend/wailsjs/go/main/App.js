@@ -126,6 +126,10 @@ export function CloneChildTask(arg1, arg2, arg3, arg4, arg5, arg6) {
   return window['go']['main']['App']['CloneChildTask'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
+export function CloneTable(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['CloneTable'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function CloseTabSession(arg1) {
   return window['go']['main']['App']['CloseTabSession'](arg1);
 }

@@ -74,6 +74,7 @@ import SelectFunctionModal from "../function/SelectFunctionModal";
 import CreateTaskModal from "../task/CreateTaskModal";
 import CreateDatabaseModal from "../database/CreateDatabaseModal";
 import CreateTableModal from "../database/CreateTableModal";
+import CloneTableModal from "../database/CloneTableModal";
 import ObjectSummariesModal from "../database/ObjectSummariesModal";
 import ExecuteTaskModal from "../task/ExecuteTaskModal";
 import TaskGraphModal from "../task/TaskGraphModal";
@@ -403,6 +404,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [executeNotebookModal, setExecuteNotebookModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createDbOpen, setCreateDbOpen] = useState(false);
   const [createTableModal, setCreateTableModal] = useState<{ db: string; schema: string } | null>(null);
+  const [cloneTableModal, setCloneTableModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [objectSummariesModal, setObjectSummariesModal] = useState<string | null>(null);
   const [createTaskModal, setCreateTaskModal] = useState<{ db: string; schema: string } | null>(null);
   const [executeTaskModal, setExecuteTaskModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -909,6 +911,16 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const schema = parts[2];
     setCtxMenu(null);
     setCreateTableModal({ db, schema });
+  };
+
+  const openCloneTableModal = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts[4];
+    setCtxMenu(null);
+    setCloneTableModal({ db, schema, name });
   };
 
   const openObjectSummaries = () => {
@@ -1779,6 +1791,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
             menuItem("Time Travel Query…", <HistoryOutlined style={{ fontSize: 12 }} />, openTimeTravelModal)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
+            menuItem("Clone Table…", <CopyOutlined style={{ fontSize: 12 }} />, openCloneTableModal, undefined, !featureFlags.cloneTable, "Clone Table is disabled. Enable it under View → Enabled Features…")}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
             menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openExportModal, undefined, !featureFlags.exportTableData, "Table Data Export is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
             menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openImportModal, undefined, !featureFlags.tableDataImport, "Table Data Import is disabled. Enable it under View → Enabled Features…")}
@@ -1977,6 +1991,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={createTableModal.schema}
           onClose={() => setCreateTableModal(null)}
           onSuccess={() => refreshDatabaseByName(createTableModal.db)}
+        />
+      )}
+
+      {/* Clone Table modal */}
+      {cloneTableModal && (
+        <CloneTableModal
+          db={cloneTableModal.db}
+          sourceSchema={cloneTableModal.schema}
+          sourceTable={cloneTableModal.name}
+          onClose={() => setCloneTableModal(null)}
+          onSuccess={() => refreshDatabaseByName(cloneTableModal.db)}
         />
       )}
 

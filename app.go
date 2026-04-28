@@ -408,6 +408,24 @@ func (a *App) GetDatabaseTableSummary(dbName string) ([]TableSummary, error) {
 	return tables, nil
 }
 
+// CloneTable clones sourceTable to targetTable in targetSchema.
+// All identifiers are double-quoted.
+func (a *App) CloneTable(db, sourceSchema, sourceTable, targetSchema, targetTable string) error {
+	if a.client == nil {
+		return fmt.Errorf("not connected")
+	}
+
+	q := func(s string) string {
+		return "\"" + strings.ReplaceAll(s, "\"", "\"\"") + "\""
+	}
+
+	sql := fmt.Sprintf("CREATE TABLE %s.%s.%s CLONE %s.%s.%s",
+		q(db), q(targetSchema), q(targetTable),
+		q(db), q(sourceSchema), q(sourceTable))
+
+	return a.client.ExecDDL(a.ctx, sql)
+}
+
 // GetSnowflakeCLIConfigPath returns the current path from which Snowflake CLI
 // connection profiles are being loaded.
 func (a *App) GetSnowflakeCLIConfigPath() (string, error) {

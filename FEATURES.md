@@ -115,6 +115,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
     - **Quote identifiers toggle** — on by default; when switched off, double-quotes are omitted for identifiers that are structurally safe
     - **Generate SQL** — clicking **Generate SQL** opens a new tab with the complete statement for review and execution
   - **Insert Full Name** — insert the fully-qualified `"DB"."SCHEMA"."OBJECT"` identifier at the cursor
+  - **Clone Table** — quickly create a clone of an existing table within the same or a different schema via a dedicated dialog
   - View DDL definition inline
   - **Rename** the object
   - **Drop** the object (with confirmation)
@@ -755,7 +756,7 @@ The following features are identified as feasible to be turned off via feature f
 - **Task Graph Visualizer** (Interactive DAG viewer and manager for Snowflake tasks)
 - **Insert Mapping** (Visual side-by-side mapping for `INSERT INTO ... SELECT` with UNIONs)
 - **Code Snippets** (Library of curated `CREATE OR REPLACE` templates)
-
+- **Clone Table** (Quickly create a clone of an existing table)
 **Developer Environments**
 - **Snowpark & Notebooks** (Embedded Python kernel and environment manager)
 - **Embedded Terminal** (xterm.js OS shell panel)
