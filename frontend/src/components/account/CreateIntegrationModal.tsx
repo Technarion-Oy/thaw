@@ -8,8 +8,8 @@
 // Commercial use of this software is restricted to parties   holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useEffect } from "react";
-import { Modal, Form, Input, Select, Switch, Button, Alert, InputNumber } from "antd";
+import { useState, useEffect, useMemo } from "react";
+import { Modal, Form, Input, Select, Switch, Button, Alert, InputNumber, Radio, Checkbox, Divider, Typography } from "antd";
 import { ExecuteQuery, GetCurrentRegion, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 
@@ -60,8 +60,12 @@ function buildStorageSql(vals: Record<string, unknown>): string {
 }
 
 function buildApiSql(vals: Record<string, unknown>): string {
-  const name = identToken(String(vals.name ?? ""), Boolean(vals.caseSensitive));
   const provider = String(vals.provider ?? "aws_api_gateway");
+  // Delegate git_https_api to its own builder with full mode support
+  if (provider === "git_https_api") {
+    return buildGitHttpsApiSql(vals);
+  }
+  const name = identToken(String(vals.name ?? ""), Boolean(vals.caseSensitive));
   const enabled = vals.enabled !== false ? "TRUE" : "FALSE";
   const lines: string[] = [
     `CREATE API INTEGRATION ${name}`,
@@ -79,9 +83,84 @@ function buildApiSql(vals: Record<string, unknown>): string {
     if (vals.apiKey) lines.push(`  API_KEY = ${sq(String(vals.apiKey))}`);
   } else if (provider === "google_api_gateway") {
     if (vals.googleAudience) lines.push(`  GOOGLE_AUDIENCE = ${sq(String(vals.googleAudience))}`);
-  } else if (provider === "git_https_api") {
-    if (vals.allowedAuthSecrets) lines.push(`  ALLOWED_AUTHENTICATION_SECRETS = (${String(vals.allowedAuthSecrets)})`);
   }
+  if (vals.comment) lines.push(`  COMMENT = ${sq(String(vals.comment))}`);
+  return lines.join("\n");
+}
+
+function buildGitHttpsApiSql(vals: Record<string, unknown>): string {
+  const name = identToken(String(vals.name ?? ""), Boolean(vals.caseSensitive));
+  const enabled = vals.enabled !== false ? "TRUE" : "FALSE";
+
+  let createClause = "CREATE";
+  if (vals.orReplace) createClause += " OR REPLACE";
+  createClause += " API INTEGRATION";
+  if (!vals.orReplace && vals.ifNotExists) createClause += " IF NOT EXISTS";
+
+  const lines: string[] = [
+    `${createClause} ${name}`,
+    `  API_PROVIDER = git_https_api`,
+  ];
+
+  if (vals.allowedPrefixes) {
+    lines.push(`  API_ALLOWED_PREFIXES = (${splitLocations(String(vals.allowedPrefixes))})`);
+  }
+  if (vals.blockedPrefixes) {
+    lines.push(`  API_BLOCKED_PREFIXES = (${splitLocations(String(vals.blockedPrefixes))})`);
+  }
+
+  const mode = String(vals.gitAuthMode ?? "TOKEN");
+
+  // ALLOWED_AUTHENTICATION_SECRETS applies to TOKEN and PRIVATELINK modes
+  if (mode === "TOKEN" || mode === "PRIVATELINK") {
+    const rawSecrets = vals.allowedAuthSecrets;
+    if (rawSecrets !== undefined && rawSecrets !== null) {
+      const secretArr = Array.isArray(rawSecrets)
+        ? (rawSecrets as string[]).map(String)
+        : [String(rawSecrets)];
+      const filtered = secretArr.map((s) => s.trim()).filter(Boolean);
+      if (filtered.length === 1 && (filtered[0].toUpperCase() === "ALL" || filtered[0].toUpperCase() === "NONE")) {
+        lines.push(`  ALLOWED_AUTHENTICATION_SECRETS = ${filtered[0].toUpperCase()}`);
+      } else if (filtered.length > 0) {
+        lines.push(`  ALLOWED_AUTHENTICATION_SECRETS = (${filtered.join(", ")})`);
+      }
+    }
+  }
+
+  if (mode === "GITHUB_APP") {
+    lines.push(`  API_USER_AUTHENTICATION = (`);
+    lines.push(`    TYPE = SNOWFLAKE_GITHUB_APP`);
+    lines.push(`  )`);
+  } else if (mode === "OAUTH2") {
+    const oauthParams: string[] = ["    TYPE = OAUTH2"];
+    if (vals.oauthClientId) oauthParams.push(`    OAUTH_CLIENT_ID = ${sq(String(vals.oauthClientId))}`);
+    if (vals.oauthClientSecret) oauthParams.push(`    OAUTH_CLIENT_SECRET = ${sq(String(vals.oauthClientSecret))}`);
+    if (vals.oauthTokenEndpoint) oauthParams.push(`    OAUTH_TOKEN_ENDPOINT = ${sq(String(vals.oauthTokenEndpoint))}`);
+    if (vals.oauthScopes) {
+      const scopes = String(vals.oauthScopes)
+        .split(",")
+        .map((s) => sq(s.trim()))
+        .filter((s) => s !== "''");
+      if (scopes.length > 0) oauthParams.push(`    OAUTH_ALLOWED_SCOPES = (${scopes.join(", ")})`);
+    }
+    lines.push(`  API_USER_AUTHENTICATION = (`);
+    oauthParams.forEach((l) => lines.push(l));
+    lines.push(`  )`);
+  } else if (mode === "PRIVATELINK") {
+    lines.push(`  USE_PRIVATELINK_ENDPOINT = ${vals.usePrivateLink ? "TRUE" : "FALSE"}`);
+    const rawCerts = vals.tlsCertificates;
+    if (rawCerts !== undefined && rawCerts !== null) {
+      const certArr = Array.isArray(rawCerts)
+        ? (rawCerts as string[]).map(String)
+        : [String(rawCerts)];
+      const filtered = certArr.map((s) => s.trim()).filter(Boolean);
+      if (filtered.length > 0) {
+        lines.push(`  TLS_TRUSTED_CERTIFICATES = (${filtered.join(", ")})`);
+      }
+    }
+  }
+
+  lines.push(`  ENABLED = ${enabled}`);
   if (vals.comment) lines.push(`  COMMENT = ${sq(String(vals.comment))}`);
   return lines.join("\n");
 }
@@ -336,7 +415,142 @@ function StorageForm({ provider }: { provider: string }) {
   );
 }
 
-function ApiForm({ provider }: { provider: string }) {
+// Special options for the secrets tag-select
+const GIT_SECRET_SPECIAL_OPTIONS = [
+  { value: "ALL",  label: "ALL"  },
+  { value: "NONE", label: "NONE" },
+];
+
+function GitHttpsApiForm({ gitAuthMode }: { gitAuthMode: string }) {
+  const allowedPrefixesVal = Form.useWatch("allowedPrefixes") as string | undefined;
+
+  // Warn when GitHub App mode has non-github.com prefixes
+  const githubPrefixWarning = useMemo(() => {
+    if (gitAuthMode !== "GITHUB_APP" || !allowedPrefixesVal) return false;
+    const prefixes = allowedPrefixesVal.split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
+    return prefixes.some((p) => !p.startsWith("https://github.com/"));
+  }, [gitAuthMode, allowedPrefixesVal]);
+
+  return (
+    <>
+      <Form.Item
+        name="allowedPrefixes"
+        label="API Allowed Prefixes"
+        rules={[
+          { required: true, message: "Required" },
+          ...(gitAuthMode === "GITHUB_APP"
+            ? [
+                {
+                  validator: (_: unknown, value: string) => {
+                    const prefixes = (value ?? "")
+                      .split(/[\n,]/)
+                      .map((s: string) => s.trim())
+                      .filter(Boolean);
+                    const invalid = prefixes.filter(
+                      (p: string) => !p.startsWith("https://github.com/")
+                    );
+                    return invalid.length > 0
+                      ? Promise.reject("GitHub App prefixes must begin with https://github.com/")
+                      : Promise.resolve();
+                  },
+                },
+              ]
+            : []),
+        ]}
+        help="One per line or comma-separated"
+      >
+        <TextArea rows={3} placeholder={gitAuthMode === "GITHUB_APP" ? "https://github.com/my-org/" : "https://example.com/"} />
+      </Form.Item>
+
+      {githubPrefixWarning && (
+        <Alert
+          type="warning"
+          showIcon
+          message="All prefixes must start with https://github.com/ for GitHub App authentication."
+          style={{ marginBottom: 12, fontSize: 12 }}
+        />
+      )}
+
+      <Form.Item name="blockedPrefixes" label="API Blocked Prefixes (optional)" help="One per line or comma-separated">
+        <TextArea rows={2} />
+      </Form.Item>
+
+      <Form.Item name="gitAuthMode" label="Git Authentication Mode" initialValue="TOKEN" style={{ marginBottom: 8 }}>
+        <Radio.Group>
+          <Radio.Button value="TOKEN">Token / Secret</Radio.Button>
+          <Radio.Button value="GITHUB_APP">GitHub App</Radio.Button>
+          <Radio.Button value="OAUTH2">OAuth2</Radio.Button>
+          <Radio.Button value="PRIVATELINK">Private Link</Radio.Button>
+        </Radio.Group>
+      </Form.Item>
+
+      {(gitAuthMode === "TOKEN" || gitAuthMode === "PRIVATELINK") && (
+        <Form.Item
+          name="allowedAuthSecrets"
+          label="Allowed Authentication Secrets (optional)"
+          help='Enter "ALL", "NONE", or type secret names and press Enter'
+        >
+          <Select
+            mode="tags"
+            options={GIT_SECRET_SPECIAL_OPTIONS}
+            placeholder='ALL, NONE, or secret names'
+            maxTagCount="responsive"
+          />
+        </Form.Item>
+      )}
+
+      {gitAuthMode === "GITHUB_APP" && (
+        <Alert
+          type="info"
+          showIcon
+          message="GitHub App authentication is managed automatically by Snowflake. No additional credentials are required here."
+          style={{ marginBottom: 12, fontSize: 12 }}
+        />
+      )}
+
+      {gitAuthMode === "OAUTH2" && (
+        <>
+          <Form.Item name="oauthClientId" label="OAuth Client ID (optional)">
+            <Input />
+          </Form.Item>
+          <Form.Item name="oauthClientSecret" label="OAuth Client Secret (optional)">
+            <Input.Password />
+          </Form.Item>
+          <Form.Item name="oauthTokenEndpoint" label="OAuth Token Endpoint (optional)">
+            <Input placeholder="https://..." />
+          </Form.Item>
+          <Form.Item name="oauthScopes" label="OAuth Allowed Scopes (optional)" help="Comma-separated">
+            <Input placeholder="read:user, repo" />
+          </Form.Item>
+        </>
+      )}
+
+      {gitAuthMode === "PRIVATELINK" && (
+        <>
+          <Form.Item name="usePrivateLink" label="Use PrivateLink Endpoint" valuePropName="checked">
+            <Switch size="small" />
+          </Form.Item>
+          <Form.Item
+            name="tlsCertificates"
+            label="TLS Trusted Certificates (optional)"
+            help="Secret names for TLS certificates — type names and press Enter"
+          >
+            <Select
+              mode="tags"
+              placeholder="Secret names"
+              maxTagCount="responsive"
+            />
+          </Form.Item>
+        </>
+      )}
+    </>
+  );
+}
+
+function ApiForm({ provider, gitAuthMode }: { provider: string; gitAuthMode: string }) {
+  if (provider === "git_https_api") {
+    return <GitHttpsApiForm gitAuthMode={gitAuthMode} />;
+  }
   return (
     <>
       <Form.Item name="allowedPrefixes" label="API Allowed Prefixes" rules={[{ required: true, message: "Required" }]} help="One per line or comma-separated">
@@ -375,16 +589,6 @@ function ApiForm({ provider }: { provider: string }) {
           </Form.Item>
           <Form.Item name="blockedPrefixes" label="API Blocked Prefixes (optional)">
             <TextArea rows={2} />
-          </Form.Item>
-        </>
-      )}
-      {provider === "git_https_api" && (
-        <>
-          <Form.Item name="blockedPrefixes" label="API Blocked Prefixes (optional)">
-            <TextArea rows={2} />
-          </Form.Item>
-          <Form.Item name="allowedAuthSecrets" label="Allowed Authentication Secrets (optional)">
-            <Input />
           </Form.Item>
         </>
       )}
@@ -751,12 +955,59 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
 
-  // Provider / subtype state tracked as watched form value
-  const provider  = Form.useWatch("provider", form) as string | undefined;
-  const source    = Form.useWatch("source",   form) as string | undefined;
-  const subtype   = Form.useWatch("subtype",  form) as string | undefined;
-  const secType   = Form.useWatch("secType",  form) as string | undefined;
-  const nameValue = (Form.useWatch("name",    form) as string | undefined) ?? "";
+  // Provider / subtype state tracked as watched form values
+  const provider    = Form.useWatch("provider",    form) as string  | undefined;
+  const source      = Form.useWatch("source",      form) as string  | undefined;
+  const subtype     = Form.useWatch("subtype",     form) as string  | undefined;
+  const secType     = Form.useWatch("secType",     form) as string  | undefined;
+  const nameValue   = (Form.useWatch("name",       form) as string  | undefined) ?? "";
+  const gitAuthMode = Form.useWatch("gitAuthMode", form) as string  | undefined;
+  const orReplace   = Form.useWatch("orReplace",   form) as boolean | undefined;
+  const ifNotExists = Form.useWatch("ifNotExists", form) as boolean | undefined;
+
+  // Additional watches for the live git_https_api SQL preview
+  const gitAllowedPrefixes    = Form.useWatch("allowedPrefixes",   form) as string   | undefined;
+  const gitBlockedPrefixes    = Form.useWatch("blockedPrefixes",    form) as string   | undefined;
+  const gitAllowedSecrets     = Form.useWatch("allowedAuthSecrets", form) as string[] | undefined;
+  const gitOauthClientId      = Form.useWatch("oauthClientId",      form) as string   | undefined;
+  const gitOauthClientSecret  = Form.useWatch("oauthClientSecret",  form) as string   | undefined;
+  const gitOauthTokenEndpoint = Form.useWatch("oauthTokenEndpoint", form) as string   | undefined;
+  const gitOauthScopes        = Form.useWatch("oauthScopes",        form) as string   | undefined;
+  const gitUsePrivateLink     = Form.useWatch("usePrivateLink",     form) as boolean  | undefined;
+  const gitTlsCertificates    = Form.useWatch("tlsCertificates",    form) as string[] | undefined;
+  const enabledVal            = Form.useWatch("enabled",            form) as boolean  | undefined;
+  const commentVal            = Form.useWatch("comment",            form) as string   | undefined;
+
+  const isGitHttps = kind === "API" && provider === "git_https_api";
+
+  // Live SQL preview for git_https_api — recomputed whenever any relevant field changes
+  const sqlPreview = useMemo(() => {
+    if (!isGitHttps) return "";
+    return buildApiSql({
+      name:               nameValue,
+      caseSensitive,
+      provider:           "git_https_api",
+      orReplace,
+      ifNotExists,
+      enabled:            enabledVal,
+      allowedPrefixes:    gitAllowedPrefixes,
+      blockedPrefixes:    gitBlockedPrefixes,
+      gitAuthMode:        gitAuthMode ?? "TOKEN",
+      allowedAuthSecrets: gitAllowedSecrets,
+      oauthClientId:      gitOauthClientId,
+      oauthClientSecret:  gitOauthClientSecret,
+      oauthTokenEndpoint: gitOauthTokenEndpoint,
+      oauthScopes:        gitOauthScopes,
+      usePrivateLink:     gitUsePrivateLink,
+      tlsCertificates:    gitTlsCertificates,
+      comment:            commentVal,
+    });
+  }, [
+    isGitHttps, nameValue, caseSensitive, orReplace, ifNotExists, enabledVal,
+    gitAllowedPrefixes, gitBlockedPrefixes, gitAllowedSecrets, gitAuthMode,
+    gitOauthClientId, gitOauthClientSecret, gitOauthTokenEndpoint, gitOauthScopes,
+    gitUsePrivateLink, gitTlsCertificates, commentVal,
+  ]);
 
   useEffect(() => {
     GetCurrentRegion()
@@ -809,7 +1060,7 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
       open
       title={`Create ${kindLabel} Integration`}
       onCancel={onClose}
-      width={600}
+      width={620}
       footer={[
         <Button key="cancel" onClick={onClose} disabled={loading}>Cancel</Button>,
         <Button key="create" type="primary" loading={loading} onClick={submit}>Create</Button>,
@@ -886,9 +1137,23 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
             </Form.Item>
           )}
 
+          {/* OR REPLACE / IF NOT EXISTS — shown only for git_https_api */}
+          {isGitHttps && (
+            <Form.Item label="Create Options" style={{ marginBottom: 8 }}>
+              <div style={{ display: "flex", gap: 16 }}>
+                <Form.Item name="orReplace" valuePropName="checked" noStyle>
+                  <Checkbox disabled={!!ifNotExists}>OR REPLACE</Checkbox>
+                </Form.Item>
+                <Form.Item name="ifNotExists" valuePropName="checked" noStyle>
+                  <Checkbox disabled={!!orReplace}>IF NOT EXISTS</Checkbox>
+                </Form.Item>
+              </div>
+            </Form.Item>
+          )}
+
           {/* Type-specific fields */}
           {kind === "STORAGE"          && <StorageForm provider={provider ?? "S3"} />}
-          {kind === "API"              && <ApiForm provider={provider ?? "aws_api_gateway"} />}
+          {kind === "API"              && <ApiForm provider={provider ?? "aws_api_gateway"} gitAuthMode={gitAuthMode ?? "TOKEN"} />}
           {kind === "CATALOG"          && <CatalogForm source={source ?? "GLUE"} />}
           {kind === "EXTERNAL ACCESS"  && (
             <>
@@ -910,6 +1175,25 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
             <Input />
           </Form.Item>
         </Form>
+
+        {/* Live SQL preview for git_https_api */}
+        {isGitHttps && sqlPreview && (
+          <>
+            <Divider style={{ margin: "8px 0" }} />
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>SQL Preview</Typography.Text>
+            <pre style={{
+              fontSize: 11,
+              fontFamily: "monospace",
+              background: "rgba(0,0,0,0.04)",
+              padding: 8,
+              borderRadius: 4,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              marginTop: 4,
+              marginBottom: 0,
+            }}>{sqlPreview}</pre>
+          </>
+        )}
 
         {error && (
           <Alert
