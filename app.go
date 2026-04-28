@@ -44,6 +44,7 @@ import (
 	"thaw/internal/logger"
 	"thaw/internal/procedure"
 	"thaw/internal/queryprofile"
+	"thaw/internal/secret"
 	"thaw/internal/sfconfig"
 	"thaw/internal/snowflake"
 	"thaw/internal/sqleditor"
@@ -1301,6 +1302,24 @@ func (a *App) ListWarehouses() ([]string, error) {
 	return a.client.ListWarehouses(a.ctx)
 }
 
+// ListSecurityIntegrations returns all security integrations.
+func (a *App) ListSecurityIntegrations() ([]snowflake.SecurityIntegration, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListSecurityIntegrations(a.ctx)
+}
+
+// BuildCreateSecretSql returns the SQL for creating a secret.
+func (a *App) BuildCreateSecretSql(database, schema string, cfg secret.SecretConfig) string {
+	return secret.BuildCreateSecretSql(database, schema, cfg)
+}
+
+// BuildModifySecretSql returns one or more SQL statements for modifying a secret.
+func (a *App) BuildModifySecretSql(database, schema, name string, cfg secret.SecretConfig, originalComment string) []string {
+	return secret.BuildModifySecretSql(database, schema, name, cfg, originalComment)
+}
+
 // AlterWarehouseProperty applies a single SET property to a warehouse.
 // property must be one of: size, warehouseType, autoSuspend, autoResume, comment,
 // maxClusterCount, minClusterCount, scalingPolicy, resourceMonitor,
@@ -2313,6 +2332,8 @@ func (a *App) GetObjectProperties(database, schema, kind, name string) ([]Proper
 		query = fmt.Sprintf("SHOW FILE FORMATS LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
 	case "PIPE":
 		query = fmt.Sprintf("SHOW PIPES LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
+	case "SECRET":
+		query = fmt.Sprintf("DESCRIBE SECRET %s.%s.%s", q(database), q(schema), q(name))
 	case "WAREHOUSE":
 		query = fmt.Sprintf("SHOW WAREHOUSES LIKE '%s'", like)
 	case "ROLE":
@@ -2346,8 +2367,9 @@ func (a *App) GetObjectProperties(database, schema, kind, name string) ([]Proper
 	}
 
 	var pairs []PropertyPair
-	if strings.ToUpper(kind) == "USER" {
-		// DESCRIBE USER returns rows of (property, value, default) — use property/value columns.
+	kindUpper := strings.ToUpper(kind)
+	if kindUpper == "USER" || kindUpper == "SECRET" {
+		// DESCRIBE USER/SECRET returns rows of (property, value, default, ...) — use property/value columns.
 		for _, row := range res.Rows {
 			if len(row) < 2 {
 				continue

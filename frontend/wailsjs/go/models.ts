@@ -1647,6 +1647,51 @@ export namespace queryprofile {
 
 }
 
+export namespace secret {
+	
+	export class SecretConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    type: string;
+	    oauthFlow: string;
+	    apiAuthentication: string;
+	    oauthScopes: string;
+	    oauthRefreshToken: string;
+	    oauthRefreshTokenExpiry: string;
+	    enabled: boolean;
+	    username: string;
+	    password: string;
+	    secretString: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SecretConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.type = source["type"];
+	        this.oauthFlow = source["oauthFlow"];
+	        this.apiAuthentication = source["apiAuthentication"];
+	        this.oauthScopes = source["oauthScopes"];
+	        this.oauthRefreshToken = source["oauthRefreshToken"];
+	        this.oauthRefreshTokenExpiry = source["oauthRefreshTokenExpiry"];
+	        this.enabled = source["enabled"];
+	        this.username = source["username"];
+	        this.password = source["password"];
+	        this.secretString = source["secretString"];
+	        this.comment = source["comment"];
+	    }
+	}
+
+}
+
 export namespace sfconfig {
 	
 	export class Connection {
@@ -2269,6 +2314,26 @@ export namespace snowflake {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.database = source["database"];
 	        this.schema = source["schema"];
+	    }
+	}
+	export class SecurityIntegration {
+	    name: string;
+	    type: string;
+	    category: string;
+	    enabled: boolean;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SecurityIntegration(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.type = source["type"];
+	        this.category = source["category"];
+	        this.enabled = source["enabled"];
+	        this.comment = source["comment"];
 	    }
 	}
 	export class SessionContext {

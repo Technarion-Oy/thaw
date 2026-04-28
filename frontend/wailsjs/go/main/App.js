@@ -66,8 +66,16 @@ export function BuildCallStatement(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['BuildCallStatement'](arg1, arg2, arg3, arg4);
 }
 
+export function BuildCreateSecretSql(arg1, arg2, arg3) {
+  return window['go']['main']['App']['BuildCreateSecretSql'](arg1, arg2, arg3);
+}
+
 export function BuildFunctionSelectStatement(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['BuildFunctionSelectStatement'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function BuildModifySecretSql(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['BuildModifySecretSql'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function CanCreateIntegration(arg1) {
@@ -708,6 +716,10 @@ export function ListRootTasks(arg1, arg2) {
 
 export function ListSchemas(arg1) {
   return window['go']['main']['App']['ListSchemas'](arg1);
+}
+
+export function ListSecurityIntegrations() {
+  return window['go']['main']['App']['ListSecurityIntegrations']();
 }
 
 export function ListSystemPythons() {
