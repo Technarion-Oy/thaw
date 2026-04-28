@@ -11,7 +11,7 @@
 import { useState, useEffect } from "react";
 import { Modal, Form, Input, Select, Button, Space, Typography, Tag, Spin } from "antd";
 import { PlayCircleOutlined } from "@ant-design/icons";
-import { GetProcedureParams } from "../../../wailsjs/go/main/App";
+import { GetProcedureParams, BuildCallStatement } from "../../../wailsjs/go/main/App";
 import { useQueryStore } from "../../store/queryStore";
 
 const { Text } = Typography;
@@ -35,20 +35,6 @@ function needsQuotes(dataType: string): boolean {
   return !isBoolean(dataType) && !isNumeric(dataType);
 }
 
-function buildCallSql(db: string, schema: string, name: string, params: Param[], values: string[]): string {
-  const esc = (s: string) => s.replace(/"/g, '""');
-  const args = params
-    .map((p, i) => {
-      const val = (values[i] ?? "").trim();
-      if (val === "") return "NULL";
-      if (isBoolean(p.dataType)) return val;
-      if (isNumeric(p.dataType)) return val;
-      return `'${val.replace(/'/g, "''")}'`;
-    })
-    .join(", ");
-  return `CALL "${esc(db)}"."${esc(schema)}"."${esc(name)}"(${args});`;
-}
-
 interface Props {
   db: string;
   schema: string;
@@ -60,6 +46,7 @@ interface Props {
 export default function CallProcedureModal({ db, schema, name, rawArgs, onClose }: Props) {
   const [params, setParams] = useState<Param[] | null>(null);
   const [values, setValues] = useState<string[]>([]);
+  const [preview, setPreview] = useState("");
   const executeInNewTab = useQueryStore((s) => s.executeInNewTab);
 
   useEffect(() => {
@@ -75,17 +62,24 @@ export default function CallProcedureModal({ db, schema, name, rawArgs, onClose 
       });
   }, [db, schema, name, rawArgs]);
 
+  useEffect(() => {
+    if (!params) return;
+    const args = params.map((p, i) => ({
+      name: p.name,
+      dataType: p.dataType,
+      value: values[i] || ""
+    }));
+    BuildCallStatement(db, schema, name, args).then(setPreview);
+  }, [db, schema, name, params, values]);
+
   const setValue = (i: number, v: string) =>
     setValues((prev) => { const next = [...prev]; next[i] = v; return next; });
 
   const handleExecute = () => {
-    if (!params) return;
-    const sql = buildCallSql(db, schema, name, params, values);
+    if (!params || !preview) return;
     onClose();
-    executeInNewTab(sql);
+    executeInNewTab(preview);
   };
-
-  const preview = params ? buildCallSql(db, schema, name, params, values) : "";
 
   return (
     <Modal

@@ -1423,6 +1423,27 @@ export namespace main {
 
 }
 
+export namespace procedure {
+	
+	export class Argument {
+	    name: string;
+	    dataType: string;
+	    value: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Argument(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.dataType = source["dataType"];
+	        this.value = source["value"];
+	    }
+	}
+
+}
+
 export namespace queryprofile {
 	
 	export class ExplainData {

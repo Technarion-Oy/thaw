@@ -42,6 +42,7 @@ import (
 	"thaw/internal/gitrepo"
 	"thaw/internal/integrations"
 	"thaw/internal/logger"
+	"thaw/internal/procedure"
 	"thaw/internal/queryprofile"
 	"thaw/internal/sfconfig"
 	"thaw/internal/snowflake"
@@ -4664,6 +4665,16 @@ func (a *App) DeleteOldestBackup(backupSetName, bsDb, bsSchema string) error {
 		fqn, escapedID,
 	))
 	return err
+}
+
+// BuildCallStatement constructs a CALL SQL statement for a stored procedure.
+func (a *App) BuildCallStatement(db, schema, name string, args []procedure.Argument) string {
+	return procedure.BuildCallStatement(db, schema, name, args)
+}
+
+// BuildFunctionSelectStatement constructs a SELECT SQL statement for a user-defined function.
+func (a *App) BuildFunctionSelectStatement(db, schema, name string, args []procedure.Argument, isTableFunction bool) string {
+	return procedure.BuildFunctionSelectStatement(db, schema, name, args, isTableFunction)
 }
 
 // ── App Info ──────────────────────────────────────────────────────────────────

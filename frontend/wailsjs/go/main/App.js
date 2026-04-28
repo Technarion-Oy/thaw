@@ -62,6 +62,14 @@ export function BuildApiIntegrationPreviewSQL(arg1) {
   return window['go']['main']['App']['BuildApiIntegrationPreviewSQL'](arg1);
 }
 
+export function BuildCallStatement(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['BuildCallStatement'](arg1, arg2, arg3, arg4);
+}
+
+export function BuildFunctionSelectStatement(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['BuildFunctionSelectStatement'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function CanCreateIntegration(arg1) {
   return window['go']['main']['App']['CanCreateIntegration'](arg1);
 }
