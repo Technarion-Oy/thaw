@@ -13,6 +13,15 @@ import (
 	"thaw/internal/snowflake"
 )
 
+// isValid reports whether t is one of the declared SecretType constants.
+func (t SecretType) isValid() bool {
+	switch t {
+	case SecretTypeOAuth2, SecretTypeCloudProviderToken, SecretTypePassword, SecretTypeGenericString, SecretTypeSymmetricKey:
+		return true
+	}
+	return false
+}
+
 type SecretType string
 
 const (
@@ -53,7 +62,12 @@ func escLit(s string) string {
 }
 
 // BuildCreateSecretSql constructs a CREATE SECRET SQL statement.
-func BuildCreateSecretSql(db, schema string, cfg SecretConfig) string {
+// It returns an error if cfg.Type is not a known SecretType constant.
+func BuildCreateSecretSql(db, schema string, cfg SecretConfig) (string, error) {
+	if !cfg.Type.isValid() {
+		return "", fmt.Errorf("invalid secret type: %q", cfg.Type)
+	}
+
 	var sb strings.Builder
 
 	createClause := "CREATE"
@@ -112,11 +126,16 @@ func BuildCreateSecretSql(db, schema string, cfg SecretConfig) string {
 		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", escLit(cfg.Comment))
 	}
 
-	return sb.String() + ";"
+	return sb.String() + ";", nil
 }
 
 // BuildModifySecretSql constructs one or more ALTER SECRET statements.
-func BuildModifySecretSql(db, schema, name string, cfg SecretConfig, originalComment string) []string {
+// It returns an error if cfg.Type is not a known SecretType constant.
+func BuildModifySecretSql(db, schema, name string, cfg SecretConfig, originalComment string) ([]string, error) {
+	if !cfg.Type.isValid() {
+		return nil, fmt.Errorf("invalid secret type: %q", cfg.Type)
+	}
+
 	secretRef := fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
 	var statements []string
 	var setClauses []string
@@ -169,5 +188,5 @@ func BuildModifySecretSql(db, schema, name string, cfg SecretConfig, originalCom
 		statements = append(statements, fmt.Sprintf("ALTER SECRET %s UNSET COMMENT;", secretRef))
 	}
 
-	return statements
+	return statements, nil
 }

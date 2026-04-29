@@ -1311,12 +1311,12 @@ func (a *App) ListSecurityIntegrations() ([]snowflake.SecurityIntegration, error
 }
 
 // BuildCreateSecretSql returns the SQL for creating a secret.
-func (a *App) BuildCreateSecretSql(database, schema string, cfg secret.SecretConfig) string {
+func (a *App) BuildCreateSecretSql(database, schema string, cfg secret.SecretConfig) (string, error) {
 	return secret.BuildCreateSecretSql(database, schema, cfg)
 }
 
 // BuildModifySecretSql returns one or more SQL statements for modifying a secret.
-func (a *App) BuildModifySecretSql(database, schema, name string, cfg secret.SecretConfig, originalComment string) []string {
+func (a *App) BuildModifySecretSql(database, schema, name string, cfg secret.SecretConfig, originalComment string) ([]string, error) {
 	return secret.BuildModifySecretSql(database, schema, name, cfg, originalComment)
 }
 

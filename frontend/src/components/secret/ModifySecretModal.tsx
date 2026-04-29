@@ -79,7 +79,7 @@ export default function ModifySecretModal({ db, schema, name, onClose, onSuccess
 
   useEffect(() => {
     if (cfg) {
-      BuildModifySecretSql(db, schema, name, cfg, originalComment).then((sqls) => setPreview(sqls.join("\n\n")));
+      BuildModifySecretSql(db, schema, name, cfg, originalComment).then((sqls) => setPreview(sqls.join("\n\n"))).catch(() => {});
     }
   }, [db, schema, name, cfg, originalComment]);
 

@@ -66,7 +66,7 @@ export default function CreateSecretModal({ db, schema, onClose, onSuccess }: Pr
   }, []);
 
   useEffect(() => {
-    BuildCreateSecretSql(db, schema, cfg).then(setPreview);
+    BuildCreateSecretSql(db, schema, cfg).then(setPreview).catch(() => {});
   }, [db, schema, cfg]);
 
   const set = <K extends keyof secret.SecretConfig>(key: K, value: secret.SecretConfig[K]) =>
