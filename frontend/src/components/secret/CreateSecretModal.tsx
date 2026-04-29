@@ -100,7 +100,10 @@ export default function CreateSecretModal({ db, schema, onClose, onSuccess }: Pr
     setCreateError(null);
     try {
       await ExecDDL(preview);
-      const fqn = `"${db}"."${schema}"."${cfg.name}"`;
+      // Snowflake uppercases unquoted identifiers; match the casing that
+      // ListSecretsInAccount will return so the dropdown auto-selects correctly.
+      const effectiveName = cfg.caseSensitive ? cfg.name : cfg.name.toUpperCase();
+      const fqn = `"${db}"."${schema}"."${effectiveName}"`;
       onSuccess?.(fqn);
       onClose();
     } catch (err) {
