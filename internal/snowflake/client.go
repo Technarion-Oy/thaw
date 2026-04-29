@@ -1123,6 +1123,35 @@ func (c *Client) ListGitTags(ctx context.Context, database, schema, repoName str
 	return tags, nil
 }
 
+// GetGitFileContent reads a file from a git repository and returns its content.
+func (c *Client) GetGitFileContent(ctx context.Context, database, schema, repoName, filePath string) (string, error) {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	sql := fmt.Sprintf(`SELECT $1 FROM @"%s"."%s"."%s"/%s`, esc(database), esc(schema), esc(repoName), filePath)
+
+	res, err := c.Execute(ctx, sql)
+	if err != nil {
+		return "", err
+	}
+
+	var content strings.Builder
+	for _, row := range res.Rows {
+		if len(row) > 0 {
+			content.WriteString(strVal(row, 0))
+			content.WriteString("\n")
+		}
+	}
+	return content.String(), nil
+}
+
+// ExecuteGitFile executes a SQL file from a git repository.
+func (c *Client) ExecuteGitFile(ctx context.Context, database, schema, repoName, filePath string) error {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	sql := fmt.Sprintf(`EXECUTE IMMEDIATE FROM @"%s"."%s"."%s"/%s`, esc(database), esc(schema), esc(repoName), filePath)
+
+	_, err := c.Execute(ctx, sql)
+	return err
+}
+
 // IntegrationRow holds metadata returned by SHOW <kind> INTEGRATIONS.
 type IntegrationRow struct {
 	Name     string `json:"name"`

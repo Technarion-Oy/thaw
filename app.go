@@ -2230,6 +2230,22 @@ func (a *App) GetGitCommitFilter(database, schema, repoName string) string {
 	return a.gitCommitFilters[repoKey]
 }
 
+// GetGitFileContent reads a file from a git repository and returns its content.
+func (a *App) GetGitFileContent(database, schema, repoName, filePath string) (string, error) {
+	if a.client == nil {
+		return "", ErrNotConnected
+	}
+	return a.client.GetGitFileContent(a.ctx, database, schema, repoName, filePath)
+}
+
+// ExecuteGitFile executes a SQL file from a git repository.
+func (a *App) ExecuteGitFile(database, schema, repoName, filePath string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	return a.client.ExecuteGitFile(a.ctx, database, schema, repoName, filePath)
+}
+
 // GetSchemaForeignKeys returns all FK→PK column mappings in the given schema
 // from INFORMATION_SCHEMA. Used by the editor to bulk-warm FK data for the
 // JOIN ON autocomplete instead of issuing per-table SHOW IMPORTED KEYS calls.

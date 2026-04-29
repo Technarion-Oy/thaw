@@ -136,6 +136,8 @@ export function EnableTaskDependents(arg1:string,arg2:string,arg3:string):Promis
 
 export function ExecDDL(arg1:string):Promise<void>;
 
+export function ExecuteGitFile(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
 export function ExecuteMigration(arg1:Array<main.MigrationObject>,arg2:string,arg3:number,arg4:main.TableMigrationStrategy):Promise<Array<main.MigrationExecEvent>>;
 
 export function ExecuteNotebook(arg1:string,arg2:string,arg3:string,arg4:Array<string>):Promise<string>;
@@ -200,7 +202,11 @@ export function GetFunctionSuggestions(arg1:string):Promise<Array<fnmeta.Functio
 
 export function GetFunctionTooltip(arg1:string):Promise<Array<fnmeta.FunctionMeta>>;
 
+export function GetGitCommitFilter(arg1:string,arg2:string,arg3:string):Promise<string>;
+
 export function GetGitConfig():Promise<config.GitConfig>;
+
+export function GetGitFileContent(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
 
 export function GetIdentifierAtColumn(arg1:string,arg2:number):Promise<Array<string>>;
 
@@ -372,7 +378,11 @@ export function ListExternalVolumes():Promise<Array<string>>;
 
 export function ListFinalizableTasks(arg1:string,arg2:string):Promise<Array<tasks.FinalizabilityRow>>;
 
+export function ListGitBranches(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.GitBranch>>;
+
 export function ListGitRepoEntries(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.GitRepoEntry>>;
+
+export function ListGitTags(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.GitTag>>;
 
 export function ListIntegrations(arg1:string):Promise<Array<snowflake.IntegrationRow>>;
 
@@ -487,6 +497,8 @@ export function SearchFiles(arg1:string,arg2:string,arg3:boolean):Promise<Array<
 export function SendChatMessage(arg1:Array<ai.UIMessage>,arg2:string,arg3:string,arg4:string,arg5:boolean):Promise<Array<ai.UIMessage>>;
 
 export function SetColumnComment(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
+
+export function SetGitCommitFilter(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function SetNotebookQueryWarehouse(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 

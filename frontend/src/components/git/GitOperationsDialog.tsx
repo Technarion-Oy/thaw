@@ -176,6 +176,16 @@ function RepositorySection() {
       await GitInitWithRemote(targetPath, cloneUrl, branchName || "main");
       setInitSuccess(true);
       setInitMode(false);
+
+      // Ensure exportDir and remoteURL point to the newly initialized repo and 
+      // refresh status so the working tree is shown immediately.
+      const currentExportDir = useGitStore.getState().exportDir;
+      if (targetPath && targetPath !== currentExportDir) {
+        await useGitStore.getState().saveConfig({ exportDir: targetPath, remoteURL: cloneUrl });
+      } else if (cloneUrl && cloneUrl !== useGitStore.getState().remoteURL) {
+        await useGitStore.getState().saveConfig({ remoteURL: cloneUrl });
+      }
+
       setCloneUrl("");
       setClonePath("");
       await refreshStatus();

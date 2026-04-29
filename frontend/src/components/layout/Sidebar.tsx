@@ -57,7 +57,7 @@ import {
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -138,7 +138,7 @@ interface ContextMenu {
   x: number;
   y: number;
   nodeKey: string;
-  nodeType: "db" | "schema" | "type" | "obj" | "gitcommits" | "gitdir";
+  nodeType: "db" | "schema" | "type" | "obj" | "gitcommits" | "gitdir" | "gitfile";
   objKind?: string;     // set for nodeType === "type" or "obj"
   objArgs?: string;     // parameter type list for PROCEDURE / FUNCTION
   isFinalizer?: boolean; // true when right-clicking a finalizer TASK node
@@ -887,8 +887,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "obj", objKind, objArgs, isFinalizer });
     } else if (key.startsWith("gitcommits:") || key.startsWith("gitcommit-empty:")) {
       setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "gitcommits" });
-    } else if (key.startsWith("gitdir:") || key.startsWith("gitfile:")) {
+    } else if (key.startsWith("gitdir:")) {
       setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "gitdir" });
+    } else if (key.startsWith("gitfile:")) {
+      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "gitfile" });
     }
   };
 
@@ -1135,6 +1137,44 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const key = ctxMenu.nodeKey;
     setCtxMenu(null);
     setTreeData((prev) => clearNodeChildren(prev, key));
+  };
+
+  const viewGitFileContent = async () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const repoName = parts[3];
+    const filePath = parts.slice(4).join(":");
+    setCtxMenu(null);
+    const hide = message.loading(`Reading ${filePath}…`, 0);
+    try {
+      const content = await GetGitFileContent(db, schema, repoName, filePath);
+      useQueryStore.getState().loadInNewTab(content);
+    } catch (e) {
+      message.error(String(e));
+    } finally {
+      hide();
+    }
+  };
+
+  const executeGitFile = async () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const repoName = parts[3];
+    const filePath = parts.slice(4).join(":");
+    setCtxMenu(null);
+    const hide = message.loading(`Executing ${filePath}…`, 0);
+    try {
+      await ExecuteGitFile(db, schema, repoName, filePath);
+      message.success(`${filePath} executed successfully`);
+    } catch (e) {
+      message.error(String(e));
+    } finally {
+      hide();
+    }
   };
 
   const fetchGitRepository = async () => {
@@ -2021,6 +2061,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Clear Commit Filter", <CloseOutlined style={{ fontSize: 12 }} />, clearGitCommitFilter)}
           {(ctxMenu.nodeKey.startsWith("gitdir:") || ctxMenu.nodeKey.startsWith("gitbranches:") || ctxMenu.nodeKey.startsWith("gittags:") || ctxMenu.nodeKey.startsWith("gitcommits:")) &&
             menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshGitNode)}
+          {ctxMenu.nodeType === "gitfile" && menuItem("View Content", <EyeOutlined style={{ fontSize: 12 }} />, viewGitFileContent)}
+          {ctxMenu.nodeType === "gitfile" && menuItem("Execute File", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeGitFile)}
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&

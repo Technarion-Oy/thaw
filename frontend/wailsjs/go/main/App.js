@@ -238,6 +238,10 @@ export function ExecDDL(arg1) {
   return window['go']['main']['App']['ExecDDL'](arg1);
 }
 
+export function ExecuteGitFile(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ExecuteGitFile'](arg1, arg2, arg3, arg4);
+}
+
 export function ExecuteMigration(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['ExecuteMigration'](arg1, arg2, arg3, arg4);
 }
@@ -366,8 +370,16 @@ export function GetFunctionTooltip(arg1) {
   return window['go']['main']['App']['GetFunctionTooltip'](arg1);
 }
 
+export function GetGitCommitFilter(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetGitCommitFilter'](arg1, arg2, arg3);
+}
+
 export function GetGitConfig() {
   return window['go']['main']['App']['GetGitConfig']();
+}
+
+export function GetGitFileContent(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['GetGitFileContent'](arg1, arg2, arg3, arg4);
 }
 
 export function GetIdentifierAtColumn(arg1, arg2) {
@@ -710,8 +722,16 @@ export function ListFinalizableTasks(arg1, arg2) {
   return window['go']['main']['App']['ListFinalizableTasks'](arg1, arg2);
 }
 
+export function ListGitBranches(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ListGitBranches'](arg1, arg2, arg3);
+}
+
 export function ListGitRepoEntries(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['ListGitRepoEntries'](arg1, arg2, arg3, arg4);
+}
+
+export function ListGitTags(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ListGitTags'](arg1, arg2, arg3);
 }
 
 export function ListIntegrations(arg1) {
@@ -940,6 +960,10 @@ export function SendChatMessage(arg1, arg2, arg3, arg4, arg5) {
 
 export function SetColumnComment(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['SetColumnComment'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function SetGitCommitFilter(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['SetGitCommitFilter'](arg1, arg2, arg3, arg4);
 }
 
 export function SetNotebookQueryWarehouse(arg1, arg2, arg3, arg4) {
