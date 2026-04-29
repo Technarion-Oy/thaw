@@ -86,6 +86,11 @@ type App struct {
 	// Per-tab isolated Snowflake sessions.
 	tabSessions sync.Map // string (tabId) → *tabSession
 
+	// Git repository commit filters (repoKey -> commitHash).
+	// repoKey format: "db.schema.repo"
+	gitCommitFiltersMu sync.Mutex
+	gitCommitFilters   map[string]string
+
 	// Embedded terminal (pseudo-terminal).
 	ptyMu  sync.Mutex
 	ptmx   *os.File
@@ -94,7 +99,9 @@ type App struct {
 
 // NewApp creates and returns a new App instance for use with the Wails runtime.
 func NewApp() *App {
-	return &App{}
+	return &App{
+		gitCommitFilters: make(map[string]string),
+	}
 }
 
 // startup is called by the Wails runtime after the application window is ready.
@@ -2163,7 +2170,64 @@ func (a *App) ListGitRepoEntries(database, schema, repoName, dirPath string) ([]
 	if a.client == nil {
 		return nil, ErrNotConnected
 	}
+
+	// If we are listing the root of the "commits" virtual folder,
+	// check if a filter has been set.
+	if strings.HasPrefix(dirPath, "commits") {
+		parts := strings.Split(strings.Trim(dirPath, "/"), "/")
+		if len(parts) == 1 { // listing "commits/"
+			a.gitCommitFiltersMu.Lock()
+			repoKey := fmt.Sprintf("%s.%s.%s", database, schema, repoName)
+			commitHash := a.gitCommitFilters[repoKey]
+			a.gitCommitFiltersMu.Unlock()
+
+			if commitHash == "" {
+				// Return an empty list or a special entry indicating no filter?
+				// For now, return empty. The frontend will handle the "Set Filter" UI.
+				return []snowflake.GitRepoEntry{}, nil
+			}
+			// If we have a hash, we want to list @repo/commits/<hash>/
+			// but ListGitRepoEntries will be called with "commits/<hash>/" next.
+		}
+	}
+
 	return a.client.ListGitRepoEntries(a.ctx, database, schema, repoName, dirPath)
+}
+
+// ListGitBranches returns all branches in the given git repository.
+func (a *App) ListGitBranches(database, schema, repoName string) ([]snowflake.GitBranch, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListGitBranches(a.ctx, database, schema, repoName)
+}
+
+// ListGitTags returns all tags in the given git repository.
+func (a *App) ListGitTags(database, schema, repoName string) ([]snowflake.GitTag, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListGitTags(a.ctx, database, schema, repoName)
+}
+
+// SetGitCommitFilter sets a commit hash filter for a specific repository.
+func (a *App) SetGitCommitFilter(database, schema, repoName, commitHash string) {
+	a.gitCommitFiltersMu.Lock()
+	defer a.gitCommitFiltersMu.Unlock()
+	repoKey := fmt.Sprintf("%s.%s.%s", database, schema, repoName)
+	if commitHash == "" {
+		delete(a.gitCommitFilters, repoKey)
+	} else {
+		a.gitCommitFilters[repoKey] = commitHash
+	}
+}
+
+// GetGitCommitFilter returns the current commit hash filter for a repository.
+func (a *App) GetGitCommitFilter(database, schema, repoName string) string {
+	a.gitCommitFiltersMu.Lock()
+	defer a.gitCommitFiltersMu.Unlock()
+	repoKey := fmt.Sprintf("%s.%s.%s", database, schema, repoName)
+	return a.gitCommitFilters[repoKey]
 }
 
 // GetSchemaForeignKeys returns all FK→PK column mappings in the given schema

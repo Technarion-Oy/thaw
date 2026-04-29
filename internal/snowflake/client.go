@@ -940,11 +940,29 @@ type GitRepoEntry struct {
 	Size  int64  `json:"size,omitempty"`
 }
 
+// GitBranch represents a branch in a Snowflake git repository.
+type GitBranch struct {
+	Name string `json:"name"`
+}
+
+// GitTag represents a tag in a Snowflake git repository.
+type GitTag struct {
+	Name string `json:"name"`
+}
+
 // ListGitRepoEntries returns the immediate children (files and directories) at
 // dirPath within the git repository stage @database.schema.repoName/dirPath.
 // Pass an empty dirPath to list the root. Directories are sorted first, then
 // files; both groups are sorted case-insensitively by name.
 func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoName, dirPath string) ([]GitRepoEntry, error) {
+	// NORMALIZE DIRPATH
+	// Remove leading slash so HasPrefix matches relPath safely.
+	dirPath = strings.TrimPrefix(dirPath, "/")
+	// Ensure trailing slash to prevent swallowing files into empty-named directories.
+	if dirPath != "" && !strings.HasSuffix(dirPath, "/") {
+		dirPath += "/"
+	}
+
 	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
 	sql := fmt.Sprintf(`LIST @"%s"."%s"."%s"/%s`, esc(database), esc(schema), esc(repoName), dirPath)
 
@@ -972,13 +990,29 @@ func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoN
 
 	for _, row := range res.Rows {
 		fullName := strVal(row, nameIdx)
-		// Strip the stage prefix: "@DB.SCHEMA.REPO/branches/main/file.txt"
-		// → find first '/', take everything after it.
-		slashIdx := strings.Index(fullName, "/")
-		if slashIdx < 0 {
-			continue
+
+		// The NAME column typically contains the stage/repo prefix, e.g.:
+		// "MYREPO/branches/main/file.txt" or "DB.SCHEMA.MYREPO/branches/main/file.txt"
+		// or even "@DB.SCHEMA.MYREPO/branches/main/file.txt".
+		// We want the relative path: "branches/main/file.txt".
+		relPath := fullName
+		if slashIdx := strings.Index(fullName, "/"); slashIdx >= 0 {
+			prefix := fullName[:slashIdx]
+			up := strings.ToUpper(prefix)
+			ur := strings.ToUpper(repoName)
+
+			// Determine if the part before the first slash is a stage prefix.
+			// It might be REPO, "REPO", @REPO, or a qualified DB.SCHEMA.REPO.
+			isPrefix := up == ur ||
+				up == `"`+ur+`"` ||
+				strings.HasPrefix(up, "@") ||
+				strings.HasSuffix(up, "."+ur) ||
+				strings.HasSuffix(up, ".\""+ur+`"`)
+
+			if isPrefix {
+				relPath = fullName[slashIdx+1:]
+			}
 		}
-		relPath := fullName[slashIdx+1:]
 
 		if !strings.HasPrefix(relPath, dirPath) {
 			continue
@@ -1027,6 +1061,66 @@ func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoN
 	})
 
 	return entries, nil
+}
+
+// ListGitBranches returns all branches in the given git repository.
+func (c *Client) ListGitBranches(ctx context.Context, database, schema, repoName string) ([]GitBranch, error) {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	sql := fmt.Sprintf(`SHOW GIT BRANCHES IN GIT REPOSITORY "%s"."%s"."%s"`, esc(database), esc(schema), esc(repoName))
+
+	res, err := c.Execute(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+
+	nameIdx := -1
+	for i, col := range res.Columns {
+		if strings.ToUpper(col) == "NAME" {
+			nameIdx = i
+			break
+		}
+	}
+	if nameIdx == -1 {
+		return nil, fmt.Errorf("NAME column not found in SHOW GIT BRANCHES output")
+	}
+
+	var branches []GitBranch
+	for _, row := range res.Rows {
+		branches = append(branches, GitBranch{
+			Name: strVal(row, nameIdx),
+		})
+	}
+	return branches, nil
+}
+
+// ListGitTags returns all tags in the given git repository.
+func (c *Client) ListGitTags(ctx context.Context, database, schema, repoName string) ([]GitTag, error) {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	sql := fmt.Sprintf(`SHOW GIT TAGS IN GIT REPOSITORY "%s"."%s"."%s"`, esc(database), esc(schema), esc(repoName))
+
+	res, err := c.Execute(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+
+	nameIdx := -1
+	for i, col := range res.Columns {
+		if strings.ToUpper(col) == "NAME" {
+			nameIdx = i
+			break
+		}
+	}
+	if nameIdx == -1 {
+		return nil, fmt.Errorf("NAME column not found in SHOW GIT TAGS output")
+	}
+
+	var tags []GitTag
+	for _, row := range res.Rows {
+		tags = append(tags, GitTag{
+			Name: strVal(row, nameIdx),
+		})
+	}
+	return tags, nil
 }
 
 // IntegrationRow holds metadata returned by SHOW <kind> INTEGRATIONS.

@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { Tree, Typography, Spin, Empty, Divider, Modal, Button, Input, Tooltip, Slider, Tag, message, type InputRef } from "antd";
+import { Tree, Typography, Spin, Empty, Divider, Modal, Button, Input, Tooltip, Slider, Tag, Space, message, type InputRef } from "antd";
 import {
   DatabaseOutlined,
   TableOutlined,
@@ -52,11 +52,12 @@ import {
   LineOutlined,
   DisconnectOutlined,
   BranchesOutlined,
+  CloseOutlined,
 } from "@ant-design/icons";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -91,6 +92,7 @@ import CreateSecretModal from "../secret/CreateSecretModal";
 import ModifySecretModal from "../secret/ModifySecretModal";
 import CreateGitRepositoryModal from "../gitrepoobj/CreateGitRepositoryModal";
 import ModifyGitRepositoryModal from "../gitrepoobj/ModifyGitRepositoryModal";
+import SetGitCommitFilterModal from "../gitrepoobj/SetGitCommitFilterModal";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 
 const { Text } = Typography;
@@ -136,7 +138,7 @@ interface ContextMenu {
   x: number;
   y: number;
   nodeKey: string;
-  nodeType: "db" | "schema" | "type" | "obj";
+  nodeType: "db" | "schema" | "type" | "obj" | "gitcommits" | "gitdir";
   objKind?: string;     // set for nodeType === "type" or "obj"
   objArgs?: string;     // parameter type list for PROCEDURE / FUNCTION
   isFinalizer?: boolean; // true when right-clicking a finalizer TASK node
@@ -416,6 +418,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [modifySecretModal, setModifySecretModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createGitRepoModal, setCreateGitRepoModal] = useState<{ db: string; schema: string } | null>(null);
   const [modifyGitRepoModal, setModifyGitRepoModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [gitCommitFilterModal, setGitCommitFilterModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [objectSummariesModal, setObjectSummariesModal] = useState<string | null>(null);
   const [createTaskModal, setCreateTaskModal] = useState<{ db: string; schema: string } | null>(null);
   const [executeTaskModal, setExecuteTaskModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -738,13 +741,94 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           setData((prev) => updateNode(prev, key, []));
         }
       } else if (kind === "GIT REPOSITORY") {
-        try {
-          const entries = await ListGitRepoEntries(db, schema, name, "");
-          setData((prev) => updateNode(prev, key, buildGitEntryNodes(db, schema, name, entries ?? [])));
-        } catch (e) {
-          console.error(e);
-          setData((prev) => updateNode(prev, key, []));
+        const typeNodes: DataNode[] = [
+          {
+            title: "branches",
+            key: `gitbranches:${db}:${schema}:${name}`,
+            icon: <FolderOutlined style={{ color: "var(--text-muted)" }} />,
+            isLeaf: false,
+          },
+          {
+            title: "tags",
+            key: `gittags:${db}:${schema}:${name}`,
+            icon: <FolderOutlined style={{ color: "var(--text-muted)" }} />,
+            isLeaf: false,
+          },
+          {
+            title: "commits",
+            key: `gitcommits:${db}:${schema}:${name}`,
+            icon: <FolderOutlined style={{ color: "var(--text-muted)" }} />,
+            isLeaf: false,
+          },
+        ];
+        setData((prev) => updateNode(prev, key, typeNodes));
+      }
+    } else if (parts[0] === "gitbranches") {
+      const db     = parts[1];
+      const schema = parts[2];
+      const repo   = parts[3];
+      try {
+        const branches = await ListGitBranches(db, schema, repo);
+        setData((prev) => updateNode(prev, key, (branches || []).map((b) => ({
+          title: b.name,
+          key: `gitdir:${db}:${schema}:${repo}:branches/${b.name}`,
+          icon: <FolderOutlined />,
+          isLeaf: false,
+        }))));
+      } catch (e) {
+        console.error(e);
+        setData((prev) => updateNode(prev, key, []));
+      }
+    } else if (parts[0] === "gittags") {
+      const db     = parts[1];
+      const schema = parts[2];
+      const repo   = parts[3];
+      try {
+        const tags = await ListGitTags(db, schema, repo);
+        setData((prev) => updateNode(prev, key, (tags || []).map((t) => ({
+          title: t.name,
+          key: `gitdir:${db}:${schema}:${repo}:tags/${t.name}`,
+          icon: <FolderOutlined />,
+          isLeaf: false,
+        }))));
+      } catch (e) {
+        console.error(e);
+        setData((prev) => updateNode(prev, key, []));
+      }
+    } else if (parts[0] === "gitcommits") {
+      const db     = parts[1];
+      const schema = parts[2];
+      const repo   = parts[3];
+      try {
+        const commitHash = await GetGitCommitFilter(db, schema, repo);
+        if (commitHash) {
+          setData((prev) => updateNode(prev, key, [
+            {
+              title: commitHash,
+              key: `gitdir:${db}:${schema}:${repo}:commits/${commitHash}`,
+              icon: <FolderOutlined />,
+              isLeaf: false,
+            }
+          ]));
+        } else {
+          setData((prev) => updateNode(prev, key, [
+            {
+              title: (
+                <Space size={4}>
+                  <EditOutlined style={{ fontSize: 10, color: "var(--accent)" }} />
+                  <Text type="secondary" style={{ fontStyle: "italic", fontSize: 12, cursor: "pointer" }}>
+                    (no commit filter set — click to set)
+                  </Text>
+                </Space>
+              ),
+              key: `gitcommit-empty:${db}:${schema}:${repo}`,
+              isLeaf: true,
+            }
+          ]));
         }
+      } catch (e) {
+        console.error(e);
+        setData((prev) => updateNode(prev, key, []));
       }
     } else if (parts[0] === "gitdir") {
       const db       = parts[1];
@@ -801,6 +885,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       const objArgs     = (node as any).arguments ?? "";
       const isFinalizer = !!(node as any).isFinalizer;
       setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "obj", objKind, objArgs, isFinalizer });
+    } else if (key.startsWith("gitcommits:") || key.startsWith("gitcommit-empty:")) {
+      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "gitcommits" });
+    } else if (key.startsWith("gitdir:") || key.startsWith("gitfile:")) {
+      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "gitdir" });
     }
   };
 
@@ -1010,6 +1098,43 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const name = parts[4];
     setCtxMenu(null);
     setModifyGitRepoModal({ db, schema, name });
+  };
+
+  const openCommitFilterModal = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    let db: string, schema: string, name: string;
+    if (ctxMenu.nodeKey.startsWith("obj:")) {
+      db = parts[1];
+      schema = parts[2];
+      name = parts[4];
+    } else {
+      db = parts[1];
+      schema = parts[2];
+      name = parts[3];
+    }
+    setCtxMenu(null);
+    setGitCommitFilterModal({ db, schema, name });
+  };
+
+  const clearGitCommitFilter = async () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts[3];
+    const nodeKey = ctxMenu.nodeKey;
+    setCtxMenu(null);
+    await SetGitCommitFilter(db, schema, name, "");
+    setTreeData((prev) => clearNodeChildren(prev, nodeKey.startsWith("gitcommit-empty") ? `gitcommits:${db}:${schema}:${name}` : nodeKey));
+    message.success("Commit filter cleared");
+  };
+
+  const refreshGitNode = () => {
+    if (!ctxMenu) return;
+    const key = ctxMenu.nodeKey;
+    setCtxMenu(null);
+    setTreeData((prev) => clearNodeChildren(prev, key));
   };
 
   const fetchGitRepository = async () => {
@@ -1688,9 +1813,18 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                  if (props.isLeaf) return null;
                  return props.expanded ? <MinusSquareOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} /> : <PlusSquareOutlined style={{ fontSize: 11, color: "var(--text-muted)" }} />;
                }}
-               onSelect={(_keys, info) => {                const { nativeEvent, node } = info;
-                const key = String(node.key);
-                if (!key.startsWith("obj:")) return;
+               onSelect={(_keys, info) => {
+                 const { nativeEvent, node } = info;
+                 const key = String(node.key);
+
+                 if (key.startsWith("gitcommit-empty:")) {
+                   const parts = key.split(":");
+                   setGitCommitFilterModal({ db: parts[1], schema: parts[2], name: parts[3] });
+                   return;
+                 }
+
+                 if (!key.startsWith("obj:")) return;
+
 
                 if (nativeEvent.ctrlKey || nativeEvent.metaKey) {
                   nativeEvent.stopPropagation();
@@ -1879,6 +2013,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Fetch", <SyncOutlined style={{ fontSize: 12 }} />, fetchGitRepository)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "GIT REPOSITORY" &&
             menuItem("Modify…", <EditOutlined style={{ fontSize: 12 }} />, openModifyGitRepository)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "GIT REPOSITORY" &&
+            menuItem("Set Commit Filter…", <EditOutlined style={{ fontSize: 12 }} />, openCommitFilterModal)}
+          {ctxMenu.nodeType === "gitcommits" &&
+            menuItem("Set Commit Filter…", <EditOutlined style={{ fontSize: 12 }} />, openCommitFilterModal)}
+          {ctxMenu.nodeType === "gitcommits" &&
+            menuItem("Clear Commit Filter", <CloseOutlined style={{ fontSize: 12 }} />, clearGitCommitFilter)}
+          {(ctxMenu.nodeKey.startsWith("gitdir:") || ctxMenu.nodeKey.startsWith("gitbranches:") || ctxMenu.nodeKey.startsWith("gittags:") || ctxMenu.nodeKey.startsWith("gitcommits:")) &&
+            menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshGitNode)}
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
@@ -2149,6 +2291,16 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           name={modifyGitRepoModal.name}
           onClose={() => setModifyGitRepoModal(null)}
           onSuccess={() => refreshDatabaseByName(modifyGitRepoModal.db)}
+        />
+      )}
+
+      {gitCommitFilterModal && (
+        <SetGitCommitFilterModal
+          db={gitCommitFilterModal.db}
+          schema={gitCommitFilterModal.schema}
+          name={gitCommitFilterModal.name}
+          onClose={() => setGitCommitFilterModal(null)}
+          onSuccess={() => setTreeData((prev) => clearNodeChildren(prev, `gitcommits:${gitCommitFilterModal.db}:${gitCommitFilterModal.schema}:${gitCommitFilterModal.name}`))}
         />
       )}
 
