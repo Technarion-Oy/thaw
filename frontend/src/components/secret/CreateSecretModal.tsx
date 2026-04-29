@@ -25,7 +25,7 @@ interface Props {
   db: string;
   schema: string;
   onClose: () => void;
-  onSuccess?: () => void;
+  onSuccess?: (secretFqn: string) => void;
 }
 
 export default function CreateSecretModal({ db, schema, onClose, onSuccess }: Props) {
@@ -100,7 +100,8 @@ export default function CreateSecretModal({ db, schema, onClose, onSuccess }: Pr
     setCreateError(null);
     try {
       await ExecDDL(preview);
-      onSuccess?.();
+      const fqn = `"${db}"."${schema}"."${cfg.name}"`;
+      onSuccess?.(fqn);
       onClose();
     } catch (err) {
       setCreateError(String(err));

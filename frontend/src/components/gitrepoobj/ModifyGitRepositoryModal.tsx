@@ -11,9 +11,10 @@
 import { useState, useEffect } from "react";
 import {
   Modal, Form, Input, Select, Space,
-  Typography, Button, Alert,
+  Typography, Button, Alert, Tooltip,
 } from "antd";
-import { BranchesOutlined } from "@ant-design/icons";
+import { BranchesOutlined, PlusOutlined } from "@ant-design/icons";
+import CreateSecretModal from "../secret/CreateSecretModal";
 import {
   GetObjectProperties,
   ListApiIntegrations,
@@ -57,6 +58,7 @@ export default function ModifyGitRepositoryModal({ db, schema, name, onClose, on
   const [modifying, setModifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState("");
+  const [showCreateSecret, setShowCreateSecret] = useState(false);
 
   useEffect(() => {
     const init = async () => {
@@ -111,6 +113,18 @@ export default function ModifyGitRepositoryModal({ db, schema, name, onClose, on
   const set = <K extends keyof GitRepoConfig>(key: K, value: GitRepoConfig[K]) =>
     setCfg((prev) => prev ? ({ ...prev, [key]: value }) : null);
 
+  const reloadSecrets = () => {
+    ListSecretsInAccount()
+      .then((secrets) => setAccountSecrets(secrets ?? []))
+      .catch(() => {});
+  };
+
+  const handleSecretCreated = (fqn: string) => {
+    reloadSecrets();
+    set("gitCredentials", fqn);
+    setShowCreateSecret(false);
+  };
+
   const handleRun = async () => {
     if (!cfg) return;
     const sqls = preview.split("\n\n").filter((s) => s.trim() !== "");
@@ -155,6 +169,7 @@ export default function ModifyGitRepositoryModal({ db, schema, name, onClose, on
   ];
 
   return (
+    <>
     <Modal
       open
       title={
@@ -209,13 +224,19 @@ export default function ModifyGitRepositoryModal({ db, schema, name, onClose, on
         </Form.Item>
 
         <Form.Item label="Git Credentials" style={itemStyle} help="Select '— None / Clear —' to remove credentials">
-          <Select
-            value={cfg.gitCredentials ?? ""}
-            onChange={(v) => set("gitCredentials", v ?? "")}
-            options={secretOptions}
-            showSearch
-            optionFilterProp="label"
-          />
+          <Space.Compact style={{ width: "100%" }}>
+            <Select
+              style={{ flex: 1 }}
+              value={cfg.gitCredentials ?? ""}
+              onChange={(v) => set("gitCredentials", v ?? "")}
+              options={secretOptions}
+              showSearch
+              optionFilterProp="label"
+            />
+            <Tooltip title="Create new secret">
+              <Button icon={<PlusOutlined />} onClick={() => setShowCreateSecret(true)} />
+            </Tooltip>
+          </Space.Compact>
         </Form.Item>
 
         <Form.Item label="Comment" style={itemStyle}>
@@ -255,5 +276,14 @@ export default function ModifyGitRepositoryModal({ db, schema, name, onClose, on
         </div>
       </Form>
     </Modal>
+    {showCreateSecret && (
+      <CreateSecretModal
+        db={db}
+        schema={schema}
+        onClose={() => setShowCreateSecret(false)}
+        onSuccess={handleSecretCreated}
+      />
+    )}
+    </>
   );
 }
