@@ -66,12 +66,20 @@ export function BuildCallStatement(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['BuildCallStatement'](arg1, arg2, arg3, arg4);
 }
 
+export function BuildCreateGitRepositorySql(arg1, arg2, arg3) {
+  return window['go']['main']['App']['BuildCreateGitRepositorySql'](arg1, arg2, arg3);
+}
+
 export function BuildCreateSecretSql(arg1, arg2, arg3) {
   return window['go']['main']['App']['BuildCreateSecretSql'](arg1, arg2, arg3);
 }
 
 export function BuildFunctionSelectStatement(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['BuildFunctionSelectStatement'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function BuildModifyGitRepositorySql(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
+  return window['go']['main']['App']['BuildModifyGitRepositorySql'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 }
 
 export function BuildModifySecretSql(arg1, arg2, arg3, arg4, arg5) {
@@ -642,6 +650,10 @@ export function ListAIModels(arg1, arg2, arg3) {
   return window['go']['main']['App']['ListAIModels'](arg1, arg2, arg3);
 }
 
+export function ListApiIntegrations() {
+  return window['go']['main']['App']['ListApiIntegrations']();
+}
+
 export function ListAvailableRoles() {
   return window['go']['main']['App']['ListAvailableRoles']();
 }
@@ -716,6 +728,10 @@ export function ListRootTasks(arg1, arg2) {
 
 export function ListSchemas(arg1) {
   return window['go']['main']['App']['ListSchemas'](arg1);
+}
+
+export function ListSecretsInAccount() {
+  return window['go']['main']['App']['ListSecretsInAccount']();
 }
 
 export function ListSecurityIntegrations() {

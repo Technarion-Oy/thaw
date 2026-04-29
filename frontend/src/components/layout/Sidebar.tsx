@@ -51,6 +51,7 @@ import {
   LinkOutlined,
   LineOutlined,
   DisconnectOutlined,
+  BranchesOutlined,
 } from "@ant-design/icons";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
@@ -88,6 +89,8 @@ import DependenciesModal from "../lineage/DependenciesModal";
 import InsertMappingModal from "../database/InsertMappingModal";
 import CreateSecretModal from "../secret/CreateSecretModal";
 import ModifySecretModal from "../secret/ModifySecretModal";
+import CreateGitRepositoryModal from "../gitrepoobj/CreateGitRepositoryModal";
+import ModifyGitRepositoryModal from "../gitrepoobj/ModifyGitRepositoryModal";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 
 const { Text } = Typography;
@@ -105,9 +108,10 @@ const KIND_LABEL: Record<string, string> = {
   PIPE:          "Pipes",
   NOTEBOOK:      "Notebooks",
   SECRET:        "Secrets",
+  "GIT REPOSITORY": "Git Repositories",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET"];
+const KIND_ORDER = ["TABLE", "VIEW", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY"];
 
 function kindIcon(kind: string) {
   switch (kind) {
@@ -122,8 +126,9 @@ function kindIcon(kind: string) {
     case "FILE FORMAT": return <FileOutlined />;
     case "PIPE":        return <ApiOutlined />;
     case "NOTEBOOK":    return <ExperimentOutlined />;
-    case "SECRET":      return <KeyOutlined />;
-    default:            return <FileOutlined />;
+    case "SECRET":          return <KeyOutlined />;
+    case "GIT REPOSITORY":  return <BranchesOutlined />;
+    default:                return <FileOutlined />;
   }
 }
 
@@ -409,6 +414,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [createTableModal, setCreateTableModal] = useState<{ db: string; schema: string } | null>(null);
   const [createSecretModal, setCreateSecretModal] = useState<{ db: string; schema: string } | null>(null);
   const [modifySecretModal, setModifySecretModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createGitRepoModal, setCreateGitRepoModal] = useState<{ db: string; schema: string } | null>(null);
+  const [modifyGitRepoModal, setModifyGitRepoModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [objectSummariesModal, setObjectSummariesModal] = useState<string | null>(null);
   const [createTaskModal, setCreateTaskModal] = useState<{ db: string; schema: string } | null>(null);
   const [executeTaskModal, setExecuteTaskModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -951,6 +958,46 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const name = parts[4];
     setCtxMenu(null);
     setModifySecretModal({ db, schema, name });
+  };
+
+  const openCreateGitRepository = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateGitRepoModal({ db, schema });
+  };
+
+  const openModifyGitRepository = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts[4];
+    setCtxMenu(null);
+    setModifyGitRepoModal({ db, schema, name });
+  };
+
+  const fetchGitRepository = async () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts[4];
+    setCtxMenu(null);
+    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const sql = `ALTER GIT REPOSITORY ${q(db)}.${q(schema)}.${q(name)} FETCH;`;
+    const hide = message.loading("Fetching repository…", 0);
+    try {
+      const { ExecDDL } = await import("../../../wailsjs/go/main/App");
+      await ExecDDL(sql);
+      hide();
+      message.success("Repository fetched successfully");
+    } catch (err) {
+      hide();
+      message.error(String(err));
+    }
   };
 
   const openTaskStatuses = () => {
@@ -1778,7 +1825,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               {menuItem("Table…", <TableOutlined style={{ fontSize: 12 }} />, openCreateTable)}
               {menuItem("Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)}
               {menuItem("Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
-              </>
+              {menuItem("Git Repository…", <BranchesOutlined style={{ fontSize: 12 }} />, openCreateGitRepository)}
+</>
               ))}          {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
           {ctxMenu.nodeType === "schema" && menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openSchemaExportModal, undefined, !featureFlags.exportTableData, "Table Data Export is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "schema" && menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openSchemaImportModal, undefined, !featureFlags.tableDataImport, "Table Data Import is disabled. Enable it under View → Enabled Features…")}
@@ -1789,8 +1837,15 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "TASK" &&
             menuItem("Create Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "SECRET" &&
-            menuItem("Create Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SECRET" &&
+            menuItem("Create Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SECRET" &&
             menuItem("Modify…", <EditOutlined style={{ fontSize: 12 }} />, openModifySecret)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "GIT REPOSITORY" &&
+            menuItem("Create Git Repository…", <BranchesOutlined style={{ fontSize: 12 }} />, openCreateGitRepository)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "GIT REPOSITORY" &&
+            menuItem("Fetch", <SyncOutlined style={{ fontSize: 12 }} />, fetchGitRepository)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "GIT REPOSITORY" &&
+            menuItem("Modify…", <EditOutlined style={{ fontSize: 12 }} />, openModifyGitRepository)}
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
@@ -2042,6 +2097,25 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           name={modifySecretModal.name}
           onClose={() => setModifySecretModal(null)}
           onSuccess={() => refreshDatabaseByName(modifySecretModal.db)}
+        />
+      )}
+
+      {createGitRepoModal && (
+        <CreateGitRepositoryModal
+          db={createGitRepoModal.db}
+          schema={createGitRepoModal.schema}
+          onClose={() => setCreateGitRepoModal(null)}
+          onSuccess={() => refreshDatabaseByName(createGitRepoModal.db)}
+        />
+      )}
+
+      {modifyGitRepoModal && (
+        <ModifyGitRepositoryModal
+          db={modifyGitRepoModal.db}
+          schema={modifyGitRepoModal.schema}
+          name={modifyGitRepoModal.name}
+          onClose={() => setModifyGitRepoModal(null)}
+          onSuccess={() => refreshDatabaseByName(modifyGitRepoModal.db)}
         />
       )}
 

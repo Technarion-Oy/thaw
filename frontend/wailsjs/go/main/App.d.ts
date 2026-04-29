@@ -4,6 +4,7 @@ import {main} from '../models';
 import {sqleditor} from '../models';
 import {integrations} from '../models';
 import {procedure} from '../models';
+import {snowgitrepo} from '../models';
 import {secret} from '../models';
 import {snowflake} from '../models';
 import {dbt} from '../models';
@@ -49,9 +50,13 @@ export function BuildApiIntegrationPreviewSQL(arg1:integrations.ApiIntegrationPa
 
 export function BuildCallStatement(arg1:string,arg2:string,arg3:string,arg4:Array<procedure.Argument>):Promise<string>;
 
+export function BuildCreateGitRepositorySql(arg1:string,arg2:string,arg3:snowgitrepo.GitRepositoryConfig):Promise<string>;
+
 export function BuildCreateSecretSql(arg1:string,arg2:string,arg3:secret.SecretConfig):Promise<string>;
 
 export function BuildFunctionSelectStatement(arg1:string,arg2:string,arg3:string,arg4:Array<procedure.Argument>,arg5:boolean):Promise<string>;
+
+export function BuildModifyGitRepositorySql(arg1:string,arg2:string,arg3:string,arg4:snowgitrepo.GitRepositoryConfig,arg5:string,arg6:string,arg7:string):Promise<Array<string>>;
 
 export function BuildModifySecretSql(arg1:string,arg2:string,arg3:string,arg4:secret.SecretConfig,arg5:string):Promise<Array<string>>;
 
@@ -337,6 +342,8 @@ export function IsNumeric(arg1:string):Promise<boolean>;
 
 export function ListAIModels(arg1:string,arg2:string,arg3:number):Promise<Array<string>>;
 
+export function ListApiIntegrations():Promise<Array<snowflake.ApiIntegration>>;
+
 export function ListAvailableRoles():Promise<Array<string>>;
 
 export function ListBackupPolicies():Promise<Array<main.BackupPolicyRow>>;
@@ -374,6 +381,8 @@ export function ListRoles():Promise<Array<string>>;
 export function ListRootTasks(arg1:string,arg2:string):Promise<Array<tasks.FinalizabilityRow>>;
 
 export function ListSchemas(arg1:string):Promise<Array<string>>;
+
+export function ListSecretsInAccount():Promise<Array<snowflake.AccountSecret>>;
 
 export function ListSecurityIntegrations():Promise<Array<snowflake.SecurityIntegration>>;
 

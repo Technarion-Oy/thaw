@@ -833,6 +833,105 @@ func (c *Client) ListExternalVolumes(ctx context.Context) ([]string, error) {
 	return c.queryStringSlice(ctx, "SHOW EXTERNAL VOLUMES", 1)
 }
 
+// ApiIntegration holds metadata for a single API integration.
+type ApiIntegration struct {
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	Enabled bool   `json:"enabled"`
+	Comment string `json:"comment"`
+}
+
+// ListApiIntegrations returns all API integrations visible to the current role.
+func (c *Client) ListApiIntegrations(ctx context.Context) ([]ApiIntegration, error) {
+	res, err := c.Execute(ctx, "SHOW API INTEGRATIONS")
+	if err != nil {
+		return nil, err
+	}
+
+	nameIdx := -1
+	typeIdx := -1
+	enabledIdx := -1
+	commentIdx := -1
+
+	for i, col := range res.Columns {
+		switch strings.ToUpper(col) {
+		case "NAME":
+			nameIdx = i
+		case "TYPE":
+			typeIdx = i
+		case "ENABLED":
+			enabledIdx = i
+		case "COMMENT":
+			commentIdx = i
+		}
+	}
+
+	var ints []ApiIntegration
+	for _, row := range res.Rows {
+		a := ApiIntegration{}
+		if nameIdx != -1 {
+			a.Name = strVal(row, nameIdx)
+		}
+		if typeIdx != -1 {
+			a.Type = strVal(row, typeIdx)
+		}
+		if enabledIdx != -1 {
+			a.Enabled = strVal(row, enabledIdx) == "true"
+		}
+		if commentIdx != -1 {
+			a.Comment = strVal(row, commentIdx)
+		}
+		ints = append(ints, a)
+	}
+	return ints, nil
+}
+
+// AccountSecret holds the name and location of a secret visible at the account level.
+type AccountSecret struct {
+	Name         string `json:"name"`
+	DatabaseName string `json:"databaseName"`
+	SchemaName   string `json:"schemaName"`
+}
+
+// ListSecretsInAccount returns all secrets visible to the current role across the account.
+func (c *Client) ListSecretsInAccount(ctx context.Context) ([]AccountSecret, error) {
+	res, err := c.Execute(ctx, "SHOW SECRETS IN ACCOUNT")
+	if err != nil {
+		return nil, err
+	}
+
+	nameIdx := -1
+	dbIdx := -1
+	schemaIdx := -1
+
+	for i, col := range res.Columns {
+		switch strings.ToUpper(col) {
+		case "NAME":
+			nameIdx = i
+		case "DATABASE_NAME":
+			dbIdx = i
+		case "SCHEMA_NAME":
+			schemaIdx = i
+		}
+	}
+
+	var secrets []AccountSecret
+	for _, row := range res.Rows {
+		s := AccountSecret{}
+		if nameIdx != -1 {
+			s.Name = strVal(row, nameIdx)
+		}
+		if dbIdx != -1 {
+			s.DatabaseName = strVal(row, dbIdx)
+		}
+		if schemaIdx != -1 {
+			s.SchemaName = strVal(row, schemaIdx)
+		}
+		secrets = append(secrets, s)
+	}
+	return secrets, nil
+}
+
 // IntegrationRow holds metadata returned by SHOW <kind> INTEGRATIONS.
 type IntegrationRow struct {
 	Name     string `json:"name"`
@@ -2237,6 +2336,7 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 		{fmt.Sprintf("SHOW PIPES IN SCHEMA %s", q), "PIPE"},
 		{fmt.Sprintf("SHOW NOTEBOOKS IN SCHEMA %s", q), "NOTEBOOK"},
 		{fmt.Sprintf("SHOW SECRETS IN SCHEMA %s", q), "SECRET"},
+		{fmt.Sprintf("SHOW GIT REPOSITORIES IN SCHEMA %s", q), "GIT REPOSITORY"},
 	}
 
 	type result struct {

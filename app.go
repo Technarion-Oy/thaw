@@ -45,6 +45,7 @@ import (
 	"thaw/internal/procedure"
 	"thaw/internal/queryprofile"
 	"thaw/internal/secret"
+	"thaw/internal/snowgitrepo"
 	"thaw/internal/sfconfig"
 	"thaw/internal/snowflake"
 	"thaw/internal/sqleditor"
@@ -1320,6 +1321,32 @@ func (a *App) BuildModifySecretSql(database, schema, name string, cfg secret.Sec
 	return secret.BuildModifySecretSql(database, schema, name, cfg, originalComment)
 }
 
+// ListApiIntegrations returns all API integrations visible to the current role.
+func (a *App) ListApiIntegrations() ([]snowflake.ApiIntegration, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListApiIntegrations(a.ctx)
+}
+
+// ListSecretsInAccount returns all secrets visible to the current role across the account.
+func (a *App) ListSecretsInAccount() ([]snowflake.AccountSecret, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListSecretsInAccount(a.ctx)
+}
+
+// BuildCreateGitRepositorySql returns the SQL for creating a GIT REPOSITORY object.
+func (a *App) BuildCreateGitRepositorySql(database, schema string, cfg snowgitrepo.GitRepositoryConfig) (string, error) {
+	return snowgitrepo.BuildCreateGitRepositorySql(database, schema, cfg)
+}
+
+// BuildModifyGitRepositorySql returns one or more ALTER GIT REPOSITORY statements.
+func (a *App) BuildModifyGitRepositorySql(database, schema, name string, cfg snowgitrepo.GitRepositoryConfig, originalComment, originalIntegration, originalCredentials string) ([]string, error) {
+	return snowgitrepo.BuildModifyGitRepositorySql(database, schema, name, cfg, originalComment, originalIntegration, originalCredentials)
+}
+
 // AlterWarehouseProperty applies a single SET property to a warehouse.
 // property must be one of: size, warehouseType, autoSuspend, autoResume, comment,
 // maxClusterCount, minClusterCount, scalingPolicy, resourceMonitor,
@@ -2334,6 +2361,8 @@ func (a *App) GetObjectProperties(database, schema, kind, name string) ([]Proper
 		query = fmt.Sprintf("SHOW PIPES LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
 	case "SECRET":
 		query = fmt.Sprintf("DESCRIBE SECRET %s.%s.%s", q(database), q(schema), q(name))
+	case "GIT REPOSITORY":
+		query = fmt.Sprintf("DESCRIBE GIT REPOSITORY %s.%s.%s", q(database), q(schema), q(name))
 	case "WAREHOUSE":
 		query = fmt.Sprintf("SHOW WAREHOUSES LIKE '%s'", like)
 	case "ROLE":
@@ -2368,7 +2397,7 @@ func (a *App) GetObjectProperties(database, schema, kind, name string) ([]Proper
 
 	var pairs []PropertyPair
 	kindUpper := strings.ToUpper(kind)
-	if kindUpper == "USER" || kindUpper == "SECRET" {
+	if kindUpper == "USER" || kindUpper == "SECRET" || kindUpper == "GIT REPOSITORY" {
 		// DESCRIBE USER/SECRET returns rows of (property, value, default, ...) — use property/value columns.
 		for _, row := range res.Rows {
 			if len(row) < 2 {
