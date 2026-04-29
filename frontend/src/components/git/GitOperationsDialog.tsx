@@ -151,6 +151,12 @@ function RepositorySection() {
         setCloneSuccess(true);
         setCloneUrl("");
         setClonePath("");
+        // Ensure exportDir points to the cloned path and refresh status so the
+        // working tree and remote URL are populated without requiring a manual refresh.
+        if (targetPath && targetPath !== exportDir) {
+          await useGitStore.getState().saveConfig({ exportDir: targetPath });
+        }
+        await refreshStatus();
       }
     } catch (e) {
       // If the remote is empty, offer to initialize instead.
