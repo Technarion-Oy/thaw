@@ -50,7 +50,7 @@ type PushParams struct {
 	Dir         string   `json:"dir"`
 	RemoteURL   string   `json:"remoteURL"`
 	Branch      string   `json:"branch"`
-	AuthMethod  string   `json:"authMethod"`  // "pat" | "bearer" | "stored" | ""
+	AuthMethod  string   `json:"authMethod"` // "pat" | "bearer" | "stored" | ""
 	Token       string   `json:"token"`
 	Message     string   `json:"message"`
 	AuthorName  string   `json:"authorName"`
@@ -82,7 +82,7 @@ type CloneParams struct {
 	Token      string `json:"token"`
 }
 
-// normaliseHTTPS converts SSH URLs (like git@github.com:org/repo.git) to 
+// normaliseHTTPS converts SSH URLs (like git@github.com:org/repo.git) to
 // HTTPS form. This is required when using token-based authentication (PAT/OAuth),
 // as those credentials only apply to the HTTPS transport.
 func normaliseHTTPS(remoteURL string) string {
@@ -346,7 +346,7 @@ func CommitAndPush(ctx context.Context, p PushParams) error {
 		RefSpecs:   []config.RefSpec{config.RefSpec(fmt.Sprintf("refs/heads/%s:refs/heads/%s", branch, branch))},
 		Auth:       resolveAuth(normaliseHTTPS(remoteURL), p.AuthMethod, p.Token),
 	}
-	// Force using the normalised (HTTPS) URL if we resolved one, 
+	// Force using the normalised (HTTPS) URL if we resolved one,
 	// even if the remote "origin" is SSH.
 	if remoteURL != "" {
 		pushOpts.RemoteURL = normaliseHTTPS(remoteURL)
@@ -434,7 +434,7 @@ func Fetch(ctx context.Context, dir, token string) error {
 	return nil
 }
 
-// InitWithRemote initialises a new git repository at dir, sets the "origin"
+// InitWithRemote initializes a new git repository at dir, sets the "origin"
 // remote URL, and configures HEAD to point to branch. The repository is left
 // empty (no commits) — ready for the user's first commit and push.
 // If dir is already a git repository it is re-used; only the remote and HEAD

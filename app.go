@@ -45,9 +45,9 @@ import (
 	"thaw/internal/procedure"
 	"thaw/internal/queryprofile"
 	"thaw/internal/secret"
-	"thaw/internal/snowgitrepo"
 	"thaw/internal/sfconfig"
 	"thaw/internal/snowflake"
+	"thaw/internal/snowgitrepo"
 	"thaw/internal/sqleditor"
 	"thaw/internal/tasks"
 	"thaw/internal/telemetry"
@@ -520,7 +520,7 @@ func (a *App) GitClone(params gitrepo.CloneParams) error {
 	return gitrepo.Clone(a.ctx, params)
 }
 
-// GitInitWithRemote initialises a git repository at dir (creating it if
+// GitInitWithRemote initializes a git repository at dir (creating it if
 // necessary), sets origin to remoteURL, and configures the default branch.
 // The repo is left empty — ready for the user's first commit and push.
 func (a *App) GitInitWithRemote(dir string, remoteURL string, branch string) error {
