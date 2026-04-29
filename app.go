@@ -513,6 +513,13 @@ func (a *App) GitClone(params gitrepo.CloneParams) error {
 	return gitrepo.Clone(a.ctx, params)
 }
 
+// GitInitWithRemote initialises a git repository at dir (creating it if
+// necessary), sets origin to remoteURL, and configures the default branch.
+// The repo is left empty — ready for the user's first commit and push.
+func (a *App) GitInitWithRemote(dir string, remoteURL string, branch string) error {
+	return gitrepo.InitWithRemote(dir, remoteURL, branch)
+}
+
 // GitListBranches returns all local and remote branches for the repository at dir.
 func (a *App) GitListBranches(dir string) ([]gitrepo.BranchInfo, error) {
 	return gitrepo.ListBranches(dir)

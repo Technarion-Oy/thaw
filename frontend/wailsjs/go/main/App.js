@@ -558,6 +558,10 @@ export function GitGetHeadFileContent(arg1) {
   return window['go']['main']['App']['GitGetHeadFileContent'](arg1);
 }
 
+export function GitInitWithRemote(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GitInitWithRemote'](arg1, arg2, arg3);
+}
+
 export function GitListBranches(arg1) {
   return window['go']['main']['App']['GitListBranches'](arg1);
 }

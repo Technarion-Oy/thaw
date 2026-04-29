@@ -20,7 +20,7 @@ import {
   EditOutlined, CheckOutlined, CloseOutlined, MergeOutlined,
 } from "@ant-design/icons";
 import { useGitStore } from "../../store/gitStore";
-import { PickDirectory } from "../../../wailsjs/go/main/App";
+import { PickDirectory, GitInitWithRemote } from "../../../wailsjs/go/main/App";
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -110,6 +110,12 @@ function RepositorySection() {
   const [cloneSuccess, setCloneSuccess] = useState(false);
   const [cloneUrlError, setCloneUrlError] = useState("");
 
+  // Init-instead-of-clone state (shown when remote is an empty repository)
+  const [initMode, setInitMode]       = useState(false);
+  const [branchName, setBranchName]   = useState("main");
+  const [initLoading, setInitLoading] = useState(false);
+  const [initSuccess, setInitSuccess] = useState(false);
+
   // Remote URL editing
   const [editingRemote, setEditingRemote] = useState(false);
   const [remoteInput, setRemoteInput]     = useState(status?.remoteURL ?? "");
@@ -135,18 +141,48 @@ function RepositorySection() {
       return;
     }
     setCloneSuccess(false);
+    setInitSuccess(false);
     clearError();
     try {
       const { oauthToken } = useGitStore.getState();
-      await clone({ url: cloneUrl, path: clonePath, authMethod: "oauth", token: oauthToken } as any);
+      const targetPath = clonePath || exportDir || "";
+      await clone({ url: cloneUrl, path: targetPath, authMethod: "oauth", token: oauthToken } as any);
       if (!useGitStore.getState().error) {
         setCloneSuccess(true);
         setCloneUrl("");
         setClonePath("");
       }
-    } catch {
-      // error in store
+    } catch (e) {
+      // If the remote is empty, offer to initialize instead.
+      if (String(e).includes("remote repository is empty")) {
+        clearError();
+        setInitMode(true);
+      }
     }
+  };
+
+  const handleInit = async () => {
+    setInitLoading(true);
+    setInitSuccess(false);
+    clearError();
+    try {
+      const targetPath = clonePath || exportDir || "";
+      await GitInitWithRemote(targetPath, cloneUrl, branchName || "main");
+      setInitSuccess(true);
+      setInitMode(false);
+      setCloneUrl("");
+      setClonePath("");
+      await refreshStatus();
+    } catch (e) {
+      useGitStore.setState({ error: String(e) });
+    } finally {
+      setInitLoading(false);
+    }
+  };
+
+  const handleCancelInit = () => {
+    setInitMode(false);
+    clearError();
   };
 
   const handleRemoteUrlChange = (v: string) => {
@@ -225,49 +261,93 @@ function RepositorySection() {
         </div>
       )}
 
-      {/* If no repo or no export dir: show clone form */}
+      {/* If no repo or no export dir: show clone / init form */}
       {exportDir && !isRepo && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 12px", background: "var(--bg-subtle, var(--bg))", border: "1px solid var(--border)", borderRadius: 8 }}>
-          <Text style={{ fontSize: 12, color: "var(--text-muted)" }}>No git repository found. Clone one to get started.</Text>
+          {initMode ? (
+            /* ── Initialize empty repository ── */
+            <>
+              <Alert
+                type="warning"
+                showIcon
+                style={{ fontSize: 12 }}
+                message="Remote repository is empty"
+                description="The repository has no commits yet. You can initialize a local repository, set this URL as origin, and push your first commit."
+              />
+              {error && <Alert type="error" message={error} showIcon closable onClose={clearError} style={{ fontSize: 12 }} />}
+              {initSuccess && <Alert type="success" message="Repository initialized successfully." showIcon style={{ fontSize: 12 }} />}
 
-          {cloneSuccess && <Alert type="success" message="Repository cloned successfully." showIcon style={{ fontSize: 12 }} />}
-          {error && <Alert type="error" message={error} showIcon closable onClose={clearError} style={{ fontSize: 12 }} />}
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <Text style={{ fontSize: 12, color: "var(--text-muted)", whiteSpace: "nowrap" }}>Default branch</Text>
+                <Input
+                  size="small"
+                  value={branchName}
+                  onChange={(e) => setBranchName(e.target.value)}
+                  placeholder="main"
+                  style={{ fontSize: 12, flex: 1 }}
+                  addonBefore={<BranchesOutlined />}
+                />
+              </div>
 
-          <div style={{ display: "flex", gap: 6, alignItems: "flex-start", flexDirection: "column" }}>
-            <Input
-              size="small"
-              placeholder="https://github.com/org/repo.git"
-              value={cloneUrl}
-              onChange={(e) => handleCloneUrlChange(e.target.value)}
-              style={{ fontSize: 12 }}
-              status={cloneUrlError ? "error" : ""}
-              addonBefore={<GithubOutlined style={{ color: cloneUrlError ? CLR_DELETED : undefined }} />}
-            />
-            {cloneUrlError && <Text style={{ fontSize: 11, color: CLR_DELETED }}>{cloneUrlError}</Text>}
-          </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <Button
+                  type="primary"
+                  size="small"
+                  loading={initLoading}
+                  disabled={!cloneUrl}
+                  onClick={handleInit}
+                  style={{ flex: 1 }}
+                >
+                  Initialize Repository
+                </Button>
+                <Button size="small" onClick={handleCancelInit}>Cancel</Button>
+              </div>
+            </>
+          ) : (
+            /* ── Clone existing repository ── */
+            <>
+              <Text style={{ fontSize: 12, color: "var(--text-muted)" }}>No git repository found. Clone one to get started.</Text>
 
-          <div style={{ display: "flex", gap: 6 }}>
-            <Input
-              size="small"
-              placeholder={clonePath || "Clone into selected directory above"}
-              value={clonePath}
-              onChange={(e) => setClonePath(e.target.value)}
-              style={{ fontSize: 12, flex: 1 }}
-            />
-            <Tooltip title="Pick directory">
-              <Button size="small" icon={<FolderOpenOutlined />} onClick={handlePickClonePath} />
-            </Tooltip>
-          </div>
+              {cloneSuccess && <Alert type="success" message="Repository cloned successfully." showIcon style={{ fontSize: 12 }} />}
+              {error && <Alert type="error" message={error} showIcon closable onClose={clearError} style={{ fontSize: 12 }} />}
 
-          <Button
-            type="primary"
-            size="small"
-            loading={cloning}
-            disabled={!cloneUrl || (!clonePath && !exportDir) || !!cloneUrlError}
-            onClick={handleClone}
-          >
-            {cloning ? "Cloning…" : "Clone Repository"}
-          </Button>
+              <div style={{ display: "flex", gap: 6, alignItems: "flex-start", flexDirection: "column" }}>
+                <Input
+                  size="small"
+                  placeholder="https://github.com/org/repo.git"
+                  value={cloneUrl}
+                  onChange={(e) => handleCloneUrlChange(e.target.value)}
+                  style={{ fontSize: 12 }}
+                  status={cloneUrlError ? "error" : ""}
+                  addonBefore={<GithubOutlined style={{ color: cloneUrlError ? CLR_DELETED : undefined }} />}
+                />
+                {cloneUrlError && <Text style={{ fontSize: 11, color: CLR_DELETED }}>{cloneUrlError}</Text>}
+              </div>
+
+              <div style={{ display: "flex", gap: 6 }}>
+                <Input
+                  size="small"
+                  placeholder={clonePath || "Clone into selected directory above"}
+                  value={clonePath}
+                  onChange={(e) => setClonePath(e.target.value)}
+                  style={{ fontSize: 12, flex: 1 }}
+                />
+                <Tooltip title="Pick directory">
+                  <Button size="small" icon={<FolderOpenOutlined />} onClick={handlePickClonePath} />
+                </Tooltip>
+              </div>
+
+              <Button
+                type="primary"
+                size="small"
+                loading={cloning}
+                disabled={!cloneUrl || (!clonePath && !exportDir) || !!cloneUrlError}
+                onClick={handleClone}
+              >
+                {cloning ? "Cloning…" : "Clone Repository"}
+              </Button>
+            </>
+          )}
         </div>
       )}
     </div>

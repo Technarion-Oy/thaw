@@ -296,6 +296,8 @@ export function GitFetch(arg1:string,arg2:string):Promise<void>;
 
 export function GitGetHeadFileContent(arg1:string):Promise<string>;
 
+export function GitInitWithRemote(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function GitListBranches(arg1:string):Promise<Array<gitrepo.BranchInfo>>;
 
 export function GitLoginWithOAuth(arg1:string):Promise<string>;
