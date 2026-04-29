@@ -932,6 +932,103 @@ func (c *Client) ListSecretsInAccount(ctx context.Context) ([]AccountSecret, err
 	return secrets, nil
 }
 
+// GitRepoEntry represents a file or directory inside a Snowflake git repository stage.
+type GitRepoEntry struct {
+	Name  string `json:"name"`
+	Path  string `json:"path"`
+	IsDir bool   `json:"isDir"`
+	Size  int64  `json:"size,omitempty"`
+}
+
+// ListGitRepoEntries returns the immediate children (files and directories) at
+// dirPath within the git repository stage @database.schema.repoName/dirPath.
+// Pass an empty dirPath to list the root. Directories are sorted first, then
+// files; both groups are sorted case-insensitively by name.
+func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoName, dirPath string) ([]GitRepoEntry, error) {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	sql := fmt.Sprintf(`LIST @"%s"."%s"."%s"/%s`, esc(database), esc(schema), esc(repoName), dirPath)
+
+	res, err := c.Execute(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+
+	nameIdx := -1
+	sizeIdx := -1
+	for i, col := range res.Columns {
+		switch strings.ToUpper(col) {
+		case "NAME":
+			nameIdx = i
+		case "SIZE":
+			sizeIdx = i
+		}
+	}
+	if nameIdx == -1 {
+		return []GitRepoEntry{}, nil
+	}
+
+	seen := make(map[string]struct{})
+	var entries []GitRepoEntry
+
+	for _, row := range res.Rows {
+		fullName := strVal(row, nameIdx)
+		// Strip the stage prefix: "@DB.SCHEMA.REPO/branches/main/file.txt"
+		// → find first '/', take everything after it.
+		slashIdx := strings.Index(fullName, "/")
+		if slashIdx < 0 {
+			continue
+		}
+		relPath := fullName[slashIdx+1:]
+
+		if !strings.HasPrefix(relPath, dirPath) {
+			continue
+		}
+		rest := relPath[len(dirPath):]
+		if rest == "" {
+			continue
+		}
+
+		// Determine immediate child name and whether it is a directory.
+		parts := strings.SplitN(rest, "/", 2)
+		childName := parts[0]
+		isDir := len(parts) > 1
+
+		childPath := dirPath + childName
+		if isDir {
+			childPath += "/"
+		}
+
+		if _, dup := seen[childPath]; dup {
+			continue
+		}
+		seen[childPath] = struct{}{}
+
+		var size int64
+		if sizeIdx != -1 && !isDir {
+			if v, err2 := strconv.ParseInt(strVal(row, sizeIdx), 10, 64); err2 == nil {
+				size = v
+			}
+		}
+
+		entries = append(entries, GitRepoEntry{
+			Name:  childName,
+			Path:  childPath,
+			IsDir: isDir,
+			Size:  size,
+		})
+	}
+
+	// Directories first, then files; each group sorted case-insensitively.
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].IsDir != entries[j].IsDir {
+			return entries[i].IsDir
+		}
+		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
+	})
+
+	return entries, nil
+}
+
 // IntegrationRow holds metadata returned by SHOW <kind> INTEGRATIONS.
 type IntegrationRow struct {
 	Name     string `json:"name"`

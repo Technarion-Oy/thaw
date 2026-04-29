@@ -370,6 +370,8 @@ export function ListExternalVolumes():Promise<Array<string>>;
 
 export function ListFinalizableTasks(arg1:string,arg2:string):Promise<Array<tasks.FinalizabilityRow>>;
 
+export function ListGitRepoEntries(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.GitRepoEntry>>;
+
 export function ListIntegrations(arg1:string):Promise<Array<snowflake.IntegrationRow>>;
 
 export function ListNotificationIntegrations():Promise<Array<string>>;

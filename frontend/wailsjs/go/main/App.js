@@ -706,6 +706,10 @@ export function ListFinalizableTasks(arg1, arg2) {
   return window['go']['main']['App']['ListFinalizableTasks'](arg1, arg2);
 }
 
+export function ListGitRepoEntries(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ListGitRepoEntries'](arg1, arg2, arg3, arg4);
+}
+
 export function ListIntegrations(arg1) {
   return window['go']['main']['App']['ListIntegrations'](arg1);
 }

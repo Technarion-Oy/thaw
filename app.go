@@ -2149,6 +2149,16 @@ func (a *App) GetTableColumnsWithTypes(database, schema, name string) ([]snowfla
 	return a.client.GetTableColumnsWithTypes(a.ctx, database, schema, name)
 }
 
+// ListGitRepoEntries returns the immediate children (files and directories) at
+// dirPath inside the git repository stage @database.schema.repoName/dirPath.
+// Pass an empty dirPath to list the root.
+func (a *App) ListGitRepoEntries(database, schema, repoName, dirPath string) ([]snowflake.GitRepoEntry, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListGitRepoEntries(a.ctx, database, schema, repoName, dirPath)
+}
+
 // GetSchemaForeignKeys returns all FK→PK column mappings in the given schema
 // from INFORMATION_SCHEMA. Used by the editor to bulk-warm FK data for the
 // JOIN ON autocomplete instead of issuing per-table SHOW IMPORTED KEYS calls.

@@ -56,7 +56,7 @@ import {
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -672,7 +672,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                 title:     o.name,
                 key:       `obj:${db}:${schema}:${kind}:${o.name}`,
                 icon:      kindIcon(kind),
-                isLeaf:    kind !== "TABLE" && kind !== "VIEW",
+                isLeaf:    kind !== "TABLE" && kind !== "VIEW" && kind !== "GIT REPOSITORY",
                 arguments: o.arguments ?? "",
                 rowCount:  o.rowCount,
               })),
@@ -737,9 +737,42 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           console.error(e);
           setData((prev) => updateNode(prev, key, []));
         }
+      } else if (kind === "GIT REPOSITORY") {
+        try {
+          const entries = await ListGitRepoEntries(db, schema, name, "");
+          setData((prev) => updateNode(prev, key, buildGitEntryNodes(db, schema, name, entries ?? [])));
+        } catch (e) {
+          console.error(e);
+          setData((prev) => updateNode(prev, key, []));
+        }
+      }
+    } else if (parts[0] === "gitdir") {
+      const db       = parts[1];
+      const schema   = parts[2];
+      const repoName = parts[3];
+      const dirPath  = parts.slice(4).join(":");
+      try {
+        const entries = await ListGitRepoEntries(db, schema, repoName, dirPath);
+        setData((prev) => updateNode(prev, key, buildGitEntryNodes(db, schema, repoName, entries ?? [])));
+      } catch (e) {
+        console.error(e);
+        setData((prev) => updateNode(prev, key, []));
       }
     }
   };
+
+  function buildGitEntryNodes(db: string, schema: string, repoName: string, entries: snowflake.GitRepoEntry[]): DataNode[] {
+    return entries.map((e) => ({
+      title: e.name,
+      key: e.isDir
+        ? `gitdir:${db}:${schema}:${repoName}:${e.path}`
+        : `gitfile:${db}:${schema}:${repoName}:${e.path}`,
+      icon: e.isDir
+        ? <FolderOutlined style={{ color: "var(--text-muted)" }} />
+        : <FileOutlined style={{ color: "var(--text-muted)", fontSize: "10px" }} />,
+      isLeaf: !e.isDir,
+    }));
+  }
 
   function updateNode(nodes: DataNode[], targetKey: string, children: DataNode[]): DataNode[] {
     return nodes.map((node) => {
