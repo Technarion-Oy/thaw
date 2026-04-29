@@ -87,6 +87,14 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 - Browse all databases → schemas → tables, views, functions, procedures, sequences, stages, streams, tasks, file formats, pipes, and notebooks
 - **Multi-selection** — hold `⌘` (macOS) or `Ctrl` (Windows/Linux) and click anywhere on an object row to select it; selected objects are highlighted across the full width of the sidebar; click any non-modifier area to clear the selection
 - **Batch deletion** — when multiple objects are selected, right-click any of them and choose **Delete N selected objects…** to drop all of them in one operation; a confirmation dialog lists all objects to be removed
+- **Secret Management** — right-click any schema and choose **Create Object** → **Secret…** or right-click an existing secret and choose **Modify…** to open the secret management dialog:
+  - **Dynamic Form** — fields update automatically based on the selected **TYPE** (`OAUTH2`, `CLOUD_PROVIDER_TOKEN`, `PASSWORD`, `GENERIC_STRING`, or `SYMMETRIC_KEY`)
+  - **OAuth Support** — supports both **Client Credentials** (with `OAUTH_SCOPES`) and **Authorization Code Grant** (with `OAUTH_REFRESH_TOKEN` and expiry) flows
+  - **Integration Picker** — `API_AUTHENTICATION` field is populated from a live list of security integrations
+  - **Masked Inputs** — passwords, tokens, and secret strings are masked in the UI for security
+  - **Modify Support** — generates correct `ALTER SECRET` statements with `SET` clauses; clearing the comment field generates an `UNSET COMMENT` statement
+  - **Live SQL Preview** — see the full `CREATE SECRET` or `ALTER SECRET` statement update in real-time as you modify the form
+  - **Execution** — runs `ExecDDL` and refreshes the schema tree automatically on success
 - **Search** — filter objects by name across all databases and schemas in real time
 - **Right-click procedures** to open a parameter dialog; clicking **Execute** generates the `CALL` statement, opens a new tab, and runs it immediately — no manual Run press needed
 - **Right-click functions** (**Call Function…**) to open a parameter dialog; detects scalar vs. table functions and generates the correct SQL; clicking **Execute** opens a new tab and runs it immediately

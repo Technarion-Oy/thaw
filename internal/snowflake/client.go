@@ -755,6 +755,65 @@ func (c *Client) ListAvailableRoles(ctx context.Context) ([]string, error) {
 	return roles, nil
 }
 
+type SecurityIntegration struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Category string `json:"category"`
+	Enabled  bool   `json:"enabled"`
+	Comment  string `json:"comment"`
+}
+
+// ListSecurityIntegrations returns all security integrations.
+func (c *Client) ListSecurityIntegrations(ctx context.Context) ([]SecurityIntegration, error) {
+	res, err := c.Execute(ctx, "SHOW SECURITY INTEGRATIONS")
+	if err != nil {
+		return nil, err
+	}
+
+	nameIdx := -1
+	typeIdx := -1
+	catIdx := -1
+	enabledIdx := -1
+	commentIdx := -1
+
+	for i, col := range res.Columns {
+		switch strings.ToUpper(col) {
+		case "NAME":
+			nameIdx = i
+		case "TYPE":
+			typeIdx = i
+		case "CATEGORY":
+			catIdx = i
+		case "ENABLED":
+			enabledIdx = i
+		case "COMMENT":
+			commentIdx = i
+		}
+	}
+
+	var ints []SecurityIntegration
+	for _, row := range res.Rows {
+		s := SecurityIntegration{}
+		if nameIdx != -1 {
+			s.Name = strVal(row, nameIdx)
+		}
+		if typeIdx != -1 {
+			s.Type = strVal(row, typeIdx)
+		}
+		if catIdx != -1 {
+			s.Category = strVal(row, catIdx)
+		}
+		if enabledIdx != -1 {
+			s.Enabled = strVal(row, enabledIdx) == "true"
+		}
+		if commentIdx != -1 {
+			s.Comment = strVal(row, commentIdx)
+		}
+		ints = append(ints, s)
+	}
+	return ints, nil
+}
+
 // ListWarehouses returns the names of all warehouses visible to the current role.
 func (c *Client) ListWarehouses(ctx context.Context) ([]string, error) {
 	// SHOW WAREHOUSES columns: name, state, ...
@@ -2177,6 +2236,7 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 		{fmt.Sprintf("SHOW FILE FORMATS IN SCHEMA %s", q), "FILE FORMAT"},
 		{fmt.Sprintf("SHOW PIPES IN SCHEMA %s", q), "PIPE"},
 		{fmt.Sprintf("SHOW NOTEBOOKS IN SCHEMA %s", q), "NOTEBOOK"},
+		{fmt.Sprintf("SHOW SECRETS IN SCHEMA %s", q), "SECRET"},
 	}
 
 	type result struct {

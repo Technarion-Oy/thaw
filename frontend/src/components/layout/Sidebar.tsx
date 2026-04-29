@@ -86,6 +86,8 @@ import PropertiesModal from "../common/PropertiesModal";
 import BackupSetsModal from "../backup/BackupSetsModal";
 import DependenciesModal from "../lineage/DependenciesModal";
 import InsertMappingModal from "../database/InsertMappingModal";
+import CreateSecretModal from "../secret/CreateSecretModal";
+import ModifySecretModal from "../secret/ModifySecretModal";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 
 const { Text } = Typography;
@@ -102,9 +104,10 @@ const KIND_LABEL: Record<string, string> = {
   "FILE FORMAT": "File Formats",
   PIPE:          "Pipes",
   NOTEBOOK:      "Notebooks",
+  SECRET:        "Secrets",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "FILE FORMAT", "PIPE", "NOTEBOOK"];
+const KIND_ORDER = ["TABLE", "VIEW", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET"];
 
 function kindIcon(kind: string) {
   switch (kind) {
@@ -119,6 +122,7 @@ function kindIcon(kind: string) {
     case "FILE FORMAT": return <FileOutlined />;
     case "PIPE":        return <ApiOutlined />;
     case "NOTEBOOK":    return <ExperimentOutlined />;
+    case "SECRET":      return <KeyOutlined />;
     default:            return <FileOutlined />;
   }
 }
@@ -403,6 +407,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [executeNotebookModal, setExecuteNotebookModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createDbOpen, setCreateDbOpen] = useState(false);
   const [createTableModal, setCreateTableModal] = useState<{ db: string; schema: string } | null>(null);
+  const [createSecretModal, setCreateSecretModal] = useState<{ db: string; schema: string } | null>(null);
+  const [modifySecretModal, setModifySecretModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [objectSummariesModal, setObjectSummariesModal] = useState<string | null>(null);
   const [createTaskModal, setCreateTaskModal] = useState<{ db: string; schema: string } | null>(null);
   const [executeTaskModal, setExecuteTaskModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -926,6 +932,25 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const schema = parts[2];
     setCtxMenu(null);
     setCreateTaskModal({ db, schema });
+  };
+
+  const openCreateSecret = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateSecretModal({ db, schema });
+  };
+
+  const openModifySecret = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts[4];
+    setCtxMenu(null);
+    setModifySecretModal({ db, schema, name });
   };
 
   const openTaskStatuses = () => {
@@ -1752,9 +1777,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             <>
               {menuItem("Table…", <TableOutlined style={{ fontSize: 12 }} />, openCreateTable)}
               {menuItem("Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)}
-            </>
-          ))}
-          {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
+              {menuItem("Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
+              </>
+              ))}          {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
           {ctxMenu.nodeType === "schema" && menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openSchemaExportModal, undefined, !featureFlags.exportTableData, "Table Data Export is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "schema" && menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openSchemaImportModal, undefined, !featureFlags.tableDataImport, "Table Data Import is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "schema" && menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets, undefined, !featureFlags.backupPoliciesAndSets, "Backup Policies & Sets is disabled. Enable it under View → Enabled Features…")}
@@ -1763,6 +1788,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Task Statuses…", <DashboardOutlined style={{ fontSize: 12 }} />, openTaskStatuses)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "TASK" &&
             menuItem("Create Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "SECRET" &&
+            menuItem("Create Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SECRET" &&
+            menuItem("Modify…", <EditOutlined style={{ fontSize: 12 }} />, openModifySecret)}
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
@@ -1994,6 +2022,26 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           db={createTaskModal.db}
           schema={createTaskModal.schema}
           onClose={() => setCreateTaskModal(null)}
+          onSuccess={() => refreshDatabaseByName(createTaskModal.db)}
+        />
+      )}
+
+      {createSecretModal && (
+        <CreateSecretModal
+          db={createSecretModal.db}
+          schema={createSecretModal.schema}
+          onClose={() => setCreateSecretModal(null)}
+          onSuccess={() => refreshDatabaseByName(createSecretModal.db)}
+        />
+      )}
+
+      {modifySecretModal && (
+        <ModifySecretModal
+          db={modifySecretModal.db}
+          schema={modifySecretModal.schema}
+          name={modifySecretModal.name}
+          onClose={() => setModifySecretModal(null)}
+          onSuccess={() => refreshDatabaseByName(modifySecretModal.db)}
         />
       )}
 
