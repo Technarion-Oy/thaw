@@ -47,6 +47,7 @@ import (
 	"thaw/internal/secret"
 	"thaw/internal/sfconfig"
 	"thaw/internal/snowflake"
+	"thaw/internal/snowgitrepo"
 	"thaw/internal/sqleditor"
 	"thaw/internal/tasks"
 	"thaw/internal/telemetry"
@@ -85,6 +86,11 @@ type App struct {
 	// Per-tab isolated Snowflake sessions.
 	tabSessions sync.Map // string (tabId) → *tabSession
 
+	// Git repository commit filters (repoKey -> commitHash).
+	// repoKey format: "db.schema.repo"
+	gitCommitFiltersMu sync.Mutex
+	gitCommitFilters   map[string]string
+
 	// Embedded terminal (pseudo-terminal).
 	ptyMu  sync.Mutex
 	ptmx   *os.File
@@ -93,7 +99,9 @@ type App struct {
 
 // NewApp creates and returns a new App instance for use with the Wails runtime.
 func NewApp() *App {
-	return &App{}
+	return &App{
+		gitCommitFilters: make(map[string]string),
+	}
 }
 
 // startup is called by the Wails runtime after the application window is ready.
@@ -510,6 +518,13 @@ func (a *App) GitPull(params gitrepo.PullParams) error {
 // The Token field is used only in-memory and is never persisted.
 func (a *App) GitClone(params gitrepo.CloneParams) error {
 	return gitrepo.Clone(a.ctx, params)
+}
+
+// GitInitWithRemote initializes a git repository at dir (creating it if
+// necessary), sets origin to remoteURL, and configures the default branch.
+// The repo is left empty — ready for the user's first commit and push.
+func (a *App) GitInitWithRemote(dir string, remoteURL string, branch string) error {
+	return gitrepo.InitWithRemote(dir, remoteURL, branch)
 }
 
 // GitListBranches returns all local and remote branches for the repository at dir.
@@ -1318,6 +1333,32 @@ func (a *App) BuildCreateSecretSql(database, schema string, cfg secret.SecretCon
 // BuildModifySecretSql returns one or more SQL statements for modifying a secret.
 func (a *App) BuildModifySecretSql(database, schema, name string, cfg secret.SecretConfig, originalComment string) ([]string, error) {
 	return secret.BuildModifySecretSql(database, schema, name, cfg, originalComment)
+}
+
+// ListApiIntegrations returns all API integrations visible to the current role.
+func (a *App) ListApiIntegrations() ([]snowflake.ApiIntegration, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListApiIntegrations(a.ctx)
+}
+
+// ListSecretsInAccount returns all secrets visible to the current role across the account.
+func (a *App) ListSecretsInAccount() ([]snowflake.AccountSecret, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListSecretsInAccount(a.ctx)
+}
+
+// BuildCreateGitRepositorySql returns the SQL for creating a GIT REPOSITORY object.
+func (a *App) BuildCreateGitRepositorySql(database, schema string, cfg snowgitrepo.GitRepositoryConfig) (string, error) {
+	return snowgitrepo.BuildCreateGitRepositorySql(database, schema, cfg)
+}
+
+// BuildModifyGitRepositorySql returns one or more ALTER GIT REPOSITORY statements.
+func (a *App) BuildModifyGitRepositorySql(database, schema, name string, cfg snowgitrepo.GitRepositoryConfig, originalComment, originalIntegration, originalCredentials string) ([]string, error) {
+	return snowgitrepo.BuildModifyGitRepositorySql(database, schema, name, cfg, originalComment, originalIntegration, originalCredentials)
 }
 
 // AlterWarehouseProperty applies a single SET property to a warehouse.
@@ -2147,6 +2188,89 @@ func (a *App) GetTableColumnsWithTypes(database, schema, name string) ([]snowfla
 	return a.client.GetTableColumnsWithTypes(a.ctx, database, schema, name)
 }
 
+// ListGitRepoEntries returns the immediate children (files and directories) at
+// dirPath inside the git repository stage @database.schema.repoName/dirPath.
+// Pass an empty dirPath to list the root.
+func (a *App) ListGitRepoEntries(database, schema, repoName, dirPath string) ([]snowflake.GitRepoEntry, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+
+	// If we are listing the root of the "commits" virtual folder,
+	// check if a filter has been set.
+	if strings.HasPrefix(dirPath, "commits") {
+		parts := strings.Split(strings.Trim(dirPath, "/"), "/")
+		if len(parts) == 1 { // listing "commits/"
+			a.gitCommitFiltersMu.Lock()
+			repoKey := fmt.Sprintf("%s.%s.%s", database, schema, repoName)
+			commitHash := a.gitCommitFilters[repoKey]
+			a.gitCommitFiltersMu.Unlock()
+
+			if commitHash == "" {
+				// Return an empty list or a special entry indicating no filter?
+				// For now, return empty. The frontend will handle the "Set Filter" UI.
+				return []snowflake.GitRepoEntry{}, nil
+			}
+			// If we have a hash, we want to list @repo/commits/<hash>/
+			// but ListGitRepoEntries will be called with "commits/<hash>/" next.
+		}
+	}
+
+	return a.client.ListGitRepoEntries(a.ctx, database, schema, repoName, dirPath)
+}
+
+// ListGitBranches returns all branches in the given git repository.
+func (a *App) ListGitBranches(database, schema, repoName string) ([]snowflake.GitBranch, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListGitBranches(a.ctx, database, schema, repoName)
+}
+
+// ListGitTags returns all tags in the given git repository.
+func (a *App) ListGitTags(database, schema, repoName string) ([]snowflake.GitTag, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListGitTags(a.ctx, database, schema, repoName)
+}
+
+// SetGitCommitFilter sets a commit hash filter for a specific repository.
+func (a *App) SetGitCommitFilter(database, schema, repoName, commitHash string) {
+	a.gitCommitFiltersMu.Lock()
+	defer a.gitCommitFiltersMu.Unlock()
+	repoKey := fmt.Sprintf("%s.%s.%s", database, schema, repoName)
+	if commitHash == "" {
+		delete(a.gitCommitFilters, repoKey)
+	} else {
+		a.gitCommitFilters[repoKey] = commitHash
+	}
+}
+
+// GetGitCommitFilter returns the current commit hash filter for a repository.
+func (a *App) GetGitCommitFilter(database, schema, repoName string) string {
+	a.gitCommitFiltersMu.Lock()
+	defer a.gitCommitFiltersMu.Unlock()
+	repoKey := fmt.Sprintf("%s.%s.%s", database, schema, repoName)
+	return a.gitCommitFilters[repoKey]
+}
+
+// GetGitFileContent reads a file from a git repository and returns its content.
+func (a *App) GetGitFileContent(database, schema, repoName, filePath string) (string, error) {
+	if a.client == nil {
+		return "", ErrNotConnected
+	}
+	return a.client.GetGitFileContent(a.ctx, database, schema, repoName, filePath)
+}
+
+// ExecuteGitFile executes a SQL file from a git repository.
+func (a *App) ExecuteGitFile(database, schema, repoName, filePath string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	return a.client.ExecuteGitFile(a.ctx, database, schema, repoName, filePath)
+}
+
 // GetSchemaForeignKeys returns all FK→PK column mappings in the given schema
 // from INFORMATION_SCHEMA. Used by the editor to bulk-warm FK data for the
 // JOIN ON autocomplete instead of issuing per-table SHOW IMPORTED KEYS calls.
@@ -2359,6 +2483,8 @@ func (a *App) GetObjectProperties(database, schema, kind, name string) ([]Proper
 		query = fmt.Sprintf("SHOW PIPES LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
 	case "SECRET":
 		query = fmt.Sprintf("DESCRIBE SECRET %s.%s.%s", q(database), q(schema), q(name))
+	case "GIT REPOSITORY":
+		query = fmt.Sprintf("DESCRIBE GIT REPOSITORY %s.%s.%s", q(database), q(schema), q(name))
 	case "WAREHOUSE":
 		query = fmt.Sprintf("SHOW WAREHOUSES LIKE '%s'", like)
 	case "ROLE":
@@ -2393,7 +2519,7 @@ func (a *App) GetObjectProperties(database, schema, kind, name string) ([]Proper
 
 	var pairs []PropertyPair
 	kindUpper := strings.ToUpper(kind)
-	if kindUpper == "USER" || kindUpper == "SECRET" {
+	if kindUpper == "USER" || kindUpper == "SECRET" || kindUpper == "GIT REPOSITORY" {
 		// DESCRIBE USER/SECRET returns rows of (property, value, default, ...) — use property/value columns.
 		for _, row := range res.Rows {
 			if len(row) < 2 {

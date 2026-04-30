@@ -23,6 +23,7 @@ import (
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/plumbing/transport"
 )
 
 // maxStatusFiles is the maximum number of file paths returned per category in
@@ -49,7 +50,7 @@ type PushParams struct {
 	Dir         string   `json:"dir"`
 	RemoteURL   string   `json:"remoteURL"`
 	Branch      string   `json:"branch"`
-	AuthMethod  string   `json:"authMethod"`  // "pat" | "bearer" | "stored" | ""
+	AuthMethod  string   `json:"authMethod"` // "pat" | "bearer" | "stored" | ""
 	Token       string   `json:"token"`
 	Message     string   `json:"message"`
 	AuthorName  string   `json:"authorName"`
@@ -81,7 +82,7 @@ type CloneParams struct {
 	Token      string `json:"token"`
 }
 
-// normaliseHTTPS converts SSH URLs (like git@github.com:org/repo.git) to 
+// normaliseHTTPS converts SSH URLs (like git@github.com:org/repo.git) to
 // HTTPS form. This is required when using token-based authentication (PAT/OAuth),
 // as those credentials only apply to the HTTPS transport.
 func normaliseHTTPS(remoteURL string) string {
@@ -345,7 +346,7 @@ func CommitAndPush(ctx context.Context, p PushParams) error {
 		RefSpecs:   []config.RefSpec{config.RefSpec(fmt.Sprintf("refs/heads/%s:refs/heads/%s", branch, branch))},
 		Auth:       resolveAuth(normaliseHTTPS(remoteURL), p.AuthMethod, p.Token),
 	}
-	// Force using the normalised (HTTPS) URL if we resolved one, 
+	// Force using the normalised (HTTPS) URL if we resolved one,
 	// even if the remote "origin" is SSH.
 	if remoteURL != "" {
 		pushOpts.RemoteURL = normaliseHTTPS(remoteURL)
@@ -433,15 +434,75 @@ func Fetch(ctx context.Context, dir, token string) error {
 	return nil
 }
 
+// InitWithRemote initializes a new git repository at dir, sets the "origin"
+// remote URL, and configures HEAD to point to branch. The repository is left
+// empty (no commits) — ready for the user's first commit and push.
+// If dir is already a git repository it is re-used; only the remote and HEAD
+// are updated.
+func InitWithRemote(dir, remoteURL, branch string) error {
+	if branch == "" {
+		branch = "main"
+	}
+	normalised := normaliseHTTPS(remoteURL)
+
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		if !errors.Is(err, gogit.ErrRepositoryAlreadyExists) {
+			return fmt.Errorf("git init: %w", err)
+		}
+		repo, err = gogit.PlainOpen(dir)
+		if err != nil {
+			return fmt.Errorf("open repo: %w", err)
+		}
+	}
+
+	// Set or replace the origin remote.
+	_ = repo.DeleteRemote("origin")
+	if _, err := repo.CreateRemote(&config.RemoteConfig{
+		Name: "origin",
+		URLs: []string{normalised},
+	}); err != nil {
+		return fmt.Errorf("set remote: %w", err)
+	}
+
+	// Point HEAD at the desired branch name.
+	headRef := plumbing.NewSymbolicReference(
+		plumbing.HEAD,
+		plumbing.NewBranchReferenceName(branch),
+	)
+	if err := repo.Storer.SetReference(headRef); err != nil {
+		return fmt.Errorf("set HEAD: %w", err)
+	}
+
+	return nil
+}
+
 // Clone clones a remote repository into the given local path.
+// If the clone fails part-way (e.g. the remote is an empty repository with no
+// commits), any .git directory created during the attempt is removed so the
+// caller can safely retry without hitting ErrRepositoryAlreadyExists.
 func Clone(ctx context.Context, p CloneParams) error {
 	url := normaliseHTTPS(p.URL)
+
+	// Remember whether .git already existed before we start, so we don't
+	// delete something the user already had.
+	gitDir := filepath.Join(p.Path, ".git")
+	_, statErr := os.Stat(gitDir)
+	gitExistedBefore := statErr == nil
+
 	_, err := gogit.PlainCloneContext(ctx, p.Path, false, &gogit.CloneOptions{
 		URL:      url,
 		Auth:     resolveAuth(url, p.AuthMethod, p.Token),
 		Progress: nil,
 	})
 	if err != nil {
+		// Clean up the partial .git we created so the user can retry.
+		if !gitExistedBefore {
+			_ = os.RemoveAll(gitDir)
+		}
+		if errors.Is(err, transport.ErrEmptyRemoteRepository) {
+			return fmt.Errorf("git clone: the remote repository is empty (no commits yet)")
+		}
 		return fmt.Errorf("git clone: %w", err)
 	}
 	return nil

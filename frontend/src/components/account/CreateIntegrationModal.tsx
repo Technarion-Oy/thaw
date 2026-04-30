@@ -20,7 +20,9 @@ import {
   CreateNotificationIntegration,
   CreateSecurityIntegration,
   BuildApiIntegrationPreviewSQL,
+  ListSecretsInAccount,
 } from "../../../wailsjs/go/main/App";
+import type { snowflake } from "../../../wailsjs/go/models";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 
 const { TextArea } = Input;
@@ -89,7 +91,11 @@ const GIT_SECRET_SPECIAL_OPTIONS = [
   { value: "NONE", label: "NONE" },
 ];
 
-function GitHttpsApiForm({ gitAuthMode }: { gitAuthMode: string }) {
+function GitHttpsApiForm({ gitAuthMode, secretOptions, loadingSecrets }: {
+  gitAuthMode: string;
+  secretOptions: { value: string; label: string }[];
+  loadingSecrets: boolean;
+}) {
   return (
     <>
       {/* Allowed Prefixes — locked addonBefore for GitHub App, free TextArea for other modes */}
@@ -129,13 +135,16 @@ function GitHttpsApiForm({ gitAuthMode }: { gitAuthMode: string }) {
         <Form.Item
           name="allowedAuthSecrets"
           label="Allowed Authentication Secrets (optional)"
-          help='Enter "ALL", "NONE", or type secret names and press Enter'
+          help='Select ALL, NONE, or pick secrets from the dropdown'
         >
           <Select
             mode="tags"
-            options={GIT_SECRET_SPECIAL_OPTIONS}
-            placeholder='ALL, NONE, or secret names'
+            options={[...GIT_SECRET_SPECIAL_OPTIONS, ...secretOptions]}
+            loading={loadingSecrets}
+            placeholder='ALL, NONE, or select secrets'
             maxTagCount="responsive"
+            showSearch
+            optionFilterProp="label"
           />
         </Form.Item>
       )}
@@ -188,9 +197,14 @@ function GitHttpsApiForm({ gitAuthMode }: { gitAuthMode: string }) {
   );
 }
 
-function ApiForm({ provider, gitAuthMode }: { provider: string; gitAuthMode: string }) {
+function ApiForm({ provider, gitAuthMode, secretOptions, loadingSecrets }: {
+  provider: string;
+  gitAuthMode: string;
+  secretOptions: { value: string; label: string }[];
+  loadingSecrets: boolean;
+}) {
   if (provider === "git_https_api") {
-    return <GitHttpsApiForm gitAuthMode={gitAuthMode} />;
+    return <GitHttpsApiForm gitAuthMode={gitAuthMode} secretOptions={secretOptions} loadingSecrets={loadingSecrets} />;
   }
   return (
     <>
@@ -595,6 +609,8 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
   const [error, setError]     = useState<string | null>(null);
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
+  const [accountSecrets, setAccountSecrets] = useState<snowflake.AccountSecret[]>([]);
+  const [loadingSecrets, setLoadingSecrets] = useState(false);
 
   // Provider / subtype state tracked as watched form values
   const provider    = Form.useWatch("provider",    form) as string  | undefined;
@@ -679,6 +695,21 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
       .then((v) => setQuotedIdentifiersIgnoreCase(v ?? false))
       .catch(() => {});
   }, [kind, form]);
+
+  useEffect(() => {
+    if (kind === "API" || kind === "EXTERNAL ACCESS") {
+      setLoadingSecrets(true);
+      ListSecretsInAccount()
+        .then((s) => setAccountSecrets(s ?? []))
+        .catch(() => {})
+        .finally(() => setLoadingSecrets(false));
+    }
+  }, [kind]);
+
+  const secretOptions = accountSecrets.map((s) => {
+    const fqn = `"${s.databaseName}"."${s.schemaName}"."${s.name}"`;
+    return { value: fqn, label: fqn };
+  });
 
   const submit = async () => {
     let vals: Record<string, unknown>;
@@ -812,7 +843,7 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
 
           {/* Type-specific fields */}
           {kind === "STORAGE"          && <StorageForm provider={provider ?? "S3"} />}
-          {kind === "API"              && <ApiForm provider={provider ?? "aws_api_gateway"} gitAuthMode={gitAuthMode ?? "TOKEN"} />}
+          {kind === "API"              && <ApiForm provider={provider ?? "aws_api_gateway"} gitAuthMode={gitAuthMode ?? "TOKEN"} secretOptions={secretOptions} loadingSecrets={loadingSecrets} />}
           {kind === "CATALOG"          && <CatalogForm source={source ?? "GLUE"} />}
           {kind === "EXTERNAL ACCESS"  && (
             <>
@@ -822,8 +853,16 @@ export default function CreateIntegrationModal({ kind, onClose, onSuccess }: Pro
               <Form.Item name="allowedApiAuthIntegrations" label="Allowed API Auth Integrations (optional)" help="Comma-separated">
                 <Input />
               </Form.Item>
-              <Form.Item name="allowedAuthSecrets" label="Allowed Authentication Secrets" help='"all", "none", or comma-separated secret names'>
-                <Input placeholder="all" />
+              <Form.Item name="allowedAuthSecrets" label="Allowed Authentication Secrets" help='Select ALL, NONE, or pick secrets from the dropdown'>
+                <Select
+                  mode="tags"
+                  options={[...GIT_SECRET_SPECIAL_OPTIONS, ...secretOptions]}
+                  loading={loadingSecrets}
+                  placeholder='ALL, NONE, or select secrets'
+                  maxTagCount="responsive"
+                  showSearch
+                  optionFilterProp="label"
+                />
               </Form.Item>
             </>
           )}

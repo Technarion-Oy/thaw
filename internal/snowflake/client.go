@@ -833,6 +833,325 @@ func (c *Client) ListExternalVolumes(ctx context.Context) ([]string, error) {
 	return c.queryStringSlice(ctx, "SHOW EXTERNAL VOLUMES", 1)
 }
 
+// ApiIntegration holds metadata for a single API integration.
+type ApiIntegration struct {
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	Enabled bool   `json:"enabled"`
+	Comment string `json:"comment"`
+}
+
+// ListApiIntegrations returns all API integrations visible to the current role.
+func (c *Client) ListApiIntegrations(ctx context.Context) ([]ApiIntegration, error) {
+	res, err := c.Execute(ctx, "SHOW API INTEGRATIONS")
+	if err != nil {
+		return nil, err
+	}
+
+	nameIdx := -1
+	typeIdx := -1
+	enabledIdx := -1
+	commentIdx := -1
+
+	for i, col := range res.Columns {
+		switch strings.ToUpper(col) {
+		case "NAME":
+			nameIdx = i
+		case "TYPE":
+			typeIdx = i
+		case "ENABLED":
+			enabledIdx = i
+		case "COMMENT":
+			commentIdx = i
+		}
+	}
+
+	var ints []ApiIntegration
+	for _, row := range res.Rows {
+		a := ApiIntegration{}
+		if nameIdx != -1 {
+			a.Name = strVal(row, nameIdx)
+		}
+		if typeIdx != -1 {
+			a.Type = strVal(row, typeIdx)
+		}
+		if enabledIdx != -1 {
+			a.Enabled = strVal(row, enabledIdx) == "true"
+		}
+		if commentIdx != -1 {
+			a.Comment = strVal(row, commentIdx)
+		}
+		ints = append(ints, a)
+	}
+	return ints, nil
+}
+
+// AccountSecret holds the name and location of a secret visible at the account level.
+type AccountSecret struct {
+	Name         string `json:"name"`
+	DatabaseName string `json:"databaseName"`
+	SchemaName   string `json:"schemaName"`
+}
+
+// ListSecretsInAccount returns all secrets visible to the current role across the account.
+func (c *Client) ListSecretsInAccount(ctx context.Context) ([]AccountSecret, error) {
+	res, err := c.Execute(ctx, "SHOW SECRETS IN ACCOUNT")
+	if err != nil {
+		return nil, err
+	}
+
+	nameIdx := -1
+	dbIdx := -1
+	schemaIdx := -1
+
+	for i, col := range res.Columns {
+		switch strings.ToUpper(col) {
+		case "NAME":
+			nameIdx = i
+		case "DATABASE_NAME":
+			dbIdx = i
+		case "SCHEMA_NAME":
+			schemaIdx = i
+		}
+	}
+
+	var secrets []AccountSecret
+	for _, row := range res.Rows {
+		s := AccountSecret{}
+		if nameIdx != -1 {
+			s.Name = strVal(row, nameIdx)
+		}
+		if dbIdx != -1 {
+			s.DatabaseName = strVal(row, dbIdx)
+		}
+		if schemaIdx != -1 {
+			s.SchemaName = strVal(row, schemaIdx)
+		}
+		secrets = append(secrets, s)
+	}
+	return secrets, nil
+}
+
+// GitRepoEntry represents a file or directory inside a Snowflake git repository stage.
+type GitRepoEntry struct {
+	Name  string `json:"name"`
+	Path  string `json:"path"`
+	IsDir bool   `json:"isDir"`
+	Size  int64  `json:"size,omitempty"`
+}
+
+// GitBranch represents a branch in a Snowflake git repository.
+type GitBranch struct {
+	Name string `json:"name"`
+}
+
+// GitTag represents a tag in a Snowflake git repository.
+type GitTag struct {
+	Name string `json:"name"`
+}
+
+// ListGitRepoEntries returns the immediate children (files and directories) at
+// dirPath within the git repository stage @database.schema.repoName/dirPath.
+// Pass an empty dirPath to list the root. Directories are sorted first, then
+// files; both groups are sorted case-insensitively by name.
+func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoName, dirPath string) ([]GitRepoEntry, error) {
+	// NORMALIZE DIRPATH
+	// Remove leading slash so HasPrefix matches relPath safely.
+	dirPath = strings.TrimPrefix(dirPath, "/")
+	// Ensure trailing slash to prevent swallowing files into empty-named directories.
+	if dirPath != "" && !strings.HasSuffix(dirPath, "/") {
+		dirPath += "/"
+	}
+
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	sql := fmt.Sprintf(`LIST @"%s"."%s"."%s"/%s`, esc(database), esc(schema), esc(repoName), dirPath)
+
+	res, err := c.Execute(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+
+	nameIdx := -1
+	sizeIdx := -1
+	for i, col := range res.Columns {
+		switch strings.ToUpper(col) {
+		case "NAME":
+			nameIdx = i
+		case "SIZE":
+			sizeIdx = i
+		}
+	}
+	if nameIdx == -1 {
+		return []GitRepoEntry{}, nil
+	}
+
+	seen := make(map[string]struct{})
+	var entries []GitRepoEntry
+
+	for _, row := range res.Rows {
+		fullName := strVal(row, nameIdx)
+
+		// The NAME column typically contains the stage/repo prefix, e.g.:
+		// "MYREPO/branches/main/file.txt" or "DB.SCHEMA.MYREPO/branches/main/file.txt"
+		// or even "@DB.SCHEMA.MYREPO/branches/main/file.txt".
+		// We want the relative path: "branches/main/file.txt".
+		relPath := fullName
+		if slashIdx := strings.Index(fullName, "/"); slashIdx >= 0 {
+			prefix := fullName[:slashIdx]
+			up := strings.ToUpper(prefix)
+			ur := strings.ToUpper(repoName)
+
+			// Determine if the part before the first slash is a stage prefix.
+			// It might be REPO, "REPO", @REPO, or a qualified DB.SCHEMA.REPO.
+			isPrefix := up == ur ||
+				up == `"`+ur+`"` ||
+				strings.HasPrefix(up, "@") ||
+				strings.HasSuffix(up, "."+ur) ||
+				strings.HasSuffix(up, ".\""+ur+`"`)
+
+			if isPrefix {
+				relPath = fullName[slashIdx+1:]
+			}
+		}
+
+		if !strings.HasPrefix(relPath, dirPath) {
+			continue
+		}
+		rest := relPath[len(dirPath):]
+		if rest == "" {
+			continue
+		}
+
+		// Determine immediate child name and whether it is a directory.
+		parts := strings.SplitN(rest, "/", 2)
+		childName := parts[0]
+		isDir := len(parts) > 1
+
+		childPath := dirPath + childName
+		if isDir {
+			childPath += "/"
+		}
+
+		if _, dup := seen[childPath]; dup {
+			continue
+		}
+		seen[childPath] = struct{}{}
+
+		var size int64
+		if sizeIdx != -1 && !isDir {
+			if v, err2 := strconv.ParseInt(strVal(row, sizeIdx), 10, 64); err2 == nil {
+				size = v
+			}
+		}
+
+		entries = append(entries, GitRepoEntry{
+			Name:  childName,
+			Path:  childPath,
+			IsDir: isDir,
+			Size:  size,
+		})
+	}
+
+	// Directories first, then files; each group sorted case-insensitively.
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].IsDir != entries[j].IsDir {
+			return entries[i].IsDir
+		}
+		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
+	})
+
+	return entries, nil
+}
+
+// ListGitBranches returns all branches in the given git repository.
+func (c *Client) ListGitBranches(ctx context.Context, database, schema, repoName string) ([]GitBranch, error) {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	sql := fmt.Sprintf(`SHOW GIT BRANCHES IN GIT REPOSITORY "%s"."%s"."%s"`, esc(database), esc(schema), esc(repoName))
+
+	res, err := c.Execute(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+
+	nameIdx := -1
+	for i, col := range res.Columns {
+		if strings.ToUpper(col) == "NAME" {
+			nameIdx = i
+			break
+		}
+	}
+	if nameIdx == -1 {
+		return nil, fmt.Errorf("NAME column not found in SHOW GIT BRANCHES output")
+	}
+
+	var branches []GitBranch
+	for _, row := range res.Rows {
+		branches = append(branches, GitBranch{
+			Name: strVal(row, nameIdx),
+		})
+	}
+	return branches, nil
+}
+
+// ListGitTags returns all tags in the given git repository.
+func (c *Client) ListGitTags(ctx context.Context, database, schema, repoName string) ([]GitTag, error) {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	sql := fmt.Sprintf(`SHOW GIT TAGS IN GIT REPOSITORY "%s"."%s"."%s"`, esc(database), esc(schema), esc(repoName))
+
+	res, err := c.Execute(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+
+	nameIdx := -1
+	for i, col := range res.Columns {
+		if strings.ToUpper(col) == "NAME" {
+			nameIdx = i
+			break
+		}
+	}
+	if nameIdx == -1 {
+		return nil, fmt.Errorf("NAME column not found in SHOW GIT TAGS output")
+	}
+
+	var tags []GitTag
+	for _, row := range res.Rows {
+		tags = append(tags, GitTag{
+			Name: strVal(row, nameIdx),
+		})
+	}
+	return tags, nil
+}
+
+// GetGitFileContent reads a file from a git repository and returns its content.
+func (c *Client) GetGitFileContent(ctx context.Context, database, schema, repoName, filePath string) (string, error) {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	sql := fmt.Sprintf(`SELECT $1 FROM @"%s"."%s"."%s"/%s`, esc(database), esc(schema), esc(repoName), filePath)
+
+	res, err := c.Execute(ctx, sql)
+	if err != nil {
+		return "", err
+	}
+
+	var content strings.Builder
+	for _, row := range res.Rows {
+		if len(row) > 0 {
+			content.WriteString(strVal(row, 0))
+			content.WriteString("\n")
+		}
+	}
+	return content.String(), nil
+}
+
+// ExecuteGitFile executes a SQL file from a git repository.
+func (c *Client) ExecuteGitFile(ctx context.Context, database, schema, repoName, filePath string) error {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	sql := fmt.Sprintf(`EXECUTE IMMEDIATE FROM @"%s"."%s"."%s"/%s`, esc(database), esc(schema), esc(repoName), filePath)
+
+	_, err := c.Execute(ctx, sql)
+	return err
+}
+
 // IntegrationRow holds metadata returned by SHOW <kind> INTEGRATIONS.
 type IntegrationRow struct {
 	Name     string `json:"name"`
@@ -2286,6 +2605,7 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 		{fmt.Sprintf("SHOW PIPES IN SCHEMA %s", q), "PIPE"},
 		{fmt.Sprintf("SHOW NOTEBOOKS IN SCHEMA %s", q), "NOTEBOOK"},
 		{fmt.Sprintf("SHOW SECRETS IN SCHEMA %s", q), "SECRET"},
+		{fmt.Sprintf("SHOW GIT REPOSITORIES IN SCHEMA %s", q), "GIT REPOSITORY"},
 	}
 
 	type result struct {

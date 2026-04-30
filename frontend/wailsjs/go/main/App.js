@@ -66,12 +66,20 @@ export function BuildCallStatement(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['BuildCallStatement'](arg1, arg2, arg3, arg4);
 }
 
+export function BuildCreateGitRepositorySql(arg1, arg2, arg3) {
+  return window['go']['main']['App']['BuildCreateGitRepositorySql'](arg1, arg2, arg3);
+}
+
 export function BuildCreateSecretSql(arg1, arg2, arg3) {
   return window['go']['main']['App']['BuildCreateSecretSql'](arg1, arg2, arg3);
 }
 
 export function BuildFunctionSelectStatement(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['BuildFunctionSelectStatement'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function BuildModifyGitRepositorySql(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
+  return window['go']['main']['App']['BuildModifyGitRepositorySql'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 }
 
 export function BuildModifySecretSql(arg1, arg2, arg3, arg4, arg5) {
@@ -238,6 +246,10 @@ export function ExecDDL(arg1) {
   return window['go']['main']['App']['ExecDDL'](arg1);
 }
 
+export function ExecuteGitFile(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ExecuteGitFile'](arg1, arg2, arg3, arg4);
+}
+
 export function ExecuteMigration(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['ExecuteMigration'](arg1, arg2, arg3, arg4);
 }
@@ -366,8 +378,16 @@ export function GetFunctionTooltip(arg1) {
   return window['go']['main']['App']['GetFunctionTooltip'](arg1);
 }
 
+export function GetGitCommitFilter(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetGitCommitFilter'](arg1, arg2, arg3);
+}
+
 export function GetGitConfig() {
   return window['go']['main']['App']['GetGitConfig']();
+}
+
+export function GetGitFileContent(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['GetGitFileContent'](arg1, arg2, arg3, arg4);
 }
 
 export function GetIdentifierAtColumn(arg1, arg2) {
@@ -562,6 +582,10 @@ export function GitGetHeadFileContent(arg1) {
   return window['go']['main']['App']['GitGetHeadFileContent'](arg1);
 }
 
+export function GitInitWithRemote(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GitInitWithRemote'](arg1, arg2, arg3);
+}
+
 export function GitListBranches(arg1) {
   return window['go']['main']['App']['GitListBranches'](arg1);
 }
@@ -654,6 +678,10 @@ export function ListAIModels(arg1, arg2, arg3) {
   return window['go']['main']['App']['ListAIModels'](arg1, arg2, arg3);
 }
 
+export function ListApiIntegrations() {
+  return window['go']['main']['App']['ListApiIntegrations']();
+}
+
 export function ListAvailableRoles() {
   return window['go']['main']['App']['ListAvailableRoles']();
 }
@@ -706,6 +734,18 @@ export function ListFinalizableTasks(arg1, arg2) {
   return window['go']['main']['App']['ListFinalizableTasks'](arg1, arg2);
 }
 
+export function ListGitBranches(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ListGitBranches'](arg1, arg2, arg3);
+}
+
+export function ListGitRepoEntries(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ListGitRepoEntries'](arg1, arg2, arg3, arg4);
+}
+
+export function ListGitTags(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ListGitTags'](arg1, arg2, arg3);
+}
+
 export function ListIntegrations(arg1) {
   return window['go']['main']['App']['ListIntegrations'](arg1);
 }
@@ -728,6 +768,10 @@ export function ListRootTasks(arg1, arg2) {
 
 export function ListSchemas(arg1) {
   return window['go']['main']['App']['ListSchemas'](arg1);
+}
+
+export function ListSecretsInAccount() {
+  return window['go']['main']['App']['ListSecretsInAccount']();
 }
 
 export function ListSecurityIntegrations() {
@@ -928,6 +972,10 @@ export function SendChatMessage(arg1, arg2, arg3, arg4, arg5) {
 
 export function SetColumnComment(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['SetColumnComment'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function SetGitCommitFilter(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['SetGitCommitFilter'](arg1, arg2, arg3, arg4);
 }
 
 export function SetNotebookQueryWarehouse(arg1, arg2, arg3, arg4) {

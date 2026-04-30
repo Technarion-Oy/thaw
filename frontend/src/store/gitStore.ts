@@ -161,13 +161,15 @@ export const useGitStore = create<GitState>((set, get) => ({
   },
 
   push: async ({ message, files }) => {
-    const { exportDir, remoteURL, branch, authorName, authorEmail, oauthToken } = get();
+    const { exportDir, remoteURL: storedURL, branch, authorName, authorEmail, oauthToken, status } = get();
     if (!exportDir) return;
+    // Prefer the store's saved URL; fall back to what the repo's git config reports.
+    const remoteURL = storedURL || status?.remoteURL || "";
     set({ pushing: true, error: null });
     try {
       await GitCommitAndPush({
         dir:         exportDir,
-        remoteURL:   remoteURL,
+        remoteURL,
         branch:      branch || "main",
         authMethod:  "oauth",
         token:       oauthToken,
@@ -185,13 +187,14 @@ export const useGitStore = create<GitState>((set, get) => ({
   },
 
   pull: async () => {
-    const { exportDir, remoteURL, branch, oauthToken } = get();
+    const { exportDir, remoteURL: storedURL, branch, oauthToken, status } = get();
     if (!exportDir) return;
+    const remoteURL = storedURL || status?.remoteURL || "";
     set({ pulling: true, error: null });
     try {
       await GitPull({
         dir:        exportDir,
-        remoteURL:  remoteURL,
+        remoteURL,
         branch:     branch || "main",
         authMethod: "oauth",
         token:      oauthToken,
@@ -328,13 +331,14 @@ export const useGitStore = create<GitState>((set, get) => ({
   },
 
   pullBranch: async (branch: string) => {
-    const { exportDir, remoteURL, oauthToken } = get();
+    const { exportDir, remoteURL: storedURL, oauthToken, status } = get();
     if (!exportDir) return;
+    const remoteURL = storedURL || status?.remoteURL || "";
     set({ pulling: true, error: null });
     try {
       await GitPull({
         dir:        exportDir,
-        remoteURL:  remoteURL,
+        remoteURL,
         branch,
         authMethod: "oauth",
         token:      oauthToken,

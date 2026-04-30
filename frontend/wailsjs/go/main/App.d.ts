@@ -4,6 +4,7 @@ import {main} from '../models';
 import {sqleditor} from '../models';
 import {integrations} from '../models';
 import {procedure} from '../models';
+import {snowgitrepo} from '../models';
 import {secret} from '../models';
 import {snowflake} from '../models';
 import {dbt} from '../models';
@@ -49,9 +50,13 @@ export function BuildApiIntegrationPreviewSQL(arg1:integrations.ApiIntegrationPa
 
 export function BuildCallStatement(arg1:string,arg2:string,arg3:string,arg4:Array<procedure.Argument>):Promise<string>;
 
+export function BuildCreateGitRepositorySql(arg1:string,arg2:string,arg3:snowgitrepo.GitRepositoryConfig):Promise<string>;
+
 export function BuildCreateSecretSql(arg1:string,arg2:string,arg3:secret.SecretConfig):Promise<string>;
 
 export function BuildFunctionSelectStatement(arg1:string,arg2:string,arg3:string,arg4:Array<procedure.Argument>,arg5:boolean):Promise<string>;
+
+export function BuildModifyGitRepositorySql(arg1:string,arg2:string,arg3:string,arg4:snowgitrepo.GitRepositoryConfig,arg5:string,arg6:string,arg7:string):Promise<Array<string>>;
 
 export function BuildModifySecretSql(arg1:string,arg2:string,arg3:string,arg4:secret.SecretConfig,arg5:string):Promise<Array<string>>;
 
@@ -135,6 +140,8 @@ export function EnableTaskDependents(arg1:string,arg2:string,arg3:string):Promis
 
 export function ExecDDL(arg1:string):Promise<void>;
 
+export function ExecuteGitFile(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
 export function ExecuteMigration(arg1:Array<main.MigrationObject>,arg2:string,arg3:number,arg4:main.TableMigrationStrategy):Promise<Array<main.MigrationExecEvent>>;
 
 export function ExecuteNotebook(arg1:string,arg2:string,arg3:string,arg4:Array<string>):Promise<string>;
@@ -199,7 +206,11 @@ export function GetFunctionSuggestions(arg1:string):Promise<Array<fnmeta.Functio
 
 export function GetFunctionTooltip(arg1:string):Promise<Array<fnmeta.FunctionMeta>>;
 
+export function GetGitCommitFilter(arg1:string,arg2:string,arg3:string):Promise<string>;
+
 export function GetGitConfig():Promise<config.GitConfig>;
+
+export function GetGitFileContent(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
 
 export function GetIdentifierAtColumn(arg1:string,arg2:number):Promise<Array<string>>;
 
@@ -297,6 +308,8 @@ export function GitFetch(arg1:string,arg2:string):Promise<void>;
 
 export function GitGetHeadFileContent(arg1:string):Promise<string>;
 
+export function GitInitWithRemote(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function GitListBranches(arg1:string):Promise<Array<gitrepo.BranchInfo>>;
 
 export function GitLoginWithOAuth(arg1:string):Promise<string>;
@@ -343,6 +356,8 @@ export function IsNumeric(arg1:string):Promise<boolean>;
 
 export function ListAIModels(arg1:string,arg2:string,arg3:number):Promise<Array<string>>;
 
+export function ListApiIntegrations():Promise<Array<snowflake.ApiIntegration>>;
+
 export function ListAvailableRoles():Promise<Array<string>>;
 
 export function ListBackupPolicies():Promise<Array<main.BackupPolicyRow>>;
@@ -369,6 +384,12 @@ export function ListExternalVolumes():Promise<Array<string>>;
 
 export function ListFinalizableTasks(arg1:string,arg2:string):Promise<Array<tasks.FinalizabilityRow>>;
 
+export function ListGitBranches(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.GitBranch>>;
+
+export function ListGitRepoEntries(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.GitRepoEntry>>;
+
+export function ListGitTags(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.GitTag>>;
+
 export function ListIntegrations(arg1:string):Promise<Array<snowflake.IntegrationRow>>;
 
 export function ListNotificationIntegrations():Promise<Array<string>>;
@@ -380,6 +401,8 @@ export function ListRoles():Promise<Array<string>>;
 export function ListRootTasks(arg1:string,arg2:string):Promise<Array<tasks.FinalizabilityRow>>;
 
 export function ListSchemas(arg1:string):Promise<Array<string>>;
+
+export function ListSecretsInAccount():Promise<Array<snowflake.AccountSecret>>;
 
 export function ListSecurityIntegrations():Promise<Array<snowflake.SecurityIntegration>>;
 
@@ -480,6 +503,8 @@ export function SearchFiles(arg1:string,arg2:string,arg3:boolean):Promise<Array<
 export function SendChatMessage(arg1:Array<ai.UIMessage>,arg2:string,arg3:string,arg4:string,arg5:boolean):Promise<Array<ai.UIMessage>>;
 
 export function SetColumnComment(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
+
+export function SetGitCommitFilter(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function SetNotebookQueryWarehouse(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 

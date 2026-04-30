@@ -84,7 +84,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 
 ## Object Browser
 
-- Browse all databases → schemas → tables, views, functions, procedures, sequences, stages, streams, tasks, file formats, pipes, and notebooks
+- Browse all databases → schemas → tables, views, functions, procedures, sequences, stages, streams, tasks, file formats, pipes, notebooks, secrets, and git repositories
 - **Multi-selection** — hold `⌘` (macOS) or `Ctrl` (Windows/Linux) and click anywhere on an object row to select it; selected objects are highlighted across the full width of the sidebar; click any non-modifier area to clear the selection
 - **Batch deletion** — when multiple objects are selected, right-click any of them and choose **Delete N selected objects…** to drop all of them in one operation; a confirmation dialog lists all objects to be removed
 - **Secret Management** — right-click any schema and choose **Create Object** → **Secret…** or right-click an existing secret and choose **Modify…** to open the secret management dialog:
@@ -95,6 +95,11 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Modify Support** — generates correct `ALTER SECRET` statements with `SET` clauses; clearing the comment field generates an `UNSET COMMENT` statement
   - **Live SQL Preview** — see the full `CREATE SECRET` or `ALTER SECRET` statement update in real-time as you modify the form
   - **Execution** — runs `ExecDDL` and refreshes the schema tree automatically on success
+- **Git Repository Management** — right-click any schema and choose **Create Object** → **Git Repository…**, or right-click an existing git repository and choose **Fetch** or **Modify…**:
+  - **Create** — specify the origin URL, API integration (required), optional git credentials secret (selected from a live account-wide secret list), optional comment and tags; live SQL preview shows the full `CREATE GIT REPOSITORY` statement
+  - **Fetch** — right-click a git repository and choose **Fetch** to run `ALTER GIT REPOSITORY … FETCH`; displays a loading toast during the operation and a success or error message on completion
+  - **Modify** — pre-fills current API integration, git credentials, and comment from `DESCRIBE GIT REPOSITORY`; generates correct `ALTER GIT REPOSITORY … SET` and `UNSET` statements (credentials and comment can be cleared via UNSET; API_INTEGRATION can only be SET); live SQL preview; multi-statement execution
+  - **Properties** — right-click and choose **Properties** to view `DESCRIBE GIT REPOSITORY` output in the properties panel
 - **Search** — filter objects by name across all databases and schemas in real time
 - **Right-click procedures** to open a parameter dialog; clicking **Execute** generates the `CALL` statement, opens a new tab, and runs it immediately — no manual Run press needed
 - **Right-click functions** (**Call Function…**) to open a parameter dialog; detects scalar vs. table functions and generates the correct SQL; clicking **Execute** opens a new tab and runs it immediately

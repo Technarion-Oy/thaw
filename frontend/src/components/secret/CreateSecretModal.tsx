@@ -25,7 +25,7 @@ interface Props {
   db: string;
   schema: string;
   onClose: () => void;
-  onSuccess?: () => void;
+  onSuccess?: (secretFqn: string) => void;
 }
 
 export default function CreateSecretModal({ db, schema, onClose, onSuccess }: Props) {
@@ -100,7 +100,11 @@ export default function CreateSecretModal({ db, schema, onClose, onSuccess }: Pr
     setCreateError(null);
     try {
       await ExecDDL(preview);
-      onSuccess?.();
+      // Snowflake uppercases unquoted identifiers; match the casing that
+      // ListSecretsInAccount will return so the dropdown auto-selects correctly.
+      const effectiveName = cfg.caseSensitive ? cfg.name : cfg.name.toUpperCase();
+      const fqn = `"${db}"."${schema}"."${effectiveName}"`;
+      onSuccess?.(fqn);
       onClose();
     } catch (err) {
       setCreateError(String(err));
