@@ -43,6 +43,7 @@ export interface Tab {
   error: string | null;
   diff?: TabDiff | null; // populated for diff tabs; absent for regular SQL tabs
   isRunning?: boolean;   // per-tab running state; never persisted
+  orphaned?: boolean;    // true when the backing file was deleted from disk
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -322,7 +323,7 @@ export const useQueryStore = create<QueryState>()(
       if (!tab) return {};
       const updatedTabs = state.tabs.map((t) =>
         t.id === id
-          ? { ...t, path: null, title: `↺ ${t.title}`, savedSql: "" }
+          ? { ...t, path: null, orphaned: true, savedSql: "" }
           : t
       );
       const isActive = state.activeTabId === id;

@@ -156,7 +156,7 @@ export default function TabBar() {
               whiteSpace: "nowrap",
               flex: 1,
             }}>
-              {tab.path && tab.sql !== tab.savedSql ? "• " : ""}{tab.title}
+              {tab.orphaned ? "↺ " : (tab.path && tab.sql !== tab.savedSql ? "• " : "")}{tab.title}
             </span>
 
             {/* Close button — always reserve space so layout doesn't shift,
