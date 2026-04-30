@@ -193,6 +193,20 @@ export default function FeatureFlagsModal({ onClose }: Props) {
             locked={locked.ddlExport}
             onChange={(v) => set("ddlExport", v)}
           />
+          <FlagRow
+            label="PUT Command"
+            description="Allow PUT file:// … @stage upload commands to be executed from the SQL editor."
+            checked={flags.putCommand}
+            locked={locked.putCommand}
+            onChange={(v) => set("putCommand", v)}
+          />
+          <FlagRow
+            label="GET Command"
+            description="Allow GET @stage file:// download commands to be executed from the SQL editor."
+            checked={flags.getCommand}
+            locked={locked.getCommand}
+            onChange={(v) => set("getCommand", v)}
+          />
         </Category>
 
         {/* ── Governance & Administration ── */}

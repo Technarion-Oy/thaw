@@ -168,8 +168,12 @@ export default function App() {
   // components (Ant Design inputs etc.) update their state correctly.
   // Cmd+C / Cmd+X are handled symmetrically for consistency.
   useEffect(() => {
-    const isEditableInput = (el: Element | null): el is HTMLInputElement | HTMLTextAreaElement =>
-      el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+    const isEditableInput = (el: Element | null): el is HTMLInputElement | HTMLTextAreaElement => {
+      if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return false;
+      // Ignore Monaco hidden textarea — it is an <textarea> but Monaco manages its own clipboard.
+      if (el.closest(".monaco-editor")) return false;
+      return true;
+    };
 
     // Insert text at the current selection of a native input / textarea.
     const spliceValue = (target: HTMLInputElement | HTMLTextAreaElement, text: string) => {

@@ -19,6 +19,7 @@ import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import type { pipe } from "../../../wailsjs/go/models";
 import Editor from "@monaco-editor/react";
 import { useThemeStore } from "../../store/themeStore";
+import { patchMonacoClipboard } from "../../utils/monacoClipboard";
 
 const { Text } = Typography;
 
@@ -236,6 +237,7 @@ export default function CreatePipeModal({ db, schema, onClose, onSuccess }: Prop
               theme={editorTheme}
               value={cfg.copyStatement}
               onChange={(v) => set("copyStatement", v ?? "")}
+              onMount={(editor) => patchMonacoClipboard(editor)}
               options={{
                 minimap: { enabled: false },
                 lineNumbers: "off",

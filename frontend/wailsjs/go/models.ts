@@ -110,6 +110,8 @@ export namespace config {
 	    exportTableData: boolean;
 	    tableDataImport: boolean;
 	    ddlExport: boolean;
+	    putCommand: boolean;
+	    getCommand: boolean;
 	    userRoleManagement: boolean;
 	    warehouseManagement: boolean;
 	    warehouseCreditUsage: boolean;
@@ -146,6 +148,8 @@ export namespace config {
 	        this.exportTableData = source["exportTableData"];
 	        this.tableDataImport = source["tableDataImport"];
 	        this.ddlExport = source["ddlExport"];
+	        this.putCommand = source["putCommand"];
+	        this.getCommand = source["getCommand"];
 	        this.userRoleManagement = source["userRoleManagement"];
 	        this.warehouseManagement = source["warehouseManagement"];
 	        this.warehouseCreditUsage = source["warehouseCreditUsage"];
