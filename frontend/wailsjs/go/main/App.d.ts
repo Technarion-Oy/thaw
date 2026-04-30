@@ -123,7 +123,11 @@ export function DropBackupPolicy(arg1:string):Promise<void>;
 
 export function DropBackupSet(arg1:string,arg2:string,arg3:string):Promise<void>;
 
+export function DropDatabase(arg1:string,arg2:string):Promise<void>;
+
 export function DropIntegration(arg1:string):Promise<void>;
+
+export function DropSchema(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function DropTaskTree(arg1:string,arg2:string,arg3:string):Promise<void>;
 

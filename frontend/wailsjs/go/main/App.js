@@ -214,8 +214,16 @@ export function DropBackupSet(arg1, arg2, arg3) {
   return window['go']['main']['App']['DropBackupSet'](arg1, arg2, arg3);
 }
 
+export function DropDatabase(arg1, arg2) {
+  return window['go']['main']['App']['DropDatabase'](arg1, arg2);
+}
+
 export function DropIntegration(arg1) {
   return window['go']['main']['App']['DropIntegration'](arg1);
+}
+
+export function DropSchema(arg1, arg2, arg3) {
+  return window['go']['main']['App']['DropSchema'](arg1, arg2, arg3);
 }
 
 export function DropTaskTree(arg1, arg2, arg3) {

@@ -29,6 +29,10 @@ interface ObjectState {
   addObjects: (db: string, schema: string, objects: { name: string; kind: string }[]) => void;
   // Removes everything under a database (used on sidebar refresh).
   clearDatabase: (db: string) => void;
+  // Removes a database and all its schemas/objects (used after DROP DATABASE).
+  removeDatabase: (db: string) => void;
+  // Removes a schema and all its objects (used after DROP SCHEMA).
+  removeSchema: (db: string, schema: string) => void;
 }
 
 export const useObjectStore = create<ObjectState>((set) => ({
@@ -59,5 +63,18 @@ export const useObjectStore = create<ObjectState>((set) => ({
     set((s) => ({
       schemas: s.schemas.filter((x) => x.db !== db),
       objects: s.objects.filter((x) => x.db !== db),
+    })),
+
+  removeDatabase: (db) =>
+    set((s) => ({
+      databases: s.databases.filter((d) => d !== db),
+      schemas: s.schemas.filter((x) => x.db !== db),
+      objects: s.objects.filter((x) => x.db !== db),
+    })),
+
+  removeSchema: (db, schema) =>
+    set((s) => ({
+      schemas: s.schemas.filter((x) => !(x.db === db && x.name === schema)),
+      objects: s.objects.filter((x) => !(x.db === db && x.schema === schema)),
     })),
 }));

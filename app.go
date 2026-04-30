@@ -1835,6 +1835,22 @@ func (a *App) DropIntegration(name string) error {
 	return a.client.DropIntegration(a.ctx, name)
 }
 
+// DropDatabase drops a database. mode must be "CASCADE" or "RESTRICT".
+func (a *App) DropDatabase(name string, mode string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	return a.client.DropDatabase(a.ctx, name, mode)
+}
+
+// DropSchema drops a schema. mode must be "CASCADE" or "RESTRICT".
+func (a *App) DropSchema(database, schema string, mode string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	return a.client.DropSchema(a.ctx, database, schema, mode)
+}
+
 // CanCreateIntegration returns true when the current role can create integrations.
 // If tabId is non-empty and the tab already has an isolated session (i.e. at least
 // one query has been run on it), that session is used so that any USE ROLE applied

@@ -912,6 +912,27 @@ func (c *Client) DropIntegration(ctx context.Context, name string) error {
 	return err
 }
 
+// DropDatabase drops a database. mode must be "CASCADE" or "RESTRICT".
+func (c *Client) DropDatabase(ctx context.Context, name string, mode string) error {
+	if mode != "CASCADE" && mode != "RESTRICT" {
+		mode = "CASCADE"
+	}
+	esc := strings.ReplaceAll(name, `"`, `""`)
+	_, err := c.db.ExecContext(ctx, fmt.Sprintf(`DROP DATABASE "%s" %s`, esc, mode))
+	return err
+}
+
+// DropSchema drops a schema. mode must be "CASCADE" or "RESTRICT".
+func (c *Client) DropSchema(ctx context.Context, database, schema string, mode string) error {
+	if mode != "CASCADE" && mode != "RESTRICT" {
+		mode = "CASCADE"
+	}
+	escDb := strings.ReplaceAll(database, `"`, `""`)
+	escSch := strings.ReplaceAll(schema, `"`, `""`)
+	_, err := c.db.ExecContext(ctx, fmt.Sprintf(`DROP SCHEMA "%s"."%s" %s`, escDb, escSch, mode))
+	return err
+}
+
 // ExecDDL executes a pre-built DDL statement (e.g. CREATE INTEGRATION …).
 // The caller is responsible for ensuring the SQL is safe; use the integrations
 // package helpers to build injection-safe DDL before calling this method.
