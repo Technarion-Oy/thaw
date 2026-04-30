@@ -222,8 +222,16 @@ export function DropBackupSet(arg1, arg2, arg3) {
   return window['go']['main']['App']['DropBackupSet'](arg1, arg2, arg3);
 }
 
+export function DropDatabase(arg1, arg2) {
+  return window['go']['main']['App']['DropDatabase'](arg1, arg2);
+}
+
 export function DropIntegration(arg1) {
   return window['go']['main']['App']['DropIntegration'](arg1);
+}
+
+export function DropSchema(arg1, arg2, arg3) {
+  return window['go']['main']['App']['DropSchema'](arg1, arg2, arg3);
 }
 
 export function DropTaskTree(arg1, arg2, arg3) {
@@ -452,6 +460,10 @@ export function GetSchemaCrossDeps(arg1, arg2) {
 
 export function GetSchemaForeignKeys(arg1, arg2) {
   return window['go']['main']['App']['GetSchemaForeignKeys'](arg1, arg2);
+}
+
+export function GetSchemaRetentionDays(arg1, arg2) {
+  return window['go']['main']['App']['GetSchemaRetentionDays'](arg1, arg2);
 }
 
 export function GetScriptingCompletions(arg1, arg2) {
