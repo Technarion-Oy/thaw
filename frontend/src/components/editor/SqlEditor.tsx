@@ -28,7 +28,8 @@ import { useObjectStore } from "../../store/objectStore";
 import { useSessionStore } from "../../store/sessionStore";
 import { useThemeStore } from "../../store/themeStore";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
-import { ClipboardGetText, ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { patchMonacoClipboard } from "../../utils/monacoClipboard";
+import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, GetAllDataTypes, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GitGetHeadFileContent } from "../../../wailsjs/go/main/App";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import ExplainModal from "../results/ExplainModal";
@@ -939,47 +940,8 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       gitGutterTimerRef.current = setTimeout(refreshGitGutter, 400);
     });
 
-    const doPaste = async () => {
-      const text = await ClipboardGetText();
-      if (!text) return;
-      const selection = editor.getSelection();
-      if (!selection) return;
-      editor.executeEdits("clipboard-paste", [{ range: selection, text, forceMoveMarkers: true }]);
-      editor.pushUndoStop();
-    };
-
-    const doCopy = async () => {
-      const selection = editor.getSelection();
-      const model = editor.getModel();
-      if (!selection || !model) return;
-      const text = model.getValueInRange(selection);
-      if (text) await ClipboardSetText(text);
-    };
-
-    const doCut = async () => {
-      const selection = editor.getSelection();
-      const model = editor.getModel();
-      if (!selection || !model) return;
-      const text = model.getValueInRange(selection);
-      if (!text) return;
-      await ClipboardSetText(text);
-      editor.executeEdits("clipboard-cut", [{ range: selection, text: "", forceMoveMarkers: true }]);
-      editor.pushUndoStop();
-    };
-
     if (!tabId) {
-      const cs = (editor as any)._commandService;
-      if (cs && typeof cs.executeCommand === "function") {
-        const origExec = cs.executeCommand.bind(cs);
-        cs.executeCommand = (commandId: string, ...args: any[]): Promise<any> => {
-          switch (commandId) {
-            case "editor.action.clipboardPasteAction": doPaste(); return Promise.resolve();
-            case "editor.action.clipboardCopyAction":  doCopy();  return Promise.resolve();
-            case "editor.action.clipboardCutAction":   doCut();   return Promise.resolve();
-            default: return origExec(commandId, ...args);
-          }
-        };
-      }
+      patchMonacoClipboard(editor);
     }
 
     const trigger = (id: string) => editor.trigger("keyboard", id, null);
@@ -2036,15 +1998,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           setEditorFontSize(14);
         }
       });
-
-      editorDom.addEventListener("keydown", (e: KeyboardEvent) => {
-        if (!(e.metaKey || e.ctrlKey)) return;
-        switch (e.key.toLowerCase()) {
-          case "v": e.preventDefault(); e.stopPropagation(); doPaste(); break;
-          case "c": e.preventDefault(); e.stopPropagation(); doCopy(); break;
-          case "x": e.preventDefault(); e.stopPropagation(); doCut(); break;
-        }
-      }, true /* capture */);
 
       editorDom.addEventListener("dragover", (e: DragEvent) => {
         const types = e.dataTransfer?.types ?? [];
