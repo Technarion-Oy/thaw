@@ -9,6 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useMemo } from "react";
+import { useThemeStore } from "../../store/themeStore";
 import {
   Modal, Spin, Space, Typography, Button, Alert, Select, Input, DatePicker,
 } from "antd";
@@ -38,6 +39,7 @@ interface Props {
 }
 
 export default function PipeCopyHistoryModal({ db, schema, name, onClose }: Props) {
+  const resolved = useThemeStore((s) => s.resolved);
   const [result, setResult] = useState<snowflake.QueryResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -153,7 +155,7 @@ export default function PipeCopyHistoryModal({ db, schema, name, onClose }: Prop
 
       {!loading && result && (
         <div
-          className="ag-theme-alpine"
+          className={resolved === "dark" ? "ag-theme-alpine-dark" : "ag-theme-alpine"}
           style={{ height: 480, width: "100%" }}
         >
           <AgGridReact

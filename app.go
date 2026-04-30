@@ -1408,13 +1408,32 @@ func (a *App) GetPipeCopyHistory(database, schema, name, startTime, status, file
 	if a.client == nil {
 		return nil, ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	quoteIdent := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
 	escStr := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
 
-	// Build the fully qualified pipe name as it appears in COPY_HISTORY.
-	// Snowflake stores it as DB.SCHEMA.PIPE (unquoted, uppercase) but we
-	// filter using ILIKE to be safe.
-	pipeFqn := fmt.Sprintf("%s.%s.%s", escStr(database), escStr(schema), escStr(name))
+	// Fetch the pipe DDL to resolve the COPY INTO target table name, which is
+	// required by the copy_history table function.
+	ddl, err := a.client.GetObjectDDL(a.ctx, database, schema, "PIPE", name, "")
+	if err != nil {
+		return nil, fmt.Errorf("could not retrieve pipe DDL to resolve target table: %w", err)
+	}
+	fqnParts, err := pipe.ParseCopyIntoTargetParts(ddl)
+	if err != nil {
+		return nil, fmt.Errorf("could not parse COPY INTO target table from pipe DDL: %w", err)
+	}
+
+	// Build the TABLE_NAME argument: double-quoted parts inside a single-quoted string literal.
+	// Unquoted identifiers from GET_DDL may be in any case but Snowflake stores
+	// them as uppercase, so uppercase them before quoting to ensure correct resolution.
+	quotedParts := make([]string, len(fqnParts))
+	for i, p := range fqnParts {
+		val := p.Value
+		if !p.Quoted {
+			val = strings.ToUpper(val)
+		}
+		quotedParts[i] = quoteIdent(val)
+	}
+	tableNameArg := strings.Join(quotedParts, ".")
 
 	startExpr := "dateadd(hours, -24, current_timestamp())"
 	if startTime != "" {
@@ -1423,8 +1442,14 @@ func (a *App) GetPipeCopyHistory(database, schema, name, startTime, status, file
 
 	var sb strings.Builder
 	fmt.Fprintf(&sb,
-		"SELECT * FROM TABLE(%s.information_schema.copy_history(TABLE_NAME => '', START_TIME => %s)) WHERE PIPE_NAME ILIKE '%s'",
-		q(database), startExpr, escStr(pipeFqn),
+		"SELECT * FROM TABLE(%s.information_schema.copy_history(TABLE_NAME => '%s', START_TIME => %s))",
+		quoteIdent(database), escStr(tableNameArg), startExpr,
+	)
+	// Filter by pipe identity using exact case-sensitive match.
+	// copy_history exposes pipe_catalog_name, pipe_schema_name, and pipe_name as
+	// separate columns; PIPE_NAME alone does not contain a fully qualified name.
+	fmt.Fprintf(&sb, " WHERE pipe_catalog_name = '%s' AND pipe_schema_name = '%s' AND pipe_name = '%s'",
+		escStr(database), escStr(schema), escStr(name),
 	)
 	if status != "" {
 		fmt.Fprintf(&sb, " AND STATUS ILIKE '%s'", escStr(status))

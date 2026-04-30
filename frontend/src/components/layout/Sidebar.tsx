@@ -2266,7 +2266,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
             menuItem("Refresh…", <SyncOutlined style={{ fontSize: 12 }} />, openRefreshPipe)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
-            menuItem("Copy History…", <HistoryOutlined style={{ fontSize: 12 }} />, openPipeCopyHistory)}
+            menuItem("View Copy History…", <HistoryOutlined style={{ fontSize: 12 }} />, openPipeCopyHistory)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SECRET" &&
             menuItem("Modify…", <EditOutlined style={{ fontSize: 12 }} />, openModifySecret)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "GIT REPOSITORY" &&
