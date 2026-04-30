@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { Tree, Typography, Spin, Empty, Divider, Modal, Button, Input, Tooltip, Slider, Tag, message, Select, type InputRef } from "antd";
+import { App as AntApp, Tree, Typography, Spin, Empty, Divider, Modal, Button, Input, Tooltip, Slider, Tag, message, Select, type InputRef } from "antd";
 import {
   DatabaseOutlined,
   TableOutlined,
@@ -55,7 +55,7 @@ import {
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, DropDatabase, DropSchema } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, DropDatabase, DropSchema } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -403,6 +403,7 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
 }
 
 export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel?: boolean }) {
+  const { modal, message: contextMsg } = AntApp.useApp();
   const [treeData, setTreeData] = useState<DataNode[]>([]);
   const [loading, setLoading]   = useState(false);
   const [loaded, setLoaded]         = useState(false);
@@ -1052,7 +1053,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       default:            sql = `DROP ${objKind} ${fullName};`;
     }
 
-    Modal.confirm({
+    modal.confirm({
       title: `Drop ${objKind.toLowerCase()} "${name}"?`,
       content: `This will permanently delete ${db}.${schema}.${name}. This action cannot be undone.`,
       okText: "Drop",
@@ -1072,7 +1073,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     // key format: obj:DB:SCHEMA:KIND:NAME
     const [, db, schema, , ...nameParts] = nodeKey.split(":");
     const name = nameParts.join(":");
-    Modal.confirm({
+    modal.confirm({
       title: `Delete task graph "${name}"?`,
       content: `This will suspend and permanently drop "${name}" and all its child tasks. This action cannot be undone.`,
       okText: "Delete Graph",
@@ -1089,18 +1090,29 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     });
   };
 
-  const dropDatabaseNode = () => {
+  const dropDatabaseNode = async () => {
     if (!ctxMenu) return;
     const db = ctxMenu.nodeKey.slice("db:".length);
     setCtxMenu(null);
+    let retentionDays = 1;
+    try {
+      retentionDays = await GetDatabaseRetentionDays(db);
+    } catch {
+      // fall back to default; non-fatal
+    }
+    const retentionNote = retentionDays > 0
+      ? `This action can be undone within the ${retentionDays}-day Time Travel retention window.`
+      : "No Time Travel retention is configured. This action cannot be undone.";
     let dropMode = "CASCADE";
-    Modal.confirm({
+    modal.confirm({
       title: `Drop database "${db}"?`,
       content: (
         <div>
-          <p style={{ marginBottom: 12 }}>
+          <p style={{ marginBottom: 8 }}>
             This will permanently drop <strong>{db}</strong> and all its schemas and objects.
-            This action cannot be undone.
+          </p>
+          <p style={{ marginBottom: 12, color: retentionDays > 0 ? "var(--text-muted)" : "#cf222e" }}>
+            {retentionNote}
           </p>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span>Mode:</span>
@@ -1125,25 +1137,36 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           useObjectStore.getState().removeDatabase(db);
           setTreeData((prev) => prev.filter((n) => n.key !== `db:${db}`));
         } catch (e) {
-          message.error(String(e));
+          contextMsg.error(String(e));
         }
       },
     });
   };
 
-  const dropSchemaNode = () => {
+  const dropSchemaNode = async () => {
     if (!ctxMenu) return;
     // key format: schema:DB:SCHEMA
     const [, db, schema] = ctxMenu.nodeKey.split(":");
     setCtxMenu(null);
+    let retentionDays = 1;
+    try {
+      retentionDays = await GetSchemaRetentionDays(db, schema);
+    } catch {
+      // fall back to default; non-fatal
+    }
+    const retentionNote = retentionDays > 0
+      ? `This action can be undone within the ${retentionDays}-day Time Travel retention window.`
+      : "No Time Travel retention is configured. This action cannot be undone.";
     let dropMode = "CASCADE";
-    Modal.confirm({
+    modal.confirm({
       title: `Drop schema "${db}.${schema}"?`,
       content: (
         <div>
-          <p style={{ marginBottom: 12 }}>
+          <p style={{ marginBottom: 8 }}>
             This will permanently drop <strong>{db}.{schema}</strong> and all its objects.
-            This action cannot be undone.
+          </p>
+          <p style={{ marginBottom: 12, color: retentionDays > 0 ? "var(--text-muted)" : "#cf222e" }}>
+            {retentionNote}
           </p>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span>Mode:</span>
@@ -1168,7 +1191,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           useObjectStore.getState().removeSchema(db, schema);
           setTreeData((prev) => removeNode(prev, `schema:${db}:${schema}`));
         } catch (e) {
-          message.error(String(e));
+          contextMsg.error(String(e));
         }
       },
     });
@@ -1484,7 +1507,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       }
     };
 
-    Modal.confirm({
+    modal.confirm({
       title: `Drop ${items.length} objects?`,
       content: (
         <div>

@@ -237,6 +237,8 @@ export function GetSchemaCrossDeps(arg1:string,arg2:string):Promise<Array<snowfl
 
 export function GetSchemaForeignKeys(arg1:string,arg2:string):Promise<Array<snowflake.TableForeignKey>>;
 
+export function GetSchemaRetentionDays(arg1:string,arg2:string):Promise<number>;
+
 export function GetScriptingCompletions(arg1:string,arg2:number):Promise<sqleditor.ScriptingCompletionResult>;
 
 export function GetSessionContext(arg1:string):Promise<snowflake.SessionContext>;

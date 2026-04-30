@@ -2066,6 +2066,15 @@ func (a *App) GetDatabaseRetentionDays(dbName string) (int, error) {
 	return a.client.GetDatabaseRetentionDays(a.ctx, dbName)
 }
 
+// GetSchemaRetentionDays returns the DATA_RETENTION_TIME_IN_DAYS parameter
+// for the given schema. Returns 1 if the value cannot be determined.
+func (a *App) GetSchemaRetentionDays(database, schema string) (int, error) {
+	if a.client == nil {
+		return 0, ErrNotConnected
+	}
+	return a.client.GetSchemaRetentionDays(a.ctx, database, schema)
+}
+
 // GetTableRetentionDays returns the Time Travel data retention period in days
 // for the given table. Returns 1 if the value cannot be determined.
 func (a *App) GetTableRetentionDays(database, schema, name string) (int, error) {
