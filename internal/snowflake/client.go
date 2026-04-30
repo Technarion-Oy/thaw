@@ -390,7 +390,29 @@ func (c *Client) Execute(ctx context.Context, query string, onProgress ...func(i
 		return &QueryResult{Rows: [][]interface{}{}}, nil
 	}
 	if len(stmts) == 1 {
-		return c.QuerySingle(ctx, stmts[0])
+		stmt := stmts[0]
+		// PUT/GET commands are incompatible with async mode. When the caller's
+		// context carries sf.WithAsyncMode (as StartQuery always does), the
+		// Snowflake server returns the query ID immediately without the full
+		// execResponse payload, so src_locations is empty and the driver
+		// raises "264004: failed to parse location". Use a plain cancellable
+		// context (no async mode) for file-transfer statements, mirroring the
+		// same pattern already used for multi-statement execution above.
+		upper := strings.ToUpper(stmt)
+		if strings.HasPrefix(upper, "PUT ") || strings.HasPrefix(upper, "PUT\t") ||
+			strings.HasPrefix(upper, "GET ") || strings.HasPrefix(upper, "GET\t") {
+			syncCtx, syncCancel := context.WithCancel(context.Background())
+			defer syncCancel()
+			go func() {
+				select {
+				case <-ctx.Done():
+					syncCancel()
+				case <-syncCtx.Done():
+				}
+			}()
+			return c.QuerySingle(syncCtx, stmt)
+		}
+		return c.QuerySingle(ctx, stmt)
 	}
 
 	// Build a plain cancellable context that inherits cancellation from ctx
@@ -623,7 +645,7 @@ func splitStatements(sql string) []string {
 				i++
 			}
 		case ch == ';':
-			stmt := strings.TrimSpace(cur.String())
+			stmt := normalizePutGet(strings.TrimSpace(cur.String()))
 			if stmt != "" {
 				stmts = append(stmts, stmt)
 			}
@@ -634,10 +656,63 @@ func splitStatements(sql string) []string {
 			i++
 		}
 	}
-	if stmt := strings.TrimSpace(cur.String()); stmt != "" {
+	if stmt := normalizePutGet(strings.TrimSpace(cur.String())); stmt != "" {
 		stmts = append(stmts, stmt)
 	}
 	return stmts
+}
+
+// normalizePutGet prepares PUT and GET statements for the gosnowflake driver:
+//
+//  1. Collapses internal newlines to spaces — the Snowflake server's location
+//     parser treats newlines as line terminators, so a multi-line PUT/GET
+//     (e.g. "PUT file://...\n @stage") causes the server to return an empty
+//     src_locations list, which the driver reports as "264004: failed to parse
+//     location".
+//
+//  2. Ensures the file:// path in PUT commands is single-quoted — the driver
+//     requires the path to be quoted (as in `PUT 'file://...' @stage`) so the
+//     server correctly echoes the path back in src_locations. Unquoted paths
+//     (e.g. typed directly in the query editor) result in empty src_locations.
+//     Already-quoted paths are left unchanged.
+func normalizePutGet(stmt string) string {
+	upper := strings.ToUpper(stmt)
+	if !strings.HasPrefix(upper, "PUT ") && !strings.HasPrefix(upper, "PUT\t") &&
+		!strings.HasPrefix(upper, "GET ") && !strings.HasPrefix(upper, "GET\t") {
+		return stmt
+	}
+	// Step 1: collapse newlines.
+	s := strings.ReplaceAll(stmt, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	// Step 2: quote unquoted file:// paths in PUT commands.
+	if strings.HasPrefix(upper, "PUT ") || strings.HasPrefix(upper, "PUT\t") {
+		s = quotePutFilePath(s)
+	}
+	return s
+}
+
+// quotePutFilePath wraps the file:// path in a PUT statement with single quotes
+// if it is not already quoted. Any single quotes within the path are escaped as \'.
+func quotePutFilePath(stmt string) string {
+	const proto = "file://"
+	idx := strings.Index(strings.ToLower(stmt), proto)
+	if idx < 0 {
+		return stmt
+	}
+	// Already quoted — nothing to do.
+	if idx > 0 && stmt[idx-1] == '\'' {
+		return stmt
+	}
+	// Find end of the unquoted path: first whitespace or semicolon.
+	end := idx + len(proto)
+	for end < len(stmt) && stmt[end] != ' ' && stmt[end] != '\t' && stmt[end] != ';' {
+		end++
+	}
+	path := stmt[idx:end]
+	// Escape any literal single quotes in the path.
+	path = strings.ReplaceAll(path, "'", `\'`)
+	return stmt[:idx] + "'" + path + "'" + stmt[end:]
 }
 
 // CancelSnowflakeQuery asks Snowflake to abort the query with the given ID.
