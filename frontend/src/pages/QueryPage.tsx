@@ -529,7 +529,8 @@ export default function QueryPage() {
     let saveTitle = tab.title;
 
     if (!savePath) {
-      savePath = await PickSaveFile(tab.title === "SQL" ? "untitled.sql" : tab.title);
+      const bareTitle = tab.title.replace(/^↺\s+/, "");
+      savePath = await PickSaveFile(bareTitle === "SQL" ? "untitled.sql" : bareTitle);
       if (!savePath) return;
       saveTitle = savePath.split("/").pop() ?? savePath;
     }
@@ -548,9 +549,10 @@ export default function QueryPage() {
     const tab = tabs.find((t) => t.id === activeTabId);
     if (!tab) return;
 
+    const bareTitle = tab.title.replace(/^↺\s+/, "");
     const defaultName = tab.path
       ? (tab.path.split("/").pop() ?? "untitled.sql")
-      : (tab.title === "SQL" ? "untitled.sql" : tab.title);
+      : (bareTitle === "SQL" ? "untitled.sql" : bareTitle);
 
     const savePath = await PickSaveFile(defaultName);
     if (!savePath) return;
@@ -575,7 +577,8 @@ export default function QueryPage() {
     let saveTitle = tab.title;
 
     if (!savePath) {
-      const defaultName = tab.title === "SQL" ? "untitled.sql" : tab.title;
+      const bareTitle = tab.title.replace(/^↺\s+/, "");
+      const defaultName = bareTitle === "SQL" ? "untitled.sql" : bareTitle;
       savePath = await PickSaveFile(defaultName);
       if (!savePath) return false; // user cancelled the dialog
       saveTitle = savePath.split("/").pop() ?? savePath;
