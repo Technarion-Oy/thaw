@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useEffect, useState } from "react";
-import { ConfigProvider, theme, message } from "antd";
+import { App as AntApp, ConfigProvider, theme, message } from "antd";
 import AppLayout from "./components/layout/AppLayout";
 import { useConnectionStore } from "./store/connectionStore";
 import ConnectModal from "./components/connection/ConnectModal";
@@ -237,30 +237,32 @@ export default function App() {
         },
       }}
     >
-      {hydrated && <AppLayout />}
-      {connectModalOpen && <ConnectModal onClose={() => setConnectModalOpen(false)} />}
-      {layoutModalOpen && (
-        <LayoutSettingsModal onClose={() => setLayoutModalOpen(false)} />
-      )}
-      {aiModalOpen && <AISettingsModal onClose={() => setAiModalOpen(false)} />}
-      {editorPrefsOpen && (
-        <EditorPreferencesModal onClose={() => setEditorPrefsOpen(false)} />
-      )}
-      {snowparkCheckOpen && (
-        <SnowparkCheckModal
-          onClose={() => setSnowparkCheckOpen(false)}
-          onSetup={() => setSnowparkSetupOpen(true)}
-        />
-      )}
-      {snowparkSetupOpen && (
-        <SnowparkSetupModal onClose={() => setSnowparkSetupOpen(false)} />
-      )}
-      {featureFlagsOpen && (
-        <FeatureFlagsModal onClose={() => setFeatureFlagsOpen(false)} />
-      )}
-      {notebookPrefsOpen && (
-        <NotebookPrefsModal onClose={() => setNotebookPrefsOpen(false)} />
-      )}
+      <AntApp>
+        {hydrated && <AppLayout />}
+        {connectModalOpen && <ConnectModal onClose={() => setConnectModalOpen(false)} />}
+        {layoutModalOpen && (
+          <LayoutSettingsModal onClose={() => setLayoutModalOpen(false)} />
+        )}
+        {aiModalOpen && <AISettingsModal onClose={() => setAiModalOpen(false)} />}
+        {editorPrefsOpen && (
+          <EditorPreferencesModal onClose={() => setEditorPrefsOpen(false)} />
+        )}
+        {snowparkCheckOpen && (
+          <SnowparkCheckModal
+            onClose={() => setSnowparkCheckOpen(false)}
+            onSetup={() => setSnowparkSetupOpen(true)}
+          />
+        )}
+        {snowparkSetupOpen && (
+          <SnowparkSetupModal onClose={() => setSnowparkSetupOpen(false)} />
+        )}
+        {featureFlagsOpen && (
+          <FeatureFlagsModal onClose={() => setFeatureFlagsOpen(false)} />
+        )}
+        {notebookPrefsOpen && (
+          <NotebookPrefsModal onClose={() => setNotebookPrefsOpen(false)} />
+        )}
+      </AntApp>
     </ConfigProvider>
   );
 }

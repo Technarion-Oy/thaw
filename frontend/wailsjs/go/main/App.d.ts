@@ -123,7 +123,11 @@ export function DropBackupPolicy(arg1:string):Promise<void>;
 
 export function DropBackupSet(arg1:string,arg2:string,arg3:string):Promise<void>;
 
+export function DropDatabase(arg1:string,arg2:string):Promise<void>;
+
 export function DropIntegration(arg1:string):Promise<void>;
+
+export function DropSchema(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function DropTaskTree(arg1:string,arg2:string,arg3:string):Promise<void>;
 
@@ -232,6 +236,8 @@ export function GetRoleDDL(arg1:string):Promise<string>;
 export function GetSchemaCrossDeps(arg1:string,arg2:string):Promise<Array<snowflake.SchemaRef>>;
 
 export function GetSchemaForeignKeys(arg1:string,arg2:string):Promise<Array<snowflake.TableForeignKey>>;
+
+export function GetSchemaRetentionDays(arg1:string,arg2:string):Promise<number>;
 
 export function GetScriptingCompletions(arg1:string,arg2:number):Promise<sqleditor.ScriptingCompletionResult>;
 

@@ -912,6 +912,27 @@ func (c *Client) DropIntegration(ctx context.Context, name string) error {
 	return err
 }
 
+// DropDatabase drops a database. mode must be "CASCADE" or "RESTRICT".
+func (c *Client) DropDatabase(ctx context.Context, name string, mode string) error {
+	if mode != "CASCADE" && mode != "RESTRICT" {
+		mode = "CASCADE"
+	}
+	esc := strings.ReplaceAll(name, `"`, `""`)
+	_, err := c.db.ExecContext(ctx, fmt.Sprintf(`DROP DATABASE "%s" %s`, esc, mode))
+	return err
+}
+
+// DropSchema drops a schema. mode must be "CASCADE" or "RESTRICT".
+func (c *Client) DropSchema(ctx context.Context, database, schema string, mode string) error {
+	if mode != "CASCADE" && mode != "RESTRICT" {
+		mode = "CASCADE"
+	}
+	escDb := strings.ReplaceAll(database, `"`, `""`)
+	escSch := strings.ReplaceAll(schema, `"`, `""`)
+	_, err := c.db.ExecContext(ctx, fmt.Sprintf(`DROP SCHEMA "%s"."%s" %s`, escDb, escSch, mode))
+	return err
+}
+
 // ExecDDL executes a pre-built DDL statement (e.g. CREATE INTEGRATION …).
 // The caller is responsible for ensuring the SQL is safe; use the integrations
 // package helpers to build injection-safe DDL before calling this method.
@@ -1587,6 +1608,34 @@ func (c *Client) ListDroppedDatabases(ctx context.Context) ([]DroppedTable, erro
 func (c *Client) GetDatabaseRetentionDays(ctx context.Context, dbName string) (int, error) {
 	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
 	query := fmt.Sprintf(`SHOW PARAMETERS LIKE 'DATA_RETENTION_TIME_IN_DAYS' IN DATABASE "%s"`, esc(dbName))
+	rows, err := c.db.QueryContext(ctx, query)
+	if err != nil {
+		return 1, err
+	}
+	defer rows.Close() //nolint:errcheck
+
+	cols, _ := rows.Columns()
+	idxs := colIndexMap(cols, "key", "value")
+
+	if rows.Next() {
+		vals, ptrs := makeValPtrs(len(cols))
+		if err := rows.Scan(ptrs...); err != nil {
+			return 1, err
+		}
+		if s := strVal(vals, idxs["value"]); s != "" {
+			if n, err := strconv.Atoi(s); err == nil {
+				return n, nil
+			}
+		}
+	}
+	return 1, nil // default: 1 day
+}
+
+// GetSchemaRetentionDays returns the DATA_RETENTION_TIME_IN_DAYS parameter
+// for the given schema. Returns 1 if the value cannot be determined.
+func (c *Client) GetSchemaRetentionDays(ctx context.Context, database, schema string) (int, error) {
+	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
+	query := fmt.Sprintf(`SHOW PARAMETERS LIKE 'DATA_RETENTION_TIME_IN_DAYS' IN SCHEMA "%s"."%s"`, esc(database), esc(schema))
 	rows, err := c.db.QueryContext(ctx, query)
 	if err != nil {
 		return 1, err

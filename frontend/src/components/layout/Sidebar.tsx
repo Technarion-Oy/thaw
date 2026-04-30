@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { Tree, Typography, Spin, Empty, Divider, Modal, Button, Input, Tooltip, Slider, Tag, message, type InputRef } from "antd";
+import { App as AntApp, Tree, Typography, Spin, Empty, Divider, Modal, Button, Input, Tooltip, Slider, Tag, message, Select, type InputRef } from "antd";
 import {
   DatabaseOutlined,
   TableOutlined,
@@ -55,7 +55,7 @@ import {
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, DropDatabase, DropSchema } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -193,6 +193,18 @@ function clearNodeChildren(nodes: DataNode[], targetKey: string): DataNode[] {
     }
     return node;
   });
+}
+
+// Remove a node by key from the tree (used after DROP DATABASE / DROP SCHEMA).
+function removeNode(nodes: DataNode[], targetKey: string): DataNode[] {
+  return nodes
+    .filter((node) => node.key !== targetKey)
+    .map((node) => {
+      if ((node as any).children) {
+        return { ...node, children: removeNode((node as any).children, targetKey) };
+      }
+      return node;
+    });
 }
 
 // Cache DDL per unique key; entries expire after DDL_CACHE_TTL so changes
@@ -391,6 +403,7 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
 }
 
 export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel?: boolean }) {
+  const { modal, message: contextMsg } = AntApp.useApp();
   const [treeData, setTreeData] = useState<DataNode[]>([]);
   const [loading, setLoading]   = useState(false);
   const [loaded, setLoaded]         = useState(false);
@@ -1040,7 +1053,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       default:            sql = `DROP ${objKind} ${fullName};`;
     }
 
-    Modal.confirm({
+    modal.confirm({
       title: `Drop ${objKind.toLowerCase()} "${name}"?`,
       content: `This will permanently delete ${db}.${schema}.${name}. This action cannot be undone.`,
       okText: "Drop",
@@ -1060,7 +1073,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     // key format: obj:DB:SCHEMA:KIND:NAME
     const [, db, schema, , ...nameParts] = nodeKey.split(":");
     const name = nameParts.join(":");
-    Modal.confirm({
+    modal.confirm({
       title: `Delete task graph "${name}"?`,
       content: `This will suspend and permanently drop "${name}" and all its child tasks. This action cannot be undone.`,
       okText: "Delete Graph",
@@ -1072,6 +1085,113 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           refreshDatabaseByName(db);
         } catch (e) {
           message.error(String(e));
+        }
+      },
+    });
+  };
+
+  const dropDatabaseNode = async () => {
+    if (!ctxMenu) return;
+    const db = ctxMenu.nodeKey.slice("db:".length);
+    setCtxMenu(null);
+    let retentionDays = 1;
+    try {
+      retentionDays = await GetDatabaseRetentionDays(db);
+    } catch {
+      // fall back to default; non-fatal
+    }
+    const retentionNote = retentionDays > 0
+      ? `This action can be undone within the ${retentionDays}-day Time Travel retention window.`
+      : "No Time Travel retention is configured. This action cannot be undone.";
+    let dropMode = "CASCADE";
+    modal.confirm({
+      title: `Drop database "${db}"?`,
+      content: (
+        <div>
+          <p style={{ marginBottom: 8 }}>
+            This will permanently drop <strong>{db}</strong> and all its schemas and objects.
+          </p>
+          <p style={{ marginBottom: 12, color: retentionDays > 0 ? "var(--text-muted)" : "#cf222e" }}>
+            {retentionNote}
+          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span>Mode:</span>
+            <Select
+              defaultValue="CASCADE"
+              style={{ width: 120 }}
+              onChange={(v: string) => { dropMode = v; }}
+              options={[
+                { value: "CASCADE", label: "CASCADE" },
+                { value: "RESTRICT", label: "RESTRICT" },
+              ]}
+            />
+          </div>
+        </div>
+      ),
+      okText: "Drop",
+      okType: "danger",
+      cancelText: "Cancel",
+      onOk: async () => {
+        try {
+          await DropDatabase(db, dropMode);
+          useObjectStore.getState().removeDatabase(db);
+          setTreeData((prev) => prev.filter((n) => n.key !== `db:${db}`));
+        } catch (e) {
+          contextMsg.error(String(e));
+        }
+      },
+    });
+  };
+
+  const dropSchemaNode = async () => {
+    if (!ctxMenu) return;
+    // key format: schema:DB:SCHEMA
+    const [, db, schema] = ctxMenu.nodeKey.split(":");
+    setCtxMenu(null);
+    let retentionDays = 1;
+    try {
+      retentionDays = await GetSchemaRetentionDays(db, schema);
+    } catch {
+      // fall back to default; non-fatal
+    }
+    const retentionNote = retentionDays > 0
+      ? `This action can be undone within the ${retentionDays}-day Time Travel retention window.`
+      : "No Time Travel retention is configured. This action cannot be undone.";
+    let dropMode = "CASCADE";
+    modal.confirm({
+      title: `Drop schema "${db}.${schema}"?`,
+      content: (
+        <div>
+          <p style={{ marginBottom: 8 }}>
+            This will permanently drop <strong>{db}.{schema}</strong> and all its objects.
+          </p>
+          <p style={{ marginBottom: 12, color: retentionDays > 0 ? "var(--text-muted)" : "#cf222e" }}>
+            {retentionNote}
+          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span>Mode:</span>
+            <Select
+              defaultValue="CASCADE"
+              style={{ width: 120 }}
+              onChange={(v: string) => { dropMode = v; }}
+              options={[
+                { value: "CASCADE", label: "CASCADE" },
+                { value: "RESTRICT", label: "RESTRICT" },
+              ]}
+            />
+          </div>
+        </div>
+      ),
+      okText: "Drop",
+      okType: "danger",
+      cancelText: "Cancel",
+      onOk: async () => {
+        try {
+          await DropSchema(db, schema, dropMode);
+          useObjectStore.getState().removeSchema(db, schema);
+          setTreeData((prev) => removeNode(prev, `schema:${db}:${schema}`));
+        } catch (e) {
+          contextMsg.error(String(e));
         }
       },
     });
@@ -1387,7 +1507,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       }
     };
 
-    Modal.confirm({
+    modal.confirm({
       title: `Drop ${items.length} objects?`,
       content: (
         <div>
@@ -1772,6 +1892,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           ))}
           {ctxMenu.nodeType === "db" && menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets, undefined, !featureFlags.backupPoliciesAndSets, "Backup Policies & Sets is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "db" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "db" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
+          {ctxMenu.nodeType === "db" && menuItem("Drop Database…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, dropDatabaseNode, "#f85149")}
           {ctxMenu.nodeType === "schema" && menuItem("Insert Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "schema" && menuItemSub("Create Object", <PlusSquareOutlined style={{ fontSize: 12 }} />, "create-object", (
             <>
@@ -1784,6 +1906,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "schema" && menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openSchemaImportModal, undefined, !featureFlags.tableDataImport, "Table Data Import is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "schema" && menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets, undefined, !featureFlags.backupPoliciesAndSets, "Backup Policies & Sets is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "schema" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "schema" && ctxMenu.nodeKey.split(":")[2] !== "INFORMATION_SCHEMA" && <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />}
+          {ctxMenu.nodeType === "schema" && ctxMenu.nodeKey.split(":")[2] !== "INFORMATION_SCHEMA" && menuItem("Drop Schema…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, dropSchemaNode, "#f85149")}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "TASK" &&
             menuItem("Task Statuses…", <DashboardOutlined style={{ fontSize: 12 }} />, openTaskStatuses)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "TASK" &&
