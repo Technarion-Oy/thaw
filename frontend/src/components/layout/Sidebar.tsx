@@ -454,6 +454,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   // active search cascade. treeData is NEVER written to by cascade loads.
   const [searchResults, setSearchResults]           = useState<DataNode[]>([]);
   const loadingNodes    = useRef<Set<string>>(new Set());
+  const [loadingGitNodes, setLoadingGitNodes] = useState<Set<string>>(new Set());
   const searchWasActive = useRef(false);
   const ctxRef = useRef<HTMLDivElement>(null);
 
@@ -767,38 +768,47 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       const db     = parts[1];
       const schema = parts[2];
       const repo   = parts[3];
+      setLoadingGitNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
       try {
         const branches = await ListGitBranches(db, schema, repo);
-        setData((prev) => updateNode(prev, key, (branches || []).map((b) => ({
+        const items = (branches || []).map((b) => ({
           title: b.name,
           key: `gitdir:${db}:${schema}:${repo}:branches/${b.name}`,
           icon: <FolderOutlined />,
           isLeaf: false,
-        }))));
+        }));
+        setData((prev) => updateNode(prev, key, items.length ? items : [gitEmptyNode(key)]));
       } catch (e) {
         console.error(e);
         setData((prev) => updateNode(prev, key, []));
+      } finally {
+        setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
       }
     } else if (parts[0] === "gittags") {
       const db     = parts[1];
       const schema = parts[2];
       const repo   = parts[3];
+      setLoadingGitNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
       try {
         const tags = await ListGitTags(db, schema, repo);
-        setData((prev) => updateNode(prev, key, (tags || []).map((t) => ({
+        const items = (tags || []).map((t) => ({
           title: t.name,
           key: `gitdir:${db}:${schema}:${repo}:tags/${t.name}`,
           icon: <FolderOutlined />,
           isLeaf: false,
-        }))));
+        }));
+        setData((prev) => updateNode(prev, key, items.length ? items : [gitEmptyNode(key)]));
       } catch (e) {
         console.error(e);
         setData((prev) => updateNode(prev, key, []));
+      } finally {
+        setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
       }
     } else if (parts[0] === "gitcommits") {
       const db     = parts[1];
       const schema = parts[2];
       const repo   = parts[3];
+      setLoadingGitNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
       try {
         const commitHash = await GetGitCommitFilter(db, schema, repo);
         if (commitHash) {
@@ -829,18 +839,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       } catch (e) {
         console.error(e);
         setData((prev) => updateNode(prev, key, []));
+      } finally {
+        setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
       }
     } else if (parts[0] === "gitdir") {
       const db       = parts[1];
       const schema   = parts[2];
       const repoName = parts[3];
       const dirPath  = parts.slice(4).join(":");
+      setLoadingGitNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
       try {
         const entries = await ListGitRepoEntries(db, schema, repoName, dirPath);
-        setData((prev) => updateNode(prev, key, buildGitEntryNodes(db, schema, repoName, entries ?? [])));
+        const nodes = buildGitEntryNodes(db, schema, repoName, entries ?? []);
+        setData((prev) => updateNode(prev, key, nodes.length ? nodes : [gitEmptyNode(key)]));
       } catch (e) {
         console.error(e);
         setData((prev) => updateNode(prev, key, []));
+      } finally {
+        setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
       }
     }
   };
@@ -856,6 +872,18 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         : <FileOutlined style={{ color: "var(--text-muted)", fontSize: "10px" }} />,
       isLeaf: !e.isDir,
     }));
+  }
+
+  function gitEmptyNode(parentKey: string): DataNode {
+    return {
+      title: (
+        <Text type="secondary" style={{ fontStyle: "italic", fontSize: 11 }}>
+          (empty)
+        </Text>
+      ),
+      key: `gitempty:${parentKey}`,
+      isLeaf: true,
+    };
   }
 
   function updateNode(nodes: DataNode[], targetKey: string, children: DataNode[]): DataNode[] {
@@ -1965,6 +1993,20 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                     <span style={selectionStyle}>
                       {tooltip}
                     </span>
+                  );
+                }
+                if (
+                  key.startsWith("gitbranches:") ||
+                  key.startsWith("gittags:") ||
+                  key.startsWith("gitcommits:") ||
+                  key.startsWith("gitdir:")
+                ) {
+                  const isLoading = loadingGitNodes.has(key);
+                  return (
+                    <Space size={4}>
+                      <span>{node.title as React.ReactNode}</span>
+                      {isLoading && <SyncOutlined spin style={{ fontSize: 10, color: "var(--text-muted)" }} />}
+                    </Space>
                   );
                 }
                 return node.title as React.ReactNode;
