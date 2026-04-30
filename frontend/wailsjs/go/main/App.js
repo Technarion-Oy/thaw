@@ -14,6 +14,10 @@ export function AlterBackupSet(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['AlterBackupSet'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterPipe(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['AlterPipe'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterTableProperty(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['AlterTableProperty'](arg1, arg2, arg3, arg4, arg5);
 }
@@ -70,6 +74,10 @@ export function BuildCreateGitRepositorySql(arg1, arg2, arg3) {
   return window['go']['main']['App']['BuildCreateGitRepositorySql'](arg1, arg2, arg3);
 }
 
+export function BuildCreatePipeSql(arg1, arg2, arg3) {
+  return window['go']['main']['App']['BuildCreatePipeSql'](arg1, arg2, arg3);
+}
+
 export function BuildCreateSecretSql(arg1, arg2, arg3) {
   return window['go']['main']['App']['BuildCreateSecretSql'](arg1, arg2, arg3);
 }
@@ -84,6 +92,10 @@ export function BuildModifyGitRepositorySql(arg1, arg2, arg3, arg4, arg5, arg6, 
 
 export function BuildModifySecretSql(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['BuildModifySecretSql'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function BuildRefreshPipeSql(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['BuildRefreshPipeSql'](arg1, arg2, arg3, arg4);
 }
 
 export function CanCreateIntegration(arg1) {
@@ -428,6 +440,10 @@ export function GetObjectProperties(arg1, arg2, arg3, arg4) {
 
 export function GetPipRegistryConfig() {
   return window['go']['main']['App']['GetPipRegistryConfig']();
+}
+
+export function GetPipeCopyHistory(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['GetPipeCopyHistory'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function GetProcedureParams(arg1, arg2, arg3, arg4) {

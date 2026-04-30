@@ -5,6 +5,7 @@ import {sqleditor} from '../models';
 import {integrations} from '../models';
 import {procedure} from '../models';
 import {snowgitrepo} from '../models';
+import {pipe} from '../models';
 import {secret} from '../models';
 import {snowflake} from '../models';
 import {dbt} from '../models';
@@ -23,6 +24,8 @@ export function AddBackup(arg1:string,arg2:string,arg3:string):Promise<void>;
 export function AlterBackupPolicy(arg1:string,arg2:string):Promise<void>;
 
 export function AlterBackupSet(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function AlterPipe(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function AlterTableProperty(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
@@ -52,6 +55,8 @@ export function BuildCallStatement(arg1:string,arg2:string,arg3:string,arg4:Arra
 
 export function BuildCreateGitRepositorySql(arg1:string,arg2:string,arg3:snowgitrepo.GitRepositoryConfig):Promise<string>;
 
+export function BuildCreatePipeSql(arg1:string,arg2:string,arg3:pipe.PipeConfig):Promise<string>;
+
 export function BuildCreateSecretSql(arg1:string,arg2:string,arg3:secret.SecretConfig):Promise<string>;
 
 export function BuildFunctionSelectStatement(arg1:string,arg2:string,arg3:string,arg4:Array<procedure.Argument>,arg5:boolean):Promise<string>;
@@ -59,6 +64,8 @@ export function BuildFunctionSelectStatement(arg1:string,arg2:string,arg3:string
 export function BuildModifyGitRepositorySql(arg1:string,arg2:string,arg3:string,arg4:snowgitrepo.GitRepositoryConfig,arg5:string,arg6:string,arg7:string):Promise<Array<string>>;
 
 export function BuildModifySecretSql(arg1:string,arg2:string,arg3:string,arg4:secret.SecretConfig,arg5:string):Promise<Array<string>>;
+
+export function BuildRefreshPipeSql(arg1:string,arg2:string,arg3:string,arg4:pipe.RefreshPipeConfig):Promise<string>;
 
 export function CanCreateIntegration(arg1:string):Promise<boolean>;
 
@@ -231,6 +238,8 @@ export function GetObjectDependencies(arg1:string,arg2:string,arg3:string,arg4:s
 export function GetObjectProperties(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<main.PropertyPair>>;
 
 export function GetPipRegistryConfig():Promise<config.PipRegistryConfig>;
+
+export function GetPipeCopyHistory(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string):Promise<snowflake.QueryResult>;
 
 export function GetProcedureParams(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.ProcParam>>;
 

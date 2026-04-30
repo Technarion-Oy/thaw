@@ -1423,6 +1423,55 @@ export namespace main {
 
 }
 
+export namespace pipe {
+	
+	export class PipeConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    autoIngest: boolean;
+	    errorIntegration: string;
+	    awsSnsTopic: string;
+	    integration: string;
+	    comment: string;
+	    copyStatement: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PipeConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.autoIngest = source["autoIngest"];
+	        this.errorIntegration = source["errorIntegration"];
+	        this.awsSnsTopic = source["awsSnsTopic"];
+	        this.integration = source["integration"];
+	        this.comment = source["comment"];
+	        this.copyStatement = source["copyStatement"];
+	    }
+	}
+	export class RefreshPipeConfig {
+	    prefix: string;
+	    modifiedAfter: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RefreshPipeConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.prefix = source["prefix"];
+	        this.modifiedAfter = source["modifiedAfter"];
+	    }
+	}
+
+}
+
 export namespace procedure {
 	
 	export class Argument {

@@ -42,6 +42,7 @@ import (
 	"thaw/internal/gitrepo"
 	"thaw/internal/integrations"
 	"thaw/internal/logger"
+	"thaw/internal/pipe"
 	"thaw/internal/procedure"
 	"thaw/internal/queryprofile"
 	"thaw/internal/secret"
@@ -1359,6 +1360,67 @@ func (a *App) BuildCreateGitRepositorySql(database, schema string, cfg snowgitre
 // BuildModifyGitRepositorySql returns one or more ALTER GIT REPOSITORY statements.
 func (a *App) BuildModifyGitRepositorySql(database, schema, name string, cfg snowgitrepo.GitRepositoryConfig, originalComment, originalIntegration, originalCredentials string) ([]string, error) {
 	return snowgitrepo.BuildModifyGitRepositorySql(database, schema, name, cfg, originalComment, originalIntegration, originalCredentials)
+}
+
+// BuildCreatePipeSql returns the SQL for creating a Snowflake PIPE.
+func (a *App) BuildCreatePipeSql(database, schema string, cfg pipe.PipeConfig) (string, error) {
+	return pipe.BuildCreatePipeSql(database, schema, cfg)
+}
+
+// BuildRefreshPipeSql returns the SQL for an ALTER PIPE ... REFRESH statement.
+func (a *App) BuildRefreshPipeSql(database, schema, name string, cfg pipe.RefreshPipeConfig) (string, error) {
+	return pipe.BuildRefreshPipeSql(database, schema, name, cfg)
+}
+
+// AlterPipe runs an ALTER PIPE statement for the given pipe.
+// clause is everything that follows the pipe name, e.g. "SET PIPE_EXECUTION_PAUSED = TRUE"
+// or "SET COMMENT = 'hello'". The caller is responsible for correct SQL quoting
+// inside the clause; this method only double-quotes the pipe identifier.
+func (a *App) AlterPipe(database, schema, name, clause string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	sql := fmt.Sprintf("ALTER PIPE %s.%s.%s %s", q(database), q(schema), q(name), clause)
+	_, err := a.client.Execute(a.ctx, sql)
+	return err
+}
+
+// GetPipeCopyHistory returns copy history rows for the given pipe from INFORMATION_SCHEMA.
+// startTime is an optional ISO-8601 timestamp; if empty, defaults to 24 hours ago.
+// status is an optional status filter (LOADED, LOAD_FAILED, PARTIALLY_LOADED, etc.); if empty, all statuses are returned.
+// fileName is an optional file name substring filter; if empty, all files are returned.
+func (a *App) GetPipeCopyHistory(database, schema, name, startTime, status, fileName string) (*snowflake.QueryResult, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	escStr := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
+
+	// Build the fully qualified pipe name as it appears in COPY_HISTORY.
+	// Snowflake stores it as DB.SCHEMA.PIPE (unquoted, uppercase) but we
+	// filter using ILIKE to be safe.
+	pipeFqn := fmt.Sprintf("%s.%s.%s", escStr(database), escStr(schema), escStr(name))
+
+	startExpr := "dateadd(hours, -24, current_timestamp())"
+	if startTime != "" {
+		startExpr = fmt.Sprintf("'%s'::timestamp_ltz", escStr(startTime))
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb,
+		"SELECT * FROM TABLE(%s.information_schema.copy_history(TABLE_NAME => '', START_TIME => %s)) WHERE PIPE_NAME ILIKE '%s'",
+		q(database), startExpr, escStr(pipeFqn),
+	)
+	if status != "" {
+		fmt.Fprintf(&sb, " AND STATUS ILIKE '%s'", escStr(status))
+	}
+	if fileName != "" {
+		fmt.Fprintf(&sb, " AND FILE_NAME ILIKE '%%%s%%'", escStr(fileName))
+	}
+	fmt.Fprintf(&sb, " ORDER BY LAST_LOAD_TIME DESC NULLS LAST")
+
+	return a.client.Execute(a.ctx, sb.String())
 }
 
 // AlterWarehouseProperty applies a single SET property to a warehouse.

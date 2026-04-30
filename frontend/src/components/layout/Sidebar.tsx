@@ -93,6 +93,10 @@ import ModifySecretModal from "../secret/ModifySecretModal";
 import CreateGitRepositoryModal from "../gitrepoobj/CreateGitRepositoryModal";
 import ModifyGitRepositoryModal from "../gitrepoobj/ModifyGitRepositoryModal";
 import SetGitCommitFilterModal from "../gitrepoobj/SetGitCommitFilterModal";
+import CreatePipeModal from "../pipe/CreatePipeModal";
+import PipePropertiesModal from "../pipe/PipePropertiesModal";
+import RefreshPipeModal from "../pipe/RefreshPipeModal";
+import PipeCopyHistoryModal from "../pipe/PipeCopyHistoryModal";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 
 const { Text } = Typography;
@@ -432,6 +436,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [createGitRepoModal, setCreateGitRepoModal] = useState<{ db: string; schema: string } | null>(null);
   const [modifyGitRepoModal, setModifyGitRepoModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [gitCommitFilterModal, setGitCommitFilterModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createPipeModal, setCreatePipeModal] = useState<{ db: string; schema: string } | null>(null);
+  const [pipePropsModal, setPipePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [refreshPipeModal, setRefreshPipeModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [pipeCopyHistoryModal, setPipeCopyHistoryModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [objectSummariesModal, setObjectSummariesModal] = useState<string | null>(null);
   const [createTaskModal, setCreateTaskModal] = useState<{ db: string; schema: string } | null>(null);
   const [executeTaskModal, setExecuteTaskModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -1141,6 +1149,45 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const name = parts[4];
     setCtxMenu(null);
     setModifyGitRepoModal({ db, schema, name });
+  };
+
+  const openCreatePipe = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreatePipeModal({ db, schema });
+  };
+
+  const openPipeProperties = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    setPipePropsModal({ db, schema, name });
+  };
+
+  const openRefreshPipe = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    setRefreshPipeModal({ db, schema, name });
+  };
+
+  const openPipeCopyHistory = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    setPipeCopyHistoryModal({ db, schema, name });
   };
 
   const openCommitFilterModal = () => {
@@ -2195,6 +2242,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             <>
               {menuItem("Table…", <TableOutlined style={{ fontSize: 12 }} />, openCreateTable)}
               {menuItem("Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)}
+              {menuItem("Pipe…", <ApiOutlined style={{ fontSize: 12 }} />, openCreatePipe)}
               {menuItem("Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
               {menuItem("Git Repository…", <BranchesOutlined style={{ fontSize: 12 }} />, openCreateGitRepository)}
 </>
@@ -2209,8 +2257,16 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Task Statuses…", <DashboardOutlined style={{ fontSize: 12 }} />, openTaskStatuses)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "TASK" &&
             menuItem("Create Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "PIPE" &&
+            menuItem("Create Pipe…", <ApiOutlined style={{ fontSize: 12 }} />, openCreatePipe)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "SECRET" &&
             menuItem("Create Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openPipeProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
+            menuItem("Refresh…", <SyncOutlined style={{ fontSize: 12 }} />, openRefreshPipe)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
+            menuItem("Copy History…", <HistoryOutlined style={{ fontSize: 12 }} />, openPipeCopyHistory)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SECRET" &&
             menuItem("Modify…", <EditOutlined style={{ fontSize: 12 }} />, openModifySecret)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "GIT REPOSITORY" &&
@@ -2509,6 +2565,42 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           name={gitCommitFilterModal.name}
           onClose={() => setGitCommitFilterModal(null)}
           onSuccess={() => setTreeData((prev) => clearNodeChildren(prev, `gitcommits:${gitCommitFilterModal.db}:${gitCommitFilterModal.schema}:${gitCommitFilterModal.name}`))}
+        />
+      )}
+
+      {createPipeModal && (
+        <CreatePipeModal
+          db={createPipeModal.db}
+          schema={createPipeModal.schema}
+          onClose={() => setCreatePipeModal(null)}
+          onSuccess={() => refreshDatabaseByName(createPipeModal.db)}
+        />
+      )}
+
+      {pipePropsModal && (
+        <PipePropertiesModal
+          db={pipePropsModal.db}
+          schema={pipePropsModal.schema}
+          name={pipePropsModal.name}
+          onClose={() => setPipePropsModal(null)}
+        />
+      )}
+
+      {refreshPipeModal && (
+        <RefreshPipeModal
+          db={refreshPipeModal.db}
+          schema={refreshPipeModal.schema}
+          name={refreshPipeModal.name}
+          onClose={() => setRefreshPipeModal(null)}
+        />
+      )}
+
+      {pipeCopyHistoryModal && (
+        <PipeCopyHistoryModal
+          db={pipeCopyHistoryModal.db}
+          schema={pipeCopyHistoryModal.schema}
+          name={pipeCopyHistoryModal.name}
+          onClose={() => setPipeCopyHistoryModal(null)}
         />
       )}
 

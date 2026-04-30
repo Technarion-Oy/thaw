@@ -95,6 +95,12 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Modify Support** — generates correct `ALTER SECRET` statements with `SET` clauses; clearing the comment field generates an `UNSET COMMENT` statement
   - **Live SQL Preview** — see the full `CREATE SECRET` or `ALTER SECRET` statement update in real-time as you modify the form
   - **Execution** — runs `ExecDDL` and refreshes the schema tree automatically on success
+- **Snowpipe Management** — right-click any schema and choose **Create Object** → **Pipe…**, or right-click an existing pipe to access pipe-specific operations:
+  - **Create** — dynamic form with name, OR REPLACE / IF NOT EXISTS options, Auto Ingest toggle, Error Integration, AWS SNS Topic, Integration, Comment, and an embedded Monaco editor for the `COPY INTO` statement; live SQL preview shows the full `CREATE PIPE` statement
+  - **Properties** — right-click a pipe and choose **Properties…** to view `SHOW PIPES` metadata plus inline-editable **Pipe Execution Paused** (toggle), **Comment** (inline edit / UNSET), and **Tags** (add/remove key-value pairs); changes are applied immediately via `ALTER PIPE … SET / UNSET`
+  - **Refresh** — right-click a pipe and choose **Refresh…** to open a dialog with optional Prefix and Modified After parameters; live SQL preview shows the generated `ALTER PIPE … REFRESH` command; click **Refresh** to execute
+  - **Copy History** — right-click a pipe and choose **Copy History…** to open an Ag-Grid view backed by `INFORMATION_SCHEMA.COPY_HISTORY`; defaults to the last 24 hours; filterable by Start Time, Status, and File Name substring; sortable by `LAST_LOAD_TIME DESC`
+  - **Drop** — right-click a pipe and choose **Delete…** for a standard danger-confirmation dialog; executes `DROP PIPE IF EXISTS` and removes the node from the tree
 - **Git Repository Management** — right-click any schema and choose **Create Object** → **Git Repository…**, or right-click an existing git repository and choose **Fetch** or **Modify…**:
   - **Create** — specify the origin URL, API integration (required), optional git credentials secret (selected from a live account-wide secret list), optional comment and tags; live SQL preview shows the full `CREATE GIT REPOSITORY` statement
   - **Fetch** — right-click a git repository and choose **Fetch** to run `ALTER GIT REPOSITORY … FETCH`; displays a loading toast during the operation and a success or error message on completion
