@@ -5,16 +5,16 @@
 // in whole or in part, is strictly prohibited without prior written permission
 // from Technarion Oy.
 //
-// Commercial use of this software is restricted to parties holding a valid
+// Commercial use of this software is restricted to patents holding a valid
 // license agreement with Technarion Oy.
 
 import { useState, useEffect } from "react";
 import {
-  Modal, Form, Input, Switch, Checkbox, Space,
+  Modal, Form, Input, Switch, Checkbox, Select, Space,
   Typography, Button, Alert,
 } from "antd";
 import { ApiOutlined } from "@ant-design/icons";
-import { BuildCreatePipeSql, ExecDDL, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/main/App";
+import { BuildCreatePipeSql, ExecDDL, GetQuotedIdentifiersIgnoreCase, ListNotificationIntegrations } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import type { pipe } from "../../../wailsjs/go/models";
 import Editor from "@monaco-editor/react";
@@ -51,11 +51,19 @@ export default function CreatePipeModal({ db, schema, onClose, onSuccess }: Prop
   const [createError, setCreateError] = useState<string | null>(null);
   const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
   const [preview, setPreview] = useState("");
+  const [notifIntegrations, setNotifIntegrations] = useState<string[]>([]);
+  const [loadingIntegrations, setLoadingIntegrations] = useState(false);
 
   useEffect(() => {
     GetQuotedIdentifiersIgnoreCase()
       .then((v) => setQuotedIdentifiersIgnoreCase(v ?? false))
       .catch(() => {});
+
+    setLoadingIntegrations(true);
+    ListNotificationIntegrations()
+      .then((names) => setNotifIntegrations(names ?? []))
+      .catch(() => {})
+      .finally(() => setLoadingIntegrations(false));
   }, []);
 
   useEffect(() => {
@@ -82,6 +90,7 @@ export default function CreatePipeModal({ db, schema, onClose, onSuccess }: Prop
     }
   };
 
+  const integrationOptions = notifIntegrations.map((n) => ({ value: n, label: n }));
   const itemStyle: React.CSSProperties = { marginBottom: 12 };
 
   return (
@@ -175,11 +184,17 @@ export default function CreatePipeModal({ db, schema, onClose, onSuccess }: Prop
           />
         </Form.Item>
 
-        <Form.Item label="Error Integration" style={itemStyle} help="Notification integration for error notifications">
-          <Input
-            value={cfg.errorIntegration}
-            onChange={(e) => set("errorIntegration", e.target.value)}
-            placeholder="MY_ERROR_INTEGRATION"
+        <Form.Item label="Error Integration" style={itemStyle} help="Notification integration used for error notifications">
+          <Select
+            allowClear
+            showSearch
+            loading={loadingIntegrations}
+            value={cfg.errorIntegration || undefined}
+            onChange={(v) => set("errorIntegration", v ?? "")}
+            placeholder="Select notification integration…"
+            options={integrationOptions}
+            style={{ width: "100%" }}
+            notFoundContent={loadingIntegrations ? "Loading…" : "No notification integrations found"}
           />
         </Form.Item>
 
@@ -191,11 +206,17 @@ export default function CreatePipeModal({ db, schema, onClose, onSuccess }: Prop
           />
         </Form.Item>
 
-        <Form.Item label="Integration" style={itemStyle} help="Notification integration name">
-          <Input
-            value={cfg.integration}
-            onChange={(e) => set("integration", e.target.value)}
-            placeholder="MY_INTEGRATION"
+        <Form.Item label="Integration" style={itemStyle} help="Notification integration for pipe event notifications">
+          <Select
+            allowClear
+            showSearch
+            loading={loadingIntegrations}
+            value={cfg.integration || undefined}
+            onChange={(v) => set("integration", v ?? "")}
+            placeholder="Select notification integration…"
+            options={integrationOptions}
+            style={{ width: "100%" }}
+            notFoundContent={loadingIntegrations ? "Loading…" : "No notification integrations found"}
           />
         </Form.Item>
 
