@@ -378,7 +378,7 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
         </div>
 
         {/* Right Column: Preview & SQL */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 20, minWidth: 0 }}>
           {/* Preview Section */}
           <div style={{ padding: 16, background: "color-mix(in srgb, var(--text) 2%, transparent)", borderRadius: 8, border: "1px solid var(--border)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
