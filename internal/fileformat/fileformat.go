@@ -38,6 +38,8 @@ type FileFormatConfig struct {
 	// ── CSV ─────────────────────────────────────────────────────────────────
 	RecordDelimiter            string   `json:"recordDelimiter"`            // default: \n
 	FieldDelimiter             string   `json:"fieldDelimiter"`             // default: ,
+	MultiLine                  bool     `json:"multiLine"`                  // default: false
+	ParseHeader                bool     `json:"parseHeader"`                // default: false
 	SkipHeader                 int      `json:"skipHeader"`                 // default: 0
 	SkipBlankLines             bool     `json:"skipBlankLines"`             // default: false
 	DateFormat                 string   `json:"dateFormat"`                 // AUTO or pattern
@@ -45,11 +47,10 @@ type FileFormatConfig struct {
 	TimestampFormat            string   `json:"timestampFormat"`            // AUTO or pattern
 	BinaryFormat               string   `json:"binaryFormat"`               // HEX | BASE64 | UTF8; default: HEX
 	Escape                     string   `json:"escape"`                     // NONE or char; default: NONE
-	EscapeUnenclosedField      string   `json:"escapeUnenclosedField"`      // default: \\
+	EscapeUnenclosedField      string   `json:"escapeUnenclosedField"`      // NONE or char; default: \\
 	FieldOptionallyEnclosedBy  string   `json:"fieldOptionallyEnclosedBy"`  // NONE | ' | "; default: NONE
 	NullIf                     []string `json:"nullIf"`                     // default: (\N) for CSV
 	ErrorOnColumnCountMismatch bool     `json:"errorOnColumnCountMismatch"` // default: true
-	ValidateUTF8               bool     `json:"validateUTF8"`               // default: true
 	EmptyFieldAsNull           bool     `json:"emptyFieldAsNull"`           // default: true
 	SkipByteOrderMark          bool     `json:"skipByteOrderMark"`          // default: true (CSV/JSON/XML)
 	Encoding                   string   `json:"encoding"`                   // default: UTF8
@@ -210,11 +211,13 @@ func BuildCreateFileFormatSql(db, schema string, cfg FileFormatConfig) string {
 
 func emitCSVParams(sb *strings.Builder, cfg FileFormatConfig) {
 	identParam(sb, "COMPRESSION", cfg.Compression, "AUTO")
-	strParam(sb, "RECORD_DELIMITER", cfg.RecordDelimiter, "\n")
-	strParam(sb, "FIELD_DELIMITER", cfg.FieldDelimiter, ",")
+	noneOrStrParam(sb, "RECORD_DELIMITER", cfg.RecordDelimiter, "\n")
+	noneOrStrParam(sb, "FIELD_DELIMITER", cfg.FieldDelimiter, ",")
+	boolParam(sb, "MULTI_LINE", cfg.MultiLine, false)
 	if cfg.FileExtension != "" {
 		fmt.Fprintf(sb, "\n  FILE_EXTENSION = '%s'", escLit(cfg.FileExtension))
 	}
+	boolParam(sb, "PARSE_HEADER", cfg.ParseHeader, false)
 	if cfg.SkipHeader > 0 {
 		fmt.Fprintf(sb, "\n  SKIP_HEADER = %d", cfg.SkipHeader)
 	}
@@ -224,13 +227,12 @@ func emitCSVParams(sb *strings.Builder, cfg FileFormatConfig) {
 	dateTimeParam(sb, "TIMESTAMP_FORMAT", cfg.TimestampFormat, "AUTO")
 	identParam(sb, "BINARY_FORMAT", cfg.BinaryFormat, "HEX")
 	noneOrStrParam(sb, "ESCAPE", cfg.Escape, "NONE")
-	strParam(sb, "ESCAPE_UNENCLOSED_FIELD", cfg.EscapeUnenclosedField, "\\")
+	noneOrStrParam(sb, "ESCAPE_UNENCLOSED_FIELD", cfg.EscapeUnenclosedField, "\\")
 	boolParam(sb, "TRIM_SPACE", cfg.TrimSpace, false)
 	noneOrStrParam(sb, "FIELD_OPTIONALLY_ENCLOSED_BY", cfg.FieldOptionallyEnclosedBy, "NONE")
 	nullIfParam(sb, cfg.NullIf)
 	boolParam(sb, "ERROR_ON_COLUMN_COUNT_MISMATCH", cfg.ErrorOnColumnCountMismatch, true)
 	boolParam(sb, "REPLACE_INVALID_CHARACTERS", cfg.ReplaceInvalid, false)
-	boolParam(sb, "VALIDATE_UTF8", cfg.ValidateUTF8, true)
 	boolParam(sb, "EMPTY_FIELD_AS_NULL", cfg.EmptyFieldAsNull, true)
 	boolParam(sb, "SKIP_BYTE_ORDER_MARK", cfg.SkipByteOrderMark, true)
 	identParam(sb, "ENCODING", cfg.Encoding, "UTF8")

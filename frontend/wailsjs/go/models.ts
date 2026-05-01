@@ -359,6 +359,8 @@ export namespace fileformat {
 	    fileExtension: string;
 	    recordDelimiter: string;
 	    fieldDelimiter: string;
+	    multiLine: boolean;
+	    parseHeader: boolean;
 	    skipHeader: number;
 	    skipBlankLines: boolean;
 	    dateFormat: string;
@@ -370,7 +372,6 @@ export namespace fileformat {
 	    fieldOptionallyEnclosedBy: string;
 	    nullIf: string[];
 	    errorOnColumnCountMismatch: boolean;
-	    validateUTF8: boolean;
 	    emptyFieldAsNull: boolean;
 	    skipByteOrderMark: boolean;
 	    encoding: string;
@@ -405,6 +406,8 @@ export namespace fileformat {
 	        this.fileExtension = source["fileExtension"];
 	        this.recordDelimiter = source["recordDelimiter"];
 	        this.fieldDelimiter = source["fieldDelimiter"];
+	        this.multiLine = source["multiLine"];
+	        this.parseHeader = source["parseHeader"];
 	        this.skipHeader = source["skipHeader"];
 	        this.skipBlankLines = source["skipBlankLines"];
 	        this.dateFormat = source["dateFormat"];
@@ -416,7 +419,6 @@ export namespace fileformat {
 	        this.fieldOptionallyEnclosedBy = source["fieldOptionallyEnclosedBy"];
 	        this.nullIf = source["nullIf"];
 	        this.errorOnColumnCountMismatch = source["errorOnColumnCountMismatch"];
-	        this.validateUTF8 = source["validateUTF8"];
 	        this.emptyFieldAsNull = source["emptyFieldAsNull"];
 	        this.skipByteOrderMark = source["skipByteOrderMark"];
 	        this.encoding = source["encoding"];
