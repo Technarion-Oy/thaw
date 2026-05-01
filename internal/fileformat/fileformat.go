@@ -207,6 +207,37 @@ func BuildCreateFileFormatSql(db, schema string, cfg FileFormatConfig) string {
 	return sb.String()
 }
 
+// BuildCreateTemporaryFileFormatSql generates a CREATE OR REPLACE TEMPORARY FILE_FORMAT
+// statement with the given name.
+func BuildCreateTemporaryFileFormatSql(name string, cfg FileFormatConfig) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "CREATE OR REPLACE TEMPORARY FILE_FORMAT %s", snowflake.QuoteIdent(name))
+
+	t := strings.ToUpper(strings.TrimSpace(cfg.Type))
+	if t == "" {
+		t = "CSV"
+	}
+	fmt.Fprintf(&sb, "\n  TYPE = %s", t)
+
+	switch t {
+	case "CSV":
+		emitCSVParams(&sb, cfg)
+	case "JSON":
+		emitJSONParams(&sb, cfg)
+	case "AVRO":
+		emitAVROParams(&sb, cfg)
+	case "ORC":
+		emitORCParams(&sb, cfg)
+	case "PARQUET":
+		emitParquetParams(&sb, cfg)
+	case "XML":
+		emitXMLParams(&sb, cfg)
+	}
+
+	sb.WriteString(";")
+	return sb.String()
+}
+
 // ── Per-type parameter emitters ──────────────────────────────────────────────
 
 func emitCSVParams(sb *strings.Builder, cfg FileFormatConfig) {

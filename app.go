@@ -1397,51 +1397,9 @@ func (a *App) BuildCreateFileFormatSql(database, schema string, cfg fileformat.F
 }
 
 // GetLocalFilePreview reads a local file and returns up to 50 rows.
-// It extracts the first 1 MiB of the local file, uploads it to a temporary
-// user stage in Snowflake, and runs a stage preview to ensure 100% fidelity
-// with Snowflake's native file format options.
+// It uses pure Go to mimic Snowflake's native file format parsing for CSV and JSON.
 func (a *App) GetLocalFilePreview(path string, cfg fileformat.FileFormatConfig) fileformat.PreviewResult {
-	if a.client == nil {
-		return fileformat.PreviewResult{Error: "Not connected to Snowflake"}
-	}
-
-	f, err := os.Open(path)
-	if err != nil {
-		return fileformat.PreviewResult{Error: err.Error()}
-	}
-	defer func() { _ = f.Close() }()
-
-	tmpFile, err := os.CreateTemp("", "thaw_preview_*.dat")
-	if err != nil {
-		return fileformat.PreviewResult{Error: err.Error()}
-	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
-
-	_, err = io.CopyN(tmpFile, f, 1024*1024)
-	if err != nil && err != io.EOF {
-		tmpFile.Close()
-		return fileformat.PreviewResult{Error: err.Error()}
-	}
-	tmpFile.Close()
-
-	// Upload to Snowflake user stage
-	escapedURL := "file://" + filepath.ToSlash(tmpPath)
-	putQuery := fmt.Sprintf("PUT '%s' @~/thaw_file_format_preview/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE", escapedURL)
-	_, err = a.client.QuerySingle(a.ctx, putQuery)
-	if err != nil {
-		return fileformat.PreviewResult{Error: fmt.Sprintf("Failed to upload preview file to Snowflake: %v", err)}
-	}
-
-	// Ensure cleanup
-	defer func() {
-		rmQuery := fmt.Sprintf("RM @~/thaw_file_format_preview/%s", filepath.Base(tmpPath))
-		_, _ = a.client.QuerySingle(a.ctx, rmQuery)
-	}()
-
-	stagePath := fmt.Sprintf("@~/thaw_file_format_preview/%s", filepath.Base(tmpPath))
-	res, _ := a.GetStageFilePreview(stagePath, cfg)
-	return res
+	return fileformat.PreviewLocalFile(path, cfg)
 }
 
 // GetStageFilePreview queries a Snowflake stage file with an inline FILE_FORMAT
@@ -1467,13 +1425,32 @@ func (a *App) GetStageFilePreview(stagePath string, cfg fileformat.FileFormatCon
 		limit = 51
 	}
 
-	query := fmt.Sprintf("SELECT * FROM %s (FILE_FORMAT => (%s)) LIMIT %d;", stagePath, inline, limit)
-	result, err := a.client.QuerySingle(a.ctx, query)
+	// Use a temporary file format to avoid "Table function argument is required to be a constant" errors.
+	formatName := fmt.Sprintf("THAW_PREVIEW_%d", time.Now().UnixNano())
+	createSql := fileformat.BuildCreateTemporaryFileFormatSql(formatName, queryCfg)
+	selectSql := fmt.Sprintf("SELECT * FROM %s (FILE_FORMAT => '%s') LIMIT %d;", stagePath, formatName, limit)
+
+	// Execute both statements. Execute returns the last result set.
+	result, err := a.client.Execute(a.ctx, createSql+"\n"+selectSql)
+
+	// Clean up the temporary format (best effort)
+	defer func() {
+		_, _ = a.client.Execute(a.ctx, fmt.Sprintf("DROP FILE_FORMAT IF EXISTS %s;", formatName))
+	}()
+
 	if err != nil {
-		return fileformat.PreviewResult{Error: err.Error()}, nil //nolint:nilerr
+		// Fallback: if the temporary format failed (e.g. no active database), try inline.
+		// Some Snowflake accounts/configurations might still support inline formats
+		// and this provides a last-resort recovery.
+		fallbackQuery := fmt.Sprintf("SELECT * FROM %s (FILE_FORMAT => (%s)) LIMIT %d;", stagePath, inline, limit)
+		var fallbackErr error
+		result, fallbackErr = a.client.QuerySingle(a.ctx, fallbackQuery)
+		if fallbackErr != nil {
+			return fileformat.PreviewResult{Error: err.Error()}, nil // return the original error
+		}
 	}
 
-	if len(result.Rows) == 0 {
+	if result == nil || len(result.Rows) == 0 {
 		return fileformat.PreviewResult{Columns: []string{}, Rows: []map[string]string{}}, nil
 	}
 
