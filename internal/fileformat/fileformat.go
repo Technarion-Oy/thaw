@@ -99,14 +99,6 @@ func boolParam(sb *strings.Builder, name string, val, def bool) {
 	}
 }
 
-// strParam emits "  NAME = 'val'" only when val differs from def and is non-empty.
-func strParam(sb *strings.Builder, name, val, def string) {
-	if val == "" || val == def {
-		return
-	}
-	fmt.Fprintf(sb, "\n  %s = '%s'", name, escLit(val))
-}
-
 // identParam emits "  NAME = VAL" (no quotes) only when val differs from def
 // and is non-empty. Used for COMPRESSION, BINARY_FORMAT, ENCODING, etc.
 func identParam(sb *strings.Builder, name, val, def string) {

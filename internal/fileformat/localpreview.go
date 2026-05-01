@@ -34,8 +34,11 @@ func previewCSV(path string, cfg FileFormatConfig) PreviewResult {
 	if err != nil {
 		return PreviewResult{Error: err.Error()}
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
+	return previewCSVReader(f, cfg)
+}
 
+func previewCSVReader(r io.Reader, cfg FileFormatConfig) PreviewResult {
 	// Handle custom delimiters
 	delim := ','
 	if cfg.FieldDelimiter != "" {
@@ -49,24 +52,14 @@ func previewCSV(path string, cfg FileFormatConfig) PreviewResult {
 				break
 			}
 		}
-	} else if cfg.RecordDelimiter != "\\n" && cfg.RecordDelimiter != "" {
-		// Just for safety if people mix things up, though Snowflake defaults field to , and record to \n
 	}
 
 	// encoding/csv requires a single rune.
-	reader := csv.NewReader(f)
+	reader := csv.NewReader(r)
 	reader.Comma = delim
 	reader.LazyQuotes = true
 	reader.TrimLeadingSpace = cfg.TrimSpace
 	reader.FieldsPerRecord = -1 // Allow variable number of fields
-
-	if cfg.FieldOptionallyEnclosedBy != "" && cfg.FieldOptionallyEnclosedBy != "NONE" {
-		if cfg.FieldOptionallyEnclosedBy == "'" || cfg.FieldOptionallyEnclosedBy == "\"" {
-			// Go's csv package assumes double quotes. We cannot easily switch it to single quotes
-			// without writing a custom parser. We will rely on default behavior for now, which
-			// handles double quotes.
-		}
-	}
 
 	// Skip header rows
 	skip := cfg.SkipHeader
@@ -169,7 +162,7 @@ func previewJSON(path string, cfg FileFormatConfig) PreviewResult {
 	if err != nil {
 		return PreviewResult{Error: err.Error()}
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	buf := make([]byte, 1024*1024)
 	n, err := io.ReadFull(f, buf)
@@ -178,6 +171,10 @@ func previewJSON(path string, cfg FileFormatConfig) PreviewResult {
 	}
 	buf = buf[:n]
 
+	return previewJSONBytes(buf, cfg)
+}
+
+func previewJSONBytes(buf []byte, cfg FileFormatConfig) PreviewResult {
 	// Try to parse as array first
 	var p fastjson.Parser
 	v, err := p.ParseBytes(buf)
@@ -199,6 +196,7 @@ func previewJSON(path string, cfg FileFormatConfig) PreviewResult {
 			if line == "" {
 				continue
 			}
+			var p fastjson.Parser
 			v, err := p.Parse(line)
 			if err != nil {
 				continue // Skip bad lines in NDJSON preview

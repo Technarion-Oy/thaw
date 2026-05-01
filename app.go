@@ -1485,7 +1485,7 @@ func (a *App) GetStageFilePreview(stagePath string, cfg fileformat.FileFormatCon
 }
 
 // PickFileForFormatPreview opens a native file-picker filtered to common data
-// file extensions. Returns the chosen path, or "" if the user cancelled.
+// file extensions. Returns the chosen path, or "" if the user canceled.
 func (a *App) PickFileForFormatPreview() string {
 	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
 		Title: "Select a data file to preview",
