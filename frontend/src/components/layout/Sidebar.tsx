@@ -20,6 +20,7 @@ import {
   InboxOutlined,
   ApiOutlined,
   ClockCircleOutlined,
+  FileTextOutlined,
   FileOutlined,
   FolderOutlined,
   ReloadOutlined,
@@ -77,6 +78,7 @@ import SelectFunctionModal from "../function/SelectFunctionModal";
 import CreateTaskModal from "../task/CreateTaskModal";
 import CreateDatabaseModal from "../database/CreateDatabaseModal";
 import CreateTableModal from "../database/CreateTableModal";
+import CreateFileFormatModal from "../database/CreateFileFormatModal";
 import ObjectSummariesModal from "../database/ObjectSummariesModal";
 import ExecuteTaskModal from "../task/ExecuteTaskModal";
 import TaskGraphModal from "../task/TaskGraphModal";
@@ -433,6 +435,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [executeNotebookModal, setExecuteNotebookModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createDbOpen, setCreateDbOpen] = useState(false);
   const [createTableModal, setCreateTableModal] = useState<{ db: string; schema: string } | null>(null);
+  const [createFileFormatModal, setCreateFileFormatModal] = useState<{ db: string; schema: string } | null>(null);
   const [createSecretModal, setCreateSecretModal] = useState<{ db: string; schema: string } | null>(null);
   const [modifySecretModal, setModifySecretModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createGitRepoModal, setCreateGitRepoModal] = useState<{ db: string; schema: string } | null>(null);
@@ -1097,6 +1100,15 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const schema = parts[2];
     setCtxMenu(null);
     setCreateTableModal({ db, schema });
+  };
+
+  const openCreateFileFormat = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateFileFormatModal({ db, schema });
   };
 
   const openObjectSummaries = () => {
@@ -2299,6 +2311,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "schema" && menuItemSub("Create Object", <PlusSquareOutlined style={{ fontSize: 12 }} />, "create-object", (
             <>
               {menuItem("Table…", <TableOutlined style={{ fontSize: 12 }} />, openCreateTable)}
+              {menuItem("File Format…", <FileTextOutlined style={{ fontSize: 12 }} />, openCreateFileFormat, undefined, !featureFlags.fileFormatBuilder, "File Format Builder is disabled. Enable it under View → Enabled Features…")}
               {menuItem("Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)}
               {menuItem("Pipe…", <ApiOutlined style={{ fontSize: 12 }} />, openCreatePipe)}
               {menuItem("Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
@@ -2317,6 +2330,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "PIPE" &&
             menuItem("Create Pipe…", <ApiOutlined style={{ fontSize: 12 }} />, openCreatePipe)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "FILE FORMAT" &&
+            menuItem("Create File Format…", <FileTextOutlined style={{ fontSize: 12 }} />, openCreateFileFormat)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "SECRET" &&
             menuItem("Create Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
@@ -2563,6 +2578,16 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={createTableModal.schema}
           onClose={() => setCreateTableModal(null)}
           onSuccess={() => refreshDatabaseByName(createTableModal.db)}
+        />
+      )}
+
+      {/* Create File Format modal */}
+      {createFileFormatModal && (
+        <CreateFileFormatModal
+          db={createFileFormatModal.db}
+          schema={createFileFormatModal.schema}
+          onClose={() => setCreateFileFormatModal(null)}
+          onSuccess={() => refreshDatabaseByName(createFileFormatModal.db)}
         />
       )}
 

@@ -37,6 +37,7 @@ import (
 	"thaw/internal/ai"
 	"thaw/internal/config"
 	"thaw/internal/ddl"
+	"thaw/internal/fileformat"
 	"thaw/internal/filesystem"
 	"thaw/internal/fnmeta"
 	"thaw/internal/gitrepo"
@@ -1384,6 +1385,65 @@ func (a *App) BuildCreatePipeSql(database, schema string, cfg pipe.PipeConfig) (
 // BuildRefreshPipeSql returns the SQL for an ALTER PIPE ... REFRESH statement.
 func (a *App) BuildRefreshPipeSql(database, schema, name string, cfg pipe.RefreshPipeConfig) (string, error) {
 	return pipe.BuildRefreshPipeSql(database, schema, name, cfg)
+}
+
+// ── File Format ──────────────────────────────────────────────────────────────
+
+// BuildCreateFileFormatSql returns the CREATE FILE FORMAT SQL statement for the
+// given configuration. Only parameters that differ from Snowflake's defaults are
+// included, keeping the output concise.
+func (a *App) BuildCreateFileFormatSql(database, schema string, cfg fileformat.FileFormatConfig) string {
+	return fileformat.BuildCreateFileFormatSql(database, schema, cfg)
+}
+
+// GetLocalFilePreview reads a local CSV or JSON file and returns up to 50 rows.
+// AVRO, ORC, PARQUET, and XML return an error directing the user to use Stage Preview.
+func (a *App) GetLocalFilePreview(path string, cfg fileformat.FileFormatConfig) fileformat.PreviewResult {
+	return fileformat.GetLocalFilePreview(path, cfg)
+}
+
+// GetStageFilePreview queries a Snowflake stage file with an inline FILE_FORMAT
+// derived from cfg and returns up to 50 rows. The stagePath must be a fully
+// qualified stage reference, e.g. "@DB.SCHEMA.STAGE/path/to/file.csv".
+func (a *App) GetStageFilePreview(stagePath string, cfg fileformat.FileFormatConfig) (fileformat.PreviewResult, error) {
+	if a.client == nil {
+		return fileformat.PreviewResult{}, ErrNotConnected
+	}
+	inline := fileformat.BuildInlineFileFormat(cfg)
+	query := fmt.Sprintf("SELECT * FROM %s (FILE_FORMAT => (%s)) LIMIT 50;", stagePath, inline)
+	result, err := a.client.QuerySingle(a.ctx, query)
+	if err != nil {
+		return fileformat.PreviewResult{Error: err.Error()}, nil //nolint:nilerr
+	}
+
+	cols := result.Columns
+	rows := make([]map[string]string, 0, len(result.Rows))
+	for _, raw := range result.Rows {
+		row := make(map[string]string, len(cols))
+		for i, col := range cols {
+			if i < len(raw) && raw[i] != nil {
+				row[col] = fmt.Sprintf("%v", raw[i])
+			}
+		}
+		rows = append(rows, row)
+	}
+	return fileformat.PreviewResult{Columns: cols, Rows: rows}, nil
+}
+
+// PickFileForFormatPreview opens a native file-picker filtered to common data
+// file extensions. Returns the chosen path, or "" if the user cancelled.
+func (a *App) PickFileForFormatPreview() string {
+	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title: "Select a data file to preview",
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "Data Files (*.csv, *.tsv, *.json, *.ndjson, *.jsonl)", Pattern: "*.csv;*.tsv;*.txt;*.json;*.ndjson;*.jsonl"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		},
+	})
+	if err != nil {
+		return ""
+	}
+	return path
 }
 
 // AlterPipe runs an ALTER PIPE statement for the given pipe.

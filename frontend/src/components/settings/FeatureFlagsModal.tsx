@@ -318,6 +318,13 @@ export default function FeatureFlagsModal({ onClose }: Props) {
             onChange={(v) => set("insertMapping", v)}
           />
           <FlagRow
+            label="File Format Builder"
+            description="Visual CREATE FILE FORMAT builder and data previewer."
+            checked={flags.fileFormatBuilder}
+            locked={locked.fileFormatBuilder}
+            onChange={(v) => set("fileFormatBuilder", v)}
+          />
+          <FlagRow
             label="Code Snippets"
             description="Library of curated CREATE OR REPLACE templates for common Snowflake objects."
             checked={flags.codeSnippets}
