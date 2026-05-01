@@ -112,13 +112,6 @@ func parseIdentPartWithQuoting(s string) (ident, rest string, quoted bool, err e
 	return ident, rest, false, err
 }
 
-// parseIdentPart consumes one identifier (quoted or unquoted) from s.
-// Kept for internal use where quoting metadata is not needed.
-func parseIdentPart(s string) (ident, rest string, err error) {
-	ident, rest, _, err = parseIdentPartWithQuoting(s)
-	return
-}
-
 // parseQuotedIdent consumes a double-quoted identifier, treating "" as an
 // escaped double-quote inside the value.
 func parseQuotedIdent(s string) (ident, rest string, err error) {
