@@ -46,6 +46,20 @@ func escLit(s string) string {
 	return strings.ReplaceAll(s, "'", "''")
 }
 
+// validateCopyStatement ensures rawStmt contains exactly one SQL statement and
+// that it begins with COPY INTO. Returns the trimmed statement on success.
+func validateCopyStatement(rawStmt string) (string, error) {
+	stmts := snowflake.SplitStatements(rawStmt)
+	if len(stmts) != 1 {
+		return "", fmt.Errorf("copy statement must contain exactly one SQL statement, got %d", len(stmts))
+	}
+	stmt := strings.TrimSpace(stmts[0])
+	if !strings.HasPrefix(strings.ToUpper(stmt), "COPY INTO ") {
+		return "", fmt.Errorf("copy statement must start with COPY INTO")
+	}
+	return stmt, nil
+}
+
 // BuildCreatePipeSql constructs a CREATE PIPE SQL statement from the given config.
 func BuildCreatePipeSql(db, schema string, cfg PipeConfig) (string, error) {
 	var sb strings.Builder
@@ -85,6 +99,12 @@ func BuildCreatePipeSql(db, schema string, cfg PipeConfig) (string, error) {
 	copyStmt := strings.TrimSpace(cfg.CopyStatement)
 	if copyStmt == "" {
 		copyStmt = "COPY INTO <table> FROM @<stage>"
+	} else {
+		validated, err := validateCopyStatement(copyStmt)
+		if err != nil {
+			return "", err
+		}
+		copyStmt = validated
 	}
 	fmt.Fprintf(&sb, "\n  AS\n%s", copyStmt)
 

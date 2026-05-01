@@ -557,10 +557,13 @@ func (c *Client) QuerySingle(ctx context.Context, query string) (*QueryResult, e
 	return result, nil
 }
 
-// splitStatements splits a SQL string into individual statements on semicolons,
-// respecting single-quoted strings, double-quoted identifiers, line comments
-// (--), block comments (/* */), and Snowflake dollar-quoted strings ($$...$$
-// and $tag$...$tag$).
+// SplitStatements splits a SQL string into individual statements on
+// semicolons, respecting single-quoted strings, double-quoted identifiers,
+// line comments (--), block comments (/* */), and Snowflake dollar-quoted
+// strings ($$..$$ and $tag$..$tag$).
+func SplitStatements(sql string) []string { return splitStatements(sql) }
+
+// splitStatements is the internal implementation of SplitStatements.
 func splitStatements(sql string) []string {
 	var stmts []string
 	var cur strings.Builder
