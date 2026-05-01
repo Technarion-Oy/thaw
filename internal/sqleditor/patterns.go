@@ -222,9 +222,25 @@ var (
 
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
 	reIsCreateStage = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?STAGE\b`)
-	stageProps      = strings.Join([]string{
-		`URL`, `STORAGE_INTEGRATION`, `FILE_FORMAT`, `COPY_OPTIONS`, `COMMENT`, `ENCRYPTION`,
-		`DIRECTORY`, `ENABLE`, `REFRESH_ON_CREATE`, `AUTO_REFRESH`, `MASTER_KEY`,
+	// stageProps lists only top-level CREATE STAGE property keys.
+	// Nested keys inside FILE_FORMAT=(...), ENCRYPTION=(...), DIRECTORY=(...),
+	// CREDENTIALS=(...), and COPY_OPTIONS=(...) are stripped before validation
+	// via stripParenContents so they never trigger a false positive.
+	stageProps = strings.Join([]string{
+		`URL`, `STORAGE_INTEGRATION`, `CREDENTIALS`, `ENCRYPTION`,
+		`AWS_ACCESS_POINT_ARN`, `USE_PRIVATELINK_ENDPOINT`, `ENDPOINT`,
+		`FILE_FORMAT`, `COPY_OPTIONS`, `COMMENT`, `DIRECTORY`,
+	}, "|")
+
+	// ── ALTER STAGE ───────────────────────────────────────────────────────────
+	reIsAlterStage         = regexp.MustCompile(`(?i)^\s*ALTER\s+STAGE\b`)
+	reAlterStageNoValidate = regexp.MustCompile(`(?i)\b(?:RENAME\s+TO|UNSET\b|SET\s+TAG\b)`)
+	// alterStageProps lists valid top-level ALTER STAGE SET property keys.
+	// SUBPATH is valid in ALTER STAGE ... REFRESH SUBPATH = '...'.
+	alterStageProps = strings.Join([]string{
+		`URL`, `STORAGE_INTEGRATION`, `CREDENTIALS`, `ENCRYPTION`,
+		`AWS_ACCESS_POINT_ARN`, `USE_PRIVATELINK_ENDPOINT`,
+		`FILE_FORMAT`, `COPY_OPTIONS`, `COMMENT`, `DIRECTORY`, `SUBPATH`,
 	}, "|")
 
 	// ── Parseable keywords ────────────────────────────────────────────────────
@@ -611,8 +627,24 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		}
 
 		// ── Preamble: CREATE STAGE ───────────────────────────────────────
+		// stripParenContents removes nested KEY=VALUE pairs inside blocks
+		// like FILE_FORMAT=(...), ENCRYPTION=(...), DIRECTORY=(...) before
+		// property validation, preventing false positives like "Unexpected
+		// property 'TYPE'" for FILE_FORMAT=(TYPE='CSV' ...).
 		if reIsCreateStage.MatchString(parseText) {
-			validateProperties(parseText, stageProps, r, &markers)
+			validateProperties(stripParenContents(parseText), stageProps, r, &markers)
+			continue
+		}
+
+		// ── Preamble: ALTER STAGE ─────────────────────────────────────────
+		// RENAME TO, UNSET TAG, SET TAG, and UNSET DCM forms carry dynamic
+		// identifiers (new name, tag names) that cannot be property-validated.
+		// All other forms (SET FILE_FORMAT=..., SET COMMENT=..., REFRESH, etc.)
+		// are validated for top-level property keys after stripping nested parens.
+		if reIsAlterStage.MatchString(parseText) {
+			if !reAlterStageNoValidate.MatchString(parseText) {
+				validateProperties(stripParenContents(parseText), alterStageProps, r, &markers)
+			}
 			continue
 		}
 
@@ -884,6 +916,56 @@ func processColumnDef(seg string, segOffset int, onTypeFound func(string, int)) 
 			onTypeFound(typeToken.text, typeToken.offset)
 		}
 	}
+}
+
+// stripParenContents returns s with all content inside parentheses removed
+// while keeping the parenthesis characters themselves.  String literals
+// (single- or double-quoted) are tracked so that parentheses appearing inside
+// quoted values are not counted as structural delimiters.
+//
+// Example:
+//
+//	"FILE_FORMAT = (TYPE = 'CSV' SKIP_HEADER = 1) COMMENT = 'x'"
+//	→ "FILE_FORMAT = () COMMENT = 'x'"
+//
+// This prevents nested KEY=VALUE pairs inside blocks such as
+// FILE_FORMAT=(...), ENCRYPTION=(...), CREDENTIALS=(...), or DIRECTORY=(...)
+// from being falsely flagged as unexpected top-level properties.
+func stripParenContents(s string) string {
+	out := make([]byte, 0, len(s))
+	depth := 0
+	inSingle := false
+	inDouble := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case !inDouble && c == '\'':
+			inSingle = !inSingle
+			if depth == 0 {
+				out = append(out, c)
+			}
+		case !inSingle && c == '"':
+			inDouble = !inDouble
+			if depth == 0 {
+				out = append(out, c)
+			}
+		case inSingle || inDouble:
+			if depth == 0 {
+				out = append(out, c)
+			}
+		case c == '(':
+			depth++
+			out = append(out, c)
+		case c == ')':
+			depth--
+			out = append(out, c)
+		default:
+			if depth == 0 {
+				out = append(out, c)
+			}
+		}
+	}
+	return string(out)
 }
 
 // validateProperties scans s for words that look like property keys (KEY =)
