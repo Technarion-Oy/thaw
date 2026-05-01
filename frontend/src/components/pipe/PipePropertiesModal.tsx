@@ -286,19 +286,10 @@ export default function PipePropertiesModal({ db, schema, name, onClose }: Props
     setPausedError(null);
     try {
       await AlterPipe(db, schema, name, `SET PIPE_EXECUTION_PAUSED = ${val ? "TRUE" : "FALSE"}`);
-      // Re-read the authoritative status from Snowflake after altering.
-      const statusJson = await GetPipeStatus(db, schema, name);
-      if (statusJson) {
-        try {
-          const status: PipeStatus = JSON.parse(statusJson);
-          setPipeStatus(status);
-          setPaused(status.executionState === "PAUSED");
-        } catch {
-          setPaused(val);
-        }
-      } else {
-        setPaused(val);
-      }
+      // Update state optimistically — SYSTEM$PIPE_STATUS is eventually consistent
+      // and may still return the previous executionState immediately after ALTER PIPE.
+      setPaused(val);
+      setPipeStatus((prev) => prev ? { ...prev, executionState: val ? "PAUSED" : "RUNNING" } : prev);
     } catch (e) {
       setPausedError(String(e));
     } finally {
