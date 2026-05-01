@@ -91,15 +91,33 @@ export default function QueryPage() {
   const [terminalOpen, setTerminalOpen] = useState(false);
   const featureFlags = useFeatureFlagsStore((s) => s.flags);
 
-  // ── Result history (last 10 unpinned + all pinned, most-recent-first) ────
+  // ── Result history — per tab (last 10 unpinned + all pinned, most-recent-first) ────
   interface HistoryEntry { id: string; queryID: string; sql: string; result: QueryResult; pinned: boolean; }
-  const [resultHistory, setResultHistory] = useState<HistoryEntry[]>([]);
-  const [historyId,     setHistoryId]     = useState<string | null>(null);
+  const [tabHistories,  setTabHistories]  = useState<Map<string, HistoryEntry[]>>(() => new Map());
+  const [tabHistoryIds, setTabHistoryIds] = useState<Map<string, string | null>>(() => new Map());
+  const [tabCompareIds, setTabCompareIds] = useState<Map<string, string | null>>(() => new Map());
+
+  // Derived values for the currently active tab.
+  const resultHistory    = tabHistories.get(activeTabId)  ?? [];
+  const historyId        = tabHistoryIds.get(activeTabId) ?? null;
+  const compareHistoryId = tabCompareIds.get(activeTabId) ?? null;
+
+  // Helpers that update any tab's history. Using the captured runTabId inside
+  // runQuery ensures results from background queries land in the correct tab
+  // even if the user has switched away before the query finishes.
+  const updateTabHistory = (tabId: string, updater: (prev: HistoryEntry[]) => HistoryEntry[]) =>
+    setTabHistories((prev) => {
+      const m = new Map(prev);
+      m.set(tabId, updater(m.get(tabId) ?? []));
+      return m;
+    });
+  const updateTabHistoryId = (tabId: string, id: string | null) =>
+    setTabHistoryIds((prev) => { const m = new Map(prev); m.set(tabId, id); return m; });
+  const setCompareHistoryId = (id: string | null) =>
+    setTabCompareIds((prev) => { const m = new Map(prev); m.set(activeTabId, id); return m; });
 
   const togglePin = (id: string) =>
-    setResultHistory((prev) => prev.map((e) => (e.id === id ? { ...e, pinned: !e.pinned } : e)));
-
-  const [compareHistoryId, setCompareHistoryId] = useState<string | null>(null);
+    updateTabHistory(activeTabId, (prev) => prev.map((e) => (e.id === id ? { ...e, pinned: !e.pinned } : e)));
 
   const [snippetsOpen, setSnippetsOpen] = useState(false);
   const [exportPathFormatOpen, setExportPathFormatOpen] = useState(false);
@@ -369,14 +387,14 @@ export default function QueryPage() {
       const res = await WaitForQueryResult(runTabId);
       setResult(res);
       const newId = crypto.randomUUID();
-      setResultHistory((prev) => {
+      updateTabHistory(runTabId, (prev) => {
         const withNew = [{ id: newId, queryID: res.queryID ?? "", sql: query, result: res, pinned: false }, ...prev];
         const pinned = withNew.filter((e) => e.pinned);
         const unpinned = withNew.filter((e) => !e.pinned).slice(0, 10);
         const kept = new Set([...unpinned.map((e) => e.id), ...pinned.map((e) => e.id)]);
         return withNew.filter((e) => kept.has(e.id));
       });
-      setHistoryId(newId);
+      updateTabHistoryId(runTabId, newId);
     } catch (e) {
       // Suppress the error when the user explicitly cancelled — keep whatever
       // result was previously shown rather than replacing it with an error.
@@ -385,7 +403,7 @@ export default function QueryPage() {
         const tabStillOpen = useQueryStore.getState().tabs.some((t) => t.id === runTabId);
         if (tabStillOpen) {
           setError(String(e));
-          setHistoryId(null); // hide the grid; let the user re-select from history
+          updateTabHistoryId(runTabId, null); // hide the grid; let the user re-select from history
         }
       }
     } finally {
@@ -1305,7 +1323,7 @@ export default function QueryPage() {
                       <Select
                         size="small"
                         value={historyId}
-                        onChange={(v) => setHistoryId(v)}
+                        onChange={(v) => updateTabHistoryId(activeTabId, v)}
                         style={{ fontSize: 11, width: 220 }}
                         popupMatchSelectWidth={false}
                         options={sortedHistory.map((e) => {
@@ -1476,7 +1494,7 @@ export default function QueryPage() {
                       size="small"
                       placeholder="Select to view…"
                       value={undefined}
-                      onChange={(v: string) => setHistoryId(v)}
+                      onChange={(v: string) => updateTabHistoryId(activeTabId, v)}
                       style={{ fontSize: 11, width: 260 }}
                       popupMatchSelectWidth={false}
                       options={sortedHistory.map((e) => {
