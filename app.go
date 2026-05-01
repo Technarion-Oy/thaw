@@ -1396,10 +1396,52 @@ func (a *App) BuildCreateFileFormatSql(database, schema string, cfg fileformat.F
 	return fileformat.BuildCreateFileFormatSql(database, schema, cfg)
 }
 
-// GetLocalFilePreview reads a local CSV or JSON file and returns up to 50 rows.
-// AVRO, ORC, PARQUET, and XML return an error directing the user to use Stage Preview.
+// GetLocalFilePreview reads a local file and returns up to 50 rows.
+// It extracts the first 1 MiB of the local file, uploads it to a temporary
+// user stage in Snowflake, and runs a stage preview to ensure 100% fidelity
+// with Snowflake's native file format options.
 func (a *App) GetLocalFilePreview(path string, cfg fileformat.FileFormatConfig) fileformat.PreviewResult {
-	return fileformat.GetLocalFilePreview(path, cfg)
+	if a.client == nil {
+		return fileformat.PreviewResult{Error: "Not connected to Snowflake"}
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return fileformat.PreviewResult{Error: err.Error()}
+	}
+	defer func() { _ = f.Close() }()
+
+	tmpFile, err := os.CreateTemp("", "thaw_preview_*.dat")
+	if err != nil {
+		return fileformat.PreviewResult{Error: err.Error()}
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	_, err = io.CopyN(tmpFile, f, 1024*1024)
+	if err != nil && err != io.EOF {
+		tmpFile.Close()
+		return fileformat.PreviewResult{Error: err.Error()}
+	}
+	tmpFile.Close()
+
+	// Upload to Snowflake user stage
+	escapedURL := "file://" + filepath.ToSlash(tmpPath)
+	putQuery := fmt.Sprintf("PUT '%s' @~/thaw_file_format_preview/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE", escapedURL)
+	_, err = a.client.QuerySingle(a.ctx, putQuery)
+	if err != nil {
+		return fileformat.PreviewResult{Error: fmt.Sprintf("Failed to upload preview file to Snowflake: %v", err)}
+	}
+
+	// Ensure cleanup
+	defer func() {
+		rmQuery := fmt.Sprintf("RM @~/thaw_file_format_preview/%s", filepath.Base(tmpPath))
+		_, _ = a.client.QuerySingle(a.ctx, rmQuery)
+	}()
+
+	stagePath := fmt.Sprintf("@~/thaw_file_format_preview/%s", filepath.Base(tmpPath))
+	res, _ := a.GetStageFilePreview(stagePath, cfg)
+	return res
 }
 
 // GetStageFilePreview queries a Snowflake stage file with an inline FILE_FORMAT
@@ -1409,16 +1451,51 @@ func (a *App) GetStageFilePreview(stagePath string, cfg fileformat.FileFormatCon
 	if a.client == nil {
 		return fileformat.PreviewResult{}, ErrNotConnected
 	}
-	inline := fileformat.BuildInlineFileFormat(cfg)
-	query := fmt.Sprintf("SELECT * FROM %s (FILE_FORMAT => (%s)) LIMIT 50;", stagePath, inline)
+
+	// Snowflake SELECT queries ignore PARSE_HEADER=TRUE for naming columns (it skips the row but leaves columns as $1, $2).
+	// To provide a useful preview that looks like the target table, if ParseHeader is true,
+	// we turn it off for the query, fetch one extra row, and use the first returned row as our column headers.
+	parseHeader := cfg.ParseHeader
+	queryCfg := cfg
+	if parseHeader {
+		queryCfg.ParseHeader = false
+	}
+
+	inline := fileformat.BuildInlineFileFormat(queryCfg)
+	limit := 50
+	if parseHeader {
+		limit = 51
+	}
+
+	query := fmt.Sprintf("SELECT * FROM %s (FILE_FORMAT => (%s)) LIMIT %d;", stagePath, inline, limit)
 	result, err := a.client.QuerySingle(a.ctx, query)
 	if err != nil {
 		return fileformat.PreviewResult{Error: err.Error()}, nil //nolint:nilerr
 	}
 
+	if len(result.Rows) == 0 {
+		return fileformat.PreviewResult{Columns: []string{}, Rows: []map[string]string{}}, nil
+	}
+
 	cols := result.Columns
-	rows := make([]map[string]string, 0, len(result.Rows))
-	for _, raw := range result.Rows {
+	dataRows := result.Rows
+
+	if parseHeader {
+		headerRow := result.Rows[0]
+		extractedCols := make([]string, len(headerRow))
+		for i, val := range headerRow {
+			if val != nil {
+				extractedCols[i] = fmt.Sprintf("%v", val)
+			} else {
+				extractedCols[i] = fmt.Sprintf("COLUMN_%d", i+1)
+			}
+		}
+		cols = extractedCols
+		dataRows = result.Rows[1:]
+	}
+
+	rows := make([]map[string]string, 0, len(dataRows))
+	for _, raw := range dataRows {
 		row := make(map[string]string, len(cols))
 		for i, col := range cols {
 			if i < len(raw) && raw[i] != nil {
