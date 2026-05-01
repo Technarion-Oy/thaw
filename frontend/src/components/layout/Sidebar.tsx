@@ -1193,34 +1193,49 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setPipeCopyHistoryModal({ db, schema, name });
   };
 
-  const pausePipeExecution = async () => {
+  const pausePipeExecution = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
     const db = parts[1];
     const schema = parts[2];
     const name = parts.slice(4).join(":");
     setCtxMenu(null);
-    try {
-      await AlterPipe(db, schema, name, "SET PIPE_EXECUTION_PAUSED = TRUE");
-      contextMsg.success(`Pipe "${name}" paused.`);
-    } catch (e) {
-      contextMsg.error(`Failed to pause pipe: ${String(e)}`);
-    }
+    modal.confirm({
+      title: "Pause Pipe Execution",
+      content: `Pause execution of pipe "${name}"? Snowpipe will stop ingesting files until resumed.`,
+      okText: "Pause",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await AlterPipe(db, schema, name, "SET PIPE_EXECUTION_PAUSED = TRUE");
+          contextMsg.success(`Pipe "${name}" paused.`);
+        } catch (e) {
+          contextMsg.error(`Failed to pause pipe: ${String(e)}`);
+        }
+      },
+    });
   };
 
-  const unpausePipeExecution = async () => {
+  const unpausePipeExecution = () => {
     if (!ctxMenu) return;
     const parts = ctxMenu.nodeKey.split(":");
     const db = parts[1];
     const schema = parts[2];
     const name = parts.slice(4).join(":");
     setCtxMenu(null);
-    try {
-      await AlterPipe(db, schema, name, "SET PIPE_EXECUTION_PAUSED = FALSE");
-      contextMsg.success(`Pipe "${name}" resumed.`);
-    } catch (e) {
-      contextMsg.error(`Failed to resume pipe: ${String(e)}`);
-    }
+    modal.confirm({
+      title: "Resume Pipe Execution",
+      content: `Resume execution of pipe "${name}"?`,
+      okText: "Resume",
+      onOk: async () => {
+        try {
+          await AlterPipe(db, schema, name, "SET PIPE_EXECUTION_PAUSED = FALSE");
+          contextMsg.success(`Pipe "${name}" resumed.`);
+        } catch (e) {
+          contextMsg.error(`Failed to resume pipe: ${String(e)}`);
+        }
+      },
+    });
   };
 
   const openPipeStatusModal = () => {
