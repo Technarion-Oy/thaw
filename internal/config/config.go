@@ -158,8 +158,8 @@ func DefaultNotebookPrefs() NotebookPrefs {
 //
 // Version tracks the schema revision so new flags introduced after an initial
 // save can be filled with their defaults rather than the zero value (false).
-// Current version: 2 (added SQL editor flags: SqlDiagnostics, SchemaAutocomplete, DdlHoverTooltips).
-const flagsVersion = 2
+// Current version: 3 (added file-transfer flags: PutCommand, GetCommand).
+const flagsVersion = 3
 
 type FeatureFlags struct {
 	Initialized bool `json:"initialized"`
@@ -170,6 +170,8 @@ type FeatureFlags struct {
 	ExportTableData bool `json:"exportTableData"` // Table Data Export
 	TableDataImport bool `json:"tableDataImport"`
 	DDLExport       bool `json:"ddlExport"`
+	PutCommand      bool `json:"putCommand"` // PUT file:// … @stage uploads from the SQL editor
+	GetCommand      bool `json:"getCommand"` // GET @stage file:// downloads from the SQL editor
 
 	// Governance & Administration
 	UserRoleManagement     bool `json:"userRoleManagement"`
@@ -216,6 +218,8 @@ func DefaultFeatureFlags() FeatureFlags {
 		ExportTableData:        true,
 		TableDataImport:        true,
 		DDLExport:              true,
+		PutCommand:             true,
+		GetCommand:             true,
 		UserRoleManagement:     true,
 		WarehouseManagement:    true,
 		WarehouseCreditUsage:   true,
@@ -286,6 +290,9 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	setIfZero(&f.SqlDiagnostics, defaults.SqlDiagnostics)
 	setIfZero(&f.SchemaAutocomplete, defaults.SchemaAutocomplete)
 	setIfZero(&f.DdlHoverTooltips, defaults.DdlHoverTooltips)
+	// Version 2 → 3: file-transfer flags added; both default to true.
+	setIfZero(&f.PutCommand, defaults.PutCommand)
+	setIfZero(&f.GetCommand, defaults.GetCommand)
 	f.Version = flagsVersion
 	return f
 }

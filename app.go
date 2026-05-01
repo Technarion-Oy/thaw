@@ -42,6 +42,7 @@ import (
 	"thaw/internal/gitrepo"
 	"thaw/internal/integrations"
 	"thaw/internal/logger"
+	"thaw/internal/pipe"
 	"thaw/internal/procedure"
 	"thaw/internal/queryprofile"
 	"thaw/internal/secret"
@@ -1021,6 +1022,20 @@ func (a *App) StartQuery(tabId string, sql string) (string, error) {
 		return "", err
 	}
 
+	// Enforce PUT/GET feature flags before execution.
+	flags := loadUserFeatureFlags()
+	trimmed := strings.TrimSpace(strings.ToUpper(sql))
+	if strings.HasPrefix(trimmed, "PUT ") || strings.HasPrefix(trimmed, "PUT\t") {
+		if !flags.PutCommand {
+			return "", fmt.Errorf("PUT commands are disabled. Enable them under View → Enabled Features…")
+		}
+	}
+	if strings.HasPrefix(trimmed, "GET ") || strings.HasPrefix(trimmed, "GET\t") {
+		if !flags.GetCommand {
+			return "", fmt.Errorf("GET commands are disabled. Enable them under View → Enabled Features…")
+		}
+	}
+
 	// Create a per-query cancellable context and replace any previous one.
 	ctx, cancel := context.WithCancel(a.ctx)
 
@@ -1359,6 +1374,115 @@ func (a *App) BuildCreateGitRepositorySql(database, schema string, cfg snowgitre
 // BuildModifyGitRepositorySql returns one or more ALTER GIT REPOSITORY statements.
 func (a *App) BuildModifyGitRepositorySql(database, schema, name string, cfg snowgitrepo.GitRepositoryConfig, originalComment, originalIntegration, originalCredentials string) ([]string, error) {
 	return snowgitrepo.BuildModifyGitRepositorySql(database, schema, name, cfg, originalComment, originalIntegration, originalCredentials)
+}
+
+// BuildCreatePipeSql returns the SQL for creating a Snowflake PIPE.
+func (a *App) BuildCreatePipeSql(database, schema string, cfg pipe.PipeConfig) (string, error) {
+	return pipe.BuildCreatePipeSql(database, schema, cfg)
+}
+
+// BuildRefreshPipeSql returns the SQL for an ALTER PIPE ... REFRESH statement.
+func (a *App) BuildRefreshPipeSql(database, schema, name string, cfg pipe.RefreshPipeConfig) (string, error) {
+	return pipe.BuildRefreshPipeSql(database, schema, name, cfg)
+}
+
+// AlterPipe runs an ALTER PIPE statement for the given pipe.
+// clause is everything that follows the pipe name, e.g. "SET PIPE_EXECUTION_PAUSED = TRUE"
+// or "SET COMMENT = 'hello'". The caller is responsible for correct SQL quoting
+// inside the clause; this method only double-quotes the pipe identifier.
+func (a *App) AlterPipe(database, schema, name, clause string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	sql := fmt.Sprintf("ALTER PIPE %s.%s.%s %s", q(database), q(schema), q(name), clause)
+	_, err := a.client.Execute(a.ctx, sql)
+	return err
+}
+
+// GetPipeStatus returns the JSON string produced by SYSTEM$PIPE_STATUS for the given pipe.
+// The JSON includes fields such as executionState, pendingFileCount, and
+// notificationChannelName. executionState is "PAUSED" when the pipe has been
+// paused via ALTER PIPE SET PIPE_EXECUTION_PAUSED = TRUE.
+func (a *App) GetPipeStatus(database, schema, name string) (string, error) {
+	if a.client == nil {
+		return "", ErrNotConnected
+	}
+	quoteIdent := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	// Build the FQN with double-quoted parts, then escape any embedded single
+	// quotes so the whole string is safe inside the outer SQL string literal.
+	pipeFqn := quoteIdent(database) + "." + quoteIdent(schema) + "." + quoteIdent(name)
+	sql := fmt.Sprintf("SELECT SYSTEM$PIPE_STATUS('%s')", strings.ReplaceAll(pipeFqn, "'", "''"))
+	result, err := a.client.Execute(a.ctx, sql)
+	if err != nil {
+		return "", err
+	}
+	if result == nil || len(result.Rows) == 0 || len(result.Rows[0]) == 0 || result.Rows[0][0] == nil {
+		return "", nil
+	}
+	return fmt.Sprint(result.Rows[0][0]), nil
+}
+
+// GetPipeCopyHistory returns copy history rows for the given pipe from INFORMATION_SCHEMA.
+// startTime is an optional ISO-8601 timestamp; if empty, defaults to 24 hours ago.
+// status is an optional status filter (LOADED, LOAD_FAILED, PARTIALLY_LOADED, etc.); if empty, all statuses are returned.
+// fileName is an optional file name substring filter; if empty, all files are returned.
+func (a *App) GetPipeCopyHistory(database, schema, name, startTime, status, fileName string) (*snowflake.QueryResult, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	quoteIdent := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	escStr := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
+
+	// Fetch the pipe DDL to resolve the COPY INTO target table name, which is
+	// required by the copy_history table function.
+	ddl, err := a.client.GetObjectDDL(a.ctx, database, schema, "PIPE", name, "")
+	if err != nil {
+		return nil, fmt.Errorf("could not retrieve pipe DDL to resolve target table: %w", err)
+	}
+	fqnParts, err := pipe.ParseCopyIntoTargetParts(ddl)
+	if err != nil {
+		return nil, fmt.Errorf("could not parse COPY INTO target table from pipe DDL: %w", err)
+	}
+
+	// Build the TABLE_NAME argument: double-quoted parts inside a single-quoted string literal.
+	// Unquoted identifiers from GET_DDL may be in any case but Snowflake stores
+	// them as uppercase, so uppercase them before quoting to ensure correct resolution.
+	quotedParts := make([]string, len(fqnParts))
+	for i, p := range fqnParts {
+		val := p.Value
+		if !p.Quoted {
+			val = strings.ToUpper(val)
+		}
+		quotedParts[i] = quoteIdent(val)
+	}
+	tableNameArg := strings.Join(quotedParts, ".")
+
+	startExpr := "dateadd(hours, -24, current_timestamp())"
+	if startTime != "" {
+		startExpr = fmt.Sprintf("'%s'::timestamp_ltz", escStr(startTime))
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb,
+		"SELECT * FROM TABLE(%s.information_schema.copy_history(TABLE_NAME => '%s', START_TIME => %s))",
+		quoteIdent(database), escStr(tableNameArg), startExpr,
+	)
+	// Filter by pipe identity using exact case-sensitive match.
+	// copy_history exposes pipe_catalog_name, pipe_schema_name, and pipe_name as
+	// separate columns; PIPE_NAME alone does not contain a fully qualified name.
+	fmt.Fprintf(&sb, " WHERE pipe_catalog_name = '%s' AND pipe_schema_name = '%s' AND pipe_name = '%s'",
+		escStr(database), escStr(schema), escStr(name),
+	)
+	if status != "" {
+		fmt.Fprintf(&sb, " AND STATUS ILIKE '%s'", escStr(status))
+	}
+	if fileName != "" {
+		fmt.Fprintf(&sb, " AND FILE_NAME ILIKE '%%%s%%'", escStr(fileName))
+	}
+	fmt.Fprintf(&sb, " ORDER BY LAST_LOAD_TIME DESC NULLS LAST")
+
+	return a.client.Execute(a.ctx, sb.String())
 }
 
 // AlterWarehouseProperty applies a single SET property to a warehouse.

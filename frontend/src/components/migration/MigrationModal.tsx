@@ -28,6 +28,7 @@ import {
 } from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { DiffEditor } from "@monaco-editor/react";
+import { patchMonacoClipboard } from "../../utils/monacoClipboard";
 import { AgGridReact } from "ag-grid-react";
 import type { ColDef } from "ag-grid-community";
 import {
@@ -674,6 +675,7 @@ export default function MigrationModal({ onClose }: Props) {
               language="sql"
               original={activeDiff.localDDL}
               modified={activeDiff.remoteDDL}
+              onMount={(editor) => patchMonacoClipboard(editor)}
               options={{
                 readOnly: true,
                 minimap: { enabled: false },
