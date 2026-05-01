@@ -8,7 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Modal, Form, Input, Select, Checkbox, Space,
   Typography, Divider, InputNumber, Button, Table, Alert, Radio, Tooltip,
@@ -183,6 +183,8 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
   const [stagePath, setStagePath] = useState("");
   const [previewData, setPreviewData] = useState<fileformat.PreviewResult | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  // tracks whether the user has triggered at least one preview (enables auto-refresh)
+  const hasPreviewRef = useRef(false);
 
   useEffect(() => {
     GetQuotedIdentifiersIgnoreCase()
@@ -207,17 +209,24 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
     if (path) setLocalPath(path);
   };
 
-  const handlePreview = async () => {
+  // Core preview fetcher — accepts explicit arguments so debounced callers
+  // always use the values captured at schedule time, not stale closure values.
+  const runPreview = useCallback(async (
+    path: string,
+    stagePth: string,
+    source: "LOCAL" | "STAGE",
+    currentCfg: fileformat.FileFormatConfig,
+  ) => {
     setError(null);
     setPreviewLoading(true);
     try {
       let res: fileformat.PreviewResult;
-      if (previewSource === "LOCAL") {
-        if (!localPath) throw new Error("Please select a local file first.");
-        res = await GetLocalFilePreview(localPath, cfg as any);
+      if (source === "LOCAL") {
+        if (!path) throw new Error("Please select a local file first.");
+        res = await GetLocalFilePreview(path, currentCfg as any);
       } else {
-        if (!stagePath.trim()) throw new Error("Please enter a stage path, e.g. @MY_STAGE/path/file.csv");
-        res = await GetStageFilePreview(stagePath.trim(), cfg as any);
+        if (!stagePth.trim()) throw new Error("Please enter a stage path, e.g. @MY_STAGE/path/file.csv");
+        res = await GetStageFilePreview(stagePth.trim(), currentCfg as any);
       }
       if (res.error) {
         setError(res.error);
@@ -231,7 +240,26 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
     } finally {
       setPreviewLoading(false);
     }
+  }, []);
+
+  // Manual Preview button — marks the session as "preview loaded" and runs immediately.
+  const handlePreview = () => {
+    hasPreviewRef.current = true;
+    runPreview(localPath, stagePath, previewSource, cfg);
   };
+
+  // Auto-refresh: re-run preview (debounced 500 ms) whenever format options,
+  // source, or file path changes — but only after the user has triggered at
+  // least one manual preview in this session.
+  useEffect(() => {
+    if (!hasPreviewRef.current) return;
+    const hasTarget = previewSource === "LOCAL" ? !!localPath : !!stagePath.trim();
+    if (!hasTarget) return;
+    const timer = setTimeout(() => {
+      runPreview(localPath, stagePath, previewSource, cfg);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [cfg, previewSource, localPath, stagePath, runPreview]);
 
   const handleCreate = async () => {
     if (!cfg.name.trim()) return;
@@ -663,7 +691,7 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
               </Space>
               <Radio.Group
                 value={previewSource}
-                onChange={e => { setPreviewSource(e.target.value); setPreviewData(null); }}
+                onChange={e => { setPreviewSource(e.target.value); setPreviewData(null); hasPreviewRef.current = false; }}
                 size="small"
               >
                 <Radio.Button value="LOCAL"><FileOutlined /> Local file</Radio.Button>

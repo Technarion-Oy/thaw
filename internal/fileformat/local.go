@@ -24,10 +24,12 @@ const (
 	maxPreviewBytes = 1 << 20 // 1 MiB — prevent memory spikes for large files
 )
 
-// GetLocalFilePreview reads a local file and returns up to 50 rows.
-// CSV and JSON (array or NDJSON) are supported. All other format types
-// return a PreviewResult with an Error message directing the user to use
-// Stage Preview instead.
+// GetLocalFilePreview reads a local file and returns up to 50 rows shaped the
+// same way Snowflake would present them after applying the file format options:
+//   - CSV/TSV: field delimiter, skip-header rows, and parse-header are applied;
+//     columns are named $1/$2/… unless PARSE_HEADER = true.
+//   - JSON: JSON array or NDJSON; key names become column headers.
+//   - Other types: returns an error directing the user to Stage Preview.
 func GetLocalFilePreview(path string, cfg FileFormatConfig) PreviewResult {
 	t := strings.ToUpper(strings.TrimSpace(cfg.Type))
 	switch t {
@@ -37,9 +39,11 @@ func GetLocalFilePreview(path string, cfg FileFormatConfig) PreviewResult {
 		return readJSONPreview(path)
 	default:
 		return PreviewResult{
+			Columns: []string{},
+			Rows:    []map[string]string{},
 			Error: fmt.Sprintf(
 				"Local preview is not supported for %s files. "+
-					"Select a Snowflake Stage source to preview %s files via Snowflake's compute engine.",
+					"Select Snowflake Stage as the source to preview %s files via Snowflake's compute engine.",
 				t, t,
 			),
 		}
@@ -51,57 +55,102 @@ func GetLocalFilePreview(path string, cfg FileFormatConfig) PreviewResult {
 func readCSVPreview(path string, cfg FileFormatConfig) PreviewResult {
 	f, err := os.Open(path)
 	if err != nil {
-		return PreviewResult{Error: err.Error()}
+		return PreviewResult{Columns: []string{}, Rows: []map[string]string{}, Error: err.Error()}
 	}
 	defer func() { _ = f.Close() }()
 
 	r := csv.NewReader(io.LimitReader(f, maxPreviewBytes))
 	r.LazyQuotes = true
 	r.TrimLeadingSpace = cfg.TrimSpace
+	// -1 disables field-count enforcement so rows with a different number of
+	// columns than the first row don't cause csv.ErrFieldCount — which, when
+	// returned on every data row, previously caused an infinite loop in the
+	// error-continuation path.
+	r.FieldsPerRecord = -1
 
-	if cfg.FieldDelimiter != "" && cfg.FieldDelimiter != "," {
-		runes := []rune(cfg.FieldDelimiter)
-		if len(runes) > 0 {
+	// Apply FIELD_DELIMITER. Go's csv.Reader always uses a single rune.
+	if d := cfg.FieldDelimiter; d != "" && d != "," && strings.ToUpper(d) != "NONE" {
+		if runes := []rune(d); len(runes) == 1 {
 			r.Comma = runes[0]
 		}
 	}
 
-	// Skip header rows (SKIP_HEADER).
+	// SKIP_HEADER: discard the first N rows unconditionally.
 	for i := 0; i < cfg.SkipHeader; i++ {
-		if _, err := r.Read(); err != nil {
+		if _, rdErr := r.Read(); rdErr != nil {
 			break
 		}
 	}
 
-	// First non-skipped row is treated as column headers.
-	headers, err := r.Read()
-	if err != nil {
-		if err == io.EOF {
-			return PreviewResult{Columns: []string{}, Rows: []map[string]string{}}
+	// PARSE_HEADER semantics mirror Snowflake:
+	//   PARSE_HEADER = true  → first non-skipped row is the header; use its
+	//                          values as column names.
+	//   PARSE_HEADER = false → columns are $1, $2, … (Snowflake default).
+	var headers []string
+	var firstData []string // when PARSE_HEADER = false we buffer the first data row
+
+	if cfg.ParseHeader {
+		headers, err = r.Read()
+		if err != nil {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				return PreviewResult{Columns: []string{}, Rows: []map[string]string{}}
+			}
+			return PreviewResult{Columns: []string{}, Rows: []map[string]string{}, Error: err.Error()}
 		}
-		return PreviewResult{Error: err.Error()}
+	} else {
+		// Peek at the first data row to determine the column count.
+		firstData, err = r.Read()
+		if err != nil {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				return PreviewResult{Columns: []string{}, Rows: []map[string]string{}}
+			}
+			return PreviewResult{Columns: []string{}, Rows: []map[string]string{}, Error: err.Error()}
+		}
+		headers = make([]string, len(firstData))
+		for i := range headers {
+			headers[i] = fmt.Sprintf("$%d", i+1)
+		}
 	}
 
 	rows := make([]map[string]string, 0, maxPreviewRows)
+
+	// When PARSE_HEADER = false the first data row was consumed above; add it.
+	if firstData != nil {
+		rows = append(rows, recordToMap(headers, firstData))
+	}
+
+	// Read remaining rows. Break on EOF or after too many consecutive errors to
+	// prevent hanging on pathological files.
+	consecutiveErrors := 0
 	for len(rows) < maxPreviewRows {
-		record, err := r.Read()
-		if err == io.EOF {
+		record, rdErr := r.Read()
+		if rdErr == io.EOF || rdErr == io.ErrUnexpectedEOF {
 			break
 		}
-		if err != nil {
-			// Skip malformed rows rather than aborting the preview.
+		if rdErr != nil {
+			consecutiveErrors++
+			if consecutiveErrors > 20 {
+				break
+			}
 			continue
 		}
-		row := make(map[string]string, len(headers))
-		for i, h := range headers {
-			if i < len(record) {
-				row[h] = record[i]
-			}
-		}
-		rows = append(rows, row)
+		consecutiveErrors = 0
+		rows = append(rows, recordToMap(headers, record))
 	}
 
 	return PreviewResult{Columns: headers, Rows: rows}
+}
+
+func recordToMap(headers, record []string) map[string]string {
+	row := make(map[string]string, len(headers))
+	for i, h := range headers {
+		if i < len(record) {
+			row[h] = record[i]
+		} else {
+			row[h] = ""
+		}
+	}
+	return row
 }
 
 // ── JSON ─────────────────────────────────────────────────────────────────────
@@ -109,13 +158,13 @@ func readCSVPreview(path string, cfg FileFormatConfig) PreviewResult {
 func readJSONPreview(path string) PreviewResult {
 	f, err := os.Open(path)
 	if err != nil {
-		return PreviewResult{Error: err.Error()}
+		return PreviewResult{Columns: []string{}, Rows: []map[string]string{}, Error: err.Error()}
 	}
 	defer func() { _ = f.Close() }()
 
 	data, err := io.ReadAll(io.LimitReader(f, maxPreviewBytes))
 	if err != nil {
-		return PreviewResult{Error: err.Error()}
+		return PreviewResult{Columns: []string{}, Rows: []map[string]string{}, Error: err.Error()}
 	}
 
 	// Try a JSON array first.
@@ -144,7 +193,7 @@ func readJSONPreview(path string) PreviewResult {
 		return jsonRecordsToPreview(records)
 	}
 
-	return PreviewResult{Error: "Unable to parse file as a JSON array or NDJSON"}
+	return PreviewResult{Columns: []string{}, Rows: []map[string]string{}, Error: "Unable to parse file as a JSON array or NDJSON"}
 }
 
 func jsonRecordsToPreview(records []map[string]any) PreviewResult {
@@ -152,7 +201,7 @@ func jsonRecordsToPreview(records []map[string]any) PreviewResult {
 		return PreviewResult{Columns: []string{}, Rows: []map[string]string{}}
 	}
 
-	// Collect column names in insertion order (first-seen wins).
+	// Collect column names in first-seen order.
 	seen := make(map[string]struct{})
 	cols := []string{}
 	for _, rec := range records {
