@@ -164,8 +164,17 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
       title: c,
       dataIndex: c,
       key: c,
-      ellipsis: true,
       width: 150,
+      render: (text: string) => (
+        <div style={{
+          maxWidth: 134, // 150 - 16px padding
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap"
+        }} title={text}>
+          {text}
+        </div>
+      ),
     }));
 
     return (
