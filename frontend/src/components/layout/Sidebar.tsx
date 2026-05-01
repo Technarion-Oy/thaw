@@ -24,6 +24,7 @@ import {
   FolderOutlined,
   ReloadOutlined,
   PlayCircleOutlined,
+  PauseCircleOutlined,
   BarChartOutlined,
   CloudUploadOutlined,
   DeleteOutlined,
@@ -57,7 +58,7 @@ import {
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -97,6 +98,7 @@ import CreatePipeModal from "../pipe/CreatePipeModal";
 import PipePropertiesModal from "../pipe/PipePropertiesModal";
 import RefreshPipeModal from "../pipe/RefreshPipeModal";
 import PipeCopyHistoryModal from "../pipe/PipeCopyHistoryModal";
+import PipeStatusModal from "../pipe/PipeStatusModal";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 
 const { Text } = Typography;
@@ -440,6 +442,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [pipePropsModal, setPipePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [refreshPipeModal, setRefreshPipeModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [pipeCopyHistoryModal, setPipeCopyHistoryModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [pipeStatusModal, setPipeStatusModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [objectSummariesModal, setObjectSummariesModal] = useState<string | null>(null);
   const [createTaskModal, setCreateTaskModal] = useState<{ db: string; schema: string } | null>(null);
   const [executeTaskModal, setExecuteTaskModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -1188,6 +1191,46 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const name = parts.slice(4).join(":");
     setCtxMenu(null);
     setPipeCopyHistoryModal({ db, schema, name });
+  };
+
+  const pausePipeExecution = async () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    try {
+      await AlterPipe(db, schema, name, "SET PIPE_EXECUTION_PAUSED = TRUE");
+      contextMsg.success(`Pipe "${name}" paused.`);
+    } catch (e) {
+      contextMsg.error(`Failed to pause pipe: ${String(e)}`);
+    }
+  };
+
+  const unpausePipeExecution = async () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    try {
+      await AlterPipe(db, schema, name, "SET PIPE_EXECUTION_PAUSED = FALSE");
+      contextMsg.success(`Pipe "${name}" resumed.`);
+    } catch (e) {
+      contextMsg.error(`Failed to resume pipe: ${String(e)}`);
+    }
+  };
+
+  const openPipeStatusModal = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts.slice(4).join(":");
+    setCtxMenu(null);
+    setPipeStatusModal({ db, schema, name });
   };
 
   const openCommitFilterModal = () => {
@@ -2267,6 +2310,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Refresh…", <SyncOutlined style={{ fontSize: 12 }} />, openRefreshPipe)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
             menuItem("View Copy History…", <HistoryOutlined style={{ fontSize: 12 }} />, openPipeCopyHistory)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
+            menuItem("Pause Execution", <PauseCircleOutlined style={{ fontSize: 12 }} />, pausePipeExecution)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
+            menuItem("Resume Execution", <PlayCircleOutlined style={{ fontSize: 12 }} />, unpausePipeExecution)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
+            menuItem("Check Status…", <DashboardOutlined style={{ fontSize: 12 }} />, openPipeStatusModal)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SECRET" &&
             menuItem("Modify…", <EditOutlined style={{ fontSize: 12 }} />, openModifySecret)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "GIT REPOSITORY" &&
@@ -2601,6 +2650,15 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={pipeCopyHistoryModal.schema}
           name={pipeCopyHistoryModal.name}
           onClose={() => setPipeCopyHistoryModal(null)}
+        />
+      )}
+
+      {pipeStatusModal && (
+        <PipeStatusModal
+          db={pipeStatusModal.db}
+          schema={pipeStatusModal.schema}
+          name={pipeStatusModal.name}
+          onClose={() => setPipeStatusModal(null)}
         />
       )}
 
