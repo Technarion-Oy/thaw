@@ -11,7 +11,7 @@
 import { useState, useEffect } from "react";
 import {
   Modal, Form, Input, Select, Checkbox, Space,
-  Typography, Divider, InputNumber, Button, Table, Alert, Radio, Tooltip,
+  Typography, Divider, InputNumber, Button, Table, Alert, Radio,
 } from "antd";
 import {
   FileTextOutlined, PlusOutlined, FileSearchOutlined,
