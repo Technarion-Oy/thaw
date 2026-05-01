@@ -2324,7 +2324,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Make Live", <CloudUploadOutlined style={{ fontSize: 12 }} />, makeNotebookLive, undefined, !featureFlags.snowparkNotebooks, "Snowpark & Notebooks is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && menuItem("Insert Full Name", <CodeOutlined style={{ fontSize: 12 }} />, insertFullName)}
           {ctxMenu.nodeType === "obj" && menuItem("View Definition", null, viewDefinition)}
-          {ctxMenu.nodeType === "obj" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind !== "PIPE" && menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" &&
             menuItem("Select for Comparison", <DiffOutlined style={{ fontSize: 12 }} />, selectObjForComparison)}
           {ctxMenu.nodeType === "obj" && pendingDiff !== null &&

@@ -446,6 +446,10 @@ export function GetPipeCopyHistory(arg1, arg2, arg3, arg4, arg5, arg6) {
   return window['go']['main']['App']['GetPipeCopyHistory'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
+export function GetPipeStatus(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetPipeStatus'](arg1, arg2, arg3);
+}
+
 export function GetProcedureParams(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['GetProcedureParams'](arg1, arg2, arg3, arg4);
 }

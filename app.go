@@ -1400,6 +1400,29 @@ func (a *App) AlterPipe(database, schema, name, clause string) error {
 	return err
 }
 
+// GetPipeStatus returns the JSON string produced by SYSTEM$PIPE_STATUS for the given pipe.
+// The JSON includes fields such as executionState, pendingFileCount, and
+// notificationChannelName. executionState is "PAUSED" when the pipe has been
+// paused via ALTER PIPE SET PIPE_EXECUTION_PAUSED = TRUE.
+func (a *App) GetPipeStatus(database, schema, name string) (string, error) {
+	if a.client == nil {
+		return "", ErrNotConnected
+	}
+	quoteIdent := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
+	// Build the FQN with double-quoted parts, then escape any embedded single
+	// quotes so the whole string is safe inside the outer SQL string literal.
+	pipeFqn := quoteIdent(database) + "." + quoteIdent(schema) + "." + quoteIdent(name)
+	sql := fmt.Sprintf("SELECT SYSTEM$PIPE_STATUS('%s')", strings.ReplaceAll(pipeFqn, "'", "''"))
+	result, err := a.client.Execute(a.ctx, sql)
+	if err != nil {
+		return "", err
+	}
+	if result == nil || len(result.Rows) == 0 || len(result.Rows[0]) == 0 || result.Rows[0][0] == nil {
+		return "", nil
+	}
+	return fmt.Sprint(result.Rows[0][0]), nil
+}
+
 // GetPipeCopyHistory returns copy history rows for the given pipe from INFORMATION_SCHEMA.
 // startTime is an optional ISO-8601 timestamp; if empty, defaults to 24 hours ago.
 // status is an optional status filter (LOADED, LOAD_FAILED, PARTIALLY_LOADED, etc.); if empty, all statuses are returned.

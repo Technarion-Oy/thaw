@@ -15,7 +15,7 @@ import {
 import {
   ApiOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined,
 } from "@ant-design/icons";
-import { GetObjectProperties, AlterPipe } from "../../../wailsjs/go/main/App";
+import { GetObjectProperties, GetPipeStatus, AlterPipe } from "../../../wailsjs/go/main/App";
 import type { main } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -229,12 +229,23 @@ interface Props {
   onClose: () => void;
 }
 
+// Subset of fields returned by SYSTEM$PIPE_STATUS that are useful to display.
+interface PipeStatus {
+  executionState: string;
+  pendingFileCount: number;
+  notificationChannelName?: string;
+  lastReceivedMessageTimestamp?: string;
+  lastForwardedMessageTimestamp?: string;
+  error?: string | null;
+}
+
 export default function PipePropertiesModal({ db, schema, name, onClose }: Props) {
   const [rows, setRows] = useState<main.PropertyPair[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
   const [pausedSaving, setPausedSaving] = useState(false);
   const [pausedError, setPausedError] = useState<string | null>(null);
+  const [pipeStatus, setPipeStatus] = useState<PipeStatus | null>(null);
 
   // Tags local state (derived from properties)
   const [tags, setTags] = useState<{ name: string; value: string }[]>([]);
@@ -242,13 +253,25 @@ export default function PipePropertiesModal({ db, schema, name, onClose }: Props
   const reload = useCallback(async () => {
     setRows(null);
     setError(null);
+    setPipeStatus(null);
     try {
-      const props = await GetObjectProperties(db, schema, "PIPE", name);
+      const [props, statusJson] = await Promise.all([
+        GetObjectProperties(db, schema, "PIPE", name),
+        GetPipeStatus(db, schema, name),
+      ]);
       setRows(props ?? []);
-      // Parse paused state
-      const propMap = new Map((props ?? []).map((p) => [p.key.toUpperCase(), p.value]));
-      const pausedVal = propMap.get("PIPE_EXECUTION_PAUSED") ?? propMap.get("EXECUTION_PAUSED") ?? "false";
-      setPaused(pausedVal.toLowerCase() === "true" || pausedVal === "1");
+
+      // Derive paused state from SYSTEM$PIPE_STATUS (executionState), which is
+      // the authoritative source. SHOW PIPES does not reflect this flag.
+      if (statusJson) {
+        try {
+          const status: PipeStatus = JSON.parse(statusJson);
+          setPipeStatus(status);
+          setPaused(status.executionState === "PAUSED");
+        } catch {
+          // JSON parse failure — fall back silently, leave paused=false
+        }
+      }
     } catch (e) {
       setError(String(e));
     }
@@ -263,7 +286,19 @@ export default function PipePropertiesModal({ db, schema, name, onClose }: Props
     setPausedError(null);
     try {
       await AlterPipe(db, schema, name, `SET PIPE_EXECUTION_PAUSED = ${val ? "TRUE" : "FALSE"}`);
-      setPaused(val);
+      // Re-read the authoritative status from Snowflake after altering.
+      const statusJson = await GetPipeStatus(db, schema, name);
+      if (statusJson) {
+        try {
+          const status: PipeStatus = JSON.parse(statusJson);
+          setPipeStatus(status);
+          setPaused(status.executionState === "PAUSED");
+        } catch {
+          setPaused(val);
+        }
+      } else {
+        setPaused(val);
+      }
     } catch (e) {
       setPausedError(String(e));
     } finally {
@@ -296,7 +331,7 @@ export default function PipePropertiesModal({ db, schema, name, onClose }: Props
   // Extract comment from rows for EditRow
   const comment = rows ? (rows.find((r) => r.key.toUpperCase() === "COMMENT")?.value ?? "") : "";
 
-  const readOnlyKeys = new Set(["COMMENT", "PIPE_EXECUTION_PAUSED", "EXECUTION_PAUSED"]);
+  const readOnlyKeys = new Set(["COMMENT"]);
 
   return (
     <Modal
@@ -339,6 +374,58 @@ export default function PipePropertiesModal({ db, schema, name, onClose }: Props
                     </td>
                   </tr>
                 ))}
+            </tbody>
+          </table>
+
+          {/* Live status from SYSTEM$PIPE_STATUS */}
+          <div style={SECTION_HEAD}>Status</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              {pipeStatus ? (
+                <>
+                  <tr>
+                    <td style={LABEL_TD}>Execution State</td>
+                    <td style={{ padding: "6px 0", fontSize: 12, color: "var(--text)" }}>
+                      <span style={{
+                        color: pipeStatus.executionState === "RUNNING" ? "var(--success, #52c41a)"
+                          : pipeStatus.executionState === "PAUSED" ? "var(--warning, #faad14)"
+                          : "var(--text-muted)",
+                        fontWeight: 500,
+                      }}>
+                        {pipeStatus.executionState}
+                      </span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style={LABEL_TD}>Pending File Count</td>
+                    <td style={{ padding: "6px 0", fontSize: 12, color: "var(--text)" }}>
+                      {pipeStatus.pendingFileCount}
+                    </td>
+                  </tr>
+                  {pipeStatus.notificationChannelName && (
+                    <tr>
+                      <td style={LABEL_TD}>Notification Channel</td>
+                      <td style={{ padding: "6px 0", fontSize: 12, color: "var(--text)" }}>
+                        {pipeStatus.notificationChannelName}
+                      </td>
+                    </tr>
+                  )}
+                  {pipeStatus.error && (
+                    <tr>
+                      <td style={LABEL_TD}>Error</td>
+                      <td style={{ padding: "6px 0", fontSize: 12 }}>
+                        <Text type="danger">{pipeStatus.error}</Text>
+                      </td>
+                    </tr>
+                  )}
+                </>
+              ) : (
+                <tr>
+                  <td colSpan={2} style={{ padding: "6px 0", fontSize: 12 }}>
+                    <Text type="secondary">(status unavailable)</Text>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
 
