@@ -386,7 +386,9 @@ export namespace fileformat {
 	    disableAutoConvert: boolean;
 	    binaryAsText: boolean;
 	    useLogicalType: boolean;
+	    snappyCompression: boolean;
 	    snappyCompressionLevel: number;
+	    useVectorizedScanner: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new FileFormatConfig(source);
@@ -433,7 +435,9 @@ export namespace fileformat {
 	        this.disableAutoConvert = source["disableAutoConvert"];
 	        this.binaryAsText = source["binaryAsText"];
 	        this.useLogicalType = source["useLogicalType"];
+	        this.snappyCompression = source["snappyCompression"];
 	        this.snappyCompressionLevel = source["snappyCompressionLevel"];
+	        this.useVectorizedScanner = source["useVectorizedScanner"];
 	    }
 	}
 	export class PreviewResult {

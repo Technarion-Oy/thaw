@@ -71,7 +71,9 @@ type FileFormatConfig struct {
 	// ── Parquet ─────────────────────────────────────────────────────────────
 	BinaryAsText           bool `json:"binaryAsText"`           // default: true
 	UseLogicalType         bool `json:"useLogicalType"`         // default: false
+	SnappyCompression      bool `json:"snappyCompression"`      // default: false
 	SnappyCompressionLevel int  `json:"snappyCompressionLevel"` // 0 = not set
+	UseVectorizedScanner   bool `json:"useVectorizedScanner"`   // default: false
 }
 
 // PreviewResult holds a data preview (up to 50 rows) from a local or staged file.
@@ -262,6 +264,7 @@ func emitJSONParams(sb *strings.Builder, cfg FileFormatConfig) {
 	dateTimeParam(sb, "TIMESTAMP_FORMAT", cfg.TimestampFormat, "AUTO")
 	identParam(sb, "BINARY_FORMAT", cfg.BinaryFormat, "HEX")
 	boolParam(sb, "TRIM_SPACE", cfg.TrimSpace, false)
+	boolParam(sb, "MULTI_LINE", cfg.MultiLine, false)
 	nullIfParam(sb, cfg.NullIf)
 	boolParam(sb, "ENABLE_OCTAL", cfg.EnableOctal, false)
 	boolParam(sb, "ALLOW_DUPLICATE", cfg.AllowDuplicate, false)
@@ -287,9 +290,11 @@ func emitORCParams(sb *strings.Builder, cfg FileFormatConfig) {
 
 func emitParquetParams(sb *strings.Builder, cfg FileFormatConfig) {
 	identParam(sb, "COMPRESSION", cfg.Compression, "AUTO")
+	boolParam(sb, "SNAPPY_COMPRESSION", cfg.SnappyCompression, false)
 	boolParam(sb, "BINARY_AS_TEXT", cfg.BinaryAsText, true)
 	boolParam(sb, "USE_LOGICAL_TYPE", cfg.UseLogicalType, false)
 	boolParam(sb, "TRIM_SPACE", cfg.TrimSpace, false)
+	boolParam(sb, "USE_VECTORIZED_SCANNER", cfg.UseVectorizedScanner, false)
 	if cfg.SnappyCompressionLevel > 0 {
 		fmt.Fprintf(sb, "\n  SNAPPY_COMPRESSION_LEVEL = %d", cfg.SnappyCompressionLevel)
 	}

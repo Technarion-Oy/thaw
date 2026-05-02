@@ -65,13 +65,13 @@ function defaultsForType(type: string): Partial<fileformat.FileFormatConfig> {
       timeFormat: "AUTO",
       timestampFormat: "AUTO",
       binaryFormat: "HEX",
+      multiLine: false,
       nullIf: [],
       enableOctal: false,
       allowDuplicate: false,
       stripOuterArray: false,
       stripNullValues: false,
       ignoreUTF8Errors: false,
-      skipByteOrderMark: true,
     };
     case "AVRO": return { ...base, nullIf: [] };
     case "ORC": return { trimSpace: false, replaceInvalid: false, nullIf: [], type };
@@ -79,7 +79,9 @@ function defaultsForType(type: string): Partial<fileformat.FileFormatConfig> {
       ...base,
       binaryAsText: true,
       useLogicalType: false,
+      snappyCompression: false,
       snappyCompressionLevel: 0,
+      useVectorizedScanner: false,
       nullIf: [],
     };
     case "XML": return {
@@ -447,8 +449,10 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
         <Checkbox checked={cfg.stripNullValues} onChange={e => set("stripNullValues", e.target.checked)}>
           Strip NULL values{help("Remove key-value pairs where the value is null.")}
         </Checkbox>
-        <Checkbox checked={cfg.allowDuplicate} onChange={e => set("allowDuplicate", e.target.checked)}>
-          Allow duplicate keys{help("Keep the last occurrence of a duplicate key (default: error).")}
+        <Checkbox checked={cfg.multiLine} onChange={e => set("multiLine", e.target.checked)}>
+          Multi-line{help("Allow records to span multiple lines.")}
+        </Checkbox>
+        <Checkbox checked={cfg.allowDuplicate} onChange={e => set("allowDuplicate", e.target.checked)}>          Allow duplicate keys{help("Keep the last occurrence of a duplicate key (default: error).")}
         </Checkbox>
         <Checkbox checked={cfg.enableOctal} onChange={e => set("enableOctal", e.target.checked)}>
           Enable octal{help("Allow octal number literals in JSON (e.g. 0777).")}
@@ -521,6 +525,12 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
         </Checkbox>
         <Checkbox checked={cfg.useLogicalType} onChange={e => set("useLogicalType", e.target.checked)}>
           Use logical type{help("Map Parquet logical types (DATE, TIME, TIMESTAMP) to the corresponding Snowflake types.")}
+        </Checkbox>
+        <Checkbox checked={cfg.snappyCompression} onChange={e => set("snappyCompression", e.target.checked)}>
+          Snappy compression{help("Use Snappy compression for Parquet.")}
+        </Checkbox>
+        <Checkbox checked={cfg.useVectorizedScanner} onChange={e => set("useVectorizedScanner", e.target.checked)}>
+          Use vectorized scanner{help("Enable vectorized scanning for Parquet files.")}
         </Checkbox>
         <Checkbox checked={cfg.trimSpace} onChange={e => set("trimSpace", e.target.checked)}>Trim whitespace</Checkbox>
         <Checkbox checked={cfg.replaceInvalid} onChange={e => set("replaceInvalid", e.target.checked)}>Replace invalid characters</Checkbox>

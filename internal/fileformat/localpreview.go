@@ -61,11 +61,12 @@ func previewCSVReader(r io.Reader, cfg FileFormatConfig) PreviewResult {
 	
 	recordDelim := "\n"
 	if cfg.RecordDelimiter != "" && cfg.RecordDelimiter != "NONE" {
-		if cfg.RecordDelimiter == "\\n" {
+		switch cfg.RecordDelimiter {
+		case "\\n":
 			recordDelim = "\n"
-		} else if cfg.RecordDelimiter == "\\r\\n" {
+		case "\\r\\n":
 			recordDelim = "\r\n"
-		} else {
+		default:
 			recordDelim = cfg.RecordDelimiter
 		}
 	}
