@@ -25,6 +25,7 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"thaw/internal/ddl"
+	"thaw/internal/snowflake"
 )
 
 // ─── event name constants ─────────────────────────────────────────────────────
@@ -448,20 +449,17 @@ func (a *App) CreateMigrationSnapshot(database, backupSetDB, backupSetSchema, ba
 	}
 
 	ctx := context.Background()
-	q := func(s string) string {
-		return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
-	}
 
 	if doBackup && backupSetName != "" {
-		fqn := fmt.Sprintf("%s.%s.%s", q(backupSetDB), q(backupSetSchema), q(backupSetName))
-		sql := fmt.Sprintf("CREATE OR REPLACE BACKUP SET %s FOR DATABASE %s", fqn, q(database))
+		fqn := fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(backupSetDB), snowflake.QuoteIdent(backupSetSchema), snowflake.QuoteIdent(backupSetName))
+		sql := fmt.Sprintf("CREATE OR REPLACE BACKUP SET %s FOR DATABASE %s", fqn, snowflake.QuoteIdent(database))
 		if _, err := a.client.Execute(ctx, sql); err != nil {
 			return fmt.Errorf("create backup set: %w", err)
 		}
 	}
 
 	if doClone && cloneDB != "" {
-		sql := fmt.Sprintf("CREATE OR REPLACE DATABASE %s CLONE %s", q(cloneDB), q(database))
+		sql := fmt.Sprintf("CREATE OR REPLACE DATABASE %s CLONE %s", snowflake.QuoteIdent(cloneDB), snowflake.QuoteIdent(database))
 		if _, err := a.client.Execute(ctx, sql); err != nil {
 			return fmt.Errorf("create clone: %w", err)
 		}

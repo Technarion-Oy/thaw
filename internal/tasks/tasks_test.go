@@ -1,6 +1,10 @@
 package tasks
 
-import "testing"
+import (
+	"testing"
+
+	"thaw/internal/snowflake"
+)
 
 func TestBareIdent(t *testing.T) {
 	cases := []struct {
@@ -21,7 +25,7 @@ func TestBareIdent(t *testing.T) {
 	}
 }
 
-// TestQRoundTrip checks that q() and bareIdent() are inverse operations.
+// TestQRoundTrip checks that snowflake.QuoteIdent() and bareIdent() are inverse operations.
 func TestQRoundTrip(t *testing.T) {
 	names := []string{
 		"MY_TASK",
@@ -31,10 +35,10 @@ func TestQRoundTrip(t *testing.T) {
 		`trailing"`,
 	}
 	for _, name := range names {
-		quoted := q(name)
+		quoted := snowflake.QuoteIdent(name)
 		got := bareIdent(quoted)
 		if got != name {
-			t.Errorf("bareIdent(q(%q)) = %q, want %q", name, got, name)
+			t.Errorf("bareIdent(snowflake.QuoteIdent(%q)) = %q, want %q", name, got, name)
 		}
 	}
 }
