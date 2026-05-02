@@ -103,11 +103,26 @@ func boolParam(sb *strings.Builder, name string, val, def bool) {
 
 // identParam emits "  NAME = VAL" (no quotes) only when val differs from def
 // and is non-empty. Used for COMPRESSION, BINARY_FORMAT, ENCODING, etc.
+// To prevent SQL injection, val must match a strict allowlist.
 func identParam(sb *strings.Builder, name, val, def string) {
 	if val == "" || strings.EqualFold(val, def) {
 		return
 	}
-	fmt.Fprintf(sb, "\n  %s = %s", name, strings.ToUpper(val))
+	
+	valUpper := strings.ToUpper(val)
+	
+	// Strict allowlist for unquoted parameters to prevent SQL injection
+	allowed := false
+	switch valUpper {
+	case "AUTO", "GZIP", "BZ2", "BROTLI", "ZSTD", "DEFLATE", "RAW_DEFLATE", "NONE", // COMPRESSION
+		"LZO", "SNAPPY", // PARQUET COMPRESSION
+		"HEX", "BASE64", "UTF8": // BINARY_FORMAT & ENCODING
+		allowed = true
+	}
+
+	if allowed {
+		fmt.Fprintf(sb, "\n  %s = %s", name, valUpper)
+	}
 }
 
 // noneOrStrParam handles parameters that accept either NONE (keyword) or a
@@ -173,7 +188,13 @@ func BuildCreateFileFormatSql(db, schema string, cfg FileFormatConfig) string {
 		snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
 
 	t := strings.ToUpper(strings.TrimSpace(cfg.Type))
-	if t == "" {
+	switch t {
+	case "CSV", "JSON", "AVRO", "ORC", "PARQUET", "XML":
+		// Valid type
+	case "":
+		t = "CSV"
+	default:
+		// Fallback to a safe default if somehow bypassed
 		t = "CSV"
 	}
 	fmt.Fprintf(&sb, "\n  TYPE = %s", t)
@@ -195,7 +216,13 @@ func BuildCreateTemporaryFileFormatSql(name string, cfg FileFormatConfig) string
 	fmt.Fprintf(&sb, "CREATE OR REPLACE TEMPORARY FILE_FORMAT %s", snowflake.QuoteIdent(name))
 
 	t := strings.ToUpper(strings.TrimSpace(cfg.Type))
-	if t == "" {
+	switch t {
+	case "CSV", "JSON", "AVRO", "ORC", "PARQUET", "XML":
+		// Valid type
+	case "":
+		t = "CSV"
+	default:
+		// Fallback to a safe default if somehow bypassed
 		t = "CSV"
 	}
 	fmt.Fprintf(&sb, "\n  TYPE = %s", t)
@@ -321,7 +348,13 @@ func emitXMLParams(sb *strings.Builder, cfg FileFormatConfig) {
 //	SELECT * FROM @stage/path (FILE_FORMAT => (<inline>)) LIMIT 50
 func BuildInlineFileFormat(cfg FileFormatConfig) string {
 	t := strings.ToUpper(strings.TrimSpace(cfg.Type))
-	if t == "" {
+	switch t {
+	case "CSV", "JSON", "AVRO", "ORC", "PARQUET", "XML":
+		// Valid type
+	case "":
+		t = "CSV"
+	default:
+		// Fallback to a safe default if somehow bypassed
 		t = "CSV"
 	}
 
