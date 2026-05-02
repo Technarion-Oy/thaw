@@ -44,3 +44,7 @@ Thumbs.db
 
 # ── Release toolchain ─────────────────────────────────────────────────────────
 node_modules/
+
+# Vector DB
+.chroma_db/
+scripts/.venv/

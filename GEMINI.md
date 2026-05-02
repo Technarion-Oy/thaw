@@ -7,6 +7,55 @@ Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend +
 - **Authentication**: Authentication is handled by parsing connection parameters from the **Snowflake CLI configuration file** (defaults to `~/.snowflake/config.toml` or `connections.toml`). Users can select a custom path during sign-in, which is persisted in the app configuration.
 - **Tech Stack**: Go 1.22, Wails v2, React 18, TypeScript 5.6, Monaco Editor, Ant Design 5, Zustand 5.
 
+## 🗄 Codebase Vector Database
+
+A ChromaDB vector index of all `.go`, `.ts`, and `.tsx` source files lives at `.chroma_db/` in the repo root. It is **not committed to git**.
+
+**Collection details:**
+- Name: `thaw_codebase`
+- Model: `models/gemini-embedding-2` at 768 dimensions
+- Distance: cosine
+- Contents: 190 source files → ~3 069 chunks (1 500 char / 150 overlap, language-aware splits)
+
+**When to query it:**
+Before writing code for a non-trivial task, query the vector DB to locate the most relevant existing files and functions. This avoids duplicate implementations and surfaces patterns you might not find with a plain `grep`.
+
+**Querying from Python:**
+```python
+import chromadb, os
+from google import genai
+from google.genai import types
+
+client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+db = chromadb.PersistentClient(path=".chroma_db")
+col = db.get_collection("thaw_codebase")
+
+def search(query: str, n: int = 8) -> list[dict]:
+    vec = client.models.embed_content(
+        model="models/gemini-embedding-2",
+        contents=query,
+        config=types.EmbedContentConfig(
+            task_type="RETRIEVAL_QUERY",
+            output_dimensionality=768,
+        ),
+    ).embeddings[0].values
+    results = col.query(query_embeddings=[vec], n_results=n)
+    return [
+        {"file": m["file_path"], "language": m["language"], "text": d}
+        for m, d in zip(results["metadatas"][0], results["documents"][0])
+    ]
+```
+
+**Refreshing the index** (run after significant code changes):
+```bash
+cd scripts
+GEMINI_API_KEY=... .venv/bin/python embed_codebase.py --reset
+```
+
+- The `--reset` flag drops and rebuilds the collection from scratch.
+- Omit `--reset` to append (but prefer `--reset` since chunk IDs are UUIDs and duplicates won't be detected).
+- The venv and all dependencies are already installed at `scripts/.venv/`.
+
 ## 🏗 Architecture Overview
 - **Go Backend**: Core logic is in `app.go` (Wails IPC bindings) and `internal/`.
 - **Snowflake Client**: Located in `internal/snowflake/client.go`. Enriched `ColumnInfo` here for metadata-heavy tasks.

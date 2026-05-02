@@ -1,0 +1,7 @@
+# Embedding pipeline dependencies
+# Install with: pip install -r requirements-embed.txt
+
+chromadb>=0.5.0
+langchain-text-splitters>=0.2.0
+google-genai>=1.0.0
+tenacity>=8.3.0

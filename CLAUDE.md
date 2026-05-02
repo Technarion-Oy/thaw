@@ -56,6 +56,55 @@ thaw/
 
 **IPC flow**: Frontend calls `wailsjs/go/main/App.ts` → Wails runtime → Go `app.go` methods → `internal/` packages.
 
+## Codebase Vector Database
+
+A ChromaDB vector index of all `.go`, `.ts`, and `.tsx` source files lives at `.chroma_db/` in the repo root. It is **not committed to git** (see `.gitignore`).
+
+**Collection details:**
+- Name: `thaw_codebase`
+- Model: `models/gemini-embedding-2` at 768 dimensions
+- Distance: cosine
+- Contents: 190 source files → ~3 069 chunks (1 500 char / 150 overlap, language-aware splits)
+
+**When to query it:**
+Before writing code for a non-trivial task, query the vector DB to locate the most relevant existing files and functions. This avoids duplicate implementations and surfaces patterns you might not find with a plain `grep`.
+
+**Querying from Python:**
+```python
+import chromadb, os
+from google import genai
+from google.genai import types
+
+client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+db = chromadb.PersistentClient(path=".chroma_db")
+col = db.get_collection("thaw_codebase")
+
+def search(query: str, n: int = 8) -> list[dict]:
+    vec = client.models.embed_content(
+        model="models/gemini-embedding-2",
+        contents=query,
+        config=types.EmbedContentConfig(
+            task_type="RETRIEVAL_QUERY",
+            output_dimensionality=768,
+        ),
+    ).embeddings[0].values
+    results = col.query(query_embeddings=[vec], n_results=n)
+    return [
+        {"file": m["file_path"], "language": m["language"], "text": d}
+        for m, d in zip(results["metadatas"][0], results["documents"][0])
+    ]
+```
+
+**Refreshing the index** (run after significant code changes):
+```bash
+cd scripts
+GEMINI_API_KEY=... .venv/bin/python embed_codebase.py --reset
+```
+
+- The `--reset` flag drops and rebuilds the collection from scratch.
+- Omit `--reset` to append (useful for incremental updates, but UUIDs are used as IDs so existing chunks are not deduplicated — prefer `--reset` unless the run was partial).
+- The venv and all dependencies are already installed at `scripts/.venv/`.
+
 ## Build Commands
 
 ```bash
