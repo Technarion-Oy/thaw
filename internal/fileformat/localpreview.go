@@ -139,11 +139,11 @@ func previewCSVReader(r io.Reader, cfg FileFormatConfig) PreviewResult {
 		rows = rows[1:]
 
 		// Rebuild rows to use new column names
-		var newRows []map[string]string
+		newRows := make([]map[string]string, 0, len(rows))
 		for _, oldRow := range rows {
 			newRow := make(map[string]string)
 			for j := range columns {
-				// The data from oldRow was keyed by COLUMN_X. 
+				// The data from oldRow was keyed by COLUMN_X.
 				// The old columns slice is now overwritten. We need the old keys.
 				oldKey := fmt.Sprintf("COLUMN_%d", j+1)
 				newRow[columns[j]] = oldRow[oldKey]
@@ -153,6 +153,12 @@ func previewCSVReader(r io.Reader, cfg FileFormatConfig) PreviewResult {
 		rows = newRows
 	}
 
+	if columns == nil {
+		columns = []string{}
+	}
+	if rows == nil {
+		rows = []map[string]string{}
+	}
 	return PreviewResult{Columns: columns, Rows: rows}
 }
 

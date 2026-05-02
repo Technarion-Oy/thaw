@@ -301,9 +301,10 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
         </Tooltip>
       ),
     }));
+    const rows = previewData.rows ?? [];
     return (
       <Table
-        dataSource={previewData.rows.map((r, i) => ({ ...r, key: i }))}
+        dataSource={rows.map((r, i) => ({ ...r, key: i }))}
         columns={columns}
         size="small"
         pagination={false}

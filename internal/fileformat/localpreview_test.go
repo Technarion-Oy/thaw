@@ -73,6 +73,40 @@ func TestPreviewCSVReader(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:  "Space delimiter with comma CSV",
+			input: "a,b,c\n1,2,3\n4,5,6",
+			cfg:   FileFormatConfig{FieldDelimiter: " "},
+			expected: PreviewResult{
+				Columns: []string{"COLUMN_1"},
+				Rows: []map[string]string{
+					{"COLUMN_1": "a,b,c"},
+					{"COLUMN_1": "1,2,3"},
+					{"COLUMN_1": "4,5,6"},
+				},
+			},
+		},
+		{
+			name:  "Parse header with space delimiter, header only file",
+			input: "col1 col2 col3",
+			cfg:   FileFormatConfig{FieldDelimiter: " ", ParseHeader: true},
+			expected: PreviewResult{
+				Columns: []string{"col1", "col2", "col3"},
+				Rows:    []map[string]string{},
+			},
+		},
+		{
+			name:  "Parse header with space delimiter and data rows",
+			input: "name age\nAlice 30\nBob 25",
+			cfg:   FileFormatConfig{FieldDelimiter: " ", ParseHeader: true},
+			expected: PreviewResult{
+				Columns: []string{"name", "age"},
+				Rows: []map[string]string{
+					{"name": "Alice", "age": "30"},
+					{"name": "Bob", "age": "25"},
+				},
+			},
+		},
 	}
 
 	for _, tc := range tests {
