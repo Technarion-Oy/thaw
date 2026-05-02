@@ -361,6 +361,17 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
           <Input value={cfg.escapeUnenclosedField} onChange={e => set("escapeUnenclosedField", e.target.value)} placeholder="\\" />
         </Form.Item>
       </div>
+      <Form.Item label={<>Optionally enclosed by{help("Character used to enclose strings. NONE, ', or \". Default: NONE.")}</>} style={itemSm}>
+        <Select
+          value={cfg.fieldOptionallyEnclosedBy}
+          onChange={v => set("fieldOptionallyEnclosedBy", v)}
+          options={[
+            { value: "NONE", label: "NONE" },
+            { value: "'", label: "Single Quote (')" },
+            { value: "\"", label: "Double Quote (\")" },
+          ]}
+        />
+      </Form.Item>
       <Space direction="vertical" size={4} style={{ marginBottom: 10 }}>
         <Checkbox checked={cfg.multiLine} onChange={e => set("multiLine", e.target.checked)}>
           Multi-line{help("Allow field values to span multiple lines.")}

@@ -1,7 +1,16 @@
+// Copyright (c) 2026 Technarion Oy. All rights reserved.
+//
+// This software and its source code are proprietary and confidential.
+// Unauthorized copying, distribution, modification, or use of this software,
+// in whole or in part, is strictly prohibited without prior written permission
+// from Technarion Oy.
+//
+// Commercial use of this software is restricted to parties holding a valid
+// license agreement with Technarion Oy.
+
 package fileformat
 
 import (
-	"encoding/csv"
 	"fmt"
 	"io"
 	"os"
@@ -39,57 +48,185 @@ func previewCSV(path string, cfg FileFormatConfig) PreviewResult {
 }
 
 func previewCSVReader(r io.Reader, cfg FileFormatConfig) PreviewResult {
-	// Handle custom delimiters
-	delim := ','
+	// Custom CSV Parser to handle Snowflake's FIELD_OPTIONALLY_ENCLOSED_BY and ESCAPE rules.
+
+	delim := ","
 	if cfg.FieldDelimiter != "" {
 		if cfg.FieldDelimiter == "\\t" {
-			delim = '\t'
+			delim = "\t"
 		} else {
-			// Snowflake allows multi-character delimiters, but standard encoding/csv doesn't.
-			// We take the first rune for best-effort local preview.
-			for _, r := range cfg.FieldDelimiter {
-				delim = r
-				break
-			}
+			delim = cfg.FieldDelimiter
+		}
+	}
+	
+	recordDelim := "\n"
+	if cfg.RecordDelimiter != "" && cfg.RecordDelimiter != "NONE" {
+		if cfg.RecordDelimiter == "\\n" {
+			recordDelim = "\n"
+		} else if cfg.RecordDelimiter == "\\r\\n" {
+			recordDelim = "\r\n"
+		} else {
+			recordDelim = cfg.RecordDelimiter
 		}
 	}
 
-	// encoding/csv requires a single rune.
-	reader := csv.NewReader(r)
-	reader.Comma = delim
-	reader.LazyQuotes = true
-	reader.TrimLeadingSpace = cfg.TrimSpace
-	reader.FieldsPerRecord = -1 // Allow variable number of fields
+	enclosedBy := ""
+	if cfg.FieldOptionallyEnclosedBy == "'" || cfg.FieldOptionallyEnclosedBy == "\"" {
+		enclosedBy = cfg.FieldOptionallyEnclosedBy
+	}
 
-	// Skip header rows
+	escape := ""
+	if cfg.Escape != "NONE" && cfg.Escape != "" {
+		if cfg.Escape == "\\\\" {
+			escape = "\\"
+		} else {
+			escape = cfg.Escape
+		}
+	}
+
+	escapeUnenclosed := "\\"
+	if cfg.EscapeUnenclosedField == "NONE" {
+		escapeUnenclosed = ""
+	} else if cfg.EscapeUnenclosedField != "" {
+		if cfg.EscapeUnenclosedField == "\\\\" {
+			escapeUnenclosed = "\\"
+		} else {
+			escapeUnenclosed = cfg.EscapeUnenclosedField
+		}
+	}
+
+	b, err := io.ReadAll(r)
+	if err != nil && err != io.EOF {
+		return PreviewResult{Error: err.Error()}
+	}
+	content := string(b)
+
+	var records [][]string
+	var currentRecord []string
+	var currentField strings.Builder
+
+	inQuotes := false
+	inEscape := false
+	i := 0
+	
+	// Helper to check prefix
+	hasPrefix := func(idx int, prefix string) bool {
+		if prefix == "" {
+			return false
+		}
+		if idx+len(prefix) > len(content) {
+			return false
+		}
+		return content[idx:idx+len(prefix)] == prefix
+	}
+
+	for i < len(content) {
+		char := string(content[i])
+		
+		if inEscape {
+			currentField.WriteString(char)
+			inEscape = false
+			i++
+			continue
+		}
+
+		if inQuotes {
+			if escape != "" && hasPrefix(i, escape) && !hasPrefix(i, enclosedBy+enclosedBy) {
+				inEscape = true
+				i += len(escape)
+				continue
+			}
+
+			if hasPrefix(i, enclosedBy) {
+				// Check for doubled quote (escaped quote)
+				if hasPrefix(i+len(enclosedBy), enclosedBy) {
+					currentField.WriteString(enclosedBy)
+					i += len(enclosedBy) * 2
+					continue
+				}
+				// End of quotes
+				inQuotes = false
+				i += len(enclosedBy)
+				continue
+			}
+
+			currentField.WriteString(char)
+			i++
+			continue
+		}
+
+		// Not in quotes
+		if escapeUnenclosed != "" && hasPrefix(i, escapeUnenclosed) {
+			inEscape = true
+			i += len(escapeUnenclosed)
+			continue
+		}
+
+		if enclosedBy != "" && hasPrefix(i, enclosedBy) && currentField.Len() == 0 {
+			inQuotes = true
+			i += len(enclosedBy)
+			continue
+		}
+
+		if hasPrefix(i, recordDelim) {
+			currentRecord = append(currentRecord, currentField.String())
+			currentField.Reset()
+			records = append(records, currentRecord)
+			currentRecord = nil
+			i += len(recordDelim)
+			continue
+		}
+
+		if hasPrefix(i, delim) {
+			currentRecord = append(currentRecord, currentField.String())
+			currentField.Reset()
+			i += len(delim)
+			continue
+		}
+
+		currentField.WriteString(char)
+		i++
+	}
+
+	// Add the last field/record if there's no trailing record delimiter
+	if currentField.Len() > 0 || len(currentRecord) > 0 {
+		currentRecord = append(currentRecord, currentField.String())
+		records = append(records, currentRecord)
+	}
+
+	// Now process the records
 	skip := cfg.SkipHeader
-	for i := 0; i < skip; i++ {
-		_, err := reader.Read()
-		if err != nil {
-			if err == io.EOF {
-				return PreviewResult{Columns: []string{}, Rows: []map[string]string{}}
-			}
-			return PreviewResult{Error: err.Error()}
-		}
+	if skip > len(records) {
+		skip = len(records)
 	}
+	records = records[skip:]
 
-	// Read data
 	var rows []map[string]string
 	var columns []string
 	limit := 50
-	if cfg.ParseHeader {
-		limit = 51 // First row becomes header
+
+	if cfg.ParseHeader && len(records) > 0 {
+		record := records[0]
+		records = records[1:]
+		
+		for j, val := range record {
+			if cfg.TrimSpace {
+				val = strings.TrimSpace(val)
+			}
+			if val == "" {
+				columns = append(columns, fmt.Sprintf("COLUMN_%d", j+1))
+			} else {
+				columns = append(columns, val)
+			}
+		}
+	}
+
+	if limit > len(records) {
+		limit = len(records)
 	}
 
 	for i := 0; i < limit; i++ {
-		record, err := reader.Read()
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			// Best effort: if we get a parsing error, we can stop or continue. Let's stop.
-			return PreviewResult{Error: fmt.Sprintf("CSV parse error at line %d: %v", skip+i+1, err)}
-		}
+		record := records[i]
 
 		if len(columns) < len(record) {
 			for j := len(columns); j < len(record); j++ {
@@ -116,41 +253,12 @@ func previewCSVReader(r io.Reader, cfg FileFormatConfig) PreviewResult {
 			}
 
 			if isNull {
-				// We represent nulls implicitly by omitting them or leaving empty depending on frontend.
-				// The previous stage preview returned string map. If we omit the key or set to empty string?
-				// Stage preview typically omits or returns literal "null" or empty. Let's omit or set empty.
-				// We will omit the key if it's null, mimicking SQL results where missing keys are null in JSON,
-				// or we set it to empty string. Let's just set it to empty string for CSV columns.
 				row[columns[j]] = ""
 			} else {
 				row[columns[j]] = val
 			}
 		}
 		rows = append(rows, row)
-	}
-
-	if cfg.ParseHeader && len(rows) > 0 {
-		headerRow := rows[0]
-		newCols := make([]string, len(columns))
-		for j, col := range columns {
-			newCols[j] = headerRow[col]
-		}
-		columns = newCols
-		rows = rows[1:]
-
-		// Rebuild rows to use new column names
-		newRows := make([]map[string]string, 0, len(rows))
-		for _, oldRow := range rows {
-			newRow := make(map[string]string)
-			for j := range columns {
-				// The data from oldRow was keyed by COLUMN_X.
-				// The old columns slice is now overwritten. We need the old keys.
-				oldKey := fmt.Sprintf("COLUMN_%d", j+1)
-				newRow[columns[j]] = oldRow[oldKey]
-			}
-			newRows = append(newRows, newRow)
-		}
-		rows = newRows
 	}
 
 	if columns == nil {

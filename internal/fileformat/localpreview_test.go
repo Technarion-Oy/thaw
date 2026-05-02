@@ -1,3 +1,13 @@
+// Copyright (c) 2026 Technarion Oy. All rights reserved.
+//
+// This software and its source code are proprietary and confidential.
+// Unauthorized copying, distribution, modification, or use of this software,
+// in whole or in part, is strictly prohibited without prior written permission
+// from Technarion Oy.
+//
+// Commercial use of this software is restricted to parties holding a valid
+// license agreement with Technarion Oy.
+
 package fileformat
 
 import (
@@ -64,7 +74,7 @@ func TestPreviewCSVReader(t *testing.T) {
 		{
 			name:  "Null Handling",
 			input: "col1,col2\nval1,\\N\nnull,val4",
-			cfg:   FileFormatConfig{ParseHeader: true, NullIf: []string{"\\N", "null"}},
+			cfg:   FileFormatConfig{ParseHeader: true, NullIf: []string{"N", "null"}}, // \N is unescaped to N by the default escape_unenclosed_field = \
 			expected: PreviewResult{
 				Columns: []string{"col1", "col2"},
 				Rows: []map[string]string{
@@ -104,6 +114,90 @@ func TestPreviewCSVReader(t *testing.T) {
 				Rows: []map[string]string{
 					{"name": "Alice", "age": "30"},
 					{"name": "Bob", "age": "25"},
+				},
+			},
+		},
+		{
+			name:  "Optionally enclosed by DOUBLE QUOTES",
+			input: "col1,col2\nval1,\"val,2\"\nval3,\"val4\"",
+			cfg:   FileFormatConfig{ParseHeader: true, FieldOptionallyEnclosedBy: "\""},
+			expected: PreviewResult{
+				Columns: []string{"col1", "col2"},
+				Rows: []map[string]string{
+					{"col1": "val1", "col2": "val,2"},
+					{"col1": "val3", "col2": "val4"},
+				},
+			},
+		},
+		{
+			name:  "Optionally enclosed by NONE ignores quotes",
+			input: "col1,col2\nval1,\"val,2\"\nval3,\"val4\"",
+			cfg:   FileFormatConfig{ParseHeader: true, FieldOptionallyEnclosedBy: "NONE"},
+			// With NONE, quotes are treated as standard characters
+			expected: PreviewResult{
+				Columns: []string{"col1", "col2", "COLUMN_3"},
+				Rows: []map[string]string{
+					{"col1": "val1", "col2": "\"val", "COLUMN_3": "2\""},
+					{"col1": "val3", "col2": "\"val4\""},
+				},
+			},
+		},
+		{
+			name:  "User test preview without OptionallyEnclosedBy (default Snowflake)",
+			input: "user_id,notes\n1,VIP customer\n5,\"Loves apples, oranges, and pears\"",
+			cfg:   FileFormatConfig{ParseHeader: true},
+			// Snowflake default optionally enclosed by is NONE, so the quotes are literal and 
+			// the comma inside the quotes creates new columns.
+			expected: PreviewResult{
+				Columns: []string{"user_id", "notes", "COLUMN_3", "COLUMN_4"},
+				Rows: []map[string]string{
+					{"user_id": "1", "notes": "VIP customer"},
+					{"user_id": "5", "notes": "\"Loves apples", "COLUMN_3": " oranges", "COLUMN_4": " and pears\""},
+				},
+			},
+		},
+		{
+			name:  "User test preview WITH OptionallyEnclosedBy",
+			input: "user_id,notes\n1,VIP customer\n5,\"Loves apples, oranges, and pears\"",
+			cfg:   FileFormatConfig{ParseHeader: true, FieldOptionallyEnclosedBy: "\""},
+			expected: PreviewResult{
+				Columns: []string{"user_id", "notes"},
+				Rows: []map[string]string{
+					{"user_id": "1", "notes": "VIP customer"},
+					{"user_id": "5", "notes": "Loves apples, oranges, and pears"},
+				},
+			},
+		},
+		{
+			name:  "Custom Escape inside enclosed string",
+			input: "col1,col2\nval1,\"he says \\\"hello\\\"\"",
+			cfg:   FileFormatConfig{ParseHeader: true, FieldOptionallyEnclosedBy: "\"", Escape: "\\\\"},
+			expected: PreviewResult{
+				Columns: []string{"col1", "col2"},
+				Rows: []map[string]string{
+					{"col1": "val1", "col2": "he says \"hello\""},
+				},
+			},
+		},
+		{
+			name:  "Custom Escape unenclosed field",
+			input: "col1,col2\nval1,this is a \\, comma",
+			cfg:   FileFormatConfig{ParseHeader: true, EscapeUnenclosedField: "\\\\"},
+			expected: PreviewResult{
+				Columns: []string{"col1", "col2"},
+				Rows: []map[string]string{
+					{"col1": "val1", "col2": "this is a , comma"},
+				},
+			},
+		},
+		{
+			name:  "Custom Escape unenclosed field NONE",
+			input: "col1,col2\nval1,this is a \\, comma",
+			cfg:   FileFormatConfig{ParseHeader: true, EscapeUnenclosedField: "NONE"},
+			expected: PreviewResult{
+				Columns: []string{"col1", "col2", "COLUMN_3"},
+				Rows: []map[string]string{
+					{"col1": "val1", "col2": "this is a \\", "COLUMN_3": " comma"},
 				},
 			},
 		},

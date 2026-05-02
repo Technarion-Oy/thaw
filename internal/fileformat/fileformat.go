@@ -176,20 +176,7 @@ func BuildCreateFileFormatSql(db, schema string, cfg FileFormatConfig) string {
 	}
 	fmt.Fprintf(&sb, "\n  TYPE = %s", t)
 
-	switch t {
-	case "CSV":
-		emitCSVParams(&sb, cfg)
-	case "JSON":
-		emitJSONParams(&sb, cfg)
-	case "AVRO":
-		emitAVROParams(&sb, cfg)
-	case "ORC":
-		emitORCParams(&sb, cfg)
-	case "PARQUET":
-		emitParquetParams(&sb, cfg)
-	case "XML":
-		emitXMLParams(&sb, cfg)
-	}
+	emitFormatParams(&sb, t, cfg)
 
 	if cfg.Comment != "" {
 		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", escLit(cfg.Comment))
@@ -211,26 +198,30 @@ func BuildCreateTemporaryFileFormatSql(name string, cfg FileFormatConfig) string
 	}
 	fmt.Fprintf(&sb, "\n  TYPE = %s", t)
 
-	switch t {
-	case "CSV":
-		emitCSVParams(&sb, cfg)
-	case "JSON":
-		emitJSONParams(&sb, cfg)
-	case "AVRO":
-		emitAVROParams(&sb, cfg)
-	case "ORC":
-		emitORCParams(&sb, cfg)
-	case "PARQUET":
-		emitParquetParams(&sb, cfg)
-	case "XML":
-		emitXMLParams(&sb, cfg)
-	}
+	emitFormatParams(&sb, t, cfg)
 
 	sb.WriteString(";")
 	return sb.String()
 }
 
 // ── Per-type parameter emitters ──────────────────────────────────────────────
+
+func emitFormatParams(sb *strings.Builder, t string, cfg FileFormatConfig) {
+	switch t {
+	case "CSV":
+		emitCSVParams(sb, cfg)
+	case "JSON":
+		emitJSONParams(sb, cfg)
+	case "AVRO":
+		emitAVROParams(sb, cfg)
+	case "ORC":
+		emitORCParams(sb, cfg)
+	case "PARQUET":
+		emitParquetParams(sb, cfg)
+	case "XML":
+		emitXMLParams(sb, cfg)
+	}
+}
 
 func emitCSVParams(sb *strings.Builder, cfg FileFormatConfig) {
 	identParam(sb, "COMPRESSION", cfg.Compression, "AUTO")
@@ -334,20 +325,7 @@ func BuildInlineFileFormat(cfg FileFormatConfig) string {
 
 	// Reuse per-type emitters on a blank builder, then strip the leading newline+spaces.
 	var paramSb strings.Builder
-	switch t {
-	case "CSV":
-		emitCSVParams(&paramSb, cfg)
-	case "JSON":
-		emitJSONParams(&paramSb, cfg)
-	case "AVRO":
-		emitAVROParams(&paramSb, cfg)
-	case "ORC":
-		emitORCParams(&paramSb, cfg)
-	case "PARQUET":
-		emitParquetParams(&paramSb, cfg)
-	case "XML":
-		emitXMLParams(&paramSb, cfg)
-	}
+	emitFormatParams(&paramSb, t, cfg)
 
 	if paramSb.Len() > 0 {
 		// Each line begins with "\n  "; replace with ", " to produce an inline clause.
