@@ -45,6 +45,7 @@ const allEnabled: config.FeatureFlags = {
   sqlDiagnostics: true,
   schemaAutocomplete: true,
   ddlHoverTooltips: true,
+  fileFormatBuilder: true,
 };
 
 // allLocked default: nothing is admin-locked.
@@ -80,6 +81,7 @@ const nothingLocked: config.FeatureFlags = {
   sqlDiagnostics: false,
   schemaAutocomplete: false,
   ddlHoverTooltips: false,
+  fileFormatBuilder: false,
 };
 
 interface FeatureFlagsState {

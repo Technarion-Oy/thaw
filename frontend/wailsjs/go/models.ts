@@ -135,6 +135,7 @@ export namespace config {
 	    sqlDiagnostics: boolean;
 	    schemaAutocomplete: boolean;
 	    ddlHoverTooltips: boolean;
+	    fileFormatBuilder: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new FeatureFlags(source);
@@ -173,6 +174,7 @@ export namespace config {
 	        this.sqlDiagnostics = source["sqlDiagnostics"];
 	        this.schemaAutocomplete = source["schemaAutocomplete"];
 	        this.ddlHoverTooltips = source["ddlHoverTooltips"];
+	        this.fileFormatBuilder = source["fileFormatBuilder"];
 	    }
 	}
 	export class GitConfig {
@@ -337,6 +339,121 @@ export namespace ddl {
 	        this.files = source["files"];
 	        this.skipped = source["skipped"];
 	        this.errors = source["errors"];
+	    }
+	}
+
+}
+
+export namespace fileformat {
+	
+	export class FileFormatConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    type: string;
+	    comment: string;
+	    compression: string;
+	    trimSpace: boolean;
+	    replaceInvalid: boolean;
+	    fileExtension: string;
+	    recordDelimiter: string;
+	    fieldDelimiter: string;
+	    multiLine: boolean;
+	    parseHeader: boolean;
+	    skipHeader: number;
+	    skipBlankLines: boolean;
+	    dateFormat: string;
+	    timeFormat: string;
+	    timestampFormat: string;
+	    binaryFormat: string;
+	    escape: string;
+	    escapeUnenclosedField: string;
+	    fieldOptionallyEnclosedBy: string;
+	    nullIf: string[];
+	    errorOnColumnCountMismatch: boolean;
+	    emptyFieldAsNull: boolean;
+	    skipByteOrderMark: boolean;
+	    encoding: string;
+	    enableOctal: boolean;
+	    allowDuplicate: boolean;
+	    stripOuterArray: boolean;
+	    stripNullValues: boolean;
+	    ignoreUTF8Errors: boolean;
+	    preserveSpace: boolean;
+	    stripOuterElement: boolean;
+	    disableSnowflakeData: boolean;
+	    disableAutoConvert: boolean;
+	    binaryAsText: boolean;
+	    useLogicalType: boolean;
+	    snappyCompression: boolean;
+	    snappyCompressionLevel: number;
+	    useVectorizedScanner: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileFormatConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.type = source["type"];
+	        this.comment = source["comment"];
+	        this.compression = source["compression"];
+	        this.trimSpace = source["trimSpace"];
+	        this.replaceInvalid = source["replaceInvalid"];
+	        this.fileExtension = source["fileExtension"];
+	        this.recordDelimiter = source["recordDelimiter"];
+	        this.fieldDelimiter = source["fieldDelimiter"];
+	        this.multiLine = source["multiLine"];
+	        this.parseHeader = source["parseHeader"];
+	        this.skipHeader = source["skipHeader"];
+	        this.skipBlankLines = source["skipBlankLines"];
+	        this.dateFormat = source["dateFormat"];
+	        this.timeFormat = source["timeFormat"];
+	        this.timestampFormat = source["timestampFormat"];
+	        this.binaryFormat = source["binaryFormat"];
+	        this.escape = source["escape"];
+	        this.escapeUnenclosedField = source["escapeUnenclosedField"];
+	        this.fieldOptionallyEnclosedBy = source["fieldOptionallyEnclosedBy"];
+	        this.nullIf = source["nullIf"];
+	        this.errorOnColumnCountMismatch = source["errorOnColumnCountMismatch"];
+	        this.emptyFieldAsNull = source["emptyFieldAsNull"];
+	        this.skipByteOrderMark = source["skipByteOrderMark"];
+	        this.encoding = source["encoding"];
+	        this.enableOctal = source["enableOctal"];
+	        this.allowDuplicate = source["allowDuplicate"];
+	        this.stripOuterArray = source["stripOuterArray"];
+	        this.stripNullValues = source["stripNullValues"];
+	        this.ignoreUTF8Errors = source["ignoreUTF8Errors"];
+	        this.preserveSpace = source["preserveSpace"];
+	        this.stripOuterElement = source["stripOuterElement"];
+	        this.disableSnowflakeData = source["disableSnowflakeData"];
+	        this.disableAutoConvert = source["disableAutoConvert"];
+	        this.binaryAsText = source["binaryAsText"];
+	        this.useLogicalType = source["useLogicalType"];
+	        this.snappyCompression = source["snappyCompression"];
+	        this.snappyCompressionLevel = source["snappyCompressionLevel"];
+	        this.useVectorizedScanner = source["useVectorizedScanner"];
+	    }
+	}
+	export class PreviewResult {
+	    columns: string[];
+	    rows: any[];
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PreviewResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.columns = source["columns"];
+	        this.rows = source["rows"];
+	        this.error = source["error"];
 	    }
 	}
 

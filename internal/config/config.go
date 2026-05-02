@@ -158,8 +158,8 @@ func DefaultNotebookPrefs() NotebookPrefs {
 //
 // Version tracks the schema revision so new flags introduced after an initial
 // save can be filled with their defaults rather than the zero value (false).
-// Current version: 3 (added file-transfer flags: PutCommand, GetCommand).
-const flagsVersion = 3
+// Current version: 4 (added FileFormatBuilder).
+const flagsVersion = 4
 
 type FeatureFlags struct {
 	Initialized bool `json:"initialized"`
@@ -204,9 +204,12 @@ type FeatureFlags struct {
 	ExplainSQL   bool `json:"explainSql"`
 
 	// SQL Editor
-	SqlDiagnostics    bool `json:"sqlDiagnostics"`
+	SqlDiagnostics     bool `json:"sqlDiagnostics"`
 	SchemaAutocomplete bool `json:"schemaAutocomplete"`
-	DdlHoverTooltips  bool `json:"ddlHoverTooltips"`
+	DdlHoverTooltips   bool `json:"ddlHoverTooltips"`
+
+	// Data Engineering
+	FileFormatBuilder bool `json:"fileFormatBuilder"` // Visual CREATE FILE FORMAT builder & previewer
 }
 
 // DefaultFeatureFlags returns a FeatureFlags with every feature enabled.
@@ -243,6 +246,7 @@ func DefaultFeatureFlags() FeatureFlags {
 		SqlDiagnostics:         true,
 		SchemaAutocomplete:     true,
 		DdlHoverTooltips:       true,
+		FileFormatBuilder:      true,
 	}
 }
 
@@ -293,6 +297,8 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	// Version 2 → 3: file-transfer flags added; both default to true.
 	setIfZero(&f.PutCommand, defaults.PutCommand)
 	setIfZero(&f.GetCommand, defaults.GetCommand)
+	// Version 3 → 4: FileFormatBuilder added; defaults to true.
+	setIfZero(&f.FileFormatBuilder, defaults.FileFormatBuilder)
 	f.Version = flagsVersion
 	return f
 }

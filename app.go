@@ -37,6 +37,7 @@ import (
 	"thaw/internal/ai"
 	"thaw/internal/config"
 	"thaw/internal/ddl"
+	"thaw/internal/fileformat"
 	"thaw/internal/filesystem"
 	"thaw/internal/fnmeta"
 	"thaw/internal/gitrepo"
@@ -1384,6 +1385,119 @@ func (a *App) BuildCreatePipeSql(database, schema string, cfg pipe.PipeConfig) (
 // BuildRefreshPipeSql returns the SQL for an ALTER PIPE ... REFRESH statement.
 func (a *App) BuildRefreshPipeSql(database, schema, name string, cfg pipe.RefreshPipeConfig) (string, error) {
 	return pipe.BuildRefreshPipeSql(database, schema, name, cfg)
+}
+
+// ── File Format ──────────────────────────────────────────────────────────────
+
+// BuildCreateFileFormatSql returns the CREATE FILE FORMAT SQL statement for the
+// given configuration. Only parameters that differ from Snowflake's defaults are
+// included, keeping the output concise.
+func (a *App) BuildCreateFileFormatSql(database, schema string, cfg fileformat.FileFormatConfig) string {
+	return fileformat.BuildCreateFileFormatSql(database, schema, cfg)
+}
+
+// GetLocalFilePreview reads a local file and returns up to 50 rows.
+// It uses pure Go to mimic Snowflake's native file format parsing for CSV and JSON.
+func (a *App) GetLocalFilePreview(path string, cfg fileformat.FileFormatConfig) fileformat.PreviewResult {
+	return fileformat.PreviewLocalFile(path, cfg)
+}
+
+// GetStageFilePreview queries a Snowflake stage file with an inline FILE_FORMAT
+// derived from cfg and returns up to 50 rows. The stagePath must be a fully
+// qualified stage reference, e.g. "@DB.SCHEMA.STAGE/path/to/file.csv".
+func (a *App) GetStageFilePreview(stagePath string, cfg fileformat.FileFormatConfig) (fileformat.PreviewResult, error) {
+	if a.client == nil {
+		return fileformat.PreviewResult{}, ErrNotConnected
+	}
+
+	// Snowflake SELECT queries ignore PARSE_HEADER=TRUE for naming columns (it skips the row but leaves columns as $1, $2).
+	// To provide a useful preview that looks like the target table, if ParseHeader is true,
+	// we turn it off for the query, fetch one extra row, and use the first returned row as our column headers.
+	parseHeader := cfg.ParseHeader
+	queryCfg := cfg
+	if parseHeader {
+		queryCfg.ParseHeader = false
+	}
+
+	inline := fileformat.BuildInlineFileFormat(queryCfg)
+	limit := 50
+	if parseHeader {
+		limit = 51
+	}
+
+	// Use a temporary file format to avoid "Table function argument is required to be a constant" errors.
+	formatName := fmt.Sprintf("THAW_PREVIEW_%d", time.Now().UnixNano())
+	createSql := fileformat.BuildCreateTemporaryFileFormatSql(formatName, queryCfg)
+	selectSql := fmt.Sprintf("SELECT * FROM %s (FILE_FORMAT => '%s') LIMIT %d;", stagePath, formatName, limit)
+
+	// Execute both statements. Execute returns the last result set.
+	result, err := a.client.Execute(a.ctx, createSql+"\n"+selectSql)
+
+	// Clean up the temporary format (best effort)
+	defer func() {
+		_, _ = a.client.Execute(a.ctx, fmt.Sprintf("DROP FILE_FORMAT IF EXISTS %s;", formatName))
+	}()
+
+	if err != nil {
+		// Fallback: if the temporary format failed (e.g. no active database), try inline.
+		// Some Snowflake accounts/configurations might still support inline formats
+		// and this provides a last-resort recovery.
+		fallbackQuery := fmt.Sprintf("SELECT * FROM %s (FILE_FORMAT => (%s)) LIMIT %d;", stagePath, inline, limit)
+		var fallbackErr error
+		result, fallbackErr = a.client.QuerySingle(a.ctx, fallbackQuery)
+		if fallbackErr != nil {
+			return fileformat.PreviewResult{Error: err.Error()}, nil // return the original error
+		}
+	}
+
+	if result == nil || len(result.Rows) == 0 {
+		return fileformat.PreviewResult{Columns: []string{}, Rows: []map[string]string{}}, nil
+	}
+
+	cols := result.Columns
+	dataRows := result.Rows
+
+	if parseHeader {
+		headerRow := result.Rows[0]
+		extractedCols := make([]string, len(headerRow))
+		for i, val := range headerRow {
+			if val != nil {
+				extractedCols[i] = fmt.Sprintf("%v", val)
+			} else {
+				extractedCols[i] = fmt.Sprintf("COLUMN_%d", i+1)
+			}
+		}
+		cols = extractedCols
+		dataRows = result.Rows[1:]
+	}
+
+	rows := make([]map[string]string, 0, len(dataRows))
+	for _, raw := range dataRows {
+		row := make(map[string]string, len(cols))
+		for i, col := range cols {
+			if i < len(raw) && raw[i] != nil {
+				row[col] = fmt.Sprintf("%v", raw[i])
+			}
+		}
+		rows = append(rows, row)
+	}
+	return fileformat.PreviewResult{Columns: cols, Rows: rows}, nil
+}
+
+// PickFileForFormatPreview opens a native file-picker filtered to common data
+// file extensions. Returns the chosen path, or "" if the user canceled.
+func (a *App) PickFileForFormatPreview() string {
+	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title: "Select a data file to preview",
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "Data Files (*.csv, *.tsv, *.json, *.ndjson, *.jsonl)", Pattern: "*.csv;*.tsv;*.txt;*.json;*.ndjson;*.jsonl"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		},
+	})
+	if err != nil {
+		return ""
+	}
+	return path
 }
 
 // AlterPipe runs an ALTER PIPE statement for the given pipe.

@@ -70,6 +70,10 @@ export function BuildCallStatement(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['BuildCallStatement'](arg1, arg2, arg3, arg4);
 }
 
+export function BuildCreateFileFormatSql(arg1, arg2, arg3) {
+  return window['go']['main']['App']['BuildCreateFileFormatSql'](arg1, arg2, arg3);
+}
+
 export function BuildCreateGitRepositorySql(arg1, arg2, arg3) {
   return window['go']['main']['App']['BuildCreateGitRepositorySql'](arg1, arg2, arg3);
 }
@@ -410,6 +414,10 @@ export function GetIntegrationProperties(arg1) {
   return window['go']['main']['App']['GetIntegrationProperties'](arg1);
 }
 
+export function GetLocalFilePreview(arg1, arg2) {
+  return window['go']['main']['App']['GetLocalFilePreview'](arg1, arg2);
+}
+
 export function GetNotebookCompletions(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['GetNotebookCompletions'](arg1, arg2, arg3, arg4);
 }
@@ -520,6 +528,10 @@ export function GetSnowsightURL() {
 
 export function GetSqlStatementRanges(arg1) {
   return window['go']['main']['App']['GetSqlStatementRanges'](arg1);
+}
+
+export function GetStageFilePreview(arg1, arg2) {
+  return window['go']['main']['App']['GetStageFilePreview'](arg1, arg2);
 }
 
 export function GetSystemRAMGB() {
@@ -860,6 +872,10 @@ export function PickDataFilesByFormat(arg1) {
 
 export function PickDirectory() {
   return window['go']['main']['App']['PickDirectory']();
+}
+
+export function PickFileForFormatPreview() {
+  return window['go']['main']['App']['PickFileForFormatPreview']();
 }
 
 export function PickNotebookFile() {

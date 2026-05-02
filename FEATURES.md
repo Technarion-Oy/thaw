@@ -166,6 +166,14 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
     - Table-level comment
   - **Live SQL Preview** — the full `CREATE TABLE` statement updates in real-time as you modify the form
   - **Execution** — runs `ExecDDL` and refreshes the schema tree automatically on success
+- **Visual File Format Builder & Previewer** — right-click any schema and choose **Create Object** → **File Format…**, or right-click the **FILE FORMATS** folder to open the designer:
+  - **Dynamic Form** — configuration fields adapt to the selected format type (CSV, JSON, AVRO, ORC, PARQUET, XML)
+  - **Comprehensive Options** — covers all Snowflake `FORMAT_TYPE_OPTIONS` including record/field delimiters, headers, skip blank lines, encoding, compression, and more
+  - **Data Preview** — test your configuration against real data before creating the format:
+    - **Local File Preview** — select a local CSV or JSON file and see how it parses with current settings (up to 50 rows)
+    - **Stage File Preview** — enter a Snowflake stage path (e.g. `@MY_STAGE/data.csv`) to preview any supported file type using Snowflake's compute engine
+  - **Live SQL Preview** — see the full `CREATE FILE FORMAT` statement update in real-time as you modify the form; only parameters that differ from Snowflake defaults are included, keeping the DDL concise
+  - **Execution** — runs `ExecDDL` and refreshes the schema tree automatically on success
 - **Right-click a database** to **Create Database…**, export its DDL, generate an ER Diagram, view dropped schemas recoverable via Time Travel, or open **Backup Sets…**
 - **Right-click a schema** to view dropped tables, **Export Data…** or **Import Data…** without needing an existing table (schema-level launch opens the same modals with a table selector or name field), open **Backup Sets…**, or use the **Create Object** cascading submenu (opens left or right depending on available screen space); contains **Task…** to open the Create Task dialog
 - **Task tree** — tasks inside a schema are displayed as a hierarchy in the sidebar: child tasks appear nested under their predecessor root task; finalizer tasks are shown as the last child of their root task with a purple **Finalizer** badge so the graph structure is visible at a glance without opening the graph modal
@@ -773,6 +781,7 @@ The following features are identified as feasible to be turned off via feature f
 - **ER Diagram & Designer** (Visual database modeling and `ALTER TABLE` generation)
 - **Task Graph Visualizer** (Interactive DAG viewer and manager for Snowflake tasks)
 - **Insert Mapping** (Visual side-by-side mapping for `INSERT INTO ... SELECT` with UNIONs)
+- **File Format Builder** (Visual CREATE FILE FORMAT builder and data previewer)
 - **Code Snippets** (Library of curated `CREATE OR REPLACE` templates)
 
 **Developer Environments**

@@ -15,6 +15,8 @@ require (
 	modernc.org/sqlite v1.47.0
 )
 
+require github.com/valyala/fastjson v1.6.10
+
 require (
 	dario.cat/mergo v1.0.0 // indirect
 	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect

@@ -4,6 +4,7 @@ import {main} from '../models';
 import {sqleditor} from '../models';
 import {integrations} from '../models';
 import {procedure} from '../models';
+import {fileformat} from '../models';
 import {snowgitrepo} from '../models';
 import {pipe} from '../models';
 import {secret} from '../models';
@@ -52,6 +53,8 @@ export function ApplySqlCasing(arg1:string,arg2:string,arg3:string,arg4:string):
 export function BuildApiIntegrationPreviewSQL(arg1:integrations.ApiIntegrationParams):Promise<string>;
 
 export function BuildCallStatement(arg1:string,arg2:string,arg3:string,arg4:Array<procedure.Argument>):Promise<string>;
+
+export function BuildCreateFileFormatSql(arg1:string,arg2:string,arg3:fileformat.FileFormatConfig):Promise<string>;
 
 export function BuildCreateGitRepositorySql(arg1:string,arg2:string,arg3:snowgitrepo.GitRepositoryConfig):Promise<string>;
 
@@ -223,6 +226,8 @@ export function GetIdentifierAtColumn(arg1:string,arg2:number):Promise<Array<str
 
 export function GetIntegrationProperties(arg1:string):Promise<Array<main.PropertyPair>>;
 
+export function GetLocalFilePreview(arg1:string,arg2:fileformat.FileFormatConfig):Promise<fileformat.PreviewResult>;
+
 export function GetNotebookCompletions(arg1:string,arg2:string,arg3:number,arg4:number):Promise<Array<main.NotebookCompletion>>;
 
 export function GetNotebookHover(arg1:string,arg2:string,arg3:number,arg4:number):Promise<string>;
@@ -278,6 +283,8 @@ export function GetSnowparkConfig():Promise<main.SnowparkConfigResult>;
 export function GetSnowsightURL():Promise<string>;
 
 export function GetSqlStatementRanges(arg1:string):Promise<Array<sqleditor.StatementRange>>;
+
+export function GetStageFilePreview(arg1:string,arg2:fileformat.FileFormatConfig):Promise<fileformat.PreviewResult>;
 
 export function GetSystemRAMGB():Promise<number>;
 
@@ -448,6 +455,8 @@ export function PickDataFileByFormat(arg1:string):Promise<string>;
 export function PickDataFilesByFormat(arg1:string):Promise<Array<string>>;
 
 export function PickDirectory():Promise<string>;
+
+export function PickFileForFormatPreview():Promise<string>;
 
 export function PickNotebookFile():Promise<string>;
 
