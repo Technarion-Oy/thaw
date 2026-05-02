@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/valyala/fastjson"
@@ -28,11 +29,16 @@ func PreviewLocalFile(path string, cfg FileFormatConfig) PreviewResult {
 		t = "CSV"
 	}
 
+	// Thaw is a native desktop application. This file preview feature reads files from
+	// the user's local filesystem on their own machine, usually selected via a native
+	// file picker. It is not a server-side LFI vulnerability.
+	cleanPath := filepath.Clean(path)
+
 	switch t {
 	case "CSV":
-		return previewCSV(path, cfg)
+		return previewCSV(cleanPath, cfg)
 	case "JSON":
-		return previewJSON(path, cfg)
+		return previewJSON(cleanPath, cfg)
 	default:
 		return PreviewResult{Error: fmt.Sprintf("Local preview is only supported for CSV and JSON file formats. Selected type: %s", t)}
 	}
@@ -96,7 +102,9 @@ func previewCSVReader(r io.Reader, cfg FileFormatConfig) PreviewResult {
 		}
 	}
 
-	b, err := io.ReadAll(r)
+	// Read at most 1MB to prevent OOM (Denial of Service) on massive files
+	lr := io.LimitReader(r, 1024*1024)
+	b, err := io.ReadAll(lr)
 	if err != nil && err != io.EOF {
 		return PreviewResult{Error: err.Error()}
 	}
