@@ -289,10 +289,14 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
         </div>
       );
     }
-    const columns = previewData.columns.map(c => ({
+    // Use stable index-based keys for dataIndex so that unusual column
+    // names (e.g. "a,b,c" from parse-header on a comma CSV with space
+    // delimiter) never reach Ant Design's CSS/path internals.
+    const colKeys = previewData.columns.map((_, idx) => `_col${idx}`);
+    const columns = previewData.columns.map((c, idx) => ({
       title: c,
-      dataIndex: c,
-      key: c,
+      dataIndex: colKeys[idx],
+      key: colKeys[idx],
       width: 140,
       ellipsis: { showTitle: false },
       render: (text: string) => (
@@ -301,10 +305,14 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
         </Tooltip>
       ),
     }));
-    const rows = previewData.rows ?? [];
+    const safeRows = (previewData.rows ?? []).map((r, i) => {
+      const row: Record<string, string | number> = { key: i };
+      previewData.columns.forEach((col, idx) => { row[colKeys[idx]] = r[col]; });
+      return row;
+    });
     return (
       <Table
-        dataSource={rows.map((r, i) => ({ ...r, key: i }))}
+        dataSource={safeRows}
         columns={columns}
         size="small"
         pagination={false}
