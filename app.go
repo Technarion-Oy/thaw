@@ -2317,6 +2317,14 @@ func (a *App) ListSchemas(database string) ([]string, error) {
 	return a.client.ListSchemas(a.ctx, database)
 }
 
+// ListFileFormats returns all file formats in the given schema.
+func (a *App) ListFileFormats(database, schema string) ([]string, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListFileFormats(a.ctx, database, schema)
+}
+
 // ListObjects returns tables, views, etc. inside a schema.
 func (a *App) ListObjects(database, schema string) ([]snowflake.SnowflakeObject, error) {
 	if a.client == nil {

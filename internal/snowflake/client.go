@@ -2753,6 +2753,12 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 	return all, nil
 }
 
+// ListFileFormats returns the names of all file formats in the specified schema.
+func (c *Client) ListFileFormats(ctx context.Context, database, schema string) ([]string, error) {
+	q := fmt.Sprintf("%s.%s", QuoteIdent(database), QuoteIdent(schema))
+	return c.queryStringSlice(ctx, fmt.Sprintf("SHOW FILE FORMATS IN SCHEMA %s", q), 1)
+}
+
 // GetObjectDDL returns the definition of a single schema object using
 // GET_DDL('<kind>', '<db>.<schema>.<name>'). The name components are
 // double-quote escaped to handle mixed-case and special characters.
@@ -3323,6 +3329,10 @@ type ImportTableParams struct {
 	CreateTable bool `json:"createTable"` // CREATE TABLE using INFER_SCHEMA first
 	// Format-specific options (see FormatTypeOptions)
 	Options FormatTypeOptions `json:"options"`
+
+	// NamedFormat is the name of an existing file format in the target schema.
+	// If set, the COPY INTO statement will use this format instead of inline options.
+	NamedFormat string `json:"namedFormat"`
 }
 
 // ImportTableResult reports the outcome of a table import.
@@ -3561,15 +3571,20 @@ func buildFFOptions(format string, o FormatTypeOptions) string {
 // file format. INFER_SCHEMA requires a named format for CSV with
 // PARSE_HEADER=TRUE because it does not accept PARSE_HEADER inline.
 func buildCreateTableSQL(stageAt, tableRef, fmtRef string, p ImportTableParams) string {
-	if strings.ToUpper(p.Format) == "JSON" {
+	if strings.ToUpper(p.Format) == "JSON" && p.NamedFormat == "" {
 		return fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (VALUE VARIANT)", tableRef)
 	}
 
 	var ffClause string
 	if fmtRef != "" {
-		// Named file format (single-quoted identifier, no parens).
-		ffClause = fmt.Sprintf("FILE_FORMAT=>'%s'", strings.ReplaceAll(fmtRef, "'", "\\'"))
+		// Temporary/inferred format created by ImportTableData.
+		ffClause = fmt.Sprintf("FILE_FORMAT=>'%s'", strings.ReplaceAll(fmtRef, "'", "''"))
+	} else if p.NamedFormat != "" {
+		// User-selected existing named format.
+		qualifiedFmt := QuoteIdent(p.Database) + "." + QuoteIdent(p.Schema) + "." + QuoteIdent(p.NamedFormat)
+		ffClause = fmt.Sprintf("FILE_FORMAT=>%s", qualifiedFmt)
 	} else {
+		// Inline options.
 		ffClause = fmt.Sprintf("FILE_FORMAT=>(%s)", buildFFOptions(p.Format, p.Options))
 	}
 
@@ -3582,6 +3597,13 @@ func buildCreateTableSQL(stageAt, tableRef, fmtRef string, p ImportTableParams) 
 
 // buildImportCopySQL returns the COPY INTO <table> FROM @stage statement.
 func buildImportCopySQL(stageAt, tableRef string, p ImportTableParams) string {
+	if p.NamedFormat != "" {
+		qualifiedFmt := QuoteIdent(p.Database) + "." + QuoteIdent(p.Schema) + "." + QuoteIdent(p.NamedFormat)
+		return fmt.Sprintf(
+			"COPY INTO %s\nFROM %s\nFILE_FORMAT = (FORMAT_NAME = %s)\nMATCH_BY_COLUMN_NAME = CASE_INSENSITIVE\nFORCE = TRUE",
+			tableRef, stageAt, qualifiedFmt)
+	}
+
 	ff := buildFFOptions(p.Format, p.Options)
 
 	switch strings.ToUpper(p.Format) {

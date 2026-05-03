@@ -8,63 +8,27 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
-  Modal, Select, Switch, Input, InputNumber, Button, Space, Typography,
+  Modal, Select, Switch, Input, Button, Space, Typography,
   Spin, Segmented, Tooltip, Collapse, Tabs,
 } from "antd";
 import {
   UploadOutlined, FolderOpenOutlined, CheckCircleOutlined,
   CloseOutlined, FileOutlined, SettingOutlined, InfoCircleOutlined,
 } from "@ant-design/icons";
-import { ImportTableData, PickDataFilesByFormat, ReadFileHead, SuggestImportOptions } from "../../../wailsjs/go/main/App";
-import { snowflake } from "../../../wailsjs/go/models";
+import {
+  ImportTableData, PickDataFilesByFormat, ReadFileHead, SuggestImportOptions, ListFileFormats,
+} from "../../../wailsjs/go/main/App";
+import { snowflake, fileformat } from "../../../wailsjs/go/models";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
+import FileFormatFields, { BASE_DEFAULTS } from "../database/FileFormatFields";
 
 const { Text } = Typography;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 type Format = "CSV" | "JSON" | "AVRO" | "ORC" | "PARQUET";
-
-interface FormatOptions {
-  // Common
-  compression: string;
-  trimSpace: boolean;
-  replaceInvalidCharacters: boolean;
-  nullIf: string[];
-  // CSV + JSON
-  dateFormat: string;
-  timeFormat: string;
-  timestampFormat: string;
-  binaryFormat: string;
-  fileExtension: string;
-  multiLine: boolean;
-  skipByteOrderMark: boolean;
-  ignoreUtf8Errors: boolean;
-  // CSV
-  recordDelimiter: string;
-  fieldDelimiter: string;
-  parseHeader: boolean;
-  skipHeader: number;
-  skipBlankLines: boolean;
-  escape: string;
-  escapeUnenclosedField: string;
-  fieldOptionallyEnclosedBy: string;
-  errorOnColumnCountMismatch: boolean;
-  emptyFieldAsNull: boolean;
-  encoding: string;
-  // JSON
-  enableOctal: boolean;
-  allowDuplicate: boolean;
-  stripOuterArray: boolean;
-  stripNullValues: boolean;
-  // PARQUET
-  snappyCompression: boolean;
-  binaryAsText: boolean;
-  useLogicalType: boolean;
-  useVectorizedScanner: boolean;
-}
 
 interface ImportResult {
   rowsLoaded: number;
@@ -78,52 +42,6 @@ interface Props {
   table: string;
   onClose: () => void;
   onSuccess: () => void;
-}
-
-// ── Defaults ─────────────────────────────────────────────────────────────────
-
-const BASE_OPTIONS: FormatOptions = {
-  compression: "AUTO",
-  trimSpace: false,
-  replaceInvalidCharacters: false,
-  nullIf: [],
-  dateFormat: "AUTO",
-  timeFormat: "AUTO",
-  timestampFormat: "AUTO",
-  binaryFormat: "HEX",
-  fileExtension: "NONE",
-  multiLine: false,
-  skipByteOrderMark: true,
-  ignoreUtf8Errors: false,
-  recordDelimiter: "\\n",
-  fieldDelimiter: ",",
-  parseHeader: false,
-  skipHeader: 0,
-  skipBlankLines: false,
-  escape: "NONE",
-  escapeUnenclosedField: "\\\\",
-  fieldOptionallyEnclosedBy: "NONE",
-  errorOnColumnCountMismatch: true,
-  emptyFieldAsNull: true,
-  encoding: "UTF8",
-  enableOctal: false,
-  allowDuplicate: false,
-  stripOuterArray: false,
-  stripNullValues: false,
-  snappyCompression: true,
-  binaryAsText: true,
-  useLogicalType: true,
-  useVectorizedScanner: false,
-};
-
-function defaultOptions(fmt: Format): FormatOptions {
-  switch (fmt) {
-    case "CSV":    return { ...BASE_OPTIONS, nullIf: ["\\N"], skipByteOrderMark: true };
-    case "JSON":   return { ...BASE_OPTIONS, nullIf: [] };
-    case "AVRO":   return { ...BASE_OPTIONS, nullIf: [] };
-    case "ORC":    return { ...BASE_OPTIONS, nullIf: [] };
-    case "PARQUET":return { ...BASE_OPTIONS, nullIf: [] };
-  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -463,276 +381,13 @@ function JsonFilePrev({ content }: { content: string }) {
   );
 }
 
-// ── UI sub-components ─────────────────────────────────────────────────────────
-
-const ROW: React.CSSProperties = {
-  display: "flex", alignItems: "center", justifyContent: "space-between",
-  gap: 8, minHeight: 28,
-};
-const LABEL: React.CSSProperties = { fontSize: 13, color: "var(--text)", flex: 1 };
-const SECTION_TITLE: React.CSSProperties = {
-  fontSize: 11, fontWeight: 600, color: "var(--text-muted)",
-  textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10,
-};
-const GRID2: React.CSSProperties = {
-  display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px",
-};
-
-function ToggleRow({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <div style={ROW}>
-      <span style={LABEL}>{label}</span>
-      <Switch checked={value} onChange={onChange} size="small" />
-    </div>
-  );
-}
-
-function StrRow({ label, value, onChange, placeholder }: {
-  label: string; value: string; onChange: (v: string) => void; placeholder?: string;
-}) {
-  return (
-    <div style={{ ...ROW, alignItems: "flex-start", flexDirection: "column", gap: 4 }}>
-      <span style={{ ...LABEL, flex: "unset" }}>{label}</span>
-      <Input
-        size="small" value={value} onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder} style={{ fontFamily: "monospace", fontSize: 12 }}
-      />
-    </div>
-  );
-}
-
-function SelectRow({ label, value, onChange, options }: {
-  label: string; value: string; onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-}) {
-  return (
-    <div style={{ ...ROW, alignItems: "flex-start", flexDirection: "column", gap: 4 }}>
-      <span style={{ ...LABEL, flex: "unset" }}>{label}</span>
-      <Select size="small" value={value} onChange={onChange} options={options} style={{ width: "100%" }} />
-    </div>
-  );
-}
-
-// ── Format option panels ───────────────────────────────────────────────────────
-
-const COMPRESSION_CSV  = ["AUTO","GZIP","BZ2","BROTLI","ZSTD","DEFLATE","RAW_DEFLATE","NONE"].map(v=>({value:v,label:v}));
-const COMPRESSION_AVRO = ["AUTO","GZIP","BROTLI","ZSTD","DEFLATE","RAW_DEFLATE","NONE"].map(v=>({value:v,label:v}));
-const COMPRESSION_PQET = ["AUTO","LZO","SNAPPY","NONE"].map(v=>({value:v,label:v}));
-const BINARY_FORMATS   = ["HEX","BASE64","UTF8"].map(v=>({value:v,label:v}));
-
-function CsvOptions({ o, set }: { o: FormatOptions; set: (k: keyof FormatOptions, v: any) => void }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* Fields */}
-      <div>
-        <div style={SECTION_TITLE}>Fields</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <StrRow label="Field delimiter" value={o.fieldDelimiter} onChange={v => set("fieldDelimiter", v)} placeholder="," />
-          <StrRow label="Record delimiter" value={o.recordDelimiter} onChange={v => set("recordDelimiter", v)} placeholder="\n" />
-          <StrRow label="Field optionally enclosed by" value={o.fieldOptionallyEnclosedBy} onChange={v => set("fieldOptionallyEnclosedBy", v)} placeholder={'NONE or "'} />
-          <StrRow label="Escape" value={o.escape} onChange={v => set("escape", v)} placeholder="NONE or \\" />
-          <StrRow label="Escape unenclosed field" value={o.escapeUnenclosedField} onChange={v => set("escapeUnenclosedField", v)} placeholder="\\\\" />
-          <div style={GRID2}>
-            <ToggleRow label="Trim space" value={o.trimSpace} onChange={v => set("trimSpace", v)} />
-            <ToggleRow label="Multi-line" value={o.multiLine} onChange={v => set("multiLine", v)} />
-          </div>
-        </div>
-      </div>
-      {/* Header */}
-      <div>
-        <div style={SECTION_TITLE}>Header</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <ToggleRow label="Parse header (first row as column names)" value={o.parseHeader} onChange={v => set("parseHeader", v)} />
-          {!o.parseHeader && (
-            <div style={ROW}>
-              <span style={LABEL}>Skip header rows</span>
-              <InputNumber
-                size="small" min={0} value={o.skipHeader}
-                onChange={v => set("skipHeader", v ?? 0)} style={{ width: 80 }}
-              />
-            </div>
-          )}
-          <ToggleRow label="Skip blank lines" value={o.skipBlankLines} onChange={v => set("skipBlankLines", v)} />
-        </div>
-      </div>
-      {/* NULL handling */}
-      <div>
-        <div style={SECTION_TITLE}>NULL handling</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div>
-            <div style={{ ...LABEL, marginBottom: 4 }}>NULL if (values treated as NULL)</div>
-            <Select
-              mode="tags" size="small" style={{ width: "100%" }}
-              value={o.nullIf} onChange={v => set("nullIf", v)}
-              placeholder="Type value and press Enter…"
-              tokenSeparators={[]}
-            />
-          </div>
-          <div style={GRID2}>
-            <ToggleRow label="Empty field as NULL" value={o.emptyFieldAsNull} onChange={v => set("emptyFieldAsNull", v)} />
-            <ToggleRow label="Error on column count mismatch" value={o.errorOnColumnCountMismatch} onChange={v => set("errorOnColumnCountMismatch", v)} />
-          </div>
-        </div>
-      </div>
-      {/* Encoding & compression */}
-      <div>
-        <div style={SECTION_TITLE}>Encoding & compression</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <SelectRow label="Compression" value={o.compression} onChange={v => set("compression", v)} options={COMPRESSION_CSV} />
-          <StrRow label="Encoding" value={o.encoding} onChange={v => set("encoding", v)} placeholder="UTF8" />
-          <SelectRow label="Binary format" value={o.binaryFormat} onChange={v => set("binaryFormat", v)} options={BINARY_FORMATS} />
-          <ToggleRow label="Skip byte order mark (BOM)" value={o.skipByteOrderMark} onChange={v => set("skipByteOrderMark", v)} />
-        </div>
-      </div>
-      {/* Date/time */}
-      <div>
-        <div style={SECTION_TITLE}>Date & time formats</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <StrRow label="Date format" value={o.dateFormat} onChange={v => set("dateFormat", v)} placeholder="AUTO" />
-          <StrRow label="Time format" value={o.timeFormat} onChange={v => set("timeFormat", v)} placeholder="AUTO" />
-          <StrRow label="Timestamp format" value={o.timestampFormat} onChange={v => set("timestampFormat", v)} placeholder="AUTO" />
-        </div>
-      </div>
-      {/* Other */}
-      <div>
-        <div style={SECTION_TITLE}>Other</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <ToggleRow label="Replace invalid characters" value={o.replaceInvalidCharacters} onChange={v => set("replaceInvalidCharacters", v)} />
-          <StrRow label="File extension" value={o.fileExtension} onChange={v => set("fileExtension", v)} placeholder="NONE" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function JsonOptions({ o, set }: { o: FormatOptions; set: (k: keyof FormatOptions, v: any) => void }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div>
-        <div style={SECTION_TITLE}>Structure</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <SelectRow label="Compression" value={o.compression} onChange={v => set("compression", v)} options={COMPRESSION_CSV} />
-          <div style={GRID2}>
-            <ToggleRow label="Multi-line" value={o.multiLine} onChange={v => set("multiLine", v)} />
-            <ToggleRow label="Strip outer array" value={o.stripOuterArray} onChange={v => set("stripOuterArray", v)} />
-            <ToggleRow label="Strip null values" value={o.stripNullValues} onChange={v => set("stripNullValues", v)} />
-            <ToggleRow label="Allow duplicate keys" value={o.allowDuplicate} onChange={v => set("allowDuplicate", v)} />
-            <ToggleRow label="Enable octal" value={o.enableOctal} onChange={v => set("enableOctal", v)} />
-            <ToggleRow label="Trim space" value={o.trimSpace} onChange={v => set("trimSpace", v)} />
-          </div>
-        </div>
-      </div>
-      <div>
-        <div style={SECTION_TITLE}>NULL handling</div>
-        <Select
-          mode="tags" size="small" style={{ width: "100%" }}
-          value={o.nullIf} onChange={v => set("nullIf", v)}
-          placeholder="Type value and press Enter…"
-          tokenSeparators={[]}
-        />
-      </div>
-      <div>
-        <div style={SECTION_TITLE}>Encoding</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <SelectRow label="Binary format" value={o.binaryFormat} onChange={v => set("binaryFormat", v)} options={BINARY_FORMATS} />
-          <div style={GRID2}>
-            <ToggleRow label="Skip byte order mark" value={o.skipByteOrderMark} onChange={v => set("skipByteOrderMark", v)} />
-            <ToggleRow label="Ignore UTF-8 errors" value={o.ignoreUtf8Errors} onChange={v => set("ignoreUtf8Errors", v)} />
-          </div>
-        </div>
-      </div>
-      <div>
-        <div style={SECTION_TITLE}>Date & time formats</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <StrRow label="Date format" value={o.dateFormat} onChange={v => set("dateFormat", v)} placeholder="AUTO" />
-          <StrRow label="Time format" value={o.timeFormat} onChange={v => set("timeFormat", v)} placeholder="AUTO" />
-          <StrRow label="Timestamp format" value={o.timestampFormat} onChange={v => set("timestampFormat", v)} placeholder="AUTO" />
-        </div>
-      </div>
-      <div>
-        <div style={SECTION_TITLE}>Other</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <ToggleRow label="Replace invalid characters" value={o.replaceInvalidCharacters} onChange={v => set("replaceInvalidCharacters", v)} />
-          <StrRow label="File extension" value={o.fileExtension} onChange={v => set("fileExtension", v)} placeholder="NONE" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AvroOptions({ o, set }: { o: FormatOptions; set: (k: keyof FormatOptions, v: any) => void }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <SelectRow label="Compression" value={o.compression} onChange={v => set("compression", v)} options={COMPRESSION_AVRO} />
-      <div>
-        <div style={{ ...LABEL, marginBottom: 4 }}>NULL if</div>
-        <Select
-          mode="tags" size="small" style={{ width: "100%" }}
-          value={o.nullIf} onChange={v => set("nullIf", v)}
-          placeholder="Type value and press Enter…"
-          tokenSeparators={[]}
-        />
-      </div>
-      <div style={GRID2}>
-        <ToggleRow label="Trim space" value={o.trimSpace} onChange={v => set("trimSpace", v)} />
-        <ToggleRow label="Replace invalid characters" value={o.replaceInvalidCharacters} onChange={v => set("replaceInvalidCharacters", v)} />
-      </div>
-    </div>
-  );
-}
-
-function OrcOptions({ o, set }: { o: FormatOptions; set: (k: keyof FormatOptions, v: any) => void }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div>
-        <div style={{ ...LABEL, marginBottom: 4 }}>NULL if</div>
-        <Select
-          mode="tags" size="small" style={{ width: "100%" }}
-          value={o.nullIf} onChange={v => set("nullIf", v)}
-          placeholder="Type value and press Enter…"
-          tokenSeparators={[]}
-        />
-      </div>
-      <div style={GRID2}>
-        <ToggleRow label="Trim space" value={o.trimSpace} onChange={v => set("trimSpace", v)} />
-        <ToggleRow label="Replace invalid characters" value={o.replaceInvalidCharacters} onChange={v => set("replaceInvalidCharacters", v)} />
-      </div>
-    </div>
-  );
-}
-
-function ParquetOptions({ o, set }: { o: FormatOptions; set: (k: keyof FormatOptions, v: any) => void }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <SelectRow label="Compression" value={o.compression} onChange={v => set("compression", v)} options={COMPRESSION_PQET} />
-      <div style={GRID2}>
-        <ToggleRow label="Snappy compression" value={o.snappyCompression} onChange={v => set("snappyCompression", v)} />
-        <ToggleRow label="Binary as text" value={o.binaryAsText} onChange={v => set("binaryAsText", v)} />
-        <ToggleRow label="Use logical type" value={o.useLogicalType} onChange={v => set("useLogicalType", v)} />
-        <ToggleRow label="Use vectorized scanner" value={o.useVectorizedScanner} onChange={v => set("useVectorizedScanner", v)} />
-        <ToggleRow label="Trim space" value={o.trimSpace} onChange={v => set("trimSpace", v)} />
-        <ToggleRow label="Replace invalid characters" value={o.replaceInvalidCharacters} onChange={v => set("replaceInvalidCharacters", v)} />
-      </div>
-      <div>
-        <div style={{ ...LABEL, marginBottom: 4 }}>NULL if</div>
-        <Select
-          mode="tags" size="small" style={{ width: "100%" }}
-          value={o.nullIf} onChange={v => set("nullIf", v)}
-          placeholder="Type value and press Enter…"
-          tokenSeparators={[]}
-        />
-      </div>
-    </div>
-  );
-}
-
 // ── Main modal ────────────────────────────────────────────────────────────────
 
 export default function ImportTableModal({ db, schema, table, onClose, onSuccess }: Props) {
   const aiImportSuggestEnabled = useFeatureFlagsStore((s) => s.flags.aiImportSuggest);
   const [filePaths, setFilePaths]     = useState<string[]>([]);
   const [format, setFormat]           = useState<Format>("CSV");
-  const [options, setOptions]         = useState<FormatOptions>(() => defaultOptions("CSV"));
+  const [cfg, setCfg]                 = useState<fileformat.FileFormatConfig>(() => ({ ...BASE_DEFAULTS, type: "CSV" }));
   const [overwrite, setOverwrite]     = useState(false);
   const [createTable, setCreateTable] = useState(table === "");
   const [newTableName, setNewTableName] = useState(table);
@@ -741,18 +396,42 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
   const [error, setError]             = useState<string | null>(null);
   const [result, setResult]           = useState<ImportResult | null>(null);
 
+  const [formatSource, setFormatSource] = useState<"inline" | "named">("inline");
+  const [availableFormats, setAvailableFormats] = useState<string[]>([]);
+  const [selectedNamedFormat, setSelectedNamedFormat] = useState<string | null>(null);
+  const [loadingFormats, setLoadingFormats] = useState(false);
+
+  useEffect(() => {
+    setLoadingFormats(true);
+    ListFileFormats(db, schema)
+      .then((fmts) => {
+        setAvailableFormats(fmts);
+        if (fmts.length > 0) {
+          setFormatSource("named");
+          setSelectedNamedFormat(fmts[0]);
+        } else {
+          setFormatSource("inline");
+        }
+      })
+      .catch(() => setAvailableFormats([]))
+      .finally(() => setLoadingFormats(false));
+  }, [db, schema]);
+
   // File preview state — keyed by file path; null = loading, string = content (or "" on error)
   const [fileHeads, setFileHeads] = useState<Record<string, string | null>>({});
   const pendingLoads = useRef<Set<string>>(new Set());
 
   const effectiveTable = createTable ? newTableName.trim() : (table || targetTable.trim());
 
-  const setOpt = (k: keyof FormatOptions, v: any) =>
-    setOptions((prev) => ({ ...prev, [k]: v }));
+  const set = useCallback(<K extends keyof fileformat.FileFormatConfig>(key: K, value: fileformat.FileFormatConfig[K]) => {
+    if (key === "type") {
+      setFormat(value as Format);
+    }
+    setCfg((prev) => ({ ...prev, [key]: value }));
+  }, []);
 
   const changeFormat = (f: Format) => {
-    setFormat(f);
-    setOptions(defaultOptions(f));
+    set("type", f);
     setAiExplanation(null);
     setAiError(null);
   };
@@ -778,8 +457,8 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
       const raw = await SuggestImportOptions(format, sample);
       if (!raw) { setAiError("No suggestion returned"); return; }
       const obj = JSON.parse(raw);
-      const apply = (key: keyof FormatOptions, val: unknown) => {
-        if (val !== undefined) setOpt(key, val);
+      const apply = (key: keyof fileformat.FileFormatConfig, val: unknown) => {
+        if (val !== undefined) set(key, val as any);
       };
       if (format === "CSV") {
         if (obj.fieldDelimiter            !== undefined) apply("fieldDelimiter", obj.fieldDelimiter);
@@ -858,6 +537,41 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
     setError(null);
     setImporting(true);
     try {
+      // Map fileformat.FileFormatConfig to snowflake.FormatTypeOptions
+      const options = snowflake.FormatTypeOptions.createFrom({
+        compression: cfg.compression,
+        trimSpace: cfg.trimSpace,
+        replaceInvalidCharacters: cfg.replaceInvalid,
+        nullIf: cfg.nullIf,
+        dateFormat: cfg.dateFormat,
+        timeFormat: cfg.timeFormat,
+        timestampFormat: cfg.timestampFormat,
+        binaryFormat: cfg.binaryFormat,
+        fileExtension: cfg.fileExtension,
+        multiLine: cfg.multiLine,
+        skipByteOrderMark: cfg.skipByteOrderMark,
+        ignoreUtf8Errors: cfg.ignoreUTF8Errors,
+        recordDelimiter: cfg.recordDelimiter,
+        fieldDelimiter: cfg.fieldDelimiter,
+        parseHeader: cfg.parseHeader,
+        skipHeader: cfg.skipHeader,
+        skipBlankLines: cfg.skipBlankLines,
+        escape: cfg.escape,
+        escapeUnenclosedField: cfg.escapeUnenclosedField,
+        fieldOptionallyEnclosedBy: cfg.fieldOptionallyEnclosedBy,
+        errorOnColumnCountMismatch: cfg.errorOnColumnCountMismatch,
+        emptyFieldAsNull: cfg.emptyFieldAsNull,
+        encoding: cfg.encoding,
+        enableOctal: cfg.enableOctal,
+        allowDuplicate: cfg.allowDuplicate,
+        stripOuterArray: cfg.stripOuterArray,
+        stripNullValues: cfg.stripNullValues,
+        snappyCompression: cfg.snappyCompression,
+        binaryAsText: cfg.binaryAsText,
+        useLogicalType: cfg.useLogicalType,
+        useVectorizedScanner: cfg.useVectorizedScanner,
+      });
+
       const r = await ImportTableData(snowflake.ImportTableParams.createFrom({
         database: db,
         schema,
@@ -867,6 +581,7 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
         overwrite: createTable ? false : overwrite,
         createTable,
         options,
+        namedFormat: formatSource === "named" ? (selectedNamedFormat ?? "") : "",
       }));
       setResult({ rowsLoaded: r.rowsLoaded, filesLoaded: r.filesLoaded, tableName: effectiveTable });
       if (createTable) onSuccess();
@@ -874,16 +589,6 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
       setError(String(e));
     } finally {
       setImporting(false);
-    }
-  };
-
-  const formatOptionsPanel = () => {
-    switch (format) {
-      case "CSV":     return <CsvOptions     o={options} set={setOpt} />;
-      case "JSON":    return <JsonOptions    o={options} set={setOpt} />;
-      case "AVRO":    return <AvroOptions    o={options} set={setOpt} />;
-      case "ORC":     return <OrcOptions     o={options} set={setOpt} />;
-      case "PARQUET": return <ParquetOptions o={options} set={setOpt} />;
     }
   };
 
@@ -913,8 +618,8 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
         return (
           <CsvFilePrev
             content={head}
-            fieldDelimiter={options.fieldDelimiter}
-            parseHeader={options.parseHeader}
+            fieldDelimiter={cfg.fieldDelimiter}
+            parseHeader={cfg.parseHeader}
           />
         );
       }
@@ -1064,53 +769,82 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
           {/* ── File preview (CSV / JSON) ── */}
           {renderPreview()}
 
+          {/* ── Format source ── */}
+          {availableFormats.length > 0 && (
+            <div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>Format source</div>
+              <Segmented
+                value={formatSource}
+                onChange={(v) => setFormatSource(v as "inline" | "named")}
+                options={[
+                  { label: "Named format", value: "named" },
+                  { label: "Inline", value: "inline" },
+                ]}
+                block
+                style={{ marginBottom: 8 }}
+              />
+              {formatSource === "named" && (
+                <Select
+                  value={selectedNamedFormat}
+                  onChange={setSelectedNamedFormat}
+                  options={availableFormats.map((f) => ({ value: f, label: f }))}
+                  style={{ width: "100%" }}
+                  placeholder="Select a file format…"
+                  loading={loadingFormats}
+                />
+              )}
+            </div>
+          )}
+
           {/* ── Format options (collapsible) ── */}
-          <Collapse
-            size="small"
-            ghost
-            activeKey={collapseOpen}
-            onChange={(keys) => setCollapseOpen(Array.isArray(keys) ? keys : [keys])}
-            items={[{
-              key: "opts",
-              label: (
-                <Space size={6}>
-                  <SettingOutlined />
-                  <span style={{ fontSize: 13 }}>Format options</span>
-                  <Text type="secondary" style={{ fontSize: 11 }}>
-                    ({format} defaults pre-filled)
-                  </Text>
-                </Space>
-              ),
-              extra: (format === "CSV" || format === "JSON") && filePaths.length > 0 && aiImportSuggestEnabled ? (
-                <Space size={4} onClick={(e) => e.stopPropagation()}>
-                  <Tooltip title="Analyze file content with AI and apply suggested format options">
-                    <Button
-                      size="small"
-                      type="text"
-                      loading={aiSuggesting}
-                      disabled={!filePaths.slice(0, 5).some((fp) => fileHeads[fp])}
-                      onClick={handleAiSuggest}
-                      style={{ fontSize: 12 }}
+          {formatSource === "inline" && (
+            <Collapse
+              size="small"
+              ghost
+              activeKey={collapseOpen}
+              onChange={(keys) => setCollapseOpen(Array.isArray(keys) ? keys : [keys])}
+              items={[{
+                key: "opts",
+                label: (
+                  <Space size={6}>
+                    <SettingOutlined />
+                    <span style={{ fontSize: 13 }}>Format options</span>
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      ({format} defaults pre-filled)
+                    </Text>
+                  </Space>
+                ),
+                extra: (format === "CSV" || format === "JSON") && filePaths.length > 0 && aiImportSuggestEnabled ? (
+                  <Space size={4} onClick={(e) => e.stopPropagation()}>
+                    <Tooltip title="Analyze file content with AI and apply suggested format options">
+                      <Button
+                        size="small"
+                        type="text"
+                        loading={aiSuggesting}
+                        disabled={!filePaths.slice(0, 5).some((fp) => fileHeads[fp])}
+                        onClick={handleAiSuggest}
+                        style={{ fontSize: 12 }}
+                      >
+                        {!aiSuggesting && <span style={{ marginRight: 4 }}>✨</span>}
+                        AI Suggest
+                      </Button>
+                    </Tooltip>
+                    <Tooltip
+                      title="A sample of your file content (up to 64 KB) is sent to your configured AI provider to generate these suggestions. No data is stored by Thaw."
+                      overlayStyle={{ maxWidth: 300 }}
                     >
-                      {!aiSuggesting && <span style={{ marginRight: 4 }}>✨</span>}
-                      AI Suggest
-                    </Button>
-                  </Tooltip>
-                  <Tooltip
-                    title="A sample of your file content (up to 64 KB) is sent to your configured AI provider to generate these suggestions. No data is stored by Thaw."
-                    overlayStyle={{ maxWidth: 300 }}
-                  >
-                    <InfoCircleOutlined style={{ fontSize: 12, color: "var(--text-muted)", cursor: "default" }} />
-                  </Tooltip>
-                </Space>
-              ) : undefined,
-              children: (
-                <div style={{ paddingTop: 4 }}>
-                  {formatOptionsPanel()}
-                </div>
-              ),
-            }]}
-          />
+                      <InfoCircleOutlined style={{ fontSize: 12, color: "var(--text-muted)", cursor: "default" }} />
+                    </Tooltip>
+                  </Space>
+                ) : undefined,
+                children: (
+                  <div style={{ paddingTop: 4 }}>
+                    <FileFormatFields cfg={cfg} set={set} hideNameFields />
+                  </div>
+                ),
+              }]}
+            />
+          )}
 
           {/* ── AI suggestion feedback ── */}
           {(aiExplanation || aiError) && (
