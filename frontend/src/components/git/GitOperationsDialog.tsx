@@ -7,6 +7,8 @@
 //
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
+//
+// @thaw-domain: Git Integration
 
 import React, { useState, useMemo, useEffect } from "react";
 import {

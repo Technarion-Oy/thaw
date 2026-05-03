@@ -11,6 +11,8 @@
 // Package integrations builds Snowflake CREATE INTEGRATION DDL statements.
 // All parameter values are validated and escaped before being embedded in SQL
 // to prevent SQL injection.
+//
+// thaw:domain: Object Browser & Administration
 package integrations
 
 import (

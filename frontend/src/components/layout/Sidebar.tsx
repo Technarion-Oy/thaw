@@ -7,6 +7,8 @@
 //
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
+//
+// @thaw-domain: Object Browser & Administration
 
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { App as AntApp, Tree, Typography, Spin, Empty, Divider, Modal, Button, Input, Tooltip, Slider, Tag, Space, message, Select, type InputRef } from "antd";

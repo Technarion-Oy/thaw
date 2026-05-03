@@ -7,6 +7,8 @@
 //
 // Commercial use of this software is restricted to parties found in a valid
 // license agreement with Technarion Oy.
+//
+// @thaw-domain: Schema Migration
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {

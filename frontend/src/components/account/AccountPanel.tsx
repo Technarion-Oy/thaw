@@ -7,6 +7,8 @@
 //
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
+//
+// @thaw-domain: Object Browser & Administration
 
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { Collapse, Space, Button, Typography, Tree, Spin, Modal, message } from "antd";

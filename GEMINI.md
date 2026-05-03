@@ -10,7 +10,16 @@ Before proposing new features, refactoring, or writing new files, you MUST consu
 2. Locate the target domain for the user's request based on the JSON map inside the `GetCodebaseSemanticMap()` function.
 3. Restrict your file creation and modification suggestions to the directories specified in that domain.
 4. Do not invent new architectural folders unless explicitly instructed by the user.
-5. If the user asks to modify the semantic map, ensure you strictly follow the JSON structure and add relevant backend/frontend paths.
+5. If the user asks to modify the semantic map, add the `thaw:domain` or `thaw:file-domain` annotation to the relevant Go files, and `@thaw-domain` to the relevant TypeScript files, then run `go generate ./internal/architecture/` to regenerate `semantic_map.go`.
+
+### How the semantic map is maintained
+
+The map in `internal/architecture/semantic_map.go` is **generated** — do not edit it by hand.
+
+- **Go packages** (`internal/*/`): add `// thaw:domain: <Domain Name>` anywhere in a `.go` file inside the package (the canonical place is `doc.go`). The generator outputs the package directory path.
+- **Root-level Go files** (`main.go`, `app.go`, etc.): add `// thaw:file-domain: <Domain Name>` to the file. The generator outputs the individual file path.
+- **TypeScript / TSX files**: add `// @thaw-domain: <Domain Name>` anywhere in the file. The generator outputs the individual file path.
+- **Regenerate**: run `go generate ./internal/architecture/` (or `go run scripts/gen_semantic_map.go` from the project root) after any annotation change. The CI test `TestSemanticMapAccuracy` will fail if any annotated path no longer exists on disk.
 
 ## 💡 Critical Context
 - **Nature of App**: This is a **Snowflake SQL Editor** and management tool.
