@@ -55,6 +55,7 @@ func GetCodebaseSemanticMap() string {
       ],
       "frontend_paths": [
         "frontend/src/components/account/AccountPanel.tsx",
+        "frontend/src/components/database/CreateStageModal.tsx",
         "frontend/src/components/layout/Sidebar.tsx",
         "frontend/src/store/objectStore.ts"
       ],

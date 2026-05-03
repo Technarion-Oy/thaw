@@ -62,6 +62,10 @@ export function ApplySqlCasing(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['ApplySqlCasing'](arg1, arg2, arg3, arg4);
 }
 
+export function BuildAlterStageSql(arg1) {
+  return window['go']['main']['App']['BuildAlterStageSql'](arg1);
+}
+
 export function BuildApiIntegrationPreviewSQL(arg1) {
   return window['go']['main']['App']['BuildApiIntegrationPreviewSQL'](arg1);
 }
@@ -84,6 +88,10 @@ export function BuildCreatePipeSql(arg1, arg2, arg3) {
 
 export function BuildCreateSecretSql(arg1, arg2, arg3) {
   return window['go']['main']['App']['BuildCreateSecretSql'](arg1, arg2, arg3);
+}
+
+export function BuildCreateStageSql(arg1) {
+  return window['go']['main']['App']['BuildCreateStageSql'](arg1);
 }
 
 export function BuildFunctionSelectStatement(arg1, arg2, arg3, arg4, arg5) {

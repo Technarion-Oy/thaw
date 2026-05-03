@@ -95,6 +95,13 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Modify Support** — generates correct `ALTER SECRET` statements with `SET` clauses; clearing the comment field generates an `UNSET COMMENT` statement
   - **Live SQL Preview** — see the full `CREATE SECRET` or `ALTER SECRET` statement update in real-time as you modify the form
   - **Execution** — runs `ExecDDL` and refreshes the schema tree automatically on success
+- **Stage Management** — right-click any schema and choose **Create Object** → **Stage…** to open the comprehensive stage designer:
+  - **Internal & External** — support for creating both internal (Snowflake-managed) and external (S3, GCS, Azure) stages
+  - **External Configuration** — specify URL and Storage Integration (selected from a live account-wide list)
+  - **Encryption** — configure encryption types (Snowflake Full, SSE, AWS SSE-KMS, etc.) and optional KMS key IDs
+  - **Directory Settings** — toggle directory tables and configure auto-refresh for external stages
+  - **Live SQL Preview** — the full `CREATE STAGE` statement updates in real-time as you modify the form
+  - **Execution** — runs `ExecDDL` and refreshes the schema tree automatically on success
 - **Snowpipe Management** — right-click any schema and choose **Create Object** → **Pipe…**, or right-click an existing pipe to access pipe-specific operations:
   - **Create** — dynamic form with name, OR REPLACE / IF NOT EXISTS options, Auto Ingest toggle, Error Integration, AWS SNS Topic, Integration, Comment, and an embedded Monaco editor for the `COPY INTO` statement; live SQL preview shows the full `CREATE PIPE` statement
   - **Properties** — right-click a pipe and choose **Properties…** to view `SHOW PIPES` metadata plus inline-editable **Pipe Execution Paused** (toggle), **Comment** (inline edit / UNSET), and **Tags** (add/remove key-value pairs); changes are applied immediately via `ALTER PIPE … SET / UNSET`
