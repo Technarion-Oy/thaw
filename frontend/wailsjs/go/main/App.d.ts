@@ -400,6 +400,8 @@ export function ListExportableDatabases():Promise<Array<string>>;
 
 export function ListExternalVolumes():Promise<Array<string>>;
 
+export function ListFileFormats(arg1:string,arg2:string):Promise<Array<string>>;
+
 export function ListFinalizableTasks(arg1:string,arg2:string):Promise<Array<tasks.FinalizabilityRow>>;
 
 export function ListGitBranches(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.GitBranch>>;

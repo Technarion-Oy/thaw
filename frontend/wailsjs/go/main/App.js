@@ -762,6 +762,10 @@ export function ListExternalVolumes() {
   return window['go']['main']['App']['ListExternalVolumes']();
 }
 
+export function ListFileFormats(arg1, arg2) {
+  return window['go']['main']['App']['ListFileFormats'](arg1, arg2);
+}
+
 export function ListFinalizableTasks(arg1, arg2) {
   return window['go']['main']['App']['ListFinalizableTasks'](arg1, arg2);
 }

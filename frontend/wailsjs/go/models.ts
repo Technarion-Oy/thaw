@@ -2458,6 +2458,7 @@ export namespace snowflake {
 	    overwrite: boolean;
 	    createTable: boolean;
 	    options: FormatTypeOptions;
+	    namedFormat: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ImportTableParams(source);
@@ -2473,6 +2474,7 @@ export namespace snowflake {
 	        this.overwrite = source["overwrite"];
 	        this.createTable = source["createTable"];
 	        this.options = this.convertValues(source["options"], FormatTypeOptions);
+	        this.namedFormat = source["namedFormat"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
