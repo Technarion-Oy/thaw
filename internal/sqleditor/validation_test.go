@@ -449,6 +449,31 @@ SELECT * FROM DB.SCH."MixedCaseTable";`
 	}
 }
 
+func TestValidateTablesExist_MissingTables(t *testing.T) {
+	sql := `SELECT
+    *
+FROM "LINEAGE_SOURCE_DB"."RAW_DATA".this_table_does_not_exists;
+
+SELECT
+    *
+FROM "LINEAGE_SOURCE_DB"."RAW_DATA"."this_table_does_not_exists";`
+
+	req := ValidateTablesExistRequest{
+		SQL:            sql,
+		StmtRanges:     GetStatementRanges(sql),
+		// Empty ResolvedRefs simulates the frontend correctly dropping missing tables
+		// once the schema has been fetched.
+		ResolvedRefs:   []ResolvedRef{},
+		KnownDatabases: []string{"LINEAGE_SOURCE_DB"},
+		KnownSchemas:   []SchemaEntry{{DB: "LINEAGE_SOURCE_DB", Name: "RAW_DATA"}},
+	}
+	markers := ValidateTablesExist(req)
+	errs := getErrors(markers)
+	if len(errs) != 2 {
+		t.Errorf("Expected 2 errors for missing tables, got %d: %v", len(errs), errs)
+	}
+}
+
 func TestValidateTablesExist_Invalid(t *testing.T) {
 	tests := []struct {
 		name          string
