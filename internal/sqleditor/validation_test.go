@@ -428,6 +428,25 @@ SELECT * FROM DB.SCH."MixedCaseTable";`
 	if len(errs) > 0 {
 		t.Errorf("Expected 0 errors for case-sensitive tables, got %d: %+v", len(errs), errs)
 	}
+
+	// Negative test: genuinely missing table still produces an error
+	req2 := req
+	req2.SQL = `SELECT * FROM DB.SCH."NonexistentTable";`
+	req2.StmtRanges = GetStatementRanges(req2.SQL)
+	markers2 := ValidateTablesExist(req2)
+	if len(getErrors(markers2)) == 0 {
+		t.Error("Expected an error for a table that does not exist, got none")
+	}
+
+	// Test QuotedIdentifiersIgnoreCase: true
+	req3 := req
+	req3.SQL = `SELECT * FROM "mixedcasetable";` // lowercase in SQL
+	req3.StmtRanges = GetStatementRanges(req3.SQL)
+	req3.QuotedIdentifiersIgnoreCase = true
+	markers3 := ValidateTablesExist(req3)
+	if len(getErrors(markers3)) > 0 {
+		t.Errorf("Expected 0 errors with QuotedIdentifiersIgnoreCase=true, got %v", getErrors(markers3))
+	}
 }
 
 func TestValidateTablesExist_Invalid(t *testing.T) {
