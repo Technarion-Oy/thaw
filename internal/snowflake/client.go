@@ -2767,8 +2767,7 @@ func (c *Client) ListFileFormats(ctx context.Context, database, schema string) (
 // parameter type list (e.g. "NUMBER, VARCHAR") so that Snowflake can resolve
 // the correct overload. Pass an empty string for all other object kinds.
 func (c *Client) GetObjectDDL(ctx context.Context, database, schema, kind, name, arguments string) (string, error) {
-	escapeIdent := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
-	qualified := fmt.Sprintf(`%s.%s.%s`, escapeIdent(database), escapeIdent(schema), escapeIdent(name))
+	qualified := fmt.Sprintf(`%s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
 	// Procedures and functions require the argument type list (which may be
 	// empty for zero-arg procedures) appended so Snowflake can resolve the
 	// overload.  Omitting the parentheses entirely causes GET_DDL to return

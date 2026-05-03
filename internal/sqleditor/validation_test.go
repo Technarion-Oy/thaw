@@ -406,6 +406,30 @@ SELECT * FROM GLOBAL_SHIPMENTS;`
 	}
 }
 
+func TestValidateTablesExist_CaseSensitive(t *testing.T) {
+	sql := `USE DATABASE DB; USE SCHEMA SCH;
+SELECT * FROM "MixedCaseTable";
+SELECT * FROM DB.SCH."MixedCaseTable";`
+
+	req := ValidateTablesExistRequest{
+		ResolvedRefs: []ResolvedRef{
+			{DB: "DB", Schema: "SCH", Name: "MixedCaseTable"},
+		},
+		KnownDatabases: []string{"DB"},
+		KnownSchemas:   []SchemaEntry{{DB: "DB", Name: "SCH"}},
+		QuotedIdentifiersIgnoreCase: false,
+	}
+
+	req.SQL = sql
+	req.StmtRanges = GetStatementRanges(sql)
+
+	markers := ValidateTablesExist(req)
+	errs := getErrors(markers)
+	if len(errs) > 0 {
+		t.Errorf("Expected 0 errors for case-sensitive tables, got %d: %+v", len(errs), errs)
+	}
+}
+
 func TestValidateTablesExist_Invalid(t *testing.T) {
 	tests := []struct {
 		name          string
