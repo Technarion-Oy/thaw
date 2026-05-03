@@ -2,6 +2,16 @@
 
 Thaw is a native desktop Snowflake manager built with **Wails v2** (Go backend + React/TypeScript frontend).
 
+## Codebase Navigation & Architecture
+
+Before proposing new features, refactoring, or writing new files, you MUST consult the codebase semantic map.
+
+1. Open and read the file: `internal/architecture/semantic_map.go`.
+2. Locate the target domain for the user's request based on the JSON map inside the `GetCodebaseSemanticMap()` function.
+3. Restrict your file creation and modification suggestions to the directories specified in that domain.
+4. Do not invent new architectural folders unless explicitly instructed by the user.
+5. If the user asks to modify the semantic map, ensure you strictly follow the JSON structure and add relevant backend/frontend paths.
+
 ## 💡 Critical Context
 - **Nature of App**: This is a **Snowflake SQL Editor** and management tool.
 - **Authentication**: Authentication is handled by parsing connection parameters from the **Snowflake CLI configuration file** (defaults to `~/.snowflake/config.toml` or `connections.toml`). Users can select a custom path during sign-in, which is persisted in the app configuration.
