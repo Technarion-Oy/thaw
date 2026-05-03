@@ -3571,17 +3571,18 @@ func buildFFOptions(format string, o FormatTypeOptions) string {
 // file format. INFER_SCHEMA requires a named format for CSV with
 // PARSE_HEADER=TRUE because it does not accept PARSE_HEADER inline.
 func buildCreateTableSQL(stageAt, tableRef, fmtRef string, p ImportTableParams) string {
-	if strings.ToUpper(p.Format) == "JSON" {
+	if strings.ToUpper(p.Format) == "JSON" && p.NamedFormat == "" {
 		return fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (VALUE VARIANT)", tableRef)
 	}
 
 	var ffClause string
 	if fmtRef != "" {
 		// Temporary/inferred format created by ImportTableData.
-		ffClause = fmt.Sprintf("FILE_FORMAT=>'%s'", strings.ReplaceAll(fmtRef, "'", "\\'"))
+		ffClause = fmt.Sprintf("FILE_FORMAT=>'%s'", strings.ReplaceAll(fmtRef, "'", "''"))
 	} else if p.NamedFormat != "" {
 		// User-selected existing named format.
-		ffClause = fmt.Sprintf("FILE_FORMAT=>'%s'", strings.ReplaceAll(p.NamedFormat, "'", "\\'"))
+		qualifiedFmt := QuoteIdent(p.Database) + "." + QuoteIdent(p.Schema) + "." + QuoteIdent(p.NamedFormat)
+		ffClause = fmt.Sprintf("FILE_FORMAT=>%s", qualifiedFmt)
 	} else {
 		// Inline options.
 		ffClause = fmt.Sprintf("FILE_FORMAT=>(%s)", buildFFOptions(p.Format, p.Options))
@@ -3596,12 +3597,14 @@ func buildCreateTableSQL(stageAt, tableRef, fmtRef string, p ImportTableParams) 
 
 // buildImportCopySQL returns the COPY INTO <table> FROM @stage statement.
 func buildImportCopySQL(stageAt, tableRef string, p ImportTableParams) string {
-	var ff string
 	if p.NamedFormat != "" {
-		ff = fmt.Sprintf("FORMAT_NAME = '%s'", strings.ReplaceAll(p.NamedFormat, "'", "\\'"))
-	} else {
-		ff = buildFFOptions(p.Format, p.Options)
+		qualifiedFmt := QuoteIdent(p.Database) + "." + QuoteIdent(p.Schema) + "." + QuoteIdent(p.NamedFormat)
+		return fmt.Sprintf(
+			"COPY INTO %s\nFROM %s\nFILE_FORMAT = (FORMAT_NAME = %s)\nMATCH_BY_COLUMN_NAME = CASE_INSENSITIVE\nFORCE = TRUE",
+			tableRef, stageAt, qualifiedFmt)
 	}
+
+	ff := buildFFOptions(p.Format, p.Options)
 
 	switch strings.ToUpper(p.Format) {
 	case "JSON":

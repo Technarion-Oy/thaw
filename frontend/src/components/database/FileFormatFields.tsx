@@ -5,12 +5,118 @@
 // in whole or in part, is strictly prohibited without prior written permission
 // from Technarion Oy.
 
+import type { CSSProperties } from "react";
 import {
   Form, Input, Select, Checkbox, Space,
   Divider, InputNumber, Tooltip,
 } from "antd";
 import { InfoCircleOutlined } from "@ant-design/icons";
 import type { fileformat } from "../../../wailsjs/go/models";
+
+export const BASE_DEFAULTS: fileformat.FileFormatConfig = {
+  name: "",
+  caseSensitive: false,
+  orReplace: false,
+  ifNotExists: false,
+  type: "CSV",
+  comment: "",
+  compression: "AUTO",
+  trimSpace: false,
+  replaceInvalid: false,
+  fileExtension: "",
+  recordDelimiter: "\\n",
+  fieldDelimiter: ",",
+  multiLine: false,
+  parseHeader: false,
+  skipHeader: 0,
+  skipBlankLines: false,
+  dateFormat: "AUTO",
+  timeFormat: "AUTO",
+  timestampFormat: "AUTO",
+  binaryFormat: "HEX",
+  escape: "NONE",
+  escapeUnenclosedField: "\\\\",
+  fieldOptionallyEnclosedBy: "NONE",
+  nullIf: ["\\N"],
+  errorOnColumnCountMismatch: true,
+  emptyFieldAsNull: true,
+  skipByteOrderMark: true,
+  encoding: "UTF8",
+  enableOctal: false,
+  allowDuplicate: false,
+  stripOuterArray: false,
+  stripNullValues: false,
+  ignoreUTF8Errors: false,
+  preserveSpace: false,
+  stripOuterElement: false,
+  disableSnowflakeData: false,
+  disableAutoConvert: false,
+  binaryAsText: true,
+  useLogicalType: false,
+  snappyCompressionLevel: 0,
+} as fileformat.FileFormatConfig;
+
+export function defaultsForType(type: string): Partial<fileformat.FileFormatConfig> {
+  const base: Partial<fileformat.FileFormatConfig> = { type, compression: "AUTO", trimSpace: false, replaceInvalid: false, fileExtension: "" };
+  switch (type) {
+    case "CSV": return {
+      ...base,
+      recordDelimiter: "\\n",
+      fieldDelimiter: ",",
+      multiLine: false,
+      parseHeader: false,
+      skipHeader: 0,
+      skipBlankLines: false,
+      dateFormat: "AUTO",
+      timeFormat: "AUTO",
+      timestampFormat: "AUTO",
+      binaryFormat: "HEX",
+      escape: "NONE",
+      escapeUnenclosedField: "\\\\",
+      fieldOptionallyEnclosedBy: "NONE",
+      nullIf: ["\\N"],
+      errorOnColumnCountMismatch: true,
+      emptyFieldAsNull: true,
+      skipByteOrderMark: true,
+      encoding: "UTF8",
+    };
+    case "JSON": return {
+      ...base,
+      dateFormat: "AUTO",
+      timeFormat: "AUTO",
+      timestampFormat: "AUTO",
+      binaryFormat: "HEX",
+      multiLine: false,
+      nullIf: [],
+      enableOctal: false,
+      allowDuplicate: false,
+      stripOuterArray: false,
+      stripNullValues: false,
+      ignoreUTF8Errors: false,
+    };
+    case "AVRO": return { ...base, nullIf: [] };
+    case "ORC": return { trimSpace: false, replaceInvalid: false, nullIf: [], type };
+    case "PARQUET": return {
+      ...base,
+      binaryAsText: true,
+      useLogicalType: false,
+      snappyCompression: false,
+      snappyCompressionLevel: 0,
+      useVectorizedScanner: false,
+      nullIf: [],
+    };
+    case "XML": return {
+      ...base,
+      ignoreUTF8Errors: false,
+      preserveSpace: false,
+      stripOuterElement: false,
+      disableSnowflakeData: false,
+      disableAutoConvert: false,
+      skipByteOrderMark: true,
+    };
+    default: return base;
+  }
+}
 
 interface Props {
   cfg: fileformat.FileFormatConfig;
@@ -46,14 +152,17 @@ function help(tip: string) {
   );
 }
 
-const itemSm: React.CSSProperties = { marginBottom: 8 };
+const itemSm: CSSProperties = { marginBottom: 8 };
 
 export default function FileFormatFields({ cfg, set, hideNameFields }: Props) {
   const handleTypeChange = (type: string) => {
-    set("type", type);
-    // Note: defaultsForType logic should ideally be here or passed in.
-    // For now we'll assume the caller handles complex type-switches if needed,
-    // or we can move the defaults here.
+    set("type", type as any);
+    const defs = defaultsForType(type);
+    for (const [k, v] of Object.entries(defs)) {
+      if (k !== "type") {
+        set(k as any, v as any);
+      }
+    }
   };
 
   const csvParams = cfg.type === "CSV" && (

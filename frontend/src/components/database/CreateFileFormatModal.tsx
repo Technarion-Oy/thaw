@@ -22,7 +22,7 @@ import {
 } from "../../../wailsjs/go/main/App";
 import type { fileformat } from "../../../wailsjs/go/models";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
-import FileFormatFields from "./FileFormatFields";
+import FileFormatFields, { BASE_DEFAULTS } from "./FileFormatFields";
 
 const { Text } = Typography;
 
@@ -32,113 +32,6 @@ interface Props {
   onClose: () => void;
   onSuccess?: () => void;
 }
-
-// ── Per-type defaults ────────────────────────────────────────────────────────
-
-function defaultsForType(type: string): Partial<fileformat.FileFormatConfig> {
-  const base: Partial<fileformat.FileFormatConfig> = { type, compression: "AUTO", trimSpace: false, replaceInvalid: false, fileExtension: "" };
-  switch (type) {
-    case "CSV": return {
-      ...base,
-      recordDelimiter: "\\n",
-      fieldDelimiter: ",",
-      multiLine: false,
-      parseHeader: false,
-      skipHeader: 0,
-      skipBlankLines: false,
-      dateFormat: "AUTO",
-      timeFormat: "AUTO",
-      timestampFormat: "AUTO",
-      binaryFormat: "HEX",
-      escape: "NONE",
-      escapeUnenclosedField: "\\\\",
-      fieldOptionallyEnclosedBy: "NONE",
-      nullIf: ["\\N"],
-      errorOnColumnCountMismatch: true,
-      emptyFieldAsNull: true,
-      skipByteOrderMark: true,
-      encoding: "UTF8",
-    };
-    case "JSON": return {
-      ...base,
-      dateFormat: "AUTO",
-      timeFormat: "AUTO",
-      timestampFormat: "AUTO",
-      binaryFormat: "HEX",
-      multiLine: false,
-      nullIf: [],
-      enableOctal: false,
-      allowDuplicate: false,
-      stripOuterArray: false,
-      stripNullValues: false,
-      ignoreUTF8Errors: false,
-    };
-    case "AVRO": return { ...base, nullIf: [] };
-    case "ORC": return { trimSpace: false, replaceInvalid: false, nullIf: [], type };
-    case "PARQUET": return {
-      ...base,
-      binaryAsText: true,
-      useLogicalType: false,
-      snappyCompression: false,
-      snappyCompressionLevel: 0,
-      useVectorizedScanner: false,
-      nullIf: [],
-    };
-    case "XML": return {
-      ...base,
-      ignoreUTF8Errors: false,
-      preserveSpace: false,
-      stripOuterElement: false,
-      disableSnowflakeData: false,
-      disableAutoConvert: false,
-      skipByteOrderMark: true,
-    };
-    default: return base;
-  }
-}
-
-const BASE_DEFAULTS: fileformat.FileFormatConfig = {
-  name: "",
-  caseSensitive: false,
-  orReplace: false,
-  ifNotExists: false,
-  type: "CSV",
-  comment: "",
-  compression: "AUTO",
-  trimSpace: false,
-  replaceInvalid: false,
-  fileExtension: "",
-  recordDelimiter: "\\n",
-  fieldDelimiter: ",",
-  multiLine: false,
-  parseHeader: false,
-  skipHeader: 0,
-  skipBlankLines: false,
-  dateFormat: "AUTO",
-  timeFormat: "AUTO",
-  timestampFormat: "AUTO",
-  binaryFormat: "HEX",
-  escape: "NONE",
-  escapeUnenclosedField: "\\\\",
-  fieldOptionallyEnclosedBy: "NONE",
-  nullIf: ["\\N"],
-  errorOnColumnCountMismatch: true,
-  emptyFieldAsNull: true,
-  skipByteOrderMark: true,
-  encoding: "UTF8",
-  enableOctal: false,
-  allowDuplicate: false,
-  stripOuterArray: false,
-  stripNullValues: false,
-  ignoreUTF8Errors: false,
-  preserveSpace: false,
-  stripOuterElement: false,
-  disableSnowflakeData: false,
-  disableAutoConvert: false,
-  binaryAsText: true,
-  useLogicalType: false,
-  snappyCompressionLevel: 0,
-} as fileformat.FileFormatConfig;
 
 // ── Modal ────────────────────────────────────────────────────────────────────
 
@@ -168,23 +61,9 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
     BuildCreateFileFormatSql(db, schema, cfg as any).then(setSqlPreview).catch(() => {});
   }, [db, schema, cfg]);
 
-  const set = <K extends keyof fileformat.FileFormatConfig>(key: K, value: fileformat.FileFormatConfig[K]) => {
-    if (key === "type") {
-      const type = value as string;
-      const typeDefaults = defaultsForType(type);
-      setCfg((prev) => ({
-        ...prev,
-        ...typeDefaults,
-        name: prev.name,
-        caseSensitive: prev.caseSensitive,
-        orReplace: prev.orReplace,
-        ifNotExists: prev.ifNotExists,
-        comment: prev.comment,
-      }));
-    } else {
-      setCfg((prev) => ({ ...prev, [key]: value }));
-    }
-  };
+  const set = useCallback(<K extends keyof fileformat.FileFormatConfig>(key: K, value: fileformat.FileFormatConfig[K]) => {
+    setCfg((prev) => ({ ...prev, [key]: value }));
+  }, []);
 
   const handlePickFile = async () => {
     const path = await PickFileForFormatPreview();

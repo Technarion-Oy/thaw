@@ -22,7 +22,7 @@ import {
 } from "../../../wailsjs/go/main/App";
 import { snowflake, fileformat } from "../../../wailsjs/go/models";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
-import FileFormatFields from "../database/FileFormatFields";
+import FileFormatFields, { BASE_DEFAULTS } from "../database/FileFormatFields";
 
 const { Text } = Typography;
 
@@ -42,104 +42,6 @@ interface Props {
   table: string;
   onClose: () => void;
   onSuccess: () => void;
-}
-
-// ── Defaults ─────────────────────────────────────────────────────────────────
-
-const BASE_DEFAULTS: fileformat.FileFormatConfig = {
-  name: "",
-  caseSensitive: false,
-  orReplace: false,
-  ifNotExists: false,
-  type: "CSV",
-  comment: "",
-  compression: "AUTO",
-  trimSpace: false,
-  replaceInvalid: false,
-  fileExtension: "",
-  recordDelimiter: "\\n",
-  fieldDelimiter: ",",
-  multiLine: false,
-  parseHeader: false,
-  skipHeader: 0,
-  skipBlankLines: false,
-  dateFormat: "AUTO",
-  timeFormat: "AUTO",
-  timestampFormat: "AUTO",
-  binaryFormat: "HEX",
-  escape: "NONE",
-  escapeUnenclosedField: "\\\\",
-  fieldOptionallyEnclosedBy: "NONE",
-  nullIf: ["\\N"],
-  errorOnColumnCountMismatch: true,
-  emptyFieldAsNull: true,
-  skipByteOrderMark: true,
-  encoding: "UTF8",
-  enableOctal: false,
-  allowDuplicate: false,
-  stripOuterArray: false,
-  stripNullValues: false,
-  ignoreUTF8Errors: false,
-  preserveSpace: false,
-  stripOuterElement: false,
-  disableSnowflakeData: false,
-  disableAutoConvert: false,
-  binaryAsText: true,
-  useLogicalType: false,
-  snappyCompressionLevel: 0,
-} as fileformat.FileFormatConfig;
-
-function defaultsForType(type: string): Partial<fileformat.FileFormatConfig> {
-  const base: Partial<fileformat.FileFormatConfig> = { type, compression: "AUTO", trimSpace: false, replaceInvalid: false, fileExtension: "" };
-  switch (type) {
-    case "CSV": return {
-      ...base,
-      recordDelimiter: "\\n",
-      fieldDelimiter: ",",
-      multiLine: false,
-      parseHeader: false,
-      skipHeader: 0,
-      skipBlankLines: false,
-      dateFormat: "AUTO",
-      timeFormat: "AUTO",
-      timestampFormat: "AUTO",
-      binaryFormat: "HEX",
-      escape: "NONE",
-      escapeUnenclosedField: "\\\\",
-      fieldOptionallyEnclosedBy: "NONE",
-      nullIf: ["\\N"],
-      errorOnColumnCountMismatch: true,
-      emptyFieldAsNull: true,
-      skipByteOrderMark: true,
-      encoding: "UTF8",
-    };
-    case "JSON": return {
-      ...base,
-      dateFormat: "AUTO",
-      timeFormat: "AUTO",
-      timestampFormat: "AUTO",
-      binaryFormat: "HEX",
-      multiLine: false,
-      nullIf: [],
-      enableOctal: false,
-      allowDuplicate: false,
-      stripOuterArray: false,
-      stripNullValues: false,
-      ignoreUTF8Errors: false,
-    };
-    case "AVRO": return { ...base, nullIf: [] };
-    case "ORC": return { trimSpace: false, replaceInvalid: false, nullIf: [], type };
-    case "PARQUET": return {
-      ...base,
-      binaryAsText: true,
-      useLogicalType: false,
-      snappyCompression: false,
-      snappyCompressionLevel: 0,
-      useVectorizedScanner: false,
-      nullIf: [],
-    };
-    default: return base;
-  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -523,19 +425,15 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
 
   const set = useCallback(<K extends keyof fileformat.FileFormatConfig>(key: K, value: fileformat.FileFormatConfig[K]) => {
     if (key === "type") {
-      const type = value as string;
-      setFormat(type as Format);
-      const typeDefaults = defaultsForType(type);
-      setCfg((prev) => ({ ...prev, ...typeDefaults }));
-      setAiExplanation(null);
-      setAiError(null);
-    } else {
-      setCfg((prev) => ({ ...prev, [key]: value }));
+      setFormat(value as Format);
     }
+    setCfg((prev) => ({ ...prev, [key]: value }));
   }, []);
 
   const changeFormat = (f: Format) => {
     set("type", f);
+    setAiExplanation(null);
+    setAiError(null);
   };
 
   // AI format suggestion state
