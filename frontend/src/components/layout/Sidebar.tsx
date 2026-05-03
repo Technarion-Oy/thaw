@@ -104,6 +104,7 @@ import RefreshPipeModal from "../pipe/RefreshPipeModal";
 import PipeCopyHistoryModal from "../pipe/PipeCopyHistoryModal";
 import PipeStatusModal from "../pipe/PipeStatusModal";
 import CreateStageModal from "../database/CreateStageModal";
+import StagePropertiesModal from "../database/StagePropertiesModal";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 
 const { Text } = Typography;
@@ -439,6 +440,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [createDbOpen, setCreateDbOpen] = useState(false);
   const [createTableModal, setCreateTableModal] = useState<{ db: string; schema: string } | null>(null);
   const [createStageModal, setCreateStageModal] = useState<{ db: string; schema: string } | null>(null);
+  const [stagePropertiesModal, setStagePropertiesModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createFileFormatModal, setCreateFileFormatModal] = useState<{ db: string; schema: string } | null>(null);
   const [createSecretModal, setCreateSecretModal] = useState<{ db: string; schema: string } | null>(null);
   const [modifySecretModal, setModifySecretModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -1113,6 +1115,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const schema = parts[2];
     setCtxMenu(null);
     setCreateStageModal({ db, schema });
+  };
+
+  const openStageProperties = () => {
+    if (!ctxMenu) return;
+    const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
+    const name = nameParts.join(":");
+    setCtxMenu(null);
+    setStagePropertiesModal({ db, schema, name });
   };
 
   const openCreateFileFormat = () => {
@@ -2352,6 +2362,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Create File Format…", <FileTextOutlined style={{ fontSize: 12 }} />, openCreateFileFormat)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "SECRET" &&
             menuItem("Create Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "FILE FORMAT" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
+            menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
+            menuItem("Alter Stage…", <EditOutlined style={{ fontSize: 12 }} />, openStageProperties)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SECRET" &&
+            menuItem("Modify…", <EditOutlined style={{ fontSize: 12 }} />, openModifySecret)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, openPipeProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
@@ -2604,6 +2622,15 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={createStageModal.schema}
           onClose={() => setCreateStageModal(null)}
           onSuccess={() => refreshDatabaseByName(createStageModal.db)}
+        />
+      )}
+      {stagePropertiesModal && (
+        <StagePropertiesModal
+          db={stagePropertiesModal.db}
+          schema={stagePropertiesModal.schema}
+          name={stagePropertiesModal.name}
+          onClose={() => setStagePropertiesModal(null)}
+          onSuccess={() => refreshDatabaseByName(stagePropertiesModal.db)}
         />
       )}
 

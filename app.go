@@ -52,6 +52,7 @@ import (
 	"thaw/internal/snowflake"
 	"thaw/internal/snowgitrepo"
 	"thaw/internal/sqleditor"
+	"thaw/internal/stage"
 	"thaw/internal/tasks"
 	"thaw/internal/telemetry"
 )
@@ -1386,6 +1387,18 @@ func (a *App) BuildCreatePipeSql(database, schema string, cfg pipe.PipeConfig) (
 // BuildRefreshPipeSql returns the SQL for an ALTER PIPE ... REFRESH statement.
 func (a *App) BuildRefreshPipeSql(database, schema, name string, cfg pipe.RefreshPipeConfig) (string, error) {
 	return pipe.BuildRefreshPipeSql(database, schema, name, cfg)
+}
+
+// ── Stage ────────────────────────────────────────────────────────────────────
+
+// BuildCreateStageSql returns the CREATE STAGE SQL statement.
+func (a *App) BuildCreateStageSql(cfg stage.StageConfig) string {
+	return stage.BuildCreateStageSql(cfg)
+}
+
+// BuildAlterStageSql returns the ALTER STAGE SQL statement.
+func (a *App) BuildAlterStageSql(cfg stage.AlterStageConfig) string {
+	return stage.BuildAlterStageSql(cfg)
 }
 
 // ── File Format ──────────────────────────────────────────────────────────────

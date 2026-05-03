@@ -11,91 +11,36 @@ import {
   Typography, Divider, Button, Alert,
 } from "antd";
 import { InboxOutlined, PlusOutlined } from "@ant-design/icons";
-import { ExecDDL, GetQuotedIdentifiersIgnoreCase, ListIntegrations } from "../../../wailsjs/go/main/App";
-import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
-import type { snowflake } from "../../../wailsjs/go/models";
+import { ExecDDL, GetQuotedIdentifiersIgnoreCase, ListIntegrations, BuildCreateStageSql, ListFileFormats } from "../../../wailsjs/go/main/App";
+
+import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
+import FileFormatFields, { BASE_DEFAULTS } from "./FileFormatFields";
+import type { snowflake, stage, fileformat } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
 
-interface StageConfig {
-  name: string;
-  caseSensitive: boolean;
-  orReplace: boolean;
-  ifNotExists: boolean;
-  stageType: "INTERNAL" | "EXTERNAL";
-  url: string;
-  storageIntegration: string;
-  encryptionType: string;
-  kmsKeyId: string;
-  directoryEnabled: boolean;
-  directoryAutoRefresh: boolean;
-  comment: string;
-}
-
-const DEFAULTS: StageConfig = {
+const DEFAULTS: any = {
   name: "",
+  database: "",
+  schema: "",
   caseSensitive: false,
   orReplace: false,
   ifNotExists: false,
-  stageType: "INTERNAL",
+  type: "INTERNAL",
   url: "",
   storageIntegration: "",
+  usePrivatelinkEndpoint: false,
   encryptionType: "SNOWFLAKE_FULL",
   kmsKeyId: "",
   directoryEnabled: false,
   directoryAutoRefresh: false,
+  directoryRefreshOnCreate: false,
+  directoryNotificationIntegration: "",
+  fileFormatName: "",
+  fileFormat: BASE_DEFAULTS,
   comment: "",
+  tags: "",
 };
-
-function buildSql(db: string, schema: string, cfg: StageConfig): string {
-  const esc = (s: string) => s.replace(/"/g, '""');
-  const sq = (s: string) => "'" + s.replace(/'/g, "''") + "'";
-
-  let createClause = "CREATE";
-  if (cfg.orReplace) createClause += " OR REPLACE";
-  createClause += " STAGE";
-  if (cfg.ifNotExists && !cfg.orReplace) createClause += " IF NOT EXISTS";
-
-  const nameToken = identToken(cfg.name || "stage_name", cfg.caseSensitive);
-  const lines: string[] = [
-    `${createClause} "${esc(db)}"."${esc(schema)}".${nameToken}`,
-  ];
-
-  if (cfg.stageType === "EXTERNAL") {
-    if (cfg.url.trim()) {
-      lines.push(`  URL = ${sq(cfg.url.trim())}`);
-    }
-    if (cfg.storageIntegration.trim()) {
-      lines.push(`  STORAGE_INTEGRATION = ${cfg.storageIntegration.trim()}`);
-    }
-  }
-
-  // Encryption
-  if (cfg.encryptionType !== "NONE") {
-    let enc = `  ENCRYPTION = (TYPE = '${cfg.encryptionType}'`;
-    if (cfg.kmsKeyId.trim()) {
-      enc += ` KMS_KEY_ID = ${sq(cfg.kmsKeyId.trim())}`;
-    }
-    enc += ")";
-    lines.push(enc);
-  }
-
-  // Directory
-  if (cfg.directoryEnabled) {
-    let dir = "  DIRECTORY = (ENABLE = TRUE";
-    if (cfg.directoryAutoRefresh && cfg.stageType === "EXTERNAL") {
-      dir += " AUTO_REFRESH = TRUE";
-    }
-    dir += ")";
-    lines.push(dir);
-  }
-
-  if (cfg.comment.trim()) {
-    lines.push(`  COMMENT = ${sq(cfg.comment.trim())}`);
-  }
-
-  return lines.join("\n") + ";";
-}
 
 interface Props {
   db: string;
@@ -105,28 +50,39 @@ interface Props {
 }
 
 export default function CreateStageModal({ db, schema, onClose, onSuccess }: Props) {
-  const [cfg, setCfg] = useState<StageConfig>(DEFAULTS);
+  const [cfg, setCfg] = useState<any>({ ...DEFAULTS, database: db, schema });
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
   const [integrations, setIntegrations] = useState<snowflake.IntegrationRow[]>([]);
+  const [fileFormats, setFileFormats] = useState<string[]>([]);
+  const [preview, setPreview] = useState("");
+  const [formatSource, setFormatSource] = useState<"named" | "inline" | "none">("none");
 
   useEffect(() => {
     GetQuotedIdentifiersIgnoreCase().then((v) => setQuotedIdentifiersIgnoreCase(v ?? false)).catch(() => {});
     ListIntegrations("STORAGE").then(setIntegrations).catch(() => {});
-  }, []);
+    ListFileFormats(db, schema).then(setFileFormats).catch(() => {});
+  }, [db, schema]);
 
-  const set = <K extends keyof StageConfig>(key: K, value: StageConfig[K]) =>
-    setCfg((prev) => ({ ...prev, [key]: value }));
+  useEffect(() => {
+    BuildCreateStageSql(cfg as stage.StageConfig).then(setPreview).catch(() => {});
+  }, [cfg]);
 
-  const canSubmit = cfg.name.trim() !== "" && (cfg.stageType === "INTERNAL" || cfg.url.trim() !== "");
+  const set = <K extends keyof stage.StageConfig>(key: K, value: stage.StageConfig[K]) =>
+    setCfg((prev: any) => ({ ...prev, [key]: value }));
+
+  const setFormatField = <K extends keyof fileformat.FileFormatConfig>(key: K, value: fileformat.FileFormatConfig[K]) =>
+    setCfg((prev: any) => ({ ...prev, fileFormat: { ...prev.fileFormat, [key]: value } }));
+
+  const canSubmit = cfg.name.trim() !== "" && (cfg.type === "INTERNAL" || cfg.url.trim() !== "");
 
   const handleCreate = async () => {
     if (!canSubmit) return;
-    const sql = buildSql(db, schema, cfg);
     setCreating(true);
     setCreateError(null);
     try {
+      const sql = await BuildCreateStageSql(cfg as stage.StageConfig);
       await ExecDDL(sql);
       onSuccess?.();
       onClose();
@@ -136,8 +92,6 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
       setCreating(false);
     }
   };
-
-  const preview = buildSql(db, schema, cfg);
 
   const divider = (label: string) => (
     <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "16px 0 8px" }}>
@@ -228,8 +182,8 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
 
         <Form.Item label="Stage type" style={{ marginBottom: 12 }}>
           <Radio.Group
-            value={cfg.stageType}
-            onChange={(e) => set("stageType", e.target.value)}
+            value={cfg.type}
+            onChange={(e) => set("type", e.target.value)}
             size="small"
           >
             <Radio value="INTERNAL">Internal</Radio>
@@ -237,7 +191,7 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
           </Radio.Group>
         </Form.Item>
 
-        {cfg.stageType === "EXTERNAL" && (
+        {cfg.type === "EXTERNAL" && (
           <>
             {divider("External Location")}
             <Form.Item label="URL" required style={{ marginBottom: 12 }} help="e.g. s3://bucket/path/ or gcs://bucket/path/">
@@ -294,11 +248,60 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
           <Checkbox 
             checked={cfg.directoryAutoRefresh} 
             onChange={e => set("directoryAutoRefresh", e.target.checked)}
-            disabled={!cfg.directoryEnabled || cfg.stageType === "INTERNAL"}
+            disabled={!cfg.directoryEnabled || cfg.type === "INTERNAL"}
           >
             Auto refresh
           </Checkbox>
+          <Checkbox 
+            checked={cfg.directoryRefreshOnCreate} 
+            onChange={e => set("directoryRefreshOnCreate", e.target.checked)}
+            disabled={!cfg.directoryEnabled || cfg.type === "EXTERNAL"}
+          >
+            Refresh on create
+          </Checkbox>
         </Space>
+
+        {divider("File Format")}
+        <Form.Item style={{ marginBottom: 12 }}>
+          <Radio.Group
+            value={formatSource}
+            onChange={(e) => {
+              setFormatSource(e.target.value);
+              if (e.target.value === "none") {
+                set("fileFormatName", "");
+                set("fileFormat", BASE_DEFAULTS);
+              } else if (e.target.value === "named") {
+                set("fileFormat", BASE_DEFAULTS);
+              } else {
+                set("fileFormatName", "");
+              }
+            }}
+            size="small"
+          >
+            <Radio value="none">None</Radio>
+            <Radio value="named">Named Format</Radio>
+            <Radio value="inline">Inline Format</Radio>
+          </Radio.Group>
+        </Form.Item>
+
+        {formatSource === "named" && (
+          <Form.Item style={{ marginBottom: 12 }}>
+            <Select
+              showSearch
+              placeholder="Select a format in this schema"
+              value={cfg.fileFormatName || undefined}
+              onChange={(v) => set("fileFormatName", v)}
+              options={fileFormats.map((f) => ({ value: f, label: f }))}
+              allowClear
+            />
+          </Form.Item>
+        )}
+
+        {formatSource === "inline" && (
+          <div style={{ paddingLeft: 12, borderLeft: "2px solid var(--border)", marginBottom: 12 }}>
+            <FileFormatFields cfg={cfg.fileFormat} set={setFormatField} hideNameFields />
+          </div>
+        )}
 
         <Form.Item label="Comment" style={{ marginBottom: 12 }}>
           <Input value={cfg.comment} onChange={e => set("comment", e.target.value)} placeholder="Stage comment" />

@@ -3170,6 +3170,109 @@ export namespace sqleditor {
 
 }
 
+export namespace stage {
+	
+	export class AlterStageConfig {
+	    name: string;
+	    database: string;
+	    schema: string;
+	    action: string;
+	    newName: string;
+	    caseSensitive: boolean;
+	    comment?: string;
+	    url?: string;
+	    storageIntegration?: string;
+	    directoryEnabled?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new AlterStageConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.database = source["database"];
+	        this.schema = source["schema"];
+	        this.action = source["action"];
+	        this.newName = source["newName"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.comment = source["comment"];
+	        this.url = source["url"];
+	        this.storageIntegration = source["storageIntegration"];
+	        this.directoryEnabled = source["directoryEnabled"];
+	    }
+	}
+	export class StageConfig {
+	    name: string;
+	    database: string;
+	    schema: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    type: string;
+	    url: string;
+	    storageIntegration: string;
+	    usePrivatelinkEndpoint: boolean;
+	    encryptionType: string;
+	    kmsKeyId: string;
+	    directoryEnabled: boolean;
+	    directoryAutoRefresh: boolean;
+	    directoryRefreshOnCreate: boolean;
+	    directoryNotificationIntegration: string;
+	    fileFormatName: string;
+	    fileFormat: fileformat.FileFormatConfig;
+	    comment: string;
+	    tags: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new StageConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.database = source["database"];
+	        this.schema = source["schema"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.type = source["type"];
+	        this.url = source["url"];
+	        this.storageIntegration = source["storageIntegration"];
+	        this.usePrivatelinkEndpoint = source["usePrivatelinkEndpoint"];
+	        this.encryptionType = source["encryptionType"];
+	        this.kmsKeyId = source["kmsKeyId"];
+	        this.directoryEnabled = source["directoryEnabled"];
+	        this.directoryAutoRefresh = source["directoryAutoRefresh"];
+	        this.directoryRefreshOnCreate = source["directoryRefreshOnCreate"];
+	        this.directoryNotificationIntegration = source["directoryNotificationIntegration"];
+	        this.fileFormatName = source["fileFormatName"];
+	        this.fileFormat = this.convertValues(source["fileFormat"], fileformat.FileFormatConfig);
+	        this.comment = source["comment"];
+	        this.tags = source["tags"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace tasks {
 	
 	export class FinalizabilityRow {
