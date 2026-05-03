@@ -191,7 +191,6 @@ func BuildAlterStageSql(cfg AlterStageConfig) string {
 			} else {
 				sb.WriteString(" DIRECTORY = (ENABLE = FALSE)")
 			}
-			first = false
 		}
 		
 	case "UNSET":
@@ -201,7 +200,6 @@ func BuildAlterStageSql(cfg AlterStageConfig) string {
 		if cfg.Comment != nil {
 			if !first { sb.WriteString(",") }
 			sb.WriteString(" COMMENT")
-			first = false
 		}
 	}
 	
