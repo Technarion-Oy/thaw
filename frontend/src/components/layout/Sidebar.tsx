@@ -103,6 +103,7 @@ import PipePropertiesModal from "../pipe/PipePropertiesModal";
 import RefreshPipeModal from "../pipe/RefreshPipeModal";
 import PipeCopyHistoryModal from "../pipe/PipeCopyHistoryModal";
 import PipeStatusModal from "../pipe/PipeStatusModal";
+import CreateStageModal from "../database/CreateStageModal";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 
 const { Text } = Typography;
@@ -437,6 +438,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [executeNotebookModal, setExecuteNotebookModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createDbOpen, setCreateDbOpen] = useState(false);
   const [createTableModal, setCreateTableModal] = useState<{ db: string; schema: string } | null>(null);
+  const [createStageModal, setCreateStageModal] = useState<{ db: string; schema: string } | null>(null);
   const [createFileFormatModal, setCreateFileFormatModal] = useState<{ db: string; schema: string } | null>(null);
   const [createSecretModal, setCreateSecretModal] = useState<{ db: string; schema: string } | null>(null);
   const [modifySecretModal, setModifySecretModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -1102,6 +1104,15 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const schema = parts[2];
     setCtxMenu(null);
     setCreateTableModal({ db, schema });
+  };
+
+  const openCreateStage = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateStageModal({ db, schema });
   };
 
   const openCreateFileFormat = () => {
@@ -2313,7 +2324,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "schema" && menuItemSub("Create Object", <PlusSquareOutlined style={{ fontSize: 12 }} />, "create-object", (
             <>
               {menuItem("Table…", <TableOutlined style={{ fontSize: 12 }} />, openCreateTable)}
+              {menuItem("Stage…", <InboxOutlined style={{ fontSize: 12 }} />, openCreateStage)}
               {menuItem("File Format…", <FileTextOutlined style={{ fontSize: 12 }} />, openCreateFileFormat, undefined, !featureFlags.fileFormatBuilder, "File Format Builder is disabled. Enable it under View → Enabled Features…")}
+
               {menuItem("Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)}
               {menuItem("Pipe…", <ApiOutlined style={{ fontSize: 12 }} />, openCreatePipe)}
               {menuItem("Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
@@ -2330,6 +2343,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Task Statuses…", <DashboardOutlined style={{ fontSize: 12 }} />, openTaskStatuses)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "TASK" &&
             menuItem("Create Task…", <ClockCircleOutlined style={{ fontSize: 12 }} />, openCreateTask)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "STAGE" &&
+            menuItem("Create Stage…", <InboxOutlined style={{ fontSize: 12 }} />, openCreateStage)}
+
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "PIPE" &&
             menuItem("Create Pipe…", <ApiOutlined style={{ fontSize: 12 }} />, openCreatePipe)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "FILE FORMAT" &&
@@ -2580,6 +2596,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={createTableModal.schema}
           onClose={() => setCreateTableModal(null)}
           onSuccess={() => refreshDatabaseByName(createTableModal.db)}
+        />
+      )}
+      {createStageModal && (
+        <CreateStageModal
+          db={createStageModal.db}
+          schema={createStageModal.schema}
+          onClose={() => setCreateStageModal(null)}
+          onSuccess={() => refreshDatabaseByName(createStageModal.db)}
         />
       )}
 
