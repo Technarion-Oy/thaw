@@ -72,10 +72,6 @@ func toString(v interface{}) string {
 	}
 }
 
-func q(s string) string {
-	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
-}
-
 // bareIdent strips exactly one surrounding double-quote pair from a Snowflake
 // identifier segment and unescapes any internal "" → ".
 // Input examples: `"MY_TASK"` → `MY_TASK`, `"my""task"` → `my"task`.
@@ -89,26 +85,25 @@ func bareIdent(s string) string {
 // CloneChildTask clones a task and replaces its predecessors.
 // caseSensitive controls whether newName is double-quoted (true) or left unquoted when valid (false).
 func CloneChildTask(ctx context.Context, client *snowflake.Client, database, schema, oldName, newName string, caseSensitive bool, newPredecessors []string) error {
-	escStr := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
 	formatPred := func(p string) string {
 		p = strings.TrimSpace(p)
 		parts := strings.Split(p, ".")
 		var quotedParts []string
 		for _, part := range parts {
 			if cleanPart := bareIdent(part); cleanPart != "" {
-				quotedParts = append(quotedParts, q(cleanPart))
+				quotedParts = append(quotedParts, snowflake.QuoteIdent(cleanPart))
 			}
 		}
 		if len(quotedParts) == 1 {
-			return fmt.Sprintf("%s.%s.%s", q(database), q(schema), quotedParts[0])
+			return fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), quotedParts[0])
 		}
 		return strings.Join(quotedParts, ".")
 	}
 
-	fqnOld := fmt.Sprintf("%s.%s.%s", q(database), q(schema), q(oldName))
-	fqnNew := fmt.Sprintf("%s.%s.%s", q(database), q(schema), snowflake.QuoteOrBare(newName, caseSensitive))
+	fqnOld := fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(oldName))
+	fqnNew := fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteOrBare(newName, caseSensitive))
 
-	showSQL := fmt.Sprintf("SHOW TASKS LIKE '%s' IN SCHEMA %s.%s", escStr(oldName), q(database), q(schema))
+	showSQL := fmt.Sprintf("SHOW TASKS LIKE '%s' IN SCHEMA %s.%s", snowflake.EscapeStringLit(oldName), snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
 	res, err := client.Execute(ctx, showSQL)
 	if err != nil {
 		return fmt.Errorf("failed to fetch original task details: %w", err)
@@ -170,9 +165,9 @@ func CloneChildTask(ctx context.Context, client *snowflake.Client, database, sch
 // suspendIfRunning suspends the named task if its current state is STARTED.
 // Snowflake requires a task to be suspended before its AFTER list can be modified.
 func suspendIfRunning(ctx context.Context, client *snowflake.Client, database, schema, taskName string) error {
-	escName := strings.ReplaceAll(taskName, `'`, `''`)
+	escName := snowflake.EscapeStringLit(taskName)
 	res, err := client.Execute(ctx, fmt.Sprintf(
-		"SHOW TASKS LIKE '%s' IN SCHEMA %s.%s", escName, q(database), q(schema)))
+		"SHOW TASKS LIKE '%s' IN SCHEMA %s.%s", escName, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)))
 	if err != nil {
 		return fmt.Errorf("failed to check state for task %q: %w", taskName, err)
 	}
@@ -189,7 +184,7 @@ func suspendIfRunning(ctx context.Context, client *snowflake.Client, database, s
 			continue
 		}
 		if strings.ToUpper(toString(row[stateIdx])) == "STARTED" {
-			fqn := fmt.Sprintf("%s.%s.%s", q(database), q(schema), q(taskName))
+			fqn := fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(taskName))
 			if _, err := client.Execute(ctx, fmt.Sprintf("ALTER TASK IF EXISTS %s SUSPEND", fqn)); err != nil {
 				return fmt.Errorf("failed to suspend task %q: %w", taskName, err)
 			}
@@ -206,13 +201,13 @@ func RemoveParents(ctx context.Context, client *snowflake.Client, database, sche
 	if len(parents) == 0 {
 		return nil
 	}
-	fqn := fmt.Sprintf("%s.%s.%s", q(database), q(schema), q(taskName))
+	fqn := fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(taskName))
 	if err := suspendIfRunning(ctx, client, database, schema, taskName); err != nil {
 		return err
 	}
 	preds := make([]string, 0, len(parents))
 	for _, p := range parents {
-		preds = append(preds, fmt.Sprintf("%s.%s.%s", q(database), q(schema), q(p)))
+		preds = append(preds, fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(p)))
 	}
 	if _, err := client.Execute(ctx, fmt.Sprintf("ALTER TASK %s REMOVE AFTER %s", fqn, strings.Join(preds, ", "))); err != nil {
 		return fmt.Errorf("failed to remove predecessors from task %q: %w", taskName, err)
@@ -227,13 +222,13 @@ func AddParents(ctx context.Context, client *snowflake.Client, database, schema,
 	if len(parents) == 0 {
 		return nil
 	}
-	fqn := fmt.Sprintf("%s.%s.%s", q(database), q(schema), q(taskName))
+	fqn := fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(taskName))
 	if err := suspendIfRunning(ctx, client, database, schema, taskName); err != nil {
 		return err
 	}
 	preds := make([]string, 0, len(parents))
 	for _, p := range parents {
-		preds = append(preds, fmt.Sprintf("%s.%s.%s", q(database), q(schema), q(p)))
+		preds = append(preds, fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(p)))
 	}
 	if _, err := client.Execute(ctx, fmt.Sprintf("ALTER TASK %s ADD AFTER %s", fqn, strings.Join(preds, ", "))); err != nil {
 		return fmt.Errorf("failed to add predecessors to task %q: %w", taskName, err)
@@ -244,12 +239,12 @@ func AddParents(ctx context.Context, client *snowflake.Client, database, schema,
 // SuspendGraph suspends the root task first (to stop new run scheduling), then
 // suspends every descendant found via BFS over SHOW TASKS.
 func SuspendGraph(ctx context.Context, client *snowflake.Client, database, schema, taskName string) error {
-	fqn := fmt.Sprintf("%s.%s.%s", q(database), q(schema), q(taskName))
+	fqn := fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(taskName))
 	if _, err := client.Execute(ctx, fmt.Sprintf("ALTER TASK IF EXISTS %s SUSPEND", fqn)); err != nil {
 		return err
 	}
 
-	res, err := client.Execute(ctx, fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
+	res, err := client.Execute(ctx, fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)))
 	if err != nil {
 		return err
 	}
@@ -309,7 +304,7 @@ func SuspendGraph(ctx context.Context, client *snowflake.Client, database, schem
 			child = orig
 		}
 		if _, err := client.Execute(ctx, fmt.Sprintf(
-			"ALTER TASK IF EXISTS %s.%s.%s SUSPEND", q(database), q(schema), q(child))); err != nil {
+			"ALTER TASK IF EXISTS %s.%s.%s SUSPEND", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(child))); err != nil {
 			return fmt.Errorf("suspending child task %q: %w", child, err)
 		}
 	}
@@ -318,7 +313,7 @@ func SuspendGraph(ctx context.Context, client *snowflake.Client, database, schem
 
 // ListFinalizableTasks returns every task in the schema along with an eligibility verdict.
 func ListFinalizableTasks(ctx context.Context, client *snowflake.Client, database, schema string) ([]FinalizabilityRow, error) {
-	res, err := client.Execute(ctx, fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
+	res, err := client.Execute(ctx, fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)))
 	if err != nil {
 		return nil, err
 	}
@@ -395,7 +390,7 @@ func ListFinalizableTasks(ctx context.Context, client *snowflake.Client, databas
 
 // HasChildren reports whether any task in the schema lists taskName as a predecessor.
 func HasChildren(ctx context.Context, client *snowflake.Client, database, schema, taskName string) (bool, error) {
-	res, err := client.Execute(ctx, fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
+	res, err := client.Execute(ctx, fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)))
 	if err != nil {
 		return false, err
 	}
@@ -423,7 +418,7 @@ func HasChildren(ctx context.Context, client *snowflake.Client, database, schema
 
 // EnableDependents resumes the named task and all of its descendants in post-order.
 func EnableDependents(ctx context.Context, client *snowflake.Client, database, schema, taskName string) error {
-	res, err := client.Execute(ctx, fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
+	res, err := client.Execute(ctx, fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)))
 	if err != nil {
 		return err
 	}
@@ -432,7 +427,7 @@ func EnableDependents(ctx context.Context, client *snowflake.Client, database, s
 	predsIdx := colIdx(res.Columns, "predecessors", "predecessor")
 
 	if nameIdx < 0 {
-		_, err = client.Execute(ctx, fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s RESUME", q(database), q(schema), q(taskName)))
+		_, err = client.Execute(ctx, fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s RESUME", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(taskName)))
 		return err
 	}
 
@@ -486,7 +481,7 @@ func EnableDependents(ctx context.Context, client *snowflake.Client, database, s
 		if orig, ok := taskNames[upper]; ok {
 			name = orig
 		}
-		if _, err := client.Execute(ctx, fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s RESUME", q(database), q(schema), q(name))); err != nil {
+		if _, err := client.Execute(ctx, fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s RESUME", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))); err != nil {
 			return fmt.Errorf("resuming task %q: %w", name, err)
 		}
 	}
@@ -495,7 +490,7 @@ func EnableDependents(ctx context.Context, client *snowflake.Client, database, s
 
 // DropTree suspends and drops the named task and all of its descendants.
 func DropTree(ctx context.Context, client *snowflake.Client, database, schema, taskName string) error {
-	res, err := client.Execute(ctx, fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
+	res, err := client.Execute(ctx, fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)))
 	if err != nil {
 		return err
 	}
@@ -553,8 +548,8 @@ func DropTree(ctx context.Context, client *snowflake.Client, database, schema, t
 	dfs(taskName)
 
 	for _, name := range dropOrder {
-		_, _ = client.Execute(ctx, fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s SUSPEND", q(database), q(schema), q(name)))
-		if _, err := client.Execute(ctx, fmt.Sprintf("DROP TASK IF EXISTS %s.%s.%s", q(database), q(schema), q(name))); err != nil {
+		_, _ = client.Execute(ctx, fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s SUSPEND", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name)))
+		if _, err := client.Execute(ctx, fmt.Sprintf("DROP TASK IF EXISTS %s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))); err != nil {
 			return fmt.Errorf("dropping task %q: %w", name, err)
 		}
 	}
@@ -563,7 +558,7 @@ func DropTree(ctx context.Context, client *snowflake.Client, database, schema, t
 
 // GetStatuses returns the current state and last-run result for every task in the given schema.
 func GetStatuses(ctx context.Context, client *snowflake.Client, database, schema string) (StatusesResult, error) {
-	showRes, err := client.Execute(ctx, fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", q(database), q(schema)))
+	showRes, err := client.Execute(ctx, fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)))
 	if err != nil {
 		return StatusesResult{}, err
 	}
@@ -682,7 +677,7 @@ func GetStatuses(ctx context.Context, client *snowflake.Client, database, schema
 			`SCHEDULED_TIME_RANGE_START => DATEADD('day', -7, CURRENT_TIMESTAMP()),`+
 			`RESULT_LIMIT => 10000))`+
 			` ORDER BY SCHEDULED_TIME DESC NULLS FIRST, COMPLETED_TIME DESC NULLS FIRST`,
-		q(database))
+		snowflake.QuoteIdent(database))
 
 	histRes, histErr := client.Execute(ctx, histSQL)
 	if histErr != nil {

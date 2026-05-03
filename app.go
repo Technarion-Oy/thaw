@@ -353,10 +353,10 @@ type TableSummary struct {
 // specified database.
 func (a *App) GetDatabaseTableSummary(dbName string) ([]TableSummary, error) {
 	if a.client == nil {
-		return nil, fmt.Errorf("not connected")
+		return nil, ErrNotConnected
 	}
 
-	qdb := "\"" + strings.ReplaceAll(dbName, "\"", "\"\"") + "\""
+	qdb := snowflake.QuoteIdent(dbName)
 	query := fmt.Sprintf(`
 		SELECT 
 			TABLE_NAME, 
@@ -1508,8 +1508,7 @@ func (a *App) AlterPipe(database, schema, name, clause string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-	sql := fmt.Sprintf("ALTER PIPE %s.%s.%s %s", q(database), q(schema), q(name), clause)
+	sql := fmt.Sprintf("ALTER PIPE %s.%s.%s %s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
 	_, err := a.client.Execute(a.ctx, sql)
 	return err
 }
@@ -1522,11 +1521,10 @@ func (a *App) GetPipeStatus(database, schema, name string) (string, error) {
 	if a.client == nil {
 		return "", ErrNotConnected
 	}
-	quoteIdent := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
 	// Build the FQN with double-quoted parts, then escape any embedded single
 	// quotes so the whole string is safe inside the outer SQL string literal.
-	pipeFqn := quoteIdent(database) + "." + quoteIdent(schema) + "." + quoteIdent(name)
-	sql := fmt.Sprintf("SELECT SYSTEM$PIPE_STATUS('%s')", strings.ReplaceAll(pipeFqn, "'", "''"))
+	pipeFqn := snowflake.QuoteIdent(database) + "." + snowflake.QuoteIdent(schema) + "." + snowflake.QuoteIdent(name)
+	sql := fmt.Sprintf("SELECT SYSTEM$PIPE_STATUS('%s')", snowflake.EscapeStringLit(pipeFqn))
 	result, err := a.client.Execute(a.ctx, sql)
 	if err != nil {
 		return "", err
@@ -1545,9 +1543,6 @@ func (a *App) GetPipeCopyHistory(database, schema, name, startTime, status, file
 	if a.client == nil {
 		return nil, ErrNotConnected
 	}
-	quoteIdent := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-	escStr := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
-
 	// Fetch the pipe DDL to resolve the COPY INTO target table name, which is
 	// required by the copy_history table function.
 	ddl, err := a.client.GetObjectDDL(a.ctx, database, schema, "PIPE", name, "")
@@ -1568,31 +1563,31 @@ func (a *App) GetPipeCopyHistory(database, schema, name, startTime, status, file
 		if !p.Quoted {
 			val = strings.ToUpper(val)
 		}
-		quotedParts[i] = quoteIdent(val)
+		quotedParts[i] = snowflake.QuoteIdent(val)
 	}
 	tableNameArg := strings.Join(quotedParts, ".")
 
 	startExpr := "dateadd(hours, -24, current_timestamp())"
 	if startTime != "" {
-		startExpr = fmt.Sprintf("'%s'::timestamp_ltz", escStr(startTime))
+		startExpr = fmt.Sprintf("'%s'::timestamp_ltz", snowflake.EscapeStringLit(startTime))
 	}
 
 	var sb strings.Builder
 	fmt.Fprintf(&sb,
 		"SELECT * FROM TABLE(%s.information_schema.copy_history(TABLE_NAME => '%s', START_TIME => %s))",
-		quoteIdent(database), escStr(tableNameArg), startExpr,
+		snowflake.QuoteIdent(database), snowflake.EscapeStringLit(tableNameArg), startExpr,
 	)
 	// Filter by pipe identity using exact case-sensitive match.
 	// copy_history exposes pipe_catalog_name, pipe_schema_name, and pipe_name as
 	// separate columns; PIPE_NAME alone does not contain a fully qualified name.
 	fmt.Fprintf(&sb, " WHERE pipe_catalog_name = '%s' AND pipe_schema_name = '%s' AND pipe_name = '%s'",
-		escStr(database), escStr(schema), escStr(name),
+		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name),
 	)
 	if status != "" {
-		fmt.Fprintf(&sb, " AND STATUS ILIKE '%s'", escStr(status))
+		fmt.Fprintf(&sb, " AND STATUS ILIKE '%s'", snowflake.EscapeStringLit(status))
 	}
 	if fileName != "" {
-		fmt.Fprintf(&sb, " AND FILE_NAME ILIKE '%%%s%%'", escStr(fileName))
+		fmt.Fprintf(&sb, " AND FILE_NAME ILIKE '%%%s%%'", snowflake.EscapeStringLit(fileName))
 	}
 	fmt.Fprintf(&sb, " ORDER BY LAST_LOAD_TIME DESC NULLS LAST")
 
@@ -1608,9 +1603,7 @@ func (a *App) AlterWarehouseProperty(name, property, value string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	escId := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
-	escStr := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
-	wh := fmt.Sprintf(`"%s"`, escId(name))
+	wh := snowflake.QuoteIdent(name)
 
 	// allowlist checks for enum-typed values that are interpolated unquoted into SQL.
 	checkEnum := func(v string, allowed ...string) (string, error) {
@@ -1664,7 +1657,7 @@ func (a *App) AlterWarehouseProperty(name, property, value string) error {
 		}
 		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET AUTO_RESUME = %s`, wh, v)
 	case "comment":
-		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET COMMENT = '%s'`, wh, escStr(value))
+		query = fmt.Sprintf(`ALTER WAREHOUSE %s SET COMMENT = '%s'`, wh, snowflake.EscapeStringLit(value))
 	case "maxClusterCount":
 		v, err := validateInt(value)
 		if err != nil {
@@ -1687,7 +1680,7 @@ func (a *App) AlterWarehouseProperty(name, property, value string) error {
 		if strings.TrimSpace(value) == "" {
 			query = fmt.Sprintf(`ALTER WAREHOUSE %s SET RESOURCE_MONITOR = NULL`, wh)
 		} else {
-			query = fmt.Sprintf(`ALTER WAREHOUSE %s SET RESOURCE_MONITOR = "%s"`, wh, escId(value))
+			query = fmt.Sprintf("ALTER WAREHOUSE %s SET RESOURCE_MONITOR = %s", wh, snowflake.QuoteIdent(value))
 		}
 	case "enableQueryAcceleration":
 		v, err := checkEnum(value, "TRUE", "FALSE")
@@ -1731,8 +1724,7 @@ func (a *App) AlterWarehouseSuspend(name string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	escId := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
-	_, err := a.client.Execute(a.ctx, fmt.Sprintf(`ALTER WAREHOUSE "%s" SUSPEND`, escId(name)))
+	_, err := a.client.Execute(a.ctx, fmt.Sprintf("ALTER WAREHOUSE %s SUSPEND", snowflake.QuoteIdent(name)))
 	return err
 }
 
@@ -1741,8 +1733,7 @@ func (a *App) AlterWarehouseResume(name string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	escId := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
-	_, err := a.client.Execute(a.ctx, fmt.Sprintf(`ALTER WAREHOUSE "%s" RESUME IF SUSPENDED`, escId(name)))
+	_, err := a.client.Execute(a.ctx, fmt.Sprintf("ALTER WAREHOUSE %s RESUME IF SUSPENDED", snowflake.QuoteIdent(name)))
 	return err
 }
 
@@ -1751,8 +1742,7 @@ func (a *App) AlterWarehouseAbortAllQueries(name string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	escId := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
-	_, err := a.client.Execute(a.ctx, fmt.Sprintf(`ALTER WAREHOUSE "%s" ABORT ALL QUERIES`, escId(name)))
+	_, err := a.client.Execute(a.ctx, fmt.Sprintf("ALTER WAREHOUSE %s ABORT ALL QUERIES", snowflake.QuoteIdent(name)))
 	return err
 }
 
@@ -1761,8 +1751,7 @@ func (a *App) AlterWarehouseRename(name, newName string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	escId := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
-	_, err := a.client.Execute(a.ctx, fmt.Sprintf(`ALTER WAREHOUSE "%s" RENAME TO "%s"`, escId(name), escId(newName)))
+	_, err := a.client.Execute(a.ctx, fmt.Sprintf("ALTER WAREHOUSE %s RENAME TO %s", snowflake.QuoteIdent(name), snowflake.QuoteIdent(newName)))
 	return err
 }
 
@@ -1773,8 +1762,7 @@ func (a *App) GetWarehouseParameters(name string) ([]PropertyPair, error) {
 	if a.client == nil {
 		return nil, ErrNotConnected
 	}
-	escId := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
-	qr, err := a.client.Execute(a.ctx, fmt.Sprintf(`SHOW PARAMETERS IN WAREHOUSE "%s"`, escId(name)))
+	qr, err := a.client.Execute(a.ctx, fmt.Sprintf("SHOW PARAMETERS IN WAREHOUSE %s", snowflake.QuoteIdent(name)))
 	if err != nil {
 		return nil, err
 	}
@@ -2689,7 +2677,6 @@ func (a *App) GetObjectProperties(database, schema, kind, name string) ([]Proper
 		return nil, ErrNotConnected
 	}
 
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
 	like := strings.ReplaceAll(name, `\`, `\\`)
 	like = strings.ReplaceAll(like, "'", "''")
 
@@ -2698,37 +2685,37 @@ func (a *App) GetObjectProperties(database, schema, kind, name string) ([]Proper
 	case "DATABASE":
 		query = fmt.Sprintf("SHOW DATABASES LIKE '%s'", like)
 	case "SCHEMA":
-		query = fmt.Sprintf("SHOW SCHEMAS LIKE '%s' IN DATABASE %s", like, q(database))
+		query = fmt.Sprintf("SHOW SCHEMAS LIKE '%s' IN DATABASE %s", like, snowflake.QuoteIdent(database))
 	case "TABLE":
-		query = fmt.Sprintf("SHOW TABLES LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
+		query = fmt.Sprintf("SHOW TABLES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
 	case "VIEW":
-		query = fmt.Sprintf("SHOW VIEWS LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
+		query = fmt.Sprintf("SHOW VIEWS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
 	case "FUNCTION":
-		query = fmt.Sprintf("SHOW FUNCTIONS LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
+		query = fmt.Sprintf("SHOW FUNCTIONS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
 	case "PROCEDURE":
-		query = fmt.Sprintf("SHOW PROCEDURES LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
+		query = fmt.Sprintf("SHOW PROCEDURES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
 	case "SEQUENCE":
-		query = fmt.Sprintf("SHOW SEQUENCES LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
+		query = fmt.Sprintf("SHOW SEQUENCES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
 	case "STAGE":
-		query = fmt.Sprintf("SHOW STAGES LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
+		query = fmt.Sprintf("SHOW STAGES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
 	case "STREAM":
-		query = fmt.Sprintf("SHOW STREAMS LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
+		query = fmt.Sprintf("SHOW STREAMS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
 	case "TASK":
-		query = fmt.Sprintf("SHOW TASKS LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
+		query = fmt.Sprintf("SHOW TASKS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
 	case "FILE FORMAT":
-		query = fmt.Sprintf("SHOW FILE FORMATS LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
+		query = fmt.Sprintf("SHOW FILE FORMATS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
 	case "PIPE":
-		query = fmt.Sprintf("SHOW PIPES LIKE '%s' IN SCHEMA %s.%s", like, q(database), q(schema))
+		query = fmt.Sprintf("SHOW PIPES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
 	case "SECRET":
-		query = fmt.Sprintf("DESCRIBE SECRET %s.%s.%s", q(database), q(schema), q(name))
+		query = fmt.Sprintf("DESCRIBE SECRET %s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
 	case "GIT REPOSITORY":
-		query = fmt.Sprintf("DESCRIBE GIT REPOSITORY %s.%s.%s", q(database), q(schema), q(name))
+		query = fmt.Sprintf("DESCRIBE GIT REPOSITORY %s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
 	case "WAREHOUSE":
 		query = fmt.Sprintf("SHOW WAREHOUSES LIKE '%s'", like)
 	case "ROLE":
 		query = fmt.Sprintf("SHOW ROLES LIKE '%s'", like)
 	case "USER":
-		query = fmt.Sprintf("DESCRIBE USER %s", q(name))
+		query = fmt.Sprintf("DESCRIBE USER %s", snowflake.QuoteIdent(name))
 	default:
 		return nil, fmt.Errorf("unsupported object kind: %s", kind)
 	}
@@ -3024,14 +3011,12 @@ func (a *App) GetColumnComments(database, schema, table string) ([]ColumnComment
 	if a.client == nil {
 		return nil, ErrNotConnected
 	}
-	escId := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
-	escStr := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
 	query := fmt.Sprintf(
 		`SELECT COLUMN_NAME, COALESCE(COMMENT, '') AS COMMENT`+
-			` FROM "%s".INFORMATION_SCHEMA.COLUMNS`+
+			` FROM %s.INFORMATION_SCHEMA.COLUMNS`+
 			` WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = '%s'`+
 			` ORDER BY ORDINAL_POSITION`,
-		escId(database), escStr(strings.ToUpper(schema)), escStr(strings.ToUpper(table)),
+		snowflake.QuoteIdent(database), snowflake.EscapeStringLit(strings.ToUpper(schema)), snowflake.EscapeStringLit(strings.ToUpper(table)),
 	)
 	res, err := a.client.Execute(a.ctx, query)
 	if err != nil {
@@ -3056,11 +3041,9 @@ func (a *App) SetColumnComment(database, schema, table, column, comment string) 
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	escId := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
-	escStr := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
-	query := fmt.Sprintf(
-		`ALTER TABLE "%s"."%s"."%s" MODIFY COLUMN "%s" COMMENT '%s'`,
-		escId(database), escId(schema), escId(table), escId(column), escStr(comment),
+	query := fmt.Sprintf("ALTER TABLE %s.%s.%s MODIFY COLUMN %s COMMENT '%s'",
+		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(table),
+		snowflake.QuoteIdent(column), snowflake.EscapeStringLit(comment),
 	)
 	_, err := a.client.Execute(a.ctx, query)
 	return err
@@ -3084,12 +3067,9 @@ func (a *App) GetTableSettings(database, schema, table string) (TableSettings, e
 	if a.client == nil {
 		return TableSettings{}, ErrNotConnected
 	}
-	escId := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
-	escStr := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
-
 	res, err := a.client.Execute(a.ctx, fmt.Sprintf(
-		`SHOW TABLES LIKE '%s' IN SCHEMA "%s"."%s"`,
-		escStr(table), escId(database), escId(schema),
+		"SHOW TABLES LIKE '%s' IN SCHEMA %s.%s",
+		snowflake.EscapeStringLit(table), snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema),
 	))
 	if err != nil {
 		return TableSettings{}, err
@@ -3144,8 +3124,8 @@ func (a *App) GetTableSettings(database, schema, table string) (TableSettings, e
 	// Fallback: read DEFAULT_DDL_COLLATION from SHOW PARAMETERS if not in SHOW TABLES.
 	if settings.DefaultDDLCollation == "" {
 		pres, perr := a.client.Execute(a.ctx, fmt.Sprintf(
-			`SHOW PARAMETERS LIKE 'DEFAULT_DDL_COLLATION' IN TABLE "%s"."%s"."%s"`,
-			escId(database), escId(schema), escId(table),
+			"SHOW PARAMETERS LIKE 'DEFAULT_DDL_COLLATION' IN TABLE %s.%s.%s",
+			snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(table),
 		))
 		if perr == nil && len(pres.Rows) > 0 {
 			pidx := make(map[string]int, len(pres.Columns))
@@ -3168,9 +3148,7 @@ func (a *App) AlterTableProperty(database, schema, table, property, value string
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	escId := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
-	escStr := func(s string) string { return strings.ReplaceAll(s, `'`, `''`) }
-	tbl := fmt.Sprintf(`"%s"."%s"."%s"`, escId(database), escId(schema), escId(table))
+	tbl := snowflake.QuoteIdent(database) + "." + snowflake.QuoteIdent(schema) + "." + snowflake.QuoteIdent(table)
 
 	var query string
 	switch property {
@@ -3189,9 +3167,9 @@ func (a *App) AlterTableProperty(database, schema, table, property, value string
 	case "changeTracking":
 		query = fmt.Sprintf(`ALTER TABLE %s SET CHANGE_TRACKING = %s`, tbl, strings.ToUpper(value))
 	case "defaultDDLCollation":
-		query = fmt.Sprintf(`ALTER TABLE %s SET DEFAULT_DDL_COLLATION = '%s'`, tbl, escStr(value))
+		query = fmt.Sprintf(`ALTER TABLE %s SET DEFAULT_DDL_COLLATION = '%s'`, tbl, snowflake.EscapeStringLit(value))
 	case "comment":
-		query = fmt.Sprintf(`ALTER TABLE %s SET COMMENT = '%s'`, tbl, escStr(value))
+		query = fmt.Sprintf(`ALTER TABLE %s SET COMMENT = '%s'`, tbl, snowflake.EscapeStringLit(value))
 	default:
 		return fmt.Errorf("unknown property: %s", property)
 	}
@@ -3241,8 +3219,7 @@ func (a *App) AlterTask(database, schema, name, clause string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-	sql := fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s %s", q(database), q(schema), q(name), clause)
+	sql := fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s %s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
 	_, err := a.client.Execute(a.ctx, sql)
 	return err
 }
@@ -3309,10 +3286,9 @@ func (a *App) SuspendTaskList(database, schema string, names []string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
 	for _, name := range names {
 		if _, err := a.client.Execute(a.ctx,
-			fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s SUSPEND", q(database), q(schema), q(name))); err != nil {
+			fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s SUSPEND", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))); err != nil {
 			return fmt.Errorf("suspending task %q: %w", name, err)
 		}
 	}
@@ -3329,10 +3305,9 @@ func (a *App) ResumeTaskList(database, schema string, names []string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
 	for _, name := range names {
 		if _, err := a.client.Execute(a.ctx,
-			fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s RESUME", q(database), q(schema), q(name))); err != nil {
+			fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s RESUME", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))); err != nil {
 			return fmt.Errorf("resuming task %q: %w", name, err)
 		}
 	}
@@ -3401,8 +3376,7 @@ func (a *App) MakeNotebookLive(database, schema, name string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
-	sql := fmt.Sprintf(`ALTER NOTEBOOK "%s"."%s"."%s" ADD LIVE VERSION FROM LAST`, esc(database), esc(schema), esc(name))
+	sql := fmt.Sprintf("ALTER NOTEBOOK %s.%s.%s ADD LIVE VERSION FROM LAST", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
 	_, err := a.client.Execute(a.ctx, sql)
 	return err
 }
@@ -3876,9 +3850,8 @@ func (a *App) SendChatMessage(
 			}
 			return strings.Join(lines, "\n"), false
 		case "describe_table":
-			esc := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
-			query := fmt.Sprintf(`DESCRIBE TABLE "%s"."%s"."%s"`,
-				esc(args["database"]), esc(args["schema"]), esc(args["table"]))
+			query := fmt.Sprintf("DESCRIBE TABLE %s.%s.%s",
+				snowflake.QuoteIdent(args["database"]), snowflake.QuoteIdent(args["schema"]), snowflake.QuoteIdent(args["table"]))
 			res, err := a.client.Execute(a.ctx, query)
 			if err != nil {
 				return err.Error(), true
@@ -4519,15 +4492,14 @@ ORDER BY START_TIME DESC`, funcName, argClause)
 
 // ListBackupSets returns backup sets scoped to a database, schema, or table.
 // bsFQN builds a (possibly fully-qualified) backup set identifier.
-// q must be the double-quote identifier-quoting function used at the call site.
-func bsFQN(q func(string) string, name, bsDb, bsSchema string) string {
+func bsFQN(name, bsDb, bsSchema string) string {
 	if bsDb != "" && bsSchema != "" {
-		return q(bsDb) + "." + q(bsSchema) + "." + q(name)
+		return snowflake.QuoteIdent(bsDb) + "." + snowflake.QuoteIdent(bsSchema) + "." + snowflake.QuoteIdent(name)
 	}
 	if bsDb != "" {
-		return q(bsDb) + "." + q(name)
+		return snowflake.QuoteIdent(bsDb) + "." + snowflake.QuoteIdent(name)
 	}
-	return q(name)
+	return snowflake.QuoteIdent(name)
 }
 
 // ListBackupSets returns backup sets whose backed-up object matches the right-clicked item.
@@ -4658,12 +4630,10 @@ func (a *App) CreateBackupSet(name, nameDb, nameSchema, forType, objectFQN, db s
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-
 	// Snowflake requires a current database to be set for CREATE BACKUP SET,
 	// even when the object name is fully qualified.
 	if db != "" {
-		if _, err := a.client.Execute(a.ctx, fmt.Sprintf("USE DATABASE %s", q(db))); err != nil {
+		if _, err := a.client.Execute(a.ctx, fmt.Sprintf("USE DATABASE %s", snowflake.QuoteIdent(db))); err != nil {
 			return err
 		}
 	}
@@ -4673,9 +4643,9 @@ func (a *App) CreateBackupSet(name, nameDb, nameSchema, forType, objectFQN, db s
 	var nameFQN string
 	switch {
 	case nameDb != "" && nameSchema != "":
-		nameFQN = q(nameDb) + "." + q(nameSchema) + "." + nameToken
+		nameFQN = snowflake.QuoteIdent(nameDb) + "." + snowflake.QuoteIdent(nameSchema) + "." + nameToken
 	case nameDb != "":
-		nameFQN = q(nameDb) + "." + nameToken
+		nameFQN = snowflake.QuoteIdent(nameDb) + "." + nameToken
 	default:
 		nameFQN = nameToken
 	}
@@ -4704,8 +4674,7 @@ func (a *App) DropBackupSet(name, bsDb, bsSchema string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-	fqn := bsFQN(q, name, bsDb, bsSchema)
+	fqn := bsFQN(name, bsDb, bsSchema)
 	_, err := a.client.Execute(a.ctx, fmt.Sprintf("DROP BACKUP SET %s", fqn))
 	return err
 }
@@ -4717,8 +4686,7 @@ func (a *App) AlterBackupSet(name, bsDb, bsSchema, alteration string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-	fqn := bsFQN(q, name, bsDb, bsSchema)
+	fqn := bsFQN(name, bsDb, bsSchema)
 	_, err := a.client.Execute(a.ctx, fmt.Sprintf("ALTER BACKUP SET %s %s", fqn, alteration))
 	return err
 }
@@ -4807,8 +4775,6 @@ func (a *App) CreateBackupPolicy(name, schedule string, expireAfterDays int64, r
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
-
 	var sb strings.Builder
 	sb.WriteString("CREATE ")
 	if orReplace {
@@ -4826,13 +4792,13 @@ func (a *App) CreateBackupPolicy(name, schedule string, expireAfterDays int64, r
 		sb.WriteString(" WITH RETENTION LOCK")
 	}
 	if schedule != "" {
-		sb.WriteString(fmt.Sprintf(" SCHEDULE = '%s'", esc(schedule)))
+		sb.WriteString(fmt.Sprintf(" SCHEDULE = '%s'", snowflake.EscapeStringLit(schedule)))
 	}
 	if expireAfterDays > 0 {
 		sb.WriteString(fmt.Sprintf(" EXPIRE_AFTER_DAYS = %d", expireAfterDays))
 	}
 	if comment != "" {
-		sb.WriteString(fmt.Sprintf(" COMMENT = '%s'", esc(comment)))
+		sb.WriteString(fmt.Sprintf(" COMMENT = '%s'", snowflake.EscapeStringLit(comment)))
 	}
 
 	_, err := a.client.Execute(a.ctx, sb.String())
@@ -4844,8 +4810,7 @@ func (a *App) DropBackupPolicy(name string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-	_, err := a.client.Execute(a.ctx, fmt.Sprintf("DROP BACKUP POLICY %s", q(name)))
+	_, err := a.client.Execute(a.ctx, fmt.Sprintf("DROP BACKUP POLICY %s", snowflake.QuoteIdent(name)))
 	return err
 }
 
@@ -4856,8 +4821,7 @@ func (a *App) AlterBackupPolicy(name, alteration string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-	_, err := a.client.Execute(a.ctx, fmt.Sprintf("ALTER BACKUP POLICY %s %s", q(name), alteration))
+	_, err := a.client.Execute(a.ctx, fmt.Sprintf("ALTER BACKUP POLICY %s %s", snowflake.QuoteIdent(name), alteration))
 	return err
 }
 
@@ -4869,9 +4833,7 @@ func (a *App) ListBackups(backupSetName, bsDb, bsSchema string) ([]BackupRow, er
 	if a.client == nil {
 		return nil, ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-
-	fqn := bsFQN(q, backupSetName, bsDb, bsSchema)
+	fqn := bsFQN(backupSetName, bsDb, bsSchema)
 	res, err := a.client.Execute(a.ctx, fmt.Sprintf("SHOW BACKUPS IN BACKUP SET %s", fqn))
 	if err != nil {
 		return nil, err
@@ -4948,8 +4910,7 @@ func (a *App) AddBackup(backupSetName, bsDb, bsSchema string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-	fqn := bsFQN(q, backupSetName, bsDb, bsSchema)
+	fqn := bsFQN(backupSetName, bsDb, bsSchema)
 	_, err := a.client.Execute(a.ctx, fmt.Sprintf("ALTER BACKUP SET %s ADD BACKUP", fqn))
 	return err
 }
@@ -4981,15 +4942,14 @@ func (a *App) RestoreFromBackup(objectType, targetName, backupSetName, bsDb, bsS
 	if backupSetName == "" {
 		return fmt.Errorf("backup set name must not be empty")
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
 	if db != "" {
-		if _, err := a.client.Execute(a.ctx, fmt.Sprintf("USE DATABASE %s", q(db))); err != nil {
+		if _, err := a.client.Execute(a.ctx, fmt.Sprintf("USE DATABASE %s", snowflake.QuoteIdent(db))); err != nil {
 			return err
 		}
 	}
 
 	// Safely construct the fully qualified name (e.g. "DB"."SCHEMA"."BACKUP_SET")
-	fqn := bsFQN(q, backupSetName, bsDb, bsSchema)
+	fqn := bsFQN(backupSetName, bsDb, bsSchema)
 
 	var sb strings.Builder
 	sb.WriteString("CREATE ")
@@ -5015,8 +4975,7 @@ func (a *App) DeleteOldestBackup(backupSetName, bsDb, bsSchema string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
-	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
-	fqn := bsFQN(q, backupSetName, bsDb, bsSchema)
+	fqn := bsFQN(backupSetName, bsDb, bsSchema)
 
 	res, err := a.client.Execute(a.ctx, fmt.Sprintf("SHOW BACKUPS IN BACKUP SET %s", fqn))
 	if err != nil {

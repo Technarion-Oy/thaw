@@ -91,6 +91,17 @@ func QuoteIdent(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
+// EscapeStringLit escapes single-quotes within a SQL string literal value by
+// doubling them. It does not add surrounding single-quote delimiters.
+func EscapeStringLit(s string) string {
+	return strings.ReplaceAll(s, `'`, `''`)
+}
+
+// QuoteStringLit wraps s in single-quotes, doubling any embedded single-quotes.
+func QuoteStringLit(s string) string {
+	return `'` + EscapeStringLit(s) + `'`
+}
+
 // QuoteOrBare returns a double-quoted identifier when caseSensitive is true or
 // when the name requires quoting (invalid bare identifier or reserved keyword);
 // otherwise it returns the name unquoted (Snowflake will uppercase it).
