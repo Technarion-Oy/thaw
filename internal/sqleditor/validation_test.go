@@ -406,6 +406,74 @@ SELECT * FROM GLOBAL_SHIPMENTS;`
 	}
 }
 
+func TestValidateTablesExist_CaseSensitive(t *testing.T) {
+	sql := `USE DATABASE DB; USE SCHEMA SCH;
+SELECT * FROM "MixedCaseTable";
+SELECT * FROM DB.SCH."MixedCaseTable";`
+
+	req := ValidateTablesExistRequest{
+		ResolvedRefs: []ResolvedRef{
+			{DB: "DB", Schema: "SCH", Name: "MixedCaseTable"},
+		},
+		KnownDatabases: []string{"DB"},
+		KnownSchemas:   []SchemaEntry{{DB: "DB", Name: "SCH"}},
+		QuotedIdentifiersIgnoreCase: false,
+	}
+
+	req.SQL = sql
+	req.StmtRanges = GetStatementRanges(sql)
+
+	markers := ValidateTablesExist(req)
+	errs := getErrors(markers)
+	if len(errs) > 0 {
+		t.Errorf("Expected 0 errors for case-sensitive tables, got %d: %+v", len(errs), errs)
+	}
+
+	// Negative test: genuinely missing table still produces an error
+	req2 := req
+	req2.SQL = `SELECT * FROM DB.SCH."NonexistentTable";`
+	req2.StmtRanges = GetStatementRanges(req2.SQL)
+	markers2 := ValidateTablesExist(req2)
+	if len(getErrors(markers2)) == 0 {
+		t.Error("Expected an error for a table that does not exist, got none")
+	}
+
+	// Test QuotedIdentifiersIgnoreCase: true
+	req3 := req
+	req3.SQL = `SELECT * FROM "mixedcasetable";` // lowercase in SQL
+	req3.StmtRanges = GetStatementRanges(req3.SQL)
+	req3.QuotedIdentifiersIgnoreCase = true
+	markers3 := ValidateTablesExist(req3)
+	if len(getErrors(markers3)) > 0 {
+		t.Errorf("Expected 0 errors with QuotedIdentifiersIgnoreCase=true, got %v", getErrors(markers3))
+	}
+}
+
+func TestValidateTablesExist_MissingTables(t *testing.T) {
+	sql := `SELECT
+    *
+FROM "LINEAGE_SOURCE_DB"."RAW_DATA".this_table_does_not_exists;
+
+SELECT
+    *
+FROM "LINEAGE_SOURCE_DB"."RAW_DATA"."this_table_does_not_exists";`
+
+	req := ValidateTablesExistRequest{
+		SQL:            sql,
+		StmtRanges:     GetStatementRanges(sql),
+		// Empty ResolvedRefs simulates the frontend correctly dropping missing tables
+		// once the schema has been fetched.
+		ResolvedRefs:   []ResolvedRef{},
+		KnownDatabases: []string{"LINEAGE_SOURCE_DB"},
+		KnownSchemas:   []SchemaEntry{{DB: "LINEAGE_SOURCE_DB", Name: "RAW_DATA"}},
+	}
+	markers := ValidateTablesExist(req)
+	errs := getErrors(markers)
+	if len(errs) != 2 {
+		t.Errorf("Expected 2 errors for missing tables, got %d: %v", len(errs), errs)
+	}
+}
+
 func TestValidateTablesExist_Invalid(t *testing.T) {
 	tests := []struct {
 		name          string

@@ -154,3 +154,24 @@ func TestNeedsQuoting(t *testing.T) {
 		})
 	}
 }
+
+func TestQuoteIdent(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+	}{
+		{"MY_TABLE", `"MY_TABLE"`},
+		{"MixedCase", `"MixedCase"`},
+		{"table", `"table"`},
+		{`has"quote`, `"has""quote"`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := QuoteIdent(tc.name)
+			if got != tc.want {
+				t.Errorf("QuoteIdent(%q) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}

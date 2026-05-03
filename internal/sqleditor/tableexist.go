@@ -647,8 +647,9 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 
 		for _, ft := range fromTables {
 			ftTable := ft.name
-			compareTable := strings.ToUpper(ftTable)
-			if (compareTable == "TABLE" || joinStopKW[compareTable]) && ft.db == "" && ft.schema == "" {
+			compareTable := ftTable
+			upperCompare := strings.ToUpper(compareTable)
+			if (upperCompare == "TABLE" || joinStopKW[upperCompare]) && ft.db == "" && ft.schema == "" {
 				continue
 			}
 			if _, isCTE := cteNames[compareTable]; isCTE {
