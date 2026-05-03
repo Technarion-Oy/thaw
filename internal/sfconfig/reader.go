@@ -10,6 +10,8 @@
 
 // Package sfconfig reads connection profiles from the Snowflake CLI
 // configuration file (~/.snowflake/config.toml).
+//
+// thaw:domain: Core IPC & App Lifecycle
 package sfconfig
 
 import (

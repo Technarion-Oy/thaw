@@ -7,6 +7,8 @@
 //
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
+//
+// @thaw-domain: Git Integration
 
 import { create } from "zustand";
 import { GitStatus, GitCommitAndPush, GitPull, GitFetch, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCheckoutRemoteBranch, GitCreateBranch, GitDeleteBranch, GitDeleteRemoteBranch, GitMergeBranch, GitResetHard, GitUpdateRemoteURL, GitPushBranch, GitLoginWithOAuth } from "../../wailsjs/go/main/App";

@@ -14,6 +14,8 @@
 //
 // No personally identifiable information, SQL query content, credentials, or
 // account-specific identifiers are ever included in crash reports.
+//
+// thaw:domain: Core IPC & App Lifecycle
 package crashreport
 
 import (

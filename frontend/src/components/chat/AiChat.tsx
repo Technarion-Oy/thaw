@@ -7,6 +7,8 @@
 //
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
+//
+// @thaw-domain: AI Tooling
 
 import { useEffect, useRef, useState } from "react";
 import { ai } from "../../../wailsjs/go/models";

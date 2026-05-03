@@ -13,6 +13,8 @@
 // It wraps the GET_QUERY_OPERATOR_STATS table function and returns typed
 // [OperatorStat] rows so callers never have to deal with raw column indices or
 // JSON string parsing. It also provides tools to parse EXPLAIN USING JSON outputs.
+//
+// thaw:domain: SQL Editor & Diagnostics
 package queryprofile
 
 import (

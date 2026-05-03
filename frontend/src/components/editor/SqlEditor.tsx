@@ -7,6 +7,8 @@
 //
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
+//
+// @thaw-domain: SQL Editor & Diagnostics
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Button } from "antd";

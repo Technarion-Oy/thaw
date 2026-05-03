@@ -7,6 +7,8 @@
 //
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
+//
+// @thaw-domain: Snowpark & Developer Workflows
 
 import { create } from "zustand";
 import { GetNotebookPrefs } from "../../wailsjs/go/main/App";

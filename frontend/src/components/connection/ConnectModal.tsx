@@ -7,6 +7,8 @@
 //
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
+//
+// @thaw-domain: Core IPC & App Lifecycle
 
 import { useState, useEffect } from "react";
 import { Form, Input, Button, Alert, Space, Typography, Select, Divider, Tooltip, Modal } from "antd";

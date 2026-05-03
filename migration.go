@@ -8,6 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
+// thaw:file-domain: Schema Migration
 package main
 
 import (

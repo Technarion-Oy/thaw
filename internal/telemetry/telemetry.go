@@ -14,6 +14,8 @@
 //
 // Events are currently written to the application log only. When an analytics
 // backend is chosen, wire it in the sendRemote placeholder below.
+//
+// thaw:domain: Core IPC & App Lifecycle
 package telemetry
 
 import (

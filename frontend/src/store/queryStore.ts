@@ -7,6 +7,8 @@
 //
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
+//
+// @thaw-domain: SQL Editor & Diagnostics
 
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";

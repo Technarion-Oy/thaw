@@ -11,6 +11,8 @@
 // Package dbt provides scaffolding for new dbt projects wired to a live
 // Snowflake connection.  It is a pure generation package — all Snowflake
 // queries are performed by the caller before invoking Generate.
+//
+// thaw:domain: Snowpark & Developer Workflows
 package dbt
 
 import (
