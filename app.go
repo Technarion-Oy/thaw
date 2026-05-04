@@ -2690,6 +2690,37 @@ type PropertyPair struct {
 	Value string `json:"value"`
 }
 
+func (a *App) resToPairs(res *snowflake.QueryResult) []PropertyPair {
+	if res == nil || len(res.Rows) == 0 {
+		return []PropertyPair{}
+	}
+
+	toString := func(v interface{}) string {
+		if v == nil {
+			return ""
+		}
+		switch t := v.(type) {
+		case []byte:
+			return string(t)
+		case string:
+			return t
+		default:
+			return fmt.Sprintf("%v", t)
+		}
+	}
+
+	var pairs []PropertyPair
+	row := res.Rows[0]
+	for i, col := range res.Columns {
+		val := ""
+		if i < len(row) {
+			val = toString(row[i])
+		}
+		pairs = append(pairs, PropertyPair{Key: col, Value: val})
+	}
+	return pairs
+}
+
 // GetObjectProperties returns structured metadata for any Snowflake object by
 // running the appropriate SHOW or DESCRIBE command and returning the result as
 // key/value pairs. kind is one of: TABLE, VIEW, FUNCTION, PROCEDURE, SEQUENCE,
@@ -2720,6 +2751,30 @@ func (a *App) GetObjectProperties(database, schema, kind, name string) ([]Proper
 		query = fmt.Sprintf("SHOW SEQUENCES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
 	case "STAGE":
 		query = fmt.Sprintf("SHOW STAGES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
+		// We'll also append DESCRIBE STAGE results if it's a single stage.
+		// However, SHOW STAGES LIKE ... might return multiple if the name is not exact.
+		// If it's a single exact name, we can DESCRIBE it.
+		descQuery := fmt.Sprintf("DESCRIBE STAGE %s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
+		
+		res, err := a.client.Execute(a.ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		pairs := a.resToPairs(res)
+		
+		// Append DESCRIBE results
+		descRes, err := a.client.Execute(a.ctx, descQuery)
+		if err == nil {
+			for _, row := range descRes.Rows {
+				if len(row) >= 4 {
+					key := fmt.Sprintf("%v", row[1]) // property
+					val := fmt.Sprintf("%v", row[3]) // property_value
+					pairs = append(pairs, PropertyPair{Key: key, Value: val})
+				}
+			}
+		}
+		return pairs, nil
+
 	case "STREAM":
 		query = fmt.Sprintf("SHOW STREAMS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
 	case "TASK":
@@ -2779,15 +2834,7 @@ func (a *App) GetObjectProperties(database, schema, kind, name string) ([]Proper
 			}
 		}
 	} else {
-		// SHOW commands: first matching row; each column name is the property key.
-		row := res.Rows[0]
-		for i, col := range res.Columns {
-			val := ""
-			if i < len(row) {
-				val = toString(row[i])
-			}
-			pairs = append(pairs, PropertyPair{Key: col, Value: val})
-		}
+		pairs = a.resToPairs(res)
 	}
 	return pairs, nil
 }
@@ -3220,11 +3267,6 @@ func (a *App) ImportTableData(params snowflake.ImportTableParams) (snowflake.Imp
 	return a.client.ImportTableData(a.ctx, params)
 }
 
-// AlterTask runs an ALTER TASK IF EXISTS statement on the given task.
-// clause is everything that follows the task name in the ALTER statement,
-// for example "RESUME", "SUSPEND", "SET COMMENT = 'hello'", or
-// "MODIFY AS SELECT 1". The caller is responsible for correct SQL quoting
-// inside the clause; this method only double-quotes the task identifier.
 // ExecDDL executes an arbitrary DDL/DML statement and discards the result set.
 // It is intended for one-shot statements (CREATE, ALTER, DROP, etc.) where the
 // caller needs to know whether the statement succeeded without routing the SQL
@@ -3237,11 +3279,27 @@ func (a *App) ExecDDL(sql string) error {
 	return err
 }
 
+// AlterTask runs an ALTER TASK IF EXISTS statement on the given task.
+// clause is everything that follows the task name in the ALTER statement,
+// for example "RESUME", "SUSPEND", "SET COMMENT = 'hello'", or
+// "MODIFY AS SELECT 1". The caller is responsible for correct SQL quoting
+// inside the clause; this method only double-quotes the task identifier.
 func (a *App) AlterTask(database, schema, name, clause string) error {
 	if a.client == nil {
 		return ErrNotConnected
 	}
 	sql := fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s %s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
+	_, err := a.client.Execute(a.ctx, sql)
+	return err
+}
+
+// AlterStage runs an ALTER STAGE IF EXISTS statement on the given stage.
+// clause is everything that follows the stage name in the ALTER statement.
+func (a *App) AlterStage(database, schema, name, clause string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+	sql := fmt.Sprintf("ALTER STAGE IF EXISTS %s.%s.%s %s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
 	_, err := a.client.Execute(a.ctx, sql)
 	return err
 }
