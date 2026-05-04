@@ -195,13 +195,27 @@ var sqlAllKeywords = map[string]bool{
 	"SUM": true, "COUNT": true, "AVG": true, "MIN": true, "MAX": true, "MEDIAN": true, "VARIANCE": true, "STDDEV": true,
 	// Date/time functions
 	"DATE_TRUNC": true, "DATEADD": true, "DATEDIFF": true, "DATE_PART": true, "CURRENT_DATE": true, "CURRENT_TIMESTAMP": true,
-	"TO_DATE": true, "TO_VARCHAR": true, "TO_NUMBER": true, "TO_TIMESTAMP": true, "TO_JSON": true, "TO_VARIANT": true,
+	"TO_DATE": true, "TO_VARCHAR": true, "TO_NUMBER": true, "TO_TIMESTAMP": true, "TO_TIMESTAMP_NTZ": true, "TO_TIMESTAMP_LTZ": true, "TO_TIMESTAMP_TZ": true,
+	"TO_JSON": true, "TO_VARIANT": true,
 	// Conditional / conversion functions
 	"IFF": true, "IFNULL": true, "NVL": true, "COALESCE": true, "DECODE": true, "ZEROIFNULL": true, "NULLIF": true,
 	// Semi-structured / array functions
 	"LISTAGG": true, "ARRAY_AGG": true, "OBJECT_AGG": true, "GET": true, "FLATTEN": true, "LATERAL": true,
 	// Snowflake generator functions / keywords
 	"SEQ4": true, "SEQ8": true, "RANDOM": true, "UNIFORM": true, "RANDSTR": true, "GENERATOR": true, "ROWCOUNT": true,
+	// Snowflake Scripting & missing keywords
+	"BEGIN": true, "DECLARE": true, "LET": true, "VAR": true, "RETURN": true, "RETURNS": true, "EXCEPTION": true, "RAISE": true,
+	"LOOP": true, "WHILE": true, "REPEAT": true, "UNTIL": true, "IF": true,
+	"EXIT": true, "CONTINUE": true, "OPEN": true, "CLOSE": true, "CALL": true, "EXECUTE": true, "IMMEDIATE": true,
+	"LANGUAGE": true, "SQL": true, "PYTHON": true, "JAVASCRIPT": true, "SCALA": true, "JAVA": true, "SECURE": true, "VOLATILE": true,
+	"IMMUTABLE": true, "STABLE": true, "INTERNAL": true, "EXTERNAL": true, "STAGE": true, "FILE": true, "FORMAT": true,
+	"STORAGE": true, "INTEGRATION": true, "SECRET": true, "GIT": true, "REPOSITORY": true, "NOTEBOOK": true,
+	// Data types
+	"INT": true, "INTEGER": true, "BIGINT": true, "SMALLINT": true, "TINYINT": true, "BYTEINT": true,
+	"NUMBER": true, "DECIMAL": true, "NUMERIC": true, "DOUBLE": true, "FLOAT": true, "REAL": true,
+	"VARCHAR": true, "STRING": true, "TEXT": true, "CHAR": true, "CHARACTER": true, "BINARY": true, "VARBINARY": true,
+	"BOOLEAN": true, "DATE": true, "DATETIME": true, "TIME": true, "TIMESTAMP": true, "TIMESTAMP_NTZ": true, "TIMESTAMP_LTZ": true, "TIMESTAMP_TZ": true,
+	"VARIANT": true, "OBJECT": true, "ARRAY": true, "GEOGRAPHY": true, "GEOMETRY": true,
 }
 
 func isWordChar(c rune) bool {
@@ -2576,6 +2590,29 @@ func ValidateSemantics(sql string, resolvedRefs []ResolvedRef, colEntries []ColE
 			colInfoCache: make(map[string][]ColInfo),
 			activeKeys:   make([]string, 0),
 		}
+
+		// NEW: Add the object being created to the aliasMap so it's not flagged as a missing column.
+		if m := reCreateTVMatch.FindStringSubmatch(raw); m != nil {
+			if parts := extractIdentParts(m[1], true); len(parts) > 0 {
+				objNameU := strings.ToUpper(parts[len(parts)-1])
+				ctx.aliasMap[objNameU] = "__object__"
+			}
+		} else if m := reCreateDbSchMatch.FindStringSubmatch(raw); m != nil {
+			if parts := extractIdentParts(m[1], true); len(parts) > 0 {
+				objNameU := strings.ToUpper(parts[len(parts)-1])
+				ctx.aliasMap[objNameU] = "__object__"
+			}
+		}
+
+		// NEW: Pre-scan for column aliases (AS alias) and add them to the aliasMap.
+		// This prevents false positives on alias names within the same statement.
+		for _, m := range reAsAliasSel.FindAllStringSubmatch(stripped, -1) {
+			aliasU := strings.ToUpper(normIdent(m[1], true))
+			if !sqlAllKeywords[aliasU] {
+				ctx.aliasMap[aliasU] = "__alias__"
+			}
+		}
+
 		// Inherit global state
 		for k, v := range globalAliasMap {
 			ctx.aliasMap[k] = v
