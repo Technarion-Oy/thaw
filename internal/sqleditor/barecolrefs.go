@@ -37,14 +37,14 @@ var (
 	reAsAliasSel = regexp.MustCompile(`(?i)\bAS\s+([a-zA-Z0-9_$]+|"[^"]+")`)
 	// FROM/JOIN without trailing \b – handles quoted identifiers like "DB"."SCH"."TABLE"
 	// (reFromJoinFallback in tableexist.go has \b which fails after closing '"')
-	reFromJoinSel = regexp.MustCompile(`(?i)(?:FROM|JOIN|CROSS\s+JOIN)\s+(` + _ident + `(?:\.` + _ident + `){0,2})`)
+	reFromJoinSel = regexp.MustCompile(`(?i)(?:FROM|JOIN|CROSS\s+JOIN|INSERT\s+INTO|UPDATE|TRUNCATE\s+TABLE|DELETE\s+FROM|MERGE\s+INTO|DESCRIBE\s+TABLE|DESC\s+TABLE|DESCRIBE\s+VIEW|DESC\s+VIEW)\s+(` + _ident + `(?:\.` + _ident + `){0,2})`)
 
 	// reFromJoinWithAlias captures (tablePath, optional_alias) from FROM/JOIN.
 	// The optional alias may be preceded by AS or appear bare (e.g. FROM t AS a
 	// or FROM t a).  SQL stop-words that look like aliases (ON, WHERE, …) are
 	// filtered out in Go code using joinStopKW.
 	reFromJoinWithAlias = regexp.MustCompile(
-		`(?i)(?:FROM|JOIN|CROSS\s+JOIN)\s+(` + _ident + `(?:\.` + _ident + `){0,2})` +
+		`(?i)(?:FROM|JOIN|CROSS\s+JOIN|INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO)\s+(` + _ident + `(?:\.` + _ident + `){0,2})` +
 			`(?:\s+(?:AS\s+)?(` + _ident + `))?`)
 
 	// CREATE TABLE (for pre-scan): capture name + column block.
@@ -725,6 +725,21 @@ func validateSelectCols(
 
 	// Scan for unknown bare (unqualified) column refs.
 	missing := scanSelectClauseForUnknownCols(selectClause, knownCols)
+
+	// NEW: Skip the name of the object being created (e.g. the view name)
+	// to prevent false positives when a view has the same name as a column.
+	if m := reCreateTVMatch.FindStringSubmatch(raw); m != nil {
+		if parts := extractIdentParts(m[1], ic); len(parts) > 0 {
+			objNameU := strings.ToUpper(parts[len(parts)-1])
+			filtered := make([]string, 0, len(missing))
+			for _, m := range missing {
+				if m != objNameU {
+					filtered = append(filtered, m)
+				}
+			}
+			missing = filtered
+		}
+	}
 
 	// Also validate qualified column refs (alias.column) for aliases whose
 	// tables are in the column cache.  Build alias → per-table column set.
