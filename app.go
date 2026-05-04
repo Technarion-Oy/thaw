@@ -2767,8 +2767,13 @@ func (a *App) GetObjectProperties(database, schema, kind, name string) ([]Proper
 		if err == nil {
 			for _, row := range descRes.Rows {
 				if len(row) >= 4 {
-					key := fmt.Sprintf("%v", row[1]) // property
-					val := fmt.Sprintf("%v", row[3]) // property_value
+					parent := fmt.Sprintf("%v", row[0]) // parent_property
+					prop := fmt.Sprintf("%v", row[1])   // property
+					val := fmt.Sprintf("%v", row[3])    // property_value
+					key := prop
+					if parent != "" && parent != "STAGE_PROPERTIES" && parent != "null" {
+						key = parent + "." + prop
+					}
 					pairs = append(pairs, PropertyPair{Key: key, Value: val})
 				}
 			}

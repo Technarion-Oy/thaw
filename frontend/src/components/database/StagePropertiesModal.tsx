@@ -157,6 +157,21 @@ function EditRow({ label, value, type, options, hint, canUnset, onSave, onUnset 
   );
 }
 
+// ─── ReadOnlyRow component ────────────────────────────────────────────────────
+
+function ReadOnlyRow({ label, value }: { label: string; value: string }) {
+  return (
+    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+      <td style={LABEL_TD}>{label}</td>
+      <td style={{ padding: "6px 0", verticalAlign: "middle" }}>
+        <span style={{ fontFamily: "monospace", fontSize: 12, color: value ? "var(--text)" : "var(--text-faint)", fontStyle: value ? "normal" : "italic", wordBreak: "break-all" }}>
+          {value || "—"}
+        </span>
+      </td>
+    </tr>
+  );
+}
+
 // ─── TagsRow component ────────────────────────────────────────────────────────
 
 function TagsRow({ db, schema, name, onAlter }: { db: string, schema: string, name: string, onAlter: (c: string) => Promise<void> }) {
@@ -281,6 +296,15 @@ export default function StagePropertiesModal({ db, schema, name: initialName, on
 
   const isExternal = get("is_external") === "true" || get("type") === "External Stage";
 
+  const HANDLED_KEYS = new Set([
+    "NAME", "DATABASE_NAME", "SCHEMA_NAME", "COMMENT",
+    "URL", "STORAGE_INTEGRATION", "DIRECTORY_ENABLED",
+    "OWNER", "CREATED_ON", "FORMAT_NAME", "FILE_FORMAT",
+    "HAS_ENCRYPTION_KEY", "ENCRYPTION_TYPE", "KMS_KEY_ID", "USE_PRIVATELINK_ENDPOINT",
+  ]);
+
+  const readOnlyPairs = (rows || []).filter(r => !HANDLED_KEYS.has(r.key.toUpperCase()) && r.value && r.value !== "null");
+
   return (
     <Modal
       open
@@ -310,6 +334,20 @@ export default function StagePropertiesModal({ db, schema, name: initialName, on
 
       {rows !== null && (
         <>
+          {/* ── Read-only info ────────────────────────────────────────────── */}
+          <div style={{ display: "flex", gap: 24, marginBottom: 4 }}>
+            {get("created_on") && (
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                Created: {get("created_on")}
+              </Text>
+            )}
+            {get("owner") && (
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                Owner: {get("owner")}
+              </Text>
+            )}
+          </div>
+
           {/* Section A: General Settings */}
           <div style={SECTION_HEAD}>General Settings</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -412,6 +450,19 @@ export default function StagePropertiesModal({ db, schema, name: initialName, on
               </tr>
             </tbody>
           </table>
+
+          {readOnlyPairs.length > 0 && (
+            <>
+              <div style={SECTION_HEAD}>Additional Properties (Read-Only)</div>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <tbody>
+                  {readOnlyPairs.map((r, i) => (
+                    <ReadOnlyRow key={i} label={r.key} value={r.value} />
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
         </>
       )}
     </Modal>
