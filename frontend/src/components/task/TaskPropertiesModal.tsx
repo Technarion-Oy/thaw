@@ -15,7 +15,7 @@ import {
 } from "antd";
 import {
   ClockCircleOutlined, EditOutlined, CheckOutlined, CloseOutlined,
-  PlayCircleOutlined, PauseCircleOutlined, PlusOutlined, DeleteOutlined, FlagOutlined,
+  PlayCircleOutlined, PauseCircleOutlined, PlusOutlined, DeleteOutlined, FlagOutlined, SearchOutlined,
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterTask, ListNotificationIntegrations, ListFinalizableTasks, TaskHasChildren, GetTaskStatuses, SuspendTaskList, ResumeTaskList } from "../../../wailsjs/go/main/App";
 import CreateTaskModal from "./CreateTaskModal";
@@ -94,11 +94,12 @@ interface RowProps {
   min?:      number;
   hint?:     string;
   canUnset?: boolean;
+  search?:   string;
   onSave:    (val: string) => Promise<void>;
   onUnset?:  () => Promise<void>;
 }
 
-function EditRow({ label, value, type, options, min, hint, canUnset, onSave, onUnset }: RowProps) {
+function EditRow({ label, value, type, options, min, hint, canUnset, search, onSave, onUnset }: RowProps) {
   const [editing,   setEditing]   = useState(false);
   const [editVal,   setEditVal]   = useState(value);
   const [saving,    setSaving]    = useState(false);
@@ -125,6 +126,13 @@ function EditRow({ label, value, type, options, min, hint, canUnset, onSave, onU
     catch (e) { message.error(String(e)); }
     finally { setUnsetting(false); }
   };
+
+  const showSection = (labels: string[]) => {
+    if (!search) return true;
+    return labels.some(l => l.toLowerCase().includes(search.toLowerCase()));
+  };
+
+  if (!showSection([label])) return null;
 
   return (
     <tr style={{ borderBottom: "1px solid var(--border)" }}>
@@ -195,11 +203,14 @@ interface PredecessorsProps {
   onAdd:     (name: string) => Promise<void>;
   onRemove:  (name: string) => Promise<void>;
   disabled?: boolean;
+  search?:   string;
 }
 
-function PredecessorsList({ predecessors, onAdd, onRemove, disabled = false }: PredecessorsProps) {
+function PredecessorsList({ predecessors, onAdd, onRemove, disabled = false, search }: PredecessorsProps) {
   const [addVal, setAddVal] = useState("");
   const [adding, setAdding] = useState(false);
+
+  if (search && !"predecessors after".includes(search.toLowerCase())) return null;
 
   const doAdd = async () => {
     const v = addVal.trim();
@@ -340,11 +351,12 @@ interface FinalizeRowProps {
   value:                  string;
   options:                { label: React.ReactNode; value: string; disabled?: boolean }[];
   currentTaskHasChildren: boolean;
+  search?:                string;
   onSave:                 (val: string) => Promise<void>;
   onUnset:                () => Promise<void>;
 }
 
-function FinalizeTaskRow({ value, options, currentTaskHasChildren, onSave, onUnset }: FinalizeRowProps) {
+function FinalizeTaskRow({ value, options, currentTaskHasChildren, search, onSave, onUnset }: FinalizeRowProps) {
   const [editing,   setEditing]   = useState(false);
   const [editVal,   setEditVal]   = useState(value);
   const [saving,    setSaving]    = useState(false);
@@ -370,6 +382,13 @@ function FinalizeTaskRow({ value, options, currentTaskHasChildren, onSave, onUns
     catch (e) { message.error(String(e)); }
     finally { setUnsetting(false); }
   };
+
+  const showSection = (labels: string[]) => {
+    if (!search) return true;
+    return labels.some(l => l.toLowerCase().includes(search.toLowerCase()));
+  };
+
+  if (!showSection(["Finalizes root task"])) return null;
 
   return (
     <tr style={{ borderBottom: "1px solid var(--border)" }}>
@@ -470,6 +489,7 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
   const [setFinalizerFor,     setSetFinalizerFor]     = useState("");
   const [settingFinalizer,    setSettingFinalizer]    = useState(false);
   const [setFinalizerError,   setSetFinalizerError]   = useState<string | null>(null);
+  const [search,              setSearch]              = useState("");
 
   const loadTaskStatuses = useCallback(() => {
     GetTaskStatuses(db, schema)
@@ -760,6 +780,16 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
 
       {rows !== null && (
         <>
+          <div style={{ marginBottom: 16 }}>
+            <Input
+              prefix={<SearchOutlined style={{ color: "var(--text-faint)" }} />}
+              placeholder="Search properties by name…"
+              allowClear
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
           {/* ── Owner line ───────────────────────────────────────────────── */}
           {get("owner") && (
             <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 6 }}>
@@ -844,7 +874,7 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
           <div style={SECTION_HEAD}>Compute</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
-              <EditRow label="Warehouse" value={get("warehouse")} type="text"
+              <EditRow search={search} label="Warehouse" value={get("warehouse")} type="text"
                 hint="Leave blank to use serverless compute" canUnset
                 onSave={async (v) => {
                   const t = v.trim();
@@ -854,25 +884,25 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
                 }}
                 onUnset={async () => { await alter("UNSET WAREHOUSE"); await load(); }}
               />
-              <EditRow label="Initial WH Size (serverless)" type="select"
+              <EditRow search={search} label="Initial WH Size (serverless)" type="select"
                 value={get("user_task_managed_initial_warehouse_size")}
                 options={SIZE_OPTIONS} canUnset
                 onSave={setEnum("USER_TASK_MANAGED_INITIAL_WAREHOUSE_SIZE")}
                 onUnset={async () => { await alter("UNSET USER_TASK_MANAGED_INITIAL_WAREHOUSE_SIZE"); await load(); }}
               />
-              <EditRow label="Min Statement Size" type="select"
+              <EditRow search={search} label="Min Statement Size" type="select"
                 value={get("serverless_task_min_statement_size") || get("serverless_task_min_warehouse_size")}
                 options={SIZE_OPTIONS} canUnset
                 onSave={setEnum("SERVERLESS_TASK_MIN_STATEMENT_SIZE")}
                 onUnset={async () => { await alter("UNSET SERVERLESS_TASK_MIN_STATEMENT_SIZE"); await load(); }}
               />
-              <EditRow label="Max Statement Size" type="select"
+              <EditRow search={search} label="Max Statement Size" type="select"
                 value={get("serverless_task_max_statement_size") || get("serverless_task_max_warehouse_size")}
                 options={SIZE_OPTIONS} canUnset
                 onSave={setEnum("SERVERLESS_TASK_MAX_STATEMENT_SIZE")}
                 onUnset={async () => { await alter("UNSET SERVERLESS_TASK_MAX_STATEMENT_SIZE"); await load(); }}
               />
-              <EditRow label="Min Trigger Interval (s)" type="number" min={0}
+              <EditRow search={search} label="Min Trigger Interval (s)" type="number" min={0}
                 value={get("user_task_minimum_trigger_interval_in_seconds")}
                 hint="USER_TASK_MINIMUM_TRIGGER_INTERVAL_IN_SECONDS"
                 onSave={setNum("USER_TASK_MINIMUM_TRIGGER_INTERVAL_IN_SECONDS")} />
@@ -952,10 +982,10 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
                   )}
                 </td>
               </tr>
-              <EditRow label="Overlap Policy" value={overlapValue}
+              <EditRow search={search} label="Overlap Policy" value={overlapValue}
                 type="select" options={OVERLAP_OPTIONS}
                 onSave={setEnum("OVERLAP_POLICY")} />
-              <EditRow label="Target Completion Interval" type="text"
+              <EditRow search={search} label="Target Completion Interval" type="text"
                 value={get("target_completion_interval")}
                 hint="e.g. '1 HOURS'" canUnset
                 onSave={setText("TARGET_COMPLETION_INTERVAL")}
@@ -968,15 +998,13 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
           <div style={SECTION_HEAD}>Dependencies</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
-              <PredecessorsList
-                predecessors={predecessors}
+              <PredecessorsList search={search}                 predecessors={predecessors}
                 onAdd={addAfter}
                 onRemove={removeAfter}
                 disabled={rootHasFinalizer}
               />
               {isThisTaskAFinalizer && (
-                <FinalizeTaskRow
-                  value={finalizeValue}
+                <FinalizeTaskRow search={search}                   value={finalizeValue}
                   options={rootTasks}
                   currentTaskHasChildren={hasChildren}
                   onSave={async (v) => {
@@ -1165,7 +1193,7 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
           <div style={SECTION_HEAD}>Configuration</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
-              <EditRow label="Config (JSON)" value={get("config")} type="textarea" canUnset
+              <EditRow search={search} label="Config (JSON)" value={get("config")} type="textarea" canUnset
                 hint="Valid JSON — merged with the task's default config at runtime"
                 onSave={async (v) => {
                   const t = v.trim();
@@ -1176,7 +1204,7 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
                 }}
                 onUnset={async () => { await alter("UNSET CONFIG"); await load(); }}
               />
-              <EditRow label="Execute as User" type="text"
+              <EditRow search={search} label="Execute as User" type="text"
                 value={get("execute_as") || get("execute_as_user")} canUnset
                 hint="User name to execute the task as"
                 onSave={async (v) => {
@@ -1194,15 +1222,15 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
           <div style={SECTION_HEAD}>Limits</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
-              <EditRow label="Timeout (ms)" type="number" min={0}
+              <EditRow search={search} label="Timeout (ms)" type="number" min={0}
                 value={get("user_task_timeout_ms")}
                 hint="USER_TASK_TIMEOUT_MS — 0 means no timeout"
                 onSave={setNum("USER_TASK_TIMEOUT_MS")} />
-              <EditRow label="Suspend After N Failures" type="number" min={0}
+              <EditRow search={search} label="Suspend After N Failures" type="number" min={0}
                 value={get("suspend_task_after_num_failures")}
                 hint="0 = never suspend"
                 onSave={setNum("SUSPEND_TASK_AFTER_NUM_FAILURES")} />
-              <EditRow label="Auto-Retry Attempts" type="number" min={0}
+              <EditRow search={search} label="Auto-Retry Attempts" type="number" min={0}
                 value={get("task_auto_retry_attempts")}
                 onSave={setNum("TASK_AUTO_RETRY_ATTEMPTS")} />
             </tbody>
@@ -1212,19 +1240,19 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
           <div style={SECTION_HEAD}>Notifications</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
-              <EditRow label="Error Integration" type="select" canUnset
+              <EditRow search={search} label="Error Integration" type="select" canUnset
                 value={get("error_integration")}
                 options={integrations}
                 onSave={setText("ERROR_INTEGRATION")}
                 onUnset={async () => { await alter("UNSET ERROR_INTEGRATION"); await load(); }}
               />
-              <EditRow label="Success Integration" type="select" canUnset
+              <EditRow search={search} label="Success Integration" type="select" canUnset
                 value={get("success_integration")}
                 options={integrations}
                 onSave={setText("SUCCESS_INTEGRATION")}
                 onUnset={async () => { await alter("UNSET SUCCESS_INTEGRATION"); await load(); }}
               />
-              <EditRow label="Log Level" type="select" value={get("log_level")}
+              <EditRow search={search} label="Log Level" type="select" value={get("log_level")}
                 options={LOG_LEVEL_OPTIONS} canUnset
                 onSave={setText("LOG_LEVEL")}
                 onUnset={async () => { await alter("UNSET LOG_LEVEL"); await load(); }}
@@ -1236,7 +1264,7 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
           <div style={SECTION_HEAD}>General</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
-              <EditRow label="Comment" type="text" canUnset value={get("comment")}
+              <EditRow search={search} label="Comment" type="text" canUnset value={get("comment")}
                 onSave={setText("COMMENT")}
                 onUnset={async () => { await alter("UNSET COMMENT"); await load(); }}
               />

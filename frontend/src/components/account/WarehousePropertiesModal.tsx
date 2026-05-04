@@ -14,7 +14,7 @@ import {
 } from "antd";
 import {
   CopyOutlined, EditOutlined, CheckOutlined, CloseOutlined,
-  PauseCircleOutlined, PlayCircleOutlined, StopOutlined, FontSizeOutlined,
+  PauseCircleOutlined, PlayCircleOutlined, StopOutlined, FontSizeOutlined, SearchOutlined,
 } from "@ant-design/icons";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import {
@@ -82,10 +82,11 @@ interface RowProps {
   saving?:   boolean;
   disabled?: boolean;
   hint?:     string;
+  search?:   string;
   onSave:    (val: string) => Promise<void>;
 }
 
-function EditRow({ label, value, type, options, min, max, saving: externalSaving, disabled, hint, onSave }: RowProps) {
+function EditRow({ label, value, type, options, min, max, saving: externalSaving, disabled, hint, search, onSave }: RowProps) {
   const [editing,   setEditing]   = useState(false);
   const [editVal,   setEditVal]   = useState(value);
   const [saving,    setSaving]    = useState(false);
@@ -110,6 +111,13 @@ function EditRow({ label, value, type, options, min, max, saving: externalSaving
       setSaving(false);
     }
   };
+
+  const showSection = (labels: string[]) => {
+    if (!search) return true;
+    return labels.some(l => l.toLowerCase().includes(search.toLowerCase()));
+  };
+
+  if (!showSection([label])) return null;
 
   if (type === "boolean") {
     return (
@@ -238,6 +246,7 @@ export default function WarehousePropertiesModal({ name: initialName, onClose, o
   const [rows,       setRows]       = useState<main.PropertyPair[] | null>(null);
   const [params,     setParams]     = useState<main.PropertyPair[] | null>(null);
   const [loadError,  setLoadError]  = useState<string | null>(null);
+  const [search,     setSearch]     = useState("");
 
   // Rename state
   const [renaming,     setRenaming]     = useState(false);
@@ -396,6 +405,16 @@ export default function WarehousePropertiesModal({ name: initialName, onClose, o
 
       {rows && (
         <>
+          <div style={{ marginBottom: 16 }}>
+            <Input
+              prefix={<SearchOutlined style={{ color: "var(--text-faint)" }} />}
+              placeholder="Search properties by name…"
+              allowClear
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
           {/* ── Status + actions ──────────────────────────────────────────── */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
             <Tag color={stateColor()} style={{ fontWeight: 600, fontSize: 12 }}>{state || "—"}</Tag>
@@ -454,15 +473,13 @@ export default function WarehousePropertiesModal({ name: initialName, onClose, o
           <div style={SECTION_HEAD}>Compute</div>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <tbody>
-              <EditRow
-                label="Warehouse Size"
+              <EditRow search={search} label="Warehouse Size"
                 value={sizeToKey(get("size"))}
                 type="select"
                 options={SIZE_OPTIONS}
                 onSave={async (v) => setProp("size", v, "Warehouse Size")}
               />
-              <EditRow
-                label="Warehouse Type"
+              <EditRow search={search} label="Warehouse Type"
                 value={get("type").toUpperCase()}
                 type="select"
                 options={TYPE_OPTIONS}
@@ -470,22 +487,19 @@ export default function WarehousePropertiesModal({ name: initialName, onClose, o
               />
               {isMultiCluster && (
                 <>
-                  <EditRow
-                    label="Max Cluster Count"
+                  <EditRow search={search} label="Max Cluster Count"
                     value={get("max_cluster_count")}
                     type="number"
                     min={1} max={10}
                     onSave={async (v) => setProp("maxClusterCount", v, "Max Cluster Count")}
                   />
-                  <EditRow
-                    label="Min Cluster Count"
+                  <EditRow search={search} label="Min Cluster Count"
                     value={get("min_cluster_count")}
                     type="number"
                     min={1} max={10}
                     onSave={async (v) => setProp("minClusterCount", v, "Min Cluster Count")}
                   />
-                  <EditRow
-                    label="Scaling Policy"
+                  <EditRow search={search} label="Scaling Policy"
                     value={get("scaling_policy")}
                     type="select"
                     options={SCALING_OPTIONS}
@@ -500,8 +514,7 @@ export default function WarehousePropertiesModal({ name: initialName, onClose, o
           <div style={SECTION_HEAD}>Behavior</div>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <tbody>
-              <EditRow
-                label="Auto Suspend (s)"
+              <EditRow search={search} label="Auto Suspend (s)"
                 value={autoSuspendVal}
                 type="number"
                 min={0}
@@ -514,8 +527,7 @@ export default function WarehousePropertiesModal({ name: initialName, onClose, o
                   {autoSuspendDisplay}
                 </td>
               </tr>
-              <EditRow
-                label="Auto Resume"
+              <EditRow search={search} label="Auto Resume"
                 value={get("auto_resume")}
                 type="boolean"
                 onSave={async (v) => setProp("autoResume", v, "Auto Resume")}
@@ -527,14 +539,12 @@ export default function WarehousePropertiesModal({ name: initialName, onClose, o
           <div style={SECTION_HEAD}>Query Acceleration</div>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <tbody>
-              <EditRow
-                label="Enable"
+              <EditRow search={search} label="Enable"
                 value={get("enable_query_acceleration")}
                 type="boolean"
                 onSave={async (v) => setProp("enableQueryAcceleration", v, "Query Acceleration")}
               />
-              <EditRow
-                label="Max Scale Factor"
+              <EditRow search={search} label="Max Scale Factor"
                 value={get("query_acceleration_max_scale_factor")}
                 type="number"
                 min={0} max={100}
@@ -548,31 +558,27 @@ export default function WarehousePropertiesModal({ name: initialName, onClose, o
           <div style={SECTION_HEAD}>Resource & Timeouts</div>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <tbody>
-              <EditRow
-                label="Resource Monitor"
+              <EditRow search={search} label="Resource Monitor"
                 value={get("resource_monitor")}
                 type="text"
                 hint="Name of resource monitor, or empty to clear"
                 onSave={async (v) => setProp("resourceMonitor", v, "Resource Monitor")}
               />
-              <EditRow
-                label="Max Concurrency Level"
+              <EditRow search={search} label="Max Concurrency Level"
                 value={getParam("MAX_CONCURRENCY_LEVEL")}
                 type="number"
                 min={1}
                 hint="Max number of concurrent queries per cluster"
                 onSave={async (v) => setProp("maxConcurrencyLevel", v, "Max Concurrency Level")}
               />
-              <EditRow
-                label="Statement Queued Timeout (s)"
+              <EditRow search={search} label="Statement Queued Timeout (s)"
                 value={getParam("STATEMENT_QUEUED_TIMEOUT_IN_SECONDS")}
                 type="number"
                 min={0}
                 hint="Seconds a query can queue before being cancelled (0 = no limit)"
                 onSave={async (v) => setProp("statementQueuedTimeout", v, "Statement Queued Timeout")}
               />
-              <EditRow
-                label="Statement Timeout (s)"
+              <EditRow search={search} label="Statement Timeout (s)"
                 value={getParam("STATEMENT_TIMEOUT_IN_SECONDS")}
                 type="number"
                 min={0}
@@ -586,8 +592,7 @@ export default function WarehousePropertiesModal({ name: initialName, onClose, o
           <div style={SECTION_HEAD}>General</div>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <tbody>
-              <EditRow
-                label="Comment"
+              <EditRow search={search} label="Comment"
                 value={get("comment")}
                 type="text"
                 onSave={async (v) => setProp("comment", v, "Comment")}

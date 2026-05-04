@@ -12,7 +12,7 @@ import {
 } from "antd";
 import {
   InboxOutlined, EditOutlined, CheckOutlined, CloseOutlined,
-  PlusOutlined, SyncOutlined,
+  PlusOutlined, SyncOutlined, SearchOutlined,
 } from "@ant-design/icons";
 import {
   GetObjectProperties, ListIntegrations, AlterStage,
@@ -49,11 +49,12 @@ interface RowProps {
   options?:  { label: string; value: string }[];
   hint?:     string;
   canUnset?: boolean;
+  search?:   string;
   onSave:    (val: any) => Promise<void>;
   onUnset?:  () => Promise<void>;
 }
 
-function EditRow({ label, value, type, options, hint, canUnset, onSave, onUnset }: RowProps) {
+function EditRow({ label, value, type, options, hint, canUnset, search, onSave, onUnset }: RowProps) {
   const [editing,   setEditing]   = useState(false);
   const [editVal,   setEditVal]   = useState(value);
   const [saving,    setSaving]    = useState(false);
@@ -82,6 +83,13 @@ function EditRow({ label, value, type, options, hint, canUnset, onSave, onUnset 
     catch (e) { message.error(String(e)); }
     finally { setUnsetting(false); }
   };
+
+  const showSection = (labels: string[]) => {
+    if (!search) return true;
+    return labels.some(l => l.toLowerCase().includes(search.toLowerCase()));
+  };
+
+  if (!showSection([label])) return null;
 
   if (type === "checkbox") {
     return (
@@ -159,7 +167,8 @@ function EditRow({ label, value, type, options, hint, canUnset, onSave, onUnset 
 
 // ─── ReadOnlyRow component ────────────────────────────────────────────────────
 
-function ReadOnlyRow({ label, value }: { label: string; value: string }) {
+function ReadOnlyRow({ label, value, search }: { label: string; value: string; search?: string }) {
+  if (search && !label.toLowerCase().includes(search.toLowerCase())) return null;
   return (
     <tr style={{ borderBottom: "1px solid var(--border)" }}>
       <td style={LABEL_TD}>{label}</td>
@@ -174,7 +183,7 @@ function ReadOnlyRow({ label, value }: { label: string; value: string }) {
 
 // ─── TagsRow component ────────────────────────────────────────────────────────
 
-function TagsRow({ db, schema, name, onAlter }: { db: string, schema: string, name: string, onAlter: (c: string) => Promise<void> }) {
+function TagsRow({ db, schema, name, search, onAlter }: { db: string, schema: string, name: string, search?: string, onAlter: (c: string) => Promise<void> }) {
   const [tags, setTags] = useState<{ key: string, value: string }[]>([]);
   const [newTag, setNewTag] = useState({ key: "", value: "" });
 
@@ -202,6 +211,8 @@ function TagsRow({ db, schema, name, onAlter }: { db: string, schema: string, na
       setTags(tags.filter(t => t.key !== key));
     } catch (e) { message.error(String(e)); }
   };
+
+  if (search && !"tags".includes(search.toLowerCase())) return null;
 
   return (
     <tr style={{ borderBottom: "1px solid var(--border)" }}>
@@ -241,6 +252,7 @@ export default function StagePropertiesModal({ db, schema, name: initialName, on
   const [integrations, setIntegrations] = useState<snowflake.IntegrationRow[]>([]);
   const [fileFormats, setFileFormats] = useState<string[]>([]);
   const [refreshingDir, setRefreshingDir] = useState(false);
+  const [search, setSearch] = useState("");
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -334,6 +346,16 @@ export default function StagePropertiesModal({ db, schema, name: initialName, on
 
       {rows !== null && (
         <>
+          <div style={{ marginBottom: 16 }}>
+            <Input
+              prefix={<SearchOutlined style={{ color: "var(--text-faint)" }} />}
+              placeholder="Search properties by name…"
+              allowClear
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
           {/* ── Read-only info ────────────────────────────────────────────── */}
           <div style={{ display: "flex", gap: 24, marginBottom: 4 }}>
             {get("created_on") && (
@@ -352,21 +374,22 @@ export default function StagePropertiesModal({ db, schema, name: initialName, on
           <div style={SECTION_HEAD}>General Settings</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
-              <EditRow label="Name" value={name} type="text"
+              <EditRow search={search} label="Name" value={name} type="text"
                 onSave={handleRename}
               />
-              <EditRow label="Comment" value={get("comment")} type="text" canUnset
+              <EditRow search={search} label="Comment" value={get("comment")} type="text" canUnset
                 onSave={async (v) => await alter(`SET COMMENT = ${q1(v)}`)}
                 onUnset={async () => await alter("UNSET COMMENT")}
               />
-              <TagsRow db={db} schema={schema} name={name} onAlter={alter} />
-              {/* DCM Project */}
-              <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                <td style={LABEL_TD}>DCM Project</td>
-                <td style={{ padding: "4px 0", verticalAlign: "middle" }}>
-                  <Button size="small" onClick={() => alter("UNSET DCM PROJECT")}>UNSET DCM PROJECT</Button>
-                </td>
-              </tr>
+              <TagsRow search={search} db={db} schema={schema} name={name} onAlter={alter} />
+              {(!search || "DCM Project".toLowerCase().includes(search.toLowerCase())) && (
+                <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                  <td style={LABEL_TD}>DCM Project</td>
+                  <td style={{ padding: "4px 0", verticalAlign: "middle" }}>
+                    <Button size="small" onClick={() => alter("UNSET DCM PROJECT")}>UNSET DCM PROJECT</Button>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
 
@@ -374,7 +397,7 @@ export default function StagePropertiesModal({ db, schema, name: initialName, on
           <div style={SECTION_HEAD}>File Format</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
-              <EditRow
+              <EditRow search={search}
                 label="Format Name"
                 value={get("file_format") || get("format_name")}
                 type="select"
@@ -395,17 +418,17 @@ export default function StagePropertiesModal({ db, schema, name: initialName, on
               <div style={SECTION_HEAD}>External Stage Parameters</div>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <tbody>
-                  <EditRow label="URL" value={get("url")} type="text"
+                  <EditRow search={search} label="URL" value={get("url")} type="text"
                     onSave={async (v) => await alter(`SET URL = '${v}'`)}
                   />
-                  <EditRow label="Storage Integration" value={get("storage_integration")}
+                  <EditRow search={search} label="Storage Integration" value={get("storage_integration")}
                     type="select"
                     options={integrations.map(i => ({ label: i.name, value: i.name }))}
                     canUnset
                     onSave={async (v) => await alter(`SET STORAGE_INTEGRATION = ${v}`)}
                     onUnset={async () => await alter("UNSET STORAGE_INTEGRATION")}
                   />
-                  <EditRow label="Encryption Type" value={get("encryption_type")} type="select"
+                  <EditRow search={search} label="Encryption Type" value={get("encryption_type")} type="select"
                     options={[
                       { label: "SNOWFLAKE_FULL", value: "SNOWFLAKE_FULL" },
                       { label: "SNOWFLAKE_SSE", value: "SNOWFLAKE_SSE" },
@@ -415,11 +438,11 @@ export default function StagePropertiesModal({ db, schema, name: initialName, on
                     ]}
                     onSave={async (v) => await alter(`SET ENCRYPTION = (TYPE = '${v}')`)}
                   />
-                  <EditRow label="KMS Key ID" value={get("kms_key_id")} type="text" canUnset
+                  <EditRow search={search} label="KMS Key ID" value={get("kms_key_id")} type="text" canUnset
                     onSave={async (v) => await alter(`SET ENCRYPTION = (KMS_KEY_ID = '${v}')`)}
                     onUnset={async () => await alter("UNSET ENCRYPTION")}
                   />
-                  <EditRow label="PrivateLink" value={get("use_privatelink_endpoint")} type="checkbox"
+                  <EditRow search={search} label="PrivateLink" value={get("use_privatelink_endpoint")} type="checkbox"
                     onSave={async (v) => await alter(`SET USE_PRIVATELINK_ENDPOINT = ${v ? "TRUE" : "FALSE"}`)}
                   />
                 </tbody>
@@ -431,23 +454,25 @@ export default function StagePropertiesModal({ db, schema, name: initialName, on
           <div style={SECTION_HEAD}>Directory Table Settings</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
-              <EditRow label="Enable Directory" value={get("directory_enabled")} type="checkbox"
+              <EditRow search={search} label="Enable Directory" value={get("directory_enabled")} type="checkbox"
                 onSave={async (v) => await alter(`SET DIRECTORY = (ENABLE = ${v ? "TRUE" : "FALSE"})`)}
               />
-              <tr>
-                <td style={LABEL_TD}>Actions</td>
-                <td style={{ padding: "4px 0", verticalAlign: "middle" }}>
-                  <Button
-                    size="small"
-                    icon={<SyncOutlined />}
-                    loading={refreshingDir}
-                    onClick={handleRefreshDirectory}
-                    disabled={get("directory_enabled") !== "true"}
-                  >
-                    Refresh Directory
-                  </Button>
-                </td>
-              </tr>
+              {(!search || "Actions".toLowerCase().includes(search.toLowerCase())) && (
+                <tr>
+                  <td style={LABEL_TD}>Actions</td>
+                  <td style={{ padding: "4px 0", verticalAlign: "middle" }}>
+                    <Button
+                      size="small"
+                      icon={<SyncOutlined />}
+                      loading={refreshingDir}
+                      onClick={handleRefreshDirectory}
+                      disabled={get("directory_enabled") !== "true"}
+                    >
+                      Refresh Directory
+                    </Button>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
 
@@ -457,7 +482,7 @@ export default function StagePropertiesModal({ db, schema, name: initialName, on
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <tbody>
                   {readOnlyPairs.map((r, i) => (
-                    <ReadOnlyRow key={i} label={r.key} value={r.value} />
+                    <ReadOnlyRow search={search} key={i} label={r.key} value={r.value} />
                   ))}
                 </tbody>
               </table>
