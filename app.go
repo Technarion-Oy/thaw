@@ -2789,15 +2789,15 @@ func (a *App) GetObjectProperties(database, schema, kind, name string) ([]Proper
 	case "PIPE":
 		query = fmt.Sprintf("SHOW PIPES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
 	case "SECRET":
-		query = fmt.Sprintf("DESCRIBE SECRET %s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
+		query = fmt.Sprintf("SHOW SECRETS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
 	case "GIT REPOSITORY":
-		query = fmt.Sprintf("DESCRIBE GIT REPOSITORY %s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
+		query = fmt.Sprintf("SHOW GIT REPOSITORIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
 	case "WAREHOUSE":
 		query = fmt.Sprintf("SHOW WAREHOUSES LIKE '%s'", like)
 	case "ROLE":
 		query = fmt.Sprintf("SHOW ROLES LIKE '%s'", like)
 	case "USER":
-		query = fmt.Sprintf("DESCRIBE USER %s", snowflake.QuoteIdent(name))
+		query = fmt.Sprintf("SHOW USERS LIKE '%s'", like)
 	default:
 		return nil, fmt.Errorf("unsupported object kind: %s", kind)
 	}
@@ -2806,42 +2806,7 @@ func (a *App) GetObjectProperties(database, schema, kind, name string) ([]Proper
 	if err != nil {
 		return nil, err
 	}
-	if len(res.Rows) == 0 {
-		return []PropertyPair{}, nil
-	}
-
-	toString := func(v interface{}) string {
-		if v == nil {
-			return ""
-		}
-		switch t := v.(type) {
-		case []byte:
-			return string(t)
-		case string:
-			return t
-		default:
-			return fmt.Sprintf("%v", t)
-		}
-	}
-
-	var pairs []PropertyPair
-	kindUpper := strings.ToUpper(kind)
-	if kindUpper == "USER" || kindUpper == "SECRET" || kindUpper == "GIT REPOSITORY" {
-		// DESCRIBE USER/SECRET returns rows of (property, value, default, ...) — use property/value columns.
-		for _, row := range res.Rows {
-			if len(row) < 2 {
-				continue
-			}
-			k := toString(row[0])
-			v := toString(row[1])
-			if k != "" {
-				pairs = append(pairs, PropertyPair{Key: k, Value: v})
-			}
-		}
-	} else {
-		pairs = a.resToPairs(res)
-	}
-	return pairs, nil
+	return a.resToPairs(res), nil
 }
 
 // SessionParam holds one row from SHOW PARAMETERS.
