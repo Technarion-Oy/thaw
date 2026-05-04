@@ -144,7 +144,7 @@ export default function StagePropertiesModal({ db, schema, name, onClose, onSucc
               <Select
                 value={cfg.storageIntegration || ""}
                 onChange={(v) => set("storageIntegration", v)}
-                options={integrations.map(i => ({ value: i.name, label: i.name }))}
+                options={(integrations || []).map(i => ({ value: i.name, label: i.name }))}
                 allowClear
               />
             </Form.Item>
