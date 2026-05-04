@@ -1271,7 +1271,7 @@ func (c *Client) ListIntegrations(ctx context.Context, kind string) ([]Integrati
 		}
 	}
 
-	var result []IntegrationRow
+	result := []IntegrationRow{}
 	for rows.Next() {
 		vals, ptrs := makeValPtrs(len(cols))
 		if err := rows.Scan(ptrs...); err != nil {
@@ -1889,7 +1889,7 @@ func (c *Client) ListExportableDatabases(ctx context.Context) ([]string, error) 
 		}
 	}
 
-	var result []string
+	result := []string{}
 	for rows.Next() {
 		vals := make([]interface{}, len(cols))
 		ptrs := make([]interface{}, len(cols))
@@ -1960,7 +1960,7 @@ func (c *Client) listDroppedHistory(ctx context.Context, query string) ([]Droppe
 		return nil, fmt.Errorf("no 'name' column in result: %s", query)
 	}
 
-	var result []DroppedTable
+	result := []DroppedTable{}
 	for rows.Next() {
 		vals, ptrs := makeValPtrs(len(cols))
 		if err := rows.Scan(ptrs...); err != nil {
@@ -2326,7 +2326,7 @@ func (c *Client) GetTableForeignKeys(ctx context.Context, database, schema, tabl
 		"fk_name", "key_sequence",
 	)
 
-	var result []TableForeignKey
+	result := []TableForeignKey{}
 	for rows.Next() {
 		vals, ptrs := makeValPtrs(len(cols))
 		if err := rows.Scan(ptrs...); err != nil {
@@ -2373,7 +2373,7 @@ func (c *Client) GetTableColumnsWithTypes(ctx context.Context, database, schema,
 	cols, _ := rows.Columns()
 	idxs := colIndexMap(cols, "name", "type", "null?", "primary key", "unique key")
 
-	var result []ColumnInfo
+	result := []ColumnInfo{}
 	for rows.Next() {
 		vals, ptrs := makeValPtrs(len(cols))
 		if err := rows.Scan(ptrs...); err != nil {
@@ -2413,7 +2413,7 @@ func (c *Client) GetSchemaForeignKeys(ctx context.Context, database, schema stri
 		"fk_name", "key_sequence",
 	)
 
-	var result []TableForeignKey
+	result := []TableForeignKey{}
 	for rows.Next() {
 		vals, ptrs := makeValPtrs(len(cols))
 		if err := rows.Scan(ptrs...); err != nil {
@@ -3073,7 +3073,7 @@ func (c *Client) queryStringSlice(ctx context.Context, query string, colIdx int)
 	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
-	var result []string
+	result := []string{}
 	for rows.Next() {
 		vals := make([]interface{}, len(cols))
 		ptrs := make([]interface{}, len(cols))

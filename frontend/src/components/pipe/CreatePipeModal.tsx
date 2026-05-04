@@ -91,7 +91,7 @@ export default function CreatePipeModal({ db, schema, onClose, onSuccess }: Prop
     }
   };
 
-  const integrationOptions = notifIntegrations.map((n) => ({ value: n, label: n }));
+  const integrationOptions = (notifIntegrations || []).map((n) => ({ value: n, label: n }));
   const itemStyle: React.CSSProperties = { marginBottom: 12 };
 
   return (

@@ -787,7 +787,7 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
                 <Select
                   value={selectedNamedFormat}
                   onChange={setSelectedNamedFormat}
-                  options={availableFormats.map((f) => ({ value: f, label: f }))}
+                  options={(availableFormats || []).map((f) => ({ value: f, label: f }))}
                   style={{ width: "100%" }}
                   placeholder="Select a file format…"
                   loading={loadingFormats}

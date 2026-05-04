@@ -207,7 +207,7 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
                 onChange={(v) => set("storageIntegration", v)}
                 placeholder="Select an integration"
                 allowClear
-                options={integrations.map(i => ({ value: i.name, label: i.name }))}
+                options={(integrations || []).map(i => ({ value: i.name, label: i.name }))}
               />
             </Form.Item>
           </>
@@ -291,7 +291,7 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
               placeholder="Select a format in this schema"
               value={cfg.fileFormatName || undefined}
               onChange={(v) => set("fileFormatName", v)}
-              options={fileFormats.map((f) => ({ value: f, label: f }))}
+              options={(fileFormats || []).map((f) => ({ value: f, label: f }))}
               allowClear
             />
           </Form.Item>
