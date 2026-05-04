@@ -18,6 +18,10 @@ export function AlterPipe(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['AlterPipe'](arg1, arg2, arg3, arg4);
 }
 
+export function AlterStage(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['AlterStage'](arg1, arg2, arg3, arg4);
+}
+
 export function AlterTableProperty(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['AlterTableProperty'](arg1, arg2, arg3, arg4, arg5);
 }
