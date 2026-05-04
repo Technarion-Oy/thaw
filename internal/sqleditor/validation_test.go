@@ -1729,3 +1729,100 @@ func min(a, b int) int {
 	}
 	return b
 }
+func TestIssue129_FalsePositives(t *testing.T) {
+	sql := `
+CREATE OR REPLACE VIEW VW_CLEAN_CUSTOMERS AS
+SELECT 
+    CUSTOMER_ID,
+    UPPER(FIRST_NAME || ' ' || LAST_NAME) AS FULL_NAME,
+    REGISTRATION_DATE
+FROM RAW_CUSTOMERS
+WHERE STATUS = 'ACTIVE';
+
+CREATE OR REPLACE PROCEDURE SP_REFRESH_EXECUTIVE_MART()
+RETURNS VARCHAR
+LANGUAGE SQL
+AS
+$$
+BEGIN
+    TRUNCATE TABLE MART_EXECUTIVE_SUMMARY;
+
+    INSERT INTO MART_EXECUTIVE_SUMMARY (
+        CUSTOMER_ID, 
+        FULL_NAME, 
+        TOTAL_LIFETIME_SPEND, 
+        TOTAL_LIFETIME_PROFIT, 
+        LAST_REFRESH_DATE
+    )
+    SELECT 
+        clv.CUSTOMER_ID,
+        clv.FULL_NAME,
+        SUM(op.NET_REVENUE) AS TOTAL_LIFETIME_SPEND,
+        SUM(op.ORDER_PROFIT) AS TOTAL_LIFETIME_PROFIT,
+        CURRENT_TIMESTAMP() AS LAST_REFRESH_DATE
+    FROM VW_CUSTOMER_LIFETIME_VALUE clv
+    JOIN VW_ORDER_PROFITABILITY op 
+      ON clv.CUSTOMER_ID = op.CUSTOMER_ID
+    GROUP BY 
+        clv.CUSTOMER_ID,
+        clv.FULL_NAME;
+    RETURN 'Executive Mart successfully refreshed. Lineage trace complete.';
+END;
+$$;
+`
+	// Setup: Mock column data for the referenced tables
+	colEntries := []ColEntry{
+		{DB: "", Schema: "", Name: "RAW_CUSTOMERS", Cols: []ColInfo{
+			{Name: "CUSTOMER_ID", DataType: "INT"},
+			{Name: "FIRST_NAME", DataType: "VARCHAR"},
+			{Name: "LAST_NAME", DataType: "VARCHAR"},
+			{Name: "REGISTRATION_DATE", DataType: "DATE"},
+			{Name: "STATUS", DataType: "VARCHAR"},
+		}},
+		{DB: "", Schema: "", Name: "VW_CUSTOMER_LIFETIME_VALUE", Cols: []ColInfo{
+			{Name: "CUSTOMER_ID", DataType: "INT"},
+			{Name: "FULL_NAME", DataType: "VARCHAR"},
+		}},
+		{DB: "", Schema: "", Name: "VW_ORDER_PROFITABILITY", Cols: []ColInfo{
+			{Name: "ORDER_ID", DataType: "INT"},
+			{Name: "CUSTOMER_ID", DataType: "INT"},
+			{Name: "NET_REVENUE", DataType: "NUMBER"},
+			{Name: "ORDER_PROFIT", DataType: "NUMBER"},
+		}},
+		{DB: "", Schema: "", Name: "MART_EXECUTIVE_SUMMARY", Cols: []ColInfo{
+			{Name: "CUSTOMER_ID", DataType: "INT"},
+			{Name: "FULL_NAME", DataType: "VARCHAR"},
+			{Name: "TOTAL_LIFETIME_SPEND", DataType: "NUMBER"},
+			{Name: "TOTAL_LIFETIME_PROFIT", DataType: "NUMBER"},
+			{Name: "LAST_REFRESH_DATE", DataType: "TIMESTAMP_NTZ"},
+		}},
+	}
+	
+	resolvedRefs := []ResolvedRef{
+		{Alias: "RAW_CUSTOMERS", Name: "RAW_CUSTOMERS"},
+		{Alias: "VW_CUSTOMER_LIFETIME_VALUE", Name: "VW_CUSTOMER_LIFETIME_VALUE"},
+		{Alias: "clv", Name: "VW_CUSTOMER_LIFETIME_VALUE"},
+		{Alias: "VW_ORDER_PROFITABILITY", Name: "VW_ORDER_PROFITABILITY"},
+		{Alias: "op", Name: "VW_ORDER_PROFITABILITY"},
+		{Alias: "MART_EXECUTIVE_SUMMARY", Name: "MART_EXECUTIVE_SUMMARY"},
+	}
+
+	markers := ValidateSemantics(sql, resolvedRefs, colEntries)
+	
+	for _, m := range markers {
+		t.Errorf("Unexpected diagnostic marker: %s at line %d, col %d", m.Message, m.StartLineNumber, m.StartColumn)
+	}
+
+	// Also test bare column validation
+	req := ValidateBareColsRequest{
+		SQL:                         sql,
+		StmtRanges:                  GetStatementRanges(sql),
+		ResolvedRefs:                resolvedRefs,
+		ColEntries:                  colEntries,
+		QuotedIdentifiersIgnoreCase: true,
+	}
+	bareMarkers := ValidateBareColumnRefs(req)
+	for _, m := range bareMarkers {
+		t.Errorf("Unexpected bare column diagnostic marker: %s at line %d, col %d", m.Message, m.StartLineNumber, m.StartColumn)
+	}
+}
