@@ -435,7 +435,7 @@ export function ListSecretsInAccount():Promise<Array<snowflake.AccountSecret>>;
 
 export function ListSecurityIntegrations():Promise<Array<snowflake.SecurityIntegration>>;
 
-export function ListStageFiles(arg1:string,arg2:string):Promise<Array<snowflake.StageFile>>;
+export function ListStageFiles(arg1:string,arg2:string):Promise<Array<stage.StageFile>>;
 
 export function ListSystemPythons():Promise<Array<main.PythonInfo>>;
 

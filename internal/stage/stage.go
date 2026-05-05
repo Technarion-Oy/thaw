@@ -10,7 +10,9 @@
 package stage
 
 import (
+	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"thaw/internal/fileformat"
@@ -205,4 +207,87 @@ func BuildAlterStageSql(cfg AlterStageConfig) string {
 	
 	sb.WriteString(";")
 	return sb.String()
+}
+
+// StageFile represents a file stored on a Snowflake stage.
+type StageFile struct {
+	Name         string `json:"name"`
+	Size         int64  `json:"size"`
+	MD5          string `json:"md5"`
+	LastModified string `json:"lastModified"`
+}
+
+// ListStageFiles returns the list of files on a Snowflake stage (internal or external).
+// stageName can be a fully qualified name (e.g. "@DB.SCHEMA.STAGE") or a relative
+// path (e.g. "@STAGE/path/"). pattern is an optional regex to filter results.
+func ListStageFiles(ctx context.Context, client *snowflake.Client, stageName string, pattern string) ([]StageFile, error) {
+	// Ensure stageName starts with @
+	if !strings.HasPrefix(stageName, "@") {
+		stageName = "@" + stageName
+	}
+
+	sql := fmt.Sprintf(`LIST %s`, stageName)
+	if pattern != "" {
+		sql += fmt.Sprintf(" PATTERN = '%s'", snowflake.EscapeStringLit(pattern))
+	}
+
+	res, err := client.Execute(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+
+	nameIdx := -1
+	sizeIdx := -1
+	md5Idx := -1
+	lastModIdx := -1
+
+	for i, col := range res.Columns {
+		switch strings.ToUpper(col) {
+		case "NAME":
+			nameIdx = i
+		case "SIZE":
+			sizeIdx = i
+		case "MD5":
+			md5Idx = i
+		case "LAST_MODIFIED":
+			lastModIdx = i
+		}
+	}
+
+	var files []StageFile
+	for _, row := range res.Rows {
+		f := StageFile{}
+		if nameIdx != -1 {
+			f.Name = strVal(row, nameIdx)
+		}
+		if sizeIdx != -1 {
+			if v, err2 := strconv.ParseInt(strVal(row, sizeIdx), 10, 64); err2 == nil {
+				f.Size = v
+			}
+		}
+		if md5Idx != -1 {
+			f.MD5 = strVal(row, md5Idx)
+		}
+		if lastModIdx != -1 {
+			f.LastModified = strVal(row, lastModIdx)
+		}
+		files = append(files, f)
+	}
+
+	return files, nil
+}
+
+// strVal handles type assertions for interface{} row values to strings.
+func strVal(row []interface{}, idx int) string {
+	if idx < 0 || idx >= len(row) || row[idx] == nil {
+		return ""
+	}
+	switch v := row[idx].(type) {
+	case string:
+		return v
+	case []byte:
+		return string(v)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
 }

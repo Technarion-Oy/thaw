@@ -1402,11 +1402,11 @@ func (a *App) BuildAlterStageSql(cfg stage.AlterStageConfig) string {
 }
 
 // ListStageFiles returns the list of files on a Snowflake stage.
-func (a *App) ListStageFiles(stageName string, pattern string) ([]snowflake.StageFile, error) {
+func (a *App) ListStageFiles(stageName string, pattern string) ([]stage.StageFile, error) {
 	if a.client == nil {
 		return nil, ErrNotConnected
 	}
-	return a.client.ListStageFiles(a.ctx, stageName, pattern)
+	return stage.ListStageFiles(a.ctx, a.client, stageName, pattern)
 }
 
 // UploadFileToStage executes a PUT command to upload a local file to an internal stage.

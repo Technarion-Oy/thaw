@@ -18,7 +18,7 @@ import {
 } from "@ant-design/icons";
 import { AgGridReact } from "ag-grid-react";
 import { ListStageFiles, RemoveStageFiles, DownloadFileFromStage, PickDirectory } from "../../../wailsjs/go/main/App";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type { stage } from "../../../wailsjs/go/models";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
 
@@ -33,7 +33,7 @@ interface Props {
 
 export default function StageBrowserModal({ db, schema, name, onClose }: Props) {
   const resolved = useThemeStore((s) => s.resolved);
-  const [files, setFiles] = useState<snowflake.StageFile[]>([]);
+  const [files, setFiles] = useState<stage.StageFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pattern, setPattern] = useState("");
@@ -92,7 +92,7 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
     return `${stageRef}${relativePath}`;
   };
 
-  const handleDelete = async (selectedRows?: snowflake.StageFile[]) => {
+  const handleDelete = async (selectedRows?: stage.StageFile[]) => {
     const selected = selectedRows || gridRef.current?.api.getSelectedRows();
     if (!selected || selected.length === 0) return;
 
@@ -118,7 +118,7 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
     });
   };
 
-  const handleDownload = async (selectedRows?: snowflake.StageFile[]) => {
+  const handleDownload = async (selectedRows?: stage.StageFile[]) => {
     const selected = selectedRows || gridRef.current?.api.getSelectedRows();
     if (!selected || selected.length === 0) return;
 
@@ -141,7 +141,7 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
   // Context menu for rows
   const [ctxVisible, setCtxVisible] = useState(false);
   const [ctxPos, setCtxPos] = useState({ x: 0, y: 0 });
-  const [ctxRows, setCtxRows] = useState<snowflake.StageFile[]>([]);
+  const [ctxRows, setCtxRows] = useState<stage.StageFile[]>([]);
 
   const onCellContextMenu = (event: any) => {
     event.event.preventDefault();
