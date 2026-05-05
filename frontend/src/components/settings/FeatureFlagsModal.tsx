@@ -207,6 +207,13 @@ export default function FeatureFlagsModal({ onClose }: Props) {
             locked={locked.getCommand}
             onChange={(v) => set("getCommand", v)}
           />
+          <FlagRow
+            label="REMOVE Command"
+            description="Allow REMOVE @stage/file deletion commands to be executed."
+            checked={flags.removeCommand}
+            locked={locked.removeCommand}
+            onChange={(v) => set("removeCommand", v)}
+          />
         </Category>
 
         {/* ── Governance & Administration ── */}

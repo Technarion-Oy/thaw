@@ -2396,9 +2396,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "FILE FORMAT" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
-            menuItem("Browse Stage Files…", <SearchOutlined style={{ fontSize: 12 }} />, openStageBrowser)}
+            menuItem("Browse Stage Files…", <SearchOutlined style={{ fontSize: 12 }} />, openStageBrowser, undefined, !featureFlags.getCommand && !featureFlags.removeCommand, "Stage browsing is only useful when GET or REMOVE commands are enabled.")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
-            menuItem("Upload File to Stage…", <UploadOutlined style={{ fontSize: 12 }} />, uploadToStage)}
+            menuItem("Upload File to Stage…", <UploadOutlined style={{ fontSize: 12 }} />, uploadToStage, undefined, !featureFlags.putCommand, "PUT commands are disabled. Enable them under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
             menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, openStageProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SECRET" &&

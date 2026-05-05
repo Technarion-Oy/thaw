@@ -1491,6 +1491,11 @@ func (a *App) RemoveStageFiles(stageName string, pattern string) error {
 		return ErrNotConnected
 	}
 
+	flags := loadUserFeatureFlags()
+	if !flags.RemoveCommand {
+		return fmt.Errorf("REMOVE commands are disabled. Enable them under View → Enabled Features…")
+	}
+
 	// Ensure stageName starts with @
 	if !strings.HasPrefix(stageName, "@") {
 		stageName = "@" + stageName

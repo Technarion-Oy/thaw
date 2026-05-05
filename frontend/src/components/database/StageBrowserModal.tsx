@@ -10,6 +10,7 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useThemeStore } from "../../store/themeStore";
+import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import {
   Modal, Space, Typography, Button, Alert, Input, App, Dropdown, MenuProps,
 } from "antd";
@@ -33,8 +34,10 @@ interface Props {
 
 export default function StageBrowserModal({ db, schema, name, onClose }: Props) {
   const resolved = useThemeStore((s) => s.resolved);
+  const flags = useFeatureFlagsStore((s) => s.flags);
   const { modal, message } = App.useApp();
   const [files, setFiles] = useState<stage.StageFile[]>([]);
+
 
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -168,6 +171,7 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
       label: `Download ${ctxRows.length > 1 ? `${ctxRows.length} files` : "file"}…`,
       icon: <DownloadOutlined />,
       onClick: () => handleDownload(ctxRows),
+      disabled: !flags.getCommand,
     },
     {
       key: "delete",
@@ -175,6 +179,7 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
       icon: <DeleteOutlined />,
       danger: true,
       onClick: () => handleDelete(ctxRows),
+      disabled: !flags.removeCommand,
     },
   ];
 
@@ -213,21 +218,25 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
           </Button>
         </Space>
         <Space>
-          <Button
-            icon={<DownloadOutlined />}
-            onClick={() => handleDownload()}
-            disabled={files.length === 0}
-          >
-            Download Selected
-          </Button>
-          <Button
-            icon={<DeleteOutlined />}
-            danger
-            onClick={() => handleDelete()}
-            disabled={files.length === 0}
-          >
-            Delete Selected
-          </Button>
+          {flags.getCommand && (
+            <Button
+              icon={<DownloadOutlined />}
+              onClick={() => handleDownload()}
+              disabled={files.length === 0}
+            >
+              Download Selected
+            </Button>
+          )}
+          {flags.removeCommand && (
+            <Button
+              icon={<DeleteOutlined />}
+              danger
+              onClick={() => handleDelete()}
+              disabled={files.length === 0}
+            >
+              Delete Selected
+            </Button>
+          )}
         </Space>
       </div>
 

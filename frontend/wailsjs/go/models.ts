@@ -112,6 +112,7 @@ export namespace config {
 	    ddlExport: boolean;
 	    putCommand: boolean;
 	    getCommand: boolean;
+	    removeCommand: boolean;
 	    userRoleManagement: boolean;
 	    warehouseManagement: boolean;
 	    warehouseCreditUsage: boolean;
@@ -151,6 +152,7 @@ export namespace config {
 	        this.ddlExport = source["ddlExport"];
 	        this.putCommand = source["putCommand"];
 	        this.getCommand = source["getCommand"];
+	        this.removeCommand = source["removeCommand"];
 	        this.userRoleManagement = source["userRoleManagement"];
 	        this.warehouseManagement = source["warehouseManagement"];
 	        this.warehouseCreditUsage = source["warehouseCreditUsage"];

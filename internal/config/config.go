@@ -158,8 +158,8 @@ func DefaultNotebookPrefs() NotebookPrefs {
 //
 // Version tracks the schema revision so new flags introduced after an initial
 // save can be filled with their defaults rather than the zero value (false).
-// Current version: 4 (added FileFormatBuilder).
-const flagsVersion = 4
+// Current version: 5 (added RemoveCommand).
+const flagsVersion = 5
 
 type FeatureFlags struct {
 	Initialized bool `json:"initialized"`
@@ -172,6 +172,7 @@ type FeatureFlags struct {
 	DDLExport       bool `json:"ddlExport"`
 	PutCommand      bool `json:"putCommand"` // PUT file:// … @stage uploads from the SQL editor
 	GetCommand      bool `json:"getCommand"` // GET @stage file:// downloads from the SQL editor
+	RemoveCommand   bool `json:"removeCommand"` // REMOVE @stage/file deletes
 
 	// Governance & Administration
 	UserRoleManagement     bool `json:"userRoleManagement"`
@@ -223,6 +224,7 @@ func DefaultFeatureFlags() FeatureFlags {
 		DDLExport:              true,
 		PutCommand:             true,
 		GetCommand:             true,
+		RemoveCommand:          true,
 		UserRoleManagement:     true,
 		WarehouseManagement:    true,
 		WarehouseCreditUsage:   true,
@@ -299,6 +301,8 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	setIfZero(&f.GetCommand, defaults.GetCommand)
 	// Version 3 → 4: FileFormatBuilder added; defaults to true.
 	setIfZero(&f.FileFormatBuilder, defaults.FileFormatBuilder)
+	// Version 4 → 5: RemoveCommand added; defaults to true.
+	setIfZero(&f.RemoveCommand, defaults.RemoveCommand)
 	f.Version = flagsVersion
 	return f
 }
