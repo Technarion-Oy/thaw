@@ -1670,13 +1670,6 @@ func assertNotContainsRef(t *testing.T, refs []sqlRef, want sqlRef) {
 	}
 }
 
-// ── TestGetObjectDependencies_DiamondDependency ───────────────────────────────
-
-type mockLineageClient struct {
-	ddls     map[string]string
-	isViewFn func(db, schema, name string) bool
-}
-
 // Mocking Client methods required by GetObjectDependencies
 // Since Go doesn't allow overriding methods easily without an interface,
 // we'll adapt the test by running the `buildChildren` logic with an interface or just verifying `depVisited` behavior directly.
