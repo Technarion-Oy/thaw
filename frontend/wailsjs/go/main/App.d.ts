@@ -141,6 +141,8 @@ export function DeployNotebook(arg1:snowflake.DeployNotebookParams):Promise<void
 
 export function Disconnect():Promise<void>;
 
+export function DownloadFileFromStage(arg1:string,arg2:string,arg3:number,arg4:string):Promise<void>;
+
 export function DropBackupPolicy(arg1:string):Promise<void>;
 
 export function DropBackupSet(arg1:string,arg2:string,arg3:string):Promise<void>;
@@ -433,6 +435,8 @@ export function ListSecretsInAccount():Promise<Array<snowflake.AccountSecret>>;
 
 export function ListSecurityIntegrations():Promise<Array<snowflake.SecurityIntegration>>;
 
+export function ListStageFiles(arg1:string,arg2:string):Promise<Array<snowflake.StageFile>>;
+
 export function ListSystemPythons():Promise<Array<main.PythonInfo>>;
 
 export function ListUsers():Promise<Array<snowflake.SnowflakeUser>>;
@@ -482,6 +486,8 @@ export function ReadFile(arg1:string):Promise<string>;
 export function ReadFileHead(arg1:string,arg2:number):Promise<string>;
 
 export function ReadNotebook(arg1:string):Promise<string>;
+
+export function RemoveStageFiles(arg1:string,arg2:string):Promise<void>;
 
 export function ResetPipRegistryConfig():Promise<void>;
 
@@ -568,6 +574,8 @@ export function TaskHasChildren(arg1:string,arg2:string,arg3:string):Promise<boo
 export function TestAIModel(arg1:string,arg2:string,arg3:string,arg4:number,arg5:number):Promise<string>;
 
 export function UninstallEnvPackage(arg1:string):Promise<void>;
+
+export function UploadFileToStage(arg1:string,arg2:string,arg3:number,arg4:boolean,arg5:string,arg6:boolean):Promise<void>;
 
 export function UseDatabase(arg1:string,arg2:string):Promise<void>;
 

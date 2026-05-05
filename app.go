@@ -1401,6 +1401,112 @@ func (a *App) BuildAlterStageSql(cfg stage.AlterStageConfig) string {
 	return stage.BuildAlterStageSql(cfg)
 }
 
+// ListStageFiles returns the list of files on a Snowflake stage.
+func (a *App) ListStageFiles(stageName string, pattern string) ([]snowflake.StageFile, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return a.client.ListStageFiles(a.ctx, stageName, pattern)
+}
+
+// UploadFileToStage executes a PUT command to upload a local file to an internal stage.
+func (a *App) UploadFileToStage(localPath string, stageName string, parallel int, autoCompress bool, sourceCompression string, overwrite bool) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+
+	flags := loadUserFeatureFlags()
+	if !flags.PutCommand {
+		return fmt.Errorf("PUT commands are disabled. Enable them under View → Enabled Features…")
+	}
+
+	// Ensure stageName starts with @
+	if !strings.HasPrefix(stageName, "@") {
+		stageName = "@" + stageName
+	}
+
+	// PUT file://<absolute_path_to_file> @stage
+	// [ PARALLEL = <integer> ]
+	// [ AUTO_COMPRESS = TRUE | FALSE ]
+	// [ SOURCE_COMPRESSION = AUTO_DETECT | GZIP | BZ2 | BROTLI | ZSTD | DEFLATE | RAW_DEFLATE | NONE ]
+	// [ OVERWRITE = TRUE | FALSE ]
+
+	sql := fmt.Sprintf("PUT 'file://%s' %s", strings.ReplaceAll(localPath, "'", "\\'"), stageName)
+	if parallel > 0 {
+		sql += fmt.Sprintf(" PARALLEL = %d", parallel)
+	}
+	if autoCompress {
+		sql += " AUTO_COMPRESS = TRUE"
+	} else {
+		sql += " AUTO_COMPRESS = FALSE"
+	}
+	if sourceCompression != "" && sourceCompression != "AUTO_DETECT" {
+		sql += fmt.Sprintf(" SOURCE_COMPRESSION = %s", sourceCompression)
+	}
+	if overwrite {
+		sql += " OVERWRITE = TRUE"
+	} else {
+		sql += " OVERWRITE = FALSE"
+	}
+
+	_, err := a.client.Execute(a.ctx, sql)
+	return err
+}
+
+// DownloadFileFromStage executes a GET command to download files from an internal stage to a local directory.
+func (a *App) DownloadFileFromStage(stageName string, localDirPath string, parallel int, pattern string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+
+	flags := loadUserFeatureFlags()
+	if !flags.GetCommand {
+		return fmt.Errorf("GET commands are disabled. Enable them under View → Enabled Features…")
+	}
+
+	// Ensure stageName starts with @
+	if !strings.HasPrefix(stageName, "@") {
+		stageName = "@" + stageName
+	}
+
+	// GET @internalStage 'file://<local_directory_path>'
+	// [ PARALLEL = <integer> ]
+	// [ PATTERN = '<regex_pattern>' ]
+
+	sql := fmt.Sprintf("GET %s 'file://%s'", stageName, strings.ReplaceAll(localDirPath, "'", "\\'"))
+	if parallel > 0 {
+		sql += fmt.Sprintf(" PARALLEL = %d", parallel)
+	}
+	if pattern != "" {
+		sql += fmt.Sprintf(" PATTERN = '%s'", snowflake.EscapeStringLit(pattern))
+	}
+
+	_, err := a.client.Execute(a.ctx, sql)
+	return err
+}
+
+// RemoveStageFiles deletes files from a stage using the REMOVE command.
+func (a *App) RemoveStageFiles(stageName string, pattern string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+
+	// Ensure stageName starts with @
+	if !strings.HasPrefix(stageName, "@") {
+		stageName = "@" + stageName
+	}
+
+	// REMOVE @stage [ PATTERN = '<regex_pattern>' ]
+
+	sql := fmt.Sprintf("REMOVE %s", stageName)
+	if pattern != "" {
+		sql += fmt.Sprintf(" PATTERN = '%s'", snowflake.EscapeStringLit(pattern))
+	}
+
+	_, err := a.client.Execute(a.ctx, sql)
+	return err
+}
+
 // ── File Format ──────────────────────────────────────────────────────────────
 
 // BuildCreateFileFormatSql returns the CREATE FILE FORMAT SQL statement for the

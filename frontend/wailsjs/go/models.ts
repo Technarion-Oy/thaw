@@ -2666,6 +2666,24 @@ export namespace snowflake {
 	        this.lastSuccessLogin = source["lastSuccessLogin"];
 	    }
 	}
+	export class StageFile {
+	    name: string;
+	    size: number;
+	    md5: string;
+	    lastModified: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new StageFile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.size = source["size"];
+	        this.md5 = source["md5"];
+	        this.lastModified = source["lastModified"];
+	    }
+	}
 	export class TableForeignKey {
 	    pkDatabase: string;
 	    pkSchema: string;
