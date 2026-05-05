@@ -11,7 +11,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useThemeStore } from "../../store/themeStore";
 import {
-  Modal, Space, Typography, Button, Alert, Input, message, Dropdown, MenuProps,
+  Modal, Space, Typography, Button, Alert, Input, App, Dropdown, MenuProps,
 } from "antd";
 import {
   InboxOutlined, ReloadOutlined, DownloadOutlined, DeleteOutlined, SearchOutlined,
@@ -33,7 +33,9 @@ interface Props {
 
 export default function StageBrowserModal({ db, schema, name, onClose }: Props) {
   const resolved = useThemeStore((s) => s.resolved);
+  const { modal, message } = App.useApp();
   const [files, setFiles] = useState<stage.StageFile[]>([]);
+
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pattern, setPattern] = useState("");
@@ -96,7 +98,7 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
     const selected = selectedRows || gridRef.current?.api.getSelectedRows();
     if (!selected || selected.length === 0) return;
 
-    Modal.confirm({
+    modal.confirm({
       title: `Remove ${selected.length} file(s)?`,
       content: `Are you sure you want to delete the selected files from ${stageRef}?`,
       okText: "Delete",
