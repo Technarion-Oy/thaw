@@ -86,6 +86,12 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
     { field: "lastModified", headerName: "Last Modified", width: 220 },
   ], []);
 
+  const getFullPath = (fileName: string) => {
+    const slashIdx = fileName.indexOf('/');
+    const relativePath = slashIdx !== -1 ? fileName.substring(slashIdx) : `/${fileName}`;
+    return `${stageRef}${relativePath}`;
+  };
+
   const handleDelete = async (selectedRows?: snowflake.StageFile[]) => {
     const selected = selectedRows || gridRef.current?.api.getSelectedRows();
     if (!selected || selected.length === 0) return;
@@ -99,7 +105,7 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
         const hide = message.loading(`Removing ${selected.length} file(s)…`, 0);
         try {
           for (const file of selected) {
-            await RemoveStageFiles(`@${file.name}`, "");
+            await RemoveStageFiles(getFullPath(file.name), "");
           }
           hide();
           message.success(`Removed ${selected.length} file(s)`);
@@ -122,7 +128,7 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
     const hide = message.loading(`Downloading ${selected.length} file(s)…`, 0);
     try {
       for (const file of selected) {
-        await DownloadFileFromStage(`@${file.name}`, localPath, 4, "");
+        await DownloadFileFromStage(getFullPath(file.name), localPath, 4, "");
       }
       hide();
       message.success(`Downloaded ${selected.length} file(s) to ${localPath}`);
