@@ -68,6 +68,14 @@ func (v depVisited) add(db, schema, name string) {
 	v[depKey(db, schema, name)] = true
 }
 
+func (v depVisited) clone() depVisited {
+	c := make(depVisited, len(v))
+	for k, val := range v {
+		c[k] = val
+	}
+	return c
+}
+
 func depKey(db, schema, name string) string {
 	return strings.ToUpper(db + "." + schema + "." + name)
 }
@@ -307,10 +315,11 @@ func (c *Client) resolveRef(ctx context.Context, ref sqlRef, vis depVisited, dep
 	// non-view reference, producing confusing noise in application logs.
 	if c.isViewInSchema(ctx, ref.db, ref.schema, ref.name) {
 		node.Kind = "VIEW"
-		vis.add(ref.db, ref.schema, ref.name)
+		branchVis := vis.clone()
+		branchVis.add(ref.db, ref.schema, ref.name)
 		ddlText, err := c.GetObjectDDL(ctx, ref.db, ref.schema, "VIEW", ref.name, "")
 		if err == nil {
-			node.Children = c.buildChildren(ctx, ddlText, ref.db, ref.schema, "VIEW", vis, depth+1)
+			node.Children = c.buildChildren(ctx, ddlText, ref.db, ref.schema, "VIEW", branchVis, depth+1)
 		} else {
 			node.Error = err.Error()
 		}
@@ -409,13 +418,14 @@ func (c *Client) resolveProcedureRef(ctx context.Context, ref sqlRef, vis depVis
 		return node
 	}
 
-	vis.add(ref.db, ref.schema, ref.name)
+	branchVis := vis.clone()
+	branchVis.add(ref.db, ref.schema, ref.name)
 	for _, ol := range overloads {
 		ddlText, err := c.GetObjectDDL(ctx, ref.db, ref.schema, "PROCEDURE", ref.name, ol.args)
 		if err != nil {
 			continue
 		}
-		children := c.buildChildren(ctx, ddlText, ref.db, ref.schema, "PROCEDURE", vis, depth+1)
+		children := c.buildChildren(ctx, ddlText, ref.db, ref.schema, "PROCEDURE", branchVis, depth+1)
 		node.Children = append(node.Children, children...)
 	}
 	return node
