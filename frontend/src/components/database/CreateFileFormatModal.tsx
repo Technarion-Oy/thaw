@@ -155,6 +155,7 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
         borderRadius: 6,
         overflow: "auto",
         maxHeight: 280,
+        background: "var(--bg)",
       }}>
         <table style={{ borderCollapse: "separate", borderSpacing: 0, width: "100%", fontSize: 11, fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace" }}>
           <thead>
@@ -163,15 +164,15 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
                 <th key={i} style={{ 
                   position: "sticky",
                   top: 0,
-                  zIndex: 1,
+                  zIndex: 10,
                   background: "var(--bg-secondary)",
                   padding: "6px 8px", 
-                  borderBottom: "1px solid var(--border)", 
-                  borderRight: i < previewData.columns!.length - 1 ? "1px solid var(--border)" : "none", 
                   textAlign: "left", 
                   whiteSpace: "nowrap",
                   fontWeight: 600,
+                  boxShadow: `inset 0 -1px 0 var(--border), ${i < previewData.columns!.length - 1 ? "inset -1px 0 0 var(--border)" : "none"}`,
                 }}>
+                  <div style={{ position: "absolute", inset: 0, background: "var(--bg)", zIndex: -1 }} />
                   {c || <em style={{ color: "var(--text-muted)", fontWeight: 400 }}>(empty)</em>}
                 </th>
               ))}
@@ -180,7 +181,7 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
           <tbody>
             {(previewData.rows ?? []).map((row, ri) => (
               <tr key={ri}>
-                {previewData.columns.map((col, ci) => (
+                {previewData.columns!.map((col, ci) => (
                   <td key={ci} style={{ 
                     padding: "4px 8px", 
                     borderBottom: ri < (previewData.rows?.length ?? 0) - 1 ? "1px solid var(--border)" : "none",
