@@ -186,34 +186,54 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
         </div>
       );
     }
-    const colKeys = previewData.columns.map((_, idx) => `_col${idx}`);
-    const columns = previewData.columns.map((c, idx) => ({
-      title: c,
-      dataIndex: colKeys[idx],
-      key: colKeys[idx],
-      width: 140,
-      ellipsis: { showTitle: false },
-      render: (text: string) => (
-        <Tooltip title={text} placement="topLeft">
-          <span style={{ fontFamily: "monospace", fontSize: 11 }}>{text}</span>
-        </Tooltip>
-      ),
-    }));
-    const safeRows = (previewData.rows ?? []).map((r, i) => {
-      const row: Record<string, string | number> = { key: i };
-      previewData.columns.forEach((col, idx) => { row[colKeys[idx]] = r[col]; });
-      return row;
-    });
     return (
-      <Table
-        dataSource={safeRows}
-        columns={columns}
-        size="small"
-        pagination={false}
-        tableLayout="fixed"
-        scroll={{ x: "max-content", y: 240 }}
-        style={{ marginTop: 10, border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}
-      />
+      <div style={{
+        marginTop: 10,
+        border: "1px solid var(--border)",
+        borderRadius: 6,
+        overflow: "auto",
+        maxHeight: 280,
+      }}>
+        <table style={{ borderCollapse: "separate", borderSpacing: 0, width: "100%", fontSize: 11, fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace" }}>
+          <thead style={{ position: "sticky", top: 0, zIndex: 1, background: "var(--bg-secondary)" }}>
+            <tr>
+              {previewData.columns.map((c, i) => (
+                <th key={i} style={{ 
+                  padding: "6px 8px", 
+                  borderBottom: "1px solid var(--border)", 
+                  borderRight: i < previewData.columns!.length - 1 ? "1px solid var(--border)" : "none", 
+                  textAlign: "left", 
+                  whiteSpace: "nowrap",
+                  fontWeight: 600,
+                }}>
+                  {c || <em style={{ color: "var(--text-muted)", fontWeight: 400 }}>(empty)</em>}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {(previewData.rows ?? []).map((row, ri) => (
+              <tr key={ri}>
+                {previewData.columns.map((col, ci) => (
+                  <td key={ci} style={{ 
+                    padding: "4px 8px", 
+                    borderBottom: ri < (previewData.rows?.length ?? 0) - 1 ? "1px solid var(--border)" : "none",
+                    borderRight: ci < previewData.columns!.length - 1 ? "1px solid var(--border)" : "none", 
+                    whiteSpace: "pre", 
+                    maxWidth: 200, 
+                    overflow: "hidden", 
+                    textOverflow: "ellipsis" 
+                  }}>
+                    <Tooltip title={row[col]} placement="topLeft">
+                      {row[col] === "" ? <em style={{ color: "var(--text-muted)", fontSize: 10 }}>(empty)</em> : row[col]}
+                    </Tooltip>
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     );
   };
 
