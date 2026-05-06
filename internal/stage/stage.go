@@ -291,3 +291,67 @@ func strVal(row []interface{}, idx int) string {
 		return fmt.Sprintf("%v", v)
 	}
 }
+
+// UploadFileToStage executes a PUT command to upload a local file to an internal stage.
+func UploadFileToStage(ctx context.Context, client *snowflake.Client, localPath string, stageName string, parallel int, autoCompress bool, sourceCompression string, overwrite bool) error {
+	// Ensure stageName starts with @
+	if !strings.HasPrefix(stageName, "@") {
+		stageName = "@" + stageName
+	}
+
+	sql := fmt.Sprintf("PUT 'file://%s' %s", strings.ReplaceAll(localPath, "'", "\\'"), stageName)
+	if parallel > 0 {
+		sql += fmt.Sprintf(" PARALLEL = %d", parallel)
+	}
+	if autoCompress {
+		sql += " AUTO_COMPRESS = TRUE"
+	} else {
+		sql += " AUTO_COMPRESS = FALSE"
+	}
+	if sourceCompression != "" && sourceCompression != "AUTO_DETECT" {
+		sql += fmt.Sprintf(" SOURCE_COMPRESSION = %s", sourceCompression)
+	}
+	if overwrite {
+		sql += " OVERWRITE = TRUE"
+	} else {
+		sql += " OVERWRITE = FALSE"
+	}
+
+	_, err := client.Execute(ctx, sql)
+	return err
+}
+
+// DownloadFileFromStage executes a GET command to download files from an internal stage to a local directory.
+func DownloadFileFromStage(ctx context.Context, client *snowflake.Client, stageName string, localDirPath string, parallel int, pattern string) error {
+	// Ensure stageName starts with @
+	if !strings.HasPrefix(stageName, "@") {
+		stageName = "@" + stageName
+	}
+
+	sql := fmt.Sprintf("GET %s 'file://%s'", stageName, strings.ReplaceAll(localDirPath, "'", "\\'"))
+	if parallel > 0 {
+		sql += fmt.Sprintf(" PARALLEL = %d", parallel)
+	}
+	if pattern != "" {
+		sql += fmt.Sprintf(" PATTERN = '%s'", snowflake.EscapeStringLit(pattern))
+	}
+
+	_, err := client.Execute(ctx, sql)
+	return err
+}
+
+// RemoveStageFiles deletes files from a stage using the REMOVE command.
+func RemoveStageFiles(ctx context.Context, client *snowflake.Client, stageName string, pattern string) error {
+	// Ensure stageName starts with @
+	if !strings.HasPrefix(stageName, "@") {
+		stageName = "@" + stageName
+	}
+
+	sql := fmt.Sprintf("REMOVE %s", stageName)
+	if pattern != "" {
+		sql += fmt.Sprintf(" PATTERN = '%s'", snowflake.EscapeStringLit(pattern))
+	}
+
+	_, err := client.Execute(ctx, sql)
+	return err
+}
