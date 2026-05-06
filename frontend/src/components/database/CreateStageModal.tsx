@@ -22,11 +22,12 @@ import {
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import FileFormatFields, { BASE_DEFAULTS } from "./FileFormatFields";
+import FormatPreviewTable from "./FormatPreviewTable";
 import type { snowflake, stage, fileformat } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
 
-const DEFAULTS: any = {
+const DEFAULTS = {
   name: "",
   database: "",
   schema: "",
@@ -73,6 +74,7 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
   const [stagePath, setStagePath] = useState("");
   const [previewData, setPreviewData] = useState<fileformat.PreviewResult | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const hasPreviewRef = useRef(false);
 
   // AI Suggest state
@@ -133,7 +135,7 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
   const runAiSuggest = async () => {
     if (!localPath) return;
     setAiSuggesting(true);
-    setCreateError(null);
+    setPreviewError(null);
     setAiExplanation(null);
     try {
       const head = await ReadFileHead(localPath, 65536);
@@ -161,7 +163,7 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
 
       if (obj.explanation) setAiExplanation(obj.explanation);
     } catch (err) {
-      setCreateError(String(err));
+      setPreviewError(String(err));
     } finally {
       setAiSuggesting(false);
     }
@@ -176,71 +178,6 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
     }, 500);
     return () => clearTimeout(timer);
   }, [cfg.fileFormat, previewSource, localPath, stagePath, runPreview]);
-
-  const renderPreviewTable = () => {
-    if (!previewData) return null;
-    if (!previewData.columns || previewData.columns.length === 0) {
-      return (
-        <div style={{ padding: "12px 0", textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
-          No data to preview
-        </div>
-      );
-    }
-    return (
-      <div style={{
-        marginTop: 10,
-        border: "1px solid var(--border)",
-        borderRadius: 6,
-        overflow: "auto",
-        maxHeight: 280,
-        background: "var(--bg)",
-      }}>
-        <table style={{ borderCollapse: "separate", borderSpacing: 0, width: "100%", fontSize: 11, fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace" }}>
-          <thead>
-            <tr>
-              {previewData.columns.map((c, i) => (
-                <th key={i} style={{ 
-                  position: "sticky",
-                  top: 0,
-                  zIndex: 10,
-                  background: "var(--bg-secondary)",
-                  padding: "6px 8px", 
-                  textAlign: "left", 
-                  whiteSpace: "nowrap",
-                  fontWeight: 600,
-                  boxShadow: `inset 0 -1px 0 var(--border), ${i < previewData.columns!.length - 1 ? "inset -1px 0 0 var(--border)" : "none"}`,
-                }}>
-                  <div style={{ position: "absolute", inset: 0, background: "var(--bg)", zIndex: -1 }} />
-                  {c || <em style={{ color: "var(--text-muted)", fontWeight: 400 }}>(empty)</em>}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {(previewData.rows ?? []).map((row, ri) => (
-              <tr key={ri}>
-                {previewData.columns!.map((col, ci) => (
-                  <td key={ci} style={{ 
-                    padding: "4px 8px", 
-                    borderBottom: ri < (previewData.rows?.length ?? 0) - 1 ? "1px solid var(--border)" : "none",
-                    borderRight: ci < previewData.columns!.length - 1 ? "1px solid var(--border)" : "none", 
-                    whiteSpace: "pre", 
-                    maxWidth: 200, 
-                    overflow: "hidden", 
-                    textOverflow: "ellipsis" 
-                  }}>
-                    <Tooltip title={row[col]} placement="topLeft">
-                      {row[col] === "" ? <em style={{ color: "var(--text-muted)", fontSize: 10 }}>(empty)</em> : row[col]}
-                    </Tooltip>
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  };
 
   const set = <K extends keyof stage.StageConfig>(key: K, value: stage.StageConfig[K]) =>
     setCfg((prev: any) => ({ ...prev, [key]: value }));
@@ -566,12 +503,12 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
                   <Button type="primary" size="small" loading={previewLoading} onClick={handlePreview}>
                     Preview
                   </Button>
-                  {previewSource === "LOCAL" && featureFlags.aiImportSuggest && (
-                    <Tooltip title="AI Suggest format options from file content">
+                  {featureFlags.aiImportSuggest && (
+                    <Tooltip title={previewSource === "LOCAL" ? "AI Suggest format options from file content" : "AI Suggest is only available for local files"}>
                       <Button
                         size="small"
                         onClick={runAiSuggest}
-                        disabled={!localPath || aiSuggesting}
+                        disabled={previewSource !== "LOCAL" || !localPath || aiSuggesting}
                         loading={aiSuggesting}
                       >
                         {!aiSuggesting && "✨"}
@@ -587,6 +524,18 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
                   </div>
                 )}
 
+                {previewError && (
+                  <Alert
+                    type="error"
+                    message="Preview failed"
+                    description={previewError}
+                    showIcon
+                    closable
+                    onClose={() => setPreviewError(null)}
+                    style={{ marginTop: 10 }}
+                  />
+                )}
+
                 {aiExplanation && (
                   <Alert
                     type="info"
@@ -599,7 +548,7 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
                   />
                 )}
 
-                {renderPreviewTable()}
+                <FormatPreviewTable previewData={previewData} />
               </div>
 
               {/* Generated SQL */}
