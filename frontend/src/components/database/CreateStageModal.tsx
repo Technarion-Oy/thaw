@@ -8,7 +8,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Modal, Form, Input, Select, Checkbox, Radio, Space,
-  Typography, Divider, Button, Alert, Table, Tooltip,
+  Typography, Divider, Button, Alert, Tooltip,
 } from "antd";
 import {
   InboxOutlined, PlusOutlined, FileSearchOutlined,

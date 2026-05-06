@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
-  Modal, Space, Typography, Button, Table, Alert, Radio, Tooltip, Input,
+  Modal, Space, Typography, Button, Alert, Radio, Tooltip, Input,
 } from "antd";
 import {
   FileTextOutlined, PlusOutlined, FileSearchOutlined,
