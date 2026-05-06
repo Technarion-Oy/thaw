@@ -242,6 +242,10 @@ export function Disconnect() {
   return window['go']['main']['App']['Disconnect']();
 }
 
+export function DownloadFileFromStage(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['DownloadFileFromStage'](arg1, arg2, arg3, arg4);
+}
+
 export function DropBackupPolicy(arg1) {
   return window['go']['main']['App']['DropBackupPolicy'](arg1);
 }
@@ -826,6 +830,10 @@ export function ListSecurityIntegrations() {
   return window['go']['main']['App']['ListSecurityIntegrations']();
 }
 
+export function ListStageFiles(arg1, arg2) {
+  return window['go']['main']['App']['ListStageFiles'](arg1, arg2);
+}
+
 export function ListSystemPythons() {
   return window['go']['main']['App']['ListSystemPythons']();
 }
@@ -924,6 +932,10 @@ export function ReadFileHead(arg1, arg2) {
 
 export function ReadNotebook(arg1) {
   return window['go']['main']['App']['ReadNotebook'](arg1);
+}
+
+export function RemoveStageFiles(arg1, arg2) {
+  return window['go']['main']['App']['RemoveStageFiles'](arg1, arg2);
 }
 
 export function ResetPipRegistryConfig() {
@@ -1096,6 +1108,10 @@ export function TestAIModel(arg1, arg2, arg3, arg4, arg5) {
 
 export function UninstallEnvPackage(arg1) {
   return window['go']['main']['App']['UninstallEnvPackage'](arg1);
+}
+
+export function UploadFileToStage(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['UploadFileToStage'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function UseDatabase(arg1, arg2) {

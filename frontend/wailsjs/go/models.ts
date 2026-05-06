@@ -112,6 +112,7 @@ export namespace config {
 	    ddlExport: boolean;
 	    putCommand: boolean;
 	    getCommand: boolean;
+	    removeCommand: boolean;
 	    userRoleManagement: boolean;
 	    warehouseManagement: boolean;
 	    warehouseCreditUsage: boolean;
@@ -151,6 +152,7 @@ export namespace config {
 	        this.ddlExport = source["ddlExport"];
 	        this.putCommand = source["putCommand"];
 	        this.getCommand = source["getCommand"];
+	        this.removeCommand = source["removeCommand"];
 	        this.userRoleManagement = source["userRoleManagement"];
 	        this.warehouseManagement = source["warehouseManagement"];
 	        this.warehouseCreditUsage = source["warehouseCreditUsage"];
@@ -3269,6 +3271,24 @@ export namespace stage {
 		    }
 		    return a;
 		}
+	}
+	export class StageFile {
+	    name: string;
+	    size: number;
+	    md5: string;
+	    lastModified: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new StageFile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.size = source["size"];
+	        this.md5 = source["md5"];
+	        this.lastModified = source["lastModified"];
+	    }
 	}
 
 }

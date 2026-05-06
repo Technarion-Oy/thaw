@@ -61,7 +61,7 @@ import {
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, UploadFileToStage, PickOpenFile } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -105,6 +105,7 @@ import PipeCopyHistoryModal from "../pipe/PipeCopyHistoryModal";
 import PipeStatusModal from "../pipe/PipeStatusModal";
 import CreateStageModal from "../database/CreateStageModal";
 import StagePropertiesModal from "../database/StagePropertiesModal";
+import StageBrowserModal from "../database/StageBrowserModal";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 
 const { Text } = Typography;
@@ -441,6 +442,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [createTableModal, setCreateTableModal] = useState<{ db: string; schema: string } | null>(null);
   const [createStageModal, setCreateStageModal] = useState<{ db: string; schema: string } | null>(null);
   const [stagePropertiesModal, setStagePropertiesModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [stageBrowserModal, setStageBrowserModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createFileFormatModal, setCreateFileFormatModal] = useState<{ db: string; schema: string } | null>(null);
   const [createSecretModal, setCreateSecretModal] = useState<{ db: string; schema: string } | null>(null);
   const [modifySecretModal, setModifySecretModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -1123,6 +1125,35 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const name = nameParts.join(":");
     setCtxMenu(null);
     setStagePropertiesModal({ db, schema, name });
+  };
+
+  const openStageBrowser = () => {
+    if (!ctxMenu) return;
+    const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
+    const name = nameParts.join(":");
+    setCtxMenu(null);
+    setStageBrowserModal({ db, schema, name });
+  };
+
+  const uploadToStage = async () => {
+    if (!ctxMenu) return;
+    const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
+    const name = nameParts.join(":");
+    setCtxMenu(null);
+
+    const localPath = await PickOpenFile();
+    if (!localPath) return;
+
+    const stageRef = `@${db}.${schema}.${name}`;
+    const hide = message.loading(`Uploading ${localPath} to ${stageRef}…`, 0);
+    try {
+      await UploadFileToStage(localPath, stageRef, 4, true, "AUTO_DETECT", true);
+      hide();
+      message.success(`Uploaded ${localPath} successfully.`);
+    } catch (e) {
+      hide();
+      message.error(`Failed to upload file: ${String(e)}`);
+    }
   };
 
   const openCreateFileFormat = () => {
@@ -2365,6 +2396,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "FILE FORMAT" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
+            menuItem("Browse Stage Files…", <SearchOutlined style={{ fontSize: 12 }} />, openStageBrowser, undefined, !featureFlags.getCommand && !featureFlags.removeCommand, "Stage browsing is only useful when GET or REMOVE commands are enabled.")}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
+            menuItem("Upload File to Stage…", <UploadOutlined style={{ fontSize: 12 }} />, uploadToStage, undefined, !featureFlags.putCommand, "PUT commands are disabled. Enable them under View → Enabled Features…")}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
             menuItem("Properties", <FileOutlined style={{ fontSize: 12 }} />, openStageProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SECRET" &&
             menuItem("Modify…", <EditOutlined style={{ fontSize: 12 }} />, openModifySecret)}
@@ -2629,6 +2664,15 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           name={stagePropertiesModal.name}
           onClose={() => setStagePropertiesModal(null)}
           onSuccess={() => refreshDatabaseByName(stagePropertiesModal.db)}
+        />
+      )}
+
+      {stageBrowserModal && (
+        <StageBrowserModal
+          db={stageBrowserModal.db}
+          schema={stageBrowserModal.schema}
+          name={stageBrowserModal.name}
+          onClose={() => setStageBrowserModal(null)}
         />
       )}
 

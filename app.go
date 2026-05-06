@@ -1401,6 +1401,56 @@ func (a *App) BuildAlterStageSql(cfg stage.AlterStageConfig) string {
 	return stage.BuildAlterStageSql(cfg)
 }
 
+// ListStageFiles returns the list of files on a Snowflake stage.
+func (a *App) ListStageFiles(stageName string, pattern string) ([]stage.StageFile, error) {
+	if a.client == nil {
+		return nil, ErrNotConnected
+	}
+	return stage.ListStageFiles(a.ctx, a.client, stageName, pattern)
+}
+
+// UploadFileToStage executes a PUT command to upload a local file to an internal stage.
+func (a *App) UploadFileToStage(localPath string, stageName string, parallel int, autoCompress bool, sourceCompression string, overwrite bool) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+
+	flags := loadUserFeatureFlags()
+	if !flags.PutCommand {
+		return fmt.Errorf("PUT commands are disabled. Enable them under View → Enabled Features…")
+	}
+
+	return stage.UploadFileToStage(a.ctx, a.client, localPath, stageName, parallel, autoCompress, sourceCompression, overwrite)
+}
+
+// DownloadFileFromStage executes a GET command to download files from an internal stage to a local directory.
+func (a *App) DownloadFileFromStage(stageName string, localDirPath string, parallel int, pattern string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+
+	flags := loadUserFeatureFlags()
+	if !flags.GetCommand {
+		return fmt.Errorf("GET commands are disabled. Enable them under View → Enabled Features…")
+	}
+
+	return stage.DownloadFileFromStage(a.ctx, a.client, stageName, localDirPath, parallel, pattern)
+}
+
+// RemoveStageFiles deletes files from a stage using the REMOVE command.
+func (a *App) RemoveStageFiles(stageName string, pattern string) error {
+	if a.client == nil {
+		return ErrNotConnected
+	}
+
+	flags := loadUserFeatureFlags()
+	if !flags.RemoveCommand {
+		return fmt.Errorf("REMOVE commands are disabled. Enable them under View → Enabled Features…")
+	}
+
+	return stage.RemoveStageFiles(a.ctx, a.client, stageName, pattern)
+}
+
 // ── File Format ──────────────────────────────────────────────────────────────
 
 // BuildCreateFileFormatSql returns the CREATE FILE FORMAT SQL statement for the

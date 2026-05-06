@@ -102,6 +102,13 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Directory Settings** — toggle directory tables and configure auto-refresh for external stages
   - **Live SQL Preview** — the full `CREATE STAGE` statement updates in real-time as you modify the form
   - **Execution** — runs `ExecDDL` and refreshes the schema tree automatically on success
+  - **Stage File Browser** — right-click any stage and choose **Browse Stage Files…** to open a virtualised Ag-Grid view of the stage contents:
+    - **LIST view** — displays name, size, MD5, and last modified timestamp for all files in the stage
+    - **Regex filtering** — a search bar allows filtering files using the Snowflake `PATTERN` parameter
+    - **Bulk operations** — select multiple files to **Download** to a local directory or **Delete** from the stage in one go
+    - **Native dialogs** — uses native OS folder pickers for selecting download targets
+    - **Context menu** — right-click any file row in the grid for quick access to Download and Delete actions
+  - **Quick Upload** — right-click any stage and choose **Upload File to Stage…** to immediately pick a local file and execute a `PUT` command (internal stages only)
 - **Snowpipe Management** — right-click any schema and choose **Create Object** → **Pipe…**, or right-click an existing pipe to access pipe-specific operations:
   - **Create** — dynamic form with name, OR REPLACE / IF NOT EXISTS options, Auto Ingest toggle, Error Integration, AWS SNS Topic, Integration, Comment, and an embedded Monaco editor for the `COPY INTO` statement; live SQL preview shows the full `CREATE PIPE` statement
   - **Properties** — right-click a pipe and choose **Properties…** to view `SHOW PIPES` metadata plus inline-editable **Pipe Execution Paused** (toggle), **Comment** (inline edit / UNSET), and **Tags** (add/remove key-value pairs); changes are applied immediately via `ALTER PIPE … SET / UNSET`
