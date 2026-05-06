@@ -212,7 +212,7 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
         pagination={false}
         tableLayout="fixed"
         scroll={{ x: "max-content", y: 240 }}
-        style={{ marginTop: 10, border: "1px solid var(--border)", borderRadius: 6 }}
+        style={{ marginTop: 10, border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}
       />
     );
   };
@@ -290,7 +290,7 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
       )}
 
       <Form layout="vertical" size="small">
-        <div style={formatSource === "inline" ? { display: "grid", gridTemplateColumns: "380px 1fr", gap: 24 } : {}}>
+        <div style={formatSource === "inline" ? { display: "grid", gridTemplateColumns: "380px minmax(0, 1fr)", gap: 24 } : {}}>
           {/* ── Left Column: Configuration ─────────────────────────────────── */}
           <div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0 16px", alignItems: "end" }}>
