@@ -177,7 +177,7 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
         pagination={false}
         tableLayout="fixed"
         scroll={{ x: "max-content", y: 240 }}
-        style={{ marginTop: 10, border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}
+        style={{ marginTop: 10, border: "1px solid var(--border)", borderRadius: 6 }}
       />
     );
   };
