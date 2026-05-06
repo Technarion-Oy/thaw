@@ -100,9 +100,12 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **External Configuration** — specify URL and Storage Integration (selected from a live account-wide list)
   - **Encryption** — configure encryption types (Snowflake Full, SSE, AWS SSE-KMS, etc.) and optional KMS key IDs
   - **Directory Settings** — toggle directory tables and configure auto-refresh for external stages
+  - **File Format Builder Integration** — choose between **Named format** or **Inline** (manual configuration); inline mode uses the visual File Format Builder form with support for:
+    - **Data Preview** — test your configuration against local files or Snowflake stage files before creating the stage
+    - **✨ AI Suggest** — automatically infer format options from local file content
+    - Fully gated by the **File Format Builder** feature flag
   - **Live SQL Preview** — the full `CREATE STAGE` statement updates in real-time as you modify the form
-  - **Execution** — runs `ExecDDL` and refreshes the schema tree automatically on success
-  - **Stage File Browser** — right-click any stage and choose **Browse Stage Files…** to open a virtualised Ag-Grid view of the stage contents:
+  - **Execution** — runs `ExecDDL` and refreshes the schema tree automatically on success  - **Stage File Browser** — right-click any stage and choose **Browse Stage Files…** to open a virtualised Ag-Grid view of the stage contents:
     - **LIST view** — displays name, size, MD5, and last modified timestamp for all files in the stage
     - **Regex filtering** — a search bar allows filtering files using the Snowflake `PATTERN` parameter
     - **Bulk operations** — select multiple files to **Download** to a local directory or **Delete** from the stage in one go
