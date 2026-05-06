@@ -195,10 +195,14 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
         maxHeight: 280,
       }}>
         <table style={{ borderCollapse: "separate", borderSpacing: 0, width: "100%", fontSize: 11, fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace" }}>
-          <thead style={{ position: "sticky", top: 0, zIndex: 1, background: "var(--bg-secondary)" }}>
+          <thead>
             <tr>
               {previewData.columns.map((c, i) => (
                 <th key={i} style={{ 
+                  position: "sticky",
+                  top: 0,
+                  zIndex: 1,
+                  background: "var(--bg-secondary)",
                   padding: "6px 8px", 
                   borderBottom: "1px solid var(--border)", 
                   borderRight: i < previewData.columns!.length - 1 ? "1px solid var(--border)" : "none", 
