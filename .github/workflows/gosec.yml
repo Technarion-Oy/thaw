@@ -41,6 +41,13 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      # go install compiles gosec from source using the Go toolchain set up above,
+      # ensuring it is compatible with the project's go.mod Go version requirement.
+      # The securego/gosec pre-built action bundles its own older Go and sets
+      # GOTOOLCHAIN=local, which breaks on projects requiring a newer Go version.
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.21.4
+
       # Excluded rules are all false positives for a native desktop application:
       #   G104 — unhandled errors: duplicate of golangci-lint errcheck (already enforced)
       #   G115 — int→uint16 overflow: PTY resize; rows/cols are always small values
@@ -53,6 +60,9 @@ jobs:
       #   G306 — WriteFile permissions 0644: correct for user-editable data files
       #   G703 — path traversal (taint): paths are within the user's own filesystem
       - name: Run gosec
-        uses: securego/gosec@v2.21.4
-        with:
-          args: -exclude=G104,G115,G122,G201,G204,G301,G304,G306,G703 -exclude-dir=frontend -exclude-dir=internal/integration ./...
+        run: |
+          gosec \
+            -exclude=G104,G115,G122,G201,G204,G301,G304,G306,G703 \
+            -exclude-dir=frontend \
+            -exclude-dir=internal/integration \
+            ./...

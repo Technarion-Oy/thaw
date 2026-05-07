@@ -43,5 +43,5 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.64.8
+          version: latest  # pre-built binary must match the project's Go version; latest ensures compatibility
           args: --timeout=5m
