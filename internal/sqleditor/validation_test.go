@@ -92,6 +92,18 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET t.val = s.val WHEN NOT MATCHED THEN INSERT (id, val) VALUES (s.id, s.val)",
 		"MERGE INTO t USING (SELECT * FROM s) AS src ON t.id = src.id WHEN MATCHED AND t.v <> src.v THEN UPDATE SET v = src.v WHEN MATCHED THEN DELETE WHEN NOT MATCHED THEN INSERT ALL BY NAME",
 		"MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE ALL BY NAME",
+		// Pipes
+		"CREATE PIPE my_pipe AS COPY INTO my_table FROM @my_stage",
+		"CREATE OR REPLACE PIPE my_pipe AS COPY INTO my_table FROM @my_stage",
+		"CREATE PIPE IF NOT EXISTS my_pipe AS COPY INTO my_table FROM @my_stage",
+		"CREATE PIPE my_pipe AUTO_INGEST = TRUE AS COPY INTO my_table FROM @my_stage",
+		"CREATE PIPE my_pipe AUTO_INGEST = TRUE AWS_SNS_TOPIC = 'arn:aws:sns:us-east-1:123456789012:my-topic' AS COPY INTO my_table FROM @my_stage",
+		"CREATE PIPE my_pipe AUTO_INGEST = TRUE INTEGRATION = 'my_int' AS COPY INTO my_table FROM @my_stage",
+		"CREATE PIPE my_pipe COMMENT = 'my pipe' AS COPY INTO my_table FROM @my_stage",
+		"CREATE PIPE my_pipe ERROR_INTEGRATION = my_error_int AS COPY INTO my_table FROM @my_stage",
+		"ALTER PIPE my_pipe REFRESH",
+		"ALTER PIPE my_pipe SET COMMENT = 'updated'",
+		"DROP PIPE IF EXISTS my_pipe",
 	}
 
 	for _, sql := range validQueries {
@@ -167,6 +179,14 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		// Other syntax
 		{"Grant role to table", "GRANT ROLE my_role TO TABLE my_table", "Unexpected syntax"},
 		{"Masking policy missing returns", "CREATE MASKING POLICY bad_mask AS (val string) -> CASE WHEN 1=1 THEN val END", "Missing RETURNS clause"},
+
+		// Invalid Pipe
+		{"Pipe missing AS", "CREATE PIPE my_pipe", "Missing mandatory AS COPY INTO"},
+		{"Pipe invalid body", "CREATE PIPE my_pipe AS SELECT 1", "Missing mandatory AS COPY INTO"},
+		{"Pipe SNS without AUTO_INGEST", "CREATE PIPE my_pipe AWS_SNS_TOPIC = 'arn:...' AS COPY INTO my_table FROM @my_stage", "AWS_SNS_TOPIC is only meaningful when AUTO_INGEST = TRUE"},
+		{"Pipe invalid property", "CREATE PIPE my_pipe INVALID_PROP = TRUE AS COPY INTO my_table FROM @my_stage", "Unexpected property 'INVALID_PROP'"},
+		{"Pipe Replace IF NOT EXISTS", "CREATE OR REPLACE PIPE IF NOT EXISTS my_pipe AS COPY INTO my_table FROM @my_stage", "Conflict between OR REPLACE and IF NOT EXISTS"},
+		{"Pipe AUTO_INGEST no stage", "CREATE PIPE my_pipe AUTO_INGEST = TRUE AS COPY INTO my_table FROM (SELECT * FROM t)", "typically requires a stage source"},
 	}
 
 	for _, tt := range tests {
@@ -529,6 +549,8 @@ func TestValidateTablesExist_Invalid(t *testing.T) {
 		{"CREATE TABLE CLONE missing", "CREATE TABLE t CLONE NOPE_TABLE", "NOPE_TABLE"},
 		{"CREATE TABLE LIKE missing", "CREATE TABLE t LIKE NOPE_TABLE", "NOPE_TABLE"},
 		{"CREATE TABLE AS SELECT missing", "CREATE TABLE t AS SELECT * FROM NOPE_TABLE", "NOPE_TABLE"},
+		// Pipes
+		{"Pipe missing target table", "CREATE PIPE p AS COPY INTO NOPE_TABLE FROM @s", "NOPE_TABLE"},
 	}
 
 	req := ValidateTablesExistRequest{

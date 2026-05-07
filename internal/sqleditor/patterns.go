@@ -38,7 +38,7 @@ var (
 	reSnowflakeFP = regexp.MustCompile(
 		`(?i)\bTABLESAMPLE\b|\bSAMPLE\s*\(|\bWITHIN\s+GROUP\b|\bCONNECT\s+BY\b` +
 			`|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b` +
-			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:STAGE|PIPE|FUNCTION|PROCEDURE|AGGREGATE` +
+			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:STAGE|FUNCTION|PROCEDURE|AGGREGATE` +
 			`|FILE\s+FORMAT|ALERT|SHARE` +
 			`|NETWORK|ROW\s+ACCESS` +
 			`|SESSION|PASSWORD|REPLICATION|FAILOVER|APPLICATION)\b` +
@@ -216,6 +216,12 @@ var (
 		`WAREHOUSE`, `USER_TASK_MANAGED_INITIAL_WAREHOUSE_SIZE`, `SCHEDULE`, `CONFIG`,
 		`ALLOW_OVERLAPPING_EXECUTION`, `USER_TASK_TIMEOUT_MS`, `SUSPEND_TASK_AFTER_NUM_FAILURES`,
 		`ERROR_INTEGRATION`, `COMMENT`, `AFTER`, `WHEN`,
+	}, "|")
+
+	// ── CREATE PIPE ───────────────────────────────────────────────────────────
+	reIsCreatePipe = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PIPE\b`)
+	pipeProps      = strings.Join([]string{
+		`AUTO_INGEST`, `AWS_SNS_TOPIC`, `INTEGRATION`, `COMMENT`, `ERROR_INTEGRATION`,
 	}, "|")
 
 	// ── CREATE USER ───────────────────────────────────────────────────────────
@@ -624,6 +630,44 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			if asIdx != nil {
 				validateProperties(parseText[:asIdx[0]], taskProps, r, &markers)
 			}
+			continue
+		}
+
+		// ── Preamble: CREATE PIPE ────────────────────────────────────────
+		if reIsCreatePipe.MatchString(parseText) {
+			// 1. Conflict between OR REPLACE and IF NOT EXISTS
+			if regexp.MustCompile(`(?i)\bOR\s+REPLACE\b`).MatchString(parseText) &&
+				regexp.MustCompile(`(?i)\bIF\s+NOT\s+EXISTS\b`).MatchString(parseText) {
+				markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE PIPE statement.", 4))
+				continue
+			}
+
+			// 2. Mandatory AS COPY INTO
+			asIdx := regexp.MustCompile(`(?i)\bAS\s+COPY\s+INTO\b`).FindStringIndex(parseText)
+			if asIdx == nil {
+				markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS COPY INTO clause in CREATE PIPE statement.", 4))
+				continue
+			}
+
+			preamble := parseText[:asIdx[0]]
+			// 3. Property validation
+			validateProperties(preamble, pipeProps, r, &markers)
+
+			// 4. AWS_SNS_TOPIC requires AUTO_INGEST = TRUE
+			if regexp.MustCompile(`(?i)\bAWS_SNS_TOPIC\s*=`).MatchString(preamble) {
+				if !regexp.MustCompile(`(?i)\bAUTO_INGEST\s*=\s*TRUE\b`).MatchString(preamble) {
+					markers = append(markers, diagMarkerSpan(r, "AWS_SNS_TOPIC is only meaningful when AUTO_INGEST = TRUE.", 4))
+				}
+			}
+
+			// 5. Warning for AUTO_INGEST = TRUE without stage source
+			if regexp.MustCompile(`(?i)\bAUTO_INGEST\s*=\s*TRUE\b`).MatchString(preamble) {
+				copyBody := parseText[asIdx[0]:]
+				if !regexp.MustCompile(`(?i)\bFROM\s+@`).MatchString(copyBody) {
+					markers = append(markers, diagMarkerSpan(r, "AUTO_INGEST = TRUE typically requires a stage source (FROM @stage).", 4))
+				}
+			}
+
 			continue
 		}
 
