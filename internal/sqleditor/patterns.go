@@ -194,6 +194,22 @@ var (
 		`CREDIT_QUOTA`, `FREQUENCY`, `START_TIMESTAMP`, `END_TIMESTAMP`, `NOTIFY_USERS`,
 	}, "|")
 
+	// ── CREATE STREAM ─────────────────────────────────────────────────────────
+	reIsCreateStream = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?STREAM\b`)
+	streamProps      = strings.Join([]string{
+		`COPY\s+GRANTS`,
+		`APPEND_ONLY\s*=\s*(?:TRUE|FALSE)`,
+		`INSERT_ONLY\s*=\s*(?:TRUE|FALSE)`,
+		`SHOW_INITIAL_ROWS\s*=\s*(?:TRUE|FALSE)`,
+		`COMMENT\s*=\s*'(?:[^']|'')*'`,
+	}, "|")
+
+	reValidCreateStream = regexp.MustCompile(
+		`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?STREAM\s+(?:IF\s+NOT\s+EXISTS\s+)?` +
+			_identPath + `(?:\s+COPY\s+GRANTS)?\s+ON\s+(?:TABLE|VIEW|STAGE|EXTERNAL\s+TABLE)\s+` + _identPath +
+			`(?:\s+(?:AT|BEFORE)\s*` + _balancedParens + `)?` +
+			`(?:\s+(?:` + streamProps + `))*\s*$`)
+
 	// ── CREATE TASK ───────────────────────────────────────────────────────────
 	reIsCreateTask = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TASK\b`)
 	taskProps      = strings.Join([]string{
@@ -583,6 +599,14 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// ── Preamble: CREATE RESOURCE MONITOR ────────────────────────────
 		if reIsCreateResourceMonitor.MatchString(parseText) {
 			validateProperties(parseText, rmProps, r, &markers)
+			continue
+		}
+
+		// ── Preamble: CREATE STREAM ──────────────────────────────────────
+		if reIsCreateStream.MatchString(parseText) {
+			if !reValidCreateStream.MatchString(parseText) {
+				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE STREAM statement.", 4))
+			}
 			continue
 		}
 
