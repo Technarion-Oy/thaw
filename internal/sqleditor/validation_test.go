@@ -101,6 +101,9 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE PIPE my_pipe AUTO_INGEST = TRUE INTEGRATION = 'my_int' AS COPY INTO my_table FROM @my_stage",
 		"CREATE PIPE my_pipe COMMENT = 'my pipe' AS COPY INTO my_table FROM @my_stage",
 		"CREATE PIPE my_pipe ERROR_INTEGRATION = my_error_int AS COPY INTO my_table FROM @my_stage",
+		"ALTER PIPE my_pipe REFRESH",
+		"ALTER PIPE my_pipe SET COMMENT = 'updated'",
+		"DROP PIPE IF EXISTS my_pipe",
 	}
 
 	for _, sql := range validQueries {
