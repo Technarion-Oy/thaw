@@ -51,6 +51,15 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE SEQUENCE my_seq START WITH 1",
 		"ALTER SEQUENCE my_seq INCREMENT = 10",
 		"DROP SEQUENCE IF EXISTS my_seq CASCADE",
+		// Streams
+		"CREATE STREAM my_stream ON TABLE my_table",
+		"CREATE OR REPLACE STREAM my_stream ON VIEW my_view APPEND_ONLY = TRUE",
+		"CREATE STREAM IF NOT EXISTS my_stream ON STAGE my_stage COMMENT = 'my stream'",
+		"CREATE STREAM my_stream ON TABLE my_table AT (TIMESTAMP => TO_TIMESTAMP_TZ('2023-01-01 00:00:00'))",
+		"CREATE STREAM my_stream ON TABLE my_table BEFORE (STATEMENT => '9e564d60-0000-0000-0000-000000000000')",
+		"CREATE STREAM my_stream ON TABLE t SHOW_INITIAL_ROWS = TRUE",
+		"CREATE STREAM s ON TABLE t CHANGE_TRACKING = TRUE",
+		"CREATE STREAM s COPY GRANTS ON TABLE t",
 		// Tables
 		"CREATE TABLE IF NOT EXISTS my_database.public.basic_employees (emp_id NUMBER)",
 		"CREATE LOCAL TEMP TABLE t (id INT, name VARCHAR)",
@@ -121,6 +130,14 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Table Replace IF NOT EXISTS", "CREATE OR REPLACE TABLE foo IF NOT EXISTS (id INT)", "Conflict between OR REPLACE and IF NOT EXISTS"},
 		{"Table CLUSTER BY no parens", "CREATE TABLE foo (id INT) CLUSTER BY id", "Unexpected syntax"},
 		{"Table Retention invalid", "CREATE TABLE foo (id INT) DATA_RETENTION_TIME_IN_DAYS = 'abc'", "Unexpected syntax"},
+
+		// Invalid Stream
+		{"Stream missing ON", "CREATE STREAM s TABLE t", "Unexpected syntax"},
+		{"Stream missing object", "CREATE STREAM s ON TABLE", "Unexpected syntax"},
+		{"Stream invalid property", "CREATE STREAM s ON TABLE t AT (OFFSET => -100) INVALID_PROP = TRUE", "Unexpected syntax"},
+		{"Stream invalid object type", "CREATE STREAM s ON SEQUENCE seq", "Unexpected syntax"},
+		{"Stream COPY GRANTS after ON", "CREATE STREAM s ON TABLE t COPY GRANTS", "Unexpected syntax"},
+		{"Stream Replace IF NOT EXISTS", "CREATE OR REPLACE STREAM foo IF NOT EXISTS ON TABLE t", "Conflict between OR REPLACE and IF NOT EXISTS"},
 
 		// Invalid MERGE
 		{"MERGE INSERT in MATCHED", "MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN INSERT (id) VALUES (s.id)", "not allowed in WHEN MATCHED"},

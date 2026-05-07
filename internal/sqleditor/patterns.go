@@ -38,7 +38,7 @@ var (
 	reSnowflakeFP = regexp.MustCompile(
 		`(?i)\bTABLESAMPLE\b|\bSAMPLE\s*\(|\bWITHIN\s+GROUP\b|\bCONNECT\s+BY\b` +
 			`|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b` +
-			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:STREAM|STAGE|PIPE|FUNCTION|PROCEDURE|AGGREGATE` +
+			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:STAGE|PIPE|FUNCTION|PROCEDURE|AGGREGATE` +
 			`|FILE\s+FORMAT|ALERT|SHARE` +
 			`|NETWORK|ROW\s+ACCESS` +
 			`|SESSION|PASSWORD|REPLICATION|FAILOVER|APPLICATION)\b` +
@@ -193,6 +193,22 @@ var (
 	rmProps                   = strings.Join([]string{
 		`CREDIT_QUOTA`, `FREQUENCY`, `START_TIMESTAMP`, `END_TIMESTAMP`, `NOTIFY_USERS`,
 	}, "|")
+
+	// ── CREATE STREAM ─────────────────────────────────────────────────────────
+	reIsCreateStream = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?STREAM\b`)
+	streamProps      = strings.Join([]string{
+		`APPEND_ONLY\s*=\s*(?:TRUE|FALSE)`,
+		`INSERT_ONLY\s*=\s*(?:TRUE|FALSE)`,
+		`SHOW_INITIAL_ROWS\s*=\s*(?:TRUE|FALSE)`,
+		`CHANGE_TRACKING\s*=\s*(?:TRUE|FALSE)`,
+		`COMMENT\s*=\s*'(?:[^']|'')*'`,
+	}, "|")
+
+	reValidCreateStream = regexp.MustCompile(
+		`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?STREAM\s+(?:IF\s+NOT\s+EXISTS\s+)?` +
+			_identPath + `(?:\s+COPY\s+GRANTS)?\s+ON\s+(?:TABLE|VIEW|STAGE|EXTERNAL\s+TABLE)\s+` + _identPath +
+			`(?:\s+(?:AT|BEFORE)\s*` + _balancedParens + `)?` +
+			`(?:\s+(?:` + streamProps + `))*\s*$`)
 
 	// ── CREATE TASK ───────────────────────────────────────────────────────────
 	reIsCreateTask = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TASK\b`)
@@ -583,6 +599,20 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// ── Preamble: CREATE RESOURCE MONITOR ────────────────────────────
 		if reIsCreateResourceMonitor.MatchString(parseText) {
 			validateProperties(parseText, rmProps, r, &markers)
+			continue
+		}
+
+		// ── Preamble: CREATE STREAM ──────────────────────────────────────
+		if reIsCreateStream.MatchString(parseText) {
+			if regexp.MustCompile(`(?i)\bOR\s+REPLACE\b`).MatchString(parseText) &&
+				regexp.MustCompile(`(?i)\bIF\s+NOT\s+EXISTS\b`).MatchString(parseText) {
+				markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS modifiers.", 4))
+				continue
+			}
+
+			if !reValidCreateStream.MatchString(parseText) {
+				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE STREAM statement.", 4))
+			}
 			continue
 		}
 
