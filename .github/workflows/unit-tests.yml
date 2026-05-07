@@ -13,9 +13,9 @@ on:
       - ".github/workflows/unit-tests.yml"
 
 jobs:
-  # ── DDL parser tests (no system deps, fast) ────────────────────────────────
-  ddl-unit-tests:
-    name: DDL unit tests
+  # ── DDL parser + SQLEditor tests (no system deps, combined to save runner startup) ──
+  pure-go-unit-tests:
+    name: Pure Go unit tests (DDL & SQLEditor)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -34,50 +34,27 @@ jobs:
         run: go mod download
 
       - name: Install go-junit-report
-        run: go install github.com/jstemmer/go-junit-report/v2@latest
+        run: |
+          # linux-amd64 matches ubuntu-latest and ubuntu-22.04 on GitHub-hosted runners.
+          # If GitHub ever moves ubuntu-latest to ARM, update the architecture suffix.
+          wget -qO go-junit-report.tar.gz https://github.com/jstemmer/go-junit-report/releases/download/v2.1.0/go-junit-report-v2.1.0-linux-amd64.tar.gz
+          tar -xzf go-junit-report.tar.gz
+          sudo mv go-junit-report /usr/local/bin/
 
-      - name: Run DDL unit tests
+      - name: Run DDL tests
+        continue-on-error: true
         run: go test -v -race -count=1 ./internal/ddl/... 2>&1 | go-junit-report -set-exit-code > report-ddl.xml
 
-      - name: Publish test results
-        uses: EnricoMi/publish-unit-test-result-action@v2
-        if: always()
-        with:
-          files: report-ddl.xml
-          check_name: DDL unit tests
-
-  # ── SQLEditor parser & validation tests (no system deps, fast) ─────────────
-  sqleditor-unit-tests:
-    name: SQLEditor unit tests
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      checks: write
-      pull-requests: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Download dependencies
-        run: go mod download
-
-      - name: Install go-junit-report
-        run: go install github.com/jstemmer/go-junit-report/v2@latest
-
-      - name: Run SQLEditor unit tests
+      - name: Run SQLEditor tests
+        continue-on-error: true
         run: go test -v -race -count=1 ./internal/sqleditor/... 2>&1 | go-junit-report -set-exit-code > report-sqleditor.xml
 
       - name: Publish test results
         uses: EnricoMi/publish-unit-test-result-action@v2
         if: always()
         with:
-          files: report-sqleditor.xml
-          check_name: SQLEditor unit tests
+          files: report-*.xml
+          check_name: Pure Go Unit Tests
 
   # ── Migration helper tests (package main, requires GTK/WebKit) ────────────
   migration-unit-tests:
@@ -97,10 +74,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+      - name: Cache and install system dependencies
+        uses: awalsh128/cache-apt-pkgs-action@v1.4.3
+        with:
+          packages: libgtk-3-dev libwebkit2gtk-4.0-dev
+          version: 1.0
 
       - name: Download dependencies
         run: go mod download
@@ -109,7 +87,12 @@ jobs:
         run: mkdir -p frontend/dist && touch frontend/dist/.keep
 
       - name: Install go-junit-report
-        run: go install github.com/jstemmer/go-junit-report/v2@latest
+        run: |
+          # linux-amd64 matches ubuntu-latest and ubuntu-22.04 on GitHub-hosted runners.
+          # If GitHub ever moves ubuntu-latest to ARM, update the architecture suffix.
+          wget -qO go-junit-report.tar.gz https://github.com/jstemmer/go-junit-report/releases/download/v2.1.0/go-junit-report-v2.1.0-linux-amd64.tar.gz
+          tar -xzf go-junit-report.tar.gz
+          sudo mv go-junit-report /usr/local/bin/
 
       - name: Run migration unit tests
         run: go test -v -race -count=1 -run "^Test(Normalize|SplitTopLevel|MigrQuote|ParseLocal|CommonColumn|ReplaceDDL|IsDependency|ExecutionPriority|RemoteKey|BuildMigration|ScanMigration)" . 2>&1 | go-junit-report -set-exit-code > report-migration.xml
