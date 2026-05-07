@@ -7,6 +7,7 @@ on:
       - '**.go'
       - 'go.mod'
       - 'go.sum'
+      - '.github/workflows/lint.yml'
   schedule:
     - cron: "0 6 * * 1"  # Every Monday at 06:00 UTC
   workflow_dispatch:
@@ -34,7 +35,7 @@ jobs:
         run: mkdir -p frontend/dist && touch frontend/dist/.keep
 
       - name: Cache and install system dependencies
-        uses: awalsh128/cache-apt-pkgs-action@latest
+        uses: awalsh128/cache-apt-pkgs-action@v1.4.3
         with:
           packages: libgtk-3-dev libwebkit2gtk-4.0-dev
           version: 1.0
@@ -42,5 +43,5 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          version: v1.64.8
           args: --timeout=5m

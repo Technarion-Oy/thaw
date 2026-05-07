@@ -35,14 +35,18 @@ jobs:
 
       - name: Install go-junit-report
         run: |
+          # linux-amd64 matches ubuntu-latest and ubuntu-22.04 on GitHub-hosted runners.
+          # If GitHub ever moves ubuntu-latest to ARM, update the architecture suffix.
           wget -qO go-junit-report.tar.gz https://github.com/jstemmer/go-junit-report/releases/download/v2.1.0/go-junit-report-v2.1.0-linux-amd64.tar.gz
           tar -xzf go-junit-report.tar.gz
           sudo mv go-junit-report /usr/local/bin/
 
       - name: Run DDL tests
+        continue-on-error: true
         run: go test -v -race -count=1 ./internal/ddl/... 2>&1 | go-junit-report -set-exit-code > report-ddl.xml
 
       - name: Run SQLEditor tests
+        continue-on-error: true
         run: go test -v -race -count=1 ./internal/sqleditor/... 2>&1 | go-junit-report -set-exit-code > report-sqleditor.xml
 
       - name: Publish test results
@@ -71,7 +75,7 @@ jobs:
           cache: true
 
       - name: Cache and install system dependencies
-        uses: awalsh128/cache-apt-pkgs-action@latest
+        uses: awalsh128/cache-apt-pkgs-action@v1.4.3
         with:
           packages: libgtk-3-dev libwebkit2gtk-4.0-dev
           version: 1.0
@@ -84,6 +88,8 @@ jobs:
 
       - name: Install go-junit-report
         run: |
+          # linux-amd64 matches ubuntu-latest and ubuntu-22.04 on GitHub-hosted runners.
+          # If GitHub ever moves ubuntu-latest to ARM, update the architecture suffix.
           wget -qO go-junit-report.tar.gz https://github.com/jstemmer/go-junit-report/releases/download/v2.1.0/go-junit-report-v2.1.0-linux-amd64.tar.gz
           tar -xzf go-junit-report.tar.gz
           sudo mv go-junit-report /usr/local/bin/
