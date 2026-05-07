@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
-  Modal, Space, Typography, Button, Table, Alert, Radio, Tooltip, Input,
+  Modal, Space, Typography, Button, Alert, Radio, Tooltip, Input,
 } from "antd";
 import {
   FileTextOutlined, PlusOutlined, FileSearchOutlined,
@@ -22,6 +22,7 @@ import {
 } from "../../../wailsjs/go/main/App";
 import type { fileformat } from "../../../wailsjs/go/models";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
+import FormatPreviewTable from "./FormatPreviewTable";
 import FileFormatFields, { BASE_DEFAULTS } from "./FileFormatFields";
 
 const { Text } = Typography;
@@ -48,6 +49,7 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
   const [stagePath, setStagePath] = useState("");
   const [previewData, setPreviewData] = useState<fileformat.PreviewResult | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   // tracks whether the user has triggered at least one preview (enables auto-refresh)
   const hasPreviewRef = useRef(false);
 
@@ -78,7 +80,7 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
     source: "LOCAL" | "STAGE",
     currentCfg: fileformat.FileFormatConfig,
   ) => {
-    setError(null);
+    setPreviewError(null);
     setPreviewLoading(true);
     try {
       let res: fileformat.PreviewResult;
@@ -90,13 +92,13 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
         res = await GetStageFilePreview(stagePth.trim(), currentCfg as any);
       }
       if (res.error) {
-        setError(res.error);
+        setPreviewError(res.error);
         setPreviewData(null);
       } else {
         setPreviewData(res);
       }
     } catch (err) {
-      setError(String(err));
+      setPreviewError(String(err));
       setPreviewData(null);
     } finally {
       setPreviewLoading(false);
@@ -136,53 +138,6 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
       setCreating(false);
     }
   };
-
-  // ── Render preview table ─────────────────────────────────────────────────
-
-  const renderPreviewTable = () => {
-    if (!previewData) return null;
-    if (!previewData.columns || previewData.columns.length === 0) {
-      return (
-        <div style={{ padding: "12px 0", textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
-          No data to preview
-        </div>
-      );
-    }
-    // Use stable index-based keys for dataIndex so that unusual column
-    // names (e.g. "a,b,c" from parse-header on a comma CSV with space
-    // delimiter) never reach Ant Design's CSS/path internals.
-    const colKeys = previewData.columns.map((_, idx) => `_col${idx}`);
-    const columns = previewData.columns.map((c, idx) => ({
-      title: c,
-      dataIndex: colKeys[idx],
-      key: colKeys[idx],
-      width: 140,
-      ellipsis: { showTitle: false },
-      render: (text: string) => (
-        <Tooltip title={text} placement="topLeft">
-          <span style={{ fontFamily: "monospace", fontSize: 11 }}>{text}</span>
-        </Tooltip>
-      ),
-    }));
-    const safeRows = (previewData.rows ?? []).map((r, i) => {
-      const row: Record<string, string | number> = { key: i };
-      previewData.columns.forEach((col, idx) => { row[colKeys[idx]] = r[col]; });
-      return row;
-    });
-    return (
-      <Table
-        dataSource={safeRows}
-        columns={columns}
-        size="small"
-        pagination={false}
-        tableLayout="fixed"
-        scroll={{ x: "max-content", y: 240 }}
-        style={{ marginTop: 10, border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}
-      />
-    );
-  };
-
-  // ── Render ───────────────────────────────────────────────────────────────
 
   return (
     <Modal
@@ -226,7 +181,7 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
         />
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "380px 1fr", gap: 24 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "380px minmax(0, 1fr)", gap: 24 }}>
         {/* ── Left: Configuration ─────────────────────────────────────── */}
         <div>
           <FileFormatFields cfg={cfg} set={set} />
@@ -300,7 +255,19 @@ export default function CreateFileFormatModal({ db, schema, onClose, onSuccess }
               </div>
             )}
 
-            {renderPreviewTable()}
+            {previewError && (
+              <Alert
+                type="error"
+                message="Preview failed"
+                description={previewError}
+                showIcon
+                closable
+                onClose={() => setPreviewError(null)}
+                style={{ marginTop: 10 }}
+              />
+            )}
+
+            <FormatPreviewTable previewData={previewData} />
           </div>
 
           {/* Generated SQL */}
