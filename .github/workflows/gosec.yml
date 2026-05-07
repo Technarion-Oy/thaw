@@ -41,12 +41,18 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      # go install compiles gosec from source using the Go toolchain set up above,
-      # ensuring it is compatible with the project's go.mod Go version requirement.
-      # The securego/gosec pre-built action bundles its own older Go and sets
-      # GOTOOLCHAIN=local, which breaks on projects requiring a newer Go version.
+      # go install X@version ignores the current module's go.mod, so gosec's own
+      # pinned golang.org/x/tools@v0.25.0 gets pulled in and fails to compile under
+      # Go 1.26.2. Build from a temp module instead, where we can promote x/tools
+      # to the version already used by this project (v0.42.0).
       - name: Install gosec
-        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.21.4
+        run: |
+          tmpdir=$(mktemp -d)
+          cd "$tmpdir"
+          go mod init _gosec
+          go get github.com/securego/gosec/v2/cmd/gosec@v2.21.4
+          go get golang.org/x/tools@v0.42.0
+          go install github.com/securego/gosec/v2/cmd/gosec
 
       # Excluded rules are all false positives for a native desktop application:
       #   G104 — unhandled errors: duplicate of golangci-lint errcheck (already enforced)
