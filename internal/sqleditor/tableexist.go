@@ -116,7 +116,7 @@ var (
 
 	// FROM/JOIN regex for fallback table extraction
 	reFromJoinFallback = regexp.MustCompile(
-		`(?i)(?:FROM|JOIN|MERGE\s+INTO|USING|INSERT\s+INTO|UPDATE|CLONE|LIKE)\s+(` + _identPath + `)`)
+		`(?i)(?:FROM|JOIN|MERGE\s+INTO|USING|INSERT\s+INTO|COPY\s+INTO|UPDATE|CLONE|LIKE)\s+(` + _identPath + `)`)
 
 	// CREATE DYNAMIC TABLE → extract SELECT portion.
 	// Go regexp has no lookahead; capture SELECT|WITH so the caller can slice
