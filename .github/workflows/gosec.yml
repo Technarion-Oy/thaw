@@ -31,33 +31,27 @@ jobs:
       - name: Create frontend dist stub
         run: mkdir -p frontend/dist && touch frontend/dist/.keep
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+      - name: Cache and install system dependencies
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: libgtk-3-dev libwebkit2gtk-4.0-dev
+          version: 1.0
 
       - name: Download dependencies
         run: go mod download
 
-      - name: Install gosec
-        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
-
+      # Excluded rules are all false positives for a native desktop application:
+      #   G104 — unhandled errors: duplicate of golangci-lint errcheck (already enforced)
+      #   G115 — int→uint16 overflow: PTY resize; rows/cols are always small values
+      #   G122 — WalkDir TOCTOU race: non-privileged user context, no exploit path
+      #   G201 — SQL string formatting: SQL is sent to the user's own Snowflake account
+      #   G204 — subprocess with variable/taint: all launches are intentional (git ops,
+      #           Snowpark venv tooling, AI tool run_command by design)
+      #   G301 — directory permissions 0755: standard for user data dirs on macOS/Linux
+      #   G304 — file inclusion via variable: all paths come from the trusted local user
+      #   G306 — WriteFile permissions 0644: correct for user-editable data files
+      #   G703 — path traversal (taint): paths are within the user's own filesystem
       - name: Run gosec
-        # Excluded rules are all false positives for a native desktop application:
-        #
-        #   G104 — unhandled errors: duplicate of golangci-lint errcheck (already enforced)
-        #   G115 — int→uint16 overflow: PTY resize; rows/cols are always small values
-        #   G122 — WalkDir TOCTOU race: non-privileged user context, no exploit path
-        #   G201 — SQL string formatting: SQL is sent to the user's own Snowflake account
-        #   G204 — subprocess with variable/taint: all launches are intentional (git ops,
-        #           Snowpark venv tooling, AI tool run_command by design)
-        #   G301 — directory permissions 0755: standard for user data dirs on macOS/Linux
-        #   G304 — file inclusion via variable: all paths come from the trusted local user
-        #   G306 — WriteFile permissions 0644: correct for user-editable data files
-        #   G703 — path traversal (taint): paths are within the user's own filesystem
-        run: |
-          gosec \
-            -exclude=G104,G115,G122,G201,G204,G301,G304,G306,G703 \
-            -exclude-dir=frontend \
-            -exclude-dir=internal/integration \
-            ./...
+        uses: securego/gosec@master
+        with:
+          args: -exclude=G104,G115,G122,G201,G204,G301,G304,G306,G703 -exclude-dir=frontend -exclude-dir=internal/integration ./...
