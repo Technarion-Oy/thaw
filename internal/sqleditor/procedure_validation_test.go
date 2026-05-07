@@ -48,6 +48,16 @@ func TestValidateSnowflakePatterns_CreateProcedure(t *testing.T) {
 			sql:           "CREATE PROCEDURE my_proc(a NUMBER) RETURNS NUMBER LANGUAGE SQL CALLED ON NULL INPUT AS $$ BEGIN RETURN a; END; $$",
 			expectWarning: false,
 		},
+		{
+			name:          "Valid table-valued procedure",
+			sql:           "CREATE PROCEDURE get_data() RETURNS TABLE(name VARCHAR, age INT) LANGUAGE SQL AS $$ BEGIN RETURN TABLE(SELECT name, age FROM t); END; $$",
+			expectWarning: false,
+		},
+		{
+			name:          "Valid procedure with EXECUTE AS in body",
+			sql:           "CREATE PROCEDURE my_proc() RETURNS VARCHAR LANGUAGE JAVASCRIPT AS $$ var s = 'EXECUTE AS INVOKER'; $$",
+			expectWarning: false,
+		},
 
 		// ── Invalid Cases ────────────────────────────────────────────────────
 		{
@@ -122,11 +132,8 @@ func TestValidateSnowflakePatterns_CreateProcedure(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ranges := GetStatementRanges(tt.sql)
 			markers := ValidateSnowflakePatterns(tt.sql, ranges)
-			
-			// For testing invalid datatypes, we should also call ValidateDataTypes since
-			// the issue states we should reuse it. Or we can just call ValidateDataTypes directly 
-			// if it's separate. ValidateSnowflakePatterns might not cover ValidateDataTypes natively
-			// unless we embed it. Let's combine them for the test.
+
+			// ValidateDataTypes is a separate validator; combine its output to test parameter and return-type checking.
 			markers = append(markers, ValidateDataTypes(tt.sql, ranges)...)
 
 			warnings := getWarnings(markers)

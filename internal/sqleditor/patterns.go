@@ -676,13 +676,30 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 
 		// ── Preamble: CREATE PROCEDURE ────────────────────────────────────────
 		if reIsCreateProcedure.MatchString(parseText) {
+			asBodyIdx := -1
+			for _, loc := range regexp.MustCompile(`(?i)\bAS\b`).FindAllStringIndex(parseText, -1) {
+				prefix := parseText[:loc[0]]
+				if regexp.MustCompile(`(?i)\bEXECUTE\s+$`).MatchString(prefix) {
+					continue
+				}
+				asBodyIdx = loc[0]
+				break
+			}
+
+			preamble := parseText
+			if asBodyIdx == -1 {
+				markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS clause in CREATE PROCEDURE statement.", 4))
+			} else {
+				preamble = parseText[:asBodyIdx]
+			}
+
 			// 1. Mandatory RETURNS
-			if !regexp.MustCompile(`(?i)\bRETURNS\b`).MatchString(parseText) {
+			if !regexp.MustCompile(`(?i)\bRETURNS\b`).MatchString(preamble) {
 				markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS clause in CREATE PROCEDURE statement.", 4))
 			}
 
 			// 2. Mandatory LANGUAGE
-			langMatch := regexp.MustCompile(`(?i)\bLANGUAGE\s+([a-zA-Z0-9_]+)\b`).FindStringSubmatch(parseText)
+			langMatch := regexp.MustCompile(`(?i)\bLANGUAGE\s+([a-zA-Z0-9_]+)\b`).FindStringSubmatch(preamble)
 			if langMatch == nil {
 				markers = append(markers, diagMarkerSpan(r, "Missing mandatory LANGUAGE clause in CREATE PROCEDURE statement.", 4))
 			} else {
@@ -696,29 +713,21 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 
 				// Python specific checks
 				if lang == "PYTHON" {
-					if !regexp.MustCompile(`(?i)\bRUNTIME_VERSION\b`).MatchString(parseText) {
+					if !regexp.MustCompile(`(?i)\bRUNTIME_VERSION\b`).MatchString(preamble) {
 						markers = append(markers, diagMarkerSpan(r, "RUNTIME_VERSION is required for PYTHON procedures.", 4))
 					}
-					hasPackages := regexp.MustCompile(`(?i)\bPACKAGES\b`).MatchString(parseText)
-					hasImports := regexp.MustCompile(`(?i)\bIMPORTS\b`).MatchString(parseText)
+					hasPackages := regexp.MustCompile(`(?i)\bPACKAGES\b`).MatchString(preamble)
+					hasImports := regexp.MustCompile(`(?i)\bIMPORTS\b`).MatchString(preamble)
 					if !hasPackages && !hasImports {
 						markers = append(markers, diagMarkerSpan(r, "PACKAGES or IMPORTS is required for PYTHON procedures.", 4))
 					}
 				}
 			}
 
-			// 3. Mandatory AS
-			// Check if there is an AS keyword followed by the body. Note: Snowflake uses AS $$ ... $$
-			// The syntax parser will have stripped it? No, parseText has it.
-			// Just checking for \bAS\b is enough for missing AS.
-			if !regexp.MustCompile(`(?i)\bAS\b`).MatchString(parseText) {
-				markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS clause in CREATE PROCEDURE statement.", 4))
-			}
-
 			// 4. Null input handling: mutually exclusive / redundant
-			hasCalledOnNull := regexp.MustCompile(`(?i)\bCALLED\s+ON\s+NULL\s+INPUT\b`).MatchString(parseText)
-			hasReturnsNull := regexp.MustCompile(`(?i)\bRETURNS\s+NULL\s+ON\s+NULL\s+INPUT\b`).MatchString(parseText)
-			hasStrict := regexp.MustCompile(`(?i)\bSTRICT\b`).MatchString(parseText)
+			hasCalledOnNull := regexp.MustCompile(`(?i)\bCALLED\s+ON\s+NULL\s+INPUT\b`).MatchString(preamble)
+			hasReturnsNull := regexp.MustCompile(`(?i)\bRETURNS\s+NULL\s+ON\s+NULL\s+INPUT\b`).MatchString(preamble)
+			hasStrict := regexp.MustCompile(`(?i)\bSTRICT\b`).MatchString(preamble)
 
 			if hasCalledOnNull && (hasReturnsNull || hasStrict) {
 				markers = append(markers, diagMarkerSpan(r, "CALLED ON NULL INPUT and RETURNS NULL ON NULL INPUT (or STRICT) are mutually exclusive.", 4))
@@ -728,7 +737,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			}
 
 			// 5. EXECUTE AS
-			if execAsMatch := regexp.MustCompile(`(?i)\bEXECUTE\s+AS\s+([a-zA-Z0-9_]+)\b`).FindStringSubmatch(parseText); execAsMatch != nil {
+			if execAsMatch := regexp.MustCompile(`(?i)\bEXECUTE\s+AS\s+([a-zA-Z0-9_]+)\b`).FindStringSubmatch(preamble); execAsMatch != nil {
 				execVal := strings.ToUpper(execAsMatch[1])
 				if execVal != "CALLER" && execVal != "OWNER" {
 					markers = append(markers, diagMarkerSpan(r, "EXECUTE AS must be CALLER or OWNER.", 4))
@@ -951,8 +960,8 @@ func ValidateDataTypes(sql string, stmtRanges []StatementRange) []DiagMarker {
 			for _, m := range reReturnsType.FindAllStringSubmatchIndex(rawText, -1) {
 				if len(m) >= 4 && m[2] != -1 {
 					typeName := rawText[m[2]:m[3]]
-					// Ignore "NULL" in RETURNS NULL ON NULL INPUT
-					if strings.ToUpper(typeName) != "NULL" {
+					// Ignore "NULL" in RETURNS NULL ON NULL INPUT and "TABLE" in RETURNS TABLE(...)
+					if strings.ToUpper(typeName) != "NULL" && strings.ToUpper(typeName) != "TABLE" {
 						checkType(typeName, stmtOffset+m[2])
 					}
 				}
