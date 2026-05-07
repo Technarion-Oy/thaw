@@ -58,6 +58,8 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE STREAM my_stream ON TABLE my_table AT (TIMESTAMP => TO_TIMESTAMP_TZ('2023-01-01 00:00:00'))",
 		"CREATE STREAM my_stream ON TABLE my_table BEFORE (STATEMENT => '9e564d60-0000-0000-0000-000000000000')",
 		"CREATE STREAM my_stream ON TABLE t SHOW_INITIAL_ROWS = TRUE",
+		"CREATE STREAM s ON TABLE t CHANGE_TRACKING = TRUE",
+		"CREATE STREAM s COPY GRANTS ON TABLE t",
 		// Tables
 		"CREATE TABLE IF NOT EXISTS my_database.public.basic_employees (emp_id NUMBER)",
 		"CREATE LOCAL TEMP TABLE t (id INT, name VARCHAR)",
@@ -134,6 +136,8 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Stream missing object", "CREATE STREAM s ON TABLE", "Unexpected syntax"},
 		{"Stream invalid property", "CREATE STREAM s ON TABLE t AT (OFFSET => -100) INVALID_PROP = TRUE", "Unexpected syntax"},
 		{"Stream invalid object type", "CREATE STREAM s ON SEQUENCE seq", "Unexpected syntax"},
+		{"Stream COPY GRANTS after ON", "CREATE STREAM s ON TABLE t COPY GRANTS", "Unexpected syntax"},
+		{"Stream Replace IF NOT EXISTS", "CREATE OR REPLACE STREAM foo IF NOT EXISTS ON TABLE t", "Conflict between OR REPLACE and IF NOT EXISTS"},
 
 		// Invalid MERGE
 		{"MERGE INSERT in MATCHED", "MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN INSERT (id) VALUES (s.id)", "not allowed in WHEN MATCHED"},
