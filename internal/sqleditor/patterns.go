@@ -1571,7 +1571,7 @@ func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker
 	}
 
 	// Rule: TRANSIENT is not supported for Iceberg tables.
-	if reTransient.MatchString(clean) {
+	if strings.Contains(strings.ToUpper(strings.Split(parseText, "(")[0]), "TRANSIENT") {
 		markers = append(markers, diagMarkerSpan(r, "TRANSIENT is not supported for Iceberg tables.", 4))
 	}
 
