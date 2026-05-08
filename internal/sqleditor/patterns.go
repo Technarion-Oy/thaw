@@ -88,6 +88,10 @@ var (
 	// ── CREATE TABLE ─────────────────────────────────────────────────────────
 	reIsCreateTable       = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+(?:REPLACE|ALTER)|LOCAL|GLOBAL|TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)*TABLE\b`)
 	reCreateTablePreamble = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath)
+
+	// ── COPY INTO ────────────────────────────────────────────────────────────
+	reIsCopyInto = regexp.MustCompile(`(?i)^\s*COPY\s+INTO\b`)
+	reCopyInto   = regexp.MustCompile(`(?i)^\s*COPY\s+INTO\s+(` + _identPath + `|@\S+|'[^']+')(?:\s+|$)`)
 	reCreateTableCTAS     = regexp.MustCompile(`(?i)^AS\s+(?:SELECT|WITH)\b`)
 	reCreateTableClone    = regexp.MustCompile(`(?i)^(?:CLONE|LIKE)\b`)
 	reCreateTableTemplate = regexp.MustCompile(`(?i)^USING\s+TEMPLATE\s*\(`)
@@ -276,7 +280,7 @@ var (
 		"SELECT": true, "WITH": true, "INSERT": true, "UPDATE": true,
 		"CREATE": true, "ALTER": true, "TRUNCATE": true, "CALL": true,
 		"SHOW": true, "SET": true, "DROP": true, "UNDROP": true,
-		"MERGE": true, "GRANT": true, "REVOKE": true,
+		"MERGE": true, "GRANT": true, "REVOKE": true, "COPY": true,
 	}
 )
 
@@ -540,6 +544,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			if !reValidAlterSeq.MatchString(parseText) || bothOrderNoorder {
 				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in ALTER SEQUENCE statement.", 4))
 			}
+			continue
+		}
+
+		// ── Preamble: COPY INTO ──────────────────────────────────────────
+		if reIsCopyInto.MatchString(parseText) {
+			markers = append(markers, validateCopyInto(parseText, r)...)
 			continue
 		}
 
@@ -1263,4 +1273,126 @@ func validateProperties(s string, validProps string, r StatementRange, markers *
 			*markers = append(*markers, diagMarkerSpan(r, fmt.Sprintf("Unexpected property '%s' in statement.", key), 4))
 		}
 	}
+}
+
+func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	m := reCopyInto.FindStringSubmatch(parseText)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in COPY INTO statement.", 4))
+		return markers
+	}
+
+	target := m[1]
+	rest := strings.TrimSpace(parseText[len(m[0]):])
+
+	// FROM clause is mandatory
+	fromMatch := regexp.MustCompile(`(?i)^FROM\s+`).FindStringIndex(rest)
+	if fromMatch == nil {
+		markers = append(markers, diagMarkerSpan(r, "COPY INTO statement is missing the mandatory FROM clause.", 4))
+		return markers
+	}
+
+	isUnloading := strings.HasPrefix(target, "@") || strings.HasPrefix(target, "'")
+	// Extract properties (everything after the FROM source)
+	restOfFrom := rest[fromMatch[1]:]
+	var properties string
+	if strings.HasPrefix(restOfFrom, "(") {
+		endIdx := findMatchingParen(restOfFrom)
+		if endIdx != -1 {
+			properties = strings.TrimSpace(restOfFrom[endIdx+1:])
+		} else {
+			properties = restOfFrom
+		}
+	} else {
+		// Find first word that looks like a property key (KEY =)
+		propIdx := regexp.MustCompile(`(?i)\b[a-zA-Z_0-9]+\s*=`).FindStringIndex(restOfFrom)
+		if propIdx != nil {
+			properties = restOfFrom[propIdx[0]:]
+		}
+	}
+
+	if !isUnloading {
+		// Loading (table target)
+		hasFiles := regexp.MustCompile(`(?i)\bFILES\s*=\s*`).MatchString(properties)
+		hasPattern := regexp.MustCompile(`(?i)\bPATTERN\s*=\s*`).MatchString(properties)
+		if hasFiles && hasPattern {
+			markers = append(markers, diagMarkerSpan(r, "FILES and PATTERN are mutually exclusive in COPY INTO statement.", 4))
+		}
+
+		// FILE_FORMAT
+		if regexp.MustCompile(`(?i)\bFILE_FORMAT\s*=\s*\(`).MatchString(properties) {
+			ffInner := extractParenContent(properties, "FILE_FORMAT")
+			hasFFName := regexp.MustCompile(`(?i)\bFORMAT_NAME\s*=\s*`).MatchString(ffInner)
+			hasFFType := regexp.MustCompile(`(?i)\bTYPE\s*=\s*`).MatchString(ffInner)
+			if hasFFName && hasFFType {
+				markers = append(markers, diagMarkerSpan(r, "FORMAT_NAME and inline TYPE are mutually exclusive in FILE_FORMAT clause.", 4))
+			}
+			if hasFFType {
+				if !regexp.MustCompile(`(?i)\bTYPE\s*=\s*(?:'?"?)(CSV|JSON|AVRO|ORC|PARQUET|XML)(?:'?"?)\b`).MatchString(ffInner) {
+					markers = append(markers, diagMarkerSpan(r, "Invalid FILE_FORMAT TYPE. Must be CSV, JSON, AVRO, ORC, PARQUET, or XML.", 4))
+				}
+			}
+		}
+
+		// ON_ERROR
+		if onErrorMatch := regexp.MustCompile(`(?i)\bON_ERROR\s*=\s*([a-zA-Z_0-9%]+)`).FindStringSubmatch(properties); onErrorMatch != nil {
+			val := strings.ToUpper(onErrorMatch[1])
+			if val != "CONTINUE" && val != "ABORT_STATEMENT" && val != "SKIP_FILE" &&
+				!regexp.MustCompile(`^SKIP_FILE_\d+%?$`).MatchString(val) {
+				markers = append(markers, diagMarkerSpan(r, "Invalid ON_ERROR value. Must be CONTINUE, SKIP_FILE, SKIP_FILE_<n>, SKIP_FILE_<n>%, or ABORT_STATEMENT.", 4))
+			}
+		}
+
+		validateBoolProp(properties, "PURGE", r, &markers)
+		validateBoolProp(properties, "FORCE", r, &markers)
+		validateBoolProp(properties, "LOAD_UNCERTAIN_FILES", r, &markers)
+
+		if matchMatch := regexp.MustCompile(`(?i)\bMATCH_BY_COLUMN_NAME\s*=\s*(\w+)\b`).FindStringSubmatch(properties); matchMatch != nil {
+			val := strings.ToUpper(matchMatch[1])
+			if val != "CASE_SENSITIVE" && val != "CASE_INSENSITIVE" && val != "NONE" {
+				markers = append(markers, diagMarkerSpan(r, "Invalid MATCH_BY_COLUMN_NAME value. Must be CASE_SENSITIVE, CASE_INSENSITIVE, or NONE.", 4))
+			}
+		}
+	} else {
+		// Unloading (stage target)
+		validateBoolProp(properties, "OVERWRITE", r, &markers)
+		validateBoolProp(properties, "SINGLE", r, &markers)
+		validateBoolProp(properties, "INCLUDE_QUERY_ID", r, &markers)
+		validateBoolProp(properties, "DETAILED_OUTPUT", r, &markers)
+
+		if mfsMatch := regexp.MustCompile(`(?i)\bMAX_FILE_SIZE\s*=\s*(\S+)\b`).FindStringSubmatch(properties); mfsMatch != nil {
+			val := mfsMatch[1]
+			if !regexp.MustCompile(`^\d+$`).MatchString(val) || val == "0" {
+				markers = append(markers, diagMarkerSpan(r, "MAX_FILE_SIZE must be a positive integer.", 4))
+			}
+		}
+	}
+
+	return markers
+}
+
+func validateBoolProp(s string, prop string, r StatementRange, markers *[]DiagMarker) {
+	re := regexp.MustCompile(`(?i)\b` + prop + `\s*=\s*(\w+)\b`)
+	if m := re.FindStringSubmatch(s); m != nil {
+		val := strings.ToUpper(m[1])
+		if val != "TRUE" && val != "FALSE" {
+			*markers = append(*markers, diagMarkerSpan(r, fmt.Sprintf("%s must be TRUE or FALSE.", prop), 4))
+		}
+	}
+}
+
+func extractParenContent(s string, key string) string {
+	re := regexp.MustCompile(`(?i)\b` + key + `\s*=\s*\(`)
+	loc := re.FindStringIndex(s)
+	if loc == nil {
+		return ""
+	}
+	content := s[loc[1]-1:]
+	endIdx := findMatchingParen(content)
+	if endIdx == -1 {
+		return content[1:]
+	}
+	return content[1:endIdx]
 }
