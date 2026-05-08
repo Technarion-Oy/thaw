@@ -119,6 +119,12 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"COPY INTO @my_stage FROM (SELECT * FROM t) OVERWRITE = TRUE SINGLE = FALSE MAX_FILE_SIZE = 1048576",
 		"COPY INTO my_table FROM @my_stage FILE_FORMAT = (TYPE = CSV FIELD_DELIMITER = '|')",
 		"COPY INTO my_table FROM @my_stage FILE_FORMAT = (FORMAT_NAME = my_format)",
+		// External Tables
+		"CREATE EXTERNAL TABLE et (col1 int as (value:c1::int)) WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = CSV)",
+		"CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s1/path/ FILE_FORMAT = (FORMAT_NAME = my_format)",
+		"CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = JSON) AUTO_REFRESH = TRUE",
+		"CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) PARTITION BY (c1) WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = PARQUET)",
+		"CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = CSV) TABLE_FORMAT = DELTA",
 	}
 
 	for _, sql := range validQueries {
@@ -211,6 +217,15 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"COPY invalid MAX_FILE_SIZE", "COPY INTO @my_stage FROM t MAX_FILE_SIZE = -100", "must be a positive integer"},
 		{"COPY invalid FILE_FORMAT TYPE", "COPY INTO my_table FROM @my_stage FILE_FORMAT = (TYPE = 'EXCEL')", "Invalid FILE_FORMAT TYPE"},
 		{"COPY mutually exclusive FORMAT_NAME/TYPE", "COPY INTO my_table FROM @my_stage FILE_FORMAT = (FORMAT_NAME = my_format TYPE = CSV)", "mutually exclusive"},
+
+		// Invalid External Table
+		{"External Table OR REPLACE", "CREATE OR REPLACE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = CSV)", "OR REPLACE is not supported"},
+		{"External Table CLUSTER BY", "CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) CLUSTER BY (c1) WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = CSV)", "CLUSTER BY is not supported"},
+		{"External Table Retention", "CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = CSV) DATA_RETENTION_TIME_IN_DAYS = 1", "DATA_RETENTION_TIME_IN_DAYS is not applicable"},
+		{"External Table missing Location", "CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) FILE_FORMAT = (TYPE = CSV)", "WITH LOCATION = @<stage> is mandatory"},
+		{"External Table missing File Format", "CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s1/path/", "FILE_FORMAT is mandatory"},
+		{"External Table non-virtual column", "CREATE EXTERNAL TABLE et (c1 int) WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = CSV)", "must be a virtual column using AS"},
+		{"External Table invalid prop", "CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = CSV) AUTO_REFRESH = YES", "Unexpected syntax in CREATE EXTERNAL TABLE properties"},
 	}
 
 	for _, tt := range tests {

@@ -192,6 +192,23 @@ var (
 		`MAX_CONCURRENCY_LEVEL`, `STATEMENT_QUEUED_TIMEOUT_IN_SECONDS`, `STATEMENT_TIMEOUT_IN_SECONDS`,
 	}, "|")
 
+	// ── CREATE EXTERNAL TABLE ────────────────────────────────────────────────
+	reIsCreateExternalTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EXTERNAL\s+TABLE\b`)
+	reExternalTablePreamble = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EXTERNAL\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath)
+
+	extTableProps = strings.Join([]string{
+		`WITH\s+LOCATION\s*=\s*@\S+`,
+		`REFRESH_ON_CREATE\s*=\s*(?:TRUE|FALSE)`,
+		`AUTO_REFRESH\s*=\s*(?:TRUE|FALSE)`,
+		`PATTERN\s*=\s*'(?:[^']|'')*'`,
+		`FILE_FORMAT\s*=\s*\((?:FORMAT_NAME\s*=\s*` + _identPath + `|TYPE\s*=\s*[a-zA-Z]+)(?:\s+[^)]+)*\)`,
+		`AWS_SNS_TOPIC\s*=\s*'(?:[^']|'')*'`,
+		`INTEGRATION\s*=\s*'(?:[^']|'')*'`,
+		`TABLE_FORMAT\s*=\s*DELTA`,
+		`COMMENT\s*=\s*'(?:[^']|'')*'`,
+		`(?:WITH\s+)?TAG\s*` + _balancedParens,
+	}, "|")
+
 	// ── CREATE RESOURCE MONITOR ───────────────────────────────────────────────
 	reIsCreateResourceMonitor = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?RESOURCE\s+MONITOR\b`)
 	rmProps                   = strings.Join([]string{
@@ -458,6 +475,92 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		if reIsCreateView.MatchString(parseText) {
 			if !reValidCreateViewPreamble.MatchString(parseText) {
 				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE VIEW statement.", 4))
+			}
+			continue
+		}
+
+		// ── Preamble: CREATE EXTERNAL TABLE ──────────────────────────────
+		if reIsCreateExternalTable.MatchString(parseText) {
+			if regexp.MustCompile(`(?i)\bOR\s+REPLACE\b`).MatchString(parseText) {
+				markers = append(markers, diagMarkerSpan(r, "OR REPLACE is not supported for EXTERNAL TABLE. Use DROP and CREATE.", 4))
+				continue
+			}
+			if regexp.MustCompile(`(?i)\bCLUSTER\s+BY\b`).MatchString(parseText) {
+				markers = append(markers, diagMarkerSpan(r, "CLUSTER BY is not supported for EXTERNAL TABLE.", 4))
+				continue
+			}
+			if regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\b`).MatchString(parseText) {
+				markers = append(markers, diagMarkerSpan(r, "DATA_RETENTION_TIME_IN_DAYS is not applicable to EXTERNAL TABLE.", 4))
+				continue
+			}
+
+			preambleMatch := reExternalTablePreamble.FindString(parseText)
+			if preambleMatch == "" {
+				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE EXTERNAL TABLE statement.", 4))
+				continue
+			}
+			rest := strings.TrimSpace(parseText[len(preambleMatch):])
+			rest = strings.TrimSpace(strings.TrimSpace(stripCommentsSQL(rest)))
+
+			if !strings.HasPrefix(rest, "(") {
+				markers = append(markers, diagMarkerSpan(r, "EXTERNAL TABLE must have a column list.", 4))
+				continue
+			}
+
+			// Find matching close paren for column list
+			endIdx := findMatchingParen(rest)
+			if endIdx == -1 {
+				markers = append(markers, diagMarkerSpan(r, "Unclosed column list in CREATE EXTERNAL TABLE statement.", 4))
+				continue
+			}
+
+			colList := rest[1:endIdx]
+			// Column validation: must use AS <expr> for non-partition columns
+			// We split by top-level commas and check each column.
+			cols := splitTopLevelCommas(colList)
+			for _, col := range cols {
+				col = strings.TrimSpace(col)
+				if col == "" {
+					continue
+				}
+				// Skip if it's a constraint like PRIMARY KEY or UNIQUE (though rare in EXTERNAL TABLE)
+				if regexp.MustCompile(`(?i)^(?:CONSTRAINT|PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY)\b`).MatchString(col) {
+					continue
+				}
+				// External table column must have "AS (" or "AS <expr>"
+				if !regexp.MustCompile(`(?i)\bAS\s+`).MatchString(col) {
+					markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Column '%s' in EXTERNAL TABLE must be a virtual column using AS <expr>.", col), 4))
+				}
+			}
+
+			after := strings.TrimSpace(rest[endIdx+1:])
+
+			// Check for PARTITION BY
+			if strings.HasPrefix(strings.ToUpper(after), "PARTITION BY") {
+				// Find first '(' after PARTITION BY
+				pIdx := strings.Index(after, "(")
+				if pIdx != -1 {
+					partEnd := findMatchingParen(after[pIdx:])
+					if partEnd != -1 {
+						after = strings.TrimSpace(after[pIdx+partEnd+1:])
+					}
+				}
+			}
+
+			// Mandatory WITH LOCATION and FILE_FORMAT
+			if !regexp.MustCompile(`(?i)\bWITH\s+LOCATION\s*=`).MatchString(after) {
+				markers = append(markers, diagMarkerSpan(r, "WITH LOCATION = @<stage> is mandatory for EXTERNAL TABLE.", 4))
+				continue
+			}
+			if !regexp.MustCompile(`(?i)\bFILE_FORMAT\s*=`).MatchString(after) {
+				markers = append(markers, diagMarkerSpan(r, "FILE_FORMAT is mandatory for EXTERNAL TABLE.", 4))
+				continue
+			}
+
+			// Validate remaining properties
+			extTablePropsRe := regexp.MustCompile(`(?i)^\s*(?:(?:` + extTableProps + `)(?:\s+|$))*$`)
+			if after != "" && !extTablePropsRe.MatchString(after) {
+				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE EXTERNAL TABLE properties.", 4))
 			}
 			continue
 		}
