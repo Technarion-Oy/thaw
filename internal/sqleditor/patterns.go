@@ -63,7 +63,6 @@ var (
 	reOrReplace         = regexp.MustCompile(`(?i)\bOR\s+REPLACE\b`)
 	reIfNotExists       = regexp.MustCompile(`(?i)\bIF\s+NOT\s+EXISTS\b`)
 	reStripStringLiterals = regexp.MustCompile(`'(?:''|[^'])*'`)
-	reIsCreateTransientIcebergTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TRANSIENT\s+ICEBERG\s+TABLE\b`)
 	// rePatternClusterBy — distinct from the CLUSTER BY pattern in `tableProps` for CREATE TABLE.
 	rePatternClusterBy  = regexp.MustCompile(`(?i)\bCLUSTER\s+BY\b`)
 	reDataRetention     = regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\b`)
@@ -299,6 +298,7 @@ var (
 
 	// ── CREATE ICEBERG TABLE ────────────────────────────────────────────────
 	reIsCreateIcebergTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?ICEBERG\s+TABLE\b`)
+	reIsCreateTransientIcebergTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TRANSIENT\s+ICEBERG\s+TABLE\b`)
 	reGetStatementProperties = regexp.MustCompile(`(?i)\b([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*('(?:''|[^'])*'|[\w$]+)`)
 
 	// ── ALTER STAGE ───────────────────────────────────────────────────────────
@@ -1623,6 +1623,8 @@ func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker
 
 	return markers
 }
+
+// ── CREATE ICEBERG TABLE helpers ──────────────────────────────────────────
 
 func getStatementProperties(s string) map[string]string {
 	props := make(map[string]string)
