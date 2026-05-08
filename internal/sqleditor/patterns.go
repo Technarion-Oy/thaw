@@ -299,7 +299,7 @@ var (
 
 	// ── CREATE ICEBERG TABLE ────────────────────────────────────────────────
 	reIsCreateIcebergTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?ICEBERG\s+TABLE\b`)
-	reGetStatementProperties = regexp.MustCompile(`(?i)\b([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(\'[^\']*\'|[\w$]+)`)
+	reGetStatementProperties = regexp.MustCompile(`(?i)\b([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*('(?:''|[^'])*'|[\w$]+)`)
 
 	// ── ALTER STAGE ───────────────────────────────────────────────────────────
 	reIsAlterStage         = regexp.MustCompile(`(?i)^\s*ALTER\s+STAGE\b`)
@@ -1122,6 +1122,8 @@ var (
 	reCreateFuncExt  = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:TEMPORARY\s+|TEMP\s+)?(?:AGGREGATE\s+)?FUNCTION\s+` + _identPath + `\s*\(`)
 	reReturnsType    = regexp.MustCompile(`(?i)\bRETURNS\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s*\([^)]*\))?\b`)
 )
+// ValidateDataTypes checks that explicit data type declarations within
+// CREATE TABLE, ALTER TABLE, and CAST() functions exist in Snowflake's registry.
 func ValidateDataTypes(sql string, stmtRanges []StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
@@ -1547,13 +1549,12 @@ func extractParenContent(s string, key string) string {
 
 func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
+	clean := reStripStringLiterals.ReplaceAllString(parseText, " ")
 	props := getStatementProperties(parseText)
 
 	catalog, hasCatalog := props["CATALOG"]
 	_, hasExternalVolume := props["EXTERNAL_VOLUME"]
 	isSnowflakeCatalog := hasCatalog && strings.EqualFold(strings.Trim(catalog, "'"), "SNOWFLAKE")
-	
-	clean := reStripStringLiterals.ReplaceAllString(parseText, " ")
 
 	// Rule: BASE_LOCATION is mandatory for all Iceberg tables.
 	if val, ok := props["BASE_LOCATION"]; !ok || strings.TrimSpace(strings.Trim(val, "'")) == "" {
@@ -1624,6 +1625,9 @@ func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker
 
 func getStatementProperties(s string) map[string]string {
 	props := make(map[string]string)
+	// Strip parentheses and their contents first, as they contain column definitions, CHECKs, etc.
+	// This helps avoid spoofing property keys like CATALOG or EXTERNAL_VOLUME.
+	s = stripParenContents(s)
 	matches := reGetStatementProperties.FindAllStringSubmatch(s, -1)
 	for _, match := range matches {
 		props[strings.ToUpper(match[1])] = match[2]
