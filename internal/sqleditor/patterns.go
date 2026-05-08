@@ -63,6 +63,7 @@ var (
 	reOrReplace         = regexp.MustCompile(`(?i)\bOR\s+REPLACE\b`)
 	reIfNotExists       = regexp.MustCompile(`(?i)\bIF\s+NOT\s+EXISTS\b`)
 	reStripStringLiterals = regexp.MustCompile(`'(?:''|[^'])*'`)
+	reTransient           = regexp.MustCompile(`(?i)\bTRANSIENT\b`)
 	// rePatternClusterBy — distinct from the CLUSTER BY pattern in `tableProps` for CREATE TABLE.
 	rePatternClusterBy  = regexp.MustCompile(`(?i)\bCLUSTER\s+BY\b`)
 	reDataRetention     = regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\b`)
@@ -295,6 +296,10 @@ var (
 		`AWS_ACCESS_POINT_ARN`, `USE_PRIVATELINK_ENDPOINT`, `ENDPOINT`,
 		`FILE_FORMAT`, `COPY_OPTIONS`, `COMMENT`, `DIRECTORY`,
 	}, "|")
+
+	// ── CREATE ICEBERG TABLE ────────────────────────────────────────────────
+	reIsCreateIcebergTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?ICEBERG\s+TABLE\b`)
+	reGetStatementProperties = regexp.MustCompile(`(?i)\b([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(\'[^\']*\'|[\w$]+)`)
 
 	// ── ALTER STAGE ───────────────────────────────────────────────────────────
 	reIsAlterStage         = regexp.MustCompile(`(?i)^\s*ALTER\s+STAGE\b`)
@@ -540,7 +545,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			// Column validation: must use AS <expr> for non-partition columns
 			// We split by top-level commas and check each column.
 			cols := splitTopLevelCommas(colList)
-			
+
 			// Snowflake rejects empty column lists
 			if len(cols) == 0 || (len(cols) == 1 && strings.TrimSpace(cols[0]) == "") {
 				markers = append(markers, diagMarkerSpan(r, "Column list must not be empty.", 4))
@@ -600,6 +605,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			if after != "" && !extTablePropsRe.MatchString(after) {
 				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE EXTERNAL TABLE properties.", 4))
 			}
+			continue
+		}
+
+		// ── Preamble: CREATE ICEBERG TABLE ───────────────────────────────
+		if reIsCreateIcebergTable.MatchString(parseText) {
+			markers = append(markers, validateCreateIcebergTable(parseText, r)...)
 			continue
 		}
 
@@ -1111,9 +1122,6 @@ var (
 	reCreateFuncExt  = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:TEMPORARY\s+|TEMP\s+)?(?:AGGREGATE\s+)?FUNCTION\s+` + _identPath + `\s*\(`)
 	reReturnsType    = regexp.MustCompile(`(?i)\bRETURNS\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s*\([^)]*\))?\b`)
 )
-
-// ValidateDataTypes checks that explicit data type declarations within
-// CREATE TABLE, ALTER TABLE, and CAST() functions exist in Snowflake's registry.
 func ValidateDataTypes(sql string, stmtRanges []StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
@@ -1535,4 +1543,105 @@ func extractParenContent(s string, key string) string {
 		return content[1:]
 	}
 	return content[1:endIdx]
+}
+
+func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	props := getStatementProperties(parseText)
+
+	catalog, hasCatalog := props["CATALOG"]
+	_, hasExternalVolume := props["EXTERNAL_VOLUME"]
+	isSnowflakeCatalog := hasCatalog && strings.EqualFold(strings.Trim(catalog, "'"), "SNOWFLAKE")
+	
+	clean := reStripStringLiterals.ReplaceAllString(parseText, " ")
+
+	// Rule: BASE_LOCATION is mandatory for all Iceberg tables.
+	if val, ok := props["BASE_LOCATION"]; !ok || strings.TrimSpace(strings.Trim(val, "'")) == "" {
+		markers = append(markers, diagMarkerSpan(r, "BASE_LOCATION is mandatory for all Iceberg tables and cannot be empty.", 4))
+	}
+
+	// Rule: EXTERNAL_VOLUME and CATALOG are mandatory for non-Snowflake catalogs.
+	if !isSnowflakeCatalog {
+		if !hasExternalVolume {
+			markers = append(markers, diagMarkerSpan(r, "EXTERNAL_VOLUME is mandatory for Iceberg tables with external catalogs.", 4))
+		}
+		if !hasCatalog {
+			markers = append(markers, diagMarkerSpan(r, "CATALOG is mandatory for Iceberg tables with external catalogs.", 4))
+		}
+	}
+
+	// Rule: TRANSIENT is not supported for Iceberg tables.
+	if reTransient.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r, "TRANSIENT is not supported for Iceberg tables.", 4))
+	}
+
+	// Rule: CATALOG_TABLE_NAME and CATALOG_NAMESPACE are only valid for non-Snowflake catalogs.
+	if isSnowflakeCatalog {
+		if _, ok := props["CATALOG_TABLE_NAME"]; ok {
+			markers = append(markers, diagMarkerSpan(r, "CATALOG_TABLE_NAME is only valid when CATALOG is not 'SNOWFLAKE'.", 4))
+		}
+		if _, ok := props["CATALOG_NAMESPACE"]; ok {
+			markers = append(markers, diagMarkerSpan(r, "CATALOG_NAMESPACE is only valid when CATALOG is not 'SNOWFLAKE'.", 4))
+		}
+	}
+
+	// Rule: OR REPLACE and IF NOT EXISTS are mutually exclusive.
+	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE ICEBERG TABLE statement.", 4))
+	}
+
+	// Rule: OR REPLACE is not supported for external catalogs.
+	if !isSnowflakeCatalog && reOrReplace.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r, "OR REPLACE is not supported for Iceberg tables backed by external catalogs.", 4))
+	}
+
+	// Rule: CLUSTER BY is only for Snowflake-managed tables.
+	if !isSnowflakeCatalog && rePatternClusterBy.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r, "CLUSTER BY is supported only for Snowflake-managed Iceberg tables.", 4))
+	}
+
+	// Rule: DATA_RETENTION_TIME_IN_DAYS is only for Snowflake-managed tables.
+	if !isSnowflakeCatalog && reDataRetention.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r, "DATA_RETENTION_TIME_IN_DAYS applies only to Snowflake-managed Iceberg tables.", 4))
+	}
+
+	// Value validation for specific properties
+	if val, ok := props["REPLACE_INVALID_CHARACTERS"]; ok && !isBool(val) {
+		markers = append(markers, diagMarkerSpan(r, "REPLACE_INVALID_CHARACTERS must be TRUE or FALSE.", 4))
+	}
+	if val, ok := props["AUTO_REFRESH"]; ok && !isBool(val) {
+		markers = append(markers, diagMarkerSpan(r, "AUTO_REFRESH must be TRUE or FALSE.", 4))
+	}
+	if val, ok := props["REFRESH_MODE"]; ok && !isValidEnumValue(val, "AUTO", "FULL", "INCREMENTAL") {
+		markers = append(markers, diagMarkerSpan(r, "Invalid REFRESH_MODE value. Must be AUTO, FULL, or INCREMENTAL.", 4))
+	}
+	if val, ok := props["INITIALIZE"]; ok && !isValidEnumValue(val, "ON_CREATE", "ON_SCHEDULE") {
+		markers = append(markers, diagMarkerSpan(r, "Invalid INITIALIZE value. Must be ON_CREATE or ON_SCHEDULE.", 4))
+	}
+
+	return markers
+}
+
+func getStatementProperties(s string) map[string]string {
+	props := make(map[string]string)
+	matches := reGetStatementProperties.FindAllStringSubmatch(s, -1)
+	for _, match := range matches {
+		props[strings.ToUpper(match[1])] = match[2]
+	}
+	return props
+}
+
+func isBool(s string) bool {
+	upper := strings.ToUpper(strings.Trim(s, "'"))
+	return upper == "TRUE" || upper == "FALSE"
+}
+
+func isValidEnumValue(val string, validValues ...string) bool {
+	upperVal := strings.ToUpper(strings.Trim(val, "'"))
+	for _, valid := range validValues {
+		if upperVal == valid {
+			return true
+		}
+	}
+	return false
 }
