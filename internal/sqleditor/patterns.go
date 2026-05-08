@@ -60,6 +60,14 @@ var (
 	reTableFlatten      = regexp.MustCompile(`(?i)\bTABLE\s*\(\s*FLATTEN\s*\(`)
 	reQualifyAfterOrder = regexp.MustCompile(`(?is)\bORDER\s+BY[\s\S]+?\bQUALIFY\b`)
 	reVariantDotPath    = regexp.MustCompile(`(?i)\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\b`)
+	reOrReplace         = regexp.MustCompile(`(?i)\bOR\s+REPLACE\b`)
+	rePatternClusterBy  = regexp.MustCompile(`(?i)\bCLUSTER\s+BY\b`)
+	reDataRetention     = regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\b`)
+	reConstraintCol     = regexp.MustCompile(`(?i)^(?:CONSTRAINT|PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY)\b`)
+	reVirtualColAS      = regexp.MustCompile(`(?i)\bAS\s+`)
+	rePartitionBy       = regexp.MustCompile(`(?i)^PARTITION\s+BY\b`)
+	reWithLocation      = regexp.MustCompile(`(?i)\bWITH\s+LOCATION\s*=`)
+	reFileFormat        = regexp.MustCompile(`(?i)\bFILE_FORMAT\s*=`)
 
 	// ── CREATE VIEW ───────────────────────────────────────────────────────────
 	reIsCreateView = regexp.MustCompile(
@@ -208,6 +216,7 @@ var (
 		`COMMENT\s*=\s*'(?:[^']|'')*'`,
 		`(?:WITH\s+)?TAG\s*` + _balancedParens,
 	}, "|")
+	extTablePropsRe = regexp.MustCompile(`(?i)^\s*(?:(?:` + extTableProps + `)(?:\s+|$))*$`)
 
 	// ── CREATE RESOURCE MONITOR ───────────────────────────────────────────────
 	reIsCreateResourceMonitor = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?RESOURCE\s+MONITOR\b`)
@@ -481,26 +490,29 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 
 		// ── Preamble: CREATE EXTERNAL TABLE ──────────────────────────────
 		if reIsCreateExternalTable.MatchString(parseText) {
-			if regexp.MustCompile(`(?i)\bOR\s+REPLACE\b`).MatchString(parseText) {
-				markers = append(markers, diagMarkerSpan(r, "OR REPLACE is not supported for EXTERNAL TABLE. Use DROP and CREATE.", 4))
-				continue
-			}
-			if regexp.MustCompile(`(?i)\bCLUSTER\s+BY\b`).MatchString(parseText) {
-				markers = append(markers, diagMarkerSpan(r, "CLUSTER BY is not supported for EXTERNAL TABLE.", 4))
-				continue
-			}
-			if regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\b`).MatchString(parseText) {
-				markers = append(markers, diagMarkerSpan(r, "DATA_RETENTION_TIME_IN_DAYS is not applicable to EXTERNAL TABLE.", 4))
-				continue
-			}
-
 			preambleMatch := reExternalTablePreamble.FindString(parseText)
 			if preambleMatch == "" {
 				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE EXTERNAL TABLE statement.", 4))
 				continue
 			}
+
+			// OR REPLACE is already matched by the preamble regex if present, but it's invalid for EXTERNAL TABLE.
+			if strings.Contains(strings.ToUpper(preambleMatch), "OR REPLACE") {
+				markers = append(markers, diagMarkerSpan(r, "OR REPLACE is not supported for EXTERNAL TABLE. Use DROP and CREATE.", 4))
+				continue
+			}
+
+			if reClusterBy.MatchString(parseText) {
+				markers = append(markers, diagMarkerSpan(r, "CLUSTER BY is not supported for EXTERNAL TABLE.", 4))
+				continue
+			}
+			if reDataRetention.MatchString(parseText) {
+				markers = append(markers, diagMarkerSpan(r, "DATA_RETENTION_TIME_IN_DAYS is not applicable to EXTERNAL TABLE.", 4))
+				continue
+			}
+
 			rest := strings.TrimSpace(parseText[len(preambleMatch):])
-			rest = strings.TrimSpace(strings.TrimSpace(stripCommentsSQL(rest)))
+			rest = stripCommentsSQL(rest)
 
 			if !strings.HasPrefix(rest, "(") {
 				markers = append(markers, diagMarkerSpan(r, "EXTERNAL TABLE must have a column list.", 4))
@@ -524,11 +536,11 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 					continue
 				}
 				// Skip if it's a constraint like PRIMARY KEY or UNIQUE (though rare in EXTERNAL TABLE)
-				if regexp.MustCompile(`(?i)^(?:CONSTRAINT|PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY)\b`).MatchString(col) {
+				if reConstraintCol.MatchString(col) {
 					continue
 				}
 				// External table column must have "AS (" or "AS <expr>"
-				if !regexp.MustCompile(`(?i)\bAS\s+`).MatchString(col) {
+				if !reVirtualColAS.MatchString(col) {
 					markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Column '%s' in EXTERNAL TABLE must be a virtual column using AS <expr>.", col), 4))
 				}
 			}
@@ -536,7 +548,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			after := strings.TrimSpace(rest[endIdx+1:])
 
 			// Check for PARTITION BY
-			if strings.HasPrefix(strings.ToUpper(after), "PARTITION BY") {
+			if rePartitionBy.MatchString(after) {
 				// Find first '(' after PARTITION BY
 				pIdx := strings.Index(after, "(")
 				if pIdx != -1 {
@@ -548,17 +560,16 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			}
 
 			// Mandatory WITH LOCATION and FILE_FORMAT
-			if !regexp.MustCompile(`(?i)\bWITH\s+LOCATION\s*=`).MatchString(after) {
+			if !reWithLocation.MatchString(after) {
 				markers = append(markers, diagMarkerSpan(r, "WITH LOCATION = @<stage> is mandatory for EXTERNAL TABLE.", 4))
 				continue
 			}
-			if !regexp.MustCompile(`(?i)\bFILE_FORMAT\s*=`).MatchString(after) {
+			if !reFileFormat.MatchString(after) {
 				markers = append(markers, diagMarkerSpan(r, "FILE_FORMAT is mandatory for EXTERNAL TABLE.", 4))
 				continue
 			}
 
 			// Validate remaining properties
-			extTablePropsRe := regexp.MustCompile(`(?i)^\s*(?:(?:` + extTableProps + `)(?:\s+|$))*$`)
 			if after != "" && !extTablePropsRe.MatchString(after) {
 				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE EXTERNAL TABLE properties.", 4))
 			}

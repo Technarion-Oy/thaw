@@ -125,6 +125,11 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = JSON) AUTO_REFRESH = TRUE",
 		"CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) PARTITION BY (c1) WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = PARQUET)",
 		"CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = CSV) TABLE_FORMAT = DELTA",
+		"CREATE EXTERNAL TABLE IF NOT EXISTS db.schema.et (c1 int as (value:c1::int)) WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV)",
+		"CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV) INTEGRATION = 'my_int'",
+		"CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV) AWS_SNS_TOPIC = 'arn:aws:sns:us-east-1:123456789012:my_topic'",
+		"CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV) WITH TAG (t1 = 'v1')",
+		"CREATE EXTERNAL TABLE \"MY DB\".\"MY SCHEMA\".et (c1 int as (value:c1::int)) WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV)",
 	}
 
 	for _, sql := range validQueries {
