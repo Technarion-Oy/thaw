@@ -110,6 +110,15 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		// Functions
 		"ALTER FUNCTION my_func(NUMBER) SET COMMENT = 'updated'",
 		"DROP FUNCTION IF EXISTS my_func(NUMBER)",
+		// COPY INTO
+		"COPY INTO my_table FROM @my_stage",
+		"COPY INTO @my_stage FROM my_table",
+		"COPY INTO my_table(col1, col2) FROM @my_stage",
+		"COPY INTO my_table(col1, col2) FROM @my_stage FILE_FORMAT = (TYPE = CSV)",
+		"COPY INTO my_table FROM @my_stage FILES = ('f1.csv', 'f2.csv') ON_ERROR = SKIP_FILE_10",
+		"COPY INTO @my_stage FROM (SELECT * FROM t) OVERWRITE = TRUE SINGLE = FALSE MAX_FILE_SIZE = 1048576",
+		"COPY INTO my_table FROM @my_stage FILE_FORMAT = (TYPE = CSV FIELD_DELIMITER = '|')",
+		"COPY INTO my_table FROM @my_stage FILE_FORMAT = (FORMAT_NAME = my_format)",
 	}
 
 	for _, sql := range validQueries {
@@ -193,6 +202,15 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Pipe invalid property", "CREATE PIPE my_pipe INVALID_PROP = TRUE AS COPY INTO my_table FROM @my_stage", "Unexpected property 'INVALID_PROP'"},
 		{"Pipe Replace IF NOT EXISTS", "CREATE OR REPLACE PIPE IF NOT EXISTS my_pipe AS COPY INTO my_table FROM @my_stage", "Conflict between OR REPLACE and IF NOT EXISTS"},
 		{"Pipe AUTO_INGEST no stage", "CREATE PIPE my_pipe AUTO_INGEST = TRUE AS COPY INTO my_table FROM (SELECT * FROM t)", "typically requires a stage source"},
+
+		// Invalid COPY INTO
+		{"COPY missing FROM", "COPY INTO my_table", "missing the mandatory FROM clause"},
+		{"COPY mutually exclusive FILES/PATTERN", "COPY INTO my_table FROM @my_stage FILES = ('f1.csv') PATTERN = '.*\\.csv'", "mutually exclusive"},
+		{"COPY invalid ON_ERROR", "COPY INTO my_table FROM @my_stage ON_ERROR = INVALID_VAL", "Invalid ON_ERROR value"},
+		{"COPY invalid PURGE", "COPY INTO my_table FROM @my_stage PURGE = YES", "must be TRUE or FALSE"},
+		{"COPY invalid MAX_FILE_SIZE", "COPY INTO @my_stage FROM t MAX_FILE_SIZE = -100", "must be a positive integer"},
+		{"COPY invalid FILE_FORMAT TYPE", "COPY INTO my_table FROM @my_stage FILE_FORMAT = (TYPE = 'EXCEL')", "Invalid FILE_FORMAT TYPE"},
+		{"COPY mutually exclusive FORMAT_NAME/TYPE", "COPY INTO my_table FROM @my_stage FILE_FORMAT = (FORMAT_NAME = my_format TYPE = CSV)", "mutually exclusive"},
 	}
 
 	for _, tt := range tests {
