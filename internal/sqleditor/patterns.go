@@ -497,12 +497,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			}
 
 			// OR REPLACE is already matched by the preamble regex if present, but it's invalid for EXTERNAL TABLE.
-			if strings.Contains(strings.ToUpper(preambleMatch), "OR REPLACE") {
+			if reOrReplace.MatchString(preambleMatch) {
 				markers = append(markers, diagMarkerSpan(r, "OR REPLACE is not supported for EXTERNAL TABLE. Use DROP and CREATE.", 4))
 				continue
 			}
 
-			if reClusterBy.MatchString(parseText) {
+			if rePatternClusterBy.MatchString(parseText) {
 				markers = append(markers, diagMarkerSpan(r, "CLUSTER BY is not supported for EXTERNAL TABLE.", 4))
 				continue
 			}
@@ -579,7 +579,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// ── Preamble: CREATE TABLE ────────────────────────────────────────
 		if reIsCreateTable.MatchString(parseText) {
 			// Specific Snowflake Error: OR REPLACE and IF NOT EXISTS are mutually exclusive
-			if regexp.MustCompile(`(?i)\bOR\s+REPLACE\b`).MatchString(parseText) &&
+			if reOrReplace.MatchString(parseText) &&
 				regexp.MustCompile(`(?i)\bIF\s+NOT\s+EXISTS\b`).MatchString(parseText) {
 				markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE TABLE statement.", 4))
 				continue
