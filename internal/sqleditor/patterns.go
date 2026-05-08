@@ -227,6 +227,9 @@ var (
 	// ── CREATE PROCEDURE ───────────────────────────────────────────────────────
 	reIsCreateProcedure = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE\b`)
 
+	// ── CREATE FUNCTION ────────────────────────────────────────────────────────
+	reIsCreateFunction = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:TEMPORARY\s+|TEMP\s+)?(?:AGGREGATE\s+)?FUNCTION\b`)
+
 	// ── CREATE USER ───────────────────────────────────────────────────────────
 	reIsCreateUser = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?USER\b`)
 	userProps      = strings.Join([]string{
@@ -674,7 +677,102 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
-		// ── Preamble: CREATE PROCEDURE ────────────────────────────────────────
+		// ── Preamble: CREATE FUNCTION ─────────────────────────────────────────
+		if reIsCreateFunction.MatchString(parseText) {
+			asBodyIdx := -1
+			for _, loc := range regexp.MustCompile(`(?i)\bAS\b`).FindAllStringIndex(parseText, -1) {
+				prefix := parseText[:loc[0]]
+				if regexp.MustCompile(`(?i)\bEXECUTE\s+$`).MatchString(prefix) {
+					continue
+				}
+				asBodyIdx = loc[0]
+				break
+			}
+
+			preamble := parseText
+			if asBodyIdx == -1 {
+				markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS clause in CREATE FUNCTION statement.", 4))
+			} else {
+				preamble = parseText[:asBodyIdx]
+			}
+
+			isAggregate := regexp.MustCompile(`(?i)\bAGGREGATE\s+FUNCTION\b`).MatchString(preamble)
+			isSecure := regexp.MustCompile(`(?i)\bSECURE\s+(?:AGGREGATE\s+)?FUNCTION\b`).MatchString(preamble)
+
+			if isSecure && isAggregate {
+				markers = append(markers, diagMarkerSpan(r, "SECURE is not supported for AGGREGATE functions.", 4))
+			}
+
+			// 1. Mandatory RETURNS
+			returnsMatch := regexp.MustCompile(`(?i)\bRETURNS\s+(TABLE)?`).FindStringSubmatch(preamble)
+			if returnsMatch == nil {
+				markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS clause in CREATE FUNCTION statement.", 4))
+			} else {
+				isTable := strings.ToUpper(returnsMatch[1]) == "TABLE"
+				if isAggregate && isTable {
+					markers = append(markers, diagMarkerSpan(r, "AGGREGATE functions cannot return a TABLE.", 4))
+				}
+			}
+
+			// 2. Mandatory LANGUAGE
+			langMatch := regexp.MustCompile(`(?i)\bLANGUAGE\s+([a-zA-Z0-9_]+)\b`).FindStringSubmatch(preamble)
+			if langMatch == nil {
+				markers = append(markers, diagMarkerSpan(r, "Missing mandatory LANGUAGE clause in CREATE FUNCTION statement.", 4))
+			} else {
+				lang := strings.ToUpper(langMatch[1])
+				switch lang {
+				case "JAVASCRIPT", "PYTHON", "JAVA", "SCALA", "SQL":
+					// valid
+				default:
+					markers = append(markers, diagMarkerSpan(r, "Unknown or unsupported LANGUAGE '"+langMatch[1]+"' in CREATE FUNCTION.", 4))
+				}
+
+				// Python specific checks
+				if lang == "PYTHON" {
+					if !regexp.MustCompile(`(?i)\bRUNTIME_VERSION\b`).MatchString(preamble) {
+						markers = append(markers, diagMarkerSpan(r, "RUNTIME_VERSION is required for PYTHON functions.", 4))
+					}
+					if !regexp.MustCompile(`(?i)\bHANDLER\b`).MatchString(preamble) {
+						markers = append(markers, diagMarkerSpan(r, "HANDLER is required for PYTHON functions.", 4))
+					}
+					hasPackages := regexp.MustCompile(`(?i)\bPACKAGES\b`).MatchString(preamble)
+					hasImports := regexp.MustCompile(`(?i)\bIMPORTS\b`).MatchString(preamble)
+					if !hasPackages && !hasImports {
+						markers = append(markers, diagMarkerSpan(r, "PACKAGES or IMPORTS is required for PYTHON functions.", 4))
+					}
+				}
+
+				// Java / Scala specific checks
+				if lang == "JAVA" || lang == "SCALA" {
+					if !regexp.MustCompile(`(?i)\bHANDLER\b`).MatchString(preamble) {
+						markers = append(markers, diagMarkerSpan(r, "HANDLER is required for "+lang+" functions.", 4))
+					}
+				}
+			}
+
+			// 4. Null input handling: mutually exclusive / redundant
+			hasCalledOnNull := regexp.MustCompile(`(?i)\bCALLED\s+ON\s+NULL\s+INPUT\b`).MatchString(preamble)
+			hasReturnsNull := regexp.MustCompile(`(?i)\bRETURNS\s+NULL\s+ON\s+NULL\s+INPUT\b`).MatchString(preamble)
+			hasStrict := regexp.MustCompile(`(?i)\bSTRICT\b`).MatchString(preamble)
+
+			if hasCalledOnNull && (hasReturnsNull || hasStrict) {
+				markers = append(markers, diagMarkerSpan(r, "CALLED ON NULL INPUT and RETURNS NULL ON NULL INPUT (or STRICT) are mutually exclusive.", 4))
+			}
+			if hasReturnsNull && hasStrict {
+				markers = append(markers, diagMarkerSpan(r, "STRICT and RETURNS NULL ON NULL INPUT are redundant.", 4))
+			}
+
+			// MEMOIZABLE
+			if regexp.MustCompile(`(?i)\bMEMOIZABLE\b`).MatchString(preamble) {
+				returnsMatch := regexp.MustCompile(`(?i)\bRETURNS\s+(TABLE)?`).FindStringSubmatch(preamble)
+				isTable := returnsMatch != nil && strings.ToUpper(returnsMatch[1]) == "TABLE"
+				if isAggregate || isTable {
+					markers = append(markers, diagMarkerSpan(r, "MEMOIZABLE is only valid for scalar functions.", 4))
+				}
+			}
+
+			continue
+		}
 		if reIsCreateProcedure.MatchString(parseText) {
 			asBodyIdx := -1
 			for _, loc := range regexp.MustCompile(`(?i)\bAS\b`).FindAllStringIndex(parseText, -1) {
@@ -860,6 +958,7 @@ var (
 	reAlterTableAdd  = regexp.MustCompile(`(?i)\bALTER\s+TABLE\s+` + _identPath + `\s+ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?` + _ident + `\s+([a-zA-Z_][a-zA-Z0-9_]*)`)
 	reCreateTableExt = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath + `\s*\(`)
 	reCreateProcExt  = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE\s+` + _identPath + `\s*\(`)
+	reCreateFuncExt  = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:TEMPORARY\s+|TEMP\s+)?(?:AGGREGATE\s+)?FUNCTION\s+` + _identPath + `\s*\(`)
 	reReturnsType    = regexp.MustCompile(`(?i)\bRETURNS\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s*\([^)]*\))?\b`)
 )
 
@@ -941,16 +1040,21 @@ func ValidateDataTypes(sql string, stmtRanges []StatementRange) []DiagMarker {
 			}
 		}
 
-		// 5. CREATE PROCEDURE (parameters and returns)
+		// 5. CREATE PROCEDURE/FUNCTION (parameters and returns)
 		if m := reCreateProcExt.FindStringSubmatchIndex(rawText); m != nil {
 			parenStart := m[1] - 1
 			colsRaw := extractBalancedBlockPat(rawText, parenStart)
 			if len(colsRaw) >= 2 {
 				colsContent := colsRaw[1 : len(colsRaw)-1]
 				contentOffset := stmtOffset + parenStart + 1
-
-				// Parameters use the same name type syntax as columns, though slightly different options.
-				// parseColumnDefs should be enough to extract the type identifier.
+				parseColumnDefs(colsContent, contentOffset, checkType)
+			}
+		} else if m := reCreateFuncExt.FindStringSubmatchIndex(rawText); m != nil {
+			parenStart := m[1] - 1
+			colsRaw := extractBalancedBlockPat(rawText, parenStart)
+			if len(colsRaw) >= 2 {
+				colsContent := colsRaw[1 : len(colsRaw)-1]
+				contentOffset := stmtOffset + parenStart + 1
 				parseColumnDefs(colsContent, contentOffset, checkType)
 			}
 		}
