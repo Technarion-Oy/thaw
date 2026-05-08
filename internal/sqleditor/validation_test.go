@@ -104,6 +104,9 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"ALTER PIPE my_pipe REFRESH",
 		"ALTER PIPE my_pipe SET COMMENT = 'updated'",
 		"DROP PIPE IF EXISTS my_pipe",
+		// Procedures
+		"ALTER PROCEDURE my_proc(INT) SET COMMENT = 'updated'",
+		"DROP PROCEDURE IF EXISTS my_proc(INT)",
 	}
 
 	for _, sql := range validQueries {
