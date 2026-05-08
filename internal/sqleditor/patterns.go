@@ -64,8 +64,9 @@ var (
 	rePatternClusterBy  = regexp.MustCompile(`(?i)\bCLUSTER\s+BY\b`)
 	reDataRetention     = regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\b`)
 	reConstraintCol     = regexp.MustCompile(`(?i)^(?:CONSTRAINT|PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY)\b`)
-	reVirtualColAS      = regexp.MustCompile(`(?i)\bAS\s+`)
+	reVirtualColAS      = regexp.MustCompile(`(?i)\bAS(?:\s+|\()`)
 	rePartitionBy       = regexp.MustCompile(`(?i)^PARTITION\s+BY\b`)
+
 	reWithLocation      = regexp.MustCompile(`(?i)\bWITH\s+LOCATION\s*=`)
 	reFileFormat        = regexp.MustCompile(`(?i)\bFILE_FORMAT\s*=`)
 
@@ -530,6 +531,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			// Column validation: must use AS <expr> for non-partition columns
 			// We split by top-level commas and check each column.
 			cols := splitTopLevelCommas(colList)
+			hasColError := false
 			for _, col := range cols {
 				col = strings.TrimSpace(col)
 				if col == "" {
@@ -542,7 +544,11 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 				// External table column must have "AS (" or "AS <expr>"
 				if !reVirtualColAS.MatchString(col) {
 					markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Column '%s' in EXTERNAL TABLE must be a virtual column using AS <expr>.", col), 4))
+					hasColError = true
 				}
+			}
+			if hasColError {
+				continue
 			}
 
 			after := strings.TrimSpace(rest[endIdx+1:])
