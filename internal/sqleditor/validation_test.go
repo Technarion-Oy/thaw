@@ -131,6 +131,7 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV) WITH TAG (t1 = 'v1')",
 		"CREATE EXTERNAL TABLE \"MY DB\".\"MY SCHEMA\".et (c1 int as (value:c1::int)) WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV)",
 		"CREATE EXTERNAL TABLE et (c1 int as(value:c1::int)) WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV)",
+		"CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) PARTITION  BY (c1) WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV)",
 	}
 
 	for _, sql := range validQueries {

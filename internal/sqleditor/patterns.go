@@ -555,9 +555,9 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			after := strings.TrimSpace(rest[endIdx+1:])
 
 			// Check for PARTITION BY
-			if rePartitionBy.MatchString(after) {
+			if loc := rePartitionBy.FindStringIndex(after); loc != nil {
 				// The next non-whitespace character must be '('
-				remainder := strings.TrimSpace(after[len("PARTITION BY"):])
+				remainder := strings.TrimSpace(after[loc[1]:])
 				if !strings.HasPrefix(remainder, "(") {
 					markers = append(markers, diagMarkerSpan(r, "PARTITION BY in EXTERNAL TABLE requires a parenthesised column list.", 4))
 					continue
@@ -565,6 +565,9 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 				partEnd := findMatchingParen(remainder)
 				if partEnd != -1 {
 					after = strings.TrimSpace(remainder[partEnd+1:])
+				} else {
+					markers = append(markers, diagMarkerSpan(r, "Unclosed parenthesised column list in PARTITION BY clause.", 4))
+					continue
 				}
 			}
 
