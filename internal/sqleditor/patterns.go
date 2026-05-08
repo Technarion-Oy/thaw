@@ -218,6 +218,7 @@ var (
 		`INTEGRATION\s*=\s*'(?:[^']|'')*'`,
 		`PARTITION_TYPE\s*=\s*USER_SPECIFIED`,
 		`TABLE_FORMAT\s*=\s*DELTA`,
+		`COPY\s+GRANTS`,
 		`COMMENT\s*=\s*'(?:[^']|'')*'`,
 		`(?:WITH\s+)?TAG\s*` + _balancedParens,
 	}, "|")
