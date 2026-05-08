@@ -63,7 +63,7 @@ var (
 	reOrReplace         = regexp.MustCompile(`(?i)\bOR\s+REPLACE\b`)
 	reIfNotExists       = regexp.MustCompile(`(?i)\bIF\s+NOT\s+EXISTS\b`)
 	reStripStringLiterals = regexp.MustCompile(`'(?:''|[^'])*'`)
-	reTransient           = regexp.MustCompile(`(?i)\bTRANSIENT\b`)
+	reIsCreateTransientIcebergTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TRANSIENT\s+ICEBERG\s+TABLE\b`)
 	// rePatternClusterBy — distinct from the CLUSTER BY pattern in `tableProps` for CREATE TABLE.
 	rePatternClusterBy  = regexp.MustCompile(`(?i)\bCLUSTER\s+BY\b`)
 	reDataRetention     = regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\b`)
@@ -1573,9 +1573,7 @@ func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker
 	}
 
 	// Rule: TRANSIENT is not supported for Iceberg tables.
-	// Only check the preamble (before any column list) using the cleaned string.
-	preamble := strings.Split(clean, "(")[0]
-	if reTransient.MatchString(preamble) {
+	if reIsCreateTransientIcebergTable.MatchString(stripped) {
 		markers = append(markers, diagMarkerSpan(r, "TRANSIENT is not supported for Iceberg tables.", 4))
 	}
 

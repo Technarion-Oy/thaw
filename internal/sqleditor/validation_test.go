@@ -1935,6 +1935,7 @@ func TestValidateSnowflakePatterns_CreateIcebergTable(t *testing.T) {
 		"CREATE ICEBERG TABLE t1 (id int) CATALOG = 'SNOWFLAKE' BASE_LOCATION = 's3://transient-comment/' COMMENT = 'TRANSIENT tables are not supported'",
 		"CREATE ICEBERG TABLE t1 (id int) EXTERNAL_VOLUME = 'my_ev' CATALOG = 'my_cat' BASE_LOCATION = 's3://external-bucket/'",
 		"CREATE ICEBERG TABLE t (id int) EXTERNAL_VOLUME = 'ev' CATALOG = 'c' BASE_LOCATION = 'loc' COMMENT = 'CLUSTER BY is not applicable'",
+		"CREATE ICEBERG TABLE transient (id int) CATALOG = 'SNOWFLAKE' BASE_LOCATION = 's3://test/'",
 	}
 
 	for _, sql := range validCases {
