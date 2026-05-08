@@ -63,11 +63,11 @@ var (
 	reOrReplace         = regexp.MustCompile(`(?i)\bOR\s+REPLACE\b`)
 	reIfNotExists       = regexp.MustCompile(`(?i)\bIF\s+NOT\s+EXISTS\b`)
 	reStripStringLiterals = regexp.MustCompile(`'(?:''|[^'])*'`)
-	// rePatternClusterBy — distinct from reClusterBy used for CREATE TABLE CLUSTER BY
+	// rePatternClusterBy — distinct from the CLUSTER BY pattern in `tableProps` for CREATE TABLE.
 	rePatternClusterBy  = regexp.MustCompile(`(?i)\bCLUSTER\s+BY\b`)
 	reDataRetention     = regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\b`)
 	reConstraintCol     = regexp.MustCompile(`(?i)^(?:CONSTRAINT|PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY)\b`)
-	reVirtualColAS      = regexp.MustCompile(`(?i)\bAS(?:\s+|\()`)
+	reVirtualColAS      = regexp.MustCompile(`(?i)\bAS\s*\([\s\S]*\)\s*$`)
 	rePartitionBy       = regexp.MustCompile(`(?i)^PARTITION\s+BY\b`)
 
 	reWithLocation      = regexp.MustCompile(`(?i)\bWITH\s+LOCATION\s*=`)

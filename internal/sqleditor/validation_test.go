@@ -236,6 +236,7 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"COPY mutually exclusive FORMAT_NAME/TYPE", "COPY INTO my_table FROM @my_stage FILE_FORMAT = (FORMAT_NAME = my_format TYPE = CSV)", "mutually exclusive"},
 
 		// Invalid External Table
+		{"External Table non-virtual col with AS", "CREATE EXTERNAL TABLE et (c1 INT DEFAULT CAST(0 AS INT)) WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV)", "must be a virtual column using AS"},
 		{"External Table OR REPLACE", "CREATE OR REPLACE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = CSV)", "OR REPLACE is not supported"},
 		{"External Table CLUSTER BY", "CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) CLUSTER BY (c1) WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = CSV)", "CLUSTER BY is not supported"},
 		{"External Table Retention", "CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = CSV) DATA_RETENTION_TIME_IN_DAYS = 1", "DATA_RETENTION_TIME_IN_DAYS is not applicable"},
