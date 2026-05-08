@@ -1549,8 +1549,10 @@ func extractParenContent(s string, key string) string {
 
 func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	clean := reStripStringLiterals.ReplaceAllString(parseText, " ")
-	props := getStatementProperties(parseText)
+	// Strip comments first to prevent comment-spoofing in property parsing
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+	clean := reStripStringLiterals.ReplaceAllString(stripped, " ")
+	props := getStatementProperties(stripped)
 
 	catalog, hasCatalog := props["CATALOG"]
 	isSnowflakeCatalog := hasCatalog && strings.EqualFold(strings.Trim(catalog, "'"), "SNOWFLAKE")
@@ -1571,7 +1573,9 @@ func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker
 	}
 
 	// Rule: TRANSIENT is not supported for Iceberg tables.
-	if strings.Contains(strings.ToUpper(strings.Split(parseText, "(")[0]), "TRANSIENT") {
+	// Only check the preamble (before any column list) using the cleaned string.
+	preamble := strings.Split(clean, "(")[0]
+	if reTransient.MatchString(preamble) {
 		markers = append(markers, diagMarkerSpan(r, "TRANSIENT is not supported for Iceberg tables.", 4))
 	}
 
