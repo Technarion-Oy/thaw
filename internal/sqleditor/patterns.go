@@ -61,6 +61,7 @@ var (
 	reQualifyAfterOrder = regexp.MustCompile(`(?is)\bORDER\s+BY[\s\S]+?\bQUALIFY\b`)
 	reVariantDotPath    = regexp.MustCompile(`(?i)\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\b`)
 	reOrReplace         = regexp.MustCompile(`(?i)\bOR\s+REPLACE\b`)
+	reIfNotExists       = regexp.MustCompile(`(?i)\bIF\s+NOT\s+EXISTS\b`)
 	rePatternClusterBy  = regexp.MustCompile(`(?i)\bCLUSTER\s+BY\b`)
 	reDataRetention     = regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\b`)
 	reConstraintCol     = regexp.MustCompile(`(?i)^(?:CONSTRAINT|PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY)\b`)
@@ -555,13 +556,15 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 
 			// Check for PARTITION BY
 			if rePartitionBy.MatchString(after) {
-				// Find first '(' after PARTITION BY
-				pIdx := strings.Index(after, "(")
-				if pIdx != -1 {
-					partEnd := findMatchingParen(after[pIdx:])
-					if partEnd != -1 {
-						after = strings.TrimSpace(after[pIdx+partEnd+1:])
-					}
+				// The next non-whitespace character must be '('
+				remainder := strings.TrimSpace(after[len("PARTITION BY"):])
+				if !strings.HasPrefix(remainder, "(") {
+					markers = append(markers, diagMarkerSpan(r, "PARTITION BY in EXTERNAL TABLE requires a parenthesised column list.", 4))
+					continue
+				}
+				partEnd := findMatchingParen(remainder)
+				if partEnd != -1 {
+					after = strings.TrimSpace(remainder[partEnd+1:])
 				}
 			}
 
@@ -585,8 +588,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// ── Preamble: CREATE TABLE ────────────────────────────────────────
 		if reIsCreateTable.MatchString(parseText) {
 			// Specific Snowflake Error: OR REPLACE and IF NOT EXISTS are mutually exclusive
-			if reOrReplace.MatchString(parseText) &&
-				regexp.MustCompile(`(?i)\bIF\s+NOT\s+EXISTS\b`).MatchString(parseText) {
+			if reOrReplace.MatchString(parseText) && reIfNotExists.MatchString(parseText) {
 				markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE TABLE statement.", 4))
 				continue
 			}
