@@ -91,7 +91,7 @@ var (
 
 	// ── COPY INTO ────────────────────────────────────────────────────────────
 	reIsCopyInto = regexp.MustCompile(`(?i)^\s*COPY\s+INTO\b`)
-	reCopyInto   = regexp.MustCompile(`(?i)^\s*COPY\s+INTO\s+(` + _identPath + `|@\S+|'[^']+')(?:\s+|$)`)
+	reCopyInto   = regexp.MustCompile(`(?i)^\s*COPY\s+INTO\s+(` + _identPath + `|@\S+|'[^']+')(?:\s*\([^)]*\))?(?:\s+|$)`)
 	reCreateTableCTAS     = regexp.MustCompile(`(?i)^AS\s+(?:SELECT|WITH)\b`)
 	reCreateTableClone    = regexp.MustCompile(`(?i)^(?:CLONE|LIKE)\b`)
 	reCreateTableTemplate = regexp.MustCompile(`(?i)^USING\s+TEMPLATE\s*\(`)

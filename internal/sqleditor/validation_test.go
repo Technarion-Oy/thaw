@@ -113,6 +113,8 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		// COPY INTO
 		"COPY INTO my_table FROM @my_stage",
 		"COPY INTO @my_stage FROM my_table",
+		"COPY INTO my_table(col1, col2) FROM @my_stage",
+		"COPY INTO my_table(col1, col2) FROM @my_stage FILE_FORMAT = (TYPE = CSV)",
 		"COPY INTO my_table FROM @my_stage FILES = ('f1.csv', 'f2.csv') ON_ERROR = SKIP_FILE_10",
 		"COPY INTO @my_stage FROM (SELECT * FROM t) OVERWRITE = TRUE SINGLE = FALSE MAX_FILE_SIZE = 1048576",
 		"COPY INTO my_table FROM @my_stage FILE_FORMAT = (TYPE = CSV FIELD_DELIMITER = '|')",
