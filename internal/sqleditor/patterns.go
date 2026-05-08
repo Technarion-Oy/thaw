@@ -62,6 +62,7 @@ var (
 	reVariantDotPath    = regexp.MustCompile(`(?i)\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\b`)
 	reOrReplace         = regexp.MustCompile(`(?i)\bOR\s+REPLACE\b`)
 	reIfNotExists       = regexp.MustCompile(`(?i)\bIF\s+NOT\s+EXISTS\b`)
+	// rePatternClusterBy — distinct from reClusterBy used for CREATE TABLE CLUSTER BY
 	rePatternClusterBy  = regexp.MustCompile(`(?i)\bCLUSTER\s+BY\b`)
 	reDataRetention     = regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\b`)
 	reConstraintCol     = regexp.MustCompile(`(?i)^(?:CONSTRAINT|PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY)\b`)
@@ -214,6 +215,7 @@ var (
 		`FILE_FORMAT\s*=\s*\((?:FORMAT_NAME\s*=\s*` + _identPath + `|TYPE\s*=\s*[a-zA-Z]+)(?:\s+[^)]+)*\)`,
 		`AWS_SNS_TOPIC\s*=\s*'(?:[^']|'')*'`,
 		`INTEGRATION\s*=\s*'(?:[^']|'')*'`,
+		`PARTITION_TYPE\s*=\s*USER_SPECIFIED`,
 		`TABLE_FORMAT\s*=\s*DELTA`,
 		`COMMENT\s*=\s*'(?:[^']|'')*'`,
 		`(?:WITH\s+)?TAG\s*` + _balancedParens,
@@ -532,6 +534,13 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			// Column validation: must use AS <expr> for non-partition columns
 			// We split by top-level commas and check each column.
 			cols := splitTopLevelCommas(colList)
+			
+			// Snowflake rejects empty column lists
+			if len(cols) == 0 || (len(cols) == 1 && strings.TrimSpace(cols[0]) == "") {
+				markers = append(markers, diagMarkerSpan(r, "Column list must not be empty.", 4))
+				continue
+			}
+
 			hasColError := false
 			for _, col := range cols {
 				col = strings.TrimSpace(col)
