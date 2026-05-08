@@ -1553,7 +1553,6 @@ func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker
 	props := getStatementProperties(parseText)
 
 	catalog, hasCatalog := props["CATALOG"]
-	_, hasExternalVolume := props["EXTERNAL_VOLUME"]
 	isSnowflakeCatalog := hasCatalog && strings.EqualFold(strings.Trim(catalog, "'"), "SNOWFLAKE")
 
 	// Rule: BASE_LOCATION is mandatory for all Iceberg tables.
@@ -1563,10 +1562,10 @@ func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker
 
 	// Rule: EXTERNAL_VOLUME and CATALOG are mandatory for non-Snowflake catalogs.
 	if !isSnowflakeCatalog {
-		if !hasExternalVolume {
+		if val, ok := props["EXTERNAL_VOLUME"]; !ok || strings.TrimSpace(strings.Trim(val, "'")) == "" {
 			markers = append(markers, diagMarkerSpan(r, "EXTERNAL_VOLUME is mandatory for Iceberg tables with external catalogs.", 4))
 		}
-		if !hasCatalog {
+		if val, ok := props["CATALOG"]; !ok || strings.TrimSpace(strings.Trim(val, "'")) == "" {
 			markers = append(markers, diagMarkerSpan(r, "CATALOG is mandatory for Iceberg tables with external catalogs.", 4))
 		}
 	}
