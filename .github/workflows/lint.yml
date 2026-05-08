@@ -40,11 +40,16 @@ jobs:
           packages: libgtk-3-dev libwebkit2gtk-4.0-dev
           version: 1.0
 
-      # go install X@version ignores the current module's go.mod, so golangci-lint
-      # resolves its own minimum versions of transitive deps (e.g. x/tools@v0.25.0)
-      # which do not compile under Go 1.26.2. Instead, seed a temp module with the
-      # project's go.mod so MVS inherits the project's already-compatible dep graph
-      # (including x/tools@v0.42.0) without needing any manual overrides.
+      # golangci-lint pre-built binaries are compiled with Go 1.24 and refuse to run
+      # against a module that requires a newer Go version. Compiling from source using
+      # the toolchain provided by actions/setup-go is the only reliable workaround
+      # until golangci-lint ships a release built with Go 1.26+.
+      #
+      # go install X@version ignores the current module's go.mod and resolves
+      # golangci-lint's minimum transitive deps (e.g. x/tools@v0.25.0), which do not
+      # compile under Go 1.26. Seeding a temp module from the project's go.mod lets
+      # MVS inherit the project's already-compatible dep graph (x/tools@v0.42.0 etc.)
+      # without manually overriding individual packages.
       - name: Install golangci-lint
         run: |
           tmpdir=$(mktemp -d)

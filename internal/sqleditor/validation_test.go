@@ -107,6 +107,9 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		// Procedures
 		"ALTER PROCEDURE my_proc(INT) SET COMMENT = 'updated'",
 		"DROP PROCEDURE IF EXISTS my_proc(INT)",
+		// Functions
+		"ALTER FUNCTION my_func(NUMBER) SET COMMENT = 'updated'",
+		"DROP FUNCTION IF EXISTS my_func(NUMBER)",
 	}
 
 	for _, sql := range validQueries {
