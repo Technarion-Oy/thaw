@@ -506,11 +506,15 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 				continue
 			}
 
-			if rePatternClusterBy.MatchString(parseText) {
+			// Use a clean version of stripped without string literals to avoid false positives
+			// in string properties like COMMENT = '... CLUSTER BY ...'
+			clean := regexp.MustCompile(`'(?:''|[^'])*'`).ReplaceAllString(stripped, " ")
+
+			if rePatternClusterBy.MatchString(clean) {
 				markers = append(markers, diagMarkerSpan(r, "CLUSTER BY is not supported for EXTERNAL TABLE.", 4))
 				continue
 			}
-			if reDataRetention.MatchString(parseText) {
+			if reDataRetention.MatchString(clean) {
 				markers = append(markers, diagMarkerSpan(r, "DATA_RETENTION_TIME_IN_DAYS is not applicable to EXTERNAL TABLE.", 4))
 				continue
 			}
