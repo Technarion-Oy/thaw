@@ -139,6 +139,7 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE EXTERNAL TABLE et /* comment */ (c1 int as (value:c1::int)) WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV)",
 		"CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) /* CLUSTER BY x */ WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV)",
 		"CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV) COMMENT = 'CLUSTER BY is not applicable here'",
+		"CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV) COMMENT = 'DATA_RETENTION_TIME_IN_DAYS = 1'",
 		"CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) -- DATA_RETENTION_TIME_IN_DAYS = 1\n WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV)",
 	}
 

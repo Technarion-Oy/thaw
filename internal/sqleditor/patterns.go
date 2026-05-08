@@ -62,6 +62,7 @@ var (
 	reVariantDotPath    = regexp.MustCompile(`(?i)\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\b`)
 	reOrReplace         = regexp.MustCompile(`(?i)\bOR\s+REPLACE\b`)
 	reIfNotExists       = regexp.MustCompile(`(?i)\bIF\s+NOT\s+EXISTS\b`)
+	reStripStringLiterals = regexp.MustCompile(`'(?:''|[^'])*'`)
 	// rePatternClusterBy — distinct from reClusterBy used for CREATE TABLE CLUSTER BY
 	rePatternClusterBy  = regexp.MustCompile(`(?i)\bCLUSTER\s+BY\b`)
 	reDataRetention     = regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\b`)
@@ -508,7 +509,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 
 			// Use a clean version of stripped without string literals to avoid false positives
 			// in string properties like COMMENT = '... CLUSTER BY ...'
-			clean := regexp.MustCompile(`'(?:''|[^'])*'`).ReplaceAllString(stripped, " ")
+			clean := reStripStringLiterals.ReplaceAllString(stripped, " ")
 
 			if rePatternClusterBy.MatchString(clean) {
 				markers = append(markers, diagMarkerSpan(r, "CLUSTER BY is not supported for EXTERNAL TABLE.", 4))
