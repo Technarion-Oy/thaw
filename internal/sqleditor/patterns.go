@@ -516,7 +516,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			}
 
 			rest := strings.TrimSpace(parseText[len(preambleMatch):])
-			rest = stripCommentsSQL(rest)
+			rest = strings.TrimSpace(stripCommentsSQL(rest))
 
 			if !strings.HasPrefix(rest, "(") {
 				markers = append(markers, diagMarkerSpan(r, "EXTERNAL TABLE must have a column list.", 4))
