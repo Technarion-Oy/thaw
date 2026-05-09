@@ -152,6 +152,9 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE OR REPLACE FILE FORMAT my_fmt TYPE = CSV",
 		"CREATE FILE FORMAT my_fmt TYPE = ORC COMMENT = 'A TRANSIENT format'",
 		"CREATE FILE FORMAT my_fmt TYPE = JSON -- FIELD_DELIMITER = ','",
+		"CREATE FILE FORMAT my_fmt",
+		"CREATE FILE FORMAT my_fmt FIELD_DELIMITER = ','",
+		"CREATE FILE FORMAT my_fmt NULL_IF = ('TYPE = CSV')",
 		// ALTER / DROP FILE FORMAT
 		"ALTER FILE FORMAT my_fmt SET TYPE = CSV",
 		"ALTER FILE FORMAT my_fmt SET COMMENT = 'new comment'",
@@ -210,8 +213,6 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"MERGE NOT MATCHED BY SOURCE", "MERGE INTO t USING s ON t.id = s.id WHEN NOT MATCHED BY SOURCE THEN DELETE", "not supported by Snowflake"},
 
 		// Invalid File Formats
-		{"File Format missing TYPE", "CREATE FILE FORMAT my_fmt FIELD_DELIMITER = ','", "Missing mandatory TYPE property"},
-		{"File Format TYPE only in string literal", "CREATE FILE FORMAT my_fmt NULL_IF = ('TYPE = CSV')", "Missing mandatory TYPE property"},
 		{"File Format invalid TYPE", "CREATE FILE FORMAT my_fmt TYPE = 'EXCEL'", "Invalid TYPE 'EXCEL' for FILE FORMAT"},
 		{"File Format invalid TRANSIENT", "CREATE TRANSIENT FILE FORMAT my_fmt TYPE = CSV", "Unexpected syntax"},
 		{"File Format invalid TEMPORARY", "CREATE TEMPORARY FILE FORMAT my_fmt TYPE = CSV", "Unexpected syntax"},
