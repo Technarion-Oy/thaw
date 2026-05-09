@@ -313,6 +313,7 @@ var (
 	reFileFormatFieldDelim = regexp.MustCompile(`(?i)\bFIELD_DELIMITER\s*=\s*('[^']+'|NONE)`)
 	reFileFormatSkipHeader = regexp.MustCompile(`(?i)\bSKIP_HEADER\s*=\s*(-?\d+)`)
 	reFileFormatValidEsc   = regexp.MustCompile(`^\\([ntr'"]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|[0-7]{1,3})$`)
+	reFileFormatTransient  = regexp.MustCompile(`(?i)\bTRANSIENT\b`)
 
 	fileFormatCommonProps = []string{`TYPE`, `COMMENT`}
 
@@ -351,6 +352,14 @@ var (
 		`DISABLE_SNOWFLAKE_DATA`, `DISABLE_AUTO_CONVERT`, `REPLACE_INVALID_CHARACTERS`,
 		`SKIP_BYTE_ORDER_MARK`,
 	}
+
+	// Pre-compiled allowed property regexes for each file format type
+	reFileFormatAllowedCsv     = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatCsvProps...), "|") + ")$")
+	reFileFormatAllowedJson    = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatJsonProps...), "|") + ")$")
+	reFileFormatAllowedAvro    = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatAvroProps...), "|") + ")$")
+	reFileFormatAllowedOrc     = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatOrcProps...), "|") + ")$")
+	reFileFormatAllowedParquet = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatParquetProps...), "|") + ")$")
+	reFileFormatAllowedXml     = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatXmlProps...), "|") + ")$")
 
 	// ── CREATE ICEBERG TABLE ────────────────────────────────────────────────
 	reIsCreateIcebergTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?ICEBERG\s+TABLE\b`)
@@ -1892,7 +1901,12 @@ func splitHybridSegments(s string) []string {
 func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	if regexp.MustCompile(`(?i)\bTRANSIENT\b`).MatchString(s) {
+	// Snowflake Rule: OR REPLACE and IF NOT EXISTS are mutually exclusive.
+	if reOrReplace.MatchString(s) && reIfNotExists.MatchString(s) {
+		markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE FILE FORMAT statement.", 4))
+	}
+
+	if reFileFormatTransient.MatchString(s) {
 		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TRANSIENT is not supported for FILE FORMAT objects.", 4))
 	}
 
@@ -1904,29 +1918,27 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 	}
 
 	rawType := strings.ToUpper(strings.Trim(typeMatch[1], "'"))
-	var allowed []string
-	allowed = append(allowed, fileFormatCommonProps...)
+	var allowedRe *regexp.Regexp
 
 	switch rawType {
 	case "CSV":
-		allowed = append(allowed, fileFormatCsvProps...)
+		allowedRe = reFileFormatAllowedCsv
 	case "JSON":
-		allowed = append(allowed, fileFormatJsonProps...)
+		allowedRe = reFileFormatAllowedJson
 	case "AVRO":
-		allowed = append(allowed, fileFormatAvroProps...)
+		allowedRe = reFileFormatAllowedAvro
 	case "ORC":
-		allowed = append(allowed, fileFormatOrcProps...)
+		allowedRe = reFileFormatAllowedOrc
 	case "PARQUET":
-		allowed = append(allowed, fileFormatParquetProps...)
+		allowedRe = reFileFormatAllowedParquet
 	case "XML":
-		allowed = append(allowed, fileFormatXmlProps...)
+		allowedRe = reFileFormatAllowedXml
 	default:
 		markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Invalid TYPE '%s' for FILE FORMAT. Must be CSV, JSON, AVRO, ORC, PARQUET, or XML.", rawType), 4))
 		return markers
 	}
 
 	// 2. Validate all property keys
-	allowedRe := regexp.MustCompile("(?i)^(" + strings.Join(allowed, "|") + ")$")
 	strippedS := reStripStringLiterals.ReplaceAllString(s, "")
 	for _, m := range reFileFormatPropKey.FindAllStringSubmatch(strippedS, -1) {
 		key := m[1]
