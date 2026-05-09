@@ -1902,8 +1902,9 @@ func splitHybridSegments(s string) []string {
 func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	strippedS := reStripStringLiterals.ReplaceAllString(s, " ")
-	sNoComment := reFileFormatStripComment.ReplaceAllString(s, " ")
+	stripped := strings.TrimSpace(stripCommentsSQL(s))
+	strippedS := reStripStringLiterals.ReplaceAllString(stripped, " ")
+	sNoComment := reFileFormatStripComment.ReplaceAllString(stripped, " ")
 
 	// Snowflake Rule: OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	if reOrReplace.MatchString(strippedS) && reIfNotExists.MatchString(strippedS) {
