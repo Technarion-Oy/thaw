@@ -1717,7 +1717,8 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 
 				segments := splitHybridSegments(colsContent)
 				for _, seg := range segments {
-					upSeg := strings.ToUpper(seg)
+					segClean := reStripStringLiterals.ReplaceAllString(seg, " ")
+					upSeg := strings.ToUpper(segClean)
 
 					// Handle CONSTRAINT prefix
 					content := upSeg
@@ -1741,7 +1742,7 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 						}
 					} else if !strings.HasPrefix(content, "FOREIGN KEY") && !strings.HasPrefix(content, "UNIQUE") && !strings.HasPrefix(content, "INDEX") {
 						// Column definition
-						words := strings.Fields(seg)
+						words := strings.Fields(segClean)
 						if len(words) > 0 {
 							colName := normalizeIdent(words[0])
 							if rePrimaryKey.MatchString(upSeg) {
