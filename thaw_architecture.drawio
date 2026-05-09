@@ -1,246 +1,267 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <mxfile host="Claude Code" modified="2026-05-09" agent="Claude" version="21.0.0">
-  <diagram name="Thaw System Architecture" id="thaw-arch-v1">
-    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
-      <root>
-        <mxCell id="0" />
-        <mxCell id="1" parent="0" />
+    <diagram name="Thaw System Architecture" id="thaw-arch-v1">
+        <mxGraphModel dx="1006" dy="491" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
 
-        <!-- ═══════════════════════════════════════════════════════ -->
-        <!--  LAYER 1 — FRONTEND                                     -->
-        <!-- ═══════════════════════════════════════════════════════ -->
-        <mxCell id="layer-fe" value="Frontend (React 18 · TypeScript · Vite · Ant Design)" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=12;horizontal=1;" vertex="1" parent="1">
-          <mxGeometry x="20" y="20" width="1180" height="290" as="geometry" />
-        </mxCell>
+                <!-- ═══ LAYER 1 — FRONTEND ═══ -->
+                <mxCell id="layer-fe" value="Frontend (React 18 · TypeScript · Vite · Ant Design)" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=12;horizontal=1;" parent="1" vertex="1">
+                    <mxGeometry x="20" y="20" width="1180" height="290" as="geometry"/>
+                </mxCell>
+                <mxCell id="fe-app" value="App.tsx&#xa;(Root component, theme sync,&#xa;menu-event listeners, modals)" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="layer-fe" vertex="1">
+                    <mxGeometry x="20" y="50" width="170" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="grp-stores" value="Zustand State Stores" style="swimlane;startSize=24;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=10;" parent="layer-fe" vertex="1">
+                    <mxGeometry x="210" y="40" width="530" height="230" as="geometry"/>
+                </mxCell>
+                <mxCell id="st-conn" value="connectionStore&#xa;(account, credentials)" style="rounded=1;whiteSpace=wrap;fillColor=#f0f0f0;strokeColor=#999;fontSize=9;" parent="grp-stores" vertex="1">
+                    <mxGeometry x="10" y="35" width="150" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="st-query" value="queryStore&#xa;(tabs, results, exec state)" style="rounded=1;whiteSpace=wrap;fillColor=#f0f0f0;strokeColor=#999;fontSize=9;" parent="grp-stores" vertex="1">
+                    <mxGeometry x="175" y="35" width="150" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="st-session" value="sessionStore&#xa;(role, wh, db, schema)" style="rounded=1;whiteSpace=wrap;fillColor=#f0f0f0;strokeColor=#999;fontSize=9;" parent="grp-stores" vertex="1">
+                    <mxGeometry x="340" y="35" width="150" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="st-obj" value="objectStore&#xa;(databases, schemas, objects)" style="rounded=1;whiteSpace=wrap;fillColor=#f0f0f0;strokeColor=#999;fontSize=9;" parent="grp-stores" vertex="1">
+                    <mxGeometry x="10" y="90" width="150" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="st-git" value="gitStore&#xa;(config, status, branches)" style="rounded=1;whiteSpace=wrap;fillColor=#f0f0f0;strokeColor=#999;fontSize=9;" parent="grp-stores" vertex="1">
+                    <mxGeometry x="175" y="90" width="150" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="st-diff" value="diffStore&#xa;(pending diff item)" style="rounded=1;whiteSpace=wrap;fillColor=#f0f0f0;strokeColor=#999;fontSize=9;" parent="grp-stores" vertex="1">
+                    <mxGeometry x="340" y="90" width="150" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="st-flags" value="featureFlagsStore&#xa;(25+ feature flags, admin locks)" style="rounded=1;whiteSpace=wrap;fillColor=#f0f0f0;strokeColor=#999;fontSize=9;" parent="grp-stores" vertex="1">
+                    <mxGeometry x="10" y="145" width="150" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="st-theme" value="themeStore&#xa;(light/dark, fonts, density)" style="rounded=1;whiteSpace=wrap;fillColor=#f0f0f0;strokeColor=#999;fontSize=9;" parent="grp-stores" vertex="1">
+                    <mxGeometry x="175" y="145" width="150" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="st-layout" value="panelLayoutStore&#xa;(sidebar widths, split ratios)" style="rounded=1;whiteSpace=wrap;fillColor=#f0f0f0;strokeColor=#999;fontSize=9;" parent="grp-stores" vertex="1">
+                    <mxGeometry x="340" y="145" width="150" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="grp-ui" value="UI Components" style="swimlane;startSize=24;fillColor=#f9f9f9;strokeColor=#888;fontStyle=1;fontSize=10;" parent="layer-fe" vertex="1">
+                    <mxGeometry x="760" y="40" width="400" height="230" as="geometry"/>
+                </mxCell>
+                <mxCell id="ui-editor" value="SQL Editor&#xa;(Monaco Editor + diagnostics,&#xa;autocomplete, hover DDL)" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" parent="grp-ui" vertex="1">
+                    <mxGeometry x="10" y="35" width="175" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="ui-results" value="Results Grid&#xa;(Ag-Grid Community,&#xa;multi-statement tabs)" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" parent="grp-ui" vertex="1">
+                    <mxGeometry x="205" y="35" width="175" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="ui-sidebar" value="Sidebar&#xa;(DDL export, file browser,&#xa;git operations panel)" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" parent="grp-ui" vertex="1">
+                    <mxGeometry x="10" y="100" width="175" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="ui-objects" value="Object Browser&#xa;(DB tree, DDL viewer,&#xa;context menu actions)" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" parent="grp-ui" vertex="1">
+                    <mxGeometry x="205" y="100" width="175" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="ui-ai" value="AI Chat Modal&#xa;(streaming chat, tool calls,&#xa;query execution in context)" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" parent="grp-ui" vertex="1">
+                    <mxGeometry x="10" y="165" width="175" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="ui-terminal" value="Embedded Terminal&#xa;(xterm.js + PTY,&#xa;shell selection)" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" parent="grp-ui" vertex="1">
+                    <mxGeometry x="205" y="165" width="175" height="50" as="geometry"/>
+                </mxCell>
 
-        <!-- App root -->
-        <mxCell id="fe-app" value="App.tsx&#xa;(Root component, theme sync,&#xa;menu-event listeners, modals)" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="layer-fe">
-          <mxGeometry x="20" y="50" width="170" height="60" as="geometry" />
-        </mxCell>
+                <!-- ═══ LAYER 2 — WAILS IPC BRIDGE ═══ -->
+                <mxCell id="layer-bridge" value="Wails v2 IPC Bridge" style="swimlane;startSize=30;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="20" y="340" width="1180" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="br-wailsjs" value="wailsjs/go/main/App.ts&#xa;(auto-generated TS bindings)" style="rounded=1;whiteSpace=wrap;fillColor=#f3e8ff;strokeColor=#9673a6;fontSize=10;" parent="layer-bridge" vertex="1">
+                    <mxGeometry x="20" y="35" width="200" height="45" as="geometry"/>
+                </mxCell>
+                <mxCell id="br-ipc" value="app.go — App struct&#xa;(~245 IPC methods, per-tab sessions,&#xa;query lifecycle management)" style="rounded=1;whiteSpace=wrap;fillColor=#e8d8f5;strokeColor=#7b4f9e;fontStyle=1;fontSize=10;" parent="layer-bridge" vertex="1">
+                    <mxGeometry x="260" y="30" width="340" height="55" as="geometry"/>
+                </mxCell>
+                <mxCell id="br-events" value="Wails Event Bus&#xa;(EventsEmit / EventsOn)&#xa;menu:*, query:result, chat:chunk" style="rounded=1;whiteSpace=wrap;fillColor=#f3e8ff;strokeColor=#9673a6;fontSize=10;" parent="layer-bridge" vertex="1">
+                    <mxGeometry x="640" y="35" width="220" height="45" as="geometry"/>
+                </mxCell>
+                <mxCell id="br-main" value="main.go&#xa;(native menu, window state,&#xa;Wails runtime init)" style="rounded=1;whiteSpace=wrap;fillColor=#f3e8ff;strokeColor=#9673a6;fontSize=10;" parent="layer-bridge" vertex="1">
+                    <mxGeometry x="900" y="35" width="200" height="45" as="geometry"/>
+                </mxCell>
 
-        <!-- Zustand stores group -->
-        <mxCell id="grp-stores" value="Zustand State Stores" style="swimlane;startSize=24;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=10;" vertex="1" parent="layer-fe">
-          <mxGeometry x="210" y="40" width="530" height="230" as="geometry" />
-        </mxCell>
+                <!-- ═══ LAYER 3 — BACKEND SERVICES ═══ -->
+                <mxCell id="layer-be" value="Backend Services (Go 1.22)" style="swimlane;startSize=30;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=12;" parent="1" vertex="1">
+                    <mxGeometry x="20" y="470" width="1180" height="250" as="geometry"/>
+                </mxCell>
+                <mxCell id="be-sf" value="internal/snowflake&#xa;Snowflake Client&#xa;(connect, execute, DDL,&#xa;SHOW, lineage)" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=9;" parent="layer-be" vertex="1">
+                    <mxGeometry x="20" y="50" width="150" height="65" as="geometry"/>
+                </mxCell>
+                <mxCell id="be-sqled" value="internal/sqleditor&#xa;SQL Diagnostics&#xa;(syntax tokenizer, JOIN&#xa;suggestions, semantic analysis)" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" parent="layer-be" vertex="1">
+                    <mxGeometry x="185" y="50" width="155" height="65" as="geometry"/>
+                </mxCell>
+                <mxCell id="be-ai" value="internal/ai&#xa;AI Provider Bridge&#xa;(OpenAI, Google, Ollama,&#xa;Azure; streaming + tool calls)" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" parent="layer-be" vertex="1">
+                    <mxGeometry x="355" y="50" width="155" height="65" as="geometry"/>
+                </mxCell>
+                <mxCell id="be-ddl" value="internal/ddl&#xa;DDL Parser &amp; Differ&#xa;(parse CREATE/ALTER,&#xa;semantic diff, format)" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" parent="layer-be" vertex="1">
+                    <mxGeometry x="525" y="50" width="150" height="65" as="geometry"/>
+                </mxCell>
+                <mxCell id="be-git" value="internal/gitrepo&#xa;Git Operations&#xa;(clone, status, commit,&#xa;push, pull, branches, OAuth)" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" parent="layer-be" vertex="1">
+                    <mxGeometry x="690" y="50" width="155" height="65" as="geometry"/>
+                </mxCell>
+                <mxCell id="be-fnmeta" value="internal/fnmeta&#xa;Function Metadata Cache&#xa;(SQLite + embedded JSON,&#xa;INFORMATION_SCHEMA sync)" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" parent="layer-be" vertex="1">
+                    <mxGeometry x="860" y="50" width="160" height="65" as="geometry"/>
+                </mxCell>
+                <mxCell id="be-config" value="internal/config&#xa;Feature Flags + Admin Policies&#xa;(TOML, Plist/Registry/etc/thaw)" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" parent="layer-be" vertex="1">
+                    <mxGeometry x="20" y="140" width="200" height="55" as="geometry"/>
+                </mxCell>
+                <mxCell id="be-fs" value="internal/filesystem&#xa;File I/O Helpers&#xa;(list, read, write, search)" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" parent="layer-be" vertex="1">
+                    <mxGeometry x="235" y="140" width="175" height="55" as="geometry"/>
+                </mxCell>
+                <mxCell id="be-sfconf" value="internal/sfconfig&#xa;~/.snowflake/config.toml&#xa;reader" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" parent="layer-be" vertex="1">
+                    <mxGeometry x="425" y="140" width="155" height="55" as="geometry"/>
+                </mxCell>
+                <mxCell id="be-builders" value="internal/{fileformat, stage,&#xa;integrations, procedure,&#xa;pipe, secret, tasks}&#xa;DDL Builders &amp; Object Metadata" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" parent="layer-be" vertex="1">
+                    <mxGeometry x="595" y="140" width="220" height="55" as="geometry"/>
+                </mxCell>
+                <mxCell id="be-infra" value="internal/{logger, telemetry,&#xa;crashreport}&#xa;Observability &amp; Reliability" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" parent="layer-be" vertex="1">
+                    <mxGeometry x="830" y="140" width="195" height="55" as="geometry"/>
+                </mxCell>
 
-        <mxCell id="st-conn" value="connectionStore&#xa;(account, credentials)" style="rounded=1;whiteSpace=wrap;fillColor=#f0f0f0;strokeColor=#999;fontSize=9;" vertex="1" parent="grp-stores">
-          <mxGeometry x="10" y="35" width="150" height="40" as="geometry" />
-        </mxCell>
-        <mxCell id="st-query" value="queryStore&#xa;(tabs, results, exec state)" style="rounded=1;whiteSpace=wrap;fillColor=#f0f0f0;strokeColor=#999;fontSize=9;" vertex="1" parent="grp-stores">
-          <mxGeometry x="175" y="35" width="150" height="40" as="geometry" />
-        </mxCell>
-        <mxCell id="st-session" value="sessionStore&#xa;(role, wh, db, schema)" style="rounded=1;whiteSpace=wrap;fillColor=#f0f0f0;strokeColor=#999;fontSize=9;" vertex="1" parent="grp-stores">
-          <mxGeometry x="340" y="35" width="150" height="40" as="geometry" />
-        </mxCell>
-        <mxCell id="st-obj" value="objectStore&#xa;(databases, schemas, objects)" style="rounded=1;whiteSpace=wrap;fillColor=#f0f0f0;strokeColor=#999;fontSize=9;" vertex="1" parent="grp-stores">
-          <mxGeometry x="10" y="90" width="150" height="40" as="geometry" />
-        </mxCell>
-        <mxCell id="st-git" value="gitStore&#xa;(config, status, branches)" style="rounded=1;whiteSpace=wrap;fillColor=#f0f0f0;strokeColor=#999;fontSize=9;" vertex="1" parent="grp-stores">
-          <mxGeometry x="175" y="90" width="150" height="40" as="geometry" />
-        </mxCell>
-        <mxCell id="st-diff" value="diffStore&#xa;(pending diff item)" style="rounded=1;whiteSpace=wrap;fillColor=#f0f0f0;strokeColor=#999;fontSize=9;" vertex="1" parent="grp-stores">
-          <mxGeometry x="340" y="90" width="150" height="40" as="geometry" />
-        </mxCell>
-        <mxCell id="st-flags" value="featureFlagsStore&#xa;(25+ feature flags, admin locks)" style="rounded=1;whiteSpace=wrap;fillColor=#f0f0f0;strokeColor=#999;fontSize=9;" vertex="1" parent="grp-stores">
-          <mxGeometry x="10" y="145" width="150" height="40" as="geometry" />
-        </mxCell>
-        <mxCell id="st-theme" value="themeStore&#xa;(light/dark, fonts, density)" style="rounded=1;whiteSpace=wrap;fillColor=#f0f0f0;strokeColor=#999;fontSize=9;" vertex="1" parent="grp-stores">
-          <mxGeometry x="175" y="145" width="150" height="40" as="geometry" />
-        </mxCell>
-        <mxCell id="st-layout" value="panelLayoutStore&#xa;(sidebar widths, split ratios)" style="rounded=1;whiteSpace=wrap;fillColor=#f0f0f0;strokeColor=#999;fontSize=9;" vertex="1" parent="grp-stores">
-          <mxGeometry x="340" y="145" width="150" height="40" as="geometry" />
-        </mxCell>
+                <!-- ═══ EXTERNAL SERVICES (right column, x=1260) ═══ -->
+                <!--
+                  All three layers are 1180px wide (x=20..1200).
+                  External nodes start at x=1260, leaving a clear 60px corridor
+                  (x=1200..1260) used exclusively for routing backend→external edges.
+                  No boxes exist in this corridor — zero crossings guaranteed.
+                -->
+                <mxCell id="ext-sf" value="Snowflake Cloud&#xa;(HTTPS / gosnowflake driver)" style="shape=mxgraph.azure.azure_function;fillColor=#fff9c4;strokeColor=#f0a500;fontStyle=1;fontSize=10;whiteSpace=wrap;" parent="1" vertex="1">
+                    <mxGeometry x="1260" y="60" width="160" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="ext-ai" value="AI APIs&#xa;OpenAI · Google Vertex&#xa;Ollama (local) · Azure OpenAI" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.machine_learning;fillColor=#f8d7da;strokeColor=#c0392b;fontStyle=1;fontSize=10;whiteSpace=wrap;" parent="1" vertex="1">
+                    <mxGeometry x="1260" y="200" width="160" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="ext-git" value="Git Remotes&#xa;GitHub · GitLab&#xa;Bitbucket (OAuth + HTTPS)" style="shape=mxgraph.veeam.2d.tape_library;fillColor=#dce8f5;strokeColor=#1a6496;fontStyle=1;fontSize=10;whiteSpace=wrap;" parent="1" vertex="1">
+                    <mxGeometry x="1260" y="340" width="160" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="ext-fs" value="Local Filesystem&#xa;(DDL exports, SQL files,&#xa;log rotation, config)" style="shape=mxgraph.cisco.servers.standard_server;fillColor=#e8f5e9;strokeColor=#388e3c;fontStyle=1;fontSize=10;whiteSpace=wrap;" parent="1" vertex="1">
+                    <mxGeometry x="1260" y="480" width="160" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="ext-sqlite" value="SQLite (local)&#xa;Function metadata cache&#xa;(fnmeta)" style="shape=mxgraph.cisco.storage.storage_server;fillColor=#f5f5f5;strokeColor=#666;fontStyle=1;fontSize=10;whiteSpace=wrap;" parent="1" vertex="1">
+                    <mxGeometry x="1260" y="600" width="160" height="60" as="geometry"/>
+                </mxCell>
 
-        <!-- UI Components group -->
-        <mxCell id="grp-ui" value="UI Components" style="swimlane;startSize=24;fillColor=#f9f9f9;strokeColor=#888;fontStyle=1;fontSize=10;" vertex="1" parent="layer-fe">
-          <mxGeometry x="760" y="40" width="400" height="230" as="geometry" />
-        </mxCell>
+                <!-- ═══════════════════════════════════════════════════════════════
+                  CONNECTIONS
+                  ═══════════════════════════════════════════════════════════════
 
-        <mxCell id="ui-editor" value="SQL Editor&#xa;(Monaco Editor + diagnostics,&#xa;autocomplete, hover DDL)" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="grp-ui">
-          <mxGeometry x="10" y="35" width="175" height="50" as="geometry" />
-        </mxCell>
-        <mxCell id="ui-results" value="Results Grid&#xa;(Ag-Grid Community,&#xa;multi-statement tabs)" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="grp-ui">
-          <mxGeometry x="205" y="35" width="175" height="50" as="geometry" />
-        </mxCell>
-        <mxCell id="ui-sidebar" value="Sidebar&#xa;(DDL export, file browser,&#xa;git operations panel)" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="grp-ui">
-          <mxGeometry x="10" y="100" width="175" height="50" as="geometry" />
-        </mxCell>
-        <mxCell id="ui-objects" value="Object Browser&#xa;(DB tree, DDL viewer,&#xa;context menu actions)" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="grp-ui">
-          <mxGeometry x="205" y="100" width="175" height="50" as="geometry" />
-        </mxCell>
-        <mxCell id="ui-ai" value="AI Chat Modal&#xa;(streaming chat, tool calls,&#xa;query execution in context)" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="grp-ui">
-          <mxGeometry x="10" y="165" width="175" height="50" as="geometry" />
-        </mxCell>
-        <mxCell id="ui-terminal" value="Embedded Terminal&#xa;(xterm.js + PTY,&#xa;shell selection)" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="grp-ui">
-          <mxGeometry x="205" y="165" width="175" height="50" as="geometry" />
-        </mxCell>
+                  VERTICAL FLOW (Frontend → Bridge → Backend)
+                  ────────────────────────────────────────────
+                  e1  layer-fe     → br-wailsjs   IPC call entry (straight down, left-aligned)
+                  e2  br-wailsjs   → br-ipc        within bridge (horizontal)
+                  e3  br-events    → layer-fe      Wails events back (dashed, straight up)
+                  e4  br-ipc       → br-events     within bridge (horizontal)
+                  e5  br-ipc       → layer-be      dispatch to Go packages (straight down)
 
-        <!-- ═══════════════════════════════════════════════════════ -->
-        <!--  LAYER 2 — WAILS IPC BRIDGE                             -->
-        <!-- ═══════════════════════════════════════════════════════ -->
-        <mxCell id="layer-bridge" value="Wails v2 IPC Bridge" style="swimlane;startSize=30;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;fontSize=12;" vertex="1" parent="1">
-          <mxGeometry x="20" y="340" width="1180" height="100" as="geometry" />
-        </mxCell>
+                  BACKEND → EXTERNAL  (corridor routing, NO box crossings)
+                  ─────────────────────────────────────────────────────────
+                  All 5 edges exit the RIGHT boundary of layer-be (x=1200) at
+                  staggered Y fractions and travel through the empty 60px corridor
+                  (x=1200..1260) to reach external services.  Each edge uses a
+                  distinct x-lane so they never overlap:
 
-        <mxCell id="br-wailsjs" value="wailsjs/go/main/App.ts&#xa;(auto-generated TS bindings)" style="rounded=1;whiteSpace=wrap;fillColor=#f3e8ff;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="layer-bridge">
-          <mxGeometry x="20" y="35" width="200" height="45" as="geometry" />
-        </mxCell>
-        <mxCell id="br-ipc" value="app.go — App struct&#xa;(~245 IPC methods, per-tab sessions,&#xa;query lifecycle management)" style="rounded=1;whiteSpace=wrap;fillColor=#e8d8f5;strokeColor=#7b4f9e;fontStyle=1;fontSize=10;" vertex="1" parent="layer-bridge">
-          <mxGeometry x="260" y="30" width="340" height="55" as="geometry" />
-        </mxCell>
-        <mxCell id="br-events" value="Wails Event Bus&#xa;(EventsEmit / EventsOn)&#xa;menu:*, query:result, chat:chunk" style="rounded=1;whiteSpace=wrap;fillColor=#f3e8ff;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="layer-bridge">
-          <mxGeometry x="640" y="35" width="220" height="45" as="geometry" />
-        </mxCell>
-        <mxCell id="br-main" value="main.go&#xa;(native menu, window state,&#xa;Wails runtime init)" style="rounded=1;whiteSpace=wrap;fillColor=#f3e8ff;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="layer-bridge">
-          <mxGeometry x="900" y="35" width="200" height="45" as="geometry" />
-        </mxCell>
+                    e6  exitY=0.20 → lane x=1207 → ext-sf     (abs exit y=520)
+                    e7  exitY=0.35 → lane x=1214 → ext-ai     (abs exit y=557)
+                    e8  exitY=0.55 → lane x=1221 → ext-git    (abs exit y=607)
+                    e9  exitY=0.70 → lane x=1228 → ext-fs     (abs exit y=645)
+                    e10 exitY=0.88 → lane x=1235 → ext-sqlite (abs exit y=690)
 
-        <!-- ═══════════════════════════════════════════════════════ -->
-        <!--  LAYER 3 — BACKEND SERVICES                             -->
-        <!-- ═══════════════════════════════════════════════════════ -->
-        <mxCell id="layer-be" value="Backend Services (Go 1.22)" style="swimlane;startSize=30;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=12;" vertex="1" parent="1">
-          <mxGeometry x="20" y="470" width="1180" height="250" as="geometry" />
-        </mxCell>
+                  Exit-Y order == target-Y order (both ascending) so lines
+                  cannot cross each other anywhere in the corridor.
 
-        <mxCell id="be-sf" value="internal/snowflake&#xa;Snowflake Client&#xa;(connect, execute, DDL,&#xa;SHOW, lineage)" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=9;" vertex="1" parent="layer-be">
-          <mxGeometry x="20" y="50" width="150" height="65" as="geometry" />
-        </mxCell>
-        <mxCell id="be-sqled" value="internal/sqleditor&#xa;SQL Diagnostics&#xa;(syntax tokenizer, JOIN&#xa;suggestions, semantic analysis)" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" vertex="1" parent="layer-be">
-          <mxGeometry x="185" y="50" width="155" height="65" as="geometry" />
-        </mxCell>
-        <mxCell id="be-ai" value="internal/ai&#xa;AI Provider Bridge&#xa;(OpenAI, Google, Ollama,&#xa;Azure; streaming + tool calls)" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" vertex="1" parent="layer-be">
-          <mxGeometry x="355" y="50" width="155" height="65" as="geometry" />
-        </mxCell>
-        <mxCell id="be-ddl" value="internal/ddl&#xa;DDL Parser &amp; Differ&#xa;(parse CREATE/ALTER,&#xa;semantic diff, format)" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" vertex="1" parent="layer-be">
-          <mxGeometry x="525" y="50" width="150" height="65" as="geometry" />
-        </mxCell>
-        <mxCell id="be-git" value="internal/gitrepo&#xa;Git Operations&#xa;(clone, status, commit,&#xa;push, pull, branches, OAuth)" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" vertex="1" parent="layer-be">
-          <mxGeometry x="690" y="50" width="155" height="65" as="geometry" />
-        </mxCell>
-        <mxCell id="be-fnmeta" value="internal/fnmeta&#xa;Function Metadata Cache&#xa;(SQLite + embedded JSON,&#xa;INFORMATION_SCHEMA sync)" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" vertex="1" parent="layer-be">
-          <mxGeometry x="860" y="50" width="160" height="65" as="geometry" />
-        </mxCell>
+                  External service center-left entry points (entryX=0, entryY=0.5):
+                    ext-sf:     (1260, 95)    [y=60+70/2]
+                    ext-ai:     (1260, 235)   [y=200+70/2]
+                    ext-git:    (1260, 375)   [y=340+70/2]
+                    ext-fs:     (1260, 515)   [y=480+70/2]
+                    ext-sqlite: (1260, 630)   [y=600+60/2]
+                ═══════════════════════════════════════════════════════════════ -->
 
-        <!-- Row 2 of backend -->
-        <mxCell id="be-config" value="internal/config&#xa;Feature Flags + Admin Policies&#xa;(TOML, Plist/Registry/etc/thaw)" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" vertex="1" parent="layer-be">
-          <mxGeometry x="20" y="140" width="200" height="55" as="geometry" />
-        </mxCell>
-        <mxCell id="be-fs" value="internal/filesystem&#xa;File I/O Helpers&#xa;(list, read, write, search)" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" vertex="1" parent="layer-be">
-          <mxGeometry x="235" y="140" width="175" height="55" as="geometry" />
-        </mxCell>
-        <mxCell id="be-sfconf" value="internal/sfconfig&#xa;~/.snowflake/config.toml&#xa;reader" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" vertex="1" parent="layer-be">
-          <mxGeometry x="425" y="140" width="155" height="55" as="geometry" />
-        </mxCell>
-        <mxCell id="be-builders" value="internal/{fileformat, stage,&#xa;integrations, procedure,&#xa;pipe, secret, tasks}&#xa;DDL Builders &amp; Object Metadata" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" vertex="1" parent="layer-be">
-          <mxGeometry x="595" y="140" width="220" height="55" as="geometry" />
-        </mxCell>
-        <mxCell id="be-infra" value="internal/{logger, telemetry,&#xa;crashreport}&#xa;Observability &amp; Reliability" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" vertex="1" parent="layer-be">
-          <mxGeometry x="830" y="140" width="195" height="55" as="geometry" />
-        </mxCell>
+                <!-- e1: Frontend layer → br-wailsjs (straight down, x aligned to br-wailsjs) -->
+                <mxCell id="e1" value="IPC calls" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.1;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="layer-fe" target="br-wailsjs" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
 
-        <!-- ═══════════════════════════════════════════════════════ -->
-        <!--  EXTERNAL SERVICES (right column)                       -->
-        <!-- ═══════════════════════════════════════════════════════ -->
-        <mxCell id="ext-sf" value="Snowflake Cloud&#xa;(HTTPS / gosnowflake driver)" style="shape=mxgraph.azure.azure_function;fillColor=#fff9c4;strokeColor=#f0a500;fontStyle=1;fontSize=10;whiteSpace=wrap;" vertex="1" parent="1">
-          <mxGeometry x="1250" y="80" width="160" height="70" as="geometry" />
-        </mxCell>
-        <mxCell id="ext-ai" value="AI APIs&#xa;OpenAI · Google Vertex&#xa;Ollama (local) · Azure OpenAI" style="shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.machine_learning;fillColor=#f8d7da;strokeColor=#c0392b;fontStyle=1;fontSize=10;whiteSpace=wrap;" vertex="1" parent="1">
-          <mxGeometry x="1250" y="210" width="160" height="70" as="geometry" />
-        </mxCell>
-        <mxCell id="ext-git" value="Git Remotes&#xa;GitHub · GitLab&#xa;Bitbucket (OAuth + HTTPS)" style="shape=mxgraph.veeam.2d.tape_library;fillColor=#dce8f5;strokeColor=#1a6496;fontStyle=1;fontSize=10;whiteSpace=wrap;" vertex="1" parent="1">
-          <mxGeometry x="1250" y="340" width="160" height="70" as="geometry" />
-        </mxCell>
-        <mxCell id="ext-fs" value="Local Filesystem&#xa;(DDL exports, SQL files,&#xa;log rotation, Snowpark files)" style="shape=mxgraph.cisco.servers.standard_server;fillColor=#e8f5e9;strokeColor=#388e3c;fontStyle=1;fontSize=10;whiteSpace=wrap;" vertex="1" parent="1">
-          <mxGeometry x="1250" y="460" width="160" height="70" as="geometry" />
-        </mxCell>
-        <mxCell id="ext-sqlite" value="SQLite (local)&#xa;Function metadata cache&#xa;(fnmeta)" style="shape=mxgraph.cisco.storage.storage_server;fillColor=#f5f5f5;strokeColor=#666;fontStyle=1;fontSize=10;whiteSpace=wrap;" vertex="1" parent="1">
-          <mxGeometry x="1250" y="580" width="160" height="60" as="geometry" />
-        </mxCell>
+                <!-- e2: wailsjs → app.go (horizontal, within bridge) -->
+                <mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="layer-bridge" source="br-wailsjs" target="br-ipc" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
 
-        <!-- ═══════════════════════════════════════════════════════ -->
-        <!--  CONNECTIONS                                             -->
-        <!-- ═══════════════════════════════════════════════════════ -->
+                <!-- e3: Event bus → Frontend (dashed, exits top of br-events, enters bottom-right of layer-fe)
+                     Both nodes are clear of x=770 in the inter-layer gap — no crossings. -->
+                <mxCell id="e3" value="Wails events" style="edgeStyle=orthogonalEdgeStyle;rounded=0;dashed=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.68;entryY=1;entryDx=0;entryDy=0;" parent="1" source="br-events" target="layer-fe" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
 
-        <!-- Frontend ↔ Bridge (IPC calls via wailsjs bindings) -->
-        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="layer-fe" target="br-wailsjs" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-          <mxCell as="value" value="IPC calls" />
-        </mxCell>
-        <!-- wailsjs bindings → app.go -->
-        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;" edge="1" source="br-wailsjs" target="br-ipc" parent="layer-bridge">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <!-- Events back to frontend -->
-        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;dashed=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;" edge="1" source="br-events" target="layer-fe" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-          <mxCell as="value" value="Wails events" />
-        </mxCell>
-        <!-- app.go → event bus -->
-        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;" edge="1" source="br-ipc" target="br-events" parent="layer-bridge">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
+                <!-- e4: app.go → event bus (horizontal, within bridge) -->
+                <mxCell id="e4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="layer-bridge" source="br-ipc" target="br-events" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
 
-        <!-- Bridge → Backend -->
-        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="br-ipc" target="layer-be" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-          <mxCell as="value" value="calls internal packages" />
-        </mxCell>
+                <!-- e5: app.go → Backend layer (straight down through inter-layer gap) -->
+                <mxCell id="e5" value="calls internal packages" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.38;entryY=0;entryDx=0;entryDy=0;" parent="1" source="br-ipc" target="layer-be" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
 
-        <!-- Backend → External: Snowflake -->
-        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" edge="1" source="be-sf" target="ext-sf" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-          <mxCell as="value" value="HTTPS/TLS&#xa;(gosnowflake)" />
-        </mxCell>
-        <!-- Backend → External: AI APIs -->
-        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" edge="1" source="be-ai" target="ext-ai" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-          <mxCell as="value" value="HTTPS REST&#xa;+ streaming" />
-        </mxCell>
-        <!-- Backend → External: Git -->
-        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" edge="1" source="be-git" target="ext-git" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-          <mxCell as="value" value="HTTPS Git&#xa;(OAuth)" />
-        </mxCell>
-        <!-- Backend → External: Filesystem -->
-        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" edge="1" source="be-fs" target="ext-fs" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-          <mxCell as="value" value="os.ReadFile&#xa;os.WriteFile" />
-        </mxCell>
-        <!-- Backend → External: SQLite -->
-        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" edge="1" source="be-fnmeta" target="ext-sqlite" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-          <mxCell as="value" value="database/sql" />
-        </mxCell>
+                <!-- e6: Backend → Snowflake Cloud
+                     Exit layer-be right edge at y=520, corridor lane x=1207, enter ext-sf at y=95 -->
+                <mxCell id="e6" value="HTTPS/TLS · queries · DDL · fnmeta sync" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=1;exitY=0.2;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="layer-be" target="ext-sf" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1207" y="520"/>
+                            <mxPoint x="1207" y="95"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
 
-        <!-- DDL also touches filesystem (exports) -->
-        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;dashed=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" edge="1" source="be-ddl" target="ext-fs" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
+                <!-- e7: Backend → AI APIs
+                     Exit layer-be right edge at y=557, corridor lane x=1214, enter ext-ai at y=235 -->
+                <mxCell id="e7" value="HTTPS REST + streaming" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=1;exitY=0.35;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="layer-be" target="ext-ai" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1214" y="557"/>
+                            <mxPoint x="1214" y="235"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
 
-        <!-- Snowflake fnmeta sync -->
-        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;dashed=1;" edge="1" source="be-fnmeta" target="ext-sf" parent="1">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="1040" y="535" />
-              <mxPoint x="1330" y="535" />
-              <mxPoint x="1330" y="115" />
-            </Array>
-          </mxGeometry>
-          <mxCell as="value" value="INFORMATION_SCHEMA&#xa;sync (background)" />
-        </mxCell>
+                <!-- e8: Backend → Git Remotes
+                     Exit layer-be right edge at y=607, corridor lane x=1221, enter ext-git at y=375 -->
+                <mxCell id="e8" value="HTTPS Git (OAuth)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=1;exitY=0.55;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="layer-be" target="ext-git" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1221" y="607"/>
+                            <mxPoint x="1221" y="375"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
 
-        <!-- Config reads local filesystem (Plist / Registry / JSON) -->
-        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;dashed=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" edge="1" source="be-config" target="ext-fs" parent="1">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="1220" y="637" />
-              <mxPoint x="1220" y="495" />
-            </Array>
-          </mxGeometry>
-          <mxCell as="value" value="TOML config&#xa;+ admin policy" />
-        </mxCell>
+                <!-- e9: Backend → Local Filesystem
+                     Exit layer-be right edge at y=645, corridor lane x=1228, enter ext-fs at y=515
+                     Covers: filesystem I/O, DDL exports, config reads, log rotation -->
+                <mxCell id="e9" value="file I/O · DDL export · config · logs" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=1;exitY=0.7;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="layer-be" target="ext-fs" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1228" y="645"/>
+                            <mxPoint x="1228" y="515"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
 
-      </root>
-    </mxGraphModel>
-  </diagram>
+                <!-- e10: Backend → SQLite
+                     Exit layer-be right edge at y=690, corridor lane x=1235, enter ext-sqlite at y=630 -->
+                <mxCell id="e10" value="database/sql (fnmeta)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;exitX=1;exitY=0.88;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="layer-be" target="ext-sqlite" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1235" y="690"/>
+                            <mxPoint x="1235" y="630"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+
+            </root>
+        </mxGraphModel>
+    </diagram>
 </mxfile>
