@@ -1723,9 +1723,10 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 					// Handle CONSTRAINT prefix
 					content := upSeg
 					if strings.HasPrefix(content, "CONSTRAINT") {
-						words := strings.Fields(seg)
-						if len(words) > 2 {
-							content = strings.ToUpper(strings.Join(words[2:], " "))
+						rest := strings.TrimSpace(content[10:]) // len("CONSTRAINT") == 10
+						fields := strings.Fields(rest)
+						if len(fields) > 1 {
+							content = strings.Join(fields[1:], " ")
 						}
 					}
 
