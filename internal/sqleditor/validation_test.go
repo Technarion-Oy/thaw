@@ -154,6 +154,8 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE FILE FORMAT my_fmt TYPE = JSON -- FIELD_DELIMITER = ','",
 		"CREATE FILE FORMAT my_fmt",
 		"CREATE FILE FORMAT my_fmt FIELD_DELIMITER = ','",
+		"CREATE FILE FORMAT my_fmt FIELD_DELIMITER = NONE",
+		"CREATE FILE FORMAT my_fmt FIELD_DELIMITER = 'NONE'",
 		"CREATE FILE FORMAT my_fmt NULL_IF = ('TYPE = CSV')",
 		// ALTER / DROP FILE FORMAT
 		"ALTER FILE FORMAT my_fmt SET TYPE = CSV",
@@ -222,6 +224,7 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"File Format invalid FIELD_DELIMITER", "CREATE FILE FORMAT my_fmt TYPE = CSV FIELD_DELIMITER = 'abc'", "FIELD_DELIMITER must be a single-character string"},
 		{"File Format empty FIELD_DELIMITER", "CREATE FILE FORMAT my_fmt TYPE = CSV FIELD_DELIMITER = ''", "FIELD_DELIMITER cannot be empty"},
 		{"File Format negative SKIP_HEADER", "CREATE FILE FORMAT my_fmt TYPE = CSV SKIP_HEADER = -1", "SKIP_HEADER must be a non-negative integer"},
+		{"File Format quoted negative SKIP_HEADER", "CREATE FILE FORMAT my_fmt TYPE = CSV SKIP_HEADER = '-1'", "SKIP_HEADER must be a non-negative integer"},
 
 		// Invalid Integrations
 		{"Integration with prefix", "CREATE STORAGE INTEGRATION MY_DB.PUBLIC.MY_INT TYPE=EXTERNAL_STAGE STORAGE_PROVIDER='S3' ENABLED=TRUE STORAGE_AWS_ROLE_ARN='arn:aws:iam::123456789012:role/bad_role' STORAGE_ALLOWED_LOCATIONS=('s3://bad-bucket/')", "account-level objects"},

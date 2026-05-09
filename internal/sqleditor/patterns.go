@@ -1989,7 +1989,8 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 					}
 				}
 			case "SKIP_HEADER":
-				if strings.HasPrefix(p.val, "-") {
+				val := strings.Trim(p.val, "'")
+				if strings.HasPrefix(val, "-") {
 					markers = append(markers, diagMarkerSpan(r, "SKIP_HEADER must be a non-negative integer.", 4))
 				}
 			}
