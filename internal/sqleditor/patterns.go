@@ -104,7 +104,10 @@ var (
 	reIndexKeyword         = regexp.MustCompile(`(?i)\bINDEX\b`)
 	reNotNull              = regexp.MustCompile(`(?i)\bNOT\s+NULL\b`)
 	rePrimaryKey           = regexp.MustCompile(`(?i)\bPRIMARY\s+KEY\b`)
-	rePrimaryKeyOutLine    = regexp.MustCompile(`(?i)^\s*PRIMARY\s+KEY\s*\(`)
+	rePrimaryKeyCols       = regexp.MustCompile(`(?i)PRIMARY\s+KEY\s*\([^)]+\)`)
+	reChangeTracking       = regexp.MustCompile(`(?i)\bCHANGE_TRACKING\b`)
+	reCopyGrants           = regexp.MustCompile(`(?i)\bCOPY\s+GRANTS\b`)
+	reTransient            = regexp.MustCompile(`(?i)\bTRANSIENT\b`)
 
 	// ── COPY INTO ────────────────────────────────────────────────────────────
 	reIsCopyInto = regexp.MustCompile(`(?i)^\s*COPY\s+INTO\b`)
@@ -1679,7 +1682,7 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 		markers = append(markers, diagMarkerSpan(r, "OR REPLACE is not supported for hybrid tables.", 4))
 	}
 
-	if strings.Contains(strings.ToUpper(clean), " TRANSIENT ") || strings.HasPrefix(strings.ToUpper(strings.TrimSpace(clean)), "CREATE TRANSIENT") {
+	if reTransient.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r, "TRANSIENT is not supported for hybrid tables.", 4))
 	}
 
@@ -1691,11 +1694,11 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 		markers = append(markers, diagMarkerSpan(r, "DATA_RETENTION_TIME_IN_DAYS is not applicable to hybrid tables.", 4))
 	}
 
-	if regexp.MustCompile(`(?i)\bCHANGE_TRACKING\b`).MatchString(clean) {
+	if reChangeTracking.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r, "CHANGE_TRACKING is not supported on hybrid tables.", 4))
 	}
 
-	if regexp.MustCompile(`(?i)\bCOPY\s+GRANTS\b`).MatchString(clean) {
+	if reCopyGrants.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r, "COPY GRANTS is not supported on hybrid tables.", 4))
 	}
 
@@ -1727,9 +1730,13 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 					if strings.HasPrefix(content, "PRIMARY KEY") {
 						hasPK = true
 						// Out of line: PRIMARY KEY (c1, c2)
-						re := regexp.MustCompile(`(?i)PRIMARY\s+KEY\s*\(([^)]+)\)`)
-						if m := re.FindStringSubmatch(seg); len(m) > 1 {
-							for _, p := range strings.Split(m[1], ",") {
+						if m := rePrimaryKeyCols.FindString(seg); m != "" {
+							// Strip 'PRIMARY KEY' and parens
+							mStr := m[11:]
+							mStr = strings.TrimSpace(mStr)
+							mStr = strings.TrimPrefix(mStr, "(")
+							mStr = strings.TrimSuffix(mStr, ")")
+							for _, p := range strings.Split(mStr, ",") {
 								pkCols[normalizeIdent(p)] = true
 							}
 						}
