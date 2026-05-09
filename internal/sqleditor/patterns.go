@@ -109,6 +109,7 @@ var (
 	reChangeTracking      = regexp.MustCompile(`(?i)\bCHANGE_TRACKING\b`)
 	reCopyGrants          = regexp.MustCompile(`(?i)\bCOPY\s+GRANTS\b`)
 	reTransient           = regexp.MustCompile(`(?i)\bTRANSIENT\b`)
+	reAutoIncrement       = regexp.MustCompile(`(?i)\b(?:AUTOINCREMENT|IDENTITY)\b`)
 
 	// ── COPY INTO ────────────────────────────────────────────────────────────
 	reIsCopyInto = regexp.MustCompile(`(?i)^\s*COPY\s+INTO\b`)
@@ -1724,11 +1725,13 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 				segClean := reStripStringLiterals.ReplaceAllString(seg, " ")
 				upSeg := strings.ToUpper(segClean)
 
+				// Normalize whitespace before checking prefixes
+				content := strings.Join(strings.Fields(upSeg), " ")
+
 				// Handle CONSTRAINT prefix
-				content := upSeg
 				if strings.HasPrefix(content, "CONSTRAINT") {
-					rest := strings.TrimSpace(content[10:]) // len("CONSTRAINT") == 10
-					fields := strings.Fields(rest)
+					constraintBody := strings.TrimSpace(content[10:]) // len("CONSTRAINT") == 10
+					fields := strings.Fields(constraintBody)
 					if len(fields) > 1 {
 						content = strings.Join(fields[1:], " ")
 					}
@@ -1754,7 +1757,7 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 							hasPK = true
 							pkCols[colName] = true
 						}
-						if reNotNull.MatchString(upSeg) {
+						if reNotNull.MatchString(upSeg) || reAutoIncrement.MatchString(upSeg) {
 							colHasNotNull[colName] = true
 						}
 					}
@@ -1798,12 +1801,30 @@ func splitHybridSegments(s string) []string {
 		} else {
 			c = ','
 		}
-		if c == '\'' && !inDouble {
-			inSingle = !inSingle
-		} else if c == '"' && !inSingle {
-			inDouble = !inDouble
-		} else if !inSingle && !inDouble {
-			if c == '(' {
+		
+		if inSingle {
+			if c == '\'' {
+				// Check for doubled quote (escaped quote)
+				if i+1 < len(s) && s[i+1] == '\'' {
+					i++ // Skip the escaped quote
+				} else {
+					inSingle = false
+				}
+			}
+		} else if inDouble {
+			if c == '"' {
+				if i+1 < len(s) && s[i+1] == '"' {
+					i++
+				} else {
+					inDouble = false
+				}
+			}
+		} else {
+			if c == '\'' {
+				inSingle = true
+			} else if c == '"' {
+				inDouble = true
+			} else if c == '(' {
 				depth++
 			} else if c == ')' {
 				depth--

@@ -2015,6 +2015,8 @@ func TestValidateSnowflakePatterns_CreateHybridTable(t *testing.T) {
 		"CREATE HYBRID TABLE t1 (id INT NOT NULL, val VARCHAR DEFAULT 'PRIMARY KEY', PRIMARY KEY (id))",
 		"CREATE HYBRID TABLE IF NOT EXISTS t1 (id INT PRIMARY KEY NOT NULL)",
 		"CREATE HYBRID TABLE t1 (id INT NOT NULL, CONSTRAINT pk1 PRIMARY KEY (id))",
+		"CREATE HYBRID TABLE t1 (id INT PRIMARY KEY AUTOINCREMENT)",
+		"CREATE HYBRID TABLE t1 (id INT PRIMARY KEY IDENTITY (1, 1))",
 	}
 
 	for _, sql := range validCases {
@@ -2043,7 +2045,7 @@ func TestValidateSnowflakePatterns_CreateHybridTable(t *testing.T) {
 		{"Index on regular table", "CREATE TABLE t1 (id INT PRIMARY KEY, val VARCHAR INDEX idx_val (val))", []string{"Secondary indexes (INDEX) are only supported on hybrid tables"}},
 		{"PK column missing NOT NULL (out of line)", "CREATE HYBRID TABLE t1 (id INT, PRIMARY KEY (id))", []string{"Primary key columns in a hybrid table must be NOT NULL"}},
 		{"PK column missing NOT NULL (inline)", "CREATE HYBRID TABLE t1 (id INT PRIMARY KEY)", []string{"Primary key columns in a hybrid table must be NOT NULL"}},
-		{"PK column missing NOT NULL (out of line, extra spaces)", "CREATE HYBRID TABLE t1 (id INT, PRIMARY  KEY  (id))", []string{"Primary key columns in a hybrid table must be NOT NULL"}},
+		{"PK column missing NOT NULL (out of line, extra spaces)", "CREATE HYBRID TABLE t1 (id INT, PRIMARY  KEY  (id))", []string{"Primary key columns in a hybrid table must be NOT NULL (column 'ID' omits it)."}},
 		{"Composite PK missing NOT NULL on one column", "CREATE HYBRID TABLE t1 (id INT NOT NULL, name INT, PRIMARY KEY (id, name))", []string{"Primary key columns in a hybrid table must be NOT NULL (column 'NAME' omits it)."}},
 		{"Constraint-named PK missing NOT NULL", "CREATE HYBRID TABLE t1 (id INT, CONSTRAINT pk1 PRIMARY KEY (id))", []string{"Primary key columns in a hybrid table must be NOT NULL"}},
 		{"string literal containing NOT NULL suppresses false negative", "CREATE HYBRID TABLE t1 (id INT DEFAULT 'NOT NULL here', PRIMARY KEY (id))", []string{"Primary key columns in a hybrid table must be NOT NULL"}},
