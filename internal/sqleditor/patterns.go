@@ -100,6 +100,16 @@ var (
 	// ── CREATE TABLE ─────────────────────────────────────────────────────────
 	reIsCreateTable       = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+(?:REPLACE|ALTER)|LOCAL|GLOBAL|TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)*TABLE\b`)
 	reCreateTablePreamble = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath)
+	reIsCreateHybridTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+REPLACE|TRANSIENT)\s+)*HYBRID\s+TABLE\b`)
+	reHybridTablePreamble = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+REPLACE|TRANSIENT)\s+)*HYBRID\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath)
+	reIndexKeyword        = regexp.MustCompile(`(?i)\bINDEX\b`)
+	reNotNull             = regexp.MustCompile(`(?i)\bNOT\s+NULL\b`)
+	rePrimaryKey          = regexp.MustCompile(`(?i)\bPRIMARY\s+KEY\b`)
+	rePrimaryKeyCols      = regexp.MustCompile(`(?i)PRIMARY\s+KEY\s*\([^)]+\)`)
+	reChangeTracking      = regexp.MustCompile(`(?i)\bCHANGE_TRACKING\b`)
+	reCopyGrants          = regexp.MustCompile(`(?i)\bCOPY\s+GRANTS\b`)
+	reTransient           = regexp.MustCompile(`(?i)\bTRANSIENT\b`)
+	reAutoIncrement       = regexp.MustCompile(`(?i)\b(?:AUTOINCREMENT|IDENTITY)\b`)
 
 	// ── COPY INTO ────────────────────────────────────────────────────────────
 	reIsCopyInto = regexp.MustCompile(`(?i)^\s*COPY\s+INTO\b`)
@@ -183,7 +193,7 @@ var (
 	reIsDropSeq    = regexp.MustCompile(`(?i)^\s*DROP\s+SEQUENCE\b`)
 	reValidDropSeq = regexp.MustCompile(`(?i)^\s*DROP\s+SEQUENCE\s+(?:IF\s+EXISTS\s+)?` + _identPath + `(?:\s+(?:CASCADE|RESTRICT))?\s*$`)
 
-	// ── CREATE DYNAMIC TABLE ──────────────────────────────────────────────────
+	// ── CREATE DYNAMIC TABLE ─────────────────────────────────────────────────
 	reIsCreateDynTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?DYNAMIC\s+TABLE\b`)
 	reDynHasTargetLag  = regexp.MustCompile(`(?i)\bTARGET_LAG\s*=`)
 	reDynHasWarehouse  = regexp.MustCompile(`(?i)\bWAREHOUSE\s*=`)
@@ -614,6 +624,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
+		// ── Preamble: CREATE HYBRID TABLE ───────────────────────────────
+		if reIsCreateHybridTable.MatchString(parseText) {
+			markers = append(markers, validateCreateHybridTable(parseText, r)...)
+			continue
+		}
+
 		// ── Preamble: CREATE TABLE ────────────────────────────────────────
 		if reIsCreateTable.MatchString(parseText) {
 			// Specific Snowflake Error: OR REPLACE and IF NOT EXISTS are mutually exclusive
@@ -644,6 +660,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 				// Find matching close paren (depth-aware, skip strings)
 				endIdx := findMatchingParen(rest)
 				if endIdx != -1 {
+					colsContent := rest[1:endIdx]
+					colsClean := reStripStringLiterals.ReplaceAllString(colsContent, " ")
+					if reIndexKeyword.MatchString(colsClean) {
+						markers = append(markers, diagMarkerSpan(r, "Secondary indexes (INDEX) are only supported on hybrid tables.", 4))
+					}
+
 					after := strings.TrimSpace(rest[endIdx+1:])
 					tablePropsRe := regexp.MustCompile(`(?i)^(?:(?:` + tableProps + `)(?:\s+|$))*$`)
 					if after == "" || tablePropsRe.MatchString(after) || reCreateTableCTAS.MatchString(after) {
@@ -1651,4 +1673,166 @@ func isValidEnumValue(val string, validValues ...string) bool {
 		}
 	}
 	return false
+}
+
+func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+	clean := reStripStringLiterals.ReplaceAllString(stripped, " ")
+
+	if reOrReplace.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r, "OR REPLACE is not supported for hybrid tables.", 4))
+	}
+
+	if reTransient.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r, "TRANSIENT is not supported for hybrid tables.", 4))
+	}
+
+	if rePatternClusterBy.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r, "CLUSTER BY is not supported on hybrid tables.", 4))
+	}
+
+	if reDataRetention.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r, "DATA_RETENTION_TIME_IN_DAYS is not applicable to hybrid tables.", 4))
+	}
+
+	if reChangeTracking.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r, "CHANGE_TRACKING is not supported on hybrid tables.", 4))
+	}
+
+	if reCopyGrants.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r, "COPY GRANTS is not supported on hybrid tables.", 4))
+	}
+
+	preambleMatch := reHybridTablePreamble.FindString(stripped)
+	if preambleMatch == "" {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE HYBRID TABLE statement.", 4))
+		return markers
+	}
+
+	rest := strings.TrimSpace(stripped[len(preambleMatch):])
+	if strings.HasPrefix(rest, "(") {
+		endIdx := findMatchingParen(rest)
+		if endIdx != -1 {
+			colsContent := rest[1:endIdx]
+
+			var hasPK bool
+			pkCols := make(map[string]bool)
+			colHasNotNull := make(map[string]bool)
+
+			segments := splitHybridSegments(colsContent)
+			for _, seg := range segments {
+				segClean := reStripStringLiterals.ReplaceAllString(seg, " ")
+				upSeg := strings.ToUpper(segClean)
+
+				// Normalize whitespace before checking prefixes
+				content := strings.Join(strings.Fields(upSeg), " ")
+
+				// Handle CONSTRAINT prefix
+				if strings.HasPrefix(content, "CONSTRAINT") {
+					constraintBody := strings.TrimSpace(content[10:]) // len("CONSTRAINT") == 10
+					fields := strings.Fields(constraintBody)
+					if len(fields) > 1 {
+						content = strings.Join(fields[1:], " ")
+					}
+				}
+
+				if strings.HasPrefix(content, "PRIMARY KEY") {
+					hasPK = true
+					// Out of line: PRIMARY KEY (c1, c2)
+					if m := rePrimaryKeyCols.FindString(segClean); m != "" {
+						if openIdx := strings.Index(m, "("); openIdx != -1 {
+							mStr := m[openIdx+1 : len(m)-1]
+							for _, p := range strings.Split(mStr, ",") {
+								pkCols[normalizeIdent(p)] = true
+							}
+						}
+					}
+				} else if !strings.HasPrefix(content, "FOREIGN KEY") && !strings.HasPrefix(content, "UNIQUE") && !strings.HasPrefix(content, "INDEX") {
+					// Column definition
+					words := strings.Fields(segClean)
+					if len(words) > 0 {
+						colName := normalizeIdent(words[0])
+						if rePrimaryKey.MatchString(upSeg) {
+							hasPK = true
+							pkCols[colName] = true
+						}
+						if reNotNull.MatchString(upSeg) || reAutoIncrement.MatchString(upSeg) {
+							colHasNotNull[colName] = true
+						}
+					}
+				}
+			}
+
+			if !hasPK {
+				markers = append(markers, diagMarkerSpan(r, "Hybrid tables must have a PRIMARY KEY constraint.", 4))
+			}
+
+			// Check for NOT NULL on all PK columns
+			for pkCol := range pkCols {
+				if !colHasNotNull[pkCol] {
+					markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Primary key columns in a hybrid table must be NOT NULL (column '%s' omits it).", pkCol), 4))
+				}
+			}
+		}
+	}
+
+	return markers
+}
+
+func normalizeIdent(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "\"") && strings.HasSuffix(s, "\"") {
+		return s[1 : len(s)-1]
+	}
+	return strings.ToUpper(s)
+}
+
+func splitHybridSegments(s string) []string {
+	var segments []string
+	depth := 0
+	inSingle := false
+	inDouble := false
+	start := 0
+	for i := 0; i <= len(s); i++ {
+		var c byte
+		if i < len(s) {
+			c = s[i]
+		} else {
+			c = ','
+		}
+		
+		if inSingle {
+			if c == '\'' {
+				// Check for doubled quote (escaped quote)
+				if i+1 < len(s) && s[i+1] == '\'' {
+					i++ // Skip the escaped quote
+				} else {
+					inSingle = false
+				}
+			}
+		} else if inDouble {
+			if c == '"' {
+				if i+1 < len(s) && s[i+1] == '"' {
+					i++
+				} else {
+					inDouble = false
+				}
+			}
+		} else {
+			if c == '\'' {
+				inSingle = true
+			} else if c == '"' {
+				inDouble = true
+			} else if c == '(' {
+				depth++
+			} else if c == ')' {
+				depth--
+			} else if c == ',' && depth == 0 {
+				segments = append(segments, strings.TrimSpace(s[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	return segments
 }

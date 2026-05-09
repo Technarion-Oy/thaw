@@ -2001,3 +2001,74 @@ func TestValidateSnowflakePatterns_CreateIcebergTable(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateSnowflakePatterns_CreateHybridTable(t *testing.T) {
+	validCases := []string{
+		"CREATE HYBRID TABLE t1 (id INT PRIMARY KEY NOT NULL)",
+		"CREATE HYBRID TABLE t1 (id INT NOT NULL PRIMARY KEY, val VARCHAR INDEX idx_val (val))",
+		"CREATE HYBRID TABLE t1 (id INT PRIMARY KEY NOT NULL, val VARCHAR) COMMENT = 'test'",
+		"CREATE HYBRID TABLE t1 (id INT PRIMARY KEY NOT NULL, c2 INT, CONSTRAINT fk_c2 FOREIGN KEY (c2) REFERENCES t2(id))",
+		"CREATE HYBRID TABLE t1 (id INT NOT NULL, val VARCHAR, PRIMARY KEY (id))",
+		"CREATE HYBRID TABLE t1 (id INT PRIMARY KEY NOT NULL, val VARCHAR NOT NULL)",
+		"CREATE HYBRID TABLE t1 (id INT PRIMARY KEY NOT NULL) COMMENT = 'no cluster by here'",
+		"CREATE TABLE t1 (id INT, val VARCHAR DEFAULT 'INDEX is not supported here')",
+		"CREATE HYBRID TABLE t1 (id INT NOT NULL, val VARCHAR DEFAULT 'PRIMARY KEY', PRIMARY KEY (id))",
+		"CREATE HYBRID TABLE IF NOT EXISTS t1 (id INT PRIMARY KEY NOT NULL)",
+		"CREATE HYBRID TABLE t1 (id INT NOT NULL, CONSTRAINT pk1 PRIMARY KEY (id))",
+		"CREATE HYBRID TABLE t1 (id INT PRIMARY KEY AUTOINCREMENT)",
+		"CREATE HYBRID TABLE t1 (id INT PRIMARY KEY IDENTITY (1, 1))",
+	}
+
+	for _, sql := range validCases {
+		t.Run(sql[:min(len(sql), 40)], func(t *testing.T) {
+			ranges := GetStatementRanges(sql)
+			markers := ValidateSnowflakePatterns(sql, ranges)
+			if warns := getWarnings(markers); len(warns) > 0 {
+				t.Errorf("Expected 0 warnings, got %d: %v", len(warns), warns)
+			}
+		})
+	}
+
+	invalidCases := []struct {
+		name     string
+		sql      string
+		wantMsgs []string
+	}{
+		{"Missing Primary Key", "CREATE HYBRID TABLE t1 (id INT)", []string{"Hybrid tables must have a PRIMARY KEY"}},
+		{"Cluster By not supported", "CREATE HYBRID TABLE t1 (id INT PRIMARY KEY) CLUSTER BY (id)", []string{"CLUSTER BY is not supported on hybrid tables"}},
+		{"Data Retention not supported", "CREATE HYBRID TABLE t1 (id INT PRIMARY KEY) DATA_RETENTION_TIME_IN_DAYS = 7", []string{"DATA_RETENTION_TIME_IN_DAYS is not applicable to hybrid tables"}},
+		{"Change Tracking not supported", "CREATE HYBRID TABLE t1 (id INT PRIMARY KEY) CHANGE_TRACKING = TRUE", []string{"CHANGE_TRACKING is not supported on hybrid tables"}},
+		{"Transient not supported", "CREATE TRANSIENT HYBRID TABLE t1 (id INT PRIMARY KEY)", []string{"TRANSIENT is not supported for hybrid tables"}},
+		{"TRANSIENT + missing PK", "CREATE TRANSIENT HYBRID TABLE t1 (id INT)", []string{"TRANSIENT is not supported for hybrid tables", "Hybrid tables must have a PRIMARY KEY"}},
+		{"OR REPLACE not supported", "CREATE OR REPLACE HYBRID TABLE t1 (id INT PRIMARY KEY)", []string{"OR REPLACE is not supported for hybrid tables"}},
+		{"COPY GRANTS not supported", "CREATE HYBRID TABLE t1 (id INT PRIMARY KEY) COPY GRANTS", []string{"COPY GRANTS is not supported on hybrid tables"}},
+		{"Index on regular table", "CREATE TABLE t1 (id INT PRIMARY KEY, val VARCHAR INDEX idx_val (val))", []string{"Secondary indexes (INDEX) are only supported on hybrid tables"}},
+		{"PK column missing NOT NULL (out of line)", "CREATE HYBRID TABLE t1 (id INT, PRIMARY KEY (id))", []string{"Primary key columns in a hybrid table must be NOT NULL"}},
+		{"PK column missing NOT NULL (inline)", "CREATE HYBRID TABLE t1 (id INT PRIMARY KEY)", []string{"Primary key columns in a hybrid table must be NOT NULL"}},
+		{"PK column missing NOT NULL (out of line, extra spaces)", "CREATE HYBRID TABLE t1 (id INT, PRIMARY  KEY  (id))", []string{"Primary key columns in a hybrid table must be NOT NULL (column 'ID' omits it)."}},
+		{"Composite PK missing NOT NULL on one column", "CREATE HYBRID TABLE t1 (id INT NOT NULL, name INT, PRIMARY KEY (id, name))", []string{"Primary key columns in a hybrid table must be NOT NULL (column 'NAME' omits it)."}},
+		{"Constraint-named PK missing NOT NULL", "CREATE HYBRID TABLE t1 (id INT, CONSTRAINT pk1 PRIMARY KEY (id))", []string{"Primary key columns in a hybrid table must be NOT NULL"}},
+		{"string literal containing NOT NULL suppresses false negative", "CREATE HYBRID TABLE t1 (id INT DEFAULT 'NOT NULL here', PRIMARY KEY (id))", []string{"Primary key columns in a hybrid table must be NOT NULL"}},
+	}
+
+	for _, tt := range invalidCases {
+		t.Run(tt.name, func(t *testing.T) {
+			ranges := GetStatementRanges(tt.sql)
+			markers := ValidateSnowflakePatterns(tt.sql, ranges)
+			warns := getWarnings(markers)
+
+			for _, wantMsg := range tt.wantMsgs {
+				found := false
+				for _, w := range warns {
+					if strings.Contains(w.Message, wantMsg) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected warning for %q, but got none matching %q. Warnings: %v", tt.sql, wantMsg, warns)
+				}
+			}
+		})
+	}
+}
