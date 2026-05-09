@@ -39,7 +39,7 @@ var (
 		`(?i)\bTABLESAMPLE\b|\bSAMPLE\s*\(|\bWITHIN\s+GROUP\b|\bCONNECT\s+BY\b` +
 			`|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b` +
 			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:STAGE` +
-			`|FILE\s+FORMAT|ALERT|SHARE` +
+			`|ALERT|SHARE` +
 			`|NETWORK|ROW\s+ACCESS` +
 			`|SESSION|PASSWORD|REPLICATION|FAILOVER|APPLICATION)\b` +
 			`|ALTER\s+(?:TABLE|VIEW|STREAM|DATABASE|STAGE|PIPE|PROCEDURE|FUNCTION` +
@@ -305,6 +305,48 @@ var (
 		`AWS_ACCESS_POINT_ARN`, `USE_PRIVATELINK_ENDPOINT`, `ENDPOINT`,
 		`FILE_FORMAT`, `COPY_OPTIONS`, `COMMENT`, `DIRECTORY`,
 	}, "|")
+
+	// ── CREATE FILE FORMAT ───────────────────────────────────────────────────
+	reIsCreateFileFormat = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?FILE\s+FORMAT\b`)
+	reFileFormatType     = regexp.MustCompile(`(?i)\bTYPE\s*=\s*(CSV|JSON|AVRO|ORC|PARQUET|XML|'CSV'|'JSON'|'AVRO'|'ORC'|'PARQUET'|'XML')`)
+
+	fileFormatCommonProps = []string{`TYPE`, `COMMENT`}
+
+	fileFormatCsvProps = []string{
+		`COMPRESSION`, `RECORD_DELIMITER`, `FIELD_DELIMITER`, `FILE_EXTENSION`,
+		`PARSE_HEADER`, `SKIP_HEADER`, `SKIP_BLANK_LINES`, `DATE_FORMAT`,
+		`TIME_FORMAT`, `TIMESTAMP_FORMAT`, `BINARY_FORMAT`, `ESCAPE`,
+		`ESCAPE_UNENCLOSED_FIELD`, `TRIM_SPACE`, `FIELD_OPTIONALLY_ENCLOSED_BY`,
+		`NULL_IF`, `ERROR_ON_COLUMN_COUNT_MISMATCH`, `REPLACE_INVALID_CHARACTERS`,
+		`EMPTY_FIELD_AS_NULL`, `SKIP_BYTE_ORDER_MARK`, `ENCODING`,
+	}
+
+	fileFormatJsonProps = []string{
+		`COMPRESSION`, `FILE_EXTENSION`, `DATE_FORMAT`, `TIME_FORMAT`,
+		`TIMESTAMP_FORMAT`, `BINARY_FORMAT`, `TRIM_SPACE`, `NULL_IF`,
+		`ENABLE_OCTAL`, `ALLOW_DUPLICATE`, `STRIP_OUTER_ARRAY`, `STRIP_NULL_VALUES`,
+		`REPLACE_INVALID_CHARACTERS`, `IGNORE_UTF8_ERRORS`, `SKIP_BYTE_ORDER_MARK`,
+	}
+
+	fileFormatAvroProps = []string{
+		`COMPRESSION`, `TRIM_SPACE`, `REPLACE_INVALID_CHARACTERS`, `NULL_IF`,
+	}
+
+	fileFormatOrcProps = []string{
+		`TRIM_SPACE`, `REPLACE_INVALID_CHARACTERS`, `NULL_IF`,
+	}
+
+	fileFormatParquetProps = []string{
+		`COMPRESSION`, `SNAPPY_COMPRESSION`, `BINARY_AS_TEXT`, `USE_LOGICAL_TYPE`,
+		`TRIM_SPACE`, `USE_VECTORIZED_SCANNER`, `SNAPPY_COMPRESSION_LEVEL`,
+		`REPLACE_INVALID_CHARACTERS`, `NULL_IF`,
+	}
+
+	fileFormatXmlProps = []string{
+		`COMPRESSION`, `IGNORE_UTF8_ERRORS`, `PRESERVE_SPACE`, `STRIP_OUTER_ELEMENT`,
+		`DISABLE_SNOWFLAKE_DATA`, `DISABLE_AUTO_CONVERT`, `REPLACE_INVALID_CHARACTERS`,
+		`SKIP_BYTE_ORDER_MARK`,
+	}
 
 	// ── CREATE ICEBERG TABLE ────────────────────────────────────────────────
 	reIsCreateIcebergTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?ICEBERG\s+TABLE\b`)
@@ -1064,6 +1106,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// property 'TYPE'" for FILE_FORMAT=(TYPE='CSV' ...).
 		if reIsCreateStage.MatchString(parseText) {
 			validateProperties(stripParenContents(parseText), stageProps, r, &markers)
+			continue
+		}
+
+		// ── Preamble: CREATE FILE FORMAT ─────────────────────────────────
+		if reIsCreateFileFormat.MatchString(parseText) {
+			markers = append(markers, validateCreateFileFormat(parseText, r)...)
 			continue
 		}
 
@@ -1835,4 +1883,72 @@ func splitHybridSegments(s string) []string {
 		}
 	}
 	return segments
+}
+
+func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// 1. Extract TYPE
+	typeMatch := regexp.MustCompile(`(?i)\bTYPE\s*=\s*('[^']+'|\S+)`).FindStringSubmatch(s)
+	if typeMatch == nil {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory TYPE property in CREATE FILE FORMAT.", 4))
+		return markers
+	}
+
+	rawType := strings.ToUpper(strings.Trim(typeMatch[1], "'"))
+	var allowed []string
+	allowed = append(allowed, fileFormatCommonProps...)
+
+	switch rawType {
+	case "CSV":
+		allowed = append(allowed, fileFormatCsvProps...)
+	case "JSON":
+		allowed = append(allowed, fileFormatJsonProps...)
+	case "AVRO":
+		allowed = append(allowed, fileFormatAvroProps...)
+	case "ORC":
+		allowed = append(allowed, fileFormatOrcProps...)
+	case "PARQUET":
+		allowed = append(allowed, fileFormatParquetProps...)
+	case "XML":
+		allowed = append(allowed, fileFormatXmlProps...)
+	default:
+		markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Invalid TYPE '%s' for FILE FORMAT. Must be CSV, JSON, AVRO, ORC, PARQUET, or XML.", rawType), 4))
+		return markers
+	}
+
+	// 2. Validate all property keys
+	allowedRe := regexp.MustCompile("(?i)^(" + strings.Join(allowed, "|") + ")$")
+	propRe := regexp.MustCompile(`(?i)\b([a-zA-Z_0-9]+)\s*=`)
+	for _, m := range propRe.FindAllStringSubmatch(s, -1) {
+		key := m[1]
+		if strings.ToUpper(key) == "TYPE" {
+			continue
+		}
+		if !allowedRe.MatchString(key) {
+			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Property '%s' is not applicable for %s file format.", key, rawType), 4))
+		}
+	}
+
+	// 3. Type-specific value validations
+	if rawType == "CSV" {
+		// FIELD_DELIMITER: single-char or NONE
+		if m := regexp.MustCompile(`(?i)\bFIELD_DELIMITER\s*=\s*('[^']+'|NONE)`).FindStringSubmatch(s); m != nil {
+			val := strings.Trim(m[1], "'")
+			if strings.ToUpper(val) != "NONE" {
+				// Handle common escaped characters and length 1
+				if len(val) > 1 && !regexp.MustCompile(`^\\[ntr'"]$`).MatchString(val) {
+					markers = append(markers, diagMarkerSpan(r, "FIELD_DELIMITER must be a single-character string or 'NONE'.", 4))
+				}
+			}
+		}
+		// SKIP_HEADER: non-negative integer
+		if m := regexp.MustCompile(`(?i)\bSKIP_HEADER\s*=\s*(-?\d+)`).FindStringSubmatch(s); m != nil {
+			if strings.HasPrefix(m[1], "-") {
+				markers = append(markers, diagMarkerSpan(r, "SKIP_HEADER must be a non-negative integer.", 4))
+			}
+		}
+	}
+
+	return markers
 }

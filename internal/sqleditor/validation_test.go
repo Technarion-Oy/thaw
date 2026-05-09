@@ -194,6 +194,12 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"MERGE UPDATE in NOT MATCHED", "MERGE INTO t USING s ON t.id = s.id WHEN NOT MATCHED THEN UPDATE SET val = s.val", "not allowed in WHEN NOT MATCHED"},
 		{"MERGE NOT MATCHED BY SOURCE", "MERGE INTO t USING s ON t.id = s.id WHEN NOT MATCHED BY SOURCE THEN DELETE", "not supported by Snowflake"},
 
+		// Invalid File Formats
+		{"File Format invalid TYPE", "CREATE FILE FORMAT my_fmt TYPE = 'EXCEL'", "Invalid TYPE 'EXCEL'"},
+		{"File Format FIELD_DELIMITER on PARQUET", "CREATE FILE FORMAT my_fmt TYPE = PARQUET FIELD_DELIMITER = ','", "Property 'FIELD_DELIMITER' is not applicable for PARQUET"},
+		{"File Format invalid FIELD_DELIMITER", "CREATE FILE FORMAT my_fmt TYPE = CSV FIELD_DELIMITER = 'abc'", "FIELD_DELIMITER must be a single-character string"},
+		{"File Format negative SKIP_HEADER", "CREATE FILE FORMAT my_fmt TYPE = CSV SKIP_HEADER = -1", "SKIP_HEADER must be a non-negative integer"},
+
 		// Invalid Integrations
 		{"Integration with prefix", "CREATE STORAGE INTEGRATION MY_DB.PUBLIC.MY_INT TYPE=EXTERNAL_STAGE STORAGE_PROVIDER='S3' ENABLED=TRUE STORAGE_AWS_ROLE_ARN='arn:aws:iam::123456789012:role/bad_role' STORAGE_ALLOWED_LOCATIONS=('s3://bad-bucket/')", "account-level objects"},
 		{"API Integration missing provider", "CREATE API INTEGRATION bad_api_int API_AWS_ROLE_ARN='arn:aws:iam::123456789012:role/snowflake_api_role' API_ALLOWED_PREFIXES=('https://xyz.execute-api.us-west-2.amazonaws.com/prod/') ENABLED=TRUE", "Missing required parameter API_PROVIDER"},
