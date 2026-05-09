@@ -54,24 +54,24 @@ var (
 	)
 
 	// ── Custom check patterns ─────────────────────────────────────────────────
-	reLateralFlatten    = regexp.MustCompile(`(?i)\bLATERALFLATTEN\b`)
-	reFlattenFromJoin   = regexp.MustCompile(`(?i)(?:FROM|JOIN|,)\s+FLATTEN\s*\(`)
-	reLateralOK         = regexp.MustCompile(`(?i)\bLATERAL\s+FLATTEN\s*\(`)
-	reTableFlatten      = regexp.MustCompile(`(?i)\bTABLE\s*\(\s*FLATTEN\s*\(`)
-	reQualifyAfterOrder = regexp.MustCompile(`(?is)\bORDER\s+BY[\s\S]+?\bQUALIFY\b`)
-	reVariantDotPath    = regexp.MustCompile(`(?i)\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\b`)
-	reOrReplace         = regexp.MustCompile(`(?i)\bOR\s+REPLACE\b`)
-	reIfNotExists       = regexp.MustCompile(`(?i)\bIF\s+NOT\s+EXISTS\b`)
+	reLateralFlatten      = regexp.MustCompile(`(?i)\bLATERALFLATTEN\b`)
+	reFlattenFromJoin     = regexp.MustCompile(`(?i)(?:FROM|JOIN|,)\s+FLATTEN\s*\(`)
+	reLateralOK           = regexp.MustCompile(`(?i)\bLATERAL\s+FLATTEN\s*\(`)
+	reTableFlatten        = regexp.MustCompile(`(?i)\bTABLE\s*\(\s*FLATTEN\s*\(`)
+	reQualifyAfterOrder   = regexp.MustCompile(`(?is)\bORDER\s+BY[\s\S]+?\bQUALIFY\b`)
+	reVariantDotPath      = regexp.MustCompile(`(?i)\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\b`)
+	reOrReplace           = regexp.MustCompile(`(?i)\bOR\s+REPLACE\b`)
+	reIfNotExists         = regexp.MustCompile(`(?i)\bIF\s+NOT\s+EXISTS\b`)
 	reStripStringLiterals = regexp.MustCompile(`'(?:''|[^'])*'`)
 	// rePatternClusterBy — distinct from the CLUSTER BY pattern in `tableProps` for CREATE TABLE.
-	rePatternClusterBy  = regexp.MustCompile(`(?i)\bCLUSTER\s+BY\b`)
-	reDataRetention     = regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\b`)
-	reConstraintCol     = regexp.MustCompile(`(?i)^(?:CONSTRAINT|PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY)\b`)
-	reVirtualColAS      = regexp.MustCompile(`(?i)\bAS\s*\([\s\S]*\)\s*$`)
-	rePartitionBy       = regexp.MustCompile(`(?i)^PARTITION\s+BY\b`)
+	rePatternClusterBy = regexp.MustCompile(`(?i)\bCLUSTER\s+BY\b`)
+	reDataRetention    = regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\b`)
+	reConstraintCol    = regexp.MustCompile(`(?i)^(?:CONSTRAINT|PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY)\b`)
+	reVirtualColAS     = regexp.MustCompile(`(?i)\bAS\s*\([\s\S]*\)\s*$`)
+	rePartitionBy      = regexp.MustCompile(`(?i)^PARTITION\s+BY\b`)
 
-	reWithLocation      = regexp.MustCompile(`(?i)\bWITH\s+LOCATION\s*=`)
-	reFileFormat        = regexp.MustCompile(`(?i)\bFILE_FORMAT\s*=`)
+	reWithLocation = regexp.MustCompile(`(?i)\bWITH\s+LOCATION\s*=`)
+	reFileFormat   = regexp.MustCompile(`(?i)\bFILE_FORMAT\s*=`)
 
 	// ── CREATE VIEW ───────────────────────────────────────────────────────────
 	reIsCreateView = regexp.MustCompile(
@@ -112,8 +112,8 @@ var (
 	reAutoIncrement       = regexp.MustCompile(`(?i)\b(?:AUTOINCREMENT|IDENTITY)\b`)
 
 	// ── COPY INTO ────────────────────────────────────────────────────────────
-	reIsCopyInto = regexp.MustCompile(`(?i)^\s*COPY\s+INTO\b`)
-	reCopyInto   = regexp.MustCompile(`(?i)^\s*COPY\s+INTO\s+(` + _identPath + `|@\S+|'[^']+')(?:\s*\([^)]*\))?(?:\s+|$)`)
+	reIsCopyInto          = regexp.MustCompile(`(?i)^\s*COPY\s+INTO\b`)
+	reCopyInto            = regexp.MustCompile(`(?i)^\s*COPY\s+INTO\s+(` + _identPath + `|@\S+|'[^']+')(?:\s*\([^)]*\))?(?:\s+|$)`)
 	reCreateTableCTAS     = regexp.MustCompile(`(?i)^AS\s+(?:SELECT|WITH)\b`)
 	reCreateTableClone    = regexp.MustCompile(`(?i)^(?:CLONE|LIKE)\b`)
 	reCreateTableTemplate = regexp.MustCompile(`(?i)^USING\s+TEMPLATE\s*\(`)
@@ -201,8 +201,8 @@ var (
 
 	// ── CREATE INTEGRATION ────────────────────────────────────────────────────
 	reIsCreateIntegration = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:STORAGE|API|NOTIFICATION|SECURITY|EXTERNAL\s+ACCESS)\s+INTEGRATION\b`)
-	reIntegrationName    = regexp.MustCompile(`(?i)INTEGRATION\s+(` + _identPath + `)`)
-	reIntegrationType    = regexp.MustCompile(`(?i)\bTYPE\s*=\s*([a-zA-Z_0-9]+)`)
+	reIntegrationName     = regexp.MustCompile(`(?i)INTEGRATION\s+(` + _identPath + `)`)
+	reIntegrationType     = regexp.MustCompile(`(?i)\bTYPE\s*=\s*([a-zA-Z_0-9]+)`)
 	reIntegrationProvider = regexp.MustCompile(`(?i)\b(?:STORAGE|API)_PROVIDER\s*=\s*('[^']+'|[a-zA-Z_0-9]+)`)
 
 	// ── CREATE WAREHOUSE ──────────────────────────────────────────────────────
@@ -307,7 +307,7 @@ var (
 	}, "|")
 
 	// ── CREATE FILE FORMAT ───────────────────────────────────────────────────
-	reIsCreateFileFormat = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+|TEMP\s+|TRANSIENT\s+)?FILE\s+FORMAT\b`)
+	reIsCreateFileFormat  = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+|TEMP\s+|TRANSIENT\s+)?FILE\s+FORMAT\b`)
 	reFileFormatPropKey   = regexp.MustCompile(`(?i)\b([a-zA-Z_0-9]+)\s*=`)
 	reFileFormatPropValue = regexp.MustCompile(`^\s*('[^']*'|[A-Za-z0-9_.-]+)`)
 	reFileFormatValidEsc  = regexp.MustCompile(`^\\([ntr'"]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|[0-7]{1,3})$`)
@@ -359,9 +359,9 @@ var (
 	reFileFormatAllowedXml     = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatXmlProps...), "|") + ")$")
 
 	// ── CREATE ICEBERG TABLE ────────────────────────────────────────────────
-	reIsCreateIcebergTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?ICEBERG\s+TABLE\b`)
+	reIsCreateIcebergTable          = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?ICEBERG\s+TABLE\b`)
 	reIsCreateTransientIcebergTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TRANSIENT\s+ICEBERG\s+TABLE\b`)
-	reGetStatementProperties = regexp.MustCompile(`(?i)\b([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*('(?:''|[^'])*'|[\w$]+)`)
+	reGetStatementProperties        = regexp.MustCompile(`(?i)\b([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*('(?:''|[^'])*'|[\w$]+)`)
 
 	// ── ALTER STAGE ───────────────────────────────────────────────────────────
 	reIsAlterStage         = regexp.MustCompile(`(?i)^\s*ALTER\s+STAGE\b`)
@@ -1202,6 +1202,7 @@ var (
 	reCreateFuncExt  = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:TEMPORARY\s+|TEMP\s+)?(?:AGGREGATE\s+)?FUNCTION\s+` + _identPath + `\s*\(`)
 	reReturnsType    = regexp.MustCompile(`(?i)\bRETURNS\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s*\([^)]*\))?\b`)
 )
+
 // ValidateDataTypes checks that explicit data type declarations within
 // CREATE TABLE, ALTER TABLE, and CAST() functions exist in Snowflake's registry.
 func ValidateDataTypes(sql string, stmtRanges []StatementRange) []DiagMarker {
@@ -1859,7 +1860,7 @@ func splitHybridSegments(s string) []string {
 		} else {
 			c = ','
 		}
-		
+
 		if inSingle {
 			if c == '\'' {
 				// Check for doubled quote (escaped quote)
@@ -1913,7 +1914,7 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TRANSIENT is not supported for FILE FORMAT objects.", 4))
 	}
 
-	if regexp.MustCompile(`(?i)\b(TEMPORARY|TEMP)\b`).MatchString(strippedS) {
+	if reFileFormatTemporary.MatchString(strippedS) {
 		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TEMPORARY is not supported for FILE FORMAT objects.", 4))
 	}
 
@@ -1991,7 +1992,8 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 					markers = append(markers, diagMarkerSpan(r, "SKIP_HEADER must be a non-negative integer.", 4))
 				}
 			}
-		}	}
+		}
+	}
 
 	return markers
 }
