@@ -1913,6 +1913,10 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TRANSIENT is not supported for FILE FORMAT objects.", 4))
 	}
 
+	if regexp.MustCompile(`(?i)\b(TEMPORARY|TEMP)\b`).MatchString(strippedS) {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TEMPORARY is not supported for FILE FORMAT objects.", 4))
+	}
+
 	// 1. Extract all properties correctly by finding keys in strippedS and values in stripped
 	type rawProp struct {
 		key string
@@ -1972,7 +1976,8 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 
 		// 3. Type-specific value validations
 		if rawType == "CSV" {
-			if p.key == "FIELD_DELIMITER" {
+			switch p.key {
+			case "FIELD_DELIMITER":
 				val := strings.Trim(p.val, "'")
 				if strings.ToUpper(val) != "NONE" {
 					if len(val) == 0 {
@@ -1981,13 +1986,12 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 						markers = append(markers, diagMarkerSpan(r, "FIELD_DELIMITER must be a single-character string or 'NONE'.", 4))
 					}
 				}
-			} else if p.key == "SKIP_HEADER" {
+			case "SKIP_HEADER":
 				if strings.HasPrefix(p.val, "-") {
 					markers = append(markers, diagMarkerSpan(r, "SKIP_HEADER must be a non-negative integer.", 4))
 				}
 			}
-		}
-	}
+		}	}
 
 	return markers
 }
