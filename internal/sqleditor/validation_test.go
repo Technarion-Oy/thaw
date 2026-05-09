@@ -142,6 +142,26 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV) COMMENT = 'DATA_RETENTION_TIME_IN_DAYS = 1'",
 		"CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) -- DATA_RETENTION_TIME_IN_DAYS = 1\n WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV)",
 		"CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) COPY GRANTS WITH LOCATION = @my_stage FILE_FORMAT = (TYPE = CSV)",
+		// File Formats
+		"CREATE FILE FORMAT my_fmt TYPE = CSV",
+		"CREATE FILE FORMAT my_fmt TYPE = CSV FIELD_DELIMITER = '\\x09' COMMENT = 'this is a tab'",
+		"CREATE FILE FORMAT my_fmt TYPE = CSV COMMENT = 'FIELD_DELIMITER = |'",
+		"CREATE FILE FORMAT my_fmt TYPE = CSV NULL_IF = ('SKIP_HEADER = -1')",
+		"CREATE FILE FORMAT my_fmt TYPE = JSON COMPRESSION = GZIP",
+		"CREATE FILE FORMAT IF NOT EXISTS my_fmt TYPE = XML",
+		"CREATE OR REPLACE FILE FORMAT my_fmt TYPE = CSV",
+		"CREATE FILE FORMAT my_fmt TYPE = ORC COMMENT = 'A TRANSIENT format'",
+		"CREATE FILE FORMAT my_fmt TYPE = JSON -- FIELD_DELIMITER = ','",
+		"CREATE FILE FORMAT my_fmt",
+		"CREATE FILE FORMAT my_fmt FIELD_DELIMITER = ','",
+		"CREATE FILE FORMAT my_fmt FIELD_DELIMITER = NONE",
+		"CREATE FILE FORMAT my_fmt FIELD_DELIMITER = 'NONE'",
+		"CREATE FILE FORMAT my_fmt NULL_IF = ('TYPE = CSV')",
+		// ALTER / DROP FILE FORMAT
+		"ALTER FILE FORMAT my_fmt SET TYPE = CSV",
+		"ALTER FILE FORMAT my_fmt SET COMMENT = 'new comment'",
+		"DROP FILE FORMAT my_fmt",
+		"DROP FILE FORMAT IF EXISTS my_fmt",
 	}
 
 	for _, sql := range validQueries {
@@ -193,6 +213,18 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"MERGE INSERT in MATCHED", "MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN INSERT (id) VALUES (s.id)", "not allowed in WHEN MATCHED"},
 		{"MERGE UPDATE in NOT MATCHED", "MERGE INTO t USING s ON t.id = s.id WHEN NOT MATCHED THEN UPDATE SET val = s.val", "not allowed in WHEN NOT MATCHED"},
 		{"MERGE NOT MATCHED BY SOURCE", "MERGE INTO t USING s ON t.id = s.id WHEN NOT MATCHED BY SOURCE THEN DELETE", "not supported by Snowflake"},
+
+		// Invalid File Formats
+		{"File Format invalid TYPE", "CREATE FILE FORMAT my_fmt TYPE = 'EXCEL'", "Invalid TYPE 'EXCEL' for FILE FORMAT"},
+		{"File Format invalid TRANSIENT", "CREATE TRANSIENT FILE FORMAT my_fmt TYPE = CSV", "Unexpected syntax"},
+		{"File Format invalid TEMPORARY", "CREATE TEMPORARY FILE FORMAT my_fmt TYPE = CSV", "Unexpected syntax"},
+		{"File Format invalid TEMP", "CREATE TEMP FILE FORMAT my_fmt TYPE = CSV", "Unexpected syntax"},
+		{"File Format Replace IF NOT EXISTS", "CREATE OR REPLACE FILE FORMAT IF NOT EXISTS my_fmt TYPE = JSON", "Conflict between OR REPLACE and IF NOT EXISTS"}, {"File Format FIELD_DELIMITER on PARQUET", "CREATE FILE FORMAT my_fmt TYPE = PARQUET FIELD_DELIMITER = ','", "Property 'FIELD_DELIMITER' is not applicable for PARQUET"},
+		{"File Format FIELD_DELIMITER on AVRO", "CREATE FILE FORMAT my_fmt TYPE = AVRO FIELD_DELIMITER = ','", "Property 'FIELD_DELIMITER' is not applicable for AVRO"},
+		{"File Format invalid FIELD_DELIMITER", "CREATE FILE FORMAT my_fmt TYPE = CSV FIELD_DELIMITER = 'abc'", "FIELD_DELIMITER must be a single-character string"},
+		{"File Format empty FIELD_DELIMITER", "CREATE FILE FORMAT my_fmt TYPE = CSV FIELD_DELIMITER = ''", "FIELD_DELIMITER cannot be empty"},
+		{"File Format negative SKIP_HEADER", "CREATE FILE FORMAT my_fmt TYPE = CSV SKIP_HEADER = -1", "SKIP_HEADER must be a non-negative integer"},
+		{"File Format quoted negative SKIP_HEADER", "CREATE FILE FORMAT my_fmt TYPE = CSV SKIP_HEADER = '-1'", "SKIP_HEADER must be a non-negative integer"},
 
 		// Invalid Integrations
 		{"Integration with prefix", "CREATE STORAGE INTEGRATION MY_DB.PUBLIC.MY_INT TYPE=EXTERNAL_STAGE STORAGE_PROVIDER='S3' ENABLED=TRUE STORAGE_AWS_ROLE_ARN='arn:aws:iam::123456789012:role/bad_role' STORAGE_ALLOWED_LOCATIONS=('s3://bad-bucket/')", "account-level objects"},
@@ -512,8 +544,8 @@ SELECT * FROM DB.SCH."MixedCaseTable";`
 		ResolvedRefs: []ResolvedRef{
 			{DB: "DB", Schema: "SCH", Name: "MixedCaseTable"},
 		},
-		KnownDatabases: []string{"DB"},
-		KnownSchemas:   []SchemaEntry{{DB: "DB", Name: "SCH"}},
+		KnownDatabases:              []string{"DB"},
+		KnownSchemas:                []SchemaEntry{{DB: "DB", Name: "SCH"}},
 		QuotedIdentifiersIgnoreCase: false,
 	}
 
@@ -556,8 +588,8 @@ SELECT
 FROM "LINEAGE_SOURCE_DB"."RAW_DATA"."this_table_does_not_exists";`
 
 	req := ValidateTablesExistRequest{
-		SQL:            sql,
-		StmtRanges:     GetStatementRanges(sql),
+		SQL:        sql,
+		StmtRanges: GetStatementRanges(sql),
 		// Empty ResolvedRefs simulates the frontend correctly dropping missing tables
 		// once the schema has been fetched.
 		ResolvedRefs:   []ResolvedRef{},
@@ -1896,7 +1928,7 @@ $$;
 			{Name: "LAST_REFRESH_DATE", DataType: "TIMESTAMP_NTZ"},
 		}},
 	}
-	
+
 	resolvedRefs := []ResolvedRef{
 		{Alias: "RAW_CUSTOMERS", Name: "RAW_CUSTOMERS"},
 		{Alias: "VW_CUSTOMER_LIFETIME_VALUE", Name: "VW_CUSTOMER_LIFETIME_VALUE"},
@@ -1907,7 +1939,7 @@ $$;
 	}
 
 	markers := ValidateSemantics(sql, resolvedRefs, colEntries)
-	
+
 	for _, m := range markers {
 		t.Errorf("Unexpected diagnostic marker: %s at line %d, col %d", m.Message, m.StartLineNumber, m.StartColumn)
 	}

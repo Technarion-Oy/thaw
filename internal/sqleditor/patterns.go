@@ -39,7 +39,7 @@ var (
 		`(?i)\bTABLESAMPLE\b|\bSAMPLE\s*\(|\bWITHIN\s+GROUP\b|\bCONNECT\s+BY\b` +
 			`|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b` +
 			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:STAGE` +
-			`|FILE\s+FORMAT|ALERT|SHARE` +
+			`|ALERT|SHARE` +
 			`|NETWORK|ROW\s+ACCESS` +
 			`|SESSION|PASSWORD|REPLICATION|FAILOVER|APPLICATION)\b` +
 			`|ALTER\s+(?:TABLE|VIEW|STREAM|DATABASE|STAGE|PIPE|PROCEDURE|FUNCTION` +
@@ -54,24 +54,24 @@ var (
 	)
 
 	// ── Custom check patterns ─────────────────────────────────────────────────
-	reLateralFlatten    = regexp.MustCompile(`(?i)\bLATERALFLATTEN\b`)
-	reFlattenFromJoin   = regexp.MustCompile(`(?i)(?:FROM|JOIN|,)\s+FLATTEN\s*\(`)
-	reLateralOK         = regexp.MustCompile(`(?i)\bLATERAL\s+FLATTEN\s*\(`)
-	reTableFlatten      = regexp.MustCompile(`(?i)\bTABLE\s*\(\s*FLATTEN\s*\(`)
-	reQualifyAfterOrder = regexp.MustCompile(`(?is)\bORDER\s+BY[\s\S]+?\bQUALIFY\b`)
-	reVariantDotPath    = regexp.MustCompile(`(?i)\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\b`)
-	reOrReplace         = regexp.MustCompile(`(?i)\bOR\s+REPLACE\b`)
-	reIfNotExists       = regexp.MustCompile(`(?i)\bIF\s+NOT\s+EXISTS\b`)
+	reLateralFlatten      = regexp.MustCompile(`(?i)\bLATERALFLATTEN\b`)
+	reFlattenFromJoin     = regexp.MustCompile(`(?i)(?:FROM|JOIN|,)\s+FLATTEN\s*\(`)
+	reLateralOK           = regexp.MustCompile(`(?i)\bLATERAL\s+FLATTEN\s*\(`)
+	reTableFlatten        = regexp.MustCompile(`(?i)\bTABLE\s*\(\s*FLATTEN\s*\(`)
+	reQualifyAfterOrder   = regexp.MustCompile(`(?is)\bORDER\s+BY[\s\S]+?\bQUALIFY\b`)
+	reVariantDotPath      = regexp.MustCompile(`(?i)\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\b`)
+	reOrReplace           = regexp.MustCompile(`(?i)\bOR\s+REPLACE\b`)
+	reIfNotExists         = regexp.MustCompile(`(?i)\bIF\s+NOT\s+EXISTS\b`)
 	reStripStringLiterals = regexp.MustCompile(`'(?:''|[^'])*'`)
 	// rePatternClusterBy — distinct from the CLUSTER BY pattern in `tableProps` for CREATE TABLE.
-	rePatternClusterBy  = regexp.MustCompile(`(?i)\bCLUSTER\s+BY\b`)
-	reDataRetention     = regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\b`)
-	reConstraintCol     = regexp.MustCompile(`(?i)^(?:CONSTRAINT|PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY)\b`)
-	reVirtualColAS      = regexp.MustCompile(`(?i)\bAS\s*\([\s\S]*\)\s*$`)
-	rePartitionBy       = regexp.MustCompile(`(?i)^PARTITION\s+BY\b`)
+	rePatternClusterBy = regexp.MustCompile(`(?i)\bCLUSTER\s+BY\b`)
+	reDataRetention    = regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\b`)
+	reConstraintCol    = regexp.MustCompile(`(?i)^(?:CONSTRAINT|PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY)\b`)
+	reVirtualColAS     = regexp.MustCompile(`(?i)\bAS\s*\([\s\S]*\)\s*$`)
+	rePartitionBy      = regexp.MustCompile(`(?i)^PARTITION\s+BY\b`)
 
-	reWithLocation      = regexp.MustCompile(`(?i)\bWITH\s+LOCATION\s*=`)
-	reFileFormat        = regexp.MustCompile(`(?i)\bFILE_FORMAT\s*=`)
+	reWithLocation = regexp.MustCompile(`(?i)\bWITH\s+LOCATION\s*=`)
+	reFileFormat   = regexp.MustCompile(`(?i)\bFILE_FORMAT\s*=`)
 
 	// ── CREATE VIEW ───────────────────────────────────────────────────────────
 	reIsCreateView = regexp.MustCompile(
@@ -112,8 +112,8 @@ var (
 	reAutoIncrement       = regexp.MustCompile(`(?i)\b(?:AUTOINCREMENT|IDENTITY)\b`)
 
 	// ── COPY INTO ────────────────────────────────────────────────────────────
-	reIsCopyInto = regexp.MustCompile(`(?i)^\s*COPY\s+INTO\b`)
-	reCopyInto   = regexp.MustCompile(`(?i)^\s*COPY\s+INTO\s+(` + _identPath + `|@\S+|'[^']+')(?:\s*\([^)]*\))?(?:\s+|$)`)
+	reIsCopyInto          = regexp.MustCompile(`(?i)^\s*COPY\s+INTO\b`)
+	reCopyInto            = regexp.MustCompile(`(?i)^\s*COPY\s+INTO\s+(` + _identPath + `|@\S+|'[^']+')(?:\s*\([^)]*\))?(?:\s+|$)`)
 	reCreateTableCTAS     = regexp.MustCompile(`(?i)^AS\s+(?:SELECT|WITH)\b`)
 	reCreateTableClone    = regexp.MustCompile(`(?i)^(?:CLONE|LIKE)\b`)
 	reCreateTableTemplate = regexp.MustCompile(`(?i)^USING\s+TEMPLATE\s*\(`)
@@ -201,8 +201,8 @@ var (
 
 	// ── CREATE INTEGRATION ────────────────────────────────────────────────────
 	reIsCreateIntegration = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:STORAGE|API|NOTIFICATION|SECURITY|EXTERNAL\s+ACCESS)\s+INTEGRATION\b`)
-	reIntegrationName    = regexp.MustCompile(`(?i)INTEGRATION\s+(` + _identPath + `)`)
-	reIntegrationType    = regexp.MustCompile(`(?i)\bTYPE\s*=\s*([a-zA-Z_0-9]+)`)
+	reIntegrationName     = regexp.MustCompile(`(?i)INTEGRATION\s+(` + _identPath + `)`)
+	reIntegrationType     = regexp.MustCompile(`(?i)\bTYPE\s*=\s*([a-zA-Z_0-9]+)`)
 	reIntegrationProvider = regexp.MustCompile(`(?i)\b(?:STORAGE|API)_PROVIDER\s*=\s*('[^']+'|[a-zA-Z_0-9]+)`)
 
 	// ── CREATE WAREHOUSE ──────────────────────────────────────────────────────
@@ -306,10 +306,63 @@ var (
 		`FILE_FORMAT`, `COPY_OPTIONS`, `COMMENT`, `DIRECTORY`,
 	}, "|")
 
+	// ── CREATE FILE FORMAT ───────────────────────────────────────────────────
+	reIsCreateFileFormat  = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+|TEMP\s+|TRANSIENT\s+)?FILE\s+FORMAT\b`)
+	reFileFormatPropKey   = regexp.MustCompile(`(?i)\b([a-zA-Z_0-9]+)\s*=`)
+	reFileFormatPropValue = regexp.MustCompile(`^\s*('[^']*'|[A-Za-z0-9_.-]+)`)
+	reFileFormatValidEsc  = regexp.MustCompile(`^\\([ntr'\"]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|[0-7]{1,3})$`)
+	reFileFormatTemporary = regexp.MustCompile(`(?i)\b(TEMPORARY|TEMP)\b`)
+
+	fileFormatCommonProps = []string{`TYPE`, `COMMENT`}
+
+	fileFormatCsvProps = []string{
+		`COMPRESSION`, `RECORD_DELIMITER`, `FIELD_DELIMITER`, `FILE_EXTENSION`,
+		`PARSE_HEADER`, `SKIP_HEADER`, `SKIP_BLANK_LINES`, `DATE_FORMAT`,
+		`TIME_FORMAT`, `TIMESTAMP_FORMAT`, `BINARY_FORMAT`, `ESCAPE`,
+		`ESCAPE_UNENCLOSED_FIELD`, `TRIM_SPACE`, `FIELD_OPTIONALLY_ENCLOSED_BY`,
+		`NULL_IF`, `ERROR_ON_COLUMN_COUNT_MISMATCH`, `REPLACE_INVALID_CHARACTERS`,
+		`EMPTY_FIELD_AS_NULL`, `SKIP_BYTE_ORDER_MARK`, `ENCODING`, `MULTI_LINE`,
+	}
+
+	fileFormatJsonProps = []string{
+		`COMPRESSION`, `FILE_EXTENSION`, `DATE_FORMAT`, `TIME_FORMAT`,
+		`TIMESTAMP_FORMAT`, `BINARY_FORMAT`, `TRIM_SPACE`, `NULL_IF`,
+		`ENABLE_OCTAL`, `ALLOW_DUPLICATE`, `STRIP_OUTER_ARRAY`, `STRIP_NULL_VALUES`,
+		`REPLACE_INVALID_CHARACTERS`, `IGNORE_UTF8_ERRORS`, `SKIP_BYTE_ORDER_MARK`,
+	}
+
+	fileFormatAvroProps = []string{
+		`COMPRESSION`, `TRIM_SPACE`, `REPLACE_INVALID_CHARACTERS`, `NULL_IF`, `SNAPPY_COMPRESSION_LEVEL`,
+	}
+
+	fileFormatOrcProps = []string{
+		`TRIM_SPACE`, `REPLACE_INVALID_CHARACTERS`, `NULL_IF`,
+	}
+
+	fileFormatParquetProps = []string{
+		`COMPRESSION`, `BINARY_AS_TEXT`, `USE_LOGICAL_TYPE`,
+		`TRIM_SPACE`, `USE_VECTORIZED_SCANNER`,
+		`REPLACE_INVALID_CHARACTERS`, `NULL_IF`,
+	}
+
+	fileFormatXmlProps = []string{
+		`COMPRESSION`, `IGNORE_UTF8_ERRORS`, `PRESERVE_SPACE`, `STRIP_OUTER_ELEMENT`,
+		`DISABLE_SNOWFLAKE_DATA`, `DISABLE_AUTO_CONVERT`, `REPLACE_INVALID_CHARACTERS`,
+		`SKIP_BYTE_ORDER_MARK`,
+	}
+
+	// Pre-compiled allowed property regexes for each file format type
+	reFileFormatAllowedCsv     = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatCsvProps...), "|") + ")$")
+	reFileFormatAllowedJson    = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatJsonProps...), "|") + ")$")
+	reFileFormatAllowedAvro    = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatAvroProps...), "|") + ")$")
+	reFileFormatAllowedOrc     = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatOrcProps...), "|") + ")$")
+	reFileFormatAllowedParquet = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatParquetProps...), "|") + ")$")
+	reFileFormatAllowedXml     = regexp.MustCompile("(?i)^(" + strings.Join(append(fileFormatCommonProps, fileFormatXmlProps...), "|") + ")$")
+
 	// ── CREATE ICEBERG TABLE ────────────────────────────────────────────────
-	reIsCreateIcebergTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?ICEBERG\s+TABLE\b`)
+	reIsCreateIcebergTable          = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?ICEBERG\s+TABLE\b`)
 	reIsCreateTransientIcebergTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TRANSIENT\s+ICEBERG\s+TABLE\b`)
-	reGetStatementProperties = regexp.MustCompile(`(?i)\b([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*('(?:''|[^'])*'|[\w$]+)`)
+	reGetStatementProperties        = regexp.MustCompile(`(?i)\b([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*('(?:''|[^'])*'|[\w$]+)`)
 
 	// ── ALTER STAGE ───────────────────────────────────────────────────────────
 	reIsAlterStage         = regexp.MustCompile(`(?i)^\s*ALTER\s+STAGE\b`)
@@ -1067,6 +1120,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
+		// ── Preamble: CREATE FILE FORMAT ─────────────────────────────────
+		if reIsCreateFileFormat.MatchString(parseText) {
+			markers = append(markers, validateCreateFileFormat(parseText, r)...)
+			continue
+		}
+
 		// ── Preamble: ALTER STAGE ─────────────────────────────────────────
 		// RENAME TO, UNSET TAG, SET TAG, and UNSET DCM forms carry dynamic
 		// identifiers (new name, tag names) that cannot be property-validated.
@@ -1144,6 +1203,7 @@ var (
 	reCreateFuncExt  = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:SECURE\s+)?(?:TEMPORARY\s+|TEMP\s+)?(?:AGGREGATE\s+)?FUNCTION\s+` + _identPath + `\s*\(`)
 	reReturnsType    = regexp.MustCompile(`(?i)\bRETURNS\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s*\([^)]*\))?\b`)
 )
+
 // ValidateDataTypes checks that explicit data type declarations within
 // CREATE TABLE, ALTER TABLE, and CAST() functions exist in Snowflake's registry.
 func ValidateDataTypes(sql string, stmtRanges []StatementRange) []DiagMarker {
@@ -1801,7 +1861,7 @@ func splitHybridSegments(s string) []string {
 		} else {
 			c = ','
 		}
-		
+
 		if inSingle {
 			if c == '\'' {
 				// Check for doubled quote (escaped quote)
@@ -1835,4 +1895,107 @@ func splitHybridSegments(s string) []string {
 		}
 	}
 	return segments
+}
+
+func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := strings.TrimSpace(stripCommentsSQL(s))
+	// Use length-preserving masking for string literals to maintain offsets
+	strippedS := reStripStringLiterals.ReplaceAllStringFunc(stripped, func(m string) string {
+		return strings.Repeat(" ", len(m))
+	})
+
+	// Snowflake Rule: OR REPLACE and IF NOT EXISTS are mutually exclusive.
+	if reOrReplace.MatchString(strippedS) && reIfNotExists.MatchString(strippedS) {
+		markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE FILE FORMAT statement.", 4))
+	}
+
+	if reTransient.MatchString(strippedS) {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TRANSIENT is not supported for FILE FORMAT objects.", 4))
+	}
+
+	if reFileFormatTemporary.MatchString(strippedS) {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TEMPORARY is not supported for FILE FORMAT objects.", 4))
+	}
+
+	// 1. Extract all properties correctly by finding keys in strippedS and values in stripped
+	type rawProp struct {
+		key string
+		val string
+	}
+	var props []rawProp
+	var rawType string
+
+	for _, m := range reFileFormatPropKey.FindAllStringSubmatchIndex(strippedS, -1) {
+		key := strings.ToUpper(strippedS[m[2]:m[3]])
+		// Find value in stripped starting after the "KEY ="
+		valRest := stripped[m[1]:]
+		// Match value: either a quoted string or a word
+		valMatch := reFileFormatPropValue.FindStringSubmatch(valRest)
+		val := ""
+		if valMatch != nil {
+			val = valMatch[1]
+		}
+
+		if key == "TYPE" {
+			rawType = strings.ToUpper(strings.Trim(val, "'"))
+		} else {
+			props = append(props, rawProp{key: key, val: val})
+		}
+	}
+
+	// If TYPE is not explicitly provided, it defaults to CSV
+	if rawType == "" {
+		rawType = "CSV"
+	}
+
+	var allowedRe *regexp.Regexp
+	switch rawType {
+	case "CSV":
+		allowedRe = reFileFormatAllowedCsv
+	case "JSON":
+		allowedRe = reFileFormatAllowedJson
+	case "AVRO":
+		allowedRe = reFileFormatAllowedAvro
+	case "ORC":
+		allowedRe = reFileFormatAllowedOrc
+	case "PARQUET":
+		allowedRe = reFileFormatAllowedParquet
+	case "XML":
+		allowedRe = reFileFormatAllowedXml
+	default:
+		markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Invalid TYPE '%s' for FILE FORMAT. Must be CSV, JSON, AVRO, ORC, PARQUET, or XML.", rawType), 4))
+		return markers
+	}
+
+	// 2. Validate property keys and values
+	for _, p := range props {
+		if !allowedRe.MatchString(p.key) {
+			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Property '%s' is not applicable for %s file format.", p.key, rawType), 4))
+			continue
+		}
+
+		// 3. Type-specific value validations
+		if rawType == "CSV" {
+			switch p.key {
+			case "FIELD_DELIMITER":
+				val := strings.Trim(p.val, "'")
+				if strings.ToUpper(val) != "NONE" {
+					if len([]rune(val)) == 0 {
+						markers = append(markers, diagMarkerSpan(r, "FIELD_DELIMITER cannot be empty.", 4))
+					} else if len([]rune(val)) > 1 && !reFileFormatValidEsc.MatchString(val) {
+						markers = append(markers, diagMarkerSpan(r, "FIELD_DELIMITER must be a single-character string or 'NONE'.", 4))
+					}
+				}
+			case "SKIP_HEADER":
+				val := strings.Trim(p.val, "'")
+				if strings.HasPrefix(val, "-") {
+					markers = append(markers, diagMarkerSpan(r, "SKIP_HEADER must be a non-negative integer.", 4))
+				}
+			}
+		}
+	}
+
+	return markers
 }
