@@ -308,9 +308,9 @@ var (
 
 	// ── CREATE FILE FORMAT ───────────────────────────────────────────────────
 	reIsCreateFileFormat = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+|TEMP\s+|TRANSIENT\s+)?FILE\s+FORMAT\b`)
-	reFileFormatType     = regexp.MustCompile(`(?i)\bTYPE\s*=\s*('[^']+'|\S+)`)
+	reFileFormatType     = regexp.MustCompile(`(?i)\bTYPE\s*=\s*('[^']*'|\S+)`)
 	reFileFormatPropKey  = regexp.MustCompile(`(?i)\b([a-zA-Z_0-9]+)\s*=`)
-	reFileFormatFieldDelim = regexp.MustCompile(`(?i)\bFIELD_DELIMITER\s*=\s*('[^']*'|NONE)`)
+	reFileFormatFieldDelim = regexp.MustCompile(`(?i)\bFIELD_DELIMITER\s*=\s*('[^']*'|\S+)`)
 	reFileFormatSkipHeader = regexp.MustCompile(`(?i)\bSKIP_HEADER\s*=\s*(-?\d+)`)
 	reFileFormatValidEsc   = regexp.MustCompile(`^\\([ntr'"]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|[0-7]{1,3})$`)
 	reFileFormatTransient  = regexp.MustCompile(`(?i)\bTRANSIENT\b`)
@@ -1902,6 +1902,7 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	strippedS := reStripStringLiterals.ReplaceAllString(s, "")
+	sNoComment := regexp.MustCompile(`(?i)\bCOMMENT\s*=\s*'(?:''|[^'])*'`).ReplaceAllString(s, "")
 
 	// Snowflake Rule: OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	if reOrReplace.MatchString(strippedS) && reIfNotExists.MatchString(strippedS) {
@@ -1913,7 +1914,7 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 	}
 
 	// 1. Extract TYPE
-	typeMatch := reFileFormatType.FindStringSubmatch(s)
+	typeMatch := reFileFormatType.FindStringSubmatch(sNoComment)
 	if typeMatch == nil {
 		markers = append(markers, diagMarkerSpan(r, "Missing mandatory TYPE property in CREATE FILE FORMAT.", 4))
 		return markers
@@ -1954,7 +1955,7 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 	// 3. Type-specific value validations
 	if rawType == "CSV" {
 		// FIELD_DELIMITER: single-char or NONE
-		if m := reFileFormatFieldDelim.FindStringSubmatch(s); m != nil {
+		if m := reFileFormatFieldDelim.FindStringSubmatch(sNoComment); m != nil {
 			val := strings.Trim(m[1], "'")
 			if strings.ToUpper(val) != "NONE" {
 				if len(val) == 0 {
@@ -1965,7 +1966,7 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 			}
 		}
 		// SKIP_HEADER: non-negative integer
-		if m := reFileFormatSkipHeader.FindStringSubmatch(s); m != nil {
+		if m := reFileFormatSkipHeader.FindStringSubmatch(sNoComment); m != nil {
 			if strings.HasPrefix(m[1], "-") {
 				markers = append(markers, diagMarkerSpan(r, "SKIP_HEADER must be a non-negative integer.", 4))
 			}
