@@ -2013,6 +2013,7 @@ func TestValidateSnowflakePatterns_CreateHybridTable(t *testing.T) {
 		"CREATE HYBRID TABLE t1 (id INT PRIMARY KEY NOT NULL) COMMENT = 'no cluster by here'",
 		"CREATE TABLE t1 (id INT, val VARCHAR DEFAULT 'INDEX is not supported here')",
 		"CREATE HYBRID TABLE t1 (id INT NOT NULL, val VARCHAR DEFAULT 'PRIMARY KEY', PRIMARY KEY (id))",
+		"CREATE HYBRID TABLE IF NOT EXISTS t1 (id INT PRIMARY KEY NOT NULL)",
 	}
 
 	for _, sql := range validCases {

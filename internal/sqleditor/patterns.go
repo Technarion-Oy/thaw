@@ -1733,7 +1733,7 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 					if strings.HasPrefix(content, "PRIMARY KEY") {
 						hasPK = true
 						// Out of line: PRIMARY KEY (c1, c2)
-						if m := rePrimaryKeyCols.FindString(seg); m != "" {
+						if m := rePrimaryKeyCols.FindString(segClean); m != "" {
 							if openIdx := strings.Index(m, "("); openIdx != -1 {
 								mStr := m[openIdx+1 : len(m)-1]
 								for _, p := range strings.Split(mStr, ",") {
