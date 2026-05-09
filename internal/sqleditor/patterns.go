@@ -100,14 +100,15 @@ var (
 	// ── CREATE TABLE ─────────────────────────────────────────────────────────
 	reIsCreateTable       = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+(?:REPLACE|ALTER)|LOCAL|GLOBAL|TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)*TABLE\b`)
 	reCreateTablePreamble = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath)
+	reIsCreateHybridTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+REPLACE|TRANSIENT)\s+)*HYBRID\s+TABLE\b`)
 	reHybridTablePreamble = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+REPLACE|TRANSIENT)\s+)*HYBRID\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath)
-	reIndexKeyword         = regexp.MustCompile(`(?i)\bINDEX\b`)
-	reNotNull              = regexp.MustCompile(`(?i)\bNOT\s+NULL\b`)
-	rePrimaryKey           = regexp.MustCompile(`(?i)\bPRIMARY\s+KEY\b`)
-	rePrimaryKeyCols       = regexp.MustCompile(`(?i)PRIMARY\s+KEY\s*\([^)]+\)`)
-	reChangeTracking       = regexp.MustCompile(`(?i)\bCHANGE_TRACKING\b`)
-	reCopyGrants           = regexp.MustCompile(`(?i)\bCOPY\s+GRANTS\b`)
-	reTransient            = regexp.MustCompile(`(?i)\bTRANSIENT\b`)
+	reIndexKeyword        = regexp.MustCompile(`(?i)\bINDEX\b`)
+	reNotNull             = regexp.MustCompile(`(?i)\bNOT\s+NULL\b`)
+	rePrimaryKey          = regexp.MustCompile(`(?i)\bPRIMARY\s+KEY\b`)
+	rePrimaryKeyCols      = regexp.MustCompile(`(?i)PRIMARY\s+KEY\s*\([^)]+\)`)
+	reChangeTracking      = regexp.MustCompile(`(?i)\bCHANGE_TRACKING\b`)
+	reCopyGrants          = regexp.MustCompile(`(?i)\bCOPY\s+GRANTS\b`)
+	reTransient           = regexp.MustCompile(`(?i)\bTRANSIENT\b`)
 
 	// ── COPY INTO ────────────────────────────────────────────────────────────
 	reIsCopyInto = regexp.MustCompile(`(?i)^\s*COPY\s+INTO\b`)
@@ -191,9 +192,8 @@ var (
 	reIsDropSeq    = regexp.MustCompile(`(?i)^\s*DROP\s+SEQUENCE\b`)
 	reValidDropSeq = regexp.MustCompile(`(?i)^\s*DROP\s+SEQUENCE\s+(?:IF\s+EXISTS\s+)?` + _identPath + `(?:\s+(?:CASCADE|RESTRICT))?\s*$`)
 
-	// ── CREATE DYNAMIC TABLE ──────────────────────────────────────────────────
+	// ── CREATE DYNAMIC TABLE ─────────────────────────────────────────────────
 	reIsCreateDynTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?DYNAMIC\s+TABLE\b`)
-	reIsCreateHybridTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+REPLACE|TRANSIENT)\s+)*HYBRID\s+TABLE\b`)
 	reDynHasTargetLag  = regexp.MustCompile(`(?i)\bTARGET_LAG\s*=`)
 	reDynHasWarehouse  = regexp.MustCompile(`(?i)\bWAREHOUSE\s*=`)
 	reDynHasAs         = regexp.MustCompile(`(?i)\bAS\s+(?:SELECT|WITH)\b`)
@@ -1704,68 +1704,71 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 	}
 
 	preambleMatch := reHybridTablePreamble.FindString(stripped)
-	if preambleMatch != "" {
-		rest := strings.TrimSpace(stripped[len(preambleMatch):])
-		if strings.HasPrefix(rest, "(") {
-			endIdx := findMatchingParen(rest)
-			if endIdx != -1 {
-				colsContent := rest[1:endIdx]
+	if preambleMatch == "" {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE HYBRID TABLE statement.", 4))
+		return markers
+	}
 
-				var hasPK bool
-				pkCols := make(map[string]bool)
-				colHasNotNull := make(map[string]bool)
+	rest := strings.TrimSpace(stripped[len(preambleMatch):])
+	if strings.HasPrefix(rest, "(") {
+		endIdx := findMatchingParen(rest)
+		if endIdx != -1 {
+			colsContent := rest[1:endIdx]
 
-				segments := splitHybridSegments(colsContent)
-				for _, seg := range segments {
-					segClean := reStripStringLiterals.ReplaceAllString(seg, " ")
-					upSeg := strings.ToUpper(segClean)
+			var hasPK bool
+			pkCols := make(map[string]bool)
+			colHasNotNull := make(map[string]bool)
 
-					// Handle CONSTRAINT prefix
-					content := upSeg
-					if strings.HasPrefix(content, "CONSTRAINT") {
-						rest := strings.TrimSpace(content[10:]) // len("CONSTRAINT") == 10
-						fields := strings.Fields(rest)
-						if len(fields) > 1 {
-							content = strings.Join(fields[1:], " ")
-						}
-					}
+			segments := splitHybridSegments(colsContent)
+			for _, seg := range segments {
+				segClean := reStripStringLiterals.ReplaceAllString(seg, " ")
+				upSeg := strings.ToUpper(segClean)
 
-					if strings.HasPrefix(content, "PRIMARY KEY") {
-						hasPK = true
-						// Out of line: PRIMARY KEY (c1, c2)
-						if m := rePrimaryKeyCols.FindString(segClean); m != "" {
-							if openIdx := strings.Index(m, "("); openIdx != -1 {
-								mStr := m[openIdx+1 : len(m)-1]
-								for _, p := range strings.Split(mStr, ",") {
-									pkCols[normalizeIdent(p)] = true
-								}
-							}
-						}
-					} else if !strings.HasPrefix(content, "FOREIGN KEY") && !strings.HasPrefix(content, "UNIQUE") && !strings.HasPrefix(content, "INDEX") {
-						// Column definition
-						words := strings.Fields(segClean)
-						if len(words) > 0 {
-							colName := normalizeIdent(words[0])
-							if rePrimaryKey.MatchString(upSeg) {
-								hasPK = true
-								pkCols[colName] = true
-							}
-							if reNotNull.MatchString(upSeg) {
-								colHasNotNull[colName] = true
-							}
-						}
+				// Handle CONSTRAINT prefix
+				content := upSeg
+				if strings.HasPrefix(content, "CONSTRAINT") {
+					rest := strings.TrimSpace(content[10:]) // len("CONSTRAINT") == 10
+					fields := strings.Fields(rest)
+					if len(fields) > 1 {
+						content = strings.Join(fields[1:], " ")
 					}
 				}
 
-				if !hasPK {
-					markers = append(markers, diagMarkerSpan(r, "Hybrid tables must have a PRIMARY KEY constraint.", 4))
-				}
-
-				// Check for NOT NULL on all PK columns
-				for pkCol := range pkCols {
-					if !colHasNotNull[pkCol] {
-						markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Primary key columns in a hybrid table must be NOT NULL (column '%s' omits it).", pkCol), 4))
+				if strings.HasPrefix(content, "PRIMARY KEY") {
+					hasPK = true
+					// Out of line: PRIMARY KEY (c1, c2)
+					if m := rePrimaryKeyCols.FindString(segClean); m != "" {
+						if openIdx := strings.Index(m, "("); openIdx != -1 {
+							mStr := m[openIdx+1 : len(m)-1]
+							for _, p := range strings.Split(mStr, ",") {
+								pkCols[normalizeIdent(p)] = true
+							}
+						}
 					}
+				} else if !strings.HasPrefix(content, "FOREIGN KEY") && !strings.HasPrefix(content, "UNIQUE") && !strings.HasPrefix(content, "INDEX") {
+					// Column definition
+					words := strings.Fields(segClean)
+					if len(words) > 0 {
+						colName := normalizeIdent(words[0])
+						if rePrimaryKey.MatchString(upSeg) {
+							hasPK = true
+							pkCols[colName] = true
+						}
+						if reNotNull.MatchString(upSeg) {
+							colHasNotNull[colName] = true
+						}
+					}
+				}
+			}
+
+			if !hasPK {
+				markers = append(markers, diagMarkerSpan(r, "Hybrid tables must have a PRIMARY KEY constraint.", 4))
+			}
+
+			// Check for NOT NULL on all PK columns
+			for pkCol := range pkCols {
+				if !colHasNotNull[pkCol] {
+					markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Primary key columns in a hybrid table must be NOT NULL (column '%s' omits it).", pkCol), 4))
 				}
 			}
 		}
