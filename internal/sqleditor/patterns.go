@@ -1914,10 +1914,6 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TRANSIENT is not supported for FILE FORMAT objects.", 4))
 	}
 
-	if reFileFormatTemporary.MatchString(strippedS) {
-		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TEMPORARY is not supported for FILE FORMAT objects.", 4))
-	}
-
 	// 1. Extract all properties correctly by finding keys in strippedS and values in stripped
 	type rawProp struct {
 		key string
