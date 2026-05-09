@@ -308,13 +308,9 @@ var (
 
 	// ── CREATE FILE FORMAT ───────────────────────────────────────────────────
 	reIsCreateFileFormat = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+|TEMP\s+|TRANSIENT\s+)?FILE\s+FORMAT\b`)
-	reFileFormatType     = regexp.MustCompile(`(?i)\bTYPE\s*=\s*('[^']*'|[A-Za-z0-9_]+)`)
-	reFileFormatPropKey  = regexp.MustCompile(`(?i)\b([a-zA-Z_0-9]+)\s*=`)
-	reFileFormatFieldDelim = regexp.MustCompile(`(?i)\bFIELD_DELIMITER\s*=\s*('[^']*'|\S+)`)
-	reFileFormatSkipHeader = regexp.MustCompile(`(?i)\bSKIP_HEADER\s*=\s*(-?\d+)`)
-	reFileFormatValidEsc   = regexp.MustCompile(`^\\([ntr'"]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|[0-7]{1,3})$`)
-	reFileFormatTransient  = regexp.MustCompile(`(?i)\bTRANSIENT\b`)
-	reFileFormatStripComment = regexp.MustCompile(`(?i)\bCOMMENT\s*=\s*'(?:''|[^'])*'`)
+	reFileFormatPropKey   = regexp.MustCompile(`(?i)\b([a-zA-Z_0-9]+)\s*=`)
+	reFileFormatPropValue = regexp.MustCompile(`^\s*('[^']*'|[A-Za-z0-9_.-]+)`)
+	reFileFormatValidEsc  = regexp.MustCompile(`^\\([ntr'"]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|[0-7]{1,3})$`)
 
 	fileFormatCommonProps = []string{`TYPE`, `COMMENT`}
 
@@ -1903,28 +1899,52 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	stripped := strings.TrimSpace(stripCommentsSQL(s))
-	strippedS := reStripStringLiterals.ReplaceAllString(stripped, " ")
-	sNoComment := reFileFormatStripComment.ReplaceAllString(stripped, " ")
+	// Use length-preserving masking for string literals to maintain offsets
+	strippedS := reStripStringLiterals.ReplaceAllStringFunc(stripped, func(m string) string {
+		return strings.Repeat(" ", len(m))
+	})
 
 	// Snowflake Rule: OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	if reOrReplace.MatchString(strippedS) && reIfNotExists.MatchString(strippedS) {
 		markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE FILE FORMAT statement.", 4))
 	}
 
-	if reFileFormatTransient.MatchString(strippedS) {
+	if reTransient.MatchString(strippedS) {
 		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TRANSIENT is not supported for FILE FORMAT objects.", 4))
 	}
 
-	// 1. Extract TYPE
-	typeMatch := reFileFormatType.FindStringSubmatch(sNoComment)
-	if typeMatch == nil {
+	// 1. Extract all properties correctly by finding keys in strippedS and values in stripped
+	type rawProp struct {
+		key string
+		val string
+	}
+	var props []rawProp
+	var rawType string
+
+	for _, m := range reFileFormatPropKey.FindAllStringSubmatchIndex(strippedS, -1) {
+		key := strings.ToUpper(strippedS[m[2]:m[3]])
+		// Find value in stripped starting after the "KEY ="
+		valRest := stripped[m[1]:]
+		// Match value: either a quoted string or a word
+		valMatch := reFileFormatPropValue.FindStringSubmatch(valRest)
+		val := ""
+		if valMatch != nil {
+			val = valMatch[1]
+		}
+
+		if key == "TYPE" {
+			rawType = strings.ToUpper(strings.Trim(val, "'"))
+		} else {
+			props = append(props, rawProp{key: key, val: val})
+		}
+	}
+
+	if rawType == "" {
 		markers = append(markers, diagMarkerSpan(r, "Missing mandatory TYPE property in CREATE FILE FORMAT.", 4))
 		return markers
 	}
 
-	rawType := strings.ToUpper(strings.Trim(typeMatch[1], "'"))
 	var allowedRe *regexp.Regexp
-
 	switch rawType {
 	case "CSV":
 		allowedRe = reFileFormatAllowedCsv
@@ -1943,34 +1963,28 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 		return markers
 	}
 
-	// 2. Validate all property keys
-	for _, m := range reFileFormatPropKey.FindAllStringSubmatch(strippedS, -1) {
-		key := m[1]
-		if strings.ToUpper(key) == "TYPE" {
+	// 2. Validate property keys and values
+	for _, p := range props {
+		if !allowedRe.MatchString(p.key) {
+			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Property '%s' is not applicable for %s file format.", p.key, rawType), 4))
 			continue
 		}
-		if !allowedRe.MatchString(key) {
-			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Property '%s' is not applicable for %s file format.", key, rawType), 4))
-		}
-	}
 
-	// 3. Type-specific value validations
-	if rawType == "CSV" {
-		// FIELD_DELIMITER: single-char or NONE
-		if m := reFileFormatFieldDelim.FindStringSubmatch(sNoComment); m != nil {
-			val := strings.Trim(m[1], "'")
-			if strings.ToUpper(val) != "NONE" {
-				if len(val) == 0 {
-					markers = append(markers, diagMarkerSpan(r, "FIELD_DELIMITER cannot be empty.", 4))
-				} else if len(val) > 1 && !reFileFormatValidEsc.MatchString(val) {
-					markers = append(markers, diagMarkerSpan(r, "FIELD_DELIMITER must be a single-character string or 'NONE'.", 4))
+		// 3. Type-specific value validations
+		if rawType == "CSV" {
+			if p.key == "FIELD_DELIMITER" {
+				val := strings.Trim(p.val, "'")
+				if strings.ToUpper(val) != "NONE" {
+					if len(val) == 0 {
+						markers = append(markers, diagMarkerSpan(r, "FIELD_DELIMITER cannot be empty.", 4))
+					} else if len(val) > 1 && !reFileFormatValidEsc.MatchString(val) {
+						markers = append(markers, diagMarkerSpan(r, "FIELD_DELIMITER must be a single-character string or 'NONE'.", 4))
+					}
 				}
-			}
-		}
-		// SKIP_HEADER: non-negative integer
-		if m := reFileFormatSkipHeader.FindStringSubmatch(sNoComment); m != nil {
-			if strings.HasPrefix(m[1], "-") {
-				markers = append(markers, diagMarkerSpan(r, "SKIP_HEADER must be a non-negative integer.", 4))
+			} else if p.key == "SKIP_HEADER" {
+				if strings.HasPrefix(p.val, "-") {
+					markers = append(markers, diagMarkerSpan(r, "SKIP_HEADER must be a non-negative integer.", 4))
+				}
 			}
 		}
 	}

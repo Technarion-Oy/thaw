@@ -147,7 +147,7 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE TEMP FILE FORMAT my_db.my_sch.my_fmt TYPE = PARQUET",
 		"CREATE FILE FORMAT my_fmt TYPE = CSV FIELD_DELIMITER = '\\x09' COMMENT = 'this is a tab'",
 		"CREATE FILE FORMAT my_fmt TYPE = CSV COMMENT = 'FIELD_DELIMITER = |'",
-		"CREATE FILE FORMAT my_fmt TYPE = CSV COMMENT = 'SKIP_HEADER = -1 means skip'",
+		"CREATE FILE FORMAT my_fmt TYPE = CSV NULL_IF = ('SKIP_HEADER = -1')",
 		"CREATE FILE FORMAT my_fmt TYPE = JSON COMPRESSION = GZIP",
 		"CREATE FILE FORMAT IF NOT EXISTS my_fmt TYPE = XML",
 		"CREATE OR REPLACE FILE FORMAT my_fmt TYPE = CSV",
@@ -207,7 +207,7 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 
 		// Invalid File Formats
 		{"File Format missing TYPE", "CREATE FILE FORMAT my_fmt FIELD_DELIMITER = ','", "Missing mandatory TYPE property"},
-		{"File Format TYPE only in string literal", "CREATE FILE FORMAT my_fmt COMMENT = 'TYPE = CSV'", "Missing mandatory TYPE property"},
+		{"File Format TYPE only in string literal", "CREATE FILE FORMAT my_fmt NULL_IF = ('TYPE = CSV')", "Missing mandatory TYPE property"},
 		{"File Format invalid TYPE", "CREATE FILE FORMAT my_fmt TYPE = 'EXCEL'", "Invalid TYPE 'EXCEL' for FILE FORMAT"},
 		{"File Format TRANSIENT", "CREATE TRANSIENT FILE FORMAT my_fmt TYPE = CSV", "Unexpected syntax"},
 		{"File Format Replace IF NOT EXISTS", "CREATE OR REPLACE FILE FORMAT IF NOT EXISTS my_fmt TYPE = JSON", "Conflict between OR REPLACE and IF NOT EXISTS"},
