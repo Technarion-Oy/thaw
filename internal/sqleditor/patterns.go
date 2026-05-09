@@ -100,7 +100,7 @@ var (
 	// ── CREATE TABLE ─────────────────────────────────────────────────────────
 	reIsCreateTable       = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+(?:REPLACE|ALTER)|LOCAL|GLOBAL|TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)*TABLE\b`)
 	reCreateTablePreamble = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath)
-	reHybridTablePreamble = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?HYBRID\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath)
+	reHybridTablePreamble = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+REPLACE|TRANSIENT)\s+)*HYBRID\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath)
 	reIndexKeyword         = regexp.MustCompile(`(?i)\bINDEX\b`)
 	reNotNull              = regexp.MustCompile(`(?i)\bNOT\s+NULL\b`)
 	rePrimaryKey           = regexp.MustCompile(`(?i)\bPRIMARY\s+KEY\b`)
@@ -660,7 +660,8 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 				endIdx := findMatchingParen(rest)
 				if endIdx != -1 {
 					colsContent := rest[1:endIdx]
-					if reIndexKeyword.MatchString(colsContent) {
+					colsClean := reStripStringLiterals.ReplaceAllString(colsContent, " ")
+					if reIndexKeyword.MatchString(colsClean) {
 						markers = append(markers, diagMarkerSpan(r, "Secondary indexes (INDEX) are only supported on hybrid tables.", 4))
 					}
 
@@ -1731,13 +1732,11 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 						hasPK = true
 						// Out of line: PRIMARY KEY (c1, c2)
 						if m := rePrimaryKeyCols.FindString(seg); m != "" {
-							// Strip 'PRIMARY KEY' and parens
-							mStr := m[11:]
-							mStr = strings.TrimSpace(mStr)
-							mStr = strings.TrimPrefix(mStr, "(")
-							mStr = strings.TrimSuffix(mStr, ")")
-							for _, p := range strings.Split(mStr, ",") {
-								pkCols[normalizeIdent(p)] = true
+							if openIdx := strings.Index(m, "("); openIdx != -1 {
+								mStr := m[openIdx+1 : len(m)-1]
+								for _, p := range strings.Split(mStr, ",") {
+									pkCols[normalizeIdent(p)] = true
+								}
 							}
 						}
 					} else if !strings.HasPrefix(content, "FOREIGN KEY") && !strings.HasPrefix(content, "UNIQUE") && !strings.HasPrefix(content, "INDEX") {
