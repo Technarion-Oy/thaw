@@ -150,9 +150,13 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE FILE FORMAT my_fmt TYPE = JSON COMPRESSION = GZIP",
 		"CREATE FILE FORMAT IF NOT EXISTS my_fmt TYPE = XML",
 		"CREATE OR REPLACE FILE FORMAT my_fmt TYPE = CSV",
-		"CREATE TEMP FILE FORMAT my_db.my_sch.my_fmt TYPE = PARQUET",
 		"CREATE FILE FORMAT my_fmt TYPE = ORC COMMENT = 'A TRANSIENT format'",
 		"CREATE FILE FORMAT my_fmt TYPE = JSON -- FIELD_DELIMITER = ','",
+		// ALTER / DROP FILE FORMAT
+		"ALTER FILE FORMAT my_fmt SET TYPE = CSV",
+		"ALTER FILE FORMAT my_fmt SET COMMENT = 'new comment'",
+		"DROP FILE FORMAT my_fmt",
+		"DROP FILE FORMAT IF EXISTS my_fmt",
 	}
 
 	for _, sql := range validQueries {
@@ -210,6 +214,8 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"File Format TYPE only in string literal", "CREATE FILE FORMAT my_fmt NULL_IF = ('TYPE = CSV')", "Missing mandatory TYPE property"},
 		{"File Format invalid TYPE", "CREATE FILE FORMAT my_fmt TYPE = 'EXCEL'", "Invalid TYPE 'EXCEL' for FILE FORMAT"},
 		{"File Format invalid TRANSIENT", "CREATE TRANSIENT FILE FORMAT my_fmt TYPE = CSV", "Unexpected syntax"},
+		{"File Format invalid TEMPORARY", "CREATE TEMPORARY FILE FORMAT my_fmt TYPE = CSV", "Unexpected syntax"},
+		{"File Format invalid TEMP", "CREATE TEMP FILE FORMAT my_fmt TYPE = CSV", "Unexpected syntax"},
 		{"File Format Replace IF NOT EXISTS", "CREATE OR REPLACE FILE FORMAT IF NOT EXISTS my_fmt TYPE = JSON", "Conflict between OR REPLACE and IF NOT EXISTS"}, {"File Format FIELD_DELIMITER on PARQUET", "CREATE FILE FORMAT my_fmt TYPE = PARQUET FIELD_DELIMITER = ','", "Property 'FIELD_DELIMITER' is not applicable for PARQUET"},
 		{"File Format FIELD_DELIMITER on AVRO", "CREATE FILE FORMAT my_fmt TYPE = AVRO FIELD_DELIMITER = ','", "Property 'FIELD_DELIMITER' is not applicable for AVRO"},
 		{"File Format invalid FIELD_DELIMITER", "CREATE FILE FORMAT my_fmt TYPE = CSV FIELD_DELIMITER = 'abc'", "FIELD_DELIMITER must be a single-character string"},

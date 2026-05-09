@@ -310,7 +310,8 @@ var (
 	reIsCreateFileFormat  = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+|TEMP\s+|TRANSIENT\s+)?FILE\s+FORMAT\b`)
 	reFileFormatPropKey   = regexp.MustCompile(`(?i)\b([a-zA-Z_0-9]+)\s*=`)
 	reFileFormatPropValue = regexp.MustCompile(`^\s*('[^']*'|[A-Za-z0-9_.-]+)`)
-	reFileFormatValidEsc  = regexp.MustCompile(`^\\([ntr'"]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|[0-7]{1,3})$`)
+	reFileFormatValidEsc  = regexp.MustCompile(`^\\([ntr'\"]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|[0-7]{1,3})$`)
+	reFileFormatTemporary = regexp.MustCompile(`(?i)\b(TEMPORARY|TEMP)\b`)
 
 	fileFormatCommonProps = []string{`TYPE`, `COMMENT`}
 
@@ -331,7 +332,7 @@ var (
 	}
 
 	fileFormatAvroProps = []string{
-		`COMPRESSION`, `TRIM_SPACE`, `REPLACE_INVALID_CHARACTERS`, `NULL_IF`,
+		`COMPRESSION`, `TRIM_SPACE`, `REPLACE_INVALID_CHARACTERS`, `NULL_IF`, `SNAPPY_COMPRESSION_LEVEL`,
 	}
 
 	fileFormatOrcProps = []string{
@@ -1914,6 +1915,10 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TRANSIENT is not supported for FILE FORMAT objects.", 4))
 	}
 
+	if reFileFormatTemporary.MatchString(strippedS) {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TEMPORARY is not supported for FILE FORMAT objects.", 4))
+	}
+
 	// 1. Extract all properties correctly by finding keys in strippedS and values in stripped
 	type rawProp struct {
 		key string
@@ -1940,9 +1945,9 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 		}
 	}
 
+	// If TYPE is not explicitly provided, it defaults to CSV
 	if rawType == "" {
-		markers = append(markers, diagMarkerSpan(r, "Missing mandatory TYPE property in CREATE FILE FORMAT.", 4))
-		return markers
+		rawType = "CSV"
 	}
 
 	var allowedRe *regexp.Regexp
@@ -1977,9 +1982,9 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 			case "FIELD_DELIMITER":
 				val := strings.Trim(p.val, "'")
 				if strings.ToUpper(val) != "NONE" {
-					if len(val) == 0 {
+					if len([]rune(val)) == 0 {
 						markers = append(markers, diagMarkerSpan(r, "FIELD_DELIMITER cannot be empty.", 4))
-					} else if len(val) > 1 && !reFileFormatValidEsc.MatchString(val) {
+					} else if len([]rune(val)) > 1 && !reFileFormatValidEsc.MatchString(val) {
 						markers = append(markers, diagMarkerSpan(r, "FIELD_DELIMITER must be a single-character string or 'NONE'.", 4))
 					}
 				}
