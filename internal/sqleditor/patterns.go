@@ -100,6 +100,11 @@ var (
 	// ── CREATE TABLE ─────────────────────────────────────────────────────────
 	reIsCreateTable       = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+(?:REPLACE|ALTER)|LOCAL|GLOBAL|TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)*TABLE\b`)
 	reCreateTablePreamble = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?(?:(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP|TEMPORARY|VOLATILE|TRANSIENT)\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath)
+	reHybridTablePreamble = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?HYBRID\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath)
+	reIndexKeyword         = regexp.MustCompile(`(?i)\bINDEX\b`)
+	reNotNull              = regexp.MustCompile(`(?i)\bNOT\s+NULL\b`)
+	rePrimaryKey           = regexp.MustCompile(`(?i)\bPRIMARY\s+KEY\b`)
+	rePrimaryKeyOutLine    = regexp.MustCompile(`(?i)^\s*PRIMARY\s+KEY\s*\(`)
 
 	// ── COPY INTO ────────────────────────────────────────────────────────────
 	reIsCopyInto = regexp.MustCompile(`(?i)^\s*COPY\s+INTO\b`)
@@ -185,6 +190,7 @@ var (
 
 	// ── CREATE DYNAMIC TABLE ──────────────────────────────────────────────────
 	reIsCreateDynTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?DYNAMIC\s+TABLE\b`)
+	reIsCreateHybridTable = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:(?:OR\s+REPLACE|TRANSIENT)\s+)*HYBRID\s+TABLE\b`)
 	reDynHasTargetLag  = regexp.MustCompile(`(?i)\bTARGET_LAG\s*=`)
 	reDynHasWarehouse  = regexp.MustCompile(`(?i)\bWAREHOUSE\s*=`)
 	reDynHasAs         = regexp.MustCompile(`(?i)\bAS\s+(?:SELECT|WITH)\b`)
@@ -614,6 +620,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
+		// ── Preamble: CREATE HYBRID TABLE ───────────────────────────────
+		if reIsCreateHybridTable.MatchString(parseText) {
+			markers = append(markers, validateCreateHybridTable(parseText, r)...)
+			continue
+		}
+
 		// ── Preamble: CREATE TABLE ────────────────────────────────────────
 		if reIsCreateTable.MatchString(parseText) {
 			// Specific Snowflake Error: OR REPLACE and IF NOT EXISTS are mutually exclusive
@@ -644,6 +656,11 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 				// Find matching close paren (depth-aware, skip strings)
 				endIdx := findMatchingParen(rest)
 				if endIdx != -1 {
+					colsContent := rest[1:endIdx]
+					if reIndexKeyword.MatchString(colsContent) {
+						markers = append(markers, diagMarkerSpan(r, "Secondary indexes (INDEX) are only supported on hybrid tables.", 4))
+					}
+
 					after := strings.TrimSpace(rest[endIdx+1:])
 					tablePropsRe := regexp.MustCompile(`(?i)^(?:(?:` + tableProps + `)(?:\s+|$))*$`)
 					if after == "" || tablePropsRe.MatchString(after) || reCreateTableCTAS.MatchString(after) {
@@ -1651,4 +1668,139 @@ func isValidEnumValue(val string, validValues ...string) bool {
 		}
 	}
 	return false
+}
+
+func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+	clean := reStripStringLiterals.ReplaceAllString(stripped, " ")
+
+	if reOrReplace.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r, "OR REPLACE is not supported for hybrid tables.", 4))
+	}
+
+	if strings.Contains(strings.ToUpper(clean), " TRANSIENT ") || strings.HasPrefix(strings.ToUpper(strings.TrimSpace(clean)), "CREATE TRANSIENT") {
+		markers = append(markers, diagMarkerSpan(r, "TRANSIENT is not supported for hybrid tables.", 4))
+	}
+
+	if rePatternClusterBy.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r, "CLUSTER BY is not supported on hybrid tables.", 4))
+	}
+
+	if reDataRetention.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r, "DATA_RETENTION_TIME_IN_DAYS is not applicable to hybrid tables.", 4))
+	}
+
+	if regexp.MustCompile(`(?i)\bCHANGE_TRACKING\b`).MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r, "CHANGE_TRACKING is not supported on hybrid tables.", 4))
+	}
+
+	if regexp.MustCompile(`(?i)\bCOPY\s+GRANTS\b`).MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r, "COPY GRANTS is not supported on hybrid tables.", 4))
+	}
+
+	preambleMatch := reHybridTablePreamble.FindString(stripped)
+	if preambleMatch != "" {
+		rest := strings.TrimSpace(stripped[len(preambleMatch):])
+		if strings.HasPrefix(rest, "(") {
+			endIdx := findMatchingParen(rest)
+			if endIdx != -1 {
+				colsContent := rest[1:endIdx]
+
+				var hasPK bool
+				pkCols := make(map[string]bool)
+				colHasNotNull := make(map[string]bool)
+
+				segments := splitHybridSegments(colsContent)
+				for _, seg := range segments {
+					upSeg := strings.ToUpper(seg)
+
+					// Handle CONSTRAINT prefix
+					content := upSeg
+					if strings.HasPrefix(content, "CONSTRAINT") {
+						words := strings.Fields(seg)
+						if len(words) > 2 {
+							content = strings.ToUpper(strings.Join(words[2:], " "))
+						}
+					}
+
+					if strings.HasPrefix(content, "PRIMARY KEY") {
+						hasPK = true
+						// Out of line: PRIMARY KEY (c1, c2)
+						re := regexp.MustCompile(`(?i)PRIMARY\s+KEY\s*\(([^)]+)\)`)
+						if m := re.FindStringSubmatch(seg); len(m) > 1 {
+							for _, p := range strings.Split(m[1], ",") {
+								pkCols[normalizeIdent(p)] = true
+							}
+						}
+					} else if !strings.HasPrefix(content, "FOREIGN KEY") && !strings.HasPrefix(content, "UNIQUE") && !strings.HasPrefix(content, "INDEX") {
+						// Column definition
+						words := strings.Fields(seg)
+						if len(words) > 0 {
+							colName := normalizeIdent(words[0])
+							if rePrimaryKey.MatchString(upSeg) {
+								hasPK = true
+								pkCols[colName] = true
+							}
+							if reNotNull.MatchString(upSeg) {
+								colHasNotNull[colName] = true
+							}
+						}
+					}
+				}
+
+				if !hasPK {
+					markers = append(markers, diagMarkerSpan(r, "Hybrid tables must have a PRIMARY KEY constraint.", 4))
+				}
+
+				// Check for NOT NULL on all PK columns
+				for pkCol := range pkCols {
+					if !colHasNotNull[pkCol] {
+						markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Primary key columns in a hybrid table must be NOT NULL (column '%s' omits it).", pkCol), 4))
+					}
+				}
+			}
+		}
+	}
+
+	return markers
+}
+
+func normalizeIdent(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "\"") && strings.HasSuffix(s, "\"") {
+		return s[1 : len(s)-1]
+	}
+	return strings.ToUpper(s)
+}
+
+func splitHybridSegments(s string) []string {
+	var segments []string
+	depth := 0
+	inSingle := false
+	inDouble := false
+	start := 0
+	for i := 0; i <= len(s); i++ {
+		var c byte
+		if i < len(s) {
+			c = s[i]
+		} else {
+			c = ','
+		}
+		if c == '\'' && !inDouble {
+			inSingle = !inSingle
+		} else if c == '"' && !inSingle {
+			inDouble = !inDouble
+		} else if !inSingle && !inDouble {
+			if c == '(' {
+				depth++
+			} else if c == ')' {
+				depth--
+			} else if c == ',' && depth == 0 {
+				segments = append(segments, strings.TrimSpace(s[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	return segments
 }
