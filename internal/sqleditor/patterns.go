@@ -308,12 +308,13 @@ var (
 
 	// ── CREATE FILE FORMAT ───────────────────────────────────────────────────
 	reIsCreateFileFormat = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+|TEMP\s+|TRANSIENT\s+)?FILE\s+FORMAT\b`)
-	reFileFormatType     = regexp.MustCompile(`(?i)\bTYPE\s*=\s*('[^']*'|\S+)`)
+	reFileFormatType     = regexp.MustCompile(`(?i)\bTYPE\s*=\s*('[^']*'|[A-Za-z0-9_]+)`)
 	reFileFormatPropKey  = regexp.MustCompile(`(?i)\b([a-zA-Z_0-9]+)\s*=`)
 	reFileFormatFieldDelim = regexp.MustCompile(`(?i)\bFIELD_DELIMITER\s*=\s*('[^']*'|\S+)`)
 	reFileFormatSkipHeader = regexp.MustCompile(`(?i)\bSKIP_HEADER\s*=\s*(-?\d+)`)
 	reFileFormatValidEsc   = regexp.MustCompile(`^\\([ntr'"]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|[0-7]{1,3})$`)
 	reFileFormatTransient  = regexp.MustCompile(`(?i)\bTRANSIENT\b`)
+	reFileFormatStripComment = regexp.MustCompile(`(?i)\bCOMMENT\s*=\s*'(?:''|[^'])*'`)
 
 	fileFormatCommonProps = []string{`TYPE`, `COMMENT`}
 
@@ -1901,8 +1902,8 @@ func splitHybridSegments(s string) []string {
 func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	strippedS := reStripStringLiterals.ReplaceAllString(s, "")
-	sNoComment := regexp.MustCompile(`(?i)\bCOMMENT\s*=\s*'(?:''|[^'])*'`).ReplaceAllString(s, "")
+	strippedS := reStripStringLiterals.ReplaceAllString(s, " ")
+	sNoComment := reFileFormatStripComment.ReplaceAllString(s, " ")
 
 	// Snowflake Rule: OR REPLACE and IF NOT EXISTS are mutually exclusive.
 	if reOrReplace.MatchString(strippedS) && reIfNotExists.MatchString(strippedS) {

@@ -150,6 +150,7 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE FILE FORMAT my_fmt TYPE = CSV COMMENT = 'SKIP_HEADER = -1 means skip'",
 		"CREATE FILE FORMAT my_fmt TYPE = JSON COMPRESSION = GZIP",
 		"CREATE FILE FORMAT IF NOT EXISTS my_fmt TYPE = XML",
+		"CREATE OR REPLACE FILE FORMAT my_fmt TYPE = CSV",
 		"CREATE FILE FORMAT my_fmt TYPE = ORC COMMENT = 'A TRANSIENT format'",
 	}
 
