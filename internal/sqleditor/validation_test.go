@@ -142,6 +142,12 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV) COMMENT = 'DATA_RETENTION_TIME_IN_DAYS = 1'",
 		"CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) -- DATA_RETENTION_TIME_IN_DAYS = 1\n WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV)",
 		"CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) COPY GRANTS WITH LOCATION = @my_stage FILE_FORMAT = (TYPE = CSV)",
+		// File Formats
+		"CREATE FILE FORMAT my_fmt TYPE = CSV",
+		"CREATE OR REPLACE FILE FORMAT IF NOT EXISTS my_db.my_sch.my_fmt TYPE = JSON",
+		"CREATE TEMP FILE FORMAT my_fmt TYPE = PARQUET COMPRESSION = SNAPPY",
+		"CREATE FILE FORMAT my_fmt TYPE = CSV FIELD_DELIMITER = '\\x09' COMMENT = 'this is a tab'",
+		"CREATE FILE FORMAT my_fmt TYPE = CSV COMMENT = 'FIELD_DELIMITER = |'",
 	}
 
 	for _, sql := range validQueries {
@@ -195,7 +201,9 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"MERGE NOT MATCHED BY SOURCE", "MERGE INTO t USING s ON t.id = s.id WHEN NOT MATCHED BY SOURCE THEN DELETE", "not supported by Snowflake"},
 
 		// Invalid File Formats
+		{"File Format missing TYPE", "CREATE FILE FORMAT my_fmt FIELD_DELIMITER = ','", "Missing mandatory TYPE property"},
 		{"File Format invalid TYPE", "CREATE FILE FORMAT my_fmt TYPE = 'EXCEL'", "Invalid TYPE 'EXCEL'"},
+		{"File Format TRANSIENT", "CREATE TRANSIENT FILE FORMAT my_fmt TYPE = CSV", "Unexpected syntax"},
 		{"File Format FIELD_DELIMITER on PARQUET", "CREATE FILE FORMAT my_fmt TYPE = PARQUET FIELD_DELIMITER = ','", "Property 'FIELD_DELIMITER' is not applicable for PARQUET"},
 		{"File Format invalid FIELD_DELIMITER", "CREATE FILE FORMAT my_fmt TYPE = CSV FIELD_DELIMITER = 'abc'", "FIELD_DELIMITER must be a single-character string"},
 		{"File Format negative SKIP_HEADER", "CREATE FILE FORMAT my_fmt TYPE = CSV SKIP_HEADER = -1", "SKIP_HEADER must be a non-negative integer"},

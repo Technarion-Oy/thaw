@@ -307,8 +307,12 @@ var (
 	}, "|")
 
 	// ── CREATE FILE FORMAT ───────────────────────────────────────────────────
-	reIsCreateFileFormat = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?FILE\s+FORMAT\b`)
-	reFileFormatType     = regexp.MustCompile(`(?i)\bTYPE\s*=\s*(CSV|JSON|AVRO|ORC|PARQUET|XML|'CSV'|'JSON'|'AVRO'|'ORC'|'PARQUET'|'XML')`)
+	reIsCreateFileFormat = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+|TEMP\s+|TRANSIENT\s+)?FILE\s+FORMAT\b`)
+	reFileFormatType     = regexp.MustCompile(`(?i)\bTYPE\s*=\s*('[^']+'|\S+)`)
+	reFileFormatPropKey  = regexp.MustCompile(`(?i)\b([a-zA-Z_0-9]+)\s*=`)
+	reFileFormatFieldDelim = regexp.MustCompile(`(?i)\bFIELD_DELIMITER\s*=\s*('[^']+'|NONE)`)
+	reFileFormatSkipHeader = regexp.MustCompile(`(?i)\bSKIP_HEADER\s*=\s*(-?\d+)`)
+	reFileFormatValidEsc   = regexp.MustCompile(`^\\([ntr'"]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|[0-7]{1,3})$`)
 
 	fileFormatCommonProps = []string{`TYPE`, `COMMENT`}
 
@@ -1888,8 +1892,12 @@ func splitHybridSegments(s string) []string {
 func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
+	if regexp.MustCompile(`(?i)\bTRANSIENT\b`).MatchString(s) {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: TRANSIENT is not supported for FILE FORMAT objects.", 4))
+	}
+
 	// 1. Extract TYPE
-	typeMatch := regexp.MustCompile(`(?i)\bTYPE\s*=\s*('[^']+'|\S+)`).FindStringSubmatch(s)
+	typeMatch := reFileFormatType.FindStringSubmatch(s)
 	if typeMatch == nil {
 		markers = append(markers, diagMarkerSpan(r, "Missing mandatory TYPE property in CREATE FILE FORMAT.", 4))
 		return markers
@@ -1919,8 +1927,8 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 
 	// 2. Validate all property keys
 	allowedRe := regexp.MustCompile("(?i)^(" + strings.Join(allowed, "|") + ")$")
-	propRe := regexp.MustCompile(`(?i)\b([a-zA-Z_0-9]+)\s*=`)
-	for _, m := range propRe.FindAllStringSubmatch(s, -1) {
+	strippedS := reStripStringLiterals.ReplaceAllString(s, "")
+	for _, m := range reFileFormatPropKey.FindAllStringSubmatch(strippedS, -1) {
 		key := m[1]
 		if strings.ToUpper(key) == "TYPE" {
 			continue
@@ -1933,17 +1941,17 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 	// 3. Type-specific value validations
 	if rawType == "CSV" {
 		// FIELD_DELIMITER: single-char or NONE
-		if m := regexp.MustCompile(`(?i)\bFIELD_DELIMITER\s*=\s*('[^']+'|NONE)`).FindStringSubmatch(s); m != nil {
+		if m := reFileFormatFieldDelim.FindStringSubmatch(s); m != nil {
 			val := strings.Trim(m[1], "'")
 			if strings.ToUpper(val) != "NONE" {
 				// Handle common escaped characters and length 1
-				if len(val) > 1 && !regexp.MustCompile(`^\\[ntr'"]$`).MatchString(val) {
+				if len(val) > 1 && !reFileFormatValidEsc.MatchString(val) {
 					markers = append(markers, diagMarkerSpan(r, "FIELD_DELIMITER must be a single-character string or 'NONE'.", 4))
 				}
 			}
 		}
 		// SKIP_HEADER: non-negative integer
-		if m := regexp.MustCompile(`(?i)\bSKIP_HEADER\s*=\s*(-?\d+)`).FindStringSubmatch(s); m != nil {
+		if m := reFileFormatSkipHeader.FindStringSubmatch(s); m != nil {
 			if strings.HasPrefix(m[1], "-") {
 				markers = append(markers, diagMarkerSpan(r, "SKIP_HEADER must be a non-negative integer.", 4))
 			}
