@@ -1925,3 +1925,79 @@ $$;
 		t.Errorf("Unexpected bare column diagnostic marker: %s at line %d, col %d", m.Message, m.StartLineNumber, m.StartColumn)
 	}
 }
+
+func TestValidateSnowflakePatterns_CreateIcebergTable(t *testing.T) {
+	validCases := []string{
+		// Snowflake-managed
+		"CREATE ICEBERG TABLE t1 (id int) CATALOG = 'SNOWFLAKE' BASE_LOCATION = 's3://my-snowflake-bucket/'",
+		"CREATE ICEBERG TABLE t1 (id int) CATALOG = 'SNOWFLAKE' BASE_LOCATION = 's3://another-bucket/' CLUSTER BY (id) DATA_RETENTION_TIME_IN_DAYS = 1",
+		"CREATE ICEBERG TABLE t1 (id int) CATALOG = 'SNOWFLAKE' BASE_LOCATION = 's3://comment-bucket/' COMMENT = 'CLUSTER BY is a table property'",
+		"CREATE ICEBERG TABLE t1 (id int) CATALOG = 'SNOWFLAKE' BASE_LOCATION = 's3://transient-comment/' COMMENT = 'TRANSIENT tables are not supported'",
+		"CREATE ICEBERG TABLE t1 (id int) EXTERNAL_VOLUME = 'my_ev' CATALOG = 'my_cat' BASE_LOCATION = 's3://external-bucket/'",
+		"CREATE ICEBERG TABLE t (id int) EXTERNAL_VOLUME = 'ev' CATALOG = 'c' BASE_LOCATION = 'loc' COMMENT = 'CLUSTER BY is not applicable'",
+		"CREATE ICEBERG TABLE transient (id int) CATALOG = 'SNOWFLAKE' BASE_LOCATION = 's3://test/'",
+		"CREATE ICEBERG TABLE t (id int) CATALOG = 'snowflake' BASE_LOCATION = 's3://test/'",
+		"CREATE ICEBERG TABLE t (id int) EXTERNAL_VOLUME = my_ev CATALOG = 'my_cat' BASE_LOCATION = 's3://bucket/'",
+	}
+
+	for _, sql := range validCases {
+		t.Run(sql[:min(len(sql), 40)], func(t *testing.T) {
+			ranges := GetStatementRanges(sql)
+			markers := ValidateSnowflakePatterns(sql, ranges)
+			if warns := getWarnings(markers); len(warns) > 0 {
+				t.Errorf("Expected 0 warnings, got %d: %v", len(warns), warns)
+			}
+		})
+	}
+
+	invalidCases := []struct {
+		name     string
+		sql      string
+		wantMsgs []string
+	}{
+		{"OR REPLACE IF NOT EXISTS Iceberg", "CREATE OR REPLACE ICEBERG TABLE IF NOT EXISTS t (id int) CATALOG = 'SNOWFLAKE' BASE_LOCATION = 's3://test/'", []string{"Conflict between OR REPLACE and IF NOT EXISTS"}},
+		{"Transient keyword used", "CREATE TRANSIENT ICEBERG TABLE t (id int) CATALOG = 'SNOWFLAKE' BASE_LOCATION = 's3://test/'", []string{"TRANSIENT is not supported for Iceberg tables."}},
+		{"Missing BASE_LOCATION for Snowflake-managed", "CREATE ICEBERG TABLE t (id int) CATALOG = 'SNOWFLAKE'", []string{"BASE_LOCATION is mandatory for all Iceberg tables and cannot be empty."}},
+		{"Empty BASE_LOCATION for Snowflake-managed", "CREATE ICEBERG TABLE t (id int) CATALOG = 'SNOWFLAKE' BASE_LOCATION = ''", []string{"BASE_LOCATION is mandatory for all Iceberg tables and cannot be empty."}},
+		{"Missing EXTERNAL_VOLUME", "CREATE ICEBERG TABLE t (id int) CATALOG = 'c' BASE_LOCATION = 'l'", []string{"EXTERNAL_VOLUME is mandatory for Iceberg tables with external catalogs."}},
+		{"Missing CATALOG", "CREATE ICEBERG TABLE t (id int) EXTERNAL_VOLUME = 'ev' BASE_LOCATION = 'l'", []string{"CATALOG is mandatory for Iceberg tables with external catalogs."}},
+		{"Empty EXTERNAL_VOLUME", "CREATE ICEBERG TABLE t (id int) EXTERNAL_VOLUME = '' CATALOG = 'c' BASE_LOCATION = 'l'", []string{"EXTERNAL_VOLUME is mandatory for Iceberg tables with external catalogs."}},
+		{"Empty CATALOG", "CREATE ICEBERG TABLE t (id int) EXTERNAL_VOLUME = 'ev' CATALOG = '' BASE_LOCATION = 'l'", []string{"CATALOG is mandatory for Iceberg tables with external catalogs."}},
+		{"CATALOG_TABLE_NAME with SNOWFLAKE", "CREATE ICEBERG TABLE t (id int) CATALOG = 'SNOWFLAKE' BASE_LOCATION = 's3://test/' CATALOG_TABLE_NAME = 'ctn'", []string{"CATALOG_TABLE_NAME is only valid when CATALOG is not 'SNOWFLAKE'"}},
+		{"CATALOG_NAMESPACE with SNOWFLAKE", "CREATE ICEBERG TABLE t (id int) CATALOG = 'SNOWFLAKE' BASE_LOCATION = 's3://test/' CATALOG_NAMESPACE = 'cns'", []string{"CATALOG_NAMESPACE is only valid when CATALOG is not 'SNOWFLAKE'"}},
+		{"OR REPLACE with external catalog", "CREATE OR REPLACE ICEBERG TABLE t (id int) EXTERNAL_VOLUME = 'ev' CATALOG = 'c' BASE_LOCATION = 'l'", []string{"OR REPLACE is not supported for Iceberg tables backed by external catalogs."}},
+		{"CLUSTER BY with external catalog", "CREATE ICEBERG TABLE t (id int) EXTERNAL_VOLUME = 'ev' CATALOG = 'c' BASE_LOCATION = 'l' CLUSTER BY (id)", []string{"CLUSTER BY is supported only for Snowflake-managed Iceberg tables."}},
+		{"DATA_RETENTION_TIME_IN_DAYS with external catalog", "CREATE ICEBERG TABLE t (id int) EXTERNAL_VOLUME = 'ev' CATALOG = 'c' BASE_LOCATION = 'l' DATA_RETENTION_TIME_IN_DAYS = 1", []string{"DATA_RETENTION_TIME_IN_DAYS applies only to Snowflake-managed Iceberg tables."}},
+		{"Invalid REFRESH_MODE", "CREATE ICEBERG TABLE t (id int) EXTERNAL_VOLUME = 'ev' CATALOG = 'c' BASE_LOCATION = 'l' REFRESH_MODE = 'INVALID'", []string{"Invalid REFRESH_MODE value. Must be AUTO, FULL, or INCREMENTAL."}},
+		{"Invalid INITIALIZE", "CREATE ICEBERG TABLE t (id int) EXTERNAL_VOLUME = 'ev' CATALOG = 'c' BASE_LOCATION = 'l' INITIALIZE = 'INVALID'", []string{"Invalid INITIALIZE value. Must be ON_CREATE or ON_SCHEDULE."}},
+		{"Invalid AUTO_REFRESH", "CREATE ICEBERG TABLE t (id int) EXTERNAL_VOLUME = 'ev' CATALOG = 'c' BASE_LOCATION = 'l' AUTO_REFRESH = 'INVALID'", []string{"AUTO_REFRESH must be TRUE or FALSE."}},
+		{"Quoted AUTO_REFRESH Invalid", "CREATE ICEBERG TABLE t (id int) EXTERNAL_VOLUME = 'ev' CATALOG = 'cat' BASE_LOCATION = 'loc' AUTO_REFRESH = 'BAD'", []string{"AUTO_REFRESH must be TRUE or FALSE."}},
+		{"Quoted REPLACE_INVALID_CHARACTERS Invalid", "CREATE ICEBERG TABLE t (id int) EXTERNAL_VOLUME = 'ev' CATALOG = 'cat' BASE_LOCATION = 'loc' REPLACE_INVALID_CHARACTERS = 'BAD'", []string{"REPLACE_INVALID_CHARACTERS must be TRUE or FALSE."}},
+		{"OR REPLACE IF NOT EXISTS External Catalog", "CREATE OR REPLACE ICEBERG TABLE IF NOT EXISTS t (id int) EXTERNAL_VOLUME = 'ev' CATALOG = 'c' BASE_LOCATION = 'l'", []string{"Conflict between OR REPLACE and IF NOT EXISTS", "OR REPLACE is not supported for Iceberg tables backed by external catalogs."}},
+		{"CREATE OR REPLACE TRANSIENT ICEBERG TABLE", "CREATE OR REPLACE TRANSIENT ICEBERG TABLE t (id int) EXTERNAL_VOLUME = 'ev' CATALOG = 'c' BASE_LOCATION = 'l'", []string{"TRANSIENT is not supported for Iceberg tables.", "OR REPLACE is not supported for Iceberg tables backed by external catalogs."}},
+	}
+
+	for _, tt := range invalidCases {
+		t.Run(tt.name, func(t *testing.T) {
+			ranges := GetStatementRanges(tt.sql)
+			markers := ValidateSnowflakePatterns(tt.sql, ranges)
+			warns := getWarnings(markers)
+
+			for _, wantMsg := range tt.wantMsgs {
+				found := false
+				for _, w := range warns {
+					if strings.Contains(w.Message, wantMsg) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected warning for %q, but got none matching %q. Warnings: %v", tt.sql, wantMsg, warns)
+				}
+			}
+			if len(warns) < len(tt.wantMsgs) {
+				t.Errorf("Expected %d warnings, got %d for %q", len(tt.wantMsgs), len(warns), tt.sql)
+			}
+		})
+	}
+}
