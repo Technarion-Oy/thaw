@@ -398,6 +398,16 @@ var (
 	reRevokeCascade  = regexp.MustCompile(`(?i)\bCASCADE\b`)
 	reRevokeRestrict = regexp.MustCompile(`(?i)\bRESTRICT\b`)
 
+	// ── CALL ──────────────────────────────────────────────────────────────────
+	reIsCall         = regexp.MustCompile(`(?i)^\s*CALL\b`)
+	reCallProcName   = regexp.MustCompile(`(?i)^\s*CALL\s+` + _identPath)
+	reCallArgParens  = regexp.MustCompile(`(?i)^\s*CALL\s+` + _identPath + `\s*\(`)
+	reCallInto       = regexp.MustCompile(`(?i)\bINTO\s+([^\s;,)]+)`)
+	reWithProcAlias  = regexp.MustCompile(`(?i)^\s*WITH\s+(` + _ident + `)\s+AS\s+PROCEDURE\b`)
+	// reAnyDollarTag matches both untagged ($$) and tagged ($tag$) Snowflake
+	// dollar-quote delimiters; used to locate the closing body delimiter.
+	reAnyDollarTag = regexp.MustCompile(`\$\w*\$`)
+
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
 	reIsCreateStage = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?STAGE\b`)
 	// stageProps lists only top-level CREATE STAGE property keys.
@@ -1337,6 +1347,18 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			if !reAlterStageNoValidate.MatchString(parseText) {
 				validateProperties(stripParenContents(parseText), alterStageProps, r, &markers)
 			}
+			continue
+		}
+
+		// ── WITH ... AS PROCEDURE (anonymous procedure) ───────────────────
+		if reWithProcAlias.MatchString(parseText) {
+			markers = append(markers, validateWithProcedureCall(parseText, r)...)
+			continue
+		}
+
+		// ── CALL ─────────────────────────────────────────────────────────
+		if reIsCall.MatchString(parseText) {
+			markers = append(markers, validateCall(parseText, r)...)
 			continue
 		}
 
@@ -2762,6 +2784,92 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 			}
 		}
 	}
+
+	return markers
+}
+
+// ── validateCall ──────────────────────────────────────────────────────────────
+
+// validateCall validates a standalone CALL statement for basic structural
+// correctness per the Snowflake docs:
+//   - Procedure name must be present — bare CALL; should be flagged.
+//   - Argument list must be parenthesised — CALL my_proc 1, 2 should be flagged.
+//   - INTO :<variable> must have a colon-prefixed variable in scripting contexts.
+func validateCall(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// 1. Procedure name must be present.
+	if !reCallProcName.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Missing procedure name in CALL statement.", 4))
+		return markers
+	}
+
+	// 2. Argument list must be parenthesised.
+	if !reCallArgParens.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r,
+			"CALL statement requires a parenthesised argument list. Use CALL proc_name() even when there are no arguments.", 4))
+	}
+
+	// 3. INTO :<variable> — the variable must be prefixed with ':' in scripting contexts.
+	// Run against the comment-stripped text to avoid false positives when INTO
+	// appears inside a -- or /* */ comment (e.g. "CALL p() -- INTO x is done").
+	callStripped := stripCommentsSQL(parseText)
+	if m := reCallInto.FindStringSubmatch(callStripped); m != nil {
+		varToken := m[1]
+		if !strings.HasPrefix(varToken, ":") {
+			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf(
+				"INTO variable must be prefixed with ':' in Snowflake Scripting. Use INTO :%s instead of INTO %s.",
+				varToken, varToken), 4))
+		}
+	}
+
+	return markers
+}
+
+// ── validateWithProcedureCall ─────────────────────────────────────────────────
+
+// validateWithProcedureCall validates a WITH <alias> AS PROCEDURE … CALL <alias>()
+// anonymous procedure statement.  It checks that a CALL statement invoking the
+// defined alias follows the dollar-quoted procedure body, and delegates the CALL
+// structural checks to validateCall.
+func validateWithProcedureCall(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// Extract the alias name.
+	m := reWithProcAlias.FindStringSubmatch(parseText)
+	if m == nil {
+		return markers
+	}
+	alias := m[1]
+
+	// Find the closing delimiter of the procedure body.
+	// Snowflake supports both untagged ($$...$$) and tagged ($tag$...$tag$)
+	// dollar-quoting.  We collect all $<tag>$ tokens via reAnyDollarTag and
+	// treat the rightmost one as the closing delimiter so that tagged forms like
+	// $proc$...$proc$ work correctly alongside the plain $$ form.
+	var afterBody string
+	if tagMatches := reAnyDollarTag.FindAllStringIndex(parseText, -1); len(tagMatches) > 0 {
+		lastTagEnd := tagMatches[len(tagMatches)-1][1]
+		afterBody = strings.TrimSpace(parseText[lastTagEnd:])
+	} else {
+		// No dollar-quoted body found; look for CALL anywhere in the statement.
+		afterBody = parseText
+	}
+
+	if !reIsCall.MatchString(afterBody) {
+		markers = append(markers, diagMarkerSpan(r, fmt.Sprintf(
+			"WITH ... AS PROCEDURE block must end with CALL %s(...).", alias), 4))
+		return markers
+	}
+
+	// Delegate structural validation of the trailing CALL to validateCall.
+	// Note: validateCall only checks structural correctness (name present, parens,
+	// INTO syntax) — it does not verify that the invoked name matches alias.
+	// A CALL to a completely different procedure after the WITH block is not flagged
+	// here; this is an intentional limitation of static regex-based validation.
+	callText := strings.TrimSpace(afterBody)
+	markers = append(markers, validateCall(callText, r)...)
 
 	return markers
 }
