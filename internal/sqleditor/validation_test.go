@@ -2542,6 +2542,16 @@ func TestValidateSnowflakePatterns_CreateExternalVolume(t *testing.T) {
 			[]string{"Each storage location requires STORAGE_BASE_URL", "Each storage location requires STORAGE_PROVIDER"},
 		},
 		{
+			"AZURE with ENCRYPTION block but no TYPE key",
+			"CREATE EXTERNAL VOLUME az_vol STORAGE_LOCATIONS = (( NAME = 'az' STORAGE_PROVIDER = 'AZURE' STORAGE_BASE_URL = 'azure://acc.blob.core.windows.net/c/' AZURE_TENANT_ID = 'tid' ENCRYPTION = (KMS_KEY_ID = 'k') ))",
+			[]string{"AZURE storage locations do not support the ENCRYPTION parameter"},
+		},
+		{
+			"S3 with ENCRYPTION block but no TYPE key",
+			"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ENCRYPTION = (KMS_KEY_ID = 'k') ))",
+			[]string{"ENCRYPTION block must specify a TYPE key"},
+		},
+		{
 			"Empty STORAGE_LOCATIONS block",
 			"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = ()",
 			[]string{"STORAGE_LOCATIONS must contain at least one storage location block"},

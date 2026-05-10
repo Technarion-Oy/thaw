@@ -484,11 +484,12 @@ var (
 	reExtVolAwsRoleArn         = regexp.MustCompile(`(?i)\bSTORAGE_AWS_ROLE_ARN\s*=`)
 	reExtVolAzureTenantID      = regexp.MustCompile(`(?i)\bAZURE_TENANT_ID\s*=`)
 	reExtVolAwsExternalID      = regexp.MustCompile(`(?i)\bSTORAGE_AWS_EXTERNAL_ID\s*=`)
+	// reExtVolHasEncryption detects any ENCRYPTION = ( block regardless of its
+	// contents. Used as a coarse presence check before reExtVolEncryptionType,
+	// which additionally requires TYPE = '...'. This ensures blocks like
+	// ENCRYPTION = (KMS_KEY_ID = 'k') (no TYPE key) are not silently ignored.
+	reExtVolHasEncryption      = regexp.MustCompile(`(?i)\bENCRYPTION\s*=\s*\(`)
 	reExtVolEncryptionType     = regexp.MustCompile(`(?i)\bENCRYPTION\s*=\s*\(\s*TYPE\s*=\s*'([^']*)'`)
-	// extVolValidEncTypes lists the accepted ENCRYPTION TYPE values for any
-	// STORAGE_LOCATIONS location block. Declared at package level to avoid
-	// rebuilding the slice on every validateCreateExternalVolume call.
-	extVolValidEncTypes = []string{"NONE", "AWS_SSE_S3", "AWS_SSE_KMS", "GCS_SSE_KMS"}
 
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
 	reIsCreateStage = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?STAGE\b`)
@@ -3257,6 +3258,12 @@ func validateCreateShare(parseText string, r StatementRange) []DiagMarker {
 
 // ── validateCreateExternalVolume ──────────────────────────────────────────────
 
+// extVolValidEncTypes lists the accepted ENCRYPTION TYPE values for a
+// STORAGE_LOCATIONS location block (S3 and GCS only; AZURE does not support
+// the ENCRYPTION parameter). Declared outside the regexp var block because
+// it is a string slice, not a compiled regexp.
+var extVolValidEncTypes = []string{"NONE", "AWS_SSE_S3", "AWS_SSE_KMS", "GCS_SSE_KMS"}
+
 // validateCreateExternalVolume checks structural requirements for
 // CREATE [OR REPLACE] EXTERNAL VOLUME statements:
 //   - OR REPLACE and IF NOT EXISTS are mutually exclusive.
@@ -3269,9 +3276,12 @@ func validateCreateShare(parseText string, r StatementRange) []DiagMarker {
 //   - STORAGE_AWS_ROLE_ARN is required for S3, S3GOV, S3CHINA, and S3COMPAT.
 //   - AZURE_TENANT_ID is required for AZURE.
 //   - STORAGE_AWS_EXTERNAL_ID is only valid for S3-family providers.
-//   - ENCRYPTION is not supported for AZURE; for S3/GCS the TYPE must be one of:
-//     NONE, AWS_SSE_S3, AWS_SSE_KMS, GCS_SSE_KMS, matched to the provider.
+//   - ENCRYPTION is not supported for AZURE (any ENCRYPTION block is rejected).
+//     For S3/GCS an ENCRYPTION block must contain a TYPE key; its value must be
+//     one of NONE, AWS_SSE_S3, AWS_SSE_KMS, or GCS_SSE_KMS, matched to the provider.
 //   - ALLOW_WRITES must be TRUE or FALSE if present.
+//   - The validator is permissive about extra, unrecognised attributes (e.g.
+//     STORAGE_AWS_ROLE_ARN on a GCS location); only the fields listed above are checked.
 func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
@@ -3390,25 +3400,34 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 		// 9. ENCRYPTION handling is provider-specific (inside per-location loop).
 		if isAzure {
 			// AZURE uses native storage encryption; the ENCRYPTION parameter is
-			// not supported at all for AZURE external volumes.
-			if reExtVolEncryptionType.MatchString(locClean) {
+			// not supported at all for AZURE external volumes. Use the loose
+			// presence regex (reExtVolHasEncryption) so blocks like
+			// ENCRYPTION = (KMS_KEY_ID = 'k') without a TYPE key are caught too.
+			if reExtVolHasEncryption.MatchString(locClean) {
 				markers = append(markers, diagMarkerSpan(r,
 					"AZURE storage locations do not support the ENCRYPTION parameter.", 4))
 			}
-		} else {
-			// For S3 and GCS, validate ENCRYPTION TYPE value and provider match.
+		} else if reExtVolHasEncryption.MatchString(locClean) {
+			// An ENCRYPTION block is present on an S3 or GCS location.
 			// Use the literal-preserving loc so the regex captures the actual type string.
-			for _, em := range reExtVolEncryptionType.FindAllStringSubmatch(loc, -1) {
-				encType := strings.ToUpper(em[1])
-				if !slices.Contains(extVolValidEncTypes, encType) {
-					markers = append(markers, diagMarkerSpan(r,
-						fmt.Sprintf("Invalid ENCRYPTION TYPE '%s'. Must be NONE, AWS_SSE_S3, AWS_SSE_KMS, or GCS_SSE_KMS.", em[1]), 4))
-				} else if (encType == "AWS_SSE_S3" || encType == "AWS_SSE_KMS") && !isS3 {
-					markers = append(markers, diagMarkerSpan(r,
-						fmt.Sprintf("ENCRYPTION TYPE '%s' is only valid for S3, S3GOV, S3CHINA, or S3COMPAT storage providers.", em[1]), 4))
-				} else if encType == "GCS_SSE_KMS" && !isGCS {
-					markers = append(markers, diagMarkerSpan(r,
-						"ENCRYPTION TYPE 'GCS_SSE_KMS' is only valid for GCS storage provider.", 4))
+			ems := reExtVolEncryptionType.FindAllStringSubmatch(loc, -1)
+			if len(ems) == 0 {
+				// ENCRYPTION block exists but has no TYPE key — always an error.
+				markers = append(markers, diagMarkerSpan(r,
+					"ENCRYPTION block must specify a TYPE key (NONE, AWS_SSE_S3, AWS_SSE_KMS, or GCS_SSE_KMS).", 4))
+			} else {
+				for _, em := range ems {
+					encType := strings.ToUpper(em[1])
+					if !slices.Contains(extVolValidEncTypes, encType) {
+						markers = append(markers, diagMarkerSpan(r,
+							fmt.Sprintf("Invalid ENCRYPTION TYPE '%s'. Must be NONE, AWS_SSE_S3, AWS_SSE_KMS, or GCS_SSE_KMS.", em[1]), 4))
+					} else if (encType == "AWS_SSE_S3" || encType == "AWS_SSE_KMS") && !isS3 {
+						markers = append(markers, diagMarkerSpan(r,
+							fmt.Sprintf("ENCRYPTION TYPE '%s' is only valid for S3, S3GOV, S3CHINA, or S3COMPAT storage providers.", em[1]), 4))
+					} else if encType == "GCS_SSE_KMS" && !isGCS {
+						markers = append(markers, diagMarkerSpan(r,
+							"ENCRYPTION TYPE 'GCS_SSE_KMS' is only valid for GCS storage provider.", 4))
+					}
 				}
 			}
 		}
