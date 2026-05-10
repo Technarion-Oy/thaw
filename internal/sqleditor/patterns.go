@@ -1525,10 +1525,8 @@ func validateProperties(s string, validProps string, r StatementRange, markers *
 
 func validateCreateAlert(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	var ifIdx []int
-
 	// 1. Mutually exclusive OR REPLACE and IF NOT EXISTS
-	ifIdx = reAlertIfExists.FindStringIndex(parseText)
+	ifIdx := reAlertIfExists.FindStringIndex(parseText)
 
 	preambleToCheck := parseText
 	if ifIdx != nil {
