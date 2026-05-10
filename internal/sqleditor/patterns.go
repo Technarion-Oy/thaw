@@ -1611,10 +1611,12 @@ func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarke
 
 	// 2. At least one of ALLOWED_IP_LIST or ALLOWED_NETWORK_RULE_LIST must be present
 	// and non-empty. An empty list (e.g. ALLOWED_IP_LIST = ()) has no effect.
+	// networkPolicyListHasEntries is used instead of a plain TrimSpace check so
+	// that whitespace-only quoted entries like ('   ') are also treated as empty.
 	allowedIPMatch := reNetworkPolicyHasAllowedIP.FindStringSubmatch(parseText)
-	hasAllowedIP := allowedIPMatch != nil && strings.TrimSpace(allowedIPMatch[1]) != ""
+	hasAllowedIP := allowedIPMatch != nil && networkPolicyListHasEntries(allowedIPMatch[1])
 	allowedRulesMatch := reNetworkPolicyHasAllowedRules.FindStringSubmatch(parseText)
-	hasAllowedRules := allowedRulesMatch != nil && strings.TrimSpace(allowedRulesMatch[1]) != ""
+	hasAllowedRules := allowedRulesMatch != nil && networkPolicyListHasEntries(allowedRulesMatch[1])
 	if !hasAllowedIP && !hasAllowedRules {
 		markers = append(markers, diagMarkerSpan(r, "Network policy has no effect: at least one of ALLOWED_IP_LIST or ALLOWED_NETWORK_RULE_LIST must be specified and non-empty.", 4))
 	}
@@ -1672,6 +1674,24 @@ func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarke
 	validateProperties(stripParenContents(parseText), networkPolicyProps, r, &markers)
 
 	return markers
+}
+
+// networkPolicyListHasEntries reports whether the raw paren content of a
+// network policy list (e.g. the capture from ALLOWED_IP_LIST = (...)) contains
+// at least one non-empty entry after stripping surrounding single quotes.
+// This avoids the false-negative caused by whitespace-only quoted entries such
+// as ('   ') which would otherwise pass a plain strings.TrimSpace != "" check.
+func networkPolicyListHasEntries(content string) bool {
+	for _, raw := range strings.Split(content, ",") {
+		entry := strings.TrimSpace(raw)
+		if len(entry) >= 2 && entry[0] == '\'' && entry[len(entry)-1] == '\'' {
+			entry = strings.TrimSpace(entry[1 : len(entry)-1])
+		}
+		if entry != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // isValidIPCIDR reports whether s is a valid IPv4 or IPv6 address, optionally
