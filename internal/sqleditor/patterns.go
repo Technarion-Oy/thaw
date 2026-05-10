@@ -368,14 +368,20 @@ var (
 	}, "|")
 
 	// ── GRANT / REVOKE ────────────────────────────────────────────────────────
+	// reIsGrantRole is used inside validateGrant (not in the top-level dispatch)
+	// to distinguish "GRANT ROLE <name>" (role assignment) from privilege grants.
 	reIsGrantRole          = regexp.MustCompile(`(?i)^\s*GRANT\s+ROLE\b`)
 	reIsGrantDatabaseRole  = regexp.MustCompile(`(?i)^\s*GRANT\s+DATABASE\s+ROLE\b`)
 	reIsGrant              = regexp.MustCompile(`(?i)^\s*GRANT\b`)
 	reIsRevoke             = regexp.MustCompile(`(?i)^\s*REVOKE\b`)
 	reIsRevokeRole         = regexp.MustCompile(`(?i)^\s*REVOKE\s+ROLE\b`)
 	reIsRevokeDatabaseRole = regexp.MustCompile(`(?i)^\s*REVOKE\s+DATABASE\s+ROLE\b`)
-	reGrantOnObject        = regexp.MustCompile(`(?i)\bGRANT\s+([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(` + _grantObjType + `)`)
-	reRevokeOnObject       = regexp.MustCompile(`(?i)\bREVOKE\s+(?:GRANT\s+OPTION\s+FOR\s+)?([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(` + _grantObjType + `)`)
+	// reGrantOnObject / reRevokeOnObject use a lazy ([\s\S]+?) to capture the
+	// privilege list, stopping at the first occurrence of " ON ". This is safe
+	// as long as no Snowflake privilege name itself contains the substring " ON ";
+	// verify this assumption when adding new privileges to grantObjectPrivileges.
+	reGrantOnObject  = regexp.MustCompile(`(?i)\bGRANT\s+([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(` + _grantObjType + `)`)
+	reRevokeOnObject = regexp.MustCompile(`(?i)\bREVOKE\s+(?:GRANT\s+OPTION\s+FOR\s+)?([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(` + _grantObjType + `)`)
 	reGrantee              = regexp.MustCompile(`(?i)\bTO\s+(?:ROLE|USER|DATABASE\s+ROLE)\b`)
 	reGranteeFrom          = regexp.MustCompile(`(?i)\bFROM\s+(?:ROLE|USER|DATABASE\s+ROLE)\b`)
 	reGrantAllFuture       = regexp.MustCompile(`(?i)\bON\s+(?:ALL|FUTURE)\b`)
@@ -510,7 +516,6 @@ var grantObjectPrivileges = map[string][]string{
 		"APPLYBUDGET",
 	},
 	"PIPE":        {"MONITOR", "OPERATE"},
-	"ROLE":        {"USAGE"},
 	"INTEGRATION": {"USAGE"},
 	"TASK":        {"MONITOR", "OPERATE"},
 	"STREAM":      {"SELECT"},
@@ -543,7 +548,6 @@ var grantObjectTypePlurals = map[string]string{
 	"WAREHOUSES":   "WAREHOUSE",
 	"DATABASES":    "DATABASE",
 	"SCHEMAS":      "SCHEMA",
-	"ROLES":        "ROLE",
 	"INTEGRATIONS": "INTEGRATION",
 	"TASKS":        "TASK",
 	"STREAMS":      "STREAM",
@@ -2129,6 +2133,16 @@ func validateGrant(parseText string, r StatementRange) []DiagMarker {
 	allFuture := strings.TrimSpace(strings.ToUpper(m[2])) // "ALL", "FUTURE", or ""
 	objectType := normalizeGrantObjectType(m[3])
 
+	// ── GRANT <priv> ON ROLE is not valid Snowflake syntax ────────────────────
+	// The correct form for role assignment is "GRANT ROLE <name> TO ROLE/USER".
+	// Snowflake does not support granting privileges on role objects via ON ROLE.
+	if objectType == "ROLE" {
+		markers = append(markers, diagMarkerSpan(r,
+			"'GRANT <privilege> ON ROLE' is not valid Snowflake syntax. "+
+				"Use 'GRANT ROLE <name> TO ROLE/USER' to assign a role.", 4))
+		return markers
+	}
+
 	// ── Grantee required ──────────────────────────────────────────────────────
 	if !reGrantee.MatchString(parseText) {
 		markers = append(markers, diagMarkerSpan(r,
@@ -2227,12 +2241,16 @@ func validateRevoke(parseText string, r StatementRange) []DiagMarker {
 }
 
 // splitPrivileges splits a comma-separated privilege list into individual
-// normalised (upper-cased, trimmed) privilege strings.
+// normalised (upper-cased, internal-whitespace-collapsed) privilege strings.
+// strings.Fields is used so that "CREATE  TABLE" (double space) normalises to
+// "CREATE TABLE" and matches the map keys in grantObjectPrivileges.
 func splitPrivileges(privList string) []string {
 	parts := strings.Split(privList, ",")
 	result := make([]string, 0, len(parts))
 	for _, p := range parts {
-		trimmed := strings.TrimSpace(strings.ToUpper(p))
+		// Collapse internal whitespace runs (tabs, double-spaces, etc.) as well
+		// as leading/trailing whitespace before the equality check.
+		trimmed := strings.Join(strings.Fields(strings.ToUpper(p)), " ")
 		if trimmed != "" {
 			result = append(result, trimmed)
 		}

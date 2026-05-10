@@ -226,7 +226,6 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"GRANT CREATE ROW ACCESS POLICY ON SCHEMA my_schema TO ROLE my_role",
 		"GRANT ADD SEARCH OPTIMIZATION ON SCHEMA my_schema TO ROLE my_role",
 		"GRANT USAGE ON SCHEMA my_schema TO ROLE my_role WITH GRANT OPTION",
-		"GRANT USAGE ON ROLE my_role TO ROLE other_role",
 		"GRANT USAGE ON INTEGRATION my_int TO ROLE my_role",
 		"GRANT MONITOR, OPERATE ON TASK my_task TO ROLE my_role",
 		"GRANT SELECT ON STREAM my_stream TO ROLE my_role",
@@ -358,8 +357,10 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Grant select on warehouse", "GRANT SELECT ON WAREHOUSE my_wh TO ROLE my_role", "not valid for object type WAREHOUSE"},
 		{"Grant insert on view", "GRANT INSERT ON VIEW my_view TO ROLE my_role", "not valid for object type VIEW"},
 		{"Grant write on table", "GRANT WRITE ON TABLE my_table TO ROLE my_role", "not valid for object type TABLE"},
+		{"Grant select on stage", "GRANT SELECT ON STAGE my_stage TO ROLE my_role", "not valid for object type STAGE"},
 		{"Grant usage on stream", "GRANT USAGE ON STREAM my_stream TO ROLE my_role", "not valid for object type STREAM"},
 		{"Grant select on account", "GRANT SELECT ON ACCOUNT TO ROLE my_role", "not valid for object type ACCOUNT"},
+		{"Grant usage on role", "GRANT USAGE ON ROLE my_role TO ROLE other_role", "not valid Snowflake syntax"},
 		{"Grant multi priv one invalid", "GRANT SELECT, INVALID_PRIV ON TABLE my_table TO ROLE my_role", "not valid for object type TABLE"},
 
 		// Invalid GRANT — structural issues
