@@ -322,8 +322,10 @@ var (
 	// The capture group holds the raw parameter list content; one level of
 	// nested parens is supported to accommodate types like NUMBER(10,2).
 	reRowAccessPolicyParamList = regexp.MustCompile(`(?i)\bAS\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)`)
-	reRowAccessPolicyReturns   = regexp.MustCompile(`(?i)\bRETURNS\s+BOOLEAN\b`)
-	reRowAccessPolicyArrow     = regexp.MustCompile(`->`)
+	reRowAccessPolicyReturns = regexp.MustCompile(`(?i)\bRETURNS\s+BOOLEAN\b`)
+	// reRowAccessPolicyArrow requires the -> to appear after RETURNS BOOLEAN,
+	// preventing a bare -> elsewhere in the SQL from satisfying the check.
+	reRowAccessPolicyArrow = regexp.MustCompile(`(?i)\bRETURNS\s+BOOLEAN\s*->`)
 	reRowAccessPolicyASOpen    = regexp.MustCompile(`(?i)\bAS\s*\(`)
 
 	// ── GRANT ─────────────────────────────────────────────────────────────────
