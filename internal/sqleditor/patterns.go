@@ -2199,11 +2199,20 @@ func validateRevoke(parseText string, r StatementRange) []DiagMarker {
 		return markers
 	}
 	privListRaw := m[1]
-	// allFuture is "" for plain object grants and "ALL" or "FUTURE" for bulk
-	// grants. It gates privilege validation: bulk grants are always skipped
+	// allFuture is "" for plain object revokes and "ALL" or "FUTURE" for bulk
+	// revokes. It gates privilege validation: bulk revokes are always skipped
 	// because the full privilege set is determined dynamically by Snowflake.
 	allFuture := strings.TrimSpace(strings.ToUpper(m[2]))
 	objectType := normalizeGrantObjectType(m[3])
+
+	// ── REVOKE <priv> ON ROLE is not valid Snowflake syntax ──────────────────
+	// The correct form for role revocation is "REVOKE ROLE <name> FROM ROLE/USER".
+	if objectType == "ROLE" {
+		markers = append(markers, diagMarkerSpan(r,
+			"'REVOKE <privilege> ON ROLE' is not valid Snowflake syntax. "+
+				"Use 'REVOKE ROLE <name> FROM ROLE/USER' to revoke a role.", 4))
+		return markers
+	}
 
 	// ── ON ALL / ON FUTURE requires IN SCHEMA or IN DATABASE ─────────────────
 	if reGrantAllFuture.MatchString(parseText) && !reGrantInQualifier.MatchString(parseText) {

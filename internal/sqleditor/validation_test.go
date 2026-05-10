@@ -268,6 +268,7 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"GRANT USAGE ON DATABASE my_db TO SHARE my_share",
 		"GRANT SELECT ON TABLE my_table TO SHARE my_share",
 		"REVOKE USAGE ON DATABASE my_db FROM SHARE my_share",
+		"REVOKE SELECT ON TABLE my_table FROM SHARE my_share",
 	}
 
 	for _, sql := range validQueries {
@@ -381,6 +382,9 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		// Invalid REVOKE — privilege/object mismatches
 		{"Revoke insert on view", "REVOKE INSERT ON VIEW my_view FROM ROLE my_role", "not valid for object type VIEW"},
 		{"Revoke select on warehouse", "REVOKE SELECT ON WAREHOUSE my_wh FROM ROLE my_role", "not valid for object type WAREHOUSE"},
+		{"Revoke select on stage", "REVOKE SELECT ON STAGE my_stage FROM ROLE my_role", "not valid for object type STAGE"},
+		{"Revoke write on stream", "REVOKE WRITE ON STREAM my_stream FROM ROLE my_role", "not valid for object type STREAM"},
+		{"Revoke usage on role", "REVOKE USAGE ON ROLE my_role FROM ROLE other_role", "not valid Snowflake syntax"},
 
 		// Invalid REVOKE — structural issues
 		{"Revoke cascade and restrict", "REVOKE SELECT ON TABLE my_table FROM ROLE my_role CASCADE RESTRICT", "mutually exclusive"},
