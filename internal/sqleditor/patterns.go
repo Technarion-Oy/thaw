@@ -427,6 +427,32 @@ var (
 	reStripDollarQuoted    = regexp.MustCompile(`\$\w*\$[\s\S]*?\$\w*\$`)
 	reExecTaskName         = regexp.MustCompile(`(?i)^\s*EXECUTE\s+TASK\s+` + _identPath)
 
+	// ── PUT / GET / LIST / REMOVE stage commands ──────────────────────────────
+	reIsPut          = regexp.MustCompile(`(?i)^\s*PUT\b`)
+	reIsGet          = regexp.MustCompile(`(?i)^\s*GET\b`)
+	reIsList         = regexp.MustCompile(`(?i)^\s*(?:LIST|LS)\b`)
+	reIsRemove       = regexp.MustCompile(`(?i)^\s*(?:REMOVE|RM)\b`)
+	// reFileURIArg matches a file:// URI argument (shared by PUT and GET).
+	reFileURIArg     = regexp.MustCompile(`(?i)\bfile://\S+`)
+	rePutKWStrip     = regexp.MustCompile(`(?i)^PUT\s+`)
+	reStageRef       = regexp.MustCompile(`@\S+`)
+	// rePutCorrectOrder validates that PUT has file:// before @stage.
+	rePutCorrectOrder = regexp.MustCompile(`(?i)^\s*PUT\s+file://\S+\s+@\S+`)
+	rePutSourceComp   = regexp.MustCompile(`(?i)\bSOURCE_COMPRESSION\s*=\s*(\w+)`)
+	rePutOverwrite    = regexp.MustCompile(`(?i)\bOVERWRITE\s*=\s*(\w+)`)
+	rePutAutoCompress = regexp.MustCompile(`(?i)\bAUTO_COMPRESS\s*=\s*(\w+)`)
+	// reParallelOption matches a PARALLEL = <n> option (shared by PUT and GET).
+	// The capture group includes an optional leading minus so that negative
+	// values like PARALLEL = -1 are captured and fail the range check rather
+	// than being silently skipped.
+	reParallelOption = regexp.MustCompile(`(?i)\bPARALLEL\s*=\s*(-?\d+)`)
+	reGetStageArg    = regexp.MustCompile(`(?i)^\s*GET\s+@\S+`)
+	reListStageArg   = regexp.MustCompile(`(?i)^\s*(?:LIST|LS)\s+@\S+`)
+	reRemoveStageArg = regexp.MustCompile(`(?i)^\s*(?:REMOVE|RM)\s+@\S+`)
+
+	// validPutCompressions lists the accepted SOURCE_COMPRESSION values for PUT.
+	validPutCompressions = []string{"AUTO_DETECT", "GZIP", "BZ2", "BROTLI", "ZSTD", "DEFLATE", "RAW_DEFLATE", "NONE"}
+
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
 	reIsCreateStage = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?STAGE\b`)
 	// stageProps lists only top-level CREATE STAGE property keys.
@@ -515,6 +541,8 @@ var (
 		"SHOW": true, "SET": true, "DROP": true, "UNDROP": true,
 		"MERGE": true, "GRANT": true, "REVOKE": true, "COPY": true,
 		"EXECUTE": true,
+		"PUT": true, "GET": true, "LIST": true, "LS": true,
+		"REMOVE": true, "RM": true,
 	}
 )
 
@@ -1408,6 +1436,30 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 
 		// ── Other EXECUTE forms (EXECUTE ALERT, etc.) — pass through ─────
 		if reIsExecute.MatchString(parseText) {
+			continue
+		}
+
+		// ── PUT ───────────────────────────────────────────────────────────
+		if reIsPut.MatchString(parseText) {
+			markers = append(markers, validatePut(parseText, r)...)
+			continue
+		}
+
+		// ── GET ───────────────────────────────────────────────────────────
+		if reIsGet.MatchString(parseText) {
+			markers = append(markers, validateGet(parseText, r)...)
+			continue
+		}
+
+		// ── LIST / LS ─────────────────────────────────────────────────────
+		if reIsList.MatchString(parseText) {
+			markers = append(markers, validateList(parseText, r)...)
+			continue
+		}
+
+		// ── REMOVE / RM ───────────────────────────────────────────────────
+		if reIsRemove.MatchString(parseText) {
+			markers = append(markers, validateRemove(parseText, r)...)
 			continue
 		}
 
@@ -2959,6 +3011,153 @@ func validateExecuteTask(parseText string, r StatementRange) []DiagMarker {
 	if !reExecTaskName.MatchString(stripped) {
 		markers = append(markers, diagMarkerSpan(r,
 			"EXECUTE TASK requires a task name. Use EXECUTE TASK <task_name>.", 4))
+	}
+
+	return markers
+}
+
+// ── validatePut ───────────────────────────────────────────────────────────────
+
+// validatePut validates a Snowflake PUT statement:
+//   - file://<path> source is mandatory; bare paths (without file://) should warn.
+//   - @<stage> destination is mandatory.
+//   - file:// must appear before @<stage> (positional order).
+//   - PARALLEL must be a positive integer between 1 and 99.
+//   - SOURCE_COMPRESSION must be one of the known compression types.
+//   - OVERWRITE must be TRUE or FALSE.
+//   - AUTO_COMPRESS must be TRUE or FALSE.
+func validatePut(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+
+	// 1. file:// source is mandatory.
+	if !reFileURIArg.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"PUT source path must use the file:// prefix (e.g. PUT file:///tmp/data.csv @mystage).", 4))
+		return markers
+	}
+
+	// 2. @<stage> destination is mandatory.
+	// Strip the PUT keyword so that identifiers that happen to contain "@" in
+	// comments do not cause false negatives.
+	afterKW := strings.TrimSpace(rePutKWStrip.ReplaceAllString(stripped, ""))
+	if !reStageRef.MatchString(afterKW) {
+		markers = append(markers, diagMarkerSpan(r,
+			"PUT requires a stage destination (e.g. @mystage or @~/path/).", 4))
+		return markers
+	}
+
+	// 3. Verify positional order: PUT file://<path> @<stage>.
+	if !rePutCorrectOrder.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"PUT source and destination are in the wrong order. Correct syntax: PUT file://<path> @<stage>.", 4))
+		return markers
+	}
+
+	// 4. PARALLEL must be 1–99.
+	if m := reParallelOption.FindStringSubmatch(stripped); m != nil {
+		n, err := strconv.Atoi(m[1])
+		if err != nil || n < 1 || n > 99 {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("PARALLEL must be a positive integer between 1 and 99, got '%s'.", m[1]), 4))
+		}
+	}
+
+	// 5. SOURCE_COMPRESSION must be a known compression type.
+	if m := rePutSourceComp.FindStringSubmatch(stripped); m != nil {
+		compType := strings.ToUpper(m[1])
+		if !slices.Contains(validPutCompressions, compType) {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("Invalid SOURCE_COMPRESSION '%s'. Valid values: AUTO_DETECT, GZIP, BZ2, BROTLI, ZSTD, DEFLATE, RAW_DEFLATE, NONE.", m[1]), 4))
+		}
+	}
+
+	// 6. OVERWRITE must be TRUE or FALSE.
+	if m := rePutOverwrite.FindStringSubmatch(stripped); m != nil {
+		if v := strings.ToUpper(m[1]); v != "TRUE" && v != "FALSE" {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("OVERWRITE must be TRUE or FALSE, got '%s'.", m[1]), 4))
+		}
+	}
+
+	// 7. AUTO_COMPRESS must be TRUE or FALSE.
+	if m := rePutAutoCompress.FindStringSubmatch(stripped); m != nil {
+		if v := strings.ToUpper(m[1]); v != "TRUE" && v != "FALSE" {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("AUTO_COMPRESS must be TRUE or FALSE, got '%s'.", m[1]), 4))
+		}
+	}
+
+	return markers
+}
+
+// ── validateGet ───────────────────────────────────────────────────────────────
+
+// validateGet validates a Snowflake GET statement:
+//   - @<stage> source is mandatory.
+//   - file://<path> destination is mandatory.
+//   - PARALLEL must be a positive integer between 1 and 99.
+func validateGet(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+
+	// 1. @<stage> source is mandatory (GET @stage …).
+	if !reGetStageArg.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"GET requires a stage source (e.g. GET @mystage file:///tmp/).", 4))
+		return markers
+	}
+
+	// 2. file:// destination is mandatory.
+	if !reFileURIArg.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"GET destination path must use the file:// prefix (e.g. GET @mystage file:///tmp/).", 4))
+		return markers
+	}
+
+	// 3. PARALLEL must be 1–99.
+	if m := reParallelOption.FindStringSubmatch(stripped); m != nil {
+		n, err := strconv.Atoi(m[1])
+		if err != nil || n < 1 || n > 99 {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("PARALLEL must be a positive integer between 1 and 99, got '%s'.", m[1]), 4))
+		}
+	}
+
+	return markers
+}
+
+// ── validateList ──────────────────────────────────────────────────────────────
+
+// validateList validates a Snowflake LIST (or LS alias) statement:
+//   - @<stage> argument is mandatory; bare LIST; should be flagged.
+func validateList(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+
+	if !reListStageArg.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"LIST (LS) requires a stage argument (e.g. LIST @mystage).", 4))
+	}
+
+	return markers
+}
+
+// ── validateRemove ────────────────────────────────────────────────────────────
+
+// validateRemove validates a Snowflake REMOVE (or RM alias) statement:
+//   - @<stage> argument is mandatory.
+func validateRemove(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+
+	if !reRemoveStageArg.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"REMOVE (RM) requires a stage argument (e.g. REMOVE @mystage).", 4))
 	}
 
 	return markers
