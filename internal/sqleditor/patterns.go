@@ -457,11 +457,6 @@ var (
 	// ── CREATE SHARE ─────────────────────────────────────────────────────────
 	reIsCreateShare    = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SHARE\b`)
 	reCreateShareName  = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SHARE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-	// reValidCreateShare checks that a share name (potentially multi-part) follows CREATE SHARE.
-	// The prefix check is done separately via sqlIdentPathHasDot.
-	reValidCreateShare = regexp.MustCompile(
-		`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SHARE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath)
-
 	// ── ALTER SHARE ────────────────────────────────────────────────────────────
 	reIsAlterShare          = regexp.MustCompile(`(?i)^\s*ALTER\s+SHARE\b`)
 	reAlterShareAddAccounts = regexp.MustCompile(`(?i)\bADD\s+ACCOUNTS\b`)
@@ -3208,18 +3203,15 @@ func validateCreateShare(parseText string, r StatementRange) []DiagMarker {
 		return markers
 	}
 
-	// 2. Share name is required — must match the preamble structure.
-	if !reValidCreateShare.MatchString(parseText) {
+	// 2. Share name is required; also used for the account-level prefix check.
+	m := reCreateShareName.FindStringSubmatch(parseText)
+	if m == nil {
 		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE SHARE statement.", 4))
 		return markers
 	}
-
-	// 3. Account-level: object name must not have a database or schema prefix.
-	if m := reCreateShareName.FindStringSubmatch(parseText); m != nil {
-		if sqlIdentPathHasDot(m[1]) {
-			markers = append(markers, diagMarkerSpan(r,
-				"Shares are account-level objects and cannot have a database or schema prefix.", 4))
-		}
+	if sqlIdentPathHasDot(m[1]) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Shares are account-level objects and cannot have a database or schema prefix.", 4))
 	}
 
 	// 4. Only COMMENT is a valid property for CREATE SHARE.
