@@ -161,16 +161,8 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 	// exists (and catch "schema was dropped" errors).
 	scriptEverCreatedSchemasByDB := make(map[string]struct{})
 
-	scriptHasActiveDB        := false
-	scriptHasActiveSchema    := false
-	scriptHasActiveRole      := false
-	scriptHasActiveWarehouse := false
-
-	// Silence "declared and not used" — these flags are reserved for future
-	// validators that need to know whether a role/warehouse was set earlier
-	// in the script (e.g. CREATE TASK warehouse cross-check).
-	_ = scriptHasActiveRole
-	_ = scriptHasActiveWarehouse
+	scriptHasActiveDB     := false
+	scriptHasActiveSchema := false
 
 	for _, r := range req.StmtRanges {
 		raw := sqlStmt(req.SQL, r)
@@ -217,14 +209,6 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			if first != "DATABASE" && first != "SCHEMA" && first != "ROLE" && first != "WAREHOUSE" {
 				scriptHasActiveDB = true
 			}
-		}
-
-		// Track USE ROLE / USE WAREHOUSE for downstream context awareness.
-		if reIsUseRole.MatchString(raw) {
-			scriptHasActiveRole = true
-		}
-		if reIsUseWarehouse.MatchString(raw) {
-			scriptHasActiveWarehouse = true
 		}
 
 		hasGlobalDB     := len(req.KnownDatabases) > 0 || anyHasDB(req.ResolvedRefs)

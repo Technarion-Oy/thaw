@@ -75,6 +75,12 @@ func TestValidateSnowflakePatterns_UseRole(t *testing.T) {
 			expectWarning: true,
 			expectedMatch: "requires a role name",
 		},
+		{
+			name:          "USE ROLE with only line comment — no role name",
+			sql:           "USE ROLE -- my_role",
+			expectWarning: true,
+			expectedMatch: "requires a role name",
+		},
 	})
 }
 

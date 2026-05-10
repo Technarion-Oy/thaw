@@ -1572,6 +1572,13 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
+		// ── Other USE variants (DATABASE, SCHEMA, bare USE <name>) ───────
+		// Valid session commands that don't need pattern validation here;
+		// existence checks are handled separately in ValidateTablesExist.
+		if firstTok == "USE" {
+			continue
+		}
+
 		// ── Skip Snowflake false-positive statements ──────────────────────
 		// (statements with Snowflake-specific syntax that the parser can't
 		// handle; we emit no error for these)
