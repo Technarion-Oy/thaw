@@ -2513,17 +2513,27 @@ func TestValidateSnowflakePatterns_CreateExternalVolume(t *testing.T) {
 		{
 			"AZURE location with invalid ENCRYPTION TYPE",
 			"CREATE EXTERNAL VOLUME az_vol STORAGE_LOCATIONS = (( NAME = 'az' STORAGE_PROVIDER = 'AZURE' STORAGE_BASE_URL = 'azure://account.blob.core.windows.net/container/' AZURE_TENANT_ID = 'tid' ENCRYPTION = (TYPE = 'AZURE_CSE') ))",
-			[]string{"Invalid ENCRYPTION TYPE 'AZURE_CSE'"},
+			[]string{"AZURE storage locations do not support the ENCRYPTION parameter"},
 		},
 		{
 			"AZURE location with AWS encryption type",
 			"CREATE EXTERNAL VOLUME az_vol STORAGE_LOCATIONS = (( NAME = 'az' STORAGE_PROVIDER = 'AZURE' STORAGE_BASE_URL = 'azure://account.blob.core.windows.net/container/' AZURE_TENANT_ID = 'tid' ENCRYPTION = (TYPE = 'AWS_SSE_S3') ))",
-			[]string{"ENCRYPTION TYPE 'AWS_SSE_S3' is only valid for S3"},
+			[]string{"AZURE storage locations do not support the ENCRYPTION parameter"},
+		},
+		{
+			"AZURE location with ENCRYPTION TYPE = NONE",
+			"CREATE EXTERNAL VOLUME az_vol STORAGE_LOCATIONS = (( NAME = 'az' STORAGE_PROVIDER = 'AZURE' STORAGE_BASE_URL = 'azure://account.blob.core.windows.net/container/' AZURE_TENANT_ID = 'tid' ENCRYPTION = (TYPE = 'NONE') ))",
+			[]string{"AZURE storage locations do not support the ENCRYPTION parameter"},
+		},
+		{
+			"Missing NAME in location block",
+			"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ))",
+			[]string{"Each storage location requires a NAME attribute"},
 		},
 		{
 			"Empty STORAGE_LOCATIONS block",
 			"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = ()",
-			[]string{"Each storage location requires STORAGE_PROVIDER"},
+			[]string{"STORAGE_LOCATIONS must contain at least one storage location block"},
 		},
 		{
 			"OR REPLACE and IF NOT EXISTS returns early without extra markers",
