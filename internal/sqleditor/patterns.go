@@ -469,6 +469,13 @@ var (
 	// the word RESTRICT somewhere other than the trailing position.
 	reAlterShareRestrictTrailing = regexp.MustCompile(`(?i)\bRESTRICT\s*$`)
 
+	// ── CREATE EVENT TABLE ──────────────────────────────────────────────────
+	reIsCreateEventTable   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EVENT\s+TABLE\b`)
+	reCreateEventTableName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EVENT\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
+	// reEventTableColumnList detects a parenthesised column list after the table name.
+	// Event tables have a fixed schema and do not allow user-defined columns.
+	reEventTableColumnList = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EVENT\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath + `\s*\(`)
+
 	// ── CREATE EXTERNAL VOLUME ────────────────────────────────────────────────
 	reIsCreateExternalVolume   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EXTERNAL\s+VOLUME\b`)
 	reCreateExternalVolumeName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EXTERNAL\s+VOLUME\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
@@ -1516,6 +1523,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// ── ALTER SHARE ──────────────────────────────────────────────────
 		if reIsAlterShare.MatchString(parseText) {
 			markers = append(markers, validateAlterShare(parseText, r)...)
+			continue
+		}
+
+		// ── CREATE EVENT TABLE ───────────────────────────────────────────
+		if reIsCreateEventTable.MatchString(parseText) {
+			markers = append(markers, validateCreateEventTable(parseText, r)...)
 			continue
 		}
 
@@ -3250,6 +3263,82 @@ func validateRemove(parseText string, r StatementRange) []DiagMarker {
 		markers = append(markers, diagMarkerSpan(r,
 			"REMOVE (RM) requires a stage argument (e.g. REMOVE @mystage).", 4))
 	}
+
+	return markers
+}
+
+// ── validateCreateEventTable ──────────────────────────────────────────────────
+
+// validateCreateEventTable checks structural requirements for
+// CREATE [OR REPLACE] EVENT TABLE statements:
+//   - OR REPLACE and IF NOT EXISTS are mutually exclusive.
+//   - Event tables have a fixed schema — column definitions are not allowed.
+//   - CLUSTER BY is not supported.
+//   - DATA_RETENTION_TIME_IN_DAYS must be a non-negative integer.
+//   - MAX_DATA_EXTENSION_TIME_IN_DAYS must be a non-negative integer.
+//   - CHANGE_TRACKING must be TRUE or FALSE.
+//   - DEFAULT_DDL_COLLATION must be a string value.
+//   - COMMENT must be a string value.
+//   - COPY GRANTS is supported.
+func validateCreateEventTable(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// Strip string literals so keywords inside COMMENT values don't trigger
+	// false positive checks.
+	stripped := reStripStringLiterals.ReplaceAllString(parseText, "''")
+
+	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
+	if reOrReplace.MatchString(stripped) && reIfNotExists.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE EVENT TABLE statement.", 4))
+		return markers
+	}
+
+	// 2. Event table name is required.
+	m := reCreateEventTableName.FindStringSubmatch(parseText)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE EVENT TABLE statement.", 4))
+		return markers
+	}
+
+	// 3. Column definitions are not allowed — event tables have a fixed schema.
+	if reEventTableColumnList.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Event tables have a fixed schema and do not support column definitions.", 4))
+	}
+
+	// 4. CLUSTER BY is not supported for event tables.
+	if rePatternClusterBy.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"CLUSTER BY is not supported for EVENT TABLE.", 4))
+	}
+
+	// 5. Validate property values using regex-based checks on stripped text.
+	reEvtRetention := regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\s*=\s*(-?\w+)`)
+	if m := reEvtRetention.FindStringSubmatch(stripped); m != nil {
+		if n, err := strconv.Atoi(m[1]); err != nil || n < 0 {
+			markers = append(markers, diagMarkerSpan(r,
+				"DATA_RETENTION_TIME_IN_DAYS must be a non-negative integer.", 4))
+		}
+	}
+	reEvtExtension := regexp.MustCompile(`(?i)\bMAX_DATA_EXTENSION_TIME_IN_DAYS\s*=\s*(-?\w+)`)
+	if m := reEvtExtension.FindStringSubmatch(stripped); m != nil {
+		if n, err := strconv.Atoi(m[1]); err != nil || n < 0 {
+			markers = append(markers, diagMarkerSpan(r,
+				"MAX_DATA_EXTENSION_TIME_IN_DAYS must be a non-negative integer.", 4))
+		}
+	}
+	reEvtChangeTracking := regexp.MustCompile(`(?i)\bCHANGE_TRACKING\s*=\s*(\w+)`)
+	if m := reEvtChangeTracking.FindStringSubmatch(stripped); m != nil {
+		if !isBool(m[1]) {
+			markers = append(markers, diagMarkerSpan(r,
+				"CHANGE_TRACKING must be TRUE or FALSE.", 4))
+		}
+	}
+
+	// 6. Validate allowed properties. Use stripParenContents to avoid
+	// false positives from keys inside TAG(...) or other paren blocks.
+	validateProperties(stripParenContents(stripped), `DATA_RETENTION_TIME_IN_DAYS|MAX_DATA_EXTENSION_TIME_IN_DAYS|CHANGE_TRACKING|DEFAULT_DDL_COLLATION|COMMENT|COPY|TAG`, r, &markers)
 
 	return markers
 }
