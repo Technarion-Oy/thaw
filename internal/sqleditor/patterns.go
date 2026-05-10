@@ -40,7 +40,7 @@ var (
 			`|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b` +
 			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:STAGE` +
 			`|SHARE` +
-			`|NETWORK|ROW\s+ACCESS` +
+			`|ROW\s+ACCESS` +
 			`|SESSION|PASSWORD|REPLICATION|FAILOVER|APPLICATION)\b` +
 			`|ALTER\s+(?:TABLE|VIEW|STREAM|DATABASE|STAGE|PIPE|PROCEDURE|FUNCTION` +
 			`|ALERT|SHARE|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK` +
@@ -303,6 +303,15 @@ var (
 
 	// ── CREATE MASKING POLICY ─────────────────────────────────────────────────
 	reIsCreateMaskingPolicy = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?MASKING\s+POLICY\b`)
+
+	// ── CREATE NETWORK POLICY ─────────────────────────────────────────────────
+	reIsCreateNetworkPolicy = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?NETWORK\s+POLICY\b`)
+	reNetworkPolicyIPList   = regexp.MustCompile(`(?i)\b(ALLOWED_IP_LIST|BLOCKED_IP_LIST)\s*=\s*\(([^)]*)\)`)
+	networkPolicyProps      = strings.Join([]string{
+		`ALLOWED_IP_LIST`, `BLOCKED_IP_LIST`,
+		`ALLOWED_NETWORK_RULE_LIST`, `BLOCKED_NETWORK_RULE_LIST`,
+		`COMMENT`,
+	}, "|")
 
 	// ── GRANT ─────────────────────────────────────────────────────────────────
 	reIsGrantRole = regexp.MustCompile(`(?i)^\s*GRANT\s+ROLE\b`)
@@ -1129,6 +1138,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
+		// ── Preamble: CREATE NETWORK POLICY ──────────────────────────────
+		if reIsCreateNetworkPolicy.MatchString(parseText) {
+			markers = append(markers, validateCreateNetworkPolicy(parseText, r)...)
+			continue
+		}
+
 		// ── Preamble: CREATE STAGE ───────────────────────────────────────
 		// stripParenContents removes nested KEY=VALUE pairs inside blocks
 		// like FILE_FORMAT=(...), ENCRYPTION=(...), DIRECTORY=(...) before
@@ -1578,6 +1593,119 @@ func validateCreateAlert(parseText string, r StatementRange) []DiagMarker {
 	validateProperties(preamble, alertProps, r, &markers)
 
 	return markers
+}
+
+func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// 1. Account-level: name must not have a database or schema prefix.
+	if m := regexp.MustCompile(`(?i)POLICY\s+(` + _identPath + `)`).FindStringSubmatch(parseText); m != nil {
+		if strings.Contains(m[1], ".") {
+			markers = append(markers, diagMarkerSpan(r, "Network policies are account-level objects and cannot have a database or schema prefix.", 4))
+		}
+	}
+
+	// 2. At least one of ALLOWED_IP_LIST or ALLOWED_NETWORK_RULE_LIST must be present.
+	hasAllowedIP := regexp.MustCompile(`(?i)\bALLOWED_IP_LIST\s*=`).MatchString(parseText)
+	hasAllowedRules := regexp.MustCompile(`(?i)\bALLOWED_NETWORK_RULE_LIST\s*=`).MatchString(parseText)
+	if !hasAllowedIP && !hasAllowedRules {
+		markers = append(markers, diagMarkerSpan(r, "Network policy has no effect: at least one of ALLOWED_IP_LIST or ALLOWED_NETWORK_RULE_LIST must be specified.", 4))
+	}
+
+	// 3. Validate IP lists and collect IPs for overlap check.
+	var allowedIPs []string
+	var blockedIPs []string
+	for _, m := range reNetworkPolicyIPList.FindAllStringSubmatch(parseText, -1) {
+		listKind := strings.ToUpper(m[1])
+		listContent := m[2]
+		for _, rawEntry := range strings.Split(listContent, ",") {
+			entry := strings.TrimSpace(rawEntry)
+			if entry == "" {
+				continue
+			}
+			// Strip surrounding single quotes.
+			if len(entry) >= 2 && entry[0] == '\'' && entry[len(entry)-1] == '\'' {
+				entry = strings.TrimSpace(entry[1 : len(entry)-1])
+			}
+			if entry == "" {
+				continue
+			}
+			if !isValidIPv4CIDR(entry) {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("Invalid IP address or CIDR '%s' in %s. Expected IPv4 format: x.x.x.x or x.x.x.x/n (0 ≤ n ≤ 32).", entry, listKind),
+					4))
+				continue
+			}
+			if listKind == "ALLOWED_IP_LIST" {
+				allowedIPs = append(allowedIPs, entry)
+			} else {
+				blockedIPs = append(blockedIPs, entry)
+			}
+		}
+	}
+
+	// 4. Warn if the same IP/CIDR appears in both ALLOWED_IP_LIST and BLOCKED_IP_LIST.
+	if len(allowedIPs) > 0 && len(blockedIPs) > 0 {
+		allowedSet := make(map[string]bool, len(allowedIPs))
+		for _, ip := range allowedIPs {
+			allowedSet[ip] = true
+		}
+		for _, ip := range blockedIPs {
+			if allowedSet[ip] {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("IP '%s' appears in both ALLOWED_IP_LIST and BLOCKED_IP_LIST.", ip),
+					4))
+			}
+		}
+	}
+
+	// 5. Validate top-level property keys (strip list contents to avoid false positives).
+	validateProperties(stripParenContents(parseText), networkPolicyProps, r, &markers)
+
+	return markers
+}
+
+// isValidIPv4CIDR reports whether s is a valid IPv4 address with an optional
+// CIDR prefix (e.g. "192.168.0.0/24" or "10.0.0.1").
+// Octets must be 0–255; prefix, if present, must be 0–32.
+func isValidIPv4CIDR(s string) bool {
+	parts := strings.SplitN(s, "/", 2)
+	octs := strings.Split(parts[0], ".")
+	if len(octs) != 4 {
+		return false
+	}
+	for _, o := range octs {
+		if len(o) == 0 || len(o) > 3 {
+			return false
+		}
+		n := 0
+		for _, c := range o {
+			if c < '0' || c > '9' {
+				return false
+			}
+			n = n*10 + int(c-'0')
+		}
+		if n > 255 {
+			return false
+		}
+	}
+	if len(parts) == 2 {
+		prefix := parts[1]
+		if len(prefix) == 0 || len(prefix) > 2 {
+			return false
+		}
+		n := 0
+		for _, c := range prefix {
+			if c < '0' || c > '9' {
+				return false
+			}
+			n = n*10 + int(c-'0')
+		}
+		if n > 32 {
+			return false
+		}
+	}
+	return true
 }
 
 func validateCopyInto(parseText string, r StatementRange) []DiagMarker {

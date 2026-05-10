@@ -166,6 +166,17 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"ALTER FILE FORMAT my_fmt SET COMMENT = 'new comment'",
 		"DROP FILE FORMAT my_fmt",
 		"DROP FILE FORMAT IF EXISTS my_fmt",
+		// Network Policies
+		"CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('192.168.1.0/24')",
+		"CREATE OR REPLACE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('10.0.0.0/8', '192.168.1.1/32')",
+		"CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ()",
+		"CREATE NETWORK POLICY my_policy ALLOWED_NETWORK_RULE_LIST = (my_rule)",
+		"CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('10.0.0.1/32') BLOCKED_IP_LIST = ('192.168.0.0/16')",
+		"CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('0.0.0.0/0')",
+		"CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('10.0.0.1')",
+		"CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('10.0.0.0/8') ALLOWED_NETWORK_RULE_LIST = (rule1, rule2) COMMENT = 'my policy'",
+		"CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = () BLOCKED_IP_LIST = ()",
+		"CREATE NETWORK POLICY my_policy ALLOWED_NETWORK_RULE_LIST = (rule1) BLOCKED_NETWORK_RULE_LIST = (rule2)",
 	}
 
 	for _, sql := range validQueries {
@@ -292,6 +303,17 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"External Table partition missing parens", "CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) PARTITION BY c1 WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = CSV)", "requires a parenthesised column list"},
 		{"External Table partition unclosed parens", "CREATE EXTERNAL TABLE et (c1 int as (value:c1::int)) PARTITION BY (c1 WITH LOCATION = @s1/path/ FILE_FORMAT = (TYPE = CSV)", "Unclosed parenthesised column list in PARTITION BY clause"},
 		{"External Table empty columns", "CREATE EXTERNAL TABLE et () WITH LOCATION = @s/p/ FILE_FORMAT = (TYPE = CSV)", "Column list must not be empty"},
+
+		// Invalid Network Policies
+		{"Network Policy with prefix", "CREATE NETWORK POLICY MY_DB.PUBLIC.bad_policy ALLOWED_IP_LIST = ('10.0.0.0/8')", "account-level"},
+		{"Network Policy no allowed list (only blocked)", "CREATE NETWORK POLICY my_policy BLOCKED_IP_LIST = ('10.0.0.0/8')", "no effect"},
+		{"Network Policy no properties", "CREATE NETWORK POLICY my_policy", "no effect"},
+		{"Network Policy only comment", "CREATE NETWORK POLICY my_policy COMMENT = 'test'", "no effect"},
+		{"Network Policy invalid IP", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('not_an_ip')", "Invalid IP address or CIDR"},
+		{"Network Policy invalid CIDR prefix", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('192.168.0.1/33')", "Invalid IP address or CIDR"},
+		{"Network Policy invalid octet", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('256.0.0.1/24')", "Invalid IP address or CIDR"},
+		{"Network Policy IP in both lists", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('10.0.0.1/32') BLOCKED_IP_LIST = ('10.0.0.1/32')", "appears in both"},
+		{"Network Policy unknown property", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('10.0.0.0/8') INVALID_PROP = TRUE", "Unexpected property 'INVALID_PROP'"},
 	}
 
 	for _, tt := range tests {
