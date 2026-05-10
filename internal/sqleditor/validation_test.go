@@ -2491,6 +2491,31 @@ func TestValidateSnowflakePatterns_CreateExternalVolume(t *testing.T) {
 			"CREATE EXTERNAL VOLUME mydb.myschema.my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ))",
 			[]string{"account-level objects and cannot have a database or schema prefix"},
 		},
+		{
+			"OR REPLACE and IF NOT EXISTS conflict",
+			"CREATE OR REPLACE EXTERNAL VOLUME IF NOT EXISTS my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ))",
+			[]string{"Conflict between OR REPLACE and IF NOT EXISTS"},
+		},
+		{
+			"Cross-provider: GCS_SSE_KMS on S3 location when GCS also present",
+			"CREATE EXTERNAL VOLUME v STORAGE_LOCATIONS = (( NAME = 's3' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ENCRYPTION = (TYPE = 'GCS_SSE_KMS') ) ( NAME = 'gcs' STORAGE_PROVIDER = 'GCS' STORAGE_BASE_URL = 'gcs://b/' ))",
+			[]string{"ENCRYPTION TYPE 'GCS_SSE_KMS' is only valid for GCS"},
+		},
+		{
+			"Cross-provider: STORAGE_AWS_EXTERNAL_ID on GCS location when S3 also present",
+			"CREATE EXTERNAL VOLUME v STORAGE_LOCATIONS = (( NAME = 's3' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ) ( NAME = 'gcs' STORAGE_PROVIDER = 'GCS' STORAGE_BASE_URL = 'gcs://b/' STORAGE_AWS_EXTERNAL_ID = 'id' ))",
+			[]string{"STORAGE_AWS_EXTERNAL_ID is only valid for S3"},
+		},
+		{
+			"AZURE location with invalid ENCRYPTION TYPE",
+			"CREATE EXTERNAL VOLUME az_vol STORAGE_LOCATIONS = (( NAME = 'az' STORAGE_PROVIDER = 'AZURE' STORAGE_BASE_URL = 'azure://account.blob.core.windows.net/container/' AZURE_TENANT_ID = 'tid' ENCRYPTION = (TYPE = 'AZURE_CSE') ))",
+			[]string{"Invalid ENCRYPTION TYPE 'AZURE_CSE'"},
+		},
+		{
+			"AZURE location with AWS encryption type",
+			"CREATE EXTERNAL VOLUME az_vol STORAGE_LOCATIONS = (( NAME = 'az' STORAGE_PROVIDER = 'AZURE' STORAGE_BASE_URL = 'azure://account.blob.core.windows.net/container/' AZURE_TENANT_ID = 'tid' ENCRYPTION = (TYPE = 'AWS_SSE_S3') ))",
+			[]string{"ENCRYPTION TYPE 'AWS_SSE_S3' is only valid for S3"},
+		},
 	}
 
 	for _, tt := range invalidCases {
