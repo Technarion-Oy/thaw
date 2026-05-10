@@ -41,7 +41,6 @@ var (
 			`|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b` +
 			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:STAGE` +
 			`|SHARE` +
-			`|ROW\s+ACCESS` +
 			`|SESSION|PASSWORD|REPLICATION|FAILOVER|APPLICATION)\b` +
 			`|ALTER\s+(?:TABLE|VIEW|STREAM|DATABASE|STAGE|PIPE|PROCEDURE|FUNCTION` +
 			`|ALERT|SHARE|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK` +
@@ -316,6 +315,18 @@ var (
 		`ALLOWED_NETWORK_RULE_LIST`, `BLOCKED_NETWORK_RULE_LIST`,
 		`COMMENT`,
 	}, "|")
+
+	// ── CREATE ROW ACCESS POLICY ──────────────────────────────────────────────
+	reIsCreateRowAccessPolicy = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?ROW\s+ACCESS\s+POLICY\b`)
+	// reRowAccessPolicyAS matches the mandatory AS (...) parameter list.
+	// The capture group holds the raw parameter list content; one level of
+	// nested parens is supported to accommodate types like NUMBER(10,2).
+	reRowAccessPolicyParamList = regexp.MustCompile(`(?i)\bAS\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)`)
+	reRowAccessPolicyReturns = regexp.MustCompile(`(?i)\bRETURNS\s+BOOLEAN\b`)
+	// reRowAccessPolicyArrow requires the -> to appear after RETURNS BOOLEAN,
+	// preventing a bare -> elsewhere in the SQL from satisfying the check.
+	reRowAccessPolicyArrow = regexp.MustCompile(`(?i)\bRETURNS\s+BOOLEAN\s*->`)
+	reRowAccessPolicyASOpen    = regexp.MustCompile(`(?i)\bAS\s*\(`)
 
 	// ── GRANT ─────────────────────────────────────────────────────────────────
 	reIsGrantRole = regexp.MustCompile(`(?i)^\s*GRANT\s+ROLE\b`)
@@ -1148,6 +1159,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
+		// ── Preamble: CREATE ROW ACCESS POLICY ───────────────────────────
+		if reIsCreateRowAccessPolicy.MatchString(parseText) {
+			markers = append(markers, validateCreateRowAccessPolicy(parseText, r)...)
+			continue
+		}
+
 		// ── Preamble: CREATE STAGE ───────────────────────────────────────
 		// stripParenContents removes nested KEY=VALUE pairs inside blocks
 		// like FILE_FORMAT=(...), ENCRYPTION=(...), DIRECTORY=(...) before
@@ -1726,6 +1743,97 @@ func sqlIdentPathHasDot(s string) bool {
 		}
 	}
 	return false
+}
+
+// validateCreateRowAccessPolicy checks structural requirements for a
+// CREATE ROW ACCESS POLICY statement.
+func validateCreateRowAccessPolicy(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
+	// Restrict the check to the preamble before AS (...) so that an IF in
+	// the policy body expression is not mistaken for the DDL modifier.
+	asIdx := reRowAccessPolicyASOpen.FindStringIndex(parseText)
+	preamble := parseText
+	if asIdx != nil {
+		preamble = parseText[:asIdx[0]]
+	}
+	if reOrReplace.MatchString(preamble) && reIfNotExists.MatchString(preamble) {
+		markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE ROW ACCESS POLICY statement.", 4))
+		return markers
+	}
+
+	// 2. Mandatory AS (<arg_name> <arg_type> [, ...]) parameter list.
+	paramMatch := reRowAccessPolicyParamList.FindStringSubmatch(parseText)
+	if paramMatch == nil {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS (<arg_name> <arg_type> [, ...]) parameter list in CREATE ROW ACCESS POLICY.", 4))
+	} else {
+		paramContent := strings.TrimSpace(paramMatch[1])
+		if paramContent == "" {
+			markers = append(markers, diagMarkerSpan(r, "Row access policy parameter list must declare at least one argument.", 4))
+		} else {
+			// Validate each parameter's declared data type.
+			validTypes := make(map[string]bool)
+			for _, dt := range sf.AllDataTypes() {
+				validTypes[strings.ToUpper(dt.Name)] = true
+			}
+			for _, param := range splitCommaRespectingParens(paramContent) {
+				param = strings.TrimSpace(param)
+				if param == "" {
+					continue
+				}
+				fields := strings.Fields(param)
+				if len(fields) >= 2 {
+					rawType := fields[1]
+					// Strip optional precision/scale parens: VARCHAR(256) → VARCHAR.
+					if idx := strings.Index(rawType, "("); idx != -1 {
+						rawType = rawType[:idx]
+					}
+					typeName := strings.ToUpper(rawType)
+					if !validTypes[typeName] {
+						markers = append(markers, diagMarkerSpan(r,
+							fmt.Sprintf("Unknown data type '%s' in row access policy parameter.", typeName), 4))
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Mandatory RETURNS BOOLEAN clause.
+	if !reRowAccessPolicyReturns.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS BOOLEAN clause in CREATE ROW ACCESS POLICY.", 4))
+	}
+
+	// 4. Mandatory -> separator between signature and body.
+	if !reRowAccessPolicyArrow.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory '->' separator between signature and body in CREATE ROW ACCESS POLICY.", 4))
+	}
+
+	return markers
+}
+
+// splitCommaRespectingParens splits s by commas that are not inside
+// parentheses.  This correctly separates parameter declarations like
+// "a VARCHAR, b NUMBER(10,2)" into ["a VARCHAR", " b NUMBER(10,2)"].
+func splitCommaRespectingParens(s string) []string {
+	var parts []string
+	depth := 0
+	start := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				parts = append(parts, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	parts = append(parts, s[start:])
+	return parts
 }
 
 func validateCopyInto(parseText string, r StatementRange) []DiagMarker {

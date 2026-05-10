@@ -177,6 +177,15 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE NETWORK POLICY my_policy ALLOWED_NETWORK_RULE_LIST = (rule1) BLOCKED_NETWORK_RULE_LIST = (rule2)",
 		// Quoted policy name whose inner text contains a dot — must not trigger the prefix warning.
 		`CREATE NETWORK POLICY "my.policy" ALLOWED_IP_LIST = ('10.0.0.0/8')`,
+		// Row Access Policies
+		"CREATE ROW ACCESS POLICY my_rap AS (val VARCHAR) RETURNS BOOLEAN -> val = current_user()",
+		"CREATE OR REPLACE ROW ACCESS POLICY my_rap AS (n NUMBER) RETURNS BOOLEAN -> n > 0",
+		"CREATE ROW ACCESS POLICY IF NOT EXISTS my_rap AS (val VARCHAR) RETURNS BOOLEAN -> TRUE",
+		"CREATE ROW ACCESS POLICY my_rap AS (a VARCHAR, b NUMBER) RETURNS BOOLEAN -> a = 'x' AND b > 0",
+		"CREATE ROW ACCESS POLICY my_rap AS (val VARCHAR(256)) RETURNS BOOLEAN -> val = 'admin'",
+		"CREATE ROW ACCESS POLICY my_rap AS (n NUMBER(10,2)) RETURNS BOOLEAN -> n > 0",
+		"CREATE ROW ACCESS POLICY my_rap AS (val VARCHAR) RETURNS BOOLEAN -> CASE WHEN val = 'admin' THEN TRUE ELSE FALSE END",
+		"CREATE ROW ACCESS POLICY my_rap AS (val VARCHAR) RETURNS BOOLEAN -> val = current_user() COMMENT = 'my comment'",
 	}
 
 	for _, sql := range validQueries {
@@ -264,6 +273,14 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		// Other syntax
 		{"Grant role to table", "GRANT ROLE my_role TO TABLE my_table", "Unexpected syntax"},
 		{"Masking policy missing returns", "CREATE MASKING POLICY bad_mask AS (val string) -> CASE WHEN 1=1 THEN val END", "Missing RETURNS clause"},
+
+		// Invalid Row Access Policy
+		{"RAP OR REPLACE with IF NOT EXISTS", "CREATE OR REPLACE ROW ACCESS POLICY IF NOT EXISTS my_rap AS (val VARCHAR) RETURNS BOOLEAN -> TRUE", "Conflict between OR REPLACE and IF NOT EXISTS"},
+		{"RAP missing AS param list", "CREATE ROW ACCESS POLICY my_rap RETURNS BOOLEAN -> TRUE", "Missing mandatory AS"},
+		{"RAP empty param list", "CREATE ROW ACCESS POLICY my_rap AS () RETURNS BOOLEAN -> TRUE", "at least one argument"},
+		{"RAP missing RETURNS BOOLEAN", "CREATE ROW ACCESS POLICY my_rap AS (val VARCHAR) -> TRUE", "Missing mandatory RETURNS BOOLEAN"},
+		{"RAP missing arrow", "CREATE ROW ACCESS POLICY my_rap AS (val VARCHAR) RETURNS BOOLEAN CASE WHEN 1=1 THEN TRUE END", "Missing mandatory '->'"},
+		{"RAP invalid param data type", "CREATE ROW ACCESS POLICY my_rap AS (val NOTATYPE) RETURNS BOOLEAN -> TRUE", "Unknown data type 'NOTATYPE'"},
 
 		// Invalid Pipe
 		{"Pipe missing AS", "CREATE PIPE my_pipe", "Missing mandatory AS COPY INTO"},
