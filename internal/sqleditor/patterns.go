@@ -432,15 +432,18 @@ var (
 	reIsGet          = regexp.MustCompile(`(?i)^\s*GET\b`)
 	reIsList         = regexp.MustCompile(`(?i)^\s*(?:LIST|LS)\b`)
 	reIsRemove       = regexp.MustCompile(`(?i)^\s*(?:REMOVE|RM)\b`)
-	rePutFileSource  = regexp.MustCompile(`(?i)\bfile://\S+`)
+	// reFileURIArg matches a file:// URI argument (shared by PUT and GET).
+	reFileURIArg     = regexp.MustCompile(`(?i)\bfile://\S+`)
+	rePutKWStrip     = regexp.MustCompile(`(?i)^PUT\s+`)
 	rePutStageRef    = regexp.MustCompile(`@\S+`)
-	rePutParallel    = regexp.MustCompile(`(?i)\bPARALLEL\s*=\s*(\d+)`)
-	rePutSourceComp  = regexp.MustCompile(`(?i)\bSOURCE_COMPRESSION\s*=\s*(\w+)`)
-	rePutOverwrite   = regexp.MustCompile(`(?i)\bOVERWRITE\s*=\s*(\w+)`)
+	// rePutCorrectOrder validates that PUT has file:// before @stage.
+	rePutCorrectOrder = regexp.MustCompile(`(?i)^\s*PUT\s+file://\S+\s+@\S+`)
+	rePutSourceComp   = regexp.MustCompile(`(?i)\bSOURCE_COMPRESSION\s*=\s*(\w+)`)
+	rePutOverwrite    = regexp.MustCompile(`(?i)\bOVERWRITE\s*=\s*(\w+)`)
 	rePutAutoCompress = regexp.MustCompile(`(?i)\bAUTO_COMPRESS\s*=\s*(\w+)`)
+	// reParallelOption matches a PARALLEL = <n> option (shared by PUT and GET).
+	reParallelOption = regexp.MustCompile(`(?i)\bPARALLEL\s*=\s*(\d+)`)
 	reGetStageArg    = regexp.MustCompile(`(?i)^\s*GET\s+@\S+`)
-	reGetFileDest    = regexp.MustCompile(`(?i)\bfile://\S+`)
-	reGetParallel    = regexp.MustCompile(`(?i)\bPARALLEL\s*=\s*(\d+)`)
 	reListStageArg   = regexp.MustCompile(`(?i)^\s*(?:LIST|LS)\s+@\S+`)
 	reRemoveStageArg = regexp.MustCompile(`(?i)^\s*(?:REMOVE|RM)\s+@\S+`)
 
@@ -3012,6 +3015,7 @@ func validateExecuteTask(parseText string, r StatementRange) []DiagMarker {
 // validatePut validates a Snowflake PUT statement:
 //   - file://<path> source is mandatory; bare paths (without file://) should warn.
 //   - @<stage> destination is mandatory.
+//   - file:// must appear before @<stage> (positional order).
 //   - PARALLEL must be a positive integer between 1 and 99.
 //   - SOURCE_COMPRESSION must be one of the known compression types.
 //   - OVERWRITE must be TRUE or FALSE.
@@ -3022,21 +3026,31 @@ func validatePut(parseText string, r StatementRange) []DiagMarker {
 	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
 
 	// 1. file:// source is mandatory.
-	if !rePutFileSource.MatchString(stripped) {
+	if !reFileURIArg.MatchString(stripped) {
 		markers = append(markers, diagMarkerSpan(r,
 			"PUT source path must use the file:// prefix (e.g. PUT file:///tmp/data.csv @mystage).", 4))
+		return markers
 	}
 
 	// 2. @<stage> destination is mandatory.
-	// Strip the PUT keyword to avoid false positives from identifier names.
-	afterKW := strings.TrimSpace(regexp.MustCompile(`(?i)^PUT\s+`).ReplaceAllString(stripped, ""))
+	// Strip the PUT keyword so that identifiers that happen to contain "@" in
+	// comments do not cause false negatives.
+	afterKW := strings.TrimSpace(rePutKWStrip.ReplaceAllString(stripped, ""))
 	if !rePutStageRef.MatchString(afterKW) {
 		markers = append(markers, diagMarkerSpan(r,
 			"PUT requires a stage destination (e.g. @mystage or @~/path/).", 4))
+		return markers
 	}
 
-	// 3. PARALLEL must be 1–99.
-	if m := rePutParallel.FindStringSubmatch(stripped); m != nil {
+	// 3. Verify positional order: PUT file://<path> @<stage>.
+	if !rePutCorrectOrder.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"PUT source and destination are in the wrong order. Correct syntax: PUT file://<path> @<stage>.", 4))
+		return markers
+	}
+
+	// 4. PARALLEL must be 1–99.
+	if m := reParallelOption.FindStringSubmatch(stripped); m != nil {
 		n, err := strconv.Atoi(m[1])
 		if err != nil || n < 1 || n > 99 {
 			markers = append(markers, diagMarkerSpan(r,
@@ -3044,7 +3058,7 @@ func validatePut(parseText string, r StatementRange) []DiagMarker {
 		}
 	}
 
-	// 4. SOURCE_COMPRESSION must be a known compression type.
+	// 5. SOURCE_COMPRESSION must be a known compression type.
 	validCompressions := []string{"AUTO_DETECT", "GZIP", "BZ2", "BROTLI", "ZSTD", "DEFLATE", "RAW_DEFLATE", "NONE"}
 	if m := rePutSourceComp.FindStringSubmatch(stripped); m != nil {
 		compType := strings.ToUpper(m[1])
@@ -3054,7 +3068,7 @@ func validatePut(parseText string, r StatementRange) []DiagMarker {
 		}
 	}
 
-	// 5. OVERWRITE must be TRUE or FALSE.
+	// 6. OVERWRITE must be TRUE or FALSE.
 	if m := rePutOverwrite.FindStringSubmatch(stripped); m != nil {
 		if v := strings.ToUpper(m[1]); v != "TRUE" && v != "FALSE" {
 			markers = append(markers, diagMarkerSpan(r,
@@ -3062,7 +3076,7 @@ func validatePut(parseText string, r StatementRange) []DiagMarker {
 		}
 	}
 
-	// 6. AUTO_COMPRESS must be TRUE or FALSE.
+	// 7. AUTO_COMPRESS must be TRUE or FALSE.
 	if m := rePutAutoCompress.FindStringSubmatch(stripped); m != nil {
 		if v := strings.ToUpper(m[1]); v != "TRUE" && v != "FALSE" {
 			markers = append(markers, diagMarkerSpan(r,
@@ -3092,13 +3106,14 @@ func validateGet(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 2. file:// destination is mandatory.
-	if !reGetFileDest.MatchString(stripped) {
+	if !reFileURIArg.MatchString(stripped) {
 		markers = append(markers, diagMarkerSpan(r,
 			"GET destination path must use the file:// prefix (e.g. GET @mystage file:///tmp/).", 4))
+		return markers
 	}
 
 	// 3. PARALLEL must be a positive integer.
-	if m := reGetParallel.FindStringSubmatch(stripped); m != nil {
+	if m := reParallelOption.FindStringSubmatch(stripped); m != nil {
 		n, err := strconv.Atoi(m[1])
 		if err != nil || n < 1 {
 			markers = append(markers, diagMarkerSpan(r,
@@ -3120,7 +3135,7 @@ func validateList(parseText string, r StatementRange) []DiagMarker {
 
 	if !reListStageArg.MatchString(stripped) {
 		markers = append(markers, diagMarkerSpan(r,
-			"LIST requires a stage argument (e.g. LIST @mystage).", 4))
+			"LIST (LS) requires a stage argument (e.g. LIST @mystage).", 4))
 	}
 
 	return markers
@@ -3137,7 +3152,7 @@ func validateRemove(parseText string, r StatementRange) []DiagMarker {
 
 	if !reRemoveStageArg.MatchString(stripped) {
 		markers = append(markers, diagMarkerSpan(r,
-			"REMOVE requires a stage argument (e.g. REMOVE @mystage).", 4))
+			"REMOVE (RM) requires a stage argument (e.g. REMOVE @mystage).", 4))
 	}
 
 	return markers

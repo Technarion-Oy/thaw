@@ -136,6 +136,12 @@ func TestValidateSnowflakePatterns_Put(t *testing.T) {
 			expectedMatch: "stage destination",
 		},
 		{
+			name:          "PUT reversed argument order (@stage before file://)",
+			sql:           "PUT @mystage file:///tmp/data.csv",
+			expectWarning: true,
+			expectedMatch: "wrong order",
+		},
+		{
 			name:          "PUT PARALLEL = 0 (below minimum)",
 			sql:           "PUT file:///tmp/data.csv @mystage PARALLEL = 0",
 			expectWarning: true,
@@ -303,31 +309,31 @@ func TestValidateSnowflakePatterns_List(t *testing.T) {
 			name:          "Bare LIST — no stage argument",
 			sql:           "LIST",
 			expectWarning: true,
-			expectedMatch: "LIST requires a stage argument",
+			expectedMatch: "LIST (LS) requires a stage argument",
 		},
 		{
 			name:          "LIST with semicolon only",
 			sql:           "LIST;",
 			expectWarning: true,
-			expectedMatch: "LIST requires a stage argument",
+			expectedMatch: "LIST (LS) requires a stage argument",
 		},
 		{
 			name:          "LIST with bare identifier (no @)",
 			sql:           "LIST mystage",
 			expectWarning: true,
-			expectedMatch: "LIST requires a stage argument",
+			expectedMatch: "LIST (LS) requires a stage argument",
 		},
 		{
 			name:          "Bare LS — no stage argument",
 			sql:           "LS",
 			expectWarning: true,
-			expectedMatch: "LIST requires a stage argument",
+			expectedMatch: "LIST (LS) requires a stage argument",
 		},
 		{
 			name:          "LS with bare identifier (no @)",
 			sql:           "LS mystage",
 			expectWarning: true,
-			expectedMatch: "LIST requires a stage argument",
+			expectedMatch: "LIST (LS) requires a stage argument",
 		},
 	})
 }
@@ -379,31 +385,31 @@ func TestValidateSnowflakePatterns_Remove(t *testing.T) {
 			name:          "Bare REMOVE — no stage argument",
 			sql:           "REMOVE",
 			expectWarning: true,
-			expectedMatch: "REMOVE requires a stage argument",
+			expectedMatch: "REMOVE (RM) requires a stage argument",
 		},
 		{
 			name:          "REMOVE with semicolon only",
 			sql:           "REMOVE;",
 			expectWarning: true,
-			expectedMatch: "REMOVE requires a stage argument",
+			expectedMatch: "REMOVE (RM) requires a stage argument",
 		},
 		{
 			name:          "REMOVE with bare identifier (no @)",
 			sql:           "REMOVE mystage",
 			expectWarning: true,
-			expectedMatch: "REMOVE requires a stage argument",
+			expectedMatch: "REMOVE (RM) requires a stage argument",
 		},
 		{
 			name:          "Bare RM — no stage argument",
 			sql:           "RM",
 			expectWarning: true,
-			expectedMatch: "REMOVE requires a stage argument",
+			expectedMatch: "REMOVE (RM) requires a stage argument",
 		},
 		{
 			name:          "RM with bare identifier (no @)",
 			sql:           "RM mystage",
 			expectWarning: true,
-			expectedMatch: "REMOVE requires a stage argument",
+			expectedMatch: "REMOVE (RM) requires a stage argument",
 		},
 	})
 }
