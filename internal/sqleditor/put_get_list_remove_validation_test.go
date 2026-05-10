@@ -154,6 +154,12 @@ func TestValidateSnowflakePatterns_Put(t *testing.T) {
 			expectedMatch: "PARALLEL must be a positive integer between 1 and 99",
 		},
 		{
+			name:          "PUT PARALLEL = -1 (negative value)",
+			sql:           "PUT file:///tmp/data.csv @mystage PARALLEL = -1",
+			expectWarning: true,
+			expectedMatch: "PARALLEL must be a positive integer between 1 and 99",
+		},
+		{
 			name:          "PUT invalid SOURCE_COMPRESSION",
 			sql:           "PUT file:///tmp/data.csv @mystage SOURCE_COMPRESSION = ZIP",
 			expectWarning: true,
@@ -257,7 +263,27 @@ func TestValidateSnowflakePatterns_Get(t *testing.T) {
 			name:          "GET PARALLEL = 0 (below minimum)",
 			sql:           "GET @mystage file:///tmp/ PARALLEL = 0",
 			expectWarning: true,
-			expectedMatch: "PARALLEL must be a positive integer",
+			expectedMatch: "PARALLEL must be a positive integer between 1 and 99",
+		},
+		{
+			name:          "GET PARALLEL = 100 (above maximum)",
+			sql:           "GET @mystage file:///tmp/ PARALLEL = 100",
+			expectWarning: true,
+			expectedMatch: "PARALLEL must be a positive integer between 1 and 99",
+		},
+		{
+			name:          "GET PARALLEL = -1 (negative value)",
+			sql:           "GET @mystage file:///tmp/ PARALLEL = -1",
+			expectWarning: true,
+			expectedMatch: "PARALLEL must be a positive integer between 1 and 99",
+		},
+		{
+			// GET with reversed args still produces an actionable error because
+			// the @stage check fails before the file:// check.
+			name:          "GET reversed argument order (file:// before @stage)",
+			sql:           "GET file:///tmp/ @mystage",
+			expectWarning: true,
+			expectedMatch: "stage source",
 		},
 	})
 }

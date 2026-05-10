@@ -435,14 +435,17 @@ var (
 	// reFileURIArg matches a file:// URI argument (shared by PUT and GET).
 	reFileURIArg     = regexp.MustCompile(`(?i)\bfile://\S+`)
 	rePutKWStrip     = regexp.MustCompile(`(?i)^PUT\s+`)
-	rePutStageRef    = regexp.MustCompile(`@\S+`)
+	reStageRef       = regexp.MustCompile(`@\S+`)
 	// rePutCorrectOrder validates that PUT has file:// before @stage.
 	rePutCorrectOrder = regexp.MustCompile(`(?i)^\s*PUT\s+file://\S+\s+@\S+`)
 	rePutSourceComp   = regexp.MustCompile(`(?i)\bSOURCE_COMPRESSION\s*=\s*(\w+)`)
 	rePutOverwrite    = regexp.MustCompile(`(?i)\bOVERWRITE\s*=\s*(\w+)`)
 	rePutAutoCompress = regexp.MustCompile(`(?i)\bAUTO_COMPRESS\s*=\s*(\w+)`)
 	// reParallelOption matches a PARALLEL = <n> option (shared by PUT and GET).
-	reParallelOption = regexp.MustCompile(`(?i)\bPARALLEL\s*=\s*(\d+)`)
+	// The capture group includes an optional leading minus so that negative
+	// values like PARALLEL = -1 are captured and fail the range check rather
+	// than being silently skipped.
+	reParallelOption = regexp.MustCompile(`(?i)\bPARALLEL\s*=\s*(-?\d+)`)
 	reGetStageArg    = regexp.MustCompile(`(?i)^\s*GET\s+@\S+`)
 	reListStageArg   = regexp.MustCompile(`(?i)^\s*(?:LIST|LS)\s+@\S+`)
 	reRemoveStageArg = regexp.MustCompile(`(?i)^\s*(?:REMOVE|RM)\s+@\S+`)
@@ -3036,7 +3039,7 @@ func validatePut(parseText string, r StatementRange) []DiagMarker {
 	// Strip the PUT keyword so that identifiers that happen to contain "@" in
 	// comments do not cause false negatives.
 	afterKW := strings.TrimSpace(rePutKWStrip.ReplaceAllString(stripped, ""))
-	if !rePutStageRef.MatchString(afterKW) {
+	if !reStageRef.MatchString(afterKW) {
 		markers = append(markers, diagMarkerSpan(r,
 			"PUT requires a stage destination (e.g. @mystage or @~/path/).", 4))
 		return markers
@@ -3112,12 +3115,12 @@ func validateGet(parseText string, r StatementRange) []DiagMarker {
 		return markers
 	}
 
-	// 3. PARALLEL must be a positive integer.
+	// 3. PARALLEL must be 1–99.
 	if m := reParallelOption.FindStringSubmatch(stripped); m != nil {
 		n, err := strconv.Atoi(m[1])
-		if err != nil || n < 1 {
+		if err != nil || n < 1 || n > 99 {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("PARALLEL must be a positive integer, got '%s'.", m[1]), 4))
+				fmt.Sprintf("PARALLEL must be a positive integer between 1 and 99, got '%s'.", m[1]), 4))
 		}
 	}
 
