@@ -2545,7 +2545,7 @@ func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 }
 
 func validateBoolProp(s string, prop string, r StatementRange, markers *[]DiagMarker) {
-	re := regexp.MustCompile(`(?i)\b` + prop + `\s*=\s*(\w+)\b`)
+	re := reBoolPropMap[prop]
 	if m := re.FindStringSubmatch(s); m != nil {
 		val := strings.ToUpper(m[1])
 		if val != "TRUE" && val != "FALSE" {
@@ -3263,6 +3263,18 @@ func validateCreateShare(parseText string, r StatementRange) []DiagMarker {
 // the ENCRYPTION parameter). Declared outside the regexp var block because
 // it is a string slice, not a compiled regexp.
 var extVolValidEncTypes = []string{"NONE", "AWS_SSE_S3", "AWS_SSE_KMS", "GCS_SSE_KMS"}
+
+// reBoolPropMap holds pre-compiled regexes for validateBoolProp. Each entry
+// matches PROP = value where value is a word token. The map is built at init
+// time so regexes are compiled once rather than on every call.
+var reBoolPropMap = func() map[string]*regexp.Regexp {
+	props := []string{"ALLOW_WRITES", "PURGE", "FORCE", "LOAD_UNCERTAIN_FILES", "OVERWRITE", "SINGLE", "INCLUDE_QUERY_ID", "DETAILED_OUTPUT"}
+	m := make(map[string]*regexp.Regexp, len(props))
+	for _, p := range props {
+		m[p] = regexp.MustCompile(`(?i)\b` + p + `\s*=\s*(\w+)\b`)
+	}
+	return m
+}()
 
 // validateCreateExternalVolume checks structural requirements for
 // CREATE [OR REPLACE] EXTERNAL VOLUME statements:
