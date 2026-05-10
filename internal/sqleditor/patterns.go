@@ -382,8 +382,8 @@ var (
 	// verify this assumption when adding new privileges to grantObjectPrivileges.
 	reGrantOnObject  = regexp.MustCompile(`(?i)\bGRANT\s+([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(` + _grantObjType + `)`)
 	reRevokeOnObject = regexp.MustCompile(`(?i)\bREVOKE\s+(?:GRANT\s+OPTION\s+FOR\s+)?([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(` + _grantObjType + `)`)
-	reGrantee              = regexp.MustCompile(`(?i)\bTO\s+(?:ROLE|USER|DATABASE\s+ROLE)\b`)
-	reGranteeFrom          = regexp.MustCompile(`(?i)\bFROM\s+(?:ROLE|USER|DATABASE\s+ROLE)\b`)
+	reGrantee              = regexp.MustCompile(`(?i)\bTO\s+(?:ROLE|USER|DATABASE\s+ROLE|SHARE)\b`)
+	reGranteeFrom          = regexp.MustCompile(`(?i)\bFROM\s+(?:ROLE|USER|DATABASE\s+ROLE|SHARE)\b`)
 	reGrantAllFuture       = regexp.MustCompile(`(?i)\bON\s+(?:ALL|FUTURE)\b`)
 	reGrantInQualifier     = regexp.MustCompile(`(?i)\bIN\s+(?:SCHEMA|DATABASE)\b`)
 	reGrantToTable         = regexp.MustCompile(`(?i)\bTO\s+TABLE\b`)

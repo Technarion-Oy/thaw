@@ -264,6 +264,10 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"REVOKE GRANT OPTION FOR SELECT ON TABLE my_table FROM ROLE my_role",
 		"REVOKE SELECT ON ALL TABLES IN SCHEMA my_schema FROM ROLE my_role",
 		"REVOKE SELECT ON FUTURE TABLES IN DATABASE my_db FROM ROLE my_role",
+		// Data-sharing grants — TO SHARE / FROM SHARE are valid grantee forms.
+		"GRANT USAGE ON DATABASE my_db TO SHARE my_share",
+		"GRANT SELECT ON TABLE my_table TO SHARE my_share",
+		"REVOKE USAGE ON DATABASE my_db FROM SHARE my_share",
 	}
 
 	for _, sql := range validQueries {
