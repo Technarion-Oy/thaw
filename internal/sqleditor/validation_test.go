@@ -275,6 +275,32 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"GRANT SELECT ON TABLE my_table TO SHARE my_share",
 		"REVOKE USAGE ON DATABASE my_db FROM SHARE my_share",
 		"REVOKE SELECT ON TABLE my_table FROM SHARE my_share",
+		// CREATE SHARE — valid
+		"CREATE SHARE my_share",
+		"CREATE OR REPLACE SHARE my_share",
+		"CREATE SHARE IF NOT EXISTS my_share",
+		"CREATE SHARE my_share COMMENT = 'description of the share'",
+		"CREATE OR REPLACE SHARE my_share COMMENT = 'updated'",
+		// "IF NOT EXISTS" inside a COMMENT value must not trigger the conflict warning.
+		"CREATE OR REPLACE SHARE my_share COMMENT = 'IF NOT EXISTS hint'",
+		// ALTER SHARE — valid
+		"ALTER SHARE my_share ADD ACCOUNTS = account1",
+		"ALTER SHARE my_share ADD ACCOUNTS = account1, account2",
+		"ALTER SHARE my_share ADD ACCOUNTS = orgname.accountname",
+		"ALTER SHARE my_share ADD ACCOUNTS = account1 RESTRICT",
+		"ALTER SHARE my_share ADD ACCOUNTS = acct1, acct2 RESTRICT",
+		"ALTER SHARE my_share REMOVE ACCOUNTS = account1",
+		"ALTER SHARE my_share REMOVE ACCOUNTS = account1, account2",
+		"ALTER SHARE my_share SET COMMENT = 'updated comment'",
+		"ALTER SHARE my_share RENAME TO new_share_name",
+		// Share named "restrict" must not trigger the RESTRICT warning.
+		"ALTER SHARE restrict SET COMMENT = 'test'",
+		`ALTER SHARE "restrict" ADD OBJECTS = db.schema.tbl`,
+		// ADD ACCOUNTS = restrict treated as account named "restrict", not keyword.
+		"ALTER SHARE my_share ADD ACCOUNTS = restrict",
+		// CREATE DATABASE FROM SHARE — valid
+		"CREATE DATABASE my_db FROM SHARE provider_account.share_name",
+		"CREATE DATABASE IF NOT EXISTS my_db FROM SHARE provider.my_share",
 	}
 
 	for _, sql := range validQueries {
@@ -497,6 +523,21 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Password Policy max lt min length", "CREATE PASSWORD POLICY my_policy PASSWORD_MIN_LENGTH = 20 PASSWORD_MAX_LENGTH = 10", "greater than or equal to PASSWORD_MIN_LENGTH"},
 		{"Password Policy min age gt max age", "CREATE PASSWORD POLICY my_policy PASSWORD_MIN_AGE_DAYS = 90 PASSWORD_MAX_AGE_DAYS = 30", "PASSWORD_MIN_AGE_DAYS"},
 		{"Password Policy unknown property", "CREATE PASSWORD POLICY my_policy INVALID_PROP = TRUE", "Unexpected property 'INVALID_PROP'"},
+
+		// Invalid CREATE SHARE
+		{"Create Share with prefix", "CREATE SHARE db.schema.my_share", "account-level"},
+		{"Create Share OR REPLACE with prefix", "CREATE OR REPLACE SHARE db.schema.my_share", "account-level"},
+		{"Create Share invalid property", "CREATE SHARE my_share AUTO_REFRESH = TRUE", "Unexpected property 'AUTO_REFRESH'"},
+		{"Create Share OR REPLACE and IF NOT EXISTS", "CREATE OR REPLACE SHARE IF NOT EXISTS my_share", "Conflict between OR REPLACE and IF NOT EXISTS"},
+		{"Create Share missing name", "CREATE SHARE", "Unexpected syntax"},
+
+		// Invalid ALTER SHARE
+		{"Alter Share RESTRICT without ADD ACCOUNTS", "ALTER SHARE my_share RESTRICT", "RESTRICT is only valid with ADD ACCOUNTS"},
+		{"Alter Share REMOVE ACCOUNTS with RESTRICT", "ALTER SHARE my_share REMOVE ACCOUNTS = account1 RESTRICT", "RESTRICT is only valid with ADD ACCOUNTS"},
+		{"Alter Share ADD ACCOUNTS missing account list", "ALTER SHARE my_share ADD ACCOUNTS =", "ADD ACCOUNTS requires at least one"},
+
+		// Invalid CREATE DATABASE FROM SHARE — missing two-part provider name
+		{"Create Database FROM SHARE one-part name", "CREATE DATABASE my_db FROM SHARE just_share_name", "Unexpected syntax"},
 	}
 
 	for _, tt := range tests {

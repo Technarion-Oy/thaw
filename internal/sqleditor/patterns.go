@@ -48,10 +48,9 @@ var (
 		`(?i)\bTABLESAMPLE\b|\bSAMPLE\s*\(|\bWITHIN\s+GROUP\b|\bCONNECT\s+BY\b` +
 			`|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b` +
 			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:STAGE` +
-			`|SHARE` +
 			`|REPLICATION|FAILOVER|APPLICATION)\b` +
 			`|ALTER\s+(?:TABLE|VIEW|STREAM|DATABASE|STAGE|PIPE|PROCEDURE|FUNCTION` +
-			`|ALERT|SHARE|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK` +
+			`|ALERT|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK` +
 			`|REPLICATION|FAILOVER)\b` +
 			`|DROP\s+(?:TABLE|VIEW|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION)\b` +
 			`|UNDROP\s+(?:DATABASE|SCHEMA|TABLE)\b` +
@@ -166,6 +165,8 @@ var (
 		`(?:WITH\s+)?TAG\s*\([^)]+\)`,
 		`(?:WITH\s+)?CONTACT\s*\([^)]+\)`,
 		`OBJECT_VISIBILITY\s*=\s*(?:PRIVILEGED|` + _ident + `)`,
+		// CREATE DATABASE <name> FROM SHARE <provider_account>.<share_name>
+		`FROM\s+SHARE\s+` + _ident + `\.` + _ident,
 	}, "|")
 
 	reValidCreateDbSchema = regexp.MustCompile(
@@ -452,6 +453,21 @@ var (
 
 	// validPutCompressions lists the accepted SOURCE_COMPRESSION values for PUT.
 	validPutCompressions = []string{"AUTO_DETECT", "GZIP", "BZ2", "BROTLI", "ZSTD", "DEFLATE", "RAW_DEFLATE", "NONE"}
+
+	// ── CREATE SHARE ─────────────────────────────────────────────────────────
+	reIsCreateShare    = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SHARE\b`)
+	reCreateShareName  = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SHARE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
+	// ── ALTER SHARE ────────────────────────────────────────────────────────────
+	reIsAlterShare          = regexp.MustCompile(`(?i)^\s*ALTER\s+SHARE\b`)
+	reAlterShareAddAccounts = regexp.MustCompile(`(?i)\bADD\s+ACCOUNTS\b`)
+	reAlterShareAddAcctsEq  = regexp.MustCompile(`(?i)\bADD\s+ACCOUNTS\s*=`)
+	// reAlterShareHasAcctList verifies that ADD ACCOUNTS = is followed by at least one identifier.
+	reAlterShareHasAcctList = regexp.MustCompile(`(?i)\bADD\s+ACCOUNTS\s*=\s*` + _ident)
+	// reAlterShareRestrictTrailing matches RESTRICT only at the end of the cleaned
+	// statement text. Anchoring to $ prevents false positives when the share name
+	// (e.g. ALTER SHARE restrict ...) or a quoted identifier ("restrict") contains
+	// the word RESTRICT somewhere other than the trailing position.
+	reAlterShareRestrictTrailing = regexp.MustCompile(`(?i)\bRESTRICT\s*$`)
 
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
 	reIsCreateStage = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?STAGE\b`)
@@ -1460,6 +1476,18 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// ── REMOVE / RM ───────────────────────────────────────────────────
 		if reIsRemove.MatchString(parseText) {
 			markers = append(markers, validateRemove(parseText, r)...)
+			continue
+		}
+
+		// ── CREATE SHARE ─────────────────────────────────────────────────
+		if reIsCreateShare.MatchString(parseText) {
+			markers = append(markers, validateCreateShare(parseText, r)...)
+			continue
+		}
+
+		// ── ALTER SHARE ──────────────────────────────────────────────────
+		if reIsAlterShare.MatchString(parseText) {
+			markers = append(markers, validateAlterShare(parseText, r)...)
 			continue
 		}
 
@@ -3158,6 +3186,78 @@ func validateRemove(parseText string, r StatementRange) []DiagMarker {
 	if !reRemoveStageArg.MatchString(stripped) {
 		markers = append(markers, diagMarkerSpan(r,
 			"REMOVE (RM) requires a stage argument (e.g. REMOVE @mystage).", 4))
+	}
+
+	return markers
+}
+
+// ── validateCreateShare ───────────────────────────────────────────────────────
+
+// validateCreateShare checks structural requirements for CREATE [OR REPLACE] SHARE:
+//   - OR REPLACE and IF NOT EXISTS are mutually exclusive.
+//   - Account-level object: name must not have a database or schema prefix.
+//   - Only COMMENT is a valid property.
+func validateCreateShare(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// Strip string literals up front so that phrases like "IF NOT EXISTS" or
+	// "OR REPLACE" inside a COMMENT value do not trigger false positive checks.
+	stripped := reStripStringLiterals.ReplaceAllString(parseText, "''")
+
+	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
+	if reOrReplace.MatchString(stripped) && reIfNotExists.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE SHARE statement.", 4))
+		return markers
+	}
+
+	// 2. Share name is required; also used for the account-level prefix check.
+	m := reCreateShareName.FindStringSubmatch(parseText)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE SHARE statement.", 4))
+		return markers
+	}
+	if sqlIdentPathHasDot(m[1]) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Shares are account-level objects and cannot have a database or schema prefix.", 4))
+	}
+
+	// 3. Only COMMENT is a valid property for CREATE SHARE.
+	validateProperties(parseText, `COMMENT`, r, &markers)
+
+	return markers
+}
+
+// ── validateAlterShare ────────────────────────────────────────────────────────
+
+// validateAlterShare checks structural requirements for ALTER SHARE statements:
+//   - ADD ACCOUNTS = requires at least one account identifier.
+//   - RESTRICT is only valid with ADD ACCOUNTS.
+func validateAlterShare(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// Strip string literals and comments, then trim, so that RESTRICT or
+	// ACCOUNTS inside a COMMENT value or after a trailing line comment cannot
+	// cause false positives. cleanText is also trimmed so the $ anchor in
+	// reAlterShareRestrictTrailing reliably targets end-of-statement.
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	cleanText := strings.TrimSpace(stripCommentsSQL(noLiterals))
+
+	hasAddAccounts := reAlterShareAddAccounts.MatchString(cleanText)
+	hasRestrict := reAlterShareRestrictTrailing.MatchString(cleanText)
+	hasAddAcctsEq := reAlterShareAddAcctsEq.MatchString(cleanText)
+	hasAcctList := reAlterShareHasAcctList.MatchString(cleanText)
+
+	// RESTRICT is only valid with ADD ACCOUNTS.
+	if hasRestrict && !hasAddAccounts {
+		markers = append(markers, diagMarkerSpan(r,
+			"RESTRICT is only valid with ADD ACCOUNTS in ALTER SHARE.", 4))
+	}
+
+	// ADD ACCOUNTS = requires at least one account identifier after the '='.
+	if hasAddAcctsEq && !hasAcctList {
+		markers = append(markers, diagMarkerSpan(r,
+			"ADD ACCOUNTS requires at least one account identifier.", 4))
 	}
 
 	return markers
