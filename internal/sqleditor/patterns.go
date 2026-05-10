@@ -507,6 +507,19 @@ var (
 	// always the leading key in ENCRYPTION blocks.
 	reExtVolEncryptionType = regexp.MustCompile(`(?i)\bENCRYPTION\s*=\s*\(\s*TYPE\s*=\s*'([^']*)'`)
 
+	// ── USE ROLE / USE WAREHOUSE / USE SECONDARY ROLES ────────────────────
+	reIsUseRole           = regexp.MustCompile(`(?i)^\s*USE\s+ROLE\b`)
+	reIsUseWarehouse      = regexp.MustCompile(`(?i)^\s*USE\s+WAREHOUSE\b`)
+	reIsUseSecondaryRoles = regexp.MustCompile(`(?i)^\s*USE\s+SECONDARY\s+ROLES\b`)
+	// reUseRoleHasName requires a non-whitespace, non-semicolon character after
+	// USE ROLE so that "USE ROLE ;" is correctly flagged as missing a role name.
+	reUseRoleHasName      = regexp.MustCompile(`(?i)^\s*USE\s+ROLE\s+[^\s;]`)
+	// reUseWarehouseHasName requires a non-whitespace, non-semicolon character after
+	// USE WAREHOUSE so that "USE WAREHOUSE ;" is correctly flagged.
+	reUseWarehouseHasName = regexp.MustCompile(`(?i)^\s*USE\s+WAREHOUSE\s+[^\s;]`)
+	// reUseSecondaryRolesValue matches ALL or NONE after USE SECONDARY ROLES.
+	reUseSecondaryRolesValue = regexp.MustCompile(`(?i)^\s*USE\s+SECONDARY\s+ROLES\s+(ALL|NONE)\b`)
+
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
 	reIsCreateStage = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?STAGE\b`)
 	// stageProps lists only top-level CREATE STAGE property keys.
@@ -594,7 +607,7 @@ var (
 		"CREATE": true, "ALTER": true, "TRUNCATE": true, "CALL": true,
 		"SHOW": true, "SET": true, "DROP": true, "UNDROP": true,
 		"MERGE": true, "GRANT": true, "REVOKE": true, "COPY": true,
-		"EXECUTE": true,
+		"EXECUTE": true, "USE": true,
 		"PUT": true, "GET": true, "LIST": true, "LS": true,
 		"REMOVE": true, "RM": true,
 	}
@@ -1538,6 +1551,24 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// ── CREATE EXTERNAL VOLUME ────────────────────────────────────────
 		if reIsCreateExternalVolume.MatchString(parseText) {
 			markers = append(markers, validateCreateExternalVolume(parseText, r)...)
+			continue
+		}
+
+		// ── USE ROLE ─────────────────────────────────────────────────────
+		if reIsUseRole.MatchString(parseText) {
+			markers = append(markers, validateUseRole(parseText, r)...)
+			continue
+		}
+
+		// ── USE WAREHOUSE ────────────────────────────────────────────────
+		if reIsUseWarehouse.MatchString(parseText) {
+			markers = append(markers, validateUseWarehouse(parseText, r)...)
+			continue
+		}
+
+		// ── USE SECONDARY ROLES ──────────────────────────────────────────
+		if reIsUseSecondaryRoles.MatchString(parseText) {
+			markers = append(markers, validateUseSecondaryRoles(parseText, r)...)
 			continue
 		}
 
@@ -3619,6 +3650,58 @@ func validateAlterShare(parseText string, r StatementRange) []DiagMarker {
 	if hasAddAcctsEq && !hasAcctList {
 		markers = append(markers, diagMarkerSpan(r,
 			"ADD ACCOUNTS requires at least one account identifier.", 4))
+	}
+
+	return markers
+}
+
+// ── validateUseRole ───────────────────────────────────────────────────────────
+
+// validateUseRole validates a USE ROLE statement:
+//   - A role name is mandatory; bare USE ROLE is invalid.
+func validateUseRole(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+
+	if !reUseRoleHasName.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"USE ROLE requires a role name. Use USE ROLE <role_name>.", 4))
+	}
+
+	return markers
+}
+
+// ── validateUseWarehouse ──────────────────────────────────────────────────────
+
+// validateUseWarehouse validates a USE WAREHOUSE statement:
+//   - A warehouse name is mandatory; bare USE WAREHOUSE is invalid.
+func validateUseWarehouse(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+
+	if !reUseWarehouseHasName.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"USE WAREHOUSE requires a warehouse name. Use USE WAREHOUSE <warehouse_name>.", 4))
+	}
+
+	return markers
+}
+
+// ── validateUseSecondaryRoles ─────────────────────────────────────────────────
+
+// validateUseSecondaryRoles validates a USE SECONDARY ROLES statement:
+//   - Only ALL or NONE are valid arguments.
+//   - Any other value is flagged.
+func validateUseSecondaryRoles(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+
+	if !reUseSecondaryRolesValue.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"USE SECONDARY ROLES requires ALL or NONE.", 4))
 	}
 
 	return markers
