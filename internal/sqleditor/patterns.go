@@ -1527,19 +1527,25 @@ func validateCreateAlert(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	// 1. Mutually exclusive OR REPLACE and IF NOT EXISTS
-	if reOrReplace.MatchString(parseText) && reIfNotExists.MatchString(parseText) {
+	preambleToCheck := parseText
+	if ifIdx := reAlertIfExists.FindStringIndex(parseText); ifIdx != nil {
+		preambleToCheck = parseText[:ifIdx[0]]
+	}
+
+	if reOrReplace.MatchString(preambleToCheck) && reIfNotExists.MatchString(preambleToCheck) {
 		markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE ALERT statement.", 4))
 		return markers
 	}
 
 	// 2. Mandatory IF (EXISTS (...))
-	if ifIdx := reAlertIfExists.FindStringIndex(parseText); ifIdx == nil {
+	ifIdx := reAlertIfExists.FindStringIndex(parseText)
+	if ifIdx == nil {
 		markers = append(markers, diagMarkerSpan(r, "Missing mandatory IF (EXISTS (...)) clause in CREATE ALERT statement.", 4))
 		return markers
 	}
 
-	preamble := parseText[:reAlertIfExists.FindStringIndex(parseText)[0]]
-	body := parseText[reAlertIfExists.FindStringIndex(parseText)[0]:]
+	preamble := parseText[:ifIdx[0]]
+	body := parseText[ifIdx[0]:]
 
 	// 3. Mandatory THEN
 	if thenIdx := reAlertThen.FindStringIndex(body); thenIdx == nil {
