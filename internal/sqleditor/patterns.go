@@ -39,11 +39,11 @@ var (
 		`(?i)\bTABLESAMPLE\b|\bSAMPLE\s*\(|\bWITHIN\s+GROUP\b|\bCONNECT\s+BY\b` +
 			`|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b` +
 			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:STAGE` +
-			`|ALERT|SHARE` +
+			`|SHARE` +
 			`|NETWORK|ROW\s+ACCESS` +
 			`|SESSION|PASSWORD|REPLICATION|FAILOVER|APPLICATION)\b` +
 			`|ALTER\s+(?:TABLE|VIEW|STREAM|DATABASE|STAGE|PIPE|PROCEDURE|FUNCTION` +
-			`|ALERT|SHARE|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK` +
+			`|SHARE|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK` +
 			`|REPLICATION|FAILOVER)\b` +
 			`|DROP\s+(?:TABLE|VIEW|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION)\b` +
 			`|UNDROP\s+(?:DATABASE|SCHEMA|TABLE)\b` +
@@ -262,6 +262,12 @@ var (
 		`WAREHOUSE`, `USER_TASK_MANAGED_INITIAL_WAREHOUSE_SIZE`, `SCHEDULE`, `CONFIG`,
 		`ALLOW_OVERLAPPING_EXECUTION`, `USER_TASK_TIMEOUT_MS`, `SUSPEND_TASK_AFTER_NUM_FAILURES`,
 		`ERROR_INTEGRATION`, `COMMENT`, `AFTER`, `WHEN`,
+	}, "|")
+
+	// ── CREATE ALERT ──────────────────────────────────────────────────────────
+	reIsCreateAlert = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?ALERT\b`)
+	alertProps      = strings.Join([]string{
+		`WAREHOUSE`, `SCHEDULE`, `COMMENT`,
 	}, "|")
 
 	// ── CREATE PIPE ───────────────────────────────────────────────────────────
@@ -872,6 +878,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			if asIdx != nil {
 				validateProperties(parseText[:asIdx[0]], taskProps, r, &markers)
 			}
+			continue
+		}
+
+		// ── Preamble: CREATE ALERT ───────────────────────────────────────
+		if reIsCreateAlert.MatchString(parseText) {
+			markers = append(markers, validateCreateAlert(parseText, r)...)
 			continue
 		}
 
@@ -1505,6 +1517,46 @@ func validateProperties(s string, validProps string, r StatementRange, markers *
 			*markers = append(*markers, diagMarkerSpan(r, fmt.Sprintf("Unexpected property '%s' in statement.", key), 4))
 		}
 	}
+}
+
+func validateCreateAlert(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// 1. Mutually exclusive OR REPLACE and IF NOT EXISTS
+	if reOrReplace.MatchString(parseText) && reIfNotExists.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE ALERT statement.", 4))
+	}
+
+	// 2. Mandatory IF (EXISTS (...))
+	ifIdx := regexp.MustCompile(`(?i)\bIF\s*\(\s*EXISTS\s*\(`).FindStringIndex(parseText)
+	if ifIdx == nil {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory IF (EXISTS (...)) clause in CREATE ALERT statement.", 4))
+		return markers
+	}
+
+	preamble := parseText[:ifIdx[0]]
+	body := parseText[ifIdx[0]:]
+
+	// 3. Mandatory THEN
+	thenIdx := regexp.MustCompile(`(?i)\bTHEN\b`).FindStringIndex(body)
+	if thenIdx == nil {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory THEN keyword in CREATE ALERT statement.", 4))
+	}
+
+	// 4. Mandatory WAREHOUSE
+	if !regexp.MustCompile(`(?i)\bWAREHOUSE\s*=`).MatchString(preamble) {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory WAREHOUSE property in CREATE ALERT statement.", 4))
+	}
+
+	// 5. Mandatory SCHEDULE
+	if !regexp.MustCompile(`(?i)\bSCHEDULE\s*=`).MatchString(preamble) {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory SCHEDULE property in CREATE ALERT statement.", 4))
+	}
+
+	// 6. Validate properties
+	validateProperties(preamble, alertProps, r, &markers)
+
+	return markers
 }
 
 func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
