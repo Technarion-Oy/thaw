@@ -2563,6 +2563,11 @@ func TestValidateSnowflakePatterns_CreateExternalVolume(t *testing.T) {
 			[]string{"STORAGE_LOCATIONS must contain at least one storage location block"},
 		},
 		{
+			"Unmatched paren in STORAGE_LOCATIONS (missing closing paren)",
+			"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = ((NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/'",
+			[]string{"STORAGE_LOCATIONS must contain at least one storage location block"},
+		},
+		{
 			"OR REPLACE and IF NOT EXISTS returns early without extra markers",
 			"CREATE OR REPLACE EXTERNAL VOLUME IF NOT EXISTS my_vol ALLOW_WRITES = TRUE",
 			[]string{"Conflict between OR REPLACE and IF NOT EXISTS"},
