@@ -450,6 +450,9 @@ var (
 	reListStageArg   = regexp.MustCompile(`(?i)^\s*(?:LIST|LS)\s+@\S+`)
 	reRemoveStageArg = regexp.MustCompile(`(?i)^\s*(?:REMOVE|RM)\s+@\S+`)
 
+	// validPutCompressions lists the accepted SOURCE_COMPRESSION values for PUT.
+	validPutCompressions = []string{"AUTO_DETECT", "GZIP", "BZ2", "BROTLI", "ZSTD", "DEFLATE", "RAW_DEFLATE", "NONE"}
+
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
 	reIsCreateStage = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?STAGE\b`)
 	// stageProps lists only top-level CREATE STAGE property keys.
@@ -3062,10 +3065,9 @@ func validatePut(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 5. SOURCE_COMPRESSION must be a known compression type.
-	validCompressions := []string{"AUTO_DETECT", "GZIP", "BZ2", "BROTLI", "ZSTD", "DEFLATE", "RAW_DEFLATE", "NONE"}
 	if m := rePutSourceComp.FindStringSubmatch(stripped); m != nil {
 		compType := strings.ToUpper(m[1])
-		if !slices.Contains(validCompressions, compType) {
+		if !slices.Contains(validPutCompressions, compType) {
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("Invalid SOURCE_COMPRESSION '%s'. Valid values: AUTO_DETECT, GZIP, BZ2, BROTLI, ZSTD, DEFLATE, RAW_DEFLATE, NONE.", m[1]), 4))
 		}
@@ -3095,7 +3097,7 @@ func validatePut(parseText string, r StatementRange) []DiagMarker {
 // validateGet validates a Snowflake GET statement:
 //   - @<stage> source is mandatory.
 //   - file://<path> destination is mandatory.
-//   - PARALLEL must be a positive integer.
+//   - PARALLEL must be a positive integer between 1 and 99.
 func validateGet(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 

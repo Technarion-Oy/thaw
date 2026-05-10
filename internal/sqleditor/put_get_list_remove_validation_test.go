@@ -216,6 +216,10 @@ func TestValidateSnowflakePatterns_Get(t *testing.T) {
 			sql:  "GET @mystage file:///tmp/ PARALLEL = 1",
 		},
 		{
+			name: "GET with PARALLEL = 99 (boundary)",
+			sql:  "GET @mystage file:///tmp/ PARALLEL = 99",
+		},
+		{
 			name: "GET with PATTERN",
 			sql:  "GET @mystage file:///tmp/ PATTERN = '.*\\.csv'",
 		},
