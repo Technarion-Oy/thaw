@@ -139,6 +139,12 @@ func TestValidateSnowflakePatterns_UseWarehouse(t *testing.T) {
 			expectWarning: true,
 			expectedMatch: "requires a warehouse name",
 		},
+		{
+			name:          "USE WAREHOUSE with only line comment — no warehouse name",
+			sql:           "USE WAREHOUSE -- my_wh",
+			expectWarning: true,
+			expectedMatch: "requires a warehouse name",
+		},
 	})
 }
 
