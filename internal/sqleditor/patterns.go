@@ -362,18 +362,28 @@ var (
 	}, "|")
 
 	// ── GRANT / REVOKE ────────────────────────────────────────────────────────
-	reIsGrantRole     = regexp.MustCompile(`(?i)^\s*GRANT\s+ROLE\b`)
-	reIsGrant         = regexp.MustCompile(`(?i)^\s*GRANT\b`)
-	reIsRevoke        = regexp.MustCompile(`(?i)^\s*REVOKE\b`)
-	reGrantOnObject   = regexp.MustCompile(`(?i)\bGRANT\s+([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(\w+)`)
-	reRevokeOnObject  = regexp.MustCompile(`(?i)\bREVOKE\s+(?:GRANT\s+OPTION\s+FOR\s+)?([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(\w+)`)
-	reGrantee         = regexp.MustCompile(`(?i)\bTO\s+(?:ROLE|USER|DATABASE\s+ROLE)\b`)
-	reGranteeFrom     = regexp.MustCompile(`(?i)\bFROM\s+(?:ROLE|USER|DATABASE\s+ROLE)\b`)
-	reGrantAllFuture  = regexp.MustCompile(`(?i)\bON\s+(?:ALL|FUTURE)\b`)
-	reGrantInQualifier = regexp.MustCompile(`(?i)\bIN\s+(?:SCHEMA|DATABASE)\b`)
-	reWithGrantOption = regexp.MustCompile(`(?i)\bWITH\s+GRANT\s+OPTION\b`)
-	reRevokeCascade   = regexp.MustCompile(`(?i)\bCASCADE\b`)
-	reRevokeRestrict  = regexp.MustCompile(`(?i)\bRESTRICT\b`)
+	reIsGrantRole          = regexp.MustCompile(`(?i)^\s*GRANT\s+ROLE\b`)
+	reIsGrantDatabaseRole  = regexp.MustCompile(`(?i)^\s*GRANT\s+DATABASE\s+ROLE\b`)
+	reIsGrant              = regexp.MustCompile(`(?i)^\s*GRANT\b`)
+	reIsRevoke             = regexp.MustCompile(`(?i)^\s*REVOKE\b`)
+	reIsRevokeRole         = regexp.MustCompile(`(?i)^\s*REVOKE\s+ROLE\b`)
+	reIsRevokeDatabaseRole = regexp.MustCompile(`(?i)^\s*REVOKE\s+DATABASE\s+ROLE\b`)
+	reGrantOnObject        = regexp.MustCompile(`(?i)\bGRANT\s+([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(\w+)`)
+	reRevokeOnObject       = regexp.MustCompile(`(?i)\bREVOKE\s+(?:GRANT\s+OPTION\s+FOR\s+)?([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(\w+)`)
+	reGrantee              = regexp.MustCompile(`(?i)\bTO\s+(?:ROLE|USER|DATABASE\s+ROLE)\b`)
+	reGranteeFrom          = regexp.MustCompile(`(?i)\bFROM\s+(?:ROLE|USER|DATABASE\s+ROLE)\b`)
+	reGrantAllFuture       = regexp.MustCompile(`(?i)\bON\s+(?:ALL|FUTURE)\b`)
+	reGrantInQualifier     = regexp.MustCompile(`(?i)\bIN\s+(?:SCHEMA|DATABASE)\b`)
+	reGrantToTable         = regexp.MustCompile(`(?i)\bTO\s+TABLE\b`)
+	reWithGrantOption      = regexp.MustCompile(`(?i)\bWITH\s+GRANT\s+OPTION\b`)
+	// reRevokeCascade / reRevokeRestrict match the keywords anywhere in the
+	// statement. Unquoted identifiers that are exactly CASCADE or RESTRICT
+	// (valid but uncommon Snowflake names) could in theory produce a false
+	// positive — word boundaries mitigate this for composite names like
+	// cascade_table, but a bare unquoted name CASCADE remains a theoretical
+	// edge case. This is an accepted limitation documented here for future readers.
+	reRevokeCascade  = regexp.MustCompile(`(?i)\bCASCADE\b`)
+	reRevokeRestrict = regexp.MustCompile(`(?i)\bRESTRICT\b`)
 
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
 	reIsCreateStage = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?STAGE\b`)
@@ -489,11 +499,16 @@ var grantObjectPrivileges = map[string][]string{
 		"ADD SEARCH OPTIMIZATION", "CREATE ALERT", "CREATE NETWORK RULE",
 		"CREATE SECRET", "CREATE SNOWFLAKE.CORTEX.SEARCH SERVICE",
 	},
+	"PIPE":        {"MONITOR", "OPERATE"},
 	"ROLE":        {"USAGE"},
 	"INTEGRATION": {"USAGE"},
 	"TASK":        {"MONITOR", "OPERATE"},
 	"STREAM":      {"SELECT"},
 	"USER":        {"MONITOR"},
+	// TODO: add SEQUENCE, FILE FORMAT, EXTERNAL TABLE, MATERIALIZED VIEW,
+	// DYNAMIC TABLE when their privilege sets are confirmed. Until then,
+	// validation is silently skipped for those object types (knownObj = false),
+	// which avoids false positives but means invalid privileges go unchecked.
 	"ACCOUNT": {
 		"CREATE ROLE", "CREATE USER", "CREATE WAREHOUSE", "CREATE DATABASE",
 		"CREATE INTEGRATION", "CREATE NETWORK POLICY", "MANAGE GRANTS",
@@ -2069,7 +2084,7 @@ func validateGrant(parseText string, r StatementRange) []DiagMarker {
 
 	// ── GRANT ROLE / GRANT DATABASE ROLE ─────────────────────────────────────
 	isGrantRole := reIsGrantRole.MatchString(parseText) ||
-		regexp.MustCompile(`(?i)^\s*GRANT\s+DATABASE\s+ROLE\b`).MatchString(parseText)
+		reIsGrantDatabaseRole.MatchString(parseText)
 	if isGrantRole {
 		// WITH GRANT OPTION is not valid for role grants.
 		if reWithGrantOption.MatchString(parseText) {
@@ -2077,7 +2092,7 @@ func validateGrant(parseText string, r StatementRange) []DiagMarker {
 				"WITH GRANT OPTION is not valid for GRANT ROLE statements.", 4))
 		}
 		// Role grants use TO USER or TO ROLE, never TO TABLE.
-		if regexp.MustCompile(`(?i)\bTO\s+TABLE\b`).MatchString(parseText) {
+		if reGrantToTable.MatchString(parseText) {
 			markers = append(markers, diagMarkerSpan(r,
 				"Unexpected syntax: Roles can be granted to other roles or users, but not directly to tables.", 4))
 		}
@@ -2139,8 +2154,8 @@ func validateRevoke(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
 	// ── REVOKE ROLE / REVOKE DATABASE ROLE ────────────────────────────────────
-	isRevokeRole := regexp.MustCompile(`(?i)^\s*REVOKE\s+ROLE\b`).MatchString(parseText) ||
-		regexp.MustCompile(`(?i)^\s*REVOKE\s+DATABASE\s+ROLE\b`).MatchString(parseText)
+	isRevokeRole := reIsRevokeRole.MatchString(parseText) ||
+		reIsRevokeDatabaseRole.MatchString(parseText)
 	if isRevokeRole {
 		if !reGranteeFrom.MatchString(parseText) {
 			markers = append(markers, diagMarkerSpan(r,
@@ -2155,6 +2170,9 @@ func validateRevoke(parseText string, r StatementRange) []DiagMarker {
 		return markers
 	}
 	privListRaw := m[1]
+	// allFuture is "" for plain object grants and "ALL" or "FUTURE" for bulk
+	// grants. It gates privilege validation: bulk grants are always skipped
+	// because the full privilege set is determined dynamically by Snowflake.
 	allFuture := strings.TrimSpace(strings.ToUpper(m[2]))
 	objectType := normalizeGrantObjectType(m[3])
 
