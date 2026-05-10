@@ -402,8 +402,7 @@ var (
 	reIsCall            = regexp.MustCompile(`(?i)^\s*CALL\b`)
 	reCallProcName      = regexp.MustCompile(`(?i)^\s*CALL\s+` + _identPath)
 	reCallArgParens     = regexp.MustCompile(`(?i)^\s*CALL\s+` + _identPath + `\s*\(`)
-	reCallInto          = regexp.MustCompile(`(?i)\bINTO\s+(\S+)`)
-	reCallKeyword       = regexp.MustCompile(`(?i)^\s*CALL\b`)
+	reCallInto          = regexp.MustCompile(`(?i)\bINTO\s+([^\s;,)]+)`)
 	reIsWithProcedure   = regexp.MustCompile(`(?i)^\s*WITH\s+` + _ident + `\s+AS\s+PROCEDURE\b`)
 	reWithProcAlias     = regexp.MustCompile(`(?i)^\s*WITH\s+(` + _ident + `)\s+AS\s+PROCEDURE\b`)
 
@@ -2852,7 +2851,7 @@ func validateWithProcedureCall(parseText string, r StatementRange) []DiagMarker 
 		afterBody = parseText
 	}
 
-	if !reCallKeyword.MatchString(afterBody) {
+	if !reIsCall.MatchString(afterBody) {
 		markers = append(markers, diagMarkerSpan(r, fmt.Sprintf(
 			"WITH ... AS PROCEDURE block must end with CALL %s(...).", alias), 4))
 		return markers

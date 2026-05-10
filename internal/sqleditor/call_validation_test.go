@@ -117,6 +117,12 @@ func TestValidateSnowflakePatterns_Call(t *testing.T) {
 			expectedMatch: "prefixed with ':'",
 		},
 		{
+			name:          "INTO variable missing colon — semicolon-terminated",
+			sql:           "CALL my_proc() INTO result_var;",
+			expectWarning: true,
+			expectedMatch: "INTO :result_var instead of INTO result_var",
+		},
+		{
 			name:          "INTO variable missing colon — bare word",
 			sql:           "CALL my_proc() INTO output",
 			expectWarning: true,
