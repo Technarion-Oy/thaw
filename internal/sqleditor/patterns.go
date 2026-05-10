@@ -1548,7 +1548,7 @@ func validateCreateAlert(parseText string, r StatementRange) []DiagMarker {
 	body := parseText[ifIdx[0]:]
 
 	// 3. Mandatory THEN
-	if thenIdx := reAlertThen.FindStringIndex(body); thenIdx == nil {
+	if thenIdx := reAlertThen.FindStringIndex(stripParenContents(body)); thenIdx == nil {
 		markers = append(markers, diagMarkerSpan(r, "Missing mandatory THEN keyword in CREATE ALERT statement.", 4))
 	}
 
