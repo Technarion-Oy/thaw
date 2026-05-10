@@ -274,6 +274,9 @@ var (
 	reAlertWarehouse = regexp.MustCompile(`(?i)\bWAREHOUSE\s*=`)
 	reAlertSchedule  = regexp.MustCompile(`(?i)\bSCHEDULE\s*=`)
 
+	// Regular expression to match property keys (e.g., KEY =)
+	reProp = regexp.MustCompile(`(?i)\b([a-zA-Z_0-9]+)\s*=`)
+
 	// ── CREATE PIPE ───────────────────────────────────────────────────────────
 	reIsCreatePipe = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PIPE\b`)
 	pipeProps      = strings.Join([]string{
@@ -1512,10 +1515,11 @@ func stripParenContents(s string) string {
 // validateProperties scans s for words that look like property keys (KEY =)
 // and checks if they match the pipe-separated list of validProps.
 func validateProperties(s string, validProps string, r StatementRange, markers *[]DiagMarker) {
-	reProp := regexp.MustCompile(`(?i)\b([a-zA-Z_0-9]+)\s*=`)
 	reValid := regexp.MustCompile(`(?i)^(` + validProps + `)$`)
 
-	for _, m := range reProp.FindAllStringSubmatch(s, -1) {
+	strippedS := reStripStringLiterals.ReplaceAllString(s, "''")
+
+	for _, m := range reProp.FindAllStringSubmatch(strippedS, -1) {
 		key := m[1]
 		if !reValid.MatchString(key) {
 			*markers = append(*markers, diagMarkerSpan(r, fmt.Sprintf("Unexpected property '%s' in statement.", key), 4))
@@ -1555,6 +1559,7 @@ func validateCreateAlert(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 3. Mandatory THEN
+	// body is empty when IF clause is absent; THEN check is skipped
 	if body != "" && reAlertThen.FindStringIndex(stripParenContents(body)) == nil {
 		markers = append(markers, diagMarkerSpan(r, "Missing mandatory THEN keyword in CREATE ALERT statement.", 4))
 	}
