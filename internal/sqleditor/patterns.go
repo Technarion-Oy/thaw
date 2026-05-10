@@ -30,6 +30,12 @@ const (
 	_ident          = `(?:[a-zA-Z_][a-zA-Z0-9_$]*|"[^"]+")`
 	_identPath      = _ident + `(?:\.` + _ident + `){0,2}`
 	_balancedParens = `\([^()]*(?:(?:\([^()]*\))[^()]*)*\)`
+
+	// _grantObjType matches the object-type token(s) in a GRANT/REVOKE ON clause.
+	// Two-word types are listed explicitly before the single-word fallback so that
+	// a greedy `(\w+(?:\s+\w+)?)` cannot swallow the object name (e.g. matching
+	// "TABLE my_table" instead of just "TABLE").
+	_grantObjType = `EXTERNAL\s+TABLE|MATERIALIZED\s+VIEW|HYBRID\s+TABLE|ICEBERG\s+TABLE|DYNAMIC\s+TABLE|FILE\s+FORMAT|\w+`
 )
 
 var (
@@ -368,8 +374,8 @@ var (
 	reIsRevoke             = regexp.MustCompile(`(?i)^\s*REVOKE\b`)
 	reIsRevokeRole         = regexp.MustCompile(`(?i)^\s*REVOKE\s+ROLE\b`)
 	reIsRevokeDatabaseRole = regexp.MustCompile(`(?i)^\s*REVOKE\s+DATABASE\s+ROLE\b`)
-	reGrantOnObject        = regexp.MustCompile(`(?i)\bGRANT\s+([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(\w+)`)
-	reRevokeOnObject       = regexp.MustCompile(`(?i)\bREVOKE\s+(?:GRANT\s+OPTION\s+FOR\s+)?([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(\w+)`)
+	reGrantOnObject        = regexp.MustCompile(`(?i)\bGRANT\s+([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(` + _grantObjType + `)`)
+	reRevokeOnObject       = regexp.MustCompile(`(?i)\bREVOKE\s+(?:GRANT\s+OPTION\s+FOR\s+)?([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(` + _grantObjType + `)`)
 	reGrantee              = regexp.MustCompile(`(?i)\bTO\s+(?:ROLE|USER|DATABASE\s+ROLE)\b`)
 	reGranteeFrom          = regexp.MustCompile(`(?i)\bFROM\s+(?:ROLE|USER|DATABASE\s+ROLE)\b`)
 	reGrantAllFuture       = regexp.MustCompile(`(?i)\bON\s+(?:ALL|FUTURE)\b`)
@@ -482,13 +488,14 @@ var (
 var grantObjectPrivileges = map[string][]string{
 	"TABLE": {
 		"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "REBUILD",
+		"EVOLVE SCHEMA",
 	},
 	"VIEW": {"SELECT", "REFERENCES"},
 	"STAGE": {"READ", "WRITE"},
-	"WAREHOUSE": {"USAGE", "MODIFY", "MONITOR", "OPERATE"},
+	"WAREHOUSE": {"USAGE", "MODIFY", "MONITOR", "OPERATE", "APPLYBUDGET"},
 	"DATABASE": {
 		"USAGE", "MODIFY", "MONITOR", "CREATE SCHEMA",
-		"IMPORTED PRIVILEGES", "REFERENCE_USAGE",
+		"IMPORTED PRIVILEGES", "REFERENCE_USAGE", "APPLYBUDGET",
 	},
 	"SCHEMA": {
 		"USAGE", "MODIFY", "MONITOR",
@@ -498,6 +505,9 @@ var grantObjectPrivileges = map[string][]string{
 		"CREATE ROW ACCESS POLICY", "CREATE DYNAMIC TABLE",
 		"ADD SEARCH OPTIMIZATION", "CREATE ALERT", "CREATE NETWORK RULE",
 		"CREATE SECRET", "CREATE SNOWFLAKE.CORTEX.SEARCH SERVICE",
+		"CREATE STREAMLIT", "CREATE NOTEBOOK",
+		"CREATE HYBRID TABLE", "CREATE ICEBERG TABLE", "CREATE EXTERNAL TABLE",
+		"APPLYBUDGET",
 	},
 	"PIPE":        {"MONITOR", "OPERATE"},
 	"ROLE":        {"USAGE"},
@@ -505,16 +515,21 @@ var grantObjectPrivileges = map[string][]string{
 	"TASK":        {"MONITOR", "OPERATE"},
 	"STREAM":      {"SELECT"},
 	"USER":        {"MONITOR"},
-	// TODO: add SEQUENCE, FILE FORMAT, EXTERNAL TABLE, MATERIALIZED VIEW,
-	// DYNAMIC TABLE when their privilege sets are confirmed. Until then,
-	// validation is silently skipped for those object types (knownObj = false),
-	// which avoids false positives but means invalid privileges go unchecked.
+	// TODO: add SEQUENCE, FILE FORMAT, EXTERNAL TABLE object-level privileges,
+	// MATERIALIZED VIEW, and DYNAMIC TABLE when their privilege sets are confirmed.
+	// Until then, validation is silently skipped for those object types
+	// (knownObj = false), which avoids false positives but means invalid
+	// privileges go unchecked.
 	"ACCOUNT": {
 		"CREATE ROLE", "CREATE USER", "CREATE WAREHOUSE", "CREATE DATABASE",
 		"CREATE INTEGRATION", "CREATE NETWORK POLICY", "MANAGE GRANTS",
 		"MONITOR USAGE", "EXECUTE TASK", "EXECUTE ALERT", "EXECUTE MANAGED TASK",
 		"IMPORT SHARE", "OVERRIDE SHARE RESTRICTIONS", "ATTACH POLICY",
 		"APPLY MASKING POLICY", "APPLY ROW ACCESS POLICY",
+		"APPLY SESSION POLICY", "APPLY TAG", "APPLY AGGREGATION POLICY",
+		"MANAGE WAREHOUSES", "CREATE SHARE", "APPLYBUDGET",
+		"BIND SERVICE ENDPOINT", "CREATE COMPUTE POOL", "CREATE EXTERNAL VOLUME",
+		"MANAGE ACCOUNT SUPPORT CASES", "RESOLVE ALL",
 	},
 }
 
@@ -2176,6 +2191,12 @@ func validateRevoke(parseText string, r StatementRange) []DiagMarker {
 	allFuture := strings.TrimSpace(strings.ToUpper(m[2]))
 	objectType := normalizeGrantObjectType(m[3])
 
+	// ── ON ALL / ON FUTURE requires IN SCHEMA or IN DATABASE ─────────────────
+	if reGrantAllFuture.MatchString(parseText) && !reGrantInQualifier.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r,
+			"ON ALL/FUTURE <objects> requires an IN SCHEMA or IN DATABASE qualifier.", 4))
+	}
+
 	// ── CASCADE and RESTRICT are mutually exclusive ───────────────────────────
 	if reRevokeCascade.MatchString(parseText) && reRevokeRestrict.MatchString(parseText) {
 		markers = append(markers, diagMarkerSpan(r,
@@ -2231,9 +2252,11 @@ func normalizeGrantObjectType(t string) string {
 }
 
 // privInSlice returns true when priv (already upper-cased) is present in slice.
+// Both priv and slice elements are expected to be upper-cased already; the
+// comparison is a direct string equality check with no further conversion.
 func privInSlice(priv string, slice []string) bool {
 	for _, s := range slice {
-		if strings.ToUpper(s) == priv {
+		if s == priv {
 			return true
 		}
 	}

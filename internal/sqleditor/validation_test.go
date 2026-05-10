@@ -241,6 +241,16 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"GRANT OWNERSHIP ON TABLE my_table TO ROLE my_role",
 		"GRANT ALL PRIVILEGES ON TABLE my_table TO ROLE my_role",
 		"GRANT ALL ON SCHEMA my_schema TO ROLE my_role",
+		// Newer privilege names that were previously missing from the matrix
+		"GRANT EVOLVE SCHEMA ON TABLE my_table TO ROLE my_role",
+		"GRANT APPLYBUDGET ON WAREHOUSE my_wh TO ROLE my_role",
+		"GRANT APPLYBUDGET ON DATABASE my_db TO ROLE my_role",
+		"GRANT CREATE STREAMLIT ON SCHEMA my_schema TO ROLE my_role",
+		"GRANT CREATE NOTEBOOK ON SCHEMA my_schema TO ROLE my_role",
+		"GRANT APPLY SESSION POLICY ON ACCOUNT TO ROLE my_role",
+		"GRANT APPLY TAG ON ACCOUNT TO ROLE my_role",
+		"GRANT MANAGE WAREHOUSES ON ACCOUNT TO ROLE my_role",
+		"GRANT RESOLVE ALL ON ACCOUNT TO ROLE my_role",
 		// REVOKE statements — valid
 		"REVOKE SELECT ON TABLE my_table FROM ROLE my_role",
 		"REVOKE INSERT, UPDATE ON TABLE my_table FROM ROLE my_role",
@@ -254,6 +264,7 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"REVOKE SELECT ON TABLE my_table FROM ROLE my_role RESTRICT",
 		"REVOKE GRANT OPTION FOR SELECT ON TABLE my_table FROM ROLE my_role",
 		"REVOKE SELECT ON ALL TABLES IN SCHEMA my_schema FROM ROLE my_role",
+		"REVOKE SELECT ON FUTURE TABLES IN DATABASE my_db FROM ROLE my_role",
 	}
 
 	for _, sql := range validQueries {
@@ -357,6 +368,10 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Grant priv missing grantee", "GRANT SELECT ON TABLE my_table", "grantee"},
 		{"Grant all tables without in", "GRANT SELECT ON ALL TABLES TO ROLE my_role", "IN SCHEMA or IN DATABASE"},
 		{"Grant future tables without in", "GRANT SELECT ON FUTURE TABLES TO ROLE my_role", "IN SCHEMA or IN DATABASE"},
+
+		// Invalid REVOKE — ON ALL/FUTURE without IN qualifier
+		{"Revoke all tables without in", "REVOKE SELECT ON ALL TABLES FROM ROLE my_role", "IN SCHEMA or IN DATABASE"},
+		{"Revoke future tables without in", "REVOKE SELECT ON FUTURE TABLES FROM ROLE my_role", "IN SCHEMA or IN DATABASE"},
 
 		// Invalid REVOKE — privilege/object mismatches
 		{"Revoke insert on view", "REVOKE INSERT ON VIEW my_view FROM ROLE my_role", "not valid for object type VIEW"},
