@@ -469,6 +469,17 @@ var (
 	// the word RESTRICT somewhere other than the trailing position.
 	reAlterShareRestrictTrailing = regexp.MustCompile(`(?i)\bRESTRICT\s*$`)
 
+	// ── CREATE EXTERNAL VOLUME ────────────────────────────────────────────────
+	reIsCreateExternalVolume   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EXTERNAL\s+VOLUME\b`)
+	reCreateExternalVolumeName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EXTERNAL\s+VOLUME\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
+	reExtVolHasStorageLocs     = regexp.MustCompile(`(?i)\bSTORAGE_LOCATIONS\s*=\s*\(`)
+	reExtVolStorageProvider    = regexp.MustCompile(`(?i)\bSTORAGE_PROVIDER\s*=\s*'([^']*)'`)
+	reExtVolStorageBaseURL     = regexp.MustCompile(`(?i)\bSTORAGE_BASE_URL\s*=\s*'[^']*'`)
+	reExtVolAwsRoleArn         = regexp.MustCompile(`(?i)\bSTORAGE_AWS_ROLE_ARN\s*=`)
+	reExtVolAzureTenantID      = regexp.MustCompile(`(?i)\bAZURE_TENANT_ID\s*=`)
+	reExtVolAwsExternalID      = regexp.MustCompile(`(?i)\bSTORAGE_AWS_EXTERNAL_ID\s*=`)
+	reExtVolEncryptionType     = regexp.MustCompile(`(?i)\bENCRYPTION\s*=\s*\(\s*TYPE\s*=\s*'([^']*)'`)
+
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
 	reIsCreateStage = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?STAGE\b`)
 	// stageProps lists only top-level CREATE STAGE property keys.
@@ -1488,6 +1499,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// ── ALTER SHARE ──────────────────────────────────────────────────
 		if reIsAlterShare.MatchString(parseText) {
 			markers = append(markers, validateAlterShare(parseText, r)...)
+			continue
+		}
+
+		// ── CREATE EXTERNAL VOLUME ────────────────────────────────────────
+		if reIsCreateExternalVolume.MatchString(parseText) {
+			markers = append(markers, validateCreateExternalVolume(parseText, r)...)
 			continue
 		}
 
@@ -3224,6 +3241,120 @@ func validateCreateShare(parseText string, r StatementRange) []DiagMarker {
 
 	// 3. Only COMMENT is a valid property for CREATE SHARE.
 	validateProperties(parseText, `COMMENT`, r, &markers)
+
+	return markers
+}
+
+// ── validateCreateExternalVolume ──────────────────────────────────────────────
+
+// validateCreateExternalVolume checks structural requirements for
+// CREATE [OR REPLACE] EXTERNAL VOLUME statements:
+//   - Account-level object: name must not have a database or schema prefix.
+//   - STORAGE_LOCATIONS is mandatory.
+//   - Each STORAGE_PROVIDER must be one of: S3, S3GOV, S3CHINA, GCS, AZURE.
+//   - STORAGE_BASE_URL is required in each storage location.
+//   - STORAGE_AWS_ROLE_ARN is required for S3, S3GOV, and S3CHINA providers.
+//   - AZURE_TENANT_ID is required for AZURE provider.
+//   - STORAGE_AWS_EXTERNAL_ID is only valid for S3, S3GOV, and S3CHINA providers.
+//   - ENCRYPTION TYPE must be one of: NONE, AWS_SSE_S3, AWS_SSE_KMS, GCS_SSE_KMS.
+//   - ALLOW_WRITES must be TRUE or FALSE if present.
+func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+	noLiterals := reStripStringLiterals.ReplaceAllString(stripped, "''")
+
+	// 1. Account-level: name must not have db.schema prefix.
+	if m := reCreateExternalVolumeName.FindStringSubmatch(parseText); m != nil {
+		if sqlIdentPathHasDot(m[1]) {
+			markers = append(markers, diagMarkerSpan(r,
+				"External volumes are account-level objects and cannot have a database or schema prefix.", 4))
+		}
+	}
+
+	// 2. STORAGE_LOCATIONS is mandatory.
+	if !reExtVolHasStorageLocs.MatchString(noLiterals) {
+		markers = append(markers, diagMarkerSpan(r,
+			"STORAGE_LOCATIONS is mandatory for CREATE EXTERNAL VOLUME.", 4))
+		return markers
+	}
+
+	// Extract STORAGE_LOCATIONS block content for per-location checks.
+	storLocContent := extractParenContent(stripped, "STORAGE_LOCATIONS")
+	if storLocContent == "" {
+		return markers
+	}
+
+	// 3. STORAGE_PROVIDER must be present and must be a valid value.
+	providerMatches := reExtVolStorageProvider.FindAllStringSubmatch(storLocContent, -1)
+	if len(providerMatches) == 0 {
+		markers = append(markers, diagMarkerSpan(r,
+			"Each storage location requires STORAGE_PROVIDER (S3, S3GOV, S3CHINA, GCS, or AZURE).", 4))
+		return markers
+	}
+
+	hasS3 := false
+	hasGCS := false
+	hasAzure := false
+	for _, pm := range providerMatches {
+		provider := strings.ToUpper(pm[1])
+		switch provider {
+		case "S3", "S3GOV", "S3CHINA":
+			hasS3 = true
+		case "GCS":
+			hasGCS = true
+		case "AZURE":
+			hasAzure = true
+		default:
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("Invalid STORAGE_PROVIDER '%s'. Must be S3, S3GOV, S3CHINA, GCS, or AZURE.", pm[1]), 4))
+		}
+	}
+
+	// 4. STORAGE_BASE_URL is required in each location.
+	baseURLCount := len(reExtVolStorageBaseURL.FindAllString(storLocContent, -1))
+	if baseURLCount < len(providerMatches) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Each storage location requires STORAGE_BASE_URL.", 4))
+	}
+
+	// 5. STORAGE_AWS_ROLE_ARN is required for S3, S3GOV, and S3CHINA.
+	if hasS3 && !reExtVolAwsRoleArn.MatchString(storLocContent) {
+		markers = append(markers, diagMarkerSpan(r,
+			"STORAGE_AWS_ROLE_ARN is required for S3, S3GOV, and S3CHINA storage providers.", 4))
+	}
+
+	// 6. AZURE_TENANT_ID is required for AZURE.
+	if hasAzure && !reExtVolAzureTenantID.MatchString(storLocContent) {
+		markers = append(markers, diagMarkerSpan(r,
+			"AZURE_TENANT_ID is required for AZURE storage provider.", 4))
+	}
+
+	// 7. STORAGE_AWS_EXTERNAL_ID is only valid for S3, S3GOV, and S3CHINA.
+	if !hasS3 && reExtVolAwsExternalID.MatchString(storLocContent) {
+		markers = append(markers, diagMarkerSpan(r,
+			"STORAGE_AWS_EXTERNAL_ID is only valid for S3, S3GOV, or S3CHINA storage providers.", 4))
+	}
+
+	// 8. ENCRYPTION TYPE must be one of the valid values; AWS types require S3,
+	//    GCS_SSE_KMS requires GCS.
+	validEncTypes := []string{"NONE", "AWS_SSE_S3", "AWS_SSE_KMS", "GCS_SSE_KMS"}
+	for _, em := range reExtVolEncryptionType.FindAllStringSubmatch(storLocContent, -1) {
+		encType := strings.ToUpper(em[1])
+		if !slices.Contains(validEncTypes, encType) {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("Invalid ENCRYPTION TYPE '%s'. Must be NONE, AWS_SSE_S3, AWS_SSE_KMS, or GCS_SSE_KMS.", em[1]), 4))
+		} else if (encType == "AWS_SSE_S3" || encType == "AWS_SSE_KMS") && !hasS3 {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("ENCRYPTION TYPE '%s' is only valid for S3, S3GOV, or S3CHINA storage providers.", em[1]), 4))
+		} else if encType == "GCS_SSE_KMS" && !hasGCS {
+			markers = append(markers, diagMarkerSpan(r,
+				"ENCRYPTION TYPE 'GCS_SSE_KMS' is only valid for GCS storage provider.", 4))
+		}
+	}
+
+	// 9. ALLOW_WRITES must be TRUE or FALSE if present.
+	validateBoolProp(parseText, "ALLOW_WRITES", r, &markers)
 
 	return markers
 }
