@@ -474,7 +474,10 @@ var (
 	reCreateEventTableName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EVENT\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
 	// reEventTableColumnList detects a parenthesised column list after the table name.
 	// Event tables have a fixed schema and do not allow user-defined columns.
-	reEventTableColumnList = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EVENT\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath + `\s*\(`)
+	reEventTableColumnList    = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EVENT\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath + `\s*\(`)
+	reEvtRetentionDays        = regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\s*=\s*(-?\d+\b|-?\w+)`)
+	reEvtExtensionDays        = regexp.MustCompile(`(?i)\bMAX_DATA_EXTENSION_TIME_IN_DAYS\s*=\s*(-?\d+\b|-?\w+)`)
+	reEvtChangeTrackingValue  = regexp.MustCompile(`(?i)\bCHANGE_TRACKING\s*=\s*(\w+)`)
 
 	// ── CREATE EXTERNAL VOLUME ────────────────────────────────────────────────
 	reIsCreateExternalVolume   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EXTERNAL\s+VOLUME\b`)
@@ -3277,9 +3280,9 @@ func validateRemove(parseText string, r StatementRange) []DiagMarker {
 //   - DATA_RETENTION_TIME_IN_DAYS must be a non-negative integer.
 //   - MAX_DATA_EXTENSION_TIME_IN_DAYS must be a non-negative integer.
 //   - CHANGE_TRACKING must be TRUE or FALSE.
-//   - DEFAULT_DDL_COLLATION must be a string value.
-//   - COMMENT must be a string value.
-//   - COPY GRANTS is supported.
+//   - Only recognised properties are allowed (DEFAULT_DDL_COLLATION, COMMENT,
+//     COPY GRANTS, TAG). COPY GRANTS is a standalone clause and bypasses
+//     the property allowlist check.
 func validateCreateEventTable(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
@@ -3313,23 +3316,20 @@ func validateCreateEventTable(parseText string, r StatementRange) []DiagMarker {
 			"CLUSTER BY is not supported for EVENT TABLE.", 4))
 	}
 
-	// 5. Validate property values using regex-based checks on stripped text.
-	reEvtRetention := regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\s*=\s*(-?\w+)`)
-	if m := reEvtRetention.FindStringSubmatch(stripped); m != nil {
+	// 5. Validate property values using package-level regexes.
+	if m := reEvtRetentionDays.FindStringSubmatch(stripped); m != nil {
 		if n, err := strconv.Atoi(m[1]); err != nil || n < 0 {
 			markers = append(markers, diagMarkerSpan(r,
 				"DATA_RETENTION_TIME_IN_DAYS must be a non-negative integer.", 4))
 		}
 	}
-	reEvtExtension := regexp.MustCompile(`(?i)\bMAX_DATA_EXTENSION_TIME_IN_DAYS\s*=\s*(-?\w+)`)
-	if m := reEvtExtension.FindStringSubmatch(stripped); m != nil {
+	if m := reEvtExtensionDays.FindStringSubmatch(stripped); m != nil {
 		if n, err := strconv.Atoi(m[1]); err != nil || n < 0 {
 			markers = append(markers, diagMarkerSpan(r,
 				"MAX_DATA_EXTENSION_TIME_IN_DAYS must be a non-negative integer.", 4))
 		}
 	}
-	reEvtChangeTracking := regexp.MustCompile(`(?i)\bCHANGE_TRACKING\s*=\s*(\w+)`)
-	if m := reEvtChangeTracking.FindStringSubmatch(stripped); m != nil {
+	if m := reEvtChangeTrackingValue.FindStringSubmatch(stripped); m != nil {
 		if !isBool(m[1]) {
 			markers = append(markers, diagMarkerSpan(r,
 				"CHANGE_TRACKING must be TRUE or FALSE.", 4))
@@ -3338,7 +3338,9 @@ func validateCreateEventTable(parseText string, r StatementRange) []DiagMarker {
 
 	// 6. Validate allowed properties. Use stripParenContents to avoid
 	// false positives from keys inside TAG(...) or other paren blocks.
-	validateProperties(stripParenContents(stripped), `DATA_RETENTION_TIME_IN_DAYS|MAX_DATA_EXTENSION_TIME_IN_DAYS|CHANGE_TRACKING|DEFAULT_DDL_COLLATION|COMMENT|COPY|TAG`, r, &markers)
+	// Note: COPY GRANTS is a standalone clause (no '='), so it bypasses
+	// validateProperties entirely and needs no allowlist entry.
+	validateProperties(stripParenContents(stripped), `DATA_RETENTION_TIME_IN_DAYS|MAX_DATA_EXTENSION_TIME_IN_DAYS|CHANGE_TRACKING|DEFAULT_DDL_COLLATION|COMMENT|TAG`, r, &markers)
 
 	return markers
 }
