@@ -49,6 +49,11 @@ func TestValidateSnowflakePatterns_Call(t *testing.T) {
 			expectWarning: false,
 		},
 		{
+			name:          "Call with INTO colon variable and trailing semicolon",
+			sql:           "CALL my_proc() INTO :result_var;",
+			expectWarning: false,
+		},
+		{
 			name:          "Call with INTO colon variable and args",
 			sql:           "CALL my_proc(1, 2) INTO :output",
 			expectWarning: false,
@@ -76,6 +81,11 @@ func TestValidateSnowflakePatterns_Call(t *testing.T) {
 		{
 			name:          "Anonymous procedure WITH AS PROCEDURE with INTO colon — valid",
 			sql:           "WITH p AS PROCEDURE () RETURNS INT LANGUAGE SQL AS $$ BEGIN RETURN 1; END; $$ CALL p() INTO :output",
+			expectWarning: false,
+		},
+		{
+			name:          "Anonymous procedure WITH tagged dollar-quoting — valid",
+			sql:           "WITH p AS PROCEDURE () RETURNS INT LANGUAGE SQL AS $proc$ BEGIN RETURN 1; END; $proc$ CALL p()",
 			expectWarning: false,
 		},
 

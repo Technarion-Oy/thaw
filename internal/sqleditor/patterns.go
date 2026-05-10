@@ -399,12 +399,14 @@ var (
 	reRevokeRestrict = regexp.MustCompile(`(?i)\bRESTRICT\b`)
 
 	// ── CALL ──────────────────────────────────────────────────────────────────
-	reIsCall            = regexp.MustCompile(`(?i)^\s*CALL\b`)
-	reCallProcName      = regexp.MustCompile(`(?i)^\s*CALL\s+` + _identPath)
-	reCallArgParens     = regexp.MustCompile(`(?i)^\s*CALL\s+` + _identPath + `\s*\(`)
-	reCallInto          = regexp.MustCompile(`(?i)\bINTO\s+([^\s;,)]+)`)
-	reIsWithProcedure   = regexp.MustCompile(`(?i)^\s*WITH\s+` + _ident + `\s+AS\s+PROCEDURE\b`)
-	reWithProcAlias     = regexp.MustCompile(`(?i)^\s*WITH\s+(` + _ident + `)\s+AS\s+PROCEDURE\b`)
+	reIsCall         = regexp.MustCompile(`(?i)^\s*CALL\b`)
+	reCallProcName   = regexp.MustCompile(`(?i)^\s*CALL\s+` + _identPath)
+	reCallArgParens  = regexp.MustCompile(`(?i)^\s*CALL\s+` + _identPath + `\s*\(`)
+	reCallInto       = regexp.MustCompile(`(?i)\bINTO\s+([^\s;,)]+)`)
+	reWithProcAlias  = regexp.MustCompile(`(?i)^\s*WITH\s+(` + _ident + `)\s+AS\s+PROCEDURE\b`)
+	// reAnyDollarTag matches both untagged ($$) and tagged ($tag$) Snowflake
+	// dollar-quote delimiters; used to locate the closing body delimiter.
+	reAnyDollarTag = regexp.MustCompile(`\$\w*\$`)
 
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
 	reIsCreateStage = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?STAGE\b`)
@@ -1349,7 +1351,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		}
 
 		// ── WITH ... AS PROCEDURE (anonymous procedure) ───────────────────
-		if reIsWithProcedure.MatchString(parseText) {
+		if reWithProcAlias.MatchString(parseText) {
 			markers = append(markers, validateWithProcedureCall(parseText, r)...)
 			continue
 		}
@@ -2841,13 +2843,17 @@ func validateWithProcedureCall(parseText string, r StatementRange) []DiagMarker 
 	}
 	alias := m[1]
 
-	// Find the closing $$ of the procedure body (dollar-quoting: $$...$$).
-	lastDD := strings.LastIndex(parseText, "$$")
+	// Find the closing delimiter of the procedure body.
+	// Snowflake supports both untagged ($$...$$) and tagged ($tag$...$tag$)
+	// dollar-quoting.  We collect all $<tag>$ tokens via reAnyDollarTag and
+	// treat the rightmost one as the closing delimiter so that tagged forms like
+	// $proc$...$proc$ work correctly alongside the plain $$ form.
 	var afterBody string
-	if lastDD >= 0 {
-		afterBody = strings.TrimSpace(parseText[lastDD+2:])
+	if tagMatches := reAnyDollarTag.FindAllStringIndex(parseText, -1); len(tagMatches) > 0 {
+		lastTagEnd := tagMatches[len(tagMatches)-1][1]
+		afterBody = strings.TrimSpace(parseText[lastTagEnd:])
 	} else {
-		// No dollar-quoted body found; look for CALL anywhere after the alias.
+		// No dollar-quoted body found; look for CALL anywhere in the statement.
 		afterBody = parseText
 	}
 
