@@ -473,7 +473,10 @@ var (
 	reIsCreateExternalVolume   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EXTERNAL\s+VOLUME\b`)
 	reCreateExternalVolumeName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EXTERNAL\s+VOLUME\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
 	reExtVolHasStorageLocs     = regexp.MustCompile(`(?i)\bSTORAGE_LOCATIONS\s*=\s*\(`)
-	reExtVolLocationName       = regexp.MustCompile(`(?i)\bNAME\s*=`)
+	// reExtVolLocationName requires NAME = ' to avoid matching hypothetical
+	// keys like CONTAINER_NAME. Applied to locClean where 'value' → '',
+	// so NAME = 'foo' becomes NAME = '' and the leading ' still matches.
+	reExtVolLocationName       = regexp.MustCompile(`(?i)\bNAME\s*=\s*'`)
 	reExtVolStorageProvider    = regexp.MustCompile(`(?i)\bSTORAGE_PROVIDER\s*=\s*'([^']*)'`)
 	reExtVolStorageBaseURL     = regexp.MustCompile(`(?i)\bSTORAGE_BASE_URL\s*=\s*'[^']*'`)
 	reExtVolAwsRoleArn         = regexp.MustCompile(`(?i)\bSTORAGE_AWS_ROLE_ARN\s*=`)
@@ -3301,7 +3304,13 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 
 	// Extract STORAGE_LOCATIONS outer block, then split into individual location
 	// entries. Each entry is a (…) block inside the outer (…).
-	// Use stripped (literals intact) so findMatchingParen skips quoted parens.
+	// We use stripped (comments removed, literals intact) rather than clean so
+	// that findMatchingParen can skip parentheses inside quoted string values.
+	// Known limitation: if a string literal before the real STORAGE_LOCATIONS
+	// clause contains the substring "STORAGE_LOCATIONS = (", extractParenContent
+	// may start extraction at the wrong parenthesis. This is extremely unlikely
+	// in practice for Snowflake DDL. Comments are absent because stripCommentsSQL
+	// was already applied; loc blocks therefore contain no -- or /* */ text.
 	// An empty STORAGE_LOCATIONS = () block produces storLocContent == "" and
 	// len(locations) == 0, which is caught by the check below.
 	storLocContent := extractParenContent(stripped, "STORAGE_LOCATIONS")
