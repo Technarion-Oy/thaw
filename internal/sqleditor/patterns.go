@@ -1603,8 +1603,10 @@ func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarke
 	var markers []DiagMarker
 
 	// 1. Account-level: name must not have a database or schema prefix.
+	// sqlIdentPathHasDot is used so that a quoted identifier whose inner text
+	// contains a dot (e.g. "my.policy") is not falsely flagged as a prefix.
 	if m := reNetworkPolicyName.FindStringSubmatch(parseText); m != nil {
-		if strings.Contains(m[1], ".") {
+		if sqlIdentPathHasDot(m[1]) {
 			markers = append(markers, diagMarkerSpan(r, "Network policies are account-level objects and cannot have a database or schema prefix.", 4))
 		}
 	}
@@ -1639,9 +1641,9 @@ func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarke
 			if entry == "" {
 				continue
 			}
-			if !isValidIPCIDR(entry) {
+			if !isValidIPv4CIDR(entry) {
 				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("Invalid IP address or CIDR '%s' in %s. Expected a valid IPv4 or IPv6 address, optionally with a CIDR prefix (e.g. 192.168.0.0/24 or 2001:db8::/32).", entry, listKind),
+					fmt.Sprintf("Invalid IPv4 address or CIDR '%s' in %s. Expected an IPv4 address, optionally with a CIDR prefix (e.g. 192.168.0.0/24 or 10.0.0.1/32). IPv6 addresses must be added via ALLOWED_NETWORK_RULE_LIST.", entry, listKind),
 					4))
 				continue
 			}
@@ -1694,15 +1696,36 @@ func networkPolicyListHasEntries(content string) bool {
 	return false
 }
 
-// isValidIPCIDR reports whether s is a valid IPv4 or IPv6 address, optionally
-// followed by a CIDR prefix length (e.g. "192.168.0.0/24", "2001:db8::/32",
-// or bare addresses like "10.0.0.1" or "::1").
-func isValidIPCIDR(s string) bool {
+// isValidIPv4CIDR reports whether s is a valid IPv4 address, optionally
+// followed by a CIDR prefix length (e.g. "192.168.0.0/24" or "10.0.0.1").
+// IPv6 addresses are intentionally rejected: Snowflake's ALLOWED_IP_LIST and
+// BLOCKED_IP_LIST only accept IPv4; IPv6 network rules must use ALLOWED_NETWORK_RULE_LIST.
+func isValidIPv4CIDR(s string) bool {
 	if strings.Contains(s, "/") {
-		_, _, err := net.ParseCIDR(s)
-		return err == nil
+		ip, _, err := net.ParseCIDR(s)
+		return err == nil && ip.To4() != nil
 	}
-	return net.ParseIP(s) != nil
+	ip := net.ParseIP(s)
+	return ip != nil && ip.To4() != nil
+}
+
+// sqlIdentPathHasDot reports whether the SQL identifier path s contains a dot
+// that acts as a namespace separator (e.g. "db.schema" or "db.schema.table").
+// Dots that appear inside a double-quoted identifier token (e.g. "my.policy")
+// are not counted, so a single-part quoted name never triggers a false positive.
+func sqlIdentPathHasDot(s string) bool {
+	inQuote := false
+	for _, c := range s {
+		switch c {
+		case '"':
+			inQuote = !inQuote
+		case '.':
+			if !inQuote {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func validateCopyInto(parseText string, r StatementRange) []DiagMarker {

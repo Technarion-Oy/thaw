@@ -175,9 +175,8 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('10.0.0.1')",
 		"CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('10.0.0.0/8') ALLOWED_NETWORK_RULE_LIST = (rule1, rule2) COMMENT = 'my policy'",
 		"CREATE NETWORK POLICY my_policy ALLOWED_NETWORK_RULE_LIST = (rule1) BLOCKED_NETWORK_RULE_LIST = (rule2)",
-		"CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('2001:db8::/32')",
-		"CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('::1')",
-		"CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('2001:db8::1') BLOCKED_IP_LIST = ('fe80::/10')",
+		// Quoted policy name whose inner text contains a dot — must not trigger the prefix warning.
+		`CREATE NETWORK POLICY "my.policy" ALLOWED_IP_LIST = ('10.0.0.0/8')`,
 	}
 
 	for _, sql := range validQueries {
@@ -315,10 +314,14 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Network Policy empty ALLOWED_NETWORK_RULE_LIST", "CREATE NETWORK POLICY my_policy ALLOWED_NETWORK_RULE_LIST = ()", "no effect"},
 		{"Network Policy both lists empty", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = () BLOCKED_IP_LIST = ()", "no effect"},
 		{"Network Policy whitespace-only quoted entry", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('   ')", "no effect"},
-		{"Network Policy invalid IP", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('not_an_ip')", "Invalid IP address or CIDR"},
-		{"Network Policy invalid CIDR prefix", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('192.168.0.1/33')", "Invalid IP address or CIDR"},
-		{"Network Policy invalid octet", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('256.0.0.1/24')", "Invalid IP address or CIDR"},
-		{"Network Policy invalid IPv6", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('gg::1')", "Invalid IP address or CIDR"},
+		{"Network Policy invalid IP", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('not_an_ip')", "Invalid IPv4"},
+		{"Network Policy invalid CIDR prefix", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('192.168.0.1/33')", "Invalid IPv4"},
+		{"Network Policy invalid octet", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('256.0.0.1/24')", "Invalid IPv4"},
+		// Snowflake only accepts IPv4 in ALLOWED/BLOCKED_IP_LIST; IPv6 is rejected even if valid.
+		{"Network Policy valid IPv6 in IP list (rejected)", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('2001:db8::/32')", "Invalid IPv4"},
+		{"Network Policy bare IPv6 in IP list (rejected)", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('::1')", "Invalid IPv4"},
+		{"Network Policy IPv6 in blocked list (rejected)", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('10.0.0.0/8') BLOCKED_IP_LIST = ('fe80::/10')", "Invalid IPv4"},
+		{"Network Policy malformed IPv6", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('gg::1')", "Invalid IPv4"},
 		{"Network Policy IP in both lists", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('10.0.0.1/32') BLOCKED_IP_LIST = ('10.0.0.1/32')", "appears in both"},
 		{"Network Policy unknown property", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('10.0.0.0/8') INVALID_PROP = TRUE", "Unexpected property 'INVALID_PROP'"},
 	}
