@@ -12,6 +12,7 @@ package sqleditor
 
 import (
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 
@@ -40,7 +41,7 @@ var (
 			`|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b` +
 			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:STAGE` +
 			`|SHARE` +
-			`|NETWORK|ROW\s+ACCESS` +
+			`|ROW\s+ACCESS` +
 			`|SESSION|PASSWORD|REPLICATION|FAILOVER|APPLICATION)\b` +
 			`|ALTER\s+(?:TABLE|VIEW|STREAM|DATABASE|STAGE|PIPE|PROCEDURE|FUNCTION` +
 			`|ALERT|SHARE|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK` +
@@ -303,6 +304,18 @@ var (
 
 	// ── CREATE MASKING POLICY ─────────────────────────────────────────────────
 	reIsCreateMaskingPolicy = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?MASKING\s+POLICY\b`)
+
+	// ── CREATE NETWORK POLICY ─────────────────────────────────────────────────
+	reIsCreateNetworkPolicy       = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?NETWORK\s+POLICY\b`)
+	reNetworkPolicyName           = regexp.MustCompile(`(?i)POLICY\s+(` + _identPath + `)`)
+	reNetworkPolicyIPList         = regexp.MustCompile(`(?i)\b(ALLOWED_IP_LIST|BLOCKED_IP_LIST)\s*=\s*\(([^)]*)\)`)
+	reNetworkPolicyHasAllowedIP   = regexp.MustCompile(`(?i)\bALLOWED_IP_LIST\s*=\s*\(([^)]*)\)`)
+	reNetworkPolicyHasAllowedRules = regexp.MustCompile(`(?i)\bALLOWED_NETWORK_RULE_LIST\s*=\s*\(([^)]*)\)`)
+	networkPolicyProps             = strings.Join([]string{
+		`ALLOWED_IP_LIST`, `BLOCKED_IP_LIST`,
+		`ALLOWED_NETWORK_RULE_LIST`, `BLOCKED_NETWORK_RULE_LIST`,
+		`COMMENT`,
+	}, "|")
 
 	// ── GRANT ─────────────────────────────────────────────────────────────────
 	reIsGrantRole = regexp.MustCompile(`(?i)^\s*GRANT\s+ROLE\b`)
@@ -1129,6 +1142,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
+		// ── Preamble: CREATE NETWORK POLICY ──────────────────────────────
+		if reIsCreateNetworkPolicy.MatchString(parseText) {
+			markers = append(markers, validateCreateNetworkPolicy(parseText, r)...)
+			continue
+		}
+
 		// ── Preamble: CREATE STAGE ───────────────────────────────────────
 		// stripParenContents removes nested KEY=VALUE pairs inside blocks
 		// like FILE_FORMAT=(...), ENCRYPTION=(...), DIRECTORY=(...) before
@@ -1578,6 +1597,135 @@ func validateCreateAlert(parseText string, r StatementRange) []DiagMarker {
 	validateProperties(preamble, alertProps, r, &markers)
 
 	return markers
+}
+
+func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// 1. Account-level: name must not have a database or schema prefix.
+	// sqlIdentPathHasDot is used so that a quoted identifier whose inner text
+	// contains a dot (e.g. "my.policy") is not falsely flagged as a prefix.
+	if m := reNetworkPolicyName.FindStringSubmatch(parseText); m != nil {
+		if sqlIdentPathHasDot(m[1]) {
+			markers = append(markers, diagMarkerSpan(r, "Network policies are account-level objects and cannot have a database or schema prefix.", 4))
+		}
+	}
+
+	// 2. At least one of ALLOWED_IP_LIST or ALLOWED_NETWORK_RULE_LIST must be present
+	// and non-empty. An empty list (e.g. ALLOWED_IP_LIST = ()) has no effect.
+	// networkPolicyListHasEntries is used instead of a plain TrimSpace check so
+	// that whitespace-only quoted entries like ('   ') are also treated as empty.
+	allowedIPMatch := reNetworkPolicyHasAllowedIP.FindStringSubmatch(parseText)
+	hasAllowedIP := allowedIPMatch != nil && networkPolicyListHasEntries(allowedIPMatch[1])
+	allowedRulesMatch := reNetworkPolicyHasAllowedRules.FindStringSubmatch(parseText)
+	hasAllowedRules := allowedRulesMatch != nil && networkPolicyListHasEntries(allowedRulesMatch[1])
+	if !hasAllowedIP && !hasAllowedRules {
+		markers = append(markers, diagMarkerSpan(r, "Network policy has no effect: at least one of ALLOWED_IP_LIST or ALLOWED_NETWORK_RULE_LIST must be specified and non-empty.", 4))
+	}
+
+	// 3. Validate IP lists and collect IPs for overlap check.
+	var allowedIPs []string
+	var blockedIPs []string
+	for _, m := range reNetworkPolicyIPList.FindAllStringSubmatch(parseText, -1) {
+		listKind := strings.ToUpper(m[1])
+		listContent := m[2]
+		for _, rawEntry := range strings.Split(listContent, ",") {
+			entry := strings.TrimSpace(rawEntry)
+			if entry == "" {
+				continue
+			}
+			// Strip surrounding single quotes.
+			if len(entry) >= 2 && entry[0] == '\'' && entry[len(entry)-1] == '\'' {
+				entry = strings.TrimSpace(entry[1 : len(entry)-1])
+			}
+			if entry == "" {
+				continue
+			}
+			if !isValidIPv4CIDR(entry) {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("Invalid IPv4 address or CIDR '%s' in %s. Expected an IPv4 address, optionally with a CIDR prefix (e.g. 192.168.0.0/24 or 10.0.0.1/32). IPv6 addresses must be added via ALLOWED_NETWORK_RULE_LIST.", entry, listKind),
+					4))
+				continue
+			}
+			if listKind == "ALLOWED_IP_LIST" {
+				allowedIPs = append(allowedIPs, entry)
+			} else {
+				blockedIPs = append(blockedIPs, entry)
+			}
+		}
+	}
+
+	// 4. Warn if the same IP/CIDR string appears in both ALLOWED_IP_LIST and
+	// BLOCKED_IP_LIST. Note: this is a string-exact comparison; semantic subnet
+	// overlaps (e.g. 10.0.0.0/8 allowed vs 10.0.1.5 blocked) are not detected.
+	if len(allowedIPs) > 0 && len(blockedIPs) > 0 {
+		allowedSet := make(map[string]bool, len(allowedIPs))
+		for _, ip := range allowedIPs {
+			allowedSet[ip] = true
+		}
+		for _, ip := range blockedIPs {
+			if allowedSet[ip] {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("IP '%s' appears in both ALLOWED_IP_LIST and BLOCKED_IP_LIST.", ip),
+					4))
+			}
+		}
+	}
+
+	// 5. Validate top-level property keys (strip list contents to avoid false positives).
+	validateProperties(stripParenContents(parseText), networkPolicyProps, r, &markers)
+
+	return markers
+}
+
+// networkPolicyListHasEntries reports whether the raw paren content of a
+// network policy list (e.g. the capture from ALLOWED_IP_LIST = (...)) contains
+// at least one non-empty entry after stripping surrounding single quotes.
+// This avoids the false-negative caused by whitespace-only quoted entries such
+// as ('   ') which would otherwise pass a plain strings.TrimSpace != "" check.
+func networkPolicyListHasEntries(content string) bool {
+	for _, raw := range strings.Split(content, ",") {
+		entry := strings.TrimSpace(raw)
+		if len(entry) >= 2 && entry[0] == '\'' && entry[len(entry)-1] == '\'' {
+			entry = strings.TrimSpace(entry[1 : len(entry)-1])
+		}
+		if entry != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// isValidIPv4CIDR reports whether s is a valid IPv4 address, optionally
+// followed by a CIDR prefix length (e.g. "192.168.0.0/24" or "10.0.0.1").
+// IPv6 addresses are intentionally rejected: Snowflake's ALLOWED_IP_LIST and
+// BLOCKED_IP_LIST only accept IPv4; IPv6 network rules must use ALLOWED_NETWORK_RULE_LIST.
+func isValidIPv4CIDR(s string) bool {
+	if strings.Contains(s, "/") {
+		ip, _, err := net.ParseCIDR(s)
+		return err == nil && ip.To4() != nil
+	}
+	ip := net.ParseIP(s)
+	return ip != nil && ip.To4() != nil
+}
+
+// sqlIdentPathHasDot reports whether the SQL identifier path s contains a dot
+// that acts as a namespace separator (e.g. "db.schema" or "db.schema.table").
+// Dots that appear inside a double-quoted identifier token (e.g. "my.policy")
+// are not counted, so a single-part quoted name never triggers a false positive.
+func sqlIdentPathHasDot(s string) bool {
+	inQuote := false
+	for _, c := range s {
+		switch c {
+		case '"':
+			inQuote = !inQuote
+		case '.':
+			if !inQuote {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
