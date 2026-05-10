@@ -3336,7 +3336,18 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 				"Each storage location requires a NAME attribute.", 4))
 		}
 
-		// 4. STORAGE_PROVIDER must be present and valid. Use the literal-
+		// 4. STORAGE_BASE_URL is required regardless of provider. Checked before
+		// the STORAGE_PROVIDER guard so it is reported even when both attributes
+		// are absent — the author sees all missing required fields at once.
+		// Note: after literal stripping, STORAGE_BASE_URL = '' satisfies the
+		// pattern — empty-string URLs are an accepted trade-off for a structural
+		// preamble validator.
+		if !reExtVolStorageBaseURL.MatchString(locClean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"Each storage location requires STORAGE_BASE_URL.", 4))
+		}
+
+		// 5. STORAGE_PROVIDER must be present and valid. Use the literal-
 		// preserving loc so the regex captures the actual provider string.
 		// First-match assumption: if a NAME or COMMENT value happened to
 		// contain "STORAGE_PROVIDER = 'S3'" the wrong match would be returned.
@@ -3356,15 +3367,6 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("Invalid STORAGE_PROVIDER '%s'. Must be S3, S3GOV, S3CHINA, S3COMPAT, GCS, or AZURE.", pm[1]), 4))
 			continue
-		}
-
-		// 5. STORAGE_BASE_URL is required.
-		// Note: after literal stripping, STORAGE_BASE_URL = '' satisfies the
-		// pattern — empty-string URLs are an accepted trade-off for a structural
-		// preamble validator.
-		if !reExtVolStorageBaseURL.MatchString(locClean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"Each storage location requires STORAGE_BASE_URL.", 4))
 		}
 
 		// 6. STORAGE_AWS_ROLE_ARN is required for S3, S3GOV, S3CHINA, and S3COMPAT.
@@ -3412,10 +3414,11 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 		}
 	}
 
-	// 10. ALLOW_WRITES must be TRUE or FALSE if present. Use stripped (comments
-	// removed) so a line like "-- ALLOW_WRITES = maybe" cannot cause a false
-	// positive.
-	validateBoolProp(stripped, "ALLOW_WRITES", r, &markers)
+	// 10. ALLOW_WRITES must be TRUE or FALSE if present. Use clean (comments and
+	// string literals both removed) so neither "-- ALLOW_WRITES = maybe" in a
+	// comment nor 'ALLOW_WRITES = MAYBE' inside a COMMENT string value can
+	// produce a false positive.
+	validateBoolProp(clean, "ALLOW_WRITES", r, &markers)
 
 	return markers
 }

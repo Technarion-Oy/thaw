@@ -2402,6 +2402,8 @@ func TestValidateSnowflakePatterns_CreateExternalVolume(t *testing.T) {
 		`CREATE EXTERNAL VOLUME "S3" STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ))`,
 		// ALLOW_WRITES in a line comment must not trigger a false positive
 		"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' )) -- ALLOW_WRITES = maybe",
+		// ALLOW_WRITES inside a COMMENT string value must not trigger a false positive
+		"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' )) COMMENT = 'do not set ALLOW_WRITES = MAYBE here'",
 	}
 
 	for _, sql := range validCases {
@@ -2533,6 +2535,11 @@ func TestValidateSnowflakePatterns_CreateExternalVolume(t *testing.T) {
 			"Missing NAME in location block",
 			"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ))",
 			[]string{"Each storage location requires a NAME attribute"},
+		},
+		{
+			"Missing both STORAGE_PROVIDER and STORAGE_BASE_URL reports both errors",
+			"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' ))",
+			[]string{"Each storage location requires STORAGE_BASE_URL", "Each storage location requires STORAGE_PROVIDER"},
 		},
 		{
 			"Empty STORAGE_LOCATIONS block",
