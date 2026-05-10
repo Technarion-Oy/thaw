@@ -420,6 +420,10 @@ var (
 	reExecImmUsingHasIdent = regexp.MustCompile(`(?i)\bUSING\s*\(\s*` + _ident)
 	// reStripDollarQuoted strips dollar-quoted blocks ($$…$$ and $tag$…$tag$)
 	// so that SQL content inside them does not cause false-positive USING checks.
+	// The pattern intentionally matches mismatched tags ($foo$…$bar$): Go's
+	// regexp package has no backreferences, so equal-tag enforcement is not
+	// possible. Over-stripping is safe here — the goal is to remove content,
+	// not to validate delimiters.
 	reStripDollarQuoted    = regexp.MustCompile(`\$\w*\$[\s\S]*?\$\w*\$`)
 	reExecTaskName         = regexp.MustCompile(`(?i)^\s*EXECUTE\s+TASK\s+` + _identPath)
 

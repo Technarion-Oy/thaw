@@ -15,68 +15,105 @@ import (
 	"testing"
 )
 
+// patternTestCase is a single PASS/FAIL case for ValidateSnowflakePatterns.
+type patternTestCase struct {
+	name          string
+	sql           string
+	expectWarning bool
+	expectedMatch string // substring that must appear in a warning message (when expectWarning is true)
+}
+
+// runPatternTests runs a slice of patternTestCase entries against
+// ValidateSnowflakePatterns and reports failures via t.
+func runPatternTests(t *testing.T, cases []patternTestCase) {
+	t.Helper()
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			ranges := GetStatementRanges(tt.sql)
+			markers := ValidateSnowflakePatterns(tt.sql, ranges)
+			warnings := getWarnings(markers)
+
+			if tt.expectWarning {
+				if len(warnings) == 0 {
+					t.Fatalf("Expected warnings for %q, got 0", tt.sql)
+				}
+				found := false
+				for _, w := range warnings {
+					if strings.Contains(strings.ToLower(w.Message), strings.ToLower(tt.expectedMatch)) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected warning matching %q, got: %v", tt.expectedMatch, warnings[0].Message)
+				}
+			} else {
+				if len(warnings) > 0 {
+					t.Errorf("Expected 0 warnings for %q, got %d: %v", tt.sql, len(warnings), warnings)
+				}
+			}
+		})
+	}
+}
+
 func TestValidateSnowflakePatterns_ExecuteImmediate(t *testing.T) {
-	tests := []struct {
-		name          string
-		sql           string
-		expectWarning bool
-		expectedMatch string
-	}{
+	runPatternTests(t, []patternTestCase{
 		// ── Valid Cases ──────────────────────────────────────────────────────
 		{
-			name:          "String literal argument",
-			sql:           "EXECUTE IMMEDIATE 'SELECT 1'",
-			expectWarning: false,
+			name: "String literal argument",
+			sql:  "EXECUTE IMMEDIATE 'SELECT 1'",
 		},
 		{
-			name:          "Colon-prefixed variable",
-			sql:           "EXECUTE IMMEDIATE :my_sql_var",
-			expectWarning: false,
+			name: "Colon-prefixed variable",
+			sql:  "EXECUTE IMMEDIATE :my_sql_var",
 		},
 		{
-			name:          "Bare identifier variable",
-			sql:           "EXECUTE IMMEDIATE my_sql_var",
-			expectWarning: false,
+			name: "Bare identifier variable",
+			sql:  "EXECUTE IMMEDIATE my_sql_var",
 		},
 		{
-			name:          "Dollar-quoted block",
-			sql:           "EXECUTE IMMEDIATE $$SELECT 1$$",
-			expectWarning: false,
+			name: "Dollar-quoted block",
+			sql:  "EXECUTE IMMEDIATE $$SELECT 1$$",
 		},
 		{
-			name:          "String literal with USING clause",
-			sql:           "EXECUTE IMMEDIATE 'SELECT $1' USING (val)",
-			expectWarning: false,
+			name: "String literal with USING clause",
+			sql:  "EXECUTE IMMEDIATE 'SELECT $1' USING (val)",
 		},
 		{
-			name:          "Variable with USING clause — multiple bind vars",
-			sql:           "EXECUTE IMMEDIATE :sql_str USING (a, b, c)",
-			expectWarning: false,
+			name: "Variable with USING clause — multiple bind vars",
+			sql:  "EXECUTE IMMEDIATE :sql_str USING (a, b, c)",
 		},
 		{
-			name:          "String literal with multi-var USING",
-			sql:           "EXECUTE IMMEDIATE 'SELECT $1, $2' USING (v1, v2)",
-			expectWarning: false,
+			name: "String literal with multi-var USING",
+			sql:  "EXECUTE IMMEDIATE 'SELECT $1, $2' USING (v1, v2)",
 		},
 		{
-			name:          "Quoted identifier variable",
-			sql:           `EXECUTE IMMEDIATE "my_sql_var"`,
-			expectWarning: false,
+			name: "Quoted identifier variable",
+			sql:  `EXECUTE IMMEDIATE "my_sql_var"`,
 		},
 		{
-			name:          "String literal with semicolon terminator",
-			sql:           "EXECUTE IMMEDIATE 'SELECT 1';",
-			expectWarning: false,
+			name: "String literal with semicolon terminator",
+			sql:  "EXECUTE IMMEDIATE 'SELECT 1';",
 		},
 		{
-			name:          "USING keyword inside string literal does not trigger false positive",
-			sql:           "EXECUTE IMMEDIATE 'INSERT INTO t USING (src)'",
-			expectWarning: false,
+			name: "USING keyword inside string literal does not trigger false positive",
+			sql:  "EXECUTE IMMEDIATE 'INSERT INTO t USING (src)'",
 		},
 		{
-			name:          "USING inside dollar-quoted block does not trigger false positive",
-			sql:           "EXECUTE IMMEDIATE $$MERGE INTO t USING (SELECT 1 AS id) AS src ON t.id = src.id WHEN MATCHED THEN DELETE$$",
-			expectWarning: false,
+			name: "USING inside dollar-quoted block does not trigger false positive",
+			sql:  "EXECUTE IMMEDIATE $$MERGE INTO t USING (SELECT 1 AS id) AS src ON t.id = src.id WHEN MATCHED THEN DELETE$$",
+		},
+		{
+			name: "Lowercase execute immediate — case insensitive",
+			sql:  "execute immediate 'SELECT 1'",
+		},
+		{
+			name: "Mixed case execute immediate — case insensitive",
+			sql:  "Execute Immediate 'SELECT 1'",
+		},
+		{
+			name: "Argument on next line — multiline input",
+			sql:  "EXECUTE IMMEDIATE\n  'SELECT 1'",
 		},
 
 		// ── Invalid Cases ────────────────────────────────────────────────────
@@ -110,69 +147,35 @@ func TestValidateSnowflakePatterns_ExecuteImmediate(t *testing.T) {
 			expectWarning: true,
 			expectedMatch: "USING clause in EXECUTE IMMEDIATE must contain at least one bind variable",
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ranges := GetStatementRanges(tt.sql)
-			markers := ValidateSnowflakePatterns(tt.sql, ranges)
-			warnings := getWarnings(markers)
-
-			if tt.expectWarning {
-				if len(warnings) == 0 {
-					t.Fatalf("Expected warnings for %q, got 0", tt.sql)
-				}
-				found := false
-				for _, w := range warnings {
-					if strings.Contains(strings.ToLower(w.Message), strings.ToLower(tt.expectedMatch)) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Errorf("Expected warning matching %q, got: %v", tt.expectedMatch, warnings[0].Message)
-				}
-			} else {
-				if len(warnings) > 0 {
-					t.Errorf("Expected 0 warnings for %q, got %d: %v", tt.sql, len(warnings), warnings)
-				}
-			}
-		})
-	}
+	})
 }
 
 func TestValidateSnowflakePatterns_ExecuteTask(t *testing.T) {
-	tests := []struct {
-		name          string
-		sql           string
-		expectWarning bool
-		expectedMatch string
-	}{
+	runPatternTests(t, []patternTestCase{
 		// ── Valid Cases ──────────────────────────────────────────────────────
 		{
-			name:          "Simple task name",
-			sql:           "EXECUTE TASK my_task",
-			expectWarning: false,
+			name: "Simple task name",
+			sql:  "EXECUTE TASK my_task",
 		},
 		{
-			name:          "Schema-qualified task name",
-			sql:           "EXECUTE TASK my_schema.my_task",
-			expectWarning: false,
+			name: "Schema-qualified task name",
+			sql:  "EXECUTE TASK my_schema.my_task",
 		},
 		{
-			name:          "Fully qualified task name",
-			sql:           "EXECUTE TASK my_db.my_schema.my_task",
-			expectWarning: false,
+			name: "Fully qualified task name",
+			sql:  "EXECUTE TASK my_db.my_schema.my_task",
 		},
 		{
-			name:          "Quoted task name",
-			sql:           `EXECUTE TASK "My Task"`,
-			expectWarning: false,
+			name: "Quoted task name",
+			sql:  `EXECUTE TASK "My Task"`,
 		},
 		{
-			name:          "Task name with trailing semicolon",
-			sql:           "EXECUTE TASK my_task;",
-			expectWarning: false,
+			name: "Task name with trailing semicolon",
+			sql:  "EXECUTE TASK my_task;",
+		},
+		{
+			name: "Lowercase execute task — case insensitive",
+			sql:  "execute task my_task",
 		},
 
 		// ── Invalid Cases ────────────────────────────────────────────────────
@@ -188,52 +191,20 @@ func TestValidateSnowflakePatterns_ExecuteTask(t *testing.T) {
 			expectWarning: true,
 			expectedMatch: "requires a task name",
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ranges := GetStatementRanges(tt.sql)
-			markers := ValidateSnowflakePatterns(tt.sql, ranges)
-			warnings := getWarnings(markers)
-
-			if tt.expectWarning {
-				if len(warnings) == 0 {
-					t.Fatalf("Expected warnings for %q, got 0", tt.sql)
-				}
-				found := false
-				for _, w := range warnings {
-					if strings.Contains(strings.ToLower(w.Message), strings.ToLower(tt.expectedMatch)) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Errorf("Expected warning matching %q, got: %v", tt.expectedMatch, warnings[0].Message)
-				}
-			} else {
-				if len(warnings) > 0 {
-					t.Errorf("Expected 0 warnings for %q, got %d: %v", tt.sql, len(warnings), warnings)
-				}
-			}
-		})
-	}
+		{
+			name:          "Lowercase execute task — no task name",
+			sql:           "execute task",
+			expectWarning: true,
+			expectedMatch: "requires a task name",
+		},
+	})
 }
 
 // TestExecuteOtherForms ensures that other EXECUTE variants (ALERT, MANAGED TASK)
 // do not produce spurious warnings.
 func TestExecuteOtherForms(t *testing.T) {
-	validCases := []string{
-		"EXECUTE ALERT my_alert",
-		"EXECUTE MANAGED TASK my_task",
-	}
-
-	for _, sql := range validCases {
-		t.Run(sql, func(t *testing.T) {
-			ranges := GetStatementRanges(sql)
-			markers := ValidateSnowflakePatterns(sql, ranges)
-			if warns := getWarnings(markers); len(warns) > 0 {
-				t.Errorf("Expected 0 warnings for %q, got %d: %v", sql, len(warns), warns)
-			}
-		})
-	}
+	runPatternTests(t, []patternTestCase{
+		{name: "EXECUTE ALERT", sql: "EXECUTE ALERT my_alert"},
+		{name: "EXECUTE MANAGED TASK", sql: "EXECUTE MANAGED TASK my_task"},
+	})
 }
