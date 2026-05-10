@@ -12,6 +12,7 @@ package sqleditor
 
 import (
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 
@@ -305,9 +306,12 @@ var (
 	reIsCreateMaskingPolicy = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?MASKING\s+POLICY\b`)
 
 	// ── CREATE NETWORK POLICY ─────────────────────────────────────────────────
-	reIsCreateNetworkPolicy = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?NETWORK\s+POLICY\b`)
-	reNetworkPolicyIPList   = regexp.MustCompile(`(?i)\b(ALLOWED_IP_LIST|BLOCKED_IP_LIST)\s*=\s*\(([^)]*)\)`)
-	networkPolicyProps      = strings.Join([]string{
+	reIsCreateNetworkPolicy       = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?NETWORK\s+POLICY\b`)
+	reNetworkPolicyName           = regexp.MustCompile(`(?i)POLICY\s+(` + _identPath + `)`)
+	reNetworkPolicyIPList         = regexp.MustCompile(`(?i)\b(ALLOWED_IP_LIST|BLOCKED_IP_LIST)\s*=\s*\(([^)]*)\)`)
+	reNetworkPolicyHasAllowedIP   = regexp.MustCompile(`(?i)\bALLOWED_IP_LIST\s*=\s*\(([^)]*)\)`)
+	reNetworkPolicyHasAllowedRules = regexp.MustCompile(`(?i)\bALLOWED_NETWORK_RULE_LIST\s*=\s*\(([^)]*)\)`)
+	networkPolicyProps             = strings.Join([]string{
 		`ALLOWED_IP_LIST`, `BLOCKED_IP_LIST`,
 		`ALLOWED_NETWORK_RULE_LIST`, `BLOCKED_NETWORK_RULE_LIST`,
 		`COMMENT`,
@@ -1599,17 +1603,20 @@ func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarke
 	var markers []DiagMarker
 
 	// 1. Account-level: name must not have a database or schema prefix.
-	if m := regexp.MustCompile(`(?i)POLICY\s+(` + _identPath + `)`).FindStringSubmatch(parseText); m != nil {
+	if m := reNetworkPolicyName.FindStringSubmatch(parseText); m != nil {
 		if strings.Contains(m[1], ".") {
 			markers = append(markers, diagMarkerSpan(r, "Network policies are account-level objects and cannot have a database or schema prefix.", 4))
 		}
 	}
 
-	// 2. At least one of ALLOWED_IP_LIST or ALLOWED_NETWORK_RULE_LIST must be present.
-	hasAllowedIP := regexp.MustCompile(`(?i)\bALLOWED_IP_LIST\s*=`).MatchString(parseText)
-	hasAllowedRules := regexp.MustCompile(`(?i)\bALLOWED_NETWORK_RULE_LIST\s*=`).MatchString(parseText)
+	// 2. At least one of ALLOWED_IP_LIST or ALLOWED_NETWORK_RULE_LIST must be present
+	// and non-empty. An empty list (e.g. ALLOWED_IP_LIST = ()) has no effect.
+	allowedIPMatch := reNetworkPolicyHasAllowedIP.FindStringSubmatch(parseText)
+	hasAllowedIP := allowedIPMatch != nil && strings.TrimSpace(allowedIPMatch[1]) != ""
+	allowedRulesMatch := reNetworkPolicyHasAllowedRules.FindStringSubmatch(parseText)
+	hasAllowedRules := allowedRulesMatch != nil && strings.TrimSpace(allowedRulesMatch[1]) != ""
 	if !hasAllowedIP && !hasAllowedRules {
-		markers = append(markers, diagMarkerSpan(r, "Network policy has no effect: at least one of ALLOWED_IP_LIST or ALLOWED_NETWORK_RULE_LIST must be specified.", 4))
+		markers = append(markers, diagMarkerSpan(r, "Network policy has no effect: at least one of ALLOWED_IP_LIST or ALLOWED_NETWORK_RULE_LIST must be specified and non-empty.", 4))
 	}
 
 	// 3. Validate IP lists and collect IPs for overlap check.
@@ -1630,9 +1637,9 @@ func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarke
 			if entry == "" {
 				continue
 			}
-			if !isValidIPv4CIDR(entry) {
+			if !isValidIPCIDR(entry) {
 				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("Invalid IP address or CIDR '%s' in %s. Expected IPv4 format: x.x.x.x or x.x.x.x/n (0 ≤ n ≤ 32).", entry, listKind),
+					fmt.Sprintf("Invalid IP address or CIDR '%s' in %s. Expected a valid IPv4 or IPv6 address, optionally with a CIDR prefix (e.g. 192.168.0.0/24 or 2001:db8::/32).", entry, listKind),
 					4))
 				continue
 			}
@@ -1644,7 +1651,9 @@ func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarke
 		}
 	}
 
-	// 4. Warn if the same IP/CIDR appears in both ALLOWED_IP_LIST and BLOCKED_IP_LIST.
+	// 4. Warn if the same IP/CIDR string appears in both ALLOWED_IP_LIST and
+	// BLOCKED_IP_LIST. Note: this is a string-exact comparison; semantic subnet
+	// overlaps (e.g. 10.0.0.0/8 allowed vs 10.0.1.5 blocked) are not detected.
 	if len(allowedIPs) > 0 && len(blockedIPs) > 0 {
 		allowedSet := make(map[string]bool, len(allowedIPs))
 		for _, ip := range allowedIPs {
@@ -1665,47 +1674,15 @@ func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarke
 	return markers
 }
 
-// isValidIPv4CIDR reports whether s is a valid IPv4 address with an optional
-// CIDR prefix (e.g. "192.168.0.0/24" or "10.0.0.1").
-// Octets must be 0–255; prefix, if present, must be 0–32.
-func isValidIPv4CIDR(s string) bool {
-	parts := strings.SplitN(s, "/", 2)
-	octs := strings.Split(parts[0], ".")
-	if len(octs) != 4 {
-		return false
+// isValidIPCIDR reports whether s is a valid IPv4 or IPv6 address, optionally
+// followed by a CIDR prefix length (e.g. "192.168.0.0/24", "2001:db8::/32",
+// or bare addresses like "10.0.0.1" or "::1").
+func isValidIPCIDR(s string) bool {
+	if strings.Contains(s, "/") {
+		_, _, err := net.ParseCIDR(s)
+		return err == nil
 	}
-	for _, o := range octs {
-		if len(o) == 0 || len(o) > 3 {
-			return false
-		}
-		n := 0
-		for _, c := range o {
-			if c < '0' || c > '9' {
-				return false
-			}
-			n = n*10 + int(c-'0')
-		}
-		if n > 255 {
-			return false
-		}
-	}
-	if len(parts) == 2 {
-		prefix := parts[1]
-		if len(prefix) == 0 || len(prefix) > 2 {
-			return false
-		}
-		n := 0
-		for _, c := range prefix {
-			if c < '0' || c > '9' {
-				return false
-			}
-			n = n*10 + int(c-'0')
-		}
-		if n > 32 {
-			return false
-		}
-	}
-	return true
+	return net.ParseIP(s) != nil
 }
 
 func validateCopyInto(parseText string, r StatementRange) []DiagMarker {

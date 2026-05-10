@@ -169,14 +169,15 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		// Network Policies
 		"CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('192.168.1.0/24')",
 		"CREATE OR REPLACE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('10.0.0.0/8', '192.168.1.1/32')",
-		"CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ()",
 		"CREATE NETWORK POLICY my_policy ALLOWED_NETWORK_RULE_LIST = (my_rule)",
 		"CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('10.0.0.1/32') BLOCKED_IP_LIST = ('192.168.0.0/16')",
 		"CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('0.0.0.0/0')",
 		"CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('10.0.0.1')",
 		"CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('10.0.0.0/8') ALLOWED_NETWORK_RULE_LIST = (rule1, rule2) COMMENT = 'my policy'",
-		"CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = () BLOCKED_IP_LIST = ()",
 		"CREATE NETWORK POLICY my_policy ALLOWED_NETWORK_RULE_LIST = (rule1) BLOCKED_NETWORK_RULE_LIST = (rule2)",
+		"CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('2001:db8::/32')",
+		"CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('::1')",
+		"CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('2001:db8::1') BLOCKED_IP_LIST = ('fe80::/10')",
 	}
 
 	for _, sql := range validQueries {
@@ -306,12 +307,16 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 
 		// Invalid Network Policies
 		{"Network Policy with prefix", "CREATE NETWORK POLICY MY_DB.PUBLIC.bad_policy ALLOWED_IP_LIST = ('10.0.0.0/8')", "account-level"},
+		{"Network Policy OR REPLACE with prefix", "CREATE OR REPLACE NETWORK POLICY MY_DB.PUBLIC.bad ALLOWED_IP_LIST = ('10.0.0.0/8')", "account-level"},
 		{"Network Policy no allowed list (only blocked)", "CREATE NETWORK POLICY my_policy BLOCKED_IP_LIST = ('10.0.0.0/8')", "no effect"},
 		{"Network Policy no properties", "CREATE NETWORK POLICY my_policy", "no effect"},
 		{"Network Policy only comment", "CREATE NETWORK POLICY my_policy COMMENT = 'test'", "no effect"},
+		{"Network Policy empty ALLOWED_IP_LIST", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ()", "no effect"},
+		{"Network Policy both lists empty", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = () BLOCKED_IP_LIST = ()", "no effect"},
 		{"Network Policy invalid IP", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('not_an_ip')", "Invalid IP address or CIDR"},
 		{"Network Policy invalid CIDR prefix", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('192.168.0.1/33')", "Invalid IP address or CIDR"},
 		{"Network Policy invalid octet", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('256.0.0.1/24')", "Invalid IP address or CIDR"},
+		{"Network Policy invalid IPv6", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('gg::1')", "Invalid IP address or CIDR"},
 		{"Network Policy IP in both lists", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('10.0.0.1/32') BLOCKED_IP_LIST = ('10.0.0.1/32')", "appears in both"},
 		{"Network Policy unknown property", "CREATE NETWORK POLICY my_policy ALLOWED_IP_LIST = ('10.0.0.0/8') INVALID_PROP = TRUE", "Unexpected property 'INVALID_PROP'"},
 	}
