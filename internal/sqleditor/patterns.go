@@ -43,7 +43,7 @@ var (
 			`|NETWORK|ROW\s+ACCESS` +
 			`|SESSION|PASSWORD|REPLICATION|FAILOVER|APPLICATION)\b` +
 			`|ALTER\s+(?:TABLE|VIEW|STREAM|DATABASE|STAGE|PIPE|PROCEDURE|FUNCTION` +
-			`|SHARE|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK` +
+			`|ALERT|SHARE|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK` +
 			`|REPLICATION|FAILOVER)\b` +
 			`|DROP\s+(?:TABLE|VIEW|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION)\b` +
 			`|UNDROP\s+(?:DATABASE|SCHEMA|TABLE)\b` +
@@ -269,6 +269,10 @@ var (
 	alertProps      = strings.Join([]string{
 		`WAREHOUSE`, `SCHEDULE`, `COMMENT`,
 	}, "|")
+	reAlertIfExists  = regexp.MustCompile(`(?i)\bIF\s*\(\s*EXISTS\s*\(`)
+	reAlertThen      = regexp.MustCompile(`(?i)\bTHEN\b`)
+	reAlertWarehouse = regexp.MustCompile(`(?i)\bWAREHOUSE\s*=`)
+	reAlertSchedule  = regexp.MustCompile(`(?i)\bSCHEDULE\s*=`)
 
 	// ── CREATE PIPE ───────────────────────────────────────────────────────────
 	reIsCreatePipe = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PIPE\b`)
@@ -1525,31 +1529,30 @@ func validateCreateAlert(parseText string, r StatementRange) []DiagMarker {
 	// 1. Mutually exclusive OR REPLACE and IF NOT EXISTS
 	if reOrReplace.MatchString(parseText) && reIfNotExists.MatchString(parseText) {
 		markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE ALERT statement.", 4))
+		return markers
 	}
 
 	// 2. Mandatory IF (EXISTS (...))
-	ifIdx := regexp.MustCompile(`(?i)\bIF\s*\(\s*EXISTS\s*\(`).FindStringIndex(parseText)
-	if ifIdx == nil {
+	if ifIdx := reAlertIfExists.FindStringIndex(parseText); ifIdx == nil {
 		markers = append(markers, diagMarkerSpan(r, "Missing mandatory IF (EXISTS (...)) clause in CREATE ALERT statement.", 4))
 		return markers
 	}
 
-	preamble := parseText[:ifIdx[0]]
-	body := parseText[ifIdx[0]:]
+	preamble := parseText[:reAlertIfExists.FindStringIndex(parseText)[0]]
+	body := parseText[reAlertIfExists.FindStringIndex(parseText)[0]:]
 
 	// 3. Mandatory THEN
-	thenIdx := regexp.MustCompile(`(?i)\bTHEN\b`).FindStringIndex(body)
-	if thenIdx == nil {
+	if thenIdx := reAlertThen.FindStringIndex(body); thenIdx == nil {
 		markers = append(markers, diagMarkerSpan(r, "Missing mandatory THEN keyword in CREATE ALERT statement.", 4))
 	}
 
 	// 4. Mandatory WAREHOUSE
-	if !regexp.MustCompile(`(?i)\bWAREHOUSE\s*=`).MatchString(preamble) {
+	if !reAlertWarehouse.MatchString(preamble) {
 		markers = append(markers, diagMarkerSpan(r, "Missing mandatory WAREHOUSE property in CREATE ALERT statement.", 4))
 	}
 
 	// 5. Mandatory SCHEDULE
-	if !regexp.MustCompile(`(?i)\bSCHEDULE\s*=`).MatchString(preamble) {
+	if !reAlertSchedule.MatchString(preamble) {
 		markers = append(markers, diagMarkerSpan(r, "Missing mandatory SCHEDULE property in CREATE ALERT statement.", 4))
 	}
 
