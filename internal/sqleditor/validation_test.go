@@ -275,6 +275,13 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"GRANT SELECT ON TABLE my_table TO SHARE my_share",
 		"REVOKE USAGE ON DATABASE my_db FROM SHARE my_share",
 		"REVOKE SELECT ON TABLE my_table FROM SHARE my_share",
+		// CREATE EVENT TABLE — valid
+		"CREATE EVENT TABLE my_events",
+		"CREATE OR REPLACE EVENT TABLE my_events",
+		"CREATE EVENT TABLE IF NOT EXISTS my_events",
+		"CREATE EVENT TABLE my_events COMMENT = 'telemetry data'",
+		"CREATE EVENT TABLE my_events DATA_RETENTION_TIME_IN_DAYS = 30",
+		"CREATE EVENT TABLE my_events CHANGE_TRACKING = TRUE",
 		// CREATE SHARE — valid
 		"CREATE SHARE my_share",
 		"CREATE OR REPLACE SHARE my_share",
@@ -523,6 +530,13 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Password Policy max lt min length", "CREATE PASSWORD POLICY my_policy PASSWORD_MIN_LENGTH = 20 PASSWORD_MAX_LENGTH = 10", "greater than or equal to PASSWORD_MIN_LENGTH"},
 		{"Password Policy min age gt max age", "CREATE PASSWORD POLICY my_policy PASSWORD_MIN_AGE_DAYS = 90 PASSWORD_MAX_AGE_DAYS = 30", "PASSWORD_MIN_AGE_DAYS"},
 		{"Password Policy unknown property", "CREATE PASSWORD POLICY my_policy INVALID_PROP = TRUE", "Unexpected property 'INVALID_PROP'"},
+
+		// Invalid CREATE EVENT TABLE
+		{"Create Event Table OR REPLACE and IF NOT EXISTS", "CREATE OR REPLACE EVENT TABLE IF NOT EXISTS my_events", "Conflict between OR REPLACE and IF NOT EXISTS"},
+		{"Create Event Table column definitions", "CREATE EVENT TABLE my_events (col1 VARCHAR)", "Event tables have a fixed schema"},
+		{"Create Event Table CLUSTER BY", "CREATE EVENT TABLE my_events CLUSTER BY (ts)", "CLUSTER BY is not supported for EVENT TABLE"},
+		{"Create Event Table invalid property", "CREATE EVENT TABLE my_events AUTO_REFRESH = TRUE", "Unexpected property 'AUTO_REFRESH'"},
+		{"Create Event Table missing name", "CREATE EVENT TABLE", "Unexpected syntax"},
 
 		// Invalid CREATE SHARE
 		{"Create Share with prefix", "CREATE SHARE db.schema.my_share", "account-level"},
@@ -2599,6 +2613,147 @@ func TestValidateSnowflakePatterns_CreateExternalVolume(t *testing.T) {
 	// warning (proving the early return works and no additional checks run).
 	t.Run("OR REPLACE and IF NOT EXISTS emits exactly one marker", func(t *testing.T) {
 		sql := "CREATE OR REPLACE EXTERNAL VOLUME IF NOT EXISTS my_vol ALLOW_WRITES = TRUE"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warns := getWarnings(markers)
+		if len(warns) != 1 {
+			t.Errorf("Expected exactly 1 warning (early return), got %d: %v", len(warns), warns)
+		}
+	})
+}
+
+func TestValidateSnowflakePatterns_CreateEventTable(t *testing.T) {
+	validCases := []string{
+		// Minimal valid event table
+		"CREATE EVENT TABLE my_events",
+		// With OR REPLACE
+		"CREATE OR REPLACE EVENT TABLE my_events",
+		// With IF NOT EXISTS
+		"CREATE EVENT TABLE IF NOT EXISTS my_events",
+		// With COMMENT
+		"CREATE EVENT TABLE my_events COMMENT = 'telemetry data'",
+		// With DATA_RETENTION_TIME_IN_DAYS
+		"CREATE EVENT TABLE my_events DATA_RETENTION_TIME_IN_DAYS = 30",
+		// With MAX_DATA_EXTENSION_TIME_IN_DAYS
+		"CREATE EVENT TABLE my_events MAX_DATA_EXTENSION_TIME_IN_DAYS = 14",
+		// With CHANGE_TRACKING = TRUE
+		"CREATE EVENT TABLE my_events CHANGE_TRACKING = TRUE",
+		// With CHANGE_TRACKING = FALSE
+		"CREATE EVENT TABLE my_events CHANGE_TRACKING = FALSE",
+		// With DEFAULT_DDL_COLLATION
+		"CREATE EVENT TABLE my_events DEFAULT_DDL_COLLATION = 'en-ci'",
+		// With COPY GRANTS
+		"CREATE OR REPLACE EVENT TABLE my_events COPY GRANTS",
+		// Multiple properties
+		"CREATE EVENT TABLE my_events DATA_RETENTION_TIME_IN_DAYS = 7 MAX_DATA_EXTENSION_TIME_IN_DAYS = 14 CHANGE_TRACKING = TRUE COMMENT = 'logs'",
+		// Schema-qualified name
+		"CREATE EVENT TABLE my_db.my_schema.my_events",
+		// Zero retention
+		"CREATE EVENT TABLE my_events DATA_RETENTION_TIME_IN_DAYS = 0",
+		// Zero extension
+		"CREATE EVENT TABLE my_events MAX_DATA_EXTENSION_TIME_IN_DAYS = 0",
+		// CLUSTER BY inside COMMENT string must not trigger false positive
+		"CREATE EVENT TABLE my_events COMMENT = 'has CLUSTER BY inside'",
+		// CLUSTER BY inside a line comment must not trigger false positive
+		"CREATE EVENT TABLE my_events\n-- CLUSTER BY (ts)\nCOMMENT = 'test'",
+		// Keywords inside a block comment must not trigger false positive
+		"CREATE EVENT TABLE my_events /* AUTO_REFRESH = TRUE */ COMMENT = 'test'",
+		// TAG property
+		"CREATE EVENT TABLE my_events TAG (cost_center = 'finance')",
+	}
+
+	for _, sql := range validCases {
+		t.Run(sql[:min(len(sql), 60)], func(t *testing.T) {
+			ranges := GetStatementRanges(sql)
+			markers := ValidateSnowflakePatterns(sql, ranges)
+			if warns := getWarnings(markers); len(warns) > 0 {
+				t.Errorf("Expected 0 warnings, got %d: %v", len(warns), warns)
+			}
+		})
+	}
+
+	invalidCases := []struct {
+		name     string
+		sql      string
+		wantMsgs []string
+	}{
+		{
+			"OR REPLACE and IF NOT EXISTS conflict",
+			"CREATE OR REPLACE EVENT TABLE IF NOT EXISTS my_events",
+			[]string{"Conflict between OR REPLACE and IF NOT EXISTS"},
+		},
+		{
+			"Column definitions not allowed",
+			"CREATE EVENT TABLE my_events (col1 VARCHAR, col2 INT)",
+			[]string{"Event tables have a fixed schema and do not support column definitions"},
+		},
+		{
+			"CLUSTER BY not supported",
+			"CREATE EVENT TABLE my_events CLUSTER BY (timestamp)",
+			[]string{"CLUSTER BY is not supported for EVENT TABLE"},
+		},
+		{
+			"Invalid DATA_RETENTION_TIME_IN_DAYS",
+			"CREATE EVENT TABLE my_events DATA_RETENTION_TIME_IN_DAYS = abc",
+			[]string{"DATA_RETENTION_TIME_IN_DAYS must be a non-negative integer"},
+		},
+		{
+			"Negative DATA_RETENTION_TIME_IN_DAYS",
+			"CREATE EVENT TABLE my_events DATA_RETENTION_TIME_IN_DAYS = -1",
+			[]string{"DATA_RETENTION_TIME_IN_DAYS must be a non-negative integer"},
+		},
+		{
+			"Invalid MAX_DATA_EXTENSION_TIME_IN_DAYS",
+			"CREATE EVENT TABLE my_events MAX_DATA_EXTENSION_TIME_IN_DAYS = xyz",
+			[]string{"MAX_DATA_EXTENSION_TIME_IN_DAYS must be a non-negative integer"},
+		},
+		{
+			"Negative MAX_DATA_EXTENSION_TIME_IN_DAYS",
+			"CREATE EVENT TABLE my_events MAX_DATA_EXTENSION_TIME_IN_DAYS = -1",
+			[]string{"MAX_DATA_EXTENSION_TIME_IN_DAYS must be a non-negative integer"},
+		},
+		{
+			"Invalid CHANGE_TRACKING value",
+			"CREATE EVENT TABLE my_events CHANGE_TRACKING = MAYBE",
+			[]string{"CHANGE_TRACKING must be TRUE or FALSE"},
+		},
+		{
+			"Unexpected property AUTO_REFRESH",
+			"CREATE EVENT TABLE my_events AUTO_REFRESH = TRUE",
+			[]string{"Unexpected property 'AUTO_REFRESH'"},
+		},
+		{
+			"Missing name",
+			"CREATE EVENT TABLE",
+			[]string{"Unexpected syntax in CREATE EVENT TABLE"},
+		},
+	}
+
+	for _, tt := range invalidCases {
+		t.Run(tt.name, func(t *testing.T) {
+			ranges := GetStatementRanges(tt.sql)
+			markers := ValidateSnowflakePatterns(tt.sql, ranges)
+			warns := getWarnings(markers)
+
+			for _, wantMsg := range tt.wantMsgs {
+				found := false
+				for _, w := range warns {
+					if strings.Contains(w.Message, wantMsg) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected warning for %q, but got none matching %q. Warnings: %v", tt.sql, wantMsg, warns)
+				}
+			}
+		})
+	}
+
+	// Verify that the OR REPLACE + IF NOT EXISTS conflict triggers exactly one
+	// warning (proving the early return works and no additional checks run).
+	t.Run("OR REPLACE and IF NOT EXISTS emits exactly one marker", func(t *testing.T) {
+		sql := "CREATE OR REPLACE EVENT TABLE IF NOT EXISTS my_events AUTO_REFRESH = TRUE"
 		ranges := GetStatementRanges(sql)
 		markers := ValidateSnowflakePatterns(sql, ranges)
 		warns := getWarnings(markers)
