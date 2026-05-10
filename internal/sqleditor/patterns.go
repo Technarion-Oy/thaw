@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"strconv"
 	"strings"
 
 	sf "thaw/internal/snowflake"
@@ -41,7 +42,7 @@ var (
 			`|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b` +
 			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:STAGE` +
 			`|SHARE` +
-			`|SESSION|PASSWORD|REPLICATION|FAILOVER|APPLICATION)\b` +
+			`|REPLICATION|FAILOVER|APPLICATION)\b` +
 			`|ALTER\s+(?:TABLE|VIEW|STREAM|DATABASE|STAGE|PIPE|PROCEDURE|FUNCTION` +
 			`|ALERT|SHARE|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK` +
 			`|REPLICATION|FAILOVER)\b` +
@@ -327,6 +328,38 @@ var (
 	// preventing a bare -> elsewhere in the SQL from satisfying the check.
 	reRowAccessPolicyArrow = regexp.MustCompile(`(?i)\bRETURNS\s+BOOLEAN\s*->`)
 	reRowAccessPolicyASOpen    = regexp.MustCompile(`(?i)\bAS\s*\(`)
+
+	// ── CREATE SESSION POLICY ─────────────────────────────────────────────────
+	reIsCreateSessionPolicy   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SESSION\s+POLICY\b`)
+	reSessionPolicyName       = regexp.MustCompile(`(?i)POLICY\s+(` + _identPath + `)`)
+	reSessionIdleTimeout      = regexp.MustCompile(`(?i)\bSESSION_IDLE_TIMEOUT_MINS\s*=\s*(-?\d+)`)
+	reSessionUIIdleTimeout    = regexp.MustCompile(`(?i)\bSESSION_UI_IDLE_TIMEOUT_MINS\s*=\s*(-?\d+)`)
+	sessionPolicyProps        = strings.Join([]string{
+		`SESSION_IDLE_TIMEOUT_MINS`, `SESSION_UI_IDLE_TIMEOUT_MINS`, `COMMENT`,
+	}, "|")
+
+	// ── CREATE PASSWORD POLICY ────────────────────────────────────────────────
+	reIsCreatePasswordPolicy     = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PASSWORD\s+POLICY\b`)
+	rePasswordPolicyName         = regexp.MustCompile(`(?i)POLICY\s+(` + _identPath + `)`)
+	rePasswordMinLength          = regexp.MustCompile(`(?i)\bPASSWORD_MIN_LENGTH\s*=\s*(-?\d+)`)
+	rePasswordMaxLength          = regexp.MustCompile(`(?i)\bPASSWORD_MAX_LENGTH\s*=\s*(-?\d+)`)
+	rePasswordMinUpperCase       = regexp.MustCompile(`(?i)\bPASSWORD_MIN_UPPER_CASE_CHARS\s*=\s*(-?\d+)`)
+	rePasswordMinLowerCase       = regexp.MustCompile(`(?i)\bPASSWORD_MIN_LOWER_CASE_CHARS\s*=\s*(-?\d+)`)
+	rePasswordMinNumeric         = regexp.MustCompile(`(?i)\bPASSWORD_MIN_NUMERIC_CHARS\s*=\s*(-?\d+)`)
+	rePasswordMinSpecial         = regexp.MustCompile(`(?i)\bPASSWORD_MIN_SPECIAL_CHARS\s*=\s*(-?\d+)`)
+	rePasswordMinAgeDays         = regexp.MustCompile(`(?i)\bPASSWORD_MIN_AGE_DAYS\s*=\s*(-?\d+)`)
+	rePasswordMaxAgeDays         = regexp.MustCompile(`(?i)\bPASSWORD_MAX_AGE_DAYS\s*=\s*(-?\d+)`)
+	rePasswordMaxRetries         = regexp.MustCompile(`(?i)\bPASSWORD_MAX_RETRIES\s*=\s*(-?\d+)`)
+	rePasswordLockoutTimeMins    = regexp.MustCompile(`(?i)\bPASSWORD_LOCKOUT_TIME_MINS\s*=\s*(-?\d+)`)
+	rePasswordHistory            = regexp.MustCompile(`(?i)\bPASSWORD_HISTORY\s*=\s*(-?\d+)`)
+	passwordPolicyProps          = strings.Join([]string{
+		`PASSWORD_MIN_LENGTH`, `PASSWORD_MAX_LENGTH`,
+		`PASSWORD_MIN_UPPER_CASE_CHARS`, `PASSWORD_MIN_LOWER_CASE_CHARS`,
+		`PASSWORD_MIN_NUMERIC_CHARS`, `PASSWORD_MIN_SPECIAL_CHARS`,
+		`PASSWORD_MIN_AGE_DAYS`, `PASSWORD_MAX_AGE_DAYS`,
+		`PASSWORD_MAX_RETRIES`, `PASSWORD_LOCKOUT_TIME_MINS`,
+		`PASSWORD_HISTORY`, `COMMENT`,
+	}, "|")
 
 	// ── GRANT ─────────────────────────────────────────────────────────────────
 	reIsGrantRole = regexp.MustCompile(`(?i)^\s*GRANT\s+ROLE\b`)
@@ -1159,6 +1192,18 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
+		// ── Preamble: CREATE SESSION POLICY ──────────────────────────────
+		if reIsCreateSessionPolicy.MatchString(parseText) {
+			markers = append(markers, validateCreateSessionPolicy(parseText, r)...)
+			continue
+		}
+
+		// ── Preamble: CREATE PASSWORD POLICY ─────────────────────────────
+		if reIsCreatePasswordPolicy.MatchString(parseText) {
+			markers = append(markers, validateCreatePasswordPolicy(parseText, r)...)
+			continue
+		}
+
 		// ── Preamble: CREATE ROW ACCESS POLICY ───────────────────────────
 		if reIsCreateRowAccessPolicy.MatchString(parseText) {
 			markers = append(markers, validateCreateRowAccessPolicy(parseText, r)...)
@@ -1743,6 +1788,108 @@ func sqlIdentPathHasDot(s string) bool {
 		}
 	}
 	return false
+}
+
+// validateCreateSessionPolicy checks structural requirements for a
+// CREATE [OR REPLACE] SESSION POLICY statement.
+func validateCreateSessionPolicy(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// 1. Account-level: object name must not have a database or schema prefix.
+	if m := reSessionPolicyName.FindStringSubmatch(parseText); m != nil {
+		if sqlIdentPathHasDot(m[1]) {
+			markers = append(markers, diagMarkerSpan(r, "Session policies are account-level objects and cannot have a database or schema prefix.", 4))
+		}
+	}
+
+	// 2. Validate SESSION_IDLE_TIMEOUT_MINS range (0–999999).
+	if m := reSessionIdleTimeout.FindStringSubmatch(parseText); m != nil {
+		if v, err := strconv.Atoi(m[1]); err == nil && (v < 0 || v > 999999) {
+			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("SESSION_IDLE_TIMEOUT_MINS value %d is out of range (0–999999). Use 0 to disable the timeout.", v), 4))
+		}
+	}
+
+	// 3. Validate SESSION_UI_IDLE_TIMEOUT_MINS range (0–999999).
+	if m := reSessionUIIdleTimeout.FindStringSubmatch(parseText); m != nil {
+		if v, err := strconv.Atoi(m[1]); err == nil && (v < 0 || v > 999999) {
+			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("SESSION_UI_IDLE_TIMEOUT_MINS value %d is out of range (0–999999). Use 0 to disable the timeout.", v), 4))
+		}
+	}
+
+	// 4. Validate property keys.
+	validateProperties(reStripStringLiterals.ReplaceAllString(parseText, "''"), sessionPolicyProps, r, &markers)
+
+	return markers
+}
+
+// validateCreatePasswordPolicy checks structural requirements for a
+// CREATE [OR REPLACE] PASSWORD POLICY statement.
+func validateCreatePasswordPolicy(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// 1. Account-level: object name must not have a database or schema prefix.
+	if m := rePasswordPolicyName.FindStringSubmatch(parseText); m != nil {
+		if sqlIdentPathHasDot(m[1]) {
+			markers = append(markers, diagMarkerSpan(r, "Password policies are account-level objects and cannot have a database or schema prefix.", 4))
+		}
+	}
+
+	// Helper to parse a named integer property and check a range; returns the
+	// parsed value (or -1 if absent) so cross-property checks can use it.
+	type intProp struct {
+		re   *regexp.Regexp
+		name string
+		min  int
+		max  int // -1 means no upper bound
+	}
+
+	props := []intProp{
+		{rePasswordMinLength, "PASSWORD_MIN_LENGTH", 8, 256},
+		{rePasswordMaxLength, "PASSWORD_MAX_LENGTH", 8, 256},
+		{rePasswordMinUpperCase, "PASSWORD_MIN_UPPER_CASE_CHARS", 0, -1},
+		{rePasswordMinLowerCase, "PASSWORD_MIN_LOWER_CASE_CHARS", 0, -1},
+		{rePasswordMinNumeric, "PASSWORD_MIN_NUMERIC_CHARS", 0, -1},
+		{rePasswordMinSpecial, "PASSWORD_MIN_SPECIAL_CHARS", 0, -1},
+		{rePasswordMinAgeDays, "PASSWORD_MIN_AGE_DAYS", 0, -1},
+		{rePasswordMaxAgeDays, "PASSWORD_MAX_AGE_DAYS", 0, 999},
+		{rePasswordMaxRetries, "PASSWORD_MAX_RETRIES", 1, 10},
+		{rePasswordLockoutTimeMins, "PASSWORD_LOCKOUT_TIME_MINS", 1, 999},
+		{rePasswordHistory, "PASSWORD_HISTORY", 0, 24},
+	}
+
+	values := make(map[string]int)
+	for _, p := range props {
+		m := p.re.FindStringSubmatch(parseText)
+		if m == nil {
+			continue
+		}
+		v, err := strconv.Atoi(m[1])
+		if err != nil {
+			continue
+		}
+		values[p.name] = v
+		if v < p.min {
+			msg := fmt.Sprintf("%s value %d is below the minimum (%d).", p.name, v, p.min)
+			markers = append(markers, diagMarkerSpan(r, msg, 4))
+		} else if p.max >= 0 && v > p.max {
+			msg := fmt.Sprintf("%s value %d exceeds the maximum (%d).", p.name, v, p.max)
+			markers = append(markers, diagMarkerSpan(r, msg, 4))
+		}
+	}
+
+	// 3. Cross-property check: PASSWORD_MAX_LENGTH must be ≥ PASSWORD_MIN_LENGTH.
+	minLen, hasMin := values["PASSWORD_MIN_LENGTH"]
+	maxLen, hasMax := values["PASSWORD_MAX_LENGTH"]
+	if hasMin && hasMax && maxLen < minLen {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("PASSWORD_MAX_LENGTH (%d) must be greater than or equal to PASSWORD_MIN_LENGTH (%d).", maxLen, minLen),
+			4))
+	}
+
+	// 4. Validate property keys.
+	validateProperties(reStripStringLiterals.ReplaceAllString(parseText, "''"), passwordPolicyProps, r, &markers)
+
+	return markers
 }
 
 // validateCreateRowAccessPolicy checks structural requirements for a
