@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -1796,7 +1797,7 @@ func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarke
 	for _, m := range reNetworkPolicyIPList.FindAllStringSubmatch(parseText, -1) {
 		listKind := strings.ToUpper(m[1])
 		listContent := m[2]
-		for _, rawEntry := range strings.Split(listContent, ",") {
+		for rawEntry := range strings.SplitSeq(listContent, ",") {
 			entry := strings.TrimSpace(rawEntry)
 			if entry == "" {
 				continue
@@ -1851,7 +1852,7 @@ func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarke
 // This avoids the false-negative caused by whitespace-only quoted entries such
 // as ('   ') which would otherwise pass a plain strings.TrimSpace != "" check.
 func networkPolicyListHasEntries(content string) bool {
-	for _, raw := range strings.Split(content, ",") {
+	for raw := range strings.SplitSeq(content, ",") {
 		entry := strings.TrimSpace(raw)
 		if len(entry) >= 2 && entry[0] == '\'' && entry[len(entry)-1] == '\'' {
 			entry = strings.TrimSpace(entry[1 : len(entry)-1])
@@ -2126,7 +2127,7 @@ func validateGrant(parseText string, r StatementRange) []DiagMarker {
 	// ── GRANT <privileges> ON <object_type> ───────────────────────────────────
 	m := reGrantOnObject.FindStringSubmatch(parseText)
 	if m == nil {
-		// No recognisable ON clause — incomplete or unsupported form; skip.
+		// No recognizable ON clause — incomplete or unsupported form; skip.
 		return markers
 	}
 	privListRaw := m[1]
@@ -2165,7 +2166,7 @@ func validateGrant(parseText string, r StatementRange) []DiagMarker {
 			if priv == "OWNERSHIP" || priv == "ALL" || priv == "ALL PRIVILEGES" {
 				continue
 			}
-			if !privInSlice(priv, validPrivs) {
+			if !slices.Contains(validPrivs, priv) {
 				markers = append(markers, diagMarkerSpan(r,
 					fmt.Sprintf("Privilege '%s' is not valid for object type %s.", priv, objectType), 4))
 			}
@@ -2239,7 +2240,7 @@ func validateRevoke(parseText string, r StatementRange) []DiagMarker {
 			if priv == "OWNERSHIP" || priv == "ALL" || priv == "ALL PRIVILEGES" {
 				continue
 			}
-			if !privInSlice(priv, validPrivs) {
+			if !slices.Contains(validPrivs, priv) {
 				markers = append(markers, diagMarkerSpan(r,
 					fmt.Sprintf("Privilege '%s' is not valid for object type %s.", priv, objectType), 4))
 			}
@@ -2254,9 +2255,8 @@ func validateRevoke(parseText string, r StatementRange) []DiagMarker {
 // strings.Fields is used so that "CREATE  TABLE" (double space) normalises to
 // "CREATE TABLE" and matches the map keys in grantObjectPrivileges.
 func splitPrivileges(privList string) []string {
-	parts := strings.Split(privList, ",")
-	result := make([]string, 0, len(parts))
-	for _, p := range parts {
+	var result []string
+	for p := range strings.SplitSeq(privList, ",") {
 		// Collapse internal whitespace runs (tabs, double-spaces, etc.) as well
 		// as leading/trailing whitespace before the equality check.
 		trimmed := strings.Join(strings.Fields(strings.ToUpper(p)), " ")
@@ -2278,17 +2278,6 @@ func normalizeGrantObjectType(t string) string {
 	return upper
 }
 
-// privInSlice returns true when priv (already upper-cased) is present in slice.
-// Both priv and slice elements are expected to be upper-cased already; the
-// comparison is a direct string equality check with no further conversion.
-func privInSlice(priv string, slice []string) bool {
-	for _, s := range slice {
-		if s == priv {
-			return true
-		}
-	}
-	return false
-}
 
 func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
@@ -2509,13 +2498,7 @@ func isBool(s string) bool {
 }
 
 func isValidEnumValue(val string, validValues ...string) bool {
-	upperVal := strings.ToUpper(strings.Trim(val, "'"))
-	for _, valid := range validValues {
-		if upperVal == valid {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(validValues, strings.ToUpper(strings.Trim(val, "'")))
 }
 
 func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker {
@@ -2586,7 +2569,7 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 					if m := rePrimaryKeyCols.FindString(segClean); m != "" {
 						if openIdx := strings.Index(m, "("); openIdx != -1 {
 							mStr := m[openIdx+1 : len(m)-1]
-							for _, p := range strings.Split(mStr, ",") {
+							for p := range strings.SplitSeq(mStr, ",") {
 								pkCols[normalizeIdent(p)] = true
 							}
 						}

@@ -2064,14 +2064,6 @@ func TestAlterStage_Invalid(t *testing.T) {
 	}
 }
 
-// ── Helpers for tests ─────────────────────────────────────────────────────────
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
 func TestIssue129_FalsePositives(t *testing.T) {
 	sql := `
 CREATE OR REPLACE VIEW VW_CLEAN_CUSTOMERS AS
