@@ -478,7 +478,11 @@ var (
 	reExtVolAwsRoleArn         = regexp.MustCompile(`(?i)\bSTORAGE_AWS_ROLE_ARN\s*=`)
 	reExtVolAzureTenantID      = regexp.MustCompile(`(?i)\bAZURE_TENANT_ID\s*=`)
 	reExtVolAwsExternalID      = regexp.MustCompile(`(?i)\bSTORAGE_AWS_EXTERNAL_ID\s*=`)
-	reExtVolEncryptionType     = regexp.MustCompile(`(?i)\bENCRYPTION\s*=\s*\(\s*TYPE\s*=\s*'([^']*)'`)
+	reExtVolEncryptionType = regexp.MustCompile(`(?i)\bENCRYPTION\s*=\s*\(\s*TYPE\s*=\s*'([^']*)'`)
+	// extVolValidEncTypes lists the accepted ENCRYPTION TYPE values for any
+	// STORAGE_LOCATIONS location block. Declared at package level to avoid
+	// rebuilding the slice on every validateCreateExternalVolume call.
+	extVolValidEncTypes = []string{"NONE", "AWS_SSE_S3", "AWS_SSE_KMS", "GCS_SSE_KMS"}
 
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
 	reIsCreateStage = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?STAGE\b`)
@@ -3264,8 +3268,11 @@ func validateCreateShare(parseText string, r StatementRange) []DiagMarker {
 func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
+	// stripped has comments removed but string literals intact; used wherever
+	// we need findMatchingParen / extractParenContent to correctly skip strings.
 	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
-	noLiterals := reStripStringLiterals.ReplaceAllString(stripped, "''")
+	// clean has both comments and string literals removed; used for keyword
+	// presence checks that must not match inside quoted values.
 	clean := reStripStringLiterals.ReplaceAllString(stripped, "''")
 
 	// 0. OR REPLACE and IF NOT EXISTS are mutually exclusive.
@@ -3284,7 +3291,7 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 	}
 
 	// 2. STORAGE_LOCATIONS is mandatory.
-	if !reExtVolHasStorageLocs.MatchString(noLiterals) {
+	if !reExtVolHasStorageLocs.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"STORAGE_LOCATIONS is mandatory for CREATE EXTERNAL VOLUME.", 4))
 		return markers
@@ -3292,10 +3299,10 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 
 	// Extract STORAGE_LOCATIONS outer block, then split into individual location
 	// entries. Each entry is a (…) block inside the outer (…).
+	// Use stripped (literals intact) so findMatchingParen skips quoted parens.
+	// An empty STORAGE_LOCATIONS = () block produces storLocContent == "" and
+	// len(locations) == 0, which is caught by the check below.
 	storLocContent := extractParenContent(stripped, "STORAGE_LOCATIONS")
-	if storLocContent == "" {
-		return markers
-	}
 	locations := splitLocationBlocks(storLocContent)
 	if len(locations) == 0 {
 		markers = append(markers, diagMarkerSpan(r,
@@ -3304,13 +3311,18 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 	}
 
 	// 3–8. Per-location validation.
-	validEncTypes := []string{"NONE", "AWS_SSE_S3", "AWS_SSE_KMS", "GCS_SSE_KMS"}
 	for _, loc := range locations {
-		// 3. STORAGE_PROVIDER must be present and valid.
+		// locClean has string literals replaced with '' so structural keyword
+		// checks cannot match inside quoted URL or ARN values.
+		locClean := reStripStringLiterals.ReplaceAllString(loc, "''")
+
+		// 3. STORAGE_PROVIDER must be present and valid. Use the literal-
+		// preserving loc so the regex captures the actual provider string.
 		pm := reExtVolStorageProvider.FindStringSubmatch(loc)
 		if pm == nil {
 			markers = append(markers, diagMarkerSpan(r,
 				"Each storage location requires STORAGE_PROVIDER (S3, S3GOV, S3CHINA, S3COMPAT, GCS, or AZURE).", 4))
+			// Cannot validate provider-specific rules without knowing the provider.
 			continue
 		}
 		provider := strings.ToUpper(pm[1])
@@ -3324,33 +3336,34 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 		}
 
 		// 4. STORAGE_BASE_URL is required.
-		if !reExtVolStorageBaseURL.MatchString(loc) {
+		if !reExtVolStorageBaseURL.MatchString(locClean) {
 			markers = append(markers, diagMarkerSpan(r,
 				"Each storage location requires STORAGE_BASE_URL.", 4))
 		}
 
 		// 5. STORAGE_AWS_ROLE_ARN is required for S3, S3GOV, S3CHINA, and S3COMPAT.
-		if isS3 && !reExtVolAwsRoleArn.MatchString(loc) {
+		if isS3 && !reExtVolAwsRoleArn.MatchString(locClean) {
 			markers = append(markers, diagMarkerSpan(r,
 				"STORAGE_AWS_ROLE_ARN is required for S3, S3GOV, S3CHINA, and S3COMPAT storage providers.", 4))
 		}
 
 		// 6. AZURE_TENANT_ID is required for AZURE.
-		if isAzure && !reExtVolAzureTenantID.MatchString(loc) {
+		if isAzure && !reExtVolAzureTenantID.MatchString(locClean) {
 			markers = append(markers, diagMarkerSpan(r,
 				"AZURE_TENANT_ID is required for AZURE storage provider.", 4))
 		}
 
 		// 7. STORAGE_AWS_EXTERNAL_ID is only valid for S3-family providers.
-		if !isS3 && reExtVolAwsExternalID.MatchString(loc) {
+		if !isS3 && reExtVolAwsExternalID.MatchString(locClean) {
 			markers = append(markers, diagMarkerSpan(r,
 				"STORAGE_AWS_EXTERNAL_ID is only valid for S3, S3GOV, S3CHINA, or S3COMPAT storage providers.", 4))
 		}
 
 		// 8. ENCRYPTION TYPE must be valid and match the location's provider.
+		// Use the literal-preserving loc so the regex captures the actual type string.
 		for _, em := range reExtVolEncryptionType.FindAllStringSubmatch(loc, -1) {
 			encType := strings.ToUpper(em[1])
-			if !slices.Contains(validEncTypes, encType) {
+			if !slices.Contains(extVolValidEncTypes, encType) {
 				markers = append(markers, diagMarkerSpan(r,
 					fmt.Sprintf("Invalid ENCRYPTION TYPE '%s'. Must be NONE, AWS_SSE_S3, AWS_SSE_KMS, or GCS_SSE_KMS.", em[1]), 4))
 			} else if (encType == "AWS_SSE_S3" || encType == "AWS_SSE_KMS") && !isS3 {

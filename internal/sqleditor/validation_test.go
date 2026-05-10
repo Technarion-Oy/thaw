@@ -2394,6 +2394,10 @@ func TestValidateSnowflakePatterns_CreateExternalVolume(t *testing.T) {
 		"CREATE EXTERNAL VOLUME multi_vol STORAGE_LOCATIONS = (( NAME = 's3loc' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ) ( NAME = 'gcsloc' STORAGE_PROVIDER = 'GCS' STORAGE_BASE_URL = 'gcs://b/' ))",
 		// Multi-provider: S3 + AZURE — STORAGE_AWS_EXTERNAL_ID remains valid (hasS3=true)
 		"CREATE EXTERNAL VOLUME multi_vol STORAGE_LOCATIONS = (( NAME = 's3loc' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' STORAGE_AWS_EXTERNAL_ID = 'eid' ) ( NAME = 'azloc' STORAGE_PROVIDER = 'AZURE' STORAGE_BASE_URL = 'azure://acc.blob.core.windows.net/c/' AZURE_TENANT_ID = 'tid' ))",
+		// Lowercase provider string — case-insensitive match should accept 's3'
+		"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 's3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ))",
+		// Quoted volume name containing a dot — should NOT flag account-level prefix
+		`CREATE EXTERNAL VOLUME "my.vol" STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ))`,
 	}
 
 	for _, sql := range validCases {
@@ -2516,6 +2520,16 @@ func TestValidateSnowflakePatterns_CreateExternalVolume(t *testing.T) {
 			"CREATE EXTERNAL VOLUME az_vol STORAGE_LOCATIONS = (( NAME = 'az' STORAGE_PROVIDER = 'AZURE' STORAGE_BASE_URL = 'azure://account.blob.core.windows.net/container/' AZURE_TENANT_ID = 'tid' ENCRYPTION = (TYPE = 'AWS_SSE_S3') ))",
 			[]string{"ENCRYPTION TYPE 'AWS_SSE_S3' is only valid for S3"},
 		},
+		{
+			"Empty STORAGE_LOCATIONS block",
+			"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = ()",
+			[]string{"Each storage location requires STORAGE_PROVIDER"},
+		},
+		{
+			"OR REPLACE and IF NOT EXISTS returns early without extra markers",
+			"CREATE OR REPLACE EXTERNAL VOLUME IF NOT EXISTS my_vol ALLOW_WRITES = TRUE",
+			[]string{"Conflict between OR REPLACE and IF NOT EXISTS"},
+		},
 	}
 
 	for _, tt := range invalidCases {
@@ -2538,4 +2552,16 @@ func TestValidateSnowflakePatterns_CreateExternalVolume(t *testing.T) {
 			}
 		})
 	}
+
+	// Verify that the OR REPLACE + IF NOT EXISTS conflict triggers exactly one
+	// warning (proving the early return works and no additional checks run).
+	t.Run("OR REPLACE and IF NOT EXISTS emits exactly one marker", func(t *testing.T) {
+		sql := "CREATE OR REPLACE EXTERNAL VOLUME IF NOT EXISTS my_vol ALLOW_WRITES = TRUE"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warns := getWarnings(markers)
+		if len(warns) != 1 {
+			t.Errorf("Expected exactly 1 warning (early return), got %d: %v", len(warns), warns)
+		}
+	})
 }
