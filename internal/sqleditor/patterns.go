@@ -403,6 +403,7 @@ var (
 	reCallProcName      = regexp.MustCompile(`(?i)^\s*CALL\s+` + _identPath)
 	reCallArgParens     = regexp.MustCompile(`(?i)^\s*CALL\s+` + _identPath + `\s*\(`)
 	reCallInto          = regexp.MustCompile(`(?i)\bINTO\s+(\S+)`)
+	reCallKeyword       = regexp.MustCompile(`(?i)^\s*CALL\b`)
 	reIsWithProcedure   = regexp.MustCompile(`(?i)^\s*WITH\s+` + _ident + `\s+AS\s+PROCEDURE\b`)
 	reWithProcAlias     = regexp.MustCompile(`(?i)^\s*WITH\s+(` + _ident + `)\s+AS\s+PROCEDURE\b`)
 
@@ -2810,7 +2811,10 @@ func validateCall(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 3. INTO :<variable> — the variable must be prefixed with ':' in scripting contexts.
-	if m := reCallInto.FindStringSubmatch(parseText); m != nil {
+	// Run against the comment-stripped text to avoid false positives when INTO
+	// appears inside a -- or /* */ comment (e.g. "CALL p() -- INTO x is done").
+	callStripped := stripCommentsSQL(parseText)
+	if m := reCallInto.FindStringSubmatch(callStripped); m != nil {
 		varToken := m[1]
 		if !strings.HasPrefix(varToken, ":") {
 			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf(
@@ -2838,8 +2842,6 @@ func validateWithProcedureCall(parseText string, r StatementRange) []DiagMarker 
 	}
 	alias := m[1]
 
-	reCallKeyword := regexp.MustCompile(`(?i)^\s*CALL\b`)
-
 	// Find the closing $$ of the procedure body (dollar-quoting: $$...$$).
 	lastDD := strings.LastIndex(parseText, "$$")
 	var afterBody string
@@ -2857,6 +2859,10 @@ func validateWithProcedureCall(parseText string, r StatementRange) []DiagMarker 
 	}
 
 	// Delegate structural validation of the trailing CALL to validateCall.
+	// Note: validateCall only checks structural correctness (name present, parens,
+	// INTO syntax) — it does not verify that the invoked name matches alias.
+	// A CALL to a completely different procedure after the WITH block is not flagged
+	// here; this is an intentional limitation of static regex-based validation.
 	callText := strings.TrimSpace(afterBody)
 	markers = append(markers, validateCall(callText, r)...)
 

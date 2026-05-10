@@ -54,8 +54,13 @@ func TestValidateSnowflakePatterns_Call(t *testing.T) {
 			expectWarning: false,
 		},
 		{
-			name:          "Call inside BEGIN END is not a top-level CALL — no check",
+			name:          "Call with integer argument",
 			sql:           "CALL my_proc(42)",
+			expectWarning: false,
+		},
+		{
+			name:          "INTO in comment does not trigger false positive",
+			sql:           "CALL my_proc() -- INTO result_var is not supported here",
 			expectWarning: false,
 		},
 		{
@@ -66,6 +71,11 @@ func TestValidateSnowflakePatterns_Call(t *testing.T) {
 		{
 			name:          "Anonymous procedure WITH AS PROCEDURE with args — valid",
 			sql:           "WITH p AS PROCEDURE (n INT) RETURNS INT LANGUAGE SQL AS $$ BEGIN RETURN n; END; $$ CALL p(42)",
+			expectWarning: false,
+		},
+		{
+			name:          "Anonymous procedure WITH AS PROCEDURE with INTO colon — valid",
+			sql:           "WITH p AS PROCEDURE () RETURNS INT LANGUAGE SQL AS $$ BEGIN RETURN 1; END; $$ CALL p() INTO :output",
 			expectWarning: false,
 		},
 
@@ -123,6 +133,12 @@ func TestValidateSnowflakePatterns_Call(t *testing.T) {
 			sql:           "WITH p AS PROCEDURE () RETURNS VARIANT LANGUAGE SQL AS $$ BEGIN RETURN 1; END; $$ CALL p",
 			expectWarning: true,
 			expectedMatch: "parenthesised argument list",
+		},
+		{
+			name:          "Anonymous procedure WITH AS PROCEDURE — INTO missing colon",
+			sql:           "WITH p AS PROCEDURE () RETURNS INT LANGUAGE SQL AS $$ BEGIN RETURN 1; END; $$ CALL p() INTO output",
+			expectWarning: true,
+			expectedMatch: "prefixed with ':'",
 		},
 	}
 
