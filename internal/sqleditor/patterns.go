@@ -398,6 +398,14 @@ var (
 	reRevokeCascade  = regexp.MustCompile(`(?i)\bCASCADE\b`)
 	reRevokeRestrict = regexp.MustCompile(`(?i)\bRESTRICT\b`)
 
+	// ── CALL ──────────────────────────────────────────────────────────────────
+	reIsCall            = regexp.MustCompile(`(?i)^\s*CALL\b`)
+	reCallProcName      = regexp.MustCompile(`(?i)^\s*CALL\s+` + _identPath)
+	reCallArgParens     = regexp.MustCompile(`(?i)^\s*CALL\s+` + _identPath + `\s*\(`)
+	reCallInto          = regexp.MustCompile(`(?i)\bINTO\s+(\S+)`)
+	reIsWithProcedure   = regexp.MustCompile(`(?i)^\s*WITH\s+` + _ident + `\s+AS\s+PROCEDURE\b`)
+	reWithProcAlias     = regexp.MustCompile(`(?i)^\s*WITH\s+(` + _ident + `)\s+AS\s+PROCEDURE\b`)
+
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
 	reIsCreateStage = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?STAGE\b`)
 	// stageProps lists only top-level CREATE STAGE property keys.
@@ -1337,6 +1345,18 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			if !reAlterStageNoValidate.MatchString(parseText) {
 				validateProperties(stripParenContents(parseText), alterStageProps, r, &markers)
 			}
+			continue
+		}
+
+		// ── WITH ... AS PROCEDURE (anonymous procedure) ───────────────────
+		if reIsWithProcedure.MatchString(parseText) {
+			markers = append(markers, validateWithProcedureCall(parseText, r)...)
+			continue
+		}
+
+		// ── CALL ─────────────────────────────────────────────────────────
+		if reIsCall.MatchString(parseText) {
+			markers = append(markers, validateCall(parseText, r)...)
 			continue
 		}
 
@@ -2762,6 +2782,83 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 			}
 		}
 	}
+
+	return markers
+}
+
+// ── validateCall ──────────────────────────────────────────────────────────────
+
+// validateCall validates a standalone CALL statement for basic structural
+// correctness per the Snowflake docs:
+//   - Procedure name must be present — bare CALL; should be flagged.
+//   - Argument list must be parenthesised — CALL my_proc 1, 2 should be flagged.
+//   - INTO :<variable> must have a colon-prefixed variable in scripting contexts.
+func validateCall(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// 1. Procedure name must be present.
+	if !reCallProcName.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Missing procedure name in CALL statement.", 4))
+		return markers
+	}
+
+	// 2. Argument list must be parenthesised.
+	if !reCallArgParens.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r,
+			"CALL statement requires a parenthesised argument list. Use CALL proc_name() even when there are no arguments.", 4))
+	}
+
+	// 3. INTO :<variable> — the variable must be prefixed with ':' in scripting contexts.
+	if m := reCallInto.FindStringSubmatch(parseText); m != nil {
+		varToken := m[1]
+		if !strings.HasPrefix(varToken, ":") {
+			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf(
+				"INTO variable must be prefixed with ':' in Snowflake Scripting. Use INTO :%s instead of INTO %s.",
+				varToken, varToken), 4))
+		}
+	}
+
+	return markers
+}
+
+// ── validateWithProcedureCall ─────────────────────────────────────────────────
+
+// validateWithProcedureCall validates a WITH <alias> AS PROCEDURE … CALL <alias>()
+// anonymous procedure statement.  It checks that a CALL statement invoking the
+// defined alias follows the dollar-quoted procedure body, and delegates the CALL
+// structural checks to validateCall.
+func validateWithProcedureCall(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// Extract the alias name.
+	m := reWithProcAlias.FindStringSubmatch(parseText)
+	if m == nil {
+		return markers
+	}
+	alias := m[1]
+
+	reCallKeyword := regexp.MustCompile(`(?i)^\s*CALL\b`)
+
+	// Find the closing $$ of the procedure body (dollar-quoting: $$...$$).
+	lastDD := strings.LastIndex(parseText, "$$")
+	var afterBody string
+	if lastDD >= 0 {
+		afterBody = strings.TrimSpace(parseText[lastDD+2:])
+	} else {
+		// No dollar-quoted body found; look for CALL anywhere after the alias.
+		afterBody = parseText
+	}
+
+	if !reCallKeyword.MatchString(afterBody) {
+		markers = append(markers, diagMarkerSpan(r, fmt.Sprintf(
+			"WITH ... AS PROCEDURE block must end with CALL %s(...).", alias), 4))
+		return markers
+	}
+
+	// Delegate structural validation of the trailing CALL to validateCall.
+	callText := strings.TrimSpace(afterBody)
+	markers = append(markers, validateCall(callText, r)...)
 
 	return markers
 }
