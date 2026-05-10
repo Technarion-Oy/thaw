@@ -3251,11 +3251,11 @@ func validateCreateShare(parseText string, r StatementRange) []DiagMarker {
 // CREATE [OR REPLACE] EXTERNAL VOLUME statements:
 //   - Account-level object: name must not have a database or schema prefix.
 //   - STORAGE_LOCATIONS is mandatory.
-//   - Each STORAGE_PROVIDER must be one of: S3, S3GOV, S3CHINA, GCS, AZURE.
+//   - Each STORAGE_PROVIDER must be one of: S3, S3GOV, S3CHINA, S3COMPAT, GCS, AZURE.
 //   - STORAGE_BASE_URL is required in each storage location.
-//   - STORAGE_AWS_ROLE_ARN is required for S3, S3GOV, and S3CHINA providers.
+//   - STORAGE_AWS_ROLE_ARN is required for S3, S3GOV, S3CHINA, and S3COMPAT providers.
 //   - AZURE_TENANT_ID is required for AZURE provider.
-//   - STORAGE_AWS_EXTERNAL_ID is only valid for S3, S3GOV, and S3CHINA providers.
+//   - STORAGE_AWS_EXTERNAL_ID is only valid for S3, S3GOV, S3CHINA, and S3COMPAT providers.
 //   - ENCRYPTION TYPE must be one of: NONE, AWS_SSE_S3, AWS_SSE_KMS, GCS_SSE_KMS.
 //   - ALLOW_WRITES must be TRUE or FALSE if present.
 func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMarker {
@@ -3289,7 +3289,7 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 	providerMatches := reExtVolStorageProvider.FindAllStringSubmatch(storLocContent, -1)
 	if len(providerMatches) == 0 {
 		markers = append(markers, diagMarkerSpan(r,
-			"Each storage location requires STORAGE_PROVIDER (S3, S3GOV, S3CHINA, GCS, or AZURE).", 4))
+			"Each storage location requires STORAGE_PROVIDER (S3, S3GOV, S3CHINA, S3COMPAT, GCS, or AZURE).", 4))
 		return markers
 	}
 
@@ -3299,7 +3299,7 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 	for _, pm := range providerMatches {
 		provider := strings.ToUpper(pm[1])
 		switch provider {
-		case "S3", "S3GOV", "S3CHINA":
+		case "S3", "S3GOV", "S3CHINA", "S3COMPAT":
 			hasS3 = true
 		case "GCS":
 			hasGCS = true
@@ -3307,7 +3307,7 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 			hasAzure = true
 		default:
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("Invalid STORAGE_PROVIDER '%s'. Must be S3, S3GOV, S3CHINA, GCS, or AZURE.", pm[1]), 4))
+				fmt.Sprintf("Invalid STORAGE_PROVIDER '%s'. Must be S3, S3GOV, S3CHINA, S3COMPAT, GCS, or AZURE.", pm[1]), 4))
 		}
 	}
 
@@ -3318,10 +3318,10 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 			"Each storage location requires STORAGE_BASE_URL.", 4))
 	}
 
-	// 5. STORAGE_AWS_ROLE_ARN is required for S3, S3GOV, and S3CHINA.
+	// 5. STORAGE_AWS_ROLE_ARN is required for S3, S3GOV, S3CHINA, and S3COMPAT.
 	if hasS3 && !reExtVolAwsRoleArn.MatchString(storLocContent) {
 		markers = append(markers, diagMarkerSpan(r,
-			"STORAGE_AWS_ROLE_ARN is required for S3, S3GOV, and S3CHINA storage providers.", 4))
+			"STORAGE_AWS_ROLE_ARN is required for S3, S3GOV, S3CHINA, and S3COMPAT storage providers.", 4))
 	}
 
 	// 6. AZURE_TENANT_ID is required for AZURE.
@@ -3330,10 +3330,10 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 			"AZURE_TENANT_ID is required for AZURE storage provider.", 4))
 	}
 
-	// 7. STORAGE_AWS_EXTERNAL_ID is only valid for S3, S3GOV, and S3CHINA.
+	// 7. STORAGE_AWS_EXTERNAL_ID is only valid for S3, S3GOV, S3CHINA, and S3COMPAT.
 	if !hasS3 && reExtVolAwsExternalID.MatchString(storLocContent) {
 		markers = append(markers, diagMarkerSpan(r,
-			"STORAGE_AWS_EXTERNAL_ID is only valid for S3, S3GOV, or S3CHINA storage providers.", 4))
+			"STORAGE_AWS_EXTERNAL_ID is only valid for S3, S3GOV, S3CHINA, or S3COMPAT storage providers.", 4))
 	}
 
 	// 8. ENCRYPTION TYPE must be one of the valid values; AWS types require S3,
