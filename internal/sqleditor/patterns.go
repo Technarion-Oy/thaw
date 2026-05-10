@@ -3280,7 +3280,7 @@ func validateRemove(parseText string, r StatementRange) []DiagMarker {
 //   - DATA_RETENTION_TIME_IN_DAYS must be a non-negative integer.
 //   - MAX_DATA_EXTENSION_TIME_IN_DAYS must be a non-negative integer.
 //   - CHANGE_TRACKING must be TRUE or FALSE.
-//   - Only recognised properties are allowed (DEFAULT_DDL_COLLATION, COMMENT,
+//   - Only recognized properties are allowed (DEFAULT_DDL_COLLATION, COMMENT,
 //     COPY GRANTS, TAG). COPY GRANTS is a standalone clause and bypasses
 //     the property allowlist check.
 func validateCreateEventTable(parseText string, r StatementRange) []DiagMarker {
