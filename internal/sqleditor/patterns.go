@@ -488,8 +488,14 @@ var (
 	// contents. Used as a coarse presence check before reExtVolEncryptionType,
 	// which additionally requires TYPE = '...'. This ensures blocks like
 	// ENCRYPTION = (KMS_KEY_ID = 'k') (no TYPE key) are not silently ignored.
-	reExtVolHasEncryption      = regexp.MustCompile(`(?i)\bENCRYPTION\s*=\s*\(`)
-	reExtVolEncryptionType     = regexp.MustCompile(`(?i)\bENCRYPTION\s*=\s*\(\s*TYPE\s*=\s*'([^']*)'`)
+	reExtVolHasEncryption  = regexp.MustCompile(`(?i)\bENCRYPTION\s*=\s*\(`)
+	// reExtVolEncryptionType assumes TYPE is the first key inside the
+	// ENCRYPTION block (i.e. ENCRYPTION = ( TYPE = '...' )). If TYPE appears
+	// after another key (e.g. ENCRYPTION = (KMS_KEY_ID = 'k' TYPE = '...')),
+	// the regex will not match and the validator will report a missing TYPE
+	// key. This matches Snowflake's documented DDL convention where TYPE is
+	// always the leading key in ENCRYPTION blocks.
+	reExtVolEncryptionType = regexp.MustCompile(`(?i)\bENCRYPTION\s*=\s*\(\s*TYPE\s*=\s*'([^']*)'`)
 
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
 	reIsCreateStage = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?STAGE\b`)
@@ -2558,6 +2564,9 @@ var reBoolPropMap = func() map[string]*regexp.Regexp {
 
 func validateBoolProp(s string, prop string, r StatementRange, markers *[]DiagMarker) {
 	re := reBoolPropMap[prop]
+	if re == nil {
+		panic("validateBoolProp: unregistered prop " + prop + " — add it to reBoolPropMap")
+	}
 	if m := re.FindStringSubmatch(s); m != nil {
 		val := strings.ToUpper(m[1])
 		if val != "TRUE" && val != "FALSE" {
@@ -2579,6 +2588,9 @@ var reParenKeyMap = func() map[string]*regexp.Regexp {
 
 func extractParenContent(s string, key string) string {
 	re := reParenKeyMap[key]
+	if re == nil {
+		panic("extractParenContent: unregistered key " + key + " — add it to reParenKeyMap")
+	}
 	loc := re.FindStringIndex(s)
 	if loc == nil {
 		return ""
