@@ -212,6 +212,63 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE PASSWORD POLICY my_password_policy COMMENT = 'corporate policy'",
 		// Quoted password policy name with an inner dot must not trigger the prefix warning.
 		`CREATE PASSWORD POLICY "my.policy" PASSWORD_MIN_LENGTH = 12`,
+		// GRANT statements — valid
+		"GRANT SELECT ON TABLE my_table TO ROLE my_role",
+		"GRANT INSERT, UPDATE, DELETE ON TABLE my_table TO ROLE my_role",
+		"GRANT SELECT ON VIEW my_view TO ROLE my_role",
+		"GRANT REFERENCES ON VIEW my_view TO ROLE my_role",
+		"GRANT USAGE ON WAREHOUSE my_wh TO ROLE my_role",
+		"GRANT USAGE, MODIFY, MONITOR, OPERATE ON WAREHOUSE my_wh TO ROLE my_role",
+		"GRANT USAGE, MODIFY ON DATABASE my_db TO ROLE my_role",
+		"GRANT CREATE SCHEMA ON DATABASE my_db TO ROLE my_role",
+		"GRANT IMPORTED PRIVILEGES ON DATABASE my_db TO ROLE my_role",
+		"GRANT CREATE TABLE ON SCHEMA my_schema TO ROLE my_role",
+		"GRANT CREATE ROW ACCESS POLICY ON SCHEMA my_schema TO ROLE my_role",
+		"GRANT ADD SEARCH OPTIMIZATION ON SCHEMA my_schema TO ROLE my_role",
+		"GRANT USAGE ON SCHEMA my_schema TO ROLE my_role WITH GRANT OPTION",
+		"GRANT USAGE ON INTEGRATION my_int TO ROLE my_role",
+		"GRANT MONITOR, OPERATE ON TASK my_task TO ROLE my_role",
+		"GRANT SELECT ON STREAM my_stream TO ROLE my_role",
+		"GRANT MONITOR ON USER my_user TO ROLE my_role",
+		"GRANT MANAGE GRANTS ON ACCOUNT TO ROLE my_role",
+		"GRANT EXECUTE TASK ON ACCOUNT TO ROLE my_role",
+		"GRANT ROLE my_role TO ROLE other_role",
+		"GRANT ROLE my_role TO USER my_user",
+		"GRANT DATABASE ROLE my_db_role TO ROLE my_role",
+		"GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA my_schema TO ROLE my_role",
+		"GRANT SELECT ON FUTURE TABLES IN DATABASE my_db TO ROLE my_role",
+		"GRANT OWNERSHIP ON TABLE my_table TO ROLE my_role",
+		"GRANT ALL PRIVILEGES ON TABLE my_table TO ROLE my_role",
+		"GRANT ALL ON SCHEMA my_schema TO ROLE my_role",
+		// Newer privilege names that were previously missing from the matrix
+		"GRANT EVOLVE SCHEMA ON TABLE my_table TO ROLE my_role",
+		"GRANT APPLYBUDGET ON WAREHOUSE my_wh TO ROLE my_role",
+		"GRANT APPLYBUDGET ON DATABASE my_db TO ROLE my_role",
+		"GRANT CREATE STREAMLIT ON SCHEMA my_schema TO ROLE my_role",
+		"GRANT CREATE NOTEBOOK ON SCHEMA my_schema TO ROLE my_role",
+		"GRANT APPLY SESSION POLICY ON ACCOUNT TO ROLE my_role",
+		"GRANT APPLY TAG ON ACCOUNT TO ROLE my_role",
+		"GRANT MANAGE WAREHOUSES ON ACCOUNT TO ROLE my_role",
+		"GRANT RESOLVE ALL ON ACCOUNT TO ROLE my_role",
+		// REVOKE statements — valid
+		"REVOKE SELECT ON TABLE my_table FROM ROLE my_role",
+		"REVOKE INSERT, UPDATE ON TABLE my_table FROM ROLE my_role",
+		"REVOKE USAGE ON WAREHOUSE my_wh FROM ROLE my_role",
+		"REVOKE USAGE ON DATABASE my_db FROM ROLE my_role",
+		"REVOKE CREATE TABLE ON SCHEMA my_schema FROM ROLE my_role",
+		"REVOKE ROLE my_role FROM ROLE other_role",
+		"REVOKE ROLE my_role FROM USER my_user",
+		"REVOKE DATABASE ROLE my_db_role FROM ROLE my_role",
+		"REVOKE SELECT ON TABLE my_table FROM ROLE my_role CASCADE",
+		"REVOKE SELECT ON TABLE my_table FROM ROLE my_role RESTRICT",
+		"REVOKE GRANT OPTION FOR SELECT ON TABLE my_table FROM ROLE my_role",
+		"REVOKE SELECT ON ALL TABLES IN SCHEMA my_schema FROM ROLE my_role",
+		"REVOKE SELECT ON FUTURE TABLES IN DATABASE my_db FROM ROLE my_role",
+		// Data-sharing grants — TO SHARE / FROM SHARE are valid grantee forms.
+		"GRANT USAGE ON DATABASE my_db TO SHARE my_share",
+		"GRANT SELECT ON TABLE my_table TO SHARE my_share",
+		"REVOKE USAGE ON DATABASE my_db FROM SHARE my_share",
+		"REVOKE SELECT ON TABLE my_table FROM SHARE my_share",
 	}
 
 	for _, sql := range validQueries {
@@ -299,6 +356,40 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		// Other syntax
 		{"Grant role to table", "GRANT ROLE my_role TO TABLE my_table", "Unexpected syntax"},
 		{"Masking policy missing returns", "CREATE MASKING POLICY bad_mask AS (val string) -> CASE WHEN 1=1 THEN val END", "Missing RETURNS clause"},
+
+		// Invalid GRANT — privilege/object mismatches
+		{"Grant invalid priv on table", "GRANT INVALID_PRIV ON TABLE my_table TO ROLE my_role", "not valid for object type TABLE"},
+		{"Grant select on warehouse", "GRANT SELECT ON WAREHOUSE my_wh TO ROLE my_role", "not valid for object type WAREHOUSE"},
+		{"Grant insert on view", "GRANT INSERT ON VIEW my_view TO ROLE my_role", "not valid for object type VIEW"},
+		{"Grant write on table", "GRANT WRITE ON TABLE my_table TO ROLE my_role", "not valid for object type TABLE"},
+		{"Grant select on stage", "GRANT SELECT ON STAGE my_stage TO ROLE my_role", "not valid for object type STAGE"},
+		{"Grant usage on stream", "GRANT USAGE ON STREAM my_stream TO ROLE my_role", "not valid for object type STREAM"},
+		{"Grant select on account", "GRANT SELECT ON ACCOUNT TO ROLE my_role", "not valid for object type ACCOUNT"},
+		{"Grant usage on role", "GRANT USAGE ON ROLE my_role TO ROLE other_role", "not valid Snowflake syntax"},
+		{"Grant multi priv one invalid", "GRANT SELECT, INVALID_PRIV ON TABLE my_table TO ROLE my_role", "not valid for object type TABLE"},
+
+		// Invalid GRANT — structural issues
+		{"Grant role with grant option", "GRANT ROLE my_role TO USER u WITH GRANT OPTION", "WITH GRANT OPTION is not valid"},
+		{"Grant role no grantee", "GRANT ROLE my_role", "TO ROLE or TO USER"},
+		{"Grant priv missing grantee", "GRANT SELECT ON TABLE my_table", "grantee"},
+		{"Grant all tables without in", "GRANT SELECT ON ALL TABLES TO ROLE my_role", "IN SCHEMA or IN DATABASE"},
+		{"Grant future tables without in", "GRANT SELECT ON FUTURE TABLES TO ROLE my_role", "IN SCHEMA or IN DATABASE"},
+
+		// Invalid REVOKE — ON ALL/FUTURE without IN qualifier
+		{"Revoke all tables without in", "REVOKE SELECT ON ALL TABLES FROM ROLE my_role", "IN SCHEMA or IN DATABASE"},
+		{"Revoke future tables without in", "REVOKE SELECT ON FUTURE TABLES FROM ROLE my_role", "IN SCHEMA or IN DATABASE"},
+
+		// Invalid REVOKE — privilege/object mismatches
+		{"Revoke insert on view", "REVOKE INSERT ON VIEW my_view FROM ROLE my_role", "not valid for object type VIEW"},
+		{"Revoke select on warehouse", "REVOKE SELECT ON WAREHOUSE my_wh FROM ROLE my_role", "not valid for object type WAREHOUSE"},
+		{"Revoke select on stage", "REVOKE SELECT ON STAGE my_stage FROM ROLE my_role", "not valid for object type STAGE"},
+		{"Revoke write on stream", "REVOKE WRITE ON STREAM my_stream FROM ROLE my_role", "not valid for object type STREAM"},
+		{"Revoke usage on role", "REVOKE USAGE ON ROLE my_role FROM ROLE other_role", "not valid Snowflake syntax"},
+
+		// Invalid REVOKE — structural issues
+		{"Revoke cascade and restrict", "REVOKE SELECT ON TABLE my_table FROM ROLE my_role CASCADE RESTRICT", "mutually exclusive"},
+		{"Revoke missing from", "REVOKE SELECT ON TABLE my_table", "FROM"},
+		{"Revoke role no from", "REVOKE ROLE my_role", "FROM ROLE or FROM USER"},
 
 		// Invalid Row Access Policy
 		{"RAP OR REPLACE with IF NOT EXISTS", "CREATE OR REPLACE ROW ACCESS POLICY IF NOT EXISTS my_rap AS (val VARCHAR) RETURNS BOOLEAN -> TRUE", "Conflict between OR REPLACE and IF NOT EXISTS"},
@@ -1973,14 +2064,6 @@ func TestAlterStage_Invalid(t *testing.T) {
 	}
 }
 
-// ── Helpers for tests ─────────────────────────────────────────────────────────
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
 func TestIssue129_FalsePositives(t *testing.T) {
 	sql := `
 CREATE OR REPLACE VIEW VW_CLEAN_CUSTOMERS AS

@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -30,6 +31,12 @@ const (
 	_ident          = `(?:[a-zA-Z_][a-zA-Z0-9_$]*|"[^"]+")`
 	_identPath      = _ident + `(?:\.` + _ident + `){0,2}`
 	_balancedParens = `\([^()]*(?:(?:\([^()]*\))[^()]*)*\)`
+
+	// _grantObjType matches the object-type token(s) in a GRANT/REVOKE ON clause.
+	// Two-word types are listed explicitly before the single-word fallback so that
+	// a greedy `(\w+(?:\s+\w+)?)` cannot swallow the object name (e.g. matching
+	// "TABLE my_table" instead of just "TABLE").
+	_grantObjType = `EXTERNAL\s+TABLE|MATERIALIZED\s+VIEW|HYBRID\s+TABLE|ICEBERG\s+TABLE|DYNAMIC\s+TABLE|FILE\s+FORMAT|\w+`
 )
 
 var (
@@ -361,8 +368,35 @@ var (
 		`PASSWORD_HISTORY`, `COMMENT`,
 	}, "|")
 
-	// ── GRANT ─────────────────────────────────────────────────────────────────
-	reIsGrantRole = regexp.MustCompile(`(?i)^\s*GRANT\s+ROLE\b`)
+	// ── GRANT / REVOKE ────────────────────────────────────────────────────────
+	// reIsGrantRole is used inside validateGrant (not in the top-level dispatch)
+	// to distinguish "GRANT ROLE <name>" (role assignment) from privilege grants.
+	reIsGrantRole          = regexp.MustCompile(`(?i)^\s*GRANT\s+ROLE\b`)
+	reIsGrantDatabaseRole  = regexp.MustCompile(`(?i)^\s*GRANT\s+DATABASE\s+ROLE\b`)
+	reIsGrant              = regexp.MustCompile(`(?i)^\s*GRANT\b`)
+	reIsRevoke             = regexp.MustCompile(`(?i)^\s*REVOKE\b`)
+	reIsRevokeRole         = regexp.MustCompile(`(?i)^\s*REVOKE\s+ROLE\b`)
+	reIsRevokeDatabaseRole = regexp.MustCompile(`(?i)^\s*REVOKE\s+DATABASE\s+ROLE\b`)
+	// reGrantOnObject / reRevokeOnObject use a lazy ([\s\S]+?) to capture the
+	// privilege list, stopping at the first occurrence of " ON ". This is safe
+	// as long as no Snowflake privilege name itself contains the substring " ON ";
+	// verify this assumption when adding new privileges to grantObjectPrivileges.
+	reGrantOnObject  = regexp.MustCompile(`(?i)\bGRANT\s+([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(` + _grantObjType + `)`)
+	reRevokeOnObject = regexp.MustCompile(`(?i)\bREVOKE\s+(?:GRANT\s+OPTION\s+FOR\s+)?([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(` + _grantObjType + `)`)
+	reGrantee              = regexp.MustCompile(`(?i)\bTO\s+(?:ROLE|USER|DATABASE\s+ROLE|SHARE)\b`)
+	reGranteeFrom          = regexp.MustCompile(`(?i)\bFROM\s+(?:ROLE|USER|DATABASE\s+ROLE|SHARE)\b`)
+	reGrantAllFuture       = regexp.MustCompile(`(?i)\bON\s+(?:ALL|FUTURE)\b`)
+	reGrantInQualifier     = regexp.MustCompile(`(?i)\bIN\s+(?:SCHEMA|DATABASE)\b`)
+	reGrantToTable         = regexp.MustCompile(`(?i)\bTO\s+TABLE\b`)
+	reWithGrantOption      = regexp.MustCompile(`(?i)\bWITH\s+GRANT\s+OPTION\b`)
+	// reRevokeCascade / reRevokeRestrict match the keywords anywhere in the
+	// statement. Unquoted identifiers that are exactly CASCADE or RESTRICT
+	// (valid but uncommon Snowflake names) could in theory produce a false
+	// positive — word boundaries mitigate this for composite names like
+	// cascade_table, but a bare unquoted name CASCADE remains a theoretical
+	// edge case. This is an accepted limitation documented here for future readers.
+	reRevokeCascade  = regexp.MustCompile(`(?i)\bCASCADE\b`)
+	reRevokeRestrict = regexp.MustCompile(`(?i)\bRESTRICT\b`)
 
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
 	reIsCreateStage = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?STAGE\b`)
@@ -453,6 +487,74 @@ var (
 		"MERGE": true, "GRANT": true, "REVOKE": true, "COPY": true,
 	}
 )
+
+// grantObjectPrivileges maps canonical Snowflake object types (upper-cased) to
+// their valid privilege names. OWNERSHIP, ALL, and ALL PRIVILEGES are handled
+// as universal special cases in validateGrant / validateRevoke and are omitted
+// from this map intentionally.
+var grantObjectPrivileges = map[string][]string{
+	"TABLE": {
+		"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "REBUILD",
+		"EVOLVE SCHEMA",
+	},
+	"VIEW": {"SELECT", "REFERENCES"},
+	"STAGE": {"READ", "WRITE"},
+	"WAREHOUSE": {"USAGE", "MODIFY", "MONITOR", "OPERATE", "APPLYBUDGET"},
+	"DATABASE": {
+		"USAGE", "MODIFY", "MONITOR", "CREATE SCHEMA",
+		"IMPORTED PRIVILEGES", "REFERENCE_USAGE", "APPLYBUDGET",
+	},
+	"SCHEMA": {
+		"USAGE", "MODIFY", "MONITOR",
+		"CREATE TABLE", "CREATE VIEW", "CREATE STAGE", "CREATE STREAM",
+		"CREATE TASK", "CREATE PIPE", "CREATE FUNCTION", "CREATE PROCEDURE",
+		"CREATE SEQUENCE", "CREATE FILE FORMAT", "CREATE MASKING POLICY",
+		"CREATE ROW ACCESS POLICY", "CREATE DYNAMIC TABLE",
+		"ADD SEARCH OPTIMIZATION", "CREATE ALERT", "CREATE NETWORK RULE",
+		"CREATE SECRET", "CREATE SNOWFLAKE.CORTEX.SEARCH SERVICE",
+		"CREATE STREAMLIT", "CREATE NOTEBOOK",
+		"CREATE HYBRID TABLE", "CREATE ICEBERG TABLE", "CREATE EXTERNAL TABLE",
+		"APPLYBUDGET",
+	},
+	"PIPE":        {"MONITOR", "OPERATE"},
+	"INTEGRATION": {"USAGE"},
+	"TASK":        {"MONITOR", "OPERATE"},
+	"STREAM":      {"SELECT"},
+	"USER":        {"MONITOR"},
+	// TODO: add SEQUENCE, FILE FORMAT, EXTERNAL TABLE object-level privileges,
+	// MATERIALIZED VIEW, and DYNAMIC TABLE when their privilege sets are confirmed.
+	// Until then, validation is silently skipped for those object types
+	// (knownObj = false), which avoids false positives but means invalid
+	// privileges go unchecked.
+	"ACCOUNT": {
+		"CREATE ROLE", "CREATE USER", "CREATE WAREHOUSE", "CREATE DATABASE",
+		"CREATE INTEGRATION", "CREATE NETWORK POLICY", "MANAGE GRANTS",
+		"MONITOR USAGE", "EXECUTE TASK", "EXECUTE ALERT", "EXECUTE MANAGED TASK",
+		"IMPORT SHARE", "OVERRIDE SHARE RESTRICTIONS", "ATTACH POLICY",
+		"APPLY MASKING POLICY", "APPLY ROW ACCESS POLICY",
+		"APPLY SESSION POLICY", "APPLY TAG", "APPLY AGGREGATION POLICY",
+		"MANAGE WAREHOUSES", "CREATE SHARE", "APPLYBUDGET",
+		"BIND SERVICE ENDPOINT", "CREATE COMPUTE POOL", "CREATE EXTERNAL VOLUME",
+		"MANAGE ACCOUNT SUPPORT CASES", "RESOLVE ALL",
+	},
+}
+
+// grantObjectTypePlurals maps plural/alternative Snowflake object-type names
+// (upper-cased) to their canonical singular form, used when parsing
+// ON ALL <objects> / ON FUTURE <objects> clauses.
+var grantObjectTypePlurals = map[string]string{
+	"TABLES":       "TABLE",
+	"VIEWS":        "VIEW",
+	"STAGES":       "STAGE",
+	"WAREHOUSES":   "WAREHOUSE",
+	"DATABASES":    "DATABASE",
+	"SCHEMAS":      "SCHEMA",
+	"INTEGRATIONS": "INTEGRATION",
+	"TASKS":        "TASK",
+	"STREAMS":      "STREAM",
+	"USERS":        "USER",
+	"PIPES":        "PIPE",
+}
 
 // ── ValidateSnowflakePatterns ─────────────────────────────────────────────────
 
@@ -1239,10 +1341,14 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		}
 
 		// ── GRANT ────────────────────────────────────────────────────────
-		if reIsGrantRole.MatchString(parseText) {
-			if regexp.MustCompile(`(?i)\bTO\s+TABLE\b`).MatchString(parseText) {
-				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: Roles can be granted to other roles or users, but not directly to tables.", 4))
-			}
+		if reIsGrant.MatchString(parseText) {
+			markers = append(markers, validateGrant(parseText, r)...)
+			continue
+		}
+
+		// ── REVOKE ───────────────────────────────────────────────────────
+		if reIsRevoke.MatchString(parseText) {
+			markers = append(markers, validateRevoke(parseText, r)...)
 			continue
 		}
 
@@ -1691,7 +1797,7 @@ func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarke
 	for _, m := range reNetworkPolicyIPList.FindAllStringSubmatch(parseText, -1) {
 		listKind := strings.ToUpper(m[1])
 		listContent := m[2]
-		for _, rawEntry := range strings.Split(listContent, ",") {
+		for rawEntry := range strings.SplitSeq(listContent, ",") {
 			entry := strings.TrimSpace(rawEntry)
 			if entry == "" {
 				continue
@@ -1746,7 +1852,7 @@ func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarke
 // This avoids the false-negative caused by whitespace-only quoted entries such
 // as ('   ') which would otherwise pass a plain strings.TrimSpace != "" check.
 func networkPolicyListHasEntries(content string) bool {
-	for _, raw := range strings.Split(content, ",") {
+	for raw := range strings.SplitSeq(content, ",") {
 		entry := strings.TrimSpace(raw)
 		if len(entry) >= 2 && entry[0] == '\'' && entry[len(entry)-1] == '\'' {
 			entry = strings.TrimSpace(entry[1 : len(entry)-1])
@@ -1989,6 +2095,190 @@ func splitCommaRespectingParens(s string) []string {
 	return parts
 }
 
+// ── validateGrant ─────────────────────────────────────────────────────────────
+
+// validateGrant validates a GRANT statement for structural correctness and
+// privilege/object-type compatibility.
+func validateGrant(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// ── GRANT ROLE / GRANT DATABASE ROLE ─────────────────────────────────────
+	isGrantRole := reIsGrantRole.MatchString(parseText) ||
+		reIsGrantDatabaseRole.MatchString(parseText)
+	if isGrantRole {
+		// WITH GRANT OPTION is not valid for role grants.
+		if reWithGrantOption.MatchString(parseText) {
+			markers = append(markers, diagMarkerSpan(r,
+				"WITH GRANT OPTION is not valid for GRANT ROLE statements.", 4))
+		}
+		// Role grants use TO USER or TO ROLE, never TO TABLE.
+		if reGrantToTable.MatchString(parseText) {
+			markers = append(markers, diagMarkerSpan(r,
+				"Unexpected syntax: Roles can be granted to other roles or users, but not directly to tables.", 4))
+		}
+		// Must have a grantee.
+		if !reGrantee.MatchString(parseText) {
+			markers = append(markers, diagMarkerSpan(r,
+				"GRANT ROLE requires a TO ROLE or TO USER clause.", 4))
+		}
+		return markers
+	}
+
+	// ── GRANT <privileges> ON <object_type> ───────────────────────────────────
+	m := reGrantOnObject.FindStringSubmatch(parseText)
+	if m == nil {
+		// No recognizable ON clause — incomplete or unsupported form; skip.
+		return markers
+	}
+	privListRaw := m[1]
+	allFuture := strings.TrimSpace(strings.ToUpper(m[2])) // "ALL", "FUTURE", or ""
+	objectType := normalizeGrantObjectType(m[3])
+
+	// ── GRANT <priv> ON ROLE is not valid Snowflake syntax ────────────────────
+	// The correct form for role assignment is "GRANT ROLE <name> TO ROLE/USER".
+	// Snowflake does not support granting privileges on role objects via ON ROLE.
+	if objectType == "ROLE" {
+		markers = append(markers, diagMarkerSpan(r,
+			"'GRANT <privilege> ON ROLE' is not valid Snowflake syntax. "+
+				"Use 'GRANT ROLE <name> TO ROLE/USER' to assign a role.", 4))
+		return markers
+	}
+
+	// ── Grantee required ──────────────────────────────────────────────────────
+	if !reGrantee.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r,
+			"GRANT statement requires a grantee (TO ROLE, TO DATABASE ROLE, or TO USER).", 4))
+	}
+
+	// ── ON ALL / ON FUTURE requires IN SCHEMA or IN DATABASE ─────────────────
+	if reGrantAllFuture.MatchString(parseText) && !reGrantInQualifier.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r,
+			"ON ALL/FUTURE <objects> requires an IN SCHEMA or IN DATABASE qualifier.", 4))
+	}
+
+	// ── Privilege validation for known object types ───────────────────────────
+	// Bulk grants (ALL/FUTURE) are skipped — the privilege set may be
+	// legitimately broad and varies by object type.
+	validPrivs, knownObj := grantObjectPrivileges[objectType]
+	if knownObj && allFuture == "" {
+		for _, priv := range splitPrivileges(privListRaw) {
+			// OWNERSHIP, ALL, and ALL PRIVILEGES are always accepted.
+			if priv == "OWNERSHIP" || priv == "ALL" || priv == "ALL PRIVILEGES" {
+				continue
+			}
+			if !slices.Contains(validPrivs, priv) {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("Privilege '%s' is not valid for object type %s.", priv, objectType), 4))
+			}
+		}
+	}
+
+	return markers
+}
+
+// ── validateRevoke ────────────────────────────────────────────────────────────
+
+// validateRevoke validates a REVOKE statement for structural correctness and
+// privilege/object-type compatibility.
+func validateRevoke(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// ── REVOKE ROLE / REVOKE DATABASE ROLE ────────────────────────────────────
+	isRevokeRole := reIsRevokeRole.MatchString(parseText) ||
+		reIsRevokeDatabaseRole.MatchString(parseText)
+	if isRevokeRole {
+		if !reGranteeFrom.MatchString(parseText) {
+			markers = append(markers, diagMarkerSpan(r,
+				"REVOKE ROLE requires a FROM ROLE or FROM USER clause.", 4))
+		}
+		return markers
+	}
+
+	// ── REVOKE <privileges> ON <object_type> ──────────────────────────────────
+	m := reRevokeOnObject.FindStringSubmatch(parseText)
+	if m == nil {
+		return markers
+	}
+	privListRaw := m[1]
+	// allFuture is "" for plain object revokes and "ALL" or "FUTURE" for bulk
+	// revokes. It gates privilege validation: bulk revokes are always skipped
+	// because the full privilege set is determined dynamically by Snowflake.
+	allFuture := strings.TrimSpace(strings.ToUpper(m[2]))
+	objectType := normalizeGrantObjectType(m[3])
+
+	// ── REVOKE <priv> ON ROLE is not valid Snowflake syntax ──────────────────
+	// The correct form for role revocation is "REVOKE ROLE <name> FROM ROLE/USER".
+	if objectType == "ROLE" {
+		markers = append(markers, diagMarkerSpan(r,
+			"'REVOKE <privilege> ON ROLE' is not valid Snowflake syntax. "+
+				"Use 'REVOKE ROLE <name> FROM ROLE/USER' to revoke a role.", 4))
+		return markers
+	}
+
+	// ── ON ALL / ON FUTURE requires IN SCHEMA or IN DATABASE ─────────────────
+	if reGrantAllFuture.MatchString(parseText) && !reGrantInQualifier.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r,
+			"ON ALL/FUTURE <objects> requires an IN SCHEMA or IN DATABASE qualifier.", 4))
+	}
+
+	// ── CASCADE and RESTRICT are mutually exclusive ───────────────────────────
+	if reRevokeCascade.MatchString(parseText) && reRevokeRestrict.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r,
+			"CASCADE and RESTRICT are mutually exclusive in REVOKE statement.", 4))
+	}
+
+	// ── FROM clause required ──────────────────────────────────────────────────
+	if !reGranteeFrom.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r,
+			"REVOKE statement requires a FROM ROLE, FROM DATABASE ROLE, or FROM USER clause.", 4))
+	}
+
+	// ── Privilege validation for known object types ───────────────────────────
+	validPrivs, knownObj := grantObjectPrivileges[objectType]
+	if knownObj && allFuture == "" {
+		for _, priv := range splitPrivileges(privListRaw) {
+			if priv == "OWNERSHIP" || priv == "ALL" || priv == "ALL PRIVILEGES" {
+				continue
+			}
+			if !slices.Contains(validPrivs, priv) {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("Privilege '%s' is not valid for object type %s.", priv, objectType), 4))
+			}
+		}
+	}
+
+	return markers
+}
+
+// splitPrivileges splits a comma-separated privilege list into individual
+// normalised (upper-cased, internal-whitespace-collapsed) privilege strings.
+// strings.Fields is used so that "CREATE  TABLE" (double space) normalises to
+// "CREATE TABLE" and matches the map keys in grantObjectPrivileges.
+func splitPrivileges(privList string) []string {
+	var result []string
+	for p := range strings.SplitSeq(privList, ",") {
+		// Collapse internal whitespace runs (tabs, double-spaces, etc.) as well
+		// as leading/trailing whitespace before the equality check.
+		trimmed := strings.Join(strings.Fields(strings.ToUpper(p)), " ")
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+// normalizeGrantObjectType converts plural and/or alternative Snowflake object
+// type names to their canonical singular upper-cased form used as map keys in
+// grantObjectPrivileges.
+func normalizeGrantObjectType(t string) string {
+	upper := strings.ToUpper(strings.TrimSpace(t))
+	if singular, ok := grantObjectTypePlurals[upper]; ok {
+		return singular
+	}
+	return upper
+}
+
+
 func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
@@ -2208,13 +2498,7 @@ func isBool(s string) bool {
 }
 
 func isValidEnumValue(val string, validValues ...string) bool {
-	upperVal := strings.ToUpper(strings.Trim(val, "'"))
-	for _, valid := range validValues {
-		if upperVal == valid {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(validValues, strings.ToUpper(strings.Trim(val, "'")))
 }
 
 func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker {
@@ -2285,7 +2569,7 @@ func validateCreateHybridTable(parseText string, r StatementRange) []DiagMarker 
 					if m := rePrimaryKeyCols.FindString(segClean); m != "" {
 						if openIdx := strings.Index(m, "("); openIdx != -1 {
 							mStr := m[openIdx+1 : len(m)-1]
-							for _, p := range strings.Split(mStr, ",") {
+							for p := range strings.SplitSeq(mStr, ",") {
 								pkCols[normalizeIdent(p)] = true
 							}
 						}
