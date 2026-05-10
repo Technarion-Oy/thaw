@@ -73,6 +73,11 @@ func TestValidateSnowflakePatterns_ExecuteImmediate(t *testing.T) {
 			sql:           "EXECUTE IMMEDIATE 'INSERT INTO t USING (src)'",
 			expectWarning: false,
 		},
+		{
+			name:          "USING inside dollar-quoted block does not trigger false positive",
+			sql:           "EXECUTE IMMEDIATE $$MERGE INTO t USING (SELECT 1 AS id) AS src ON t.id = src.id WHEN MATCHED THEN DELETE$$",
+			expectWarning: false,
+		},
 
 		// ── Invalid Cases ────────────────────────────────────────────────────
 		{
@@ -84,6 +89,12 @@ func TestValidateSnowflakePatterns_ExecuteImmediate(t *testing.T) {
 		{
 			name:          "EXECUTE IMMEDIATE with only a semicolon",
 			sql:           "EXECUTE IMMEDIATE;",
+			expectWarning: true,
+			expectedMatch: "requires a SQL string argument",
+		},
+		{
+			name:          "EXECUTE IMMEDIATE with space then semicolon",
+			sql:           "EXECUTE IMMEDIATE ;",
 			expectWarning: true,
 			expectedMatch: "requires a SQL string argument",
 		},

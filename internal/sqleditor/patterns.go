@@ -412,9 +412,15 @@ var (
 	reIsExecuteImmediate   = regexp.MustCompile(`(?i)^\s*EXECUTE\s+IMMEDIATE\b`)
 	reIsExecuteTask        = regexp.MustCompile(`(?i)^\s*EXECUTE\s+TASK\b`)
 	reIsExecute            = regexp.MustCompile(`(?i)^\s*EXECUTE\b`)
-	reExecImmHasArg        = regexp.MustCompile(`(?i)^\s*EXECUTE\s+IMMEDIATE\s+\S`)
+	// reExecImmHasArg requires a non-whitespace, non-semicolon character after
+	// EXECUTE IMMEDIATE so that "EXECUTE IMMEDIATE ;" (space before semicolon)
+	// is correctly flagged as missing an argument.
+	reExecImmHasArg        = regexp.MustCompile(`(?i)^\s*EXECUTE\s+IMMEDIATE\s+[^\s;]`)
 	reExecImmUsing         = regexp.MustCompile(`(?i)\bUSING\s*\(`)
 	reExecImmUsingHasIdent = regexp.MustCompile(`(?i)\bUSING\s*\(\s*` + _ident)
+	// reStripDollarQuoted strips dollar-quoted blocks ($$…$$ and $tag$…$tag$)
+	// so that SQL content inside them does not cause false-positive USING checks.
+	reStripDollarQuoted    = regexp.MustCompile(`\$\w*\$[\s\S]*?\$\w*\$`)
 	reExecTaskName         = regexp.MustCompile(`(?i)^\s*EXECUTE\s+TASK\s+` + _identPath)
 
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
@@ -2923,9 +2929,11 @@ func validateExecuteImmediate(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 2. USING clause, if present, must contain at least one bind variable.
-	// Strip string literals first to avoid false positives from USING appearing
-	// inside the SQL string argument itself.
+	// Strip both single-quoted literals and dollar-quoted blocks first to avoid
+	// false positives from USING appearing inside the SQL string argument itself
+	// (e.g. EXECUTE IMMEDIATE $$MERGE INTO t USING () ON …$$).
 	cleanText := reStripStringLiterals.ReplaceAllString(stripped, " ")
+	cleanText = reStripDollarQuoted.ReplaceAllString(cleanText, " ")
 	if reExecImmUsing.MatchString(cleanText) && !reExecImmUsingHasIdent.MatchString(cleanText) {
 		markers = append(markers, diagMarkerSpan(r,
 			"USING clause in EXECUTE IMMEDIATE must contain at least one bind variable.", 4))
