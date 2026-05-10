@@ -478,7 +478,7 @@ var (
 	reExtVolAwsRoleArn         = regexp.MustCompile(`(?i)\bSTORAGE_AWS_ROLE_ARN\s*=`)
 	reExtVolAzureTenantID      = regexp.MustCompile(`(?i)\bAZURE_TENANT_ID\s*=`)
 	reExtVolAwsExternalID      = regexp.MustCompile(`(?i)\bSTORAGE_AWS_EXTERNAL_ID\s*=`)
-	reExtVolEncryptionType = regexp.MustCompile(`(?i)\bENCRYPTION\s*=\s*\(\s*TYPE\s*=\s*'([^']*)'`)
+	reExtVolEncryptionType     = regexp.MustCompile(`(?i)\bENCRYPTION\s*=\s*\(\s*TYPE\s*=\s*'([^']*)'`)
 	// extVolValidEncTypes lists the accepted ENCRYPTION TYPE values for any
 	// STORAGE_LOCATIONS location block. Declared at package level to avoid
 	// rebuilding the slice on every validateCreateExternalVolume call.
