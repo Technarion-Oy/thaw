@@ -3280,7 +3280,7 @@ var extVolValidEncTypes = []string{"NONE", "AWS_SSE_S3", "AWS_SSE_KMS", "GCS_SSE
 //     For S3/GCS an ENCRYPTION block must contain a TYPE key; its value must be
 //     one of NONE, AWS_SSE_S3, AWS_SSE_KMS, or GCS_SSE_KMS, matched to the provider.
 //   - ALLOW_WRITES must be TRUE or FALSE if present.
-//   - The validator is permissive about extra, unrecognised attributes (e.g.
+//   - The validator is permissive about extra, unrecognized attributes (e.g.
 //     STORAGE_AWS_ROLE_ARN on a GCS location); only the fields listed above are checked.
 func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
