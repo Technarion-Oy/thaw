@@ -1525,10 +1525,13 @@ func validateProperties(s string, validProps string, r StatementRange, markers *
 
 func validateCreateAlert(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
+	var ifIdx []int
 
 	// 1. Mutually exclusive OR REPLACE and IF NOT EXISTS
+	ifIdx = reAlertIfExists.FindStringIndex(parseText)
+
 	preambleToCheck := parseText
-	if ifIdx := reAlertIfExists.FindStringIndex(parseText); ifIdx != nil {
+	if ifIdx != nil {
 		preambleToCheck = parseText[:ifIdx[0]]
 	}
 
@@ -1538,14 +1541,12 @@ func validateCreateAlert(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 2. Mandatory IF (EXISTS (...))
-	ifIdx := reAlertIfExists.FindStringIndex(parseText)
 	if ifIdx == nil {
 		markers = append(markers, diagMarkerSpan(r, "Missing mandatory IF (EXISTS (...)) clause in CREATE ALERT statement.", 4))
 	}
 
 	var preamble string
 	var body string
-
 	if ifIdx != nil {
 		preamble = parseText[:ifIdx[0]]
 		body = parseText[ifIdx[0]:]
