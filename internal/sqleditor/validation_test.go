@@ -2654,6 +2654,10 @@ func TestValidateSnowflakePatterns_CreateEventTable(t *testing.T) {
 		"CREATE EVENT TABLE my_events MAX_DATA_EXTENSION_TIME_IN_DAYS = 0",
 		// CLUSTER BY inside COMMENT string must not trigger false positive
 		"CREATE EVENT TABLE my_events COMMENT = 'has CLUSTER BY inside'",
+		// CLUSTER BY inside a line comment must not trigger false positive
+		"CREATE EVENT TABLE my_events\n-- CLUSTER BY (ts)\nCOMMENT = 'test'",
+		// Keywords inside a block comment must not trigger false positive
+		"CREATE EVENT TABLE my_events /* AUTO_REFRESH = TRUE */ COMMENT = 'test'",
 		// TAG property
 		"CREATE EVENT TABLE my_events TAG (cost_center = 'finance')",
 	}
@@ -2701,6 +2705,11 @@ func TestValidateSnowflakePatterns_CreateEventTable(t *testing.T) {
 		{
 			"Invalid MAX_DATA_EXTENSION_TIME_IN_DAYS",
 			"CREATE EVENT TABLE my_events MAX_DATA_EXTENSION_TIME_IN_DAYS = xyz",
+			[]string{"MAX_DATA_EXTENSION_TIME_IN_DAYS must be a non-negative integer"},
+		},
+		{
+			"Negative MAX_DATA_EXTENSION_TIME_IN_DAYS",
+			"CREATE EVENT TABLE my_events MAX_DATA_EXTENSION_TIME_IN_DAYS = -1",
 			[]string{"MAX_DATA_EXTENSION_TIME_IN_DAYS must be a non-negative integer"},
 		},
 		{

@@ -3286,50 +3286,51 @@ func validateRemove(parseText string, r StatementRange) []DiagMarker {
 func validateCreateEventTable(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	// Strip string literals so keywords inside COMMENT values don't trigger
-	// false positive checks.
-	stripped := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	// Strip comments and string literals so that keywords inside -- / /* */
+	// comments or COMMENT values don't trigger false positive checks.
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+	clean := reStripStringLiterals.ReplaceAllString(stripped, "''")
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if reOrReplace.MatchString(stripped) && reIfNotExists.MatchString(stripped) {
+	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE EVENT TABLE statement.", 4))
 		return markers
 	}
 
 	// 2. Event table name is required.
-	m := reCreateEventTableName.FindStringSubmatch(parseText)
+	m := reCreateEventTableName.FindStringSubmatch(stripped)
 	if m == nil {
 		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE EVENT TABLE statement.", 4))
 		return markers
 	}
 
 	// 3. Column definitions are not allowed — event tables have a fixed schema.
-	if reEventTableColumnList.MatchString(stripped) {
+	if reEventTableColumnList.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"Event tables have a fixed schema and do not support column definitions.", 4))
 	}
 
 	// 4. CLUSTER BY is not supported for event tables.
-	if rePatternClusterBy.MatchString(stripped) {
+	if rePatternClusterBy.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"CLUSTER BY is not supported for EVENT TABLE.", 4))
 	}
 
 	// 5. Validate property values using package-level regexes.
-	if m := reEvtRetentionDays.FindStringSubmatch(stripped); m != nil {
+	if m := reEvtRetentionDays.FindStringSubmatch(clean); m != nil {
 		if n, err := strconv.Atoi(m[1]); err != nil || n < 0 {
 			markers = append(markers, diagMarkerSpan(r,
 				"DATA_RETENTION_TIME_IN_DAYS must be a non-negative integer.", 4))
 		}
 	}
-	if m := reEvtExtensionDays.FindStringSubmatch(stripped); m != nil {
+	if m := reEvtExtensionDays.FindStringSubmatch(clean); m != nil {
 		if n, err := strconv.Atoi(m[1]); err != nil || n < 0 {
 			markers = append(markers, diagMarkerSpan(r,
 				"MAX_DATA_EXTENSION_TIME_IN_DAYS must be a non-negative integer.", 4))
 		}
 	}
-	if m := reEvtChangeTrackingValue.FindStringSubmatch(stripped); m != nil {
+	if m := reEvtChangeTrackingValue.FindStringSubmatch(clean); m != nil {
 		if !isBool(m[1]) {
 			markers = append(markers, diagMarkerSpan(r,
 				"CHANGE_TRACKING must be TRUE or FALSE.", 4))
@@ -3340,7 +3341,7 @@ func validateCreateEventTable(parseText string, r StatementRange) []DiagMarker {
 	// false positives from keys inside TAG(...) or other paren blocks.
 	// Note: COPY GRANTS is a standalone clause (no '='), so it bypasses
 	// validateProperties entirely and needs no allowlist entry.
-	validateProperties(stripParenContents(stripped), `DATA_RETENTION_TIME_IN_DAYS|MAX_DATA_EXTENSION_TIME_IN_DAYS|CHANGE_TRACKING|DEFAULT_DDL_COLLATION|COMMENT|TAG`, r, &markers)
+	validateProperties(stripParenContents(clean), `DATA_RETENTION_TIME_IN_DAYS|MAX_DATA_EXTENSION_TIME_IN_DAYS|CHANGE_TRACKING|DEFAULT_DDL_COLLATION|COMMENT|TAG`, r, &markers)
 
 	return markers
 }
