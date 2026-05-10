@@ -469,6 +469,34 @@ var (
 	// the word RESTRICT somewhere other than the trailing position.
 	reAlterShareRestrictTrailing = regexp.MustCompile(`(?i)\bRESTRICT\s*$`)
 
+	// ── CREATE EXTERNAL VOLUME ────────────────────────────────────────────────
+	reIsCreateExternalVolume   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EXTERNAL\s+VOLUME\b`)
+	reCreateExternalVolumeName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EXTERNAL\s+VOLUME\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
+	reExtVolHasStorageLocs     = regexp.MustCompile(`(?i)\bSTORAGE_LOCATIONS\s*=\s*\(`)
+	// reExtVolLocationName matches NAME = ' to detect the required attribute.
+	// \b already prevents matching embedded words like CONTAINER_NAME (_N has
+	// no word boundary). The trailing ' further ensures we only match
+	// string-valued assignments; on locClean, 'value' → '' so the opening '
+	// of the empty placeholder still satisfies the pattern.
+	reExtVolLocationName       = regexp.MustCompile(`(?i)\bNAME\s*=\s*'`)
+	reExtVolStorageProvider    = regexp.MustCompile(`(?i)\bSTORAGE_PROVIDER\s*=\s*'([^']*)'`)
+	reExtVolStorageBaseURL     = regexp.MustCompile(`(?i)\bSTORAGE_BASE_URL\s*=\s*'[^']*'`)
+	reExtVolAwsRoleArn         = regexp.MustCompile(`(?i)\bSTORAGE_AWS_ROLE_ARN\s*=`)
+	reExtVolAzureTenantID      = regexp.MustCompile(`(?i)\bAZURE_TENANT_ID\s*=`)
+	reExtVolAwsExternalID      = regexp.MustCompile(`(?i)\bSTORAGE_AWS_EXTERNAL_ID\s*=`)
+	// reExtVolHasEncryption detects any ENCRYPTION = ( block regardless of its
+	// contents. Used as a coarse presence check before reExtVolEncryptionType,
+	// which additionally requires TYPE = '...'. This ensures blocks like
+	// ENCRYPTION = (KMS_KEY_ID = 'k') (no TYPE key) are not silently ignored.
+	reExtVolHasEncryption  = regexp.MustCompile(`(?i)\bENCRYPTION\s*=\s*\(`)
+	// reExtVolEncryptionType assumes TYPE is the first key inside the
+	// ENCRYPTION block (i.e. ENCRYPTION = ( TYPE = '...' )). If TYPE appears
+	// after another key (e.g. ENCRYPTION = (KMS_KEY_ID = 'k' TYPE = '...')),
+	// the regex will not match and the validator will report a missing TYPE
+	// key. This matches Snowflake's documented DDL convention where TYPE is
+	// always the leading key in ENCRYPTION blocks.
+	reExtVolEncryptionType = regexp.MustCompile(`(?i)\bENCRYPTION\s*=\s*\(\s*TYPE\s*=\s*'([^']*)'`)
+
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
 	reIsCreateStage = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?STAGE\b`)
 	// stageProps lists only top-level CREATE STAGE property keys.
@@ -1488,6 +1516,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// ── ALTER SHARE ──────────────────────────────────────────────────
 		if reIsAlterShare.MatchString(parseText) {
 			markers = append(markers, validateAlterShare(parseText, r)...)
+			continue
+		}
+
+		// ── CREATE EXTERNAL VOLUME ────────────────────────────────────────
+		if reIsCreateExternalVolume.MatchString(parseText) {
+			markers = append(markers, validateCreateExternalVolume(parseText, r)...)
 			continue
 		}
 
@@ -2516,8 +2550,23 @@ func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 	return markers
 }
 
+// reBoolPropMap holds pre-compiled regexes for validateBoolProp. Each entry
+// matches PROP = value where value is a word token. The map is built at init
+// time so regexes are compiled once rather than on every call.
+var reBoolPropMap = func() map[string]*regexp.Regexp {
+	props := []string{"ALLOW_WRITES", "PURGE", "FORCE", "LOAD_UNCERTAIN_FILES", "OVERWRITE", "SINGLE", "INCLUDE_QUERY_ID", "DETAILED_OUTPUT"}
+	m := make(map[string]*regexp.Regexp, len(props))
+	for _, p := range props {
+		m[p] = regexp.MustCompile(`(?i)\b` + p + `\s*=\s*(\w+)\b`)
+	}
+	return m
+}()
+
 func validateBoolProp(s string, prop string, r StatementRange, markers *[]DiagMarker) {
-	re := regexp.MustCompile(`(?i)\b` + prop + `\s*=\s*(\w+)\b`)
+	re := reBoolPropMap[prop]
+	if re == nil {
+		panic("validateBoolProp: unregistered prop " + prop + " — add it to reBoolPropMap")
+	}
 	if m := re.FindStringSubmatch(s); m != nil {
 		val := strings.ToUpper(m[1])
 		if val != "TRUE" && val != "FALSE" {
@@ -2526,8 +2575,22 @@ func validateBoolProp(s string, prop string, r StatementRange, markers *[]DiagMa
 	}
 }
 
+// reParenKeyMap holds pre-compiled regexes for extractParenContent. Each entry
+// matches KEY = ( to locate the start of a parenthesized block.
+var reParenKeyMap = func() map[string]*regexp.Regexp {
+	keys := []string{"FILE_FORMAT", "STORAGE_LOCATIONS"}
+	m := make(map[string]*regexp.Regexp, len(keys))
+	for _, k := range keys {
+		m[k] = regexp.MustCompile(`(?i)\b` + k + `\s*=\s*\(`)
+	}
+	return m
+}()
+
 func extractParenContent(s string, key string) string {
-	re := regexp.MustCompile(`(?i)\b` + key + `\s*=\s*\(`)
+	re := reParenKeyMap[key]
+	if re == nil {
+		panic("extractParenContent: unregistered key " + key + " — add it to reParenKeyMap")
+	}
 	loc := re.FindStringIndex(s)
 	if loc == nil {
 		return ""
@@ -3226,6 +3289,212 @@ func validateCreateShare(parseText string, r StatementRange) []DiagMarker {
 	validateProperties(parseText, `COMMENT`, r, &markers)
 
 	return markers
+}
+
+// ── validateCreateExternalVolume ──────────────────────────────────────────────
+
+// extVolValidEncTypes lists the accepted ENCRYPTION TYPE values for a
+// STORAGE_LOCATIONS location block (S3 and GCS only; AZURE does not support
+// the ENCRYPTION parameter). Declared outside the regexp var block because
+// it is a string slice, not a compiled regexp.
+var extVolValidEncTypes = []string{"NONE", "AWS_SSE_S3", "AWS_SSE_KMS", "GCS_SSE_KMS"}
+
+// validateCreateExternalVolume checks structural requirements for
+// CREATE [OR REPLACE] EXTERNAL VOLUME statements:
+//   - OR REPLACE and IF NOT EXISTS are mutually exclusive.
+//   - Account-level object: name must not have a database or schema prefix.
+//   - STORAGE_LOCATIONS is mandatory and must contain at least one location block.
+//   - Each location is validated independently:
+//   - NAME is required.
+//   - STORAGE_PROVIDER must be one of: S3, S3GOV, S3CHINA, S3COMPAT, GCS, AZURE.
+//   - STORAGE_BASE_URL is required.
+//   - STORAGE_AWS_ROLE_ARN is required for S3, S3GOV, S3CHINA, and S3COMPAT.
+//   - AZURE_TENANT_ID is required for AZURE.
+//   - STORAGE_AWS_EXTERNAL_ID is only valid for S3-family providers.
+//   - ENCRYPTION is not supported for AZURE (any ENCRYPTION block is rejected).
+//     For S3/GCS an ENCRYPTION block must contain a TYPE key; its value must be
+//     one of NONE, AWS_SSE_S3, AWS_SSE_KMS, or GCS_SSE_KMS, matched to the provider.
+//   - ALLOW_WRITES must be TRUE or FALSE if present.
+//   - The validator is permissive about extra, unrecognized attributes (e.g.
+//     STORAGE_AWS_ROLE_ARN on a GCS location); only the fields listed above are checked.
+func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// stripped has comments removed but string literals intact; used wherever
+	// we need findMatchingParen / extractParenContent to correctly skip strings.
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+	// clean has both comments and string literals removed; used for keyword
+	// presence checks that must not match inside quoted values.
+	clean := reStripStringLiterals.ReplaceAllString(stripped, "''")
+
+	// 0. OR REPLACE and IF NOT EXISTS are mutually exclusive.
+	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE EXTERNAL VOLUME statement.", 4))
+		return markers
+	}
+
+	// 1. Account-level: name must not have db.schema prefix.
+	if m := reCreateExternalVolumeName.FindStringSubmatch(parseText); m != nil {
+		if sqlIdentPathHasDot(m[1]) {
+			markers = append(markers, diagMarkerSpan(r,
+				"External volumes are account-level objects and cannot have a database or schema prefix.", 4))
+		}
+	}
+
+	// 2. STORAGE_LOCATIONS is mandatory.
+	if !reExtVolHasStorageLocs.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"STORAGE_LOCATIONS is mandatory for CREATE EXTERNAL VOLUME.", 4))
+		return markers
+	}
+
+	// Extract STORAGE_LOCATIONS outer block, then split into individual location
+	// entries. Each entry is a (…) block inside the outer (…).
+	// We use stripped (comments removed, literals intact) rather than clean so
+	// that findMatchingParen can skip parentheses inside quoted string values.
+	// Known limitation: if a string literal before the real STORAGE_LOCATIONS
+	// clause contains the substring "STORAGE_LOCATIONS = (", extractParenContent
+	// may start extraction at the wrong parenthesis. This is extremely unlikely
+	// in practice for Snowflake DDL. Comments are absent because stripCommentsSQL
+	// was already applied; loc blocks therefore contain no -- or /* */ text.
+	// An empty STORAGE_LOCATIONS = () block produces storLocContent == "" and
+	// len(locations) == 0, which is caught by the check below.
+	storLocContent := extractParenContent(stripped, "STORAGE_LOCATIONS")
+	locations := splitLocationBlocks(storLocContent)
+	if len(locations) == 0 {
+		markers = append(markers, diagMarkerSpan(r,
+			"STORAGE_LOCATIONS must contain at least one storage location block.", 4))
+		return markers
+	}
+
+	// 3–9. Per-location validation.
+	for _, loc := range locations {
+		// locClean has string literals replaced with '' so structural keyword
+		// checks cannot match inside quoted URL or ARN values.
+		locClean := reStripStringLiterals.ReplaceAllString(loc, "''")
+
+		// 3. NAME is required in every location block (checked before provider
+		// so it is reported even when STORAGE_PROVIDER is also missing).
+		if !reExtVolLocationName.MatchString(locClean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"Each storage location requires a NAME attribute.", 4))
+		}
+
+		// 4. STORAGE_BASE_URL is required regardless of provider. Checked before
+		// the STORAGE_PROVIDER guard so it is reported even when both attributes
+		// are absent — the author sees all missing required fields at once.
+		// Note: after literal stripping, STORAGE_BASE_URL = '' satisfies the
+		// pattern — empty-string URLs are an accepted trade-off for a structural
+		// preamble validator.
+		if !reExtVolStorageBaseURL.MatchString(locClean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"Each storage location requires STORAGE_BASE_URL.", 4))
+		}
+
+		// 5. STORAGE_PROVIDER must be present and valid. Use the literal-
+		// preserving loc so the regex captures the actual provider string.
+		// First-match assumption: if a NAME or COMMENT value happened to
+		// contain "STORAGE_PROVIDER = 'S3'" the wrong match would be returned.
+		// In practice this is negligible risk for Snowflake DDL.
+		pm := reExtVolStorageProvider.FindStringSubmatch(loc)
+		if pm == nil {
+			markers = append(markers, diagMarkerSpan(r,
+				"Each storage location requires STORAGE_PROVIDER (S3, S3GOV, S3CHINA, S3COMPAT, GCS, or AZURE).", 4))
+			// Cannot validate provider-specific rules without knowing the provider.
+			continue
+		}
+		provider := strings.ToUpper(pm[1])
+		isS3 := provider == "S3" || provider == "S3GOV" || provider == "S3CHINA" || provider == "S3COMPAT"
+		isGCS := provider == "GCS"
+		isAzure := provider == "AZURE"
+		if !isS3 && !isGCS && !isAzure {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("Invalid STORAGE_PROVIDER '%s'. Must be S3, S3GOV, S3CHINA, S3COMPAT, GCS, or AZURE.", pm[1]), 4))
+			continue
+		}
+
+		// 6. STORAGE_AWS_ROLE_ARN is required for S3, S3GOV, S3CHINA, and S3COMPAT.
+		if isS3 && !reExtVolAwsRoleArn.MatchString(locClean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"STORAGE_AWS_ROLE_ARN is required for S3, S3GOV, S3CHINA, and S3COMPAT storage providers.", 4))
+		}
+
+		// 7. AZURE_TENANT_ID is required for AZURE.
+		if isAzure && !reExtVolAzureTenantID.MatchString(locClean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"AZURE_TENANT_ID is required for AZURE storage provider.", 4))
+		}
+
+		// 8. STORAGE_AWS_EXTERNAL_ID is only valid for S3-family providers.
+		if !isS3 && reExtVolAwsExternalID.MatchString(locClean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"STORAGE_AWS_EXTERNAL_ID is only valid for S3, S3GOV, S3CHINA, or S3COMPAT storage providers.", 4))
+		}
+
+		// 9. ENCRYPTION handling is provider-specific (inside per-location loop).
+		if isAzure {
+			// AZURE uses native storage encryption; the ENCRYPTION parameter is
+			// not supported at all for AZURE external volumes. Use the loose
+			// presence regex (reExtVolHasEncryption) so blocks like
+			// ENCRYPTION = (KMS_KEY_ID = 'k') without a TYPE key are caught too.
+			if reExtVolHasEncryption.MatchString(locClean) {
+				markers = append(markers, diagMarkerSpan(r,
+					"AZURE storage locations do not support the ENCRYPTION parameter.", 4))
+			}
+		} else if reExtVolHasEncryption.MatchString(locClean) {
+			// An ENCRYPTION block is present on an S3 or GCS location.
+			// Use the literal-preserving loc so the regex captures the actual type string.
+			ems := reExtVolEncryptionType.FindAllStringSubmatch(loc, -1)
+			if len(ems) == 0 {
+				// ENCRYPTION block exists but has no TYPE key — always an error.
+				markers = append(markers, diagMarkerSpan(r,
+					"ENCRYPTION block must specify a TYPE key (NONE, AWS_SSE_S3, AWS_SSE_KMS, or GCS_SSE_KMS).", 4))
+			} else {
+				for _, em := range ems {
+					encType := strings.ToUpper(em[1])
+					if !slices.Contains(extVolValidEncTypes, encType) {
+						markers = append(markers, diagMarkerSpan(r,
+							fmt.Sprintf("Invalid ENCRYPTION TYPE '%s'. Must be NONE, AWS_SSE_S3, AWS_SSE_KMS, or GCS_SSE_KMS.", em[1]), 4))
+					} else if (encType == "AWS_SSE_S3" || encType == "AWS_SSE_KMS") && !isS3 {
+						markers = append(markers, diagMarkerSpan(r,
+							fmt.Sprintf("ENCRYPTION TYPE '%s' is only valid for S3, S3GOV, S3CHINA, or S3COMPAT storage providers.", em[1]), 4))
+					} else if encType == "GCS_SSE_KMS" && !isGCS {
+						markers = append(markers, diagMarkerSpan(r,
+							"ENCRYPTION TYPE 'GCS_SSE_KMS' is only valid for GCS storage provider.", 4))
+					}
+				}
+			}
+		}
+	}
+
+	// 10. ALLOW_WRITES must be TRUE or FALSE if present. Use clean (comments and
+	// string literals both removed) so neither "-- ALLOW_WRITES = maybe" in a
+	// comment nor 'ALLOW_WRITES = MAYBE' inside a COMMENT string value can
+	// produce a false positive.
+	validateBoolProp(clean, "ALLOW_WRITES", r, &markers)
+
+	return markers
+}
+
+// splitLocationBlocks iterates over s (the content inside a STORAGE_LOCATIONS
+// outer paren) and returns each inner (…) block with its enclosing parens
+// stripped. String literals inside the blocks are preserved so that
+// per-location regex checks operate on real values.
+func splitLocationBlocks(s string) []string {
+	var blocks []string
+	for i := 0; i < len(s); i++ {
+		if s[i] != '(' {
+			continue
+		}
+		end := findMatchingParen(s[i:])
+		if end == -1 {
+			break
+		}
+		blocks = append(blocks, s[i+1:i+end])
+		i += end // skip past the closing ')'
+	}
+	return blocks
 }
 
 // ── validateAlterShare ────────────────────────────────────────────────────────
