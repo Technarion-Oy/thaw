@@ -463,7 +463,11 @@ var (
 	reAlterShareAddAcctsEq  = regexp.MustCompile(`(?i)\bADD\s+ACCOUNTS\s*=`)
 	// reAlterShareHasAcctList verifies that ADD ACCOUNTS = is followed by at least one identifier.
 	reAlterShareHasAcctList = regexp.MustCompile(`(?i)\bADD\s+ACCOUNTS\s*=\s*` + _ident)
-	reAlterShareRestrict    = regexp.MustCompile(`(?i)\bRESTRICT\b`)
+	// reAlterShareRestrictTrailing matches RESTRICT only at the end of the cleaned
+	// statement text. Anchoring to $ prevents false positives when the share name
+	// (e.g. ALTER SHARE restrict ...) or a quoted identifier ("restrict") contains
+	// the word RESTRICT somewhere other than the trailing position.
+	reAlterShareRestrictTrailing = regexp.MustCompile(`(?i)\bRESTRICT\s*$`)
 
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
 	reIsCreateStage = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?STAGE\b`)
@@ -3196,8 +3200,12 @@ func validateRemove(parseText string, r StatementRange) []DiagMarker {
 func validateCreateShare(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
+	// Strip string literals up front so that phrases like "IF NOT EXISTS" or
+	// "OR REPLACE" inside a COMMENT value do not trigger false positive checks.
+	stripped := reStripStringLiterals.ReplaceAllString(parseText, "''")
+
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if reOrReplace.MatchString(parseText) && reIfNotExists.MatchString(parseText) {
+	if reOrReplace.MatchString(stripped) && reIfNotExists.MatchString(stripped) {
 		markers = append(markers, diagMarkerSpan(r,
 			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE SHARE statement.", 4))
 		return markers
@@ -3214,7 +3222,7 @@ func validateCreateShare(parseText string, r StatementRange) []DiagMarker {
 			"Shares are account-level objects and cannot have a database or schema prefix.", 4))
 	}
 
-	// 4. Only COMMENT is a valid property for CREATE SHARE.
+	// 3. Only COMMENT is a valid property for CREATE SHARE.
 	validateProperties(parseText, `COMMENT`, r, &markers)
 
 	return markers
@@ -3228,14 +3236,17 @@ func validateCreateShare(parseText string, r StatementRange) []DiagMarker {
 func validateAlterShare(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	// Strip string literals so that RESTRICT inside a comment value does not
-	// produce a false positive.
-	strippedLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	// Strip string literals and comments, then trim, so that RESTRICT or
+	// ACCOUNTS inside a COMMENT value or after a trailing line comment cannot
+	// cause false positives. cleanText is also trimmed so the $ anchor in
+	// reAlterShareRestrictTrailing reliably targets end-of-statement.
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	cleanText := strings.TrimSpace(stripCommentsSQL(noLiterals))
 
-	hasAddAccounts := reAlterShareAddAccounts.MatchString(strippedLiterals)
-	hasRestrict := reAlterShareRestrict.MatchString(strippedLiterals)
-	hasAddAcctsEq := reAlterShareAddAcctsEq.MatchString(strippedLiterals)
-	hasAcctList := reAlterShareHasAcctList.MatchString(strippedLiterals)
+	hasAddAccounts := reAlterShareAddAccounts.MatchString(cleanText)
+	hasRestrict := reAlterShareRestrictTrailing.MatchString(cleanText)
+	hasAddAcctsEq := reAlterShareAddAcctsEq.MatchString(cleanText)
+	hasAcctList := reAlterShareHasAcctList.MatchString(cleanText)
 
 	// RESTRICT is only valid with ADD ACCOUNTS.
 	if hasRestrict && !hasAddAccounts {

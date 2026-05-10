@@ -281,6 +281,8 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE SHARE IF NOT EXISTS my_share",
 		"CREATE SHARE my_share COMMENT = 'description of the share'",
 		"CREATE OR REPLACE SHARE my_share COMMENT = 'updated'",
+		// "IF NOT EXISTS" inside a COMMENT value must not trigger the conflict warning.
+		"CREATE OR REPLACE SHARE my_share COMMENT = 'IF NOT EXISTS hint'",
 		// ALTER SHARE — valid
 		"ALTER SHARE my_share ADD ACCOUNTS = account1",
 		"ALTER SHARE my_share ADD ACCOUNTS = account1, account2",
@@ -291,6 +293,11 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"ALTER SHARE my_share REMOVE ACCOUNTS = account1, account2",
 		"ALTER SHARE my_share SET COMMENT = 'updated comment'",
 		"ALTER SHARE my_share RENAME TO new_share_name",
+		// Share named "restrict" must not trigger the RESTRICT warning.
+		"ALTER SHARE restrict SET COMMENT = 'test'",
+		`ALTER SHARE "restrict" ADD OBJECTS = db.schema.tbl`,
+		// ADD ACCOUNTS = restrict treated as account named "restrict", not keyword.
+		"ALTER SHARE my_share ADD ACCOUNTS = restrict",
 		// CREATE DATABASE FROM SHARE — valid
 		"CREATE DATABASE my_db FROM SHARE provider_account.share_name",
 		"CREATE DATABASE IF NOT EXISTS my_db FROM SHARE provider.my_share",
