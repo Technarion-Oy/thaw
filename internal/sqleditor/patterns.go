@@ -473,9 +473,11 @@ var (
 	reIsCreateExternalVolume   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EXTERNAL\s+VOLUME\b`)
 	reCreateExternalVolumeName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EXTERNAL\s+VOLUME\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
 	reExtVolHasStorageLocs     = regexp.MustCompile(`(?i)\bSTORAGE_LOCATIONS\s*=\s*\(`)
-	// reExtVolLocationName requires NAME = ' to avoid matching hypothetical
-	// keys like CONTAINER_NAME. Applied to locClean where 'value' → '',
-	// so NAME = 'foo' becomes NAME = '' and the leading ' still matches.
+	// reExtVolLocationName matches NAME = ' to detect the required attribute.
+	// \b already prevents matching embedded words like CONTAINER_NAME (_N has
+	// no word boundary). The trailing ' further ensures we only match
+	// string-valued assignments; on locClean, 'value' → '' so the opening '
+	// of the empty placeholder still satisfies the pattern.
 	reExtVolLocationName       = regexp.MustCompile(`(?i)\bNAME\s*=\s*'`)
 	reExtVolStorageProvider    = regexp.MustCompile(`(?i)\bSTORAGE_PROVIDER\s*=\s*'([^']*)'`)
 	reExtVolStorageBaseURL     = regexp.MustCompile(`(?i)\bSTORAGE_BASE_URL\s*=\s*'[^']*'`)
@@ -3336,6 +3338,9 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 
 		// 4. STORAGE_PROVIDER must be present and valid. Use the literal-
 		// preserving loc so the regex captures the actual provider string.
+		// First-match assumption: if a NAME or COMMENT value happened to
+		// contain "STORAGE_PROVIDER = 'S3'" the wrong match would be returned.
+		// In practice this is negligible risk for Snowflake DDL.
 		pm := reExtVolStorageProvider.FindStringSubmatch(loc)
 		if pm == nil {
 			markers = append(markers, diagMarkerSpan(r,
@@ -3380,7 +3385,7 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 				"STORAGE_AWS_EXTERNAL_ID is only valid for S3, S3GOV, S3CHINA, or S3COMPAT storage providers.", 4))
 		}
 
-		// 9. ENCRYPTION handling is provider-specific.
+		// 9. ENCRYPTION handling is provider-specific (inside per-location loop).
 		if isAzure {
 			// AZURE uses native storage encryption; the ENCRYPTION parameter is
 			// not supported at all for AZURE external volumes.
@@ -3407,8 +3412,10 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 		}
 	}
 
-	// 9. ALLOW_WRITES must be TRUE or FALSE if present.
-	validateBoolProp(parseText, "ALLOW_WRITES", r, &markers)
+	// 10. ALLOW_WRITES must be TRUE or FALSE if present. Use stripped (comments
+	// removed) so a line like "-- ALLOW_WRITES = maybe" cannot cause a false
+	// positive.
+	validateBoolProp(stripped, "ALLOW_WRITES", r, &markers)
 
 	return markers
 }
