@@ -408,6 +408,15 @@ var (
 	// dollar-quote delimiters; used to locate the closing body delimiter.
 	reAnyDollarTag = regexp.MustCompile(`\$\w*\$`)
 
+	// ── EXECUTE IMMEDIATE / EXECUTE TASK ─────────────────────────────────────
+	reIsExecuteImmediate   = regexp.MustCompile(`(?i)^\s*EXECUTE\s+IMMEDIATE\b`)
+	reIsExecuteTask        = regexp.MustCompile(`(?i)^\s*EXECUTE\s+TASK\b`)
+	reIsExecute            = regexp.MustCompile(`(?i)^\s*EXECUTE\b`)
+	reExecImmHasArg        = regexp.MustCompile(`(?i)^\s*EXECUTE\s+IMMEDIATE\s+\S`)
+	reExecImmUsing         = regexp.MustCompile(`(?i)\bUSING\s*\(`)
+	reExecImmUsingHasIdent = regexp.MustCompile(`(?i)\bUSING\s*\(\s*` + _ident)
+	reExecTaskName         = regexp.MustCompile(`(?i)^\s*EXECUTE\s+TASK\s+` + _identPath)
+
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
 	reIsCreateStage = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?STAGE\b`)
 	// stageProps lists only top-level CREATE STAGE property keys.
@@ -495,6 +504,7 @@ var (
 		"CREATE": true, "ALTER": true, "TRUNCATE": true, "CALL": true,
 		"SHOW": true, "SET": true, "DROP": true, "UNDROP": true,
 		"MERGE": true, "GRANT": true, "REVOKE": true, "COPY": true,
+		"EXECUTE": true,
 	}
 )
 
@@ -1371,6 +1381,23 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// ── REVOKE ───────────────────────────────────────────────────────
 		if reIsRevoke.MatchString(parseText) {
 			markers = append(markers, validateRevoke(parseText, r)...)
+			continue
+		}
+
+		// ── EXECUTE IMMEDIATE ─────────────────────────────────────────────
+		if reIsExecuteImmediate.MatchString(parseText) {
+			markers = append(markers, validateExecuteImmediate(parseText, r)...)
+			continue
+		}
+
+		// ── EXECUTE TASK ──────────────────────────────────────────────────
+		if reIsExecuteTask.MatchString(parseText) {
+			markers = append(markers, validateExecuteTask(parseText, r)...)
+			continue
+		}
+
+		// ── Other EXECUTE forms (EXECUTE ALERT, etc.) — pass through ─────
+		if reIsExecute.MatchString(parseText) {
 			continue
 		}
 
@@ -2870,6 +2897,57 @@ func validateWithProcedureCall(parseText string, r StatementRange) []DiagMarker 
 	// here; this is an intentional limitation of static regex-based validation.
 	callText := strings.TrimSpace(afterBody)
 	markers = append(markers, validateCall(callText, r)...)
+
+	return markers
+}
+
+// ── validateExecuteImmediate ───────────────────────────────────────────────────
+
+// validateExecuteImmediate validates an EXECUTE IMMEDIATE statement per the
+// Snowflake docs:
+//   - A SQL string argument is mandatory; bare EXECUTE IMMEDIATE is invalid.
+//   - The argument may be a string literal ('…'), a dollar-quoted string ($$…$$),
+//     a colon-prefixed scripting variable (:var), or a bare identifier.
+//   - The optional USING clause, if present, must contain at least one bind
+//     variable identifier.
+func validateExecuteImmediate(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+
+	// 1. A SQL string argument is mandatory.
+	if !reExecImmHasArg.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"EXECUTE IMMEDIATE requires a SQL string argument (string literal, dollar-quoted string, or variable reference).", 4))
+		return markers
+	}
+
+	// 2. USING clause, if present, must contain at least one bind variable.
+	// Strip string literals first to avoid false positives from USING appearing
+	// inside the SQL string argument itself.
+	cleanText := reStripStringLiterals.ReplaceAllString(stripped, " ")
+	if reExecImmUsing.MatchString(cleanText) && !reExecImmUsingHasIdent.MatchString(cleanText) {
+		markers = append(markers, diagMarkerSpan(r,
+			"USING clause in EXECUTE IMMEDIATE must contain at least one bind variable.", 4))
+	}
+
+	return markers
+}
+
+// ── validateExecuteTask ───────────────────────────────────────────────────────
+
+// validateExecuteTask validates an EXECUTE TASK statement per the Snowflake
+// docs:
+//   - A task name (qualified identifier) is required; bare EXECUTE TASK is invalid.
+func validateExecuteTask(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+
+	if !reExecTaskName.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"EXECUTE TASK requires a task name. Use EXECUTE TASK <task_name>.", 4))
+	}
 
 	return markers
 }
