@@ -98,6 +98,10 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE PIPE IF NOT EXISTS my_pipe AS COPY INTO my_table FROM @my_stage",
 		"CREATE PIPE my_pipe AUTO_INGEST = TRUE AS COPY INTO my_table FROM @my_stage",
 		"CREATE PIPE my_pipe AUTO_INGEST = TRUE AWS_SNS_TOPIC = 'arn:aws:sns:us-east-1:123456789012:my-topic' AS COPY INTO my_table FROM @my_stage",
+		// Alerts
+		"CREATE ALERT my_alert WAREHOUSE = my_wh SCHEDULE = '1 MINUTE' IF (EXISTS (SELECT 1)) THEN CALL my_proc()",
+		"CREATE OR REPLACE ALERT my_alert WAREHOUSE = my_wh SCHEDULE = 'USING CRON 0 0 * * * UTC' COMMENT = 'test' IF (EXISTS (SELECT * FROM t WHERE val > 10)) THEN INSERT INTO log SELECT CURRENT_TIMESTAMP()",
+		"CREATE ALERT IF NOT EXISTS db.schema.my_alert WAREHOUSE = \"MY WH\" SCHEDULE = '5 MINUTE' IF (EXISTS (SELECT 1)) THEN SYSTEM$SEND_EMAIL('my_int', 'me@example.com', 'Alert!', 'Something happened')",
 		"CREATE PIPE my_pipe AUTO_INGEST = TRUE INTEGRATION = 'my_int' AS COPY INTO my_table FROM @my_stage",
 		"CREATE PIPE my_pipe COMMENT = 'my pipe' AS COPY INTO my_table FROM @my_stage",
 		"CREATE PIPE my_pipe ERROR_INTEGRATION = my_error_int AS COPY INTO my_table FROM @my_stage",
@@ -257,6 +261,15 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Pipe invalid property", "CREATE PIPE my_pipe INVALID_PROP = TRUE AS COPY INTO my_table FROM @my_stage", "Unexpected property 'INVALID_PROP'"},
 		{"Pipe Replace IF NOT EXISTS", "CREATE OR REPLACE PIPE IF NOT EXISTS my_pipe AS COPY INTO my_table FROM @my_stage", "Conflict between OR REPLACE and IF NOT EXISTS"},
 		{"Pipe AUTO_INGEST no stage", "CREATE PIPE my_pipe AUTO_INGEST = TRUE AS COPY INTO my_table FROM (SELECT * FROM t)", "typically requires a stage source"},
+
+		// Invalid Alert
+		{"Alert missing WAREHOUSE", "CREATE ALERT my_alert SCHEDULE = '1 MINUTE' IF (EXISTS (SELECT 1)) THEN CALL p()", "Missing mandatory WAREHOUSE"},
+		{"Alert missing SCHEDULE", "CREATE ALERT my_alert WAREHOUSE = wh IF (EXISTS (SELECT 1)) THEN CALL p()", "Missing mandatory SCHEDULE"},
+		{"Alert missing IF", "CREATE ALERT my_alert WAREHOUSE = wh SCHEDULE = '1 MINUTE' THEN CALL p()", "Missing mandatory IF (EXISTS (...))"},
+		{"Alert missing THEN", "CREATE ALERT my_alert WAREHOUSE = wh SCHEDULE = '1 MINUTE' IF (EXISTS (SELECT 1)) CALL p()", "Missing mandatory THEN keyword"},
+		{"Alert Replace IF NOT EXISTS", "CREATE OR REPLACE ALERT IF NOT EXISTS my_alert WAREHOUSE = wh SCHEDULE = '1 MINUTE' IF (EXISTS (SELECT 1)) THEN CALL p()", "Conflict between OR REPLACE and IF NOT EXISTS"},
+		{"Alert THEN false negative with CASE THEN in subquery", "CREATE ALERT a WAREHOUSE = wh SCHEDULE = '1 MINUTE' IF (EXISTS (SELECT CASE WHEN x > 1 THEN 1 ELSE 0 END FROM t)) CALL p()", "Missing mandatory THEN keyword"},
+		{"Alert unknown property", "CREATE ALERT my_alert WAREHOUSE = wh SCHEDULE = '1 MINUTE' FOO = bar IF (EXISTS (SELECT 1)) THEN CALL p()", "Unexpected property 'FOO'"},
 
 		// Invalid COPY INTO
 		{"COPY missing FROM", "COPY INTO my_table", "missing the mandatory FROM clause"},

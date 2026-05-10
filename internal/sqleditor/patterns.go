@@ -39,7 +39,7 @@ var (
 		`(?i)\bTABLESAMPLE\b|\bSAMPLE\s*\(|\bWITHIN\s+GROUP\b|\bCONNECT\s+BY\b` +
 			`|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b` +
 			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:STAGE` +
-			`|ALERT|SHARE` +
+			`|SHARE` +
 			`|NETWORK|ROW\s+ACCESS` +
 			`|SESSION|PASSWORD|REPLICATION|FAILOVER|APPLICATION)\b` +
 			`|ALTER\s+(?:TABLE|VIEW|STREAM|DATABASE|STAGE|PIPE|PROCEDURE|FUNCTION` +
@@ -263,6 +263,19 @@ var (
 		`ALLOW_OVERLAPPING_EXECUTION`, `USER_TASK_TIMEOUT_MS`, `SUSPEND_TASK_AFTER_NUM_FAILURES`,
 		`ERROR_INTEGRATION`, `COMMENT`, `AFTER`, `WHEN`,
 	}, "|")
+
+	// ── CREATE ALERT ──────────────────────────────────────────────────────────
+	reIsCreateAlert = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?ALERT\b`)
+	alertProps      = strings.Join([]string{
+		`WAREHOUSE`, `SCHEDULE`, `COMMENT`,
+	}, "|")
+	reAlertIfExists  = regexp.MustCompile(`(?i)\bIF\s*\(\s*EXISTS\s*\(`)
+	reAlertThen      = regexp.MustCompile(`(?i)\bTHEN\b`)
+	reAlertWarehouse = regexp.MustCompile(`(?i)\bWAREHOUSE\s*=`)
+	reAlertSchedule  = regexp.MustCompile(`(?i)\bSCHEDULE\s*=`)
+
+	// Regular expression to match property keys (e.g., KEY =)
+	reProp = regexp.MustCompile(`(?i)\b([a-zA-Z_0-9]+)\s*=`)
 
 	// ── CREATE PIPE ───────────────────────────────────────────────────────────
 	reIsCreatePipe = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PIPE\b`)
@@ -872,6 +885,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			if asIdx != nil {
 				validateProperties(parseText[:asIdx[0]], taskProps, r, &markers)
 			}
+			continue
+		}
+
+		// ── Preamble: CREATE ALERT ───────────────────────────────────────
+		if reIsCreateAlert.MatchString(parseText) {
+			markers = append(markers, validateCreateAlert(parseText, r)...)
 			continue
 		}
 
@@ -1496,15 +1515,69 @@ func stripParenContents(s string) string {
 // validateProperties scans s for words that look like property keys (KEY =)
 // and checks if they match the pipe-separated list of validProps.
 func validateProperties(s string, validProps string, r StatementRange, markers *[]DiagMarker) {
-	reProp := regexp.MustCompile(`(?i)\b([a-zA-Z_0-9]+)\s*=`)
 	reValid := regexp.MustCompile(`(?i)^(` + validProps + `)$`)
 
-	for _, m := range reProp.FindAllStringSubmatch(s, -1) {
+	strippedS := reStripStringLiterals.ReplaceAllString(s, "''")
+
+	for _, m := range reProp.FindAllStringSubmatch(strippedS, -1) {
 		key := m[1]
 		if !reValid.MatchString(key) {
 			*markers = append(*markers, diagMarkerSpan(r, fmt.Sprintf("Unexpected property '%s' in statement.", key), 4))
 		}
 	}
+}
+
+func validateCreateAlert(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	// 1. Mutually exclusive OR REPLACE and IF NOT EXISTS
+	ifIdx := reAlertIfExists.FindStringIndex(parseText)
+
+	preambleToCheck := parseText
+	if ifIdx != nil {
+		preambleToCheck = parseText[:ifIdx[0]]
+	}
+
+	if reOrReplace.MatchString(preambleToCheck) && reIfNotExists.MatchString(preambleToCheck) {
+		markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE ALERT statement.", 4))
+		return markers
+	}
+
+	// 2. Mandatory IF (EXISTS (...))
+	if ifIdx == nil {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory IF (EXISTS (...)) clause in CREATE ALERT statement.", 4))
+	}
+
+	var preamble string
+	var body string
+	if ifIdx != nil {
+		preamble = parseText[:ifIdx[0]]
+		body = parseText[ifIdx[0]:]
+	} else {
+		// If IF (EXISTS ( is missing, consider the whole statement as preamble for other checks
+		preamble = parseText
+		body = ""
+	}
+
+	// 3. Mandatory THEN
+	// body is empty when IF clause is absent; THEN check is skipped
+	if body != "" && reAlertThen.FindStringIndex(stripParenContents(body)) == nil {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory THEN keyword in CREATE ALERT statement.", 4))
+	}
+
+	// 4. Mandatory WAREHOUSE
+	if !reAlertWarehouse.MatchString(preamble) {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory WAREHOUSE property in CREATE ALERT statement.", 4))
+	}
+
+	// 5. Mandatory SCHEDULE
+	if !reAlertSchedule.MatchString(preamble) {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory SCHEDULE property in CREATE ALERT statement.", 4))
+	}
+
+	// 6. Validate properties
+	validateProperties(preamble, alertProps, r, &markers)
+
+	return markers
 }
 
 func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
