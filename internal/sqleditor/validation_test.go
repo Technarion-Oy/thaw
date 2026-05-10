@@ -269,6 +269,7 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Alert missing THEN", "CREATE ALERT my_alert WAREHOUSE = wh SCHEDULE = '1 MINUTE' IF (EXISTS (SELECT 1)) CALL p()", "Missing mandatory THEN keyword"},
 		{"Alert Replace IF NOT EXISTS", "CREATE OR REPLACE ALERT IF NOT EXISTS my_alert WAREHOUSE = wh SCHEDULE = '1 MINUTE' IF (EXISTS (SELECT 1)) THEN CALL p()", "Conflict between OR REPLACE and IF NOT EXISTS"},
 		{"Alert THEN false negative with CASE THEN in subquery", "CREATE ALERT a WAREHOUSE = wh SCHEDULE = '1 MINUTE' IF (EXISTS (SELECT CASE WHEN x > 1 THEN 1 ELSE 0 END FROM t)) CALL p()", "Missing mandatory THEN keyword"},
+		{"Alert unknown property", "CREATE ALERT my_alert WAREHOUSE = wh SCHEDULE = '1 MINUTE' FOO = bar IF (EXISTS (SELECT 1)) THEN CALL p()", "Unexpected property 'FOO'"},
 
 		// Invalid COPY INTO
 		{"COPY missing FROM", "COPY INTO my_table", "missing the mandatory FROM clause"},

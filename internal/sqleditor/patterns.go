@@ -1541,14 +1541,22 @@ func validateCreateAlert(parseText string, r StatementRange) []DiagMarker {
 	ifIdx := reAlertIfExists.FindStringIndex(parseText)
 	if ifIdx == nil {
 		markers = append(markers, diagMarkerSpan(r, "Missing mandatory IF (EXISTS (...)) clause in CREATE ALERT statement.", 4))
-		return markers
 	}
 
-	preamble := parseText[:ifIdx[0]]
-	body := parseText[ifIdx[0]:]
+	var preamble string
+	var body string
+
+	if ifIdx != nil {
+		preamble = parseText[:ifIdx[0]]
+		body = parseText[ifIdx[0]:]
+	} else {
+		// If IF (EXISTS ( is missing, consider the whole statement as preamble for other checks
+		preamble = parseText
+		body = ""
+	}
 
 	// 3. Mandatory THEN
-	if thenIdx := reAlertThen.FindStringIndex(stripParenContents(body)); thenIdx == nil {
+	if body != "" && reAlertThen.FindStringIndex(stripParenContents(body)) == nil {
 		markers = append(markers, diagMarkerSpan(r, "Missing mandatory THEN keyword in CREATE ALERT statement.", 4))
 	}
 
