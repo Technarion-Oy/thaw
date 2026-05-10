@@ -192,7 +192,8 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE SESSION POLICY my_session_policy SESSION_IDLE_TIMEOUT_MINS = 60",
 		"CREATE SESSION POLICY my_session_policy SESSION_UI_IDLE_TIMEOUT_MINS = 30",
 		"CREATE SESSION POLICY my_session_policy SESSION_IDLE_TIMEOUT_MINS = 0",
-		"CREATE SESSION POLICY my_session_policy SESSION_IDLE_TIMEOUT_MINS = 999999",
+		"CREATE SESSION POLICY my_session_policy SESSION_IDLE_TIMEOUT_MINS = 56400",
+		"CREATE SESSION POLICY my_session_policy SESSION_UI_IDLE_TIMEOUT_MINS = 56400",
 		"CREATE SESSION POLICY my_session_policy SESSION_IDLE_TIMEOUT_MINS = 60 SESSION_UI_IDLE_TIMEOUT_MINS = 30 COMMENT = 'my policy'",
 		// Quoted session policy name with an inner dot must not trigger the prefix warning.
 		`CREATE SESSION POLICY "my.policy" SESSION_IDLE_TIMEOUT_MINS = 60`,
@@ -371,9 +372,9 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Session Policy with prefix", "CREATE SESSION POLICY MY_DB.PUBLIC.bad_policy SESSION_IDLE_TIMEOUT_MINS = 60", "account-level"},
 		{"Session Policy OR REPLACE with prefix", "CREATE OR REPLACE SESSION POLICY MY_DB.PUBLIC.bad SESSION_IDLE_TIMEOUT_MINS = 60", "account-level"},
 		{"Session Policy idle timeout below range", "CREATE SESSION POLICY my_policy SESSION_IDLE_TIMEOUT_MINS = -1", "out of range"},
-		{"Session Policy idle timeout above range", "CREATE SESSION POLICY my_policy SESSION_IDLE_TIMEOUT_MINS = 1000000", "out of range"},
+		{"Session Policy idle timeout above range", "CREATE SESSION POLICY my_policy SESSION_IDLE_TIMEOUT_MINS = 56401", "out of range"},
 		{"Session Policy UI idle timeout below range", "CREATE SESSION POLICY my_policy SESSION_UI_IDLE_TIMEOUT_MINS = -1", "out of range"},
-		{"Session Policy UI idle timeout above range", "CREATE SESSION POLICY my_policy SESSION_UI_IDLE_TIMEOUT_MINS = 1000000", "out of range"},
+		{"Session Policy UI idle timeout above range", "CREATE SESSION POLICY my_policy SESSION_UI_IDLE_TIMEOUT_MINS = 56401", "out of range"},
 		{"Session Policy unknown property", "CREATE SESSION POLICY my_policy INVALID_PROP = 60", "Unexpected property 'INVALID_PROP'"},
 
 		// Invalid Password Policies
@@ -388,10 +389,16 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Password Policy lockout time below range", "CREATE PASSWORD POLICY my_policy PASSWORD_LOCKOUT_TIME_MINS = 0", "below the minimum"},
 		{"Password Policy lockout time above range", "CREATE PASSWORD POLICY my_policy PASSWORD_LOCKOUT_TIME_MINS = 1000", "exceeds the maximum"},
 		{"Password Policy max age above range", "CREATE PASSWORD POLICY my_policy PASSWORD_MAX_AGE_DAYS = 1000", "exceeds the maximum"},
+		{"Password Policy min age above range", "CREATE PASSWORD POLICY my_policy PASSWORD_MIN_AGE_DAYS = 1000", "exceeds the maximum"},
 		{"Password Policy history above range", "CREATE PASSWORD POLICY my_policy PASSWORD_HISTORY = 25", "exceeds the maximum"},
 		{"Password Policy history negative", "CREATE PASSWORD POLICY my_policy PASSWORD_HISTORY = -1", "below the minimum"},
 		{"Password Policy min uppercase negative", "CREATE PASSWORD POLICY my_policy PASSWORD_MIN_UPPER_CASE_CHARS = -1", "below the minimum"},
+		{"Password Policy min uppercase above range", "CREATE PASSWORD POLICY my_policy PASSWORD_MIN_UPPER_CASE_CHARS = 257", "exceeds the maximum"},
+		{"Password Policy min lowercase above range", "CREATE PASSWORD POLICY my_policy PASSWORD_MIN_LOWER_CASE_CHARS = 257", "exceeds the maximum"},
+		{"Password Policy min numeric above range", "CREATE PASSWORD POLICY my_policy PASSWORD_MIN_NUMERIC_CHARS = 257", "exceeds the maximum"},
+		{"Password Policy min special above range", "CREATE PASSWORD POLICY my_policy PASSWORD_MIN_SPECIAL_CHARS = 257", "exceeds the maximum"},
 		{"Password Policy max lt min length", "CREATE PASSWORD POLICY my_policy PASSWORD_MIN_LENGTH = 20 PASSWORD_MAX_LENGTH = 10", "greater than or equal to PASSWORD_MIN_LENGTH"},
+		{"Password Policy min age gt max age", "CREATE PASSWORD POLICY my_policy PASSWORD_MIN_AGE_DAYS = 90 PASSWORD_MAX_AGE_DAYS = 30", "PASSWORD_MIN_AGE_DAYS"},
 		{"Password Policy unknown property", "CREATE PASSWORD POLICY my_policy INVALID_PROP = TRUE", "Unexpected property 'INVALID_PROP'"},
 	}
 

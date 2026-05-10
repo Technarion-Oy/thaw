@@ -1802,22 +1802,22 @@ func validateCreateSessionPolicy(parseText string, r StatementRange) []DiagMarke
 		}
 	}
 
-	// 2. Validate SESSION_IDLE_TIMEOUT_MINS range (0–999999).
+	// 2. Validate SESSION_IDLE_TIMEOUT_MINS range (0–56400).
 	if m := reSessionIdleTimeout.FindStringSubmatch(parseText); m != nil {
-		if v, err := strconv.Atoi(m[1]); err == nil && (v < 0 || v > 999999) {
-			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("SESSION_IDLE_TIMEOUT_MINS value %d is out of range (0–999999). Use 0 to disable the timeout.", v), 4))
+		if v, err := strconv.Atoi(m[1]); err == nil && (v < 0 || v > 56400) {
+			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("SESSION_IDLE_TIMEOUT_MINS value %d is out of range (0–56400). Use 0 to disable the timeout.", v), 4))
 		}
 	}
 
-	// 3. Validate SESSION_UI_IDLE_TIMEOUT_MINS range (0–999999).
+	// 3. Validate SESSION_UI_IDLE_TIMEOUT_MINS range (0–56400).
 	if m := reSessionUIIdleTimeout.FindStringSubmatch(parseText); m != nil {
-		if v, err := strconv.Atoi(m[1]); err == nil && (v < 0 || v > 999999) {
-			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("SESSION_UI_IDLE_TIMEOUT_MINS value %d is out of range (0–999999). Use 0 to disable the timeout.", v), 4))
+		if v, err := strconv.Atoi(m[1]); err == nil && (v < 0 || v > 56400) {
+			markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("SESSION_UI_IDLE_TIMEOUT_MINS value %d is out of range (0–56400). Use 0 to disable the timeout.", v), 4))
 		}
 	}
 
 	// 4. Validate property keys.
-	validateProperties(reStripStringLiterals.ReplaceAllString(parseText, "''"), sessionPolicyProps, r, &markers)
+	validateProperties(parseText, sessionPolicyProps, r, &markers)
 
 	return markers
 }
@@ -1834,8 +1834,7 @@ func validateCreatePasswordPolicy(parseText string, r StatementRange) []DiagMark
 		}
 	}
 
-	// Helper to parse a named integer property and check a range; returns the
-	// parsed value (or -1 if absent) so cross-property checks can use it.
+	// 2. Per-property range validation.
 	type intProp struct {
 		re   *regexp.Regexp
 		name string
@@ -1846,11 +1845,11 @@ func validateCreatePasswordPolicy(parseText string, r StatementRange) []DiagMark
 	props := []intProp{
 		{rePasswordMinLength, "PASSWORD_MIN_LENGTH", 8, 256},
 		{rePasswordMaxLength, "PASSWORD_MAX_LENGTH", 8, 256},
-		{rePasswordMinUpperCase, "PASSWORD_MIN_UPPER_CASE_CHARS", 0, -1},
-		{rePasswordMinLowerCase, "PASSWORD_MIN_LOWER_CASE_CHARS", 0, -1},
-		{rePasswordMinNumeric, "PASSWORD_MIN_NUMERIC_CHARS", 0, -1},
-		{rePasswordMinSpecial, "PASSWORD_MIN_SPECIAL_CHARS", 0, -1},
-		{rePasswordMinAgeDays, "PASSWORD_MIN_AGE_DAYS", 0, -1},
+		{rePasswordMinUpperCase, "PASSWORD_MIN_UPPER_CASE_CHARS", 0, 256},
+		{rePasswordMinLowerCase, "PASSWORD_MIN_LOWER_CASE_CHARS", 0, 256},
+		{rePasswordMinNumeric, "PASSWORD_MIN_NUMERIC_CHARS", 0, 256},
+		{rePasswordMinSpecial, "PASSWORD_MIN_SPECIAL_CHARS", 0, 256},
+		{rePasswordMinAgeDays, "PASSWORD_MIN_AGE_DAYS", 0, 999},
 		{rePasswordMaxAgeDays, "PASSWORD_MAX_AGE_DAYS", 0, 999},
 		{rePasswordMaxRetries, "PASSWORD_MAX_RETRIES", 1, 10},
 		{rePasswordLockoutTimeMins, "PASSWORD_LOCKOUT_TIME_MINS", 1, 999},
@@ -1877,17 +1876,24 @@ func validateCreatePasswordPolicy(parseText string, r StatementRange) []DiagMark
 		}
 	}
 
-	// 3. Cross-property check: PASSWORD_MAX_LENGTH must be ≥ PASSWORD_MIN_LENGTH.
-	minLen, hasMin := values["PASSWORD_MIN_LENGTH"]
-	maxLen, hasMax := values["PASSWORD_MAX_LENGTH"]
-	if hasMin && hasMax && maxLen < minLen {
+	// 3. Cross-property checks.
+	minLen, hasMinLen := values["PASSWORD_MIN_LENGTH"]
+	maxLen, hasMaxLen := values["PASSWORD_MAX_LENGTH"]
+	if hasMinLen && hasMaxLen && maxLen < minLen {
 		markers = append(markers, diagMarkerSpan(r,
 			fmt.Sprintf("PASSWORD_MAX_LENGTH (%d) must be greater than or equal to PASSWORD_MIN_LENGTH (%d).", maxLen, minLen),
 			4))
 	}
+	minAge, hasMinAge := values["PASSWORD_MIN_AGE_DAYS"]
+	maxAge, hasMaxAge := values["PASSWORD_MAX_AGE_DAYS"]
+	if hasMinAge && hasMaxAge && maxAge > 0 && minAge > maxAge {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("PASSWORD_MIN_AGE_DAYS (%d) must be less than or equal to PASSWORD_MAX_AGE_DAYS (%d).", minAge, maxAge),
+			4))
+	}
 
 	// 4. Validate property keys.
-	validateProperties(reStripStringLiterals.ReplaceAllString(parseText, "''"), passwordPolicyProps, r, &markers)
+	validateProperties(parseText, passwordPolicyProps, r, &markers)
 
 	return markers
 }
