@@ -361,8 +361,19 @@ var (
 		`PASSWORD_HISTORY`, `COMMENT`,
 	}, "|")
 
-	// ── GRANT ─────────────────────────────────────────────────────────────────
-	reIsGrantRole = regexp.MustCompile(`(?i)^\s*GRANT\s+ROLE\b`)
+	// ── GRANT / REVOKE ────────────────────────────────────────────────────────
+	reIsGrantRole     = regexp.MustCompile(`(?i)^\s*GRANT\s+ROLE\b`)
+	reIsGrant         = regexp.MustCompile(`(?i)^\s*GRANT\b`)
+	reIsRevoke        = regexp.MustCompile(`(?i)^\s*REVOKE\b`)
+	reGrantOnObject   = regexp.MustCompile(`(?i)\bGRANT\s+([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(\w+)`)
+	reRevokeOnObject  = regexp.MustCompile(`(?i)\bREVOKE\s+(?:GRANT\s+OPTION\s+FOR\s+)?([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(\w+)`)
+	reGrantee         = regexp.MustCompile(`(?i)\bTO\s+(?:ROLE|USER|DATABASE\s+ROLE)\b`)
+	reGranteeFrom     = regexp.MustCompile(`(?i)\bFROM\s+(?:ROLE|USER|DATABASE\s+ROLE)\b`)
+	reGrantAllFuture  = regexp.MustCompile(`(?i)\bON\s+(?:ALL|FUTURE)\b`)
+	reGrantInQualifier = regexp.MustCompile(`(?i)\bIN\s+(?:SCHEMA|DATABASE)\b`)
+	reWithGrantOption = regexp.MustCompile(`(?i)\bWITH\s+GRANT\s+OPTION\b`)
+	reRevokeCascade   = regexp.MustCompile(`(?i)\bCASCADE\b`)
+	reRevokeRestrict  = regexp.MustCompile(`(?i)\bRESTRICT\b`)
 
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
 	reIsCreateStage = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?STAGE\b`)
@@ -453,6 +464,62 @@ var (
 		"MERGE": true, "GRANT": true, "REVOKE": true, "COPY": true,
 	}
 )
+
+// grantObjectPrivileges maps canonical Snowflake object types (upper-cased) to
+// their valid privilege names. OWNERSHIP, ALL, and ALL PRIVILEGES are handled
+// as universal special cases in validateGrant / validateRevoke and are omitted
+// from this map intentionally.
+var grantObjectPrivileges = map[string][]string{
+	"TABLE": {
+		"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "REBUILD",
+	},
+	"VIEW": {"SELECT", "REFERENCES"},
+	"STAGE": {"READ", "WRITE"},
+	"WAREHOUSE": {"USAGE", "MODIFY", "MONITOR", "OPERATE"},
+	"DATABASE": {
+		"USAGE", "MODIFY", "MONITOR", "CREATE SCHEMA",
+		"IMPORTED PRIVILEGES", "REFERENCE_USAGE",
+	},
+	"SCHEMA": {
+		"USAGE", "MODIFY", "MONITOR",
+		"CREATE TABLE", "CREATE VIEW", "CREATE STAGE", "CREATE STREAM",
+		"CREATE TASK", "CREATE PIPE", "CREATE FUNCTION", "CREATE PROCEDURE",
+		"CREATE SEQUENCE", "CREATE FILE FORMAT", "CREATE MASKING POLICY",
+		"CREATE ROW ACCESS POLICY", "CREATE DYNAMIC TABLE",
+		"ADD SEARCH OPTIMIZATION", "CREATE ALERT", "CREATE NETWORK RULE",
+		"CREATE SECRET", "CREATE SNOWFLAKE.CORTEX.SEARCH SERVICE",
+	},
+	"ROLE":        {"USAGE"},
+	"INTEGRATION": {"USAGE"},
+	"TASK":        {"MONITOR", "OPERATE"},
+	"STREAM":      {"SELECT"},
+	"USER":        {"MONITOR"},
+	"ACCOUNT": {
+		"CREATE ROLE", "CREATE USER", "CREATE WAREHOUSE", "CREATE DATABASE",
+		"CREATE INTEGRATION", "CREATE NETWORK POLICY", "MANAGE GRANTS",
+		"MONITOR USAGE", "EXECUTE TASK", "EXECUTE ALERT", "EXECUTE MANAGED TASK",
+		"IMPORT SHARE", "OVERRIDE SHARE RESTRICTIONS", "ATTACH POLICY",
+		"APPLY MASKING POLICY", "APPLY ROW ACCESS POLICY",
+	},
+}
+
+// grantObjectTypePlurals maps plural/alternative Snowflake object-type names
+// (upper-cased) to their canonical singular form, used when parsing
+// ON ALL <objects> / ON FUTURE <objects> clauses.
+var grantObjectTypePlurals = map[string]string{
+	"TABLES":       "TABLE",
+	"VIEWS":        "VIEW",
+	"STAGES":       "STAGE",
+	"WAREHOUSES":   "WAREHOUSE",
+	"DATABASES":    "DATABASE",
+	"SCHEMAS":      "SCHEMA",
+	"ROLES":        "ROLE",
+	"INTEGRATIONS": "INTEGRATION",
+	"TASKS":        "TASK",
+	"STREAMS":      "STREAM",
+	"USERS":        "USER",
+	"PIPES":        "PIPE",
+}
 
 // ── ValidateSnowflakePatterns ─────────────────────────────────────────────────
 
@@ -1239,10 +1306,14 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		}
 
 		// ── GRANT ────────────────────────────────────────────────────────
-		if reIsGrantRole.MatchString(parseText) {
-			if regexp.MustCompile(`(?i)\bTO\s+TABLE\b`).MatchString(parseText) {
-				markers = append(markers, diagMarkerSpan(r, "Unexpected syntax: Roles can be granted to other roles or users, but not directly to tables.", 4))
-			}
+		if reIsGrant.MatchString(parseText) {
+			markers = append(markers, validateGrant(parseText, r)...)
+			continue
+		}
+
+		// ── REVOKE ───────────────────────────────────────────────────────
+		if reIsRevoke.MatchString(parseText) {
+			markers = append(markers, validateRevoke(parseText, r)...)
 			continue
 		}
 
@@ -1987,6 +2058,168 @@ func splitCommaRespectingParens(s string) []string {
 	}
 	parts = append(parts, s[start:])
 	return parts
+}
+
+// ── validateGrant ─────────────────────────────────────────────────────────────
+
+// validateGrant validates a GRANT statement for structural correctness and
+// privilege/object-type compatibility.
+func validateGrant(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// ── GRANT ROLE / GRANT DATABASE ROLE ─────────────────────────────────────
+	isGrantRole := reIsGrantRole.MatchString(parseText) ||
+		regexp.MustCompile(`(?i)^\s*GRANT\s+DATABASE\s+ROLE\b`).MatchString(parseText)
+	if isGrantRole {
+		// WITH GRANT OPTION is not valid for role grants.
+		if reWithGrantOption.MatchString(parseText) {
+			markers = append(markers, diagMarkerSpan(r,
+				"WITH GRANT OPTION is not valid for GRANT ROLE statements.", 4))
+		}
+		// Role grants use TO USER or TO ROLE, never TO TABLE.
+		if regexp.MustCompile(`(?i)\bTO\s+TABLE\b`).MatchString(parseText) {
+			markers = append(markers, diagMarkerSpan(r,
+				"Unexpected syntax: Roles can be granted to other roles or users, but not directly to tables.", 4))
+		}
+		// Must have a grantee.
+		if !reGrantee.MatchString(parseText) {
+			markers = append(markers, diagMarkerSpan(r,
+				"GRANT ROLE requires a TO ROLE or TO USER clause.", 4))
+		}
+		return markers
+	}
+
+	// ── GRANT <privileges> ON <object_type> ───────────────────────────────────
+	m := reGrantOnObject.FindStringSubmatch(parseText)
+	if m == nil {
+		// No recognisable ON clause — incomplete or unsupported form; skip.
+		return markers
+	}
+	privListRaw := m[1]
+	allFuture := strings.TrimSpace(strings.ToUpper(m[2])) // "ALL", "FUTURE", or ""
+	objectType := normalizeGrantObjectType(m[3])
+
+	// ── Grantee required ──────────────────────────────────────────────────────
+	if !reGrantee.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r,
+			"GRANT statement requires a grantee (TO ROLE, TO DATABASE ROLE, or TO USER).", 4))
+	}
+
+	// ── ON ALL / ON FUTURE requires IN SCHEMA or IN DATABASE ─────────────────
+	if reGrantAllFuture.MatchString(parseText) && !reGrantInQualifier.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r,
+			"ON ALL/FUTURE <objects> requires an IN SCHEMA or IN DATABASE qualifier.", 4))
+	}
+
+	// ── Privilege validation for known object types ───────────────────────────
+	// Bulk grants (ALL/FUTURE) are skipped — the privilege set may be
+	// legitimately broad and varies by object type.
+	validPrivs, knownObj := grantObjectPrivileges[objectType]
+	if knownObj && allFuture == "" {
+		for _, priv := range splitPrivileges(privListRaw) {
+			// OWNERSHIP, ALL, and ALL PRIVILEGES are always accepted.
+			if priv == "OWNERSHIP" || priv == "ALL" || priv == "ALL PRIVILEGES" {
+				continue
+			}
+			if !privInSlice(priv, validPrivs) {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("Privilege '%s' is not valid for object type %s.", priv, objectType), 4))
+			}
+		}
+	}
+
+	return markers
+}
+
+// ── validateRevoke ────────────────────────────────────────────────────────────
+
+// validateRevoke validates a REVOKE statement for structural correctness and
+// privilege/object-type compatibility.
+func validateRevoke(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// ── REVOKE ROLE / REVOKE DATABASE ROLE ────────────────────────────────────
+	isRevokeRole := regexp.MustCompile(`(?i)^\s*REVOKE\s+ROLE\b`).MatchString(parseText) ||
+		regexp.MustCompile(`(?i)^\s*REVOKE\s+DATABASE\s+ROLE\b`).MatchString(parseText)
+	if isRevokeRole {
+		if !reGranteeFrom.MatchString(parseText) {
+			markers = append(markers, diagMarkerSpan(r,
+				"REVOKE ROLE requires a FROM ROLE or FROM USER clause.", 4))
+		}
+		return markers
+	}
+
+	// ── REVOKE <privileges> ON <object_type> ──────────────────────────────────
+	m := reRevokeOnObject.FindStringSubmatch(parseText)
+	if m == nil {
+		return markers
+	}
+	privListRaw := m[1]
+	allFuture := strings.TrimSpace(strings.ToUpper(m[2]))
+	objectType := normalizeGrantObjectType(m[3])
+
+	// ── CASCADE and RESTRICT are mutually exclusive ───────────────────────────
+	if reRevokeCascade.MatchString(parseText) && reRevokeRestrict.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r,
+			"CASCADE and RESTRICT are mutually exclusive in REVOKE statement.", 4))
+	}
+
+	// ── FROM clause required ──────────────────────────────────────────────────
+	if !reGranteeFrom.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r,
+			"REVOKE statement requires a FROM ROLE, FROM DATABASE ROLE, or FROM USER clause.", 4))
+	}
+
+	// ── Privilege validation for known object types ───────────────────────────
+	validPrivs, knownObj := grantObjectPrivileges[objectType]
+	if knownObj && allFuture == "" {
+		for _, priv := range splitPrivileges(privListRaw) {
+			if priv == "OWNERSHIP" || priv == "ALL" || priv == "ALL PRIVILEGES" {
+				continue
+			}
+			if !privInSlice(priv, validPrivs) {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("Privilege '%s' is not valid for object type %s.", priv, objectType), 4))
+			}
+		}
+	}
+
+	return markers
+}
+
+// splitPrivileges splits a comma-separated privilege list into individual
+// normalised (upper-cased, trimmed) privilege strings.
+func splitPrivileges(privList string) []string {
+	parts := strings.Split(privList, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		trimmed := strings.TrimSpace(strings.ToUpper(p))
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+// normalizeGrantObjectType converts plural and/or alternative Snowflake object
+// type names to their canonical singular upper-cased form used as map keys in
+// grantObjectPrivileges.
+func normalizeGrantObjectType(t string) string {
+	upper := strings.ToUpper(strings.TrimSpace(t))
+	if singular, ok := grantObjectTypePlurals[upper]; ok {
+		return singular
+	}
+	return upper
+}
+
+// privInSlice returns true when priv (already upper-cased) is present in slice.
+func privInSlice(priv string, slice []string) bool {
+	for _, s := range slice {
+		if strings.ToUpper(s) == priv {
+			return true
+		}
+	}
+	return false
 }
 
 func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
