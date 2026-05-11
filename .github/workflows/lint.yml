@@ -15,7 +15,7 @@ on:
 jobs:
   golangci-lint:
     name: golangci-lint
-    runs-on: ubuntu-22.04
+    runs-on: githubactions
     permissions:
       contents: read
       checks: write

@@ -14,7 +14,7 @@ on:
 jobs:
   govulncheck:
     name: govulncheck
-    runs-on: ubuntu-22.04
+    runs-on: githubactions
     permissions:
       contents: read
 

@@ -8,7 +8,7 @@ on:
 jobs:
   test:
     name: Snowflake integration tests
-    runs-on: ubuntu-latest
+    runs-on: githubactions
     permissions:
       contents: read
       checks: write
