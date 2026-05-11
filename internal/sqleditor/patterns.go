@@ -526,7 +526,8 @@ var (
 	reAlterSessionUnset = regexp.MustCompile(`(?i)^\s*ALTER\s+SESSION\s+UNSET\b`)
 	// reAlterSessionParam extracts <PARAM> = <value> pairs from ALTER SESSION SET.
 	// Value is either a quoted string (with escaped quotes) or a non-whitespace token.
-	reAlterSessionParam = regexp.MustCompile(`(?i)([A-Z_][A-Z0-9_]*)\s*=\s*('(?:''|[^'])*'|[^\s;]+)`)
+	reAlterSessionParam      = regexp.MustCompile(`(?i)([A-Z_][A-Z0-9_]*)\s*=\s*('(?:''|[^'])*'|[^\s;]+)`)
+	reAlterSessionParamSplit = regexp.MustCompile(`[,\s]+`)
 
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
 	reIsCreateStage = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?STAGE\b`)
@@ -3866,7 +3867,7 @@ func validateAlterSession(parseText string, r StatementRange) []DiagMarker {
 		}
 
 		// Parameter names may be comma-separated or whitespace-separated.
-		parts := regexp.MustCompile(`[,\s]+`).Split(rest, -1)
+		parts := reAlterSessionParamSplit.Split(rest, -1)
 		for _, p := range parts {
 			p = strings.TrimSpace(p)
 			if p == "" {

@@ -2820,6 +2820,8 @@ func TestValidateSnowflakePatterns_AlterSession(t *testing.T) {
 		// Comments in statement
 		"ALTER SESSION SET /* comment */ QUERY_TAG = 'test'",
 		"ALTER SESSION SET QUERY_TAG = 'test' -- trailing comment",
+		"ALTER SESSION UNSET /* comment */ QUERY_TAG",
+		"ALTER SESSION UNSET QUERY_TAG -- trailing comment",
 	}
 
 	for _, sql := range validCases {
@@ -2937,6 +2939,10 @@ func TestValidateSnowflakePatterns_AlterSession(t *testing.T) {
 			ranges := GetStatementRanges(tt.sql)
 			markers := ValidateSnowflakePatterns(tt.sql, ranges)
 			warns := getWarnings(markers)
+
+			if len(warns) != len(tt.wantMsgs) {
+				t.Errorf("Expected %d warning(s) for %q, got %d: %v", len(tt.wantMsgs), tt.sql, len(warns), warns)
+			}
 
 			for _, wantMsg := range tt.wantMsgs {
 				found := false
