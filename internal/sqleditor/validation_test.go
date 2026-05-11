@@ -2808,6 +2808,22 @@ func TestValidateSnowflakePatterns_AlterSession(t *testing.T) {
 		"ALTER SESSION SET PYTHON_PROFILER_MODULES = 'all'",
 		"ALTER SESSION SET PYTHON_PROFILER_TARGET_STAGE = '@my_stage'",
 		"ALTER SESSION SET SIMULATED_DATA_SHARING_CONSUMER = 'my_account'",
+		// Additional commonly-used parameters
+		"ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = 300",
+		"ALTER SESSION SET LOCK_TIMEOUT = 60",
+		"ALTER SESSION SET GEOGRAPHY_OUTPUT_FORMAT = 'GEOJSON'",
+		"ALTER SESSION SET GEOMETRY_OUTPUT_FORMAT = 'WKT'",
+		"ALTER SESSION SET CLIENT_SESSION_KEEP_ALIVE = TRUE",
+		"ALTER SESSION SET ABORT_DETACHED_QUERY = FALSE",
+		"ALTER SESSION SET ERROR_ON_NONDETERMINISTIC_MERGE = TRUE",
+		"ALTER SESSION SET ERROR_ON_NONDETERMINISTIC_UPDATE = TRUE",
+		"ALTER SESSION SET CLIENT_RESULT_CHUNK_SIZE = 160",
+		"ALTER SESSION SET TWO_DIGIT_CENTURY_START = 1970",
+		"ALTER SESSION SET TIMESTAMP_TYPE_MAPPING = 'TIMESTAMP_NTZ'",
+		"ALTER SESSION SET NETWORK_POLICY = 'my_policy'",
+		"ALTER SESSION SET PERIODIC_DATA_REKEYING = TRUE",
+		"ALTER SESSION SET CLIENT_MEMORY_LIMIT = 1536",
+		"ALTER SESSION SET CLIENT_PREFETCH_THREADS = 4",
 		// UNSET with single parameter
 		"ALTER SESSION UNSET QUERY_TAG",
 		// UNSET with multiple comma-separated parameters
@@ -2932,6 +2948,26 @@ func TestValidateSnowflakePatterns_AlterSession(t *testing.T) {
 			"ALTER SESSION UNSET QUERY_TAG, FAKE_PARAM",
 			[]string{"Unknown session parameter 'FAKE_PARAM'"},
 		},
+		{
+			"stray token without = value",
+			"ALTER SESSION SET QUERY_TAG = 'test' TIMEZONE",
+			[]string{"missing '= <value>' assignment"},
+		},
+		{
+			"TWO_DIGIT_CENTURY_START out of range",
+			"ALTER SESSION SET TWO_DIGIT_CENTURY_START = 1800",
+			[]string{"TWO_DIGIT_CENTURY_START must be an integer between 1900 and 2100"},
+		},
+		{
+			"invalid GEOGRAPHY_OUTPUT_FORMAT",
+			"ALTER SESSION SET GEOGRAPHY_OUTPUT_FORMAT = 'XML'",
+			[]string{"GEOGRAPHY_OUTPUT_FORMAT must be one of: GEOJSON, WKT, WKB, EWKT, EWKB"},
+		},
+		{
+			"invalid TIMESTAMP_TYPE_MAPPING",
+			"ALTER SESSION SET TIMESTAMP_TYPE_MAPPING = 'TIMESTAMP_XYZ'",
+			[]string{"TIMESTAMP_TYPE_MAPPING must be one of: TIMESTAMP_NTZ, TIMESTAMP_LTZ, TIMESTAMP_TZ"},
+		},
 	}
 
 	for _, tt := range invalidCases {
@@ -2958,4 +2994,27 @@ func TestValidateSnowflakePatterns_AlterSession(t *testing.T) {
 			}
 		})
 	}
+
+	// Multi-statement test: ALTER SESSION embedded between other statements.
+	t.Run("multi-statement with ALTER SESSION", func(t *testing.T) {
+		sql := "SELECT 1;\nALTER SESSION SET QUERY_TAG = 'test';\nSELECT 2"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		if warns := getWarnings(markers); len(warns) > 0 {
+			t.Errorf("Expected 0 warnings for multi-statement SQL, got %d: %v", len(warns), warns)
+		}
+	})
+
+	t.Run("multi-statement with invalid ALTER SESSION", func(t *testing.T) {
+		sql := "SELECT 1;\nALTER SESSION SET AUTOCOMMIT = MAYBE;\nSELECT 2"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warns := getWarnings(markers)
+		if len(warns) != 1 {
+			t.Errorf("Expected 1 warning, got %d: %v", len(warns), warns)
+		}
+		if len(warns) > 0 && !strings.Contains(warns[0].Message, "AUTOCOMMIT must be TRUE or FALSE") {
+			t.Errorf("Expected AUTOCOMMIT warning, got: %v", warns[0].Message)
+		}
+	})
 }

@@ -3774,6 +3774,21 @@ var knownSessionParams = map[string]sessionParamSpec{
 	"PYTHON_PROFILER_MODULES":            {kind: spString},
 	"PYTHON_PROFILER_TARGET_STAGE":       {kind: spString},
 	"SIMULATED_DATA_SHARING_CONSUMER":    {kind: spString},
+	"STATEMENT_TIMEOUT_IN_SECONDS":       {kind: spNonNeg},
+	"LOCK_TIMEOUT":                       {kind: spNonNeg},
+	"GEOGRAPHY_OUTPUT_FORMAT":            {kind: spEnum, vals: []string{"GEOJSON", "WKT", "WKB", "EWKT", "EWKB"}},
+	"GEOMETRY_OUTPUT_FORMAT":             {kind: spEnum, vals: []string{"GEOJSON", "WKT", "WKB", "EWKT", "EWKB"}},
+	"CLIENT_SESSION_KEEP_ALIVE":          {kind: spBool},
+	"ABORT_DETACHED_QUERY":               {kind: spBool},
+	"ERROR_ON_NONDETERMINISTIC_MERGE":    {kind: spBool},
+	"ERROR_ON_NONDETERMINISTIC_UPDATE":   {kind: spBool},
+	"CLIENT_RESULT_CHUNK_SIZE":           {kind: spNonNeg},
+	"TWO_DIGIT_CENTURY_START":            {kind: spIntRange, min: 1900, max: 2100},
+	"TIMESTAMP_TYPE_MAPPING":             {kind: spEnum, vals: []string{"TIMESTAMP_NTZ", "TIMESTAMP_LTZ", "TIMESTAMP_TZ"}},
+	"NETWORK_POLICY":                     {kind: spString},
+	"PERIODIC_DATA_REKEYING":             {kind: spBool},
+	"CLIENT_MEMORY_LIMIT":                {kind: spNonNeg},
+	"CLIENT_PREFETCH_THREADS":            {kind: spNonNeg},
 }
 
 // validateAlterSession validates ALTER SESSION SET / UNSET statements:
@@ -3805,6 +3820,18 @@ func validateAlterSession(parseText string, r StatementRange) []DiagMarker {
 			markers = append(markers, diagMarkerSpan(r,
 				"ALTER SESSION SET requires at least one parameter assignment. Use ALTER SESSION SET <param> = <value>.", 4))
 			return markers
+		}
+
+		// Check for stray tokens — parameter names without a = value assignment.
+		// Remove all matched param = value regions, then look for leftover identifiers.
+		residual := reAlterSessionParam.ReplaceAllString(rest, " ")
+		for _, tok := range reAlterSessionParamSplit.Split(residual, -1) {
+			tok = strings.TrimSpace(tok)
+			if tok == "" {
+				continue
+			}
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("Parameter '%s' is missing '= <value>' assignment.", strings.ToUpper(tok)), 4))
 		}
 
 		for _, pair := range pairs {
