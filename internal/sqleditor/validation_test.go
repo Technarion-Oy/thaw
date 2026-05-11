@@ -67,11 +67,7 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		// Drop
 		"DROP DATABASE my_db CASCADE",
 		"DROP SCHEMA IF EXISTS my_sch RESTRICT",
-		// SHOW statements (comprehensive tests in TestValidateSnowflakePatterns_Show)
-		"SHOW TABLES",
-		"SHOW TABLES LIKE '%test%' IN DATABASE my_db",
-		"SHOW GRANTS ON ACCOUNT",
-		"show tables",
+		// SHOW statements — comprehensive tests in TestValidateSnowflakePatterns_Show
 		// False Positive Guards (Should be silently ignored, 0 warnings)
 		"DELETE FROM t WHERE id = 1",
 		"GRANT SELECT ON t TO ROLE r",
@@ -3261,9 +3257,9 @@ func TestValidateSnowflakePatterns_Show(t *testing.T) {
 			[]string{"Unexpected token 'FOOBAR'"},
 		},
 		{
-			"typo in clause keyword LIEK",
-			"SHOW TABLES LIEK '%foo%'",
-			[]string{"Unexpected token 'LIEK'"},
+			"typo in clause keyword LIIKE",
+			"SHOW TABLES LIIKE '%foo%'",
+			[]string{"Unexpected token 'LIIKE'"},
 		},
 	}
 

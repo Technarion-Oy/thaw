@@ -4109,6 +4109,11 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 		return markers
 	}
 
+	// Optional clauses are parsed in canonical order: LIKE → IN → STARTS WITH → LIMIT.
+	// Snowflake itself accepts these in any order, so a clause written out of this
+	// order (e.g., IN before LIKE) will surface as "Unexpected token". This is a
+	// known limitation — a future improvement could parse order-independently.
+
 	// ── LIKE '<pattern>' ─────────────────────────────────────────────────
 	if strings.HasPrefix(restUp, "LIKE") && isShowBoundary(restUp, 4) {
 		rest = strings.TrimSpace(rest[4:])
