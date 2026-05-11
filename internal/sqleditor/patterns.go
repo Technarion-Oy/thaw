@@ -4026,7 +4026,8 @@ func isShowBoundary(s string, pos int) bool {
 // showClauseKeywords is the set of SHOW clause keywords that must not be
 // consumed as identifiers when parsing optional scope names in the IN clause.
 var showClauseKeywords = map[string]bool{
-	"LIKE": true, "STARTS": true, "LIMIT": true, "FROM": true,
+	"LIKE": true, "IN": true, "STARTS": true, "WITH": true,
+	"LIMIT": true, "FROM": true,
 }
 
 // validateShow validates a SHOW <object_type> statement:
@@ -4151,21 +4152,38 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 			}
 		}
 
+		// Implicit scope: Snowflake allows omitting the scope keyword
+		// (e.g., SHOW TABLES IN my_schema). Try consuming an identifier
+		// path as an implicit schema scope before reporting an error.
 		if !matched {
-			words := strings.Fields(restUp)
-			if len(words) > 0 {
-				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("Invalid scope '%s' in IN clause. Valid scopes are ACCOUNT, DATABASE, SCHEMA, TABLE.", words[0]), 4))
-			} else {
+			if rest == "" {
 				markers = append(markers, diagMarkerSpan(r,
 					"IN clause requires a scope. Use IN ACCOUNT, IN DATABASE, IN SCHEMA, or IN TABLE.", 4))
+				return markers
 			}
-			return markers
+			if m := reShowIdentPath.FindString(rest); m != "" {
+				if !showClauseKeywords[strings.ToUpper(m)] {
+					rest = strings.TrimSpace(rest[len(m):])
+					restUp = strings.ToUpper(rest)
+					matched = true
+				}
+			}
+			if !matched {
+				words := strings.Fields(restUp)
+				if len(words) > 0 {
+					markers = append(markers, diagMarkerSpan(r,
+						fmt.Sprintf("Invalid scope '%s' in IN clause. Valid scopes are ACCOUNT, DATABASE, SCHEMA, TABLE.", words[0]), 4))
+				} else {
+					markers = append(markers, diagMarkerSpan(r,
+						"IN clause requires a scope. Use IN ACCOUNT, IN DATABASE, IN SCHEMA, or IN TABLE.", 4))
+				}
+				return markers
+			}
 		}
 	}
 
 	// ── STARTS WITH '<prefix>' ───────────────────────────────────────────
-	if strings.HasPrefix(restUp, "STARTS") {
+	if strings.HasPrefix(restUp, "STARTS") && isShowBoundary(restUp, 6) {
 		rest = strings.TrimSpace(rest[6:])
 		restUp = strings.ToUpper(rest)
 		if !strings.HasPrefix(restUp, "WITH") {
