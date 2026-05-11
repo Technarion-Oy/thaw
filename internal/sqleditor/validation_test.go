@@ -98,6 +98,20 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"SHOW NETWORK POLICIES",
 		"SHOW ROW ACCESS POLICIES",
 		"SHOW ORGANIZATION ACCOUNTS",
+		"SHOW DELEGATED AUTHORIZATIONS",
+		"SHOW HYBRID TABLES",
+		"SHOW ICEBERG TABLES",
+		"SHOW EXTERNAL FUNCTIONS",
+		"SHOW GIT REPOSITORIES",
+		"SHOW GIT BRANCHES",
+		"SHOW IMAGE REPOSITORIES",
+		"SHOW COMPUTE POOLS",
+		"SHOW AUTHENTICATION POLICIES",
+		"SHOW OBJECTS",
+		"SHOW VARIABLES",
+		"SHOW SERVICES",
+		"SHOW ENDPOINTS",
+		"SHOW NOTEBOOKS",
 		"SHOW FUTURE GRANTS IN DATABASE my_db",
 		"SHOW TERSE TABLES",
 		"SHOW TERSE VIEWS",
@@ -3130,6 +3144,22 @@ func TestValidateSnowflakePatterns_Show(t *testing.T) {
 		// Three-word object types
 		"SHOW ROW ACCESS POLICIES",
 		"SHOW ORGANIZATION ACCOUNTS",
+		"SHOW DELEGATED AUTHORIZATIONS",
+		// Additional two-word types
+		"SHOW HYBRID TABLES",
+		"SHOW ICEBERG TABLES",
+		"SHOW EXTERNAL FUNCTIONS",
+		"SHOW GIT REPOSITORIES",
+		"SHOW GIT BRANCHES",
+		"SHOW IMAGE REPOSITORIES",
+		"SHOW COMPUTE POOLS",
+		"SHOW AUTHENTICATION POLICIES",
+		// Additional single-word types
+		"SHOW OBJECTS",
+		"SHOW VARIABLES",
+		"SHOW SERVICES",
+		"SHOW ENDPOINTS",
+		"SHOW NOTEBOOKS",
 		// FUTURE GRANTS
 		"SHOW FUTURE GRANTS IN DATABASE my_db",
 		// TERSE modifier (valid types)
@@ -3288,6 +3318,21 @@ func TestValidateSnowflakePatterns_Show(t *testing.T) {
 			"SHOW TABLES LIMIT 10 FROM test",
 			[]string{"FROM in LIMIT clause requires a string literal"},
 		},
+		{
+			"bare SHOW TERSE without object type",
+			"SHOW TERSE",
+			[]string{"SHOW TERSE requires an object type"},
+		},
+		{
+			"trailing unrecognized token",
+			"SHOW TABLES FOOBAR",
+			[]string{"Unexpected token 'FOOBAR'"},
+		},
+		{
+			"typo in clause keyword LIEK",
+			"SHOW TABLES LIEK '%foo%'",
+			[]string{"Unexpected token 'LIEK'"},
+		},
 	}
 
 	for _, tt := range invalidCases {
@@ -3337,4 +3382,41 @@ func TestValidateSnowflakePatterns_Show(t *testing.T) {
 			t.Errorf("Expected object type warning, got: %v", warns[0].Message)
 		}
 	})
+}
+
+// TestShowObjectTypes_OrderingInvariant verifies that showObjectTypes is sorted
+// by word count descending so the longest match is always attempted first.
+func TestShowObjectTypes_OrderingInvariant(t *testing.T) {
+	prevWords := 100 // start high
+	for i, ot := range showObjectTypes {
+		n := len(strings.Fields(ot))
+		if n > prevWords {
+			t.Errorf("showObjectTypes[%d] = %q has %d words but follows an entry with %d words; entries must be sorted by word count descending",
+				i, ot, n, prevWords)
+		}
+		prevWords = n
+	}
+}
+
+// TestMatchStringLiteral tests edge cases of the matchStringLiteral helper.
+func TestMatchStringLiteral(t *testing.T) {
+	tests := []struct {
+		input string
+		want  int
+	}{
+		{"'hello'", 7},
+		{"'it''s'", 7},
+		{"''", 2},
+		{"'abc' rest", 5},
+		{"'unclosed", -1},
+		{"not a string", -1},
+		{"", -1},
+		{"'single''escape''pair'", 22},
+	}
+	for _, tt := range tests {
+		got := matchStringLiteral(tt.input)
+		if got != tt.want {
+			t.Errorf("matchStringLiteral(%q) = %d, want %d", tt.input, got, tt.want)
+		}
+	}
 }

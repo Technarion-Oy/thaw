@@ -628,24 +628,34 @@ var (
 
 // showObjectTypes lists all valid Snowflake object type keywords after SHOW,
 // sorted by word count descending so the longest match is attempted first.
+// Within each group, entries are alphabetical.
 var showObjectTypes = []string{
 	// Three-word types
-	"ORGANIZATION ACCOUNTS",
 	"ROW ACCESS POLICIES",
 	// Two-word types
 	"AGGREGATION POLICIES",
+	"AUTHENTICATION POLICIES",
+	"COMPUTE POOLS",
+	"DELEGATED AUTHORIZATIONS",
 	"DYNAMIC TABLES",
 	"EVENT TABLES",
 	"EXPORTED KEYS",
+	"EXTERNAL FUNCTIONS",
 	"EXTERNAL TABLES",
 	"FAILOVER GROUPS",
 	"FILE FORMATS",
 	"FUTURE GRANTS",
+	"GIT BRANCHES",
+	"GIT REPOSITORIES",
+	"HYBRID TABLES",
+	"ICEBERG TABLES",
+	"IMAGE REPOSITORIES",
 	"IMPORTED KEYS",
 	"MANAGED ACCOUNTS",
 	"MASKING POLICIES",
 	"NETWORK POLICIES",
 	"NETWORK RULES",
+	"ORGANIZATION ACCOUNTS",
 	"PACKAGES POLICIES",
 	"PASSWORD POLICIES",
 	"PRIMARY KEYS",
@@ -660,10 +670,13 @@ var showObjectTypes = []string{
 	"COLUMNS",
 	"CONNECTIONS",
 	"DATABASES",
+	"ENDPOINTS",
 	"FUNCTIONS",
 	"GRANTS",
 	"INTEGRATIONS",
 	"LOCKS",
+	"NOTEBOOKS",
+	"OBJECTS",
 	"PARAMETERS",
 	"PIPES",
 	"PROCEDURES",
@@ -672,6 +685,7 @@ var showObjectTypes = []string{
 	"SCHEMAS",
 	"SECRETS",
 	"SEQUENCES",
+	"SERVICES",
 	"SHARES",
 	"STAGES",
 	"STREAMS",
@@ -680,6 +694,7 @@ var showObjectTypes = []string{
 	"TASKS",
 	"TRANSACTIONS",
 	"USERS",
+	"VARIABLES",
 	"VIEWS",
 	"WAREHOUSES",
 }
@@ -3997,8 +4012,25 @@ func validateAlterSession(parseText string, r StatementRange) []DiagMarker {
 
 // ── validateShow ──────────────────────────────────────────────────────────────
 
+// isShowBoundary reports whether position pos in s is at a word boundary
+// (end of string or whitespace).  Used by validateShow for consistent
+// keyword-termination checks.
+func isShowBoundary(s string, pos int) bool {
+	if pos >= len(s) {
+		return true
+	}
+	c := s[pos]
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+}
+
+// showClauseKeywords is the set of SHOW clause keywords that must not be
+// consumed as identifiers when parsing optional scope names in the IN clause.
+var showClauseKeywords = map[string]bool{
+	"LIKE": true, "STARTS": true, "LIMIT": true, "FROM": true,
+}
+
 // validateShow validates a SHOW <object_type> statement:
-//   - The object type keyword must be one of the recognised Snowflake nouns.
+//   - The object type keyword must be one of the recognized Snowflake nouns.
 //   - The TERSE modifier is only valid for TABLES, VIEWS, SCHEMAS, DATABASES,
 //     STAGES.
 //   - The HISTORY modifier is only valid for SHOW PIPES.
@@ -4007,6 +4039,7 @@ func validateAlterSession(parseText string, r StatementRange) []DiagMarker {
 //   - STARTS WITH requires a string literal argument.
 //   - LIMIT requires a positive integer; the optional FROM requires a string
 //     literal.
+//   - Any trailing unrecognized text after the parsed clauses is flagged.
 func validateShow(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
@@ -4024,8 +4057,7 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 
 	// ── TERSE modifier ───────────────────────────────────────────────────
 	isTerse := false
-	if strings.HasPrefix(restUp, "TERSE") && len(restUp) > 5 &&
-		(restUp[5] == ' ' || restUp[5] == '\t') {
+	if strings.HasPrefix(restUp, "TERSE") && isShowBoundary(restUp, 5) {
 		isTerse = true
 		rest = strings.TrimSpace(rest[5:])
 		restUp = strings.ToUpper(rest)
@@ -4034,22 +4066,24 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 	// ── Object type (longest match first) ────────────────────────────────
 	objType := ""
 	for _, ot := range showObjectTypes {
-		if strings.HasPrefix(restUp, ot) {
-			rem := restUp[len(ot):]
-			if rem == "" || rem[0] == ' ' || rem[0] == '\t' || rem[0] == '\n' || rem[0] == '\r' {
-				objType = ot
-				rest = strings.TrimSpace(rest[len(ot):])
-				restUp = strings.ToUpper(rest)
-				break
-			}
+		if strings.HasPrefix(restUp, ot) && isShowBoundary(restUp, len(ot)) {
+			objType = ot
+			rest = strings.TrimSpace(rest[len(ot):])
+			restUp = strings.ToUpper(rest)
+			break
 		}
 	}
 
 	if objType == "" {
-		words := strings.Fields(restUp)
-		bad := words[0]
-		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("Unknown object type '%s' in SHOW statement.", bad), 4))
+		if restUp == "" {
+			// Reached when TERSE consumed everything, e.g. "SHOW TERSE".
+			markers = append(markers, diagMarkerSpan(r,
+				"SHOW TERSE requires an object type. Use SHOW TERSE TABLES, SHOW TERSE VIEWS, etc.", 4))
+		} else {
+			words := strings.Fields(restUp)
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("Unknown object type '%s' in SHOW statement.", words[0]), 4))
+		}
 		return markers
 	}
 
@@ -4060,8 +4094,7 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// ── HISTORY modifier ─────────────────────────────────────────────────
-	if strings.HasPrefix(restUp, "HISTORY") &&
-		(len(restUp) == 7 || restUp[7] == ' ' || restUp[7] == '\t') {
+	if strings.HasPrefix(restUp, "HISTORY") && isShowBoundary(restUp, 7) {
 		if objType != "PIPES" {
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("HISTORY is only valid for SHOW PIPES, not SHOW %s.", objType), 4))
@@ -4076,8 +4109,7 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// ── LIKE '<pattern>' ─────────────────────────────────────────────────
-	if strings.HasPrefix(restUp, "LIKE") &&
-		(len(restUp) == 4 || restUp[4] == ' ' || restUp[4] == '\t') {
+	if strings.HasPrefix(restUp, "LIKE") && isShowBoundary(restUp, 4) {
 		rest = strings.TrimSpace(rest[4:])
 		if rest == "" || rest[0] != '\'' {
 			markers = append(markers, diagMarkerSpan(r,
@@ -4095,31 +4127,27 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// ── IN { ACCOUNT | DATABASE [<db>] | SCHEMA [<schema>] | TABLE [<tbl>] }
-	if strings.HasPrefix(restUp, "IN") &&
-		(len(restUp) == 2 || restUp[2] == ' ' || restUp[2] == '\t') {
+	if strings.HasPrefix(restUp, "IN") && isShowBoundary(restUp, 2) {
 		rest = strings.TrimSpace(rest[2:])
 		restUp = strings.ToUpper(rest)
 
 		matched := false
 		for _, scope := range []string{"ACCOUNT", "DATABASE", "SCHEMA", "TABLE"} {
-			if strings.HasPrefix(restUp, scope) {
-				after := restUp[len(scope):]
-				if after == "" || after[0] == ' ' || after[0] == '\t' || after[0] == '\n' {
-					matched = true
-					rest = strings.TrimSpace(rest[len(scope):])
-					restUp = strings.ToUpper(rest)
-					// Consume optional identifier path for non-ACCOUNT scopes.
-					if scope != "ACCOUNT" && rest != "" {
-						if m := reShowIdentPath.FindString(rest); m != "" {
-							mUp := strings.ToUpper(m)
-							if mUp != "STARTS" && mUp != "LIMIT" {
-								rest = strings.TrimSpace(rest[len(m):])
-								restUp = strings.ToUpper(rest)
-							}
+			if strings.HasPrefix(restUp, scope) && isShowBoundary(restUp, len(scope)) {
+				matched = true
+				rest = strings.TrimSpace(rest[len(scope):])
+				restUp = strings.ToUpper(rest)
+				// Consume optional identifier path for non-ACCOUNT scopes,
+				// but never swallow a clause keyword.
+				if scope != "ACCOUNT" && rest != "" {
+					if m := reShowIdentPath.FindString(rest); m != "" {
+						if !showClauseKeywords[strings.ToUpper(m)] {
+							rest = strings.TrimSpace(rest[len(m):])
+							restUp = strings.ToUpper(rest)
 						}
 					}
-					break
 				}
+				break
 			}
 		}
 
@@ -4162,8 +4190,7 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// ── LIMIT <n> [FROM '<name>'] ────────────────────────────────────────
-	if strings.HasPrefix(restUp, "LIMIT") &&
-		(len(restUp) == 5 || restUp[5] == ' ' || restUp[5] == '\t') {
+	if strings.HasPrefix(restUp, "LIMIT") && isShowBoundary(restUp, 5) {
 		rest = strings.TrimSpace(rest[5:])
 
 		// Extract the number token.
@@ -4191,8 +4218,7 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 		}
 
 		// Optional FROM '<name>'
-		if strings.HasPrefix(restUp, "FROM") &&
-			(len(restUp) == 4 || restUp[4] == ' ' || restUp[4] == '\t') {
+		if strings.HasPrefix(restUp, "FROM") && isShowBoundary(restUp, 4) {
 			rest = strings.TrimSpace(rest[4:])
 			if rest == "" || rest[0] != '\'' {
 				markers = append(markers, diagMarkerSpan(r,
@@ -4205,7 +4231,16 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 					"Unterminated string literal in LIMIT FROM clause.", 4))
 				return markers
 			}
+			rest = strings.TrimSpace(rest[end:])
+			restUp = strings.ToUpper(rest)
 		}
+	}
+
+	// ── Trailing unrecognized content ────────────────────────────────────
+	if restUp != "" {
+		words := strings.Fields(restUp)
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("Unexpected token '%s' in SHOW statement.", words[0]), 4))
 	}
 
 	return markers
