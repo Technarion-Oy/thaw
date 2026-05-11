@@ -67,6 +67,61 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		// Drop
 		"DROP DATABASE my_db CASCADE",
 		"DROP SCHEMA IF EXISTS my_sch RESTRICT",
+		// SHOW statements
+		"SHOW TABLES",
+		"SHOW VIEWS",
+		"SHOW SCHEMAS",
+		"SHOW DATABASES",
+		"SHOW WAREHOUSES",
+		"SHOW ROLES",
+		"SHOW USERS",
+		"SHOW STAGES",
+		"SHOW PIPES",
+		"SHOW STREAMS",
+		"SHOW TASKS",
+		"SHOW FUNCTIONS",
+		"SHOW PROCEDURES",
+		"SHOW SEQUENCES",
+		"SHOW COLUMNS",
+		"SHOW INTEGRATIONS",
+		"SHOW SHARES",
+		"SHOW GRANTS",
+		"SHOW PARAMETERS",
+		"SHOW ALERTS",
+		"SHOW TAGS",
+		"SHOW SECRETS",
+		"SHOW PRIMARY KEYS",
+		"SHOW DYNAMIC TABLES",
+		"SHOW EXTERNAL TABLES",
+		"SHOW FILE FORMATS",
+		"SHOW RESOURCE MONITORS",
+		"SHOW NETWORK POLICIES",
+		"SHOW ROW ACCESS POLICIES",
+		"SHOW ORGANIZATION ACCOUNTS",
+		"SHOW FUTURE GRANTS IN DATABASE my_db",
+		"SHOW TERSE TABLES",
+		"SHOW TERSE VIEWS",
+		"SHOW TERSE SCHEMAS",
+		"SHOW TERSE DATABASES",
+		"SHOW TERSE STAGES",
+		"SHOW PIPES HISTORY",
+		"SHOW TABLES LIKE '%test%'",
+		"SHOW TABLES LIKE 'my_table'",
+		"SHOW TABLES IN ACCOUNT",
+		"SHOW TABLES IN DATABASE",
+		"SHOW TABLES IN DATABASE my_db",
+		"SHOW TABLES IN SCHEMA my_db.my_schema",
+		"SHOW TABLES IN TABLE my_db.my_schema.my_table",
+		"SHOW TABLES STARTS WITH 'test'",
+		"SHOW TABLES LIMIT 10",
+		"SHOW TABLES LIMIT 100 FROM 'my_table'",
+		"SHOW TABLES LIKE '%test%' IN DATABASE my_db STARTS WITH 'test' LIMIT 10",
+		"SHOW TERSE TABLES LIKE '%test%' IN SCHEMA",
+		"SHOW GRANTS ON ACCOUNT",
+		"SHOW GRANTS TO ROLE admin",
+		"show tables",
+		"SHOW /* comment */ TABLES",
+		"SHOW TABLES -- trailing comment",
 		// False Positive Guards (Should be silently ignored, 0 warnings)
 		"DELETE FROM t WHERE id = 1",
 		"GRANT SELECT ON t TO ROLE r",
@@ -3015,6 +3070,271 @@ func TestValidateSnowflakePatterns_AlterSession(t *testing.T) {
 		}
 		if len(warns) > 0 && !strings.Contains(warns[0].Message, "AUTOCOMMIT must be TRUE or FALSE") {
 			t.Errorf("Expected AUTOCOMMIT warning, got: %v", warns[0].Message)
+		}
+	})
+}
+
+// ── SHOW commands ─────────────────────────────────────────────────────────────
+
+func TestValidateSnowflakePatterns_Show(t *testing.T) {
+	validCases := []string{
+		// Basic object types (single-word)
+		"SHOW TABLES",
+		"SHOW VIEWS",
+		"SHOW SCHEMAS",
+		"SHOW DATABASES",
+		"SHOW WAREHOUSES",
+		"SHOW ROLES",
+		"SHOW USERS",
+		"SHOW STAGES",
+		"SHOW PIPES",
+		"SHOW STREAMS",
+		"SHOW TASKS",
+		"SHOW FUNCTIONS",
+		"SHOW PROCEDURES",
+		"SHOW SEQUENCES",
+		"SHOW COLUMNS",
+		"SHOW INTEGRATIONS",
+		"SHOW SHARES",
+		"SHOW GRANTS",
+		"SHOW PARAMETERS",
+		"SHOW LOCKS",
+		"SHOW TRANSACTIONS",
+		"SHOW CONNECTIONS",
+		"SHOW REGIONS",
+		"SHOW ALERTS",
+		"SHOW TAGS",
+		"SHOW SECRETS",
+		// Two-word object types
+		"SHOW PRIMARY KEYS",
+		"SHOW IMPORTED KEYS",
+		"SHOW EXPORTED KEYS",
+		"SHOW UNIQUE KEYS",
+		"SHOW DYNAMIC TABLES",
+		"SHOW EXTERNAL TABLES",
+		"SHOW EVENT TABLES",
+		"SHOW FILE FORMATS",
+		"SHOW RESOURCE MONITORS",
+		"SHOW MANAGED ACCOUNTS",
+		"SHOW NETWORK POLICIES",
+		"SHOW MASKING POLICIES",
+		"SHOW SESSION POLICIES",
+		"SHOW PASSWORD POLICIES",
+		"SHOW AGGREGATION POLICIES",
+		"SHOW PROJECTION POLICIES",
+		"SHOW NETWORK RULES",
+		"SHOW PACKAGES POLICIES",
+		"SHOW REPLICATION DATABASES",
+		"SHOW REPLICATION GROUPS",
+		"SHOW FAILOVER GROUPS",
+		// Three-word object types
+		"SHOW ROW ACCESS POLICIES",
+		"SHOW ORGANIZATION ACCOUNTS",
+		// FUTURE GRANTS
+		"SHOW FUTURE GRANTS IN DATABASE my_db",
+		// TERSE modifier (valid types)
+		"SHOW TERSE TABLES",
+		"SHOW TERSE VIEWS",
+		"SHOW TERSE SCHEMAS",
+		"SHOW TERSE DATABASES",
+		"SHOW TERSE STAGES",
+		// HISTORY modifier (valid for PIPES)
+		"SHOW PIPES HISTORY",
+		// LIKE clause
+		"SHOW TABLES LIKE '%test%'",
+		"SHOW TABLES LIKE 'my_table'",
+		"SHOW TABLES LIKE 'it''s a test'",
+		// IN clause
+		"SHOW TABLES IN ACCOUNT",
+		"SHOW TABLES IN DATABASE",
+		"SHOW TABLES IN DATABASE my_db",
+		"SHOW TABLES IN SCHEMA my_db.my_schema",
+		"SHOW TABLES IN TABLE my_db.my_schema.my_table",
+		"SHOW VIEWS IN DATABASE",
+		"SHOW SCHEMAS IN DATABASE my_db",
+		// STARTS WITH clause
+		"SHOW TABLES STARTS WITH 'test'",
+		"SHOW TABLES STARTS WITH 'TEST_'",
+		// LIMIT clause
+		"SHOW TABLES LIMIT 10",
+		"SHOW TABLES LIMIT 1",
+		"SHOW TABLES LIMIT 100 FROM 'my_table'",
+		"SHOW TABLES LIMIT 50 FROM 'start_name'",
+		// Combined clauses
+		"SHOW TABLES LIKE '%test%' IN DATABASE my_db",
+		"SHOW TABLES LIKE '%test%' IN DATABASE my_db STARTS WITH 'test' LIMIT 10",
+		"SHOW TERSE TABLES LIKE '%test%' IN SCHEMA",
+		"SHOW TABLES IN ACCOUNT LIMIT 5",
+		"SHOW VIEWS LIKE '%v%' IN SCHEMA my_db.my_schema LIMIT 20 FROM 'view_name'",
+		// GRANTS with non-standard syntax (clause validation skipped)
+		"SHOW GRANTS ON ACCOUNT",
+		"SHOW GRANTS TO ROLE admin",
+		"SHOW GRANTS OF ROLE admin",
+		// Case insensitivity
+		"show tables",
+		"Show Views",
+		"SHOW terse TABLES",
+		// Comments
+		"SHOW /* comment */ TABLES",
+		"SHOW TABLES -- trailing comment",
+		"SHOW TABLES LIKE '%test%' -- comment",
+		// Quoted identifiers in IN clause
+		`SHOW TABLES IN DATABASE "my-db"`,
+		`SHOW TABLES IN SCHEMA "MY DB"."MY SCHEMA"`,
+	}
+
+	for _, sql := range validCases {
+		t.Run(sql[:min(len(sql), 60)], func(t *testing.T) {
+			ranges := GetStatementRanges(sql)
+			markers := ValidateSnowflakePatterns(sql, ranges)
+			if warns := getWarnings(markers); len(warns) > 0 {
+				t.Errorf("Expected 0 warnings for %q, got %d: %v", sql, len(warns), warns)
+			}
+		})
+	}
+
+	invalidCases := []struct {
+		name     string
+		sql      string
+		wantMsgs []string
+	}{
+		{
+			"bare SHOW without object type",
+			"SHOW",
+			[]string{"SHOW requires an object type"},
+		},
+		{
+			"unknown object type (typo)",
+			"SHOW TABEL",
+			[]string{"Unknown object type 'TABEL'"},
+		},
+		{
+			"unknown object type INDEXES",
+			"SHOW INDEXES",
+			[]string{"Unknown object type 'INDEXES'"},
+		},
+		{
+			"TERSE with invalid type PIPES",
+			"SHOW TERSE PIPES",
+			[]string{"TERSE is not valid for SHOW PIPES"},
+		},
+		{
+			"TERSE with invalid type FUNCTIONS",
+			"SHOW TERSE FUNCTIONS",
+			[]string{"TERSE is not valid for SHOW FUNCTIONS"},
+		},
+		{
+			"TERSE with invalid type ALERTS",
+			"SHOW TERSE ALERTS",
+			[]string{"TERSE is not valid for SHOW ALERTS"},
+		},
+		{
+			"HISTORY with non-PIPES type",
+			"SHOW TABLES HISTORY",
+			[]string{"HISTORY is only valid for SHOW PIPES"},
+		},
+		{
+			"HISTORY with VIEWS",
+			"SHOW VIEWS HISTORY",
+			[]string{"HISTORY is only valid for SHOW PIPES"},
+		},
+		{
+			"LIKE without string literal",
+			"SHOW TABLES LIKE test",
+			[]string{"LIKE requires a string literal"},
+		},
+		{
+			"LIKE with bare number",
+			"SHOW TABLES LIKE 123",
+			[]string{"LIKE requires a string literal"},
+		},
+		{
+			"IN with invalid scope WAREHOUSE",
+			"SHOW TABLES IN WAREHOUSE",
+			[]string{"Invalid scope 'WAREHOUSE'"},
+		},
+		{
+			"IN with invalid scope ROLE",
+			"SHOW TABLES IN ROLE",
+			[]string{"Invalid scope 'ROLE'"},
+		},
+		{
+			"IN with empty scope",
+			"SHOW TABLES IN",
+			[]string{"IN clause requires a scope"},
+		},
+		{
+			"STARTS WITH without string literal",
+			"SHOW TABLES STARTS WITH test",
+			[]string{"STARTS WITH requires a string literal"},
+		},
+		{
+			"LIMIT with zero",
+			"SHOW TABLES LIMIT 0",
+			[]string{"LIMIT requires a positive integer, got '0'"},
+		},
+		{
+			"LIMIT with negative number",
+			"SHOW TABLES LIMIT -1",
+			[]string{"LIMIT requires a positive integer, got '-1'"},
+		},
+		{
+			"LIMIT with non-integer",
+			"SHOW TABLES LIMIT abc",
+			[]string{"LIMIT requires a positive integer, got 'abc'"},
+		},
+		{
+			"LIMIT FROM without string literal",
+			"SHOW TABLES LIMIT 10 FROM test",
+			[]string{"FROM in LIMIT clause requires a string literal"},
+		},
+	}
+
+	for _, tt := range invalidCases {
+		t.Run(tt.name, func(t *testing.T) {
+			ranges := GetStatementRanges(tt.sql)
+			markers := ValidateSnowflakePatterns(tt.sql, ranges)
+			warns := getWarnings(markers)
+
+			if len(warns) != len(tt.wantMsgs) {
+				t.Errorf("Expected %d warning(s) for %q, got %d: %v", len(tt.wantMsgs), tt.sql, len(warns), warns)
+			}
+
+			for _, wantMsg := range tt.wantMsgs {
+				found := false
+				for _, w := range warns {
+					if strings.Contains(w.Message, wantMsg) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected warning for %q containing %q, got: %v", tt.sql, wantMsg, warns)
+				}
+			}
+		})
+	}
+
+	// Multi-statement test: SHOW embedded between other statements.
+	t.Run("multi-statement with valid SHOW", func(t *testing.T) {
+		sql := "SELECT 1;\nSHOW TABLES LIKE '%test%';\nSELECT 2"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		if warns := getWarnings(markers); len(warns) > 0 {
+			t.Errorf("Expected 0 warnings for multi-statement SQL, got %d: %v", len(warns), warns)
+		}
+	})
+
+	t.Run("multi-statement with invalid SHOW", func(t *testing.T) {
+		sql := "SELECT 1;\nSHOW TABEL;\nSELECT 2"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warns := getWarnings(markers)
+		if len(warns) != 1 {
+			t.Errorf("Expected 1 warning, got %d: %v", len(warns), warns)
+		}
+		if len(warns) > 0 && !strings.Contains(warns[0].Message, "Unknown object type 'TABEL'") {
+			t.Errorf("Expected object type warning, got: %v", warns[0].Message)
 		}
 	})
 }

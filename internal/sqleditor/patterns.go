@@ -610,6 +610,10 @@ var (
 		`FILE_FORMAT`, `COPY_OPTIONS`, `COMMENT`, `DIRECTORY`, `SUBPATH`,
 	}, "|")
 
+	// ── SHOW ─────────────────────────────────────────────────────────────────
+	reIsShow        = regexp.MustCompile(`(?i)^\s*SHOW\b`)
+	reShowIdentPath = regexp.MustCompile(`^` + _identPath)
+
 	// ── Parseable keywords ────────────────────────────────────────────────────
 	parseableKWs = map[string]bool{
 		"SELECT": true, "WITH": true, "INSERT": true, "UPDATE": true,
@@ -621,6 +625,80 @@ var (
 		"REMOVE": true, "RM": true,
 	}
 )
+
+// showObjectTypes lists all valid Snowflake object type keywords after SHOW,
+// sorted by word count descending so the longest match is attempted first.
+var showObjectTypes = []string{
+	// Three-word types
+	"ORGANIZATION ACCOUNTS",
+	"ROW ACCESS POLICIES",
+	// Two-word types
+	"AGGREGATION POLICIES",
+	"DYNAMIC TABLES",
+	"EVENT TABLES",
+	"EXPORTED KEYS",
+	"EXTERNAL TABLES",
+	"FAILOVER GROUPS",
+	"FILE FORMATS",
+	"FUTURE GRANTS",
+	"IMPORTED KEYS",
+	"MANAGED ACCOUNTS",
+	"MASKING POLICIES",
+	"NETWORK POLICIES",
+	"NETWORK RULES",
+	"PACKAGES POLICIES",
+	"PASSWORD POLICIES",
+	"PRIMARY KEYS",
+	"PROJECTION POLICIES",
+	"REPLICATION DATABASES",
+	"REPLICATION GROUPS",
+	"RESOURCE MONITORS",
+	"SESSION POLICIES",
+	"UNIQUE KEYS",
+	// Single-word types
+	"ALERTS",
+	"COLUMNS",
+	"CONNECTIONS",
+	"DATABASES",
+	"FUNCTIONS",
+	"GRANTS",
+	"INTEGRATIONS",
+	"LOCKS",
+	"PARAMETERS",
+	"PIPES",
+	"PROCEDURES",
+	"REGIONS",
+	"ROLES",
+	"SCHEMAS",
+	"SECRETS",
+	"SEQUENCES",
+	"SHARES",
+	"STAGES",
+	"STREAMS",
+	"TABLES",
+	"TAGS",
+	"TASKS",
+	"TRANSACTIONS",
+	"USERS",
+	"VIEWS",
+	"WAREHOUSES",
+}
+
+// showTerseEligible contains object types that support the TERSE modifier.
+var showTerseEligible = map[string]bool{
+	"TABLES":    true,
+	"VIEWS":     true,
+	"SCHEMAS":   true,
+	"DATABASES": true,
+	"STAGES":    true,
+}
+
+// showNoClauseValidation contains object types where optional clause validation
+// is skipped because they have non-standard syntax (e.g. SHOW GRANTS ON ...).
+var showNoClauseValidation = map[string]bool{
+	"GRANTS":        true,
+	"FUTURE GRANTS": true,
+}
 
 // grantObjectPrivileges maps canonical Snowflake object types (upper-cased) to
 // their valid privilege names. OWNERSHIP, ALL, and ALL PRIVILEGES are handled
@@ -1591,6 +1669,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// Valid session commands that don't need pattern validation here;
 		// existence checks are handled separately in ValidateTablesExist.
 		if firstTok == "USE" {
+			continue
+		}
+
+		// ── SHOW ─────────────────────────────────────────────────────────
+		if reIsShow.MatchString(parseText) {
+			markers = append(markers, validateShow(parseText, r)...)
 			continue
 		}
 
@@ -3909,4 +3993,239 @@ func validateAlterSession(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	return markers
+}
+
+// ── validateShow ──────────────────────────────────────────────────────────────
+
+// validateShow validates a SHOW <object_type> statement:
+//   - The object type keyword must be one of the recognised Snowflake nouns.
+//   - The TERSE modifier is only valid for TABLES, VIEWS, SCHEMAS, DATABASES,
+//     STAGES.
+//   - The HISTORY modifier is only valid for SHOW PIPES.
+//   - LIKE requires a string literal argument.
+//   - IN requires a valid scope (ACCOUNT, DATABASE, SCHEMA, TABLE).
+//   - STARTS WITH requires a string literal argument.
+//   - LIMIT requires a positive integer; the optional FROM requires a string
+//     literal.
+func validateShow(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+
+	// Remove "SHOW" keyword.
+	rest := strings.TrimSpace(stripped[len("SHOW"):])
+	restUp := strings.ToUpper(rest)
+
+	if restUp == "" {
+		markers = append(markers, diagMarkerSpan(r,
+			"SHOW requires an object type. Use SHOW TABLES, SHOW VIEWS, SHOW SCHEMAS, etc.", 4))
+		return markers
+	}
+
+	// ── TERSE modifier ───────────────────────────────────────────────────
+	isTerse := false
+	if strings.HasPrefix(restUp, "TERSE") && len(restUp) > 5 &&
+		(restUp[5] == ' ' || restUp[5] == '\t') {
+		isTerse = true
+		rest = strings.TrimSpace(rest[5:])
+		restUp = strings.ToUpper(rest)
+	}
+
+	// ── Object type (longest match first) ────────────────────────────────
+	objType := ""
+	for _, ot := range showObjectTypes {
+		if strings.HasPrefix(restUp, ot) {
+			rem := restUp[len(ot):]
+			if rem == "" || rem[0] == ' ' || rem[0] == '\t' || rem[0] == '\n' || rem[0] == '\r' {
+				objType = ot
+				rest = strings.TrimSpace(rest[len(ot):])
+				restUp = strings.ToUpper(rest)
+				break
+			}
+		}
+	}
+
+	if objType == "" {
+		words := strings.Fields(restUp)
+		bad := words[0]
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("Unknown object type '%s' in SHOW statement.", bad), 4))
+		return markers
+	}
+
+	// ── Validate TERSE eligibility ───────────────────────────────────────
+	if isTerse && !showTerseEligible[objType] {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("TERSE is not valid for SHOW %s. TERSE is supported for TABLES, VIEWS, SCHEMAS, DATABASES, STAGES.", objType), 4))
+	}
+
+	// ── HISTORY modifier ─────────────────────────────────────────────────
+	if strings.HasPrefix(restUp, "HISTORY") &&
+		(len(restUp) == 7 || restUp[7] == ' ' || restUp[7] == '\t') {
+		if objType != "PIPES" {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("HISTORY is only valid for SHOW PIPES, not SHOW %s.", objType), 4))
+		}
+		rest = strings.TrimSpace(rest[7:])
+		restUp = strings.ToUpper(rest)
+	}
+
+	// Skip clause validation for types with non-standard syntax.
+	if showNoClauseValidation[objType] || restUp == "" {
+		return markers
+	}
+
+	// ── LIKE '<pattern>' ─────────────────────────────────────────────────
+	if strings.HasPrefix(restUp, "LIKE") &&
+		(len(restUp) == 4 || restUp[4] == ' ' || restUp[4] == '\t') {
+		rest = strings.TrimSpace(rest[4:])
+		if rest == "" || rest[0] != '\'' {
+			markers = append(markers, diagMarkerSpan(r,
+				"LIKE requires a string literal. Use LIKE '<pattern>'.", 4))
+			return markers
+		}
+		end := matchStringLiteral(rest)
+		if end == -1 {
+			markers = append(markers, diagMarkerSpan(r,
+				"Unterminated string literal in LIKE clause.", 4))
+			return markers
+		}
+		rest = strings.TrimSpace(rest[end:])
+		restUp = strings.ToUpper(rest)
+	}
+
+	// ── IN { ACCOUNT | DATABASE [<db>] | SCHEMA [<schema>] | TABLE [<tbl>] }
+	if strings.HasPrefix(restUp, "IN") &&
+		(len(restUp) == 2 || restUp[2] == ' ' || restUp[2] == '\t') {
+		rest = strings.TrimSpace(rest[2:])
+		restUp = strings.ToUpper(rest)
+
+		matched := false
+		for _, scope := range []string{"ACCOUNT", "DATABASE", "SCHEMA", "TABLE"} {
+			if strings.HasPrefix(restUp, scope) {
+				after := restUp[len(scope):]
+				if after == "" || after[0] == ' ' || after[0] == '\t' || after[0] == '\n' {
+					matched = true
+					rest = strings.TrimSpace(rest[len(scope):])
+					restUp = strings.ToUpper(rest)
+					// Consume optional identifier path for non-ACCOUNT scopes.
+					if scope != "ACCOUNT" && rest != "" {
+						if m := reShowIdentPath.FindString(rest); m != "" {
+							mUp := strings.ToUpper(m)
+							if mUp != "STARTS" && mUp != "LIMIT" {
+								rest = strings.TrimSpace(rest[len(m):])
+								restUp = strings.ToUpper(rest)
+							}
+						}
+					}
+					break
+				}
+			}
+		}
+
+		if !matched {
+			words := strings.Fields(restUp)
+			if len(words) > 0 {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("Invalid scope '%s' in IN clause. Valid scopes are ACCOUNT, DATABASE, SCHEMA, TABLE.", words[0]), 4))
+			} else {
+				markers = append(markers, diagMarkerSpan(r,
+					"IN clause requires a scope. Use IN ACCOUNT, IN DATABASE, IN SCHEMA, or IN TABLE.", 4))
+			}
+			return markers
+		}
+	}
+
+	// ── STARTS WITH '<prefix>' ───────────────────────────────────────────
+	if strings.HasPrefix(restUp, "STARTS") {
+		rest = strings.TrimSpace(rest[6:])
+		restUp = strings.ToUpper(rest)
+		if !strings.HasPrefix(restUp, "WITH") {
+			markers = append(markers, diagMarkerSpan(r,
+				"Expected WITH after STARTS. Use STARTS WITH '<prefix>'.", 4))
+			return markers
+		}
+		rest = strings.TrimSpace(rest[4:])
+		if rest == "" || rest[0] != '\'' {
+			markers = append(markers, diagMarkerSpan(r,
+				"STARTS WITH requires a string literal. Use STARTS WITH '<prefix>'.", 4))
+			return markers
+		}
+		end := matchStringLiteral(rest)
+		if end == -1 {
+			markers = append(markers, diagMarkerSpan(r,
+				"Unterminated string literal in STARTS WITH clause.", 4))
+			return markers
+		}
+		rest = strings.TrimSpace(rest[end:])
+		restUp = strings.ToUpper(rest)
+	}
+
+	// ── LIMIT <n> [FROM '<name>'] ────────────────────────────────────────
+	if strings.HasPrefix(restUp, "LIMIT") &&
+		(len(restUp) == 5 || restUp[5] == ' ' || restUp[5] == '\t') {
+		rest = strings.TrimSpace(rest[5:])
+
+		// Extract the number token.
+		idx := strings.IndexAny(rest, " \t\n\r")
+		numStr := rest
+		if idx != -1 {
+			numStr = rest[:idx]
+			rest = strings.TrimSpace(rest[idx:])
+		} else {
+			rest = ""
+		}
+		restUp = strings.ToUpper(rest)
+
+		if numStr == "" {
+			markers = append(markers, diagMarkerSpan(r,
+				"LIMIT requires a positive integer. Use LIMIT <n>.", 4))
+			return markers
+		}
+
+		n, err := strconv.Atoi(numStr)
+		if err != nil || n <= 0 {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("LIMIT requires a positive integer, got '%s'.", numStr), 4))
+			return markers
+		}
+
+		// Optional FROM '<name>'
+		if strings.HasPrefix(restUp, "FROM") &&
+			(len(restUp) == 4 || restUp[4] == ' ' || restUp[4] == '\t') {
+			rest = strings.TrimSpace(rest[4:])
+			if rest == "" || rest[0] != '\'' {
+				markers = append(markers, diagMarkerSpan(r,
+					"FROM in LIMIT clause requires a string literal. Use LIMIT <n> FROM '<name>'.", 4))
+				return markers
+			}
+			end := matchStringLiteral(rest)
+			if end == -1 {
+				markers = append(markers, diagMarkerSpan(r,
+					"Unterminated string literal in LIMIT FROM clause.", 4))
+				return markers
+			}
+		}
+	}
+
+	return markers
+}
+
+// matchStringLiteral returns the position right after the closing single quote
+// of a SQL string literal at the start of s, or -1 if s does not start with a
+// valid string literal.  Embedded '' (escaped quotes) are handled.
+func matchStringLiteral(s string) int {
+	if len(s) == 0 || s[0] != '\'' {
+		return -1
+	}
+	for i := 1; i < len(s); i++ {
+		if s[i] == '\'' {
+			if i+1 < len(s) && s[i+1] == '\'' {
+				i++ // skip escaped quote
+				continue
+			}
+			return i + 1
+		}
+	}
+	return -1
 }
