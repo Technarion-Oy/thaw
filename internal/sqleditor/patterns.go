@@ -701,11 +701,14 @@ var showObjectTypes = []string{
 
 // showTerseEligible contains object types that support the TERSE modifier.
 var showTerseEligible = map[string]bool{
-	"TABLES":    true,
-	"VIEWS":     true,
-	"SCHEMAS":   true,
-	"DATABASES": true,
-	"STAGES":    true,
+	"TABLES":          true,
+	"EXTERNAL TABLES": true,
+	"VIEWS":           true,
+	"SCHEMAS":         true,
+	"DATABASES":       true,
+	"STAGES":          true,
+	"STREAMS":         true,
+	"USERS":           true,
 }
 
 // showNoClauseValidation contains object types where optional clause validation
@@ -4092,14 +4095,15 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 	// ── Validate TERSE eligibility ───────────────────────────────────────
 	if isTerse && !showTerseEligible[objType] {
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("TERSE is not valid for SHOW %s. TERSE is supported for TABLES, VIEWS, SCHEMAS, DATABASES, STAGES.", objType), 4))
+			fmt.Sprintf("TERSE is not valid for SHOW %s. TERSE is supported for TABLES, EXTERNAL TABLES, VIEWS, SCHEMAS, DATABASES, STAGES, STREAMS, USERS.", objType), 4))
 	}
 
 	// ── HISTORY modifier ─────────────────────────────────────────────────
+	showHistoryEligible := objType == "PIPES" || objType == "REPLICATION DATABASES"
 	if strings.HasPrefix(restUp, "HISTORY") && isShowBoundary(restUp, 7) {
-		if objType != "PIPES" {
+		if !showHistoryEligible {
 			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("HISTORY is only valid for SHOW PIPES, not SHOW %s.", objType), 4))
+				fmt.Sprintf("HISTORY is only valid for SHOW PIPES and SHOW REPLICATION DATABASES, not SHOW %s.", objType), 4))
 		}
 		rest = strings.TrimSpace(rest[7:])
 		restUp = strings.ToUpper(rest)
@@ -4116,12 +4120,9 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 	// keyword matches the current position.
 	seenLike, seenIn, seenStartsWith, seenLimit := false, false, false, false
 	for restUp != "" {
-		consumed := false
-
 		// ── LIKE '<pattern>' ─────────────────────────────────────────
 		if !seenLike && strings.HasPrefix(restUp, "LIKE") && isShowBoundary(restUp, 4) {
 			seenLike = true
-			consumed = true
 			rest = strings.TrimSpace(rest[4:])
 			if rest == "" || rest[0] != '\'' {
 				markers = append(markers, diagMarkerSpan(r,
@@ -4136,12 +4137,12 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 			}
 			rest = strings.TrimSpace(rest[end:])
 			restUp = strings.ToUpper(rest)
+			continue
 		}
 
 		// ── IN { ACCOUNT | DATABASE [<db>] | SCHEMA [<schema>] | TABLE [<tbl>] | <ident> }
 		if !seenIn && strings.HasPrefix(restUp, "IN") && isShowBoundary(restUp, 2) {
 			seenIn = true
-			consumed = true
 			rest = strings.TrimSpace(rest[2:])
 			restUp = strings.ToUpper(rest)
 
@@ -4196,15 +4197,15 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 					return markers
 				}
 			}
+			continue
 		}
 
 		// ── STARTS WITH '<prefix>' ───────────────────────────────────
 		if !seenStartsWith && strings.HasPrefix(restUp, "STARTS") && isShowBoundary(restUp, 6) {
 			seenStartsWith = true
-			consumed = true
 			rest = strings.TrimSpace(rest[6:])
 			restUp = strings.ToUpper(rest)
-			if !strings.HasPrefix(restUp, "WITH") {
+			if !(strings.HasPrefix(restUp, "WITH") && isShowBoundary(restUp, 4)) {
 				markers = append(markers, diagMarkerSpan(r,
 					"Expected WITH after STARTS. Use STARTS WITH '<prefix>'.", 4))
 				return markers
@@ -4223,12 +4224,12 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 			}
 			rest = strings.TrimSpace(rest[end:])
 			restUp = strings.ToUpper(rest)
+			continue
 		}
 
 		// ── LIMIT <n> [FROM '<name>'] ────────────────────────────────
 		if !seenLimit && strings.HasPrefix(restUp, "LIMIT") && isShowBoundary(restUp, 5) {
 			seenLimit = true
-			consumed = true
 			rest = strings.TrimSpace(rest[5:])
 
 			// Extract the number token.
@@ -4272,11 +4273,11 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 				rest = strings.TrimSpace(rest[end:])
 				restUp = strings.ToUpper(rest)
 			}
+			continue
 		}
 
-		if !consumed {
-			break
-		}
+		// No clause keyword matched — exit the loop.
+		break
 	}
 
 	// ── Trailing unrecognized content ────────────────────────────────────

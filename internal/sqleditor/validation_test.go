@@ -3100,8 +3100,12 @@ func TestValidateSnowflakePatterns_Show(t *testing.T) {
 		"SHOW TERSE SCHEMAS",
 		"SHOW TERSE DATABASES",
 		"SHOW TERSE STAGES",
-		// HISTORY modifier (valid for PIPES)
+		"SHOW TERSE EXTERNAL TABLES",
+		"SHOW TERSE STREAMS",
+		"SHOW TERSE USERS",
+		// HISTORY modifier (valid for PIPES and REPLICATION DATABASES)
 		"SHOW PIPES HISTORY",
+		"SHOW REPLICATION DATABASES HISTORY",
 		// LIKE clause
 		"SHOW TABLES LIKE '%test%'",
 		"SHOW TABLES LIKE 'my_table'",
@@ -3208,14 +3212,14 @@ func TestValidateSnowflakePatterns_Show(t *testing.T) {
 			[]string{"TERSE is not valid for SHOW ALERTS"},
 		},
 		{
-			"HISTORY with non-PIPES type",
+			"HISTORY with non-eligible type",
 			"SHOW TABLES HISTORY",
-			[]string{"HISTORY is only valid for SHOW PIPES"},
+			[]string{"HISTORY is only valid for SHOW PIPES and SHOW REPLICATION DATABASES"},
 		},
 		{
 			"HISTORY with VIEWS",
 			"SHOW VIEWS HISTORY",
-			[]string{"HISTORY is only valid for SHOW PIPES"},
+			[]string{"HISTORY is only valid for SHOW PIPES and SHOW REPLICATION DATABASES"},
 		},
 		{
 			"LIKE without string literal",
