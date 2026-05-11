@@ -19,7 +19,7 @@ jobs:
           - os: windows-latest
             platform: windows
             arch: amd64
-          - os: ubuntu-22.04   # pinned: ubuntu-latest may lack libwebkit2gtk-4.0-dev
+          - os: ubuntu-24.04   # pinned: ubuntu-latest may lack libwebkit2gtk-4.1-dev
             platform: linux
             arch: amd64
 
@@ -45,7 +45,7 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
 
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
