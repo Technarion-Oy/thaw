@@ -629,12 +629,16 @@ var (
 // showObjectTypes lists all valid Snowflake object type keywords after SHOW,
 // sorted by word count descending so the longest match is attempted first.
 // Within each group, entries are alphabetical.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show
 var showObjectTypes = []string{
 	// Three-word types
+	"CORTEX SEARCH SERVICES",
+	"DATA METRIC FUNCTIONS",
 	"ROW ACCESS POLICIES",
 	// Two-word types
 	"AGGREGATION POLICIES",
 	"AUTHENTICATION POLICIES",
+	"CATALOG INTEGRATIONS",
 	"COMPUTE POOLS",
 	"DELEGATED AUTHORIZATIONS",
 	"DYNAMIC TABLES",
@@ -642,6 +646,7 @@ var showObjectTypes = []string{
 	"EXPORTED KEYS",
 	"EXTERNAL FUNCTIONS",
 	"EXTERNAL TABLES",
+	"EXTERNAL VOLUMES",
 	"FAILOVER GROUPS",
 	"FILE FORMATS",
 	"FUTURE GRANTS",
@@ -653,6 +658,7 @@ var showObjectTypes = []string{
 	"IMPORTED KEYS",
 	"MANAGED ACCOUNTS",
 	"MASKING POLICIES",
+	"MATERIALIZED VIEWS",
 	"NETWORK POLICIES",
 	"NETWORK RULES",
 	"ORGANIZATION ACCOUNTS",
@@ -667,6 +673,7 @@ var showObjectTypes = []string{
 	"UNIQUE KEYS",
 	// Single-word types
 	"ALERTS",
+	"CHANNELS",
 	"COLUMNS",
 	"CONNECTIONS",
 	"DATABASES",
@@ -674,7 +681,9 @@ var showObjectTypes = []string{
 	"FUNCTIONS",
 	"GRANTS",
 	"INTEGRATIONS",
+	"LISTINGS",
 	"LOCKS",
+	"MODELS",
 	"NOTEBOOKS",
 	"OBJECTS",
 	"PARAMETERS",
@@ -687,7 +696,9 @@ var showObjectTypes = []string{
 	"SEQUENCES",
 	"SERVICES",
 	"SHARES",
+	"SNAPSHOTS",
 	"STAGES",
+	"STREAMLITS",
 	"STREAMS",
 	"TABLES",
 	"TAGS",
@@ -1697,7 +1708,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
-		// ── SHOW ─────────────────────────────────────────────────────────
+		// ── SHOW (intercepted before the node-sql-parser) ───────────────
 		if reIsShow.MatchString(parseText) {
 			markers = append(markers, validateShow(parseText, r)...)
 			continue
@@ -4044,7 +4055,7 @@ var showClauseKeywords = map[string]bool{
 //   - The object type keyword must be one of the recognized Snowflake nouns.
 //   - The TERSE modifier is only valid for TABLES, VIEWS, SCHEMAS, DATABASES,
 //     STAGES.
-//   - The HISTORY modifier is only valid for SHOW PIPES.
+//   - The HISTORY modifier is only valid for SHOW PIPES and SHOW REPLICATION DATABASES.
 //   - LIKE requires a string literal argument.
 //   - IN requires a valid scope (ACCOUNT, DATABASE, SCHEMA, TABLE).
 //   - STARTS WITH requires a string literal argument.
@@ -4239,7 +4250,7 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 			rest = strings.TrimSpace(rest[5:])
 
 			// Extract the number token.
-			idx := strings.IndexAny(rest, " \t\n\r")
+			idx := strings.IndexAny(rest, " \t\n\r;")
 			numStr := rest
 			if idx != -1 {
 				numStr = rest[:idx]
@@ -4288,9 +4299,10 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 
 	// ── Trailing unrecognized content ────────────────────────────────────
 	if restUp != "" {
-		words := strings.Fields(restUp)
-		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("Unexpected token '%s' in SHOW statement.", words[0]), 4))
+		if words := strings.Fields(restUp); len(words) > 0 {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("Unexpected token '%s' in SHOW statement.", words[0]), 4))
+		}
 	}
 
 	return markers

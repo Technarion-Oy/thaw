@@ -3086,8 +3086,20 @@ func TestValidateSnowflakePatterns_Show(t *testing.T) {
 		"SHOW IMAGE REPOSITORIES",
 		"SHOW COMPUTE POOLS",
 		"SHOW AUTHENTICATION POLICIES",
+		// Additional two-word types
+		"SHOW MATERIALIZED VIEWS",
+		"SHOW CATALOG INTEGRATIONS",
+		"SHOW EXTERNAL VOLUMES",
+		// Three-word types
+		"SHOW CORTEX SEARCH SERVICES",
+		"SHOW DATA METRIC FUNCTIONS",
 		// Additional single-word types
+		"SHOW CHANNELS",
+		"SHOW LISTINGS",
+		"SHOW MODELS",
 		"SHOW OBJECTS",
+		"SHOW SNAPSHOTS",
+		"SHOW STREAMLITS",
 		"SHOW VARIABLES",
 		"SHOW SERVICES",
 		"SHOW ENDPOINTS",
@@ -3272,6 +3284,11 @@ func TestValidateSnowflakePatterns_Show(t *testing.T) {
 			"bare SHOW TERSE without object type",
 			"SHOW TERSE",
 			[]string{"SHOW TERSE requires an object type"},
+		},
+		{
+			"TERSE + HISTORY combined (TERSE invalid for PIPES)",
+			"SHOW TERSE PIPES HISTORY",
+			[]string{"TERSE is not valid for SHOW PIPES"},
 		},
 		{
 			"trailing unrecognized token",
