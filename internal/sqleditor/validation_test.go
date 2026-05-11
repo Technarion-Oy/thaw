@@ -3165,9 +3165,12 @@ func TestValidateSnowflakePatterns_Show(t *testing.T) {
 		"SHOW /* comment */ TABLES",
 		"SHOW TABLES -- trailing comment",
 		"SHOW TABLES LIKE '%test%' -- comment",
-		// Quoted identifiers in IN clause
+		// Quoted identifiers in IN clause (including keyword names)
 		`SHOW TABLES IN DATABASE "my-db"`,
 		`SHOW TABLES IN SCHEMA "MY DB"."MY SCHEMA"`,
+		`SHOW TABLES IN DATABASE "LIKE"`,
+		`SHOW TABLES IN DATABASE "IN"`,
+		`SHOW TABLES IN "LIKE"`,
 	}
 
 	for _, sql := range validCases {

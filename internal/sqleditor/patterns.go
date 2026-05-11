@@ -4030,7 +4030,7 @@ func isShowBoundary(s string, pos int) bool {
 		return true
 	}
 	c := s[pos]
-	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ';' || c == '('
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ';' || c == '(' || c == ')'
 }
 
 // showClauseKeywords is the set of SHOW clause keywords that must not be
@@ -4160,10 +4160,11 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 					// Consume optional identifier path for non-ACCOUNT scopes,
 					// but never swallow a clause keyword. Check the first path
 					// component so that e.g. "my_db.LIKE" is not consumed whole.
+					// Quoted identifiers (e.g. "LIKE") are always safe to consume.
 					if scope != "ACCOUNT" && rest != "" {
 						if m := reShowIdentPath.FindString(rest); m != "" {
 							first := strings.SplitN(m, ".", 2)[0]
-							if !showClauseKeywords[strings.ToUpper(strings.Trim(first, `"`))] {
+							if strings.HasPrefix(first, `"`) || !showClauseKeywords[strings.ToUpper(first)] {
 								rest = strings.TrimSpace(rest[len(m):])
 								restUp = strings.ToUpper(rest)
 							}
@@ -4184,7 +4185,7 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 				}
 				if m := reShowIdentPath.FindString(rest); m != "" {
 					first := strings.SplitN(m, ".", 2)[0]
-					if !showClauseKeywords[strings.ToUpper(strings.Trim(first, `"`))] {
+					if strings.HasPrefix(first, `"`) || !showClauseKeywords[strings.ToUpper(first)] {
 						rest = strings.TrimSpace(rest[len(m):])
 						restUp = strings.ToUpper(rest)
 						matched = true
