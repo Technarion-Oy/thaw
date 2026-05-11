@@ -8,7 +8,7 @@ on:
 jobs:
   test:
     name: Snowflake integration tests
-    runs-on: githubactions
+    runs-on: self-hosted
     permissions:
       contents: read
       checks: write

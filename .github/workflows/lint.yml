@@ -15,7 +15,7 @@ on:
 jobs:
   golangci-lint:
     name: golangci-lint
-    runs-on: githubactions
+    runs-on: self-hosted
     permissions:
       contents: read
       checks: write
