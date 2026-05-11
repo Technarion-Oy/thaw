@@ -711,6 +711,12 @@ var showTerseEligible = map[string]bool{
 	"USERS":           true,
 }
 
+// showHistoryEligible contains object types that support the HISTORY modifier.
+var showHistoryEligible = map[string]bool{
+	"PIPES":                  true,
+	"REPLICATION DATABASES":  true,
+}
+
 // showNoClauseValidation contains object types where optional clause validation
 // is skipped because they have non-standard syntax (e.g. SHOW GRANTS ON ...).
 var showNoClauseValidation = map[string]bool{
@@ -4017,14 +4023,14 @@ func validateAlterSession(parseText string, r StatementRange) []DiagMarker {
 // ── validateShow ──────────────────────────────────────────────────────────────
 
 // isShowBoundary reports whether position pos in s is at a word boundary
-// (end of string or whitespace).  Used by validateShow for consistent
-// keyword-termination checks.
+// (end of string, whitespace, semicolon, or opening parenthesis).
+// Used by validateShow for consistent keyword-termination checks.
 func isShowBoundary(s string, pos int) bool {
 	if pos >= len(s) {
 		return true
 	}
 	c := s[pos]
-	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ';' || c == '('
 }
 
 // showClauseKeywords is the set of SHOW clause keywords that must not be
@@ -4099,9 +4105,8 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// ── HISTORY modifier ─────────────────────────────────────────────────
-	showHistoryEligible := objType == "PIPES" || objType == "REPLICATION DATABASES"
 	if strings.HasPrefix(restUp, "HISTORY") && isShowBoundary(restUp, 7) {
-		if !showHistoryEligible {
+		if !showHistoryEligible[objType] {
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("HISTORY is only valid for SHOW PIPES and SHOW REPLICATION DATABASES, not SHOW %s.", objType), 4))
 		}

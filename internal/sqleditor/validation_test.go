@@ -3110,6 +3110,7 @@ func TestValidateSnowflakePatterns_Show(t *testing.T) {
 		"SHOW TABLES LIKE '%test%'",
 		"SHOW TABLES LIKE 'my_table'",
 		"SHOW TABLES LIKE 'it''s a test'",
+		"SHOW TABLES LIKE ''",
 		// IN clause (explicit scope)
 		"SHOW TABLES IN ACCOUNT",
 		"SHOW TABLES IN DATABASE",
@@ -3132,6 +3133,7 @@ func TestValidateSnowflakePatterns_Show(t *testing.T) {
 		"SHOW TABLES LIMIT 1",
 		"SHOW TABLES LIMIT 100 FROM 'my_table'",
 		"SHOW TABLES LIMIT 50 FROM 'start_name'",
+		"SHOW TABLES LIMIT 10 FROM ''",
 		// Combined clauses (canonical order: LIKE → IN → STARTS WITH → LIMIT)
 		"SHOW TABLES LIKE '%test%' IN DATABASE my_db",
 		"SHOW TABLES LIKE '%test%' IN DATABASE my_db STARTS WITH 'test' LIMIT 10",
@@ -3157,7 +3159,9 @@ func TestValidateSnowflakePatterns_Show(t *testing.T) {
 		"show tables",
 		"Show Views",
 		"SHOW terse TABLES",
-		// Comments
+		// Comments (note: a leading block comment like "/* c */ SHOW TABLES"
+		// causes reIsShow to not match, so the statement falls through to the
+		// generic parser — this matches the behavior of other validators)
 		"SHOW /* comment */ TABLES",
 		"SHOW TABLES -- trailing comment",
 		"SHOW TABLES LIKE '%test%' -- comment",
