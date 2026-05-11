@@ -520,6 +520,14 @@ var (
 	// reUseSecondaryRolesValue matches ALL or NONE after USE SECONDARY ROLES.
 	reUseSecondaryRolesValue = regexp.MustCompile(`(?i)^\s*USE\s+SECONDARY\s+ROLES\s+(ALL|NONE)\b`)
 
+	// ── ALTER SESSION ──────────────────────────────────────────────────────────
+	reIsAlterSession    = regexp.MustCompile(`(?i)^\s*ALTER\s+SESSION\b`)
+	reAlterSessionSet   = regexp.MustCompile(`(?i)^\s*ALTER\s+SESSION\s+SET\b`)
+	reAlterSessionUnset = regexp.MustCompile(`(?i)^\s*ALTER\s+SESSION\s+UNSET\b`)
+	// reAlterSessionParam extracts <PARAM> = <value> pairs from ALTER SESSION SET.
+	// Value is either a quoted string (with escaped quotes) or a non-whitespace token.
+	reAlterSessionParam = regexp.MustCompile(`(?i)([A-Z_][A-Z0-9_]*)\s*=\s*('(?:''|[^'])*'|[^\s;]+)`)
+
 	// ── CREATE STAGE ──────────────────────────────────────────────────────────
 	reIsCreateStage = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?STAGE\b`)
 	// stageProps lists only top-level CREATE STAGE property keys.
@@ -1539,6 +1547,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// ── ALTER SHARE ──────────────────────────────────────────────────
 		if reIsAlterShare.MatchString(parseText) {
 			markers = append(markers, validateAlterShare(parseText, r)...)
+			continue
+		}
+
+		// ── ALTER SESSION ────────────────────────────────────────────────
+		if reIsAlterSession.MatchString(parseText) {
+			markers = append(markers, validateAlterSession(parseText, r)...)
 			continue
 		}
 
@@ -3709,6 +3723,161 @@ func validateUseSecondaryRoles(parseText string, r StatementRange) []DiagMarker 
 	if !reUseSecondaryRolesValue.MatchString(stripped) {
 		markers = append(markers, diagMarkerSpan(r,
 			"USE SECONDARY ROLES requires ALL or NONE.", 4))
+	}
+
+	return markers
+}
+
+// ── validateAlterSession ──────────────────────────────────────────────────────
+
+// sessionParamKind describes the value constraint for a known session parameter.
+type sessionParamKind int
+
+const (
+	spString   sessionParamKind = iota // any quoted string
+	spBool                             // TRUE or FALSE
+	spIntRange                         // integer within [min, max]
+	spNonNeg                           // non-negative integer
+	spEnum                             // one of a fixed set of values
+)
+
+type sessionParamSpec struct {
+	kind sessionParamKind
+	min  int
+	max  int
+	vals []string
+}
+
+var knownSessionParams = map[string]sessionParamSpec{
+	"QUERY_TAG":                          {kind: spString},
+	"TIMEZONE":                           {kind: spString},
+	"TIMESTAMP_OUTPUT_FORMAT":            {kind: spString},
+	"DATE_OUTPUT_FORMAT":                 {kind: spString},
+	"TIME_OUTPUT_FORMAT":                 {kind: spString},
+	"TIMESTAMP_INPUT_FORMAT":             {kind: spString},
+	"TIMESTAMP_NTZ_OUTPUT_FORMAT":        {kind: spString},
+	"TIMESTAMP_TZ_OUTPUT_FORMAT":         {kind: spString},
+	"TIMESTAMP_LTZ_OUTPUT_FORMAT":        {kind: spString},
+	"WEEK_START":                         {kind: spIntRange, min: 0, max: 7},
+	"WEEK_OF_YEAR_POLICY":                {kind: spIntRange, min: 0, max: 1},
+	"DATE_FIRST_DAY_OF_WEEK":             {kind: spIntRange, min: 0, max: 6},
+	"BINARY_OUTPUT_FORMAT":               {kind: spEnum, vals: []string{"HEX", "BASE64", "UTF8"}},
+	"ROWS_PER_RESULTSET":                 {kind: spNonNeg},
+	"QUOTED_IDENTIFIERS_IGNORE_CASE":     {kind: spBool},
+	"AUTOCOMMIT":                         {kind: spBool},
+	"TRANSACTION_DEFAULT_ISOLATION_LEVEL": {kind: spEnum, vals: []string{"READ COMMITTED"}},
+	"STRICT_JSON_OUTPUT":                 {kind: spBool},
+	"JSON_INDENT":                        {kind: spIntRange, min: 0, max: 16},
+	"MULTI_STATEMENT_COUNT":              {kind: spNonNeg},
+	"USE_CACHED_RESULT":                  {kind: spBool},
+	"PYTHON_PROFILER_MODULES":            {kind: spString},
+	"PYTHON_PROFILER_TARGET_STAGE":       {kind: spString},
+	"SIMULATED_DATA_SHARING_CONSUMER":    {kind: spString},
+}
+
+// validateAlterSession validates ALTER SESSION SET / UNSET statements:
+//   - ALTER SESSION without SET or UNSET is invalid.
+//   - ALTER SESSION SET requires at least one <param> = <value> pair.
+//   - ALTER SESSION UNSET requires at least one parameter name.
+//   - Unknown parameter names produce a warning.
+//   - Known parameter values are checked against their type constraints.
+func validateAlterSession(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+
+	isSet := reAlterSessionSet.MatchString(stripped)
+	isUnset := reAlterSessionUnset.MatchString(stripped)
+
+	if !isSet && !isUnset {
+		markers = append(markers, diagMarkerSpan(r,
+			"ALTER SESSION requires SET or UNSET. Use ALTER SESSION SET <param> = <value> or ALTER SESSION UNSET <param>.", 4))
+		return markers
+	}
+
+	if isSet {
+		loc := reAlterSessionSet.FindStringIndex(stripped)
+		rest := strings.TrimSpace(stripped[loc[1]:])
+
+		pairs := reAlterSessionParam.FindAllStringSubmatch(rest, -1)
+		if len(pairs) == 0 {
+			markers = append(markers, diagMarkerSpan(r,
+				"ALTER SESSION SET requires at least one parameter assignment. Use ALTER SESSION SET <param> = <value>.", 4))
+			return markers
+		}
+
+		for _, pair := range pairs {
+			paramName := strings.ToUpper(pair[1])
+			rawValue := pair[2]
+
+			spec, known := knownSessionParams[paramName]
+			if !known {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("Unknown session parameter '%s'.", paramName), 4))
+				continue
+			}
+
+			// Unquote string values.
+			value := rawValue
+			if strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'") && len(value) >= 2 {
+				value = value[1 : len(value)-1]
+				value = strings.ReplaceAll(value, "''", "'")
+			}
+
+			switch spec.kind {
+			case spString:
+				// Any value accepted.
+			case spBool:
+				upper := strings.ToUpper(value)
+				if upper != "TRUE" && upper != "FALSE" {
+					markers = append(markers, diagMarkerSpan(r,
+						fmt.Sprintf("%s must be TRUE or FALSE.", paramName), 4))
+				}
+			case spIntRange:
+				n, err := strconv.Atoi(value)
+				if err != nil || n < spec.min || n > spec.max {
+					markers = append(markers, diagMarkerSpan(r,
+						fmt.Sprintf("%s must be an integer between %d and %d.", paramName, spec.min, spec.max), 4))
+				}
+			case spNonNeg:
+				n, err := strconv.Atoi(value)
+				if err != nil || n < 0 {
+					markers = append(markers, diagMarkerSpan(r,
+						fmt.Sprintf("%s must be a non-negative integer.", paramName), 4))
+				}
+			case spEnum:
+				upper := strings.ToUpper(value)
+				if !slices.Contains(spec.vals, upper) {
+					markers = append(markers, diagMarkerSpan(r,
+						fmt.Sprintf("%s must be one of: %s.", paramName, strings.Join(spec.vals, ", ")), 4))
+				}
+			}
+		}
+	}
+
+	if isUnset {
+		loc := reAlterSessionUnset.FindStringIndex(stripped)
+		rest := strings.TrimSpace(stripped[loc[1]:])
+
+		if rest == "" {
+			markers = append(markers, diagMarkerSpan(r,
+				"ALTER SESSION UNSET requires at least one parameter name.", 4))
+			return markers
+		}
+
+		// Parameter names may be comma-separated or whitespace-separated.
+		parts := regexp.MustCompile(`[,\s]+`).Split(rest, -1)
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			paramName := strings.ToUpper(p)
+			if _, known := knownSessionParams[paramName]; !known {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("Unknown session parameter '%s'.", paramName), 4))
+			}
+		}
 	}
 
 	return markers
