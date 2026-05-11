@@ -16,7 +16,7 @@ jobs:
   # ── DDL parser + SQLEditor tests (no system deps, combined to save runner startup) ──
   pure-go-unit-tests:
     name: Pure Go unit tests (DDL & SQLEditor)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: read
       checks: write
@@ -59,8 +59,7 @@ jobs:
   # ── Migration helper tests (package main, requires GTK/WebKit) ────────────
   migration-unit-tests:
     name: Migration unit tests
-    # Pinned: ubuntu-latest may lack libwebkit2gtk-4.0-dev (same as build.yml).
-    runs-on: ubuntu-22.04
+    runs-on: self-hosted
     permissions:
       contents: read
       checks: write

@@ -15,7 +15,7 @@ on:
 jobs:
   gosec:
     name: gosec
-    runs-on: ubuntu-22.04
+    runs-on: self-hosted
     permissions:
       contents: read
 
