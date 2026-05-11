@@ -713,6 +713,7 @@ var showTerseEligible = map[string]bool{
 var showNoClauseValidation = map[string]bool{
 	"GRANTS":        true,
 	"FUTURE GRANTS": true,
+	"PARAMETERS":    true,
 }
 
 // grantObjectPrivileges maps canonical Snowflake object types (upper-cased) to
@@ -4109,153 +4110,172 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 		return markers
 	}
 
-	// Optional clauses are parsed in canonical order: LIKE → IN → STARTS WITH → LIMIT.
-	// Snowflake itself accepts these in any order, so a clause written out of this
-	// order (e.g., IN before LIKE) will surface as "Unexpected token". This is a
-	// known limitation — a future improvement could parse order-independently.
+	// Optional clauses are parsed in a loop so their order does not matter.
+	// Snowflake accepts LIKE, IN, STARTS WITH, and LIMIT in any order.
+	// Each clause is consumed at most once; the loop exits when no clause
+	// keyword matches the current position.
+	seenLike, seenIn, seenStartsWith, seenLimit := false, false, false, false
+	for restUp != "" {
+		consumed := false
 
-	// ── LIKE '<pattern>' ─────────────────────────────────────────────────
-	if strings.HasPrefix(restUp, "LIKE") && isShowBoundary(restUp, 4) {
-		rest = strings.TrimSpace(rest[4:])
-		if rest == "" || rest[0] != '\'' {
-			markers = append(markers, diagMarkerSpan(r,
-				"LIKE requires a string literal. Use LIKE '<pattern>'.", 4))
-			return markers
-		}
-		end := matchStringLiteral(rest)
-		if end == -1 {
-			markers = append(markers, diagMarkerSpan(r,
-				"Unterminated string literal in LIKE clause.", 4))
-			return markers
-		}
-		rest = strings.TrimSpace(rest[end:])
-		restUp = strings.ToUpper(rest)
-	}
-
-	// ── IN { ACCOUNT | DATABASE [<db>] | SCHEMA [<schema>] | TABLE [<tbl>] }
-	if strings.HasPrefix(restUp, "IN") && isShowBoundary(restUp, 2) {
-		rest = strings.TrimSpace(rest[2:])
-		restUp = strings.ToUpper(rest)
-
-		matched := false
-		for _, scope := range []string{"ACCOUNT", "DATABASE", "SCHEMA", "TABLE"} {
-			if strings.HasPrefix(restUp, scope) && isShowBoundary(restUp, len(scope)) {
-				matched = true
-				rest = strings.TrimSpace(rest[len(scope):])
-				restUp = strings.ToUpper(rest)
-				// Consume optional identifier path for non-ACCOUNT scopes,
-				// but never swallow a clause keyword.
-				if scope != "ACCOUNT" && rest != "" {
-					if m := reShowIdentPath.FindString(rest); m != "" {
-						if !showClauseKeywords[strings.ToUpper(m)] {
-							rest = strings.TrimSpace(rest[len(m):])
-							restUp = strings.ToUpper(rest)
-						}
-					}
-				}
-				break
-			}
-		}
-
-		// Implicit scope: Snowflake allows omitting the scope keyword
-		// (e.g., SHOW TABLES IN my_schema). Try consuming an identifier
-		// path as an implicit schema scope before reporting an error.
-		if !matched {
-			if rest == "" {
-				markers = append(markers, diagMarkerSpan(r,
-					"IN clause requires a scope. Use IN ACCOUNT, IN DATABASE, IN SCHEMA, or IN TABLE.", 4))
-				return markers
-			}
-			if m := reShowIdentPath.FindString(rest); m != "" {
-				if !showClauseKeywords[strings.ToUpper(m)] {
-					rest = strings.TrimSpace(rest[len(m):])
-					restUp = strings.ToUpper(rest)
-					matched = true
-				}
-			}
-			if !matched {
-				words := strings.Fields(restUp)
-				if len(words) > 0 {
-					markers = append(markers, diagMarkerSpan(r,
-						fmt.Sprintf("Invalid scope '%s' in IN clause. Valid scopes are ACCOUNT, DATABASE, SCHEMA, TABLE.", words[0]), 4))
-				} else {
-					markers = append(markers, diagMarkerSpan(r,
-						"IN clause requires a scope. Use IN ACCOUNT, IN DATABASE, IN SCHEMA, or IN TABLE.", 4))
-				}
-				return markers
-			}
-		}
-	}
-
-	// ── STARTS WITH '<prefix>' ───────────────────────────────────────────
-	if strings.HasPrefix(restUp, "STARTS") && isShowBoundary(restUp, 6) {
-		rest = strings.TrimSpace(rest[6:])
-		restUp = strings.ToUpper(rest)
-		if !strings.HasPrefix(restUp, "WITH") {
-			markers = append(markers, diagMarkerSpan(r,
-				"Expected WITH after STARTS. Use STARTS WITH '<prefix>'.", 4))
-			return markers
-		}
-		rest = strings.TrimSpace(rest[4:])
-		if rest == "" || rest[0] != '\'' {
-			markers = append(markers, diagMarkerSpan(r,
-				"STARTS WITH requires a string literal. Use STARTS WITH '<prefix>'.", 4))
-			return markers
-		}
-		end := matchStringLiteral(rest)
-		if end == -1 {
-			markers = append(markers, diagMarkerSpan(r,
-				"Unterminated string literal in STARTS WITH clause.", 4))
-			return markers
-		}
-		rest = strings.TrimSpace(rest[end:])
-		restUp = strings.ToUpper(rest)
-	}
-
-	// ── LIMIT <n> [FROM '<name>'] ────────────────────────────────────────
-	if strings.HasPrefix(restUp, "LIMIT") && isShowBoundary(restUp, 5) {
-		rest = strings.TrimSpace(rest[5:])
-
-		// Extract the number token.
-		idx := strings.IndexAny(rest, " \t\n\r")
-		numStr := rest
-		if idx != -1 {
-			numStr = rest[:idx]
-			rest = strings.TrimSpace(rest[idx:])
-		} else {
-			rest = ""
-		}
-		restUp = strings.ToUpper(rest)
-
-		if numStr == "" {
-			markers = append(markers, diagMarkerSpan(r,
-				"LIMIT requires a positive integer. Use LIMIT <n>.", 4))
-			return markers
-		}
-
-		n, err := strconv.Atoi(numStr)
-		if err != nil || n <= 0 {
-			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("LIMIT requires a positive integer, got '%s'.", numStr), 4))
-			return markers
-		}
-
-		// Optional FROM '<name>'
-		if strings.HasPrefix(restUp, "FROM") && isShowBoundary(restUp, 4) {
+		// ── LIKE '<pattern>' ─────────────────────────────────────────
+		if !seenLike && strings.HasPrefix(restUp, "LIKE") && isShowBoundary(restUp, 4) {
+			seenLike = true
+			consumed = true
 			rest = strings.TrimSpace(rest[4:])
 			if rest == "" || rest[0] != '\'' {
 				markers = append(markers, diagMarkerSpan(r,
-					"FROM in LIMIT clause requires a string literal. Use LIMIT <n> FROM '<name>'.", 4))
+					"LIKE requires a string literal. Use LIKE '<pattern>'.", 4))
 				return markers
 			}
 			end := matchStringLiteral(rest)
 			if end == -1 {
 				markers = append(markers, diagMarkerSpan(r,
-					"Unterminated string literal in LIMIT FROM clause.", 4))
+					"Unterminated string literal in LIKE clause.", 4))
 				return markers
 			}
 			rest = strings.TrimSpace(rest[end:])
 			restUp = strings.ToUpper(rest)
+		}
+
+		// ── IN { ACCOUNT | DATABASE [<db>] | SCHEMA [<schema>] | TABLE [<tbl>] | <ident> }
+		if !seenIn && strings.HasPrefix(restUp, "IN") && isShowBoundary(restUp, 2) {
+			seenIn = true
+			consumed = true
+			rest = strings.TrimSpace(rest[2:])
+			restUp = strings.ToUpper(rest)
+
+			matched := false
+			for _, scope := range []string{"ACCOUNT", "DATABASE", "SCHEMA", "TABLE"} {
+				if strings.HasPrefix(restUp, scope) && isShowBoundary(restUp, len(scope)) {
+					matched = true
+					rest = strings.TrimSpace(rest[len(scope):])
+					restUp = strings.ToUpper(rest)
+					// Consume optional identifier path for non-ACCOUNT scopes,
+					// but never swallow a clause keyword. Check the first path
+					// component so that e.g. "my_db.LIKE" is not consumed whole.
+					if scope != "ACCOUNT" && rest != "" {
+						if m := reShowIdentPath.FindString(rest); m != "" {
+							first := strings.SplitN(m, ".", 2)[0]
+							if !showClauseKeywords[strings.ToUpper(strings.Trim(first, `"`))] {
+								rest = strings.TrimSpace(rest[len(m):])
+								restUp = strings.ToUpper(rest)
+							}
+						}
+					}
+					break
+				}
+			}
+
+			// Implicit scope: Snowflake allows omitting the scope keyword
+			// (e.g., SHOW TABLES IN my_schema). Try consuming an identifier
+			// path as an implicit schema scope before reporting an error.
+			if !matched {
+				if rest == "" {
+					markers = append(markers, diagMarkerSpan(r,
+						"IN clause requires a scope. Use IN ACCOUNT, IN DATABASE, IN SCHEMA, or IN TABLE.", 4))
+					return markers
+				}
+				if m := reShowIdentPath.FindString(rest); m != "" {
+					first := strings.SplitN(m, ".", 2)[0]
+					if !showClauseKeywords[strings.ToUpper(strings.Trim(first, `"`))] {
+						rest = strings.TrimSpace(rest[len(m):])
+						restUp = strings.ToUpper(rest)
+						matched = true
+					}
+				}
+				if !matched {
+					words := strings.Fields(restUp)
+					if len(words) > 0 {
+						markers = append(markers, diagMarkerSpan(r,
+							fmt.Sprintf("Invalid scope '%s' in IN clause. Valid scopes are ACCOUNT, DATABASE, SCHEMA, TABLE.", words[0]), 4))
+					} else {
+						markers = append(markers, diagMarkerSpan(r,
+							"IN clause requires a scope. Use IN ACCOUNT, IN DATABASE, IN SCHEMA, or IN TABLE.", 4))
+					}
+					return markers
+				}
+			}
+		}
+
+		// ── STARTS WITH '<prefix>' ───────────────────────────────────
+		if !seenStartsWith && strings.HasPrefix(restUp, "STARTS") && isShowBoundary(restUp, 6) {
+			seenStartsWith = true
+			consumed = true
+			rest = strings.TrimSpace(rest[6:])
+			restUp = strings.ToUpper(rest)
+			if !strings.HasPrefix(restUp, "WITH") {
+				markers = append(markers, diagMarkerSpan(r,
+					"Expected WITH after STARTS. Use STARTS WITH '<prefix>'.", 4))
+				return markers
+			}
+			rest = strings.TrimSpace(rest[4:])
+			if rest == "" || rest[0] != '\'' {
+				markers = append(markers, diagMarkerSpan(r,
+					"STARTS WITH requires a string literal. Use STARTS WITH '<prefix>'.", 4))
+				return markers
+			}
+			end := matchStringLiteral(rest)
+			if end == -1 {
+				markers = append(markers, diagMarkerSpan(r,
+					"Unterminated string literal in STARTS WITH clause.", 4))
+				return markers
+			}
+			rest = strings.TrimSpace(rest[end:])
+			restUp = strings.ToUpper(rest)
+		}
+
+		// ── LIMIT <n> [FROM '<name>'] ────────────────────────────────
+		if !seenLimit && strings.HasPrefix(restUp, "LIMIT") && isShowBoundary(restUp, 5) {
+			seenLimit = true
+			consumed = true
+			rest = strings.TrimSpace(rest[5:])
+
+			// Extract the number token.
+			idx := strings.IndexAny(rest, " \t\n\r")
+			numStr := rest
+			if idx != -1 {
+				numStr = rest[:idx]
+				rest = strings.TrimSpace(rest[idx:])
+			} else {
+				rest = ""
+			}
+			restUp = strings.ToUpper(rest)
+
+			if numStr == "" {
+				markers = append(markers, diagMarkerSpan(r,
+					"LIMIT requires a positive integer. Use LIMIT <n>.", 4))
+				return markers
+			}
+
+			n, err := strconv.Atoi(numStr)
+			if err != nil || n <= 0 {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("LIMIT requires a positive integer, got '%s'.", numStr), 4))
+				return markers
+			}
+
+			// Optional FROM '<name>'
+			if strings.HasPrefix(restUp, "FROM") && isShowBoundary(restUp, 4) {
+				rest = strings.TrimSpace(rest[4:])
+				if rest == "" || rest[0] != '\'' {
+					markers = append(markers, diagMarkerSpan(r,
+						"FROM in LIMIT clause requires a string literal. Use LIMIT <n> FROM '<name>'.", 4))
+					return markers
+				}
+				end := matchStringLiteral(rest)
+				if end == -1 {
+					markers = append(markers, diagMarkerSpan(r,
+						"Unterminated string literal in LIMIT FROM clause.", 4))
+					return markers
+				}
+				rest = strings.TrimSpace(rest[end:])
+				restUp = strings.ToUpper(rest)
+			}
+		}
+
+		if !consumed {
+			break
 		}
 	}
 

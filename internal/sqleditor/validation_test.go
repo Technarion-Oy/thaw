@@ -3128,16 +3128,27 @@ func TestValidateSnowflakePatterns_Show(t *testing.T) {
 		"SHOW TABLES LIMIT 1",
 		"SHOW TABLES LIMIT 100 FROM 'my_table'",
 		"SHOW TABLES LIMIT 50 FROM 'start_name'",
-		// Combined clauses
+		// Combined clauses (canonical order: LIKE → IN → STARTS WITH → LIMIT)
 		"SHOW TABLES LIKE '%test%' IN DATABASE my_db",
 		"SHOW TABLES LIKE '%test%' IN DATABASE my_db STARTS WITH 'test' LIMIT 10",
 		"SHOW TERSE TABLES LIKE '%test%' IN SCHEMA",
 		"SHOW TABLES IN ACCOUNT LIMIT 5",
 		"SHOW VIEWS LIKE '%v%' IN SCHEMA my_db.my_schema LIMIT 20 FROM 'view_name'",
+		// Combined clauses (non-canonical order — Snowflake accepts any order)
+		"SHOW TABLES IN SCHEMA my_schema LIKE '%test%'",
+		"SHOW TABLES LIMIT 10 STARTS WITH 'test_'",
+		"SHOW TABLES IN DATABASE my_db LIKE '%foo%' LIMIT 5",
+		"SHOW TABLES STARTS WITH 'a' LIKE '%b%' IN ACCOUNT LIMIT 1",
+		"SHOW TABLES LIMIT 50 FROM 'x' IN DATABASE LIKE '%y%'",
 		// GRANTS with non-standard syntax (clause validation skipped)
 		"SHOW GRANTS ON ACCOUNT",
 		"SHOW GRANTS TO ROLE admin",
 		"SHOW GRANTS OF ROLE admin",
+		// PARAMETERS with non-standard FOR syntax (clause validation skipped)
+		"SHOW PARAMETERS",
+		"SHOW PARAMETERS FOR USER my_user",
+		"SHOW PARAMETERS FOR SESSION",
+		"SHOW PARAMETERS IN SESSION",
 		// Case insensitivity
 		"show tables",
 		"Show Views",
