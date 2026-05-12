@@ -4546,13 +4546,14 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 func countIdentParts(m string) int {
 	parts := 1
 	for i := 0; i < len(m); i++ {
-		if m[i] == '"' {
+		switch m[i] {
+		case '"':
 			// Skip to closing quote (handles _ident's "[^"]+" pattern).
 			i++
 			for i < len(m) && m[i] != '"' {
 				i++
 			}
-		} else if m[i] == '.' {
+		case '.':
 			parts++
 		}
 	}
