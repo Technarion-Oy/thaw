@@ -279,7 +279,6 @@ var (
 	reTaskAfter      = regexp.MustCompile(`(?i)\bAFTER\b`)
 	reTaskAfterNames = regexp.MustCompile(`(?i)\bAFTER\s+(` + _identPath + `(?:\s*,\s*` + _identPath + `)*)`)
 	reTaskFinalizeBare = regexp.MustCompile(`(?i)\bFINALIZE\b`)
-	reTaskFinalize     = regexp.MustCompile(`(?i)\bFINALIZE\s*=`)
 	reTaskFinalizeN    = regexp.MustCompile(`(?i)\bFINALIZE\s*=\s*(` + _identPath + `)`)
 	reTaskWhen       = regexp.MustCompile(`(?i)\bWHEN\b`)
 	reTaskWhenExpr   = regexp.MustCompile(`(?i)\bWHEN\s+\S`)
@@ -301,6 +300,7 @@ var (
 	reAlterTaskModifyWhenE  = regexp.MustCompile(`(?i)\bMODIFY\s+WHEN\s+\S`)
 	reAlterTaskSetFinalize  = regexp.MustCompile(`(?i)\bSET\s+FINALIZE\s*=`)
 	reAlterTaskSetFinalizeN = regexp.MustCompile(`(?i)\bSET\s+FINALIZE\s*=\s*(` + _identPath + `)`)
+	reAlterTaskUnsetProp   = regexp.MustCompile(`(?i)\bUNSET\s+([A-Za-z_][A-Za-z0-9_]*)`)
 
 	// ── CREATE ALERT ──────────────────────────────────────────────────────────
 	reIsCreateAlert = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?ALERT\b`)
@@ -4996,6 +4996,16 @@ func validateAlterTask(parseText string, r StatementRange) []DiagMarker {
 	// 7. Validate property names for SET (excluding SET FINALIZE which is handled above).
 	if hasSet && !hasSetFinalize {
 		validateProperties(clean, taskProps, r, &markers)
+	}
+
+	// 8. Validate property name for UNSET.
+	if hasUnset {
+		reValid := regexp.MustCompile(`(?i)^(` + taskProps + `)$`)
+		if m := reAlterTaskUnsetProp.FindStringSubmatch(clean); m != nil {
+			if !reValid.MatchString(m[1]) {
+				markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Unexpected property '%s' in statement.", m[1]), 4))
+			}
+		}
 	}
 
 	return markers

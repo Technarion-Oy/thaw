@@ -4028,6 +4028,12 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 			"ALTER TASK my_task SET RETRY_LIMIT = 5",
 			[]string{"Unexpected property 'RETRY_LIMIT'"},
 		},
+		// ── ALTER TASK — UNSET with unknown property ─────────────────────
+		{
+			"ALTER TASK UNSET with unknown property",
+			"ALTER TASK my_task UNSET FOOBAR",
+			[]string{"Unexpected property 'FOOBAR'"},
+		},
 	}
 
 	for _, tc := range invalidCases {
