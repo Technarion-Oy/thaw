@@ -614,6 +614,11 @@ var (
 	reIsShow        = regexp.MustCompile(`(?i)^\s*SHOW\b`)
 	reShowIdentPath = regexp.MustCompile(`^` + _identPath)
 
+	// ── DESCRIBE / DESC ──────────────────────────────────────────────────────
+	reIsDescribe      = regexp.MustCompile(`(?i)^\s*(?:DESCRIBE|DESC)\b`)
+	reDescIdentPath   = regexp.MustCompile(`^` + _identPath)
+	reDescHasParens   = regexp.MustCompile(`\(`)
+
 	// ── Parseable keywords ────────────────────────────────────────────────────
 	parseableKWs = map[string]bool{
 		"SELECT": true, "WITH": true, "INSERT": true, "UPDATE": true,
@@ -623,6 +628,7 @@ var (
 		"EXECUTE": true, "USE": true,
 		"PUT": true, "GET": true, "LIST": true, "LS": true,
 		"REMOVE": true, "RM": true,
+		"DESCRIBE": true, "DESC": true,
 	}
 )
 
@@ -734,6 +740,88 @@ var showNoClauseValidation = map[string]bool{
 	"GRANTS":        true,
 	"FUTURE GRANTS": true,
 	"PARAMETERS":    true,
+}
+
+// describeObjectTypes lists all valid Snowflake object type keywords after
+// DESCRIBE / DESC, sorted by word count descending so the longest match is
+// attempted first.  Within each group, entries are alphabetical.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/desc
+var describeObjectTypes = []string{
+	// Three-word types
+	"CORTEX SEARCH SERVICE",
+	"ROW ACCESS POLICY",
+	// Two-word types
+	"AGGREGATION POLICY",
+	"APPLICATION PACKAGE",
+	"AUTHENTICATION POLICY",
+	"CATALOG INTEGRATION",
+	"COMPUTE POOL",
+	"DYNAMIC TABLE",
+	"EVENT TABLE",
+	"EXTERNAL TABLE",
+	"EXTERNAL VOLUME",
+	"FAILOVER GROUP",
+	"FILE FORMAT",
+	"GIT REPOSITORY",
+	"ICEBERG TABLE",
+	"MASKING POLICY",
+	"NETWORK POLICY",
+	"NETWORK RULE",
+	"NOTIFICATION INTEGRATION",
+	"PACKAGES POLICY",
+	"PASSWORD POLICY",
+	"PROJECTION POLICY",
+	"REPLICATION GROUP",
+	"RESOURCE MONITOR",
+	"SESSION POLICY",
+	// Single-word types
+	"ALERT",
+	"APPLICATION",
+	"DATABASE",
+	"FUNCTION",
+	"INTEGRATION",
+	"PIPE",
+	"PROCEDURE",
+	"RESULT",
+	"ROLE",
+	"SCHEMA",
+	"SECRET",
+	"SEQUENCE",
+	"SERVICE",
+	"SHARE",
+	"STAGE",
+	"STREAM",
+	"TABLE",
+	"TAG",
+	"TASK",
+	"TRANSACTION",
+	"USER",
+	"VIEW",
+	"WAREHOUSE",
+}
+
+// describeAccountLevel contains account-level object types that should not be
+// qualified with a database or schema prefix (db.schema.name).
+var describeAccountLevel = map[string]bool{
+	"WAREHOUSE":  true,
+	"USER":       true,
+	"ROLE":       true,
+	"INTEGRATION": true,
+	"DATABASE":   true,
+	"SHARE":      true,
+	"RESOURCE MONITOR":         true,
+	"NOTIFICATION INTEGRATION": true,
+	"CATALOG INTEGRATION":      true,
+	"COMPUTE POOL":             true,
+	"EXTERNAL VOLUME":          true,
+	"NETWORK POLICY":           true,
+}
+
+// describeNeedsSignature contains object types that require a parenthesised
+// parameter-type signature for disambiguation (name overloading).
+var describeNeedsSignature = map[string]bool{
+	"FUNCTION":  true,
+	"PROCEDURE": true,
 }
 
 // grantObjectPrivileges maps canonical Snowflake object types (upper-cased) to
@@ -1705,6 +1793,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// Valid session commands that don't need pattern validation here;
 		// existence checks are handled separately in ValidateTablesExist.
 		if firstTok == "USE" {
+			continue
+		}
+
+		// ── DESCRIBE / DESC ──────────────────────────────────────────────
+		if reIsDescribe.MatchString(parseText) {
+			markers = append(markers, validateDescribe(parseText, r)...)
 			continue
 		}
 
@@ -4302,6 +4396,98 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 		if words := strings.Fields(restUp); len(words) > 0 {
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("Unexpected token '%s' in SHOW statement.", words[0]), 4))
+		}
+	}
+
+	return markers
+}
+
+// validateDescribe validates a DESCRIBE / DESC statement:
+//   - The object type keyword must be one of the recognized Snowflake nouns.
+//   - An object name is mandatory after the object type keyword.
+//   - FUNCTION and PROCEDURE require a parenthesised parameter-type signature.
+//   - Account-level objects (WAREHOUSE, USER, ROLE, etc.) should not have a
+//     database or schema prefix.
+func validateDescribe(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+	strippedUp := strings.ToUpper(stripped)
+
+	// Remove the leading DESCRIBE or DESC keyword.
+	var rest string
+	if strings.HasPrefix(strippedUp, "DESCRIBE") {
+		rest = strings.TrimSpace(stripped[len("DESCRIBE"):])
+	} else {
+		rest = strings.TrimSpace(stripped[len("DESC"):])
+	}
+	restUp := strings.ToUpper(rest)
+
+	if restUp == "" {
+		markers = append(markers, diagMarkerSpan(r,
+			"DESCRIBE requires an object type and name. Use DESCRIBE TABLE <name>, DESCRIBE VIEW <name>, etc.", 4))
+		return markers
+	}
+
+	// ── Object type (longest match first) ────────────────────────────────
+	objType := ""
+	for _, ot := range describeObjectTypes {
+		if strings.HasPrefix(restUp, ot) && isShowBoundary(restUp, len(ot)) {
+			objType = ot
+			rest = strings.TrimSpace(rest[len(ot):])
+			restUp = strings.ToUpper(rest)
+			break
+		}
+	}
+
+	if objType == "" {
+		words := strings.Fields(restUp)
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("Unknown object type '%s' in DESCRIBE statement.", words[0]), 4))
+		return markers
+	}
+
+	// ── RESULT and TRANSACTION are special: they take a string literal
+	// (query ID / transaction ID) rather than an identifier path.
+	if objType == "RESULT" || objType == "TRANSACTION" {
+		if restUp == "" {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("DESCRIBE %s requires a query/transaction ID. Use DESCRIBE %s '<id>'.", objType, objType), 4))
+		}
+		return markers
+	}
+
+	// ── Object name is mandatory ─────────────────────────────────────────
+	if restUp == "" {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("DESCRIBE %s requires an object name.", objType), 4))
+		return markers
+	}
+
+	// ── FUNCTION / PROCEDURE: require parenthesised signature ────────────
+	if describeNeedsSignature[objType] {
+		if !reDescHasParens.MatchString(rest) {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("DESCRIBE %s requires a parameter signature. Use DESCRIBE %s <name>(<arg_types>).", objType, objType), 4))
+			return markers
+		}
+		return markers
+	}
+
+	// ── Consume the identifier path ──────────────────────────────────────
+	m := reDescIdentPath.FindString(rest)
+	if m == "" {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("Expected an object name after DESCRIBE %s.", objType), 4))
+		return markers
+	}
+
+	// ── Account-level objects: warn on db/schema prefix ──────────────────
+	if describeAccountLevel[objType] {
+		parts := strings.Split(m, ".")
+		if len(parts) > 1 {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("%s is an account-level object and should not be qualified with a database or schema prefix.", objType), 4))
 		}
 	}
 
