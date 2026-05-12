@@ -522,10 +522,8 @@ var (
 	// reAlterTagRename matches ALTER TAG <name> RENAME TO <new_name>.
 	reAlterTagRenameTo = regexp.MustCompile(`(?i)\bRENAME\s+TO\s+(` + _identPath + `)`)
 	// reAlterTagAddAllowed matches ALTER TAG <name> ADD ALLOWED_VALUES.
-	reAlterTagAddAllowed      = regexp.MustCompile(`(?i)\bADD\s+ALLOWED_VALUES\b`)
-	reAlterTagAddAllowedIdx   = regexp.MustCompile(`(?i)\bADD\s+ALLOWED_VALUES\s+`)
-	reAlterTagDropAllowed     = regexp.MustCompile(`(?i)\bDROP\s+ALLOWED_VALUES\b`)
-	reAlterTagDropAllowedIdx  = regexp.MustCompile(`(?i)\bDROP\s+ALLOWED_VALUES\s+`)
+	reAlterTagAddAllowed = regexp.MustCompile(`(?i)\bADD\s+ALLOWED_VALUES\b`)
+	reAlterTagDropAllowed = regexp.MustCompile(`(?i)\bDROP\s+ALLOWED_VALUES\b`)
 	// reAlterTagRenameToBare matches RENAME TO without requiring a name after it.
 	reAlterTagRenameToBare = regexp.MustCompile(`(?i)\bRENAME\s+TO\b`)
 	// reAlterTagUnsetAllowed matches ALTER TAG <name> UNSET ALLOWED_VALUES.
@@ -4638,7 +4636,7 @@ func validateCreateTag(parseText string, r StatementRange) []DiagMarker {
 // and warns about duplicate values.
 func checkDuplicateAllowedValues(listStr string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	seen := make(map[string]bool)
+	seen := make(map[string]string) // upper-case key → original-case value
 	// Walk through the list extracting individual string literals.
 	s := listStr
 	for len(s) > 0 {
@@ -4651,12 +4649,17 @@ func checkDuplicateAllowedValues(listStr string, r StatementRange) []DiagMarker 
 			break
 		}
 		// Extract the raw value between outer quotes (without unescaping).
-		val := strings.ToUpper(s[1 : end-1])
-		if seen[val] {
-			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("Duplicate value '%s' in ALLOWED_VALUES list.", s[1:end-1]), 4))
+		raw := s[1 : end-1]
+		key := strings.ToUpper(raw)
+		if orig, exists := seen[key]; exists {
+			msg := fmt.Sprintf("Duplicate value '%s' in ALLOWED_VALUES list.", raw)
+			if raw != orig {
+				msg = fmt.Sprintf("Duplicate value '%s' in ALLOWED_VALUES list (case-insensitive match with '%s').", raw, orig)
+			}
+			markers = append(markers, diagMarkerSpan(r, msg, 4))
+		} else {
+			seen[key] = raw
 		}
-		seen[val] = true
 		s = s[end:]
 	}
 	return markers
@@ -4700,6 +4703,18 @@ func validateAlterTag(parseText string, r StatementRange) []DiagMarker {
 		return markers
 	}
 
+	// Count sub-commands — Snowflake only allows one per ALTER TAG statement.
+	subCmdCount := 0
+	for _, has := range []bool{hasRename, hasAddAllowed, hasDropAllowed, hasUnsetAllowed, hasSetComment, hasUnsetComment} {
+		if has {
+			subCmdCount++
+		}
+	}
+	if subCmdCount > 1 {
+		markers = append(markers, diagMarkerSpan(r,
+			"ALTER TAG supports only one sub-command per statement.", 4))
+	}
+
 	// 2. RENAME TO requires a new name.
 	if hasRename && !reAlterTagRenameTo.MatchString(parseText) {
 		markers = append(markers, diagMarkerSpan(r,
@@ -4708,7 +4723,7 @@ func validateAlterTag(parseText string, r StatementRange) []DiagMarker {
 
 	// 3. ADD ALLOWED_VALUES requires at least one string literal value.
 	if hasAddAllowed {
-		after := reAlterTagAddAllowedIdx.FindStringIndex(parseText)
+		after := reAlterTagAddAllowed.FindStringIndex(parseText)
 		if after == nil {
 			markers = append(markers, diagMarkerSpan(r,
 				"ADD ALLOWED_VALUES requires at least one string literal value.", 4))
@@ -4725,7 +4740,7 @@ func validateAlterTag(parseText string, r StatementRange) []DiagMarker {
 
 	// 4. DROP ALLOWED_VALUES requires at least one string literal value.
 	if hasDropAllowed {
-		after := reAlterTagDropAllowedIdx.FindStringIndex(parseText)
+		after := reAlterTagDropAllowed.FindStringIndex(parseText)
 		if after == nil {
 			markers = append(markers, diagMarkerSpan(r,
 				"DROP ALLOWED_VALUES requires at least one string literal value.", 4))

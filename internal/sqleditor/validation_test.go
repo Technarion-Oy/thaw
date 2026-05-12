@@ -3788,6 +3788,21 @@ func TestValidateSnowflakePatterns_Tag(t *testing.T) {
 			"ALTER TAG my_tag DROP ALLOWED_VALUES 'v1', 'v2', 'v1'",
 			[]string{"Duplicate value 'v1'"},
 		},
+		{
+			"ALTER TAG ADD ALLOWED_VALUES with case-insensitive duplicate",
+			"ALTER TAG my_tag ADD ALLOWED_VALUES 'Finance', 'FINANCE'",
+			[]string{"case-insensitive match with 'Finance'"},
+		},
+		{
+			"ALTER TAG compound sub-commands",
+			"ALTER TAG my_tag RENAME TO new_tag ADD ALLOWED_VALUES 'x'",
+			[]string{"ALTER TAG supports only one sub-command per statement"},
+		},
+		{
+			"ALTER TAG compound SET COMMENT and UNSET ALLOWED_VALUES",
+			"ALTER TAG my_tag SET COMMENT = 'c' UNSET ALLOWED_VALUES",
+			[]string{"ALTER TAG supports only one sub-command per statement"},
+		},
 		// ── DROP TAG ─────────────────────────────────────────────────────
 		{
 			"bare DROP TAG without name",
