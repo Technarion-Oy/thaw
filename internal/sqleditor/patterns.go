@@ -804,6 +804,7 @@ var describeObjectTypes = []string{
 	"FUNCTION",
 	"GATEWAY",
 	"INTEGRATION",
+	"LISTING",
 	"NOTEBOOK",
 	"PIPE",
 	"PROCEDURE",
@@ -847,6 +848,7 @@ var describeAccountLevel = map[string]bool{
 	"ORGANIZATION PROFILE":             true,
 	"OPENFLOW DATA PLANE INTEGRATION":  true,
 	"POSTGRES INSTANCE":                true,
+	"SPECIFICATION":                    true,
 }
 
 // describeNeedsSignature contains object types that require a parenthesised
@@ -4517,8 +4519,7 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 
 	// ── Account-level objects: warn on db/schema prefix ──────────────────
 	if describeAccountLevel[objType] {
-		parts := strings.Split(m, ".")
-		if len(parts) > 1 {
+		if countIdentParts(m) > 1 {
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("%s is an account-level object and should not be qualified with a database or schema prefix.", objType), 4))
 		}
@@ -4537,6 +4538,25 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	return markers
+}
+
+// countIdentParts counts the number of dot-separated identifier segments in a
+// matched identifier path, correctly skipping dots inside quoted identifiers.
+// For example: "my.db".schema.tbl → 3, "my.warehouse" → 1.
+func countIdentParts(m string) int {
+	parts := 1
+	for i := 0; i < len(m); i++ {
+		if m[i] == '"' {
+			// Skip to closing quote (handles _ident's "[^"]+" pattern).
+			i++
+			for i < len(m) && m[i] != '"' {
+				i++
+			}
+		} else if m[i] == '.' {
+			parts++
+		}
+	}
+	return parts
 }
 
 // matchStringLiteral returns the position right after the closing single quote

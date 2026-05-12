@@ -3504,6 +3504,10 @@ func TestValidateSnowflakePatterns_Describe(t *testing.T) {
 		"DESCRIBE STORAGE LIFECYCLE POLICY my_slp",
 		"DESCRIBE POSTGRES INSTANCE my_pi",
 		"DESCRIBE ORGANIZATION PROFILE my_op",
+		"DESCRIBE LISTING my_listing",
+		"DESCRIBE SPECIFICATION my_spec",
+		// ── Quoted identifiers with embedded dots (no false positive) ────
+		`DESCRIBE WAREHOUSE "my.warehouse"`,
 	}
 
 	for _, sql := range validCases {
@@ -3612,6 +3616,11 @@ func TestValidateSnowflakePatterns_Describe(t *testing.T) {
 			"DESCRIBE RESOURCE MONITOR with schema prefix",
 			"DESCRIBE RESOURCE MONITOR db.my_rm",
 			[]string{"RESOURCE MONITOR is an account-level object and should not be qualified"},
+		},
+		{
+			"DESCRIBE SPECIFICATION with schema prefix",
+			"DESCRIBE SPECIFICATION db.my_spec",
+			[]string{"SPECIFICATION is an account-level object and should not be qualified"},
 		},
 		// ── Trailing unrecognized content ────────────────────────────────
 		{
