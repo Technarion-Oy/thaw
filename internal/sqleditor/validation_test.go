@@ -3850,3 +3850,213 @@ func TestValidateSnowflakePatterns_Tag(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateSnowflakePatterns_Task(t *testing.T) {
+	validCases := []string{
+		// ── CREATE TASK — root tasks (must have SCHEDULE) ────────────────
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' AS SELECT 1",
+		"CREATE OR REPLACE TASK my_task WAREHOUSE = wh SCHEDULE = 'USING CRON 0 0 * * * UTC' AS INSERT INTO t SELECT 1",
+		"CREATE TASK IF NOT EXISTS db.schema.my_task WAREHOUSE = wh SCHEDULE = '5 MINUTE' AS CALL my_proc()",
+		"CREATE TASK my_task USER_TASK_MANAGED_INITIAL_WAREHOUSE_SIZE = 'XSMALL' SCHEDULE = '1 MINUTE' AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' COMMENT = 'root task' AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '60 MINUTE' ALLOW_OVERLAPPING_EXECUTION = TRUE AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' USER_TASK_TIMEOUT_MS = 60000 AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' SUSPEND_TASK_AFTER_NUM_FAILURES = 3 AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' ERROR_INTEGRATION = my_int AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' CONFIG = $${\"key\": \"val\"}$$ AS SELECT 1",
+		// ── CREATE TASK — child tasks (AFTER, no SCHEDULE) ──────────────
+		"CREATE TASK child_task WAREHOUSE = wh AFTER parent_task AS SELECT 1",
+		"CREATE TASK child_task WAREHOUSE = wh AFTER db.schema.parent_task AS SELECT 1",
+		"CREATE TASK child_task WAREHOUSE = wh AFTER task1, task2, task3 AS SELECT 1",
+		"CREATE TASK child_task WAREHOUSE = wh AFTER parent_task WHEN SYSTEM$STREAM_HAS_DATA('my_stream') AS INSERT INTO t SELECT * FROM s",
+		// ── CREATE TASK — child task with WHEN condition ─────────────────
+		"CREATE TASK child_task WAREHOUSE = wh AFTER parent WHEN SYSTEM$GET_PREDECESSOR_RETURN_VALUE('parent') = 'done' AS SELECT 1",
+		"CREATE TASK child_task WAREHOUSE = wh AFTER parent WHEN cond1 AND cond2 AS SELECT 1",
+		// ── CREATE TASK — root task with WHEN (valid per Snowflake docs) ─
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' WHEN SYSTEM$STREAM_HAS_DATA('my_stream') AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '5 MINUTE' WHEN SYSTEM$STREAM_HAS_DATA('s1') AND SYSTEM$STREAM_HAS_DATA('s2') AS SELECT 1",
+		// ── CREATE TASK — finalizer tasks ────────────────────────────────
+		"CREATE TASK finalizer_task FINALIZE = root_task AS SELECT 1",
+		"CREATE TASK finalizer_task WAREHOUSE = wh FINALIZE = root_task AS SELECT 1",
+		// ── ALTER TASK ──────────────────────────────────────────────────
+		"ALTER TASK my_task RESUME",
+		"ALTER TASK my_task SUSPEND",
+		"ALTER TASK IF EXISTS my_task RESUME",
+		"ALTER TASK IF EXISTS my_task SUSPEND",
+		"ALTER TASK my_task SET SCHEDULE = '10 MINUTE'",
+		"ALTER TASK my_task SET WAREHOUSE = new_wh",
+		"ALTER TASK my_task SET USER_TASK_TIMEOUT_MS = 60000",
+		"ALTER TASK my_task SET COMMENT = 'updated'",
+		"ALTER TASK my_task SET SUSPEND_TASK_AFTER_NUM_FAILURES = 5",
+		"ALTER TASK my_task SET ERROR_INTEGRATION = my_int",
+		"ALTER TASK my_task UNSET WAREHOUSE",
+		"ALTER TASK my_task UNSET COMMENT",
+		"ALTER TASK my_task REMOVE AFTER task1",
+		"ALTER TASK my_task REMOVE AFTER task1, task2",
+		"ALTER TASK my_task ADD AFTER task1",
+		"ALTER TASK my_task ADD AFTER task1, task2",
+		"ALTER TASK my_task MODIFY AS SELECT 1 FROM t",
+		"ALTER TASK my_task MODIFY WHEN SYSTEM$STREAM_HAS_DATA('my_stream')",
+		"ALTER TASK my_task SET FINALIZE = root_task",
+	}
+
+	for _, sql := range validCases {
+		t.Run(sql[:min(len(sql), 60)], func(t *testing.T) {
+			ranges := GetStatementRanges(sql)
+			markers := ValidateSnowflakePatterns(sql, ranges)
+			if warns := getWarnings(markers); len(warns) > 0 {
+				t.Errorf("Expected 0 warnings for %q, got %d: %v", sql, len(warns), warns)
+			}
+		})
+	}
+
+	invalidCases := []struct {
+		name     string
+		sql      string
+		wantMsgs []string
+	}{
+		// ── CREATE TASK — missing name ──────────────────────────────────
+		{
+			"bare CREATE TASK without name",
+			"CREATE TASK",
+			[]string{"CREATE TASK requires a task name"},
+		},
+		{
+			"CREATE OR REPLACE TASK without name",
+			"CREATE OR REPLACE TASK",
+			[]string{"CREATE TASK requires a task name"},
+		},
+		// ── CREATE TASK — OR REPLACE + IF NOT EXISTS conflict ───────────
+		{
+			"OR REPLACE + IF NOT EXISTS conflict",
+			"CREATE OR REPLACE TASK IF NOT EXISTS my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' AS SELECT 1",
+			[]string{"Conflict between OR REPLACE and IF NOT EXISTS"},
+		},
+		// ── CREATE TASK — missing AS body ───────────────────────────────
+		{
+			"missing AS keyword",
+			"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE'",
+			[]string{"CREATE TASK requires an AS clause"},
+		},
+		// ── CREATE TASK — AFTER + SCHEDULE mutual exclusivity ───────────
+		{
+			"AFTER and SCHEDULE are mutually exclusive",
+			"CREATE TASK child WAREHOUSE = wh AFTER parent SCHEDULE = '10 MINUTE' AS SELECT 1",
+			[]string{"AFTER and SCHEDULE are mutually exclusive"},
+		},
+		// ── CREATE TASK — root task without SCHEDULE ────────────────────
+		{
+			"root task missing SCHEDULE",
+			"CREATE TASK my_task WAREHOUSE = wh AS SELECT 1",
+			[]string{"Root task (no AFTER or FINALIZE clause) requires a SCHEDULE"},
+		},
+		// ── CREATE TASK — bare AFTER without names ──────────────────────
+		{
+			"bare AFTER without predecessor names",
+			"CREATE TASK child WAREHOUSE = wh AFTER AS SELECT 1",
+			[]string{"AFTER requires at least one predecessor task name"},
+		},
+		// ── CREATE TASK — FINALIZE + AFTER conflict ─────────────────────
+		{
+			"FINALIZE with AFTER is invalid",
+			"CREATE TASK finalizer WAREHOUSE = wh FINALIZE = root_task AFTER parent AS SELECT 1",
+			[]string{"FINALIZE must not be combined with AFTER"},
+		},
+		// ── CREATE TASK — FINALIZE + SCHEDULE conflict ──────────────────
+		{
+			"FINALIZE with SCHEDULE is invalid",
+			"CREATE TASK finalizer WAREHOUSE = wh FINALIZE = root_task SCHEDULE = '10 MINUTE' AS SELECT 1",
+			[]string{"FINALIZE must not be combined with SCHEDULE"},
+		},
+		// ── CREATE TASK — bare WHEN without expression ──────────────────
+		{
+			"bare WHEN without expression",
+			"CREATE TASK child WAREHOUSE = wh AFTER parent WHEN AS SELECT 1",
+			[]string{"WHEN requires a boolean expression"},
+		},
+		// ── CREATE TASK — FINALIZE without root task name ───────────────
+		{
+			"bare FINALIZE without root task name",
+			"CREATE TASK finalizer FINALIZE AS SELECT 1",
+			[]string{"FINALIZE requires a root task name"},
+		},
+		// ── ALTER TASK — missing name ───────────────────────────────────
+		{
+			"bare ALTER TASK without name",
+			"ALTER TASK",
+			[]string{"ALTER TASK requires a task name"},
+		},
+		// ── ALTER TASK — unknown sub-command ────────────────────────────
+		{
+			"ALTER TASK unknown sub-command",
+			"ALTER TASK my_task RESET",
+			[]string{"Unknown ALTER TASK sub-command"},
+		},
+		// ── ALTER TASK — ADD AFTER without names ────────────────────────
+		{
+			"ALTER TASK ADD AFTER without names",
+			"ALTER TASK my_task ADD AFTER",
+			[]string{"ADD AFTER requires at least one predecessor task name"},
+		},
+		// ── ALTER TASK — MODIFY AS without body ─────────────────────────
+		{
+			"ALTER TASK MODIFY AS without body",
+			"ALTER TASK my_task MODIFY AS",
+			[]string{"MODIFY AS requires a SQL statement"},
+		},
+		// ── ALTER TASK — MODIFY WHEN without expression ─────────────────
+		{
+			"ALTER TASK MODIFY WHEN without expression",
+			"ALTER TASK my_task MODIFY WHEN",
+			[]string{"MODIFY WHEN requires a boolean expression"},
+		},
+		// ── ALTER TASK — SET FINALIZE without root task name ─────────────
+		{
+			"ALTER TASK SET FINALIZE without name",
+			"ALTER TASK my_task SET FINALIZE =",
+			[]string{"SET FINALIZE requires a root task name"},
+		},
+		// ── ALTER TASK — REMOVE AFTER without name ──────────────────────
+		{
+			"ALTER TASK REMOVE AFTER without task name",
+			"ALTER TASK my_task REMOVE AFTER",
+			[]string{"REMOVE AFTER requires at least one predecessor task name"},
+		},
+		// ── ALTER TASK — SET with unknown property ───────────────────────
+		{
+			"ALTER TASK SET with unknown property",
+			"ALTER TASK my_task SET RETRY_LIMIT = 5",
+			[]string{"Unexpected property 'RETRY_LIMIT'"},
+		},
+		// ── ALTER TASK — UNSET with unknown property ─────────────────────
+		{
+			"ALTER TASK UNSET with unknown property",
+			"ALTER TASK my_task UNSET FOOBAR",
+			[]string{"Unexpected property 'FOOBAR'"},
+		},
+	}
+
+	for _, tc := range invalidCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ranges := GetStatementRanges(tc.sql)
+			markers := ValidateSnowflakePatterns(tc.sql, ranges)
+			warns := getWarnings(markers)
+			if len(warns) == 0 {
+				t.Errorf("Expected warnings for %q, got 0", tc.sql)
+				return
+			}
+			for _, wantMsg := range tc.wantMsgs {
+				found := false
+				for _, w := range warns {
+					if strings.Contains(w.Message, wantMsg) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected warning containing %q for %q, got: %v", wantMsg, tc.sql, warns)
+				}
+			}
+		})
+	}
+}

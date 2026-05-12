@@ -270,8 +270,37 @@ var (
 	taskProps      = strings.Join([]string{
 		`WAREHOUSE`, `USER_TASK_MANAGED_INITIAL_WAREHOUSE_SIZE`, `SCHEDULE`, `CONFIG`,
 		`ALLOW_OVERLAPPING_EXECUTION`, `USER_TASK_TIMEOUT_MS`, `SUSPEND_TASK_AFTER_NUM_FAILURES`,
-		`ERROR_INTEGRATION`, `COMMENT`, `AFTER`, `WHEN`,
+		`ERROR_INTEGRATION`, `COMMENT`, `AFTER`, `WHEN`, `FINALIZE`,
 	}, "|")
+
+	reCreateTaskName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TASK\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
+	reTaskAS         = regexp.MustCompile(`(?i)\bAS\b`)
+	reTaskSchedule   = regexp.MustCompile(`(?i)\bSCHEDULE\s*=`)
+	reTaskAfter      = regexp.MustCompile(`(?i)\bAFTER\b`)
+	reTaskAfterNames = regexp.MustCompile(`(?i)\bAFTER\s+(` + _identPath + `(?:\s*,\s*` + _identPath + `)*)`)
+	reTaskFinalizeBare = regexp.MustCompile(`(?i)\bFINALIZE\b`)
+	reTaskFinalizeN    = regexp.MustCompile(`(?i)\bFINALIZE\s*=\s*(` + _identPath + `)`)
+	reTaskWhen       = regexp.MustCompile(`(?i)\bWHEN\b`)
+	reTaskWhenExpr   = regexp.MustCompile(`(?i)\bWHEN\s+\S`)
+
+	// ── ALTER TASK ────────────────────────────────────────────────────────────
+	reIsAlterTask     = regexp.MustCompile(`(?i)^\s*ALTER\s+TASK\b`)
+	reAlterTaskName   = regexp.MustCompile(`(?i)^\s*ALTER\s+TASK\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
+	reAlterTaskResume = regexp.MustCompile(`(?i)\bRESUME\s*$`)
+	reAlterTaskSusp   = regexp.MustCompile(`(?i)\bSUSPEND\s*$`)
+	reAlterTaskSet    = regexp.MustCompile(`(?i)\bSET\b`)
+	reAlterTaskUnset  = regexp.MustCompile(`(?i)\bUNSET\b`)
+	reAlterTaskRemAfter     = regexp.MustCompile(`(?i)\bREMOVE\s+AFTER\b`)
+	reAlterTaskRemAfterN    = regexp.MustCompile(`(?i)\bREMOVE\s+AFTER\s+(` + _identPath + `(?:\s*,\s*` + _identPath + `)*)`)
+	reAlterTaskAddAfter     = regexp.MustCompile(`(?i)\bADD\s+AFTER\b`)
+	reAlterTaskAddAfterN    = regexp.MustCompile(`(?i)\bADD\s+AFTER\s+(` + _identPath + `(?:\s*,\s*` + _identPath + `)*)`)
+	reAlterTaskModifyAS     = regexp.MustCompile(`(?i)\bMODIFY\s+AS\b`)
+	reAlterTaskModifyASBody = regexp.MustCompile(`(?i)\bMODIFY\s+AS\s+\S`)
+	reAlterTaskModifyWhen   = regexp.MustCompile(`(?i)\bMODIFY\s+WHEN\b`)
+	reAlterTaskModifyWhenE  = regexp.MustCompile(`(?i)\bMODIFY\s+WHEN\s+\S`)
+	reAlterTaskSetFinalize  = regexp.MustCompile(`(?i)\bSET\s+FINALIZE\s*=`)
+	reAlterTaskSetFinalizeN = regexp.MustCompile(`(?i)\bSET\s+FINALIZE\s*=\s*(` + _identPath + `)`)
+	reAlterTaskUnsetProp   = regexp.MustCompile(`(?i)\bUNSET\s+([A-Za-z_][A-Za-z0-9_]*)`)
 
 	// ── CREATE ALERT ──────────────────────────────────────────────────────────
 	reIsCreateAlert = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?ALERT\b`)
@@ -1436,12 +1465,13 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 
 		// ── Preamble: CREATE TASK ────────────────────────────────────────
 		if reIsCreateTask.MatchString(parseText) {
-			// Tasks ARE schema objects, so they CAN have prefixes. No account-level check.
-			// Validate properties up to the AS keyword
-			asIdx := regexp.MustCompile(`(?i)\bAS\b`).FindStringIndex(parseText)
-			if asIdx != nil {
-				validateProperties(parseText[:asIdx[0]], taskProps, r, &markers)
-			}
+			markers = append(markers, validateCreateTask(parseText, r)...)
+			continue
+		}
+
+		// ── ALTER TASK ──────────────────────────────────────────────────
+		if reIsAlterTask.MatchString(parseText) {
+			markers = append(markers, validateAlterTask(parseText, r)...)
 			continue
 		}
 
@@ -4780,6 +4810,202 @@ func validateDropTag(parseText string, r StatementRange) []DiagMarker {
 	if reDropTagCascadeRestrict.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"CASCADE / RESTRICT are not valid for DROP TAG.", 4))
+	}
+
+	return markers
+}
+
+// ── validateCreateTask ────────────────────────────────────────────────────
+
+// validateCreateTask checks structural requirements for CREATE TASK statements:
+//   - Task name is mandatory.
+//   - OR REPLACE and IF NOT EXISTS are mutually exclusive.
+//   - AS clause is required (the task body).
+//   - AFTER and SCHEDULE are mutually exclusive (child vs root task).
+//   - Root tasks (no AFTER) must have SCHEDULE.
+//   - Bare AFTER (no predecessor names) is invalid.
+//   - FINALIZE must not be combined with AFTER or SCHEDULE.
+//   - FINALIZE requires a root task name (FINALIZE = <name>).
+//   - WHEN requires a boolean expression.
+func validateCreateTask(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := reStripStringLiterals.ReplaceAllString(parseText, "''")
+
+	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
+	if reOrReplace.MatchString(stripped) && reIfNotExists.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE TASK statement.", 4))
+		return markers
+	}
+
+	// 2. Task name is required.
+	if reCreateTaskName.FindStringSubmatch(parseText) == nil {
+		markers = append(markers, diagMarkerSpan(r, "CREATE TASK requires a task name.", 4))
+		return markers
+	}
+
+	// Split into preamble (before AS) and body for property and structural checks.
+	// We need to find the standalone AS keyword, not AS inside a string or function name.
+	asIdx := reTaskAS.FindStringIndex(stripped)
+	hasAS := asIdx != nil
+
+	var preamble string
+	if hasAS {
+		preamble = stripped[:asIdx[0]]
+	} else {
+		preamble = stripped
+	}
+
+	hasAfter := reTaskAfter.MatchString(preamble)
+	hasSchedule := reTaskSchedule.MatchString(preamble)
+	hasFinalize := reTaskFinalizeBare.MatchString(preamble)
+	hasWhen := reTaskWhen.MatchString(preamble)
+
+	// 3. AS clause is required.
+	if !hasAS {
+		markers = append(markers, diagMarkerSpan(r, "CREATE TASK requires an AS clause with a SQL statement body.", 4))
+		return markers
+	}
+
+	// 4. FINALIZE conflicts.
+	if hasFinalize {
+		if hasAfter {
+			markers = append(markers, diagMarkerSpan(r,
+				"FINALIZE must not be combined with AFTER in a CREATE TASK statement.", 4))
+		}
+		if hasSchedule {
+			markers = append(markers, diagMarkerSpan(r,
+				"FINALIZE must not be combined with SCHEDULE in a CREATE TASK statement.", 4))
+		}
+		// FINALIZE requires the = <name> syntax (FINALIZE = <name>).
+		if !reTaskFinalizeN.MatchString(preamble) {
+			markers = append(markers, diagMarkerSpan(r,
+				"FINALIZE requires a root task name (e.g. FINALIZE = root_task).", 4))
+		}
+		// Validate properties, then return — no SCHEDULE/AFTER checks for finalizer.
+		validateProperties(preamble, taskProps, r, &markers)
+		return markers
+	}
+
+	// 5. AFTER and SCHEDULE are mutually exclusive.
+	if hasAfter && hasSchedule {
+		markers = append(markers, diagMarkerSpan(r,
+			"AFTER and SCHEDULE are mutually exclusive in a CREATE TASK statement. A child task (AFTER) must not also set SCHEDULE.", 4))
+	}
+
+	// 6. Bare AFTER without predecessor names.
+	if hasAfter && !reTaskAfterNames.MatchString(preamble) {
+		markers = append(markers, diagMarkerSpan(r,
+			"AFTER requires at least one predecessor task name.", 4))
+	}
+
+	// 7. Root task without SCHEDULE.
+	if !hasAfter && !hasSchedule {
+		markers = append(markers, diagMarkerSpan(r,
+			"Root task (no AFTER or FINALIZE clause) requires a SCHEDULE property.", 4))
+	}
+
+	// 8. WHEN checks.
+	if hasWhen {
+		// WHEN requires an expression (not bare WHEN followed directly by AS).
+		if !reTaskWhenExpr.MatchString(preamble) {
+			markers = append(markers, diagMarkerSpan(r,
+				"WHEN requires a boolean expression.", 4))
+		}
+	}
+
+	// 9. Validate properties.
+	validateProperties(preamble, taskProps, r, &markers)
+
+	return markers
+}
+
+// ── validateAlterTask ────────────────────────────────────────────────────────
+
+// validateAlterTask checks structural requirements for ALTER TASK statements:
+//   - Task name is mandatory.
+//   - RESUME / SUSPEND are valid standalone sub-commands.
+//   - SET / UNSET modify task properties.
+//   - ADD AFTER / REMOVE AFTER manage DAG predecessors.
+//   - MODIFY AS / MODIFY WHEN change the task body or condition.
+//   - SET FINALIZE sets the finalizer root task.
+//   - Unknown sub-commands produce a warning.
+func validateAlterTask(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripped)
+
+	// 1. Task name is required.
+	if reAlterTaskName.FindStringSubmatch(parseText) == nil {
+		markers = append(markers, diagMarkerSpan(r, "ALTER TASK requires a task name.", 4))
+		return markers
+	}
+
+	// Determine the sub-command.
+	hasResume := reAlterTaskResume.MatchString(clean)
+	hasSuspend := reAlterTaskSusp.MatchString(clean)
+	hasSet := reAlterTaskSet.MatchString(clean)
+	hasUnset := reAlterTaskUnset.MatchString(clean)
+	hasRemAfter := reAlterTaskRemAfter.MatchString(clean)
+	hasAddAfter := reAlterTaskAddAfter.MatchString(clean)
+	hasModifyAS := reAlterTaskModifyAS.MatchString(clean)
+	hasModifyWhen := reAlterTaskModifyWhen.MatchString(clean)
+	hasSetFinalize := reAlterTaskSetFinalize.MatchString(clean)
+
+	anyKnown := hasResume || hasSuspend || hasSet || hasUnset ||
+		hasRemAfter || hasAddAfter || hasModifyAS || hasModifyWhen || hasSetFinalize
+
+	if !anyKnown {
+		markers = append(markers, diagMarkerSpan(r,
+			"Unknown ALTER TASK sub-command. Expected RESUME, SUSPEND, SET, UNSET, ADD AFTER, REMOVE AFTER, MODIFY AS, MODIFY WHEN, or SET FINALIZE.", 4))
+		return markers
+	}
+
+	// 2. ADD AFTER requires at least one predecessor name.
+	if hasAddAfter && !reAlterTaskAddAfterN.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"ADD AFTER requires at least one predecessor task name.", 4))
+	}
+
+	// 3. REMOVE AFTER requires at least one predecessor name.
+	if hasRemAfter && !reAlterTaskRemAfterN.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"REMOVE AFTER requires at least one predecessor task name.", 4))
+	}
+
+	// 4. MODIFY AS requires a SQL body.
+	if hasModifyAS && !reAlterTaskModifyASBody.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"MODIFY AS requires a SQL statement.", 4))
+	}
+
+	// 5. MODIFY WHEN requires a boolean expression.
+	if hasModifyWhen && !reAlterTaskModifyWhenE.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"MODIFY WHEN requires a boolean expression.", 4))
+	}
+
+	// 6. SET FINALIZE requires a root task name.
+	if hasSetFinalize && !reAlterTaskSetFinalizeN.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"SET FINALIZE requires a root task name (e.g. SET FINALIZE = root_task).", 4))
+	}
+
+	// 7. Validate property names for SET (excluding SET FINALIZE which is handled above).
+	if hasSet && !hasSetFinalize {
+		validateProperties(clean, taskProps, r, &markers)
+	}
+
+	// 8. Validate property name for UNSET.
+	if hasUnset {
+		reValid := regexp.MustCompile(`(?i)^(` + taskProps + `)$`)
+		if m := reAlterTaskUnsetProp.FindStringSubmatch(clean); m != nil {
+			if !reValid.MatchString(m[1]) {
+				markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Unexpected property '%s' in statement.", m[1]), 4))
+			}
+		}
 	}
 
 	return markers
