@@ -67,29 +67,10 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		// Drop
 		"DROP DATABASE my_db CASCADE",
 		"DROP SCHEMA IF EXISTS my_sch RESTRICT",
-		// Tags
+		// Tags — comprehensive tests in TestValidateSnowflakePatterns_Tag
 		"CREATE TAG my_tag",
-		"CREATE OR REPLACE TAG my_tag",
-		"CREATE TAG IF NOT EXISTS my_tag",
-		"CREATE TAG my_tag COMMENT = 'cost center tag'",
-		"CREATE TAG db.schema.my_tag",
-		"CREATE TAG my_tag ALLOWED_VALUES 'finance', 'engineering', 'marketing'",
-		"CREATE TAG my_tag ALLOWED_VALUES 'a'",
-		"CREATE OR REPLACE TAG cost_center ALLOWED_VALUES 'finance', 'hr' COMMENT = 'dept tag'",
 		"ALTER TAG my_tag RENAME TO new_tag",
-		"ALTER TAG db.schema.my_tag RENAME TO db.schema.new_tag",
-		"ALTER TAG my_tag ADD ALLOWED_VALUES 'new_val'",
-		"ALTER TAG my_tag ADD ALLOWED_VALUES 'v1', 'v2', 'v3'",
-		"ALTER TAG my_tag DROP ALLOWED_VALUES 'old_val'",
-		"ALTER TAG my_tag DROP ALLOWED_VALUES 'v1', 'v2'",
-		"ALTER TAG my_tag UNSET ALLOWED_VALUES",
-		"ALTER TAG my_tag SET COMMENT = 'updated tag'",
-		"ALTER TAG my_tag UNSET COMMENT",
-		"ALTER TAG IF EXISTS my_tag RENAME TO new_tag",
-		"ALTER TAG IF EXISTS my_tag ADD ALLOWED_VALUES 'x'",
 		"DROP TAG my_tag",
-		"DROP TAG IF EXISTS my_tag",
-		"DROP TAG db.schema.my_tag",
 		// SHOW statements — comprehensive tests in TestValidateSnowflakePatterns_Show
 		// False Positive Guards (Should be silently ignored, 0 warnings)
 		"DELETE FROM t WHERE id = 1",
@@ -3801,6 +3782,11 @@ func TestValidateSnowflakePatterns_Tag(t *testing.T) {
 			"ALTER TAG DROP ALLOWED_VALUES with non-string",
 			"ALTER TAG my_tag DROP ALLOWED_VALUES finance",
 			[]string{"DROP ALLOWED_VALUES requires at least one string literal"},
+		},
+		{
+			"ALTER TAG DROP ALLOWED_VALUES with duplicate values",
+			"ALTER TAG my_tag DROP ALLOWED_VALUES 'v1', 'v2', 'v1'",
+			[]string{"Duplicate value 'v1'"},
 		},
 		// ── DROP TAG ─────────────────────────────────────────────────────
 		{

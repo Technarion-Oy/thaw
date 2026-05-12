@@ -521,8 +521,12 @@ var (
 	// reAlterTagRename matches ALTER TAG <name> RENAME TO <new_name>.
 	reAlterTagRenameTo = regexp.MustCompile(`(?i)\bRENAME\s+TO\s+(` + _identPath + `)`)
 	// reAlterTagAddAllowed matches ALTER TAG <name> ADD ALLOWED_VALUES.
-	reAlterTagAddAllowed  = regexp.MustCompile(`(?i)\bADD\s+ALLOWED_VALUES\b`)
-	reAlterTagDropAllowed = regexp.MustCompile(`(?i)\bDROP\s+ALLOWED_VALUES\b`)
+	reAlterTagAddAllowed      = regexp.MustCompile(`(?i)\bADD\s+ALLOWED_VALUES\b`)
+	reAlterTagAddAllowedIdx   = regexp.MustCompile(`(?i)\bADD\s+ALLOWED_VALUES\s+`)
+	reAlterTagDropAllowed     = regexp.MustCompile(`(?i)\bDROP\s+ALLOWED_VALUES\b`)
+	reAlterTagDropAllowedIdx  = regexp.MustCompile(`(?i)\bDROP\s+ALLOWED_VALUES\s+`)
+	// reAlterTagRenameToBare matches RENAME TO without requiring a name after it.
+	reAlterTagRenameToBare = regexp.MustCompile(`(?i)\bRENAME\s+TO\b`)
 	// reAlterTagUnsetAllowed matches ALTER TAG <name> UNSET ALLOWED_VALUES.
 	reAlterTagUnsetAllowed = regexp.MustCompile(`(?i)\bUNSET\s+ALLOWED_VALUES\b`)
 	reAlterTagSetComment   = regexp.MustCompile(`(?i)\bSET\s+COMMENT\s*=`)
@@ -4619,8 +4623,10 @@ func validateCreateTag(parseText string, r StatementRange) []DiagMarker {
 		}
 	}
 
-	// 4. Only ALLOWED_VALUES and COMMENT are valid properties.
-	validateProperties(parseText, `ALLOWED_VALUES|COMMENT`, r, &markers)
+	// 4. Only COMMENT is a valid KEY = VALUE property for CREATE TAG.
+	// ALLOWED_VALUES uses space-separated syntax (no '='), so reProp
+	// inside validateProperties cannot match it — it is already validated above.
+	validateProperties(parseText, `COMMENT`, r, &markers)
 
 	return markers
 }
@@ -4676,7 +4682,7 @@ func validateAlterTag(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// Determine the sub-command by checking after the tag name.
-	hasRename := regexp.MustCompile(`(?i)\bRENAME\s+TO\b`).MatchString(clean)
+	hasRename := reAlterTagRenameToBare.MatchString(clean)
 	hasAddAllowed := reAlterTagAddAllowed.MatchString(clean)
 	hasDropAllowed := reAlterTagDropAllowed.MatchString(clean)
 	hasUnsetAllowed := reAlterTagUnsetAllowed.MatchString(clean)
@@ -4699,7 +4705,7 @@ func validateAlterTag(parseText string, r StatementRange) []DiagMarker {
 
 	// 3. ADD ALLOWED_VALUES requires at least one string literal value.
 	if hasAddAllowed {
-		after := regexp.MustCompile(`(?i)\bADD\s+ALLOWED_VALUES\s+`).FindStringIndex(parseText)
+		after := reAlterTagAddAllowedIdx.FindStringIndex(parseText)
 		if after == nil {
 			markers = append(markers, diagMarkerSpan(r,
 				"ADD ALLOWED_VALUES requires at least one string literal value.", 4))
@@ -4716,7 +4722,7 @@ func validateAlterTag(parseText string, r StatementRange) []DiagMarker {
 
 	// 4. DROP ALLOWED_VALUES requires at least one string literal value.
 	if hasDropAllowed {
-		after := regexp.MustCompile(`(?i)\bDROP\s+ALLOWED_VALUES\s+`).FindStringIndex(parseText)
+		after := reAlterTagDropAllowedIdx.FindStringIndex(parseText)
 		if after == nil {
 			markers = append(markers, diagMarkerSpan(r,
 				"DROP ALLOWED_VALUES requires at least one string literal value.", 4))
@@ -4725,6 +4731,8 @@ func validateAlterTag(parseText string, r StatementRange) []DiagMarker {
 			if len(rest) == 0 || rest[0] != '\'' {
 				markers = append(markers, diagMarkerSpan(r,
 					"DROP ALLOWED_VALUES requires at least one string literal value.", 4))
+			} else {
+				markers = append(markers, checkDuplicateAllowedValues(rest, r)...)
 			}
 		}
 	}
