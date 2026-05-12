@@ -507,6 +507,29 @@ var (
 	// always the leading key in ENCRYPTION blocks.
 	reExtVolEncryptionType = regexp.MustCompile(`(?i)\bENCRYPTION\s*=\s*\(\s*TYPE\s*=\s*'([^']*)'`)
 
+	// ── CREATE TAG / ALTER TAG / DROP TAG ────────────────────────────────
+	reIsCreateTag    = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TAG\b`)
+	reCreateTagName  = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TAG\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
+	reIsAlterTag     = regexp.MustCompile(`(?i)^\s*ALTER\s+TAG\b`)
+	reAlterTagName   = regexp.MustCompile(`(?i)^\s*ALTER\s+TAG\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
+	reIsDropTag      = regexp.MustCompile(`(?i)^\s*DROP\s+TAG\b`)
+	reDropTagName    = regexp.MustCompile(`(?i)^\s*DROP\s+TAG\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
+	// reTagAllowedValues matches ALLOWED_VALUES followed by a parenthesised or
+	// comma-separated list of string literals.
+	reTagAllowedValues     = regexp.MustCompile(`(?i)\bALLOWED_VALUES\s+`)
+	reTagStringLiteralList = regexp.MustCompile(`(?i)\bALLOWED_VALUES\s+('(?:''|[^'])*'(?:\s*,\s*'(?:''|[^'])*')*)`)
+	// reAlterTagRename matches ALTER TAG <name> RENAME TO <new_name>.
+	reAlterTagRenameTo = regexp.MustCompile(`(?i)\bRENAME\s+TO\s+(` + _identPath + `)`)
+	// reAlterTagAddAllowed matches ALTER TAG <name> ADD ALLOWED_VALUES.
+	reAlterTagAddAllowed  = regexp.MustCompile(`(?i)\bADD\s+ALLOWED_VALUES\b`)
+	reAlterTagDropAllowed = regexp.MustCompile(`(?i)\bDROP\s+ALLOWED_VALUES\b`)
+	// reAlterTagUnsetAllowed matches ALTER TAG <name> UNSET ALLOWED_VALUES.
+	reAlterTagUnsetAllowed = regexp.MustCompile(`(?i)\bUNSET\s+ALLOWED_VALUES\b`)
+	reAlterTagSetComment   = regexp.MustCompile(`(?i)\bSET\s+COMMENT\s*=`)
+	reAlterTagUnsetComment = regexp.MustCompile(`(?i)\bUNSET\s+COMMENT\b`)
+	// reDropTagCascadeRestrict detects CASCADE or RESTRICT trailing the DROP TAG statement.
+	reDropTagCascadeRestrict = regexp.MustCompile(`(?i)\b(?:CASCADE|RESTRICT)\s*$`)
+
 	// ── USE ROLE / USE WAREHOUSE / USE SECONDARY ROLES ────────────────────
 	reIsUseRole           = regexp.MustCompile(`(?i)^\s*USE\s+ROLE\b`)
 	reIsUseWarehouse      = regexp.MustCompile(`(?i)^\s*USE\s+WAREHOUSE\b`)
@@ -1784,6 +1807,24 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// ── ALTER SHARE ──────────────────────────────────────────────────
 		if reIsAlterShare.MatchString(parseText) {
 			markers = append(markers, validateAlterShare(parseText, r)...)
+			continue
+		}
+
+		// ── CREATE TAG ──────────────────────────────────────────────────
+		if reIsCreateTag.MatchString(parseText) {
+			markers = append(markers, validateCreateTag(parseText, r)...)
+			continue
+		}
+
+		// ── ALTER TAG ───────────────────────────────────────────────────
+		if reIsAlterTag.MatchString(parseText) {
+			markers = append(markers, validateAlterTag(parseText, r)...)
+			continue
+		}
+
+		// ── DROP TAG ────────────────────────────────────────────────────
+		if reIsDropTag.MatchString(parseText) {
+			markers = append(markers, validateDropTag(parseText, r)...)
 			continue
 		}
 
@@ -4535,6 +4576,184 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("Unexpected token '%s' after object name in DESCRIBE statement.", words[0]), 4))
 		}
+	}
+
+	return markers
+}
+
+// ── validateCreateTag ─────────────────────────────────────────────────────────
+
+// validateCreateTag checks structural requirements for
+// CREATE [OR REPLACE] TAG [IF NOT EXISTS] <name> statements:
+//   - OR REPLACE and IF NOT EXISTS are mutually exclusive.
+//   - Tag name is mandatory.
+//   - ALLOWED_VALUES values must be string literals; duplicates are warned.
+//   - Only ALLOWED_VALUES and COMMENT are valid properties.
+func validateCreateTag(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := reStripStringLiterals.ReplaceAllString(parseText, "''")
+
+	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
+	if reOrReplace.MatchString(stripped) && reIfNotExists.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE TAG statement.", 4))
+		return markers
+	}
+
+	// 2. Tag name is required.
+	m := reCreateTagName.FindStringSubmatch(parseText)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r, "CREATE TAG requires a tag name.", 4))
+		return markers
+	}
+
+	// 3. ALLOWED_VALUES values must be string literals; check for duplicates.
+	if reTagAllowedValues.MatchString(stripped) {
+		lm := reTagStringLiteralList.FindStringSubmatch(parseText)
+		if lm == nil {
+			markers = append(markers, diagMarkerSpan(r,
+				"ALLOWED_VALUES requires a list of string literals (e.g. ALLOWED_VALUES 'v1', 'v2').", 4))
+		} else {
+			markers = append(markers, checkDuplicateAllowedValues(lm[1], r)...)
+		}
+	}
+
+	// 4. Only ALLOWED_VALUES and COMMENT are valid properties.
+	validateProperties(parseText, `ALLOWED_VALUES|COMMENT`, r, &markers)
+
+	return markers
+}
+
+// checkDuplicateAllowedValues parses a comma-separated list of string literals
+// and warns about duplicate values.
+func checkDuplicateAllowedValues(listStr string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	seen := make(map[string]bool)
+	// Walk through the list extracting individual string literals.
+	s := listStr
+	for len(s) > 0 {
+		s = strings.TrimLeft(s, " \t\r\n,")
+		if len(s) == 0 {
+			break
+		}
+		end := matchStringLiteral(s)
+		if end == -1 {
+			break
+		}
+		// Extract the raw value between outer quotes (without unescaping).
+		val := strings.ToUpper(s[1 : end-1])
+		if seen[val] {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("Duplicate value '%s' in ALLOWED_VALUES list.", s[1:end-1]), 4))
+		}
+		seen[val] = true
+		s = s[end:]
+	}
+	return markers
+}
+
+// ── validateAlterTag ─────────────────────────────────────────────────────────
+
+// validateAlterTag checks structural requirements for ALTER TAG statements:
+//   - Tag name is mandatory.
+//   - RENAME TO requires a new name.
+//   - ADD ALLOWED_VALUES / DROP ALLOWED_VALUES require at least one string literal.
+//   - UNSET ALLOWED_VALUES takes no additional arguments.
+//   - SET COMMENT / UNSET COMMENT are valid sub-commands.
+//   - Unknown sub-commands produce a warning.
+func validateAlterTag(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(stripped))
+
+	// 1. Tag name is required.
+	nm := reAlterTagName.FindStringSubmatch(parseText)
+	if nm == nil {
+		markers = append(markers, diagMarkerSpan(r, "ALTER TAG requires a tag name.", 4))
+		return markers
+	}
+
+	// Determine the sub-command by checking after the tag name.
+	hasRename := regexp.MustCompile(`(?i)\bRENAME\s+TO\b`).MatchString(clean)
+	hasAddAllowed := reAlterTagAddAllowed.MatchString(clean)
+	hasDropAllowed := reAlterTagDropAllowed.MatchString(clean)
+	hasUnsetAllowed := reAlterTagUnsetAllowed.MatchString(clean)
+	hasSetComment := reAlterTagSetComment.MatchString(clean)
+	hasUnsetComment := reAlterTagUnsetComment.MatchString(clean)
+
+	anyKnown := hasRename || hasAddAllowed || hasDropAllowed || hasUnsetAllowed || hasSetComment || hasUnsetComment
+
+	if !anyKnown {
+		markers = append(markers, diagMarkerSpan(r,
+			"Unknown ALTER TAG sub-command. Expected RENAME TO, ADD ALLOWED_VALUES, DROP ALLOWED_VALUES, UNSET ALLOWED_VALUES, SET COMMENT, or UNSET COMMENT.", 4))
+		return markers
+	}
+
+	// 2. RENAME TO requires a new name.
+	if hasRename && !reAlterTagRenameTo.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r,
+			"ALTER TAG RENAME TO requires a new tag name.", 4))
+	}
+
+	// 3. ADD ALLOWED_VALUES requires at least one string literal value.
+	if hasAddAllowed {
+		after := regexp.MustCompile(`(?i)\bADD\s+ALLOWED_VALUES\s+`).FindStringIndex(parseText)
+		if after == nil {
+			markers = append(markers, diagMarkerSpan(r,
+				"ADD ALLOWED_VALUES requires at least one string literal value.", 4))
+		} else {
+			rest := strings.TrimSpace(parseText[after[1]:])
+			if len(rest) == 0 || rest[0] != '\'' {
+				markers = append(markers, diagMarkerSpan(r,
+					"ADD ALLOWED_VALUES requires at least one string literal value.", 4))
+			} else {
+				markers = append(markers, checkDuplicateAllowedValues(rest, r)...)
+			}
+		}
+	}
+
+	// 4. DROP ALLOWED_VALUES requires at least one string literal value.
+	if hasDropAllowed {
+		after := regexp.MustCompile(`(?i)\bDROP\s+ALLOWED_VALUES\s+`).FindStringIndex(parseText)
+		if after == nil {
+			markers = append(markers, diagMarkerSpan(r,
+				"DROP ALLOWED_VALUES requires at least one string literal value.", 4))
+		} else {
+			rest := strings.TrimSpace(parseText[after[1]:])
+			if len(rest) == 0 || rest[0] != '\'' {
+				markers = append(markers, diagMarkerSpan(r,
+					"DROP ALLOWED_VALUES requires at least one string literal value.", 4))
+			}
+		}
+	}
+
+	return markers
+}
+
+// ── validateDropTag ──────────────────────────────────────────────────────────
+
+// validateDropTag checks structural requirements for DROP TAG statements:
+//   - Tag name is mandatory.
+//   - CASCADE / RESTRICT are not valid for DROP TAG and produce a warning.
+func validateDropTag(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(stripped))
+
+	// 1. Tag name is required.
+	m := reDropTagName.FindStringSubmatch(parseText)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r, "DROP TAG requires a tag name.", 4))
+		return markers
+	}
+
+	// 2. CASCADE / RESTRICT are not valid for DROP TAG.
+	if reDropTagCascadeRestrict.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"CASCADE / RESTRICT are not valid for DROP TAG.", 4))
 	}
 
 	return markers
