@@ -514,8 +514,9 @@ var (
 	reAlterTagName   = regexp.MustCompile(`(?i)^\s*ALTER\s+TAG\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
 	reIsDropTag      = regexp.MustCompile(`(?i)^\s*DROP\s+TAG\b`)
 	reDropTagName    = regexp.MustCompile(`(?i)^\s*DROP\s+TAG\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
-	// reTagAllowedValues matches ALLOWED_VALUES followed by a parenthesised or
-	// comma-separated list of string literals.
+	// reTagAllowedValues detects the presence of the ALLOWED_VALUES keyword
+	// followed by whitespace. The actual string-literal list parsing is done
+	// by reTagStringLiteralList.
 	reTagAllowedValues     = regexp.MustCompile(`(?i)\bALLOWED_VALUES\s+`)
 	reTagStringLiteralList = regexp.MustCompile(`(?i)\bALLOWED_VALUES\s+('(?:''|[^'])*'(?:\s*,\s*'(?:''|[^'])*')*)`)
 	// reAlterTagRename matches ALTER TAG <name> RENAME TO <new_name>.
@@ -531,7 +532,9 @@ var (
 	reAlterTagUnsetAllowed = regexp.MustCompile(`(?i)\bUNSET\s+ALLOWED_VALUES\b`)
 	reAlterTagSetComment   = regexp.MustCompile(`(?i)\bSET\s+COMMENT\s*=`)
 	reAlterTagUnsetComment = regexp.MustCompile(`(?i)\bUNSET\s+COMMENT\b`)
-	// reDropTagCascadeRestrict detects CASCADE or RESTRICT trailing the DROP TAG statement.
+	// reDropTagCascadeRestrict detects CASCADE or RESTRICT trailing the DROP TAG
+	// statement. $ is safe here: parseText has trailing semicolons stripped and
+	// clean has comments removed before matching.
 	reDropTagCascadeRestrict = regexp.MustCompile(`(?i)\b(?:CASCADE|RESTRICT)\s*$`)
 
 	// ── USE ROLE / USE WAREHOUSE / USE SECONDARY ROLES ────────────────────
