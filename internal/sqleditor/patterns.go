@@ -610,6 +610,10 @@ var (
 		`FILE_FORMAT`, `COPY_OPTIONS`, `COMMENT`, `DIRECTORY`, `SUBPATH`,
 	}, "|")
 
+	// ── SHOW ─────────────────────────────────────────────────────────────────
+	reIsShow        = regexp.MustCompile(`(?i)^\s*SHOW\b`)
+	reShowIdentPath = regexp.MustCompile(`^` + _identPath)
+
 	// ── Parseable keywords ────────────────────────────────────────────────────
 	parseableKWs = map[string]bool{
 		"SELECT": true, "WITH": true, "INSERT": true, "UPDATE": true,
@@ -621,6 +625,116 @@ var (
 		"REMOVE": true, "RM": true,
 	}
 )
+
+// showObjectTypes lists all valid Snowflake object type keywords after SHOW,
+// sorted by word count descending so the longest match is attempted first.
+// Within each group, entries are alphabetical.
+// Reference: https://docs.snowflake.com/en/sql-reference/sql/show
+var showObjectTypes = []string{
+	// Three-word types
+	"CORTEX SEARCH SERVICES",
+	"DATA METRIC FUNCTIONS",
+	"ROW ACCESS POLICIES",
+	// Two-word types
+	"AGGREGATION POLICIES",
+	"AUTHENTICATION POLICIES",
+	"CATALOG INTEGRATIONS",
+	"COMPUTE POOLS",
+	"DELEGATED AUTHORIZATIONS",
+	"DYNAMIC TABLES",
+	"EVENT TABLES",
+	"EXPORTED KEYS",
+	"EXTERNAL FUNCTIONS",
+	"EXTERNAL TABLES",
+	"EXTERNAL VOLUMES",
+	"FAILOVER GROUPS",
+	"FILE FORMATS",
+	"FUTURE GRANTS",
+	"GIT BRANCHES",
+	"GIT REPOSITORIES",
+	"HYBRID TABLES",
+	"ICEBERG TABLES",
+	"IMAGE REPOSITORIES",
+	"IMPORTED KEYS",
+	"MANAGED ACCOUNTS",
+	"MASKING POLICIES",
+	"MATERIALIZED VIEWS",
+	"NETWORK POLICIES",
+	"NETWORK RULES",
+	"ORGANIZATION ACCOUNTS",
+	"PACKAGES POLICIES",
+	"PASSWORD POLICIES",
+	"PRIMARY KEYS",
+	"PROJECTION POLICIES",
+	"REPLICATION DATABASES",
+	"REPLICATION GROUPS",
+	"RESOURCE MONITORS",
+	"SESSION POLICIES",
+	"UNIQUE KEYS",
+	// Single-word types
+	"ALERTS",
+	"CHANNELS",
+	"COLUMNS",
+	"CONNECTIONS",
+	"DATABASES",
+	"ENDPOINTS",
+	"FUNCTIONS",
+	"GRANTS",
+	"INTEGRATIONS",
+	"LISTINGS",
+	"LOCKS",
+	"MODELS",
+	"NOTEBOOKS",
+	"OBJECTS",
+	"PARAMETERS",
+	"PIPES",
+	"PROCEDURES",
+	"REGIONS",
+	"ROLES",
+	"SCHEMAS",
+	"SECRETS",
+	"SEQUENCES",
+	"SERVICES",
+	"SHARES",
+	"SNAPSHOTS",
+	"STAGES",
+	"STREAMLITS",
+	"STREAMS",
+	"TABLES",
+	"TAGS",
+	"TASKS",
+	"TRANSACTIONS",
+	"USERS",
+	"VARIABLES",
+	"VIEWS",
+	"WAREHOUSES",
+}
+
+// showTerseEligible contains object types that support the TERSE modifier.
+var showTerseEligible = map[string]bool{
+	"TABLES":          true,
+	"EXTERNAL TABLES": true,
+	"VIEWS":           true,
+	"SCHEMAS":         true,
+	"DATABASES":       true,
+	"STAGES":          true,
+	"STREAMS":         true,
+	"USERS":           true,
+}
+
+// showHistoryEligible contains object types that support the HISTORY modifier.
+var showHistoryEligible = map[string]bool{
+	"PIPES":                  true,
+	"REPLICATION DATABASES":  true,
+}
+
+// showNoClauseValidation contains object types where optional clause validation
+// is skipped because they have non-standard syntax (e.g. SHOW GRANTS ON ...).
+var showNoClauseValidation = map[string]bool{
+	"GRANTS":        true,
+	"FUTURE GRANTS": true,
+	"PARAMETERS":    true,
+}
 
 // grantObjectPrivileges maps canonical Snowflake object types (upper-cased) to
 // their valid privilege names. OWNERSHIP, ALL, and ALL PRIVILEGES are handled
@@ -1591,6 +1705,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// Valid session commands that don't need pattern validation here;
 		// existence checks are handled separately in ValidateTablesExist.
 		if firstTok == "USE" {
+			continue
+		}
+
+		// ── SHOW (intercepted before the node-sql-parser) ───────────────
+		if reIsShow.MatchString(parseText) {
+			markers = append(markers, validateShow(parseText, r)...)
 			continue
 		}
 
@@ -3909,4 +4029,300 @@ func validateAlterSession(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	return markers
+}
+
+// ── validateShow ──────────────────────────────────────────────────────────────
+
+// isShowBoundary reports whether position pos in s is at a word boundary
+// (end of string, whitespace, semicolon, or opening parenthesis).
+// Used by validateShow for consistent keyword-termination checks.
+func isShowBoundary(s string, pos int) bool {
+	if pos >= len(s) {
+		return true
+	}
+	c := s[pos]
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ';' || c == '(' || c == ')'
+}
+
+// showClauseKeywords is the set of SHOW clause keywords that must not be
+// consumed as identifiers when parsing optional scope names in the IN clause.
+var showClauseKeywords = map[string]bool{
+	"LIKE": true, "IN": true, "STARTS": true, "WITH": true,
+	"LIMIT": true, "FROM": true,
+}
+
+// validateShow validates a SHOW <object_type> statement:
+//   - The object type keyword must be one of the recognized Snowflake nouns.
+//   - The TERSE modifier is only valid for TABLES, VIEWS, SCHEMAS, DATABASES,
+//     STAGES.
+//   - The HISTORY modifier is only valid for SHOW PIPES and SHOW REPLICATION DATABASES.
+//   - LIKE requires a string literal argument.
+//   - IN requires a valid scope (ACCOUNT, DATABASE, SCHEMA, TABLE).
+//   - STARTS WITH requires a string literal argument.
+//   - LIMIT requires a positive integer; the optional FROM requires a string
+//     literal.
+//   - Any trailing unrecognized text after the parsed clauses is flagged.
+func validateShow(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+
+	// Remove "SHOW" keyword.
+	rest := strings.TrimSpace(stripped[len("SHOW"):])
+	restUp := strings.ToUpper(rest)
+
+	if restUp == "" {
+		markers = append(markers, diagMarkerSpan(r,
+			"SHOW requires an object type. Use SHOW TABLES, SHOW VIEWS, SHOW SCHEMAS, etc.", 4))
+		return markers
+	}
+
+	// ── TERSE modifier ───────────────────────────────────────────────────
+	isTerse := false
+	if strings.HasPrefix(restUp, "TERSE") && isShowBoundary(restUp, 5) {
+		isTerse = true
+		rest = strings.TrimSpace(rest[5:])
+		restUp = strings.ToUpper(rest)
+	}
+
+	// ── Object type (longest match first) ────────────────────────────────
+	objType := ""
+	for _, ot := range showObjectTypes {
+		if strings.HasPrefix(restUp, ot) && isShowBoundary(restUp, len(ot)) {
+			objType = ot
+			rest = strings.TrimSpace(rest[len(ot):])
+			restUp = strings.ToUpper(rest)
+			break
+		}
+	}
+
+	if objType == "" {
+		if restUp == "" {
+			// Reached when TERSE consumed everything, e.g. "SHOW TERSE".
+			markers = append(markers, diagMarkerSpan(r,
+				"SHOW TERSE requires an object type. Use SHOW TERSE TABLES, SHOW TERSE VIEWS, etc.", 4))
+		} else {
+			words := strings.Fields(restUp)
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("Unknown object type '%s' in SHOW statement.", words[0]), 4))
+		}
+		return markers
+	}
+
+	// ── Validate TERSE eligibility ───────────────────────────────────────
+	if isTerse && !showTerseEligible[objType] {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("TERSE is not valid for SHOW %s. TERSE is supported for TABLES, EXTERNAL TABLES, VIEWS, SCHEMAS, DATABASES, STAGES, STREAMS, USERS.", objType), 4))
+	}
+
+	// ── HISTORY modifier ─────────────────────────────────────────────────
+	if strings.HasPrefix(restUp, "HISTORY") && isShowBoundary(restUp, 7) {
+		if !showHistoryEligible[objType] {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("HISTORY is only valid for SHOW PIPES and SHOW REPLICATION DATABASES, not SHOW %s.", objType), 4))
+		}
+		rest = strings.TrimSpace(rest[7:])
+		restUp = strings.ToUpper(rest)
+	}
+
+	// Skip clause validation for types with non-standard syntax.
+	if showNoClauseValidation[objType] || restUp == "" {
+		return markers
+	}
+
+	// Optional clauses are parsed in a loop so their order does not matter.
+	// Snowflake accepts LIKE, IN, STARTS WITH, and LIMIT in any order.
+	// Each clause is consumed at most once; the loop exits when no clause
+	// keyword matches the current position.
+	seenLike, seenIn, seenStartsWith, seenLimit := false, false, false, false
+	for restUp != "" {
+		// ── LIKE '<pattern>' ─────────────────────────────────────────
+		if !seenLike && strings.HasPrefix(restUp, "LIKE") && isShowBoundary(restUp, 4) {
+			seenLike = true
+			rest = strings.TrimSpace(rest[4:])
+			if rest == "" || rest[0] != '\'' {
+				markers = append(markers, diagMarkerSpan(r,
+					"LIKE requires a string literal. Use LIKE '<pattern>'.", 4))
+				return markers
+			}
+			end := matchStringLiteral(rest)
+			if end == -1 {
+				markers = append(markers, diagMarkerSpan(r,
+					"Unterminated string literal in LIKE clause.", 4))
+				return markers
+			}
+			rest = strings.TrimSpace(rest[end:])
+			restUp = strings.ToUpper(rest)
+			continue
+		}
+
+		// ── IN { ACCOUNT | DATABASE [<db>] | SCHEMA [<schema>] | TABLE [<tbl>] | <ident> }
+		if !seenIn && strings.HasPrefix(restUp, "IN") && isShowBoundary(restUp, 2) {
+			seenIn = true
+			rest = strings.TrimSpace(rest[2:])
+			restUp = strings.ToUpper(rest)
+
+			matched := false
+			for _, scope := range []string{"ACCOUNT", "DATABASE", "SCHEMA", "TABLE"} {
+				if strings.HasPrefix(restUp, scope) && isShowBoundary(restUp, len(scope)) {
+					matched = true
+					rest = strings.TrimSpace(rest[len(scope):])
+					restUp = strings.ToUpper(rest)
+					// Consume optional identifier path for non-ACCOUNT scopes,
+					// but never swallow a clause keyword. Check the first path
+					// component so that e.g. "my_db.LIKE" is not consumed whole.
+					// Quoted identifiers (e.g. "LIKE") are always safe to consume.
+					if scope != "ACCOUNT" && rest != "" {
+						if m := reShowIdentPath.FindString(rest); m != "" {
+							first := strings.SplitN(m, ".", 2)[0]
+							if strings.HasPrefix(first, `"`) || !showClauseKeywords[strings.ToUpper(first)] {
+								rest = strings.TrimSpace(rest[len(m):])
+								restUp = strings.ToUpper(rest)
+							}
+						}
+					}
+					break
+				}
+			}
+
+			// Implicit scope: Snowflake allows omitting the scope keyword
+			// (e.g., SHOW TABLES IN my_schema). Try consuming an identifier
+			// path as an implicit schema scope before reporting an error.
+			if !matched {
+				if rest == "" {
+					markers = append(markers, diagMarkerSpan(r,
+						"IN clause requires a scope. Use IN ACCOUNT, IN DATABASE, IN SCHEMA, or IN TABLE.", 4))
+					return markers
+				}
+				if m := reShowIdentPath.FindString(rest); m != "" {
+					first := strings.SplitN(m, ".", 2)[0]
+					if strings.HasPrefix(first, `"`) || !showClauseKeywords[strings.ToUpper(first)] {
+						rest = strings.TrimSpace(rest[len(m):])
+						restUp = strings.ToUpper(rest)
+						matched = true
+					}
+				}
+				if !matched {
+					words := strings.Fields(restUp)
+					if len(words) > 0 {
+						markers = append(markers, diagMarkerSpan(r,
+							fmt.Sprintf("Invalid scope '%s' in IN clause. Valid scopes are ACCOUNT, DATABASE, SCHEMA, TABLE.", words[0]), 4))
+					} else {
+						markers = append(markers, diagMarkerSpan(r,
+							"IN clause requires a scope. Use IN ACCOUNT, IN DATABASE, IN SCHEMA, or IN TABLE.", 4))
+					}
+					return markers
+				}
+			}
+			continue
+		}
+
+		// ── STARTS WITH '<prefix>' ───────────────────────────────────
+		if !seenStartsWith && strings.HasPrefix(restUp, "STARTS") && isShowBoundary(restUp, 6) {
+			seenStartsWith = true
+			rest = strings.TrimSpace(rest[6:])
+			restUp = strings.ToUpper(rest)
+			if !(strings.HasPrefix(restUp, "WITH") && isShowBoundary(restUp, 4)) {
+				markers = append(markers, diagMarkerSpan(r,
+					"Expected WITH after STARTS. Use STARTS WITH '<prefix>'.", 4))
+				return markers
+			}
+			rest = strings.TrimSpace(rest[4:])
+			if rest == "" || rest[0] != '\'' {
+				markers = append(markers, diagMarkerSpan(r,
+					"STARTS WITH requires a string literal. Use STARTS WITH '<prefix>'.", 4))
+				return markers
+			}
+			end := matchStringLiteral(rest)
+			if end == -1 {
+				markers = append(markers, diagMarkerSpan(r,
+					"Unterminated string literal in STARTS WITH clause.", 4))
+				return markers
+			}
+			rest = strings.TrimSpace(rest[end:])
+			restUp = strings.ToUpper(rest)
+			continue
+		}
+
+		// ── LIMIT <n> [FROM '<name>'] ────────────────────────────────
+		if !seenLimit && strings.HasPrefix(restUp, "LIMIT") && isShowBoundary(restUp, 5) {
+			seenLimit = true
+			rest = strings.TrimSpace(rest[5:])
+
+			// Extract the number token.
+			idx := strings.IndexAny(rest, " \t\n\r;")
+			numStr := rest
+			if idx != -1 {
+				numStr = rest[:idx]
+				rest = strings.TrimSpace(rest[idx:])
+			} else {
+				rest = ""
+			}
+			restUp = strings.ToUpper(rest)
+
+			if numStr == "" {
+				markers = append(markers, diagMarkerSpan(r,
+					"LIMIT requires a positive integer. Use LIMIT <n>.", 4))
+				return markers
+			}
+
+			n, err := strconv.Atoi(numStr)
+			if err != nil || n <= 0 {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("LIMIT requires a positive integer, got '%s'.", numStr), 4))
+				return markers
+			}
+
+			// Optional FROM '<name>'
+			if strings.HasPrefix(restUp, "FROM") && isShowBoundary(restUp, 4) {
+				rest = strings.TrimSpace(rest[4:])
+				if rest == "" || rest[0] != '\'' {
+					markers = append(markers, diagMarkerSpan(r,
+						"FROM in LIMIT clause requires a string literal. Use LIMIT <n> FROM '<name>'.", 4))
+					return markers
+				}
+				end := matchStringLiteral(rest)
+				if end == -1 {
+					markers = append(markers, diagMarkerSpan(r,
+						"Unterminated string literal in LIMIT FROM clause.", 4))
+					return markers
+				}
+				rest = strings.TrimSpace(rest[end:])
+				restUp = strings.ToUpper(rest)
+			}
+			continue
+		}
+
+		// No clause keyword matched — exit the loop.
+		break
+	}
+
+	// ── Trailing unrecognized content ────────────────────────────────────
+	if restUp != "" {
+		if words := strings.Fields(restUp); len(words) > 0 {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("Unexpected token '%s' in SHOW statement.", words[0]), 4))
+		}
+	}
+
+	return markers
+}
+
+// matchStringLiteral returns the position right after the closing single quote
+// of a SQL string literal at the start of s, or -1 if s does not start with a
+// valid string literal.  Embedded '' (escaped quotes) are handled.
+func matchStringLiteral(s string) int {
+	if len(s) == 0 || s[0] != '\'' {
+		return -1
+	}
+	for i := 1; i < len(s); i++ {
+		if s[i] == '\'' {
+			if i+1 < len(s) && s[i+1] == '\'' {
+				i++ // skip escaped quote
+				continue
+			}
+			return i + 1
+		}
+	}
+	return -1
 }

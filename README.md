@@ -850,7 +850,7 @@ go test -v -run "^Test(Normalize|SplitTopLevel|MigrQuote|ParseLocal|CommonColumn
 
 > **Linux note** — the root package imports Wails (CGO + GTK/WebKit). Install the system headers first:
 > ```bash
-> sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+> sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
 > go test -v -run "^Test(Normalize|SplitTopLevel|MigrQuote|ParseLocal|CommonColumn|ReplaceDDL|IsDependency|ExecutionPriority|RemoteKey|BuildMigration|ScanMigration)" .
 > ```
 
