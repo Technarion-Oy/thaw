@@ -16,10 +16,16 @@ jobs:
   gosec:
     name: gosec
     runs-on: self-hosted
+    container: ubuntu:24.04
     permissions:
       contents: read
 
     steps:
+      - name: Install base tools
+        run: |
+          apt-get update
+          apt-get install -y git curl wget
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
@@ -32,11 +38,8 @@ jobs:
       - name: Create frontend dist stub
         run: mkdir -p frontend/dist && touch frontend/dist/.keep
 
-      - name: Cache and install system dependencies
-        uses: awalsh128/cache-apt-pkgs-action@v1.4.3
-        with:
-          packages: libgtk-3-dev libwebkit2gtk-4.1-dev
-          version: 1.0
+      - name: Install system dependencies
+        run: apt-get update && apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
 
       - name: Download dependencies
         run: go mod download

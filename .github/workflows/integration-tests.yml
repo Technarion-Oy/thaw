@@ -9,12 +9,18 @@ jobs:
   test:
     name: Snowflake integration tests
     runs-on: self-hosted
+    container: ubuntu:24.04
     permissions:
       contents: read
       checks: write
       pull-requests: write
 
     steps:
+      - name: Install base tools
+        run: |
+          apt-get update
+          apt-get install -y git curl wget
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
