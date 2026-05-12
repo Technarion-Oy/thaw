@@ -4879,7 +4879,7 @@ func validateCreateTask(parseText string, r StatementRange) []DiagMarker {
 				"FINALIZE must not be combined with SCHEDULE in a CREATE TASK statement.", 4))
 		}
 		// FINALIZE requires the = <name> syntax (FINALIZE = <name>).
-		if !reTaskFinalize.MatchString(preamble) || !reTaskFinalizeN.MatchString(preamble) {
+		if !reTaskFinalizeN.MatchString(preamble) {
 			markers = append(markers, diagMarkerSpan(r,
 				"FINALIZE requires a root task name (e.g. FINALIZE = root_task).", 4))
 		}
@@ -4903,7 +4903,7 @@ func validateCreateTask(parseText string, r StatementRange) []DiagMarker {
 	// 7. Root task without SCHEDULE.
 	if !hasAfter && !hasSchedule {
 		markers = append(markers, diagMarkerSpan(r,
-			"Root task (no AFTER clause) should have a SCHEDULE property.", 4))
+			"Root task (no AFTER or FINALIZE clause) requires a SCHEDULE property.", 4))
 	}
 
 	// 8. WHEN checks.
@@ -4991,6 +4991,11 @@ func validateAlterTask(parseText string, r StatementRange) []DiagMarker {
 	if hasSetFinalize && !reAlterTaskSetFinalizeN.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"SET FINALIZE requires a root task name (e.g. SET FINALIZE = root_task).", 4))
+	}
+
+	// 7. Validate property names for SET (excluding SET FINALIZE which is handled above).
+	if hasSet && !hasSetFinalize {
+		validateProperties(clean, taskProps, r, &markers)
 	}
 
 	return markers

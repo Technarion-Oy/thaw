@@ -3892,6 +3892,7 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 		"ALTER TASK my_task UNSET WAREHOUSE",
 		"ALTER TASK my_task UNSET COMMENT",
 		"ALTER TASK my_task REMOVE AFTER task1",
+		"ALTER TASK my_task REMOVE AFTER task1, task2",
 		"ALTER TASK my_task ADD AFTER task1",
 		"ALTER TASK my_task ADD AFTER task1, task2",
 		"ALTER TASK my_task MODIFY AS SELECT 1 FROM t",
@@ -3947,7 +3948,7 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 		{
 			"root task missing SCHEDULE",
 			"CREATE TASK my_task WAREHOUSE = wh AS SELECT 1",
-			[]string{"Root task (no AFTER clause) should have a SCHEDULE"},
+			[]string{"Root task (no AFTER or FINALIZE clause) requires a SCHEDULE"},
 		},
 		// ── CREATE TASK — bare AFTER without names ──────────────────────
 		{
@@ -4020,6 +4021,12 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 			"ALTER TASK REMOVE AFTER without task name",
 			"ALTER TASK my_task REMOVE AFTER",
 			[]string{"REMOVE AFTER requires at least one predecessor task name"},
+		},
+		// ── ALTER TASK — SET with unknown property ───────────────────────
+		{
+			"ALTER TASK SET with unknown property",
+			"ALTER TASK my_task SET RETRY_LIMIT = 5",
+			[]string{"Unexpected property 'RETRY_LIMIT'"},
 		},
 	}
 
