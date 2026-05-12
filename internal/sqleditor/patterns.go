@@ -610,14 +610,14 @@ var (
 		`FILE_FORMAT`, `COPY_OPTIONS`, `COMMENT`, `DIRECTORY`, `SUBPATH`,
 	}, "|")
 
+	// ── Shared ───────────────────────────────────────────────────────────────
+	reIdentPathAnchored = regexp.MustCompile(`^` + _identPath)
+
 	// ── SHOW ─────────────────────────────────────────────────────────────────
-	reIsShow        = regexp.MustCompile(`(?i)^\s*SHOW\b`)
-	reShowIdentPath = regexp.MustCompile(`^` + _identPath)
+	reIsShow = regexp.MustCompile(`(?i)^\s*SHOW\b`)
 
 	// ── DESCRIBE / DESC ──────────────────────────────────────────────────────
-	reIsDescribe      = regexp.MustCompile(`(?i)^\s*(?:DESCRIBE|DESC)\b`)
-	reDescIdentPath   = regexp.MustCompile(`^` + _identPath)
-	reDescHasParens   = regexp.MustCompile(`\(`)
+	reIsDescribe = regexp.MustCompile(`(?i)^\s*(?:DESCRIBE|DESC)\b`)
 
 	// ── Parseable keywords ────────────────────────────────────────────────────
 	parseableKWs = map[string]bool{
@@ -747,39 +747,64 @@ var showNoClauseValidation = map[string]bool{
 // attempted first.  Within each group, entries are alphabetical.
 // Reference: https://docs.snowflake.com/en/sql-reference/sql/desc
 var describeObjectTypes = []string{
+	// Four-word types
+	"OPENFLOW DATA PLANE INTEGRATION",
 	// Three-word types
 	"CORTEX SEARCH SERVICE",
+	"ONLINE FEATURE TABLE",
 	"ROW ACCESS POLICY",
+	"STORAGE LIFECYCLE POLICY",
 	// Two-word types
 	"AGGREGATION POLICY",
 	"APPLICATION PACKAGE",
 	"AUTHENTICATION POLICY",
+	"BACKUP POLICY",
+	"BACKUP SET",
 	"CATALOG INTEGRATION",
 	"COMPUTE POOL",
+	"DBT PROJECT",
+	"DCM PROJECT",
 	"DYNAMIC TABLE",
 	"EVENT TABLE",
+	"EXTERNAL AGENT",
 	"EXTERNAL TABLE",
 	"EXTERNAL VOLUME",
 	"FAILOVER GROUP",
+	"FEATURE POLICY",
 	"FILE FORMAT",
 	"GIT REPOSITORY",
 	"ICEBERG TABLE",
+	"JOIN POLICY",
+	"MAINTENANCE POLICY",
 	"MASKING POLICY",
+	"MATERIALIZED VIEW",
+	"MCP SERVER",
+	"MODEL MONITOR",
 	"NETWORK POLICY",
 	"NETWORK RULE",
 	"NOTIFICATION INTEGRATION",
+	"ORGANIZATION PROFILE",
 	"PACKAGES POLICY",
 	"PASSWORD POLICY",
+	"POSTGRES INSTANCE",
+	"PRIVACY POLICY",
 	"PROJECTION POLICY",
 	"REPLICATION GROUP",
 	"RESOURCE MONITOR",
+	"SEMANTIC VIEW",
 	"SESSION POLICY",
+	"SNAPSHOT POLICY",
+	"SNAPSHOT SET",
 	// Single-word types
+	"AGENT",
 	"ALERT",
 	"APPLICATION",
+	"CONFIGURATION",
 	"DATABASE",
 	"FUNCTION",
+	"GATEWAY",
 	"INTEGRATION",
+	"NOTEBOOK",
 	"PIPE",
 	"PROCEDURE",
 	"RESULT",
@@ -789,12 +814,16 @@ var describeObjectTypes = []string{
 	"SEQUENCE",
 	"SERVICE",
 	"SHARE",
+	"SNAPSHOT",
+	"SPECIFICATION",
 	"STAGE",
 	"STREAM",
+	"STREAMLIT",
 	"TABLE",
 	"TAG",
 	"TASK",
 	"TRANSACTION",
+	"TYPE",
 	"USER",
 	"VIEW",
 	"WAREHOUSE",
@@ -803,18 +832,21 @@ var describeObjectTypes = []string{
 // describeAccountLevel contains account-level object types that should not be
 // qualified with a database or schema prefix (db.schema.name).
 var describeAccountLevel = map[string]bool{
-	"WAREHOUSE":  true,
-	"USER":       true,
-	"ROLE":       true,
-	"INTEGRATION": true,
-	"DATABASE":   true,
-	"SHARE":      true,
-	"RESOURCE MONITOR":         true,
-	"NOTIFICATION INTEGRATION": true,
-	"CATALOG INTEGRATION":      true,
-	"COMPUTE POOL":             true,
-	"EXTERNAL VOLUME":          true,
-	"NETWORK POLICY":           true,
+	"WAREHOUSE":                        true,
+	"USER":                             true,
+	"ROLE":                             true,
+	"INTEGRATION":                      true,
+	"DATABASE":                         true,
+	"SHARE":                            true,
+	"RESOURCE MONITOR":                 true,
+	"NOTIFICATION INTEGRATION":         true,
+	"CATALOG INTEGRATION":              true,
+	"COMPUTE POOL":                     true,
+	"EXTERNAL VOLUME":                  true,
+	"NETWORK POLICY":                   true,
+	"ORGANIZATION PROFILE":             true,
+	"OPENFLOW DATA PLANE INTEGRATION":  true,
+	"POSTGRES INSTANCE":                true,
 }
 
 // describeNeedsSignature contains object types that require a parenthesised
@@ -4127,10 +4159,10 @@ func validateAlterSession(parseText string, r StatementRange) []DiagMarker {
 
 // ── validateShow ──────────────────────────────────────────────────────────────
 
-// isShowBoundary reports whether position pos in s is at a word boundary
+// isKeywordBoundary reports whether position pos in s is at a word boundary
 // (end of string, whitespace, semicolon, or opening parenthesis).
-// Used by validateShow for consistent keyword-termination checks.
-func isShowBoundary(s string, pos int) bool {
+// Used by validateShow and validateDescribe for keyword-termination checks.
+func isKeywordBoundary(s string, pos int) bool {
 	if pos >= len(s) {
 		return true
 	}
@@ -4173,7 +4205,7 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 
 	// ── TERSE modifier ───────────────────────────────────────────────────
 	isTerse := false
-	if strings.HasPrefix(restUp, "TERSE") && isShowBoundary(restUp, 5) {
+	if strings.HasPrefix(restUp, "TERSE") && isKeywordBoundary(restUp, 5) {
 		isTerse = true
 		rest = strings.TrimSpace(rest[5:])
 		restUp = strings.ToUpper(rest)
@@ -4182,7 +4214,7 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 	// ── Object type (longest match first) ────────────────────────────────
 	objType := ""
 	for _, ot := range showObjectTypes {
-		if strings.HasPrefix(restUp, ot) && isShowBoundary(restUp, len(ot)) {
+		if strings.HasPrefix(restUp, ot) && isKeywordBoundary(restUp, len(ot)) {
 			objType = ot
 			rest = strings.TrimSpace(rest[len(ot):])
 			restUp = strings.ToUpper(rest)
@@ -4210,7 +4242,7 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// ── HISTORY modifier ─────────────────────────────────────────────────
-	if strings.HasPrefix(restUp, "HISTORY") && isShowBoundary(restUp, 7) {
+	if strings.HasPrefix(restUp, "HISTORY") && isKeywordBoundary(restUp, 7) {
 		if !showHistoryEligible[objType] {
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("HISTORY is only valid for SHOW PIPES and SHOW REPLICATION DATABASES, not SHOW %s.", objType), 4))
@@ -4231,7 +4263,7 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 	seenLike, seenIn, seenStartsWith, seenLimit := false, false, false, false
 	for restUp != "" {
 		// ── LIKE '<pattern>' ─────────────────────────────────────────
-		if !seenLike && strings.HasPrefix(restUp, "LIKE") && isShowBoundary(restUp, 4) {
+		if !seenLike && strings.HasPrefix(restUp, "LIKE") && isKeywordBoundary(restUp, 4) {
 			seenLike = true
 			rest = strings.TrimSpace(rest[4:])
 			if rest == "" || rest[0] != '\'' {
@@ -4251,14 +4283,14 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 		}
 
 		// ── IN { ACCOUNT | DATABASE [<db>] | SCHEMA [<schema>] | TABLE [<tbl>] | <ident> }
-		if !seenIn && strings.HasPrefix(restUp, "IN") && isShowBoundary(restUp, 2) {
+		if !seenIn && strings.HasPrefix(restUp, "IN") && isKeywordBoundary(restUp, 2) {
 			seenIn = true
 			rest = strings.TrimSpace(rest[2:])
 			restUp = strings.ToUpper(rest)
 
 			matched := false
 			for _, scope := range []string{"ACCOUNT", "DATABASE", "SCHEMA", "TABLE"} {
-				if strings.HasPrefix(restUp, scope) && isShowBoundary(restUp, len(scope)) {
+				if strings.HasPrefix(restUp, scope) && isKeywordBoundary(restUp, len(scope)) {
 					matched = true
 					rest = strings.TrimSpace(rest[len(scope):])
 					restUp = strings.ToUpper(rest)
@@ -4267,7 +4299,7 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 					// component so that e.g. "my_db.LIKE" is not consumed whole.
 					// Quoted identifiers (e.g. "LIKE") are always safe to consume.
 					if scope != "ACCOUNT" && rest != "" {
-						if m := reShowIdentPath.FindString(rest); m != "" {
+						if m := reIdentPathAnchored.FindString(rest); m != "" {
 							first := strings.SplitN(m, ".", 2)[0]
 							if strings.HasPrefix(first, `"`) || !showClauseKeywords[strings.ToUpper(first)] {
 								rest = strings.TrimSpace(rest[len(m):])
@@ -4288,7 +4320,7 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 						"IN clause requires a scope. Use IN ACCOUNT, IN DATABASE, IN SCHEMA, or IN TABLE.", 4))
 					return markers
 				}
-				if m := reShowIdentPath.FindString(rest); m != "" {
+				if m := reIdentPathAnchored.FindString(rest); m != "" {
 					first := strings.SplitN(m, ".", 2)[0]
 					if strings.HasPrefix(first, `"`) || !showClauseKeywords[strings.ToUpper(first)] {
 						rest = strings.TrimSpace(rest[len(m):])
@@ -4312,11 +4344,11 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 		}
 
 		// ── STARTS WITH '<prefix>' ───────────────────────────────────
-		if !seenStartsWith && strings.HasPrefix(restUp, "STARTS") && isShowBoundary(restUp, 6) {
+		if !seenStartsWith && strings.HasPrefix(restUp, "STARTS") && isKeywordBoundary(restUp, 6) {
 			seenStartsWith = true
 			rest = strings.TrimSpace(rest[6:])
 			restUp = strings.ToUpper(rest)
-			if !(strings.HasPrefix(restUp, "WITH") && isShowBoundary(restUp, 4)) {
+			if !(strings.HasPrefix(restUp, "WITH") && isKeywordBoundary(restUp, 4)) {
 				markers = append(markers, diagMarkerSpan(r,
 					"Expected WITH after STARTS. Use STARTS WITH '<prefix>'.", 4))
 				return markers
@@ -4339,7 +4371,7 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 		}
 
 		// ── LIMIT <n> [FROM '<name>'] ────────────────────────────────
-		if !seenLimit && strings.HasPrefix(restUp, "LIMIT") && isShowBoundary(restUp, 5) {
+		if !seenLimit && strings.HasPrefix(restUp, "LIMIT") && isKeywordBoundary(restUp, 5) {
 			seenLimit = true
 			rest = strings.TrimSpace(rest[5:])
 
@@ -4368,7 +4400,7 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 			}
 
 			// Optional FROM '<name>'
-			if strings.HasPrefix(restUp, "FROM") && isShowBoundary(restUp, 4) {
+			if strings.HasPrefix(restUp, "FROM") && isKeywordBoundary(restUp, 4) {
 				rest = strings.TrimSpace(rest[4:])
 				if rest == "" || rest[0] != '\'' {
 					markers = append(markers, diagMarkerSpan(r,
@@ -4408,6 +4440,7 @@ func validateShow(parseText string, r StatementRange) []DiagMarker {
 //   - FUNCTION and PROCEDURE require a parenthesised parameter-type signature.
 //   - Account-level objects (WAREHOUSE, USER, ROLE, etc.) should not have a
 //     database or schema prefix.
+//   - Any trailing unrecognized text after the object name is flagged.
 func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
@@ -4432,7 +4465,7 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 	// ── Object type (longest match first) ────────────────────────────────
 	objType := ""
 	for _, ot := range describeObjectTypes {
-		if strings.HasPrefix(restUp, ot) && isShowBoundary(restUp, len(ot)) {
+		if strings.HasPrefix(restUp, ot) && isKeywordBoundary(restUp, len(ot)) {
 			objType = ot
 			rest = strings.TrimSpace(rest[len(ot):])
 			restUp = strings.ToUpper(rest)
@@ -4466,7 +4499,7 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 
 	// ── FUNCTION / PROCEDURE: require parenthesised signature ────────────
 	if describeNeedsSignature[objType] {
-		if !reDescHasParens.MatchString(rest) {
+		if !strings.Contains(rest, "(") {
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("DESCRIBE %s requires a parameter signature. Use DESCRIBE %s <name>(<arg_types>).", objType, objType), 4))
 			return markers
@@ -4475,7 +4508,7 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// ── Consume the identifier path ──────────────────────────────────────
-	m := reDescIdentPath.FindString(rest)
+	m := reIdentPathAnchored.FindString(rest)
 	if m == "" {
 		markers = append(markers, diagMarkerSpan(r,
 			fmt.Sprintf("Expected an object name after DESCRIBE %s.", objType), 4))
@@ -4488,6 +4521,18 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 		if len(parts) > 1 {
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("%s is an account-level object and should not be qualified with a database or schema prefix.", objType), 4))
+		}
+	}
+
+	// ── Trailing unrecognized content ────────────────────────────────────
+	// Skip trailing check when remainder starts with '"' — this indicates
+	// an escaped double-quote within a quoted identifier (e.g. "complex""name")
+	// that _ident cannot fully consume.
+	trailing := strings.TrimSpace(rest[len(m):])
+	if trailing != "" && !strings.HasPrefix(trailing, "\"") {
+		if words := strings.Fields(strings.ToUpper(trailing)); len(words) > 0 {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("Unexpected token '%s' after object name in DESCRIBE statement.", words[0]), 4))
 		}
 	}
 

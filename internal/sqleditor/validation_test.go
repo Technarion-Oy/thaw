@@ -3390,6 +3390,20 @@ func TestMatchStringLiteral(t *testing.T) {
 
 // ── DESCRIBE / DESC Tests ───────────────────────────────────────────────────
 
+// TestDescribeObjectTypes_OrderingInvariant verifies that describeObjectTypes is sorted
+// by word count descending so the longest match is always attempted first.
+func TestDescribeObjectTypes_OrderingInvariant(t *testing.T) {
+	prevWords := 100 // start high
+	for i, ot := range describeObjectTypes {
+		n := len(strings.Fields(ot))
+		if n > prevWords {
+			t.Errorf("describeObjectTypes[%d] = %q has %d words but follows an entry with %d words; entries must be sorted by word count descending",
+				i, ot, n, prevWords)
+		}
+		prevWords = n
+	}
+}
+
 func TestValidateSnowflakePatterns_Describe(t *testing.T) {
 	validCases := []string{
 		// ── Basic single-word object types ────────────────────────────────
@@ -3477,6 +3491,19 @@ func TestValidateSnowflakePatterns_Describe(t *testing.T) {
 		"DESCRIBE ICEBERG TABLE my_it",
 		"DESCRIBE NETWORK RULE my_nr",
 		"DESCRIBE CORTEX SEARCH SERVICE my_css",
+		"DESCRIBE AUTHENTICATION POLICY my_auth_pol",
+		// ── Newly added object types ─────────────────────────────────────
+		"DESCRIBE MATERIALIZED VIEW my_mv",
+		"DESCRIBE STREAMLIT my_st",
+		"DESCRIBE NOTEBOOK my_nb",
+		"DESCRIBE SEMANTIC VIEW my_sv",
+		"DESCRIBE SNAPSHOT my_snap",
+		"DESCRIBE MCP SERVER my_mcp",
+		"DESCRIBE ONLINE FEATURE TABLE my_oft",
+		"DESCRIBE OPENFLOW DATA PLANE INTEGRATION my_odpi",
+		"DESCRIBE STORAGE LIFECYCLE POLICY my_slp",
+		"DESCRIBE POSTGRES INSTANCE my_pi",
+		"DESCRIBE ORGANIZATION PROFILE my_op",
 	}
 
 	for _, sql := range validCases {
@@ -3579,6 +3606,23 @@ func TestValidateSnowflakePatterns_Describe(t *testing.T) {
 			"DESCRIBE DATABASE with prefix",
 			"DESCRIBE DATABASE other_db.my_db",
 			[]string{"DATABASE is an account-level object and should not be qualified"},
+		},
+		// ── Multi-word account-level object with db/schema prefix ─────────
+		{
+			"DESCRIBE RESOURCE MONITOR with schema prefix",
+			"DESCRIBE RESOURCE MONITOR db.my_rm",
+			[]string{"RESOURCE MONITOR is an account-level object and should not be qualified"},
+		},
+		// ── Trailing unrecognized content ────────────────────────────────
+		{
+			"DESCRIBE TABLE with trailing garbage",
+			"DESCRIBE TABLE my_table SOME_GARBAGE",
+			[]string{"Unexpected token 'SOME_GARBAGE' after object name"},
+		},
+		{
+			"DESCRIBE VIEW with extra words",
+			"DESCRIBE VIEW my_view EXTRA STUFF",
+			[]string{"Unexpected token 'EXTRA' after object name"},
 		},
 	}
 
