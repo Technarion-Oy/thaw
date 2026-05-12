@@ -3387,3 +3387,275 @@ func TestMatchStringLiteral(t *testing.T) {
 		}
 	}
 }
+
+// ── DESCRIBE / DESC Tests ───────────────────────────────────────────────────
+
+// TestDescribeObjectTypes_OrderingInvariant verifies that describeObjectTypes is sorted
+// by word count descending so the longest match is always attempted first.
+func TestDescribeObjectTypes_OrderingInvariant(t *testing.T) {
+	prevWords := 100 // start high
+	for i, ot := range describeObjectTypes {
+		n := len(strings.Fields(ot))
+		if n > prevWords {
+			t.Errorf("describeObjectTypes[%d] = %q has %d words but follows an entry with %d words; entries must be sorted by word count descending",
+				i, ot, n, prevWords)
+		}
+		prevWords = n
+	}
+}
+
+func TestValidateSnowflakePatterns_Describe(t *testing.T) {
+	validCases := []string{
+		// ── Basic single-word object types ────────────────────────────────
+		"DESCRIBE TABLE my_table",
+		"DESCRIBE VIEW my_view",
+		"DESCRIBE STAGE my_stage",
+		"DESCRIBE STREAM my_stream",
+		"DESCRIBE TASK my_task",
+		"DESCRIBE PIPE my_pipe",
+		"DESCRIBE SEQUENCE my_seq",
+		"DESCRIBE DATABASE my_db",
+		"DESCRIBE SCHEMA my_schema",
+		"DESCRIBE WAREHOUSE my_wh",
+		"DESCRIBE USER my_user",
+		"DESCRIBE ROLE my_role",
+		"DESCRIBE INTEGRATION my_int",
+		"DESCRIBE SHARE my_share",
+		"DESCRIBE ALERT my_alert",
+		"DESCRIBE TAG my_tag",
+		"DESCRIBE SECRET my_secret",
+		"DESCRIBE SERVICE my_svc",
+		// ── Two-word object types ────────────────────────────────────────
+		"DESCRIBE NETWORK POLICY my_np",
+		"DESCRIBE MASKING POLICY my_mp",
+		"DESCRIBE ROW ACCESS POLICY my_rap",
+		"DESCRIBE SESSION POLICY my_sp",
+		"DESCRIBE PASSWORD POLICY my_pp",
+		"DESCRIBE AGGREGATION POLICY my_ap",
+		"DESCRIBE PROJECTION POLICY my_pp2",
+		"DESCRIBE PACKAGES POLICY my_pkg_pol",
+		"DESCRIBE EXTERNAL TABLE my_ext_tbl",
+		"DESCRIBE DYNAMIC TABLE my_dyn_tbl",
+		"DESCRIBE EVENT TABLE my_evt_tbl",
+		"DESCRIBE FILE FORMAT my_ff",
+		"DESCRIBE RESOURCE MONITOR my_rm",
+		"DESCRIBE REPLICATION GROUP my_rg",
+		"DESCRIBE FAILOVER GROUP my_fg",
+		// ── DESC alias ───────────────────────────────────────────────────
+		"DESC TABLE my_table",
+		"DESC VIEW my_view",
+		"DESC STAGE my_stage",
+		"DESC FUNCTION my_func(NUMBER, VARCHAR)",
+		"DESC PROCEDURE my_proc(NUMBER)",
+		"DESC NETWORK POLICY my_np",
+		"DESC MASKING POLICY my_mp",
+		"DESC ROW ACCESS POLICY my_rap",
+		// ── Three-part names ─────────────────────────────────────────────
+		"DESCRIBE TABLE my_db.my_schema.my_table",
+		"DESCRIBE VIEW db.sch.vw",
+		"DESC TABLE db.sch.tbl",
+		// ── Two-part names ───────────────────────────────────────────────
+		"DESCRIBE TABLE my_schema.my_table",
+		"DESC VIEW sch.vw",
+		// ── Quoted identifiers ───────────────────────────────────────────
+		`DESCRIBE TABLE "my-table"`,
+		`DESCRIBE TABLE "MY DB"."MY SCHEMA"."MY TABLE"`,
+		`DESC VIEW "complex""name"`,
+		// ── FUNCTION / PROCEDURE with signatures ─────────────────────────
+		"DESCRIBE FUNCTION my_func(NUMBER, VARCHAR)",
+		"DESCRIBE FUNCTION my_func()",
+		"DESCRIBE FUNCTION db.schema.my_func(INT)",
+		"DESCRIBE PROCEDURE my_proc(VARCHAR, NUMBER, BOOLEAN)",
+		"DESCRIBE PROCEDURE my_proc()",
+		"DESC FUNCTION multiply(NUMBER, NUMBER)",
+		"DESC PROCEDURE my_pi()",
+		// ── RESULT / TRANSACTION (special: take string-literal IDs) ─────
+		"DESCRIBE RESULT '01a4567b-0000-0000-0000-000000000000'",
+		"DESC RESULT 'last_query_id'",
+		"DESCRIBE TRANSACTION 123456789",
+		// ── Case insensitivity ───────────────────────────────────────────
+		"describe table my_table",
+		"Describe View my_view",
+		"desc table my_table",
+		// ── With comments ────────────────────────────────────────────────
+		"DESCRIBE TABLE my_table -- trailing comment",
+		"DESCRIBE /* comment */ TABLE my_table",
+		// ── Additional object types ──────────────────────────────────────
+		"DESCRIBE APPLICATION my_app",
+		"DESCRIBE APPLICATION PACKAGE my_pkg",
+		"DESCRIBE CATALOG INTEGRATION my_ci",
+		"DESCRIBE COMPUTE POOL my_cp",
+		"DESCRIBE EXTERNAL VOLUME my_ev",
+		"DESCRIBE NOTIFICATION INTEGRATION my_ni",
+		"DESCRIBE GIT REPOSITORY my_repo",
+		"DESCRIBE ICEBERG TABLE my_it",
+		"DESCRIBE NETWORK RULE my_nr",
+		"DESCRIBE CORTEX SEARCH SERVICE my_css",
+		"DESCRIBE AUTHENTICATION POLICY my_auth_pol",
+		// ── Newly added object types ─────────────────────────────────────
+		"DESCRIBE MATERIALIZED VIEW my_mv",
+		"DESCRIBE STREAMLIT my_st",
+		"DESCRIBE NOTEBOOK my_nb",
+		"DESCRIBE SEMANTIC VIEW my_sv",
+		"DESCRIBE SNAPSHOT my_snap",
+		"DESCRIBE MCP SERVER my_mcp",
+		"DESCRIBE ONLINE FEATURE TABLE my_oft",
+		"DESCRIBE OPENFLOW DATA PLANE INTEGRATION my_odpi",
+		"DESCRIBE STORAGE LIFECYCLE POLICY my_slp",
+		"DESCRIBE POSTGRES INSTANCE my_pi",
+		"DESCRIBE ORGANIZATION PROFILE my_op",
+		"DESCRIBE LISTING my_listing",
+		"DESCRIBE SPECIFICATION my_spec",
+		// ── Quoted identifiers with embedded dots (no false positive) ────
+		`DESCRIBE WAREHOUSE "my.warehouse"`,
+	}
+
+	for _, sql := range validCases {
+		t.Run(sql[:min(len(sql), 60)], func(t *testing.T) {
+			ranges := GetStatementRanges(sql)
+			markers := ValidateSnowflakePatterns(sql, ranges)
+			if warns := getWarnings(markers); len(warns) > 0 {
+				t.Errorf("Expected 0 warnings for %q, got %d: %v", sql, len(warns), warns)
+			}
+		})
+	}
+
+	invalidCases := []struct {
+		name     string
+		sql      string
+		wantMsgs []string
+	}{
+		// ── Bare DESCRIBE / DESC ─────────────────────────────────────────
+		{
+			"bare DESCRIBE without anything",
+			"DESCRIBE",
+			[]string{"DESCRIBE requires an object type and name"},
+		},
+		{
+			"bare DESC without anything",
+			"DESC",
+			[]string{"DESCRIBE requires an object type and name"},
+		},
+		// ── Unknown object type ──────────────────────────────────────────
+		{
+			"unknown object type TABEL (typo)",
+			"DESCRIBE TABEL my_table",
+			[]string{"Unknown object type 'TABEL'"},
+		},
+		{
+			"unknown object type INDEX",
+			"DESC INDEX my_idx",
+			[]string{"Unknown object type 'INDEX'"},
+		},
+		// ── Missing object name ──────────────────────────────────────────
+		{
+			"DESCRIBE TABLE with no name",
+			"DESCRIBE TABLE",
+			[]string{"DESCRIBE TABLE requires an object name"},
+		},
+		{
+			"DESC VIEW with no name",
+			"DESC VIEW",
+			[]string{"DESCRIBE VIEW requires an object name"},
+		},
+		{
+			"DESCRIBE STAGE with no name",
+			"DESCRIBE STAGE",
+			[]string{"DESCRIBE STAGE requires an object name"},
+		},
+		{
+			"DESCRIBE NETWORK POLICY with no name",
+			"DESCRIBE NETWORK POLICY",
+			[]string{"DESCRIBE NETWORK POLICY requires an object name"},
+		},
+		// ── FUNCTION without signature ───────────────────────────────────
+		{
+			"DESCRIBE FUNCTION without parens",
+			"DESCRIBE FUNCTION my_func",
+			[]string{"DESCRIBE FUNCTION requires a parameter signature"},
+		},
+		{
+			"DESC FUNCTION without parens",
+			"DESC FUNCTION my_func",
+			[]string{"DESCRIBE FUNCTION requires a parameter signature"},
+		},
+		// ── PROCEDURE without signature ──────────────────────────────────
+		{
+			"DESCRIBE PROCEDURE without parens",
+			"DESCRIBE PROCEDURE my_proc",
+			[]string{"DESCRIBE PROCEDURE requires a parameter signature"},
+		},
+		// ── Account-level object with db/schema prefix ───────────────────
+		{
+			"DESCRIBE WAREHOUSE with schema prefix",
+			"DESCRIBE WAREHOUSE my_db.my_wh",
+			[]string{"WAREHOUSE is an account-level object and should not be qualified"},
+		},
+		{
+			"DESC USER with db prefix",
+			"DESC USER my_db.my_user",
+			[]string{"USER is an account-level object and should not be qualified"},
+		},
+		{
+			"DESCRIBE ROLE with three-part name",
+			"DESCRIBE ROLE db.schema.my_role",
+			[]string{"ROLE is an account-level object and should not be qualified"},
+		},
+		{
+			"DESCRIBE INTEGRATION with prefix",
+			"DESCRIBE INTEGRATION db.my_int",
+			[]string{"INTEGRATION is an account-level object and should not be qualified"},
+		},
+		{
+			"DESCRIBE DATABASE with prefix",
+			"DESCRIBE DATABASE other_db.my_db",
+			[]string{"DATABASE is an account-level object and should not be qualified"},
+		},
+		// ── Multi-word account-level object with db/schema prefix ─────────
+		{
+			"DESCRIBE RESOURCE MONITOR with schema prefix",
+			"DESCRIBE RESOURCE MONITOR db.my_rm",
+			[]string{"RESOURCE MONITOR is an account-level object and should not be qualified"},
+		},
+		{
+			"DESCRIBE SPECIFICATION with schema prefix",
+			"DESCRIBE SPECIFICATION db.my_spec",
+			[]string{"SPECIFICATION is an account-level object and should not be qualified"},
+		},
+		// ── Trailing unrecognized content ────────────────────────────────
+		{
+			"DESCRIBE TABLE with trailing garbage",
+			"DESCRIBE TABLE my_table SOME_GARBAGE",
+			[]string{"Unexpected token 'SOME_GARBAGE' after object name"},
+		},
+		{
+			"DESCRIBE VIEW with extra words",
+			"DESCRIBE VIEW my_view EXTRA STUFF",
+			[]string{"Unexpected token 'EXTRA' after object name"},
+		},
+	}
+
+	for _, tc := range invalidCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ranges := GetStatementRanges(tc.sql)
+			markers := ValidateSnowflakePatterns(tc.sql, ranges)
+			warns := getWarnings(markers)
+			if len(warns) == 0 {
+				t.Errorf("Expected warnings for %q, got 0", tc.sql)
+				return
+			}
+			for _, wantMsg := range tc.wantMsgs {
+				found := false
+				for _, w := range warns {
+					if strings.Contains(w.Message, wantMsg) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected warning containing %q for %q, got: %v", wantMsg, tc.sql, warns)
+				}
+			}
+		})
+	}
+}
