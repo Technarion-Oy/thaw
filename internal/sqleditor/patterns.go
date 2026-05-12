@@ -4815,8 +4815,6 @@ func validateDropTag(parseText string, r StatementRange) []DiagMarker {
 	return markers
 }
 
-// countIdentParts counts the number of dot-separated identifier segments in a
-// matched identifier path, correctly skipping dots inside quoted identifiers.
 // ── validateCreateTask ────────────────────────────────────────────────────
 
 // validateCreateTask checks structural requirements for CREATE TASK statements:
@@ -4829,7 +4827,6 @@ func validateDropTag(parseText string, r StatementRange) []DiagMarker {
 //   - FINALIZE must not be combined with AFTER or SCHEDULE.
 //   - FINALIZE requires a root task name (FINALIZE = <name>).
 //   - WHEN requires a boolean expression.
-//   - WHEN is only valid for child tasks (tasks with AFTER).
 func validateCreateTask(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
@@ -4916,11 +4913,6 @@ func validateCreateTask(parseText string, r StatementRange) []DiagMarker {
 			markers = append(markers, diagMarkerSpan(r,
 				"WHEN requires a boolean expression.", 4))
 		}
-		// WHEN is only valid for child tasks (tasks with AFTER).
-		if !hasAfter {
-			markers = append(markers, diagMarkerSpan(r,
-				"WHEN is only valid for child tasks (tasks with AFTER). Root tasks cannot have a WHEN condition.", 4))
-		}
 	}
 
 	// 9. Validate properties.
@@ -5004,6 +4996,8 @@ func validateAlterTask(parseText string, r StatementRange) []DiagMarker {
 	return markers
 }
 
+// countIdentParts counts the number of dot-separated identifier segments in a
+// matched identifier path, correctly skipping dots inside quoted identifiers.
 // For example: "my.db".schema.tbl → 3, "my.warehouse" → 1.
 func countIdentParts(m string) int {
 	parts := 1

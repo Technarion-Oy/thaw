@@ -3820,7 +3820,7 @@ func TestValidateSnowflakePatterns_Tag(t *testing.T) {
 			[]string{"CASCADE / RESTRICT are not valid for DROP TAG"},
 		},
 		{
-			"Drop TAG IF EXISTS with CASCADE",
+			"DROP TAG IF EXISTS with CASCADE",
 			"DROP TAG IF EXISTS my_tag CASCADE",
 			[]string{"CASCADE / RESTRICT are not valid for DROP TAG"},
 		},
@@ -3872,6 +3872,9 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 		// ── CREATE TASK — child task with WHEN condition ─────────────────
 		"CREATE TASK child_task WAREHOUSE = wh AFTER parent WHEN SYSTEM$GET_PREDECESSOR_RETURN_VALUE('parent') = 'done' AS SELECT 1",
 		"CREATE TASK child_task WAREHOUSE = wh AFTER parent WHEN cond1 AND cond2 AS SELECT 1",
+		// ── CREATE TASK — root task with WHEN (valid per Snowflake docs) ─
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' WHEN SYSTEM$STREAM_HAS_DATA('my_stream') AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '5 MINUTE' WHEN SYSTEM$STREAM_HAS_DATA('s1') AND SYSTEM$STREAM_HAS_DATA('s2') AS SELECT 1",
 		// ── CREATE TASK — finalizer tasks ────────────────────────────────
 		"CREATE TASK finalizer_task FINALIZE = root_task AS SELECT 1",
 		"CREATE TASK finalizer_task WAREHOUSE = wh FINALIZE = root_task AS SELECT 1",
@@ -3969,12 +3972,6 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 			"bare WHEN without expression",
 			"CREATE TASK child WAREHOUSE = wh AFTER parent WHEN AS SELECT 1",
 			[]string{"WHEN requires a boolean expression"},
-		},
-		// ── CREATE TASK — WHEN without AFTER (root task with WHEN) ──────
-		{
-			"WHEN without AFTER is invalid for root task",
-			"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' WHEN SYSTEM$STREAM_HAS_DATA('s') AS SELECT 1",
-			[]string{"WHEN is only valid for child tasks"},
 		},
 		// ── CREATE TASK — FINALIZE without root task name ───────────────
 		{
