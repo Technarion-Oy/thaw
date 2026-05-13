@@ -225,6 +225,26 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"ALTER PROJECTION POLICY my_proj_policy RENAME TO new_proj_policy",
 		"DROP PROJECTION POLICY my_proj_policy",
 		"DROP PROJECTION POLICY IF EXISTS my_proj_policy",
+		// Packages Policies
+		"CREATE PACKAGES POLICY my_pkg_policy LANGUAGE PYTHON",
+		"CREATE OR REPLACE PACKAGES POLICY my_pkg_policy LANGUAGE PYTHON",
+		"CREATE PACKAGES POLICY IF NOT EXISTS my_pkg_policy LANGUAGE PYTHON",
+		"CREATE PACKAGES POLICY my_pkg_policy LANGUAGE PYTHON ALLOWLIST = ('numpy', 'pandas==1.5.3')",
+		"CREATE PACKAGES POLICY my_pkg_policy LANGUAGE PYTHON BLOCKLIST = ('os', 'sys')",
+		"CREATE PACKAGES POLICY my_pkg_policy LANGUAGE PYTHON COMMENT = 'restrict packages'",
+		"CREATE PACKAGES POLICY my_pkg_policy LANGUAGE PYTHON ALLOWLIST = ('requests==2.28.0') COMMENT = 'allow requests'",
+		"CREATE PACKAGES POLICY my_pkg_policy LANGUAGE python",
+		// Neither ALLOWLIST nor BLOCKLIST is valid (uses default Anaconda list)
+		"CREATE PACKAGES POLICY my_pkg_policy LANGUAGE PYTHON",
+		// ALTER / DROP Packages Policy
+		"ALTER PACKAGES POLICY my_pkg_policy SET ALLOWLIST = ('numpy')",
+		"ALTER PACKAGES POLICY my_pkg_policy SET BLOCKLIST = ('os')",
+		"ALTER PACKAGES POLICY my_pkg_policy SET COMMENT = 'updated'",
+		"ALTER PACKAGES POLICY my_pkg_policy UNSET ALLOWLIST",
+		"ALTER PACKAGES POLICY my_pkg_policy UNSET BLOCKLIST",
+		"ALTER PACKAGES POLICY my_pkg_policy UNSET COMMENT",
+		"DROP PACKAGES POLICY my_pkg_policy",
+		"DROP PACKAGES POLICY IF EXISTS my_pkg_policy",
 		// Session Policies
 		"CREATE SESSION POLICY my_session_policy",
 		"CREATE OR REPLACE SESSION POLICY my_session_policy",
@@ -492,6 +512,17 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		// ALTER / DROP Projection Policy — invalid
 		{"Alter Proj Policy missing action", "ALTER PROJECTION POLICY my_proj_policy", "requires SET BODY, SET COMMENT, UNSET COMMENT, or RENAME TO"},
 		{"Drop Proj Policy missing name", "DROP PROJECTION POLICY", "requires a policy name"},
+
+		// Invalid Packages Policies
+		{"Pkg Policy OR REPLACE with IF NOT EXISTS", "CREATE OR REPLACE PACKAGES POLICY IF NOT EXISTS my_pkg_policy LANGUAGE PYTHON", "Conflict between OR REPLACE and IF NOT EXISTS"},
+		{"Pkg Policy unsupported language", "CREATE PACKAGES POLICY my_pkg_policy LANGUAGE JAVA", "only PYTHON is allowed"},
+		{"Pkg Policy unsupported language Scala", "CREATE PACKAGES POLICY my_pkg_policy LANGUAGE SCALA", "only PYTHON is allowed"},
+		{"Pkg Policy ALLOWLIST and BLOCKLIST", "CREATE PACKAGES POLICY my_pkg_policy LANGUAGE PYTHON ALLOWLIST = ('numpy') BLOCKLIST = ('os')", "mutually exclusive"},
+		{"Pkg Policy with prefix", "CREATE PACKAGES POLICY MY_DB.PUBLIC.bad_policy LANGUAGE PYTHON", "account-level"},
+		{"Pkg Policy OR REPLACE with prefix", "CREATE OR REPLACE PACKAGES POLICY MY_DB.PUBLIC.bad LANGUAGE PYTHON", "account-level"},
+		// ALTER / DROP Packages Policy — invalid
+		{"Alter Pkg Policy missing action", "ALTER PACKAGES POLICY my_pkg_policy", "requires SET ALLOWLIST, SET BLOCKLIST, SET COMMENT, UNSET ALLOWLIST, UNSET BLOCKLIST, or UNSET COMMENT"},
+		{"Drop Pkg Policy missing name", "DROP PACKAGES POLICY", "requires a policy name"},
 
 		// Invalid Pipe
 		{"Pipe missing AS", "CREATE PIPE my_pipe", "Missing mandatory AS COPY INTO"},
