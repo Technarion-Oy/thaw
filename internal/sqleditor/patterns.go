@@ -5935,9 +5935,12 @@ func validateCreateDatashare(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 3. Only COMMENT and SHARE_RESTRICTIONS are valid properties.
-	// Use clean (comments already stripped) so that property-like tokens
-	// inside trailing line comments do not trigger false positives.
-	validateProperties(clean, `COMMENT|SHARE_RESTRICTIONS`, r, &markers)
+	// Pass noLiterals (comments not yet stripped) so that validateProperties'
+	// internal literal stripping is not redundant; comments were stripped in
+	// clean but validateProperties only strips literals, not comments — use
+	// the comment-stripped noComments intermediate instead.
+	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
+	validateProperties(noComments, `COMMENT|SHARE_RESTRICTIONS`, r, &markers)
 
 	// 4. SHARE_RESTRICTIONS must be TRUE or FALSE.
 	validateBoolProp(clean, "SHARE_RESTRICTIONS", r, &markers)
@@ -5967,6 +5970,10 @@ func validateAlterDatashare(parseText string, r StatementRange) []DiagMarker {
 		markers = append(markers, diagMarkerSpan(r,
 			"ALTER DATASHARE requires a datashare name.", 4))
 		return markers
+	}
+	if sqlIdentPathHasDot(m[1]) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Datashares are account-level objects and cannot have a database or schema prefix.", 4))
 	}
 
 	// 2. If none of the known actions are present, warn about unknown sub-command.
@@ -6001,9 +6008,15 @@ func validateAlterDatashare(parseText string, r StatementRange) []DiagMarker {
 			"REMOVE DATABASES requires at least one database identifier.", 4))
 	}
 
-	// 7. SHARE_RESTRICTIONS must be TRUE or FALSE if present.
-	if hasAddAccounts {
+	// 7. SHARE_RESTRICTIONS validation: always check the boolean value, and
+	// warn if it appears without ADD ACCOUNTS (the only valid context).
+	hasShareRestrictions := regexp.MustCompile(`(?i)\bSHARE_RESTRICTIONS\b`).MatchString(clean)
+	if hasShareRestrictions {
 		validateBoolProp(clean, "SHARE_RESTRICTIONS", r, &markers)
+		if !hasAddAccounts {
+			markers = append(markers, diagMarkerSpan(r,
+				"SHARE_RESTRICTIONS is only valid with ADD ACCOUNTS in ALTER DATASHARE.", 4))
+		}
 	}
 
 	return markers

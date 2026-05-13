@@ -686,6 +686,8 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Alter Datashare ADD DATABASES missing list", "ALTER DATASHARE my_ds ADD DATABASES", "ADD DATABASES requires at least one"},
 		{"Alter Datashare REMOVE DATABASES missing list", "ALTER DATASHARE my_ds REMOVE DATABASES", "REMOVE DATABASES requires at least one"},
 		{"Alter Datashare SHARE_RESTRICTIONS invalid", "ALTER DATASHARE my_ds ADD ACCOUNTS = org1.acct1 SHARE_RESTRICTIONS = MAYBE", "SHARE_RESTRICTIONS must be TRUE or FALSE"},
+		{"Alter Datashare with prefix", "ALTER DATASHARE db.my_ds ADD ACCOUNTS = org1.acct1", "account-level"},
+		{"Alter Datashare SHARE_RESTRICTIONS without ADD ACCOUNTS", "ALTER DATASHARE my_ds REMOVE ACCOUNTS = acct1 SHARE_RESTRICTIONS = TRUE", "SHARE_RESTRICTIONS is only valid with ADD ACCOUNTS"},
 
 		// Invalid DROP DATASHARE
 		{"Drop Datashare missing name", "DROP DATASHARE", "requires a datashare name"},
