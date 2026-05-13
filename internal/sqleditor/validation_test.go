@@ -394,6 +394,12 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"DROP REPLICATION GROUP IF EXISTS my_rg",
 		"DROP FAILOVER GROUP my_fg",
 		"DROP FAILOVER GROUP IF EXISTS my_fg",
+		// Group name containing "databases"/"integrations" — no false positives
+		"CREATE REPLICATION GROUP databases_backup OBJECT_TYPES = ROLES ALLOWED_ACCOUNTS = org1.acct1",
+		"CREATE REPLICATION GROUP integrations_sync OBJECT_TYPES = ROLES ALLOWED_ACCOUNTS = org1.acct1",
+		// ALTER FAILOVER GROUP with inline comment
+		"ALTER FAILOVER GROUP my_fg PRIMARY -- promote to primary",
+		"ALTER FAILOVER GROUP my_fg REFRESH -- manual refresh",
 		// Time Travel — valid AT/BEFORE clauses
 		"SELECT * FROM orders AT (TIMESTAMP => '2024-01-01 00:00:00'::TIMESTAMP_LTZ)",
 		"SELECT * FROM orders AT (OFFSET => -3600)",
@@ -4319,6 +4325,13 @@ func TestValidateSnowflakePatterns_ReplicationFailoverGroup(t *testing.T) {
 		"ALTER FAILOVER GROUP my_fg MOVE DATABASES db1 TO REPLICATION GROUP other_rg",
 		"ALTER FAILOVER GROUP my_fg SET REPLICATION_SCHEDULE = '10 MINUTE'",
 		"ALTER FAILOVER GROUP my_fg RENAME TO new_fg",
+		// Group name containing "databases" must not trigger false ALLOWED_DATABASES warning
+		"CREATE REPLICATION GROUP databases_backup OBJECT_TYPES = ROLES ALLOWED_ACCOUNTS = org1.acct1",
+		// Group name containing "integrations" must not trigger false ALLOWED_INTEGRATION_TYPES warning
+		"CREATE REPLICATION GROUP integrations_sync OBJECT_TYPES = ROLES ALLOWED_ACCOUNTS = org1.acct1",
+		// ALTER FAILOVER GROUP with inline comment after PRIMARY/REFRESH
+		"ALTER FAILOVER GROUP my_fg PRIMARY -- promote to primary",
+		"ALTER FAILOVER GROUP my_fg REFRESH -- manual refresh",
 		// DROP REPLICATION GROUP
 		"DROP REPLICATION GROUP my_rg",
 		"DROP REPLICATION GROUP IF EXISTS my_rg",

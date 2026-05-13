@@ -441,7 +441,10 @@ var (
 	reReplGroupAllowedDatabases     = regexp.MustCompile(`(?i)\bALLOWED_DATABASES\s*=`)
 	reReplGroupAllowedIntTypes      = regexp.MustCompile(`(?i)\bALLOWED_INTEGRATION_TYPES\s*=`)
 	reReplGroupSchedule             = regexp.MustCompile(`(?i)\bREPLICATION_SCHEDULE\s*=`)
-	reReplGroupIgnoreEdition        = regexp.MustCompile(`(?i)\bIGNORE\s+EDITION\s+CHECK\b`)
+	// reReplGroupObjectTypesValue captures the value portion after OBJECT_TYPES =
+	// up to the next known keyword boundary, so substring checks for DATABASES
+	// or INTEGRATIONS only examine the actual type list — not the group name.
+	reReplGroupObjectTypesValue     = regexp.MustCompile(`(?i)\bOBJECT_TYPES\s*=\s*(.+?)\s+(?:ALLOWED_|IGNORE\s+EDITION|REPLICATION_SCHEDULE)`)
 	// ALTER actions
 	reAlterReplGroupAdd          = regexp.MustCompile(`(?i)\bADD\s+` + _ident)
 	reAlterReplGroupMoveDatabases = regexp.MustCompile(`(?i)\bMOVE\s+DATABASES\b`)
@@ -454,8 +457,8 @@ var (
 	reIsAlterFailoverGroup  = regexp.MustCompile(`(?i)^\s*ALTER\s+FAILOVER\s+GROUP\b`)
 	reIsDropFailoverGroup   = regexp.MustCompile(`(?i)^\s*DROP\s+FAILOVER\s+GROUP\b`)
 	reFailoverGroupAllowedAccounts = regexp.MustCompile(`(?i)\bALLOWED_(?:FAILOVER_)?ACCOUNTS\s*=`)
-	reAlterFailoverPrimary  = regexp.MustCompile(`(?i)\bPRIMARY\s*$`)
-	reAlterFailoverRefresh  = regexp.MustCompile(`(?i)\bREFRESH\s*$`)
+	reAlterFailoverPrimary  = regexp.MustCompile(`(?i)\bPRIMARY\b`)
+	reAlterFailoverRefresh  = regexp.MustCompile(`(?i)\bREFRESH\b`)
 
 	// ── Time Travel AT / BEFORE clauses ──────────────────────────────────────
 	reTimeTravelClause = regexp.MustCompile(`(?i)\b(AT|BEFORE)\s*\(`)
@@ -5687,18 +5690,6 @@ func validateTimeTravelClauses(stripped string, r StatementRange) []DiagMarker {
 
 // ── validateCreateReplicationGroup ────────────────────────────────────────────
 
-// validReplObjectTypes lists the valid OBJECT_TYPES values for REPLICATION/FAILOVER GROUP.
-var validReplObjectTypes = []string{
-	"ACCOUNT PARAMETERS", "DATABASES", "INTEGRATIONS", "NETWORK POLICIES",
-	"RESOURCE MONITORS", "ROLES", "SHARES", "USERS", "WAREHOUSES",
-}
-
-// validReplIntegrationTypes lists the valid ALLOWED_INTEGRATION_TYPES values.
-var validReplIntegrationTypes = []string{
-	"SECURITY INTEGRATIONS", "API INTEGRATIONS", "STORAGE INTEGRATIONS",
-	"EXTERNAL ACCESS INTEGRATIONS", "NOTIFICATION INTEGRATIONS",
-}
-
 // validateCreateReplicationGroup checks structural requirements for
 // CREATE [OR REPLACE] REPLICATION GROUP:
 //   - Group name is required and must not have a db.schema prefix (account-level).
@@ -5757,17 +5748,19 @@ func validateCreateReplOrFailoverGroup(parseText string, r StatementRange, group
 		}
 	}
 
-	// 4. If DATABASES is in OBJECT_TYPES, ALLOWED_DATABASES is required.
-	upper := strings.ToUpper(clean)
-	if strings.Contains(upper, "DATABASES") && !reReplGroupAllowedDatabases.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("OBJECT_TYPES includes DATABASES but ALLOWED_DATABASES is missing in CREATE %s GROUP.", groupType), 4))
-	}
-
-	// 5. If INTEGRATIONS is in OBJECT_TYPES, ALLOWED_INTEGRATION_TYPES is required.
-	if strings.Contains(upper, "INTEGRATIONS") && !reReplGroupAllowedIntTypes.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("OBJECT_TYPES includes INTEGRATIONS but ALLOWED_INTEGRATION_TYPES is missing in CREATE %s GROUP.", groupType), 4))
+	// 4–5. Extract the OBJECT_TYPES value list and check for DATABASES / INTEGRATIONS.
+	// We only inspect the captured value portion (not the entire SQL) to avoid
+	// false positives when the group name itself contains "databases" or "integrations".
+	if otMatch := reReplGroupObjectTypesValue.FindStringSubmatch(clean); otMatch != nil {
+		otValue := strings.ToUpper(otMatch[1])
+		if strings.Contains(otValue, "DATABASES") && !reReplGroupAllowedDatabases.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("OBJECT_TYPES includes DATABASES but ALLOWED_DATABASES is missing in CREATE %s GROUP.", groupType), 4))
+		}
+		if strings.Contains(otValue, "INTEGRATIONS") && !reReplGroupAllowedIntTypes.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("OBJECT_TYPES includes INTEGRATIONS but ALLOWED_INTEGRATION_TYPES is missing in CREATE %s GROUP.", groupType), 4))
+		}
 	}
 
 	return markers
@@ -5783,7 +5776,10 @@ func validateCreateReplOrFailoverGroup(parseText string, r StatementRange, group
 func validateAlterReplicationOrFailoverGroup(parseText string, r StatementRange, groupType string) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	// Strip comments and string literals so trailing -- comments and quoted
+	// values cannot cause false positives or missed matches.
+	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
+	clean := reStripStringLiterals.ReplaceAllString(noComments, "''")
 
 	// 1. Group name is required.
 	m := reReplGroupName.FindStringSubmatch(clean)
