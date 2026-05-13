@@ -447,6 +447,7 @@ var (
 	reReplGroupObjectTypesValue     = regexp.MustCompile(`(?i)\bOBJECT_TYPES\s*=\s*(.+?)\s+(?:ALLOWED_|IGNORE\s+EDITION|REPLICATION_SCHEDULE)`)
 	// ALTER actions
 	reAlterReplGroupAdd          = regexp.MustCompile(`(?i)\bADD\s+` + _ident)
+	reAlterReplGroupRemove       = regexp.MustCompile(`(?i)\bREMOVE\s+` + _ident)
 	reAlterReplGroupMoveDatabases = regexp.MustCompile(`(?i)\bMOVE\s+DATABASES\b`)
 	reAlterReplGroupMoveTo        = regexp.MustCompile(`(?i)\bTO\s+REPLICATION\s+GROUP\s+` + _ident)
 	reAlterReplGroupSet           = regexp.MustCompile(`(?i)\bSET\s+(?:REPLICATION_SCHEDULE|OBJECT_TYPES)\b`)
@@ -459,6 +460,8 @@ var (
 	reFailoverGroupAllowedAccounts = regexp.MustCompile(`(?i)\bALLOWED_(?:FAILOVER_)?ACCOUNTS\s*=`)
 	reAlterFailoverPrimary  = regexp.MustCompile(`(?i)\bPRIMARY\b`)
 	reAlterFailoverRefresh  = regexp.MustCompile(`(?i)\bREFRESH\b`)
+	reAlterFailoverSuspend  = regexp.MustCompile(`(?i)\bSUSPEND\b`)
+	reAlterFailoverResume   = regexp.MustCompile(`(?i)\bRESUME\b`)
 
 	// ── Time Travel AT / BEFORE clauses ──────────────────────────────────────
 	reTimeTravelClause = regexp.MustCompile(`(?i)\b(AT|BEFORE)\s*\(`)
@@ -5714,7 +5717,10 @@ func validateCreateFailoverGroup(parseText string, r StatementRange) []DiagMarke
 func validateCreateReplOrFailoverGroup(parseText string, r StatementRange, groupType string) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	// Strip comments and string literals so commented-out clauses and quoted
+	// values cannot cause false positives.
+	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
+	clean := reStripStringLiterals.ReplaceAllString(noComments, "''")
 
 	// 1. Group name is required and must be account-level (no dot prefix).
 	m := reReplGroupName.FindStringSubmatch(clean)
@@ -5771,8 +5777,8 @@ func validateCreateReplOrFailoverGroup(parseText string, r StatementRange, group
 // validateAlterReplicationOrFailoverGroup checks structural requirements for
 // ALTER REPLICATION GROUP and ALTER FAILOVER GROUP:
 //   - Group name is required.
-//   - Must contain a valid action (ADD, MOVE DATABASES, SET, RENAME TO,
-//     or for FAILOVER: PRIMARY, REFRESH).
+//   - Must contain a valid action (ADD, REMOVE, MOVE DATABASES, SET, RENAME TO,
+//     or for FAILOVER: PRIMARY, REFRESH, SUSPEND, RESUME).
 func validateAlterReplicationOrFailoverGroup(parseText string, r StatementRange, groupType string) []DiagMarker {
 	var markers []DiagMarker
 
@@ -5791,6 +5797,7 @@ func validateAlterReplicationOrFailoverGroup(parseText string, r StatementRange,
 
 	// 2. Must contain a valid action.
 	hasAction := reAlterReplGroupAdd.MatchString(clean) ||
+		reAlterReplGroupRemove.MatchString(clean) ||
 		reAlterReplGroupMoveDatabases.MatchString(clean) ||
 		reAlterReplGroupSet.MatchString(clean) ||
 		reAlterReplGroupRename.MatchString(clean) ||
@@ -5799,16 +5806,18 @@ func validateAlterReplicationOrFailoverGroup(parseText string, r StatementRange,
 	if groupType == "FAILOVER" {
 		hasAction = hasAction ||
 			reAlterFailoverPrimary.MatchString(clean) ||
-			reAlterFailoverRefresh.MatchString(clean)
+			reAlterFailoverRefresh.MatchString(clean) ||
+			reAlterFailoverSuspend.MatchString(clean) ||
+			reAlterFailoverResume.MatchString(clean)
 	}
 
 	if !hasAction {
 		if groupType == "FAILOVER" {
 			markers = append(markers, diagMarkerSpan(r,
-				"ALTER FAILOVER GROUP requires an action: ADD, MOVE DATABASES, SET, RENAME TO, PRIMARY, or REFRESH.", 4))
+				"ALTER FAILOVER GROUP requires an action: ADD, REMOVE, MOVE DATABASES, SET, RENAME TO, PRIMARY, REFRESH, SUSPEND, or RESUME.", 4))
 		} else {
 			markers = append(markers, diagMarkerSpan(r,
-				"ALTER REPLICATION GROUP requires an action: ADD, MOVE DATABASES, SET, or RENAME TO.", 4))
+				"ALTER REPLICATION GROUP requires an action: ADD, REMOVE, MOVE DATABASES, SET, or RENAME TO.", 4))
 		}
 		return markers
 	}
