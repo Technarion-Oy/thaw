@@ -564,6 +564,32 @@ var (
 	// clean has comments removed before matching.
 	reDropTagCascadeRestrict = regexp.MustCompile(`(?i)\b(?:CASCADE|RESTRICT)\s*$`)
 
+	// ── BEGIN / COMMIT / ROLLBACK / SAVEPOINT / RELEASE SAVEPOINT ────────
+	reIsBegin            = regexp.MustCompile(`(?i)^\s*BEGIN\b`)
+	reIsCommit           = regexp.MustCompile(`(?i)^\s*COMMIT\b`)
+	reIsRollback         = regexp.MustCompile(`(?i)^\s*ROLLBACK\b`)
+	reIsSavepoint        = regexp.MustCompile(`(?i)^\s*SAVEPOINT\b`)
+	reIsReleaseSavepoint = regexp.MustCompile(`(?i)^\s*RELEASE\s+SAVEPOINT\b`)
+
+	// BEGIN [WORK|TRANSACTION] [NAME <ident>] — the full valid form.
+	reBeginValid = regexp.MustCompile(`(?i)^\s*BEGIN(\s+(WORK|TRANSACTION))?\s*$`)
+	// BEGIN ... NAME <ident> variant (supports quoted identifiers).
+	reBeginName = regexp.MustCompile(`(?i)^\s*BEGIN(\s+(WORK|TRANSACTION))?\s+NAME\s+` + _ident + `\s*$`)
+	// BEGIN ... NAME (bare, missing name).
+	reBeginNameBare = regexp.MustCompile(`(?i)\bNAME\s*$`)
+	// COMMIT [WORK] — full valid form.
+	reCommitValid = regexp.MustCompile(`(?i)^\s*COMMIT(\s+WORK)?\s*$`)
+	// ROLLBACK [WORK] [TO SAVEPOINT <ident>] — full valid form.
+	reRollbackValid = regexp.MustCompile(`(?i)^\s*ROLLBACK(\s+WORK)?(\s+TO\s+SAVEPOINT\s+[^\s;]+)?\s*$`)
+	// ROLLBACK ... TO without SAVEPOINT keyword.
+	reRollbackToBare = regexp.MustCompile(`(?i)\bTO\b`)
+	// ROLLBACK ... TO SAVEPOINT (without name).
+	reRollbackToSavepointBare = regexp.MustCompile(`(?i)\bTO\s+SAVEPOINT\s*$`)
+	// SAVEPOINT <name> — name is mandatory.
+	reSavepointHasName = regexp.MustCompile(`(?i)^\s*SAVEPOINT\s+[^\s;]`)
+	// RELEASE SAVEPOINT <name> — name is mandatory.
+	reReleaseSavepointHasName = regexp.MustCompile(`(?i)^\s*RELEASE\s+SAVEPOINT\s+[^\s;]`)
+
 	// ── USE ROLE / USE WAREHOUSE / USE SECONDARY ROLES ────────────────────
 	reIsUseRole           = regexp.MustCompile(`(?i)^\s*USE\s+ROLE\b`)
 	reIsUseWarehouse      = regexp.MustCompile(`(?i)^\s*USE\s+WAREHOUSE\b`)
@@ -686,6 +712,8 @@ var (
 		"PUT": true, "GET": true, "LIST": true, "LS": true,
 		"REMOVE": true, "RM": true,
 		"DESCRIBE": true, "DESC": true,
+		"BEGIN": true, "COMMIT": true, "ROLLBACK": true,
+		"SAVEPOINT": true, "RELEASE": true,
 	}
 )
 
@@ -992,6 +1020,10 @@ var grantObjectTypePlurals = map[string]string{
 // ValidateSyntax already covers generic syntax errors via its tokenizer.
 func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMarker {
 	var markers []DiagMarker
+
+	// ── Block-level transaction tracking ─────────────────────────────────
+	txnDepth := 0
+	var txnBeginRange StatementRange // range of the opening BEGIN (for end-of-script warning)
 
 	for _, r := range stmtRanges {
 		rawText := sqlStmt(sql, r)
@@ -1918,6 +1950,55 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
+		// ── BEGIN (transaction) ─────────────────────────────────────────
+		if reIsBegin.MatchString(parseText) {
+			markers = append(markers, validateBegin(parseText, r)...)
+			if txnDepth > 0 {
+				markers = append(markers, diagMarkerSpan(r,
+					"Snowflake does not support nested BEGIN. A transaction is already open.", 4))
+			} else {
+				txnBeginRange = r
+			}
+			txnDepth++
+			continue
+		}
+
+		// ── COMMIT ──────────────────────────────────────────────────────
+		if reIsCommit.MatchString(parseText) {
+			markers = append(markers, validateCommit(parseText, r)...)
+			if txnDepth == 0 {
+				markers = append(markers, diagMarkerSpan(r,
+					"COMMIT with no open transaction. Add BEGIN before COMMIT.", 4))
+			} else {
+				txnDepth--
+			}
+			continue
+		}
+
+		// ── ROLLBACK ────────────────────────────────────────────────────
+		if reIsRollback.MatchString(parseText) {
+			markers = append(markers, validateRollback(parseText, r)...)
+			if txnDepth == 0 {
+				markers = append(markers, diagMarkerSpan(r,
+					"ROLLBACK with no open transaction. Add BEGIN before ROLLBACK.", 4))
+			} else {
+				txnDepth--
+			}
+			continue
+		}
+
+		// ── SAVEPOINT ───────────────────────────────────────────────────
+		if reIsSavepoint.MatchString(parseText) {
+			markers = append(markers, validateSavepoint(parseText, r)...)
+			continue
+		}
+
+		// ── RELEASE SAVEPOINT ───────────────────────────────────────────
+		if reIsReleaseSavepoint.MatchString(parseText) {
+			markers = append(markers, validateReleaseSavepoint(parseText, r)...)
+			continue
+		}
+
 		// ── Skip Snowflake false-positive statements ──────────────────────
 		// (statements with Snowflake-specific syntax that the parser can't
 		// handle; we emit no error for these)
@@ -1928,6 +2009,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		}
 		// Generic SELECT/INSERT/UPDATE/WITH: no additional checks here.
 		// ValidateSyntax (the tokenizer) already covers them.
+	}
+
+	// ── Post-loop: unclosed transaction check ────────────────────────────
+	if txnDepth > 0 {
+		markers = append(markers, diagMarkerSpan(txnBeginRange,
+			"Transaction not committed or rolled back. Add COMMIT or ROLLBACK before the end of the script.", 4))
 	}
 
 	return markers
@@ -5048,4 +5135,109 @@ func matchStringLiteral(s string) int {
 		}
 	}
 	return -1
+}
+
+// ── validateBegin ─────────────────────────────────────────────────────────────
+
+// validateBegin validates a BEGIN statement:
+//   - BEGIN [WORK | TRANSACTION] [NAME <name>]
+//   - WORK and TRANSACTION are optional synonyms.
+//   - NAME <name> provides an optional transaction name (identifier).
+func validateBegin(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+
+	// BEGIN [WORK|TRANSACTION] with optional NAME <ident>
+	if reBeginName.MatchString(stripped) {
+		return markers // valid: BEGIN [WORK|TRANSACTION] NAME <ident>
+	}
+	if reBeginNameBare.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"BEGIN NAME requires a transaction name. Use BEGIN NAME <name>.", 4))
+		return markers
+	}
+	if !reBeginValid.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Unexpected token after BEGIN. Valid forms: BEGIN, BEGIN WORK, BEGIN TRANSACTION, BEGIN [TRANSACTION] NAME <name>.", 4))
+	}
+	return markers
+}
+
+// ── validateCommit ────────────────────────────────────────────────────────────
+
+// validateCommit validates a COMMIT statement:
+//   - COMMIT [WORK]
+//   - WORK is optional and redundant; extra tokens should warn.
+func validateCommit(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+
+	if !reCommitValid.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Unexpected token after COMMIT. Valid forms: COMMIT, COMMIT WORK.", 4))
+	}
+	return markers
+}
+
+// ── validateRollback ──────────────────────────────────────────────────────────
+
+// validateRollback validates a ROLLBACK statement:
+//   - ROLLBACK [WORK] [TO SAVEPOINT <name>]
+//   - WORK is optional; TO SAVEPOINT <name> requires an identifier.
+func validateRollback(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+
+	if reRollbackValid.MatchString(stripped) {
+		return markers // valid form
+	}
+
+	// Check for TO SAVEPOINT without name.
+	if reRollbackToSavepointBare.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"ROLLBACK TO SAVEPOINT requires a savepoint name. Use ROLLBACK TO SAVEPOINT <name>.", 4))
+		return markers
+	}
+
+	// Check for TO without SAVEPOINT keyword.
+	if reRollbackToBare.MatchString(stripped) {
+		// Has TO but no valid SAVEPOINT pattern — probably missing SAVEPOINT keyword.
+		markers = append(markers, diagMarkerSpan(r,
+			"ROLLBACK TO requires SAVEPOINT keyword. Use ROLLBACK TO SAVEPOINT <name>.", 4))
+		return markers
+	}
+
+	markers = append(markers, diagMarkerSpan(r,
+		"Unexpected token after ROLLBACK. Valid forms: ROLLBACK, ROLLBACK WORK, ROLLBACK [WORK] TO SAVEPOINT <name>.", 4))
+	return markers
+}
+
+// ── validateSavepoint ─────────────────────────────────────────────────────────
+
+// validateSavepoint validates a SAVEPOINT statement:
+//   - SAVEPOINT <name> — name is mandatory.
+func validateSavepoint(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+
+	if !reSavepointHasName.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"SAVEPOINT requires a savepoint name. Use SAVEPOINT <name>.", 4))
+	}
+	return markers
+}
+
+// ── validateReleaseSavepoint ──────────────────────────────────────────────────
+
+// validateReleaseSavepoint validates a RELEASE SAVEPOINT statement:
+//   - RELEASE SAVEPOINT <name> — name is mandatory.
+func validateReleaseSavepoint(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
+
+	if !reReleaseSavepointHasName.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"RELEASE SAVEPOINT requires a savepoint name. Use RELEASE SAVEPOINT <name>.", 4))
+	}
+	return markers
 }
