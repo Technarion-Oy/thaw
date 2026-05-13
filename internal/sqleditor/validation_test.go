@@ -235,7 +235,7 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE PACKAGES POLICY my_pkg_policy LANGUAGE PYTHON ALLOWLIST = ('requests==2.28.0') COMMENT = 'allow requests'",
 		"CREATE PACKAGES POLICY my_pkg_policy LANGUAGE python",
 		// Neither ALLOWLIST nor BLOCKLIST is valid (uses default Anaconda list)
-		"CREATE PACKAGES POLICY my_pkg_policy LANGUAGE PYTHON",
+		"CREATE PACKAGES POLICY default_anaconda_policy LANGUAGE PYTHON",
 		// ALTER / DROP Packages Policy
 		"ALTER PACKAGES POLICY my_pkg_policy SET LANGUAGE PYTHON",
 		"ALTER PACKAGES POLICY my_pkg_policy SET ALLOWLIST = ('numpy')",
@@ -522,9 +522,11 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Pkg Policy ALLOWLIST and BLOCKLIST", "CREATE PACKAGES POLICY my_pkg_policy LANGUAGE PYTHON ALLOWLIST = ('numpy') BLOCKLIST = ('os')", "mutually exclusive"},
 		{"Pkg Policy with prefix", "CREATE PACKAGES POLICY MY_DB.PUBLIC.bad_policy LANGUAGE PYTHON", "account-level"},
 		{"Pkg Policy OR REPLACE with prefix", "CREATE OR REPLACE PACKAGES POLICY MY_DB.PUBLIC.bad LANGUAGE PYTHON", "account-level"},
+		{"Pkg Policy IF NOT EXISTS with prefix", "CREATE PACKAGES POLICY IF NOT EXISTS MY_DB.PUBLIC.bad_policy LANGUAGE PYTHON", "account-level"},
 		// ALTER / DROP Packages Policy — invalid
-		{"Alter Pkg Policy missing action", "ALTER PACKAGES POLICY my_pkg_policy", "requires SET ALLOWLIST, SET BLOCKLIST, SET COMMENT, UNSET ALLOWLIST, UNSET BLOCKLIST, or UNSET COMMENT"},
+		{"Alter Pkg Policy missing action", "ALTER PACKAGES POLICY my_pkg_policy", "requires SET ALLOWLIST, SET BLOCKLIST, SET COMMENT, SET LANGUAGE, UNSET ALLOWLIST, UNSET BLOCKLIST, or UNSET COMMENT"},
 		{"Alter Pkg Policy unsupported language", "ALTER PACKAGES POLICY my_pkg_policy SET LANGUAGE JAVA", "only PYTHON is allowed"},
+		{"Alter Pkg Policy ALLOWLIST and BLOCKLIST", "ALTER PACKAGES POLICY my_pkg_policy SET ALLOWLIST = ('numpy') SET BLOCKLIST = ('os')", "mutually exclusive"},
 		{"Drop Pkg Policy missing name", "DROP PACKAGES POLICY", "requires a policy name"},
 
 		// Invalid Pipe

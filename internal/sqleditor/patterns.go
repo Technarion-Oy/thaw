@@ -424,7 +424,7 @@ var (
 
 	// ── CREATE PACKAGES POLICY ──────────────────────────────────────────────
 	reIsCreatePackagesPolicy      = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PACKAGES\s+POLICY\b`)
-	rePkgPolicyName               = regexp.MustCompile(`(?i)POLICY\s+(` + _identPath + `)`)
+	rePkgPolicyName               = regexp.MustCompile(`(?i)POLICY\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
 	rePkgPolicyLanguage           = regexp.MustCompile(`(?i)\bLANGUAGE\s+(\w+)`)
 	rePkgPolicyHasAllowlist       = regexp.MustCompile(`(?i)\bALLOWLIST\b`)
 	rePkgPolicyHasBlocklist       = regexp.MustCompile(`(?i)\bBLOCKLIST\b`)
@@ -3038,7 +3038,7 @@ func validateAlterPackagesPolicy(parseText string, r StatementRange) []DiagMarke
 
 	if !reAlterPkgPolicyAction.MatchString(parseText) {
 		markers = append(markers, diagMarkerSpan(r,
-			"ALTER PACKAGES POLICY requires SET ALLOWLIST, SET BLOCKLIST, SET COMMENT, UNSET ALLOWLIST, UNSET BLOCKLIST, or UNSET COMMENT.", 4))
+			"ALTER PACKAGES POLICY requires SET ALLOWLIST, SET BLOCKLIST, SET COMMENT, SET LANGUAGE, UNSET ALLOWLIST, UNSET BLOCKLIST, or UNSET COMMENT.", 4))
 	}
 
 	// Validate LANGUAGE value if SET LANGUAGE is used.
@@ -3047,6 +3047,11 @@ func validateAlterPackagesPolicy(parseText string, r StatementRange) []DiagMarke
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("LANGUAGE '%s' is not supported for PACKAGES POLICY; only PYTHON is allowed.", m[1]), 4))
 		}
+	}
+
+	// ALLOWLIST and BLOCKLIST are mutually exclusive.
+	if rePkgPolicyHasAllowlist.MatchString(parseText) && rePkgPolicyHasBlocklist.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r, "ALLOWLIST and BLOCKLIST are mutually exclusive in ALTER PACKAGES POLICY.", 4))
 	}
 
 	return markers
