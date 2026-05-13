@@ -48,11 +48,11 @@ var (
 		`(?i)\bTABLESAMPLE\b|\bSAMPLE\s*\(|\bWITHIN\s+GROUP\b|\bCONNECT\s+BY\b` +
 			`|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b` +
 			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:STAGE` +
-			`|REPLICATION|FAILOVER|APPLICATION)\b` +
+			`|REPLICATION|FAILOVER|APPLICATION|DATASHARE)\b` +
 			`|ALTER\s+(?:TABLE|VIEW|STREAM|DATABASE|STAGE|PIPE|PROCEDURE|FUNCTION` +
 			`|ALERT|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK` +
-			`|REPLICATION|FAILOVER)\b` +
-			`|DROP\s+(?:TABLE|VIEW|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION)\b` +
+			`|REPLICATION|FAILOVER|DATASHARE)\b` +
+			`|DROP\s+(?:TABLE|VIEW|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|DATASHARE)\b` +
 			`|UNDROP\s+(?:DATABASE|SCHEMA|TABLE)\b` +
 			`|INSERT\s+OVERWRITE\b` +
 			`|TRUNCATE\s+\S+\s+IF\b` +
@@ -570,6 +570,28 @@ var (
 	// (e.g. ALTER SHARE restrict ...) or a quoted identifier ("restrict") contains
 	// the word RESTRICT somewhere other than the trailing position.
 	reAlterShareRestrictTrailing = regexp.MustCompile(`(?i)\bRESTRICT\s*$`)
+
+	// ── CREATE DATASHARE ─────────────────────────────────────────────────────
+	reIsCreateDatashare   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?DATASHARE\b`)
+	reCreateDatashareName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?DATASHARE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
+	// ── ALTER DATASHARE ──────────────────────────────────────────────────────
+	reIsAlterDatashare             = regexp.MustCompile(`(?i)^\s*ALTER\s+DATASHARE\b`)
+	reAlterDatashareName           = regexp.MustCompile(`(?i)^\s*ALTER\s+DATASHARE\s+(` + _identPath + `)`)
+	reAlterDatashareAddAccounts    = regexp.MustCompile(`(?i)\bADD\s+ACCOUNTS\s*=`)
+	reAlterDatashareAddAcctList    = regexp.MustCompile(`(?i)\bADD\s+ACCOUNTS\s*=\s*` + _ident)
+	reAlterDatashareRemoveAccounts = regexp.MustCompile(`(?i)\bREMOVE\s+ACCOUNTS\s*=`)
+	reAlterDatashareRemoveAcctList = regexp.MustCompile(`(?i)\bREMOVE\s+ACCOUNTS\s*=\s*` + _ident)
+	reAlterDatashareAddDatabases   = regexp.MustCompile(`(?i)\bADD\s+DATABASES\b`)
+	reAlterDatashareAddDbList      = regexp.MustCompile(`(?i)\bADD\s+DATABASES\s+` + _ident)
+	reAlterDatashareRemoveDatabases = regexp.MustCompile(`(?i)\bREMOVE\s+DATABASES\b`)
+	reAlterDatashareRemoveDbList   = regexp.MustCompile(`(?i)\bREMOVE\s+DATABASES\s+` + _ident)
+	reAlterDatashareSetComment     = regexp.MustCompile(`(?i)\bSET\s+COMMENT\b`)
+	reAlterDatashareUnsetComment   = regexp.MustCompile(`(?i)\bUNSET\s+COMMENT\b`)
+	// reAlterDatashareAction matches any known ALTER DATASHARE sub-command.
+	reAlterDatashareAction = regexp.MustCompile(`(?i)\b(?:ADD\s+ACCOUNTS|REMOVE\s+ACCOUNTS|ADD\s+DATABASES|REMOVE\s+DATABASES|SET\s+COMMENT|UNSET\s+COMMENT)\b`)
+	// ── DROP DATASHARE ───────────────────────────────────────────────────────
+	reIsDropDatashare   = regexp.MustCompile(`(?i)^\s*DROP\s+DATASHARE\b`)
+	reDropDatashareName = regexp.MustCompile(`(?i)^\s*DROP\s+DATASHARE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
 
 	// ── CREATE EVENT TABLE ──────────────────────────────────────────────────
 	reIsCreateEventTable   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EVENT\s+TABLE\b`)
@@ -2053,6 +2075,24 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
+		// ── CREATE DATASHARE ────────────────────────────────────────────
+		if reIsCreateDatashare.MatchString(parseText) {
+			markers = append(markers, validateCreateDatashare(parseText, r)...)
+			continue
+		}
+
+		// ── ALTER DATASHARE ─────────────────────────────────────────────
+		if reIsAlterDatashare.MatchString(parseText) {
+			markers = append(markers, validateAlterDatashare(parseText, r)...)
+			continue
+		}
+
+		// ── DROP DATASHARE ──────────────────────────────────────────────
+		if reIsDropDatashare.MatchString(parseText) {
+			markers = append(markers, validateDropDatashare(parseText, r)...)
+			continue
+		}
+
 		// ── CREATE TAG ──────────────────────────────────────────────────
 		if reIsCreateTag.MatchString(parseText) {
 			markers = append(markers, validateCreateTag(parseText, r)...)
@@ -3412,7 +3452,7 @@ func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 // matches PROP = value where value is a word token. The map is built at init
 // time so regexes are compiled once rather than on every call.
 var reBoolPropMap = func() map[string]*regexp.Regexp {
-	props := []string{"ALLOW_WRITES", "PURGE", "FORCE", "LOAD_UNCERTAIN_FILES", "OVERWRITE", "SINGLE", "INCLUDE_QUERY_ID", "DETAILED_OUTPUT"}
+	props := []string{"ALLOW_WRITES", "PURGE", "FORCE", "LOAD_UNCERTAIN_FILES", "OVERWRITE", "SINGLE", "INCLUDE_QUERY_ID", "DETAILED_OUTPUT", "SHARE_RESTRICTIONS"}
 	m := make(map[string]*regexp.Regexp, len(props))
 	for _, p := range props {
 		m[p] = regexp.MustCompile(`(?i)\b` + p + `\s*=\s*(\w+)\b`)
@@ -5857,6 +5897,144 @@ func validateDropReplicationOrFailoverGroup(parseText string, r StatementRange, 
 	if sqlIdentPathHasDot(m[1]) {
 		markers = append(markers, diagMarkerSpan(r,
 			fmt.Sprintf("%s groups are account-level objects and cannot have a database or schema prefix.", groupType), 4))
+	}
+
+	return markers
+}
+
+// ── validateCreateDatashare ───────────────────────────────────────────────────
+
+// validateCreateDatashare checks structural requirements for
+// CREATE [OR REPLACE] DATASHARE [IF NOT EXISTS] <name> statements:
+//   - OR REPLACE and IF NOT EXISTS are mutually exclusive.
+//   - Datashares are account-level objects: name must not have a db.schema prefix.
+//   - SHARE_RESTRICTIONS must be TRUE or FALSE if present.
+//   - Only COMMENT and SHARE_RESTRICTIONS are valid properties.
+func validateCreateDatashare(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := reStripStringLiterals.ReplaceAllString(parseText, "''")
+
+	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
+	if reOrReplace.MatchString(stripped) && reIfNotExists.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE DATASHARE statement.", 4))
+		return markers
+	}
+
+	// 2. Datashare name is required; also used for the account-level prefix check.
+	m := reCreateDatashareName.FindStringSubmatch(parseText)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE DATASHARE statement.", 4))
+		return markers
+	}
+	if sqlIdentPathHasDot(m[1]) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Datashares are account-level objects and cannot have a database or schema prefix.", 4))
+	}
+
+	// 3. Only COMMENT and SHARE_RESTRICTIONS are valid properties.
+	validateProperties(parseText, `COMMENT|SHARE_RESTRICTIONS`, r, &markers)
+
+	// 4. SHARE_RESTRICTIONS must be TRUE or FALSE.
+	clean := reStripStringLiterals.ReplaceAllString(
+		strings.TrimSpace(stripCommentsSQL(parseText)), "''")
+	validateBoolProp(clean, "SHARE_RESTRICTIONS", r, &markers)
+
+	return markers
+}
+
+// ── validateAlterDatashare ────────────────────────────────────────────────────
+
+// validateAlterDatashare checks structural requirements for ALTER DATASHARE statements:
+//   - A datashare name is required.
+//   - ADD ACCOUNTS = requires at least one account identifier.
+//   - REMOVE ACCOUNTS = requires at least one account identifier.
+//   - ADD DATABASES requires at least one database identifier.
+//   - REMOVE DATABASES requires at least one database identifier.
+//   - SHARE_RESTRICTIONS must be TRUE or FALSE if present (valid with ADD ACCOUNTS).
+//   - Unknown sub-commands warn.
+func validateAlterDatashare(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+
+	// 1. Datashare name is required.
+	m := reAlterDatashareName.FindStringSubmatch(clean)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"ALTER DATASHARE requires a datashare name.", 4))
+		return markers
+	}
+
+	// 2. Check for known sub-commands.
+	hasAddAccounts := reAlterDatashareAddAccounts.MatchString(clean)
+	hasRemoveAccounts := reAlterDatashareRemoveAccounts.MatchString(clean)
+	hasAddDatabases := reAlterDatashareAddDatabases.MatchString(clean)
+	hasRemoveDatabases := reAlterDatashareRemoveDatabases.MatchString(clean)
+	hasSetComment := reAlterDatashareSetComment.MatchString(clean)
+	hasUnsetComment := reAlterDatashareUnsetComment.MatchString(clean)
+
+	// If none of the known actions are present, warn about unknown sub-command.
+	if !reAlterDatashareAction.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Unknown ALTER DATASHARE sub-command. Expected ADD ACCOUNTS, REMOVE ACCOUNTS, ADD DATABASES, REMOVE DATABASES, SET COMMENT, or UNSET COMMENT.", 4))
+		return markers
+	}
+
+	// 3. ADD ACCOUNTS = requires at least one account.
+	if hasAddAccounts && !reAlterDatashareAddAcctList.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"ADD ACCOUNTS requires at least one account identifier.", 4))
+	}
+
+	// 4. REMOVE ACCOUNTS = requires at least one account.
+	if hasRemoveAccounts && !reAlterDatashareRemoveAcctList.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"REMOVE ACCOUNTS requires at least one account identifier.", 4))
+	}
+
+	// 5. ADD DATABASES requires at least one database.
+	if hasAddDatabases && !reAlterDatashareAddDbList.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"ADD DATABASES requires at least one database identifier.", 4))
+	}
+
+	// 6. REMOVE DATABASES requires at least one database.
+	if hasRemoveDatabases && !reAlterDatashareRemoveDbList.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"REMOVE DATABASES requires at least one database identifier.", 4))
+	}
+
+	// 7. SHARE_RESTRICTIONS must be TRUE or FALSE if present.
+	if hasAddAccounts {
+		validateBoolProp(clean, "SHARE_RESTRICTIONS", r, &markers)
+	}
+
+	// Suppress unused-variable warnings for SET/UNSET COMMENT; they are
+	// recognized actions but require no further structural checks.
+	_ = hasSetComment
+	_ = hasUnsetComment
+
+	return markers
+}
+
+// ── validateDropDatashare ─────────────────────────────────────────────────────
+
+// validateDropDatashare checks structural requirements for DROP DATASHARE:
+//   - Datashare name is required.
+func validateDropDatashare(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
+	clean := reStripStringLiterals.ReplaceAllString(noComments, "''")
+
+	m := reDropDatashareName.FindStringSubmatch(clean)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"DROP DATASHARE requires a datashare name.", 4))
+		return markers
 	}
 
 	return markers
