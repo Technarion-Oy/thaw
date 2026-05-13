@@ -580,7 +580,7 @@ var (
 	// COMMIT [WORK] — full valid form.
 	reCommitValid = regexp.MustCompile(`(?i)^\s*COMMIT(\s+WORK)?\s*$`)
 	// ROLLBACK [WORK] [TO SAVEPOINT <ident>] — full valid form.
-	reRollbackValid = regexp.MustCompile(`(?i)^\s*ROLLBACK(\s+WORK)?(\s+TO\s+SAVEPOINT\s+[^\s;]+)?\s*$`)
+	reRollbackValid = regexp.MustCompile(`(?i)^\s*ROLLBACK(\s+WORK)?(\s+TO\s+SAVEPOINT\s+` + _ident + `)?\s*$`)
 	// ROLLBACK ... TO without SAVEPOINT keyword.
 	reRollbackToBare = regexp.MustCompile(`(?i)\bTO\b`)
 	// ROLLBACK ... TO SAVEPOINT (without name).
@@ -1958,10 +1958,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			if txnDepth > 0 {
 				markers = append(markers, diagMarkerSpan(r,
 					"Snowflake does not support nested BEGIN. A transaction is already open.", 4))
+				// Don't increment txnDepth — Snowflake rejects nested BEGIN,
+				// so we keep tracking only the original transaction.
 			} else {
 				txnBeginRange = r
+				txnDepth++
 			}
-			txnDepth++
 			continue
 		}
 
@@ -1979,10 +1981,11 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 
 		// ── ROLLBACK ────────────────────────────────────────────────────
 		if reIsRollback.MatchString(parseText) {
-			markers = append(markers, validateRollback(parseText, r)...)
+			// Strip comments once and reuse for both validation and block-level tracking.
+			rollbackStripped := strings.TrimSpace(stripCommentsSQL(parseText))
+			markers = append(markers, validateRollbackStripped(rollbackStripped, r)...)
 			// ROLLBACK TO SAVEPOINT does NOT end the transaction — only bare
 			// ROLLBACK / ROLLBACK WORK closes it.
-			rollbackStripped := strings.TrimSpace(stripCommentsSQL(parseText))
 			isToSavepoint := reRollbackToSavepointFull.MatchString(rollbackStripped)
 			if !isToSavepoint {
 				if txnDepth == 0 {
@@ -5196,12 +5199,11 @@ func validateCommit(parseText string, r StatementRange) []DiagMarker {
 
 // ── validateRollback ──────────────────────────────────────────────────────────
 
-// validateRollback validates a ROLLBACK statement:
-//   - ROLLBACK [WORK] [TO SAVEPOINT <name>]
-//   - WORK is optional; TO SAVEPOINT <name> requires an identifier.
-func validateRollback(parseText string, r StatementRange) []DiagMarker {
+// validateRollbackStripped validates a ROLLBACK statement from already-stripped text
+// (comments removed, trimmed). This avoids redundant stripCommentsSQL calls when
+// the caller has already stripped the text for block-level tracking.
+func validateRollbackStripped(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
 
 	if reRollbackValid.MatchString(stripped) {
 		return markers // valid form

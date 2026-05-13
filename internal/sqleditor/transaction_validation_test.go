@@ -184,6 +184,14 @@ func TestValidateSnowflakePatterns_Rollback(t *testing.T) {
 			name: "ROLLBACK TO SAVEPOINT quoted name",
 			sql:  "BEGIN;\nROLLBACK TO SAVEPOINT \"My_Save\";\nCOMMIT;",
 		},
+		{
+			name: "ROLLBACK TO SAVEPOINT quoted name with spaces",
+			sql:  "BEGIN;\nROLLBACK TO SAVEPOINT \"my save point\";\nCOMMIT;",
+		},
+		{
+			name: "ROLLBACK WORK TO SAVEPOINT quoted name with spaces",
+			sql:  "BEGIN;\nROLLBACK WORK TO SAVEPOINT \"sp 1\";\nCOMMIT;",
+		},
 
 		// ── FAIL ─────────────────────────────────────────────────────────────
 		{
@@ -209,6 +217,12 @@ func TestValidateSnowflakePatterns_Rollback(t *testing.T) {
 			sql:           "BEGIN;\nROLLBACK WORK EXTRA",
 			expectWarning: true,
 			expectedMatch: "unexpected token",
+		},
+		{
+			name:          "ROLLBACK WORK TO without SAVEPOINT keyword",
+			sql:           "BEGIN;\nROLLBACK WORK TO sp1",
+			expectWarning: true,
+			expectedMatch: "ROLLBACK TO requires SAVEPOINT",
 		},
 	})
 }
@@ -385,6 +399,20 @@ func TestValidateSnowflakePatterns_TransactionBlocks(t *testing.T) {
 		{
 			name: "ROLLBACK TO SAVEPOINT then ROLLBACK — transaction closed by bare ROLLBACK",
 			sql:  "BEGIN;\nSAVEPOINT sp1;\nROLLBACK TO SAVEPOINT sp1;\nROLLBACK;",
+		},
+
+		// ── PASS — multiple sequential transactions ────────────────────────
+		{
+			name: "Two sequential transactions — BEGIN COMMIT BEGIN COMMIT",
+			sql:  "BEGIN;\nCOMMIT;\nBEGIN;\nCOMMIT;",
+		},
+
+		// ── FAIL — extra COMMIT after closed transaction ─────────────────
+		{
+			name:          "BEGIN COMMIT then extra COMMIT — second COMMIT has no open transaction",
+			sql:           "BEGIN;\nCOMMIT;\nCOMMIT;",
+			expectWarning: true,
+			expectedMatch: "no open transaction",
 		},
 
 		// ── PASS — scripting inside $$ should not count ──────────────────────
