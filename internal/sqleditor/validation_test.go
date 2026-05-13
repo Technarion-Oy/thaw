@@ -370,6 +370,14 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		// CREATE DATABASE FROM SHARE — valid
 		"CREATE DATABASE my_db FROM SHARE provider_account.share_name",
 		"CREATE DATABASE IF NOT EXISTS my_db FROM SHARE provider.my_share",
+		// Time Travel — valid AT/BEFORE clauses
+		"SELECT * FROM orders AT (TIMESTAMP => '2024-01-01 00:00:00'::TIMESTAMP_LTZ)",
+		"SELECT * FROM orders AT (OFFSET => -3600)",
+		"SELECT * FROM orders AT (STATEMENT => '8e5d0ca9-005e-44e6-b858-a8f5b37c5726')",
+		"SELECT * FROM orders BEFORE (STATEMENT => '8e5d0ca9-005e-44e6-b858-a8f5b37c5726')",
+		"SELECT * FROM orders BEFORE (TIMESTAMP => '2024-01-01 00:00:00'::TIMESTAMP_LTZ)",
+		"SELECT * FROM orders BEFORE (OFFSET => -3600)",
+		"SELECT * FROM orders AT (STREAM => my_stream)",
 	}
 
 	for _, sql := range validQueries {
@@ -4121,6 +4129,90 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 			"ALTER TASK UNSET with unknown property",
 			"ALTER TASK my_task UNSET FOOBAR",
 			[]string{"Unexpected property 'FOOBAR'"},
+		},
+	}
+
+	for _, tc := range invalidCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ranges := GetStatementRanges(tc.sql)
+			markers := ValidateSnowflakePatterns(tc.sql, ranges)
+			warns := getWarnings(markers)
+			if len(warns) == 0 {
+				t.Errorf("Expected warnings for %q, got 0", tc.sql)
+				return
+			}
+			for _, wantMsg := range tc.wantMsgs {
+				found := false
+				for _, w := range warns {
+					if strings.Contains(w.Message, wantMsg) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected warning containing %q for %q, got: %v", wantMsg, tc.sql, warns)
+				}
+			}
+		})
+	}
+}
+
+// ── Time Travel AT / BEFORE Tests ──────────────────────────────────────────
+
+func TestValidateSnowflakePatterns_TimeTravel(t *testing.T) {
+	// ── Valid Time Travel queries ─────────────────────────────────────────
+	validQueries := []string{
+		"SELECT * FROM orders AT (TIMESTAMP => '2024-01-01 00:00:00'::TIMESTAMP_LTZ)",
+		"SELECT * FROM orders AT (OFFSET => -3600)",
+		"SELECT * FROM orders AT (OFFSET => -60*5)",
+		"SELECT * FROM orders AT (STATEMENT => '8e5d0ca9-005e-44e6-b858-a8f5b37c5726')",
+		"SELECT * FROM orders BEFORE (STATEMENT => '8e5d0ca9-005e-44e6-b858-a8f5b37c5726')",
+		"SELECT * FROM orders BEFORE (TIMESTAMP => '2024-01-01 00:00:00'::TIMESTAMP_LTZ)",
+		"SELECT * FROM orders BEFORE (OFFSET => -3600)",
+		"SELECT * FROM orders AT (STREAM => my_stream)",
+		// Fully qualified table with Time Travel
+		"SELECT * FROM db.schema.orders AT (TIMESTAMP => '2024-01-01')",
+		// Time Travel in CLONE context (already supported)
+		"CREATE TABLE t CLONE s AT (TIMESTAMP => TO_TIMESTAMP_TZ('2023-01-01 00:00:00'))",
+		"CREATE STREAM my_stream ON TABLE my_table AT (TIMESTAMP => TO_TIMESTAMP_TZ('2023-01-01 00:00:00'))",
+	}
+
+	for _, sql := range validQueries {
+		t.Run(sql[:min(len(sql), 40)], func(t *testing.T) {
+			ranges := GetStatementRanges(sql)
+			markers := ValidateSnowflakePatterns(sql, ranges)
+			warnings := getWarnings(markers)
+			if len(warnings) > 0 {
+				t.Errorf("Expected 0 warnings for %q, got %d: %v", sql, len(warnings), warnings)
+			}
+		})
+	}
+
+	// ── Invalid Time Travel queries ───────────────────────────────────────
+	invalidCases := []struct {
+		name     string
+		sql      string
+		wantMsgs []string
+	}{
+		{
+			"Missing => operator",
+			"SELECT * FROM orders AT (TIMESTAMP '2024-01-01')",
+			[]string{"Missing '=>' operator"},
+		},
+		{
+			"Multiple arguments",
+			"SELECT * FROM orders AT (TIMESTAMP => '2024-01-01', OFFSET => -60)",
+			[]string{"Multiple keyword arguments"},
+		},
+		{
+			"STREAM in BEFORE clause",
+			"SELECT * FROM orders BEFORE (STREAM => my_stream)",
+			[]string{"STREAM => is not valid in a BEFORE clause"},
+		},
+		{
+			"Missing parentheses",
+			"SELECT * FROM orders AT TIMESTAMP '2024-01-01'",
+			[]string{"requires parentheses"},
 		},
 	}
 

@@ -172,6 +172,7 @@ var joinStopKW = map[string]bool{
 	"INTERSECT": true, "CROSS": true, "INNER": true, "LEFT": true,
 	"RIGHT": true, "FULL": true, "OUTER": true, "NATURAL": true, "JOIN": true,
 	"SELECT": true, "WITH": true, "FROM": true,
+	"AT": true, "BEFORE": true,
 }
 
 var sqlAllKeywords = map[string]bool{

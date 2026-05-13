@@ -431,6 +431,13 @@ var (
 	reIsDropPackagesPolicy        = regexp.MustCompile(`(?i)^\s*DROP\s+PACKAGES\s+POLICY\b`)
 	reAlterPkgPolicyAction        = regexp.MustCompile(`(?i)\b(?:SET\s+(?:ALLOWLIST|BLOCKLIST|ADDITIONAL_CREATION_BLOCKLIST|COMMENT)\b|UNSET\s+(?:ALLOWLIST|BLOCKLIST|ADDITIONAL_CREATION_BLOCKLIST|COMMENT)\b)`)
 
+	// ── Time Travel AT / BEFORE clauses ──────────────────────────────────────
+	reTimeTravelClause = regexp.MustCompile(`(?i)\b(AT|BEFORE)\s*\(`)
+	// Bare AT/BEFORE after a table ref without parentheses (missing parens).
+	reTimeTravelBare = regexp.MustCompile(`(?i)(?:FROM|JOIN)\s+` + _identPath + `\s+(?:AT|BEFORE)\s+(?:TIMESTAMP|OFFSET|STATEMENT|STREAM)\b`)
+	// Valid keyword arguments inside AT/BEFORE clause.
+	reTimeTravelArg = regexp.MustCompile(`(?i)\b(TIMESTAMP|OFFSET|STATEMENT|STREAM)\s*=>`)
+
 	// ── GRANT / REVOKE ────────────────────────────────────────────────────────
 	// reIsGrantRole is used inside validateGrant (not in the top-level dispatch)
 	// to distinguish "GRANT ROLE <name>" (role assignment) from privilege grants.
@@ -1171,7 +1178,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			}
 		}
 
-		// ── Custom check 5: MERGE statement rules ─────────────────────────
+		// ── Custom check 5: Time Travel AT / BEFORE clause validation ────
+		if reTimeTravelClause.MatchString(stripped) || reTimeTravelBare.MatchString(stripped) {
+			markers = append(markers, validateTimeTravelClauses(stripped, r)...)
+		}
+
+		// ── Custom check 6: MERGE statement rules ─────────────────────────
 		if firstTok == "MERGE" {
 			// Find all WHEN clauses
 			reWhen := regexp.MustCompile(`(?i)\bWHEN\s+`)
@@ -5535,5 +5547,92 @@ func validateReleaseSavepointStripped(stripped string, r StatementRange) []DiagM
 		markers = append(markers, diagMarkerSpan(r,
 			"RELEASE SAVEPOINT requires a savepoint name. Use RELEASE SAVEPOINT <name>.", 4))
 	}
+	return markers
+}
+
+// ── validateTimeTravelClauses ─────────────────────────────────────────────────
+
+// validateTimeTravelClauses scans the statement for AT(...) / BEFORE(...)
+// Time Travel clauses and validates their structural correctness:
+//   - The clause must use parentheses (bare AT TIMESTAMP ... is invalid).
+//   - Exactly one keyword argument: TIMESTAMP =>, OFFSET =>, STATEMENT =>,
+//     or STREAM => (AT only).
+//   - Multiple keyword arguments are invalid.
+//   - STREAM => is not valid inside BEFORE.
+//   - The => operator is required.
+func validateTimeTravelClauses(stripped string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// Check for bare AT/BEFORE without parentheses (e.g. FROM t AT TIMESTAMP '...')
+	if reTimeTravelBare.MatchString(stripped) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Time Travel clause requires parentheses. Use AT (TIMESTAMP => ...) or BEFORE (STATEMENT => ...).", 4))
+	}
+
+	// Find each AT(...) / BEFORE(...) occurrence and validate contents.
+	for _, loc := range reTimeTravelClause.FindAllStringSubmatchIndex(stripped, -1) {
+		keyword := strings.ToUpper(stripped[loc[2]:loc[3]]) // "AT" or "BEFORE"
+
+		// Find the opening paren position (end of the keyword match minus 1).
+		parenStart := loc[1] - 1
+		body := extractBalancedBlock(stripped, parenStart)
+		if body == "" {
+			continue // Unbalanced — the syntax checker will flag it.
+		}
+		// Strip outer parens.
+		inner := body[1 : len(body)-1]
+
+		// Count how many valid keyword arguments appear.
+		args := reTimeTravelArg.FindAllStringSubmatch(inner, -1)
+
+		if len(args) == 0 {
+			// Check if the user wrote a keyword without =>
+			reBareKW := regexp.MustCompile(`(?i)\b(TIMESTAMP|OFFSET|STATEMENT|STREAM)\b`)
+			if m := reBareKW.FindStringSubmatch(inner); m != nil {
+				markers = append(markers, diagMarkerSpan(r,
+					"Missing '=>' operator in "+keyword+" clause. Use "+strings.ToUpper(m[1])+" => <value>.", 4))
+			} else {
+				markers = append(markers, diagMarkerSpan(r,
+					"Invalid "+keyword+" clause. Expected one of: TIMESTAMP =>, OFFSET =>, STATEMENT =>"+
+						func() string {
+							if keyword == "AT" {
+								return ", STREAM =>"
+							}
+							return ""
+						}()+".", 4))
+			}
+			continue
+		}
+
+		if len(args) > 1 {
+			markers = append(markers, diagMarkerSpan(r,
+				"Multiple keyword arguments in "+keyword+" clause. Only one of TIMESTAMP, OFFSET, STATEMENT"+
+					func() string {
+						if keyword == "AT" {
+							return ", STREAM"
+						}
+						return ""
+					}()+" is allowed.", 4))
+			continue
+		}
+
+		// Exactly one argument — validate it.
+		argName := strings.ToUpper(args[0][1])
+		validArgs := map[string]bool{
+			"TIMESTAMP": true, "OFFSET": true, "STATEMENT": true, "STREAM": true,
+		}
+		if !validArgs[argName] {
+			markers = append(markers, diagMarkerSpan(r,
+				"Unknown keyword '"+argName+"' in "+keyword+" clause.", 4))
+			continue
+		}
+
+		// STREAM is only valid in AT, not BEFORE.
+		if argName == "STREAM" && keyword == "BEFORE" {
+			markers = append(markers, diagMarkerSpan(r,
+				"STREAM => is not valid in a BEFORE clause. STREAM is only supported with AT.", 4))
+		}
+	}
+
 	return markers
 }
