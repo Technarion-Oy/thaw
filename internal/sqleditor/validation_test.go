@@ -236,13 +236,16 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE PACKAGES POLICY my_pkg_policy LANGUAGE python",
 		// Neither ALLOWLIST nor BLOCKLIST is valid (uses default Anaconda list)
 		"CREATE PACKAGES POLICY default_anaconda_policy LANGUAGE PYTHON",
+		// ALLOWLIST and BLOCKLIST can coexist (BLOCKLIST overrides)
+		"CREATE PACKAGES POLICY my_pkg_policy LANGUAGE PYTHON ALLOWLIST = ('numpy') BLOCKLIST = ('os')",
 		// ALTER / DROP Packages Policy
-		"ALTER PACKAGES POLICY my_pkg_policy SET LANGUAGE PYTHON",
 		"ALTER PACKAGES POLICY my_pkg_policy SET ALLOWLIST = ('numpy')",
 		"ALTER PACKAGES POLICY my_pkg_policy SET BLOCKLIST = ('os')",
+		"ALTER PACKAGES POLICY my_pkg_policy SET ADDITIONAL_CREATION_BLOCKLIST = ('os')",
 		"ALTER PACKAGES POLICY my_pkg_policy SET COMMENT = 'updated'",
 		"ALTER PACKAGES POLICY my_pkg_policy UNSET ALLOWLIST",
 		"ALTER PACKAGES POLICY my_pkg_policy UNSET BLOCKLIST",
+		"ALTER PACKAGES POLICY my_pkg_policy UNSET ADDITIONAL_CREATION_BLOCKLIST",
 		"ALTER PACKAGES POLICY my_pkg_policy UNSET COMMENT",
 		"DROP PACKAGES POLICY my_pkg_policy",
 		"DROP PACKAGES POLICY IF EXISTS my_pkg_policy",
@@ -519,15 +522,15 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Pkg Policy missing LANGUAGE", "CREATE PACKAGES POLICY my_pkg_policy", "Missing mandatory LANGUAGE"},
 		{"Pkg Policy unsupported language", "CREATE PACKAGES POLICY my_pkg_policy LANGUAGE JAVA", "only PYTHON is allowed"},
 		{"Pkg Policy unsupported language Scala", "CREATE PACKAGES POLICY my_pkg_policy LANGUAGE SCALA", "only PYTHON is allowed"},
-		{"Pkg Policy ALLOWLIST and BLOCKLIST", "CREATE PACKAGES POLICY my_pkg_policy LANGUAGE PYTHON ALLOWLIST = ('numpy') BLOCKLIST = ('os')", "mutually exclusive"},
 		{"Pkg Policy with prefix", "CREATE PACKAGES POLICY MY_DB.PUBLIC.bad_policy LANGUAGE PYTHON", "account-level"},
 		{"Pkg Policy OR REPLACE with prefix", "CREATE OR REPLACE PACKAGES POLICY MY_DB.PUBLIC.bad LANGUAGE PYTHON", "account-level"},
 		{"Pkg Policy IF NOT EXISTS with prefix", "CREATE PACKAGES POLICY IF NOT EXISTS MY_DB.PUBLIC.bad_policy LANGUAGE PYTHON", "account-level"},
 		// ALTER / DROP Packages Policy — invalid
-		{"Alter Pkg Policy missing action", "ALTER PACKAGES POLICY my_pkg_policy", "requires SET ALLOWLIST, SET BLOCKLIST, SET COMMENT, SET LANGUAGE, UNSET ALLOWLIST, UNSET BLOCKLIST, or UNSET COMMENT"},
-		{"Alter Pkg Policy unsupported language", "ALTER PACKAGES POLICY my_pkg_policy SET LANGUAGE JAVA", "only PYTHON is allowed"},
-		{"Alter Pkg Policy ALLOWLIST and BLOCKLIST", "ALTER PACKAGES POLICY my_pkg_policy SET ALLOWLIST = ('numpy') SET BLOCKLIST = ('os')", "mutually exclusive"},
+		{"Alter Pkg Policy missing action", "ALTER PACKAGES POLICY my_pkg_policy", "requires SET ALLOWLIST"},
+		{"Alter Pkg Policy with prefix", "ALTER PACKAGES POLICY MY_DB.PUBLIC.bad_policy SET ALLOWLIST = ('numpy')", "account-level"},
 		{"Drop Pkg Policy missing name", "DROP PACKAGES POLICY", "requires a policy name"},
+		{"Drop Pkg Policy with prefix", "DROP PACKAGES POLICY MY_DB.PUBLIC.bad_policy", "account-level"},
+		{"Drop Pkg Policy IF EXISTS with prefix", "DROP PACKAGES POLICY IF EXISTS MY_DB.PUBLIC.bad_policy", "account-level"},
 
 		// Invalid Pipe
 		{"Pipe missing AS", "CREATE PIPE my_pipe", "Missing mandatory AS COPY INTO"},

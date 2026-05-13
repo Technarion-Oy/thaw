@@ -424,15 +424,13 @@ var (
 
 	// ── CREATE PACKAGES POLICY ──────────────────────────────────────────────
 	reIsCreatePackagesPolicy      = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PACKAGES\s+POLICY\b`)
-	rePkgPolicyName               = regexp.MustCompile(`(?i)POLICY\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
+	rePkgPolicyName               = regexp.MustCompile(`(?i)POLICY\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?(` + _identPath + `)`)
 	rePkgPolicyLanguage           = regexp.MustCompile(`(?i)\bLANGUAGE\s+(\w+)`)
-	rePkgPolicyHasAllowlist       = regexp.MustCompile(`(?i)\bALLOWLIST\b`)
-	rePkgPolicyHasBlocklist       = regexp.MustCompile(`(?i)\bBLOCKLIST\b`)
 
 	// ── ALTER / DROP PACKAGES POLICY ────────────────────────────────────────
 	reIsAlterPackagesPolicy       = regexp.MustCompile(`(?i)^\s*ALTER\s+PACKAGES\s+POLICY\b`)
 	reIsDropPackagesPolicy        = regexp.MustCompile(`(?i)^\s*DROP\s+PACKAGES\s+POLICY\b`)
-	reAlterPkgPolicyAction        = regexp.MustCompile(`(?i)\b(?:SET\s+(?:ALLOWLIST|BLOCKLIST|COMMENT|LANGUAGE)\b|UNSET\s+(?:ALLOWLIST|BLOCKLIST|COMMENT)\b)`)
+	reAlterPkgPolicyAction        = regexp.MustCompile(`(?i)\b(?:SET\s+(?:ALLOWLIST|BLOCKLIST|ADDITIONAL_CREATION_BLOCKLIST|COMMENT)\b|UNSET\s+(?:ALLOWLIST|BLOCKLIST|ADDITIONAL_CREATION_BLOCKLIST|COMMENT)\b)`)
 
 	// ── GRANT / REVOKE ────────────────────────────────────────────────────────
 	// reIsGrantRole is used inside validateGrant (not in the top-level dispatch)
@@ -3021,11 +3019,6 @@ func validateCreatePackagesPolicy(parseText string, r StatementRange) []DiagMark
 			fmt.Sprintf("LANGUAGE '%s' is not supported for PACKAGES POLICY; only PYTHON is allowed.", m[1]), 4))
 	}
 
-	// 4. ALLOWLIST and BLOCKLIST are mutually exclusive.
-	if rePkgPolicyHasAllowlist.MatchString(parseText) && rePkgPolicyHasBlocklist.MatchString(parseText) {
-		markers = append(markers, diagMarkerSpan(r, "ALLOWLIST and BLOCKLIST are mutually exclusive in CREATE PACKAGES POLICY.", 4))
-	}
-
 	return markers
 }
 
@@ -3036,22 +3029,17 @@ func validateCreatePackagesPolicy(parseText string, r StatementRange) []DiagMark
 func validateAlterPackagesPolicy(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	if !reAlterPkgPolicyAction.MatchString(parseText) {
-		markers = append(markers, diagMarkerSpan(r,
-			"ALTER PACKAGES POLICY requires SET ALLOWLIST, SET BLOCKLIST, SET COMMENT, SET LANGUAGE, UNSET ALLOWLIST, UNSET BLOCKLIST, or UNSET COMMENT.", 4))
-	}
-
-	// Validate LANGUAGE value if SET LANGUAGE is used.
-	if m := rePkgPolicyLanguage.FindStringSubmatch(parseText); m != nil {
-		if strings.ToUpper(m[1]) != "PYTHON" {
-			markers = append(markers, diagMarkerSpan(r,
-				fmt.Sprintf("LANGUAGE '%s' is not supported for PACKAGES POLICY; only PYTHON is allowed.", m[1]), 4))
+	// 1. Account-level: name must not have a database or schema prefix.
+	if m := rePkgPolicyName.FindStringSubmatch(parseText); m != nil {
+		if sqlIdentPathHasDot(m[1]) {
+			markers = append(markers, diagMarkerSpan(r, "Packages policies are account-level objects and cannot have a database or schema prefix.", 4))
 		}
 	}
 
-	// ALLOWLIST and BLOCKLIST are mutually exclusive.
-	if rePkgPolicyHasAllowlist.MatchString(parseText) && rePkgPolicyHasBlocklist.MatchString(parseText) {
-		markers = append(markers, diagMarkerSpan(r, "ALLOWLIST and BLOCKLIST are mutually exclusive in ALTER PACKAGES POLICY.", 4))
+	// 2. Must contain a valid action.
+	if !reAlterPkgPolicyAction.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r,
+			"ALTER PACKAGES POLICY requires SET ALLOWLIST, SET BLOCKLIST, SET ADDITIONAL_CREATION_BLOCKLIST, SET COMMENT, UNSET ALLOWLIST, UNSET BLOCKLIST, UNSET ADDITIONAL_CREATION_BLOCKLIST, or UNSET COMMENT.", 4))
 	}
 
 	return markers
@@ -3064,6 +3052,14 @@ func validateAlterPackagesPolicy(parseText string, r StatementRange) []DiagMarke
 func validateDropPackagesPolicy(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
+	// 1. Account-level: name must not have a database or schema prefix.
+	if m := rePkgPolicyName.FindStringSubmatch(parseText); m != nil {
+		if sqlIdentPathHasDot(m[1]) {
+			markers = append(markers, diagMarkerSpan(r, "Packages policies are account-level objects and cannot have a database or schema prefix.", 4))
+		}
+	}
+
+	// 2. Policy name is required.
 	if !reDropPolicyHasName.MatchString(parseText) {
 		markers = append(markers, diagMarkerSpan(r, "DROP PACKAGES POLICY requires a policy name.", 4))
 	}
