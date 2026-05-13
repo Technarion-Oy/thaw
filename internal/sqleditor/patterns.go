@@ -5911,17 +5911,20 @@ func validateDropReplicationOrFailoverGroup(parseText string, r StatementRange, 
 func validateCreateDatashare(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	stripped := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	// Strip string literals first so that stripCommentsSQL cannot be misled
+	// by '--' inside a quoted value (e.g. COMMENT = 'test -- value').
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if reOrReplace.MatchString(stripped) && reIfNotExists.MatchString(stripped) {
+	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE DATASHARE statement.", 4))
 		return markers
 	}
 
 	// 2. Datashare name is required; also used for the account-level prefix check.
-	m := reCreateDatashareName.FindStringSubmatch(parseText)
+	m := reCreateDatashareName.FindStringSubmatch(clean)
 	if m == nil {
 		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE DATASHARE statement.", 4))
 		return markers
@@ -5935,8 +5938,6 @@ func validateCreateDatashare(parseText string, r StatementRange) []DiagMarker {
 	validateProperties(parseText, `COMMENT|SHARE_RESTRICTIONS`, r, &markers)
 
 	// 4. SHARE_RESTRICTIONS must be TRUE or FALSE.
-	clean := reStripStringLiterals.ReplaceAllString(
-		strings.TrimSpace(stripCommentsSQL(parseText)), "''")
 	validateBoolProp(clean, "SHARE_RESTRICTIONS", r, &markers)
 
 	return markers
