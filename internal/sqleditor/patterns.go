@@ -440,11 +440,10 @@ var (
 	reReplGroupAllowedAccounts = regexp.MustCompile(`(?i)\bALLOWED_ACCOUNTS\s*=`)
 	reReplGroupAllowedDatabases     = regexp.MustCompile(`(?i)\bALLOWED_DATABASES\s*=`)
 	reReplGroupAllowedIntTypes      = regexp.MustCompile(`(?i)\bALLOWED_INTEGRATION_TYPES\s*=`)
-	reReplGroupSchedule             = regexp.MustCompile(`(?i)\bREPLICATION_SCHEDULE\s*=`)
 	// reReplGroupObjectTypesValue captures the value portion after OBJECT_TYPES =
-	// up to the next known keyword boundary, so substring checks for DATABASES
-	// or INTEGRATIONS only examine the actual type list — not the group name.
-	reReplGroupObjectTypesValue     = regexp.MustCompile(`(?i)\bOBJECT_TYPES\s*=\s*(.+?)\s+(?:ALLOWED_|IGNORE\s+EDITION|REPLICATION_SCHEDULE)`)
+	// up to the next known keyword boundary (or end-of-string), so substring
+	// checks for DATABASES or INTEGRATIONS only examine the actual type list.
+	reReplGroupObjectTypesValue     = regexp.MustCompile(`(?i)\bOBJECT_TYPES\s*=\s*(.+?)(?:\s+(?:ALLOWED_|IGNORE\s+EDITION|REPLICATION_SCHEDULE)|\s*$)`)
 	// ALTER actions
 	reAlterReplGroupAdd          = regexp.MustCompile(`(?i)\bADD\s+` + _ident)
 	reAlterReplGroupRemove       = regexp.MustCompile(`(?i)\bREMOVE\s+` + _ident)
@@ -5788,27 +5787,29 @@ func validateAlterReplicationOrFailoverGroup(parseText string, r StatementRange,
 	clean := reStripStringLiterals.ReplaceAllString(noComments, "''")
 
 	// 1. Group name is required.
-	m := reReplGroupName.FindStringSubmatch(clean)
-	if m == nil {
+	mLoc := reReplGroupName.FindStringIndex(clean)
+	if mLoc == nil {
 		markers = append(markers, diagMarkerSpan(r,
 			fmt.Sprintf("ALTER %s GROUP requires a group name.", groupType), 4))
 		return markers
 	}
 
-	// 2. Must contain a valid action.
-	hasAction := reAlterReplGroupAdd.MatchString(clean) ||
-		reAlterReplGroupRemove.MatchString(clean) ||
-		reAlterReplGroupMoveDatabases.MatchString(clean) ||
-		reAlterReplGroupSet.MatchString(clean) ||
-		reAlterReplGroupRename.MatchString(clean) ||
-		reReplGroupSchedule.MatchString(clean)
+	// 2. Must contain a valid action. Check only the portion after the group
+	// name so that a group named "primary", "refresh", etc. doesn't falsely
+	// satisfy the action check.
+	afterName := clean[mLoc[1]:]
+	hasAction := reAlterReplGroupAdd.MatchString(afterName) ||
+		reAlterReplGroupRemove.MatchString(afterName) ||
+		reAlterReplGroupMoveDatabases.MatchString(afterName) ||
+		reAlterReplGroupSet.MatchString(afterName) ||
+		reAlterReplGroupRename.MatchString(afterName)
 
 	if groupType == "FAILOVER" {
 		hasAction = hasAction ||
-			reAlterFailoverPrimary.MatchString(clean) ||
-			reAlterFailoverRefresh.MatchString(clean) ||
-			reAlterFailoverSuspend.MatchString(clean) ||
-			reAlterFailoverResume.MatchString(clean)
+			reAlterFailoverPrimary.MatchString(afterName) ||
+			reAlterFailoverRefresh.MatchString(afterName) ||
+			reAlterFailoverSuspend.MatchString(afterName) ||
+			reAlterFailoverResume.MatchString(afterName)
 	}
 
 	if !hasAction {
@@ -5823,7 +5824,7 @@ func validateAlterReplicationOrFailoverGroup(parseText string, r StatementRange,
 	}
 
 	// 3. MOVE DATABASES requires TO REPLICATION GROUP <name>.
-	if reAlterReplGroupMoveDatabases.MatchString(clean) && !reAlterReplGroupMoveTo.MatchString(clean) {
+	if reAlterReplGroupMoveDatabases.MatchString(afterName) && !reAlterReplGroupMoveTo.MatchString(afterName) {
 		markers = append(markers, diagMarkerSpan(r,
 			fmt.Sprintf("MOVE DATABASES in ALTER %s GROUP requires TO REPLICATION GROUP <name>.", groupType), 4))
 	}
@@ -5839,7 +5840,8 @@ func validateAlterReplicationOrFailoverGroup(parseText string, r StatementRange,
 func validateDropReplicationOrFailoverGroup(parseText string, r StatementRange, groupType string) []DiagMarker {
 	var markers []DiagMarker
 
-	clean := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
+	clean := reStripStringLiterals.ReplaceAllString(noComments, "''")
 
 	m := reReplGroupName.FindStringSubmatch(clean)
 	if m == nil {
