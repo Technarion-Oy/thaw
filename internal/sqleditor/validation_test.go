@@ -237,6 +237,7 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		// Neither ALLOWLIST nor BLOCKLIST is valid (uses default Anaconda list)
 		"CREATE PACKAGES POLICY my_pkg_policy LANGUAGE PYTHON",
 		// ALTER / DROP Packages Policy
+		"ALTER PACKAGES POLICY my_pkg_policy SET LANGUAGE PYTHON",
 		"ALTER PACKAGES POLICY my_pkg_policy SET ALLOWLIST = ('numpy')",
 		"ALTER PACKAGES POLICY my_pkg_policy SET BLOCKLIST = ('os')",
 		"ALTER PACKAGES POLICY my_pkg_policy SET COMMENT = 'updated'",
@@ -515,6 +516,7 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 
 		// Invalid Packages Policies
 		{"Pkg Policy OR REPLACE with IF NOT EXISTS", "CREATE OR REPLACE PACKAGES POLICY IF NOT EXISTS my_pkg_policy LANGUAGE PYTHON", "Conflict between OR REPLACE and IF NOT EXISTS"},
+		{"Pkg Policy missing LANGUAGE", "CREATE PACKAGES POLICY my_pkg_policy", "Missing mandatory LANGUAGE"},
 		{"Pkg Policy unsupported language", "CREATE PACKAGES POLICY my_pkg_policy LANGUAGE JAVA", "only PYTHON is allowed"},
 		{"Pkg Policy unsupported language Scala", "CREATE PACKAGES POLICY my_pkg_policy LANGUAGE SCALA", "only PYTHON is allowed"},
 		{"Pkg Policy ALLOWLIST and BLOCKLIST", "CREATE PACKAGES POLICY my_pkg_policy LANGUAGE PYTHON ALLOWLIST = ('numpy') BLOCKLIST = ('os')", "mutually exclusive"},
@@ -522,6 +524,7 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Pkg Policy OR REPLACE with prefix", "CREATE OR REPLACE PACKAGES POLICY MY_DB.PUBLIC.bad LANGUAGE PYTHON", "account-level"},
 		// ALTER / DROP Packages Policy — invalid
 		{"Alter Pkg Policy missing action", "ALTER PACKAGES POLICY my_pkg_policy", "requires SET ALLOWLIST, SET BLOCKLIST, SET COMMENT, UNSET ALLOWLIST, UNSET BLOCKLIST, or UNSET COMMENT"},
+		{"Alter Pkg Policy unsupported language", "ALTER PACKAGES POLICY my_pkg_policy SET LANGUAGE JAVA", "only PYTHON is allowed"},
 		{"Drop Pkg Policy missing name", "DROP PACKAGES POLICY", "requires a policy name"},
 
 		// Invalid Pipe
