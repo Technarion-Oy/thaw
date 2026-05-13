@@ -5786,12 +5786,17 @@ func validateAlterReplicationOrFailoverGroup(parseText string, r StatementRange,
 	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
 	clean := reStripStringLiterals.ReplaceAllString(noComments, "''")
 
-	// 1. Group name is required.
+	// 1. Group name is required and must be account-level (no dot prefix).
+	m := reReplGroupName.FindStringSubmatch(clean)
 	mLoc := reReplGroupName.FindStringIndex(clean)
 	if mLoc == nil {
 		markers = append(markers, diagMarkerSpan(r,
 			fmt.Sprintf("ALTER %s GROUP requires a group name.", groupType), 4))
 		return markers
+	}
+	if sqlIdentPathHasDot(m[1]) {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("%s groups are account-level objects and cannot have a database or schema prefix.", groupType), 4))
 	}
 
 	// 2. Must contain a valid action. Check only the portion after the group
@@ -5847,6 +5852,11 @@ func validateDropReplicationOrFailoverGroup(parseText string, r StatementRange, 
 	if m == nil {
 		markers = append(markers, diagMarkerSpan(r,
 			fmt.Sprintf("DROP %s GROUP requires a group name.", groupType), 4))
+		return markers
+	}
+	if sqlIdentPathHasDot(m[1]) {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("%s groups are account-level objects and cannot have a database or schema prefix.", groupType), 4))
 	}
 
 	return markers

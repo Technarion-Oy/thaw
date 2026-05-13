@@ -370,13 +370,6 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		// CREATE DATABASE FROM SHARE — valid
 		"CREATE DATABASE my_db FROM SHARE provider_account.share_name",
 		"CREATE DATABASE IF NOT EXISTS my_db FROM SHARE provider.my_share",
-		// REPLICATION / FAILOVER GROUP — smoke tests (full coverage in TestValidateSnowflakePatterns_ReplicationFailoverGroup)
-		"CREATE REPLICATION GROUP my_rg OBJECT_TYPES = ROLES ALLOWED_ACCOUNTS = org1.acct1",
-		"ALTER REPLICATION GROUP my_rg ADD org1.acct2",
-		"DROP REPLICATION GROUP my_rg",
-		"CREATE FAILOVER GROUP my_fg OBJECT_TYPES = ROLES ALLOWED_ACCOUNTS = org1.acct1",
-		"ALTER FAILOVER GROUP my_fg PRIMARY",
-		"DROP FAILOVER GROUP my_fg",
 		// Time Travel — valid AT/BEFORE clauses
 		"SELECT * FROM orders AT (TIMESTAMP => '2024-01-01 00:00:00'::TIMESTAMP_LTZ)",
 		"SELECT * FROM orders AT (OFFSET => -3600)",
@@ -4441,6 +4434,38 @@ func TestValidateSnowflakePatterns_ReplicationFailoverGroup(t *testing.T) {
 			"ALTER FAILOVER GROUP named refresh with no action",
 			"ALTER FAILOVER GROUP refresh",
 			[]string{"ALTER FAILOVER GROUP requires an action"},
+		},
+		{
+			"ALTER FAILOVER GROUP named suspend with no action",
+			"ALTER FAILOVER GROUP suspend",
+			[]string{"ALTER FAILOVER GROUP requires an action"},
+		},
+		{
+			"ALTER FAILOVER GROUP named resume with no action",
+			"ALTER FAILOVER GROUP resume",
+			[]string{"ALTER FAILOVER GROUP requires an action"},
+		},
+		// ALTER — account-level prefix check
+		{
+			"ALTER REPL GROUP db.schema prefix",
+			"ALTER REPLICATION GROUP mydb.my_rg ADD org1.acct2",
+			[]string{"account-level objects and cannot have a database or schema prefix"},
+		},
+		{
+			"ALTER FAILOVER GROUP db.schema prefix",
+			"ALTER FAILOVER GROUP mydb.my_fg PRIMARY",
+			[]string{"account-level objects and cannot have a database or schema prefix"},
+		},
+		// DROP — account-level prefix check
+		{
+			"DROP REPL GROUP db.schema prefix",
+			"DROP REPLICATION GROUP mydb.my_rg",
+			[]string{"account-level objects and cannot have a database or schema prefix"},
+		},
+		{
+			"DROP FAILOVER GROUP db.schema prefix",
+			"DROP FAILOVER GROUP mydb.my_fg",
+			[]string{"account-level objects and cannot have a database or schema prefix"},
 		},
 		// DROP — missing name
 		{
