@@ -581,10 +581,11 @@ var (
 	reAlterDatashareAddAcctList    = regexp.MustCompile(`(?i)\bADD\s+ACCOUNTS\s*=\s*` + _ident)
 	reAlterDatashareRemoveAccounts = regexp.MustCompile(`(?i)\bREMOVE\s+ACCOUNTS\s*=`)
 	reAlterDatashareRemoveAcctList = regexp.MustCompile(`(?i)\bREMOVE\s+ACCOUNTS\s*=\s*` + _ident)
-	reAlterDatashareAddDatabases    = regexp.MustCompile(`(?i)\bADD\s+DATABASES\b`)
-	reAlterDatashareAddDbList       = regexp.MustCompile(`(?i)\bADD\s+DATABASES\s+` + _ident)
-	reAlterDatashareRemoveDatabases = regexp.MustCompile(`(?i)\bREMOVE\s+DATABASES\b`)
-	reAlterDatashareRemoveDbList    = regexp.MustCompile(`(?i)\bREMOVE\s+DATABASES\s+` + _ident)
+	reAlterDatashareAddDatabases     = regexp.MustCompile(`(?i)\bADD\s+DATABASES\b`)
+	reAlterDatashareAddDbList        = regexp.MustCompile(`(?i)\bADD\s+DATABASES\s+` + _ident)
+	reAlterDatashareRemoveDatabases  = regexp.MustCompile(`(?i)\bREMOVE\s+DATABASES\b`)
+	reAlterDatashareRemoveDbList     = regexp.MustCompile(`(?i)\bREMOVE\s+DATABASES\s+` + _ident)
+	reAlterDatashareShareRestrict    = regexp.MustCompile(`(?i)\bSHARE_RESTRICTIONS\b`)
 	// reAlterDatashareAction matches any known ALTER DATASHARE sub-command.
 	reAlterDatashareAction = regexp.MustCompile(`(?i)\b(?:ADD\s+ACCOUNTS|REMOVE\s+ACCOUNTS|ADD\s+DATABASES|REMOVE\s+DATABASES|SET\s+COMMENT|UNSET\s+COMMENT)\b`)
 	// ── DROP DATASHARE ───────────────────────────────────────────────────────
@@ -5935,10 +5936,8 @@ func validateCreateDatashare(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 3. Only COMMENT and SHARE_RESTRICTIONS are valid properties.
-	// Pass noLiterals (comments not yet stripped) so that validateProperties'
-	// internal literal stripping is not redundant; comments were stripped in
-	// clean but validateProperties only strips literals, not comments — use
-	// the comment-stripped noComments intermediate instead.
+	// validateProperties strips string literals internally but not comments,
+	// so pass the comment-stripped (but literals-intact) form.
 	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
 	validateProperties(noComments, `COMMENT|SHARE_RESTRICTIONS`, r, &markers)
 
@@ -6010,7 +6009,7 @@ func validateAlterDatashare(parseText string, r StatementRange) []DiagMarker {
 
 	// 7. SHARE_RESTRICTIONS validation: always check the boolean value, and
 	// warn if it appears without ADD ACCOUNTS (the only valid context).
-	hasShareRestrictions := regexp.MustCompile(`(?i)\bSHARE_RESTRICTIONS\b`).MatchString(clean)
+	hasShareRestrictions := reAlterDatashareShareRestrict.MatchString(clean)
 	if hasShareRestrictions {
 		validateBoolProp(clean, "SHARE_RESTRICTIONS", r, &markers)
 		if !hasAddAccounts {
