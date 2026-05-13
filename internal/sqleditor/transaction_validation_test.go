@@ -420,5 +420,35 @@ func TestValidateSnowflakePatterns_TransactionBlocks(t *testing.T) {
 			name: "BEGIN inside dollar-quoted procedure body — not a transaction",
 			sql:  "CREATE PROCEDURE foo() RETURNS VARCHAR LANGUAGE SQL AS $$ BEGIN RETURN 'ok'; END; $$;",
 		},
+
+		// ── PASS — anonymous scripting blocks (BEGIN + scripting keyword) ─
+		{
+			name: "Anonymous block with LET — not a transaction",
+			sql:  "BEGIN\n  LET x := 1;\nRETURN x;\nEND;",
+		},
+		{
+			name: "Anonymous block with IF — not a transaction",
+			sql:  "BEGIN\n  IF (TRUE) THEN\n    RETURN 1;\n  END IF;\nEND;",
+		},
+		{
+			name: "Anonymous block with DECLARE — not a transaction",
+			sql:  "BEGIN\n  DECLARE x INT;\n  x := 1;\nEND;",
+		},
+		{
+			name: "Anonymous block with FOR — not a transaction",
+			sql:  "BEGIN\n  FOR i IN 1 TO 10 DO\n    INSERT INTO t VALUES (i);\n  END FOR;\nEND;",
+		},
+		{
+			name: "Anonymous block with WHILE — not a transaction",
+			sql:  "BEGIN\n  WHILE (TRUE) DO\n    BREAK;\n  END WHILE;\nEND;",
+		},
+		{
+			name: "Anonymous block with RETURN — not a transaction",
+			sql:  "BEGIN\n  RETURN 42;\nEND;",
+		},
+		{
+			name: "Anonymous block with CALL — not a transaction",
+			sql:  "BEGIN\n  CALL my_proc();\nEND;",
+		},
 	})
 }

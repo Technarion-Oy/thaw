@@ -573,6 +573,12 @@ var (
 
 	// BEGIN [WORK|TRANSACTION] [NAME <ident>] — the full valid form.
 	reBeginValid = regexp.MustCompile(`(?i)^\s*BEGIN(\s+(WORK|TRANSACTION))?\s*$`)
+	// Detects a scripting block: BEGIN followed by a known scripting keyword
+	// (LET, IF, FOR, WHILE, LOOP, DECLARE, RETURN, CASE, CALL).
+	// GetStatementRanges splits on semicolons, so the first "statement" of an
+	// anonymous block looks like "BEGIN\n  LET x := 1" — this regex catches
+	// that pattern so we skip transaction validation and txnDepth tracking.
+	reBeginScripting = regexp.MustCompile(`(?i)^\s*BEGIN\s+(?:LET|IF|FOR|WHILE|LOOP|DECLARE|RETURN|CASE|CALL)\b`)
 	// BEGIN ... NAME <ident> variant (supports quoted identifiers).
 	reBeginName = regexp.MustCompile(`(?i)^\s*BEGIN(\s+(WORK|TRANSACTION))?\s+NAME\s+` + _ident + `\s*$`)
 	// BEGIN ... NAME (bare, missing name).
@@ -1954,7 +1960,14 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 
 		// ── BEGIN (transaction) ─────────────────────────────────────────
 		if reIsBegin.MatchString(parseText) {
-			markers = append(markers, validateBegin(parseText, r)...)
+			// Skip anonymous scripting blocks (BEGIN followed by LET, IF, etc.).
+			// GetStatementRanges splits on semicolons, so the first "statement"
+			// of an anonymous block looks like "BEGIN\n  LET x := 1".
+			beginStripped := strings.TrimSpace(stripCommentsSQL(parseText))
+			if reBeginScripting.MatchString(beginStripped) {
+				continue // scripting block, not a transaction
+			}
+			markers = append(markers, validateBeginStripped(beginStripped, r)...)
 			if txnDepth > 0 {
 				markers = append(markers, diagMarkerSpan(r,
 					"Snowflake does not support nested BEGIN. A transaction is already open.", 4))
@@ -1969,7 +1982,8 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 
 		// ── COMMIT ──────────────────────────────────────────────────────
 		if reIsCommit.MatchString(parseText) {
-			markers = append(markers, validateCommit(parseText, r)...)
+			commitStripped := strings.TrimSpace(stripCommentsSQL(parseText))
+			markers = append(markers, validateCommitStripped(commitStripped, r)...)
 			if txnDepth == 0 {
 				markers = append(markers, diagMarkerSpan(r,
 					"COMMIT with no open transaction. Add BEGIN before COMMIT.", 4))
@@ -2000,13 +2014,15 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 
 		// ── SAVEPOINT ───────────────────────────────────────────────────
 		if reIsSavepoint.MatchString(parseText) {
-			markers = append(markers, validateSavepoint(parseText, r)...)
+			spStripped := strings.TrimSpace(stripCommentsSQL(parseText))
+			markers = append(markers, validateSavepointStripped(spStripped, r)...)
 			continue
 		}
 
 		// ── RELEASE SAVEPOINT ───────────────────────────────────────────
 		if reIsReleaseSavepoint.MatchString(parseText) {
-			markers = append(markers, validateReleaseSavepoint(parseText, r)...)
+			relStripped := strings.TrimSpace(stripCommentsSQL(parseText))
+			markers = append(markers, validateReleaseSavepointStripped(relStripped, r)...)
 			continue
 		}
 
@@ -5157,13 +5173,13 @@ func matchStringLiteral(s string) int {
 
 // ── validateBegin ─────────────────────────────────────────────────────────────
 
-// validateBegin validates a BEGIN statement:
+// validateBeginStripped validates a BEGIN statement from already-stripped text
+// (comments removed, trimmed).
 //   - BEGIN [WORK | TRANSACTION] [NAME <name>]
 //   - WORK and TRANSACTION are optional synonyms.
 //   - NAME <name> provides an optional transaction name (identifier).
-func validateBegin(parseText string, r StatementRange) []DiagMarker {
+func validateBeginStripped(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
 
 	// BEGIN [WORK|TRANSACTION] with optional NAME <ident>
 	if reBeginName.MatchString(stripped) {
@@ -5183,12 +5199,12 @@ func validateBegin(parseText string, r StatementRange) []DiagMarker {
 
 // ── validateCommit ────────────────────────────────────────────────────────────
 
-// validateCommit validates a COMMIT statement:
+// validateCommitStripped validates a COMMIT statement from already-stripped text
+// (comments removed, trimmed).
 //   - COMMIT [WORK]
 //   - WORK is optional and redundant; extra tokens should warn.
-func validateCommit(parseText string, r StatementRange) []DiagMarker {
+func validateCommitStripped(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
 
 	if !reCommitValid.MatchString(stripped) {
 		markers = append(markers, diagMarkerSpan(r,
@@ -5231,11 +5247,11 @@ func validateRollbackStripped(stripped string, r StatementRange) []DiagMarker {
 
 // ── validateSavepoint ─────────────────────────────────────────────────────────
 
-// validateSavepoint validates a SAVEPOINT statement:
+// validateSavepointStripped validates a SAVEPOINT statement from already-stripped
+// text (comments removed, trimmed).
 //   - SAVEPOINT <name> — name is mandatory.
-func validateSavepoint(parseText string, r StatementRange) []DiagMarker {
+func validateSavepointStripped(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
 
 	if !reSavepointHasName.MatchString(stripped) {
 		markers = append(markers, diagMarkerSpan(r,
@@ -5246,11 +5262,11 @@ func validateSavepoint(parseText string, r StatementRange) []DiagMarker {
 
 // ── validateReleaseSavepoint ──────────────────────────────────────────────────
 
-// validateReleaseSavepoint validates a RELEASE SAVEPOINT statement:
+// validateReleaseSavepointStripped validates a RELEASE SAVEPOINT statement from
+// already-stripped text (comments removed, trimmed).
 //   - RELEASE SAVEPOINT <name> — name is mandatory.
-func validateReleaseSavepoint(parseText string, r StatementRange) []DiagMarker {
+func validateReleaseSavepointStripped(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	stripped := strings.TrimSpace(stripCommentsSQL(parseText))
 
 	if !reReleaseSavepointHasName.MatchString(stripped) {
 		markers = append(markers, diagMarkerSpan(r,
