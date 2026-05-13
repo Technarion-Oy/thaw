@@ -431,6 +431,37 @@ var (
 	reIsDropPackagesPolicy        = regexp.MustCompile(`(?i)^\s*DROP\s+PACKAGES\s+POLICY\b`)
 	reAlterPkgPolicyAction        = regexp.MustCompile(`(?i)\b(?:SET\s+(?:ALLOWLIST|BLOCKLIST|ADDITIONAL_CREATION_BLOCKLIST|COMMENT)\b|UNSET\s+(?:ALLOWLIST|BLOCKLIST|ADDITIONAL_CREATION_BLOCKLIST|COMMENT)\b)`)
 
+	// ── CREATE / ALTER / DROP REPLICATION GROUP ─────────────────────────────
+	reIsCreateReplicationGroup = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?REPLICATION\s+GROUP\b`)
+	reIsAlterReplicationGroup  = regexp.MustCompile(`(?i)^\s*ALTER\s+REPLICATION\s+GROUP\b`)
+	reIsDropReplicationGroup   = regexp.MustCompile(`(?i)^\s*DROP\s+REPLICATION\s+GROUP\b`)
+	reReplGroupName            = regexp.MustCompile(`(?i)(?:REPLICATION|FAILOVER)\s+GROUP\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?(` + _identPath + `)`)
+	reReplGroupObjectTypes     = regexp.MustCompile(`(?i)\bOBJECT_TYPES\s*=`)
+	reReplGroupAllowedAccounts = regexp.MustCompile(`(?i)\bALLOWED_ACCOUNTS\s*=`)
+	reReplGroupAllowedDatabases     = regexp.MustCompile(`(?i)\bALLOWED_DATABASES\s*=`)
+	reReplGroupAllowedIntTypes      = regexp.MustCompile(`(?i)\bALLOWED_INTEGRATION_TYPES\s*=`)
+	// reReplGroupObjectTypesValue captures the value portion after OBJECT_TYPES =
+	// up to the next known keyword boundary (or end-of-string), so substring
+	// checks for DATABASES or INTEGRATIONS only examine the actual type list.
+	reReplGroupObjectTypesValue     = regexp.MustCompile(`(?i)\bOBJECT_TYPES\s*=\s*(.+?)(?:\s+(?:ALLOWED_|IGNORE\s+EDITION|REPLICATION_SCHEDULE)|\s*$)`)
+	// ALTER actions
+	reAlterReplGroupAdd          = regexp.MustCompile(`(?i)\bADD\s+` + _ident)
+	reAlterReplGroupRemove       = regexp.MustCompile(`(?i)\bREMOVE\s+` + _ident)
+	reAlterReplGroupMoveDatabases = regexp.MustCompile(`(?i)\bMOVE\s+DATABASES\b`)
+	reAlterReplGroupMoveTo        = regexp.MustCompile(`(?i)\bTO\s+REPLICATION\s+GROUP\s+` + _ident)
+	reAlterReplGroupSet           = regexp.MustCompile(`(?i)\bSET\s+(?:REPLICATION_SCHEDULE|OBJECT_TYPES)\b`)
+	reAlterReplGroupRename        = regexp.MustCompile(`(?i)\bRENAME\s+TO\s+` + _ident)
+
+	// ── CREATE / ALTER / DROP FAILOVER GROUP ────────────────────────────────
+	reIsCreateFailoverGroup = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?FAILOVER\s+GROUP\b`)
+	reIsAlterFailoverGroup  = regexp.MustCompile(`(?i)^\s*ALTER\s+FAILOVER\s+GROUP\b`)
+	reIsDropFailoverGroup   = regexp.MustCompile(`(?i)^\s*DROP\s+FAILOVER\s+GROUP\b`)
+	reFailoverGroupAllowedAccounts = regexp.MustCompile(`(?i)\bALLOWED_(?:FAILOVER_)?ACCOUNTS\s*=`)
+	reAlterFailoverPrimary  = regexp.MustCompile(`(?i)\bPRIMARY\b`)
+	reAlterFailoverRefresh  = regexp.MustCompile(`(?i)\bREFRESH\b`)
+	reAlterFailoverSuspend  = regexp.MustCompile(`(?i)\bSUSPEND\b`)
+	reAlterFailoverResume   = regexp.MustCompile(`(?i)\bRESUME\b`)
+
 	// ── Time Travel AT / BEFORE clauses ──────────────────────────────────────
 	reTimeTravelClause = regexp.MustCompile(`(?i)\b(AT|BEFORE)\s*\(`)
 	// Bare AT/BEFORE after a table ref without parentheses (missing parens).
@@ -1878,6 +1909,42 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// ── Preamble: DROP PACKAGES POLICY ──────────────────────────────
 		if reIsDropPackagesPolicy.MatchString(parseText) {
 			markers = append(markers, validateDropPackagesPolicy(parseText, r)...)
+			continue
+		}
+
+		// ── CREATE REPLICATION GROUP ─────────────────────────────────────
+		if reIsCreateReplicationGroup.MatchString(parseText) {
+			markers = append(markers, validateCreateReplicationGroup(parseText, r)...)
+			continue
+		}
+
+		// ── ALTER REPLICATION GROUP ──────────────────────────────────────
+		if reIsAlterReplicationGroup.MatchString(parseText) {
+			markers = append(markers, validateAlterReplicationOrFailoverGroup(parseText, r, "REPLICATION")...)
+			continue
+		}
+
+		// ── DROP REPLICATION GROUP ───────────────────────────────────────
+		if reIsDropReplicationGroup.MatchString(parseText) {
+			markers = append(markers, validateDropReplicationOrFailoverGroup(parseText, r, "REPLICATION")...)
+			continue
+		}
+
+		// ── CREATE FAILOVER GROUP ────────────────────────────────────────
+		if reIsCreateFailoverGroup.MatchString(parseText) {
+			markers = append(markers, validateCreateFailoverGroup(parseText, r)...)
+			continue
+		}
+
+		// ── ALTER FAILOVER GROUP ─────────────────────────────────────────
+		if reIsAlterFailoverGroup.MatchString(parseText) {
+			markers = append(markers, validateAlterReplicationOrFailoverGroup(parseText, r, "FAILOVER")...)
+			continue
+		}
+
+		// ── DROP FAILOVER GROUP ──────────────────────────────────────────
+		if reIsDropFailoverGroup.MatchString(parseText) {
+			markers = append(markers, validateDropReplicationOrFailoverGroup(parseText, r, "FAILOVER")...)
 			continue
 		}
 
@@ -5618,6 +5685,178 @@ func validateTimeTravelClauses(stripped string, r StatementRange) []DiagMarker {
 			markers = append(markers, diagMarkerSpan(r,
 				"STREAM => is not valid in a BEFORE clause. STREAM is only supported with AT.", 4))
 		}
+	}
+
+	return markers
+}
+
+// ── validateCreateReplicationGroup ────────────────────────────────────────────
+
+// validateCreateReplicationGroup checks structural requirements for
+// CREATE [OR REPLACE] REPLICATION GROUP:
+//   - Group name is required and must not have a db.schema prefix (account-level).
+//   - OBJECT_TYPES is mandatory.
+//   - ALLOWED_ACCOUNTS is mandatory.
+//   - If OBJECT_TYPES includes DATABASES, ALLOWED_DATABASES is required.
+//   - If OBJECT_TYPES includes INTEGRATIONS, ALLOWED_INTEGRATION_TYPES is required.
+func validateCreateReplicationGroup(parseText string, r StatementRange) []DiagMarker {
+	return validateCreateReplOrFailoverGroup(parseText, r, "REPLICATION")
+}
+
+// ── validateCreateFailoverGroup ──────────────────────────────────────────────
+
+// validateCreateFailoverGroup checks structural requirements for
+// CREATE [OR REPLACE] FAILOVER GROUP. Same rules as REPLICATION GROUP.
+func validateCreateFailoverGroup(parseText string, r StatementRange) []DiagMarker {
+	return validateCreateReplOrFailoverGroup(parseText, r, "FAILOVER")
+}
+
+// validateCreateReplOrFailoverGroup is the shared implementation for both
+// CREATE REPLICATION GROUP and CREATE FAILOVER GROUP validation.
+func validateCreateReplOrFailoverGroup(parseText string, r StatementRange, groupType string) []DiagMarker {
+	var markers []DiagMarker
+
+	// Strip comments and string literals so commented-out clauses and quoted
+	// values cannot cause false positives.
+	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
+	clean := reStripStringLiterals.ReplaceAllString(noComments, "''")
+
+	// 1. Group name is required and must be account-level (no dot prefix).
+	m := reReplGroupName.FindStringSubmatch(clean)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("CREATE %s GROUP requires a group name.", groupType), 4))
+		return markers
+	}
+	if sqlIdentPathHasDot(m[1]) {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("%s groups are account-level objects and cannot have a database or schema prefix.", groupType), 4))
+	}
+
+	// 2. OBJECT_TYPES is mandatory.
+	if !reReplGroupObjectTypes.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("Missing mandatory OBJECT_TYPES in CREATE %s GROUP.", groupType), 4))
+		return markers
+	}
+
+	// 3. ALLOWED_ACCOUNTS (or ALLOWED_FAILOVER_ACCOUNTS for failover) is mandatory.
+	if groupType == "FAILOVER" {
+		if !reFailoverGroupAllowedAccounts.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"Missing mandatory ALLOWED_ACCOUNTS or ALLOWED_FAILOVER_ACCOUNTS in CREATE FAILOVER GROUP.", 4))
+		}
+	} else {
+		if !reReplGroupAllowedAccounts.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"Missing mandatory ALLOWED_ACCOUNTS in CREATE REPLICATION GROUP.", 4))
+		}
+	}
+
+	// 4–5. Extract the OBJECT_TYPES value list and check for DATABASES / INTEGRATIONS.
+	// We only inspect the captured value portion (not the entire SQL) to avoid
+	// false positives when the group name itself contains "databases" or "integrations".
+	if otMatch := reReplGroupObjectTypesValue.FindStringSubmatch(clean); otMatch != nil {
+		otValue := strings.ToUpper(otMatch[1])
+		if strings.Contains(otValue, "DATABASES") && !reReplGroupAllowedDatabases.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("OBJECT_TYPES includes DATABASES but ALLOWED_DATABASES is missing in CREATE %s GROUP.", groupType), 4))
+		}
+		if strings.Contains(otValue, "INTEGRATIONS") && !reReplGroupAllowedIntTypes.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("OBJECT_TYPES includes INTEGRATIONS but ALLOWED_INTEGRATION_TYPES is missing in CREATE %s GROUP.", groupType), 4))
+		}
+	}
+
+	return markers
+}
+
+// ── validateAlterReplicationOrFailoverGroup ───────────────────────────────────
+
+// validateAlterReplicationOrFailoverGroup checks structural requirements for
+// ALTER REPLICATION GROUP and ALTER FAILOVER GROUP:
+//   - Group name is required.
+//   - Must contain a valid action (ADD, REMOVE, MOVE DATABASES, SET, RENAME TO,
+//     or for FAILOVER: PRIMARY, REFRESH, SUSPEND, RESUME).
+func validateAlterReplicationOrFailoverGroup(parseText string, r StatementRange, groupType string) []DiagMarker {
+	var markers []DiagMarker
+
+	// Strip comments and string literals so trailing -- comments and quoted
+	// values cannot cause false positives or missed matches.
+	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
+	clean := reStripStringLiterals.ReplaceAllString(noComments, "''")
+
+	// 1. Group name is required and must be account-level (no dot prefix).
+	m := reReplGroupName.FindStringSubmatch(clean)
+	mLoc := reReplGroupName.FindStringIndex(clean)
+	if mLoc == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("ALTER %s GROUP requires a group name.", groupType), 4))
+		return markers
+	}
+	if sqlIdentPathHasDot(m[1]) {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("%s groups are account-level objects and cannot have a database or schema prefix.", groupType), 4))
+	}
+
+	// 2. Must contain a valid action. Check only the portion after the group
+	// name so that a group named "primary", "refresh", etc. doesn't falsely
+	// satisfy the action check.
+	afterName := clean[mLoc[1]:]
+	hasAction := reAlterReplGroupAdd.MatchString(afterName) ||
+		reAlterReplGroupRemove.MatchString(afterName) ||
+		reAlterReplGroupMoveDatabases.MatchString(afterName) ||
+		reAlterReplGroupSet.MatchString(afterName) ||
+		reAlterReplGroupRename.MatchString(afterName)
+
+	if groupType == "FAILOVER" {
+		hasAction = hasAction ||
+			reAlterFailoverPrimary.MatchString(afterName) ||
+			reAlterFailoverRefresh.MatchString(afterName) ||
+			reAlterFailoverSuspend.MatchString(afterName) ||
+			reAlterFailoverResume.MatchString(afterName)
+	}
+
+	if !hasAction {
+		if groupType == "FAILOVER" {
+			markers = append(markers, diagMarkerSpan(r,
+				"ALTER FAILOVER GROUP requires an action: ADD, REMOVE, MOVE DATABASES, SET, RENAME TO, PRIMARY, REFRESH, SUSPEND, or RESUME.", 4))
+		} else {
+			markers = append(markers, diagMarkerSpan(r,
+				"ALTER REPLICATION GROUP requires an action: ADD, REMOVE, MOVE DATABASES, SET, or RENAME TO.", 4))
+		}
+		return markers
+	}
+
+	// 3. MOVE DATABASES requires TO REPLICATION GROUP <name>.
+	if reAlterReplGroupMoveDatabases.MatchString(afterName) && !reAlterReplGroupMoveTo.MatchString(afterName) {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("MOVE DATABASES in ALTER %s GROUP requires TO REPLICATION GROUP <name>.", groupType), 4))
+	}
+
+	return markers
+}
+
+// ── validateDropReplicationOrFailoverGroup ────────────────────────────────────
+
+// validateDropReplicationOrFailoverGroup checks structural requirements for
+// DROP REPLICATION GROUP and DROP FAILOVER GROUP:
+//   - Group name is required.
+func validateDropReplicationOrFailoverGroup(parseText string, r StatementRange, groupType string) []DiagMarker {
+	var markers []DiagMarker
+
+	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
+	clean := reStripStringLiterals.ReplaceAllString(noComments, "''")
+
+	m := reReplGroupName.FindStringSubmatch(clean)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("DROP %s GROUP requires a group name.", groupType), 4))
+		return markers
+	}
+	if sqlIdentPathHasDot(m[1]) {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("%s groups are account-level objects and cannot have a database or schema prefix.", groupType), 4))
 	}
 
 	return markers
