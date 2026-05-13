@@ -33,7 +33,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
 
       # Wails embeds the frontend dist; create a stub so the go:embed
       # directive in main.go compiles without a full npm build.
