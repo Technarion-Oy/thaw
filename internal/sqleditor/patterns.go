@@ -398,6 +398,30 @@ var (
 		`PASSWORD_HISTORY`, `COMMENT`,
 	}, "|")
 
+	// ── CREATE AGGREGATION POLICY ────────────────────────────────────────────
+	reIsCreateAggregationPolicy   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?AGGREGATION\s+POLICY\b`)
+	reAggPolicyAS                 = regexp.MustCompile(`(?i)\bAS\s*\(`)
+	reAggPolicyReturns            = regexp.MustCompile(`(?i)\bRETURNS\s+AGGREGATION_CONSTRAINT\b`)
+	reAggPolicyArrow              = regexp.MustCompile(`(?i)\bRETURNS\s+AGGREGATION_CONSTRAINT\s*->`)
+	reAggPolicyMinGroupSize       = regexp.MustCompile(`(?i)\bMIN_GROUP_SIZE\s*=>\s*(-?\d+)`)
+
+	// ── CREATE PROJECTION POLICY ────────────────────────────────────────────
+	reIsCreateProjectionPolicy    = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PROJECTION\s+POLICY\b`)
+	reProjPolicyAS                = regexp.MustCompile(`(?i)\bAS\s*\(`)
+	reProjPolicyReturns           = regexp.MustCompile(`(?i)\bRETURNS\s+PROJECTION_CONSTRAINT\b`)
+	reProjPolicyArrow             = regexp.MustCompile(`(?i)\bRETURNS\s+PROJECTION_CONSTRAINT\s*->`)
+	reProjPolicyAllowValue        = regexp.MustCompile(`(?i)\bALLOW\s*=>\s*'([^']*)'`)
+
+	// ── ALTER / DROP AGGREGATION POLICY ──────────────────────────────────────
+	reIsAlterAggregationPolicy    = regexp.MustCompile(`(?i)^\s*ALTER\s+AGGREGATION\s+POLICY\b`)
+	reIsDropAggregationPolicy     = regexp.MustCompile(`(?i)^\s*DROP\s+AGGREGATION\s+POLICY\b`)
+	reAlterPolicyAction           = regexp.MustCompile(`(?i)\b(?:SET\s+BODY\s*->|SET\s+COMMENT\s*=|UNSET\s+COMMENT\b|RENAME\s+TO\b)`)
+	reDropPolicyHasName           = regexp.MustCompile(`(?i)POLICY\s+(?:IF\s+EXISTS\s+)?` + _identPath)
+
+	// ── ALTER / DROP PROJECTION POLICY ───────────────────────────────────────
+	reIsAlterProjectionPolicy     = regexp.MustCompile(`(?i)^\s*ALTER\s+PROJECTION\s+POLICY\b`)
+	reIsDropProjectionPolicy      = regexp.MustCompile(`(?i)^\s*DROP\s+PROJECTION\s+POLICY\b`)
+
 	// ── GRANT / REVOKE ────────────────────────────────────────────────────────
 	// reIsGrantRole is used inside validateGrant (not in the top-level dispatch)
 	// to distinguish "GRANT ROLE <name>" (role assignment) from privilege grants.
@@ -1780,6 +1804,42 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
+		// ── Preamble: CREATE AGGREGATION POLICY ─────────────────────────
+		if reIsCreateAggregationPolicy.MatchString(parseText) {
+			markers = append(markers, validateCreateAggregationPolicy(parseText, r)...)
+			continue
+		}
+
+		// ── Preamble: CREATE PROJECTION POLICY ──────────────────────────
+		if reIsCreateProjectionPolicy.MatchString(parseText) {
+			markers = append(markers, validateCreateProjectionPolicy(parseText, r)...)
+			continue
+		}
+
+		// ── Preamble: ALTER AGGREGATION POLICY ──────────────────────────
+		if reIsAlterAggregationPolicy.MatchString(parseText) {
+			markers = append(markers, validateAlterAggregationOrProjectionPolicy(parseText, r, "AGGREGATION")...)
+			continue
+		}
+
+		// ── Preamble: ALTER PROJECTION POLICY ───────────────────────────
+		if reIsAlterProjectionPolicy.MatchString(parseText) {
+			markers = append(markers, validateAlterAggregationOrProjectionPolicy(parseText, r, "PROJECTION")...)
+			continue
+		}
+
+		// ── Preamble: DROP AGGREGATION POLICY ───────────────────────────
+		if reIsDropAggregationPolicy.MatchString(parseText) {
+			markers = append(markers, validateDropAggregationOrProjectionPolicy(parseText, r, "AGGREGATION")...)
+			continue
+		}
+
+		// ── Preamble: DROP PROJECTION POLICY ────────────────────────────
+		if reIsDropProjectionPolicy.MatchString(parseText) {
+			markers = append(markers, validateDropAggregationOrProjectionPolicy(parseText, r, "PROJECTION")...)
+			continue
+		}
+
 		// ── Preamble: CREATE STAGE ───────────────────────────────────────
 		// stripParenContents removes nested KEY=VALUE pairs inside blocks
 		// like FILE_FORMAT=(...), ENCRYPTION=(...), DIRECTORY=(...) before
@@ -2780,6 +2840,126 @@ func splitCommaRespectingParens(s string) []string {
 	}
 	parts = append(parts, s[start:])
 	return parts
+}
+
+// ── validateCreateAggregationPolicy ───────────────────────────────────────────
+
+// validateCreateAggregationPolicy checks structural requirements for a
+// CREATE [OR REPLACE] AGGREGATION POLICY statement.
+func validateCreateAggregationPolicy(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
+	asIdx := reAggPolicyAS.FindStringIndex(parseText)
+	preamble := parseText
+	if asIdx != nil {
+		preamble = parseText[:asIdx[0]]
+	}
+	if reOrReplace.MatchString(preamble) && reIfNotExists.MatchString(preamble) {
+		markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE AGGREGATION POLICY statement.", 4))
+		return markers
+	}
+
+	// 2. Mandatory AS () parameter list.
+	if !reAggPolicyAS.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS () clause in CREATE AGGREGATION POLICY.", 4))
+	}
+
+	// 3. Mandatory RETURNS AGGREGATION_CONSTRAINT clause.
+	if !reAggPolicyReturns.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS AGGREGATION_CONSTRAINT clause in CREATE AGGREGATION POLICY.", 4))
+	}
+
+	// 4. Mandatory -> separator between signature and body.
+	if !reAggPolicyArrow.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory '->' separator between signature and body in CREATE AGGREGATION POLICY.", 4))
+	}
+
+	// 5. Validate MIN_GROUP_SIZE range (1–1 000 000) if present.
+	if m := reAggPolicyMinGroupSize.FindStringSubmatch(parseText); m != nil {
+		val, err := strconv.Atoi(m[1])
+		if err == nil && (val < 1 || val > 1000000) {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("MIN_GROUP_SIZE (%d) must be between 1 and 1000000.", val), 4))
+		}
+	}
+
+	return markers
+}
+
+// ── validateCreateProjectionPolicy ───────────────────────────────────────────
+
+// validateCreateProjectionPolicy checks structural requirements for a
+// CREATE [OR REPLACE] PROJECTION POLICY statement.
+func validateCreateProjectionPolicy(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
+	asIdx := reProjPolicyAS.FindStringIndex(parseText)
+	preamble := parseText
+	if asIdx != nil {
+		preamble = parseText[:asIdx[0]]
+	}
+	if reOrReplace.MatchString(preamble) && reIfNotExists.MatchString(preamble) {
+		markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE PROJECTION POLICY statement.", 4))
+		return markers
+	}
+
+	// 2. Mandatory AS () parameter list.
+	if !reProjPolicyAS.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory AS () clause in CREATE PROJECTION POLICY.", 4))
+	}
+
+	// 3. Mandatory RETURNS PROJECTION_CONSTRAINT clause.
+	if !reProjPolicyReturns.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory RETURNS PROJECTION_CONSTRAINT clause in CREATE PROJECTION POLICY.", 4))
+	}
+
+	// 4. Mandatory -> separator between signature and body.
+	if !reProjPolicyArrow.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory '->' separator between signature and body in CREATE PROJECTION POLICY.", 4))
+	}
+
+	// 5. Validate ALLOW value if present: must be 'none' or 'transformation'.
+	if m := reProjPolicyAllowValue.FindStringSubmatch(parseText); m != nil {
+		val := strings.ToLower(m[1])
+		if val != "none" && val != "transformation" {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("ALLOW value '%s' is invalid; must be 'none' or 'transformation'.", m[1]), 4))
+		}
+	}
+
+	return markers
+}
+
+// ── validateAlterAggregationOrProjectionPolicy ───────────────────────────────
+
+// validateAlterAggregationOrProjectionPolicy checks structural requirements for
+// ALTER AGGREGATION POLICY or ALTER PROJECTION POLICY statements.
+func validateAlterAggregationOrProjectionPolicy(parseText string, r StatementRange, policyType string) []DiagMarker {
+	var markers []DiagMarker
+
+	if !reAlterPolicyAction.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("ALTER %s POLICY requires SET BODY, SET COMMENT, UNSET COMMENT, or RENAME TO.", policyType), 4))
+	}
+
+	return markers
+}
+
+// ── validateDropAggregationOrProjectionPolicy ────────────────────────────────
+
+// validateDropAggregationOrProjectionPolicy checks structural requirements for
+// DROP AGGREGATION POLICY or DROP PROJECTION POLICY statements.
+func validateDropAggregationOrProjectionPolicy(parseText string, r StatementRange, policyType string) []DiagMarker {
+	var markers []DiagMarker
+
+	if !reDropPolicyHasName.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("DROP %s POLICY requires a policy name.", policyType), 4))
+	}
+
+	return markers
 }
 
 // ── validateGrant ─────────────────────────────────────────────────────────────
