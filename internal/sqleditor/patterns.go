@@ -437,6 +437,8 @@ var (
 	reTimeTravelBare = regexp.MustCompile(`(?i)(?:FROM|JOIN)\s+` + _identPath + `\s+(?:AT|BEFORE)\s+(?:TIMESTAMP|OFFSET|STATEMENT|STREAM)\b`)
 	// Valid keyword arguments inside AT/BEFORE clause.
 	reTimeTravelArg = regexp.MustCompile(`(?i)\b(TIMESTAMP|OFFSET|STATEMENT|STREAM)\s*=>`)
+	// Bare keyword without => inside AT/BEFORE parens.
+	reTimeTravelBareKW = regexp.MustCompile(`(?i)\b(TIMESTAMP|OFFSET|STATEMENT|STREAM)\b`)
 
 	// ── GRANT / REVOKE ────────────────────────────────────────────────────────
 	// reIsGrantRole is used inside validateGrant (not in the top-level dispatch)
@@ -5585,49 +5587,31 @@ func validateTimeTravelClauses(stripped string, r StatementRange) []DiagMarker {
 		// Count how many valid keyword arguments appear.
 		args := reTimeTravelArg.FindAllStringSubmatch(inner, -1)
 
+		streamSuffix := ""
+		if keyword == "AT" {
+			streamSuffix = ", STREAM"
+		}
+
 		if len(args) == 0 {
 			// Check if the user wrote a keyword without =>
-			reBareKW := regexp.MustCompile(`(?i)\b(TIMESTAMP|OFFSET|STATEMENT|STREAM)\b`)
-			if m := reBareKW.FindStringSubmatch(inner); m != nil {
+			if m := reTimeTravelBareKW.FindStringSubmatch(inner); m != nil {
 				markers = append(markers, diagMarkerSpan(r,
 					"Missing '=>' operator in "+keyword+" clause. Use "+strings.ToUpper(m[1])+" => <value>.", 4))
 			} else {
 				markers = append(markers, diagMarkerSpan(r,
-					"Invalid "+keyword+" clause. Expected one of: TIMESTAMP =>, OFFSET =>, STATEMENT =>"+
-						func() string {
-							if keyword == "AT" {
-								return ", STREAM =>"
-							}
-							return ""
-						}()+".", 4))
+					"Invalid "+keyword+" clause. Expected one of: TIMESTAMP =>, OFFSET =>, STATEMENT =>"+streamSuffix+" =>.", 4))
 			}
 			continue
 		}
 
 		if len(args) > 1 {
 			markers = append(markers, diagMarkerSpan(r,
-				"Multiple keyword arguments in "+keyword+" clause. Only one of TIMESTAMP, OFFSET, STATEMENT"+
-					func() string {
-						if keyword == "AT" {
-							return ", STREAM"
-						}
-						return ""
-					}()+" is allowed.", 4))
+				"Multiple keyword arguments in "+keyword+" clause. Only one of TIMESTAMP, OFFSET, STATEMENT"+streamSuffix+" is allowed.", 4))
 			continue
 		}
 
-		// Exactly one argument — validate it.
+		// Exactly one argument — validate STREAM restriction.
 		argName := strings.ToUpper(args[0][1])
-		validArgs := map[string]bool{
-			"TIMESTAMP": true, "OFFSET": true, "STATEMENT": true, "STREAM": true,
-		}
-		if !validArgs[argName] {
-			markers = append(markers, diagMarkerSpan(r,
-				"Unknown keyword '"+argName+"' in "+keyword+" clause.", 4))
-			continue
-		}
-
-		// STREAM is only valid in AT, not BEFORE.
 		if argName == "STREAM" && keyword == "BEFORE" {
 			markers = append(markers, diagMarkerSpan(r,
 				"STREAM => is not valid in a BEFORE clause. STREAM is only supported with AT.", 4))

@@ -4175,6 +4175,13 @@ func TestValidateSnowflakePatterns_TimeTravel(t *testing.T) {
 		// Time Travel in CLONE context (already supported)
 		"CREATE TABLE t CLONE s AT (TIMESTAMP => TO_TIMESTAMP_TZ('2023-01-01 00:00:00'))",
 		"CREATE STREAM my_stream ON TABLE my_table AT (TIMESTAMP => TO_TIMESTAMP_TZ('2023-01-01 00:00:00'))",
+		// Multiple Time Travel clauses in one query (JOIN)
+		"SELECT a.id FROM t1 AT (OFFSET => -60) JOIN t2 BEFORE (STATEMENT => '8e5d0ca9-005e-44e6-b858-a8f5b37c5726') ON a.id = b.id",
+		// DML with Time Travel
+		"INSERT INTO t SELECT * FROM s AT (OFFSET => -3600)",
+		// Case variation — lowercase keywords
+		"SELECT * FROM orders at (timestamp => '2024-01-01')",
+		"SELECT * FROM orders before (statement => 'abc-123')",
 	}
 
 	for _, sql := range validQueries {
