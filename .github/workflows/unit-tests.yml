@@ -34,7 +34,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
 
       - name: Download dependencies
         run: go mod download
@@ -83,7 +83,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
 
       - name: Install system dependencies
         run: apt-get update && apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
