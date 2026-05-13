@@ -422,6 +422,15 @@ var (
 	reIsAlterProjectionPolicy     = regexp.MustCompile(`(?i)^\s*ALTER\s+PROJECTION\s+POLICY\b`)
 	reIsDropProjectionPolicy      = regexp.MustCompile(`(?i)^\s*DROP\s+PROJECTION\s+POLICY\b`)
 
+	// ── CREATE PACKAGES POLICY ──────────────────────────────────────────────
+	reIsCreatePackagesPolicy      = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PACKAGES\s+POLICY\b`)
+	rePkgPolicyLanguage           = regexp.MustCompile(`(?i)\bLANGUAGE\s+(\w+)`)
+
+	// ── ALTER / DROP PACKAGES POLICY ────────────────────────────────────────
+	reIsAlterPackagesPolicy       = regexp.MustCompile(`(?i)^\s*ALTER\s+PACKAGES\s+POLICY\b`)
+	reIsDropPackagesPolicy        = regexp.MustCompile(`(?i)^\s*DROP\s+PACKAGES\s+POLICY\b`)
+	reAlterPkgPolicyAction        = regexp.MustCompile(`(?i)\b(?:SET\s+(?:ALLOWLIST|BLOCKLIST|ADDITIONAL_CREATION_BLOCKLIST|COMMENT)\b|UNSET\s+(?:ALLOWLIST|BLOCKLIST|ADDITIONAL_CREATION_BLOCKLIST|COMMENT)\b)`)
+
 	// ── GRANT / REVOKE ────────────────────────────────────────────────────────
 	// reIsGrantRole is used inside validateGrant (not in the top-level dispatch)
 	// to distinguish "GRANT ROLE <name>" (role assignment) from privilege grants.
@@ -1840,6 +1849,24 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
+		// ── Preamble: CREATE PACKAGES POLICY ────────────────────────────
+		if reIsCreatePackagesPolicy.MatchString(parseText) {
+			markers = append(markers, validateCreatePackagesPolicy(parseText, r)...)
+			continue
+		}
+
+		// ── Preamble: ALTER PACKAGES POLICY ─────────────────────────────
+		if reIsAlterPackagesPolicy.MatchString(parseText) {
+			markers = append(markers, validateAlterPackagesPolicy(parseText, r)...)
+			continue
+		}
+
+		// ── Preamble: DROP PACKAGES POLICY ──────────────────────────────
+		if reIsDropPackagesPolicy.MatchString(parseText) {
+			markers = append(markers, validateDropPackagesPolicy(parseText, r)...)
+			continue
+		}
+
 		// ── Preamble: CREATE STAGE ───────────────────────────────────────
 		// stripParenContents removes nested KEY=VALUE pairs inside blocks
 		// like FILE_FORMAT=(...), ENCRYPTION=(...), DIRECTORY=(...) before
@@ -2957,6 +2984,62 @@ func validateDropAggregationOrProjectionPolicy(parseText string, r StatementRang
 	if !reDropPolicyHasName.MatchString(parseText) {
 		markers = append(markers, diagMarkerSpan(r,
 			fmt.Sprintf("DROP %s POLICY requires a policy name.", policyType), 4))
+	}
+
+	return markers
+}
+
+// ── validateCreatePackagesPolicy ─────────────────────────────────────────────
+
+// validateCreatePackagesPolicy checks structural requirements for a
+// CREATE [OR REPLACE] PACKAGES POLICY statement.
+func validateCreatePackagesPolicy(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
+	if reOrReplace.MatchString(parseText) && reIfNotExists.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE PACKAGES POLICY statement.", 4))
+		return markers
+	}
+
+	// 2. LANGUAGE is mandatory and must be PYTHON.
+	m := rePkgPolicyLanguage.FindStringSubmatch(parseText)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r, "Missing mandatory LANGUAGE clause in CREATE PACKAGES POLICY. Only LANGUAGE PYTHON is supported.", 4))
+	} else if strings.ToUpper(m[1]) != "PYTHON" {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("LANGUAGE '%s' is not supported for PACKAGES POLICY; only PYTHON is allowed.", m[1]), 4))
+	}
+
+	return markers
+}
+
+// ── validateAlterPackagesPolicy ──────────────────────────────────────────────
+
+// validateAlterPackagesPolicy checks structural requirements for an
+// ALTER PACKAGES POLICY statement.
+func validateAlterPackagesPolicy(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// Must contain a valid action.
+	if !reAlterPkgPolicyAction.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r,
+			"ALTER PACKAGES POLICY requires SET ALLOWLIST, SET BLOCKLIST, SET ADDITIONAL_CREATION_BLOCKLIST, SET COMMENT, UNSET ALLOWLIST, UNSET BLOCKLIST, UNSET ADDITIONAL_CREATION_BLOCKLIST, or UNSET COMMENT.", 4))
+	}
+
+	return markers
+}
+
+// ── validateDropPackagesPolicy ───────────────────────────────────────────────
+
+// validateDropPackagesPolicy checks structural requirements for a
+// DROP PACKAGES POLICY statement.
+func validateDropPackagesPolicy(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// Policy name is required.
+	if !reDropPolicyHasName.MatchString(parseText) {
+		markers = append(markers, diagMarkerSpan(r, "DROP PACKAGES POLICY requires a policy name.", 4))
 	}
 
 	return markers
