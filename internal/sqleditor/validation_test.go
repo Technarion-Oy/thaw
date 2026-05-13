@@ -352,6 +352,30 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE OR REPLACE SHARE my_share COMMENT = 'updated'",
 		// "IF NOT EXISTS" inside a COMMENT value must not trigger the conflict warning.
 		"CREATE OR REPLACE SHARE my_share COMMENT = 'IF NOT EXISTS hint'",
+		// CREATE DATASHARE — valid
+		"CREATE DATASHARE my_datashare",
+		"CREATE OR REPLACE DATASHARE my_datashare",
+		"CREATE DATASHARE IF NOT EXISTS my_datashare",
+		"CREATE DATASHARE my_datashare COMMENT = 'provider share'",
+		"CREATE DATASHARE my_datashare SHARE_RESTRICTIONS = TRUE",
+		"CREATE DATASHARE my_datashare SHARE_RESTRICTIONS = FALSE",
+		"CREATE DATASHARE my_datashare SHARE_RESTRICTIONS = TRUE COMMENT = 'desc'",
+		"CREATE OR REPLACE DATASHARE my_datashare COMMENT = 'IF NOT EXISTS hint'",
+		// ALTER DATASHARE — valid
+		"ALTER DATASHARE my_ds ADD ACCOUNTS = org1.acct1",
+		"ALTER DATASHARE my_ds ADD ACCOUNTS = org1.acct1, org2.acct2",
+		"ALTER DATASHARE my_ds ADD ACCOUNTS = org1.acct1 SHARE_RESTRICTIONS = TRUE",
+		"ALTER DATASHARE my_ds REMOVE ACCOUNTS = org1.acct1",
+		"ALTER DATASHARE my_ds REMOVE ACCOUNTS = org1.acct1, org2.acct2",
+		"ALTER DATASHARE my_ds ADD DATABASES db1",
+		"ALTER DATASHARE my_ds ADD DATABASES db1, db2",
+		"ALTER DATASHARE my_ds REMOVE DATABASES db1",
+		"ALTER DATASHARE my_ds REMOVE DATABASES db1, db2",
+		"ALTER DATASHARE my_ds SET COMMENT = 'updated'",
+		"ALTER DATASHARE my_ds UNSET COMMENT",
+		// DROP DATASHARE — valid
+		"DROP DATASHARE my_datashare",
+		"DROP DATASHARE IF EXISTS my_datashare",
 		// ALTER SHARE — valid
 		"ALTER SHARE my_share ADD ACCOUNTS = account1",
 		"ALTER SHARE my_share ADD ACCOUNTS = account1, account2",
@@ -645,6 +669,29 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Create Share invalid property", "CREATE SHARE my_share AUTO_REFRESH = TRUE", "Unexpected property 'AUTO_REFRESH'"},
 		{"Create Share OR REPLACE and IF NOT EXISTS", "CREATE OR REPLACE SHARE IF NOT EXISTS my_share", "Conflict between OR REPLACE and IF NOT EXISTS"},
 		{"Create Share missing name", "CREATE SHARE", "Unexpected syntax"},
+
+		// Invalid CREATE DATASHARE
+		{"Create Datashare with prefix", "CREATE DATASHARE db.schema.my_ds", "account-level"},
+		{"Create Datashare OR REPLACE with prefix", "CREATE OR REPLACE DATASHARE db.my_ds", "account-level"},
+		{"Create Datashare invalid property", "CREATE DATASHARE my_ds AUTO_REFRESH = TRUE", "Unexpected property 'AUTO_REFRESH'"},
+		{"Create Datashare OR REPLACE and IF NOT EXISTS", "CREATE OR REPLACE DATASHARE IF NOT EXISTS my_ds", "Conflict between OR REPLACE and IF NOT EXISTS"},
+		{"Create Datashare missing name", "CREATE DATASHARE", "Unexpected syntax"},
+		{"Create Datashare SHARE_RESTRICTIONS invalid value", "CREATE DATASHARE my_ds SHARE_RESTRICTIONS = MAYBE", "SHARE_RESTRICTIONS must be TRUE or FALSE"},
+
+		// Invalid ALTER DATASHARE
+		{"Alter Datashare missing name", "ALTER DATASHARE", "requires a datashare name"},
+		{"Alter Datashare unknown sub-command", "ALTER DATASHARE my_ds ENABLE CHANGE_TRACKING", "Unknown ALTER DATASHARE sub-command"},
+		{"Alter Datashare ADD ACCOUNTS missing list", "ALTER DATASHARE my_ds ADD ACCOUNTS =", "ADD ACCOUNTS requires at least one"},
+		{"Alter Datashare REMOVE ACCOUNTS missing list", "ALTER DATASHARE my_ds REMOVE ACCOUNTS =", "REMOVE ACCOUNTS requires at least one"},
+		{"Alter Datashare ADD DATABASES missing list", "ALTER DATASHARE my_ds ADD DATABASES", "ADD DATABASES requires at least one"},
+		{"Alter Datashare REMOVE DATABASES missing list", "ALTER DATASHARE my_ds REMOVE DATABASES", "REMOVE DATABASES requires at least one"},
+		{"Alter Datashare SHARE_RESTRICTIONS invalid", "ALTER DATASHARE my_ds ADD ACCOUNTS = org1.acct1 SHARE_RESTRICTIONS = MAYBE", "SHARE_RESTRICTIONS must be TRUE or FALSE"},
+		{"Alter Datashare with prefix", "ALTER DATASHARE db.my_ds ADD ACCOUNTS = org1.acct1", "account-level"},
+		{"Alter Datashare SHARE_RESTRICTIONS without ADD ACCOUNTS", "ALTER DATASHARE my_ds REMOVE ACCOUNTS = acct1 SHARE_RESTRICTIONS = TRUE", "SHARE_RESTRICTIONS is only valid with ADD ACCOUNTS"},
+
+		// Invalid DROP DATASHARE
+		{"Drop Datashare missing name", "DROP DATASHARE", "requires a datashare name"},
+		{"Drop Datashare with prefix", "DROP DATASHARE db.my_ds", "account-level"},
 
 		// Invalid ALTER SHARE
 		{"Alter Share RESTRICT without ADD ACCOUNTS", "ALTER SHARE my_share RESTRICT", "RESTRICT is only valid with ADD ACCOUNTS"},
