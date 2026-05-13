@@ -581,12 +581,10 @@ var (
 	reAlterDatashareAddAcctList    = regexp.MustCompile(`(?i)\bADD\s+ACCOUNTS\s*=\s*` + _ident)
 	reAlterDatashareRemoveAccounts = regexp.MustCompile(`(?i)\bREMOVE\s+ACCOUNTS\s*=`)
 	reAlterDatashareRemoveAcctList = regexp.MustCompile(`(?i)\bREMOVE\s+ACCOUNTS\s*=\s*` + _ident)
-	reAlterDatashareAddDatabases   = regexp.MustCompile(`(?i)\bADD\s+DATABASES\b`)
-	reAlterDatashareAddDbList      = regexp.MustCompile(`(?i)\bADD\s+DATABASES\s+` + _ident)
+	reAlterDatashareAddDatabases    = regexp.MustCompile(`(?i)\bADD\s+DATABASES\b`)
+	reAlterDatashareAddDbList       = regexp.MustCompile(`(?i)\bADD\s+DATABASES\s+` + _ident)
 	reAlterDatashareRemoveDatabases = regexp.MustCompile(`(?i)\bREMOVE\s+DATABASES\b`)
-	reAlterDatashareRemoveDbList   = regexp.MustCompile(`(?i)\bREMOVE\s+DATABASES\s+` + _ident)
-	reAlterDatashareSetComment     = regexp.MustCompile(`(?i)\bSET\s+COMMENT\b`)
-	reAlterDatashareUnsetComment   = regexp.MustCompile(`(?i)\bUNSET\s+COMMENT\b`)
+	reAlterDatashareRemoveDbList    = regexp.MustCompile(`(?i)\bREMOVE\s+DATABASES\s+` + _ident)
 	// reAlterDatashareAction matches any known ALTER DATASHARE sub-command.
 	reAlterDatashareAction = regexp.MustCompile(`(?i)\b(?:ADD\s+ACCOUNTS|REMOVE\s+ACCOUNTS|ADD\s+DATABASES|REMOVE\s+DATABASES|SET\s+COMMENT|UNSET\s+COMMENT)\b`)
 	// ── DROP DATASHARE ───────────────────────────────────────────────────────
@@ -5968,15 +5966,7 @@ func validateAlterDatashare(parseText string, r StatementRange) []DiagMarker {
 		return markers
 	}
 
-	// 2. Check for known sub-commands.
-	hasAddAccounts := reAlterDatashareAddAccounts.MatchString(clean)
-	hasRemoveAccounts := reAlterDatashareRemoveAccounts.MatchString(clean)
-	hasAddDatabases := reAlterDatashareAddDatabases.MatchString(clean)
-	hasRemoveDatabases := reAlterDatashareRemoveDatabases.MatchString(clean)
-	hasSetComment := reAlterDatashareSetComment.MatchString(clean)
-	hasUnsetComment := reAlterDatashareUnsetComment.MatchString(clean)
-
-	// If none of the known actions are present, warn about unknown sub-command.
+	// 2. If none of the known actions are present, warn about unknown sub-command.
 	if !reAlterDatashareAction.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"Unknown ALTER DATASHARE sub-command. Expected ADD ACCOUNTS, REMOVE ACCOUNTS, ADD DATABASES, REMOVE DATABASES, SET COMMENT, or UNSET COMMENT.", 4))
@@ -5984,25 +5974,26 @@ func validateAlterDatashare(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 3. ADD ACCOUNTS = requires at least one account.
+	hasAddAccounts := reAlterDatashareAddAccounts.MatchString(clean)
 	if hasAddAccounts && !reAlterDatashareAddAcctList.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"ADD ACCOUNTS requires at least one account identifier.", 4))
 	}
 
 	// 4. REMOVE ACCOUNTS = requires at least one account.
-	if hasRemoveAccounts && !reAlterDatashareRemoveAcctList.MatchString(clean) {
+	if reAlterDatashareRemoveAccounts.MatchString(clean) && !reAlterDatashareRemoveAcctList.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"REMOVE ACCOUNTS requires at least one account identifier.", 4))
 	}
 
 	// 5. ADD DATABASES requires at least one database.
-	if hasAddDatabases && !reAlterDatashareAddDbList.MatchString(clean) {
+	if reAlterDatashareAddDatabases.MatchString(clean) && !reAlterDatashareAddDbList.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"ADD DATABASES requires at least one database identifier.", 4))
 	}
 
 	// 6. REMOVE DATABASES requires at least one database.
-	if hasRemoveDatabases && !reAlterDatashareRemoveDbList.MatchString(clean) {
+	if reAlterDatashareRemoveDatabases.MatchString(clean) && !reAlterDatashareRemoveDbList.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"REMOVE DATABASES requires at least one database identifier.", 4))
 	}
@@ -6011,11 +6002,6 @@ func validateAlterDatashare(parseText string, r StatementRange) []DiagMarker {
 	if hasAddAccounts {
 		validateBoolProp(clean, "SHARE_RESTRICTIONS", r, &markers)
 	}
-
-	// Suppress unused-variable warnings for SET/UNSET COMMENT; they are
-	// recognized actions but require no further structural checks.
-	_ = hasSetComment
-	_ = hasUnsetComment
 
 	return markers
 }
