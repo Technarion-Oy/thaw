@@ -592,6 +592,14 @@ var (
 	reIsDropDatashare   = regexp.MustCompile(`(?i)^\s*DROP\s+DATASHARE\b`)
 	reDropDatashareName = regexp.MustCompile(`(?i)^\s*DROP\s+DATASHARE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
 
+	// ── CREATE COMPUTE POOL ─────────────────────────────────────────────────
+	reIsCreateComputePool   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?COMPUTE\s+POOL\b`)
+	reCreateComputePoolName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?COMPUTE\s+POOL\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
+	reComputePoolMinNodes       = regexp.MustCompile(`(?i)\bMIN_NODES\s*=\s*(-?\d+)`)
+	reComputePoolMaxNodes       = regexp.MustCompile(`(?i)\bMAX_NODES\s*=\s*(-?\d+)`)
+	reComputePoolInstanceFamily = regexp.MustCompile(`(?i)\bINSTANCE_FAMILY\s*=\s*'?([a-zA-Z0-9_]+)'?`)
+	reComputePoolAutoSuspend    = regexp.MustCompile(`(?i)\bAUTO_SUSPEND_SECS\s*=\s*(-?\d+)`)
+
 	// ── CREATE EVENT TABLE ──────────────────────────────────────────────────
 	reIsCreateEventTable   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EVENT\s+TABLE\b`)
 	reCreateEventTableName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EVENT\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
@@ -2092,6 +2100,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
+		// ── CREATE COMPUTE POOL ─────────────────────────────────────────
+		if reIsCreateComputePool.MatchString(parseText) {
+			markers = append(markers, validateCreateComputePool(parseText, r)...)
+			continue
+		}
+
 		// ── CREATE TAG ──────────────────────────────────────────────────
 		if reIsCreateTag.MatchString(parseText) {
 			markers = append(markers, validateCreateTag(parseText, r)...)
@@ -3451,7 +3465,7 @@ func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 // matches PROP = value where value is a word token. The map is built at init
 // time so regexes are compiled once rather than on every call.
 var reBoolPropMap = func() map[string]*regexp.Regexp {
-	props := []string{"ALLOW_WRITES", "PURGE", "FORCE", "LOAD_UNCERTAIN_FILES", "OVERWRITE", "SINGLE", "INCLUDE_QUERY_ID", "DETAILED_OUTPUT", "SHARE_RESTRICTIONS"}
+	props := []string{"ALLOW_WRITES", "PURGE", "FORCE", "LOAD_UNCERTAIN_FILES", "OVERWRITE", "SINGLE", "INCLUDE_QUERY_ID", "DETAILED_OUTPUT", "SHARE_RESTRICTIONS", "AUTO_RESUME", "INITIALLY_SUSPENDED"}
 	m := make(map[string]*regexp.Regexp, len(props))
 	for _, p := range props {
 		m[p] = regexp.MustCompile(`(?i)\b` + p + `\s*=\s*(\w+)\b`)
@@ -5897,6 +5911,126 @@ func validateDropReplicationOrFailoverGroup(parseText string, r StatementRange, 
 		markers = append(markers, diagMarkerSpan(r,
 			fmt.Sprintf("%s groups are account-level objects and cannot have a database or schema prefix.", groupType), 4))
 	}
+
+	return markers
+}
+
+// ── validateCreateComputePool ─────────────────────────────────────────────────
+
+// validateCreateComputePool checks structural requirements for
+// CREATE [OR REPLACE] COMPUTE POOL [IF NOT EXISTS] <name> statements:
+//   - OR REPLACE and IF NOT EXISTS are mutually exclusive.
+//   - Compute pools are account-level objects: name must not have a db.schema prefix.
+//   - MIN_NODES, MAX_NODES, and INSTANCE_FAMILY are mandatory.
+//   - MIN_NODES must be >= 1.
+//   - MAX_NODES must be >= MIN_NODES.
+//   - INSTANCE_FAMILY must be one of the valid Snowpark Container Services SKUs.
+//   - AUTO_RESUME and INITIALLY_SUSPENDED must be TRUE or FALSE.
+//   - AUTO_SUSPEND_SECS must be a non-negative integer.
+//   - Only known properties are accepted.
+func validateCreateComputePool(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+
+	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
+	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE COMPUTE POOL statement.", 4))
+		return markers
+	}
+
+	// 2. Pool name is required; also used for account-level prefix check.
+	m := reCreateComputePoolName.FindStringSubmatch(clean)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE COMPUTE POOL statement.", 4))
+		return markers
+	}
+	if sqlIdentPathHasDot(m[1]) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Compute pools are account-level objects and cannot have a database or schema prefix.", 4))
+	}
+
+	// 3. Mandatory properties: MIN_NODES, MAX_NODES, INSTANCE_FAMILY.
+	minNodesMatch := reComputePoolMinNodes.FindStringSubmatch(clean)
+	maxNodesMatch := reComputePoolMaxNodes.FindStringSubmatch(clean)
+	instanceFamilyMatch := reComputePoolInstanceFamily.FindStringSubmatch(clean)
+
+	if minNodesMatch == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"Missing mandatory property MIN_NODES in CREATE COMPUTE POOL statement.", 4))
+	}
+	if maxNodesMatch == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"Missing mandatory property MAX_NODES in CREATE COMPUTE POOL statement.", 4))
+	}
+	if instanceFamilyMatch == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"Missing mandatory property INSTANCE_FAMILY in CREATE COMPUTE POOL statement.", 4))
+	}
+
+	// 4. Validate MIN_NODES value (>= 1).
+	var minNodes int
+	hasMinNodes := false
+	if minNodesMatch != nil {
+		v, err := strconv.Atoi(minNodesMatch[1])
+		if err == nil {
+			minNodes = v
+			hasMinNodes = true
+			if v < 1 {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("MIN_NODES value %d is below the minimum (1).", v), 4))
+			}
+		}
+	}
+
+	// 5. Validate MAX_NODES value (>= 1, >= MIN_NODES).
+	if maxNodesMatch != nil {
+		v, err := strconv.Atoi(maxNodesMatch[1])
+		if err == nil {
+			if v < 1 {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("MAX_NODES value %d is below the minimum (1).", v), 4))
+			}
+			if hasMinNodes && v < minNodes {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("MAX_NODES (%d) must be >= MIN_NODES (%d).", v, minNodes), 4))
+			}
+		}
+	}
+
+	// 6. Validate INSTANCE_FAMILY against known SKUs.
+	validFamilies := []string{
+		"CPU_X64_XS", "CPU_X64_S", "CPU_X64_M", "CPU_X64_L", "CPU_X64_XL",
+		"HIGHMEM_X64_S", "HIGHMEM_X64_M", "HIGHMEM_X64_L", "HIGHMEM_X64_SL",
+		"GPU_NV_S", "GPU_NV_M", "GPU_NV_L", "GPU_NV_XL", "GPU_NV_4XL",
+	}
+	if instanceFamilyMatch != nil {
+		family := strings.ToUpper(instanceFamilyMatch[1])
+		if !slices.Contains(validFamilies, family) {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("Invalid INSTANCE_FAMILY '%s'. Valid values: %s.",
+					instanceFamilyMatch[1], strings.Join(validFamilies, ", ")), 4))
+		}
+	}
+
+	// 7. Validate AUTO_SUSPEND_SECS (non-negative integer).
+	if susMatch := reComputePoolAutoSuspend.FindStringSubmatch(clean); susMatch != nil {
+		v, err := strconv.Atoi(susMatch[1])
+		if err == nil && v < 0 {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("AUTO_SUSPEND_SECS value %d must be a non-negative integer.", v), 4))
+		}
+	}
+
+	// 8. Validate boolean properties.
+	validateBoolProp(clean, "AUTO_RESUME", r, &markers)
+	validateBoolProp(clean, "INITIALLY_SUSPENDED", r, &markers)
+
+	// 9. Only known properties are accepted.
+	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
+	validateProperties(noComments, `MIN_NODES|MAX_NODES|INSTANCE_FAMILY|AUTO_RESUME|AUTO_SUSPEND_SECS|COMMENT|INITIALLY_SUSPENDED`, r, &markers)
 
 	return markers
 }
