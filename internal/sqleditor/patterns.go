@@ -597,7 +597,7 @@ var (
 	reCreateComputePoolName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?COMPUTE\s+POOL\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
 	reComputePoolMinNodes       = regexp.MustCompile(`(?i)\bMIN_NODES\s*=\s*(-?\d+)`)
 	reComputePoolMaxNodes       = regexp.MustCompile(`(?i)\bMAX_NODES\s*=\s*(-?\d+)`)
-	reComputePoolInstanceFamily = regexp.MustCompile(`(?i)\bINSTANCE_FAMILY\s*=\s*'?([a-zA-Z0-9_]+)'?`)
+	reComputePoolInstanceFamily = regexp.MustCompile(`(?i)\bINSTANCE_FAMILY\s*=\s*([a-zA-Z0-9_]+)`)
 	reComputePoolAutoSuspend    = regexp.MustCompile(`(?i)\bAUTO_SUSPEND_SECS\s*=\s*(-?\d+)`)
 
 	// ── CREATE EVENT TABLE ──────────────────────────────────────────────────
