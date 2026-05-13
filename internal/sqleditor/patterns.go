@@ -5935,7 +5935,9 @@ func validateCreateDatashare(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 3. Only COMMENT and SHARE_RESTRICTIONS are valid properties.
-	validateProperties(parseText, `COMMENT|SHARE_RESTRICTIONS`, r, &markers)
+	// Use clean (comments already stripped) so that property-like tokens
+	// inside trailing line comments do not trigger false positives.
+	validateProperties(clean, `COMMENT|SHARE_RESTRICTIONS`, r, &markers)
 
 	// 4. SHARE_RESTRICTIONS must be TRUE or FALSE.
 	validateBoolProp(clean, "SHARE_RESTRICTIONS", r, &markers)
@@ -6011,17 +6013,22 @@ func validateAlterDatashare(parseText string, r StatementRange) []DiagMarker {
 
 // validateDropDatashare checks structural requirements for DROP DATASHARE:
 //   - Datashare name is required.
+//   - Datashares are account-level objects: name must not have a db.schema prefix.
 func validateDropDatashare(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
-	clean := reStripStringLiterals.ReplaceAllString(noComments, "''")
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
 
 	m := reDropDatashareName.FindStringSubmatch(clean)
 	if m == nil {
 		markers = append(markers, diagMarkerSpan(r,
 			"DROP DATASHARE requires a datashare name.", 4))
 		return markers
+	}
+	if sqlIdentPathHasDot(m[1]) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Datashares are account-level objects and cannot have a database or schema prefix.", 4))
 	}
 
 	return markers
