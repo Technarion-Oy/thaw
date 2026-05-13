@@ -4221,6 +4221,16 @@ func TestValidateSnowflakePatterns_TimeTravel(t *testing.T) {
 			"SELECT * FROM orders AT TIMESTAMP '2024-01-01'",
 			[]string{"requires parentheses"},
 		},
+		{
+			"Unknown content in AT clause",
+			"SELECT * FROM orders AT (123)",
+			[]string{"Invalid AT clause. Expected one of"},
+		},
+		{
+			"Unknown content in BEFORE clause",
+			"SELECT * FROM orders BEFORE (123)",
+			[]string{"Invalid BEFORE clause. Expected one of"},
+		},
 	}
 
 	for _, tc := range invalidCases {

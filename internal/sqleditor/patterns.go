@@ -5587,9 +5587,11 @@ func validateTimeTravelClauses(stripped string, r StatementRange) []DiagMarker {
 		// Count how many valid keyword arguments appear.
 		args := reTimeTravelArg.FindAllStringSubmatch(inner, -1)
 
-		streamSuffix := ""
+		streamExpected := ""  // for "Expected one of: …, STREAM =>"
+		streamPlain := ""     // for "Only one of …, STREAM"
 		if keyword == "AT" {
-			streamSuffix = ", STREAM"
+			streamExpected = ", STREAM =>"
+			streamPlain = ", STREAM"
 		}
 
 		if len(args) == 0 {
@@ -5599,14 +5601,14 @@ func validateTimeTravelClauses(stripped string, r StatementRange) []DiagMarker {
 					"Missing '=>' operator in "+keyword+" clause. Use "+strings.ToUpper(m[1])+" => <value>.", 4))
 			} else {
 				markers = append(markers, diagMarkerSpan(r,
-					"Invalid "+keyword+" clause. Expected one of: TIMESTAMP =>, OFFSET =>, STATEMENT =>"+streamSuffix+" =>.", 4))
+					"Invalid "+keyword+" clause. Expected one of: TIMESTAMP =>, OFFSET =>, STATEMENT =>"+streamExpected+".", 4))
 			}
 			continue
 		}
 
 		if len(args) > 1 {
 			markers = append(markers, diagMarkerSpan(r,
-				"Multiple keyword arguments in "+keyword+" clause. Only one of TIMESTAMP, OFFSET, STATEMENT"+streamSuffix+" is allowed.", 4))
+				"Multiple keyword arguments in "+keyword+" clause. Only one of TIMESTAMP, OFFSET, STATEMENT"+streamPlain+" is allowed.", 4))
 			continue
 		}
 
