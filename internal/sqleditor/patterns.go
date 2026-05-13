@@ -585,6 +585,8 @@ var (
 	reRollbackToBare = regexp.MustCompile(`(?i)\bTO\b`)
 	// ROLLBACK ... TO SAVEPOINT (without name).
 	reRollbackToSavepointBare = regexp.MustCompile(`(?i)\bTO\s+SAVEPOINT\s*$`)
+	// ROLLBACK ... TO SAVEPOINT <name> — detects the full form (used for block-level tracking).
+	reRollbackToSavepointFull = regexp.MustCompile(`(?i)\bTO\s+SAVEPOINT\b`)
 	// SAVEPOINT <name> — name is mandatory.
 	reSavepointHasName = regexp.MustCompile(`(?i)^\s*SAVEPOINT\s+[^\s;]`)
 	// RELEASE SAVEPOINT <name> — name is mandatory.
@@ -1978,11 +1980,17 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// ── ROLLBACK ────────────────────────────────────────────────────
 		if reIsRollback.MatchString(parseText) {
 			markers = append(markers, validateRollback(parseText, r)...)
-			if txnDepth == 0 {
-				markers = append(markers, diagMarkerSpan(r,
-					"ROLLBACK with no open transaction. Add BEGIN before ROLLBACK.", 4))
-			} else {
-				txnDepth--
+			// ROLLBACK TO SAVEPOINT does NOT end the transaction — only bare
+			// ROLLBACK / ROLLBACK WORK closes it.
+			rollbackStripped := strings.TrimSpace(stripCommentsSQL(parseText))
+			isToSavepoint := reRollbackToSavepointFull.MatchString(rollbackStripped)
+			if !isToSavepoint {
+				if txnDepth == 0 {
+					markers = append(markers, diagMarkerSpan(r,
+						"ROLLBACK with no open transaction. Add BEGIN before ROLLBACK.", 4))
+				} else {
+					txnDepth--
+				}
 			}
 			continue
 		}
@@ -1996,6 +2004,13 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// ── RELEASE SAVEPOINT ───────────────────────────────────────────
 		if reIsReleaseSavepoint.MatchString(parseText) {
 			markers = append(markers, validateReleaseSavepoint(parseText, r)...)
+			continue
+		}
+
+		// ── Bare RELEASE (without SAVEPOINT keyword) ────────────────────
+		if firstTok == "RELEASE" {
+			markers = append(markers, diagMarkerSpan(r,
+				"RELEASE requires SAVEPOINT keyword. Use RELEASE SAVEPOINT <name>.", 4))
 			continue
 		}
 

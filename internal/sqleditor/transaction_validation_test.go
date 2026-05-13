@@ -158,15 +158,15 @@ func TestValidateSnowflakePatterns_Rollback(t *testing.T) {
 		},
 		{
 			name: "ROLLBACK TO SAVEPOINT sp1",
-			sql:  "BEGIN;\nROLLBACK TO SAVEPOINT sp1",
+			sql:  "BEGIN;\nROLLBACK TO SAVEPOINT sp1;\nCOMMIT;",
 		},
 		{
 			name: "ROLLBACK WORK TO SAVEPOINT sp1",
-			sql:  "BEGIN;\nROLLBACK WORK TO SAVEPOINT sp1",
+			sql:  "BEGIN;\nROLLBACK WORK TO SAVEPOINT sp1;\nCOMMIT;",
 		},
 		{
 			name: "Lowercase rollback to savepoint",
-			sql:  "begin;\nrollback to savepoint sp1",
+			sql:  "begin;\nrollback to savepoint sp1;\ncommit;",
 		},
 		{
 			name: "Mixed case Rollback Work",
@@ -182,7 +182,7 @@ func TestValidateSnowflakePatterns_Rollback(t *testing.T) {
 		},
 		{
 			name: "ROLLBACK TO SAVEPOINT quoted name",
-			sql:  "BEGIN;\nROLLBACK TO SAVEPOINT \"My_Save\"",
+			sql:  "BEGIN;\nROLLBACK TO SAVEPOINT \"My_Save\";\nCOMMIT;",
 		},
 
 		// ── FAIL ─────────────────────────────────────────────────────────────
@@ -314,6 +314,18 @@ func TestValidateSnowflakePatterns_ReleaseSavepoint(t *testing.T) {
 			expectWarning: true,
 			expectedMatch: "requires a savepoint name",
 		},
+		{
+			name:          "Bare RELEASE without SAVEPOINT keyword",
+			sql:           "RELEASE",
+			expectWarning: true,
+			expectedMatch: "requires SAVEPOINT keyword",
+		},
+		{
+			name:          "Bare RELEASE with semicolon",
+			sql:           "RELEASE;",
+			expectWarning: true,
+			expectedMatch: "requires SAVEPOINT keyword",
+		},
 	})
 }
 
@@ -363,6 +375,16 @@ func TestValidateSnowflakePatterns_TransactionBlocks(t *testing.T) {
 			sql:           "BEGIN;\nBEGIN;\nCOMMIT;\nCOMMIT;",
 			expectWarning: true,
 			expectedMatch: "nested BEGIN",
+		},
+
+		// ── PASS — ROLLBACK TO SAVEPOINT keeps transaction open ─────────────
+		{
+			name: "ROLLBACK TO SAVEPOINT then COMMIT — transaction stays open",
+			sql:  "BEGIN;\nSAVEPOINT sp1;\nINSERT INTO t VALUES (1);\nROLLBACK TO SAVEPOINT sp1;\nCOMMIT;",
+		},
+		{
+			name: "ROLLBACK TO SAVEPOINT then ROLLBACK — transaction closed by bare ROLLBACK",
+			sql:  "BEGIN;\nSAVEPOINT sp1;\nROLLBACK TO SAVEPOINT sp1;\nROLLBACK;",
 		},
 
 		// ── PASS — scripting inside $$ should not count ──────────────────────
