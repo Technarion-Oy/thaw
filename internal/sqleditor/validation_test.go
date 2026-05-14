@@ -4685,6 +4685,24 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 		"DROP SERVICE IF EXISTS my_svc",
 		// DROP SERVICE — schema-qualified name
 		"DROP SERVICE db.schema.my_svc",
+
+		// CREATE IMAGE REPOSITORY — valid
+		"CREATE IMAGE REPOSITORY my_repo",
+		"CREATE OR REPLACE IMAGE REPOSITORY my_repo",
+		"CREATE IMAGE REPOSITORY IF NOT EXISTS my_repo",
+		"CREATE IMAGE REPOSITORY my_repo COMMENT = 'my image repo'",
+		"CREATE OR REPLACE IMAGE REPOSITORY my_repo COMMENT = 'replaced repo'",
+		// CREATE IMAGE REPOSITORY — schema-qualified names
+		"CREATE IMAGE REPOSITORY db.schema.my_repo",
+		"CREATE IMAGE REPOSITORY schema.my_repo",
+		// CREATE IMAGE REPOSITORY — case insensitive
+		"create image repository my_repo",
+		"Create Image Repository IF NOT EXISTS my_repo",
+
+		// DROP IMAGE REPOSITORY — valid
+		"DROP IMAGE REPOSITORY my_repo",
+		"DROP IMAGE REPOSITORY IF EXISTS my_repo",
+		"DROP IMAGE REPOSITORY db.schema.my_repo",
 	}
 
 	for _, sql := range validCases {
@@ -4869,6 +4887,57 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 			"DROP SERVICE IF EXISTS missing name",
 			"DROP SERVICE IF EXISTS",
 			[]string{"DROP SERVICE requires a service name"},
+		},
+
+		// CREATE IMAGE REPOSITORY — missing name
+		{
+			"CREATE IMAGE REPOSITORY missing name",
+			"CREATE IMAGE REPOSITORY",
+			[]string{"Unexpected syntax in CREATE IMAGE REPOSITORY"},
+		},
+		// CREATE IMAGE REPOSITORY — OR REPLACE without name
+		{
+			"CREATE OR REPLACE IMAGE REPOSITORY missing name",
+			"CREATE OR REPLACE IMAGE REPOSITORY",
+			[]string{"Unexpected syntax in CREATE IMAGE REPOSITORY"},
+		},
+		// CREATE IMAGE REPOSITORY — IF NOT EXISTS without name
+		{
+			"CREATE IMAGE REPOSITORY IF NOT EXISTS missing name",
+			"CREATE IMAGE REPOSITORY IF NOT EXISTS",
+			[]string{"Unexpected syntax in CREATE IMAGE REPOSITORY"},
+		},
+		// CREATE IMAGE REPOSITORY — OR REPLACE and IF NOT EXISTS conflict
+		{
+			"CREATE IMAGE REPOSITORY OR REPLACE + IF NOT EXISTS",
+			"CREATE OR REPLACE IMAGE REPOSITORY IF NOT EXISTS my_repo",
+			[]string{"Conflict between OR REPLACE and IF NOT EXISTS"},
+		},
+		// CREATE IMAGE REPOSITORY — unexpected property
+		{
+			"CREATE IMAGE REPOSITORY unexpected property",
+			"CREATE IMAGE REPOSITORY my_repo TAG_POLICY = my_policy",
+			[]string{"Unexpected property 'TAG_POLICY'"},
+		},
+
+		// DROP IMAGE REPOSITORY — missing name
+		{
+			"DROP IMAGE REPOSITORY missing name",
+			"DROP IMAGE REPOSITORY",
+			[]string{"DROP IMAGE REPOSITORY requires a repository name"},
+		},
+		// DROP IMAGE REPOSITORY IF EXISTS — missing name
+		{
+			"DROP IMAGE REPOSITORY IF EXISTS missing name",
+			"DROP IMAGE REPOSITORY IF EXISTS",
+			[]string{"DROP IMAGE REPOSITORY requires a repository name"},
+		},
+
+		// ALTER IMAGE REPOSITORY — unsupported
+		{
+			"ALTER IMAGE REPOSITORY unsupported",
+			"ALTER IMAGE REPOSITORY my_repo SET COMMENT = 'test'",
+			[]string{"ALTER IMAGE REPOSITORY is not supported"},
 		},
 	}
 

@@ -48,11 +48,11 @@ var (
 		`(?i)\bTABLESAMPLE\b|\bSAMPLE\s*\(|\bWITHIN\s+GROUP\b|\bCONNECT\s+BY\b` +
 			`|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b` +
 			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:STAGE` +
-			`|REPLICATION|FAILOVER|APPLICATION|DATASHARE|SERVICE)\b` +
+			`|REPLICATION|FAILOVER|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY)\b` +
 			`|ALTER\s+(?:TABLE|VIEW|STREAM|DATABASE|STAGE|PIPE|PROCEDURE|FUNCTION` +
 			`|ALERT|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK` +
-			`|REPLICATION|FAILOVER|DATASHARE|SERVICE)\b` +
-			`|DROP\s+(?:TABLE|VIEW|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|DATASHARE|SERVICE)\b` +
+			`|REPLICATION|FAILOVER|DATASHARE|SERVICE|IMAGE\s+REPOSITORY)\b` +
+			`|DROP\s+(?:TABLE|VIEW|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY)\b` +
 			`|EXECUTE\s+(?:JOB\s+)?SERVICE\b` +
 			`|UNDROP\s+(?:DATABASE|SCHEMA|TABLE)\b` +
 			`|INSERT\s+OVERWRITE\b` +
@@ -628,6 +628,13 @@ var (
 	reAlterServiceAction      = regexp.MustCompile(`(?i)\b(?:SUSPEND|RESUME|SET\s+(?:MIN_INSTANCES|MAX_INSTANCES|COMMENT|QUERY_WAREHOUSE)|UNSET\s+(?:COMMENT|QUERY_WAREHOUSE|MIN_INSTANCES|MAX_INSTANCES)|FROM\s+(?:@` + _identPath + `\s+)?SPECIFICATION(?:_TEMPLATE)?(?:_FILE)?)\b`)
 	reAlterServiceSetBare     = regexp.MustCompile(`(?i)\bSET\s+\w+`)
 	reAlterServiceUnsetBare   = regexp.MustCompile(`(?i)\bUNSET\s+\w+`)
+
+	// ── CREATE / DROP IMAGE REPOSITORY (SPCS) ────────────────────────────
+	reIsCreateImageRepository   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?IMAGE\s+REPOSITORY\b`)
+	reCreateImageRepositoryName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?IMAGE\s+REPOSITORY\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
+	reIsDropImageRepository     = regexp.MustCompile(`(?i)^\s*DROP\s+IMAGE\s+REPOSITORY\b`)
+	reDropImageRepositoryName   = regexp.MustCompile(`(?i)^\s*DROP\s+IMAGE\s+REPOSITORY\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
+	reIsAlterImageRepository    = regexp.MustCompile(`(?i)^\s*ALTER\s+IMAGE\s+REPOSITORY\b`)
 
 	// ── CREATE EVENT TABLE ──────────────────────────────────────────────────
 	reIsCreateEventTable   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EVENT\s+TABLE\b`)
@@ -2156,6 +2163,24 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// ── DROP SERVICE ────────────────────────────────────────────────
 		if reIsDropService.MatchString(parseText) {
 			markers = append(markers, validateDropService(parseText, r)...)
+			continue
+		}
+
+		// ── CREATE IMAGE REPOSITORY ─────────────────────────────────────
+		if reIsCreateImageRepository.MatchString(parseText) {
+			markers = append(markers, validateCreateImageRepository(parseText, r)...)
+			continue
+		}
+
+		// ── DROP IMAGE REPOSITORY ───────────────────────────────────────
+		if reIsDropImageRepository.MatchString(parseText) {
+			markers = append(markers, validateDropImageRepository(parseText, r)...)
+			continue
+		}
+
+		// ── ALTER IMAGE REPOSITORY ──────────────────────────────────────
+		if reIsAlterImageRepository.MatchString(parseText) {
+			markers = append(markers, validateAlterImageRepository(parseText, r)...)
 			continue
 		}
 
@@ -6494,4 +6519,87 @@ func validateDropService(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	return markers
+}
+
+// ── validateCreateImageRepository ─────────────────────────────────────────────
+
+// validateCreateImageRepository checks structural requirements for
+// CREATE [OR REPLACE] IMAGE REPOSITORY [IF NOT EXISTS] <name> statements:
+//   - OR REPLACE and IF NOT EXISTS are mutually exclusive.
+//   - A repository name is required.
+//   - Image repositories are schema-level objects: three-part names are valid.
+//   - Only COMMENT is a valid property.
+func validateCreateImageRepository(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+
+	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
+	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE IMAGE REPOSITORY statement.", 4))
+		return markers
+	}
+
+	// 2. Repository name is required.
+	m := reCreateImageRepositoryName.FindStringSubmatch(clean)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"Unexpected syntax in CREATE IMAGE REPOSITORY statement.", 4))
+		return markers
+	}
+	// Guard against "CREATE IMAGE REPOSITORY IF NOT EXISTS" (no name): the
+	// optional IF\s+NOT\s+EXISTS\s+ group fails (no trailing whitespace+ident),
+	// so the regex captures "IF" as the name. Detect this and flag it.
+	if strings.EqualFold(m[1], "IF") && reIfNotExists.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Unexpected syntax in CREATE IMAGE REPOSITORY statement.", 4))
+		return markers
+	}
+
+	// 3. Only COMMENT is a valid property.
+	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
+	validateProperties(noComments, `COMMENT`, r, &markers)
+
+	return markers
+}
+
+// ── validateDropImageRepository ───────────────────────────────────────────────
+
+// validateDropImageRepository checks structural requirements for DROP IMAGE REPOSITORY:
+//   - Repository name is required.
+func validateDropImageRepository(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+
+	m := reDropImageRepositoryName.FindStringSubmatch(clean)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"DROP IMAGE REPOSITORY requires a repository name.", 4))
+		return markers
+	}
+	// Guard against "DROP IMAGE REPOSITORY IF EXISTS" (no name): the optional
+	// IF\s+EXISTS\s+ group fails (no trailing whitespace+ident), so the
+	// regex captures "IF" as the name. Detect this and flag it.
+	if strings.EqualFold(m[1], "IF") && reDropServiceIfExists.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"DROP IMAGE REPOSITORY requires a repository name.", 4))
+		return markers
+	}
+
+	return markers
+}
+
+// ── validateAlterImageRepository ──────────────────────────────────────────────
+
+// validateAlterImageRepository warns that ALTER IMAGE REPOSITORY is not
+// supported in the current Snowflake specification.
+func validateAlterImageRepository(_ string, r StatementRange) []DiagMarker {
+	return []DiagMarker{
+		diagMarkerSpan(r,
+			"ALTER IMAGE REPOSITORY is not supported in the current Snowflake specification.", 4),
+	}
 }
