@@ -6623,6 +6623,11 @@ func TestValidateSnowflakePatterns_InsertAllFirstOverwrite(t *testing.T) {
 			`INSERT ALL
 			   INTO t1 (id, val)
 			 SELECT id, 'WHEN ELSE SELECT INTO' AS val FROM source`,
+			// CTE with INSERT ALL (WITH ... SELECT)
+			`INSERT ALL
+			   INTO t1
+			   INTO t2
+			 WITH cte AS (SELECT id, amount FROM raw_data) SELECT * FROM cte`,
 		}
 		for _, sql := range validQueries {
 			t.Run(sql[:min(len(sql), 60)], func(t *testing.T) {
@@ -6731,6 +6736,16 @@ func TestValidateSnowflakePatterns_InsertAllFirstOverwrite(t *testing.T) {
 				 SELECT id, x FROM source`,
 				wantMsg: "WHEN branch must contain INTO clause",
 			},
+			// INSERT OVERWRITE ALL without any INTO
+			{
+				sql:     `INSERT OVERWRITE ALL SELECT * FROM source`,
+				wantMsg: "INSERT ALL requires at least one INTO clause",
+			},
+			// INSERT OVERWRITE ALL without trailing SELECT
+			{
+				sql:     `INSERT OVERWRITE ALL INTO t1 (id) VALUES (1)`,
+				wantMsg: "INSERT ALL requires a source SELECT",
+			},
 		}
 		for _, tc := range cases {
 			t.Run(tc.sql[:min(len(tc.sql), 60)], func(t *testing.T) {
@@ -6772,6 +6787,11 @@ func TestValidateSnowflakePatterns_InsertAllFirstOverwrite(t *testing.T) {
 				sql: `INSERT FIRST
 				   WHEN x > 0 THEN INTO t1`,
 				wantMsg: "INSERT FIRST requires a source SELECT",
+			},
+			// INSERT OVERWRITE FIRST without WHEN branches
+			{
+				sql:     `INSERT OVERWRITE FIRST INTO t1 SELECT id FROM source`,
+				wantMsg: "INSERT FIRST requires at least one WHEN branch",
 			},
 		}
 		for _, tc := range cases {

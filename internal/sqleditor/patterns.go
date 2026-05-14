@@ -3132,6 +3132,10 @@ func validateInsertMultiTable(keyword string, stripped string, r StatementRange)
 // scanInsertMultiKeywords scans upper (already uppercased) up to scanLimit for
 // top-level (depth == 0) WHEN, ELSE, and INTO keywords. Returns the positions
 // of each WHEN, and whether ELSE and INTO were found.
+// Note: word-boundary checks peek one character past the keyword end using
+// len(upper) (not scanLimit) because we need to verify the character after the
+// keyword is not a word character. This is safe — the keyword start is always
+// within scanLimit, and we only read (not match) one byte beyond.
 func scanInsertMultiKeywords(upper string, scanLimit int) (whenPositions []int, hasElse bool, hasInto bool) {
 	depth := 0
 	for i := 0; i < scanLimit; i++ {
