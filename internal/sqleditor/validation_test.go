@@ -4777,6 +4777,18 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 			"ALTER SERVICE my_svc ENABLE",
 			[]string{"Unknown ALTER SERVICE sub-command"},
 		},
+		// ALTER SERVICE — SET with unknown property
+		{
+			"ALTER SERVICE SET unknown property",
+			"ALTER SERVICE my_svc SET UNKNOWN_PROP = 1",
+			[]string{"Unknown property in ALTER SERVICE SET"},
+		},
+		// ALTER SERVICE — UNSET with unknown property
+		{
+			"ALTER SERVICE UNSET unknown property",
+			"ALTER SERVICE my_svc UNSET UNKNOWN_PROP",
+			[]string{"Unknown property in ALTER SERVICE UNSET"},
+		},
 		// ALTER SERVICE — MIN_INSTANCES negative
 		{
 			"ALTER SERVICE MIN_INSTANCES negative",

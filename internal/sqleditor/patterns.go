@@ -616,13 +616,13 @@ var (
 	reServiceFromSpecFile     = regexp.MustCompile(`(?i)\bFROM\s+SPECIFICATION_FILE\b`)
 	reServiceMinInstances     = regexp.MustCompile(`(?i)\bMIN_INSTANCES\s*=\s*(-?\d+)`)
 	reServiceMaxInstances     = regexp.MustCompile(`(?i)\bMAX_INSTANCES\s*=\s*(-?\d+)`)
-	// ALTER SERVICE actions
-	reAlterServiceSuspend     = regexp.MustCompile(`(?i)\bSUSPEND\b`)
-	reAlterServiceResume      = regexp.MustCompile(`(?i)\bRESUME\b`)
-	reAlterServiceSet         = regexp.MustCompile(`(?i)\bSET\s+(?:MIN_INSTANCES|MAX_INSTANCES|COMMENT|QUERY_WAREHOUSE)\b`)
-	reAlterServiceUnset       = regexp.MustCompile(`(?i)\bUNSET\s+(?:COMMENT|QUERY_WAREHOUSE)\b`)
-	reAlterServiceFromSpec    = regexp.MustCompile(`(?i)\bFROM\s+SPECIFICATION\b`)
+	// ALTER SERVICE actions — reAlterServiceAction matches any known sub-command
+	// for the "unknown sub-command" guard. reAlterServiceSetBare matches bare
+	// SET (with any property) so we can distinguish "unknown property within SET"
+	// from "unknown sub-command entirely".
 	reAlterServiceAction      = regexp.MustCompile(`(?i)\b(?:SUSPEND|RESUME|SET\s+(?:MIN_INSTANCES|MAX_INSTANCES|COMMENT|QUERY_WAREHOUSE)|UNSET\s+(?:COMMENT|QUERY_WAREHOUSE)|FROM\s+SPECIFICATION)\b`)
+	reAlterServiceSetBare     = regexp.MustCompile(`(?i)\bSET\s+\w+`)
+	reAlterServiceUnsetBare   = regexp.MustCompile(`(?i)\bUNSET\s+\w+`)
 
 	// ── CREATE EVENT TABLE ──────────────────────────────────────────────────
 	reIsCreateEventTable   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EVENT\s+TABLE\b`)
@@ -6269,7 +6269,9 @@ func validateCreateService(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 4. Exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE is required.
-	hasSpec := reServiceFromSpec.MatchString(clean) && !reServiceFromSpecFile.MatchString(clean)
+	// \b in reServiceFromSpec prevents matching SPECIFICATION_FILE (underscore
+	// is a word character), so the two regexes are mutually exclusive.
+	hasSpec := reServiceFromSpec.MatchString(clean)
 	hasSpecFile := reServiceFromSpecFile.MatchString(clean)
 	if hasSpec && hasSpecFile {
 		markers = append(markers, diagMarkerSpan(r,
@@ -6313,7 +6315,7 @@ func validateCreateService(parseText string, r StatementRange) []DiagMarker {
 	validateBoolProp(clean, "AUTO_RESUME", r, &markers)
 
 	// 8. Only known properties are accepted.
-	noComments := strings.TrimSpace(stripCommentsSQL(reStripDollarQuoted.ReplaceAllString(parseText, "''")))
+	noComments := strings.TrimSpace(stripCommentsSQL(noDollar))
 	validateProperties(noComments,
 		`MIN_INSTANCES|MAX_INSTANCES|EXTERNAL_ACCESS_INTEGRATIONS|AUTO_RESUME|QUERY_WAREHOUSE|COMMENT|SPECIFICATION_FILE`,
 		r, &markers)
@@ -6350,7 +6352,7 @@ func validateExecuteService(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 3. Exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE is required.
-	hasSpec := reServiceFromSpec.MatchString(clean) && !reServiceFromSpecFile.MatchString(clean)
+	hasSpec := reServiceFromSpec.MatchString(clean)
 	hasSpecFile := reServiceFromSpecFile.MatchString(clean)
 	if hasSpec && hasSpecFile {
 		markers = append(markers, diagMarkerSpan(r,
@@ -6371,7 +6373,7 @@ func validateExecuteService(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 5. Only known properties are accepted.
-	noComments := strings.TrimSpace(stripCommentsSQL(reStripDollarQuoted.ReplaceAllString(parseText, "''")))
+	noComments := strings.TrimSpace(stripCommentsSQL(noDollar))
 	validateProperties(noComments,
 		`EXTERNAL_ACCESS_INTEGRATIONS|QUERY_WAREHOUSE|COMMENT|SPECIFICATION_FILE`,
 		r, &markers)
@@ -6402,10 +6404,20 @@ func validateAlterService(parseText string, r StatementRange) []DiagMarker {
 		return markers
 	}
 
-	// 2. At least one known action must be present.
+	// 2. At least one known action must be present. Distinguish between
+	// "SET with an unrecognized property" and "entirely unknown sub-command"
+	// so the user gets a more actionable message.
 	if !reAlterServiceAction.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Unknown ALTER SERVICE sub-command. Expected SUSPEND, RESUME, SET, UNSET, or FROM SPECIFICATION.", 4))
+		if reAlterServiceSetBare.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"Unknown property in ALTER SERVICE SET. Valid properties: MIN_INSTANCES, MAX_INSTANCES, COMMENT, QUERY_WAREHOUSE.", 4))
+		} else if reAlterServiceUnsetBare.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"Unknown property in ALTER SERVICE UNSET. Valid properties: COMMENT, QUERY_WAREHOUSE.", 4))
+		} else {
+			markers = append(markers, diagMarkerSpan(r,
+				"Unknown ALTER SERVICE sub-command. Expected SUSPEND, RESUME, SET, UNSET, or FROM SPECIFICATION.", 4))
+		}
 		return markers
 	}
 
