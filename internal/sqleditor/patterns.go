@@ -58,7 +58,9 @@ var (
 			`|INSERT\s+OVERWRITE\b` +
 			`|TRUNCATE\s+\S+\s+IF\b` +
 			`|\bLATERAL\s+FLATTEN\b` +
-			`|\bINFER_SCHEMA\b`,
+			`|\bINFER_SCHEMA\b` +
+			`|\bPIVOT\s*\(` +
+			`|\bUNPIVOT\b`,
 	)
 
 	// ── Snowflake Cortex AI function call detection ──────────────────────────
@@ -279,23 +281,23 @@ var (
 		`ERROR_INTEGRATION`, `COMMENT`, `AFTER`, `WHEN`, `FINALIZE`,
 	}, "|")
 
-	reCreateTaskName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TASK\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-	reTaskAS         = regexp.MustCompile(`(?i)\bAS\b`)
-	reTaskSchedule   = regexp.MustCompile(`(?i)\bSCHEDULE\s*=`)
-	reTaskAfter      = regexp.MustCompile(`(?i)\bAFTER\b`)
-	reTaskAfterNames = regexp.MustCompile(`(?i)\bAFTER\s+(` + _identPath + `(?:\s*,\s*` + _identPath + `)*)`)
+	reCreateTaskName   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TASK\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
+	reTaskAS           = regexp.MustCompile(`(?i)\bAS\b`)
+	reTaskSchedule     = regexp.MustCompile(`(?i)\bSCHEDULE\s*=`)
+	reTaskAfter        = regexp.MustCompile(`(?i)\bAFTER\b`)
+	reTaskAfterNames   = regexp.MustCompile(`(?i)\bAFTER\s+(` + _identPath + `(?:\s*,\s*` + _identPath + `)*)`)
 	reTaskFinalizeBare = regexp.MustCompile(`(?i)\bFINALIZE\b`)
 	reTaskFinalizeN    = regexp.MustCompile(`(?i)\bFINALIZE\s*=\s*(` + _identPath + `)`)
-	reTaskWhen       = regexp.MustCompile(`(?i)\bWHEN\b`)
-	reTaskWhenExpr   = regexp.MustCompile(`(?i)\bWHEN\s+\S`)
+	reTaskWhen         = regexp.MustCompile(`(?i)\bWHEN\b`)
+	reTaskWhenExpr     = regexp.MustCompile(`(?i)\bWHEN\s+\S`)
 
 	// ── ALTER TASK ────────────────────────────────────────────────────────────
-	reIsAlterTask     = regexp.MustCompile(`(?i)^\s*ALTER\s+TASK\b`)
-	reAlterTaskName   = regexp.MustCompile(`(?i)^\s*ALTER\s+TASK\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
-	reAlterTaskResume = regexp.MustCompile(`(?i)\bRESUME\s*$`)
-	reAlterTaskSusp   = regexp.MustCompile(`(?i)\bSUSPEND\s*$`)
-	reAlterTaskSet    = regexp.MustCompile(`(?i)\bSET\b`)
-	reAlterTaskUnset  = regexp.MustCompile(`(?i)\bUNSET\b`)
+	reIsAlterTask           = regexp.MustCompile(`(?i)^\s*ALTER\s+TASK\b`)
+	reAlterTaskName         = regexp.MustCompile(`(?i)^\s*ALTER\s+TASK\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
+	reAlterTaskResume       = regexp.MustCompile(`(?i)\bRESUME\s*$`)
+	reAlterTaskSusp         = regexp.MustCompile(`(?i)\bSUSPEND\s*$`)
+	reAlterTaskSet          = regexp.MustCompile(`(?i)\bSET\b`)
+	reAlterTaskUnset        = regexp.MustCompile(`(?i)\bUNSET\b`)
 	reAlterTaskRemAfter     = regexp.MustCompile(`(?i)\bREMOVE\s+AFTER\b`)
 	reAlterTaskRemAfterN    = regexp.MustCompile(`(?i)\bREMOVE\s+AFTER\s+(` + _identPath + `(?:\s*,\s*` + _identPath + `)*)`)
 	reAlterTaskAddAfter     = regexp.MustCompile(`(?i)\bADD\s+AFTER\b`)
@@ -306,7 +308,7 @@ var (
 	reAlterTaskModifyWhenE  = regexp.MustCompile(`(?i)\bMODIFY\s+WHEN\s+\S`)
 	reAlterTaskSetFinalize  = regexp.MustCompile(`(?i)\bSET\s+FINALIZE\s*=`)
 	reAlterTaskSetFinalizeN = regexp.MustCompile(`(?i)\bSET\s+FINALIZE\s*=\s*(` + _identPath + `)`)
-	reAlterTaskUnsetProp   = regexp.MustCompile(`(?i)\bUNSET\s+([A-Za-z_][A-Za-z0-9_]*)`)
+	reAlterTaskUnsetProp    = regexp.MustCompile(`(?i)\bUNSET\s+([A-Za-z_][A-Za-z0-9_]*)`)
 
 	// ── CREATE ALERT ──────────────────────────────────────────────────────────
 	reIsCreateAlert = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?ALERT\b`)
@@ -349,10 +351,10 @@ var (
 	reIsCreateMaskingPolicy = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?MASKING\s+POLICY\b`)
 
 	// ── CREATE NETWORK POLICY ─────────────────────────────────────────────────
-	reIsCreateNetworkPolicy       = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?NETWORK\s+POLICY\b`)
-	reNetworkPolicyName           = regexp.MustCompile(`(?i)POLICY\s+(` + _identPath + `)`)
-	reNetworkPolicyIPList         = regexp.MustCompile(`(?i)\b(ALLOWED_IP_LIST|BLOCKED_IP_LIST)\s*=\s*\(([^)]*)\)`)
-	reNetworkPolicyHasAllowedIP   = regexp.MustCompile(`(?i)\bALLOWED_IP_LIST\s*=\s*\(([^)]*)\)`)
+	reIsCreateNetworkPolicy        = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?NETWORK\s+POLICY\b`)
+	reNetworkPolicyName            = regexp.MustCompile(`(?i)POLICY\s+(` + _identPath + `)`)
+	reNetworkPolicyIPList          = regexp.MustCompile(`(?i)\b(ALLOWED_IP_LIST|BLOCKED_IP_LIST)\s*=\s*\(([^)]*)\)`)
+	reNetworkPolicyHasAllowedIP    = regexp.MustCompile(`(?i)\bALLOWED_IP_LIST\s*=\s*\(([^)]*)\)`)
 	reNetworkPolicyHasAllowedRules = regexp.MustCompile(`(?i)\bALLOWED_NETWORK_RULE_LIST\s*=\s*\(([^)]*)\)`)
 	networkPolicyProps             = strings.Join([]string{
 		`ALLOWED_IP_LIST`, `BLOCKED_IP_LIST`,
@@ -366,36 +368,36 @@ var (
 	// The capture group holds the raw parameter list content; one level of
 	// nested parens is supported to accommodate types like NUMBER(10,2).
 	reRowAccessPolicyParamList = regexp.MustCompile(`(?i)\bAS\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)`)
-	reRowAccessPolicyReturns = regexp.MustCompile(`(?i)\bRETURNS\s+BOOLEAN\b`)
+	reRowAccessPolicyReturns   = regexp.MustCompile(`(?i)\bRETURNS\s+BOOLEAN\b`)
 	// reRowAccessPolicyArrow requires the -> to appear after RETURNS BOOLEAN,
 	// preventing a bare -> elsewhere in the SQL from satisfying the check.
-	reRowAccessPolicyArrow = regexp.MustCompile(`(?i)\bRETURNS\s+BOOLEAN\s*->`)
-	reRowAccessPolicyASOpen    = regexp.MustCompile(`(?i)\bAS\s*\(`)
+	reRowAccessPolicyArrow  = regexp.MustCompile(`(?i)\bRETURNS\s+BOOLEAN\s*->`)
+	reRowAccessPolicyASOpen = regexp.MustCompile(`(?i)\bAS\s*\(`)
 
 	// ── CREATE SESSION POLICY ─────────────────────────────────────────────────
-	reIsCreateSessionPolicy   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SESSION\s+POLICY\b`)
-	reSessionPolicyName       = regexp.MustCompile(`(?i)POLICY\s+(` + _identPath + `)`)
-	reSessionIdleTimeout      = regexp.MustCompile(`(?i)\bSESSION_IDLE_TIMEOUT_MINS\s*=\s*(-?\d+)`)
-	reSessionUIIdleTimeout    = regexp.MustCompile(`(?i)\bSESSION_UI_IDLE_TIMEOUT_MINS\s*=\s*(-?\d+)`)
-	sessionPolicyProps        = strings.Join([]string{
+	reIsCreateSessionPolicy = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SESSION\s+POLICY\b`)
+	reSessionPolicyName     = regexp.MustCompile(`(?i)POLICY\s+(` + _identPath + `)`)
+	reSessionIdleTimeout    = regexp.MustCompile(`(?i)\bSESSION_IDLE_TIMEOUT_MINS\s*=\s*(-?\d+)`)
+	reSessionUIIdleTimeout  = regexp.MustCompile(`(?i)\bSESSION_UI_IDLE_TIMEOUT_MINS\s*=\s*(-?\d+)`)
+	sessionPolicyProps      = strings.Join([]string{
 		`SESSION_IDLE_TIMEOUT_MINS`, `SESSION_UI_IDLE_TIMEOUT_MINS`, `COMMENT`,
 	}, "|")
 
 	// ── CREATE PASSWORD POLICY ────────────────────────────────────────────────
-	reIsCreatePasswordPolicy     = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PASSWORD\s+POLICY\b`)
-	rePasswordPolicyName         = regexp.MustCompile(`(?i)POLICY\s+(` + _identPath + `)`)
-	rePasswordMinLength          = regexp.MustCompile(`(?i)\bPASSWORD_MIN_LENGTH\s*=\s*(-?\d+)`)
-	rePasswordMaxLength          = regexp.MustCompile(`(?i)\bPASSWORD_MAX_LENGTH\s*=\s*(-?\d+)`)
-	rePasswordMinUpperCase       = regexp.MustCompile(`(?i)\bPASSWORD_MIN_UPPER_CASE_CHARS\s*=\s*(-?\d+)`)
-	rePasswordMinLowerCase       = regexp.MustCompile(`(?i)\bPASSWORD_MIN_LOWER_CASE_CHARS\s*=\s*(-?\d+)`)
-	rePasswordMinNumeric         = regexp.MustCompile(`(?i)\bPASSWORD_MIN_NUMERIC_CHARS\s*=\s*(-?\d+)`)
-	rePasswordMinSpecial         = regexp.MustCompile(`(?i)\bPASSWORD_MIN_SPECIAL_CHARS\s*=\s*(-?\d+)`)
-	rePasswordMinAgeDays         = regexp.MustCompile(`(?i)\bPASSWORD_MIN_AGE_DAYS\s*=\s*(-?\d+)`)
-	rePasswordMaxAgeDays         = regexp.MustCompile(`(?i)\bPASSWORD_MAX_AGE_DAYS\s*=\s*(-?\d+)`)
-	rePasswordMaxRetries         = regexp.MustCompile(`(?i)\bPASSWORD_MAX_RETRIES\s*=\s*(-?\d+)`)
-	rePasswordLockoutTimeMins    = regexp.MustCompile(`(?i)\bPASSWORD_LOCKOUT_TIME_MINS\s*=\s*(-?\d+)`)
-	rePasswordHistory            = regexp.MustCompile(`(?i)\bPASSWORD_HISTORY\s*=\s*(-?\d+)`)
-	passwordPolicyProps          = strings.Join([]string{
+	reIsCreatePasswordPolicy  = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PASSWORD\s+POLICY\b`)
+	rePasswordPolicyName      = regexp.MustCompile(`(?i)POLICY\s+(` + _identPath + `)`)
+	rePasswordMinLength       = regexp.MustCompile(`(?i)\bPASSWORD_MIN_LENGTH\s*=\s*(-?\d+)`)
+	rePasswordMaxLength       = regexp.MustCompile(`(?i)\bPASSWORD_MAX_LENGTH\s*=\s*(-?\d+)`)
+	rePasswordMinUpperCase    = regexp.MustCompile(`(?i)\bPASSWORD_MIN_UPPER_CASE_CHARS\s*=\s*(-?\d+)`)
+	rePasswordMinLowerCase    = regexp.MustCompile(`(?i)\bPASSWORD_MIN_LOWER_CASE_CHARS\s*=\s*(-?\d+)`)
+	rePasswordMinNumeric      = regexp.MustCompile(`(?i)\bPASSWORD_MIN_NUMERIC_CHARS\s*=\s*(-?\d+)`)
+	rePasswordMinSpecial      = regexp.MustCompile(`(?i)\bPASSWORD_MIN_SPECIAL_CHARS\s*=\s*(-?\d+)`)
+	rePasswordMinAgeDays      = regexp.MustCompile(`(?i)\bPASSWORD_MIN_AGE_DAYS\s*=\s*(-?\d+)`)
+	rePasswordMaxAgeDays      = regexp.MustCompile(`(?i)\bPASSWORD_MAX_AGE_DAYS\s*=\s*(-?\d+)`)
+	rePasswordMaxRetries      = regexp.MustCompile(`(?i)\bPASSWORD_MAX_RETRIES\s*=\s*(-?\d+)`)
+	rePasswordLockoutTimeMins = regexp.MustCompile(`(?i)\bPASSWORD_LOCKOUT_TIME_MINS\s*=\s*(-?\d+)`)
+	rePasswordHistory         = regexp.MustCompile(`(?i)\bPASSWORD_HISTORY\s*=\s*(-?\d+)`)
+	passwordPolicyProps       = strings.Join([]string{
 		`PASSWORD_MIN_LENGTH`, `PASSWORD_MAX_LENGTH`,
 		`PASSWORD_MIN_UPPER_CASE_CHARS`, `PASSWORD_MIN_LOWER_CASE_CHARS`,
 		`PASSWORD_MIN_NUMERIC_CHARS`, `PASSWORD_MIN_SPECIAL_CHARS`,
@@ -405,68 +407,68 @@ var (
 	}, "|")
 
 	// ── CREATE AGGREGATION POLICY ────────────────────────────────────────────
-	reIsCreateAggregationPolicy   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?AGGREGATION\s+POLICY\b`)
-	reAggPolicyAS                 = regexp.MustCompile(`(?i)\bAS\s*\(`)
-	reAggPolicyReturns            = regexp.MustCompile(`(?i)\bRETURNS\s+AGGREGATION_CONSTRAINT\b`)
-	reAggPolicyArrow              = regexp.MustCompile(`(?i)\bRETURNS\s+AGGREGATION_CONSTRAINT\s*->`)
-	reAggPolicyMinGroupSize       = regexp.MustCompile(`(?i)\bMIN_GROUP_SIZE\s*=>\s*(-?\d+)`)
+	reIsCreateAggregationPolicy = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?AGGREGATION\s+POLICY\b`)
+	reAggPolicyAS               = regexp.MustCompile(`(?i)\bAS\s*\(`)
+	reAggPolicyReturns          = regexp.MustCompile(`(?i)\bRETURNS\s+AGGREGATION_CONSTRAINT\b`)
+	reAggPolicyArrow            = regexp.MustCompile(`(?i)\bRETURNS\s+AGGREGATION_CONSTRAINT\s*->`)
+	reAggPolicyMinGroupSize     = regexp.MustCompile(`(?i)\bMIN_GROUP_SIZE\s*=>\s*(-?\d+)`)
 
 	// ── CREATE PROJECTION POLICY ────────────────────────────────────────────
-	reIsCreateProjectionPolicy    = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PROJECTION\s+POLICY\b`)
-	reProjPolicyAS                = regexp.MustCompile(`(?i)\bAS\s*\(`)
-	reProjPolicyReturns           = regexp.MustCompile(`(?i)\bRETURNS\s+PROJECTION_CONSTRAINT\b`)
-	reProjPolicyArrow             = regexp.MustCompile(`(?i)\bRETURNS\s+PROJECTION_CONSTRAINT\s*->`)
-	reProjPolicyAllowValue        = regexp.MustCompile(`(?i)\bALLOW\s*=>\s*'([^']*)'`)
+	reIsCreateProjectionPolicy = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PROJECTION\s+POLICY\b`)
+	reProjPolicyAS             = regexp.MustCompile(`(?i)\bAS\s*\(`)
+	reProjPolicyReturns        = regexp.MustCompile(`(?i)\bRETURNS\s+PROJECTION_CONSTRAINT\b`)
+	reProjPolicyArrow          = regexp.MustCompile(`(?i)\bRETURNS\s+PROJECTION_CONSTRAINT\s*->`)
+	reProjPolicyAllowValue     = regexp.MustCompile(`(?i)\bALLOW\s*=>\s*'([^']*)'`)
 
 	// ── ALTER / DROP AGGREGATION POLICY ──────────────────────────────────────
-	reIsAlterAggregationPolicy    = regexp.MustCompile(`(?i)^\s*ALTER\s+AGGREGATION\s+POLICY\b`)
-	reIsDropAggregationPolicy     = regexp.MustCompile(`(?i)^\s*DROP\s+AGGREGATION\s+POLICY\b`)
-	reAlterPolicyAction           = regexp.MustCompile(`(?i)\b(?:SET\s+BODY\s*->|SET\s+COMMENT\s*=|UNSET\s+COMMENT\b|RENAME\s+TO\b)`)
-	reDropPolicyHasName           = regexp.MustCompile(`(?i)POLICY\s+(?:IF\s+EXISTS\s+)?` + _identPath)
+	reIsAlterAggregationPolicy = regexp.MustCompile(`(?i)^\s*ALTER\s+AGGREGATION\s+POLICY\b`)
+	reIsDropAggregationPolicy  = regexp.MustCompile(`(?i)^\s*DROP\s+AGGREGATION\s+POLICY\b`)
+	reAlterPolicyAction        = regexp.MustCompile(`(?i)\b(?:SET\s+BODY\s*->|SET\s+COMMENT\s*=|UNSET\s+COMMENT\b|RENAME\s+TO\b)`)
+	reDropPolicyHasName        = regexp.MustCompile(`(?i)POLICY\s+(?:IF\s+EXISTS\s+)?` + _identPath)
 
 	// ── ALTER / DROP PROJECTION POLICY ───────────────────────────────────────
-	reIsAlterProjectionPolicy     = regexp.MustCompile(`(?i)^\s*ALTER\s+PROJECTION\s+POLICY\b`)
-	reIsDropProjectionPolicy      = regexp.MustCompile(`(?i)^\s*DROP\s+PROJECTION\s+POLICY\b`)
+	reIsAlterProjectionPolicy = regexp.MustCompile(`(?i)^\s*ALTER\s+PROJECTION\s+POLICY\b`)
+	reIsDropProjectionPolicy  = regexp.MustCompile(`(?i)^\s*DROP\s+PROJECTION\s+POLICY\b`)
 
 	// ── CREATE PACKAGES POLICY ──────────────────────────────────────────────
-	reIsCreatePackagesPolicy      = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PACKAGES\s+POLICY\b`)
-	rePkgPolicyLanguage           = regexp.MustCompile(`(?i)\bLANGUAGE\s+(\w+)`)
+	reIsCreatePackagesPolicy = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PACKAGES\s+POLICY\b`)
+	rePkgPolicyLanguage      = regexp.MustCompile(`(?i)\bLANGUAGE\s+(\w+)`)
 
 	// ── ALTER / DROP PACKAGES POLICY ────────────────────────────────────────
-	reIsAlterPackagesPolicy       = regexp.MustCompile(`(?i)^\s*ALTER\s+PACKAGES\s+POLICY\b`)
-	reIsDropPackagesPolicy        = regexp.MustCompile(`(?i)^\s*DROP\s+PACKAGES\s+POLICY\b`)
-	reAlterPkgPolicyAction        = regexp.MustCompile(`(?i)\b(?:SET\s+(?:ALLOWLIST|BLOCKLIST|ADDITIONAL_CREATION_BLOCKLIST|COMMENT)\b|UNSET\s+(?:ALLOWLIST|BLOCKLIST|ADDITIONAL_CREATION_BLOCKLIST|COMMENT)\b)`)
+	reIsAlterPackagesPolicy = regexp.MustCompile(`(?i)^\s*ALTER\s+PACKAGES\s+POLICY\b`)
+	reIsDropPackagesPolicy  = regexp.MustCompile(`(?i)^\s*DROP\s+PACKAGES\s+POLICY\b`)
+	reAlterPkgPolicyAction  = regexp.MustCompile(`(?i)\b(?:SET\s+(?:ALLOWLIST|BLOCKLIST|ADDITIONAL_CREATION_BLOCKLIST|COMMENT)\b|UNSET\s+(?:ALLOWLIST|BLOCKLIST|ADDITIONAL_CREATION_BLOCKLIST|COMMENT)\b)`)
 
 	// ── CREATE / ALTER / DROP REPLICATION GROUP ─────────────────────────────
-	reIsCreateReplicationGroup = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?REPLICATION\s+GROUP\b`)
-	reIsAlterReplicationGroup  = regexp.MustCompile(`(?i)^\s*ALTER\s+REPLICATION\s+GROUP\b`)
-	reIsDropReplicationGroup   = regexp.MustCompile(`(?i)^\s*DROP\s+REPLICATION\s+GROUP\b`)
-	reReplGroupName            = regexp.MustCompile(`(?i)(?:REPLICATION|FAILOVER)\s+GROUP\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?(` + _identPath + `)`)
-	reReplGroupObjectTypes     = regexp.MustCompile(`(?i)\bOBJECT_TYPES\s*=`)
-	reReplGroupAllowedAccounts = regexp.MustCompile(`(?i)\bALLOWED_ACCOUNTS\s*=`)
-	reReplGroupAllowedDatabases     = regexp.MustCompile(`(?i)\bALLOWED_DATABASES\s*=`)
-	reReplGroupAllowedIntTypes      = regexp.MustCompile(`(?i)\bALLOWED_INTEGRATION_TYPES\s*=`)
+	reIsCreateReplicationGroup  = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?REPLICATION\s+GROUP\b`)
+	reIsAlterReplicationGroup   = regexp.MustCompile(`(?i)^\s*ALTER\s+REPLICATION\s+GROUP\b`)
+	reIsDropReplicationGroup    = regexp.MustCompile(`(?i)^\s*DROP\s+REPLICATION\s+GROUP\b`)
+	reReplGroupName             = regexp.MustCompile(`(?i)(?:REPLICATION|FAILOVER)\s+GROUP\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?(` + _identPath + `)`)
+	reReplGroupObjectTypes      = regexp.MustCompile(`(?i)\bOBJECT_TYPES\s*=`)
+	reReplGroupAllowedAccounts  = regexp.MustCompile(`(?i)\bALLOWED_ACCOUNTS\s*=`)
+	reReplGroupAllowedDatabases = regexp.MustCompile(`(?i)\bALLOWED_DATABASES\s*=`)
+	reReplGroupAllowedIntTypes  = regexp.MustCompile(`(?i)\bALLOWED_INTEGRATION_TYPES\s*=`)
 	// reReplGroupObjectTypesValue captures the value portion after OBJECT_TYPES =
 	// up to the next known keyword boundary (or end-of-string), so substring
 	// checks for DATABASES or INTEGRATIONS only examine the actual type list.
-	reReplGroupObjectTypesValue     = regexp.MustCompile(`(?i)\bOBJECT_TYPES\s*=\s*(.+?)(?:\s+(?:ALLOWED_|IGNORE\s+EDITION|REPLICATION_SCHEDULE)|\s*$)`)
+	reReplGroupObjectTypesValue = regexp.MustCompile(`(?i)\bOBJECT_TYPES\s*=\s*(.+?)(?:\s+(?:ALLOWED_|IGNORE\s+EDITION|REPLICATION_SCHEDULE)|\s*$)`)
 	// ALTER actions
-	reAlterReplGroupAdd          = regexp.MustCompile(`(?i)\bADD\s+` + _ident)
-	reAlterReplGroupRemove       = regexp.MustCompile(`(?i)\bREMOVE\s+` + _ident)
+	reAlterReplGroupAdd           = regexp.MustCompile(`(?i)\bADD\s+` + _ident)
+	reAlterReplGroupRemove        = regexp.MustCompile(`(?i)\bREMOVE\s+` + _ident)
 	reAlterReplGroupMoveDatabases = regexp.MustCompile(`(?i)\bMOVE\s+DATABASES\b`)
 	reAlterReplGroupMoveTo        = regexp.MustCompile(`(?i)\bTO\s+REPLICATION\s+GROUP\s+` + _ident)
 	reAlterReplGroupSet           = regexp.MustCompile(`(?i)\bSET\s+(?:REPLICATION_SCHEDULE|OBJECT_TYPES)\b`)
 	reAlterReplGroupRename        = regexp.MustCompile(`(?i)\bRENAME\s+TO\s+` + _ident)
 
 	// ── CREATE / ALTER / DROP FAILOVER GROUP ────────────────────────────────
-	reIsCreateFailoverGroup = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?FAILOVER\s+GROUP\b`)
-	reIsAlterFailoverGroup  = regexp.MustCompile(`(?i)^\s*ALTER\s+FAILOVER\s+GROUP\b`)
-	reIsDropFailoverGroup   = regexp.MustCompile(`(?i)^\s*DROP\s+FAILOVER\s+GROUP\b`)
+	reIsCreateFailoverGroup        = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?FAILOVER\s+GROUP\b`)
+	reIsAlterFailoverGroup         = regexp.MustCompile(`(?i)^\s*ALTER\s+FAILOVER\s+GROUP\b`)
+	reIsDropFailoverGroup          = regexp.MustCompile(`(?i)^\s*DROP\s+FAILOVER\s+GROUP\b`)
 	reFailoverGroupAllowedAccounts = regexp.MustCompile(`(?i)\bALLOWED_(?:FAILOVER_)?ACCOUNTS\s*=`)
-	reAlterFailoverPrimary  = regexp.MustCompile(`(?i)\bPRIMARY\b`)
-	reAlterFailoverRefresh  = regexp.MustCompile(`(?i)\bREFRESH\b`)
-	reAlterFailoverSuspend  = regexp.MustCompile(`(?i)\bSUSPEND\b`)
-	reAlterFailoverResume   = regexp.MustCompile(`(?i)\bRESUME\b`)
+	reAlterFailoverPrimary         = regexp.MustCompile(`(?i)\bPRIMARY\b`)
+	reAlterFailoverRefresh         = regexp.MustCompile(`(?i)\bREFRESH\b`)
+	reAlterFailoverSuspend         = regexp.MustCompile(`(?i)\bSUSPEND\b`)
+	reAlterFailoverResume          = regexp.MustCompile(`(?i)\bRESUME\b`)
 
 	// ── Time Travel AT / BEFORE clauses ──────────────────────────────────────
 	reTimeTravelClause = regexp.MustCompile(`(?i)\b(AT|BEFORE)\s*\(`)
@@ -490,14 +492,14 @@ var (
 	// privilege list, stopping at the first occurrence of " ON ". This is safe
 	// as long as no Snowflake privilege name itself contains the substring " ON ";
 	// verify this assumption when adding new privileges to grantObjectPrivileges.
-	reGrantOnObject  = regexp.MustCompile(`(?i)\bGRANT\s+([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(` + _grantObjType + `)`)
-	reRevokeOnObject = regexp.MustCompile(`(?i)\bREVOKE\s+(?:GRANT\s+OPTION\s+FOR\s+)?([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(` + _grantObjType + `)`)
-	reGrantee              = regexp.MustCompile(`(?i)\bTO\s+(?:ROLE|USER|DATABASE\s+ROLE|SHARE)\b`)
-	reGranteeFrom          = regexp.MustCompile(`(?i)\bFROM\s+(?:ROLE|USER|DATABASE\s+ROLE|SHARE)\b`)
-	reGrantAllFuture       = regexp.MustCompile(`(?i)\bON\s+(?:ALL|FUTURE)\b`)
-	reGrantInQualifier     = regexp.MustCompile(`(?i)\bIN\s+(?:SCHEMA|DATABASE)\b`)
-	reGrantToTable         = regexp.MustCompile(`(?i)\bTO\s+TABLE\b`)
-	reWithGrantOption      = regexp.MustCompile(`(?i)\bWITH\s+GRANT\s+OPTION\b`)
+	reGrantOnObject    = regexp.MustCompile(`(?i)\bGRANT\s+([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(` + _grantObjType + `)`)
+	reRevokeOnObject   = regexp.MustCompile(`(?i)\bREVOKE\s+(?:GRANT\s+OPTION\s+FOR\s+)?([\s\S]+?)\s+ON\s+(ALL\s+|FUTURE\s+)?(` + _grantObjType + `)`)
+	reGrantee          = regexp.MustCompile(`(?i)\bTO\s+(?:ROLE|USER|DATABASE\s+ROLE|SHARE)\b`)
+	reGranteeFrom      = regexp.MustCompile(`(?i)\bFROM\s+(?:ROLE|USER|DATABASE\s+ROLE|SHARE)\b`)
+	reGrantAllFuture   = regexp.MustCompile(`(?i)\bON\s+(?:ALL|FUTURE)\b`)
+	reGrantInQualifier = regexp.MustCompile(`(?i)\bIN\s+(?:SCHEMA|DATABASE)\b`)
+	reGrantToTable     = regexp.MustCompile(`(?i)\bTO\s+TABLE\b`)
+	reWithGrantOption  = regexp.MustCompile(`(?i)\bWITH\s+GRANT\s+OPTION\b`)
 	// reRevokeCascade / reRevokeRestrict match the keywords anywhere in the
 	// statement. Unquoted identifiers that are exactly CASCADE or RESTRICT
 	// (valid but uncommon Snowflake names) could in theory produce a false
@@ -508,19 +510,19 @@ var (
 	reRevokeRestrict = regexp.MustCompile(`(?i)\bRESTRICT\b`)
 
 	// ── CALL ──────────────────────────────────────────────────────────────────
-	reIsCall         = regexp.MustCompile(`(?i)^\s*CALL\b`)
-	reCallProcName   = regexp.MustCompile(`(?i)^\s*CALL\s+` + _identPath)
-	reCallArgParens  = regexp.MustCompile(`(?i)^\s*CALL\s+` + _identPath + `\s*\(`)
-	reCallInto       = regexp.MustCompile(`(?i)\bINTO\s+([^\s;,)]+)`)
-	reWithProcAlias  = regexp.MustCompile(`(?i)^\s*WITH\s+(` + _ident + `)\s+AS\s+PROCEDURE\b`)
+	reIsCall        = regexp.MustCompile(`(?i)^\s*CALL\b`)
+	reCallProcName  = regexp.MustCompile(`(?i)^\s*CALL\s+` + _identPath)
+	reCallArgParens = regexp.MustCompile(`(?i)^\s*CALL\s+` + _identPath + `\s*\(`)
+	reCallInto      = regexp.MustCompile(`(?i)\bINTO\s+([^\s;,)]+)`)
+	reWithProcAlias = regexp.MustCompile(`(?i)^\s*WITH\s+(` + _ident + `)\s+AS\s+PROCEDURE\b`)
 	// reAnyDollarTag matches both untagged ($$) and tagged ($tag$) Snowflake
 	// dollar-quote delimiters; used to locate the closing body delimiter.
 	reAnyDollarTag = regexp.MustCompile(`\$\w*\$`)
 
 	// ── EXECUTE IMMEDIATE / EXECUTE TASK ─────────────────────────────────────
-	reIsExecuteImmediate   = regexp.MustCompile(`(?i)^\s*EXECUTE\s+IMMEDIATE\b`)
-	reIsExecuteTask        = regexp.MustCompile(`(?i)^\s*EXECUTE\s+TASK\b`)
-	reIsExecute            = regexp.MustCompile(`(?i)^\s*EXECUTE\b`)
+	reIsExecuteImmediate = regexp.MustCompile(`(?i)^\s*EXECUTE\s+IMMEDIATE\b`)
+	reIsExecuteTask      = regexp.MustCompile(`(?i)^\s*EXECUTE\s+TASK\b`)
+	reIsExecute          = regexp.MustCompile(`(?i)^\s*EXECUTE\b`)
 	// reExecImmHasArg requires a non-whitespace, non-semicolon character after
 	// EXECUTE IMMEDIATE so that "EXECUTE IMMEDIATE ;" (space before semicolon)
 	// is correctly flagged as missing an argument.
@@ -533,18 +535,18 @@ var (
 	// regexp package has no backreferences, so equal-tag enforcement is not
 	// possible. Over-stripping is safe here — the goal is to remove content,
 	// not to validate delimiters.
-	reStripDollarQuoted    = regexp.MustCompile(`\$\w*\$[\s\S]*?\$\w*\$`)
-	reExecTaskName         = regexp.MustCompile(`(?i)^\s*EXECUTE\s+TASK\s+` + _identPath)
+	reStripDollarQuoted = regexp.MustCompile(`\$\w*\$[\s\S]*?\$\w*\$`)
+	reExecTaskName      = regexp.MustCompile(`(?i)^\s*EXECUTE\s+TASK\s+` + _identPath)
 
 	// ── PUT / GET / LIST / REMOVE stage commands ──────────────────────────────
-	reIsPut          = regexp.MustCompile(`(?i)^\s*PUT\b`)
-	reIsGet          = regexp.MustCompile(`(?i)^\s*GET\b`)
-	reIsList         = regexp.MustCompile(`(?i)^\s*(?:LIST|LS)\b`)
-	reIsRemove       = regexp.MustCompile(`(?i)^\s*(?:REMOVE|RM)\b`)
+	reIsPut    = regexp.MustCompile(`(?i)^\s*PUT\b`)
+	reIsGet    = regexp.MustCompile(`(?i)^\s*GET\b`)
+	reIsList   = regexp.MustCompile(`(?i)^\s*(?:LIST|LS)\b`)
+	reIsRemove = regexp.MustCompile(`(?i)^\s*(?:REMOVE|RM)\b`)
 	// reFileURIArg matches a file:// URI argument (shared by PUT and GET).
-	reFileURIArg     = regexp.MustCompile(`(?i)\bfile://\S+`)
-	rePutKWStrip     = regexp.MustCompile(`(?i)^PUT\s+`)
-	reStageRef       = regexp.MustCompile(`@\S+`)
+	reFileURIArg = regexp.MustCompile(`(?i)\bfile://\S+`)
+	rePutKWStrip = regexp.MustCompile(`(?i)^PUT\s+`)
+	reStageRef   = regexp.MustCompile(`@\S+`)
 	// rePutCorrectOrder validates that PUT has file:// before @stage.
 	rePutCorrectOrder = regexp.MustCompile(`(?i)^\s*PUT\s+file://\S+\s+@\S+`)
 	rePutSourceComp   = regexp.MustCompile(`(?i)\bSOURCE_COMPRESSION\s*=\s*(\w+)`)
@@ -563,8 +565,8 @@ var (
 	validPutCompressions = []string{"AUTO_DETECT", "GZIP", "BZ2", "BROTLI", "ZSTD", "DEFLATE", "RAW_DEFLATE", "NONE"}
 
 	// ── CREATE SHARE ─────────────────────────────────────────────────────────
-	reIsCreateShare    = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SHARE\b`)
-	reCreateShareName  = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SHARE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
+	reIsCreateShare   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SHARE\b`)
+	reCreateShareName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SHARE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
 	// ── ALTER SHARE ────────────────────────────────────────────────────────────
 	reIsAlterShare          = regexp.MustCompile(`(?i)^\s*ALTER\s+SHARE\b`)
 	reAlterShareAddAccounts = regexp.MustCompile(`(?i)\bADD\s+ACCOUNTS\b`)
@@ -581,17 +583,17 @@ var (
 	reIsCreateDatashare   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?DATASHARE\b`)
 	reCreateDatashareName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?DATASHARE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
 	// ── ALTER DATASHARE ──────────────────────────────────────────────────────
-	reIsAlterDatashare             = regexp.MustCompile(`(?i)^\s*ALTER\s+DATASHARE\b`)
-	reAlterDatashareName           = regexp.MustCompile(`(?i)^\s*ALTER\s+DATASHARE\s+(` + _identPath + `)`)
-	reAlterDatashareAddAccounts    = regexp.MustCompile(`(?i)\bADD\s+ACCOUNTS\s*=`)
-	reAlterDatashareAddAcctList    = regexp.MustCompile(`(?i)\bADD\s+ACCOUNTS\s*=\s*` + _ident)
-	reAlterDatashareRemoveAccounts = regexp.MustCompile(`(?i)\bREMOVE\s+ACCOUNTS\s*=`)
-	reAlterDatashareRemoveAcctList = regexp.MustCompile(`(?i)\bREMOVE\s+ACCOUNTS\s*=\s*` + _ident)
-	reAlterDatashareAddDatabases     = regexp.MustCompile(`(?i)\bADD\s+DATABASES\b`)
-	reAlterDatashareAddDbList        = regexp.MustCompile(`(?i)\bADD\s+DATABASES\s+` + _ident)
-	reAlterDatashareRemoveDatabases  = regexp.MustCompile(`(?i)\bREMOVE\s+DATABASES\b`)
-	reAlterDatashareRemoveDbList     = regexp.MustCompile(`(?i)\bREMOVE\s+DATABASES\s+` + _ident)
-	reAlterDatashareShareRestrict    = regexp.MustCompile(`(?i)\bSHARE_RESTRICTIONS\b`)
+	reIsAlterDatashare              = regexp.MustCompile(`(?i)^\s*ALTER\s+DATASHARE\b`)
+	reAlterDatashareName            = regexp.MustCompile(`(?i)^\s*ALTER\s+DATASHARE\s+(` + _identPath + `)`)
+	reAlterDatashareAddAccounts     = regexp.MustCompile(`(?i)\bADD\s+ACCOUNTS\s*=`)
+	reAlterDatashareAddAcctList     = regexp.MustCompile(`(?i)\bADD\s+ACCOUNTS\s*=\s*` + _ident)
+	reAlterDatashareRemoveAccounts  = regexp.MustCompile(`(?i)\bREMOVE\s+ACCOUNTS\s*=`)
+	reAlterDatashareRemoveAcctList  = regexp.MustCompile(`(?i)\bREMOVE\s+ACCOUNTS\s*=\s*` + _ident)
+	reAlterDatashareAddDatabases    = regexp.MustCompile(`(?i)\bADD\s+DATABASES\b`)
+	reAlterDatashareAddDbList       = regexp.MustCompile(`(?i)\bADD\s+DATABASES\s+` + _ident)
+	reAlterDatashareRemoveDatabases = regexp.MustCompile(`(?i)\bREMOVE\s+DATABASES\b`)
+	reAlterDatashareRemoveDbList    = regexp.MustCompile(`(?i)\bREMOVE\s+DATABASES\s+` + _ident)
+	reAlterDatashareShareRestrict   = regexp.MustCompile(`(?i)\bSHARE_RESTRICTIONS\b`)
 	// reAlterDatashareAction matches any known ALTER DATASHARE sub-command.
 	reAlterDatashareAction = regexp.MustCompile(`(?i)\b(?:ADD\s+ACCOUNTS|REMOVE\s+ACCOUNTS|ADD\s+DATABASES|REMOVE\s+DATABASES|SET\s+COMMENT|UNSET\s+COMMENT)\b`)
 	// ── DROP DATASHARE ───────────────────────────────────────────────────────
@@ -599,40 +601,40 @@ var (
 	reDropDatashareName = regexp.MustCompile(`(?i)^\s*DROP\s+DATASHARE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
 
 	// ── CREATE COMPUTE POOL ─────────────────────────────────────────────────
-	reIsCreateComputePool   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?COMPUTE\s+POOL\b`)
-	reCreateComputePoolName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?COMPUTE\s+POOL\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
+	reIsCreateComputePool       = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?COMPUTE\s+POOL\b`)
+	reCreateComputePoolName     = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?COMPUTE\s+POOL\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
 	reComputePoolMinNodes       = regexp.MustCompile(`(?i)\bMIN_NODES\s*=\s*(-?\d+)`)
 	reComputePoolMaxNodes       = regexp.MustCompile(`(?i)\bMAX_NODES\s*=\s*(-?\d+)`)
 	reComputePoolInstanceFamily = regexp.MustCompile(`(?i)\bINSTANCE_FAMILY\s*=\s*([a-zA-Z0-9_]+)`)
 	reComputePoolAutoSuspend    = regexp.MustCompile(`(?i)\bAUTO_SUSPEND_SECS\s*=\s*(-?\d+)`)
 
 	// ── CREATE / EXECUTE / ALTER / DROP SERVICE (SPCS) ────────────────────
-	reIsCreateService   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SERVICE\b`)
-	reCreateServiceName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SERVICE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-	reIsExecuteService  = regexp.MustCompile(`(?i)^\s*EXECUTE\s+(?:JOB\s+)?SERVICE\b`)
-	reExecuteServiceName = regexp.MustCompile(`(?i)^\s*EXECUTE\s+(?:JOB\s+)?SERVICE\s+(` + _identPath + `)`)
-	reIsAlterService    = regexp.MustCompile(`(?i)^\s*ALTER\s+SERVICE\b`)
-	reAlterServiceName  = regexp.MustCompile(`(?i)^\s*ALTER\s+SERVICE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
-	reIsDropService        = regexp.MustCompile(`(?i)^\s*DROP\s+SERVICE\b`)
-	reDropServiceName      = regexp.MustCompile(`(?i)^\s*DROP\s+SERVICE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
-	reDropServiceIfExists  = regexp.MustCompile(`(?i)\bIF\s+EXISTS\b`)
+	reIsCreateService     = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SERVICE\b`)
+	reCreateServiceName   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SERVICE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
+	reIsExecuteService    = regexp.MustCompile(`(?i)^\s*EXECUTE\s+(?:JOB\s+)?SERVICE\b`)
+	reExecuteServiceName  = regexp.MustCompile(`(?i)^\s*EXECUTE\s+(?:JOB\s+)?SERVICE\s+(` + _identPath + `)`)
+	reIsAlterService      = regexp.MustCompile(`(?i)^\s*ALTER\s+SERVICE\b`)
+	reAlterServiceName    = regexp.MustCompile(`(?i)^\s*ALTER\s+SERVICE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
+	reIsDropService       = regexp.MustCompile(`(?i)^\s*DROP\s+SERVICE\b`)
+	reDropServiceName     = regexp.MustCompile(`(?i)^\s*DROP\s+SERVICE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
+	reDropServiceIfExists = regexp.MustCompile(`(?i)\bIF\s+EXISTS\b`)
 	// Service property patterns
-	reServiceInComputePool    = regexp.MustCompile(`(?i)\bIN\s+COMPUTE\s+POOL\s+(` + _ident + `)`)
+	reServiceInComputePool = regexp.MustCompile(`(?i)\bIN\s+COMPUTE\s+POOL\s+(` + _ident + `)`)
 	// reServiceFromSpec matches FROM SPECIFICATION and FROM SPECIFICATION_TEMPLATE
 	// (inline YAML). The \b after SPECIFICATION prevents matching _FILE/_TEMPLATE_FILE.
-	reServiceFromSpec         = regexp.MustCompile(`(?i)\bFROM\s+(?:@` + _identPath + `\s+)?SPECIFICATION(?:_TEMPLATE)?\b`)
+	reServiceFromSpec = regexp.MustCompile(`(?i)\bFROM\s+(?:@` + _identPath + `\s+)?SPECIFICATION(?:_TEMPLATE)?\b`)
 	// reServiceFromSpecFile matches FROM SPECIFICATION_FILE and
 	// FROM SPECIFICATION_TEMPLATE_FILE, including the FROM @stage prefix form.
-	reServiceFromSpecFile     = regexp.MustCompile(`(?i)\bFROM\s+(?:@` + _identPath + `\s+)?SPECIFICATION(?:_TEMPLATE)?_FILE\b`)
-	reServiceMinInstances     = regexp.MustCompile(`(?i)\bMIN_INSTANCES\s*=\s*(-?\d+)`)
-	reServiceMaxInstances     = regexp.MustCompile(`(?i)\bMAX_INSTANCES\s*=\s*(-?\d+)`)
+	reServiceFromSpecFile = regexp.MustCompile(`(?i)\bFROM\s+(?:@` + _identPath + `\s+)?SPECIFICATION(?:_TEMPLATE)?_FILE\b`)
+	reServiceMinInstances = regexp.MustCompile(`(?i)\bMIN_INSTANCES\s*=\s*(-?\d+)`)
+	reServiceMaxInstances = regexp.MustCompile(`(?i)\bMAX_INSTANCES\s*=\s*(-?\d+)`)
 	// ALTER SERVICE actions — reAlterServiceAction matches any known sub-command
 	// for the "unknown sub-command" guard. reAlterServiceSetBare matches bare
 	// SET (with any property) so we can distinguish "unknown property within SET"
 	// from "unknown sub-command entirely".
-	reAlterServiceAction      = regexp.MustCompile(`(?i)\b(?:SUSPEND|RESUME|SET\s+(?:MIN_INSTANCES|MAX_INSTANCES|COMMENT|QUERY_WAREHOUSE)|UNSET\s+(?:COMMENT|QUERY_WAREHOUSE|MIN_INSTANCES|MAX_INSTANCES)|FROM\s+(?:@` + _identPath + `\s+)?SPECIFICATION(?:_TEMPLATE)?(?:_FILE)?)\b`)
-	reAlterServiceSetBare     = regexp.MustCompile(`(?i)\bSET\s+\w+`)
-	reAlterServiceUnsetBare   = regexp.MustCompile(`(?i)\bUNSET\s+\w+`)
+	reAlterServiceAction    = regexp.MustCompile(`(?i)\b(?:SUSPEND|RESUME|SET\s+(?:MIN_INSTANCES|MAX_INSTANCES|COMMENT|QUERY_WAREHOUSE)|UNSET\s+(?:COMMENT|QUERY_WAREHOUSE|MIN_INSTANCES|MAX_INSTANCES)|FROM\s+(?:@` + _identPath + `\s+)?SPECIFICATION(?:_TEMPLATE)?(?:_FILE)?)\b`)
+	reAlterServiceSetBare   = regexp.MustCompile(`(?i)\bSET\s+\w+`)
+	reAlterServiceUnsetBare = regexp.MustCompile(`(?i)\bUNSET\s+\w+`)
 
 	// ── CREATE / DROP IMAGE REPOSITORY (SPCS) ────────────────────────────
 	reIsCreateImageRepository   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?IMAGE\s+REPOSITORY\b`)
@@ -658,7 +660,7 @@ var (
 	reCreateSecretName  = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SECRET\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
 	reSecretType        = regexp.MustCompile(`(?i)\bTYPE\b\s*=\s*([\w]+)`)
 	reSecretAPIA        = regexp.MustCompile(`(?i)\bAPI_AUTHENTICATION\s*=\s*` + _ident)
-	reSecretUsername     = regexp.MustCompile(`(?i)\bUSERNAME\s*=`)
+	reSecretUsername    = regexp.MustCompile(`(?i)\bUSERNAME\s*=`)
 	reSecretPassword    = regexp.MustCompile(`(?i)\bPASSWORD\s*=`)
 	reSecretString      = regexp.MustCompile(`(?i)\bSECRET_STRING\s*=`)
 	reSecretEnabled     = regexp.MustCompile(`(?i)\bENABLED\s*=`)
@@ -703,10 +705,10 @@ var (
 	reCreateEventTableName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EVENT\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
 	// reEventTableColumnList detects a parenthesised column list after the table name.
 	// Event tables have a fixed schema and do not allow user-defined columns.
-	reEventTableColumnList    = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EVENT\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath + `\s*\(`)
-	reEvtRetentionDays        = regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\s*=\s*(-?\d+\b|-?\w+)`)
-	reEvtExtensionDays        = regexp.MustCompile(`(?i)\bMAX_DATA_EXTENSION_TIME_IN_DAYS\s*=\s*(-?\d+\b|-?\w+)`)
-	reEvtChangeTrackingValue  = regexp.MustCompile(`(?i)\bCHANGE_TRACKING\s*=\s*(\w+)`)
+	reEventTableColumnList   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EVENT\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?` + _identPath + `\s*\(`)
+	reEvtRetentionDays       = regexp.MustCompile(`(?i)\bDATA_RETENTION_TIME_IN_DAYS\s*=\s*(-?\d+\b|-?\w+)`)
+	reEvtExtensionDays       = regexp.MustCompile(`(?i)\bMAX_DATA_EXTENSION_TIME_IN_DAYS\s*=\s*(-?\d+\b|-?\w+)`)
+	reEvtChangeTrackingValue = regexp.MustCompile(`(?i)\bCHANGE_TRACKING\s*=\s*(\w+)`)
 
 	// ── CREATE EXTERNAL VOLUME ────────────────────────────────────────────────
 	reIsCreateExternalVolume   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EXTERNAL\s+VOLUME\b`)
@@ -717,17 +719,17 @@ var (
 	// no word boundary). The trailing ' further ensures we only match
 	// string-valued assignments; on locClean, 'value' → '' so the opening '
 	// of the empty placeholder still satisfies the pattern.
-	reExtVolLocationName       = regexp.MustCompile(`(?i)\bNAME\s*=\s*'`)
-	reExtVolStorageProvider    = regexp.MustCompile(`(?i)\bSTORAGE_PROVIDER\s*=\s*'([^']*)'`)
-	reExtVolStorageBaseURL     = regexp.MustCompile(`(?i)\bSTORAGE_BASE_URL\s*=\s*'[^']*'`)
-	reExtVolAwsRoleArn         = regexp.MustCompile(`(?i)\bSTORAGE_AWS_ROLE_ARN\s*=`)
-	reExtVolAzureTenantID      = regexp.MustCompile(`(?i)\bAZURE_TENANT_ID\s*=`)
-	reExtVolAwsExternalID      = regexp.MustCompile(`(?i)\bSTORAGE_AWS_EXTERNAL_ID\s*=`)
+	reExtVolLocationName    = regexp.MustCompile(`(?i)\bNAME\s*=\s*'`)
+	reExtVolStorageProvider = regexp.MustCompile(`(?i)\bSTORAGE_PROVIDER\s*=\s*'([^']*)'`)
+	reExtVolStorageBaseURL  = regexp.MustCompile(`(?i)\bSTORAGE_BASE_URL\s*=\s*'[^']*'`)
+	reExtVolAwsRoleArn      = regexp.MustCompile(`(?i)\bSTORAGE_AWS_ROLE_ARN\s*=`)
+	reExtVolAzureTenantID   = regexp.MustCompile(`(?i)\bAZURE_TENANT_ID\s*=`)
+	reExtVolAwsExternalID   = regexp.MustCompile(`(?i)\bSTORAGE_AWS_EXTERNAL_ID\s*=`)
 	// reExtVolHasEncryption detects any ENCRYPTION = ( block regardless of its
 	// contents. Used as a coarse presence check before reExtVolEncryptionType,
 	// which additionally requires TYPE = '...'. This ensures blocks like
 	// ENCRYPTION = (KMS_KEY_ID = 'k') (no TYPE key) are not silently ignored.
-	reExtVolHasEncryption  = regexp.MustCompile(`(?i)\bENCRYPTION\s*=\s*\(`)
+	reExtVolHasEncryption = regexp.MustCompile(`(?i)\bENCRYPTION\s*=\s*\(`)
 	// reExtVolEncryptionType assumes TYPE is the first key inside the
 	// ENCRYPTION block (i.e. ENCRYPTION = ( TYPE = '...' )). If TYPE appears
 	// after another key (e.g. ENCRYPTION = (KMS_KEY_ID = 'k' TYPE = '...')),
@@ -737,12 +739,12 @@ var (
 	reExtVolEncryptionType = regexp.MustCompile(`(?i)\bENCRYPTION\s*=\s*\(\s*TYPE\s*=\s*'([^']*)'`)
 
 	// ── CREATE TAG / ALTER TAG / DROP TAG ────────────────────────────────
-	reIsCreateTag    = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TAG\b`)
-	reCreateTagName  = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TAG\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-	reIsAlterTag     = regexp.MustCompile(`(?i)^\s*ALTER\s+TAG\b`)
-	reAlterTagName   = regexp.MustCompile(`(?i)^\s*ALTER\s+TAG\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
-	reIsDropTag      = regexp.MustCompile(`(?i)^\s*DROP\s+TAG\b`)
-	reDropTagName    = regexp.MustCompile(`(?i)^\s*DROP\s+TAG\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
+	reIsCreateTag   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TAG\b`)
+	reCreateTagName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TAG\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
+	reIsAlterTag    = regexp.MustCompile(`(?i)^\s*ALTER\s+TAG\b`)
+	reAlterTagName  = regexp.MustCompile(`(?i)^\s*ALTER\s+TAG\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
+	reIsDropTag     = regexp.MustCompile(`(?i)^\s*DROP\s+TAG\b`)
+	reDropTagName   = regexp.MustCompile(`(?i)^\s*DROP\s+TAG\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
 	// reTagAllowedValues detects the presence of the ALLOWED_VALUES keyword
 	// followed by whitespace. The actual string-literal list parsing is done
 	// by reTagStringLiteralList.
@@ -751,7 +753,7 @@ var (
 	// reAlterTagRename matches ALTER TAG <name> RENAME TO <new_name>.
 	reAlterTagRenameTo = regexp.MustCompile(`(?i)\bRENAME\s+TO\s+(` + _identPath + `)`)
 	// reAlterTagAddAllowed matches ALTER TAG <name> ADD ALLOWED_VALUES.
-	reAlterTagAddAllowed = regexp.MustCompile(`(?i)\bADD\s+ALLOWED_VALUES\b`)
+	reAlterTagAddAllowed  = regexp.MustCompile(`(?i)\bADD\s+ALLOWED_VALUES\b`)
 	reAlterTagDropAllowed = regexp.MustCompile(`(?i)\bDROP\s+ALLOWED_VALUES\b`)
 	// reAlterTagRenameToBare matches RENAME TO without requiring a name after it.
 	reAlterTagRenameToBare = regexp.MustCompile(`(?i)\bRENAME\s+TO\b`)
@@ -766,11 +768,11 @@ var (
 	reCascadeRestrictTrailing = regexp.MustCompile(`(?i)\b(?:CASCADE|RESTRICT)\s*$`)
 
 	// ── CREATE NOTEBOOK / ALTER NOTEBOOK / DROP NOTEBOOK ─────────────
-	reIsCreateNotebook = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?NOTEBOOK\b`)
+	reIsCreateNotebook   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?NOTEBOOK\b`)
 	reCreateNotebookName = regexp.MustCompile(
 		`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?NOTEBOOK\s+(?:IF\s+NOT\s+EXISTS\s+)?` +
 			`(` + _identPath + `)`)
-	reIsAlterNotebook = regexp.MustCompile(`(?i)^\s*ALTER\s+NOTEBOOK\b`)
+	reIsAlterNotebook   = regexp.MustCompile(`(?i)^\s*ALTER\s+NOTEBOOK\b`)
 	reAlterNotebookName = regexp.MustCompile(
 		`(?i)^\s*ALTER\s+NOTEBOOK\s+(?:IF\s+EXISTS\s+)?` +
 			`(` + _identPath + `)`)
@@ -785,13 +787,36 @@ var (
 	// (with or without the required FROM LAST suffix).
 	reAlterNotebookAddLiveVersion = regexp.MustCompile(`(?i)\bADD\s+LIVE\s+VERSION\b`)
 	reIsDropNotebook              = regexp.MustCompile(`(?i)^\s*DROP\s+NOTEBOOK\b`)
-	reDropNotebookName = regexp.MustCompile(
+	reDropNotebookName            = regexp.MustCompile(
 		`(?i)^\s*DROP\s+NOTEBOOK\s+(?:IF\s+EXISTS\s+)?` +
 			`(` + _identPath + `)`)
 	// reCreateNotebookFrom detects the FROM '@...' clause.
 	reCreateNotebookFrom = regexp.MustCompile(`(?i)\bFROM\s+'[^']*'`)
 	// reCreateNotebookMainFile detects the MAIN_FILE = '...' clause.
 	reCreateNotebookMainFile = regexp.MustCompile(`(?i)\bMAIN_FILE\s*=\s*'[^']*'`)
+
+	// ── PIVOT / UNPIVOT ──────────────────────────────────────────────────
+	// Detection: matches PIVOT( or UNPIVOT( after a table reference in a
+	// SELECT/WITH statement.
+	// rePivotAgg uses \bPIVOT which cannot match inside UNPIVOT because \b
+	// does not fire between two word characters (N and P).
+	rePivotClause   = regexp.MustCompile(`(?i)\bPIVOT\s*\(`)
+	reUnpivotClause = regexp.MustCompile(`(?i)\bUNPIVOT\s*(?:(?:INCLUDE|EXCLUDE)\s+NULLS\s*)?\(`)
+
+	// PIVOT structural: captures the aggregate function name
+	rePivotAgg = regexp.MustCompile(`(?i)\bPIVOT\s*\(\s*([\w]+)\s*\(`)
+	// Shared PIVOT/UNPIVOT structural patterns:
+	// - FOR ... IN (...) presence
+	rePivotForIn = regexp.MustCompile(`(?i)\bFOR\b[\s\S]+?\bIN\s*\(`)
+	// - Empty IN list: IN ()
+	rePivotEmptyIn = regexp.MustCompile(`(?i)\bIN\s*\(\s*\)`)
+
+	// Valid aggregate functions for PIVOT
+	pivotValidAggs = map[string]bool{
+		"SUM": true, "AVG": true, "COUNT": true, "MAX": true, "MIN": true,
+		"ANY_VALUE": true, "LISTAGG": true, "MEDIAN": true,
+		"STDDEV": true, "VARIANCE": true,
+	}
 
 	// ── BEGIN / COMMIT / ROLLBACK / SAVEPOINT / RELEASE SAVEPOINT ────────
 	reIsBegin            = regexp.MustCompile(`(?i)^\s*BEGIN\b`)
@@ -833,7 +858,7 @@ var (
 	reIsUseSecondaryRoles = regexp.MustCompile(`(?i)^\s*USE\s+SECONDARY\s+ROLES\b`)
 	// reUseRoleHasName requires a non-whitespace, non-semicolon character after
 	// USE ROLE so that "USE ROLE ;" is correctly flagged as missing a role name.
-	reUseRoleHasName      = regexp.MustCompile(`(?i)^\s*USE\s+ROLE\s+[^\s;]`)
+	reUseRoleHasName = regexp.MustCompile(`(?i)^\s*USE\s+ROLE\s+[^\s;]`)
 	// reUseWarehouseHasName requires a non-whitespace, non-semicolon character after
 	// USE WAREHOUSE so that "USE WAREHOUSE ;" is correctly flagged.
 	reUseWarehouseHasName = regexp.MustCompile(`(?i)^\s*USE\s+WAREHOUSE\s+[^\s;]`)
@@ -958,17 +983,17 @@ var (
 	// in this set will produce a warning diagnostic.
 	// Reference: https://docs.snowflake.com/en/guides-overview-ai-features
 	knownCortexFunctions = map[string]bool{
-		"COMPLETE":       true,
-		"EXTRACT_ANSWER": true,
-		"SENTIMENT":      true,
-		"SUMMARIZE":      true,
-		"TRANSLATE":      true,
-		"CLASSIFY_TEXT":  true,
+		"COMPLETE":        true,
+		"EXTRACT_ANSWER":  true,
+		"SENTIMENT":       true,
+		"SUMMARIZE":       true,
+		"TRANSLATE":       true,
+		"CLASSIFY_TEXT":   true,
 		"EMBED_TEXT_768":  true,
 		"EMBED_TEXT_1024": true,
-		"FINETUNE":       true,
-		"SEARCH_PREVIEW": true,
-		"TRY_COMPLETE":   true,
+		"FINETUNE":        true,
+		"SEARCH_PREVIEW":  true,
+		"TRY_COMPLETE":    true,
 	}
 )
 
@@ -1070,8 +1095,8 @@ var showTerseEligible = map[string]bool{
 
 // showHistoryEligible contains object types that support the HISTORY modifier.
 var showHistoryEligible = map[string]bool{
-	"PIPES":                  true,
-	"REPLICATION DATABASES":  true,
+	"PIPES":                 true,
+	"REPLICATION DATABASES": true,
 }
 
 // showNoClauseValidation contains object types where optional clause validation
@@ -1173,22 +1198,22 @@ var describeObjectTypes = []string{
 // describeAccountLevel contains account-level object types that should not be
 // qualified with a database or schema prefix (db.schema.name).
 var describeAccountLevel = map[string]bool{
-	"WAREHOUSE":                        true,
-	"USER":                             true,
-	"ROLE":                             true,
-	"INTEGRATION":                      true,
-	"DATABASE":                         true,
-	"SHARE":                            true,
-	"RESOURCE MONITOR":                 true,
-	"NOTIFICATION INTEGRATION":         true,
-	"CATALOG INTEGRATION":              true,
-	"COMPUTE POOL":                     true,
-	"EXTERNAL VOLUME":                  true,
-	"NETWORK POLICY":                   true,
-	"ORGANIZATION PROFILE":             true,
-	"OPENFLOW DATA PLANE INTEGRATION":  true,
-	"POSTGRES INSTANCE":                true,
-	"SPECIFICATION":                    true,
+	"WAREHOUSE":                       true,
+	"USER":                            true,
+	"ROLE":                            true,
+	"INTEGRATION":                     true,
+	"DATABASE":                        true,
+	"SHARE":                           true,
+	"RESOURCE MONITOR":                true,
+	"NOTIFICATION INTEGRATION":        true,
+	"CATALOG INTEGRATION":             true,
+	"COMPUTE POOL":                    true,
+	"EXTERNAL VOLUME":                 true,
+	"NETWORK POLICY":                  true,
+	"ORGANIZATION PROFILE":            true,
+	"OPENFLOW DATA PLANE INTEGRATION": true,
+	"POSTGRES INSTANCE":               true,
+	"SPECIFICATION":                   true,
 }
 
 // describeNeedsSignature contains object types that require a parenthesised
@@ -1207,8 +1232,8 @@ var grantObjectPrivileges = map[string][]string{
 		"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "REBUILD",
 		"EVOLVE SCHEMA",
 	},
-	"VIEW": {"SELECT", "REFERENCES"},
-	"STAGE": {"READ", "WRITE"},
+	"VIEW":      {"SELECT", "REFERENCES"},
+	"STAGE":     {"READ", "WRITE"},
 	"WAREHOUSE": {"USAGE", "MODIFY", "MONITOR", "OPERATE", "APPLYBUDGET"},
 	"DATABASE": {
 		"USAGE", "MODIFY", "MONITOR", "CREATE SCHEMA",
@@ -1457,7 +1482,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 				}
 				funcName := strings.ToUpper(rawText[m[2]:m[3]])
 				if !knownCortexFunctions[funcName] {
-					fullMatch := rawText[m[0]:m[1]-1] // exclude trailing '('
+					fullMatch := rawText[m[0] : m[1]-1] // exclude trailing '('
 					upTo := rawText[:m[0]]
 					lines := strings.Split(upTo, "\n")
 					errLine := r.StartLine + len(lines) - 1
@@ -2552,6 +2577,15 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
+		// ── PIVOT / UNPIVOT structural validation ────────────────────────
+		// Validate before the FP guard skips the statement.
+		if rePivotClause.MatchString(stripped) {
+			markers = append(markers, validatePivotClauses(stripped, r)...)
+		}
+		if reUnpivotClause.MatchString(stripped) {
+			markers = append(markers, validateUnpivotClauses(stripped, r)...)
+		}
+
 		// ── Skip Snowflake false-positive statements ──────────────────────
 		// (statements with Snowflake-specific syntax that the parser can't
 		// handle; we emit no error for these)
@@ -2570,6 +2604,92 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			"Transaction not committed or rolled back. Add COMMIT or ROLLBACK before the end of the script.", 4))
 	}
 
+	return markers
+}
+
+// ── PIVOT / UNPIVOT validation ────────────────────────────────────────────────
+
+// validatePivotClauses checks all PIVOT(...) occurrences in the statement for
+// structural correctness: valid aggregate function, FOR ... IN ..., non-empty
+// IN list.
+func validatePivotClauses(stripped string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	// stripped is already comment-free; only mask string literals.
+	clean := strings.TrimSpace(reStripStringLiterals.ReplaceAllString(stripped, "''"))
+
+	// Find all PIVOT( occurrences
+	for _, loc := range rePivotClause.FindAllStringIndex(clean, -1) {
+		// Extract the balanced PIVOT(...) block
+		parenIdx := strings.Index(clean[loc[0]:], "(")
+		if parenIdx < 0 {
+			continue
+		}
+		blockStart := loc[0] + parenIdx
+		blockEnd := findMatchingParen(clean[blockStart:])
+		if blockEnd < 0 {
+			continue
+		}
+		pivotBody := clean[blockStart+1 : blockStart+blockEnd]
+
+		// 1. Validate aggregate function
+		if m := rePivotAgg.FindStringSubmatch(clean[loc[0]:]); m != nil {
+			funcName := strings.ToUpper(m[1])
+			if !pivotValidAggs[funcName] {
+				markers = append(markers, diagMarkerSpan(r,
+					"'"+funcName+"' is not a valid aggregate function for PIVOT. Use SUM, AVG, COUNT, MAX, MIN, ANY_VALUE, LISTAGG, MEDIAN, STDDEV, or VARIANCE.", 4))
+			}
+		}
+
+		// 2. Check FOR ... IN is present
+		if !rePivotForIn.MatchString(pivotBody) {
+			markers = append(markers, diagMarkerSpan(r,
+				"PIVOT requires FOR <column> IN (<values>).", 4))
+			continue
+		}
+
+		// 3. Check IN list is not empty
+		if rePivotEmptyIn.MatchString(pivotBody) {
+			markers = append(markers, diagMarkerSpan(r,
+				"PIVOT IN list must not be empty. Provide at least one literal value.", 4))
+		}
+	}
+	return markers
+}
+
+// validateUnpivotClauses checks all UNPIVOT(...) occurrences in the statement
+// for structural correctness: FOR ... IN ..., non-empty IN list.
+func validateUnpivotClauses(stripped string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	// stripped is already comment-free; only mask string literals.
+	clean := strings.TrimSpace(reStripStringLiterals.ReplaceAllString(stripped, "''"))
+
+	// Find all UNPIVOT( occurrences
+	for _, loc := range reUnpivotClause.FindAllStringIndex(clean, -1) {
+		// Extract the balanced UNPIVOT(...) block
+		parenIdx := strings.Index(clean[loc[0]:], "(")
+		if parenIdx < 0 {
+			continue
+		}
+		blockStart := loc[0] + parenIdx
+		blockEnd := findMatchingParen(clean[blockStart:])
+		if blockEnd < 0 {
+			continue
+		}
+		unpivotBody := clean[blockStart+1 : blockStart+blockEnd]
+
+		// 1. Check FOR ... IN is present
+		if !rePivotForIn.MatchString(unpivotBody) {
+			markers = append(markers, diagMarkerSpan(r,
+				"UNPIVOT requires FOR <name_column> IN (<columns>).", 4))
+			continue
+		}
+
+		// 2. Check IN list is not empty
+		if rePivotEmptyIn.MatchString(unpivotBody) {
+			markers = append(markers, diagMarkerSpan(r,
+				"UNPIVOT IN list must not be empty. Provide at least one column name.", 4))
+		}
+	}
 	return markers
 }
 
@@ -3659,7 +3779,6 @@ func normalizeGrantObjectType(t string) string {
 	}
 	return upper
 }
-
 
 func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
@@ -4890,45 +5009,45 @@ type sessionParamSpec struct {
 }
 
 var knownSessionParams = map[string]sessionParamSpec{
-	"QUERY_TAG":                          {kind: spString},
-	"TIMEZONE":                           {kind: spString},
-	"TIMESTAMP_OUTPUT_FORMAT":            {kind: spString},
-	"DATE_OUTPUT_FORMAT":                 {kind: spString},
-	"TIME_OUTPUT_FORMAT":                 {kind: spString},
-	"TIMESTAMP_INPUT_FORMAT":             {kind: spString},
-	"TIMESTAMP_NTZ_OUTPUT_FORMAT":        {kind: spString},
-	"TIMESTAMP_TZ_OUTPUT_FORMAT":         {kind: spString},
-	"TIMESTAMP_LTZ_OUTPUT_FORMAT":        {kind: spString},
-	"WEEK_START":                         {kind: spIntRange, min: 0, max: 7},
-	"WEEK_OF_YEAR_POLICY":                {kind: spIntRange, min: 0, max: 1},
-	"DATE_FIRST_DAY_OF_WEEK":             {kind: spIntRange, min: 0, max: 6},
-	"BINARY_OUTPUT_FORMAT":               {kind: spEnum, vals: []string{"HEX", "BASE64", "UTF8"}},
-	"ROWS_PER_RESULTSET":                 {kind: spNonNeg},
-	"QUOTED_IDENTIFIERS_IGNORE_CASE":     {kind: spBool},
-	"AUTOCOMMIT":                         {kind: spBool},
+	"QUERY_TAG":                           {kind: spString},
+	"TIMEZONE":                            {kind: spString},
+	"TIMESTAMP_OUTPUT_FORMAT":             {kind: spString},
+	"DATE_OUTPUT_FORMAT":                  {kind: spString},
+	"TIME_OUTPUT_FORMAT":                  {kind: spString},
+	"TIMESTAMP_INPUT_FORMAT":              {kind: spString},
+	"TIMESTAMP_NTZ_OUTPUT_FORMAT":         {kind: spString},
+	"TIMESTAMP_TZ_OUTPUT_FORMAT":          {kind: spString},
+	"TIMESTAMP_LTZ_OUTPUT_FORMAT":         {kind: spString},
+	"WEEK_START":                          {kind: spIntRange, min: 0, max: 7},
+	"WEEK_OF_YEAR_POLICY":                 {kind: spIntRange, min: 0, max: 1},
+	"DATE_FIRST_DAY_OF_WEEK":              {kind: spIntRange, min: 0, max: 6},
+	"BINARY_OUTPUT_FORMAT":                {kind: spEnum, vals: []string{"HEX", "BASE64", "UTF8"}},
+	"ROWS_PER_RESULTSET":                  {kind: spNonNeg},
+	"QUOTED_IDENTIFIERS_IGNORE_CASE":      {kind: spBool},
+	"AUTOCOMMIT":                          {kind: spBool},
 	"TRANSACTION_DEFAULT_ISOLATION_LEVEL": {kind: spEnum, vals: []string{"READ COMMITTED"}},
-	"STRICT_JSON_OUTPUT":                 {kind: spBool},
-	"JSON_INDENT":                        {kind: spIntRange, min: 0, max: 16},
-	"MULTI_STATEMENT_COUNT":              {kind: spNonNeg},
-	"USE_CACHED_RESULT":                  {kind: spBool},
-	"PYTHON_PROFILER_MODULES":            {kind: spString},
-	"PYTHON_PROFILER_TARGET_STAGE":       {kind: spString},
-	"SIMULATED_DATA_SHARING_CONSUMER":    {kind: spString},
-	"STATEMENT_TIMEOUT_IN_SECONDS":       {kind: spNonNeg},
-	"LOCK_TIMEOUT":                       {kind: spNonNeg},
-	"GEOGRAPHY_OUTPUT_FORMAT":            {kind: spEnum, vals: []string{"GEOJSON", "WKT", "WKB", "EWKT", "EWKB"}},
-	"GEOMETRY_OUTPUT_FORMAT":             {kind: spEnum, vals: []string{"GEOJSON", "WKT", "WKB", "EWKT", "EWKB"}},
-	"CLIENT_SESSION_KEEP_ALIVE":          {kind: spBool},
-	"ABORT_DETACHED_QUERY":               {kind: spBool},
-	"ERROR_ON_NONDETERMINISTIC_MERGE":    {kind: spBool},
-	"ERROR_ON_NONDETERMINISTIC_UPDATE":   {kind: spBool},
-	"CLIENT_RESULT_CHUNK_SIZE":           {kind: spNonNeg},
-	"TWO_DIGIT_CENTURY_START":            {kind: spIntRange, min: 1900, max: 2100},
-	"TIMESTAMP_TYPE_MAPPING":             {kind: spEnum, vals: []string{"TIMESTAMP_NTZ", "TIMESTAMP_LTZ", "TIMESTAMP_TZ"}},
-	"NETWORK_POLICY":                     {kind: spString},
-	"PERIODIC_DATA_REKEYING":             {kind: spBool},
-	"CLIENT_MEMORY_LIMIT":                {kind: spNonNeg},
-	"CLIENT_PREFETCH_THREADS":            {kind: spNonNeg},
+	"STRICT_JSON_OUTPUT":                  {kind: spBool},
+	"JSON_INDENT":                         {kind: spIntRange, min: 0, max: 16},
+	"MULTI_STATEMENT_COUNT":               {kind: spNonNeg},
+	"USE_CACHED_RESULT":                   {kind: spBool},
+	"PYTHON_PROFILER_MODULES":             {kind: spString},
+	"PYTHON_PROFILER_TARGET_STAGE":        {kind: spString},
+	"SIMULATED_DATA_SHARING_CONSUMER":     {kind: spString},
+	"STATEMENT_TIMEOUT_IN_SECONDS":        {kind: spNonNeg},
+	"LOCK_TIMEOUT":                        {kind: spNonNeg},
+	"GEOGRAPHY_OUTPUT_FORMAT":             {kind: spEnum, vals: []string{"GEOJSON", "WKT", "WKB", "EWKT", "EWKB"}},
+	"GEOMETRY_OUTPUT_FORMAT":              {kind: spEnum, vals: []string{"GEOJSON", "WKT", "WKB", "EWKT", "EWKB"}},
+	"CLIENT_SESSION_KEEP_ALIVE":           {kind: spBool},
+	"ABORT_DETACHED_QUERY":                {kind: spBool},
+	"ERROR_ON_NONDETERMINISTIC_MERGE":     {kind: spBool},
+	"ERROR_ON_NONDETERMINISTIC_UPDATE":    {kind: spBool},
+	"CLIENT_RESULT_CHUNK_SIZE":            {kind: spNonNeg},
+	"TWO_DIGIT_CENTURY_START":             {kind: spIntRange, min: 1900, max: 2100},
+	"TIMESTAMP_TYPE_MAPPING":              {kind: spEnum, vals: []string{"TIMESTAMP_NTZ", "TIMESTAMP_LTZ", "TIMESTAMP_TZ"}},
+	"NETWORK_POLICY":                      {kind: spString},
+	"PERIODIC_DATA_REKEYING":              {kind: spBool},
+	"CLIENT_MEMORY_LIMIT":                 {kind: spNonNeg},
+	"CLIENT_PREFETCH_THREADS":             {kind: spNonNeg},
 }
 
 // validateAlterSession validates ALTER SESSION SET / UNSET statements:
@@ -5849,7 +5968,7 @@ func countIdentParts(m string) int {
 
 // matchStringLiteral returns the position right after the closing single quote
 // of a SQL string literal at the start of s, or -1 if s does not start with a
-// valid string literal.  Embedded '' (escaped quotes) are handled.
+// valid string literal.  Embedded doubled single-quotes are handled.
 func matchStringLiteral(s string) int {
 	if len(s) == 0 || s[0] != '\'' {
 		return -1
@@ -6005,8 +6124,8 @@ func validateTimeTravelClauses(stripped string, r StatementRange) []DiagMarker {
 		// Count how many valid keyword arguments appear.
 		args := reTimeTravelArg.FindAllStringSubmatch(inner, -1)
 
-		streamExpected := ""  // for "Expected one of: …, STREAM =>"
-		streamPlain := ""     // for "Only one of …, STREAM"
+		streamExpected := "" // for "Expected one of: …, STREAM =>"
+		streamPlain := ""    // for "Only one of …, STREAM"
 		if keyword == "AT" {
 			streamExpected = ", STREAM =>"
 			streamPlain = ", STREAM"
