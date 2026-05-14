@@ -61,7 +61,8 @@ var (
 			`|\bINFER_SCHEMA\b` +
 			`|\bPIVOT\s*\(` +
 			`|\bUNPIVOT\b` +
-			`|\bMATCH_RECOGNIZE\s*\(`,
+			`|\bMATCH_RECOGNIZE\s*\(` +
+		`|\bASOF\s+JOIN\b`,
 	)
 
 	// ── Snowflake Cortex AI function call detection ──────────────────────────
@@ -844,6 +845,20 @@ var (
 	// Valid AFTER MATCH SKIP targets.
 	reAfterMatchSkipValid = regexp.MustCompile(
 		`(?i)^\s*(?:TO\s+NEXT\s+ROW|PAST\s+LAST\s+ROW|TO\s+FIRST\s+` + _ident + `|TO\s+LAST\s+` + _ident + `)\s*$`)
+
+	// ── ASOF JOIN ──────────────────────────────────────────────────────
+	// Detection: matches ASOF JOIN (the core Snowflake time-series join).
+	reAsofJoinClause = regexp.MustCompile(`(?i)\bASOF\s+JOIN\b`)
+
+	// MATCH_CONDITION (...) — mandatory clause for ASOF JOIN.
+	reAsofMatchCondition = regexp.MustCompile(`(?i)\bMATCH_CONDITION\s*\(`)
+
+	// USING FUNCTION form — alternative to MATCH_CONDITION for custom matching.
+	reAsofUsingFunction = regexp.MustCompile(`(?i)\bUSING\s*\(\s*` + _ident + `(?:\.` + _ident + `){0,2}\s*\(`)
+
+	// Valid comparison operators inside MATCH_CONDITION: >=, >, <=, <.
+	// The check logic uses containsAsofValidComparison() instead of a single
+	// regex because Go's regexp2 engine does not support lookaheads.
 
 	// ── BEGIN / COMMIT / ROLLBACK / SAVEPOINT / RELEASE SAVEPOINT ────────
 	reIsBegin            = regexp.MustCompile(`(?i)^\s*BEGIN\b`)
@@ -2619,6 +2634,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			markers = append(markers, validateMatchRecognizeClauses(stripped, r)...)
 		}
 
+		// ── ASOF JOIN structural validation ──────────────────────────────
+		// Validate before the FP guard skips the statement.
+		if reAsofJoinClause.MatchString(stripped) {
+			markers = append(markers, validateAsofJoinClauses(stripped, r)...)
+		}
+
 		// ── Skip Snowflake false-positive statements ──────────────────────
 		// (statements with Snowflake-specific syntax that the parser can't
 		// handle; we emit no error for these)
@@ -2784,6 +2805,176 @@ func validateMatchRecognizeClauses(stripped string, r StatementRange) []DiagMark
 		}
 	}
 	return markers
+}
+
+// ── ASOF JOIN validation ───────────────────────────────────────────────────────
+
+// validateAsofJoinClauses checks all ASOF JOIN occurrences in the statement for
+// structural correctness:
+//   - mandatory MATCH_CONDITION clause (unless USING FUNCTION form is used)
+//   - comparison operator inside MATCH_CONDITION must be >=, >, <=, or <
+//   - ON and USING clauses are not valid with ASOF JOIN
+func validateAsofJoinClauses(stripped string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	clean := strings.TrimSpace(reStripStringLiterals.ReplaceAllString(stripped, "''"))
+
+	for _, loc := range reAsofJoinClause.FindAllStringIndex(clean, -1) {
+		// Extract the text after ASOF JOIN up to the next ASOF JOIN or end of statement.
+		afterJoin := clean[loc[1]:]
+		nextAsof := reAsofJoinClause.FindStringIndex(afterJoin)
+		var scope string
+		if nextAsof != nil {
+			scope = afterJoin[:nextAsof[0]]
+		} else {
+			scope = afterJoin
+		}
+
+		hasMatchCondition := reAsofMatchCondition.MatchString(scope)
+		hasUsingFunction := reAsofUsingFunction.MatchString(scope)
+
+		// 1. Check for invalid ON clause.
+		if hasOnClause(scope, hasMatchCondition) {
+			markers = append(markers, diagMarkerSpan(r,
+				"ON clause is not valid with ASOF JOIN. Use MATCH_CONDITION instead.", 4))
+		}
+
+		// 2. Check for invalid USING clause (plain USING, not USING FUNCTION).
+		if hasUsingClause(scope, hasUsingFunction) {
+			markers = append(markers, diagMarkerSpan(r,
+				"USING clause is not valid with ASOF JOIN. Use MATCH_CONDITION instead.", 4))
+		}
+
+		// 3. Validate MATCH_CONDITION or USING FUNCTION is present.
+		if !hasMatchCondition && !hasUsingFunction {
+			markers = append(markers, diagMarkerSpan(r,
+				"ASOF JOIN requires a MATCH_CONDITION clause. Use ASOF JOIN <table> MATCH_CONDITION (<left_expr> >= <right_expr>).", 4))
+			continue
+		}
+
+		// 4. If MATCH_CONDITION is present, validate the comparison operator.
+		if hasMatchCondition {
+			mcLoc := reAsofMatchCondition.FindStringIndex(scope)
+			if mcLoc != nil {
+				parenStart := strings.Index(scope[mcLoc[0]:], "(")
+				if parenStart >= 0 {
+					absStart := mcLoc[0] + parenStart
+					blockEnd := findMatchingParen(scope[absStart:])
+					if blockEnd > 0 {
+						mcBody := scope[absStart+1 : absStart+blockEnd]
+						if !containsAsofValidComparison(mcBody) {
+							markers = append(markers, diagMarkerSpan(r,
+								"MATCH_CONDITION comparison must use one of: >=, >, <=, <. Operators =, <>, != are not supported.", 4))
+						}
+					}
+				}
+			}
+		}
+	}
+	return markers
+}
+
+// containsAsofValidComparison checks whether the MATCH_CONDITION body contains
+// one of the valid comparison operators (>=, >, <=, <) and does NOT contain only
+// invalid operators (=, <>, !=).
+func containsAsofValidComparison(body string) bool {
+	for i := 0; i < len(body); i++ {
+		ch := body[i]
+		switch ch {
+		case '>':
+			if i+1 < len(body) && body[i+1] == '=' {
+				return true // >=
+			}
+			return true // >
+		case '<':
+			if i+1 < len(body) && body[i+1] == '>' {
+				i++ // <> — invalid, skip past '>'
+				continue
+			}
+			if i+1 < len(body) && body[i+1] == '=' {
+				return true // <=
+			}
+			return true // <
+		case '!':
+			if i+1 < len(body) && body[i+1] == '=' {
+				i++ // != — invalid, skip past '='
+				continue
+			}
+		case '=':
+			// Bare = — invalid, skip
+			continue
+		}
+	}
+	return false
+}
+
+// hasOnClause checks if the scope after an ASOF JOIN contains a bare ON keyword
+// (not inside MATCH_CONDITION parentheses). It looks for ON as a standalone
+// keyword that isn't part of MATCH_CONDITION content.
+func hasOnClause(scope string, hasMatchCondition bool) bool {
+	upper := strings.ToUpper(scope)
+	idx := 0
+	for {
+		pos := strings.Index(upper[idx:], "ON")
+		if pos < 0 {
+			return false
+		}
+		absPos := idx + pos
+		// Check it's a word boundary (not part of CONDITION, FUNCTION, etc.)
+		if absPos > 0 && isWordChar(rune(upper[absPos-1])) {
+			idx = absPos + 2
+			continue
+		}
+		if absPos+2 < len(upper) && isWordChar(rune(upper[absPos+2])) {
+			idx = absPos + 2
+			continue
+		}
+		// If there's a MATCH_CONDITION, ON before it is invalid; ON after it
+		// is part of WHERE or something else — but Snowflake doesn't allow ON
+		// with ASOF JOIN at all.
+		if hasMatchCondition {
+			mcPos := strings.Index(upper, "MATCH_CONDITION")
+			if mcPos >= 0 && absPos > mcPos {
+				// ON appears after MATCH_CONDITION — likely part of WHERE/etc.
+				// Skip this occurrence.
+				idx = absPos + 2
+				continue
+			}
+		}
+		return true
+	}
+}
+
+// hasUsingClause checks if the scope after an ASOF JOIN contains a bare USING
+// keyword that is NOT followed by a function call (USING FUNCTION form is valid).
+func hasUsingClause(scope string, hasUsingFunction bool) bool {
+	if hasUsingFunction {
+		return false
+	}
+	upper := strings.ToUpper(scope)
+	idx := 0
+	for {
+		pos := strings.Index(upper[idx:], "USING")
+		if pos < 0 {
+			return false
+		}
+		absPos := idx + pos
+		// Check word boundary before
+		if absPos > 0 && isWordChar(rune(upper[absPos-1])) {
+			idx = absPos + 5
+			continue
+		}
+		// Check word boundary after
+		if absPos+5 < len(upper) && isWordChar(rune(upper[absPos+5])) {
+			idx = absPos + 5
+			continue
+		}
+		// Check if this is the USING FUNCTION form — if so, skip it.
+		after := strings.TrimSpace(upper[absPos+5:])
+		if strings.HasPrefix(after, "(") {
+			return true // USING (...) is the column-list form, not valid
+		}
+		idx = absPos + 5
+	}
 }
 
 // findMatchingParen finds the index of the closing ')' that matches the opening

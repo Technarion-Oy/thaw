@@ -6398,6 +6398,112 @@ MATCH_RECOGNIZE (
 	})
 }
 
+func TestValidateSnowflakePatterns_AsofJoin(t *testing.T) {
+	t.Run("valid ASOF JOIN queries", func(t *testing.T) {
+		validQueries := []string{
+			// Basic ASOF JOIN with MATCH_CONDITION >=
+			`SELECT a.ts, a.val, b.price FROM measurements a ASOF JOIN prices b MATCH_CONDITION (a.ts >= b.ts)`,
+			// ASOF JOIN with WHERE clause
+			`SELECT a.ts, a.val, b.price FROM measurements a ASOF JOIN prices b MATCH_CONDITION (a.ts >= b.ts) WHERE a.sensor = 'X'`,
+			// ASOF JOIN with MATCH_CONDITION using >
+			`SELECT * FROM t1 ASOF JOIN t2 MATCH_CONDITION (t1.ts > t2.ts)`,
+			// ASOF JOIN with MATCH_CONDITION using <=
+			`SELECT * FROM t1 ASOF JOIN t2 MATCH_CONDITION (t1.ts <= t2.ts)`,
+			// ASOF JOIN with MATCH_CONDITION using <
+			`SELECT * FROM t1 ASOF JOIN t2 MATCH_CONDITION (t1.ts < t2.ts)`,
+			// Multiline ASOF JOIN
+			`SELECT a.ts, b.price
+			 FROM measurements a
+			 ASOF JOIN prices b
+			   MATCH_CONDITION (a.ts >= b.ts)
+			 WHERE a.sensor = 'X'`,
+			// ASOF JOIN with fully qualified table names
+			`SELECT * FROM db.schema.measurements a ASOF JOIN db.schema.prices b MATCH_CONDITION (a.ts >= b.ts)`,
+			// ASOF JOIN with quoted identifiers
+			`SELECT * FROM "DB"."SCH"."MEASUREMENTS" a ASOF JOIN "DB"."SCH"."PRICES" b MATCH_CONDITION (a."TS" >= b."TS")`,
+			// Multiple columns in MATCH_CONDITION expression
+			`SELECT * FROM t1 ASOF JOIN t2 MATCH_CONDITION (t1.event_time >= t2.event_time)`,
+			// ASOF JOIN with subquery context
+			`SELECT * FROM (SELECT ts, val FROM raw_data) a ASOF JOIN prices b MATCH_CONDITION (a.ts >= b.ts)`,
+			// ASOF JOIN with CTE
+			`WITH cte AS (SELECT ts, val FROM measurements) SELECT * FROM cte a ASOF JOIN prices b MATCH_CONDITION (a.ts >= b.ts)`,
+			// USING FUNCTION form (custom matching logic)
+			`SELECT * FROM t1 ASOF JOIN t2 USING (my_match_func(t1.ts, t2.ts))`,
+			// USING FUNCTION form with qualified function name
+			`SELECT * FROM t1 ASOF JOIN t2 USING (db.schema.my_func(t1.ts, t2.ts))`,
+		}
+		for _, sql := range validQueries {
+			t.Run(sql[:min(len(sql), 60)], func(t *testing.T) {
+				stmtRanges := GetStatementRanges(sql)
+				markers := ValidateSnowflakePatterns(sql, stmtRanges)
+				warns := getWarnings(markers)
+				if len(warns) > 0 {
+					t.Errorf("Expected no warnings for %q, got: %v", sql, warns)
+				}
+			})
+		}
+	})
+
+	t.Run("invalid ASOF JOIN queries", func(t *testing.T) {
+		cases := []struct {
+			sql     string
+			wantMsg string
+		}{
+			// Missing MATCH_CONDITION
+			{
+				sql:     `SELECT * FROM t1 ASOF JOIN t2 WHERE t1.ts >= t2.ts`,
+				wantMsg: "ASOF JOIN requires a MATCH_CONDITION clause",
+			},
+			// Bare ASOF JOIN without any condition
+			{
+				sql:     `SELECT * FROM t1 ASOF JOIN t2`,
+				wantMsg: "ASOF JOIN requires a MATCH_CONDITION clause",
+			},
+			// ON clause used instead of MATCH_CONDITION
+			{
+				sql:     `SELECT * FROM t1 ASOF JOIN t2 ON t1.ts >= t2.ts`,
+				wantMsg: "ON clause is not valid with ASOF JOIN",
+			},
+			// USING column-list clause (not USING FUNCTION)
+			{
+				sql:     `SELECT * FROM t1 ASOF JOIN t2 USING (ts)`,
+				wantMsg: "USING clause is not valid with ASOF JOIN",
+			},
+			// Invalid comparison operator: =
+			{
+				sql:     `SELECT * FROM t1 ASOF JOIN t2 MATCH_CONDITION (t1.ts = t2.ts)`,
+				wantMsg: "MATCH_CONDITION comparison must use one of: >=, >, <=, <",
+			},
+			// Invalid comparison operator: <>
+			{
+				sql:     `SELECT * FROM t1 ASOF JOIN t2 MATCH_CONDITION (t1.ts <> t2.ts)`,
+				wantMsg: "MATCH_CONDITION comparison must use one of: >=, >, <=, <",
+			},
+			// Invalid comparison operator: !=
+			{
+				sql:     `SELECT * FROM t1 ASOF JOIN t2 MATCH_CONDITION (t1.ts != t2.ts)`,
+				wantMsg: "MATCH_CONDITION comparison must use one of: >=, >, <=, <",
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.sql[:min(len(tc.sql), 60)], func(t *testing.T) {
+				stmtRanges := GetStatementRanges(tc.sql)
+				markers := ValidateSnowflakePatterns(tc.sql, stmtRanges)
+				warns := getWarnings(markers)
+				found := false
+				for _, w := range warns {
+					if strings.Contains(w.Message, tc.wantMsg) {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("Expected warning containing %q, got: %v", tc.wantMsg, warns)
+				}
+			})
+		}
+	})
+}
+
 func TestValidateBareColumnRefs_MatchRecognizeSuppression(t *testing.T) {
 	// MATCH_RECOGNIZE queries should not produce false-positive column warnings
 	// because pattern variables (A, B) are local aliases, not table references.
