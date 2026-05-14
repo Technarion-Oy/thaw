@@ -4623,15 +4623,37 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 		"CREATE SERVICE my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION_FILE = '@stage/spec.yaml' MIN_INSTANCES = 1 MAX_INSTANCES = 2",
 		// CREATE SERVICE — COMMENT with IF NOT EXISTS inside string should not trigger conflict
 		"CREATE OR REPLACE SERVICE my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ COMMENT = 'IF NOT EXISTS hint'",
+		// CREATE SERVICE — FROM @stage SPECIFICATION_FILE (stage-prefix form)
+		"CREATE SERVICE my_svc IN COMPUTE POOL my_pool FROM @my_stage SPECIFICATION_FILE = 'spec.yaml'",
+		// CREATE SERVICE — FROM SPECIFICATION_TEMPLATE (parameterized spec)
+		"CREATE SERVICE my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION_TEMPLATE $$spec with {{ var }}$$",
+		// CREATE SERVICE — FROM SPECIFICATION_TEMPLATE_FILE
+		"CREATE SERVICE my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION_TEMPLATE_FILE = '@stage/spec.yaml'",
+		// CREATE SERVICE — FROM @stage SPECIFICATION_TEMPLATE_FILE
+		"CREATE SERVICE my_svc IN COMPUTE POOL my_pool FROM @my_stage SPECIFICATION_TEMPLATE_FILE = 'spec.yaml'",
+		// CREATE SERVICE — additional known properties
+		"CREATE SERVICE my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ AUTO_SUSPEND_SECS = 300",
+		"CREATE SERVICE my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ MIN_READY_INSTANCES = 1",
+		"CREATE SERVICE my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ LOG_LEVEL = 'INFO'",
 
 		// EXECUTE SERVICE — inline YAML
 		"EXECUTE SERVICE my_job IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$",
+		// EXECUTE JOB SERVICE — canonical form
+		"EXECUTE JOB SERVICE my_job IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$",
 		// EXECUTE SERVICE — stage-referenced specification file
 		"EXECUTE SERVICE my_job IN COMPUTE POOL my_pool FROM SPECIFICATION_FILE = '@stage/spec.yaml'",
+		// EXECUTE JOB SERVICE — stage-prefix form
+		"EXECUTE JOB SERVICE my_job IN COMPUTE POOL my_pool FROM @my_stage SPECIFICATION_FILE = 'spec.yaml'",
 		// EXECUTE SERVICE — with optional properties
 		"EXECUTE SERVICE my_job IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ QUERY_WAREHOUSE = wh1",
 		"EXECUTE SERVICE my_job IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ COMMENT = 'batch job'",
 		"EXECUTE SERVICE my_job IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ EXTERNAL_ACCESS_INTEGRATIONS = (eai1)",
+		// EXECUTE JOB SERVICE — additional properties
+		"EXECUTE JOB SERVICE my_job IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ NAME = my_named_job",
+		"EXECUTE JOB SERVICE my_job IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ ASYNC = TRUE",
+		"EXECUTE JOB SERVICE my_job IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ REPLICAS = 3",
+		// EXECUTE SERVICE — SPECIFICATION_TEMPLATE
+		"EXECUTE SERVICE my_job IN COMPUTE POOL my_pool FROM SPECIFICATION_TEMPLATE $$spec$$",
 
 		// ALTER SERVICE — SUSPEND / RESUME
 		"ALTER SERVICE my_svc SUSPEND",
@@ -4648,6 +4670,10 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 		"ALTER SERVICE my_svc FROM SPECIFICATION $$new_spec$$",
 		// ALTER SERVICE — rolling update with FROM SPECIFICATION_FILE
 		"ALTER SERVICE my_svc FROM SPECIFICATION_FILE = '@stage/spec.yaml'",
+		// ALTER SERVICE — FROM SPECIFICATION_TEMPLATE
+		"ALTER SERVICE my_svc FROM SPECIFICATION_TEMPLATE $$new_spec$$",
+		// ALTER SERVICE — FROM @stage SPECIFICATION_FILE
+		"ALTER SERVICE my_svc FROM @my_stage SPECIFICATION_FILE = 'spec.yaml'",
 		// ALTER SERVICE — UNSET MIN_INSTANCES / MAX_INSTANCES
 		"ALTER SERVICE my_svc UNSET MIN_INSTANCES",
 		"ALTER SERVICE my_svc UNSET MAX_INSTANCES",
@@ -4737,6 +4763,12 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 		{
 			"EXECUTE SERVICE missing name",
 			"EXECUTE SERVICE",
+			[]string{"Unexpected syntax in EXECUTE SERVICE"},
+		},
+		// EXECUTE JOB SERVICE — missing name (canonical form)
+		{
+			"EXECUTE JOB SERVICE missing name",
+			"EXECUTE JOB SERVICE",
 			[]string{"Unexpected syntax in EXECUTE SERVICE"},
 		},
 		// EXECUTE SERVICE — missing COMPUTE POOL

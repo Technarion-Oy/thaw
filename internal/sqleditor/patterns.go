@@ -53,7 +53,7 @@ var (
 			`|ALERT|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK` +
 			`|REPLICATION|FAILOVER|DATASHARE|SERVICE)\b` +
 			`|DROP\s+(?:TABLE|VIEW|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|DATASHARE|SERVICE)\b` +
-			`|EXECUTE\s+SERVICE\b` +
+			`|EXECUTE\s+(?:JOB\s+)?SERVICE\b` +
 			`|UNDROP\s+(?:DATABASE|SCHEMA|TABLE)\b` +
 			`|INSERT\s+OVERWRITE\b` +
 			`|TRUNCATE\s+\S+\s+IF\b` +
@@ -604,23 +604,27 @@ var (
 	// ── CREATE / EXECUTE / ALTER / DROP SERVICE (SPCS) ────────────────────
 	reIsCreateService   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SERVICE\b`)
 	reCreateServiceName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SERVICE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-	reIsExecuteService  = regexp.MustCompile(`(?i)^\s*EXECUTE\s+SERVICE\b`)
-	reExecuteServiceName = regexp.MustCompile(`(?i)^\s*EXECUTE\s+SERVICE\s+(` + _identPath + `)`)
+	reIsExecuteService  = regexp.MustCompile(`(?i)^\s*EXECUTE\s+(?:JOB\s+)?SERVICE\b`)
+	reExecuteServiceName = regexp.MustCompile(`(?i)^\s*EXECUTE\s+(?:JOB\s+)?SERVICE\s+(` + _identPath + `)`)
 	reIsAlterService    = regexp.MustCompile(`(?i)^\s*ALTER\s+SERVICE\b`)
 	reAlterServiceName  = regexp.MustCompile(`(?i)^\s*ALTER\s+SERVICE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
 	reIsDropService     = regexp.MustCompile(`(?i)^\s*DROP\s+SERVICE\b`)
 	reDropServiceName   = regexp.MustCompile(`(?i)^\s*DROP\s+SERVICE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
 	// Service property patterns
 	reServiceInComputePool    = regexp.MustCompile(`(?i)\bIN\s+COMPUTE\s+POOL\s+(` + _ident + `)`)
-	reServiceFromSpec         = regexp.MustCompile(`(?i)\bFROM\s+SPECIFICATION\b`)
-	reServiceFromSpecFile     = regexp.MustCompile(`(?i)\bFROM\s+SPECIFICATION_FILE\b`)
+	// reServiceFromSpec matches FROM SPECIFICATION and FROM SPECIFICATION_TEMPLATE
+	// (inline YAML). The \b after SPECIFICATION prevents matching _FILE/_TEMPLATE_FILE.
+	reServiceFromSpec         = regexp.MustCompile(`(?i)\bFROM\s+(?:@` + _identPath + `\s+)?SPECIFICATION(?:_TEMPLATE)?\b`)
+	// reServiceFromSpecFile matches FROM SPECIFICATION_FILE and
+	// FROM SPECIFICATION_TEMPLATE_FILE, including the FROM @stage prefix form.
+	reServiceFromSpecFile     = regexp.MustCompile(`(?i)\bFROM\s+(?:@` + _identPath + `\s+)?SPECIFICATION(?:_TEMPLATE)?_FILE\b`)
 	reServiceMinInstances     = regexp.MustCompile(`(?i)\bMIN_INSTANCES\s*=\s*(-?\d+)`)
 	reServiceMaxInstances     = regexp.MustCompile(`(?i)\bMAX_INSTANCES\s*=\s*(-?\d+)`)
 	// ALTER SERVICE actions — reAlterServiceAction matches any known sub-command
 	// for the "unknown sub-command" guard. reAlterServiceSetBare matches bare
 	// SET (with any property) so we can distinguish "unknown property within SET"
 	// from "unknown sub-command entirely".
-	reAlterServiceAction      = regexp.MustCompile(`(?i)\b(?:SUSPEND|RESUME|SET\s+(?:MIN_INSTANCES|MAX_INSTANCES|COMMENT|QUERY_WAREHOUSE)|UNSET\s+(?:COMMENT|QUERY_WAREHOUSE|MIN_INSTANCES|MAX_INSTANCES)|FROM\s+SPECIFICATION(?:_FILE)?)\b`)
+	reAlterServiceAction      = regexp.MustCompile(`(?i)\b(?:SUSPEND|RESUME|SET\s+(?:MIN_INSTANCES|MAX_INSTANCES|COMMENT|QUERY_WAREHOUSE)|UNSET\s+(?:COMMENT|QUERY_WAREHOUSE|MIN_INSTANCES|MAX_INSTANCES)|FROM\s+(?:@` + _identPath + `\s+)?SPECIFICATION(?:_TEMPLATE)?(?:_FILE)?)\b`)
 	reAlterServiceSetBare     = regexp.MustCompile(`(?i)\bSET\s+\w+`)
 	reAlterServiceUnsetBare   = regexp.MustCompile(`(?i)\bUNSET\s+\w+`)
 
@@ -6317,7 +6321,7 @@ func validateCreateService(parseText string, r StatementRange) []DiagMarker {
 	// 8. Only known properties are accepted.
 	noComments := strings.TrimSpace(stripCommentsSQL(noDollar))
 	validateProperties(noComments,
-		`MIN_INSTANCES|MAX_INSTANCES|EXTERNAL_ACCESS_INTEGRATIONS|AUTO_RESUME|QUERY_WAREHOUSE|COMMENT|SPECIFICATION_FILE`,
+		`MIN_INSTANCES|MAX_INSTANCES|MIN_READY_INSTANCES|EXTERNAL_ACCESS_INTEGRATIONS|AUTO_RESUME|AUTO_SUSPEND_SECS|QUERY_WAREHOUSE|COMMENT|SPECIFICATION_FILE|SPECIFICATION_TEMPLATE_FILE|LOG_LEVEL`,
 		r, &markers)
 
 	return markers
@@ -6375,7 +6379,7 @@ func validateExecuteService(parseText string, r StatementRange) []DiagMarker {
 	// 5. Only known properties are accepted.
 	noComments := strings.TrimSpace(stripCommentsSQL(noDollar))
 	validateProperties(noComments,
-		`EXTERNAL_ACCESS_INTEGRATIONS|QUERY_WAREHOUSE|COMMENT|SPECIFICATION_FILE|MIN_INSTANCES|MAX_INSTANCES`,
+		`EXTERNAL_ACCESS_INTEGRATIONS|QUERY_WAREHOUSE|COMMENT|SPECIFICATION_FILE|SPECIFICATION_TEMPLATE_FILE|MIN_INSTANCES|MAX_INSTANCES|NAME|ASYNC|REPLICAS`,
 		r, &markers)
 
 	return markers
