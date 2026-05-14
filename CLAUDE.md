@@ -23,6 +23,12 @@ The map in `internal/architecture/semantic_map.go` is **generated** — do not e
 
 ## Development Workflow
 
+- **Keep documentation up to date**: Every change that adds, removes, or modifies a user-facing feature, internal package, frontend component/store, or architectural pattern MUST include corresponding updates to the relevant documentation files in the **same commit or PR**. The documentation files and what to update in each:
+  - `README.md` — feature descriptions, project structure tree (internal packages, frontend components, stores), SQL validation list, keyboard shortcuts
+  - `FEATURES.md` — feature list; if the feature is toggleable, also the "Feasible Optional Features" section
+  - `CLAUDE.md` — architecture tree, Zustand store list, key patterns, critical gotchas
+  - `GEMINI.md` — architecture overview, engineering standards, common workflows
+  Do not defer documentation to a follow-up PR. Outdated docs mislead both humans and LLM agents.
 - **Branching**: All changes must be made in a feature branch (e.g., `feat/`, `fix/`, `chore/`).
 - **Git History**: NEVER alter git branch history. Do not use `git commit --amend`, `git rebase`, or `git push --force`. Always create new commits for updates.
 - **Commits**: Use descriptive commit messages with conventional prefixes. The commit type determines whether a release is triggered and what version component is bumped:

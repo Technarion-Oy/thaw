@@ -83,6 +83,12 @@ GEMINI_API_KEY=... .venv/bin/python embed_codebase.py --reset
 - **IPC Flow**: Frontend calls `wailsjs/go/main/App.ts` → Go `*App` methods in `app.go`.
 
 ## 🛠 Engineering Standards
+- **Keep documentation up to date**: Every change that adds, removes, or modifies a user-facing feature, internal package, frontend component/store, or architectural pattern MUST include corresponding documentation updates in the **same commit or PR**. Files to update:
+  - `README.md` — feature descriptions, project structure tree, SQL validation list, keyboard shortcuts
+  - `FEATURES.md` — feature list; if toggleable, also the "Feasible Optional Features" section
+  - `CLAUDE.md` — architecture tree, Zustand store list, key patterns, critical gotchas
+  - `GEMINI.md` — architecture overview, engineering standards, common workflows
+  Do not defer documentation to a follow-up PR. Outdated docs mislead both humans and LLM agents.
 - **Surgical Edits**: Prefer `replace` over `write_file` for large files like `app.go` and `Sidebar.tsx`.
 - **Wails Bindings**: After modifying Go method signatures in `app.go`, you MUST run `wails generate module` to update frontend bindings.
 - **New Feature Pattern**:
