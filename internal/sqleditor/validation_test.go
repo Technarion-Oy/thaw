@@ -6431,6 +6431,12 @@ func TestValidateSnowflakePatterns_AsofJoin(t *testing.T) {
 			`SELECT * FROM t1 ASOF JOIN t2 USING (my_match_func(t1.ts, t2.ts))`,
 			// USING FUNCTION form with qualified function name
 			`SELECT * FROM t1 ASOF JOIN t2 USING (db.schema.my_func(t1.ts, t2.ts))`,
+			// Multiple ASOF JOINs in one statement
+			`SELECT * FROM t1 ASOF JOIN t2 MATCH_CONDITION (t1.ts >= t2.ts) ASOF JOIN t3 MATCH_CONDITION (t1.ts >= t3.ts)`,
+			// ASOF JOIN with subquery containing a regular JOIN with ON
+			`SELECT * FROM t1 ASOF JOIN (SELECT * FROM x JOIN y ON x.id = y.id) AS t2 MATCH_CONDITION (t1.ts >= t2.ts)`,
+			// Table name containing "ON" (e.g. options)
+			`SELECT * FROM t1 ASOF JOIN options MATCH_CONDITION (t1.ts >= options.ts)`,
 		}
 		for _, sql := range validQueries {
 			t.Run(sql[:min(len(sql), 60)], func(t *testing.T) {

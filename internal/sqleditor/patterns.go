@@ -62,7 +62,7 @@ var (
 			`|\bPIVOT\s*\(` +
 			`|\bUNPIVOT\b` +
 			`|\bMATCH_RECOGNIZE\s*\(` +
-		`|\bASOF\s+JOIN\b`,
+			`|\bASOF\s+JOIN\b`,
 	)
 
 	// ── Snowflake Cortex AI function call detection ──────────────────────────
@@ -858,7 +858,7 @@ var (
 
 	// Valid comparison operators inside MATCH_CONDITION: >=, >, <=, <.
 	// The check logic uses containsAsofValidComparison() instead of a single
-	// regex because Go's regexp2 engine does not support lookaheads.
+	// regex because Go's regexp package (RE2) does not support lookaheads.
 
 	// ── BEGIN / COMMIT / ROLLBACK / SAVEPOINT / RELEASE SAVEPOINT ────────
 	reIsBegin            = regexp.MustCompile(`(?i)^\s*BEGIN\b`)
@@ -2908,40 +2908,44 @@ func containsAsofValidComparison(body string) bool {
 }
 
 // hasOnClause checks if the scope after an ASOF JOIN contains a bare ON keyword
-// (not inside MATCH_CONDITION parentheses). It looks for ON as a standalone
-// keyword that isn't part of MATCH_CONDITION content.
+// at the top level (not inside parenthesized subqueries or MATCH_CONDITION).
 func hasOnClause(scope string, hasMatchCondition bool) bool {
 	upper := strings.ToUpper(scope)
-	idx := 0
-	for {
-		pos := strings.Index(upper[idx:], "ON")
-		if pos < 0 {
-			return false
-		}
-		absPos := idx + pos
-		// Check it's a word boundary (not part of CONDITION, FUNCTION, etc.)
-		if absPos > 0 && isWordChar(rune(upper[absPos-1])) {
-			idx = absPos + 2
-			continue
-		}
-		if absPos+2 < len(upper) && isWordChar(rune(upper[absPos+2])) {
-			idx = absPos + 2
-			continue
-		}
-		// If there's a MATCH_CONDITION, ON before it is invalid; ON after it
-		// is part of WHERE or something else — but Snowflake doesn't allow ON
-		// with ASOF JOIN at all.
-		if hasMatchCondition {
-			mcPos := strings.Index(upper, "MATCH_CONDITION")
-			if mcPos >= 0 && absPos > mcPos {
-				// ON appears after MATCH_CONDITION — likely part of WHERE/etc.
-				// Skip this occurrence.
-				idx = absPos + 2
-				continue
+	depth := 0
+	for i := 0; i < len(upper); i++ {
+		switch upper[i] {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case 'O':
+			if depth > 0 {
+				continue // inside parenthesized group — skip
+			}
+			if i+1 < len(upper) && upper[i+1] == 'N' {
+				// Check word boundaries.
+				if i > 0 && isWordChar(rune(upper[i-1])) {
+					continue
+				}
+				if i+2 < len(upper) && isWordChar(rune(upper[i+2])) {
+					continue
+				}
+				// Found bare ON at top level.
+				// If there's a MATCH_CONDITION, ON after it is likely part of
+				// WHERE or another clause — skip.
+				if hasMatchCondition {
+					mcPos := strings.Index(upper, "MATCH_CONDITION")
+					if mcPos >= 0 && i > mcPos {
+						continue
+					}
+				}
+				return true
 			}
 		}
-		return true
 	}
+	return false
 }
 
 // hasUsingClause checks if the scope after an ASOF JOIN contains a bare USING
