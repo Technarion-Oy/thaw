@@ -60,7 +60,7 @@ var (
 			`|\bLATERAL\s+FLATTEN\b` +
 			`|\bINFER_SCHEMA\b` +
 			`|\bPIVOT\s*\(` +
-			`|\bUNPIVOT\s*\(`,
+			`|\bUNPIVOT\b`,
 	)
 
 	// ── Snowflake Cortex AI function call detection ──────────────────────────
@@ -798,8 +798,10 @@ var (
 	// ── PIVOT / UNPIVOT ──────────────────────────────────────────────────
 	// Detection: matches PIVOT( or UNPIVOT( after a table reference in a
 	// SELECT/WITH statement.
+	// rePivotAgg uses \bPIVOT which cannot match inside UNPIVOT because \b
+	// does not fire between two word characters (N and P).
 	rePivotClause   = regexp.MustCompile(`(?i)\bPIVOT\s*\(`)
-	reUnpivotClause = regexp.MustCompile(`(?i)\bUNPIVOT\s*\(`)
+	reUnpivotClause = regexp.MustCompile(`(?i)\bUNPIVOT\s+(?:(?:INCLUDE|EXCLUDE)\s+NULLS\s+)?\(`)
 
 	// PIVOT structural: captures the aggregate function name
 	rePivotAgg = regexp.MustCompile(`(?i)\bPIVOT\s*\(\s*([\w]+)\s*\(`)

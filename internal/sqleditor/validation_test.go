@@ -6118,6 +6118,8 @@ func TestValidateSnowflakePatterns_Pivot(t *testing.T) {
 			"SELECT * FROM db.schema.monthly_sales PIVOT (SUM(amount) FOR month IN ('Jan', 'Feb'))",
 			// PIVOT with alias on the source table
 			"SELECT * FROM sales_data s PIVOT (SUM(s.amount) FOR s.month IN ('Jan', 'Feb'))",
+			// Mixed-case keywords
+			"SELECT * FROM t pivot (sum(amount) for month in ('Jan', 'Feb'))",
 		}
 		for _, sql := range validQueries {
 			t.Run(sql[:min(len(sql), 60)], func(t *testing.T) {
@@ -6179,6 +6181,12 @@ func TestValidateSnowflakePatterns_Unpivot(t *testing.T) {
 			"SELECT * FROM db.schema.wide_table UNPIVOT (value FOR metric IN (col_a, col_b))",
 			// UNPIVOT with quoted identifiers
 			`SELECT * FROM wide_table UNPIVOT ("value" FOR "metric" IN ("COL_A", "COL_B"))`,
+			// UNPIVOT INCLUDE NULLS
+			"SELECT * FROM wide_table UNPIVOT INCLUDE NULLS (value FOR metric IN (col_a, col_b))",
+			// UNPIVOT EXCLUDE NULLS
+			"SELECT * FROM wide_table UNPIVOT EXCLUDE NULLS (value FOR metric IN (col_a, col_b))",
+			// Mixed-case keywords
+			"SELECT * FROM t unpivot (value FOR metric IN (col_a, col_b))",
 		}
 		for _, sql := range validQueries {
 			t.Run(sql[:min(len(sql), 60)], func(t *testing.T) {
@@ -6204,6 +6212,10 @@ func TestValidateSnowflakePatterns_Unpivot(t *testing.T) {
 			{
 				sql:     "SELECT * FROM wide_table UNPIVOT (value IN (col_a, col_b))",
 				wantMsg: "UNPIVOT requires FOR <name_column> IN",
+			},
+			{
+				sql:     "SELECT * FROM wide_table UNPIVOT INCLUDE NULLS (value FOR metric IN ())",
+				wantMsg: "UNPIVOT IN list must not be empty",
 			},
 		}
 		for _, tc := range cases {
