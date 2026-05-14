@@ -4813,6 +4813,13 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 			[]string{"MAX_INSTANCES (2) must be >= MIN_INSTANCES (10)"},
 		},
 
+		// ALTER SERVICE — SET with unknown trailing property
+		{
+			"ALTER SERVICE SET with unknown trailing property",
+			"ALTER SERVICE my_svc SET COMMENT = 'foo' SOME_NONSENSE = bar",
+			[]string{"Unexpected property 'SOME_NONSENSE'"},
+		},
+
 		// DROP SERVICE — missing name
 		{
 			"DROP SERVICE missing name",

@@ -6451,6 +6451,15 @@ func validateAlterService(parseText string, r StatementRange) []DiagMarker {
 		}
 	}
 
+	// 5. Validate allowed properties when SET is used (catches unknown props
+	// in multi-property statements like SET COMMENT = 'x' UNKNOWN = y).
+	if reAlterServiceSetBare.MatchString(clean) {
+		noComments := strings.TrimSpace(stripCommentsSQL(noDollar))
+		validateProperties(noComments,
+			`MIN_INSTANCES|MAX_INSTANCES|COMMENT|QUERY_WAREHOUSE`,
+			r, &markers)
+	}
+
 	return markers
 }
 
