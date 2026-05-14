@@ -838,6 +838,8 @@ var (
 	// AFTER MATCH SKIP — captures the skip target text.
 	// Uses [\s\S]+? instead of .+? so that the match spans newlines in
 	// multi-line MATCH_RECOGNIZE bodies.
+	// NOTE: the terminator keyword list must be kept in sync with any new
+	// sub-clauses Snowflake may add to MATCH_RECOGNIZE in the future.
 	reAfterMatchSkip = regexp.MustCompile(`(?i)\bAFTER\s+MATCH\s+SKIP\s+([\s\S]+?)(?:\b(?:PATTERN|DEFINE|MEASURES|ONE|ALL|ORDER|PARTITION)\b|$)`)
 	// Valid AFTER MATCH SKIP targets.
 	reAfterMatchSkipValid = regexp.MustCompile(

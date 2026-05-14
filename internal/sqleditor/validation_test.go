@@ -6317,6 +6317,8 @@ MATCH_RECOGNIZE (
 )`,
 			// AFTER MATCH SKIP TO FIRST with quoted identifier
 			`SELECT * FROM t MATCH_RECOGNIZE (PATTERN (A B) AFTER MATCH SKIP TO FIRST "myVar" DEFINE A AS x > 0, B AS x < 0)`,
+			// Multiple MATCH_RECOGNIZE in a single statement (subquery)
+			`SELECT * FROM (SELECT * FROM t1 MATCH_RECOGNIZE (PATTERN (A B) DEFINE A AS x > 0, B AS x < 0)) a JOIN (SELECT * FROM t2 MATCH_RECOGNIZE (PATTERN (X Y+) DEFINE X AS v = 1, Y AS v = 2)) b ON a.id = b.id`,
 		}
 		for _, sql := range validQueries {
 			t.Run(sql[:min(len(sql), 60)], func(t *testing.T) {
@@ -6371,6 +6373,11 @@ MATCH_RECOGNIZE (
 				sql:     `SELECT * FROM t MATCH_RECOGNIZE (PATTERN (A B))`,
 				wantMsg: "MATCH_RECOGNIZE requires a DEFINE clause",
 			},
+			// DEFINE keyword present but without any variable bindings.
+			{
+				sql:     `SELECT * FROM t MATCH_RECOGNIZE (PATTERN (A B) DEFINE)`,
+				wantMsg: "MATCH_RECOGNIZE requires a DEFINE clause",
+			},
 		}
 		for _, tc := range cases {
 			t.Run(tc.sql[:min(len(tc.sql), 60)], func(t *testing.T) {
@@ -6407,13 +6414,13 @@ func TestValidateBareColumnRefs_MatchRecognizeSuppression(t *testing.T) {
 	}
 
 	for _, sql := range validQueries {
-		t.Run(sql[:min(len(sql), 50)], func(t *testing.T) {
+		t.Run(sql[:min(len(sql), 60)], func(t *testing.T) {
 			req.SQL = sql
 			req.StmtRanges = GetStatementRanges(sql)
 			markers := ValidateBareColumnRefs(req)
 			warnings := getWarnings(markers)
 			if len(warnings) > 0 {
-				t.Errorf("Expected 0 warnings for MATCH_RECOGNIZE query %q, got %d: %v", sql[:50], len(warnings), warnings)
+				t.Errorf("Expected 0 warnings for MATCH_RECOGNIZE query %q, got %d: %v", sql[:60], len(warnings), warnings)
 			}
 		})
 	}
