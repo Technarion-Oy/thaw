@@ -781,10 +781,10 @@ var (
 	reAlterNotebookRenameToBare = regexp.MustCompile(`(?i)\bRENAME\s+TO\s*$`)
 	// reAlterNotebookAddLiveVersionFull matches the complete ADD LIVE VERSION FROM LAST.
 	reAlterNotebookAddLiveVersionFull = regexp.MustCompile(`(?i)\bADD\s+LIVE\s+VERSION\s+FROM\s+LAST\b`)
-	// reAlterNotebookAddLiveVersionBare matches ADD LIVE VERSION at end-of-string
-	// without the required FROM LAST suffix.
-	reAlterNotebookAddLiveVersionBare = regexp.MustCompile(`(?i)\bADD\s+LIVE\s+VERSION\s*$`)
-	reIsDropNotebook = regexp.MustCompile(`(?i)^\s*DROP\s+NOTEBOOK\b`)
+	// reAlterNotebookAddLiveVersion detects the ADD LIVE VERSION sub-command
+	// (with or without the required FROM LAST suffix).
+	reAlterNotebookAddLiveVersion = regexp.MustCompile(`(?i)\bADD\s+LIVE\s+VERSION\b`)
+	reIsDropNotebook              = regexp.MustCompile(`(?i)^\s*DROP\s+NOTEBOOK\b`)
 	reDropNotebookName = regexp.MustCompile(
 		`(?i)^\s*DROP\s+NOTEBOOK\s+(?:IF\s+EXISTS\s+)?` +
 			`(` + _identPath + `)`)
@@ -7392,26 +7392,27 @@ func validateAlterSecret(parseText string, r StatementRange) []DiagMarker {
 func validateCreateNotebook(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	stripped := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if reOrReplace.MatchString(stripped) && reIfNotExists.MatchString(stripped) {
+	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE NOTEBOOK statement.", 4))
 		return markers
 	}
 
 	// 2. Notebook name is required.
-	if reCreateNotebookName.FindStringSubmatch(stripped) == nil {
+	if reCreateNotebookName.FindStringSubmatch(clean) == nil {
 		markers = append(markers, diagMarkerSpan(r,
 			"CREATE NOTEBOOK requires a notebook name.", 4))
 		return markers
 	}
 
 	// 3. When FROM is specified, MAIN_FILE is required.
-	// Both checks run against stripped (string literals removed) to avoid
+	// Checks run against clean (string literals and comments removed) to avoid
 	// false positives from COMMENT values containing FROM or MAIN_FILE.
-	if reCreateNotebookFrom.MatchString(stripped) && !reCreateNotebookMainFile.MatchString(stripped) {
+	if reCreateNotebookFrom.MatchString(clean) && !reCreateNotebookMainFile.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"MAIN_FILE is required when FROM is specified in CREATE NOTEBOOK.", 4))
 	}
@@ -7453,7 +7454,7 @@ func validateAlterNotebook(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 4. ADD LIVE VERSION requires FROM LAST.
-	if reAlterNotebookAddLiveVersionBare.MatchString(clean) && !reAlterNotebookAddLiveVersionFull.MatchString(clean) {
+	if reAlterNotebookAddLiveVersion.MatchString(clean) && !reAlterNotebookAddLiveVersionFull.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"ADD LIVE VERSION requires FROM LAST.", 4))
 	}

@@ -6001,6 +6001,14 @@ func TestValidateSnowflakePatterns_Notebook(t *testing.T) {
 				sql:     "ALTER NOTEBOOK my_nb ADD LIVE VERSION",
 				wantMsg: "ADD LIVE VERSION requires FROM LAST",
 			},
+			{
+				sql:     "ALTER NOTEBOOK my_nb ADD LIVE VERSION FROM",
+				wantMsg: "ADD LIVE VERSION requires FROM LAST",
+			},
+			{
+				sql:     "ALTER NOTEBOOK my_nb ADD LIVE VERSION FROM FIRST",
+				wantMsg: "ADD LIVE VERSION requires FROM LAST",
+			},
 		}
 		for _, tc := range cases {
 			t.Run(tc.sql, func(t *testing.T) {
