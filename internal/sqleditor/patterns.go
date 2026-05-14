@@ -55,7 +55,7 @@ var (
 			`|DROP\s+(?:TABLE|VIEW|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|APPLICATION\s+PACKAGE|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY|GIT\s+REPOSITORY)\b` +
 			`|EXECUTE\s+(?:JOB\s+)?SERVICE\b` +
 			`|UNDROP\s+(?:DATABASE|SCHEMA|TABLE)\b` +
-			`|INSERT\s+(?:OVERWRITE\s+)?(?:ALL|FIRST)\b` +
+			`|^INSERT\s+(?:OVERWRITE\s+)?(?:ALL|FIRST)\b` +
 			`|TRUNCATE\s+\S+\s+IF\b` +
 			`|\bLATERAL\s+FLATTEN\b` +
 			`|\bINFER_SCHEMA\b` +
@@ -871,12 +871,9 @@ var (
 	reIsInsertOverwriteBare = regexp.MustCompile(`(?i)^\s*INSERT\s+OVERWRITE\b`)
 
 	// Structural patterns used inside the validators.
-	reInsertMultiInto       = regexp.MustCompile(`(?i)\bINTO\b`)
-	reInsertMultiWhen       = regexp.MustCompile(`(?i)\bWHEN\b`)
-	reInsertMultiElse       = regexp.MustCompile(`(?i)\bELSE\b`)
 	reInsertMultiThenInto   = regexp.MustCompile(`(?i)\bTHEN\s+INTO\b`)
-	reInsertMultiTrailingSel = regexp.MustCompile(`(?i)\bSELECT\b`)
 	reInsertOverwriteSource = regexp.MustCompile(`(?i)\b(?:SELECT|VALUES)\b`)
+	reInsertOverwritePrefix = regexp.MustCompile(`(?i)^\s*INSERT\s+OVERWRITE\s+INTO\s+` + _identPath)
 
 	// ── BEGIN / COMMIT / ROLLBACK / SAVEPOINT / RELEASE SAVEPOINT ────────
 	reIsBegin            = regexp.MustCompile(`(?i)^\s*BEGIN\b`)
@@ -3066,9 +3063,20 @@ func validateInsertMultiTable(keyword string, stripped string, r StatementRange)
 	clean := strings.TrimSpace(reStripStringLiterals.ReplaceAllString(stripped, "''"))
 	upper := strings.ToUpper(clean)
 
-	hasWhen := reInsertMultiWhen.MatchString(clean)
-	hasElse := reInsertMultiElse.MatchString(clean)
-	hasInto := reInsertMultiInto.MatchString(clean)
+	// Find the position of the trailing top-level SELECT. Keywords after
+	// this position belong to the source query and must be ignored (e.g.
+	// CASE WHEN/ELSE inside the SELECT clause).
+	trailingSelectPos := findLastTopLevelSelectPos(upper)
+
+	// Scan for top-level WHEN, ELSE, and INTO keywords (depth == 0) that
+	// appear before the trailing SELECT.
+	scanLimit := len(upper)
+	if trailingSelectPos >= 0 {
+		scanLimit = trailingSelectPos
+	}
+
+	whenPositions, hasElse, hasInto := scanInsertMultiKeywords(upper, scanLimit)
+	hasWhen := len(whenPositions) > 0
 
 	// Determine if this is a conditional form (has WHEN or ELSE) or
 	// unconditional (bare INSERT ALL INTO ... INTO ... SELECT).
@@ -3092,21 +3100,12 @@ func validateInsertMultiTable(keyword string, stripped string, r StatementRange)
 		}
 
 		// Each WHEN must have a THEN INTO.
-		whenLocs := reInsertMultiWhen.FindAllStringIndex(upper, -1)
-		for i, loc := range whenLocs {
-			end := len(upper)
-			if i+1 < len(whenLocs) {
-				end = whenLocs[i+1][0]
+		for i, whenPos := range whenPositions {
+			end := scanLimit
+			if i+1 < len(whenPositions) {
+				end = whenPositions[i+1]
 			}
-			// Also stop at ELSE
-			if elseLoc := reInsertMultiElse.FindStringIndex(upper[loc[1]:]); elseLoc != nil {
-				elseAbsPos := loc[1] + elseLoc[0]
-				if elseAbsPos < end {
-					end = elseAbsPos
-				}
-			}
-			// Also stop at trailing SELECT
-			clause := upper[loc[0]:end]
+			clause := upper[whenPos:end]
 			if !reInsertMultiThenInto.MatchString(clause) {
 				markers = append(markers, diagMarkerSpan(r,
 					"WHEN branch must contain INTO clause. Use WHEN <condition> THEN INTO <table>.", 4))
@@ -3122,13 +3121,88 @@ func validateInsertMultiTable(keyword string, stripped string, r StatementRange)
 	}
 
 	// Trailing SELECT is mandatory for all multi-table inserts.
-	// Find the last top-level SELECT (not inside parenthesized subqueries).
-	if !hasTrailingTopLevelSelect(clean) {
+	if trailingSelectPos < 0 {
 		markers = append(markers, diagMarkerSpan(r,
 			"INSERT "+keyword+" requires a source SELECT at the end of the statement.", 4))
 	}
 
 	return markers
+}
+
+// scanInsertMultiKeywords scans upper (already uppercased) up to scanLimit for
+// top-level (depth == 0) WHEN, ELSE, and INTO keywords. Returns the positions
+// of each WHEN, and whether ELSE and INTO were found.
+func scanInsertMultiKeywords(upper string, scanLimit int) (whenPositions []int, hasElse bool, hasInto bool) {
+	depth := 0
+	for i := 0; i < scanLimit; i++ {
+		switch upper[i] {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case 'W':
+			if depth == 0 && i+4 <= scanLimit && upper[i:i+4] == "WHEN" {
+				if i > 0 && isWordChar(rune(upper[i-1])) {
+					continue
+				}
+				if i+4 < len(upper) && isWordChar(rune(upper[i+4])) {
+					continue
+				}
+				whenPositions = append(whenPositions, i)
+			}
+		case 'E':
+			if depth == 0 && i+4 <= scanLimit && upper[i:i+4] == "ELSE" {
+				if i > 0 && isWordChar(rune(upper[i-1])) {
+					continue
+				}
+				if i+4 < len(upper) && isWordChar(rune(upper[i+4])) {
+					continue
+				}
+				hasElse = true
+			}
+		case 'I':
+			if depth == 0 && i+4 <= scanLimit && upper[i:i+4] == "INTO" {
+				if i > 0 && isWordChar(rune(upper[i-1])) {
+					continue
+				}
+				if i+4 < len(upper) && isWordChar(rune(upper[i+4])) {
+					continue
+				}
+				hasInto = true
+			}
+		}
+	}
+	return
+}
+
+// findLastTopLevelSelectPos returns the position of the last top-level SELECT
+// keyword (depth == 0) in s, or -1 if none found.
+func findLastTopLevelSelectPos(upper string) int {
+	depth := 0
+	lastPos := -1
+	for i := 0; i < len(upper); i++ {
+		switch upper[i] {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case 'S':
+			if depth == 0 && i+6 <= len(upper) && upper[i:i+6] == "SELECT" {
+				if i > 0 && isWordChar(rune(upper[i-1])) {
+					continue
+				}
+				if i+6 < len(upper) && isWordChar(rune(upper[i+6])) {
+					continue
+				}
+				lastPos = i
+			}
+		}
+	}
+	return lastPos
 }
 
 // validateInsertOverwrite validates INSERT OVERWRITE INTO statements.
@@ -3155,8 +3229,7 @@ func validateInsertOverwrite(stripped string, r StatementRange) []DiagMarker {
 	// Check for a source: SELECT or VALUES must appear.
 	// Remove the INSERT OVERWRITE INTO <table> prefix first to avoid matching
 	// the INTO keyword itself.
-	afterPrefix := regexp.MustCompile(`(?i)^\s*INSERT\s+OVERWRITE\s+INTO\s+` + _identPath).
-		ReplaceAllString(clean, "")
+	afterPrefix := reInsertOverwritePrefix.ReplaceAllString(clean, "")
 	// Strip optional column list
 	afterPrefix = strings.TrimSpace(afterPrefix)
 	if strings.HasPrefix(afterPrefix, "(") {
@@ -3170,63 +3243,6 @@ func validateInsertOverwrite(stripped string, r StatementRange) []DiagMarker {
 	}
 
 	return markers
-}
-
-// hasTrailingTopLevelSelect checks whether the statement has a SELECT keyword
-// at the top level (not inside parenthesized subqueries) that appears after
-// all INTO clauses.
-func hasTrailingTopLevelSelect(s string) bool {
-	upper := strings.ToUpper(s)
-	depth := 0
-	lastTopSelectPos := -1
-	for i := 0; i < len(upper); i++ {
-		switch upper[i] {
-		case '(':
-			depth++
-		case ')':
-			if depth > 0 {
-				depth--
-			}
-		case 'S':
-			if depth == 0 && i+6 <= len(upper) && upper[i:i+6] == "SELECT" {
-				// Check word boundaries.
-				if i > 0 && isWordChar(rune(upper[i-1])) {
-					continue
-				}
-				if i+6 < len(upper) && isWordChar(rune(upper[i+6])) {
-					continue
-				}
-				lastTopSelectPos = i
-			}
-		}
-	}
-	if lastTopSelectPos < 0 {
-		return false
-	}
-	// The SELECT must appear after the last top-level INTO.
-	lastIntoPos := -1
-	depth = 0
-	for i := 0; i < len(upper); i++ {
-		switch upper[i] {
-		case '(':
-			depth++
-		case ')':
-			if depth > 0 {
-				depth--
-			}
-		case 'I':
-			if depth == 0 && i+4 <= len(upper) && upper[i:i+4] == "INTO" {
-				if i > 0 && isWordChar(rune(upper[i-1])) {
-					continue
-				}
-				if i+4 < len(upper) && isWordChar(rune(upper[i+4])) {
-					continue
-				}
-				lastIntoPos = i
-			}
-		}
-	}
-	return lastTopSelectPos > lastIntoPos
 }
 
 // findTopLevelMatches returns all matches of re in s that are not inside

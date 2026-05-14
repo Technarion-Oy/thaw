@@ -6609,6 +6609,20 @@ func TestValidateSnowflakePatterns_InsertAllFirstOverwrite(t *testing.T) {
 			   WHEN x > 0 THEN INTO t1
 			   ELSE INTO t2
 			 SELECT id, x FROM source`,
+			// CASE WHEN/ELSE in trailing SELECT must not trigger false positive
+			`INSERT ALL
+			   INTO t1 (id, label)
+			   INTO t2 (id, label)
+			 SELECT id, CASE WHEN status = 1 THEN 'active' ELSE 'inactive' END AS label FROM source`,
+			// Subquery with WHEN/ELSE in trailing SELECT
+			`INSERT ALL
+			   INTO t1
+			   INTO t2
+			 SELECT id, (SELECT CASE WHEN x > 0 THEN 1 ELSE 0 END FROM y) AS flag FROM source`,
+			// String literal containing WHEN/ELSE
+			`INSERT ALL
+			   INTO t1 (id, val)
+			 SELECT id, 'WHEN ELSE SELECT INTO' AS val FROM source`,
 		}
 		for _, sql := range validQueries {
 			t.Run(sql[:min(len(sql), 60)], func(t *testing.T) {
