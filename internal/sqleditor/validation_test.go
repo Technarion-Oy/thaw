@@ -6859,6 +6859,9 @@ func TestValidateSnowflakePatterns_AlterTableSearchOptimization(t *testing.T) {
 			// Bare ADD SEARCH OPTIMIZATION (no ON clause)
 			"ALTER TABLE my_table ADD SEARCH OPTIMIZATION",
 			"ALTER TABLE db.schema.my_table ADD SEARCH OPTIMIZATION",
+			// IF EXISTS form
+			"ALTER TABLE IF EXISTS my_table ADD SEARCH OPTIMIZATION",
+			"ALTER TABLE IF EXISTS my_table ADD SEARCH OPTIMIZATION ON EQUALITY(c1)",
 			// Bare DROP SEARCH OPTIMIZATION
 			"ALTER TABLE my_table DROP SEARCH OPTIMIZATION",
 			"ALTER TABLE db.schema.my_table DROP SEARCH OPTIMIZATION",
@@ -6928,6 +6931,11 @@ func TestValidateSnowflakePatterns_AlterTableSearchOptimization(t *testing.T) {
 			// DROP with unknown expression type
 			{
 				sql:     "ALTER TABLE t DROP SEARCH OPTIMIZATION ON UNKNOWN(col1)",
+				wantMsg: "Unknown search optimization type",
+			},
+			// IF EXISTS with unknown expression type
+			{
+				sql:     "ALTER TABLE IF EXISTS t ADD SEARCH OPTIMIZATION ON FUZZY(col1)",
 				wantMsg: "Unknown search optimization type",
 			},
 		}

@@ -866,7 +866,7 @@ var (
 	// Detection: matches ALTER TABLE <name> ADD SEARCH OPTIMIZATION or
 	// ALTER TABLE <name> DROP SEARCH OPTIMIZATION.
 	reIsAlterTableSearchOpt = regexp.MustCompile(
-		`(?i)^\s*ALTER\s+TABLE\s+` + _identPath + `\s+(?:ADD|DROP)\s+SEARCH\s+OPTIMIZATION\b`)
+		`(?i)^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?` + _identPath + `\s+(?:ADD|DROP)\s+SEARCH\s+OPTIMIZATION\b`)
 	// ON clause: captures everything after ON (expression list).
 	reSearchOptOnClause = regexp.MustCompile(
 		`(?i)\bSEARCH\s+OPTIMIZATION\s+ON\b`)
@@ -8242,11 +8242,6 @@ func validateAlterTableSearchOptimization(stripped string, r StatementRange) []D
 	clean := strings.TrimSpace(reStripStringLiterals.ReplaceAllString(stripped, "''"))
 
 	// If there is no ON clause, the bare form is valid — nothing to check.
-	if !reSearchOptOnClause.MatchString(clean) {
-		return markers
-	}
-
-	// Extract the text after ON.
 	loc := reSearchOptOnClause.FindStringIndex(clean)
 	if loc == nil {
 		return markers
