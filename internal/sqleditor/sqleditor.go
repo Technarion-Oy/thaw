@@ -173,6 +173,7 @@ var joinStopKW = map[string]bool{
 	"RIGHT": true, "FULL": true, "OUTER": true, "NATURAL": true, "JOIN": true,
 	"SELECT": true, "WITH": true, "FROM": true,
 	"AT": true, "BEFORE": true,
+	"ASOF": true, "MATCH_CONDITION": true,
 }
 
 var sqlAllKeywords = map[string]bool{
@@ -216,7 +217,7 @@ var sqlAllKeywords = map[string]bool{
 	// words that users may use as column names; the dot/paren logic in
 	// scanSelectClauseForUnknownCols already skips them when used inside
 	// SNOWFLAKE.CORTEX.<name>(...) calls)
-	"SNOWFLAKE": true, "CORTEX": true,
+	"SNOWFLAKE": true, "CORTEX": true, "MATCH_CONDITION": true,
 	// Data types
 	"INT": true, "INTEGER": true, "BIGINT": true, "SMALLINT": true, "TINYINT": true, "BYTEINT": true,
 	"NUMBER": true, "DECIMAL": true, "NUMERIC": true, "DOUBLE": true, "FLOAT": true, "REAL": true,
@@ -934,7 +935,7 @@ var sqlFormatterKeywords = map[string]bool{
 	"WHEN": true, "WHERE": true, "WINDOW": true, "WITH": true,
 	"WITHIN": true, "WITHOUT": true,
 	// Snowflake-specific
-	"ANTI": true, "ASOF": true, "CLONE": true, "CRON": true,
+	"ANTI": true, "ASOF": true, "CLONE": true, "CRON": true, "MATCH_CONDITION": true,
 	"DYNAMIC": true, "ENABLE": true, "EXTERNAL": true, "FINALIZE": true,
 	"FORMAT": true, "ICEBERG": true, "MASKING": true, "NETWORK": true,
 	"NOTIFY": true, "POLICY": true, "PROJECTION": true, "RECOVER": true,
