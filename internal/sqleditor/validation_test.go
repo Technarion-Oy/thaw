@@ -6185,6 +6185,8 @@ func TestValidateSnowflakePatterns_Unpivot(t *testing.T) {
 			"SELECT * FROM wide_table UNPIVOT INCLUDE NULLS (value FOR metric IN (col_a, col_b))",
 			// UNPIVOT EXCLUDE NULLS
 			"SELECT * FROM wide_table UNPIVOT EXCLUDE NULLS (value FOR metric IN (col_a, col_b))",
+			// No space before opening paren
+			"SELECT * FROM wide_table UNPIVOT(value FOR metric IN (col_a, col_b))",
 			// Mixed-case keywords
 			"SELECT * FROM t unpivot (value FOR metric IN (col_a, col_b))",
 		}

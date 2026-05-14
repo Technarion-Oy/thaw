@@ -801,7 +801,7 @@ var (
 	// rePivotAgg uses \bPIVOT which cannot match inside UNPIVOT because \b
 	// does not fire between two word characters (N and P).
 	rePivotClause   = regexp.MustCompile(`(?i)\bPIVOT\s*\(`)
-	reUnpivotClause = regexp.MustCompile(`(?i)\bUNPIVOT\s+(?:(?:INCLUDE|EXCLUDE)\s+NULLS\s+)?\(`)
+	reUnpivotClause = regexp.MustCompile(`(?i)\bUNPIVOT\s*(?:(?:INCLUDE|EXCLUDE)\s+NULLS\s+)?\(`)
 
 	// PIVOT structural: captures the aggregate function name
 	rePivotAgg = regexp.MustCompile(`(?i)\bPIVOT\s*\(\s*([\w]+)\s*\(`)
