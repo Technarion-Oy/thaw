@@ -5905,6 +5905,8 @@ func TestValidateSnowflakePatterns_Notebook(t *testing.T) {
 			"CREATE NOTEBOOK my_nb COMMENT = 'A test notebook'",
 			"CREATE NOTEBOOK my_nb FROM '@stage/path' MAIN_FILE = 'nb.ipynb' COMMENT = 'imported'",
 			"CREATE NOTEBOOK my_nb IDLE_AUTO_SHUTDOWN_TIME_SECONDS = 3600",
+			// COMMENT containing FROM should not trigger MAIN_FILE requirement
+			`CREATE NOTEBOOK my_nb COMMENT = 'imported FROM ''@stage/path'' stuff'`,
 		}
 		for _, sql := range validQueries {
 			t.Run(sql, func(t *testing.T) {
@@ -5994,6 +5996,10 @@ func TestValidateSnowflakePatterns_Notebook(t *testing.T) {
 			{
 				sql:     "ALTER NOTEBOOK my_nb RENAME TO",
 				wantMsg: "RENAME TO requires a new notebook name",
+			},
+			{
+				sql:     "ALTER NOTEBOOK my_nb ADD LIVE VERSION",
+				wantMsg: "ADD LIVE VERSION requires FROM LAST",
 			},
 		}
 		for _, tc := range cases {

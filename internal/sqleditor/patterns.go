@@ -759,10 +759,11 @@ var (
 	reAlterTagUnsetAllowed = regexp.MustCompile(`(?i)\bUNSET\s+ALLOWED_VALUES\b`)
 	reAlterTagSetComment   = regexp.MustCompile(`(?i)\bSET\s+COMMENT\s*=`)
 	reAlterTagUnsetComment = regexp.MustCompile(`(?i)\bUNSET\s+COMMENT\b`)
-	// reDropTagCascadeRestrict detects CASCADE or RESTRICT trailing the DROP TAG
-	// statement. $ is safe here: parseText has trailing semicolons stripped and
-	// clean has comments removed before matching.
-	reDropTagCascadeRestrict = regexp.MustCompile(`(?i)\b(?:CASCADE|RESTRICT)\s*$`)
+	// reCascadeRestrictTrailing detects CASCADE or RESTRICT trailing a DROP
+	// statement. Used by DROP TAG and DROP NOTEBOOK validators. $ is safe here:
+	// parseText has trailing semicolons stripped and clean has comments removed
+	// before matching.
+	reCascadeRestrictTrailing = regexp.MustCompile(`(?i)\b(?:CASCADE|RESTRICT)\s*$`)
 
 	// ── CREATE NOTEBOOK / ALTER NOTEBOOK / DROP NOTEBOOK ─────────────
 	reIsCreateNotebook = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?NOTEBOOK\b`)
@@ -778,6 +779,11 @@ var (
 	reAlterNotebookRenameTo = regexp.MustCompile(
 		`(?i)\bRENAME\s+TO\s+(` + _identPath + `)`)
 	reAlterNotebookRenameToBare = regexp.MustCompile(`(?i)\bRENAME\s+TO\s*$`)
+	// reAlterNotebookAddLiveVersionFull matches the complete ADD LIVE VERSION FROM LAST.
+	reAlterNotebookAddLiveVersionFull = regexp.MustCompile(`(?i)\bADD\s+LIVE\s+VERSION\s+FROM\s+LAST\b`)
+	// reAlterNotebookAddLiveVersionBare matches ADD LIVE VERSION at end-of-string
+	// without the required FROM LAST suffix.
+	reAlterNotebookAddLiveVersionBare = regexp.MustCompile(`(?i)\bADD\s+LIVE\s+VERSION\s*$`)
 	reIsDropNotebook = regexp.MustCompile(`(?i)^\s*DROP\s+NOTEBOOK\b`)
 	reDropNotebookName = regexp.MustCompile(
 		`(?i)^\s*DROP\s+NOTEBOOK\s+(?:IF\s+EXISTS\s+)?` +
@@ -5617,7 +5623,7 @@ func validateDropTag(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 2. CASCADE / RESTRICT are not valid for DROP TAG.
-	if reDropTagCascadeRestrict.MatchString(clean) {
+	if reCascadeRestrictTrailing.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"CASCADE / RESTRICT are not valid for DROP TAG.", 4))
 	}
@@ -7396,14 +7402,16 @@ func validateCreateNotebook(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 2. Notebook name is required.
-	if reCreateNotebookName.FindStringSubmatch(parseText) == nil {
+	if reCreateNotebookName.FindStringSubmatch(stripped) == nil {
 		markers = append(markers, diagMarkerSpan(r,
 			"CREATE NOTEBOOK requires a notebook name.", 4))
 		return markers
 	}
 
 	// 3. When FROM is specified, MAIN_FILE is required.
-	if reCreateNotebookFrom.MatchString(parseText) && !reCreateNotebookMainFile.MatchString(parseText) {
+	// Both checks run against stripped (string literals removed) to avoid
+	// false positives from COMMENT values containing FROM or MAIN_FILE.
+	if reCreateNotebookFrom.MatchString(stripped) && !reCreateNotebookMainFile.MatchString(stripped) {
 		markers = append(markers, diagMarkerSpan(r,
 			"MAIN_FILE is required when FROM is specified in CREATE NOTEBOOK.", 4))
 	}
@@ -7444,6 +7452,12 @@ func validateAlterNotebook(parseText string, r StatementRange) []DiagMarker {
 			"RENAME TO requires a new notebook name.", 4))
 	}
 
+	// 4. ADD LIVE VERSION requires FROM LAST.
+	if reAlterNotebookAddLiveVersionBare.MatchString(clean) && !reAlterNotebookAddLiveVersionFull.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"ADD LIVE VERSION requires FROM LAST.", 4))
+	}
+
 	return markers
 }
 
@@ -7459,14 +7473,14 @@ func validateDropNotebook(parseText string, r StatementRange) []DiagMarker {
 	clean := strings.TrimSpace(stripCommentsSQL(stripped))
 
 	// 1. Notebook name is required.
-	if reDropNotebookName.FindStringSubmatch(parseText) == nil {
+	if reDropNotebookName.FindStringSubmatch(clean) == nil {
 		markers = append(markers, diagMarkerSpan(r,
 			"DROP NOTEBOOK requires a notebook name.", 4))
 		return markers
 	}
 
 	// 2. CASCADE / RESTRICT are not valid for DROP NOTEBOOK.
-	if reDropTagCascadeRestrict.MatchString(clean) {
+	if reCascadeRestrictTrailing.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"CASCADE / RESTRICT are not valid for DROP NOTEBOOK.", 4))
 	}
