@@ -4728,6 +4728,12 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 			"CREATE SERVICE my_svc IN COMPUTE POOL my_pool",
 			[]string{"Missing mandatory FROM SPECIFICATION or FROM SPECIFICATION_FILE"},
 		},
+		// CREATE SERVICE — both SPECIFICATION and SPECIFICATION_FILE
+		{
+			"CREATE SERVICE both spec and spec file",
+			"CREATE SERVICE my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ FROM SPECIFICATION_FILE = '@stage/spec.yaml'",
+			[]string{"requires exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE"},
+		},
 		// CREATE SERVICE — MIN_INSTANCES negative
 		{
 			"CREATE SERVICE MIN_INSTANCES negative",
@@ -4856,6 +4862,12 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 		{
 			"DROP SERVICE missing name",
 			"DROP SERVICE",
+			[]string{"DROP SERVICE requires a service name"},
+		},
+		// DROP SERVICE IF EXISTS — missing name
+		{
+			"DROP SERVICE IF EXISTS missing name",
+			"DROP SERVICE IF EXISTS",
 			[]string{"DROP SERVICE requires a service name"},
 		},
 	}

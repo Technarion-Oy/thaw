@@ -608,8 +608,9 @@ var (
 	reExecuteServiceName = regexp.MustCompile(`(?i)^\s*EXECUTE\s+(?:JOB\s+)?SERVICE\s+(` + _identPath + `)`)
 	reIsAlterService    = regexp.MustCompile(`(?i)^\s*ALTER\s+SERVICE\b`)
 	reAlterServiceName  = regexp.MustCompile(`(?i)^\s*ALTER\s+SERVICE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
-	reIsDropService     = regexp.MustCompile(`(?i)^\s*DROP\s+SERVICE\b`)
-	reDropServiceName   = regexp.MustCompile(`(?i)^\s*DROP\s+SERVICE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
+	reIsDropService        = regexp.MustCompile(`(?i)^\s*DROP\s+SERVICE\b`)
+	reDropServiceName      = regexp.MustCompile(`(?i)^\s*DROP\s+SERVICE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
+	reDropServiceIfExists  = regexp.MustCompile(`(?i)\bIF\s+EXISTS\b`)
 	// Service property patterns
 	reServiceInComputePool    = regexp.MustCompile(`(?i)\bIN\s+COMPUTE\s+POOL\s+(` + _ident + `)`)
 	// reServiceFromSpec matches FROM SPECIFICATION and FROM SPECIFICATION_TEMPLATE
@@ -6479,6 +6480,14 @@ func validateDropService(parseText string, r StatementRange) []DiagMarker {
 
 	m := reDropServiceName.FindStringSubmatch(clean)
 	if m == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"DROP SERVICE requires a service name.", 4))
+		return markers
+	}
+	// Guard against "DROP SERVICE IF EXISTS" (no name): the optional
+	// IF\s+EXISTS\s+ group fails (no trailing whitespace+ident), so the
+	// regex captures "IF" as the name. Detect this and flag it.
+	if strings.EqualFold(m[1], "IF") && reDropServiceIfExists.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"DROP SERVICE requires a service name.", 4))
 		return markers
