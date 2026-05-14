@@ -8384,9 +8384,10 @@ func validateAlterDynamicTable(parseText string, r StatementRange) []DiagMarker 
 	}
 
 	// 6. SET TARGET_LAG value validation.
-	//    Uses parseText (raw) instead of clean because clean has string literals
+	//    The bare check uses suffix (no string literals to worry about).
+	//    The value check uses parseText (raw) because clean has string literals
 	//    stripped, and the lag value is inside a string literal (e.g. '1 minute').
-	if hasSet && reAlterDynTableTargetLagBare.MatchString(parseText) {
+	if hasSet && reAlterDynTableTargetLagBare.MatchString(suffix) {
 		if !reAlterDynTableTargetLagVal.MatchString(parseText) {
 			markers = append(markers, diagMarkerSpan(r,
 				"Invalid TARGET_LAG value. Expected a quoted duration (e.g. '1 minute') or DOWNSTREAM.", 4))

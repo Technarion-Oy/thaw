@@ -7020,7 +7020,8 @@ func TestValidateSnowflakePatterns_AlterDynamicTable(t *testing.T) {
 			// SET WAREHOUSE
 			"ALTER DYNAMIC TABLE my_dt SET WAREHOUSE = my_wh",
 			"ALTER DYNAMIC TABLE IF EXISTS my_dt SET WAREHOUSE = my_wh",
-			// SET COMMENT (uses string literal — stripped by preprocessing)
+			// SET COMMENT (string literal stripped by preprocessing — exercises non-TARGET_LAG SET path)
+			"ALTER DYNAMIC TABLE my_dt SET COMMENT = 'hello world'",
 			// UNSET
 			"ALTER DYNAMIC TABLE my_dt UNSET DATA_RETENTION_TIME_IN_DAYS",
 			"ALTER DYNAMIC TABLE IF EXISTS my_dt UNSET DATA_RETENTION_TIME_IN_DAYS",
