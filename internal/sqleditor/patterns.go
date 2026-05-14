@@ -1408,6 +1408,110 @@ var grantObjectTypePlurals = map[string]string{
 // errors.  It is a pure Go replacement for the validateWithParser function in
 // sqlDiagnostics.ts; the node-sql-parser dependency is dropped because
 // ValidateSyntax already covers generic syntax errors via its tokenizer.
+// parseTextRoute pairs a guard regex with a validation function. When the
+// guard matches parseText, the validator is called and its markers are
+// appended. The statement is then skipped (continue).
+type parseTextRoute struct {
+	guard *regexp.Regexp
+	fn    func(string, StatementRange) []DiagMarker
+}
+
+// parseTextRoutes is the declarative dispatch table for simple regex→validator
+// entries in ValidateSnowflakePatterns. Order matters: the first matching
+// guard wins (mirroring the original if/continue chain).
+var parseTextRoutes = []parseTextRoute{
+	{reIsCreateIcebergTable, validateCreateIcebergTable},
+	{reIsCreateHybridTable, validateCreateHybridTable},
+	{reIsCopyInto, validateCopyInto},
+	{reIsCreateTask, validateCreateTask},
+	{reIsAlterTask, validateAlterTask},
+	{reIsCreateAlert, validateCreateAlert},
+	{reIsCreateNetworkPolicy, validateCreateNetworkPolicy},
+	{reIsCreateSessionPolicy, validateCreateSessionPolicy},
+	{reIsCreatePasswordPolicy, validateCreatePasswordPolicy},
+	{reIsCreateRowAccessPolicy, validateCreateRowAccessPolicy},
+	{reIsCreateAggregationPolicy, validateCreateAggregationPolicy},
+	{reIsCreateProjectionPolicy, validateCreateProjectionPolicy},
+	{reIsAlterAggregationPolicy, func(pt string, r StatementRange) []DiagMarker {
+		return validateAlterAggregationOrProjectionPolicy(pt, r, "AGGREGATION")
+	}},
+	{reIsAlterProjectionPolicy, func(pt string, r StatementRange) []DiagMarker {
+		return validateAlterAggregationOrProjectionPolicy(pt, r, "PROJECTION")
+	}},
+	{reIsDropAggregationPolicy, func(pt string, r StatementRange) []DiagMarker {
+		return validateDropAggregationOrProjectionPolicy(pt, r, "AGGREGATION")
+	}},
+	{reIsDropProjectionPolicy, func(pt string, r StatementRange) []DiagMarker {
+		return validateDropAggregationOrProjectionPolicy(pt, r, "PROJECTION")
+	}},
+	{reIsCreatePackagesPolicy, validateCreatePackagesPolicy},
+	{reIsAlterPackagesPolicy, validateAlterPackagesPolicy},
+	{reIsDropPackagesPolicy, validateDropPackagesPolicy},
+	{reIsCreateReplicationGroup, validateCreateReplicationGroup},
+	{reIsAlterReplicationGroup, func(pt string, r StatementRange) []DiagMarker {
+		return validateAlterReplicationOrFailoverGroup(pt, r, "REPLICATION")
+	}},
+	{reIsDropReplicationGroup, func(pt string, r StatementRange) []DiagMarker {
+		return validateDropReplicationOrFailoverGroup(pt, r, "REPLICATION")
+	}},
+	{reIsCreateFailoverGroup, validateCreateFailoverGroup},
+	{reIsAlterFailoverGroup, func(pt string, r StatementRange) []DiagMarker {
+		return validateAlterReplicationOrFailoverGroup(pt, r, "FAILOVER")
+	}},
+	{reIsDropFailoverGroup, func(pt string, r StatementRange) []DiagMarker {
+		return validateDropReplicationOrFailoverGroup(pt, r, "FAILOVER")
+	}},
+	{reIsCreateFileFormat, validateCreateFileFormat},
+	{reWithProcAlias, validateWithProcedureCall},
+	{reIsCall, validateCall},
+	{reIsGrant, validateGrant},
+	{reIsRevoke, validateRevoke},
+	{reIsExecuteImmediate, validateExecuteImmediate},
+	{reIsExecuteTask, validateExecuteTask},
+	{reIsExecuteService, validateExecuteService},
+	{reIsPut, validatePut},
+	{reIsGet, validateGet},
+	{reIsList, validateList},
+	{reIsRemove, validateRemove},
+	{reIsCreateShare, validateCreateShare},
+	{reIsAlterShare, validateAlterShare},
+	{reIsCreateDatashare, validateCreateDatashare},
+	{reIsAlterDatashare, validateAlterDatashare},
+	{reIsDropDatashare, validateDropDatashare},
+	{reIsCreateComputePool, validateCreateComputePool},
+	{reIsCreateService, validateCreateService},
+	{reIsAlterService, validateAlterService},
+	{reIsDropService, validateDropService},
+	{reIsCreateImageRepository, validateCreateImageRepository},
+	{reIsDropImageRepository, validateDropImageRepository},
+	{reIsAlterImageRepository, validateAlterImageRepository},
+	{reIsCreateGitRepository, validateCreateGitRepository},
+	{reIsAlterGitRepository, validateAlterGitRepository},
+	{reIsDropGitRepository, validateDropGitRepository},
+	{reIsCreateSecret, validateCreateSecret},
+	{reIsAlterSecret, validateAlterSecret},
+	{reIsCreateApplicationPackage, validateCreateApplicationPackage},
+	{reIsAlterApplicationPackage, validateAlterApplicationPackage},
+	{reIsDropApplicationPackage, validateDropApplicationPackage},
+	{reIsCreateApplication, validateCreateApplication},
+	{reIsAlterApplication, validateAlterApplication},
+	{reIsDropApplication, validateDropApplication},
+	{reIsCreateTag, validateCreateTag},
+	{reIsAlterTag, validateAlterTag},
+	{reIsDropTag, validateDropTag},
+	{reIsCreateNotebook, validateCreateNotebook},
+	{reIsAlterNotebook, validateAlterNotebook},
+	{reIsDropNotebook, validateDropNotebook},
+	{reIsAlterSession, validateAlterSession},
+	{reIsCreateEventTable, validateCreateEventTable},
+	{reIsCreateExternalVolume, validateCreateExternalVolume},
+	{reIsUseRole, validateUseRole},
+	{reIsUseWarehouse, validateUseWarehouse},
+	{reIsUseSecondaryRoles, validateUseSecondaryRoles},
+	{reIsDescribe, validateDescribe},
+	{reIsShow, validateShow},
+}
+
 func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
@@ -1607,6 +1711,23 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			}
 		}
 
+		// ── Table-driven dispatch: try each parseTextRoute in order. ──────
+		// Routes with dedicated validator functions are checked first. If a
+		// guard regex matches, the validator runs and we continue to the next
+		// statement. Inline dispatch blocks below handle statements that
+		// require access to loop-local variables (txnDepth, stripped, etc.).
+		routeMatched := false
+		for _, route := range parseTextRoutes {
+			if route.guard.MatchString(parseText) {
+				markers = append(markers, route.fn(parseText, r)...)
+				routeMatched = true
+				break
+			}
+		}
+		if routeMatched {
+			continue
+		}
+
 		// ── Preamble: CREATE VIEW ─────────────────────────────────────────
 		if reIsCreateView.MatchString(parseText) {
 			if !reValidCreateViewPreamble.MatchString(parseText) {
@@ -1724,23 +1845,11 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
-		// ── Preamble: CREATE ICEBERG TABLE ───────────────────────────────
-		if reIsCreateIcebergTable.MatchString(parseText) {
-			markers = append(markers, validateCreateIcebergTable(parseText, r)...)
-			continue
-		}
-
-		// ── Preamble: CREATE HYBRID TABLE ───────────────────────────────
-		if reIsCreateHybridTable.MatchString(parseText) {
-			markers = append(markers, validateCreateHybridTable(parseText, r)...)
-			continue
-		}
-
 		// ── Preamble: CREATE TABLE ────────────────────────────────────────
 		if reIsCreateTable.MatchString(parseText) {
 			// Specific Snowflake Error: OR REPLACE and IF NOT EXISTS are mutually exclusive
-			if reOrReplace.MatchString(parseText) && reIfNotExists.MatchString(parseText) {
-				markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE TABLE statement.", 4))
+			if marker, conflict := checkOrReplaceConflict(parseText, r, "CREATE TABLE"); conflict {
+				markers = append(markers, marker)
 				continue
 			}
 
@@ -1826,12 +1935,6 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
-		// ── Preamble: COPY INTO ──────────────────────────────────────────
-		if reIsCopyInto.MatchString(parseText) {
-			markers = append(markers, validateCopyInto(parseText, r)...)
-			continue
-		}
-
 		// ── Preamble: DROP SEQUENCE ───────────────────────────────────────
 		if reIsDropSeq.MatchString(parseText) {
 			if !reValidDropSeq.MatchString(parseText) {
@@ -1905,9 +2008,8 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 
 		// ── Preamble: CREATE STREAM ──────────────────────────────────────
 		if reIsCreateStream.MatchString(parseText) {
-			if regexp.MustCompile(`(?i)\bOR\s+REPLACE\b`).MatchString(parseText) &&
-				regexp.MustCompile(`(?i)\bIF\s+NOT\s+EXISTS\b`).MatchString(parseText) {
-				markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS modifiers.", 4))
+			if marker, conflict := checkOrReplaceConflict(parseText, r, "CREATE STREAM"); conflict {
+				markers = append(markers, marker)
 				continue
 			}
 
@@ -1917,30 +2019,11 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
-		// ── Preamble: CREATE TASK ────────────────────────────────────────
-		if reIsCreateTask.MatchString(parseText) {
-			markers = append(markers, validateCreateTask(parseText, r)...)
-			continue
-		}
-
-		// ── ALTER TASK ──────────────────────────────────────────────────
-		if reIsAlterTask.MatchString(parseText) {
-			markers = append(markers, validateAlterTask(parseText, r)...)
-			continue
-		}
-
-		// ── Preamble: CREATE ALERT ───────────────────────────────────────
-		if reIsCreateAlert.MatchString(parseText) {
-			markers = append(markers, validateCreateAlert(parseText, r)...)
-			continue
-		}
-
 		// ── Preamble: CREATE PIPE ────────────────────────────────────────
 		if reIsCreatePipe.MatchString(parseText) {
 			// 1. Conflict between OR REPLACE and IF NOT EXISTS
-			if regexp.MustCompile(`(?i)\bOR\s+REPLACE\b`).MatchString(parseText) &&
-				regexp.MustCompile(`(?i)\bIF\s+NOT\s+EXISTS\b`).MatchString(parseText) {
-				markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE PIPE statement.", 4))
+			if marker, conflict := checkOrReplaceConflict(parseText, r, "CREATE PIPE"); conflict {
+				markers = append(markers, marker)
 				continue
 			}
 
@@ -2170,120 +2253,6 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
-		// ── Preamble: CREATE NETWORK POLICY ──────────────────────────────
-		if reIsCreateNetworkPolicy.MatchString(parseText) {
-			markers = append(markers, validateCreateNetworkPolicy(parseText, r)...)
-			continue
-		}
-
-		// ── Preamble: CREATE SESSION POLICY ──────────────────────────────
-		if reIsCreateSessionPolicy.MatchString(parseText) {
-			markers = append(markers, validateCreateSessionPolicy(parseText, r)...)
-			continue
-		}
-
-		// ── Preamble: CREATE PASSWORD POLICY ─────────────────────────────
-		if reIsCreatePasswordPolicy.MatchString(parseText) {
-			markers = append(markers, validateCreatePasswordPolicy(parseText, r)...)
-			continue
-		}
-
-		// ── Preamble: CREATE ROW ACCESS POLICY ───────────────────────────
-		if reIsCreateRowAccessPolicy.MatchString(parseText) {
-			markers = append(markers, validateCreateRowAccessPolicy(parseText, r)...)
-			continue
-		}
-
-		// ── Preamble: CREATE AGGREGATION POLICY ─────────────────────────
-		if reIsCreateAggregationPolicy.MatchString(parseText) {
-			markers = append(markers, validateCreateAggregationPolicy(parseText, r)...)
-			continue
-		}
-
-		// ── Preamble: CREATE PROJECTION POLICY ──────────────────────────
-		if reIsCreateProjectionPolicy.MatchString(parseText) {
-			markers = append(markers, validateCreateProjectionPolicy(parseText, r)...)
-			continue
-		}
-
-		// ── Preamble: ALTER AGGREGATION POLICY ──────────────────────────
-		if reIsAlterAggregationPolicy.MatchString(parseText) {
-			markers = append(markers, validateAlterAggregationOrProjectionPolicy(parseText, r, "AGGREGATION")...)
-			continue
-		}
-
-		// ── Preamble: ALTER PROJECTION POLICY ───────────────────────────
-		if reIsAlterProjectionPolicy.MatchString(parseText) {
-			markers = append(markers, validateAlterAggregationOrProjectionPolicy(parseText, r, "PROJECTION")...)
-			continue
-		}
-
-		// ── Preamble: DROP AGGREGATION POLICY ───────────────────────────
-		if reIsDropAggregationPolicy.MatchString(parseText) {
-			markers = append(markers, validateDropAggregationOrProjectionPolicy(parseText, r, "AGGREGATION")...)
-			continue
-		}
-
-		// ── Preamble: DROP PROJECTION POLICY ────────────────────────────
-		if reIsDropProjectionPolicy.MatchString(parseText) {
-			markers = append(markers, validateDropAggregationOrProjectionPolicy(parseText, r, "PROJECTION")...)
-			continue
-		}
-
-		// ── Preamble: CREATE PACKAGES POLICY ────────────────────────────
-		if reIsCreatePackagesPolicy.MatchString(parseText) {
-			markers = append(markers, validateCreatePackagesPolicy(parseText, r)...)
-			continue
-		}
-
-		// ── Preamble: ALTER PACKAGES POLICY ─────────────────────────────
-		if reIsAlterPackagesPolicy.MatchString(parseText) {
-			markers = append(markers, validateAlterPackagesPolicy(parseText, r)...)
-			continue
-		}
-
-		// ── Preamble: DROP PACKAGES POLICY ──────────────────────────────
-		if reIsDropPackagesPolicy.MatchString(parseText) {
-			markers = append(markers, validateDropPackagesPolicy(parseText, r)...)
-			continue
-		}
-
-		// ── CREATE REPLICATION GROUP ─────────────────────────────────────
-		if reIsCreateReplicationGroup.MatchString(parseText) {
-			markers = append(markers, validateCreateReplicationGroup(parseText, r)...)
-			continue
-		}
-
-		// ── ALTER REPLICATION GROUP ──────────────────────────────────────
-		if reIsAlterReplicationGroup.MatchString(parseText) {
-			markers = append(markers, validateAlterReplicationOrFailoverGroup(parseText, r, "REPLICATION")...)
-			continue
-		}
-
-		// ── DROP REPLICATION GROUP ───────────────────────────────────────
-		if reIsDropReplicationGroup.MatchString(parseText) {
-			markers = append(markers, validateDropReplicationOrFailoverGroup(parseText, r, "REPLICATION")...)
-			continue
-		}
-
-		// ── CREATE FAILOVER GROUP ────────────────────────────────────────
-		if reIsCreateFailoverGroup.MatchString(parseText) {
-			markers = append(markers, validateCreateFailoverGroup(parseText, r)...)
-			continue
-		}
-
-		// ── ALTER FAILOVER GROUP ─────────────────────────────────────────
-		if reIsAlterFailoverGroup.MatchString(parseText) {
-			markers = append(markers, validateAlterReplicationOrFailoverGroup(parseText, r, "FAILOVER")...)
-			continue
-		}
-
-		// ── DROP FAILOVER GROUP ──────────────────────────────────────────
-		if reIsDropFailoverGroup.MatchString(parseText) {
-			markers = append(markers, validateDropReplicationOrFailoverGroup(parseText, r, "FAILOVER")...)
-			continue
-		}
-
 		// ── Preamble: CREATE STAGE ───────────────────────────────────────
 		// stripParenContents removes nested KEY=VALUE pairs inside blocks
 		// like FILE_FORMAT=(...), ENCRYPTION=(...), DIRECTORY=(...) before
@@ -2291,12 +2260,6 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// property 'TYPE'" for FILE_FORMAT=(TYPE='CSV' ...).
 		if reIsCreateStage.MatchString(parseText) {
 			validateProperties(stripParenContents(parseText), stageProps, r, &markers)
-			continue
-		}
-
-		// ── Preamble: CREATE FILE FORMAT ─────────────────────────────────
-		if reIsCreateFileFormat.MatchString(parseText) {
-			markers = append(markers, validateCreateFileFormat(parseText, r)...)
 			continue
 		}
 
@@ -2312,284 +2275,8 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
-		// ── WITH ... AS PROCEDURE (anonymous procedure) ───────────────────
-		if reWithProcAlias.MatchString(parseText) {
-			markers = append(markers, validateWithProcedureCall(parseText, r)...)
-			continue
-		}
-
-		// ── CALL ─────────────────────────────────────────────────────────
-		if reIsCall.MatchString(parseText) {
-			markers = append(markers, validateCall(parseText, r)...)
-			continue
-		}
-
-		// ── GRANT ────────────────────────────────────────────────────────
-		if reIsGrant.MatchString(parseText) {
-			markers = append(markers, validateGrant(parseText, r)...)
-			continue
-		}
-
-		// ── REVOKE ───────────────────────────────────────────────────────
-		if reIsRevoke.MatchString(parseText) {
-			markers = append(markers, validateRevoke(parseText, r)...)
-			continue
-		}
-
-		// ── EXECUTE IMMEDIATE ─────────────────────────────────────────────
-		if reIsExecuteImmediate.MatchString(parseText) {
-			markers = append(markers, validateExecuteImmediate(parseText, r)...)
-			continue
-		}
-
-		// ── EXECUTE TASK ──────────────────────────────────────────────────
-		if reIsExecuteTask.MatchString(parseText) {
-			markers = append(markers, validateExecuteTask(parseText, r)...)
-			continue
-		}
-
-		// ── EXECUTE SERVICE (job service) ─────────────────────────────────
-		if reIsExecuteService.MatchString(parseText) {
-			markers = append(markers, validateExecuteService(parseText, r)...)
-			continue
-		}
-
 		// ── Other EXECUTE forms (EXECUTE ALERT, etc.) — pass through ─────
 		if reIsExecute.MatchString(parseText) {
-			continue
-		}
-
-		// ── PUT ───────────────────────────────────────────────────────────
-		if reIsPut.MatchString(parseText) {
-			markers = append(markers, validatePut(parseText, r)...)
-			continue
-		}
-
-		// ── GET ───────────────────────────────────────────────────────────
-		if reIsGet.MatchString(parseText) {
-			markers = append(markers, validateGet(parseText, r)...)
-			continue
-		}
-
-		// ── LIST / LS ─────────────────────────────────────────────────────
-		if reIsList.MatchString(parseText) {
-			markers = append(markers, validateList(parseText, r)...)
-			continue
-		}
-
-		// ── REMOVE / RM ───────────────────────────────────────────────────
-		if reIsRemove.MatchString(parseText) {
-			markers = append(markers, validateRemove(parseText, r)...)
-			continue
-		}
-
-		// ── CREATE SHARE ─────────────────────────────────────────────────
-		if reIsCreateShare.MatchString(parseText) {
-			markers = append(markers, validateCreateShare(parseText, r)...)
-			continue
-		}
-
-		// ── ALTER SHARE ──────────────────────────────────────────────────
-		if reIsAlterShare.MatchString(parseText) {
-			markers = append(markers, validateAlterShare(parseText, r)...)
-			continue
-		}
-
-		// ── CREATE DATASHARE ────────────────────────────────────────────
-		if reIsCreateDatashare.MatchString(parseText) {
-			markers = append(markers, validateCreateDatashare(parseText, r)...)
-			continue
-		}
-
-		// ── ALTER DATASHARE ─────────────────────────────────────────────
-		if reIsAlterDatashare.MatchString(parseText) {
-			markers = append(markers, validateAlterDatashare(parseText, r)...)
-			continue
-		}
-
-		// ── DROP DATASHARE ──────────────────────────────────────────────
-		if reIsDropDatashare.MatchString(parseText) {
-			markers = append(markers, validateDropDatashare(parseText, r)...)
-			continue
-		}
-
-		// ── CREATE COMPUTE POOL ─────────────────────────────────────────
-		if reIsCreateComputePool.MatchString(parseText) {
-			markers = append(markers, validateCreateComputePool(parseText, r)...)
-			continue
-		}
-
-		// ── CREATE SERVICE ──────────────────────────────────────────────
-		if reIsCreateService.MatchString(parseText) {
-			markers = append(markers, validateCreateService(parseText, r)...)
-			continue
-		}
-
-		// ── ALTER SERVICE ───────────────────────────────────────────────
-		if reIsAlterService.MatchString(parseText) {
-			markers = append(markers, validateAlterService(parseText, r)...)
-			continue
-		}
-
-		// ── DROP SERVICE ────────────────────────────────────────────────
-		if reIsDropService.MatchString(parseText) {
-			markers = append(markers, validateDropService(parseText, r)...)
-			continue
-		}
-
-		// ── CREATE IMAGE REPOSITORY ─────────────────────────────────────
-		if reIsCreateImageRepository.MatchString(parseText) {
-			markers = append(markers, validateCreateImageRepository(parseText, r)...)
-			continue
-		}
-
-		// ── DROP IMAGE REPOSITORY ───────────────────────────────────────
-		if reIsDropImageRepository.MatchString(parseText) {
-			markers = append(markers, validateDropImageRepository(parseText, r)...)
-			continue
-		}
-
-		// ── ALTER IMAGE REPOSITORY ──────────────────────────────────────
-		if reIsAlterImageRepository.MatchString(parseText) {
-			markers = append(markers, validateAlterImageRepository(parseText, r)...)
-			continue
-		}
-
-		// ── CREATE GIT REPOSITORY ──────────────────────────────────────
-		if reIsCreateGitRepository.MatchString(parseText) {
-			markers = append(markers, validateCreateGitRepository(parseText, r)...)
-			continue
-		}
-
-		// ── ALTER GIT REPOSITORY ───────────────────────────────────────
-		if reIsAlterGitRepository.MatchString(parseText) {
-			markers = append(markers, validateAlterGitRepository(parseText, r)...)
-			continue
-		}
-
-		// ── DROP GIT REPOSITORY ────────────────────────────────────────
-		if reIsDropGitRepository.MatchString(parseText) {
-			markers = append(markers, validateDropGitRepository(parseText, r)...)
-			continue
-		}
-
-		// ── CREATE SECRET ──────────────────────────────────────────────
-		if reIsCreateSecret.MatchString(parseText) {
-			markers = append(markers, validateCreateSecret(parseText, r)...)
-			continue
-		}
-
-		// ── ALTER SECRET ───────────────────────────────────────────────
-		if reIsAlterSecret.MatchString(parseText) {
-			markers = append(markers, validateAlterSecret(parseText, r)...)
-			continue
-		}
-
-		// ── CREATE APPLICATION PACKAGE ──────────────────────────────────
-		if reIsCreateApplicationPackage.MatchString(parseText) {
-			markers = append(markers, validateCreateApplicationPackage(parseText, r)...)
-			continue
-		}
-
-		// ── ALTER APPLICATION PACKAGE ───────────────────────────────────
-		if reIsAlterApplicationPackage.MatchString(parseText) {
-			markers = append(markers, validateAlterApplicationPackage(parseText, r)...)
-			continue
-		}
-
-		// ── DROP APPLICATION PACKAGE ────────────────────────────────────
-		if reIsDropApplicationPackage.MatchString(parseText) {
-			markers = append(markers, validateDropApplicationPackage(parseText, r)...)
-			continue
-		}
-
-		// ── CREATE APPLICATION ──────────────────────────────────────────
-		if reIsCreateApplication.MatchString(parseText) {
-			markers = append(markers, validateCreateApplication(parseText, r)...)
-			continue
-		}
-
-		// ── ALTER APPLICATION ───────────────────────────────────────────
-		if reIsAlterApplication.MatchString(parseText) {
-			markers = append(markers, validateAlterApplication(parseText, r)...)
-			continue
-		}
-
-		// ── DROP APPLICATION ────────────────────────────────────────────
-		if reIsDropApplication.MatchString(parseText) {
-			markers = append(markers, validateDropApplication(parseText, r)...)
-			continue
-		}
-
-		// ── CREATE TAG ──────────────────────────────────────────────────
-		if reIsCreateTag.MatchString(parseText) {
-			markers = append(markers, validateCreateTag(parseText, r)...)
-			continue
-		}
-
-		// ── ALTER TAG ───────────────────────────────────────────────────
-		if reIsAlterTag.MatchString(parseText) {
-			markers = append(markers, validateAlterTag(parseText, r)...)
-			continue
-		}
-
-		// ── DROP TAG ────────────────────────────────────────────────────
-		if reIsDropTag.MatchString(parseText) {
-			markers = append(markers, validateDropTag(parseText, r)...)
-			continue
-		}
-
-		// ── CREATE NOTEBOOK ────────────────────────────────────────────
-		if reIsCreateNotebook.MatchString(parseText) {
-			markers = append(markers, validateCreateNotebook(parseText, r)...)
-			continue
-		}
-
-		// ── ALTER NOTEBOOK ─────────────────────────────────────────────
-		if reIsAlterNotebook.MatchString(parseText) {
-			markers = append(markers, validateAlterNotebook(parseText, r)...)
-			continue
-		}
-
-		// ── DROP NOTEBOOK ──────────────────────────────────────────────
-		if reIsDropNotebook.MatchString(parseText) {
-			markers = append(markers, validateDropNotebook(parseText, r)...)
-			continue
-		}
-
-		// ── ALTER SESSION ────────────────────────────────────────────────
-		if reIsAlterSession.MatchString(parseText) {
-			markers = append(markers, validateAlterSession(parseText, r)...)
-			continue
-		}
-
-		// ── CREATE EVENT TABLE ───────────────────────────────────────────
-		if reIsCreateEventTable.MatchString(parseText) {
-			markers = append(markers, validateCreateEventTable(parseText, r)...)
-			continue
-		}
-
-		// ── CREATE EXTERNAL VOLUME ────────────────────────────────────────
-		if reIsCreateExternalVolume.MatchString(parseText) {
-			markers = append(markers, validateCreateExternalVolume(parseText, r)...)
-			continue
-		}
-
-		// ── USE ROLE ─────────────────────────────────────────────────────
-		if reIsUseRole.MatchString(parseText) {
-			markers = append(markers, validateUseRole(parseText, r)...)
-			continue
-		}
-
-		// ── USE WAREHOUSE ────────────────────────────────────────────────
-		if reIsUseWarehouse.MatchString(parseText) {
-			markers = append(markers, validateUseWarehouse(parseText, r)...)
-			continue
-		}
-
-		// ── USE SECONDARY ROLES ──────────────────────────────────────────
-		if reIsUseSecondaryRoles.MatchString(parseText) {
-			markers = append(markers, validateUseSecondaryRoles(parseText, r)...)
 			continue
 		}
 
@@ -2597,18 +2284,6 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// Valid session commands that don't need pattern validation here;
 		// existence checks are handled separately in ValidateTablesExist.
 		if firstTok == "USE" {
-			continue
-		}
-
-		// ── DESCRIBE / DESC ──────────────────────────────────────────────
-		if reIsDescribe.MatchString(parseText) {
-			markers = append(markers, validateDescribe(parseText, r)...)
-			continue
-		}
-
-		// ── SHOW (intercepted before the node-sql-parser) ───────────────
-		if reIsShow.MatchString(parseText) {
-			markers = append(markers, validateShow(parseText, r)...)
 			continue
 		}
 
@@ -2769,6 +2444,48 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 	}
 
 	return markers
+}
+
+// ── Shared validation helpers (DRY) ───────────────────────────────────────────
+
+// cleanParseText strips string literals (replacing them with ''), then removes
+// SQL comments and trims whitespace. The two-step ordering prevents '--' inside
+// quoted strings from being treated as line comments.
+func cleanParseText(s string) string {
+	return strings.TrimSpace(stripCommentsSQL(reStripStringLiterals.ReplaceAllString(s, "''")))
+}
+
+// checkOrReplaceConflict returns a diagnostic and true if both OR REPLACE and
+// IF NOT EXISTS modifiers are present in text. stmtType is included in the
+// message (e.g. "CREATE DATASHARE").
+func checkOrReplaceConflict(text string, r StatementRange, stmtType string) (DiagMarker, bool) {
+	if reOrReplace.MatchString(text) && reIfNotExists.MatchString(text) {
+		return diagMarkerSpan(r,
+			"Conflict between OR REPLACE and IF NOT EXISTS in "+stmtType+" statement.", 4), true
+	}
+	return DiagMarker{}, false
+}
+
+// checkAccountLevelPrefix returns a diagnostic if the SQL identifier path
+// contains a dot outside of double-quoted segments, indicating a database or
+// schema prefix on an account-level object.
+func checkAccountLevelPrefix(name string, r StatementRange, objType string) *DiagMarker {
+	if sqlIdentPathHasDot(name) {
+		m := diagMarkerSpan(r,
+			objType+" are account-level objects and cannot have a database or schema prefix.", 4)
+		return &m
+	}
+	return nil
+}
+
+// checkNameSwallowedByIF detects the case where a regex captures "IF" as the
+// object name because the IF [NOT] EXISTS / IF EXISTS clause consumed the
+// actual name slot. Returns the error marker and true if the name was swallowed.
+func checkNameSwallowedByIF(name string, clean string, r StatementRange, reExists *regexp.Regexp, errMsg string) (DiagMarker, bool) {
+	if strings.EqualFold(name, "IF") && reExists.MatchString(clean) {
+		return diagMarkerSpan(r, errMsg, 4), true
+	}
+	return DiagMarker{}, false
 }
 
 // ── PIVOT / UNPIVOT validation ────────────────────────────────────────────────
@@ -3718,8 +3435,8 @@ func validateCreateAlert(parseText string, r StatementRange) []DiagMarker {
 		preambleToCheck = parseText[:ifIdx[0]]
 	}
 
-	if reOrReplace.MatchString(preambleToCheck) && reIfNotExists.MatchString(preambleToCheck) {
-		markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE ALERT statement.", 4))
+	if marker, conflict := checkOrReplaceConflict(preambleToCheck, r, "CREATE ALERT"); conflict {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -3765,11 +3482,12 @@ func validateCreateNetworkPolicy(parseText string, r StatementRange) []DiagMarke
 	var markers []DiagMarker
 
 	// 1. Account-level: name must not have a database or schema prefix.
-	// sqlIdentPathHasDot is used so that a quoted identifier whose inner text
-	// contains a dot (e.g. "my.policy") is not falsely flagged as a prefix.
+	// checkAccountLevelPrefix uses sqlIdentPathHasDot so that a quoted
+	// identifier whose inner text contains a dot (e.g. "my.policy") is not
+	// falsely flagged as a prefix.
 	if m := reNetworkPolicyName.FindStringSubmatch(parseText); m != nil {
-		if sqlIdentPathHasDot(m[1]) {
-			markers = append(markers, diagMarkerSpan(r, "Network policies are account-level objects and cannot have a database or schema prefix.", 4))
+		if pfx := checkAccountLevelPrefix(m[1], r, "Network policies"); pfx != nil {
+			markers = append(markers, *pfx)
 		}
 	}
 
@@ -3897,8 +3615,8 @@ func validateCreateSessionPolicy(parseText string, r StatementRange) []DiagMarke
 
 	// 1. Account-level: object name must not have a database or schema prefix.
 	if m := reSessionPolicyName.FindStringSubmatch(parseText); m != nil {
-		if sqlIdentPathHasDot(m[1]) {
-			markers = append(markers, diagMarkerSpan(r, "Session policies are account-level objects and cannot have a database or schema prefix.", 4))
+		if pfx := checkAccountLevelPrefix(m[1], r, "Session policies"); pfx != nil {
+			markers = append(markers, *pfx)
 		}
 	}
 
@@ -3929,8 +3647,8 @@ func validateCreatePasswordPolicy(parseText string, r StatementRange) []DiagMark
 
 	// 1. Account-level: object name must not have a database or schema prefix.
 	if m := rePasswordPolicyName.FindStringSubmatch(parseText); m != nil {
-		if sqlIdentPathHasDot(m[1]) {
-			markers = append(markers, diagMarkerSpan(r, "Password policies are account-level objects and cannot have a database or schema prefix.", 4))
+		if pfx := checkAccountLevelPrefix(m[1], r, "Password policies"); pfx != nil {
+			markers = append(markers, *pfx)
 		}
 	}
 
@@ -4011,8 +3729,8 @@ func validateCreateRowAccessPolicy(parseText string, r StatementRange) []DiagMar
 	if asIdx != nil {
 		preamble = parseText[:asIdx[0]]
 	}
-	if reOrReplace.MatchString(preamble) && reIfNotExists.MatchString(preamble) {
-		markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE ROW ACCESS POLICY statement.", 4))
+	if marker, conflict := checkOrReplaceConflict(preamble, r, "CREATE ROW ACCESS POLICY"); conflict {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -4102,8 +3820,8 @@ func validateCreateAggregationPolicy(parseText string, r StatementRange) []DiagM
 	if asIdx != nil {
 		preamble = parseText[:asIdx[0]]
 	}
-	if reOrReplace.MatchString(preamble) && reIfNotExists.MatchString(preamble) {
-		markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE AGGREGATION POLICY statement.", 4))
+	if marker, conflict := checkOrReplaceConflict(preamble, r, "CREATE AGGREGATION POLICY"); conflict {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -4147,8 +3865,8 @@ func validateCreateProjectionPolicy(parseText string, r StatementRange) []DiagMa
 	if asIdx != nil {
 		preamble = parseText[:asIdx[0]]
 	}
-	if reOrReplace.MatchString(preamble) && reIfNotExists.MatchString(preamble) {
-		markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE PROJECTION POLICY statement.", 4))
+	if marker, conflict := checkOrReplaceConflict(preamble, r, "CREATE PROJECTION POLICY"); conflict {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -4217,8 +3935,8 @@ func validateCreatePackagesPolicy(parseText string, r StatementRange) []DiagMark
 	var markers []DiagMarker
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if reOrReplace.MatchString(parseText) && reIfNotExists.MatchString(parseText) {
-		markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE PACKAGES POLICY statement.", 4))
+	if marker, conflict := checkOrReplaceConflict(parseText, r, "CREATE PACKAGES POLICY"); conflict {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -4640,8 +4358,8 @@ func validateCreateIcebergTable(parseText string, r StatementRange) []DiagMarker
 	}
 
 	// Rule: OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE ICEBERG TABLE statement.", 4))
+	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE ICEBERG TABLE"); conflict {
+		markers = append(markers, marker)
 	}
 
 	// Rule: OR REPLACE is not supported for external catalogs.
@@ -4871,8 +4589,8 @@ func validateCreateFileFormat(s string, r StatementRange) []DiagMarker {
 	})
 
 	// Snowflake Rule: OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if reOrReplace.MatchString(strippedS) && reIfNotExists.MatchString(strippedS) {
-		markers = append(markers, diagMarkerSpan(r, "Conflict between OR REPLACE and IF NOT EXISTS in CREATE FILE FORMAT statement.", 4))
+	if marker, conflict := checkOrReplaceConflict(strippedS, r, "CREATE FILE FORMAT"); conflict {
+		markers = append(markers, marker)
 	}
 
 	if reTransient.MatchString(strippedS) {
@@ -5272,9 +4990,8 @@ func validateCreateEventTable(parseText string, r StatementRange) []DiagMarker {
 	clean := reStripStringLiterals.ReplaceAllString(stripped, "''")
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE EVENT TABLE statement.", 4))
+	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE EVENT TABLE"); conflict {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -5335,14 +5052,11 @@ func validateCreateEventTable(parseText string, r StatementRange) []DiagMarker {
 func validateCreateShare(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	// Strip string literals up front so that phrases like "IF NOT EXISTS" or
-	// "OR REPLACE" inside a COMMENT value do not trigger false positive checks.
-	stripped := reStripStringLiterals.ReplaceAllString(parseText, "''")
-
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if reOrReplace.MatchString(stripped) && reIfNotExists.MatchString(stripped) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE SHARE statement.", 4))
+	// Use cleanParseText so that phrases inside COMMENT values or comments
+	// do not trigger false positive checks.
+	if marker, conflict := checkOrReplaceConflict(cleanParseText(parseText), r, "CREATE SHARE"); conflict {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -5352,9 +5066,8 @@ func validateCreateShare(parseText string, r StatementRange) []DiagMarker {
 		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE SHARE statement.", 4))
 		return markers
 	}
-	if sqlIdentPathHasDot(m[1]) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Shares are account-level objects and cannot have a database or schema prefix.", 4))
+	if pfx := checkAccountLevelPrefix(m[1], r, "Shares"); pfx != nil {
+		markers = append(markers, *pfx)
 	}
 
 	// 3. Only COMMENT is a valid property for CREATE SHARE.
@@ -5400,17 +5113,15 @@ func validateCreateExternalVolume(parseText string, r StatementRange) []DiagMark
 	clean := reStripStringLiterals.ReplaceAllString(stripped, "''")
 
 	// 0. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE EXTERNAL VOLUME statement.", 4))
+	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE EXTERNAL VOLUME"); conflict {
+		markers = append(markers, marker)
 		return markers
 	}
 
 	// 1. Account-level: name must not have db.schema prefix.
 	if m := reCreateExternalVolumeName.FindStringSubmatch(parseText); m != nil {
-		if sqlIdentPathHasDot(m[1]) {
-			markers = append(markers, diagMarkerSpan(r,
-				"External volumes are account-level objects and cannot have a database or schema prefix.", 4))
+		if pfx := checkAccountLevelPrefix(m[1], r, "External volumes"); pfx != nil {
+			markers = append(markers, *pfx)
 		}
 	}
 
@@ -5579,15 +5290,14 @@ func validateAlterShare(parseText string, r StatementRange) []DiagMarker {
 
 	// Strip string literals and comments, then trim, so that RESTRICT or
 	// ACCOUNTS inside a COMMENT value or after a trailing line comment cannot
-	// cause false positives. cleanText is also trimmed so the $ anchor in
+	// cause false positives. clean is also trimmed so the $ anchor in
 	// reAlterShareRestrictTrailing reliably targets end-of-statement.
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	cleanText := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
-	hasAddAccounts := reAlterShareAddAccounts.MatchString(cleanText)
-	hasRestrict := reAlterShareRestrictTrailing.MatchString(cleanText)
-	hasAddAcctsEq := reAlterShareAddAcctsEq.MatchString(cleanText)
-	hasAcctList := reAlterShareHasAcctList.MatchString(cleanText)
+	hasAddAccounts := reAlterShareAddAccounts.MatchString(clean)
+	hasRestrict := reAlterShareRestrictTrailing.MatchString(clean)
+	hasAddAcctsEq := reAlterShareAddAcctsEq.MatchString(clean)
+	hasAcctList := reAlterShareHasAcctList.MatchString(clean)
 
 	// RESTRICT is only valid with ADD ACCOUNTS.
 	if hasRestrict && !hasAddAccounts {
@@ -6230,12 +5940,11 @@ func validateDescribe(parseText string, r StatementRange) []DiagMarker {
 func validateCreateTag(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	stripped := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := cleanParseText(parseText)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if reOrReplace.MatchString(stripped) && reIfNotExists.MatchString(stripped) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE TAG statement.", 4))
+	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE TAG"); conflict {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -6247,7 +5956,7 @@ func validateCreateTag(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 3. ALLOWED_VALUES values must be string literals; check for duplicates.
-	if reTagAllowedValues.MatchString(stripped) {
+	if reTagAllowedValues.MatchString(clean) {
 		lm := reTagStringLiteralList.FindStringSubmatch(parseText)
 		if lm == nil {
 			markers = append(markers, diagMarkerSpan(r,
@@ -6310,8 +6019,7 @@ func checkDuplicateAllowedValues(listStr string, r StatementRange) []DiagMarker 
 func validateAlterTag(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	stripped := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(stripped))
+	clean := cleanParseText(parseText)
 
 	// 1. Tag name is required.
 	nm := reAlterTagName.FindStringSubmatch(parseText)
@@ -6399,8 +6107,7 @@ func validateAlterTag(parseText string, r StatementRange) []DiagMarker {
 func validateDropTag(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	stripped := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(stripped))
+	clean := cleanParseText(parseText)
 
 	// 1. Tag name is required.
 	m := reDropTagName.FindStringSubmatch(parseText)
@@ -6436,9 +6143,8 @@ func validateCreateTask(parseText string, r StatementRange) []DiagMarker {
 	stripped := reStripStringLiterals.ReplaceAllString(parseText, "''")
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if reOrReplace.MatchString(stripped) && reIfNotExists.MatchString(stripped) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE TASK statement.", 4))
+	if marker, conflict := checkOrReplaceConflict(stripped, r, "CREATE TASK"); conflict {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -6866,9 +6572,8 @@ func validateCreateReplOrFailoverGroup(parseText string, r StatementRange, group
 			fmt.Sprintf("CREATE %s GROUP requires a group name.", groupType), 4))
 		return markers
 	}
-	if sqlIdentPathHasDot(m[1]) {
-		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("%s groups are account-level objects and cannot have a database or schema prefix.", groupType), 4))
+	if pfx := checkAccountLevelPrefix(m[1], r, groupType+" groups"); pfx != nil {
+		markers = append(markers, *pfx)
 	}
 
 	// 2. OBJECT_TYPES is mandatory.
@@ -6932,9 +6637,8 @@ func validateAlterReplicationOrFailoverGroup(parseText string, r StatementRange,
 			fmt.Sprintf("ALTER %s GROUP requires a group name.", groupType), 4))
 		return markers
 	}
-	if sqlIdentPathHasDot(m[1]) {
-		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("%s groups are account-level objects and cannot have a database or schema prefix.", groupType), 4))
+	if pfx := checkAccountLevelPrefix(m[1], r, groupType+" groups"); pfx != nil {
+		markers = append(markers, *pfx)
 	}
 
 	// 2. Must contain a valid action. Check only the portion after the group
@@ -6992,9 +6696,8 @@ func validateDropReplicationOrFailoverGroup(parseText string, r StatementRange, 
 			fmt.Sprintf("DROP %s GROUP requires a group name.", groupType), 4))
 		return markers
 	}
-	if sqlIdentPathHasDot(m[1]) {
-		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("%s groups are account-level objects and cannot have a database or schema prefix.", groupType), 4))
+	if pfx := checkAccountLevelPrefix(m[1], r, groupType+" groups"); pfx != nil {
+		markers = append(markers, *pfx)
 	}
 
 	return markers
@@ -7016,13 +6719,11 @@ func validateDropReplicationOrFailoverGroup(parseText string, r StatementRange, 
 func validateCreateComputePool(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE COMPUTE POOL statement.", 4))
+	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE COMPUTE POOL"); conflict {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -7032,9 +6733,8 @@ func validateCreateComputePool(parseText string, r StatementRange) []DiagMarker 
 		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE COMPUTE POOL statement.", 4))
 		return markers
 	}
-	if sqlIdentPathHasDot(m[1]) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Compute pools are account-level objects and cannot have a database or schema prefix.", 4))
+	if pfx := checkAccountLevelPrefix(m[1], r, "Compute pools"); pfx != nil {
+		markers = append(markers, *pfx)
 	}
 
 	// 3. Mandatory properties: MIN_NODES, MAX_NODES, INSTANCE_FAMILY.
@@ -7133,13 +6833,11 @@ func validateCreateDatashare(parseText string, r StatementRange) []DiagMarker {
 
 	// Strip string literals first so that stripCommentsSQL cannot be misled
 	// by '--' inside a quoted value (e.g. COMMENT = 'test -- value').
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE DATASHARE statement.", 4))
+	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE DATASHARE"); conflict {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -7149,9 +6847,8 @@ func validateCreateDatashare(parseText string, r StatementRange) []DiagMarker {
 		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE DATASHARE statement.", 4))
 		return markers
 	}
-	if sqlIdentPathHasDot(m[1]) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Datashares are account-level objects and cannot have a database or schema prefix.", 4))
+	if pfx := checkAccountLevelPrefix(m[1], r, "Datashares"); pfx != nil {
+		markers = append(markers, *pfx)
 	}
 
 	// 3. Only COMMENT and SHARE_RESTRICTIONS are valid properties.
@@ -7179,8 +6876,7 @@ func validateCreateDatashare(parseText string, r StatementRange) []DiagMarker {
 func validateAlterDatashare(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
 	// 1. Datashare name is required.
 	m := reAlterDatashareName.FindStringSubmatch(clean)
@@ -7189,9 +6885,8 @@ func validateAlterDatashare(parseText string, r StatementRange) []DiagMarker {
 			"ALTER DATASHARE requires a datashare name.", 4))
 		return markers
 	}
-	if sqlIdentPathHasDot(m[1]) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Datashares are account-level objects and cannot have a database or schema prefix.", 4))
+	if pfx := checkAccountLevelPrefix(m[1], r, "Datashares"); pfx != nil {
+		markers = append(markers, *pfx)
 	}
 
 	// 2. If none of the known actions are present, warn about unknown sub-command.
@@ -7248,8 +6943,7 @@ func validateAlterDatashare(parseText string, r StatementRange) []DiagMarker {
 func validateDropDatashare(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
 	m := reDropDatashareName.FindStringSubmatch(clean)
 	if m == nil {
@@ -7257,9 +6951,8 @@ func validateDropDatashare(parseText string, r StatementRange) []DiagMarker {
 			"DROP DATASHARE requires a datashare name.", 4))
 		return markers
 	}
-	if sqlIdentPathHasDot(m[1]) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Datashares are account-level objects and cannot have a database or schema prefix.", 4))
+	if pfx := checkAccountLevelPrefix(m[1], r, "Datashares"); pfx != nil {
+		markers = append(markers, *pfx)
 	}
 
 	return markers
@@ -7286,9 +6979,8 @@ func validateCreateService(parseText string, r StatementRange) []DiagMarker {
 	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE SERVICE statement.", 4))
+	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE SERVICE"); conflict {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -7507,8 +7199,7 @@ func validateAlterService(parseText string, r StatementRange) []DiagMarker {
 func validateDropService(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
 	m := reDropServiceName.FindStringSubmatch(clean)
 	if m == nil {
@@ -7517,11 +7208,8 @@ func validateDropService(parseText string, r StatementRange) []DiagMarker {
 		return markers
 	}
 	// Guard against "DROP SERVICE IF EXISTS" (no name): the optional
-	// IF\s+EXISTS\s+ group fails (no trailing whitespace+ident), so the
-	// regex captures "IF" as the name. Detect this and flag it.
-	if strings.EqualFold(m[1], "IF") && reDropServiceIfExists.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"DROP SERVICE requires a service name.", 4))
+	if marker, swallowed := checkNameSwallowedByIF(m[1], clean, r, reDropServiceIfExists, "DROP SERVICE requires a service name."); swallowed {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -7539,13 +7227,11 @@ func validateDropService(parseText string, r StatementRange) []DiagMarker {
 func validateCreateImageRepository(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE IMAGE REPOSITORY statement.", 4))
+	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE IMAGE REPOSITORY"); conflict {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -7556,12 +7242,8 @@ func validateCreateImageRepository(parseText string, r StatementRange) []DiagMar
 			"Unexpected syntax in CREATE IMAGE REPOSITORY statement.", 4))
 		return markers
 	}
-	// Guard against "CREATE IMAGE REPOSITORY IF NOT EXISTS" (no name): the
-	// optional IF\s+NOT\s+EXISTS\s+ group fails (no trailing whitespace+ident),
-	// so the regex captures "IF" as the name. Detect this and flag it.
-	if strings.EqualFold(m[1], "IF") && reIfNotExists.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Unexpected syntax in CREATE IMAGE REPOSITORY statement.", 4))
+	if marker, swallowed := checkNameSwallowedByIF(m[1], clean, r, reIfNotExists, "Unexpected syntax in CREATE IMAGE REPOSITORY statement."); swallowed {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -7579,8 +7261,7 @@ func validateCreateImageRepository(parseText string, r StatementRange) []DiagMar
 func validateDropImageRepository(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
 	m := reDropImageRepositoryName.FindStringSubmatch(clean)
 	if m == nil {
@@ -7591,9 +7272,8 @@ func validateDropImageRepository(parseText string, r StatementRange) []DiagMarke
 	// Guard against "DROP IMAGE REPOSITORY IF EXISTS" (no name): the optional
 	// IF\s+EXISTS\s+ group fails (no trailing whitespace+ident), so the
 	// regex captures "IF" as the name. Detect this and flag it.
-	if strings.EqualFold(m[1], "IF") && reDropServiceIfExists.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"DROP IMAGE REPOSITORY requires a repository name.", 4))
+	if marker, swallowed := checkNameSwallowedByIF(m[1], clean, r, reDropServiceIfExists, "DROP IMAGE REPOSITORY requires a repository name."); swallowed {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -7622,13 +7302,11 @@ func validateAlterImageRepository(_ string, r StatementRange) []DiagMarker {
 func validateCreateApplicationPackage(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE APPLICATION PACKAGE statement.", 4))
+	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE APPLICATION PACKAGE"); conflict {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -7639,15 +7317,12 @@ func validateCreateApplicationPackage(parseText string, r StatementRange) []Diag
 			"Unexpected syntax in CREATE APPLICATION PACKAGE statement.", 4))
 		return markers
 	}
-	// Guard against "CREATE APPLICATION PACKAGE IF NOT EXISTS" (no name).
-	if strings.EqualFold(m[1], "IF") && reIfNotExists.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Unexpected syntax in CREATE APPLICATION PACKAGE statement.", 4))
+	if marker, swallowed := checkNameSwallowedByIF(m[1], clean, r, reIfNotExists, "Unexpected syntax in CREATE APPLICATION PACKAGE statement."); swallowed {
+		markers = append(markers, marker)
 		return markers
 	}
-	if sqlIdentPathHasDot(m[1]) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Application packages are account-level objects and cannot have a database or schema prefix.", 4))
+	if pfx := checkAccountLevelPrefix(m[1], r, "Application packages"); pfx != nil {
+		markers = append(markers, *pfx)
 	}
 
 	// 3. DISTRIBUTION must be INTERNAL or EXTERNAL if present.
@@ -7677,8 +7352,7 @@ func validateCreateApplicationPackage(parseText string, r StatementRange) []Diag
 func validateAlterApplicationPackage(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
 	// 1. Package name is required.
 	m := reAlterApplicationPackageName.FindStringSubmatch(clean)
@@ -7720,8 +7394,7 @@ func validateAlterApplicationPackage(parseText string, r StatementRange) []DiagM
 func validateDropApplicationPackage(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
 	m := reDropApplicationPackageName.FindStringSubmatch(clean)
 	if m == nil {
@@ -7729,10 +7402,8 @@ func validateDropApplicationPackage(parseText string, r StatementRange) []DiagMa
 			"DROP APPLICATION PACKAGE requires a package name.", 4))
 		return markers
 	}
-	// Guard against "DROP APPLICATION PACKAGE IF EXISTS" (no name).
-	if strings.EqualFold(m[1], "IF") && reDropServiceIfExists.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"DROP APPLICATION PACKAGE requires a package name.", 4))
+	if marker, swallowed := checkNameSwallowedByIF(m[1], clean, r, reDropServiceIfExists, "DROP APPLICATION PACKAGE requires a package name."); swallowed {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -7752,13 +7423,11 @@ func validateDropApplicationPackage(parseText string, r StatementRange) []DiagMa
 func validateCreateApplication(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE APPLICATION statement.", 4))
+	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE APPLICATION"); conflict {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -7770,14 +7439,12 @@ func validateCreateApplication(parseText string, r StatementRange) []DiagMarker 
 		return markers
 	}
 	// Guard against "CREATE APPLICATION IF NOT EXISTS" (no name).
-	if strings.EqualFold(m[1], "IF") && reIfNotExists.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Unexpected syntax in CREATE APPLICATION statement.", 4))
+	if marker, swallowed := checkNameSwallowedByIF(m[1], clean, r, reIfNotExists, "Unexpected syntax in CREATE APPLICATION statement."); swallowed {
+		markers = append(markers, marker)
 		return markers
 	}
-	if sqlIdentPathHasDot(m[1]) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Applications are account-level objects and cannot have a database or schema prefix.", 4))
+	if pfx := checkAccountLevelPrefix(m[1], r, "Applications"); pfx != nil {
+		markers = append(markers, *pfx)
 	}
 
 	// 3. FROM APPLICATION PACKAGE is mandatory.
@@ -7812,8 +7479,7 @@ func validateCreateApplication(parseText string, r StatementRange) []DiagMarker 
 func validateAlterApplication(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
 	// 1. Application name is required.
 	m := reAlterApplicationName.FindStringSubmatch(clean)
@@ -7858,8 +7524,7 @@ func validateAlterApplication(parseText string, r StatementRange) []DiagMarker {
 func validateDropApplication(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
 	m := reDropApplicationName.FindStringSubmatch(clean)
 	if m == nil {
@@ -7867,10 +7532,8 @@ func validateDropApplication(parseText string, r StatementRange) []DiagMarker {
 			"DROP APPLICATION requires an application name.", 4))
 		return markers
 	}
-	// Guard against "DROP APPLICATION IF EXISTS" (no name).
-	if strings.EqualFold(m[1], "IF") && reDropServiceIfExists.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"DROP APPLICATION requires an application name.", 4))
+	if marker, swallowed := checkNameSwallowedByIF(m[1], clean, r, reDropServiceIfExists, "DROP APPLICATION requires an application name."); swallowed {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -7889,13 +7552,11 @@ func validateDropApplication(parseText string, r StatementRange) []DiagMarker {
 func validateCreateGitRepository(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE GIT REPOSITORY statement.", 4))
+	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE GIT REPOSITORY"); conflict {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -7906,10 +7567,8 @@ func validateCreateGitRepository(parseText string, r StatementRange) []DiagMarke
 			"Unexpected syntax in CREATE GIT REPOSITORY statement.", 4))
 		return markers
 	}
-	// Guard against "CREATE GIT REPOSITORY IF NOT EXISTS" (no name).
-	if strings.EqualFold(m[1], "IF") && reIfNotExists.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Unexpected syntax in CREATE GIT REPOSITORY statement.", 4))
+	if marker, swallowed := checkNameSwallowedByIF(m[1], clean, r, reIfNotExists, "Unexpected syntax in CREATE GIT REPOSITORY statement."); swallowed {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -7958,8 +7617,7 @@ func validateCreateGitRepository(parseText string, r StatementRange) []DiagMarke
 func validateAlterGitRepository(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
 	// 1. Repository name is required.
 	m := reAlterGitRepositoryName.FindStringSubmatch(clean)
@@ -7985,8 +7643,7 @@ func validateAlterGitRepository(parseText string, r StatementRange) []DiagMarker
 func validateDropGitRepository(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
 	m := reDropGitRepositoryName.FindStringSubmatch(clean)
 	if m == nil {
@@ -7995,9 +7652,8 @@ func validateDropGitRepository(parseText string, r StatementRange) []DiagMarker 
 		return markers
 	}
 	// Guard against "DROP GIT REPOSITORY IF EXISTS" (no name).
-	if strings.EqualFold(m[1], "IF") && reDropServiceIfExists.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"DROP GIT REPOSITORY requires a repository name.", 4))
+	if marker, swallowed := checkNameSwallowedByIF(m[1], clean, r, reDropServiceIfExists, "DROP GIT REPOSITORY requires a repository name."); swallowed {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -8068,13 +7724,11 @@ var secretTypedProps = []secretPropDef{
 func validateCreateSecret(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE SECRET statement.", 4))
+	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE SECRET"); conflict {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -8085,10 +7739,8 @@ func validateCreateSecret(parseText string, r StatementRange) []DiagMarker {
 			"Unexpected syntax in CREATE SECRET statement.", 4))
 		return markers
 	}
-	// Guard against "CREATE SECRET IF NOT EXISTS" (no name).
-	if strings.EqualFold(m[1], "IF") && reIfNotExists.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Unexpected syntax in CREATE SECRET statement.", 4))
+	if marker, swallowed := checkNameSwallowedByIF(m[1], clean, r, reIfNotExists, "Unexpected syntax in CREATE SECRET statement."); swallowed {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -8150,8 +7802,7 @@ func validateCreateSecret(parseText string, r StatementRange) []DiagMarker {
 func validateAlterSecret(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
 	// 1. Secret name is required.
 	m := reAlterSecretName.FindStringSubmatch(clean)
@@ -8179,13 +7830,11 @@ func validateAlterSecret(parseText string, r StatementRange) []DiagMarker {
 func validateCreateNotebook(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
 	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
-	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
-		markers = append(markers, diagMarkerSpan(r,
-			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE NOTEBOOK statement.", 4))
+	if marker, conflict := checkOrReplaceConflict(clean, r, "CREATE NOTEBOOK"); conflict {
+		markers = append(markers, marker)
 		return markers
 	}
 
@@ -8216,8 +7865,7 @@ func validateCreateNotebook(parseText string, r StatementRange) []DiagMarker {
 func validateAlterNotebook(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
 	// 1. Notebook name is required.
 	m := reAlterNotebookName.FindStringSubmatch(clean)
@@ -8257,8 +7905,7 @@ func validateAlterNotebook(parseText string, r StatementRange) []DiagMarker {
 func validateDropNotebook(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	stripped := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(stripped))
+	clean := cleanParseText(parseText)
 
 	// 1. Notebook name is required.
 	if reDropNotebookName.FindStringSubmatch(clean) == nil {
@@ -8338,8 +7985,7 @@ func validateAlterTableSearchOptimization(stripped string, r StatementRange) []D
 func validateAlterDynamicTable(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
 	// 1. Table name is required.
 	nm := reAlterDynTableName.FindStringSubmatch(clean)
@@ -8428,8 +8074,7 @@ func validateAlterDynamicTable(parseText string, r StatementRange) []DiagMarker 
 func validateAlterTableSwapWith(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 
-	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	clean := cleanParseText(parseText)
 
 	// 1. Extract source table name.
 	srcMatch := reAlterTableSwapWithName.FindStringSubmatch(clean)
