@@ -55,7 +55,7 @@ var (
 			`|DROP\s+(?:TABLE|VIEW|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|APPLICATION\s+PACKAGE|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY|GIT\s+REPOSITORY)\b` +
 			`|EXECUTE\s+(?:JOB\s+)?SERVICE\b` +
 			`|UNDROP\s+(?:DATABASE|SCHEMA|TABLE)\b` +
-			`|INSERT\s+OVERWRITE\b` +
+			`|INSERT\s+(?:OVERWRITE\s+)?(?:ALL|FIRST)\b` +
 			`|TRUNCATE\s+\S+\s+IF\b` +
 			`|\bLATERAL\s+FLATTEN\b` +
 			`|\bINFER_SCHEMA\b` +
@@ -861,6 +861,22 @@ var (
 	// Valid comparison operators inside MATCH_CONDITION: >=, >, <=, <.
 	// The check logic uses containsAsofValidComparison() instead of a single
 	// regex because Go's regexp package (RE2) does not support lookaheads.
+
+	// ── INSERT ALL / INSERT FIRST / INSERT OVERWRITE ────────────────────
+	// Detection regexes for multi-table INSERT and INSERT OVERWRITE.
+	reIsInsertAll       = regexp.MustCompile(`(?i)^\s*INSERT\s+(?:OVERWRITE\s+)?ALL\b`)
+	reIsInsertFirst     = regexp.MustCompile(`(?i)^\s*INSERT\s+(?:OVERWRITE\s+)?FIRST\b`)
+	reIsInsertOverwrite = regexp.MustCompile(`(?i)^\s*INSERT\s+OVERWRITE\s+INTO\b`)
+	// INSERT OVERWRITE without INTO (e.g. INSERT OVERWRITE t1 ...)
+	reIsInsertOverwriteBare = regexp.MustCompile(`(?i)^\s*INSERT\s+OVERWRITE\b`)
+
+	// Structural patterns used inside the validators.
+	reInsertMultiInto       = regexp.MustCompile(`(?i)\bINTO\b`)
+	reInsertMultiWhen       = regexp.MustCompile(`(?i)\bWHEN\b`)
+	reInsertMultiElse       = regexp.MustCompile(`(?i)\bELSE\b`)
+	reInsertMultiThenInto   = regexp.MustCompile(`(?i)\bTHEN\s+INTO\b`)
+	reInsertMultiTrailingSel = regexp.MustCompile(`(?i)\bSELECT\b`)
+	reInsertOverwriteSource = regexp.MustCompile(`(?i)\b(?:SELECT|VALUES)\b`)
 
 	// ── BEGIN / COMMIT / ROLLBACK / SAVEPOINT / RELEASE SAVEPOINT ────────
 	reIsBegin            = regexp.MustCompile(`(?i)^\s*BEGIN\b`)
@@ -2621,6 +2637,27 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
+		// ── INSERT ALL structural validation ─────────────────────────────
+		// Validate before the FP guard skips the statement.
+		if reIsInsertAll.MatchString(stripped) {
+			markers = append(markers, validateInsertAll(stripped, r)...)
+			continue
+		}
+
+		// ── INSERT FIRST structural validation ───────────────────────────
+		// Validate before the FP guard skips the statement.
+		if reIsInsertFirst.MatchString(stripped) {
+			markers = append(markers, validateInsertFirst(stripped, r)...)
+			continue
+		}
+
+		// ── INSERT OVERWRITE structural validation ───────────────────────
+		// Validate before the FP guard skips the statement.
+		if reIsInsertOverwriteBare.MatchString(stripped) {
+			markers = append(markers, validateInsertOverwrite(stripped, r)...)
+			continue
+		}
+
 		// ── PIVOT / UNPIVOT structural validation ────────────────────────
 		// Validate before the FP guard skips the statement.
 		if rePivotClause.MatchString(stripped) {
@@ -2999,6 +3036,197 @@ func hasUsingClause(scope string, hasUsingFunction bool) bool {
 		}
 	}
 	return false
+}
+
+// ── INSERT ALL / INSERT FIRST / INSERT OVERWRITE validation ───────────────────
+
+// validateInsertAll validates INSERT [OVERWRITE] ALL statements.
+// Rules:
+//   - At least one INTO clause is required
+//   - If WHEN branches are present, at least one is required (ELSE alone is invalid)
+//   - Each WHEN branch must contain a THEN INTO
+//   - A trailing SELECT is mandatory
+func validateInsertAll(stripped string, r StatementRange) []DiagMarker {
+	return validateInsertMultiTable("ALL", stripped, r)
+}
+
+// validateInsertFirst validates INSERT [OVERWRITE] FIRST statements.
+// Rules:
+//   - At least one WHEN branch is required (INSERT FIRST always requires conditions)
+//   - Each WHEN branch must contain a THEN INTO
+//   - A trailing SELECT is mandatory
+func validateInsertFirst(stripped string, r StatementRange) []DiagMarker {
+	return validateInsertMultiTable("FIRST", stripped, r)
+}
+
+// validateInsertMultiTable is the shared implementation for INSERT ALL and
+// INSERT FIRST validation.
+func validateInsertMultiTable(keyword string, stripped string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	clean := strings.TrimSpace(reStripStringLiterals.ReplaceAllString(stripped, "''"))
+	upper := strings.ToUpper(clean)
+
+	hasWhen := reInsertMultiWhen.MatchString(clean)
+	hasElse := reInsertMultiElse.MatchString(clean)
+	hasInto := reInsertMultiInto.MatchString(clean)
+
+	// Determine if this is a conditional form (has WHEN or ELSE) or
+	// unconditional (bare INSERT ALL INTO ... INTO ... SELECT).
+	isConditional := hasWhen || hasElse
+
+	if keyword == "FIRST" {
+		// INSERT FIRST always requires WHEN branches.
+		if !hasWhen {
+			markers = append(markers, diagMarkerSpan(r,
+				"INSERT FIRST requires at least one WHEN branch. Use WHEN <condition> THEN INTO <table>.", 4))
+			return markers
+		}
+	}
+
+	if isConditional {
+		// Conditional form: require at least one WHEN (ELSE alone is invalid).
+		if !hasWhen {
+			markers = append(markers, diagMarkerSpan(r,
+				"INSERT "+keyword+" requires at least one WHEN branch when using conditional insert. Use WHEN <condition> THEN INTO <table>.", 4))
+			return markers
+		}
+
+		// Each WHEN must have a THEN INTO.
+		whenLocs := reInsertMultiWhen.FindAllStringIndex(upper, -1)
+		for i, loc := range whenLocs {
+			end := len(upper)
+			if i+1 < len(whenLocs) {
+				end = whenLocs[i+1][0]
+			}
+			// Also stop at ELSE
+			if elseLoc := reInsertMultiElse.FindStringIndex(upper[loc[1]:]); elseLoc != nil {
+				elseAbsPos := loc[1] + elseLoc[0]
+				if elseAbsPos < end {
+					end = elseAbsPos
+				}
+			}
+			// Also stop at trailing SELECT
+			clause := upper[loc[0]:end]
+			if !reInsertMultiThenInto.MatchString(clause) {
+				markers = append(markers, diagMarkerSpan(r,
+					"WHEN branch must contain INTO clause. Use WHEN <condition> THEN INTO <table>.", 4))
+			}
+		}
+	} else {
+		// Unconditional form: require at least one INTO.
+		if !hasInto {
+			markers = append(markers, diagMarkerSpan(r,
+				"INSERT "+keyword+" requires at least one INTO clause.", 4))
+			return markers
+		}
+	}
+
+	// Trailing SELECT is mandatory for all multi-table inserts.
+	// Find the last top-level SELECT (not inside parenthesized subqueries).
+	if !hasTrailingTopLevelSelect(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"INSERT "+keyword+" requires a source SELECT at the end of the statement.", 4))
+	}
+
+	return markers
+}
+
+// validateInsertOverwrite validates INSERT OVERWRITE INTO statements.
+// Rules:
+//   - INTO is required after OVERWRITE (bare INSERT OVERWRITE <table> is invalid)
+//   - A source SELECT or VALUES is required
+func validateInsertOverwrite(stripped string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	clean := strings.TrimSpace(reStripStringLiterals.ReplaceAllString(stripped, "''"))
+
+	// If this is actually INSERT OVERWRITE ALL or INSERT OVERWRITE FIRST,
+	// those are handled by validateInsertAll/validateInsertFirst.
+	if reIsInsertAll.MatchString(clean) || reIsInsertFirst.MatchString(clean) {
+		return nil
+	}
+
+	if !reIsInsertOverwrite.MatchString(clean) {
+		// INSERT OVERWRITE without INTO
+		markers = append(markers, diagMarkerSpan(r,
+			"INSERT OVERWRITE requires INTO. Use INSERT OVERWRITE INTO <table>.", 4))
+		return markers
+	}
+
+	// Check for a source: SELECT or VALUES must appear.
+	// Remove the INSERT OVERWRITE INTO <table> prefix first to avoid matching
+	// the INTO keyword itself.
+	afterPrefix := regexp.MustCompile(`(?i)^\s*INSERT\s+OVERWRITE\s+INTO\s+` + _identPath).
+		ReplaceAllString(clean, "")
+	// Strip optional column list
+	afterPrefix = strings.TrimSpace(afterPrefix)
+	if strings.HasPrefix(afterPrefix, "(") {
+		if endIdx := findMatchingParen(afterPrefix); endIdx > 0 {
+			afterPrefix = strings.TrimSpace(afterPrefix[endIdx+1:])
+		}
+	}
+	if !reInsertOverwriteSource.MatchString(afterPrefix) {
+		markers = append(markers, diagMarkerSpan(r,
+			"INSERT OVERWRITE INTO requires a source SELECT or VALUES clause.", 4))
+	}
+
+	return markers
+}
+
+// hasTrailingTopLevelSelect checks whether the statement has a SELECT keyword
+// at the top level (not inside parenthesized subqueries) that appears after
+// all INTO clauses.
+func hasTrailingTopLevelSelect(s string) bool {
+	upper := strings.ToUpper(s)
+	depth := 0
+	lastTopSelectPos := -1
+	for i := 0; i < len(upper); i++ {
+		switch upper[i] {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case 'S':
+			if depth == 0 && i+6 <= len(upper) && upper[i:i+6] == "SELECT" {
+				// Check word boundaries.
+				if i > 0 && isWordChar(rune(upper[i-1])) {
+					continue
+				}
+				if i+6 < len(upper) && isWordChar(rune(upper[i+6])) {
+					continue
+				}
+				lastTopSelectPos = i
+			}
+		}
+	}
+	if lastTopSelectPos < 0 {
+		return false
+	}
+	// The SELECT must appear after the last top-level INTO.
+	lastIntoPos := -1
+	depth = 0
+	for i := 0; i < len(upper); i++ {
+		switch upper[i] {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case 'I':
+			if depth == 0 && i+4 <= len(upper) && upper[i:i+4] == "INTO" {
+				if i > 0 && isWordChar(rune(upper[i-1])) {
+					continue
+				}
+				if i+4 < len(upper) && isWordChar(rune(upper[i+4])) {
+					continue
+				}
+				lastIntoPos = i
+			}
+		}
+	}
+	return lastTopSelectPos > lastIntoPos
 }
 
 // findTopLevelMatches returns all matches of re in s that are not inside
