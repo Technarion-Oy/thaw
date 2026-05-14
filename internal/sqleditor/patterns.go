@@ -620,7 +620,7 @@ var (
 	// for the "unknown sub-command" guard. reAlterServiceSetBare matches bare
 	// SET (with any property) so we can distinguish "unknown property within SET"
 	// from "unknown sub-command entirely".
-	reAlterServiceAction      = regexp.MustCompile(`(?i)\b(?:SUSPEND|RESUME|SET\s+(?:MIN_INSTANCES|MAX_INSTANCES|COMMENT|QUERY_WAREHOUSE)|UNSET\s+(?:COMMENT|QUERY_WAREHOUSE)|FROM\s+SPECIFICATION)\b`)
+	reAlterServiceAction      = regexp.MustCompile(`(?i)\b(?:SUSPEND|RESUME|SET\s+(?:MIN_INSTANCES|MAX_INSTANCES|COMMENT|QUERY_WAREHOUSE)|UNSET\s+(?:COMMENT|QUERY_WAREHOUSE|MIN_INSTANCES|MAX_INSTANCES)|FROM\s+SPECIFICATION(?:_FILE)?)\b`)
 	reAlterServiceSetBare     = regexp.MustCompile(`(?i)\bSET\s+\w+`)
 	reAlterServiceUnsetBare   = regexp.MustCompile(`(?i)\bUNSET\s+\w+`)
 
@@ -6375,7 +6375,7 @@ func validateExecuteService(parseText string, r StatementRange) []DiagMarker {
 	// 5. Only known properties are accepted.
 	noComments := strings.TrimSpace(stripCommentsSQL(noDollar))
 	validateProperties(noComments,
-		`EXTERNAL_ACCESS_INTEGRATIONS|QUERY_WAREHOUSE|COMMENT|SPECIFICATION_FILE`,
+		`EXTERNAL_ACCESS_INTEGRATIONS|QUERY_WAREHOUSE|COMMENT|SPECIFICATION_FILE|MIN_INSTANCES|MAX_INSTANCES`,
 		r, &markers)
 
 	return markers
@@ -6413,7 +6413,7 @@ func validateAlterService(parseText string, r StatementRange) []DiagMarker {
 				"Unknown property in ALTER SERVICE SET. Valid properties: MIN_INSTANCES, MAX_INSTANCES, COMMENT, QUERY_WAREHOUSE.", 4))
 		} else if reAlterServiceUnsetBare.MatchString(clean) {
 			markers = append(markers, diagMarkerSpan(r,
-				"Unknown property in ALTER SERVICE UNSET. Valid properties: COMMENT, QUERY_WAREHOUSE.", 4))
+				"Unknown property in ALTER SERVICE UNSET. Valid properties: COMMENT, QUERY_WAREHOUSE, MIN_INSTANCES, MAX_INSTANCES.", 4))
 		} else {
 			markers = append(markers, diagMarkerSpan(r,
 				"Unknown ALTER SERVICE sub-command. Expected SUSPEND, RESUME, SET, UNSET, or FROM SPECIFICATION.", 4))
