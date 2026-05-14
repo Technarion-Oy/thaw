@@ -5449,6 +5449,14 @@ func TestValidateSnowflakePatterns_Secret(t *testing.T) {
 		"CREATE SECRET my_secret TYPE = GENERIC_STRING SECRET_STRING = 'some-api-key-value'",
 		// -- PASS: CREATE SECRET TYPE = GENERIC_STRING with COMMENT
 		"CREATE SECRET my_secret TYPE = GENERIC_STRING SECRET_STRING = 'abc123' COMMENT = 'api key'",
+		// -- PASS: CREATE SECRET TYPE = CLOUD_PROVIDER_TOKEN with API_AUTHENTICATION
+		"CREATE SECRET my_secret TYPE = CLOUD_PROVIDER_TOKEN API_AUTHENTICATION = my_int",
+		// -- PASS: CREATE SECRET TYPE = CLOUD_PROVIDER_TOKEN with ENABLED
+		"CREATE SECRET my_secret TYPE = CLOUD_PROVIDER_TOKEN API_AUTHENTICATION = my_int ENABLED = TRUE",
+		// -- PASS: CREATE SECRET TYPE = SYMMETRIC_KEY with ALGORITHM
+		"CREATE SECRET my_secret TYPE = SYMMETRIC_KEY ALGORITHM = 'AES-256'",
+		// -- PASS: CREATE SECRET TYPE = SYMMETRIC_KEY with COMMENT
+		"CREATE SECRET my_secret TYPE = SYMMETRIC_KEY ALGORITHM = 'AES-256' COMMENT = 'encryption key'",
 		// -- PASS: OR REPLACE variant
 		"CREATE OR REPLACE SECRET my_secret TYPE = PASSWORD USERNAME = 'u' PASSWORD = 'p'",
 		// -- PASS: IF NOT EXISTS variant
@@ -5466,12 +5474,20 @@ func TestValidateSnowflakePatterns_Secret(t *testing.T) {
 		"ALTER SECRET my_secret SET USERNAME = 'new_user' PASSWORD = 'new_pass'",
 		// -- PASS: ALTER SECRET SET for OAUTH2
 		"ALTER SECRET my_secret SET OAUTH_REFRESH_TOKEN = 'new_token' OAUTH_REFRESH_TOKEN_EXPIRY_TIME = '2026-01-01 00:00:00'",
+		// -- PASS: ALTER SECRET SET OAUTH_SCOPES
+		"ALTER SECRET my_secret SET OAUTH_SCOPES = ('scope1', 'scope2')",
+		// -- PASS: ALTER SECRET SET API_AUTHENTICATION
+		"ALTER SECRET my_secret SET API_AUTHENTICATION = new_int",
 		// -- PASS: ALTER SECRET SET COMMENT
 		"ALTER SECRET my_secret SET COMMENT = 'updated'",
 		// -- PASS: ALTER SECRET UNSET COMMENT
 		"ALTER SECRET my_secret UNSET COMMENT",
 		// -- PASS: ALTER SECRET with three-part name
 		"ALTER SECRET db.schema.my_secret SET COMMENT = 'updated'",
+		// -- PASS: ALTER SECRET IF EXISTS
+		"ALTER SECRET IF EXISTS my_secret SET COMMENT = 'updated'",
+		// -- PASS: ALTER SECRET IF EXISTS with three-part name
+		"ALTER SECRET IF EXISTS db.schema.my_secret SET SECRET_STRING = 'new_val'",
 	}
 
 	for _, sql := range validCases {
@@ -5551,6 +5567,18 @@ func TestValidateSnowflakePatterns_Secret(t *testing.T) {
 			"CREATE SECRET my_secret TYPE = GENERIC_STRING",
 			[]string{"TYPE = GENERIC_STRING requires SECRET_STRING"},
 		},
+		// -- FAIL: TYPE = CLOUD_PROVIDER_TOKEN missing API_AUTHENTICATION
+		{
+			"CREATE SECRET CLOUD_PROVIDER_TOKEN missing API_AUTHENTICATION",
+			"CREATE SECRET my_secret TYPE = CLOUD_PROVIDER_TOKEN",
+			[]string{"TYPE = CLOUD_PROVIDER_TOKEN requires API_AUTHENTICATION"},
+		},
+		// -- FAIL: TYPE = SYMMETRIC_KEY missing ALGORITHM
+		{
+			"CREATE SECRET SYMMETRIC_KEY missing ALGORITHM",
+			"CREATE SECRET my_secret TYPE = SYMMETRIC_KEY",
+			[]string{"TYPE = SYMMETRIC_KEY requires ALGORITHM"},
+		},
 		// -- FAIL: USERNAME on OAUTH2 type (wrong type property)
 		{
 			"CREATE SECRET OAUTH2 with USERNAME",
@@ -5568,6 +5596,12 @@ func TestValidateSnowflakePatterns_Secret(t *testing.T) {
 			"CREATE SECRET GENERIC_STRING with API_AUTHENTICATION",
 			"CREATE SECRET my_secret TYPE = GENERIC_STRING SECRET_STRING = 'abc' API_AUTHENTICATION = my_int",
 			[]string{"API_AUTHENTICATION is not valid for TYPE = GENERIC_STRING"},
+		},
+		// -- FAIL: USERNAME on SYMMETRIC_KEY type (wrong type property)
+		{
+			"CREATE SECRET SYMMETRIC_KEY with USERNAME",
+			"CREATE SECRET my_secret TYPE = SYMMETRIC_KEY ALGORITHM = 'AES-256' USERNAME = 'u'",
+			[]string{"USERNAME is not valid for TYPE = SYMMETRIC_KEY"},
 		},
 		// -- FAIL: Unexpected property
 		{

@@ -649,16 +649,18 @@ var (
 	reDropGitRepositoryName   = regexp.MustCompile(`(?i)^\s*DROP\s+GIT\s+REPOSITORY\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
 
 	// ── CREATE / ALTER SECRET ─────────────────────────────────────────────
-	reIsCreateSecret   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SECRET\b`)
-	reCreateSecretName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SECRET\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-	reSecretType       = regexp.MustCompile(`(?i)\bTYPE\s*=\s*([\w]+)`)
-	reSecretAPIA       = regexp.MustCompile(`(?i)\bAPI_AUTHENTICATION\s*=\s*` + _ident)
-	reSecretUsername    = regexp.MustCompile(`(?i)\bUSERNAME\s*=`)
-	reSecretPassword   = regexp.MustCompile(`(?i)\bPASSWORD\s*=`)
-	reSecretString     = regexp.MustCompile(`(?i)\bSECRET_STRING\s*=`)
-	reIsAlterSecret    = regexp.MustCompile(`(?i)^\s*ALTER\s+SECRET\b`)
-	reAlterSecretName  = regexp.MustCompile(`(?i)^\s*ALTER\s+SECRET\s+(` + _identPath + `)`)
-	reAlterSecretAction = regexp.MustCompile(`(?i)\b(?:SET\s+(?:SECRET_STRING|USERNAME|PASSWORD|OAUTH_REFRESH_TOKEN|OAUTH_REFRESH_TOKEN_EXPIRY_TIME|COMMENT)|UNSET\s+COMMENT)\b`)
+	reIsCreateSecret    = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SECRET\b`)
+	reCreateSecretName  = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SECRET\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
+	reSecretType        = regexp.MustCompile(`(?i)\bTYPE\s*=\s*([\w]+)`)
+	reSecretAPIA        = regexp.MustCompile(`(?i)\bAPI_AUTHENTICATION\s*=\s*` + _ident)
+	reSecretUsername     = regexp.MustCompile(`(?i)\bUSERNAME\s*=`)
+	reSecretPassword    = regexp.MustCompile(`(?i)\bPASSWORD\s*=`)
+	reSecretString      = regexp.MustCompile(`(?i)\bSECRET_STRING\s*=`)
+	reSecretEnabled     = regexp.MustCompile(`(?i)\bENABLED\s*=`)
+	reSecretAlgorithm   = regexp.MustCompile(`(?i)\bALGORITHM\s*=`)
+	reIsAlterSecret     = regexp.MustCompile(`(?i)^\s*ALTER\s+SECRET\b`)
+	reAlterSecretName   = regexp.MustCompile(`(?i)^\s*ALTER\s+SECRET\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
+	reAlterSecretAction = regexp.MustCompile(`(?i)\b(?:SET\s+(?:SECRET_STRING|USERNAME|PASSWORD|OAUTH_REFRESH_TOKEN|OAUTH_REFRESH_TOKEN_EXPIRY_TIME|OAUTH_SCOPES|API_AUTHENTICATION|COMMENT)|UNSET\s+COMMENT)\b`)
 
 	// ── CREATE / ALTER / DROP APPLICATION PACKAGE (Native Apps) ────────────
 	reIsCreateApplicationPackage   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?APPLICATION\s+PACKAGE\b`)
@@ -7121,10 +7123,12 @@ func validateDropGitRepository(parseText string, r StatementRange) []DiagMarker 
 // CREATE [OR REPLACE] SECRET [IF NOT EXISTS] <name> statements:
 //   - OR REPLACE and IF NOT EXISTS are mutually exclusive.
 //   - Schema-level object: three-part names (db.schema.name) are valid.
-//   - TYPE is mandatory; must be OAUTH2, PASSWORD, or GENERIC_STRING.
+//   - TYPE is mandatory; must be OAUTH2, PASSWORD, GENERIC_STRING, CLOUD_PROVIDER_TOKEN, or SYMMETRIC_KEY.
 //   - TYPE = OAUTH2 requires API_AUTHENTICATION.
 //   - TYPE = PASSWORD requires USERNAME and PASSWORD.
 //   - TYPE = GENERIC_STRING requires SECRET_STRING.
+//   - TYPE = CLOUD_PROVIDER_TOKEN requires API_AUTHENTICATION.
+//   - TYPE = SYMMETRIC_KEY requires ALGORITHM.
 //   - Properties belonging to a different TYPE are flagged.
 func validateCreateSecret(parseText string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
@@ -7157,13 +7161,13 @@ func validateCreateSecret(parseText string, r StatementRange) []DiagMarker {
 	typeMatch := reSecretType.FindStringSubmatch(clean)
 	if typeMatch == nil {
 		markers = append(markers, diagMarkerSpan(r,
-			"CREATE SECRET requires TYPE = OAUTH2 | PASSWORD | GENERIC_STRING.", 4))
+			"CREATE SECRET requires TYPE = OAUTH2 | PASSWORD | GENERIC_STRING | CLOUD_PROVIDER_TOKEN | SYMMETRIC_KEY.", 4))
 		return markers
 	}
 
 	secretType := strings.ToUpper(typeMatch[1])
 
-	// 4. Validate TYPE value.
+	// 4. Validate TYPE value and type-specific properties.
 	switch secretType {
 	case "OAUTH2":
 		// API_AUTHENTICATION is mandatory.
@@ -7225,25 +7229,69 @@ func validateCreateSecret(parseText string, r StatementRange) []DiagMarker {
 				"PASSWORD is not valid for TYPE = GENERIC_STRING. PASSWORD belongs to TYPE = PASSWORD.", 4))
 		}
 
+	case "CLOUD_PROVIDER_TOKEN":
+		// API_AUTHENTICATION is mandatory.
+		if !reSecretAPIA.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"TYPE = CLOUD_PROVIDER_TOKEN requires API_AUTHENTICATION = <security_integration_name>.", 4))
+		}
+		// Cross-type property checks.
+		if reSecretUsername.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"USERNAME is not valid for TYPE = CLOUD_PROVIDER_TOKEN. USERNAME belongs to TYPE = PASSWORD.", 4))
+		}
+		if reSecretPassword.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"PASSWORD is not valid for TYPE = CLOUD_PROVIDER_TOKEN. PASSWORD belongs to TYPE = PASSWORD.", 4))
+		}
+		if reSecretString.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"SECRET_STRING is not valid for TYPE = CLOUD_PROVIDER_TOKEN. SECRET_STRING belongs to TYPE = GENERIC_STRING.", 4))
+		}
+
+	case "SYMMETRIC_KEY":
+		// ALGORITHM is mandatory.
+		if !reSecretAlgorithm.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"TYPE = SYMMETRIC_KEY requires ALGORITHM = '<algorithm>'.", 4))
+		}
+		// Cross-type property checks.
+		if reSecretAPIA.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"API_AUTHENTICATION is not valid for TYPE = SYMMETRIC_KEY. API_AUTHENTICATION belongs to TYPE = OAUTH2.", 4))
+		}
+		if reSecretUsername.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"USERNAME is not valid for TYPE = SYMMETRIC_KEY. USERNAME belongs to TYPE = PASSWORD.", 4))
+		}
+		if reSecretPassword.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"PASSWORD is not valid for TYPE = SYMMETRIC_KEY. PASSWORD belongs to TYPE = PASSWORD.", 4))
+		}
+		if reSecretString.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"SECRET_STRING is not valid for TYPE = SYMMETRIC_KEY. SECRET_STRING belongs to TYPE = GENERIC_STRING.", 4))
+		}
+
 	default:
 		markers = append(markers, diagMarkerSpan(r,
-			fmt.Sprintf("Unknown TYPE '%s'. Valid types: OAUTH2, PASSWORD, GENERIC_STRING.", typeMatch[1]), 4))
+			fmt.Sprintf("Unknown TYPE '%s'. Valid types: OAUTH2, PASSWORD, GENERIC_STRING, CLOUD_PROVIDER_TOKEN, SYMMETRIC_KEY.", typeMatch[1]), 4))
 		return markers
 	}
 
 	// 5. Only known properties are accepted.
-	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
-	validateProperties(noComments, `TYPE|API_AUTHENTICATION|OAUTH_SCOPES|OAUTH_REFRESH_TOKEN|OAUTH_REFRESH_TOKEN_EXPIRY_TIME|USERNAME|PASSWORD|SECRET_STRING|COMMENT`, r, &markers)
+	validateProperties(parseText, `TYPE|API_AUTHENTICATION|OAUTH_SCOPES|OAUTH_REFRESH_TOKEN|OAUTH_REFRESH_TOKEN_EXPIRY_TIME|USERNAME|PASSWORD|SECRET_STRING|ENABLED|ALGORITHM|COMMENT`, r, &markers)
 
 	return markers
 }
 
 // ── validateAlterSecret ──────────────────────────────────────────────────────
 
-// validateAlterSecret checks structural requirements for ALTER SECRET:
+// validateAlterSecret checks structural requirements for ALTER SECRET [IF EXISTS]:
 //   - Secret name is required.
 //   - SET SECRET_STRING / USERNAME / PASSWORD / OAUTH_REFRESH_TOKEN /
-//     OAUTH_REFRESH_TOKEN_EXPIRY_TIME / COMMENT are valid SET targets.
+//     OAUTH_REFRESH_TOKEN_EXPIRY_TIME / OAUTH_SCOPES / API_AUTHENTICATION /
+//     COMMENT are valid SET targets.
 //   - UNSET COMMENT is a valid UNSET target.
 //   - Unknown sub-commands warn.
 func validateAlterSecret(parseText string, r StatementRange) []DiagMarker {
