@@ -871,8 +871,9 @@ var (
 	reSearchOptOnClause = regexp.MustCompile(
 		`(?i)\bSEARCH\s+OPTIMIZATION\s+ON\b`)
 	// Extracts individual expression-type calls: EQUALITY(...), SUBSTRING(...), etc.
+	// Anchored to start-of-expression since input is pre-split by splitTopLevelCommas.
 	reSearchOptExpr = regexp.MustCompile(
-		`(?i)\b([A-Z_]+)\s*\(`)
+		`(?i)^\s*([A-Z_]+)\s*\(`)
 	// Valid search optimization expression types.
 	searchOptValidExprs = map[string]bool{
 		"EQUALITY":  true,
@@ -2678,6 +2679,7 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// Validate before the FP guard skips the statement.
 		if reIsAlterTableSearchOpt.MatchString(stripped) {
 			markers = append(markers, validateAlterTableSearchOptimization(stripped, r)...)
+			continue
 		}
 
 		// ── PIVOT / UNPIVOT structural validation ────────────────────────

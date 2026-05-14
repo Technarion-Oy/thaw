@@ -6883,6 +6883,10 @@ func TestValidateSnowflakePatterns_AlterTableSearchOptimization(t *testing.T) {
 			// Case insensitive
 			"ALTER TABLE t ADD search optimization ON equality(c1)",
 			"alter table t add search optimization on substring(c1), geo(c2)",
+			// With trailing semicolons / whitespace
+			"ALTER TABLE t ADD SEARCH OPTIMIZATION;",
+			"ALTER TABLE t ADD SEARCH OPTIMIZATION ON EQUALITY(c1);",
+			"ALTER TABLE t DROP SEARCH OPTIMIZATION ON SUBSTRING(c1), GEO(c2);  ",
 		}
 		for _, sql := range validQueries {
 			t.Run(sql, func(t *testing.T) {
