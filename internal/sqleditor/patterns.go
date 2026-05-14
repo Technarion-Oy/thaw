@@ -48,11 +48,12 @@ var (
 		`(?i)\bTABLESAMPLE\b|\bSAMPLE\s*\(|\bWITHIN\s+GROUP\b|\bCONNECT\s+BY\b` +
 			`|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b` +
 			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:STAGE` +
-			`|REPLICATION|FAILOVER|APPLICATION|DATASHARE)\b` +
+			`|REPLICATION|FAILOVER|APPLICATION|DATASHARE|SERVICE)\b` +
 			`|ALTER\s+(?:TABLE|VIEW|STREAM|DATABASE|STAGE|PIPE|PROCEDURE|FUNCTION` +
 			`|ALERT|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK` +
-			`|REPLICATION|FAILOVER|DATASHARE)\b` +
-			`|DROP\s+(?:TABLE|VIEW|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|DATASHARE)\b` +
+			`|REPLICATION|FAILOVER|DATASHARE|SERVICE)\b` +
+			`|DROP\s+(?:TABLE|VIEW|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|DATASHARE|SERVICE)\b` +
+			`|EXECUTE\s+(?:JOB\s+)?SERVICE\b` +
 			`|UNDROP\s+(?:DATABASE|SCHEMA|TABLE)\b` +
 			`|INSERT\s+OVERWRITE\b` +
 			`|TRUNCATE\s+\S+\s+IF\b` +
@@ -599,6 +600,34 @@ var (
 	reComputePoolMaxNodes       = regexp.MustCompile(`(?i)\bMAX_NODES\s*=\s*(-?\d+)`)
 	reComputePoolInstanceFamily = regexp.MustCompile(`(?i)\bINSTANCE_FAMILY\s*=\s*([a-zA-Z0-9_]+)`)
 	reComputePoolAutoSuspend    = regexp.MustCompile(`(?i)\bAUTO_SUSPEND_SECS\s*=\s*(-?\d+)`)
+
+	// ── CREATE / EXECUTE / ALTER / DROP SERVICE (SPCS) ────────────────────
+	reIsCreateService   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SERVICE\b`)
+	reCreateServiceName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SERVICE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
+	reIsExecuteService  = regexp.MustCompile(`(?i)^\s*EXECUTE\s+(?:JOB\s+)?SERVICE\b`)
+	reExecuteServiceName = regexp.MustCompile(`(?i)^\s*EXECUTE\s+(?:JOB\s+)?SERVICE\s+(` + _identPath + `)`)
+	reIsAlterService    = regexp.MustCompile(`(?i)^\s*ALTER\s+SERVICE\b`)
+	reAlterServiceName  = regexp.MustCompile(`(?i)^\s*ALTER\s+SERVICE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
+	reIsDropService        = regexp.MustCompile(`(?i)^\s*DROP\s+SERVICE\b`)
+	reDropServiceName      = regexp.MustCompile(`(?i)^\s*DROP\s+SERVICE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
+	reDropServiceIfExists  = regexp.MustCompile(`(?i)\bIF\s+EXISTS\b`)
+	// Service property patterns
+	reServiceInComputePool    = regexp.MustCompile(`(?i)\bIN\s+COMPUTE\s+POOL\s+(` + _ident + `)`)
+	// reServiceFromSpec matches FROM SPECIFICATION and FROM SPECIFICATION_TEMPLATE
+	// (inline YAML). The \b after SPECIFICATION prevents matching _FILE/_TEMPLATE_FILE.
+	reServiceFromSpec         = regexp.MustCompile(`(?i)\bFROM\s+(?:@` + _identPath + `\s+)?SPECIFICATION(?:_TEMPLATE)?\b`)
+	// reServiceFromSpecFile matches FROM SPECIFICATION_FILE and
+	// FROM SPECIFICATION_TEMPLATE_FILE, including the FROM @stage prefix form.
+	reServiceFromSpecFile     = regexp.MustCompile(`(?i)\bFROM\s+(?:@` + _identPath + `\s+)?SPECIFICATION(?:_TEMPLATE)?_FILE\b`)
+	reServiceMinInstances     = regexp.MustCompile(`(?i)\bMIN_INSTANCES\s*=\s*(-?\d+)`)
+	reServiceMaxInstances     = regexp.MustCompile(`(?i)\bMAX_INSTANCES\s*=\s*(-?\d+)`)
+	// ALTER SERVICE actions — reAlterServiceAction matches any known sub-command
+	// for the "unknown sub-command" guard. reAlterServiceSetBare matches bare
+	// SET (with any property) so we can distinguish "unknown property within SET"
+	// from "unknown sub-command entirely".
+	reAlterServiceAction      = regexp.MustCompile(`(?i)\b(?:SUSPEND|RESUME|SET\s+(?:MIN_INSTANCES|MAX_INSTANCES|COMMENT|QUERY_WAREHOUSE)|UNSET\s+(?:COMMENT|QUERY_WAREHOUSE|MIN_INSTANCES|MAX_INSTANCES)|FROM\s+(?:@` + _identPath + `\s+)?SPECIFICATION(?:_TEMPLATE)?(?:_FILE)?)\b`)
+	reAlterServiceSetBare     = regexp.MustCompile(`(?i)\bSET\s+\w+`)
+	reAlterServiceUnsetBare   = regexp.MustCompile(`(?i)\bUNSET\s+\w+`)
 
 	// ── CREATE EVENT TABLE ──────────────────────────────────────────────────
 	reIsCreateEventTable   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EVENT\s+TABLE\b`)
@@ -2041,6 +2070,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
+		// ── EXECUTE SERVICE (job service) ─────────────────────────────────
+		if reIsExecuteService.MatchString(parseText) {
+			markers = append(markers, validateExecuteService(parseText, r)...)
+			continue
+		}
+
 		// ── Other EXECUTE forms (EXECUTE ALERT, etc.) — pass through ─────
 		if reIsExecute.MatchString(parseText) {
 			continue
@@ -2103,6 +2138,24 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// ── CREATE COMPUTE POOL ─────────────────────────────────────────
 		if reIsCreateComputePool.MatchString(parseText) {
 			markers = append(markers, validateCreateComputePool(parseText, r)...)
+			continue
+		}
+
+		// ── CREATE SERVICE ──────────────────────────────────────────────
+		if reIsCreateService.MatchString(parseText) {
+			markers = append(markers, validateCreateService(parseText, r)...)
+			continue
+		}
+
+		// ── ALTER SERVICE ───────────────────────────────────────────────
+		if reIsAlterService.MatchString(parseText) {
+			markers = append(markers, validateAlterService(parseText, r)...)
+			continue
+		}
+
+		// ── DROP SERVICE ────────────────────────────────────────────────
+		if reIsDropService.MatchString(parseText) {
+			markers = append(markers, validateDropService(parseText, r)...)
 			continue
 		}
 
@@ -6175,6 +6228,269 @@ func validateDropDatashare(parseText string, r StatementRange) []DiagMarker {
 	if sqlIdentPathHasDot(m[1]) {
 		markers = append(markers, diagMarkerSpan(r,
 			"Datashares are account-level objects and cannot have a database or schema prefix.", 4))
+	}
+
+	return markers
+}
+
+// ── validateCreateService ─────────────────────────────────────────────────────
+
+// validateCreateService checks structural requirements for
+// CREATE [OR REPLACE] SERVICE [IF NOT EXISTS] <name> statements:
+//   - OR REPLACE and IF NOT EXISTS are mutually exclusive.
+//   - IN COMPUTE POOL <name> is mandatory.
+//   - Exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE is required.
+//   - MIN_INSTANCES must be a non-negative integer if present.
+//   - MAX_INSTANCES must be >= MIN_INSTANCES if both are present.
+//   - AUTO_RESUME must be TRUE or FALSE if present.
+//   - Only known properties are accepted.
+func validateCreateService(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	// Strip dollar-quoted bodies so inline YAML does not cause false-positive
+	// property warnings (e.g. keys inside $$spec$$ matching reProp).
+	noDollar := reStripDollarQuoted.ReplaceAllString(parseText, "''")
+	noLiterals := reStripStringLiterals.ReplaceAllString(noDollar, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+
+	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
+	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE SERVICE statement.", 4))
+		return markers
+	}
+
+	// 2. Service name is required.
+	m := reCreateServiceName.FindStringSubmatch(clean)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in CREATE SERVICE statement.", 4))
+		return markers
+	}
+
+	// 3. IN COMPUTE POOL is mandatory.
+	if !reServiceInComputePool.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Missing mandatory IN COMPUTE POOL clause in CREATE SERVICE statement.", 4))
+	}
+
+	// 4. Exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE is required.
+	// \b in reServiceFromSpec prevents matching SPECIFICATION_FILE (underscore
+	// is a word character), so the two regexes are mutually exclusive.
+	hasSpec := reServiceFromSpec.MatchString(clean)
+	hasSpecFile := reServiceFromSpecFile.MatchString(clean)
+	if hasSpec && hasSpecFile {
+		markers = append(markers, diagMarkerSpan(r,
+			"CREATE SERVICE requires exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE, not both.", 4))
+	} else if !hasSpec && !hasSpecFile {
+		markers = append(markers, diagMarkerSpan(r,
+			"Missing mandatory FROM SPECIFICATION or FROM SPECIFICATION_FILE clause in CREATE SERVICE statement.", 4))
+	}
+
+	// 5. Validate MIN_INSTANCES value (non-negative).
+	var minInstances int
+	hasMinInstances := false
+	if minMatch := reServiceMinInstances.FindStringSubmatch(clean); minMatch != nil {
+		v, err := strconv.Atoi(minMatch[1])
+		if err == nil {
+			minInstances = v
+			hasMinInstances = true
+			if v < 0 {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("MIN_INSTANCES value %d must be a non-negative integer.", v), 4))
+			}
+		}
+	}
+
+	// 6. Validate MAX_INSTANCES value (non-negative, >= MIN_INSTANCES).
+	if maxMatch := reServiceMaxInstances.FindStringSubmatch(clean); maxMatch != nil {
+		v, err := strconv.Atoi(maxMatch[1])
+		if err == nil {
+			if v < 0 {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("MAX_INSTANCES value %d must be a non-negative integer.", v), 4))
+			}
+			if hasMinInstances && v < minInstances {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("MAX_INSTANCES (%d) must be >= MIN_INSTANCES (%d).", v, minInstances), 4))
+			}
+		}
+	}
+
+	// 7. Validate boolean properties.
+	validateBoolProp(clean, "AUTO_RESUME", r, &markers)
+
+	// 8. Only known properties are accepted.
+	noComments := strings.TrimSpace(stripCommentsSQL(noDollar))
+	validateProperties(noComments,
+		`MIN_INSTANCES|MAX_INSTANCES|MIN_READY_INSTANCES|EXTERNAL_ACCESS_INTEGRATIONS|AUTO_RESUME|AUTO_SUSPEND_SECS|QUERY_WAREHOUSE|COMMENT|SPECIFICATION_FILE|SPECIFICATION_TEMPLATE_FILE|LOG_LEVEL`,
+		r, &markers)
+
+	return markers
+}
+
+// ── validateExecuteService ────────────────────────────────────────────────────
+
+// validateExecuteService checks structural requirements for
+// EXECUTE SERVICE <name> statements (job services):
+//   - IN COMPUTE POOL <name> is mandatory.
+//   - Exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE is required.
+//   - MIN_INSTANCES / MAX_INSTANCES are not supported (flagged if present).
+//   - Only known properties are accepted.
+func validateExecuteService(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	noDollar := reStripDollarQuoted.ReplaceAllString(parseText, "''")
+	noLiterals := reStripStringLiterals.ReplaceAllString(noDollar, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+
+	// 1. Service name is required.
+	m := reExecuteServiceName.FindStringSubmatch(clean)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r, "Unexpected syntax in EXECUTE SERVICE statement.", 4))
+		return markers
+	}
+
+	// 2. IN COMPUTE POOL is mandatory.
+	if !reServiceInComputePool.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Missing mandatory IN COMPUTE POOL clause in EXECUTE SERVICE statement.", 4))
+	}
+
+	// 3. Exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE is required.
+	hasSpec := reServiceFromSpec.MatchString(clean)
+	hasSpecFile := reServiceFromSpecFile.MatchString(clean)
+	if hasSpec && hasSpecFile {
+		markers = append(markers, diagMarkerSpan(r,
+			"EXECUTE SERVICE requires exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE, not both.", 4))
+	} else if !hasSpec && !hasSpecFile {
+		markers = append(markers, diagMarkerSpan(r,
+			"Missing mandatory FROM SPECIFICATION or FROM SPECIFICATION_FILE clause in EXECUTE SERVICE statement.", 4))
+	}
+
+	// 4. MIN_INSTANCES / MAX_INSTANCES are not supported for job services.
+	if reServiceMinInstances.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"MIN_INSTANCES is not supported in EXECUTE SERVICE (job services run once).", 4))
+	}
+	if reServiceMaxInstances.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"MAX_INSTANCES is not supported in EXECUTE SERVICE (job services run once).", 4))
+	}
+
+	// 5. Only known properties are accepted.
+	noComments := strings.TrimSpace(stripCommentsSQL(noDollar))
+	validateProperties(noComments,
+		`EXTERNAL_ACCESS_INTEGRATIONS|QUERY_WAREHOUSE|COMMENT|SPECIFICATION_FILE|SPECIFICATION_TEMPLATE_FILE|MIN_INSTANCES|MAX_INSTANCES|NAME|ASYNC|REPLICAS`,
+		r, &markers)
+
+	return markers
+}
+
+// ── validateAlterService ──────────────────────────────────────────────────────
+
+// validateAlterService checks structural requirements for ALTER SERVICE statements:
+//   - A service name is required.
+//   - At least one known sub-command must be present (SUSPEND, RESUME,
+//     SET MIN_INSTANCES/MAX_INSTANCES/COMMENT/QUERY_WAREHOUSE,
+//     UNSET COMMENT/QUERY_WAREHOUSE, FROM SPECIFICATION).
+//   - MIN_INSTANCES / MAX_INSTANCES values are validated when used with SET.
+func validateAlterService(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	noDollar := reStripDollarQuoted.ReplaceAllString(parseText, "''")
+	noLiterals := reStripStringLiterals.ReplaceAllString(noDollar, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+
+	// 1. Service name is required.
+	m := reAlterServiceName.FindStringSubmatch(clean)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"ALTER SERVICE requires a service name.", 4))
+		return markers
+	}
+
+	// 2. At least one known action must be present. Distinguish between
+	// "SET with an unrecognized property" and "entirely unknown sub-command"
+	// so the user gets a more actionable message.
+	if !reAlterServiceAction.MatchString(clean) {
+		if reAlterServiceSetBare.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"Unknown property in ALTER SERVICE SET. Valid properties: MIN_INSTANCES, MAX_INSTANCES, COMMENT, QUERY_WAREHOUSE.", 4))
+		} else if reAlterServiceUnsetBare.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"Unknown property in ALTER SERVICE UNSET. Valid properties: COMMENT, QUERY_WAREHOUSE, MIN_INSTANCES, MAX_INSTANCES.", 4))
+		} else {
+			markers = append(markers, diagMarkerSpan(r,
+				"Unknown ALTER SERVICE sub-command. Expected SUSPEND, RESUME, SET, UNSET, or FROM SPECIFICATION.", 4))
+		}
+		return markers
+	}
+
+	// 3. Validate MIN_INSTANCES value (non-negative) if present in SET.
+	var minInstances int
+	hasMinInstances := false
+	if minMatch := reServiceMinInstances.FindStringSubmatch(clean); minMatch != nil {
+		v, err := strconv.Atoi(minMatch[1])
+		if err == nil {
+			minInstances = v
+			hasMinInstances = true
+			if v < 0 {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("MIN_INSTANCES value %d must be a non-negative integer.", v), 4))
+			}
+		}
+	}
+
+	// 4. Validate MAX_INSTANCES value (non-negative, >= MIN_INSTANCES) if present.
+	if maxMatch := reServiceMaxInstances.FindStringSubmatch(clean); maxMatch != nil {
+		v, err := strconv.Atoi(maxMatch[1])
+		if err == nil {
+			if v < 0 {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("MAX_INSTANCES value %d must be a non-negative integer.", v), 4))
+			}
+			if hasMinInstances && v < minInstances {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("MAX_INSTANCES (%d) must be >= MIN_INSTANCES (%d).", v, minInstances), 4))
+			}
+		}
+	}
+
+	// 5. Validate allowed properties when SET is used (catches unknown props
+	// in multi-property statements like SET COMMENT = 'x' UNKNOWN = y).
+	if reAlterServiceSetBare.MatchString(clean) {
+		noComments := strings.TrimSpace(stripCommentsSQL(noDollar))
+		validateProperties(noComments,
+			`MIN_INSTANCES|MAX_INSTANCES|COMMENT|QUERY_WAREHOUSE`,
+			r, &markers)
+	}
+
+	return markers
+}
+
+// ── validateDropService ───────────────────────────────────────────────────────
+
+// validateDropService checks structural requirements for DROP SERVICE:
+//   - Service name is required.
+func validateDropService(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+
+	m := reDropServiceName.FindStringSubmatch(clean)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"DROP SERVICE requires a service name.", 4))
+		return markers
+	}
+	// Guard against "DROP SERVICE IF EXISTS" (no name): the optional
+	// IF\s+EXISTS\s+ group fails (no trailing whitespace+ident), so the
+	// regex captures "IF" as the name. Detect this and flag it.
+	if strings.EqualFold(m[1], "IF") && reDropServiceIfExists.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"DROP SERVICE requires a service name.", 4))
+		return markers
 	}
 
 	return markers
