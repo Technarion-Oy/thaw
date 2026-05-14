@@ -5749,6 +5749,7 @@ func TestCortexAI_ValidateSnowflakePatterns_KnownFunctions(t *testing.T) {
 		"SELECT SNOWFLAKE.CORTEX.EMBED_TEXT_1024('model', chunk) FROM corpus",
 		"SELECT SNOWFLAKE.CORTEX.TRY_COMPLETE('model', prompt) FROM t",
 		"SELECT SNOWFLAKE.CORTEX.SEARCH_PREVIEW('service', query) FROM t",
+		"SELECT SNOWFLAKE.CORTEX.FINETUNE('model', 'train_data') FROM t",
 	}
 
 	for _, sql := range validQueries {
@@ -5797,5 +5798,19 @@ func TestCortexAI_ValidateSnowflakePatterns_UnknownFunction(t *testing.T) {
 				t.Errorf("Expected warning containing %q, got: %v", tc.wantMsg, warns[0].Message)
 			}
 		})
+	}
+}
+
+func TestCortexAI_DuplicateUnknownFunction_DistinctMarkers(t *testing.T) {
+	sql := "SELECT SNOWFLAKE.CORTEX.MAGIC(a), SNOWFLAKE.CORTEX.MAGIC(b) FROM t"
+	stmtRanges := GetStatementRanges(sql)
+	markers := ValidateSnowflakePatterns(sql, stmtRanges)
+	warns := getWarnings(markers)
+	if len(warns) != 2 {
+		t.Fatalf("Expected 2 warnings for duplicate unknown Cortex function, got %d", len(warns))
+	}
+	// The two markers must have distinct column positions.
+	if warns[0].StartColumn == warns[1].StartColumn {
+		t.Errorf("Both markers have the same StartColumn=%d; expected distinct positions", warns[0].StartColumn)
 	}
 }

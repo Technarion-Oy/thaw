@@ -1416,25 +1416,23 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		}
 
 		// ── Custom check 7: unknown SNOWFLAKE.CORTEX.<function> ──────────
-		for _, m := range reCortexFuncCall.FindAllStringSubmatchIndex(stripped, -1) {
-			funcName := strings.ToUpper(stripped[m[2]:m[3]])
+		// Use reCortexFuncCall on rawText directly so each match position is
+		// accurate (avoids stripped-vs-raw offset drift and the duplicate-
+		// marker bug where FindStringIndex always returns the first hit).
+		for _, m := range reCortexFuncCall.FindAllStringSubmatchIndex(rawText, -1) {
+			funcName := strings.ToUpper(rawText[m[2]:m[3]])
 			if !knownCortexFunctions[funcName] {
-				// Locate the function name in the raw (un-stripped) text.
-				reFuncInRaw := regexp.MustCompile(
-					`(?i)\bSNOWFLAKE\s*\.\s*CORTEX\s*\.\s*` + regexp.QuoteMeta(stripped[m[2]:m[3]]))
-				if rloc := reFuncInRaw.FindStringIndex(rawText); rloc != nil {
-					upTo := rawText[:rloc[0]]
-					lines := strings.Split(upTo, "\n")
-					errLine := r.StartLine + len(lines) - 1
-					errCol := len(lines[len(lines)-1]) + 1
-					fullMatch := rawText[rloc[0]:rloc[1]]
-					markers = append(markers, DiagMarker{
-						StartLineNumber: errLine, StartColumn: errCol,
-						EndLineNumber: errLine, EndColumn: errCol + len(fullMatch),
-						Message:  "Unknown Cortex function '" + stripped[m[2]:m[3]] + "'. Known functions: COMPLETE, EXTRACT_ANSWER, SENTIMENT, SUMMARIZE, TRANSLATE, CLASSIFY_TEXT, EMBED_TEXT_768, EMBED_TEXT_1024, FINETUNE, SEARCH_PREVIEW, TRY_COMPLETE.",
-						Severity: 4,
-					})
-				}
+				fullMatch := rawText[m[0]:m[1]-1] // exclude trailing '('
+				upTo := rawText[:m[0]]
+				lines := strings.Split(upTo, "\n")
+				errLine := r.StartLine + len(lines) - 1
+				errCol := len(lines[len(lines)-1]) + 1
+				markers = append(markers, DiagMarker{
+					StartLineNumber: errLine, StartColumn: errCol,
+					EndLineNumber: errLine, EndColumn: errCol + len(fullMatch),
+					Message:  "Unknown Cortex function '" + rawText[m[2]:m[3]] + "'. Known functions: COMPLETE, EXTRACT_ANSWER, SENTIMENT, SUMMARIZE, TRANSLATE, CLASSIFY_TEXT, EMBED_TEXT_768, EMBED_TEXT_1024, FINETUNE, SEARCH_PREVIEW, TRY_COMPLETE.",
+					Severity: 4,
+				})
 			}
 		}
 
