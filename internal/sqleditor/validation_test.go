@@ -7106,6 +7106,24 @@ func TestValidateSnowflakePatterns_AlterDynamicTable(t *testing.T) {
 				sql:     "ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = 42",
 				wantMsg: "Invalid TARGET_LAG value",
 			},
+			// Zero-duration TARGET_LAG (Snowflake requires positive integer)
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = '0 seconds'",
+				wantMsg: "Invalid TARGET_LAG value",
+			},
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = '0 minutes'",
+				wantMsg: "Invalid TARGET_LAG value",
+			},
+			// Bare SET / UNSET without a property name
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt SET",
+				wantMsg: "SET requires at least one property",
+			},
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt UNSET",
+				wantMsg: "UNSET requires at least one property name",
+			},
 		}
 		for _, tc := range cases {
 			t.Run(tc.sql, func(t *testing.T) {

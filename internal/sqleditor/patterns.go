@@ -235,7 +235,7 @@ var (
 	// SET property detection
 	reAlterDynTableTargetLagBare = regexp.MustCompile(`(?i)\bTARGET_LAG\s*=`)
 	reAlterDynTableTargetLagVal  = regexp.MustCompile(
-		`(?i)\bTARGET_LAG\s*=\s*(?:'(?:\d+\s+(?:seconds?|minutes?|hours?|days?))'|DOWNSTREAM\b)`)
+		`(?i)\bTARGET_LAG\s*=\s*(?:'(?:[1-9]\d*\s+(?:seconds?|minutes?|hours?|days?))'|DOWNSTREAM\b)`)
 
 	// ── CREATE INTEGRATION ────────────────────────────────────────────────────
 	reIsCreateIntegration = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:STORAGE|API|NOTIFICATION|SECURITY|EXTERNAL\s+ACCESS)\s+INTEGRATION\b`)
@@ -8340,13 +8340,6 @@ func validateAlterDynamicTable(parseText string, r StatementRange) []DiagMarker 
 	hasSwap := reAlterDynTableSwapWith.MatchString(suffix)
 	hasRename := reAlterDynTableRenameTo.MatchString(suffix)
 
-	// Disambiguate SET/UNSET: "UNSET" also contains "SET",
-	// so only count standalone SET when UNSET is not present.
-	if hasUnset {
-		stripped := reAlterDynTableUnset.ReplaceAllString(suffix, "")
-		hasSet = reAlterDynTableSet.MatchString(stripped)
-	}
-
 	anyKnown := hasRefresh || hasSuspend || hasResume || hasSet || hasUnset || hasSwap || hasRename
 
 	if !anyKnown {
@@ -8379,7 +8372,18 @@ func validateAlterDynamicTable(parseText string, r StatementRange) []DiagMarker 
 			"RENAME TO requires a new table name.", 4))
 	}
 
-	// 5. SET TARGET_LAG value validation.
+	// 5. Bare SET / UNSET without a property name.
+	suffixTrimmed := strings.TrimSpace(suffix)
+	if hasSet && !hasUnset && strings.EqualFold(suffixTrimmed, "SET") {
+		markers = append(markers, diagMarkerSpan(r,
+			"SET requires at least one property (e.g. TARGET_LAG, WAREHOUSE).", 4))
+	}
+	if hasUnset && !hasSet && strings.EqualFold(suffixTrimmed, "UNSET") {
+		markers = append(markers, diagMarkerSpan(r,
+			"UNSET requires at least one property name.", 4))
+	}
+
+	// 6. SET TARGET_LAG value validation.
 	//    Uses parseText (raw) instead of clean because clean has string literals
 	//    stripped, and the lag value is inside a string literal (e.g. '1 minute').
 	if hasSet && reAlterDynTableTargetLagBare.MatchString(parseText) {
