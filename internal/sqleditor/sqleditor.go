@@ -211,6 +211,12 @@ var sqlAllKeywords = map[string]bool{
 	"LANGUAGE": true, "SQL": true, "PYTHON": true, "JAVASCRIPT": true, "SCALA": true, "JAVA": true, "SECURE": true, "VOLATILE": true,
 	"IMMUTABLE": true, "STABLE": true, "INTERNAL": true, "EXTERNAL": true, "STAGE": true, "FILE": true, "FORMAT": true,
 	"STORAGE": true, "INTEGRATION": true, "SECRET": true, "GIT": true, "REPOSITORY": true, "NOTEBOOK": true,
+	// Snowflake Cortex AI namespace identifiers (function names like
+	// COMPLETE and TRANSLATE are intentionally omitted — they are common
+	// words that users may use as column names; the dot/paren logic in
+	// scanSelectClauseForUnknownCols already skips them when used inside
+	// SNOWFLAKE.CORTEX.<name>(...) calls)
+	"SNOWFLAKE": true, "CORTEX": true,
 	// Data types
 	"INT": true, "INTEGER": true, "BIGINT": true, "SMALLINT": true, "TINYINT": true, "BYTEINT": true,
 	"NUMBER": true, "DECIMAL": true, "NUMERIC": true, "DOUBLE": true, "FLOAT": true, "REAL": true,

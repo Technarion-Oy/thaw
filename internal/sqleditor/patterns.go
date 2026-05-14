@@ -61,6 +61,11 @@ var (
 			`|\bINFER_SCHEMA\b`,
 	)
 
+	// ── Snowflake Cortex AI function call detection ──────────────────────────
+	// Matches SNOWFLAKE.CORTEX.<function>( — captures the function name.
+	reCortexFuncCall = regexp.MustCompile(
+		`(?i)\bSNOWFLAKE\s*\.\s*CORTEX\s*\.\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\(`)
+
 	// ── Custom check patterns ─────────────────────────────────────────────────
 	reLateralFlatten      = regexp.MustCompile(`(?i)\bLATERALFLATTEN\b`)
 	reFlattenFromJoin     = regexp.MustCompile(`(?i)(?:FROM|JOIN|,)\s+FLATTEN\s*\(`)
@@ -918,6 +923,24 @@ var (
 		"BEGIN": true, "COMMIT": true, "ROLLBACK": true,
 		"SAVEPOINT": true, "RELEASE": true,
 	}
+
+	// knownCortexFunctions lists the Snowflake Cortex AI function names
+	// (upper-cased).  Any SNOWFLAKE.CORTEX.<name>() call where <name> is not
+	// in this set will produce a warning diagnostic.
+	// Reference: https://docs.snowflake.com/en/guides-overview-ai-features
+	knownCortexFunctions = map[string]bool{
+		"COMPLETE":       true,
+		"EXTRACT_ANSWER": true,
+		"SENTIMENT":      true,
+		"SUMMARIZE":      true,
+		"TRANSLATE":      true,
+		"CLASSIFY_TEXT":  true,
+		"EMBED_TEXT_768":  true,
+		"EMBED_TEXT_1024": true,
+		"FINETUNE":       true,
+		"SEARCH_PREVIEW": true,
+		"TRY_COMPLETE":   true,
+	}
 )
 
 // showObjectTypes lists all valid Snowflake object type keywords after SHOW,
@@ -1387,6 +1410,33 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 						StartLineNumber: errLine, StartColumn: errCol,
 						EndLineNumber: errLine, EndColumn: errCol + 26,
 						Message:  "WHEN NOT MATCHED BY SOURCE is not supported by Snowflake. Use a subquery with a LEFT JOIN as your source to identify missing rows.",
+						Severity: 4,
+					})
+				}
+			}
+		}
+
+		// ── Custom check 7: unknown SNOWFLAKE.CORTEX.<function> ──────────
+		// Run reCortexFuncCall on rawText so each match gets an accurate
+		// position.  Use an inert-region mask to skip matches inside SQL
+		// comments, string literals, and dollar-quoted blocks.
+		if reCortexFuncCall.MatchString(rawText) {
+			inertMask := buildInertMask(rawText)
+			for _, m := range reCortexFuncCall.FindAllStringSubmatchIndex(rawText, -1) {
+				if m[0] < len(inertMask) && inertMask[m[0]] {
+					continue // match starts inside a comment, string, or $$-block
+				}
+				funcName := strings.ToUpper(rawText[m[2]:m[3]])
+				if !knownCortexFunctions[funcName] {
+					fullMatch := rawText[m[0]:m[1]-1] // exclude trailing '('
+					upTo := rawText[:m[0]]
+					lines := strings.Split(upTo, "\n")
+					errLine := r.StartLine + len(lines) - 1
+					errCol := len(lines[len(lines)-1]) + 1
+					markers = append(markers, DiagMarker{
+						StartLineNumber: errLine, StartColumn: errCol,
+						EndLineNumber: errLine, EndColumn: errCol + len(fullMatch),
+						Message:  "Unknown Cortex function '" + rawText[m[2]:m[3]] + "'. Known functions: COMPLETE, EXTRACT_ANSWER, SENTIMENT, SUMMARIZE, TRANSLATE, CLASSIFY_TEXT, EMBED_TEXT_768, EMBED_TEXT_1024, FINETUNE, SEARCH_PREVIEW, TRY_COMPLETE.",
 						Severity: 4,
 					})
 				}

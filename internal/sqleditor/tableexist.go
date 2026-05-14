@@ -652,6 +652,12 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			if (upperCompare == "TABLE" || joinStopKW[upperCompare]) && ft.db == "" && ft.schema == "" {
 				continue
 			}
+			// Skip SNOWFLAKE.CORTEX.* — built-in Cortex AI function namespace,
+			// not a real database/schema/table path.
+			if ft.db != "" && ft.schema != "" &&
+				strings.EqualFold(ft.db, "SNOWFLAKE") && strings.EqualFold(ft.schema, "CORTEX") {
+				continue
+			}
 			if _, isCTE := cteNames[compareTable]; isCTE {
 				continue
 			}
