@@ -820,20 +820,25 @@ var (
 	}
 
 	// ── MATCH_RECOGNIZE ─────────────────────────────────────────────────
-	// Detection: matches MATCH_RECOGNIZE( after a table reference.
+	// Detection: matches MATCH_RECOGNIZE( (typically appears after a table
+	// reference in FROM).
 	reMatchRecognizeClause = regexp.MustCompile(`(?i)\bMATCH_RECOGNIZE\s*\(`)
 
 	// Structural: mandatory PATTERN (...) inside the MATCH_RECOGNIZE body.
 	reMatchRecognizePattern = regexp.MustCompile(`(?i)\bPATTERN\s*\(`)
 	// Empty PATTERN: PATTERN ()
 	reMatchRecognizeEmptyPattern = regexp.MustCompile(`(?i)\bPATTERN\s*\(\s*\)`)
+	// DEFINE clause detection.
+	reMatchRecognizeDefine = regexp.MustCompile(`(?i)\bDEFINE\s+`)
 
 	// ONE ROW PER MATCH / ALL ROWS PER MATCH detection.
 	reOneRowPerMatch  = regexp.MustCompile(`(?i)\bONE\s+ROW\s+PER\s+MATCH\b`)
 	reAllRowsPerMatch = regexp.MustCompile(`(?i)\bALL\s+ROWS\s+PER\s+MATCH\b`)
 
 	// AFTER MATCH SKIP — captures the skip target text.
-	reAfterMatchSkip = regexp.MustCompile(`(?i)\bAFTER\s+MATCH\s+SKIP\s+(.+?)(?:\b(?:PATTERN|DEFINE|MEASURES|ONE|ALL)\b|$)`)
+	// Uses [\s\S]+? instead of .+? so that the match spans newlines in
+	// multi-line MATCH_RECOGNIZE bodies.
+	reAfterMatchSkip = regexp.MustCompile(`(?i)\bAFTER\s+MATCH\s+SKIP\s+([\s\S]+?)(?:\b(?:PATTERN|DEFINE|MEASURES|ONE|ALL)\b|$)`)
 	// Valid AFTER MATCH SKIP targets.
 	reAfterMatchSkipValid = regexp.MustCompile(
 		`(?i)^\s*(?:TO\s+NEXT\s+ROW|PAST\s+LAST\s+ROW|TO\s+FIRST\s+` + _ident + `|TO\s+LAST\s+` + _ident + `)\s*$`)
@@ -2724,6 +2729,7 @@ func validateUnpivotClauses(stripped string, r StatementRange) []DiagMarker {
 // validateMatchRecognizeClauses checks all MATCH_RECOGNIZE(...) occurrences in
 // the statement for structural correctness:
 //   - mandatory PATTERN clause with at least one variable
+//   - mandatory DEFINE clause
 //   - ONE ROW PER MATCH / ALL ROWS PER MATCH mutual exclusion
 //   - AFTER MATCH SKIP target validity
 func validateMatchRecognizeClauses(stripped string, r StatementRange) []DiagMarker {
@@ -2752,7 +2758,13 @@ func validateMatchRecognizeClauses(stripped string, r StatementRange) []DiagMark
 				"MATCH_RECOGNIZE PATTERN must contain at least one pattern variable.", 4))
 		}
 
-		// 2. ONE ROW PER MATCH / ALL ROWS PER MATCH mutual exclusion.
+		// 2. Validate mandatory DEFINE clause.
+		if !reMatchRecognizeDefine.MatchString(mrBody) {
+			markers = append(markers, diagMarkerSpan(r,
+				"MATCH_RECOGNIZE requires a DEFINE clause to bind pattern variables.", 4))
+		}
+
+		// 3. ONE ROW PER MATCH / ALL ROWS PER MATCH mutual exclusion.
 		hasOneRow := reOneRowPerMatch.MatchString(mrBody)
 		hasAllRows := reAllRowsPerMatch.MatchString(mrBody)
 		if hasOneRow && hasAllRows {
@@ -2760,7 +2772,7 @@ func validateMatchRecognizeClauses(stripped string, r StatementRange) []DiagMark
 				"ONE ROW PER MATCH and ALL ROWS PER MATCH are mutually exclusive. Use one or the other.", 4))
 		}
 
-		// 3. AFTER MATCH SKIP target validation.
+		// 4. AFTER MATCH SKIP target validation.
 		if m := reAfterMatchSkip.FindStringSubmatch(mrBody); m != nil {
 			target := strings.TrimSpace(m[1])
 			if !reAfterMatchSkipValid.MatchString(target) {

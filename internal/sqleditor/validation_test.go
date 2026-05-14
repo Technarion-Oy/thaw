@@ -6349,6 +6349,21 @@ MATCH_RECOGNIZE (
 				sql:     `SELECT * FROM t MATCH_RECOGNIZE (PATTERN (A B) AFTER MATCH SKIP NOWHERE DEFINE A AS x > 0, B AS x < 0)`,
 				wantMsg: "Invalid AFTER MATCH SKIP target",
 			},
+			// Multi-line: invalid AFTER MATCH SKIP must be caught even when
+			// DEFINE is on a separate line.
+			{
+				sql: `SELECT * FROM t MATCH_RECOGNIZE (
+  PATTERN (A B)
+  AFTER MATCH SKIP NOWHERE
+  DEFINE A AS x > 0, B AS x < 0
+)`,
+				wantMsg: "Invalid AFTER MATCH SKIP target",
+			},
+			// Missing DEFINE clause.
+			{
+				sql:     `SELECT * FROM t MATCH_RECOGNIZE (PATTERN (A B))`,
+				wantMsg: "MATCH_RECOGNIZE requires a DEFINE clause",
+			},
 		}
 		for _, tc := range cases {
 			t.Run(tc.sql[:min(len(tc.sql), 60)], func(t *testing.T) {
