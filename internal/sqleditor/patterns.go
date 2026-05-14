@@ -48,11 +48,11 @@ var (
 		`(?i)\bTABLESAMPLE\b|\bSAMPLE\s*\(|\bWITHIN\s+GROUP\b|\bCONNECT\s+BY\b` +
 			`|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b` +
 			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:STAGE` +
-			`|REPLICATION|FAILOVER|APPLICATION\s+PACKAGE|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY)\b` +
+			`|REPLICATION|FAILOVER|APPLICATION\s+PACKAGE|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY|GIT\s+REPOSITORY)\b` +
 			`|ALTER\s+(?:TABLE|VIEW|STREAM|DATABASE|STAGE|PIPE|PROCEDURE|FUNCTION` +
 			`|ALERT|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK` +
-			`|REPLICATION|FAILOVER|APPLICATION\s+PACKAGE|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY)\b` +
-			`|DROP\s+(?:TABLE|VIEW|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|APPLICATION\s+PACKAGE|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY)\b` +
+			`|REPLICATION|FAILOVER|APPLICATION\s+PACKAGE|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY|GIT\s+REPOSITORY)\b` +
+			`|DROP\s+(?:TABLE|VIEW|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|APPLICATION\s+PACKAGE|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY|GIT\s+REPOSITORY)\b` +
 			`|EXECUTE\s+(?:JOB\s+)?SERVICE\b` +
 			`|UNDROP\s+(?:DATABASE|SCHEMA|TABLE)\b` +
 			`|INSERT\s+OVERWRITE\b` +
@@ -635,6 +635,18 @@ var (
 	reIsDropImageRepository     = regexp.MustCompile(`(?i)^\s*DROP\s+IMAGE\s+REPOSITORY\b`)
 	reDropImageRepositoryName   = regexp.MustCompile(`(?i)^\s*DROP\s+IMAGE\s+REPOSITORY\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
 	reIsAlterImageRepository    = regexp.MustCompile(`(?i)^\s*ALTER\s+IMAGE\s+REPOSITORY\b`)
+
+	// ── CREATE / ALTER / DROP GIT REPOSITORY ──────────────────────────────
+	reIsCreateGitRepository   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?GIT\s+REPOSITORY\b`)
+	reCreateGitRepositoryName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?GIT\s+REPOSITORY\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
+	reGitRepoAPIIntegration   = regexp.MustCompile(`(?i)\bAPI_INTEGRATION\s*=\s*` + _ident)
+	reGitRepoOrigin           = regexp.MustCompile(`(?i)\bORIGIN\s*=\s*'([^']*)'`)
+	reGitRepoOriginBare       = regexp.MustCompile(`(?i)\bORIGIN\s*=`)
+	reIsAlterGitRepository    = regexp.MustCompile(`(?i)^\s*ALTER\s+GIT\s+REPOSITORY\b`)
+	reAlterGitRepositoryName  = regexp.MustCompile(`(?i)^\s*ALTER\s+GIT\s+REPOSITORY\s+(` + _identPath + `)`)
+	reAlterGitRepoAction      = regexp.MustCompile(`(?i)\b(?:FETCH|SET\s+(?:API_INTEGRATION|GIT_CREDENTIALS|COMMENT)|UNSET\s+(?:GIT_CREDENTIALS|COMMENT))\b`)
+	reIsDropGitRepository     = regexp.MustCompile(`(?i)^\s*DROP\s+GIT\s+REPOSITORY\b`)
+	reDropGitRepositoryName   = regexp.MustCompile(`(?i)^\s*DROP\s+GIT\s+REPOSITORY\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
 
 	// ── CREATE / ALTER / DROP APPLICATION PACKAGE (Native Apps) ────────────
 	reIsCreateApplicationPackage   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?APPLICATION\s+PACKAGE\b`)
@@ -2209,6 +2221,24 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// ── ALTER IMAGE REPOSITORY ──────────────────────────────────────
 		if reIsAlterImageRepository.MatchString(parseText) {
 			markers = append(markers, validateAlterImageRepository(parseText, r)...)
+			continue
+		}
+
+		// ── CREATE GIT REPOSITORY ──────────────────────────────────────
+		if reIsCreateGitRepository.MatchString(parseText) {
+			markers = append(markers, validateCreateGitRepository(parseText, r)...)
+			continue
+		}
+
+		// ── ALTER GIT REPOSITORY ───────────────────────────────────────
+		if reIsAlterGitRepository.MatchString(parseText) {
+			markers = append(markers, validateAlterGitRepository(parseText, r)...)
+			continue
+		}
+
+		// ── DROP GIT REPOSITORY ────────────────────────────────────────
+		if reIsDropGitRepository.MatchString(parseText) {
+			markers = append(markers, validateDropGitRepository(parseText, r)...)
 			continue
 		}
 
@@ -6928,6 +6958,133 @@ func validateDropApplication(parseText string, r StatementRange) []DiagMarker {
 	if strings.EqualFold(m[1], "IF") && reDropServiceIfExists.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"DROP APPLICATION requires an application name.", 4))
+		return markers
+	}
+
+	return markers
+}
+
+// ── validateCreateGitRepository ──────────────────────────────────────────────
+
+// validateCreateGitRepository checks structural requirements for
+// CREATE [OR REPLACE] GIT REPOSITORY [IF NOT EXISTS] <name> statements:
+//   - OR REPLACE and IF NOT EXISTS are mutually exclusive.
+//   - Schema-level object: three-part names (db.schema.name) are valid.
+//   - API_INTEGRATION = <name> is mandatory.
+//   - ORIGIN = '<url>' is mandatory; value must start with https:// or git@.
+//   - GIT_CREDENTIALS and COMMENT are optional valid properties.
+func validateCreateGitRepository(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+
+	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
+	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE GIT REPOSITORY statement.", 4))
+		return markers
+	}
+
+	// 2. Repository name is required.
+	m := reCreateGitRepositoryName.FindStringSubmatch(clean)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"Unexpected syntax in CREATE GIT REPOSITORY statement.", 4))
+		return markers
+	}
+	// Guard against "CREATE GIT REPOSITORY IF NOT EXISTS" (no name).
+	if strings.EqualFold(m[1], "IF") && reIfNotExists.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Unexpected syntax in CREATE GIT REPOSITORY statement.", 4))
+		return markers
+	}
+
+	// 3. API_INTEGRATION is mandatory.
+	if !reGitRepoAPIIntegration.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"CREATE GIT REPOSITORY requires API_INTEGRATION = <integration_name>.", 4))
+	}
+
+	// 4. ORIGIN is mandatory and must be a valid-looking URL.
+	// Check against the original (with string literals) for the URL value.
+	noLiteralsOrig := strings.TrimSpace(stripCommentsSQL(parseText))
+	originMatch := reGitRepoOrigin.FindStringSubmatch(noLiteralsOrig)
+	if originMatch == nil {
+		if reGitRepoOriginBare.MatchString(clean) {
+			// ORIGIN = is present but value is not a string literal.
+			markers = append(markers, diagMarkerSpan(r,
+				"ORIGIN value must be a string literal (e.g. ORIGIN = 'https://...').", 4))
+		} else {
+			markers = append(markers, diagMarkerSpan(r,
+				"CREATE GIT REPOSITORY requires ORIGIN = '<url>'.", 4))
+		}
+	} else {
+		url := originMatch[1]
+		if !strings.HasPrefix(strings.ToLower(url), "https://") && !strings.HasPrefix(url, "git@") {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("ORIGIN URL should start with 'https://' or 'git@', got '%s'.", url), 4))
+		}
+	}
+
+	// 5. Only API_INTEGRATION, ORIGIN, GIT_CREDENTIALS, and COMMENT are valid properties.
+	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
+	validateProperties(noComments, `API_INTEGRATION|ORIGIN|GIT_CREDENTIALS|COMMENT`, r, &markers)
+
+	return markers
+}
+
+// ── validateAlterGitRepository ───────────────────────────────────────────────
+
+// validateAlterGitRepository checks structural requirements for ALTER GIT REPOSITORY:
+//   - Repository name is required.
+//   - FETCH — triggers a sync; no arguments.
+//   - SET API_INTEGRATION / GIT_CREDENTIALS / COMMENT — valid SET targets.
+//   - UNSET GIT_CREDENTIALS / COMMENT — valid UNSET targets.
+//   - Unknown sub-commands warn.
+func validateAlterGitRepository(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+
+	// 1. Repository name is required.
+	m := reAlterGitRepositoryName.FindStringSubmatch(clean)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"ALTER GIT REPOSITORY requires a repository name.", 4))
+		return markers
+	}
+
+	// 2. Check for known sub-commands.
+	if !reAlterGitRepoAction.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Unknown ALTER GIT REPOSITORY sub-command. Expected FETCH, SET API_INTEGRATION/GIT_CREDENTIALS/COMMENT, or UNSET GIT_CREDENTIALS/COMMENT.", 4))
+	}
+
+	return markers
+}
+
+// ── validateDropGitRepository ────────────────────────────────────────────────
+
+// validateDropGitRepository checks structural requirements for DROP GIT REPOSITORY:
+//   - Repository name is required.
+func validateDropGitRepository(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+
+	m := reDropGitRepositoryName.FindStringSubmatch(clean)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"DROP GIT REPOSITORY requires a repository name.", 4))
+		return markers
+	}
+	// Guard against "DROP GIT REPOSITORY IF EXISTS" (no name).
+	if strings.EqualFold(m[1], "IF") && reDropServiceIfExists.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"DROP GIT REPOSITORY requires a repository name.", 4))
 		return markers
 	}
 
