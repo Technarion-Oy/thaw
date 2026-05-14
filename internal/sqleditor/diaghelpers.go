@@ -149,9 +149,9 @@ func diagMarkerSpan(r StatementRange, msg string, severity int) DiagMarker {
 }
 
 // buildInertMask returns a boolean slice where true indicates the byte
-// position is inside a SQL comment (-- or /* */) or a single-quoted string
-// literal (including the delimiters themselves).  Used to filter out regex
-// matches that fall inside inert regions.
+// position is inside a SQL comment (-- or /* */), a single-quoted string
+// literal, or a dollar-quoted string ($$...$$ or $tag$...$tag$).
+// Used to filter out regex matches that fall inside inert regions.
 func buildInertMask(s string) []bool {
 	mask := make([]bool, len(s))
 	for i := 0; i < len(s); {
@@ -173,6 +173,30 @@ func buildInertMask(s string) []bool {
 				} else {
 					i++
 				}
+			}
+		} else if c == '$' { // dollar-quoted string ($$...$$ or $tag$...$tag$)
+			tag := extractDollarTagBytes(s, i)
+			if tag != "" {
+				tagLen := len(tag)
+				// Mark opening tag
+				for k := 0; k < tagLen && i < len(s); k++ {
+					mask[i] = true
+					i++
+				}
+				// Mark body until closing tag
+				for i < len(s) {
+					if s[i] == '$' && i+tagLen <= len(s) && s[i:i+tagLen] == tag {
+						for k := 0; k < tagLen && i < len(s); k++ {
+							mask[i] = true
+							i++
+						}
+						break
+					}
+					mask[i] = true
+					i++
+				}
+			} else {
+				i++
 			}
 		} else if c == '-' && i+1 < len(s) && s[i+1] == '-' { // line comment
 			for i < len(s) && s[i] != '\n' {
@@ -199,6 +223,27 @@ func buildInertMask(s string) []bool {
 		}
 	}
 	return mask
+}
+
+// extractDollarTagBytes extracts a $tag$ delimiter starting at byte position i
+// in s.  Returns the full tag string (e.g. "$$" or "$body$") or "" if none.
+func extractDollarTagBytes(s string, i int) string {
+	if i >= len(s) || s[i] != '$' {
+		return ""
+	}
+	j := i + 1
+	for j < len(s) && isWordCharByte(s[j]) {
+		j++
+	}
+	if j < len(s) && s[j] == '$' {
+		return s[i : j+1]
+	}
+	return ""
+}
+
+func isWordCharByte(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+		(c >= '0' && c <= '9') || c == '_'
 }
 
 // sqlStmt returns the raw statement text from sql given a StatementRange.

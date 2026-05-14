@@ -5823,6 +5823,10 @@ func TestCortexAI_NoFalsePositivesInCommentsAndStrings(t *testing.T) {
 		"/* SNOWFLAKE.CORTEX.FAKE_FUNC(x) */ SELECT 1",
 		// String literal
 		"SELECT 'SNOWFLAKE.CORTEX.FAKE_FUNC(x)' FROM t",
+		// Dollar-quoted string
+		"EXECUTE IMMEDIATE $$SELECT SNOWFLAKE.CORTEX.FAKE_FUNC(x) FROM t$$",
+		// Dollar-quoted procedure body with tagged delimiter
+		"CREATE PROCEDURE p() RETURNS STRING LANGUAGE SQL AS $body$\n  SELECT SNOWFLAKE.CORTEX.NOT_REAL(col) FROM t;\n$body$",
 	}
 
 	for _, sql := range noWarnQueries {
@@ -5837,4 +5841,41 @@ func TestCortexAI_NoFalsePositivesInCommentsAndStrings(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCortexAI_CaseInsensitive(t *testing.T) {
+	// Known function in lowercase — should produce no warning
+	validQueries := []string{
+		"SELECT snowflake.cortex.complete('mistral-7b', prompt) FROM t",
+		"SELECT Snowflake.Cortex.Sentiment(review) FROM t",
+		"SELECT SNOWFLAKE.cortex.SUMMARIZE(text) FROM t",
+	}
+	for _, sql := range validQueries {
+		t.Run("valid/"+sql[:min(len(sql), 40)], func(t *testing.T) {
+			stmtRanges := GetStatementRanges(sql)
+			markers := ValidateSnowflakePatterns(sql, stmtRanges)
+			for _, w := range getWarnings(markers) {
+				if strings.Contains(w.Message, "Unknown Cortex function") {
+					t.Errorf("Expected no Cortex warning for %q, got: %v", sql, w.Message)
+				}
+			}
+		})
+	}
+
+	// Unknown function in lowercase — should still produce a warning
+	invalidSQL := "SELECT snowflake.cortex.magic_answer(col) FROM t"
+	t.Run("invalid/"+invalidSQL[:40], func(t *testing.T) {
+		stmtRanges := GetStatementRanges(invalidSQL)
+		markers := ValidateSnowflakePatterns(invalidSQL, stmtRanges)
+		warns := getWarnings(markers)
+		found := false
+		for _, w := range warns {
+			if strings.Contains(w.Message, "Unknown Cortex function") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("Expected unknown Cortex function warning for %q, got none", invalidSQL)
+		}
+	})
 }
