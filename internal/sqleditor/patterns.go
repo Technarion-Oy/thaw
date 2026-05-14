@@ -651,7 +651,7 @@ var (
 	// ── CREATE / ALTER SECRET ─────────────────────────────────────────────
 	reIsCreateSecret    = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SECRET\b`)
 	reCreateSecretName  = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?SECRET\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
-	reSecretType        = regexp.MustCompile(`(?i)\bTYPE\s*=\s*([\w]+)`)
+	reSecretType        = regexp.MustCompile(`(?i)\bTYPE\b\s*=\s*([\w]+)`)
 	reSecretAPIA        = regexp.MustCompile(`(?i)\bAPI_AUTHENTICATION\s*=\s*` + _ident)
 	reSecretUsername     = regexp.MustCompile(`(?i)\bUSERNAME\s*=`)
 	reSecretPassword    = regexp.MustCompile(`(?i)\bPASSWORD\s*=`)
@@ -7120,6 +7120,54 @@ func validateDropGitRepository(parseText string, r StatementRange) []DiagMarker 
 	return markers
 }
 
+// ── CREATE SECRET data-driven type validation ────────────────────────────────
+
+// secretPropDef associates a regex with its display name and owning type(s).
+type secretPropDef struct {
+	re    *regexp.Regexp
+	name  string
+	owner string // human-readable owner type(s)
+}
+
+// secretMandatoryDef describes a mandatory property for a given TYPE.
+type secretMandatoryDef struct {
+	re   *regexp.Regexp
+	hint string // e.g. "API_AUTHENTICATION = <security_integration_name>"
+}
+
+// secretTypeAllowed maps each TYPE to the set of type-specific property regexes
+// that are valid for it. Properties not in this set trigger a cross-type warning.
+var secretTypeAllowed = map[string]map[*regexp.Regexp]bool{
+	"OAUTH2":               {reSecretAPIA: true, reSecretOAuthScopes: true, reSecretOAuthRT: true, reSecretOAuthRTExp: true},
+	"PASSWORD":             {reSecretUsername: true, reSecretPassword: true},
+	"GENERIC_STRING":       {reSecretString: true},
+	"CLOUD_PROVIDER_TOKEN": {reSecretAPIA: true, reSecretEnabled: true},
+	"SYMMETRIC_KEY":        {reSecretAlgorithm: true},
+}
+
+// secretTypeMandatory maps each TYPE to its mandatory properties.
+var secretTypeMandatory = map[string][]secretMandatoryDef{
+	"OAUTH2":               {{reSecretAPIA, "API_AUTHENTICATION = <security_integration_name>"}},
+	"PASSWORD":             {{reSecretUsername, "USERNAME = '<username>'"}, {reSecretPassword, "PASSWORD = '<password>'"}},
+	"GENERIC_STRING":       {{reSecretString, "SECRET_STRING = '<value>'"}},
+	"CLOUD_PROVIDER_TOKEN": {{reSecretAPIA, "API_AUTHENTICATION = <security_integration_name>"}},
+	"SYMMETRIC_KEY":        {{reSecretAlgorithm, "ALGORITHM = '<algorithm>'"}},
+}
+
+// secretTypedProps lists all type-specific properties with their owning type.
+// This is iterated for cross-type violation detection.
+var secretTypedProps = []secretPropDef{
+	{reSecretAPIA, "API_AUTHENTICATION", "OAUTH2 or CLOUD_PROVIDER_TOKEN"},
+	{reSecretUsername, "USERNAME", "PASSWORD"},
+	{reSecretPassword, "PASSWORD", "PASSWORD"},
+	{reSecretString, "SECRET_STRING", "GENERIC_STRING"},
+	{reSecretEnabled, "ENABLED", "CLOUD_PROVIDER_TOKEN"},
+	{reSecretAlgorithm, "ALGORITHM", "SYMMETRIC_KEY"},
+	{reSecretOAuthScopes, "OAUTH_SCOPES", "OAUTH2"},
+	{reSecretOAuthRT, "OAUTH_REFRESH_TOKEN", "OAUTH2"},
+	{reSecretOAuthRTExp, "OAUTH_REFRESH_TOKEN_EXPIRY_TIME", "OAUTH2"},
+}
+
 // ── validateCreateSecret ─────────────────────────────────────────────────────
 
 // validateCreateSecret checks structural requirements for
@@ -7171,195 +7219,33 @@ func validateCreateSecret(parseText string, r StatementRange) []DiagMarker {
 	secretType := strings.ToUpper(typeMatch[1])
 
 	// 4. Validate TYPE value and type-specific properties.
-	switch secretType {
-	case "OAUTH2":
-		// API_AUTHENTICATION is mandatory.
-		if !reSecretAPIA.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"TYPE = OAUTH2 requires API_AUTHENTICATION = <security_integration_name>.", 4))
-		}
-		// Cross-type property checks.
-		if reSecretUsername.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"USERNAME is not valid for TYPE = OAUTH2. USERNAME belongs to TYPE = PASSWORD.", 4))
-		}
-		if reSecretPassword.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"PASSWORD is not valid for TYPE = OAUTH2. PASSWORD belongs to TYPE = PASSWORD.", 4))
-		}
-		if reSecretString.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"SECRET_STRING is not valid for TYPE = OAUTH2. SECRET_STRING belongs to TYPE = GENERIC_STRING.", 4))
-		}
-		if reSecretAlgorithm.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"ALGORITHM is not valid for TYPE = OAUTH2. ALGORITHM belongs to TYPE = SYMMETRIC_KEY.", 4))
-		}
-		if reSecretEnabled.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"ENABLED is not valid for TYPE = OAUTH2. ENABLED belongs to TYPE = CLOUD_PROVIDER_TOKEN.", 4))
-		}
-
-	case "PASSWORD":
-		// USERNAME and PASSWORD are mandatory.
-		if !reSecretUsername.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"TYPE = PASSWORD requires USERNAME = '<username>'.", 4))
-		}
-		if !reSecretPassword.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"TYPE = PASSWORD requires PASSWORD = '<password>'.", 4))
-		}
-		// Cross-type property checks.
-		if reSecretAPIA.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"API_AUTHENTICATION is not valid for TYPE = PASSWORD. API_AUTHENTICATION belongs to TYPE = OAUTH2.", 4))
-		}
-		if reSecretString.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"SECRET_STRING is not valid for TYPE = PASSWORD. SECRET_STRING belongs to TYPE = GENERIC_STRING.", 4))
-		}
-		if reSecretAlgorithm.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"ALGORITHM is not valid for TYPE = PASSWORD. ALGORITHM belongs to TYPE = SYMMETRIC_KEY.", 4))
-		}
-		if reSecretEnabled.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"ENABLED is not valid for TYPE = PASSWORD. ENABLED belongs to TYPE = CLOUD_PROVIDER_TOKEN.", 4))
-		}
-		if reSecretOAuthScopes.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"OAUTH_SCOPES is not valid for TYPE = PASSWORD. OAUTH_SCOPES belongs to TYPE = OAUTH2.", 4))
-		}
-		if reSecretOAuthRT.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"OAUTH_REFRESH_TOKEN is not valid for TYPE = PASSWORD. OAUTH_REFRESH_TOKEN belongs to TYPE = OAUTH2.", 4))
-		}
-		if reSecretOAuthRTExp.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"OAUTH_REFRESH_TOKEN_EXPIRY_TIME is not valid for TYPE = PASSWORD. OAUTH_REFRESH_TOKEN_EXPIRY_TIME belongs to TYPE = OAUTH2.", 4))
-		}
-
-	case "GENERIC_STRING":
-		// SECRET_STRING is mandatory.
-		if !reSecretString.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"TYPE = GENERIC_STRING requires SECRET_STRING = '<value>'.", 4))
-		}
-		// Cross-type property checks.
-		if reSecretAPIA.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"API_AUTHENTICATION is not valid for TYPE = GENERIC_STRING. API_AUTHENTICATION belongs to TYPE = OAUTH2.", 4))
-		}
-		if reSecretUsername.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"USERNAME is not valid for TYPE = GENERIC_STRING. USERNAME belongs to TYPE = PASSWORD.", 4))
-		}
-		if reSecretPassword.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"PASSWORD is not valid for TYPE = GENERIC_STRING. PASSWORD belongs to TYPE = PASSWORD.", 4))
-		}
-		if reSecretAlgorithm.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"ALGORITHM is not valid for TYPE = GENERIC_STRING. ALGORITHM belongs to TYPE = SYMMETRIC_KEY.", 4))
-		}
-		if reSecretEnabled.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"ENABLED is not valid for TYPE = GENERIC_STRING. ENABLED belongs to TYPE = CLOUD_PROVIDER_TOKEN.", 4))
-		}
-		if reSecretOAuthScopes.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"OAUTH_SCOPES is not valid for TYPE = GENERIC_STRING. OAUTH_SCOPES belongs to TYPE = OAUTH2.", 4))
-		}
-		if reSecretOAuthRT.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"OAUTH_REFRESH_TOKEN is not valid for TYPE = GENERIC_STRING. OAUTH_REFRESH_TOKEN belongs to TYPE = OAUTH2.", 4))
-		}
-		if reSecretOAuthRTExp.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"OAUTH_REFRESH_TOKEN_EXPIRY_TIME is not valid for TYPE = GENERIC_STRING. OAUTH_REFRESH_TOKEN_EXPIRY_TIME belongs to TYPE = OAUTH2.", 4))
-		}
-
-	case "CLOUD_PROVIDER_TOKEN":
-		// API_AUTHENTICATION is mandatory.
-		if !reSecretAPIA.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"TYPE = CLOUD_PROVIDER_TOKEN requires API_AUTHENTICATION = <security_integration_name>.", 4))
-		}
-		// Cross-type property checks.
-		if reSecretUsername.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"USERNAME is not valid for TYPE = CLOUD_PROVIDER_TOKEN. USERNAME belongs to TYPE = PASSWORD.", 4))
-		}
-		if reSecretPassword.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"PASSWORD is not valid for TYPE = CLOUD_PROVIDER_TOKEN. PASSWORD belongs to TYPE = PASSWORD.", 4))
-		}
-		if reSecretString.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"SECRET_STRING is not valid for TYPE = CLOUD_PROVIDER_TOKEN. SECRET_STRING belongs to TYPE = GENERIC_STRING.", 4))
-		}
-		if reSecretAlgorithm.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"ALGORITHM is not valid for TYPE = CLOUD_PROVIDER_TOKEN. ALGORITHM belongs to TYPE = SYMMETRIC_KEY.", 4))
-		}
-		if reSecretOAuthScopes.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"OAUTH_SCOPES is not valid for TYPE = CLOUD_PROVIDER_TOKEN. OAUTH_SCOPES belongs to TYPE = OAUTH2.", 4))
-		}
-		if reSecretOAuthRT.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"OAUTH_REFRESH_TOKEN is not valid for TYPE = CLOUD_PROVIDER_TOKEN. OAUTH_REFRESH_TOKEN belongs to TYPE = OAUTH2.", 4))
-		}
-		if reSecretOAuthRTExp.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"OAUTH_REFRESH_TOKEN_EXPIRY_TIME is not valid for TYPE = CLOUD_PROVIDER_TOKEN. OAUTH_REFRESH_TOKEN_EXPIRY_TIME belongs to TYPE = OAUTH2.", 4))
-		}
-
-	case "SYMMETRIC_KEY":
-		// ALGORITHM is mandatory.
-		if !reSecretAlgorithm.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"TYPE = SYMMETRIC_KEY requires ALGORITHM = '<algorithm>'.", 4))
-		}
-		// Cross-type property checks.
-		if reSecretAPIA.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"API_AUTHENTICATION is not valid for TYPE = SYMMETRIC_KEY. API_AUTHENTICATION belongs to TYPE = OAUTH2.", 4))
-		}
-		if reSecretUsername.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"USERNAME is not valid for TYPE = SYMMETRIC_KEY. USERNAME belongs to TYPE = PASSWORD.", 4))
-		}
-		if reSecretPassword.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"PASSWORD is not valid for TYPE = SYMMETRIC_KEY. PASSWORD belongs to TYPE = PASSWORD.", 4))
-		}
-		if reSecretString.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"SECRET_STRING is not valid for TYPE = SYMMETRIC_KEY. SECRET_STRING belongs to TYPE = GENERIC_STRING.", 4))
-		}
-		if reSecretEnabled.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"ENABLED is not valid for TYPE = SYMMETRIC_KEY. ENABLED belongs to TYPE = CLOUD_PROVIDER_TOKEN.", 4))
-		}
-		if reSecretOAuthScopes.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"OAUTH_SCOPES is not valid for TYPE = SYMMETRIC_KEY. OAUTH_SCOPES belongs to TYPE = OAUTH2.", 4))
-		}
-		if reSecretOAuthRT.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"OAUTH_REFRESH_TOKEN is not valid for TYPE = SYMMETRIC_KEY. OAUTH_REFRESH_TOKEN belongs to TYPE = OAUTH2.", 4))
-		}
-		if reSecretOAuthRTExp.MatchString(clean) {
-			markers = append(markers, diagMarkerSpan(r,
-				"OAUTH_REFRESH_TOKEN_EXPIRY_TIME is not valid for TYPE = SYMMETRIC_KEY. OAUTH_REFRESH_TOKEN_EXPIRY_TIME belongs to TYPE = OAUTH2.", 4))
-		}
-
-	default:
+	allowed, ok := secretTypeAllowed[secretType]
+	if !ok {
 		markers = append(markers, diagMarkerSpan(r,
 			fmt.Sprintf("Unknown TYPE '%s'. Valid types: OAUTH2, PASSWORD, GENERIC_STRING, CLOUD_PROVIDER_TOKEN, SYMMETRIC_KEY.", typeMatch[1]), 4))
 		return markers
+	}
+
+	// Check mandatory properties.
+	if mandatory, hasMandatory := secretTypeMandatory[secretType]; hasMandatory {
+		for _, mp := range mandatory {
+			if !mp.re.MatchString(clean) {
+				markers = append(markers, diagMarkerSpan(r,
+					fmt.Sprintf("TYPE = %s requires %s.", secretType, mp.hint), 4))
+			}
+		}
+	}
+
+	// Cross-type property checks.
+	for _, sp := range secretTypedProps {
+		if allowed[sp.re] {
+			continue // property is valid for this TYPE
+		}
+		if sp.re.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("%s is not valid for TYPE = %s. %s belongs to TYPE = %s.",
+					sp.name, secretType, sp.name, sp.owner), 4))
+		}
 	}
 
 	// 5. Only known properties are accepted.

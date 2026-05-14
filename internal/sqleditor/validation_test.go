@@ -5647,6 +5647,12 @@ func TestValidateSnowflakePatterns_Secret(t *testing.T) {
 			"ALTER SECRET my_secret REFRESH",
 			[]string{"Unknown ALTER SECRET sub-command"},
 		},
+		// -- FAIL: ALTER SECRET IF EXISTS unknown sub-command
+		{
+			"ALTER SECRET IF EXISTS unknown action",
+			"ALTER SECRET IF EXISTS my_secret REFRESH",
+			[]string{"Unknown ALTER SECRET sub-command"},
+		},
 	}
 
 	for _, tc := range invalidCases {
