@@ -6895,7 +6895,13 @@ func validateAlterApplication(parseText string, r StatementRange) []DiagMarker {
 		return markers
 	}
 
-	// 3. DEBUG_MODE must be TRUE or FALSE when used with SET.
+	// 3. If UPGRADE USING VERSION is present, PATCH must also be present.
+	if reAppUsingVersion.MatchString(clean) && !reAppUsingVersionPatch.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"USING VERSION requires a PATCH number in ALTER APPLICATION UPGRADE.", 4))
+	}
+
+	// 4. DEBUG_MODE must be TRUE or FALSE when used with SET.
 	validateBoolProp(clean, "DEBUG_MODE", r, &markers)
 
 	return markers

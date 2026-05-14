@@ -5079,6 +5079,12 @@ func TestValidateSnowflakePatterns_ApplicationPackageAndApplication(t *testing.T
 			"CREATE APPLICATION PACKAGE db.my_pkg",
 			[]string{"account-level objects and cannot have a database or schema prefix"},
 		},
+		// CREATE APPLICATION PACKAGE — account-level prefix (three-part name)
+		{
+			"CREATE APPLICATION PACKAGE with three-part name",
+			"CREATE APPLICATION PACKAGE db.schema.my_pkg",
+			[]string{"account-level objects and cannot have a database or schema prefix"},
+		},
 		// CREATE APPLICATION PACKAGE — invalid DISTRIBUTION
 		{
 			"CREATE APPLICATION PACKAGE invalid DISTRIBUTION",
@@ -5208,6 +5214,12 @@ func TestValidateSnowflakePatterns_ApplicationPackageAndApplication(t *testing.T
 			"ALTER APPLICATION DEBUG_MODE invalid",
 			"ALTER APPLICATION my_app SET DEBUG_MODE = MAYBE",
 			[]string{"DEBUG_MODE must be TRUE or FALSE"},
+		},
+		// ALTER APPLICATION — UPGRADE USING VERSION without PATCH
+		{
+			"ALTER APPLICATION UPGRADE VERSION without PATCH",
+			"ALTER APPLICATION my_app UPGRADE USING VERSION v2",
+			[]string{"USING VERSION requires a PATCH number"},
 		},
 
 		// DROP APPLICATION — missing name
