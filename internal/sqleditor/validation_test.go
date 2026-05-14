@@ -6439,6 +6439,8 @@ func TestValidateSnowflakePatterns_AsofJoin(t *testing.T) {
 			`SELECT * FROM t1 ASOF JOIN (SELECT * FROM x JOIN y USING (id)) AS t2 MATCH_CONDITION (t1.ts >= t2.ts)`,
 			// Table name containing "ON" (e.g. options)
 			`SELECT * FROM t1 ASOF JOIN options MATCH_CONDITION (t1.ts >= options.ts)`,
+			// Nested ASOF JOIN inside subquery — outer scope must not be truncated
+			`SELECT * FROM t1 ASOF JOIN (SELECT * FROM x ASOF JOIN y MATCH_CONDITION (x.ts >= y.ts)) AS t2 MATCH_CONDITION (t1.ts >= t2.ts)`,
 		}
 		for _, sql := range validQueries {
 			t.Run(sql[:min(len(sql), 60)], func(t *testing.T) {
@@ -6505,6 +6507,38 @@ func TestValidateSnowflakePatterns_AsofJoin(t *testing.T) {
 					}
 				}
 				if !found {
+					t.Errorf("Expected warning containing %q, got: %v", tc.wantMsg, warns)
+				}
+			})
+		}
+	})
+
+	t.Run("ON/USING without MATCH_CONDITION produces single warning", func(t *testing.T) {
+		// When ON or USING is used instead of MATCH_CONDITION, only the
+		// ON/USING warning should appear — not a redundant "requires
+		// MATCH_CONDITION" warning on top of it.
+		cases := []struct {
+			sql     string
+			wantMsg string
+		}{
+			{
+				sql:     `SELECT * FROM t1 ASOF JOIN t2 ON t1.ts >= t2.ts`,
+				wantMsg: "ON clause is not valid with ASOF JOIN",
+			},
+			{
+				sql:     `SELECT * FROM t1 ASOF JOIN t2 USING (ts)`,
+				wantMsg: "USING clause is not valid with ASOF JOIN",
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.sql[:min(len(tc.sql), 60)], func(t *testing.T) {
+				stmtRanges := GetStatementRanges(tc.sql)
+				markers := ValidateSnowflakePatterns(tc.sql, stmtRanges)
+				warns := getWarnings(markers)
+				if len(warns) != 1 {
+					t.Errorf("Expected exactly 1 warning, got %d: %v", len(warns), warns)
+				}
+				if len(warns) > 0 && !strings.Contains(warns[0].Message, tc.wantMsg) {
 					t.Errorf("Expected warning containing %q, got: %v", tc.wantMsg, warns)
 				}
 			})

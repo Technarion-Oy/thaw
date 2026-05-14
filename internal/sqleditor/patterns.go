@@ -2820,13 +2820,17 @@ func validateAsofJoinClauses(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
 	clean := strings.TrimSpace(reStripStringLiterals.ReplaceAllString(stripped, "''"))
 
-	for _, loc := range reAsofJoinClause.FindAllStringIndex(clean, -1) {
-		// Extract the text after ASOF JOIN up to the next ASOF JOIN or end of statement.
+	// Find all top-level ASOF JOIN positions (skip matches inside parenthesized
+	// subqueries so nested ASOF JOINs don't corrupt the outer scope).
+	topLevelLocs := findTopLevelMatches(clean, reAsofJoinClause)
+
+	for i, loc := range topLevelLocs {
+		// Scope: text after this ASOF JOIN up to the next top-level ASOF JOIN
+		// (or end of statement).
 		afterJoin := clean[loc[1]:]
-		nextAsof := reAsofJoinClause.FindStringIndex(afterJoin)
 		var scope string
-		if nextAsof != nil {
-			scope = afterJoin[:nextAsof[0]]
+		if i+1 < len(topLevelLocs) {
+			scope = clean[loc[1]:topLevelLocs[i+1][0]]
 		} else {
 			scope = afterJoin
 		}
@@ -2835,19 +2839,24 @@ func validateAsofJoinClauses(stripped string, r StatementRange) []DiagMarker {
 		hasUsingFunction := reAsofUsingFunction.MatchString(scope)
 
 		// 1. Check for invalid ON clause.
+		flaggedOnOrUsing := false
 		if hasOnClause(scope, hasMatchCondition) {
 			markers = append(markers, diagMarkerSpan(r,
 				"ON clause is not valid with ASOF JOIN. Use MATCH_CONDITION instead.", 4))
+			flaggedOnOrUsing = true
 		}
 
 		// 2. Check for invalid USING clause (plain USING, not USING FUNCTION).
 		if hasUsingClause(scope, hasUsingFunction) {
 			markers = append(markers, diagMarkerSpan(r,
 				"USING clause is not valid with ASOF JOIN. Use MATCH_CONDITION instead.", 4))
+			flaggedOnOrUsing = true
 		}
 
 		// 3. Validate MATCH_CONDITION or USING FUNCTION is present.
-		if !hasMatchCondition && !hasUsingFunction {
+		// Skip if ON/USING was already flagged — those messages already say
+		// "Use MATCH_CONDITION instead", so a second warning is redundant.
+		if !hasMatchCondition && !hasUsingFunction && !flaggedOnOrUsing {
 			markers = append(markers, diagMarkerSpan(r,
 				"ASOF JOIN requires a MATCH_CONDITION clause. Use ASOF JOIN <table> MATCH_CONDITION (<left_expr> >= <right_expr>).", 4))
 			continue
@@ -2990,6 +2999,44 @@ func hasUsingClause(scope string, hasUsingFunction bool) bool {
 		}
 	}
 	return false
+}
+
+// findTopLevelMatches returns all matches of re in s that are not inside
+// parenthesized groups. This prevents nested ASOF JOINs inside subqueries
+// from corrupting the scope splitting of the outer ASOF JOIN.
+func findTopLevelMatches(s string, re *regexp.Regexp) [][]int {
+	allLocs := re.FindAllStringIndex(s, -1)
+	if len(allLocs) == 0 {
+		return nil
+	}
+	// Precompute paren depth at every position that starts a match.
+	// We scan once to build a depth array up to the last match start.
+	maxPos := allLocs[len(allLocs)-1][0]
+	depth := 0
+	depthAt := make(map[int]int, len(allLocs))
+	matchIdx := 0
+	for i := 0; i <= maxPos && matchIdx < len(allLocs); i++ {
+		if i == allLocs[matchIdx][0] {
+			depthAt[i] = depth
+			matchIdx++
+		}
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		}
+	}
+
+	var result [][]int
+	for _, loc := range allLocs {
+		if depthAt[loc[0]] == 0 {
+			result = append(result, loc)
+		}
+	}
+	return result
 }
 
 // findMatchingParen finds the index of the closing ')' that matches the opening
