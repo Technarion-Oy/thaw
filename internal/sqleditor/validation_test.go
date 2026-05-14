@@ -47,6 +47,12 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"CREATE MATERIALIZED VIEW mv AS SELECT 1 FROM t",
 		// Snowflake Dynamic Tables
 		"CREATE DYNAMIC TABLE dt TARGET_LAG = '1 minute' WAREHOUSE = wh AS SELECT 1 FROM t",
+		// ALTER DYNAMIC TABLE — comprehensive tests in TestValidateSnowflakePatterns_AlterDynamicTable
+		"ALTER DYNAMIC TABLE my_dt REFRESH",
+		"ALTER DYNAMIC TABLE my_dt SUSPEND",
+		"ALTER DYNAMIC TABLE my_dt RESUME",
+		"ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = '1 minute'",
+		"ALTER DYNAMIC TABLE my_dt SET WAREHOUSE = my_wh",
 		// Sequences
 		"CREATE SEQUENCE my_seq START WITH 1",
 		"ALTER SEQUENCE my_seq INCREMENT = 10",
@@ -6984,4 +6990,157 @@ func TestValidateBareColumnRefs_MatchRecognizeSuppression(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ── ALTER DYNAMIC TABLE Tests ────────────────────────────────────────────────
+
+func TestValidateSnowflakePatterns_AlterDynamicTable(t *testing.T) {
+	t.Run("valid ALTER DYNAMIC TABLE", func(t *testing.T) {
+		validQueries := []string{
+			// REFRESH
+			"ALTER DYNAMIC TABLE my_dt REFRESH",
+			"ALTER DYNAMIC TABLE IF EXISTS my_dt REFRESH",
+			"ALTER DYNAMIC TABLE db.schema.my_dt REFRESH",
+			// SUSPEND
+			"ALTER DYNAMIC TABLE my_dt SUSPEND",
+			"ALTER DYNAMIC TABLE IF EXISTS my_dt SUSPEND",
+			// RESUME
+			"ALTER DYNAMIC TABLE my_dt RESUME",
+			"ALTER DYNAMIC TABLE IF EXISTS my_dt RESUME",
+			// SET TARGET_LAG
+			"ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = '1 minute'",
+			"ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = '5 minutes'",
+			"ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = '1 hour'",
+			"ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = '2 hours'",
+			"ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = '30 seconds'",
+			"ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = '1 day'",
+			"ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = '7 days'",
+			"ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = DOWNSTREAM",
+			"ALTER DYNAMIC TABLE IF EXISTS my_dt SET TARGET_LAG = DOWNSTREAM",
+			// SET WAREHOUSE
+			"ALTER DYNAMIC TABLE my_dt SET WAREHOUSE = my_wh",
+			"ALTER DYNAMIC TABLE IF EXISTS my_dt SET WAREHOUSE = my_wh",
+			// SET COMMENT (string literal stripped by preprocessing — exercises non-TARGET_LAG SET path)
+			"ALTER DYNAMIC TABLE my_dt SET COMMENT = 'hello world'",
+			// UNSET
+			"ALTER DYNAMIC TABLE my_dt UNSET DATA_RETENTION_TIME_IN_DAYS",
+			"ALTER DYNAMIC TABLE IF EXISTS my_dt UNSET DATA_RETENTION_TIME_IN_DAYS",
+			// SWAP WITH
+			"ALTER DYNAMIC TABLE my_dt SWAP WITH other_dt",
+			"ALTER DYNAMIC TABLE IF EXISTS my_dt SWAP WITH db.schema.other_dt",
+			// RENAME TO
+			"ALTER DYNAMIC TABLE my_dt RENAME TO new_name",
+			"ALTER DYNAMIC TABLE IF EXISTS my_dt RENAME TO db.schema.new_name",
+			// Case insensitive
+			"alter dynamic table my_dt refresh",
+			"ALTER DYNAMIC TABLE my_dt set target_lag = downstream",
+			"Alter Dynamic Table my_dt Suspend",
+			// Table name collides with a sub-command keyword — must not false-positive
+			"ALTER DYNAMIC TABLE suspend SET TARGET_LAG = DOWNSTREAM",
+			"ALTER DYNAMIC TABLE resume SET WAREHOUSE = my_wh",
+			"ALTER DYNAMIC TABLE refresh SUSPEND",
+			"ALTER DYNAMIC TABLE set RESUME",
+			// With trailing semicolons / whitespace
+			"ALTER DYNAMIC TABLE my_dt REFRESH;",
+			"ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = '1 minute';  ",
+		}
+		for _, sql := range validQueries {
+			t.Run(sql, func(t *testing.T) {
+				stmtRanges := GetStatementRanges(sql)
+				markers := ValidateSnowflakePatterns(sql, stmtRanges)
+				warns := getWarnings(markers)
+				if len(warns) > 0 {
+					t.Errorf("Expected no warnings for %q, got: %v", sql, warns)
+				}
+			})
+		}
+	})
+
+	t.Run("invalid ALTER DYNAMIC TABLE", func(t *testing.T) {
+		cases := []struct {
+			sql     string
+			wantMsg string
+		}{
+			// Missing table name
+			{
+				sql:     "ALTER DYNAMIC TABLE",
+				wantMsg: "ALTER DYNAMIC TABLE requires a table name",
+			},
+			// Unknown sub-command
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt TRUNCATE",
+				wantMsg: "Unknown ALTER DYNAMIC TABLE sub-command",
+			},
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt DROP",
+				wantMsg: "Unknown ALTER DYNAMIC TABLE sub-command",
+			},
+			// SWAP WITH without target name
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt SWAP WITH",
+				wantMsg: "SWAP WITH requires a target table name",
+			},
+			// RENAME TO without new name
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt RENAME TO",
+				wantMsg: "RENAME TO requires a new table name",
+			},
+			// Multiple sub-commands in one statement
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt SUSPEND RESUME",
+				wantMsg: "ALTER DYNAMIC TABLE supports only one sub-command per statement",
+			},
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt REFRESH SUSPEND",
+				wantMsg: "ALTER DYNAMIC TABLE supports only one sub-command per statement",
+			},
+			// Invalid TARGET_LAG value
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = 'invalid'",
+				wantMsg: "Invalid TARGET_LAG value",
+			},
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = '1 fortnight'",
+				wantMsg: "Invalid TARGET_LAG value",
+			},
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = 42",
+				wantMsg: "Invalid TARGET_LAG value",
+			},
+			// Zero-duration TARGET_LAG (Snowflake requires positive integer)
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = '0 seconds'",
+				wantMsg: "Invalid TARGET_LAG value",
+			},
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = '0 minutes'",
+				wantMsg: "Invalid TARGET_LAG value",
+			},
+			// Bare SET / UNSET without a property name
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt SET",
+				wantMsg: "SET requires at least one property",
+			},
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt UNSET",
+				wantMsg: "UNSET requires at least one property name",
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.sql, func(t *testing.T) {
+				stmtRanges := GetStatementRanges(tc.sql)
+				markers := ValidateSnowflakePatterns(tc.sql, stmtRanges)
+				warns := getWarnings(markers)
+				found := false
+				for _, w := range warns {
+					if strings.Contains(w.Message, tc.wantMsg) {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("Expected warning containing %q for %q, got: %v", tc.wantMsg, tc.sql, warns)
+				}
+			})
+		}
+	})
 }

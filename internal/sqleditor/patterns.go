@@ -218,6 +218,25 @@ var (
 	reDynHasWarehouse  = regexp.MustCompile(`(?i)\bWAREHOUSE\s*=`)
 	reDynHasAs         = regexp.MustCompile(`(?i)\bAS\s+(?:SELECT|WITH)\b`)
 
+	// ── ALTER DYNAMIC TABLE ──────────────────────────────────────────────────
+	reIsAlterDynTable   = regexp.MustCompile(`(?i)^\s*ALTER\s+DYNAMIC\s+TABLE\b`)
+	reAlterDynTableName = regexp.MustCompile(
+		`(?i)^\s*ALTER\s+DYNAMIC\s+TABLE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
+	// Sub-command detection (matched against the cleaned text after the table name).
+	reAlterDynTableRefresh      = regexp.MustCompile(`(?i)\bREFRESH\b`)
+	reAlterDynTableSuspend      = regexp.MustCompile(`(?i)\bSUSPEND\b`)
+	reAlterDynTableResume       = regexp.MustCompile(`(?i)\bRESUME\b`)
+	reAlterDynTableSet          = regexp.MustCompile(`(?i)\bSET\b`)
+	reAlterDynTableUnset        = regexp.MustCompile(`(?i)\bUNSET\b`)
+	reAlterDynTableSwapWith     = regexp.MustCompile(`(?i)\bSWAP\s+WITH\b`)
+	reAlterDynTableRenameTo     = regexp.MustCompile(`(?i)\bRENAME\s+TO\b`)
+	reAlterDynTableSwapTarget   = regexp.MustCompile(`(?i)\bSWAP\s+WITH\s+(` + _identPath + `)`)
+	reAlterDynTableRenameTarget = regexp.MustCompile(`(?i)\bRENAME\s+TO\s+(` + _identPath + `)`)
+	// SET property detection
+	reAlterDynTableTargetLagBare = regexp.MustCompile(`(?i)\bTARGET_LAG\s*=`)
+	reAlterDynTableTargetLagVal  = regexp.MustCompile(
+		`(?i)\bTARGET_LAG\s*=\s*(?:'(?:[1-9]\d*\s+(?:seconds?|minutes?|hours?|days?))'|DOWNSTREAM\b)`)
+
 	// ── CREATE INTEGRATION ────────────────────────────────────────────────────
 	reIsCreateIntegration = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:STORAGE|API|NOTIFICATION|SECURITY|EXTERNAL\s+ACCESS)\s+INTEGRATION\b`)
 	reIntegrationName     = regexp.MustCompile(`(?i)INTEGRATION\s+(` + _identPath + `)`)
@@ -2679,6 +2698,13 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// Validate before the FP guard skips the statement.
 		if reIsAlterTableSearchOpt.MatchString(stripped) {
 			markers = append(markers, validateAlterTableSearchOptimization(stripped, r)...)
+			continue
+		}
+
+		// ── ALTER DYNAMIC TABLE lifecycle commands ───────────────────────
+		// Validate before the FP guard skips the statement.
+		if reIsAlterDynTable.MatchString(parseText) {
+			markers = append(markers, validateAlterDynamicTable(parseText, r)...)
 			continue
 		}
 
@@ -8272,6 +8298,99 @@ func validateAlterTableSearchOptimization(stripped string, r StatementRange) []D
 		if !searchOptValidExprs[funcName] {
 			markers = append(markers, diagMarkerSpan(r,
 				fmt.Sprintf("Unknown search optimization type %q. Valid types are EQUALITY, SUBSTRING, GEO, FULL_TEXT.", funcName), 4))
+		}
+	}
+
+	return markers
+}
+
+// ── validateAlterDynamicTable ───────────────────────────────────────────────
+
+// validateAlterDynamicTable checks structural requirements for
+// ALTER DYNAMIC TABLE lifecycle commands:
+//   - Table name is mandatory.
+//   - Known sub-commands: REFRESH, SUSPEND, RESUME, SET, UNSET, SWAP WITH, RENAME TO.
+//   - SWAP WITH requires a target table name.
+//   - RENAME TO requires a new name.
+//   - SET TARGET_LAG value must be a valid lag time or DOWNSTREAM.
+//   - Unknown sub-commands produce a warning.
+func validateAlterDynamicTable(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+
+	// 1. Table name is required.
+	nm := reAlterDynTableName.FindStringSubmatch(clean)
+	if nm == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"ALTER DYNAMIC TABLE requires a table name.", 4))
+		return markers
+	}
+
+	// 2. Determine sub-command from the suffix after the table name, so that
+	//    a table name matching a keyword (e.g. "suspend") is not mistaken
+	//    for a sub-command.
+	suffix := clean[reAlterDynTableName.FindStringIndex(clean)[1]:]
+	hasRefresh := reAlterDynTableRefresh.MatchString(suffix)
+	hasSuspend := reAlterDynTableSuspend.MatchString(suffix)
+	hasResume := reAlterDynTableResume.MatchString(suffix)
+	hasSet := reAlterDynTableSet.MatchString(suffix)
+	hasUnset := reAlterDynTableUnset.MatchString(suffix)
+	hasSwap := reAlterDynTableSwapWith.MatchString(suffix)
+	hasRename := reAlterDynTableRenameTo.MatchString(suffix)
+
+	anyKnown := hasRefresh || hasSuspend || hasResume || hasSet || hasUnset || hasSwap || hasRename
+
+	if !anyKnown {
+		markers = append(markers, diagMarkerSpan(r,
+			"Unknown ALTER DYNAMIC TABLE sub-command. Expected REFRESH, SUSPEND, RESUME, SET, UNSET, SWAP WITH, or RENAME TO.", 4))
+		return markers
+	}
+
+	// Count sub-commands — Snowflake only allows one per statement.
+	subCmdCount := 0
+	for _, has := range []bool{hasRefresh, hasSuspend, hasResume, hasSet, hasUnset, hasSwap, hasRename} {
+		if has {
+			subCmdCount++
+		}
+	}
+	if subCmdCount > 1 {
+		markers = append(markers, diagMarkerSpan(r,
+			"ALTER DYNAMIC TABLE supports only one sub-command per statement.", 4))
+	}
+
+	// 3. SWAP WITH requires a target table name.
+	if hasSwap && reAlterDynTableSwapTarget.FindStringSubmatch(suffix) == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"SWAP WITH requires a target table name.", 4))
+	}
+
+	// 4. RENAME TO requires a new name.
+	if hasRename && reAlterDynTableRenameTarget.FindStringSubmatch(suffix) == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"RENAME TO requires a new table name.", 4))
+	}
+
+	// 5. Bare SET / UNSET without a property name.
+	suffixTrimmed := strings.TrimSpace(suffix)
+	if hasSet && !hasUnset && strings.EqualFold(suffixTrimmed, "SET") {
+		markers = append(markers, diagMarkerSpan(r,
+			"SET requires at least one property (e.g. TARGET_LAG, WAREHOUSE).", 4))
+	}
+	if hasUnset && !hasSet && strings.EqualFold(suffixTrimmed, "UNSET") {
+		markers = append(markers, diagMarkerSpan(r,
+			"UNSET requires at least one property name.", 4))
+	}
+
+	// 6. SET TARGET_LAG value validation.
+	//    The bare check uses suffix (no string literals to worry about).
+	//    The value check uses parseText (raw) because clean has string literals
+	//    stripped, and the lag value is inside a string literal (e.g. '1 minute').
+	if hasSet && reAlterDynTableTargetLagBare.MatchString(suffix) {
+		if !reAlterDynTableTargetLagVal.MatchString(parseText) {
+			markers = append(markers, diagMarkerSpan(r,
+				"Invalid TARGET_LAG value. Expected a quoted duration (e.g. '1 minute') or DOWNSTREAM.", 4))
 		}
 	}
 
