@@ -233,8 +233,6 @@ var (
 	reAlterDynTableSwapTarget   = regexp.MustCompile(`(?i)\bSWAP\s+WITH\s+(` + _identPath + `)`)
 	reAlterDynTableRenameTarget = regexp.MustCompile(`(?i)\bRENAME\s+TO\s+(` + _identPath + `)`)
 	// SET property detection
-	reAlterDynTableTargetLag = regexp.MustCompile(
-		`(?i)\bTARGET_LAG\s*=\s*(?:'[^']*'|DOWNSTREAM)\b`)
 	reAlterDynTableTargetLagBare = regexp.MustCompile(`(?i)\bTARGET_LAG\s*=`)
 	reAlterDynTableTargetLagVal  = regexp.MustCompile(
 		`(?i)\bTARGET_LAG\s*=\s*(?:'(?:\d+\s+(?:seconds?|minutes?|hours?|days?))'|DOWNSTREAM\b)`)
@@ -8330,20 +8328,22 @@ func validateAlterDynamicTable(parseText string, r StatementRange) []DiagMarker 
 		return markers
 	}
 
-	// 2. Determine sub-command from text after "ALTER DYNAMIC TABLE [IF EXISTS] <name>".
-	hasRefresh := reAlterDynTableRefresh.MatchString(clean)
-	hasSuspend := reAlterDynTableSuspend.MatchString(clean)
-	hasResume := reAlterDynTableResume.MatchString(clean)
-	hasSet := reAlterDynTableSet.MatchString(clean)
-	hasUnset := reAlterDynTableUnset.MatchString(clean)
-	hasSwap := reAlterDynTableSwapWith.MatchString(clean)
-	hasRename := reAlterDynTableRenameTo.MatchString(clean)
+	// 2. Determine sub-command from the suffix after the table name, so that
+	//    a table name matching a keyword (e.g. "suspend") is not mistaken
+	//    for a sub-command.
+	suffix := clean[reAlterDynTableName.FindStringIndex(clean)[1]:]
+	hasRefresh := reAlterDynTableRefresh.MatchString(suffix)
+	hasSuspend := reAlterDynTableSuspend.MatchString(suffix)
+	hasResume := reAlterDynTableResume.MatchString(suffix)
+	hasSet := reAlterDynTableSet.MatchString(suffix)
+	hasUnset := reAlterDynTableUnset.MatchString(suffix)
+	hasSwap := reAlterDynTableSwapWith.MatchString(suffix)
+	hasRename := reAlterDynTableRenameTo.MatchString(suffix)
 
-	// Disambiguate SET/UNSET from other keywords. "UNSET" also contains "SET",
+	// Disambiguate SET/UNSET: "UNSET" also contains "SET",
 	// so only count standalone SET when UNSET is not present.
 	if hasUnset {
-		// Check if SET appears outside of UNSET context.
-		stripped := regexp.MustCompile(`(?i)\bUNSET\b`).ReplaceAllString(clean, "")
+		stripped := reAlterDynTableUnset.ReplaceAllString(suffix, "")
 		hasSet = reAlterDynTableSet.MatchString(stripped)
 	}
 
@@ -8368,18 +8368,20 @@ func validateAlterDynamicTable(parseText string, r StatementRange) []DiagMarker 
 	}
 
 	// 3. SWAP WITH requires a target table name.
-	if hasSwap && reAlterDynTableSwapTarget.FindStringSubmatch(clean) == nil {
+	if hasSwap && reAlterDynTableSwapTarget.FindStringSubmatch(suffix) == nil {
 		markers = append(markers, diagMarkerSpan(r,
 			"SWAP WITH requires a target table name.", 4))
 	}
 
 	// 4. RENAME TO requires a new name.
-	if hasRename && reAlterDynTableRenameTarget.FindStringSubmatch(clean) == nil {
+	if hasRename && reAlterDynTableRenameTarget.FindStringSubmatch(suffix) == nil {
 		markers = append(markers, diagMarkerSpan(r,
 			"RENAME TO requires a new table name.", 4))
 	}
 
 	// 5. SET TARGET_LAG value validation.
+	//    Uses parseText (raw) instead of clean because clean has string literals
+	//    stripped, and the lag value is inside a string literal (e.g. '1 minute').
 	if hasSet && reAlterDynTableTargetLagBare.MatchString(parseText) {
 		if !reAlterDynTableTargetLagVal.MatchString(parseText) {
 			markers = append(markers, diagMarkerSpan(r,

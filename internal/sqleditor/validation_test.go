@@ -7034,6 +7034,11 @@ func TestValidateSnowflakePatterns_AlterDynamicTable(t *testing.T) {
 			"alter dynamic table my_dt refresh",
 			"ALTER DYNAMIC TABLE my_dt set target_lag = downstream",
 			"Alter Dynamic Table my_dt Suspend",
+			// Table name collides with a sub-command keyword — must not false-positive
+			"ALTER DYNAMIC TABLE suspend SET TARGET_LAG = DOWNSTREAM",
+			"ALTER DYNAMIC TABLE resume SET WAREHOUSE = my_wh",
+			"ALTER DYNAMIC TABLE refresh SUSPEND",
+			"ALTER DYNAMIC TABLE set RESUME",
 			// With trailing semicolons / whitespace
 			"ALTER DYNAMIC TABLE my_dt REFRESH;",
 			"ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = '1 minute';  ",
@@ -7078,6 +7083,15 @@ func TestValidateSnowflakePatterns_AlterDynamicTable(t *testing.T) {
 			{
 				sql:     "ALTER DYNAMIC TABLE my_dt RENAME TO",
 				wantMsg: "RENAME TO requires a new table name",
+			},
+			// Multiple sub-commands in one statement
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt SUSPEND RESUME",
+				wantMsg: "ALTER DYNAMIC TABLE supports only one sub-command per statement",
+			},
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt REFRESH SUSPEND",
+				wantMsg: "ALTER DYNAMIC TABLE supports only one sub-command per statement",
 			},
 			// Invalid TARGET_LAG value
 			{
