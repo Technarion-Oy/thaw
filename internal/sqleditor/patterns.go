@@ -60,7 +60,8 @@ var (
 			`|\bLATERAL\s+FLATTEN\b` +
 			`|\bINFER_SCHEMA\b` +
 			`|\bPIVOT\s*\(` +
-			`|\bUNPIVOT\b`,
+			`|\bUNPIVOT\b` +
+			`|\bMATCH_RECOGNIZE\s*\(`,
 	)
 
 	// ── Snowflake Cortex AI function call detection ──────────────────────────
@@ -817,6 +818,25 @@ var (
 		"ANY_VALUE": true, "LISTAGG": true, "MEDIAN": true,
 		"STDDEV": true, "VARIANCE": true,
 	}
+
+	// ── MATCH_RECOGNIZE ─────────────────────────────────────────────────
+	// Detection: matches MATCH_RECOGNIZE( after a table reference.
+	reMatchRecognizeClause = regexp.MustCompile(`(?i)\bMATCH_RECOGNIZE\s*\(`)
+
+	// Structural: mandatory PATTERN (...) inside the MATCH_RECOGNIZE body.
+	reMatchRecognizePattern = regexp.MustCompile(`(?i)\bPATTERN\s*\(`)
+	// Empty PATTERN: PATTERN ()
+	reMatchRecognizeEmptyPattern = regexp.MustCompile(`(?i)\bPATTERN\s*\(\s*\)`)
+
+	// ONE ROW PER MATCH / ALL ROWS PER MATCH detection.
+	reOneRowPerMatch  = regexp.MustCompile(`(?i)\bONE\s+ROW\s+PER\s+MATCH\b`)
+	reAllRowsPerMatch = regexp.MustCompile(`(?i)\bALL\s+ROWS\s+PER\s+MATCH\b`)
+
+	// AFTER MATCH SKIP — captures the skip target text.
+	reAfterMatchSkip = regexp.MustCompile(`(?i)\bAFTER\s+MATCH\s+SKIP\s+(.+?)(?:\b(?:PATTERN|DEFINE|MEASURES|ONE|ALL)\b|$)`)
+	// Valid AFTER MATCH SKIP targets.
+	reAfterMatchSkipValid = regexp.MustCompile(
+		`(?i)^\s*(?:TO\s+NEXT\s+ROW|PAST\s+LAST\s+ROW|TO\s+FIRST\s+` + _ident + `|TO\s+LAST\s+` + _ident + `)\s*$`)
 
 	// ── BEGIN / COMMIT / ROLLBACK / SAVEPOINT / RELEASE SAVEPOINT ────────
 	reIsBegin            = regexp.MustCompile(`(?i)^\s*BEGIN\b`)
@@ -2586,6 +2606,12 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			markers = append(markers, validateUnpivotClauses(stripped, r)...)
 		}
 
+		// ── MATCH_RECOGNIZE structural validation ────────────────────────
+		// Validate before the FP guard skips the statement.
+		if reMatchRecognizeClause.MatchString(stripped) {
+			markers = append(markers, validateMatchRecognizeClauses(stripped, r)...)
+		}
+
 		// ── Skip Snowflake false-positive statements ──────────────────────
 		// (statements with Snowflake-specific syntax that the parser can't
 		// handle; we emit no error for these)
@@ -2688,6 +2714,59 @@ func validateUnpivotClauses(stripped string, r StatementRange) []DiagMarker {
 		if rePivotEmptyIn.MatchString(unpivotBody) {
 			markers = append(markers, diagMarkerSpan(r,
 				"UNPIVOT IN list must not be empty. Provide at least one column name.", 4))
+		}
+	}
+	return markers
+}
+
+// ── MATCH_RECOGNIZE validation ────────────────────────────────────────────────
+
+// validateMatchRecognizeClauses checks all MATCH_RECOGNIZE(...) occurrences in
+// the statement for structural correctness:
+//   - mandatory PATTERN clause with at least one variable
+//   - ONE ROW PER MATCH / ALL ROWS PER MATCH mutual exclusion
+//   - AFTER MATCH SKIP target validity
+func validateMatchRecognizeClauses(stripped string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+	clean := strings.TrimSpace(reStripStringLiterals.ReplaceAllString(stripped, "''"))
+
+	for _, loc := range reMatchRecognizeClause.FindAllStringIndex(clean, -1) {
+		// Extract the balanced MATCH_RECOGNIZE(...) block.
+		parenIdx := strings.Index(clean[loc[0]:], "(")
+		if parenIdx < 0 {
+			continue
+		}
+		blockStart := loc[0] + parenIdx
+		blockEnd := findMatchingParen(clean[blockStart:])
+		if blockEnd < 0 {
+			continue
+		}
+		mrBody := clean[blockStart+1 : blockStart+blockEnd]
+
+		// 1. Validate mandatory PATTERN clause.
+		if !reMatchRecognizePattern.MatchString(mrBody) {
+			markers = append(markers, diagMarkerSpan(r,
+				"MATCH_RECOGNIZE requires a PATTERN clause.", 4))
+		} else if reMatchRecognizeEmptyPattern.MatchString(mrBody) {
+			markers = append(markers, diagMarkerSpan(r,
+				"MATCH_RECOGNIZE PATTERN must contain at least one pattern variable.", 4))
+		}
+
+		// 2. ONE ROW PER MATCH / ALL ROWS PER MATCH mutual exclusion.
+		hasOneRow := reOneRowPerMatch.MatchString(mrBody)
+		hasAllRows := reAllRowsPerMatch.MatchString(mrBody)
+		if hasOneRow && hasAllRows {
+			markers = append(markers, diagMarkerSpan(r,
+				"ONE ROW PER MATCH and ALL ROWS PER MATCH are mutually exclusive. Use one or the other.", 4))
+		}
+
+		// 3. AFTER MATCH SKIP target validation.
+		if m := reAfterMatchSkip.FindStringSubmatch(mrBody); m != nil {
+			target := strings.TrimSpace(m[1])
+			if !reAfterMatchSkipValid.MatchString(target) {
+				markers = append(markers, diagMarkerSpan(r,
+					"Invalid AFTER MATCH SKIP target. Use TO NEXT ROW, PAST LAST ROW, TO FIRST <variable>, or TO LAST <variable>.", 4))
+			}
 		}
 	}
 	return markers
