@@ -148,6 +148,59 @@ func diagMarkerSpan(r StatementRange, msg string, severity int) DiagMarker {
 	}
 }
 
+// buildInertMask returns a boolean slice where true indicates the byte
+// position is inside a SQL comment (-- or /* */) or a single-quoted string
+// literal (including the delimiters themselves).  Used to filter out regex
+// matches that fall inside inert regions.
+func buildInertMask(s string) []bool {
+	mask := make([]bool, len(s))
+	for i := 0; i < len(s); {
+		c := s[i]
+		if c == '\'' { // single-quoted string literal
+			mask[i] = true
+			i++
+			for i < len(s) {
+				mask[i] = true
+				if s[i] == '\'' {
+					if i+1 < len(s) && s[i+1] == '\'' {
+						i++
+						mask[i] = true
+						i++
+					} else {
+						i++
+						break
+					}
+				} else {
+					i++
+				}
+			}
+		} else if c == '-' && i+1 < len(s) && s[i+1] == '-' { // line comment
+			for i < len(s) && s[i] != '\n' {
+				mask[i] = true
+				i++
+			}
+		} else if c == '/' && i+1 < len(s) && s[i+1] == '*' { // block comment
+			mask[i] = true
+			i++
+			mask[i] = true
+			i++
+			for i < len(s) {
+				mask[i] = true
+				if s[i] == '*' && i+1 < len(s) && s[i+1] == '/' {
+					i++
+					mask[i] = true
+					i++
+					break
+				}
+				i++
+			}
+		} else {
+			i++
+		}
+	}
+	return mask
+}
+
 // sqlStmt returns the raw statement text from sql given a StatementRange.
 func sqlStmt(sql string, r StatementRange) string {
 	runes := []rune(sql)

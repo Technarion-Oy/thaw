@@ -1416,10 +1416,14 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		}
 
 		// ── Custom check 7: unknown SNOWFLAKE.CORTEX.<function> ──────────
-		// Use reCortexFuncCall on rawText directly so each match position is
-		// accurate (avoids stripped-vs-raw offset drift and the duplicate-
-		// marker bug where FindStringIndex always returns the first hit).
+		// Run reCortexFuncCall on rawText so each match gets an accurate
+		// position.  Use an inert-region mask to skip matches inside SQL
+		// comments (-- / /* */) and single-quoted string literals.
+		inertMask := buildInertMask(rawText)
 		for _, m := range reCortexFuncCall.FindAllStringSubmatchIndex(rawText, -1) {
+			if m[0] < len(inertMask) && inertMask[m[0]] {
+				continue // match starts inside a comment or string literal
+			}
 			funcName := strings.ToUpper(rawText[m[2]:m[3]])
 			if !knownCortexFunctions[funcName] {
 				fullMatch := rawText[m[0]:m[1]-1] // exclude trailing '('

@@ -5814,3 +5814,27 @@ func TestCortexAI_DuplicateUnknownFunction_DistinctMarkers(t *testing.T) {
 		t.Errorf("Both markers have the same StartColumn=%d; expected distinct positions", warns[0].StartColumn)
 	}
 }
+
+func TestCortexAI_NoFalsePositivesInCommentsAndStrings(t *testing.T) {
+	noWarnQueries := []string{
+		// Line comment
+		"-- SELECT SNOWFLAKE.CORTEX.MAGIC_FUNC(x)\nSELECT 1",
+		// Block comment
+		"/* SNOWFLAKE.CORTEX.FAKE_FUNC(x) */ SELECT 1",
+		// String literal
+		"SELECT 'SNOWFLAKE.CORTEX.FAKE_FUNC(x)' FROM t",
+	}
+
+	for _, sql := range noWarnQueries {
+		t.Run(sql[:min(len(sql), 50)], func(t *testing.T) {
+			stmtRanges := GetStatementRanges(sql)
+			markers := ValidateSnowflakePatterns(sql, stmtRanges)
+			warns := getWarnings(markers)
+			for _, w := range warns {
+				if strings.Contains(w.Message, "Unknown Cortex function") {
+					t.Errorf("Expected no Cortex warning for %q, got: %v", sql, w.Message)
+				}
+			}
+		})
+	}
+}
