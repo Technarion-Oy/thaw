@@ -48,7 +48,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - **Function call highlighting** — every function call in the editor is coloured based on what it is: built-in Snowflake functions appear in **gold** (matching the keyword colour palette) and user-defined functions appear in **teal**; highlighting is applied as you type (200 ms debounce) so it stays current without any manual refresh; the colour set is populated from the local SQLite function cache on editor mount and includes all functions from the embedded fallback catalogue plus any UDFs discovered after a live connection
 - **Live SQL diagnostics** — real-time squiggly-line markers appear 400 ms after each edit; no false positives on well-formed Snowflake SQL:
   - **Syntax errors** (red) — character-by-character Snowflake SQL tokenizer validates unclosed string literals (`'…`), unclosed quoted identifiers (`"…`), unclosed dollar-quoted strings (`$$…`), unclosed block comments (`/*…`), unmatched or extra closing parentheses/brackets, and bare-word tokens that appear after a semicolon but are not a recognised SQL statement keyword (e.g. `SELECT 1; garbage`); also validates Snowflake Scripting assignment syntax (`:=` vs `=`) and variable declarations; inside `$$` scripting blocks, placeholder text (`<wrong_text>`, `{placeholder}`), bare unrecognised identifiers, and other tokens that cannot open a valid statement are all flagged
-  - **Grammar warnings** (yellow) — a Snowflake-dialect PEG parser (`node-sql-parser`) validates the full grammatical structure of SELECT, INSERT, UPDATE, CREATE, DROP, ALTER, and related statements; Snowflake-specific constructs not yet covered by the parser (e.g. `TABLESAMPLE`, `AT (TIMESTAMP =>…)`, `WITHIN GROUP`) are silently skipped to avoid false positives
+  - **Grammar warnings** (yellow) — a Snowflake-dialect PEG parser (`node-sql-parser`) validates the full grammatical structure of SELECT, INSERT, UPDATE, CREATE, DROP, ALTER, and related statements; Snowflake-specific constructs not yet covered by the parser (e.g. `TABLESAMPLE`, `AT (TIMESTAMP =>…)`, `WITHIN GROUP`) are silently skipped to avoid false positives; additionally, 50+ statement types are validated via Go-side regex patterns in the backend (`internal/sqleditor`) to catch structural errors without false positives — including CREATE/ALTER/DROP for STREAM, PIPE, ALERT, PROCEDURE, FUNCTION, HYBRID TABLE, ICEBERG TABLE, EVENT TABLE, NETWORK POLICY, ROW ACCESS POLICY, SESSION POLICY, PASSWORD POLICY, AGGREGATION POLICY, PROJECTION POLICY, PACKAGES POLICY, FILE FORMAT, SHARE, DATASHARE, EXTERNAL VOLUME, TAG, TASK, REPLICATION GROUP, FAILOVER GROUP, COMPUTE POOL, SERVICE, IMAGE REPOSITORY, SECRET, GIT REPOSITORY, APPLICATION PACKAGE, APPLICATION, and GRANT/REVOKE with privilege-to-object-type compatibility checks
 - **Explain SQL** — right-click any query and choose **Explain SQL** to see the Snowflake execution plan before running it; detects and highlights performance anti-patterns (full table scans, cartesian joins, row explosions) directly in the editor with detailed tooltips
 - **SQL analysis engine** — character-by-character Snowflake SQL tokenizer (syntax/parentheses/scripting), FROM/JOIN table-ref extractor, and a three-tier JOIN condition suggestion engine (FKs, PK naming heuristics, and type-compatible columns) are implemented in the Go backend (`internal/sqleditor`) to protect proprietary analysis logic; the frontend calls these via IPC for real-time diagnostics and autocomplete
   - **Column existence warnings** (yellow) — bare unquoted (`wrong_col`) and double-quoted (`"wrong_col"`) column names in SELECT lists are validated against the table's actual column list; `alias.column` two-part references are also checked; column metadata is fetched automatically the first time a table appears in a query and cached for the session; all checks are silent while the cache is cold
@@ -528,14 +528,20 @@ Open **Tools → Schema Migration…** in the menu bar to deploy local `.sql` DD
 - Highlights the file that matches the currently active tab
 
 ### Git integration
-- View git status for the working directory (staged / unstaged files)
-- **Pull** — fetch and merge from the configured remote branch
-- **Commit & Push** — opens a modal where you can:
-  - Select individual files to stage (with Select All / None buttons)
-  - Filter files by extension (`.sql`, `.json`, …)
-  - Enter a commit message and a personal-access token
-- Git credentials are **never persisted to disk** — the token is used in-memory only
-- OS junk files (`.DS_Store`, `Thumbs.db`, `desktop.ini`) are automatically excluded from commits and appended to `.gitignore`
+- **Embedded `go-git`** — all git operations run without a system `git` installation; no external binary dependency
+- **Git Operations Dialog** — open via **Git → Git Operations…** (`⌘G` / `Ctrl+G`) or the "Git Operations…" button in the sidebar Git panel; provides four tabs:
+  - **Commit & Push** — file checklist with checkboxes (added/modified/deleted colour-coded), select all / none / by extension, commit message textarea, personal access token input (ephemeral, never saved)
+  - **Pull** — shows current remote URL and branch; PAT input; pull from configured remote branch
+  - **Clone** — remote URL input, local path picker (native OS dialog), optional PAT (for private repos), clone progress feedback
+  - **Branches** — lists all local and remote branches with the current branch highlighted; Switch button per local branch; **Merge branch** button to merge any local branch into the current one (Fast-Forward only); create new branch with name input and **Create Branch** button
+- **Git gutter indicators** — when a tracked file is open in the SQL editor, VS Code-style coloured bars appear in the gutter:
+  - **Green bar** — lines added since the last HEAD commit
+  - **Blue bar** — lines modified since the last HEAD commit
+  - **Red chevron** — deletion point where lines were removed
+  - Indicators update 400 ms after each keystroke; clear automatically when a scratch tab (no file path) is active
+- View git status for the working directory (staged and unstaged files shown in the sidebar panel)
+- Git credentials are **never saved to disk** — tokens are held in memory only for the duration of the operation
+- OS junk files (`.DS_Store`, `Thumbs.db`, `desktop.ini`) are automatically excluded and added to `.gitignore`
 
 ### UI
 - **Drag-and-drop panel layout** — every sidebar panel (Export DDL, File Browser, Git, Object Browser, Administration) has a drag handle at its top edge; drag panels between the left and right sidebars or reorder them within a sidebar; layout is persisted across sessions
@@ -670,22 +676,35 @@ thaw/
 │   ├── dbt/
 │   │   ├── generator.go           # Pure dbt project file generator (no Snowflake calls)
 │   │   └── generator_test.go      # 56 unit tests for generator, source names, and SQL stubs
-│   ├── sqleditor/sqleditor.go     # SQL diagnostics & JOIN condition engine (ValidateSyntax, ParseJoinTables, ComputeJoinOnConditions, ValidateSemantics)
+│   ├── sqleditor/                 # SQL diagnostics & JOIN condition engine
+│   │   ├── sqleditor.go           # ValidateSyntax, ParseJoinTables, ComputeJoinOnConditions, ValidateSemantics
+│   │   ├── patterns.go            # 50+ Go-side regex validation patterns for Snowflake DDL/DCL
+│   │   └── sqleditor_test.go
+│   ├── fileformat/                # File format DDL builder and local preview (CSV, JSON, AVRO, ORC, PARQUET, XML)
 │   ├── filesystem/fs.go           # Directory listing, file reading and writing
-│   ├── gitrepo/repo.go            # Git status, commit/push, pull
+│   ├── fnmeta/                    # Function catalog metadata (SQLite cache + embedded JSON fallback + live sync)
+│   ├── gitrepo/repo.go            # Git operations via go-git (status, commit/push, pull, clone, branches)
 │   ├── integration/
 │   │   ├── basic_test.go          # Connectivity + result-shape integration tests (key-pair auth)
 │   │   ├── export_test.go         # DDL export end-to-end tests (require live Snowflake account)
 │   │   ├── formatter_test.go      # SQL formatter dialect tests — 18 queries covering ::, :, FLATTEN, CTEs, QUALIFY, PIVOT, SAMPLE, MATCH_RECOGNIZE (no CREATE privileges needed)
 │   │   └── migration_test.go      # Schema migration strategy integration tests (key-pair auth)
+│   ├── integrations/              # CREATE INTEGRATION SQL builders (Storage, API, Catalog, External Access, Notification, Security)
 │   ├── logger/
 │   │   ├── logger.go              # slog + lumberjack setup; sets slog.Default so gosnowflake v2 logs flow in automatically
 │   │   ├── path_dev.go            # Log path for dev builds (./logs/thaw.log)
 │   │   └── path_prod.go           # Log path for production builds (OS-specific)
+│   ├── pipe/                      # Pipe management: CREATE PIPE SQL builder, copy history, COPY statement validation
+│   ├── procedure/                 # Procedure/function call statement builder (CALL, SELECT for scalar/table functions)
+│   ├── queryprofile/              # Query execution profile and EXPLAIN plan parser; performance diagnostics
+│   ├── secret/                    # Secret management: CREATE/ALTER SECRET SQL builder (OAUTH2, PASSWORD, GENERIC_STRING, etc.)
 │   ├── sfconfig/reader.go         # Snowflake CLI config (~/.snowflake/config.toml)
 │   ├── snowflake/client.go        # Snowflake driver wrapper
 │   ├── snowflake/lineage.go       # DDL-based dependency/lineage parser (recursive, cycle-safe)
 │   ├── snowflake/lineage_test.go  # Unit tests for lineage parser (56 cases; no Snowflake required)
+│   ├── snowgitrepo/               # Snowflake Git repository integration: CREATE/ALTER GIT REPOSITORY SQL builder
+│   ├── stage/                     # Stage creation SQL builder (internal/external, encryption, directory tables)
+│   ├── tasks/                     # Task graph management: schedule parsing, execution history, status tracking
 │   └── telemetry/telemetry.go     # Anonymous event tracking; remote-send placeholder
 └── frontend/
     ├── index.html
@@ -695,70 +714,51 @@ thaw/
     │   ├── App.tsx                # Root component, Ant Design dark theme
     │   ├── main.tsx               # React entry point; suppresses WebView context menu
     │   ├── styles/global.css      # Global styles incl. Monaco occurrence-highlight class
-    │   ├── store/
-    │   │   ├── connectionStore.ts  # Connection state (Zustand)
-    │   │   ├── diffStore.ts        # Text comparison pending item + fetch state (Zustand)
-    │   │   ├── gitStore.ts         # Git / export directory state (Zustand)
-    │   │   ├── objectStore.ts      # Object browser state (Zustand)
-    │   │   ├── panelLayoutStore.ts # Sidebar panel order, widths, editor split (Zustand, persisted)
-    │   │   ├── queryStore.ts       # Multi-tab editor state (Zustand)
-    │   │   ├── sessionStore.ts     # Active role & warehouse (Zustand)
-    │   │   └── themeStore.ts       # Light/dark/system theme preference (Zustand, persisted)
+    │   ├── store/                   # Zustand stores (11 stores)
+    │   │   ├── connectionStore.ts  # Connection state
+    │   │   ├── diffStore.ts        # Text comparison pending item + fetch state
+    │   │   ├── featureFlagsStore.ts # Feature flags (loaded on startup, reloaded after modal save)
+    │   │   ├── gitStore.ts         # Git / export directory state
+    │   │   ├── insertMappingStore.ts # Insert Mapping source/target selection state
+    │   │   ├── notebookPrefsStore.ts # Notebook preferences (persisted)
+    │   │   ├── objectStore.ts      # Object browser state
+    │   │   ├── panelLayoutStore.ts # Sidebar panel order, widths, editor split (persisted)
+    │   │   ├── queryStore.ts       # Multi-tab editor state
+    │   │   ├── sessionStore.ts     # Active role & warehouse
+    │   │   └── themeStore.ts       # Light/dark/system theme preference (persisted)
     │   ├── pages/
     │   │   └── QueryPage.tsx      # Main query workspace; save handlers; menu event wiring
-    │   └── components/
-    │       ├── connection/ConnectModal.tsx
-    │       ├── editor/
-    │       │   ├── monacoSetup.ts # Shared Monaco theme/language registration
-    │       │   ├── SqlEditor.tsx  # Monaco editor with completions, selection highlight
-    │       │   └── TabBar.tsx     # File/scratch tab strip with dirty indicator
-    │       ├── export/
-    │       │   ├── ExportPanel.tsx         # DDL export panel
-    │       │   ├── ExportTableModal.tsx    # Table data export dialog (CSV/JSON/PARQUET)
-    │       │   └── ImportTableModal.tsx    # Table data import dialog (CSV/JSON/AVRO/ORC/PARQUET)
-    │       ├── files/FileBrowser.tsx
-    │       ├── git/
-    │       │   ├── GitPanel.tsx
-    │       │   └── CommitModal.tsx
-    │       ├── er/
-    │       │   ├── ERDiagramModal.tsx  # Read-only ER diagram viewer (from existing DB)
-    │       │   ├── ERDesigner.tsx      # Visual ER schema designer (create new tables)
-    │       │   └── buildMermaid.ts    # Mermaid source generator for the diagram viewer
-    │       ├── account/
-    │       │   ├── AccountPanel.tsx              # Administration panel: roles, warehouses, user management, backup policies, integrations
-    │       │   ├── QueryHistoryModal.tsx          # Query Activity modal (INFORMATION_SCHEMA.QUERY_HISTORY_*)
-    │       │   ├── WarehouseMeteringModal.tsx     # Warehouse Credit Usage modal (ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY)
-    │       │   ├── UserManagementPanel.tsx        # User list, search, right-click menu
-    │       │   ├── EditUserModal.tsx              # ALTER USER dialog with live SQL preview
-    │       │   ├── CreateUserModal.tsx            # CREATE USER dialog with live SQL preview
-    │       │   ├── BackupPoliciesPanel.tsx        # Backup policies list with create/alter/drop
-    │       │   ├── IntegrationsPanel.tsx          # Integrations tree: lazy-load, right-click create/properties/modify/drop
-    │       │   ├── CreateIntegrationModal.tsx     # Dynamic CREATE INTEGRATION form per kind and subtype
-    │       │   └── IntegrationModifyModal.tsx     # DESCRIBE properties + editable ALTER SQL editor
-    │       ├── backup/
-    │       │   └── BackupSetsModal.tsx     # Backup sets + nested backups with add/drop/restore
-    │       ├── chat/AiChat.tsx        # AI Chat panel with tool-call display and Run/Copy buttons
-    │       ├── lineage/DependenciesModal.tsx  # Recursive dependency tree modal with DDL hover tooltips
-    │       ├── procedure/CallProcedureModal.tsx
-    │       ├── results/ResultGrid.tsx
-    │       ├── settings/
-    │       │   ├── AISettingsModal.tsx    # AI provider / API key / model configuration
-    │       │   └── LayoutSettingsModal.tsx
-    │       ├── snowpark/
-    │       │   ├── SnowparkCheckModal.tsx  # Environment check dialog
-    │       │   └── SnowparkSetupModal.tsx  # Three-step setup wizard (conda / venv)
-    │       ├── notebook/
-    │       │   └── NotebookTab.tsx         # Jupyter-style notebook with Monaco cell editors
-    │       ├── migration/MigrationModal.tsx # Schema Migration wizard (Tools menu)
-    │       ├── dbt/DbtProjectModal.tsx     # dbt Project Scaffolding wizard (Tools menu)
-    │       ├── snippets/SnippetsModal.tsx  # Code Snippets browser (Tools menu)
-    │       ├── help/KeyboardShortcutsModal.tsx  # Searchable keyboard shortcuts reference (Help menu)
-    │       ├── task/CreateTaskModal.tsx    # Full CREATE TASK dialog (all clauses, task picker for AFTER)
-    │       ├── task/ExecuteTaskModal.tsx   # Execute Task dialog (Execute / Retry Last, optional CONFIG JSON)
-    │       ├── task/TaskPropertiesModal.tsx # Full ALTER TASK properties editor (all clauses, inline editing)
-    │       └── layout/
-    │           ├── AppLayout.tsx  # Two-sidebar layout with drag-and-drop panel reordering and resize handles
-    │           └── Sidebar.tsx    # Object browser: lazy tree, right-click actions (rename, drop, undrop, DDL)
+    │   └── components/              # Feature components (~30 directories, ~93 files)
+    │       ├── account/              # Administration: users, warehouses, integrations, backup policies, query history, metering
+    │       ├── backup/               # Backup sets: list, add, drop, restore from backup
+    │       ├── chat/                 # AI Chat panel with tool-call display and Run/Copy buttons
+    │       ├── common/               # Shared modals (PropertiesModal, SessionPropertiesModal)
+    │       ├── connection/           # ConnectModal, UserAgreementModal
+    │       ├── database/             # Database-level modals: create table, create stage, file format builder, DDL viewer
+    │       ├── dbt/                  # dbt Project Scaffolding wizard (Tools menu)
+    │       ├── editor/               # SqlEditor, TabBar, monacoSetup, snippet integration, YAML worker
+    │       ├── er/                   # ER Diagram viewer + Visual ER Designer + Mermaid generator
+    │       ├── export/               # DDL export panel, table data export/import modals
+    │       ├── files/                # File browser (sidebar)
+    │       ├── fnmeta/               # Function catalog modal
+    │       ├── function/             # Function selection modal
+    │       ├── git/                  # GitPanel + GitOperationsDialog (commit, pull, clone, branches)
+    │       ├── gitrepoobj/           # Snowflake Git Repository objects: create, modify, commit filter
+    │       ├── help/                 # About dialog, keyboard shortcuts modal
+    │       ├── layout/               # AppLayout (two-sidebar drag-and-drop), Sidebar (object tree + context menus)
+    │       ├── lineage/              # Recursive dependency tree modal with DDL hover tooltips
+    │       ├── migration/            # Schema Migration wizard (Tools menu)
+    │       ├── notebook/             # Jupyter-style notebook: cell editors, deploy, execute, preferences, debugger
+    │       ├── pipe/                 # Pipe management: create, properties, refresh, copy history
+    │       ├── procedure/            # Call Procedure / Call Function modals
+    │       ├── results/              # ResultGrid, ExplainModal, QueryProfileModal
+    │       ├── secret/               # Secret management: create, modify (OAUTH2, PASSWORD, etc.)
+    │       ├── settings/             # AI settings, Feature Flags toggle, Layout settings
+    │       ├── shared/               # Shared UI utilities (ObjectNameCaseControl)
+    │       ├── snippets/             # Code Snippets browser (Tools menu)
+    │       ├── snowpark/             # Snowpark setup wizard, environment check, pip registries
+    │       ├── task/                 # Task management: create, execute, properties, graph DAG, schedule editor
+    │       └── terminal/             # Embedded xterm.js terminal panel
     └── wailsjs/                   # Auto-generated Go→JS bridge (do not edit)
 ```
 
@@ -1185,56 +1185,6 @@ Log and crash files are written to:
 
 Snowflake CLI connection profiles are read from `~/.snowflake/config.toml` and
 pre-fill the connection form, but are never modified by Thaw.
-
-### AI Chat
-
-When AI is enabled, an **AI Chat** tab appears next to the **Results** tab in the bottom half of the query workspace.
-
-**Chat mode vs Agent mode** — a toggle above the input switches between:
-- **Chat mode** (default) — single API call, no tools; the assistant sees the current SQL and last query result but makes no live Snowflake calls
-- **Agent mode** — a tool-calling loop (up to 8 iterations) that gives the assistant access to the live Snowflake session and the local file system
-
-**Tools available in Agent mode:**
-
-| Tool | What it does |
-|------|-------------|
-| `get_session_context` | Returns the active role, warehouse, database, and schema |
-| `list_databases` | Lists all databases accessible to the current role |
-| `list_schemas(database)` | Lists all schemas in a database |
-| `list_tables(database, schema)` | Lists all tables and views in a schema (with kind) |
-| `describe_table(database, schema, table)` | Returns each column's name and data type |
-| `run_sql(query)` | Executes a SQL query and returns up to 50 rows |
-| `list_directory(path)` | Lists files and subdirectories relative to the working directory |
-| `read_file(path)` | Reads a local text file (SQL scripts, configs, …); capped at 50 000 characters |
-| `run_command(command)` | Runs a shell command in the working directory; returns combined stdout/stderr |
-
-The assistant always looks up real names before writing SQL — it will not guess database, schema, table, or column names.
-
-**Working directory:** The assistant is told the configured export/working directory so it can reference local SQL files by path.
-
-**Stop generation:** A **Stop** button appears while the assistant is thinking; clicking it cancels the in-flight API request immediately without showing an error.
-
-**Context injection:** The current SQL in the editor and the most recent query result are automatically included in each turn so the assistant has full context without the user needing to paste them.
-
-**Run button:** SQL code blocks in the assistant's response include a **Run** button that inserts the SQL into the active editor tab and executes it immediately.
-
-**Copy button:** Every message and error has a **Copy** button that writes the text to the clipboard via the native OS clipboard API.
-
-Chat history is preserved when switching between the Results and AI Chat tabs; it resets when the page is reloaded.
-
-### AI inline completions
-
-Open **AI → Configure AI…** in the menu bar to configure:
-
-| Setting | Description |
-|---------|-------------|
-| **Enable AI suggestions** | Master on/off toggle |
-| **Provider** | `OpenAI` or `Google AI Studios` |
-| **API Key** | Stored locally in `config.json` (mode `0600`) |
-| **Model** | Auto-fetched from the provider after entering a valid key; falls back to built-in defaults if the key is not yet valid |
-| **Model status** | A live indicator appears below the model dropdown: `● Model OK` (green) confirms the selected model is reachable; `● <error>` (red) shows the exact API error (e.g. invalid model name) within 10 seconds of selection |
-
-Once enabled, the Monaco editor fetches ghost-text suggestions as you type (triggered automatically after a short pause). Press `Tab` to accept a suggestion.
 
 ---
 

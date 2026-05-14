@@ -52,7 +52,8 @@ To execute this workflow, you must have access to:
 
 ### Phase 4: Refactor & Commit
 1.  **Clean Up:** Once all tests pass, review your Go code for formatting (`gofmt`), readability, and efficiency.
-2.  **Report:** Output a summary to the user detailing:
+2.  **Update Documentation:** Update the SQL validation list in `README.md` (the grammar warnings bullet under "Live SQL diagnostics") to include any newly validated statement types. If you added a new internal package or significantly changed the validation architecture, also update the project structure in `README.md`, `CLAUDE.md`, and `GEMINI.md`.
+3.  **Report:** Output a summary to the user detailing:
     * The syntax rules learned from the Snowflake docs.
     * The specific SQL queries added to `test.sql`.
     * The exact functions/patterns modified in the Go source code to fix the behavior.
