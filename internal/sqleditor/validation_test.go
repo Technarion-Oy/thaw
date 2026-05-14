@@ -4895,6 +4895,18 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 			"CREATE IMAGE REPOSITORY",
 			[]string{"Unexpected syntax in CREATE IMAGE REPOSITORY"},
 		},
+		// CREATE IMAGE REPOSITORY — OR REPLACE without name
+		{
+			"CREATE OR REPLACE IMAGE REPOSITORY missing name",
+			"CREATE OR REPLACE IMAGE REPOSITORY",
+			[]string{"Unexpected syntax in CREATE IMAGE REPOSITORY"},
+		},
+		// CREATE IMAGE REPOSITORY — IF NOT EXISTS without name
+		{
+			"CREATE IMAGE REPOSITORY IF NOT EXISTS missing name",
+			"CREATE IMAGE REPOSITORY IF NOT EXISTS",
+			[]string{"Unexpected syntax in CREATE IMAGE REPOSITORY"},
+		},
 		// CREATE IMAGE REPOSITORY — OR REPLACE and IF NOT EXISTS conflict
 		{
 			"CREATE IMAGE REPOSITORY OR REPLACE + IF NOT EXISTS",

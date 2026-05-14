@@ -6549,6 +6549,14 @@ func validateCreateImageRepository(parseText string, r StatementRange) []DiagMar
 			"Unexpected syntax in CREATE IMAGE REPOSITORY statement.", 4))
 		return markers
 	}
+	// Guard against "CREATE IMAGE REPOSITORY IF NOT EXISTS" (no name): the
+	// optional IF\s+NOT\s+EXISTS\s+ group fails (no trailing whitespace+ident),
+	// so the regex captures "IF" as the name. Detect this and flag it.
+	if strings.EqualFold(m[1], "IF") && reIfNotExists.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Unexpected syntax in CREATE IMAGE REPOSITORY statement.", 4))
+		return markers
+	}
 
 	// 3. Only COMMENT is a valid property.
 	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
