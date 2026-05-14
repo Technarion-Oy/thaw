@@ -759,10 +759,39 @@ var (
 	reAlterTagUnsetAllowed = regexp.MustCompile(`(?i)\bUNSET\s+ALLOWED_VALUES\b`)
 	reAlterTagSetComment   = regexp.MustCompile(`(?i)\bSET\s+COMMENT\s*=`)
 	reAlterTagUnsetComment = regexp.MustCompile(`(?i)\bUNSET\s+COMMENT\b`)
-	// reDropTagCascadeRestrict detects CASCADE or RESTRICT trailing the DROP TAG
-	// statement. $ is safe here: parseText has trailing semicolons stripped and
-	// clean has comments removed before matching.
-	reDropTagCascadeRestrict = regexp.MustCompile(`(?i)\b(?:CASCADE|RESTRICT)\s*$`)
+	// reCascadeRestrictTrailing detects CASCADE or RESTRICT trailing a DROP
+	// statement. Used by DROP TAG and DROP NOTEBOOK validators. $ is safe here:
+	// parseText has trailing semicolons stripped and clean has comments removed
+	// before matching.
+	reCascadeRestrictTrailing = regexp.MustCompile(`(?i)\b(?:CASCADE|RESTRICT)\s*$`)
+
+	// ── CREATE NOTEBOOK / ALTER NOTEBOOK / DROP NOTEBOOK ─────────────
+	reIsCreateNotebook = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?NOTEBOOK\b`)
+	reCreateNotebookName = regexp.MustCompile(
+		`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?NOTEBOOK\s+(?:IF\s+NOT\s+EXISTS\s+)?` +
+			`(` + _identPath + `)`)
+	reIsAlterNotebook = regexp.MustCompile(`(?i)^\s*ALTER\s+NOTEBOOK\b`)
+	reAlterNotebookName = regexp.MustCompile(
+		`(?i)^\s*ALTER\s+NOTEBOOK\s+(?:IF\s+EXISTS\s+)?` +
+			`(` + _identPath + `)`)
+	reAlterNotebookAction = regexp.MustCompile(
+		`(?i)\b(?:SET\b|UNSET\b|RENAME\s+TO\b|ADD\s+LIVE\s+VERSION\b)`)
+	reAlterNotebookRenameTo = regexp.MustCompile(
+		`(?i)\bRENAME\s+TO\s+(` + _identPath + `)`)
+	reAlterNotebookRenameToBare = regexp.MustCompile(`(?i)\bRENAME\s+TO\s*$`)
+	// reAlterNotebookAddLiveVersionFull matches the complete ADD LIVE VERSION FROM LAST.
+	reAlterNotebookAddLiveVersionFull = regexp.MustCompile(`(?i)\bADD\s+LIVE\s+VERSION\s+FROM\s+LAST\b`)
+	// reAlterNotebookAddLiveVersion detects the ADD LIVE VERSION sub-command
+	// (with or without the required FROM LAST suffix).
+	reAlterNotebookAddLiveVersion = regexp.MustCompile(`(?i)\bADD\s+LIVE\s+VERSION\b`)
+	reIsDropNotebook              = regexp.MustCompile(`(?i)^\s*DROP\s+NOTEBOOK\b`)
+	reDropNotebookName = regexp.MustCompile(
+		`(?i)^\s*DROP\s+NOTEBOOK\s+(?:IF\s+EXISTS\s+)?` +
+			`(` + _identPath + `)`)
+	// reCreateNotebookFrom detects the FROM '@...' clause.
+	reCreateNotebookFrom = regexp.MustCompile(`(?i)\bFROM\s+'[^']*'`)
+	// reCreateNotebookMainFile detects the MAIN_FILE = '...' clause.
+	reCreateNotebookMainFile = regexp.MustCompile(`(?i)\bMAIN_FILE\s*=\s*'[^']*'`)
 
 	// ── BEGIN / COMMIT / ROLLBACK / SAVEPOINT / RELEASE SAVEPOINT ────────
 	reIsBegin            = regexp.MustCompile(`(?i)^\s*BEGIN\b`)
@@ -2372,6 +2401,24 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// ── DROP TAG ────────────────────────────────────────────────────
 		if reIsDropTag.MatchString(parseText) {
 			markers = append(markers, validateDropTag(parseText, r)...)
+			continue
+		}
+
+		// ── CREATE NOTEBOOK ────────────────────────────────────────────
+		if reIsCreateNotebook.MatchString(parseText) {
+			markers = append(markers, validateCreateNotebook(parseText, r)...)
+			continue
+		}
+
+		// ── ALTER NOTEBOOK ─────────────────────────────────────────────
+		if reIsAlterNotebook.MatchString(parseText) {
+			markers = append(markers, validateAlterNotebook(parseText, r)...)
+			continue
+		}
+
+		// ── DROP NOTEBOOK ──────────────────────────────────────────────
+		if reIsDropNotebook.MatchString(parseText) {
+			markers = append(markers, validateDropNotebook(parseText, r)...)
 			continue
 		}
 
@@ -5576,7 +5623,7 @@ func validateDropTag(parseText string, r StatementRange) []DiagMarker {
 	}
 
 	// 2. CASCADE / RESTRICT are not valid for DROP TAG.
-	if reDropTagCascadeRestrict.MatchString(clean) {
+	if reCascadeRestrictTrailing.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"CASCADE / RESTRICT are not valid for DROP TAG.", 4))
 	}
@@ -7331,6 +7378,112 @@ func validateAlterSecret(parseText string, r StatementRange) []DiagMarker {
 	if !reAlterSecretAction.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"Unknown ALTER SECRET sub-command. Expected SET SECRET_STRING/USERNAME/PASSWORD/OAUTH_REFRESH_TOKEN/OAUTH_REFRESH_TOKEN_EXPIRY_TIME/OAUTH_SCOPES/API_AUTHENTICATION/COMMENT, or UNSET COMMENT.", 4))
+	}
+
+	return markers
+}
+
+// ── validateCreateNotebook ──────────────────────────────────────────────────
+
+// validateCreateNotebook checks structural requirements for CREATE NOTEBOOK:
+//   - Notebook name is mandatory.
+//   - OR REPLACE and IF NOT EXISTS are mutually exclusive.
+//   - When FROM is specified, MAIN_FILE is required.
+func validateCreateNotebook(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+
+	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
+	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE NOTEBOOK statement.", 4))
+		return markers
+	}
+
+	// 2. Notebook name is required.
+	if reCreateNotebookName.FindStringSubmatch(clean) == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"CREATE NOTEBOOK requires a notebook name.", 4))
+		return markers
+	}
+
+	// 3. When FROM is specified, MAIN_FILE is required.
+	// Checks run against clean (string literals and comments removed) to avoid
+	// false positives from COMMENT values containing FROM or MAIN_FILE.
+	if reCreateNotebookFrom.MatchString(clean) && !reCreateNotebookMainFile.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"MAIN_FILE is required when FROM is specified in CREATE NOTEBOOK.", 4))
+	}
+
+	return markers
+}
+
+// ── validateAlterNotebook ───────────────────────────────────────────────────
+
+// validateAlterNotebook checks structural requirements for ALTER NOTEBOOK:
+//   - Notebook name is mandatory.
+//   - Known sub-commands: SET, UNSET, RENAME TO, ADD LIVE VERSION.
+//   - RENAME TO requires a target name.
+func validateAlterNotebook(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+
+	// 1. Notebook name is required.
+	m := reAlterNotebookName.FindStringSubmatch(clean)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"ALTER NOTEBOOK requires a notebook name.", 4))
+		return markers
+	}
+
+	// 2. Check for known sub-commands.
+	if !reAlterNotebookAction.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Unknown ALTER NOTEBOOK sub-command. Expected SET, UNSET, RENAME TO, or ADD LIVE VERSION FROM LAST.", 4))
+		return markers
+	}
+
+	// 3. RENAME TO requires a target name.
+	if reAlterNotebookRenameToBare.MatchString(clean) && reAlterNotebookRenameTo.FindStringSubmatch(clean) == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"RENAME TO requires a new notebook name.", 4))
+	}
+
+	// 4. ADD LIVE VERSION requires FROM LAST.
+	if reAlterNotebookAddLiveVersion.MatchString(clean) && !reAlterNotebookAddLiveVersionFull.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"ADD LIVE VERSION requires FROM LAST.", 4))
+	}
+
+	return markers
+}
+
+// ── validateDropNotebook ────────────────────────────────────────────────────
+
+// validateDropNotebook checks structural requirements for DROP NOTEBOOK:
+//   - Notebook name is mandatory.
+//   - CASCADE / RESTRICT are not valid for DROP NOTEBOOK.
+func validateDropNotebook(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	stripped := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(stripped))
+
+	// 1. Notebook name is required.
+	if reDropNotebookName.FindStringSubmatch(clean) == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"DROP NOTEBOOK requires a notebook name.", 4))
+		return markers
+	}
+
+	// 2. CASCADE / RESTRICT are not valid for DROP NOTEBOOK.
+	if reCascadeRestrictTrailing.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"CASCADE / RESTRICT are not valid for DROP NOTEBOOK.", 4))
 	}
 
 	return markers
