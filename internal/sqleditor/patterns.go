@@ -838,7 +838,7 @@ var (
 	// AFTER MATCH SKIP — captures the skip target text.
 	// Uses [\s\S]+? instead of .+? so that the match spans newlines in
 	// multi-line MATCH_RECOGNIZE bodies.
-	reAfterMatchSkip = regexp.MustCompile(`(?i)\bAFTER\s+MATCH\s+SKIP\s+([\s\S]+?)(?:\b(?:PATTERN|DEFINE|MEASURES|ONE|ALL)\b|$)`)
+	reAfterMatchSkip = regexp.MustCompile(`(?i)\bAFTER\s+MATCH\s+SKIP\s+([\s\S]+?)(?:\b(?:PATTERN|DEFINE|MEASURES|ONE|ALL|ORDER|PARTITION)\b|$)`)
 	// Valid AFTER MATCH SKIP targets.
 	reAfterMatchSkipValid = regexp.MustCompile(
 		`(?i)^\s*(?:TO\s+NEXT\s+ROW|PAST\s+LAST\s+ROW|TO\s+FIRST\s+` + _ident + `|TO\s+LAST\s+` + _ident + `)\s*$`)

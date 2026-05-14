@@ -6310,6 +6310,13 @@ MATCH_RECOGNIZE (
 			`SELECT * FROM db.schema.events MATCH_RECOGNIZE (ORDER BY ts PATTERN (A B) DEFINE A AS type = 'login', B AS type = 'purchase')`,
 			// Complex PATTERN with quantifiers
 			`SELECT * FROM t MATCH_RECOGNIZE (PATTERN (A B* C+? D{2,5}) DEFINE A AS x=1, B AS x=2, C AS x=3, D AS x=4)`,
+			// Keywords inside string literals must not trigger false positives
+			`SELECT * FROM t MATCH_RECOGNIZE (
+    PATTERN (A B)
+    DEFINE A AS col = 'PATTERN', B AS col = 'DEFINE'
+)`,
+			// AFTER MATCH SKIP TO FIRST with quoted identifier
+			`SELECT * FROM t MATCH_RECOGNIZE (PATTERN (A B) AFTER MATCH SKIP TO FIRST "myVar" DEFINE A AS x > 0, B AS x < 0)`,
 		}
 		for _, sql := range validQueries {
 			t.Run(sql[:min(len(sql), 60)], func(t *testing.T) {
