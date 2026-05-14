@@ -901,6 +901,20 @@ var (
 		"FULL_TEXT": true,
 	}
 
+	// ── ALTER TABLE … SWAP WITH ─────────────────────────────────────────
+	// Detection: matches ALTER TABLE <name> SWAP WITH …
+	reIsAlterTableSwapWith = regexp.MustCompile(
+		`(?i)^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?` + _identPath + `\s+SWAP\s+WITH\b`)
+	// Captures the source table name.
+	reAlterTableSwapWithName = regexp.MustCompile(
+		`(?i)^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)\s+SWAP\s+WITH\b`)
+	// Captures the target table name after SWAP WITH.
+	reAlterTableSwapTarget = regexp.MustCompile(
+		`(?i)\bSWAP\s+WITH\s+(` + _identPath + `)`)
+	// Detects trailing tokens after the target table name (ignores semicolons and whitespace).
+	reAlterTableSwapTrailing = regexp.MustCompile(
+		`(?i)\bSWAP\s+WITH\s+` + _identPath + `\s+[^\s;]`)
+
 	// ── INSERT ALL / INSERT FIRST / INSERT OVERWRITE ────────────────────
 	// Detection regexes for multi-table INSERT and INSERT OVERWRITE.
 	reIsInsertAll       = regexp.MustCompile(`(?i)^\s*INSERT\s+(?:OVERWRITE\s+)?ALL\b`)
@@ -2691,6 +2705,13 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// Validate before the FP guard skips the statement.
 		if reIsInsertOverwriteBare.MatchString(stripped) {
 			markers = append(markers, validateInsertOverwrite(stripped, r)...)
+			continue
+		}
+
+		// ── ALTER TABLE … SWAP WITH ──────────────────────────────────────
+		// Validate before the FP guard skips the statement.
+		if reIsAlterTableSwapWith.MatchString(stripped) {
+			markers = append(markers, validateAlterTableSwapWith(stripped, r)...)
 			continue
 		}
 
@@ -8392,6 +8413,52 @@ func validateAlterDynamicTable(parseText string, r StatementRange) []DiagMarker 
 			markers = append(markers, diagMarkerSpan(r,
 				"Invalid TARGET_LAG value. Expected a quoted duration (e.g. '1 minute') or DOWNSTREAM.", 4))
 		}
+	}
+
+	return markers
+}
+
+// ── validateAlterTableSwapWith ──────────────────────────────────────────────
+
+// validateAlterTableSwapWith checks structural requirements for
+// ALTER TABLE <name> SWAP WITH <other_name>:
+//   - Both source and target table names are required.
+//   - Source and target must be different identifiers (same name is a no-op).
+//   - No additional clauses are allowed after the target table name.
+func validateAlterTableSwapWith(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+
+	// 1. Extract source table name.
+	srcMatch := reAlterTableSwapWithName.FindStringSubmatch(clean)
+	if srcMatch == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"ALTER TABLE … SWAP WITH requires a table name.", 4))
+		return markers
+	}
+	srcName := strings.ToUpper(strings.ReplaceAll(srcMatch[1], `"`, ""))
+
+	// 2. Target table name is required after SWAP WITH.
+	tgtMatch := reAlterTableSwapTarget.FindStringSubmatch(clean)
+	if tgtMatch == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"SWAP WITH requires a target table name.", 4))
+		return markers
+	}
+	tgtName := strings.ToUpper(strings.ReplaceAll(tgtMatch[1], `"`, ""))
+
+	// 3. Source and target must be different (same name is a no-op).
+	if srcName == tgtName {
+		markers = append(markers, diagMarkerSpan(r,
+			fmt.Sprintf("SWAP WITH the same table '%s' is a no-op.", tgtMatch[1]), 4))
+	}
+
+	// 4. No additional clauses after the target table name.
+	if reAlterTableSwapTrailing.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Unexpected clause after SWAP WITH target table. SWAP WITH must be the final clause.", 4))
 	}
 
 	return markers

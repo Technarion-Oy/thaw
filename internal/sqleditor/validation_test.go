@@ -89,6 +89,10 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"ALTER TABLE my_table ADD SEARCH OPTIMIZATION",
 		"ALTER TABLE t ADD SEARCH OPTIMIZATION ON EQUALITY(c1), SUBSTRING(c2)",
 		"ALTER TABLE t DROP SEARCH OPTIMIZATION",
+		// ALTER TABLE SWAP WITH — comprehensive tests in TestValidateSnowflakePatterns_AlterTableSwapWith
+		"ALTER TABLE orders SWAP WITH orders_backup",
+		"ALTER TABLE db1.schema1.t1 SWAP WITH db1.schema1.t2",
+		"ALTER TABLE IF EXISTS t1 SWAP WITH t2",
 		// SHOW statements — comprehensive tests in TestValidateSnowflakePatterns_Show
 		// False Positive Guards (Should be silently ignored, 0 warnings)
 		"DELETE FROM t WHERE id = 1",
@@ -7124,6 +7128,111 @@ func TestValidateSnowflakePatterns_AlterDynamicTable(t *testing.T) {
 			{
 				sql:     "ALTER DYNAMIC TABLE my_dt UNSET",
 				wantMsg: "UNSET requires at least one property name",
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.sql, func(t *testing.T) {
+				stmtRanges := GetStatementRanges(tc.sql)
+				markers := ValidateSnowflakePatterns(tc.sql, stmtRanges)
+				warns := getWarnings(markers)
+				found := false
+				for _, w := range warns {
+					if strings.Contains(w.Message, tc.wantMsg) {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("Expected warning containing %q for %q, got: %v", tc.wantMsg, tc.sql, warns)
+				}
+			})
+		}
+	})
+}
+
+// ── ALTER TABLE … SWAP WITH Tests ────────────────────────────────────────────
+
+func TestValidateSnowflakePatterns_AlterTableSwapWith(t *testing.T) {
+	t.Run("valid ALTER TABLE SWAP WITH", func(t *testing.T) {
+		validQueries := []string{
+			// Basic
+			"ALTER TABLE orders SWAP WITH orders_backup",
+			"ALTER TABLE t1 SWAP WITH t2",
+			// IF EXISTS
+			"ALTER TABLE IF EXISTS t1 SWAP WITH t2",
+			"ALTER TABLE IF EXISTS orders SWAP WITH orders_backup",
+			// Three-part names
+			"ALTER TABLE db1.schema1.t1 SWAP WITH db1.schema1.t2",
+			"ALTER TABLE mydb.public.orders SWAP WITH mydb.public.orders_backup",
+			// Two-part names
+			"ALTER TABLE schema1.t1 SWAP WITH schema1.t2",
+			// Mixed part counts
+			"ALTER TABLE db.schema.t1 SWAP WITH t2",
+			"ALTER TABLE t1 SWAP WITH db.schema.t2",
+			// IF EXISTS with multi-part names
+			"ALTER TABLE IF EXISTS db.schema.t1 SWAP WITH db.schema.t2",
+			// Quoted identifiers
+			`ALTER TABLE "MY_TABLE" SWAP WITH "OTHER_TABLE"`,
+			`ALTER TABLE "my table" SWAP WITH "other table"`,
+			`ALTER TABLE db."SCHEMA"."TABLE" SWAP WITH db."SCHEMA"."OTHER"`,
+			// Case insensitive
+			"alter table t1 swap with t2",
+			"Alter Table T1 Swap With T2",
+			"ALTER TABLE t1 swap WITH t2",
+			// With trailing semicolons / whitespace
+			"ALTER TABLE t1 SWAP WITH t2;",
+			"ALTER TABLE t1 SWAP WITH t2;  ",
+			"ALTER TABLE t1 SWAP WITH t2 ;",
+			// Table name collides with a keyword
+			"ALTER TABLE swap SWAP WITH other_t",
+			`ALTER TABLE "select" SWAP WITH "from"`,
+		}
+		for _, sql := range validQueries {
+			t.Run(sql, func(t *testing.T) {
+				stmtRanges := GetStatementRanges(sql)
+				markers := ValidateSnowflakePatterns(sql, stmtRanges)
+				warns := getWarnings(markers)
+				if len(warns) > 0 {
+					t.Errorf("Expected no warnings for %q, got: %v", sql, warns)
+				}
+			})
+		}
+	})
+
+	t.Run("invalid ALTER TABLE SWAP WITH", func(t *testing.T) {
+		cases := []struct {
+			sql     string
+			wantMsg string
+		}{
+			// Missing target table name
+			{
+				sql:     "ALTER TABLE orders SWAP WITH",
+				wantMsg: "SWAP WITH requires a target table name",
+			},
+			{
+				sql:     "ALTER TABLE IF EXISTS orders SWAP WITH",
+				wantMsg: "SWAP WITH requires a target table name",
+			},
+			{
+				sql:     "ALTER TABLE db.schema.t1 SWAP WITH",
+				wantMsg: "SWAP WITH requires a target table name",
+			},
+			// Same table (no-op)
+			{
+				sql:     "ALTER TABLE orders SWAP WITH orders",
+				wantMsg: "SWAP WITH the same table",
+			},
+			{
+				sql:     "ALTER TABLE t1 SWAP WITH t1",
+				wantMsg: "SWAP WITH the same table",
+			},
+			// Extra clause after target
+			{
+				sql:     "ALTER TABLE orders SWAP WITH backup CLUSTER BY (id)",
+				wantMsg: "Unexpected clause after SWAP WITH target table",
+			},
+			{
+				sql:     "ALTER TABLE orders SWAP WITH backup SET DATA_RETENTION_TIME_IN_DAYS = 1",
+				wantMsg: "Unexpected clause after SWAP WITH target table",
 			},
 		}
 		for _, tc := range cases {

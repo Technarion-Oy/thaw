@@ -457,6 +457,34 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 					}
 				}
 			}
+
+			// ── ALTER TABLE … SWAP WITH: validate the target table ──────
+			if tgtMatch := reAlterTableSwapTarget.FindStringSubmatch(raw); tgtMatch != nil {
+				tgtParts := extractIdentParts(tgtMatch[1], ic)
+				tgtTable := tgtParts[len(tgtParts)-1]
+				tgtDB := ""
+				tgtSchema := ""
+				if len(tgtParts) == 3 {
+					tgtDB = tgtParts[0]
+					tgtSchema = tgtParts[1]
+				} else if len(tgtParts) == 2 {
+					tgtSchema = tgtParts[0]
+				}
+				tgtPath := strings.Join(tgtParts, ".")
+				if !isIn(scriptCreatedTables, tgtTable) && !isIn(scriptCreatedTables, tgtPath) {
+					isLive := anyRefMatch(req.ResolvedRefs, tgtTable, tgtDB, tgtSchema, checkEq)
+					if !isLive {
+						if tgtDB != "" && len(req.KnownDatabases) == 0 {
+							continue
+						}
+						badToken, msgFn := resolveErrorToken(tgtTable, tgtDB, tgtSchema,
+							scriptCreatedDbsAndSchemas, req.KnownDatabases, req.KnownSchemas, req.ResolvedRefs, checkEq)
+						for _, t := range findTokensLocally(raw, []string{badToken}, r.StartLine, ic) {
+							markers = append(markers, diagMarkerAt(t, msgFn(t.name), 8))
+						}
+					}
+				}
+			}
 		}
 
 		// ── Validate USE DATABASE <name> ──────────────────────────────────────
