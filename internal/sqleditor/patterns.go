@@ -48,11 +48,11 @@ var (
 		`(?i)\bTABLESAMPLE\b|\bSAMPLE\s*\(|\bWITHIN\s+GROUP\b|\bCONNECT\s+BY\b` +
 			`|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b` +
 			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:STAGE` +
-			`|REPLICATION|FAILOVER|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY)\b` +
+			`|REPLICATION|FAILOVER|APPLICATION\s+PACKAGE|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY)\b` +
 			`|ALTER\s+(?:TABLE|VIEW|STREAM|DATABASE|STAGE|PIPE|PROCEDURE|FUNCTION` +
 			`|ALERT|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK` +
-			`|REPLICATION|FAILOVER|DATASHARE|SERVICE|IMAGE\s+REPOSITORY)\b` +
-			`|DROP\s+(?:TABLE|VIEW|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY)\b` +
+			`|REPLICATION|FAILOVER|APPLICATION\s+PACKAGE|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY)\b` +
+			`|DROP\s+(?:TABLE|VIEW|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|APPLICATION\s+PACKAGE|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY)\b` +
 			`|EXECUTE\s+(?:JOB\s+)?SERVICE\b` +
 			`|UNDROP\s+(?:DATABASE|SCHEMA|TABLE)\b` +
 			`|INSERT\s+OVERWRITE\b` +
@@ -655,7 +655,7 @@ var (
 	reCreateApplicationName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?APPLICATION\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
 	reAppFromPackage        = regexp.MustCompile(`(?i)\bFROM\s+APPLICATION\s+PACKAGE\s+(` + _identPath + `)`)
 	reAppUsingVersion       = regexp.MustCompile(`(?i)\bUSING\s+VERSION\b`)
-	reAppUsingVersionPatch  = regexp.MustCompile(`(?i)\bUSING\s+VERSION\s+` + _ident + `\s+PATCH\s+\d+`)
+	reAppUsingVersionPatch  = regexp.MustCompile(`(?i)\bUSING\s+VERSION\s+` + _ident + `\s+PATCH\s+\d+\b`)
 	reIsAlterApplication    = regexp.MustCompile(`(?i)^\s*ALTER\s+APPLICATION\b`)
 	reAlterApplicationName  = regexp.MustCompile(`(?i)^\s*ALTER\s+APPLICATION\s+(` + _identPath + `)`)
 	reAlterAppAction        = regexp.MustCompile(`(?i)\b(?:UPGRADE|SET\s+DEBUG_MODE|UNSET\s+DEBUG_MODE)\b`)
