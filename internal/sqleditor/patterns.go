@@ -48,11 +48,11 @@ var (
 		`(?i)\bTABLESAMPLE\b|\bSAMPLE\s*\(|\bWITHIN\s+GROUP\b|\bCONNECT\s+BY\b` +
 			`|\bAT\s*\(|\bBEFORE\s*\(|\bIN\s+TABLE\b` +
 			`|CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRANSIENT\s+)?(?:STAGE` +
-			`|REPLICATION|FAILOVER|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY)\b` +
+			`|REPLICATION|FAILOVER|APPLICATION\s+PACKAGE|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY)\b` +
 			`|ALTER\s+(?:TABLE|VIEW|STREAM|DATABASE|STAGE|PIPE|PROCEDURE|FUNCTION` +
 			`|ALERT|EXTERNAL|NOTIFICATION|STORAGE|SECURITY|MASKING|NETWORK` +
-			`|REPLICATION|FAILOVER|DATASHARE|SERVICE|IMAGE\s+REPOSITORY)\b` +
-			`|DROP\s+(?:TABLE|VIEW|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY)\b` +
+			`|REPLICATION|FAILOVER|APPLICATION\s+PACKAGE|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY)\b` +
+			`|DROP\s+(?:TABLE|VIEW|STREAM|STAGE|PIPE|PROCEDURE|FUNCTION|APPLICATION\s+PACKAGE|APPLICATION|DATASHARE|SERVICE|IMAGE\s+REPOSITORY)\b` +
 			`|EXECUTE\s+(?:JOB\s+)?SERVICE\b` +
 			`|UNDROP\s+(?:DATABASE|SCHEMA|TABLE)\b` +
 			`|INSERT\s+OVERWRITE\b` +
@@ -635,6 +635,34 @@ var (
 	reIsDropImageRepository     = regexp.MustCompile(`(?i)^\s*DROP\s+IMAGE\s+REPOSITORY\b`)
 	reDropImageRepositoryName   = regexp.MustCompile(`(?i)^\s*DROP\s+IMAGE\s+REPOSITORY\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
 	reIsAlterImageRepository    = regexp.MustCompile(`(?i)^\s*ALTER\s+IMAGE\s+REPOSITORY\b`)
+
+	// ── CREATE / ALTER / DROP APPLICATION PACKAGE (Native Apps) ────────────
+	reIsCreateApplicationPackage   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?APPLICATION\s+PACKAGE\b`)
+	reCreateApplicationPackageName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?APPLICATION\s+PACKAGE\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
+	reIsAlterApplicationPackage    = regexp.MustCompile(`(?i)^\s*ALTER\s+APPLICATION\s+PACKAGE\b`)
+	reAlterApplicationPackageName  = regexp.MustCompile(`(?i)^\s*ALTER\s+APPLICATION\s+PACKAGE\s+(` + _identPath + `)`)
+	reAlterAppPkgAction            = regexp.MustCompile(`(?i)\b(?:SET\s+(?:DEFAULT\s+RELEASE\s+DIRECTIVE|DISTRIBUTION)|ADD\s+VERSION|DROP\s+VERSION)\b`)
+	reAlterAppPkgSetBare           = regexp.MustCompile(`(?i)\bSET\s+\w+`)
+	reAppPkgDistribution           = regexp.MustCompile(`(?i)\bDISTRIBUTION\s*=\s*(\w+)`)
+	reIsDropApplicationPackage     = regexp.MustCompile(`(?i)^\s*DROP\s+APPLICATION\s+PACKAGE\b`)
+	reDropApplicationPackageName   = regexp.MustCompile(`(?i)^\s*DROP\s+APPLICATION\s+PACKAGE\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
+
+	// ── CREATE / ALTER / DROP APPLICATION (Native Apps) ───────────────────
+	// Note: These regexes match both "APPLICATION" and "APPLICATION PACKAGE".
+	// The dispatch loop checks APPLICATION PACKAGE patterns first, so these
+	// only fire for bare APPLICATION statements.
+	reIsCreateApplication   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?APPLICATION\b`)
+	reCreateApplicationName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?APPLICATION\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
+	reAppFromPackage        = regexp.MustCompile(`(?i)\bFROM\s+APPLICATION\s+PACKAGE\s+(` + _identPath + `)`)
+	reAppUsingVersion       = regexp.MustCompile(`(?i)\bUSING\s+VERSION\b`)
+	reAppUsingVersionPatch  = regexp.MustCompile(`(?i)\bUSING\s+VERSION\s+` + _ident + `\s+PATCH\s+\d+\b`)
+	reIsAlterApplication    = regexp.MustCompile(`(?i)^\s*ALTER\s+APPLICATION\b`)
+	reAlterApplicationName  = regexp.MustCompile(`(?i)^\s*ALTER\s+APPLICATION\s+(` + _identPath + `)`)
+	reAlterAppAction        = regexp.MustCompile(`(?i)\b(?:UPGRADE|SET\s+DEBUG_MODE|UNSET\s+DEBUG_MODE)\b`)
+	reAlterAppSetBare       = regexp.MustCompile(`(?i)\bSET\s+\w+`)
+	reAlterAppUnsetBare     = regexp.MustCompile(`(?i)\bUNSET\s+\w+`)
+	reIsDropApplication     = regexp.MustCompile(`(?i)^\s*DROP\s+APPLICATION\b`)
+	reDropApplicationName   = regexp.MustCompile(`(?i)^\s*DROP\s+APPLICATION\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
 
 	// ── CREATE EVENT TABLE ──────────────────────────────────────────────────
 	reIsCreateEventTable   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?EVENT\s+TABLE\b`)
@@ -2184,6 +2212,42 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 			continue
 		}
 
+		// ── CREATE APPLICATION PACKAGE ──────────────────────────────────
+		if reIsCreateApplicationPackage.MatchString(parseText) {
+			markers = append(markers, validateCreateApplicationPackage(parseText, r)...)
+			continue
+		}
+
+		// ── ALTER APPLICATION PACKAGE ───────────────────────────────────
+		if reIsAlterApplicationPackage.MatchString(parseText) {
+			markers = append(markers, validateAlterApplicationPackage(parseText, r)...)
+			continue
+		}
+
+		// ── DROP APPLICATION PACKAGE ────────────────────────────────────
+		if reIsDropApplicationPackage.MatchString(parseText) {
+			markers = append(markers, validateDropApplicationPackage(parseText, r)...)
+			continue
+		}
+
+		// ── CREATE APPLICATION ──────────────────────────────────────────
+		if reIsCreateApplication.MatchString(parseText) {
+			markers = append(markers, validateCreateApplication(parseText, r)...)
+			continue
+		}
+
+		// ── ALTER APPLICATION ───────────────────────────────────────────
+		if reIsAlterApplication.MatchString(parseText) {
+			markers = append(markers, validateAlterApplication(parseText, r)...)
+			continue
+		}
+
+		// ── DROP APPLICATION ────────────────────────────────────────────
+		if reIsDropApplication.MatchString(parseText) {
+			markers = append(markers, validateDropApplication(parseText, r)...)
+			continue
+		}
+
 		// ── CREATE TAG ──────────────────────────────────────────────────
 		if reIsCreateTag.MatchString(parseText) {
 			markers = append(markers, validateCreateTag(parseText, r)...)
@@ -3543,7 +3607,7 @@ func validateCopyInto(parseText string, r StatementRange) []DiagMarker {
 // matches PROP = value where value is a word token. The map is built at init
 // time so regexes are compiled once rather than on every call.
 var reBoolPropMap = func() map[string]*regexp.Regexp {
-	props := []string{"ALLOW_WRITES", "PURGE", "FORCE", "LOAD_UNCERTAIN_FILES", "OVERWRITE", "SINGLE", "INCLUDE_QUERY_ID", "DETAILED_OUTPUT", "SHARE_RESTRICTIONS", "AUTO_RESUME", "INITIALLY_SUSPENDED"}
+	props := []string{"ALLOW_WRITES", "PURGE", "FORCE", "LOAD_UNCERTAIN_FILES", "OVERWRITE", "SINGLE", "INCLUDE_QUERY_ID", "DETAILED_OUTPUT", "SHARE_RESTRICTIONS", "AUTO_RESUME", "INITIALLY_SUSPENDED", "DEBUG_MODE"}
 	m := make(map[string]*regexp.Regexp, len(props))
 	for _, p := range props {
 		m[p] = regexp.MustCompile(`(?i)\b` + p + `\s*=\s*(\w+)\b`)
@@ -6602,4 +6666,270 @@ func validateAlterImageRepository(_ string, r StatementRange) []DiagMarker {
 		diagMarkerSpan(r,
 			"ALTER IMAGE REPOSITORY is not supported in the current Snowflake specification.", 4),
 	}
+}
+
+// ── validateCreateApplicationPackage ──────────────────────────────────────────
+
+// validateCreateApplicationPackage checks structural requirements for
+// CREATE [OR REPLACE] APPLICATION PACKAGE [IF NOT EXISTS] <name> statements:
+//   - OR REPLACE and IF NOT EXISTS are mutually exclusive.
+//   - Application packages are account-level objects: name must not have a db.schema prefix.
+//   - DISTRIBUTION must be INTERNAL or EXTERNAL if present.
+//   - Only DISTRIBUTION and COMMENT are valid properties.
+func validateCreateApplicationPackage(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+
+	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
+	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE APPLICATION PACKAGE statement.", 4))
+		return markers
+	}
+
+	// 2. Package name is required; also used for account-level prefix check.
+	m := reCreateApplicationPackageName.FindStringSubmatch(clean)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"Unexpected syntax in CREATE APPLICATION PACKAGE statement.", 4))
+		return markers
+	}
+	// Guard against "CREATE APPLICATION PACKAGE IF NOT EXISTS" (no name).
+	if strings.EqualFold(m[1], "IF") && reIfNotExists.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Unexpected syntax in CREATE APPLICATION PACKAGE statement.", 4))
+		return markers
+	}
+	if sqlIdentPathHasDot(m[1]) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Application packages are account-level objects and cannot have a database or schema prefix.", 4))
+	}
+
+	// 3. DISTRIBUTION must be INTERNAL or EXTERNAL if present.
+	if distMatch := reAppPkgDistribution.FindStringSubmatch(clean); distMatch != nil {
+		val := strings.ToUpper(distMatch[1])
+		if val != "INTERNAL" && val != "EXTERNAL" {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("DISTRIBUTION must be INTERNAL or EXTERNAL, got '%s'.", distMatch[1]), 4))
+		}
+	}
+
+	// 4. Only DISTRIBUTION and COMMENT are valid properties.
+	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
+	validateProperties(noComments, `DISTRIBUTION|COMMENT`, r, &markers)
+
+	return markers
+}
+
+// ── validateAlterApplicationPackage ───────────────────────────────────────────
+
+// validateAlterApplicationPackage checks structural requirements for
+// ALTER APPLICATION PACKAGE <name> statements:
+//   - Package name is required.
+//   - Must contain a known sub-command (SET DEFAULT RELEASE DIRECTIVE, ADD VERSION,
+//     DROP VERSION, SET DISTRIBUTION).
+//   - DISTRIBUTION must be INTERNAL or EXTERNAL if present.
+func validateAlterApplicationPackage(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+
+	// 1. Package name is required.
+	m := reAlterApplicationPackageName.FindStringSubmatch(clean)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"ALTER APPLICATION PACKAGE requires a package name.", 4))
+		return markers
+	}
+
+	// 2. At least one known action must be present.
+	if !reAlterAppPkgAction.MatchString(clean) {
+		if reAlterAppPkgSetBare.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"Unknown property in ALTER APPLICATION PACKAGE SET. Valid properties: DEFAULT RELEASE DIRECTIVE, DISTRIBUTION.", 4))
+		} else {
+			markers = append(markers, diagMarkerSpan(r,
+				"Unknown ALTER APPLICATION PACKAGE sub-command. Expected SET DEFAULT RELEASE DIRECTIVE, ADD VERSION, DROP VERSION, or SET DISTRIBUTION.", 4))
+		}
+		return markers
+	}
+
+	// 3. DISTRIBUTION must be INTERNAL or EXTERNAL if present.
+	if distMatch := reAppPkgDistribution.FindStringSubmatch(clean); distMatch != nil {
+		val := strings.ToUpper(distMatch[1])
+		if val != "INTERNAL" && val != "EXTERNAL" {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("DISTRIBUTION must be INTERNAL or EXTERNAL, got '%s'.", distMatch[1]), 4))
+		}
+	}
+
+	return markers
+}
+
+// ── validateDropApplicationPackage ────────────────────────────────────────────
+
+// validateDropApplicationPackage checks structural requirements for
+// DROP APPLICATION PACKAGE [IF EXISTS] <name>:
+//   - Package name is required.
+func validateDropApplicationPackage(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+
+	m := reDropApplicationPackageName.FindStringSubmatch(clean)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"DROP APPLICATION PACKAGE requires a package name.", 4))
+		return markers
+	}
+	// Guard against "DROP APPLICATION PACKAGE IF EXISTS" (no name).
+	if strings.EqualFold(m[1], "IF") && reDropServiceIfExists.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"DROP APPLICATION PACKAGE requires a package name.", 4))
+		return markers
+	}
+
+	return markers
+}
+
+// ── validateCreateApplication ─────────────────────────────────────────────────
+
+// validateCreateApplication checks structural requirements for
+// CREATE [OR REPLACE] APPLICATION [IF NOT EXISTS] <name> FROM APPLICATION PACKAGE <pkg>:
+//   - OR REPLACE and IF NOT EXISTS are mutually exclusive.
+//   - Applications are account-level objects: name must not have a db.schema prefix.
+//   - FROM APPLICATION PACKAGE clause is mandatory.
+//   - If USING VERSION is specified, PATCH is also required.
+//   - DEBUG_MODE must be TRUE or FALSE if present.
+//   - Only USING, DEBUG_MODE, and COMMENT are valid properties.
+func validateCreateApplication(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+
+	// 1. OR REPLACE and IF NOT EXISTS are mutually exclusive.
+	if reOrReplace.MatchString(clean) && reIfNotExists.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Conflict between OR REPLACE and IF NOT EXISTS in CREATE APPLICATION statement.", 4))
+		return markers
+	}
+
+	// 2. Application name is required.
+	m := reCreateApplicationName.FindStringSubmatch(clean)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"Unexpected syntax in CREATE APPLICATION statement.", 4))
+		return markers
+	}
+	// Guard against "CREATE APPLICATION IF NOT EXISTS" (no name).
+	if strings.EqualFold(m[1], "IF") && reIfNotExists.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Unexpected syntax in CREATE APPLICATION statement.", 4))
+		return markers
+	}
+	if sqlIdentPathHasDot(m[1]) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Applications are account-level objects and cannot have a database or schema prefix.", 4))
+	}
+
+	// 3. FROM APPLICATION PACKAGE is mandatory.
+	if !reAppFromPackage.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"Missing mandatory FROM APPLICATION PACKAGE clause in CREATE APPLICATION statement.", 4))
+	}
+
+	// 4. If USING VERSION is present, PATCH must also be present.
+	if reAppUsingVersion.MatchString(clean) && !reAppUsingVersionPatch.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"USING VERSION requires a PATCH number in CREATE APPLICATION statement.", 4))
+	}
+
+	// 5. DEBUG_MODE must be TRUE or FALSE if present.
+	validateBoolProp(clean, "DEBUG_MODE", r, &markers)
+
+	// 6. Only known properties are accepted.
+	noComments := strings.TrimSpace(stripCommentsSQL(parseText))
+	validateProperties(noComments, `DEBUG_MODE|COMMENT`, r, &markers)
+
+	return markers
+}
+
+// ── validateAlterApplication ──────────────────────────────────────────────────
+
+// validateAlterApplication checks structural requirements for
+// ALTER APPLICATION <name> statements:
+//   - Application name is required.
+//   - Must contain a known sub-command (UPGRADE, SET DEBUG_MODE, UNSET DEBUG_MODE).
+//   - DEBUG_MODE must be TRUE or FALSE when used with SET.
+func validateAlterApplication(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+
+	// 1. Application name is required.
+	m := reAlterApplicationName.FindStringSubmatch(clean)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"ALTER APPLICATION requires an application name.", 4))
+		return markers
+	}
+
+	// 2. At least one known action must be present.
+	if !reAlterAppAction.MatchString(clean) {
+		if reAlterAppSetBare.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"Unknown property in ALTER APPLICATION SET. Valid properties: DEBUG_MODE.", 4))
+		} else if reAlterAppUnsetBare.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"Unknown property in ALTER APPLICATION UNSET. Valid properties: DEBUG_MODE.", 4))
+		} else {
+			markers = append(markers, diagMarkerSpan(r,
+				"Unknown ALTER APPLICATION sub-command. Expected UPGRADE, SET DEBUG_MODE, or UNSET DEBUG_MODE.", 4))
+		}
+		return markers
+	}
+
+	// 3. If UPGRADE USING VERSION is present, PATCH must also be present.
+	if reAppUsingVersion.MatchString(clean) && !reAppUsingVersionPatch.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"USING VERSION requires a PATCH number in ALTER APPLICATION UPGRADE.", 4))
+	}
+
+	// 4. DEBUG_MODE must be TRUE or FALSE when used with SET.
+	validateBoolProp(clean, "DEBUG_MODE", r, &markers)
+
+	return markers
+}
+
+// ── validateDropApplication ───────────────────────────────────────────────────
+
+// validateDropApplication checks structural requirements for
+// DROP APPLICATION [IF EXISTS] <name> [CASCADE]:
+//   - Application name is required.
+func validateDropApplication(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	noLiterals := reStripStringLiterals.ReplaceAllString(parseText, "''")
+	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+
+	m := reDropApplicationName.FindStringSubmatch(clean)
+	if m == nil {
+		markers = append(markers, diagMarkerSpan(r,
+			"DROP APPLICATION requires an application name.", 4))
+		return markers
+	}
+	// Guard against "DROP APPLICATION IF EXISTS" (no name).
+	if strings.EqualFold(m[1], "IF") && reDropServiceIfExists.MatchString(clean) {
+		markers = append(markers, diagMarkerSpan(r,
+			"DROP APPLICATION requires an application name.", 4))
+		return markers
+	}
+
+	return markers
 }
