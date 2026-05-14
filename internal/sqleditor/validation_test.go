@@ -6102,6 +6102,16 @@ func TestValidateSnowflakePatterns_Pivot(t *testing.T) {
 			"SELECT * FROM readings PIVOT (MAX(value) FOR sensor IN ('temp', 'humidity')) AS pvt",
 			// PIVOT with MIN
 			"SELECT * FROM readings PIVOT (MIN(value) FOR sensor IN ('temp', 'humidity'))",
+			// PIVOT with ANY_VALUE
+			"SELECT * FROM data PIVOT (ANY_VALUE(val) FOR key IN ('a', 'b'))",
+			// PIVOT with LISTAGG
+			"SELECT * FROM data PIVOT (LISTAGG(name) FOR category IN ('x', 'y'))",
+			// PIVOT with MEDIAN
+			"SELECT * FROM data PIVOT (MEDIAN(score) FOR subject IN ('math', 'science'))",
+			// PIVOT with STDDEV
+			"SELECT * FROM data PIVOT (STDDEV(measurement) FOR sensor IN ('s1', 's2'))",
+			// PIVOT with VARIANCE
+			"SELECT * FROM data PIVOT (VARIANCE(amount) FOR region IN ('east', 'west'))",
 			// PIVOT with numeric values in IN list
 			"SELECT * FROM data PIVOT (SUM(val) FOR code IN (1, 2, 3))",
 			// PIVOT with fully qualified table

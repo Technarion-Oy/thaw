@@ -801,19 +801,13 @@ var (
 	rePivotClause   = regexp.MustCompile(`(?i)\bPIVOT\s*\(`)
 	reUnpivotClause = regexp.MustCompile(`(?i)\bUNPIVOT\s*\(`)
 
-	// PIVOT structural parts:
-	// - Valid aggregates: SUM, AVG, COUNT, MIN, MAX
+	// PIVOT structural: captures the aggregate function name
 	rePivotAgg = regexp.MustCompile(`(?i)\bPIVOT\s*\(\s*([\w]+)\s*\(`)
+	// Shared PIVOT/UNPIVOT structural patterns:
 	// - FOR ... IN (...) presence
 	rePivotForIn = regexp.MustCompile(`(?i)\bFOR\b[\s\S]+?\bIN\s*\(`)
 	// - Empty IN list: IN ()
 	rePivotEmptyIn = regexp.MustCompile(`(?i)\bIN\s*\(\s*\)`)
-
-	// UNPIVOT structural parts:
-	// - FOR ... IN (...) presence
-	reUnpivotForIn = regexp.MustCompile(`(?i)\bFOR\b[\s\S]+?\bIN\s*\(`)
-	// - Empty IN list: IN ()
-	reUnpivotEmptyIn = regexp.MustCompile(`(?i)\bIN\s*\(\s*\)`)
 
 	// Valid aggregate functions for PIVOT
 	pivotValidAggs = map[string]bool{
@@ -2682,14 +2676,14 @@ func validateUnpivotClauses(stripped string, r StatementRange) []DiagMarker {
 		unpivotBody := clean[blockStart+1 : blockStart+blockEnd]
 
 		// 1. Check FOR ... IN is present
-		if !reUnpivotForIn.MatchString(unpivotBody) {
+		if !rePivotForIn.MatchString(unpivotBody) {
 			markers = append(markers, diagMarkerSpan(r,
 				"UNPIVOT requires FOR <name_column> IN (<columns>).", 4))
 			continue
 		}
 
 		// 2. Check IN list is not empty
-		if reUnpivotEmptyIn.MatchString(unpivotBody) {
+		if rePivotEmptyIn.MatchString(unpivotBody) {
 			markers = append(markers, diagMarkerSpan(r,
 				"UNPIVOT IN list must not be empty. Provide at least one column name.", 4))
 		}
@@ -5972,7 +5966,7 @@ func countIdentParts(m string) int {
 
 // matchStringLiteral returns the position right after the closing single quote
 // of a SQL string literal at the start of s, or -1 if s does not start with a
-// valid string literal.  Embedded ” (escaped quotes) are handled.
+// valid string literal.  Embedded doubled single-quotes are handled.
 func matchStringLiteral(s string) int {
 	if len(s) == 0 || s[0] != '\'' {
 		return -1
