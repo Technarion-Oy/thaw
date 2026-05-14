@@ -853,7 +853,9 @@ var (
 	// MATCH_CONDITION (...) — mandatory clause for ASOF JOIN.
 	reAsofMatchCondition = regexp.MustCompile(`(?i)\bMATCH_CONDITION\s*\(`)
 
-	// USING FUNCTION form — alternative to MATCH_CONDITION for custom matching.
+	// USING (match_function(...)) form — alternative to MATCH_CONDITION for
+	// custom matching logic.  Matches USING ( <func_name>( to distinguish from
+	// the plain USING (column_list) form used by regular JOINs.
 	reAsofUsingFunction = regexp.MustCompile(`(?i)\bUSING\s*\(\s*` + _ident + `(?:\.` + _ident + `){0,2}\s*\(`)
 
 	// Valid comparison operators inside MATCH_CONDITION: >=, >, <=, <.
@@ -2911,6 +2913,10 @@ func containsAsofValidComparison(body string) bool {
 // at the top level (not inside parenthesized subqueries or MATCH_CONDITION).
 func hasOnClause(scope string, hasMatchCondition bool) bool {
 	upper := strings.ToUpper(scope)
+	mcPos := -1
+	if hasMatchCondition {
+		mcPos = strings.Index(upper, "MATCH_CONDITION")
+	}
 	depth := 0
 	for i := 0; i < len(upper); i++ {
 		switch upper[i] {
@@ -2935,11 +2941,8 @@ func hasOnClause(scope string, hasMatchCondition bool) bool {
 				// Found bare ON at top level.
 				// If there's a MATCH_CONDITION, ON after it is likely part of
 				// WHERE or another clause — skip.
-				if hasMatchCondition {
-					mcPos := strings.Index(upper, "MATCH_CONDITION")
-					if mcPos >= 0 && i > mcPos {
-						continue
-					}
+				if mcPos >= 0 && i > mcPos {
+					continue
 				}
 				return true
 			}
@@ -2949,36 +2952,44 @@ func hasOnClause(scope string, hasMatchCondition bool) bool {
 }
 
 // hasUsingClause checks if the scope after an ASOF JOIN contains a bare USING
-// keyword that is NOT followed by a function call (USING FUNCTION form is valid).
+// keyword at the top level (not inside parenthesized subqueries) that is NOT
+// the USING (match_function(...)) form.
 func hasUsingClause(scope string, hasUsingFunction bool) bool {
 	if hasUsingFunction {
 		return false
 	}
 	upper := strings.ToUpper(scope)
-	idx := 0
-	for {
-		pos := strings.Index(upper[idx:], "USING")
-		if pos < 0 {
-			return false
+	depth := 0
+	for i := 0; i < len(upper); i++ {
+		switch upper[i] {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case 'U':
+			if depth > 0 {
+				continue // inside parenthesized group — skip
+			}
+			// Check for "USING" at position i.
+			if i+5 <= len(upper) && upper[i:i+5] == "USING" {
+				// Check word boundaries.
+				if i > 0 && isWordChar(rune(upper[i-1])) {
+					continue
+				}
+				if i+5 < len(upper) && isWordChar(rune(upper[i+5])) {
+					continue
+				}
+				// Found bare USING at top level — check if followed by '('.
+				after := strings.TrimSpace(upper[i+5:])
+				if strings.HasPrefix(after, "(") {
+					return true // USING (...) column-list form, not valid
+				}
+			}
 		}
-		absPos := idx + pos
-		// Check word boundary before
-		if absPos > 0 && isWordChar(rune(upper[absPos-1])) {
-			idx = absPos + 5
-			continue
-		}
-		// Check word boundary after
-		if absPos+5 < len(upper) && isWordChar(rune(upper[absPos+5])) {
-			idx = absPos + 5
-			continue
-		}
-		// Check if this is the USING FUNCTION form — if so, skip it.
-		after := strings.TrimSpace(upper[absPos+5:])
-		if strings.HasPrefix(after, "(") {
-			return true // USING (...) is the column-list form, not valid
-		}
-		idx = absPos + 5
 	}
+	return false
 }
 
 // findMatchingParen finds the index of the closing ')' that matches the opening

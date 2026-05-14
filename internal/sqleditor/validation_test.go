@@ -6435,6 +6435,8 @@ func TestValidateSnowflakePatterns_AsofJoin(t *testing.T) {
 			`SELECT * FROM t1 ASOF JOIN t2 MATCH_CONDITION (t1.ts >= t2.ts) ASOF JOIN t3 MATCH_CONDITION (t1.ts >= t3.ts)`,
 			// ASOF JOIN with subquery containing a regular JOIN with ON
 			`SELECT * FROM t1 ASOF JOIN (SELECT * FROM x JOIN y ON x.id = y.id) AS t2 MATCH_CONDITION (t1.ts >= t2.ts)`,
+			// ASOF JOIN with subquery containing a regular JOIN with USING
+			`SELECT * FROM t1 ASOF JOIN (SELECT * FROM x JOIN y USING (id)) AS t2 MATCH_CONDITION (t1.ts >= t2.ts)`,
 			// Table name containing "ON" (e.g. options)
 			`SELECT * FROM t1 ASOF JOIN options MATCH_CONDITION (t1.ts >= options.ts)`,
 		}
