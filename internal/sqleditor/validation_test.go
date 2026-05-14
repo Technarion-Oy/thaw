@@ -79,6 +79,10 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"ALTER NOTEBOOK my_nb RENAME TO new_nb",
 		"DROP NOTEBOOK my_nb",
 		"DROP NOTEBOOK IF EXISTS my_nb",
+		// ALTER TABLE SEARCH OPTIMIZATION — comprehensive tests in TestValidateSnowflakePatterns_AlterTableSearchOptimization
+		"ALTER TABLE my_table ADD SEARCH OPTIMIZATION",
+		"ALTER TABLE t ADD SEARCH OPTIMIZATION ON EQUALITY(c1), SUBSTRING(c2)",
+		"ALTER TABLE t DROP SEARCH OPTIMIZATION",
 		// SHOW statements — comprehensive tests in TestValidateSnowflakePatterns_Show
 		// False Positive Guards (Should be silently ignored, 0 warnings)
 		"DELETE FROM t WHERE id = 1",
@@ -6841,6 +6845,113 @@ func TestValidateSnowflakePatterns_InsertAllFirstOverwrite(t *testing.T) {
 				}
 				if !found {
 					t.Errorf("Expected warning containing %q for:\n%s\ngot: %v", tc.wantMsg, tc.sql, warns)
+				}
+			})
+		}
+	})
+}
+
+// ── ALTER TABLE … ADD/DROP SEARCH OPTIMIZATION ──────────────────────────────
+
+func TestValidateSnowflakePatterns_AlterTableSearchOptimization(t *testing.T) {
+	t.Run("valid ALTER TABLE SEARCH OPTIMIZATION", func(t *testing.T) {
+		validQueries := []string{
+			// Bare ADD SEARCH OPTIMIZATION (no ON clause)
+			"ALTER TABLE my_table ADD SEARCH OPTIMIZATION",
+			"ALTER TABLE db.schema.my_table ADD SEARCH OPTIMIZATION",
+			// IF EXISTS form
+			"ALTER TABLE IF EXISTS my_table ADD SEARCH OPTIMIZATION",
+			"ALTER TABLE IF EXISTS my_table ADD SEARCH OPTIMIZATION ON EQUALITY(c1)",
+			// Bare DROP SEARCH OPTIMIZATION
+			"ALTER TABLE my_table DROP SEARCH OPTIMIZATION",
+			"ALTER TABLE db.schema.my_table DROP SEARCH OPTIMIZATION",
+			// ON clause with EQUALITY
+			"ALTER TABLE my_table ADD SEARCH OPTIMIZATION ON EQUALITY(col1)",
+			"ALTER TABLE t ADD SEARCH OPTIMIZATION ON EQUALITY(col1, col2)",
+			// ON clause with SUBSTRING
+			"ALTER TABLE t ADD SEARCH OPTIMIZATION ON SUBSTRING(col1)",
+			"ALTER TABLE t ADD SEARCH OPTIMIZATION ON SUBSTRING(col1, col2)",
+			// ON clause with GEO
+			"ALTER TABLE t ADD SEARCH OPTIMIZATION ON GEO(geo_col)",
+			// ON clause with FULL_TEXT
+			"ALTER TABLE t ADD SEARCH OPTIMIZATION ON FULL_TEXT(col1)",
+			"ALTER TABLE t ADD SEARCH OPTIMIZATION ON FULL_TEXT(col1, col2)",
+			"ALTER TABLE t ADD SEARCH OPTIMIZATION ON FULL_TEXT(col1, LANGUAGE => 'en')",
+			// Multiple expression types
+			"ALTER TABLE t ADD SEARCH OPTIMIZATION ON EQUALITY(c1), SUBSTRING(c2)",
+			"ALTER TABLE t ADD SEARCH OPTIMIZATION ON EQUALITY(c1), SUBSTRING(c2), GEO(c3), FULL_TEXT(c4)",
+			// DROP with ON clause
+			"ALTER TABLE t DROP SEARCH OPTIMIZATION ON EQUALITY(col1)",
+			"ALTER TABLE t DROP SEARCH OPTIMIZATION ON EQUALITY(c1), SUBSTRING(c2)",
+			// Case insensitive
+			"ALTER TABLE t ADD search optimization ON equality(c1)",
+			"alter table t add search optimization on substring(c1), geo(c2)",
+			// With trailing semicolons / whitespace
+			"ALTER TABLE t ADD SEARCH OPTIMIZATION;",
+			"ALTER TABLE t ADD SEARCH OPTIMIZATION ON EQUALITY(c1);",
+			"ALTER TABLE t DROP SEARCH OPTIMIZATION ON SUBSTRING(c1), GEO(c2);  ",
+		}
+		for _, sql := range validQueries {
+			t.Run(sql, func(t *testing.T) {
+				stmtRanges := GetStatementRanges(sql)
+				markers := ValidateSnowflakePatterns(sql, stmtRanges)
+				warns := getWarnings(markers)
+				if len(warns) > 0 {
+					t.Errorf("Expected no warnings for %q, got: %v", sql, warns)
+				}
+			})
+		}
+	})
+
+	t.Run("invalid ALTER TABLE SEARCH OPTIMIZATION", func(t *testing.T) {
+		cases := []struct {
+			sql     string
+			wantMsg string
+		}{
+			// Unknown expression type
+			{
+				sql:     "ALTER TABLE t ADD SEARCH OPTIMIZATION ON FUZZY(col1)",
+				wantMsg: "Unknown search optimization type",
+			},
+			// Another unknown type
+			{
+				sql:     "ALTER TABLE t ADD SEARCH OPTIMIZATION ON HASH(col1)",
+				wantMsg: "Unknown search optimization type",
+			},
+			// Empty ON clause
+			{
+				sql:     "ALTER TABLE t ADD SEARCH OPTIMIZATION ON",
+				wantMsg: "SEARCH OPTIMIZATION ON requires at least one expression",
+			},
+			// Mixed valid and invalid
+			{
+				sql:     "ALTER TABLE t ADD SEARCH OPTIMIZATION ON EQUALITY(c1), FUZZY(c2)",
+				wantMsg: "Unknown search optimization type",
+			},
+			// DROP with unknown expression type
+			{
+				sql:     "ALTER TABLE t DROP SEARCH OPTIMIZATION ON UNKNOWN(col1)",
+				wantMsg: "Unknown search optimization type",
+			},
+			// IF EXISTS with unknown expression type
+			{
+				sql:     "ALTER TABLE IF EXISTS t ADD SEARCH OPTIMIZATION ON FUZZY(col1)",
+				wantMsg: "Unknown search optimization type",
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.sql, func(t *testing.T) {
+				stmtRanges := GetStatementRanges(tc.sql)
+				markers := ValidateSnowflakePatterns(tc.sql, stmtRanges)
+				warns := getWarnings(markers)
+				found := false
+				for _, w := range warns {
+					if strings.Contains(w.Message, tc.wantMsg) {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("Expected warning containing %q for %q, got: %v", tc.wantMsg, tc.sql, warns)
 				}
 			})
 		}

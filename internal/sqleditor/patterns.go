@@ -862,6 +862,26 @@ var (
 	// The check logic uses containsAsofValidComparison() instead of a single
 	// regex because Go's regexp package (RE2) does not support lookaheads.
 
+	// ── ALTER TABLE … ADD/DROP SEARCH OPTIMIZATION ─────────────────────
+	// Detection: matches ALTER TABLE <name> ADD SEARCH OPTIMIZATION or
+	// ALTER TABLE <name> DROP SEARCH OPTIMIZATION.
+	reIsAlterTableSearchOpt = regexp.MustCompile(
+		`(?i)^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?` + _identPath + `\s+(?:ADD|DROP)\s+SEARCH\s+OPTIMIZATION\b`)
+	// ON clause: captures everything after ON (expression list).
+	reSearchOptOnClause = regexp.MustCompile(
+		`(?i)\bSEARCH\s+OPTIMIZATION\s+ON\b`)
+	// Extracts individual expression-type calls: EQUALITY(...), SUBSTRING(...), etc.
+	// Anchored to start-of-expression since input is pre-split by splitTopLevelCommas.
+	reSearchOptExpr = regexp.MustCompile(
+		`(?i)^\s*([A-Z_]+)\s*\(`)
+	// Valid search optimization expression types.
+	searchOptValidExprs = map[string]bool{
+		"EQUALITY":  true,
+		"SUBSTRING": true,
+		"GEO":       true,
+		"FULL_TEXT": true,
+	}
+
 	// ── INSERT ALL / INSERT FIRST / INSERT OVERWRITE ────────────────────
 	// Detection regexes for multi-table INSERT and INSERT OVERWRITE.
 	reIsInsertAll       = regexp.MustCompile(`(?i)^\s*INSERT\s+(?:OVERWRITE\s+)?ALL\b`)
@@ -2652,6 +2672,13 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// Validate before the FP guard skips the statement.
 		if reIsInsertOverwriteBare.MatchString(stripped) {
 			markers = append(markers, validateInsertOverwrite(stripped, r)...)
+			continue
+		}
+
+		// ── ALTER TABLE … ADD/DROP SEARCH OPTIMIZATION ──────────────────
+		// Validate before the FP guard skips the statement.
+		if reIsAlterTableSearchOpt.MatchString(stripped) {
+			markers = append(markers, validateAlterTableSearchOptimization(stripped, r)...)
 			continue
 		}
 
@@ -8197,6 +8224,55 @@ func validateDropNotebook(parseText string, r StatementRange) []DiagMarker {
 	if reCascadeRestrictTrailing.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
 			"CASCADE / RESTRICT are not valid for DROP NOTEBOOK.", 4))
+	}
+
+	return markers
+}
+
+// ── validateAlterTableSearchOptimization ────────────────────────────────────
+
+// validateAlterTableSearchOptimization checks structural requirements for
+// ALTER TABLE <name> ADD/DROP SEARCH OPTIMIZATION:
+//   - Bare ADD/DROP SEARCH OPTIMIZATION (no ON clause) is valid.
+//   - ON <expression_list>: each expression must be EQUALITY, SUBSTRING, GEO,
+//     or FULL_TEXT. Unknown expression type names are flagged.
+func validateAlterTableSearchOptimization(stripped string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	clean := strings.TrimSpace(reStripStringLiterals.ReplaceAllString(stripped, "''"))
+
+	// If there is no ON clause, the bare form is valid — nothing to check.
+	loc := reSearchOptOnClause.FindStringIndex(clean)
+	if loc == nil {
+		return markers
+	}
+	onBody := strings.TrimSpace(clean[loc[1]:])
+
+	if onBody == "" {
+		markers = append(markers, diagMarkerSpan(r,
+			"SEARCH OPTIMIZATION ON requires at least one expression (e.g. EQUALITY, SUBSTRING, GEO, FULL_TEXT).", 4))
+		return markers
+	}
+
+	// Split the ON body into top-level comma-separated expressions and
+	// validate each expression type.
+	exprs := splitTopLevelCommas(onBody)
+	for _, expr := range exprs {
+		expr = strings.TrimSpace(expr)
+		if expr == "" {
+			continue
+		}
+		m := reSearchOptExpr.FindStringSubmatch(expr)
+		if m == nil {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("Invalid search optimization expression: %q. Expected EQUALITY, SUBSTRING, GEO, or FULL_TEXT.", expr), 4))
+			continue
+		}
+		funcName := strings.ToUpper(m[1])
+		if !searchOptValidExprs[funcName] {
+			markers = append(markers, diagMarkerSpan(r,
+				fmt.Sprintf("Unknown search optimization type %q. Valid types are EQUALITY, SUBSTRING, GEO, FULL_TEXT.", funcName), 4))
+		}
 	}
 
 	return markers
