@@ -5603,6 +5603,30 @@ func TestValidateSnowflakePatterns_Secret(t *testing.T) {
 			"CREATE SECRET my_secret TYPE = SYMMETRIC_KEY ALGORITHM = 'AES-256' USERNAME = 'u'",
 			[]string{"USERNAME is not valid for TYPE = SYMMETRIC_KEY"},
 		},
+		// -- FAIL: ALGORITHM on OAUTH2 type (wrong type property)
+		{
+			"CREATE SECRET OAUTH2 with ALGORITHM",
+			"CREATE SECRET my_secret TYPE = OAUTH2 API_AUTHENTICATION = my_int ALGORITHM = 'AES-256'",
+			[]string{"ALGORITHM is not valid for TYPE = OAUTH2"},
+		},
+		// -- FAIL: ENABLED on PASSWORD type (wrong type property)
+		{
+			"CREATE SECRET PASSWORD with ENABLED",
+			"CREATE SECRET my_secret TYPE = PASSWORD USERNAME = 'u' PASSWORD = 'p' ENABLED = TRUE",
+			[]string{"ENABLED is not valid for TYPE = PASSWORD"},
+		},
+		// -- FAIL: OAUTH_REFRESH_TOKEN on PASSWORD type (wrong type property)
+		{
+			"CREATE SECRET PASSWORD with OAUTH_REFRESH_TOKEN",
+			"CREATE SECRET my_secret TYPE = PASSWORD USERNAME = 'u' PASSWORD = 'p' OAUTH_REFRESH_TOKEN = 'tok'",
+			[]string{"OAUTH_REFRESH_TOKEN is not valid for TYPE = PASSWORD"},
+		},
+		// -- FAIL: OAUTH_SCOPES on GENERIC_STRING type (wrong type property)
+		{
+			"CREATE SECRET GENERIC_STRING with OAUTH_SCOPES",
+			"CREATE SECRET my_secret TYPE = GENERIC_STRING SECRET_STRING = 'abc' OAUTH_SCOPES = ('s1')",
+			[]string{"OAUTH_SCOPES is not valid for TYPE = GENERIC_STRING"},
+		},
 		// -- FAIL: Unexpected property
 		{
 			"CREATE SECRET unexpected property",

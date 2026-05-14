@@ -658,6 +658,9 @@ var (
 	reSecretString      = regexp.MustCompile(`(?i)\bSECRET_STRING\s*=`)
 	reSecretEnabled     = regexp.MustCompile(`(?i)\bENABLED\s*=`)
 	reSecretAlgorithm   = regexp.MustCompile(`(?i)\bALGORITHM\s*=`)
+	reSecretOAuthScopes = regexp.MustCompile(`(?i)\bOAUTH_SCOPES\s*=`)
+	reSecretOAuthRT     = regexp.MustCompile(`(?i)\bOAUTH_REFRESH_TOKEN\s*=`)
+	reSecretOAuthRTExp  = regexp.MustCompile(`(?i)\bOAUTH_REFRESH_TOKEN_EXPIRY_TIME\s*=`)
 	reIsAlterSecret     = regexp.MustCompile(`(?i)^\s*ALTER\s+SECRET\b`)
 	reAlterSecretName   = regexp.MustCompile(`(?i)^\s*ALTER\s+SECRET\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
 	reAlterSecretAction = regexp.MustCompile(`(?i)\b(?:SET\s+(?:SECRET_STRING|USERNAME|PASSWORD|OAUTH_REFRESH_TOKEN|OAUTH_REFRESH_TOKEN_EXPIRY_TIME|OAUTH_SCOPES|API_AUTHENTICATION|COMMENT)|UNSET\s+COMMENT)\b`)
@@ -7188,6 +7191,14 @@ func validateCreateSecret(parseText string, r StatementRange) []DiagMarker {
 			markers = append(markers, diagMarkerSpan(r,
 				"SECRET_STRING is not valid for TYPE = OAUTH2. SECRET_STRING belongs to TYPE = GENERIC_STRING.", 4))
 		}
+		if reSecretAlgorithm.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"ALGORITHM is not valid for TYPE = OAUTH2. ALGORITHM belongs to TYPE = SYMMETRIC_KEY.", 4))
+		}
+		if reSecretEnabled.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"ENABLED is not valid for TYPE = OAUTH2. ENABLED belongs to TYPE = CLOUD_PROVIDER_TOKEN.", 4))
+		}
 
 	case "PASSWORD":
 		// USERNAME and PASSWORD are mandatory.
@@ -7207,6 +7218,26 @@ func validateCreateSecret(parseText string, r StatementRange) []DiagMarker {
 		if reSecretString.MatchString(clean) {
 			markers = append(markers, diagMarkerSpan(r,
 				"SECRET_STRING is not valid for TYPE = PASSWORD. SECRET_STRING belongs to TYPE = GENERIC_STRING.", 4))
+		}
+		if reSecretAlgorithm.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"ALGORITHM is not valid for TYPE = PASSWORD. ALGORITHM belongs to TYPE = SYMMETRIC_KEY.", 4))
+		}
+		if reSecretEnabled.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"ENABLED is not valid for TYPE = PASSWORD. ENABLED belongs to TYPE = CLOUD_PROVIDER_TOKEN.", 4))
+		}
+		if reSecretOAuthScopes.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"OAUTH_SCOPES is not valid for TYPE = PASSWORD. OAUTH_SCOPES belongs to TYPE = OAUTH2.", 4))
+		}
+		if reSecretOAuthRT.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"OAUTH_REFRESH_TOKEN is not valid for TYPE = PASSWORD. OAUTH_REFRESH_TOKEN belongs to TYPE = OAUTH2.", 4))
+		}
+		if reSecretOAuthRTExp.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"OAUTH_REFRESH_TOKEN_EXPIRY_TIME is not valid for TYPE = PASSWORD. OAUTH_REFRESH_TOKEN_EXPIRY_TIME belongs to TYPE = OAUTH2.", 4))
 		}
 
 	case "GENERIC_STRING":
@@ -7228,6 +7259,26 @@ func validateCreateSecret(parseText string, r StatementRange) []DiagMarker {
 			markers = append(markers, diagMarkerSpan(r,
 				"PASSWORD is not valid for TYPE = GENERIC_STRING. PASSWORD belongs to TYPE = PASSWORD.", 4))
 		}
+		if reSecretAlgorithm.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"ALGORITHM is not valid for TYPE = GENERIC_STRING. ALGORITHM belongs to TYPE = SYMMETRIC_KEY.", 4))
+		}
+		if reSecretEnabled.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"ENABLED is not valid for TYPE = GENERIC_STRING. ENABLED belongs to TYPE = CLOUD_PROVIDER_TOKEN.", 4))
+		}
+		if reSecretOAuthScopes.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"OAUTH_SCOPES is not valid for TYPE = GENERIC_STRING. OAUTH_SCOPES belongs to TYPE = OAUTH2.", 4))
+		}
+		if reSecretOAuthRT.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"OAUTH_REFRESH_TOKEN is not valid for TYPE = GENERIC_STRING. OAUTH_REFRESH_TOKEN belongs to TYPE = OAUTH2.", 4))
+		}
+		if reSecretOAuthRTExp.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"OAUTH_REFRESH_TOKEN_EXPIRY_TIME is not valid for TYPE = GENERIC_STRING. OAUTH_REFRESH_TOKEN_EXPIRY_TIME belongs to TYPE = OAUTH2.", 4))
+		}
 
 	case "CLOUD_PROVIDER_TOKEN":
 		// API_AUTHENTICATION is mandatory.
@@ -7247,6 +7298,22 @@ func validateCreateSecret(parseText string, r StatementRange) []DiagMarker {
 		if reSecretString.MatchString(clean) {
 			markers = append(markers, diagMarkerSpan(r,
 				"SECRET_STRING is not valid for TYPE = CLOUD_PROVIDER_TOKEN. SECRET_STRING belongs to TYPE = GENERIC_STRING.", 4))
+		}
+		if reSecretAlgorithm.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"ALGORITHM is not valid for TYPE = CLOUD_PROVIDER_TOKEN. ALGORITHM belongs to TYPE = SYMMETRIC_KEY.", 4))
+		}
+		if reSecretOAuthScopes.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"OAUTH_SCOPES is not valid for TYPE = CLOUD_PROVIDER_TOKEN. OAUTH_SCOPES belongs to TYPE = OAUTH2.", 4))
+		}
+		if reSecretOAuthRT.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"OAUTH_REFRESH_TOKEN is not valid for TYPE = CLOUD_PROVIDER_TOKEN. OAUTH_REFRESH_TOKEN belongs to TYPE = OAUTH2.", 4))
+		}
+		if reSecretOAuthRTExp.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"OAUTH_REFRESH_TOKEN_EXPIRY_TIME is not valid for TYPE = CLOUD_PROVIDER_TOKEN. OAUTH_REFRESH_TOKEN_EXPIRY_TIME belongs to TYPE = OAUTH2.", 4))
 		}
 
 	case "SYMMETRIC_KEY":
@@ -7271,6 +7338,22 @@ func validateCreateSecret(parseText string, r StatementRange) []DiagMarker {
 		if reSecretString.MatchString(clean) {
 			markers = append(markers, diagMarkerSpan(r,
 				"SECRET_STRING is not valid for TYPE = SYMMETRIC_KEY. SECRET_STRING belongs to TYPE = GENERIC_STRING.", 4))
+		}
+		if reSecretEnabled.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"ENABLED is not valid for TYPE = SYMMETRIC_KEY. ENABLED belongs to TYPE = CLOUD_PROVIDER_TOKEN.", 4))
+		}
+		if reSecretOAuthScopes.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"OAUTH_SCOPES is not valid for TYPE = SYMMETRIC_KEY. OAUTH_SCOPES belongs to TYPE = OAUTH2.", 4))
+		}
+		if reSecretOAuthRT.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"OAUTH_REFRESH_TOKEN is not valid for TYPE = SYMMETRIC_KEY. OAUTH_REFRESH_TOKEN belongs to TYPE = OAUTH2.", 4))
+		}
+		if reSecretOAuthRTExp.MatchString(clean) {
+			markers = append(markers, diagMarkerSpan(r,
+				"OAUTH_REFRESH_TOKEN_EXPIRY_TIME is not valid for TYPE = SYMMETRIC_KEY. OAUTH_REFRESH_TOKEN_EXPIRY_TIME belongs to TYPE = OAUTH2.", 4))
 		}
 
 	default:
@@ -7311,7 +7394,7 @@ func validateAlterSecret(parseText string, r StatementRange) []DiagMarker {
 	// 2. Check for known sub-commands.
 	if !reAlterSecretAction.MatchString(clean) {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unknown ALTER SECRET sub-command. Expected SET SECRET_STRING/USERNAME/PASSWORD/OAUTH_REFRESH_TOKEN/OAUTH_REFRESH_TOKEN_EXPIRY_TIME/COMMENT, or UNSET COMMENT.", 4))
+			"Unknown ALTER SECRET sub-command. Expected SET SECRET_STRING/USERNAME/PASSWORD/OAUTH_REFRESH_TOKEN/OAUTH_REFRESH_TOKEN_EXPIRY_TIME/OAUTH_SCOPES/API_AUTHENTICATION/COMMENT, or UNSET COMMENT.", 4))
 	}
 
 	return markers
