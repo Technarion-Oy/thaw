@@ -801,7 +801,7 @@ var (
 	// rePivotAgg uses \bPIVOT which cannot match inside UNPIVOT because \b
 	// does not fire between two word characters (N and P).
 	rePivotClause   = regexp.MustCompile(`(?i)\bPIVOT\s*\(`)
-	reUnpivotClause = regexp.MustCompile(`(?i)\bUNPIVOT\s*(?:(?:INCLUDE|EXCLUDE)\s+NULLS\s+)?\(`)
+	reUnpivotClause = regexp.MustCompile(`(?i)\bUNPIVOT\s*(?:(?:INCLUDE|EXCLUDE)\s+NULLS\s*)?\(`)
 
 	// PIVOT structural: captures the aggregate function name
 	rePivotAgg = regexp.MustCompile(`(?i)\bPIVOT\s*\(\s*([\w]+)\s*\(`)
@@ -2614,8 +2614,8 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 // IN list.
 func validatePivotClauses(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	noLiterals := reStripStringLiterals.ReplaceAllString(stripped, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	// stripped is already comment-free; only mask string literals.
+	clean := strings.TrimSpace(reStripStringLiterals.ReplaceAllString(stripped, "''"))
 
 	// Find all PIVOT( occurrences
 	for _, loc := range rePivotClause.FindAllStringIndex(clean, -1) {
@@ -2660,8 +2660,8 @@ func validatePivotClauses(stripped string, r StatementRange) []DiagMarker {
 // for structural correctness: FOR ... IN ..., non-empty IN list.
 func validateUnpivotClauses(stripped string, r StatementRange) []DiagMarker {
 	var markers []DiagMarker
-	noLiterals := reStripStringLiterals.ReplaceAllString(stripped, "''")
-	clean := strings.TrimSpace(stripCommentsSQL(noLiterals))
+	// stripped is already comment-free; only mask string literals.
+	clean := strings.TrimSpace(reStripStringLiterals.ReplaceAllString(stripped, "''"))
 
 	// Find all UNPIVOT( occurrences
 	for _, loc := range reUnpivotClause.FindAllStringIndex(clean, -1) {
