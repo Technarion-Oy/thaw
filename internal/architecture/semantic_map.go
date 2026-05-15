@@ -13,14 +13,16 @@ func GetCodebaseSemanticMap() string {
       "name": "Core IPC \u0026 App Lifecycle",
       "backend_paths": [
         "app.go",
+        "internal/apperrors/",
         "internal/config/",
         "internal/crashreport/",
         "internal/filesystem/",
         "internal/logger/",
+        "internal/session/",
         "internal/sfconfig/",
         "internal/telemetry/",
-        "main.go",
-        "session.go"
+        "internal/version/",
+        "main.go"
       ],
       "frontend_paths": [
         "frontend/src/components/connection/ConnectModal.tsx",
@@ -51,11 +53,13 @@ func GetCodebaseSemanticMap() string {
         "internal/procedure/",
         "internal/secret/",
         "internal/snowflake/",
+        "internal/stage/",
         "internal/tasks/"
       ],
       "frontend_paths": [
         "frontend/src/components/account/AccountPanel.tsx",
         "frontend/src/components/database/CreateStageModal.tsx",
+        "frontend/src/components/database/StagePropertiesModal.tsx",
         "frontend/src/components/layout/Sidebar.tsx",
         "frontend/src/store/objectStore.ts"
       ],
@@ -66,7 +70,7 @@ func GetCodebaseSemanticMap() string {
       "backend_paths": [
         "internal/ddl/",
         "internal/fileformat/",
-        "migration.go"
+        "internal/migration/"
       ],
       "frontend_paths": [
         "frontend/src/components/migration/MigrationModal.tsx",
@@ -87,9 +91,8 @@ func GetCodebaseSemanticMap() string {
     {
       "name": "Snowpark \u0026 Developer Workflows",
       "backend_paths": [
-        "dbt.go",
         "internal/dbt/",
-        "snowpark.go"
+        "internal/snowpark/"
       ],
       "frontend_paths": [
         "frontend/src/components/notebook/NotebookTab.tsx",

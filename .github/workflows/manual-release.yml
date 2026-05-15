@@ -148,13 +148,13 @@ jobs:
 
       - name: Build (macOS & Linux)
         if: matrix.platform != 'windows'
-        run: wails build -clean -ldflags "-s -w -X main.Version=${{ needs.release.outputs.version }}" -trimpath
+        run: wails build -clean -tags webkit2_41 -ldflags "-s -w -X thaw/internal/version.Version=${{ needs.release.outputs.version }}" -trimpath
         env:
           NODE_OPTIONS: --max-old-space-size=6144
 
       - name: Build & Package Installer (Windows)
         if: matrix.platform == 'windows'
-        run: wails build -clean -nsis -ldflags "-s -w -X main.Version=${{ needs.release.outputs.version }}" -trimpath
+        run: wails build -clean -nsis -ldflags "-s -w -X thaw/internal/version.Version=${{ needs.release.outputs.version }}" -trimpath
         env:
           NODE_OPTIONS: --max-old-space-size=6144
 
@@ -167,7 +167,7 @@ jobs:
         run: |
           garble build \
             -tags desktop,production \
-            -trimpath -ldflags="-s -w -X main.Version=${{ needs.release.outputs.version }}" \
+            -trimpath -ldflags="-s -w -X thaw/internal/version.Version=${{ needs.release.outputs.version }}" \
             -o build/bin/thaw.app/Contents/MacOS/thaw \
             .
 
@@ -175,8 +175,8 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           garble build \
-            -tags desktop,production \
-            -trimpath -ldflags="-s -w -X main.Version=${{ needs.release.outputs.version }}" \
+            -tags desktop,production,webkit2_41 \
+            -trimpath -ldflags="-s -w -X thaw/internal/version.Version=${{ needs.release.outputs.version }}" \
             -o build/bin/thaw \
             .
 

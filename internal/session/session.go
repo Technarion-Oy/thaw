@@ -8,8 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-// thaw:file-domain: Core IPC & App Lifecycle
-package main
+package session
 
 import (
 	"encoding/json"
@@ -26,11 +25,11 @@ type WindowState struct {
 	Maximized bool `json:"maximised"` //nolint:misspell // JSON tag kept for backward-compat with existing session files
 }
 
-// loadWindowState reads the persisted window state from disk.
+// LoadWindowState reads the persisted window state from disk.
 // Returns (state, true) on success, or (zero, false) if the file is missing,
 // unreadable, or contains invalid JSON.
-func loadWindowState() (WindowState, bool) {
-	data, err := os.ReadFile(sessionStatePath())
+func LoadWindowState() (WindowState, bool) {
+	data, err := os.ReadFile(StatePath())
 	if err != nil {
 		return WindowState{}, false
 	}
@@ -45,12 +44,12 @@ func loadWindowState() (WindowState, bool) {
 	return s, true
 }
 
-// saveWindowState marshals the given WindowState to JSON and writes it to the
+// SaveWindowState marshals the given WindowState to JSON and writes it to the
 // session state file, creating the file if it does not exist.
-func saveWindowState(s WindowState) error {
+func SaveWindowState(s WindowState) error {
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(sessionStatePath(), data, 0o644)
+	return os.WriteFile(StatePath(), data, 0o644)
 }

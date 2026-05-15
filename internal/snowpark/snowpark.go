@@ -8,11 +8,11 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-// thaw:file-domain: Snowpark & Developer Workflows
-package main
+package snowpark
 
 import (
 	"bufio"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -29,7 +29,9 @@ import (
 	"sync"
 	"time"
 
+	"thaw/internal/apperrors"
 	"thaw/internal/config"
+	"thaw/internal/snowflake"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -571,7 +573,7 @@ while True:
             else:
                 print(DEBUG_RESULT_MARKER + json.dumps({"error": str(e)}), flush=True)
             print(SENTINEL, flush=True)
-            
+
         continue
 
     # ── Standard Execution ────────────────────────────────────────────────────
@@ -698,6 +700,17 @@ type NotebookCompletion struct {
 	Documentation string `json:"documentation"` // raw docstring (may be empty)
 }
 
+// NotebookSyntaxError describes a single Python diagnostic returned by CheckPythonSyntax.
+// Line is 1-indexed; Col and EndCol are 0-indexed (Monaco adds 1 when applying markers).
+// Severity is "error" (syntax errors) or "warning" (e.g. module-not-found).
+type NotebookSyntaxError struct {
+	Severity string `json:"severity"`
+	Line     int    `json:"line"`
+	Col      int    `json:"col"`
+	EndCol   *int   `json:"endCol"`
+	Msg      string `json:"msg"`
+}
+
 // ─── kernel session management ────────────────────────────────────────────────
 
 type notebookSession struct {
@@ -733,17 +746,36 @@ func ensureKernelScript() (string, error) {
 	return kernelScriptPath, kernelScriptErr
 }
 
-// ─── IPC methods ──────────────────────────────────────────────────────────────
+// ─── Service ──────────────────────────────────────────────────────────────────
+
+// SyncTabContextFunc is called when a notebook kernel's session context changes.
+// The function receives the tabId and each context field that needs a USE command
+// (empty string means that field did not change).
+type SyncTabContextFunc func(tabId, role, warehouse, database, schema string)
+
+// Service manages Snowpark/Jupyter notebook operations.
+type Service struct {
+	ctx            context.Context
+	syncTabContext SyncTabContextFunc
+}
+
+// NewService creates a Service. ctx is the Wails application context used for
+// dialogs and event emission. syncTabContext is called when a kernel's session
+// context drifts from the tab's session (may be nil if tab-session sync is
+// not needed).
+func NewService(ctx context.Context, syncTabContext SyncTabContextFunc) *Service {
+	return &Service{ctx: ctx, syncTabContext: syncTabContext}
+}
+
+// ─── pure helpers ─────────────────────────────────────────────────────────────
 
 // IsAppleSilicon reports whether the host is an Apple Silicon (arm64) Mac.
-func (a *App) IsAppleSilicon() bool {
+func IsAppleSilicon() bool {
 	return runtime.GOOS == "darwin" && runtime.GOARCH == "arm64"
 }
 
-// ─── venv helpers ─────────────────────────────────────────────────────────────
-
 // pythonVersionAtLeast reports whether a "major.minor" version string satisfies
-// the given minimum (e.g. atLeastPythonVersion("3.13", 3, 9) → true).
+// the given minimum (e.g. pythonVersionAtLeast("3.13", 3, 9) → true).
 // Returns false if the string cannot be parsed.
 func pythonVersionAtLeast(version string, wantMajor, wantMinor int) bool {
 	parts := strings.SplitN(version, ".", 2)
@@ -813,103 +845,29 @@ func snowparkPython() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// ─── config IPC ───────────────────────────────────────────────────────────────
-
-// GetSnowparkConfig returns the effective Snowpark environment settings.
-func (a *App) GetSnowparkConfig() SnowparkConfigResult {
-	cfg, _ := config.Load()
-	backend := cfg.Snowpark.Backend
-	if backend == "" {
-		backend = "conda"
+// detectSystemPython returns the version string (e.g. "3.11") of the first
+// python3/python binary found on PATH, or "" if none is found.
+func detectSystemPython() string {
+	re := regexp.MustCompile(`Python (\d+\.\d+)`)
+	for _, bin := range []string{"python3", "python"} {
+		p, err := exec.LookPath(bin)
+		if err != nil {
+			continue
+		}
+		out, err := exec.Command(p, "--version").CombinedOutput()
+		if err != nil {
+			continue
+		}
+		if m := re.FindStringSubmatch(string(out)); len(m) >= 2 {
+			return m[1]
+		}
 	}
-	venvPath := cfg.Snowpark.VenvPath
-	if venvPath == "" {
-		venvPath = defaultVenvPath()
-	}
-	return SnowparkConfigResult{Backend: backend, VenvPath: venvPath, PythonPath: cfg.Snowpark.PythonPath}
+	return ""
 }
 
-// SaveSnowparkConfig persists the backend choice.
-func (a *App) SaveSnowparkConfig(backend string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	cfg.Snowpark.Backend = backend
-	return config.Save(cfg)
-}
-
-// SaveSnowparkVenvPath persists the custom venv directory path.
-func (a *App) SaveSnowparkVenvPath(path string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	cfg.Snowpark.VenvPath = path
-	return config.Save(cfg)
-}
-
-// VenvFolderExists reports whether the configured venv directory exists on disk.
-func (a *App) VenvFolderExists() bool {
-	cfg, _ := config.Load()
-	venvPath := cfg.Snowpark.VenvPath
-	if venvPath == "" {
-		venvPath = defaultVenvPath()
-	}
-	_, err := os.Stat(venvPath)
-	return err == nil
-}
-
-// SaveSnowparkPythonPath persists the chosen Python binary path for venv creation.
-func (a *App) SaveSnowparkPythonPath(pythonPath string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	cfg.Snowpark.PythonPath = pythonPath
-	return config.Save(cfg)
-}
-
-// ─── pip registry IPC ─────────────────────────────────────────────────────────
-
-// GetPipRegistryConfig returns the persisted pip registry configuration.
-func (a *App) GetPipRegistryConfig() (config.PipRegistryConfig, error) {
-	cfg, err := config.Load()
-	if err != nil {
-		return config.PipRegistryConfig{}, err
-	}
-	return cfg.PipRegistry, nil
-}
-
-// SavePipRegistryConfig persists the pip registry configuration to disk.
-func (a *App) SavePipRegistryConfig(cfg config.PipRegistryConfig) error {
-	appCfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	appCfg.PipRegistry = cfg
-	return config.Save(appCfg)
-}
-
-// ResetPipRegistryConfig clears the pip registry configuration.
-func (a *App) ResetPipRegistryConfig() error {
-	appCfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	appCfg.PipRegistry = config.PipRegistryConfig{}
-	return config.Save(appCfg)
-}
-
-// PickCACertFile opens a file picker for certificate files and returns the chosen path.
-func (a *App) PickCACertFile() (string, error) {
-	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
-		Title: "Select CA Certificate",
-		Filters: []wailsruntime.FileFilter{
-			{DisplayName: "Certificate Files (*.pem, *.crt, *.cer)", Pattern: "*.pem;*.crt;*.cer"},
-		},
-	})
-	return path, err
+// bpFilePath returns the companion breakpoints file path for a notebook.
+func bpFilePath(notebookPath string) string {
+	return notebookPath + ".thaw-bp.json"
 }
 
 // ─── pip registry helpers ──────────────────────────────────────────────────────
@@ -969,7 +927,7 @@ func splitHosts(s string) []string {
 // buildPipRegistrySetup converts the persisted PipRegistryConfig into concrete
 // pip CLI flags and environment variables.  It is called immediately before
 // every pip install invocation.
-func (a *App) buildPipRegistrySetup() pipRegistrySetup {
+func (s *Service) buildPipRegistrySetup() pipRegistrySetup {
 	appCfg, err := config.Load()
 	if err != nil {
 		return pipRegistrySetup{}
@@ -1026,8 +984,131 @@ func (a *App) buildPipRegistrySetup() pipRegistrySetup {
 	return pipRegistrySetup{Args: args, Env: env}
 }
 
+// kernelRPC sends a pre-formatted request string to the kernel stdin, reads
+// stdout until the sentinel, and returns the last non-sentinel line (JSON).
+// The caller must already hold s.mu.
+func kernelRPC(s *notebookSession, request string) (string, error) {
+	if _, err := fmt.Fprint(s.stdin, request); err != nil {
+		return "", fmt.Errorf("write to kernel: %w", err)
+	}
+	var lastLine string
+	for {
+		line, err := s.stdout.ReadString('\n')
+		if err != nil {
+			return "", fmt.Errorf("read from kernel: %w", err)
+		}
+		line = strings.TrimRight(line, "\n\r")
+		if line == kernelSentinel {
+			break
+		}
+		lastLine = line
+	}
+	return lastLine, nil
+}
+
+// ─── config IPC ───────────────────────────────────────────────────────────────
+
+// GetSnowparkConfig returns the effective Snowpark environment settings.
+func (s *Service) GetSnowparkConfig() SnowparkConfigResult {
+	cfg, _ := config.Load()
+	backend := cfg.Snowpark.Backend
+	if backend == "" {
+		backend = "conda"
+	}
+	venvPath := cfg.Snowpark.VenvPath
+	if venvPath == "" {
+		venvPath = defaultVenvPath()
+	}
+	return SnowparkConfigResult{Backend: backend, VenvPath: venvPath, PythonPath: cfg.Snowpark.PythonPath}
+}
+
+// SaveSnowparkConfig persists the backend choice.
+func (s *Service) SaveSnowparkConfig(backend string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	cfg.Snowpark.Backend = backend
+	return config.Save(cfg)
+}
+
+// SaveSnowparkVenvPath persists the custom venv directory path.
+func (s *Service) SaveSnowparkVenvPath(path string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	cfg.Snowpark.VenvPath = path
+	return config.Save(cfg)
+}
+
+// VenvFolderExists reports whether the configured venv directory exists on disk.
+func (s *Service) VenvFolderExists() bool {
+	cfg, _ := config.Load()
+	venvPath := cfg.Snowpark.VenvPath
+	if venvPath == "" {
+		venvPath = defaultVenvPath()
+	}
+	_, err := os.Stat(venvPath)
+	return err == nil
+}
+
+// SaveSnowparkPythonPath persists the chosen Python binary path for venv creation.
+func (s *Service) SaveSnowparkPythonPath(pythonPath string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	cfg.Snowpark.PythonPath = pythonPath
+	return config.Save(cfg)
+}
+
+// ─── pip registry IPC ─────────────────────────────────────────────────────────
+
+// GetPipRegistryConfig returns the persisted pip registry configuration.
+func (s *Service) GetPipRegistryConfig() (config.PipRegistryConfig, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return config.PipRegistryConfig{}, err
+	}
+	return cfg.PipRegistry, nil
+}
+
+// SavePipRegistryConfig persists the pip registry configuration to disk.
+func (s *Service) SavePipRegistryConfig(cfg config.PipRegistryConfig) error {
+	appCfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	appCfg.PipRegistry = cfg
+	return config.Save(appCfg)
+}
+
+// ResetPipRegistryConfig clears the pip registry configuration.
+func (s *Service) ResetPipRegistryConfig() error {
+	appCfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	appCfg.PipRegistry = config.PipRegistryConfig{}
+	return config.Save(appCfg)
+}
+
+// PickCACertFile opens a file picker for certificate files and returns the chosen path.
+func (s *Service) PickCACertFile() (string, error) {
+	path, err := wailsruntime.OpenFileDialog(s.ctx, wailsruntime.OpenDialogOptions{
+		Title: "Select CA Certificate",
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "Certificate Files (*.pem, *.crt, *.cer)", Pattern: "*.pem;*.crt;*.cer"},
+		},
+	})
+	return path, err
+}
+
+// ─── system python discovery ──────────────────────────────────────────────────
+
 // ListSystemPythons returns all Python interpreters found on the system.
-func (a *App) ListSystemPythons() []PythonInfo {
+func (s *Service) ListSystemPythons() []PythonInfo {
 	seen := map[string]bool{}
 	var result []PythonInfo
 	re := regexp.MustCompile(`Python (\d+\.\d+(?:\.\d+)?)`)
@@ -1087,28 +1168,10 @@ func (a *App) ListSystemPythons() []PythonInfo {
 	return result
 }
 
-// detectSystemPython returns the version string (e.g. "3.11") of the first
-// python3/python binary found on PATH, or "" if none is found.
-func detectSystemPython() string {
-	re := regexp.MustCompile(`Python (\d+\.\d+)`)
-	for _, bin := range []string{"python3", "python"} {
-		p, err := exec.LookPath(bin)
-		if err != nil {
-			continue
-		}
-		out, err := exec.Command(p, "--version").CombinedOutput()
-		if err != nil {
-			continue
-		}
-		if m := re.FindStringSubmatch(string(out)); len(m) >= 2 {
-			return m[1]
-		}
-	}
-	return ""
-}
+// ─── environment check ────────────────────────────────────────────────────────
 
 // CheckSnowparkEnv inspects the local environment based on the configured backend.
-func (a *App) CheckSnowparkEnv() SnowparkCheckResult {
+func (s *Service) CheckSnowparkEnv() SnowparkCheckResult {
 	result := SnowparkCheckResult{}
 
 	// Always detect system Python regardless of backend.
@@ -1122,12 +1185,12 @@ func (a *App) CheckSnowparkEnv() SnowparkCheckResult {
 	result.Backend = backend
 
 	if backend == "venv" {
-		return a.checkVenvEnv(&result, cfg)
+		return s.checkVenvEnv(&result, cfg)
 	}
-	return a.checkCondaEnv(&result)
+	return s.checkCondaEnv(&result)
 }
 
-func (a *App) checkCondaEnv(result *SnowparkCheckResult) SnowparkCheckResult {
+func (s *Service) checkCondaEnv(result *SnowparkCheckResult) SnowparkCheckResult {
 	condaPath, err := exec.LookPath("conda")
 	if err != nil {
 		result.Details = "conda not found. Install Miniconda or Anaconda and ensure it is on your PATH."
@@ -1177,7 +1240,7 @@ func (a *App) checkCondaEnv(result *SnowparkCheckResult) SnowparkCheckResult {
 	return *result
 }
 
-func (a *App) checkVenvEnv(result *SnowparkCheckResult, cfg *config.AppConfig) SnowparkCheckResult {
+func (s *Service) checkVenvEnv(result *SnowparkCheckResult, cfg *config.AppConfig) SnowparkCheckResult {
 	venvPath := cfg.Snowpark.VenvPath
 	if venvPath == "" {
 		venvPath = defaultVenvPath()
@@ -1219,8 +1282,10 @@ func (a *App) checkVenvEnv(result *SnowparkCheckResult, cfg *config.AppConfig) S
 	return *result
 }
 
+// ─── command streaming ────────────────────────────────────────────────────────
+
 // streamCommandTo runs cmd and emits each output line as the given event.
-func (a *App) streamCommandTo(cmd *exec.Cmd, eventName string) error {
+func (s *Service) streamCommandTo(cmd *exec.Cmd, eventName string) error {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -1234,7 +1299,7 @@ func (a *App) streamCommandTo(cmd *exec.Cmd, eventName string) error {
 	}
 
 	emit := func(line string) {
-		wailsruntime.EventsEmit(a.ctx, eventName, line)
+		wailsruntime.EventsEmit(s.ctx, eventName, line)
 	}
 
 	var wg sync.WaitGroup
@@ -1253,12 +1318,14 @@ func (a *App) streamCommandTo(cmd *exec.Cmd, eventName string) error {
 }
 
 // streamCommand runs cmd and emits each output line as a "snowpark:install-output" event.
-func (a *App) streamCommand(cmd *exec.Cmd) error {
-	return a.streamCommandTo(cmd, "snowpark:install-output")
+func (s *Service) streamCommand(cmd *exec.Cmd) error {
+	return s.streamCommandTo(cmd, "snowpark:install-output")
 }
 
+// ─── pip/env helpers ──────────────────────────────────────────────────────────
+
 // pipBinForEnv returns the pip binary path for the active backend environment.
-func (a *App) pipBinForEnv() (string, error) {
+func (s *Service) pipBinForEnv() (string, error) {
 	cfg, _ := config.Load()
 	backend := cfg.Snowpark.Backend
 	if backend == "" {
@@ -1280,7 +1347,7 @@ func (a *App) pipBinForEnv() (string, error) {
 }
 
 // ListEnvPackages returns all packages installed in the active Snowpark environment.
-func (a *App) ListEnvPackages() ([]PackageInfo, error) {
+func (s *Service) ListEnvPackages() ([]PackageInfo, error) {
 	cfg, _ := config.Load()
 	backend := cfg.Snowpark.Backend
 	if backend == "" {
@@ -1289,7 +1356,7 @@ func (a *App) ListEnvPackages() ([]PackageInfo, error) {
 
 	var cmd *exec.Cmd
 	if backend == "venv" {
-		pip, err := a.pipBinForEnv()
+		pip, err := s.pipBinForEnv()
 		if err != nil {
 			return nil, err
 		}
@@ -1325,17 +1392,17 @@ func (a *App) ListEnvPackages() ([]PackageInfo, error) {
 
 // InstallEnvPackage installs a single Python package in the active environment,
 // streaming output via the "snowpark:package-output" event.
-func (a *App) InstallEnvPackage(pkg string) error {
+func (s *Service) InstallEnvPackage(pkg string) error {
 	cfg, _ := config.Load()
 	backend := cfg.Snowpark.Backend
 	if backend == "" {
 		backend = "conda"
 	}
 
-	setup := a.buildPipRegistrySetup()
+	setup := s.buildPipRegistrySetup()
 	var cmd *exec.Cmd
 	if backend == "venv" {
-		pip, err := a.pipBinForEnv()
+		pip, err := s.pipBinForEnv()
 		if err != nil {
 			return err
 		}
@@ -1354,7 +1421,7 @@ func (a *App) InstallEnvPackage(pkg string) error {
 		cmd.Env = append(os.Environ(), setup.Env...)
 	}
 
-	if err := a.streamCommandTo(cmd, "snowpark:package-output"); err != nil {
+	if err := s.streamCommandTo(cmd, "snowpark:package-output"); err != nil {
 		return fmt.Errorf("install %s failed: %w", pkg, err)
 	}
 	return nil
@@ -1362,7 +1429,7 @@ func (a *App) InstallEnvPackage(pkg string) error {
 
 // UninstallEnvPackage removes a Python package from the active environment,
 // streaming output via the "snowpark:package-output" event.
-func (a *App) UninstallEnvPackage(pkg string) error {
+func (s *Service) UninstallEnvPackage(pkg string) error {
 	cfg, _ := config.Load()
 	backend := cfg.Snowpark.Backend
 	if backend == "" {
@@ -1371,7 +1438,7 @@ func (a *App) UninstallEnvPackage(pkg string) error {
 
 	var cmd *exec.Cmd
 	if backend == "venv" {
-		pip, err := a.pipBinForEnv()
+		pip, err := s.pipBinForEnv()
 		if err != nil {
 			return err
 		}
@@ -1385,15 +1452,17 @@ func (a *App) UninstallEnvPackage(pkg string) error {
 			"pip", "uninstall", "-y", pkg)
 	}
 
-	if err := a.streamCommandTo(cmd, "snowpark:package-output"); err != nil {
+	if err := s.streamCommandTo(cmd, "snowpark:package-output"); err != nil {
 		return fmt.Errorf("uninstall %s failed: %w", pkg, err)
 	}
 	return nil
 }
 
+// ─── conda install methods ────────────────────────────────────────────────────
+
 // InstallCondaEnv creates the thaw_snowpark conda environment.
 // On Apple Silicon the CONDA_SUBDIR=osx-64 workaround is applied automatically.
-func (a *App) InstallCondaEnv() error {
+func (s *Service) InstallCondaEnv() error {
 	condaPath, err := exec.LookPath("conda")
 	if err != nil {
 		return fmt.Errorf("conda not found: %w", err)
@@ -1401,7 +1470,7 @@ func (a *App) InstallCondaEnv() error {
 
 	// Skip if already exists.
 	if out, _ := exec.Command(condaPath, "env", "list").Output(); strings.Contains(string(out), SnowparkCondaEnv) {
-		wailsruntime.EventsEmit(a.ctx, "snowpark:install-output",
+		wailsruntime.EventsEmit(s.ctx, "snowpark:install-output",
 			fmt.Sprintf("Conda environment '%s' already exists, skipping creation.", SnowparkCondaEnv))
 		return nil
 	}
@@ -1413,22 +1482,22 @@ func (a *App) InstallCondaEnv() error {
 		"python=3.12", "numpy", "pandas", "pyarrow",
 	}
 	cmd := exec.Command(condaPath, args...)
-	if a.IsAppleSilicon() {
+	if IsAppleSilicon() {
 		// Apple M-series: force x86_64 to avoid pyOpenSSL ffi.callback crash.
 		cmd.Env = append(os.Environ(), "CONDA_SUBDIR=osx-64")
-		wailsruntime.EventsEmit(a.ctx, "snowpark:install-output",
+		wailsruntime.EventsEmit(s.ctx, "snowpark:install-output",
 			"Apple Silicon detected — creating x86_64 environment (CONDA_SUBDIR=osx-64).")
 	}
-	if err := a.streamCommand(cmd); err != nil {
+	if err := s.streamCommand(cmd); err != nil {
 		return fmt.Errorf("conda create failed: %w", err)
 	}
 
 	// Pin subdir for future installs on Apple Silicon.
-	if a.IsAppleSilicon() {
+	if IsAppleSilicon() {
 		cfgCmd := exec.Command(condaPath, "run", "-n", SnowparkCondaEnv,
 			"conda", "config", "--env", "--set", "subdir", "osx-64")
-		if e := a.streamCommand(cfgCmd); e != nil {
-			wailsruntime.EventsEmit(a.ctx, "snowpark:install-output",
+		if e := s.streamCommand(cfgCmd); e != nil {
+			wailsruntime.EventsEmit(s.ctx, "snowpark:install-output",
 				"[warn] conda config --env --set subdir osx-64: "+e.Error())
 		}
 	}
@@ -1437,33 +1506,33 @@ func (a *App) InstallCondaEnv() error {
 
 // InstallSnowparkPackage installs snowflake-snowpark-python (plus pandas/pyarrow)
 // into the thaw_snowpark conda environment.
-func (a *App) InstallSnowparkPackage() error {
+func (s *Service) InstallSnowparkPackage() error {
 	condaPath, err := exec.LookPath("conda")
 	if err != nil {
 		return fmt.Errorf("conda not found: %w", err)
 	}
 	cmd := exec.Command(condaPath, "install", "-n", SnowparkCondaEnv, "-y",
 		"snowflake-snowpark-python", "pandas", "pyarrow")
-	if err := a.streamCommand(cmd); err != nil {
+	if err := s.streamCommand(cmd); err != nil {
 		return fmt.Errorf("snowpark install failed: %w", err)
 	}
 	return nil
 }
 
 // InstallJupyterNotebook installs notebook, ipython-sql, sqlalchemy and pyflakes via pip.
-func (a *App) InstallJupyterNotebook() error {
+func (s *Service) InstallJupyterNotebook() error {
 	condaPath, err := exec.LookPath("conda")
 	if err != nil {
 		return fmt.Errorf("conda not found: %w", err)
 	}
-	setup := a.buildPipRegistrySetup()
+	setup := s.buildPipRegistrySetup()
 	baseArgs := []string{"run", "-n", SnowparkCondaEnv, "pip", "install", "notebook", "ipython-sql", "sqlalchemy", "pyflakes", "debugpy", "cryptography<44.0.0"}
 	args := append(baseArgs, setup.Args...)
 	cmd := exec.Command(condaPath, args...)
 	if len(setup.Env) > 0 {
 		cmd.Env = append(os.Environ(), setup.Env...)
 	}
-	if err := a.streamCommand(cmd); err != nil {
+	if err := s.streamCommand(cmd); err != nil {
 		return fmt.Errorf("notebook install failed: %w", err)
 	}
 	return nil
@@ -1472,7 +1541,7 @@ func (a *App) InstallJupyterNotebook() error {
 // ─── venv install methods ─────────────────────────────────────────────────────
 
 // InstallVenvEnv creates a Python venv at the configured path using system python3.
-func (a *App) InstallVenvEnv() error {
+func (s *Service) InstallVenvEnv() error {
 	cfg, _ := config.Load()
 	venvPath := cfg.Snowpark.VenvPath
 	if venvPath == "" {
@@ -1481,7 +1550,7 @@ func (a *App) InstallVenvEnv() error {
 
 	// Skip if already exists.
 	if _, err := os.Stat(venvPythonBin(venvPath)); err == nil {
-		wailsruntime.EventsEmit(a.ctx, "snowpark:install-output",
+		wailsruntime.EventsEmit(s.ctx, "snowpark:install-output",
 			fmt.Sprintf("Virtual environment already exists at %s, skipping.", venvPath))
 		return nil
 	}
@@ -1498,13 +1567,13 @@ func (a *App) InstallVenvEnv() error {
 		}
 	}
 
-	wailsruntime.EventsEmit(a.ctx, "snowpark:install-output",
+	wailsruntime.EventsEmit(s.ctx, "snowpark:install-output",
 		fmt.Sprintf("Creating venv at %s…", venvPath))
 	if err := os.MkdirAll(filepath.Dir(venvPath), 0o700); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}
 	cmd := exec.Command(python, "-m", "venv", venvPath)
-	if err := a.streamCommand(cmd); err != nil {
+	if err := s.streamCommand(cmd); err != nil {
 		return fmt.Errorf("venv create failed: %w", err)
 	}
 	return nil
@@ -1512,7 +1581,7 @@ func (a *App) InstallVenvEnv() error {
 
 // InstallSnowparkVenv installs snowflake-snowpark-python into the venv.
 // Pass withPandas=true for the [pandas] extras variant.
-func (a *App) InstallSnowparkVenv(withPandas bool) error {
+func (s *Service) InstallSnowparkVenv(withPandas bool) error {
 	cfg, _ := config.Load()
 	venvPath := cfg.Snowpark.VenvPath
 	if venvPath == "" {
@@ -1522,20 +1591,20 @@ func (a *App) InstallSnowparkVenv(withPandas bool) error {
 	if withPandas {
 		pkg = "snowflake-snowpark-python[pandas]"
 	}
-	setup := a.buildPipRegistrySetup()
+	setup := s.buildPipRegistrySetup()
 	args := append([]string{"install", pkg}, setup.Args...)
 	cmd := exec.Command(venvPipBin(venvPath), args...)
 	if len(setup.Env) > 0 {
 		cmd.Env = append(os.Environ(), setup.Env...)
 	}
-	if err := a.streamCommand(cmd); err != nil {
+	if err := s.streamCommand(cmd); err != nil {
 		return fmt.Errorf("snowpark venv install failed: %w", err)
 	}
 	return nil
 }
 
 // DeleteVenvFolder removes the venv directory at the configured path.
-func (a *App) DeleteVenvFolder() error {
+func (s *Service) DeleteVenvFolder() error {
 	cfg, _ := config.Load()
 	venvPath := cfg.Snowpark.VenvPath
 	if venvPath == "" {
@@ -1548,24 +1617,26 @@ func (a *App) DeleteVenvFolder() error {
 }
 
 // InstallJupyterVenv installs notebook, ipython-sql, sqlalchemy and pyflakes into the venv.
-func (a *App) InstallJupyterVenv() error {
+func (s *Service) InstallJupyterVenv() error {
 	cfg, _ := config.Load()
 	venvPath := cfg.Snowpark.VenvPath
 	if venvPath == "" {
 		venvPath = defaultVenvPath()
 	}
-	setup := a.buildPipRegistrySetup()
+	setup := s.buildPipRegistrySetup()
 	baseArgs := []string{"install", "notebook", "ipython-sql", "sqlalchemy", "pyflakes", "debugpy", "cryptography<44.0.0"}
 	args := append(baseArgs, setup.Args...)
 	cmd := exec.Command(venvPipBin(venvPath), args...)
 	if len(setup.Env) > 0 {
 		cmd.Env = append(os.Environ(), setup.Env...)
 	}
-	if err := a.streamCommand(cmd); err != nil {
+	if err := s.streamCommand(cmd); err != nil {
 		return fmt.Errorf("notebook venv install failed: %w", err)
 	}
 	return nil
 }
+
+// ─── notebook CRUD ────────────────────────────────────────────────────────────
 
 // minimalNotebook is the nbformat v4 JSON written when creating a new notebook.
 const minimalNotebook = `{
@@ -1588,8 +1659,8 @@ const minimalNotebook = `{
 `
 
 // NewNotebook shows a save dialog, writes a blank notebook, and returns the path and content.
-func (a *App) NewNotebook() (string, error) {
-	path, err := wailsruntime.SaveFileDialog(a.ctx, wailsruntime.SaveDialogOptions{
+func (s *Service) NewNotebook() (string, error) {
+	path, err := wailsruntime.SaveFileDialog(s.ctx, wailsruntime.SaveDialogOptions{
 		Title:           "New Notebook",
 		DefaultFilename: "notebook.ipynb",
 		Filters: []wailsruntime.FileFilter{
@@ -1610,8 +1681,8 @@ func (a *App) NewNotebook() (string, error) {
 }
 
 // PickNotebookFile opens a file picker for .ipynb files and returns the chosen path.
-func (a *App) PickNotebookFile() (string, error) {
-	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+func (s *Service) PickNotebookFile() (string, error) {
+	path, err := wailsruntime.OpenFileDialog(s.ctx, wailsruntime.OpenDialogOptions{
 		Title: "Open Notebook",
 		Filters: []wailsruntime.FileFilter{
 			{DisplayName: "Jupyter Notebooks (*.ipynb)", Pattern: "*.ipynb"},
@@ -1621,7 +1692,7 @@ func (a *App) PickNotebookFile() (string, error) {
 }
 
 // ReadNotebook reads an .ipynb file and returns its raw JSON content.
-func (a *App) ReadNotebook(path string) (string, error) {
+func (s *Service) ReadNotebook(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
@@ -1630,18 +1701,13 @@ func (a *App) ReadNotebook(path string) (string, error) {
 }
 
 // SaveNotebook writes notebook JSON to the given path.
-func (a *App) SaveNotebook(path string, content string) error {
+func (s *Service) SaveNotebook(path string, content string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
-}
-
-// bpFilePath returns the companion breakpoints file path for a notebook.
-func bpFilePath(notebookPath string) string {
-	return notebookPath + ".thaw-bp.json"
 }
 
 // SaveNotebookBreakpoints persists breakpoints (cellId → sorted line numbers)
 // to a companion file next to the notebook. An empty map deletes the file.
-func (a *App) SaveNotebookBreakpoints(notebookPath string, bps map[string][]int) error {
+func (s *Service) SaveNotebookBreakpoints(notebookPath string, bps map[string][]int) error {
 	p := bpFilePath(notebookPath)
 	if len(bps) == 0 {
 		_ = os.Remove(p) // best-effort delete when no breakpoints remain
@@ -1656,7 +1722,7 @@ func (a *App) SaveNotebookBreakpoints(notebookPath string, bps map[string][]int)
 
 // LoadNotebookBreakpoints reads the companion breakpoints file for a notebook.
 // Returns an empty map (no error) when the file does not exist.
-func (a *App) LoadNotebookBreakpoints(notebookPath string) (map[string][]int, error) {
+func (s *Service) LoadNotebookBreakpoints(notebookPath string) (map[string][]int, error) {
 	data, err := os.ReadFile(bpFilePath(notebookPath))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1671,13 +1737,15 @@ func (a *App) LoadNotebookBreakpoints(notebookPath string) (map[string][]int, er
 	return bps, nil
 }
 
-// RunNotebookSql executes a SQL query via the active Snowflake connection and
+// ─── notebook SQL execution ───────────────────────────────────────────────────
+
+// RunNotebookSql executes a SQL query via the provided Snowflake client and
 // returns the result as columns + rows, suitable for table display in a notebook.
-func (a *App) RunNotebookSql(sql string) (NotebookSqlResult, error) {
-	if a.client == nil {
-		return NotebookSqlResult{}, ErrNotConnected
+func (s *Service) RunNotebookSql(client *snowflake.Client, sql string) (NotebookSqlResult, error) {
+	if client == nil {
+		return NotebookSqlResult{}, apperrors.ErrNotConnected
 	}
-	result, err := a.client.Execute(a.ctx, sql)
+	result, err := client.Execute(s.ctx, sql)
 	if err != nil {
 		return NotebookSqlResult{}, err
 	}
@@ -1693,17 +1761,19 @@ func (a *App) RunNotebookSql(sql string) (NotebookSqlResult, error) {
 	}, nil
 }
 
+// ─── kernel environment ───────────────────────────────────────────────────────
+
 // notebookKernelEnv returns the THAW_SF_* environment variables to inject into
 // the kernel subprocess so it can auto-create a matching Snowpark session.
 // Falls back to nil (no extra vars) when not connected or params are unavailable.
-func (a *App) notebookKernelEnv() []string {
-	if a.connectParams == nil || a.client == nil {
+func (s *Service) notebookKernelEnv(client *snowflake.Client, connectParams *snowflake.ConnectParams) []string {
+	if connectParams == nil || client == nil {
 		return nil
 	}
-	p := a.connectParams
+	p := connectParams
 	// Fetch the live session state — the user may have switched role / warehouse
 	// / database / schema since connecting.
-	ctx, err := a.client.GetSessionContext(a.ctx)
+	ctx, err := client.GetSessionContext(s.ctx)
 	if err != nil {
 		// Fall back to original params if the query fails.
 		ctx.Role = p.Role
@@ -1726,9 +1796,11 @@ func (a *App) notebookKernelEnv() []string {
 	}
 }
 
+// ─── kernel session lifecycle ─────────────────────────────────────────────────
+
 // StartNotebookSession launches the Python kernel subprocess for a notebook tab.
 // Safe to call multiple times — returns immediately if a session already exists.
-func (a *App) StartNotebookSession(tabId string) error {
+func (s *Service) StartNotebookSession(client *snowflake.Client, connectParams *snowflake.ConnectParams, tabId string) error {
 	if _, ok := notebookSessions.Load(tabId); ok {
 		return nil
 	}
@@ -1746,7 +1818,7 @@ func (a *App) StartNotebookSession(tabId string) error {
 	cmd := exec.Command(python, "-u", scriptPath)
 	// Inject connection parameters so the kernel can auto-create a Snowpark
 	// session that matches the app's active connection.
-	if extra := a.notebookKernelEnv(); len(extra) > 0 {
+	if extra := s.notebookKernelEnv(client, connectParams); len(extra) > 0 {
 		cmd.Env = append(os.Environ(), extra...)
 	}
 
@@ -1767,8 +1839,8 @@ func (a *App) StartNotebookSession(tabId string) error {
 
 	// Capture the current main-connection context so we can detect drift later.
 	var initCtx NotebookSessionContext
-	if a.client != nil {
-		if sc, err := a.client.GetSessionContext(a.ctx); err == nil {
+	if client != nil {
+		if sc, err := client.GetSessionContext(s.ctx); err == nil {
 			initCtx = NotebookSessionContext{
 				Role:      sc.Role,
 				Warehouse: sc.Warehouse,
@@ -1789,28 +1861,28 @@ func (a *App) StartNotebookSession(tabId string) error {
 
 // RunNotebookCell sends code to the kernel and returns its output.
 // StartNotebookSession must have been called for this tabId first.
-func (a *App) RunNotebookCell(tabId string, cellId string, code string) (NotebookCellOutput, error) {
+func (s *Service) RunNotebookCell(tabId string, cellId string, code string) (NotebookCellOutput, error) {
 	val, ok := notebookSessions.Load(tabId)
 	if !ok {
 		return NotebookCellOutput{}, fmt.Errorf("no kernel for tab %s — call StartNotebookSession first", tabId)
 	}
-	s := val.(*notebookSession)
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	sess := val.(*notebookSession)
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
 
 	// Write code block + run marker, prefixed with the exec marker + cellId so
 	// the kernel can write the code to a physical temp file.  This gives any
 	// functions defined in this cell a real co_filename that debugpy can
 	// navigate to when stepping in from a later debug session.
 	payload := fmt.Sprintf("%s\n%s\n%s\n%s\n", kernelExecMarker, cellId, code, kernelRunMarker)
-	if _, err := fmt.Fprint(s.stdin, payload); err != nil {
+	if _, err := fmt.Fprint(sess.stdin, payload); err != nil {
 		return NotebookCellOutput{}, fmt.Errorf("write to kernel: %w", err)
 	}
 
 	// Read lines until the sentinel appears; the line just before it is JSON.
 	var lastJSON string
 	for {
-		line, err := s.stdout.ReadString('\n')
+		line, err := sess.stdout.ReadString('\n')
 		if err != nil {
 			return NotebookCellOutput{}, fmt.Errorf("read from kernel: %w", err)
 		}
@@ -1829,7 +1901,7 @@ func (a *App) RunNotebookCell(tabId string, cellId string, code string) (Noteboo
 	}
 
 	// Sync session context changes back to the tab's isolated session.
-	a.syncKernelContext(tabId, s, out.SessionContext)
+	s.syncKernelContext(tabId, sess, out.SessionContext)
 
 	return out, nil
 }
@@ -1837,7 +1909,7 @@ func (a *App) RunNotebookCell(tabId string, cellId string, code string) (Noteboo
 // ─── DAP Proxy Methods ────────────────────────────────────────────────────────
 
 // StartDapProxy connects to debugpy and starts shuttling messages.
-func (a *App) StartDapProxy() error {
+func (s *Service) StartDapProxy() error {
 	dapMutex.Lock()
 	defer dapMutex.Unlock()
 
@@ -1859,7 +1931,7 @@ func (a *App) StartDapProxy() error {
 
 	// CRITICAL: Wrap inside sync.Once to prevent duplicate listeners/memory leaks!
 	dapProxyOnce.Do(func() {
-		wailsruntime.EventsOn(a.ctx, "dap:client-to-backend", func(optionalData ...interface{}) {
+		wailsruntime.EventsOn(s.ctx, "dap:client-to-backend", func(optionalData ...interface{}) {
 			dapMutex.Lock()
 			defer dapMutex.Unlock()
 			if len(optionalData) > 0 {
@@ -1879,11 +1951,11 @@ func (a *App) StartDapProxy() error {
 
 			n, err := dapConn.Read(buf)
 			if err != nil {
-				wailsruntime.EventsEmit(a.ctx, "dap:disconnected", err.Error())
+				wailsruntime.EventsEmit(s.ctx, "dap:disconnected", err.Error())
 				break
 			}
 			// Encode to Base64 to guarantee that binary data/multi-byte chars are never corrupted!
-			wailsruntime.EventsEmit(a.ctx, "dap:backend-to-client", base64.StdEncoding.EncodeToString(buf[:n]))
+			wailsruntime.EventsEmit(s.ctx, "dap:backend-to-client", base64.StdEncoding.EncodeToString(buf[:n]))
 		}
 	}()
 
@@ -1891,7 +1963,7 @@ func (a *App) StartDapProxy() error {
 }
 
 // StopDapProxy closes the connection when debugging is done
-func (a *App) StopDapProxy() {
+func (s *Service) StopDapProxy() {
 	dapMutex.Lock()
 	defer dapMutex.Unlock()
 	if dapConn != nil {
@@ -1901,25 +1973,25 @@ func (a *App) StopDapProxy() {
 }
 
 // DebugNotebookCell executes the cell using debugpy and shuttles the output back to React
-func (a *App) DebugNotebookCell(tabId string, cellId string, code string) (NotebookCellOutput, error) {
+func (s *Service) DebugNotebookCell(tabId string, cellId string, code string) (NotebookCellOutput, error) {
 	val, ok := notebookSessions.Load(tabId)
 	if !ok {
 		return NotebookCellOutput{}, fmt.Errorf("no kernel running")
 	}
-	s := val.(*notebookSession)
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	sess := val.(*notebookSession)
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
 
 	// 1. Send the debug command to Python
 	payload := fmt.Sprintf("%s\n%s\n%s\n%s\n", kernelDebugMarker, cellId, code, kernelRunMarker)
 
-	if _, err := fmt.Fprint(s.stdin, payload); err != nil {
+	if _, err := fmt.Fprint(sess.stdin, payload); err != nil {
 		return NotebookCellOutput{}, err
 	}
 
 	// 2. Read the "DEBUG_READY" response
 	for {
-		line, err := s.stdout.ReadString('\n')
+		line, err := sess.stdout.ReadString('\n')
 		if err != nil {
 			return NotebookCellOutput{}, err
 		}
@@ -1937,16 +2009,16 @@ func (a *App) DebugNotebookCell(tabId string, cellId string, code string) (Noteb
 			_ = json.Unmarshal([]byte(line), &payload)
 
 			// 1. Tell React what the filepath is so it can set breakpoints
-			wailsruntime.EventsEmit(a.ctx, "dap:debug-ready", map[string]string{
+			wailsruntime.EventsEmit(s.ctx, "dap:debug-ready", map[string]string{
 				"filepath": payload.Filepath,
 			})
 
 			// 2. Start the TCP Proxy in a goroutine and tell React it's open (or failed!)
 			go func() {
-				if err := a.StartDapProxy(); err != nil {
-					wailsruntime.EventsEmit(a.ctx, "dap:proxy-ready", err.Error())
+				if err := s.StartDapProxy(); err != nil {
+					wailsruntime.EventsEmit(s.ctx, "dap:proxy-ready", err.Error())
 				} else {
-					wailsruntime.EventsEmit(a.ctx, "dap:proxy-ready", "")
+					wailsruntime.EventsEmit(s.ctx, "dap:proxy-ready", "")
 				}
 			}()
 		} else if strings.Contains(line, "error") {
@@ -1960,7 +2032,7 @@ func (a *App) DebugNotebookCell(tabId string, cellId string, code string) (Noteb
 	// 4. Now wait for the ACTUAL execution result (after the DAP client resumes the debugger)
 	var lastJSON string
 	for {
-		line, err := s.stdout.ReadString('\n')
+		line, err := sess.stdout.ReadString('\n')
 		if err != nil {
 			return NotebookCellOutput{}, fmt.Errorf("read from kernel: %w", err)
 		}
@@ -1973,12 +2045,12 @@ func (a *App) DebugNotebookCell(tabId string, cellId string, code string) (Noteb
 			lastJSON = strings.TrimPrefix(line, kernelDebugResultMarker)
 		} else if line != "" {
 			// Non-empty, non-sentinel, non-result line → real-time user stdout.
-			wailsruntime.EventsEmit(a.ctx, "notebook:debug:output", line)
+			wailsruntime.EventsEmit(s.ctx, "notebook:debug:output", line)
 		}
 	}
 
 	// 5. Clean up the DAP proxy after execution is finished
-	a.StopDapProxy()
+	s.StopDapProxy()
 
 	var out NotebookCellOutput
 	if lastJSON != "" {
@@ -1987,16 +2059,18 @@ func (a *App) DebugNotebookCell(tabId string, cellId string, code string) (Noteb
 		}
 	}
 
-	a.syncKernelContext(tabId, s, out.SessionContext)
+	s.syncKernelContext(tabId, sess, out.SessionContext)
 
 	return out, nil
 }
 
+// ─── kernel context sync ──────────────────────────────────────────────────────
+
 // syncKernelContext compares a newly-returned kernel context against the last
-// known context stored in s, applies any USE commands to the tab's isolated
-// session, emits a context-changed event when something changed, and updates
-// s.lastCtx.  The caller must hold s.mu.
-func (a *App) syncKernelContext(tabId string, s *notebookSession, ctx *NotebookSessionContext) {
+// known context stored in sess, applies any USE commands to the tab's isolated
+// session via the syncTabContext callback, emits a context-changed event when
+// something changed, and updates sess.lastCtx.  The caller must hold sess.mu.
+func (s *Service) syncKernelContext(tabId string, sess *notebookSession, ctx *NotebookSessionContext) {
 	if ctx == nil {
 		return
 	}
@@ -2012,50 +2086,53 @@ func (a *App) syncKernelContext(tabId string, s *notebookSession, ctx *NotebookS
 		Schema:    strip(ctx.Schema),
 	}
 	oldCtx := NotebookSessionContext{
-		Role:      strip(s.lastCtx.Role),
-		Warehouse: strip(s.lastCtx.Warehouse),
-		Database:  strip(s.lastCtx.Database),
-		Schema:    strip(s.lastCtx.Schema),
+		Role:      strip(sess.lastCtx.Role),
+		Warehouse: strip(sess.lastCtx.Warehouse),
+		Database:  strip(sess.lastCtx.Database),
+		Schema:    strip(sess.lastCtx.Schema),
 	}
 	if newCtx != oldCtx {
-		if val, ok := a.tabSessions.Load(tabId); ok {
-			ts := val.(*tabSession)
+		if s.syncTabContext != nil {
+			role, wh, db, schema := "", "", "", ""
 			if newCtx.Role != oldCtx.Role && newCtx.Role != "" {
-				_ = ts.client.UseRole(a.ctx, newCtx.Role)
+				role = newCtx.Role
 			}
 			if newCtx.Warehouse != oldCtx.Warehouse && newCtx.Warehouse != "" {
-				_ = ts.client.UseWarehouse(a.ctx, newCtx.Warehouse)
+				wh = newCtx.Warehouse
 			}
 			if newCtx.Database != oldCtx.Database && newCtx.Database != "" {
-				_ = ts.client.UseDatabase(a.ctx, newCtx.Database)
+				db = newCtx.Database
 			}
 			if newCtx.Schema != oldCtx.Schema && newCtx.Schema != "" {
-				_ = ts.client.UseSchema(a.ctx, newCtx.Schema)
+				schema = newCtx.Schema
 			}
+			s.syncTabContext(tabId, role, wh, db, schema)
 		}
-		s.lastCtx = newCtx
-		wailsruntime.EventsEmit(a.ctx, "notebook:session:context:changed", newCtx)
+		sess.lastCtx = newCtx
+		wailsruntime.EventsEmit(s.ctx, "notebook:session:context:changed", newCtx)
 	} else {
-		s.lastCtx = newCtx
+		sess.lastCtx = newCtx
 	}
 }
+
+// ─── kernel SQL cell execution ────────────────────────────────────────────────
 
 // RunNotebookCellSql executes SQL via the active Snowpark kernel session for the
 // given notebook tab so that SQL cells share context with Python cells (USE,
 // role/warehouse changes, etc.).  Falls back to the main connection when no
 // kernel is running.
-func (a *App) RunNotebookCellSql(tabId, sql string) (NotebookSqlResult, error) {
+func (s *Service) RunNotebookCellSql(client *snowflake.Client, tabId, sql string) (NotebookSqlResult, error) {
 	val, ok := notebookSessions.Load(tabId)
 	if !ok {
 		// No kernel — fall back to main connection.
-		return a.RunNotebookSql(sql)
+		return s.RunNotebookSql(client, sql)
 	}
-	s := val.(*notebookSession)
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	sess := val.(*notebookSession)
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
 
 	payload := fmt.Sprintf("%s\n%s\n%s\n", kernelSqlMarker, sql, kernelRunMarker)
-	resultJSON, err := kernelRPC(s, payload)
+	resultJSON, err := kernelRPC(sess, payload)
 	if err != nil {
 		return NotebookSqlResult{}, err
 	}
@@ -2077,7 +2154,7 @@ func (a *App) RunNotebookCellSql(tabId, sql string) (NotebookSqlResult, error) {
 		return NotebookSqlResult{}, fmt.Errorf("%s", *raw.Error)
 	}
 
-	a.syncKernelContext(tabId, s, raw.SessionContext)
+	s.syncKernelContext(tabId, sess, raw.SessionContext)
 
 	rows := raw.Rows
 	if rows == nil {
@@ -2094,7 +2171,7 @@ func (a *App) RunNotebookCellSql(tabId, sql string) (NotebookSqlResult, error) {
 // NotebookUseContext sends USE statements to the running Snowpark kernel for a
 // notebook tab so the session matches the tab's role/warehouse/database/schema.
 // Returns nil immediately if no kernel is running for tabId or all params are empty.
-func (a *App) NotebookUseContext(tabId, role, warehouse, database, schema string) error {
+func (s *Service) NotebookUseContext(tabId, role, warehouse, database, schema string) error {
 	if role == "" && warehouse == "" && database == "" && schema == "" {
 		return nil
 	}
@@ -2102,7 +2179,7 @@ func (a *App) NotebookUseContext(tabId, role, warehouse, database, schema string
 	if !ok {
 		return nil // no kernel running — silently ignore
 	}
-	s := val.(*notebookSession)
+	sess := val.(*notebookSession)
 
 	escape := func(v string) string {
 		return strings.ReplaceAll(v, "'", "\\'")
@@ -2128,16 +2205,16 @@ func (a *App) NotebookUseContext(tabId, role, warehouse, database, schema string
 	lines = append(lines, "except Exception:", "    pass")
 	code := strings.Join(lines, "\n")
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
 
-	if _, err := fmt.Fprintf(s.stdin, "%s\n%s\n", code, kernelRunMarker); err != nil {
+	if _, err := fmt.Fprintf(sess.stdin, "%s\n%s\n", code, kernelRunMarker); err != nil {
 		return fmt.Errorf("write to kernel: %w", err)
 	}
 
 	// Drain stdout until the sentinel (discard output).
 	for {
-		line, err := s.stdout.ReadString('\n')
+		line, err := sess.stdout.ReadString('\n')
 		if err != nil {
 			return fmt.Errorf("read from kernel: %w", err)
 		}
@@ -2148,44 +2225,24 @@ func (a *App) NotebookUseContext(tabId, role, warehouse, database, schema string
 	return nil
 }
 
-// kernelRPC sends a pre-formatted request string to the kernel stdin, reads
-// stdout until the sentinel, and returns the last non-sentinel line (JSON).
-// The caller must already hold s.mu.
-func kernelRPC(s *notebookSession, request string) (string, error) {
-	if _, err := fmt.Fprint(s.stdin, request); err != nil {
-		return "", fmt.Errorf("write to kernel: %w", err)
-	}
-	var lastLine string
-	for {
-		line, err := s.stdout.ReadString('\n')
-		if err != nil {
-			return "", fmt.Errorf("read from kernel: %w", err)
-		}
-		line = strings.TrimRight(line, "\n\r")
-		if line == kernelSentinel {
-			break
-		}
-		lastLine = line
-	}
-	return lastLine, nil
-}
+// ─── kernel intellisense ──────────────────────────────────────────────────────
 
 // GetNotebookCompletions queries jedi completions from the running kernel for
 // the given Python source at cursor position (line, col).  line is 1-indexed
 // and col is 0-indexed, matching jedi's convention.  Returns nil without error
 // when no kernel is running for the tab (e.g. kernel not yet started).
-func (a *App) GetNotebookCompletions(tabId, code string, line, col int) ([]NotebookCompletion, error) {
+func (s *Service) GetNotebookCompletions(tabId, code string, line, col int) ([]NotebookCompletion, error) {
 	val, ok := notebookSessions.Load(tabId)
 	if !ok {
 		return nil, nil
 	}
-	s := val.(*notebookSession)
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	sess := val.(*notebookSession)
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
 
 	req, _ := json.Marshal(map[string]any{"code": code, "line": line, "col": col})
 	payload := fmt.Sprintf("%s\n%s\n%s\n", kernelCompleteMarker, string(req), kernelRunMarker)
-	resultJSON, err := kernelRPC(s, payload)
+	resultJSON, err := kernelRPC(sess, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -2201,18 +2258,18 @@ func (a *App) GetNotebookCompletions(tabId, code string, line, col int) ([]Noteb
 // GetNotebookHover queries jedi hover documentation from the running kernel for
 // the given Python source at cursor position (line, col).  Returns an empty
 // string when no kernel is running or no documentation is available.
-func (a *App) GetNotebookHover(tabId, code string, line, col int) (string, error) {
+func (s *Service) GetNotebookHover(tabId, code string, line, col int) (string, error) {
 	val, ok := notebookSessions.Load(tabId)
 	if !ok {
 		return "", nil
 	}
-	s := val.(*notebookSession)
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	sess := val.(*notebookSession)
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
 
 	req, _ := json.Marshal(map[string]any{"code": code, "line": line, "col": col})
 	payload := fmt.Sprintf("%s\n%s\n%s\n", kernelHoverMarker, string(req), kernelRunMarker)
-	resultJSON, err := kernelRPC(s, payload)
+	resultJSON, err := kernelRPC(sess, payload)
 	if err != nil {
 		return "", err
 	}
@@ -2225,17 +2282,6 @@ func (a *App) GetNotebookHover(tabId, code string, line, col int) (string, error
 	return resp.Hover, nil
 }
 
-// NotebookSyntaxError describes a single Python diagnostic returned by CheckPythonSyntax.
-// Line is 1-indexed; Col and EndCol are 0-indexed (Monaco adds 1 when applying markers).
-// Severity is "error" (syntax errors) or "warning" (e.g. module-not-found).
-type NotebookSyntaxError struct {
-	Severity string `json:"severity"`
-	Line     int    `json:"line"`
-	Col      int    `json:"col"`
-	EndCol   *int   `json:"endCol"`
-	Msg      string `json:"msg"`
-}
-
 // CheckPythonSyntax asks the running Python kernel to analyze code and return
 // diagnostics.  mode controls the analysis depth:
 //   - "off"    — always returns nil (caller should skip, but Go side handles it too)
@@ -2243,7 +2289,7 @@ type NotebookSyntaxError struct {
 //   - "kernel" — ast.parse + pyflakes with live namespace stubs (default)
 //
 // Returns nil (no error) when no kernel is running for the tab.
-func (a *App) CheckPythonSyntax(tabId, code, mode string) ([]NotebookSyntaxError, error) {
+func (s *Service) CheckPythonSyntax(tabId, code, mode string) ([]NotebookSyntaxError, error) {
 	if mode == "off" {
 		return nil, nil
 	}
@@ -2251,13 +2297,13 @@ func (a *App) CheckPythonSyntax(tabId, code, mode string) ([]NotebookSyntaxError
 	if !ok {
 		return nil, nil
 	}
-	s := val.(*notebookSession)
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	sess := val.(*notebookSession)
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
 
 	req, _ := json.Marshal(map[string]any{"code": code, "mode": mode})
 	payload := fmt.Sprintf("%s\n%s\n%s\n", kernelSyntaxMarker, string(req), kernelRunMarker)
-	resultJSON, err := kernelRPC(s, payload)
+	resultJSON, err := kernelRPC(sess, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -2271,17 +2317,17 @@ func (a *App) CheckPythonSyntax(tabId, code, mode string) ([]NotebookSyntaxError
 }
 
 // StopNotebookSession kills the Python kernel for a notebook tab.
-func (a *App) StopNotebookSession(tabId string) error {
+func (s *Service) StopNotebookSession(tabId string) error {
 	val, ok := notebookSessions.LoadAndDelete(tabId)
 	if !ok {
 		return nil
 	}
-	s := val.(*notebookSession)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_ = s.stdin.Close()
-	if s.cmd.Process != nil {
-		return s.cmd.Process.Kill()
+	sess := val.(*notebookSession)
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	_ = sess.stdin.Close()
+	if sess.cmd.Process != nil {
+		return sess.cmd.Process.Kill()
 	}
 	return nil
 }

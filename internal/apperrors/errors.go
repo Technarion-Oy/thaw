@@ -8,10 +8,10 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-package main
+package apperrors
 
-// Version is the application version string. Override at build time with:
-//
-//	wails build -ldflags "-X main.Version=1.2.3"
-//	go build   -ldflags "-X main.Version=1.2.3" .
-var Version = "dev"
+import "errors"
+
+// ErrNotConnected is returned by App methods that require an active Snowflake
+// connection when none has been established yet.
+var ErrNotConnected = errors.New("no active Snowflake connection")

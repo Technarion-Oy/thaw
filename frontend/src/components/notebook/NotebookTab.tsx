@@ -56,7 +56,7 @@ import {
   LoadNotebookBreakpoints,
 } from "../../../wailsjs/go/main/App";
 import { DapClient, type CellBreakpoints, type DebugVariable } from "./debugClient";
-import type { main } from "../../../wailsjs/go/models";
+import type { snowpark } from "../../../wailsjs/go/models";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import { useNotebookPrefsStore } from "../../store/notebookPrefsStore";
 
@@ -185,7 +185,7 @@ interface CellOutput {
   text: string;
 }
 
-type SqlResult = main.NotebookSqlResult;
+type SqlResult = snowpark.NotebookSqlResult;
 
 interface Cell {
   id: string;

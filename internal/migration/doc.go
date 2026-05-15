@@ -8,12 +8,9 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-//go:build dev
+// thaw:domain: Schema Migration
 
-package main
-
-// sessionStatePath returns the session state file path for local development builds.
-// Stored in the project directory for easy inspection during development.
-func sessionStatePath() string {
-	return "./thaw-session.json"
-}
+// Package migration implements the schema migration engine: scanning local SQL
+// files, diffing against a live Snowflake database, deploying changes with
+// retry, and generating human-readable migration scripts.
+package migration

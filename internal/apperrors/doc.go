@@ -8,10 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-package main
+// thaw:domain: Core IPC & App Lifecycle
 
-import "errors"
-
-// ErrNotConnected is returned by App methods that require an active Snowflake
-// connection when none has been established yet.
-var ErrNotConnected = errors.New("no active Snowflake connection")
+// Package apperrors defines sentinel errors shared across the application.
+package apperrors

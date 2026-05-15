@@ -8,8 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-// thaw:file-domain: Schema Migration
-package main
+package migration
 
 import (
 	"context"
@@ -23,8 +22,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
-
 	"thaw/internal/ddl"
 	"thaw/internal/snowflake"
 )
@@ -32,8 +29,8 @@ import (
 // ─── event name constants ─────────────────────────────────────────────────────
 
 const (
-	migrationAnalyzeProgressEvent = "migration:analyze:progress"
-	migrationExecProgressEvent    = "migration:exec:progress"
+	AnalyzeProgressEvent = "migration:analyze:progress"
+	ExecProgressEvent    = "migration:exec:progress"
 )
 
 // ─── structs ──────────────────────────────────────────────────────────────────
@@ -58,13 +55,13 @@ type MigrationDiffItem struct {
 	RemoteDDL string          `json:"remoteDDL"`
 }
 
-// MigrationAnalyzeProgress is emitted during AnalyzeMigration.
+// MigrationAnalyzeProgress is emitted during Analyze.
 type MigrationAnalyzeProgress struct {
 	Done  int `json:"done"`
 	Total int `json:"total"`
 }
 
-// MigrationExecEvent is emitted during ExecuteMigration for each object processed.
+// MigrationExecEvent is emitted during Execute for each object processed.
 type MigrationExecEvent struct {
 	Done   int    `json:"done"`
 	Total  int    `json:"total"`
@@ -74,30 +71,83 @@ type MigrationExecEvent struct {
 	Pass   int    `json:"pass"`
 }
 
+// ─── TableMigrationStrategy ───────────────────────────────────────────────────
+
+// TableMigrationStrategy controls how TABLE objects that already exist in
+// Snowflake are handled during migration. It has no effect on non-TABLE objects,
+// which are always executed via their raw DDL.
+type TableMigrationStrategy string
+
+const (
+	// StrategyInPlace applies ALTER TABLE ADD/DROP/ALTER COLUMN statements to
+	// the existing table without touching unaffected rows.
+	StrategyInPlace TableMigrationStrategy = "in_place"
+
+	// StrategyBlueGreenSwap creates a temporary table with the new schema,
+	// copies shared columns from the original, then atomically swaps the two
+	// tables with ALTER TABLE … SWAP WITH. Columns absent from the new schema
+	// are discarded; all other rows are preserved.
+	StrategyBlueGreenSwap TableMigrationStrategy = "blue_green_swap"
+
+	// StrategyViewAbstraction renames the original table to <name>_v1, creates
+	// the new table with the updated schema, and creates a compatibility view
+	// <name>_compat that exposes shared columns from the archived data.
+	StrategyViewAbstraction TableMigrationStrategy = "view_abstraction"
+
+	// StrategyDestructiveRebuild drops the existing table before recreating it.
+	// All existing data is permanently lost.
+	StrategyDestructiveRebuild TableMigrationStrategy = "destructive_rebuild"
+)
+
 // ─── module-level compiled regexps ───────────────────────────────────────────
 
 var (
-	migrationBlockCommentRE = regexp.MustCompile(`(?s)/\*.*?\*/`)
-	migrationLineCommentRE  = regexp.MustCompile(`--[^\n]*`)
-	migrationWhitespaceRE   = regexp.MustCompile(`\s+`)
-	migrationUseDatabaseRE  = regexp.MustCompile(`(?i)^\s*USE\s+DATABASE\s+"?([^"\s;]+)"?`)
-	migrationUseSchemaRE    = regexp.MustCompile(`(?i)^\s*USE\s+SCHEMA\s+"?([^"\s;]+)"?`)
-	migrationIsReplaceRE    = regexp.MustCompile(`(?i)^\s*CREATE\s+OR\s+REPLACE\b`)
+	blockCommentRE = regexp.MustCompile(`(?s)/\*.*?\*/`)
+	lineCommentRE  = regexp.MustCompile(`--[^\n]*`)
+	whitespaceRE   = regexp.MustCompile(`\s+`)
+	useDatabaseRE  = regexp.MustCompile(`(?i)^\s*USE\s+DATABASE\s+"?([^"\s;]+)"?`)
+	useSchemaRE    = regexp.MustCompile(`(?i)^\s*USE\s+SCHEMA\s+"?([^"\s;]+)"?`)
+	isReplaceRE    = regexp.MustCompile(`(?i)^\s*CREATE\s+OR\s+REPLACE\b`)
 
 	// column-parsing patterns used by table migration strategies
-	migrConstraintPrefixRE = regexp.MustCompile(
+	constraintPrefixRE = regexp.MustCompile(
 		`(?i)^\s*(CONSTRAINT|PRIMARY\s+KEY|UNIQUE|CHECK|FOREIGN\s+KEY|CLUSTER\s+BY)`)
-	migrColNameRE = regexp.MustCompile(`(?i)^\s*"?([A-Za-z_][A-Za-z0-9_$]*)"?\s+\S`)
-	migrColTypeRE = regexp.MustCompile(`(?i)^\w+(?:\s*\([^)]*\))?`)
+	colNameRE = regexp.MustCompile(`(?i)^\s*"?([A-Za-z_][A-Za-z0-9_$]*)"?\s+\S`)
+	colTypeRE = regexp.MustCompile(`(?i)^\w+(?:\s*\([^)]*\))?`)
 )
 
-// ─── ScanMigrationSource ─────────────────────────────────────────────────────
+// ─── column helpers ──────────────────────────────────────────────────────────
 
-// ScanMigrationSource walks dir, parses every .sql file, and returns one
+// colDef is a column name plus its normalised type expression.
+type colDef struct {
+	Name     string // upper-cased, unquoted
+	TypeExpr string // base type only, e.g. "VARCHAR(255)" or "NUMBER(38,0)"
+}
+
+// tempCounter generates unique temp-table name suffixes within a session.
+var tempCounter atomic.Int64
+
+// ─── Service ─────────────────────────────────────────────────────────────────
+
+// Service manages schema migration operations.
+type Service struct {
+	cancelFunc context.CancelFunc
+	emit       func(eventName string, data interface{})
+}
+
+// NewService creates a Service. The emit callback is used to send progress
+// events (e.g. via wailsruntime.EventsEmit).
+func NewService(emit func(eventName string, data interface{})) *Service {
+	return &Service{emit: emit}
+}
+
+// ─── ScanSource ──────────────────────────────────────────────────────────────
+
+// ScanSource walks dir, parses every .sql file, and returns one
 // MigrationObject per unique DDL CREATE statement found. It tracks USE DATABASE
 // / USE SCHEMA context across files and within files to infer the target
 // database and schema for objects that are not fully qualified.
-func (a *App) ScanMigrationSource(dir string) ([]MigrationObject, error) {
+func (s *Service) ScanSource(dir string) ([]MigrationObject, error) {
 	// keyed by db+\x00+schema+\x00+kind+\x00+name+\x00+argSig (last wins)
 	seen := make(map[string]MigrationObject)
 
@@ -123,13 +173,13 @@ func (a *App) ScanMigrationSource(dir string) ([]MigrationObject, error) {
 
 		for _, stmt := range stmts {
 			// Track USE DATABASE context
-			if m := migrationUseDatabaseRE.FindStringSubmatch(stmt); m != nil {
+			if m := useDatabaseRE.FindStringSubmatch(stmt); m != nil {
 				ctxDB = strings.ToUpper(m[1])
 				ctxSch = "" // switching DB resets schema context
 				continue
 			}
 			// Track USE SCHEMA context
-			if m := migrationUseSchemaRE.FindStringSubmatch(stmt); m != nil {
+			if m := useSchemaRE.FindStringSubmatch(stmt); m != nil {
 				ctxSch = strings.ToUpper(m[1])
 				continue
 			}
@@ -145,7 +195,7 @@ func (a *App) ScanMigrationSource(dir string) ([]MigrationObject, error) {
 				ObjectName: obj.Name,
 				ArgSig:     obj.ArgSig,
 				DDL:        obj.SQL,
-				IsReplace:  migrationIsReplaceRE.MatchString(stmt),
+				IsReplace:  isReplaceRE.MatchString(stmt),
 			}
 
 			// Resolve database/schema from object ident, falling back to USE context
@@ -176,9 +226,9 @@ func (a *App) ScanMigrationSource(dir string) ([]MigrationObject, error) {
 	return result, nil
 }
 
-// ─── AnalyzeMigration ────────────────────────────────────────────────────────
+// ─── Analyze ─────────────────────────────────────────────────────────────────
 
-// AnalyzeMigration compares the supplied local objects against what is currently
+// Analyze compares the supplied local objects against what is currently
 // in Snowflake and returns a diff for each object. It emits
 // migration:analyze:progress events while working.
 //
@@ -189,16 +239,12 @@ func (a *App) ScanMigrationSource(dir string) ([]MigrationObject, error) {
 //     double-quoted identifier ("DB.SCHEMA.TABLE") which is syntactically
 //     incorrect and doesn't match the unqualified form in the database dump.
 //   - One query per database is more efficient than N per-object queries.
-func (a *App) AnalyzeMigration(objects []MigrationObject, database string) ([]MigrationDiffItem, error) {
-	if a.client == nil {
-		return nil, ErrNotConnected
-	}
-
+func (s *Service) Analyze(client *snowflake.Client, objects []MigrationObject, database string) ([]MigrationDiffItem, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	a.migrationCancelFunc = cancel
+	s.cancelFunc = cancel
 	defer func() {
 		cancel()
-		a.migrationCancelFunc = nil
+		s.cancelFunc = nil
 	}()
 
 	// Fill blank databases from the parameter
@@ -223,10 +269,6 @@ func (a *App) AnalyzeMigration(objects []MigrationObject, database string) ([]Mi
 	}
 
 	// ── Fetch database-level DDL and parse into a remote object map ───────────
-	//
-	// remoteDDLMap: remoteKey → canonical DDL statement text
-	// existingDBs:  set of database names that exist remotely
-	// existingSchemas: set of "DB\x00SCHEMA" keys that exist remotely
 
 	remoteDDLMap := make(map[string]string) // remoteKey → DDL text
 	existingDBs := make(map[string]bool)
@@ -240,7 +282,7 @@ func (a *App) AnalyzeMigration(objects []MigrationObject, database string) ([]Mi
 			defer fetchWg.Done()
 
 			escapedDB := strings.ReplaceAll(db, "'", "''")
-			result, err := a.client.Execute(ctx,
+			result, err := client.Execute(ctx,
 				fmt.Sprintf("SELECT GET_DDL('database', '%s', true)", escapedDB),
 			)
 			if err != nil {
@@ -253,8 +295,6 @@ func (a *App) AnalyzeMigration(objects []MigrationObject, database string) ([]Mi
 			if !ok || ddlText == "" {
 				return
 			}
-
-
 
 			stmts := ddl.Split(ddlText)
 
@@ -277,7 +317,6 @@ func (a *App) AnalyzeMigration(objects []MigrationObject, database string) ([]Mi
 				objKind := strings.ToUpper(string(obj.Kind))
 
 				if obj.Kind == ddl.KindSchema {
-					// For SCHEMA objects obj.Name is the schema name itself
 					existingSchemas[objDB+"\x00"+objName] = true
 				}
 
@@ -288,7 +327,6 @@ func (a *App) AnalyzeMigration(objects []MigrationObject, database string) ([]Mi
 		}(db)
 	}
 	fetchWg.Wait()
-
 
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -301,8 +339,6 @@ func (a *App) AnalyzeMigration(objects []MigrationObject, database string) ([]Mi
 	}
 
 	// ── Worker pool: classify each local object ───────────────────────────────
-	//
-	// remoteDDLMap is read-only from here on — no mutex needed in workers.
 
 	total := len(objects)
 	var doneCount atomic.Int32
@@ -334,8 +370,6 @@ func (a *App) AnalyzeMigration(objects []MigrationObject, database string) ([]Mi
 
 				switch upperKind {
 				case "DATABASE":
-					// The database-level DDL dump can't meaningfully diff a bare
-					// CREATE DATABASE statement — just report existence.
 					if existingDBs[strings.ToUpper(mo.ObjectName)] {
 						item.Status = "unchanged"
 					} else {
@@ -343,7 +377,6 @@ func (a *App) AnalyzeMigration(objects []MigrationObject, database string) ([]Mi
 					}
 
 				case "SCHEMA":
-					// Similarly, the nested dump makes SCHEMA DDL incomparable.
 					schemaKey := strings.ToUpper(mo.Database) + "\x00" + strings.ToUpper(mo.ObjectName)
 					if existingSchemas[schemaKey] {
 						item.Status = "unchanged"
@@ -368,7 +401,7 @@ func (a *App) AnalyzeMigration(objects []MigrationObject, database string) ([]Mi
 
 				results[idx] = item
 				n := int(doneCount.Add(1))
-				wailsruntime.EventsEmit(a.ctx, migrationAnalyzeProgressEvent, MigrationAnalyzeProgress{
+				s.emit(AnalyzeProgressEvent, MigrationAnalyzeProgress{
 					Done:  n,
 					Total: total,
 				})
@@ -377,27 +410,11 @@ func (a *App) AnalyzeMigration(objects []MigrationObject, database string) ([]Mi
 	}
 	wg.Wait()
 
-	// Count outcomes for the log summary
-	var cntNew, cntChanged, cntUnchanged int
-	for _, r := range results {
-		switch r.Status {
-		case "new":
-			cntNew++
-		case "changed":
-			cntChanged++
-		case "unchanged":
-			cntUnchanged++
-		}
-	}
-
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
 
 	// ── "Removed" items: remote objects absent from the local set ─────────────
-	//
-	// DATABASE and SCHEMA are structural containers — we never suggest removing
-	// them automatically.
 	for k, stmt := range remoteDDLMap {
 		if localKeys[k] {
 			continue
@@ -429,39 +446,27 @@ func (a *App) AnalyzeMigration(objects []MigrationObject, database string) ([]Mi
 		return statusOrder[results[i].Status] < statusOrder[results[j].Status]
 	})
 
-	// Count removed items that were appended after the worker pass
-	cntRemoved := 0
-	for _, r := range results {
-		if r.Status == "removed" {
-			cntRemoved++
-		}
-	}
-
 	return results, nil
 }
 
-// ─── CreateMigrationSnapshot ─────────────────────────────────────────────────
+// ─── CreateSnapshot ──────────────────────────────────────────────────────────
 
-// CreateMigrationSnapshot optionally creates a backup set and/or a zero-copy
+// CreateSnapshot optionally creates a backup set and/or a zero-copy
 // clone of the target database as a safety net before deployment.
-func (a *App) CreateMigrationSnapshot(database, backupSetDB, backupSetSchema, backupSetName string, doBackup bool, cloneDB string, doClone bool) error {
-	if a.client == nil {
-		return ErrNotConnected
-	}
-
+func (s *Service) CreateSnapshot(client *snowflake.Client, database, backupSetDB, backupSetSchema, backupSetName string, doBackup bool, cloneDB string, doClone bool) error {
 	ctx := context.Background()
 
 	if doBackup && backupSetName != "" {
 		fqn := fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(backupSetDB), snowflake.QuoteIdent(backupSetSchema), snowflake.QuoteIdent(backupSetName))
 		sql := fmt.Sprintf("CREATE OR REPLACE BACKUP SET %s FOR DATABASE %s", fqn, snowflake.QuoteIdent(database))
-		if _, err := a.client.Execute(ctx, sql); err != nil {
+		if _, err := client.Execute(ctx, sql); err != nil {
 			return fmt.Errorf("create backup set: %w", err)
 		}
 	}
 
 	if doClone && cloneDB != "" {
 		sql := fmt.Sprintf("CREATE OR REPLACE DATABASE %s CLONE %s", snowflake.QuoteIdent(cloneDB), snowflake.QuoteIdent(database))
-		if _, err := a.client.Execute(ctx, sql); err != nil {
+		if _, err := client.Execute(ctx, sql); err != nil {
 			return fmt.Errorf("create clone: %w", err)
 		}
 	}
@@ -469,21 +474,17 @@ func (a *App) CreateMigrationSnapshot(database, backupSetDB, backupSetSchema, ba
 	return nil
 }
 
-// ─── ExecuteMigration ────────────────────────────────────────────────────────
+// ─── Execute ─────────────────────────────────────────────────────────────────
 
-// ExecuteMigration deploys the selected objects to Snowflake in dependency order
+// Execute deploys the selected objects to Snowflake in dependency order
 // with up to maxPasses retry passes for objects that fail due to dependency
 // errors. It emits migration:exec:progress events throughout.
-func (a *App) ExecuteMigration(selected []MigrationObject, database string, maxPasses int, strategy TableMigrationStrategy) ([]MigrationExecEvent, error) {
-	if a.client == nil {
-		return nil, ErrNotConnected
-	}
-
+func (s *Service) Execute(client *snowflake.Client, selected []MigrationObject, database string, maxPasses int, strategy TableMigrationStrategy) ([]MigrationExecEvent, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	a.migrationCancelFunc = cancel
+	s.cancelFunc = cancel
 	defer func() {
 		cancel()
-		a.migrationCancelFunc = nil
+		s.cancelFunc = nil
 	}()
 
 	if maxPasses <= 0 {
@@ -532,14 +533,14 @@ func (a *App) ExecuteMigration(selected []MigrationObject, database string, maxP
 				Pass:   pass,
 			}
 			allEvents = append(allEvents, runEvt)
-			wailsruntime.EventsEmit(a.ctx, migrationExecProgressEvent, runEvt)
+			s.emit(ExecProgressEvent, runEvt)
 
 			// Set database context if known; non-fatal if it fails.
 			if mo.Database != "" {
-				_, _ = a.client.Execute(ctx, fmt.Sprintf("USE DATABASE %s", migrQuote(mo.Database)))
+				_, _ = client.Execute(ctx, fmt.Sprintf("USE DATABASE %s", migrQuote(mo.Database)))
 			}
 
-			execErr := a.executeMigrationObject(ctx, mo, strategy)
+			execErr := s.executeMigrationObject(ctx, client, mo, strategy)
 
 			if execErr == nil {
 				doneCount++
@@ -551,7 +552,7 @@ func (a *App) ExecuteMigration(selected []MigrationObject, database string, maxP
 					Pass:   pass,
 				}
 				allEvents = append(allEvents, evt)
-				wailsruntime.EventsEmit(a.ctx, migrationExecProgressEvent, evt)
+				s.emit(ExecProgressEvent, evt)
 			} else if isDependencyError(execErr.Error()) && pass < maxPasses {
 				nextPass = append(nextPass, mo)
 				evt := MigrationExecEvent{
@@ -563,7 +564,7 @@ func (a *App) ExecuteMigration(selected []MigrationObject, database string, maxP
 					Pass:   pass,
 				}
 				allEvents = append(allEvents, evt)
-				wailsruntime.EventsEmit(a.ctx, migrationExecProgressEvent, evt)
+				s.emit(ExecProgressEvent, evt)
 			} else {
 				doneCount++
 				evt := MigrationExecEvent{
@@ -575,7 +576,7 @@ func (a *App) ExecuteMigration(selected []MigrationObject, database string, maxP
 					Pass:   pass,
 				}
 				allEvents = append(allEvents, evt)
-				wailsruntime.EventsEmit(a.ctx, migrationExecProgressEvent, evt)
+				s.emit(ExecProgressEvent, evt)
 			}
 		}
 
@@ -595,20 +596,30 @@ func (a *App) ExecuteMigration(selected []MigrationObject, database string, maxP
 			Pass:   maxPasses,
 		}
 		allEvents = append(allEvents, evt)
-		wailsruntime.EventsEmit(a.ctx, migrationExecProgressEvent, evt)
+		s.emit(ExecProgressEvent, evt)
 	}
 
 	return allEvents, nil
 }
 
-// ─── CancelMigration ─────────────────────────────────────────────────────────
+// ─── Cancel ──────────────────────────────────────────────────────────────────
 
-// CancelMigration cancels any in-flight AnalyzeMigration or ExecuteMigration.
-func (a *App) CancelMigration() error {
-	if a.migrationCancelFunc != nil {
-		a.migrationCancelFunc()
+// Cancel cancels any in-flight Analyze or Execute operation.
+func (s *Service) Cancel() error {
+	if s.cancelFunc != nil {
+		s.cancelFunc()
 	}
 	return nil
+}
+
+// ─── GenerateScript ──────────────────────────────────────────────────────────
+
+// GenerateScript builds a human-readable SQL script for the supplied
+// diff items using the chosen table migration strategy. It does not require an
+// active Snowflake connection because all column information is derived from the
+// DDL text already present in the diff items.
+func GenerateScript(items []MigrationDiffItem, database string, strategy TableMigrationStrategy) string {
+	return buildMigrationScript(items, database, strategy)
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -623,13 +634,12 @@ func remoteKey(db, schema, kind, name, argSig string) string {
 }
 
 // normalizeDDL strips comments, collapses whitespace, uppercases, and strips
-// any trailing semicolon so that cosmetic formatting differences — including
-// the trailing ";" that Snowflake's GET_DDL appends but local files omit —
-// don't register as spurious changes.
+// any trailing semicolon so that cosmetic formatting differences don't register
+// as spurious changes.
 func normalizeDDL(sql string) string {
-	s := migrationBlockCommentRE.ReplaceAllString(sql, " ")
-	s = migrationLineCommentRE.ReplaceAllString(s, " ")
-	s = migrationWhitespaceRE.ReplaceAllString(s, " ")
+	s := blockCommentRE.ReplaceAllString(sql, " ")
+	s = lineCommentRE.ReplaceAllString(s, " ")
+	s = whitespaceRE.ReplaceAllString(s, " ")
 	s = strings.ToUpper(strings.TrimSpace(s))
 	s = strings.TrimRight(s, ";")
 	s = strings.TrimSpace(s)
@@ -673,65 +683,16 @@ func executionPriority(kind string) int {
 
 // isDependencyError reports whether an error message indicates a dependency
 // issue that may resolve on a subsequent pass.
-//
-// Snowflake emits several patterns depending on object type:
-//   - "Object 'X' does not exist or not authorized."
-//   - "Table 'X' does not exist or not authorized."
-//   - "View 'X' does not exist or not authorized."
-//   - "002003 (42S02): SQL compilation error: Object 'X' does not exist…"
-//
-// We match on the common suffix "does not exist" (covers all variants) and
-// the separate "not authorized" phrase, which can appear without "does not
-// exist" when privilege grants are missing.
 func isDependencyError(msg string) bool {
 	lower := strings.ToLower(msg)
 	return strings.Contains(lower, "does not exist") ||
 		strings.Contains(lower, "not authorized")
 }
 
-// ─── TableMigrationStrategy ───────────────────────────────────────────────────
-
-// TableMigrationStrategy controls how TABLE objects that already exist in
-// Snowflake are handled during migration. It has no effect on non-TABLE objects,
-// which are always executed via their raw DDL.
-type TableMigrationStrategy string
-
-const (
-	// StrategyInPlace applies ALTER TABLE ADD/DROP/ALTER COLUMN statements to
-	// the existing table without touching unaffected rows.
-	StrategyInPlace TableMigrationStrategy = "in_place"
-
-	// StrategyBlueGreenSwap creates a temporary table with the new schema,
-	// copies shared columns from the original, then atomically swaps the two
-	// tables with ALTER TABLE … SWAP WITH. Columns absent from the new schema
-	// are discarded; all other rows are preserved.
-	StrategyBlueGreenSwap TableMigrationStrategy = "blue_green_swap"
-
-	// StrategyViewAbstraction renames the original table to <name>_v1, creates
-	// the new table with the updated schema, and creates a compatibility view
-	// <name>_compat that exposes shared columns from the archived data.
-	StrategyViewAbstraction TableMigrationStrategy = "view_abstraction"
-
-	// StrategyDestructiveRebuild drops the existing table before recreating it.
-	// All existing data is permanently lost.
-	StrategyDestructiveRebuild TableMigrationStrategy = "destructive_rebuild"
-)
-
-// ─── column helpers ──────────────────────────────────────────────────────────
-
-// migrColDef is a column name plus its normalised type expression.
-type migrColDef struct {
-	Name     string // upper-cased, unquoted
-	TypeExpr string // base type only, e.g. "VARCHAR(255)" or "NUMBER(38,0)"
-}
-
-// migrTempCounter generates unique temp-table name suffixes within a session.
-var migrTempCounter atomic.Int64
-
 // migrTempName returns a temporary table name unlikely to collide with
 // existing objects.
 func migrTempName(base string) string {
-	n := migrTempCounter.Add(1)
+	n := tempCounter.Add(1)
 	if len(base) > 50 {
 		base = base[:50]
 	}
@@ -745,15 +706,15 @@ func migrQuote(s string) string {
 
 // parseLocalTableColumns extracts column definitions from a CREATE TABLE DDL
 // statement. Constraint and clustering clauses are skipped.
-func parseLocalTableColumns(ddl string) []migrColDef {
+func parseLocalTableColumns(ddlText string) []colDef {
 	// Locate the outermost parenthesised block.
-	start := strings.IndexByte(ddl, '(')
+	start := strings.IndexByte(ddlText, '(')
 	if start < 0 {
 		return nil
 	}
 	depth, end := 0, -1
-	for i := start; i < len(ddl); i++ {
-		switch ddl[i] {
+	for i := start; i < len(ddlText); i++ {
+		switch ddlText[i] {
 		case '(':
 			depth++
 		case ')':
@@ -770,30 +731,26 @@ func parseLocalTableColumns(ddl string) []migrColDef {
 		return nil
 	}
 
-	var cols []migrColDef
-	for _, part := range splitTopLevel(ddl[start+1:end], ',') {
+	var cols []colDef
+	for _, part := range splitTopLevel(ddlText[start+1:end], ',') {
 		part = strings.TrimSpace(part)
-		if part == "" || migrConstraintPrefixRE.MatchString(part) {
+		if part == "" || constraintPrefixRE.MatchString(part) {
 			continue
 		}
-		locs := migrColNameRE.FindStringSubmatchIndex(part)
+		locs := colNameRE.FindStringSubmatchIndex(part)
 		if locs == nil {
 			continue
 		}
 		name := strings.ToUpper(part[locs[2]:locs[3]]) // capture group [1]
-		// The full match ends at locs[1]; the trailing \S in the pattern is the
-		// first character of the type expression — start rest from there so the
-		// closing " of a quoted identifier is not included in the type clause.
 		rest := strings.TrimSpace(part[locs[1]-1:])
-		// Extract only the base type (strip NOT NULL, DEFAULT, etc.)
 		typeExpr := ""
-		if tm := migrColTypeRE.FindString(rest); tm != "" {
+		if tm := colTypeRE.FindString(rest); tm != "" {
 			typeExpr = strings.ToUpper(strings.TrimSpace(tm))
 		} else if len(strings.Fields(rest)) > 0 {
 			typeExpr = strings.ToUpper(strings.Fields(rest)[0])
 		}
 		if typeExpr != "" {
-			cols = append(cols, migrColDef{Name: name, TypeExpr: typeExpr})
+			cols = append(cols, colDef{Name: name, TypeExpr: typeExpr})
 		}
 	}
 	return cols
@@ -821,7 +778,7 @@ func splitTopLevel(s string, sep byte) []string {
 
 // commonColumnNames returns column names from a that also appear in b,
 // preserving the order from a.
-func commonColumnNames(a, b []migrColDef) []string {
+func commonColumnNames(a, b []colDef) []string {
 	set := make(map[string]bool, len(b))
 	for _, c := range b {
 		set[c.Name] = true
@@ -836,34 +793,29 @@ func commonColumnNames(a, b []migrColDef) []string {
 }
 
 // replaceDDLTableName rewrites the table identifier in a CREATE TABLE DDL so
-// it references db.schema.newName. Handles quoted/unquoted and qualified names
-// as well as CREATE OR REPLACE [TRANSIENT] TABLE variants.
-func replaceDDLTableName(ddl, db, schema, newName string) string {
+// it references db.schema.newName.
+func replaceDDLTableName(ddlText, db, schema, newName string) string {
 	newFQN := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(newName)
 
-	// Split at the first '(' to isolate the header.
-	parenIdx := strings.IndexByte(ddl, '(')
+	parenIdx := strings.IndexByte(ddlText, '(')
 	if parenIdx < 0 {
-		return ddl
+		return ddlText
 	}
-	header := ddl[:parenIdx]
-	body := ddl[parenIdx:]
+	header := ddlText[:parenIdx]
+	body := ddlText[parenIdx:]
 
-	// Find the last "TABLE" keyword in the header (handles TRANSIENT TABLE).
 	upper := strings.ToUpper(header)
 	tablePos := strings.LastIndex(upper, "TABLE")
 	if tablePos < 0 {
-		return ddl
+		return ddlText
 	}
 
-	// Skip whitespace after TABLE to find the start of the identifier.
 	i := tablePos + 5
 	for i < len(header) && (header[i] == ' ' || header[i] == '\t') {
 		i++
 	}
 	identStart := i
 
-	// Scan the identifier, respecting double-quoted segments.
 	inQuote := false
 	for i < len(header) {
 		ch := header[i]
@@ -884,7 +836,7 @@ func replaceDDLTableName(ddl, db, schema, newName string) string {
 // tableExists reports whether a BASE TABLE with the given name exists.
 // Uses INFORMATION_SCHEMA to avoid triggering gosnowflake driver error logs
 // when the table is absent.
-func (a *App) tableExists(ctx context.Context, db, schema, name string) (bool, error) {
+func tableExists(ctx context.Context, client *snowflake.Client, db, schema, name string) (bool, error) {
 	sql := fmt.Sprintf(
 		"SELECT COUNT(*) FROM %s.INFORMATION_SCHEMA.TABLES"+
 			" WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = '%s'"+
@@ -893,7 +845,7 @@ func (a *App) tableExists(ctx context.Context, db, schema, name string) (bool, e
 		strings.ReplaceAll(strings.ToUpper(schema), "'", "''"),
 		strings.ReplaceAll(strings.ToUpper(name), "'", "''"),
 	)
-	res, err := a.client.Execute(ctx, sql)
+	res, err := client.Execute(ctx, sql)
 	if err != nil {
 		return false, err
 	}
@@ -913,13 +865,13 @@ func (a *App) tableExists(ctx context.Context, db, schema, name string) (bool, e
 
 // describeTableColumns runs DESCRIBE TABLE and returns the column definitions.
 // Only rows with kind = "Column" are included.
-func (a *App) describeTableColumns(ctx context.Context, db, schema, table string) ([]migrColDef, error) {
+func describeTableColumns(ctx context.Context, client *snowflake.Client, db, schema, table string) ([]colDef, error) {
 	fqn := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(table)
-	res, err := a.client.Execute(ctx, "DESCRIBE TABLE "+fqn)
+	res, err := client.Execute(ctx, "DESCRIBE TABLE "+fqn)
 	if err != nil {
 		return nil, err
 	}
-	var cols []migrColDef
+	var cols []colDef
 	for _, row := range res.Rows {
 		if len(row) < 3 {
 			continue
@@ -930,7 +882,7 @@ func (a *App) describeTableColumns(ctx context.Context, db, schema, table string
 		}
 		colName, _ := row[0].(string)
 		typeExpr, _ := row[1].(string)
-		cols = append(cols, migrColDef{
+		cols = append(cols, colDef{
 			Name:     strings.ToUpper(colName),
 			TypeExpr: strings.ToUpper(typeExpr),
 		})
@@ -942,8 +894,7 @@ func (a *App) describeTableColumns(ctx context.Context, db, schema, table string
 // It returns 0 without error when the table is not found or the count cannot
 // be determined, so callers should treat any error as "unknown" rather than
 // "empty".
-func (a *App) tableRowCount(ctx context.Context, db, schema, name string) (int64, error) {
-	// LIKE matching is case-insensitive; escape LIKE metacharacters in the name.
+func tableRowCount(ctx context.Context, client *snowflake.Client, db, schema, name string) (int64, error) {
 	escaped := strings.ReplaceAll(name, "'", "''")
 	escaped = strings.ReplaceAll(escaped, "%", "\\%")
 	escaped = strings.ReplaceAll(escaped, "_", "\\_")
@@ -951,7 +902,7 @@ func (a *App) tableRowCount(ctx context.Context, db, schema, name string) (int64
 		"SHOW TABLES LIKE '%s' IN SCHEMA %s.%s",
 		escaped, migrQuote(db), migrQuote(schema),
 	)
-	res, err := a.client.Execute(ctx, sql)
+	res, err := client.Execute(ctx, sql)
 	if err != nil {
 		return 0, err
 	}
@@ -959,7 +910,6 @@ func (a *App) tableRowCount(ctx context.Context, db, schema, name string) (int64
 		return 0, nil
 	}
 
-	// Locate "name" and "rows" column indices dynamically — SHOW output can vary.
 	nameIdx, rowsIdx := -1, -1
 	for i, col := range res.Columns {
 		switch strings.ToLower(col) {
@@ -973,8 +923,6 @@ func (a *App) tableRowCount(ctx context.Context, db, schema, name string) (int64
 		return 0, nil
 	}
 
-	// SHOW TABLES LIKE can match multiple tables (e.g. MY_TABLE and MY1TABLE);
-	// scan all rows and match on the exact name.
 	for _, row := range res.Rows {
 		if nameIdx >= 0 && len(row) > nameIdx {
 			rowName, _ := row[nameIdx].(string)
@@ -1005,41 +953,36 @@ func (a *App) tableRowCount(ctx context.Context, db, schema, name string) (int64
 // object. Non-TABLE objects are always executed via their raw DDL. TABLE objects
 // use the chosen strategy only when the table already exists; brand-new tables
 // are always created via their DDL directly.
-func (a *App) executeMigrationObject(ctx context.Context, mo MigrationObject, strategy TableMigrationStrategy) error {
+func (s *Service) executeMigrationObject(ctx context.Context, client *snowflake.Client, mo MigrationObject, strategy TableMigrationStrategy) error {
 	if strings.ToUpper(mo.ObjectKind) != "TABLE" {
-		_, err := a.client.Execute(ctx, mo.DDL)
+		_, err := client.Execute(ctx, mo.DDL)
 		return err
 	}
 
-	exists, err := a.tableExists(ctx, mo.Database, mo.Schema, mo.ObjectName)
+	exists, err := tableExists(ctx, client, mo.Database, mo.Schema, mo.ObjectName)
 	if err != nil {
-		// Cannot determine existence; fall back to direct execution.
-		_, execErr := a.client.Execute(ctx, mo.DDL)
+		_, execErr := client.Execute(ctx, mo.DDL)
 		return execErr
 	}
 	if !exists {
-		_, err = a.client.Execute(ctx, mo.DDL)
+		_, err = client.Execute(ctx, mo.DDL)
 		return err
 	}
 
-	// Empty table: data-preserving strategies add no value — use a fast
-	// CREATE OR REPLACE path instead (DROP + CREATE so the DDL is applied as-is
-	// even when the local file lacks OR REPLACE).
-	rowCount, rcErr := a.tableRowCount(ctx, mo.Database, mo.Schema, mo.ObjectName)
+	rowCount, rcErr := tableRowCount(ctx, client, mo.Database, mo.Schema, mo.ObjectName)
 	if rcErr == nil && rowCount == 0 {
-		return a.executeDestructiveRebuild(ctx, mo)
+		return executeDestructiveRebuild(ctx, client, mo)
 	}
 
-	// Existing non-empty table: apply chosen strategy.
 	switch strategy {
 	case StrategyBlueGreenSwap:
-		return a.executeBlueGreenSwap(ctx, mo)
+		return executeBlueGreenSwap(ctx, client, mo)
 	case StrategyViewAbstraction:
-		return a.executeViewAbstraction(ctx, mo)
+		return executeViewAbstraction(ctx, client, mo)
 	case StrategyDestructiveRebuild:
-		return a.executeDestructiveRebuild(ctx, mo)
+		return executeDestructiveRebuild(ctx, client, mo)
 	default: // StrategyInPlace
-		return a.executeInPlace(ctx, mo)
+		return executeInPlace(ctx, client, mo)
 	}
 }
 
@@ -1047,59 +990,55 @@ func (a *App) executeMigrationObject(ctx context.Context, mo MigrationObject, st
 
 // executeInPlace diffs local column definitions against the remote schema and
 // applies ALTER TABLE ADD/DROP/ALTER COLUMN TYPE statements.
-func (a *App) executeInPlace(ctx context.Context, mo MigrationObject) error {
+func executeInPlace(ctx context.Context, client *snowflake.Client, mo MigrationObject) error {
 	db, schema, name := mo.Database, mo.Schema, mo.ObjectName
 	fqn := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(name)
 
-	remoteCols, err := a.describeTableColumns(ctx, db, schema, name)
+	remoteCols, err := describeTableColumns(ctx, client, db, schema, name)
 	if err != nil {
 		return fmt.Errorf("describe remote columns: %w", err)
 	}
 	localCols := parseLocalTableColumns(mo.DDL)
 	if len(localCols) == 0 {
-		// Cannot parse local DDL; fall back to direct execution.
-		_, execErr := a.client.Execute(ctx, mo.DDL)
+		_, execErr := client.Execute(ctx, mo.DDL)
 		return execErr
 	}
 
-	remoteByName := make(map[string]migrColDef, len(remoteCols))
+	remoteByName := make(map[string]colDef, len(remoteCols))
 	for _, c := range remoteCols {
 		remoteByName[c.Name] = c
 	}
-	localByName := make(map[string]migrColDef, len(localCols))
+	localByName := make(map[string]colDef, len(localCols))
 	for _, c := range localCols {
 		localByName[c.Name] = c
 	}
 
-	// ADD new columns.
 	for _, c := range localCols {
 		if _, exists := remoteByName[c.Name]; !exists {
 			sql := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", fqn, migrQuote(c.Name), c.TypeExpr)
-			if _, err = a.client.Execute(ctx, sql); err != nil {
+			if _, err = client.Execute(ctx, sql); err != nil {
 				return fmt.Errorf("add column %s: %w", c.Name, err)
 			}
 		}
 	}
 
-	// DROP removed columns.
 	for _, c := range remoteCols {
 		if _, exists := localByName[c.Name]; !exists {
 			sql := fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s", fqn, migrQuote(c.Name))
-			if _, err = a.client.Execute(ctx, sql); err != nil {
+			if _, err = client.Execute(ctx, sql); err != nil {
 				return fmt.Errorf("drop column %s: %w", c.Name, err)
 			}
 		}
 	}
 
-	// ALTER COLUMN TYPE for changed columns.
 	for _, lc := range localCols {
 		rc, exists := remoteByName[lc.Name]
 		if !exists {
-			continue // just added above
+			continue
 		}
 		if !strings.EqualFold(lc.TypeExpr, rc.TypeExpr) {
 			sql := fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s TYPE %s", fqn, migrQuote(lc.Name), lc.TypeExpr)
-			if _, err = a.client.Execute(ctx, sql); err != nil {
+			if _, err = client.Execute(ctx, sql); err != nil {
 				return fmt.Errorf("alter column %s type: %w", lc.Name, err)
 			}
 		}
@@ -1113,34 +1052,31 @@ func (a *App) executeInPlace(ctx context.Context, mo MigrationObject) error {
 // executeBlueGreenSwap creates a temporary table with the new schema (by
 // rewriting the table name in the local DDL), copies shared columns from the
 // original, atomically swaps the two tables, then drops the temp.
-func (a *App) executeBlueGreenSwap(ctx context.Context, mo MigrationObject) error {
+func executeBlueGreenSwap(ctx context.Context, client *snowflake.Client, mo MigrationObject) error {
 	db, schema, name := mo.Database, mo.Schema, mo.ObjectName
 	tmpName := migrTempName(name)
 	origFQN := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(name)
 	tmpFQN := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(tmpName)
 
-	// 1. Create temporary table with new DDL (same schema, different name).
 	tmpDDL := replaceDDLTableName(mo.DDL, db, schema, tmpName)
-	if _, err := a.client.Execute(ctx, tmpDDL); err != nil {
+	if _, err := client.Execute(ctx, tmpDDL); err != nil {
 		return fmt.Errorf("create temp table: %w", err)
 	}
 
-	dropTmp := func() { _, _ = a.client.Execute(ctx, "DROP TABLE IF EXISTS "+tmpFQN) }
+	dropTmp := func() { _, _ = client.Execute(ctx, "DROP TABLE IF EXISTS "+tmpFQN) }
 
-	// 2. Determine shared columns: remote (old) ∩ new.
-	remoteCols, err := a.describeTableColumns(ctx, db, schema, name)
+	remoteCols, err := describeTableColumns(ctx, client, db, schema, name)
 	if err != nil {
 		dropTmp()
 		return fmt.Errorf("describe remote columns: %w", err)
 	}
-	newCols, err := a.describeTableColumns(ctx, db, schema, tmpName)
+	newCols, err := describeTableColumns(ctx, client, db, schema, tmpName)
 	if err != nil {
 		dropTmp()
 		return fmt.Errorf("describe new columns: %w", err)
 	}
 	commonNames := commonColumnNames(remoteCols, newCols)
 
-	// 3. Copy shared columns from original into temp.
 	if len(commonNames) > 0 {
 		var colList strings.Builder
 		for i, n := range commonNames {
@@ -1151,19 +1087,17 @@ func (a *App) executeBlueGreenSwap(ctx context.Context, mo MigrationObject) erro
 		}
 		cols := colList.String()
 		insertSQL := fmt.Sprintf("INSERT INTO %s (%s) SELECT %s FROM %s", tmpFQN, cols, cols, origFQN)
-		if _, err = a.client.Execute(ctx, insertSQL); err != nil {
+		if _, err = client.Execute(ctx, insertSQL); err != nil {
 			dropTmp()
 			return fmt.Errorf("copy data: %w", err)
 		}
 	}
 
-	// 4. Atomically swap: original now has new schema + copied rows.
-	if _, err = a.client.Execute(ctx, fmt.Sprintf("ALTER TABLE %s SWAP WITH %s", origFQN, tmpFQN)); err != nil {
+	if _, err = client.Execute(ctx, fmt.Sprintf("ALTER TABLE %s SWAP WITH %s", origFQN, tmpFQN)); err != nil {
 		dropTmp()
 		return fmt.Errorf("swap tables: %w", err)
 	}
 
-	// 5. Drop temp (now holds the old schema/data).
 	dropTmp()
 	return nil
 }
@@ -1173,32 +1107,27 @@ func (a *App) executeBlueGreenSwap(ctx context.Context, mo MigrationObject) erro
 // executeViewAbstraction renames the existing table to <name>_v1, creates the
 // new table from local DDL, and creates a compatibility view <name>_compat that
 // exposes shared columns from the archived data.
-func (a *App) executeViewAbstraction(ctx context.Context, mo MigrationObject) error {
+func executeViewAbstraction(ctx context.Context, client *snowflake.Client, mo MigrationObject) error {
 	db, schema, name := mo.Database, mo.Schema, mo.ObjectName
 	archiveName := name + "_v1"
 	origFQN := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(name)
 	archiveFQN := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(archiveName)
 	compatFQN := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(name+"_compat")
 
-	// 1. Capture remote columns before renaming.
-	remoteCols, err := a.describeTableColumns(ctx, db, schema, name)
+	remoteCols, err := describeTableColumns(ctx, client, db, schema, name)
 	if err != nil {
 		return fmt.Errorf("describe remote columns: %w", err)
 	}
 
-	// 2. Rename original table to archive.
-	if _, err = a.client.Execute(ctx, fmt.Sprintf("ALTER TABLE %s RENAME TO %s", origFQN, archiveFQN)); err != nil {
+	if _, err = client.Execute(ctx, fmt.Sprintf("ALTER TABLE %s RENAME TO %s", origFQN, archiveFQN)); err != nil {
 		return fmt.Errorf("rename table: %w", err)
 	}
 
-	// 3. Create new table from local DDL.
-	if _, err = a.client.Execute(ctx, mo.DDL); err != nil {
-		// Roll back the rename.
-		_, _ = a.client.Execute(ctx, fmt.Sprintf("ALTER TABLE %s RENAME TO %s", archiveFQN, origFQN))
+	if _, err = client.Execute(ctx, mo.DDL); err != nil {
+		_, _ = client.Execute(ctx, fmt.Sprintf("ALTER TABLE %s RENAME TO %s", archiveFQN, origFQN))
 		return fmt.Errorf("create new table: %w", err)
 	}
 
-	// 4. Create a compatibility view over the shared columns.
 	localCols := parseLocalTableColumns(mo.DDL)
 	commonNames := commonColumnNames(remoteCols, localCols)
 	if len(commonNames) > 0 {
@@ -1213,7 +1142,7 @@ func (a *App) executeViewAbstraction(ctx context.Context, mo MigrationObject) er
 			"CREATE OR REPLACE VIEW %s AS SELECT %s FROM %s",
 			compatFQN, colList.String(), archiveFQN,
 		)
-		if _, err = a.client.Execute(ctx, viewSQL); err != nil {
+		if _, err = client.Execute(ctx, viewSQL); err != nil {
 			return fmt.Errorf("create compat view: %w", err)
 		}
 	}
@@ -1225,27 +1154,19 @@ func (a *App) executeViewAbstraction(ctx context.Context, mo MigrationObject) er
 
 // executeDestructiveRebuild drops the existing table and recreates it from
 // local DDL. All existing data is permanently lost.
-func (a *App) executeDestructiveRebuild(ctx context.Context, mo MigrationObject) error {
+func executeDestructiveRebuild(ctx context.Context, client *snowflake.Client, mo MigrationObject) error {
 	db, schema, name := mo.Database, mo.Schema, mo.ObjectName
 	fqn := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(name)
-	if _, err := a.client.Execute(ctx, "DROP TABLE IF EXISTS "+fqn); err != nil {
+	if _, err := client.Execute(ctx, "DROP TABLE IF EXISTS "+fqn); err != nil {
 		return fmt.Errorf("drop table: %w", err)
 	}
-	if _, err := a.client.Execute(ctx, mo.DDL); err != nil {
+	if _, err := client.Execute(ctx, mo.DDL); err != nil {
 		return fmt.Errorf("create table: %w", err)
 	}
 	return nil
 }
 
-// ─── GenerateMigrationScript ──────────────────────────────────────────────────
-
-// GenerateMigrationScript builds a human-readable SQL script for the supplied
-// diff items using the chosen table migration strategy. It does not require an
-// active Snowflake connection because all column information is derived from the
-// DDL text already present in the diff items.
-func (a *App) GenerateMigrationScript(items []MigrationDiffItem, database string, strategy TableMigrationStrategy) (string, error) {
-	return buildMigrationScript(items, database, strategy), nil
-}
+// ─── script generation ────────────────────────────────────────────────────────
 
 func buildMigrationScript(items []MigrationDiffItem, database string, strategy TableMigrationStrategy) string {
 	dbFallback := strings.ToUpper(database)
@@ -1282,24 +1203,23 @@ func buildMigrationScript(items []MigrationDiffItem, database string, strategy T
 		}
 
 		fqn := migrQuote(db) + "." + migrQuote(mo.Schema) + "." + migrQuote(mo.ObjectName)
-		ddl := strings.TrimRight(mo.DDL, ";\n ")
+		ddlText := strings.TrimRight(mo.DDL, ";\n ")
 
 		if strings.ToUpper(mo.ObjectKind) != "TABLE" || item.Status == "new" {
-			fmt.Fprintf(&sb, "%s;\n\n", ddl)
+			fmt.Fprintf(&sb, "%s;\n\n", ddlText)
 			continue
 		}
 
-		// Existing TABLE: emit strategy-specific SQL.
 		switch strategy {
 		case StrategyInPlace:
 			scriptInPlace(&sb, fqn, mo.ObjectName, item.LocalDDL, item.RemoteDDL)
 		case StrategyBlueGreenSwap:
-			scriptBlueGreen(&sb, fqn, db, mo.Schema, mo.ObjectName, item.LocalDDL, item.RemoteDDL, ddl)
+			scriptBlueGreen(&sb, fqn, db, mo.Schema, mo.ObjectName, item.LocalDDL, item.RemoteDDL, ddlText)
 		case StrategyViewAbstraction:
-			scriptViewAbstraction(&sb, fqn, db, mo.Schema, mo.ObjectName, item.LocalDDL, item.RemoteDDL, ddl)
+			scriptViewAbstraction(&sb, fqn, db, mo.Schema, mo.ObjectName, item.LocalDDL, item.RemoteDDL, ddlText)
 		case StrategyDestructiveRebuild:
 			fmt.Fprintf(&sb, "-- Destructive Rebuild: %s\n", mo.ObjectName)
-			fmt.Fprintf(&sb, "DROP TABLE IF EXISTS %s;\n%s;\n\n", fqn, ddl)
+			fmt.Fprintf(&sb, "DROP TABLE IF EXISTS %s;\n%s;\n\n", fqn, ddlText)
 		}
 	}
 
@@ -1315,11 +1235,11 @@ func scriptInPlace(sb *strings.Builder, fqn, objectName, localDDL, remoteDDL str
 		return
 	}
 
-	remoteByName := make(map[string]migrColDef, len(remoteCols))
+	remoteByName := make(map[string]colDef, len(remoteCols))
 	for _, c := range remoteCols {
 		remoteByName[c.Name] = c
 	}
-	localByName := make(map[string]migrColDef, len(localCols))
+	localByName := make(map[string]colDef, len(localCols))
 	for _, c := range localCols {
 		localByName[c.Name] = c
 	}
@@ -1354,10 +1274,10 @@ func scriptInPlace(sb *strings.Builder, fqn, objectName, localDDL, remoteDDL str
 	sb.WriteString("\n")
 }
 
-func scriptBlueGreen(sb *strings.Builder, origFQN, db, schema, objectName, localDDL, remoteDDL, ddl string) {
+func scriptBlueGreen(sb *strings.Builder, origFQN, db, schema, objectName, localDDL, remoteDDL, ddlText string) {
 	tmpName := objectName + "__migration_tmp"
 	tmpFQN := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(tmpName)
-	tmpDDL := strings.TrimRight(replaceDDLTableName(ddl, db, schema, tmpName), ";\n ")
+	tmpDDL := strings.TrimRight(replaceDDLTableName(ddlText, db, schema, tmpName), ";\n ")
 
 	remoteCols := parseLocalTableColumns(remoteDDL)
 	localCols := parseLocalTableColumns(localDDL)
@@ -1380,7 +1300,7 @@ func scriptBlueGreen(sb *strings.Builder, origFQN, db, schema, objectName, local
 	fmt.Fprintf(sb, "DROP TABLE IF EXISTS %s;\n\n", tmpFQN)
 }
 
-func scriptViewAbstraction(sb *strings.Builder, origFQN, db, schema, objectName, localDDL, remoteDDL, ddl string) {
+func scriptViewAbstraction(sb *strings.Builder, origFQN, db, schema, objectName, localDDL, remoteDDL, ddlText string) {
 	archiveFQN := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(objectName+"_v1")
 	compatFQN := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(objectName+"_compat")
 
@@ -1389,7 +1309,7 @@ func scriptViewAbstraction(sb *strings.Builder, origFQN, db, schema, objectName,
 	commonNames := commonColumnNames(remoteCols, localCols)
 
 	fmt.Fprintf(sb, "-- View Abstraction: %s\n", objectName)
-	fmt.Fprintf(sb, "ALTER TABLE %s RENAME TO %s;\n%s;\n", origFQN, archiveFQN, ddl)
+	fmt.Fprintf(sb, "ALTER TABLE %s RENAME TO %s;\n%s;\n", origFQN, archiveFQN, ddlText)
 	if len(commonNames) > 0 {
 		var colList strings.Builder
 		for i, n := range commonNames {

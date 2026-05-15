@@ -13,9 +13,9 @@ on:
       - ".github/workflows/unit-tests.yml"
 
 jobs:
-  # ── DDL parser + SQLEditor tests (no system deps, combined to save runner startup) ──
+  # ── Pure Go unit tests (no system deps, combined to save runner startup) ──
   pure-go-unit-tests:
-    name: Pure Go unit tests (DDL & SQLEditor)
+    name: Pure Go unit tests
     runs-on: self-hosted
     container: ubuntu:24.04
     permissions:
@@ -55,59 +55,13 @@ jobs:
         continue-on-error: true
         run: go test -v -race -count=1 ./internal/sqleditor/... 2>&1 | go-junit-report -set-exit-code > report-sqleditor.xml
 
+      - name: Run Migration tests
+        continue-on-error: true
+        run: go test -v -race -count=1 ./internal/migration/... 2>&1 | go-junit-report -set-exit-code > report-migration.xml
+
       - name: Publish test results
         uses: EnricoMi/publish-unit-test-result-action@v2
         if: always()
         with:
           files: report-*.xml
           check_name: Pure Go Unit Tests
-
-  # ── Migration helper tests (package main, requires GTK/WebKit) ────────────
-  migration-unit-tests:
-    name: Migration unit tests
-    runs-on: self-hosted
-    container: ubuntu:24.04
-    permissions:
-      contents: read
-      checks: write
-      pull-requests: write
-
-    steps:
-      - name: Install base tools
-        run: |
-          apt-get update
-          apt-get install -y git curl wget
-
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: false
-
-      - name: Install system dependencies
-        run: apt-get update && apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
-
-      - name: Download dependencies
-        run: go mod download
-
-      - name: Create frontend dist stub (required by go:embed in main.go)
-        run: mkdir -p frontend/dist && touch frontend/dist/.keep
-
-      - name: Install go-junit-report
-        run: |
-          # linux-amd64 matches ubuntu-latest and ubuntu-22.04 on GitHub-hosted runners.
-          # If GitHub ever moves ubuntu-latest to ARM, update the architecture suffix.
-          wget -qO go-junit-report.tar.gz https://github.com/jstemmer/go-junit-report/releases/download/v2.1.0/go-junit-report-v2.1.0-linux-amd64.tar.gz
-          tar -xzf go-junit-report.tar.gz
-          mv go-junit-report /usr/local/bin/
-
-      - name: Run migration unit tests
-        run: go test -v -race -count=1 -run "^Test(Normalize|SplitTopLevel|MigrQuote|ParseLocal|CommonColumn|ReplaceDDL|IsDependency|ExecutionPriority|RemoteKey|BuildMigration|ScanMigration)" . 2>&1 | go-junit-report -set-exit-code > report-migration.xml
-
-      - name: Publish test results
-        uses: EnricoMi/publish-unit-test-result-action@v2
-        if: always()
-        with:
-          files: report-migration.xml
-          check_name: Migration unit tests
