@@ -62,18 +62,23 @@ export default function UserManagementPanel() {
       setAccessible(true);
     } catch {
       setAccessible(false);
-      setLoading(false);
-      return;
     } finally {
       setLoading(false);
     }
-    // Privilege checks run independently — an error here must not hide the panel.
-    CanCreateUsers(role).then(setCanCreate).catch(() => {});
-    CanManageUsers(role).then(setCanManage).catch(() => {});
-  }, [role]);
+  }, []);
 
-  // Re-run whenever the active role changes so the list and privileges refresh.
+  // Re-run whenever the active role changes so the list refreshes.
   useEffect(() => { load(); }, [load, role]);
+
+  // Privilege checks — re-run when role changes. The stale guard prevents
+  // an old in-flight response from overwriting a newer result.
+  useEffect(() => {
+    if (!role) { setCanCreate(false); setCanManage(false); return; }
+    let stale = false;
+    CanCreateUsers(role).then((v) => { if (!stale) setCanCreate(v); }).catch(() => {});
+    CanManageUsers(role).then((v) => { if (!stale) setCanManage(v); }).catch(() => {});
+    return () => { stale = true; };
+  }, [role]);
 
   // Close context menu on outside click.
   useEffect(() => {

@@ -102,10 +102,13 @@ export default function IntegrationsPanel() {
   const [dropConfirm,   setDropConfirm]   = useState<string | null>(null);
   const [dropKind,      setDropKind]      = useState<string>("");
 
-  // Re-check whenever the active role changes.
+  // Re-check whenever the active role changes. The stale guard prevents
+  // an old in-flight response from overwriting a newer result.
   useEffect(() => {
     if (!role) { setCanCreate(false); return; }
-    CanCreateIntegration(role).then(setCanCreate).catch(() => {});
+    let stale = false;
+    CanCreateIntegration(role).then((v) => { if (!stale) setCanCreate(v); }).catch(() => {});
+    return () => { stale = true; };
   }, [role]);
 
   const refreshCanCreate = () =>
