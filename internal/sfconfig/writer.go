@@ -439,7 +439,7 @@ func SetDefaultProfile(path string, name string) error {
 	}
 
 	// No sections at all — append.
-	lines = append(lines, newLine)
+	lines = append(lines, newLine, "")
 	return writeLines(resolved, lines)
 }
 
@@ -473,10 +473,10 @@ func ClearDefaultProfile(path string) error {
 // Returns an error if the new name already exists.
 func RenameProfile(path string, oldName, newName string) error {
 	if err := ValidateProfileName(oldName); err != nil {
-		return err
+		return fmt.Errorf("old name: %w", err)
 	}
 	if err := ValidateProfileName(newName); err != nil {
-		return err
+		return fmt.Errorf("new name: %w", err)
 	}
 	if oldName == newName {
 		return nil

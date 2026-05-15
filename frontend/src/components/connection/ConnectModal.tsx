@@ -10,7 +10,7 @@
 //
 // @thaw-domain: Core IPC & App Lifecycle
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Form, Input, Button, Alert, Space, Typography, Select, Divider, Tooltip, Modal, Popconfirm, message } from "antd";
 import { CloudServerOutlined, FolderOpenOutlined, SaveOutlined, CopyOutlined, DeleteOutlined, StarOutlined, PlusOutlined, EditOutlined } from "@ant-design/icons";
 import UserAgreementModal from "./UserAgreementModal";
@@ -67,9 +67,10 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
   const [cliConfigPath, setCliConfigPath] = useState<string>("");
   const [selectedProfile, setSelectedProfile] = useState<string | undefined>(undefined);
   const [nameModalOpen, setNameModalOpen] = useState(false);
-  const [nameModalMode, setNameModalMode] = useState<"new" | "save" | "clone" | "rename">("save");
+  const [nameModalMode, setNameModalMode] = useState<"new" | "clone" | "rename">("new");
   const [nameModalValue, setNameModalValue] = useState("");
   const [profileBusy, setProfileBusy] = useState(false);
+  const profileBusyRef = useRef(false);
 
   const refreshCliConfig = useCallback((selectAfter?: string) => {
     LoadSnowflakeCLIConfig()
@@ -99,6 +100,7 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
       const path = await PickSnowflakeCLIConfigPath();
       if (path) {
         setCliConfigPath(path);
+        setSelectedProfile(undefined);
         refreshCliConfig();
       }
     } catch (e) {
@@ -141,8 +143,6 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
   const nameModalHasDuplicate = (() => {
     const name = nameModalValue.trim();
     if (!name) return false;
-    // "save" overwrites by design — no duplicate check.
-    if (nameModalMode === "save") return false;
     return existingProfileNames.has(name);
   })();
 
@@ -165,13 +165,17 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
     });
   };
 
-  /** Wraps an async profile operation with the busy guard. */
+  /** Wraps an async profile operation with a ref-based busy guard. */
   const withProfileBusy = <T extends unknown[]>(
     fn: (...args: T) => Promise<void>,
   ) => async (...args: T) => {
-    if (profileBusy) return;
+    if (profileBusyRef.current) return;
+    profileBusyRef.current = true;
     setProfileBusy(true);
-    try { await fn(...args); } finally { setProfileBusy(false); }
+    try { await fn(...args); } finally {
+      profileBusyRef.current = false;
+      setProfileBusy(false);
+    }
   };
 
   const handleSaveProfile = withProfileBusy(async (profileName: string) => {
@@ -237,13 +241,9 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
     }
   });
 
-  const openNameModal = (mode: "new" | "save" | "clone" | "rename") => {
+  const openNameModal = (mode: "new" | "clone" | "rename") => {
     setNameModalMode(mode);
-    setNameModalValue(
-      mode === "save" ? (selectedProfile || "")
-        : mode === "rename" ? (selectedProfile || "")
-        : "",
-    );
+    setNameModalValue(mode === "rename" ? (selectedProfile || "") : "");
     setNameModalOpen(true);
   };
 
@@ -251,7 +251,7 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
     const name = nameModalValue.trim();
     if (!name || !profileNameIsValid(name) || nameModalHasDuplicate) return;
     setNameModalOpen(false);
-    if (nameModalMode === "new" || nameModalMode === "save") {
+    if (nameModalMode === "new") {
       handleSaveProfile(name);
     } else if (nameModalMode === "clone") {
       handleCloneProfile(name);
@@ -354,7 +354,7 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
                       size="small"
                       icon={<SaveOutlined />}
                       disabled={!selectedProfile || profileBusy}
-                      onClick={() => openNameModal("save")}
+                      onClick={() => selectedProfile && handleSaveProfile(selectedProfile)}
                     >
                       Save
                     </Button>
@@ -550,13 +550,11 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
             open={nameModalOpen}
             title={
               nameModalMode === "new" ? "New Profile"
-                : nameModalMode === "save" ? "Save Profile"
                 : nameModalMode === "clone" ? "Clone Profile"
                 : "Rename Profile"
             }
             okText={
               nameModalMode === "new" ? "Create"
-                : nameModalMode === "save" ? "Save"
                 : nameModalMode === "clone" ? "Clone"
                 : "Rename"
             }
@@ -575,8 +573,6 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
               <Text type="secondary" style={{ fontSize: 12 }}>
                 {nameModalMode === "new"
                   ? "Enter a name for the new profile. The current form values will be saved."
-                  : nameModalMode === "save"
-                  ? "Enter a name for the profile. Existing profiles with the same name will be overwritten."
                   : nameModalMode === "clone"
                   ? `Cloning "${selectedProfile}". Enter a name for the new profile.`
                   : `Renaming "${selectedProfile}". Enter the new name.`}
