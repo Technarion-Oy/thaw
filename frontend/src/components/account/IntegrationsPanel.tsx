@@ -10,7 +10,6 @@
 
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { useSessionStore } from "../../store/sessionStore";
-import { useQueryStore } from "../../store/queryStore";
 import { Collapse, Space, Typography, Tree, Spin, Popconfirm, message } from "antd";
 import {
   ApiOutlined,
@@ -93,8 +92,7 @@ export default function IntegrationsPanel() {
   const [canCreate, setCanCreate] = useState(false);
   const [ctxMenu,   setCtxMenu]   = useState<CtxMenuState | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
-  const role      = useSessionStore((s) => s.role);
-  const activeTabId = useQueryStore((s) => s.activeTabId);
+  const role = useSessionStore((s) => s.role);
 
   // Modal state
   const [createOpen,    setCreateOpen]    = useState<{ kind: string } | null>(null);
@@ -104,16 +102,18 @@ export default function IntegrationsPanel() {
   const [dropConfirm,   setDropConfirm]   = useState<string | null>(null);
   const [dropKind,      setDropKind]      = useState<string>("");
 
-  // Re-check whenever the active role changes. Pass the tab ID so the backend
-  // checks the tab's isolated session (which reflects any USE ROLE applied there)
-  // rather than the main shared connection.
+  // Re-check whenever the active role changes. The stale guard prevents
+  // an old in-flight response from overwriting a newer result.
   useEffect(() => {
-    if (!role) { setCanCreate(false); return; }
-    CanCreateIntegration(activeTabId).then(setCanCreate).catch(() => {});
-  }, [role, activeTabId]);
+    setCanCreate(false);
+    if (!role) return;
+    let stale = false;
+    CanCreateIntegration(role).then((v) => { if (!stale) setCanCreate(v); }).catch(() => {});
+    return () => { stale = true; };
+  }, [role]);
 
   const refreshCanCreate = () =>
-    CanCreateIntegration(activeTabId).then(setCanCreate).catch(() => {});
+    CanCreateIntegration(role).then(setCanCreate).catch(() => {});
 
   // Clamp context menu in viewport before paint
   useLayoutEffect(() => {
