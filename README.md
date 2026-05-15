@@ -10,7 +10,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 
 ### Snowflake connectivity
 - Connect with account / user / password / warehouse / role
-- Auto-fill connection form from Snowflake CLI profiles (defaults to `~/.snowflake/config.toml`, but any location can be chosen and persisted); includes support for key-pair (`SNOWFLAKE_JWT`) profiles; authenticator values are matched case-insensitively
+- **Snowflake CLI Profile Manager** — create, save, rename, clone, set-default, and delete connection profiles in `~/.snowflake/config.toml` (or a custom location) directly from the connection dialog; includes support for key-pair (`SNOWFLAKE_JWT`) profiles; authenticator values are matched case-insensitively; text-level TOML manipulation preserves user comments and unknown keys
 - Cancel an in-progress connection attempt
 - **Offline-first startup** — the app launches instantly without waiting for a Snowflake connection; connection parameters are validated and the session is established on demand when you first run a query or browse objects
 - **User Agreement** — a **User Agreement** link at the bottom of the connect screen opens the End User License Agreement in a scrollable modal
@@ -693,7 +693,8 @@ thaw/
 │   ├── queryprofile/              # Query execution profile and EXPLAIN plan parser; performance diagnostics
 │   ├── secret/                    # Secret management: CREATE/ALTER SECRET SQL builder (OAUTH2, PASSWORD, GENERIC_STRING, etc.)
 │   ├── session/                    # Window state persistence (load/save, OS-specific paths)
-│   ├── sfconfig/reader.go         # Snowflake CLI config (~/.snowflake/config.toml)
+│   ├── sfconfig/reader.go         # Snowflake CLI config reader (~/.snowflake/config.toml)
+│   ├── sfconfig/writer.go         # Snowflake CLI config writer (save/delete/clone/set-default)
 │   ├── snowflake/client.go        # Snowflake driver wrapper
 │   ├── snowflake/lineage.go       # DDL-based dependency/lineage parser (recursive, cycle-safe)
 │   ├── snowflake/lineage_test.go  # Unit tests for lineage parser (56 cases; no Snowflake required)
@@ -1180,8 +1181,9 @@ Log and crash files are written to:
 - **Linux** — `~/.local/state/thaw/` (or `$XDG_STATE_HOME/thaw/`)
 - **Windows** — `%APPDATA%\thaw\logs\`
 
-Snowflake CLI connection profiles are read from `~/.snowflake/config.toml` and
-pre-fill the connection form, but are never modified by Thaw.
+Snowflake CLI connection profiles are read from and written to `~/.snowflake/config.toml`.
+Profiles can be saved, cloned, set as default, or deleted from the connection dialog.
+The writer uses text-level TOML manipulation to preserve user comments and unknown keys.
 
 ---
 

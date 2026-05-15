@@ -1,0 +1,482 @@
+// Copyright (c) 2026 Technarion Oy. All rights reserved.
+//
+// This software and its source code are proprietary and confidential.
+// Unauthorized copying, distribution, modification, or use of this software,
+// in whole or in part, is strictly prohibited without prior written permission
+// from Technarion Oy.
+//
+// Commercial use of this software is restricted to parties holding a valid
+// license agreement with Technarion Oy.
+
+package sfconfig
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+)
+
+// profileNameRe matches valid profile names: alphanumerics, hyphens, underscores.
+var profileNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// sectionHeaderRe matches TOML section headers like [connections.myprofile].
+var sectionHeaderRe = regexp.MustCompile(`^\s*\[(.+)\]\s*$`)
+
+// sectionSpan marks the start and end line indices of a TOML section.
+type sectionSpan struct {
+	name  string // e.g. "connections.myprofile"
+	start int    // line index of the [section] header
+	end   int    // exclusive end (first line of next section or len(lines))
+}
+
+// ValidateProfileName checks that a profile name is non-empty and contains
+// only alphanumerics, hyphens, and underscores.
+func ValidateProfileName(name string) error {
+	if name == "" {
+		return fmt.Errorf("profile name must not be empty")
+	}
+	if !profileNameRe.MatchString(name) {
+		return fmt.Errorf("profile name %q contains invalid characters (allowed: A-Z, a-z, 0-9, _ , -)", name)
+	}
+	return nil
+}
+
+// resolvePath returns the effective config file path, matching Load() behavior.
+func resolvePath(path string) (string, error) {
+	if path != "" {
+		return path, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot determine home directory: %w", err)
+	}
+	return filepath.Join(home, ".snowflake", "config.toml"), nil
+}
+
+// parseSections finds all [section] boundaries in the given lines.
+func parseSections(lines []string) []sectionSpan {
+	var spans []sectionSpan
+	for i, line := range lines {
+		m := sectionHeaderRe.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		if len(spans) > 0 {
+			spans[len(spans)-1].end = i
+		}
+		spans = append(spans, sectionSpan{name: m[1], start: i, end: len(lines)})
+	}
+	return spans
+}
+
+// tomlEscape escapes a string for use as a TOML quoted value.
+func tomlEscape(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return s
+}
+
+// connectionFieldOrder defines the canonical order for rendering connection fields.
+var connectionFieldOrder = []struct {
+	tomlKey  string
+	jsonKey  string
+	getter   func(*Connection) string
+}{
+	{"account", "account", func(c *Connection) string { return c.Account }},
+	{"user", "user", func(c *Connection) string { return c.User }},
+	{"password", "password", func(c *Connection) string { return c.Password }},
+	{"role", "role", func(c *Connection) string { return c.Role }},
+	{"warehouse", "warehouse", func(c *Connection) string { return c.Warehouse }},
+	{"database", "database", func(c *Connection) string { return c.Database }},
+	{"schema", "schema", func(c *Connection) string { return c.Schema }},
+	{"authenticator", "authenticator", func(c *Connection) string { return c.Authenticator }},
+	{"passcode", "passcode", func(c *Connection) string { return c.Passcode }},
+	{"okta_url", "oktaUrl", func(c *Connection) string { return c.OktaURL }},
+	{"private_key_path", "privateKeyPath", func(c *Connection) string { return c.PrivateKeyPath }},
+	{"private_key_passphrase", "privateKeyPassphrase", func(c *Connection) string { return c.PrivateKeyPassphrase }},
+}
+
+// connectionToTOMLLines renders a Connection as TOML key=value lines (without
+// the section header). Only non-empty fields are included.
+func connectionToTOMLLines(c Connection) []string {
+	var out []string
+	for _, f := range connectionFieldOrder {
+		v := f.getter(&c)
+		if v == "" {
+			continue
+		}
+		out = append(out, fmt.Sprintf(`%s = "%s"`, f.tomlKey, tomlEscape(v)))
+	}
+	return out
+}
+
+// knownConnectionKeys is the set of TOML keys that Thaw models on Connection.
+var knownConnectionKeys map[string]bool
+
+func init() {
+	knownConnectionKeys = make(map[string]bool, len(connectionFieldOrder))
+	for _, f := range connectionFieldOrder {
+		knownConnectionKeys[f.tomlKey] = true
+	}
+}
+
+// atomicWriteFile writes data to a temp file and renames it into place.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("create directory %s: %w", dir, err)
+	}
+	tmp, err := os.CreateTemp(dir, ".thaw-sfconfig-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		// Clean up on failure.
+		_ = os.Remove(tmpName)
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
+
+// readFileLines reads a file and splits it into lines.
+// Returns empty slice (not error) if the file doesn't exist.
+func readFileLines(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	content := string(data)
+	if content == "" {
+		return nil, nil
+	}
+	return strings.Split(content, "\n"), nil
+}
+
+// writeLines joins lines and writes them atomically.
+func writeLines(path string, lines []string) error {
+	return atomicWriteFile(path, []byte(strings.Join(lines, "\n")), 0600)
+}
+
+// findConnectionSpan finds the sectionSpan for connections.<name>.
+func findConnectionSpan(spans []sectionSpan, name string) *sectionSpan {
+	target := "connections." + name
+	for i := range spans {
+		if spans[i].name == target {
+			return &spans[i]
+		}
+	}
+	return nil
+}
+
+// sectionBodyEnd returns the end of the meaningful body of a section, excluding
+// trailing blank lines and comment-only lines that visually belong to the next
+// section. This prevents "eating" comments that precede the next [section] header.
+func sectionBodyEnd(lines []string, span *sectionSpan) int {
+	end := span.end
+	for end > span.start+1 {
+		line := strings.TrimSpace(lines[end-1])
+		if line == "" || strings.HasPrefix(line, "#") {
+			end--
+		} else {
+			break
+		}
+	}
+	return end
+}
+
+// extractUnknownKeys returns lines from an existing section that contain keys
+// Thaw doesn't model, preserving user-added custom keys.
+func extractUnknownKeys(lines []string, span *sectionSpan) []string {
+	var unknown []string
+	kvRe := regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=`)
+	bodyEnd := sectionBodyEnd(lines, span)
+	for i := span.start + 1; i < bodyEnd; i++ {
+		m := kvRe.FindStringSubmatch(lines[i])
+		if m == nil {
+			continue
+		}
+		if !knownConnectionKeys[m[1]] {
+			unknown = append(unknown, lines[i])
+		}
+	}
+	return unknown
+}
+
+// SaveProfile creates or updates a named connection profile in the config file.
+func SaveProfile(path string, profile Connection) error {
+	if err := ValidateProfileName(profile.Name); err != nil {
+		return err
+	}
+	resolved, err := resolvePath(path)
+	if err != nil {
+		return err
+	}
+
+	lines, err := readFileLines(resolved)
+	if err != nil {
+		return err
+	}
+
+	spans := parseSections(lines)
+	existing := findConnectionSpan(spans, profile.Name)
+
+	header := fmt.Sprintf("[connections.%s]", profile.Name)
+	newKVs := connectionToTOMLLines(profile)
+
+	if existing != nil {
+		// Update: replace only the meaningful body (header + key/value lines),
+		// leaving trailing blanks/comments that belong to the next section.
+		bodyEnd := sectionBodyEnd(lines, existing)
+		unknown := extractUnknownKeys(lines, existing)
+		var replacement []string
+		replacement = append(replacement, header)
+		replacement = append(replacement, newKVs...)
+		replacement = append(replacement, unknown...)
+
+		// Build new file content.
+		var result []string
+		result = append(result, lines[:existing.start]...)
+		result = append(result, replacement...)
+		result = append(result, lines[bodyEnd:]...)
+		return writeLines(resolved, result)
+	}
+
+	// New profile: append at end.
+	if lines == nil {
+		lines = []string{}
+	}
+	// Ensure a blank line before the new section if file isn't empty.
+	if len(lines) > 0 {
+		last := lines[len(lines)-1]
+		if strings.TrimSpace(last) != "" {
+			lines = append(lines, "")
+		}
+	}
+	lines = append(lines, header)
+	lines = append(lines, newKVs...)
+	lines = append(lines, "") // trailing newline
+	return writeLines(resolved, lines)
+}
+
+// DeleteProfile removes a named connection profile. If the deleted profile was
+// the default, default_connection_name is cleared.
+func DeleteProfile(path string, name string) error {
+	if err := ValidateProfileName(name); err != nil {
+		return err
+	}
+	resolved, err := resolvePath(path)
+	if err != nil {
+		return err
+	}
+
+	lines, err := readFileLines(resolved)
+	if err != nil {
+		return err
+	}
+	if lines == nil {
+		return fmt.Errorf("profile %q not found", name)
+	}
+
+	spans := parseSections(lines)
+	span := findConnectionSpan(spans, name)
+	if span == nil {
+		return fmt.Errorf("profile %q not found", name)
+	}
+
+	// Remove the section, including any trailing blank line.
+	end := span.end
+	for end < len(lines) && strings.TrimSpace(lines[end]) == "" {
+		end++
+		break // remove at most one trailing blank line
+	}
+
+	var result []string
+	result = append(result, lines[:span.start]...)
+	result = append(result, lines[end:]...)
+
+	// Clear default_connection_name if it pointed to the deleted profile.
+	result = clearDefaultIfMatches(result, name)
+
+	return writeLines(resolved, result)
+}
+
+// CloneProfile duplicates a profile under a new name.
+func CloneProfile(path string, sourceName, newName string) error {
+	if err := ValidateProfileName(newName); err != nil {
+		return err
+	}
+	resolved, err := resolvePath(path)
+	if err != nil {
+		return err
+	}
+
+	lines, err := readFileLines(resolved)
+	if err != nil {
+		return err
+	}
+	if lines == nil {
+		return fmt.Errorf("source profile %q not found", sourceName)
+	}
+
+	spans := parseSections(lines)
+
+	// Check source exists.
+	src := findConnectionSpan(spans, sourceName)
+	if src == nil {
+		return fmt.Errorf("source profile %q not found", sourceName)
+	}
+
+	// Check destination doesn't exist.
+	if findConnectionSpan(spans, newName) != nil {
+		return fmt.Errorf("profile %q already exists", newName)
+	}
+
+	// Copy source section body (everything except the header).
+	var cloned []string
+	cloned = append(cloned, fmt.Sprintf("[connections.%s]", newName))
+	for i := src.start + 1; i < src.end; i++ {
+		cloned = append(cloned, lines[i])
+	}
+
+	// Append the cloned section at end.
+	if len(lines) > 0 {
+		last := lines[len(lines)-1]
+		if strings.TrimSpace(last) != "" {
+			lines = append(lines, "")
+		}
+	}
+	lines = append(lines, cloned...)
+	lines = append(lines, "") // trailing newline
+	return writeLines(resolved, lines)
+}
+
+// defaultConnRe matches the default_connection_name line.
+var defaultConnRe = regexp.MustCompile(`^(\s*)default_connection_name\s*=\s*"([^"]*)"`)
+
+// SetDefaultProfile updates or inserts the default_connection_name line.
+func SetDefaultProfile(path string, name string) error {
+	if err := ValidateProfileName(name); err != nil {
+		return err
+	}
+	resolved, err := resolvePath(path)
+	if err != nil {
+		return err
+	}
+
+	lines, err := readFileLines(resolved)
+	if err != nil {
+		return err
+	}
+	if lines == nil {
+		return fmt.Errorf("config file does not exist")
+	}
+
+	// Verify the profile exists.
+	spans := parseSections(lines)
+	if findConnectionSpan(spans, name) == nil {
+		return fmt.Errorf("profile %q not found", name)
+	}
+
+	// Find and replace existing default_connection_name line.
+	for i, line := range lines {
+		if defaultConnRe.MatchString(line) {
+			m := defaultConnRe.FindStringSubmatch(line)
+			lines[i] = fmt.Sprintf(`%sdefault_connection_name = "%s"`, m[1], tomlEscape(name))
+			return writeLines(resolved, lines)
+		}
+	}
+
+	// No existing line — insert before the first [section].
+	newLine := fmt.Sprintf(`default_connection_name = "%s"`, tomlEscape(name))
+	if len(spans) > 0 {
+		insertAt := spans[0].start
+		var result []string
+		result = append(result, lines[:insertAt]...)
+		result = append(result, newLine, "")
+		result = append(result, lines[insertAt:]...)
+		return writeLines(resolved, result)
+	}
+
+	// No sections at all — append.
+	lines = append(lines, newLine)
+	return writeLines(resolved, lines)
+}
+
+// RenameProfile renames a connection profile. The old section header is
+// replaced, and default_connection_name is updated if it matched the old name.
+// Returns an error if the new name already exists.
+func RenameProfile(path string, oldName, newName string) error {
+	if err := ValidateProfileName(oldName); err != nil {
+		return err
+	}
+	if err := ValidateProfileName(newName); err != nil {
+		return err
+	}
+	if oldName == newName {
+		return nil
+	}
+	resolved, err := resolvePath(path)
+	if err != nil {
+		return err
+	}
+
+	lines, err := readFileLines(resolved)
+	if err != nil {
+		return err
+	}
+	if lines == nil {
+		return fmt.Errorf("profile %q not found", oldName)
+	}
+
+	spans := parseSections(lines)
+
+	src := findConnectionSpan(spans, oldName)
+	if src == nil {
+		return fmt.Errorf("profile %q not found", oldName)
+	}
+	if findConnectionSpan(spans, newName) != nil {
+		return fmt.Errorf("profile %q already exists", newName)
+	}
+
+	// Replace the section header.
+	lines[src.start] = fmt.Sprintf("[connections.%s]", newName)
+
+	// Update default_connection_name if it pointed to the old name.
+	for i, line := range lines {
+		m := defaultConnRe.FindStringSubmatch(line)
+		if m != nil && m[2] == oldName {
+			lines[i] = fmt.Sprintf(`%sdefault_connection_name = "%s"`, m[1], tomlEscape(newName))
+			break
+		}
+	}
+
+	return writeLines(resolved, lines)
+}
+
+// clearDefaultIfMatches scans lines for default_connection_name and clears it
+// if it matches the given name.
+func clearDefaultIfMatches(lines []string, name string) []string {
+	for i, line := range lines {
+		m := defaultConnRe.FindStringSubmatch(line)
+		if m != nil && m[2] == name {
+			lines[i] = fmt.Sprintf(`%sdefault_connection_name = ""`, m[1])
+			break
+		}
+	}
+	return lines
+}

@@ -23,7 +23,7 @@ The map in `internal/architecture/semantic_map.go` is **generated** — do not e
 
 ## 💡 Critical Context
 - **Nature of App**: This is a **Snowflake SQL Editor** and management tool.
-- **Authentication**: Authentication is handled by parsing connection parameters from the **Snowflake CLI configuration file** (defaults to `~/.snowflake/config.toml` or `connections.toml`). Users can select a custom path during sign-in, which is persisted in the app configuration.
+- **Authentication**: Authentication is handled by parsing connection parameters from the **Snowflake CLI configuration file** (defaults to `~/.snowflake/config.toml` or `connections.toml`). Users can select a custom path during sign-in, which is persisted in the app configuration. Profiles can be **created, saved, renamed, cloned, set as default, and deleted** directly from the connection dialog via `internal/sfconfig/writer.go` (text-level TOML manipulation that preserves comments and unknown keys).
 - **Tech Stack**: Go 1.22, Wails v2, React 18, TypeScript 5.6, Monaco Editor, Ant Design 5, Zustand 5.
 
 ## 🗄 Codebase Vector Database

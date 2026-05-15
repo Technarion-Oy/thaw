@@ -10,16 +10,17 @@
 //
 // @thaw-domain: Core IPC & App Lifecycle
 
-import { useState, useEffect } from "react";
-import { Form, Input, Button, Alert, Space, Typography, Select, Divider, Tooltip, Modal } from "antd";
-import { CloudServerOutlined, FolderOpenOutlined } from "@ant-design/icons";
+import { useState, useEffect, useCallback } from "react";
+import { Form, Input, Button, Alert, Space, Typography, Select, Divider, Tooltip, Modal, Popconfirm, message } from "antd";
+import { CloudServerOutlined, FolderOpenOutlined, SaveOutlined, CopyOutlined, DeleteOutlined, StarOutlined, PlusOutlined, EditOutlined } from "@ant-design/icons";
 import UserAgreementModal from "./UserAgreementModal";
 import {
   Connect, CancelConnect, LoadSnowflakeCLIConfig,
   GetSnowflakeCLIConfigPath, PickSnowflakeCLIConfigPath,
+  SaveProfile, DeleteProfile, CloneProfile, SetDefaultProfile, RenameProfile,
 } from "../../../wailsjs/go/main/App";
+import { sfconfig } from "../../../wailsjs/go/models";
 import { useConnectionStore, type ConnectionParams } from "../../store/connectionStore";
-import type { sfconfig } from "../../../wailsjs/go/models";
 
 const { Title, Text } = Typography;
 
@@ -64,21 +65,39 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
 
   const [cliConfig, setCliConfig] = useState<sfconfig.Config | null>(null);
   const [cliConfigPath, setCliConfigPath] = useState<string>("");
+  const [selectedProfile, setSelectedProfile] = useState<string | undefined>(undefined);
+  const [nameModalOpen, setNameModalOpen] = useState(false);
+  const [nameModalMode, setNameModalMode] = useState<"new" | "save" | "clone" | "rename">("save");
+  const [nameModalValue, setNameModalValue] = useState("");
 
-  const refreshCliConfig = () => {
+  const refreshCliConfig = useCallback((selectAfter?: string) => {
     LoadSnowflakeCLIConfig()
       .then((cfg) => {
-        setCliConfig(cfg.connections?.length ? cfg : null);
+        const hasCfg = cfg.connections?.length ? cfg : null;
+        setCliConfig(hasCfg);
+        if (selectAfter && hasCfg?.connections?.find((c) => c.name === selectAfter)) {
+          setSelectedProfile(selectAfter);
+        }
       })
       .catch(() => {
         setCliConfig(null);
       });
-  };
+  }, []);
 
   // Load Snowflake CLI config and path once on mount.
   useEffect(() => {
     GetSnowflakeCLIConfigPath().then(setCliConfigPath);
-    refreshCliConfig();
+    LoadSnowflakeCLIConfig()
+      .then((cfg) => {
+        const hasCfg = cfg.connections?.length ? cfg : null;
+        setCliConfig(hasCfg);
+        if (hasCfg?.defaultConnection) {
+          setSelectedProfile(hasCfg.defaultConnection);
+        }
+      })
+      .catch(() => {
+        setCliConfig(null);
+      });
   }, []);
 
   const changeCliConfigPath = async () => {
@@ -94,6 +113,7 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
   };
 
   const applyCliConnection = (name: string) => {
+    setSelectedProfile(name);
     const conn = cliConfig?.connections?.find((c) => c.name === name);
     if (!conn) return;
 
@@ -114,6 +134,120 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
       privateKeyPath:       conn.privateKeyPath,
       privateKeyPassphrase: conn.privateKeyPassphrase,
     });
+  };
+
+  const profileNameIsValid = (name: string) =>
+    /^[A-Za-z0-9_-]+$/.test(name);
+
+  const existingProfileNames = new Set(
+    cliConfig?.connections?.map((c) => c.name) ?? [],
+  );
+
+  /** True when the name modal should block submission due to a duplicate. */
+  const nameModalHasDuplicate = (() => {
+    const name = nameModalValue.trim();
+    if (!name) return false;
+    // "save" overwrites by design — no duplicate check.
+    if (nameModalMode === "save") return false;
+    return existingProfileNames.has(name);
+  })();
+
+  const buildConnectionFromForm = (profileName: string) => {
+    const values = form.getFieldsValue(true);
+    return new sfconfig.Connection({
+      name:                 profileName,
+      account:              values.account || "",
+      user:                 values.user || "",
+      password:             values.password || "",
+      role:                 values.role || "",
+      warehouse:            values.warehouse || "",
+      database:             values.database || "",
+      schema:               values.schema || "",
+      authenticator:        values.authenticator || "",
+      passcode:             values.passcode || "",
+      oktaUrl:              values.oktaUrl || "",
+      privateKeyPath:       values.privateKeyPath || "",
+      privateKeyPassphrase: values.privateKeyPassphrase || "",
+    });
+  };
+
+  const handleSaveProfile = async (profileName: string) => {
+    try {
+      await SaveProfile(buildConnectionFromForm(profileName));
+      message.success(`Profile "${profileName}" saved`);
+      refreshCliConfig(profileName);
+    } catch (e) {
+      message.error(`Failed to save profile: ${e}`);
+    }
+  };
+
+  const handleCloneProfile = async (newName: string) => {
+    if (!selectedProfile) return;
+    try {
+      await CloneProfile(selectedProfile, newName);
+      message.success(`Profile "${selectedProfile}" cloned as "${newName}"`);
+      refreshCliConfig(newName);
+    } catch (e) {
+      message.error(`Failed to clone profile: ${e}`);
+    }
+  };
+
+  const handleRenameProfile = async (newName: string) => {
+    if (!selectedProfile) return;
+    try {
+      await RenameProfile(selectedProfile, newName);
+      message.success(`Profile renamed to "${newName}"`);
+      refreshCliConfig(newName);
+    } catch (e) {
+      message.error(`Failed to rename profile: ${e}`);
+    }
+  };
+
+  const handleSetDefault = async () => {
+    if (!selectedProfile) return;
+    try {
+      await SetDefaultProfile(selectedProfile);
+      message.success(`"${selectedProfile}" set as default`);
+      refreshCliConfig(selectedProfile);
+    } catch (e) {
+      message.error(`Failed to set default: ${e}`);
+    }
+  };
+
+  const handleDeleteProfile = async () => {
+    if (!selectedProfile) return;
+    const name = selectedProfile;
+    try {
+      await DeleteProfile(name);
+      message.success(`Profile "${name}" deleted`);
+      setSelectedProfile(undefined);
+      refreshCliConfig();
+    } catch (e) {
+      message.error(`Failed to delete profile: ${e}`);
+    }
+  };
+
+  const openNameModal = (mode: "new" | "save" | "clone" | "rename") => {
+    setNameModalMode(mode);
+    setNameModalValue(
+      mode === "save" ? (selectedProfile || "")
+        : mode === "rename" ? (selectedProfile || "")
+        : "",
+    );
+    setNameModalOpen(true);
+  };
+
+  const confirmNameModal = () => {
+    const name = nameModalValue.trim();
+    if (!name || !profileNameIsValid(name) || nameModalHasDuplicate) return;
+    setNameModalOpen(false);
+    if (nameModalMode === "new" || nameModalMode === "save") {
+      handleSaveProfile(name);
+    } else if (nameModalMode === "clone") {
+      handleCloneProfile(name);
+    } else if (nameModalMode === "rename") {
+      handleRenameProfile(name);
+    }
   };
 
   const onFinish = async (values: ConnectionParams) => {
@@ -171,6 +305,7 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
                 style={{ width: "100%" }}
                 placeholder="Select a connection profile…"
                 onChange={applyCliConnection}
+                value={selectedProfile}
                 defaultValue={cliConfig.defaultConnection || undefined}
                 options={cliConfig.connections.map((c) => ({
                   value: c.name,
@@ -178,9 +313,9 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
                 }))}
               />
             ) : (
-              <div style={{ 
-                padding: "8px 12px", 
-                background: "var(--bg-faint)", 
+              <div style={{
+                padding: "8px 12px",
+                background: "var(--bg-faint)",
                 border: "1px dashed var(--border)",
                 borderRadius: 6,
                 textAlign: "center"
@@ -190,6 +325,78 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
                 </Text>
               </div>
             )}
+
+            {/* ── Profile action buttons ─────────────────────────────── */}
+            <div style={{ display: "flex", gap: 4, marginTop: 6, flexWrap: "wrap" }}>
+              <Tooltip title="Create a new profile from the current form values">
+                <Button
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={() => openNameModal("new")}
+                >
+                  New
+                </Button>
+              </Tooltip>
+              <Tooltip title="Overwrite the selected profile with the current form values">
+                <Button
+                  size="small"
+                  icon={<SaveOutlined />}
+                  disabled={!selectedProfile}
+                  onClick={() => openNameModal("save")}
+                >
+                  Save
+                </Button>
+              </Tooltip>
+              <Tooltip title="Rename the selected profile">
+                <Button
+                  size="small"
+                  icon={<EditOutlined />}
+                  disabled={!selectedProfile}
+                  onClick={() => openNameModal("rename")}
+                >
+                  Rename
+                </Button>
+              </Tooltip>
+              <Tooltip title="Clone the selected profile under a new name">
+                <Button
+                  size="small"
+                  icon={<CopyOutlined />}
+                  disabled={!selectedProfile}
+                  onClick={() => openNameModal("clone")}
+                >
+                  Clone
+                </Button>
+              </Tooltip>
+              <Tooltip title="Set the selected profile as default">
+                <Button
+                  size="small"
+                  icon={<StarOutlined />}
+                  disabled={!selectedProfile || cliConfig?.defaultConnection === selectedProfile}
+                  onClick={handleSetDefault}
+                >
+                  Default
+                </Button>
+              </Tooltip>
+              <Popconfirm
+                title={`Delete profile "${selectedProfile}"?`}
+                onConfirm={handleDeleteProfile}
+                okText="Delete"
+                okType="danger"
+                disabled={!selectedProfile}
+              >
+                <Tooltip title="Delete the selected profile">
+                  <Button
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                    disabled={!selectedProfile}
+                  >
+                    Delete
+                  </Button>
+                </Tooltip>
+              </Popconfirm>
+            </div>
+
             <Divider style={{ borderColor: "var(--border)", margin: "16px 0 4px" }} />
           </div>
 
@@ -322,6 +529,67 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
           </Form>
 
           <UserAgreementModal open={agreementOpen} onClose={() => setAgreementOpen(false)} />
+
+          {/* ── Profile name sub-modal ──────────────────────────── */}
+          <Modal
+            open={nameModalOpen}
+            title={
+              nameModalMode === "new" ? "New Profile"
+                : nameModalMode === "save" ? "Save Profile"
+                : nameModalMode === "clone" ? "Clone Profile"
+                : "Rename Profile"
+            }
+            okText={
+              nameModalMode === "new" ? "Create"
+                : nameModalMode === "save" ? "Save"
+                : nameModalMode === "clone" ? "Clone"
+                : "Rename"
+            }
+            onOk={confirmNameModal}
+            onCancel={() => setNameModalOpen(false)}
+            okButtonProps={{
+              disabled:
+                !nameModalValue.trim()
+                || !profileNameIsValid(nameModalValue.trim())
+                || nameModalHasDuplicate,
+            }}
+            destroyOnClose
+            width={360}
+          >
+            <div style={{ marginBottom: 8 }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {nameModalMode === "new"
+                  ? "Enter a name for the new profile. The current form values will be saved."
+                  : nameModalMode === "save"
+                  ? "Enter a name for the profile. Existing profiles with the same name will be overwritten."
+                  : nameModalMode === "clone"
+                  ? `Cloning "${selectedProfile}". Enter a name for the new profile.`
+                  : `Renaming "${selectedProfile}". Enter the new name.`}
+              </Text>
+            </div>
+            <Input
+              autoFocus
+              placeholder="profile-name"
+              value={nameModalValue}
+              onChange={(e) => setNameModalValue(e.target.value)}
+              onPressEnter={confirmNameModal}
+              status={
+                nameModalValue.trim() && (!profileNameIsValid(nameModalValue.trim()) || nameModalHasDuplicate)
+                  ? "error"
+                  : undefined
+              }
+            />
+            {nameModalValue.trim() && !profileNameIsValid(nameModalValue.trim()) && (
+              <Text type="danger" style={{ fontSize: 11, marginTop: 4, display: "block" }}>
+                Only letters, numbers, hyphens, and underscores are allowed.
+              </Text>
+            )}
+            {nameModalHasDuplicate && (
+              <Text type="danger" style={{ fontSize: 11, marginTop: 4, display: "block" }}>
+                A profile named "{nameModalValue.trim()}" already exists.
+              </Text>
+            )}
+          </Modal>
       </Space>
     </Modal>
   );
