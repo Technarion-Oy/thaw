@@ -518,6 +518,16 @@ func (a *App) SetDefaultProfile(name string) error {
 	return sfconfig.SetDefaultProfile(cfg.SnowflakeCLIConfigPath, name)
 }
 
+// ClearDefaultProfile removes the default_connection_name value in the
+// Snowflake CLI configuration file.
+func (a *App) ClearDefaultProfile() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	return sfconfig.ClearDefaultProfile(cfg.SnowflakeCLIConfigPath)
+}
+
 // PickSnowflakeCLIConfigPath opens a native file dialog to select a new
 // Snowflake CLI configuration file. The selected path is persisted and
 // used for all subsequent profile loads.

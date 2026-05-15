@@ -17,7 +17,7 @@ import UserAgreementModal from "./UserAgreementModal";
 import {
   Connect, CancelConnect, LoadSnowflakeCLIConfig,
   GetSnowflakeCLIConfigPath, PickSnowflakeCLIConfigPath,
-  SaveProfile, DeleteProfile, CloneProfile, SetDefaultProfile, RenameProfile,
+  SaveProfile, DeleteProfile, CloneProfile, SetDefaultProfile, ClearDefaultProfile, RenameProfile,
 } from "../../../wailsjs/go/main/App";
 import { sfconfig } from "../../../wailsjs/go/models";
 import { useConnectionStore, type ConnectionParams } from "../../store/connectionStore";
@@ -203,14 +203,21 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
     }
   };
 
-  const handleSetDefault = async () => {
+  const isSelectedDefault = !!(selectedProfile && cliConfig?.defaultConnection === selectedProfile);
+
+  const handleToggleDefault = async () => {
     if (!selectedProfile) return;
     try {
-      await SetDefaultProfile(selectedProfile);
-      message.success(`"${selectedProfile}" set as default`);
+      if (isSelectedDefault) {
+        await ClearDefaultProfile();
+        message.success(`"${selectedProfile}" is no longer the default`);
+      } else {
+        await SetDefaultProfile(selectedProfile);
+        message.success(`"${selectedProfile}" set as default`);
+      }
       refreshCliConfig(selectedProfile);
     } catch (e) {
-      message.error(`Failed to set default: ${e}`);
+      message.error(`Failed to update default: ${e}`);
     }
   };
 
@@ -367,12 +374,13 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
                   Clone
                 </Button>
               </Tooltip>
-              <Tooltip title="Set the selected profile as default">
+              <Tooltip title={isSelectedDefault ? "Remove as default profile" : "Set the selected profile as default"}>
                 <Button
                   size="small"
                   icon={<StarOutlined />}
-                  disabled={!selectedProfile || cliConfig?.defaultConnection === selectedProfile}
-                  onClick={handleSetDefault}
+                  disabled={!selectedProfile}
+                  type={isSelectedDefault ? "primary" : "default"}
+                  onClick={handleToggleDefault}
                 >
                   Default
                 </Button>

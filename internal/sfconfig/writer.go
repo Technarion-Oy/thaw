@@ -417,6 +417,31 @@ func SetDefaultProfile(path string, name string) error {
 	return writeLines(resolved, lines)
 }
 
+// ClearDefaultProfile removes the default_connection_name value (sets it to "").
+func ClearDefaultProfile(path string) error {
+	resolved, err := resolvePath(path)
+	if err != nil {
+		return err
+	}
+
+	lines, err := readFileLines(resolved)
+	if err != nil {
+		return err
+	}
+	if lines == nil {
+		return nil
+	}
+
+	for i, line := range lines {
+		m := defaultConnRe.FindStringSubmatch(line)
+		if m != nil {
+			lines[i] = fmt.Sprintf(`%sdefault_connection_name = ""`, m[1])
+			return writeLines(resolved, lines)
+		}
+	}
+	return nil
+}
+
 // RenameProfile renames a connection profile. The old section header is
 // replaced, and default_connection_name is updated if it matched the old name.
 // Returns an error if the new name already exists.

@@ -166,6 +166,10 @@ export function CheckSnowparkEnv() {
   return window['go']['main']['App']['CheckSnowparkEnv']();
 }
 
+export function ClearDefaultProfile() {
+  return window['go']['main']['App']['ClearDefaultProfile']();
+}
+
 export function CloneChildTask(arg1, arg2, arg3, arg4, arg5, arg6) {
   return window['go']['main']['App']['CloneChildTask'](arg1, arg2, arg3, arg4, arg5, arg6);
 }

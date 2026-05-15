@@ -369,6 +369,43 @@ account = "dev-account"
 	}
 }
 
+func TestClearDefaultProfile(t *testing.T) {
+	dir := t.TempDir()
+	initial := `default_connection_name = "dev"
+
+[connections.dev]
+account = "dev-account"
+`
+	path := writeTestFile(t, dir, "config.toml", initial)
+
+	err := ClearDefaultProfile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	content := readTestFile(t, path)
+	if !strings.Contains(content, `default_connection_name = ""`) {
+		t.Error("default_connection_name was not cleared")
+	}
+	// Profile should still exist.
+	if !strings.Contains(content, "[connections.dev]") {
+		t.Error("profile section was lost")
+	}
+}
+
+func TestClearDefaultProfile_NoDefault(t *testing.T) {
+	dir := t.TempDir()
+	initial := `[connections.dev]
+account = "dev-account"
+`
+	path := writeTestFile(t, dir, "config.toml", initial)
+
+	err := ClearDefaultProfile(path)
+	if err != nil {
+		t.Errorf("clearing when no default exists should be a no-op, got: %v", err)
+	}
+}
+
 func TestRenameProfile(t *testing.T) {
 	dir := t.TempDir()
 	initial := `default_connection_name = "dev"
