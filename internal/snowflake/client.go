@@ -1332,12 +1332,15 @@ func (c *Client) ExecDDL(ctx context.Context, sql string) error {
 	return err
 }
 
-// CanCreateIntegration returns (true, nil) when the current session role (or any
-// role it inherits) allows creating integrations.
-func (c *Client) CanCreateIntegration(ctx context.Context) (bool, error) {
-	c.connector.mu.RLock()
-	role := c.connector.role
-	c.connector.mu.RUnlock()
+// CanCreateIntegration returns (true, nil) when the given role (or any role it
+// inherits) allows creating integrations. If role is empty, the connector's
+// current role is used as a fallback.
+func (c *Client) CanCreateIntegration(ctx context.Context, role string) (bool, error) {
+	if role == "" {
+		c.connector.mu.RLock()
+		role = c.connector.role
+		c.connector.mu.RUnlock()
+	}
 
 	if role == "" {
 		if err := c.db.QueryRowContext(ctx, "SELECT CURRENT_ROLE()").Scan(&role); err != nil {
@@ -1605,12 +1608,15 @@ func (c *Client) CanModifyUserAuth(ctx context.Context, username string) (bool, 
 	return false, rows.Err()
 }
 
-// CanCreateUsers returns (true, nil) when the current session role (or any
-// role it inherits) allows creating users.
-func (c *Client) CanCreateUsers(ctx context.Context) (bool, error) {
-	c.connector.mu.RLock()
-	role := c.connector.role
-	c.connector.mu.RUnlock()
+// CanCreateUsers returns (true, nil) when the given role (or any role it
+// inherits) allows creating users. If role is empty, the connector's current
+// role is used as a fallback.
+func (c *Client) CanCreateUsers(ctx context.Context, role string) (bool, error) {
+	if role == "" {
+		c.connector.mu.RLock()
+		role = c.connector.role
+		c.connector.mu.RUnlock()
+	}
 
 	if role == "" {
 		// Fallback: ask the DB directly (e.g. before first UseRole call).
@@ -1625,12 +1631,15 @@ func (c *Client) CanCreateUsers(ctx context.Context) (bool, error) {
 	)
 }
 
-// CanManageUsers returns (true, nil) when the current session role (or any
-// role it inherits) can ALTER or DROP other users.
-func (c *Client) CanManageUsers(ctx context.Context) (bool, error) {
-	c.connector.mu.RLock()
-	role := c.connector.role
-	c.connector.mu.RUnlock()
+// CanManageUsers returns (true, nil) when the given role (or any role it
+// inherits) can ALTER or DROP other users. If role is empty, the connector's
+// current role is used as a fallback.
+func (c *Client) CanManageUsers(ctx context.Context, role string) (bool, error) {
+	if role == "" {
+		c.connector.mu.RLock()
+		role = c.connector.role
+		c.connector.mu.RUnlock()
+	}
 
 	if role == "" {
 		if err := c.db.QueryRowContext(ctx, "SELECT CURRENT_ROLE()").Scan(&role); err != nil {

@@ -1910,20 +1910,22 @@ func (a *App) GetUserDDL(name string) (string, error) {
 	return a.client.GetUserDDL(a.ctx, name)
 }
 
-// CanManageUsers returns true when the current role can alter or drop users.
-func (a *App) CanManageUsers() (bool, error) {
+// CanManageUsers returns true when the given role can alter or drop users.
+// The frontend passes the current role from sessionStore.
+func (a *App) CanManageUsers(role string) (bool, error) {
 	if a.client == nil {
 		return false, apperrors.ErrNotConnected
 	}
-	return a.client.CanManageUsers(a.ctx)
+	return a.client.CanManageUsers(a.ctx, role)
 }
 
-// CanCreateUsers returns true when the current role can create users.
-func (a *App) CanCreateUsers() (bool, error) {
+// CanCreateUsers returns true when the given role can create users.
+// The frontend passes the current role from sessionStore.
+func (a *App) CanCreateUsers(role string) (bool, error) {
 	if a.client == nil {
 		return false, apperrors.ErrNotConnected
 	}
-	return a.client.CanCreateUsers(a.ctx)
+	return a.client.CanCreateUsers(a.ctx, role)
 }
 
 // CanModifyUserAuth returns true when the current session role (or any role it
@@ -2213,20 +2215,13 @@ func (a *App) DropSchema(database, schema string, mode string) error {
 	return a.client.DropSchema(a.ctx, database, schema, mode)
 }
 
-// CanCreateIntegration returns true when the current role can create integrations.
-// If tabId is non-empty and the tab already has an isolated session (i.e. at least
-// one query has been run on it), that session is used so that any USE ROLE applied
-// to the tab is reflected. Otherwise the main shared connection is used.
-func (a *App) CanCreateIntegration(tabId string) (bool, error) {
-	if tabId != "" {
-		if val, ok := a.tabSessions.Load(tabId); ok {
-			return val.(*tabSession).client.CanCreateIntegration(a.ctx)
-		}
-	}
+// CanCreateIntegration returns true when the given role can create integrations.
+// The frontend passes the current role from sessionStore.
+func (a *App) CanCreateIntegration(role string) (bool, error) {
 	if a.client == nil {
 		return false, apperrors.ErrNotConnected
 	}
-	return a.client.CanCreateIntegration(a.ctx)
+	return a.client.CanCreateIntegration(a.ctx, role)
 }
 
 // ── Integration SQL builders (IPC) ────────────────────────────────────────────

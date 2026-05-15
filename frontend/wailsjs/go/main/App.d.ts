@@ -81,9 +81,9 @@ export function BuildRefreshPipeSql(arg1:string,arg2:string,arg3:string,arg4:pip
 
 export function CanCreateIntegration(arg1:string):Promise<boolean>;
 
-export function CanCreateUsers():Promise<boolean>;
+export function CanCreateUsers(arg1:string):Promise<boolean>;
 
-export function CanManageUsers():Promise<boolean>;
+export function CanManageUsers(arg1:string):Promise<boolean>;
 
 export function CanModifyUserAuth(arg1:string):Promise<boolean>;
 

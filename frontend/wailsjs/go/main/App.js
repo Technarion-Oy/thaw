@@ -118,12 +118,12 @@ export function CanCreateIntegration(arg1) {
   return window['go']['main']['App']['CanCreateIntegration'](arg1);
 }
 
-export function CanCreateUsers() {
-  return window['go']['main']['App']['CanCreateUsers']();
+export function CanCreateUsers(arg1) {
+  return window['go']['main']['App']['CanCreateUsers'](arg1);
 }
 
-export function CanManageUsers() {
-  return window['go']['main']['App']['CanManageUsers']();
+export function CanManageUsers(arg1) {
+  return window['go']['main']['App']['CanManageUsers'](arg1);
 }
 
 export function CanModifyUserAuth(arg1) {

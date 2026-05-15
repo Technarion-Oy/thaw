@@ -68,9 +68,9 @@ export default function UserManagementPanel() {
       setLoading(false);
     }
     // Privilege checks run independently — an error here must not hide the panel.
-    CanCreateUsers().then(setCanCreate).catch(() => {});
-    CanManageUsers().then(setCanManage).catch(() => {});
-  }, []);
+    CanCreateUsers(role).then(setCanCreate).catch(() => {});
+    CanManageUsers(role).then(setCanManage).catch(() => {});
+  }, [role]);
 
   // Re-run whenever the active role changes so the list and privileges refresh.
   useEffect(() => { load(); }, [load, role]);
