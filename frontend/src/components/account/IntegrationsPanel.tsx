@@ -105,7 +105,8 @@ export default function IntegrationsPanel() {
   // Re-check whenever the active role changes. The stale guard prevents
   // an old in-flight response from overwriting a newer result.
   useEffect(() => {
-    if (!role) { setCanCreate(false); return; }
+    setCanCreate(false);
+    if (!role) return;
     let stale = false;
     CanCreateIntegration(role).then((v) => { if (!stale) setCanCreate(v); }).catch(() => {});
     return () => { stale = true; };

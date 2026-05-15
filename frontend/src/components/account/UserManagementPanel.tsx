@@ -73,7 +73,9 @@ export default function UserManagementPanel() {
   // Privilege checks — re-run when role changes. The stale guard prevents
   // an old in-flight response from overwriting a newer result.
   useEffect(() => {
-    if (!role) { setCanCreate(false); setCanManage(false); return; }
+    setCanCreate(false);
+    setCanManage(false);
+    if (!role) return;
     let stale = false;
     CanCreateUsers(role).then((v) => { if (!stale) setCanCreate(v); }).catch(() => {});
     CanManageUsers(role).then((v) => { if (!stale) setCanManage(v); }).catch(() => {});
