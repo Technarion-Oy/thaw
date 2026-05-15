@@ -38,7 +38,7 @@ import {
   InstallEnvPackage,
   UninstallEnvPackage,
 } from "../../../wailsjs/go/main/App";
-import type { main } from "../../../wailsjs/go/models";
+import type { snowpark } from "../../../wailsjs/go/models";
 import { EventsOn } from "../../../wailsjs/runtime/runtime";
 import { useGitStore } from "../../store/gitStore";
 
@@ -120,7 +120,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
   const [isAppleSilicon, setIsAppleSilicon] = useState(false);
   const [venvPath, setVenvPath]     = useState("");
   const [pythonPath, setPythonPath] = useState("");
-  const [availablePythons, setAvailablePythons] = useState<main.PythonInfo[]>([]);
+  const [availablePythons, setAvailablePythons] = useState<snowpark.PythonInfo[]>([]);
   const [current, setCurrent]       = useState(0);
   const [steps, setSteps]           = useState<StepState[]>([makeStepState(), makeStepState(), makeStepState()]);
   const [, setConfigLoaded] = useState(false);
@@ -128,7 +128,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
   const logEndRef = useRef<HTMLDivElement | null>(null);
 
   // Package management (step 3)
-  const [packages, setPackages]           = useState<main.PackageInfo[]>([]);
+  const [packages, setPackages]           = useState<snowpark.PackageInfo[]>([]);
   const [packagesLoading, setPackagesLoading] = useState(false);
   const [packagesError, setPackagesError] = useState<string | null>(null);
   const [packageInput, setPackageInput]   = useState("");

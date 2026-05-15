@@ -16,7 +16,7 @@ import {
   ReloadOutlined,
 } from "@ant-design/icons";
 import { CheckSnowparkEnv } from "../../../wailsjs/go/main/App";
-import type { main } from "../../../wailsjs/go/models";
+import type { snowpark } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
 
@@ -25,7 +25,7 @@ interface Props {
   onSetup: () => void;
 }
 
-type CheckResult = main.SnowparkCheckResult;
+type CheckResult = snowpark.SnowparkCheckResult;
 
 interface CheckRow {
   label: string;
