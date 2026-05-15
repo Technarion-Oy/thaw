@@ -108,6 +108,12 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
     }
   };
 
+  const clearProfileSelection = () => {
+    setSelectedProfile(undefined);
+    form.resetFields();
+    setAuth("username_password_mfa");
+  };
+
   const applyCliConnection = (name: string) => {
     setSelectedProfile(name);
     const conn = cliConfig?.connections?.find((c) => c.name === name);
@@ -319,7 +325,9 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
                 style={{ width: "100%" }}
                 placeholder="Select a connection profile…"
                 onChange={applyCliConnection}
+                onClear={clearProfileSelection}
                 value={selectedProfile}
+                allowClear
                 options={cliConfig.connections.map((c) => ({
                   value: c.name,
                   label: cliConfig.defaultConnection === c.name ? `${c.name} (default)` : c.name,
