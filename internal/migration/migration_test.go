@@ -8,7 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-package main
+package migration
 
 import (
 	"os"
@@ -180,49 +180,49 @@ func TestMigrQuote(t *testing.T) {
 
 func TestParseLocalTableColumns(t *testing.T) {
 	cases := []struct {
-		name  string
-		ddl   string
-		want  []migrColDef
+		name string
+		ddl  string
+		want []colDef
 	}{
 		{
 			name: "simple_table",
 			ddl:  `CREATE TABLE t (id NUMBER, name VARCHAR(255))`,
-			want: []migrColDef{{Name: "ID", TypeExpr: "NUMBER"}, {Name: "NAME", TypeExpr: "VARCHAR(255)"}},
+			want: []colDef{{Name: "ID", TypeExpr: "NUMBER"}, {Name: "NAME", TypeExpr: "VARCHAR(255)"}},
 		},
 		{
 			name: "complex_numeric_type",
 			ddl:  `CREATE TABLE t (amount NUMBER(38,0), price FLOAT)`,
-			want: []migrColDef{{Name: "AMOUNT", TypeExpr: "NUMBER(38,0)"}, {Name: "PRICE", TypeExpr: "FLOAT"}},
+			want: []colDef{{Name: "AMOUNT", TypeExpr: "NUMBER(38,0)"}, {Name: "PRICE", TypeExpr: "FLOAT"}},
 		},
 		{
 			name: "quoted_column_name",
 			ddl:  `CREATE TABLE t ("MyCol" VARCHAR, "Count" NUMBER)`,
-			want: []migrColDef{{Name: "MYCOL", TypeExpr: "VARCHAR"}, {Name: "COUNT", TypeExpr: "NUMBER"}},
+			want: []colDef{{Name: "MYCOL", TypeExpr: "VARCHAR"}, {Name: "COUNT", TypeExpr: "NUMBER"}},
 		},
 		{
 			name: "column_with_default_and_not_null",
 			ddl:  `CREATE TABLE t (id NUMBER NOT NULL DEFAULT 0, active BOOLEAN NOT NULL DEFAULT TRUE)`,
-			want: []migrColDef{{Name: "ID", TypeExpr: "NUMBER"}, {Name: "ACTIVE", TypeExpr: "BOOLEAN"}},
+			want: []colDef{{Name: "ID", TypeExpr: "NUMBER"}, {Name: "ACTIVE", TypeExpr: "BOOLEAN"}},
 		},
 		{
 			name: "constraint_clauses_skipped",
 			ddl:  `CREATE TABLE t (id NUMBER, CONSTRAINT pk PRIMARY KEY (id), UNIQUE (id))`,
-			want: []migrColDef{{Name: "ID", TypeExpr: "NUMBER"}},
+			want: []colDef{{Name: "ID", TypeExpr: "NUMBER"}},
 		},
 		{
 			name: "primary_key_inline_skipped",
 			ddl:  `CREATE TABLE t (id NUMBER, name VARCHAR, PRIMARY KEY (id))`,
-			want: []migrColDef{{Name: "ID", TypeExpr: "NUMBER"}, {Name: "NAME", TypeExpr: "VARCHAR"}},
+			want: []colDef{{Name: "ID", TypeExpr: "NUMBER"}, {Name: "NAME", TypeExpr: "VARCHAR"}},
 		},
 		{
 			name: "cluster_by_skipped",
 			ddl:  `CREATE TABLE t (id NUMBER, ts TIMESTAMP_NTZ, CLUSTER BY (ts))`,
-			want: []migrColDef{{Name: "ID", TypeExpr: "NUMBER"}, {Name: "TS", TypeExpr: "TIMESTAMP_NTZ"}},
+			want: []colDef{{Name: "ID", TypeExpr: "NUMBER"}, {Name: "TS", TypeExpr: "TIMESTAMP_NTZ"}},
 		},
 		{
 			name: "variant_and_array_types",
 			ddl:  `CREATE TABLE t (id NUMBER, tags ARRAY, meta VARIANT, doc OBJECT)`,
-			want: []migrColDef{
+			want: []colDef{
 				{Name: "ID", TypeExpr: "NUMBER"},
 				{Name: "TAGS", TypeExpr: "ARRAY"},
 				{Name: "META", TypeExpr: "VARIANT"},
@@ -232,7 +232,7 @@ func TestParseLocalTableColumns(t *testing.T) {
 		{
 			name: "transient_table",
 			ddl:  `CREATE OR REPLACE TRANSIENT TABLE mydb.myschema.events (id NUMBER, payload VARIANT)`,
-			want: []migrColDef{{Name: "ID", TypeExpr: "NUMBER"}, {Name: "PAYLOAD", TypeExpr: "VARIANT"}},
+			want: []colDef{{Name: "ID", TypeExpr: "NUMBER"}, {Name: "PAYLOAD", TypeExpr: "VARIANT"}},
 		},
 		{
 			name: "no_parens_returns_nil",
@@ -247,12 +247,12 @@ func TestParseLocalTableColumns(t *testing.T) {
 		{
 			name: "dollar_sign_in_column_name",
 			ddl:  `CREATE TABLE t (col$1 VARCHAR, _private NUMBER)`,
-			want: []migrColDef{{Name: "COL$1", TypeExpr: "VARCHAR"}, {Name: "_PRIVATE", TypeExpr: "NUMBER"}},
+			want: []colDef{{Name: "COL$1", TypeExpr: "VARCHAR"}, {Name: "_PRIVATE", TypeExpr: "NUMBER"}},
 		},
 		{
 			name: "timestamp_with_precision",
 			ddl:  `CREATE TABLE t (created_at TIMESTAMP_NTZ(9), updated_at TIMESTAMP_LTZ(6))`,
-			want: []migrColDef{
+			want: []colDef{
 				{Name: "CREATED_AT", TypeExpr: "TIMESTAMP_NTZ(9)"},
 				{Name: "UPDATED_AT", TypeExpr: "TIMESTAMP_LTZ(6)"},
 			},
@@ -260,12 +260,12 @@ func TestParseLocalTableColumns(t *testing.T) {
 		{
 			name: "check_constraint_skipped",
 			ddl:  `CREATE TABLE t (age NUMBER, CHECK (age >= 0))`,
-			want: []migrColDef{{Name: "AGE", TypeExpr: "NUMBER"}},
+			want: []colDef{{Name: "AGE", TypeExpr: "NUMBER"}},
 		},
 		{
 			name: "foreign_key_skipped",
 			ddl:  `CREATE TABLE t (id NUMBER, ref_id NUMBER, FOREIGN KEY (ref_id) REFERENCES other(id))`,
-			want: []migrColDef{{Name: "ID", TypeExpr: "NUMBER"}, {Name: "REF_ID", TypeExpr: "NUMBER"}},
+			want: []colDef{{Name: "ID", TypeExpr: "NUMBER"}, {Name: "REF_ID", TypeExpr: "NUMBER"}},
 		},
 	}
 	for _, tc := range cases {
@@ -287,17 +287,17 @@ func TestParseLocalTableColumns(t *testing.T) {
 // ─── commonColumnNames ────────────────────────────────────────────────────────
 
 func TestCommonColumnNames(t *testing.T) {
-	mkCols := func(names ...string) []migrColDef {
-		cols := make([]migrColDef, len(names))
+	mkCols := func(names ...string) []colDef {
+		cols := make([]colDef, len(names))
 		for i, n := range names {
-			cols[i] = migrColDef{Name: n}
+			cols[i] = colDef{Name: n}
 		}
 		return cols
 	}
 
 	cases := []struct {
 		name string
-		a, b []migrColDef
+		a, b []colDef
 		want []string
 	}{
 		{
@@ -328,7 +328,7 @@ func TestCommonColumnNames(t *testing.T) {
 			name: "full_overlap",
 			a:    mkCols("A", "B", "C"),
 			b:    mkCols("C", "B", "A"),
-			want: []string{"A", "B", "C"}, // order from a
+			want: []string{"A", "B", "C"},
 		},
 		{
 			name: "order_preserved_from_a",
@@ -458,22 +458,21 @@ func TestIsDependencyError(t *testing.T) {
 // ─── executionPriority ────────────────────────────────────────────────────────
 
 func TestExecutionPriority(t *testing.T) {
-	// Verify that each kind maps to the documented priority.
 	expected := map[string]int{
-		"DATABASE":         0,
-		"SCHEMA":           1,
-		"SEQUENCE":         2,
-		"TABLE":            3,
-		"FILE FORMAT":      4,
-		"STAGE":            5,
-		"VIEW":             6,
+		"DATABASE":          0,
+		"SCHEMA":            1,
+		"SEQUENCE":          2,
+		"TABLE":             3,
+		"FILE FORMAT":       4,
+		"STAGE":             5,
+		"VIEW":              6,
 		"MATERIALIZED VIEW": 7,
-		"FUNCTION":         8,
-		"PROCEDURE":        9,
-		"STREAM":           10,
-		"TASK":             11,
-		"PIPE":             12,
-		"UNKNOWN_KIND":     99,
+		"FUNCTION":          8,
+		"PROCEDURE":         9,
+		"STREAM":            10,
+		"TASK":              11,
+		"PIPE":              12,
+		"UNKNOWN_KIND":      99,
 	}
 	for kind, want := range expected {
 		got := executionPriority(kind)
@@ -482,7 +481,6 @@ func TestExecutionPriority(t *testing.T) {
 		}
 	}
 
-	// Case insensitivity.
 	if executionPriority("table") != executionPriority("TABLE") {
 		t.Error("executionPriority should be case-insensitive")
 	}
@@ -490,7 +488,6 @@ func TestExecutionPriority(t *testing.T) {
 		t.Error("executionPriority should be case-insensitive")
 	}
 
-	// Deployment order: databases before schemas before tables before views.
 	if !(executionPriority("DATABASE") < executionPriority("SCHEMA") &&
 		executionPriority("SCHEMA") < executionPriority("TABLE") &&
 		executionPriority("TABLE") < executionPriority("VIEW") &&
@@ -547,7 +544,6 @@ func TestRemoteKey(t *testing.T) {
 // ─── buildMigrationScript ────────────────────────────────────────────────────
 
 func TestBuildMigrationScript(t *testing.T) {
-	// Shared test items.
 	newTableItem := MigrationDiffItem{
 		Object: MigrationObject{
 			ObjectKind: "TABLE",
@@ -603,7 +599,6 @@ func TestBuildMigrationScript(t *testing.T) {
 
 	t.Run("unchanged_and_removed_excluded", func(t *testing.T) {
 		script := buildMigrationScript([]MigrationDiffItem{unchangedItem, removedItem}, "MYDB", StrategyInPlace)
-		// Only the header should be present; no USE DATABASE either since no valid items.
 		if strings.Contains(script, "IGNORED") || strings.Contains(script, "DROPPED") {
 			t.Errorf("unchanged/removed items should not appear in script:\n%s", script)
 		}
@@ -611,7 +606,6 @@ func TestBuildMigrationScript(t *testing.T) {
 
 	t.Run("in_place_emits_alter_statements", func(t *testing.T) {
 		script := buildMigrationScript([]MigrationDiffItem{changedTableItem}, "MYDB", StrategyInPlace)
-		// status column dropped, new_col / status added
 		if !strings.Contains(script, "ADD COLUMN") && !strings.Contains(script, "DROP COLUMN") {
 			t.Errorf("expected ALTER TABLE statements in in_place script:\n%s", script)
 		}
@@ -674,7 +668,6 @@ func TestBuildMigrationScript(t *testing.T) {
 			Status:   "new",
 			LocalDDL: `CREATE OR REPLACE VIEW "MYDB"."PUBLIC"."MY_VIEW" AS SELECT 1`,
 		}
-		// Put view first, table second — expect table before view in output.
 		items := []MigrationDiffItem{viewItem, newTableItem}
 		script := buildMigrationScript(items, "MYDB", StrategyInPlace)
 		tablePos := strings.Index(script, "ORDERS")
@@ -696,9 +689,8 @@ func TestBuildMigrationScript(t *testing.T) {
 	})
 }
 
-// ─── ScanMigrationSource ─────────────────────────────────────────────────────
+// ─── ScanSource ──────────────────────────────────────────────────────────────
 
-// sortMigObjs sorts by Database+Schema+ObjectKind+ObjectName for deterministic comparison.
 func sortMigObjs(objs []MigrationObject) {
 	sort.Slice(objs, func(i, j int) bool {
 		ki := objs[i].Database + objs[i].Schema + objs[i].ObjectKind + objs[i].ObjectName
@@ -707,12 +699,12 @@ func sortMigObjs(objs []MigrationObject) {
 	})
 }
 
-func TestScanMigrationSource(t *testing.T) {
-	a := &App{} // ScanMigrationSource only uses the file system.
+func TestScanSource(t *testing.T) {
+	svc := NewService(func(string, interface{}) {}) // no-op emitter
 
 	t.Run("empty_dir_returns_empty_slice", func(t *testing.T) {
 		dir := t.TempDir()
-		objs, err := a.ScanMigrationSource(dir)
+		objs, err := svc.ScanSource(dir)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -729,7 +721,7 @@ func TestScanMigrationSource(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("key: val"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		objs, err := a.ScanMigrationSource(dir)
+		objs, err := svc.ScanSource(dir)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -747,7 +739,7 @@ CREATE OR REPLACE VIEW order_summary AS SELECT id FROM orders;`
 		if err := os.WriteFile(filepath.Join(dir, "schema.sql"), []byte(sql), 0644); err != nil {
 			t.Fatal(err)
 		}
-		objs, err := a.ScanMigrationSource(dir)
+		objs, err := svc.ScanSource(dir)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -755,7 +747,6 @@ CREATE OR REPLACE VIEW order_summary AS SELECT id FROM orders;`
 			t.Fatalf("expected 2 objects, got %d: %v", len(objs), objs)
 		}
 		sortMigObjs(objs)
-		// After sort: orders (TABLE) < order_summary (VIEW) by name
 		table := objs[0]
 		if strings.ToUpper(table.ObjectKind) != "TABLE" || strings.ToUpper(table.ObjectName) != "ORDERS" {
 			t.Errorf("expected ORDERS TABLE, got %+v", table)
@@ -775,11 +766,9 @@ CREATE OR REPLACE VIEW order_summary AS SELECT id FROM orders;`
 
 	t.Run("deduplication_last_definition_wins", func(t *testing.T) {
 		dir := t.TempDir()
-		// File a.sql defines ORDERS first.
 		sqlA := `USE DATABASE DB;
 USE SCHEMA SCH;
 CREATE TABLE orders (id NUMBER);`
-		// File b.sql redefines ORDERS with a different DDL (later alphabetically).
 		sqlB := `USE DATABASE DB;
 USE SCHEMA SCH;
 CREATE TABLE orders (id NUMBER, name VARCHAR(100));`
@@ -789,14 +778,13 @@ CREATE TABLE orders (id NUMBER, name VARCHAR(100));`
 		if err := os.WriteFile(filepath.Join(dir, "b_orders.sql"), []byte(sqlB), 0644); err != nil {
 			t.Fatal(err)
 		}
-		objs, err := a.ScanMigrationSource(dir)
+		objs, err := svc.ScanSource(dir)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if len(objs) != 1 {
 			t.Fatalf("expected 1 object after dedup, got %d: %v", len(objs), objs)
 		}
-		// b_orders.sql wins (last alphabetically). Its DDL has name column.
 		if !strings.Contains(objs[0].DDL, "name") && !strings.Contains(strings.ToUpper(objs[0].DDL), "NAME") {
 			t.Errorf("last definition should win; expected DDL with 'name' column, got: %q", objs[0].DDL)
 		}
@@ -809,16 +797,14 @@ USE SCHEMA SCH1;
 CREATE TABLE table1 (id NUMBER);
 USE DATABASE DB2;
 CREATE TABLE table2 (id NUMBER);`
-		// table2 has DB2 but no schema (schema reset when USE DATABASE is encountered)
 		if err := os.WriteFile(filepath.Join(dir, "multi.sql"), []byte(sql), 0644); err != nil {
 			t.Fatal(err)
 		}
-		objs, err := a.ScanMigrationSource(dir)
+		objs, err := svc.ScanSource(dir)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		sortMigObjs(objs)
-		// table1 should have DB1.SCH1; table2 should have DB2 with no schema
 		var t1, t2 MigrationObject
 		for _, o := range objs {
 			if strings.ToUpper(o.ObjectName) == "TABLE1" {
@@ -851,14 +837,13 @@ CREATE OR REPLACE VIEW active_customers AS SELECT id FROM customers;`
 		if err := os.WriteFile(filepath.Join(dir, "views.sql"), []byte(sqlViews), 0644); err != nil {
 			t.Fatal(err)
 		}
-		objs, err := a.ScanMigrationSource(dir)
+		objs, err := svc.ScanSource(dir)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if len(objs) != 3 {
 			t.Fatalf("expected 3 objects, got %d: %v", len(objs), objs)
 		}
-		// All should be in PROD.PUBLIC
 		for _, o := range objs {
 			if o.Database != "PROD" || o.Schema != "PUBLIC" {
 				t.Errorf("object %q has wrong context: db=%q schema=%q", o.ObjectName, o.Database, o.Schema)

@@ -24,6 +24,8 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"thaw/internal/crashreport"
+	"thaw/internal/session"
+	"thaw/internal/version"
 )
 
 //go:embed all:frontend/dist
@@ -32,13 +34,13 @@ var assets embed.FS
 // main is the application entry point. It initializes crash reporting, builds
 // the native menu, and hands control to the Wails runtime.
 func main() {
-	crashreport.Init(Version)
+	crashreport.Init(version.Version)
 	defer crashreport.Recover()
 
 	app := NewApp()
 
 	winW, winH := 1400, 900
-	if saved, ok := loadWindowState(); ok {
+	if saved, ok := session.LoadWindowState(); ok {
 		winW, winH = saved.Width, saved.Height
 		app.savedWindowState = &saved
 	}

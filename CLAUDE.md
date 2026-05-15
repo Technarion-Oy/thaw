@@ -56,9 +56,12 @@ The map in `internal/architecture/semantic_map.go` is **generated** — do not e
 thaw/
 ├── main.go              # Entry point, native menu, Wails runtime setup
 ├── app.go               # All Wails IPC bindings (~2750 lines)
-├── errors.go            # Sentinel errors (ErrNotConnected etc.)
-├── version.go           # Version string
 ├── internal/
+│   ├── apperrors/       # Sentinel errors (ErrNotConnected etc.)
+│   ├── version/         # Version string (set via -ldflags at build time)
+│   ├── session/         # Window state persistence (load/save, OS-specific paths)
+│   ├── migration/       # Schema migration engine (Service pattern)
+│   ├── snowpark/        # Snowpark/Jupyter support (Service pattern)
 │   ├── snowflake/       # Snowflake client — connection, query, DDL, lineage
 │   ├── sqleditor/       # SQL diagnostics & JOIN suggestion engine
 │   │   ├── sqleditor.go

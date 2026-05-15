@@ -10,7 +10,7 @@
 
 //go:build !dev
 
-package main
+package session
 
 import (
 	"os"
@@ -18,12 +18,12 @@ import (
 	"runtime"
 )
 
-// sessionStatePath returns the OS-specific session state file path for production builds.
+// StatePath returns the OS-specific session state file path for production builds.
 //
 //   - macOS:   ~/Library/Application Support/thaw/session.json
 //   - Windows: %LOCALAPPDATA%\thaw\session.json
 //   - Linux:   $XDG_DATA_HOME/thaw/session.json  (default: ~/.local/share/thaw/session.json)
-func sessionStatePath() string {
+func StatePath() string {
 	var dir string
 	switch runtime.GOOS {
 	case "darwin":

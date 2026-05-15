@@ -650,14 +650,6 @@ git tag v1.2.3 && git push origin v1.2.3
 thaw/
 ├── main.go                        # Wails entry point, window config, native menu
 ├── app.go                         # Methods bound to the frontend (Connect, ExecuteQuery, …)
-├── snowpark.go                    # Snowpark IPC: env check/setup, notebook kernel, SQL cells
-├── dbt.go                         # dbt project scaffolding IPC (CreateDbtProject)
-├── session.go                     # Window state persistence (WindowState, load/save)
-├── session_path_dev.go            # Session file path for dev builds (./thaw-session.json)
-├── session_path_prod.go           # Session file path for production builds (OS-specific)
-├── errors.go                      # Sentinel errors
-├── version.go                     # Version string (overridable via -ldflags at build time)
-├── migration_test.go              # Unit tests for migration helper functions (no Snowflake required)
 ├── go.mod
 ├── wails.json                     # Wails project configuration
 ├── build/
@@ -665,6 +657,7 @@ thaw/
 │   └── windows/                   # Windows resources
 ├── internal/
 │   ├── ai/ai.go                   # AI provider HTTP clients (OpenAI, Google AI Studios); model listing; agentic chat loop with tool-calling
+│   ├── apperrors/                  # Sentinel errors (ErrNotConnected etc.)
 │   ├── config/config.go           # Saved git / export / AI settings
 │   ├── crashreport/crashreport.go # Panic handler; writes JSON crash file; remote-send placeholder
 │   ├── ddl/
@@ -694,18 +687,22 @@ thaw/
 │   │   ├── logger.go              # slog + lumberjack setup; sets slog.Default so gosnowflake v2 logs flow in automatically
 │   │   ├── path_dev.go            # Log path for dev builds (./logs/thaw.log)
 │   │   └── path_prod.go           # Log path for production builds (OS-specific)
+│   ├── migration/                  # Schema migration engine (Service pattern with NewService)
 │   ├── pipe/                      # Pipe management: CREATE PIPE SQL builder, copy history, COPY statement validation
 │   ├── procedure/                 # Procedure/function call statement builder (CALL, SELECT for scalar/table functions)
 │   ├── queryprofile/              # Query execution profile and EXPLAIN plan parser; performance diagnostics
 │   ├── secret/                    # Secret management: CREATE/ALTER SECRET SQL builder (OAUTH2, PASSWORD, GENERIC_STRING, etc.)
+│   ├── session/                    # Window state persistence (load/save, OS-specific paths)
 │   ├── sfconfig/reader.go         # Snowflake CLI config (~/.snowflake/config.toml)
 │   ├── snowflake/client.go        # Snowflake driver wrapper
 │   ├── snowflake/lineage.go       # DDL-based dependency/lineage parser (recursive, cycle-safe)
 │   ├── snowflake/lineage_test.go  # Unit tests for lineage parser (56 cases; no Snowflake required)
 │   ├── snowgitrepo/               # Snowflake Git repository integration: CREATE/ALTER GIT REPOSITORY SQL builder
+│   ├── snowpark/                   # Snowpark/Jupyter support (Service pattern with NewService)
 │   ├── stage/                     # Stage creation SQL builder (internal/external, encryption, directory tables)
 │   ├── tasks/                     # Task graph management: schedule parsing, execution history, status tracking
-│   └── telemetry/telemetry.go     # Anonymous event tracking; remote-send placeholder
+│   ├── telemetry/telemetry.go     # Anonymous event tracking; remote-send placeholder
+│   └── version/                   # Version string (set via -ldflags `-X thaw/internal/version.Version=`)
 └── frontend/
     ├── index.html
     ├── vite.config.ts
@@ -842,16 +839,16 @@ go test -v ./internal/dbt/
 
 ### Migration helper tests
 
-The root package (`migration.go`) contains unit tests for all pure migration helper functions — no Snowflake connection required.
+The `internal/migration` package contains unit tests for all pure migration helper functions — no Snowflake connection required.
 
 ```bash
-go test -v -run "^Test(Normalize|SplitTopLevel|MigrQuote|ParseLocal|CommonColumn|ReplaceDDL|IsDependency|ExecutionPriority|RemoteKey|BuildMigration|ScanMigration)" .
+go test -v ./internal/migration/...
 ```
 
-> **Linux note** — the root package imports Wails (CGO + GTK/WebKit). Install the system headers first:
+> **Linux note** — the migration package transitively imports Wails (CGO + GTK/WebKit). Install the system headers first:
 > ```bash
 > sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
-> go test -v -run "^Test(Normalize|SplitTopLevel|MigrQuote|ParseLocal|CommonColumn|ReplaceDDL|IsDependency|ExecutionPriority|RemoteKey|BuildMigration|ScanMigration)" .
+> go test -v ./internal/migration/...
 > ```
 
 ---

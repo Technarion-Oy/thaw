@@ -36,7 +36,9 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"thaw/internal/ai"
+	"thaw/internal/apperrors"
 	"thaw/internal/config"
+	"thaw/internal/dbt"
 	"thaw/internal/ddl"
 	"thaw/internal/fileformat"
 	"thaw/internal/filesystem"
@@ -44,17 +46,21 @@ import (
 	"thaw/internal/gitrepo"
 	"thaw/internal/integrations"
 	"thaw/internal/logger"
+	"thaw/internal/migration"
 	"thaw/internal/pipe"
 	"thaw/internal/procedure"
 	"thaw/internal/queryprofile"
 	"thaw/internal/secret"
+	"thaw/internal/session"
 	"thaw/internal/sfconfig"
 	"thaw/internal/snowflake"
 	"thaw/internal/snowgitrepo"
+	"thaw/internal/snowpark"
 	"thaw/internal/sqleditor"
 	"thaw/internal/stage"
 	"thaw/internal/tasks"
 	"thaw/internal/telemetry"
+	"thaw/internal/version"
 )
 
 // tabSession holds the per-tab Snowflake client and the two-phase query
@@ -80,12 +86,15 @@ type App struct {
 	client              *snowflake.Client
 	connectParams       *snowflake.ConnectParams // stored after a successful Connect for notebook session init
 	cancelConnect       context.CancelFunc
-	exportCancelFunc    context.CancelFunc // cancels an in-flight DDL export
-	migrationCancelFunc context.CancelFunc // cancels an in-flight schema migration
-	cancelChat          context.CancelFunc // cancels an in-flight AI chat request
-	fnStore             *fnmeta.Store      // local SQLite cache for Snowflake function metadata
-	logCleanup          func()             // closes the log rotation file on shutdown
-	savedWindowState    *WindowState       // non-nil when a persisted window state was loaded at launch
+	exportCancelFunc context.CancelFunc // cancels an in-flight DDL export
+	cancelChat       context.CancelFunc // cancels an in-flight AI chat request
+	fnStore          *fnmeta.Store      // local SQLite cache for Snowflake function metadata
+	logCleanup       func()             // closes the log rotation file on shutdown
+	savedWindowState *session.WindowState // non-nil when a persisted window state was loaded at launch
+
+	// Service instances for delegated business logic.
+	migrationSvc *migration.Service
+	snowparkSvc  *snowpark.Service
 
 	// Per-tab isolated Snowflake sessions.
 	tabSessions sync.Map // string (tabId) → *tabSession
@@ -119,9 +128,31 @@ func (a *App) startup(ctx context.Context) {
 		}
 	}
 	a.logCleanup = logger.Init()
-	telemetry.Init(Version)
+	telemetry.Init(version.Version)
 	logger.L.Info("application started")
 	telemetry.Track(telemetry.EventAppStarted, nil)
+
+	// Initialize delegated service instances.
+	a.migrationSvc = migration.NewService(func(eventName string, data interface{}) {
+		wailsruntime.EventsEmit(ctx, eventName, data)
+	})
+	a.snowparkSvc = snowpark.NewService(ctx, func(tabId, role, wh, db, schema string) {
+		if val, ok := a.tabSessions.Load(tabId); ok {
+			ts := val.(*tabSession)
+			if role != "" {
+				_ = ts.client.UseRole(ctx, role)
+			}
+			if wh != "" {
+				_ = ts.client.UseWarehouse(ctx, wh)
+			}
+			if db != "" {
+				_ = ts.client.UseDatabase(ctx, db)
+			}
+			if schema != "" {
+				_ = ts.client.UseSchema(ctx, schema)
+			}
+		}
+	})
 
 	// Open the function-metadata SQLite cache and seed it from the embedded
 	// fallback JSON so autocomplete works immediately, even offline.
@@ -169,7 +200,7 @@ func (a *App) getOrInitTabSession(tabId string) (*tabSession, error) {
 		return val.(*tabSession), nil
 	}
 	if a.connectParams == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	client, err := snowflake.NewClient(a.ctx, *a.connectParams)
 	if err != nil {
@@ -213,7 +244,7 @@ func (a *App) shutdown(_ context.Context) {
 	w, h := wailsruntime.WindowGetSize(a.ctx)
 	x, y := wailsruntime.WindowGetPosition(a.ctx)
 	m := wailsruntime.WindowIsMaximised(a.ctx)
-	_ = saveWindowState(WindowState{X: x, Y: y, Width: w, Height: h, Maximized: m})
+	_ = session.SaveWindowState(session.WindowState{X: x, Y: y, Width: w, Height: h, Maximized: m})
 
 	// Stop any running terminal process cleanly before the app exits.
 	a.StopShell() //nolint:errcheck
@@ -355,7 +386,7 @@ type TableSummary struct {
 // specified database.
 func (a *App) GetDatabaseTableSummary(dbName string) ([]TableSummary, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 
 	qdb := snowflake.QuoteIdent(dbName)
@@ -655,7 +686,7 @@ type AccountExportResult struct {
 // GetRoleDDL returns the DDL definition of a Snowflake role.
 func (a *App) GetRoleDDL(name string) (string, error) {
 	if a.client == nil {
-		return "", ErrNotConnected
+		return "", apperrors.ErrNotConnected
 	}
 	return a.client.GetRoleDDL(a.ctx, name)
 }
@@ -663,7 +694,7 @@ func (a *App) GetRoleDDL(name string) (string, error) {
 // GetWarehouseDDL returns the DDL definition of a Snowflake warehouse.
 func (a *App) GetWarehouseDDL(name string) (string, error) {
 	if a.client == nil {
-		return "", ErrNotConnected
+		return "", apperrors.ErrNotConnected
 	}
 	return a.client.GetWarehouseDDL(a.ctx, name)
 }
@@ -672,7 +703,7 @@ func (a *App) GetWarehouseDDL(name string) (string, error) {
 // under <outputDir>/_account/roles/ and <outputDir>/_account/warehouses/.
 func (a *App) ExportAccountObjectsDDL(outputDir string) (AccountExportResult, error) {
 	if a.client == nil {
-		return AccountExportResult{}, ErrNotConnected
+		return AccountExportResult{}, apperrors.ErrNotConnected
 	}
 
 	var result AccountExportResult
@@ -953,7 +984,7 @@ func (a *App) IsConnected() bool {
 // flow use StartQuery + WaitForQueryResult to surface the query ID early.
 func (a *App) ExecuteQuery(sql string) (*snowflake.QueryResult, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	qidChan := make(chan string, 1)
 	ctx := sf.WithQueryIDChan(a.ctx, qidChan)
@@ -976,7 +1007,7 @@ func (a *App) ExecuteQuery(sql string) (*snowflake.QueryResult, error) {
 // objects rather than raw strings.
 func (a *App) GetQueryOperatorStats(queryID string) ([]queryprofile.OperatorStat, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return queryprofile.GetOperatorStats(a.ctx, a.client, queryID)
 }
@@ -992,7 +1023,7 @@ func (a *App) RunExplain(tabId string, sql string) (*queryprofile.ExplainResult,
 		}
 	}
 	if client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 
 	// Use a single pinned connection for the entire explain operation.
@@ -1279,7 +1310,7 @@ func (a *App) GetSessionContext(tabId string) (snowflake.SessionContext, error) 
 		if a.client != nil {
 			return a.client.GetSessionContext(a.ctx)
 		}
-		return snowflake.SessionContext{}, ErrNotConnected
+		return snowflake.SessionContext{}, apperrors.ErrNotConnected
 	}
 	ts, err := a.getOrInitTabSession(tabId)
 	if err != nil {
@@ -1294,7 +1325,7 @@ func (a *App) GetSessionContext(tabId string) (snowflake.SessionContext, error) 
 // case). The frontend uses this to warn users when creating objects.
 func (a *App) GetQuotedIdentifiersIgnoreCase() (bool, error) {
 	if a.client == nil {
-		return false, ErrNotConnected
+		return false, apperrors.ErrNotConnected
 	}
 	return a.client.GetQuotedIdentifiersIgnoreCase(a.ctx)
 }
@@ -1313,7 +1344,7 @@ func (a *App) GetReservedKeywords() []string {
 // Used for informational displays and user-management role pickers.
 func (a *App) ListRoles() ([]string, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.ListRoles(a.ctx)
 }
@@ -1322,7 +1353,7 @@ func (a *App) ListRoles() ([]string, error) {
 // (CURRENT_AVAILABLE_ROLES). Used for the role-selection toolbar dropdown.
 func (a *App) ListAvailableRoles() ([]string, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.ListAvailableRoles(a.ctx)
 }
@@ -1330,7 +1361,7 @@ func (a *App) ListAvailableRoles() ([]string, error) {
 // ListWarehouses returns all warehouses visible to the current role.
 func (a *App) ListWarehouses() ([]string, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.ListWarehouses(a.ctx)
 }
@@ -1338,7 +1369,7 @@ func (a *App) ListWarehouses() ([]string, error) {
 // ListSecurityIntegrations returns all security integrations.
 func (a *App) ListSecurityIntegrations() ([]snowflake.SecurityIntegration, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.ListSecurityIntegrations(a.ctx)
 }
@@ -1356,7 +1387,7 @@ func (a *App) BuildModifySecretSql(database, schema, name string, cfg secret.Sec
 // ListApiIntegrations returns all API integrations visible to the current role.
 func (a *App) ListApiIntegrations() ([]snowflake.ApiIntegration, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.ListApiIntegrations(a.ctx)
 }
@@ -1364,7 +1395,7 @@ func (a *App) ListApiIntegrations() ([]snowflake.ApiIntegration, error) {
 // ListSecretsInAccount returns all secrets visible to the current role across the account.
 func (a *App) ListSecretsInAccount() ([]snowflake.AccountSecret, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.ListSecretsInAccount(a.ctx)
 }
@@ -1404,7 +1435,7 @@ func (a *App) BuildAlterStageSql(cfg stage.AlterStageConfig) string {
 // ListStageFiles returns the list of files on a Snowflake stage.
 func (a *App) ListStageFiles(stageName string, pattern string) ([]stage.StageFile, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return stage.ListStageFiles(a.ctx, a.client, stageName, pattern)
 }
@@ -1412,7 +1443,7 @@ func (a *App) ListStageFiles(stageName string, pattern string) ([]stage.StageFil
 // UploadFileToStage executes a PUT command to upload a local file to an internal stage.
 func (a *App) UploadFileToStage(localPath string, stageName string, parallel int, autoCompress bool, sourceCompression string, overwrite bool) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 
 	flags := loadUserFeatureFlags()
@@ -1426,7 +1457,7 @@ func (a *App) UploadFileToStage(localPath string, stageName string, parallel int
 // DownloadFileFromStage executes a GET command to download files from an internal stage to a local directory.
 func (a *App) DownloadFileFromStage(stageName string, localDirPath string, parallel int, pattern string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 
 	flags := loadUserFeatureFlags()
@@ -1440,7 +1471,7 @@ func (a *App) DownloadFileFromStage(stageName string, localDirPath string, paral
 // RemoveStageFiles deletes files from a stage using the REMOVE command.
 func (a *App) RemoveStageFiles(stageName string, pattern string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 
 	flags := loadUserFeatureFlags()
@@ -1471,7 +1502,7 @@ func (a *App) GetLocalFilePreview(path string, cfg fileformat.FileFormatConfig) 
 // qualified stage reference, e.g. "@DB.SCHEMA.STAGE/path/to/file.csv".
 func (a *App) GetStageFilePreview(stagePath string, cfg fileformat.FileFormatConfig) (fileformat.PreviewResult, error) {
 	if a.client == nil {
-		return fileformat.PreviewResult{}, ErrNotConnected
+		return fileformat.PreviewResult{}, apperrors.ErrNotConnected
 	}
 
 	// Snowflake SELECT queries ignore PARSE_HEADER=TRUE for naming columns (it skips the row but leaves columns as $1, $2).
@@ -1570,7 +1601,7 @@ func (a *App) PickFileForFormatPreview() string {
 // inside the clause; this method only double-quotes the pipe identifier.
 func (a *App) AlterPipe(database, schema, name, clause string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("ALTER PIPE %s.%s.%s %s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
 	_, err := a.client.Execute(a.ctx, sql)
@@ -1583,7 +1614,7 @@ func (a *App) AlterPipe(database, schema, name, clause string) error {
 // paused via ALTER PIPE SET PIPE_EXECUTION_PAUSED = TRUE.
 func (a *App) GetPipeStatus(database, schema, name string) (string, error) {
 	if a.client == nil {
-		return "", ErrNotConnected
+		return "", apperrors.ErrNotConnected
 	}
 	// Build the FQN with double-quoted parts, then escape any embedded single
 	// quotes so the whole string is safe inside the outer SQL string literal.
@@ -1605,7 +1636,7 @@ func (a *App) GetPipeStatus(database, schema, name string) (string, error) {
 // fileName is an optional file name substring filter; if empty, all files are returned.
 func (a *App) GetPipeCopyHistory(database, schema, name, startTime, status, fileName string) (*snowflake.QueryResult, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	// Fetch the pipe DDL to resolve the COPY INTO target table name, which is
 	// required by the copy_history table function.
@@ -1665,7 +1696,7 @@ func (a *App) GetPipeCopyHistory(database, schema, name, startTime, status, file
 // maxConcurrencyLevel, statementQueuedTimeout, statementTimeout.
 func (a *App) AlterWarehouseProperty(name, property, value string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	wh := snowflake.QuoteIdent(name)
 
@@ -1786,7 +1817,7 @@ func (a *App) AlterWarehouseProperty(name, property, value string) error {
 // AlterWarehouseSuspend suspends the named warehouse.
 func (a *App) AlterWarehouseSuspend(name string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	_, err := a.client.Execute(a.ctx, fmt.Sprintf("ALTER WAREHOUSE %s SUSPEND", snowflake.QuoteIdent(name)))
 	return err
@@ -1795,7 +1826,7 @@ func (a *App) AlterWarehouseSuspend(name string) error {
 // AlterWarehouseResume resumes the named warehouse if it is suspended.
 func (a *App) AlterWarehouseResume(name string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	_, err := a.client.Execute(a.ctx, fmt.Sprintf("ALTER WAREHOUSE %s RESUME IF SUSPENDED", snowflake.QuoteIdent(name)))
 	return err
@@ -1804,7 +1835,7 @@ func (a *App) AlterWarehouseResume(name string) error {
 // AlterWarehouseAbortAllQueries issues ABORT ALL QUERIES on the named warehouse.
 func (a *App) AlterWarehouseAbortAllQueries(name string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	_, err := a.client.Execute(a.ctx, fmt.Sprintf("ALTER WAREHOUSE %s ABORT ALL QUERIES", snowflake.QuoteIdent(name)))
 	return err
@@ -1813,7 +1844,7 @@ func (a *App) AlterWarehouseAbortAllQueries(name string) error {
 // AlterWarehouseRename renames a warehouse and returns the new name.
 func (a *App) AlterWarehouseRename(name, newName string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	_, err := a.client.Execute(a.ctx, fmt.Sprintf("ALTER WAREHOUSE %s RENAME TO %s", snowflake.QuoteIdent(name), snowflake.QuoteIdent(newName)))
 	return err
@@ -1824,7 +1855,7 @@ func (a *App) AlterWarehouseRename(name, newName string) error {
 // SHOW PARAMETERS IN WAREHOUSE. The returned map key is the parameter name.
 func (a *App) GetWarehouseParameters(name string) ([]PropertyPair, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	qr, err := a.client.Execute(a.ctx, fmt.Sprintf("SHOW PARAMETERS IN WAREHOUSE %s", snowflake.QuoteIdent(name)))
 	if err != nil {
@@ -1866,7 +1897,7 @@ func (a *App) GetWarehouseParameters(name string) ([]PropertyPair, error) {
 // Returns an error if the role lacks the required privilege.
 func (a *App) ListUsers() ([]snowflake.SnowflakeUser, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.ListUsers(a.ctx)
 }
@@ -1874,7 +1905,7 @@ func (a *App) ListUsers() ([]snowflake.SnowflakeUser, error) {
 // GetUserDDL returns a CREATE USER DDL statement for the given user.
 func (a *App) GetUserDDL(name string) (string, error) {
 	if a.client == nil {
-		return "", ErrNotConnected
+		return "", apperrors.ErrNotConnected
 	}
 	return a.client.GetUserDDL(a.ctx, name)
 }
@@ -1882,7 +1913,7 @@ func (a *App) GetUserDDL(name string) (string, error) {
 // CanManageUsers returns true when the current role can alter or drop users.
 func (a *App) CanManageUsers() (bool, error) {
 	if a.client == nil {
-		return false, ErrNotConnected
+		return false, apperrors.ErrNotConnected
 	}
 	return a.client.CanManageUsers(a.ctx)
 }
@@ -1890,7 +1921,7 @@ func (a *App) CanManageUsers() (bool, error) {
 // CanCreateUsers returns true when the current role can create users.
 func (a *App) CanCreateUsers() (bool, error) {
 	if a.client == nil {
-		return false, ErrNotConnected
+		return false, apperrors.ErrNotConnected
 	}
 	return a.client.CanCreateUsers(a.ctx)
 }
@@ -1900,7 +1931,7 @@ func (a *App) CanCreateUsers() (bool, error) {
 // named user.
 func (a *App) CanModifyUserAuth(username string) (bool, error) {
 	if a.client == nil {
-		return false, ErrNotConnected
+		return false, apperrors.ErrNotConnected
 	}
 	return a.client.CanModifyUserAuth(a.ctx, username)
 }
@@ -2080,7 +2111,7 @@ func stripPEMContent(pemStr string) string {
 // SetUserPublicKey applies an RSA public key to a Snowflake user.
 func (a *App) SetUserPublicKey(username, publicKey string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	esc := strings.ReplaceAll(username, `"`, `""`)
 	sq := strings.ReplaceAll(publicKey, "'", "''")
@@ -2091,7 +2122,7 @@ func (a *App) SetUserPublicKey(username, publicKey string) error {
 // ListNotificationIntegrations returns the names of all notification integrations.
 func (a *App) ListNotificationIntegrations() ([]string, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.ListNotificationIntegrations(a.ctx)
 }
@@ -2099,7 +2130,7 @@ func (a *App) ListNotificationIntegrations() ([]string, error) {
 // ListExternalVolumes returns the names of all external volumes visible to the current role.
 func (a *App) ListExternalVolumes() ([]string, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.ListExternalVolumes(a.ctx)
 }
@@ -2108,7 +2139,7 @@ func (a *App) ListExternalVolumes() ([]string, error) {
 // kind may be "STORAGE", "API", "CATALOG", "EXTERNAL ACCESS", "NOTIFICATION", or "SECURITY".
 func (a *App) ListIntegrations(kind string) ([]snowflake.IntegrationRow, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.ListIntegrations(a.ctx, kind)
 }
@@ -2117,7 +2148,7 @@ func (a *App) ListIntegrations(kind string) ([]snowflake.IntegrationRow, error) 
 // and returns the result as key/value pairs.
 func (a *App) GetIntegrationProperties(name string) ([]PropertyPair, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	esc := strings.ReplaceAll(name, `"`, `""`)
 	res, err := a.client.Execute(a.ctx, fmt.Sprintf(`DESCRIBE INTEGRATION "%s"`, esc))
@@ -2161,7 +2192,7 @@ func (a *App) GetIntegrationProperties(name string) ([]PropertyPair, error) {
 // DropIntegration drops the named integration.
 func (a *App) DropIntegration(name string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	return a.client.DropIntegration(a.ctx, name)
 }
@@ -2169,7 +2200,7 @@ func (a *App) DropIntegration(name string) error {
 // DropDatabase drops a database. mode must be "CASCADE" or "RESTRICT".
 func (a *App) DropDatabase(name string, mode string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	return a.client.DropDatabase(a.ctx, name, mode)
 }
@@ -2177,7 +2208,7 @@ func (a *App) DropDatabase(name string, mode string) error {
 // DropSchema drops a schema. mode must be "CASCADE" or "RESTRICT".
 func (a *App) DropSchema(database, schema string, mode string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	return a.client.DropSchema(a.ctx, database, schema, mode)
 }
@@ -2193,7 +2224,7 @@ func (a *App) CanCreateIntegration(tabId string) (bool, error) {
 		}
 	}
 	if a.client == nil {
-		return false, ErrNotConnected
+		return false, apperrors.ErrNotConnected
 	}
 	return a.client.CanCreateIntegration(a.ctx)
 }
@@ -2203,7 +2234,7 @@ func (a *App) CanCreateIntegration(tabId string) (bool, error) {
 // CreateStorageIntegration builds and executes a CREATE STORAGE INTEGRATION DDL.
 func (a *App) CreateStorageIntegration(params integrations.StorageIntegrationParams) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	sql, err := integrations.BuildStorageIntegrationSQL(params)
 	if err != nil {
@@ -2215,7 +2246,7 @@ func (a *App) CreateStorageIntegration(params integrations.StorageIntegrationPar
 // CreateApiIntegration builds and executes a CREATE API INTEGRATION DDL.
 func (a *App) CreateApiIntegration(params integrations.ApiIntegrationParams) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	sql, err := integrations.BuildApiIntegrationSQL(params)
 	if err != nil {
@@ -2227,7 +2258,7 @@ func (a *App) CreateApiIntegration(params integrations.ApiIntegrationParams) err
 // CreateCatalogIntegration builds and executes a CREATE CATALOG INTEGRATION DDL.
 func (a *App) CreateCatalogIntegration(params integrations.CatalogIntegrationParams) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	sql, err := integrations.BuildCatalogIntegrationSQL(params)
 	if err != nil {
@@ -2239,7 +2270,7 @@ func (a *App) CreateCatalogIntegration(params integrations.CatalogIntegrationPar
 // CreateExternalAccessIntegration builds and executes a CREATE EXTERNAL ACCESS INTEGRATION DDL.
 func (a *App) CreateExternalAccessIntegration(params integrations.ExternalAccessIntegrationParams) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	sql, err := integrations.BuildExternalAccessIntegrationSQL(params)
 	if err != nil {
@@ -2251,7 +2282,7 @@ func (a *App) CreateExternalAccessIntegration(params integrations.ExternalAccess
 // CreateNotificationIntegration builds and executes a CREATE NOTIFICATION INTEGRATION DDL.
 func (a *App) CreateNotificationIntegration(params integrations.NotificationIntegrationParams) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	sql, err := integrations.BuildNotificationIntegrationSQL(params)
 	if err != nil {
@@ -2263,7 +2294,7 @@ func (a *App) CreateNotificationIntegration(params integrations.NotificationInte
 // CreateSecurityIntegration builds and executes a CREATE SECURITY INTEGRATION DDL.
 func (a *App) CreateSecurityIntegration(params integrations.SecurityIntegrationParams) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	sql, err := integrations.BuildSecurityIntegrationSQL(params)
 	if err != nil {
@@ -2319,7 +2350,7 @@ func (a *App) UseSchema(tabId string, schema string) error {
 // "AWS_US_EAST_1", "AZURE_EASTUS2", or "GCP_US_CENTRAL1".
 func (a *App) GetCurrentRegion() (string, error) {
 	if a.client == nil {
-		return "", ErrNotConnected
+		return "", apperrors.ErrNotConnected
 	}
 	qr, err := a.client.Execute(a.ctx, `SELECT CURRENT_REGION()`)
 	if err != nil {
@@ -2336,7 +2367,7 @@ func (a *App) GetCurrentRegion() (string, error) {
 // CURRENT_ORGANIZATION_NAME() and CURRENT_ACCOUNT_NAME().
 func (a *App) GetSnowsightURL() (string, error) {
 	if a.client == nil {
-		return "", ErrNotConnected
+		return "", apperrors.ErrNotConnected
 	}
 	qr, err := a.client.Execute(a.ctx, `SELECT 'https://' || LOWER(CURRENT_ORGANIZATION_NAME()) || '-' || LOWER(CURRENT_ACCOUNT_NAME()) || '.snowflakecomputing.com'`)
 	if err != nil {
@@ -2352,7 +2383,7 @@ func (a *App) GetSnowsightURL() (string, error) {
 // the canonical Snowflake username exactly as stored (preserving case).
 func (a *App) GetCurrentUser() (string, error) {
 	if a.client == nil {
-		return "", ErrNotConnected
+		return "", apperrors.ErrNotConnected
 	}
 	qr, err := a.client.Execute(a.ctx, `SELECT CURRENT_USER()`)
 	if err != nil {
@@ -2367,7 +2398,7 @@ func (a *App) GetCurrentUser() (string, error) {
 // ListDatabases returns all databases visible to the current role.
 func (a *App) ListDatabases() ([]string, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.ListDatabases(a.ctx)
 }
@@ -2375,7 +2406,7 @@ func (a *App) ListDatabases() ([]string, error) {
 // ListSchemas returns all schemas in the given database.
 func (a *App) ListSchemas(database string) ([]string, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.ListSchemas(a.ctx, database)
 }
@@ -2383,7 +2414,7 @@ func (a *App) ListSchemas(database string) ([]string, error) {
 // ListFileFormats returns all file formats in the given schema.
 func (a *App) ListFileFormats(database, schema string) ([]string, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.ListFileFormats(a.ctx, database, schema)
 }
@@ -2391,7 +2422,7 @@ func (a *App) ListFileFormats(database, schema string) ([]string, error) {
 // ListObjects returns tables, views, etc. inside a schema.
 func (a *App) ListObjects(database, schema string) ([]snowflake.SnowflakeObject, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.ListObjects(a.ctx, database, schema)
 }
@@ -2400,7 +2431,7 @@ func (a *App) ListObjects(database, schema string) ([]snowflake.SnowflakeObject,
 // for the given database. Returns 1 if the value cannot be determined.
 func (a *App) GetDatabaseRetentionDays(dbName string) (int, error) {
 	if a.client == nil {
-		return 0, ErrNotConnected
+		return 0, apperrors.ErrNotConnected
 	}
 	return a.client.GetDatabaseRetentionDays(a.ctx, dbName)
 }
@@ -2409,7 +2440,7 @@ func (a *App) GetDatabaseRetentionDays(dbName string) (int, error) {
 // for the given schema. Returns 1 if the value cannot be determined.
 func (a *App) GetSchemaRetentionDays(database, schema string) (int, error) {
 	if a.client == nil {
-		return 0, ErrNotConnected
+		return 0, apperrors.ErrNotConnected
 	}
 	return a.client.GetSchemaRetentionDays(a.ctx, database, schema)
 }
@@ -2418,7 +2449,7 @@ func (a *App) GetSchemaRetentionDays(database, schema string) (int, error) {
 // for the given table. Returns 1 if the value cannot be determined.
 func (a *App) GetTableRetentionDays(database, schema, name string) (int, error) {
 	if a.client == nil {
-		return 0, ErrNotConnected
+		return 0, apperrors.ErrNotConnected
 	}
 	return a.client.GetTableRetentionDays(a.ctx, database, schema, name)
 }
@@ -2427,7 +2458,7 @@ func (a *App) GetTableRetentionDays(database, schema, name string) (int, error) 
 // retention window and can be recovered with UNDROP TABLE.
 func (a *App) ListDroppedTables(database, schema string) ([]snowflake.DroppedTable, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.ListDroppedTables(a.ctx, database, schema)
 }
@@ -2436,7 +2467,7 @@ func (a *App) ListDroppedTables(database, schema string) ([]snowflake.DroppedTab
 // Travel retention window and can be recovered with UNDROP SCHEMA.
 func (a *App) ListDroppedSchemas(database string) ([]snowflake.DroppedTable, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.ListDroppedSchemas(a.ctx, database)
 }
@@ -2445,7 +2476,7 @@ func (a *App) ListDroppedSchemas(database string) ([]snowflake.DroppedTable, err
 // retention window and can be recovered with UNDROP DATABASE.
 func (a *App) ListDroppedDatabases() ([]snowflake.DroppedTable, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.ListDroppedDatabases(a.ctx)
 }
@@ -2454,7 +2485,7 @@ func (a *App) ListDroppedDatabases() ([]snowflake.DroppedTable, error) {
 // parameter list with real parameter names parsed from the DDL.
 func (a *App) GetProcedureParams(database, schema, name, argTypes string) ([]snowflake.ProcParam, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.GetProcedureParams(a.ctx, database, schema, name, argTypes)
 }
@@ -2462,7 +2493,7 @@ func (a *App) GetProcedureParams(database, schema, name, argTypes string) ([]sno
 // GetTableColumns returns the ordered column names for a table or view.
 func (a *App) GetTableColumns(database, schema, name string) ([]string, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.GetTableColumns(a.ctx, database, schema, name)
 }
@@ -2471,7 +2502,7 @@ func (a *App) GetTableColumns(database, schema, name string) ([]string, error) {
 // referencing side. Used by the editor's JOIN ON autocomplete.
 func (a *App) GetTableForeignKeys(database, schema, table string) ([]snowflake.TableForeignKey, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.GetTableForeignKeys(a.ctx, database, schema, table)
 }
@@ -2481,7 +2512,7 @@ func (a *App) GetTableForeignKeys(database, schema, table string) ([]snowflake.T
 // same-name column suggestions.
 func (a *App) GetTableColumnsWithTypes(database, schema, name string) ([]snowflake.ColumnInfo, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.GetTableColumnsWithTypes(a.ctx, database, schema, name)
 }
@@ -2491,7 +2522,7 @@ func (a *App) GetTableColumnsWithTypes(database, schema, name string) ([]snowfla
 // Pass an empty dirPath to list the root.
 func (a *App) ListGitRepoEntries(database, schema, repoName, dirPath string) ([]snowflake.GitRepoEntry, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 
 	// If we are listing the root of the "commits" virtual folder,
@@ -2520,7 +2551,7 @@ func (a *App) ListGitRepoEntries(database, schema, repoName, dirPath string) ([]
 // ListGitBranches returns all branches in the given git repository.
 func (a *App) ListGitBranches(database, schema, repoName string) ([]snowflake.GitBranch, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.ListGitBranches(a.ctx, database, schema, repoName)
 }
@@ -2528,7 +2559,7 @@ func (a *App) ListGitBranches(database, schema, repoName string) ([]snowflake.Gi
 // ListGitTags returns all tags in the given git repository.
 func (a *App) ListGitTags(database, schema, repoName string) ([]snowflake.GitTag, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.ListGitTags(a.ctx, database, schema, repoName)
 }
@@ -2556,7 +2587,7 @@ func (a *App) GetGitCommitFilter(database, schema, repoName string) string {
 // GetGitFileContent reads a file from a git repository and returns its content.
 func (a *App) GetGitFileContent(database, schema, repoName, filePath string) (string, error) {
 	if a.client == nil {
-		return "", ErrNotConnected
+		return "", apperrors.ErrNotConnected
 	}
 	return a.client.GetGitFileContent(a.ctx, database, schema, repoName, filePath)
 }
@@ -2564,7 +2595,7 @@ func (a *App) GetGitFileContent(database, schema, repoName, filePath string) (st
 // ExecuteGitFile executes a SQL file from a git repository.
 func (a *App) ExecuteGitFile(database, schema, repoName, filePath string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	return a.client.ExecuteGitFile(a.ctx, database, schema, repoName, filePath)
 }
@@ -2574,7 +2605,7 @@ func (a *App) ExecuteGitFile(database, schema, repoName, filePath string) error 
 // JOIN ON autocomplete instead of issuing per-table SHOW IMPORTED KEYS calls.
 func (a *App) GetSchemaForeignKeys(database, schema string) ([]snowflake.TableForeignKey, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.GetSchemaForeignKeys(a.ctx, database, schema)
 }
@@ -2704,7 +2735,7 @@ func (a *App) GetSnowflakeKeywords() []string {
 // parameter list together with a flag indicating whether it is a table function.
 func (a *App) GetFunctionInfo(database, schema, name, argTypes string) (*snowflake.FunctionInfo, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.GetFunctionInfo(a.ctx, database, schema, name, argTypes)
 }
@@ -2717,7 +2748,7 @@ func (a *App) GetFunctionInfo(database, schema, name, argTypes string) (*snowfla
 // Pass an empty string for all other object kinds.
 func (a *App) GetObjectDDL(database, schema, kind, name, arguments string) (string, error) {
 	if a.client == nil {
-		return "", ErrNotConnected
+		return "", apperrors.ErrNotConnected
 	}
 	return a.client.GetObjectDDL(a.ctx, database, schema, kind, name, arguments)
 }
@@ -2729,7 +2760,7 @@ func (a *App) GetObjectDDL(database, schema, kind, name, arguments string) (stri
 // (e.g. "NUMBER, VARCHAR") or an empty string for views.
 func (a *App) GetObjectDependencies(database, schema, kind, name, arguments string) (snowflake.DependencyNode, error) {
 	if a.client == nil {
-		return snowflake.DependencyNode{}, ErrNotConnected
+		return snowflake.DependencyNode{}, apperrors.ErrNotConnected
 	}
 	return a.client.GetObjectDependencies(a.ctx, database, schema, kind, name, arguments)
 }
@@ -2777,7 +2808,7 @@ func (a *App) resToPairs(res *snowflake.QueryResult) []PropertyPair {
 // STAGE, STREAM, TASK, FILE FORMAT, PIPE, WAREHOUSE, ROLE, USER.
 func (a *App) GetObjectProperties(database, schema, kind, name string) ([]PropertyPair, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 
 	like := strings.ReplaceAll(name, `\`, `\\`)
@@ -2954,7 +2985,7 @@ func colIdx(cols []string, names ...string) int {
 // GetSessionParameters returns the current session parameters from SHOW PARAMETERS IN SESSION.
 func (a *App) GetSessionParameters() ([]SessionParam, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	res, err := a.client.Execute(a.ctx, "SHOW PARAMETERS IN SESSION")
 	if err != nil {
@@ -3009,7 +3040,7 @@ func (a *App) GetSessionParameters() ([]SessionParam, error) {
 // GetSessionVariables returns the current session variables from SHOW VARIABLES.
 func (a *App) GetSessionVariables() ([]SessionVar, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	res, err := a.client.Execute(a.ctx, "SHOW VARIABLES")
 	if err != nil {
@@ -3071,7 +3102,7 @@ func quoteIfString(value, paramType string) string {
 // SetSessionParameter applies ALTER SESSION SET key = value for the given parameter.
 func (a *App) SetSessionParameter(name, value, paramType string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	valExpr := quoteIfString(value, paramType)
 	_, err := a.client.Execute(a.ctx, "ALTER SESSION SET "+name+" = "+valExpr)
@@ -3081,7 +3112,7 @@ func (a *App) SetSessionParameter(name, value, paramType string) error {
 // SetSessionVariable applies SET name = value for the given session variable.
 func (a *App) SetSessionVariable(name, value, varType string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	valExpr := quoteIfString(value, varType)
 	_, err := a.client.Execute(a.ctx, "SET "+name+" = "+valExpr)
@@ -3098,7 +3129,7 @@ type ColumnComment struct {
 // by ordinal position.
 func (a *App) GetColumnComments(database, schema, table string) ([]ColumnComment, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	query := fmt.Sprintf(
 		`SELECT COLUMN_NAME, COALESCE(COMMENT, '') AS COMMENT`+
@@ -3128,7 +3159,7 @@ func (a *App) GetColumnComments(database, schema, table string) ([]ColumnComment
 // SetColumnComment sets (or clears) the COMMENT on a single table column.
 func (a *App) SetColumnComment(database, schema, table, column, comment string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	query := fmt.Sprintf("ALTER TABLE %s.%s.%s MODIFY COLUMN %s COMMENT '%s'",
 		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(table),
@@ -3154,7 +3185,7 @@ type TableSettings struct {
 // by running SHOW TABLES and (for collation) SHOW PARAMETERS.
 func (a *App) GetTableSettings(database, schema, table string) (TableSettings, error) {
 	if a.client == nil {
-		return TableSettings{}, ErrNotConnected
+		return TableSettings{}, apperrors.ErrNotConnected
 	}
 	res, err := a.client.Execute(a.ctx, fmt.Sprintf(
 		"SHOW TABLES LIKE '%s' IN SCHEMA %s.%s",
@@ -3235,7 +3266,7 @@ func (a *App) GetTableSettings(database, schema, table string) (TableSettings, e
 // maxDataExtensionDays, changeTracking, defaultDDLCollation, comment.
 func (a *App) AlterTableProperty(database, schema, table, property, value string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	tbl := snowflake.QuoteIdent(database) + "." + snowflake.QuoteIdent(schema) + "." + snowflake.QuoteIdent(table)
 
@@ -3272,7 +3303,7 @@ func (a *App) AlterTableProperty(database, schema, table, property, value string
 // download completes or on error.
 func (a *App) ExportTableData(params snowflake.ExportTableParams) (snowflake.ExportTableResult, error) {
 	if a.client == nil {
-		return snowflake.ExportTableResult{}, ErrNotConnected
+		return snowflake.ExportTableResult{}, apperrors.ErrNotConnected
 	}
 	return a.client.ExportTableData(a.ctx, params)
 }
@@ -3282,7 +3313,7 @@ func (a *App) ExportTableData(params snowflake.ExportTableParams) (snowflake.Exp
 // or on error.
 func (a *App) ImportTableData(params snowflake.ImportTableParams) (snowflake.ImportTableResult, error) {
 	if a.client == nil {
-		return snowflake.ImportTableResult{}, ErrNotConnected
+		return snowflake.ImportTableResult{}, apperrors.ErrNotConnected
 	}
 	return a.client.ImportTableData(a.ctx, params)
 }
@@ -3293,7 +3324,7 @@ func (a *App) ImportTableData(params snowflake.ImportTableParams) (snowflake.Imp
 // through the editor's query pipeline.
 func (a *App) ExecDDL(sql string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	_, err := a.client.Execute(a.ctx, sql)
 	return err
@@ -3306,7 +3337,7 @@ func (a *App) ExecDDL(sql string) error {
 // inside the clause; this method only double-quotes the task identifier.
 func (a *App) AlterTask(database, schema, name, clause string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("ALTER TASK IF EXISTS %s.%s.%s %s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
 	_, err := a.client.Execute(a.ctx, sql)
@@ -3317,7 +3348,7 @@ func (a *App) AlterTask(database, schema, name, clause string) error {
 // clause is everything that follows the stage name in the ALTER statement.
 func (a *App) AlterStage(database, schema, name, clause string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("ALTER STAGE IF EXISTS %s.%s.%s %s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name), clause)
 	_, err := a.client.Execute(a.ctx, sql)
@@ -3327,7 +3358,7 @@ func (a *App) AlterStage(database, schema, name, clause string) error {
 // ListFinalizableTasks returns every task in the schema along with an eligibility verdict.
 func (a *App) ListFinalizableTasks(database, schema string) ([]tasks.FinalizabilityRow, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return tasks.ListFinalizableTasks(a.ctx, a.client, database, schema)
 }
@@ -3337,7 +3368,7 @@ func (a *App) ListFinalizableTasks(database, schema string) ([]tasks.Finalizabil
 // or left unquoted when it is a valid bare identifier (Snowflake uppercases it).
 func (a *App) CloneChildTask(database, schema, oldName, newName string, caseSensitive bool, newPredecessors []string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	return tasks.CloneChildTask(a.ctx, a.client, database, schema, oldName, newName, caseSensitive, newPredecessors)
 }
@@ -3345,7 +3376,7 @@ func (a *App) CloneChildTask(database, schema, oldName, newName string, caseSens
 // GetTaskStatuses returns the current state and last-run result for every task in the given schema.
 func (a *App) GetTaskStatuses(database, schema string) (tasks.StatusesResult, error) {
 	if a.client == nil {
-		return tasks.StatusesResult{}, ErrNotConnected
+		return tasks.StatusesResult{}, apperrors.ErrNotConnected
 	}
 	return tasks.GetStatuses(a.ctx, a.client, database, schema)
 }
@@ -3362,7 +3393,7 @@ func (a *App) ListRootTasks(database, schema string) ([]tasks.FinalizabilityRow,
 // predecessor (i.e. the task has at least one dependent / child task).
 func (a *App) TaskHasChildren(database, schema, taskName string) (bool, error) {
 	if a.client == nil {
-		return false, ErrNotConnected
+		return false, apperrors.ErrNotConnected
 	}
 	return tasks.HasChildren(a.ctx, a.client, database, schema, taskName)
 }
@@ -3372,7 +3403,7 @@ func (a *App) TaskHasChildren(database, schema, taskName string) (bool, error) {
 // before their parent, which Snowflake requires when enabling a task graph.
 func (a *App) EnableTaskDependents(database, schema, taskName string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	return tasks.EnableDependents(a.ctx, a.client, database, schema, taskName)
 }
@@ -3384,7 +3415,7 @@ func (a *App) EnableTaskDependents(database, schema, taskName string) error {
 // compute the correct order without re-parsing SHOW TASKS predecessor columns.
 func (a *App) SuspendTaskList(database, schema string, names []string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	for _, name := range names {
 		if _, err := a.client.Execute(a.ctx,
@@ -3403,7 +3434,7 @@ func (a *App) SuspendTaskList(database, schema string, names []string) error {
 // compute the correct order without re-parsing SHOW TASKS predecessor columns.
 func (a *App) ResumeTaskList(database, schema string, names []string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	for _, name := range names {
 		if _, err := a.client.Execute(a.ctx,
@@ -3418,7 +3449,7 @@ func (a *App) ResumeTaskList(database, schema string, names []string) error {
 // runs) and then suspends every descendant task in the graph.
 func (a *App) SuspendTaskGraph(database, schema, taskName string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	return tasks.SuspendGraph(a.ctx, a.client, database, schema, taskName)
 }
@@ -3427,7 +3458,7 @@ func (a *App) SuspendTaskGraph(database, schema, taskName string) error {
 // Tasks are processed in post-order (leaves first, root last).
 func (a *App) DropTaskTree(database, schema, taskName string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	return tasks.DropTree(a.ctx, a.client, database, schema, taskName)
 }
@@ -3437,7 +3468,7 @@ func (a *App) DropTaskTree(database, schema, taskName string) error {
 // retryLast to true to re-execute the last failed run.
 func (a *App) ExecuteTask(database, schema, name, config string, retryLast bool) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	return a.client.ExecuteTask(a.ctx, database, schema, name, config, retryLast)
 }
@@ -3447,7 +3478,7 @@ func (a *App) ExecuteTask(database, schema, name, config string, retryLast bool)
 // literal value and is automatically single-quoted in the generated SQL.
 func (a *App) ExecuteNotebook(database, schema, name string, params []string) (string, error) {
 	if a.client == nil {
-		return "", ErrNotConnected
+		return "", apperrors.ErrNotConnected
 	}
 	return a.client.ExecuteNotebook(a.ctx, database, schema, name, params)
 }
@@ -3456,7 +3487,7 @@ func (a *App) ExecuteNotebook(database, schema, name string, params []string) (s
 // the given Snowflake Notebook, or an empty string if none is set.
 func (a *App) GetNotebookQueryWarehouse(database, schema, name string) (string, error) {
 	if a.client == nil {
-		return "", ErrNotConnected
+		return "", apperrors.ErrNotConnected
 	}
 	return a.client.GetNotebookQueryWarehouse(a.ctx, database, schema, name)
 }
@@ -3465,7 +3496,7 @@ func (a *App) GetNotebookQueryWarehouse(database, schema, name string) (string, 
 // Snowflake Notebook via ALTER NOTEBOOK … SET QUERY_WAREHOUSE.
 func (a *App) SetNotebookQueryWarehouse(database, schema, name, warehouse string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	return a.client.SetNotebookQueryWarehouse(a.ctx, database, schema, name, warehouse)
 }
@@ -3474,7 +3505,7 @@ func (a *App) SetNotebookQueryWarehouse(database, schema, name, warehouse string
 // live version via ALTER NOTEBOOK … ADD LIVE VERSION FROM LAST.
 func (a *App) MakeNotebookLive(database, schema, name string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	sql := fmt.Sprintf("ALTER NOTEBOOK %s.%s.%s ADD LIVE VERSION FROM LAST", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
 	_, err := a.client.Execute(a.ctx, sql)
@@ -3487,7 +3518,7 @@ func (a *App) MakeNotebookLive(database, schema, name string) error {
 // The temporary directory is cleaned up automatically.
 func (a *App) FetchNotebookContent(database, schema, name string) (string, error) {
 	if a.client == nil {
-		return "", ErrNotConnected
+		return "", apperrors.ErrNotConnected
 	}
 	return a.client.FetchNotebookContent(a.ctx, database, schema, name)
 }
@@ -3497,7 +3528,7 @@ func (a *App) FetchNotebookContent(database, schema, name string) (string, error
 // automatically after the notebook is created (or on error).
 func (a *App) DeployNotebook(params snowflake.DeployNotebookParams) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	return a.client.DeployNotebook(a.ctx, params)
 }
@@ -3507,7 +3538,7 @@ func (a *App) DeployNotebook(params snowflake.DeployNotebookParams) error {
 // Relationship Diagram on the frontend.
 func (a *App) GetERDiagramData(database string) (snowflake.ERDiagramData, error) {
 	if a.client == nil {
-		return snowflake.ERDiagramData{}, ErrNotConnected
+		return snowflake.ERDiagramData{}, apperrors.ErrNotConnected
 	}
 	return a.client.GetERDiagramData(a.ctx, database)
 }
@@ -3532,7 +3563,7 @@ type DDLProgressPayload struct {
 // can update a progress indicator in real time.
 func (a *App) ExportDatabaseDDL(database, outputDir string) (ddl.ExportResult, error) {
 	if a.client == nil {
-		return ddl.ExportResult{}, ErrNotConnected
+		return ddl.ExportResult{}, apperrors.ErrNotConnected
 	}
 
 	ctx, cancel := context.WithCancel(a.ctx)
@@ -3573,7 +3604,7 @@ func (a *App) ExportDatabaseDDL(database, outputDir string) (ddl.ExportResult, e
 // populate the database-selection checkboxes in the Export DDL panel.
 func (a *App) ListExportableDatabases() ([]string, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.ListExportableDatabases(a.ctx)
 }
@@ -3586,7 +3617,7 @@ func (a *App) ListExportableDatabases() ([]string, error) {
 // allowing the frontend to show a live progress bar.
 func (a *App) ExportAllDatabasesDDL(outputDir string, databases []string) ([]ddl.ExportResult, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 
 	if len(databases) == 0 {
@@ -3900,7 +3931,7 @@ func (a *App) SendChatMessage(
 	agentMode bool,
 ) ([]ai.UIMessage, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	cfg, err := config.Load()
 	if err != nil || !cfg.AI.Enabled || cfg.AI.APIKey == "" {
@@ -4338,7 +4369,7 @@ func (a *App) StopShell() error {
 // zero-row probe query so it is fast and never touches real data.
 func (a *App) CanViewWarehouseMeteringHistory() (bool, error) {
 	if a.client == nil {
-		return false, ErrNotConnected
+		return false, apperrors.ErrNotConnected
 	}
 	_, err := a.client.QuerySingle(a.ctx,
 		"SELECT 1 FROM SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY LIMIT 0")
@@ -4354,7 +4385,7 @@ func (a *App) CanViewWarehouseMeteringHistory() (bool, error) {
 // filters; dates must be RFC3339 strings when provided.
 func (a *App) GetWarehouseMeteringHistory(warehouse, startDate, endDate string) ([]WarehouseMeteringRow, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	var conds []string
 	if warehouse != "" {
@@ -4454,7 +4485,7 @@ func (a *App) GetQueryHistory(
 	includeClientGenerated bool,
 ) ([]QueryHistoryRow, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 
 	// Choose the table function name.
@@ -4610,7 +4641,7 @@ func bsFQN(name, bsDb, bsSchema string) string {
 // It searches the entire account to find the backups, optionally filtering by the backup set's name.
 func (a *App) ListBackupSets(scopeType, db, schema, table, nameFilter string) ([]BackupSetRow, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 
 	// 1. Build the base query
@@ -4728,7 +4759,7 @@ func (a *App) ListBackupSets(scopeType, db, schema, table, nameFilter string) ([
 // exact case) or left unquoted when it is a valid bare identifier.
 func (a *App) CreateBackupSet(name, nameDb, nameSchema, forType, objectFQN, db string, orReplace, ifNotExists, caseSensitive bool) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	// Snowflake requires a current database to be set for CREATE BACKUP SET,
 	// even when the object name is fully qualified.
@@ -4772,7 +4803,7 @@ func (a *App) CreateBackupSet(name, nameDb, nameSchema, forType, objectFQN, db s
 // DropBackupSet drops the named backup set.
 func (a *App) DropBackupSet(name, bsDb, bsSchema string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	fqn := bsFQN(name, bsDb, bsSchema)
 	_, err := a.client.Execute(a.ctx, fmt.Sprintf("DROP BACKUP SET %s", fqn))
@@ -4784,7 +4815,7 @@ func (a *App) DropBackupSet(name, bsDb, bsSchema string) error {
 // "SET COMMENT = 'text'", "UNSET COMMENT", "SUSPEND BACKUP POLICY", etc.
 func (a *App) AlterBackupSet(name, bsDb, bsSchema, alteration string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	fqn := bsFQN(name, bsDb, bsSchema)
 	_, err := a.client.Execute(a.ctx, fmt.Sprintf("ALTER BACKUP SET %s %s", fqn, alteration))
@@ -4796,7 +4827,7 @@ func (a *App) AlterBackupSet(name, bsDb, bsSchema, alteration string) error {
 // ListBackupPolicies runs SHOW BACKUP POLICIES and returns all visible policies.
 func (a *App) ListBackupPolicies() ([]BackupPolicyRow, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	res, err := a.client.Execute(a.ctx, "SHOW BACKUP POLICIES")
 	if err != nil {
@@ -4873,7 +4904,7 @@ func (a *App) ListBackupPolicies() ([]BackupPolicyRow, error) {
 // case); when false the name is left unquoted if it is a valid bare identifier.
 func (a *App) CreateBackupPolicy(name, schedule string, expireAfterDays int64, retentionLock bool, comment, tags string, orReplace, ifNotExists, caseSensitive bool) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	var sb strings.Builder
 	sb.WriteString("CREATE ")
@@ -4908,7 +4939,7 @@ func (a *App) CreateBackupPolicy(name, schedule string, expireAfterDays int64, r
 // DropBackupPolicy drops the named backup policy.
 func (a *App) DropBackupPolicy(name string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	_, err := a.client.Execute(a.ctx, fmt.Sprintf("DROP BACKUP POLICY %s", snowflake.QuoteIdent(name)))
 	return err
@@ -4919,7 +4950,7 @@ func (a *App) DropBackupPolicy(name string) error {
 // "SET SCHEDULE = '60 MINUTE'", "SET COMMENT = 'text'", "UNSET COMMENT", etc.
 func (a *App) AlterBackupPolicy(name, alteration string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	_, err := a.client.Execute(a.ctx, fmt.Sprintf("ALTER BACKUP POLICY %s %s", snowflake.QuoteIdent(name), alteration))
 	return err
@@ -4931,7 +4962,7 @@ func (a *App) AlterBackupPolicy(name, alteration string) error {
 // db must be non-empty; it is used to set a current database context first.
 func (a *App) ListBackups(backupSetName, bsDb, bsSchema string) ([]BackupRow, error) {
 	if a.client == nil {
-		return nil, ErrNotConnected
+		return nil, apperrors.ErrNotConnected
 	}
 	fqn := bsFQN(backupSetName, bsDb, bsSchema)
 	res, err := a.client.Execute(a.ctx, fmt.Sprintf("SHOW BACKUPS IN BACKUP SET %s", fqn))
@@ -5008,7 +5039,7 @@ func (a *App) ListBackups(backupSetName, bsDb, bsSchema string) ([]BackupRow, er
 // AddBackup triggers ALTER BACKUP SET <fqn> ADD BACKUP to create a new backup snapshot.
 func (a *App) AddBackup(backupSetName, bsDb, bsSchema string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	fqn := bsFQN(backupSetName, bsDb, bsSchema)
 	_, err := a.client.Execute(a.ctx, fmt.Sprintf("ALTER BACKUP SET %s ADD BACKUP", fqn))
@@ -5030,7 +5061,7 @@ func (a *App) AddBackup(backupSetName, bsDb, bsSchema string) error {
 // backupID is the UUID returned by SHOW BACKUPS (stored as a single-quoted string literal).
 func (a *App) RestoreFromBackup(objectType, targetName, backupSetName, bsDb, bsSchema, backupID, db string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	objType := strings.ToUpper(strings.TrimSpace(objectType))
 	if objType == "" {
@@ -5073,7 +5104,7 @@ func (a *App) RestoreFromBackup(objectType, targetName, backupSetName, bsDb, bsS
 // Snowflake only permits deleting the single oldest eligible backup at a time.
 func (a *App) DeleteOldestBackup(backupSetName, bsDb, bsSchema string) error {
 	if a.client == nil {
-		return ErrNotConnected
+		return apperrors.ErrNotConnected
 	}
 	fqn := bsFQN(backupSetName, bsDb, bsSchema)
 
@@ -5183,8 +5214,281 @@ func (a *App) GetAppInfo() AppInfo {
 	return AppInfo{
 		CompanyName:    "Technarion Oy",
 		ProductName:    "Thaw",
-		ProductVersion: Version,
+		ProductVersion: version.Version,
 		Copyright:      "Copyright \u00a9 2026 Technarion Oy. All rights reserved.",
 		Comments:       "Snowflake Manager",
 	}
+}
+
+// ─── Schema Migration IPC wrappers ────────────────────────────────────────────
+
+// ScanMigrationSource walks dir and returns one MigrationObject per DDL statement.
+func (a *App) ScanMigrationSource(dir string) ([]migration.MigrationObject, error) {
+	return a.migrationSvc.ScanSource(dir)
+}
+
+// AnalyzeMigration diffs local objects against the live Snowflake database.
+func (a *App) AnalyzeMigration(objects []migration.MigrationObject, database string) ([]migration.MigrationDiffItem, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.migrationSvc.Analyze(a.client, objects, database)
+}
+
+// CreateMigrationSnapshot optionally creates a backup set and/or a zero-copy
+// clone of the target database as a safety net before deployment.
+func (a *App) CreateMigrationSnapshot(database, backupSetDB, backupSetSchema, backupSetName string, doBackup bool, cloneDB string, doClone bool) error {
+	if a.client == nil {
+		return apperrors.ErrNotConnected
+	}
+	return a.migrationSvc.CreateSnapshot(a.client, database, backupSetDB, backupSetSchema, backupSetName, doBackup, cloneDB, doClone)
+}
+
+// ExecuteMigration deploys the selected objects to Snowflake.
+func (a *App) ExecuteMigration(selected []migration.MigrationObject, database string, maxPasses int, strategy migration.TableMigrationStrategy) ([]migration.MigrationExecEvent, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.migrationSvc.Execute(a.client, selected, database, maxPasses, strategy)
+}
+
+// CancelMigration cancels an in-flight schema migration.
+func (a *App) CancelMigration() error {
+	return a.migrationSvc.Cancel()
+}
+
+// GenerateMigrationScript returns a human-readable migration script.
+func (a *App) GenerateMigrationScript(items []migration.MigrationDiffItem, database string, strategy migration.TableMigrationStrategy) string {
+	return migration.GenerateScript(items, database, strategy)
+}
+
+// ─── dbt IPC methods ──────────────────────────────────────────────────────────
+
+// CreateDbtProject scaffolds a new dbt project pre-wired to the active
+// Snowflake connection.
+//
+// req describes the project name, output directory and optional profile name.
+// schemasMap maps database names to the list of schemas to include as sources.
+func (a *App) CreateDbtProject(req dbt.CreateRequest, schemasMap map[string][]string) (*dbt.CreateResult, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+
+	// ── Fetch live session info ────────────────────────────────────────────────
+	qr, err := a.client.Execute(a.ctx,
+		`SELECT CURRENT_ACCOUNT(), CURRENT_USER(), CURRENT_ROLE(), CURRENT_WAREHOUSE(), CURRENT_DATABASE(), CURRENT_SCHEMA()`)
+	if err != nil {
+		return nil, fmt.Errorf("fetch session info: %w", err)
+	}
+
+	var sess dbt.SessionInfo
+	if len(qr.Rows) > 0 && len(qr.Rows[0]) >= 6 {
+		row := qr.Rows[0]
+		sess.Account = strings.ToLower(fmt.Sprint(row[0]))
+		sess.User = fmt.Sprint(row[1])
+		sess.Role = fmt.Sprint(row[2])
+		sess.Warehouse = fmt.Sprint(row[3])
+		sess.Database = fmt.Sprint(row[4])
+		sess.Schema = fmt.Sprint(row[5])
+	}
+
+	// ── Discover objects per schema ───────────────────────────────────────────
+	var schemaObjects []dbt.SchemaObjects
+
+	for db, schemas := range schemasMap {
+		for _, schema := range schemas {
+			if strings.ToUpper(schema) == "INFORMATION_SCHEMA" {
+				schemaObjects = append(schemaObjects, dbt.SchemaObjects{
+					DB:       db,
+					Schema:   schema,
+					IsSystem: true,
+				})
+				continue
+			}
+
+			objs, err := a.client.ListObjects(a.ctx, db, schema)
+			if err != nil {
+				schemaObjects = append(schemaObjects, dbt.SchemaObjects{
+					DB:     db,
+					Schema: schema,
+				})
+				continue
+			}
+
+			var tables, views []string
+			for _, o := range objs {
+				switch strings.ToUpper(o.Kind) {
+				case "TABLE":
+					tables = append(tables, o.Name)
+				case "VIEW":
+					views = append(views, o.Name)
+				}
+			}
+
+			so := dbt.SchemaObjects{
+				DB:     db,
+				Schema: schema,
+				Tables: tables,
+				Views:  views,
+			}
+
+			if req.InlineViewDefs && len(views) > 0 {
+				viewDefs := make(map[string]string, len(views))
+				for _, v := range views {
+					ddlText, err := a.client.GetObjectDDL(a.ctx, db, schema, "VIEW", v, "")
+					if err != nil {
+						continue
+					}
+					if body := snowflake.ExtractDDLBody(ddlText, "VIEW"); body != "" {
+						viewDefs[v] = body
+					}
+				}
+				so.ViewDefs = viewDefs
+			}
+
+			schemaObjects = append(schemaObjects, so)
+		}
+	}
+
+	// ── Rewrite object references in inlined view bodies ──────────────────────
+	if req.InlineViewDefs {
+		type objInfo struct {
+			kind   string
+			db     string
+			schema string
+			name   string
+		}
+		objLookup := make(map[string]objInfo)
+		for _, so := range schemaObjects {
+			for _, t := range so.Tables {
+				objLookup[strings.ToUpper(so.DB+"\x00"+so.Schema+"\x00"+t)] = objInfo{"table", so.DB, so.Schema, t}
+			}
+			for _, v := range so.Views {
+				objLookup[strings.ToUpper(so.DB+"\x00"+so.Schema+"\x00"+v)] = objInfo{"view", so.DB, so.Schema, v}
+			}
+		}
+
+		multiScope := len(schemaObjects) > 1
+
+		for i := range schemaObjects {
+			if len(schemaObjects[i].ViewDefs) == 0 {
+				continue
+			}
+			newDefs := make(map[string]string, len(schemaObjects[i].ViewDefs))
+			for viewName, body := range schemaObjects[i].ViewDefs {
+				rewritten := snowflake.RewriteSQLReferences(
+					body,
+					schemaObjects[i].DB,
+					schemaObjects[i].Schema,
+					func(db, schema, name string) string {
+						key := strings.ToUpper(db + "\x00" + schema + "\x00" + name)
+						info, ok := objLookup[key]
+						if !ok {
+							return ""
+						}
+						sName := dbt.SourceName(info.db, info.schema)
+						if info.kind == "table" {
+							return fmt.Sprintf("{{ source('%s', '%s') }}", sName, info.name)
+						}
+						modelName := dbt.StagingModelName(info.db, info.schema, info.name, multiScope)
+						return fmt.Sprintf("{{ ref('%s') }}", modelName)
+					},
+				)
+				newDefs[viewName] = rewritten
+			}
+			schemaObjects[i].ViewDefs = newDefs
+		}
+	}
+
+	return dbt.Generate(req, sess, schemaObjects)
+}
+
+// GetSchemaCrossDeps returns the unique (database, schema) pairs referenced
+// by views in the given schema that fall outside that schema.
+func (a *App) GetSchemaCrossDeps(db, schema string) ([]snowflake.SchemaRef, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.client.GetSchemaCrossDeps(a.ctx, db, schema)
+}
+
+// GetDatabaseCrossDeps analyses all given schemas in db sequentially.
+func (a *App) GetDatabaseCrossDeps(db string, schemas []string) ([]snowflake.SchemaRef, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.client.GetDatabaseCrossDeps(a.ctx, db, schemas)
+}
+
+// ─── Snowpark IPC wrappers ────────────────────────────────────────────────────
+
+func (a *App) IsAppleSilicon() bool                                   { return snowpark.IsAppleSilicon() }
+func (a *App) GetSnowparkConfig() snowpark.SnowparkConfigResult       { return a.snowparkSvc.GetSnowparkConfig() }
+func (a *App) SaveSnowparkConfig(backend string) error                { return a.snowparkSvc.SaveSnowparkConfig(backend) }
+func (a *App) SaveSnowparkVenvPath(path string) error                 { return a.snowparkSvc.SaveSnowparkVenvPath(path) }
+func (a *App) VenvFolderExists() bool                                 { return a.snowparkSvc.VenvFolderExists() }
+func (a *App) SaveSnowparkPythonPath(pythonPath string) error         { return a.snowparkSvc.SaveSnowparkPythonPath(pythonPath) }
+func (a *App) GetPipRegistryConfig() (config.PipRegistryConfig, error) { return a.snowparkSvc.GetPipRegistryConfig() }
+func (a *App) SavePipRegistryConfig(cfg config.PipRegistryConfig) error { return a.snowparkSvc.SavePipRegistryConfig(cfg) }
+func (a *App) ResetPipRegistryConfig() error                          { return a.snowparkSvc.ResetPipRegistryConfig() }
+func (a *App) PickCACertFile() (string, error)                        { return a.snowparkSvc.PickCACertFile() }
+func (a *App) ListSystemPythons() []snowpark.PythonInfo               { return a.snowparkSvc.ListSystemPythons() }
+func (a *App) CheckSnowparkEnv() snowpark.SnowparkCheckResult         { return a.snowparkSvc.CheckSnowparkEnv() }
+func (a *App) ListEnvPackages() ([]snowpark.PackageInfo, error)       { return a.snowparkSvc.ListEnvPackages() }
+func (a *App) InstallEnvPackage(pkg string) error                     { return a.snowparkSvc.InstallEnvPackage(pkg) }
+func (a *App) UninstallEnvPackage(pkg string) error                   { return a.snowparkSvc.UninstallEnvPackage(pkg) }
+func (a *App) InstallCondaEnv() error                                 { return a.snowparkSvc.InstallCondaEnv() }
+func (a *App) InstallSnowparkPackage() error                          { return a.snowparkSvc.InstallSnowparkPackage() }
+func (a *App) InstallJupyterNotebook() error                          { return a.snowparkSvc.InstallJupyterNotebook() }
+func (a *App) InstallVenvEnv() error                                  { return a.snowparkSvc.InstallVenvEnv() }
+func (a *App) InstallSnowparkVenv(withPandas bool) error              { return a.snowparkSvc.InstallSnowparkVenv(withPandas) }
+func (a *App) DeleteVenvFolder() error                                { return a.snowparkSvc.DeleteVenvFolder() }
+func (a *App) InstallJupyterVenv() error                              { return a.snowparkSvc.InstallJupyterVenv() }
+func (a *App) NewNotebook() (string, error)                           { return a.snowparkSvc.NewNotebook() }
+func (a *App) PickNotebookFile() (string, error)                      { return a.snowparkSvc.PickNotebookFile() }
+func (a *App) ReadNotebook(path string) (string, error)               { return a.snowparkSvc.ReadNotebook(path) }
+func (a *App) SaveNotebook(path string, content string) error         { return a.snowparkSvc.SaveNotebook(path, content) }
+func (a *App) SaveNotebookBreakpoints(notebookPath string, bps map[string][]int) error { return a.snowparkSvc.SaveNotebookBreakpoints(notebookPath, bps) }
+func (a *App) LoadNotebookBreakpoints(notebookPath string) (map[string][]int, error)   { return a.snowparkSvc.LoadNotebookBreakpoints(notebookPath) }
+func (a *App) StopDapProxy()                                          { a.snowparkSvc.StopDapProxy() }
+func (a *App) StopNotebookSession(tabId string) error                 { return a.snowparkSvc.StopNotebookSession(tabId) }
+
+func (a *App) RunNotebookSql(sql string) (snowpark.NotebookSqlResult, error) {
+	return a.snowparkSvc.RunNotebookSql(a.client, sql)
+}
+
+func (a *App) StartNotebookSession(tabId string) error {
+	return a.snowparkSvc.StartNotebookSession(a.client, a.connectParams, tabId)
+}
+
+func (a *App) RunNotebookCell(tabId string, cellId string, code string) (snowpark.NotebookCellOutput, error) {
+	return a.snowparkSvc.RunNotebookCell(tabId, cellId, code)
+}
+
+func (a *App) StartDapProxy() error {
+	return a.snowparkSvc.StartDapProxy()
+}
+
+func (a *App) DebugNotebookCell(tabId string, cellId string, code string) (snowpark.NotebookCellOutput, error) {
+	return a.snowparkSvc.DebugNotebookCell(tabId, cellId, code)
+}
+
+func (a *App) RunNotebookCellSql(tabId, sql string) (snowpark.NotebookSqlResult, error) {
+	return a.snowparkSvc.RunNotebookCellSql(a.client, tabId, sql)
+}
+
+func (a *App) NotebookUseContext(tabId, role, warehouse, database, schema string) error {
+	return a.snowparkSvc.NotebookUseContext(tabId, role, warehouse, database, schema)
+}
+
+func (a *App) GetNotebookCompletions(tabId, code string, line, col int) ([]snowpark.NotebookCompletion, error) {
+	return a.snowparkSvc.GetNotebookCompletions(tabId, code, line, col)
+}
+
+func (a *App) GetNotebookHover(tabId, code string, line, col int) (string, error) {
+	return a.snowparkSvc.GetNotebookHover(tabId, code, line, col)
+}
+
+func (a *App) CheckPythonSyntax(tabId, code, mode string) ([]snowpark.NotebookSyntaxError, error) {
+	return a.snowparkSvc.CheckPythonSyntax(tabId, code, mode)
 }

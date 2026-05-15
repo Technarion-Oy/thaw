@@ -97,7 +97,7 @@ jobs:
         #                   (-w) so function/variable names are not recoverable.
         # -trimpath         removes all local file-system paths embedded by the
         #                   compiler (source file references, module cache paths).
-        run: wails build -clean -ldflags "-s -w -X main.Version=${{ steps.prep.outputs.version }}" -trimpath
+        run: wails build -clean -ldflags "-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" -trimpath
         env:
           # The macOS arm64 runner has 7 GB RAM.  javascript-obfuscator's
           # control-flow flattening can multiply the AST size of each
@@ -110,7 +110,7 @@ jobs:
         if: matrix.platform == 'windows'
         # Since we dropped garble for Windows, we can let Wails handle 
         # both the compilation AND the NSIS installer generation natively!
-        run: wails build -clean -nsis -ldflags "-s -w -X main.Version=${{ steps.prep.outputs.version }}" -trimpath
+        run: wails build -clean -nsis -ldflags "-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" -trimpath
         env:
           NODE_OPTIONS: --max-old-space-size=6144
 
@@ -135,7 +135,7 @@ jobs:
         run: |
           garble build \
             -tags desktop,production \
-            -trimpath -ldflags="-s -w -X main.Version=${{ steps.prep.outputs.version }}" \
+            -trimpath -ldflags="-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" \
             -o build/bin/thaw.app/Contents/MacOS/thaw \
             .
 
@@ -144,7 +144,7 @@ jobs:
         run: |
           garble build \
             -tags desktop,production \
-            -trimpath -ldflags="-s -w -X main.Version=${{ steps.prep.outputs.version }}" \
+            -trimpath -ldflags="-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" \
             -o build/bin/thaw \
             .
 
