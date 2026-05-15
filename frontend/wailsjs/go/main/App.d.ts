@@ -105,7 +105,11 @@ export function CheckPythonSyntax(arg1:string,arg2:string,arg3:string):Promise<A
 
 export function CheckSnowparkEnv():Promise<snowpark.SnowparkCheckResult>;
 
+export function ClearDefaultProfile():Promise<void>;
+
 export function CloneChildTask(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean,arg6:Array<string>):Promise<void>;
+
+export function CloneProfile(arg1:string,arg2:string):Promise<void>;
 
 export function CloseTabSession(arg1:string):Promise<void>;
 
@@ -136,6 +140,8 @@ export function CreateStorageIntegration(arg1:integrations.StorageIntegrationPar
 export function DebugNotebookCell(arg1:string,arg2:string,arg3:string):Promise<snowpark.NotebookCellOutput>;
 
 export function DeleteOldestBackup(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function DeleteProfile(arg1:string):Promise<void>;
 
 export function DeleteVenvFolder():Promise<void>;
 
@@ -491,6 +497,8 @@ export function ReadNotebook(arg1:string):Promise<string>;
 
 export function RemoveStageFiles(arg1:string,arg2:string):Promise<void>;
 
+export function RenameProfile(arg1:string,arg2:string):Promise<void>;
+
 export function ResetPipRegistryConfig():Promise<void>;
 
 export function ResizeShell(arg1:number,arg2:number):Promise<void>;
@@ -527,6 +535,8 @@ export function SaveNotebookPrefs(arg1:config.NotebookPrefs):Promise<void>;
 
 export function SavePipRegistryConfig(arg1:config.PipRegistryConfig):Promise<void>;
 
+export function SaveProfile(arg1:sfconfig.Connection):Promise<void>;
+
 export function SaveSnowparkConfig(arg1:string):Promise<void>;
 
 export function SaveSnowparkPythonPath(arg1:string):Promise<void>;
@@ -540,6 +550,8 @@ export function SearchFiles(arg1:string,arg2:string,arg3:boolean):Promise<Array<
 export function SendChatMessage(arg1:Array<ai.UIMessage>,arg2:string,arg3:string,arg4:string,arg5:boolean):Promise<Array<ai.UIMessage>>;
 
 export function SetColumnComment(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
+
+export function SetDefaultProfile(arg1:string):Promise<void>;
 
 export function SetGitCommitFilter(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 

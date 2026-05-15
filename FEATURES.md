@@ -621,7 +621,15 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
 ### Snowflake Connectivity
 
 - Connect with account / user / password / warehouse / role
-- **Auto-fill from Snowflake CLI** — reads Snowflake CLI profiles from `~/.snowflake/config.toml` (or a custom location) and populates the connection form; includes support for key-pair (`SNOWFLAKE_JWT`) profiles; the config file path can be changed during sign-in and is persisted as the new default location for the machine
+- **Snowflake CLI Profile Manager** — full CRUD management of Snowflake CLI profiles in `~/.snowflake/config.toml` (or a custom location) directly from the connection dialog:
+  - **Auto-fill** — select a profile to populate the connection form; includes support for key-pair (`SNOWFLAKE_JWT`) profiles; the config file path can be changed during sign-in and is persisted as the new default location
+  - **New** — create a new profile from the current form values; blocked if a profile with the same name already exists
+  - **Save** — overwrite the selected profile with the current form values
+  - **Rename** — rename the selected profile; blocked if the new name already exists; updates `default_connection_name` if it pointed to the old name
+  - **Clone** — duplicate a profile under a new name; blocked if the new name already exists
+  - **Set Default** — set any profile as the `default_connection_name`
+  - **Delete** — remove a profile (with confirmation); if the deleted profile was the default, the default is cleared
+  - Text-level TOML manipulation preserves user comments, blank lines, and unknown keys
 - **Offline-first startup** — the app launches instantly without waiting for a Snowflake connection; connection parameters are validated and the session is established on demand when you first run a query or browse objects, rather than blocking the UI at launch.
 - **Cancel connection** — abort an in-progress connection attempt
 - **User Agreement** — a **User Agreement** link at the bottom of the connect screen opens the End User License Agreement in a scrollable modal

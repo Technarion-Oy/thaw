@@ -166,8 +166,16 @@ export function CheckSnowparkEnv() {
   return window['go']['main']['App']['CheckSnowparkEnv']();
 }
 
+export function ClearDefaultProfile() {
+  return window['go']['main']['App']['ClearDefaultProfile']();
+}
+
 export function CloneChildTask(arg1, arg2, arg3, arg4, arg5, arg6) {
   return window['go']['main']['App']['CloneChildTask'](arg1, arg2, arg3, arg4, arg5, arg6);
+}
+
+export function CloneProfile(arg1, arg2) {
+  return window['go']['main']['App']['CloneProfile'](arg1, arg2);
 }
 
 export function CloseTabSession(arg1) {
@@ -228,6 +236,10 @@ export function DebugNotebookCell(arg1, arg2, arg3) {
 
 export function DeleteOldestBackup(arg1, arg2, arg3) {
   return window['go']['main']['App']['DeleteOldestBackup'](arg1, arg2, arg3);
+}
+
+export function DeleteProfile(arg1) {
+  return window['go']['main']['App']['DeleteProfile'](arg1);
 }
 
 export function DeleteVenvFolder() {
@@ -938,6 +950,10 @@ export function RemoveStageFiles(arg1, arg2) {
   return window['go']['main']['App']['RemoveStageFiles'](arg1, arg2);
 }
 
+export function RenameProfile(arg1, arg2) {
+  return window['go']['main']['App']['RenameProfile'](arg1, arg2);
+}
+
 export function ResetPipRegistryConfig() {
   return window['go']['main']['App']['ResetPipRegistryConfig']();
 }
@@ -1010,6 +1026,10 @@ export function SavePipRegistryConfig(arg1) {
   return window['go']['main']['App']['SavePipRegistryConfig'](arg1);
 }
 
+export function SaveProfile(arg1) {
+  return window['go']['main']['App']['SaveProfile'](arg1);
+}
+
 export function SaveSnowparkConfig(arg1) {
   return window['go']['main']['App']['SaveSnowparkConfig'](arg1);
 }
@@ -1036,6 +1056,10 @@ export function SendChatMessage(arg1, arg2, arg3, arg4, arg5) {
 
 export function SetColumnComment(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['SetColumnComment'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function SetDefaultProfile(arg1) {
+  return window['go']['main']['App']['SetDefaultProfile'](arg1);
 }
 
 export function SetGitCommitFilter(arg1, arg2, arg3, arg4) {
