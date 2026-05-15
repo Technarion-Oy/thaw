@@ -22,7 +22,8 @@ import (
 var profileNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // sectionHeaderRe matches TOML section headers like [connections.myprofile].
-var sectionHeaderRe = regexp.MustCompile(`^\s*\[(.+)\]\s*$`)
+// Uses [^\[\]]+ to avoid matching TOML array-of-tables ([[...]]) or malformed brackets.
+var sectionHeaderRe = regexp.MustCompile(`^\s*\[([^\[\]]+)\]\s*$`)
 
 // sectionSpan marks the start and end line indices of a TOML section.
 type sectionSpan struct {
@@ -71,11 +72,30 @@ func parseSections(lines []string) []sectionSpan {
 	return spans
 }
 
-// tomlEscape escapes a string for use as a TOML quoted value.
+// tomlEscape escapes a string for use as a TOML basic quoted value.
 func tomlEscape(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	return s
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case '\b':
+			b.WriteString(`\b`)
+		case '\t':
+			b.WriteString(`\t`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\f':
+			b.WriteString(`\f`)
+		case '\r':
+			b.WriteString(`\r`)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // connectionFieldOrder defines the canonical order for rendering connection fields.
@@ -111,6 +131,9 @@ func connectionToTOMLLines(c Connection) []string {
 	}
 	return out
 }
+
+// kvLineRe matches TOML key = value lines to extract the key name.
+var kvLineRe = regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=`)
 
 // knownConnectionKeys is the set of TOML keys that Thaw models on Connection.
 var knownConnectionKeys map[string]bool
@@ -160,7 +183,7 @@ func readFileLines(path string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	content := string(data)
+	content := strings.ReplaceAll(string(data), "\r\n", "\n")
 	if content == "" {
 		return nil, nil
 	}
@@ -203,10 +226,9 @@ func sectionBodyEnd(lines []string, span *sectionSpan) int {
 // Thaw doesn't model, preserving user-added custom keys.
 func extractUnknownKeys(lines []string, span *sectionSpan) []string {
 	var unknown []string
-	kvRe := regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=`)
 	bodyEnd := sectionBodyEnd(lines, span)
 	for i := span.start + 1; i < bodyEnd; i++ {
-		m := kvRe.FindStringSubmatch(lines[i])
+		m := kvLineRe.FindStringSubmatch(lines[i])
 		if m == nil {
 			continue
 		}
@@ -298,11 +320,10 @@ func DeleteProfile(path string, name string) error {
 		return fmt.Errorf("profile %q not found", name)
 	}
 
-	// Remove the section, including any trailing blank line.
+	// Remove the section, plus at most one trailing blank line.
 	end := span.end
-	for end < len(lines) && strings.TrimSpace(lines[end]) == "" {
+	if end < len(lines) && strings.TrimSpace(lines[end]) == "" {
 		end++
-		break // remove at most one trailing blank line
 	}
 
 	var result []string
@@ -317,6 +338,9 @@ func DeleteProfile(path string, name string) error {
 
 // CloneProfile duplicates a profile under a new name.
 func CloneProfile(path string, sourceName, newName string) error {
+	if err := ValidateProfileName(sourceName); err != nil {
+		return fmt.Errorf("source: %w", err)
+	}
 	if err := ValidateProfileName(newName); err != nil {
 		return err
 	}
@@ -346,10 +370,12 @@ func CloneProfile(path string, sourceName, newName string) error {
 		return fmt.Errorf("profile %q already exists", newName)
 	}
 
-	// Copy source section body (everything except the header).
+	// Copy source section body (everything except the header), excluding
+	// trailing blanks/comments that visually belong to the next section.
+	bodyEnd := sectionBodyEnd(lines, src)
 	var cloned []string
 	cloned = append(cloned, fmt.Sprintf("[connections.%s]", newName))
-	for i := src.start + 1; i < src.end; i++ {
+	for i := src.start + 1; i < bodyEnd; i++ {
 		cloned = append(cloned, lines[i])
 	}
 

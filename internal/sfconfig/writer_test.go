@@ -566,6 +566,9 @@ func TestTomlEscape(t *testing.T) {
 		{`has "quotes"`, `has \"quotes\"`},
 		{`back\slash`, `back\\slash`},
 		{`both "and" \`, `both \"and\" \\`},
+		{"tab\there", `tab\there`},
+		{"new\nline", `new\nline`},
+		{"cr\rreturn", `cr\rreturn`},
 	}
 	for _, tt := range tests {
 		got := tomlEscape(tt.input)

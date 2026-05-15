@@ -469,63 +469,72 @@ func (a *App) GetSnowflakeCLIConfigPath() (string, error) {
 	return filepath.Join(home, ".snowflake", "config.toml"), nil
 }
 
+// sfconfigPath returns the Snowflake CLI config path from the app config.
+func (a *App) sfconfigPath() (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	return cfg.SnowflakeCLIConfigPath, nil
+}
+
 // SaveProfile creates or updates a named connection profile in the Snowflake
 // CLI configuration file.
 func (a *App) SaveProfile(profile sfconfig.Connection) error {
-	cfg, err := config.Load()
+	p, err := a.sfconfigPath()
 	if err != nil {
 		return err
 	}
-	return sfconfig.SaveProfile(cfg.SnowflakeCLIConfigPath, profile)
+	return sfconfig.SaveProfile(p, profile)
 }
 
 // RenameProfile renames an existing connection profile. If the old name was the
 // default, the default is updated to the new name.
 func (a *App) RenameProfile(oldName, newName string) error {
-	cfg, err := config.Load()
+	p, err := a.sfconfigPath()
 	if err != nil {
 		return err
 	}
-	return sfconfig.RenameProfile(cfg.SnowflakeCLIConfigPath, oldName, newName)
+	return sfconfig.RenameProfile(p, oldName, newName)
 }
 
 // DeleteProfile removes a named connection profile from the Snowflake CLI
 // configuration file. If it was the default profile, the default is cleared.
 func (a *App) DeleteProfile(name string) error {
-	cfg, err := config.Load()
+	p, err := a.sfconfigPath()
 	if err != nil {
 		return err
 	}
-	return sfconfig.DeleteProfile(cfg.SnowflakeCLIConfigPath, name)
+	return sfconfig.DeleteProfile(p, name)
 }
 
 // CloneProfile duplicates an existing profile under a new name.
 func (a *App) CloneProfile(sourceName, newName string) error {
-	cfg, err := config.Load()
+	p, err := a.sfconfigPath()
 	if err != nil {
 		return err
 	}
-	return sfconfig.CloneProfile(cfg.SnowflakeCLIConfigPath, sourceName, newName)
+	return sfconfig.CloneProfile(p, sourceName, newName)
 }
 
 // SetDefaultProfile sets the default_connection_name in the Snowflake CLI
 // configuration file.
 func (a *App) SetDefaultProfile(name string) error {
-	cfg, err := config.Load()
+	p, err := a.sfconfigPath()
 	if err != nil {
 		return err
 	}
-	return sfconfig.SetDefaultProfile(cfg.SnowflakeCLIConfigPath, name)
+	return sfconfig.SetDefaultProfile(p, name)
 }
 
 // ClearDefaultProfile removes the default_connection_name value in the
 // Snowflake CLI configuration file.
 func (a *App) ClearDefaultProfile() error {
-	cfg, err := config.Load()
+	p, err := a.sfconfigPath()
 	if err != nil {
 		return err
 	}
-	return sfconfig.ClearDefaultProfile(cfg.SnowflakeCLIConfigPath)
+	return sfconfig.ClearDefaultProfile(p)
 }
 
 // PickSnowflakeCLIConfigPath opens a native file dialog to select a new
