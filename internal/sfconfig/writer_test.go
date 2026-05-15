@@ -168,6 +168,9 @@ account = "prod"
 	if !strings.Contains(content, "# This is a top-level comment") {
 		t.Error("top-level comment was lost")
 	}
+	if !strings.Contains(content, "# inline note") {
+		t.Error("intra-section comment was lost")
+	}
 	if !strings.Contains(content, "# Prod") {
 		t.Error("prod comment was lost")
 	}

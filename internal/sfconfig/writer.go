@@ -222,21 +222,24 @@ func sectionBodyEnd(lines []string, span *sectionSpan) int {
 	return end
 }
 
-// extractUnknownKeys returns lines from an existing section that contain keys
-// Thaw doesn't model, preserving user-added custom keys.
-func extractUnknownKeys(lines []string, span *sectionSpan) []string {
-	var unknown []string
+// extractPreservedLines returns lines from an existing section that should
+// survive a SaveProfile update: intra-section comments, blank lines, and
+// key=value lines for keys Thaw doesn't model.
+func extractPreservedLines(lines []string, span *sectionSpan) []string {
+	var preserved []string
 	bodyEnd := sectionBodyEnd(lines, span)
 	for i := span.start + 1; i < bodyEnd; i++ {
-		m := kvLineRe.FindStringSubmatch(lines[i])
-		if m == nil {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			preserved = append(preserved, lines[i])
 			continue
 		}
-		if !knownConnectionKeys[m[1]] {
-			unknown = append(unknown, lines[i])
+		m := kvLineRe.FindStringSubmatch(lines[i])
+		if m != nil && !knownConnectionKeys[m[1]] {
+			preserved = append(preserved, lines[i])
 		}
 	}
-	return unknown
+	return preserved
 }
 
 // SaveProfile creates or updates a named connection profile in the config file.
@@ -264,11 +267,11 @@ func SaveProfile(path string, profile Connection) error {
 		// Update: replace only the meaningful body (header + key/value lines),
 		// leaving trailing blanks/comments that belong to the next section.
 		bodyEnd := sectionBodyEnd(lines, existing)
-		unknown := extractUnknownKeys(lines, existing)
+		extra := extractPreservedLines(lines, existing)
 		var replacement []string
 		replacement = append(replacement, header)
 		replacement = append(replacement, newKVs...)
-		replacement = append(replacement, unknown...)
+		replacement = append(replacement, extra...)
 
 		// Build new file content.
 		var result []string
@@ -342,7 +345,7 @@ func CloneProfile(path string, sourceName, newName string) error {
 		return fmt.Errorf("source: %w", err)
 	}
 	if err := ValidateProfileName(newName); err != nil {
-		return err
+		return fmt.Errorf("new name: %w", err)
 	}
 	resolved, err := resolvePath(path)
 	if err != nil {
@@ -420,8 +423,8 @@ func SetDefaultProfile(path string, name string) error {
 
 	// Find and replace existing default_connection_name line.
 	for i, line := range lines {
-		if defaultConnRe.MatchString(line) {
-			m := defaultConnRe.FindStringSubmatch(line)
+		m := defaultConnRe.FindStringSubmatch(line)
+		if m != nil {
 			lines[i] = fmt.Sprintf(`%sdefault_connection_name = "%s"`, m[1], tomlEscape(name))
 			return writeLines(resolved, lines)
 		}

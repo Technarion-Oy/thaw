@@ -143,6 +143,8 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
   const nameModalHasDuplicate = (() => {
     const name = nameModalValue.trim();
     if (!name) return false;
+    // In rename mode, the current profile name is not a conflict.
+    if (nameModalMode === "rename" && name === selectedProfile) return false;
     return existingProfileNames.has(name);
   })();
 
@@ -235,6 +237,8 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
       await DeleteProfile(name);
       message.success(`Profile "${name}" deleted`);
       setSelectedProfile(undefined);
+      form.resetFields();
+      setAuth("username_password_mfa");
       refreshCliConfig();
     } catch (e) {
       message.error(`Failed to delete profile: ${e}`);
@@ -349,16 +353,22 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
               </Tooltip>
               {cliConfig && (
                 <>
-                  <Tooltip title="Overwrite the selected profile with the current form values">
-                    <Button
-                      size="small"
-                      icon={<SaveOutlined />}
-                      disabled={!selectedProfile || profileBusy}
-                      onClick={() => selectedProfile && handleSaveProfile(selectedProfile)}
-                    >
-                      Save
-                    </Button>
-                  </Tooltip>
+                  <Popconfirm
+                    title={`Overwrite profile "${selectedProfile}" with current form values?`}
+                    onConfirm={() => selectedProfile && handleSaveProfile(selectedProfile)}
+                    okText="Overwrite"
+                    disabled={!selectedProfile || profileBusy}
+                  >
+                    <Tooltip title="Overwrite the selected profile with the current form values">
+                      <Button
+                        size="small"
+                        icon={<SaveOutlined />}
+                        disabled={!selectedProfile || profileBusy}
+                      >
+                        Save
+                      </Button>
+                    </Tooltip>
+                  </Popconfirm>
                   <Tooltip title="Rename the selected profile">
                     <Button
                       size="small"
