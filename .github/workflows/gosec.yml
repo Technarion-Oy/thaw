@@ -69,8 +69,11 @@ jobs:
       #   G306 — WriteFile permissions 0644: correct for user-editable data files
       #   G703 — path traversal (taint): paths are within the user's own filesystem
       - name: Run gosec
+        # webkit2_41: Ubuntu 24.04 only ships libwebkit2gtk-4.1-dev; without this
+        # tag, Wails' CGO directives default to webkit2gtk-4.0 and pkg-config fails.
         run: |
           gosec \
+            -tags=webkit2_41 \
             -exclude=G104,G115,G122,G201,G204,G301,G304,G306,G703 \
             -exclude-dir=frontend \
             -exclude-dir=internal/integration \

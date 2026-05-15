@@ -103,7 +103,9 @@ jobs:
           mv go-junit-report /usr/local/bin/
 
       - name: Run migration unit tests
-        run: go test -v -race -count=1 -run "^Test(Normalize|SplitTopLevel|MigrQuote|ParseLocal|CommonColumn|ReplaceDDL|IsDependency|ExecutionPriority|RemoteKey|BuildMigration|ScanMigration)" . 2>&1 | go-junit-report -set-exit-code > report-migration.xml
+        # webkit2_41: Ubuntu 24.04 only ships libwebkit2gtk-4.1-dev; without this
+        # tag, Wails' CGO directives default to webkit2gtk-4.0 and pkg-config fails.
+        run: go test -v -race -count=1 -tags webkit2_41 -run "^Test(Normalize|SplitTopLevel|MigrQuote|ParseLocal|CommonColumn|ReplaceDDL|IsDependency|ExecutionPriority|RemoteKey|BuildMigration|ScanMigration)" . 2>&1 | go-junit-report -set-exit-code > report-migration.xml
 
       - name: Publish test results
         uses: EnricoMi/publish-unit-test-result-action@v2

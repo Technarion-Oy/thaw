@@ -97,7 +97,10 @@ jobs:
         #                   (-w) so function/variable names are not recoverable.
         # -trimpath         removes all local file-system paths embedded by the
         #                   compiler (source file references, module cache paths).
-        run: wails build -clean -ldflags "-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" -trimpath
+        # -tags webkit2_41: Ubuntu 24.04 only ships libwebkit2gtk-4.1-dev;
+        #   Wails' CGO directives default to webkit2gtk-4.0 without this tag.
+        #   Harmless on macOS (webkit CGO is gated behind //go:build linux).
+        run: wails build -clean -tags webkit2_41 -ldflags "-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" -trimpath
         env:
           # The macOS arm64 runner has 7 GB RAM.  javascript-obfuscator's
           # control-flow flattening can multiply the AST size of each
@@ -143,7 +146,7 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           garble build \
-            -tags desktop,production \
+            -tags desktop,production,webkit2_41 \
             -trimpath -ldflags="-s -w -X thaw/internal/version.Version=${{ steps.prep.outputs.version }}" \
             -o build/bin/thaw \
             .
