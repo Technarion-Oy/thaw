@@ -231,6 +231,14 @@ func (s *Service) ScanSource(dir string) ([]MigrationObject, error) {
 // Analyze compares the supplied local objects against what is currently
 // in Snowflake and returns a diff for each object. It emits
 // migration:analyze:progress events while working.
+//
+// Remote DDL is sourced exclusively from GET_DDL('database', X, true) rather
+// than per-object GET_DDL calls.  The database-level dump is preferred because:
+//   - It is the canonical form Snowflake produces for export/clone workflows.
+//   - Per-object GET_DDL for streams wraps ON TABLE references as a single
+//     double-quoted identifier ("DB.SCHEMA.TABLE") which is syntactically
+//     incorrect and doesn't match the unqualified form in the database dump.
+//   - One query per database is more efficient than N per-object queries.
 func (s *Service) Analyze(client *snowflake.Client, objects []MigrationObject, database string) ([]MigrationDiffItem, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancelFunc = cancel
@@ -825,6 +833,9 @@ func replaceDDLTableName(ddlText, db, schema, newName string) string {
 
 // ─── Snowflake introspection helpers ─────────────────────────────────────────
 
+// tableExists reports whether a BASE TABLE with the given name exists.
+// Uses INFORMATION_SCHEMA to avoid triggering gosnowflake driver error logs
+// when the table is absent.
 func tableExists(ctx context.Context, client *snowflake.Client, db, schema, name string) (bool, error) {
 	sql := fmt.Sprintf(
 		"SELECT COUNT(*) FROM %s.INFORMATION_SCHEMA.TABLES"+
@@ -852,6 +863,8 @@ func tableExists(ctx context.Context, client *snowflake.Client, db, schema, name
 	return false, nil
 }
 
+// describeTableColumns runs DESCRIBE TABLE and returns the column definitions.
+// Only rows with kind = "Column" are included.
 func describeTableColumns(ctx context.Context, client *snowflake.Client, db, schema, table string) ([]colDef, error) {
 	fqn := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(table)
 	res, err := client.Execute(ctx, "DESCRIBE TABLE "+fqn)
@@ -877,6 +890,10 @@ func describeTableColumns(ctx context.Context, client *snowflake.Client, db, sch
 	return cols, nil
 }
 
+// tableRowCount returns the row count for a table using SHOW TABLES.
+// It returns 0 without error when the table is not found or the count cannot
+// be determined, so callers should treat any error as "unknown" rather than
+// "empty".
 func tableRowCount(ctx context.Context, client *snowflake.Client, db, schema, name string) (int64, error) {
 	escaped := strings.ReplaceAll(name, "'", "''")
 	escaped = strings.ReplaceAll(escaped, "%", "\\%")
@@ -932,6 +949,10 @@ func tableRowCount(ctx context.Context, client *snowflake.Client, db, schema, na
 
 // ─── strategy dispatch ────────────────────────────────────────────────────────
 
+// executeMigrationObject runs the appropriate strategy for a single migration
+// object. Non-TABLE objects are always executed via their raw DDL. TABLE objects
+// use the chosen strategy only when the table already exists; brand-new tables
+// are always created via their DDL directly.
 func (s *Service) executeMigrationObject(ctx context.Context, client *snowflake.Client, mo MigrationObject, strategy TableMigrationStrategy) error {
 	if strings.ToUpper(mo.ObjectKind) != "TABLE" {
 		_, err := client.Execute(ctx, mo.DDL)
@@ -967,6 +988,8 @@ func (s *Service) executeMigrationObject(ctx context.Context, client *snowflake.
 
 // ─── strategy: in_place ───────────────────────────────────────────────────────
 
+// executeInPlace diffs local column definitions against the remote schema and
+// applies ALTER TABLE ADD/DROP/ALTER COLUMN TYPE statements.
 func executeInPlace(ctx context.Context, client *snowflake.Client, mo MigrationObject) error {
 	db, schema, name := mo.Database, mo.Schema, mo.ObjectName
 	fqn := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(name)
@@ -1026,6 +1049,9 @@ func executeInPlace(ctx context.Context, client *snowflake.Client, mo MigrationO
 
 // ─── strategy: blue_green_swap ────────────────────────────────────────────────
 
+// executeBlueGreenSwap creates a temporary table with the new schema (by
+// rewriting the table name in the local DDL), copies shared columns from the
+// original, atomically swaps the two tables, then drops the temp.
 func executeBlueGreenSwap(ctx context.Context, client *snowflake.Client, mo MigrationObject) error {
 	db, schema, name := mo.Database, mo.Schema, mo.ObjectName
 	tmpName := migrTempName(name)
@@ -1078,6 +1104,9 @@ func executeBlueGreenSwap(ctx context.Context, client *snowflake.Client, mo Migr
 
 // ─── strategy: view_abstraction ───────────────────────────────────────────────
 
+// executeViewAbstraction renames the existing table to <name>_v1, creates the
+// new table from local DDL, and creates a compatibility view <name>_compat that
+// exposes shared columns from the archived data.
 func executeViewAbstraction(ctx context.Context, client *snowflake.Client, mo MigrationObject) error {
 	db, schema, name := mo.Database, mo.Schema, mo.ObjectName
 	archiveName := name + "_v1"
@@ -1123,6 +1152,8 @@ func executeViewAbstraction(ctx context.Context, client *snowflake.Client, mo Mi
 
 // ─── strategy: destructive_rebuild ────────────────────────────────────────────
 
+// executeDestructiveRebuild drops the existing table and recreates it from
+// local DDL. All existing data is permanently lost.
 func executeDestructiveRebuild(ctx context.Context, client *snowflake.Client, mo MigrationObject) error {
 	db, schema, name := mo.Database, mo.Schema, mo.ObjectName
 	fqn := migrQuote(db) + "." + migrQuote(schema) + "." + migrQuote(name)
