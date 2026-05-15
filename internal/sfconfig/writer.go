@@ -100,22 +100,21 @@ func tomlEscape(s string) string {
 
 // connectionFieldOrder defines the canonical order for rendering connection fields.
 var connectionFieldOrder = []struct {
-	tomlKey  string
-	jsonKey  string
-	getter   func(*Connection) string
+	tomlKey string
+	getter  func(*Connection) string
 }{
-	{"account", "account", func(c *Connection) string { return c.Account }},
-	{"user", "user", func(c *Connection) string { return c.User }},
-	{"password", "password", func(c *Connection) string { return c.Password }},
-	{"role", "role", func(c *Connection) string { return c.Role }},
-	{"warehouse", "warehouse", func(c *Connection) string { return c.Warehouse }},
-	{"database", "database", func(c *Connection) string { return c.Database }},
-	{"schema", "schema", func(c *Connection) string { return c.Schema }},
-	{"authenticator", "authenticator", func(c *Connection) string { return c.Authenticator }},
-	{"passcode", "passcode", func(c *Connection) string { return c.Passcode }},
-	{"okta_url", "oktaUrl", func(c *Connection) string { return c.OktaURL }},
-	{"private_key_path", "privateKeyPath", func(c *Connection) string { return c.PrivateKeyPath }},
-	{"private_key_passphrase", "privateKeyPassphrase", func(c *Connection) string { return c.PrivateKeyPassphrase }},
+	{"account", func(c *Connection) string { return c.Account }},
+	{"user", func(c *Connection) string { return c.User }},
+	{"password", func(c *Connection) string { return c.Password }},
+	{"role", func(c *Connection) string { return c.Role }},
+	{"warehouse", func(c *Connection) string { return c.Warehouse }},
+	{"database", func(c *Connection) string { return c.Database }},
+	{"schema", func(c *Connection) string { return c.Schema }},
+	{"authenticator", func(c *Connection) string { return c.Authenticator }},
+	{"passcode", func(c *Connection) string { return c.Passcode }},
+	{"okta_url", func(c *Connection) string { return c.OktaURL }},
+	{"private_key_path", func(c *Connection) string { return c.PrivateKeyPath }},
+	{"private_key_passphrase", func(c *Connection) string { return c.PrivateKeyPassphrase }},
 }
 
 // connectionToTOMLLines renders a Connection as TOML key=value lines (without
@@ -225,6 +224,9 @@ func sectionBodyEnd(lines []string, span *sectionSpan) int {
 // extractPreservedLines returns lines from an existing section that should
 // survive a SaveProfile update: intra-section comments, blank lines, and
 // key=value lines for keys Thaw doesn't model.
+//
+// Note: SaveProfile appends preserved lines after the Thaw-modeled fields,
+// so intra-section content may be reordered relative to the original layout.
 func extractPreservedLines(lines []string, span *sectionSpan) []string {
 	var preserved []string
 	bodyEnd := sectionBodyEnd(lines, span)
@@ -394,8 +396,21 @@ func CloneProfile(path string, sourceName, newName string) error {
 	return writeLines(resolved, lines)
 }
 
-// defaultConnRe matches the default_connection_name line.
-var defaultConnRe = regexp.MustCompile(`^(\s*)default_connection_name\s*=\s*"([^"]*)"`)
+// defaultConnRe matches the default_connection_name line with double-quoted,
+// single-quoted, or bare (unquoted) values.
+var defaultConnRe = regexp.MustCompile(`^(\s*)default_connection_name\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))`)
+
+// defaultConnValue extracts the matched value from defaultConnRe submatches.
+// Group 2 = double-quoted, group 3 = single-quoted, group 4 = bare.
+func defaultConnValue(m []string) string {
+	if m[2] != "" {
+		return m[2]
+	}
+	if m[3] != "" {
+		return m[3]
+	}
+	return m[4]
+}
 
 // SetDefaultProfile updates or inserts the default_connection_name line.
 func SetDefaultProfile(path string, name string) error {
@@ -513,7 +528,7 @@ func RenameProfile(path string, oldName, newName string) error {
 	// Update default_connection_name if it pointed to the old name.
 	for i, line := range lines {
 		m := defaultConnRe.FindStringSubmatch(line)
-		if m != nil && m[2] == oldName {
+		if m != nil && defaultConnValue(m) == oldName {
 			lines[i] = fmt.Sprintf(`%sdefault_connection_name = "%s"`, m[1], tomlEscape(newName))
 			break
 		}
@@ -527,7 +542,7 @@ func RenameProfile(path string, oldName, newName string) error {
 func clearDefaultIfMatches(lines []string, name string) []string {
 	for i, line := range lines {
 		m := defaultConnRe.FindStringSubmatch(line)
-		if m != nil && m[2] == name {
+		if m != nil && defaultConnValue(m) == name {
 			lines[i] = fmt.Sprintf(`%sdefault_connection_name = ""`, m[1])
 			break
 		}

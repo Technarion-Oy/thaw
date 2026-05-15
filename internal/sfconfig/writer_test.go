@@ -489,6 +489,146 @@ account = "dev-account"
 	}
 }
 
+func TestSaveProfile_PreservesCommentsAndUnknownKeys(t *testing.T) {
+	dir := t.TempDir()
+	initial := `[connections.dev]
+account = "myorg"
+# This is the service user
+user = "admin"
+custom_timeout = "30"
+
+# Keep this note
+custom_flag = "true"
+`
+	path := writeTestFile(t, dir, "config.toml", initial)
+
+	err := SaveProfile(path, Connection{
+		Name:    "dev",
+		Account: "myorg-updated",
+		User:    "admin",
+		Role:    "SYSADMIN",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	content := readTestFile(t, path)
+	if !strings.Contains(content, `account = "myorg-updated"`) {
+		t.Error("account not updated")
+	}
+	if !strings.Contains(content, `role = "SYSADMIN"`) {
+		t.Error("new role not added")
+	}
+	if !strings.Contains(content, `custom_timeout = "30"`) {
+		t.Error("unknown key custom_timeout was lost")
+	}
+	if !strings.Contains(content, `custom_flag = "true"`) {
+		t.Error("unknown key custom_flag was lost")
+	}
+	if !strings.Contains(content, "# This is the service user") {
+		t.Error("intra-section comment was lost")
+	}
+	if !strings.Contains(content, "# Keep this note") {
+		t.Error("second intra-section comment was lost")
+	}
+}
+
+func TestDeleteProfile_ClearsDefault_SingleQuoted(t *testing.T) {
+	dir := t.TempDir()
+	initial := `default_connection_name = 'dev'
+
+[connections.dev]
+account = "dev-account"
+
+[connections.prod]
+account = "prod-account"
+`
+	path := writeTestFile(t, dir, "config.toml", initial)
+
+	err := DeleteProfile(path, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	content := readTestFile(t, path)
+	if !strings.Contains(content, `default_connection_name = ""`) {
+		t.Error("default_connection_name was not cleared for single-quoted value")
+	}
+}
+
+func TestDeleteProfile_ClearsDefault_BareValue(t *testing.T) {
+	dir := t.TempDir()
+	initial := `default_connection_name = dev
+
+[connections.dev]
+account = "dev-account"
+
+[connections.prod]
+account = "prod-account"
+`
+	path := writeTestFile(t, dir, "config.toml", initial)
+
+	err := DeleteProfile(path, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	content := readTestFile(t, path)
+	if !strings.Contains(content, `default_connection_name = ""`) {
+		t.Error("default_connection_name was not cleared for bare value")
+	}
+}
+
+func TestSetDefaultProfile_SingleQuoted(t *testing.T) {
+	dir := t.TempDir()
+	initial := `default_connection_name = 'dev'
+
+[connections.dev]
+account = "dev-account"
+
+[connections.prod]
+account = "prod-account"
+`
+	path := writeTestFile(t, dir, "config.toml", initial)
+
+	err := SetDefaultProfile(path, "prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	content := readTestFile(t, path)
+	if !strings.Contains(content, `default_connection_name = "prod"`) {
+		t.Error("default not updated from single-quoted value")
+	}
+}
+
+func TestRenameProfile_BareDefault(t *testing.T) {
+	dir := t.TempDir()
+	initial := `default_connection_name = dev
+
+[connections.dev]
+account = "dev-account"
+user = "admin"
+
+[connections.prod]
+account = "prod-account"
+`
+	path := writeTestFile(t, dir, "config.toml", initial)
+
+	err := RenameProfile(path, "dev", "staging")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	content := readTestFile(t, path)
+	if !strings.Contains(content, `default_connection_name = "staging"`) {
+		t.Error("default_connection_name was not updated from bare value")
+	}
+	if !strings.Contains(content, "[connections.staging]") {
+		t.Error("section header not renamed")
+	}
+}
+
 func TestRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
