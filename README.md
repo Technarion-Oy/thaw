@@ -669,7 +669,8 @@ thaw/
 │   ├── dbt/
 │   │   ├── generator.go           # Pure dbt project file generator (no Snowflake calls)
 │   │   └── generator_test.go      # 56 unit tests for generator, source names, and SQL stubs
-│   ├── sqleditor/                 # SQL diagnostics & JOIN condition engine
+│   ├── sqleditor/                 # SQL diagnostics & JOIN condition engine (Wails-bound Service)
+│   │   ├── service.go             # Wails-bound Service struct (IPC endpoints for all SQL analysis methods)
 │   │   ├── sqleditor.go           # ValidateSyntax, ParseJoinTables, ComputeJoinOnConditions, ValidateSemantics
 │   │   ├── patterns.go            # 50+ Go-side regex validation patterns for Snowflake DDL/DCL
 │   │   └── sqleditor_test.go

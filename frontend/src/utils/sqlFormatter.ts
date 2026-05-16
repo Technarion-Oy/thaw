@@ -7,7 +7,7 @@
  */
 
 import { format as sfFormat } from "sql-formatter";
-import { ApplySqlCasing } from "../../wailsjs/go/main/App";
+import { ApplySqlCasing } from "../../wailsjs/go/sqleditor/Service";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

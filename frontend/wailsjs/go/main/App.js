@@ -54,18 +54,6 @@ export function AnalyzeMigration(arg1, arg2) {
   return window['go']['main']['App']['AnalyzeMigration'](arg1, arg2);
 }
 
-export function AnalyzeSqlSemantics(arg1, arg2, arg3) {
-  return window['go']['main']['App']['AnalyzeSqlSemantics'](arg1, arg2, arg3);
-}
-
-export function AnalyzeSqlSyntax(arg1) {
-  return window['go']['main']['App']['AnalyzeSqlSyntax'](arg1);
-}
-
-export function ApplySqlCasing(arg1, arg2, arg3, arg4) {
-  return window['go']['main']['App']['ApplySqlCasing'](arg1, arg2, arg3, arg4);
-}
-
 export function BuildAlterStageSql(arg1) {
   return window['go']['main']['App']['BuildAlterStageSql'](arg1);
 }
@@ -180,10 +168,6 @@ export function CloneProfile(arg1, arg2) {
 
 export function CloseTabSession(arg1) {
   return window['go']['main']['App']['CloseTabSession'](arg1);
-}
-
-export function ComputeJoinOnConditions(arg1) {
-  return window['go']['main']['App']['ComputeJoinOnConditions'](arg1);
 }
 
 export function Connect(arg1) {
@@ -330,10 +314,6 @@ export function FetchNotebookContent(arg1, arg2, arg3) {
   return window['go']['main']['App']['FetchNotebookContent'](arg1, arg2, arg3);
 }
 
-export function FindSqlTokenPositions(arg1, arg2, arg3) {
-  return window['go']['main']['App']['FindSqlTokenPositions'](arg1, arg2, arg3);
-}
-
 export function GenerateKeyPair(arg1, arg2, arg3) {
   return window['go']['main']['App']['GenerateKeyPair'](arg1, arg2, arg3);
 }
@@ -348,10 +328,6 @@ export function GetAIConfig() {
 
 export function GetAISuggestion(arg1) {
   return window['go']['main']['App']['GetAISuggestion'](arg1);
-}
-
-export function GetActiveFunctionCall(arg1) {
-  return window['go']['main']['App']['GetActiveFunctionCall'](arg1);
 }
 
 export function GetAdminLockedFlags() {
@@ -434,10 +410,6 @@ export function GetGitFileContent(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['GetGitFileContent'](arg1, arg2, arg3, arg4);
 }
 
-export function GetIdentifierAtColumn(arg1, arg2) {
-  return window['go']['main']['App']['GetIdentifierAtColumn'](arg1, arg2);
-}
-
 export function GetIntegrationProperties(arg1) {
   return window['go']['main']['App']['GetIntegrationProperties'](arg1);
 }
@@ -502,10 +474,6 @@ export function GetQuotedIdentifiersIgnoreCase() {
   return window['go']['main']['App']['GetQuotedIdentifiersIgnoreCase']();
 }
 
-export function GetReservedKeywords() {
-  return window['go']['main']['App']['GetReservedKeywords']();
-}
-
 export function GetRoleDDL(arg1) {
   return window['go']['main']['App']['GetRoleDDL'](arg1);
 }
@@ -520,10 +488,6 @@ export function GetSchemaForeignKeys(arg1, arg2) {
 
 export function GetSchemaRetentionDays(arg1, arg2) {
   return window['go']['main']['App']['GetSchemaRetentionDays'](arg1, arg2);
-}
-
-export function GetScriptingCompletions(arg1, arg2) {
-  return window['go']['main']['App']['GetScriptingCompletions'](arg1, arg2);
 }
 
 export function GetSessionContext(arg1) {
@@ -542,20 +506,12 @@ export function GetSnowflakeCLIConfigPath() {
   return window['go']['main']['App']['GetSnowflakeCLIConfigPath']();
 }
 
-export function GetSnowflakeKeywords() {
-  return window['go']['main']['App']['GetSnowflakeKeywords']();
-}
-
 export function GetSnowparkConfig() {
   return window['go']['main']['App']['GetSnowparkConfig']();
 }
 
 export function GetSnowsightURL() {
   return window['go']['main']['App']['GetSnowsightURL']();
-}
-
-export function GetSqlStatementRanges(arg1) {
-  return window['go']['main']['App']['GetSqlStatementRanges'](arg1);
 }
 
 export function GetStageFilePreview(arg1, arg2) {
@@ -882,14 +838,6 @@ export function NotebookUseContext(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['NotebookUseContext'](arg1, arg2, arg3, arg4, arg5);
 }
 
-export function ParseJoinTableRefs(arg1) {
-  return window['go']['main']['App']['ParseJoinTableRefs'](arg1);
-}
-
-export function ParseSignatureParams(arg1) {
-  return window['go']['main']['App']['ParseSignatureParams'](arg1);
-}
-
 export function PickCACertFile() {
   return window['go']['main']['App']['PickCACertFile']();
 }
@@ -1152,22 +1100,6 @@ export function UseSchema(arg1, arg2) {
 
 export function UseWarehouse(arg1, arg2) {
   return window['go']['main']['App']['UseWarehouse'](arg1, arg2);
-}
-
-export function ValidateBareColumnRefs(arg1) {
-  return window['go']['main']['App']['ValidateBareColumnRefs'](arg1);
-}
-
-export function ValidateDataTypes(arg1, arg2) {
-  return window['go']['main']['App']['ValidateDataTypes'](arg1, arg2);
-}
-
-export function ValidateSnowflakePatterns(arg1, arg2) {
-  return window['go']['main']['App']['ValidateSnowflakePatterns'](arg1, arg2);
-}
-
-export function ValidateTablesExist(arg1) {
-  return window['go']['main']['App']['ValidateTablesExist'](arg1);
 }
 
 export function VenvFolderExists() {

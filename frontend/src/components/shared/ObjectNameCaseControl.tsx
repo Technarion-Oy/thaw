@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { Alert, Radio } from "antd";
-import { GetReservedKeywords } from "../../../wailsjs/go/main/App";
+import { GetSnowflakeKeywords } from "../../../wailsjs/go/sqleditor/Service";
 
 // ── Identifier helpers ────────────────────────────────────────────────────────
 
@@ -22,14 +22,14 @@ export const UNQUOTED_IDENT_RE = /^[A-Za-z_][A-Za-z0-9_$]{0,254}$/;
 
 /**
  * Module-level cache of Snowflake reserved keywords (uppercased).
- * Loaded once from the backend via GetReservedKeywords() so that
+ * Loaded once from the backend via GetSnowflakeKeywords() so that
  * needsQuoting() uses the same list as the Go NeedsQuoting() function.
  * Starts empty; populated asynchronously on first module import.
  */
 let _reservedKeywords: Set<string> = new Set();
 
 (function loadReservedKeywords() {
-  GetReservedKeywords()
+  GetSnowflakeKeywords()
     .then((kws) => {
       _reservedKeywords = new Set((kws ?? []).map((k) => k.toUpperCase()));
     })
