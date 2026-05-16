@@ -1397,7 +1397,6 @@ func (a *App) GetQuotedIdentifiersIgnoreCase() (bool, error) {
 	return a.client.GetQuotedIdentifiersIgnoreCase(a.ctx)
 }
 
-
 // ListRoles returns all roles visible to the current role (SHOW ROLES).
 // Used for informational displays and user-management role pickers.
 func (a *App) ListRoles() ([]string, error) {
