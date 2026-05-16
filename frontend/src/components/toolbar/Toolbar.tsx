@@ -55,7 +55,7 @@ export interface ToolbarProps {
   onNewNotebook: () => void;
   /** Handler: save the current tab. */
   onSave: () => void;
-  /** Context-specific toolbar content rendered between action buttons and session selectors. */
+  /** Context-specific toolbar content rendered on a second row below the primary controls. */
   contextSlot?: ReactNode;
 }
 
@@ -91,195 +91,197 @@ export default function Toolbar({
         padding: "6px 12px",
         borderBottom: "1px solid var(--border)",
         display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
+        flexDirection: "column",
+        gap: contextSlot ? 4 : 0,
         background: "var(--bg-raised)",
       }}
     >
-      {/* ── Left: execution controls + action buttons ── */}
-      <Space size={4}>
-        {isRunning ? (
-          <Button
-            danger
-            icon={<StopOutlined />}
-            loading={isCancelling}
-            onClick={onCancel}
-            size="small"
-          >
-            {isCancelling ? "Cancelling\u2026" : "Cancel"}
-          </Button>
-        ) : (
-          <Tooltip title={!isConnected ? "Connect to Snowflake to run queries" : undefined}>
+      {/* ── Primary row: execution + file actions + session selectors ── */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <Space size={4}>
+          {isRunning ? (
             <Button
-              type="primary"
-              icon={<PlayCircleOutlined />}
-              onClick={onRun}
+              danger
+              icon={<StopOutlined />}
+              loading={isCancelling}
+              onClick={onCancel}
               size="small"
-              disabled={!isConnected}
             >
-              Run
+              {isCancelling ? "Cancelling\u2026" : "Cancel"}
             </Button>
+          ) : (
+            <Tooltip title={!isConnected ? "Connect to Snowflake to run queries" : undefined}>
+              <Button
+                type="primary"
+                icon={<PlayCircleOutlined />}
+                onClick={onRun}
+                size="small"
+                disabled={!isConnected}
+              >
+                Run
+              </Button>
+            </Tooltip>
+          )}
+          <Text type="secondary" style={{ fontSize: 11, whiteSpace: "nowrap" }}>
+            {isRunning
+              ? "Esc to cancel"
+              : selectedSql.trim()
+              ? "\u2318\u21B5 \u00B7 running selection"
+              : "\u2318\u21B5 to run"}
+          </Text>
+
+          {/* Separator */}
+          <div style={{ width: 1, height: 20, background: "var(--border)", margin: "0 4px" }} />
+
+          {/* Action buttons */}
+          <Tooltip title="New SQL query">
+            <Button
+              icon={<FileAddOutlined />}
+              size="small"
+              onClick={onNewSql}
+              style={{ width: 28, padding: 0 }}
+            />
           </Tooltip>
-        )}
-        <Text type="secondary" style={{ fontSize: 11, whiteSpace: "nowrap" }}>
-          {isRunning
-            ? "Esc to cancel"
-            : selectedSql.trim()
-            ? "\u2318\u21B5 \u00B7 running selection"
-            : "\u2318\u21B5 to run"}
-        </Text>
+          <Tooltip title="New notebook">
+            <Button
+              icon={<BookOutlined />}
+              size="small"
+              onClick={onNewNotebook}
+              style={{ width: 28, padding: 0 }}
+            />
+          </Tooltip>
+          <Tooltip title="Save (\u2318S)">
+            <Button
+              icon={<SaveOutlined />}
+              size="small"
+              onClick={onSave}
+              style={{ width: 28, padding: 0 }}
+            />
+          </Tooltip>
+        </Space>
 
-        {/* Separator */}
-        <div style={{ width: 1, height: 20, background: "var(--border)", margin: "0 4px" }} />
-
-        {/* Action buttons */}
-        <Tooltip title="New SQL query">
+        {/* ── Right: connect button or session context ── */}
+        {!isConnected ? (
           <Button
-            icon={<FileAddOutlined />}
+            icon={<LinkOutlined />}
+            type="primary"
             size="small"
-            onClick={onNewSql}
-            style={{ width: 28, padding: 0 }}
-          />
-        </Tooltip>
-        <Tooltip title="New notebook">
-          <Button
-            icon={<BookOutlined />}
-            size="small"
-            onClick={onNewNotebook}
-            style={{ width: 28, padding: 0 }}
-          />
-        </Tooltip>
-        <Tooltip title="Save (⌘S)">
-          <Button
-            icon={<SaveOutlined />}
-            size="small"
-            onClick={onSave}
-            style={{ width: 28, padding: 0 }}
-          />
-        </Tooltip>
+            onClick={() => window.dispatchEvent(new Event("thaw:connect"))}
+          >
+            Connect to Snowflake
+          </Button>
+        ) : null}
+        <Space size={6} style={{ display: isConnected ? undefined : "none" }}>
+          {/* Session selectors: two rows (role+wh / db+schema) */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <Space size={6}>
+              {/* Role selector */}
+              <Tooltip title={role ? `Role: ${role}` : "Active role"}>
+                <Select
+                  size="small"
+                  style={selectStyle}
+                  value={role || undefined}
+                  placeholder={loadingContext ? "\u2026" : "Role"}
+                  loading={loadingRoles || switchingRole}
+                  showSearch
+                  optionFilterProp="label"
+                  onChange={switchRole}
+                  onDropdownVisibleChange={(open) => { if (open) loadRoles(); }}
+                  options={roles.map((r) => ({ value: r, label: r }))}
+                  dropdownStyle={{ minWidth: 200 }}
+                />
+              </Tooltip>
 
-        {/* Context-specific slot (notebook kernel status, ER design button, etc.) */}
-        {contextSlot}
-      </Space>
+              {/* Warehouse selector */}
+              <Tooltip title={warehouse ? `Warehouse: ${warehouse}` : "Active warehouse"}>
+                <Select
+                  size="small"
+                  style={selectStyle}
+                  value={warehouse || undefined}
+                  placeholder={loadingContext ? "\u2026" : "Warehouse"}
+                  loading={loadingWarehouses || switchingWarehouse}
+                  showSearch
+                  optionFilterProp="label"
+                  onChange={switchWarehouse}
+                  onDropdownVisibleChange={(open) => { if (open) loadWarehouses(); }}
+                  options={warehouses.map((w) => ({ value: w, label: w }))}
+                  dropdownStyle={{ minWidth: 200 }}
+                />
+              </Tooltip>
+            </Space>
 
-      {/* ── Center/Right: connect button or session context ── */}
-      {!isConnected ? (
-        <Button
-          icon={<LinkOutlined />}
-          type="primary"
-          size="small"
-          onClick={() => window.dispatchEvent(new Event("thaw:connect"))}
-        >
-          Connect to Snowflake
-        </Button>
-      ) : null}
-      <Space size={6} style={{ display: isConnected ? undefined : "none" }}>
-        {/* Session selectors: two rows (role+wh / db+schema) */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-          <Space size={6}>
-            {/* Role selector */}
-            <Tooltip title={role ? `Role: ${role}` : "Active role"}>
-              <Select
-                size="small"
-                style={selectStyle}
-                value={role || undefined}
-                placeholder={loadingContext ? "\u2026" : "Role"}
-                loading={loadingRoles || switchingRole}
-                showSearch
-                optionFilterProp="label"
-                onChange={switchRole}
-                onDropdownVisibleChange={(open) => { if (open) loadRoles(); }}
-                options={roles.map((r) => ({ value: r, label: r }))}
-                dropdownStyle={{ minWidth: 200 }}
-              />
-            </Tooltip>
+            <Space size={6}>
+              {/* Database selector */}
+              <Tooltip title={database ? `Database: ${database}` : "Active database"}>
+                <Select
+                  size="small"
+                  style={selectStyle}
+                  value={database || undefined}
+                  placeholder={loadingContext ? "\u2026" : "Database"}
+                  loading={loadingDatabases || switchingDatabase}
+                  showSearch
+                  optionFilterProp="label"
+                  onChange={switchDatabase}
+                  onDropdownVisibleChange={(open) => { if (open) loadDatabases(); }}
+                  options={databases.map((d) => ({ value: d, label: d }))}
+                  dropdownStyle={{ minWidth: 200 }}
+                />
+              </Tooltip>
 
-            {/* Warehouse selector */}
-            <Tooltip title={warehouse ? `Warehouse: ${warehouse}` : "Active warehouse"}>
-              <Select
-                size="small"
-                style={selectStyle}
-                value={warehouse || undefined}
-                placeholder={loadingContext ? "\u2026" : "Warehouse"}
-                loading={loadingWarehouses || switchingWarehouse}
-                showSearch
-                optionFilterProp="label"
-                onChange={switchWarehouse}
-                onDropdownVisibleChange={(open) => { if (open) loadWarehouses(); }}
-                options={warehouses.map((w) => ({ value: w, label: w }))}
-                dropdownStyle={{ minWidth: 200 }}
-              />
-            </Tooltip>
-          </Space>
-
-          <Space size={6}>
-            {/* Database selector */}
-            <Tooltip title={database ? `Database: ${database}` : "Active database"}>
-              <Select
-                size="small"
-                style={selectStyle}
-                value={database || undefined}
-                placeholder={loadingContext ? "\u2026" : "Database"}
-                loading={loadingDatabases || switchingDatabase}
-                showSearch
-                optionFilterProp="label"
-                onChange={switchDatabase}
-                onDropdownVisibleChange={(open) => { if (open) loadDatabases(); }}
-                options={databases.map((d) => ({ value: d, label: d }))}
-                dropdownStyle={{ minWidth: 200 }}
-              />
-            </Tooltip>
-
-            {/* Schema selector */}
-            <Tooltip title={schema ? `Schema: ${schema}` : "Active schema"}>
-              <Select
-                size="small"
-                style={selectStyle}
-                value={schema || undefined}
-                placeholder={loadingContext ? "\u2026" : "Schema"}
-                loading={loadingSchemas || switchingSchema}
-                showSearch
-                optionFilterProp="label"
-                onChange={switchSchema}
-                onDropdownVisibleChange={(open) => { if (open) loadSchemas(); }}
-                options={schemas.map((s) => ({ value: s, label: s }))}
-                dropdownStyle={{ minWidth: 200 }}
-              />
-            </Tooltip>
-          </Space>
-        </div>
-
-        {params && (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-            {(currentUser || currentRegion) && (
-              <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "monospace", lineHeight: 1 }}>
-                {[currentUser, currentRegion].filter(Boolean).join(" \u00B7 ")}
-              </div>
-            )}
-            <Dropdown
-              trigger={["contextMenu"]}
-              menu={{
-                items: [
-                  { key: "session-props", label: "Session Properties", onClick: onOpenSessionProperties },
-                  { key: "snowsight", label: "Open Snowsight\u2026", onClick: onOpenSnowsight },
-                ],
-              }}
-            >
-              <Tag color="blue" style={{ fontSize: 11, margin: 0, cursor: "context-menu" }}>
-                {params.account} \u00B7 {params.user}
-              </Tag>
-            </Dropdown>
+              {/* Schema selector */}
+              <Tooltip title={schema ? `Schema: ${schema}` : "Active schema"}>
+                <Select
+                  size="small"
+                  style={selectStyle}
+                  value={schema || undefined}
+                  placeholder={loadingContext ? "\u2026" : "Schema"}
+                  loading={loadingSchemas || switchingSchema}
+                  showSearch
+                  optionFilterProp="label"
+                  onChange={switchSchema}
+                  onDropdownVisibleChange={(open) => { if (open) loadSchemas(); }}
+                  options={schemas.map((s) => ({ value: s, label: s }))}
+                  dropdownStyle={{ minWidth: 200 }}
+                />
+              </Tooltip>
+            </Space>
           </div>
-        )}
-        <Button
-          icon={<DisconnectOutlined />}
-          size="small"
-          danger
-          onClick={onDisconnect}
-        >
-          Disconnect
-        </Button>
-      </Space>
+
+          {params && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+              {(currentUser || currentRegion) && (
+                <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "monospace", lineHeight: 1 }}>
+                  {[currentUser, currentRegion].filter(Boolean).join(" \u00B7 ")}
+                </div>
+              )}
+              <Dropdown
+                trigger={["contextMenu"]}
+                menu={{
+                  items: [
+                    { key: "session-props", label: "Session Properties", onClick: onOpenSessionProperties },
+                    { key: "snowsight", label: "Open Snowsight\u2026", onClick: onOpenSnowsight },
+                  ],
+                }}
+              >
+                <Tag color="blue" style={{ fontSize: 11, margin: 0, cursor: "context-menu" }}>
+                  {params.account} \u00B7 {params.user}
+                </Tag>
+              </Dropdown>
+            </div>
+          )}
+          <Button
+            icon={<DisconnectOutlined />}
+            size="small"
+            danger
+            onClick={onDisconnect}
+          >
+            Disconnect
+          </Button>
+        </Space>
+      </div>
+
+      {/* ── Second row: context-specific controls (notebook, ER diagram, etc.) ── */}
+      {contextSlot}
     </div>
   );
 }

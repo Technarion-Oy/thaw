@@ -16,6 +16,7 @@ import {
   ReloadOutlined,
   PlusOutlined,
   CloudUploadOutlined,
+  WarningOutlined,
 } from "@ant-design/icons";
 
 const { Text } = Typography;
@@ -43,9 +44,6 @@ export default function NotebookToolbarSlot({
 }: NotebookToolbarSlotProps) {
   return (
     <Space size={4}>
-      {/* Separator */}
-      <div style={{ width: 1, height: 20, background: "var(--border)", margin: "0 4px" }} />
-
       <Tooltip title="Run all cells">
         <Button
           icon={<PlayCircleOutlined />}
@@ -87,7 +85,9 @@ export default function NotebookToolbarSlot({
         <Tag color="success" style={{ fontSize: 10 }}>Kernel ready</Tag>
       )}
       {kernelError && (
-        <Tag color="error" style={{ fontSize: 10 }} title={kernelError}>Kernel error</Tag>
+        <Tooltip title={kernelError}>
+          <WarningOutlined style={{ color: "#ff4d4f", fontSize: 14 }} />
+        </Tooltip>
       )}
     </Space>
   );
