@@ -281,6 +281,27 @@ export namespace config {
 		    return a;
 		}
 	}
+	
+	export class SessionConfig {
+	    maxSessions: number;
+	    maxOpenConnsPerSession: number;
+	    maxIdleConnsPerSession: number;
+	    initMode: string;
+	    idleTimeoutMinutes: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.maxSessions = source["maxSessions"];
+	        this.maxOpenConnsPerSession = source["maxOpenConnsPerSession"];
+	        this.maxIdleConnsPerSession = source["maxIdleConnsPerSession"];
+	        this.initMode = source["initMode"];
+	        this.idleTimeoutMinutes = source["idleTimeoutMinutes"];
+	    }
+	}
 
 }
 

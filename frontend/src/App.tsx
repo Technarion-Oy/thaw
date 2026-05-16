@@ -20,6 +20,7 @@ import SnowparkSetupModal from "./components/snowpark/SnowparkSetupModal";
 import EditorPreferencesModal from "./components/editor/EditorPreferencesModal";
 import FeatureFlagsModal from "./components/settings/FeatureFlagsModal";
 import NotebookPrefsModal from "./components/notebook/NotebookPrefsModal";
+import SessionManagementModal from "./components/settings/SessionManagementModal";
 import { IsConnected } from "../wailsjs/go/main/App";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../wailsjs/runtime/runtime";
 import { useThemeStore, type ThemePreference } from "./store/themeStore";
@@ -43,6 +44,7 @@ export default function App() {
   const [snowparkSetupOpen, setSnowparkSetupOpen]       = useState(false);
   const [featureFlagsOpen, setFeatureFlagsOpen]         = useState(false);
   const [notebookPrefsOpen, setNotebookPrefsOpen]       = useState(false);
+  const [sessionMgmtOpen, setSessionMgmtOpen]           = useState(false);
   const diffError    = useDiffStore((s) => s.error);
   const clearDiffError = useDiffStore((s) => s.clearError);
 
@@ -139,6 +141,12 @@ export default function App() {
   // Listen for "Notebook Preferences…" menu event.
   useEffect(() => {
     const off = EventsOn("menu:notebook-preferences", () => setNotebookPrefsOpen(true));
+    return () => off();
+  }, []);
+
+  // Listen for "Session Management…" menu event.
+  useEffect(() => {
+    const off = EventsOn("menu:session-management", () => setSessionMgmtOpen(true));
     return () => off();
   }, []);
 
@@ -265,6 +273,9 @@ export default function App() {
         )}
         {notebookPrefsOpen && (
           <NotebookPrefsModal onClose={() => setNotebookPrefsOpen(false)} />
+        )}
+        {sessionMgmtOpen && (
+          <SessionManagementModal onClose={() => setSessionMgmtOpen(false)} />
         )}
       </AntApp>
     </ConfigProvider>

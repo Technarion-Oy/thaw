@@ -649,6 +649,13 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
   - **Variables** section — all rows from `SHOW VARIABLES`; editing works identically; changes apply via `SET variable = value`
   - String-type values are automatically single-quoted in the generated SQL; booleans and numbers are passed raw
   - **Copy** button copies all parameters and variables to the clipboard
+- **Session Management** — open **View → Advanced → Session Management…** to configure:
+  - **Max concurrent sessions** (1–32) — LRU cap; excess idle sessions are evicted
+  - **Max open connections per session** (1–16) — `database/sql` MaxOpenConns per tab pool
+  - **Max idle connections per session** (1–16) — `database/sql` MaxIdleConns per tab pool
+  - **Init mode** (lazy / eager) — whether sessions are created on first query or immediately when a tab opens
+  - **Idle timeout** (0–480 minutes) — time-based eviction alongside LRU; 0 = LRU only
+  - **Reset to Defaults** — restores all values to CPU-based defaults
 
 ---
 

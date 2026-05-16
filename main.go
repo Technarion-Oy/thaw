@@ -166,6 +166,12 @@ func buildMenu(app *App) *menu.Menu {
 		wailsruntime.EventsEmit(app.ctx, "menu:feature-flags")
 	})
 
+	viewMenu.AddSeparator()
+	advancedMenu := viewMenu.AddSubmenu("Advanced")
+	advancedMenu.AddText("Session Management…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:session-management")
+	})
+
 	// ── AI ────────────────────────────────────────────────────────────────────
 	aiMenu := appMenu.AddSubmenu("AI")
 	aiMenu.AddText("Configure AI…", nil, func(_ *menu.CallbackData) {

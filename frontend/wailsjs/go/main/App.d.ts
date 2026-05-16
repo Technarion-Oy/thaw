@@ -208,6 +208,8 @@ export function GetDatabaseRetentionDays(arg1:string):Promise<number>;
 
 export function GetDatabaseTableSummary(arg1:string):Promise<Array<main.TableSummary>>;
 
+export function GetDefaultSessionConfig():Promise<config.SessionConfig>;
+
 export function GetERDiagramData(arg1:string):Promise<snowflake.ERDiagramData>;
 
 export function GetEditorPrefs():Promise<config.EditorPrefs>;
@@ -266,7 +268,11 @@ export function GetSchemaForeignKeys(arg1:string,arg2:string):Promise<Array<snow
 
 export function GetSchemaRetentionDays(arg1:string,arg2:string):Promise<number>;
 
+export function GetSessionConfig():Promise<config.SessionConfig>;
+
 export function GetSessionContext(arg1:string):Promise<snowflake.SessionContext>;
+
+export function GetSessionInitMode():Promise<string>;
 
 export function GetSessionParameters():Promise<Array<main.SessionParam>>;
 
@@ -509,6 +515,8 @@ export function SaveNotebookPrefs(arg1:config.NotebookPrefs):Promise<void>;
 export function SavePipRegistryConfig(arg1:config.PipRegistryConfig):Promise<void>;
 
 export function SaveProfile(arg1:sfconfig.Connection):Promise<void>;
+
+export function SaveSessionConfig(arg1:config.SessionConfig):Promise<void>;
 
 export function SaveSnowparkConfig(arg1:string):Promise<void>;
 

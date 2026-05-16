@@ -261,13 +261,16 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 
 	db := sql.OpenDB(sc)
 
-	// Restore full pool concurrency.  Every new connection the pool creates
-	// goes through sessionConnector.Connect, which applies the current role
-	// and warehouse — so there is no longer any need for a single connection.
-	db.SetMaxOpenConns(32)
-	db.SetMaxIdleConns(2)
+	// Keep a modest pool to avoid Snowflake session quota exhaustion.
+	// With ServerSessionKeepAlive=true, each pool connection holds a live
+	// Snowflake session that persists until Snowflake's 4h timeout — even
+	// after the Go side closes it.  Setting MaxIdleConns equal to
+	// MaxOpenConns prevents connection churn that creates zombie sessions.
+	// Use SetPoolLimits(32, 32) for bulk operations like DDL export.
+	db.SetMaxOpenConns(8)
+	db.SetMaxIdleConns(8)
 	db.SetConnMaxLifetime(30 * time.Minute)
-	db.SetConnMaxIdleTime(3 * time.Minute)
+	db.SetConnMaxIdleTime(5 * time.Minute)
 
 	if err := db.PingContext(ctx); err != nil {
 		db.Close() //nolint:errcheck
@@ -289,6 +292,14 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 // IsAlive checks that the underlying connection is still usable.
 func (c *Client) IsAlive() bool {
 	return c.db.PingContext(context.Background()) == nil
+}
+
+// SetPoolLimits overrides the connection pool's MaxOpenConns and MaxIdleConns.
+// Tab sessions use smaller limits (e.g. 4/1) since they only run one query at
+// a time; the shared client keeps the default 32/2 for parallel DDL export.
+func (c *Client) SetPoolLimits(maxOpen, maxIdle int) {
+	c.db.SetMaxOpenConns(maxOpen)
+	c.db.SetMaxIdleConns(maxIdle)
 }
 
 // Close terminates the connection pool.
