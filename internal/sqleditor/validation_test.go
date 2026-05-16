@@ -928,6 +928,20 @@ func TestValidateBareColumnRefs_Invalid(t *testing.T) {
 		{"INSERT wrong col with quoted col in CREATE TABLE",
 			"CREATE TABLE t1 (\n  \"CUSTOMER_ID\" INT,\n  FIRST_NAME VARCHAR\n);\nINSERT INTO t1 (\"CUSTOMER_ID\", FAKE_COL) SELECT 1, 'a';",
 			[]string{"FAKE_COL"}},
+
+		// Regression: bare reference to a case-sensitive quoted column must be flagged.
+		// "customer_id" (quoted, lowercase) cannot be referenced as bare customer_id
+		// because Snowflake normalizes bare identifiers to CUSTOMER_ID which ≠ customer_id.
+		{"SELECT bare ref to quoted lowercase col",
+			"CREATE OR REPLACE TABLE RAW_CUSTOMERS1 (\n  \"customer_id\" INT,\n  FIRST_NAME VARCHAR\n);\nCREATE OR REPLACE VIEW VW AS\nSELECT\n  customer_id,\n  FIRST_NAME\nFROM RAW_CUSTOMERS1;",
+			[]string{"CUSTOMER_ID"}},
+		{"SELECT bare ref to quoted lowercase col simple",
+			"CREATE TABLE t1 (\n  \"customer_id\" INT,\n  name VARCHAR\n);\nSELECT customer_id, name FROM t1;",
+			[]string{"CUSTOMER_ID"}},
+		// User-reported scenario: CREATE TABLE + CREATE VIEW referencing quoted col with bare ident.
+		{"CREATE VIEW bare ref to quoted lowercase col",
+			"CREATE OR REPLACE TABLE RAW_CUSTOMERS1 (\n  \"customer_id\" INT,\n  FIRST_NAME VARCHAR,\n  LAST_NAME VARCHAR,\n  REGISTRATION_DATE DATE,\n  STATUS VARCHAR\n);\n\nCREATE OR REPLACE VIEW VW_CLEAN_CUSTOMERS AS\nSELECT\n  customer_id,\n  UPPER(FIRST_NAME || ' ' || LAST_NAME) AS FULL_NAME,\n  REGISTRATION_DATE\nFROM RAW_CUSTOMERS1\nWHERE STATUS = 'ACTIVE';",
+			[]string{"CUSTOMER_ID"}},
 	}
 
 	req := ValidateBareColsRequest{

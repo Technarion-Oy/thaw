@@ -400,6 +400,57 @@ func lookupColsForRef(
 	return nil, false
 }
 
+// lookupColsForRefTagged is like lookupColsForRef but additionally reports
+// whether the returned columns came from the localColCache (fromLocal=true)
+// or from the colInfoCache/resolvedRefs metadata (fromLocal=false).
+func lookupColsForRefTagged(
+	name, db, schema string,
+	resolvedRefs []ResolvedRef,
+	colInfoCache, localColCache map[string][]ColInfo,
+	checkEq func(string, string) bool,
+) (cols []ColInfo, found bool, fromLocal bool) {
+	nameU := strings.ToUpper(name)
+
+	// If db+schema are fully qualified, look up directly.
+	if db != "" && schema != "" {
+		key := bcrCacheKey(strings.ToUpper(db), strings.ToUpper(schema), nameU)
+		if c, ok := colInfoCache[key]; ok {
+			return c, true, false
+		}
+		if c, ok := localColCache[key]; ok {
+			return c, true, true
+		}
+		return nil, false, false
+	}
+
+	// Try to resolve via resolvedRefs (Snowflake live objects).
+	for _, ref := range resolvedRefs {
+		if checkEq(ref.Name, name) &&
+			(db == "" || checkEq(ref.DB, db)) &&
+			(schema == "" || checkEq(ref.Schema, schema)) {
+			key := bcrCacheKey(strings.ToUpper(ref.DB), strings.ToUpper(ref.Schema), strings.ToUpper(ref.Name))
+			if c, ok := colInfoCache[key]; ok {
+				return c, true, false
+			}
+			break
+		}
+	}
+
+	// Fall back to local cache with schema.table or table-only key.
+	if schema != "" {
+		key := bcrCacheKey("", strings.ToUpper(schema), nameU)
+		if c, ok := localColCache[key]; ok {
+			return c, true, true
+		}
+	}
+	key := bcrCacheKey("", "", nameU)
+	if c, ok := localColCache[key]; ok {
+		return c, true, true
+	}
+
+	return nil, false, false
+}
+
 // validateInsertCols validates the explicit column list in an INSERT statement.
 // Only fires when the INSERT names columns: INSERT INTO t (c1, c2) VALUES ...
 func validateInsertCols(
@@ -583,9 +634,15 @@ func buildSingleQuoteMask(s string) []bool {
 // scanSelectClauseForUnknownCols finds identifiers in the SELECT clause that
 // are not qualified (preceded/followed by "."), not function calls (followed
 // by "("), not AS aliases, not numeric literals, and not inside single-quoted
-// string literals.  It returns each unknown name normalised to uppercase (for
+// string literals.  It returns each unknown name normalised via normIdent (for
 // use as a lookup key and search target).
-func scanSelectClauseForUnknownCols(clause string, knownCols map[string]struct{}) []string {
+//
+// Two known-column sets are used:
+//   - metaCols: columns from Snowflake metadata (case-insensitive, all uppercase keys)
+//   - localCols: columns from in-script CREATE TABLE (case-sensitive, keys from normIdent)
+//
+// A reference is valid if it matches either set with the appropriate semantics.
+func scanSelectClauseForUnknownCols(clause string, metaCols, localCols map[string]struct{}, ic bool) []string {
 	locs := reIdentOrQuoted.FindAllStringIndex(clause, -1)
 	if len(locs) == 0 {
 		return nil
@@ -636,16 +693,18 @@ func scanSelectClauseForUnknownCols(clause string, knownCols map[string]struct{}
 			continue
 		}
 
-		// Normalize to uppercase for case-insensitive column lookup
-		normName := strings.ToUpper(normIdent(raw, false))
+		// Normalize the identifier: bare identifiers are uppercased (Snowflake
+		// convention), quoted identifiers preserve case (unless ic=true).
+		normName := normIdent(raw, ic)
 
-		// NEW: Skip known SQL keywords to prevent flagging things like FROM, WHERE, etc.
-		if sqlAllKeywords[normName] {
+		// Skip known SQL keywords to prevent flagging things like FROM, WHERE, etc.
+		normUpper := strings.ToUpper(normName)
+		if sqlAllKeywords[normUpper] {
 			continue
 		}
 
-		// NEW: Skip date parts used as the first argument of date functions
-		if bcrDateParts[normName] {
+		// Skip date parts used as the first argument of date functions
+		if bcrDateParts[normUpper] {
 			if fn := GetActiveFunctionCall(clause[:start]); fn != nil {
 				if bcrDateFuncs[strings.ToUpper(fn.Name)] && fn.ParamIndex == 0 {
 					continue
@@ -653,7 +712,14 @@ func scanSelectClauseForUnknownCols(clause string, knownCols map[string]struct{}
 			}
 		}
 
-		if _, found := knownCols[normName]; !found {
+		// A reference is valid if:
+		//  - it matches the local in-script set exactly (case-sensitive), OR
+		//  - its uppercased form matches the metadata set (case-insensitive).
+		// When ic=true, both sets are already uppercased and normName is also
+		// uppercased, so the distinction disappears.
+		_, inLocal := localCols[normName]
+		_, inMeta := metaCols[strings.ToUpper(normName)]
+		if !inLocal && !inMeta {
 			if _, already := seen[normName]; !already {
 				seen[normName] = struct{}{}
 				missing = append(missing, normName)
@@ -663,13 +729,17 @@ func scanSelectClauseForUnknownCols(clause string, knownCols map[string]struct{}
 	return missing
 }
 
+// aliasColSets holds the meta (case-insensitive) and local (case-sensitive)
+// known-column sets for a single table alias.
+type aliasColSets struct{ meta, local map[string]struct{} }
+
 // scanAliasedColRefs scans clause for alias.column occurrences and returns
-// the column names that are NOT found in the alias's known-column set.
-// aliasColMap maps UPPERCASE alias → set of UPPERCASE known column names.
-// Only aliases that appear in aliasColMap are checked; all others are silently
-// skipped so that CTE aliases (whose column lists are unknown without an AST)
-// never produce false positives.
-func scanAliasedColRefs(clause string, aliasColMap map[string]map[string]struct{}) []string {
+// the column names that are NOT found in the alias's known-column sets.
+// aliasMap maps UPPERCASE alias → meta/local column sets (same distinction as
+// scanSelectClauseForUnknownCols).  Only aliases present in aliasMap are
+// checked; all others are silently skipped so that CTE aliases (whose column
+// lists are unknown without an AST) never produce false positives.
+func scanAliasedColRefs(clause string, aliasMap map[string]*aliasColSets, ic bool) []string {
 	locs := reIdentOrQuoted.FindAllStringIndex(clause, -1)
 	if len(locs) == 0 {
 		return nil
@@ -708,14 +778,16 @@ func scanAliasedColRefs(clause string, aliasColMap map[string]map[string]struct{
 		}
 		prevRaw := clause[prevStart:locs[i-1][1]]
 		aliasU := strings.ToUpper(normIdent(prevRaw, false))
-		knownCols, hasAlias := aliasColMap[aliasU]
+		sets, hasAlias := aliasMap[aliasU]
 		if !hasAlias {
 			continue // Alias not resolved to a cached table; skip.
 		}
 		colRaw := clause[start:end]
-		normName := strings.ToUpper(normIdent(colRaw, false))
+		normName := normIdent(colRaw, ic)
 		key := aliasU + "\x00" + normName
-		if _, found := knownCols[normName]; !found {
+		_, inLocal := sets.local[normName]
+		_, inMeta := sets.meta[strings.ToUpper(normName)]
+		if !inLocal && !inMeta {
 			if _, already := seen[key]; !already {
 				seen[key] = struct{}{}
 				missing = append(missing, normName)
@@ -756,15 +828,30 @@ func validateSelectCols(
 		}
 	}
 
-	// Build combined known columns from all FROM/JOIN tables.
-	knownCols := make(map[string]struct{})
+	// Build known-column sets from all FROM/JOIN tables.
+	// metaCols: columns from Snowflake metadata — uppercased (case-insensitive matching).
+	// localCols: columns from in-script CREATE TABLE — as-is from normIdent
+	// (case-sensitive for quoted, uppercase for bare).
+	metaCols := make(map[string]struct{})
+	localCols := make(map[string]struct{})
 	foundAnyTable := false
 	for _, t := range tables {
-		cols, ok := lookupColsForRef(t.name, t.db, t.schema, resolvedRefs, colInfoCache, localColCache, checkEq)
-		if ok {
-			foundAnyTable = true
+		cols, found, fromLocal := lookupColsForRefTagged(t.name, t.db, t.schema, resolvedRefs, colInfoCache, localColCache, checkEq)
+		if !found {
+			continue
+		}
+		foundAnyTable = true
+		if fromLocal {
 			for _, c := range cols {
-				knownCols[strings.ToUpper(c.Name)] = struct{}{}
+				key := c.Name
+				if ic {
+					key = strings.ToUpper(key)
+				}
+				localCols[key] = struct{}{}
+			}
+		} else {
+			for _, c := range cols {
+				metaCols[strings.ToUpper(c.Name)] = struct{}{}
 			}
 		}
 	}
@@ -776,16 +863,16 @@ func validateSelectCols(
 	selectClause := extractSelectClause(stripped[selLoc[1]:])
 
 	// Scan for unknown bare (unqualified) column refs.
-	missing := scanSelectClauseForUnknownCols(selectClause, knownCols)
+	missing := scanSelectClauseForUnknownCols(selectClause, metaCols, localCols, ic)
 
-	// NEW: Skip the name of the object being created (e.g. the view name)
+	// Skip the name of the object being created (e.g. the view name)
 	// to prevent false positives when a view has the same name as a column.
 	if m := reCreateTVMatch.FindStringSubmatch(raw); m != nil {
 		if parts := extractIdentParts(m[1], ic); len(parts) > 0 {
-			objNameU := strings.ToUpper(parts[len(parts)-1])
+			objName := parts[len(parts)-1] // already normalised by extractIdentParts
 			filtered := make([]string, 0, len(missing))
 			for _, m := range missing {
-				if m != objNameU {
+				if m != objName {
 					filtered = append(filtered, m)
 				}
 			}
@@ -794,8 +881,8 @@ func validateSelectCols(
 	}
 
 	// Also validate qualified column refs (alias.column) for aliases whose
-	// tables are in the column cache.  Build alias → per-table column set.
-	aliasColMap := make(map[string]map[string]struct{})
+	// tables are in the column cache.  Build alias → per-table column sets.
+	aliasMap := make(map[string]*aliasColSets)
 	for _, fm := range reFromJoinWithAlias.FindAllStringSubmatch(stripped, -1) {
 		rawAlias := fm[2]
 		if rawAlias == "" {
@@ -818,14 +905,28 @@ func validateSelectCols(
 		default:
 			continue
 		}
-		cols, ok := lookupColsForRef(tRef.name, tRef.db, tRef.schema, resolvedRefs, colInfoCache, localColCache, checkEq)
-		if !ok {
+		cols, found, fromLocal := lookupColsForRefTagged(tRef.name, tRef.db, tRef.schema, resolvedRefs, colInfoCache, localColCache, checkEq)
+		if !found {
 			continue // Table not cached; cannot validate — skip to avoid false positives.
 		}
-		aliasColMap[aliasU] = buildKnownColSet(cols, ic)
+		sets := &aliasColSets{meta: make(map[string]struct{}), local: make(map[string]struct{})}
+		if fromLocal {
+			for _, c := range cols {
+				key := c.Name
+				if ic {
+					key = strings.ToUpper(key)
+				}
+				sets.local[key] = struct{}{}
+			}
+		} else {
+			for _, c := range cols {
+				sets.meta[strings.ToUpper(c.Name)] = struct{}{}
+			}
+		}
+		aliasMap[aliasU] = sets
 	}
-	if len(aliasColMap) > 0 {
-		missing = append(missing, scanAliasedColRefs(selectClause, aliasColMap)...)
+	if len(aliasMap) > 0 {
+		missing = append(missing, scanAliasedColRefs(selectClause, aliasMap, ic)...)
 	}
 
 	if len(missing) == 0 {
