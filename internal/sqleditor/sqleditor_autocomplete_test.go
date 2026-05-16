@@ -1488,4 +1488,236 @@ SELECT  FROM RAW_CUSTOMERS1;`
 			t.Errorf("expected store object match, got %+v", ctx.ResolvedRefs[0])
 		}
 	})
+
+	// ── Scenarios from PR #255 acceptance tests ──────────────────────────────
+
+	t.Run("in-editor CREATE TABLE + alias dot-completion (cursor before FROM)", func(t *testing.T) {
+		// Simulates: user types "SELECT w." with cursor BEFORE "FROM widget w"
+		// The full statement text includes FROM clause — GetAutocompleteContextFull
+		// should find the table ref and in-editor table definition.
+		sql := "CREATE TABLE widget (\n    widget_id INT,\n    widget_name VARCHAR(100),\n    is_active BOOLEAN\n);\n\nSELECT w.\nFROM widget w;"
+
+		// Cursor at "SELECT w." — inside the SELECT statement
+		cursorOffset := strings.Index(sql, "SELECT w.") + len("SELECT w.")
+
+		req := AutocompleteContextRequest{
+			SQL:          sql,
+			CursorOffset: cursorOffset,
+			StoreObjects: nil,
+			Session:      &SessionContext{Database: "TEST_DB", Schema: "PUBLIC"},
+		}
+
+		ctx := GetAutocompleteContextFull(req)
+
+		// TableRefs should find "widget w" from the full current statement
+		if len(ctx.TableRefs) == 0 {
+			t.Fatal("expected TableRefs to include widget (from full statement)")
+		}
+		foundWidget := false
+		for _, ref := range ctx.TableRefs {
+			if strings.EqualFold(ref.Name, "WIDGET") && strings.EqualFold(ref.Alias, "W") {
+				foundWidget = true
+			}
+		}
+		if !foundWidget {
+			t.Errorf("expected WIDGET with alias W in TableRefs, got %+v", ctx.TableRefs)
+		}
+
+		// ResolvedRefs should resolve widget via session context
+		if len(ctx.ResolvedRefs) == 0 {
+			t.Fatal("expected ResolvedRefs to be non-empty")
+		}
+		foundResolved := false
+		for _, ref := range ctx.ResolvedRefs {
+			if strings.EqualFold(ref.Name, "WIDGET") {
+				foundResolved = true
+				if ref.DB != "TEST_DB" || ref.Schema != "PUBLIC" {
+					t.Errorf("expected TEST_DB.PUBLIC, got %s.%s", ref.DB, ref.Schema)
+				}
+				if ref.Alias != "W" && ref.Alias != "w" {
+					t.Errorf("expected alias W, got %s", ref.Alias)
+				}
+			}
+		}
+		if !foundResolved {
+			t.Errorf("WIDGET not found in ResolvedRefs: %+v", ctx.ResolvedRefs)
+		}
+
+		// InEditorTables should have widget with its columns
+		if len(ctx.InEditorTables) == 0 {
+			t.Fatal("expected InEditorTables to be non-empty")
+		}
+		foundTable := false
+		for _, tbl := range ctx.InEditorTables {
+			if strings.EqualFold(tbl.Name, "WIDGET") {
+				foundTable = true
+				if len(tbl.Cols) != 3 {
+					t.Errorf("expected 3 cols, got %d: %+v", len(tbl.Cols), tbl.Cols)
+				}
+			}
+		}
+		if !foundTable {
+			t.Errorf("WIDGET not found in InEditorTables: %+v", ctx.InEditorTables)
+		}
+	})
+
+	t.Run("multiple in-editor tables with JOIN", func(t *testing.T) {
+		sql := "CREATE TABLE dept (dept_id INT, dept_name VARCHAR(50));\nCREATE TABLE emp (emp_id INT, emp_name VARCHAR(100), dept_id INT);\n\nSELECT e.\nFROM emp e\nJOIN dept d ON e.dept_id = d.dept_id;"
+
+		cursorOffset := strings.Index(sql, "SELECT e.") + len("SELECT e.")
+
+		req := AutocompleteContextRequest{
+			SQL:          sql,
+			CursorOffset: cursorOffset,
+			StoreObjects: nil,
+			Session:      &SessionContext{Database: "MY_DB", Schema: "MY_SCH"},
+		}
+
+		ctx := GetAutocompleteContextFull(req)
+
+		// Should have both emp and dept in table refs
+		if len(ctx.TableRefs) < 2 {
+			t.Fatalf("expected at least 2 table refs, got %d: %+v", len(ctx.TableRefs), ctx.TableRefs)
+		}
+
+		// Should have both in-editor tables
+		if len(ctx.InEditorTables) != 2 {
+			t.Fatalf("expected 2 in-editor tables, got %d: %+v", len(ctx.InEditorTables), ctx.InEditorTables)
+		}
+
+		// emp should have 3 columns
+		for _, tbl := range ctx.InEditorTables {
+			if strings.EqualFold(tbl.Name, "EMP") {
+				if len(tbl.Cols) != 3 {
+					t.Errorf("expected 3 cols for EMP, got %d", len(tbl.Cols))
+				}
+			}
+			if strings.EqualFold(tbl.Name, "DEPT") {
+				if len(tbl.Cols) != 2 {
+					t.Errorf("expected 2 cols for DEPT, got %d", len(tbl.Cols))
+				}
+			}
+		}
+	})
+
+	t.Run("USE + CREATE TABLE + CTE combined scenario", func(t *testing.T) {
+		sql := `USE DATABASE GOVERNANCE;
+USE SCHEMA PUBLIC;
+
+CREATE TABLE summary (summary_id INT, total DECIMAL(18,2));
+
+WITH agg AS (
+    SELECT 1 AS key, 999 AS val
+)
+SELECT
+    s.
+FROM agg
+CROSS JOIN summary s;`
+
+		cursorOffset := strings.Index(sql, "    s.") + len("    s.")
+
+		req := AutocompleteContextRequest{
+			SQL:          sql,
+			CursorOffset: cursorOffset,
+			StoreObjects: nil,
+			Session:      &SessionContext{Database: "DEFAULT_DB", Schema: "DEFAULT_SCH"},
+		}
+
+		ctx := GetAutocompleteContextFull(req)
+
+		// UseContext should be GOVERNANCE.PUBLIC
+		if ctx.UseContext == nil || ctx.UseContext.Database != "GOVERNANCE" || ctx.UseContext.Schema != "PUBLIC" {
+			t.Errorf("expected UseContext GOVERNANCE.PUBLIC, got %+v", ctx.UseContext)
+		}
+
+		// InEditorTables should have summary with GOVERNANCE.PUBLIC qualification
+		foundSummary := false
+		for _, tbl := range ctx.InEditorTables {
+			if strings.EqualFold(tbl.Name, "SUMMARY") {
+				foundSummary = true
+				if tbl.DB != "GOVERNANCE" || tbl.Schema != "PUBLIC" {
+					t.Errorf("expected GOVERNANCE.PUBLIC for summary, got %s.%s", tbl.DB, tbl.Schema)
+				}
+				if len(tbl.Cols) != 2 {
+					t.Errorf("expected 2 cols for summary, got %d: %+v", len(tbl.Cols), tbl.Cols)
+				}
+			}
+		}
+		if !foundSummary {
+			t.Errorf("SUMMARY not in InEditorTables: %+v", ctx.InEditorTables)
+		}
+
+		// CTE columns should be available
+		if len(ctx.CTEColumns) == 0 {
+			t.Fatal("expected CTE columns")
+		}
+		foundAgg := false
+		for _, cte := range ctx.CTEColumns {
+			if cte.Name == "AGG" {
+				foundAgg = true
+				if len(cte.Cols) != 2 {
+					t.Errorf("expected 2 CTE cols (key, val), got %d: %+v", len(cte.Cols), cte.Cols)
+				}
+			}
+		}
+		if !foundAgg {
+			t.Errorf("AGG CTE not found: %+v", ctx.CTEColumns)
+		}
+
+		// ResolvedRefs should include summary with alias "s"
+		foundRef := false
+		for _, ref := range ctx.ResolvedRefs {
+			if strings.EqualFold(ref.Name, "SUMMARY") {
+				foundRef = true
+				if ref.DB != "GOVERNANCE" || ref.Schema != "PUBLIC" {
+					t.Errorf("expected GOVERNANCE.PUBLIC, got %s.%s", ref.DB, ref.Schema)
+				}
+			}
+		}
+		if !foundRef {
+			t.Errorf("SUMMARY not in ResolvedRefs: %+v", ctx.ResolvedRefs)
+		}
+	})
+
+	t.Run("in-editor table columns only for referenced tables in current stmt", func(t *testing.T) {
+		// When there are multiple in-editor tables, only those referenced in
+		// the current statement should contribute columns to contextual suggestions
+		sql := `CREATE TABLE alpha (a1 INT, a2 TEXT);
+CREATE TABLE beta (b1 INT, b2 TEXT);
+SELECT * FROM alpha;`
+
+		cursorOffset := len(sql)
+
+		req := AutocompleteContextRequest{
+			SQL:          sql,
+			CursorOffset: cursorOffset,
+			StoreObjects: nil,
+			Session:      &SessionContext{Database: "DB", Schema: "SCH"},
+		}
+
+		ctx := GetAutocompleteContextFull(req)
+
+		// Both tables exist in InEditorTables (all CREATE TABLEs are extracted)
+		if len(ctx.InEditorTables) != 2 {
+			t.Fatalf("expected 2 in-editor tables, got %d", len(ctx.InEditorTables))
+		}
+
+		// But only alpha is in table refs (current statement is SELECT * FROM alpha)
+		foundAlpha := false
+		foundBeta := false
+		for _, ref := range ctx.TableRefs {
+			if strings.EqualFold(ref.Name, "ALPHA") {
+				foundAlpha = true
+			}
+			if strings.EqualFold(ref.Name, "BETA") {
+				foundBeta = true
+			}
+		}
+		if !foundAlpha {
+			t.Errorf("expected ALPHA in TableRefs")
+		}
+		if foundBeta {
+			t.Errorf("BETA should NOT be in TableRefs (not in current stmt)")
+		}
+	})
 }

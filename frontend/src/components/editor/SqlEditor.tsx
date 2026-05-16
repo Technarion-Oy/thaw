@@ -33,7 +33,7 @@ import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import { patchMonacoClipboard } from "../../utils/monacoClipboard";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, GetAllDataTypes, GitGetHeadFileContent } from "../../../wailsjs/go/main/App";
-import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContext, GetAutocompleteContextFull, ResolveTableRefs } from "../../../wailsjs/go/sqleditor/Service";
+import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs } from "../../../wailsjs/go/sqleditor/Service";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
@@ -1104,9 +1104,17 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                 };
               }
 
-              // 1b. Is it a CTE name? -> suggest CTE columns
+              // 1b + 2. Use full-statement context for CTE columns AND alias resolution
+              // (ParseJoinTableRefs(textToCursor) misses FROM clauses after cursor)
               {
-                const dotCtx = await GetAutocompleteContext(model.getValue(), model.getOffsetAt(position));
+                const dotCtx = await GetAutocompleteContextFull({
+                  sql: model.getValue(),
+                  cursorOffset: model.getOffsetAt(position),
+                  storeObjects: objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })),
+                  session: { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema },
+                } as any);
+
+                // 1b. CTE name → suggest CTE columns
                 const dotCTECols = (dotCtx?.cteColumns ?? []).find((c: any) => UC(c.name) === UC(qualifier));
                 if (dotCTECols && dotCTECols.cols && dotCTECols.cols.length > 0) {
                   return {
@@ -1120,51 +1128,36 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                     })),
                   };
                 }
-              }
 
-              // 2. Is it an alias in the current query? -> suggest columns
-              const rawRefs = await ParseJoinTableRefs(textToCursor);
-              if (rawRefs) {
-                const aliasMatch = (rawRefs as any[]).find((r) => UC(r.alias) === UC(qualifier));
+                // 2. Alias in current query → suggest columns (uses full-statement table refs)
+                const dotRefs = dotCtx?.tableRefs ?? [];
+                const aliasMatch = dotRefs.find((r: any) => UC(r.alias) === UC(qualifier));
                 if (aliasMatch) {
-                  // Resolve the alias via backend (uses store objects, UseContext, session)
-                  const resolvedArr = await ResolveTableRefs(
-                    [aliasMatch] as any[],
-                    objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any,
-                    { database: "", schema: "" } as any,
-                    { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any,
+                  // Find the resolved ref for this alias
+                  const resolvedMatch = (dotCtx?.resolvedRefs ?? []).find(
+                    (r: any) => UC(r.alias) === UC(qualifier)
                   );
-                  if (resolvedArr && resolvedArr.length > 0) {
-                    const resolvedTable = resolvedArr[0];
-                    if (resolvedTable.db && resolvedTable.schema) {
-                      // Check in-editor tables first for tables not yet in Snowflake
-                      const fullContent = model.getValue();
-                      const offset = model.getOffsetAt(position);
-                      const editorCtx = await GetAutocompleteContextFull({
-                        sql: fullContent,
-                        cursorOffset: offset,
-                        storeObjects: objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })),
-                        session: { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema },
-                      } as any);
-                      const inEditorMatch = (editorCtx?.inEditorTables || []).find(
-                        (tbl) => UC(tbl.name) === UC(resolvedTable.name) &&
-                                 UC(tbl.db) === UC(resolvedTable.db) &&
-                                 UC(tbl.schema) === UC(resolvedTable.schema)
-                      );
-                      if (inEditorMatch && inEditorMatch.cols.length > 0) {
-                        return {
-                          suggestions: inEditorMatch.cols.map((col, i) => ({
-                            label:      col.name,
-                            kind:       monaco.languages.CompletionItemKind.Field,
-                            insertText: quoteIfNecessary(col.name),
-                            sortText:   "02_" + String(i).padStart(3, "0") + "_" + col.name,
-                            detail:     `COLUMN (in-editor) · ${inEditorMatch.name}`,
-                            range,
-                          })),
-                        };
-                      }
-                      return { suggestions: mkColSuggestions(await getColumns(resolvedTable.db, resolvedTable.schema, resolvedTable.name), range, monaco) };
+                  if (resolvedMatch && resolvedMatch.db && resolvedMatch.schema) {
+                    // Check in-editor tables first (tables defined but not yet executed)
+                    const inEditorMatch = (dotCtx?.inEditorTables || []).find(
+                      (tbl: any) => UC(tbl.name) === UC(resolvedMatch.name) &&
+                                   UC(tbl.db) === UC(resolvedMatch.db) &&
+                                   UC(tbl.schema) === UC(resolvedMatch.schema)
+                    );
+                    if (inEditorMatch && inEditorMatch.cols.length > 0) {
+                      return {
+                        suggestions: inEditorMatch.cols.map((col: any, i: number) => ({
+                          label:      col.name,
+                          kind:       monaco.languages.CompletionItemKind.Field,
+                          insertText: quoteIfNecessary(col.name),
+                          sortText:   "02_" + String(i).padStart(3, "0") + "_" + col.name,
+                          detail:     `COLUMN (in-editor) · ${inEditorMatch.name}`,
+                          range,
+                        })),
+                      };
                     }
+                    // Fall back to Snowflake metadata
+                    return { suggestions: mkColSuggestions(await getColumns(resolvedMatch.db, resolvedMatch.schema, resolvedMatch.name), range, monaco) };
                   }
                 }
               }
@@ -1402,8 +1395,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           refsToFetch.push({ db: ref.db, schema: ref.schema, name: ref.name });
         }
 
-        // Add in-editor CREATE TABLE column suggestions
+        // Add in-editor CREATE TABLE column suggestions (only for tables referenced in current stmt)
+        const referencedTableNames = new Set((ctx?.resolvedRefs || []).map((r: any) => UC(r.name)));
         for (const tbl of (ctx?.inEditorTables || [])) {
+          if (!referencedTableNames.has(UC(tbl.name))) continue;
           for (const col of tbl.cols) {
             const colName = col.name || (col as any);
             if (!seenColKeys.has(UC(colName))) {
