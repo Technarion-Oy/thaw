@@ -52,7 +52,6 @@ export function notebookButtons(props: NotebookToolbarSlotProps): ReactNode {
           icon={<PlusOutlined />}
           size="small"
           onClick={onAddCell}
-          disabled={!kernelReady}
           style={{ width: 28, padding: 0 }}
         />
       </Tooltip>
