@@ -1407,11 +1407,16 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             }
 
             if (matchedObjs.length === 0) {
+              // Prefer USE context from the editor over live session context
+              const useCtx = ctx?.useContext;
               const sess = useSessionStore.getState();
-              if (sess.database && sess.schema && ref.name && !ref.db && !ref.schema) {
-                refsToFetch.push({ db: sess.database, schema: sess.schema, name: ref.name });
-              } else if (sess.database && ref.schema && ref.name && !ref.db) {
-                refsToFetch.push({ db: sess.database, schema: ref.schema, name: ref.name });
+              const effectiveDb = useCtx?.database || sess.database;
+              const effectiveSchema = useCtx?.schema || sess.schema;
+
+              if (effectiveDb && effectiveSchema && ref.name && !ref.db && !ref.schema) {
+                refsToFetch.push({ db: effectiveDb, schema: effectiveSchema, name: ref.name });
+              } else if (effectiveDb && ref.schema && ref.name && !ref.db) {
+                refsToFetch.push({ db: effectiveDb, schema: ref.schema, name: ref.name });
               }
             }
           }

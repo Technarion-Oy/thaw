@@ -655,6 +655,191 @@ func TestGetAutocompleteContext_Extended(t *testing.T) {
 			t.Errorf("expected MYVAR in variables, got %v", ctx.Scripting.Variables)
 		}
 	})
+
+	t.Run("CREATE VIEW with FROM table ref", func(t *testing.T) {
+		sql := "CREATE OR REPLACE VIEW VW_CLEAN AS\nSELECT \n    col1\nFROM RAW_CUSTOMERS\nWHERE STATUS = 'ACTIVE';"
+		// Cursor in the SELECT clause (before FROM)
+		offset := len([]rune("CREATE OR REPLACE VIEW VW_CLEAN AS\nSELECT \n    "))
+
+		ctx := GetAutocompleteContext(sql, offset)
+		// The FROM clause in the same statement should be detected even though cursor is before it
+		foundTable := false
+		for _, ref := range ctx.TableRefs {
+			if ref.Name == "RAW_CUSTOMERS" {
+				foundTable = true
+			}
+		}
+		if !foundTable {
+			t.Errorf("expected RAW_CUSTOMERS in table refs for CREATE VIEW, got %+v", ctx.TableRefs)
+		}
+	})
+
+	t.Run("multi-statement with USE then CREATE VIEW", func(t *testing.T) {
+		sql := "USE MY_DB.MY_SCHEMA;\n\nCREATE OR REPLACE VIEW v AS\nSELECT \nFROM my_table;"
+		// Cursor in the SELECT of the VIEW (second statement)
+		offset := len([]rune("USE MY_DB.MY_SCHEMA;\n\nCREATE OR REPLACE VIEW v AS\nSELECT "))
+
+		ctx := GetAutocompleteContext(sql, offset)
+		if ctx.CurrentStmtIdx != 1 {
+			t.Errorf("expected stmtIdx=1, got %d", ctx.CurrentStmtIdx)
+		}
+		// Table refs from the current statement's FROM clause
+		foundTable := false
+		for _, ref := range ctx.TableRefs {
+			if ref.Name == "MY_TABLE" {
+				foundTable = true
+			}
+		}
+		if !foundTable {
+			t.Errorf("expected MY_TABLE in table refs, got %+v", ctx.TableRefs)
+		}
+		// Table refs remain per-statement; USE context is propagated
+		// separately via the UseContext field.
+	})
+
+	t.Run("USE statement extracted as table ref in full SQL", func(t *testing.T) {
+		// ParseJoinTables on the FULL sql should find USE refs,
+		// but GetAutocompleteContext only parses table refs from the CURRENT statement.
+		sql := "USE PROD_DB.PUBLIC;\nSELECT * FROM customers"
+		// Cursor in the second statement
+		offset := len([]rune(sql))
+
+		ctx := GetAutocompleteContext(sql, offset)
+		// The USE ref is in statement 0, not in the current statement (statement 1).
+		// So table refs from current statement should only contain CUSTOMERS.
+		for _, ref := range ctx.TableRefs {
+			if ref.Name == "" && ref.DB == "PROD_DB" {
+				t.Error("USE statement ref should NOT appear in current statement's table refs")
+			}
+		}
+		foundCustomers := false
+		for _, ref := range ctx.TableRefs {
+			if ref.Name == "CUSTOMERS" {
+				foundCustomers = true
+			}
+		}
+		if !foundCustomers {
+			t.Errorf("expected CUSTOMERS in table refs, got %+v", ctx.TableRefs)
+		}
+	})
+
+	// ── UseContext propagation ────────────────────────────────────────────
+
+	t.Run("UseContext: USE DATABASE then SELECT", func(t *testing.T) {
+		sql := "USE DATABASE mydb;\nSELECT * FROM t"
+		offset := len([]rune(sql))
+
+		ctx := GetAutocompleteContext(sql, offset)
+		if ctx.UseContext == nil {
+			t.Fatal("expected UseContext to be non-nil")
+		}
+		if ctx.UseContext.Database != "MYDB" {
+			t.Errorf("expected Database=MYDB, got %q", ctx.UseContext.Database)
+		}
+		if ctx.UseContext.Schema != "" {
+			t.Errorf("expected Schema empty, got %q", ctx.UseContext.Schema)
+		}
+	})
+
+	t.Run("UseContext: USE SCHEMA then SELECT", func(t *testing.T) {
+		sql := "USE SCHEMA my_schema;\nSELECT * FROM t"
+		offset := len([]rune(sql))
+
+		ctx := GetAutocompleteContext(sql, offset)
+		if ctx.UseContext == nil {
+			t.Fatal("expected UseContext to be non-nil")
+		}
+		if ctx.UseContext.Schema != "MY_SCHEMA" {
+			t.Errorf("expected Schema=MY_SCHEMA, got %q", ctx.UseContext.Schema)
+		}
+		if ctx.UseContext.Database != "" {
+			t.Errorf("expected Database empty, got %q", ctx.UseContext.Database)
+		}
+	})
+
+	t.Run("UseContext: USE db.schema then SELECT", func(t *testing.T) {
+		sql := "USE prod_db.staging;\nSELECT * FROM t"
+		offset := len([]rune(sql))
+
+		ctx := GetAutocompleteContext(sql, offset)
+		if ctx.UseContext == nil {
+			t.Fatal("expected UseContext to be non-nil")
+		}
+		if ctx.UseContext.Database != "PROD_DB" {
+			t.Errorf("expected Database=PROD_DB, got %q", ctx.UseContext.Database)
+		}
+		if ctx.UseContext.Schema != "STAGING" {
+			t.Errorf("expected Schema=STAGING, got %q", ctx.UseContext.Schema)
+		}
+	})
+
+	t.Run("UseContext: multiple USE statements last-writer-wins", func(t *testing.T) {
+		sql := "USE DATABASE db1;\nUSE SCHEMA s1;\nUSE DATABASE db2;\nSELECT * FROM t"
+		offset := len([]rune(sql))
+
+		ctx := GetAutocompleteContext(sql, offset)
+		if ctx.UseContext == nil {
+			t.Fatal("expected UseContext to be non-nil")
+		}
+		if ctx.UseContext.Database != "DB2" {
+			t.Errorf("expected Database=DB2 (last writer), got %q", ctx.UseContext.Database)
+		}
+		if ctx.UseContext.Schema != "S1" {
+			t.Errorf("expected Schema=S1, got %q", ctx.UseContext.Schema)
+		}
+	})
+
+	t.Run("UseContext: USE in current statement is captured", func(t *testing.T) {
+		sql := "USE my_db.my_schema"
+		offset := len([]rune(sql))
+
+		ctx := GetAutocompleteContext(sql, offset)
+		if ctx.UseContext == nil {
+			t.Fatal("expected UseContext to be non-nil for current USE statement")
+		}
+		if ctx.UseContext.Database != "MY_DB" {
+			t.Errorf("expected Database=MY_DB, got %q", ctx.UseContext.Database)
+		}
+		if ctx.UseContext.Schema != "MY_SCHEMA" {
+			t.Errorf("expected Schema=MY_SCHEMA, got %q", ctx.UseContext.Schema)
+		}
+	})
+
+	t.Run("UseContext: no USE statements yields nil", func(t *testing.T) {
+		sql := "SELECT 1;\nSELECT 2"
+		offset := len([]rune(sql))
+
+		ctx := GetAutocompleteContext(sql, offset)
+		if ctx.UseContext != nil {
+			t.Errorf("expected nil UseContext when no USE statements, got %+v", ctx.UseContext)
+		}
+	})
+
+	t.Run("UseContext: USE ROLE and USE WAREHOUSE are ignored", func(t *testing.T) {
+		sql := "USE ROLE admin;\nUSE WAREHOUSE compute_wh;\nSELECT * FROM t"
+		offset := len([]rune(sql))
+
+		ctx := GetAutocompleteContext(sql, offset)
+		if ctx.UseContext != nil {
+			t.Errorf("expected nil UseContext for ROLE/WAREHOUSE, got %+v", ctx.UseContext)
+		}
+	})
+
+	t.Run("UseContext: USE db.schema override replaces earlier USE DATABASE", func(t *testing.T) {
+		sql := "USE DATABASE old_db;\nUSE SCHEMA old_schema;\nUSE new_db.new_schema;\nSELECT * FROM t"
+		offset := len([]rune(sql))
+
+		ctx := GetAutocompleteContext(sql, offset)
+		if ctx.UseContext == nil {
+			t.Fatal("expected UseContext to be non-nil")
+		}
+		if ctx.UseContext.Database != "NEW_DB" {
+			t.Errorf("expected Database=NEW_DB, got %q", ctx.UseContext.Database)
+		}
+		if ctx.UseContext.Schema != "NEW_SCHEMA" {
+			t.Errorf("expected Schema=NEW_SCHEMA, got %q", ctx.UseContext.Schema)
+		}
+	})
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

@@ -2779,6 +2779,20 @@ export namespace snowpark {
 
 export namespace sqleditor {
 	
+	export class UseContext {
+	    database: string;
+	    schema: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UseContext(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.database = source["database"];
+	        this.schema = source["schema"];
+	    }
+	}
 	export class ColInfo {
 	    name: string;
 	    dataType: string;
@@ -2882,6 +2896,7 @@ export namespace sqleditor {
 	    scripting: ScriptingCompletionResult;
 	    tableRefs: JoinTableRef[];
 	    cteColumns: CTEColumnEntry[];
+	    useContext?: UseContext;
 	
 	    static createFrom(source: any = {}) {
 	        return new AutocompleteContext(source);
@@ -2895,6 +2910,7 @@ export namespace sqleditor {
 	        this.scripting = this.convertValues(source["scripting"], ScriptingCompletionResult);
 	        this.tableRefs = this.convertValues(source["tableRefs"], JoinTableRef);
 	        this.cteColumns = this.convertValues(source["cteColumns"], CTEColumnEntry);
+	        this.useContext = this.convertValues(source["useContext"], UseContext);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -3152,6 +3168,7 @@ export namespace sqleditor {
 	        this.end = source["end"];
 	    }
 	}
+	
 	
 	
 	export class ValidateBareColsRequest {

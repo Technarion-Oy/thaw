@@ -107,6 +107,13 @@ type CTEColumnEntry struct {
 	Cols []ColInfo `json:"cols"`
 }
 
+// UseContext holds the accumulated DATABASE/SCHEMA context from USE statements
+// that appear before the current cursor position in a multi-statement editor.
+type UseContext struct {
+	Database string `json:"database"`
+	Schema   string `json:"schema"`
+}
+
 // AutocompleteContext bundles all server-side context needed by the frontend
 // completion provider in a single IPC round-trip.
 type AutocompleteContext struct {
@@ -116,6 +123,7 @@ type AutocompleteContext struct {
 	Scripting       ScriptingCompletionResult `json:"scripting"`
 	TableRefs       []JoinTableRef            `json:"tableRefs"`
 	CTEColumns      []CTEColumnEntry          `json:"cteColumns"`
+	UseContext      *UseContext               `json:"useContext,omitempty"`
 }
 
 // FunctionCallContext is returned by GetActiveFunctionCall and identifies the
@@ -3032,6 +3040,36 @@ func GetAutocompleteContext(sql string, cursorOffset int) AutocompleteContext {
 	tableRefs := ParseJoinTables(currentStmt)
 	cteColumns := getCTEColumnsAtCursor(currentStmt)
 
+	// Scan statements 0..currentIdx (inclusive) for USE DATABASE/SCHEMA context.
+	var useCtx *UseContext
+	runes := []rune(sql)
+	scanEnd := currentIdx + 1
+	if currentIdx < 0 {
+		scanEnd = 0
+	}
+	for i := 0; i < scanEnd && i < len(ranges); i++ {
+		r := ranges[i]
+		end := r.EndOffset
+		if end > len(runes) {
+			end = len(runes)
+		}
+		stmtText := string(runes[r.StartOffset:end])
+		refs := ParseJoinTables(stmtText)
+		for _, ref := range refs {
+			if ref.Name == "" { // USE statement ref (Name is always empty)
+				if useCtx == nil {
+					useCtx = &UseContext{}
+				}
+				if ref.DB != "" {
+					useCtx.Database = ref.DB
+				}
+				if ref.Schema != "" {
+					useCtx.Schema = ref.Schema
+				}
+			}
+		}
+	}
+
 	return AutocompleteContext{
 		StatementRanges: ranges,
 		CurrentStmt:     currentStmt,
@@ -3039,6 +3077,7 @@ func GetAutocompleteContext(sql string, cursorOffset int) AutocompleteContext {
 		Scripting:       scripting,
 		TableRefs:       tableRefs,
 		CTEColumns:      cteColumns,
+		UseContext:      useCtx,
 	}
 }
 
