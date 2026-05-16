@@ -10,9 +10,9 @@
 //
 // @thaw-domain: Snowpark & Developer Workflows
 
+import type { ReactNode } from "react";
 import { Button, Spin, Tooltip, Typography } from "antd";
 import {
-  PlayCircleOutlined,
   ReloadOutlined,
   PlusOutlined,
   CloudUploadOutlined,
@@ -26,80 +26,65 @@ export interface NotebookToolbarSlotProps {
   kernelReady: boolean;
   kernelStarting: boolean;
   kernelError: string | null;
-  saving: boolean;
-  onRunAll: () => void;
   onRestartKernel: () => void;
   onAddCell: () => void;
   onDeploy: () => void;
 }
 
-export default function NotebookToolbarSlot({
-  kernelReady,
-  kernelStarting,
-  kernelError,
-  saving: _saving,
-  onRunAll,
-  onRestartKernel,
-  onAddCell,
-  onDeploy,
-}: NotebookToolbarSlotProps) {
+/**
+ * Returns the 3 notebook action buttons (bare elements, no wrapper) to be
+ * placed as the second row of the toolbar's 3-column button grid.
+ */
+export function notebookButtons(props: NotebookToolbarSlotProps): ReactNode {
+  const { kernelReady, onRestartKernel, onAddCell, onDeploy } = props;
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      {/* Separator */}
-      <div style={{ width: 1, height: 20, background: "var(--border)" }} />
+    <>
+      <Tooltip title="Restart kernel">
+        <Button
+          icon={<ReloadOutlined />}
+          size="small"
+          onClick={onRestartKernel}
+          style={{ width: 28, padding: 0 }}
+        />
+      </Tooltip>
+      <Tooltip title="Add cell">
+        <Button
+          icon={<PlusOutlined />}
+          size="small"
+          onClick={onAddCell}
+          disabled={!kernelReady}
+          style={{ width: 28, padding: 0 }}
+        />
+      </Tooltip>
+      <Tooltip title="Deploy notebook to Snowflake">
+        <Button
+          icon={<CloudUploadOutlined />}
+          size="small"
+          onClick={onDeploy}
+          style={{ width: 28, padding: 0 }}
+        />
+      </Tooltip>
+    </>
+  );
+}
 
-      {/* Notebook action buttons — vertical column */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <Tooltip title="Run all cells" placement="right">
-          <Button
-            icon={<PlayCircleOutlined />}
-            size="small"
-            onClick={onRunAll}
-            disabled={!kernelReady}
-            style={{ width: 28, padding: 0 }}
-          />
+/** Returns a compact kernel status indicator (icon or spinner). */
+export function notebookStatus(props: NotebookToolbarSlotProps): ReactNode {
+  const { kernelReady, kernelStarting, kernelError } = props;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4 }}>
+      {kernelStarting && <Spin size="small" />}
+      {kernelStarting && <Text style={{ fontSize: 10, color: "var(--text-muted)" }}>Starting&hellip;</Text>}
+      {kernelReady && !kernelStarting && (
+        <Tooltip title="Kernel ready">
+          <CheckCircleOutlined style={{ color: "#52c41a", fontSize: 14 }} />
         </Tooltip>
-        <Tooltip title="Restart kernel" placement="right">
-          <Button
-            icon={<ReloadOutlined />}
-            size="small"
-            onClick={onRestartKernel}
-            style={{ width: 28, padding: 0 }}
-          />
+      )}
+      {kernelError && (
+        <Tooltip title={kernelError}>
+          <WarningOutlined style={{ color: "#ff4d4f", fontSize: 14 }} />
         </Tooltip>
-        <Tooltip title="Add cell" placement="right">
-          <Button
-            icon={<PlusOutlined />}
-            size="small"
-            onClick={onAddCell}
-            style={{ width: 28, padding: 0 }}
-          />
-        </Tooltip>
-        <Tooltip title="Deploy this notebook to Snowflake" placement="right">
-          <Button
-            icon={<CloudUploadOutlined />}
-            size="small"
-            onClick={onDeploy}
-            style={{ width: 28, padding: 0 }}
-          />
-        </Tooltip>
-      </div>
-
-      {/* Kernel status */}
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-        {kernelStarting && <Spin size="small" />}
-        {kernelStarting && <Text style={{ fontSize: 10, color: "var(--text-muted)" }}>Starting\u2026</Text>}
-        {kernelReady && !kernelStarting && (
-          <Tooltip title="Kernel ready">
-            <CheckCircleOutlined style={{ color: "#52c41a", fontSize: 14 }} />
-          </Tooltip>
-        )}
-        {kernelError && (
-          <Tooltip title={kernelError}>
-            <WarningOutlined style={{ color: "#ff4d4f", fontSize: 14 }} />
-          </Tooltip>
-        )}
-      </div>
+      )}
     </div>
   );
 }

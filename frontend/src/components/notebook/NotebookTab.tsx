@@ -554,11 +554,14 @@ export default function NotebookTab({ tabId }: Props) {
     }
   }, [kernelReady, patchCell, syncToStore, tabId]);
 
+  // runAll is not exposed in the toolbar (the main Run button is used instead)
+  // but kept for the menu:snowpark-run-all event and programmatic use.
   const runAll = useCallback(async () => {
     for (const cell of cellsRef.current) {
       if (cell.kind === "code") await runCell(cell);
     }
   }, [runCell]);
+  void runAll;
 
   // Toggle a breakpoint line for a specific cell and persist to disk.
   // Also updates the live DAP session (if any) so debugpy immediately reflects
@@ -823,7 +826,6 @@ export default function NotebookTab({ tabId }: Props) {
   // ── Sync callbacks to the unified toolbar store (after all are defined) ───
   useEffect(() => {
     useNotebookToolbarStore.getState().setCallbacks({
-      onRunAll: runAll,
       onRestartKernel: restartKernel,
       onAddCell: () => addCell(),
       onDeploy: () => {
@@ -832,7 +834,7 @@ export default function NotebookTab({ tabId }: Props) {
       },
     });
     return () => { useNotebookToolbarStore.getState().clear(); };
-  }, [runAll, restartKernel, addCell, rawNb]);
+  }, [restartKernel, addCell, rawNb]);
 
   const addCellAbove = useCallback((beforeId: string) => {
     const newCell: Cell = {

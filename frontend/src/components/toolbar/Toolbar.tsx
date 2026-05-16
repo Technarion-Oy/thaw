@@ -55,8 +55,13 @@ export interface ToolbarProps {
   onNewNotebook: () => void;
   /** Handler: save the current tab. */
   onSave: () => void;
-  /** Context-specific toolbar content rendered as a vertical column next to file buttons. */
-  contextSlot?: ReactNode;
+  /**
+   * Extra buttons rendered as the second row of the 3-column button grid.
+   * Should be 3 bare `<Tooltip><Button/></Tooltip>` elements (no wrapper).
+   */
+  contextButtons?: ReactNode;
+  /** Extra content rendered after the button grid (e.g. kernel status icon). */
+  contextStatus?: ReactNode;
 }
 
 export default function Toolbar({
@@ -73,7 +78,8 @@ export default function Toolbar({
   onNewSql,
   onNewNotebook,
   onSave,
-  contextSlot,
+  contextButtons,
+  contextStatus,
 }: ToolbarProps) {
   const { params, isConnected } = useConnectionStore();
   const {
@@ -96,7 +102,7 @@ export default function Toolbar({
         background: "var(--bg-raised)",
       }}
     >
-      {/* ── Left: execution controls + action button columns ── */}
+      {/* ── Left: execution controls + button grid ── */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {/* Run/Cancel + hint */}
         <Space size={4}>
@@ -133,11 +139,11 @@ export default function Toolbar({
         </Space>
 
         {/* Separator */}
-        <div style={{ width: 1, height: 20, background: "var(--border)" }} />
+        <div style={{ width: 1, alignSelf: "stretch", background: "var(--border)" }} />
 
-        {/* File action buttons — vertical column */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <Tooltip title="New SQL query" placement="right">
+        {/* Action button grid: 3 columns, 1 or 2 rows */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 28px)", gap: 2 }}>
+          <Tooltip title="New SQL query">
             <Button
               icon={<FileAddOutlined />}
               size="small"
@@ -145,7 +151,7 @@ export default function Toolbar({
               style={{ width: 28, padding: 0 }}
             />
           </Tooltip>
-          <Tooltip title="New notebook" placement="right">
+          <Tooltip title="New notebook">
             <Button
               icon={<BookOutlined />}
               size="small"
@@ -153,7 +159,7 @@ export default function Toolbar({
               style={{ width: 28, padding: 0 }}
             />
           </Tooltip>
-          <Tooltip title="Save (\u2318S)" placement="right">
+          <Tooltip title="Save (\u2318S)">
             <Button
               icon={<SaveOutlined />}
               size="small"
@@ -161,10 +167,12 @@ export default function Toolbar({
               style={{ width: 28, padding: 0 }}
             />
           </Tooltip>
+          {/* Second row: context-specific buttons (e.g. notebook actions) */}
+          {contextButtons}
         </div>
 
-        {/* Context-specific buttons — vertical column (notebook actions, etc.) */}
-        {contextSlot}
+        {/* Context status (kernel indicator) */}
+        {contextStatus}
       </div>
 
       {/* ── Right: connect button or session context ── */}
@@ -182,7 +190,6 @@ export default function Toolbar({
         {/* Session selectors: two rows (role+wh / db+schema) */}
         <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
           <Space size={6}>
-            {/* Role selector */}
             <Tooltip title={role ? `Role: ${role}` : "Active role"}>
               <Select
                 size="small"
@@ -198,8 +205,6 @@ export default function Toolbar({
                 dropdownStyle={{ minWidth: 200 }}
               />
             </Tooltip>
-
-            {/* Warehouse selector */}
             <Tooltip title={warehouse ? `Warehouse: ${warehouse}` : "Active warehouse"}>
               <Select
                 size="small"
@@ -216,9 +221,7 @@ export default function Toolbar({
               />
             </Tooltip>
           </Space>
-
           <Space size={6}>
-            {/* Database selector */}
             <Tooltip title={database ? `Database: ${database}` : "Active database"}>
               <Select
                 size="small"
@@ -234,8 +237,6 @@ export default function Toolbar({
                 dropdownStyle={{ minWidth: 200 }}
               />
             </Tooltip>
-
-            {/* Schema selector */}
             <Tooltip title={schema ? `Schema: ${schema}` : "Active schema"}>
               <Select
                 size="small"

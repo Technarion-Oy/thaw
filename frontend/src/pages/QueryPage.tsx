@@ -43,7 +43,7 @@ import { useSessionStore } from "../store/sessionStore";
 import { useFeatureFlagsStore } from "../store/featureFlagsStore";
 import { useNotebookToolbarStore } from "../store/notebookToolbarStore";
 import Toolbar from "../components/toolbar/Toolbar";
-import NotebookToolbarSlot from "../components/toolbar/NotebookToolbarSlot";
+import { notebookButtons, notebookStatus } from "../components/toolbar/NotebookToolbarSlot";
 
 const { Text } = Typography;
 
@@ -895,18 +895,14 @@ export default function QueryPage() {
     openNotebookUnsaved("Untitled Notebook", blank);
   };
 
-  const notebookContextSlot = isNotebookTab && nbToolbar.onRunAll ? (
-    <NotebookToolbarSlot
-      kernelReady={nbToolbar.kernelReady}
-      kernelStarting={nbToolbar.kernelStarting}
-      kernelError={nbToolbar.kernelError}
-      saving={nbToolbar.saving}
-      onRunAll={nbToolbar.onRunAll}
-      onRestartKernel={nbToolbar.onRestartKernel!}
-      onAddCell={nbToolbar.onAddCell!}
-      onDeploy={nbToolbar.onDeploy!}
-    />
-  ) : undefined;
+  const nbSlotProps = isNotebookTab && nbToolbar.onRestartKernel ? {
+    kernelReady: nbToolbar.kernelReady,
+    kernelStarting: nbToolbar.kernelStarting,
+    kernelError: nbToolbar.kernelError,
+    onRestartKernel: nbToolbar.onRestartKernel!,
+    onAddCell: nbToolbar.onAddCell!,
+    onDeploy: nbToolbar.onDeploy!,
+  } : null;
 
   return (
     <div data-query-layout style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg)" }}>
@@ -925,7 +921,8 @@ export default function QueryPage() {
         onNewSql={openScratch}
         onNewNotebook={handleNewNotebook}
         onSave={handleSave}
-        contextSlot={notebookContextSlot}
+        contextButtons={nbSlotProps ? notebookButtons(nbSlotProps) : undefined}
+        contextStatus={nbSlotProps ? notebookStatus(nbSlotProps) : undefined}
       />
 
       {/* Session error banner (role/warehouse switch failures) */}
