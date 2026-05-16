@@ -50,7 +50,6 @@ import IntegrationsPanel from "./IntegrationsPanel";
 import type { main } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
-const CLR_BORDER    = "var(--border)";
 const CLR_SECONDARY = "var(--text-muted)";
 
 interface DdlModal {
@@ -272,7 +271,7 @@ export default function AccountPanel() {
   const treeData = buildTree(roles, warehouses);
 
   return (
-    <div style={{ borderTop: `1px solid ${CLR_BORDER}` }}>
+    <div>
       {!isConnected ? (
         <div style={{ padding: "24px 16px", textAlign: "center", color: "var(--text-muted)" }}>
           <DisconnectOutlined style={{ fontSize: 24, display: "block", margin: "0 auto 8px" }} />

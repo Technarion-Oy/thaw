@@ -30,7 +30,6 @@ type FileEntry    = filesystem.FileEntry;
 type SearchMatch  = filesystem.SearchMatch;
 
 const { Text } = Typography;
-const CLR_BORDER    = "var(--border)";
 const CLR_SECONDARY = "var(--text-muted)";
 
 function entriesToNodes(entries: FileEntry[]): DataNode[] {
@@ -306,7 +305,7 @@ export default function FileBrowser() {
   const grouped = groupByPath(searchResults);
 
   return (
-    <div style={{ borderTop: `1px solid ${CLR_BORDER}` }}>
+    <div>
       <Collapse
         ghost
         activeKey={activeKeys}

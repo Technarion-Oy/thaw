@@ -188,7 +188,6 @@ function PanelWrapper({ id, sidebar }: { id: PanelId; sidebar: SidebarId }) {
           flexShrink: 0,
           background: "color-mix(in srgb, var(--text) 5%, transparent)",
           borderTop: "1px solid var(--border)",
-          borderBottom: "1px solid var(--border)",
           transition: "background 0.1s",
         }}
         onMouseEnter={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--accent) 18%, transparent)"; }}

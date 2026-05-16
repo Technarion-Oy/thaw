@@ -190,7 +190,7 @@ export default function UserManagementPanel() {
   };
 
   return (
-    <div style={{ borderTop: "1px solid var(--border)", padding: "8px 4px 4px" }}>
+    <div style={{ borderTop: "1px solid var(--border)", padding: "4px 4px 4px" }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "2px 8px 6px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
