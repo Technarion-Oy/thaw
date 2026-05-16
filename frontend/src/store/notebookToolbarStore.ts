@@ -25,8 +25,6 @@ interface NotebookToolbarState {
   kernelStarting: boolean;
   /** Kernel error message, or null. */
   kernelError: string | null;
-  /** Whether a save is in progress. */
-  saving: boolean;
   /** Callbacks (set by NotebookTab, read by QueryPage for the toolbar slot). */
   onRestartKernel: (() => void) | null;
   onAddCell: (() => void) | null;
@@ -34,7 +32,6 @@ interface NotebookToolbarState {
 
   /** Update kernel state (called by NotebookTab). */
   setKernelState: (state: { kernelReady: boolean; kernelStarting: boolean; kernelError: string | null }) => void;
-  setSaving: (saving: boolean) => void;
   setCallbacks: (cbs: { onRestartKernel: () => void; onAddCell: () => void; onDeploy: () => void }) => void;
   /** Clear all state when notebook tab is unmounted or deactivated. */
   clear: () => void;
@@ -44,21 +41,18 @@ export const useNotebookToolbarStore = create<NotebookToolbarState>((set) => ({
   kernelReady: false,
   kernelStarting: false,
   kernelError: null,
-  saving: false,
   onRestartKernel: null,
   onAddCell: null,
   onDeploy: null,
 
   setKernelState: ({ kernelReady, kernelStarting, kernelError }) =>
     set({ kernelReady, kernelStarting, kernelError }),
-  setSaving: (saving) => set({ saving }),
   setCallbacks: ({ onRestartKernel, onAddCell, onDeploy }) =>
     set({ onRestartKernel, onAddCell, onDeploy }),
   clear: () => set({
     kernelReady: false,
     kernelStarting: false,
     kernelError: null,
-    saving: false,
     onRestartKernel: null,
     onAddCell: null,
     onDeploy: null,

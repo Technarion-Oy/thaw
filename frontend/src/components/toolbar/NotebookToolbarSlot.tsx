@@ -11,7 +11,7 @@
 // @thaw-domain: Snowpark & Developer Workflows
 
 import type { ReactNode } from "react";
-import { Button, Spin, Tooltip, Typography } from "antd";
+import { Button, Spin, Tooltip, Typography, theme } from "antd";
 import {
   ReloadOutlined,
   PlusOutlined,
@@ -67,21 +67,22 @@ export function notebookButtons(props: NotebookToolbarSlotProps): ReactNode {
   );
 }
 
-/** Returns a compact kernel status indicator (icon or spinner). */
-export function notebookStatus(props: NotebookToolbarSlotProps): ReactNode {
+/** Compact kernel status indicator (icon or spinner). */
+export function NotebookStatusIndicator(props: NotebookToolbarSlotProps): ReactNode {
   const { kernelReady, kernelStarting, kernelError } = props;
+  const { token } = theme.useToken();
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4 }}>
       {kernelStarting && <Spin size="small" />}
       {kernelStarting && <Text style={{ fontSize: 10, color: "var(--text-muted)" }}>Starting&hellip;</Text>}
       {kernelReady && !kernelStarting && (
         <Tooltip title="Kernel ready">
-          <CheckCircleOutlined style={{ color: "#52c41a", fontSize: 14 }} />
+          <CheckCircleOutlined style={{ color: token.colorSuccess, fontSize: 14 }} />
         </Tooltip>
       )}
       {kernelError && (
         <Tooltip title={kernelError}>
-          <WarningOutlined style={{ color: "#ff4d4f", fontSize: 14 }} />
+          <WarningOutlined style={{ color: token.colorError, fontSize: 14 }} />
         </Tooltip>
       )}
     </div>

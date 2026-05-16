@@ -43,7 +43,7 @@ import { useSessionStore } from "../store/sessionStore";
 import { useFeatureFlagsStore } from "../store/featureFlagsStore";
 import { useNotebookToolbarStore } from "../store/notebookToolbarStore";
 import Toolbar from "../components/toolbar/Toolbar";
-import { notebookButtons, notebookStatus } from "../components/toolbar/NotebookToolbarSlot";
+import { notebookButtons, NotebookStatusIndicator } from "../components/toolbar/NotebookToolbarSlot";
 
 const { Text } = Typography;
 
@@ -880,7 +880,12 @@ export default function QueryPage() {
   };
 
   // ── Notebook toolbar state (read from store, bridged by NotebookTab) ──────
-  const nbToolbar = useNotebookToolbarStore();
+  const nbKernelReady    = useNotebookToolbarStore((s) => s.kernelReady);
+  const nbKernelStarting = useNotebookToolbarStore((s) => s.kernelStarting);
+  const nbKernelError    = useNotebookToolbarStore((s) => s.kernelError);
+  const nbOnRestartKernel = useNotebookToolbarStore((s) => s.onRestartKernel);
+  const nbOnAddCell       = useNotebookToolbarStore((s) => s.onAddCell);
+  const nbOnDeploy        = useNotebookToolbarStore((s) => s.onDeploy);
 
   const handleNewNotebook = () => {
     const blank = JSON.stringify({
@@ -895,13 +900,13 @@ export default function QueryPage() {
     openNotebookUnsaved("Untitled Notebook", blank);
   };
 
-  const nbSlotProps = isNotebookTab && nbToolbar.onRestartKernel ? {
-    kernelReady: nbToolbar.kernelReady,
-    kernelStarting: nbToolbar.kernelStarting,
-    kernelError: nbToolbar.kernelError,
-    onRestartKernel: nbToolbar.onRestartKernel!,
-    onAddCell: nbToolbar.onAddCell!,
-    onDeploy: nbToolbar.onDeploy!,
+  const nbSlotProps = isNotebookTab && nbOnRestartKernel && nbOnAddCell && nbOnDeploy ? {
+    kernelReady: nbKernelReady,
+    kernelStarting: nbKernelStarting,
+    kernelError: nbKernelError,
+    onRestartKernel: nbOnRestartKernel,
+    onAddCell: nbOnAddCell,
+    onDeploy: nbOnDeploy,
   } : null;
 
   return (
@@ -922,7 +927,7 @@ export default function QueryPage() {
         onNewNotebook={handleNewNotebook}
         onSave={handleSave}
         contextButtons={nbSlotProps ? notebookButtons(nbSlotProps) : undefined}
-        contextStatus={nbSlotProps ? notebookStatus(nbSlotProps) : undefined}
+        contextStatus={nbSlotProps ? <NotebookStatusIndicator {...nbSlotProps} /> : undefined}
       />
 
       {/* Session error banner (role/warehouse switch failures) */}

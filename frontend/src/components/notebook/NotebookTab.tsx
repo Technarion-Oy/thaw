@@ -42,7 +42,6 @@ import {
   RunNotebookCell,
   RunNotebookCellSql,
   StopNotebookSession,
-  SaveNotebook,
   GetTableColumns,
   GetNotebookCompletions,
   GetNotebookHover,
@@ -284,7 +283,6 @@ export default function NotebookTab({ tabId }: Props) {
 
   const tab         = useQueryStore((s) => s.tabs.find((t) => t.id === tabId));
   const setSql      = useQueryStore((s) => s.setSql);
-  const markSaved   = useQueryStore((s) => s.markSaved);
   const loadContext = useSessionStore((s) => s.loadContext);
   const syntaxMode  = useNotebookPrefsStore((s) => s.prefs.syntaxMode);
 
@@ -295,7 +293,6 @@ export default function NotebookTab({ tabId }: Props) {
   const [kernelReady, setKernelReady] = useState(false);
   const [kernelStarting, setKernelStarting] = useState(false);
   const [kernelError, setKernelError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
   const [deployOpen, setDeployOpen] = useState(false);
   // Snapshot of serialized notebook content captured when the Deploy modal is opened.
   // Used for unsaved notebooks that have no on-disk file path.
@@ -554,15 +551,6 @@ export default function NotebookTab({ tabId }: Props) {
     }
   }, [kernelReady, patchCell, syncToStore, tabId]);
 
-  // runAll is not exposed in the toolbar (the main Run button is used instead)
-  // but kept for the menu:snowpark-run-all event and programmatic use.
-  const runAll = useCallback(async () => {
-    for (const cell of cellsRef.current) {
-      if (cell.kind === "code") await runCell(cell);
-    }
-  }, [runCell]);
-  void runAll;
-
   // Toggle a breakpoint line for a specific cell and persist to disk.
   // Also updates the live DAP session (if any) so debugpy immediately reflects
   // the change — this allows removing a breakpoint on the currently-paused line.
@@ -777,26 +765,6 @@ export default function NotebookTab({ tabId }: Props) {
   useEffect(() => {
     useNotebookToolbarStore.getState().setKernelState({ kernelReady, kernelStarting, kernelError });
   }, [kernelReady, kernelStarting, kernelError]);
-
-  useEffect(() => {
-    useNotebookToolbarStore.getState().setSaving(saving);
-  }, [saving]);
-
-  const saveNotebook = useCallback(async () => {
-    if (!tab?.path) { message.warning("No file path — use File > Save As to save."); return; }
-    const json = serializeNotebook(rawNb, cellsRef.current);
-    setSaving(true);
-    try {
-      await SaveNotebook(tab.path, json);
-      markSaved(tabId, tab.path, tab.title);
-      message.success("Notebook saved");
-    } catch (e) {
-      message.error(String(e));
-    } finally {
-      setSaving(false);
-    }
-  }, [tab, rawNb, markSaved, tabId]);
-  void saveNotebook; // Referenced via toolbar store callbacks, not directly in render
 
   const addCell = useCallback((afterId?: string) => {
     const newCell: Cell = {
