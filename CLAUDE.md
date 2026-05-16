@@ -55,7 +55,7 @@ The map in `internal/architecture/semantic_map.go` is **generated** — do not e
 ```
 thaw/
 ├── main.go              # Entry point, native menu, Wails runtime setup
-├── app.go               # All Wails IPC bindings (~2750 lines)
+├── app.go               # Wails IPC bindings (connection-dependent methods)
 ├── internal/
 │   ├── apperrors/       # Sentinel errors (ErrNotConnected etc.)
 │   ├── version/         # Version string (set via -ldflags at build time)
@@ -63,7 +63,8 @@ thaw/
 │   ├── migration/       # Schema migration engine (Service pattern)
 │   ├── snowpark/        # Snowpark/Jupyter support (Service pattern)
 │   ├── snowflake/       # Snowflake client — connection, query, DDL, lineage
-│   ├── sqleditor/       # SQL diagnostics & JOIN suggestion engine
+│   ├── sqleditor/       # SQL diagnostics & JOIN suggestion engine (Wails-bound Service)
+│   │   ├── service.go   # Wails-bound Service struct (IPC endpoints)
 │   │   ├── sqleditor.go
 │   │   └── sqleditor_test.go
 │   ├── ddl/             # DDL parsing and git-export pipeline
@@ -82,7 +83,7 @@ thaw/
     └── wailsjs/         # Auto-generated Wails IPC bindings (DO NOT EDIT)
 ```
 
-**IPC flow**: Frontend calls `wailsjs/go/main/App.ts` → Wails runtime → Go `app.go` methods → `internal/` packages.
+**IPC flow**: Frontend calls `wailsjs/go/main/App.ts` (or `wailsjs/go/sqleditor/Service.ts` for SQL editor methods) → Wails runtime → Go methods on `App` or bound `Service` structs → `internal/` packages.
 
 ## Codebase Vector Database
 
@@ -191,11 +192,12 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 - **Never register completion/hover providers inside the component render** — use module-level disposable refs
 
 ### SQL diagnostics & JOIN suggestions (backend)
-All proprietary analysis logic lives in `internal/sqleditor/sqleditor.go` and is called via IPC:
+All proprietary analysis logic lives in `internal/sqleditor/` and is exposed to the frontend via a dedicated Wails-bound `sqleditor.Service` struct (`service.go`). The service is registered in `main.go`'s `Bind` array and its methods are imported from `wailsjs/go/sqleditor/Service` (not from `wailsjs/go/main/App`):
 - `AnalyzeSqlSyntax(sql)` → character-by-character tokenizer (strings, comments, parens, dollar-quoting, scripting); inside `$$` blocks it also flags: placeholder tokens (`<>{}` at statement-start), bare unrecognised identifiers at statement-start, and wrong `:=`/`=` assignment syntax
 - `ParseJoinTableRefs(sql)` → regex-based FROM/JOIN table-ref extractor (3/2/1-part + alias)
 - `AnalyzeSqlSemantics(sql, resolvedRefs, colEntries)` → alias.column validator
 - `ComputeJoinOnConditions(req)` → three-tier JOIN ON suggestion engine (FK → PK heuristic → type-compatible same-name columns + USING)
+- `GetSnowflakeKeywords()` → static list of Snowflake reserved keywords (delegates to `snowflake.ReservedKeywords()`)
 - `validateWithParser` and `validateBareColumnRefs` still run in the frontend (`sqlDiagnostics.ts`) as they depend on `node-sql-parser` which has no Go equivalent
 
 ### Adding a feature flag (Enabled Features)

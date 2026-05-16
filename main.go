@@ -25,6 +25,7 @@ import (
 
 	"thaw/internal/crashreport"
 	"thaw/internal/session"
+	"thaw/internal/sqleditor"
 	"thaw/internal/version"
 )
 
@@ -76,6 +77,7 @@ func main() {
 		},
 		Bind: []interface{}{
 			app,
+			sqleditor.NewService(),
 		},
 		Menu: appMenu,
 		Mac: &mac.Options{

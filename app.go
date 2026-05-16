@@ -56,7 +56,6 @@ import (
 	"thaw/internal/snowflake"
 	"thaw/internal/snowgitrepo"
 	"thaw/internal/snowpark"
-	"thaw/internal/sqleditor"
 	"thaw/internal/stage"
 	"thaw/internal/tasks"
 	"thaw/internal/telemetry"
@@ -1398,16 +1397,6 @@ func (a *App) GetQuotedIdentifiersIgnoreCase() (bool, error) {
 	return a.client.GetQuotedIdentifiersIgnoreCase(a.ctx)
 }
 
-// GetReservedKeywords returns the canonical list of Snowflake SQL reserved
-// keywords from the backend. The frontend uses this list to replicate the same
-// quoting logic as the Go NeedsQuoting function — an identifier that matches
-// one of these keywords (case-insensitively) must be double-quoted even when
-// its characters would otherwise form a valid bare identifier.
-// No active connection is required; the list is static.
-func (a *App) GetReservedKeywords() []string {
-	return snowflake.ReservedKeywords()
-}
-
 // ListRoles returns all roles visible to the current role (SHOW ROLES).
 // Used for informational displays and user-management role pickers.
 func (a *App) ListRoles() ([]string, error) {
@@ -2671,127 +2660,6 @@ func (a *App) GetSchemaForeignKeys(database, schema string) ([]snowflake.TableFo
 		return nil, apperrors.ErrNotConnected
 	}
 	return a.client.GetSchemaForeignKeys(a.ctx, database, schema)
-}
-
-// ── SQL editor analysis IPC methods ───────────────────────────────────────────
-// These methods expose the proprietary SQL analysis algorithms (previously in
-// the TypeScript frontend) as backend IPC calls so the logic is protected by
-// Go binary obfuscation rather than being visible in the JS bundle.
-
-// AnalyzeSqlSyntax runs the custom Snowflake SQL tokenizer on the given text
-// and returns structural error markers (unclosed strings, unmatched parens,
-// bad scripting assignments, etc.).  No Snowflake connection is required.
-func (a *App) AnalyzeSqlSyntax(sql string) []sqleditor.DiagMarker {
-	return sqleditor.ValidateSyntax(sql)
-}
-
-// ParseJoinTableRefs extracts all FROM/JOIN table references (with aliases)
-// from the given SQL text.  No Snowflake connection is required.
-func (a *App) ParseJoinTableRefs(sql string) []sqleditor.JoinTableRef {
-	return sqleditor.ParseJoinTables(sql)
-}
-
-// ComputeJoinOnConditions computes JOIN ON / USING condition suggestions using
-// FK constraints, PK naming heuristics, and type-compatible same-name columns.
-// The caller is responsible for fetching and passing FK and column data;
-// no Snowflake connection is required by this method.
-func (a *App) ComputeJoinOnConditions(req sqleditor.JoinOnSuggestionsReq) []sqleditor.JoinCondition {
-	return sqleditor.ComputeJoinOnConditions(req)
-}
-
-// AnalyzeSqlSemantics validates alias.column references in SQL against the
-// provided column info, returning Warning markers for unrecognized column names.
-// No Snowflake connection is required.
-func (a *App) AnalyzeSqlSemantics(sql string, resolvedRefs []sqleditor.ResolvedRef, colEntries []sqleditor.ColEntry) []sqleditor.DiagMarker {
-	return sqleditor.ValidateSemantics(sql, resolvedRefs, colEntries)
-}
-
-// ValidateSnowflakePatterns runs custom Snowflake anti-pattern checks and
-// statement preamble validation.  It is the Go port of validateWithParser from
-// sqlDiagnostics.ts (minus the node-sql-parser AST call, which is covered by
-// AnalyzeSqlSyntax).  No Snowflake connection is required.
-func (a *App) ValidateSnowflakePatterns(sql string, stmtRanges []sqleditor.StatementRange) []sqleditor.DiagMarker {
-	return sqleditor.ValidateSnowflakePatterns(sql, stmtRanges)
-}
-
-// ValidateDataTypes checks CREATE TABLE, ALTER TABLE ADD COLUMN, CAST(), and
-// shorthand cast (::) expressions for unrecognized Snowflake data type names.
-// No Snowflake connection is required.
-func (a *App) ValidateDataTypes(sql string, stmtRanges []sqleditor.StatementRange) []sqleditor.DiagMarker {
-	return sqleditor.ValidateDataTypes(sql, stmtRanges)
-}
-
-// ValidateTablesExist checks SELECT/CREATE/ALTER/DROP/UNDROP statements for
-// references to databases, schemas, or tables that are absent from the resolved
-// references or known catalogs.  No Snowflake connection is required.
-func (a *App) ValidateTablesExist(req sqleditor.ValidateTablesExistRequest) []sqleditor.DiagMarker {
-	return sqleditor.ValidateTablesExist(req)
-}
-
-// ValidateBareColumnRefs checks INSERT column lists and CREATE TABLE REFERENCES
-// column lists against the column info cache.  It also builds an in-script
-// column cache from CREATE TABLE statements so that subsequent INSERTs can
-// validate against tables created earlier in the same script.
-// No Snowflake connection is required.
-func (a *App) ValidateBareColumnRefs(req sqleditor.ValidateBareColsRequest) []sqleditor.DiagMarker {
-	return sqleditor.ValidateBareColumnRefs(req)
-}
-
-// GetScriptingCompletions extracts declared Snowflake Scripting variables
-// visible at cursorOffset and determines whether a ':' prefix is required for
-// completions. No Snowflake connection is required.
-func (a *App) GetScriptingCompletions(sql string, cursorOffset int) sqleditor.ScriptingCompletionResult {
-	return sqleditor.GetScriptingCompletions(sql, cursorOffset)
-}
-
-// GetSqlStatementRanges splits sql into per-statement line ranges and byte offsets.
-// No Snowflake connection is required.
-func (a *App) GetSqlStatementRanges(sql string) []sqleditor.StatementRange {
-	return sqleditor.GetStatementRanges(sql)
-}
-
-// GetIdentifierAtColumn parses the dot-separated identifier (e.g. db.schema.table)
-// under the zero-indexed cursor column col within a single line of SQL.
-// Returns nil when the column is not on any identifier.
-// No Snowflake connection is required.
-func (a *App) GetIdentifierAtColumn(line string, col int) []string {
-	return sqleditor.GetIdentifierAtColumn(line, col)
-}
-
-// FindSqlTokenPositions walks sql and returns the line/column positions of bare
-// words in bareTargets and double-quoted identifiers in quotedTargets, skipping
-// string literals and comments.  No Snowflake connection is required.
-func (a *App) FindSqlTokenPositions(sql string, bareTargets []string, quotedTargets []string) []sqleditor.TokenMatch {
-	return sqleditor.FindTokenPositions(sql, bareTargets, quotedTargets)
-}
-
-// GetActiveFunctionCall parses the SQL prefix (text from document start to
-// cursor) and returns the innermost open function call with its active parameter
-// index.  Returns nil when the cursor is not inside a named function call.
-// No Snowflake connection is required.
-func (a *App) GetActiveFunctionCall(prefix string) *sqleditor.FunctionCallContext {
-	return sqleditor.GetActiveFunctionCall(prefix)
-}
-
-// ParseSignatureParams extracts the byte spans of each parameter within a
-// function signature string for Monaco parameter-label highlighting.
-// No Snowflake connection is required.
-func (a *App) ParseSignatureParams(sig string) []sqleditor.SignatureParam {
-	return sqleditor.ParseSignatureParams(sig)
-}
-
-// ApplySqlCasing applies token-level keyword/identifier/function casing to a
-// formatted SQL string.  Quoted identifiers, string literals, dollar-quoted
-// blocks, and comments are passed through unchanged.
-// No Snowflake connection is required.
-func (a *App) ApplySqlCasing(sql, keywordCase, identifierCase, functionCase string) string {
-	return sqleditor.ApplyCasing(sql, keywordCase, identifierCase, functionCase)
-}
-
-// GetSnowflakeKeywords returns the full list of Snowflake SQL reserved keywords.
-// No Snowflake connection is required.
-func (a *App) GetSnowflakeKeywords() []string {
-	return snowflake.ReservedKeywords()
 }
 
 // GetFunctionInfo fetches the DDL for a user-defined function and returns its

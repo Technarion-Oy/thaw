@@ -866,6 +866,22 @@ func TestValidateBareColumnRefs_Valid(t *testing.T) {
 		"SELECT DATE_TRUNC('month', CURRENT_DATE()) FROM DB.SCH.EMPLOYEES",
 		"SELECT TIMESTAMPDIFF(second, CURRENT_DATE(), CURRENT_DATE()) FROM DB.SCH.EMPLOYEES",
 		"SELECT EXTRACT(year FROM CURRENT_DATE()) FROM DB.SCH.EMPLOYEES",
+
+		// Regression: double-quoted column names + comments in CREATE TABLE must
+		// not break the in-script column cache for subsequent INSERT/SELECT.
+		"CREATE TABLE t1 (\n  \"CUSTOMER_ID\" INT,\n  FIRST_NAME VARCHAR\n);\nINSERT INTO t1 (\"CUSTOMER_ID\", FIRST_NAME) SELECT 1, 'a';",
+		// Column after a line comment must still be cached.
+		"CREATE TABLE t2 (\n  -- primary key\n  id INT,\n  name VARCHAR\n);\nINSERT INTO t2 (id, name) SELECT 1, 'a';",
+		// Column after a block comment must still be cached.
+		"CREATE TABLE t3 (\n  /* pk */ id INT,\n  name VARCHAR\n);\nINSERT INTO t3 (id, name) SELECT 1, 'a';",
+		// Double-quoted column containing comma must be handled correctly.
+		"CREATE TABLE t4 (\n  \"A,B\" INT,\n  COL2 INT\n);\nINSERT INTO t4 (\"A,B\", COL2) SELECT 1, 2;",
+		// SELECT from a table whose columns are defined after comments.
+		"CREATE TABLE t5 (\n  -- the id\n  customer_id INT,\n  full_name VARCHAR\n);\nSELECT customer_id, full_name FROM t5;",
+		// Column with escaped double-quote in name (Snowflake uses "" to embed a literal ").
+		"CREATE TABLE t6 (\n  \"col\"\"name\" INT,\n  other INT\n);\nINSERT INTO t6 (\"col\"\"name\", other) SELECT 1, 2;",
+		// Column after a DEFAULT with escaped single-quote must still be cached.
+		"CREATE TABLE t7 (\n  greeting VARCHAR DEFAULT 'it''s',\n  id INT\n);\nINSERT INTO t7 (greeting, id) SELECT 'hi', 1;",
 	}
 
 	req := ValidateBareColsRequest{
@@ -908,6 +924,28 @@ func TestValidateBareColumnRefs_Invalid(t *testing.T) {
 		// Regression: Ensure date parts are still validated if used as normal columns outside date functions
 		{"Bare date part outside function", `SELECT month FROM "DB"."SCH"."EMPLOYEES"`, []string{"month"}},
 		{"Date part as 2nd param", `SELECT DATEADD(day, month, CURRENT_DATE()) FROM "DB"."SCH"."EMPLOYEES"`, []string{"month"}},
+
+		// Regression: columns after comments must be correctly cached; wrong columns must still be flagged.
+		{"INSERT wrong col after comment in CREATE TABLE",
+			"CREATE TABLE t1 (\n  -- primary key\n  id INT,\n  name VARCHAR\n);\nINSERT INTO t1 (id, WRONG_COL) SELECT 1, 'a';",
+			[]string{"WRONG_COL"}},
+		{"INSERT wrong col with quoted col in CREATE TABLE",
+			"CREATE TABLE t1 (\n  \"CUSTOMER_ID\" INT,\n  FIRST_NAME VARCHAR\n);\nINSERT INTO t1 (\"CUSTOMER_ID\", FAKE_COL) SELECT 1, 'a';",
+			[]string{"FAKE_COL"}},
+
+		// Regression: bare reference to a case-sensitive quoted column must be flagged.
+		// "customer_id" (quoted, lowercase) cannot be referenced as bare customer_id
+		// because Snowflake normalizes bare identifiers to CUSTOMER_ID which ≠ customer_id.
+		{"SELECT bare ref to quoted lowercase col",
+			"CREATE OR REPLACE TABLE RAW_CUSTOMERS1 (\n  \"customer_id\" INT,\n  FIRST_NAME VARCHAR\n);\nCREATE OR REPLACE VIEW VW AS\nSELECT\n  customer_id,\n  FIRST_NAME\nFROM RAW_CUSTOMERS1;",
+			[]string{"CUSTOMER_ID"}},
+		{"SELECT bare ref to quoted lowercase col simple",
+			"CREATE TABLE t1 (\n  \"customer_id\" INT,\n  name VARCHAR\n);\nSELECT customer_id, name FROM t1;",
+			[]string{"CUSTOMER_ID"}},
+		// User-reported scenario: CREATE TABLE + CREATE VIEW referencing quoted col with bare ident.
+		{"CREATE VIEW bare ref to quoted lowercase col",
+			"CREATE OR REPLACE TABLE RAW_CUSTOMERS1 (\n  \"customer_id\" INT,\n  FIRST_NAME VARCHAR,\n  LAST_NAME VARCHAR,\n  REGISTRATION_DATE DATE,\n  STATUS VARCHAR\n);\n\nCREATE OR REPLACE VIEW VW_CLEAN_CUSTOMERS AS\nSELECT\n  customer_id,\n  UPPER(FIRST_NAME || ' ' || LAST_NAME) AS FULL_NAME,\n  REGISTRATION_DATE\nFROM RAW_CUSTOMERS1\nWHERE STATUS = 'ACTIVE';",
+			[]string{"CUSTOMER_ID"}},
 	}
 
 	req := ValidateBareColsRequest{

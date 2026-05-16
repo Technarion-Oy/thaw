@@ -76,11 +76,12 @@ GEMINI_API_KEY=... .venv/bin/python embed_codebase.py --reset
 - The venv and all dependencies are already installed at `scripts/.venv/`.
 
 ## 🏗 Architecture Overview
-- **Go Backend**: Core logic is in `app.go` (Wails IPC bindings) and `internal/`.
+- **Go Backend**: Core logic is in `app.go` (Wails IPC bindings for connection-dependent methods) and `internal/`.
 - **Snowflake Client**: Located in `internal/snowflake/client.go`. Enriched `ColumnInfo` here for metadata-heavy tasks.
+- **SQL Editor Service**: `internal/sqleditor/service.go` — a Wails-bound `Service` struct exposing all SQL diagnostics & autocomplete IPC endpoints (no Snowflake connection required). Registered in `main.go`'s `Bind` array. Frontend imports from `wailsjs/go/sqleditor/Service`.
 - **Frontend**: React application in `frontend/src/`.
 - **State Management**: Zustand stores are in `frontend/src/store/`.
-- **IPC Flow**: Frontend calls `wailsjs/go/main/App.ts` → Go `*App` methods in `app.go`.
+- **IPC Flow**: Frontend calls `wailsjs/go/main/App.ts` → Go `*App` methods in `app.go` (connection-dependent), or `wailsjs/go/sqleditor/Service.ts` → Go `*sqleditor.Service` methods (stateless SQL analysis).
 
 ## 🛠 Engineering Standards
 - **Keep documentation up to date**: Every change that adds, removes, or modifies a user-facing feature, internal package, frontend component/store, or architectural pattern MUST include corresponding documentation updates in the **same commit or PR**. Files to update:
@@ -90,7 +91,7 @@ GEMINI_API_KEY=... .venv/bin/python embed_codebase.py --reset
   - `GEMINI.md` — architecture overview, engineering standards, common workflows
   Do not defer documentation to a follow-up PR. Outdated docs mislead both humans and LLM agents.
 - **Surgical Edits**: Prefer `replace` over `write_file` for large files like `app.go` and `Sidebar.tsx`.
-- **Wails Bindings**: After modifying Go method signatures in `app.go`, you MUST run `wails generate module` to update frontend bindings.
+- **Wails Bindings**: After modifying Go method signatures in `app.go` or any Wails-bound `Service` struct (e.g., `internal/sqleditor/service.go`), you MUST run `wails generate module` to update frontend bindings.
 - **New Feature Pattern**:
     1. Define state in a new `zustand` store in `frontend/src/store/` (optional).
     2. Create UI components in `frontend/src/components/` (e.g., `database/CreateTableModal.tsx`, `layout/`).
