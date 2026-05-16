@@ -761,11 +761,6 @@ export default function NotebookTab({ tabId }: Props) {
   }, [tabId]);
   useEffect(() => { restartKernelRef.current = restartKernel; }, [restartKernel]);
 
-  // ── Sync kernel state & callbacks to the unified toolbar store ────────────
-  useEffect(() => {
-    useNotebookToolbarStore.getState().setKernelState({ kernelReady, kernelStarting, kernelError });
-  }, [kernelReady, kernelStarting, kernelError]);
-
   const addCell = useCallback((afterId?: string) => {
     const newCell: Cell = {
       id: crypto.randomUUID(),
@@ -791,18 +786,31 @@ export default function NotebookTab({ tabId }: Props) {
     setSelectedCellId(newCell.id);
   }, [syncToStore]);
 
-  // ── Sync callbacks to the unified toolbar store (after all are defined) ───
+  // ── Sync kernel state & callbacks to the unified toolbar store ────────────
+  // Merged into a single effect to avoid transient states when switching tabs
+  // (clear + partial re-set in separate effects could briefly null out callbacks).
   useEffect(() => {
-    useNotebookToolbarStore.getState().setCallbacks({
+    const store = useNotebookToolbarStore.getState();
+    store.setKernelState({ kernelReady, kernelStarting, kernelError });
+    store.setCallbacks({
       onRestartKernel: restartKernel,
       onAddCell: () => addCell(),
       onDeploy: () => {
         setDeployContent(serializeNotebook(rawNb, cellsRef.current));
         setDeployOpen(true);
       },
+      onRunAll: () => {
+        const currentCells = cellsRef.current;
+        (async () => {
+          for (const cell of currentCells) {
+            if (cell.kind === "markdown") continue;
+            await runCell(cell);
+          }
+        })();
+      },
     });
     return () => { useNotebookToolbarStore.getState().clear(); };
-  }, [restartKernel, addCell, rawNb]);
+  }, [restartKernel, addCell, rawNb, runCell, kernelReady, kernelStarting, kernelError]);
 
   const addCellAbove = useCallback((beforeId: string) => {
     const newCell: Cell = {

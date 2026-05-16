@@ -886,6 +886,7 @@ export default function QueryPage() {
   const nbOnRestartKernel = useNotebookToolbarStore((s) => s.onRestartKernel);
   const nbOnAddCell       = useNotebookToolbarStore((s) => s.onAddCell);
   const nbOnDeploy        = useNotebookToolbarStore((s) => s.onDeploy);
+  const nbOnRunAll        = useNotebookToolbarStore((s) => s.onRunAll);
 
   const handleNewNotebook = () => {
     const blank = JSON.stringify({
@@ -918,7 +919,7 @@ export default function QueryPage() {
         selectedSql={selectedSql}
         currentUser={currentUser}
         currentRegion={currentRegion}
-        onRun={() => runQuery()}
+        onRun={isNotebookTab && nbOnRunAll ? nbOnRunAll : () => runQuery()}
         onCancel={handleCancel}
         onDisconnect={handleDisconnect}
         onOpenSessionProperties={openSessionProperties}

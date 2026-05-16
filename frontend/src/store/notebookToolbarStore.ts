@@ -29,10 +29,11 @@ interface NotebookToolbarState {
   onRestartKernel: (() => void) | null;
   onAddCell: (() => void) | null;
   onDeploy: (() => void) | null;
+  onRunAll: (() => void) | null;
 
   /** Update kernel state (called by NotebookTab). */
   setKernelState: (state: { kernelReady: boolean; kernelStarting: boolean; kernelError: string | null }) => void;
-  setCallbacks: (cbs: { onRestartKernel: () => void; onAddCell: () => void; onDeploy: () => void }) => void;
+  setCallbacks: (cbs: { onRestartKernel: () => void; onAddCell: () => void; onDeploy: () => void; onRunAll: () => void }) => void;
   /** Clear all state when notebook tab is unmounted or deactivated. */
   clear: () => void;
 }
@@ -44,11 +45,12 @@ export const useNotebookToolbarStore = create<NotebookToolbarState>((set) => ({
   onRestartKernel: null,
   onAddCell: null,
   onDeploy: null,
+  onRunAll: null,
 
   setKernelState: ({ kernelReady, kernelStarting, kernelError }) =>
     set({ kernelReady, kernelStarting, kernelError }),
-  setCallbacks: ({ onRestartKernel, onAddCell, onDeploy }) =>
-    set({ onRestartKernel, onAddCell, onDeploy }),
+  setCallbacks: ({ onRestartKernel, onAddCell, onDeploy, onRunAll }) =>
+    set({ onRestartKernel, onAddCell, onDeploy, onRunAll }),
   clear: () => set({
     kernelReady: false,
     kernelStarting: false,
@@ -56,5 +58,6 @@ export const useNotebookToolbarStore = create<NotebookToolbarState>((set) => ({
     onRestartKernel: null,
     onAddCell: null,
     onDeploy: null,
+    onRunAll: null,
   }),
 }));

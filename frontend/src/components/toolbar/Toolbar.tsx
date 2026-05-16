@@ -21,6 +21,7 @@ import {
   BookOutlined,
   SaveOutlined,
 } from "@ant-design/icons";
+import { useShallow } from "zustand/react/shallow";
 import { useConnectionStore } from "../../store/connectionStore";
 import { useSessionStore } from "../../store/sessionStore";
 
@@ -81,7 +82,9 @@ export default function Toolbar({
   contextButtons,
   contextStatus,
 }: ToolbarProps) {
-  const { params, isConnected } = useConnectionStore();
+  const { params, isConnected } = useConnectionStore(
+    useShallow((s) => ({ params: s.params, isConnected: s.isConnected }))
+  );
   const {
     role, warehouse, database, schema,
     roles, warehouses, databases, schemas,
@@ -89,7 +92,21 @@ export default function Toolbar({
     switchingRole, switchingWarehouse, switchingDatabase, switchingSchema,
     loadRoles, loadWarehouses, loadDatabases, loadSchemas,
     switchRole, switchWarehouse, switchDatabase, switchSchema,
-  } = useSessionStore();
+  } = useSessionStore(
+    useShallow((s) => ({
+      role: s.role, warehouse: s.warehouse, database: s.database, schema: s.schema,
+      roles: s.roles, warehouses: s.warehouses, databases: s.databases, schemas: s.schemas,
+      loadingContext: s.loadingContext, loadingRoles: s.loadingRoles,
+      loadingWarehouses: s.loadingWarehouses, loadingDatabases: s.loadingDatabases,
+      loadingSchemas: s.loadingSchemas,
+      switchingRole: s.switchingRole, switchingWarehouse: s.switchingWarehouse,
+      switchingDatabase: s.switchingDatabase, switchingSchema: s.switchingSchema,
+      loadRoles: s.loadRoles, loadWarehouses: s.loadWarehouses,
+      loadDatabases: s.loadDatabases, loadSchemas: s.loadSchemas,
+      switchRole: s.switchRole, switchWarehouse: s.switchWarehouse,
+      switchDatabase: s.switchDatabase, switchSchema: s.switchSchema,
+    }))
+  );
 
   return (
     <div
