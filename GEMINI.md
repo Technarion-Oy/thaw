@@ -80,6 +80,7 @@ GEMINI_API_KEY=... .venv/bin/python embed_codebase.py --reset
 - **Snowflake Client**: Located in `internal/snowflake/client.go`. Enriched `ColumnInfo` here for metadata-heavy tasks.
 - **SQL Editor Service**: `internal/sqleditor/service.go` — a Wails-bound `Service` struct exposing all SQL diagnostics & autocomplete IPC endpoints (no Snowflake connection required). Registered in `main.go`'s `Bind` array. Frontend imports from `wailsjs/go/sqleditor/Service`.
 - **Frontend**: React application in `frontend/src/`.
+- **Unified Toolbar**: `frontend/src/components/toolbar/Toolbar.tsx` — reusable toolbar with execution controls, quick-action buttons (New SQL, New Notebook, Save), session selectors, and a `contextSlot` for tab-type-specific content (e.g. `NotebookToolbarSlot` for kernel status). The `notebookToolbarStore` bridges NotebookTab's internal state to the toolbar.
 - **State Management**: Zustand stores are in `frontend/src/store/`.
 - **IPC Flow**: Frontend calls `wailsjs/go/main/App.ts` → Go `*App` methods in `app.go` (connection-dependent), or `wailsjs/go/sqleditor/Service.ts` → Go `*sqleditor.Service` methods (stateless SQL analysis).
 

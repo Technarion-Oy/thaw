@@ -26,6 +26,7 @@ func GetCodebaseSemanticMap() string {
       ],
       "frontend_paths": [
         "frontend/src/components/connection/ConnectModal.tsx",
+        "frontend/src/components/toolbar/Toolbar.tsx",
         "frontend/src/store/connectionStore.ts",
         "frontend/wailsjs/"
       ],
@@ -39,6 +40,7 @@ func GetCodebaseSemanticMap() string {
       ],
       "frontend_paths": [
         "frontend/src/components/editor/SqlEditor.tsx",
+        "frontend/src/components/editor/sqlEditorUtils.ts",
         "frontend/src/components/results/ResultGrid.tsx",
         "frontend/src/store/queryStore.ts"
       ],
@@ -96,7 +98,9 @@ func GetCodebaseSemanticMap() string {
       ],
       "frontend_paths": [
         "frontend/src/components/notebook/NotebookTab.tsx",
-        "frontend/src/store/notebookPrefsStore.ts"
+        "frontend/src/components/toolbar/NotebookToolbarSlot.tsx",
+        "frontend/src/store/notebookPrefsStore.ts",
+        "frontend/src/store/notebookToolbarStore.ts"
       ],
       "description": "Python environment management, Jupyter kernels, and dbt project scaffolding."
     },

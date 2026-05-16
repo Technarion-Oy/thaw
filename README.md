@@ -14,7 +14,8 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - Cancel an in-progress connection attempt
 - **Offline-first startup** — the app launches instantly without waiting for a Snowflake connection; connection parameters are validated and the session is established on demand when you first run a query or browse objects
 - **User Agreement** — a **User Agreement** link at the bottom of the connect screen opens the End User License Agreement in a scrollable modal
-- Switch role, warehouse, database, or schema from the query toolbar without reconnecting
+- **Unified Toolbar** — a reusable toolbar component with execution controls (Run/Cancel), quick-action buttons (New SQL, New Notebook, Save), session selectors (role, warehouse, database, schema), and context-specific slots that dynamically adapt based on the active tab type (e.g. notebook kernel status, ER Design button)
+- Switch role, warehouse, database, or schema from the toolbar without reconnecting
 - Role dropdown shows only roles the current user can actually `USE ROLE` to — not all account-visible roles
 - Schema dropdown lists only schemas belonging to the currently selected database; resets automatically when the database is switched
 - After any `USE` command runs in the editor, all four toolbar dropdowns (role, warehouse, database, schema) update automatically to reflect the new session state; the internal connection context is also synced so subsequent toolbar dropdown selections always target the correct database — no "Object does not exist" errors from stale context
@@ -716,7 +717,7 @@ thaw/
     │   ├── App.tsx                # Root component, Ant Design dark theme
     │   ├── main.tsx               # React entry point; suppresses WebView context menu
     │   ├── styles/global.css      # Global styles incl. Monaco occurrence-highlight class
-    │   ├── store/                   # Zustand stores (11 stores)
+    │   ├── store/                   # Zustand stores (12 stores)
     │   │   ├── connectionStore.ts  # Connection state
     │   │   ├── diffStore.ts        # Text comparison pending item + fetch state
     │   │   ├── featureFlagsStore.ts # Feature flags (loaded on startup, reloaded after modal save)
@@ -726,6 +727,7 @@ thaw/
     │   │   ├── objectStore.ts      # Object browser state
     │   │   ├── panelLayoutStore.ts # Sidebar panel order, widths, editor split (persisted)
     │   │   ├── queryStore.ts       # Multi-tab editor state
+    │   │   ├── notebookToolbarStore.ts # Bridges notebook kernel state to unified toolbar
     │   │   ├── sessionStore.ts     # Active role & warehouse
     │   │   └── themeStore.ts       # Light/dark/system theme preference (persisted)
     │   ├── pages/
@@ -760,7 +762,8 @@ thaw/
     │       ├── snippets/             # Code Snippets browser (Tools menu)
     │       ├── snowpark/             # Snowpark setup wizard, environment check, pip registries
     │       ├── task/                 # Task management: create, execute, properties, graph DAG, schedule editor
-    │       └── terminal/             # Embedded xterm.js terminal panel
+    │       ├── terminal/             # Embedded xterm.js terminal panel
+    │       └── toolbar/              # Unified toolbar: Toolbar shell, NotebookToolbarSlot
     └── wailsjs/                   # Auto-generated Go→JS bridge (do not edit)
 ```
 
