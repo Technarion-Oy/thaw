@@ -1721,3 +1721,266 @@ SELECT * FROM alpha;`
 		}
 	})
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TestComputeGitLineDiff
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestComputeGitLineDiff(t *testing.T) {
+	tests := []struct {
+		name     string
+		head     []string
+		current  []string
+		max      int
+		wantAdd  []int
+		wantMod  []int
+		wantDel  []int
+	}{
+		{
+			name:    "no changes",
+			head:    []string{"a", "b", "c"},
+			current: []string{"a", "b", "c"},
+			max:     3000,
+			wantAdd: []int{}, wantMod: []int{}, wantDel: []int{},
+		},
+		{
+			name:    "added lines only",
+			head:    []string{"a", "c"},
+			current: []string{"a", "b", "c"},
+			max:     3000,
+			wantAdd: []int{2}, wantMod: []int{}, wantDel: []int{},
+		},
+		{
+			name:    "deleted lines only",
+			head:    []string{"a", "b", "c"},
+			current: []string{"a", "c"},
+			max:     3000,
+			wantAdd: []int{}, wantMod: []int{}, wantDel: []int{1},
+		},
+		{
+			name:    "modified line (same position in added and deleted)",
+			head:    []string{"a", "b", "c"},
+			current: []string{"a", "x", "c"},
+			max:     3000,
+			wantAdd: []int{}, wantMod: []int{2}, wantDel: []int{},
+		},
+		{
+			name:    "mixed add delete modify",
+			head:    []string{"a", "b", "c", "d"},
+			current: []string{"a", "x", "c", "d", "e"},
+			max:     3000,
+			wantAdd: []int{5}, wantMod: []int{2}, wantDel: []int{},
+		},
+		{
+			name:    "exceeds maxLines",
+			head:    []string{"a", "b"},
+			current: []string{"a", "c"},
+			max:     1,
+			wantAdd: []int{}, wantMod: []int{}, wantDel: []int{},
+		},
+		{
+			name:    "empty head (all added)",
+			head:    []string{},
+			current: []string{"a", "b"},
+			max:     3000,
+			wantAdd: []int{1, 2}, wantMod: []int{}, wantDel: []int{},
+		},
+		{
+			name:    "empty current (all deleted)",
+			head:    []string{"a", "b"},
+			current: []string{},
+			max:     3000,
+			wantAdd: []int{}, wantMod: []int{}, wantDel: []int{1, 1},
+		},
+		{
+			name:    "both empty",
+			head:    []string{},
+			current: []string{},
+			max:     3000,
+			wantAdd: []int{}, wantMod: []int{}, wantDel: []int{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ComputeGitLineDiff(tt.head, tt.current, tt.max)
+			if !reflect.DeepEqual(got.Added, tt.wantAdd) {
+				t.Errorf("Added = %v, want %v", got.Added, tt.wantAdd)
+			}
+			if !reflect.DeepEqual(got.Modified, tt.wantMod) {
+				t.Errorf("Modified = %v, want %v", got.Modified, tt.wantMod)
+			}
+			if !reflect.DeepEqual(got.Deleted, tt.wantDel) {
+				t.Errorf("Deleted = %v, want %v", got.Deleted, tt.wantDel)
+			}
+		})
+	}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TestIsDatatypeContext
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestIsDatatypeContext(t *testing.T) {
+	tests := []struct {
+		name         string
+		textToCursor string
+		lineUpToWord string
+		want         bool
+	}{
+		{name: "cast shorthand ::", textToCursor: "SELECT x::", lineUpToWord: "SELECT x::", want: true},
+		{name: "cast shorthand with space", textToCursor: "SELECT x:: ", lineUpToWord: "SELECT x:: ", want: true},
+		{name: "CAST(x AS", textToCursor: "SELECT CAST(x AS ", lineUpToWord: "SELECT CAST(x AS ", want: true},
+		{name: "TRY_CAST(x AS", textToCursor: "SELECT TRY_CAST(x AS ", lineUpToWord: "SELECT TRY_CAST(x AS ", want: true},
+		{name: "DECLARE varname", textToCursor: "DECLARE myvar ", lineUpToWord: "  myvar ", want: true},
+		{name: "CREATE TABLE col", textToCursor: "CREATE TABLE t (\n  col ", lineUpToWord: "  col ", want: true},
+		{name: "ALTER TABLE col", textToCursor: "ALTER TABLE t ADD COLUMN (\n  col ", lineUpToWord: "  col ", want: true},
+		{name: "CREATE TABLE second col", textToCursor: "CREATE TABLE t (id INT,\n  name ", lineUpToWord: "  name ", want: true},
+		{name: "SELECT FROM not datatype", textToCursor: "SELECT x FROM ", lineUpToWord: "SELECT x FROM ", want: false},
+		{name: "empty strings", textToCursor: "", lineUpToWord: "", want: false},
+		{name: "just a word", textToCursor: "hello", lineUpToWord: "hello", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsDatatypeContext(tt.textToCursor, tt.lineUpToWord)
+			if got != tt.want {
+				t.Errorf("IsDatatypeContext(%q, %q) = %v, want %v", tt.textToCursor, tt.lineUpToWord, got, tt.want)
+			}
+		})
+	}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TestIsInJoinOnClause
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestIsInJoinOnClause(t *testing.T) {
+	tests := []struct {
+		name         string
+		textToCursor string
+		want         bool
+	}{
+		{name: "JOIN ON cursor", textToCursor: "SELECT * FROM t1 JOIN t2 ON ", want: true},
+		{name: "JOIN ON partial", textToCursor: "SELECT * FROM t1 JOIN t2 ON t1.id = ", want: true},
+		{name: "terminated by WHERE", textToCursor: "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id WHERE ", want: false},
+		{name: "no JOIN", textToCursor: "SELECT * FROM t1", want: false},
+		{name: "JOIN no ON", textToCursor: "SELECT * FROM t1 JOIN t2", want: false},
+		{name: "multiple JOINs uses last", textToCursor: "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id JOIN t3 ON ", want: true},
+		{name: "multiple JOINs terminated", textToCursor: "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id JOIN t3 ON t3.id = t2.id WHERE ", want: false},
+		{name: "GROUP BY terminates", textToCursor: "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id GROUP BY ", want: false},
+		{name: "HAVING terminates", textToCursor: "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id HAVING ", want: false},
+		{name: "UNION terminates", textToCursor: "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id UNION ", want: false},
+		{name: "empty string", textToCursor: "", want: false},
+		{name: "case insensitive", textToCursor: "select * from t1 join t2 on ", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsInJoinOnClause(tt.textToCursor)
+			if got != tt.want {
+				t.Errorf("IsInJoinOnClause(%q) = %v, want %v", tt.textToCursor, got, tt.want)
+			}
+		})
+	}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TestDetectUsingClause
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestDetectUsingClause(t *testing.T) {
+	tests := []struct {
+		name         string
+		textToCursor string
+		wantInUsing  bool
+		wantPartial  bool
+	}{
+		{name: "USING( start", textToCursor: "JOIN t2 USING (", wantInUsing: true, wantPartial: false},
+		{name: "USING( no space", textToCursor: "JOIN t2 USING(", wantInUsing: true, wantPartial: false},
+		{name: "USING partial", textToCursor: "JOIN t2 USING (col1, ", wantInUsing: false, wantPartial: true},
+		{name: "USING partial multi", textToCursor: "JOIN t2 USING (col1, col2, ", wantInUsing: false, wantPartial: true},
+		{name: "USING closed", textToCursor: "JOIN t2 USING (col1)", wantInUsing: false, wantPartial: false},
+		{name: "no USING", textToCursor: "SELECT * FROM t1 WHERE ", wantInUsing: false, wantPartial: false},
+		{name: "empty string", textToCursor: "", wantInUsing: false, wantPartial: false},
+		{name: "case insensitive", textToCursor: "join t2 using (", wantInUsing: true, wantPartial: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DetectUsingClause(tt.textToCursor)
+			if got.InUsing != tt.wantInUsing {
+				t.Errorf("DetectUsingClause(%q).InUsing = %v, want %v", tt.textToCursor, got.InUsing, tt.wantInUsing)
+			}
+			if got.IsPartial != tt.wantPartial {
+				t.Errorf("DetectUsingClause(%q).IsPartial = %v, want %v", tt.textToCursor, got.IsPartial, tt.wantPartial)
+			}
+		})
+	}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TestAutocompleteContextFullDatatypeAndJoin
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestAutocompleteContextFullDatatypeAndJoin(t *testing.T) {
+	t.Run("isDatatypeContext in full context", func(t *testing.T) {
+		req := AutocompleteContextRequest{
+			SQL:          "SELECT x::",
+			CursorOffset: 10,
+			LineUpToWord: "SELECT x::",
+		}
+		ctx := GetAutocompleteContextFull(req)
+		if !ctx.IsDatatypeCtx {
+			t.Error("expected IsDatatypeCtx = true for '::' at cursor")
+		}
+	})
+
+	t.Run("isInJoinOnClause in full context", func(t *testing.T) {
+		sql := "SELECT * FROM t1 JOIN t2 ON "
+		req := AutocompleteContextRequest{
+			SQL:          sql,
+			CursorOffset: len(sql),
+			LineUpToWord: sql,
+		}
+		ctx := GetAutocompleteContextFull(req)
+		if !ctx.IsInJoinOnClause {
+			t.Error("expected IsInJoinOnClause = true")
+		}
+	})
+
+	t.Run("usingClause in full context", func(t *testing.T) {
+		sql := "SELECT * FROM t1 JOIN t2 USING ("
+		req := AutocompleteContextRequest{
+			SQL:          sql,
+			CursorOffset: len(sql),
+			LineUpToWord: "USING (",
+		}
+		ctx := GetAutocompleteContextFull(req)
+		if ctx.UsingClause == nil {
+			t.Fatal("expected UsingClause to be non-nil")
+		}
+		if !ctx.UsingClause.InUsing {
+			t.Error("expected UsingClause.InUsing = true")
+		}
+	})
+
+	t.Run("no context flags when normal SELECT", func(t *testing.T) {
+		sql := "SELECT * FROM t1 WHERE "
+		req := AutocompleteContextRequest{
+			SQL:          sql,
+			CursorOffset: len(sql),
+			LineUpToWord: "WHERE ",
+		}
+		ctx := GetAutocompleteContextFull(req)
+		if ctx.IsDatatypeCtx {
+			t.Error("expected IsDatatypeCtx = false")
+		}
+		if ctx.IsInJoinOnClause {
+			t.Error("expected IsInJoinOnClause = false")
+		}
+		if ctx.UsingClause != nil {
+			t.Error("expected UsingClause = nil")
+		}
+	})
+}

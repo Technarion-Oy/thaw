@@ -14,8 +14,16 @@ export function ApplySqlCasing(arg1, arg2, arg3, arg4) {
   return window['go']['sqleditor']['Service']['ApplySqlCasing'](arg1, arg2, arg3, arg4);
 }
 
+export function ComputeGitLineDiff(arg1, arg2, arg3) {
+  return window['go']['sqleditor']['Service']['ComputeGitLineDiff'](arg1, arg2, arg3);
+}
+
 export function ComputeJoinOnConditions(arg1) {
   return window['go']['sqleditor']['Service']['ComputeJoinOnConditions'](arg1);
+}
+
+export function DetectUsingClause(arg1) {
+  return window['go']['sqleditor']['Service']['DetectUsingClause'](arg1);
 }
 
 export function GetActiveFunctionCall(arg1) {
@@ -44,6 +52,14 @@ export function GetSnowflakeKeywords() {
 
 export function GetSqlStatementRanges(arg1) {
   return window['go']['sqleditor']['Service']['GetSqlStatementRanges'](arg1);
+}
+
+export function IsDatatypeContext(arg1, arg2) {
+  return window['go']['sqleditor']['Service']['IsDatatypeContext'](arg1, arg2);
+}
+
+export function IsInJoinOnClause(arg1) {
+  return window['go']['sqleditor']['Service']['IsInJoinOnClause'](arg1);
 }
 
 export function ParseJoinTableRefs(arg1) {

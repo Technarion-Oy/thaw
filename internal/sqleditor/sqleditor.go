@@ -143,20 +143,37 @@ type AutocompleteContextRequest struct {
 	CursorOffset int            `json:"cursorOffset"`
 	StoreObjects []StoreObject  `json:"storeObjects"`
 	Session      *SessionContext `json:"session,omitempty"`
+	LineUpToWord string          `json:"lineUpToWord"`
+}
+
+// UsingClauseInfo describes whether the cursor is inside a USING(...) clause.
+type UsingClauseInfo struct {
+	InUsing   bool `json:"inUsing"`   // Cursor is right after USING(
+	IsPartial bool `json:"isPartial"` // Cursor is after USING(col, ...
+}
+
+// LineDiff holds 1-based line numbers for added, modified, and deleted lines.
+type LineDiff struct {
+	Added    []int `json:"added"`
+	Modified []int `json:"modified"`
+	Deleted  []int `json:"deleted"`
 }
 
 // AutocompleteContext bundles all server-side context needed by the frontend
 // completion provider in a single IPC round-trip.
 type AutocompleteContext struct {
-	StatementRanges []StatementRange          `json:"statementRanges"`
-	CurrentStmt     string                    `json:"currentStmt"`
-	CurrentStmtIdx  int                       `json:"currentStmtIdx"`
-	Scripting       ScriptingCompletionResult `json:"scripting"`
-	TableRefs       []JoinTableRef            `json:"tableRefs"`
-	CTEColumns      []CTEColumnEntry          `json:"cteColumns"`
-	UseContext      *UseContext               `json:"useContext,omitempty"`
-	ResolvedRefs    []ResolvedRef             `json:"resolvedRefs,omitempty"`
-	InEditorTables  []InEditorTableDef        `json:"inEditorTables,omitempty"`
+	StatementRanges  []StatementRange          `json:"statementRanges"`
+	CurrentStmt      string                    `json:"currentStmt"`
+	CurrentStmtIdx   int                       `json:"currentStmtIdx"`
+	Scripting        ScriptingCompletionResult `json:"scripting"`
+	TableRefs        []JoinTableRef            `json:"tableRefs"`
+	CTEColumns       []CTEColumnEntry          `json:"cteColumns"`
+	UseContext       *UseContext               `json:"useContext,omitempty"`
+	ResolvedRefs     []ResolvedRef             `json:"resolvedRefs,omitempty"`
+	InEditorTables   []InEditorTableDef        `json:"inEditorTables,omitempty"`
+	IsDatatypeCtx    bool                      `json:"isDatatypeContext"`
+	IsInJoinOnClause bool                      `json:"isInJoinOnClause"`
+	UsingClause      *UsingClauseInfo          `json:"usingClause,omitempty"`
 }
 
 // FunctionCallContext is returned by GetActiveFunctionCall and identifies the
@@ -3325,6 +3342,176 @@ func ExtractInEditorTableDefs(
 	return defs
 }
 
+// ── ComputeGitLineDiff ─────────────────────────────────────────────────────
+
+// ComputeGitLineDiff computes a line-level diff between HEAD lines and current
+// lines using an LCS dynamic-programming approach. Returns 1-based line numbers
+// for added, modified, and deleted regions. Returns empty slices if either
+// input exceeds maxLines.
+func ComputeGitLineDiff(headLines, currentLines []string, maxLines int) LineDiff {
+	if len(headLines) > maxLines || len(currentLines) > maxLines {
+		return LineDiff{Added: []int{}, Modified: []int{}, Deleted: []int{}}
+	}
+
+	H := len(headLines)
+	C := len(currentLines)
+
+	// DP LCS on line arrays.
+	dp := make([][]int, H+1)
+	for i := range dp {
+		dp[i] = make([]int, C+1)
+	}
+	for i := H - 1; i >= 0; i-- {
+		for j := C - 1; j >= 0; j-- {
+			if headLines[i] == currentLines[j] {
+				dp[i][j] = 1 + dp[i+1][j+1]
+			} else if dp[i+1][j] > dp[i][j+1] {
+				dp[i][j] = dp[i+1][j]
+			} else {
+				dp[i][j] = dp[i][j+1]
+			}
+		}
+	}
+
+	// Backtrack to find diff operations.
+	var added, deleted []int
+	i, j := 0, 0
+	for i < H || j < C {
+		if i < H && j < C && headLines[i] == currentLines[j] {
+			i++
+			j++
+		} else if j < C && (i >= H || dp[i+1][j] <= dp[i][j+1]) {
+			added = append(added, j+1) // 1-based
+			j++
+		} else {
+			// Head line i was deleted. Record deletion point as line j in current (1-based, min 1).
+			pos := j
+			if pos < 1 {
+				pos = 1
+			}
+			deleted = append(deleted, pos)
+			i++
+		}
+	}
+
+	// Reclassify: a line in current that appears in both added and deleted
+	// at the same position was in HEAD but changed — show as "modified".
+	deletedSet := make(map[int]bool, len(deleted))
+	for _, l := range deleted {
+		deletedSet[l] = true
+	}
+	addedSet := make(map[int]bool, len(added))
+	for _, l := range added {
+		addedSet[l] = true
+	}
+
+	var modified []int
+	for _, l := range added {
+		if deletedSet[l] {
+			modified = append(modified, l)
+		}
+	}
+
+	filteredAdded := make([]int, 0, len(added))
+	for _, l := range added {
+		if !deletedSet[l] {
+			filteredAdded = append(filteredAdded, l)
+		}
+	}
+	filteredDeleted := make([]int, 0, len(deleted))
+	for _, l := range deleted {
+		if !addedSet[l] {
+			filteredDeleted = append(filteredDeleted, l)
+		}
+	}
+
+	if filteredAdded == nil {
+		filteredAdded = []int{}
+	}
+	if modified == nil {
+		modified = []int{}
+	}
+	if filteredDeleted == nil {
+		filteredDeleted = []int{}
+	}
+
+	return LineDiff{Added: filteredAdded, Modified: modified, Deleted: filteredDeleted}
+}
+
+// ── IsDatatypeContext ──────────────────────────────────────────────────────
+
+// Compiled regex patterns for datatype context detection (autocomplete).
+var (
+	reDtCtxCastShorthand = regexp.MustCompile(`::\s*$`)
+	reDtCtxCastFunction  = regexp.MustCompile(`(?i)\b(?:TRY_)?CAST\s*\([^)]*\bAS\s*$`)
+	reDtCtxDeclareVar    = regexp.MustCompile(`(?i)\bDECLARE\b[^;]*\b\w+\s*$`)
+	reDtCtxCreateAlter   = regexp.MustCompile(`(?is)\b(?:CREATE|ALTER)\b[^;]*\(\s*(?:.*,\s*)?\w+\s*$`)
+)
+
+// IsDatatypeContext returns true when the cursor position suggests a Snowflake
+// data type name is expected — after ::, CAST(x AS, DECLARE varname, or
+// CREATE/ALTER TABLE (..., col_name.
+func IsDatatypeContext(textToCursor string, lineUpToWord string) bool {
+	if reDtCtxCastShorthand.MatchString(lineUpToWord) {
+		return true
+	}
+	if reDtCtxCastFunction.MatchString(lineUpToWord) {
+		return true
+	}
+	if reDtCtxDeclareVar.MatchString(textToCursor) {
+		return true
+	}
+	if reDtCtxCreateAlter.MatchString(textToCursor) {
+		return true
+	}
+	return false
+}
+
+// ── IsInJoinOnClause ───────────────────────────────────────────────────────
+
+var (
+	reJoinGlobal     = regexp.MustCompile(`(?i)\bJOIN\b`)
+	reOnAfterJoin    = regexp.MustCompile(`(?i)\bON\b`)
+	reJoinTerminator = regexp.MustCompile(`(?i)\b(?:JOIN|WHERE|GROUP|ORDER|HAVING|UNION|INTERSECT|EXCEPT)\b`)
+)
+
+// IsInJoinOnClause returns true when the cursor is inside a JOIN ... ON ...
+// clause that has not been terminated by a subsequent keyword.
+func IsInJoinOnClause(textToCursor string) bool {
+	matches := reJoinGlobal.FindAllStringIndex(textToCursor, -1)
+	if len(matches) == 0 {
+		return false
+	}
+	lastJoin := matches[len(matches)-1]
+	afterLastJoin := textToCursor[lastJoin[1]:]
+	onLoc := reOnAfterJoin.FindStringIndex(afterLastJoin)
+	if onLoc == nil {
+		return false
+	}
+	afterOn := afterLastJoin[onLoc[1]:]
+	return !reJoinTerminator.MatchString(afterOn)
+}
+
+// ── DetectUsingClause ──────────────────────────────────────────────────────
+
+var (
+	reUsingFull    = regexp.MustCompile(`(?i)\bUSING\s*\(\s*$`)
+	reUsingPartial = regexp.MustCompile(`(?i)\bUSING\s*\(\s*(?:\w+\s*,\s*)+$`)
+)
+
+// DetectUsingClause checks whether the cursor is inside a USING(...) clause.
+// InUsing is true when right after "USING(" with no columns yet.
+// IsPartial is true when after "USING(col1, " with at least one column listed.
+func DetectUsingClause(textToCursor string) UsingClauseInfo {
+	if reUsingFull.MatchString(textToCursor) {
+		return UsingClauseInfo{InUsing: true, IsPartial: false}
+	}
+	if reUsingPartial.MatchString(textToCursor) {
+		return UsingClauseInfo{InUsing: false, IsPartial: true}
+	}
+	return UsingClauseInfo{}
+}
+
 // GetAutocompleteContextFull extends GetAutocompleteContext with ref resolution
 // and in-editor CREATE TABLE column extraction, so the frontend completion
 // provider becomes a thin wrapper.
@@ -3332,5 +3519,20 @@ func GetAutocompleteContextFull(req AutocompleteContextRequest) AutocompleteCont
 	ctx := GetAutocompleteContext(req.SQL, req.CursorOffset)
 	ctx.ResolvedRefs = ResolveTableRefs(ctx.TableRefs, req.StoreObjects, ctx.UseContext, req.Session)
 	ctx.InEditorTables = ExtractInEditorTableDefs(req.SQL, ctx.StatementRanges, ctx.UseContext, req.Session)
+
+	// Compute context-detection fields from text-to-cursor.
+	textToCursor := req.SQL
+	runes := []rune(req.SQL)
+	if req.CursorOffset >= 0 && req.CursorOffset <= len(runes) {
+		textToCursor = string(runes[:req.CursorOffset])
+	}
+	ctx.IsDatatypeCtx = IsDatatypeContext(textToCursor, req.LineUpToWord)
+	ctx.IsInJoinOnClause = IsInJoinOnClause(textToCursor)
+
+	usingInfo := DetectUsingClause(textToCursor)
+	if usingInfo.InUsing || usingInfo.IsPartial {
+		ctx.UsingClause = &usingInfo
+	}
+
 	return ctx
 }

@@ -2779,6 +2779,20 @@ export namespace snowpark {
 
 export namespace sqleditor {
 	
+	export class UsingClauseInfo {
+	    inUsing: boolean;
+	    isPartial: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new UsingClauseInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.inUsing = source["inUsing"];
+	        this.isPartial = source["isPartial"];
+	    }
+	}
 	export class InEditorTableDef {
 	    db: string;
 	    schema: string;
@@ -2953,6 +2967,9 @@ export namespace sqleditor {
 	    useContext?: UseContext;
 	    resolvedRefs?: ResolvedRef[];
 	    inEditorTables?: InEditorTableDef[];
+	    isDatatypeContext: boolean;
+	    isInJoinOnClause: boolean;
+	    usingClause?: UsingClauseInfo;
 	
 	    static createFrom(source: any = {}) {
 	        return new AutocompleteContext(source);
@@ -2969,6 +2986,9 @@ export namespace sqleditor {
 	        this.useContext = this.convertValues(source["useContext"], UseContext);
 	        this.resolvedRefs = this.convertValues(source["resolvedRefs"], ResolvedRef);
 	        this.inEditorTables = this.convertValues(source["inEditorTables"], InEditorTableDef);
+	        this.isDatatypeContext = source["isDatatypeContext"];
+	        this.isInJoinOnClause = source["isInJoinOnClause"];
+	        this.usingClause = this.convertValues(source["usingClause"], UsingClauseInfo);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -3026,6 +3046,7 @@ export namespace sqleditor {
 	    cursorOffset: number;
 	    storeObjects: StoreObject[];
 	    session?: SessionContext;
+	    lineUpToWord: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AutocompleteContextRequest(source);
@@ -3037,6 +3058,7 @@ export namespace sqleditor {
 	        this.cursorOffset = source["cursorOffset"];
 	        this.storeObjects = this.convertValues(source["storeObjects"], StoreObject);
 	        this.session = this.convertValues(source["session"], SessionContext);
+	        this.lineUpToWord = source["lineUpToWord"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -3247,6 +3269,22 @@ export namespace sqleditor {
 		}
 	}
 	
+	export class LineDiff {
+	    added: number[];
+	    modified: number[];
+	    deleted: number[];
+	
+	    static createFrom(source: any = {}) {
+	        return new LineDiff(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.added = source["added"];
+	        this.modified = source["modified"];
+	        this.deleted = source["deleted"];
+	    }
+	}
 	
 	export class SchemaEntry {
 	    db: string;
@@ -3278,6 +3316,7 @@ export namespace sqleditor {
 	        this.end = source["end"];
 	    }
 	}
+	
 	
 	
 	

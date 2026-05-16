@@ -32,9 +32,10 @@ import { useThemeStore } from "../../store/themeStore";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import { patchMonacoClipboard } from "../../utils/monacoClipboard";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, GetAllDataTypes, GitGetHeadFileContent } from "../../../wailsjs/go/main/App";
-import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs } from "../../../wailsjs/go/sqleditor/Service";
+import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, GetAllDataTypes, GitGetHeadFileContent } from "../../../wailsjs/go/main/App";
+import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContextFull, ResolveTableRefs, ComputeGitLineDiff } from "../../../wailsjs/go/sqleditor/Service";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
+import { UC, quoteIfNecessary, getFKs, getFKsCached, setFKCache, FKEntry, buildVariableSuggestions } from "./sqlEditorUtils";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 
@@ -89,60 +90,7 @@ const headContentCache = new Map<string, string>();
 // avoid O(H×C) DP memory / time blowup on very large files.
 const MAX_DIFF_LINES = 3000;
 
-// Compute line-level diff between HEAD and current content.
-// Returns 1-based line numbers for added, modified, and deleted regions.
-function computeGitLineDiff(headLines: string[], currentLines: string[]): {
-  added: number[];
-  modified: number[];
-  deleted: number[];
-} {
-  if (headLines.length > MAX_DIFF_LINES || currentLines.length > MAX_DIFF_LINES) {
-    return { added: [], modified: [], deleted: [] };
-  }
-
-  // DP LCS on line arrays.
-  const H = headLines.length;
-  const C = currentLines.length;
-  const dp: number[][] = Array.from({ length: H + 1 }, () => new Array(C + 1).fill(0));
-  for (let i = H - 1; i >= 0; i--) {
-    for (let j = C - 1; j >= 0; j--) {
-      dp[i][j] = headLines[i] === currentLines[j]
-        ? 1 + dp[i + 1][j + 1]
-        : Math.max(dp[i + 1][j], dp[i][j + 1]);
-    }
-  }
-
-  // Backtrack to find diff operations.
-  const added: number[] = [];
-  const deleted: number[] = [];
-  let i = 0, j = 0;
-  while (i < H || j < C) {
-    if (i < H && j < C && headLines[i] === currentLines[j]) {
-      i++; j++;
-    } else if (j < C && (i >= H || dp[i + 1][j] <= dp[i][j + 1])) {
-      added.push(j + 1);
-      j++;
-    } else {
-      // Head line i was deleted. Record deletion point in current as line j (insertion point).
-      deleted.push(Math.max(1, j));
-      i++;
-    }
-  }
-
-  // Reclassify: a line in current that appears in both `added` and `deleted`
-  // at the same position was in HEAD but changed — show it as "modified".
-  const deletedSet = new Set(deleted);
-  const addedSet   = new Set(added);
-  const modifiedLines: number[] = [];
-  for (const line of added) {
-    if (deletedSet.has(line)) modifiedLines.push(line);
-  }
-  return {
-    added:    added.filter(l => !deletedSet.has(l)),
-    modified: modifiedLines,
-    deleted:  deleted.filter(l => !addedSet.has(l)),
-  };
-}
+// computeGitLineDiff — moved to Go backend (sqleditor.ComputeGitLineDiff).
 
 // ── Datatype completion cache ──────────────────────────────────────────────────
 // Fetched once from the Go registry (snowflake.AllDataTypes) so the editor and
@@ -180,13 +128,8 @@ function ensureKeywordsLoaded(): Promise<void> {
   return keywordsFetchPromise;
 }
 
-const UC = (s: string) => s.toUpperCase();
-
-function quoteIfNecessary(name: string): string {
-  if (!name) return name;
-  const needsQuoting = !/^[A-Z_][A-Z0-9_$]*$/.test(name) || (snowflakeKeywords?.has(name.toUpperCase()) ?? false);
-  return needsQuoting ? `"${name.replace(/"/g, '""')}"` : name;
-}
+// quoteIfNecessary is imported from sqlEditorUtils.ts — local wrapper for convenience.
+const quoteIfNec = (name: string) => quoteIfNecessary(name, snowflakeKeywords);
 
 // ── Column-level completion cache ─────────────────────────────────────────────
 const columnCache  = new Map<string, string[]>();
@@ -209,41 +152,7 @@ async function getColumns(db: string, schema: string, table: string): Promise<st
   }
 }
 
-// ── FK cache for JOIN ON autocomplete ─────────────────────────────────────────
-interface FKEntry {
-  pkDatabase: string; pkSchema: string; pkTable: string; pkColumn: string;
-  fkColumn: string;
-  constraintName: string;
-  keySequence: number;
-}
-const fkCache    = new Map<string, FKEntry[]>();
-const fetchingFKs = new Set<string>();
-
-async function getFKs(db: string, schema: string, table: string): Promise<FKEntry[]> {
-  const key = `${db.toUpperCase()}\0${schema.toUpperCase()}\0${table.toUpperCase()}`;
-  if (fkCache.has(key)) return fkCache.get(key)!;
-  if (fetchingFKs.has(key)) return [];
-  fetchingFKs.add(key);
-  try {
-    const fks = await GetTableForeignKeys(db, schema, table);
-    const entries: FKEntry[] = (fks ?? []).map((fk: any) => ({
-      pkDatabase:     fk.pkDatabase     ?? "",
-      pkSchema:       fk.pkSchema       ?? "",
-      pkTable:        fk.pkTable        ?? "",
-      pkColumn:       fk.pkColumn       ?? "",
-      fkColumn:       fk.fkColumn       ?? "",
-      constraintName: fk.constraintName ?? "",
-      keySequence:    fk.keySequence    ?? 0,
-    }));
-    fkCache.set(key, entries);
-    return entries;
-  } catch {
-    fkCache.set(key, []);
-    return [];
-  } finally {
-    fetchingFKs.delete(key);
-  }
-}
+// FK cache for JOIN ON autocomplete — imported from sqlEditorUtils.ts
 
 // ── ColInfo cache for type-compatible JOIN ON suggestions ─────────────────────
 const colInfoCache   = new Map<string, ColInfo[]>();
@@ -295,7 +204,7 @@ async function warmUpFKsForSchema(db: string, schema: string): Promise<void> {
       });
     }
     for (const [k, entries] of grouped) {
-      if (!fkCache.has(k)) fkCache.set(k, entries);
+      setFKCache(k, entries);
     }
   } catch {
     fetchedFKSchemas.delete(key); 
@@ -306,7 +215,7 @@ function mkColSuggestions(cols: string[], range: any, monaco: any) {
   return cols.map((col) => ({
     label:      col,
     kind:       monaco.languages.CompletionItemKind.Field,
-    insertText: quoteIfNecessary(col),
+    insertText: quoteIfNec(col),
     sortText:   "02_" + col,
     detail:     "COLUMN",
     range,
@@ -901,7 +810,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       const headLines    = (headContent ?? "").split("\n");
       const currentLines = currentText.split("\n");
 
-      const { added, modified, deleted } = computeGitLineDiff(headLines, currentLines);
+      const { added, modified, deleted } = await ComputeGitLineDiff(headLines, currentLines, MAX_DIFF_LINES);
 
       const decorations: any[] = [];
       for (const lineNum of added) {
@@ -966,42 +875,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           .getLineContent(position.lineNumber)
           .substring(0, word.startColumn - 1);
 
-        // ── Datatype context ──────────────────────────────────────────────
-        // Offer Snowflake type names when the cursor is in a position that
-        // syntactically expects a data type:
-        //   • x::| — type-cast shorthand
-        //   • CAST(x AS |  /  TRY_CAST(x AS |
-        //   • DECLARE varname | — Snowflake Scripting variable declaration
-        //   • CREATE/ALTER TABLE (..., col_name | — DDL column type
-        const isDatatypeContext = (
-          /::$/.test(lineUpToWord) ||
-          /\b(?:TRY_)?CAST\s*\([^)]*\bAS\s*$/i.test(lineUpToWord) ||
-          /\bDECLARE\b[^;]*\b\w+\s*$/i.test(model.getValue().slice(0, model.getOffsetAt(position))) ||
-          /\b(?:CREATE|ALTER)\b[^;]*\(\s*(?:.*,\s*)?\w+\s*$/is.test(model.getValue().slice(0, model.getOffsetAt(position)))
-        );
-        if (isDatatypeContext) {
-          await ensureDataTypesLoaded();
-          if (cachedDataTypes && cachedDataTypes.length > 0) {
-            return {
-              suggestions: cachedDataTypes.map((dt, i) => {
-                const hasParams = dt.ParamHint !== "";
-                return {
-                  label:      dt.Name,
-                  kind:       monaco.languages.CompletionItemKind.TypeParameter,
-                  insertText: hasParams ? `${dt.Name}($1)` : dt.Name,
-                  insertTextRules: hasParams
-                    ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
-                    : 0,
-                  detail:    hasParams ? `Type ${dt.ParamHint}` : "Type",
-                  sortText:  "00_dt_" + String(i).padStart(3, "0"),
-                  range,
-                };
-              }),
-            };
-          }
-        }
-        // ─────────────────────────────────────────────────────────────────
-
         const schemaAutocompleteEnabled = useFeatureFlagsStore.getState().flags.schemaAutocomplete;
 
         const fullLine = model.getLineContent(position.lineNumber);
@@ -1064,7 +937,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                   .map((o) => ({
                     label:      o.name,
                     kind:       monacoKind(monaco, o.kind),
-                    insertText: quoteIfNecessary(o.name),
+                    insertText: quoteIfNec(o.name),
                     sortText:   "03_" + o.name,
                     detail:     o.kind,
                     range,
@@ -1096,7 +969,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                     .map((s) => ({
                       label:      s.name,
                       kind:       monaco.languages.CompletionItemKind.Module,
-                      insertText: quoteIfNecessary(s.name),
+                      insertText: quoteIfNec(s.name),
                       sortText:   "04_" + s.name,
                       detail:     "SCHEMA",
                       range,
@@ -1112,6 +985,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                   cursorOffset: model.getOffsetAt(position),
                   storeObjects: objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })),
                   session: { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema },
+                  lineUpToWord,
                 } as any);
 
                 // 1b. CTE name → suggest CTE columns
@@ -1121,7 +995,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                     suggestions: dotCTECols.cols.map((col: any, i: number) => ({
                       label:      col.name,
                       kind:       monaco.languages.CompletionItemKind.Field,
-                      insertText: quoteIfNecessary(col.name),
+                      insertText: quoteIfNec(col.name),
                       sortText:   "02_" + String(i).padStart(3, "0"),
                       detail:     `COLUMN (CTE) · ${dotCTECols.name}`,
                       range,
@@ -1149,7 +1023,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                         suggestions: inEditorMatch.cols.map((col: any, i: number) => ({
                           label:      col.name,
                           kind:       monaco.languages.CompletionItemKind.Field,
-                          insertText: quoteIfNecessary(col.name),
+                          insertText: quoteIfNec(col.name),
                           sortText:   "02_" + String(i).padStart(3, "0") + "_" + col.name,
                           detail:     `COLUMN (in-editor) · ${inEditorMatch.name}`,
                           range,
@@ -1169,7 +1043,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                   suggestions: schemaObjs.map((o) => ({
                     label:      o.name,
                     kind:       monacoKind(monaco, o.kind),
-                    insertText: quoteIfNecessary(o.name),
+                    insertText: quoteIfNec(o.name),
                     sortText:   "03_" + o.name,
                     detail:     o.kind,
                     range,
@@ -1196,17 +1070,52 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           }
         }
 
-        const isInJoinOnClause = (() => {
-          const joinMatches = [...textToCursor.matchAll(/\bJOIN\b/gi)];
-          if (joinMatches.length === 0) return false;
-          const lastJoin = joinMatches[joinMatches.length - 1];
-          const afterLastJoin = textToCursor.slice(lastJoin.index! + lastJoin[0].length);
-          const onMatch = afterLastJoin.match(/\bON\b/i);
-          if (!onMatch) return false;
-          const afterOn = afterLastJoin.slice(onMatch.index! + onMatch[0].length);
-          return !/\b(?:JOIN|WHERE|GROUP|ORDER|HAVING|UNION|INTERSECT|EXCEPT)\b/i.test(afterOn);
-        })();
+        // ── Unified autocomplete context (single IPC round-trip) ─────────
+        const { databases, schemas, objects } = useObjectStore.getState();
 
+        const ctx = await GetAutocompleteContextFull({
+          sql: model.getValue(),
+          cursorOffset,
+          storeObjects: objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })),
+          session: { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema },
+          lineUpToWord,
+        } as any);
+        const declaredVars: string[] = ctx?.scripting?.variables ?? [];
+        const needsColon: boolean = ctx?.scripting?.needsColon ?? false;
+        const ctxTableRefs = ctx?.tableRefs ?? [];
+        const ctxCTEColumns = ctx?.cteColumns ?? [];
+
+        // Build a CTE column lookup map for quick access
+        const cteColMap = new Map<string, {name: string, dataType: string}[]>();
+        for (const cte of ctxCTEColumns) {
+          cteColMap.set(UC(cte.name), cte.cols ?? []);
+        }
+
+        // ── Datatype context (computed by backend) ────────────────────────
+        if (ctx?.isDatatypeContext) {
+          await ensureDataTypesLoaded();
+          if (cachedDataTypes && cachedDataTypes.length > 0) {
+            return {
+              suggestions: cachedDataTypes.map((dt, i) => {
+                const hasParams = dt.ParamHint !== "";
+                return {
+                  label:      dt.Name,
+                  kind:       monaco.languages.CompletionItemKind.TypeParameter,
+                  insertText: hasParams ? `${dt.Name}($1)` : dt.Name,
+                  insertTextRules: hasParams
+                    ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+                    : 0,
+                  detail:    hasParams ? `Type ${dt.ParamHint}` : "Type",
+                  sortText:  "00_dt_" + String(i).padStart(3, "0"),
+                  range,
+                };
+              }),
+            };
+          }
+        }
+
+        // ── JOIN ON clause completion (computed by backend) ────────────────
+        const isInJoinOnClause = ctx?.isInJoinOnClause ?? false;
         const wordIsOn = word.word.toUpperCase() === "ON";
         if ((wordIsOn || isInJoinOnClause) && schemaAutocompleteEnabled) {
           const rawRefs = await ParseJoinTableRefs(textToCursor);
@@ -1270,32 +1179,10 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           }
         }
 
-        const { databases, schemas, objects } = useObjectStore.getState();
-        const fullContent = model.getValue();
-        const offset = model.getOffsetAt(position);
-
-        // ── Unified autocomplete context (single IPC round-trip) ─────────
-        const ctx = await GetAutocompleteContextFull({
-          sql: fullContent,
-          cursorOffset: offset,
-          storeObjects: objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })),
-          session: { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema },
-        } as any);
-        const declaredVars: string[] = ctx?.scripting?.variables ?? [];
-        const needsColon: boolean = ctx?.scripting?.needsColon ?? false;
-        const ctxTableRefs = ctx?.tableRefs ?? [];
-        const ctxCTEColumns = ctx?.cteColumns ?? [];
-
-        // Build a CTE column lookup map for quick access
-        const cteColMap = new Map<string, {name: string, dataType: string}[]>();
-        for (const cte of ctxCTEColumns) {
-          cteColMap.set(UC(cte.name), cte.cols ?? []);
-        }
-
-        // ── USING clause completion ─────────────────────────────────────
-        const usingMatch = textToCursor.match(/\bUSING\s*\(\s*$/i);
-        const usingPartialMatch = !usingMatch && textToCursor.match(/\bUSING\s*\(\s*(?:\w+\s*,\s*)+$/i);
-        if ((usingMatch || usingPartialMatch) && schemaAutocompleteEnabled) {
+        // ── USING clause completion (computed by backend) ──────────────
+        const usingInCtx = ctx?.usingClause?.inUsing ?? false;
+        const usingPartialInCtx = ctx?.usingClause?.isPartial ?? false;
+        if ((usingInCtx || usingPartialInCtx) && schemaAutocompleteEnabled) {
           const usingRefs = ctxTableRefs.length >= 2 ? ctxTableRefs : (await ParseJoinTableRefs(textToCursor) || []);
           if (usingRefs.length >= 2) {
             const resolvedUsing = await ResolveTableRefs(usingRefs as any[], objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, (ctx?.useContext ?? { database: "", schema: "" }) as any, { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any);
@@ -1311,7 +1198,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                 const shared = [...colSets[0]].filter((c) => colSets[1].has(c));
                 // Filter out already-listed columns in partial USING
                 const alreadyListed = new Set<string>();
-                if (usingPartialMatch) {
+                if (usingPartialInCtx) {
                   const insideParen = textToCursor.slice(textToCursor.lastIndexOf("(") + 1);
                   for (const part of insideParen.split(",")) {
                     const trimmed = part.trim().toUpperCase();
@@ -1344,20 +1231,12 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           range,
         }));
 
-        const variableSuggestions = declaredVars.map((v) => ({
-          label:      needsColon ? ":" + v : v,
-          kind:       monaco.languages.CompletionItemKind.Variable,
-          insertText: needsColon ? ":" + v : v,
-          filterText: needsColon ? ":" + v : v,
-          sortText:   "01_" + v,
-          detail:     "SCRIPT VARIABLE",
-          range,
-        }));
+        const variableSuggestions = buildVariableSuggestions(declaredVars, needsColon, range, monaco);
 
         const dbSuggestions = databases.map((db) => ({
           label:      db,
           kind:       monaco.languages.CompletionItemKind.Module,
-          insertText: quoteIfNecessary(db),
+          insertText: quoteIfNec(db),
           sortText:   "05_" + db,
           detail:     "DATABASE",
           range,
@@ -1366,7 +1245,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const schemaSuggestions = schemas.map((s) => ({
           label:      s.name,
           kind:       monaco.languages.CompletionItemKind.Module,
-          insertText: quoteIfNecessary(s.name),
+          insertText: quoteIfNec(s.name),
           sortText:   "04_" + s.name,
           detail:     `SCHEMA · ${s.db}`,
           range,
@@ -1375,7 +1254,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const objectSuggestions = objects.map((o) => ({
           label:      o.name,
           kind:       monacoKind(monaco, o.kind),
-          insertText: quoteIfNecessary(o.name),
+          insertText: quoteIfNec(o.name),
           sortText:   "03_" + o.name,
           detail:     `${o.kind} · ${o.db}.${o.schema}`,
           range,
@@ -1406,7 +1285,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
               contextColSuggestions.push({
                 label:      colName,
                 kind:       monaco.languages.CompletionItemKind.Field,
-                insertText: quoteIfNecessary(colName),
+                insertText: quoteIfNec(colName),
                 sortText:   "02_" + colName,
                 detail:     `COLUMN (in-editor) · ${tbl.name}`,
                 range,
@@ -1424,7 +1303,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
               contextColSuggestions.push({
                 label:      colName,
                 kind:       monaco.languages.CompletionItemKind.Field,
-                insertText: quoteIfNecessary(colName),
+                insertText: quoteIfNec(colName),
                 sortText:   "02_" + colName,
                 detail:     `COLUMN (CTE) · ${cteName}`,
                 range,
@@ -1442,7 +1321,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                 contextColSuggestions.push({
                   label:      col,
                   kind:       monaco.languages.CompletionItemKind.Field,
-                  insertText: quoteIfNecessary(col),
+                  insertText: quoteIfNec(col),
                   sortText:   "02_" + col,
                   detail:     `COLUMN · ${ref.name}`,
                   range,
@@ -1901,7 +1780,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
               if (resolved && resolved.length >= 2) {
                 const fkEntries = resolved.map((ref) => ({
                   db: ref.db, schema: ref.schema, name: ref.name,
-                  fks: fkCache.get(`${UC(ref.db)}\0${UC(ref.schema)}\0${UC(ref.name)}`) ?? [],
+                  fks: getFKsCached(ref.db, ref.schema, ref.name),
                 }));
                 const colEntries = resolved.map((ref) => ({
                   db: ref.db, schema: ref.schema, name: ref.name,
