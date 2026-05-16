@@ -248,13 +248,65 @@ func extractBalancedBlock(s string, openIdx int) string {
 
 // parseCreateTableColDefs splits a raw column-definition block (the text
 // between CREATE TABLE name( ... )) into individual ColInfo entries.
+// It handles comments (-- and /* */), double-quoted identifiers with special
+// characters, and single-quoted string literals so that commas and parentheses
+// inside those contexts do not interfere with column splitting.
 func parseCreateTableColDefs(colsRaw string, ic bool) []ColInfo {
 	var columns []ColInfo
 	depth := 0
+	inDouble := false
+	inSingle := false
 	var current strings.Builder
 
 	for i := 0; i < len(colsRaw); i++ {
 		c := colsRaw[i]
+
+		// Skip line comments (-- to end of line).
+		if !inDouble && !inSingle && c == '-' && i+1 < len(colsRaw) && colsRaw[i+1] == '-' {
+			for i < len(colsRaw) && colsRaw[i] != '\n' {
+				i++
+			}
+			// Write the newline so line structure is preserved.
+			if i < len(colsRaw) {
+				current.WriteByte('\n')
+			}
+			continue
+		}
+
+		// Skip block comments (/* ... */).
+		if !inDouble && !inSingle && c == '/' && i+1 < len(colsRaw) && colsRaw[i+1] == '*' {
+			i += 2
+			for i < len(colsRaw) {
+				if colsRaw[i] == '*' && i+1 < len(colsRaw) && colsRaw[i+1] == '/' {
+					i += 2
+					break
+				}
+				i++
+			}
+			current.WriteByte(' ') // Replace comment with space.
+			continue
+		}
+
+		// Track double-quoted identifiers.
+		if !inSingle && c == '"' {
+			inDouble = !inDouble
+			current.WriteByte(c)
+			continue
+		}
+
+		// Track single-quoted string literals (for DEFAULT values etc.).
+		if !inDouble && c == '\'' {
+			inSingle = !inSingle
+			current.WriteByte(c)
+			continue
+		}
+
+		// Inside a quoted context, write everything verbatim.
+		if inDouble || inSingle {
+			current.WriteByte(c)
+			continue
+		}
+
 		switch {
 		case c == '(':
 			depth++
