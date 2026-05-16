@@ -197,7 +197,9 @@ All proprietary analysis logic lives in `internal/sqleditor/` and is exposed to 
 - `ParseJoinTableRefs(sql)` → regex-based FROM/JOIN table-ref extractor (3/2/1-part + alias)
 - `AnalyzeSqlSemantics(sql, resolvedRefs, colEntries)` → alias.column validator
 - `ComputeJoinOnConditions(req)` → three-tier JOIN ON suggestion engine (FK → PK heuristic → type-compatible same-name columns + USING)
+- `GetAutocompleteContext(sql, cursorOffset)` → unified endpoint bundling statement ranges, scripting completions, table refs, and CTE column projections in a single IPC round-trip; used by the frontend completion provider to avoid sequential calls
 - `GetSnowflakeKeywords()` → static list of Snowflake reserved keywords (delegates to `snowflake.ReservedKeywords()`)
+- `ValidateTablesExist` markers include a `Code` field with JSON quick-fix metadata (`{"kind":"qualify-table","original":"FOO","suggestions":["DB.SCHEMA.FOO"]}`) when the unresolved table exists in other schemas; the frontend's `CodeActionProvider` parses this to offer lightbulb quick-fix qualification
 - `validateWithParser` and `validateBareColumnRefs` still run in the frontend (`sqlDiagnostics.ts`) as they depend on `node-sql-parser` which has no Go equivalent
 
 ### Adding a feature flag (Enabled Features)

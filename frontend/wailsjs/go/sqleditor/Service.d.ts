@@ -12,6 +12,8 @@ export function ComputeJoinOnConditions(arg1:sqleditor.JoinOnSuggestionsReq):Pro
 
 export function GetActiveFunctionCall(arg1:string):Promise<sqleditor.FunctionCallContext>;
 
+export function GetAutocompleteContext(arg1:string,arg2:number):Promise<sqleditor.AutocompleteContext>;
+
 export function GetIdentifierAtColumn(arg1:string,arg2:number):Promise<Array<string>>;
 
 export function GetScriptingCompletions(arg1:string,arg2:number):Promise<sqleditor.ScriptingCompletionResult>;

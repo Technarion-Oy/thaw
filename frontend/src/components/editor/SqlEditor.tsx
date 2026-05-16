@@ -33,7 +33,7 @@ import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import { patchMonacoClipboard } from "../../utils/monacoClipboard";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, GetAllDataTypes, GitGetHeadFileContent } from "../../../wailsjs/go/main/App";
-import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetScriptingCompletions, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords } from "../../../wailsjs/go/sqleditor/Service";
+import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContext } from "../../../wailsjs/go/sqleditor/Service";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
@@ -46,6 +46,7 @@ export interface DiagMarker {
   endColumn: number;
   message: string;
   severity: number;
+  code?: string;
 }
 
 export interface ColInfo {
@@ -68,6 +69,7 @@ const hoverDDLCache = new Map<string, { ddl: string; ts: number }>();
 let hoverProviderDisposable: { dispose(): void } | null = null;
 let inlineCompletionsDisposable: { dispose(): void } | null = null;
 let signatureHelpDisposable: { dispose(): void } | null = null;
+let codeActionProviderDisposable: { dispose(): void } | null = null;
 
 // Module-level editor preferences — updated whenever the user saves new prefs.
 let editorPrefsRef: EditorPrefs = { ...DEFAULT_EDITOR_PREFS };
@@ -806,6 +808,11 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           })
           .filter(Boolean) as ResolvedRef[];
 
+        // Build allKnownTables from objectStore for quick-fix qualification suggestions
+        const allKnownTables: ResolvedRef[] = storeObjs
+          .filter((o) => o.kind === "TABLE" || o.kind === "VIEW")
+          .map((o) => ({ alias: "", db: o.db, schema: o.schema, name: o.name }));
+
         const tableMarkers = await ValidateTablesExist({
           sql: diagSql,
           stmtRanges,
@@ -816,6 +823,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           droppedDatabases: [],
           droppedSchemas: [],
           droppedTables: [],
+          allKnownTables,
         } as any);
         if (model.getVersionId() !== diagVersion) return;
         diagMarkers.push(...((tableMarkers || []) as DiagMarker[]));
@@ -1113,6 +1121,24 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
                 };
               }
 
+              // 1b. Is it a CTE name? -> suggest CTE columns
+              {
+                const dotCtx = await GetAutocompleteContext(model.getValue(), model.getOffsetAt(position));
+                const dotCTECols = (dotCtx?.cteColumns ?? []).find((c: any) => UC(c.name) === UC(qualifier));
+                if (dotCTECols && dotCTECols.cols && dotCTECols.cols.length > 0) {
+                  return {
+                    suggestions: dotCTECols.cols.map((col: any, i: number) => ({
+                      label:      col.name,
+                      kind:       monaco.languages.CompletionItemKind.Field,
+                      insertText: quoteIfNecessary(col.name),
+                      sortText:   "02_" + String(i).padStart(3, "0"),
+                      detail:     `COLUMN (CTE) · ${dotCTECols.name}`,
+                      range,
+                    })),
+                  };
+                }
+              }
+
               // 2. Is it an alias in the current query? -> suggest columns
               const rawRefs = await ParseJoinTableRefs(textToCursor);
               if (rawRefs) {
@@ -1248,10 +1274,63 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const { databases, schemas, objects } = useObjectStore.getState();
         const fullContent = model.getValue();
         const offset = model.getOffsetAt(position);
-        
-        const scriptingResult = await GetScriptingCompletions(fullContent, offset);
-        const declaredVars: string[] = scriptingResult?.variables ?? [];
-        const needsColon: boolean = scriptingResult?.needsColon ?? false;
+
+        // ── Unified autocomplete context (single IPC round-trip) ─────────
+        const ctx = await GetAutocompleteContext(fullContent, offset);
+        const declaredVars: string[] = ctx?.scripting?.variables ?? [];
+        const needsColon: boolean = ctx?.scripting?.needsColon ?? false;
+        const ctxTableRefs = ctx?.tableRefs ?? [];
+        const ctxCTEColumns = ctx?.cteColumns ?? [];
+
+        // Build a CTE column lookup map for quick access
+        const cteColMap = new Map<string, {name: string, dataType: string}[]>();
+        for (const cte of ctxCTEColumns) {
+          cteColMap.set(UC(cte.name), cte.cols ?? []);
+        }
+
+        // ── USING clause completion ─────────────────────────────────────
+        const usingMatch = textToCursor.match(/\bUSING\s*\(\s*$/i);
+        const usingPartialMatch = !usingMatch && textToCursor.match(/\bUSING\s*\(\s*(?:\w+\s*,\s*)+$/i);
+        if ((usingMatch || usingPartialMatch) && schemaAutocompleteEnabled) {
+          const usingRefs = ctxTableRefs.length >= 2 ? ctxTableRefs : (await ParseJoinTableRefs(textToCursor) || []);
+          if (usingRefs.length >= 2) {
+            const resolvedUsing = resolveRefs(usingRefs as any[], objects);
+            if (resolvedUsing && resolvedUsing.length >= 2) {
+              // Get columns for the last two refs (the JOIN pair)
+              const lastTwo = resolvedUsing.slice(-2);
+              const colSets: Set<string>[] = [];
+              for (const ref of lastTwo) {
+                const cols = await getColInfos(ref.db, ref.schema, ref.name);
+                colSets.push(new Set((cols || []).map((c: any) => UC(c.name))));
+              }
+              if (colSets.length === 2) {
+                const shared = [...colSets[0]].filter((c) => colSets[1].has(c));
+                // Filter out already-listed columns in partial USING
+                const alreadyListed = new Set<string>();
+                if (usingPartialMatch) {
+                  const insideParen = textToCursor.slice(textToCursor.lastIndexOf("(") + 1);
+                  for (const part of insideParen.split(",")) {
+                    const trimmed = part.trim().toUpperCase();
+                    if (trimmed) alreadyListed.add(trimmed);
+                  }
+                }
+                const filtered = shared.filter((c) => !alreadyListed.has(c));
+                if (filtered.length > 0) {
+                  return {
+                    suggestions: filtered.map((col, i) => ({
+                      label:      col,
+                      kind:       monaco.languages.CompletionItemKind.Field,
+                      insertText: col,
+                      sortText:   "00_" + String(i).padStart(3, "0"),
+                      detail:     "SHARED COLUMN",
+                      range,
+                    })),
+                  };
+                }
+              }
+            }
+          }
+        }
 
         const keywordSuggestions = snowflakeKeywordsArray.map((kw) => ({
           label:      kw,
@@ -1265,7 +1344,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           label:      needsColon ? ":" + v : v,
           kind:       monaco.languages.CompletionItemKind.Variable,
           insertText: needsColon ? ":" + v : v,
-          filterText: needsColon ? ":" + v : v, 
+          filterText: needsColon ? ":" + v : v,
           sortText:   "01_" + v,
           detail:     "SCRIPT VARIABLE",
           range,
@@ -1298,32 +1377,24 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           range,
         }));
 
-        // Isolate the current statement for context columns so tables from other queries don't bleed in
-        const ranges = await GetSqlStatementRanges(fullContent);
-        let currentStmtText = fullContent;
-        for (const r of ranges) {
-          if (position.lineNumber >= r.startLine && position.lineNumber <= r.endLine) {
-            const lines = model.getLinesContent().slice(r.startLine - 1, r.endLine);
-            currentStmtText = lines.join("\n");
-            break;
-          }
-        }
-
         const contextColSuggestions: any[] = [];
         let fetchPending = false;
 
         if (schemaAutocompleteEnabled) {
         const seenColKeys = new Set<string>();
 
-        const rawRefs = await ParseJoinTableRefs(currentStmtText);
-        const refsToFetch: {db: string, schema: string, name: string}[] = [];
+        const rawRefs = ctxTableRefs;
+        const refsToFetch: {db: string, schema: string, name: string, isCTE?: boolean}[] = [];
 
         for (const ref of (rawRefs || [])) {
+          // Check if this ref is a CTE — use CTE columns directly
+          if (cteColMap.has(UC(ref.name)) && !ref.db && !ref.schema) {
+            // CTE columns are added below
+            continue;
+          }
           if (ref.db && ref.schema && ref.name) {
-            // Fully qualified: trust the name and attempt fetch directly without requiring it in objectStore
             refsToFetch.push({ db: ref.db, schema: ref.schema, name: ref.name });
           } else {
-            // Partial: Try to resolve via objects store
             const matchedObjs = objects.filter((o) => {
               if (o.kind !== "TABLE" && o.kind !== "VIEW") return false;
               if (UC(o.name) !== UC(ref.name)) return false;
@@ -1334,8 +1405,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             for (const obj of matchedObjs) {
               refsToFetch.push({ db: obj.db, schema: obj.schema, name: obj.name });
             }
-            
-            // Fallback to session store defaults if not found in cache
+
             if (matchedObjs.length === 0) {
               const sess = useSessionStore.getState();
               if (sess.database && sess.schema && ref.name && !ref.db && !ref.schema) {
@@ -1343,6 +1413,24 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
               } else if (sess.database && ref.schema && ref.name && !ref.db) {
                 refsToFetch.push({ db: sess.database, schema: ref.schema, name: ref.name });
               }
+            }
+          }
+        }
+
+        // Add CTE column suggestions
+        for (const [cteName, cols] of cteColMap) {
+          for (const col of cols) {
+            const colName = col.name || (col as any);
+            if (!seenColKeys.has(UC(colName))) {
+              seenColKeys.add(UC(colName));
+              contextColSuggestions.push({
+                label:      colName,
+                kind:       monaco.languages.CompletionItemKind.Field,
+                insertText: quoteIfNecessary(colName),
+                sortText:   "02_" + colName,
+                detail:     `COLUMN (CTE) · ${cteName}`,
+                range,
+              });
             }
           }
         }
@@ -1403,6 +1491,48 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           ],
           incomplete: fetchPending,
         };
+      },
+    });
+
+    // ── Quick-Fix CodeActionProvider ──────────────────────────────────────────
+    if (codeActionProviderDisposable) {
+      codeActionProviderDisposable.dispose();
+      codeActionProviderDisposable = null;
+    }
+    codeActionProviderDisposable = monaco.languages.registerCodeActionProvider("sql", {
+      provideCodeActions(_model: any, _range: any, context: any) {
+        const actions: any[] = [];
+        for (const marker of context.markers ?? []) {
+          if (!marker.code) continue;
+          let payload: any;
+          try {
+            payload = typeof marker.code === "string" ? JSON.parse(marker.code) : marker.code;
+          } catch { continue; }
+          if (payload.kind !== "qualify-table" || !payload.suggestions) continue;
+          for (const suggestion of payload.suggestions) {
+            actions.push({
+              title: `Qualify as ${suggestion}`,
+              kind: "quickfix",
+              diagnostics: [marker],
+              edit: {
+                edits: [{
+                  resource: _model.uri,
+                  textEdit: {
+                    range: {
+                      startLineNumber: marker.startLineNumber,
+                      startColumn: marker.startColumn,
+                      endLineNumber: marker.endLineNumber,
+                      endColumn: marker.endColumn,
+                    },
+                    text: suggestion,
+                  },
+                  versionId: undefined,
+                }],
+              },
+            });
+          }
+        }
+        return { actions, dispose() {} };
       },
     });
 

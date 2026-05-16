@@ -22,6 +22,10 @@ export function GetActiveFunctionCall(arg1) {
   return window['go']['sqleditor']['Service']['GetActiveFunctionCall'](arg1);
 }
 
+export function GetAutocompleteContext(arg1, arg2) {
+  return window['go']['sqleditor']['Service']['GetAutocompleteContext'](arg1, arg2);
+}
+
 export function GetIdentifierAtColumn(arg1, arg2) {
   return window['go']['sqleditor']['Service']['GetIdentifierAtColumn'](arg1, arg2);
 }

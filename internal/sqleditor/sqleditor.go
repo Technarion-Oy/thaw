@@ -31,7 +31,8 @@ type DiagMarker struct {
 	EndLineNumber   int    `json:"endLineNumber"`
 	EndColumn       int    `json:"endColumn"`
 	Message         string `json:"message"`
-	Severity        int    `json:"severity"` // 8 = Error (red), 4 = Warning (yellow)
+	Severity        int    `json:"severity"`        // 8 = Error (red), 4 = Warning (yellow)
+	Code            string `json:"code,omitempty"`   // JSON quick-fix metadata (e.g. qualify-table suggestions)
 }
 
 // JoinTableRef is a table reference parsed from a FROM/JOIN clause.
@@ -99,6 +100,23 @@ type JoinCondition struct {
 	SortText  string `json:"sortText"`
 }
 
+
+// CTEColumnEntry represents a CTE name and its projected columns for autocomplete.
+type CTEColumnEntry struct {
+	Name string    `json:"name"` // Uppercase CTE name
+	Cols []ColInfo `json:"cols"`
+}
+
+// AutocompleteContext bundles all server-side context needed by the frontend
+// completion provider in a single IPC round-trip.
+type AutocompleteContext struct {
+	StatementRanges []StatementRange          `json:"statementRanges"`
+	CurrentStmt     string                    `json:"currentStmt"`
+	CurrentStmtIdx  int                       `json:"currentStmtIdx"`
+	Scripting       ScriptingCompletionResult `json:"scripting"`
+	TableRefs       []JoinTableRef            `json:"tableRefs"`
+	CTEColumns      []CTEColumnEntry          `json:"cteColumns"`
+}
 
 // FunctionCallContext is returned by GetActiveFunctionCall and identifies the
 // innermost open function call at the cursor position.
@@ -1113,7 +1131,11 @@ func ValidateSyntax(sql string) []DiagMarker {
 	declaredVars := map[string]bool{}
 
 	addError := func(msg string, sl, sc, el, ec int) {
-		markers = append(markers, DiagMarker{sl, sc, el, ec, msg, 8})
+		markers = append(markers, DiagMarker{
+			StartLineNumber: sl, StartColumn: sc,
+			EndLineNumber: el, EndColumn: ec,
+			Message: msg, Severity: 8,
+		})
 	}
 
 	i := 0
@@ -2975,4 +2997,73 @@ func ComputeJoinOnConditions(req JoinOnSuggestionsReq) []JoinCondition {
 	}
 
 	return suggestions
+}
+
+// ── GetAutocompleteContext ────────────────────────────────────────────────────
+
+// GetAutocompleteContext bundles statement ranges, scripting completions, table
+// references, and CTE column projections for the current cursor position into a
+// single response. This replaces multiple sequential IPC calls from the frontend.
+func GetAutocompleteContext(sql string, cursorOffset int) AutocompleteContext {
+	ranges := GetStatementRanges(sql)
+
+	// Identify which statement contains the cursor.
+	currentIdx := -1
+	currentStmt := sql
+	for i, r := range ranges {
+		if cursorOffset >= r.StartOffset && cursorOffset <= r.EndOffset {
+			currentIdx = i
+			runes := []rune(sql)
+			currentStmt = string(runes[r.StartOffset:r.EndOffset])
+			break
+		}
+	}
+	// If cursor is past all ranges, use the last statement.
+	if currentIdx == -1 && len(ranges) > 0 {
+		last := ranges[len(ranges)-1]
+		currentIdx = len(ranges) - 1
+		runes := []rune(sql)
+		if last.EndOffset <= len(runes) {
+			currentStmt = string(runes[last.StartOffset:last.EndOffset])
+		}
+	}
+
+	scripting := GetScriptingCompletions(sql, cursorOffset)
+	tableRefs := ParseJoinTables(currentStmt)
+	cteColumns := getCTEColumnsAtCursor(currentStmt)
+
+	return AutocompleteContext{
+		StatementRanges: ranges,
+		CurrentStmt:     currentStmt,
+		CurrentStmtIdx:  currentIdx,
+		Scripting:       scripting,
+		TableRefs:       tableRefs,
+		CTEColumns:      cteColumns,
+	}
+}
+
+// getCTEColumnsAtCursor extracts CTE column projections from the given statement
+// text, suitable for autocomplete suggestions. It uses the existing
+// extractCTEProjections machinery with an empty global registry.
+func getCTEColumnsAtCursor(stmtText string) []CTEColumnEntry {
+	stripped := stripCommentsSQL(stmtText)
+	upper := strings.ToUpper(strings.TrimSpace(stripped))
+	if !strings.HasPrefix(upper, "WITH") {
+		return nil
+	}
+
+	projections := extractCTEProjections(stripped, make(map[string][]ColInfo))
+	if len(projections) == 0 {
+		return nil
+	}
+
+	// Convert map to sorted slice for deterministic output.
+	entries := make([]CTEColumnEntry, 0, len(projections))
+	for name, cols := range projections {
+		entries = append(entries, CTEColumnEntry{Name: name, Cols: cols})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Name < entries[j].Name
+	})
+	return entries
 }

@@ -114,6 +114,13 @@ func (s *Service) ApplySqlCasing(sql, keywordCase, identifierCase, functionCase 
 	return ApplyCasing(sql, keywordCase, identifierCase, functionCase)
 }
 
+// GetAutocompleteContext bundles statement ranges, scripting completions, table
+// references, and CTE column projections for the cursor position into a single
+// response, reducing IPC round-trips for the frontend completion provider.
+func (s *Service) GetAutocompleteContext(sql string, cursorOffset int) AutocompleteContext {
+	return GetAutocompleteContext(sql, cursorOffset)
+}
+
 // GetSnowflakeKeywords returns the full list of Snowflake SQL reserved keywords.
 func (s *Service) GetSnowflakeKeywords() []string {
 	return snowflake.ReservedKeywords()

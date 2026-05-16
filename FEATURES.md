@@ -48,6 +48,9 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - `db.schema.` → tables, views, functions, and other objects in that schema
   - `db.schema.table.` → columns of that table or view
   - `Ctrl+Space` inside a query → columns from all tables referenced in the current `FROM`/`JOIN` clauses
+  - **CTE column projection** — `WITH cte AS (SELECT id, name FROM t) SELECT cte.` → suggests `id`, `name` from the CTE's projected columns; works with multiple CTEs and nested references
+  - **USING clause completion** — after `USING (` in a JOIN clause → suggests shared column names between the two joined tables; filters out already-listed columns in partial USING expressions
+  - **Quick-fix table qualification** — when a table name cannot be resolved, a lightbulb quick-fix offers to replace it with the fully-qualified `DB.SCHEMA.TABLE` path if the same table name exists in other schemas
   - After `ON` in a `JOIN` clause → join conditions in three tiers: **(1)** FK relationships — composite multi-column constraints produce a single `col1 = ref.col1 AND col2 = ref.col2` expression (sourced from `SHOW IMPORTED KEYS`); **(2)** PK-naming-convention heuristic (`orders.CUSTOMER_ID = customers.ID`) when no FK constraint exists; **(3)** type-compatible same-name columns with both `a.col = b.col` equality and `USING (col)` alternatives; works with quoted/unquoted identifiers, full three-part names, and optional table aliases
   - **Ghost text before ON** — after `JOIN table ` (before typing `ON`), an inline ghost-text suggestion `ON <condition>` appears and can be accepted with `Tab` (FK-cache-backed, instant)
   - **Ctrl+Space before ON** — pressing `Ctrl+Space` after a JOIN table reference but before typing `ON` opens a full dropdown of `ON <condition>` suggestions covering all three tiers
