@@ -47,6 +47,7 @@ const allEnabled: config.FeatureFlags = {
   schemaAutocomplete: true,
   ddlHoverTooltips: true,
   fileFormatBuilder: true,
+  snowflakeCLIProfileManager: true,
 };
 
 // allLocked default: nothing is admin-locked.
@@ -84,6 +85,7 @@ const nothingLocked: config.FeatureFlags = {
   schemaAutocomplete: false,
   ddlHoverTooltips: false,
   fileFormatBuilder: false,
+  snowflakeCLIProfileManager: false,
 };
 
 interface FeatureFlagsState {

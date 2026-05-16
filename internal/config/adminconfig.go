@@ -35,7 +35,8 @@ import (
 //	  "ai":                       { "aiChat": false, "aiInlineCompletions": false },
 //	  "advancedTools":            { "schemaMigration": false },
 //	  "developerEnvironments":    { "snowparkNotebooks": false },
-//	  "performanceDiagnostics":   { "explainSql": false }
+//	  "performanceDiagnostics":   { "explainSql": false },
+//	  "connection":               { "snowflakeCLIProfileManager": false }
 //	}
 
 // ptrbool is a small helper so JSON null / absent ≠ false.
@@ -89,6 +90,11 @@ type adminPerfDiag struct {
 	ExplainSQL   ptrBool `json:"explainSql,omitempty"`
 }
 
+// adminConnection is the "connection" category.
+type adminConnection struct {
+	SnowflakeCLIProfileManager ptrBool `json:"snowflakeCLIProfileManager,omitempty"`
+}
+
 // adminConfigJSON is the full schema for the admin features.json file.
 type adminConfigJSON struct {
 	DataExportImport         adminDataExportImport `json:"dataExportImport"`
@@ -97,6 +103,7 @@ type adminConfigJSON struct {
 	AdvancedTools            adminAdvancedTools    `json:"advancedTools"`
 	DeveloperEnvironments    adminDevEnv           `json:"developerEnvironments"`
 	PerformanceDiagnostics   adminPerfDiag         `json:"performanceDiagnostics"`
+	Connection               adminConnection       `json:"connection"`
 }
 
 // ─── System config file path ───────────────────────────────────────────────────
@@ -206,6 +213,9 @@ func mergeAdminOverrides(user FeatureFlags, cfg adminConfigJSON) (effective Feat
 	// Performance & Diagnostics
 	apply(&effective.QueryProfile, &locked.QueryProfile, cfg.PerformanceDiagnostics.QueryProfile)
 	apply(&effective.ExplainSQL, &locked.ExplainSQL, cfg.PerformanceDiagnostics.ExplainSQL)
+
+	// Connection
+	apply(&effective.SnowflakeCLIProfileManager, &locked.SnowflakeCLIProfileManager, cfg.Connection.SnowflakeCLIProfileManager)
 
 	return effective, locked
 }

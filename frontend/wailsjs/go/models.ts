@@ -137,6 +137,7 @@ export namespace config {
 	    schemaAutocomplete: boolean;
 	    ddlHoverTooltips: boolean;
 	    fileFormatBuilder: boolean;
+	    snowflakeCLIProfileManager: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new FeatureFlags(source);
@@ -177,6 +178,7 @@ export namespace config {
 	        this.schemaAutocomplete = source["schemaAutocomplete"];
 	        this.ddlHoverTooltips = source["ddlHoverTooltips"];
 	        this.fileFormatBuilder = source["fileFormatBuilder"];
+	        this.snowflakeCLIProfileManager = source["snowflakeCLIProfileManager"];
 	    }
 	}
 	export class GitConfig {

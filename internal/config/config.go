@@ -158,8 +158,8 @@ func DefaultNotebookPrefs() NotebookPrefs {
 //
 // Version tracks the schema revision so new flags introduced after an initial
 // save can be filled with their defaults rather than the zero value (false).
-// Current version: 5 (added RemoveCommand).
-const flagsVersion = 5
+// Current version: 6 (added SnowflakeCLIProfileManager).
+const flagsVersion = 6
 
 type FeatureFlags struct {
 	Initialized bool `json:"initialized"`
@@ -211,6 +211,9 @@ type FeatureFlags struct {
 
 	// Data Engineering
 	FileFormatBuilder bool `json:"fileFormatBuilder"` // Visual CREATE FILE FORMAT builder & previewer
+
+	// Connection
+	SnowflakeCLIProfileManager bool `json:"snowflakeCLIProfileManager"` // Manage Snowflake CLI profiles from the connection dialog
 }
 
 // DefaultFeatureFlags returns a FeatureFlags with every feature enabled.
@@ -249,6 +252,7 @@ func DefaultFeatureFlags() FeatureFlags {
 		SchemaAutocomplete:     true,
 		DdlHoverTooltips:       true,
 		FileFormatBuilder:      true,
+		SnowflakeCLIProfileManager: true,
 	}
 }
 
@@ -303,6 +307,8 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	setIfZero(&f.FileFormatBuilder, defaults.FileFormatBuilder)
 	// Version 4 → 5: RemoveCommand added; defaults to true.
 	setIfZero(&f.RemoveCommand, defaults.RemoveCommand)
+	// Version 5 → 6: SnowflakeCLIProfileManager added; defaults to true.
+	setIfZero(&f.SnowflakeCLIProfileManager, defaults.SnowflakeCLIProfileManager)
 	f.Version = flagsVersion
 	return f
 }

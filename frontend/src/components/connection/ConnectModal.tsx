@@ -21,6 +21,7 @@ import {
 } from "../../../wailsjs/go/main/App";
 import { sfconfig } from "../../../wailsjs/go/models";
 import { useConnectionStore, type ConnectionParams } from "../../store/connectionStore";
+import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 
 const { Title, Text } = Typography;
 
@@ -62,6 +63,7 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
   const [auth, setAuth]         = useState("username_password_mfa");
   const [agreementOpen, setAgreementOpen] = useState(false);
   const setConnected            = useConnectionStore((s) => s.setConnected);
+  const profileManagerEnabled   = useFeatureFlagsStore((s) => s.flags.snowflakeCLIProfileManager);
 
   const [cliConfig, setCliConfig] = useState<sfconfig.Config | null>(null);
   const [cliConfigPath, setCliConfigPath] = useState<string>("");
@@ -302,7 +304,7 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
           </Space>
 
           {/* ── Snowflake CLI profiles ──────────────────────────────────── */}
-          <div>
+          {profileManagerEnabled && <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 6 }}>
               <Text type="secondary" style={{ fontSize: 12 }}>
                 Snowflake CLI profiles
@@ -431,7 +433,7 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
             </div>
 
             <Divider style={{ borderColor: "var(--border)", margin: "16px 0 4px" }} />
-          </div>
+          </div>}
 
           {error && <Alert type="error" message={error} showIcon />}
 

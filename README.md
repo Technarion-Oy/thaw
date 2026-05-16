@@ -10,7 +10,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 
 ### Snowflake connectivity
 - Connect with account / user / password / warehouse / role
-- **Snowflake CLI Profile Manager** — create, save, rename, clone, set-default, and delete connection profiles in `~/.snowflake/config.toml` (or a custom location) directly from the connection dialog; includes support for key-pair (`SNOWFLAKE_JWT`) profiles; authenticator values are matched case-insensitively; text-level TOML manipulation preserves user comments and unknown keys
+- **Snowflake CLI Profile Manager** — create, save, rename, clone, set-default, and delete connection profiles in `~/.snowflake/config.toml` (or a custom location) directly from the connection dialog; includes support for key-pair (`SNOWFLAKE_JWT`) profiles; authenticator values are matched case-insensitively; text-level TOML manipulation preserves user comments and unknown keys; toggleable via **View → Enabled Features…**
 - Cancel an in-progress connection attempt
 - **Offline-first startup** — the app launches instantly without waiting for a Snowflake connection; connection parameters are validated and the session is established on demand when you first run a query or browse objects
 - **User Agreement** — a **User Agreement** link at the bottom of the connect screen opens the End User License Agreement in a scrollable modal

@@ -60,6 +60,8 @@ var registryFeatureEntries = []registryFeatureEntry{
 
 	{"DisableQueryProfile", func(c *adminConfigJSON, v bool) { p := !v; c.PerformanceDiagnostics.QueryProfile = &p }},
 	{"DisableExplainSQL", func(c *adminConfigJSON, v bool) { p := !v; c.PerformanceDiagnostics.ExplainSQL = &p }},
+
+	{"DisableSnowflakeCLIProfileManager", func(c *adminConfigJSON, v bool) { p := !v; c.Connection.SnowflakeCLIProfileManager = &p }},
 }
 
 // readRegistryKey opens a registry key and applies feature policy values.

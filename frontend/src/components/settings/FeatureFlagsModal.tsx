@@ -384,6 +384,17 @@ export default function FeatureFlagsModal({ onClose }: Props) {
           />
         </Category>
 
+        {/* ── Connection ── */}
+        <Category title="Connection">
+          <FlagRow
+            label="Snowflake CLI Profile Manager"
+            description="Manage Snowflake CLI profiles (~/.snowflake/config.toml) from the connection dialog."
+            checked={flags.snowflakeCLIProfileManager}
+            locked={locked.snowflakeCLIProfileManager}
+            onChange={(v) => set("snowflakeCLIProfileManager", v)}
+          />
+        </Category>
+
         {/* ── SQL Editor ── */}
         <Category title="SQL Editor">
           <FlagRow

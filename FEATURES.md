@@ -828,6 +828,9 @@ The following features are identified as feasible to be turned off via feature f
 - **Query Profile** (Operator statistics and execution time breakdown graphs)
 - **Explain SQL** (Pre-execution linter for full table scans and cartesian joins)
 
+**Connection**
+- **Snowflake CLI Profile Manager** (Manage Snowflake CLI profiles from the connection dialog)
+
 ---
 
 ## UI & Theming
