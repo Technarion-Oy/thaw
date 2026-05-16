@@ -25,7 +25,7 @@ import { CommandsRegistry } from "monaco-editor/esm/vs/platform/commands/common/
 // @ts-ignore
 import { ContextKeyExpr } from "monaco-editor/esm/vs/platform/contextkey/common/contextkey.js";
 import * as monacoLib from "monaco-editor";
-import { Button, Dropdown, Modal, Space, Spin, Tooltip, Typography, Select, Tag, message } from "antd";
+import { Button, Dropdown, Modal, Space, Spin, Tooltip, Typography, Select, message } from "antd";
 import type { MenuProps } from "antd";
 import {
   PlayCircleOutlined,
@@ -35,17 +35,13 @@ import {
   DeleteOutlined,
   CaretUpOutlined,
   CaretDownOutlined,
-  SaveOutlined,
-  ReloadOutlined,
   CopyOutlined,
-  CloudUploadOutlined,
 } from "@ant-design/icons";
 import {
   StartNotebookSession,
   RunNotebookCell,
   RunNotebookCellSql,
   StopNotebookSession,
-  SaveNotebook,
   GetTableColumns,
   GetNotebookCompletions,
   GetNotebookHover,
@@ -146,6 +142,7 @@ let _lastPythonEditor: monacoLib.editor.ICodeEditor | null = null;
 import { useQueryStore } from "../../store/queryStore";
 import { useThemeStore } from "../../store/themeStore";
 import { useSessionStore } from "../../store/sessionStore";
+import { useNotebookToolbarStore } from "../../store/notebookToolbarStore";
 import DeployNotebookModal from "./DeployNotebookModal";
 
 const { Text } = Typography;
@@ -286,7 +283,6 @@ export default function NotebookTab({ tabId }: Props) {
 
   const tab         = useQueryStore((s) => s.tabs.find((t) => t.id === tabId));
   const setSql      = useQueryStore((s) => s.setSql);
-  const markSaved   = useQueryStore((s) => s.markSaved);
   const loadContext = useSessionStore((s) => s.loadContext);
   const syntaxMode  = useNotebookPrefsStore((s) => s.prefs.syntaxMode);
 
@@ -297,7 +293,6 @@ export default function NotebookTab({ tabId }: Props) {
   const [kernelReady, setKernelReady] = useState(false);
   const [kernelStarting, setKernelStarting] = useState(false);
   const [kernelError, setKernelError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
   const [deployOpen, setDeployOpen] = useState(false);
   // Snapshot of serialized notebook content captured when the Deploy modal is opened.
   // Used for unsaved notebooks that have no on-disk file path.
@@ -556,12 +551,6 @@ export default function NotebookTab({ tabId }: Props) {
     }
   }, [kernelReady, patchCell, syncToStore, tabId]);
 
-  const runAll = useCallback(async () => {
-    for (const cell of cellsRef.current) {
-      if (cell.kind === "code") await runCell(cell);
-    }
-  }, [runCell]);
-
   // Toggle a breakpoint line for a specific cell and persist to disk.
   // Also updates the live DAP session (if any) so debugpy immediately reflects
   // the change — this allows removing a breakpoint on the currently-paused line.
@@ -772,21 +761,6 @@ export default function NotebookTab({ tabId }: Props) {
   }, [tabId]);
   useEffect(() => { restartKernelRef.current = restartKernel; }, [restartKernel]);
 
-  const saveNotebook = useCallback(async () => {
-    if (!tab?.path) { message.warning("No file path — use File > Save As to save."); return; }
-    const json = serializeNotebook(rawNb, cellsRef.current);
-    setSaving(true);
-    try {
-      await SaveNotebook(tab.path, json);
-      markSaved(tabId, tab.path, tab.title);
-      message.success("Notebook saved");
-    } catch (e) {
-      message.error(String(e));
-    } finally {
-      setSaving(false);
-    }
-  }, [tab, rawNb, markSaved, tabId]);
-
   const addCell = useCallback((afterId?: string) => {
     const newCell: Cell = {
       id: crypto.randomUUID(),
@@ -811,6 +785,32 @@ export default function NotebookTab({ tabId }: Props) {
     });
     setSelectedCellId(newCell.id);
   }, [syncToStore]);
+
+  // ── Sync kernel state & callbacks to the unified toolbar store ────────────
+  // Merged into a single effect to avoid transient states when switching tabs
+  // (clear + partial re-set in separate effects could briefly null out callbacks).
+  useEffect(() => {
+    const store = useNotebookToolbarStore.getState();
+    store.setKernelState({ kernelReady, kernelStarting, kernelError });
+    store.setCallbacks({
+      onRestartKernel: restartKernel,
+      onAddCell: () => addCell(),
+      onDeploy: () => {
+        setDeployContent(serializeNotebook(rawNb, cellsRef.current));
+        setDeployOpen(true);
+      },
+      onRunAll: () => {
+        const currentCells = cellsRef.current;
+        (async () => {
+          for (const cell of currentCells) {
+            if (cell.kind === "markdown") continue;
+            await runCell(cell);
+          }
+        })();
+      },
+    });
+    return () => { useNotebookToolbarStore.getState().clear(); };
+  }, [restartKernel, addCell, rawNb, runCell, kernelReady, kernelStarting, kernelError]);
 
   const addCellAbove = useCallback((beforeId: string) => {
     const newCell: Cell = {
@@ -942,64 +942,6 @@ export default function NotebookTab({ tabId }: Props) {
 
   return (
     <div ref={containerRef} style={{ display: "flex", flexDirection: "column", height: "100%", background: bg, overflow: "hidden" }}>
-      {/* Toolbar */}
-      <div style={{
-        padding: "4px 12px",
-        borderBottom: `1px solid ${border}`,
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        background: bgRaised,
-        flexShrink: 0,
-      }}>
-        <Space size={4}>
-          <Tooltip title="Run all cells">
-            <Button
-              icon={<PlayCircleOutlined />}
-              size="small"
-              type="primary"
-              onClick={runAll}
-              disabled={!kernelReady}
-            >
-              Run All
-            </Button>
-          </Tooltip>
-          <Tooltip title="Restart kernel">
-            <Button icon={<ReloadOutlined />} size="small" onClick={restartKernel} />
-          </Tooltip>
-          <Tooltip title="Save notebook">
-            <Button icon={<SaveOutlined />} size="small" loading={saving} onClick={saveNotebook} />
-          </Tooltip>
-          <Button icon={<PlusOutlined />} size="small" onClick={() => addCell()}>
-            Add Cell
-          </Button>
-        </Space>
-
-        <div style={{ flex: 1 }} />
-
-        <Tooltip title="Deploy this notebook to Snowflake">
-          <Button
-            icon={<CloudUploadOutlined />}
-            size="small"
-            onClick={() => {
-              setDeployContent(serializeNotebook(rawNb, cellsRef.current));
-              setDeployOpen(true);
-            }}
-          >
-            Deploy
-          </Button>
-        </Tooltip>
-
-        {/* Kernel status */}
-        {kernelStarting && <Spin size="small" />}
-        {kernelStarting && <Text style={{ fontSize: 11, color: textMuted }}>Starting kernel…</Text>}
-        {kernelReady && !kernelStarting && (
-          <Tag color="success" style={{ fontSize: 10 }}>Kernel ready</Tag>
-        )}
-        {kernelError && (
-          <Tag color="error" style={{ fontSize: 10 }} title={kernelError}>Kernel error</Tag>
-        )}
-      </div>
 
       {/* Cell list */}
       <div style={{ flex: 1, overflowY: "auto", padding: "12px 0" }}>

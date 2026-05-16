@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, Modal, type MenuProps } from "antd";
-import { PlayCircleOutlined, StopOutlined, DisconnectOutlined, CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, LinkOutlined } from "@ant-design/icons";
+import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
 import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, InitTabSession, CloseTabSession } from "../../wailsjs/go/main/App";
@@ -41,6 +41,9 @@ import { useQueryStore, type QueryResult, EXECUTE_IN_TAB_EVENT } from "../store/
 import { useConnectionStore } from "../store/connectionStore";
 import { useSessionStore } from "../store/sessionStore";
 import { useFeatureFlagsStore } from "../store/featureFlagsStore";
+import { useNotebookToolbarStore } from "../store/notebookToolbarStore";
+import Toolbar from "../components/toolbar/Toolbar";
+import { notebookButtons, NotebookStatusIndicator } from "../components/toolbar/NotebookToolbarSlot";
 
 const { Text } = Typography;
 
@@ -145,19 +148,15 @@ export default function QueryPage() {
   // Scroll-sync handles for the side-by-side grid split.
   const primarySyncRef = useRef<ScrollSyncHandle | null>(null);
   const compareSyncRef = useRef<ScrollSyncHandle | null>(null);
-  const { params, disconnect, isConnected } = useConnectionStore();
+  const { disconnect, isConnected } = useConnectionStore();
   // Pending query stored when the user runs SQL while disconnected.
   const pendingQueryRef = useRef<string | null>(null);
   // Tracks previous isConnected value to detect connect transitions.
   const prevConnectedRef = useRef(isConnected);
   const {
     role, warehouse, database, schema,
-    roles, warehouses, databases, schemas,
-    loadingContext, loadingRoles, loadingWarehouses, loadingDatabases, loadingSchemas,
-    switchingRole, switchingWarehouse, switchingDatabase, switchingSchema,
     error: sessionError,
-    loadContext, loadRoles, loadWarehouses, loadDatabases, loadSchemas,
-    switchRole, switchWarehouse, switchDatabase, switchSchema, clearError,
+    loadContext, clearError,
   } = useSessionStore();
 
   // Sync local split state when the store value changes (e.g., after layout reset).
@@ -860,7 +859,6 @@ export default function QueryPage() {
   });
 
 
-  const selectStyle = { fontSize: 12, width: 130 };
 
   // The result currently shown in the grid — null when no result is selected
   // (e.g. right after a failed query; the user must pick from history explicitly).
@@ -881,170 +879,57 @@ export default function QueryPage() {
     return n.length > 45 ? n.slice(0, 45) + "…" : n;
   };
 
+  // ── Notebook toolbar state (read from store, bridged by NotebookTab) ──────
+  const nbKernelReady    = useNotebookToolbarStore((s) => s.kernelReady);
+  const nbKernelStarting = useNotebookToolbarStore((s) => s.kernelStarting);
+  const nbKernelError    = useNotebookToolbarStore((s) => s.kernelError);
+  const nbOnRestartKernel = useNotebookToolbarStore((s) => s.onRestartKernel);
+  const nbOnAddCell       = useNotebookToolbarStore((s) => s.onAddCell);
+  const nbOnDeploy        = useNotebookToolbarStore((s) => s.onDeploy);
+  const nbOnRunAll        = useNotebookToolbarStore((s) => s.onRunAll);
+
+  const handleNewNotebook = () => {
+    const blank = JSON.stringify({
+      nbformat: 4,
+      nbformat_minor: 5,
+      metadata: {
+        kernelspec: { display_name: "Python 3", language: "python", name: "python3" },
+        language_info: { name: "python", version: "3.12.0" },
+      },
+      cells: [{ cell_type: "code", execution_count: null, metadata: {}, outputs: [], source: [] }],
+    }, null, 1);
+    openNotebookUnsaved("Untitled Notebook", blank);
+  };
+
+  const nbSlotProps = isNotebookTab && nbOnRestartKernel && nbOnAddCell && nbOnDeploy ? {
+    kernelReady: nbKernelReady,
+    kernelStarting: nbKernelStarting,
+    kernelError: nbKernelError,
+    onRestartKernel: nbOnRestartKernel,
+    onAddCell: nbOnAddCell,
+    onDeploy: nbOnDeploy,
+  } : null;
+
   return (
     <div data-query-layout style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg)" }}>
-      {/* Toolbar */}
-      <div
-        style={{
-          padding: "6px 12px",
-          borderBottom: "1px solid var(--border)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          background: "var(--bg-raised)",
-        }}
-      >
-        <Space>
-          {isRunning ? (
-            <Button
-              danger
-              icon={<StopOutlined />}
-              loading={isCancelling}
-              onClick={handleCancel}
-              size="small"
-            >
-              {isCancelling ? "Cancelling…" : "Cancel"}
-            </Button>
-          ) : (
-            <Tooltip title={!isConnected ? "Connect to Snowflake to run queries" : undefined}>
-              <Button
-                type="primary"
-                icon={<PlayCircleOutlined />}
-                onClick={() => runQuery()}
-                size="small"
-                disabled={!isConnected}
-              >
-                Run
-              </Button>
-            </Tooltip>
-          )}
-          <Text type="secondary" style={{ fontSize: 11, whiteSpace: "nowrap" }}>
-            {isRunning
-              ? "Esc to cancel"
-              : selectedSql.trim()
-              ? "⌘↵ · running selection"
-              : "⌘↵ to run"}
-          </Text>
-        </Space>
-
-        {!isConnected ? (
-          <Button
-            icon={<LinkOutlined />}
-            type="primary"
-            size="small"
-            onClick={() => window.dispatchEvent(new Event("thaw:connect"))}
-          >
-            Connect to Snowflake
-          </Button>
-        ) : null}
-        <Space size={6} style={{ display: isConnected ? undefined : "none" }}>
-          {/* ── Session selectors: two rows (role+wh / db+schema) ── */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <Space size={6}>
-              {/* ── Role selector ───────────────────────────────── */}
-              <Tooltip title={role ? `Role: ${role}` : "Active role"}>
-                <Select
-                  size="small"
-                  style={selectStyle}
-                  value={role || undefined}
-                  placeholder={loadingContext ? "…" : "Role"}
-                  loading={loadingRoles || switchingRole}
-                  showSearch
-                  optionFilterProp="label"
-                  onChange={switchRole}
-                  onDropdownVisibleChange={(open) => { if (open) loadRoles(); }}
-                  options={roles.map((r) => ({ value: r, label: r }))}
-                  dropdownStyle={{ minWidth: 200 }}
-                />
-              </Tooltip>
-
-              {/* ── Warehouse selector ──────────────────────────── */}
-              <Tooltip title={warehouse ? `Warehouse: ${warehouse}` : "Active warehouse"}>
-                <Select
-                  size="small"
-                  style={selectStyle}
-                  value={warehouse || undefined}
-                  placeholder={loadingContext ? "…" : "Warehouse"}
-                  loading={loadingWarehouses || switchingWarehouse}
-                  showSearch
-                  optionFilterProp="label"
-                  onChange={switchWarehouse}
-                  onDropdownVisibleChange={(open) => { if (open) loadWarehouses(); }}
-                  options={warehouses.map((w) => ({ value: w, label: w }))}
-                  dropdownStyle={{ minWidth: 200 }}
-                />
-              </Tooltip>
-            </Space>
-
-            <Space size={6}>
-              {/* ── Database selector ───────────────────────────── */}
-              <Tooltip title={database ? `Database: ${database}` : "Active database"}>
-                <Select
-                  size="small"
-                  style={selectStyle}
-                  value={database || undefined}
-                  placeholder={loadingContext ? "…" : "Database"}
-                  loading={loadingDatabases || switchingDatabase}
-                  showSearch
-                  optionFilterProp="label"
-                  onChange={switchDatabase}
-                  onDropdownVisibleChange={(open) => { if (open) loadDatabases(); }}
-                  options={databases.map((d) => ({ value: d, label: d }))}
-                  dropdownStyle={{ minWidth: 200 }}
-                />
-              </Tooltip>
-
-              {/* ── Schema selector ─────────────────────────────── */}
-              <Tooltip title={schema ? `Schema: ${schema}` : "Active schema"}>
-                <Select
-                  size="small"
-                  style={selectStyle}
-                  value={schema || undefined}
-                  placeholder={loadingContext ? "…" : "Schema"}
-                  loading={loadingSchemas || switchingSchema}
-                  showSearch
-                  optionFilterProp="label"
-                  onChange={switchSchema}
-                  onDropdownVisibleChange={(open) => { if (open) loadSchemas(); }}
-                  options={schemas.map((s) => ({ value: s, label: s }))}
-                  dropdownStyle={{ minWidth: 200 }}
-                />
-              </Tooltip>
-            </Space>
-          </div>
-
-          {params && (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-              {(currentUser || currentRegion) && (
-                <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "monospace", lineHeight: 1 }}>
-                  {[currentUser, currentRegion].filter(Boolean).join(" · ")}
-                </div>
-              )}
-              <Dropdown
-                trigger={["contextMenu"]}
-                menu={{
-                  items: [
-                    { key: "session-props", label: "Session Properties", onClick: openSessionProperties },
-                    { key: "snowsight", label: "Open Snowsight…", onClick: openSnowsight },
-                  ],
-                }}
-              >
-                <Tag color="blue" style={{ fontSize: 11, margin: 0, cursor: "context-menu" }}>
-                  {params.account} · {params.user}
-                </Tag>
-              </Dropdown>
-            </div>
-          )}
-          <Button
-            icon={<DisconnectOutlined />}
-            size="small"
-            danger
-            onClick={handleDisconnect}
-          >
-            Disconnect
-          </Button>
-        </Space>
-      </div>
+      {/* Unified Toolbar */}
+      <Toolbar
+        isRunning={isRunning}
+        isCancelling={isCancelling}
+        selectedSql={selectedSql}
+        currentUser={currentUser}
+        currentRegion={currentRegion}
+        onRun={isNotebookTab && nbOnRunAll ? nbOnRunAll : () => runQuery()}
+        onCancel={handleCancel}
+        onDisconnect={handleDisconnect}
+        onOpenSessionProperties={openSessionProperties}
+        onOpenSnowsight={openSnowsight}
+        onNewSql={openScratch}
+        onNewNotebook={handleNewNotebook}
+        onSave={handleSave}
+        contextButtons={nbSlotProps ? notebookButtons(nbSlotProps) : undefined}
+        contextStatus={nbSlotProps ? <NotebookStatusIndicator {...nbSlotProps} /> : undefined}
+      />
 
       {/* Session error banner (role/warehouse switch failures) */}
       {sessionError && (

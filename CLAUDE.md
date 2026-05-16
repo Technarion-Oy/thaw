@@ -78,8 +78,8 @@ thaw/
 │   └── crashreport/     # Crash reporting
 └── frontend/src/
     ├── pages/           # Top-level page components
-    ├── components/      # Feature components (editor/, layout/, results/, ...)
-    ├── store/           # Zustand stores (8 stores)
+    ├── components/      # Feature components (editor/, layout/, toolbar/, results/, ...)
+    ├── store/           # Zustand stores (9 stores)
     └── wailsjs/         # Auto-generated Wails IPC bindings (DO NOT EDIT)
 ```
 
@@ -182,6 +182,15 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 - `panelLayoutStore` — persisted panel sizes
 - `diffStore` — DDL diff comparisons
 - `gitStore` — git repo state
+- `notebookToolbarStore` — bridges NotebookTab kernel state/callbacks to the unified Toolbar
+
+### Unified Toolbar
+- The application toolbar is implemented as a reusable `<Toolbar />` component in `frontend/src/components/toolbar/Toolbar.tsx`
+- It renders: execution controls (Run/Cancel), action buttons (New SQL, New Notebook, Save), session selectors (role, warehouse, database, schema), connection info (username, account tag, disconnect)
+- Context-specific additions (e.g. notebook kernel status) are rendered via the `contextSlot` prop
+- `NotebookToolbarSlot` (`frontend/src/components/toolbar/NotebookToolbarSlot.tsx`) renders Run All, Restart Kernel, Add Cell, Deploy buttons and kernel status indicators
+- `notebookToolbarStore` bridges the NotebookTab's internal kernel state and callbacks to the unified Toolbar through QueryPage
+- The Toolbar reads session state directly from `connectionStore` and `sessionStore` — no prop-drilling for session selectors
 
 ### Monaco editor integration
 - The SQL editor is in `frontend/src/components/editor/SqlEditor.tsx`
