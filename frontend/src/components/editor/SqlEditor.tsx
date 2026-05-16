@@ -33,7 +33,7 @@ import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import { patchMonacoClipboard } from "../../utils/monacoClipboard";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { GetObjectDDL, ListObjects, ListSchemas, GetTableColumns, GetTableForeignKeys, GetTableColumnsWithTypes, GetSchemaForeignKeys, GetUserDDL, GetAISuggestion, GetFunctionSuggestions, GetFunctionTooltip, GetAllFunctionNames, GetEditorPrefs, GetAllDataTypes, GitGetHeadFileContent } from "../../../wailsjs/go/main/App";
-import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContext } from "../../../wailsjs/go/sqleditor/Service";
+import { AnalyzeSqlSyntax, ParseJoinTableRefs, ComputeJoinOnConditions, AnalyzeSqlSemantics, GetSqlStatementRanges, GetIdentifierAtColumn, GetActiveFunctionCall, ParseSignatureParams, ValidateSnowflakePatterns, ValidateDataTypes, ValidateTablesExist, ValidateBareColumnRefs, GetSnowflakeKeywords, GetAutocompleteContext, GetAutocompleteContextFull, ResolveTableRefs } from "../../../wailsjs/go/sqleditor/Service";
 import { getSnowflakeSnippets, SNIPPET_CATEGORIES } from "./snowflakeSnippets";
 import ExplainModal from "../results/ExplainModal";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
@@ -324,25 +324,8 @@ function makeSugg(label: string, detail: string, sortText: string, range: any, m
   };
 }
 
-function resolveRefs(
-  refs: Array<{ db: string; schema: string; name: string; alias: string }>,
-  storeObjs: Array<{ db: string; schema: string; name: string; kind: string }>,
-): Array<{ db: string; schema: string; name: string; alias: string }> | null {
-  const resolved = refs.map((ref) => {
-    if (ref.db && ref.schema) {
-      return { db: ref.db, schema: ref.schema, name: ref.name, alias: ref.alias };
-    }
-    const obj = storeObjs.find((o) => {
-      if (o.kind !== "TABLE" && o.kind !== "VIEW") return false;
-      if (UC(o.name) !== UC(ref.name)) return false;
-      if (ref.db     && UC(o.db)     !== UC(ref.db))     return false;
-      if (ref.schema && UC(o.schema) !== UC(ref.schema)) return false;
-      return true;
-    });
-    return obj ? { db: obj.db, schema: obj.schema, name: obj.name, alias: ref.alias } : null;
-  }).filter(Boolean) as Array<{ db: string; schema: string; name: string; alias: string }>;
-  return resolved.length >= 2 ? resolved : null;
-}
+// resolveRefs has been moved to the backend (sqleditor.ResolveTableRefs).
+// Use the `ResolveTableRefs` IPC method from wailsjs/go/sqleditor/Service.
 
 function monacoKind(monaco: any, kind: string): number {
   const K = monaco.languages.CompletionItemKind;
@@ -1144,21 +1127,44 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
               if (rawRefs) {
                 const aliasMatch = (rawRefs as any[]).find((r) => UC(r.alias) === UC(qualifier));
                 if (aliasMatch) {
-                  // Resolve the alias to a real table
-                  let resolvedTable = { db: aliasMatch.db, schema: aliasMatch.schema, name: aliasMatch.name };
-                  if (!resolvedTable.db || !resolvedTable.schema) {
-                    const found = objects.find(o =>
-                      (o.kind === "TABLE" || o.kind === "VIEW") &&
-                      UC(o.name) === UC(aliasMatch.name) &&
-                      (!aliasMatch.db     || UC(o.db)     === UC(aliasMatch.db)) &&
-                      (!aliasMatch.schema || UC(o.schema) === UC(aliasMatch.schema))
-                    );
-                    if (found) {
-                      resolvedTable = { db: found.db, schema: found.schema, name: found.name };
+                  // Resolve the alias via backend (uses store objects, UseContext, session)
+                  const resolvedArr = await ResolveTableRefs(
+                    [aliasMatch] as any[],
+                    objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any,
+                    { database: "", schema: "" } as any,
+                    { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any,
+                  );
+                  if (resolvedArr && resolvedArr.length > 0) {
+                    const resolvedTable = resolvedArr[0];
+                    if (resolvedTable.db && resolvedTable.schema) {
+                      // Check in-editor tables first for tables not yet in Snowflake
+                      const fullContent = model.getValue();
+                      const offset = model.getOffsetAt(position);
+                      const editorCtx = await GetAutocompleteContextFull({
+                        sql: fullContent,
+                        cursorOffset: offset,
+                        storeObjects: objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })),
+                        session: { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema },
+                      } as any);
+                      const inEditorMatch = (editorCtx?.inEditorTables || []).find(
+                        (tbl) => UC(tbl.name) === UC(resolvedTable.name) &&
+                                 UC(tbl.db) === UC(resolvedTable.db) &&
+                                 UC(tbl.schema) === UC(resolvedTable.schema)
+                      );
+                      if (inEditorMatch && inEditorMatch.cols.length > 0) {
+                        return {
+                          suggestions: inEditorMatch.cols.map((col, i) => ({
+                            label:      col.name,
+                            kind:       monaco.languages.CompletionItemKind.Field,
+                            insertText: quoteIfNecessary(col.name),
+                            sortText:   "02_" + String(i).padStart(3, "0") + "_" + col.name,
+                            detail:     `COLUMN (in-editor) · ${inEditorMatch.name}`,
+                            range,
+                          })),
+                        };
+                      }
+                      return { suggestions: mkColSuggestions(await getColumns(resolvedTable.db, resolvedTable.schema, resolvedTable.name), range, monaco) };
                     }
-                  }
-                  if (resolvedTable.db && resolvedTable.schema) {
-                    return { suggestions: mkColSuggestions(await getColumns(resolvedTable.db, resolvedTable.schema, resolvedTable.name), range, monaco) };
                   }
                 }
               }
@@ -1212,7 +1218,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         if ((wordIsOn || isInJoinOnClause) && schemaAutocompleteEnabled) {
           const rawRefs = await ParseJoinTableRefs(textToCursor);
           if (rawRefs && (rawRefs as any[]).length >= 2) {
-            const resolvedRefs = resolveRefs(rawRefs as any[], useObjectStore.getState().objects);
+            const resolvedRefs = await ResolveTableRefs(rawRefs as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any);
             if (resolvedRefs && resolvedRefs.length >= 2) {
               for (const ref of resolvedRefs) {
                 warmUpFKsForSchema(ref.db, ref.schema).catch(() => {});
@@ -1247,7 +1253,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
             rawRefsC && (rawRefsC as any[]).length >= 2;
 
           if (hasTriggerC) {
-            const resolvedC = resolveRefs(rawRefsC as any[], useObjectStore.getState().objects);
+            const resolvedC = await ResolveTableRefs(rawRefsC as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any);
             if (resolvedC && resolvedC.length >= 2) {
               const fkEntriesC: any[] = [];
               const colEntriesC: any[] = [];
@@ -1276,7 +1282,12 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         const offset = model.getOffsetAt(position);
 
         // ── Unified autocomplete context (single IPC round-trip) ─────────
-        const ctx = await GetAutocompleteContext(fullContent, offset);
+        const ctx = await GetAutocompleteContextFull({
+          sql: fullContent,
+          cursorOffset: offset,
+          storeObjects: objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })),
+          session: { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema },
+        } as any);
         const declaredVars: string[] = ctx?.scripting?.variables ?? [];
         const needsColon: boolean = ctx?.scripting?.needsColon ?? false;
         const ctxTableRefs = ctx?.tableRefs ?? [];
@@ -1294,7 +1305,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         if ((usingMatch || usingPartialMatch) && schemaAutocompleteEnabled) {
           const usingRefs = ctxTableRefs.length >= 2 ? ctxTableRefs : (await ParseJoinTableRefs(textToCursor) || []);
           if (usingRefs.length >= 2) {
-            const resolvedUsing = resolveRefs(usingRefs as any[], objects);
+            const resolvedUsing = await ResolveTableRefs(usingRefs as any[], objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, (ctx?.useContext ?? { database: "", schema: "" }) as any, { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any);
             if (resolvedUsing && resolvedUsing.length >= 2) {
               // Get columns for the last two refs (the JOIN pair)
               const lastTwo = resolvedUsing.slice(-2);
@@ -1383,41 +1394,28 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
         if (schemaAutocompleteEnabled) {
         const seenColKeys = new Set<string>();
 
-        const rawRefs = ctxTableRefs;
-        const refsToFetch: {db: string, schema: string, name: string, isCTE?: boolean}[] = [];
+        // Use backend-resolved refs directly (already qualified via store/UseContext/session)
+        const refsToFetch: {db: string, schema: string, name: string}[] = [];
+        for (const ref of (ctx?.resolvedRefs || [])) {
+          // Skip CTE names — their columns are added below
+          if (cteColMap.has(UC(ref.name)) && !ref.db && !ref.schema) continue;
+          refsToFetch.push({ db: ref.db, schema: ref.schema, name: ref.name });
+        }
 
-        for (const ref of (rawRefs || [])) {
-          // Check if this ref is a CTE — use CTE columns directly
-          if (cteColMap.has(UC(ref.name)) && !ref.db && !ref.schema) {
-            // CTE columns are added below
-            continue;
-          }
-          if (ref.db && ref.schema && ref.name) {
-            refsToFetch.push({ db: ref.db, schema: ref.schema, name: ref.name });
-          } else {
-            const matchedObjs = objects.filter((o) => {
-              if (o.kind !== "TABLE" && o.kind !== "VIEW") return false;
-              if (UC(o.name) !== UC(ref.name)) return false;
-              if (ref.db && UC(o.db) !== UC(ref.db)) return false;
-              if (ref.schema && UC(o.schema) !== UC(ref.schema)) return false;
-              return true;
-            });
-            for (const obj of matchedObjs) {
-              refsToFetch.push({ db: obj.db, schema: obj.schema, name: obj.name });
-            }
-
-            if (matchedObjs.length === 0) {
-              // Prefer USE context from the editor over live session context
-              const useCtx = ctx?.useContext;
-              const sess = useSessionStore.getState();
-              const effectiveDb = useCtx?.database || sess.database;
-              const effectiveSchema = useCtx?.schema || sess.schema;
-
-              if (effectiveDb && effectiveSchema && ref.name && !ref.db && !ref.schema) {
-                refsToFetch.push({ db: effectiveDb, schema: effectiveSchema, name: ref.name });
-              } else if (effectiveDb && ref.schema && ref.name && !ref.db) {
-                refsToFetch.push({ db: effectiveDb, schema: ref.schema, name: ref.name });
-              }
+        // Add in-editor CREATE TABLE column suggestions
+        for (const tbl of (ctx?.inEditorTables || [])) {
+          for (const col of tbl.cols) {
+            const colName = col.name || (col as any);
+            if (!seenColKeys.has(UC(colName))) {
+              seenColKeys.add(UC(colName));
+              contextColSuggestions.push({
+                label:      colName,
+                kind:       monaco.languages.CompletionItemKind.Field,
+                insertText: quoteIfNecessary(colName),
+                sortText:   "02_" + colName,
+                detail:     `COLUMN (in-editor) · ${tbl.name}`,
+                range,
+              });
             }
           }
         }
@@ -1696,7 +1694,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
 
         if (parts.length === 2) {
           const rawRefs = await ParseJoinTableRefs(editor.getModel()?.getValue() ?? "");
-          const resolved = resolveRefs((rawRefs || []) as any[], useObjectStore.getState().objects);
+          const resolved = await ResolveTableRefs((rawRefs || []) as any[], objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any);
           const matchedTable = resolved?.find(
             (r) => r.alias.toUpperCase() === parts[0].toUpperCase(),
           );
@@ -1904,7 +1902,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
           if (lastJoinSeg.length > 0 && !/\b(?:ON|USING)\b/i.test(lastJoinSeg)) {
             const ghostRefs = await ParseJoinTableRefs(prefixFull);
             if (ghostRefs && (ghostRefs as any[]).length >= 2) {
-              const resolved = resolveRefs(ghostRefs as any[], useObjectStore.getState().objects);
+              const resolved = await ResolveTableRefs(ghostRefs as any[], useObjectStore.getState().objects.map(o => ({ db: o.db, schema: o.schema, name: o.name, kind: o.kind })) as any, { database: "", schema: "" } as any, { database: useSessionStore.getState().database, schema: useSessionStore.getState().schema } as any);
               if (resolved && resolved.length >= 2) {
                 const fkEntries = resolved.map((ref) => ({
                   db: ref.db, schema: ref.schema, name: ref.name,

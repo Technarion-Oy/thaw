@@ -26,6 +26,10 @@ export function GetAutocompleteContext(arg1, arg2) {
   return window['go']['sqleditor']['Service']['GetAutocompleteContext'](arg1, arg2);
 }
 
+export function GetAutocompleteContextFull(arg1) {
+  return window['go']['sqleditor']['Service']['GetAutocompleteContextFull'](arg1);
+}
+
 export function GetIdentifierAtColumn(arg1, arg2) {
   return window['go']['sqleditor']['Service']['GetIdentifierAtColumn'](arg1, arg2);
 }
@@ -48,6 +52,10 @@ export function ParseJoinTableRefs(arg1) {
 
 export function ParseSignatureParams(arg1) {
   return window['go']['sqleditor']['Service']['ParseSignatureParams'](arg1);
+}
+
+export function ResolveTableRefs(arg1, arg2, arg3, arg4) {
+  return window['go']['sqleditor']['Service']['ResolveTableRefs'](arg1, arg2, arg3, arg4);
 }
 
 export function ValidateBareColumnRefs(arg1) {

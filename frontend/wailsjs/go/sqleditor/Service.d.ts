@@ -14,6 +14,8 @@ export function GetActiveFunctionCall(arg1:string):Promise<sqleditor.FunctionCal
 
 export function GetAutocompleteContext(arg1:string,arg2:number):Promise<sqleditor.AutocompleteContext>;
 
+export function GetAutocompleteContextFull(arg1:sqleditor.AutocompleteContextRequest):Promise<sqleditor.AutocompleteContext>;
+
 export function GetIdentifierAtColumn(arg1:string,arg2:number):Promise<Array<string>>;
 
 export function GetScriptingCompletions(arg1:string,arg2:number):Promise<sqleditor.ScriptingCompletionResult>;
@@ -25,6 +27,8 @@ export function GetSqlStatementRanges(arg1:string):Promise<Array<sqleditor.State
 export function ParseJoinTableRefs(arg1:string):Promise<Array<sqleditor.JoinTableRef>>;
 
 export function ParseSignatureParams(arg1:string):Promise<Array<sqleditor.SignatureParam>>;
+
+export function ResolveTableRefs(arg1:Array<sqleditor.JoinTableRef>,arg2:Array<sqleditor.StoreObject>,arg3:sqleditor.UseContext,arg4:sqleditor.SessionContext):Promise<Array<sqleditor.ResolvedRef>>;
 
 export function ValidateBareColumnRefs(arg1:sqleditor.ValidateBareColsRequest):Promise<Array<sqleditor.DiagMarker>>;
 

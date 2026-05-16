@@ -114,6 +114,37 @@ type UseContext struct {
 	Schema   string `json:"schema"`
 }
 
+// StoreObject represents a known database object from the frontend object store.
+type StoreObject struct {
+	DB     string `json:"db"`
+	Schema string `json:"schema"`
+	Name   string `json:"name"`
+	Kind   string `json:"kind"`
+}
+
+// SessionContext holds the live Snowflake session's database/schema for fallback resolution.
+type SessionContext struct {
+	Database string `json:"database"`
+	Schema   string `json:"schema"`
+}
+
+// InEditorTableDef represents a table defined via CREATE TABLE in the editor text
+// whose columns can be used for autocomplete before the statement is executed.
+type InEditorTableDef struct {
+	DB     string    `json:"db"`
+	Schema string    `json:"schema"`
+	Name   string    `json:"name"`
+	Cols   []ColInfo `json:"cols"`
+}
+
+// AutocompleteContextRequest bundles all inputs for the extended autocomplete context.
+type AutocompleteContextRequest struct {
+	SQL          string          `json:"sql"`
+	CursorOffset int            `json:"cursorOffset"`
+	StoreObjects []StoreObject  `json:"storeObjects"`
+	Session      *SessionContext `json:"session,omitempty"`
+}
+
 // AutocompleteContext bundles all server-side context needed by the frontend
 // completion provider in a single IPC round-trip.
 type AutocompleteContext struct {
@@ -124,6 +155,8 @@ type AutocompleteContext struct {
 	TableRefs       []JoinTableRef            `json:"tableRefs"`
 	CTEColumns      []CTEColumnEntry          `json:"cteColumns"`
 	UseContext      *UseContext               `json:"useContext,omitempty"`
+	ResolvedRefs    []ResolvedRef             `json:"resolvedRefs,omitempty"`
+	InEditorTables  []InEditorTableDef        `json:"inEditorTables,omitempty"`
 }
 
 // FunctionCallContext is returned by GetActiveFunctionCall and identifies the
@@ -3105,4 +3138,199 @@ func getCTEColumnsAtCursor(stmtText string) []CTEColumnEntry {
 		return entries[i].Name < entries[j].Name
 	})
 	return entries
+}
+
+// ── Ref resolution & in-editor table defs ─────────────────────────────────
+
+// ResolveTableRefs resolves unqualified/partially-qualified table references
+// against the provided store objects, UseContext, and session context.
+// Resolution order for each ref:
+//  1. Already fully qualified (db+schema+name) → return as-is
+//  2. Search storeObjects for matching TABLE/VIEW (case-insensitive)
+//  3. Apply UseContext (editor-level USE DATABASE/SCHEMA)
+//  4. Apply session context (live Snowflake connection)
+//  5. If still incomplete → skip
+//
+// USE refs (Name == "") are skipped.
+func ResolveTableRefs(
+	refs []JoinTableRef,
+	storeObjects []StoreObject,
+	useCtx *UseContext,
+	session *SessionContext,
+) []ResolvedRef {
+	var resolved []ResolvedRef
+	for _, ref := range refs {
+		// Skip USE refs (ParseJoinTables returns these with Name == "")
+		if ref.Name == "" {
+			continue
+		}
+
+		r := ResolvedRef{
+			Alias:  ref.Alias,
+			DB:     ref.DB,
+			Schema: ref.Schema,
+			Name:   ref.Name,
+		}
+
+		// 1. Already fully qualified
+		if r.DB != "" && r.Schema != "" {
+			resolved = append(resolved, r)
+			continue
+		}
+
+		// 2. Search store objects
+		found := false
+		for _, o := range storeObjects {
+			if !strings.EqualFold(o.Kind, "TABLE") && !strings.EqualFold(o.Kind, "VIEW") {
+				continue
+			}
+			if !strings.EqualFold(o.Name, ref.Name) {
+				continue
+			}
+			if ref.DB != "" && !strings.EqualFold(o.DB, ref.DB) {
+				continue
+			}
+			if ref.Schema != "" && !strings.EqualFold(o.Schema, ref.Schema) {
+				continue
+			}
+			r.DB = o.DB
+			r.Schema = o.Schema
+			r.Name = o.Name
+			found = true
+			break
+		}
+		if found {
+			resolved = append(resolved, r)
+			continue
+		}
+
+		// 3. Apply UseContext
+		if useCtx != nil {
+			if r.DB == "" && useCtx.Database != "" {
+				r.DB = useCtx.Database
+			}
+			if r.Schema == "" && useCtx.Schema != "" {
+				r.Schema = useCtx.Schema
+			}
+		}
+		if r.DB != "" && r.Schema != "" {
+			resolved = append(resolved, r)
+			continue
+		}
+
+		// 4. Apply session context
+		if session != nil {
+			if r.DB == "" && session.Database != "" {
+				r.DB = session.Database
+			}
+			if r.Schema == "" && session.Schema != "" {
+				r.Schema = session.Schema
+			}
+		}
+		if r.DB != "" && r.Schema != "" {
+			resolved = append(resolved, r)
+		}
+		// 5. Still incomplete → skip
+	}
+	return resolved
+}
+
+// ExtractInEditorTableDefs scans all statements for CREATE TABLE definitions
+// and extracts their column definitions. UseContext and session context are
+// applied to qualify unqualified table names.
+func ExtractInEditorTableDefs(
+	sql string,
+	stmtRanges []StatementRange,
+	useCtx *UseContext,
+	session *SessionContext,
+) []InEditorTableDef {
+	var defs []InEditorTableDef
+
+	for _, r := range stmtRanges {
+		raw := sqlStmt(sql, r)
+
+		// Must be a CREATE TABLE (not CTAS/CLONE/LIKE)
+		if !reCreateTableGuard.MatchString(raw) {
+			continue
+		}
+
+		m := reCreateTablePreScan.FindStringSubmatchIndex(raw)
+		if m == nil {
+			continue
+		}
+
+		// Check for CTAS: if AS SELECT follows the column block or there is no column block
+		nameStr := raw[m[2]:m[3]]
+
+		// Extract balanced column block starting at the opening paren.
+		parenStart := m[1] - 1
+		colsRaw := extractBalancedBlock(raw, parenStart)
+		if colsRaw == "" {
+			continue
+		}
+
+		// Check if this is CTAS: text after closing paren starts with AS
+		afterParen := strings.TrimSpace(raw[parenStart+len(colsRaw):])
+		if strings.HasPrefix(strings.ToUpper(afterParen), "AS") {
+			continue
+		}
+
+		// Strip surrounding parens and parse columns
+		if len(colsRaw) >= 2 {
+			colsRaw = colsRaw[1 : len(colsRaw)-1]
+		}
+		columns := parseCreateTableColDefs(colsRaw, false)
+		if len(columns) == 0 {
+			continue
+		}
+
+		// Extract name parts
+		parts := extractIdentParts(nameStr, false)
+		if len(parts) == 0 {
+			continue
+		}
+
+		var db, schema, name string
+		switch len(parts) {
+		case 3:
+			db, schema, name = parts[0], parts[1], parts[2]
+		case 2:
+			schema, name = parts[0], parts[1]
+		default:
+			name = parts[0]
+		}
+
+		// Qualify using UseContext then session
+		if db == "" && useCtx != nil && useCtx.Database != "" {
+			db = useCtx.Database
+		}
+		if schema == "" && useCtx != nil && useCtx.Schema != "" {
+			schema = useCtx.Schema
+		}
+		if db == "" && session != nil && session.Database != "" {
+			db = session.Database
+		}
+		if schema == "" && session != nil && session.Schema != "" {
+			schema = session.Schema
+		}
+
+		defs = append(defs, InEditorTableDef{
+			DB:     db,
+			Schema: schema,
+			Name:   name,
+			Cols:   columns,
+		})
+	}
+
+	return defs
+}
+
+// GetAutocompleteContextFull extends GetAutocompleteContext with ref resolution
+// and in-editor CREATE TABLE column extraction, so the frontend completion
+// provider becomes a thin wrapper.
+func GetAutocompleteContextFull(req AutocompleteContextRequest) AutocompleteContext {
+	ctx := GetAutocompleteContext(req.SQL, req.CursorOffset)
+	ctx.ResolvedRefs = ResolveTableRefs(ctx.TableRefs, req.StoreObjects, ctx.UseContext, req.Session)
+	ctx.InEditorTables = ExtractInEditorTableDefs(req.SQL, ctx.StatementRanges, ctx.UseContext, req.Session)
+	return ctx
 }

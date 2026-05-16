@@ -121,6 +121,22 @@ func (s *Service) GetAutocompleteContext(sql string, cursorOffset int) Autocompl
 	return GetAutocompleteContext(sql, cursorOffset)
 }
 
+// GetAutocompleteContextFull extends GetAutocompleteContext with ref resolution
+// and in-editor CREATE TABLE column extraction, reducing the frontend to a thin
+// wrapper. It resolves unqualified table refs against store objects, UseContext,
+// and session context, and extracts columns from CREATE TABLE statements in the
+// editor text.
+func (s *Service) GetAutocompleteContextFull(req AutocompleteContextRequest) AutocompleteContext {
+	return GetAutocompleteContextFull(req)
+}
+
+// ResolveTableRefs resolves an array of table references against store objects,
+// UseContext, and session context. Used by hover/diagnostics paths that already
+// have refs but need qualification.
+func (s *Service) ResolveTableRefs(refs []JoinTableRef, storeObjects []StoreObject, useCtx *UseContext, session *SessionContext) []ResolvedRef {
+	return ResolveTableRefs(refs, storeObjects, useCtx, session)
+}
+
 // GetSnowflakeKeywords returns the full list of Snowflake SQL reserved keywords.
 func (s *Service) GetSnowflakeKeywords() []string {
 	return snowflake.ReservedKeywords()

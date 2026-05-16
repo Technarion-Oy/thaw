@@ -1166,3 +1166,326 @@ func TestGetCTEColumnsAtCursor_Extended(t *testing.T) {
 		}
 	})
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TestResolveTableRefs
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestResolveTableRefs(t *testing.T) {
+	storeObjs := []StoreObject{
+		{DB: "PROD_DB", Schema: "PUBLIC", Name: "CUSTOMERS", Kind: "TABLE"},
+		{DB: "PROD_DB", Schema: "STAGING", Name: "ORDERS", Kind: "TABLE"},
+		{DB: "ANALYTICS", Schema: "DW", Name: "FACT_SALES", Kind: "VIEW"},
+	}
+
+	t.Run("fully qualified ref passes through unchanged", func(t *testing.T) {
+		refs := []JoinTableRef{{DB: "MY_DB", Schema: "MY_SCH", Name: "MY_TBL", Alias: "t"}}
+		got := ResolveTableRefs(refs, storeObjs, nil, nil)
+		if len(got) != 1 || got[0].DB != "MY_DB" || got[0].Schema != "MY_SCH" || got[0].Name != "MY_TBL" || got[0].Alias != "t" {
+			t.Errorf("expected passthrough, got %+v", got)
+		}
+	})
+
+	t.Run("unqualified ref matched against store objects", func(t *testing.T) {
+		refs := []JoinTableRef{{Name: "CUSTOMERS", Alias: "c"}}
+		got := ResolveTableRefs(refs, storeObjs, nil, nil)
+		if len(got) != 1 || got[0].DB != "PROD_DB" || got[0].Schema != "PUBLIC" {
+			t.Errorf("expected PROD_DB.PUBLIC resolution, got %+v", got)
+		}
+	})
+
+	t.Run("unqualified ref falls back to UseContext when no store match", func(t *testing.T) {
+		refs := []JoinTableRef{{Name: "UNKNOWN_TABLE", Alias: ""}}
+		useCtx := &UseContext{Database: "CTX_DB", Schema: "CTX_SCH"}
+		got := ResolveTableRefs(refs, storeObjs, useCtx, nil)
+		if len(got) != 1 || got[0].DB != "CTX_DB" || got[0].Schema != "CTX_SCH" || got[0].Name != "UNKNOWN_TABLE" {
+			t.Errorf("expected UseContext fallback, got %+v", got)
+		}
+	})
+
+	t.Run("UseContext overrides session context", func(t *testing.T) {
+		refs := []JoinTableRef{{Name: "UNKNOWN_TABLE", Alias: ""}}
+		useCtx := &UseContext{Database: "CTX_DB", Schema: "CTX_SCH"}
+		sess := &SessionContext{Database: "SESS_DB", Schema: "SESS_SCH"}
+		got := ResolveTableRefs(refs, storeObjs, useCtx, sess)
+		if len(got) != 1 || got[0].DB != "CTX_DB" || got[0].Schema != "CTX_SCH" {
+			t.Errorf("expected UseContext to override session, got %+v", got)
+		}
+	})
+
+	t.Run("session context used when no UseContext", func(t *testing.T) {
+		refs := []JoinTableRef{{Name: "UNKNOWN_TABLE", Alias: ""}}
+		sess := &SessionContext{Database: "SESS_DB", Schema: "SESS_SCH"}
+		got := ResolveTableRefs(refs, nil, nil, sess)
+		if len(got) != 1 || got[0].DB != "SESS_DB" || got[0].Schema != "SESS_SCH" {
+			t.Errorf("expected session context, got %+v", got)
+		}
+	})
+
+	t.Run("two-part ref (schema.name) gets db from UseContext", func(t *testing.T) {
+		refs := []JoinTableRef{{Schema: "MY_SCH", Name: "MY_TBL", Alias: ""}}
+		useCtx := &UseContext{Database: "CTX_DB"}
+		got := ResolveTableRefs(refs, storeObjs, useCtx, nil)
+		if len(got) != 1 || got[0].DB != "CTX_DB" || got[0].Schema != "MY_SCH" {
+			t.Errorf("expected db from UseContext, got %+v", got)
+		}
+	})
+
+	t.Run("USE refs (Name empty) are skipped", func(t *testing.T) {
+		refs := []JoinTableRef{{DB: "SOME_DB", Schema: "SOME_SCH", Name: "", Alias: ""}}
+		got := ResolveTableRefs(refs, storeObjs, nil, nil)
+		if len(got) != 0 {
+			t.Errorf("expected empty result for USE ref, got %+v", got)
+		}
+	})
+
+	t.Run("case-insensitive matching", func(t *testing.T) {
+		refs := []JoinTableRef{{Name: "customers", Alias: "c"}}
+		got := ResolveTableRefs(refs, storeObjs, nil, nil)
+		if len(got) != 1 || got[0].DB != "PROD_DB" {
+			t.Errorf("expected case-insensitive match, got %+v", got)
+		}
+	})
+
+	t.Run("no match and no context returns empty slice", func(t *testing.T) {
+		refs := []JoinTableRef{{Name: "NONEXISTENT", Alias: ""}}
+		got := ResolveTableRefs(refs, nil, nil, nil)
+		if len(got) != 0 {
+			t.Errorf("expected empty result, got %+v", got)
+		}
+	})
+
+	t.Run("multiple refs resolved correctly", func(t *testing.T) {
+		refs := []JoinTableRef{
+			{Name: "CUSTOMERS", Alias: "c"},
+			{Name: "ORDERS", Alias: "o"},
+		}
+		got := ResolveTableRefs(refs, storeObjs, nil, nil)
+		if len(got) != 2 {
+			t.Fatalf("expected 2 resolved refs, got %d: %+v", len(got), got)
+		}
+		if got[0].Schema != "PUBLIC" || got[1].Schema != "STAGING" {
+			t.Errorf("unexpected schemas: %+v", got)
+		}
+	})
+
+	t.Run("partial schema match filters correctly", func(t *testing.T) {
+		refs := []JoinTableRef{{Schema: "DW", Name: "FACT_SALES", Alias: "fs"}}
+		got := ResolveTableRefs(refs, storeObjs, nil, nil)
+		if len(got) != 1 || got[0].DB != "ANALYTICS" || got[0].Schema != "DW" {
+			t.Errorf("expected ANALYTICS.DW match, got %+v", got)
+		}
+	})
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TestExtractInEditorTableDefs
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestExtractInEditorTableDefs(t *testing.T) {
+	t.Run("single CREATE TABLE extracts columns with types", func(t *testing.T) {
+		sql := "CREATE TABLE my_table (id INT, name VARCHAR, email TEXT);"
+		ranges := GetStatementRanges(sql)
+		defs := ExtractInEditorTableDefs(sql, ranges, nil, nil)
+		if len(defs) != 1 {
+			t.Fatalf("expected 1 def, got %d", len(defs))
+		}
+		if defs[0].Name != "MY_TABLE" {
+			t.Errorf("expected MY_TABLE, got %s", defs[0].Name)
+		}
+		if len(defs[0].Cols) != 3 {
+			t.Fatalf("expected 3 columns, got %d: %+v", len(defs[0].Cols), defs[0].Cols)
+		}
+		if defs[0].Cols[0].Name != "ID" || defs[0].Cols[1].Name != "NAME" || defs[0].Cols[2].Name != "EMAIL" {
+			t.Errorf("unexpected column names: %+v", defs[0].Cols)
+		}
+	})
+
+	t.Run("multiple CREATE TABLEs across statements", func(t *testing.T) {
+		sql := "CREATE TABLE t1 (a INT, b TEXT);\nCREATE TABLE t2 (x NUMBER, y VARCHAR);"
+		ranges := GetStatementRanges(sql)
+		defs := ExtractInEditorTableDefs(sql, ranges, nil, nil)
+		if len(defs) != 2 {
+			t.Fatalf("expected 2 defs, got %d", len(defs))
+		}
+		if defs[0].Name != "T1" || defs[1].Name != "T2" {
+			t.Errorf("expected T1 and T2, got %s and %s", defs[0].Name, defs[1].Name)
+		}
+	})
+
+	t.Run("qualified names (db.schema.table) preserved", func(t *testing.T) {
+		sql := "CREATE TABLE my_db.my_schema.my_table (col1 INT);"
+		ranges := GetStatementRanges(sql)
+		defs := ExtractInEditorTableDefs(sql, ranges, nil, nil)
+		if len(defs) != 1 {
+			t.Fatalf("expected 1 def, got %d", len(defs))
+		}
+		if defs[0].DB != "MY_DB" || defs[0].Schema != "MY_SCHEMA" || defs[0].Name != "MY_TABLE" {
+			t.Errorf("expected MY_DB.MY_SCHEMA.MY_TABLE, got %s.%s.%s", defs[0].DB, defs[0].Schema, defs[0].Name)
+		}
+	})
+
+	t.Run("unqualified names get qualified via UseContext", func(t *testing.T) {
+		sql := "CREATE TABLE raw_customers (customer_id INT, first_name VARCHAR);"
+		ranges := GetStatementRanges(sql)
+		useCtx := &UseContext{Database: "LINEAGE_SOURCE_DB", Schema: "STAGING"}
+		defs := ExtractInEditorTableDefs(sql, ranges, useCtx, nil)
+		if len(defs) != 1 {
+			t.Fatalf("expected 1 def, got %d", len(defs))
+		}
+		if defs[0].DB != "LINEAGE_SOURCE_DB" || defs[0].Schema != "STAGING" {
+			t.Errorf("expected LINEAGE_SOURCE_DB.STAGING qualification, got %s.%s", defs[0].DB, defs[0].Schema)
+		}
+		if defs[0].Name != "RAW_CUSTOMERS" {
+			t.Errorf("expected RAW_CUSTOMERS, got %s", defs[0].Name)
+		}
+	})
+
+	t.Run("CREATE TABLE AS SELECT (CTAS) is skipped", func(t *testing.T) {
+		sql := "CREATE TABLE ctas_table (id INT) AS SELECT 1 AS id;"
+		ranges := GetStatementRanges(sql)
+		defs := ExtractInEditorTableDefs(sql, ranges, nil, nil)
+		if len(defs) != 0 {
+			t.Errorf("expected CTAS to be skipped, got %+v", defs)
+		}
+	})
+
+	t.Run("CREATE OR REPLACE TABLE works", func(t *testing.T) {
+		sql := "CREATE OR REPLACE TABLE replaced_tbl (col_a FLOAT, col_b DATE);"
+		ranges := GetStatementRanges(sql)
+		defs := ExtractInEditorTableDefs(sql, ranges, nil, nil)
+		if len(defs) != 1 {
+			t.Fatalf("expected 1 def, got %d", len(defs))
+		}
+		if defs[0].Name != "REPLACED_TBL" {
+			t.Errorf("expected REPLACED_TBL, got %s", defs[0].Name)
+		}
+		if len(defs[0].Cols) != 2 {
+			t.Errorf("expected 2 cols, got %d", len(defs[0].Cols))
+		}
+	})
+
+	t.Run("session context used as fallback", func(t *testing.T) {
+		sql := "CREATE TABLE orders (order_id INT);"
+		ranges := GetStatementRanges(sql)
+		sess := &SessionContext{Database: "SESS_DB", Schema: "SESS_SCH"}
+		defs := ExtractInEditorTableDefs(sql, ranges, nil, sess)
+		if len(defs) != 1 {
+			t.Fatalf("expected 1 def, got %d", len(defs))
+		}
+		if defs[0].DB != "SESS_DB" || defs[0].Schema != "SESS_SCH" {
+			t.Errorf("expected SESS_DB.SESS_SCH, got %s.%s", defs[0].DB, defs[0].Schema)
+		}
+	})
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TestGetAutocompleteContextFull
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestGetAutocompleteContextFull(t *testing.T) {
+	t.Run("USE + CREATE TABLE + SELECT scenario", func(t *testing.T) {
+		sql := `USE LINEAGE_SOURCE_DB.STAGING;
+CREATE TABLE RAW_CUSTOMERS1 (
+    customer_id INT,
+    FIRST_NAME VARCHAR(50),
+    LAST_NAME VARCHAR(50),
+    email TEXT
+);
+CREATE VIEW VW_CLEAN_CUSTOMERS AS
+SELECT  FROM RAW_CUSTOMERS1;`
+
+		// Cursor after "SELECT " in the last statement
+		cursorOffset := strings.Index(sql, "SELECT  FROM") + len("SELECT ")
+
+		storeObjs := []StoreObject{
+			{DB: "LINEAGE_SOURCE_DB", Schema: "STAGING", Name: "EXISTING_TABLE", Kind: "TABLE"},
+		}
+
+		req := AutocompleteContextRequest{
+			SQL:          sql,
+			CursorOffset: cursorOffset,
+			StoreObjects: storeObjs,
+			Session:      &SessionContext{Database: "DEFAULT_DB", Schema: "PUBLIC"},
+		}
+
+		ctx := GetAutocompleteContextFull(req)
+
+		// Verify UseContext is populated
+		if ctx.UseContext == nil {
+			t.Fatal("expected UseContext to be non-nil")
+		}
+		if ctx.UseContext.Database != "LINEAGE_SOURCE_DB" || ctx.UseContext.Schema != "STAGING" {
+			t.Errorf("unexpected UseContext: %+v", ctx.UseContext)
+		}
+
+		// Verify ResolvedRefs includes RAW_CUSTOMERS1 resolved via UseContext
+		if len(ctx.ResolvedRefs) == 0 {
+			t.Fatal("expected ResolvedRefs to be non-empty")
+		}
+		foundResolved := false
+		for _, ref := range ctx.ResolvedRefs {
+			if strings.EqualFold(ref.Name, "RAW_CUSTOMERS1") {
+				foundResolved = true
+				if ref.DB != "LINEAGE_SOURCE_DB" || ref.Schema != "STAGING" {
+					t.Errorf("expected LINEAGE_SOURCE_DB.STAGING for RAW_CUSTOMERS1, got %s.%s", ref.DB, ref.Schema)
+				}
+			}
+		}
+		if !foundResolved {
+			t.Errorf("RAW_CUSTOMERS1 not found in ResolvedRefs: %+v", ctx.ResolvedRefs)
+		}
+
+		// Verify InEditorTables includes RAW_CUSTOMERS1 with columns
+		if len(ctx.InEditorTables) == 0 {
+			t.Fatal("expected InEditorTables to be non-empty")
+		}
+		foundTable := false
+		for _, tbl := range ctx.InEditorTables {
+			if strings.EqualFold(tbl.Name, "RAW_CUSTOMERS1") {
+				foundTable = true
+				if tbl.DB != "LINEAGE_SOURCE_DB" || tbl.Schema != "STAGING" {
+					t.Errorf("expected LINEAGE_SOURCE_DB.STAGING, got %s.%s", tbl.DB, tbl.Schema)
+				}
+				if len(tbl.Cols) != 4 {
+					t.Errorf("expected 4 columns, got %d: %+v", len(tbl.Cols), tbl.Cols)
+				}
+				colNames := make([]string, len(tbl.Cols))
+				for i, c := range tbl.Cols {
+					colNames[i] = c.Name
+				}
+				expectedCols := []string{"CUSTOMER_ID", "FIRST_NAME", "LAST_NAME", "EMAIL"}
+				if !reflect.DeepEqual(colNames, expectedCols) {
+					t.Errorf("expected columns %v, got %v", expectedCols, colNames)
+				}
+			}
+		}
+		if !foundTable {
+			t.Errorf("RAW_CUSTOMERS1 not found in InEditorTables: %+v", ctx.InEditorTables)
+		}
+	})
+
+	t.Run("store objects take precedence over UseContext", func(t *testing.T) {
+		sql := "USE MY_DB.MY_SCH;\nSELECT * FROM customers;"
+		cursorOffset := len(sql)
+
+		storeObjs := []StoreObject{
+			{DB: "STORE_DB", Schema: "STORE_SCH", Name: "CUSTOMERS", Kind: "TABLE"},
+		}
+
+		req := AutocompleteContextRequest{
+			SQL:          sql,
+			CursorOffset: cursorOffset,
+			StoreObjects: storeObjs,
+		}
+
+		ctx := GetAutocompleteContextFull(req)
+
+		if len(ctx.ResolvedRefs) != 1 {
+			t.Fatalf("expected 1 resolved ref, got %d: %+v", len(ctx.ResolvedRefs), ctx.ResolvedRefs)
+		}
+		if ctx.ResolvedRefs[0].DB != "STORE_DB" || ctx.ResolvedRefs[0].Schema != "STORE_SCH" {
+			t.Errorf("expected store object match, got %+v", ctx.ResolvedRefs[0])
+		}
+	})
+}
