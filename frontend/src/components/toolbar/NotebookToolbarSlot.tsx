@@ -36,7 +36,7 @@ export interface NotebookToolbarSlotProps {
  * placed as the second row of the toolbar's 3-column button grid.
  */
 export function notebookButtons(props: NotebookToolbarSlotProps): ReactNode {
-  const { kernelReady, onRestartKernel, onAddCell, onDeploy } = props;
+  const { onRestartKernel, onAddCell, onDeploy } = props;
   return (
     <>
       <Tooltip title="Restart kernel">
