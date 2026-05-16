@@ -878,6 +878,10 @@ func TestValidateBareColumnRefs_Valid(t *testing.T) {
 		"CREATE TABLE t4 (\n  \"A,B\" INT,\n  COL2 INT\n);\nINSERT INTO t4 (\"A,B\", COL2) SELECT 1, 2;",
 		// SELECT from a table whose columns are defined after comments.
 		"CREATE TABLE t5 (\n  -- the id\n  customer_id INT,\n  full_name VARCHAR\n);\nSELECT customer_id, full_name FROM t5;",
+		// Column with escaped double-quote in name (Snowflake uses "" to embed a literal ").
+		"CREATE TABLE t6 (\n  \"col\"\"name\" INT,\n  other INT\n);\nINSERT INTO t6 (\"col\"\"name\", other) SELECT 1, 2;",
+		// Column after a DEFAULT with escaped single-quote must still be cached.
+		"CREATE TABLE t7 (\n  greeting VARCHAR DEFAULT 'it''s',\n  id INT\n);\nINSERT INTO t7 (greeting, id) SELECT 'hi', 1;",
 	}
 
 	req := ValidateBareColsRequest{

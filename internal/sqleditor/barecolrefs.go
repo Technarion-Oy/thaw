@@ -274,6 +274,8 @@ func parseCreateTableColDefs(colsRaw string, ic bool) []ColInfo {
 		}
 
 		// Skip block comments (/* ... */).
+		// NOTE: if the comment is never closed, the rest of the column definitions
+		// are silently consumed — acceptable since the SQL is already invalid.
 		if !inDouble && !inSingle && c == '/' && i+1 < len(colsRaw) && colsRaw[i+1] == '*' {
 			i += 2
 			for i < len(colsRaw) {
@@ -287,15 +289,31 @@ func parseCreateTableColDefs(colsRaw string, ic bool) []ColInfo {
 			continue
 		}
 
-		// Track double-quoted identifiers.
+		// Track double-quoted identifiers.  Handle escaped quotes ("") inside
+		// quoted identifiers — Snowflake uses "" to embed a literal double-quote.
 		if !inSingle && c == '"' {
+			if inDouble && i+1 < len(colsRaw) && colsRaw[i+1] == '"' {
+				// Escaped quote inside identifier: write both and stay in double-quote mode.
+				current.WriteByte(c)
+				current.WriteByte(c)
+				i++
+				continue
+			}
 			inDouble = !inDouble
 			current.WriteByte(c)
 			continue
 		}
 
 		// Track single-quoted string literals (for DEFAULT values etc.).
+		// Handle escaped quotes ('') inside string literals.
 		if !inDouble && c == '\'' {
+			if inSingle && i+1 < len(colsRaw) && colsRaw[i+1] == '\'' {
+				// Escaped quote inside string: write both and stay in single-quote mode.
+				current.WriteByte(c)
+				current.WriteByte(c)
+				i++
+				continue
+			}
 			inSingle = !inSingle
 			current.WriteByte(c)
 			continue
@@ -337,7 +355,7 @@ func parseCreateTableColDefs(colsRaw string, ic bool) []ColInfo {
 	return columns
 }
 
-var reFirstColIdent = regexp.MustCompile(`^([a-zA-Z0-9_$]+|"[^"]+")`)
+var reFirstColIdent = regexp.MustCompile(`^([a-zA-Z0-9_$]+|"(?:[^"]|"")*")`)
 
 func parseFirstIdentAsCol(def string, ic bool) (ColInfo, bool) {
 	m := reFirstColIdent.FindString(def)
@@ -358,46 +376,8 @@ func lookupColsForRef(
 	colInfoCache, localColCache map[string][]ColInfo,
 	checkEq func(string, string) bool,
 ) ([]ColInfo, bool) {
-	nameU := strings.ToUpper(name)
-
-	// If db+schema are fully qualified, look up directly.
-	if db != "" && schema != "" {
-		key := bcrCacheKey(strings.ToUpper(db), strings.ToUpper(schema), nameU)
-		if cols, ok := colInfoCache[key]; ok {
-			return cols, true
-		}
-		if cols, ok := localColCache[key]; ok {
-			return cols, true
-		}
-		return nil, false
-	}
-
-	// Try to resolve via resolvedRefs (Snowflake live objects).
-	for _, ref := range resolvedRefs {
-		if checkEq(ref.Name, name) &&
-			(db == "" || checkEq(ref.DB, db)) &&
-			(schema == "" || checkEq(ref.Schema, schema)) {
-			key := bcrCacheKey(strings.ToUpper(ref.DB), strings.ToUpper(ref.Schema), strings.ToUpper(ref.Name))
-			if cols, ok := colInfoCache[key]; ok {
-				return cols, true
-			}
-			break
-		}
-	}
-
-	// Fall back to local cache with schema.table or table-only key.
-	if schema != "" {
-		key := bcrCacheKey("", strings.ToUpper(schema), nameU)
-		if cols, ok := localColCache[key]; ok {
-			return cols, true
-		}
-	}
-	key := bcrCacheKey("", "", nameU)
-	if cols, ok := localColCache[key]; ok {
-		return cols, true
-	}
-
-	return nil, false
+	cols, found, _ := lookupColsForRefTagged(name, db, schema, resolvedRefs, colInfoCache, localColCache, checkEq)
+	return cols, found
 }
 
 // lookupColsForRefTagged is like lookupColsForRef but additionally reports
