@@ -61,7 +61,7 @@ import {
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, UploadFileToStage, PickOpenFile } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, UploadFileToStage, PickOpenFile, ExecDDL } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -990,8 +990,13 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
     const sql = `UNDROP TABLE ${q(db)}.${q(schema)}.${q(name)};`;
     setUndropModal(null);
-    await useQueryStore.getState().executeWith(sql);
-    refreshDatabaseByName(db);
+    try {
+      await ExecDDL(sql);
+      message.success(`Table "${name}" restored`);
+      refreshDatabaseByName(db);
+    } catch (e) {
+      message.error(String(e));
+    }
   };
 
   const showDroppedSchemas = async () => {
@@ -1011,8 +1016,13 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
     const sql = `UNDROP SCHEMA ${q(db)}.${q(name)};`;
     setUndropSchemasModal(null);
-    await useQueryStore.getState().executeWith(sql);
-    refreshDatabaseByName(db);
+    try {
+      await ExecDDL(sql);
+      message.success(`Schema "${name}" restored`);
+      refreshDatabaseByName(db);
+    } catch (e) {
+      message.error(String(e));
+    }
   };
 
   const showDroppedDatabases = async () => {
@@ -1029,8 +1039,13 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
     const sql = `UNDROP DATABASE ${q(name)};`;
     setUndropDatabasesModal(null);
-    await useQueryStore.getState().executeWith(sql);
-    refreshAllDatabases();
+    try {
+      await ExecDDL(sql);
+      message.success(`Database "${name}" restored`);
+      refreshAllDatabases();
+    } catch (e) {
+      message.error(String(e));
+    }
   };
 
   const selectTop1000 = () => {
@@ -1504,8 +1519,13 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       okType: "danger",
       cancelText: "Cancel",
       onOk: async () => {
-        await useQueryStore.getState().executeWith(sql);
-        refreshDatabaseByName(db);
+        try {
+          await ExecDDL(sql);
+          message.success(`Dropped ${objKind.toLowerCase()} "${name}"`);
+          refreshDatabaseByName(db);
+        } catch (e) {
+          message.error(String(e));
+        }
       },
     });
   };
@@ -1679,8 +1699,13 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     }
 
     setRenameModal(null);
-    await useQueryStore.getState().executeWith(sql);
-    refreshDatabaseByName(db);
+    try {
+      await ExecDDL(sql);
+      message.success(`Renamed "${oldName}" to "${trimmed}"`);
+      refreshDatabaseByName(db);
+    } catch (e) {
+      message.error(String(e));
+    }
   };
 
   const openTimeTravelModal = async () => {
@@ -1970,9 +1995,20 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       cancelText: "Cancel",
       onOk: async () => {
         const affectedDbs = new Set<string>();
+        let failed = 0;
         for (const item of items) {
-          await useQueryStore.getState().executeWith(buildDropSql(item.db, item.schema, item.kind, item.name, item.args));
-          affectedDbs.add(item.db);
+          try {
+            await ExecDDL(buildDropSql(item.db, item.schema, item.kind, item.name, item.args));
+            affectedDbs.add(item.db);
+          } catch (e) {
+            failed++;
+            message.error(`Failed to drop ${item.kind.toLowerCase()} "${item.name}": ${String(e)}`);
+          }
+        }
+        if (failed === 0) {
+          message.success(`Dropped ${items.length} object${items.length > 1 ? "s" : ""}`);
+        } else if (failed < items.length) {
+          message.warning(`Dropped ${items.length - failed} of ${items.length} objects`);
         }
         affectedDbs.forEach((db) => refreshDatabaseByName(db));
       },
