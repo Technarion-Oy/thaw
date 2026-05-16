@@ -21,7 +21,6 @@ import {
   BookOutlined,
   SaveOutlined,
 } from "@ant-design/icons";
-import { useShallow } from "zustand/react/shallow";
 import { useConnectionStore } from "../../store/connectionStore";
 import { useSessionStore } from "../../store/sessionStore";
 
@@ -82,31 +81,33 @@ export default function Toolbar({
   contextButtons,
   contextStatus,
 }: ToolbarProps) {
-  const { params, isConnected } = useConnectionStore(
-    useShallow((s) => ({ params: s.params, isConnected: s.isConnected }))
-  );
-  const {
-    role, warehouse, database, schema,
-    roles, warehouses, databases, schemas,
-    loadingContext, loadingRoles, loadingWarehouses, loadingDatabases, loadingSchemas,
-    switchingRole, switchingWarehouse, switchingDatabase, switchingSchema,
-    loadRoles, loadWarehouses, loadDatabases, loadSchemas,
-    switchRole, switchWarehouse, switchDatabase, switchSchema,
-  } = useSessionStore(
-    useShallow((s) => ({
-      role: s.role, warehouse: s.warehouse, database: s.database, schema: s.schema,
-      roles: s.roles, warehouses: s.warehouses, databases: s.databases, schemas: s.schemas,
-      loadingContext: s.loadingContext, loadingRoles: s.loadingRoles,
-      loadingWarehouses: s.loadingWarehouses, loadingDatabases: s.loadingDatabases,
-      loadingSchemas: s.loadingSchemas,
-      switchingRole: s.switchingRole, switchingWarehouse: s.switchingWarehouse,
-      switchingDatabase: s.switchingDatabase, switchingSchema: s.switchingSchema,
-      loadRoles: s.loadRoles, loadWarehouses: s.loadWarehouses,
-      loadDatabases: s.loadDatabases, loadSchemas: s.loadSchemas,
-      switchRole: s.switchRole, switchWarehouse: s.switchWarehouse,
-      switchDatabase: s.switchDatabase, switchSchema: s.switchSchema,
-    }))
-  );
+  const params = useConnectionStore((s) => s.params);
+  const isConnected = useConnectionStore((s) => s.isConnected);
+  const role = useSessionStore((s) => s.role);
+  const warehouse = useSessionStore((s) => s.warehouse);
+  const database = useSessionStore((s) => s.database);
+  const schema = useSessionStore((s) => s.schema);
+  const roles = useSessionStore((s) => s.roles);
+  const warehouses = useSessionStore((s) => s.warehouses);
+  const databases = useSessionStore((s) => s.databases);
+  const schemas = useSessionStore((s) => s.schemas);
+  const loadingContext = useSessionStore((s) => s.loadingContext);
+  const loadingRoles = useSessionStore((s) => s.loadingRoles);
+  const loadingWarehouses = useSessionStore((s) => s.loadingWarehouses);
+  const loadingDatabases = useSessionStore((s) => s.loadingDatabases);
+  const loadingSchemas = useSessionStore((s) => s.loadingSchemas);
+  const switchingRole = useSessionStore((s) => s.switchingRole);
+  const switchingWarehouse = useSessionStore((s) => s.switchingWarehouse);
+  const switchingDatabase = useSessionStore((s) => s.switchingDatabase);
+  const switchingSchema = useSessionStore((s) => s.switchingSchema);
+  const loadRoles = useSessionStore((s) => s.loadRoles);
+  const loadWarehouses = useSessionStore((s) => s.loadWarehouses);
+  const loadDatabases = useSessionStore((s) => s.loadDatabases);
+  const loadSchemas = useSessionStore((s) => s.loadSchemas);
+  const switchRole = useSessionStore((s) => s.switchRole);
+  const switchWarehouse = useSessionStore((s) => s.switchWarehouse);
+  const switchDatabase = useSessionStore((s) => s.switchDatabase);
+  const switchSchema = useSessionStore((s) => s.switchSchema);
 
   return (
     <div
