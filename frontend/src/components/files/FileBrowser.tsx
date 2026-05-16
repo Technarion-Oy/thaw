@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
-import { Tree, Typography, Spin, Collapse, Space, Button, Input, Switch, message } from "antd";
+import { Tree, Typography, Spin, Button, Input, Switch, message } from "antd";
 import {
   FolderOutlined,
   FolderOpenOutlined,
@@ -17,6 +17,8 @@ import {
   ReloadOutlined,
   SearchOutlined,
   DiffOutlined,
+  CaretRightFilled,
+  CaretDownFilled,
 } from "@ant-design/icons";
 import type { DataNode, EventDataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
@@ -30,7 +32,6 @@ type FileEntry    = filesystem.FileEntry;
 type SearchMatch  = filesystem.SearchMatch;
 
 const { Text } = Typography;
-const CLR_BORDER    = "var(--border)";
 const CLR_SECONDARY = "var(--text-muted)";
 
 function entriesToNodes(entries: FileEntry[]): DataNode[] {
@@ -107,8 +108,8 @@ export default function FileBrowser() {
   const [fileCtxMenu, setFileCtxMenu] = useState<{ x: number; y: number; path: string; name: string } | null>(null);
   const fileCtxRef = useRef<HTMLDivElement>(null);
 
-  // ── Collapse controlled key (so search icon can expand the panel) ──────────
-  const [activeKeys, setActiveKeys] = useState<string[]>([]);
+  // ── Collapse state ──────────────────────────────────────────────────────────
+  const [expanded, setExpanded] = useState(false);
 
   const pendingDiff   = useDiffStore((s) => s.pending);
   const selectForComp = useDiffStore((s) => s.selectForComparison);
@@ -240,10 +241,10 @@ export default function FileBrowser() {
     }
   };
 
-  const onCollapseChange = (keys: string | string[]) => {
-    const next = Array.isArray(keys) ? keys : [keys];
-    setActiveKeys(next);
-    if (next.includes("files")) loadRoot();
+  const toggleExpanded = () => {
+    const next = !expanded;
+    setExpanded(next);
+    if (next) loadRoot();
   };
 
   const toggleSearch = (e: React.MouseEvent) => {
@@ -251,8 +252,7 @@ export default function FileBrowser() {
     const opening = !searchOpen;
     setSearchOpen(opening);
     if (opening) {
-      // Expand panel if it isn't already open
-      setActiveKeys((prev) => prev.includes("files") ? prev : [...prev, "files"]);
+      setExpanded(true);
     } else {
       setSearchQuery("");
       setSearchResults([]);
@@ -306,206 +306,200 @@ export default function FileBrowser() {
   const grouped = groupByPath(searchResults);
 
   return (
-    <div style={{ borderTop: `1px solid ${CLR_BORDER}` }}>
-      <Collapse
-        ghost
-        activeKey={activeKeys}
-        style={{ background: "transparent" }}
-        onChange={onCollapseChange as any}
-        items={[{
-          key:   "files",
-          label: (
-            <Space size={6}>
-              <FolderOutlined style={{ color: "var(--text)", fontSize: 13 }} />
-              <Text style={{ fontSize: 11, color: "var(--text)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                Files
-              </Text>
-            </Space>
-          ),
-          style: { border: "none" },
-          extra: (
-            <Space size={2}>
-              <Button
-                size="small"
-                type="text"
-                icon={
-                  <SearchOutlined
-                    style={{ fontSize: 11, color: searchOpen ? "var(--link)" : CLR_SECONDARY }}
-                  />
-                }
-                onClick={toggleSearch}
-                style={{ height: 18, padding: "0 4px", minWidth: 0 }}
-              />
-              {loaded && (
-                <Button
+    <div style={{ padding: "4px 4px" }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", padding: "0 4px 0 8px", marginBottom: expanded ? 4 : 0, gap: 2 }}>
+        <div
+          style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", flex: 1, padding: "2px 4px", borderRadius: 4 }}
+          onClick={toggleExpanded}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+        >
+          {expanded
+            ? <CaretDownFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
+            : <CaretRightFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
+          }
+          <FolderOutlined style={{ color: "var(--text)", fontSize: 13 }} />
+          <Text style={{ fontSize: 11, color: "var(--text)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Files
+          </Text>
+        </div>
+        <Button
+          size="small"
+          type="text"
+          icon={<SearchOutlined style={{ fontSize: 11, color: searchOpen ? "var(--link)" : CLR_SECONDARY }} />}
+          onClick={toggleSearch}
+          style={{ height: 20, padding: "0 4px", minWidth: 0 }}
+        />
+        {loaded && (
+          <Button
+            size="small"
+            type="text"
+            icon={<ReloadOutlined style={{ fontSize: 11 }} />}
+            loading={loading}
+            onClick={(e) => { e.stopPropagation(); refresh(); }}
+            style={{ height: 20, padding: "0 4px", minWidth: 0 }}
+          />
+        )}
+      </div>
+
+      {/* Content */}
+      {expanded && (
+        <div style={{ padding: "0 4px" }}>
+          {!exportDir && (
+            <Text style={{ fontSize: 11, color: CLR_SECONDARY }}>
+              Set a working directory in the Git section below.
+            </Text>
+          )}
+
+          {exportDir && searchOpen && (
+            <>
+              {/* ── Search input ── */}
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                <Input
                   size="small"
-                  type="text"
-                  icon={<ReloadOutlined style={{ fontSize: 11 }} />}
-                  loading={loading}
-                  onClick={(e) => { e.stopPropagation(); refresh(); }}
-                  style={{ height: 18, padding: "0 4px", minWidth: 0 }}
+                  placeholder={useRegex ? "Regex pattern…" : "Search files…"}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  prefix={<SearchOutlined style={{ color: CLR_SECONDARY, fontSize: 11 }} />}
+                  style={{ flex: 1, fontSize: 12 }}
+                  allowClear
+                  autoFocus
                 />
-              )}
-            </Space>
-          ),
-          children: (
-            <div style={{ padding: "0 4px 8px" }}>
-              {!exportDir && (
-                <Text style={{ fontSize: 11, color: CLR_SECONDARY }}>
-                  Set a working directory in the Git section below.
+                <Switch
+                  size="small"
+                  checked={useRegex}
+                  onChange={setUseRegex}
+                  title="Regular expression"
+                />
+                <Text style={{ fontSize: 10, color: useRegex ? "var(--link)" : CLR_SECONDARY, userSelect: "none" }}>
+                  .*
                 </Text>
-              )}
+              </div>
 
-              {exportDir && searchOpen && (
-                <>
-                  {/* ── Search input ── */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                    <Input
-                      size="small"
-                      placeholder={useRegex ? "Regex pattern…" : "Search files…"}
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      prefix={<SearchOutlined style={{ color: CLR_SECONDARY, fontSize: 11 }} />}
-                      style={{ flex: 1, fontSize: 12 }}
-                      allowClear
-                      autoFocus
-                    />
-                    <Switch
-                      size="small"
-                      checked={useRegex}
-                      onChange={setUseRegex}
-                      title="Regular expression"
-                    />
-                    <Text style={{ fontSize: 10, color: useRegex ? "var(--link)" : CLR_SECONDARY, userSelect: "none" }}>
-                      .*
-                    </Text>
-                  </div>
-
-                  {/* ── Search states ── */}
-                  {searching && (
-                    <Spin size="small" style={{ display: "block", margin: "8px auto" }} />
-                  )}
-
-                  {!searching && searchError && (
-                    <Text style={{ fontSize: 11, color: "#f85149", display: "block", wordBreak: "break-word" }}>
-                      {searchError}
-                    </Text>
-                  )}
-
-                  {!searching && !searchError && searchQuery.trim() && searchResults.length === 0 && (
-                    <Text style={{ fontSize: 11, color: CLR_SECONDARY }}>No results.</Text>
-                  )}
-
-                  {/* ── Search results ── */}
-                  {searchResults.length > 0 && (
-                    <div>
-                      {Array.from(grouped.entries()).map(([path, matches]) => {
-                        const relPath = exportDir
-                          ? path.replace(exportDir, "").replace(/^[/\\]/, "")
-                          : path;
-                        return (
-                          <div key={path} style={{ marginBottom: 10 }}>
-                            <div
-                              title={path}
-                              style={{
-                                fontSize: 11,
-                                color: "var(--link)",
-                                fontWeight: 500,
-                                marginBottom: 2,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              <FileOutlined style={{ marginRight: 4, fontSize: 10 }} />
-                              {relPath}
-                            </div>
-                            {matches.map((m) => {
-                              const { before, match, after, ellipsisBefore, ellipsisAfter } =
-                                getSnippet(m.lineContent, m.matchStart, m.matchEnd);
-                              return (
-                                <div
-                                  key={`${m.path}:${m.lineNumber}`}
-                                  onClick={() => handleResultClick(m)}
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "baseline",
-                                    gap: 6,
-                                    padding: "1px 4px",
-                                    cursor: "pointer",
-                                    borderRadius: 3,
-                                    overflow: "hidden",
-                                  }}
-                                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
-                                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                                >
-                                  <span style={{ color: CLR_SECONDARY, fontSize: 10, flexShrink: 0, fontFamily: "monospace" }}>
-                                    {m.lineNumber}
-                                  </span>
-                                  <span
-                                    style={{
-                                      fontFamily: "monospace",
-                                      fontSize: 11,
-                                      color: "var(--text)",
-                                      overflow: "hidden",
-                                      whiteSpace: "nowrap",
-                                      textOverflow: "ellipsis",
-                                      flexShrink: 1,
-                                      minWidth: 0,
-                                    }}
-                                  >
-                                    {ellipsisBefore && <span style={{ color: CLR_SECONDARY }}>…</span>}
-                                    {before}
-                                    <mark style={{ background: "#ffa657", color: "#0d1117", borderRadius: 2, padding: "0 1px" }}>
-                                      {match}
-                                    </mark>
-                                    {after}
-                                    {ellipsisAfter && <span style={{ color: CLR_SECONDARY }}>…</span>}
-                                  </span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        );
-                      })}
-                      {searchResults.length >= 200 && (
-                        <Text style={{ fontSize: 10, color: CLR_SECONDARY }}>
-                          Showing first 200 results.
-                        </Text>
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-
-              {exportDir && !searchOpen && loading && (
+              {/* ── Search states ── */}
+              {searching && (
                 <Spin size="small" style={{ display: "block", margin: "8px auto" }} />
               )}
 
-              {exportDir && !searchOpen && !loading && loaded && treeData.length === 0 && (
-                <Text style={{ fontSize: 11, color: CLR_SECONDARY }}>Directory is empty.</Text>
+              {!searching && searchError && (
+                <Text style={{ fontSize: 11, color: "#f85149", display: "block", wordBreak: "break-word" }}>
+                  {searchError}
+                </Text>
               )}
 
-              {!searchOpen && loaded && treeData.length > 0 && (
-                <div style={{ overflow: "hidden" }}>
-                  <Tree
-                    treeData={treeData}
-                    loadedKeys={loadedKeys}
-                    selectedKeys={selectedKey ? [selectedKey] : []}
-                    onLoad={(keys) => setLoadedKeys(keys)}
-                    loadData={onLoadData as any}
-                    onSelect={onSelect as any}
-                    onRightClick={onRightClick as any}
-                    showIcon
-                    blockNode
-                    style={{ background: "transparent", color: "var(--text)", fontSize: 12 }}
-                  />
+              {!searching && !searchError && searchQuery.trim() && searchResults.length === 0 && (
+                <Text style={{ fontSize: 11, color: CLR_SECONDARY }}>No results.</Text>
+              )}
+
+              {/* ── Search results ── */}
+              {searchResults.length > 0 && (
+                <div>
+                  {Array.from(grouped.entries()).map(([path, matches]) => {
+                    const relPath = exportDir
+                      ? path.replace(exportDir, "").replace(/^[/\\]/, "")
+                      : path;
+                    return (
+                      <div key={path} style={{ marginBottom: 10 }}>
+                        <div
+                          title={path}
+                          style={{
+                            fontSize: 11,
+                            color: "var(--link)",
+                            fontWeight: 500,
+                            marginBottom: 2,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          <FileOutlined style={{ marginRight: 4, fontSize: 10 }} />
+                          {relPath}
+                        </div>
+                        {matches.map((m) => {
+                          const { before, match, after, ellipsisBefore, ellipsisAfter } =
+                            getSnippet(m.lineContent, m.matchStart, m.matchEnd);
+                          return (
+                            <div
+                              key={`${m.path}:${m.lineNumber}`}
+                              onClick={() => handleResultClick(m)}
+                              style={{
+                                display: "flex",
+                                alignItems: "baseline",
+                                gap: 6,
+                                padding: "1px 4px",
+                                cursor: "pointer",
+                                borderRadius: 3,
+                                overflow: "hidden",
+                              }}
+                              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
+                              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                            >
+                              <span style={{ color: CLR_SECONDARY, fontSize: 10, flexShrink: 0, fontFamily: "monospace" }}>
+                                {m.lineNumber}
+                              </span>
+                              <span
+                                style={{
+                                  fontFamily: "monospace",
+                                  fontSize: 11,
+                                  color: "var(--text)",
+                                  overflow: "hidden",
+                                  whiteSpace: "nowrap",
+                                  textOverflow: "ellipsis",
+                                  flexShrink: 1,
+                                  minWidth: 0,
+                                }}
+                              >
+                                {ellipsisBefore && <span style={{ color: CLR_SECONDARY }}>…</span>}
+                                {before}
+                                <mark style={{ background: "#ffa657", color: "#0d1117", borderRadius: 2, padding: "0 1px" }}>
+                                  {match}
+                                </mark>
+                                {after}
+                                {ellipsisAfter && <span style={{ color: CLR_SECONDARY }}>…</span>}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                  {searchResults.length >= 200 && (
+                    <Text style={{ fontSize: 10, color: CLR_SECONDARY }}>
+                      Showing first 200 results.
+                    </Text>
+                  )}
                 </div>
               )}
+            </>
+          )}
+
+          {exportDir && !searchOpen && loading && (
+            <Spin size="small" style={{ display: "block", margin: "8px auto" }} />
+          )}
+
+          {exportDir && !searchOpen && !loading && loaded && treeData.length === 0 && (
+            <Text style={{ fontSize: 11, color: CLR_SECONDARY }}>Directory is empty.</Text>
+          )}
+
+          {!searchOpen && loaded && treeData.length > 0 && (
+            <div style={{ overflow: "hidden" }}>
+              <Tree
+                treeData={treeData}
+                loadedKeys={loadedKeys}
+                selectedKeys={selectedKey ? [selectedKey] : []}
+                onLoad={(keys) => setLoadedKeys(keys)}
+                loadData={onLoadData as any}
+                onSelect={onSelect as any}
+                onRightClick={onRightClick as any}
+                showIcon
+                blockNode
+                style={{ background: "transparent", color: "var(--text)", fontSize: 12 }}
+              />
             </div>
-          ),
-        }]}
-      />
+          )}
+        </div>
+      )}
 
       {/* File comparison context menu */}
       {fileCtxMenu && (

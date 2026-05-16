@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { useSessionStore } from "../../store/sessionStore";
-import { Collapse, Space, Typography, Tree, Spin, Popconfirm, message } from "antd";
+import { Typography, Tree, Spin, Popconfirm, message } from "antd";
 import {
   ApiOutlined,
   FileProtectOutlined,
@@ -19,6 +19,8 @@ import {
   DeleteOutlined,
   FileOutlined,
   EditOutlined,
+  CaretRightFilled,
+  CaretDownFilled,
 } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
 import {
@@ -90,6 +92,7 @@ export default function IntegrationsPanel() {
   const [loadingKinds, setLoadingKinds] = useState<Set<string>>(new Set());
   const [childrenMap, setChildrenMap] = useState<Map<string, snowflake.IntegrationRow[]>>(new Map());
   const [canCreate, setCanCreate] = useState(false);
+  const [expanded,  setExpanded]  = useState(false);
   const [ctxMenu,   setCtxMenu]   = useState<CtxMenuState | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
   const role = useSessionStore((s) => s.role);
@@ -231,55 +234,55 @@ export default function IntegrationsPanel() {
   const anyLoading = loadingKinds.size > 0;
 
   return (
-    <div style={{ borderTop: "1px solid var(--border)" }}>
-      <Collapse
-        ghost
-        defaultActiveKey={[]}
-        style={{ background: "transparent" }}
-        onChange={(keys) => {
-          if ((keys as string[]).includes("integrations")) refreshCanCreate();
-        }}
-        items={[{
-          key:   "integrations",
-          label: (
-            <Space size={6}>
-              <FileProtectOutlined style={{ color: "var(--text)", fontSize: 13 }} />
-              <Text style={{ fontSize: 11, color: "var(--text)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                Integrations
-              </Text>
-            </Space>
-          ),
-          style: { border: "none" },
-          extra: anyLoading ? (
-            <Spin size="small" style={{ marginRight: 4 }} />
-          ) : (
-            <ReloadOutlined
-              style={{ fontSize: 11, color: "var(--text-muted)", cursor: "pointer" }}
-              title="Reload all loaded categories"
-              onClick={(e) => {
-                e.stopPropagation();
-                loadedKinds.forEach((k) => reloadKind(k));
-                refreshCanCreate();
-              }}
-            />
-          ),
-          children: (
-            <div
-              style={{ padding: "0 4px 8px" }}
-              onClick={() => ctxMenu && closeCtx()}
-            >
-              <Tree
-                treeData={treeData}
-                loadData={onLoadData as any}
-                onRightClick={onRightClick as any}
-                showIcon
-                blockNode
-                style={{ background: "transparent", color: "var(--text)", fontSize: 12 }}
-              />
-            </div>
-          ),
-        }]}
-      />
+    <div style={{ borderTop: "1px solid var(--border)", padding: "4px 4px" }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", padding: "0 4px 0 8px", marginBottom: expanded ? 4 : 0, gap: 2 }}>
+        <div
+          style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", flex: 1, padding: "2px 4px", borderRadius: 4 }}
+          onClick={() => { setExpanded((v) => !v); if (!expanded) refreshCanCreate(); }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+        >
+          {expanded
+            ? <CaretDownFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
+            : <CaretRightFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
+          }
+          <FileProtectOutlined style={{ color: "var(--text)", fontSize: 13 }} />
+          <Text style={{ fontSize: 11, color: "var(--text)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Integrations
+          </Text>
+        </div>
+        {anyLoading ? (
+          <Spin size="small" style={{ marginRight: 4 }} />
+        ) : (
+          <ReloadOutlined
+            style={{ fontSize: 11, color: "var(--text-muted)", cursor: "pointer" }}
+            title="Reload all loaded categories"
+            onClick={(e) => {
+              e.stopPropagation();
+              loadedKinds.forEach((k) => reloadKind(k));
+              refreshCanCreate();
+            }}
+          />
+        )}
+      </div>
+
+      {/* Content */}
+      {expanded && (
+        <div
+          style={{ padding: "0 4px" }}
+          onClick={() => ctxMenu && closeCtx()}
+        >
+          <Tree
+            treeData={treeData}
+            loadData={onLoadData as any}
+            onRightClick={onRightClick as any}
+            showIcon
+            blockNode
+            style={{ background: "transparent", color: "var(--text)", fontSize: 12 }}
+          />
+        </div>
+      )}
 
       {/* Drop popconfirm — rendered as a hidden element we programmatically trigger */}
       <Popconfirm

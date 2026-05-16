@@ -11,10 +11,12 @@
 // @thaw-domain: Object Browser & Administration
 
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
-import { Collapse, Space, Button, Typography, Tree, Spin, Modal, message } from "antd";
+import { Button, Typography, Tree, Spin, Modal, message } from "antd";
 import {
   TeamOutlined,
   ThunderboltOutlined,
+  CaretRightFilled,
+  CaretDownFilled,
   ReloadOutlined,
   ExportOutlined,
   CopyOutlined,
@@ -50,7 +52,6 @@ import IntegrationsPanel from "./IntegrationsPanel";
 import type { main } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
-const CLR_BORDER    = "var(--border)";
 const CLR_SECONDARY = "var(--text-muted)";
 
 interface DdlModal {
@@ -101,6 +102,7 @@ export default function AccountPanel() {
   const isConnected = useConnectionStore((s) => s.isConnected);
   const featureFlags = useFeatureFlagsStore((s) => s.flags);
 
+  const [expanded,   setExpanded]   = useState(false);
   const [loaded,     setLoaded]     = useState(false);
   const [loading,    setLoading]    = useState(false);
   const [error,      setError]      = useState<string | null>(null);
@@ -272,7 +274,7 @@ export default function AccountPanel() {
   const treeData = buildTree(roles, warehouses);
 
   return (
-    <div style={{ borderTop: `1px solid ${CLR_BORDER}` }}>
+    <div style={{ padding: "4px 4px" }}>
       {!isConnected ? (
         <div style={{ padding: "24px 16px", textAlign: "center", color: "var(--text-muted)" }}>
           <DisconnectOutlined style={{ fontSize: 24, display: "block", margin: "0 auto 8px" }} />
@@ -282,100 +284,98 @@ export default function AccountPanel() {
           </Button>
         </div>
       ) : (
-      <Collapse
-        ghost
-        defaultActiveKey={[]}
-        style={{ background: "transparent" }}
-        onChange={(keys) => {
-          if ((Array.isArray(keys) ? keys : [keys]).includes("account")) loadIfNeeded();
-        }}
-        items={[{
-          key:   "account",
-          label: (
-            <Space size={6}>
-              <TeamOutlined style={{ color: "var(--text)", fontSize: 13 }} />
-              <Text style={{ fontSize: 11, color: "var(--text)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                Administration
+      <>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", padding: "0 4px 0 8px", marginBottom: expanded ? 4 : 0, gap: 2 }}>
+          <div
+            style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", flex: 1, padding: "2px 4px", borderRadius: 4 }}
+            onClick={() => { setExpanded((v) => !v); if (!expanded) loadIfNeeded(); }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+          >
+            {expanded
+              ? <CaretDownFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
+              : <CaretRightFilled style={{ fontSize: 9, color: "var(--text-muted)" }} />
+            }
+            <TeamOutlined style={{ color: "var(--text)", fontSize: 13 }} />
+            <Text style={{ fontSize: 11, color: "var(--text)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              Administration
+            </Text>
+          </div>
+          {featureFlags.queryActivityHistory && (
+            <Button
+              size="small"
+              type="text"
+              icon={<HistoryOutlined style={{ fontSize: 11 }} />}
+              title="Query Activity"
+              onClick={() => setHistoryOpen(true)}
+              style={{ height: 20, padding: "0 4px", minWidth: 0 }}
+            />
+          )}
+          {canViewMetering && featureFlags.warehouseCreditUsage && (
+            <Button
+              size="small"
+              type="text"
+              icon={<BarChartOutlined style={{ fontSize: 11 }} />}
+              title="Warehouse Credit Usage"
+              onClick={() => setMeteringOpen(true)}
+              style={{ height: 20, padding: "0 4px", minWidth: 0 }}
+            />
+          )}
+          {loaded && <>
+            <Button
+              size="small"
+              type="text"
+              icon={<ExportOutlined style={{ fontSize: 11 }} />}
+              loading={exporting}
+              title="Export roles & warehouses to files"
+              onClick={exportAll}
+              style={{ height: 20, padding: "0 4px", minWidth: 0 }}
+            />
+            <Button
+              size="small"
+              type="text"
+              icon={<ReloadOutlined style={{ fontSize: 11 }} />}
+              loading={loading}
+              onClick={(e) => { e.stopPropagation(); refresh(); }}
+              style={{ height: 20, padding: "0 4px", minWidth: 0 }}
+            />
+          </>}
+        </div>
+
+        {/* Content */}
+        {expanded && (
+          <div style={{ padding: "0 4px" }}>
+            {loading && (
+              <Spin size="small" style={{ display: "block", margin: "8px auto" }} />
+            )}
+
+            {!loading && error && (
+              <Text style={{ fontSize: 11, color: "#f85149", display: "block", padding: "0 8px" }}>
+                {error}
               </Text>
-            </Space>
-          ),
-          style: { border: "none" },
-          extra: (
-            <Space size={2} onClick={(e) => e.stopPropagation()}>
-              {featureFlags.queryActivityHistory && (
-                <Button
-                  size="small"
-                  type="text"
-                  icon={<HistoryOutlined style={{ fontSize: 11 }} />}
-                  title="Query Activity"
-                  onClick={() => setHistoryOpen(true)}
-                  style={{ height: 18, padding: "0 4px", minWidth: 0 }}
-                />
-              )}
-              {canViewMetering && featureFlags.warehouseCreditUsage && (
-                <Button
-                  size="small"
-                  type="text"
-                  icon={<BarChartOutlined style={{ fontSize: 11 }} />}
-                  title="Warehouse Credit Usage"
-                  onClick={() => setMeteringOpen(true)}
-                  style={{ height: 18, padding: "0 4px", minWidth: 0 }}
-                />
-              )}
-              {loaded && <>
-                <Button
-                  size="small"
-                  type="text"
-                  icon={<ExportOutlined style={{ fontSize: 11 }} />}
-                  loading={exporting}
-                  title="Export roles & warehouses to files"
-                  onClick={exportAll}
-                  style={{ height: 18, padding: "0 4px", minWidth: 0 }}
-                />
-                <Button
-                  size="small"
-                  type="text"
-                  icon={<ReloadOutlined style={{ fontSize: 11 }} />}
-                  loading={loading}
-                  onClick={(e) => { e.stopPropagation(); refresh(); }}
-                  style={{ height: 18, padding: "0 4px", minWidth: 0 }}
-                />
-              </>}
-            </Space>
-          ),
-          children: (
-            <div style={{ padding: "0 4px 8px" }}>
-              {loading && (
-                <Spin size="small" style={{ display: "block", margin: "8px auto" }} />
-              )}
+            )}
 
-              {!loading && error && (
-                <Text style={{ fontSize: 11, color: "#f85149", display: "block", padding: "0 8px" }}>
-                  {error}
-                </Text>
-              )}
+            {!loading && loaded && (
+              <div style={{ overflow: "hidden" }}>
+                <Tree
+                  treeData={treeData}
+                  onSelect={onSelect as any}
+                  onRightClick={onRightClick as any}
+                  defaultExpandAll
+                  showIcon
+                  blockNode
+                  style={{ background: "transparent", color: "var(--text)", fontSize: 12 }}
+                />
+              </div>
+            )}
 
-              {!loading && loaded && (
-                <div style={{ overflow: "hidden" }}>
-                  <Tree
-                    treeData={treeData}
-                    onSelect={onSelect as any}
-                    onRightClick={onRightClick as any}
-                    defaultExpandAll
-                    showIcon
-                    blockNode
-                    style={{ background: "transparent", color: "var(--text)", fontSize: 12 }}
-                  />
-                </div>
-              )}
-
-              {loaded && featureFlags.userRoleManagement && <UserManagementPanel />}
-              {loaded && featureFlags.backupPoliciesAndSets && <BackupPoliciesPanel />}
-              {loaded && featureFlags.integrationsManagement && <IntegrationsPanel />}
-            </div>
-          ),
-        }]}
-      />
+            {loaded && featureFlags.userRoleManagement && <UserManagementPanel />}
+            {loaded && featureFlags.backupPoliciesAndSets && <BackupPoliciesPanel />}
+            {loaded && featureFlags.integrationsManagement && <IntegrationsPanel />}
+          </div>
+        )}
+      </>
       )}
 
       {/* Account object context menu */}
