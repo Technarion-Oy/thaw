@@ -2173,9 +2173,11 @@ func TypeCategory(dt string) string {
 
 // ── CTE projection helpers ────────────────────────────────────────────────────
 
-// reCTEDef matches a CTE definition of the form:  <name> AS (
+// reCTEDef matches a CTE definition of the form:  <name> [(<col_list>)] AS (
 // Used to locate CTE names and their opening parenthesis.
-var reCTEDef = regexp.MustCompile(`(?i)(?:^|[^a-zA-Z0-9_$])(` + _ident + `)\s+AS\s*\(`)
+// The optional (?:\([^)]*\))? matches an explicit column alias list between
+// the CTE name and the AS keyword, e.g. cte(col_a, col_b) AS (...).
+var reCTEDef = regexp.MustCompile(`(?i)(?:^|[^a-zA-Z0-9_$])(` + _ident + `)\s*(?:\([^)]*\))?\s+AS\s*\(`)
 
 // reAsAliasExpr matches a trailing "AS <alias>" at the end of a SELECT-list
 // expression (anchored with $).
@@ -2359,6 +2361,38 @@ func isSimpleCTESelect(innerSQL string) bool {
 	return true
 }
 
+// getSimpleSelectColumnNames extracts bare column names from a simple SELECT
+// statement (one that already passes isSimpleCTESelect).  Returns the last
+// dot-component of each SELECT-list item, uppercased.  Returns ["*"] if the
+// select list contains a wildcard.
+func getSimpleSelectColumnNames(innerSQL string) []string {
+	stripped := stripCommentsSQL(innerSQL)
+	selLoc := reSelectKW.FindStringIndex(stripped)
+	if selLoc == nil {
+		return nil
+	}
+	afterSelect := strings.TrimSpace(stripped[selLoc[1]:])
+	upAfter := strings.ToUpper(afterSelect)
+	if strings.HasPrefix(upAfter, "DISTINCT ") || strings.HasPrefix(upAfter, "DISTINCT\t") || strings.HasPrefix(upAfter, "DISTINCT\n") {
+		afterSelect = strings.TrimSpace(afterSelect[8:])
+	} else if strings.HasPrefix(upAfter, "ALL ") {
+		afterSelect = strings.TrimSpace(afterSelect[4:])
+	}
+	selectClause := extractSelectClause(afterSelect)
+
+	var names []string
+	for _, expr := range splitTopLevelCommas(selectClause) {
+		trimmed := strings.TrimSpace(expr)
+		if trimmed == "*" {
+			return []string{"*"}
+		}
+		parts := strings.Split(trimmed, ".")
+		last := strings.TrimSpace(parts[len(parts)-1])
+		names = append(names, strings.ToUpper(normIdent(last, true)))
+	}
+	return names
+}
+
 // extractCTEProjections processes a WITH clause sequentially (Step 3).
 func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo) map[string][]ColInfo {
 	localScope := make(map[string][]ColInfo)
@@ -2379,18 +2413,31 @@ func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo)
 
 		cteName := remaining[m[2]:m[3]]
 
-		// Find opening paren after the name match.
-		// We know it must exist because reCTEDef matched.
-		relParenStart := strings.Index(remaining[m[3]:], "(")
-		if relParenStart == -1 {
-			remaining = remaining[m[3]:]
-			continue
-		}
-		parenStart := m[3] + relParenStart
+		// The regex match ends with "AS\s*(" so the body's opening paren
+		// is always at m[1]-1.
+		bodyParenStart := m[1] - 1
 
-		bodyBlock := extractBalancedBlock(remaining, parenStart)
+		// Check for explicit column aliases between name and "AS (".
+		// E.g. cte(col_a, col_b) AS (...) — the region between the name
+		// and the body paren contains "(col_a, col_b) AS ".
+		var explicitCols []string
+		betweenNameAndBody := remaining[m[3]:bodyParenStart]
+		if parenIdx := strings.Index(betweenNameAndBody, "("); parenIdx >= 0 {
+			block := extractBalancedBlock(betweenNameAndBody, parenIdx)
+			if len(block) > 2 {
+				inner := block[1 : len(block)-1]
+				for _, part := range splitTopLevelCommas(inner) {
+					trimmed := strings.TrimSpace(part)
+					if trimmed != "" {
+						explicitCols = append(explicitCols, strings.ToUpper(normIdent(trimmed, true)))
+					}
+				}
+			}
+		}
+
+		bodyBlock := extractBalancedBlock(remaining, bodyParenStart)
 		if len(bodyBlock) < 2 {
-			remaining = remaining[parenStart+1:]
+			remaining = remaining[bodyParenStart+1:]
 			continue
 		}
 		innerSQL := strings.TrimSpace(bodyBlock[1 : len(bodyBlock)-1])
@@ -2408,14 +2455,49 @@ func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo)
 			// projection list.
 			if isSimpleCTESelect(innerSQL) {
 				innerStripped := stripCommentsSQL(innerSQL)
+				var allSourceCols []ColInfo
 				for _, fm := range reFromJoinSel.FindAllStringSubmatch(innerStripped, -1) {
 					tablePath := fm[1]
 					parts := extractIdentParts(tablePath, true)
 					if len(parts) > 0 {
 						tableNameU := parts[len(parts)-1]
 						if cols, ok := localScope[tableNameU]; ok {
-							cteCols = append(cteCols, cols...)
+							allSourceCols = append(allSourceCols, cols...)
 						}
+					}
+				}
+				if len(allSourceCols) > 0 {
+					// Extract projected column names from the SELECT list.
+					// Only filter when every projected name exists in the
+					// source — this handles chained CTEs (e.g. SELECT id
+					// FROM base) correctly while preserving typo detection
+					// when a projected name doesn't match any source column.
+					projNames := getSimpleSelectColumnNames(innerSQL)
+					if len(projNames) > 0 && projNames[0] != "*" {
+						sourceMap := make(map[string]ColInfo)
+						for _, c := range allSourceCols {
+							sourceMap[c.Name] = c
+						}
+						allExist := true
+						for _, name := range projNames {
+							if _, ok := sourceMap[name]; !ok {
+								allExist = false
+								break
+							}
+						}
+						if allExist {
+							for _, name := range projNames {
+								cteCols = append(cteCols, sourceMap[name])
+							}
+						} else {
+							// Some projected names don't exist in source
+							// (potential typos) — use all source columns to
+							// preserve typo detection in alias.col validation.
+							cteCols = allSourceCols
+						}
+					} else {
+						// SELECT * — return all source columns
+						cteCols = allSourceCols
 					}
 				}
 			}
@@ -2426,6 +2508,19 @@ func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo)
 			}
 		}
 
+		// If CTE has explicit column aliases, override with those names.
+		if len(explicitCols) > 0 {
+			overridden := make([]ColInfo, len(explicitCols))
+			for i, name := range explicitCols {
+				dt := "UNKNOWN"
+				if i < len(cteCols) {
+					dt = cteCols[i].DataType
+				}
+				overridden[i] = ColInfo{Name: name, DataType: dt}
+			}
+			cteCols = overridden
+		}
+
 		if len(cteCols) > 0 {
 			nameU := strings.ToUpper(normIdent(cteName, true))
 			result[nameU] = cteCols
@@ -2433,7 +2528,7 @@ func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo)
 		}
 
 		// Advance past this CTE definition
-		remaining = remaining[parenStart+len(bodyBlock):]
+		remaining = remaining[bodyParenStart+len(bodyBlock):]
 	}
 	return result
 }

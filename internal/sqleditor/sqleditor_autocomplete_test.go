@@ -1168,6 +1168,102 @@ func TestGetCTEColumnsAtCursor_Extended(t *testing.T) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// TestCTEExplicitColumnAliases — issue 1c
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestCTEExplicitColumnAliases(t *testing.T) {
+	// 1c: WITH cte(col_a, col_b) AS (SELECT 1, 2) SELECT cte.
+	sql := "WITH cte(col_a, col_b) AS (SELECT 1, 2) SELECT cte."
+	ctx := GetAutocompleteContext(sql, len(sql))
+	if len(ctx.CTEColumns) == 0 {
+		t.Fatal("expected CTE columns")
+	}
+	var cteCols []ColInfo
+	for _, entry := range ctx.CTEColumns {
+		if entry.Name == "CTE" {
+			cteCols = entry.Cols
+		}
+	}
+	if len(cteCols) != 2 {
+		t.Fatalf("expected 2 columns, got %d: %+v", len(cteCols), cteCols)
+	}
+	if cteCols[0].Name != "COL_A" {
+		t.Errorf("expected first col COL_A, got %q", cteCols[0].Name)
+	}
+	if cteCols[1].Name != "COL_B" {
+		t.Errorf("expected second col COL_B, got %q", cteCols[1].Name)
+	}
+}
+
+func TestCTEExplicitColsOverrideBody(t *testing.T) {
+	// Explicit cols override body aliases
+	sql := "WITH t(x, y) AS (SELECT 1 AS a, 2 AS b) SELECT t."
+	ctx := GetAutocompleteContext(sql, len(sql))
+	if len(ctx.CTEColumns) == 0 {
+		t.Fatal("expected CTE columns")
+	}
+	var cteCols []ColInfo
+	for _, entry := range ctx.CTEColumns {
+		if entry.Name == "T" {
+			cteCols = entry.Cols
+		}
+	}
+	if len(cteCols) != 2 {
+		t.Fatalf("expected 2 columns, got %d: %+v", len(cteCols), cteCols)
+	}
+	if cteCols[0].Name != "X" {
+		t.Errorf("expected first col X, got %q", cteCols[0].Name)
+	}
+	if cteCols[1].Name != "Y" {
+		t.Errorf("expected second col Y, got %q", cteCols[1].Name)
+	}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TestCTEChainedProjection — issue 1d
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestCTEChainedProjection(t *testing.T) {
+	// 1d: derived should only have "ID", not "ID" + "STATUS"
+	sql := `WITH base AS (SELECT 1 AS id, 'ok' AS status), derived AS (SELECT id FROM base) SELECT derived.`
+	ctx := GetAutocompleteContext(sql, len(sql))
+	var derivedCols []ColInfo
+	for _, entry := range ctx.CTEColumns {
+		if entry.Name == "DERIVED" {
+			derivedCols = entry.Cols
+		}
+	}
+	if len(derivedCols) != 1 {
+		t.Fatalf("expected derived to have exactly 1 column (ID), got %d: %+v", len(derivedCols), derivedCols)
+	}
+	if derivedCols[0].Name != "ID" {
+		t.Errorf("expected column ID, got %q", derivedCols[0].Name)
+	}
+}
+
+func TestCTEStarProjection(t *testing.T) {
+	// SELECT * should still return all source columns
+	sql := `WITH base AS (SELECT 1 AS id, 'ok' AS status), derived AS (SELECT * FROM base) SELECT derived.`
+	ctx := GetAutocompleteContext(sql, len(sql))
+	var derivedCols []ColInfo
+	for _, entry := range ctx.CTEColumns {
+		if entry.Name == "DERIVED" {
+			derivedCols = entry.Cols
+		}
+	}
+	colNames := map[string]bool{}
+	for _, c := range derivedCols {
+		colNames[c.Name] = true
+	}
+	if !colNames["ID"] {
+		t.Error("expected column ID in derived CTE")
+	}
+	if !colNames["STATUS"] {
+		t.Error("expected column STATUS in derived CTE")
+	}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // TestResolveTableRefs
 // ══════════════════════════════════════════════════════════════════════════════
 
