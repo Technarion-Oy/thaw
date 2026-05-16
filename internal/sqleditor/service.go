@@ -114,7 +114,54 @@ func (s *Service) ApplySqlCasing(sql, keywordCase, identifierCase, functionCase 
 	return ApplyCasing(sql, keywordCase, identifierCase, functionCase)
 }
 
+// GetAutocompleteContext bundles statement ranges, scripting completions, table
+// references, and CTE column projections for the cursor position into a single
+// response, reducing IPC round-trips for the frontend completion provider.
+func (s *Service) GetAutocompleteContext(sql string, cursorOffset int) AutocompleteContext {
+	return GetAutocompleteContext(sql, cursorOffset)
+}
+
+// GetAutocompleteContextFull extends GetAutocompleteContext with ref resolution
+// and in-editor CREATE TABLE column extraction, reducing the frontend to a thin
+// wrapper. It resolves unqualified table refs against store objects, UseContext,
+// and session context, and extracts columns from CREATE TABLE statements in the
+// editor text.
+func (s *Service) GetAutocompleteContextFull(req AutocompleteContextRequest) AutocompleteContext {
+	return GetAutocompleteContextFull(req)
+}
+
+// ResolveTableRefs resolves an array of table references against store objects,
+// UseContext, and session context. Used by hover/diagnostics paths that already
+// have refs but need qualification.
+func (s *Service) ResolveTableRefs(refs []JoinTableRef, storeObjects []StoreObject, useCtx *UseContext, session *SessionContext) []ResolvedRef {
+	return ResolveTableRefs(refs, storeObjects, useCtx, session)
+}
+
 // GetSnowflakeKeywords returns the full list of Snowflake SQL reserved keywords.
 func (s *Service) GetSnowflakeKeywords() []string {
 	return snowflake.ReservedKeywords()
+}
+
+// ComputeGitLineDiff computes a line-level diff between HEAD and current content
+// using an LCS algorithm. Returns 1-based line numbers for added, modified, and
+// deleted regions. Returns empty slices if either input exceeds maxLines.
+func (s *Service) ComputeGitLineDiff(headLines, currentLines []string, maxLines int) LineDiff {
+	return ComputeGitLineDiff(headLines, currentLines, maxLines)
+}
+
+// IsDatatypeContext returns true when the cursor is in a position that expects
+// a Snowflake data type name (after ::, CAST AS, DECLARE, CREATE/ALTER TABLE column).
+func (s *Service) IsDatatypeContext(textToCursor, lineUpToWord string) bool {
+	return IsDatatypeContext(textToCursor, lineUpToWord)
+}
+
+// IsInJoinOnClause returns true when the cursor is inside a JOIN ... ON ...
+// clause that has not been terminated by a subsequent keyword.
+func (s *Service) IsInJoinOnClause(textToCursor string) bool {
+	return IsInJoinOnClause(textToCursor)
+}
+
+// DetectUsingClause checks whether the cursor is inside a USING(...) clause.
+func (s *Service) DetectUsingClause(textToCursor string) UsingClauseInfo {
+	return DetectUsingClause(textToCursor)
 }

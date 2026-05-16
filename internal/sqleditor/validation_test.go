@@ -7291,3 +7291,70 @@ func TestValidateSnowflakePatterns_AlterTableSwapWith(t *testing.T) {
 		}
 	})
 }
+
+// ── Quick-Fix Code Field Tests ───────────────────────────────────────────────
+
+func TestValidateTablesExist_QuickFixCode(t *testing.T) {
+	t.Run("populates Code when alternative qualifications exist", func(t *testing.T) {
+		sql := "SELECT * FROM my_table"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateTablesExist(ValidateTablesExistRequest{
+			SQL:            sql,
+			StmtRanges:     ranges,
+			ResolvedRefs:   []ResolvedRef{},
+			KnownDatabases: []string{"PROD_DB"},
+			KnownSchemas:   []SchemaEntry{{DB: "PROD_DB", Name: "PUBLIC"}},
+			AllKnownTables: []ResolvedRef{
+				{DB: "PROD_DB", Schema: "PUBLIC", Name: "MY_TABLE", Alias: ""},
+				{DB: "PROD_DB", Schema: "ANALYTICS", Name: "MY_TABLE", Alias: ""},
+			},
+		})
+
+		errors := getErrors(markers)
+		if len(errors) == 0 {
+			t.Fatal("expected at least one error marker")
+		}
+
+		foundCode := false
+		for _, m := range errors {
+			if m.Code != "" {
+				foundCode = true
+				if !strings.Contains(m.Code, "qualify-table") {
+					t.Errorf("expected Code to contain 'qualify-table', got %q", m.Code)
+				}
+				if !strings.Contains(m.Code, "PROD_DB.PUBLIC.MY_TABLE") {
+					t.Errorf("expected Code to contain qualified suggestion, got %q", m.Code)
+				}
+			}
+		}
+		if !foundCode {
+			t.Error("expected at least one marker to have non-empty Code field")
+		}
+	})
+
+	t.Run("Code is empty when no alternative qualifications exist", func(t *testing.T) {
+		sql := "SELECT * FROM nonexistent_table"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateTablesExist(ValidateTablesExistRequest{
+			SQL:            sql,
+			StmtRanges:     ranges,
+			ResolvedRefs:   []ResolvedRef{},
+			KnownDatabases: []string{"PROD_DB"},
+			KnownSchemas:   []SchemaEntry{{DB: "PROD_DB", Name: "PUBLIC"}},
+			AllKnownTables: []ResolvedRef{
+				{DB: "PROD_DB", Schema: "PUBLIC", Name: "OTHER_TABLE", Alias: ""},
+			},
+		})
+
+		errors := getErrors(markers)
+		if len(errors) == 0 {
+			t.Fatal("expected at least one error marker")
+		}
+
+		for _, m := range errors {
+			if m.Code != "" {
+				t.Errorf("expected empty Code field when no matches, got %q", m.Code)
+			}
+		}
+	})
+}

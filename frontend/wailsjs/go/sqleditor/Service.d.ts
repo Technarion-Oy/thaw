@@ -8,9 +8,17 @@ export function AnalyzeSqlSyntax(arg1:string):Promise<Array<sqleditor.DiagMarker
 
 export function ApplySqlCasing(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
 
+export function ComputeGitLineDiff(arg1:Array<string>,arg2:Array<string>,arg3:number):Promise<sqleditor.LineDiff>;
+
 export function ComputeJoinOnConditions(arg1:sqleditor.JoinOnSuggestionsReq):Promise<Array<sqleditor.JoinCondition>>;
 
+export function DetectUsingClause(arg1:string):Promise<sqleditor.UsingClauseInfo>;
+
 export function GetActiveFunctionCall(arg1:string):Promise<sqleditor.FunctionCallContext>;
+
+export function GetAutocompleteContext(arg1:string,arg2:number):Promise<sqleditor.AutocompleteContext>;
+
+export function GetAutocompleteContextFull(arg1:sqleditor.AutocompleteContextRequest):Promise<sqleditor.AutocompleteContext>;
 
 export function GetIdentifierAtColumn(arg1:string,arg2:number):Promise<Array<string>>;
 
@@ -20,9 +28,15 @@ export function GetSnowflakeKeywords():Promise<Array<string>>;
 
 export function GetSqlStatementRanges(arg1:string):Promise<Array<sqleditor.StatementRange>>;
 
+export function IsDatatypeContext(arg1:string,arg2:string):Promise<boolean>;
+
+export function IsInJoinOnClause(arg1:string):Promise<boolean>;
+
 export function ParseJoinTableRefs(arg1:string):Promise<Array<sqleditor.JoinTableRef>>;
 
 export function ParseSignatureParams(arg1:string):Promise<Array<sqleditor.SignatureParam>>;
+
+export function ResolveTableRefs(arg1:Array<sqleditor.JoinTableRef>,arg2:Array<sqleditor.StoreObject>,arg3:sqleditor.UseContext,arg4:sqleditor.SessionContext):Promise<Array<sqleditor.ResolvedRef>>;
 
 export function ValidateBareColumnRefs(arg1:sqleditor.ValidateBareColsRequest):Promise<Array<sqleditor.DiagMarker>>;
 

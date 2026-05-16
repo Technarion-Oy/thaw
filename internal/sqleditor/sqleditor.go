@@ -31,7 +31,8 @@ type DiagMarker struct {
 	EndLineNumber   int    `json:"endLineNumber"`
 	EndColumn       int    `json:"endColumn"`
 	Message         string `json:"message"`
-	Severity        int    `json:"severity"` // 8 = Error (red), 4 = Warning (yellow)
+	Severity        int    `json:"severity"`        // 8 = Error (red), 4 = Warning (yellow)
+	Code            string `json:"code,omitempty"`   // JSON quick-fix metadata (e.g. qualify-table suggestions)
 }
 
 // JoinTableRef is a table reference parsed from a FROM/JOIN clause.
@@ -99,6 +100,81 @@ type JoinCondition struct {
 	SortText  string `json:"sortText"`
 }
 
+
+// CTEColumnEntry represents a CTE name and its projected columns for autocomplete.
+type CTEColumnEntry struct {
+	Name string    `json:"name"` // Uppercase CTE name
+	Cols []ColInfo `json:"cols"`
+}
+
+// UseContext holds the accumulated DATABASE/SCHEMA context from USE statements
+// that appear before the current cursor position in a multi-statement editor.
+type UseContext struct {
+	Database string `json:"database"`
+	Schema   string `json:"schema"`
+}
+
+// StoreObject represents a known database object from the frontend object store.
+type StoreObject struct {
+	DB     string `json:"db"`
+	Schema string `json:"schema"`
+	Name   string `json:"name"`
+	Kind   string `json:"kind"`
+}
+
+// SessionContext holds the live Snowflake session's database/schema for fallback resolution.
+type SessionContext struct {
+	Database string `json:"database"`
+	Schema   string `json:"schema"`
+}
+
+// InEditorTableDef represents a table defined via CREATE TABLE in the editor text
+// whose columns can be used for autocomplete before the statement is executed.
+type InEditorTableDef struct {
+	DB     string    `json:"db"`
+	Schema string    `json:"schema"`
+	Name   string    `json:"name"`
+	Cols   []ColInfo `json:"cols"`
+}
+
+// AutocompleteContextRequest bundles all inputs for the extended autocomplete context.
+type AutocompleteContextRequest struct {
+	SQL          string          `json:"sql"`
+	CursorOffset int            `json:"cursorOffset"`
+	StoreObjects []StoreObject  `json:"storeObjects"`
+	Session      *SessionContext `json:"session,omitempty"`
+	LineUpToWord string          `json:"lineUpToWord"`
+}
+
+// UsingClauseInfo describes whether the cursor is inside a USING(...) clause.
+type UsingClauseInfo struct {
+	InUsing   bool `json:"inUsing"`   // Cursor is right after USING(
+	IsPartial bool `json:"isPartial"` // Cursor is after USING(col, ...
+}
+
+// LineDiff holds 1-based line numbers for added, modified, and deleted lines.
+type LineDiff struct {
+	Added    []int `json:"added"`
+	Modified []int `json:"modified"`
+	Deleted  []int `json:"deleted"`
+}
+
+// AutocompleteContext bundles all server-side context needed by the frontend
+// completion provider in a single IPC round-trip.
+type AutocompleteContext struct {
+	StatementRanges  []StatementRange          `json:"statementRanges"`
+	CurrentStmt      string                    `json:"currentStmt"`
+	CurrentStmtIdx   int                       `json:"currentStmtIdx"`
+	Scripting        ScriptingCompletionResult `json:"scripting"`
+	TableRefs        []JoinTableRef            `json:"tableRefs"`
+	CTEColumns       []CTEColumnEntry          `json:"cteColumns"`
+	UseContext       *UseContext               `json:"useContext,omitempty"`
+	ResolvedRefs     []ResolvedRef             `json:"resolvedRefs,omitempty"`
+	InEditorTables   []InEditorTableDef        `json:"inEditorTables,omitempty"`
+	IsDatatypeCtx    bool                      `json:"isDatatypeContext"`
+	IsInJoinOnClause bool                      `json:"isInJoinOnClause"`
+	UsingClause      *UsingClauseInfo          `json:"usingClause,omitempty"`
+}
 
 // FunctionCallContext is returned by GetActiveFunctionCall and identifies the
 // innermost open function call at the cursor position.
@@ -1113,7 +1189,11 @@ func ValidateSyntax(sql string) []DiagMarker {
 	declaredVars := map[string]bool{}
 
 	addError := func(msg string, sl, sc, el, ec int) {
-		markers = append(markers, DiagMarker{sl, sc, el, ec, msg, 8})
+		markers = append(markers, DiagMarker{
+			StartLineNumber: sl, StartColumn: sc,
+			EndLineNumber: el, EndColumn: ec,
+			Message: msg, Severity: 8,
+		})
 	}
 
 	i := 0
@@ -2093,9 +2173,11 @@ func TypeCategory(dt string) string {
 
 // ── CTE projection helpers ────────────────────────────────────────────────────
 
-// reCTEDef matches a CTE definition of the form:  <name> AS (
+// reCTEDef matches a CTE definition of the form:  <name> [(<col_list>)] AS (
 // Used to locate CTE names and their opening parenthesis.
-var reCTEDef = regexp.MustCompile(`(?i)(?:^|[^a-zA-Z0-9_$])(` + _ident + `)\s+AS\s*\(`)
+// The optional (?:\([^)]*\))? matches an explicit column alias list between
+// the CTE name and the AS keyword, e.g. cte(col_a, col_b) AS (...).
+var reCTEDef = regexp.MustCompile(`(?i)(?:^|[^a-zA-Z0-9_$])(` + _ident + `)\s*(?:\([^)]*\))?\s+AS\s*\(`)
 
 // reAsAliasExpr matches a trailing "AS <alias>" at the end of a SELECT-list
 // expression (anchored with $).
@@ -2279,6 +2361,38 @@ func isSimpleCTESelect(innerSQL string) bool {
 	return true
 }
 
+// getSimpleSelectColumnNames extracts bare column names from a simple SELECT
+// statement (one that already passes isSimpleCTESelect).  Returns the last
+// dot-component of each SELECT-list item, uppercased.  Returns ["*"] if the
+// select list contains a wildcard.
+func getSimpleSelectColumnNames(innerSQL string) []string {
+	stripped := stripCommentsSQL(innerSQL)
+	selLoc := reSelectKW.FindStringIndex(stripped)
+	if selLoc == nil {
+		return nil
+	}
+	afterSelect := strings.TrimSpace(stripped[selLoc[1]:])
+	upAfter := strings.ToUpper(afterSelect)
+	if strings.HasPrefix(upAfter, "DISTINCT ") || strings.HasPrefix(upAfter, "DISTINCT\t") || strings.HasPrefix(upAfter, "DISTINCT\n") {
+		afterSelect = strings.TrimSpace(afterSelect[8:])
+	} else if strings.HasPrefix(upAfter, "ALL ") {
+		afterSelect = strings.TrimSpace(afterSelect[4:])
+	}
+	selectClause := extractSelectClause(afterSelect)
+
+	var names []string
+	for _, expr := range splitTopLevelCommas(selectClause) {
+		trimmed := strings.TrimSpace(expr)
+		if trimmed == "*" {
+			return []string{"*"}
+		}
+		parts := strings.Split(trimmed, ".")
+		last := strings.TrimSpace(parts[len(parts)-1])
+		names = append(names, strings.ToUpper(normIdent(last, true)))
+	}
+	return names
+}
+
 // extractCTEProjections processes a WITH clause sequentially (Step 3).
 func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo) map[string][]ColInfo {
 	localScope := make(map[string][]ColInfo)
@@ -2299,18 +2413,31 @@ func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo)
 
 		cteName := remaining[m[2]:m[3]]
 
-		// Find opening paren after the name match.
-		// We know it must exist because reCTEDef matched.
-		relParenStart := strings.Index(remaining[m[3]:], "(")
-		if relParenStart == -1 {
-			remaining = remaining[m[3]:]
-			continue
-		}
-		parenStart := m[3] + relParenStart
+		// The regex match ends with "AS\s*(" so the body's opening paren
+		// is always at m[1]-1.
+		bodyParenStart := m[1] - 1
 
-		bodyBlock := extractBalancedBlock(remaining, parenStart)
+		// Check for explicit column aliases between name and "AS (".
+		// E.g. cte(col_a, col_b) AS (...) — the region between the name
+		// and the body paren contains "(col_a, col_b) AS ".
+		var explicitCols []string
+		betweenNameAndBody := remaining[m[3]:bodyParenStart]
+		if parenIdx := strings.Index(betweenNameAndBody, "("); parenIdx >= 0 {
+			block := extractBalancedBlock(betweenNameAndBody, parenIdx)
+			if len(block) > 2 {
+				inner := block[1 : len(block)-1]
+				for _, part := range splitTopLevelCommas(inner) {
+					trimmed := strings.TrimSpace(part)
+					if trimmed != "" {
+						explicitCols = append(explicitCols, strings.ToUpper(normIdent(trimmed, true)))
+					}
+				}
+			}
+		}
+
+		bodyBlock := extractBalancedBlock(remaining, bodyParenStart)
 		if len(bodyBlock) < 2 {
-			remaining = remaining[parenStart+1:]
+			remaining = remaining[bodyParenStart+1:]
 			continue
 		}
 		innerSQL := strings.TrimSpace(bodyBlock[1 : len(bodyBlock)-1])
@@ -2328,14 +2455,49 @@ func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo)
 			// projection list.
 			if isSimpleCTESelect(innerSQL) {
 				innerStripped := stripCommentsSQL(innerSQL)
+				var allSourceCols []ColInfo
 				for _, fm := range reFromJoinSel.FindAllStringSubmatch(innerStripped, -1) {
 					tablePath := fm[1]
 					parts := extractIdentParts(tablePath, true)
 					if len(parts) > 0 {
 						tableNameU := parts[len(parts)-1]
 						if cols, ok := localScope[tableNameU]; ok {
-							cteCols = append(cteCols, cols...)
+							allSourceCols = append(allSourceCols, cols...)
 						}
+					}
+				}
+				if len(allSourceCols) > 0 {
+					// Extract projected column names from the SELECT list.
+					// Only filter when every projected name exists in the
+					// source — this handles chained CTEs (e.g. SELECT id
+					// FROM base) correctly while preserving typo detection
+					// when a projected name doesn't match any source column.
+					projNames := getSimpleSelectColumnNames(innerSQL)
+					if len(projNames) > 0 && projNames[0] != "*" {
+						sourceMap := make(map[string]ColInfo)
+						for _, c := range allSourceCols {
+							sourceMap[c.Name] = c
+						}
+						allExist := true
+						for _, name := range projNames {
+							if _, ok := sourceMap[name]; !ok {
+								allExist = false
+								break
+							}
+						}
+						if allExist {
+							for _, name := range projNames {
+								cteCols = append(cteCols, sourceMap[name])
+							}
+						} else {
+							// Some projected names don't exist in source
+							// (potential typos) — use all source columns to
+							// preserve typo detection in alias.col validation.
+							cteCols = allSourceCols
+						}
+					} else {
+						// SELECT * — return all source columns
+						cteCols = allSourceCols
 					}
 				}
 			}
@@ -2346,6 +2508,19 @@ func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo)
 			}
 		}
 
+		// If CTE has explicit column aliases, override with those names.
+		if len(explicitCols) > 0 {
+			overridden := make([]ColInfo, len(explicitCols))
+			for i, name := range explicitCols {
+				dt := "UNKNOWN"
+				if i < len(cteCols) {
+					dt = cteCols[i].DataType
+				}
+				overridden[i] = ColInfo{Name: name, DataType: dt}
+			}
+			cteCols = overridden
+		}
+
 		if len(cteCols) > 0 {
 			nameU := strings.ToUpper(normIdent(cteName, true))
 			result[nameU] = cteCols
@@ -2353,7 +2528,7 @@ func extractCTEProjections(stripped string, globalRegistry map[string][]ColInfo)
 		}
 
 		// Advance past this CTE definition
-		remaining = remaining[parenStart+len(bodyBlock):]
+		remaining = remaining[bodyParenStart+len(bodyBlock):]
 	}
 	return result
 }
@@ -2975,4 +3150,484 @@ func ComputeJoinOnConditions(req JoinOnSuggestionsReq) []JoinCondition {
 	}
 
 	return suggestions
+}
+
+// ── GetAutocompleteContext ────────────────────────────────────────────────────
+
+// GetAutocompleteContext bundles statement ranges, scripting completions, table
+// references, and CTE column projections for the current cursor position into a
+// single response. This replaces multiple sequential IPC calls from the frontend.
+func GetAutocompleteContext(sql string, cursorOffset int) AutocompleteContext {
+	ranges := GetStatementRanges(sql)
+
+	// Identify which statement contains the cursor.
+	currentIdx := -1
+	currentStmt := sql
+	for i, r := range ranges {
+		if cursorOffset >= r.StartOffset && cursorOffset <= r.EndOffset {
+			currentIdx = i
+			runes := []rune(sql)
+			currentStmt = string(runes[r.StartOffset:r.EndOffset])
+			break
+		}
+	}
+	// If cursor is past all ranges, use the last statement.
+	if currentIdx == -1 && len(ranges) > 0 {
+		last := ranges[len(ranges)-1]
+		currentIdx = len(ranges) - 1
+		runes := []rune(sql)
+		if last.EndOffset <= len(runes) {
+			currentStmt = string(runes[last.StartOffset:last.EndOffset])
+		}
+	}
+
+	scripting := GetScriptingCompletions(sql, cursorOffset)
+	tableRefs := ParseJoinTables(currentStmt)
+	cteColumns := getCTEColumnsAtCursor(currentStmt)
+
+	// Scan statements 0..currentIdx (inclusive) for USE DATABASE/SCHEMA context.
+	var useCtx *UseContext
+	runes := []rune(sql)
+	scanEnd := currentIdx + 1
+	if currentIdx < 0 {
+		scanEnd = 0
+	}
+	for i := 0; i < scanEnd && i < len(ranges); i++ {
+		r := ranges[i]
+		end := r.EndOffset
+		if end > len(runes) {
+			end = len(runes)
+		}
+		stmtText := string(runes[r.StartOffset:end])
+		refs := ParseJoinTables(stmtText)
+		for _, ref := range refs {
+			if ref.Name == "" { // USE statement ref (Name is always empty)
+				if useCtx == nil {
+					useCtx = &UseContext{}
+				}
+				if ref.DB != "" {
+					useCtx.Database = ref.DB
+				}
+				if ref.Schema != "" {
+					useCtx.Schema = ref.Schema
+				}
+			}
+		}
+	}
+
+	return AutocompleteContext{
+		StatementRanges: ranges,
+		CurrentStmt:     currentStmt,
+		CurrentStmtIdx:  currentIdx,
+		Scripting:       scripting,
+		TableRefs:       tableRefs,
+		CTEColumns:      cteColumns,
+		UseContext:      useCtx,
+	}
+}
+
+// getCTEColumnsAtCursor extracts CTE column projections from the given statement
+// text, suitable for autocomplete suggestions. It uses the existing
+// extractCTEProjections machinery with an empty global registry.
+func getCTEColumnsAtCursor(stmtText string) []CTEColumnEntry {
+	stripped := stripCommentsSQL(stmtText)
+	upper := strings.ToUpper(strings.TrimSpace(stripped))
+	if !strings.HasPrefix(upper, "WITH") {
+		return nil
+	}
+
+	projections := extractCTEProjections(stripped, make(map[string][]ColInfo))
+	if len(projections) == 0 {
+		return nil
+	}
+
+	// Convert map to sorted slice for deterministic output.
+	entries := make([]CTEColumnEntry, 0, len(projections))
+	for name, cols := range projections {
+		entries = append(entries, CTEColumnEntry{Name: name, Cols: cols})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Name < entries[j].Name
+	})
+	return entries
+}
+
+// ── Ref resolution & in-editor table defs ─────────────────────────────────
+
+// ResolveTableRefs resolves unqualified/partially-qualified table references
+// against the provided store objects, UseContext, and session context.
+// Resolution order for each ref:
+//  1. Already fully qualified (db+schema+name) → return as-is
+//  2. Search storeObjects for matching TABLE/VIEW (case-insensitive)
+//  3. Apply UseContext (editor-level USE DATABASE/SCHEMA)
+//  4. Apply session context (live Snowflake connection)
+//  5. If still incomplete → skip
+//
+// USE refs (Name == "") are skipped.
+func ResolveTableRefs(
+	refs []JoinTableRef,
+	storeObjects []StoreObject,
+	useCtx *UseContext,
+	session *SessionContext,
+) []ResolvedRef {
+	var resolved []ResolvedRef
+	for _, ref := range refs {
+		// Skip USE refs (ParseJoinTables returns these with Name == "")
+		if ref.Name == "" {
+			continue
+		}
+
+		r := ResolvedRef{
+			Alias:  ref.Alias,
+			DB:     ref.DB,
+			Schema: ref.Schema,
+			Name:   ref.Name,
+		}
+
+		// 1. Already fully qualified
+		if r.DB != "" && r.Schema != "" {
+			resolved = append(resolved, r)
+			continue
+		}
+
+		// 2. Search store objects
+		found := false
+		for _, o := range storeObjects {
+			if !strings.EqualFold(o.Kind, "TABLE") && !strings.EqualFold(o.Kind, "VIEW") {
+				continue
+			}
+			if !strings.EqualFold(o.Name, ref.Name) {
+				continue
+			}
+			if ref.DB != "" && !strings.EqualFold(o.DB, ref.DB) {
+				continue
+			}
+			if ref.Schema != "" && !strings.EqualFold(o.Schema, ref.Schema) {
+				continue
+			}
+			r.DB = o.DB
+			r.Schema = o.Schema
+			r.Name = o.Name
+			found = true
+			break
+		}
+		if found {
+			resolved = append(resolved, r)
+			continue
+		}
+
+		// 3. Apply UseContext
+		if useCtx != nil {
+			if r.DB == "" && useCtx.Database != "" {
+				r.DB = useCtx.Database
+			}
+			if r.Schema == "" && useCtx.Schema != "" {
+				r.Schema = useCtx.Schema
+			}
+		}
+		if r.DB != "" && r.Schema != "" {
+			resolved = append(resolved, r)
+			continue
+		}
+
+		// 4. Apply session context
+		if session != nil {
+			if r.DB == "" && session.Database != "" {
+				r.DB = session.Database
+			}
+			if r.Schema == "" && session.Schema != "" {
+				r.Schema = session.Schema
+			}
+		}
+		if r.DB != "" && r.Schema != "" {
+			resolved = append(resolved, r)
+		}
+		// 5. Still incomplete → skip
+	}
+	return resolved
+}
+
+// ExtractInEditorTableDefs scans all statements for CREATE TABLE definitions
+// and extracts their column definitions. UseContext and session context are
+// applied to qualify unqualified table names.
+func ExtractInEditorTableDefs(
+	sql string,
+	stmtRanges []StatementRange,
+	useCtx *UseContext,
+	session *SessionContext,
+) []InEditorTableDef {
+	var defs []InEditorTableDef
+
+	for _, r := range stmtRanges {
+		raw := sqlStmt(sql, r)
+
+		// Must be a CREATE TABLE (not CTAS/CLONE/LIKE)
+		if !reCreateTableGuard.MatchString(raw) {
+			continue
+		}
+
+		m := reCreateTablePreScan.FindStringSubmatchIndex(raw)
+		if m == nil {
+			continue
+		}
+
+		// Check for CTAS: if AS SELECT follows the column block or there is no column block
+		nameStr := raw[m[2]:m[3]]
+
+		// Extract balanced column block starting at the opening paren.
+		parenStart := m[1] - 1
+		colsRaw := extractBalancedBlock(raw, parenStart)
+		if colsRaw == "" {
+			continue
+		}
+
+		// Check if this is CTAS: text after closing paren starts with AS
+		afterParen := strings.TrimSpace(raw[parenStart+len(colsRaw):])
+		if strings.HasPrefix(strings.ToUpper(afterParen), "AS") {
+			continue
+		}
+
+		// Strip surrounding parens and parse columns
+		if len(colsRaw) >= 2 {
+			colsRaw = colsRaw[1 : len(colsRaw)-1]
+		}
+		columns := parseCreateTableColDefs(colsRaw, false)
+		if len(columns) == 0 {
+			continue
+		}
+
+		// Extract name parts
+		parts := extractIdentParts(nameStr, false)
+		if len(parts) == 0 {
+			continue
+		}
+
+		var db, schema, name string
+		switch len(parts) {
+		case 3:
+			db, schema, name = parts[0], parts[1], parts[2]
+		case 2:
+			schema, name = parts[0], parts[1]
+		default:
+			name = parts[0]
+		}
+
+		// Qualify using UseContext then session
+		if db == "" && useCtx != nil && useCtx.Database != "" {
+			db = useCtx.Database
+		}
+		if schema == "" && useCtx != nil && useCtx.Schema != "" {
+			schema = useCtx.Schema
+		}
+		if db == "" && session != nil && session.Database != "" {
+			db = session.Database
+		}
+		if schema == "" && session != nil && session.Schema != "" {
+			schema = session.Schema
+		}
+
+		defs = append(defs, InEditorTableDef{
+			DB:     db,
+			Schema: schema,
+			Name:   name,
+			Cols:   columns,
+		})
+	}
+
+	return defs
+}
+
+// ── ComputeGitLineDiff ─────────────────────────────────────────────────────
+
+// ComputeGitLineDiff computes a line-level diff between HEAD lines and current
+// lines using an LCS dynamic-programming approach. Returns 1-based line numbers
+// for added, modified, and deleted regions. Returns empty slices if either
+// input exceeds maxLines.
+func ComputeGitLineDiff(headLines, currentLines []string, maxLines int) LineDiff {
+	if len(headLines) > maxLines || len(currentLines) > maxLines {
+		return LineDiff{Added: []int{}, Modified: []int{}, Deleted: []int{}}
+	}
+
+	H := len(headLines)
+	C := len(currentLines)
+
+	// DP LCS on line arrays.
+	dp := make([][]int, H+1)
+	for i := range dp {
+		dp[i] = make([]int, C+1)
+	}
+	for i := H - 1; i >= 0; i-- {
+		for j := C - 1; j >= 0; j-- {
+			if headLines[i] == currentLines[j] {
+				dp[i][j] = 1 + dp[i+1][j+1]
+			} else if dp[i+1][j] > dp[i][j+1] {
+				dp[i][j] = dp[i+1][j]
+			} else {
+				dp[i][j] = dp[i][j+1]
+			}
+		}
+	}
+
+	// Backtrack to find diff operations.
+	var added, deleted []int
+	i, j := 0, 0
+	for i < H || j < C {
+		if i < H && j < C && headLines[i] == currentLines[j] {
+			i++
+			j++
+		} else if j < C && (i >= H || dp[i+1][j] <= dp[i][j+1]) {
+			added = append(added, j+1) // 1-based
+			j++
+		} else {
+			// Head line i was deleted. Record deletion point as line j in current (1-based, min 1).
+			pos := j
+			if pos < 1 {
+				pos = 1
+			}
+			deleted = append(deleted, pos)
+			i++
+		}
+	}
+
+	// Reclassify: a line in current that appears in both added and deleted
+	// at the same position was in HEAD but changed — show as "modified".
+	deletedSet := make(map[int]bool, len(deleted))
+	for _, l := range deleted {
+		deletedSet[l] = true
+	}
+	addedSet := make(map[int]bool, len(added))
+	for _, l := range added {
+		addedSet[l] = true
+	}
+
+	var modified []int
+	for _, l := range added {
+		if deletedSet[l] {
+			modified = append(modified, l)
+		}
+	}
+
+	filteredAdded := make([]int, 0, len(added))
+	for _, l := range added {
+		if !deletedSet[l] {
+			filteredAdded = append(filteredAdded, l)
+		}
+	}
+	filteredDeleted := make([]int, 0, len(deleted))
+	for _, l := range deleted {
+		if !addedSet[l] {
+			filteredDeleted = append(filteredDeleted, l)
+		}
+	}
+
+	if filteredAdded == nil {
+		filteredAdded = []int{}
+	}
+	if modified == nil {
+		modified = []int{}
+	}
+	if filteredDeleted == nil {
+		filteredDeleted = []int{}
+	}
+
+	return LineDiff{Added: filteredAdded, Modified: modified, Deleted: filteredDeleted}
+}
+
+// ── IsDatatypeContext ──────────────────────────────────────────────────────
+
+// Compiled regex patterns for datatype context detection (autocomplete).
+var (
+	reDtCtxCastShorthand = regexp.MustCompile(`::\s*$`)
+	reDtCtxCastFunction  = regexp.MustCompile(`(?i)\b(?:TRY_)?CAST\s*\([^)]*\bAS\s*$`)
+	reDtCtxDeclareVar    = regexp.MustCompile(`(?i)\bDECLARE\b[^;]*\b\w+\s*$`)
+	reDtCtxCreateAlter   = regexp.MustCompile(`(?is)\b(?:CREATE|ALTER)\b[^;]*\(\s*(?:.*,\s*)?\w+\s*$`)
+)
+
+// IsDatatypeContext returns true when the cursor position suggests a Snowflake
+// data type name is expected — after ::, CAST(x AS, DECLARE varname, or
+// CREATE/ALTER TABLE (..., col_name.
+func IsDatatypeContext(textToCursor string, lineUpToWord string) bool {
+	if reDtCtxCastShorthand.MatchString(lineUpToWord) {
+		return true
+	}
+	if reDtCtxCastFunction.MatchString(lineUpToWord) {
+		return true
+	}
+	if reDtCtxDeclareVar.MatchString(textToCursor) {
+		return true
+	}
+	if reDtCtxCreateAlter.MatchString(textToCursor) {
+		return true
+	}
+	return false
+}
+
+// ── IsInJoinOnClause ───────────────────────────────────────────────────────
+
+var (
+	reJoinGlobal     = regexp.MustCompile(`(?i)\bJOIN\b`)
+	reOnAfterJoin    = regexp.MustCompile(`(?i)\bON\b`)
+	reJoinTerminator = regexp.MustCompile(`(?i)\b(?:JOIN|WHERE|GROUP|ORDER|HAVING|UNION|INTERSECT|EXCEPT)\b`)
+)
+
+// IsInJoinOnClause returns true when the cursor is inside a JOIN ... ON ...
+// clause that has not been terminated by a subsequent keyword.
+func IsInJoinOnClause(textToCursor string) bool {
+	matches := reJoinGlobal.FindAllStringIndex(textToCursor, -1)
+	if len(matches) == 0 {
+		return false
+	}
+	lastJoin := matches[len(matches)-1]
+	afterLastJoin := textToCursor[lastJoin[1]:]
+	onLoc := reOnAfterJoin.FindStringIndex(afterLastJoin)
+	if onLoc == nil {
+		return false
+	}
+	afterOn := afterLastJoin[onLoc[1]:]
+	return !reJoinTerminator.MatchString(afterOn)
+}
+
+// ── DetectUsingClause ──────────────────────────────────────────────────────
+
+var (
+	reUsingFull    = regexp.MustCompile(`(?i)\bUSING\s*\(\s*$`)
+	reUsingPartial = regexp.MustCompile(`(?i)\bUSING\s*\(\s*(?:\w+\s*,\s*)+$`)
+)
+
+// DetectUsingClause checks whether the cursor is inside a USING(...) clause.
+// InUsing is true when right after "USING(" with no columns yet.
+// IsPartial is true when after "USING(col1, " with at least one column listed.
+func DetectUsingClause(textToCursor string) UsingClauseInfo {
+	if reUsingFull.MatchString(textToCursor) {
+		return UsingClauseInfo{InUsing: true, IsPartial: false}
+	}
+	if reUsingPartial.MatchString(textToCursor) {
+		return UsingClauseInfo{InUsing: false, IsPartial: true}
+	}
+	return UsingClauseInfo{}
+}
+
+// GetAutocompleteContextFull extends GetAutocompleteContext with ref resolution
+// and in-editor CREATE TABLE column extraction, so the frontend completion
+// provider becomes a thin wrapper.
+func GetAutocompleteContextFull(req AutocompleteContextRequest) AutocompleteContext {
+	ctx := GetAutocompleteContext(req.SQL, req.CursorOffset)
+	ctx.ResolvedRefs = ResolveTableRefs(ctx.TableRefs, req.StoreObjects, ctx.UseContext, req.Session)
+	ctx.InEditorTables = ExtractInEditorTableDefs(req.SQL, ctx.StatementRanges, ctx.UseContext, req.Session)
+
+	// Compute context-detection fields from text-to-cursor.
+	textToCursor := req.SQL
+	runes := []rune(req.SQL)
+	if req.CursorOffset >= 0 && req.CursorOffset <= len(runes) {
+		textToCursor = string(runes[:req.CursorOffset])
+	}
+	ctx.IsDatatypeCtx = IsDatatypeContext(textToCursor, req.LineUpToWord)
+	ctx.IsInJoinOnClause = IsInJoinOnClause(textToCursor)
+
+	usingInfo := DetectUsingClause(textToCursor)
+	if usingInfo.InUsing || usingInfo.IsPartial {
+		ctx.UsingClause = &usingInfo
+	}
+
+	return ctx
 }

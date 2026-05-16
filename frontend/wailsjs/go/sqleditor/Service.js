@@ -14,12 +14,28 @@ export function ApplySqlCasing(arg1, arg2, arg3, arg4) {
   return window['go']['sqleditor']['Service']['ApplySqlCasing'](arg1, arg2, arg3, arg4);
 }
 
+export function ComputeGitLineDiff(arg1, arg2, arg3) {
+  return window['go']['sqleditor']['Service']['ComputeGitLineDiff'](arg1, arg2, arg3);
+}
+
 export function ComputeJoinOnConditions(arg1) {
   return window['go']['sqleditor']['Service']['ComputeJoinOnConditions'](arg1);
 }
 
+export function DetectUsingClause(arg1) {
+  return window['go']['sqleditor']['Service']['DetectUsingClause'](arg1);
+}
+
 export function GetActiveFunctionCall(arg1) {
   return window['go']['sqleditor']['Service']['GetActiveFunctionCall'](arg1);
+}
+
+export function GetAutocompleteContext(arg1, arg2) {
+  return window['go']['sqleditor']['Service']['GetAutocompleteContext'](arg1, arg2);
+}
+
+export function GetAutocompleteContextFull(arg1) {
+  return window['go']['sqleditor']['Service']['GetAutocompleteContextFull'](arg1);
 }
 
 export function GetIdentifierAtColumn(arg1, arg2) {
@@ -38,12 +54,24 @@ export function GetSqlStatementRanges(arg1) {
   return window['go']['sqleditor']['Service']['GetSqlStatementRanges'](arg1);
 }
 
+export function IsDatatypeContext(arg1, arg2) {
+  return window['go']['sqleditor']['Service']['IsDatatypeContext'](arg1, arg2);
+}
+
+export function IsInJoinOnClause(arg1) {
+  return window['go']['sqleditor']['Service']['IsInJoinOnClause'](arg1);
+}
+
 export function ParseJoinTableRefs(arg1) {
   return window['go']['sqleditor']['Service']['ParseJoinTableRefs'](arg1);
 }
 
 export function ParseSignatureParams(arg1) {
   return window['go']['sqleditor']['Service']['ParseSignatureParams'](arg1);
+}
+
+export function ResolveTableRefs(arg1, arg2, arg3, arg4) {
+  return window['go']['sqleditor']['Service']['ResolveTableRefs'](arg1, arg2, arg3, arg4);
 }
 
 export function ValidateBareColumnRefs(arg1) {

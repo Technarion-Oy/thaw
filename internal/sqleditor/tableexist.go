@@ -11,6 +11,7 @@
 package sqleditor
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 )
@@ -25,16 +26,21 @@ type SchemaEntry struct {
 
 // ValidateTablesExistRequest is the input to ValidateTablesExist.
 type ValidateTablesExistRequest struct {
-	SQL                         string         `json:"sql"`
+	SQL                         string           `json:"sql"`
 	StmtRanges                  []StatementRange `json:"stmtRanges"`
-	ResolvedRefs                []ResolvedRef  `json:"resolvedRefs"`
-	KnownDatabases              []string       `json:"knownDatabases"`
-	KnownSchemas                []SchemaEntry  `json:"knownSchemas"`
-	QuotedIdentifiersIgnoreCase bool           `json:"quotedIdentifiersIgnoreCase"`
-	DroppedDatabases            []string       `json:"droppedDatabases"`
-	DroppedSchemas              []SchemaEntry  `json:"droppedSchemas"`
+	ResolvedRefs                []ResolvedRef    `json:"resolvedRefs"`
+	KnownDatabases              []string         `json:"knownDatabases"`
+	KnownSchemas                []SchemaEntry    `json:"knownSchemas"`
+	QuotedIdentifiersIgnoreCase bool             `json:"quotedIdentifiersIgnoreCase"`
+	DroppedDatabases            []string         `json:"droppedDatabases"`
+	DroppedSchemas              []SchemaEntry    `json:"droppedSchemas"`
 	// DroppedTables uses ResolvedRef (Alias field is ignored).
-	DroppedTables []ResolvedRef `json:"droppedTables"`
+	DroppedTables  []ResolvedRef `json:"droppedTables"`
+	// AllKnownTables is the full set of resolved table references available in
+	// the session. When a "table not found" marker is emitted, this list is
+	// searched for tables with the same name in other schemas, enabling
+	// quick-fix qualification suggestions via the Code field.
+	AllKnownTables []ResolvedRef `json:"allKnownTables"`
 }
 
 // ── Precompiled regexes ───────────────────────────────────────────────────────
@@ -730,7 +736,15 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			} else {
 				diagMsg = "Object '" + t.name + "' does not exist or is not authorized."
 			}
-			markers = append(markers, diagMarkerAt(t, diagMsg, 8))
+			marker := diagMarkerAt(t, diagMsg, 8)
+
+			// Populate quick-fix Code when the unresolved token is a table name
+			// and alternative fully-qualified paths exist in AllKnownTables.
+			if len(req.AllKnownTables) > 0 {
+				marker.Code = buildQualifyTableCode(name, req.AllKnownTables, checkEq)
+			}
+
+			markers = append(markers, marker)
 		}
 	}
 
@@ -905,4 +919,52 @@ func resolveErrorToken(
 		}
 	}
 	return
+}
+
+// qualifyTableCodePayload is the JSON structure embedded in DiagMarker.Code
+// when an unresolved table name has alternative fully-qualified paths.
+type qualifyTableCodePayload struct {
+	Kind        string   `json:"kind"`
+	Original    string   `json:"original"`
+	Suggestions []string `json:"suggestions"`
+}
+
+// buildQualifyTableCode searches AllKnownTables for tables whose name matches
+// the unresolved token and returns a JSON string with qualification suggestions.
+// Returns "" if no matches are found.
+func buildQualifyTableCode(tableName string, allKnown []ResolvedRef, eq func(string, string) bool) string {
+	var suggestions []string
+	seen := make(map[string]struct{})
+	for _, ref := range allKnown {
+		if !eq(ref.Name, tableName) {
+			continue
+		}
+		var qualified string
+		if ref.DB != "" && ref.Schema != "" {
+			qualified = ref.DB + "." + ref.Schema + "." + ref.Name
+		} else if ref.Schema != "" {
+			qualified = ref.Schema + "." + ref.Name
+		} else {
+			continue
+		}
+		upper := strings.ToUpper(qualified)
+		if _, ok := seen[upper]; ok {
+			continue
+		}
+		seen[upper] = struct{}{}
+		suggestions = append(suggestions, qualified)
+	}
+	if len(suggestions) == 0 {
+		return ""
+	}
+	payload := qualifyTableCodePayload{
+		Kind:        "qualify-table",
+		Original:    tableName,
+		Suggestions: suggestions,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }

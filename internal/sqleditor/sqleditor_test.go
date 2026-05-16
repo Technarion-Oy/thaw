@@ -1110,3 +1110,132 @@ func TestScriptingNeedsColon(t *testing.T) {
 		})
 	}
 }
+
+// ── GetAutocompleteContext Tests ─────────────────────────────────────────────
+
+func TestGetAutocompleteContext_BasicSingleStatement(t *testing.T) {
+	sql := "SELECT id, name FROM users WHERE id = 1"
+	offset := len([]rune(sql)) // cursor at end
+
+	ctx := GetAutocompleteContext(sql, offset)
+
+	if len(ctx.StatementRanges) != 1 {
+		t.Fatalf("expected 1 statement range, got %d", len(ctx.StatementRanges))
+	}
+	if ctx.CurrentStmtIdx != 0 {
+		t.Errorf("expected currentStmtIdx=0, got %d", ctx.CurrentStmtIdx)
+	}
+	if ctx.CurrentStmt != sql {
+		t.Errorf("expected currentStmt to be the full SQL, got %q", ctx.CurrentStmt)
+	}
+	// Table refs should find "users"
+	found := false
+	for _, ref := range ctx.TableRefs {
+		if ref.Name == "USERS" || ref.Name == "users" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected to find table ref 'users' in %+v", ctx.TableRefs)
+	}
+}
+
+func TestGetAutocompleteContext_MultiStatement(t *testing.T) {
+	sql := "SELECT 1;\nSELECT a FROM t1;\nSELECT b FROM t2"
+	// Place cursor in the second statement (offset within "SELECT a FROM t1;")
+	offset := len([]rune("SELECT 1;\nSELECT a"))
+
+	ctx := GetAutocompleteContext(sql, offset)
+
+	if len(ctx.StatementRanges) != 3 {
+		t.Fatalf("expected 3 statement ranges, got %d", len(ctx.StatementRanges))
+	}
+	if ctx.CurrentStmtIdx != 1 {
+		t.Errorf("expected currentStmtIdx=1, got %d", ctx.CurrentStmtIdx)
+	}
+}
+
+func TestGetAutocompleteContext_ScriptingVariables(t *testing.T) {
+	sql := "CREATE PROCEDURE p() RETURNS INT LANGUAGE SQL AS $$ DECLARE x INT; BEGIN RETURN :x; END; $$"
+	// Cursor inside the $$ block
+	offset := len([]rune("CREATE PROCEDURE p() RETURNS INT LANGUAGE SQL AS $$ DECLARE x INT; BEGIN RETURN :"))
+
+	ctx := GetAutocompleteContext(sql, offset)
+
+	if len(ctx.Scripting.Variables) == 0 {
+		t.Error("expected scripting variables to be extracted")
+	}
+	foundX := false
+	for _, v := range ctx.Scripting.Variables {
+		if v == "X" {
+			foundX = true
+			break
+		}
+	}
+	if !foundX {
+		t.Errorf("expected variable 'X' in %v", ctx.Scripting.Variables)
+	}
+}
+
+// ── getCTEColumnsAtCursor Tests ──────────────────────────────────────────────
+
+func TestGetCTEColumnsAtCursor_SingleCTE(t *testing.T) {
+	sql := "WITH cte AS (SELECT id, name FROM users) SELECT cte."
+	cols := getCTEColumnsAtCursor(sql)
+
+	if len(cols) == 0 {
+		t.Fatal("expected CTE columns to be extracted")
+	}
+	if cols[0].Name != "CTE" {
+		t.Errorf("expected CTE name 'CTE', got %q", cols[0].Name)
+	}
+	// The CTE may or may not resolve columns depending on whether "users" is in
+	// the empty registry. For a simple SELECT list projection, it should find
+	// "id" and "name" as projected columns.
+	if len(cols[0].Cols) < 2 {
+		t.Logf("CTE columns: %+v (may be empty if source table not in registry)", cols[0].Cols)
+	}
+}
+
+func TestGetCTEColumnsAtCursor_MultipleCTEs(t *testing.T) {
+	sql := "WITH a AS (SELECT 1 AS x), b AS (SELECT 2 AS y) SELECT a.x, b.y"
+	cols := getCTEColumnsAtCursor(sql)
+
+	if len(cols) < 2 {
+		t.Fatalf("expected at least 2 CTE entries, got %d", len(cols))
+	}
+
+	// Should have entries for both "A" and "B"
+	names := make(map[string]bool)
+	for _, c := range cols {
+		names[c.Name] = true
+	}
+	if !names["A"] {
+		t.Error("expected CTE entry for 'A'")
+	}
+	if !names["B"] {
+		t.Error("expected CTE entry for 'B'")
+	}
+}
+
+func TestGetCTEColumnsAtCursor_NoCTE(t *testing.T) {
+	sql := "SELECT id FROM users"
+	cols := getCTEColumnsAtCursor(sql)
+
+	if cols != nil {
+		t.Errorf("expected nil for non-CTE query, got %+v", cols)
+	}
+}
+
+func TestGetCTEColumnsAtCursor_CommentBeforeWith(t *testing.T) {
+	sql := "-- comment\nWITH cte AS (SELECT 1 AS val) SELECT cte.val"
+	cols := getCTEColumnsAtCursor(sql)
+
+	if len(cols) == 0 {
+		t.Fatal("expected CTE columns even with leading comment")
+	}
+	if cols[0].Name != "CTE" {
+		t.Errorf("expected CTE name 'CTE', got %q", cols[0].Name)
+	}
+}

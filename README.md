@@ -58,6 +58,9 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
   - After `db.schema.` → objects (tables, views, functions, …) in that schema
   - After `db.schema.table.` or `schema.table.` or `table.` → columns of that table/view
   - `Ctrl+Space` anywhere in a query (SELECT list, WHERE clause, etc.) → columns from all tables/views referenced in the `FROM`/`JOIN` clauses of the current statement; both quoted (`"TABLE"`) and unquoted identifiers are recognised; works above the FROM clause (e.g. inside the SELECT column list)
+  - **CTE column projection** — `cte.` after a WITH clause suggests the CTE's projected columns; multi-CTE and nested references are supported
+  - **USING clause completion** — `USING (` suggests shared column names between joined tables
+  - **Quick-fix table qualification** — unresolved table markers offer a lightbulb quick-fix to auto-qualify with `DB.SCHEMA.TABLE`
   - After `ON` in a `JOIN` clause → join conditions in three tiers: **(1)** FK relationships (composite multi-column constraints produce `col1 = col1 AND col2 = col2` expressions, sourced from `SHOW IMPORTED KEYS`), **(2)** PK-naming-convention heuristic (`orders.CUSTOMER_ID = customers.ID`) when no FK constraint exists, **(3)** type-compatible same-name columns with both equality (`a.col = b.col`) and `USING (col)` alternatives; works with quoted and unquoted identifiers, full three-part names, and optional table aliases
   - **Ghost text (Trigger A)** — after `JOIN table ` (before typing `ON`), an inline ghost-text suggestion appears with the most likely `ON <condition>`; accept with `Tab`; powered by the FK cache so it's instant when data is already loaded
   - **Ctrl+Space before ON (Trigger C)** — press `Ctrl+Space` right after a JOIN table reference (before typing `ON`) to get a full dropdown of `ON <condition>` options (all three tiers: FK, heuristic, same-name)

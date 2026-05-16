@@ -185,6 +185,7 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 
 ### Monaco editor integration
 - The SQL editor is in `frontend/src/components/editor/SqlEditor.tsx`
+- Pure helper functions (`quoteIfNecessary`, `getFKs` + cache, `buildVariableSuggestions`, `FKEntry`) live in `frontend/src/components/editor/sqlEditorUtils.ts`
 - `getQualifiedIdent(model, pos)` extracts full dot-separated identifiers (e.g. `DB.SCHEMA.TABLE`) from the cursor position
 - `getStatementLineRanges(sql)` splits SQL into per-statement line ranges (mirrors Go backend `splitStatements`)
 - DDL hover cache: module-level `hoverDDLCache` (Map, 60s TTL)
@@ -197,8 +198,18 @@ All proprietary analysis logic lives in `internal/sqleditor/` and is exposed to 
 - `ParseJoinTableRefs(sql)` → regex-based FROM/JOIN table-ref extractor (3/2/1-part + alias)
 - `AnalyzeSqlSemantics(sql, resolvedRefs, colEntries)` → alias.column validator
 - `ComputeJoinOnConditions(req)` → three-tier JOIN ON suggestion engine (FK → PK heuristic → type-compatible same-name columns + USING)
+- `GetAutocompleteContext(sql, cursorOffset)` → unified endpoint bundling statement ranges, scripting completions, table refs, CTE column projections, and `UseContext` (accumulated `USE DATABASE/SCHEMA` context from earlier statements) in a single IPC round-trip
+- `GetAutocompleteContextFull(req)` → extends `GetAutocompleteContext` with backend ref resolution (`ResolvedRefs`), in-editor CREATE TABLE column extraction (`InEditorTables`), and context-detection flags (`IsDatatypeCtx`, `IsInJoinOnClause`, `UsingClause`); accepts `StoreObject[]`, `SessionContext`, and `LineUpToWord` so the frontend completion provider becomes a thin wrapper with no inline resolution logic
+- `ComputeGitLineDiff(headLines, currentLines, maxLines)` → LCS-based line-level diff returning 1-based line numbers for added/modified/deleted regions; used by git gutter decorations
+- `IsDatatypeContext(textToCursor, lineUpToWord)` → detects whether cursor expects a data type (after `::`, `CAST AS`, `DECLARE`, `CREATE/ALTER TABLE` column)
+- `IsInJoinOnClause(textToCursor)` → detects whether cursor is inside a JOIN ... ON ... clause not yet terminated by a subsequent keyword
+- `DetectUsingClause(textToCursor)` → detects USING clause context (`InUsing` for empty USING, `IsPartial` for partial column list)
+- `ResolveTableRefs(refs, storeObjects, useCtx, session)` → resolves unqualified/partially-qualified table refs against store objects, UseContext, and session context (priority: fully-qualified → store match → UseContext → session); skips USE refs (Name=="")
 - `GetSnowflakeKeywords()` → static list of Snowflake reserved keywords (delegates to `snowflake.ReservedKeywords()`)
+- `ValidateTablesExist` markers include a `Code` field with JSON quick-fix metadata (`{"kind":"qualify-table","original":"FOO","suggestions":["DB.SCHEMA.FOO"]}`) when the unresolved table exists in other schemas; the frontend's `CodeActionProvider` parses this to offer lightbulb quick-fix qualification
 - `validateWithParser` and `validateBareColumnRefs` still run in the frontend (`sqlDiagnostics.ts`) as they depend on `node-sql-parser` which has no Go equivalent
+- The frontend `resolveRefs()` function has been removed — all table ref resolution now goes through the backend `ResolveTableRefs` IPC method, ensuring UseContext and session context are consistently applied across all completion/hover/diagnostics paths
+- `InEditorTableDef` exposes columns from CREATE TABLE statements in the editor text for autocomplete before execution; `ExtractInEditorTableDefs` reuses `parseCreateTableColDefs` from `barecolrefs.go`
 
 ### Adding a feature flag (Enabled Features)
 
