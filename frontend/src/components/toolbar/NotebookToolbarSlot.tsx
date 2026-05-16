@@ -10,13 +10,14 @@
 //
 // @thaw-domain: Snowpark & Developer Workflows
 
-import { Button, Space, Spin, Tooltip, Typography, Tag } from "antd";
+import { Button, Spin, Tooltip, Typography } from "antd";
 import {
   PlayCircleOutlined,
   ReloadOutlined,
   PlusOutlined,
   CloudUploadOutlined,
   WarningOutlined,
+  CheckCircleOutlined,
 } from "@ant-design/icons";
 
 const { Text } = Typography;
@@ -43,52 +44,62 @@ export default function NotebookToolbarSlot({
   onDeploy,
 }: NotebookToolbarSlotProps) {
   return (
-    <Space size={4}>
-      <Tooltip title="Run all cells">
-        <Button
-          icon={<PlayCircleOutlined />}
-          size="small"
-          onClick={onRunAll}
-          disabled={!kernelReady}
-          style={{ width: 28, padding: 0 }}
-        />
-      </Tooltip>
-      <Tooltip title="Restart kernel">
-        <Button
-          icon={<ReloadOutlined />}
-          size="small"
-          onClick={onRestartKernel}
-          style={{ width: 28, padding: 0 }}
-        />
-      </Tooltip>
-      <Tooltip title="Add cell">
-        <Button
-          icon={<PlusOutlined />}
-          size="small"
-          onClick={onAddCell}
-          style={{ width: 28, padding: 0 }}
-        />
-      </Tooltip>
-      <Tooltip title="Deploy this notebook to Snowflake">
-        <Button
-          icon={<CloudUploadOutlined />}
-          size="small"
-          onClick={onDeploy}
-          style={{ width: 28, padding: 0 }}
-        />
-      </Tooltip>
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      {/* Separator */}
+      <div style={{ width: 1, height: 20, background: "var(--border)" }} />
+
+      {/* Notebook action buttons — vertical column */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <Tooltip title="Run all cells" placement="right">
+          <Button
+            icon={<PlayCircleOutlined />}
+            size="small"
+            onClick={onRunAll}
+            disabled={!kernelReady}
+            style={{ width: 28, padding: 0 }}
+          />
+        </Tooltip>
+        <Tooltip title="Restart kernel" placement="right">
+          <Button
+            icon={<ReloadOutlined />}
+            size="small"
+            onClick={onRestartKernel}
+            style={{ width: 28, padding: 0 }}
+          />
+        </Tooltip>
+        <Tooltip title="Add cell" placement="right">
+          <Button
+            icon={<PlusOutlined />}
+            size="small"
+            onClick={onAddCell}
+            style={{ width: 28, padding: 0 }}
+          />
+        </Tooltip>
+        <Tooltip title="Deploy this notebook to Snowflake" placement="right">
+          <Button
+            icon={<CloudUploadOutlined />}
+            size="small"
+            onClick={onDeploy}
+            style={{ width: 28, padding: 0 }}
+          />
+        </Tooltip>
+      </div>
 
       {/* Kernel status */}
-      {kernelStarting && <Spin size="small" />}
-      {kernelStarting && <Text style={{ fontSize: 11, color: "var(--text-muted)" }}>Starting kernel\u2026</Text>}
-      {kernelReady && !kernelStarting && (
-        <Tag color="success" style={{ fontSize: 10 }}>Kernel ready</Tag>
-      )}
-      {kernelError && (
-        <Tooltip title={kernelError}>
-          <WarningOutlined style={{ color: "#ff4d4f", fontSize: 14 }} />
-        </Tooltip>
-      )}
-    </Space>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+        {kernelStarting && <Spin size="small" />}
+        {kernelStarting && <Text style={{ fontSize: 10, color: "var(--text-muted)" }}>Starting\u2026</Text>}
+        {kernelReady && !kernelStarting && (
+          <Tooltip title="Kernel ready">
+            <CheckCircleOutlined style={{ color: "#52c41a", fontSize: 14 }} />
+          </Tooltip>
+        )}
+        {kernelError && (
+          <Tooltip title={kernelError}>
+            <WarningOutlined style={{ color: "#ff4d4f", fontSize: 14 }} />
+          </Tooltip>
+        )}
+      </div>
+    </div>
   );
 }
