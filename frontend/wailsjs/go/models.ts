@@ -138,11 +138,11 @@ export namespace config {
 	    ddlHoverTooltips: boolean;
 	    fileFormatBuilder: boolean;
 	    snowflakeCLIProfileManager: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new FeatureFlags(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.initialized = source["initialized"];

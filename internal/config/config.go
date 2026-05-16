@@ -251,7 +251,7 @@ func DefaultFeatureFlags() FeatureFlags {
 		SqlDiagnostics:         true,
 		SchemaAutocomplete:     true,
 		DdlHoverTooltips:       true,
-		FileFormatBuilder:          true,
+		FileFormatBuilder:      true,
 		SnowflakeCLIProfileManager: true,
 	}
 }
