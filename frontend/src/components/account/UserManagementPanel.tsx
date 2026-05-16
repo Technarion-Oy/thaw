@@ -192,7 +192,7 @@ export default function UserManagementPanel() {
   return (
     <div style={{ borderTop: "1px solid var(--border)", padding: "4px 4px 4px" }}>
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "2px 8px 6px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 4px 4px 8px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <UserOutlined style={{ fontSize: 12, color: "var(--text-muted)" }} />
           <Text style={{ fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
