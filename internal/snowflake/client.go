@@ -1791,13 +1791,22 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // FormatRoleGrant builds a single GRANT statement line for a role DDL export.
-// For account-level grants the object name (which is just the account
-// identifier) is omitted because Snowflake syntax requires bare ON ACCOUNT.
+// Special cases handled:
+//   - ON ACCOUNT: object name is omitted (Snowflake requires bare ON ACCOUNT)
+//   - USAGE ON ROLE: converted to GRANT ROLE ... TO ROLE ... (the executable
+//     form of role membership); WITH GRANT OPTION is dropped because
+//     GRANT ROLE ... WITH GRANT OPTION is not valid Snowflake syntax
 func FormatRoleGrant(priv, onType, obj, escapedRole string, withGrantOption bool) string {
 	var stmt string
-	if strings.EqualFold(onType, "ACCOUNT") {
+	switch {
+	case strings.EqualFold(onType, "ROLE") && strings.EqualFold(priv, "USAGE"):
+		// USAGE on ROLE is Snowflake's internal representation of role membership.
+		// The executable form is GRANT ROLE <name> TO ROLE <parent>.
+		// WITH GRANT OPTION is not valid for GRANT ROLE statements.
+		return fmt.Sprintf("GRANT ROLE %s TO ROLE \"%s\";", obj, escapedRole)
+	case strings.EqualFold(onType, "ACCOUNT"):
 		stmt = fmt.Sprintf("GRANT %s ON ACCOUNT TO ROLE \"%s\"", priv, escapedRole)
-	} else {
+	default:
 		stmt = fmt.Sprintf("GRANT %s ON %s %s TO ROLE \"%s\"", priv, onType, obj, escapedRole)
 	}
 	if withGrantOption {

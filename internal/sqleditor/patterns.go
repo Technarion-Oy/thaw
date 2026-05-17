@@ -1455,7 +1455,7 @@ var grantObjectPrivileges = map[string][]string{
 		// Legacy / uncategorised
 		"APPLYBUDGET",
 	},
-	"ROLE": {"OWNERSHIP", "USAGE"},
+	"ROLE": {"OWNERSHIP"},
 }
 
 // grantObjectTypePlurals maps plural/alternative Snowflake object-type names

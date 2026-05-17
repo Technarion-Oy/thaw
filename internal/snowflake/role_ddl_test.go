@@ -109,6 +109,32 @@ func TestFormatRoleGrant(t *testing.T) {
 			role:   "ETL_ROLE",
 			want:   `GRANT USAGE ON INTEGRATION "MY_INTEGRATION" TO ROLE "ETL_ROLE";`,
 		},
+		{
+			name:   "USAGE on ROLE converts to GRANT ROLE",
+			priv:   "USAGE",
+			onType: "ROLE",
+			obj:    "SECURITYADMIN",
+			role:   "ACCOUNTADMIN",
+			want:   `GRANT ROLE SECURITYADMIN TO ROLE "ACCOUNTADMIN";`,
+		},
+		{
+			name:            "USAGE on ROLE drops WITH GRANT OPTION",
+			priv:            "USAGE",
+			onType:          "ROLE",
+			obj:             "SYSADMIN",
+			role:            "ACCOUNTADMIN",
+			withGrantOption: true,
+			want:            `GRANT ROLE SYSADMIN TO ROLE "ACCOUNTADMIN";`,
+		},
+		{
+			name:            "OWNERSHIP on ROLE remains as-is",
+			priv:            "OWNERSHIP",
+			onType:          "ROLE",
+			obj:             "MY_CUSTOM_ROLE",
+			role:            "SECURITYADMIN",
+			withGrantOption: true,
+			want:            `GRANT OWNERSHIP ON ROLE MY_CUSTOM_ROLE TO ROLE "SECURITYADMIN" WITH GRANT OPTION;`,
+		},
 	}
 
 	for _, tt := range tests {

@@ -349,8 +349,7 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"GRANT APPLY TAG ON ACCOUNT TO ROLE my_role",
 		"GRANT MANAGE WAREHOUSES ON ACCOUNT TO ROLE my_role",
 		"GRANT RESOLVE ALL ON ACCOUNT TO ROLE my_role",
-		// Grants on ROLE objects — OWNERSHIP and USAGE are valid
-		"GRANT USAGE ON ROLE my_role TO ROLE other_role",
+		// Grants on ROLE objects — OWNERSHIP is valid (ownership transfer)
 		"GRANT OWNERSHIP ON ROLE my_role TO ROLE other_role",
 		"GRANT OWNERSHIP ON ROLE my_role TO ROLE other_role WITH GRANT OPTION",
 		// REVOKE statements — valid
@@ -560,6 +559,7 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Grant usage on stream", "GRANT USAGE ON STREAM my_stream TO ROLE my_role", "not valid for object type STREAM"},
 		{"Grant select on account", "GRANT SELECT ON ACCOUNT TO ROLE my_role", "not valid for object type ACCOUNT"},
 		{"Grant select on role", "GRANT SELECT ON ROLE my_role TO ROLE other_role", "not valid for object type ROLE"},
+		{"Grant usage on role", "GRANT USAGE ON ROLE my_role TO ROLE other_role", "not valid for object type ROLE"},
 		{"Grant multi priv one invalid", "GRANT SELECT, INVALID_PRIV ON TABLE my_table TO ROLE my_role", "not valid for object type TABLE"},
 
 		// Invalid GRANT — structural issues
@@ -579,6 +579,7 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Revoke select on stage", "REVOKE SELECT ON STAGE my_stage FROM ROLE my_role", "not valid for object type STAGE"},
 		{"Revoke write on stream", "REVOKE WRITE ON STREAM my_stream FROM ROLE my_role", "not valid for object type STREAM"},
 		{"Revoke select on role", "REVOKE SELECT ON ROLE my_role FROM ROLE other_role", "not valid for object type ROLE"},
+		{"Revoke usage on role", "REVOKE USAGE ON ROLE my_role FROM ROLE other_role", "not valid for object type ROLE"},
 
 		// Invalid REVOKE — structural issues
 		{"Revoke cascade and restrict", "REVOKE SELECT ON TABLE my_table FROM ROLE my_role CASCADE RESTRICT", "mutually exclusive"},
