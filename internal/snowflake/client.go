@@ -1724,6 +1724,16 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 
 	// ── CREATE ROLE ──────────────────────────────────────────────────────────
 	var sb strings.Builder
+
+	// Snowflake system roles have grants on internal object types (CLASS,
+	// APPLICATION_ROLE, DATABASE_ROLE, IMAGE_REPOSITORY, etc.) that cannot
+	// be recreated with standard SQL. Emit a warning header for these roles.
+	if isSystemRole(name) {
+		sb.WriteString("-- WARNING: This is a Snowflake system role. The DDL below is for\n")
+		sb.WriteString("-- informational purposes only and may contain invalid syntax that\n")
+		sb.WriteString("-- cannot be executed. Do not run this script.\n\n")
+	}
+
 	sb.WriteString(fmt.Sprintf("CREATE ROLE IF NOT EXISTS \"%s\"", escapedIdent))
 	if comment != "" {
 		sb.WriteString(fmt.Sprintf("\n  COMMENT = '%s'",
@@ -1794,6 +1804,16 @@ func FormatRoleGrant(priv, onType, obj, escapedRole string, withGrantOption bool
 		stmt += " WITH GRANT OPTION"
 	}
 	return stmt + ";"
+}
+
+// isSystemRole returns true for Snowflake built-in system roles whose DDL
+// cannot be faithfully represented with standard SQL.
+func isSystemRole(name string) bool {
+	switch strings.ToUpper(name) {
+	case "ACCOUNTADMIN", "SYSADMIN", "SECURITYADMIN", "USERADMIN", "ORGADMIN", "PUBLIC":
+		return true
+	}
+	return false
 }
 
 // colIndexMap returns a map of (lowercase column name → column index)
