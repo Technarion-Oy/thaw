@@ -490,6 +490,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [searchResults, setSearchResults]           = useState<DataNode[]>([]);
   const loadingNodes    = useRef<Set<string>>(new Set());
   const [loadingGitNodes, setLoadingGitNodes] = useState<Set<string>>(new Set());
+  const [loadingTreeNodes, setLoadingTreeNodes] = useState<Set<string>>(new Set());
   const searchWasActive = useRef(false);
   const ctxRef = useRef<HTMLDivElement>(null);
 
@@ -651,6 +652,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     setSearchExpandedKeys([]);
     searchWasActive.current = false;
     loadingNodes.current.clear();
+    setLoadingTreeNodes(new Set());
     useObjectStore.getState().setDatabases([]);
     doLoadDatabases();
   };
@@ -668,6 +670,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
 
     if (parts[0] === "db") {
       const db = parts[1];
+      setLoadingTreeNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
       try {
         const schemas = await ListSchemas(db);
         setData((prev) =>
@@ -683,9 +686,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         // Shared / restricted databases (e.g. SNOWFLAKE) don't support
         // SHOW SCHEMAS. Mark as empty so the cascade doesn't retry.
         setData((prev) => updateNode(prev, key, []));
+      } finally {
+        setLoadingTreeNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
       }
     } else if (parts[0] === "schema") {
       const [, db, schema] = parts;
+      setLoadingTreeNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
       try {
         const objects = await ListObjects(db, schema);
 
@@ -722,6 +728,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       } catch {
         // Schema not accessible — mark as empty so the cascade doesn't retry.
         setData((prev) => updateNode(prev, key, []));
+      } finally {
+        setLoadingTreeNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
       }
     } else if (parts[0] === "obj") {
       const db     = parts[1];
@@ -730,6 +738,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       const name   = parts.slice(4).join(":");
 
       if (kind === "TABLE" || kind === "VIEW") {
+        setLoadingTreeNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
         try {
           const [columns, fks] = await Promise.all([
             GetTableColumnsWithTypes(db, schema, name),
@@ -775,6 +784,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         } catch (e) {
           console.error(e);
           setData((prev) => updateNode(prev, key, []));
+        } finally {
+          setLoadingTreeNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
         }
       } else if (kind === "GIT REPOSITORY") {
         const typeNodes: DataNode[] = [
@@ -2265,6 +2276,18 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               style={{ background: "transparent", color: "var(--text)" }}
               titleRender={(node) => {
                 const key = String(node.key);
+                if (key.startsWith("db:") || key.startsWith("schema:")) {
+                  const isLoading = loadingTreeNodes.has(key);
+                  if (isLoading) {
+                    return (
+                      <Space size={4}>
+                        <span>{node.title as React.ReactNode}</span>
+                        <SyncOutlined spin style={{ fontSize: 10, color: "var(--text-muted)" }} />
+                      </Space>
+                    );
+                  }
+                  return node.title as React.ReactNode;
+                }
                 if (key.startsWith("obj:")) {
                   const parts = key.split(":");
                   const db     = parts[1];
@@ -2302,6 +2325,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                         : undefined;
 
                   if (kind === "TABLE" || kind === "VIEW") {
+                    const isLoadingObj = loadingTreeNodes.has(key);
                     return (
                       <span
                         draggable
@@ -2312,7 +2336,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                         }}
                         style={selectionStyle}
                       >
-                        {tooltip}
+                        {isLoadingObj ? (
+                          <Space size={4}>
+                            {tooltip}
+                            <SyncOutlined spin style={{ fontSize: 10, color: "var(--text-muted)" }} />
+                          </Space>
+                        ) : tooltip}
                       </span>
                     );
                   }
