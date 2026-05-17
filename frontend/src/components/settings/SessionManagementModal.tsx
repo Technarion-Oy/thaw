@@ -82,7 +82,7 @@ export default function SessionManagementModal({ onClose }: Props) {
           <Space>
             <Button onClick={onClose}>Cancel</Button>
             <Button type="primary" loading={saving} onClick={handleSave}>
-              Save &amp; Apply
+              Save & Apply
             </Button>
           </Space>
         </div>

@@ -287,10 +287,10 @@ func (a *App) CloseTabSession(tabId string) {
 	a.evictedContexts.Delete(tabId)
 }
 
-// evictIfNeeded closes the least-recently-used idle tab session when the number
-// of active sessions has reached the configured maximum. Must be called under
-// tabSessionInitMu. The evicted session's context is cached in evictedContexts
-// so it can be restored transparently when the tab is next used.
+// evictIfNeeded closes the least-recently-used idle tab sessions until the
+// session count is below the configured maximum. Must be called under
+// tabSessionInitMu. Evicted session contexts are cached in evictedContexts
+// so they can be restored transparently when the tab is next used.
 func (a *App) evictIfNeeded() {
 	a.sessionConfigMu.RLock()
 	maxSessions := a.sessionMaxSessions
@@ -299,45 +299,47 @@ func (a *App) evictIfNeeded() {
 		maxSessions = 8 // fallback before config is loaded
 	}
 
-	var count int
-	a.tabSessions.Range(func(_, _ any) bool {
-		count++
-		return true
-	})
-	if count < maxSessions {
-		return
-	}
-
-	// Find the LRU session that has no active query and is not in use.
-	var lruTabId string
-	var lruTime int64
-	a.tabSessions.Range(func(key, val any) bool {
-		ts := val.(*tabSession)
-		ts.queryMu.Lock()
-		hasQuery := ts.queryDone != nil
-		ts.queryMu.Unlock()
-		if hasQuery || ts.inUse.Load() > 0 {
-			return true // skip sessions with active queries or in-use RPCs
+	for {
+		var count int
+		a.tabSessions.Range(func(_, _ any) bool {
+			count++
+			return true
+		})
+		if count < maxSessions {
+			return
 		}
-		lastUsed := ts.lastUsed.Load()
-		if lruTabId == "" || lastUsed < lruTime {
-			lruTabId = key.(string)
-			lruTime = lastUsed
-		}
-		return true
-	})
-	if lruTabId == "" {
-		return // all sessions are actively querying or in use; allow over-cap
-	}
 
-	// Evict: remove from map, cache context from connector's in-memory state
-	// (no RPC — avoids blocking tabSessionInitMu on a Snowflake round-trip),
-	// and close the connection asynchronously.
-	if val, ok := a.tabSessions.LoadAndDelete(lruTabId); ok {
-		ts := val.(*tabSession)
-		a.evictedContexts.Store(lruTabId, ts.client.GetCachedSessionContext())
-		logger.L.Info("evicting LRU tab session", "tabId", lruTabId)
-		go ts.client.Close() //nolint:errcheck
+		// Find the LRU session that has no active query and is not in use.
+		var lruTabId string
+		var lruTime int64
+		a.tabSessions.Range(func(key, val any) bool {
+			ts := val.(*tabSession)
+			ts.queryMu.Lock()
+			hasQuery := ts.queryDone != nil
+			ts.queryMu.Unlock()
+			if hasQuery || ts.inUse.Load() > 0 {
+				return true // skip sessions with active queries or in-use RPCs
+			}
+			lastUsed := ts.lastUsed.Load()
+			if lruTabId == "" || lastUsed < lruTime {
+				lruTabId = key.(string)
+				lruTime = lastUsed
+			}
+			return true
+		})
+		if lruTabId == "" {
+			return // all sessions are actively querying or in use; allow over-cap
+		}
+
+		// Evict: remove from map, cache context from connector's in-memory state
+		// (no RPC — avoids blocking tabSessionInitMu on a Snowflake round-trip),
+		// and close the connection asynchronously.
+		if val, ok := a.tabSessions.LoadAndDelete(lruTabId); ok {
+			ts := val.(*tabSession)
+			a.evictedContexts.Store(lruTabId, ts.client.GetCachedSessionContext())
+			logger.L.Info("evicting LRU tab session", "tabId", lruTabId)
+			go ts.client.Close() //nolint:errcheck
+		}
 	}
 }
 
@@ -4179,6 +4181,15 @@ func (a *App) evictIdleSessions() {
 		// Cache session context from connector's in-memory state (no RPC).
 		a.evictedContexts.Store(tabId, ts.client.GetCachedSessionContext())
 		if _, ok := a.tabSessions.LoadAndDelete(tabId); ok {
+			// Final guard: if the session was reactivated between our pre-check
+			// and LoadAndDelete (e.g. getOrInitTabSession stamped lastUsed),
+			// put it back to avoid closing an active session.
+			recentCutoff := time.Now().Add(-1 * time.Second).UnixNano()
+			if ts.lastUsed.Load() >= recentCutoff {
+				a.tabSessions.Store(tabId, ts)
+				a.evictedContexts.Delete(tabId)
+				continue
+			}
 			logger.L.Info("evicting idle tab session", "tabId", tabId)
 			go ts.client.Close() //nolint:errcheck
 		}

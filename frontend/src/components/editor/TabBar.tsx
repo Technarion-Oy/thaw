@@ -48,6 +48,10 @@ export default function TabBar() {
   const [sessionIds, setSessionIds] = useState<Record<string, string>>({});
   const sessionIdsRef = useRef(sessionIds);
   sessionIdsRef.current = sessionIds;
+  // Clear stale session IDs when disconnecting (old IDs are invalid after reconnect).
+  useEffect(() => {
+    if (!isConnected) setSessionIds({});
+  }, [isConnected]);
   const fetchingRef = useRef<Set<string>>(new Set());
   const fetchTab = useCallback((tabId: string) => {
     if (!isConnected) return;
