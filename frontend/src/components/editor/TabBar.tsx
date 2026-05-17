@@ -46,10 +46,12 @@ export default function TabBar() {
   // Only caches non-empty results; tabs without sessions are re-checked on hover.
   const isConnected = useConnectionStore((s) => s.isConnected);
   const [sessionIds, setSessionIds] = useState<Record<string, string>>({});
+  const sessionIdsRef = useRef(sessionIds);
+  sessionIdsRef.current = sessionIds;
   const fetchingRef = useRef<Set<string>>(new Set());
   const fetchTab = useCallback((tabId: string) => {
     if (!isConnected) return;
-    if (sessionIds[tabId]) return; // already have a session ID
+    if (sessionIdsRef.current[tabId]) return; // already have a session ID
     if (fetchingRef.current.has(tabId)) return; // in-flight
     fetchingRef.current.add(tabId);
     GetTabSessionID(tabId)
@@ -58,7 +60,7 @@ export default function TabBar() {
       })
       .catch(() => {})
       .finally(() => fetchingRef.current.delete(tabId));
-  }, [isConnected, sessionIds]);
+  }, [isConnected]);
 
   // Close a set of tabs directly (no confirmation).
   const closeDirect = (ids: string[]) =>

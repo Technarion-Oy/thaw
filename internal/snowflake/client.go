@@ -317,6 +317,21 @@ func (c *Client) GetSessionID(ctx context.Context) (string, error) {
 	return id, nil
 }
 
+// GetCachedSessionContext returns the session context from the connector's
+// in-memory cache without making a Snowflake RPC. Useful when the caller needs
+// the context but cannot tolerate network latency (e.g. under a mutex).
+func (c *Client) GetCachedSessionContext() SessionContext {
+	c.connector.mu.RLock()
+	ctx := SessionContext{
+		Role:      c.connector.role,
+		Warehouse: c.connector.wh,
+		Database:  c.connector.db,
+		Schema:    c.connector.sc,
+	}
+	c.connector.mu.RUnlock()
+	return ctx
+}
+
 // Close terminates the connection pool.
 func (c *Client) Close() error {
 	return c.db.Close()

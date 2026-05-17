@@ -158,6 +158,8 @@ func (a *App) startup(ctx context.Context) {
 	a.snowparkSvc = snowpark.NewService(ctx, func(tabId, role, wh, db, schema string) {
 		if val, ok := a.tabSessions.Load(tabId); ok {
 			ts := val.(*tabSession)
+			ts.inUse.Add(1)
+			defer ts.inUse.Add(-1)
 			if role != "" {
 				_ = ts.client.UseRole(ctx, role)
 			}
@@ -328,17 +330,12 @@ func (a *App) evictIfNeeded() {
 		return // all sessions are actively querying or in use; allow over-cap
 	}
 
-	// Cache the session context before eviction.
-	if val, ok := a.tabSessions.Load(lruTabId); ok {
-		ts := val.(*tabSession)
-		if ctx, err := ts.client.GetSessionContext(a.ctx); err == nil {
-			a.evictedContexts.Store(lruTabId, ctx)
-		}
-	}
-
-	// Evict: remove from map and close async.
+	// Evict: remove from map, cache context from connector's in-memory state
+	// (no RPC — avoids blocking tabSessionInitMu on a Snowflake round-trip),
+	// and close the connection asynchronously.
 	if val, ok := a.tabSessions.LoadAndDelete(lruTabId); ok {
 		ts := val.(*tabSession)
+		a.evictedContexts.Store(lruTabId, ts.client.GetCachedSessionContext())
 		logger.L.Info("evicting LRU tab session", "tabId", lruTabId)
 		go ts.client.Close() //nolint:errcheck
 	}
@@ -4179,10 +4176,8 @@ func (a *App) evictIdleSessions() {
 		if ts.lastUsed.Load() >= cutoff || ts.inUse.Load() > 0 {
 			continue
 		}
-		// Cache session context before eviction.
-		if ctx, err := ts.client.GetSessionContext(a.ctx); err == nil {
-			a.evictedContexts.Store(tabId, ctx)
-		}
+		// Cache session context from connector's in-memory state (no RPC).
+		a.evictedContexts.Store(tabId, ts.client.GetCachedSessionContext())
 		if _, ok := a.tabSessions.LoadAndDelete(tabId); ok {
 			logger.L.Info("evicting idle tab session", "tabId", tabId)
 			go ts.client.Close() //nolint:errcheck
