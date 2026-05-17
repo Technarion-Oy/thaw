@@ -122,11 +122,15 @@ export default function AccountPanel() {
   const selectForComp = useDiffStore((s) => s.selectForComparison);
   const compareWith   = useDiffStore((s) => s.compareWith);
 
-  // ── Probe warehouse metering access on mount ─────────────────────────────
+  // ── Probe warehouse metering access on connect ───────────────────────────
 
   useEffect(() => {
-    CanViewWarehouseMeteringHistory().then(setCanViewMetering).catch(() => {});
-  }, []);
+    if (isConnected) {
+      CanViewWarehouseMeteringHistory().then(setCanViewMetering).catch(() => {});
+    } else {
+      setCanViewMetering(false);
+    }
+  }, [isConnected]);
 
   // ── Loading ──────────────────────────────────────────────────────────────
 
