@@ -289,11 +289,34 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
     <Modal
       open
       centered
-      footer={null}
       width={540}
       maskClosable={false}
       closable={!!onClose}
       onCancel={onClose}
+      styles={{ body: { maxHeight: "60vh", overflowY: "auto" } }}
+      footer={
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: 0 }}>
+          {loading ? (
+            <Button danger block onClick={() => CancelConnect()}>
+              Cancel
+            </Button>
+          ) : (
+            <Button type="primary" block onClick={() => form.submit()}>
+              {auth === "externalbrowser" ? "Connect (opens browser)" : "Connect"}
+            </Button>
+          )}
+          <div style={{ textAlign: "center", marginTop: 12 }}>
+            <Button
+              type="link"
+              size="small"
+              onClick={() => setAgreementOpen(true)}
+              style={{ fontSize: 12, color: "var(--text-muted)" }}
+            >
+              User Agreement
+            </Button>
+          </div>
+        </div>
+      }
     >
       <Space direction="vertical" size={24} style={{ width: "100%" }}>
           <Space align="center">
@@ -350,16 +373,14 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
             )}
 
             {/* ── Profile action buttons ─────────────────────────────── */}
-            <div style={{ display: "flex", gap: 4, marginTop: 6, flexWrap: "wrap" }}>
-              <Tooltip title="Create a new profile from the current form values">
+            <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
+              <Tooltip title="New profile from current form values">
                 <Button
                   size="small"
                   icon={<PlusOutlined />}
                   disabled={profileBusy}
                   onClick={() => openNameModal("new")}
-                >
-                  New
-                </Button>
+                />
               </Tooltip>
               {cliConfig && (
                 <>
@@ -369,46 +390,38 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
                     okText="Overwrite"
                     disabled={!selectedProfile || profileBusy}
                   >
-                    <Tooltip title="Overwrite the selected profile with the current form values">
+                    <Tooltip title="Save current form values to selected profile">
                       <Button
                         size="small"
                         icon={<SaveOutlined />}
                         disabled={!selectedProfile || profileBusy}
-                      >
-                        Save
-                      </Button>
+                      />
                     </Tooltip>
                   </Popconfirm>
-                  <Tooltip title="Rename the selected profile">
+                  <Tooltip title="Rename selected profile">
                     <Button
                       size="small"
                       icon={<EditOutlined />}
                       disabled={!selectedProfile || profileBusy}
                       onClick={() => openNameModal("rename")}
-                    >
-                      Rename
-                    </Button>
+                    />
                   </Tooltip>
-                  <Tooltip title="Clone the selected profile under a new name">
+                  <Tooltip title="Clone selected profile">
                     <Button
                       size="small"
                       icon={<CopyOutlined />}
                       disabled={!selectedProfile || profileBusy}
                       onClick={() => openNameModal("clone")}
-                    >
-                      Clone
-                    </Button>
+                    />
                   </Tooltip>
-                  <Tooltip title={isSelectedDefault ? "Remove as default profile" : "Set the selected profile as default"}>
+                  <Tooltip title={isSelectedDefault ? "Remove as default profile" : "Set as default profile"}>
                     <Button
                       size="small"
                       icon={<StarOutlined />}
                       disabled={!selectedProfile || profileBusy}
                       type={isSelectedDefault ? "primary" : "default"}
                       onClick={handleToggleDefault}
-                    >
-                      Default
-                    </Button>
+                    />
                   </Tooltip>
                   <Popconfirm
                     title={`Delete profile "${selectedProfile}"?`}
@@ -417,15 +430,13 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
                     okType="danger"
                     disabled={!selectedProfile || profileBusy}
                   >
-                    <Tooltip title="Delete the selected profile">
+                    <Tooltip title="Delete selected profile">
                       <Button
                         size="small"
                         danger
                         icon={<DeleteOutlined />}
                         disabled={!selectedProfile || profileBusy}
-                      >
-                        Delete
-                      </Button>
+                      />
                     </Tooltip>
                   </Popconfirm>
                 </>
@@ -539,28 +550,6 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
               </>
             )}
 
-            <Form.Item style={{ marginBottom: 0, marginTop: 8 }}>
-              {loading ? (
-                <Button danger block onClick={() => CancelConnect()}>
-                  Cancel
-                </Button>
-              ) : (
-                <Button type="primary" htmlType="submit" block>
-                  {auth === "externalbrowser" ? "Connect (opens browser)" : "Connect"}
-                </Button>
-              )}
-            </Form.Item>
-
-            <div style={{ textAlign: "center", marginTop: 12 }}>
-              <Button
-                type="link"
-                size="small"
-                onClick={() => setAgreementOpen(true)}
-                style={{ fontSize: 12, color: "var(--text-muted)" }}
-              >
-                User Agreement
-              </Button>
-            </div>
           </Form>
 
           <UserAgreementModal open={agreementOpen} onClose={() => setAgreementOpen(false)} />
