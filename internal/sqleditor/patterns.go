@@ -1455,6 +1455,9 @@ var grantObjectPrivileges = map[string][]string{
 		// Legacy / uncategorised
 		"APPLYBUDGET",
 	},
+	// ROLE is listed so it becomes a known object type for validation;
+	// OWNERSHIP itself is accepted universally, but listing it here
+	// ensures invalid privileges like USAGE get flagged.
 	"ROLE": {"OWNERSHIP"},
 }
 

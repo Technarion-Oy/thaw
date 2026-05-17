@@ -164,7 +164,9 @@ func TestAccountAdminDDL_CrossValidation(t *testing.T) {
 }
 
 // splitDDLStatements splits a multi-statement DDL string on semicolons,
-// trimming whitespace and skipping empty entries.
+// trimming whitespace and skipping empty entries. Note: this splits naively
+// without handling semicolons inside string literals, which is fine for the
+// controlled test data in this file.
 func splitDDLStatements(ddl string) []string {
 	raw := strings.Split(ddl, ";")
 	var result []string
