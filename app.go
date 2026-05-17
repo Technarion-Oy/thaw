@@ -345,18 +345,26 @@ func (a *App) restoreSessionContext(tabId string, ts *tabSession) {
 	if !ok {
 		return
 	}
-	ctx := val.(snowflake.SessionContext)
-	if ctx.Role != "" {
-		_ = ts.client.UseRole(a.ctx, ctx.Role)
+	sctx := val.(snowflake.SessionContext)
+	if sctx.Role != "" {
+		if err := ts.client.UseRole(a.ctx, sctx.Role); err != nil {
+			logger.L.Debug("restoreSessionContext: failed to restore role", "tabId", tabId, "role", sctx.Role, "err", err)
+		}
 	}
-	if ctx.Warehouse != "" {
-		_ = ts.client.UseWarehouse(a.ctx, ctx.Warehouse)
+	if sctx.Warehouse != "" {
+		if err := ts.client.UseWarehouse(a.ctx, sctx.Warehouse); err != nil {
+			logger.L.Debug("restoreSessionContext: failed to restore warehouse", "tabId", tabId, "warehouse", sctx.Warehouse, "err", err)
+		}
 	}
-	if ctx.Database != "" {
-		_ = ts.client.UseDatabase(a.ctx, ctx.Database)
+	if sctx.Database != "" {
+		if err := ts.client.UseDatabase(a.ctx, sctx.Database); err != nil {
+			logger.L.Debug("restoreSessionContext: failed to restore database", "tabId", tabId, "database", sctx.Database, "err", err)
+		}
 	}
-	if ctx.Schema != "" {
-		_ = ts.client.UseSchema(a.ctx, ctx.Schema)
+	if sctx.Schema != "" {
+		if err := ts.client.UseSchema(a.ctx, sctx.Schema); err != nil {
+			logger.L.Debug("restoreSessionContext: failed to restore schema", "tabId", tabId, "schema", sctx.Schema, "err", err)
+		}
 	}
 }
 
@@ -3642,7 +3650,7 @@ func (a *App) ExportDatabaseDDL(database, outputDir string) (ddl.ExportResult, e
 
 	// Temporarily scale up pool for parallel DDL fetching.
 	a.client.SetPoolLimits(32, 32)
-	defer a.client.SetPoolLimits(8, 8)
+	defer a.client.SetPoolLimits(snowflake.DefaultMaxOpenConns, snowflake.DefaultMaxIdleConns)
 
 	ctx, cancel := context.WithCancel(a.ctx)
 	a.exportCancelFunc = cancel
@@ -3700,7 +3708,7 @@ func (a *App) ExportAllDatabasesDDL(outputDir string, databases []string) ([]ddl
 
 	// Temporarily scale up pool for parallel DDL fetching.
 	a.client.SetPoolLimits(32, 32)
-	defer a.client.SetPoolLimits(8, 8)
+	defer a.client.SetPoolLimits(snowflake.DefaultMaxOpenConns, snowflake.DefaultMaxIdleConns)
 
 	if len(databases) == 0 {
 		var err error
@@ -4003,6 +4011,31 @@ func (a *App) GetSessionConfig() config.SessionConfig {
 
 // SaveSessionConfig persists session management settings and applies them at runtime.
 func (a *App) SaveSessionConfig(sc config.SessionConfig) error {
+	// Validate and clamp values to valid ranges.
+	if sc.MaxSessions < 1 {
+		sc.MaxSessions = 1
+	} else if sc.MaxSessions > 32 {
+		sc.MaxSessions = 32
+	}
+	if sc.MaxOpenConnsPerSession < 1 {
+		sc.MaxOpenConnsPerSession = 1
+	} else if sc.MaxOpenConnsPerSession > 16 {
+		sc.MaxOpenConnsPerSession = 16
+	}
+	if sc.MaxIdleConnsPerSession < 1 {
+		sc.MaxIdleConnsPerSession = 1
+	} else if sc.MaxIdleConnsPerSession > 16 {
+		sc.MaxIdleConnsPerSession = 16
+	}
+	if sc.InitMode != "lazy" && sc.InitMode != "eager" {
+		sc.InitMode = "lazy"
+	}
+	if sc.IdleTimeoutMinutes < 0 {
+		sc.IdleTimeoutMinutes = 0
+	} else if sc.IdleTimeoutMinutes > 480 {
+		sc.IdleTimeoutMinutes = 480
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -4046,14 +4079,16 @@ func (a *App) applySessionConfig(sc config.SessionConfig) {
 		a.sessionIdleStopCh = nil
 	}
 
-	// Start a new idle eviction loop if timeout > 0.
+	// Determine whether to start a new eviction loop while still holding the lock.
+	var stop chan struct{}
 	if sc.IdleTimeoutMinutes > 0 {
-		stop := make(chan struct{})
+		stop = make(chan struct{})
 		a.sessionIdleStopCh = stop
-		a.sessionConfigMu.Unlock()
+	}
+	a.sessionConfigMu.Unlock()
+
+	if stop != nil {
 		go a.runIdleEvictionLoop(stop)
-	} else {
-		a.sessionConfigMu.Unlock()
 	}
 }
 
@@ -4099,17 +4134,24 @@ func (a *App) evictIdleSessions() {
 	})
 
 	for _, tabId := range toEvict {
+		val, ok := a.tabSessions.Load(tabId)
+		if !ok {
+			continue
+		}
+		ts := val.(*tabSession)
+		// Re-check lastUsed to avoid evicting a session that was reactivated
+		// between the Range scan and now (TOCTOU mitigation).
+		if ts.lastUsed.Load() >= cutoff {
+			continue
+		}
 		// Cache session context before eviction.
-		if val, ok := a.tabSessions.Load(tabId); ok {
-			ts := val.(*tabSession)
-			if ctx, err := ts.client.GetSessionContext(a.ctx); err == nil {
-				a.evictedContexts.Store(tabId, ctx)
-			}
+		if ctx, err := ts.client.GetSessionContext(a.ctx); err == nil {
+			a.evictedContexts.Store(tabId, ctx)
 		}
 		if val, ok := a.tabSessions.LoadAndDelete(tabId); ok {
-			ts := val.(*tabSession)
+			evicted := val.(*tabSession)
 			logger.L.Info("evicting idle tab session", "tabId", tabId)
-			go ts.client.Close() //nolint:errcheck
+			go evicted.client.Close() //nolint:errcheck
 		}
 	}
 }

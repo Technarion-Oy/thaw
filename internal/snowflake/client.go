@@ -267,8 +267,8 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 	// after the Go side closes it.  Setting MaxIdleConns equal to
 	// MaxOpenConns prevents connection churn that creates zombie sessions.
 	// Use SetPoolLimits(32, 32) for bulk operations like DDL export.
-	db.SetMaxOpenConns(8)
-	db.SetMaxIdleConns(8)
+	db.SetMaxOpenConns(DefaultMaxOpenConns)
+	db.SetMaxIdleConns(DefaultMaxIdleConns)
 	db.SetConnMaxLifetime(30 * time.Minute)
 	db.SetConnMaxIdleTime(5 * time.Minute)
 
@@ -294,9 +294,15 @@ func (c *Client) IsAlive() bool {
 	return c.db.PingContext(context.Background()) == nil
 }
 
+// DefaultMaxOpenConns is the shared client's default MaxOpenConns (used by NewClient).
+const DefaultMaxOpenConns = 8
+
+// DefaultMaxIdleConns is the shared client's default MaxIdleConns (used by NewClient).
+const DefaultMaxIdleConns = 8
+
 // SetPoolLimits overrides the connection pool's MaxOpenConns and MaxIdleConns.
 // Tab sessions use smaller limits (e.g. 4/1) since they only run one query at
-// a time; the shared client keeps the default 32/2 for parallel DDL export.
+// a time; the shared client uses DefaultMaxOpenConns/DefaultMaxIdleConns.
 func (c *Client) SetPoolLimits(maxOpen, maxIdle int) {
 	c.db.SetMaxOpenConns(maxOpen)
 	c.db.SetMaxIdleConns(maxIdle)

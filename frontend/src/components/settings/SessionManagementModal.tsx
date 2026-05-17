@@ -1,3 +1,4 @@
+// @thaw-domain: Core IPC & App Lifecycle
 import { useEffect, useState } from "react";
 import {
   Alert,
@@ -14,19 +15,14 @@ import {
   SaveSessionConfig,
   GetDefaultSessionConfig,
 } from "../../../wailsjs/go/main/App";
+import { config } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
 
+type SessionConfig = config.SessionConfig;
+
 interface Props {
   onClose: () => void;
-}
-
-interface SessionConfig {
-  maxSessions: number;
-  maxOpenConnsPerSession: number;
-  maxIdleConnsPerSession: number;
-  initMode: string;
-  idleTimeoutMinutes: number;
 }
 
 export default function SessionManagementModal({ onClose }: Props) {
@@ -42,7 +38,7 @@ export default function SessionManagementModal({ onClose }: Props) {
 
   useEffect(() => {
     GetSessionConfig()
-      .then((c) => setCfg(c as unknown as SessionConfig))
+      .then((c) => setCfg(c))
       .catch(() => {});
   }, []);
 
@@ -66,7 +62,7 @@ export default function SessionManagementModal({ onClose }: Props) {
 
   async function handleReset() {
     try {
-      const defaults = (await GetDefaultSessionConfig()) as unknown as SessionConfig;
+      const defaults = await GetDefaultSessionConfig();
       setCfg(defaults);
     } catch (e: unknown) {
       setError(String(e));
@@ -143,14 +139,14 @@ export default function SessionManagementModal({ onClose }: Props) {
           label={<Text style={{ fontSize: 12 }}>Max idle connections per session</Text>}
           help={
             <Text type="secondary" style={{ fontSize: 11 }}>
-              database/sql MaxIdleConns for each tab&apos;s connection pool.
+              database/sql MaxIdleConns for each tab&apos;s connection pool. Should be ≤ max open connections.
             </Text>
           }
           style={{ marginBottom: 20 }}
         >
           <InputNumber
             min={1}
-            max={16}
+            max={cfg.maxOpenConnsPerSession}
             value={cfg.maxIdleConnsPerSession}
             onChange={(v) => set("maxIdleConnsPerSession", v ?? 1)}
             style={{ width: 100 }}
