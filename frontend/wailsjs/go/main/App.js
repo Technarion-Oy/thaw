@@ -534,6 +534,10 @@ export function GetSystemRAMGB() {
   return window['go']['main']['App']['GetSystemRAMGB']();
 }
 
+export function GetTabSessionID(arg1) {
+  return window['go']['main']['App']['GetTabSessionID'](arg1);
+}
+
 export function GetTableColumns(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetTableColumns'](arg1, arg2, arg3);
 }

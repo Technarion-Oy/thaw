@@ -288,6 +288,8 @@ export function GetStageFilePreview(arg1:string,arg2:fileformat.FileFormatConfig
 
 export function GetSystemRAMGB():Promise<number>;
 
+export function GetTabSessionID(arg1:string):Promise<string>;
+
 export function GetTableColumns(arg1:string,arg2:string,arg3:string):Promise<Array<string>>;
 
 export function GetTableColumnsWithTypes(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.ColumnInfo>>;

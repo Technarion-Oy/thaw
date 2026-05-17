@@ -308,6 +308,15 @@ func (c *Client) SetPoolLimits(maxOpen, maxIdle int) {
 	c.db.SetMaxIdleConns(maxIdle)
 }
 
+// GetSessionID returns the Snowflake session ID via SELECT CURRENT_SESSION().
+func (c *Client) GetSessionID(ctx context.Context) (string, error) {
+	var id string
+	if err := c.db.QueryRowContext(ctx, "SELECT CURRENT_SESSION()").Scan(&id); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
 // Close terminates the connection pool.
 func (c *Client) Close() error {
 	return c.db.Close()

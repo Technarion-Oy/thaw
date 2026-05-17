@@ -1537,6 +1537,17 @@ func (a *App) GetSessionContext(tabId string) (snowflake.SessionContext, error) 
 	return ts.client.GetSessionContext(a.ctx)
 }
 
+// GetTabSessionID returns the Snowflake session ID for the given tab.
+// Returns an empty string (no error) when the tab has no active session.
+func (a *App) GetTabSessionID(tabId string) (string, error) {
+	val, ok := a.tabSessions.Load(tabId)
+	if !ok {
+		return "", nil
+	}
+	ts := val.(*tabSession)
+	return ts.client.GetSessionID(a.ctx)
+}
+
 // GetQuotedIdentifiersIgnoreCase returns true when the current session's
 // QUOTED_IDENTIFIERS_IGNORE_CASE parameter is TRUE, meaning Snowflake treats
 // quoted identifiers as case-insensitive (double-quoting does not preserve

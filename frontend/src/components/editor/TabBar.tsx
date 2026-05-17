@@ -8,10 +8,12 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useEffect, useRef, useState } from "react";
-import { Button, Modal } from "antd";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { Button, Modal, Tooltip } from "antd";
 import { FileOutlined, CodeOutlined, PlusOutlined, CloseOutlined, DiffOutlined, ExperimentOutlined } from "@ant-design/icons";
 import { useQueryStore } from "../../store/queryStore";
+import { GetTabSessionID } from "../../../wailsjs/go/main/App";
+import { useConnectionStore } from "../../store/connectionStore";
 
 const CLR_BORDER       = "var(--border)";
 const CLR_BG           = "var(--bg)";
@@ -39,6 +41,24 @@ export default function TabBar() {
   // Track which tab the pointer is hovering over so the close button
   // only appears on hover (less cluttered when many tabs are open).
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+
+  // Session ID cache for tab tooltips (fetched lazily on hover).
+  // Only caches non-empty results; tabs without sessions are re-checked on hover.
+  const isConnected = useConnectionStore((s) => s.isConnected);
+  const [sessionIds, setSessionIds] = useState<Record<string, string>>({});
+  const fetchingRef = useRef<Set<string>>(new Set());
+  const fetchTab = useCallback((tabId: string) => {
+    if (!isConnected) return;
+    if (sessionIds[tabId]) return; // already have a session ID
+    if (fetchingRef.current.has(tabId)) return; // in-flight
+    fetchingRef.current.add(tabId);
+    GetTabSessionID(tabId)
+      .then((id) => {
+        if (id) setSessionIds((prev) => ({ ...prev, [tabId]: id }));
+      })
+      .catch(() => {})
+      .finally(() => fetchingRef.current.delete(tabId));
+  }, [isConnected, sessionIds]);
 
   // Close a set of tabs directly (no confirmation).
   const closeDirect = (ids: string[]) =>
@@ -91,12 +111,19 @@ export default function TabBar() {
         const isDropBefore = dropTarget?.id === tab.id && dropTarget.before;
         const isDropAfter  = dropTarget?.id === tab.id && !dropTarget.before;
 
+        const sessionId = sessionIds[tab.id];
+        const tooltipText = !isConnected
+          ? undefined
+          : sessionId
+          ? `Session ID: ${sessionId}`
+          : "No active session";
+
         return (
+          <Tooltip key={tab.id} title={tooltipText} mouseEnterDelay={0.6} placement="bottom">
           <div
-            key={tab.id}
             draggable
             onClick={() => activateTab(tab.id)}
-            onMouseEnter={() => setHoveredId(tab.id)}
+            onMouseEnter={() => { setHoveredId(tab.id); fetchTab(tab.id); }}
             onMouseLeave={() => setHoveredId(null)}
             onDragStart={(e) => {
               draggingId.current = tab.id;
@@ -185,6 +212,7 @@ export default function TabBar() {
             {isDropBefore && <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 2, background: CLR_ACCENT, pointerEvents: "none" }} />}
             {isDropAfter  && <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 2, background: CLR_ACCENT, pointerEvents: "none" }} />}
           </div>
+          </Tooltip>
         );
       })}
 
