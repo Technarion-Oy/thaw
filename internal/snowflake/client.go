@@ -1724,6 +1724,16 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 
 	// ── CREATE ROLE ──────────────────────────────────────────────────────────
 	var sb strings.Builder
+
+	// Snowflake system roles have grants on internal object types (CLASS,
+	// APPLICATION_ROLE, DATABASE_ROLE, IMAGE_REPOSITORY, etc.) that cannot
+	// be recreated with standard SQL. Emit a warning header for these roles.
+	if isSystemRole(name) {
+		sb.WriteString("-- WARNING: This is a Snowflake system role. The DDL below is for\n")
+		sb.WriteString("-- informational purposes only and may contain invalid syntax that\n")
+		sb.WriteString("-- cannot be executed. Do not run this script.\n\n")
+	}
+
 	sb.WriteString(fmt.Sprintf("CREATE ROLE IF NOT EXISTS \"%s\"", escapedIdent))
 	if comment != "" {
 		sb.WriteString(fmt.Sprintf("\n  COMMENT = '%s'",
@@ -1748,12 +1758,7 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 			if priv == "" || onType == "" {
 				continue
 			}
-			stmt := fmt.Sprintf("GRANT %s ON %s %s TO ROLE \"%s\"",
-				priv, onType, obj, escapedIdent)
-			if opt {
-				stmt += " WITH GRANT OPTION"
-			}
-			sb.WriteString(stmt + ";\n")
+			sb.WriteString(FormatRoleGrant(priv, onType, obj, escapedIdent, opt) + "\n")
 		}
 		rows.Close() //nolint:errcheck
 	}
@@ -1784,6 +1789,47 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+// FormatRoleGrant builds a single GRANT statement line for a role DDL export.
+// Special cases handled:
+//   - ON ACCOUNT: object name is omitted (Snowflake requires bare ON ACCOUNT)
+//   - USAGE ON ROLE: converted to GRANT ROLE ... TO ROLE ... (the executable
+//     form of role membership); WITH GRANT OPTION is dropped because
+//     GRANT ROLE ... WITH GRANT OPTION is not valid Snowflake syntax
+func FormatRoleGrant(priv, onType, obj, escapedRole string, withGrantOption bool) string {
+	var stmt string
+	switch {
+	case strings.EqualFold(onType, "ROLE"):
+		// Quote the child role name — SHOW GRANTS returns bare identifiers even
+		// for mixed-case roles (e.g. "My_Role" → My_Role in the name column).
+		escapedChild := strings.ReplaceAll(obj, `"`, `""`)
+		if strings.EqualFold(priv, "USAGE") {
+			// USAGE on ROLE is Snowflake's internal representation of role membership.
+			// The executable form is GRANT ROLE <name> TO ROLE <parent>.
+			// WITH GRANT OPTION is not valid for GRANT ROLE statements.
+			return fmt.Sprintf("GRANT ROLE \"%s\" TO ROLE \"%s\";", escapedChild, escapedRole)
+		}
+		stmt = fmt.Sprintf("GRANT %s ON ROLE \"%s\" TO ROLE \"%s\"", priv, escapedChild, escapedRole)
+	case strings.EqualFold(onType, "ACCOUNT"):
+		stmt = fmt.Sprintf("GRANT %s ON ACCOUNT TO ROLE \"%s\"", priv, escapedRole)
+	default:
+		stmt = fmt.Sprintf("GRANT %s ON %s %s TO ROLE \"%s\"", priv, onType, obj, escapedRole)
+	}
+	if withGrantOption {
+		stmt += " WITH GRANT OPTION"
+	}
+	return stmt + ";"
+}
+
+// isSystemRole returns true for Snowflake built-in system roles whose DDL
+// cannot be faithfully represented with standard SQL.
+func isSystemRole(name string) bool {
+	switch strings.ToUpper(name) {
+	case "ACCOUNTADMIN", "SYSADMIN", "SECURITYADMIN", "USERADMIN", "ORGADMIN", "PUBLIC":
+		return true
+	}
+	return false
+}
 
 // colIndexMap returns a map of (lowercase column name → column index)
 // for the requested column names. Unknown columns map to -1.
