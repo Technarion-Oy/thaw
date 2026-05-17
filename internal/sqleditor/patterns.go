@@ -4121,8 +4121,12 @@ func validateGrant(parseText string, r StatementRange) []DiagMarker {
 				continue
 			}
 			if !slices.Contains(validPrivs, priv) {
-				markers = append(markers, diagMarkerSpan(r,
-					fmt.Sprintf("Privilege '%s' is not valid for object type %s.", priv, objectType), 4))
+				msg := fmt.Sprintf("Privilege '%s' is not valid for object type %s.", priv, objectType)
+				if objectType == "ROLE" && priv == "USAGE" {
+					msg = "'GRANT USAGE ON ROLE' is not valid Snowflake syntax. " +
+						"Use 'GRANT ROLE <name> TO ROLE/USER' to assign a role."
+				}
+				markers = append(markers, diagMarkerSpan(r, msg, 4))
 			}
 		}
 	}

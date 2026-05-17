@@ -559,7 +559,7 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Grant usage on stream", "GRANT USAGE ON STREAM my_stream TO ROLE my_role", "not valid for object type STREAM"},
 		{"Grant select on account", "GRANT SELECT ON ACCOUNT TO ROLE my_role", "not valid for object type ACCOUNT"},
 		{"Grant select on role", "GRANT SELECT ON ROLE my_role TO ROLE other_role", "not valid for object type ROLE"},
-		{"Grant usage on role", "GRANT USAGE ON ROLE my_role TO ROLE other_role", "not valid for object type ROLE"},
+		{"Grant usage on role", "GRANT USAGE ON ROLE my_role TO ROLE other_role", "Use 'GRANT ROLE <name> TO ROLE/USER' to assign a role"},
 		{"Grant multi priv one invalid", "GRANT SELECT, INVALID_PRIV ON TABLE my_table TO ROLE my_role", "not valid for object type TABLE"},
 
 		// Invalid GRANT — structural issues

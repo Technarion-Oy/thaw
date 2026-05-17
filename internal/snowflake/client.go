@@ -1803,7 +1803,10 @@ func FormatRoleGrant(priv, onType, obj, escapedRole string, withGrantOption bool
 		// USAGE on ROLE is Snowflake's internal representation of role membership.
 		// The executable form is GRANT ROLE <name> TO ROLE <parent>.
 		// WITH GRANT OPTION is not valid for GRANT ROLE statements.
-		return fmt.Sprintf("GRANT ROLE %s TO ROLE \"%s\";", obj, escapedRole)
+		// Quote the child role name — SHOW GRANTS returns bare identifiers even
+		// for mixed-case roles (e.g. "My_Role" → My_Role in the name column).
+		escapedChild := strings.ReplaceAll(obj, `"`, `""`)
+		return fmt.Sprintf("GRANT ROLE \"%s\" TO ROLE \"%s\";", escapedChild, escapedRole)
 	case strings.EqualFold(onType, "ACCOUNT"):
 		stmt = fmt.Sprintf("GRANT %s ON ACCOUNT TO ROLE \"%s\"", priv, escapedRole)
 	default:
