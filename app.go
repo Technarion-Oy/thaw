@@ -4178,18 +4178,20 @@ func (a *App) evictIdleSessions() {
 		if ts.lastUsed.Load() >= cutoff || ts.inUse.Load() > 0 {
 			continue
 		}
-		// Cache session context from connector's in-memory state (no RPC).
-		a.evictedContexts.Store(tabId, ts.client.GetCachedSessionContext())
 		if _, ok := a.tabSessions.LoadAndDelete(tabId); ok {
 			// Final guard: if the session was reactivated between our pre-check
 			// and LoadAndDelete (e.g. getOrInitTabSession stamped lastUsed),
-			// put it back to avoid closing an active session.
+			// put it back. Safe under normal scheduling — the reactivation guard
+			// covers the nanosecond-wide TOCTOU window between Load and
+			// LoadAndDelete where getOrInitTabSession could stamp lastUsed.
 			recentCutoff := time.Now().Add(-1 * time.Second).UnixNano()
 			if ts.lastUsed.Load() >= recentCutoff {
 				a.tabSessions.Store(tabId, ts)
-				a.evictedContexts.Delete(tabId)
 				continue
 			}
+			// Cache session context from connector's in-memory state (no RPC)
+			// only after confirming the deletion succeeded.
+			a.evictedContexts.Store(tabId, ts.client.GetCachedSessionContext())
 			logger.L.Info("evicting idle tab session", "tabId", tabId)
 			go ts.client.Close() //nolint:errcheck
 		}
