@@ -349,6 +349,10 @@ func TestValidateSnowflakePatterns_ValidQueries(t *testing.T) {
 		"GRANT APPLY TAG ON ACCOUNT TO ROLE my_role",
 		"GRANT MANAGE WAREHOUSES ON ACCOUNT TO ROLE my_role",
 		"GRANT RESOLVE ALL ON ACCOUNT TO ROLE my_role",
+		// Grants on ROLE objects — OWNERSHIP and USAGE are valid
+		"GRANT USAGE ON ROLE my_role TO ROLE other_role",
+		"GRANT OWNERSHIP ON ROLE my_role TO ROLE other_role",
+		"GRANT OWNERSHIP ON ROLE my_role TO ROLE other_role WITH GRANT OPTION",
 		// REVOKE statements — valid
 		"REVOKE SELECT ON TABLE my_table FROM ROLE my_role",
 		"REVOKE INSERT, UPDATE ON TABLE my_table FROM ROLE my_role",
@@ -555,7 +559,7 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Grant select on stage", "GRANT SELECT ON STAGE my_stage TO ROLE my_role", "not valid for object type STAGE"},
 		{"Grant usage on stream", "GRANT USAGE ON STREAM my_stream TO ROLE my_role", "not valid for object type STREAM"},
 		{"Grant select on account", "GRANT SELECT ON ACCOUNT TO ROLE my_role", "not valid for object type ACCOUNT"},
-		{"Grant usage on role", "GRANT USAGE ON ROLE my_role TO ROLE other_role", "not valid Snowflake syntax"},
+		{"Grant select on role", "GRANT SELECT ON ROLE my_role TO ROLE other_role", "not valid for object type ROLE"},
 		{"Grant multi priv one invalid", "GRANT SELECT, INVALID_PRIV ON TABLE my_table TO ROLE my_role", "not valid for object type TABLE"},
 
 		// Invalid GRANT — structural issues
@@ -574,7 +578,7 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Revoke select on warehouse", "REVOKE SELECT ON WAREHOUSE my_wh FROM ROLE my_role", "not valid for object type WAREHOUSE"},
 		{"Revoke select on stage", "REVOKE SELECT ON STAGE my_stage FROM ROLE my_role", "not valid for object type STAGE"},
 		{"Revoke write on stream", "REVOKE WRITE ON STREAM my_stream FROM ROLE my_role", "not valid for object type STREAM"},
-		{"Revoke usage on role", "REVOKE USAGE ON ROLE my_role FROM ROLE other_role", "not valid Snowflake syntax"},
+		{"Revoke select on role", "REVOKE SELECT ON ROLE my_role FROM ROLE other_role", "not valid for object type ROLE"},
 
 		// Invalid REVOKE — structural issues
 		{"Revoke cascade and restrict", "REVOKE SELECT ON TABLE my_table FROM ROLE my_role CASCADE RESTRICT", "mutually exclusive"},

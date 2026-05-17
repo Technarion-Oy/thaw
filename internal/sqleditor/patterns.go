@@ -1372,30 +1372,90 @@ var grantObjectPrivileges = map[string][]string{
 	// Until then, validation is silently skipped for those object types
 	// (knownObj = false), which avoids false positives but means invalid
 	// privileges go unchecked.
+	// Snowflake account-level (global) privileges. This list is maintained from
+	// real SHOW GRANTS TO ROLE output and the Snowflake documentation. Snowflake
+	// adds new privileges regularly; unknown privileges are flagged as warnings.
 	"ACCOUNT": {
-		"CREATE ROLE", "CREATE USER", "CREATE WAREHOUSE", "CREATE DATABASE",
-		"CREATE INTEGRATION", "CREATE NETWORK POLICY", "MANAGE GRANTS",
-		"MONITOR USAGE", "EXECUTE TASK", "EXECUTE ALERT", "EXECUTE MANAGED TASK",
-		"IMPORT SHARE", "OVERRIDE SHARE RESTRICTIONS", "ATTACH POLICY",
-		"APPLY MASKING POLICY", "APPLY ROW ACCESS POLICY",
-		"APPLY SESSION POLICY", "APPLY TAG", "APPLY AGGREGATION POLICY",
-		"MANAGE WAREHOUSES", "CREATE SHARE", "APPLYBUDGET",
-		"BIND SERVICE ENDPOINT", "CREATE COMPUTE POOL", "CREATE EXTERNAL VOLUME",
-		"MANAGE ACCOUNT SUPPORT CASES", "RESOLVE ALL",
-		// Additional global privileges from Snowflake documentation
-		"APPLY AUTHENTICATION POLICY", "APPLY PACKAGES POLICY",
-		"APPLY PASSWORD POLICY", "APPLY PROJECTION POLICY",
-		"APPLY JOIN POLICY", "APPLY PRIVACY POLICY",
-		"CANCEL QUERY", "EXECUTE DATA METRIC FUNCTION",
-		"EXECUTE MANAGED ALERT",
+		// APPLY policies
+		"APPLY AGGREGATION POLICY", "APPLY AUTHENTICATION POLICY",
+		"APPLY BACKUP RETENTION LOCK", "APPLY CONTACT",
+		"APPLY JOIN POLICY", "APPLY LEGAL HOLD",
+		"APPLY MASKING POLICY", "APPLY PACKAGES POLICY",
+		"APPLY PASSWORD POLICY", "APPLY PRIVACY POLICY",
+		"APPLY PROJECTION POLICY", "APPLY RESOURCE GROUP",
+		"APPLY ROW ACCESS POLICY", "APPLY SESSION POLICY",
+		"APPLY STORAGE LIFECYCLE POLICY", "APPLY TAG",
+		"ATTACH POLICY",
+		// AUDIT
+		"AUDIT",
+		// BIND
+		"BIND SERVICE ENDPOINT",
+		// CANCEL
+		"CANCEL QUERY",
+		// CREATE
 		"CREATE ACCOUNT", "CREATE APPLICATION", "CREATE APPLICATION PACKAGE",
-		"CREATE FAILOVER GROUP", "CREATE REPLICATION GROUP",
-		"CREATE SECURITY INTEGRATION", "CREATE LISTING",
-		"MANAGE LISTING AUTO FULFILLMENT", "MANAGE EVENT SHARING",
+		"CREATE API INTEGRATION", "CREATE COMPUTE POOL",
+		"CREATE DATABASE", "CREATE EXTERNAL ACCESS INTEGRATION",
+		"CREATE EXTERNAL VOLUME", "CREATE FAILOVER GROUP",
+		"CREATE INTEGRATION", "CREATE LISTING", "CREATE MIGRATION",
+		"CREATE NETWORK POLICY",
+		"CREATE OPENFLOW DATA PLANE INTEGRATION",
+		"CREATE OPENFLOW RUNTIME INTEGRATION",
+		"CREATE ORGANIZATION LISTING", "CREATE POSTGRES INSTANCE",
+		"CREATE PREVIEW APPLICATION", "CREATE PROVISIONED THROUGHPUT",
+		"CREATE REPLICATION GROUP", "CREATE ROLE",
+		"CREATE SECURITY INTEGRATION", "CREATE SHARE",
+		"CREATE SNOWFLAKE INTELLIGENCE", "CREATE UPSTREAM REPOSITORY",
+		"CREATE USER", "CREATE WAREHOUSE",
+		// DELETE
+		"DELETE LINEAGE",
+		// EXECUTE
+		"EXECUTE ALERT", "EXECUTE AUTO CLASSIFICATION",
+		"EXECUTE DATA METRIC FUNCTION", "EXECUTE MANAGED ALERT",
+		"EXECUTE MANAGED TASK", "EXECUTE SPARK APPLICATION", "EXECUTE TASK",
+		// IMPORT
+		"IMPORT ORGANIZATION LISTING", "IMPORT ORGANIZATION USER GROUPS",
+		"IMPORT SHARE",
+		// INGEST
+		"INGEST LINEAGE",
+		// MANAGE
+		"MANAGE ACCOUNT SUPPORT CASES", "MANAGE BILLING",
+		"MANAGE DATA QUALITY", "MANAGE EVENT SHARING",
+		"MANAGE FIREWALL_CONFIGURATION", "MANAGE GRANTS",
+		"MANAGE LISTING AUTO FULFILLMENT",
 		"MANAGE ORGANIZATION SUPPORT CASES",
-		"MONITOR", "MONITOR EXECUTION", "MONITOR SECURITY",
+		"MANAGE POSTGRES PRIVATE CONNECTIVITY",
+		"MANAGE SHARE TARGET", "MANAGE USER SUPPORT CASES",
+		"MANAGE WAREHOUSES",
+		// MODIFY
+		"MODIFY LOG EVENT LEVEL", "MODIFY LOG LEVEL",
+		"MODIFY METRIC LEVEL",
+		"MODIFY SESSION LOG EVENT LEVEL", "MODIFY SESSION LOG LEVEL",
+		"MODIFY SESSION METRIC LEVEL", "MODIFY SESSION TRACE LEVEL",
+		"MODIFY TRACE LEVEL",
+		// MONITOR
+		"MONITOR", "MONITOR EXECUTION", "MONITOR ROLE",
+		"MONITOR SECURITY", "MONITOR USAGE", "MONITOR USER",
+		// OVERRIDE
+		"OVERRIDE SHARE RESTRICTIONS",
+		// PURCHASE
 		"PURCHASE DATA EXCHANGE LISTING",
+		// READ
+		"READ SESSION",
+		"READ UNREDACTED AI OBSERVABILITY EVENTS TABLE",
+		"READ UNREDACTED ERROR TABLE",
+		// REPLICATE
+		"REPLICATE",
+		// RESOLVE
+		"RESOLVE ALL",
+		// USE
+		"USE AI FUNCTIONS",
+		// VIEW
+		"VIEW LINEAGE",
+		// Legacy / uncategorised
+		"APPLYBUDGET",
 	},
+	"ROLE": {"OWNERSHIP", "USAGE"},
 }
 
 // grantObjectTypePlurals maps plural/alternative Snowflake object-type names
@@ -1702,7 +1762,9 @@ func ValidateSnowflakePatterns(sql string, stmtRanges []StatementRange) []DiagMa
 		// Run reCortexFuncCall on rawText so each match gets an accurate
 		// position.  Use an inert-region mask to skip matches inside SQL
 		// comments, string literals, and dollar-quoted blocks.
-		if reCortexFuncCall.MatchString(rawText) {
+		// Skip for GRANT/REVOKE statements where function signatures appear
+		// as object references (e.g. GRANT USAGE ON PROCEDURE SNOWFLAKE.CORTEX.X(...)).
+		if reCortexFuncCall.MatchString(rawText) && !reIsGrant.MatchString(parseText) && !reIsRevoke.MatchString(parseText) {
 			inertMask := buildInertMask(rawText)
 			for _, m := range reCortexFuncCall.FindAllStringSubmatchIndex(rawText, -1) {
 				if m[0] < len(inertMask) && inertMask[m[0]] {
@@ -4036,16 +4098,6 @@ func validateGrant(parseText string, r StatementRange) []DiagMarker {
 	allFuture := strings.TrimSpace(strings.ToUpper(m[2])) // "ALL", "FUTURE", or ""
 	objectType := normalizeGrantObjectType(m[3])
 
-	// ── GRANT <priv> ON ROLE is not valid Snowflake syntax ────────────────────
-	// The correct form for role assignment is "GRANT ROLE <name> TO ROLE/USER".
-	// Snowflake does not support granting privileges on role objects via ON ROLE.
-	if objectType == "ROLE" {
-		markers = append(markers, diagMarkerSpan(r,
-			"'GRANT <privilege> ON ROLE' is not valid Snowflake syntax. "+
-				"Use 'GRANT ROLE <name> TO ROLE/USER' to assign a role.", 4))
-		return markers
-	}
-
 	// ── Grantee required ──────────────────────────────────────────────────────
 	if !reGrantee.MatchString(parseText) {
 		markers = append(markers, diagMarkerSpan(r,
@@ -4107,15 +4159,6 @@ func validateRevoke(parseText string, r StatementRange) []DiagMarker {
 	// because the full privilege set is determined dynamically by Snowflake.
 	allFuture := strings.TrimSpace(strings.ToUpper(m[2]))
 	objectType := normalizeGrantObjectType(m[3])
-
-	// ── REVOKE <priv> ON ROLE is not valid Snowflake syntax ──────────────────
-	// The correct form for role revocation is "REVOKE ROLE <name> FROM ROLE/USER".
-	if objectType == "ROLE" {
-		markers = append(markers, diagMarkerSpan(r,
-			"'REVOKE <privilege> ON ROLE' is not valid Snowflake syntax. "+
-				"Use 'REVOKE ROLE <name> FROM ROLE/USER' to revoke a role.", 4))
-		return markers
-	}
 
 	// ── ON ALL / ON FUTURE requires IN SCHEMA or IN DATABASE ─────────────────
 	if reGrantAllFuture.MatchString(parseText) && !reGrantInQualifier.MatchString(parseText) {
