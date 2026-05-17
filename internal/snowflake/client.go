@@ -1748,18 +1748,7 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 			if priv == "" || onType == "" {
 				continue
 			}
-			var stmt string
-			if strings.EqualFold(onType, "ACCOUNT") {
-				stmt = fmt.Sprintf("GRANT %s ON ACCOUNT TO ROLE \"%s\"",
-					priv, escapedIdent)
-			} else {
-				stmt = fmt.Sprintf("GRANT %s ON %s %s TO ROLE \"%s\"",
-					priv, onType, obj, escapedIdent)
-			}
-			if opt {
-				stmt += " WITH GRANT OPTION"
-			}
-			sb.WriteString(stmt + ";\n")
+			sb.WriteString(FormatRoleGrant(priv, onType, obj, escapedIdent, opt) + "\n")
 		}
 		rows.Close() //nolint:errcheck
 	}
@@ -1790,6 +1779,22 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+// FormatRoleGrant builds a single GRANT statement line for a role DDL export.
+// For account-level grants the object name (which is just the account
+// identifier) is omitted because Snowflake syntax requires bare ON ACCOUNT.
+func FormatRoleGrant(priv, onType, obj, escapedRole string, withGrantOption bool) string {
+	var stmt string
+	if strings.EqualFold(onType, "ACCOUNT") {
+		stmt = fmt.Sprintf("GRANT %s ON ACCOUNT TO ROLE \"%s\"", priv, escapedRole)
+	} else {
+		stmt = fmt.Sprintf("GRANT %s ON %s %s TO ROLE \"%s\"", priv, onType, obj, escapedRole)
+	}
+	if withGrantOption {
+		stmt += " WITH GRANT OPTION"
+	}
+	return stmt + ";"
+}
 
 // colIndexMap returns a map of (lowercase column name → column index)
 // for the requested column names. Unknown columns map to -1.
