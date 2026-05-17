@@ -289,11 +289,34 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
     <Modal
       open
       centered
-      footer={null}
       width={540}
       maskClosable={false}
       closable={!!onClose}
       onCancel={onClose}
+      styles={{ body: { maxHeight: "60vh", overflowY: "auto" } }}
+      footer={
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: 0 }}>
+          {loading ? (
+            <Button danger block onClick={() => CancelConnect()}>
+              Cancel
+            </Button>
+          ) : (
+            <Button type="primary" block onClick={() => form.submit()}>
+              {auth === "externalbrowser" ? "Connect (opens browser)" : "Connect"}
+            </Button>
+          )}
+          <div style={{ textAlign: "center", marginTop: 12 }}>
+            <Button
+              type="link"
+              size="small"
+              onClick={() => setAgreementOpen(true)}
+              style={{ fontSize: 12, color: "var(--text-muted)" }}
+            >
+              User Agreement
+            </Button>
+          </div>
+        </div>
+      }
     >
       <Space direction="vertical" size={24} style={{ width: "100%" }}>
           <Space align="center">
@@ -539,28 +562,6 @@ export default function ConnectModal({ onClose }: { onClose?: () => void }) {
               </>
             )}
 
-            <Form.Item style={{ marginBottom: 0, marginTop: 8 }}>
-              {loading ? (
-                <Button danger block onClick={() => CancelConnect()}>
-                  Cancel
-                </Button>
-              ) : (
-                <Button type="primary" htmlType="submit" block>
-                  {auth === "externalbrowser" ? "Connect (opens browser)" : "Connect"}
-                </Button>
-              )}
-            </Form.Item>
-
-            <div style={{ textAlign: "center", marginTop: 12 }}>
-              <Button
-                type="link"
-                size="small"
-                onClick={() => setAgreementOpen(true)}
-                style={{ fontSize: 12, color: "var(--text-muted)" }}
-              >
-                User Agreement
-              </Button>
-            </div>
           </Form>
 
           <UserAgreementModal open={agreementOpen} onClose={() => setAgreementOpen(false)} />
