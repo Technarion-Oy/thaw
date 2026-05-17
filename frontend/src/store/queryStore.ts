@@ -11,8 +11,22 @@
 // @thaw-domain: SQL Editor & Diagnostics
 
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
+import { persist, createJSONStorage, type StateStorage } from "zustand/middleware";
 import { ExecuteQuery } from "../../wailsjs/go/main/App";
+
+// Wraps localStorage to swallow QuotaExceededError on setItem.
+// Persistence is best-effort — the in-memory store remains authoritative.
+const safeLocalStorage: StateStorage = {
+  getItem: (name) => localStorage.getItem(name),
+  setItem: (name, value) => {
+    try {
+      localStorage.setItem(name, value);
+    } catch {
+      // QuotaExceededError — silently drop; data lives in memory.
+    }
+  },
+  removeItem: (name) => localStorage.removeItem(name),
+};
 
 // Custom event name used by executeInNewTab to ask QueryPage to run a query
 // through its own StartQuery/WaitForQueryResult path (the only path that
@@ -486,7 +500,7 @@ export const useQueryStore = create<QueryState>()(
 }),
 {
   name: "thaw-query-store",
-  storage: createJSONStorage(() => localStorage),
+  storage: createJSONStorage(() => safeLocalStorage),
   // Persist the canonical tab state and the flat active-tab aliases.
   // isRunning and selectedSql are intentionally excluded so they always
   // reset to safe defaults (false / "") after a page reload.
@@ -494,22 +508,27 @@ export const useQueryStore = create<QueryState>()(
   // (e.g. account_usage.query_history) exceed the storage quota and throw a
   // QuotaExceededError. Results are kept in memory during the session so
   // tab-switching still works; they are simply not restored after a reload.
-  // For file-backed notebook tabs, sql/savedSql are cleared before persisting
-  // (content can be large) and re-read from disk on startup by QueryPage.
-  partialize: (state) => ({
-    tabs: state.tabs.map((t) => ({
-      ...t,
-      isRunning: false,  // never persist running state
+  // For file-backed tabs, sql/savedSql are cleared before persisting
+  // (content can be large and exceeds localStorage quota) and re-read from
+  // disk on startup by QueryPage.
+  partialize: (state) => {
+    const activeTab = state.tabs.find((t) => t.id === state.activeTabId);
+    const activeIsFile = activeTab?.path;
+    return {
+      tabs: state.tabs.map((t) => ({
+        ...t,
+        isRunning: false,  // never persist running state
+        result: null,
+        diff: null,
+        sql:      t.path ? "" : t.sql,
+        savedSql: t.path ? "" : t.savedSql,
+      })),
+      activeTabId: state.activeTabId,
+      sql: activeIsFile ? "" : state.sql,
       result: null,
-      diff: null,
-      sql:      (t.kind === "notebook" && t.path) ? "" : t.sql,
-      savedSql: (t.kind === "notebook" && t.path) ? "" : t.savedSql,
-    })),
-    activeTabId: state.activeTabId,
-    sql: state.sql,
-    result: null,
-    error: state.error,
-    currentFile: state.currentFile,
-  }),
+      error: state.error,
+      currentFile: state.currentFile,
+    };
+  },
 }
 ));

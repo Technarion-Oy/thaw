@@ -29,6 +29,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/creack/pty"
@@ -62,10 +63,16 @@ import (
 	"thaw/internal/version"
 )
 
+// Default maxTabSessions fallback (used before config is loaded).
+// The actual limit is configurable via View → Advanced → Session Management…
+// and stored in config.SessionConfig.MaxSessions.
+
 // tabSession holds the per-tab Snowflake client and the two-phase query
 // execution state that was previously global on App.
 type tabSession struct {
 	client             *snowflake.Client
+	lastUsed           atomic.Int64 // UnixNano timestamp for LRU eviction
+	inUse              atomic.Int32 // incremented during non-query client RPCs to prevent eviction mid-flight
 	queryMu            sync.Mutex
 	queryID            string
 	queryDone          chan struct{}
@@ -97,6 +104,19 @@ type App struct {
 
 	// Per-tab isolated Snowflake sessions.
 	tabSessions sync.Map // string (tabId) → *tabSession
+
+	// evictedContexts caches session context (role/wh/db/schema) for tabs whose
+	// sessions were evicted by LRU. Restored transparently on next use.
+	evictedContexts sync.Map // string (tabId) → snowflake.SessionContext
+
+	// Session management runtime state (configurable via View → Advanced → Session Management…).
+	sessionConfigMu    sync.RWMutex
+	sessionMaxSessions int
+	sessionMaxOpen     int
+	sessionMaxIdle     int
+	sessionInitMode    string
+	sessionIdleTimeout time.Duration
+	sessionIdleStopCh  chan struct{}
 
 	// Git repository commit filters (repoKey -> commitHash).
 	// repoKey format: "db.schema.repo"
@@ -138,6 +158,8 @@ func (a *App) startup(ctx context.Context) {
 	a.snowparkSvc = snowpark.NewService(ctx, func(tabId, role, wh, db, schema string) {
 		if val, ok := a.tabSessions.Load(tabId); ok {
 			ts := val.(*tabSession)
+			ts.inUse.Add(1)
+			defer ts.inUse.Add(-1)
 			if role != "" {
 				_ = ts.client.UseRole(ctx, role)
 			}
@@ -168,6 +190,9 @@ func (a *App) startup(ctx context.Context) {
 			logger.L.Warn("fnmeta: open store failed", "err", err)
 		}
 	}
+
+	// Apply session management config (pool limits, idle eviction).
+	a.applySessionConfig(a.GetSessionConfig())
 }
 
 // isQueryRunning reports whether any tab has a query submitted by StartQuery still in flight.
@@ -190,23 +215,48 @@ func (a *App) isQueryRunning() bool {
 // current connect params).
 func (a *App) getOrInitTabSession(tabId string) (*tabSession, error) {
 	if val, ok := a.tabSessions.Load(tabId); ok {
-		return val.(*tabSession), nil
+		ts := val.(*tabSession)
+		ts.lastUsed.Store(time.Now().UnixNano())
+		return ts, nil
 	}
 	tabSessionInitMu.Lock()
-	defer tabSessionInitMu.Unlock()
 	// Double-check after acquiring the lock.
 	if val, ok := a.tabSessions.Load(tabId); ok {
-		return val.(*tabSession), nil
+		tabSessionInitMu.Unlock()
+		ts := val.(*tabSession)
+		ts.lastUsed.Store(time.Now().UnixNano())
+		return ts, nil
 	}
 	if a.connectParams == nil {
+		tabSessionInitMu.Unlock()
 		return nil, apperrors.ErrNotConnected
 	}
+	logger.L.Info("creating new tab session", "tabId", tabId)
+	a.evictIfNeeded()
 	client, err := snowflake.NewClient(a.ctx, *a.connectParams)
 	if err != nil {
+		tabSessionInitMu.Unlock()
 		return nil, err
 	}
+	a.sessionConfigMu.RLock()
+	maxOpen := a.sessionMaxOpen
+	maxIdle := a.sessionMaxIdle
+	a.sessionConfigMu.RUnlock()
+	if maxOpen <= 0 {
+		maxOpen = 4
+	}
+	if maxIdle <= 0 {
+		maxIdle = 1
+	}
+	client.SetPoolLimits(maxOpen, maxIdle)
 	ts := &tabSession{client: client}
+	ts.lastUsed.Store(time.Now().UnixNano())
 	a.tabSessions.Store(tabId, ts)
+	tabSessionInitMu.Unlock()
+	// Restore evicted session context outside the mutex — these are Snowflake
+	// RPCs that can be slow on high-latency connections and must not block
+	// other tabs from initializing their sessions concurrently.
+	a.restoreSessionContext(tabId, ts)
 	return ts, nil
 }
 
@@ -224,6 +274,7 @@ func (a *App) InitTabSession(tabId string) error {
 func (a *App) CloseTabSession(tabId string) {
 	val, ok := a.tabSessions.LoadAndDelete(tabId)
 	if !ok {
+		a.evictedContexts.Delete(tabId)
 		return
 	}
 	ts := val.(*tabSession)
@@ -233,6 +284,97 @@ func (a *App) CloseTabSession(tabId string) {
 	}
 	ts.queryMu.Unlock()
 	go ts.client.Close() //nolint:errcheck
+	a.evictedContexts.Delete(tabId)
+}
+
+// evictIfNeeded closes the least-recently-used idle tab sessions until the
+// session count is below the configured maximum. Must be called under
+// tabSessionInitMu. Evicted session contexts are cached in evictedContexts
+// so they can be restored transparently when the tab is next used.
+func (a *App) evictIfNeeded() {
+	a.sessionConfigMu.RLock()
+	maxSessions := a.sessionMaxSessions
+	a.sessionConfigMu.RUnlock()
+	if maxSessions <= 0 {
+		maxSessions = 8 // fallback before config is loaded
+	}
+
+	for {
+		var count int
+		a.tabSessions.Range(func(_, _ any) bool {
+			count++
+			return true
+		})
+		if count < maxSessions {
+			return
+		}
+
+		// Find the LRU session that has no active query and is not in use.
+		var lruTabId string
+		var lruTime int64
+		a.tabSessions.Range(func(key, val any) bool {
+			ts := val.(*tabSession)
+			ts.queryMu.Lock()
+			hasQuery := ts.queryDone != nil
+			ts.queryMu.Unlock()
+			if hasQuery || ts.inUse.Load() > 0 {
+				return true // skip sessions with active queries or in-use RPCs
+			}
+			lastUsed := ts.lastUsed.Load()
+			if lruTabId == "" || lastUsed < lruTime {
+				lruTabId = key.(string)
+				lruTime = lastUsed
+			}
+			return true
+		})
+		if lruTabId == "" {
+			return // all sessions are actively querying or in use; allow over-cap
+		}
+
+		// Evict: remove from map, cache context from connector's in-memory state
+		// (no RPC — avoids blocking tabSessionInitMu on a Snowflake round-trip),
+		// and close the connection asynchronously.
+		if val, ok := a.tabSessions.LoadAndDelete(lruTabId); ok {
+			ts := val.(*tabSession)
+			a.evictedContexts.Store(lruTabId, ts.client.GetCachedSessionContext())
+			logger.L.Info("evicting LRU tab session", "tabId", lruTabId)
+			go ts.client.Close() //nolint:errcheck
+		}
+	}
+}
+
+// restoreSessionContext applies a previously-evicted session context to a
+// freshly-created tab session. This ensures that switching back to an evicted
+// tab transparently restores the user's role, warehouse, database, and schema.
+// Called outside tabSessionInitMu so it must guard against concurrent eviction.
+func (a *App) restoreSessionContext(tabId string, ts *tabSession) {
+	val, ok := a.evictedContexts.LoadAndDelete(tabId)
+	if !ok {
+		return
+	}
+	ts.inUse.Add(1)
+	defer ts.inUse.Add(-1)
+	sctx := val.(snowflake.SessionContext)
+	if sctx.Role != "" {
+		if err := ts.client.UseRole(a.ctx, sctx.Role); err != nil {
+			logger.L.Debug("restoreSessionContext: failed to restore role", "tabId", tabId, "role", sctx.Role, "err", err)
+		}
+	}
+	if sctx.Warehouse != "" {
+		if err := ts.client.UseWarehouse(a.ctx, sctx.Warehouse); err != nil {
+			logger.L.Debug("restoreSessionContext: failed to restore warehouse", "tabId", tabId, "warehouse", sctx.Warehouse, "err", err)
+		}
+	}
+	if sctx.Database != "" {
+		if err := ts.client.UseDatabase(a.ctx, sctx.Database); err != nil {
+			logger.L.Debug("restoreSessionContext: failed to restore database", "tabId", tabId, "database", sctx.Database, "err", err)
+		}
+	}
+	if sctx.Schema != "" {
+		if err := ts.client.UseSchema(a.ctx, sctx.Schema); err != nil {
+			logger.L.Debug("restoreSessionContext: failed to restore schema", "tabId", tabId, "schema", sctx.Schema, "err", err)
+		}
+	}
 }
 
 // shutdown is called by the Wails runtime just before the application exits.
@@ -244,6 +386,14 @@ func (a *App) shutdown(_ context.Context) {
 	x, y := wailsruntime.WindowGetPosition(a.ctx)
 	m := wailsruntime.WindowIsMaximised(a.ctx)
 	_ = session.SaveWindowState(session.WindowState{X: x, Y: y, Width: w, Height: h, Maximized: m})
+
+	// Stop idle eviction loop.
+	a.sessionConfigMu.Lock()
+	if a.sessionIdleStopCh != nil {
+		close(a.sessionIdleStopCh)
+		a.sessionIdleStopCh = nil
+	}
+	a.sessionConfigMu.Unlock()
 
 	// Stop any running terminal process cleanly before the app exits.
 	a.StopShell() //nolint:errcheck
@@ -1031,6 +1181,12 @@ func (a *App) Disconnect() error {
 		a.CloseTabSession(tid)
 	}
 
+	// Clear any cached evicted session contexts.
+	a.evictedContexts.Range(func(key, _ any) bool {
+		a.evictedContexts.Delete(key)
+		return true
+	})
+
 	if a.client == nil {
 		return nil
 	}
@@ -1374,6 +1530,10 @@ func (a *App) WaitForQueryResult(tabId string) (*snowflake.QueryResult, error) {
 // triggering a full NewClient re-login just to read session variables.
 func (a *App) GetSessionContext(tabId string) (snowflake.SessionContext, error) {
 	if _, ok := a.tabSessions.Load(tabId); !ok {
+		// Return cached context from an evicted session if available.
+		if val, ok := a.evictedContexts.Load(tabId); ok {
+			return val.(snowflake.SessionContext), nil
+		}
 		if a.client != nil {
 			return a.client.GetSessionContext(a.ctx)
 		}
@@ -1383,7 +1543,22 @@ func (a *App) GetSessionContext(tabId string) (snowflake.SessionContext, error) 
 	if err != nil {
 		return snowflake.SessionContext{}, err
 	}
+	ts.inUse.Add(1)
+	defer ts.inUse.Add(-1)
 	return ts.client.GetSessionContext(a.ctx)
+}
+
+// GetTabSessionID returns the Snowflake session ID for the given tab.
+// Returns an empty string (no error) when the tab has no active session.
+func (a *App) GetTabSessionID(tabId string) (string, error) {
+	val, ok := a.tabSessions.Load(tabId)
+	if !ok {
+		return "", nil
+	}
+	ts := val.(*tabSession)
+	ts.inUse.Add(1)
+	defer ts.inUse.Add(-1)
+	return ts.client.GetSessionID(a.ctx)
 }
 
 // GetQuotedIdentifiersIgnoreCase returns true when the current session's
@@ -2367,6 +2542,8 @@ func (a *App) UseRole(tabId string, role string) error {
 	if err != nil {
 		return err
 	}
+	ts.inUse.Add(1)
+	defer ts.inUse.Add(-1)
 	return ts.client.UseRole(a.ctx, role)
 }
 
@@ -2376,6 +2553,8 @@ func (a *App) UseWarehouse(tabId string, warehouse string) error {
 	if err != nil {
 		return err
 	}
+	ts.inUse.Add(1)
+	defer ts.inUse.Add(-1)
 	return ts.client.UseWarehouse(a.ctx, warehouse)
 }
 
@@ -2385,6 +2564,8 @@ func (a *App) UseDatabase(tabId string, database string) error {
 	if err != nil {
 		return err
 	}
+	ts.inUse.Add(1)
+	defer ts.inUse.Add(-1)
 	return ts.client.UseDatabase(a.ctx, database)
 }
 
@@ -2394,6 +2575,8 @@ func (a *App) UseSchema(tabId string, schema string) error {
 	if err != nil {
 		return err
 	}
+	ts.inUse.Add(1)
+	defer ts.inUse.Add(-1)
 	return ts.client.UseSchema(a.ctx, schema)
 }
 
@@ -3497,6 +3680,10 @@ func (a *App) ExportDatabaseDDL(database, outputDir string) (ddl.ExportResult, e
 		return ddl.ExportResult{}, apperrors.ErrNotConnected
 	}
 
+	// Temporarily scale up pool for parallel DDL fetching.
+	a.client.SetPoolLimits(32, 32)
+	defer a.client.SetPoolLimits(snowflake.DefaultMaxOpenConns, snowflake.DefaultMaxIdleConns)
+
 	ctx, cancel := context.WithCancel(a.ctx)
 	a.exportCancelFunc = cancel
 	defer func() {
@@ -3550,6 +3737,10 @@ func (a *App) ExportAllDatabasesDDL(outputDir string, databases []string) ([]ddl
 	if a.client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
+
+	// Temporarily scale up pool for parallel DDL fetching.
+	a.client.SetPoolLimits(32, 32)
+	defer a.client.SetPoolLimits(snowflake.DefaultMaxOpenConns, snowflake.DefaultMaxIdleConns)
 
 	if len(databases) == 0 {
 		var err error
@@ -3822,6 +4013,189 @@ func (a *App) SaveNotebookPrefs(prefs config.NotebookPrefs) error {
 	}
 	cfg.NotebookPrefs = prefs
 	return config.Save(cfg)
+}
+
+// ─── Session management ──────────────────────────────────────────────────────
+
+// GetSessionConfig returns the persisted session management configuration.
+// Zero-value fields are backfilled with CPU-based defaults.
+func (a *App) GetSessionConfig() config.SessionConfig {
+	cfg, err := config.Load()
+	if err != nil {
+		return config.DefaultSessionConfig()
+	}
+	sc := cfg.Session
+	defaults := config.DefaultSessionConfig()
+	if sc.MaxSessions == 0 {
+		sc.MaxSessions = defaults.MaxSessions
+	}
+	if sc.MaxOpenConnsPerSession == 0 {
+		sc.MaxOpenConnsPerSession = defaults.MaxOpenConnsPerSession
+	}
+	if sc.MaxIdleConnsPerSession == 0 {
+		sc.MaxIdleConnsPerSession = defaults.MaxIdleConnsPerSession
+	}
+	if sc.InitMode == "" {
+		sc.InitMode = defaults.InitMode
+	}
+	return sc
+}
+
+// SaveSessionConfig persists session management settings and applies them at runtime.
+func (a *App) SaveSessionConfig(sc config.SessionConfig) error {
+	// Validate and clamp values to valid ranges.
+	if sc.MaxSessions < 1 {
+		sc.MaxSessions = 1
+	} else if sc.MaxSessions > 32 {
+		sc.MaxSessions = 32
+	}
+	if sc.MaxOpenConnsPerSession < 1 {
+		sc.MaxOpenConnsPerSession = 1
+	} else if sc.MaxOpenConnsPerSession > 16 {
+		sc.MaxOpenConnsPerSession = 16
+	}
+	if sc.MaxIdleConnsPerSession < 1 {
+		sc.MaxIdleConnsPerSession = 1
+	} else if sc.MaxIdleConnsPerSession > 16 {
+		sc.MaxIdleConnsPerSession = 16
+	}
+	if sc.MaxIdleConnsPerSession > sc.MaxOpenConnsPerSession {
+		sc.MaxIdleConnsPerSession = sc.MaxOpenConnsPerSession
+	}
+	if sc.InitMode != "lazy" && sc.InitMode != "eager" {
+		sc.InitMode = "lazy"
+	}
+	if sc.IdleTimeoutMinutes < 0 {
+		sc.IdleTimeoutMinutes = 0
+	} else if sc.IdleTimeoutMinutes > 480 {
+		sc.IdleTimeoutMinutes = 480
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	cfg.Session = sc
+	if err := config.Save(cfg); err != nil {
+		return err
+	}
+	a.applySessionConfig(sc)
+	return nil
+}
+
+// GetDefaultSessionConfig returns the CPU-based default values (for the Reset button).
+func (a *App) GetDefaultSessionConfig() config.SessionConfig {
+	return config.DefaultSessionConfig()
+}
+
+// GetSessionInitMode returns the current session initialization mode ("lazy" or "eager").
+func (a *App) GetSessionInitMode() string {
+	a.sessionConfigMu.RLock()
+	mode := a.sessionInitMode
+	a.sessionConfigMu.RUnlock()
+	if mode == "" {
+		return "lazy"
+	}
+	return mode
+}
+
+// applySessionConfig updates runtime session fields under lock and manages the idle eviction loop.
+func (a *App) applySessionConfig(sc config.SessionConfig) {
+	a.sessionConfigMu.Lock()
+	a.sessionMaxSessions = sc.MaxSessions
+	a.sessionMaxOpen = sc.MaxOpenConnsPerSession
+	a.sessionMaxIdle = sc.MaxIdleConnsPerSession
+	a.sessionInitMode = sc.InitMode
+	a.sessionIdleTimeout = time.Duration(sc.IdleTimeoutMinutes) * time.Minute
+
+	// Stop existing idle eviction loop if running.
+	if a.sessionIdleStopCh != nil {
+		close(a.sessionIdleStopCh)
+		a.sessionIdleStopCh = nil
+	}
+
+	// Determine whether to start a new eviction loop while still holding the lock.
+	var stop chan struct{}
+	if sc.IdleTimeoutMinutes > 0 {
+		stop = make(chan struct{})
+		a.sessionIdleStopCh = stop
+	}
+	a.sessionConfigMu.Unlock()
+
+	if stop != nil {
+		go a.runIdleEvictionLoop(stop)
+	}
+}
+
+// runIdleEvictionLoop periodically evicts sessions that have been idle longer than the configured timeout.
+func (a *App) runIdleEvictionLoop(stop <-chan struct{}) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			a.evictIdleSessions()
+		}
+	}
+}
+
+// evictIdleSessions closes sessions whose lastUsed exceeds the idle timeout.
+func (a *App) evictIdleSessions() {
+	a.sessionConfigMu.RLock()
+	timeout := a.sessionIdleTimeout
+	a.sessionConfigMu.RUnlock()
+	if timeout <= 0 {
+		return
+	}
+
+	cutoff := time.Now().Add(-timeout).UnixNano()
+	var toEvict []string
+
+	a.tabSessions.Range(func(key, val any) bool {
+		ts := val.(*tabSession)
+		// Skip sessions with active queries or in-use RPCs.
+		ts.queryMu.Lock()
+		hasQuery := ts.queryDone != nil
+		ts.queryMu.Unlock()
+		if hasQuery || ts.inUse.Load() > 0 {
+			return true
+		}
+		if ts.lastUsed.Load() < cutoff {
+			toEvict = append(toEvict, key.(string))
+		}
+		return true
+	})
+
+	for _, tabId := range toEvict {
+		val, ok := a.tabSessions.Load(tabId)
+		if !ok {
+			continue
+		}
+		ts := val.(*tabSession)
+		// Re-check: skip if session was reactivated or is now in use.
+		if ts.lastUsed.Load() >= cutoff || ts.inUse.Load() > 0 {
+			continue
+		}
+		if _, ok := a.tabSessions.LoadAndDelete(tabId); ok {
+			// Final guard: if the session was reactivated between our pre-check
+			// and LoadAndDelete (e.g. getOrInitTabSession stamped lastUsed),
+			// put it back. Safe under normal scheduling — the reactivation guard
+			// covers the nanosecond-wide TOCTOU window between Load and
+			// LoadAndDelete where getOrInitTabSession could stamp lastUsed.
+			recentCutoff := time.Now().Add(-1 * time.Second).UnixNano()
+			if ts.lastUsed.Load() >= recentCutoff {
+				a.tabSessions.Store(tabId, ts)
+				continue
+			}
+			// Cache session context from connector's in-memory state (no RPC)
+			// only after confirming the deletion succeeded.
+			a.evictedContexts.Store(tabId, ts.client.GetCachedSessionContext())
+			logger.L.Info("evicting idle tab session", "tabId", tabId)
+			go ts.client.Close() //nolint:errcheck
+		}
+	}
 }
 
 // ListAIModels returns the models available for the given provider and API key.

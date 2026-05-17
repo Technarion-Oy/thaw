@@ -14,7 +14,7 @@ import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip,
 import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, InitTabSession, CloseTabSession } from "../../wailsjs/go/main/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession } from "../../wailsjs/go/main/App";
 import { GetSqlStatementRanges } from "../../wailsjs/go/sqleditor/Service";
 import type { main } from "../../wailsjs/go/models";
 import SessionPropertiesModal from "../components/common/SessionPropertiesModal";
@@ -179,17 +179,29 @@ export default function QueryPage() {
     store.loadContext(activeTabId);
   }, [activeTabId]);
 
-  // Track tab additions/removals to init new sessions and close stale ones.
+  // Track tab additions/removals to manage sessions.
   const tabs = useQueryStore((s) => s.tabs);
   const prevTabIdsRef = useRef<Set<string>>(new Set(tabs.map((t) => t.id)));
+  const sessionInitModeRef = useRef<string>("lazy");
+  // Load init mode once on mount and when config changes via save.
+  useEffect(() => {
+    GetSessionInitMode().then((mode) => { sessionInitModeRef.current = mode; });
+    const handler = () => {
+      GetSessionInitMode().then((mode) => { sessionInitModeRef.current = mode; });
+    };
+    window.addEventListener("thaw:session-config-saved", handler);
+    return () => window.removeEventListener("thaw:session-config-saved", handler);
+  }, []);
   useEffect(() => {
     const currentIds = new Set(tabs.map((t) => t.id));
-    // New tabs.
-    currentIds.forEach((id) => {
-      if (!prevTabIdsRef.current.has(id)) {
-        InitTabSession(id).catch(() => {});
-      }
-    });
+    // New tabs: init eagerly only when explicitly configured.
+    if (sessionInitModeRef.current === "eager") {
+      currentIds.forEach((id) => {
+        if (!prevTabIdsRef.current.has(id)) {
+          InitTabSession(id).catch(() => {});
+        }
+      });
+    }
     // Removed tabs.
     prevTabIdsRef.current.forEach((id) => {
       if (!currentIds.has(id)) {

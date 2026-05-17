@@ -261,13 +261,16 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 
 	db := sql.OpenDB(sc)
 
-	// Restore full pool concurrency.  Every new connection the pool creates
-	// goes through sessionConnector.Connect, which applies the current role
-	// and warehouse — so there is no longer any need for a single connection.
-	db.SetMaxOpenConns(32)
-	db.SetMaxIdleConns(2)
+	// Keep a modest pool to avoid Snowflake session quota exhaustion.
+	// With ServerSessionKeepAlive=true, each pool connection holds a live
+	// Snowflake session that persists until Snowflake's 4h timeout — even
+	// after the Go side closes it.  Setting MaxIdleConns equal to
+	// MaxOpenConns prevents connection churn that creates zombie sessions.
+	// Use SetPoolLimits(32, 32) for bulk operations like DDL export.
+	db.SetMaxOpenConns(DefaultMaxOpenConns)
+	db.SetMaxIdleConns(DefaultMaxIdleConns)
 	db.SetConnMaxLifetime(30 * time.Minute)
-	db.SetConnMaxIdleTime(3 * time.Minute)
+	db.SetConnMaxIdleTime(5 * time.Minute)
 
 	if err := db.PingContext(ctx); err != nil {
 		db.Close() //nolint:errcheck
@@ -289,6 +292,44 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 // IsAlive checks that the underlying connection is still usable.
 func (c *Client) IsAlive() bool {
 	return c.db.PingContext(context.Background()) == nil
+}
+
+// DefaultMaxOpenConns is the shared client's default MaxOpenConns (used by NewClient).
+const DefaultMaxOpenConns = 8
+
+// DefaultMaxIdleConns is the shared client's default MaxIdleConns (used by NewClient).
+const DefaultMaxIdleConns = 8
+
+// SetPoolLimits overrides the connection pool's MaxOpenConns and MaxIdleConns.
+// Tab sessions use smaller limits (e.g. 4/1) since they only run one query at
+// a time; the shared client uses DefaultMaxOpenConns/DefaultMaxIdleConns.
+func (c *Client) SetPoolLimits(maxOpen, maxIdle int) {
+	c.db.SetMaxOpenConns(maxOpen)
+	c.db.SetMaxIdleConns(maxIdle)
+}
+
+// GetSessionID returns the Snowflake session ID via SELECT CURRENT_SESSION().
+func (c *Client) GetSessionID(ctx context.Context) (string, error) {
+	var id string
+	if err := c.db.QueryRowContext(ctx, "SELECT CURRENT_SESSION()").Scan(&id); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// GetCachedSessionContext returns the session context from the connector's
+// in-memory cache without making a Snowflake RPC. Useful when the caller needs
+// the context but cannot tolerate network latency (e.g. under a mutex).
+func (c *Client) GetCachedSessionContext() SessionContext {
+	c.connector.mu.RLock()
+	ctx := SessionContext{
+		Role:      c.connector.role,
+		Warehouse: c.connector.wh,
+		Database:  c.connector.db,
+		Schema:    c.connector.sc,
+	}
+	c.connector.mu.RUnlock()
+	return ctx
 }
 
 // Close terminates the connection pool.

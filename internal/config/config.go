@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // Connection is a saved Snowflake connection profile.
@@ -88,6 +89,27 @@ type PipRegistryConfig struct {
 	ProxyBypassHosts     string                  `json:"proxyBypassHosts"` // comma-separated
 	TrustedHosts         string                  `json:"trustedHosts"`    // comma-separated
 	CustomCACertPath     string                  `json:"customCACertPath"`
+}
+
+// SessionConfig holds session pooling and lifecycle parameters.
+type SessionConfig struct {
+	MaxSessions            int    `json:"maxSessions"`
+	MaxOpenConnsPerSession int    `json:"maxOpenConnsPerSession"`
+	MaxIdleConnsPerSession int    `json:"maxIdleConnsPerSession"`
+	InitMode               string `json:"initMode"`        // "lazy" | "eager"
+	IdleTimeoutMinutes     int    `json:"idleTimeoutMinutes"`
+}
+
+// DefaultSessionConfig returns CPU-based defaults for session management.
+func DefaultSessionConfig() SessionConfig {
+	cpus := runtime.NumCPU()
+	return SessionConfig{
+		MaxSessions:            min(16, max(4, cpus)),
+		MaxOpenConnsPerSession: min(8, max(2, cpus)),
+		MaxIdleConnsPerSession: min(4, max(1, cpus/2)),
+		InitMode:               "lazy",
+		IdleTimeoutMinutes:     0,
+	}
 }
 
 // EditorPrefs holds SQL formatting preferences for the Monaco editor.
@@ -323,6 +345,7 @@ type AppConfig struct {
 	PipRegistry            PipRegistryConfig `json:"pipRegistry"`
 	Editor                 EditorPrefs       `json:"editor"`
 	NotebookPrefs          NotebookPrefs     `json:"notebookPrefs"`
+	Session                SessionConfig     `json:"session"`
 	SnowflakeCLIConfigPath string            `json:"snowflakeCliConfigPath"`
 	FeatureFlags           FeatureFlags      `json:"featureFlags"`
 }

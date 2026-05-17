@@ -443,6 +443,16 @@ Right-click the **account · user** tag in the query toolbar to open the **Sessi
 - String-type values are automatically single-quoted in the generated SQL; booleans and numbers are passed through raw
 - **Copy** button exports all parameters and variables as `key: value` lines to the clipboard
 
+#### Session Management
+
+Open **View → Advanced → Session Management…** to tune per-tab connection pooling:
+
+- **Max concurrent sessions** — LRU cap (1–32); excess idle sessions are evicted
+- **Max open / idle connections per session** — controls `database/sql` pool limits per tab
+- **Init mode** — lazy (first query) or eager (on tab open)
+- **Idle timeout** — time-based eviction (0 = disabled, LRU only)
+- **Reset to Defaults** — restores CPU-based default values
+
 
 - Export DDL for every database (or a single one) with one file per object
 - Fully qualified names (`db.schema.object`) in every CREATE statement

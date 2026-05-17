@@ -374,6 +374,10 @@ export function GetDatabaseTableSummary(arg1) {
   return window['go']['main']['App']['GetDatabaseTableSummary'](arg1);
 }
 
+export function GetDefaultSessionConfig() {
+  return window['go']['main']['App']['GetDefaultSessionConfig']();
+}
+
 export function GetERDiagramData(arg1) {
   return window['go']['main']['App']['GetERDiagramData'](arg1);
 }
@@ -490,8 +494,16 @@ export function GetSchemaRetentionDays(arg1, arg2) {
   return window['go']['main']['App']['GetSchemaRetentionDays'](arg1, arg2);
 }
 
+export function GetSessionConfig() {
+  return window['go']['main']['App']['GetSessionConfig']();
+}
+
 export function GetSessionContext(arg1) {
   return window['go']['main']['App']['GetSessionContext'](arg1);
+}
+
+export function GetSessionInitMode() {
+  return window['go']['main']['App']['GetSessionInitMode']();
 }
 
 export function GetSessionParameters() {
@@ -520,6 +532,10 @@ export function GetStageFilePreview(arg1, arg2) {
 
 export function GetSystemRAMGB() {
   return window['go']['main']['App']['GetSystemRAMGB']();
+}
+
+export function GetTabSessionID(arg1) {
+  return window['go']['main']['App']['GetTabSessionID'](arg1);
 }
 
 export function GetTableColumns(arg1, arg2, arg3) {
@@ -976,6 +992,10 @@ export function SavePipRegistryConfig(arg1) {
 
 export function SaveProfile(arg1) {
   return window['go']['main']['App']['SaveProfile'](arg1);
+}
+
+export function SaveSessionConfig(arg1) {
+  return window['go']['main']['App']['SaveSessionConfig'](arg1);
 }
 
 export function SaveSnowparkConfig(arg1) {
