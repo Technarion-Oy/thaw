@@ -579,7 +579,7 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Revoke select on stage", "REVOKE SELECT ON STAGE my_stage FROM ROLE my_role", "not valid for object type STAGE"},
 		{"Revoke write on stream", "REVOKE WRITE ON STREAM my_stream FROM ROLE my_role", "not valid for object type STREAM"},
 		{"Revoke select on role", "REVOKE SELECT ON ROLE my_role FROM ROLE other_role", "not valid for object type ROLE"},
-		{"Revoke usage on role", "REVOKE USAGE ON ROLE my_role FROM ROLE other_role", "not valid for object type ROLE"},
+		{"Revoke usage on role", "REVOKE USAGE ON ROLE my_role FROM ROLE other_role", "Use 'REVOKE ROLE <name> FROM ROLE/USER' to revoke a role"},
 
 		// Invalid REVOKE — structural issues
 		{"Revoke cascade and restrict", "REVOKE SELECT ON TABLE my_table FROM ROLE my_role CASCADE RESTRICT", "mutually exclusive"},

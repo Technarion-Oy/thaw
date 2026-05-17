@@ -1799,14 +1799,17 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 func FormatRoleGrant(priv, onType, obj, escapedRole string, withGrantOption bool) string {
 	var stmt string
 	switch {
-	case strings.EqualFold(onType, "ROLE") && strings.EqualFold(priv, "USAGE"):
-		// USAGE on ROLE is Snowflake's internal representation of role membership.
-		// The executable form is GRANT ROLE <name> TO ROLE <parent>.
-		// WITH GRANT OPTION is not valid for GRANT ROLE statements.
+	case strings.EqualFold(onType, "ROLE"):
 		// Quote the child role name — SHOW GRANTS returns bare identifiers even
 		// for mixed-case roles (e.g. "My_Role" → My_Role in the name column).
 		escapedChild := strings.ReplaceAll(obj, `"`, `""`)
-		return fmt.Sprintf("GRANT ROLE \"%s\" TO ROLE \"%s\";", escapedChild, escapedRole)
+		if strings.EqualFold(priv, "USAGE") {
+			// USAGE on ROLE is Snowflake's internal representation of role membership.
+			// The executable form is GRANT ROLE <name> TO ROLE <parent>.
+			// WITH GRANT OPTION is not valid for GRANT ROLE statements.
+			return fmt.Sprintf("GRANT ROLE \"%s\" TO ROLE \"%s\";", escapedChild, escapedRole)
+		}
+		stmt = fmt.Sprintf("GRANT %s ON ROLE \"%s\" TO ROLE \"%s\"", priv, escapedChild, escapedRole)
 	case strings.EqualFold(onType, "ACCOUNT"):
 		stmt = fmt.Sprintf("GRANT %s ON ACCOUNT TO ROLE \"%s\"", priv, escapedRole)
 	default:

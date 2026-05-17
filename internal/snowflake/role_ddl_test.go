@@ -135,13 +135,13 @@ func TestFormatRoleGrant(t *testing.T) {
 			want:   `GRANT ROLE "My_Role" TO ROLE "PARENT";`,
 		},
 		{
-			name:            "OWNERSHIP on ROLE remains as-is",
+			name:            "OWNERSHIP on ROLE quotes role name",
 			priv:            "OWNERSHIP",
 			onType:          "ROLE",
 			obj:             "MY_CUSTOM_ROLE",
 			role:            "SECURITYADMIN",
 			withGrantOption: true,
-			want:            `GRANT OWNERSHIP ON ROLE MY_CUSTOM_ROLE TO ROLE "SECURITYADMIN" WITH GRANT OPTION;`,
+			want:            `GRANT OWNERSHIP ON ROLE "MY_CUSTOM_ROLE" TO ROLE "SECURITYADMIN" WITH GRANT OPTION;`,
 		},
 	}
 
