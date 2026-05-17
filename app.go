@@ -72,6 +72,7 @@ import (
 type tabSession struct {
 	client             *snowflake.Client
 	lastUsed           atomic.Int64 // UnixNano timestamp for LRU eviction
+	inUse              atomic.Int32 // incremented during non-query client RPCs to prevent eviction mid-flight
 	queryMu            sync.Mutex
 	queryID            string
 	queryDone          chan struct{}
@@ -217,20 +218,22 @@ func (a *App) getOrInitTabSession(tabId string) (*tabSession, error) {
 		return ts, nil
 	}
 	tabSessionInitMu.Lock()
-	defer tabSessionInitMu.Unlock()
 	// Double-check after acquiring the lock.
 	if val, ok := a.tabSessions.Load(tabId); ok {
+		tabSessionInitMu.Unlock()
 		ts := val.(*tabSession)
 		ts.lastUsed.Store(time.Now().UnixNano())
 		return ts, nil
 	}
 	if a.connectParams == nil {
+		tabSessionInitMu.Unlock()
 		return nil, apperrors.ErrNotConnected
 	}
 	logger.L.Info("creating new tab session", "tabId", tabId)
 	a.evictIfNeeded()
 	client, err := snowflake.NewClient(a.ctx, *a.connectParams)
 	if err != nil {
+		tabSessionInitMu.Unlock()
 		return nil, err
 	}
 	a.sessionConfigMu.RLock()
@@ -247,6 +250,10 @@ func (a *App) getOrInitTabSession(tabId string) (*tabSession, error) {
 	ts := &tabSession{client: client}
 	ts.lastUsed.Store(time.Now().UnixNano())
 	a.tabSessions.Store(tabId, ts)
+	tabSessionInitMu.Unlock()
+	// Restore evicted session context outside the mutex — these are Snowflake
+	// RPCs that can be slow on high-latency connections and must not block
+	// other tabs from initializing their sessions concurrently.
 	a.restoreSessionContext(tabId, ts)
 	return ts, nil
 }
@@ -299,7 +306,7 @@ func (a *App) evictIfNeeded() {
 		return
 	}
 
-	// Find the LRU session that has no active query.
+	// Find the LRU session that has no active query and is not in use.
 	var lruTabId string
 	var lruTime int64
 	a.tabSessions.Range(func(key, val any) bool {
@@ -307,8 +314,8 @@ func (a *App) evictIfNeeded() {
 		ts.queryMu.Lock()
 		hasQuery := ts.queryDone != nil
 		ts.queryMu.Unlock()
-		if hasQuery {
-			return true // skip sessions with active queries
+		if hasQuery || ts.inUse.Load() > 0 {
+			return true // skip sessions with active queries or in-use RPCs
 		}
 		lastUsed := ts.lastUsed.Load()
 		if lruTabId == "" || lastUsed < lruTime {
@@ -318,7 +325,7 @@ func (a *App) evictIfNeeded() {
 		return true
 	})
 	if lruTabId == "" {
-		return // all sessions are actively querying; allow over-cap
+		return // all sessions are actively querying or in use; allow over-cap
 	}
 
 	// Cache the session context before eviction.
@@ -340,11 +347,14 @@ func (a *App) evictIfNeeded() {
 // restoreSessionContext applies a previously-evicted session context to a
 // freshly-created tab session. This ensures that switching back to an evicted
 // tab transparently restores the user's role, warehouse, database, and schema.
+// Called outside tabSessionInitMu so it must guard against concurrent eviction.
 func (a *App) restoreSessionContext(tabId string, ts *tabSession) {
 	val, ok := a.evictedContexts.LoadAndDelete(tabId)
 	if !ok {
 		return
 	}
+	ts.inUse.Add(1)
+	defer ts.inUse.Add(-1)
 	sctx := val.(snowflake.SessionContext)
 	if sctx.Role != "" {
 		if err := ts.client.UseRole(a.ctx, sctx.Role); err != nil {
@@ -1534,6 +1544,8 @@ func (a *App) GetSessionContext(tabId string) (snowflake.SessionContext, error) 
 	if err != nil {
 		return snowflake.SessionContext{}, err
 	}
+	ts.inUse.Add(1)
+	defer ts.inUse.Add(-1)
 	return ts.client.GetSessionContext(a.ctx)
 }
 
@@ -1545,6 +1557,8 @@ func (a *App) GetTabSessionID(tabId string) (string, error) {
 		return "", nil
 	}
 	ts := val.(*tabSession)
+	ts.inUse.Add(1)
+	defer ts.inUse.Add(-1)
 	return ts.client.GetSessionID(a.ctx)
 }
 
@@ -2529,6 +2543,8 @@ func (a *App) UseRole(tabId string, role string) error {
 	if err != nil {
 		return err
 	}
+	ts.inUse.Add(1)
+	defer ts.inUse.Add(-1)
 	return ts.client.UseRole(a.ctx, role)
 }
 
@@ -2538,6 +2554,8 @@ func (a *App) UseWarehouse(tabId string, warehouse string) error {
 	if err != nil {
 		return err
 	}
+	ts.inUse.Add(1)
+	defer ts.inUse.Add(-1)
 	return ts.client.UseWarehouse(a.ctx, warehouse)
 }
 
@@ -2547,6 +2565,8 @@ func (a *App) UseDatabase(tabId string, database string) error {
 	if err != nil {
 		return err
 	}
+	ts.inUse.Add(1)
+	defer ts.inUse.Add(-1)
 	return ts.client.UseDatabase(a.ctx, database)
 }
 
@@ -2556,6 +2576,8 @@ func (a *App) UseSchema(tabId string, schema string) error {
 	if err != nil {
 		return err
 	}
+	ts.inUse.Add(1)
+	defer ts.inUse.Add(-1)
 	return ts.client.UseSchema(a.ctx, schema)
 }
 
@@ -4038,6 +4060,9 @@ func (a *App) SaveSessionConfig(sc config.SessionConfig) error {
 	} else if sc.MaxIdleConnsPerSession > 16 {
 		sc.MaxIdleConnsPerSession = 16
 	}
+	if sc.MaxIdleConnsPerSession > sc.MaxOpenConnsPerSession {
+		sc.MaxIdleConnsPerSession = sc.MaxOpenConnsPerSession
+	}
 	if sc.InitMode != "lazy" && sc.InitMode != "eager" {
 		sc.InitMode = "lazy"
 	}
@@ -4131,11 +4156,11 @@ func (a *App) evictIdleSessions() {
 
 	a.tabSessions.Range(func(key, val any) bool {
 		ts := val.(*tabSession)
-		// Skip sessions with active queries.
+		// Skip sessions with active queries or in-use RPCs.
 		ts.queryMu.Lock()
 		hasQuery := ts.queryDone != nil
 		ts.queryMu.Unlock()
-		if hasQuery {
+		if hasQuery || ts.inUse.Load() > 0 {
 			return true
 		}
 		if ts.lastUsed.Load() < cutoff {
@@ -4150,19 +4175,17 @@ func (a *App) evictIdleSessions() {
 			continue
 		}
 		ts := val.(*tabSession)
-		// Re-check lastUsed to avoid evicting a session that was reactivated
-		// between the Range scan and now (TOCTOU mitigation).
-		if ts.lastUsed.Load() >= cutoff {
+		// Re-check: skip if session was reactivated or is now in use.
+		if ts.lastUsed.Load() >= cutoff || ts.inUse.Load() > 0 {
 			continue
 		}
 		// Cache session context before eviction.
 		if ctx, err := ts.client.GetSessionContext(a.ctx); err == nil {
 			a.evictedContexts.Store(tabId, ctx)
 		}
-		if val, ok := a.tabSessions.LoadAndDelete(tabId); ok {
-			evicted := val.(*tabSession)
+		if _, ok := a.tabSessions.LoadAndDelete(tabId); ok {
 			logger.L.Info("evicting idle tab session", "tabId", tabId)
-			go evicted.client.Close() //nolint:errcheck
+			go ts.client.Close() //nolint:errcheck
 		}
 	}
 }
