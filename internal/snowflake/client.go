@@ -1748,8 +1748,14 @@ func (c *Client) GetRoleDDL(ctx context.Context, name string) (string, error) {
 			if priv == "" || onType == "" {
 				continue
 			}
-			stmt := fmt.Sprintf("GRANT %s ON %s %s TO ROLE \"%s\"",
-				priv, onType, obj, escapedIdent)
+			var stmt string
+			if strings.EqualFold(onType, "ACCOUNT") {
+				stmt = fmt.Sprintf("GRANT %s ON ACCOUNT TO ROLE \"%s\"",
+					priv, escapedIdent)
+			} else {
+				stmt = fmt.Sprintf("GRANT %s ON %s %s TO ROLE \"%s\"",
+					priv, onType, obj, escapedIdent)
+			}
 			if opt {
 				stmt += " WITH GRANT OPTION"
 			}
