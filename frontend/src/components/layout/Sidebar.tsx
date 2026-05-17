@@ -2171,6 +2171,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                     })
                   );
                   loadingNodes.current.clear();
+                  setLoadingTreeNodes(new Set());
                   searchWasActive.current = false;
                 }
                 setSearchQuery(val);
