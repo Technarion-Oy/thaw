@@ -2481,8 +2481,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Resume Execution", <PlayCircleOutlined style={{ fontSize: 12 }} />, unpausePipeExecution)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PIPE" &&
             menuItem("Check Status…", <DashboardOutlined style={{ fontSize: 12 }} />, openPipeStatusModal)}
-          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "SECRET" &&
-            menuItem("Modify…", <EditOutlined style={{ fontSize: 12 }} />, openModifySecret)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "GIT REPOSITORY" &&
             menuItem("Create Git Repository…", <BranchesOutlined style={{ fontSize: 12 }} />, openCreateGitRepository)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "GIT REPOSITORY" &&
