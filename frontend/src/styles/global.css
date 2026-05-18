@@ -117,19 +117,20 @@ body,
   user-select: text !important;
 }
 
-/* Ag-Grid result cells — re-enable text selection.
-   WKWebView sets user-select:none on the body; the grid's built-in
-   enableCellTextSelection prop has no effect without this override.
-   --wails-draggable: no-drag prevents the WebKit drag layer from swallowing
-   pointer events before user-select can take effect. */
-.ag-theme-alpine,
-.ag-theme-alpine-dark {
+/* Custom TanStack data grid — re-enable text selection.
+   WKWebView sets user-select:none on the body; this override ensures cell
+   text is selectable. --wails-draggable: no-drag prevents the WebKit drag
+   layer from swallowing pointer events before user-select can take effect. */
+.thaw-grid {
   --wails-draggable: no-drag;
 }
-.ag-theme-alpine .ag-cell,
-.ag-theme-alpine-dark .ag-cell {
+.thaw-grid td {
   -webkit-user-select: text !important;
   user-select: text !important;
+}
+/* Alternating row background for readability */
+.thaw-grid tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--bg-raised) 50%, transparent);
 }
 
 /* Monaco editor — custom selection occurrence highlights.

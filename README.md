@@ -2,7 +2,7 @@
 
 A desktop application for Snowflake management: browsing objects, running SQL queries, exporting DDL to a git repository, and pushing changes via CI/CD workflows.
 
-**Stack:** Go · Wails v2 · React · Ant Design · Monaco Editor · Ag-Grid
+**Stack:** Go · Wails v2 · React · Ant Design · Monaco Editor · TanStack Table
 
 ---
 
@@ -81,7 +81,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - **Query Profile** — click the graph icon in the results status bar (visible for successful runs) to see the execution profile for the query (Operator Statistics, Time Breakdown, and Attributes)
 - **Code Snippets** — open **Tools → Code Snippets…** in the menu bar to browse 24 curated `CREATE OR REPLACE` templates across six categories (Data Objects, Code, Automation, Storage, Governance, Infrastructure); live search filters by name; selecting a snippet shows a read-only preview; clicking **Open in New Tab** loads the SQL into a new scratch tab for review and customisation before running
 - **Function Catalog AI Chat** — open **Help → Function Catalog…** and switch to the **Ask AI** tab to chat with the AI about any selected function; the function's full signatures and descriptions are automatically injected as context so you can ask usage questions, request examples, or compare overloads without pasting anything; for built-in Snowflake functions a **📖 Snowflake documentation** link opens the official docs page in the system browser; chat history resets automatically when switching to a different function
-- Results displayed in a virtualised Ag-Grid table
+- Results displayed in a virtualised TanStack Table grid
 - **NULL display** — `NULL` values are rendered as a faded italic `NULL` label so they are never confused with empty strings
 - **Copy from results** — right-click any cell to open a context menu with three options: **Copy cell value**, **Copy row (tab-separated)**, and **Copy row with headers**; all three write to the native OS clipboard via the Wails runtime so they work reliably on macOS (WKWebView suppresses standard browser clipboard access)
 - **Result history** — the last 10 successful result sets are kept in memory; a dropdown in the results status bar lets you switch between them (analogous to `LAST_QUERY_ID(-n)`); after a query failure the dropdown becomes a standalone **Previous results** picker — the grid is hidden until a result is explicitly selected, keeping the error visible and unambiguous; click the **pin** icon next to any entry to keep it indefinitely (pinned entries are exempt from the 10-result cap and float to the top of the dropdown); **right-click** any entry and choose **View side by side** to split the results area horizontally — both grids scroll in sync so rows stay aligned; the compare panel's query ID and row count appear on a second line of the status bar (right-aligned); close the split with the × button
@@ -517,7 +517,7 @@ Open **Tools → Schema Migration…** in the menu bar to deploy local `.sql` DD
 
 1. **Configure** — add one or more source directory → target database mappings; each mapping associates a local `.sql` directory with a fallback Snowflake database used for objects that have no explicit `USE DATABASE` context; multiple mappings let you migrate several databases in a single wizard run
 2. **Scan** — reads every `.sql` file in all source directories, splits multi-statement files, tracks `USE DATABASE` / `USE SCHEMA` context, applies each mapping's fallback database, and deduplicates objects across all sources by kind + name; the summary shows total counts by object type
-3. **Review** — shows an Ag-Grid diff table with a status tag for each object:
+3. **Review** — shows an TanStack Table diff grid with a status tag for each object:
    - **New** — exists locally but not in Snowflake
    - **Changed** — exists in both; DDL is normalised (comments stripped, whitespace collapsed, uppercased, trailing `;` removed) before comparison to eliminate cosmetic noise
    - **Unchanged** — identical DDL; hidden from selection by default

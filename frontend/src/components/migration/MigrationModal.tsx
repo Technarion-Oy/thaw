@@ -10,7 +10,7 @@
 //
 // @thaw-domain: Schema Migration
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useMemo, useState } from "react";
 import {
   Alert,
   Button,
@@ -31,8 +31,15 @@ import {
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { DiffEditor } from "@monaco-editor/react";
 import { patchMonacoClipboard } from "../../utils/monacoClipboard";
-import { AgGridReact } from "ag-grid-react";
-import type { ColDef } from "ag-grid-community";
+import {
+  useReactTable,
+  getCoreRowModel,
+  getSortedRowModel,
+  type ColumnDef,
+  type SortingState,
+  flexRender,
+} from "@tanstack/react-table";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ScanMigrationSource,
   AnalyzeMigration,
@@ -156,6 +163,23 @@ function extractReferencedNames(ddl: string): string[] {
 
 let nextMappingId = 1;
 
+// ─── Shared grid table styles ─────────────────────────────────────────────────
+
+const gridTableStyle: React.CSSProperties = {
+  width: "100%",
+  borderCollapse: "collapse",
+  tableLayout: "fixed",
+  fontSize: 12,
+  fontFamily: "var(--ui-font, 'Inter', 'SF Pro Text', system-ui, sans-serif)",
+};
+
+const gridHeaderStyle: React.CSSProperties = {
+  position: "sticky",
+  top: 0,
+  zIndex: 2,
+  background: "var(--bg-raised)",
+};
+
 // ─── MigrationModal ───────────────────────────────────────────────────────────
 
 export default function MigrationModal({ onClose }: Props) {
@@ -184,7 +208,7 @@ export default function MigrationModal({ onClose }: Props) {
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [activeDiff, setActiveDiff] = useState<MigrationDiffItem | null>(null);
   const [statusFilter, setStatusFilter] = useState<"all" | "new" | "changed">("all");
-  const gridRef = useRef<AgGridReact>(null);
+  const reviewScrollRef = useRef<HTMLDivElement>(null);
 
   // Step 3 — Strategy & Protect
   const [tableStrategy, setTableStrategy] = useState<string>("in_place");
@@ -195,6 +219,7 @@ export default function MigrationModal({ onClose }: Props) {
   const [execEvents, setExecEvents] = useState<MigrationExecEvent[]>([]);
   const [deployDone, setDeployDone] = useState(false);
   const [latestProgress, setLatestProgress] = useState({ done: 0, total: 0 });
+  const execScrollRef = useRef<HTMLDivElement>(null);
 
   // Load databases on mount
   useEffect(() => {
@@ -360,15 +385,16 @@ export default function MigrationModal({ onClose }: Props) {
     }
   }
 
-  // Grid column definitions
-  const reviewCols: ColDef<MigrationDiffItem>[] = [
+  // Review grid columns (TanStack)
+  const reviewCols = useMemo<ColumnDef<MigrationDiffItem>[]>(() => [
     {
-      headerName: "",
-      width: 44,
-      pinned: "left",
-      cellRenderer: (params: { data?: MigrationDiffItem }) => {
-        if (!params.data) return null;
-        const item = params.data;
+      id: "checkbox",
+      header: "",
+      size: 44,
+      enableSorting: false,
+      enableResizing: false,
+      cell: ({ row }) => {
+        const item = row.original;
         const key = objectLabel(item.object);
         return (
           <Checkbox
@@ -380,30 +406,73 @@ export default function MigrationModal({ onClose }: Props) {
       },
     },
     {
-      headerName: "Status",
-      width: 110,
-      field: "status",
-      cellRenderer: (params: { value?: string }) => (
-        <Tag color={statusColor(params.value ?? "")}>{(params.value ?? "").toUpperCase()}</Tag>
-      ),
+      id: "status",
+      accessorKey: "status",
+      header: "Status",
+      size: 110,
+      cell: ({ getValue }) => {
+        const v = (getValue() as string) ?? "";
+        return <Tag color={statusColor(v)}>{v.toUpperCase()}</Tag>;
+      },
     },
-    { headerName: "Kind", width: 120, valueGetter: (p) => p.data?.object.objectKind },
-    { headerName: "Name", flex: 1, valueGetter: (p) => p.data?.object.objectName },
-    { headerName: "Schema", width: 120, valueGetter: (p) => p.data?.object.schema },
-    { headerName: "Database", width: 130, valueGetter: (p) => p.data?.object.database },
     {
-      headerName: "File",
-      flex: 1,
-      valueGetter: (p) =>
-        p.data?.object.filePath
-          ? p.data.object.filePath.split("/").pop()
-          : "",
+      id: "kind",
+      header: "Kind",
+      size: 120,
+      accessorFn: (row) => row.object.objectKind,
     },
-  ];
+    {
+      id: "name",
+      header: "Name",
+      size: 200,
+      accessorFn: (row) => row.object.objectName,
+    },
+    {
+      id: "schema",
+      header: "Schema",
+      size: 120,
+      accessorFn: (row) => row.object.schema,
+    },
+    {
+      id: "database",
+      header: "Database",
+      size: 130,
+      accessorFn: (row) => row.object.database,
+    },
+    {
+      id: "file",
+      header: "File",
+      size: 200,
+      accessorFn: (row) =>
+        row.object.filePath ? row.object.filePath.split("/").pop() ?? "" : "",
+    },
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [selectedKeys, diffItems]);
 
   const filteredDiff = diffItems.filter((item) => {
     if (statusFilter === "all") return true;
     return item.status === statusFilter;
+  });
+
+  const [reviewSorting, setReviewSorting] = useState<SortingState>([]);
+
+  const reviewTable = useReactTable({
+    data: filteredDiff,
+    columns: reviewCols,
+    state: { sorting: reviewSorting },
+    onSortingChange: setReviewSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    columnResizeMode: "onChange",
+  });
+
+  const reviewRows = reviewTable.getRowModel().rows;
+
+  const reviewVirtualizer = useVirtualizer({
+    count: reviewRows.length,
+    getScrollElement: () => reviewScrollRef.current,
+    estimateSize: () => 32,
+    overscan: 5,
   });
 
   // ── Step 3 helpers ─────────────────────────────────────────────────────────
@@ -503,6 +572,79 @@ export default function MigrationModal({ onClose }: Props) {
     await CancelMigration().catch(() => {});
   }
 
+  // Exec grid columns (TanStack)
+  const execCols = useMemo<ColumnDef<MigrationExecEvent>[]>(() => [
+    {
+      id: "pass",
+      accessorKey: "pass",
+      header: "Pass",
+      size: 70,
+    },
+    {
+      id: "kind",
+      header: "Kind",
+      size: 130,
+      accessorFn: (row) => {
+        const parts = (row.object ?? "").split(".");
+        return parts[2] ?? "";
+      },
+    },
+    {
+      id: "name",
+      header: "Name",
+      size: 200,
+      accessorFn: (row) => {
+        const parts = (row.object ?? "").split(".");
+        return parts[3] ?? row.object ?? "";
+      },
+    },
+    {
+      id: "status",
+      accessorKey: "status",
+      header: "Status",
+      size: 110,
+      cell: ({ getValue }) => {
+        const v = (getValue() as string) ?? "";
+        return <Tag color={statusColor(v)}>{v.toUpperCase()}</Tag>;
+      },
+    },
+    {
+      id: "error",
+      accessorKey: "error",
+      header: "Error",
+      size: 300,
+    },
+  ], []);
+
+  // Exec events table (only terminal events — skip "running")
+  const terminalEvents = useMemo(
+    () => execEvents.filter(
+      (e) => e.status === "success" || e.status === "failed" || e.status === "skipped"
+    ),
+    [execEvents]
+  );
+
+  const [execSorting, setExecSorting] = useState<SortingState>([]);
+
+  const execTable = useReactTable({
+    data: terminalEvents,
+    columns: execCols,
+    state: { sorting: execSorting },
+    onSortingChange: setExecSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    columnResizeMode: "onChange",
+  });
+
+  const execRows = execTable.getRowModel().rows;
+
+  const execVirtualizer = useVirtualizer({
+    count: execRows.length,
+    getScrollElement: () => execScrollRef.current,
+    estimateSize: () => 32,
+    overscan: 5,
+  });
+
   // ── Render steps ──────────────────────────────────────────────────────────
 
   function renderStep0() {
@@ -528,7 +670,7 @@ export default function MigrationModal({ onClose }: Props) {
                     placeholder="/path/to/sql/files"
                     style={{ fontFamily: "monospace" }}
                   />
-                  <Button onClick={() => handlePickDir(mapping.id)}>Browse…</Button>
+                  <Button onClick={() => handlePickDir(mapping.id)}>Browse...</Button>
                 </Space.Compact>
                 <Select
                   showSearch
@@ -627,6 +769,8 @@ export default function MigrationModal({ onClose }: Props) {
   }
 
   function renderStep2() {
+    const reviewVisibleCols = reviewTable.getVisibleLeafColumns();
+
     return (
       <Space direction="vertical" style={{ width: "100%", gap: 12 }}>
         <Space wrap>
@@ -654,20 +798,137 @@ export default function MigrationModal({ onClose }: Props) {
         </Space>
 
         <div
-          className={resolved === "dark" ? "ag-theme-alpine-dark" : "ag-theme-alpine"}
-          style={{ height: 260, width: "100%" }}
+          ref={reviewScrollRef}
+          className="thaw-grid"
+          style={{ height: 260, width: "100%", overflow: "auto" }}
         >
-          <AgGridReact
-            ref={gridRef}
-            rowData={filteredDiff}
-            columnDefs={reviewCols}
-            rowSelection="single"
-            onRowClicked={(e) => {
-              if (e.data) setActiveDiff(e.data as MigrationDiffItem);
-            }}
-            defaultColDef={{ resizable: true }}
-            suppressMovableColumns
-          />
+          <table style={gridTableStyle}>
+            <colgroup>
+              {reviewVisibleCols.map((column) => (
+                <col key={column.id} style={{ width: column.getSize() }} />
+              ))}
+            </colgroup>
+            <thead style={gridHeaderStyle}>
+              {reviewTable.getHeaderGroups().map((headerGroup) => (
+                <tr key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => {
+                    const isSorted = header.column.getIsSorted();
+                    const canSort = header.column.getCanSort();
+                    return (
+                      <th
+                        key={header.id}
+                        style={{
+                          height: 32,
+                          padding: "0 8px",
+                          textAlign: "left",
+                          fontWeight: 600,
+                          fontSize: 12,
+                          color: "var(--text-muted)",
+                          borderBottom: "1px solid var(--border)",
+                          borderRight: "1px solid var(--border)",
+                          cursor: canSort ? "pointer" : "default",
+                          userSelect: "none",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          position: header.id === "checkbox" ? "sticky" : undefined,
+                          left: header.id === "checkbox" ? 0 : undefined,
+                          zIndex: header.id === "checkbox" ? 3 : undefined,
+                          background: "var(--bg-raised)",
+                          width: header.column.getSize(),
+                        }}
+                        onClick={canSort ? header.column.getToggleSortingHandler() : undefined}
+                      >
+                        {flexRender(header.column.columnDef.header, header.getContext())}
+                        {isSorted && (
+                          <span style={{ marginLeft: 4, fontSize: 9 }}>
+                            {isSorted === "asc" ? "\u25B2" : "\u25BC"}
+                          </span>
+                        )}
+                        {header.column.getCanResize() && (
+                          <div
+                            onMouseDown={header.getResizeHandler()}
+                            onTouchStart={header.getResizeHandler()}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              position: "absolute",
+                              right: 0,
+                              top: 0,
+                              bottom: 0,
+                              width: 4,
+                              cursor: "col-resize",
+                              background: header.column.getIsResizing() ? "var(--accent)" : "transparent",
+                            }}
+                          />
+                        )}
+                      </th>
+                    );
+                  })}
+                </tr>
+              ))}
+            </thead>
+            <tbody>
+              {reviewVirtualizer.getVirtualItems().length > 0 && (
+                <tr>
+                  <td
+                    style={{ height: reviewVirtualizer.getVirtualItems()[0].start, padding: 0, border: "none" }}
+                    colSpan={reviewVisibleCols.length}
+                  />
+                </tr>
+              )}
+              {reviewVirtualizer.getVirtualItems().map((virtualRow) => {
+                const row = reviewRows[virtualRow.index];
+                return (
+                  <tr
+                    key={row.id}
+                    style={{
+                      height: 32,
+                      cursor: "pointer",
+                      background: activeDiff && objectLabel(activeDiff.object) === objectLabel(row.original.object)
+                        ? "color-mix(in srgb, var(--accent) 12%, transparent)"
+                        : undefined,
+                    }}
+                    onClick={() => setActiveDiff(row.original)}
+                  >
+                    {row.getVisibleCells().map((cell) => (
+                      <td
+                        key={cell.id}
+                        style={{
+                          padding: "0 8px",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          borderBottom: "1px solid var(--border)",
+                          color: "var(--text)",
+                          height: 32,
+                          position: cell.column.id === "checkbox" ? "sticky" : undefined,
+                          left: cell.column.id === "checkbox" ? 0 : undefined,
+                          zIndex: cell.column.id === "checkbox" ? 1 : undefined,
+                          background: cell.column.id === "checkbox" ? "var(--bg-overlay)" : undefined,
+                        }}
+                      >
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+              {reviewVirtualizer.getVirtualItems().length > 0 && (
+                <tr>
+                  <td
+                    style={{
+                      height:
+                        reviewVirtualizer.getTotalSize() -
+                        (reviewVirtualizer.getVirtualItems()[reviewVirtualizer.getVirtualItems().length - 1]?.end ?? 0),
+                      padding: 0,
+                      border: "none",
+                    }}
+                    colSpan={reviewVisibleCols.length}
+                  />
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
 
         {activeDiff && (
@@ -856,39 +1117,7 @@ export default function MigrationModal({ onClose }: Props) {
         ? Math.round((latestProgress.done / latestProgress.total) * 100)
         : 0;
 
-    // Exec events table (only terminal events — skip "running")
-    const terminalEvents = execEvents.filter(
-      (e) => e.status === "success" || e.status === "failed" || e.status === "skipped"
-    );
-
-    const execCols: ColDef<MigrationExecEvent>[] = [
-      { headerName: "Pass", width: 70, field: "pass" },
-      {
-        headerName: "Kind",
-        width: 130,
-        valueGetter: (p) => {
-          const parts = (p.data?.object ?? "").split(".");
-          return parts[2] ?? "";
-        },
-      },
-      {
-        headerName: "Name",
-        flex: 1,
-        valueGetter: (p) => {
-          const parts = (p.data?.object ?? "").split(".");
-          return parts[3] ?? p.data?.object ?? "";
-        },
-      },
-      {
-        headerName: "Status",
-        width: 110,
-        field: "status",
-        cellRenderer: (params: { value?: string }) => (
-          <Tag color={statusColor(params.value ?? "")}>{(params.value ?? "").toUpperCase()}</Tag>
-        ),
-      },
-      { headerName: "Error", flex: 2, field: "error" },
-    ];
+    const execVisibleCols = execTable.getVisibleLeafColumns();
 
     return (
       <Space direction="vertical" style={{ width: "100%", gap: 12 }}>
@@ -899,15 +1128,121 @@ export default function MigrationModal({ onClose }: Props) {
         />
 
         <div
-          className={resolved === "dark" ? "ag-theme-alpine-dark" : "ag-theme-alpine"}
-          style={{ height: 320, width: "100%" }}
+          ref={execScrollRef}
+          className="thaw-grid"
+          style={{ height: 320, width: "100%", overflow: "auto" }}
         >
-          <AgGridReact
-            rowData={terminalEvents}
-            columnDefs={execCols}
-            defaultColDef={{ resizable: true }}
-            suppressMovableColumns
-          />
+          <table style={gridTableStyle}>
+            <colgroup>
+              {execVisibleCols.map((column) => (
+                <col key={column.id} style={{ width: column.getSize() }} />
+              ))}
+            </colgroup>
+            <thead style={gridHeaderStyle}>
+              {execTable.getHeaderGroups().map((headerGroup) => (
+                <tr key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => {
+                    const isSorted = header.column.getIsSorted();
+                    const canSort = header.column.getCanSort();
+                    return (
+                      <th
+                        key={header.id}
+                        style={{
+                          height: 32,
+                          padding: "0 8px",
+                          textAlign: "left",
+                          fontWeight: 600,
+                          fontSize: 12,
+                          color: "var(--text-muted)",
+                          borderBottom: "1px solid var(--border)",
+                          borderRight: "1px solid var(--border)",
+                          cursor: canSort ? "pointer" : "default",
+                          userSelect: "none",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          background: "var(--bg-raised)",
+                          position: "relative",
+                          width: header.column.getSize(),
+                        }}
+                        onClick={canSort ? header.column.getToggleSortingHandler() : undefined}
+                      >
+                        {flexRender(header.column.columnDef.header, header.getContext())}
+                        {isSorted && (
+                          <span style={{ marginLeft: 4, fontSize: 9 }}>
+                            {isSorted === "asc" ? "\u25B2" : "\u25BC"}
+                          </span>
+                        )}
+                        {header.column.getCanResize() && (
+                          <div
+                            onMouseDown={header.getResizeHandler()}
+                            onTouchStart={header.getResizeHandler()}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              position: "absolute",
+                              right: 0,
+                              top: 0,
+                              bottom: 0,
+                              width: 4,
+                              cursor: "col-resize",
+                              background: header.column.getIsResizing() ? "var(--accent)" : "transparent",
+                            }}
+                          />
+                        )}
+                      </th>
+                    );
+                  })}
+                </tr>
+              ))}
+            </thead>
+            <tbody>
+              {execVirtualizer.getVirtualItems().length > 0 && (
+                <tr>
+                  <td
+                    style={{ height: execVirtualizer.getVirtualItems()[0].start, padding: 0, border: "none" }}
+                    colSpan={execVisibleCols.length}
+                  />
+                </tr>
+              )}
+              {execVirtualizer.getVirtualItems().map((virtualRow) => {
+                const row = execRows[virtualRow.index];
+                return (
+                  <tr key={row.id} style={{ height: 32 }}>
+                    {row.getVisibleCells().map((cell) => (
+                      <td
+                        key={cell.id}
+                        style={{
+                          padding: "0 8px",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          borderBottom: "1px solid var(--border)",
+                          color: "var(--text)",
+                          height: 32,
+                        }}
+                      >
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+              {execVirtualizer.getVirtualItems().length > 0 && (
+                <tr>
+                  <td
+                    style={{
+                      height:
+                        execVirtualizer.getTotalSize() -
+                        (execVirtualizer.getVirtualItems()[execVirtualizer.getVirtualItems().length - 1]?.end ?? 0),
+                      padding: 0,
+                      border: "none",
+                    }}
+                    colSpan={execVisibleCols.length}
+                  />
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>

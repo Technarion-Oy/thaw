@@ -10,11 +10,24 @@
 //
 // @thaw-domain: SQL Editor & Diagnostics
 
-import { useMemo, useRef, useCallback, useState, useEffect, useLayoutEffect } from "react";
-import { AgGridReact } from "ag-grid-react";
-import type { GridApi, FirstDataRenderedEvent, RowDataUpdatedEvent, CellContextMenuEvent, BodyScrollEvent } from "ag-grid-community";
-import "ag-grid-community/styles/ag-grid.css";
-import "ag-grid-community/styles/ag-theme-alpine.css";
+import {
+  useMemo,
+  useRef,
+  useCallback,
+  useState,
+  useEffect,
+  useLayoutEffect,
+} from "react";
+import {
+  useReactTable,
+  getCoreRowModel,
+  getSortedRowModel,
+  getFilteredRowModel,
+  type ColumnDef,
+  type SortingState,
+  flexRender,
+} from "@tanstack/react-table";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { message } from "antd";
 import type { QueryResult } from "../../store/queryStore";
 import { useThemeStore } from "../../store/themeStore";
@@ -43,9 +56,58 @@ interface CtxMenu {
 // Maximum column width in px. Prevents wide-content columns (e.g. QUERY_TEXT)
 // from consuming the entire grid and hiding all other columns.
 const MAX_COL_WIDTH = 300;
+const MIN_COL_WIDTH = 60;
+
+// Number of sample rows to inspect for auto-sizing column widths.
+const AUTO_SIZE_SAMPLE_ROWS = 100;
+
+// Read a CSS variable from the document root as a number (strip "px").
+function cssVar(name: string, fallback: number): number {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const n = parseInt(raw, 10);
+  return isNaN(n) ? fallback : n;
+}
+
+// Estimate the pixel width of a string at 11px font size.
+// Uses a shared off-screen canvas for text measurement.
+let _measureCtx: CanvasRenderingContext2D | null = null;
+function measureText(text: string): number {
+  if (!_measureCtx) {
+    const canvas = document.createElement("canvas");
+    _measureCtx = canvas.getContext("2d");
+    if (_measureCtx) _measureCtx.font = "11px Inter, SF Pro Text, system-ui, sans-serif";
+  }
+  if (!_measureCtx) return text.length * 7;
+  return _measureCtx.measureText(text).width;
+}
+
+// Compute initial column widths from header text + first N rows of data.
+function computeColumnWidths(
+  columns: string[],
+  rows: unknown[][],
+  sampleRows: number = AUTO_SIZE_SAMPLE_ROWS
+): number[] {
+  const widths: number[] = [];
+  const slicedRows = rows.slice(0, sampleRows);
+
+  for (let colIdx = 0; colIdx < columns.length; colIdx++) {
+    // Start with header width + padding for sort indicator
+    let maxW = measureText(columns[colIdx]) + 32;
+
+    for (const row of slicedRows) {
+      const val = row[colIdx];
+      const text = val == null ? "NULL" : String(val);
+      const w = measureText(text) + 16; // cell padding
+      if (w > maxW) maxW = w;
+    }
+
+    widths.push(Math.max(MIN_COL_WIDTH, Math.min(MAX_COL_WIDTH, Math.ceil(maxW))));
+  }
+  return widths;
+}
 
 // Render NULL/undefined as a distinct faded label so it is never confused
-// with an empty string.  All other values are stringified normally.
+// with an empty string. All other values are stringified normally.
 function NullCellRenderer({ value }: { value: unknown }) {
   if (value === null || value === undefined) {
     return (
@@ -57,37 +119,101 @@ function NullCellRenderer({ value }: { value: unknown }) {
   return <>{String(value)}</>;
 }
 
-// Read a CSS variable from the document root as a number (strip "px").
-function cssVar(name: string, fallback: number): number {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  const n = parseInt(raw, 10);
-  return isNaN(n) ? fallback : n;
-}
-
-export default function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
-  const resolved  = useThemeStore((s) => s.resolved);
+function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
   // Subscribe to uiDensity so the grid re-renders (and re-reads CSS vars) when
   // the user changes the density setting.
   useThemeStore((s) => s.uiDensity);
-  const apiRef       = useRef<GridApi | null>(null);
-  const wrapperRef   = useRef<HTMLDivElement>(null);
-  const isSyncingRef = useRef(false);
-  const ctxRef  = useRef<HTMLDivElement>(null);
-  const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null);
 
-  // Helper: returns the ag-grid scrollable viewport element.
-  const getViewport = () =>
-    wrapperRef.current?.querySelector<HTMLElement>(".ag-body-viewport") ?? null;
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const isSyncingRef = useRef(false);
+  const ctxRef = useRef<HTMLDivElement>(null);
+  const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null);
+  const [sorting, setSorting] = useState<SortingState>([]);
+  const [columnSizing, setColumnSizing] = useState<Record<string, number>>({});
+
+  const rowHeight = cssVar("--row-height", 24);
+  const headerHeight = cssVar("--header-height", 28);
+
+  // Convert result.rows into row objects for TanStack Table
+  const data = useMemo(
+    () =>
+      result.rows.map((row) =>
+        Object.fromEntries(result.columns.map((col, i) => [col, row[i]]))
+      ),
+    [result.rows, result.columns]
+  );
+
+  // Compute initial column widths from data
+  const initialWidths = useMemo(
+    () => computeColumnWidths(result.columns, result.rows),
+    [result.columns, result.rows]
+  );
+
+  // Set initial column sizing when data changes
+  useEffect(() => {
+    const sizing: Record<string, number> = {};
+    result.columns.forEach((col, i) => {
+      sizing[col] = initialWidths[i];
+    });
+    setColumnSizing(sizing);
+  }, [result.columns, initialWidths]);
+
+  // Column definitions
+  const columns = useMemo<ColumnDef<Record<string, unknown>>[]>(
+    () =>
+      result.columns.map((col, colIdx) => ({
+        id: col,
+        accessorKey: col,
+        header: col,
+        size: initialWidths[colIdx],
+        minSize: MIN_COL_WIDTH,
+        maxSize: MAX_COL_WIDTH,
+        cell: ({ getValue }) => <NullCellRenderer value={getValue()} />,
+      })),
+    [result.columns, initialWidths]
+  );
+
+  const table = useReactTable({
+    data,
+    columns,
+    state: { sorting, columnSizing },
+    onSortingChange: setSorting,
+    onColumnSizingChange: setColumnSizing,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    columnResizeMode: "onChange",
+  });
+
+  const { rows: tableRows } = table.getRowModel();
+
+  // Row virtualizer
+  const rowVirtualizer = useVirtualizer({
+    count: tableRows.length,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: () => rowHeight,
+    overscan: 10,
+  });
+
+  // Column virtualizer for horizontal scrolling with wide tables
+  const visibleColumns = table.getVisibleLeafColumns();
+  const columnVirtualizer = useVirtualizer({
+    horizontal: true,
+    count: visibleColumns.length,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: (index) => visibleColumns[index].getSize(),
+    overscan: 3,
+  });
 
   // Register a scrollTo handle so the parent can programmatically scroll this grid.
   useEffect(() => {
     if (!syncScrollRef) return;
     syncScrollRef.current = {
       scrollTo: (top: number) => {
-        const vp = getViewport();
-        if (!vp) return;
+        const el = scrollContainerRef.current;
+        if (!el) return;
         isSyncingRef.current = true;
-        vp.scrollTop = top;
+        el.scrollTop = top;
         requestAnimationFrame(() => { isSyncingRef.current = false; });
       },
     };
@@ -95,16 +221,24 @@ export default function ResultGrid({ result, syncScrollRef, onVerticalScroll }: 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncScrollRef]);
 
+  // Handle scroll events for sync
+  const handleScroll = useCallback(() => {
+    if (isSyncingRef.current) return;
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    onVerticalScroll?.(el.scrollTop);
+  }, [onVerticalScroll]);
+
   // Dismiss context menu on outside mousedown or Escape.
   useEffect(() => {
     if (!ctxMenu) return;
     const dismiss = () => setCtxMenu(null);
-    const onKey   = (e: KeyboardEvent) => { if (e.key === "Escape") dismiss(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") dismiss(); };
     document.addEventListener("mousedown", dismiss);
-    document.addEventListener("keydown",   onKey);
+    document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("mousedown", dismiss);
-      document.removeEventListener("keydown",   onKey);
+      document.removeEventListener("keydown", onKey);
     };
   }, [ctxMenu]);
 
@@ -113,61 +247,28 @@ export default function ResultGrid({ result, syncScrollRef, onVerticalScroll }: 
     if (!ctxMenu || !ctxRef.current) return;
     const el = ctxRef.current;
     const { width, height } = el.getBoundingClientRect();
-    const pad  = 8;
-    const left = Math.max(pad, Math.min(ctxMenu.x, window.innerWidth  - width  - pad));
-    const top  = Math.max(pad, Math.min(ctxMenu.y, window.innerHeight - height - pad));
+    const pad = 8;
+    const left = Math.max(pad, Math.min(ctxMenu.x, window.innerWidth - width - pad));
+    const top = Math.max(pad, Math.min(ctxMenu.y, window.innerHeight - height - pad));
     el.style.left = `${left}px`;
-    el.style.top  = `${top}px`;
+    el.style.top = `${top}px`;
   }, [ctxMenu]);
 
-  const columnDefs = useMemo(
-    () =>
-      result.columns.map((col) => ({
-        field: col,
-        headerName: col,
-        resizable: true,
-        sortable: true,
-        filter: true,
-        minWidth: 60,
-        maxWidth: MAX_COL_WIDTH,
-      })),
+  const handleCellContextMenu = useCallback(
+    (e: React.MouseEvent, rowData: Record<string, unknown>, colId: string) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const cellValue = rowData[colId] == null ? "" : String(rowData[colId]);
+      const rowValues = result.columns.map((col) => {
+        const v = rowData[col];
+        return v == null ? "" : String(v);
+      });
+
+      setCtxMenu({ x: e.clientX, y: e.clientY, cellValue, rowValues, columns: result.columns });
+    },
     [result.columns]
   );
-
-  const rowData = useMemo(
-    () =>
-      result.rows.map((row) =>
-        Object.fromEntries(result.columns.map((col, i) => [col, row[i]]))
-      ),
-    [result.rows, result.columns]
-  );
-
-  // Auto-size every column to fit its header and cell content, capped at MAX_COL_WIDTH.
-  const autoSize = useCallback((e: FirstDataRenderedEvent | RowDataUpdatedEvent) => {
-    (e.api as GridApi).autoSizeAllColumns();
-  }, []);
-
-  const onBodyScroll = useCallback((e: BodyScrollEvent) => {
-    if (isSyncingRef.current || e.direction !== "vertical") return;
-    onVerticalScroll?.(getViewport()?.scrollTop ?? 0);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onVerticalScroll]);
-
-  const onCellContextMenu = useCallback((e: CellContextMenuEvent) => {
-    const mouse = e.event as MouseEvent | undefined;
-    if (!mouse) return;
-    // Prevent the document-level contextmenu handler from firing (it would
-    // call e.preventDefault which is fine, but we also don't need it).
-    mouse.stopPropagation();
-
-    const cellValue = e.value == null ? "" : String(e.value);
-    const rowValues = result.columns.map((col) => {
-      const v = e.data?.[col];
-      return v == null ? "" : String(v);
-    });
-
-    setCtxMenu({ x: mouse.clientX, y: mouse.clientY, cellValue, rowValues, columns: result.columns });
-  }, [result.columns]);
 
   const copyCell = async () => {
     if (!ctxMenu) return;
@@ -190,45 +291,202 @@ export default function ResultGrid({ result, syncScrollRef, onVerticalScroll }: 
     message.success("Row copied with headers");
   };
 
-  const menuItem = (label: string, action: () => void) => (
+  const menuItemEl = (label: string, action: () => void) => (
     <div
       style={{ padding: "6px 14px", cursor: "pointer", color: "var(--text)", whiteSpace: "nowrap" }}
       onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-      // onMouseDown instead of onClick: dismiss fires on mousedown (document
-      // listener), so onClick would never fire. stopPropagation prevents
-      // the dismiss handler from running before the action.
       onMouseDown={(e) => { e.stopPropagation(); action(); }}
     >
       {label}
     </div>
   );
 
+  const totalColumnWidth = columnVirtualizer.getTotalSize();
+  const totalRowHeight = rowVirtualizer.getTotalSize();
+
   return (
-    <div ref={wrapperRef} style={{ height: "100%", width: "100%", position: "relative" }}>
+    <div style={{ height: "100%", width: "100%", position: "relative" }}>
       <div
-        className={resolved === "dark" ? "ag-theme-alpine-dark" : "ag-theme-alpine"}
-        style={{ height: "100%", width: "100%", "--ag-font-size": "11px" } as React.CSSProperties}
+        ref={scrollContainerRef}
+        className="thaw-grid"
+        onScroll={handleScroll}
+        style={{
+          height: "100%",
+          width: "100%",
+          overflow: "auto",
+          // WKWebView compat
+          ["--wails-draggable" as string]: "no-drag",
+        }}
       >
-        <AgGridReact
-          columnDefs={columnDefs}
-          rowData={rowData}
-          defaultColDef={{ resizable: true, minWidth: 60, maxWidth: MAX_COL_WIDTH, cellRenderer: NullCellRenderer }}
-          rowHeight={cssVar("--row-height", 24)}
-          headerHeight={cssVar("--header-height", 28)}
-          animateRows
-          enableCellTextSelection
-          suppressMenuHide
-          pagination
-          paginationPageSize={500}
-          onGridReady={(e) => { apiRef.current = e.api; }}
-          onFirstDataRendered={autoSize}
-          onRowDataUpdated={autoSize}
-          onBodyScroll={onBodyScroll}
-          onCellContextMenu={onCellContextMenu}
-        />
+        <table
+          style={{
+            width: Math.max(totalColumnWidth, scrollContainerRef.current?.clientWidth ?? 0),
+            borderCollapse: "collapse",
+            tableLayout: "fixed",
+            fontSize: 11,
+            fontFamily: "var(--ui-font, 'Inter', 'SF Pro Text', system-ui, sans-serif)",
+          }}
+        >
+          {/* Column widths via colgroup */}
+          <colgroup>
+            {columnVirtualizer.getVirtualItems().map((virtualCol) => {
+              const column = visibleColumns[virtualCol.index];
+              return (
+                <col
+                  key={column.id}
+                  style={{ width: column.getSize() }}
+                />
+              );
+            })}
+          </colgroup>
+
+          {/* Header */}
+          <thead
+            style={{
+              position: "sticky",
+              top: 0,
+              zIndex: 2,
+              background: "var(--bg-raised)",
+            }}
+          >
+            {table.getHeaderGroups().map((headerGroup) => (
+              <tr key={headerGroup.id}>
+                {columnVirtualizer.getVirtualItems().map((virtualCol) => {
+                  const header = headerGroup.headers[virtualCol.index];
+                  if (!header) return null;
+                  const isSorted = header.column.getIsSorted();
+                  return (
+                    <th
+                      key={header.id}
+                      style={{
+                        height: headerHeight,
+                        padding: "0 8px",
+                        textAlign: "left",
+                        fontWeight: 600,
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                        borderBottom: "1px solid var(--border)",
+                        borderRight: "1px solid var(--border)",
+                        cursor: "pointer",
+                        userSelect: "none",
+                        position: "relative",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        width: header.column.getSize(),
+                      }}
+                      onClick={header.column.getToggleSortingHandler()}
+                    >
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {flexRender(header.column.columnDef.header, header.getContext())}
+                      </span>
+                      {isSorted && (
+                        <span style={{ marginLeft: 4, fontSize: 9 }}>
+                          {isSorted === "asc" ? "\u25B2" : "\u25BC"}
+                        </span>
+                      )}
+                      {/* Resize handle */}
+                      <div
+                        onMouseDown={header.getResizeHandler()}
+                        onTouchStart={header.getResizeHandler()}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          position: "absolute",
+                          right: 0,
+                          top: 0,
+                          bottom: 0,
+                          width: 4,
+                          cursor: "col-resize",
+                          background: header.column.getIsResizing()
+                            ? "var(--accent)"
+                            : "transparent",
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!header.column.getIsResizing())
+                            e.currentTarget.style.background = "var(--border)";
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!header.column.getIsResizing())
+                            e.currentTarget.style.background = "transparent";
+                        }}
+                      />
+                    </th>
+                  );
+                })}
+              </tr>
+            ))}
+          </thead>
+
+          {/* Body */}
+          <tbody>
+            {/* Top spacer */}
+            {rowVirtualizer.getVirtualItems().length > 0 && (
+              <tr>
+                <td
+                  style={{ height: rowVirtualizer.getVirtualItems()[0].start, padding: 0, border: "none" }}
+                  colSpan={visibleColumns.length}
+                />
+              </tr>
+            )}
+            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+              const row = tableRows[virtualRow.index];
+              return (
+                <tr
+                  key={row.id}
+                  style={{ height: rowHeight }}
+                >
+                  {columnVirtualizer.getVirtualItems().map((virtualCol) => {
+                    const cell = row.getVisibleCells()[virtualCol.index];
+                    if (!cell) return null;
+                    return (
+                      <td
+                        key={cell.id}
+                        onContextMenu={(e) =>
+                          handleCellContextMenu(e, row.original, cell.column.id)
+                        }
+                        style={{
+                          padding: "0 8px",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          borderBottom: "1px solid var(--border)",
+                          borderRight: "1px solid color-mix(in srgb, var(--border) 40%, transparent)",
+                          color: "var(--text)",
+                          // WKWebView text selection
+                          WebkitUserSelect: "text",
+                          userSelect: "text",
+                          height: rowHeight,
+                          width: cell.column.getSize(),
+                        }}
+                      >
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+            {/* Bottom spacer */}
+            {rowVirtualizer.getVirtualItems().length > 0 && (
+              <tr>
+                <td
+                  style={{
+                    height:
+                      totalRowHeight -
+                      (rowVirtualizer.getVirtualItems()[rowVirtualizer.getVirtualItems().length - 1]?.end ?? 0),
+                    padding: 0,
+                    border: "none",
+                  }}
+                  colSpan={visibleColumns.length}
+                />
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
 
+      {/* Context menu */}
       {ctxMenu && (
         <div
           ref={ctxRef}
@@ -247,11 +505,13 @@ export default function ResultGrid({ result, syncScrollRef, onVerticalScroll }: 
             fontSize: 13,
           }}
         >
-          {menuItem("Copy cell value",        copyCell)}
-          {menuItem("Copy row (tab-separated)", copyRow)}
-          {menuItem("Copy row with headers",  copyRowWithHeaders)}
+          {menuItemEl("Copy cell value", copyCell)}
+          {menuItemEl("Copy row (tab-separated)", copyRow)}
+          {menuItemEl("Copy row with headers", copyRowWithHeaders)}
         </div>
       )}
     </div>
   );
 }
+
+export default ResultGrid;

@@ -118,7 +118,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
     - Fully gated by the **File Format Builder** feature flag
   - **Live SQL Preview** — the full `CREATE STAGE` statement updates in real-time as you modify the form
   - **Execution** — runs `ExecDDL` and refreshes the schema tree automatically on success
-- **Stage File Browser** — right-click any stage and choose **Browse Stage Files…** to open a virtualised Ag-Grid view of the stage contents:
+- **Stage File Browser** — right-click any stage and choose **Browse Stage Files…** to open a virtualised TanStack Table grid view of the stage contents:
     - **LIST view** — displays name, size, MD5, and last modified timestamp for all files in the stage
     - **Regex filtering** — a search bar allows filtering files using the Snowflake `PATTERN` parameter
     - **Bulk operations** — select multiple files to **Download** to a local directory or **Delete** from the stage in one go
@@ -129,7 +129,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Create** — dynamic form with name, OR REPLACE / IF NOT EXISTS options, Auto Ingest toggle, Error Integration, AWS SNS Topic, Integration, Comment, and an embedded Monaco editor for the `COPY INTO` statement; live SQL preview shows the full `CREATE PIPE` statement
   - **Properties** — right-click a pipe and choose **Properties…** to view `SHOW PIPES` metadata plus inline-editable **Pipe Execution Paused** (toggle), **Comment** (inline edit / UNSET), and **Tags** (add/remove key-value pairs); changes are applied immediately via `ALTER PIPE … SET / UNSET`
   - **Refresh** — right-click a pipe and choose **Refresh…** to open a dialog with optional Prefix and Modified After parameters; live SQL preview shows the generated `ALTER PIPE … REFRESH` command; click **Refresh** to execute
-  - **Copy History** — right-click a pipe and choose **Copy History…** to open an Ag-Grid view backed by `INFORMATION_SCHEMA.COPY_HISTORY`; defaults to the last 24 hours; filterable by Start Time, Status, and File Name substring; sortable by `LAST_LOAD_TIME DESC`
+  - **Copy History** — right-click a pipe and choose **Copy History…** to open a TanStack Table grid view backed by `INFORMATION_SCHEMA.COPY_HISTORY`; defaults to the last 24 hours; filterable by Start Time, Status, and File Name substring; sortable by `LAST_LOAD_TIME DESC`
   - **Drop** — right-click a pipe and choose **Delete…** for a standard danger-confirmation dialog; executes `DROP PIPE IF EXISTS` and removes the node from the tree
 - **Git Repository Management** — right-click any schema and choose **Create Object** → **Git Repository…**, or right-click an existing git repository and choose **Fetch** or **Modify…**:
   - **Create** — specify the origin URL, API integration (required), optional git credentials secret (selected from a live account-wide secret list), optional comment and tags; live SQL preview shows the full `CREATE GIT REPOSITORY` statement
@@ -391,7 +391,7 @@ Open **Tools → Schema Migration…** to deploy local `.sql` DDL files to a Sno
 - Merges and deduplicates objects across all sources by kind + name (last definition wins); shows a count breakdown by object type (TABLE: N, VIEW: N, …)
 
 ### Step 3 — Review
-- **Ag-Grid diff table** with status tags:
+- **TanStack Table diff grid** with status tags:
   - **New** — object exists locally but not in Snowflake
   - **Changed** — DDL differs after normalisation (comments stripped, whitespace collapsed, uppercased, trailing `;` removed)
   - **Unchanged** — identical; hidden from selection by default
@@ -947,4 +947,4 @@ Open **Help → Keyboard Shortcuts…** in the menu bar for a searchable, always
 
 ---
 
-*Thaw is built with Go, Wails, React, Ant Design, Monaco Editor, and Ag-Grid.*
+*Thaw is built with Go, Wails, React, Ant Design, Monaco Editor, and TanStack Table.*
