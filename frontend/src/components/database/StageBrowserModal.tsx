@@ -448,7 +448,11 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
                     key={row.id}
                     style={{
                       height: 32,
-                      background: isSelected ? "color-mix(in srgb, var(--accent) 12%, transparent)" : undefined,
+                      background: isSelected
+                        ? "color-mix(in srgb, var(--accent) 12%, transparent)"
+                        : virtualRow.index % 2 === 1
+                          ? "color-mix(in srgb, var(--bg-raised) 50%, transparent)"
+                          : undefined,
                     }}
                   >
                     {row.getVisibleCells().map((cell) => (

@@ -145,21 +145,24 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
     [result.columns, result.rows]
   );
 
-  // Set initial column sizing when data changes
+  // Set initial column sizing when data changes.
+  // Column ids use the format `${colIdx}_${name}` to handle duplicate column
+  // names from JOINs (e.g. `SELECT a.id, b.id`).
   useEffect(() => {
     const sizing: Record<string, number> = {};
     result.columns.forEach((col, i) => {
-      sizing[col] = initialWidths[i];
+      sizing[`${i}_${col}`] = initialWidths[i];
     });
     setColumnSizing(sizing);
   }, [result.columns, initialWidths]);
 
   // Column definitions — use accessorFn to read from the raw unknown[] arrays
-  // instead of accessorKey which requires row objects.
+  // instead of accessorKey which requires row objects.  Column ids include the
+  // index prefix so duplicate column names (common in JOIN results) are unique.
   const columns = useMemo<ColumnDef<unknown[]>[]>(
     () =>
       result.columns.map((col, colIdx) => ({
-        id: col,
+        id: `${colIdx}_${col}`,
         accessorFn: (row: unknown[]) => row[colIdx],
         header: col,
         size: initialWidths[colIdx],
@@ -255,7 +258,9 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
       e.preventDefault();
       e.stopPropagation();
 
-      const colIdx = result.columns.indexOf(columnId);
+      // Column ids use the format `${colIdx}_${name}` — extract the numeric prefix.
+      const underscoreIdx = columnId.indexOf("_");
+      const colIdx = underscoreIdx >= 0 ? parseInt(columnId.substring(0, underscoreIdx), 10) : -1;
       const cellValue = colIdx >= 0 && rowData[colIdx] != null ? String(rowData[colIdx]) : "";
       const rowValues = rowData.map((v) => (v == null ? "" : String(v)));
 
@@ -455,7 +460,12 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
               return (
                 <tr
                   key={row.id}
-                  style={{ height: rowHeight }}
+                  style={{
+                    height: rowHeight,
+                    background: virtualRow.index % 2 === 1
+                      ? "color-mix(in srgb, var(--bg-raised) 50%, transparent)"
+                      : undefined,
+                  }}
                 >
                   {/* Left column spacer */}
                   {leftColCount > 0 && (

@@ -317,7 +317,15 @@ export default function PipeCopyHistoryModal({ db, schema, name, onClose }: Prop
               {rowVirtualizer.getVirtualItems().map((virtualRow) => {
                 const row = tableRows[virtualRow.index];
                 return (
-                  <tr key={row.id} style={{ height: 32 }}>
+                  <tr
+                    key={row.id}
+                    style={{
+                      height: 32,
+                      background: virtualRow.index % 2 === 1
+                        ? "color-mix(in srgb, var(--bg-raised) 50%, transparent)"
+                        : undefined,
+                    }}
+                  >
                     {row.getVisibleCells().map((cell) => (
                       <td
                         key={cell.id}

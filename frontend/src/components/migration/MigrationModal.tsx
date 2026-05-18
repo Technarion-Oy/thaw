@@ -886,7 +886,9 @@ export default function MigrationModal({ onClose }: Props) {
                       cursor: "pointer",
                       background: activeDiff && objectLabel(activeDiff.object) === objectLabel(row.original.object)
                         ? "color-mix(in srgb, var(--accent) 12%, transparent)"
-                        : undefined,
+                        : virtualRow.index % 2 === 1
+                          ? "color-mix(in srgb, var(--bg-raised) 50%, transparent)"
+                          : undefined,
                     }}
                     onClick={() => setActiveDiff(row.original)}
                   >
@@ -1207,7 +1209,15 @@ export default function MigrationModal({ onClose }: Props) {
               {execVirtualizer.getVirtualItems().map((virtualRow) => {
                 const row = execRows[virtualRow.index];
                 return (
-                  <tr key={row.id} style={{ height: 32 }}>
+                  <tr
+                    key={row.id}
+                    style={{
+                      height: 32,
+                      background: virtualRow.index % 2 === 1
+                        ? "color-mix(in srgb, var(--bg-raised) 50%, transparent)"
+                        : undefined,
+                    }}
+                  >
                     {row.getVisibleCells().map((cell) => (
                       <td
                         key={cell.id}
