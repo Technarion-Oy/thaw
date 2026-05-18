@@ -498,9 +498,6 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
                           borderBottom: "1px solid var(--border)",
                           borderRight: "1px solid color-mix(in srgb, var(--border) 40%, transparent)",
                           color: "var(--text)",
-                          // WKWebView text selection
-                          WebkitUserSelect: "text",
-                          userSelect: "text",
                           height: rowHeight,
                           width: cell.column.getSize(),
                         }}

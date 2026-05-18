@@ -866,6 +866,14 @@ export default function MigrationModal({ onClose }: Props) {
                               cursor: "col-resize",
                               background: header.column.getIsResizing() ? "var(--accent)" : "transparent",
                             }}
+                            onMouseEnter={(e) => {
+                              if (!header.column.getIsResizing())
+                                e.currentTarget.style.background = "var(--border)";
+                            }}
+                            onMouseLeave={(e) => {
+                              if (!header.column.getIsResizing())
+                                e.currentTarget.style.background = "transparent";
+                            }}
                           />
                         )}
                       </th>
@@ -1195,6 +1203,14 @@ export default function MigrationModal({ onClose }: Props) {
                               width: 4,
                               cursor: "col-resize",
                               background: header.column.getIsResizing() ? "var(--accent)" : "transparent",
+                            }}
+                            onMouseEnter={(e) => {
+                              if (!header.column.getIsResizing())
+                                e.currentTarget.style.background = "var(--border)";
+                            }}
+                            onMouseLeave={(e) => {
+                              if (!header.column.getIsResizing())
+                                e.currentTarget.style.background = "transparent";
                             }}
                           />
                         )}
