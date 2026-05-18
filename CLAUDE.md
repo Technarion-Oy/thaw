@@ -362,6 +362,6 @@ Integration tests live in `internal/integration/` (require live Snowflake connec
 | Build tool | Vite 5 |
 | UI library | Ant Design 5 |
 | SQL editor | Monaco (`@monaco-editor/react`) |
-| Results grid | Ag-Grid Community |
+| Results grid | TanStack Table v8 + `@tanstack/react-virtual` |
 | State | Zustand 5 |
 | Terminal | xterm.js |

@@ -8,8 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useEffect, useMemo, useRef } from "react";
-import { useThemeStore } from "../../store/themeStore";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import {
   Modal, Space, Typography, Button, Alert, Input, App, Dropdown, MenuProps,
@@ -17,11 +16,17 @@ import {
 import {
   InboxOutlined, ReloadOutlined, DownloadOutlined, DeleteOutlined, SearchOutlined,
 } from "@ant-design/icons";
-import { AgGridReact } from "ag-grid-react";
+import {
+  useReactTable,
+  getCoreRowModel,
+  getSortedRowModel,
+  type ColumnDef,
+  type SortingState,
+  flexRender,
+} from "@tanstack/react-table";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { ListStageFiles, RemoveStageFiles, DownloadFileFromStage, PickDirectory } from "../../../wailsjs/go/main/App";
 import type { stage } from "../../../wailsjs/go/models";
-import "ag-grid-community/styles/ag-grid.css";
-import "ag-grid-community/styles/ag-theme-alpine.css";
 
 const { Text } = Typography;
 
@@ -32,17 +37,25 @@ interface Props {
   onClose: () => void;
 }
 
+function formatSize(bytes: number | null | undefined): string {
+  if (bytes === undefined || bytes === null) return "-";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
 export default function StageBrowserModal({ db, schema, name, onClose }: Props) {
-  const resolved = useThemeStore((s) => s.resolved);
   const flags = useFeatureFlagsStore((s) => s.flags);
   const { modal, message } = App.useApp();
   const [files, setFiles] = useState<stage.StageFile[]>([]);
 
-
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pattern, setPattern] = useState("");
-  const gridRef = useRef<AgGridReact>(null);
+  const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
+  const [sorting, setSorting] = useState<SortingState>([{ id: "name", desc: false }]);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const stageRef = `@${db}.${schema}.${name}`;
 
@@ -65,31 +78,88 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db, schema, name]);
 
-  const columnDefs = useMemo(() => [
+  // Clear selection when files change
+  useEffect(() => {
+    setSelectedRowIds(new Set());
+  }, [files]);
+
+  const toggleRow = useCallback((rowName: string) => {
+    setSelectedRowIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowName)) next.delete(rowName);
+      else next.add(rowName);
+      return next;
+    });
+  }, []);
+
+  const toggleAll = useCallback(() => {
+    setSelectedRowIds((prev) => {
+      if (prev.size === files.length) return new Set();
+      return new Set(files.map((f) => f.name));
+    });
+  }, [files]);
+
+  const getSelectedRows = useCallback((): stage.StageFile[] => {
+    return files.filter((f) => selectedRowIds.has(f.name));
+  }, [files, selectedRowIds]);
+
+  // Column defs are kept stable — checkbox rendering is handled inline in the
+  // JSX (outside flexRender) so selection state changes don't rebuild columns.
+  const columns = useMemo<ColumnDef<stage.StageFile>[]>(() => [
     {
-      field: "name",
-      headerName: "Name",
-      flex: 1,
-      checkboxSelection: true,
-      headerCheckboxSelection: true,
-      sort: "asc" as const,
+      id: "checkbox",
+      header: "",
+      size: 40,
+      enableSorting: false,
+      enableResizing: false,
     },
     {
-      field: "size",
-      headerName: "Size",
-      width: 120,
-      valueFormatter: (p: any) => {
-        if (p.value === undefined || p.value === null) return "-";
-        const bytes = p.value;
-        if (bytes < 1024) return `${bytes} B`;
-        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-        if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-        return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-      },
+      id: "name",
+      accessorKey: "name",
+      header: "Name",
+      size: 300,
+      minSize: 100,
     },
-    { field: "md5", headerName: "MD5", width: 280 },
-    { field: "lastModified", headerName: "Last Modified", width: 220 },
+    {
+      id: "size",
+      accessorKey: "size",
+      header: "Size",
+      size: 120,
+      cell: ({ getValue }) => formatSize(getValue() as number | null),
+    },
+    {
+      id: "md5",
+      accessorKey: "md5",
+      header: "MD5",
+      size: 280,
+    },
+    {
+      id: "lastModified",
+      accessorKey: "lastModified",
+      header: "Last Modified",
+      size: 220,
+    },
   ], []);
+
+  const table = useReactTable({
+    data: files,
+    columns,
+    state: { sorting },
+    onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    columnResizeMode: "onChange",
+  });
+
+  const { rows: tableRows } = table.getRowModel();
+
+  const rowVirtualizer = useVirtualizer({
+    count: tableRows.length,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: () => 32,
+    overscan: 10,
+  });
+  const virtualRows = rowVirtualizer.getVirtualItems();
 
   const getFullPath = (fileName: string) => {
     const slashIdx = fileName.indexOf('/');
@@ -97,8 +167,8 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
     return `${stageRef}${relativePath}`;
   };
 
-  const handleDelete = async (selectedRows?: stage.StageFile[]) => {
-    const selected = selectedRows || gridRef.current?.api.getSelectedRows();
+  const handleDelete = async (targetRows?: stage.StageFile[]) => {
+    const selected = targetRows || getSelectedRows();
     if (!selected || selected.length === 0) return;
 
     modal.confirm({
@@ -123,8 +193,8 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
     });
   };
 
-  const handleDownload = async (selectedRows?: stage.StageFile[]) => {
-    const selected = selectedRows || gridRef.current?.api.getSelectedRows();
+  const handleDownload = async (targetRows?: stage.StageFile[]) => {
+    const selected = targetRows || getSelectedRows();
     if (!selected || selected.length === 0) return;
 
     const localPath = await PickDirectory();
@@ -148,10 +218,10 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
   const [ctxPos, setCtxPos] = useState({ x: 0, y: 0 });
   const [ctxRows, setCtxRows] = useState<stage.StageFile[]>([]);
 
-  const onCellContextMenu = (event: any) => {
-    event.event.preventDefault();
-    const selected = gridRef.current?.api.getSelectedRows() || [];
-    const clickedRow = event.data;
+  const onCellContextMenu = useCallback((e: React.MouseEvent, rowData: stage.StageFile) => {
+    e.preventDefault();
+    const selected = getSelectedRows();
+    const clickedRow = rowData;
 
     // If clicked row is not in selection, use only clicked row.
     // Otherwise, use the whole selection.
@@ -161,9 +231,9 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
     }
 
     setCtxRows(targetRows);
-    setCtxPos({ x: event.event.clientX, y: event.event.clientY });
+    setCtxPos({ x: e.clientX, y: e.clientY });
     setCtxVisible(true);
-  };
+  }, [getSelectedRows]);
 
   const menuItems: MenuProps["items"] = [
     {
@@ -182,6 +252,8 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
       disabled: !flags.removeCommand,
     },
   ];
+
+  const visibleColumns = table.getVisibleLeafColumns();
 
   return (
     <Modal
@@ -222,7 +294,7 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
             <Button
               icon={<DownloadOutlined />}
               onClick={() => handleDownload()}
-              disabled={files.length === 0}
+              disabled={selectedRowIds.size === 0}
             >
               Download Selected
             </Button>
@@ -232,7 +304,7 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
               icon={<DeleteOutlined />}
               danger
               onClick={() => handleDelete()}
-              disabled={files.length === 0}
+              disabled={selectedRowIds.size === 0}
             >
               Delete Selected
             </Button>
@@ -251,20 +323,187 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
       )}
 
       <div
-        className={resolved === "dark" ? "ag-theme-alpine-dark" : "ag-theme-alpine"}
-        style={{ height: 500, width: "100%" }}
+        ref={scrollContainerRef}
+        className="thaw-grid"
         onContextMenu={(e) => e.preventDefault()}
+        tabIndex={0}
+        style={{
+          height: 500,
+          width: "100%",
+          overflow: "auto",
+          outline: "none",
+          ["--wails-draggable" as string]: "no-drag",
+        }}
       >
-        <AgGridReact
-          ref={gridRef}
-          columnDefs={columnDefs}
-          rowData={files}
-          rowSelection="multiple"
-          defaultColDef={{ resizable: true, sortable: true, filter: true }}
-          suppressMovableColumns
-          onCellContextMenu={onCellContextMenu}
-          overlayNoRowsTemplate={loading ? " " : "No files found in this stage."}
-        />
+        {files.length === 0 && !loading ? (
+          <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
+            No files found in this stage.
+          </div>
+        ) : (
+          <table
+            role="grid"
+            aria-label="Stage files"
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              tableLayout: "fixed",
+              fontSize: 12,
+              fontFamily: "var(--ui-font, 'Inter', 'SF Pro Text', system-ui, sans-serif)",
+            }}
+          >
+            <colgroup>
+              {visibleColumns.map((column) => (
+                <col key={column.id} style={{ width: column.getSize() }} />
+              ))}
+            </colgroup>
+            <thead style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--bg-raised)" }}>
+              {table.getHeaderGroups().map((headerGroup) => (
+                <tr key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => {
+                    const isSorted = header.column.getIsSorted();
+                    const canSort = header.column.getCanSort();
+                    return (
+                      <th
+                        key={header.id}
+                        style={{
+                          height: 32,
+                          padding: "0 8px",
+                          textAlign: "left",
+                          fontWeight: 600,
+                          fontSize: 12,
+                          color: "var(--text-muted)",
+                          borderBottom: "1px solid var(--border)",
+                          borderRight: "1px solid var(--border)",
+                          cursor: canSort ? "pointer" : "default",
+                          userSelect: "none",
+                          position: "relative",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          width: header.column.getSize(),
+                        }}
+                        onClick={canSort ? header.column.getToggleSortingHandler() : undefined}
+                      >
+                        {header.column.id === "checkbox" ? (
+                          <input
+                            type="checkbox"
+                            checked={files.length > 0 && selectedRowIds.size === files.length}
+                            onChange={toggleAll}
+                            style={{ cursor: "pointer" }}
+                            ref={(el) => {
+                              if (el) el.indeterminate = selectedRowIds.size > 0 && selectedRowIds.size < files.length;
+                            }}
+                          />
+                        ) : (
+                          <>
+                            {flexRender(header.column.columnDef.header, header.getContext())}
+                            {isSorted && (
+                              <span style={{ marginLeft: 4, fontSize: 9 }}>
+                                {isSorted === "asc" ? "\u25B2" : "\u25BC"}
+                              </span>
+                            )}
+                          </>
+                        )}
+                        {header.column.getCanResize() && (
+                          <div
+                            onMouseDown={header.getResizeHandler()}
+                            onTouchStart={header.getResizeHandler()}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              position: "absolute",
+                              right: 0,
+                              top: 0,
+                              bottom: 0,
+                              width: 4,
+                              cursor: "col-resize",
+                              background: header.column.getIsResizing() ? "var(--accent)" : "transparent",
+                            }}
+                            onMouseEnter={(e) => {
+                              if (!header.column.getIsResizing())
+                                e.currentTarget.style.background = "var(--border)";
+                            }}
+                            onMouseLeave={(e) => {
+                              if (!header.column.getIsResizing())
+                                e.currentTarget.style.background = "transparent";
+                            }}
+                          />
+                        )}
+                      </th>
+                    );
+                  })}
+                </tr>
+              ))}
+            </thead>
+            <tbody>
+              {virtualRows.length > 0 && (
+                <tr>
+                  <td
+                    style={{ height: virtualRows[0].start, padding: 0, border: "none" }}
+                    colSpan={visibleColumns.length}
+                  />
+                </tr>
+              )}
+              {virtualRows.map((virtualRow) => {
+                const row = tableRows[virtualRow.index];
+                const isSelected = selectedRowIds.has(row.original.name);
+                return (
+                  <tr
+                    key={row.id}
+                    style={{
+                      height: 32,
+                      background: isSelected
+                        ? "color-mix(in srgb, var(--accent) 12%, transparent)"
+                        : virtualRow.index % 2 === 1
+                          ? "color-mix(in srgb, var(--bg-raised) 50%, transparent)"
+                          : undefined,
+                    }}
+                  >
+                    {row.getVisibleCells().map((cell) => (
+                      <td
+                        key={cell.id}
+                        onContextMenu={(e) => onCellContextMenu(e, row.original)}
+                        style={{
+                          padding: "0 8px",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          borderBottom: "1px solid var(--border)",
+                          color: "var(--text)",
+                          height: 32,
+                        }}
+                      >
+                        {cell.column.id === "checkbox" ? (
+                          <input
+                            type="checkbox"
+                            checked={selectedRowIds.has(row.original.name)}
+                            onChange={() => toggleRow(row.original.name)}
+                            style={{ cursor: "pointer" }}
+                          />
+                        ) : (
+                          flexRender(cell.column.columnDef.cell, cell.getContext())
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+              {virtualRows.length > 0 && (
+                <tr>
+                  <td
+                    style={{
+                      height:
+                        rowVirtualizer.getTotalSize() -
+                        (virtualRows[virtualRows.length - 1]?.end ?? 0),
+                      padding: 0,
+                      border: "none",
+                    }}
+                    colSpan={visibleColumns.length}
+                  />
+                </tr>
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <Dropdown
