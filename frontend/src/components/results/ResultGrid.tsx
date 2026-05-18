@@ -773,6 +773,28 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
         onContextMenu={(e) => handleCellContextMenu(e, rowOriginal, columnId, rowIndex)}
         onMouseDown={(e) => handleCellMouseDown(e, rowIndex, colIdx)}
         onMouseEnter={() => handleCellMouseEnter(rowIndex, colIdx)}
+        onDoubleClick={(e) => {
+          // Allow native text selection on double-click
+          const td = e.currentTarget;
+          td.style.userSelect = "text";
+          td.style.webkitUserSelect = "text";
+          // Select the text content
+          const sel = window.getSelection();
+          if (sel) {
+            const range = document.createRange();
+            range.selectNodeContents(td);
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
+          // Re-disable on the next mousedown anywhere
+          const restore = () => {
+            td.style.userSelect = "none";
+            td.style.webkitUserSelect = "none";
+            document.removeEventListener("mousedown", restore);
+          };
+          // Delay so the current double-click selection isn't cleared
+          requestAnimationFrame(() => document.addEventListener("mousedown", restore));
+        }}
         style={{
           padding: "0 8px",
           overflow: "hidden",
@@ -787,6 +809,8 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
           left: stickyLeft != null ? stickyLeft : undefined,
           right: stickyRight != null ? stickyRight : undefined,
           zIndex: pinned ? 1 : undefined,
+          userSelect: "none",
+          WebkitUserSelect: "none",
           background: selected
             ? "color-mix(in srgb, var(--accent) 20%, transparent)"
             : pinned ? "var(--bg)" : undefined,
@@ -1170,12 +1194,7 @@ class ResultGridErrorBoundary extends React.Component<
     if (this.state.error) {
       return (
         <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 12 }}>
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>Grid rendering error</div>
-          <pre style={{ whiteSpace: "pre-wrap", fontSize: 11, color: "var(--text-faint)" }}>
-            {this.state.error.message}
-            {"\n"}
-            {this.state.error.stack}
-          </pre>
+          Unable to display results. Try running the query again.
         </div>
       );
     }
