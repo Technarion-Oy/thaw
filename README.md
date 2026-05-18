@@ -86,6 +86,15 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - **Copy from results** — right-click any cell to open a context menu with three options: **Copy cell value**, **Copy row (tab-separated)**, and **Copy row with headers**; all three write to the native OS clipboard via the Wails runtime so they work reliably on macOS (WKWebView suppresses standard browser clipboard access)
 - **Result history** — the last 10 successful result sets are kept in memory; a dropdown in the results status bar lets you switch between them (analogous to `LAST_QUERY_ID(-n)`); after a query failure the dropdown becomes a standalone **Previous results** picker — the grid is hidden until a result is explicitly selected, keeping the error visible and unambiguous; click the **pin** icon next to any entry to keep it indefinitely (pinned entries are exempt from the 10-result cap and float to the top of the dropdown); **right-click** any entry and choose **View side by side** to split the results area horizontally — both grids scroll in sync so rows stay aligned; the compare panel's query ID and row count appear on a second line of the status bar (right-aligned); close the split with the × button
 - **Export results** — CSV and Excel (`.xlsx`) export buttons in the results status bar; CSV uses RFC 4180 quoting; Excel uses SheetJS to produce a native `.xlsx` file; both open a native save dialog with format-appropriate file filters; exports reflect whichever historical result is currently selected
+- **Auto-size columns** — double-click a column resize handle to auto-fit width to content
+- **Column pinning** — right-click a column header → **Pin to Left / Right** to freeze it during scrolling
+- **Global grid search** (`⌘G`) — search bar above the grid with match highlighting and navigation
+- **Data type formatting** — right-click a header → **Format Column…** to apply number/currency/percentage/datetime formatting
+- **Conditional formatting** — right-click a header → **Conditional Formatting…** for colour-scale, data-bar, or text-match rules
+- **Excel-style column filtering** — right-click a header → **Filter…** for a checklist + condition filter dropdown
+- **Multi-cell copy & selection** (feature-flagged) — drag to select a range; `⌘C` copies as TSV with headers; row-number gutter and status bar with Sum/Avg/Count/Min/Max
+- **Quick charting** — right-click a selection → **Create Chart…** for bar, line, or scatter charts via Recharts
+- **Row grouping** — right-click a header → **Group by This Column** or drag headers to the grouping drop zone
 
 ### Embedded terminal
 
@@ -727,7 +736,7 @@ thaw/
     │   ├── App.tsx                # Root component, Ant Design dark theme
     │   ├── main.tsx               # React entry point; suppresses WebView context menu
     │   ├── styles/global.css      # Global styles incl. Monaco occurrence-highlight class
-    │   ├── store/                   # Zustand stores (12 stores)
+    │   ├── store/                   # Zustand stores (13 stores)
     │   │   ├── connectionStore.ts  # Connection state
     │   │   ├── diffStore.ts        # Text comparison pending item + fetch state
     │   │   ├── featureFlagsStore.ts # Feature flags (loaded on startup, reloaded after modal save)
@@ -765,7 +774,7 @@ thaw/
     │       ├── notebook/             # Jupyter-style notebook: cell editors, deploy, execute, preferences, debugger
     │       ├── pipe/                 # Pipe management: create, properties, refresh, copy history
     │       ├── procedure/            # Call Procedure / Call Function modals
-    │       ├── results/              # ResultGrid, ExplainModal, QueryProfileModal
+    │       ├── results/              # ResultGrid, GridSearch, StatusBar, QuickChartModal, ColumnFilterDropdown, ConditionalFormattingModal, DataTypeFormatModal, ExplainModal, QueryProfileModal
     │       ├── secret/               # Secret management: create, modify (OAUTH2, PASSWORD, etc.)
     │       ├── settings/             # AI settings, Feature Flags toggle, Layout settings
     │       ├── shared/               # Shared UI utilities (ObjectNameCaseControl)
@@ -1127,6 +1136,7 @@ Open **Help → Keyboard Shortcuts…** in the menu bar for a searchable, always
 | `⌘⇧ Enter` | `Ctrl+Shift+Enter` | Run all statements |
 | `Esc` | `Esc` | Cancel running query |
 | `⌘↓` | `Ctrl+↓` | Focus results grid |
+| `⌘G` | `Ctrl+G` | Toggle grid search |
 | `⌘E` | `Ctrl+E` | Export current results as CSV |
 
 ### Editor

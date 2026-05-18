@@ -22,27 +22,45 @@ import {
   useReactTable,
   getCoreRowModel,
   getSortedRowModel,
+  getFilteredRowModel,
+  getGroupedRowModel,
+  getExpandedRowModel,
   type ColumnDef,
   type SortingState,
+  type ColumnFiltersState,
+  type ColumnPinningState,
+  // GroupingState imported via type through TanStack's internal types
+  type ExpandedState,
   flexRender,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { message } from "antd";
 import type { QueryResult } from "../../store/queryStore";
 import { useThemeStore } from "../../store/themeStore";
+import { useGridStore, type ConditionalRule } from "../../store/gridStore";
+import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { computeColumnWidths } from "../../utils/gridMeasure";
+import { computeColumnWidths, measureText } from "../../utils/gridMeasure";
+import { applyFormat } from "./DataTypeFormatModal";
+import { columnFilterFn, type ColumnFilterValue } from "./ColumnFilterDropdown";
+import ColumnFilterDropdown from "./ColumnFilterDropdown";
+import ConditionalFormattingModal from "./ConditionalFormattingModal";
+import DataTypeFormatModal from "./DataTypeFormatModal";
+import QuickChartModal from "./QuickChartModal";
 
 export interface ScrollSyncHandle {
   scrollTo: (top: number) => void;
 }
 
+export interface ResultGridHandle {
+  scrollToRow: (rowIndex: number) => void;
+}
+
 interface Props {
   result: QueryResult;
-  /** Exposes a scrollTo handle so a sibling grid can drive this grid's scroll position. */
   syncScrollRef?: React.MutableRefObject<ScrollSyncHandle | null>;
-  /** Called when this grid scrolls vertically so the sibling can follow. */
   onVerticalScroll?: (top: number) => void;
+  gridRef?: React.MutableRefObject<ResultGridHandle | null>;
 }
 
 interface CtxMenu {
@@ -51,24 +69,89 @@ interface CtxMenu {
   cellValue: string;
   rowValues: string[];
   columns: string[];
+  rowIndex: number;
+  colIndex: number;
 }
 
-// Maximum column width in px. Prevents wide-content columns (e.g. QUERY_TEXT)
-// from consuming the entire grid and hiding all other columns.
+interface HeaderCtxMenu {
+  x: number;
+  y: number;
+  columnId: string;
+  columnName: string;
+  colIndex: number;
+}
+
+// Maximum column width for initial auto-sizing. Double-click resize removes this cap.
 const MAX_COL_WIDTH = 300;
+const AUTO_SIZE_MAX_COL_WIDTH = 800;
 const MIN_COL_WIDTH = 60;
 const GRID_FONT = "11px Inter, SF Pro Text, system-ui, sans-serif";
 
-// Read a CSS variable from the document root as a number (strip "px").
 function cssVar(name: string, fallback: number): number {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   const n = parseInt(raw, 10);
   return isNaN(n) ? fallback : n;
 }
 
-// Render NULL/undefined as a distinct faded label so it is never confused
-// with an empty string. All other values are stringified normally.
-function NullCellRenderer({ value }: { value: unknown }) {
+// ─── Conditional formatting helpers ───────────────────────────────────────────
+
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace("#", "");
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+function interpolateColor(min: string, max: string, ratio: number): string {
+  const [r1, g1, b1] = hexToRgb(min);
+  const [r2, g2, b2] = hexToRgb(max);
+  const r = Math.round(r1 + (r2 - r1) * ratio);
+  const g = Math.round(g1 + (g2 - g1) * ratio);
+  const b = Math.round(b1 + (b2 - b1) * ratio);
+  return `rgb(${r},${g},${b})`;
+}
+
+function getConditionalStyle(
+  value: unknown,
+  rules: ConditionalRule[],
+  colMin: number,
+  colMax: number,
+): React.CSSProperties {
+  const style: React.CSSProperties = {};
+  for (const rule of rules) {
+    if (rule.type === "colorScale") {
+      const n = Number(value);
+      if (!isNaN(n) && colMax !== colMin) {
+        const ratio = (n - colMin) / (colMax - colMin);
+        style.backgroundColor = interpolateColor(rule.minColor, rule.maxColor, Math.max(0, Math.min(1, ratio)));
+      }
+    } else if (rule.type === "textMatch") {
+      const s = value == null ? "" : String(value);
+      if (rule.pattern && s.toLowerCase().includes(rule.pattern.toLowerCase())) {
+        style.backgroundColor = rule.backgroundColor;
+        style.color = rule.textColor;
+      }
+    }
+    // dataBar is handled in the cell renderer JSX
+  }
+  return style;
+}
+
+// ─── Cell content renderer ────────────────────────────────────────────────────
+
+function CellContent({
+  value,
+  searchTerm,
+  formatConfig,
+  rules,
+  colMin,
+  colMax,
+}: {
+  value: unknown;
+  searchTerm: string;
+  formatConfig?: ReturnType<typeof useGridStore.getState>["columnFormats"][string];
+  rules?: ConditionalRule[];
+  colMin: number;
+  colMax: number;
+}) {
   if (value === null || value === undefined) {
     return (
       <span style={{ color: "var(--text-faint)", fontStyle: "italic", fontSize: 10, letterSpacing: "0.04em" }}>
@@ -76,44 +159,116 @@ function NullCellRenderer({ value }: { value: unknown }) {
       </span>
     );
   }
-  return <>{String(value)}</>;
+
+  let displayText = formatConfig ? applyFormat(value, formatConfig) : String(value);
+
+  // Data bar overlay
+  const dataBarRule = rules?.find((r) => r.type === "dataBar");
+  const dataBarEl = dataBarRule && dataBarRule.type === "dataBar" && colMax !== colMin ? (() => {
+    const n = Number(value);
+    if (isNaN(n)) return null;
+    const ratio = Math.max(0, Math.min(1, (n - colMin) / (colMax - colMin)));
+    return (
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: `${ratio * 100}%`,
+          backgroundColor: `${dataBarRule.color}33`,
+          pointerEvents: "none",
+        }}
+      />
+    );
+  })() : null;
+
+  // Search highlighting
+  if (searchTerm) {
+    const lower = displayText.toLowerCase();
+    const searchLower = searchTerm.toLowerCase();
+    const idx = lower.indexOf(searchLower);
+    if (idx >= 0) {
+      return (
+        <span style={{ position: "relative" }}>
+          {dataBarEl}
+          {displayText.slice(0, idx)}
+          <mark style={{ backgroundColor: "var(--accent)", color: "#fff", borderRadius: 2, padding: "0 1px" }}>
+            {displayText.slice(idx, idx + searchTerm.length)}
+          </mark>
+          {displayText.slice(idx + searchTerm.length)}
+        </span>
+      );
+    }
+  }
+
+  return (
+    <span style={{ position: "relative" }}>
+      {dataBarEl}
+      {displayText}
+    </span>
+  );
 }
 
-function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
-  // Subscribe to uiDensity so CSS var reads are recalculated on density change.
+// ─── Main component ───────────────────────────────────────────────────────────
+
+function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props) {
   const uiDensity = useThemeStore((s) => s.uiDensity);
+  const featureFlags = useFeatureFlagsStore((s) => s.flags);
+
+  // Grid store state
+  const selectionRange = useGridStore((s) => s.selectionRange);
+  const setSelectionRange = useGridStore((s) => s.setSelectionRange);
+  const isSelecting = useGridStore((s) => s.isSelecting);
+  const setIsSelecting = useGridStore((s) => s.setIsSelecting);
+  const searchTerm = useGridStore((s) => s.searchTerm);
+  const columnFormats = useGridStore((s) => s.columnFormats);
+  const conditionalRules = useGridStore((s) => s.conditionalRules);
+  const grouping = useGridStore((s) => s.grouping);
+  const setGrouping = useGridStore((s) => s.setGrouping);
+  const addGroupingColumn = useGridStore((s) => s.addGroupingColumn);
+  const removeGroupingColumn = useGridStore((s) => s.removeGroupingColumn);
+  const resetGrid = useGridStore((s) => s.reset);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isSyncingRef = useRef(false);
   const lastScrollTopRef = useRef(0);
   const ctxRef = useRef<HTMLDivElement>(null);
+  const headerCtxRef = useRef<HTMLDivElement>(null);
+
   const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null);
+  const [headerCtxMenu, setHeaderCtxMenu] = useState<HeaderCtxMenu | null>(null);
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnSizing, setColumnSizing] = useState<Record<string, number>>({});
   const [containerWidth, setContainerWidth] = useState(0);
+  const [columnPinning, setColumnPinning] = useState<ColumnPinningState>({ left: [], right: [] });
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const [expanded, setExpanded] = useState<ExpandedState>(true);
+
+  // Modal state
+  const [filterDropdown, setFilterDropdown] = useState<{ columnId: string; position: { x: number; y: number } } | null>(null);
+  const [formatModal, setFormatModal] = useState<{ columnId: string; columnName: string } | null>(null);
+  const [condFormatModal, setCondFormatModal] = useState<{ columnId: string; columnName: string } | null>(null);
+  const [chartModal, setChartModal] = useState(false);
+
+  // Drag-over state for grouping drop zone
+  const [groupDropOver, setGroupDropOver] = useState(false);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const rowHeight = useMemo(() => cssVar("--row-height", 24), [uiDensity]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const headerHeight = useMemo(() => cssVar("--header-height", 28), [uiDensity]);
 
-  // Pass the raw row arrays directly to TanStack Table — no per-row object
-  // conversion.  Column accessors read by index, avoiding the O(rows * cols)
-  // Object.fromEntries that previously blocked the main thread for ~1 s on
-  // large result sets when switching history entries.
   const data = result.rows;
 
-  // Compute initial column widths from data
   const initialWidths = useMemo(
     () => computeColumnWidths(result.columns, result.rows, {
       font: GRID_FONT, minWidth: MIN_COL_WIDTH, maxWidth: MAX_COL_WIDTH, nullText: "NULL",
     }),
-    [result.columns, result.rows]
+    [result.columns, result.rows],
   );
 
-  // Reset column sizing and sorting when the result changes.
-  // Column ids use the format `${colIdx}_${name}` to handle duplicate column
-  // names from JOINs (e.g. `SELECT a.id, b.id`).
+  // Reset grid state when result changes
   useEffect(() => {
     const sizing: Record<string, number> = {};
     result.columns.forEach((col, i) => {
@@ -121,11 +276,34 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
     });
     setColumnSizing(sizing);
     setSorting([]);
-  }, [result.columns, initialWidths]);
+    setColumnPinning({ left: [], right: [] });
+    setColumnFilters([]);
+    setExpanded(true);
+    resetGrid();
+  }, [result.columns, initialWidths, resetGrid]);
 
-  // Column definitions — use accessorFn to read from the raw unknown[] arrays
-  // instead of accessorKey which requires row objects.  Column ids include the
-  // index prefix so duplicate column names (common in JOIN results) are unique.
+  // Pre-compute min/max per column for conditional formatting
+  const columnMinMax = useMemo(() => {
+    const mm: Record<string, { min: number; max: number }> = {};
+    for (const colId of Object.keys(conditionalRules)) {
+      const underscoreIdx = colId.indexOf("_");
+      const colIdx = underscoreIdx >= 0 ? parseInt(colId.substring(0, underscoreIdx), 10) : -1;
+      if (colIdx < 0) continue;
+      let min = Infinity;
+      let max = -Infinity;
+      for (const row of result.rows) {
+        const n = Number(row[colIdx]);
+        if (!isNaN(n)) {
+          if (n < min) min = n;
+          if (n > max) max = n;
+        }
+      }
+      if (min !== Infinity) mm[colId] = { min, max };
+    }
+    return mm;
+  }, [conditionalRules, result.rows]);
+
+  // Column definitions
   const columns = useMemo<ColumnDef<unknown[]>[]>(
     () =>
       result.columns.map((col, colIdx) => ({
@@ -134,21 +312,33 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
         header: col,
         size: initialWidths[colIdx],
         minSize: MIN_COL_WIDTH,
-        maxSize: MAX_COL_WIDTH,
-        cell: ({ getValue }) => <NullCellRenderer value={getValue()} />,
+        maxSize: AUTO_SIZE_MAX_COL_WIDTH,
+        filterFn: columnFilterFn as any,
+        aggregatedCell: ({ getValue }: any) => {
+          const val = getValue();
+          return val != null ? String(val) : "";
+        },
       })),
-    [result.columns, initialWidths]
+    [result.columns, initialWidths],
   );
 
   const table = useReactTable({
     data,
     columns,
-    state: { sorting, columnSizing },
+    state: { sorting, columnSizing, columnPinning, columnFilters, grouping, expanded },
     onSortingChange: setSorting,
     onColumnSizingChange: setColumnSizing,
+    onColumnPinningChange: setColumnPinning,
+    onColumnFiltersChange: setColumnFilters,
+    onGroupingChange: setGrouping as any,
+    onExpandedChange: setExpanded,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getGroupedRowModel: getGroupedRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
     columnResizeMode: "onChange",
+    enableGrouping: true,
   });
 
   const { rows: tableRows } = table.getRowModel();
@@ -161,24 +351,37 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
     overscan: 10,
   });
 
-  // Column virtualizer for horizontal scrolling with wide tables
-  const visibleColumns = table.getVisibleLeafColumns();
+  // Separate pinned and unpinned columns
+  const leftPinned = table.getLeftLeafColumns();
+  const rightPinned = table.getRightLeafColumns();
+  const centerColumns = table.getCenterLeafColumns();
+
+  // Column virtualizer for center (unpinned) columns only
   const columnVirtualizer = useVirtualizer({
     horizontal: true,
-    count: visibleColumns.length,
+    count: centerColumns.length,
     getScrollElement: () => scrollContainerRef.current,
-    estimateSize: (index) => visibleColumns[index].getSize(),
+    estimateSize: (index) => centerColumns[index].getSize(),
     overscan: 3,
   });
 
-  // Measure container width after mount so the table fills the available space
-  // even on the first render (when scrollContainerRef is not yet attached).
   useLayoutEffect(() => {
     const el = scrollContainerRef.current;
     if (el) setContainerWidth(el.clientWidth);
   }, []);
 
-  // Register a scrollTo handle so the parent can programmatically scroll this grid.
+  // Expose scrollToRow for search navigation
+  useEffect(() => {
+    if (!gridRef) return;
+    gridRef.current = {
+      scrollToRow: (rowIndex: number) => {
+        rowVirtualizer.scrollToIndex(rowIndex, { align: "center" });
+      },
+    };
+    return () => { if (gridRef) gridRef.current = null; };
+  }, [gridRef, rowVirtualizer]);
+
+  // Scroll sync handle
   useEffect(() => {
     if (!syncScrollRef) return;
     syncScrollRef.current = {
@@ -194,8 +397,6 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncScrollRef]);
 
-  // Handle scroll events for sync — only fire when scrollTop actually changes
-  // to avoid unnecessary no-op calls during horizontal-only scrolling.
   const handleScroll = useCallback(() => {
     if (isSyncingRef.current) return;
     const el = scrollContainerRef.current;
@@ -206,10 +407,132 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
     onVerticalScroll?.(top);
   }, [onVerticalScroll]);
 
-  // Dismiss context menu on outside mousedown or Escape.
+  // ─── Auto-size column on double-click ─────────────────────────────────────
+
+  const autoSizeColumn = useCallback(
+    (columnId: string) => {
+      const underscoreIdx = columnId.indexOf("_");
+      const colIdx = underscoreIdx >= 0 ? parseInt(columnId.substring(0, underscoreIdx), 10) : -1;
+      if (colIdx < 0) return;
+
+      const headerText = result.columns[colIdx] ?? "";
+      let maxW = measureText(headerText, GRID_FONT) + 32;
+
+      // Measure all rows (up to 500 for performance)
+      const sampleRows = result.rows.slice(0, 500);
+      for (const row of sampleRows) {
+        const val = row[colIdx];
+        const text = val == null ? "NULL" : String(val);
+        const w = measureText(text, GRID_FONT) + 16;
+        if (w > maxW) maxW = w;
+      }
+
+      const newWidth = Math.max(MIN_COL_WIDTH, Math.min(AUTO_SIZE_MAX_COL_WIDTH, Math.ceil(maxW)));
+      setColumnSizing((prev) => ({ ...prev, [columnId]: newWidth }));
+    },
+    [result.columns, result.rows],
+  );
+
+  // ─── Range selection ──────────────────────────────────────────────────────
+
+  const selectionStartRef = useRef<{ row: number; col: number } | null>(null);
+
+  const handleCellMouseDown = useCallback(
+    (e: React.MouseEvent, rowIndex: number, colIndex: number) => {
+      if (e.button !== 0) return; // only left click
+      if (!featureFlags.multiCellCopy) return;
+      selectionStartRef.current = { row: rowIndex, col: colIndex };
+      setSelectionRange({ startRow: rowIndex, endRow: rowIndex, startCol: colIndex, endCol: colIndex });
+      setIsSelecting(true);
+    },
+    [featureFlags.multiCellCopy, setSelectionRange, setIsSelecting],
+  );
+
+  const handleCellMouseEnter = useCallback(
+    (rowIndex: number, colIndex: number) => {
+      if (!isSelecting || !selectionStartRef.current) return;
+      setSelectionRange({
+        startRow: selectionStartRef.current.row,
+        endRow: rowIndex,
+        startCol: selectionStartRef.current.col,
+        endCol: colIndex,
+      });
+    },
+    [isSelecting, setSelectionRange],
+  );
+
   useEffect(() => {
-    if (!ctxMenu) return;
-    const dismiss = () => setCtxMenu(null);
+    if (!isSelecting) return;
+    const onUp = () => {
+      setIsSelecting(false);
+      selectionStartRef.current = null;
+    };
+    document.addEventListener("mouseup", onUp);
+    return () => document.removeEventListener("mouseup", onUp);
+  }, [isSelecting, setIsSelecting]);
+
+  // ─── Multi-cell copy (Cmd+C / Ctrl+C) ────────────────────────────────────
+
+  useEffect(() => {
+    if (!featureFlags.multiCellCopy) return;
+    const handler = (e: KeyboardEvent) => {
+      const cmd = /Mac|iPhone|iPad/.test(navigator.platform) ? e.metaKey : e.ctrlKey;
+      if (!cmd || e.key !== "c") return;
+      if (!selectionRange) return;
+      // Only handle if focus is inside the grid
+      const el = scrollContainerRef.current;
+      if (!el || !el.contains(document.activeElement) && document.activeElement !== el) return;
+
+      e.preventDefault();
+      const { startRow, endRow, startCol, endCol } = selectionRange;
+      const minRow = Math.min(startRow, endRow);
+      const maxRow = Math.max(startRow, endRow);
+      const minCol = Math.min(startCol, endCol);
+      const maxCol = Math.max(startCol, endCol);
+
+      const lines: string[] = [];
+      // Add headers
+      const headers: string[] = [];
+      for (let c = minCol; c <= maxCol; c++) headers.push(result.columns[c] ?? "");
+      lines.push(headers.join("\t"));
+
+      for (let r = minRow; r <= maxRow; r++) {
+        const row = result.rows[r];
+        if (!row) continue;
+        const cells: string[] = [];
+        for (let c = minCol; c <= maxCol; c++) {
+          cells.push(row[c] == null ? "" : String(row[c]));
+        }
+        lines.push(cells.join("\t"));
+      }
+
+      ClipboardSetText(lines.join("\n")).then(() => {
+        const count = (maxRow - minRow + 1) * (maxCol - minCol + 1);
+        message.success(`Copied ${count} cells`);
+      });
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [featureFlags.multiCellCopy, selectionRange, result.rows, result.columns]);
+
+  // ─── Select all ───────────────────────────────────────────────────────────
+
+  const handleSelectAll = useCallback(() => {
+    if (!featureFlags.multiCellCopy) return;
+    setSelectionRange({
+      startRow: 0,
+      endRow: result.rows.length - 1,
+      startCol: 0,
+      endCol: result.columns.length - 1,
+    });
+  }, [featureFlags.multiCellCopy, result.rows.length, result.columns.length, setSelectionRange]);
+
+  // ─── Context menus ────────────────────────────────────────────────────────
+
+  // Dismiss context menus
+  useEffect(() => {
+    if (!ctxMenu && !headerCtxMenu) return;
+    const dismiss = () => { setCtxMenu(null); setHeaderCtxMenu(null); };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") dismiss(); };
     document.addEventListener("mousedown", dismiss);
     document.addEventListener("keydown", onKey);
@@ -217,34 +540,47 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
       document.removeEventListener("mousedown", dismiss);
       document.removeEventListener("keydown", onKey);
     };
-  }, [ctxMenu]);
+  }, [ctxMenu, headerCtxMenu]);
 
-  // Clamp context menu inside viewport before first paint.
+  // Clamp context menus
   useLayoutEffect(() => {
     if (!ctxMenu || !ctxRef.current) return;
     const el = ctxRef.current;
     const { width, height } = el.getBoundingClientRect();
     const pad = 8;
-    const left = Math.max(pad, Math.min(ctxMenu.x, window.innerWidth - width - pad));
-    const top = Math.max(pad, Math.min(ctxMenu.y, window.innerHeight - height - pad));
-    el.style.left = `${left}px`;
-    el.style.top = `${top}px`;
+    el.style.left = `${Math.max(pad, Math.min(ctxMenu.x, window.innerWidth - width - pad))}px`;
+    el.style.top = `${Math.max(pad, Math.min(ctxMenu.y, window.innerHeight - height - pad))}px`;
   }, [ctxMenu]);
 
+  useLayoutEffect(() => {
+    if (!headerCtxMenu || !headerCtxRef.current) return;
+    const el = headerCtxRef.current;
+    const { width, height } = el.getBoundingClientRect();
+    const pad = 8;
+    el.style.left = `${Math.max(pad, Math.min(headerCtxMenu.x, window.innerWidth - width - pad))}px`;
+    el.style.top = `${Math.max(pad, Math.min(headerCtxMenu.y, window.innerHeight - height - pad))}px`;
+  }, [headerCtxMenu]);
+
   const handleCellContextMenu = useCallback(
-    (e: React.MouseEvent, rowData: unknown[], columnId: string) => {
+    (e: React.MouseEvent, rowData: unknown[], columnId: string, rowIndex: number) => {
       e.preventDefault();
       e.stopPropagation();
-
-      // Column ids use the format `${colIdx}_${name}` — extract the numeric prefix.
       const underscoreIdx = columnId.indexOf("_");
       const colIdx = underscoreIdx >= 0 ? parseInt(columnId.substring(0, underscoreIdx), 10) : -1;
       const cellValue = colIdx >= 0 && rowData[colIdx] != null ? String(rowData[colIdx]) : "";
       const rowValues = rowData.map((v) => (v == null ? "" : String(v)));
-
-      setCtxMenu({ x: e.clientX, y: e.clientY, cellValue, rowValues, columns: result.columns });
+      setCtxMenu({ x: e.clientX, y: e.clientY, cellValue, rowValues, columns: result.columns, rowIndex, colIndex: colIdx });
     },
-    [result.columns]
+    [result.columns],
+  );
+
+  const handleHeaderContextMenu = useCallback(
+    (e: React.MouseEvent, columnId: string, columnName: string, colIndex: number) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setHeaderCtxMenu({ x: e.clientX, y: e.clientY, columnId, columnName, colIndex });
+    },
+    [],
   );
 
   const copyCell = async () => {
@@ -268,178 +604,431 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
     message.success("Row copied with headers");
   };
 
-  const menuItemEl = (label: string, action: () => void) => (
+  const menuItemEl = (label: string, action: () => void, disabled?: boolean) => (
     <div
-      style={{ padding: "6px 14px", cursor: "pointer", color: "var(--text)", whiteSpace: "nowrap" }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
+      style={{
+        padding: "6px 14px",
+        cursor: disabled ? "default" : "pointer",
+        color: disabled ? "var(--text-faint)" : "var(--text)",
+        whiteSpace: "nowrap",
+        opacity: disabled ? 0.5 : 1,
+      }}
+      onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.background = "var(--border)"; }}
       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-      onMouseDown={(e) => { e.stopPropagation(); action(); }}
+      onMouseDown={(e) => { e.stopPropagation(); if (!disabled) action(); }}
     >
       {label}
     </div>
   );
 
+  // ─── Selection check helper ───────────────────────────────────────────────
+
+  const isCellSelected = useCallback(
+    (rowIdx: number, colIdx: number): boolean => {
+      if (!selectionRange) return false;
+      const minRow = Math.min(selectionRange.startRow, selectionRange.endRow);
+      const maxRow = Math.max(selectionRange.startRow, selectionRange.endRow);
+      const minCol = Math.min(selectionRange.startCol, selectionRange.endCol);
+      const maxCol = Math.max(selectionRange.startCol, selectionRange.endCol);
+      return rowIdx >= minRow && rowIdx <= maxRow && colIdx >= minCol && colIdx <= maxCol;
+    },
+    [selectionRange],
+  );
+
+  // ─── Column pinning helpers ───────────────────────────────────────────────
+
+  const pinColumn = (columnId: string, direction: "left" | "right") => {
+    setColumnPinning((prev) => {
+      const left = (prev.left ?? []).filter((id) => id !== columnId);
+      const right = (prev.right ?? []).filter((id) => id !== columnId);
+      if (direction === "left") left.push(columnId);
+      else right.push(columnId);
+      return { left, right };
+    });
+    setHeaderCtxMenu(null);
+  };
+
+  const unpinColumn = (columnId: string) => {
+    setColumnPinning((prev) => ({
+      left: (prev.left ?? []).filter((id) => id !== columnId),
+      right: (prev.right ?? []).filter((id) => id !== columnId),
+    }));
+    setHeaderCtxMenu(null);
+  };
+
+  const isPinned = (columnId: string) => {
+    return (columnPinning.left ?? []).includes(columnId) || (columnPinning.right ?? []).includes(columnId);
+  };
+
+  // ─── Grouping drop zone handlers ─────────────────────────────────────────
+
+  const handleGroupDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setGroupDropOver(false);
+    const columnId = e.dataTransfer.getData("text/plain");
+    if (columnId) addGroupingColumn(columnId);
+  };
+
+  // ─── Layout calculations ──────────────────────────────────────────────────
+
   const totalColumnWidth = columnVirtualizer.getTotalSize();
+  const pinnedLeftWidth = leftPinned.reduce((acc, col) => acc + col.getSize(), 0);
+  const pinnedRightWidth = rightPinned.reduce((acc, col) => acc + col.getSize(), 0);
   const totalRowHeight = rowVirtualizer.getTotalSize();
   const virtualRows = rowVirtualizer.getVirtualItems();
-
-  // Compute left/right spacer widths for column virtualisation.
-  // The colgroup declares ALL columns so the browser knows the full layout;
-  // each row renders only the visible cells plus padding <td> spacers on the
-  // left and right to fill the off-screen column space.
   const virtualCols = columnVirtualizer.getVirtualItems();
   const firstVirtCol = virtualCols[0];
   const lastVirtCol = virtualCols[virtualCols.length - 1];
 
-  // Number of columns before and after the visible window
   const leftColCount = firstVirtCol ? firstVirtCol.index : 0;
-  const rightColCount = lastVirtCol ? visibleColumns.length - lastVirtCol.index - 1 : 0;
+  const rightColCount = lastVirtCol ? centerColumns.length - lastVirtCol.index - 1 : 0;
 
-  // Pixel widths for the left/right spacer cells
   let leftSpacerWidth = 0;
-  for (let i = 0; i < leftColCount; i++) leftSpacerWidth += visibleColumns[i].getSize();
+  for (let i = 0; i < leftColCount; i++) leftSpacerWidth += centerColumns[i].getSize();
   let rightSpacerWidth = 0;
-  for (let i = visibleColumns.length - rightColCount; i < visibleColumns.length; i++)
-    rightSpacerWidth += visibleColumns[i].getSize();
+  for (let i = centerColumns.length - rightColCount; i < centerColumns.length; i++)
+    rightSpacerWidth += centerColumns[i].getSize();
+
+  const fullTableWidth = pinnedLeftWidth + totalColumnWidth + pinnedRightWidth;
+
+  // ─── Filter dropdown data ─────────────────────────────────────────────────
+
+  const filterColumnValues = useMemo(() => {
+    if (!filterDropdown) return [];
+    const underscoreIdx = filterDropdown.columnId.indexOf("_");
+    const colIdx = underscoreIdx >= 0 ? parseInt(filterDropdown.columnId.substring(0, underscoreIdx), 10) : -1;
+    if (colIdx < 0) return [];
+    return result.rows.map((r) => r[colIdx]);
+  }, [filterDropdown, result.rows]);
+
+  // ─── Render a header cell ─────────────────────────────────────────────────
+
+  const renderHeaderCell = (columnId: string, colIndex: number, headerText: string, headerCtx: any, column: any, pinned: boolean, stickyLeft?: number, stickyRight?: number) => {
+    const isSorted = column.getIsSorted();
+    const isFiltered = columnFilters.some((f) => f.id === columnId);
+    const isGrouped = grouping.includes(columnId);
+
+    return (
+      <th
+        key={columnId}
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData("text/plain", columnId);
+          e.dataTransfer.effectAllowed = "move";
+        }}
+        onContextMenu={(e) => handleHeaderContextMenu(e, columnId, headerText, colIndex)}
+        style={{
+          height: headerHeight,
+          padding: "0 8px",
+          textAlign: "left",
+          fontWeight: 600,
+          fontSize: 11,
+          color: "var(--text-muted)",
+          borderBottom: "1px solid var(--border)",
+          borderRight: "1px solid var(--border)",
+          cursor: "pointer",
+          userSelect: "none",
+          position: pinned ? "sticky" : "relative",
+          left: stickyLeft != null ? stickyLeft : undefined,
+          right: stickyRight != null ? stickyRight : undefined,
+          zIndex: pinned ? 3 : undefined,
+          background: pinned ? "var(--bg-raised)" : "var(--bg-raised)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          width: column.getSize(),
+        }}
+        onClick={column.getToggleSortingHandler()}
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+          {isGrouped && <span style={{ fontSize: 9, marginRight: 3, color: "var(--accent)" }}>[G]</span>}
+          {flexRender(headerText, headerCtx)}
+        </span>
+        {isSorted && (
+          <span style={{ marginLeft: 4, fontSize: 9 }}>
+            {isSorted === "asc" ? "\u25B2" : "\u25BC"}
+          </span>
+        )}
+        {isFiltered && (
+          <span style={{ marginLeft: 4, fontSize: 9, color: "var(--accent)" }}>F</span>
+        )}
+        {/* Resize handle with double-click auto-size */}
+        <div
+          onMouseDown={column.getResizeHandler()}
+          onTouchStart={column.getResizeHandler()}
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => { e.stopPropagation(); autoSizeColumn(columnId); }}
+          style={{
+            position: "absolute",
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: 4,
+            cursor: "col-resize",
+            background: column.getIsResizing() ? "var(--accent)" : "transparent",
+          }}
+          onMouseEnter={(e) => { if (!column.getIsResizing()) e.currentTarget.style.background = "var(--border)"; }}
+          onMouseLeave={(e) => { if (!column.getIsResizing()) e.currentTarget.style.background = "transparent"; }}
+        />
+      </th>
+    );
+  };
+
+  // ─── Render a body cell ───────────────────────────────────────────────────
+
+  const renderBodyCell = (cell: any, rowOriginal: unknown[], rowIndex: number, pinned: boolean, stickyLeft?: number, stickyRight?: number) => {
+    const columnId = cell.column.id;
+    const underscoreIdx = columnId.indexOf("_");
+    const colIdx = underscoreIdx >= 0 ? parseInt(columnId.substring(0, underscoreIdx), 10) : -1;
+    const value = cell.getValue();
+    const rules = conditionalRules[columnId];
+    const mm = columnMinMax[columnId];
+    const condStyle = rules ? getConditionalStyle(value, rules, mm?.min ?? 0, mm?.max ?? 1) : {};
+    const selected = featureFlags.multiCellCopy && isCellSelected(rowIndex, colIdx);
+
+    return (
+      <td
+        key={cell.id}
+        onContextMenu={(e) => handleCellContextMenu(e, rowOriginal, columnId, rowIndex)}
+        onMouseDown={(e) => handleCellMouseDown(e, rowIndex, colIdx)}
+        onMouseEnter={() => handleCellMouseEnter(rowIndex, colIdx)}
+        style={{
+          padding: "0 8px",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          borderBottom: "1px solid var(--border)",
+          borderRight: "1px solid color-mix(in srgb, var(--border) 40%, transparent)",
+          color: "var(--text)",
+          height: rowHeight,
+          width: cell.column.getSize(),
+          position: pinned ? "sticky" : "relative",
+          left: stickyLeft != null ? stickyLeft : undefined,
+          right: stickyRight != null ? stickyRight : undefined,
+          zIndex: pinned ? 1 : undefined,
+          background: selected
+            ? "color-mix(in srgb, var(--accent) 20%, transparent)"
+            : pinned ? "var(--bg)" : undefined,
+          ...condStyle,
+        }}
+      >
+        {cell.getIsGrouped() ? (
+          <span
+            onClick={cell.row.getToggleExpandedHandler()}
+            style={{ cursor: "pointer" }}
+          >
+            {cell.row.getIsExpanded() ? "\u25BC " : "\u25B6 "}
+            <CellContent
+              value={value}
+
+              searchTerm={searchTerm}
+              formatConfig={columnFormats[columnId]}
+              rules={rules}
+              colMin={mm?.min ?? 0}
+              colMax={mm?.max ?? 1}
+            />
+            {" "}({cell.row.subRows.length})
+          </span>
+        ) : cell.getIsAggregated() ? (
+          flexRender(cell.column.columnDef.aggregatedCell, cell.getContext())
+        ) : (
+          <CellContent
+            value={value}
+            searchTerm={searchTerm}
+            formatConfig={columnFormats[columnId]}
+            rules={rules}
+            colMin={mm?.min ?? 0}
+            colMax={mm?.max ?? 1}
+          />
+        )}
+      </td>
+    );
+  };
+
+  // Compute sticky offsets for pinned columns
+  const leftOffsets = useMemo(() => {
+    const offsets: number[] = [];
+    let acc = 0;
+    for (const col of leftPinned) {
+      offsets.push(acc);
+      acc += col.getSize();
+    }
+    return offsets;
+  }, [leftPinned]);
+
+  const rightOffsets = useMemo(() => {
+    const offsets: number[] = [];
+    let acc = 0;
+    for (let i = rightPinned.length - 1; i >= 0; i--) {
+      offsets.unshift(acc);
+      acc += rightPinned[i].getSize();
+    }
+    return offsets;
+  }, [rightPinned]);
 
   return (
-    <div style={{ height: "100%", width: "100%", position: "relative" }}>
+    <div style={{ height: "100%", width: "100%", position: "relative", display: "flex", flexDirection: "column" }}>
+      {/* Grouping drop zone */}
+      {grouping.length > 0 && (
+        <div
+          onDragOver={(e) => { e.preventDefault(); setGroupDropOver(true); }}
+          onDragLeave={() => setGroupDropOver(false)}
+          onDrop={handleGroupDrop}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "4px 8px",
+            background: groupDropOver ? "color-mix(in srgb, var(--accent) 10%, var(--bg-raised))" : "var(--bg-raised)",
+            borderBottom: "1px solid var(--border)",
+            flexShrink: 0,
+            minHeight: 28,
+            fontSize: 11,
+            color: "var(--text-muted)",
+            flexWrap: "wrap",
+          }}
+        >
+          <span style={{ fontWeight: 600, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>Grouped by:</span>
+          {grouping.map((colId) => {
+            const underscoreIdx = colId.indexOf("_");
+            const name = underscoreIdx >= 0 ? colId.substring(underscoreIdx + 1) : colId;
+            return (
+              <span
+                key={colId}
+                style={{
+                  padding: "2px 6px",
+                  background: "color-mix(in srgb, var(--accent) 15%, transparent)",
+                  borderRadius: 3,
+                  fontSize: 11,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                }}
+              >
+                {name}
+                <span
+                  style={{ cursor: "pointer", fontWeight: 700, fontSize: 10 }}
+                  onClick={() => removeGroupingColumn(colId)}
+                >
+                  ×
+                </span>
+              </span>
+            );
+          })}
+        </div>
+      )}
+
       <div
         ref={scrollContainerRef}
         className="thaw-grid"
         onScroll={handleScroll}
         tabIndex={0}
+        onDragOver={(e) => { if (grouping.length === 0) { e.preventDefault(); setGroupDropOver(true); } }}
+        onDragLeave={() => setGroupDropOver(false)}
+        onDrop={grouping.length === 0 ? handleGroupDrop : undefined}
         style={{
-          height: "100%",
+          flex: 1,
           width: "100%",
           overflow: "auto",
           outline: "none",
-          // WKWebView compat
           ["--wails-draggable" as string]: "no-drag",
+          ...(groupDropOver && grouping.length === 0 ? { background: "color-mix(in srgb, var(--accent) 5%, transparent)" } : {}),
         }}
       >
         <table
           role="grid"
           aria-label="Query results"
           style={{
-            width: Math.max(totalColumnWidth, containerWidth),
+            width: Math.max(fullTableWidth, containerWidth),
             borderCollapse: "collapse",
             tableLayout: "fixed",
             fontSize: 11,
             fontFamily: "var(--ui-font, 'Inter', 'SF Pro Text', system-ui, sans-serif)",
           }}
         >
-          {/* Declare ALL columns so the browser knows every column's width */}
           <colgroup>
-            {visibleColumns.map((column) => (
-              <col key={column.id} style={{ width: column.getSize() }} />
-            ))}
+            {leftPinned.map((col) => <col key={col.id} style={{ width: col.getSize() }} />)}
+            {centerColumns.map((col) => <col key={col.id} style={{ width: col.getSize() }} />)}
+            {rightPinned.map((col) => <col key={col.id} style={{ width: col.getSize() }} />)}
           </colgroup>
 
           {/* Header */}
-          <thead
-            style={{
-              position: "sticky",
-              top: 0,
-              zIndex: 2,
-              background: "var(--bg-raised)",
-            }}
-          >
+          <thead style={{ position: "sticky", top: 0, zIndex: 4, background: "var(--bg-raised)" }}>
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>
-                {/* Left spacer header */}
-                {leftColCount > 0 && (
+                {/* Select-all button cell */}
+                {featureFlags.multiCellCopy && (
                   <th
-                    colSpan={leftColCount}
-                    style={{ width: leftSpacerWidth, padding: 0, border: "none" }}
-                  />
+                    style={{
+                      width: 28,
+                      minWidth: 28,
+                      maxWidth: 28,
+                      height: headerHeight,
+                      padding: 0,
+                      textAlign: "center",
+                      borderBottom: "1px solid var(--border)",
+                      borderRight: "1px solid var(--border)",
+                      cursor: "pointer",
+                      position: "sticky",
+                      left: 0,
+                      zIndex: 5,
+                      background: "var(--bg-raised)",
+                      fontSize: 9,
+                      color: "var(--text-muted)",
+                    }}
+                    onClick={handleSelectAll}
+                    title="Select all"
+                  >
+                    ☐
+                  </th>
                 )}
-                {virtualCols.map((virtualCol) => {
-                  const header = headerGroup.headers[virtualCol.index];
+                {/* Pinned left headers */}
+                {leftPinned.map((col, i) => {
+                  const header = headerGroup.headers.find((h) => h.column.id === col.id);
                   if (!header) return null;
-                  const isSorted = header.column.getIsSorted();
-                  return (
-                    <th
-                      key={header.id}
-                      style={{
-                        height: headerHeight,
-                        padding: "0 8px",
-                        textAlign: "left",
-                        fontWeight: 600,
-                        fontSize: 11,
-                        color: "var(--text-muted)",
-                        borderBottom: "1px solid var(--border)",
-                        borderRight: "1px solid var(--border)",
-                        cursor: "pointer",
-                        userSelect: "none",
-                        position: "relative",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        width: header.column.getSize(),
-                      }}
-                      onClick={header.column.getToggleSortingHandler()}
-                    >
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {flexRender(header.column.columnDef.header, header.getContext())}
-                      </span>
-                      {isSorted && (
-                        <span style={{ marginLeft: 4, fontSize: 9 }}>
-                          {isSorted === "asc" ? "\u25B2" : "\u25BC"}
-                        </span>
-                      )}
-                      {/* Resize handle */}
-                      <div
-                        onMouseDown={header.getResizeHandler()}
-                        onTouchStart={header.getResizeHandler()}
-                        onClick={(e) => e.stopPropagation()}
-                        style={{
-                          position: "absolute",
-                          right: 0,
-                          top: 0,
-                          bottom: 0,
-                          width: 4,
-                          cursor: "col-resize",
-                          background: header.column.getIsResizing()
-                            ? "var(--accent)"
-                            : "transparent",
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!header.column.getIsResizing())
-                            e.currentTarget.style.background = "var(--border)";
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!header.column.getIsResizing())
-                            e.currentTarget.style.background = "transparent";
-                        }}
-                      />
-                    </th>
-                  );
+                  const underscoreIdx = col.id.indexOf("_");
+                  const colIdx = underscoreIdx >= 0 ? parseInt(col.id.substring(0, underscoreIdx), 10) : 0;
+                  const stickyLeft = (featureFlags.multiCellCopy ? 28 : 0) + leftOffsets[i];
+                  return renderHeaderCell(col.id, colIdx, header.column.columnDef.header as string, header.getContext(), header.column, true, stickyLeft);
                 })}
-                {/* Right spacer header */}
-                {rightColCount > 0 && (
-                  <th
-                    colSpan={rightColCount}
-                    style={{ width: rightSpacerWidth, padding: 0, border: "none" }}
-                  />
-                )}
+                {/* Left spacer */}
+                {leftColCount > 0 && <th colSpan={leftColCount} style={{ width: leftSpacerWidth, padding: 0, border: "none" }} />}
+                {/* Center (virtualized) headers */}
+                {virtualCols.map((vc) => {
+                  const col = centerColumns[vc.index];
+                  const header = headerGroup.headers.find((h) => h.column.id === col.id);
+                  if (!header) return null;
+                  const underscoreIdx = col.id.indexOf("_");
+                  const colIdx = underscoreIdx >= 0 ? parseInt(col.id.substring(0, underscoreIdx), 10) : 0;
+                  return renderHeaderCell(col.id, colIdx, header.column.columnDef.header as string, header.getContext(), header.column, false);
+                })}
+                {/* Right spacer */}
+                {rightColCount > 0 && <th colSpan={rightColCount} style={{ width: rightSpacerWidth, padding: 0, border: "none" }} />}
+                {/* Pinned right headers */}
+                {rightPinned.map((col, i) => {
+                  const header = headerGroup.headers.find((h) => h.column.id === col.id);
+                  if (!header) return null;
+                  const underscoreIdx = col.id.indexOf("_");
+                  const colIdx = underscoreIdx >= 0 ? parseInt(col.id.substring(0, underscoreIdx), 10) : 0;
+                  return renderHeaderCell(col.id, colIdx, header.column.columnDef.header as string, header.getContext(), header.column, true, undefined, rightOffsets[i]);
+                })}
               </tr>
             ))}
           </thead>
 
           {/* Body */}
           <tbody>
-            {/* Top row spacer */}
             {virtualRows.length > 0 && (
               <tr>
                 <td
                   style={{ height: virtualRows[0].start, padding: 0, border: "none" }}
-                  colSpan={visibleColumns.length}
+                  colSpan={leftPinned.length + centerColumns.length + rightPinned.length + (featureFlags.multiCellCopy ? 1 : 0)}
                 />
               </tr>
             )}
             {virtualRows.map((virtualRow) => {
               const row = tableRows[virtualRow.index];
+              const cells = row.getVisibleCells();
               return (
                 <tr
                   key={row.id}
@@ -450,60 +1039,65 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
                       : undefined,
                   }}
                 >
-                  {/* Left column spacer */}
-                  {leftColCount > 0 && (
+                  {/* Row number / select-all column */}
+                  {featureFlags.multiCellCopy && (
                     <td
-                      colSpan={leftColCount}
-                      style={{ width: leftSpacerWidth, padding: 0, border: "none" }}
-                    />
+                      style={{
+                        width: 28,
+                        minWidth: 28,
+                        maxWidth: 28,
+                        padding: "0 4px",
+                        fontSize: 9,
+                        color: "var(--text-faint)",
+                        textAlign: "center",
+                        borderBottom: "1px solid var(--border)",
+                        borderRight: "1px solid var(--border)",
+                        position: "sticky",
+                        left: 0,
+                        zIndex: 1,
+                        background: "var(--bg-raised)",
+                        userSelect: "none",
+                      }}
+                    >
+                      {virtualRow.index + 1}
+                    </td>
                   )}
-                  {virtualCols.map((virtualCol) => {
-                    const cell = row.getVisibleCells()[virtualCol.index];
+                  {/* Pinned left cells */}
+                  {leftPinned.map((col, i) => {
+                    const cell = cells.find((c) => c.column.id === col.id);
                     if (!cell) return null;
-                    return (
-                      <td
-                        key={cell.id}
-                        onContextMenu={(e) =>
-                          handleCellContextMenu(e, row.original, cell.column.id)
-                        }
-                        style={{
-                          padding: "0 8px",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                          borderBottom: "1px solid var(--border)",
-                          borderRight: "1px solid color-mix(in srgb, var(--border) 40%, transparent)",
-                          color: "var(--text)",
-                          height: rowHeight,
-                          width: cell.column.getSize(),
-                        }}
-                      >
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </td>
-                    );
+                    const stickyLeft = (featureFlags.multiCellCopy ? 28 : 0) + leftOffsets[i];
+                    return renderBodyCell(cell, row.original, virtualRow.index, true, stickyLeft);
                   })}
-                  {/* Right column spacer */}
-                  {rightColCount > 0 && (
-                    <td
-                      colSpan={rightColCount}
-                      style={{ width: rightSpacerWidth, padding: 0, border: "none" }}
-                    />
-                  )}
+                  {/* Left spacer */}
+                  {leftColCount > 0 && <td colSpan={leftColCount} style={{ width: leftSpacerWidth, padding: 0, border: "none" }} />}
+                  {/* Center (virtualized) cells */}
+                  {virtualCols.map((vc) => {
+                    const col = centerColumns[vc.index];
+                    const cell = cells.find((c) => c.column.id === col.id);
+                    if (!cell) return null;
+                    return renderBodyCell(cell, row.original, virtualRow.index, false);
+                  })}
+                  {/* Right spacer */}
+                  {rightColCount > 0 && <td colSpan={rightColCount} style={{ width: rightSpacerWidth, padding: 0, border: "none" }} />}
+                  {/* Pinned right cells */}
+                  {rightPinned.map((col, i) => {
+                    const cell = cells.find((c) => c.column.id === col.id);
+                    if (!cell) return null;
+                    return renderBodyCell(cell, row.original, virtualRow.index, true, undefined, rightOffsets[i]);
+                  })}
                 </tr>
               );
             })}
-            {/* Bottom row spacer */}
             {virtualRows.length > 0 && (
               <tr>
                 <td
                   style={{
-                    height:
-                      totalRowHeight -
-                      (virtualRows[virtualRows.length - 1]?.end ?? 0),
+                    height: totalRowHeight - (virtualRows[virtualRows.length - 1]?.end ?? 0),
                     padding: 0,
                     border: "none",
                   }}
-                  colSpan={visibleColumns.length}
+                  colSpan={leftPinned.length + centerColumns.length + rightPinned.length + (featureFlags.multiCellCopy ? 1 : 0)}
                 />
               </tr>
             )}
@@ -511,7 +1105,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
         </table>
       </div>
 
-      {/* Context menu */}
+      {/* Cell context menu */}
       {ctxMenu && (
         <div
           ref={ctxRef}
@@ -533,7 +1127,121 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
           {menuItemEl("Copy cell value", copyCell)}
           {menuItemEl("Copy row (tab-separated)", copyRow)}
           {menuItemEl("Copy row with headers", copyRowWithHeaders)}
+          {featureFlags.multiCellCopy && selectionRange && (
+            <>
+              <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+              {menuItemEl("Create Chart...", () => { setCtxMenu(null); setChartModal(true); })}
+            </>
+          )}
         </div>
+      )}
+
+      {/* Header context menu */}
+      {headerCtxMenu && (
+        <div
+          ref={headerCtxRef}
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            position: "fixed",
+            top: headerCtxMenu.y,
+            left: headerCtxMenu.x,
+            zIndex: 9999,
+            background: "var(--bg-overlay)",
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
+            minWidth: 190,
+            padding: "4px 0",
+            fontSize: 13,
+          }}
+        >
+          {menuItemEl(
+            isPinned(headerCtxMenu.columnId) ? "Unpin Column" : "Pin to Left",
+            () => isPinned(headerCtxMenu.columnId) ? unpinColumn(headerCtxMenu.columnId) : pinColumn(headerCtxMenu.columnId, "left"),
+          )}
+          {!isPinned(headerCtxMenu.columnId) && menuItemEl("Pin to Right", () => pinColumn(headerCtxMenu.columnId, "right"))}
+          <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+          {menuItemEl("Filter...", () => {
+            setFilterDropdown({ columnId: headerCtxMenu.columnId, position: { x: headerCtxMenu.x, y: headerCtxMenu.y } });
+            setHeaderCtxMenu(null);
+          })}
+          {menuItemEl("Format Column...", () => {
+            setFormatModal({ columnId: headerCtxMenu.columnId, columnName: headerCtxMenu.columnName });
+            setHeaderCtxMenu(null);
+          })}
+          {menuItemEl("Conditional Formatting...", () => {
+            setCondFormatModal({ columnId: headerCtxMenu.columnId, columnName: headerCtxMenu.columnName });
+            setHeaderCtxMenu(null);
+          })}
+          <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+          {menuItemEl(
+            grouping.includes(headerCtxMenu.columnId) ? "Remove Grouping" : "Group by This Column",
+            () => {
+              if (grouping.includes(headerCtxMenu.columnId)) {
+                removeGroupingColumn(headerCtxMenu.columnId);
+              } else {
+                addGroupingColumn(headerCtxMenu.columnId);
+              }
+              setHeaderCtxMenu(null);
+            },
+          )}
+          {menuItemEl("Auto-size Column", () => {
+            autoSizeColumn(headerCtxMenu.columnId);
+            setHeaderCtxMenu(null);
+          })}
+        </div>
+      )}
+
+      {/* Filter dropdown */}
+      {filterDropdown && (
+        <ColumnFilterDropdown
+          columnValues={filterColumnValues}
+          currentFilter={columnFilters.find((f) => f.id === filterDropdown.columnId)?.value as ColumnFilterValue | undefined}
+          onApply={(filter) => {
+            if (filter) {
+              setColumnFilters((prev) => [
+                ...prev.filter((f) => f.id !== filterDropdown.columnId),
+                { id: filterDropdown.columnId, value: filter },
+              ]);
+            } else {
+              setColumnFilters((prev) => prev.filter((f) => f.id !== filterDropdown.columnId));
+            }
+          }}
+          onClose={() => setFilterDropdown(null)}
+          position={filterDropdown.position}
+        />
+      )}
+
+      {/* Format modal */}
+      {formatModal && (
+        <DataTypeFormatModal
+          columnId={formatModal.columnId}
+          columnName={formatModal.columnName}
+          sampleValues={(() => {
+            const underscoreIdx = formatModal.columnId.indexOf("_");
+            const colIdx = underscoreIdx >= 0 ? parseInt(formatModal.columnId.substring(0, underscoreIdx), 10) : -1;
+            return colIdx >= 0 ? result.rows.slice(0, 100).map((r) => r[colIdx]) : [];
+          })()}
+          onClose={() => setFormatModal(null)}
+        />
+      )}
+
+      {/* Conditional formatting modal */}
+      {condFormatModal && (
+        <ConditionalFormattingModal
+          columnId={condFormatModal.columnId}
+          columnName={condFormatModal.columnName}
+          onClose={() => setCondFormatModal(null)}
+        />
+      )}
+
+      {/* Quick chart modal */}
+      {chartModal && selectionRange && (
+        <QuickChartModal
+          result={result}
+          selectionRange={selectionRange}
+          onClose={() => setChartModal(false)}
+        />
       )}
     </div>
   );

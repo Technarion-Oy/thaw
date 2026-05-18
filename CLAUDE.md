@@ -79,7 +79,7 @@ thaw/
 └── frontend/src/
     ├── pages/           # Top-level page components
     ├── components/      # Feature components (editor/, layout/, toolbar/, results/, ...)
-    ├── store/           # Zustand stores (9 stores)
+    ├── store/           # Zustand stores (10 stores)
     └── wailsjs/         # Auto-generated Wails IPC bindings (DO NOT EDIT)
 ```
 
@@ -183,6 +183,7 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 - `diffStore` — DDL diff comparisons
 - `gitStore` — git repo state
 - `notebookToolbarStore` — bridges NotebookTab kernel state/callbacks to the unified Toolbar
+- `gridStore` — results grid selection range, search state, column formatting, conditional formatting rules, and row grouping state; resets when a new query result arrives
 
 ### Unified Toolbar
 - The application toolbar is implemented as a reusable `<Toolbar />` component in `frontend/src/components/toolbar/Toolbar.tsx`

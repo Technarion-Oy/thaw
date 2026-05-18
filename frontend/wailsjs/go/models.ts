@@ -138,6 +138,7 @@ export namespace config {
 	    ddlHoverTooltips: boolean;
 	    fileFormatBuilder: boolean;
 	    snowflakeCLIProfileManager: boolean;
+	    multiCellCopy: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new FeatureFlags(source);
@@ -179,6 +180,7 @@ export namespace config {
 	        this.ddlHoverTooltips = source["ddlHoverTooltips"];
 	        this.fileFormatBuilder = source["fileFormatBuilder"];
 	        this.snowflakeCLIProfileManager = source["snowflakeCLIProfileManager"];
+	        this.multiCellCopy = source["multiCellCopy"];
 	    }
 	}
 	export class GitConfig {

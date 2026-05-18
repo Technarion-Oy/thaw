@@ -395,6 +395,17 @@ export default function FeatureFlagsModal({ onClose }: Props) {
           />
         </Category>
 
+        {/* ── Results Grid ── */}
+        <Category title="Results Grid">
+          <FlagRow
+            label="Multi-Cell Copy & Selection"
+            description="Range selection, multi-cell copy to clipboard, selection aggregations, and quick charting in the results grid."
+            checked={flags.multiCellCopy}
+            locked={locked.multiCellCopy}
+            onChange={(v) => set("multiCellCopy", v)}
+          />
+        </Category>
+
         {/* ── SQL Editor ── */}
         <Category title="SQL Editor">
           <FlagRow

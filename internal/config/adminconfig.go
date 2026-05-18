@@ -95,6 +95,11 @@ type adminConnection struct {
 	SnowflakeCLIProfileManager ptrBool `json:"snowflakeCLIProfileManager,omitempty"`
 }
 
+// adminResultsGrid is the "resultsGrid" category.
+type adminResultsGrid struct {
+	MultiCellCopy ptrBool `json:"multiCellCopy,omitempty"`
+}
+
 // adminConfigJSON is the full schema for the admin features.json file.
 type adminConfigJSON struct {
 	DataExportImport         adminDataExportImport `json:"dataExportImport"`
@@ -104,6 +109,7 @@ type adminConfigJSON struct {
 	DeveloperEnvironments    adminDevEnv           `json:"developerEnvironments"`
 	PerformanceDiagnostics   adminPerfDiag         `json:"performanceDiagnostics"`
 	Connection               adminConnection       `json:"connection"`
+	ResultsGrid              adminResultsGrid      `json:"resultsGrid"`
 }
 
 // ─── System config file path ───────────────────────────────────────────────────
@@ -216,6 +222,9 @@ func mergeAdminOverrides(user FeatureFlags, cfg adminConfigJSON) (effective Feat
 
 	// Connection
 	apply(&effective.SnowflakeCLIProfileManager, &locked.SnowflakeCLIProfileManager, cfg.Connection.SnowflakeCLIProfileManager)
+
+	// Results Grid
+	apply(&effective.MultiCellCopy, &locked.MultiCellCopy, cfg.ResultsGrid.MultiCellCopy)
 
 	return effective, locked
 }
