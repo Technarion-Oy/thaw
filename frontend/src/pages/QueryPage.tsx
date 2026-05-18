@@ -1238,7 +1238,7 @@ export default function QueryPage() {
                             key: "side-by-side",
                             icon: <LayoutOutlined />,
                             label: "View side by side",
-                            disabled: entry.id === historyId || entry.id === compareHistoryId,
+                            disabled: entry.id === historyId || compareHistoryId !== null,
                             onClick: ({ domEvent }) => { domEvent.stopPropagation(); setCompareHistoryId(entry.id); },
                           }]};
                           return (
