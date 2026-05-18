@@ -103,28 +103,12 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
     return files.filter((f) => selectedRowIds.has(f.name));
   }, [files, selectedRowIds]);
 
+  // Column defs are kept stable — checkbox rendering is handled inline in the
+  // JSX (outside flexRender) so selection state changes don't rebuild columns.
   const columns = useMemo<ColumnDef<stage.StageFile>[]>(() => [
     {
       id: "checkbox",
-      header: () => (
-        <input
-          type="checkbox"
-          checked={files.length > 0 && selectedRowIds.size === files.length}
-          onChange={toggleAll}
-          style={{ cursor: "pointer" }}
-          ref={(el) => {
-            if (el) el.indeterminate = selectedRowIds.size > 0 && selectedRowIds.size < files.length;
-          }}
-        />
-      ),
-      cell: ({ row }) => (
-        <input
-          type="checkbox"
-          checked={selectedRowIds.has(row.original.name)}
-          onChange={() => toggleRow(row.original.name)}
-          style={{ cursor: "pointer" }}
-        />
-      ),
+      header: "",
       size: 40,
       enableSorting: false,
       enableResizing: false,
@@ -155,7 +139,7 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
       header: "Last Modified",
       size: 220,
     },
-  ], [files.length, selectedRowIds, toggleAll, toggleRow]);
+  ], []);
 
   const table = useReactTable({
     data: files,
@@ -400,11 +384,25 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
                         }}
                         onClick={canSort ? header.column.getToggleSortingHandler() : undefined}
                       >
-                        {flexRender(header.column.columnDef.header, header.getContext())}
-                        {isSorted && (
-                          <span style={{ marginLeft: 4, fontSize: 9 }}>
-                            {isSorted === "asc" ? "\u25B2" : "\u25BC"}
-                          </span>
+                        {header.column.id === "checkbox" ? (
+                          <input
+                            type="checkbox"
+                            checked={files.length > 0 && selectedRowIds.size === files.length}
+                            onChange={toggleAll}
+                            style={{ cursor: "pointer" }}
+                            ref={(el) => {
+                              if (el) el.indeterminate = selectedRowIds.size > 0 && selectedRowIds.size < files.length;
+                            }}
+                          />
+                        ) : (
+                          <>
+                            {flexRender(header.column.columnDef.header, header.getContext())}
+                            {isSorted && (
+                              <span style={{ marginLeft: 4, fontSize: 9 }}>
+                                {isSorted === "asc" ? "\u25B2" : "\u25BC"}
+                              </span>
+                            )}
+                          </>
                         )}
                         {header.column.getCanResize() && (
                           <div
@@ -474,7 +472,16 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
                           height: 32,
                         }}
                       >
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        {cell.column.id === "checkbox" ? (
+                          <input
+                            type="checkbox"
+                            checked={selectedRowIds.has(row.original.name)}
+                            onChange={() => toggleRow(row.original.name)}
+                            style={{ cursor: "pointer" }}
+                          />
+                        ) : (
+                          flexRender(cell.column.columnDef.cell, cell.getContext())
+                        )}
                       </td>
                     ))}
                   </tr>

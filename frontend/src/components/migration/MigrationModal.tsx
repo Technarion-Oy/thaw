@@ -385,7 +385,9 @@ export default function MigrationModal({ onClose }: Props) {
     }
   }
 
-  // Review grid columns (TanStack)
+  // Review grid columns (TanStack).
+  // Checkbox rendering is handled inline in the JSX (outside flexRender)
+  // so selection state changes don't trigger column def rebuilds.
   const reviewCols = useMemo<ColumnDef<MigrationDiffItem>[]>(() => [
     {
       id: "checkbox",
@@ -393,17 +395,6 @@ export default function MigrationModal({ onClose }: Props) {
       size: 44,
       enableSorting: false,
       enableResizing: false,
-      cell: ({ row }) => {
-        const item = row.original;
-        const key = objectLabel(item.object);
-        return (
-          <Checkbox
-            checked={selectedKeys.has(key)}
-            disabled={item.status === "removed"}
-            onChange={(e) => handleCheck(item, e.target.checked)}
-          />
-        );
-      },
     },
     {
       id: "status",
@@ -446,8 +437,7 @@ export default function MigrationModal({ onClose }: Props) {
       accessorFn: (row) =>
         row.object.filePath ? row.object.filePath.split("/").pop() ?? "" : "",
     },
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [selectedKeys, diffItems]);
+  ], [diffItems]);
 
   const filteredDiff = diffItems.filter((item) => {
     if (statusFilter === "all") return true;
@@ -646,6 +636,13 @@ export default function MigrationModal({ onClose }: Props) {
     overscan: 5,
   });
   const execVirtualRows = execVirtualizer.getVirtualItems();
+
+  // Auto-scroll the exec grid to the latest event during deployment.
+  useEffect(() => {
+    if (!deployDone && terminalEvents.length > 0) {
+      execVirtualizer.scrollToIndex(terminalEvents.length - 1, { align: "end" });
+    }
+  }, [terminalEvents.length, deployDone, execVirtualizer]);
 
   // ── Render steps ──────────────────────────────────────────────────────────
 
@@ -920,7 +917,15 @@ export default function MigrationModal({ onClose }: Props) {
                           background: cell.column.id === "checkbox" ? "var(--bg-overlay)" : undefined,
                         }}
                       >
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        {cell.column.id === "checkbox" ? (
+                          <Checkbox
+                            checked={selectedKeys.has(objectLabel(row.original.object))}
+                            disabled={row.original.status === "removed"}
+                            onChange={(e) => handleCheck(row.original, e.target.checked)}
+                          />
+                        ) : (
+                          flexRender(cell.column.columnDef.cell, cell.getContext())
+                        )}
                       </td>
                     ))}
                   </tr>

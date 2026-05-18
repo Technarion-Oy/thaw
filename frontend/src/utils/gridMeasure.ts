@@ -12,11 +12,13 @@
 // used by ResultGrid and PipeCopyHistoryModal.
 
 const _ctxCache = new Map<string, CanvasRenderingContext2D>();
+const MAX_CTX_CACHE = 10;
 
 /** Measure the pixel width of `text` at the given CSS font. */
 export function measureText(text: string, font: string): number {
   let ctx = _ctxCache.get(font);
   if (!ctx) {
+    if (_ctxCache.size >= MAX_CTX_CACHE) _ctxCache.clear();
     const canvas = document.createElement("canvas");
     ctx = canvas.getContext("2d") ?? undefined;
     if (ctx) {

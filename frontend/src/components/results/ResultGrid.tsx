@@ -80,9 +80,8 @@ function NullCellRenderer({ value }: { value: unknown }) {
 }
 
 function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
-  // Subscribe to uiDensity so the grid re-renders (and re-reads CSS vars) when
-  // the user changes the density setting.
-  useThemeStore((s) => s.uiDensity);
+  // Subscribe to uiDensity so CSS var reads are recalculated on density change.
+  const uiDensity = useThemeStore((s) => s.uiDensity);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isSyncingRef = useRef(false);
@@ -93,8 +92,10 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
   const [columnSizing, setColumnSizing] = useState<Record<string, number>>({});
   const [containerWidth, setContainerWidth] = useState(0);
 
-  const rowHeight = cssVar("--row-height", 24);
-  const headerHeight = cssVar("--header-height", 28);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const rowHeight = useMemo(() => cssVar("--row-height", 24), [uiDensity]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const headerHeight = useMemo(() => cssVar("--header-height", 28), [uiDensity]);
 
   // Pass the raw row arrays directly to TanStack Table — no per-row object
   // conversion.  Column accessors read by index, avoiding the O(rows * cols)
