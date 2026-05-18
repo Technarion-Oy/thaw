@@ -685,7 +685,8 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
 
   // ─── Render a header cell ─────────────────────────────────────────────────
 
-  const renderHeaderCell = (columnId: string, colIndex: number, headerText: string, headerCtx: any, column: any, pinned: boolean, stickyLeft?: number, stickyRight?: number) => {
+  const renderHeaderCell = (columnId: string, colIndex: number, header: any, pinned: boolean, stickyLeft?: number, stickyRight?: number) => {
+    const column = header.column;
     const isSorted = column.getIsSorted();
     const isFiltered = columnFilters.some((f) => f.id === columnId);
 
@@ -697,7 +698,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
           e.dataTransfer.setData("text/plain", columnId);
           e.dataTransfer.effectAllowed = "move";
         }}
-        onContextMenu={(e) => handleHeaderContextMenu(e, columnId, headerText, colIndex)}
+        onContextMenu={(e) => handleHeaderContextMenu(e, columnId, column.columnDef.header as string, colIndex)}
         style={{
           height: headerHeight,
           padding: "0 8px",
@@ -722,7 +723,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
         onClick={column.getToggleSortingHandler()}
       >
         <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-          {flexRender(headerText, headerCtx)}
+          {flexRender(column.columnDef.header, header.getContext())}
         </span>
         {isSorted && (
           <span style={{ marginLeft: 4, fontSize: 9 }}>
@@ -734,8 +735,8 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
         )}
         {/* Resize handle with double-click auto-size */}
         <div
-          onMouseDown={column.getResizeHandler()}
-          onTouchStart={column.getResizeHandler()}
+          onMouseDown={header.getResizeHandler()}
+          onTouchStart={header.getResizeHandler()}
           onClick={(e) => e.stopPropagation()}
           onDoubleClick={(e) => { e.stopPropagation(); autoSizeColumn(columnId); }}
           style={{
@@ -895,7 +896,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
                   const underscoreIdx = col.id.indexOf("_");
                   const colIdx = underscoreIdx >= 0 ? parseInt(col.id.substring(0, underscoreIdx), 10) : 0;
                   const stickyLeft = (featureFlags.multiCellCopy ? 28 : 0) + leftOffsets[i];
-                  return renderHeaderCell(col.id, colIdx, header.column.columnDef.header as string, header.getContext(), header.column, true, stickyLeft);
+                  return renderHeaderCell(col.id, colIdx, header, true, stickyLeft);
                 })}
                 {/* Left spacer */}
                 {leftColCount > 0 && <th colSpan={leftColCount} style={{ width: leftSpacerWidth, padding: 0, border: "none" }} />}
@@ -907,7 +908,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
                   if (!header) return null;
                   const underscoreIdx = col.id.indexOf("_");
                   const colIdx = underscoreIdx >= 0 ? parseInt(col.id.substring(0, underscoreIdx), 10) : 0;
-                  return renderHeaderCell(col.id, colIdx, header.column.columnDef.header as string, header.getContext(), header.column, false);
+                  return renderHeaderCell(col.id, colIdx, header, false);
                 })}
                 {/* Right spacer */}
                 {rightColCount > 0 && <th colSpan={rightColCount} style={{ width: rightSpacerWidth, padding: 0, border: "none" }} />}
@@ -917,7 +918,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
                   if (!header) return null;
                   const underscoreIdx = col.id.indexOf("_");
                   const colIdx = underscoreIdx >= 0 ? parseInt(col.id.substring(0, underscoreIdx), 10) : 0;
-                  return renderHeaderCell(col.id, colIdx, header.column.columnDef.header as string, header.getContext(), header.column, true, undefined, rightOffsets[i]);
+                  return renderHeaderCell(col.id, colIdx, header, true, undefined, rightOffsets[i]);
                 })}
               </tr>
             ))}
