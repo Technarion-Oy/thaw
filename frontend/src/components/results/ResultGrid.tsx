@@ -23,14 +23,10 @@ import {
   getCoreRowModel,
   getSortedRowModel,
   getFilteredRowModel,
-  getGroupedRowModel,
-  getExpandedRowModel,
   type ColumnDef,
   type SortingState,
   type ColumnFiltersState,
   type ColumnPinningState,
-  // GroupingState imported via type through TanStack's internal types
-  type ExpandedState,
   flexRender,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -224,10 +220,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
   const searchTerm = useGridStore((s) => s.searchTerm);
   const columnFormats = useGridStore((s) => s.columnFormats);
   const conditionalRules = useGridStore((s) => s.conditionalRules);
-  const grouping = useGridStore((s) => s.grouping);
   const setGrouping = useGridStore((s) => s.setGrouping);
-  const addGroupingColumn = useGridStore((s) => s.addGroupingColumn);
-  const removeGroupingColumn = useGridStore((s) => s.removeGroupingColumn);
   const resetGrid = useGridStore((s) => s.reset);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -243,7 +236,6 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
   const [containerWidth, setContainerWidth] = useState(0);
   const [columnPinning, setColumnPinning] = useState<ColumnPinningState>({ left: [], right: [] });
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
-  const [expanded, setExpanded] = useState<ExpandedState>(true);
 
   // Modal state
   const [filterDropdown, setFilterDropdown] = useState<{ columnId: string; position: { x: number; y: number } } | null>(null);
@@ -251,8 +243,6 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
   const [condFormatModal, setCondFormatModal] = useState<{ columnId: string; columnName: string } | null>(null);
   const [chartModal, setChartModal] = useState(false);
 
-  // Drag-over state for grouping drop zone
-  const [groupDropOver, setGroupDropOver] = useState(false);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const rowHeight = useMemo(() => cssVar("--row-height", 24), [uiDensity]);
@@ -285,7 +275,6 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     setColumnPinning({ left: [], right: [] });
     setColumnFilters([]);
     setGrouping([]);
-    setExpanded(true);
     resetGrid();
   }
 
@@ -321,10 +310,6 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
         minSize: MIN_COL_WIDTH,
         maxSize: AUTO_SIZE_MAX_COL_WIDTH,
         filterFn: columnFilterFn as any,
-        aggregatedCell: ({ getValue }: any) => {
-          const val = getValue();
-          return val != null ? String(val) : "";
-        },
       })),
     [result.columns, initialWidths],
   );
@@ -332,23 +317,15 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
   const table = useReactTable({
     data,
     columns,
-    state: { sorting, columnSizing, columnPinning, columnFilters, grouping, expanded },
+    state: { sorting, columnSizing, columnPinning, columnFilters },
     onSortingChange: setSorting,
     onColumnSizingChange: setColumnSizing,
     onColumnPinningChange: setColumnPinning,
     onColumnFiltersChange: setColumnFilters,
-    onGroupingChange: (updater: any) => {
-      const next = typeof updater === "function" ? updater(grouping) : updater;
-      setGrouping(next);
-    },
-    onExpandedChange: setExpanded,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
-    getGroupedRowModel: getGroupedRowModel(),
-    getExpandedRowModel: getExpandedRowModel(),
     columnResizeMode: "onChange",
-    enableGrouping: true,
   });
 
   const { rows: tableRows } = table.getRowModel();
@@ -670,15 +647,6 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     return (columnPinning.left ?? []).includes(columnId) || (columnPinning.right ?? []).includes(columnId);
   };
 
-  // ─── Grouping drop zone handlers ─────────────────────────────────────────
-
-  const handleGroupDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setGroupDropOver(false);
-    const columnId = e.dataTransfer.getData("text/plain");
-    if (columnId) addGroupingColumn(columnId);
-  };
-
   // ─── Layout calculations ──────────────────────────────────────────────────
 
   const totalColumnWidth = columnVirtualizer.getTotalSize();
@@ -702,7 +670,8 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     if (centerColumns[i]) rightSpacerWidth += centerColumns[i].getSize();
   }
 
-  const fullTableWidth = pinnedLeftWidth + totalColumnWidth + pinnedRightWidth;
+  const selectAllColWidth = featureFlags.multiCellCopy ? 28 : 0;
+  const fullTableWidth = selectAllColWidth + pinnedLeftWidth + totalColumnWidth + pinnedRightWidth;
 
   // ─── Filter dropdown data ─────────────────────────────────────────────────
 
@@ -719,7 +688,6 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
   const renderHeaderCell = (columnId: string, colIndex: number, headerText: string, headerCtx: any, column: any, pinned: boolean, stickyLeft?: number, stickyRight?: number) => {
     const isSorted = column.getIsSorted();
     const isFiltered = columnFilters.some((f) => f.id === columnId);
-    const isGrouped = grouping.includes(columnId);
 
     return (
       <th
@@ -754,7 +722,6 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
         onClick={column.getToggleSortingHandler()}
       >
         <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-          {isGrouped && <span style={{ fontSize: 9, marginRight: 3, color: "var(--accent)" }}>[G]</span>}
           {flexRender(headerText, headerCtx)}
         </span>
         {isSorted && (
@@ -825,35 +792,14 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
           ...condStyle,
         }}
       >
-        {cell.getIsGrouped() ? (
-          <span
-            onClick={cell.row.getToggleExpandedHandler()}
-            style={{ cursor: "pointer" }}
-          >
-            {cell.row.getIsExpanded() ? "\u25BC " : "\u25B6 "}
-            <CellContent
-              value={value}
-
-              searchTerm={searchTerm}
-              formatConfig={columnFormats[columnId]}
-              rules={rules}
-              colMin={mm?.min ?? 0}
-              colMax={mm?.max ?? 1}
-            />
-            {" "}({cell.row.subRows.length})
-          </span>
-        ) : cell.getIsAggregated() ? (
-          flexRender(cell.column.columnDef.aggregatedCell, cell.getContext())
-        ) : (
-          <CellContent
-            value={value}
-            searchTerm={searchTerm}
-            formatConfig={columnFormats[columnId]}
-            rules={rules}
-            colMin={mm?.min ?? 0}
-            colMax={mm?.max ?? 1}
-          />
-        )}
+        <CellContent
+          value={value}
+          searchTerm={searchTerm}
+          formatConfig={columnFormats[columnId]}
+          rules={rules}
+          colMin={mm?.min ?? 0}
+          colMax={mm?.max ?? 1}
+        />
       </td>
     );
   };
@@ -881,71 +827,17 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
 
   return (
     <div style={{ height: "100%", width: "100%", position: "relative", display: "flex", flexDirection: "column" }}>
-      {/* Grouping drop zone */}
-      {grouping.length > 0 && (
-        <div
-          onDragOver={(e) => { e.preventDefault(); setGroupDropOver(true); }}
-          onDragLeave={() => setGroupDropOver(false)}
-          onDrop={handleGroupDrop}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "4px 8px",
-            background: groupDropOver ? "color-mix(in srgb, var(--accent) 10%, var(--bg-raised))" : "var(--bg-raised)",
-            borderBottom: "1px solid var(--border)",
-            flexShrink: 0,
-            minHeight: 28,
-            fontSize: 11,
-            color: "var(--text-muted)",
-            flexWrap: "wrap",
-          }}
-        >
-          <span style={{ fontWeight: 600, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>Grouped by:</span>
-          {grouping.map((colId) => {
-            const underscoreIdx = colId.indexOf("_");
-            const name = underscoreIdx >= 0 ? colId.substring(underscoreIdx + 1) : colId;
-            return (
-              <span
-                key={colId}
-                style={{
-                  padding: "2px 6px",
-                  background: "color-mix(in srgb, var(--accent) 15%, transparent)",
-                  borderRadius: 3,
-                  fontSize: 11,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                }}
-              >
-                {name}
-                <span
-                  style={{ cursor: "pointer", fontWeight: 700, fontSize: 10 }}
-                  onClick={() => removeGroupingColumn(colId)}
-                >
-                  ×
-                </span>
-              </span>
-            );
-          })}
-        </div>
-      )}
-
       <div
         ref={scrollContainerRef}
         className="thaw-grid"
         onScroll={handleScroll}
         tabIndex={0}
-        onDragOver={(e) => { if (grouping.length === 0) { e.preventDefault(); setGroupDropOver(true); } }}
-        onDragLeave={() => setGroupDropOver(false)}
-        onDrop={grouping.length === 0 ? handleGroupDrop : undefined}
         style={{
           flex: 1,
           width: "100%",
           overflow: "auto",
           outline: "none",
           ["--wails-draggable" as string]: "no-drag",
-          ...(groupDropOver && grouping.length === 0 ? { background: "color-mix(in srgb, var(--accent) 5%, transparent)" } : {}),
         }}
       >
         <table
@@ -1043,6 +935,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
             )}
             {virtualRows.map((virtualRow) => {
               const row = tableRows[virtualRow.index];
+              if (!row) return null;
               const cells = row.getVisibleCells();
               return (
                 <tr
@@ -1190,17 +1083,6 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
             setHeaderCtxMenu(null);
           })}
           <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
-          {menuItemEl(
-            grouping.includes(headerCtxMenu.columnId) ? "Remove Grouping" : "Group by This Column",
-            () => {
-              if (grouping.includes(headerCtxMenu.columnId)) {
-                removeGroupingColumn(headerCtxMenu.columnId);
-              } else {
-                addGroupingColumn(headerCtxMenu.columnId);
-              }
-              setHeaderCtxMenu(null);
-            },
-          )}
           {menuItemEl("Auto-size Column", () => {
             autoSizeColumn(headerCtxMenu.columnId);
             setHeaderCtxMenu(null);
@@ -1263,4 +1145,49 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
   );
 }
 
-export default ResultGrid;
+// ─── Error boundary ──────────────────────────────────────────────────────────
+
+import React from "react";
+
+interface EBState { error: Error | null }
+
+class ResultGridErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  EBState
+> {
+  state: EBState = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error("ResultGrid crashed:", error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 12 }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>Grid rendering error</div>
+          <pre style={{ whiteSpace: "pre-wrap", fontSize: 11, color: "var(--text-faint)" }}>
+            {this.state.error.message}
+            {"\n"}
+            {this.state.error.stack}
+          </pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function ResultGridWithErrorBoundary(props: Props) {
+  return (
+    <ResultGridErrorBoundary>
+      <ResultGrid {...props} />
+    </ResultGridErrorBoundary>
+  );
+}
+
+export default ResultGridWithErrorBoundary;
