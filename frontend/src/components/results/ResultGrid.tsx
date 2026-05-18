@@ -428,6 +428,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     (e: React.MouseEvent, rowIndex: number, colIndex: number) => {
       if (e.button !== 0) return; // only left click
       if (!featureFlags.multiCellCopy) return;
+      e.preventDefault(); // prevent native text selection during drag
       selectionStartRef.current = { row: rowIndex, col: colIndex };
       setSelectionRange({ startRow: rowIndex, endRow: rowIndex, startCol: colIndex, endCol: colIndex });
       setIsSelecting(true);
