@@ -190,14 +190,18 @@ export default function PipeCopyHistoryModal({ db, schema, name, onClose }: Prop
         <div
           ref={scrollContainerRef}
           className="thaw-grid"
+          tabIndex={0}
           style={{
             height: 480,
             width: "100%",
             overflow: "auto",
+            outline: "none",
             ["--wails-draggable" as string]: "no-drag",
           }}
         >
           <table
+            role="grid"
+            aria-label="Copy history"
             style={{
               width: "100%",
               borderCollapse: "collapse",
@@ -245,28 +249,30 @@ export default function PipeCopyHistoryModal({ db, schema, name, onClose }: Prop
                             {isSorted === "asc" ? "\u25B2" : "\u25BC"}
                           </span>
                         )}
-                        <div
-                          onMouseDown={header.getResizeHandler()}
-                          onTouchStart={header.getResizeHandler()}
-                          onClick={(e) => e.stopPropagation()}
-                          style={{
-                            position: "absolute",
-                            right: 0,
-                            top: 0,
-                            bottom: 0,
-                            width: 4,
-                            cursor: "col-resize",
-                            background: header.column.getIsResizing() ? "var(--accent)" : "transparent",
-                          }}
-                          onMouseEnter={(e) => {
-                            if (!header.column.getIsResizing())
-                              e.currentTarget.style.background = "var(--border)";
-                          }}
-                          onMouseLeave={(e) => {
-                            if (!header.column.getIsResizing())
-                              e.currentTarget.style.background = "transparent";
-                          }}
-                        />
+                        {header.column.getCanResize() && (
+                          <div
+                            onMouseDown={header.getResizeHandler()}
+                            onTouchStart={header.getResizeHandler()}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              position: "absolute",
+                              right: 0,
+                              top: 0,
+                              bottom: 0,
+                              width: 4,
+                              cursor: "col-resize",
+                              background: header.column.getIsResizing() ? "var(--accent)" : "transparent",
+                            }}
+                            onMouseEnter={(e) => {
+                              if (!header.column.getIsResizing())
+                                e.currentTarget.style.background = "var(--border)";
+                            }}
+                            onMouseLeave={(e) => {
+                              if (!header.column.getIsResizing())
+                                e.currentTarget.style.background = "transparent";
+                            }}
+                          />
+                        )}
                       </th>
                     );
                   })}

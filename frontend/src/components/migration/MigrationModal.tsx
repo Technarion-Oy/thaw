@@ -802,9 +802,10 @@ export default function MigrationModal({ onClose }: Props) {
         <div
           ref={reviewScrollRef}
           className="thaw-grid"
-          style={{ height: 260, width: "100%", overflow: "auto" }}
+          tabIndex={0}
+          style={{ height: 260, width: "100%", overflow: "auto", outline: "none" }}
         >
-          <table style={gridTableStyle}>
+          <table role="grid" aria-label="Migration review" style={gridTableStyle}>
             <colgroup>
               {reviewVisibleCols.map((column) => (
                 <col key={column.id} style={{ width: column.getSize() }} />
@@ -1142,9 +1143,10 @@ export default function MigrationModal({ onClose }: Props) {
         <div
           ref={execScrollRef}
           className="thaw-grid"
-          style={{ height: 320, width: "100%", overflow: "auto" }}
+          tabIndex={0}
+          style={{ height: 320, width: "100%", overflow: "auto", outline: "none" }}
         >
-          <table style={gridTableStyle}>
+          <table role="grid" aria-label="Migration execution" style={gridTableStyle}>
             <colgroup>
               {execVisibleCols.map((column) => (
                 <col key={column.id} style={{ width: column.getSize() }} />

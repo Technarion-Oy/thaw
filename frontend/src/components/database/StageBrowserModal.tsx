@@ -342,10 +342,12 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
         ref={scrollContainerRef}
         className="thaw-grid"
         onContextMenu={(e) => e.preventDefault()}
+        tabIndex={0}
         style={{
           height: 500,
           width: "100%",
           overflow: "auto",
+          outline: "none",
           ["--wails-draggable" as string]: "no-drag",
         }}
       >
@@ -355,6 +357,8 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
           </div>
         ) : (
           <table
+            role="grid"
+            aria-label="Stage files"
             style={{
               width: "100%",
               borderCollapse: "collapse",

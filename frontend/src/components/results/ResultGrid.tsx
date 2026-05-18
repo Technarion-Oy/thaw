@@ -91,6 +91,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
   const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null);
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnSizing, setColumnSizing] = useState<Record<string, number>>({});
+  const [containerWidth, setContainerWidth] = useState(0);
 
   const rowHeight = cssVar("--row-height", 24);
   const headerHeight = cssVar("--header-height", 28);
@@ -168,6 +169,13 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
     estimateSize: (index) => visibleColumns[index].getSize(),
     overscan: 3,
   });
+
+  // Measure container width after mount so the table fills the available space
+  // even on the first render (when scrollContainerRef is not yet attached).
+  useLayoutEffect(() => {
+    const el = scrollContainerRef.current;
+    if (el) setContainerWidth(el.clientWidth);
+  }, []);
 
   // Register a scrollTo handle so the parent can programmatically scroll this grid.
   useEffect(() => {
@@ -299,17 +307,21 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
         ref={scrollContainerRef}
         className="thaw-grid"
         onScroll={handleScroll}
+        tabIndex={0}
         style={{
           height: "100%",
           width: "100%",
           overflow: "auto",
+          outline: "none",
           // WKWebView compat
           ["--wails-draggable" as string]: "no-drag",
         }}
       >
         <table
+          role="grid"
+          aria-label="Query results"
           style={{
-            width: Math.max(totalColumnWidth, scrollContainerRef.current?.clientWidth ?? 0),
+            width: Math.max(totalColumnWidth, containerWidth),
             borderCollapse: "collapse",
             tableLayout: "fixed",
             fontSize: 11,
