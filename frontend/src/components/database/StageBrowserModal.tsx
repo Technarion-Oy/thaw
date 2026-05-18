@@ -54,8 +54,6 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pattern, setPattern] = useState("");
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
-  const selectedRowIdsRef = useRef(selectedRowIds);
-  selectedRowIdsRef.current = selectedRowIds;
   const [sorting, setSorting] = useState<SortingState>([{ id: "name", desc: false }]);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -105,26 +103,24 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
     return files.filter((f) => selectedRowIds.has(f.name));
   }, [files, selectedRowIds]);
 
-  // Column defs read selectedRowIds from a ref so they stay stable across
-  // selection changes, avoiding a full TanStack column rebuild on each click.
   const columns = useMemo<ColumnDef<stage.StageFile>[]>(() => [
     {
       id: "checkbox",
       header: () => (
         <input
           type="checkbox"
-          checked={files.length > 0 && selectedRowIdsRef.current.size === files.length}
+          checked={files.length > 0 && selectedRowIds.size === files.length}
           onChange={toggleAll}
           style={{ cursor: "pointer" }}
           ref={(el) => {
-            if (el) el.indeterminate = selectedRowIdsRef.current.size > 0 && selectedRowIdsRef.current.size < files.length;
+            if (el) el.indeterminate = selectedRowIds.size > 0 && selectedRowIds.size < files.length;
           }}
         />
       ),
       cell: ({ row }) => (
         <input
           type="checkbox"
-          checked={selectedRowIdsRef.current.has(row.original.name)}
+          checked={selectedRowIds.has(row.original.name)}
           onChange={() => toggleRow(row.original.name)}
           style={{ cursor: "pointer" }}
         />
@@ -159,7 +155,7 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
       header: "Last Modified",
       size: 220,
     },
-  ], [files.length, toggleAll, toggleRow]);
+  ], [files.length, selectedRowIds, toggleAll, toggleRow]);
 
   const table = useReactTable({
     data: files,
@@ -314,7 +310,7 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
             <Button
               icon={<DownloadOutlined />}
               onClick={() => handleDownload()}
-              disabled={files.length === 0}
+              disabled={selectedRowIds.size === 0}
             >
               Download Selected
             </Button>
@@ -324,7 +320,7 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
               icon={<DeleteOutlined />}
               danger
               onClick={() => handleDelete()}
-              disabled={files.length === 0}
+              disabled={selectedRowIds.size === 0}
             >
               Delete Selected
             </Button>

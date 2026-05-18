@@ -31,6 +31,7 @@ import { message } from "antd";
 import type { QueryResult } from "../../store/queryStore";
 import { useThemeStore } from "../../store/themeStore";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { computeColumnWidths } from "../../utils/gridMeasure";
 
 export interface ScrollSyncHandle {
   scrollTo: (top: number) => void;
@@ -56,53 +57,13 @@ interface CtxMenu {
 // from consuming the entire grid and hiding all other columns.
 const MAX_COL_WIDTH = 300;
 const MIN_COL_WIDTH = 60;
-
-// Number of sample rows to inspect for auto-sizing column widths.
-const AUTO_SIZE_SAMPLE_ROWS = 100;
+const GRID_FONT = "11px Inter, SF Pro Text, system-ui, sans-serif";
 
 // Read a CSS variable from the document root as a number (strip "px").
 function cssVar(name: string, fallback: number): number {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   const n = parseInt(raw, 10);
   return isNaN(n) ? fallback : n;
-}
-
-// Estimate the pixel width of a string at 11px font size.
-// Uses a shared off-screen canvas for text measurement.
-let _measureCtx: CanvasRenderingContext2D | null = null;
-function measureText(text: string): number {
-  if (!_measureCtx) {
-    const canvas = document.createElement("canvas");
-    _measureCtx = canvas.getContext("2d");
-    if (_measureCtx) _measureCtx.font = "11px Inter, SF Pro Text, system-ui, sans-serif";
-  }
-  if (!_measureCtx) return text.length * 7;
-  return _measureCtx.measureText(text).width;
-}
-
-// Compute initial column widths from header text + first N rows of data.
-function computeColumnWidths(
-  columns: string[],
-  rows: unknown[][],
-  sampleRows: number = AUTO_SIZE_SAMPLE_ROWS
-): number[] {
-  const widths: number[] = [];
-  const slicedRows = rows.slice(0, sampleRows);
-
-  for (let colIdx = 0; colIdx < columns.length; colIdx++) {
-    // Start with header width + padding for sort indicator
-    let maxW = measureText(columns[colIdx]) + 32;
-
-    for (const row of slicedRows) {
-      const val = row[colIdx];
-      const text = val == null ? "NULL" : String(val);
-      const w = measureText(text) + 16; // cell padding
-      if (w > maxW) maxW = w;
-    }
-
-    widths.push(Math.max(MIN_COL_WIDTH, Math.min(MAX_COL_WIDTH, Math.ceil(maxW))));
-  }
-  return widths;
 }
 
 // Render NULL/undefined as a distinct faded label so it is never confused
@@ -142,7 +103,9 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
 
   // Compute initial column widths from data
   const initialWidths = useMemo(
-    () => computeColumnWidths(result.columns, result.rows),
+    () => computeColumnWidths(result.columns, result.rows, {
+      font: GRID_FONT, minWidth: MIN_COL_WIDTH, maxWidth: MAX_COL_WIDTH, nullText: "NULL",
+    }),
     [result.columns, result.rows]
   );
 

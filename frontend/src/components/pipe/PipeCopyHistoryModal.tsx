@@ -24,6 +24,7 @@ import {
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { GetPipeCopyHistory } from "../../../wailsjs/go/main/App";
 import type { snowflake } from "../../../wailsjs/go/models";
+import { computeColumnWidths } from "../../utils/gridMeasure";
 import dayjs from "dayjs";
 
 const { Text } = Typography;
@@ -38,39 +39,7 @@ const STATUS_OPTIONS = [
 
 const MIN_COL_WIDTH = 80;
 const MAX_COL_WIDTH = 400;
-const AUTO_SIZE_SAMPLE_ROWS = 50;
-
-// Estimate the pixel width of a string at 12px font size.
-let _measureCtx: CanvasRenderingContext2D | null = null;
-function measureText(text: string): number {
-  if (!_measureCtx) {
-    const canvas = document.createElement("canvas");
-    _measureCtx = canvas.getContext("2d");
-    if (_measureCtx) _measureCtx.font = "12px Inter, SF Pro Text, system-ui, sans-serif";
-  }
-  if (!_measureCtx) return text.length * 7;
-  return _measureCtx.measureText(text).width;
-}
-
-function computeColumnWidths(
-  columns: string[],
-  rows: unknown[][],
-): number[] {
-  const widths: number[] = [];
-  const slicedRows = rows.slice(0, AUTO_SIZE_SAMPLE_ROWS);
-
-  for (let colIdx = 0; colIdx < columns.length; colIdx++) {
-    let maxW = measureText(columns[colIdx]) + 32;
-    for (const row of slicedRows) {
-      const val = row[colIdx];
-      const text = val == null ? "" : String(val);
-      const w = measureText(text) + 16;
-      if (w > maxW) maxW = w;
-    }
-    widths.push(Math.max(MIN_COL_WIDTH, Math.min(MAX_COL_WIDTH, Math.ceil(maxW))));
-  }
-  return widths;
-}
+const GRID_FONT = "12px Inter, SF Pro Text, system-ui, sans-serif";
 
 interface Props {
   db: string;
@@ -113,7 +82,9 @@ export default function PipeCopyHistoryModal({ db, schema, name, onClose }: Prop
 
   const initialWidths = useMemo(() => {
     if (!result?.columns?.length) return [];
-    return computeColumnWidths(result.columns, result.rows);
+    return computeColumnWidths(result.columns, result.rows, {
+      font: GRID_FONT, minWidth: MIN_COL_WIDTH, maxWidth: MAX_COL_WIDTH, sampleRows: 50,
+    });
   }, [result]);
 
   const columns = useMemo<ColumnDef<unknown[]>[]>(() => {
@@ -245,6 +216,7 @@ export default function PipeCopyHistoryModal({ db, schema, name, onClose }: Prop
                 <tr key={headerGroup.id}>
                   {headerGroup.headers.map((header) => {
                     const isSorted = header.column.getIsSorted();
+                    const canSort = header.column.getCanSort();
                     return (
                       <th
                         key={header.id}
@@ -257,7 +229,7 @@ export default function PipeCopyHistoryModal({ db, schema, name, onClose }: Prop
                           color: "var(--text-muted)",
                           borderBottom: "1px solid var(--border)",
                           borderRight: "1px solid var(--border)",
-                          cursor: "pointer",
+                          cursor: canSort ? "pointer" : "default",
                           userSelect: "none",
                           position: "relative",
                           overflow: "hidden",
@@ -265,7 +237,7 @@ export default function PipeCopyHistoryModal({ db, schema, name, onClose }: Prop
                           whiteSpace: "nowrap",
                           width: header.column.getSize(),
                         }}
-                        onClick={header.column.getToggleSortingHandler()}
+                        onClick={canSort ? header.column.getToggleSortingHandler() : undefined}
                       >
                         {flexRender(header.column.columnDef.header, header.getContext())}
                         {isSorted && (
