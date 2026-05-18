@@ -22,7 +22,6 @@ import {
   useReactTable,
   getCoreRowModel,
   getSortedRowModel,
-  getFilteredRowModel,
   type ColumnDef,
   type SortingState,
   flexRender,
@@ -179,7 +178,6 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
     onColumnSizingChange: setColumnSizing,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
     columnResizeMode: "onChange",
   });
 
@@ -253,11 +251,12 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
   }, [ctxMenu]);
 
   const handleCellContextMenu = useCallback(
-    (e: React.MouseEvent, rowData: unknown[], colIdx: number) => {
+    (e: React.MouseEvent, rowData: unknown[], columnId: string) => {
       e.preventDefault();
       e.stopPropagation();
 
-      const cellValue = rowData[colIdx] == null ? "" : String(rowData[colIdx]);
+      const colIdx = result.columns.indexOf(columnId);
+      const cellValue = colIdx >= 0 && rowData[colIdx] != null ? String(rowData[colIdx]) : "";
       const rowValues = rowData.map((v) => (v == null ? "" : String(v)));
 
       setCtxMenu({ x: e.clientX, y: e.clientY, cellValue, rowValues, columns: result.columns });
@@ -300,6 +299,25 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
   const totalColumnWidth = columnVirtualizer.getTotalSize();
   const totalRowHeight = rowVirtualizer.getTotalSize();
 
+  // Compute left/right spacer widths for column virtualisation.
+  // The colgroup declares ALL columns so the browser knows the full layout;
+  // each row renders only the visible cells plus padding <td> spacers on the
+  // left and right to fill the off-screen column space.
+  const virtualCols = columnVirtualizer.getVirtualItems();
+  const firstVirtCol = virtualCols[0];
+  const lastVirtCol = virtualCols[virtualCols.length - 1];
+
+  // Number of columns before and after the visible window
+  const leftColCount = firstVirtCol ? firstVirtCol.index : 0;
+  const rightColCount = lastVirtCol ? visibleColumns.length - lastVirtCol.index - 1 : 0;
+
+  // Pixel widths for the left/right spacer cells
+  let leftSpacerWidth = 0;
+  for (let i = 0; i < leftColCount; i++) leftSpacerWidth += visibleColumns[i].getSize();
+  let rightSpacerWidth = 0;
+  for (let i = visibleColumns.length - rightColCount; i < visibleColumns.length; i++)
+    rightSpacerWidth += visibleColumns[i].getSize();
+
   return (
     <div style={{ height: "100%", width: "100%", position: "relative" }}>
       <div
@@ -323,17 +341,11 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
             fontFamily: "var(--ui-font, 'Inter', 'SF Pro Text', system-ui, sans-serif)",
           }}
         >
-          {/* Column widths via colgroup */}
+          {/* Declare ALL columns so the browser knows every column's width */}
           <colgroup>
-            {columnVirtualizer.getVirtualItems().map((virtualCol) => {
-              const column = visibleColumns[virtualCol.index];
-              return (
-                <col
-                  key={column.id}
-                  style={{ width: column.getSize() }}
-                />
-              );
-            })}
+            {visibleColumns.map((column) => (
+              <col key={column.id} style={{ width: column.getSize() }} />
+            ))}
           </colgroup>
 
           {/* Header */}
@@ -347,7 +359,14 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
           >
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>
-                {columnVirtualizer.getVirtualItems().map((virtualCol) => {
+                {/* Left spacer header */}
+                {leftColCount > 0 && (
+                  <th
+                    colSpan={leftColCount}
+                    style={{ width: leftSpacerWidth, padding: 0, border: "none" }}
+                  />
+                )}
+                {virtualCols.map((virtualCol) => {
                   const header = headerGroup.headers[virtualCol.index];
                   if (!header) return null;
                   const isSorted = header.column.getIsSorted();
@@ -409,13 +428,20 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
                     </th>
                   );
                 })}
+                {/* Right spacer header */}
+                {rightColCount > 0 && (
+                  <th
+                    colSpan={rightColCount}
+                    style={{ width: rightSpacerWidth, padding: 0, border: "none" }}
+                  />
+                )}
               </tr>
             ))}
           </thead>
 
           {/* Body */}
           <tbody>
-            {/* Top spacer */}
+            {/* Top row spacer */}
             {rowVirtualizer.getVirtualItems().length > 0 && (
               <tr>
                 <td
@@ -431,14 +457,21 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
                   key={row.id}
                   style={{ height: rowHeight }}
                 >
-                  {columnVirtualizer.getVirtualItems().map((virtualCol) => {
+                  {/* Left column spacer */}
+                  {leftColCount > 0 && (
+                    <td
+                      colSpan={leftColCount}
+                      style={{ width: leftSpacerWidth, padding: 0, border: "none" }}
+                    />
+                  )}
+                  {virtualCols.map((virtualCol) => {
                     const cell = row.getVisibleCells()[virtualCol.index];
                     if (!cell) return null;
                     return (
                       <td
                         key={cell.id}
                         onContextMenu={(e) =>
-                          handleCellContextMenu(e, row.original, virtualCol.index)
+                          handleCellContextMenu(e, row.original, cell.column.id)
                         }
                         style={{
                           padding: "0 8px",
@@ -459,10 +492,17 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
                       </td>
                     );
                   })}
+                  {/* Right column spacer */}
+                  {rightColCount > 0 && (
+                    <td
+                      colSpan={rightColCount}
+                      style={{ width: rightSpacerWidth, padding: 0, border: "none" }}
+                    />
+                  )}
                 </tr>
               );
             })}
-            {/* Bottom spacer */}
+            {/* Bottom row spacer */}
             {rowVirtualizer.getVirtualItems().length > 0 && (
               <tr>
                 <td

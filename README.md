@@ -517,7 +517,7 @@ Open **Tools → Schema Migration…** in the menu bar to deploy local `.sql` DD
 
 1. **Configure** — add one or more source directory → target database mappings; each mapping associates a local `.sql` directory with a fallback Snowflake database used for objects that have no explicit `USE DATABASE` context; multiple mappings let you migrate several databases in a single wizard run
 2. **Scan** — reads every `.sql` file in all source directories, splits multi-statement files, tracks `USE DATABASE` / `USE SCHEMA` context, applies each mapping's fallback database, and deduplicates objects across all sources by kind + name; the summary shows total counts by object type
-3. **Review** — shows an TanStack Table diff grid with a status tag for each object:
+3. **Review** — shows a TanStack Table diff grid with a status tag for each object:
    - **New** — exists locally but not in Snowflake
    - **Changed** — exists in both; DDL is normalised (comments stripped, whitespace collapsed, uppercased, trailing `;` removed) before comparison to eliminate cosmetic noise
    - **Unchanged** — identical DDL; hidden from selection by default

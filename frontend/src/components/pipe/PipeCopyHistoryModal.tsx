@@ -188,7 +188,7 @@ export default function PipeCopyHistoryModal({ db, schema, name, onClose }: Prop
           style={{ width: 180 }}
         />
         <Input
-          placeholder="File name filter..."
+          placeholder="File name filter…"
           value={fileName}
           onChange={(e) => setFileName(e.target.value)}
           style={{ width: 200 }}

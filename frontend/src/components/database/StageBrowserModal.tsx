@@ -20,7 +20,6 @@ import {
   useReactTable,
   getCoreRowModel,
   getSortedRowModel,
-  getFilteredRowModel,
   type ColumnDef,
   type SortingState,
   flexRender,
@@ -165,7 +164,6 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
     onSortingChange: setSorting,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
     columnResizeMode: "onChange",
   });
 

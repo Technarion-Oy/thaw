@@ -670,7 +670,7 @@ export default function MigrationModal({ onClose }: Props) {
                     placeholder="/path/to/sql/files"
                     style={{ fontFamily: "monospace" }}
                   />
-                  <Button onClick={() => handlePickDir(mapping.id)}>Browse...</Button>
+                  <Button onClick={() => handlePickDir(mapping.id)}>Browse…</Button>
                 </Space.Compact>
                 <Select
                   showSearch
