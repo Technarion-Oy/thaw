@@ -54,6 +54,8 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pattern, setPattern] = useState("");
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
+  const selectedRowIdsRef = useRef(selectedRowIds);
+  selectedRowIdsRef.current = selectedRowIds;
   const [sorting, setSorting] = useState<SortingState>([{ id: "name", desc: false }]);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -103,24 +105,26 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
     return files.filter((f) => selectedRowIds.has(f.name));
   }, [files, selectedRowIds]);
 
+  // Column defs read selectedRowIds from a ref so they stay stable across
+  // selection changes, avoiding a full TanStack column rebuild on each click.
   const columns = useMemo<ColumnDef<stage.StageFile>[]>(() => [
     {
       id: "checkbox",
       header: () => (
         <input
           type="checkbox"
-          checked={files.length > 0 && selectedRowIds.size === files.length}
+          checked={files.length > 0 && selectedRowIdsRef.current.size === files.length}
           onChange={toggleAll}
           style={{ cursor: "pointer" }}
           ref={(el) => {
-            if (el) el.indeterminate = selectedRowIds.size > 0 && selectedRowIds.size < files.length;
+            if (el) el.indeterminate = selectedRowIdsRef.current.size > 0 && selectedRowIdsRef.current.size < files.length;
           }}
         />
       ),
       cell: ({ row }) => (
         <input
           type="checkbox"
-          checked={selectedRowIds.has(row.original.name)}
+          checked={selectedRowIdsRef.current.has(row.original.name)}
           onChange={() => toggleRow(row.original.name)}
           style={{ cursor: "pointer" }}
         />
@@ -155,7 +159,7 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
       header: "Last Modified",
       size: 220,
     },
-  ], [files.length, selectedRowIds, toggleAll, toggleRow]);
+  ], [files.length, toggleAll, toggleRow]);
 
   const table = useReactTable({
     data: files,
@@ -175,6 +179,7 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
     estimateSize: () => 32,
     overscan: 10,
   });
+  const virtualRows = rowVirtualizer.getVirtualItems();
 
   const getFullPath = (fileName: string) => {
     const slashIdx = fileName.indexOf('/');
@@ -432,15 +437,15 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
               ))}
             </thead>
             <tbody>
-              {rowVirtualizer.getVirtualItems().length > 0 && (
+              {virtualRows.length > 0 && (
                 <tr>
                   <td
-                    style={{ height: rowVirtualizer.getVirtualItems()[0].start, padding: 0, border: "none" }}
+                    style={{ height: virtualRows[0].start, padding: 0, border: "none" }}
                     colSpan={visibleColumns.length}
                   />
                 </tr>
               )}
-              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+              {virtualRows.map((virtualRow) => {
                 const row = tableRows[virtualRow.index];
                 const isSelected = selectedRowIds.has(row.original.name);
                 return (
@@ -475,13 +480,13 @@ export default function StageBrowserModal({ db, schema, name, onClose }: Props) 
                   </tr>
                 );
               })}
-              {rowVirtualizer.getVirtualItems().length > 0 && (
+              {virtualRows.length > 0 && (
                 <tr>
                   <td
                     style={{
                       height:
                         rowVirtualizer.getTotalSize() -
-                        (rowVirtualizer.getVirtualItems()[rowVirtualizer.getVirtualItems().length - 1]?.end ?? 0),
+                        (virtualRows[virtualRows.length - 1]?.end ?? 0),
                       padding: 0,
                       border: "none",
                     }}

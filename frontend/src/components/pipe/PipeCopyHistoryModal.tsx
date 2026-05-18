@@ -146,6 +146,7 @@ export default function PipeCopyHistoryModal({ db, schema, name, onClose }: Prop
     estimateSize: () => 32,
     overscan: 10,
   });
+  const virtualRows = rowVirtualizer.getVirtualItems();
 
   const visibleColumns = table.getVisibleLeafColumns();
   const pipeRef = `"${db}"."${schema}"."${name}"`;
@@ -301,15 +302,15 @@ export default function PipeCopyHistoryModal({ db, schema, name, onClose }: Prop
               ))}
             </thead>
             <tbody>
-              {rowVirtualizer.getVirtualItems().length > 0 && (
+              {virtualRows.length > 0 && (
                 <tr>
                   <td
-                    style={{ height: rowVirtualizer.getVirtualItems()[0].start, padding: 0, border: "none" }}
+                    style={{ height: virtualRows[0].start, padding: 0, border: "none" }}
                     colSpan={visibleColumns.length}
                   />
                 </tr>
               )}
-              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+              {virtualRows.map((virtualRow) => {
                 const row = tableRows[virtualRow.index];
                 return (
                   <tr
@@ -340,13 +341,13 @@ export default function PipeCopyHistoryModal({ db, schema, name, onClose }: Prop
                   </tr>
                 );
               })}
-              {rowVirtualizer.getVirtualItems().length > 0 && (
+              {virtualRows.length > 0 && (
                 <tr>
                   <td
                     style={{
                       height:
                         rowVirtualizer.getTotalSize() -
-                        (rowVirtualizer.getVirtualItems()[rowVirtualizer.getVirtualItems().length - 1]?.end ?? 0),
+                        (virtualRows[virtualRows.length - 1]?.end ?? 0),
                       padding: 0,
                       border: "none",
                     }}

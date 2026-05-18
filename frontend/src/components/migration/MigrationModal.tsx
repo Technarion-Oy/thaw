@@ -479,6 +479,7 @@ export default function MigrationModal({ onClose }: Props) {
     estimateSize: () => 32,
     overscan: 5,
   });
+  const reviewVirtualRows = reviewVirtualizer.getVirtualItems();
 
   // ── Step 3 helpers ─────────────────────────────────────────────────────────
 
@@ -649,6 +650,7 @@ export default function MigrationModal({ onClose }: Props) {
     estimateSize: () => 32,
     overscan: 5,
   });
+  const execVirtualRows = execVirtualizer.getVirtualItems();
 
   // ── Render steps ──────────────────────────────────────────────────────────
 
@@ -836,7 +838,7 @@ export default function MigrationModal({ onClose }: Props) {
                           overflow: "hidden",
                           textOverflow: "ellipsis",
                           whiteSpace: "nowrap",
-                          position: header.id === "checkbox" ? "sticky" : undefined,
+                          position: header.id === "checkbox" ? "sticky" : "relative",
                           left: header.id === "checkbox" ? 0 : undefined,
                           zIndex: header.id === "checkbox" ? 3 : undefined,
                           background: "var(--bg-raised)",
@@ -873,15 +875,15 @@ export default function MigrationModal({ onClose }: Props) {
               ))}
             </thead>
             <tbody>
-              {reviewVirtualizer.getVirtualItems().length > 0 && (
+              {reviewVirtualRows.length > 0 && (
                 <tr>
                   <td
-                    style={{ height: reviewVirtualizer.getVirtualItems()[0].start, padding: 0, border: "none" }}
+                    style={{ height: reviewVirtualRows[0].start, padding: 0, border: "none" }}
                     colSpan={reviewVisibleCols.length}
                   />
                 </tr>
               )}
-              {reviewVirtualizer.getVirtualItems().map((virtualRow) => {
+              {reviewVirtualRows.map((virtualRow) => {
                 const row = reviewRows[virtualRow.index];
                 return (
                   <tr
@@ -920,13 +922,13 @@ export default function MigrationModal({ onClose }: Props) {
                   </tr>
                 );
               })}
-              {reviewVirtualizer.getVirtualItems().length > 0 && (
+              {reviewVirtualRows.length > 0 && (
                 <tr>
                   <td
                     style={{
                       height:
                         reviewVirtualizer.getTotalSize() -
-                        (reviewVirtualizer.getVirtualItems()[reviewVirtualizer.getVirtualItems().length - 1]?.end ?? 0),
+                        (reviewVirtualRows[reviewVirtualRows.length - 1]?.end ?? 0),
                       padding: 0,
                       border: "none",
                     }}
@@ -1203,15 +1205,15 @@ export default function MigrationModal({ onClose }: Props) {
               ))}
             </thead>
             <tbody>
-              {execVirtualizer.getVirtualItems().length > 0 && (
+              {execVirtualRows.length > 0 && (
                 <tr>
                   <td
-                    style={{ height: execVirtualizer.getVirtualItems()[0].start, padding: 0, border: "none" }}
+                    style={{ height: execVirtualRows[0].start, padding: 0, border: "none" }}
                     colSpan={execVisibleCols.length}
                   />
                 </tr>
               )}
-              {execVirtualizer.getVirtualItems().map((virtualRow) => {
+              {execVirtualRows.map((virtualRow) => {
                 const row = execRows[virtualRow.index];
                 return (
                   <tr
@@ -1242,13 +1244,13 @@ export default function MigrationModal({ onClose }: Props) {
                   </tr>
                 );
               })}
-              {execVirtualizer.getVirtualItems().length > 0 && (
+              {execVirtualRows.length > 0 && (
                 <tr>
                   <td
                     style={{
                       height:
                         execVirtualizer.getTotalSize() -
-                        (execVirtualizer.getVirtualItems()[execVirtualizer.getVirtualItems().length - 1]?.end ?? 0),
+                        (execVirtualRows[execVirtualRows.length - 1]?.end ?? 0),
                       padding: 0,
                       border: "none",
                     }}
