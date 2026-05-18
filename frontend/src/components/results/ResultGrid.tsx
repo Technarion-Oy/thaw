@@ -330,7 +330,10 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     onColumnSizingChange: setColumnSizing,
     onColumnPinningChange: setColumnPinning,
     onColumnFiltersChange: setColumnFilters,
-    onGroupingChange: setGrouping as any,
+    onGroupingChange: (updater: any) => {
+      const next = typeof updater === "function" ? updater(grouping) : updater;
+      setGrouping(next);
+    },
     onExpandedChange: setExpanded,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -361,7 +364,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     horizontal: true,
     count: centerColumns.length,
     getScrollElement: () => scrollContainerRef.current,
-    estimateSize: (index) => centerColumns[index].getSize(),
+    estimateSize: (index) => centerColumns[index]?.getSize() ?? 100,
     overscan: 3,
   });
 
@@ -684,10 +687,13 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
   const rightColCount = lastVirtCol ? centerColumns.length - lastVirtCol.index - 1 : 0;
 
   let leftSpacerWidth = 0;
-  for (let i = 0; i < leftColCount; i++) leftSpacerWidth += centerColumns[i].getSize();
+  for (let i = 0; i < leftColCount; i++) {
+    if (centerColumns[i]) leftSpacerWidth += centerColumns[i].getSize();
+  }
   let rightSpacerWidth = 0;
-  for (let i = centerColumns.length - rightColCount; i < centerColumns.length; i++)
-    rightSpacerWidth += centerColumns[i].getSize();
+  for (let i = Math.max(0, centerColumns.length - rightColCount); i < centerColumns.length; i++) {
+    if (centerColumns[i]) rightSpacerWidth += centerColumns[i].getSize();
+  }
 
   const fullTableWidth = pinnedLeftWidth + totalColumnWidth + pinnedRightWidth;
 
@@ -947,6 +953,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
           }}
         >
           <colgroup>
+            {featureFlags.multiCellCopy && <col style={{ width: 28 }} />}
             {leftPinned.map((col) => <col key={col.id} style={{ width: col.getSize() }} />)}
             {centerColumns.map((col) => <col key={col.id} style={{ width: col.getSize() }} />)}
             {rightPinned.map((col) => <col key={col.id} style={{ width: col.getSize() }} />)}
@@ -996,6 +1003,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
                 {/* Center (virtualized) headers */}
                 {virtualCols.map((vc) => {
                   const col = centerColumns[vc.index];
+                  if (!col) return null;
                   const header = headerGroup.headers.find((h) => h.column.id === col.id);
                   if (!header) return null;
                   const underscoreIdx = col.id.indexOf("_");
@@ -1074,6 +1082,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
                   {/* Center (virtualized) cells */}
                   {virtualCols.map((vc) => {
                     const col = centerColumns[vc.index];
+                    if (!col) return null;
                     const cell = cells.find((c) => c.column.id === col.id);
                     if (!cell) return null;
                     return renderBodyCell(cell, row.original, virtualRow.index, false);
