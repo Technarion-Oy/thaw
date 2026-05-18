@@ -125,6 +125,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isSyncingRef = useRef(false);
+  const lastScrollTopRef = useRef(0);
   const ctxRef = useRef<HTMLDivElement>(null);
   const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null);
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -145,7 +146,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
     [result.columns, result.rows]
   );
 
-  // Set initial column sizing when data changes.
+  // Reset column sizing and sorting when the result changes.
   // Column ids use the format `${colIdx}_${name}` to handle duplicate column
   // names from JOINs (e.g. `SELECT a.id, b.id`).
   useEffect(() => {
@@ -154,6 +155,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
       sizing[`${i}_${col}`] = initialWidths[i];
     });
     setColumnSizing(sizing);
+    setSorting([]);
   }, [result.columns, initialWidths]);
 
   // Column definitions — use accessorFn to read from the raw unknown[] arrays
@@ -220,12 +222,16 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncScrollRef]);
 
-  // Handle scroll events for sync
+  // Handle scroll events for sync — only fire when scrollTop actually changes
+  // to avoid unnecessary no-op calls during horizontal-only scrolling.
   const handleScroll = useCallback(() => {
     if (isSyncingRef.current) return;
     const el = scrollContainerRef.current;
     if (!el) return;
-    onVerticalScroll?.(el.scrollTop);
+    const top = el.scrollTop;
+    if (top === lastScrollTopRef.current) return;
+    lastScrollTopRef.current = top;
+    onVerticalScroll?.(top);
   }, [onVerticalScroll]);
 
   // Dismiss context menu on outside mousedown or Escape.
@@ -303,6 +309,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
 
   const totalColumnWidth = columnVirtualizer.getTotalSize();
   const totalRowHeight = rowVirtualizer.getTotalSize();
+  const virtualRows = rowVirtualizer.getVirtualItems();
 
   // Compute left/right spacer widths for column virtualisation.
   // The colgroup declares ALL columns so the browser knows the full layout;
@@ -447,15 +454,15 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
           {/* Body */}
           <tbody>
             {/* Top row spacer */}
-            {rowVirtualizer.getVirtualItems().length > 0 && (
+            {virtualRows.length > 0 && (
               <tr>
                 <td
-                  style={{ height: rowVirtualizer.getVirtualItems()[0].start, padding: 0, border: "none" }}
+                  style={{ height: virtualRows[0].start, padding: 0, border: "none" }}
                   colSpan={visibleColumns.length}
                 />
               </tr>
             )}
-            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+            {virtualRows.map((virtualRow) => {
               const row = tableRows[virtualRow.index];
               return (
                 <tr
@@ -513,13 +520,13 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
               );
             })}
             {/* Bottom row spacer */}
-            {rowVirtualizer.getVirtualItems().length > 0 && (
+            {virtualRows.length > 0 && (
               <tr>
                 <td
                   style={{
                     height:
                       totalRowHeight -
-                      (rowVirtualizer.getVirtualItems()[rowVirtualizer.getVirtualItems().length - 1]?.end ?? 0),
+                      (virtualRows[virtualRows.length - 1]?.end ?? 0),
                     padding: 0,
                     border: "none",
                   }}

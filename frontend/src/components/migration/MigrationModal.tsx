@@ -206,6 +206,8 @@ export default function MigrationModal({ onClose }: Props) {
   const [analyzeProgress, setAnalyzeProgress] = useState({ done: 0, total: 0 });
   const [diffItems, setDiffItems] = useState<MigrationDiffItem[]>([]);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const selectedKeysRef = useRef(selectedKeys);
+  selectedKeysRef.current = selectedKeys;
   const [activeDiff, setActiveDiff] = useState<MigrationDiffItem | null>(null);
   const [statusFilter, setStatusFilter] = useState<"all" | "new" | "changed">("all");
   const reviewScrollRef = useRef<HTMLDivElement>(null);
@@ -385,7 +387,10 @@ export default function MigrationModal({ onClose }: Props) {
     }
   }
 
-  // Review grid columns (TanStack)
+  // Review grid columns (TanStack).
+  // The checkbox cell reads selectedKeys from a ref so the column defs stay
+  // stable across selection changes, avoiding a full TanStack column rebuild
+  // on every checkbox click.
   const reviewCols = useMemo<ColumnDef<MigrationDiffItem>[]>(() => [
     {
       id: "checkbox",
@@ -398,7 +403,7 @@ export default function MigrationModal({ onClose }: Props) {
         const key = objectLabel(item.object);
         return (
           <Checkbox
-            checked={selectedKeys.has(key)}
+            checked={selectedKeysRef.current.has(key)}
             disabled={item.status === "removed"}
             onChange={(e) => handleCheck(item, e.target.checked)}
           />
@@ -447,7 +452,7 @@ export default function MigrationModal({ onClose }: Props) {
         row.object.filePath ? row.object.filePath.split("/").pop() ?? "" : "",
     },
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [selectedKeys, diffItems]);
+  ], [diffItems]);
 
   const filteredDiff = diffItems.filter((item) => {
     if (statusFilter === "all") return true;

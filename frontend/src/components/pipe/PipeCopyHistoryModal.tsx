@@ -109,23 +109,18 @@ export default function PipeCopyHistoryModal({ db, schema, name, onClose }: Prop
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db, schema, name]);
 
-  const rowData = useMemo(() => {
-    if (!result) return [];
-    return result.rows.map((row) =>
-      Object.fromEntries((result.columns ?? []).map((col, i) => [col, row[i]]))
-    );
-  }, [result]);
+  const data = result?.rows ?? [];
 
   const initialWidths = useMemo(() => {
     if (!result?.columns?.length) return [];
     return computeColumnWidths(result.columns, result.rows);
   }, [result]);
 
-  const columns = useMemo<ColumnDef<Record<string, unknown>>[]>(() => {
+  const columns = useMemo<ColumnDef<unknown[]>[]>(() => {
     if (!result?.columns?.length) return [];
     return result.columns.map((col, colIdx) => ({
-      id: col,
-      accessorKey: col,
+      id: `${colIdx}_${col}`,
+      accessorFn: (row: unknown[]) => row[colIdx],
       header: col,
       size: initialWidths[colIdx] ?? MIN_COL_WIDTH,
       minSize: MIN_COL_WIDTH,
@@ -134,7 +129,7 @@ export default function PipeCopyHistoryModal({ db, schema, name, onClose }: Prop
   }, [result, initialWidths]);
 
   const table = useReactTable({
-    data: rowData,
+    data,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
