@@ -268,8 +268,14 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     [result.columns, result.rows],
   );
 
-  // Reset grid state when result changes
-  useEffect(() => {
+  // Reset grid state synchronously when result columns change.
+  // Using React's "adjusting state during rendering" pattern so TanStack Table
+  // never processes new column definitions paired with stale state (old column
+  // IDs in grouping/columnFilters/columnPinning would crash getGroupedRowModel).
+  const [prevResultKey, setPrevResultKey] = useState("");
+  const resultKey = result.columns.join("\0");
+  if (resultKey !== prevResultKey) {
+    setPrevResultKey(resultKey);
     const sizing: Record<string, number> = {};
     result.columns.forEach((col, i) => {
       sizing[`${i}_${col}`] = initialWidths[i];
@@ -278,9 +284,10 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     setSorting([]);
     setColumnPinning({ left: [], right: [] });
     setColumnFilters([]);
+    setGrouping([]);
     setExpanded(true);
     resetGrid();
-  }, [result.columns, initialWidths, resetGrid]);
+  }
 
   // Pre-compute min/max per column for conditional formatting
   const columnMinMax = useMemo(() => {
