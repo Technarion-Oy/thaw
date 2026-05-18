@@ -134,14 +134,11 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
   const rowHeight = cssVar("--row-height", 24);
   const headerHeight = cssVar("--header-height", 28);
 
-  // Convert result.rows into row objects for TanStack Table
-  const data = useMemo(
-    () =>
-      result.rows.map((row) =>
-        Object.fromEntries(result.columns.map((col, i) => [col, row[i]]))
-      ),
-    [result.rows, result.columns]
-  );
+  // Pass the raw row arrays directly to TanStack Table — no per-row object
+  // conversion.  Column accessors read by index, avoiding the O(rows * cols)
+  // Object.fromEntries that previously blocked the main thread for ~1 s on
+  // large result sets when switching history entries.
+  const data = result.rows;
 
   // Compute initial column widths from data
   const initialWidths = useMemo(
@@ -158,12 +155,13 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
     setColumnSizing(sizing);
   }, [result.columns, initialWidths]);
 
-  // Column definitions
-  const columns = useMemo<ColumnDef<Record<string, unknown>>[]>(
+  // Column definitions — use accessorFn to read from the raw unknown[] arrays
+  // instead of accessorKey which requires row objects.
+  const columns = useMemo<ColumnDef<unknown[]>[]>(
     () =>
       result.columns.map((col, colIdx) => ({
         id: col,
-        accessorKey: col,
+        accessorFn: (row: unknown[]) => row[colIdx],
         header: col,
         size: initialWidths[colIdx],
         minSize: MIN_COL_WIDTH,
@@ -255,15 +253,12 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
   }, [ctxMenu]);
 
   const handleCellContextMenu = useCallback(
-    (e: React.MouseEvent, rowData: Record<string, unknown>, colId: string) => {
+    (e: React.MouseEvent, rowData: unknown[], colIdx: number) => {
       e.preventDefault();
       e.stopPropagation();
 
-      const cellValue = rowData[colId] == null ? "" : String(rowData[colId]);
-      const rowValues = result.columns.map((col) => {
-        const v = rowData[col];
-        return v == null ? "" : String(v);
-      });
+      const cellValue = rowData[colIdx] == null ? "" : String(rowData[colIdx]);
+      const rowValues = rowData.map((v) => (v == null ? "" : String(v)));
 
       setCtxMenu({ x: e.clientX, y: e.clientY, cellValue, rowValues, columns: result.columns });
     },
@@ -443,7 +438,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
                       <td
                         key={cell.id}
                         onContextMenu={(e) =>
-                          handleCellContextMenu(e, row.original, cell.column.id)
+                          handleCellContextMenu(e, row.original, virtualCol.index)
                         }
                         style={{
                           padding: "0 8px",
