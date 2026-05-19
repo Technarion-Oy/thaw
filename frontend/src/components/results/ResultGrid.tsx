@@ -91,6 +91,13 @@ const AUTO_SIZE_MAX_COL_WIDTH = 800;
 const MIN_COL_WIDTH = 60;
 const GRID_FONT = "11px Inter, SF Pro Text, system-ui, sans-serif";
 
+// z-index layers for the grid stacking context
+const Z_PINNED_CELL = 1;
+const Z_PINNED_HEADER = 3;
+const Z_THEAD = 4;
+const Z_SELECT_ALL = 5;
+const Z_OVERLAY = 9999;
+
 function cssVar(name: string, fallback: number): number {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   const n = parseInt(raw, 10);
@@ -239,6 +246,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
   const conditionalRules = useGridStore((s) => s.conditionalRules);
   const setTableRows = useGridStore((s) => s.setTableRows);
   const resetGrid = useGridStore((s) => s.reset);
+  const resetNavigation = useGridStore((s) => s.resetNavigation);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isSyncingRef = useRef(false);
@@ -274,23 +282,34 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     [result.columns, result.rows],
   );
 
-  // Reset grid state synchronously when result columns change.
+  // Reset grid state synchronously when result changes.
   // Using React's "adjusting state during rendering" pattern so TanStack Table
   // never processes new column definitions paired with stale state (old column
   // IDs in columnFilters/columnPinning would cause errors).
   const [prevResultKey, setPrevResultKey] = useState("");
+  const [prevColumnSchema, setPrevColumnSchema] = useState("");
   const resultKey = (result.queryID ?? "") + "\0" + result.columns.join("\0");
+  const columnSchema = result.columns.join("\0");
   if (resultKey !== prevResultKey) {
     setPrevResultKey(resultKey);
-    const sizing: Record<string, number> = {};
-    result.columns.forEach((col, i) => {
-      sizing[`${i}_${col}`] = initialWidths[i];
-    });
-    setColumnSizing(sizing);
-    setSorting([]);
-    setColumnPinning({ left: [], right: [] });
-    setColumnFilters([]);
-    resetGrid();
+    const schemaChanged = columnSchema !== prevColumnSchema;
+    if (schemaChanged) {
+      setPrevColumnSchema(columnSchema);
+      const sizing: Record<string, number> = {};
+      result.columns.forEach((col, i) => {
+        sizing[`${i}_${col}`] = initialWidths[i];
+      });
+      setColumnSizing(sizing);
+      setSorting([]);
+      setColumnPinning({ left: [], right: [] });
+      setColumnFilters([]);
+      resetGrid(); // full reset — clears formatting
+    } else {
+      // Same columns, new queryID (re-run) — preserve formatting
+      setSorting([]);
+      setColumnFilters([]);
+      resetNavigation();
+    }
   }
 
   // Stable key for which columns have conditional rules — avoids recomputing
@@ -311,14 +330,14 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
   // Samples up to 50k rows for performance on very large result sets.
   const columnMinMax = useMemo(() => {
     const mm: Record<string, { min: number; max: number }> = {};
-    const sampleRows = result.rows.length > 50000 ? result.rows.slice(0, 50000) : result.rows;
+    const rowLimit = Math.min(result.rows.length, 50000);
     for (const colId of conditionalRuleColumns) {
       const colIdx = colIdxFromColumnId(colId);
       if (colIdx < 0) continue;
       let min = Infinity;
       let max = -Infinity;
-      for (const row of sampleRows) {
-        const n = Number(row[colIdx]);
+      for (let i = 0; i < rowLimit; i++) {
+        const n = Number(result.rows[i][colIdx]);
         if (!isNaN(n)) {
           if (n < min) min = n;
           if (n > max) max = n;
@@ -839,11 +858,14 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     if (colIdx < 0) return { values: [] as string[], truncated: false };
     const unique = new Set<string>();
     const MAX_UNIQUE = 1000;
+    const MAX_SCAN = 50000;
     let truncated = false;
-    for (const row of result.rows) {
-      unique.add(row[colIdx] == null ? "" : String(row[colIdx]));
+    const scanLimit = Math.min(result.rows.length, MAX_SCAN);
+    for (let i = 0; i < scanLimit; i++) {
+      unique.add(result.rows[i][colIdx] == null ? "" : String(result.rows[i][colIdx]));
       if (unique.size >= MAX_UNIQUE) { truncated = true; break; }
     }
+    if (result.rows.length > MAX_SCAN && unique.size < MAX_UNIQUE) truncated = true;
     return { values: Array.from(unique), truncated };
   }, [filterDropdown, result.rows]);
 
@@ -875,7 +897,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
           position: pinned ? "sticky" : "relative",
           left: stickyLeft != null ? stickyLeft : undefined,
           right: stickyRight != null ? stickyRight : undefined,
-          zIndex: pinned ? 3 : undefined,
+          zIndex: pinned ? Z_PINNED_HEADER : undefined,
           background: "var(--bg-raised)",
           overflow: "hidden",
           textOverflow: "ellipsis",
@@ -990,7 +1012,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
           position: pinned ? "sticky" : "relative",
           left: stickyLeft != null ? stickyLeft : undefined,
           right: stickyRight != null ? stickyRight : undefined,
-          zIndex: pinned ? 1 : undefined,
+          zIndex: pinned ? Z_PINNED_CELL : undefined,
           userSelect: "none",
           WebkitUserSelect: "none",
           background: selected
@@ -1066,7 +1088,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
           </colgroup>
 
           {/* Header */}
-          <thead style={{ position: "sticky", top: 0, zIndex: 4, background: "var(--bg-raised)" }}>
+          <thead style={{ position: "sticky", top: 0, zIndex: Z_THEAD, background: "var(--bg-raised)" }}>
             {table.getHeaderGroups().map((headerGroup) => {
               const headerMap = new Map(headerGroup.headers.map((h) => [h.column.id, h]));
               return (
@@ -1086,7 +1108,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
                       cursor: "pointer",
                       position: "sticky",
                       left: 0,
-                      zIndex: 5,
+                      zIndex: Z_SELECT_ALL,
                       background: "var(--bg-raised)",
                       fontSize: 9,
                       color: "var(--text-muted)",
@@ -1172,7 +1194,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
                         borderRight: "1px solid var(--border)",
                         position: "sticky",
                         left: 0,
-                        zIndex: 1,
+                        zIndex: Z_PINNED_CELL,
                         background: "var(--bg-raised)",
                         userSelect: "none",
                         cursor: "pointer",
@@ -1234,7 +1256,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
             position: "fixed",
             top: ctxMenu.y,
             left: ctxMenu.x,
-            zIndex: 9999,
+            zIndex: Z_OVERLAY,
             background: "var(--bg-overlay)",
             border: "1px solid var(--border)",
             borderRadius: 6,
@@ -1265,7 +1287,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
             position: "fixed",
             top: headerCtxMenu.y,
             left: headerCtxMenu.x,
-            zIndex: 9999,
+            zIndex: Z_OVERLAY,
             background: "var(--bg-overlay)",
             border: "1px solid var(--border)",
             borderRadius: 6,

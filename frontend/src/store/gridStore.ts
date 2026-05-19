@@ -98,7 +98,9 @@ interface GridState {
   setConditionalRules: (colId: string, rules: ConditionalRule[]) => void;
   clearConditionalRules: (colId: string) => void;
 
-  // Reset all state (called when a new query result arrives)
+  // Reset navigation state only (selection, search) — preserves formatting
+  resetNavigation: () => void;
+  // Reset all state including formatting (called when column schema changes)
   reset: () => void;
 }
 
@@ -150,5 +152,13 @@ export const useGridStore = create<GridState>((set, get) => ({
       return { conditionalRules: rest };
     }),
 
+  resetNavigation: () => set({
+    tableRows: null,
+    selectionRange: null,
+    isSelecting: false,
+    searchTerm: "",
+    searchMatches: [],
+    currentMatchIndex: 0,
+  }),
   reset: () => set(initialState),
 }));
