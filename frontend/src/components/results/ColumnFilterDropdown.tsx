@@ -19,6 +19,7 @@ type ConditionOp = "contains" | "startsWith" | "endsWith" | "equals" | "gt" | "l
 
 interface Props {
   columnValues: unknown[];
+  truncated?: boolean;
   currentFilter: ColumnFilterValue | undefined;
   onApply: (filter: ColumnFilterValue | undefined) => void;
   onClose: () => void;
@@ -82,6 +83,7 @@ export const columnFilterFn: FilterFn<unknown[]> = (
 
 export default function ColumnFilterDropdown({
   columnValues,
+  truncated,
   currentFilter,
   onApply,
   onClose,
@@ -226,6 +228,11 @@ export default function ColumnFilterDropdown({
             </Checkbox>
           </div>
         ))}
+        {truncated && (
+          <div style={{ padding: "4px 0", fontSize: 10, color: "var(--text-faint)", fontStyle: "italic" }}>
+            Showing first 1,000 unique values
+          </div>
+        )}
       </div>
 
       <Divider style={{ margin: "8px 0" }} />

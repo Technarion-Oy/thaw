@@ -96,14 +96,10 @@ export default function QuickChartModal({ tableRows, columns, selectionRange, on
       }
     }
 
-    // If no numeric value columns found (e.g. all text), use row index as x
-    // and try to use the first column as values
-    if (valCols.length === 0 && colIndices.length >= 1) {
-      for (let i = 0; i < colIndices.length; i++) {
-        if (numericFlags[i]) {
-          valCols.push({ index: colIndices[i], name: names[i] });
-        }
-      }
+    // When all columns are numeric, xIdx is 0 and was excluded from valCols above.
+    // Add it back so at least one value column is available for charting.
+    if (valCols.length === 0 && numericFlags[xIdx]) {
+      valCols.push({ index: colIndices[xIdx], name: names[xIdx] });
     }
 
     // Build chart data

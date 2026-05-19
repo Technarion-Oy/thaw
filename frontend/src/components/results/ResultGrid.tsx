@@ -293,6 +293,13 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     resetGrid();
   }
 
+  // Stable key for which columns have conditional rules — avoids recomputing
+  // min/max when only rule colors/patterns change (not the set of columns).
+  const conditionalRuleKeys = useMemo(
+    () => Object.keys(conditionalRules).sort().join(","),
+    [conditionalRules],
+  );
+
   // Pre-compute min/max per column for conditional formatting.
   // Samples up to 50k rows for performance on very large result sets.
   const columnMinMax = useMemo(() => {
@@ -313,7 +320,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
       if (min !== Infinity) mm[colId] = { min, max };
     }
     return mm;
-  }, [Object.keys(conditionalRules).sort().join(","), result.rows]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [conditionalRuleKeys, result.rows]);
 
   // Column definitions
   const columns = useMemo<ColumnDef<unknown[]>[]>(
@@ -586,7 +593,9 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
       const maxCol = Math.max(startCol, endCol);
 
       const lines: string[] = [];
-      // Add headers
+      // Add headers — selectionRange indices are original column indices (extracted from
+      // TanStack column IDs like "3_COL_NAME"), so result.columns[c] is correct even
+      // after visual reordering via column pinning.
       const headers: string[] = [];
       for (let c = minCol; c <= maxCol; c++) headers.push(result.columns[c] ?? "");
       lines.push(headers.join("\t"));
@@ -793,17 +802,18 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
 
   // ─── Filter dropdown data ─────────────────────────────────────────────────
 
-  const filterColumnValues = useMemo(() => {
-    if (!filterDropdown) return [];
+  const filterColumnData = useMemo(() => {
+    if (!filterDropdown) return { values: [] as string[], truncated: false };
     const colIdx = colIdxFromColumnId(filterDropdown.columnId);
-    if (colIdx < 0) return [];
+    if (colIdx < 0) return { values: [] as string[], truncated: false };
     const unique = new Set<string>();
     const MAX_UNIQUE = 1000;
+    let truncated = false;
     for (const row of result.rows) {
       unique.add(row[colIdx] == null ? "" : String(row[colIdx]));
-      if (unique.size >= MAX_UNIQUE) break;
+      if (unique.size >= MAX_UNIQUE) { truncated = true; break; }
     }
-    return Array.from(unique);
+    return { values: Array.from(unique), truncated };
   }, [filterDropdown, result.rows]);
 
   // ─── Render a header cell ─────────────────────────────────────────────────
@@ -1260,7 +1270,8 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
       {/* Filter dropdown */}
       {filterDropdown && (
         <ColumnFilterDropdown
-          columnValues={filterColumnValues}
+          columnValues={filterColumnData.values}
+          truncated={filterColumnData.truncated}
           currentFilter={columnFilters.find((f) => f.id === filterDropdown.columnId)?.value as ColumnFilterValue | undefined}
           onApply={(filter) => {
             if (filter) {
@@ -1331,7 +1342,22 @@ class ResultGridErrorBoundary extends React.Component<
     if (this.state.error) {
       return (
         <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 12 }}>
-          Unable to display results. Try running the query again.
+          Unable to display results.{" "}
+          <button
+            onClick={() => this.setState({ error: null })}
+            style={{
+              background: "none",
+              border: "1px solid var(--border)",
+              borderRadius: 4,
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              fontSize: 12,
+              padding: "2px 8px",
+              marginLeft: 4,
+            }}
+          >
+            Retry
+          </button>
         </div>
       );
     }

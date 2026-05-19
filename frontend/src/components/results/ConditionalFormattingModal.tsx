@@ -35,6 +35,8 @@ export default function ConditionalFormattingModal({ columnId, columnName, onClo
   const setConditionalRules = useGridStore((s) => s.setConditionalRules);
   const clearConditionalRules = useGridStore((s) => s.clearConditionalRules);
 
+  // IDs are only used as React keys within this modal. Start the counter
+  // past the initial rule IDs (0..n-1) so newly added rules never collide.
   const nextId = useRef(existingRules.length);
   const [rules, setRules] = useState(() =>
     existingRules.map((rule, i) => ({ id: i, rule })),
