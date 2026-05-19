@@ -957,10 +957,11 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
             sel.removeAllRanges();
             sel.addRange(range);
           }
-          // Re-disable on the next mousedown anywhere
+          // Re-disable on the next mousedown anywhere and clear the selection
           const restore = () => {
             td.style.userSelect = "none";
             td.style.webkitUserSelect = "none";
+            window.getSelection()?.removeAllRanges();
             document.removeEventListener("mousedown", restore);
           };
           // Delay so the current double-click selection isn't cleared
