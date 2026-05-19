@@ -302,6 +302,10 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
 
   // Pre-compute min/max per column for conditional formatting.
   // Samples up to 50k rows for performance on very large result sets.
+  // NOTE: Depends on `conditionalRuleKeys` (not `conditionalRules` directly) so this
+  // only recomputes when the set of columns with rules changes. The closure reads the
+  // live `conditionalRules` ref which is fine — React re-creates the closure when deps
+  // change. Do NOT add `conditionalRules` to the dep array or the optimisation is lost.
   const columnMinMax = useMemo(() => {
     const mm: Record<string, { min: number; max: number }> = {};
     const sampleRows = result.rows.length > 50000 ? result.rows.slice(0, 50000) : result.rows;
@@ -594,12 +598,18 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
       const minCol = Math.min(startCol, endCol);
       const maxCol = Math.max(startCol, endCol);
 
+      // Escape TSV special characters: wrap in double-quotes if value contains
+      // tab, newline, or double-quote (with internal quotes doubled).
+      const tsvEscape = (v: string) =>
+        v.includes("\t") || v.includes("\n") || v.includes("\r") || v.includes('"')
+          ? `"${v.replace(/"/g, '""')}"` : v;
+
       const lines: string[] = [];
       // Add headers — selectionRange indices are original column indices (extracted from
       // TanStack column IDs like "3_COL_NAME"), so result.columns[c] is correct even
       // after visual reordering via column pinning.
       const headers: string[] = [];
-      for (let c = minCol; c <= maxCol; c++) headers.push(result.columns[c] ?? "");
+      for (let c = minCol; c <= maxCol; c++) headers.push(tsvEscape(result.columns[c] ?? ""));
       lines.push(headers.join("\t"));
 
       for (let r = minRow; r <= maxRow; r++) {
@@ -608,7 +618,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
         const orig = row.original;
         const cells: string[] = [];
         for (let c = minCol; c <= maxCol; c++) {
-          cells.push(orig[c] == null ? "" : String(orig[c]));
+          cells.push(tsvEscape(orig[c] == null ? "" : String(orig[c])));
         }
         lines.push(cells.join("\t"));
       }
@@ -729,16 +739,23 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
 
   // ─── Selection check helper ───────────────────────────────────────────────
 
+  const normalizedSelection = useMemo(() => {
+    if (!selectionRange) return null;
+    return {
+      minRow: Math.min(selectionRange.startRow, selectionRange.endRow),
+      maxRow: Math.max(selectionRange.startRow, selectionRange.endRow),
+      minCol: Math.min(selectionRange.startCol, selectionRange.endCol),
+      maxCol: Math.max(selectionRange.startCol, selectionRange.endCol),
+    };
+  }, [selectionRange]);
+
   const isCellSelected = useCallback(
     (rowIdx: number, colIdx: number): boolean => {
-      if (!selectionRange) return false;
-      const minRow = Math.min(selectionRange.startRow, selectionRange.endRow);
-      const maxRow = Math.max(selectionRange.startRow, selectionRange.endRow);
-      const minCol = Math.min(selectionRange.startCol, selectionRange.endCol);
-      const maxCol = Math.max(selectionRange.startCol, selectionRange.endCol);
-      return rowIdx >= minRow && rowIdx <= maxRow && colIdx >= minCol && colIdx <= maxCol;
+      if (!normalizedSelection) return false;
+      return rowIdx >= normalizedSelection.minRow && rowIdx <= normalizedSelection.maxRow
+        && colIdx >= normalizedSelection.minCol && colIdx <= normalizedSelection.maxCol;
     },
-    [selectionRange],
+    [normalizedSelection],
   );
 
   // ─── Column pinning helpers ───────────────────────────────────────────────
@@ -847,7 +864,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
           left: stickyLeft != null ? stickyLeft : undefined,
           right: stickyRight != null ? stickyRight : undefined,
           zIndex: pinned ? 3 : undefined,
-          background: pinned ? "var(--bg-raised)" : "var(--bg-raised)",
+          background: "var(--bg-raised)",
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
