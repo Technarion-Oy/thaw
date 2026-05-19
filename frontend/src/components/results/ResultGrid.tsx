@@ -187,7 +187,7 @@ const CellContent = React.memo(function CellContent({
           top: 0,
           bottom: 0,
           width: `${ratio * 100}%`,
-          backgroundColor: `${dataBarRule.color}33`,
+          backgroundColor: `color-mix(in srgb, ${dataBarRule.color} 20%, transparent)`,
           pointerEvents: "none",
         }}
       />
@@ -939,12 +939,13 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
           {isFiltered && (
             <span style={{ marginLeft: 2, fontSize: 9, color: "var(--accent)", flexShrink: 0 }}>F</span>
           )}
-          {/* Sort button */}
+          {/* Sort button — hidden on unsorted columns, visible on hover via CSS class */}
           <span
             role="button"
             title={isSorted === "asc" ? "Sorted ascending" : isSorted === "desc" ? "Sorted descending" : "Sort column"}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); column.getToggleSortingHandler()?.(e); }}
+            className={isSorted ? undefined : "sort-indicator-idle"}
             style={{
               marginLeft: 2,
               fontSize: 9,
@@ -953,11 +954,9 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
               textAlign: "center",
               borderRadius: 3,
               color: isSorted ? "var(--accent)" : "var(--text-faint)",
-              opacity: isSorted ? 1 : 0.5,
+              opacity: isSorted ? 1 : 0,
               cursor: "pointer",
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
-            onMouseLeave={(e) => { if (!isSorted) e.currentTarget.style.opacity = "0.5"; }}
           >
             {isSorted === "asc" ? "\u25B2" : isSorted === "desc" ? "\u25BC" : "\u21C5"}
           </span>
@@ -1090,6 +1089,8 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
 
   return (
     <div style={{ height: "100%", width: "100%", position: "relative", display: "flex", flexDirection: "column" }}>
+      {/* Show sort indicator on header hover */}
+      <style>{`th:hover .sort-indicator-idle { opacity: 0.5 !important; }`}</style>
       <div
         ref={scrollContainerRef}
         className="thaw-grid"
@@ -1445,7 +1446,7 @@ class ResultGridErrorBoundary extends React.Component<
 
 function ResultGridWithErrorBoundary(props: Props) {
   // Key resets the error boundary when a new query result arrives
-  const boundaryKey = props.result.queryID ?? props.result.columns.join("\0");
+  const boundaryKey = props.result.queryID ?? `${props.result.columns.join("\0")}|${props.result.rows.length}`;
   return (
     <ResultGridErrorBoundary key={boundaryKey}>
       <ResultGrid {...props} />

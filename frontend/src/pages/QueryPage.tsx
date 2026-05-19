@@ -185,6 +185,7 @@ export default function QueryPage() {
     store.setActiveTab(activeTabId);
     store.loadContext(activeTabId);
     setGridSearchOpen(false);
+    useGridStore.getState().resetNavigation();
   }, [activeTabId]);
 
   // Track tab additions/removals to manage sessions.
@@ -792,10 +793,11 @@ export default function QueryPage() {
       }
 
       // ⌘G / Ctrl+G — Open Grid Search, or Find Next when already open
-      // (skip when Monaco editor has focus — let it handle Go to Line)
+      // (skip when Monaco editor has focus or results pane isn't active)
       if (cmd && !e.shiftKey && !e.altKey && e.key === "g") {
         const monacoEl = document.querySelector(".monaco-editor");
         if (monacoEl?.contains(document.activeElement)) return;
+        if (resultPane !== "results") return;
         e.preventDefault();
         if (gridSearchOpen) {
           useGridStore.getState().nextMatch();
@@ -1412,8 +1414,8 @@ export default function QueryPage() {
                     </div>
                   )}
                 </div>{/* end grids row */}
-                {/* Selection aggregations status bar */}
-                {featureFlags.multiCellCopy && <StatusBar />}
+                {/* Selection aggregations status bar (hidden in compare mode — gridStore is a singleton) */}
+                {featureFlags.multiCellCopy && !compareResult && <StatusBar />}
               </div>
             ) : (
               <>
