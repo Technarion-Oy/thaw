@@ -64,17 +64,18 @@ export const columnFilterFn: FilterFn<unknown[]> = (
         if (lower !== filterLower) return false;
         break;
       case "gt":
-        if (Number(cellValue) <= Number(value)) return false;
-        break;
       case "lt":
-        if (Number(cellValue) >= Number(value)) return false;
-        break;
       case "gte":
-        if (Number(cellValue) < Number(value)) return false;
+      case "lte": {
+        const numCell = Number(cellValue);
+        const numFilter = Number(value);
+        if (isNaN(numCell) || isNaN(numFilter)) return false;
+        if (op === "gt"  && !(numCell >  numFilter)) return false;
+        if (op === "lt"  && !(numCell <  numFilter)) return false;
+        if (op === "gte" && !(numCell >= numFilter)) return false;
+        if (op === "lte" && !(numCell <= numFilter)) return false;
         break;
-      case "lte":
-        if (Number(cellValue) > Number(value)) return false;
-        break;
+      }
     }
   }
 

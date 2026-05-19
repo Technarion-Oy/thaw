@@ -51,7 +51,8 @@ export default function GridSearch({ columnCount, onScrollToRow, onClose }: Prop
       }
       const lower = term.toLowerCase();
       const matches: CellCoord[] = [];
-      for (let row = 0; row < tableRows.length; row++) {
+      const maxRows = Math.min(tableRows.length, 100_000);
+      for (let row = 0; row < maxRows; row++) {
         const orig = tableRows[row].original;
         for (let col = 0; col < columnCount; col++) {
           const val = orig[col];

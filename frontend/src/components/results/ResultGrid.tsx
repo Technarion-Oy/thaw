@@ -32,7 +32,7 @@ import {
   flexRender,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { message } from "antd";
+import { Button, message } from "antd";
 import type { QueryResult } from "../../store/queryStore";
 import { useThemeStore } from "../../store/themeStore";
 import { useGridStore, type ConditionalRule } from "../../store/gridStore";
@@ -432,7 +432,8 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
       const headerText = result.columns[colIdx] ?? "";
       let maxW = measureText(headerText, GRID_FONT) + 32;
 
-      // Measure all rows (up to 500 for performance)
+      // Measure raw (unfiltered) rows — intentionally uses result.rows so auto-size
+      // accommodates the widest values even when a filter is active.
       const sampleRows = result.rows.slice(0, 500);
       for (const row of sampleRows) {
         const val = row[colIdx];
@@ -546,6 +547,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     (e: React.MouseEvent, colIndex: number) => {
       if (e.button !== 0) return;
       if (!featureFlags.multiCellCopy) return;
+      if (e.detail >= 2) return; // double-click triggers sort, not selection
       e.preventDefault();
       selectionModeRef.current = "column";
       selectionStartRef.current = { row: 0, col: colIndex };
@@ -1343,21 +1345,9 @@ class ResultGridErrorBoundary extends React.Component<
       return (
         <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 12 }}>
           Unable to display results.{" "}
-          <button
-            onClick={() => this.setState({ error: null })}
-            style={{
-              background: "none",
-              border: "1px solid var(--border)",
-              borderRadius: 4,
-              color: "var(--text-muted)",
-              cursor: "pointer",
-              fontSize: 12,
-              padding: "2px 8px",
-              marginLeft: 4,
-            }}
-          >
+          <Button size="small" onClick={() => this.setState({ error: null })} style={{ marginLeft: 4 }}>
             Retry
-          </button>
+          </Button>
         </div>
       );
     }

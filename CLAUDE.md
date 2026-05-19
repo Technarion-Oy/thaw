@@ -183,7 +183,7 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 - `diffStore` — DDL diff comparisons
 - `gitStore` — git repo state
 - `notebookToolbarStore` — bridges NotebookTab kernel state/callbacks to the unified Toolbar
-- `gridStore` — results grid selection range, search state, column formatting, and conditional formatting rules; resets when a new query result arrives. **Known limitation**: gridStore is a singleton — formatting, search state, and the `tableRows` reference are shared across tabs and reset when switching tabs or running a query in another tab.
+- `gridStore` — results grid selection range, search state, column formatting, and conditional formatting rules; resets when a new query result arrives. **Known limitation**: gridStore is a singleton — formatting, search state, selection range, conditional formatting rules, and the `tableRows` reference are shared across tabs and reset when switching tabs or running a query in another tab. During tab switches there is a brief window where stale state is visible (e.g. selection range from Tab A could be read against Tab B's data, or conditional rules keyed by column ID like `0_ID` could apply across tabs with identically-named columns). The `reset()` call on result change mitigates most cases.
 
 ### Unified Toolbar
 - The application toolbar is implemented as a reusable `<Toolbar />` component in `frontend/src/components/toolbar/Toolbar.tsx`
