@@ -598,6 +598,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     },
     [featureFlags.multiCellCopy, tableRows.length, setSelectionRange, setIsSelecting],
   );
+  useEffect(() => () => { if (columnSelectTimerRef.current) clearTimeout(columnSelectTimerRef.current); }, []);
 
   const handleColumnMouseEnter = useCallback(
     (colIndex: number) => {
@@ -1025,10 +1026,10 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
           zIndex: pinned ? Z_PINNED_CELL : undefined,
           userSelect: "none",
           WebkitUserSelect: "none",
+          ...condStyle,
           background: selected
             ? "color-mix(in srgb, var(--accent) 20%, transparent)"
-            : pinned ? "var(--bg)" : undefined,
-          ...condStyle,
+            : condStyle.backgroundColor ?? (pinned ? "var(--bg)" : undefined),
         }}
       >
         <CellContent

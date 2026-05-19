@@ -184,6 +184,7 @@ export default function QueryPage() {
     const store = useSessionStore.getState();
     store.setActiveTab(activeTabId);
     store.loadContext(activeTabId);
+    setGridSearchOpen(false);
   }, [activeTabId]);
 
   // Track tab additions/removals to manage sessions.
