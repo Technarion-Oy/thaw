@@ -10,6 +10,8 @@
 //
 // @thaw-domain: Schema Migration
 
+import type { CSSProperties } from "react";
+
 // ─── backend types (mirrors migration.go structs) ─────────────────────────────
 
 export interface MigrationObject {
@@ -70,7 +72,7 @@ export function objectLabel(mo: MigrationObject): string {
 
 // ─── Shared grid table styles ─────────────────────────────────────────────────
 
-export const gridTableStyle: React.CSSProperties = {
+export const gridTableStyle: CSSProperties = {
   width: "100%",
   borderCollapse: "collapse",
   tableLayout: "fixed",
@@ -78,7 +80,7 @@ export const gridTableStyle: React.CSSProperties = {
   fontFamily: "var(--ui-font, 'Inter', 'SF Pro Text', system-ui, sans-serif)",
 };
 
-export const gridHeaderStyle: React.CSSProperties = {
+export const gridHeaderStyle: CSSProperties = {
   position: "sticky",
   top: 0,
   zIndex: 2,
