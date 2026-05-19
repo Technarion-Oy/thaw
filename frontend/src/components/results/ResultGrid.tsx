@@ -571,21 +571,30 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
 
   // ─── Column selection (click/drag column headers) ─────────────────────────
 
+  // Defer column selection start so a double-click (sort) cancels it,
+  // preventing a brief selection flash before the sort re-render.
+  const columnSelectTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const handleColumnMouseDown = useCallback(
     (e: React.MouseEvent, colIndex: number) => {
       if (e.button !== 0) return;
       if (!featureFlags.multiCellCopy) return;
-      if (e.detail >= 2) return; // double-click triggers sort, not selection
+      if (e.detail >= 2) {
+        // Double-click — cancel any pending selection and let sort handler fire
+        if (columnSelectTimerRef.current) clearTimeout(columnSelectTimerRef.current);
+        return;
+      }
       e.preventDefault();
-      selectionModeRef.current = "column";
-      selectionStartRef.current = { row: 0, col: colIndex };
-      setSelectionRange({
-        startRow: 0,
-        endRow: tableRows.length - 1,
-        startCol: colIndex,
-        endCol: colIndex,
-      });
-      setIsSelecting(true);
+      columnSelectTimerRef.current = setTimeout(() => {
+        selectionModeRef.current = "column";
+        selectionStartRef.current = { row: 0, col: colIndex };
+        setSelectionRange({
+          startRow: 0,
+          endRow: tableRows.length - 1,
+          startCol: colIndex,
+          endCol: colIndex,
+        });
+        setIsSelecting(true);
+      }, 200);
     },
     [featureFlags.multiCellCopy, tableRows.length, setSelectionRange, setIsSelecting],
   );
@@ -933,7 +942,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
             onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
             onMouseLeave={(e) => { if (!isSorted) e.currentTarget.style.opacity = "0.5"; }}
           >
-            {isSorted === "asc" ? "\u25B2" : isSorted === "desc" ? "\u25BC" : "\u25B2"}
+            {isSorted === "asc" ? "\u25B2" : isSorted === "desc" ? "\u25BC" : "\u21C5"}
           </span>
         </div>
         {/* Resize handle with double-click auto-size */}

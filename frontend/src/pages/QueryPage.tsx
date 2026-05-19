@@ -44,6 +44,7 @@ import { useConnectionStore } from "../store/connectionStore";
 import { useSessionStore } from "../store/sessionStore";
 import { useFeatureFlagsStore } from "../store/featureFlagsStore";
 import { useNotebookToolbarStore } from "../store/notebookToolbarStore";
+import { useGridStore } from "../store/gridStore";
 import Toolbar from "../components/toolbar/Toolbar";
 import { notebookButtons, NotebookStatusIndicator } from "../components/toolbar/NotebookToolbarSlot";
 
@@ -789,12 +790,17 @@ export default function QueryPage() {
         return;
       }
 
-      // ⌘G / Ctrl+G — Toggle Grid Search (skip when Monaco editor has focus — let it handle Go to Line)
+      // ⌘G / Ctrl+G — Open Grid Search, or Find Next when already open
+      // (skip when Monaco editor has focus — let it handle Go to Line)
       if (cmd && !e.shiftKey && !e.altKey && e.key === "g") {
         const monacoEl = document.querySelector(".monaco-editor");
         if (monacoEl?.contains(document.activeElement)) return;
         e.preventDefault();
-        setGridSearchOpen((prev) => !prev);
+        if (gridSearchOpen) {
+          useGridStore.getState().nextMatch();
+        } else {
+          setGridSearchOpen(true);
+        }
         return;
       }
 

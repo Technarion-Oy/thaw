@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import { Input, Button, Typography } from "antd";
+import type { InputRef } from "antd";
 import { CloseOutlined, UpOutlined, DownOutlined, SearchOutlined } from "@ant-design/icons";
 import { useGridStore, type CellCoord } from "../../store/gridStore";
 
@@ -31,7 +32,7 @@ export default function GridSearch({ columnCount, onScrollToRow, onClose }: Prop
   const currentMatchIndex = useGridStore((s) => s.currentMatchIndex);
   const nextMatch = useGridStore((s) => s.nextMatch);
   const prevMatch = useGridStore((s) => s.prevMatch);
-  const inputRef = useRef<any>(null);
+  const inputRef = useRef<InputRef>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
   // Focus input on mount

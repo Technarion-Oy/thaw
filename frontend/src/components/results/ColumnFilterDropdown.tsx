@@ -102,9 +102,16 @@ export default function ColumnFilterDropdown({
   }, [columnValues]);
 
   const [searchText, setSearchText] = useState("");
-  const [checkedValues, setCheckedValues] = useState<Set<string>>(
-    () => currentFilter?.checkedValues ?? new Set(uniqueValues),
-  );
+  const [checkedValues, setCheckedValues] = useState<Set<string>>(() => {
+    if (!currentFilter?.checkedValues) return new Set(uniqueValues);
+    // Union restored filter with any new values that appeared after re-run,
+    // so newly added rows aren't silently excluded.
+    const restored = new Set(currentFilter.checkedValues);
+    for (const v of uniqueValues) {
+      if (!currentFilter.checkedValues.has(v)) restored.add(v);
+    }
+    return restored;
+  });
   const [conditionOp, setConditionOp] = useState<ConditionOp>(
     currentFilter?.condition?.op ?? "contains",
   );
