@@ -594,6 +594,14 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
       // Only handle if focus is inside the grid
       const el = scrollContainerRef.current;
       if (!el || (!el.contains(document.activeElement) && document.activeElement !== el)) return;
+      // If the user has a native text selection (e.g. from double-click),
+      // copy that selection text instead of the grid selection.
+      const nativeSel = window.getSelection();
+      if (nativeSel && nativeSel.toString().length > 0) {
+        e.preventDefault();
+        ClipboardSetText(nativeSel.toString());
+        return;
+      }
 
       e.preventDefault();
       const { startRow, endRow, startCol, endCol } = selectionRange;
@@ -957,8 +965,10 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
             sel.removeAllRanges();
             sel.addRange(range);
           }
-          // Re-disable on the next mousedown anywhere and clear the selection
-          const restore = () => {
+          // Re-disable on mousedown outside this cell and clear the selection.
+          // Clicks inside the cell are allowed so users can select partial text.
+          const restore = (ev: MouseEvent) => {
+            if (td.contains(ev.target as Node)) return; // click inside cell — keep selection mode
             td.style.userSelect = "none";
             td.style.webkitUserSelect = "none";
             window.getSelection()?.removeAllRanges();
