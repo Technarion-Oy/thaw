@@ -79,7 +79,7 @@ thaw/
 └── frontend/src/
     ├── pages/           # Top-level page components
     ├── components/      # Feature components (editor/, layout/, toolbar/, results/, ...)
-    ├── store/           # Zustand stores (9 stores)
+    ├── store/           # Zustand stores (10 stores)
     └── wailsjs/         # Auto-generated Wails IPC bindings (DO NOT EDIT)
 ```
 
@@ -183,6 +183,7 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 - `diffStore` — DDL diff comparisons
 - `gitStore` — git repo state
 - `notebookToolbarStore` — bridges NotebookTab kernel state/callbacks to the unified Toolbar
+- `gridStore` — results grid selection range, search state, column formatting, and conditional formatting rules; resets navigation state when a new query result arrives (formatting persists if the column schema is unchanged). **Known limitation**: gridStore is a singleton — formatting, search state, selection range, conditional formatting rules, and the `tableRows` reference are shared across tabs and reset when switching tabs or running a query in another tab. During tab switches there is a brief window where stale state is visible (e.g. selection range from Tab A could be read against Tab B's data, or conditional rules keyed by column ID like `0_ID` could apply across tabs with identically-named columns). In side-by-side compare mode, both `ResultGrid` instances call `setTableRows()` — the last to render wins, so `StatusBar`/`GridSearch` may show data from the compare grid. The `reset()` call on column schema change mitigates most cases.
 
 ### Unified Toolbar
 - The application toolbar is implemented as a reusable `<Toolbar />` component in `frontend/src/components/toolbar/Toolbar.tsx`

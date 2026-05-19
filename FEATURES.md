@@ -620,6 +620,16 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
 - **Result history** — the last 10 successful result sets are kept in memory for the session; a dropdown in the results status bar (visible after two or more runs) lets you switch between them instantly, similar to `LAST_QUERY_ID(-n)` in SQL; after a query failure the error is shown and the dropdown appears as a standalone **Previous results** picker — the last result grid is not auto-displayed so the failure is immediately obvious, but any historical result can be recalled on demand; click the **pin** icon next to any entry in the dropdown to keep it indefinitely — pinned results are exempt from the 10-entry cap and always appear at the top of the list (click again to unpin); **right-click** any entry and choose **View side by side** to open it alongside the current result in a horizontally split view — both grids scroll in sync so corresponding rows stay level, column headers align, and the compare panel's SQL snippet, query ID, and row count appear on a second line of the status bar (right-aligned for clarity); close the compare panel with the × button in the status bar
 - **Export results** — CSV (RFC 4180) and Excel (`.xlsx`) export with a native save dialog; exports always reflect whichever result is currently selected in the history dropdown
 - Column sorting and horizontal scrolling
+- **Auto-Size Columns** — double-click a column resize handle to auto-fit the column width based on header text and data content (samples up to 500 rows)
+- **Column Pinning** — right-click any column header and choose **Pin to Left** or **Pin to Right** to freeze it during horizontal scrolling; pinned columns render as `position: sticky` and are excluded from column virtualisation
+- **Global Grid Search** — press `⌘G` (or click the search icon) to open a search bar above the results grid; matches are highlighted in-cell and navigable with Enter/Shift+Enter
+- **Data Type Formatting** — right-click a column header → **Format Column…** to apply number, currency, percentage, or date/time formatting via `Intl` APIs; preview before applying
+- **Conditional Formatting** — right-click a column header → **Conditional Formatting…** to add colour-scale, data-bar, or text-match highlight rules
+- **Excel-Style Column Filtering** — right-click a column header → **Filter…** to open a dropdown with a unique-value checklist and conditional filter (contains, starts with, greater than, etc.)
+- **Multi-Cell Copy & Selection** (feature-flagged) — click and drag to select a range of cells; `⌘C` copies the selection as TSV with headers to the native clipboard; a row-number gutter and select-all button appear when enabled
+- **Selection Aggregations** — when a range is selected, a status bar below the grid shows Sum, Avg, Count, Min, Max of numeric values in the selection
+- **Quick Charting** — with a range selected, right-click → **Create Chart…** to open a modal with bar, line, and scatter chart types powered by Recharts
+
 
 ### Snowflake Connectivity
 
@@ -839,6 +849,9 @@ The following features are identified as feasible to be turned off via feature f
 - **Query Profile** (Operator statistics and execution time breakdown graphs)
 - **Explain SQL** (Pre-execution linter for full table scans and cartesian joins)
 
+**Results Grid**
+- **Multi-Cell Copy & Selection** (Range selection, multi-cell copy, selection aggregations, and quick charting)
+
 **Connection**
 - **Snowflake CLI Profile Manager** (Manage Snowflake CLI profiles from the connection dialog)
 
@@ -901,6 +914,7 @@ Open **Help → Keyboard Shortcuts…** in the menu bar for a searchable, always
 | `⌘⇧ Enter` | `Ctrl+Shift+Enter` | Run all statements |
 | `Esc` | `Esc` | Cancel running query |
 | `⌘↓` | `Ctrl+↓` | Focus results grid |
+| `⌘G` | `Ctrl+G` | Toggle grid search |
 | `⌘E` | `Ctrl+E` | Export current results as CSV |
 
 ### Editor

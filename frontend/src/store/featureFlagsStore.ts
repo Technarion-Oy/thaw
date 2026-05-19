@@ -48,6 +48,7 @@ const allEnabled: config.FeatureFlags = {
   ddlHoverTooltips: true,
   fileFormatBuilder: true,
   snowflakeCLIProfileManager: true,
+  multiCellCopy: true,
 };
 
 // allLocked default: nothing is admin-locked.
@@ -86,6 +87,7 @@ const nothingLocked: config.FeatureFlags = {
   ddlHoverTooltips: false,
   fileFormatBuilder: false,
   snowflakeCLIProfileManager: false,
+  multiCellCopy: false,
 };
 
 interface FeatureFlagsState {

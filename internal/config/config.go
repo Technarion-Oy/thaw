@@ -180,8 +180,8 @@ func DefaultNotebookPrefs() NotebookPrefs {
 //
 // Version tracks the schema revision so new flags introduced after an initial
 // save can be filled with their defaults rather than the zero value (false).
-// Current version: 6 (added SnowflakeCLIProfileManager).
-const flagsVersion = 6
+// Current version: 7 (added MultiCellCopy).
+const flagsVersion = 7
 
 type FeatureFlags struct {
 	Initialized bool `json:"initialized"`
@@ -236,6 +236,9 @@ type FeatureFlags struct {
 
 	// Connection
 	SnowflakeCLIProfileManager bool `json:"snowflakeCLIProfileManager"` // Manage Snowflake CLI profiles from the connection dialog
+
+	// Results Grid
+	MultiCellCopy bool `json:"multiCellCopy"` // Range selection and multi-cell copy in query results
 }
 
 // DefaultFeatureFlags returns a FeatureFlags with every feature enabled.
@@ -275,6 +278,7 @@ func DefaultFeatureFlags() FeatureFlags {
 		DdlHoverTooltips:       true,
 		FileFormatBuilder:      true,
 		SnowflakeCLIProfileManager: true,
+		MultiCellCopy:              true,
 	}
 }
 
@@ -331,6 +335,8 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	setIfZero(&f.RemoveCommand, defaults.RemoveCommand)
 	// Version 5 → 6: SnowflakeCLIProfileManager added; defaults to true.
 	setIfZero(&f.SnowflakeCLIProfileManager, defaults.SnowflakeCLIProfileManager)
+	// Version 6 → 7: MultiCellCopy added; defaults to true.
+	setIfZero(&f.MultiCellCopy, defaults.MultiCellCopy)
 	f.Version = flagsVersion
 	return f
 }

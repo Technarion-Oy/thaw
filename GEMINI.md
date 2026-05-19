@@ -81,7 +81,8 @@ GEMINI_API_KEY=... .venv/bin/python embed_codebase.py --reset
 - **SQL Editor Service**: `internal/sqleditor/service.go` — a Wails-bound `Service` struct exposing all SQL diagnostics & autocomplete IPC endpoints (no Snowflake connection required). Registered in `main.go`'s `Bind` array. Frontend imports from `wailsjs/go/sqleditor/Service`.
 - **Frontend**: React application in `frontend/src/`.
 - **Unified Toolbar**: `frontend/src/components/toolbar/Toolbar.tsx` — reusable toolbar with execution controls, quick-action buttons (New SQL, New Notebook, Save), session selectors, and a `contextSlot` for tab-type-specific content (e.g. `NotebookToolbarSlot` for kernel status). The `notebookToolbarStore` bridges NotebookTab's internal state to the toolbar.
-- **State Management**: Zustand stores are in `frontend/src/store/`.
+- **State Management**: Zustand stores are in `frontend/src/store/`. The `gridStore` manages results grid state: selection range, search, column formatting, and conditional formatting.
+- **Results Grid**: `frontend/src/components/results/ResultGrid.tsx` — TanStack Table v8 grid with column pinning, auto-size, Excel-style filtering, conditional formatting, data-type formatting, range selection, and quick charting. Supporting components: `GridSearch`, `StatusBar`, `QuickChartModal`, `ColumnFilterDropdown`, `ConditionalFormattingModal`, `DataTypeFormatModal`.
 - **IPC Flow**: Frontend calls `wailsjs/go/main/App.ts` → Go `*App` methods in `app.go` (connection-dependent), or `wailsjs/go/sqleditor/Service.ts` → Go `*sqleditor.Service` methods (stateless SQL analysis).
 
 ## 🛠 Engineering Standards

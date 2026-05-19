@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, Modal, type MenuProps } from "antd";
-import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined } from "@ant-design/icons";
+import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, SearchOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
 import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession } from "../../wailsjs/go/main/App";
@@ -32,7 +32,9 @@ import TabBar from "../components/editor/TabBar";
 import { DiffEditor } from "@monaco-editor/react";
 import { ensureMonacoSetup } from "../components/editor/monacoSetup";
 import { useThemeStore } from "../store/themeStore";
-import ResultGrid, { type ScrollSyncHandle } from "../components/results/ResultGrid";
+import ResultGrid, { type ScrollSyncHandle, type ResultGridHandle } from "../components/results/ResultGrid";
+import GridSearch from "../components/results/GridSearch";
+import StatusBar from "../components/results/StatusBar";
 import QueryProfileModal from "../components/results/QueryProfileModal";
 import AiChat from "../components/chat/AiChat";
 import TerminalPanel from "../components/terminal/TerminalPanel";
@@ -42,6 +44,7 @@ import { useConnectionStore } from "../store/connectionStore";
 import { useSessionStore } from "../store/sessionStore";
 import { useFeatureFlagsStore } from "../store/featureFlagsStore";
 import { useNotebookToolbarStore } from "../store/notebookToolbarStore";
+import { useGridStore } from "../store/gridStore";
 import Toolbar from "../components/toolbar/Toolbar";
 import { notebookButtons, NotebookStatusIndicator } from "../components/toolbar/NotebookToolbarSlot";
 
@@ -148,6 +151,10 @@ export default function QueryPage() {
   // Scroll-sync handles for the side-by-side grid split.
   const primarySyncRef = useRef<ScrollSyncHandle | null>(null);
   const compareSyncRef = useRef<ScrollSyncHandle | null>(null);
+  // Grid handle for search scroll-to-row.
+  const primaryGridRef = useRef<ResultGridHandle | null>(null);
+  // Grid search bar visibility.
+  const [gridSearchOpen, setGridSearchOpen] = useState(false);
   const { disconnect, isConnected } = useConnectionStore();
   // Pending query stored when the user runs SQL while disconnected.
   const pendingQueryRef = useRef<string | null>(null);
@@ -177,6 +184,8 @@ export default function QueryPage() {
     const store = useSessionStore.getState();
     store.setActiveTab(activeTabId);
     store.loadContext(activeTabId);
+    setGridSearchOpen(false);
+    useGridStore.getState().resetNavigation();
   }, [activeTabId]);
 
   // Track tab additions/removals to manage sessions.
@@ -685,7 +694,7 @@ export default function QueryPage() {
 
   // ── Global keyboard shortcuts ──────────────────────────────────────────────
   useEffect(() => {
-    const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+    const isMac = /Macintosh/i.test(navigator.userAgent);
 
     const handler = (e: KeyboardEvent) => {
       const cmd  = isMac ? e.metaKey : e.ctrlKey;
@@ -780,6 +789,21 @@ export default function QueryPage() {
         e.preventDefault();
         setResultPane("chat");
         setTimeout(() => window.dispatchEvent(new Event("thaw:focus-ai-chat")), 30);
+        return;
+      }
+
+      // ⌘G / Ctrl+G — Open Grid Search, or Find Next when already open
+      // (skip when Monaco editor has focus or results pane isn't active)
+      if (cmd && !e.shiftKey && !e.altKey && e.key === "g") {
+        const monacoEl = document.querySelector(".monaco-editor");
+        if (monacoEl?.contains(document.activeElement)) return;
+        if (resultPane !== "results") return;
+        e.preventDefault();
+        if (gridSearchOpen) {
+          useGridStore.getState().nextMatch();
+        } else {
+          setGridSearchOpen(true);
+        }
         return;
       }
 
@@ -1286,6 +1310,15 @@ export default function QueryPage() {
                       </Space>
                     )}
                     <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+                      <Tooltip title="Search Results (⌘G)">
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<SearchOutlined style={{ fontSize: 11, color: gridSearchOpen ? "var(--accent)" : "var(--text-muted)" }} />}
+                          style={{ height: 18, padding: "0 4px", minWidth: 0 }}
+                          onClick={() => setGridSearchOpen((prev) => !prev)}
+                        />
+                      </Tooltip>
                       {featureFlags.resultsetExport && (
                         <Tooltip title="Export as CSV">
                           <Button
@@ -1353,6 +1386,14 @@ export default function QueryPage() {
                     </div>
                   )}
                 </div>
+                {/* Grid search bar */}
+                {gridSearchOpen && displayedResult && (
+                  <GridSearch
+                    columnCount={displayedResult.columns.length}
+                    onScrollToRow={(row) => primaryGridRef.current?.scrollToRow(row)}
+                    onClose={() => setGridSearchOpen(false)}
+                  />
+                )}
                 {/* Grids row — bare grids, headers at the same level */}
                 <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
                   <div style={{ flex: 1, overflow: "hidden", ...(compareResult ? { borderRight: "1px solid var(--border)" } : {}) }}>
@@ -1360,6 +1401,7 @@ export default function QueryPage() {
                       result={displayedResult}
                       syncScrollRef={compareResult ? primarySyncRef : undefined}
                       onVerticalScroll={compareResult ? (top) => compareSyncRef.current?.scrollTo(top) : undefined}
+                      gridRef={primaryGridRef}
                     />
                   </div>
                   {compareResult && compareEntry && (
@@ -1372,6 +1414,8 @@ export default function QueryPage() {
                     </div>
                   )}
                 </div>{/* end grids row */}
+                {/* Selection aggregations status bar (hidden in compare mode — gridStore is a singleton) */}
+                {featureFlags.multiCellCopy && !compareResult && <StatusBar />}
               </div>
             ) : (
               <>

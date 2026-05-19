@@ -10,7 +10,7 @@
 //
 // @thaw-domain: SQL Editor & Diagnostics
 
-import {
+import React, {
   useMemo,
   useRef,
   useCallback,
@@ -22,27 +22,43 @@ import {
   useReactTable,
   getCoreRowModel,
   getSortedRowModel,
+  getFilteredRowModel,
   type ColumnDef,
   type SortingState,
+  type ColumnFiltersState,
+  type ColumnPinningState,
+  type Header,
+  type Cell,
   flexRender,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { message } from "antd";
+import { Button, message } from "antd";
 import type { QueryResult } from "../../store/queryStore";
 import { useThemeStore } from "../../store/themeStore";
+import { useGridStore, type ConditionalRule } from "../../store/gridStore";
+import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import { computeColumnWidths } from "../../utils/gridMeasure";
+import { computeColumnWidths, measureText } from "../../utils/gridMeasure";
+import { applyFormat } from "./DataTypeFormatModal";
+import { columnFilterFn, type ColumnFilterValue } from "./ColumnFilterDropdown";
+import ColumnFilterDropdown from "./ColumnFilterDropdown";
+import ConditionalFormattingModal from "./ConditionalFormattingModal";
+import DataTypeFormatModal from "./DataTypeFormatModal";
+import QuickChartModal from "./QuickChartModal";
 
 export interface ScrollSyncHandle {
   scrollTo: (top: number) => void;
 }
 
+export interface ResultGridHandle {
+  scrollToRow: (rowIndex: number) => void;
+}
+
 interface Props {
   result: QueryResult;
-  /** Exposes a scrollTo handle so a sibling grid can drive this grid's scroll position. */
   syncScrollRef?: React.MutableRefObject<ScrollSyncHandle | null>;
-  /** Called when this grid scrolls vertically so the sibling can follow. */
   onVerticalScroll?: (top: number) => void;
+  gridRef?: React.MutableRefObject<ResultGridHandle | null>;
 }
 
 interface CtxMenu {
@@ -51,24 +67,102 @@ interface CtxMenu {
   cellValue: string;
   rowValues: string[];
   columns: string[];
+  rowIndex: number;
+  colIndex: number;
 }
 
-// Maximum column width in px. Prevents wide-content columns (e.g. QUERY_TEXT)
-// from consuming the entire grid and hiding all other columns.
+interface HeaderCtxMenu {
+  x: number;
+  y: number;
+  columnId: string;
+  columnName: string;
+  colIndex: number;
+}
+
+/** Extract the 0-based column index from a TanStack column ID like "3_COL_NAME". */
+function colIdxFromColumnId(columnId: string): number {
+  const i = columnId.indexOf("_");
+  return i >= 0 ? parseInt(columnId.substring(0, i), 10) : -1;
+}
+
+// Maximum column width for initial auto-sizing. Double-click resize removes this cap.
 const MAX_COL_WIDTH = 300;
+const AUTO_SIZE_MAX_COL_WIDTH = 800;
 const MIN_COL_WIDTH = 60;
 const GRID_FONT = "11px Inter, SF Pro Text, system-ui, sans-serif";
 
-// Read a CSS variable from the document root as a number (strip "px").
+// z-index layers for the grid stacking context
+const Z_PINNED_CELL = 1;
+const Z_PINNED_HEADER = 3;
+const Z_THEAD = 4;
+const Z_SELECT_ALL = 5;
+const Z_OVERLAY = 9999;
+
 function cssVar(name: string, fallback: number): number {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   const n = parseInt(raw, 10);
   return isNaN(n) ? fallback : n;
 }
 
-// Render NULL/undefined as a distinct faded label so it is never confused
-// with an empty string. All other values are stringified normally.
-function NullCellRenderer({ value }: { value: unknown }) {
+// ─── Conditional formatting helpers ───────────────────────────────────────────
+
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace("#", "");
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+function interpolateColor(min: string, max: string, ratio: number): string {
+  const [r1, g1, b1] = hexToRgb(min);
+  const [r2, g2, b2] = hexToRgb(max);
+  const r = Math.round(r1 + (r2 - r1) * ratio);
+  const g = Math.round(g1 + (g2 - g1) * ratio);
+  const b = Math.round(b1 + (b2 - b1) * ratio);
+  return `rgb(${r},${g},${b})`;
+}
+
+function getConditionalStyle(
+  value: unknown,
+  rules: ConditionalRule[],
+  colMin: number,
+  colMax: number,
+): React.CSSProperties {
+  const style: React.CSSProperties = {};
+  for (const rule of rules) {
+    if (rule.type === "colorScale") {
+      const n = Number(value);
+      if (!isNaN(n) && colMax !== colMin) {
+        const ratio = (n - colMin) / (colMax - colMin);
+        style.backgroundColor = interpolateColor(rule.minColor, rule.maxColor, Math.max(0, Math.min(1, ratio)));
+      }
+    } else if (rule.type === "textMatch") {
+      const s = value == null ? "" : String(value);
+      if (rule.pattern && s.toLowerCase().includes(rule.pattern.toLowerCase())) {
+        style.backgroundColor = rule.backgroundColor;
+        style.color = rule.textColor;
+      }
+    }
+    // dataBar is handled in the cell renderer JSX
+  }
+  return style;
+}
+
+// ─── Cell content renderer ────────────────────────────────────────────────────
+
+const CellContent = React.memo(function CellContent({
+  value,
+  searchTerm,
+  formatConfig,
+  rules,
+  colMin,
+  colMax,
+}: {
+  value: unknown;
+  searchTerm: string;
+  formatConfig?: ReturnType<typeof useGridStore.getState>["columnFormats"][string];
+  rules?: ConditionalRule[];
+  colMin: number;
+  colMax: number;
+}) {
   if (value === null || value === undefined) {
     return (
       <span style={{ color: "var(--text-faint)", fontStyle: "italic", fontSize: 10, letterSpacing: "0.04em" }}>
@@ -76,56 +170,187 @@ function NullCellRenderer({ value }: { value: unknown }) {
       </span>
     );
   }
-  return <>{String(value)}</>;
-}
 
-function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
-  // Subscribe to uiDensity so CSS var reads are recalculated on density change.
+  let displayText = formatConfig ? applyFormat(value, formatConfig) : String(value);
+
+  // Data bar overlay
+  const dataBarRule = rules?.find((r) => r.type === "dataBar");
+  const dataBarEl = dataBarRule && dataBarRule.type === "dataBar" && colMax !== colMin ? (() => {
+    const n = Number(value);
+    if (isNaN(n)) return null;
+    const ratio = Math.max(0, Math.min(1, (n - colMin) / (colMax - colMin)));
+    return (
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: `${ratio * 100}%`,
+          backgroundColor: `color-mix(in srgb, ${dataBarRule.color} 20%, transparent)`,
+          pointerEvents: "none",
+        }}
+      />
+    );
+  })() : null;
+
+  // Search highlighting (all occurrences)
+  if (searchTerm) {
+    const lower = displayText.toLowerCase();
+    const searchLower = searchTerm.toLowerCase();
+    const parts: React.ReactNode[] = [];
+    let cursor = 0;
+    let idx = lower.indexOf(searchLower, cursor);
+    if (idx >= 0) {
+      while (idx >= 0) {
+        if (idx > cursor) parts.push(displayText.slice(cursor, idx));
+        parts.push(
+          <mark key={idx} style={{ backgroundColor: "var(--accent)", color: "#fff", borderRadius: 2, padding: "0 1px" }}>
+            {displayText.slice(idx, idx + searchTerm.length)}
+          </mark>,
+        );
+        cursor = idx + searchTerm.length;
+        idx = lower.indexOf(searchLower, cursor);
+      }
+      if (cursor < displayText.length) parts.push(displayText.slice(cursor));
+      return (
+        <div style={{ position: "relative" }}>
+          {dataBarEl}
+          {parts}
+        </div>
+      );
+    }
+  }
+
+  return (
+    <div style={{ position: "relative" }}>
+      {dataBarEl}
+      {displayText}
+    </div>
+  );
+});
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props) {
   const uiDensity = useThemeStore((s) => s.uiDensity);
+  const featureFlags = useFeatureFlagsStore((s) => s.flags);
+
+  // Grid store state
+  const selectionRange = useGridStore((s) => s.selectionRange);
+  const setSelectionRange = useGridStore((s) => s.setSelectionRange);
+  const isSelecting = useGridStore((s) => s.isSelecting);
+  const setIsSelecting = useGridStore((s) => s.setIsSelecting);
+  const searchTerm = useGridStore((s) => s.searchTerm);
+  const columnFormats = useGridStore((s) => s.columnFormats);
+  const conditionalRules = useGridStore((s) => s.conditionalRules);
+  const setTableRows = useGridStore((s) => s.setTableRows);
+  const resetGrid = useGridStore((s) => s.reset);
+  const resetNavigation = useGridStore((s) => s.resetNavigation);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isSyncingRef = useRef(false);
   const lastScrollTopRef = useRef(0);
+  // Track the active double-click text selection restore listener for cleanup on unmount
+  const cellRestoreRef = useRef<((ev: MouseEvent) => void) | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
+  const headerCtxRef = useRef<HTMLDivElement>(null);
+
   const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null);
+  const [headerCtxMenu, setHeaderCtxMenu] = useState<HeaderCtxMenu | null>(null);
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnSizing, setColumnSizing] = useState<Record<string, number>>({});
   const [containerWidth, setContainerWidth] = useState(0);
+  const [columnPinning, setColumnPinning] = useState<ColumnPinningState>({ left: [], right: [] });
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+
+  // Modal state
+  const [filterDropdown, setFilterDropdown] = useState<{ columnId: string; position: { x: number; y: number } } | null>(null);
+  const [formatModal, setFormatModal] = useState<{ columnId: string; columnName: string } | null>(null);
+  const [condFormatModal, setCondFormatModal] = useState<{ columnId: string; columnName: string } | null>(null);
+  const [chartModal, setChartModal] = useState(false);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const rowHeight = useMemo(() => cssVar("--row-height", 24), [uiDensity]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const headerHeight = useMemo(() => cssVar("--header-height", 28), [uiDensity]);
 
-  // Pass the raw row arrays directly to TanStack Table — no per-row object
-  // conversion.  Column accessors read by index, avoiding the O(rows * cols)
-  // Object.fromEntries that previously blocked the main thread for ~1 s on
-  // large result sets when switching history entries.
   const data = result.rows;
 
-  // Compute initial column widths from data
   const initialWidths = useMemo(
     () => computeColumnWidths(result.columns, result.rows, {
       font: GRID_FONT, minWidth: MIN_COL_WIDTH, maxWidth: MAX_COL_WIDTH, nullText: "NULL",
     }),
-    [result.columns, result.rows]
+    [result.columns, result.rows],
   );
 
-  // Reset column sizing and sorting when the result changes.
-  // Column ids use the format `${colIdx}_${name}` to handle duplicate column
-  // names from JOINs (e.g. `SELECT a.id, b.id`).
-  useEffect(() => {
-    const sizing: Record<string, number> = {};
-    result.columns.forEach((col, i) => {
-      sizing[`${i}_${col}`] = initialWidths[i];
-    });
-    setColumnSizing(sizing);
-    setSorting([]);
-  }, [result.columns, initialWidths]);
+  // Reset grid state synchronously when result changes.
+  // Using React's "adjusting state during rendering" pattern so TanStack Table
+  // never processes new column definitions paired with stale state (old column
+  // IDs in columnFilters/columnPinning would cause errors).
+  const [prevResultKey, setPrevResultKey] = useState("");
+  const [prevColumnSchema, setPrevColumnSchema] = useState("");
+  const resultKey = (result.queryID ?? "") + "\0" + result.columns.join("\0");
+  const columnSchema = result.columns.join("\0");
+  if (resultKey !== prevResultKey) {
+    setPrevResultKey(resultKey);
+    const schemaChanged = columnSchema !== prevColumnSchema;
+    if (schemaChanged) {
+      setPrevColumnSchema(columnSchema);
+      const sizing: Record<string, number> = {};
+      result.columns.forEach((col, i) => {
+        sizing[`${i}_${col}`] = initialWidths[i];
+      });
+      setColumnSizing(sizing);
+      setSorting([]);
+      setColumnPinning({ left: [], right: [] });
+      setColumnFilters([]);
+      resetGrid(); // full reset — clears formatting
+    } else {
+      // Same columns, new queryID (re-run) — preserve formatting
+      setSorting([]);
+      setColumnFilters([]);
+      resetNavigation();
+    }
+  }
 
-  // Column definitions — use accessorFn to read from the raw unknown[] arrays
-  // instead of accessorKey which requires row objects.  Column ids include the
-  // index prefix so duplicate column names (common in JOIN results) are unique.
+  // Stable key for which columns have conditional rules — avoids recomputing
+  // min/max when only rule colors/patterns change (not the set of columns).
+  const conditionalRuleKeys = useMemo(
+    () => Object.keys(conditionalRules).sort().join(","),
+    [conditionalRules],
+  );
+
+  // Stable sorted column list derived from conditionalRuleKeys so columnMinMax
+  // doesn't read the live conditionalRules object inside its closure.
+  const conditionalRuleColumns = useMemo(
+    () => conditionalRuleKeys ? conditionalRuleKeys.split(",") : [],
+    [conditionalRuleKeys],
+  );
+
+  // Pre-compute min/max per column for conditional formatting.
+  // Samples up to 50k rows for performance on very large result sets.
+  const columnMinMax = useMemo(() => {
+    const mm: Record<string, { min: number; max: number }> = {};
+    const rowLimit = Math.min(result.rows.length, 50000);
+    for (const colId of conditionalRuleColumns) {
+      const colIdx = colIdxFromColumnId(colId);
+      if (colIdx < 0) continue;
+      let min = Infinity;
+      let max = -Infinity;
+      for (let i = 0; i < rowLimit; i++) {
+        const n = Number(result.rows[i][colIdx]);
+        if (!isNaN(n)) {
+          if (n < min) min = n;
+          if (n > max) max = n;
+        }
+      }
+      if (min !== Infinity) mm[colId] = { min, max };
+    }
+    return mm;
+  }, [conditionalRuleColumns, result.rows]);
+
+  // Column definitions
   const columns = useMemo<ColumnDef<unknown[]>[]>(
     () =>
       result.columns.map((col, colIdx) => ({
@@ -134,24 +359,32 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
         header: col,
         size: initialWidths[colIdx],
         minSize: MIN_COL_WIDTH,
-        maxSize: MAX_COL_WIDTH,
-        cell: ({ getValue }) => <NullCellRenderer value={getValue()} />,
+        maxSize: AUTO_SIZE_MAX_COL_WIDTH,
+        filterFn: columnFilterFn,
       })),
-    [result.columns, initialWidths]
+    [result.columns, initialWidths],
   );
 
   const table = useReactTable({
     data,
     columns,
-    state: { sorting, columnSizing },
+    state: { sorting, columnSizing, columnPinning, columnFilters },
     onSortingChange: setSorting,
     onColumnSizingChange: setColumnSizing,
+    onColumnPinningChange: setColumnPinning,
+    onColumnFiltersChange: setColumnFilters,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
     columnResizeMode: "onChange",
   });
 
   const { rows: tableRows } = table.getRowModel();
+
+  // Sync tableRows to gridStore so StatusBar and GridSearch can access filtered/sorted rows.
+  useEffect(() => {
+    setTableRows(tableRows);
+  }, [tableRows, setTableRows]);
 
   // Row virtualizer
   const rowVirtualizer = useVirtualizer({
@@ -161,24 +394,39 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
     overscan: 10,
   });
 
-  // Column virtualizer for horizontal scrolling with wide tables
-  const visibleColumns = table.getVisibleLeafColumns();
+  // Separate pinned and unpinned columns
+  const leftPinned = table.getLeftLeafColumns();
+  const rightPinned = table.getRightLeafColumns();
+  const centerColumns = table.getCenterLeafColumns();
+
+  // Column virtualizer for center (unpinned) columns only
   const columnVirtualizer = useVirtualizer({
     horizontal: true,
-    count: visibleColumns.length,
+    count: centerColumns.length,
     getScrollElement: () => scrollContainerRef.current,
-    estimateSize: (index) => visibleColumns[index].getSize(),
+    estimateSize: (index) => centerColumns[index]?.getSize() ?? 100,
     overscan: 3,
   });
 
-  // Measure container width after mount so the table fills the available space
-  // even on the first render (when scrollContainerRef is not yet attached).
   useLayoutEffect(() => {
     const el = scrollContainerRef.current;
     if (el) setContainerWidth(el.clientWidth);
   }, []);
 
-  // Register a scrollTo handle so the parent can programmatically scroll this grid.
+  // Expose scrollToRow for search navigation via a stable ref so the effect
+  // only runs once instead of every render (rowVirtualizer is new each render).
+  const rowVirtualizerRef = useRef(rowVirtualizer);
+  rowVirtualizerRef.current = rowVirtualizer;
+  useEffect(() => {
+    if (!gridRef) return;
+    gridRef.current = {
+      scrollToRow: (rowIndex: number) => {
+        rowVirtualizerRef.current.scrollToIndex(rowIndex, { align: "center" });
+      },
+    };
+  }, [gridRef]);
+
+  // Scroll sync handle
   useEffect(() => {
     if (!syncScrollRef) return;
     syncScrollRef.current = {
@@ -194,8 +442,6 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncScrollRef]);
 
-  // Handle scroll events for sync — only fire when scrollTop actually changes
-  // to avoid unnecessary no-op calls during horizontal-only scrolling.
   const handleScroll = useCallback(() => {
     if (isSyncingRef.current) return;
     const el = scrollContainerRef.current;
@@ -206,10 +452,262 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
     onVerticalScroll?.(top);
   }, [onVerticalScroll]);
 
-  // Dismiss context menu on outside mousedown or Escape.
+  // ─── Auto-size column on double-click ─────────────────────────────────────
+
+  const autoSizeColumn = useCallback(
+    (columnId: string) => {
+      const colIdx = colIdxFromColumnId(columnId);
+      if (colIdx < 0) return;
+
+      const headerText = result.columns[colIdx] ?? "";
+      let maxW = measureText(headerText, GRID_FONT) + 32;
+
+      // Measure raw (unfiltered) rows — intentionally uses result.rows so auto-size
+      // accommodates the widest values even when a filter is active.
+      const sampleRows = result.rows.slice(0, 500);
+      for (const row of sampleRows) {
+        const val = row[colIdx];
+        const text = val == null ? "NULL" : String(val);
+        const w = measureText(text, GRID_FONT) + 16;
+        if (w > maxW) maxW = w;
+      }
+
+      const newWidth = Math.max(MIN_COL_WIDTH, Math.min(AUTO_SIZE_MAX_COL_WIDTH, Math.ceil(maxW)));
+      setColumnSizing((prev) => ({ ...prev, [columnId]: newWidth }));
+    },
+    [result.columns, result.rows],
+  );
+
+  // ─── Range selection ──────────────────────────────────────────────────────
+
+  const selectionStartRef = useRef<{ row: number; col: number } | null>(null);
+  const selectionModeRef = useRef<"cell" | "row" | "column" | null>(null);
+
+  const handleCellMouseDown = useCallback(
+    (e: React.MouseEvent, rowIndex: number, colIndex: number) => {
+      if (e.button !== 0) return; // only left click
+      if (!featureFlags.multiCellCopy) return;
+      e.preventDefault(); // prevent native text selection during drag
+      scrollContainerRef.current?.focus(); // restore focus so ⌘C copy handler works
+      selectionModeRef.current = "cell";
+      selectionStartRef.current = { row: rowIndex, col: colIndex };
+      setSelectionRange({ startRow: rowIndex, endRow: rowIndex, startCol: colIndex, endCol: colIndex });
+      setIsSelecting(true);
+    },
+    [featureFlags.multiCellCopy, setSelectionRange, setIsSelecting],
+  );
+
+  const handleCellMouseEnter = useCallback(
+    (rowIndex: number, colIndex: number) => {
+      if (!isSelecting || !selectionStartRef.current) return;
+      const mode = selectionModeRef.current;
+      if (mode === "row") {
+        setSelectionRange({
+          startRow: selectionStartRef.current.row,
+          endRow: rowIndex,
+          startCol: 0,
+          endCol: result.columns.length - 1,
+        });
+      } else if (mode === "column") {
+        setSelectionRange({
+          startRow: 0,
+          endRow: tableRows.length - 1,
+          startCol: selectionStartRef.current.col,
+          endCol: colIndex,
+        });
+      } else {
+        setSelectionRange({
+          startRow: selectionStartRef.current.row,
+          endRow: rowIndex,
+          startCol: selectionStartRef.current.col,
+          endCol: colIndex,
+        });
+      }
+    },
+    [isSelecting, result.columns.length, tableRows.length, setSelectionRange],
+  );
+
   useEffect(() => {
-    if (!ctxMenu) return;
-    const dismiss = () => setCtxMenu(null);
+    if (!isSelecting) return;
+    const onUp = () => {
+      setIsSelecting(false);
+      selectionStartRef.current = null;
+      selectionModeRef.current = null;
+    };
+    document.addEventListener("mouseup", onUp);
+    return () => document.removeEventListener("mouseup", onUp);
+  }, [isSelecting, setIsSelecting]);
+
+  // ─── Row selection (click/drag row numbers) ────────────────────────────────
+
+  const handleRowMouseDown = useCallback(
+    (e: React.MouseEvent, rowIndex: number) => {
+      if (e.button !== 0) return;
+      if (!featureFlags.multiCellCopy) return;
+      e.preventDefault();
+      selectionModeRef.current = "row";
+      selectionStartRef.current = { row: rowIndex, col: 0 };
+      setSelectionRange({
+        startRow: rowIndex,
+        endRow: rowIndex,
+        startCol: 0,
+        endCol: result.columns.length - 1,
+      });
+      setIsSelecting(true);
+    },
+    [featureFlags.multiCellCopy, result.columns.length, setSelectionRange, setIsSelecting],
+  );
+
+  const handleRowMouseEnter = useCallback(
+    (rowIndex: number) => {
+      if (!isSelecting || selectionModeRef.current !== "row" || !selectionStartRef.current) return;
+      setSelectionRange({
+        startRow: selectionStartRef.current.row,
+        endRow: rowIndex,
+        startCol: 0,
+        endCol: result.columns.length - 1,
+      });
+    },
+    [isSelecting, result.columns.length, setSelectionRange],
+  );
+
+  // ─── Column selection (click/drag column headers) ─────────────────────────
+
+  // Defer column selection start so a double-click (sort) cancels it,
+  // preventing a brief selection flash before the sort re-render.
+  const columnSelectTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const handleColumnMouseDown = useCallback(
+    (e: React.MouseEvent, colIndex: number) => {
+      if (e.button !== 0) return;
+      if (!featureFlags.multiCellCopy) return;
+      if (e.detail >= 2) {
+        // Double-click — cancel any pending selection and let sort handler fire
+        if (columnSelectTimerRef.current) clearTimeout(columnSelectTimerRef.current);
+        return;
+      }
+      e.preventDefault();
+      columnSelectTimerRef.current = setTimeout(() => {
+        selectionModeRef.current = "column";
+        selectionStartRef.current = { row: 0, col: colIndex };
+        setSelectionRange({
+          startRow: 0,
+          endRow: tableRows.length - 1,
+          startCol: colIndex,
+          endCol: colIndex,
+        });
+        setIsSelecting(true);
+      }, 200);
+    },
+    [featureFlags.multiCellCopy, tableRows.length, setSelectionRange, setIsSelecting],
+  );
+  useEffect(() => () => {
+    if (columnSelectTimerRef.current) clearTimeout(columnSelectTimerRef.current);
+    if (cellRestoreRef.current) {
+      document.removeEventListener("mousedown", cellRestoreRef.current);
+      cellRestoreRef.current = null;
+    }
+  }, []);
+
+  const handleColumnMouseEnter = useCallback(
+    (colIndex: number) => {
+      if (!isSelecting || selectionModeRef.current !== "column" || !selectionStartRef.current) return;
+      setSelectionRange({
+        startRow: 0,
+        endRow: tableRows.length - 1,
+        startCol: selectionStartRef.current.col,
+        endCol: colIndex,
+      });
+    },
+    [isSelecting, tableRows.length, setSelectionRange],
+  );
+
+  // ─── Multi-cell copy (Cmd+C / Ctrl+C) ────────────────────────────────────
+  // Use refs for selectionRange and tableRows so the keydown listener doesn't
+  // re-register on every mouse-move during drag selection.
+  const selectionRangeRef = useRef(selectionRange);
+  selectionRangeRef.current = selectionRange;
+  const tableRowsRef = useRef(tableRows);
+  tableRowsRef.current = tableRows;
+
+  useEffect(() => {
+    if (!featureFlags.multiCellCopy) return;
+    const handler = (e: KeyboardEvent) => {
+      const cmd = /Macintosh/i.test(navigator.userAgent) ? e.metaKey : e.ctrlKey;
+      if (!cmd || e.key !== "c") return;
+      const sel = selectionRangeRef.current;
+      if (!sel) return;
+      // Only handle if focus is inside the grid
+      const el = scrollContainerRef.current;
+      if (!el || (!el.contains(document.activeElement) && document.activeElement !== el)) return;
+      // If the user has a native text selection (e.g. from double-click),
+      // copy that selection text instead of the grid selection.
+      const nativeSel = window.getSelection();
+      if (nativeSel && nativeSel.toString().length > 0) {
+        e.preventDefault();
+        ClipboardSetText(nativeSel.toString());
+        return;
+      }
+
+      e.preventDefault();
+      const { startRow, endRow, startCol, endCol } = sel;
+      const minRow = Math.min(startRow, endRow);
+      const maxRow = Math.max(startRow, endRow);
+      const minCol = Math.min(startCol, endCol);
+      const maxCol = Math.max(startCol, endCol);
+
+      // Escape TSV special characters: wrap in double-quotes if value contains
+      // tab, newline, or double-quote (with internal quotes doubled).
+      const tsvEscape = (v: string) =>
+        v.includes("\t") || v.includes("\n") || v.includes("\r") || v.includes('"')
+          ? `"${v.replace(/"/g, '""')}"` : v;
+
+      const lines: string[] = [];
+      // Add headers — selectionRange indices are original column indices (extracted from
+      // TanStack column IDs like "3_COL_NAME"), so result.columns[c] is correct even
+      // after visual reordering via column pinning.
+      const headers: string[] = [];
+      for (let c = minCol; c <= maxCol; c++) headers.push(tsvEscape(result.columns[c] ?? ""));
+      lines.push(headers.join("\t"));
+
+      const rows = tableRowsRef.current;
+      for (let r = minRow; r <= maxRow; r++) {
+        const row = rows?.[r];
+        if (!row) continue;
+        const orig = row.original;
+        const cells: string[] = [];
+        for (let c = minCol; c <= maxCol; c++) {
+          cells.push(tsvEscape(orig[c] == null ? "" : String(orig[c])));
+        }
+        lines.push(cells.join("\t"));
+      }
+
+      ClipboardSetText(lines.join("\n")).then(() => {
+        const count = (maxRow - minRow + 1) * (maxCol - minCol + 1);
+        message.success(`Copied ${count} cells`);
+      });
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [featureFlags.multiCellCopy, result.columns]);
+
+  // ─── Select all ───────────────────────────────────────────────────────────
+
+  const handleSelectAll = useCallback(() => {
+    if (!featureFlags.multiCellCopy) return;
+    setSelectionRange({
+      startRow: 0,
+      endRow: tableRows.length - 1,
+      startCol: 0,
+      endCol: result.columns.length - 1,
+    });
+  }, [featureFlags.multiCellCopy, tableRows.length, result.columns.length, setSelectionRange]);
+
+  // ─── Context menus ────────────────────────────────────────────────────────
+
+  // Dismiss context menus
+  useEffect(() => {
+    if (!ctxMenu && !headerCtxMenu) return;
+    const dismiss = () => { setCtxMenu(null); setHeaderCtxMenu(null); };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") dismiss(); };
     document.addEventListener("mousedown", dismiss);
     document.addEventListener("keydown", onKey);
@@ -217,34 +715,46 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
       document.removeEventListener("mousedown", dismiss);
       document.removeEventListener("keydown", onKey);
     };
-  }, [ctxMenu]);
+  }, [ctxMenu, headerCtxMenu]);
 
-  // Clamp context menu inside viewport before first paint.
+  // Clamp context menus
   useLayoutEffect(() => {
     if (!ctxMenu || !ctxRef.current) return;
     const el = ctxRef.current;
     const { width, height } = el.getBoundingClientRect();
     const pad = 8;
-    const left = Math.max(pad, Math.min(ctxMenu.x, window.innerWidth - width - pad));
-    const top = Math.max(pad, Math.min(ctxMenu.y, window.innerHeight - height - pad));
-    el.style.left = `${left}px`;
-    el.style.top = `${top}px`;
+    el.style.left = `${Math.max(pad, Math.min(ctxMenu.x, window.innerWidth - width - pad))}px`;
+    el.style.top = `${Math.max(pad, Math.min(ctxMenu.y, window.innerHeight - height - pad))}px`;
   }, [ctxMenu]);
 
+  useLayoutEffect(() => {
+    if (!headerCtxMenu || !headerCtxRef.current) return;
+    const el = headerCtxRef.current;
+    const { width, height } = el.getBoundingClientRect();
+    const pad = 8;
+    el.style.left = `${Math.max(pad, Math.min(headerCtxMenu.x, window.innerWidth - width - pad))}px`;
+    el.style.top = `${Math.max(pad, Math.min(headerCtxMenu.y, window.innerHeight - height - pad))}px`;
+  }, [headerCtxMenu]);
+
   const handleCellContextMenu = useCallback(
-    (e: React.MouseEvent, rowData: unknown[], columnId: string) => {
+    (e: React.MouseEvent, rowData: unknown[], columnId: string, rowIndex: number) => {
       e.preventDefault();
       e.stopPropagation();
-
-      // Column ids use the format `${colIdx}_${name}` — extract the numeric prefix.
-      const underscoreIdx = columnId.indexOf("_");
-      const colIdx = underscoreIdx >= 0 ? parseInt(columnId.substring(0, underscoreIdx), 10) : -1;
+      const colIdx = colIdxFromColumnId(columnId);
       const cellValue = colIdx >= 0 && rowData[colIdx] != null ? String(rowData[colIdx]) : "";
       const rowValues = rowData.map((v) => (v == null ? "" : String(v)));
-
-      setCtxMenu({ x: e.clientX, y: e.clientY, cellValue, rowValues, columns: result.columns });
+      setCtxMenu({ x: e.clientX, y: e.clientY, cellValue, rowValues, columns: result.columns, rowIndex, colIndex: colIdx });
     },
-    [result.columns]
+    [result.columns],
+  );
+
+  const handleHeaderContextMenu = useCallback(
+    (e: React.MouseEvent, columnId: string, columnName: string, colIndex: number) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setHeaderCtxMenu({ x: e.clientX, y: e.clientY, columnId, columnName, colIndex });
+    },
+    [], // setHeaderCtxMenu is a stable React state setter
   );
 
   const copyCell = async () => {
@@ -268,53 +778,330 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
     message.success("Row copied with headers");
   };
 
-  const menuItemEl = (label: string, action: () => void) => (
+  const menuItemEl = (label: string, action: () => void, disabled?: boolean) => (
     <div
-      style={{ padding: "6px 14px", cursor: "pointer", color: "var(--text)", whiteSpace: "nowrap" }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
+      style={{
+        padding: "6px 14px",
+        cursor: disabled ? "default" : "pointer",
+        color: disabled ? "var(--text-faint)" : "var(--text)",
+        whiteSpace: "nowrap",
+        opacity: disabled ? 0.5 : 1,
+      }}
+      onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.background = "var(--border)"; }}
       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-      onMouseDown={(e) => { e.stopPropagation(); action(); }}
+      onMouseDown={(e) => { e.stopPropagation(); if (!disabled) action(); }}
     >
       {label}
     </div>
   );
 
+  // ─── Selection check helper ───────────────────────────────────────────────
+
+  const normalizedSelection = useMemo(() => {
+    if (!selectionRange) return null;
+    return {
+      minRow: Math.min(selectionRange.startRow, selectionRange.endRow),
+      maxRow: Math.max(selectionRange.startRow, selectionRange.endRow),
+      minCol: Math.min(selectionRange.startCol, selectionRange.endCol),
+      maxCol: Math.max(selectionRange.startCol, selectionRange.endCol),
+    };
+  }, [selectionRange]);
+
+  const isCellSelected = useCallback(
+    (rowIdx: number, colIdx: number): boolean => {
+      if (!normalizedSelection) return false;
+      return rowIdx >= normalizedSelection.minRow && rowIdx <= normalizedSelection.maxRow
+        && colIdx >= normalizedSelection.minCol && colIdx <= normalizedSelection.maxCol;
+    },
+    [normalizedSelection],
+  );
+
+  // ─── Column pinning helpers ───────────────────────────────────────────────
+
+  const pinColumn = (columnId: string, direction: "left" | "right") => {
+    setColumnPinning((prev) => {
+      const left = (prev.left ?? []).filter((id) => id !== columnId);
+      const right = (prev.right ?? []).filter((id) => id !== columnId);
+      if (direction === "left") left.push(columnId);
+      else right.push(columnId);
+      return { left, right };
+    });
+    setHeaderCtxMenu(null);
+  };
+
+  const unpinColumn = (columnId: string) => {
+    setColumnPinning((prev) => ({
+      left: (prev.left ?? []).filter((id) => id !== columnId),
+      right: (prev.right ?? []).filter((id) => id !== columnId),
+    }));
+    setHeaderCtxMenu(null);
+  };
+
+  const isPinned = (columnId: string) => {
+    return (columnPinning.left ?? []).includes(columnId) || (columnPinning.right ?? []).includes(columnId);
+  };
+
+  // ─── Layout calculations ──────────────────────────────────────────────────
+
   const totalColumnWidth = columnVirtualizer.getTotalSize();
+  const pinnedLeftWidth = leftPinned.reduce((acc, col) => acc + col.getSize(), 0);
+  const pinnedRightWidth = rightPinned.reduce((acc, col) => acc + col.getSize(), 0);
   const totalRowHeight = rowVirtualizer.getTotalSize();
   const virtualRows = rowVirtualizer.getVirtualItems();
-
-  // Compute left/right spacer widths for column virtualisation.
-  // The colgroup declares ALL columns so the browser knows the full layout;
-  // each row renders only the visible cells plus padding <td> spacers on the
-  // left and right to fill the off-screen column space.
   const virtualCols = columnVirtualizer.getVirtualItems();
   const firstVirtCol = virtualCols[0];
   const lastVirtCol = virtualCols[virtualCols.length - 1];
 
-  // Number of columns before and after the visible window
   const leftColCount = firstVirtCol ? firstVirtCol.index : 0;
-  const rightColCount = lastVirtCol ? visibleColumns.length - lastVirtCol.index - 1 : 0;
+  const rightColCount = lastVirtCol ? centerColumns.length - lastVirtCol.index - 1 : 0;
 
-  // Pixel widths for the left/right spacer cells
   let leftSpacerWidth = 0;
-  for (let i = 0; i < leftColCount; i++) leftSpacerWidth += visibleColumns[i].getSize();
+  for (let i = 0; i < leftColCount; i++) {
+    if (centerColumns[i]) leftSpacerWidth += centerColumns[i].getSize();
+  }
   let rightSpacerWidth = 0;
-  for (let i = visibleColumns.length - rightColCount; i < visibleColumns.length; i++)
-    rightSpacerWidth += visibleColumns[i].getSize();
+  for (let i = Math.max(0, centerColumns.length - rightColCount); i < centerColumns.length; i++) {
+    if (centerColumns[i]) rightSpacerWidth += centerColumns[i].getSize();
+  }
+
+  const selectAllColWidth = featureFlags.multiCellCopy ? 28 : 0;
+  const fullTableWidth = selectAllColWidth + pinnedLeftWidth + totalColumnWidth + pinnedRightWidth;
+
+  // Pre-compute sample values for the format modal (avoids IIFE re-creation every render)
+  const sampleValues = useMemo(() => {
+    if (!formatModal) return [];
+    const colIdx = colIdxFromColumnId(formatModal.columnId);
+    return colIdx >= 0 ? result.rows.slice(0, 100).map((r) => r[colIdx]) : [];
+  }, [formatModal, result.rows]);
+
+  // Stable callback for filter dropdown dismiss (avoids listener churn in ColumnFilterDropdown)
+  const handleFilterClose = useCallback(() => setFilterDropdown(null), []);
+
+  // ─── Filter dropdown data ─────────────────────────────────────────────────
+
+  const filterColumnId = filterDropdown?.columnId ?? null;
+  const filterColumnData = useMemo(() => {
+    if (!filterColumnId) return { values: [] as string[], truncated: false };
+    const colIdx = colIdxFromColumnId(filterColumnId);
+    if (colIdx < 0) return { values: [] as string[], truncated: false };
+    const unique = new Set<string>();
+    const MAX_UNIQUE = 1000;
+    const MAX_SCAN = 50000;
+    let truncated = false;
+    const scanLimit = Math.min(result.rows.length, MAX_SCAN);
+    for (let i = 0; i < scanLimit; i++) {
+      unique.add(result.rows[i][colIdx] == null ? "" : String(result.rows[i][colIdx]));
+      if (unique.size >= MAX_UNIQUE) { truncated = true; break; }
+    }
+    if (result.rows.length > MAX_SCAN && unique.size < MAX_UNIQUE) truncated = true;
+    return { values: Array.from(unique).sort(), truncated };
+  }, [filterColumnId, result.rows]);
+
+  // ─── Render a header cell ─────────────────────────────────────────────────
+
+  const renderHeaderCell = (columnId: string, colIndex: number, header: Header<unknown[], unknown>, pinned: boolean, stickyLeft?: number, stickyRight?: number) => {
+    const column = header.column;
+    const isSorted = column.getIsSorted();
+    const isFiltered = columnFilters.some((f) => f.id === columnId);
+
+    return (
+      <th
+        key={columnId}
+        onContextMenu={(e) => handleHeaderContextMenu(e, columnId, column.columnDef.header as string, colIndex)}
+        onMouseDown={(e) => handleColumnMouseDown(e, colIndex)}
+        onMouseEnter={() => handleColumnMouseEnter(colIndex)}
+        onDoubleClick={column.getToggleSortingHandler()}
+        style={{
+          height: headerHeight,
+          padding: "0 8px",
+          textAlign: "left",
+          fontWeight: 600,
+          fontSize: 11,
+          color: "var(--text-muted)",
+          borderBottom: "1px solid var(--border)",
+          borderRight: "1px solid var(--border)",
+          cursor: "pointer",
+          userSelect: "none",
+          position: pinned ? "sticky" : "relative",
+          left: stickyLeft != null ? stickyLeft : undefined,
+          right: stickyRight != null ? stickyRight : undefined,
+          zIndex: pinned ? Z_PINNED_HEADER : undefined,
+          background: "var(--bg-raised)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          width: column.getSize(),
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", overflow: "hidden" }}>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>
+            {flexRender(column.columnDef.header, header.getContext())}
+          </span>
+          {isFiltered && (
+            <span style={{ marginLeft: 2, fontSize: 9, color: "var(--accent)", flexShrink: 0 }}>F</span>
+          )}
+          {/* Sort button — hidden on unsorted columns, visible on hover via CSS class */}
+          <span
+            role="button"
+            title={isSorted === "asc" ? "Sorted ascending" : isSorted === "desc" ? "Sorted descending" : "Sort column"}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); column.getToggleSortingHandler()?.(e); }}
+            className={isSorted ? undefined : "sort-indicator-idle"}
+            style={{
+              marginLeft: 2,
+              fontSize: 9,
+              flexShrink: 0,
+              width: 14,
+              textAlign: "center",
+              borderRadius: 3,
+              color: isSorted ? "var(--accent)" : "var(--text-faint)",
+              opacity: isSorted ? 1 : 0,
+              cursor: "pointer",
+            }}
+          >
+            {isSorted === "asc" ? "\u25B2" : isSorted === "desc" ? "\u25BC" : "\u21C5"}
+          </span>
+        </div>
+        {/* Resize handle with double-click auto-size */}
+        <div
+          onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); header.getResizeHandler()(e); }}
+          onTouchStart={header.getResizeHandler()}
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => { e.stopPropagation(); autoSizeColumn(columnId); }}
+          style={{
+            position: "absolute",
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: 4,
+            cursor: "col-resize",
+            background: column.getIsResizing() ? "var(--accent)" : "transparent",
+          }}
+          onMouseEnter={(e) => { if (!column.getIsResizing()) e.currentTarget.style.background = "var(--border)"; }}
+          onMouseLeave={(e) => { if (!column.getIsResizing()) e.currentTarget.style.background = "transparent"; }}
+        />
+      </th>
+    );
+  };
+
+  // ─── Render a body cell ───────────────────────────────────────────────────
+
+  const renderBodyCell = (cell: Cell<unknown[], unknown>, rowOriginal: unknown[], rowIndex: number, pinned: boolean, stickyLeft?: number, stickyRight?: number) => {
+    const columnId = cell.column.id;
+    const colIdx = colIdxFromColumnId(columnId);
+    const value = cell.getValue();
+    const rules = conditionalRules[columnId];
+    const mm = columnMinMax[columnId];
+    const condStyle = rules ? getConditionalStyle(value, rules, mm?.min ?? 0, mm?.max ?? 1) : {};
+    const selected = featureFlags.multiCellCopy && isCellSelected(rowIndex, colIdx);
+
+    return (
+      <td
+        key={cell.id}
+        onContextMenu={(e) => handleCellContextMenu(e, rowOriginal, columnId, rowIndex)}
+        onMouseDown={(e) => handleCellMouseDown(e, rowIndex, colIdx)}
+        onMouseEnter={() => handleCellMouseEnter(rowIndex, colIdx)}
+        onDoubleClick={(e) => {
+          // Allow native text selection on double-click
+          const td = e.currentTarget;
+          td.style.userSelect = "text";
+          td.style.webkitUserSelect = "text";
+          // Select the text content
+          const sel = window.getSelection();
+          if (sel) {
+            const range = document.createRange();
+            range.selectNodeContents(td);
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
+          // Clean up any previous restore listener before attaching a new one
+          if (cellRestoreRef.current) {
+            document.removeEventListener("mousedown", cellRestoreRef.current);
+            cellRestoreRef.current = null;
+          }
+          // Re-disable on mousedown outside this cell and clear the selection.
+          // Clicks inside the cell are allowed so users can select partial text.
+          const restore = (ev: MouseEvent) => {
+            if (td.contains(ev.target as Node)) return; // click inside cell — keep selection mode
+            td.style.userSelect = "none";
+            td.style.webkitUserSelect = "none";
+            window.getSelection()?.removeAllRanges();
+            document.removeEventListener("mousedown", restore);
+            cellRestoreRef.current = null;
+          };
+          cellRestoreRef.current = restore;
+          // Delay so the current double-click selection isn't cleared
+          requestAnimationFrame(() => document.addEventListener("mousedown", restore));
+        }}
+        style={{
+          padding: "0 8px",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          borderBottom: "1px solid var(--border)",
+          borderRight: "1px solid color-mix(in srgb, var(--border) 40%, transparent)",
+          color: "var(--text)",
+          height: rowHeight,
+          width: cell.column.getSize(),
+          position: pinned ? "sticky" : "relative",
+          left: stickyLeft != null ? stickyLeft : undefined,
+          right: stickyRight != null ? stickyRight : undefined,
+          zIndex: pinned ? Z_PINNED_CELL : undefined,
+          userSelect: "none",
+          WebkitUserSelect: "none",
+          ...condStyle,
+          background: selected
+            ? `color-mix(in srgb, var(--accent) 20%, ${condStyle.backgroundColor || "transparent"})`
+            : condStyle.backgroundColor ?? (pinned ? "var(--bg)" : undefined),
+        }}
+      >
+        <CellContent
+          value={value}
+          searchTerm={searchTerm}
+          formatConfig={columnFormats[columnId]}
+          rules={rules}
+          colMin={mm?.min ?? 0}
+          colMax={mm?.max ?? 1}
+        />
+      </td>
+    );
+  };
+
+  // Compute sticky offsets for pinned columns
+  const leftOffsets = useMemo(() => {
+    const offsets: number[] = [];
+    let acc = 0;
+    for (const col of leftPinned) {
+      offsets.push(acc);
+      acc += col.getSize();
+    }
+    return offsets;
+  }, [leftPinned]);
+
+  const rightOffsets = useMemo(() => {
+    const offsets: number[] = [];
+    let acc = 0;
+    for (let i = rightPinned.length - 1; i >= 0; i--) {
+      offsets.unshift(acc);
+      acc += rightPinned[i].getSize();
+    }
+    return offsets;
+  }, [rightPinned]);
 
   return (
-    <div style={{ height: "100%", width: "100%", position: "relative" }}>
+    <div style={{ height: "100%", width: "100%", position: "relative", display: "flex", flexDirection: "column" }}>
+      {/* Show sort indicator on header hover */}
+      <style>{`th:hover .sort-indicator-idle { opacity: 0.5 !important; }`}</style>
       <div
         ref={scrollContainerRef}
         className="thaw-grid"
         onScroll={handleScroll}
         tabIndex={0}
         style={{
-          height: "100%",
+          flex: 1,
           width: "100%",
           overflow: "auto",
           outline: "none",
-          // WKWebView compat
           ["--wails-draggable" as string]: "no-drag",
         }}
       >
@@ -322,124 +1109,100 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
           role="grid"
           aria-label="Query results"
           style={{
-            width: Math.max(totalColumnWidth, containerWidth),
+            width: Math.max(fullTableWidth, containerWidth),
             borderCollapse: "collapse",
             tableLayout: "fixed",
             fontSize: 11,
             fontFamily: "var(--ui-font, 'Inter', 'SF Pro Text', system-ui, sans-serif)",
           }}
         >
-          {/* Declare ALL columns so the browser knows every column's width */}
           <colgroup>
-            {visibleColumns.map((column) => (
-              <col key={column.id} style={{ width: column.getSize() }} />
-            ))}
+            {featureFlags.multiCellCopy && <col style={{ width: 28 }} />}
+            {leftPinned.map((col) => <col key={col.id} style={{ width: col.getSize() }} />)}
+            {centerColumns.map((col) => <col key={col.id} style={{ width: col.getSize() }} />)}
+            {rightPinned.map((col) => <col key={col.id} style={{ width: col.getSize() }} />)}
           </colgroup>
 
           {/* Header */}
-          <thead
-            style={{
-              position: "sticky",
-              top: 0,
-              zIndex: 2,
-              background: "var(--bg-raised)",
-            }}
-          >
-            {table.getHeaderGroups().map((headerGroup) => (
+          <thead style={{ position: "sticky", top: 0, zIndex: Z_THEAD, background: "var(--bg-raised)" }}>
+            {table.getHeaderGroups().map((headerGroup) => {
+              const headerMap = new Map(headerGroup.headers.map((h) => [h.column.id, h]));
+              return (
               <tr key={headerGroup.id}>
-                {/* Left spacer header */}
-                {leftColCount > 0 && (
+                {/* Select-all button cell */}
+                {featureFlags.multiCellCopy && (
                   <th
-                    colSpan={leftColCount}
-                    style={{ width: leftSpacerWidth, padding: 0, border: "none" }}
-                  />
+                    style={{
+                      width: 28,
+                      minWidth: 28,
+                      maxWidth: 28,
+                      height: headerHeight,
+                      padding: 0,
+                      textAlign: "center",
+                      borderBottom: "1px solid var(--border)",
+                      borderRight: "1px solid var(--border)",
+                      cursor: "pointer",
+                      position: "sticky",
+                      left: 0,
+                      zIndex: Z_SELECT_ALL,
+                      background: "var(--bg-raised)",
+                      fontSize: 9,
+                      color: "var(--text-muted)",
+                    }}
+                    onClick={handleSelectAll}
+                    title="Select all"
+                  >
+                    ☐
+                  </th>
                 )}
-                {virtualCols.map((virtualCol) => {
-                  const header = headerGroup.headers[virtualCol.index];
+                {/* Pinned left headers */}
+                {leftPinned.map((col, i) => {
+                  const header = headerMap.get(col.id);
                   if (!header) return null;
-                  const isSorted = header.column.getIsSorted();
-                  return (
-                    <th
-                      key={header.id}
-                      style={{
-                        height: headerHeight,
-                        padding: "0 8px",
-                        textAlign: "left",
-                        fontWeight: 600,
-                        fontSize: 11,
-                        color: "var(--text-muted)",
-                        borderBottom: "1px solid var(--border)",
-                        borderRight: "1px solid var(--border)",
-                        cursor: "pointer",
-                        userSelect: "none",
-                        position: "relative",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        width: header.column.getSize(),
-                      }}
-                      onClick={header.column.getToggleSortingHandler()}
-                    >
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {flexRender(header.column.columnDef.header, header.getContext())}
-                      </span>
-                      {isSorted && (
-                        <span style={{ marginLeft: 4, fontSize: 9 }}>
-                          {isSorted === "asc" ? "\u25B2" : "\u25BC"}
-                        </span>
-                      )}
-                      {/* Resize handle */}
-                      <div
-                        onMouseDown={header.getResizeHandler()}
-                        onTouchStart={header.getResizeHandler()}
-                        onClick={(e) => e.stopPropagation()}
-                        style={{
-                          position: "absolute",
-                          right: 0,
-                          top: 0,
-                          bottom: 0,
-                          width: 4,
-                          cursor: "col-resize",
-                          background: header.column.getIsResizing()
-                            ? "var(--accent)"
-                            : "transparent",
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!header.column.getIsResizing())
-                            e.currentTarget.style.background = "var(--border)";
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!header.column.getIsResizing())
-                            e.currentTarget.style.background = "transparent";
-                        }}
-                      />
-                    </th>
-                  );
+                  const colIdx = colIdxFromColumnId(col.id);
+                  const stickyLeft = (featureFlags.multiCellCopy ? 28 : 0) + leftOffsets[i];
+                  return renderHeaderCell(col.id, colIdx, header, true, stickyLeft);
                 })}
-                {/* Right spacer header */}
-                {rightColCount > 0 && (
-                  <th
-                    colSpan={rightColCount}
-                    style={{ width: rightSpacerWidth, padding: 0, border: "none" }}
-                  />
-                )}
+                {/* Left spacer */}
+                {leftColCount > 0 && <th colSpan={leftColCount} style={{ width: leftSpacerWidth, padding: 0, border: "none" }} />}
+                {/* Center (virtualized) headers */}
+                {virtualCols.map((vc) => {
+                  const col = centerColumns[vc.index];
+                  if (!col) return null;
+                  const header = headerMap.get(col.id);
+                  if (!header) return null;
+                  const colIdx = colIdxFromColumnId(col.id);
+                  return renderHeaderCell(col.id, colIdx, header, false);
+                })}
+                {/* Right spacer */}
+                {rightColCount > 0 && <th colSpan={rightColCount} style={{ width: rightSpacerWidth, padding: 0, border: "none" }} />}
+                {/* Pinned right headers */}
+                {rightPinned.map((col, i) => {
+                  const header = headerMap.get(col.id);
+                  if (!header) return null;
+                  const colIdx = colIdxFromColumnId(col.id);
+                  return renderHeaderCell(col.id, colIdx, header, true, undefined, rightOffsets[i]);
+                })}
               </tr>
-            ))}
+              );
+            })}
           </thead>
 
           {/* Body */}
           <tbody>
-            {/* Top row spacer */}
             {virtualRows.length > 0 && (
               <tr>
                 <td
                   style={{ height: virtualRows[0].start, padding: 0, border: "none" }}
-                  colSpan={visibleColumns.length}
+                  colSpan={leftPinned.length + centerColumns.length + rightPinned.length + (featureFlags.multiCellCopy ? 1 : 0)}
                 />
               </tr>
             )}
             {virtualRows.map((virtualRow) => {
               const row = tableRows[virtualRow.index];
+              if (!row) return null;
+              const cells = row.getVisibleCells();
+              const cellMap = new Map(cells.map((c) => [c.column.id, c]));
               return (
                 <tr
                   key={row.id}
@@ -450,60 +1213,69 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
                       : undefined,
                   }}
                 >
-                  {/* Left column spacer */}
-                  {leftColCount > 0 && (
+                  {/* Row number / select-all column */}
+                  {featureFlags.multiCellCopy && (
                     <td
-                      colSpan={leftColCount}
-                      style={{ width: leftSpacerWidth, padding: 0, border: "none" }}
-                    />
+                      onMouseDown={(e) => handleRowMouseDown(e, virtualRow.index)}
+                      onMouseEnter={() => handleRowMouseEnter(virtualRow.index)}
+                      style={{
+                        width: 28,
+                        minWidth: 28,
+                        maxWidth: 28,
+                        padding: "0 4px",
+                        fontSize: 9,
+                        color: "var(--text-faint)",
+                        textAlign: "center",
+                        borderBottom: "1px solid var(--border)",
+                        borderRight: "1px solid var(--border)",
+                        position: "sticky",
+                        left: 0,
+                        zIndex: Z_PINNED_CELL,
+                        background: "var(--bg-raised)",
+                        userSelect: "none",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {virtualRow.index + 1}
+                    </td>
                   )}
-                  {virtualCols.map((virtualCol) => {
-                    const cell = row.getVisibleCells()[virtualCol.index];
+                  {/* Pinned left cells */}
+                  {leftPinned.map((col, i) => {
+                    const cell = cellMap.get(col.id);
                     if (!cell) return null;
-                    return (
-                      <td
-                        key={cell.id}
-                        onContextMenu={(e) =>
-                          handleCellContextMenu(e, row.original, cell.column.id)
-                        }
-                        style={{
-                          padding: "0 8px",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                          borderBottom: "1px solid var(--border)",
-                          borderRight: "1px solid color-mix(in srgb, var(--border) 40%, transparent)",
-                          color: "var(--text)",
-                          height: rowHeight,
-                          width: cell.column.getSize(),
-                        }}
-                      >
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </td>
-                    );
+                    const stickyLeft = (featureFlags.multiCellCopy ? 28 : 0) + leftOffsets[i];
+                    return renderBodyCell(cell, row.original, virtualRow.index, true, stickyLeft);
                   })}
-                  {/* Right column spacer */}
-                  {rightColCount > 0 && (
-                    <td
-                      colSpan={rightColCount}
-                      style={{ width: rightSpacerWidth, padding: 0, border: "none" }}
-                    />
-                  )}
+                  {/* Left spacer */}
+                  {leftColCount > 0 && <td colSpan={leftColCount} style={{ width: leftSpacerWidth, padding: 0, border: "none" }} />}
+                  {/* Center (virtualized) cells */}
+                  {virtualCols.map((vc) => {
+                    const col = centerColumns[vc.index];
+                    if (!col) return null;
+                    const cell = cellMap.get(col.id);
+                    if (!cell) return null;
+                    return renderBodyCell(cell, row.original, virtualRow.index, false);
+                  })}
+                  {/* Right spacer */}
+                  {rightColCount > 0 && <td colSpan={rightColCount} style={{ width: rightSpacerWidth, padding: 0, border: "none" }} />}
+                  {/* Pinned right cells */}
+                  {rightPinned.map((col, i) => {
+                    const cell = cellMap.get(col.id);
+                    if (!cell) return null;
+                    return renderBodyCell(cell, row.original, virtualRow.index, true, undefined, rightOffsets[i]);
+                  })}
                 </tr>
               );
             })}
-            {/* Bottom row spacer */}
             {virtualRows.length > 0 && (
               <tr>
                 <td
                   style={{
-                    height:
-                      totalRowHeight -
-                      (virtualRows[virtualRows.length - 1]?.end ?? 0),
+                    height: totalRowHeight - (virtualRows[virtualRows.length - 1]?.end ?? 0),
                     padding: 0,
                     border: "none",
                   }}
-                  colSpan={visibleColumns.length}
+                  colSpan={leftPinned.length + centerColumns.length + rightPinned.length + (featureFlags.multiCellCopy ? 1 : 0)}
                 />
               </tr>
             )}
@@ -511,7 +1283,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
         </table>
       </div>
 
-      {/* Context menu */}
+      {/* Cell context menu */}
       {ctxMenu && (
         <div
           ref={ctxRef}
@@ -520,7 +1292,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
             position: "fixed",
             top: ctxMenu.y,
             left: ctxMenu.x,
-            zIndex: 9999,
+            zIndex: Z_OVERLAY,
             background: "var(--bg-overlay)",
             border: "1px solid var(--border)",
             borderRadius: 6,
@@ -533,10 +1305,154 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll }: Props) {
           {menuItemEl("Copy cell value", copyCell)}
           {menuItemEl("Copy row (tab-separated)", copyRow)}
           {menuItemEl("Copy row with headers", copyRowWithHeaders)}
+          {featureFlags.multiCellCopy && selectionRange && (
+            <>
+              <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+              {menuItemEl("Create Chart...", () => { setCtxMenu(null); setChartModal(true); })}
+            </>
+          )}
         </div>
+      )}
+
+      {/* Header context menu */}
+      {headerCtxMenu && (
+        <div
+          ref={headerCtxRef}
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            position: "fixed",
+            top: headerCtxMenu.y,
+            left: headerCtxMenu.x,
+            zIndex: Z_OVERLAY,
+            background: "var(--bg-overlay)",
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
+            minWidth: 190,
+            padding: "4px 0",
+            fontSize: 13,
+          }}
+        >
+          {menuItemEl(
+            isPinned(headerCtxMenu.columnId) ? "Unpin Column" : "Pin to Left",
+            () => isPinned(headerCtxMenu.columnId) ? unpinColumn(headerCtxMenu.columnId) : pinColumn(headerCtxMenu.columnId, "left"),
+          )}
+          {!isPinned(headerCtxMenu.columnId) && menuItemEl("Pin to Right", () => pinColumn(headerCtxMenu.columnId, "right"))}
+          <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+          {menuItemEl("Filter...", () => {
+            setFilterDropdown({ columnId: headerCtxMenu.columnId, position: { x: headerCtxMenu.x, y: headerCtxMenu.y } });
+            setHeaderCtxMenu(null);
+          })}
+          {menuItemEl("Format Column...", () => {
+            setFormatModal({ columnId: headerCtxMenu.columnId, columnName: headerCtxMenu.columnName });
+            setHeaderCtxMenu(null);
+          })}
+          {menuItemEl("Conditional Formatting...", () => {
+            setCondFormatModal({ columnId: headerCtxMenu.columnId, columnName: headerCtxMenu.columnName });
+            setHeaderCtxMenu(null);
+          })}
+          <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+          {menuItemEl("Auto-size Column", () => {
+            autoSizeColumn(headerCtxMenu.columnId);
+            setHeaderCtxMenu(null);
+          })}
+        </div>
+      )}
+
+      {/* Filter dropdown */}
+      {filterDropdown && (
+        <ColumnFilterDropdown
+          columnValues={filterColumnData.values}
+          truncated={filterColumnData.truncated}
+          currentFilter={columnFilters.find((f) => f.id === filterDropdown.columnId)?.value as ColumnFilterValue | undefined}
+          onApply={(filter) => {
+            if (filter) {
+              setColumnFilters((prev) => [
+                ...prev.filter((f) => f.id !== filterDropdown.columnId),
+                { id: filterDropdown.columnId, value: filter },
+              ]);
+            } else {
+              setColumnFilters((prev) => prev.filter((f) => f.id !== filterDropdown.columnId));
+            }
+          }}
+          onClose={handleFilterClose}
+          position={filterDropdown.position}
+        />
+      )}
+
+      {/* Format modal */}
+      {formatModal && (
+        <DataTypeFormatModal
+          columnId={formatModal.columnId}
+          columnName={formatModal.columnName}
+          sampleValues={sampleValues}
+          onClose={() => setFormatModal(null)}
+        />
+      )}
+
+      {/* Conditional formatting modal */}
+      {condFormatModal && (
+        <ConditionalFormattingModal
+          columnId={condFormatModal.columnId}
+          columnName={condFormatModal.columnName}
+          onClose={() => setCondFormatModal(null)}
+        />
+      )}
+
+      {/* Quick chart modal */}
+      {chartModal && selectionRange && (
+        <QuickChartModal
+          tableRows={tableRows}
+          columns={result.columns}
+          selectionRange={selectionRange}
+          onClose={() => setChartModal(false)}
+        />
       )}
     </div>
   );
 }
 
-export default ResultGrid;
+// ─── Error boundary ──────────────────────────────────────────────────────────
+
+interface EBState { error: Error | null }
+
+class ResultGridErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  EBState
+> {
+  state: EBState = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error("ResultGrid crashed:", error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 12 }}>
+          Unable to display results.{" "}
+          <Button size="small" onClick={() => this.setState({ error: null })} style={{ marginLeft: 4 }}>
+            Retry
+          </Button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function ResultGridWithErrorBoundary(props: Props) {
+  // Key resets the error boundary when a new query result arrives
+  const boundaryKey = props.result.queryID ?? `${props.result.columns.join("\0")}|${props.result.rows.length}`;
+  return (
+    <ResultGridErrorBoundary key={boundaryKey}>
+      <ResultGrid {...props} />
+    </ResultGridErrorBoundary>
+  );
+}
+
+export default ResultGridWithErrorBoundary;
