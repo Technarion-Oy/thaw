@@ -207,19 +207,19 @@ function CellContent({
       }
       if (cursor < displayText.length) parts.push(displayText.slice(cursor));
       return (
-        <span style={{ position: "relative" }}>
+        <div style={{ position: "relative" }}>
           {dataBarEl}
           {parts}
-        </span>
+        </div>
       );
     }
   }
 
   return (
-    <span style={{ position: "relative" }}>
+    <div style={{ position: "relative" }}>
       {dataBarEl}
       {displayText}
-    </span>
+    </div>
   );
 }
 
@@ -1298,7 +1298,8 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
       {/* Quick chart modal */}
       {chartModal && selectionRange && (
         <QuickChartModal
-          result={result}
+          tableRows={tableRows}
+          columns={result.columns}
           selectionRange={selectionRange}
           onClose={() => setChartModal(false)}
         />

@@ -26,13 +26,14 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
+import type { Row } from "@tanstack/react-table";
 import type { SelectionRange } from "../../store/gridStore";
-import type { QueryResult } from "../../store/queryStore";
 
 type ChartType = "bar" | "line" | "scatter";
 
 interface Props {
-  result: QueryResult;
+  tableRows: Row<unknown[]>[];
+  columns: string[];
   selectionRange: SelectionRange;
   onClose: () => void;
 }
@@ -54,7 +55,7 @@ const CHART_COLORS = [
   "#13c2c2", "#f5222d", "#faad14",
 ];
 
-export default function QuickChartModal({ result, selectionRange, onClose }: Props) {
+export default function QuickChartModal({ tableRows, columns, selectionRange, onClose }: Props) {
   const [chartType, setChartType] = useState<ChartType>("bar");
 
   const { data, xKey, valueKeys } = useMemo(() => {
@@ -66,13 +67,13 @@ export default function QuickChartModal({ result, selectionRange, onClose }: Pro
     const colIndices: number[] = [];
     for (let c = minCol; c <= maxCol; c++) colIndices.push(c);
 
-    const names = colIndices.map((c) => result.columns[c] ?? `Col ${c}`);
+    const names = colIndices.map((c) => columns[c] ?? `Col ${c}`);
 
     // Sample values per column to detect types
     const sampleValues = colIndices.map((c) => {
       const vals: unknown[] = [];
       for (let r = minRow; r <= maxRow; r++) {
-        vals.push(result.rows[r]?.[c]);
+        vals.push(tableRows[r]?.original[c]);
       }
       return vals;
     });
@@ -108,7 +109,7 @@ export default function QuickChartModal({ result, selectionRange, onClose }: Pro
     // Build chart data
     const rows: Record<string, unknown>[] = [];
     for (let r = minRow; r <= maxRow; r++) {
-      const row = result.rows[r];
+      const row = tableRows[r]?.original;
       if (!row) continue;
       const entry: Record<string, unknown> = {
         [xName]: row[xColIndex] != null ? String(row[xColIndex]) : `Row ${r}`,
@@ -125,7 +126,7 @@ export default function QuickChartModal({ result, selectionRange, onClose }: Pro
       xKey: xName,
       valueKeys: valCols.map((vc) => vc.name),
     };
-  }, [result, selectionRange]);
+  }, [tableRows, columns, selectionRange]);
 
   const renderChart = () => {
     if (valueKeys.length === 0) {

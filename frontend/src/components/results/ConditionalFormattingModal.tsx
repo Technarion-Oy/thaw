@@ -10,7 +10,7 @@
 //
 // @thaw-domain: SQL Editor & Diagnostics
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Modal, Select, Input, Button, Space, Typography } from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { useGridStore, type ConditionalRule } from "../../store/gridStore";
@@ -35,33 +35,37 @@ export default function ConditionalFormattingModal({ columnId, columnName, onClo
   const setConditionalRules = useGridStore((s) => s.setConditionalRules);
   const clearConditionalRules = useGridStore((s) => s.clearConditionalRules);
 
-  const [rules, setRules] = useState<ConditionalRule[]>(existingRules);
+  const nextId = useRef(existingRules.length);
+  const [rules, setRules] = useState(() =>
+    existingRules.map((rule, i) => ({ id: i, rule })),
+  );
 
   const addColorScale = () => {
-    setRules([...rules, { type: "colorScale", minColor: "#52c41a", maxColor: "#f5222d" }]);
+    setRules([...rules, { id: nextId.current++, rule: { type: "colorScale" as const, minColor: "#52c41a", maxColor: "#f5222d" } }]);
   };
 
   const addDataBar = () => {
-    setRules([...rules, { type: "dataBar", color: "#1677ff" }]);
+    setRules([...rules, { id: nextId.current++, rule: { type: "dataBar" as const, color: "#1677ff" } }]);
   };
 
   const addTextMatch = () => {
-    setRules([...rules, { type: "textMatch", pattern: "", backgroundColor: "#fff2e8", textColor: "#d4380d" }]);
+    setRules([...rules, { id: nextId.current++, rule: { type: "textMatch" as const, pattern: "", backgroundColor: "#fff2e8", textColor: "#d4380d" } }]);
   };
 
-  const removeRule = (idx: number) => {
-    setRules(rules.filter((_, i) => i !== idx));
+  const removeRule = (id: number) => {
+    setRules(rules.filter((e) => e.id !== id));
   };
 
-  const updateRule = (idx: number, updated: ConditionalRule) => {
-    setRules(rules.map((r, i) => (i === idx ? updated : r)));
+  const updateRule = (id: number, updated: ConditionalRule) => {
+    setRules(rules.map((e) => (e.id === id ? { ...e, rule: updated } : e)));
   };
 
   const handleApply = () => {
-    if (rules.length === 0) {
+    const extracted = rules.map((e) => e.rule);
+    if (extracted.length === 0) {
       clearConditionalRules(columnId);
     } else {
-      setConditionalRules(columnId, rules);
+      setConditionalRules(columnId, extracted);
     }
     onClose();
   };
@@ -84,9 +88,11 @@ export default function ConditionalFormattingModal({ columnId, columnName, onClo
       width={480}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: 400, overflowY: "auto" }}>
-        {rules.map((rule, idx) => (
+        {rules.map((entry) => {
+          const rule = entry.rule;
+          return (
           <div
-            key={idx}
+            key={entry.id}
             style={{
               padding: 10,
               border: "1px solid var(--border)",
@@ -103,7 +109,7 @@ export default function ConditionalFormattingModal({ columnId, columnName, onClo
                 size="small"
                 icon={<DeleteOutlined />}
                 danger
-                onClick={() => removeRule(idx)}
+                onClick={() => removeRule(entry.id)}
               />
             </div>
 
@@ -114,7 +120,7 @@ export default function ConditionalFormattingModal({ columnId, columnName, onClo
                   <input
                     type="color"
                     value={rule.minColor}
-                    onChange={(e) => updateRule(idx, { ...rule, minColor: e.target.value })}
+                    onChange={(e) => updateRule(entry.id, { ...rule, minColor: e.target.value })}
                     style={{ marginLeft: 4, width: 30, height: 20, border: "none", cursor: "pointer" }}
                   />
                 </label>
@@ -123,7 +129,7 @@ export default function ConditionalFormattingModal({ columnId, columnName, onClo
                   <input
                     type="color"
                     value={rule.maxColor}
-                    onChange={(e) => updateRule(idx, { ...rule, maxColor: e.target.value })}
+                    onChange={(e) => updateRule(entry.id, { ...rule, maxColor: e.target.value })}
                     style={{ marginLeft: 4, width: 30, height: 20, border: "none", cursor: "pointer" }}
                   />
                 </label>
@@ -133,7 +139,7 @@ export default function ConditionalFormattingModal({ columnId, columnName, onClo
                   style={{ width: 120, fontSize: 11 }}
                   onChange={(v: string) => {
                     const preset = PRESET_COLORS.find((p) => p.label === v);
-                    if (preset) updateRule(idx, { ...rule, minColor: preset.min, maxColor: preset.max });
+                    if (preset) updateRule(entry.id, { ...rule, minColor: preset.min, maxColor: preset.max });
                   }}
                   options={PRESET_COLORS.map((p) => ({ label: p.label, value: p.label }))}
                 />
@@ -146,7 +152,7 @@ export default function ConditionalFormattingModal({ columnId, columnName, onClo
                 <input
                   type="color"
                   value={rule.color}
-                  onChange={(e) => updateRule(idx, { ...rule, color: e.target.value })}
+                  onChange={(e) => updateRule(entry.id, { ...rule, color: e.target.value })}
                   style={{ marginLeft: 4, width: 30, height: 20, border: "none", cursor: "pointer" }}
                 />
               </label>
@@ -158,7 +164,7 @@ export default function ConditionalFormattingModal({ columnId, columnName, onClo
                   size="small"
                   placeholder="Match text (e.g. FAILED)"
                   value={rule.pattern}
-                  onChange={(e) => updateRule(idx, { ...rule, pattern: e.target.value })}
+                  onChange={(e) => updateRule(entry.id, { ...rule, pattern: e.target.value })}
                   style={{ fontSize: 11 }}
                 />
                 <Space>
@@ -167,7 +173,7 @@ export default function ConditionalFormattingModal({ columnId, columnName, onClo
                     <input
                       type="color"
                       value={rule.backgroundColor}
-                      onChange={(e) => updateRule(idx, { ...rule, backgroundColor: e.target.value })}
+                      onChange={(e) => updateRule(entry.id, { ...rule, backgroundColor: e.target.value })}
                       style={{ marginLeft: 4, width: 30, height: 20, border: "none", cursor: "pointer" }}
                     />
                   </label>
@@ -176,7 +182,7 @@ export default function ConditionalFormattingModal({ columnId, columnName, onClo
                     <input
                       type="color"
                       value={rule.textColor}
-                      onChange={(e) => updateRule(idx, { ...rule, textColor: e.target.value })}
+                      onChange={(e) => updateRule(entry.id, { ...rule, textColor: e.target.value })}
                       style={{ marginLeft: 4, width: 30, height: 20, border: "none", cursor: "pointer" }}
                     />
                   </label>
@@ -184,7 +190,8 @@ export default function ConditionalFormattingModal({ columnId, columnName, onClo
               </Space>
             )}
           </div>
-        ))}
+          );
+        })}
 
         {rules.length === 0 && (
           <Text style={{ color: "var(--text-muted)", fontSize: 12, textAlign: "center", padding: 16 }}>
