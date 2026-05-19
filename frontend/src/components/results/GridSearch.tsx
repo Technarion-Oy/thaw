@@ -14,17 +14,16 @@ import { useCallback, useEffect, useRef } from "react";
 import { Input, Button, Typography } from "antd";
 import { CloseOutlined, UpOutlined, DownOutlined, SearchOutlined } from "@ant-design/icons";
 import { useGridStore, type CellCoord } from "../../store/gridStore";
-import type { QueryResult } from "../../store/queryStore";
 
 const { Text } = Typography;
 
 interface Props {
-  result: QueryResult;
+  columnCount: number;
   onScrollToRow: (rowIndex: number) => void;
   onClose: () => void;
 }
 
-export default function GridSearch({ result, onScrollToRow, onClose }: Props) {
+export default function GridSearch({ columnCount, onScrollToRow, onClose }: Props) {
   const searchTerm = useGridStore((s) => s.searchTerm);
   const setSearchTerm = useGridStore((s) => s.setSearchTerm);
   const searchMatches = useGridStore((s) => s.searchMatches);
@@ -40,18 +39,22 @@ export default function GridSearch({ result, onScrollToRow, onClose }: Props) {
     inputRef.current?.focus();
   }, []);
 
-  // Compute matches when search term changes (debounced)
+  const tableRows = useGridStore((s) => s.tableRows);
+
+  // Compute matches when search term changes (debounced).
+  // Searches over tableRows (filtered/sorted model) so matches align with visible grid indices.
   const computeMatches = useCallback(
     (term: string) => {
-      if (!term) {
+      if (!term || !tableRows) {
         setSearchMatches([]);
         return;
       }
       const lower = term.toLowerCase();
       const matches: CellCoord[] = [];
-      for (let row = 0; row < result.rows.length; row++) {
-        for (let col = 0; col < result.columns.length; col++) {
-          const val = result.rows[row][col];
+      for (let row = 0; row < tableRows.length; row++) {
+        const orig = tableRows[row].original;
+        for (let col = 0; col < columnCount; col++) {
+          const val = orig[col];
           if (val != null && String(val).toLowerCase().includes(lower)) {
             matches.push({ row, col });
           }
@@ -59,7 +62,7 @@ export default function GridSearch({ result, onScrollToRow, onClose }: Props) {
       }
       setSearchMatches(matches);
     },
-    [result.rows, result.columns.length, setSearchMatches],
+    [tableRows, columnCount, setSearchMatches],
   );
 
   useEffect(() => {

@@ -27,6 +27,8 @@ import {
   type SortingState,
   type ColumnFiltersState,
   type ColumnPinningState,
+  type Header,
+  type Cell,
   flexRender,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -75,6 +77,12 @@ interface HeaderCtxMenu {
   columnId: string;
   columnName: string;
   colIndex: number;
+}
+
+/** Extract the 0-based column index from a TanStack column ID like "3_COL_NAME". */
+function colIdxFromColumnId(columnId: string): number {
+  const i = columnId.indexOf("_");
+  return i >= 0 ? parseInt(columnId.substring(0, i), 10) : -1;
 }
 
 // Maximum column width for initial auto-sizing. Double-click resize removes this cap.
@@ -229,6 +237,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
   const searchTerm = useGridStore((s) => s.searchTerm);
   const columnFormats = useGridStore((s) => s.columnFormats);
   const conditionalRules = useGridStore((s) => s.conditionalRules);
+  const setTableRows = useGridStore((s) => s.setTableRows);
   const resetGrid = useGridStore((s) => s.reset);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -290,8 +299,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     const mm: Record<string, { min: number; max: number }> = {};
     const sampleRows = result.rows.length > 50000 ? result.rows.slice(0, 50000) : result.rows;
     for (const colId of Object.keys(conditionalRules)) {
-      const underscoreIdx = colId.indexOf("_");
-      const colIdx = underscoreIdx >= 0 ? parseInt(colId.substring(0, underscoreIdx), 10) : -1;
+      const colIdx = colIdxFromColumnId(colId);
       if (colIdx < 0) continue;
       let min = Infinity;
       let max = -Infinity;
@@ -337,6 +345,11 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
   });
 
   const { rows: tableRows } = table.getRowModel();
+
+  // Sync tableRows to gridStore so StatusBar and GridSearch can access filtered/sorted rows.
+  useEffect(() => {
+    setTableRows(tableRows);
+  }, [tableRows, setTableRows]);
 
   // Row virtualizer
   const rowVirtualizer = useVirtualizer({
@@ -406,8 +419,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
 
   const autoSizeColumn = useCallback(
     (columnId: string) => {
-      const underscoreIdx = columnId.indexOf("_");
-      const colIdx = underscoreIdx >= 0 ? parseInt(columnId.substring(0, underscoreIdx), 10) : -1;
+      const colIdx = colIdxFromColumnId(columnId);
       if (colIdx < 0) return;
 
       const headerText = result.columns[colIdx] ?? "";
@@ -460,7 +472,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
       } else if (mode === "column") {
         setSelectionRange({
           startRow: 0,
-          endRow: result.rows.length - 1,
+          endRow: tableRows.length - 1,
           startCol: selectionStartRef.current.col,
           endCol: colIndex,
         });
@@ -473,7 +485,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
         });
       }
     },
-    [isSelecting, result.columns.length, result.rows.length, setSelectionRange],
+    [isSelecting, result.columns.length, tableRows.length, setSelectionRange],
   );
 
   useEffect(() => {
@@ -531,13 +543,13 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
       selectionStartRef.current = { row: 0, col: colIndex };
       setSelectionRange({
         startRow: 0,
-        endRow: result.rows.length - 1,
+        endRow: tableRows.length - 1,
         startCol: colIndex,
         endCol: colIndex,
       });
       setIsSelecting(true);
     },
-    [featureFlags.multiCellCopy, result.rows.length, setSelectionRange, setIsSelecting],
+    [featureFlags.multiCellCopy, tableRows.length, setSelectionRange, setIsSelecting],
   );
 
   const handleColumnMouseEnter = useCallback(
@@ -545,12 +557,12 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
       if (!isSelecting || selectionModeRef.current !== "column" || !selectionStartRef.current) return;
       setSelectionRange({
         startRow: 0,
-        endRow: result.rows.length - 1,
+        endRow: tableRows.length - 1,
         startCol: selectionStartRef.current.col,
         endCol: colIndex,
       });
     },
-    [isSelecting, result.rows.length, setSelectionRange],
+    [isSelecting, tableRows.length, setSelectionRange],
   );
 
   // ─── Multi-cell copy (Cmd+C / Ctrl+C) ────────────────────────────────────
@@ -579,11 +591,12 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
       lines.push(headers.join("\t"));
 
       for (let r = minRow; r <= maxRow; r++) {
-        const row = result.rows[r];
+        const row = tableRows[r];
         if (!row) continue;
+        const orig = row.original;
         const cells: string[] = [];
         for (let c = minCol; c <= maxCol; c++) {
-          cells.push(row[c] == null ? "" : String(row[c]));
+          cells.push(orig[c] == null ? "" : String(orig[c]));
         }
         lines.push(cells.join("\t"));
       }
@@ -595,7 +608,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [featureFlags.multiCellCopy, selectionRange, result.rows, result.columns]);
+  }, [featureFlags.multiCellCopy, selectionRange, tableRows, result.columns]);
 
   // ─── Select all ───────────────────────────────────────────────────────────
 
@@ -603,11 +616,11 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     if (!featureFlags.multiCellCopy) return;
     setSelectionRange({
       startRow: 0,
-      endRow: result.rows.length - 1,
+      endRow: tableRows.length - 1,
       startCol: 0,
       endCol: result.columns.length - 1,
     });
-  }, [featureFlags.multiCellCopy, result.rows.length, result.columns.length, setSelectionRange]);
+  }, [featureFlags.multiCellCopy, tableRows.length, result.columns.length, setSelectionRange]);
 
   // ─── Context menus ────────────────────────────────────────────────────────
 
@@ -647,8 +660,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     (e: React.MouseEvent, rowData: unknown[], columnId: string, rowIndex: number) => {
       e.preventDefault();
       e.stopPropagation();
-      const underscoreIdx = columnId.indexOf("_");
-      const colIdx = underscoreIdx >= 0 ? parseInt(columnId.substring(0, underscoreIdx), 10) : -1;
+      const colIdx = colIdxFromColumnId(columnId);
       const cellValue = colIdx >= 0 && rowData[colIdx] != null ? String(rowData[colIdx]) : "";
       const rowValues = rowData.map((v) => (v == null ? "" : String(v)));
       setCtxMenu({ x: e.clientX, y: e.clientY, cellValue, rowValues, columns: result.columns, rowIndex, colIndex: colIdx });
@@ -768,19 +780,34 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
   const selectAllColWidth = featureFlags.multiCellCopy ? 28 : 0;
   const fullTableWidth = selectAllColWidth + pinnedLeftWidth + totalColumnWidth + pinnedRightWidth;
 
+  // Pre-compute sample values for the format modal (avoids IIFE re-creation every render)
+  const sampleValues = useMemo(() => {
+    if (!formatModal) return [];
+    const colIdx = colIdxFromColumnId(formatModal.columnId);
+    return colIdx >= 0 ? result.rows.slice(0, 100).map((r) => r[colIdx]) : [];
+  }, [formatModal, result.rows]);
+
+  // Stable callback for filter dropdown dismiss (avoids listener churn in ColumnFilterDropdown)
+  const handleFilterClose = useCallback(() => setFilterDropdown(null), []);
+
   // ─── Filter dropdown data ─────────────────────────────────────────────────
 
   const filterColumnValues = useMemo(() => {
     if (!filterDropdown) return [];
-    const underscoreIdx = filterDropdown.columnId.indexOf("_");
-    const colIdx = underscoreIdx >= 0 ? parseInt(filterDropdown.columnId.substring(0, underscoreIdx), 10) : -1;
+    const colIdx = colIdxFromColumnId(filterDropdown.columnId);
     if (colIdx < 0) return [];
-    return result.rows.map((r) => r[colIdx]);
+    const unique = new Set<string>();
+    const MAX_UNIQUE = 1000;
+    for (const row of result.rows) {
+      unique.add(row[colIdx] == null ? "" : String(row[colIdx]));
+      if (unique.size >= MAX_UNIQUE) break;
+    }
+    return Array.from(unique);
   }, [filterDropdown, result.rows]);
 
   // ─── Render a header cell ─────────────────────────────────────────────────
 
-  const renderHeaderCell = (columnId: string, colIndex: number, header: any, pinned: boolean, stickyLeft?: number, stickyRight?: number) => {
+  const renderHeaderCell = (columnId: string, colIndex: number, header: Header<unknown[], unknown>, pinned: boolean, stickyLeft?: number, stickyRight?: number) => {
     const column = header.column;
     const isSorted = column.getIsSorted();
     const isFiltered = columnFilters.some((f) => f.id === columnId);
@@ -868,10 +895,9 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
 
   // ─── Render a body cell ───────────────────────────────────────────────────
 
-  const renderBodyCell = (cell: any, rowOriginal: unknown[], rowIndex: number, pinned: boolean, stickyLeft?: number, stickyRight?: number) => {
+  const renderBodyCell = (cell: Cell<unknown[], unknown>, rowOriginal: unknown[], rowIndex: number, pinned: boolean, stickyLeft?: number, stickyRight?: number) => {
     const columnId = cell.column.id;
-    const underscoreIdx = columnId.indexOf("_");
-    const colIdx = underscoreIdx >= 0 ? parseInt(columnId.substring(0, underscoreIdx), 10) : -1;
+    const colIdx = colIdxFromColumnId(columnId);
     const value = cell.getValue();
     const rules = conditionalRules[columnId];
     const mm = columnMinMax[columnId];
@@ -1030,8 +1056,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
                 {leftPinned.map((col, i) => {
                   const header = headerMap.get(col.id);
                   if (!header) return null;
-                  const underscoreIdx = col.id.indexOf("_");
-                  const colIdx = underscoreIdx >= 0 ? parseInt(col.id.substring(0, underscoreIdx), 10) : 0;
+                  const colIdx = colIdxFromColumnId(col.id);
                   const stickyLeft = (featureFlags.multiCellCopy ? 28 : 0) + leftOffsets[i];
                   return renderHeaderCell(col.id, colIdx, header, true, stickyLeft);
                 })}
@@ -1043,8 +1068,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
                   if (!col) return null;
                   const header = headerMap.get(col.id);
                   if (!header) return null;
-                  const underscoreIdx = col.id.indexOf("_");
-                  const colIdx = underscoreIdx >= 0 ? parseInt(col.id.substring(0, underscoreIdx), 10) : 0;
+                  const colIdx = colIdxFromColumnId(col.id);
                   return renderHeaderCell(col.id, colIdx, header, false);
                 })}
                 {/* Right spacer */}
@@ -1053,8 +1077,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
                 {rightPinned.map((col, i) => {
                   const header = headerMap.get(col.id);
                   if (!header) return null;
-                  const underscoreIdx = col.id.indexOf("_");
-                  const colIdx = underscoreIdx >= 0 ? parseInt(col.id.substring(0, underscoreIdx), 10) : 0;
+                  const colIdx = colIdxFromColumnId(col.id);
                   return renderHeaderCell(col.id, colIdx, header, true, undefined, rightOffsets[i]);
                 })}
               </tr>
@@ -1248,7 +1271,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
               setColumnFilters((prev) => prev.filter((f) => f.id !== filterDropdown.columnId));
             }
           }}
-          onClose={() => setFilterDropdown(null)}
+          onClose={handleFilterClose}
           position={filterDropdown.position}
         />
       )}
@@ -1258,11 +1281,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
         <DataTypeFormatModal
           columnId={formatModal.columnId}
           columnName={formatModal.columnName}
-          sampleValues={(() => {
-            const underscoreIdx = formatModal.columnId.indexOf("_");
-            const colIdx = underscoreIdx >= 0 ? parseInt(formatModal.columnId.substring(0, underscoreIdx), 10) : -1;
-            return colIdx >= 0 ? result.rows.slice(0, 100).map((r) => r[colIdx]) : [];
-          })()}
+          sampleValues={sampleValues}
           onClose={() => setFormatModal(null)}
         />
       )}

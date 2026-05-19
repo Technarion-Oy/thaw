@@ -789,8 +789,10 @@ export default function QueryPage() {
         return;
       }
 
-      // ⌘G / Ctrl+G — Toggle Grid Search
+      // ⌘G / Ctrl+G — Toggle Grid Search (skip when Monaco editor has focus — let it handle Go to Line)
       if (cmd && !e.shiftKey && !e.altKey && e.key === "g") {
+        const monacoEl = document.querySelector(".monaco-editor");
+        if (monacoEl?.contains(document.activeElement)) return;
         e.preventDefault();
         setGridSearchOpen((prev) => !prev);
         return;
@@ -1378,7 +1380,7 @@ export default function QueryPage() {
                 {/* Grid search bar */}
                 {gridSearchOpen && displayedResult && (
                   <GridSearch
-                    result={displayedResult}
+                    columnCount={displayedResult.columns.length}
                     onScrollToRow={(row) => primaryGridRef.current?.scrollToRow(row)}
                     onClose={() => setGridSearchOpen(false)}
                   />
@@ -1404,7 +1406,7 @@ export default function QueryPage() {
                   )}
                 </div>{/* end grids row */}
                 {/* Selection aggregations status bar */}
-                {featureFlags.multiCellCopy && <StatusBar result={displayedResult} />}
+                {featureFlags.multiCellCopy && <StatusBar />}
               </div>
             ) : (
               <>

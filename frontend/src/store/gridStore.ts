@@ -11,6 +11,7 @@
 // @thaw-domain: SQL Editor & Diagnostics
 
 import { create } from "zustand";
+import type { Row } from "@tanstack/react-table";
 
 // ─── Selection ────────────────────────────────────────────────────────────────
 
@@ -67,6 +68,10 @@ export type ConditionalRule = ColorScaleRule | DataBarRule | TextMatchRule;
 // ─── Store ────────────────────────────────────────────────────────────────────
 
 interface GridState {
+  // Filtered/sorted rows from TanStack table model (set by ResultGrid)
+  tableRows: Row<unknown[]>[] | null;
+  setTableRows: (rows: Row<unknown[]>[]) => void;
+
   // Range selection
   selectionRange: SelectionRange | null;
   isSelecting: boolean;
@@ -98,6 +103,7 @@ interface GridState {
 }
 
 const initialState = {
+  tableRows: null as Row<unknown[]>[] | null,
   selectionRange: null as SelectionRange | null,
   isSelecting: false,
   searchTerm: "",
@@ -110,6 +116,7 @@ const initialState = {
 export const useGridStore = create<GridState>((set, get) => ({
   ...initialState,
 
+  setTableRows: (rows) => set({ tableRows: rows }),
   setSelectionRange: (range) => set({ selectionRange: range }),
   setIsSelecting: (v) => set({ isSelecting: v }),
 

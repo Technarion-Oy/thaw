@@ -12,22 +12,18 @@
 
 import { useMemo } from "react";
 import { useGridStore } from "../../store/gridStore";
-import type { QueryResult } from "../../store/queryStore";
-
-interface Props {
-  result: QueryResult;
-}
 
 function formatNumber(n: number): string {
   if (Number.isInteger(n)) return n.toLocaleString();
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 });
 }
 
-export default function StatusBar({ result }: Props) {
+export default function StatusBar() {
   const selectionRange = useGridStore((s) => s.selectionRange);
+  const tableRows = useGridStore((s) => s.tableRows);
 
   const stats = useMemo(() => {
-    if (!selectionRange) return null;
+    if (!selectionRange || !tableRows) return null;
 
     const { startRow, endRow, startCol, endCol } = selectionRange;
     const minRow = Math.min(startRow, endRow);
@@ -39,11 +35,12 @@ export default function StatusBar({ result }: Props) {
     let cellCount = 0;
 
     for (let r = minRow; r <= maxRow; r++) {
-      const row = result.rows[r];
+      const row = tableRows[r];
       if (!row) continue;
+      const orig = row.original;
       for (let c = minCol; c <= maxCol; c++) {
         cellCount++;
-        const val = row[c];
+        const val = orig[c];
         if (val === null || val === undefined) continue;
         const num = Number(val);
         if (!isNaN(num) && val !== "" && val !== true && val !== false) {
@@ -67,7 +64,7 @@ export default function StatusBar({ result }: Props) {
       min,
       max,
     };
-  }, [selectionRange, result.rows]);
+  }, [selectionRange, tableRows]);
 
   if (!stats) return null;
 
