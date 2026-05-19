@@ -411,17 +411,18 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     if (el) setContainerWidth(el.clientWidth);
   }, []);
 
-  // Expose scrollToRow for search navigation — assign directly without cleanup
-  // to avoid a null window between effect cleanup and re-assignment, since
-  // rowVirtualizer is a new object every render.
+  // Expose scrollToRow for search navigation via a stable ref so the effect
+  // only runs once instead of every render (rowVirtualizer is new each render).
+  const rowVirtualizerRef = useRef(rowVirtualizer);
+  rowVirtualizerRef.current = rowVirtualizer;
   useEffect(() => {
     if (!gridRef) return;
     gridRef.current = {
       scrollToRow: (rowIndex: number) => {
-        rowVirtualizer.scrollToIndex(rowIndex, { align: "center" });
+        rowVirtualizerRef.current.scrollToIndex(rowIndex, { align: "center" });
       },
     };
-  }, [gridRef, rowVirtualizer]);
+  }, [gridRef]);
 
   // Scroll sync handle
   useEffect(() => {
