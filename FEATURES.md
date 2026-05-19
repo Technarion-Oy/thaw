@@ -629,7 +629,7 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
 - **Multi-Cell Copy & Selection** (feature-flagged) — click and drag to select a range of cells; `⌘C` copies the selection as TSV with headers to the native clipboard; a row-number gutter and select-all button appear when enabled
 - **Selection Aggregations** — when a range is selected, a status bar below the grid shows Sum, Avg, Count, Min, Max of numeric values in the selection
 - **Quick Charting** — with a range selected, right-click → **Create Chart…** to open a modal with bar, line, and scatter chart types powered by Recharts
-- **Row Grouping** — right-click a column header → **Group by This Column** (or drag a column header to the grouping drop zone) to group rows; grouped rows are expandable/collapsible; multiple columns can be stacked
+
 
 ### Snowflake Connectivity
 

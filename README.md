@@ -94,7 +94,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 - **Excel-style column filtering** — right-click a header → **Filter…** for a checklist + condition filter dropdown
 - **Multi-cell copy & selection** (feature-flagged) — drag to select a range; `⌘C` copies as TSV with headers; row-number gutter and status bar with Sum/Avg/Count/Min/Max
 - **Quick charting** — right-click a selection → **Create Chart…** for bar, line, or scatter charts via Recharts
-- **Row grouping** — right-click a header → **Group by This Column** or drag headers to the grouping drop zone
+
 
 ### Embedded terminal
 

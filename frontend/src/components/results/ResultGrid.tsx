@@ -10,7 +10,7 @@
 //
 // @thaw-domain: SQL Editor & Diagnostics
 
-import {
+import React, {
   useMemo,
   useRef,
   useCallback,
@@ -179,20 +179,29 @@ function CellContent({
     );
   })() : null;
 
-  // Search highlighting
+  // Search highlighting (all occurrences)
   if (searchTerm) {
     const lower = displayText.toLowerCase();
     const searchLower = searchTerm.toLowerCase();
-    const idx = lower.indexOf(searchLower);
+    const parts: React.ReactNode[] = [];
+    let cursor = 0;
+    let idx = lower.indexOf(searchLower, cursor);
     if (idx >= 0) {
+      while (idx >= 0) {
+        if (idx > cursor) parts.push(displayText.slice(cursor, idx));
+        parts.push(
+          <mark key={idx} style={{ backgroundColor: "var(--accent)", color: "#fff", borderRadius: 2, padding: "0 1px" }}>
+            {displayText.slice(idx, idx + searchTerm.length)}
+          </mark>,
+        );
+        cursor = idx + searchTerm.length;
+        idx = lower.indexOf(searchLower, cursor);
+      }
+      if (cursor < displayText.length) parts.push(displayText.slice(cursor));
       return (
         <span style={{ position: "relative" }}>
           {dataBarEl}
-          {displayText.slice(0, idx)}
-          <mark style={{ backgroundColor: "var(--accent)", color: "#fff", borderRadius: 2, padding: "0 1px" }}>
-            {displayText.slice(idx, idx + searchTerm.length)}
-          </mark>
-          {displayText.slice(idx + searchTerm.length)}
+          {parts}
         </span>
       );
     }
@@ -220,7 +229,6 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
   const searchTerm = useGridStore((s) => s.searchTerm);
   const columnFormats = useGridStore((s) => s.columnFormats);
   const conditionalRules = useGridStore((s) => s.conditionalRules);
-  const setGrouping = useGridStore((s) => s.setGrouping);
   const resetGrid = useGridStore((s) => s.reset);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -243,7 +251,6 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
   const [condFormatModal, setCondFormatModal] = useState<{ columnId: string; columnName: string } | null>(null);
   const [chartModal, setChartModal] = useState(false);
 
-
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const rowHeight = useMemo(() => cssVar("--row-height", 24), [uiDensity]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -261,7 +268,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
   // Reset grid state synchronously when result columns change.
   // Using React's "adjusting state during rendering" pattern so TanStack Table
   // never processes new column definitions paired with stale state (old column
-  // IDs in grouping/columnFilters/columnPinning would crash getGroupedRowModel).
+  // IDs in columnFilters/columnPinning would cause errors).
   const [prevResultKey, setPrevResultKey] = useState("");
   const resultKey = result.columns.join("\0");
   if (resultKey !== prevResultKey) {
@@ -274,20 +281,21 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     setSorting([]);
     setColumnPinning({ left: [], right: [] });
     setColumnFilters([]);
-    setGrouping([]);
     resetGrid();
   }
 
-  // Pre-compute min/max per column for conditional formatting
+  // Pre-compute min/max per column for conditional formatting.
+  // Samples up to 50k rows for performance on very large result sets.
   const columnMinMax = useMemo(() => {
     const mm: Record<string, { min: number; max: number }> = {};
+    const sampleRows = result.rows.length > 50000 ? result.rows.slice(0, 50000) : result.rows;
     for (const colId of Object.keys(conditionalRules)) {
       const underscoreIdx = colId.indexOf("_");
       const colIdx = underscoreIdx >= 0 ? parseInt(colId.substring(0, underscoreIdx), 10) : -1;
       if (colIdx < 0) continue;
       let min = Infinity;
       let max = -Infinity;
-      for (const row of result.rows) {
+      for (const row of sampleRows) {
         const n = Number(row[colIdx]);
         if (!isNaN(n)) {
           if (n < min) min = n;
@@ -423,12 +431,14 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
   // ─── Range selection ──────────────────────────────────────────────────────
 
   const selectionStartRef = useRef<{ row: number; col: number } | null>(null);
+  const selectionModeRef = useRef<"cell" | "row" | "column" | null>(null);
 
   const handleCellMouseDown = useCallback(
     (e: React.MouseEvent, rowIndex: number, colIndex: number) => {
       if (e.button !== 0) return; // only left click
       if (!featureFlags.multiCellCopy) return;
       e.preventDefault(); // prevent native text selection during drag
+      selectionModeRef.current = "cell";
       selectionStartRef.current = { row: rowIndex, col: colIndex };
       setSelectionRange({ startRow: rowIndex, endRow: rowIndex, startCol: colIndex, endCol: colIndex });
       setIsSelecting(true);
@@ -439,14 +449,31 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
   const handleCellMouseEnter = useCallback(
     (rowIndex: number, colIndex: number) => {
       if (!isSelecting || !selectionStartRef.current) return;
-      setSelectionRange({
-        startRow: selectionStartRef.current.row,
-        endRow: rowIndex,
-        startCol: selectionStartRef.current.col,
-        endCol: colIndex,
-      });
+      const mode = selectionModeRef.current;
+      if (mode === "row") {
+        setSelectionRange({
+          startRow: selectionStartRef.current.row,
+          endRow: rowIndex,
+          startCol: 0,
+          endCol: result.columns.length - 1,
+        });
+      } else if (mode === "column") {
+        setSelectionRange({
+          startRow: 0,
+          endRow: result.rows.length - 1,
+          startCol: selectionStartRef.current.col,
+          endCol: colIndex,
+        });
+      } else {
+        setSelectionRange({
+          startRow: selectionStartRef.current.row,
+          endRow: rowIndex,
+          startCol: selectionStartRef.current.col,
+          endCol: colIndex,
+        });
+      }
     },
-    [isSelecting, setSelectionRange],
+    [isSelecting, result.columns.length, result.rows.length, setSelectionRange],
   );
 
   useEffect(() => {
@@ -454,22 +481,89 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     const onUp = () => {
       setIsSelecting(false);
       selectionStartRef.current = null;
+      selectionModeRef.current = null;
     };
     document.addEventListener("mouseup", onUp);
     return () => document.removeEventListener("mouseup", onUp);
   }, [isSelecting, setIsSelecting]);
+
+  // ─── Row selection (click/drag row numbers) ────────────────────────────────
+
+  const handleRowMouseDown = useCallback(
+    (e: React.MouseEvent, rowIndex: number) => {
+      if (e.button !== 0) return;
+      if (!featureFlags.multiCellCopy) return;
+      e.preventDefault();
+      selectionModeRef.current = "row";
+      selectionStartRef.current = { row: rowIndex, col: 0 };
+      setSelectionRange({
+        startRow: rowIndex,
+        endRow: rowIndex,
+        startCol: 0,
+        endCol: result.columns.length - 1,
+      });
+      setIsSelecting(true);
+    },
+    [featureFlags.multiCellCopy, result.columns.length, setSelectionRange, setIsSelecting],
+  );
+
+  const handleRowMouseEnter = useCallback(
+    (rowIndex: number) => {
+      if (!isSelecting || selectionModeRef.current !== "row" || !selectionStartRef.current) return;
+      setSelectionRange({
+        startRow: selectionStartRef.current.row,
+        endRow: rowIndex,
+        startCol: 0,
+        endCol: result.columns.length - 1,
+      });
+    },
+    [isSelecting, result.columns.length, setSelectionRange],
+  );
+
+  // ─── Column selection (click/drag column headers) ─────────────────────────
+
+  const handleColumnMouseDown = useCallback(
+    (e: React.MouseEvent, colIndex: number) => {
+      if (e.button !== 0) return;
+      if (!featureFlags.multiCellCopy) return;
+      e.preventDefault();
+      selectionModeRef.current = "column";
+      selectionStartRef.current = { row: 0, col: colIndex };
+      setSelectionRange({
+        startRow: 0,
+        endRow: result.rows.length - 1,
+        startCol: colIndex,
+        endCol: colIndex,
+      });
+      setIsSelecting(true);
+    },
+    [featureFlags.multiCellCopy, result.rows.length, setSelectionRange, setIsSelecting],
+  );
+
+  const handleColumnMouseEnter = useCallback(
+    (colIndex: number) => {
+      if (!isSelecting || selectionModeRef.current !== "column" || !selectionStartRef.current) return;
+      setSelectionRange({
+        startRow: 0,
+        endRow: result.rows.length - 1,
+        startCol: selectionStartRef.current.col,
+        endCol: colIndex,
+      });
+    },
+    [isSelecting, result.rows.length, setSelectionRange],
+  );
 
   // ─── Multi-cell copy (Cmd+C / Ctrl+C) ────────────────────────────────────
 
   useEffect(() => {
     if (!featureFlags.multiCellCopy) return;
     const handler = (e: KeyboardEvent) => {
-      const cmd = /Mac|iPhone|iPad/.test(navigator.platform) ? e.metaKey : e.ctrlKey;
+      const cmd = /Macintosh/i.test(navigator.userAgent) ? e.metaKey : e.ctrlKey;
       if (!cmd || e.key !== "c") return;
       if (!selectionRange) return;
       // Only handle if focus is inside the grid
       const el = scrollContainerRef.current;
-      if (!el || !el.contains(document.activeElement) && document.activeElement !== el) return;
+      if (!el || (!el.contains(document.activeElement) && document.activeElement !== el)) return;
 
       e.preventDefault();
       const { startRow, endRow, startCol, endCol } = selectionRange;
@@ -694,12 +788,10 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     return (
       <th
         key={columnId}
-        draggable
-        onDragStart={(e) => {
-          e.dataTransfer.setData("text/plain", columnId);
-          e.dataTransfer.effectAllowed = "move";
-        }}
         onContextMenu={(e) => handleHeaderContextMenu(e, columnId, column.columnDef.header as string, colIndex)}
+        onMouseDown={(e) => handleColumnMouseDown(e, colIndex)}
+        onMouseEnter={() => handleColumnMouseEnter(colIndex)}
+        onDoubleClick={column.getToggleSortingHandler()}
         style={{
           height: headerHeight,
           padding: "0 8px",
@@ -721,22 +813,40 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
           whiteSpace: "nowrap",
           width: column.getSize(),
         }}
-        onClick={column.getToggleSortingHandler()}
       >
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-          {flexRender(column.columnDef.header, header.getContext())}
-        </span>
-        {isSorted && (
-          <span style={{ marginLeft: 4, fontSize: 9 }}>
-            {isSorted === "asc" ? "\u25B2" : "\u25BC"}
+        <div style={{ display: "flex", alignItems: "center", overflow: "hidden" }}>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>
+            {flexRender(column.columnDef.header, header.getContext())}
           </span>
-        )}
-        {isFiltered && (
-          <span style={{ marginLeft: 4, fontSize: 9, color: "var(--accent)" }}>F</span>
-        )}
+          {isFiltered && (
+            <span style={{ marginLeft: 2, fontSize: 9, color: "var(--accent)", flexShrink: 0 }}>F</span>
+          )}
+          {/* Sort button */}
+          <span
+            role="button"
+            title={isSorted === "asc" ? "Sorted ascending" : isSorted === "desc" ? "Sorted descending" : "Sort column"}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); column.getToggleSortingHandler()?.(e); }}
+            style={{
+              marginLeft: 2,
+              fontSize: 9,
+              flexShrink: 0,
+              width: 14,
+              textAlign: "center",
+              borderRadius: 3,
+              color: isSorted ? "var(--accent)" : "var(--text-faint)",
+              opacity: isSorted ? 1 : 0.5,
+              cursor: "pointer",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+            onMouseLeave={(e) => { if (!isSorted) e.currentTarget.style.opacity = "0.5"; }}
+          >
+            {isSorted === "asc" ? "\u25B2" : isSorted === "desc" ? "\u25BC" : "\u25B2"}
+          </span>
+        </div>
         {/* Resize handle with double-click auto-size */}
         <div
-          onMouseDown={header.getResizeHandler()}
+          onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); header.getResizeHandler()(e); }}
           onTouchStart={header.getResizeHandler()}
           onClick={(e) => e.stopPropagation()}
           onDoubleClick={(e) => { e.stopPropagation(); autoSizeColumn(columnId); }}
@@ -886,7 +996,9 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
 
           {/* Header */}
           <thead style={{ position: "sticky", top: 0, zIndex: 4, background: "var(--bg-raised)" }}>
-            {table.getHeaderGroups().map((headerGroup) => (
+            {table.getHeaderGroups().map((headerGroup) => {
+              const headerMap = new Map(headerGroup.headers.map((h) => [h.column.id, h]));
+              return (
               <tr key={headerGroup.id}>
                 {/* Select-all button cell */}
                 {featureFlags.multiCellCopy && (
@@ -916,7 +1028,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
                 )}
                 {/* Pinned left headers */}
                 {leftPinned.map((col, i) => {
-                  const header = headerGroup.headers.find((h) => h.column.id === col.id);
+                  const header = headerMap.get(col.id);
                   if (!header) return null;
                   const underscoreIdx = col.id.indexOf("_");
                   const colIdx = underscoreIdx >= 0 ? parseInt(col.id.substring(0, underscoreIdx), 10) : 0;
@@ -929,7 +1041,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
                 {virtualCols.map((vc) => {
                   const col = centerColumns[vc.index];
                   if (!col) return null;
-                  const header = headerGroup.headers.find((h) => h.column.id === col.id);
+                  const header = headerMap.get(col.id);
                   if (!header) return null;
                   const underscoreIdx = col.id.indexOf("_");
                   const colIdx = underscoreIdx >= 0 ? parseInt(col.id.substring(0, underscoreIdx), 10) : 0;
@@ -939,14 +1051,15 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
                 {rightColCount > 0 && <th colSpan={rightColCount} style={{ width: rightSpacerWidth, padding: 0, border: "none" }} />}
                 {/* Pinned right headers */}
                 {rightPinned.map((col, i) => {
-                  const header = headerGroup.headers.find((h) => h.column.id === col.id);
+                  const header = headerMap.get(col.id);
                   if (!header) return null;
                   const underscoreIdx = col.id.indexOf("_");
                   const colIdx = underscoreIdx >= 0 ? parseInt(col.id.substring(0, underscoreIdx), 10) : 0;
                   return renderHeaderCell(col.id, colIdx, header, true, undefined, rightOffsets[i]);
                 })}
               </tr>
-            ))}
+              );
+            })}
           </thead>
 
           {/* Body */}
@@ -963,6 +1076,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
               const row = tableRows[virtualRow.index];
               if (!row) return null;
               const cells = row.getVisibleCells();
+              const cellMap = new Map(cells.map((c) => [c.column.id, c]));
               return (
                 <tr
                   key={row.id}
@@ -976,6 +1090,8 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
                   {/* Row number / select-all column */}
                   {featureFlags.multiCellCopy && (
                     <td
+                      onMouseDown={(e) => handleRowMouseDown(e, virtualRow.index)}
+                      onMouseEnter={() => handleRowMouseEnter(virtualRow.index)}
                       style={{
                         width: 28,
                         minWidth: 28,
@@ -991,6 +1107,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
                         zIndex: 1,
                         background: "var(--bg-raised)",
                         userSelect: "none",
+                        cursor: "pointer",
                       }}
                     >
                       {virtualRow.index + 1}
@@ -998,7 +1115,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
                   )}
                   {/* Pinned left cells */}
                   {leftPinned.map((col, i) => {
-                    const cell = cells.find((c) => c.column.id === col.id);
+                    const cell = cellMap.get(col.id);
                     if (!cell) return null;
                     const stickyLeft = (featureFlags.multiCellCopy ? 28 : 0) + leftOffsets[i];
                     return renderBodyCell(cell, row.original, virtualRow.index, true, stickyLeft);
@@ -1009,7 +1126,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
                   {virtualCols.map((vc) => {
                     const col = centerColumns[vc.index];
                     if (!col) return null;
-                    const cell = cells.find((c) => c.column.id === col.id);
+                    const cell = cellMap.get(col.id);
                     if (!cell) return null;
                     return renderBodyCell(cell, row.original, virtualRow.index, false);
                   })}
@@ -1017,7 +1134,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
                   {rightColCount > 0 && <td colSpan={rightColCount} style={{ width: rightSpacerWidth, padding: 0, border: "none" }} />}
                   {/* Pinned right cells */}
                   {rightPinned.map((col, i) => {
-                    const cell = cells.find((c) => c.column.id === col.id);
+                    const cell = cellMap.get(col.id);
                     if (!cell) return null;
                     return renderBodyCell(cell, row.original, virtualRow.index, true, undefined, rightOffsets[i]);
                   })}
@@ -1173,8 +1290,6 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
 
 // ─── Error boundary ──────────────────────────────────────────────────────────
 
-import React from "react";
-
 interface EBState { error: Error | null }
 
 class ResultGridErrorBoundary extends React.Component<
@@ -1204,8 +1319,10 @@ class ResultGridErrorBoundary extends React.Component<
 }
 
 function ResultGridWithErrorBoundary(props: Props) {
+  // Key resets the error boundary when a new query result arrives
+  const boundaryKey = props.result.queryID ?? props.result.columns.join("\0");
   return (
-    <ResultGridErrorBoundary>
+    <ResultGridErrorBoundary key={boundaryKey}>
       <ResultGrid {...props} />
     </ResultGridErrorBoundary>
   );

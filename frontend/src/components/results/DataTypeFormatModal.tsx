@@ -11,7 +11,7 @@
 // @thaw-domain: SQL Editor & Diagnostics
 
 import { useState } from "react";
-import { Modal, Select, InputNumber, Space, Typography } from "antd";
+import { Modal, Select, InputNumber, Space, Typography, Button } from "antd";
 import { useGridStore, type FormatConfig, type FormatType } from "../../store/gridStore";
 
 const { Text } = Typography;
@@ -136,53 +136,15 @@ export default function DataTypeFormatModal({ columnId, columnName, sampleValues
       open
       onCancel={onClose}
       footer={[
-        <button
-          key="clear"
-          onClick={handleClear}
-          style={{
-            padding: "4px 15px",
-            fontSize: 12,
-            border: "1px solid var(--border)",
-            borderRadius: 4,
-            background: "transparent",
-            color: "var(--text)",
-            cursor: "pointer",
-            marginRight: 8,
-          }}
-        >
+        <Button key="clear" size="small" onClick={handleClear}>
           Clear Format
-        </button>,
-        <button
-          key="cancel"
-          onClick={onClose}
-          style={{
-            padding: "4px 15px",
-            fontSize: 12,
-            border: "1px solid var(--border)",
-            borderRadius: 4,
-            background: "transparent",
-            color: "var(--text)",
-            cursor: "pointer",
-            marginRight: 8,
-          }}
-        >
+        </Button>,
+        <Button key="cancel" size="small" onClick={onClose}>
           Cancel
-        </button>,
-        <button
-          key="apply"
-          onClick={handleApply}
-          style={{
-            padding: "4px 15px",
-            fontSize: 12,
-            border: "1px solid var(--accent)",
-            borderRadius: 4,
-            background: "var(--accent)",
-            color: "#fff",
-            cursor: "pointer",
-          }}
-        >
+        </Button>,
+        <Button key="apply" size="small" type="primary" onClick={handleApply}>
           Apply
-        </button>,
+        </Button>,
       ]}
       width={400}
     >
@@ -204,7 +166,7 @@ export default function DataTypeFormatModal({ columnId, columnName, sampleValues
               options={[
                 { label: "Number", value: "number" },
                 { label: "Currency", value: "currency" },
-                { label: "Percentage", value: "percentage" },
+                { label: "Percentage (multiplies by 100)", value: "percentage" },
                 { label: "Date/Time", value: "datetime" },
               ]}
             />

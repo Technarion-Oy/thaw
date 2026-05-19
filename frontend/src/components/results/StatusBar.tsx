@@ -56,8 +56,8 @@ export default function StatusBar({ result }: Props) {
 
     const sum = numericValues.reduce((a, b) => a + b, 0);
     const avg = sum / numericValues.length;
-    const min = Math.min(...numericValues);
-    const max = Math.max(...numericValues);
+    const min = numericValues.reduce((a, b) => Math.min(a, b), Infinity);
+    const max = numericValues.reduce((a, b) => Math.max(a, b), -Infinity);
 
     return {
       sum,

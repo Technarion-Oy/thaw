@@ -64,10 +64,6 @@ export interface TextMatchRule {
 
 export type ConditionalRule = ColorScaleRule | DataBarRule | TextMatchRule;
 
-// ─── Grouping ─────────────────────────────────────────────────────────────────
-
-export type AggregationFn = "sum" | "count" | "avg" | "min" | "max";
-
 // ─── Store ────────────────────────────────────────────────────────────────────
 
 interface GridState {
@@ -97,16 +93,6 @@ interface GridState {
   setConditionalRules: (colId: string, rules: ConditionalRule[]) => void;
   clearConditionalRules: (colId: string) => void;
 
-  // Grouping columns (ordered)
-  grouping: string[];
-  setGrouping: (cols: string[]) => void;
-  addGroupingColumn: (colId: string) => void;
-  removeGroupingColumn: (colId: string) => void;
-
-  // Aggregation function per value column (when grouped)
-  aggregationFns: Record<string, AggregationFn>;
-  setAggregationFn: (colId: string, fn: AggregationFn) => void;
-
   // Reset all state (called when a new query result arrives)
   reset: () => void;
 }
@@ -119,8 +105,6 @@ const initialState = {
   currentMatchIndex: 0,
   columnFormats: {} as Record<string, FormatConfig>,
   conditionalRules: {} as Record<string, ConditionalRule[]>,
-  grouping: [] as string[],
-  aggregationFns: {} as Record<string, AggregationFn>,
 };
 
 export const useGridStore = create<GridState>((set, get) => ({
@@ -158,15 +142,6 @@ export const useGridStore = create<GridState>((set, get) => ({
       const { [colId]: _, ...rest } = s.conditionalRules;
       return { conditionalRules: rest };
     }),
-
-  setGrouping: (cols) => set({ grouping: cols }),
-  addGroupingColumn: (colId) =>
-    set((s) => s.grouping.includes(colId) ? s : { grouping: [...s.grouping, colId] }),
-  removeGroupingColumn: (colId) =>
-    set((s) => ({ grouping: s.grouping.filter((c) => c !== colId) })),
-
-  setAggregationFn: (colId, fn) =>
-    set((s) => ({ aggregationFns: { ...s.aggregationFns, [colId]: fn } })),
 
   reset: () => set(initialState),
 }));

@@ -691,7 +691,7 @@ export default function QueryPage() {
 
   // ── Global keyboard shortcuts ──────────────────────────────────────────────
   useEffect(() => {
-    const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+    const isMac = /Macintosh/i.test(navigator.userAgent);
 
     const handler = (e: KeyboardEvent) => {
       const cmd  = isMac ? e.metaKey : e.ctrlKey;
