@@ -770,7 +770,7 @@ thaw/
     │       ├── help/                 # About dialog, keyboard shortcuts modal
     │       ├── layout/               # AppLayout (two-sidebar drag-and-drop), Sidebar (object tree + context menus)
     │       ├── lineage/              # Recursive dependency tree modal with DDL hover tooltips
-    │       ├── migration/            # Schema Migration wizard (Tools menu)
+    │       ├── migration/            # Schema Migration wizard (Tools menu): MigrationModal, ReviewGrid, ExecGrid, migrationUtils
     │       ├── notebook/             # Jupyter-style notebook: cell editors, deploy, execute, preferences, debugger
     │       ├── pipe/                 # Pipe management: create, properties, refresh, copy history
     │       ├── procedure/            # Call Procedure / Call Function modals
