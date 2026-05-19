@@ -24,6 +24,7 @@ import {
   getSortedRowModel,
   getFilteredRowModel,
   type ColumnDef,
+  type FilterFn,
   type SortingState,
   type ColumnFiltersState,
   type ColumnPinningState,
@@ -325,7 +326,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
         size: initialWidths[colIdx],
         minSize: MIN_COL_WIDTH,
         maxSize: AUTO_SIZE_MAX_COL_WIDTH,
-        filterFn: columnFilterFn as any,
+        filterFn: columnFilterFn as FilterFn<unknown[]>,
       })),
     [result.columns, initialWidths],
   );
@@ -450,6 +451,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
       if (e.button !== 0) return; // only left click
       if (!featureFlags.multiCellCopy) return;
       e.preventDefault(); // prevent native text selection during drag
+      scrollContainerRef.current?.focus(); // restore focus so ⌘C copy handler works
       selectionModeRef.current = "cell";
       selectionStartRef.current = { row: rowIndex, col: colIndex };
       setSelectionRange({ startRow: rowIndex, endRow: rowIndex, startCol: colIndex, endCol: colIndex });

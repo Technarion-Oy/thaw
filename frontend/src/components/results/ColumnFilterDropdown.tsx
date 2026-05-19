@@ -10,7 +10,7 @@
 //
 // @thaw-domain: SQL Editor & Diagnostics
 
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { Input, Checkbox, Button, Divider, Select, Space } from "antd";
 import { FilterOutlined } from "@ant-design/icons";
 
@@ -165,6 +165,16 @@ export default function ColumnFilterDropdown({
       document.removeEventListener("keydown", onKey);
     };
   }, [onClose]);
+
+  // Clamp dropdown to viewport so it doesn't render off-screen
+  useLayoutEffect(() => {
+    const el = dropdownRef.current;
+    if (!el) return;
+    const { width, height } = el.getBoundingClientRect();
+    const pad = 8;
+    el.style.left = `${Math.max(pad, Math.min(position.x, window.innerWidth - width - pad))}px`;
+    el.style.top = `${Math.max(pad, Math.min(position.y, window.innerHeight - height - pad))}px`;
+  }, [position]);
 
   return (
     <div
