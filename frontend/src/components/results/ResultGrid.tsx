@@ -879,9 +879,10 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
 
   // ─── Filter dropdown data ─────────────────────────────────────────────────
 
+  const filterColumnId = filterDropdown?.columnId ?? null;
   const filterColumnData = useMemo(() => {
-    if (!filterDropdown) return { values: [] as string[], truncated: false };
-    const colIdx = colIdxFromColumnId(filterDropdown.columnId);
+    if (!filterColumnId) return { values: [] as string[], truncated: false };
+    const colIdx = colIdxFromColumnId(filterColumnId);
     if (colIdx < 0) return { values: [] as string[], truncated: false };
     const unique = new Set<string>();
     const MAX_UNIQUE = 1000;
@@ -894,7 +895,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     }
     if (result.rows.length > MAX_SCAN && unique.size < MAX_UNIQUE) truncated = true;
     return { values: Array.from(unique).sort(), truncated };
-  }, [filterDropdown, result.rows]);
+  }, [filterColumnId, result.rows]);
 
   // ─── Render a header cell ─────────────────────────────────────────────────
 

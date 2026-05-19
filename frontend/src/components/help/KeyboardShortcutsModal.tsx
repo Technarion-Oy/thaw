@@ -77,6 +77,15 @@ const GROUPS: ShortcutGroup[] = [
     ],
   },
   {
+    title: "Results Grid",
+    rows: [
+      { action: "Search Results",              mac: "⌘ G",           win: "Ctrl+G",        status: "new" },
+      { action: "Find Next Match",             mac: "Enter",          win: "Enter",         status: "new" },
+      { action: "Find Previous Match",         mac: "⇧ Enter",       win: "Shift+Enter",   status: "new" },
+      { action: "Close Search",                mac: "Esc",            win: "Esc",           status: "new" },
+    ],
+  },
+  {
     title: "Notebook (Command Mode — no cell editor focused)",
     rows: [
       { action: "Run Cell",              mac: "⇧ Enter",  win: "Shift+Enter" },

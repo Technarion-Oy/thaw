@@ -1136,7 +1136,7 @@ Open **Help → Keyboard Shortcuts…** in the menu bar for a searchable, always
 | `⌘⇧ Enter` | `Ctrl+Shift+Enter` | Run all statements |
 | `Esc` | `Esc` | Cancel running query |
 | `⌘↓` | `Ctrl+↓` | Focus results grid |
-| `⌘G` | `Ctrl+G` | Toggle grid search |
+| `⌘G` | `Ctrl+G` | Toggle grid search (results pane only) |
 | `⌘E` | `Ctrl+E` | Export current results as CSV |
 
 ### Editor

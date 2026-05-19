@@ -218,7 +218,7 @@ export default function ColumnFilterDropdown({
       </div>
       <div style={{ maxHeight: 180, overflowY: "auto", marginBottom: 8 }}>
         {filteredValues.map((val) => (
-          <div key={val} style={{ padding: "1px 0" }}>
+          <div key={val || "__blank__"} style={{ padding: "1px 0" }}>
             <Checkbox
               checked={checkedValues.has(val)}
               onChange={() => {
