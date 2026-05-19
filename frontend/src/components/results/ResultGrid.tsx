@@ -251,6 +251,8 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isSyncingRef = useRef(false);
   const lastScrollTopRef = useRef(0);
+  // Track the active double-click text selection restore listener for cleanup on unmount
+  const cellRestoreRef = useRef<((ev: MouseEvent) => void) | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
   const headerCtxRef = useRef<HTMLDivElement>(null);
 
@@ -598,7 +600,13 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     },
     [featureFlags.multiCellCopy, tableRows.length, setSelectionRange, setIsSelecting],
   );
-  useEffect(() => () => { if (columnSelectTimerRef.current) clearTimeout(columnSelectTimerRef.current); }, []);
+  useEffect(() => () => {
+    if (columnSelectTimerRef.current) clearTimeout(columnSelectTimerRef.current);
+    if (cellRestoreRef.current) {
+      document.removeEventListener("mousedown", cellRestoreRef.current);
+      cellRestoreRef.current = null;
+    }
+  }, []);
 
   const handleColumnMouseEnter = useCallback(
     (colIndex: number) => {
@@ -998,6 +1006,11 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
             sel.removeAllRanges();
             sel.addRange(range);
           }
+          // Clean up any previous restore listener before attaching a new one
+          if (cellRestoreRef.current) {
+            document.removeEventListener("mousedown", cellRestoreRef.current);
+            cellRestoreRef.current = null;
+          }
           // Re-disable on mousedown outside this cell and clear the selection.
           // Clicks inside the cell are allowed so users can select partial text.
           const restore = (ev: MouseEvent) => {
@@ -1006,7 +1019,9 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
             td.style.webkitUserSelect = "none";
             window.getSelection()?.removeAllRanges();
             document.removeEventListener("mousedown", restore);
+            cellRestoreRef.current = null;
           };
+          cellRestoreRef.current = restore;
           // Delay so the current double-click selection isn't cleared
           requestAnimationFrame(() => document.addEventListener("mousedown", restore));
         }}
@@ -1028,7 +1043,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
           WebkitUserSelect: "none",
           ...condStyle,
           background: selected
-            ? "color-mix(in srgb, var(--accent) 20%, transparent)"
+            ? `color-mix(in srgb, var(--accent) 20%, ${condStyle.backgroundColor || "transparent"})`
             : condStyle.backgroundColor ?? (pinned ? "var(--bg)" : undefined),
         }}
       >

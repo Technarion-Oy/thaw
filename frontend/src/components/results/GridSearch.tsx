@@ -10,7 +10,7 @@
 //
 // @thaw-domain: SQL Editor & Diagnostics
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Input, Button, Typography } from "antd";
 import type { InputRef } from "antd";
 import { CloseOutlined, UpOutlined, DownOutlined, SearchOutlined } from "@ant-design/icons";
@@ -34,6 +34,7 @@ export default function GridSearch({ columnCount, onScrollToRow, onClose }: Prop
   const prevMatch = useGridStore((s) => s.prevMatch);
   const inputRef = useRef<InputRef>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const [searchCapped, setSearchCapped] = useState(false);
 
   // Focus input on mount
   useEffect(() => {
@@ -52,7 +53,9 @@ export default function GridSearch({ columnCount, onScrollToRow, onClose }: Prop
       }
       const lower = term.toLowerCase();
       const matches: CellCoord[] = [];
-      const maxRows = Math.min(tableRows.length, 100_000);
+      const MAX_SEARCH_ROWS = 100_000;
+      const maxRows = Math.min(tableRows.length, MAX_SEARCH_ROWS);
+      setSearchCapped(tableRows.length > MAX_SEARCH_ROWS);
       for (let row = 0; row < maxRows; row++) {
         const orig = tableRows[row].original;
         for (let col = 0; col < columnCount; col++) {
@@ -129,6 +132,11 @@ export default function GridSearch({ columnCount, onScrollToRow, onClose }: Prop
       {searchMatches.length > 0 && (
         <Text style={{ fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>
           {currentMatchIndex + 1} of {searchMatches.length}
+        </Text>
+      )}
+      {searchCapped && searchTerm && (
+        <Text style={{ fontSize: 10, color: "var(--text-faint)", whiteSpace: "nowrap", fontStyle: "italic" }}>
+          first 100k rows
         </Text>
       )}
       {searchTerm && searchMatches.length === 0 && (
