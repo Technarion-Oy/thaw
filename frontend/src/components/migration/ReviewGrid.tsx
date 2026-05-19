@@ -27,7 +27,7 @@ import {
   objectLabel,
   gridTableStyle,
   gridHeaderStyle,
-} from "./MigrationModal";
+} from "./migrationUtils";
 
 interface ReviewGridProps {
   data: MigrationDiffItem[];

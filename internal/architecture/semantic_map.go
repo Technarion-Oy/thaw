@@ -86,6 +86,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/migration/ExecGrid.tsx",
         "frontend/src/components/migration/MigrationModal.tsx",
         "frontend/src/components/migration/ReviewGrid.tsx",
+        "frontend/src/components/migration/migrationUtils.ts",
         "frontend/src/store/diffStore.ts"
       ],
       "description": "DDL extraction, schema diffing, and the deployment wizard."

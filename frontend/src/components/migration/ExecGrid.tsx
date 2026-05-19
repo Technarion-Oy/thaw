@@ -26,7 +26,7 @@ import {
   statusColor,
   gridTableStyle,
   gridHeaderStyle,
-} from "./MigrationModal";
+} from "./migrationUtils";
 
 interface ExecGridProps {
   events: MigrationExecEvent[];
