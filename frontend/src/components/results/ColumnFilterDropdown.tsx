@@ -92,14 +92,11 @@ export default function ColumnFilterDropdown({
 }: Props) {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Extract unique string values
-  const uniqueValues = useMemo(() => {
-    const set = new Set<string>();
-    for (const v of columnValues) {
-      set.add(v == null ? "" : String(v));
-    }
-    return Array.from(set).sort();
-  }, [columnValues]);
+  // columnValues are already sorted unique strings from ResultGrid's filterColumnData
+  const uniqueValues = useMemo(
+    () => columnValues.map((v) => (v == null ? "" : String(v))),
+    [columnValues],
+  );
 
   const [searchText, setSearchText] = useState("");
   const [checkedValues, setCheckedValues] = useState<Set<string>>(() => {

@@ -622,13 +622,20 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
   );
 
   // ─── Multi-cell copy (Cmd+C / Ctrl+C) ────────────────────────────────────
+  // Use refs for selectionRange and tableRows so the keydown listener doesn't
+  // re-register on every mouse-move during drag selection.
+  const selectionRangeRef = useRef(selectionRange);
+  selectionRangeRef.current = selectionRange;
+  const tableRowsRef = useRef(tableRows);
+  tableRowsRef.current = tableRows;
 
   useEffect(() => {
     if (!featureFlags.multiCellCopy) return;
     const handler = (e: KeyboardEvent) => {
       const cmd = /Macintosh/i.test(navigator.userAgent) ? e.metaKey : e.ctrlKey;
       if (!cmd || e.key !== "c") return;
-      if (!selectionRange) return;
+      const sel = selectionRangeRef.current;
+      if (!sel) return;
       // Only handle if focus is inside the grid
       const el = scrollContainerRef.current;
       if (!el || (!el.contains(document.activeElement) && document.activeElement !== el)) return;
@@ -642,7 +649,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
       }
 
       e.preventDefault();
-      const { startRow, endRow, startCol, endCol } = selectionRange;
+      const { startRow, endRow, startCol, endCol } = sel;
       const minRow = Math.min(startRow, endRow);
       const maxRow = Math.max(startRow, endRow);
       const minCol = Math.min(startCol, endCol);
@@ -662,8 +669,9 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
       for (let c = minCol; c <= maxCol; c++) headers.push(tsvEscape(result.columns[c] ?? ""));
       lines.push(headers.join("\t"));
 
+      const rows = tableRowsRef.current;
       for (let r = minRow; r <= maxRow; r++) {
-        const row = tableRows[r];
+        const row = rows?.[r];
         if (!row) continue;
         const orig = row.original;
         const cells: string[] = [];
@@ -680,7 +688,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [featureFlags.multiCellCopy, selectionRange, tableRows, result.columns]);
+  }, [featureFlags.multiCellCopy, result.columns]);
 
   // ─── Select all ───────────────────────────────────────────────────────────
 
@@ -885,7 +893,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
       if (unique.size >= MAX_UNIQUE) { truncated = true; break; }
     }
     if (result.rows.length > MAX_SCAN && unique.size < MAX_UNIQUE) truncated = true;
-    return { values: Array.from(unique), truncated };
+    return { values: Array.from(unique).sort(), truncated };
   }, [filterDropdown, result.rows]);
 
   // ─── Render a header cell ─────────────────────────────────────────────────
