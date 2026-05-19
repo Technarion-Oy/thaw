@@ -24,7 +24,6 @@ import {
   getSortedRowModel,
   getFilteredRowModel,
   type ColumnDef,
-  type FilterFn,
   type SortingState,
   type ColumnFiltersState,
   type ColumnPinningState,
@@ -280,7 +279,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
   // never processes new column definitions paired with stale state (old column
   // IDs in columnFilters/columnPinning would cause errors).
   const [prevResultKey, setPrevResultKey] = useState("");
-  const resultKey = result.columns.join("\0");
+  const resultKey = (result.queryID ?? "") + "\0" + result.columns.join("\0");
   if (resultKey !== prevResultKey) {
     setPrevResultKey(resultKey);
     const sizing: Record<string, number> = {};
@@ -314,7 +313,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
       if (min !== Infinity) mm[colId] = { min, max };
     }
     return mm;
-  }, [conditionalRules, result.rows]);
+  }, [Object.keys(conditionalRules).sort().join(","), result.rows]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Column definitions
   const columns = useMemo<ColumnDef<unknown[]>[]>(
@@ -326,7 +325,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
         size: initialWidths[colIdx],
         minSize: MIN_COL_WIDTH,
         maxSize: AUTO_SIZE_MAX_COL_WIDTH,
-        filterFn: columnFilterFn as FilterFn<unknown[]>,
+        filterFn: columnFilterFn,
       })),
     [result.columns, initialWidths],
   );
@@ -676,7 +675,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
       e.stopPropagation();
       setHeaderCtxMenu({ x: e.clientX, y: e.clientY, columnId, columnName, colIndex });
     },
-    [],
+    [], // setHeaderCtxMenu is a stable React state setter
   );
 
   const copyCell = async () => {

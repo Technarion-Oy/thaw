@@ -65,9 +65,17 @@ export default function GridSearch({ columnCount, onScrollToRow, onClose }: Prop
     [tableRows, columnCount, setSearchMatches],
   );
 
+  // Debounce only on searchTerm changes; recompute immediately when tableRows changes
+  const prevTermRef = useRef(searchTerm);
   useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => computeMatches(searchTerm), 200);
+    const termChanged = prevTermRef.current !== searchTerm;
+    prevTermRef.current = searchTerm;
+    if (termChanged) {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => computeMatches(searchTerm), 200);
+    } else {
+      computeMatches(searchTerm);
+    }
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [searchTerm, computeMatches]);
 

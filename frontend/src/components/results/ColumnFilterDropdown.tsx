@@ -13,6 +13,7 @@
 import { useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { Input, Checkbox, Button, Divider, Select, Space } from "antd";
 import { FilterOutlined } from "@ant-design/icons";
+import type { FilterFn } from "@tanstack/react-table";
 
 type ConditionOp = "contains" | "startsWith" | "endsWith" | "equals" | "gt" | "lt" | "gte" | "lte";
 
@@ -29,11 +30,11 @@ export interface ColumnFilterValue {
   condition?: { op: ConditionOp; value: string };
 }
 
-export function columnFilterFn(
-  row: { getValue: (colId: string) => unknown },
-  columnId: string,
+export const columnFilterFn: FilterFn<unknown[]> = (
+  row,
+  columnId,
   filterValue: ColumnFilterValue,
-): boolean {
+) => {
   const cellValue = row.getValue(columnId);
   const cellStr = cellValue == null ? "" : String(cellValue);
 
