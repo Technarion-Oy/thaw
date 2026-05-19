@@ -26,6 +26,7 @@ func GetCodebaseSemanticMap() string {
       ],
       "frontend_paths": [
         "frontend/src/components/connection/ConnectModal.tsx",
+        "frontend/src/components/settings/SessionManagementModal.tsx",
         "frontend/src/components/toolbar/Toolbar.tsx",
         "frontend/src/store/connectionStore.ts",
         "frontend/wailsjs/"
@@ -41,7 +42,14 @@ func GetCodebaseSemanticMap() string {
       "frontend_paths": [
         "frontend/src/components/editor/SqlEditor.tsx",
         "frontend/src/components/editor/sqlEditorUtils.ts",
+        "frontend/src/components/results/ColumnFilterDropdown.tsx",
+        "frontend/src/components/results/ConditionalFormattingModal.tsx",
+        "frontend/src/components/results/DataTypeFormatModal.tsx",
+        "frontend/src/components/results/GridSearch.tsx",
+        "frontend/src/components/results/QuickChartModal.tsx",
         "frontend/src/components/results/ResultGrid.tsx",
+        "frontend/src/components/results/StatusBar.tsx",
+        "frontend/src/store/gridStore.ts",
         "frontend/src/store/queryStore.ts"
       ],
       "description": "Proprietary SQL tokenizer, syntax validation, and Monaco editor UI components."
@@ -75,7 +83,9 @@ func GetCodebaseSemanticMap() string {
         "internal/migration/"
       ],
       "frontend_paths": [
+        "frontend/src/components/migration/ExecGrid.tsx",
         "frontend/src/components/migration/MigrationModal.tsx",
+        "frontend/src/components/migration/ReviewGrid.tsx",
         "frontend/src/store/diffStore.ts"
       ],
       "description": "DDL extraction, schema diffing, and the deployment wizard."
