@@ -141,7 +141,7 @@ function getConditionalStyle(
 
 // ─── Cell content renderer ────────────────────────────────────────────────────
 
-function CellContent({
+const CellContent = React.memo(function CellContent({
   value,
   searchTerm,
   formatConfig,
@@ -221,7 +221,7 @@ function CellContent({
       {displayText}
     </div>
   );
-}
+});
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
@@ -300,16 +300,19 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     [conditionalRules],
   );
 
+  // Stable sorted column list derived from conditionalRuleKeys so columnMinMax
+  // doesn't read the live conditionalRules object inside its closure.
+  const conditionalRuleColumns = useMemo(
+    () => conditionalRuleKeys ? conditionalRuleKeys.split(",") : [],
+    [conditionalRuleKeys],
+  );
+
   // Pre-compute min/max per column for conditional formatting.
   // Samples up to 50k rows for performance on very large result sets.
-  // NOTE: Depends on `conditionalRuleKeys` (not `conditionalRules` directly) so this
-  // only recomputes when the set of columns with rules changes. The closure reads the
-  // live `conditionalRules` ref which is fine — React re-creates the closure when deps
-  // change. Do NOT add `conditionalRules` to the dep array or the optimisation is lost.
   const columnMinMax = useMemo(() => {
     const mm: Record<string, { min: number; max: number }> = {};
     const sampleRows = result.rows.length > 50000 ? result.rows.slice(0, 50000) : result.rows;
-    for (const colId of Object.keys(conditionalRules)) {
+    for (const colId of conditionalRuleColumns) {
       const colIdx = colIdxFromColumnId(colId);
       if (colIdx < 0) continue;
       let min = Infinity;
@@ -324,7 +327,7 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
       if (min !== Infinity) mm[colId] = { min, max };
     }
     return mm;
-  }, [conditionalRuleKeys, result.rows]);
+  }, [conditionalRuleColumns, result.rows]);
 
   // Column definitions
   const columns = useMemo<ColumnDef<unknown[]>[]>(
@@ -389,7 +392,9 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
     if (el) setContainerWidth(el.clientWidth);
   }, []);
 
-  // Expose scrollToRow for search navigation
+  // Expose scrollToRow for search navigation — assign directly without cleanup
+  // to avoid a null window between effect cleanup and re-assignment, since
+  // rowVirtualizer is a new object every render.
   useEffect(() => {
     if (!gridRef) return;
     gridRef.current = {
@@ -397,7 +402,6 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
         rowVirtualizer.scrollToIndex(rowIndex, { align: "center" });
       },
     };
-    return () => { if (gridRef) gridRef.current = null; };
   }, [gridRef, rowVirtualizer]);
 
   // Scroll sync handle
