@@ -114,7 +114,8 @@ func RevealInFinder(path, allowedRoot string) error {
 	case "darwin":
 		return exec.Command("open", "-R", abs).Start()
 	case "windows":
-		return exec.Command("explorer", "/select,", abs).Start()
+		// explorer expects /select, and the path as a single combined argument.
+		return exec.Command("explorer", fmt.Sprintf("/select,%s", abs)).Start()
 	default: // linux and others
 		return exec.Command("xdg-open", filepath.Dir(abs)).Start()
 	}
@@ -126,13 +127,14 @@ func RuntimeOS() string {
 	return runtime.GOOS
 }
 
-// DeleteFile removes the file at path. It refuses to delete directories;
-// use DeleteDirectory for that. The path must be inside allowedRoot.
+// DeleteFile removes the file (or symlink) at path. It refuses to delete
+// directories; use DeleteDirectory for that. The path must be inside allowedRoot.
+// Uses Lstat so symlinks pointing to directories can still be deleted as files.
 func DeleteFile(path, allowedRoot string) error {
 	if err := validateExistingPath(path, allowedRoot); err != nil {
 		return err
 	}
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		return err
 	}

@@ -668,7 +668,6 @@ export default function FileBrowser() {
             padding: "4px 0",
           }}
           onClick={(e) => e.stopPropagation()}
-          onMouseLeave={() => setFileCtxMenu(null)}
         >
           {/* ── File management actions ── */}
           <CtxItem icon={<FolderViewOutlined />} label={revealLabel} onClick={handleReveal} />

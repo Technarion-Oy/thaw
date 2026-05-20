@@ -23,6 +23,7 @@ import {
   CancelExport,
   ListExportableDatabases,
   RevealInFinder,
+  GetPlatformOS,
 } from "../../../wailsjs/go/main/App";
 import { useGitStore } from "../../store/gitStore";
 import { useConnectionStore } from "../../store/connectionStore";
@@ -41,6 +42,10 @@ const { Text } = Typography;
 export default function ExportPanel() {
   const { exportDir, pickExportDir } = useGitStore();
   const isConnected = useConnectionStore((s) => s.isConnected);
+
+  const [platformOS, setPlatformOS] = useState("darwin");
+  useEffect(() => { GetPlatformOS().then(setPlatformOS).catch(() => {}); }, []);
+  const revealLabel = platformOS === "windows" ? "Show in Explorer" : platformOS === "darwin" ? "Show in Finder" : "Show in File Manager";
 
   // ── database selection ────────────────────────────────────────────────────
   const [dbs, setDbs]               = useState<string[]>([]);
@@ -295,7 +300,7 @@ export default function ExportPanel() {
                 </Tag>
               )}
             </Space>
-            <Tooltip title="Show in Finder">
+            <Tooltip title={revealLabel}>
               <Button
                 type="text"
                 size="small"

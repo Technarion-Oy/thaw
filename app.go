@@ -123,6 +123,9 @@ type App struct {
 	gitCommitFiltersMu sync.Mutex
 	gitCommitFilters   map[string]string
 
+	// Cached export directory (set on startup and when SaveGitConfig is called).
+	cachedExportDir string
+
 	// Embedded terminal (pseudo-terminal).
 	ptyMu  sync.Mutex
 	ptmx   *os.File
@@ -150,6 +153,11 @@ func (a *App) startup(ctx context.Context) {
 	telemetry.Init(version.Version)
 	logger.L.Info("application started")
 	telemetry.Track(telemetry.EventAppStarted, nil)
+
+	// Cache the export directory so file management IPC methods don't re-read config.
+	if cfg, err := config.Load(); err == nil {
+		a.cachedExportDir = cfg.Git.ExportDir
+	}
 
 	// Initialize delegated service instances.
 	a.migrationSvc = migration.NewService(func(eventName string, data interface{}) {
@@ -743,6 +751,7 @@ func (a *App) SaveGitConfig(gitCfg config.GitConfig) error {
 		return err
 	}
 	cfg.Git = gitCfg
+	a.cachedExportDir = gitCfg.ExportDir
 	return config.Save(cfg)
 }
 
@@ -887,7 +896,7 @@ func (a *App) SearchFiles(dir, query string, useRegex bool) ([]filesystem.Search
 // RevealInFinder opens the platform file manager and selects the given path.
 // The path must be inside the configured export directory.
 func (a *App) RevealInFinder(path string) error {
-	root, err := exportRoot()
+	root, err := a.exportRoot()
 	if err != nil {
 		return err
 	}
@@ -902,7 +911,7 @@ func (a *App) GetPlatformOS() string {
 
 // DeleteFile removes the file at path. The path must be inside the configured export directory.
 func (a *App) DeleteFile(path string) error {
-	root, err := exportRoot()
+	root, err := a.exportRoot()
 	if err != nil {
 		return err
 	}
@@ -912,7 +921,7 @@ func (a *App) DeleteFile(path string) error {
 // DeleteDirectory removes the directory at path and all its contents.
 // The path must be inside the configured export directory.
 func (a *App) DeleteDirectory(path string) error {
-	root, err := exportRoot()
+	root, err := a.exportRoot()
 	if err != nil {
 		return err
 	}
@@ -921,7 +930,7 @@ func (a *App) DeleteDirectory(path string) error {
 
 // RenameFile renames (moves) oldPath to newPath. Both must be inside the export directory.
 func (a *App) RenameFile(oldPath, newPath string) error {
-	root, err := exportRoot()
+	root, err := a.exportRoot()
 	if err != nil {
 		return err
 	}
@@ -931,7 +940,7 @@ func (a *App) RenameFile(oldPath, newPath string) error {
 // CreateDirectory creates a new directory at path, including any necessary parents.
 // The path must be inside the configured export directory.
 func (a *App) CreateDirectory(path string) error {
-	root, err := exportRoot()
+	root, err := a.exportRoot()
 	if err != nil {
 		return err
 	}
@@ -940,23 +949,19 @@ func (a *App) CreateDirectory(path string) error {
 
 // CreateFile creates an empty file at path. The path must be inside the export directory.
 func (a *App) CreateFile(path string) error {
-	root, err := exportRoot()
+	root, err := a.exportRoot()
 	if err != nil {
 		return err
 	}
 	return filesystem.WriteFileInRoot(path, "", root)
 }
 
-// exportRoot returns the configured export directory, or an error if not set.
-func exportRoot() (string, error) {
-	cfg, err := config.Load()
-	if err != nil {
-		return "", fmt.Errorf("could not load config: %w", err)
-	}
-	if cfg.Git.ExportDir == "" {
+// exportRoot returns the cached export directory, or an error if not set.
+func (a *App) exportRoot() (string, error) {
+	if a.cachedExportDir == "" {
 		return "", fmt.Errorf("no export directory configured")
 	}
-	return cfg.Git.ExportDir, nil
+	return a.cachedExportDir, nil
 }
 
 // ─── Account-level objects (roles, warehouses) ────────────────────────────────
