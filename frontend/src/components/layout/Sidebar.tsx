@@ -84,6 +84,7 @@ import CreateFileFormatModal from "../database/CreateFileFormatModal";
 import ObjectSummariesModal from "../database/ObjectSummariesModal";
 import ExecuteTaskModal from "../task/ExecuteTaskModal";
 import TaskGraphModal from "../task/TaskGraphModal";
+import TaskHistoryModal from "../task/TaskHistoryModal";
 import TaskPropertiesModal from "../task/TaskPropertiesModal";
 import TaskStatusesModal from "../task/TaskStatusesModal";
 import ERDiagramModal from "../er/ERDiagramModal";
@@ -155,6 +156,7 @@ interface ContextMenu {
   objKind?: string;     // set for nodeType === "type" or "obj"
   objArgs?: string;     // parameter type list for PROCEDURE / FUNCTION
   isFinalizer?: boolean; // true when right-clicking a finalizer TASK node
+  isRootTask?: boolean;  // true when right-clicking a root-level TASK node (no predecessors, not a finalizer)
 }
 
 interface UndropModal {
@@ -274,12 +276,13 @@ function buildTaskTree(
   db: string,
   schema: string,
 ): DataNode[] {
-  const makeNode = (o: snowflake.SnowflakeObject, kids: DataNode[] = [], isFinalizer = false): DataNode => ({
+  const makeNode = (o: snowflake.SnowflakeObject, kids: DataNode[] = [], isFinalizer = false, isRootTask = false): DataNode => ({
     title:       o.name,
     key:         `obj:${db}:${schema}:TASK:${o.name}`,
     icon:        kindIcon("TASK"),
     isLeaf:      kids.length === 0,
     isFinalizer, // consumed by titleRender
+    isRootTask,  // consumed by context menu for task history
     ...(kids.length > 0 ? { children: kids } : {}),
   } as DataNode);
 
@@ -316,24 +319,24 @@ function buildTaskTree(
 
   const inTree = new Set<string>();
 
-  function buildSubTree(name: string): DataNode {
+  function buildSubTree(name: string, isRoot: boolean): DataNode {
     inTree.add(name.toUpperCase());
     const task = byName.get(name.toUpperCase())!;
-    const kids = (childrenOf.get(name.toUpperCase()) ?? []).map(buildSubTree);
+    const kids = (childrenOf.get(name.toUpperCase()) ?? []).map((n) => buildSubTree(n, false));
     // Attach finalizer task as the last child if this is its designated root task.
     const finTask = finalizerOf.get(name.toUpperCase());
     if (finTask) {
       inTree.add(finTask.name.toUpperCase());
       kids.push(makeNode(finTask, [], true));
     }
-    return makeNode(task, kids);
+    return makeNode(task, kids, false, isRoot);
   }
 
   const result: DataNode[] = [];
   for (const t of tasks) {
     // Skip finalizer tasks (placed inside their root) and tasks with a parent.
     if (finalizerNames.has(t.name.toUpperCase())) continue;
-    if (!parentOf.has(t.name.toUpperCase())) result.push(buildSubTree(t.name));
+    if (!parentOf.has(t.name.toUpperCase())) result.push(buildSubTree(t.name, true));
   }
   // Safety net: orphaned tasks not yet placed (shouldn't normally occur).
   for (const t of tasks) {
@@ -459,6 +462,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [executeTaskModal, setExecuteTaskModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [taskPropsModal, setTaskPropsModal] = useState<{ db: string; schema: string; name: string; isFinalizer?: boolean } | null>(null);
   const [taskGraphModal, setTaskGraphModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [taskHistoryModal, setTaskHistoryModal] = useState<{ db: string; schema: string; name: string; isRoot: boolean } | null>(null);
   const [taskStatusesModal, setTaskStatusesModal] = useState<{ db: string; schema: string } | null>(null);
   const [undropModal, setUndropModal] = useState<UndropModal | null>(null);
   const [undropSchemasModal, setUndropSchemasModal] = useState<UndropSchemasModal | null>(null);
@@ -958,7 +962,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       const objKind     = key.split(":")[3];
       const objArgs     = (node as any).arguments ?? "";
       const isFinalizer = !!(node as any).isFinalizer;
-      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "obj", objKind, objArgs, isFinalizer });
+      const isRootTask  = !!(node as any).isRootTask;
+      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "obj", objKind, objArgs, isFinalizer, isRootTask });
     } else if (key.startsWith("gitcommits:") || key.startsWith("gitcommit-empty:")) {
       setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "gitcommits" });
     } else if (key.startsWith("gitdir:")) {
@@ -1125,6 +1130,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const name = nameParts.join(":");
     setCtxMenu(null);
     setTaskGraphModal({ db, schema, name });
+  };
+
+  const openTaskHistory = () => {
+    if (!ctxMenu) return;
+    const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
+    const name = nameParts.join(":");
+    setCtxMenu(null);
+    setTaskHistoryModal({ db, schema, name, isRoot: !!ctxMenu.isRootTask });
   };
 
   const openCreateTable = () => {
@@ -2522,6 +2535,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Execute Task", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeTask)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TASK" &&
             menuItem("View Task Graph…", <ShareAltOutlined style={{ fontSize: 12 }} />, openTaskGraph, undefined, !featureFlags.taskGraphVisualizer, "Task Graph Visualizer is disabled. Enable it under View → Enabled Features…")}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TASK" &&
+            menuItem("View Run History…", <HistoryOutlined style={{ fontSize: 12 }} />, openTaskHistory)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TASK" && !ctxMenu.isFinalizer &&
             menuItem("Delete Task Graph…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, deleteTaskGraph, "#f85149")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PROCEDURE" &&
@@ -2642,6 +2657,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={taskGraphModal.schema}
           taskName={taskGraphModal.name}
           onClose={() => setTaskGraphModal(null)}
+        />
+      )}
+
+      {/* Task History modal */}
+      {taskHistoryModal && (
+        <TaskHistoryModal
+          db={taskHistoryModal.db}
+          schema={taskHistoryModal.schema}
+          name={taskHistoryModal.name}
+          isRoot={taskHistoryModal.isRoot}
+          onClose={() => setTaskHistoryModal(null)}
         />
       )}
 

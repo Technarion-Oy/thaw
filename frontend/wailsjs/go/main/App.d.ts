@@ -300,6 +300,8 @@ export function GetTableRetentionDays(arg1:string,arg2:string,arg3:string):Promi
 
 export function GetTableSettings(arg1:string,arg2:string,arg3:string):Promise<main.TableSettings>;
 
+export function GetTaskRunHistory(arg1:string,arg2:string,arg3:string,arg4:boolean,arg5:number):Promise<Array<tasks.TaskHistoryRow>>;
+
 export function GetTaskStatuses(arg1:string,arg2:string):Promise<tasks.StatusesResult>;
 
 export function GetUserDDL(arg1:string):Promise<string>;

@@ -3626,6 +3626,36 @@ export namespace tasks {
 		    return a;
 		}
 	}
+	export class TaskHistoryRow {
+	    name: string;
+	    state: string;
+	    returnValue: string;
+	    scheduledTime: string;
+	    startTime: string;
+	    endTime: string;
+	    errorCode: string;
+	    errorMessage: string;
+	    runId: string;
+	    rootTaskId: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TaskHistoryRow(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.state = source["state"];
+	        this.returnValue = source["returnValue"];
+	        this.scheduledTime = source["scheduledTime"];
+	        this.startTime = source["startTime"];
+	        this.endTime = source["endTime"];
+	        this.errorCode = source["errorCode"];
+	        this.errorMessage = source["errorMessage"];
+	        this.runId = source["runId"];
+	        this.rootTaskId = source["rootTaskId"];
+	    }
+	}
 
 }
 

@@ -32,6 +32,111 @@ type StatusesResult struct {
 	HistoryError string      `json:"historyError"`
 }
 
+// TaskHistoryRow holds a single row from INFORMATION_SCHEMA.TASK_HISTORY().
+type TaskHistoryRow struct {
+	Name          string `json:"name"`
+	State         string `json:"state"`
+	ReturnValue   string `json:"returnValue"`
+	ScheduledTime string `json:"scheduledTime"`
+	StartTime     string `json:"startTime"`
+	EndTime       string `json:"endTime"`
+	ErrorCode     string `json:"errorCode"`
+	ErrorMessage  string `json:"errorMessage"`
+	RunID         string `json:"runId"`
+	RootTaskID    string `json:"rootTaskId"`
+}
+
+// GetTaskRunHistory returns the execution history for a task from INFORMATION_SCHEMA.TASK_HISTORY().
+// For root tasks (isRoot=true), it fetches all child task executions grouped by SCHEDULED_TIME.
+// For child/standalone tasks, it fetches only that task's history.
+func GetTaskRunHistory(ctx context.Context, client *snowflake.Client, database, schema, taskName string, isRoot bool, days int) ([]TaskHistoryRow, error) {
+	if days <= 0 {
+		days = 1
+	}
+
+	quotedDB := snowflake.QuoteIdent(database)
+
+	// For root tasks, look up the task ID via SHOW TASKS so we can use ROOT_TASK_ID
+	// (TASK_HISTORY accepts ROOT_TASK_ID but not ROOT_TASK_NAME).
+	// For non-root tasks, TASK_NAME accepts a plain unqualified name.
+	var filterClause string
+	if isRoot {
+		showSQL := fmt.Sprintf("SHOW TASKS LIKE '%s' IN SCHEMA %s.%s",
+			snowflake.EscapeLikePattern(taskName), quotedDB, snowflake.QuoteIdent(schema))
+		showRes, err := client.Execute(ctx, showSQL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to look up task ID: %w", err)
+		}
+		nameIdx := colIdx(showRes.Columns, "name")
+		idIdx := colIdx(showRes.Columns, "id")
+		if idIdx < 0 || nameIdx < 0 || len(showRes.Rows) == 0 {
+			return nil, fmt.Errorf("task %q not found in %s.%s", taskName, database, schema)
+		}
+		// SHOW TASKS LIKE is case-insensitive and may return multiple rows;
+		// find the exact match by name.
+		var taskID string
+		for _, r := range showRes.Rows {
+			if strings.EqualFold(toString(r[nameIdx]), taskName) {
+				taskID = toString(r[idIdx])
+				break
+			}
+		}
+		if taskID == "" {
+			return nil, fmt.Errorf("task %q not found in %s.%s", taskName, database, schema)
+		}
+		filterClause = fmt.Sprintf("ROOT_TASK_ID => '%s'", snowflake.EscapeStringLit(taskID))
+	} else {
+		filterClause = fmt.Sprintf("TASK_NAME => '%s'", snowflake.EscapeStringLit(taskName))
+	}
+
+	sql := fmt.Sprintf(
+		`SELECT * FROM TABLE(%s.INFORMATION_SCHEMA.TASK_HISTORY(`+
+			`%s,`+
+			`SCHEDULED_TIME_RANGE_START => DATEADD('day', -%d, CURRENT_TIMESTAMP()),`+
+			`RESULT_LIMIT => 10000))`+
+			` ORDER BY SCHEDULED_TIME DESC NULLS FIRST, QUERY_START_TIME ASC NULLS LAST`,
+		quotedDB, filterClause, days)
+
+	res, err := client.Execute(ctx, sql)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query task history: %w", err)
+	}
+
+	nameIdx := colIdx(res.Columns, "name", "task_name")
+	stateIdx := colIdx(res.Columns, "state", "run_status")
+	retIdx := colIdx(res.Columns, "return_value")
+	schedIdx := colIdx(res.Columns, "scheduled_time")
+	startIdx := colIdx(res.Columns, "query_start_time", "start_time")
+	endIdx := colIdx(res.Columns, "completed_time", "end_time")
+	ecIdx := colIdx(res.Columns, "error_code")
+	emIdx := colIdx(res.Columns, "error_message", "exception_text")
+	ridIdx := colIdx(res.Columns, "run_id")
+	rtidIdx := colIdx(res.Columns, "root_task_id")
+
+	rows := make([]TaskHistoryRow, 0, len(res.Rows))
+	for _, row := range res.Rows {
+		safe := func(idx int) string {
+			if idx < 0 || idx >= len(row) {
+				return ""
+			}
+			return toString(row[idx])
+		}
+		rows = append(rows, TaskHistoryRow{
+			Name:          safe(nameIdx),
+			State:         safe(stateIdx),
+			ReturnValue:   safe(retIdx),
+			ScheduledTime: safe(schedIdx),
+			StartTime:     safe(startIdx),
+			EndTime:       safe(endIdx),
+			ErrorCode:     safe(ecIdx),
+			ErrorMessage:  safe(emIdx),
+			RunID:         safe(ridIdx),
+			RootTaskID:    safe(rtidIdx),
+		})
+	}
+	return rows, nil
+}
+
 // Helper functions for parsing Snowflake results
 func colIdx(cols []string, names ...string) int {
 	for i, c := range cols {
@@ -103,7 +208,7 @@ func CloneChildTask(ctx context.Context, client *snowflake.Client, database, sch
 	fqnOld := fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(oldName))
 	fqnNew := fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteOrBare(newName, caseSensitive))
 
-	showSQL := fmt.Sprintf("SHOW TASKS LIKE '%s' IN SCHEMA %s.%s", snowflake.EscapeStringLit(oldName), snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
+	showSQL := fmt.Sprintf("SHOW TASKS LIKE '%s' IN SCHEMA %s.%s", snowflake.EscapeLikePattern(oldName), snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
 	res, err := client.Execute(ctx, showSQL)
 	if err != nil {
 		return fmt.Errorf("failed to fetch original task details: %w", err)
@@ -165,7 +270,7 @@ func CloneChildTask(ctx context.Context, client *snowflake.Client, database, sch
 // suspendIfRunning suspends the named task if its current state is STARTED.
 // Snowflake requires a task to be suspended before its AFTER list can be modified.
 func suspendIfRunning(ctx context.Context, client *snowflake.Client, database, schema, taskName string) error {
-	escName := snowflake.EscapeStringLit(taskName)
+	escName := snowflake.EscapeLikePattern(taskName)
 	res, err := client.Execute(ctx, fmt.Sprintf(
 		"SHOW TASKS LIKE '%s' IN SCHEMA %s.%s", escName, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)))
 	if err != nil {

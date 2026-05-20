@@ -67,6 +67,7 @@ thaw/
 │   │   ├── service.go   # Wails-bound Service struct (IPC endpoints)
 │   │   ├── sqleditor.go
 │   │   └── sqleditor_test.go
+│   ├── tasks/           # Task graph ops, statuses, run history (TASK_HISTORY)
 │   ├── ddl/             # DDL parsing and git-export pipeline
 │   ├── ai/              # AI provider clients (OpenAI, Google)
 │   ├── config/          # App config (TOML persistence)
@@ -78,7 +79,7 @@ thaw/
 │   └── crashreport/     # Crash reporting
 └── frontend/src/
     ├── pages/           # Top-level page components
-    ├── components/      # Feature components (editor/, layout/, toolbar/, results/, ...)
+    ├── components/      # Feature components (editor/, layout/, toolbar/, results/, task/, ...)
     ├── store/           # Zustand stores (10 stores)
     └── wailsjs/         # Auto-generated Wails IPC bindings (DO NOT EDIT)
 ```
