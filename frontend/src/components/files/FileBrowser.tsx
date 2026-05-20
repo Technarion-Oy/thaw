@@ -715,6 +715,7 @@ export default function FileBrowser() {
           ref={fileCtxRef}
           role="menu"
           aria-label="File actions"
+          aria-orientation="vertical"
           style={{
             position: "fixed",
             top: fileCtxMenu.y,
@@ -729,6 +730,12 @@ export default function FileBrowser() {
           }}
           onClick={(e) => e.stopPropagation()}
           onContextMenu={(e) => e.preventDefault()}
+          onBlur={(e) => {
+            // Dismiss menu when focus leaves the container entirely.
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+              setFileCtxMenu(null);
+            }
+          }}
         >
           {/* ── File management actions ── */}
           <CtxItem icon={<FolderViewOutlined />} label={revealText} onClick={handleReveal} />

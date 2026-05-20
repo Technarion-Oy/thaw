@@ -185,7 +185,14 @@ func RenameFile(oldPath, newPath, allowedRoot string) error {
 		return err
 	}
 	if _, err := os.Stat(newPath); err == nil {
-		return fmt.Errorf("destination already exists: %s", filepath.Base(newPath))
+		// On case-insensitive filesystems (macOS/Windows), allow case-only renames
+		// (e.g. File.sql → file.sql) where os.Stat finds the same file.
+		sameFile := caseInsensitiveFS() &&
+			strings.EqualFold(filepath.Base(oldPath), filepath.Base(newPath)) &&
+			pathsEqual(filepath.Dir(oldPath), filepath.Dir(newPath))
+		if !sameFile {
+			return fmt.Errorf("destination already exists: %s", filepath.Base(newPath))
+		}
 	}
 	return os.Rename(oldPath, newPath)
 }

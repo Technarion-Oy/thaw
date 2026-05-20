@@ -13,6 +13,7 @@ package filesystem
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -282,6 +283,22 @@ func TestRenameFile_Success(t *testing.T) {
 	}
 	if _, err := os.Stat(new_); err != nil {
 		t.Error("new file should exist after rename")
+	}
+}
+
+func TestRenameFile_CaseOnlyRename(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
+		t.Skip("case-insensitive rename test only relevant on macOS/Windows")
+	}
+	root := t.TempDir()
+	old := filepath.Join(root, "File.sql")
+	if err := os.WriteFile(old, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	new_ := filepath.Join(root, "file.sql")
+	// Case-only rename should succeed on case-insensitive FS.
+	if err := RenameFile(old, new_, root); err != nil {
+		t.Errorf("expected no error for case-only rename, got: %v", err)
 	}
 }
 
