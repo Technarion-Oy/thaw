@@ -9,20 +9,37 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
-import { Tree, Typography, Spin, Button, Input, Switch, message } from "antd";
+import { Tree, Typography, Spin, Button, Input, Switch, Modal, message } from "antd";
 import {
   FolderOutlined,
   FolderOpenOutlined,
+  FolderAddOutlined,
   FileOutlined,
+  FileAddOutlined,
   ReloadOutlined,
   SearchOutlined,
   DiffOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  CopyOutlined,
+  FolderViewOutlined,
   CaretRightFilled,
   CaretDownFilled,
 } from "@ant-design/icons";
 import type { DataNode, EventDataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDirectory, ReadFile, SearchFiles } from "../../../wailsjs/go/main/App";
+import {
+  ListDirectory,
+  ReadFile,
+  SearchFiles,
+  RevealInFinder,
+  DeleteFile,
+  DeleteDirectory,
+  RenameFile,
+  CreateDirectory,
+  CreateFile,
+} from "../../../wailsjs/go/main/App";
+import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { useGitStore } from "../../store/gitStore";
 import { useQueryStore } from "../../store/queryStore";
 import { useDiffStore } from "../../store/diffStore";
@@ -104,9 +121,12 @@ export default function FileBrowser() {
   const [searchError,   setSearchError]   = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Context menu for file comparison ──────────────────────────────────────
-  const [fileCtxMenu, setFileCtxMenu] = useState<{ x: number; y: number; path: string; name: string } | null>(null);
+  // ── Context menu ─────────────────────────────────────────────────────────
+  const [fileCtxMenu, setFileCtxMenu] = useState<{ x: number; y: number; path: string; name: string; isDir: boolean } | null>(null);
   const fileCtxRef = useRef<HTMLDivElement>(null);
+
+  // ── Inline input state (rename / new folder / new file) ─────────────────
+  const [inlineInput, setInlineInput] = useState<{ kind: "rename" | "newFolder" | "newFile"; path: string; value: string } | null>(null);
 
   // ── Collapse state ──────────────────────────────────────────────────────────
   const [expanded, setExpanded] = useState(false);
@@ -282,10 +302,10 @@ export default function FileBrowser() {
 
   const onRightClick = ({ event, node }: { event: React.MouseEvent; node: DataNode }) => {
     event.preventDefault();
-    if ((node as any).isLeaf === false) return; // skip directories
     const path = String(node.key);
     const name = path.split("/").pop() ?? path;
-    setFileCtxMenu({ x: event.clientX, y: event.clientY, path, name });
+    const isDir = (node as any).isLeaf === false;
+    setFileCtxMenu({ x: event.clientX, y: event.clientY, path, name, isDir });
   };
 
   const selectFileForComparison = () => {
@@ -301,6 +321,89 @@ export default function FileBrowser() {
     const { path, name } = fileCtxMenu;
     setFileCtxMenu(null);
     compareWith({ category: "file", label: `FILE: ${name}`, path });
+  };
+
+  const handleReveal = () => {
+    if (!fileCtxMenu) return;
+    RevealInFinder(fileCtxMenu.path).catch((e) => message.error(`Could not reveal: ${String(e)}`));
+    setFileCtxMenu(null);
+  };
+
+  const handleCopyPath = () => {
+    if (!fileCtxMenu) return;
+    ClipboardSetText(fileCtxMenu.path);
+    message.success("Path copied");
+    setFileCtxMenu(null);
+  };
+
+  const handleDeleteConfirm = () => {
+    if (!fileCtxMenu) return;
+    const { path, name, isDir } = fileCtxMenu;
+    setFileCtxMenu(null);
+    Modal.confirm({
+      title: `Delete ${isDir ? "folder" : "file"}`,
+      content: `Are you sure you want to delete "${name}"?${isDir ? " This will remove the folder and all its contents." : ""}`,
+      okText: "Delete",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          if (isDir) {
+            await DeleteDirectory(path);
+          } else {
+            await DeleteFile(path);
+          }
+          message.success(`Deleted ${name}`);
+          refresh();
+        } catch (e) {
+          message.error(`Delete failed: ${String(e)}`);
+        }
+      },
+    });
+  };
+
+  const handleRenameStart = () => {
+    if (!fileCtxMenu) return;
+    setInlineInput({ kind: "rename", path: fileCtxMenu.path, value: fileCtxMenu.name });
+    setFileCtxMenu(null);
+  };
+
+  const handleNewFolderStart = () => {
+    if (!fileCtxMenu) return;
+    setInlineInput({ kind: "newFolder", path: fileCtxMenu.path, value: "" });
+    setFileCtxMenu(null);
+  };
+
+  const handleNewFileStart = () => {
+    if (!fileCtxMenu) return;
+    setInlineInput({ kind: "newFile", path: fileCtxMenu.path, value: "" });
+    setFileCtxMenu(null);
+  };
+
+  const submitInlineInput = async () => {
+    if (!inlineInput || !inlineInput.value.trim()) {
+      setInlineInput(null);
+      return;
+    }
+    const { kind, path, value } = inlineInput;
+    setInlineInput(null);
+    try {
+      if (kind === "rename") {
+        const dir = path.substring(0, path.lastIndexOf("/"));
+        const newPath = `${dir}/${value.trim()}`;
+        await RenameFile(path, newPath);
+        message.success(`Renamed to ${value.trim()}`);
+      } else if (kind === "newFolder") {
+        await CreateDirectory(`${path}/${value.trim()}`);
+        message.success(`Created folder ${value.trim()}`);
+      } else if (kind === "newFile") {
+        const name = value.trim().endsWith(".sql") ? value.trim() : `${value.trim()}.sql`;
+        await CreateFile(`${path}/${name}`);
+        message.success(`Created ${name}`);
+      }
+      refresh();
+    } catch (e) {
+      message.error(String(e));
+    }
   };
 
   const grouped = groupByPath(searchResults);
@@ -501,7 +604,38 @@ export default function FileBrowser() {
         </div>
       )}
 
-      {/* File comparison context menu */}
+      {/* Inline input modal for rename / new folder / new file */}
+      {inlineInput && (
+        <Modal
+          open
+          title={
+            inlineInput.kind === "rename" ? "Rename" :
+            inlineInput.kind === "newFolder" ? "New Folder" :
+            "New SQL File"
+          }
+          okText={inlineInput.kind === "rename" ? "Rename" : "Create"}
+          onOk={submitInlineInput}
+          onCancel={() => setInlineInput(null)}
+          width={360}
+          destroyOnClose
+        >
+          <Input
+            autoFocus
+            size="small"
+            value={inlineInput.value}
+            onChange={(e) => setInlineInput({ ...inlineInput, value: e.target.value })}
+            onPressEnter={submitInlineInput}
+            placeholder={
+              inlineInput.kind === "rename" ? "New name" :
+              inlineInput.kind === "newFolder" ? "Folder name" :
+              "File name (.sql)"
+            }
+            style={{ marginTop: 8 }}
+          />
+        </Modal>
+      )}
+
+      {/* Context menu */}
       {fileCtxMenu && (
         <div
           ref={fileCtxRef}
@@ -520,28 +654,56 @@ export default function FileBrowser() {
           onClick={(e) => e.stopPropagation()}
           onMouseLeave={() => setFileCtxMenu(null)}
         >
-          <div
-            style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", fontSize: 13, cursor: "pointer", color: "var(--text)" }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-            onClick={selectFileForComparison}
-          >
-            <DiffOutlined style={{ fontSize: 12 }} />
-            Select for Comparison
-          </div>
-          {pendingDiff !== null && (
-            <div
-              style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", fontSize: 13, cursor: "pointer", color: "var(--text)" }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-              onClick={compareFileWith}
-            >
-              <DiffOutlined style={{ fontSize: 12, color: "var(--accent)" }} />
-              {`Compare with: ${pendingDiff.label}`}
-            </div>
+          {/* ── File management actions ── */}
+          <CtxItem icon={<FolderViewOutlined />} label="Reveal in Finder" onClick={handleReveal} />
+          <CtxItem icon={<CopyOutlined />} label="Copy Path" onClick={handleCopyPath} />
+          <CtxItem icon={<EditOutlined />} label="Rename…" onClick={handleRenameStart} />
+          <CtxItem icon={<DeleteOutlined />} label="Delete" onClick={handleDeleteConfirm} danger />
+
+          {/* ── Directory-only actions ── */}
+          {fileCtxMenu.isDir && (
+            <>
+              <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+              <CtxItem icon={<FolderAddOutlined />} label="New Folder…" onClick={handleNewFolderStart} />
+              <CtxItem icon={<FileAddOutlined />} label="New SQL File…" onClick={handleNewFileStart} />
+            </>
+          )}
+
+          {/* ── Comparison actions (files only) ── */}
+          {!fileCtxMenu.isDir && (
+            <>
+              <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+              <CtxItem icon={<DiffOutlined />} label="Select for Comparison" onClick={selectFileForComparison} />
+              {pendingDiff !== null && (
+                <CtxItem
+                  icon={<DiffOutlined style={{ color: "var(--accent)" }} />}
+                  label={`Compare with: ${pendingDiff.label}`}
+                  onClick={compareFileWith}
+                />
+              )}
+            </>
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Reusable context menu item */
+function CtxItem({ icon, label, onClick, danger }: { icon: React.ReactNode; label: string; onClick: () => void; danger?: boolean }) {
+  return (
+    <div
+      style={{
+        display: "flex", alignItems: "center", gap: 8,
+        padding: "6px 14px", fontSize: 13, cursor: "pointer",
+        color: danger ? "#f85149" : "var(--text)",
+      }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
+      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+      onClick={onClick}
+    >
+      <span style={{ fontSize: 12, display: "flex" }}>{icon}</span>
+      {label}
     </div>
   );
 }

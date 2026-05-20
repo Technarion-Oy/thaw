@@ -884,6 +884,73 @@ func (a *App) SearchFiles(dir, query string, useRegex bool) ([]filesystem.Search
 	return filesystem.SearchFiles(dir, query, useRegex)
 }
 
+// RevealInFinder opens the platform file manager and selects the given path.
+func (a *App) RevealInFinder(path string) error {
+	return filesystem.RevealInFinder(path)
+}
+
+// DeleteFile removes the file at path. The path must be inside the configured export directory.
+func (a *App) DeleteFile(path string) error {
+	root, err := exportRoot()
+	if err != nil {
+		return err
+	}
+	return filesystem.DeleteFile(path, root)
+}
+
+// DeleteDirectory removes the directory at path and all its contents.
+// The path must be inside the configured export directory.
+func (a *App) DeleteDirectory(path string) error {
+	root, err := exportRoot()
+	if err != nil {
+		return err
+	}
+	return filesystem.DeleteDirectory(path, root)
+}
+
+// RenameFile renames (moves) oldPath to newPath. Both must be inside the export directory.
+func (a *App) RenameFile(oldPath, newPath string) error {
+	root, err := exportRoot()
+	if err != nil {
+		return err
+	}
+	return filesystem.RenameFile(oldPath, newPath, root)
+}
+
+// CreateDirectory creates a new directory at path, including any necessary parents.
+// The path must be inside the configured export directory.
+func (a *App) CreateDirectory(path string) error {
+	root, err := exportRoot()
+	if err != nil {
+		return err
+	}
+	return filesystem.MkDir(path, root)
+}
+
+// CreateFile creates an empty file at path. The path must be inside the export directory.
+func (a *App) CreateFile(path string) error {
+	root, err := exportRoot()
+	if err != nil {
+		return err
+	}
+	if err := filesystem.MkDir(filepath.Dir(path), root); err != nil {
+		return err
+	}
+	return filesystem.WriteFile(path, "")
+}
+
+// exportRoot returns the configured export directory, or an error if not set.
+func exportRoot() (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", fmt.Errorf("could not load config: %w", err)
+	}
+	if cfg.Git.ExportDir == "" {
+		return "", fmt.Errorf("no export directory configured")
+	}
+	return cfg.Git.ExportDir, nil
+}
+
 // ─── Account-level objects (roles, warehouses) ────────────────────────────────
 
 // KeyPairResult holds the paths and public key content produced by GenerateKeyPair.

@@ -22,6 +22,7 @@ import {
   ExportAllDatabasesDDL,
   CancelExport,
   ListExportableDatabases,
+  RevealInFinder,
 } from "../../../wailsjs/go/main/App";
 import { useGitStore } from "../../store/gitStore";
 import { useConnectionStore } from "../../store/connectionStore";
@@ -294,6 +295,15 @@ export default function ExportPanel() {
                 </Tag>
               )}
             </Space>
+            <Tooltip title="Show in Finder">
+              <Button
+                type="text"
+                size="small"
+                icon={<FolderOpenOutlined style={{ fontSize: 11 }} />}
+                onClick={() => exportDir && RevealInFinder(exportDir)}
+                style={{ color: "var(--text-muted)", padding: "0 4px" }}
+              />
+            </Tooltip>
             <Button
               type="text"
               size="small"

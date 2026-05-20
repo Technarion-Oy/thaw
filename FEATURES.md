@@ -357,7 +357,14 @@ Open **AI → Configure AI…** in the menu bar to set your provider, API key, a
 - **Save** (`⌘S` / `Ctrl+S`) — writes back to the file's original path
 - **Save As…** (`⌘⇧S` / `Ctrl+Shift+S`) — native OS save dialog; promotes a scratch tab to a named file
 - **New Tab** (`⌘T` / `Ctrl+T`) — opens a blank scratch tab
-- **File Browser** — browse the working directory in the sidebar; click any file to open it; auto-refreshes after a DDL export; right-click any file to **Select for Comparison** or **Compare with** another item
+- **File Browser** — browse the working directory in the sidebar; click any file to open it; auto-refreshes after a DDL export; right-click any file or folder to access the context menu:
+  - **Reveal in Finder** / **Show in Explorer** — opens the platform file manager and selects the file or folder
+  - **Copy Path** — copies the full file path to the clipboard
+  - **Rename…** — renames the file or folder via a modal dialog
+  - **Delete** — deletes the file or folder (with confirmation dialog); directories are removed recursively; paths are restricted to the export directory for safety
+  - **New Folder…** (directories only) — creates a new subfolder
+  - **New SQL File…** (directories only) — creates an empty `.sql` file
+  - **Select for Comparison** / **Compare with** (files only) — DDL diff comparison workflow
 
 ---
 
@@ -371,7 +378,7 @@ Open **AI → Configure AI…** in the menu bar to set your provider, API key, a
 - Parallel export — up to 16 databases fetched concurrently; each database uses a single `GET_DDL('DATABASE', name, true)` call for maximum throughput
 - **Live progress bar** while the export runs
 - **Cancel** — stop an in-progress export at any time
-- Results summary shows file counts, skipped databases, and any errors
+- Results summary shows file counts, skipped databases, and any errors; click the folder icon to **reveal the export directory** in the platform file manager
 
 ---
 
