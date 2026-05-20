@@ -115,9 +115,10 @@ func RevealInFinder(path, allowedRoot string) error {
 	case "darwin":
 		return exec.Command("open", "-R", abs).Start()
 	case "windows":
-		// explorer expects /select, and the path as a single combined argument.
-		// Go's exec.Command handles argument quoting via syscall.EscapeArg.
-		return exec.Command("explorer", "/select,"+abs).Start()
+		// explorer treats commas as argument delimiters, so the path must be
+		// quoted within the /select, argument. Go's syscall.EscapeArg does not
+		// handle this explorer-specific behavior.
+		return exec.Command("explorer", fmt.Sprintf(`/select,"%s"`, abs)).Start()
 	default: // linux and others
 		return exec.Command("xdg-open", filepath.Dir(abs)).Start()
 	}

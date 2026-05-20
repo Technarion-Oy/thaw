@@ -378,7 +378,7 @@ export default function FileBrowser() {
     setFileCtxMenu(null);
     Modal.confirm({
       title: `Delete ${isDir ? "folder" : "file"}`,
-      content: `Are you sure you want to delete "${name}"?${isDir ? " All contents will be permanently removed." : ""}`,
+      content: `Are you sure you want to delete "${name}"?${isDir ? " This item and all its contents will be permanently removed." : ""}`,
       okText: "Delete",
       okButtonProps: { danger: true },
       onOk: async () => {
