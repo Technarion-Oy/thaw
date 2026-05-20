@@ -38,6 +38,7 @@ import {
   RenameFile,
   CreateDirectory,
   CreateFile,
+  GetPlatformOS,
 } from "../../../wailsjs/go/main/App";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { useGitStore } from "../../store/gitStore";
@@ -130,6 +131,11 @@ export default function FileBrowser() {
 
   // ── Collapse state ──────────────────────────────────────────────────────────
   const [expanded, setExpanded] = useState(false);
+
+  // ── Platform detection for labels ─────────────────────────────────────────
+  const [platformOS, setPlatformOS] = useState("darwin");
+  useEffect(() => { GetPlatformOS().then(setPlatformOS).catch(() => {}); }, []);
+  const revealLabel = platformOS === "windows" ? "Show in Explorer" : platformOS === "darwin" ? "Reveal in Finder" : "Show in File Manager";
 
   const pendingDiff   = useDiffStore((s) => s.pending);
   const selectForComp = useDiffStore((s) => s.selectForComparison);
@@ -329,11 +335,16 @@ export default function FileBrowser() {
     setFileCtxMenu(null);
   };
 
-  const handleCopyPath = () => {
+  const handleCopyPath = async () => {
     if (!fileCtxMenu) return;
-    ClipboardSetText(fileCtxMenu.path);
-    message.success("Path copied");
+    const p = fileCtxMenu.path;
     setFileCtxMenu(null);
+    try {
+      await ClipboardSetText(p);
+      message.success("Path copied");
+    } catch {
+      message.error("Failed to copy path");
+    }
   };
 
   const handleDeleteConfirm = () => {
@@ -385,18 +396,23 @@ export default function FileBrowser() {
       return;
     }
     const { kind, path, value } = inlineInput;
+    const sanitized = value.trim().replace(/[/\\]/g, "");
+    if (!sanitized) {
+      message.error("Name cannot be empty or contain path separators");
+      return;
+    }
     setInlineInput(null);
     try {
       if (kind === "rename") {
         const dir = path.substring(0, path.lastIndexOf("/"));
-        const newPath = `${dir}/${value.trim()}`;
+        const newPath = `${dir}/${sanitized}`;
         await RenameFile(path, newPath);
-        message.success(`Renamed to ${value.trim()}`);
+        message.success(`Renamed to ${sanitized}`);
       } else if (kind === "newFolder") {
-        await CreateDirectory(`${path}/${value.trim()}`);
-        message.success(`Created folder ${value.trim()}`);
+        await CreateDirectory(`${path}/${sanitized}`);
+        message.success(`Created folder ${sanitized}`);
       } else if (kind === "newFile") {
-        const name = value.trim().endsWith(".sql") ? value.trim() : `${value.trim()}.sql`;
+        const name = sanitized.endsWith(".sql") ? sanitized : `${sanitized}.sql`;
         await CreateFile(`${path}/${name}`);
         message.success(`Created ${name}`);
       }
@@ -655,7 +671,7 @@ export default function FileBrowser() {
           onMouseLeave={() => setFileCtxMenu(null)}
         >
           {/* ── File management actions ── */}
-          <CtxItem icon={<FolderViewOutlined />} label="Reveal in Finder" onClick={handleReveal} />
+          <CtxItem icon={<FolderViewOutlined />} label={revealLabel} onClick={handleReveal} />
           <CtxItem icon={<CopyOutlined />} label="Copy Path" onClick={handleCopyPath} />
           <CtxItem icon={<EditOutlined />} label="Rename…" onClick={handleRenameStart} />
           <CtxItem icon={<DeleteOutlined />} label="Delete" onClick={handleDeleteConfirm} danger />

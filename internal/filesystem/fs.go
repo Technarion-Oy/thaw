@@ -101,7 +101,11 @@ func ListDir(dir string) ([]FileEntry, error) {
 // RevealInFinder opens the platform file manager and selects the given path.
 // On macOS it runs `open -R`, on Windows `explorer /select,`, on Linux `xdg-open`
 // (opens the parent directory since most Linux file managers don't support select).
-func RevealInFinder(path string) error {
+// The path must be inside allowedRoot for consistency with other file operations.
+func RevealInFinder(path, allowedRoot string) error {
+	if err := validateExistingPath(path, allowedRoot); err != nil {
+		return err
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return err
@@ -116,10 +120,16 @@ func RevealInFinder(path string) error {
 	}
 }
 
+// RuntimeOS returns the current OS identifier (darwin, windows, linux).
+// Used by the frontend to display platform-appropriate labels.
+func RuntimeOS() string {
+	return runtime.GOOS
+}
+
 // DeleteFile removes the file at path. It refuses to delete directories;
 // use DeleteDirectory for that. The path must be inside allowedRoot.
 func DeleteFile(path, allowedRoot string) error {
-	if err := validateInsideRoot(path, allowedRoot); err != nil {
+	if err := validateExistingPath(path, allowedRoot); err != nil {
 		return err
 	}
 	info, err := os.Stat(path)
@@ -133,9 +143,9 @@ func DeleteFile(path, allowedRoot string) error {
 }
 
 // DeleteDirectory removes the directory at path and all its contents.
-// The path must be inside allowedRoot.
+// The path must be strictly inside allowedRoot (cannot delete the root itself).
 func DeleteDirectory(path, allowedRoot string) error {
-	if err := validateInsideRoot(path, allowedRoot); err != nil {
+	if err := validateExistingPath(path, allowedRoot); err != nil {
 		return err
 	}
 	info, err := os.Stat(path)
@@ -149,11 +159,12 @@ func DeleteDirectory(path, allowedRoot string) error {
 }
 
 // RenameFile renames (moves) oldPath to newPath. Both must be inside allowedRoot.
+// For newPath (which doesn't exist yet), the parent directory is validated instead.
 func RenameFile(oldPath, newPath, allowedRoot string) error {
-	if err := validateInsideRoot(oldPath, allowedRoot); err != nil {
+	if err := validateExistingPath(oldPath, allowedRoot); err != nil {
 		return err
 	}
-	if err := validateInsideRoot(newPath, allowedRoot); err != nil {
+	if err := validateNewPath(newPath, allowedRoot); err != nil {
 		return err
 	}
 	if _, err := os.Stat(newPath); err == nil {
@@ -163,31 +174,85 @@ func RenameFile(oldPath, newPath, allowedRoot string) error {
 }
 
 // MkDir creates a directory (and any necessary parents) at path.
-// The path must be inside allowedRoot.
+// The path must be inside allowedRoot. Since the target doesn't exist yet,
+// the parent directory is validated instead.
 func MkDir(path, allowedRoot string) error {
-	if err := validateInsideRoot(path, allowedRoot); err != nil {
+	if err := validateNewPath(path, allowedRoot); err != nil {
 		return err
 	}
 	return os.MkdirAll(path, 0o755)
 }
 
-// validateInsideRoot checks that path is inside allowedRoot after resolving symlinks.
-func validateInsideRoot(path, allowedRoot string) error {
+// WriteFileInRoot creates or overwrites the file at path with content.
+// Parent directories are created if needed. The path must be inside allowedRoot.
+func WriteFileInRoot(path, content, allowedRoot string) error {
+	if err := validateNewPath(path, allowedRoot); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+// validateExistingPath checks that an existing path is strictly inside allowedRoot,
+// resolving symlinks to prevent escaping the root via symbolic links.
+func validateExistingPath(path, allowedRoot string) error {
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return fmt.Errorf("invalid path: %w", err)
+	}
+	realRoot, err := filepath.EvalSymlinks(allowedRoot)
+	if err != nil {
+		return fmt.Errorf("invalid root: %w", err)
+	}
+	return checkStrictlyInside(realPath, realRoot)
+}
+
+// validateNewPath checks that a path that doesn't exist yet is inside allowedRoot
+// by resolving symlinks on the nearest existing ancestor directory.
+func validateNewPath(path, allowedRoot string) error {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("invalid path: %w", err)
 	}
-	absRoot, err := filepath.Abs(allowedRoot)
+	// Walk up to find the nearest existing ancestor and resolve symlinks on it.
+	ancestor := absPath
+	for {
+		if _, statErr := os.Stat(ancestor); statErr == nil {
+			break
+		}
+		parent := filepath.Dir(ancestor)
+		if parent == ancestor {
+			// Reached filesystem root without finding an existing ancestor.
+			return fmt.Errorf("no existing ancestor for path: %s", path)
+		}
+		ancestor = parent
+	}
+	realAncestor, err := filepath.EvalSymlinks(ancestor)
+	if err != nil {
+		return fmt.Errorf("invalid path: %w", err)
+	}
+	// Reconstruct the full path with the resolved ancestor prefix.
+	remaining, _ := filepath.Rel(ancestor, absPath)
+	realPath := filepath.Join(realAncestor, remaining)
+
+	realRoot, err := filepath.EvalSymlinks(allowedRoot)
 	if err != nil {
 		return fmt.Errorf("invalid root: %w", err)
 	}
-	// Ensure the path starts with the root directory.
-	rel, err := filepath.Rel(absRoot, absPath)
+	return checkStrictlyInside(realPath, realRoot)
+}
+
+// checkStrictlyInside verifies that resolvedPath is strictly inside resolvedRoot
+// (not equal to it, not outside it).
+func checkStrictlyInside(resolvedPath, resolvedRoot string) error {
+	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
 	if err != nil {
 		return fmt.Errorf("path is outside allowed directory")
 	}
-	if strings.HasPrefix(rel, "..") {
-		return fmt.Errorf("path is outside allowed directory: %s", allowedRoot)
+	if rel == "." || strings.HasPrefix(rel, "..") {
+		return fmt.Errorf("path is outside allowed directory: %s", resolvedRoot)
 	}
 	return nil
 }

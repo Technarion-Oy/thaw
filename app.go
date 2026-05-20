@@ -885,8 +885,19 @@ func (a *App) SearchFiles(dir, query string, useRegex bool) ([]filesystem.Search
 }
 
 // RevealInFinder opens the platform file manager and selects the given path.
+// The path must be inside the configured export directory.
 func (a *App) RevealInFinder(path string) error {
-	return filesystem.RevealInFinder(path)
+	root, err := exportRoot()
+	if err != nil {
+		return err
+	}
+	return filesystem.RevealInFinder(path, root)
+}
+
+// GetPlatformOS returns the current OS identifier (darwin, windows, linux)
+// so the frontend can display platform-appropriate labels.
+func (a *App) GetPlatformOS() string {
+	return filesystem.RuntimeOS()
 }
 
 // DeleteFile removes the file at path. The path must be inside the configured export directory.
@@ -933,10 +944,7 @@ func (a *App) CreateFile(path string) error {
 	if err != nil {
 		return err
 	}
-	if err := filesystem.MkDir(filepath.Dir(path), root); err != nil {
-		return err
-	}
-	return filesystem.WriteFile(path, "")
+	return filesystem.WriteFileInRoot(path, "", root)
 }
 
 // exportRoot returns the configured export directory, or an error if not set.
