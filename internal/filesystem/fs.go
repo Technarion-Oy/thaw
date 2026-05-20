@@ -116,7 +116,8 @@ func RevealInFinder(path, allowedRoot string) error {
 		return exec.Command("open", "-R", abs).Start()
 	case "windows":
 		// explorer expects /select, and the path as a single combined argument.
-		return exec.Command("explorer", fmt.Sprintf("/select,%s", abs)).Start()
+		// Path is quoted to handle commas and special characters in filenames.
+		return exec.Command("explorer", fmt.Sprintf(`/select,"%s"`, abs)).Start()
 	default: // linux and others
 		return exec.Command("xdg-open", filepath.Dir(abs)).Start()
 	}

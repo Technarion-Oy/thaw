@@ -119,7 +119,6 @@ export default function FileBrowser() {
   const exportDir   = useGitStore((s) => s.exportDir);
   const openFile    = useQueryStore((s) => s.openFile);
   const currentFile = useQueryStore((s) => s.currentFile);
-  const tabs           = useQueryStore((s) => s.tabs);
   const updateTabPath  = useQueryStore((s) => s.updateTabPath);
   const orphanTab      = useQueryStore((s) => s.orphanFileTab);
 
@@ -440,11 +439,12 @@ export default function FileBrowser() {
         // Avoid double separator when dir is a root (e.g. "/" or "C:\").
         const newPath = dir.endsWith(sep) ? `${dir}${sanitized}` : `${dir}${sep}${sanitized}`;
         await RenameFile(path, newPath);
-        // Update any open tabs that reference the old path (or are children of a renamed directory).
+        // Read fresh tabs from the store (not the stale closure captured at render time).
         // Uses updateTabPath (not markSaved) to preserve the dirty state — the file's
         // disk content was moved but any unsaved in-memory edits remain uncommitted.
+        const currentTabs = useQueryStore.getState().tabs;
         const prefix = path + sep;
-        for (const tab of tabs) {
+        for (const tab of currentTabs) {
           if (tab.path === path) {
             updateTabPath(tab.id, newPath, sanitized);
           } else if (tab.path?.startsWith(prefix)) {
@@ -739,7 +739,7 @@ export default function FileBrowser() {
           {/* ── Directory-only actions ── */}
           {fileCtxMenu.isDir && (
             <>
-              <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+              <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
               <CtxItem icon={<FolderAddOutlined />} label="New Folder…" onClick={handleNewFolderStart} />
               <CtxItem icon={<FileAddOutlined />} label="New SQL File…" onClick={handleNewFileStart} />
             </>
@@ -748,7 +748,7 @@ export default function FileBrowser() {
           {/* ── Comparison actions (files only) ── */}
           {!fileCtxMenu.isDir && (
             <>
-              <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+              <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
               <CtxItem icon={<DiffOutlined />} label="Select for Comparison" onClick={selectFileForComparison} />
               {pendingDiff !== null && (
                 <CtxItem
