@@ -38,12 +38,12 @@ import {
   RenameFile,
   CreateDirectory,
   CreateFile,
-  GetPlatformOS,
 } from "../../../wailsjs/go/main/App";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { useGitStore } from "../../store/gitStore";
 import { useQueryStore } from "../../store/queryStore";
 import { useDiffStore } from "../../store/diffStore";
+import { getPlatformOS, getCachedPlatformOS, revealLabel } from "./platformUtil";
 import type { filesystem } from "../../../wailsjs/go/models";
 
 type FileEntry    = filesystem.FileEntry;
@@ -52,22 +52,10 @@ type SearchMatch  = filesystem.SearchMatch;
 const { Text } = Typography;
 const CLR_SECONDARY = "var(--text-muted)";
 
-// Module-level cache for platform OS (compile-time constant, fetched once).
-let _platformOS: string | null = null;
-const getPlatform = (): Promise<string> =>
-  _platformOS
-    ? Promise.resolve(_platformOS)
-    : GetPlatformOS().then((os) => { _platformOS = os; return os; }).catch(() => "darwin");
-
-/** Platform-appropriate label for the "reveal" action. */
-function revealLabelFor(os: string): string {
-  return os === "windows" ? "Show in Explorer" : os === "darwin" ? "Reveal in Finder" : "Show in File Manager";
-}
-
 /** Extract the directory portion of a path, handling both / and \ separators. */
 function pathDir(p: string): string {
   const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
-  return i > 0 ? p.substring(0, i) : p;
+  return i > 0 ? p.substring(0, i) : ".";
 }
 
 /** Extract the filename from a path, handling both / and \ separators. */
@@ -157,9 +145,9 @@ export default function FileBrowser() {
   const [expanded, setExpanded] = useState(false);
 
   // ── Platform detection for labels ─────────────────────────────────────────
-  const [platformOS, setPlatformOS] = useState(_platformOS ?? "darwin");
-  useEffect(() => { getPlatform().then(setPlatformOS); }, []);
-  const revealLabel = revealLabelFor(platformOS);
+  const [platformOS, setPlatformOS] = useState(getCachedPlatformOS());
+  useEffect(() => { getPlatformOS().then(setPlatformOS); }, []);
+  const revealText = revealLabel(platformOS);
 
   const pendingDiff   = useDiffStore((s) => s.pending);
   const selectForComp = useDiffStore((s) => s.selectForComparison);
@@ -247,6 +235,7 @@ export default function FileBrowser() {
   };
 
   const refresh = async () => {
+    setFileCtxMenu(null); // dismiss stale context menu
     setLoaded(false);
     setTreeData([]);
     setLoadedKeys([]);
@@ -702,7 +691,7 @@ export default function FileBrowser() {
           onClick={(e) => e.stopPropagation()}
         >
           {/* ── File management actions ── */}
-          <CtxItem icon={<FolderViewOutlined />} label={revealLabel} onClick={handleReveal} />
+          <CtxItem icon={<FolderViewOutlined />} label={revealText} onClick={handleReveal} />
           <CtxItem icon={<CopyOutlined />} label="Copy Path" onClick={handleCopyPath} />
           <CtxItem icon={<EditOutlined />} label="Rename…" onClick={handleRenameStart} />
           <CtxItem icon={<DeleteOutlined />} label="Delete" onClick={handleDeleteConfirm} danger />

@@ -23,10 +23,10 @@ import {
   CancelExport,
   ListExportableDatabases,
   RevealInFinder,
-  GetPlatformOS,
 } from "../../../wailsjs/go/main/App";
 import { useGitStore } from "../../store/gitStore";
 import { useConnectionStore } from "../../store/connectionStore";
+import { getPlatformOS, getCachedPlatformOS, revealLabel } from "../files/platformUtil";
 import type { ddl } from "../../../wailsjs/go/models";
 
 type ExportResult = ddl.ExportResult;
@@ -39,24 +39,13 @@ interface ProgressEvent {
 
 const { Text } = Typography;
 
-// Module-level cache for platform OS (compile-time constant, fetched once).
-let _platformOS: string | null = null;
-const getPlatform = (): Promise<string> =>
-  _platformOS
-    ? Promise.resolve(_platformOS)
-    : GetPlatformOS().then((os) => { _platformOS = os; return os; }).catch(() => "darwin");
-
-function revealLabelFor(os: string): string {
-  return os === "windows" ? "Show in Explorer" : os === "darwin" ? "Show in Finder" : "Show in File Manager";
-}
-
 export default function ExportPanel() {
   const { exportDir, pickExportDir } = useGitStore();
   const isConnected = useConnectionStore((s) => s.isConnected);
 
-  const [platformOS, setPlatformOS] = useState(_platformOS ?? "darwin");
-  useEffect(() => { getPlatform().then(setPlatformOS); }, []);
-  const revealLabel = revealLabelFor(platformOS);
+  const [platformOS, setPlatformOS] = useState(getCachedPlatformOS());
+  useEffect(() => { getPlatformOS().then(setPlatformOS); }, []);
+  const revealText = revealLabel(platformOS);
 
   // ── database selection ────────────────────────────────────────────────────
   const [dbs, setDbs]               = useState<string[]>([]);
@@ -311,12 +300,12 @@ export default function ExportPanel() {
                 </Tag>
               )}
             </Space>
-            <Tooltip title={revealLabel}>
+            <Tooltip title={revealText}>
               <Button
                 type="text"
                 size="small"
                 icon={<FolderOpenOutlined style={{ fontSize: 11 }} />}
-                onClick={() => exportDir && RevealInFinder(exportDir)}
+                onClick={() => exportDir && RevealInFinder(exportDir).catch(() => {})}
                 style={{ color: "var(--text-muted)", padding: "0 4px" }}
               />
             </Tooltip>
