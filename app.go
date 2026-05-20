@@ -957,6 +957,16 @@ func (a *App) CreateFile(path string) error {
 	return filesystem.WriteFileInRoot(path, "", root)
 }
 
+// DuplicateFile creates a copy of the file at path in the same directory with a unique name.
+// Returns the full path of the new copy.
+func (a *App) DuplicateFile(path string) (string, error) {
+	root, err := a.exportRoot()
+	if err != nil {
+		return "", err
+	}
+	return filesystem.DuplicateFile(path, root)
+}
+
 // exportRoot returns the cached export directory, or an error if not set.
 func (a *App) exportRoot() (string, error) {
 	a.exportDirMu.RLock()

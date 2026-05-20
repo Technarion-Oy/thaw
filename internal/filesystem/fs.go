@@ -353,6 +353,60 @@ func checkStrictlyInside(resolvedPath, resolvedRoot string) error {
 	return nil
 }
 
+// uniqueCopyName generates a unique copy name for srcPath by appending _copy, _copy_2, etc.
+func uniqueCopyName(srcPath string) string {
+	dir := filepath.Dir(srcPath)
+	base := filepath.Base(srcPath)
+	ext := filepath.Ext(base)
+	stem := base[:len(base)-len(ext)]
+
+	candidate := filepath.Join(dir, stem+"_copy"+ext)
+	if _, err := os.Stat(candidate); err != nil {
+		return candidate
+	}
+	for i := 2; ; i++ {
+		candidate = filepath.Join(dir, fmt.Sprintf("%s_copy_%d%s", stem, i, ext))
+		if _, err := os.Stat(candidate); err != nil {
+			return candidate
+		}
+	}
+}
+
+// DuplicateFile creates a copy of srcPath in the same directory with a unique name.
+// The source path must be strictly inside allowedRoot. Returns the path of the new copy.
+func DuplicateFile(srcPath, allowedRoot string) (string, error) {
+	if err := validateExistingPath(srcPath, allowedRoot); err != nil {
+		return "", err
+	}
+	info, err := os.Lstat(srcPath)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("cannot duplicate a directory")
+	}
+
+	dstPath := uniqueCopyName(srcPath)
+
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return "", err
+	}
+	defer src.Close() //nolint:errcheck
+
+	dst, err := os.OpenFile(dstPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return "", err
+	}
+	defer dst.Close() //nolint:errcheck
+
+	if _, err := io.Copy(dst, src); err != nil {
+		os.Remove(dstPath) //nolint:errcheck
+		return "", err
+	}
+	return dstPath, nil
+}
+
 // checkInsideOrEqual verifies that resolvedPath is inside or equal to resolvedRoot.
 // Uses both a string-prefix check and filepath.Rel as defense-in-depth.
 func checkInsideOrEqual(resolvedPath, resolvedRoot string) error {

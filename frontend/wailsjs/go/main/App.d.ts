@@ -162,6 +162,8 @@ export function DropSchema(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function DropTaskTree(arg1:string,arg2:string,arg3:string):Promise<void>;
 
+export function DuplicateFile(arg1:string):Promise<string>;
+
 export function EnableTaskDependents(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function ExecDDL(arg1:string):Promise<void>;

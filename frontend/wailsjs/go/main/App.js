@@ -282,6 +282,10 @@ export function DropTaskTree(arg1, arg2, arg3) {
   return window['go']['main']['App']['DropTaskTree'](arg1, arg2, arg3);
 }
 
+export function DuplicateFile(arg1) {
+  return window['go']['main']['App']['DuplicateFile'](arg1);
+}
+
 export function EnableTaskDependents(arg1, arg2, arg3) {
   return window['go']['main']['App']['EnableTaskDependents'](arg1, arg2, arg3);
 }

@@ -38,6 +38,7 @@ import {
   RenameFile,
   CreateDirectory,
   CreateFile,
+  DuplicateFile,
 } from "../../../wailsjs/go/main/App";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { useGitStore } from "../../store/gitStore";
@@ -455,6 +456,21 @@ export default function FileBrowser() {
       message.success("Path copied");
     } catch {
       message.error("Failed to copy path");
+    }
+  };
+
+  const handleDuplicate = async () => {
+    if (!fileCtxMenu || fileCtxMenu.isDir) return;
+    const { path } = fileCtxMenu;
+    setFileCtxMenu(null);
+    try {
+      const newPath = await DuplicateFile(path);
+      const name = pathBase(newPath);
+      const parentDir = pathDir(newPath);
+      setTreeData(prev => addChild(prev, parentDir, makeNode(newPath, name, false)));
+      message.success(`Created ${name}`);
+    } catch (e) {
+      message.error(`Duplicate failed: ${String(e)}`);
     }
   };
 
@@ -926,6 +942,9 @@ export default function FileBrowser() {
           {/* ── File management actions ── */}
           <CtxItem icon={<FolderViewOutlined />} label={revealText} onClick={handleReveal} />
           <CtxItem icon={<CopyOutlined />} label="Copy Path" onClick={handleCopyPath} />
+          {!fileCtxMenu.isDir && (
+            <CtxItem icon={<CopyOutlined />} label="Duplicate" onClick={handleDuplicate} />
+          )}
           <CtxItem icon={<EditOutlined />} label="Rename…" onClick={handleRenameStart} />
           <CtxItem icon={<DeleteOutlined />} label="Delete" onClick={handleDeleteConfirm} danger />
 
