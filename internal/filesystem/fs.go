@@ -368,13 +368,17 @@ func uniqueCopyName(srcPath string) (string, error) {
 	stem := base[:len(base)-len(ext)]
 
 	candidate := filepath.Join(dir, stem+"_copy"+ext)
-	if _, err := os.Stat(candidate); err != nil {
+	if _, err := os.Stat(candidate); os.IsNotExist(err) {
 		return candidate, nil
+	} else if err != nil {
+		return "", err
 	}
 	for i := 2; i < 1000; i++ {
 		candidate = filepath.Join(dir, fmt.Sprintf("%s_copy_%d%s", stem, i, ext))
-		if _, err := os.Stat(candidate); err != nil {
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
 			return candidate, nil
+		} else if err != nil {
+			return "", err
 		}
 	}
 	return "", fmt.Errorf("could not find a unique copy name for %s", filepath.Base(srcPath))
@@ -408,7 +412,7 @@ func DuplicateFile(srcPath, allowedRoot string) (string, error) {
 	}
 	defer src.Close() //nolint:errcheck
 
-	dst, err := os.OpenFile(dstPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	dst, err := os.OpenFile(dstPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
 	if err != nil {
 		return "", err
 	}
