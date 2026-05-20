@@ -668,6 +668,17 @@ export default function FileBrowser() {
               "File name (.sql)"
             }
             style={{ marginTop: 8 }}
+            ref={(el) => {
+              // Select just the filename stem (before the last dot) for easy editing.
+              if (el && inlineInput.kind === "rename") {
+                const input = el.input ?? el;
+                if (input && typeof input.setSelectionRange === "function") {
+                  const dot = inlineInput.value.lastIndexOf(".");
+                  const end = dot > 0 ? dot : inlineInput.value.length;
+                  requestAnimationFrame(() => input.setSelectionRange(0, end));
+                }
+              }
+            }}
           />
         </Modal>
       )}
@@ -689,6 +700,7 @@ export default function FileBrowser() {
             padding: "4px 0",
           }}
           onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
         >
           {/* ── File management actions ── */}
           <CtxItem icon={<FolderViewOutlined />} label={revealText} onClick={handleReveal} />

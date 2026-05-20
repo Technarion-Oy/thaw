@@ -5,6 +5,8 @@
 // in whole or in part, is strictly prohibited without prior written permission
 // from Technarion Oy.
 
+// @thaw-domain: Core IPC & App Lifecycle
+
 import { GetPlatformOS } from "../../../wailsjs/go/main/App";
 
 // Module-level cache for platform OS (compile-time constant, fetched once).
@@ -17,6 +19,9 @@ export function getPlatformOS(): Promise<string> {
     .then((os) => { _platformOS = os; return os; })
     .catch(() => "darwin");
 }
+
+// Eagerly fetch on module load so the cache is populated before components mount.
+getPlatformOS();
 
 /** Returns the cached value synchronously, or "darwin" if not yet fetched. */
 export function getCachedPlatformOS(): string {

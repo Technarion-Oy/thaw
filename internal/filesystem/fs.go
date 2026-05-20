@@ -147,13 +147,19 @@ func DeleteFile(path, allowedRoot string) error {
 
 // DeleteDirectory removes the directory at path and all its contents.
 // The path must be strictly inside allowedRoot (cannot delete the root itself).
+// Uses Lstat so that a symlink pointing to a directory is treated as a symlink
+// (removed via os.Remove) rather than recursively deleting the target.
 func DeleteDirectory(path, allowedRoot string) error {
 	if err := validateExistingPath(path, allowedRoot); err != nil {
 		return err
 	}
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		return err
+	}
+	// Symlink: remove the link itself regardless of what it points to.
+	if info.Mode()&os.ModeSymlink != 0 {
+		return os.Remove(path)
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("path is not a directory")
@@ -262,8 +268,13 @@ func validateInsideOrEqual(path, allowedRoot string) error {
 }
 
 // checkStrictlyInside verifies that resolvedPath is strictly inside resolvedRoot
-// (not equal to it, not outside it).
+// (not equal to it, not outside it). Uses both a string-prefix check and
+// filepath.Rel as defense-in-depth.
 func checkStrictlyInside(resolvedPath, resolvedRoot string) error {
+	// Defense-in-depth: string-prefix check prevents prefix-collision edge cases.
+	if !strings.HasPrefix(resolvedPath, resolvedRoot+string(filepath.Separator)) {
+		return fmt.Errorf("path is outside allowed directory: %s", resolvedRoot)
+	}
 	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
 	if err != nil {
 		return fmt.Errorf("path is outside allowed directory")
@@ -275,7 +286,12 @@ func checkStrictlyInside(resolvedPath, resolvedRoot string) error {
 }
 
 // checkInsideOrEqual verifies that resolvedPath is inside or equal to resolvedRoot.
+// Uses both a string-prefix check and filepath.Rel as defense-in-depth.
 func checkInsideOrEqual(resolvedPath, resolvedRoot string) error {
+	// Defense-in-depth: string-prefix check prevents prefix-collision edge cases.
+	if resolvedPath != resolvedRoot && !strings.HasPrefix(resolvedPath, resolvedRoot+string(filepath.Separator)) {
+		return fmt.Errorf("path is outside allowed directory: %s", resolvedRoot)
+	}
 	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
 	if err != nil {
 		return fmt.Errorf("path is outside allowed directory")

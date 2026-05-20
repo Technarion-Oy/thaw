@@ -6,7 +6,7 @@
 // from Technarion Oy.
 
 import { useState, useEffect } from "react";
-import { Button, Progress, Typography, Space, Tag, Collapse, Alert, Tooltip, Checkbox } from "antd";
+import { Button, Progress, Typography, Space, Tag, Collapse, Alert, Tooltip, Checkbox, message } from "antd";
 import {
   CloudUploadOutlined,
   DatabaseOutlined,
@@ -305,7 +305,7 @@ export default function ExportPanel() {
                 type="text"
                 size="small"
                 icon={<FolderOpenOutlined style={{ fontSize: 11 }} />}
-                onClick={() => exportDir && RevealInFinder(exportDir).catch(() => {})}
+                onClick={() => exportDir && RevealInFinder(exportDir).catch((e) => message.error(`Could not reveal: ${String(e)}`))}
                 style={{ color: "var(--text-muted)", padding: "0 4px" }}
               />
             </Tooltip>

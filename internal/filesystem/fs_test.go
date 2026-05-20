@@ -234,6 +234,37 @@ func TestDeleteDirectory_RejectsFile(t *testing.T) {
 	}
 }
 
+func TestDeleteDirectory_SymlinkToDir(t *testing.T) {
+	root := t.TempDir()
+	realDir := filepath.Join(root, "realdir")
+	if err := os.Mkdir(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(realDir, "inner.txt"), []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Symlink inside root pointing to a directory inside root.
+	symlink := filepath.Join(root, "link_to_dir")
+	if err := os.Symlink(realDir, symlink); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+	// DeleteDirectory on a symlink should remove only the symlink, not the target.
+	if err := DeleteDirectory(symlink, root); err != nil {
+		t.Errorf("expected no error, got: %v", err)
+	}
+	if _, err := os.Lstat(symlink); !os.IsNotExist(err) {
+		t.Error("symlink should have been deleted")
+	}
+	// Real directory and its contents should still exist.
+	if _, err := os.Stat(realDir); err != nil {
+		t.Error("real directory should still exist after deleting symlink")
+	}
+	data, err := os.ReadFile(filepath.Join(realDir, "inner.txt"))
+	if err != nil || string(data) != "data" {
+		t.Error("contents of real directory should be intact")
+	}
+}
+
 // ─── RenameFile ─────────────────────────────────────────────────────────────
 
 func TestRenameFile_Success(t *testing.T) {
