@@ -208,7 +208,7 @@ func CloneChildTask(ctx context.Context, client *snowflake.Client, database, sch
 	fqnOld := fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(oldName))
 	fqnNew := fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteOrBare(newName, caseSensitive))
 
-	showSQL := fmt.Sprintf("SHOW TASKS LIKE '%s' IN SCHEMA %s.%s", snowflake.EscapeStringLit(oldName), snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
+	showSQL := fmt.Sprintf("SHOW TASKS LIKE '%s' IN SCHEMA %s.%s", snowflake.EscapeLikePattern(oldName), snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
 	res, err := client.Execute(ctx, showSQL)
 	if err != nil {
 		return fmt.Errorf("failed to fetch original task details: %w", err)
@@ -270,7 +270,7 @@ func CloneChildTask(ctx context.Context, client *snowflake.Client, database, sch
 // suspendIfRunning suspends the named task if its current state is STARTED.
 // Snowflake requires a task to be suspended before its AFTER list can be modified.
 func suspendIfRunning(ctx context.Context, client *snowflake.Client, database, schema, taskName string) error {
-	escName := snowflake.EscapeStringLit(taskName)
+	escName := snowflake.EscapeLikePattern(taskName)
 	res, err := client.Execute(ctx, fmt.Sprintf(
 		"SHOW TASKS LIKE '%s' IN SCHEMA %s.%s", escName, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)))
 	if err != nil {

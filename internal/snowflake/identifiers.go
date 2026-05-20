@@ -106,6 +106,7 @@ func QuoteStringLit(s string) string {
 // the string matches literally when used in a SHOW … LIKE '<pattern>' clause.
 // Single-quotes are also doubled (same as EscapeStringLit).
 func EscapeLikePattern(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `'`, `''`)
 	s = strings.ReplaceAll(s, `%`, `\%`)
 	s = strings.ReplaceAll(s, `_`, `\_`)

@@ -20,6 +20,7 @@ import {
   HistoryOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
+import type { ColumnsType } from "antd/es/table";
 import { GetTaskRunHistory, ListObjects } from "../../../wailsjs/go/main/App";
 import type { tasks, snowflake } from "../../../wailsjs/go/models";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
@@ -177,6 +178,141 @@ function groupByRunId(
   });
 }
 
+// ── Error column renderer ────────────────────────────────────────────────
+
+function renderError(msg: string) {
+  if (!msg) return null;
+  const short = msg.length > 60 ? msg.slice(0, 60) + "\u2026" : msg;
+  return (
+    <Tooltip
+      title={<pre style={{ margin: 0, fontSize: 11, whiteSpace: "pre-wrap", maxWidth: 420 }}>{msg}</pre>}
+      overlayStyle={{ maxWidth: 460 }}
+    >
+      <Text type="danger" style={{ fontSize: 12, cursor: "default" }}>{short}</Text>
+    </Tooltip>
+  );
+}
+
+// ── Column definitions (module-level — no state/props dependencies) ──────
+
+const flatColumns: ColumnsType<tasks.TaskHistoryRow> = [
+  {
+    title: "Status",
+    dataIndex: "state",
+    key: "state",
+    width: 130,
+    render: (state: string) => runStateTag(state),
+  },
+  {
+    title: "Scheduled",
+    dataIndex: "scheduledTime",
+    key: "scheduledTime",
+    width: 190,
+    render: (ts: string) => (
+      <Text type="secondary" style={{ fontSize: 12 }}>{formatTime(ts)}</Text>
+    ),
+  },
+  {
+    title: "Start",
+    dataIndex: "startTime",
+    key: "startTime",
+    width: 190,
+    render: (ts: string) => (
+      <Text type="secondary" style={{ fontSize: 12 }}>{formatTime(ts)}</Text>
+    ),
+  },
+  {
+    title: "Duration",
+    key: "duration",
+    width: 90,
+    render: (_, record) => (
+      <Text style={{ fontSize: 12 }}>{formatDuration(record.startTime, record.endTime)}</Text>
+    ),
+  },
+  {
+    title: "Error",
+    dataIndex: "errorMessage",
+    key: "errorMessage",
+    render: (msg: string) => renderError(msg),
+  },
+];
+
+const dagColumns: ColumnsType<DAGRun> = [
+  {
+    title: "Status",
+    dataIndex: "status",
+    key: "status",
+    width: 130,
+    render: (status: string) => runStateTag(status),
+  },
+  {
+    title: "Scheduled",
+    dataIndex: "scheduledTime",
+    key: "scheduledTime",
+    width: 190,
+    render: (ts: string) => (
+      <Text type="secondary" style={{ fontSize: 12 }}>{formatTime(ts)}</Text>
+    ),
+  },
+  {
+    title: "Tasks",
+    dataIndex: "taskCount",
+    key: "taskCount",
+    width: 70,
+    render: (count: number) => (
+      <Text style={{ fontSize: 12 }}>{count}</Text>
+    ),
+  },
+  {
+    title: "",
+    key: "spacer",
+  },
+];
+
+const expandedColumns: ColumnsType<tasks.TaskHistoryRow> = [
+  {
+    title: "Status",
+    dataIndex: "state",
+    key: "state",
+    width: 130,
+    render: (state: string) => runStateTag(state),
+  },
+  {
+    title: "Task",
+    dataIndex: "name",
+    key: "name",
+    width: 180,
+    render: (n: string) => (
+      <Text style={{ fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace", fontSize: 12 }}>
+        {n}
+      </Text>
+    ),
+  },
+  {
+    title: "Start",
+    dataIndex: "startTime",
+    key: "startTime",
+    width: 190,
+    render: (ts: string) => (
+      <Text type="secondary" style={{ fontSize: 12 }}>{formatTime(ts)}</Text>
+    ),
+  },
+  {
+    title: "Duration",
+    key: "duration",
+    width: 90,
+    render: (_, record) => (
+      <Text style={{ fontSize: 12 }}>{formatDuration(record.startTime, record.endTime)}</Text>
+    ),
+  },
+  {
+    title: "Error",
+    dataIndex: "errorMessage",
+    key: "errorMessage",
+    render: (msg: string) => renderError(msg),
+  },
+];
+
 // ── Component ─────────────────────────────────────────────────────────────
 
 type ScopeOption = "Last 24 Hours" | "Last 7 Days";
@@ -189,6 +325,7 @@ export default function TaskHistoryModal({ db, schema, name, isRoot, onClose }: 
   const [topoOrder, setTopoOrder] = useState<Map<string, number>>(new Map());
   const [expandedRunIds, setExpandedRunIds] = useState<string[]>([]);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const loadGenRef = useRef(0);
 
   const days = scope === "Last 7 Days" ? 7 : 1;
 
@@ -201,12 +338,17 @@ export default function TaskHistoryModal({ db, schema, name, isRoot, onClose }: 
   }, [db, schema, isRoot]);
 
   const load = useCallback(() => {
+    const generation = ++loadGenRef.current;
     setError(null);
     GetTaskRunHistory(db, schema, name, isRoot, days)
-      .then((result) => setRows(result ?? []))
+      .then((result) => {
+        if (loadGenRef.current === generation) setRows(result ?? []);
+      })
       .catch((e) => {
-        setError(String(e));
-        setRows([]);
+        if (loadGenRef.current === generation) {
+          setError(String(e));
+          setRows([]);
+        }
       });
   }, [db, schema, name, isRoot, days]);
 
@@ -258,149 +400,6 @@ export default function TaskHistoryModal({ db, schema, name, isRoot, onClose }: 
       return kept;
     });
   }, [dagRuns]);
-
-  // ── Flat columns (child / standalone task) ────────────────────────────────
-  const flatColumns = [
-    {
-      title: "Status",
-      dataIndex: "state",
-      key: "state",
-      width: 130,
-      render: (state: string) => runStateTag(state),
-    },
-    {
-      title: "Scheduled",
-      dataIndex: "scheduledTime",
-      key: "scheduledTime",
-      width: 190,
-      render: (ts: string) => (
-        <Text type="secondary" style={{ fontSize: 12 }}>{formatTime(ts)}</Text>
-      ),
-    },
-    {
-      title: "Start",
-      dataIndex: "startTime",
-      key: "startTime",
-      width: 190,
-      render: (ts: string) => (
-        <Text type="secondary" style={{ fontSize: 12 }}>{formatTime(ts)}</Text>
-      ),
-    },
-    {
-      title: "Duration",
-      key: "duration",
-      width: 90,
-      render: (_: unknown, record: tasks.TaskHistoryRow) => (
-        <Text style={{ fontSize: 12 }}>{formatDuration(record.startTime, record.endTime)}</Text>
-      ),
-    },
-    {
-      title: "Error",
-      dataIndex: "errorMessage",
-      key: "errorMessage",
-      render: (msg: string) => {
-        if (!msg) return null;
-        const short = msg.length > 60 ? msg.slice(0, 60) + "\u2026" : msg;
-        return (
-          <Tooltip
-            title={<pre style={{ margin: 0, fontSize: 11, whiteSpace: "pre-wrap", maxWidth: 420 }}>{msg}</pre>}
-            overlayStyle={{ maxWidth: 460 }}
-          >
-            <Text type="danger" style={{ fontSize: 12, cursor: "default" }}>{short}</Text>
-          </Tooltip>
-        );
-      },
-    },
-  ];
-
-  // ── DAG run columns (root task, expanded) ─────────────────────────────────
-  const dagColumns = [
-    {
-      title: "Status",
-      dataIndex: "status",
-      key: "status",
-      width: 130,
-      render: (status: string) => runStateTag(status),
-    },
-    {
-      title: "Scheduled",
-      dataIndex: "scheduledTime",
-      key: "scheduledTime",
-      width: 190,
-      render: (ts: string) => (
-        <Text type="secondary" style={{ fontSize: 12 }}>{formatTime(ts)}</Text>
-      ),
-    },
-    {
-      title: "Tasks",
-      dataIndex: "taskCount",
-      key: "taskCount",
-      width: 70,
-      render: (count: number) => (
-        <Text style={{ fontSize: 12 }}>{count}</Text>
-      ),
-    },
-    {
-      title: "",
-      key: "spacer",
-    },
-  ];
-
-  // ── Expanded row columns for DAG child tasks ──────────────────────────────
-  const expandedColumns = [
-    {
-      title: "Status",
-      dataIndex: "state",
-      key: "state",
-      width: 130,
-      render: (state: string) => runStateTag(state),
-    },
-    {
-      title: "Task",
-      dataIndex: "name",
-      key: "name",
-      width: 180,
-      render: (n: string) => (
-        <Text style={{ fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace", fontSize: 12 }}>
-          {n}
-        </Text>
-      ),
-    },
-    {
-      title: "Start",
-      dataIndex: "startTime",
-      key: "startTime",
-      width: 190,
-      render: (ts: string) => (
-        <Text type="secondary" style={{ fontSize: 12 }}>{formatTime(ts)}</Text>
-      ),
-    },
-    {
-      title: "Duration",
-      key: "duration",
-      width: 90,
-      render: (_: unknown, record: tasks.TaskHistoryRow) => (
-        <Text style={{ fontSize: 12 }}>{formatDuration(record.startTime, record.endTime)}</Text>
-      ),
-    },
-    {
-      title: "Error",
-      dataIndex: "errorMessage",
-      key: "errorMessage",
-      render: (msg: string) => {
-        if (!msg) return null;
-        const short = msg.length > 60 ? msg.slice(0, 60) + "\u2026" : msg;
-        return (
-          <Tooltip
-            title={<pre style={{ margin: 0, fontSize: 11, whiteSpace: "pre-wrap", maxWidth: 420 }}>{msg}</pre>}
-            overlayStyle={{ maxWidth: 460 }}
-          >
-            <Text type="danger" style={{ fontSize: 12, cursor: "default" }}>{short}</Text>
-          </Tooltip>
-        );
-      },
-    },
-  ];
 
   return (
     <Modal
@@ -480,14 +479,14 @@ export default function TaskHistoryModal({ db, schema, name, isRoot, onClose }: 
       {rows !== null && !error && isRoot && (
         <Table
           dataSource={dagRuns}
-          columns={dagColumns as any}
+          columns={dagColumns}
           rowKey="runId"
           size="small"
           expandable={{
             expandedRowRender: (dagRun: DAGRun) => (
               <Table
                 dataSource={dagRun.tasks}
-                columns={expandedColumns as any}
+                columns={expandedColumns}
                 rowKey={(r) => `${r.name}-${r.startTime}-${r.runId}`}
                 size="small"
                 pagination={false}
@@ -509,7 +508,7 @@ export default function TaskHistoryModal({ db, schema, name, isRoot, onClose }: 
       {rows !== null && !error && !isRoot && (
         <Table
           dataSource={allRows}
-          columns={flatColumns as any}
+          columns={flatColumns}
           rowKey={(r) => `${r.scheduledTime}-${r.startTime}-${r.runId}`}
           size="small"
           pagination={allRows.length > 50 ? { pageSize: 50, showSizeChanger: false } : false}
