@@ -121,6 +121,7 @@ export default function FileBrowser() {
   const currentFile = useQueryStore((s) => s.currentFile);
   const tabs        = useQueryStore((s) => s.tabs);
   const markSaved   = useQueryStore((s) => s.markSaved);
+  const orphanTab   = useQueryStore((s) => s.orphanFileTab);
 
   // ── File tree state ────────────────────────────────────────────────────────
   const [treeData,    setTreeData]    = useState<DataNode[]>([]);
@@ -375,7 +376,7 @@ export default function FileBrowser() {
     setFileCtxMenu(null);
     Modal.confirm({
       title: `Delete ${isDir ? "folder" : "file"}`,
-      content: `Are you sure you want to delete "${name}"?${isDir ? " This will remove the folder and all its contents." : ""}`,
+      content: `Are you sure you want to delete "${name}"?${isDir ? " If this is a real folder, all its contents will be removed. Symbolic links are removed without affecting the target." : ""}`,
       okText: "Delete",
       okButtonProps: { danger: true },
       onOk: async () => {
@@ -384,6 +385,13 @@ export default function FileBrowser() {
             await DeleteDirectory(path);
           } else {
             await DeleteFile(path);
+          }
+          // Orphan any open tabs referencing the deleted path (or children).
+          const sep = path.includes("\\") ? "\\" : "/";
+          for (const tab of tabs) {
+            if (tab.path === path || (isDir && tab.path?.startsWith(path + sep))) {
+              orphanTab(tab.id);
+            }
           }
           message.success(`Deleted ${name}`);
           refresh();
@@ -430,10 +438,14 @@ export default function FileBrowser() {
         const sep = path.includes("\\") ? "\\" : "/";
         const newPath = `${dir}${sep}${sanitized}`;
         await RenameFile(path, newPath);
-        // Update any open tabs that reference the old path.
+        // Update any open tabs that reference the old path (or are children of a renamed directory).
+        const prefix = path + sep;
         for (const tab of tabs) {
           if (tab.path === path) {
             markSaved(tab.id, newPath, sanitized);
+          } else if (tab.path?.startsWith(prefix)) {
+            const updatedPath = newPath + tab.path.substring(path.length);
+            markSaved(tab.id, updatedPath, pathBase(updatedPath));
           }
         }
         message.success(`Renamed to ${sanitized}`);
@@ -698,6 +710,7 @@ export default function FileBrowser() {
         <div
           ref={fileCtxRef}
           role="menu"
+          aria-label="File actions"
           style={{
             position: "fixed",
             top: fileCtxMenu.y,
