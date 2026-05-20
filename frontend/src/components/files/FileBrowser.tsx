@@ -252,9 +252,8 @@ export default function FileBrowser() {
     try {
       const entries = await ListDirectory(exportDir);
       setTreeData(entriesToNodes(entries));
+      setLoadedKeys([]); // clear so Tree re-triggers loadData for expanded dirs
       setLoaded(true);
-      // Preserve loadedKeys and selectedKey so the tree stays expanded
-      // after single-file operations (rename, create, delete).
     } catch {
       // non-fatal
     } finally {
