@@ -12,12 +12,13 @@ import { GetPlatformOS } from "../../../wailsjs/go/main/App";
 // Module-level cache for platform OS (compile-time constant, fetched once).
 let _platformOS: string | null = null;
 
-/** Fetches the platform OS once and caches the result. */
+/** Fetches the platform OS once and caches the result.
+ *  On failure, returns "unknown" WITHOUT caching — so the next call retries. */
 export function getPlatformOS(): Promise<string> {
   if (_platformOS) return Promise.resolve(_platformOS);
   return GetPlatformOS()
     .then((os) => { _platformOS = os; return os; })
-    .catch(() => "unknown");
+    .catch(() => "unknown"); // intentionally not cached: _platformOS stays null
 }
 
 // Eagerly fetch on module load so the cache is populated before components mount.

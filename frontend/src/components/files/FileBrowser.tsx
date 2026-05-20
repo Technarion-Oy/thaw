@@ -60,6 +60,11 @@ function pathDir(p: string): string {
   return i === 0 ? p.substring(0, 1) : p.substring(0, i);
 }
 
+/** Detect the path separator used in a path (backslash on Windows, forward slash otherwise). */
+function pathSep(p: string): string {
+  return p.includes("\\") ? "\\" : "/";
+}
+
 /** Extract the filename from a path, handling both / and \ separators. */
 function pathBase(p: string): string {
   const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
@@ -243,15 +248,13 @@ export default function FileBrowser() {
 
   const refresh = async () => {
     setFileCtxMenu(null); // dismiss stale context menu
-    setLoaded(false);
-    setTreeData([]);
-    setLoadedKeys([]);
-    setSelectedKey(null);
     setLoading(true);
     try {
       const entries = await ListDirectory(exportDir);
       setTreeData(entriesToNodes(entries));
       setLoaded(true);
+      // Preserve loadedKeys and selectedKey so the tree stays expanded
+      // after single-file operations (rename, create, delete).
     } catch {
       // non-fatal
     } finally {
@@ -390,7 +393,7 @@ export default function FileBrowser() {
           }
           // Read fresh tabs from the store (not the stale closure captured at render time).
           const currentTabs = useQueryStore.getState().tabs;
-          const sep = path.includes("\\") ? "\\" : "/";
+          const sep = pathSep(path);
           for (const tab of currentTabs) {
             if (tab.path === path || (isDir && tab.path?.startsWith(path + sep))) {
               orphanTab(tab.id);
@@ -443,7 +446,7 @@ export default function FileBrowser() {
     try {
       if (kind === "rename") {
         const dir = pathDir(path);
-        const sep = path.includes("\\") ? "\\" : "/";
+        const sep = pathSep(path);
         // Avoid double separator when dir is a root (e.g. "/" or "C:\").
         const newPath = dir.endsWith(sep) ? `${dir}${sanitized}` : `${dir}${sep}${sanitized}`;
         await RenameFile(path, newPath);
@@ -462,11 +465,11 @@ export default function FileBrowser() {
         }
         message.success(`Renamed to ${sanitized}`);
       } else if (kind === "newFolder") {
-        const sep = path.includes("\\") ? "\\" : "/";
+        const sep = pathSep(path);
         await CreateDirectory(`${path}${sep}${sanitized}`);
         message.success(`Created folder ${sanitized}`);
       } else if (kind === "newFile") {
-        const sep = path.includes("\\") ? "\\" : "/";
+        const sep = pathSep(path);
         const name = sanitized.endsWith(".sql") ? sanitized : `${sanitized}.sql`;
         await CreateFile(`${path}${sep}${name}`);
         message.success(`Created ${name}`);
@@ -817,7 +820,7 @@ function CtxItem({ icon, label, onClick, danger }: { icon: React.ReactNode; labe
       onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
       onFocus={(e) => (e.currentTarget.style.background = "var(--border)")}
-      onBlur={(e) => (e.currentTarget.style.background = "transparent")}
+      onBlur={(e) => { e.stopPropagation(); e.currentTarget.style.background = "transparent"; }}
       onClick={onClick}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
     >
