@@ -659,11 +659,7 @@ The frontend build pipeline applies two layers of IP protection automatically:
 
 The build script allocates 6 GB of Node heap (`--max-old-space-size=6144`) to accommodate the obfuscator's memory usage.
 
-**CI release builds** are triggered automatically by pushing a version tag to `main`. Artifacts for macOS (arm64), Windows (amd64), and Linux (amd64) are produced and named after the tag:
-
-```bash
-git tag v1.2.3 && git push origin v1.2.3
-```
+**CI release builds** are triggered by running the release pipeline, which automatically creates and pushes the version tag. Artifacts for macOS (arm64), Windows (amd64), and Linux (amd64) are produced and named after the tag.
 
 ---
 
