@@ -558,6 +558,10 @@ export function GetTableSettings(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetTableSettings'](arg1, arg2, arg3);
 }
 
+export function GetTaskRunHistory(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['GetTaskRunHistory'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function GetTaskStatuses(arg1, arg2) {
   return window['go']['main']['App']['GetTaskStatuses'](arg1, arg2);
 }

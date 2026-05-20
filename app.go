@@ -3495,6 +3495,14 @@ func (a *App) GetTaskStatuses(database, schema string) (tasks.StatusesResult, er
 	return tasks.GetStatuses(a.ctx, a.client, database, schema)
 }
 
+// GetTaskRunHistory returns the execution history for a task from INFORMATION_SCHEMA.TASK_HISTORY().
+func (a *App) GetTaskRunHistory(database, schema, taskName string, isRoot bool, days int) ([]tasks.TaskHistoryRow, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return tasks.GetTaskRunHistory(a.ctx, a.client, database, schema, taskName, isRoot, days)
+}
+
 // ... and identically wrap DropTree, EnableDependents, HasChildren, etc.
 
 // ListRootTasks returns task finalizability rows for the given schema.

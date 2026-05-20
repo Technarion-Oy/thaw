@@ -15,10 +15,11 @@ import {
 } from "antd";
 import {
   ClockCircleOutlined, EditOutlined, CheckOutlined, CloseOutlined,
-  PlayCircleOutlined, PauseCircleOutlined, PlusOutlined, DeleteOutlined, FlagOutlined, SearchOutlined,
+  PlayCircleOutlined, PauseCircleOutlined, PlusOutlined, DeleteOutlined, FlagOutlined, SearchOutlined, HistoryOutlined,
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterTask, ListNotificationIntegrations, ListFinalizableTasks, TaskHasChildren, GetTaskStatuses, SuspendTaskList, ResumeTaskList } from "../../../wailsjs/go/main/App";
 import CreateTaskModal from "./CreateTaskModal";
+import TaskHistoryModal from "./TaskHistoryModal";
 import type { main, tasks } from "../../../wailsjs/go/models";
 import { parsePredecessors as parsePredecessorsUtil, extractName } from "../../utils/taskHierarchy";
 import WhenConditionBuilder from "./WhenConditionBuilder";
@@ -471,6 +472,7 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
   const [toggling,     setToggling]     = useState(false);
   const [togglingGraph, setTogglingGraph] = useState(false);
   const [integrations, setIntegrations] = useState<{ label: string; value: string }[]>([]);
+  const [showHistory,  setShowHistory]  = useState(false);
   const [whenEditing,  setWhenEditing]  = useState(false);
   const [whenDraft,    setWhenDraft]    = useState("");
   const [whenSaving,   setWhenSaving]   = useState(false);
@@ -843,6 +845,13 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
                 </Button>
               </Tooltip>
             )}
+            <Button
+              size="small"
+              icon={<HistoryOutlined />}
+              onClick={() => setShowHistory(true)}
+            >
+              History
+            </Button>
           </div>
 
           {/* ── Trigger warning ──────────────────────────────────────────── */}
@@ -1285,6 +1294,16 @@ export default function TaskPropertiesModal({ db, schema, name, isFinalizer = fa
           setShowCreateFinalizer(false);
           setRootHasFinalizer(true);
         }}
+      />
+    )}
+
+    {showHistory && (
+      <TaskHistoryModal
+        db={db}
+        schema={schema}
+        name={name}
+        isRoot={!isFinalizer && predecessors.length === 0}
+        onClose={() => setShowHistory(false)}
       />
     )}
     </>

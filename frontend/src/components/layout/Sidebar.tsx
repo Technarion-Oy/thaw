@@ -84,6 +84,7 @@ import CreateFileFormatModal from "../database/CreateFileFormatModal";
 import ObjectSummariesModal from "../database/ObjectSummariesModal";
 import ExecuteTaskModal from "../task/ExecuteTaskModal";
 import TaskGraphModal from "../task/TaskGraphModal";
+import TaskHistoryModal from "../task/TaskHistoryModal";
 import TaskPropertiesModal from "../task/TaskPropertiesModal";
 import TaskStatusesModal from "../task/TaskStatusesModal";
 import ERDiagramModal from "../er/ERDiagramModal";
@@ -459,6 +460,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [executeTaskModal, setExecuteTaskModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [taskPropsModal, setTaskPropsModal] = useState<{ db: string; schema: string; name: string; isFinalizer?: boolean } | null>(null);
   const [taskGraphModal, setTaskGraphModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [taskHistoryModal, setTaskHistoryModal] = useState<{ db: string; schema: string; name: string; isRoot: boolean } | null>(null);
   const [taskStatusesModal, setTaskStatusesModal] = useState<{ db: string; schema: string } | null>(null);
   const [undropModal, setUndropModal] = useState<UndropModal | null>(null);
   const [undropSchemasModal, setUndropSchemasModal] = useState<UndropSchemasModal | null>(null);
@@ -1125,6 +1127,19 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const name = nameParts.join(":");
     setCtxMenu(null);
     setTaskGraphModal({ db, schema, name });
+  };
+
+  const openTaskHistory = () => {
+    if (!ctxMenu) return;
+    const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
+    const name = nameParts.join(":");
+    // A task is a root task if it is not a finalizer and has no predecessors
+    // (i.e. it sits at the top level in the task tree). The isFinalizer flag
+    // is reliably set by buildTaskTree; for non-finalizer tasks at the root
+    // of the tree, the node will not have a parent in the tree.
+    const isRoot = !ctxMenu.isFinalizer;
+    setCtxMenu(null);
+    setTaskHistoryModal({ db, schema, name, isRoot });
   };
 
   const openCreateTable = () => {
@@ -2522,6 +2537,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Execute Task", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeTask)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TASK" &&
             menuItem("View Task Graph…", <ShareAltOutlined style={{ fontSize: 12 }} />, openTaskGraph, undefined, !featureFlags.taskGraphVisualizer, "Task Graph Visualizer is disabled. Enable it under View → Enabled Features…")}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TASK" &&
+            menuItem("View Run History…", <HistoryOutlined style={{ fontSize: 12 }} />, openTaskHistory)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TASK" && !ctxMenu.isFinalizer &&
             menuItem("Delete Task Graph…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, deleteTaskGraph, "#f85149")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "PROCEDURE" &&
@@ -2642,6 +2659,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           schema={taskGraphModal.schema}
           taskName={taskGraphModal.name}
           onClose={() => setTaskGraphModal(null)}
+        />
+      )}
+
+      {/* Task History modal */}
+      {taskHistoryModal && (
+        <TaskHistoryModal
+          db={taskHistoryModal.db}
+          schema={taskHistoryModal.schema}
+          name={taskHistoryModal.name}
+          isRoot={taskHistoryModal.isRoot}
+          onClose={() => setTaskHistoryModal(null)}
         />
       )}
 
