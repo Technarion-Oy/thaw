@@ -419,6 +419,7 @@ func DuplicateFile(srcPath, allowedRoot string) (string, error) {
 	defer dst.Close() //nolint:errcheck
 
 	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()        //nolint:errcheck // close before remove (required on Windows)
 		os.Remove(dstPath) //nolint:errcheck
 		return "", err
 	}
