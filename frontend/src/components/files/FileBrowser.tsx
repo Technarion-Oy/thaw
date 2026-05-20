@@ -224,8 +224,15 @@ export default function FileBrowser() {
   const [fileCtxMenu, setFileCtxMenu] = useState<{ x: number; y: number; path: string; name: string; isDir: boolean } | null>(null);
   const fileCtxRef = useRef<HTMLDivElement>(null);
 
-  // ── Inline input state (rename / new folder / new file) ─────────────────
-  const [inlineInput, setInlineInput] = useState<{ kind: "rename" | "newFolder" | "newFile"; path: string; value: string } | null>(null);
+  // ── Inline rename state (VS Code–style editing in the tree) ────────────
+  const [editingKey, setEditingKey] = useState<Key | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+  const editActionRef = useRef<"idle" | "submitting" | "cancelled">("idle");
+  const editInitRef = useRef(false);
+
+  // ── Modal state (new folder / new file) ─────────────────────────────────
+  const [inlineInput, setInlineInput] = useState<{ kind: "newFolder" | "newFile"; path: string; value: string } | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // ── Collapse state ──────────────────────────────────────────────────────────
   const [expanded, setExpanded] = useState(false);
@@ -497,8 +504,66 @@ export default function FileBrowser() {
 
   const handleRenameStart = () => {
     if (!fileCtxMenu) return;
-    setInlineInput({ kind: "rename", path: fileCtxMenu.path, value: fileCtxMenu.name });
+    editActionRef.current = "idle";
+    editInitRef.current = false;
+    setEditingKey(fileCtxMenu.path);
+    setEditingValue(fileCtxMenu.name);
     setFileCtxMenu(null);
+  };
+
+  const submitRename = async () => {
+    if (editActionRef.current !== "idle" || editingKey === null) return;
+    const path = String(editingKey);
+    const sanitized = editingValue.trim().replace(/[/\\]/g, "");
+    if (!sanitized || sanitized === pathBase(path)) {
+      editActionRef.current = "cancelled";
+      setEditingKey(null);
+      return;
+    }
+    if (/[:"*?<>|]/.test(sanitized)) {
+      message.error("Name contains invalid characters (: \" * ? < > |)");
+      return;
+    }
+    const dir = pathDir(path);
+    const sep = pathSep(path);
+    const newPath = dir.endsWith(sep) ? `${dir}${sanitized}` : `${dir}${sep}${sanitized}`;
+    editActionRef.current = "submitting";
+    try {
+      await RenameFile(path, newPath);
+      const currentTabs = useQueryStore.getState().tabs;
+      const prefix = path + sep;
+      for (const tab of currentTabs) {
+        if (tab.path === path) {
+          updateTabPath(tab.id, newPath, sanitized);
+        } else if (tab.path?.startsWith(prefix)) {
+          const updatedPath = newPath + tab.path.substring(path.length);
+          updateTabPath(tab.id, updatedPath, pathBase(updatedPath));
+        }
+      }
+      setTreeData(prev => renameTreeNode(prev, path, newPath, sanitized));
+      setLoadedKeys(prev => prev.map(k => {
+        const ks = String(k);
+        if (ks === path) return newPath;
+        if (ks.startsWith(prefix)) return newPath + ks.substring(path.length);
+        return k;
+      }));
+      setSelectedKey(prev => {
+        const sk = prev ? String(prev) : null;
+        if (sk === path) return newPath;
+        if (sk?.startsWith(prefix)) return newPath + sk.substring(path.length);
+        return prev;
+      });
+      setEditingKey(null);
+      message.success(`Renamed to ${sanitized}`);
+    } catch (e) {
+      message.error(`Rename failed: ${String(e)}`);
+      editActionRef.current = "idle"; // allow retry
+    }
+  };
+
+  const cancelRename = () => {
+    editActionRef.current = "cancelled";
+    setEditingKey(null);
   };
 
   const handleNewFolderStart = () => {
@@ -514,6 +579,7 @@ export default function FileBrowser() {
   };
 
   const submitInlineInput = async () => {
+    if (isSubmitting) return;
     if (!inlineInput || !inlineInput.value.trim()) {
       setInlineInput(null);
       return;
@@ -529,48 +595,15 @@ export default function FileBrowser() {
       message.error("Name contains invalid characters (: \" * ? < > |)");
       return;
     }
+    setIsSubmitting(true);
     try {
-      if (kind === "rename") {
-        const dir = pathDir(path);
-        const sep = pathSep(path);
-        // Avoid double separator when dir is a root (e.g. "/" or "C:\").
-        const newPath = dir.endsWith(sep) ? `${dir}${sanitized}` : `${dir}${sep}${sanitized}`;
-        await RenameFile(path, newPath);
-        // Read fresh tabs from the store (not the stale closure captured at render time).
-        // Uses updateTabPath (not markSaved) to preserve the dirty state — the file's
-        // disk content was moved but any unsaved in-memory edits remain uncommitted.
-        const currentTabs = useQueryStore.getState().tabs;
-        const prefix = path + sep;
-        for (const tab of currentTabs) {
-          if (tab.path === path) {
-            updateTabPath(tab.id, newPath, sanitized);
-          } else if (tab.path?.startsWith(prefix)) {
-            const updatedPath = newPath + tab.path.substring(path.length);
-            updateTabPath(tab.id, updatedPath, pathBase(updatedPath));
-          }
-        }
-        // Update tree in-place: re-key the renamed node and all descendants.
-        setTreeData(prev => renameTreeNode(prev, path, newPath, sanitized));
-        setLoadedKeys(prev => prev.map(k => {
-          const ks = String(k);
-          if (ks === path) return newPath;
-          if (ks.startsWith(prefix)) return newPath + ks.substring(path.length);
-          return k;
-        }));
-        setSelectedKey(prev => {
-          const sk = prev ? String(prev) : null;
-          if (sk === path) return newPath;
-          if (sk?.startsWith(prefix)) return newPath + sk.substring(path.length);
-          return prev;
-        });
-        message.success(`Renamed to ${sanitized}`);
-      } else if (kind === "newFolder") {
+      if (kind === "newFolder") {
         const sep = pathSep(path);
         const folderPath = `${path}${sep}${sanitized}`;
         await CreateDirectory(folderPath);
         setTreeData(prev => addChild(prev, path, makeNode(folderPath, sanitized, true)));
         message.success(`Created folder ${sanitized}`);
-      } else if (kind === "newFile") {
+      } else {
         const sep = pathSep(path);
         const name = sanitized.endsWith(".sql") ? sanitized : `${sanitized}.sql`;
         const filePath = `${path}${sep}${name}`;
@@ -580,9 +613,43 @@ export default function FileBrowser() {
       }
       setInlineInput(null);
     } catch (e) {
-      const prefix = kind === "rename" ? "Rename failed" : kind === "newFolder" ? "Could not create folder" : "Could not create file";
+      const prefix = kind === "newFolder" ? "Could not create folder" : "Could not create file";
       message.error(`${prefix}: ${String(e)}`);
+    } finally {
+      setIsSubmitting(false);
     }
+  };
+
+  const titleRender = (nodeData: DataNode) => {
+    if (editingKey !== null && nodeData.key === editingKey) {
+      return (
+        <Input
+          size="small"
+          autoFocus
+          value={editingValue}
+          onChange={(e) => setEditingValue(e.target.value)}
+          onKeyDown={(e) => {
+            e.stopPropagation(); // prevent tree keyboard navigation
+            if (e.key === "Enter") submitRename();
+            else if (e.key === "Escape") cancelRename();
+          }}
+          onBlur={submitRename}
+          onClick={(e) => e.stopPropagation()} // prevent tree selection
+          style={{ fontSize: 12, height: 22, padding: "0 4px" }}
+          ref={(el) => {
+            if (!el || editInitRef.current) return;
+            editInitRef.current = true;
+            const input = (el as any).input ?? el;
+            if (input?.setSelectionRange) {
+              const dot = editingValue.lastIndexOf(".");
+              const end = dot > 0 ? dot : editingValue.length;
+              requestAnimationFrame(() => input.setSelectionRange(0, end));
+            }
+          }}
+        />
+      );
+    }
+    return <>{nodeData.title}</>;
   };
 
   const grouped = groupByPath(searchResults);
@@ -774,6 +841,7 @@ export default function FileBrowser() {
                 loadData={onLoadData as any}
                 onSelect={onSelect as any}
                 onRightClick={onRightClick as any}
+                titleRender={titleRender}
                 showIcon
                 blockNode
                 style={{ background: "transparent", color: "var(--text)", fontSize: 12 }}
@@ -783,16 +851,13 @@ export default function FileBrowser() {
         </div>
       )}
 
-      {/* Inline input modal for rename / new folder / new file */}
+      {/* Modal for new folder / new file */}
       {inlineInput && (
         <Modal
           open
-          title={
-            inlineInput.kind === "rename" ? "Rename" :
-            inlineInput.kind === "newFolder" ? "New Folder" :
-            "New SQL File"
-          }
-          okText={inlineInput.kind === "rename" ? "Rename" : "Create"}
+          title={inlineInput.kind === "newFolder" ? "New Folder" : "New SQL File"}
+          okText="Create"
+          confirmLoading={isSubmitting}
           onOk={submitInlineInput}
           onCancel={() => setInlineInput(null)}
           width={360}
@@ -803,24 +868,9 @@ export default function FileBrowser() {
             size="small"
             value={inlineInput.value}
             onChange={(e) => setInlineInput({ ...inlineInput, value: e.target.value })}
-            onPressEnter={submitInlineInput}
-            placeholder={
-              inlineInput.kind === "rename" ? "New name" :
-              inlineInput.kind === "newFolder" ? "Folder name" :
-              "File name (.sql)"
-            }
+            onPressEnter={() => { if (!isSubmitting) submitInlineInput(); }}
+            placeholder={inlineInput.kind === "newFolder" ? "Folder name" : "File name (.sql)"}
             style={{ marginTop: 8 }}
-            ref={(el) => {
-              // Select just the filename stem (before the last dot) for easy editing.
-              if (el && inlineInput.kind === "rename") {
-                const input = el.input ?? el;
-                if (input && typeof input.setSelectionRange === "function") {
-                  const dot = inlineInput.value.lastIndexOf(".");
-                  const end = dot > 0 ? dot : inlineInput.value.length;
-                  requestAnimationFrame(() => input.setSelectionRange(0, end));
-                }
-              }
-            }}
           />
         </Modal>
       )}
@@ -923,6 +973,7 @@ function CtxItem({ icon, label, onClick, danger }: { icon: React.ReactNode; labe
       onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
       onFocus={(e) => (e.currentTarget.style.background = "var(--border)")}
+      // Stop blur propagation so moving focus between items doesn't dismiss the parent menu.
       onBlur={(e) => { e.stopPropagation(); e.currentTarget.style.background = "transparent"; }}
       onClick={onClick}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}

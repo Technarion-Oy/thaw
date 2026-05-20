@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"unicode/utf8"
 )
 
 // FileEntry describes a single file or directory.
@@ -310,9 +311,17 @@ func caseInsensitiveFS() bool {
 // Note: the byte-length slice before EqualFold is safe for filesystem paths
 // which are overwhelmingly ASCII. Unicode characters whose case-folded forms
 // have different byte widths (e.g. ß/SS) are not valid in typical FS paths.
+// Guard: if the slice point falls mid-rune the check returns false and the
+// filepath.Rel defense-in-depth layer handles correctness.
 func hasPathPrefix(path, prefix string) bool {
 	if caseInsensitiveFS() {
-		return len(path) >= len(prefix) && strings.EqualFold(path[:len(prefix)], prefix)
+		if len(path) < len(prefix) {
+			return false
+		}
+		if !utf8.ValidString(path[:len(prefix)]) {
+			return false
+		}
+		return strings.EqualFold(path[:len(prefix)], prefix)
 	}
 	return strings.HasPrefix(path, prefix)
 }

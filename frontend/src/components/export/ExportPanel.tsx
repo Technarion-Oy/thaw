@@ -300,15 +300,17 @@ export default function ExportPanel() {
                 </Tag>
               )}
             </Space>
-            <Tooltip title={revealText}>
-              <Button
-                type="text"
-                size="small"
-                icon={<FolderOpenOutlined style={{ fontSize: 11 }} />}
-                onClick={() => exportDir && RevealInFinder(exportDir).catch((e) => message.error(`Could not reveal: ${String(e)}`))}
-                style={{ color: "var(--text-muted)", padding: "0 4px" }}
-              />
-            </Tooltip>
+            {exportDir && (
+              <Tooltip title={revealText}>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<FolderOpenOutlined style={{ fontSize: 11 }} />}
+                  onClick={() => RevealInFinder(exportDir).catch((e) => message.error(`Could not reveal: ${String(e)}`))}
+                  style={{ color: "var(--text-muted)", padding: "0 4px" }}
+                />
+              </Tooltip>
+            )}
             <Button
               type="text"
               size="small"
