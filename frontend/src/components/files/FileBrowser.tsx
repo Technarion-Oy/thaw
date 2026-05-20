@@ -93,6 +93,83 @@ function updateNode(nodes: DataNode[], targetKey: string, children: DataNode[]):
   });
 }
 
+/** Create a DataNode for a new file or directory. */
+function makeNode(path: string, name: string, isDir: boolean): DataNode {
+  return {
+    key: path,
+    title: name,
+    icon: (props: { expanded?: boolean }) =>
+      isDir
+        ? (props.expanded ? <FolderOpenOutlined /> : <FolderOutlined />)
+        : <FileOutlined style={{ color: CLR_SECONDARY }} />,
+    isLeaf: !isDir,
+  };
+}
+
+/** Remove a node by key from the tree. */
+function removeNode(nodes: DataNode[], key: string): DataNode[] {
+  return nodes
+    .filter((n) => n.key !== key)
+    .map((n) =>
+      n.children ? { ...n, children: removeNode(n.children, key) } : n
+    );
+}
+
+/** Rename a node (update key + title) and recursively re-key all descendants. */
+function renameTreeNode(
+  nodes: DataNode[],
+  oldKey: string,
+  newKey: string,
+  newTitle: string,
+): DataNode[] {
+  return nodes.map((n) => {
+    if (n.key === oldKey) {
+      return {
+        ...n,
+        key: newKey,
+        title: newTitle,
+        children: n.children ? reKeyChildren(n.children, String(oldKey), newKey) : undefined,
+      };
+    }
+    return n.children
+      ? { ...n, children: renameTreeNode(n.children, oldKey, newKey, newTitle) }
+      : n;
+  });
+}
+
+/** Recursively update descendant keys when a parent path changes. */
+function reKeyChildren(nodes: DataNode[], oldPrefix: string, newPrefix: string): DataNode[] {
+  return nodes.map((n) => ({
+    ...n,
+    key: newPrefix + String(n.key).substring(oldPrefix.length),
+    children: n.children ? reKeyChildren(n.children, oldPrefix, newPrefix) : undefined,
+  }));
+}
+
+/** Insert a child into a parent's children, maintaining dirs-first alphabetical order.
+ *  If the parent hasn't been expanded yet (no children array), the node is not inserted
+ *  — it will appear naturally when the user expands the directory. */
+function addChild(nodes: DataNode[], parentKey: string, child: DataNode): DataNode[] {
+  return nodes.map((n) => {
+    if (n.key === parentKey) {
+      if (!n.children) return n;
+      const kids = [...n.children];
+      const isDir = !child.isLeaf;
+      const name = String(child.title ?? "");
+      let i = 0;
+      if (isDir) {
+        while (i < kids.length && !kids[i].isLeaf && String(kids[i].title ?? "").localeCompare(name) < 0) i++;
+      } else {
+        while (i < kids.length && !kids[i].isLeaf) i++;
+        while (i < kids.length && String(kids[i].title ?? "").localeCompare(name) < 0) i++;
+      }
+      kids.splice(i, 0, child);
+      return { ...n, children: kids };
+    }
+    return n.children ? { ...n, children: addChild(n.children, parentKey, child) } : n;
+  });
+}
+
 // Returns a context window around the match so long lines display usefully.
 function getSnippet(
   line: string,
@@ -399,7 +476,17 @@ export default function FileBrowser() {
             }
           }
           message.success(`Deleted ${name}`);
-          refresh();
+          // Update tree in-place instead of full refresh.
+          setTreeData(prev => removeNode(prev, path));
+          setLoadedKeys(prev => prev.filter(k => {
+            const ks = String(k);
+            return ks !== path && !ks.startsWith(path + sep);
+          }));
+          setSelectedKey(prev => {
+            const sk = prev ? String(prev) : null;
+            if (sk === path || (isDir && sk?.startsWith(path + sep))) return null;
+            return prev;
+          });
         } catch (e) {
           message.error(`Delete failed: ${String(e)}`);
           throw e; // Re-throw to keep the modal open on failure.
@@ -462,19 +549,36 @@ export default function FileBrowser() {
             updateTabPath(tab.id, updatedPath, pathBase(updatedPath));
           }
         }
+        // Update tree in-place: re-key the renamed node and all descendants.
+        setTreeData(prev => renameTreeNode(prev, path, newPath, sanitized));
+        setLoadedKeys(prev => prev.map(k => {
+          const ks = String(k);
+          if (ks === path) return newPath;
+          if (ks.startsWith(prefix)) return newPath + ks.substring(path.length);
+          return k;
+        }));
+        setSelectedKey(prev => {
+          const sk = prev ? String(prev) : null;
+          if (sk === path) return newPath;
+          if (sk?.startsWith(prefix)) return newPath + sk.substring(path.length);
+          return prev;
+        });
         message.success(`Renamed to ${sanitized}`);
       } else if (kind === "newFolder") {
         const sep = pathSep(path);
-        await CreateDirectory(`${path}${sep}${sanitized}`);
+        const folderPath = `${path}${sep}${sanitized}`;
+        await CreateDirectory(folderPath);
+        setTreeData(prev => addChild(prev, path, makeNode(folderPath, sanitized, true)));
         message.success(`Created folder ${sanitized}`);
       } else if (kind === "newFile") {
         const sep = pathSep(path);
         const name = sanitized.endsWith(".sql") ? sanitized : `${sanitized}.sql`;
-        await CreateFile(`${path}${sep}${name}`);
+        const filePath = `${path}${sep}${name}`;
+        await CreateFile(filePath);
+        setTreeData(prev => addChild(prev, path, makeNode(filePath, name, false)));
         message.success(`Created ${name}`);
       }
       setInlineInput(null);
-      refresh();
     } catch (e) {
       const prefix = kind === "rename" ? "Rename failed" : kind === "newFolder" ? "Could not create folder" : "Could not create file";
       message.error(`${prefix}: ${String(e)}`);
