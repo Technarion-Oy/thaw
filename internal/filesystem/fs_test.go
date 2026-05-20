@@ -473,6 +473,74 @@ func TestDeleteFile_SymlinkToDir(t *testing.T) {
 	}
 }
 
+// ─── DuplicateFile ──────────────────────────────────────────────────────────
+
+func TestDuplicateFile_Success(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "query.sql")
+	if err := os.WriteFile(src, []byte("SELECT 1;"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	newPath, err := DuplicateFile(src, root)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if filepath.Base(newPath) != "query_copy.sql" {
+		t.Errorf("expected query_copy.sql, got: %s", filepath.Base(newPath))
+	}
+	data, err := os.ReadFile(newPath)
+	if err != nil {
+		t.Fatal("duplicate file should exist")
+	}
+	if string(data) != "SELECT 1;" {
+		t.Errorf("content mismatch: got %q", string(data))
+	}
+}
+
+func TestDuplicateFile_SecondCopy(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "query.sql")
+	if err := os.WriteFile(src, []byte("SELECT 1;"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Create the first copy so the second gets _copy_2.
+	if err := os.WriteFile(filepath.Join(root, "query_copy.sql"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	newPath, err := DuplicateFile(src, root)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if filepath.Base(newPath) != "query_copy_2.sql" {
+		t.Errorf("expected query_copy_2.sql, got: %s", filepath.Base(newPath))
+	}
+}
+
+func TestDuplicateFile_OutsideRoot(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	src := filepath.Join(outside, "query.sql")
+	if err := os.WriteFile(src, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := DuplicateFile(src, root)
+	if err == nil {
+		t.Error("expected error for source outside root")
+	}
+}
+
+func TestDuplicateFile_RejectsDirectory(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "subdir")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := DuplicateFile(sub, root)
+	if err == nil {
+		t.Error("expected error when trying to duplicate a directory")
+	}
+}
+
 // ─── Prefix-collision defense ───────────────────────────────────────────────
 
 func TestValidateExistingPath_PrefixCollision(t *testing.T) {

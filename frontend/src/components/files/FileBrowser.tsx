@@ -22,6 +22,7 @@ import {
   DeleteOutlined,
   EditOutlined,
   CopyOutlined,
+  SnippetsOutlined,
   FolderViewOutlined,
   CaretRightFilled,
   CaretDownFilled,
@@ -943,7 +944,7 @@ export default function FileBrowser() {
           <CtxItem icon={<FolderViewOutlined />} label={revealText} onClick={handleReveal} />
           <CtxItem icon={<CopyOutlined />} label="Copy Path" onClick={handleCopyPath} />
           {!fileCtxMenu.isDir && (
-            <CtxItem icon={<CopyOutlined />} label="Duplicate" onClick={handleDuplicate} />
+            <CtxItem icon={<SnippetsOutlined />} label="Duplicate" onClick={handleDuplicate} />
           )}
           <CtxItem icon={<EditOutlined />} label="Rename…" onClick={handleRenameStart} />
           <CtxItem icon={<DeleteOutlined />} label="Delete" onClick={handleDeleteConfirm} danger />

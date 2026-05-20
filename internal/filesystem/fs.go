@@ -215,13 +215,19 @@ func WriteFileInRoot(path, content, allowedRoot string) error {
 	if err := validateNewPath(path, allowedRoot); err != nil {
 		return err
 	}
-	if _, err := os.Stat(path); err == nil {
-		return fmt.Errorf("file already exists: %s", filepath.Base(path))
-	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(content), 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		if os.IsExist(err) {
+			return fmt.Errorf("file already exists: %s", filepath.Base(path))
+		}
+		return err
+	}
+	defer f.Close() //nolint:errcheck
+	_, err = f.WriteString(content)
+	return err
 }
 
 // validateExistingPath checks that an existing path is strictly inside allowedRoot,
@@ -354,7 +360,8 @@ func checkStrictlyInside(resolvedPath, resolvedRoot string) error {
 }
 
 // uniqueCopyName generates a unique copy name for srcPath by appending _copy, _copy_2, etc.
-func uniqueCopyName(srcPath string) string {
+// Returns an error if no unique name can be found within 999 attempts.
+func uniqueCopyName(srcPath string) (string, error) {
 	dir := filepath.Dir(srcPath)
 	base := filepath.Base(srcPath)
 	ext := filepath.Ext(base)
@@ -362,14 +369,15 @@ func uniqueCopyName(srcPath string) string {
 
 	candidate := filepath.Join(dir, stem+"_copy"+ext)
 	if _, err := os.Stat(candidate); err != nil {
-		return candidate
+		return candidate, nil
 	}
-	for i := 2; ; i++ {
+	for i := 2; i < 1000; i++ {
 		candidate = filepath.Join(dir, fmt.Sprintf("%s_copy_%d%s", stem, i, ext))
 		if _, err := os.Stat(candidate); err != nil {
-			return candidate
+			return candidate, nil
 		}
 	}
+	return "", fmt.Errorf("could not find a unique copy name for %s", filepath.Base(srcPath))
 }
 
 // DuplicateFile creates a copy of srcPath in the same directory with a unique name.
@@ -386,7 +394,13 @@ func DuplicateFile(srcPath, allowedRoot string) (string, error) {
 		return "", fmt.Errorf("cannot duplicate a directory")
 	}
 
-	dstPath := uniqueCopyName(srcPath)
+	dstPath, err := uniqueCopyName(srcPath)
+	if err != nil {
+		return "", err
+	}
+	if err := validateNewPath(dstPath, allowedRoot); err != nil {
+		return "", err
+	}
 
 	src, err := os.Open(srcPath)
 	if err != nil {

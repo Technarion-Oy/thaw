@@ -360,7 +360,8 @@ Open **AI → Configure AI…** in the menu bar to set your provider, API key, a
 - **File Browser** — browse the working directory in the sidebar; click any file to open it; auto-refreshes after a DDL export; right-click any file or folder to access the context menu:
   - **Reveal in Finder** / **Show in Explorer** — opens the platform file manager and selects the file or folder
   - **Copy Path** — copies the full file path to the clipboard
-  - **Rename…** — renames the file or folder via a modal dialog
+  - **Duplicate** (files only) — creates a copy of the file in the same directory with a `_copy` suffix
+  - **Rename…** — renames the file or folder inline in the tree (VS Code-style)
   - **Delete** — deletes the file or folder (with confirmation dialog); directories are removed recursively; paths are restricted to the export directory for safety
   - **New Folder…** (directories only) — creates a new subfolder
   - **New SQL File…** (directories only) — creates an empty `.sql` file
