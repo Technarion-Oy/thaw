@@ -119,9 +119,9 @@ export default function FileBrowser() {
   const exportDir   = useGitStore((s) => s.exportDir);
   const openFile    = useQueryStore((s) => s.openFile);
   const currentFile = useQueryStore((s) => s.currentFile);
-  const tabs        = useQueryStore((s) => s.tabs);
-  const markSaved   = useQueryStore((s) => s.markSaved);
-  const orphanTab   = useQueryStore((s) => s.orphanFileTab);
+  const tabs           = useQueryStore((s) => s.tabs);
+  const updateTabPath  = useQueryStore((s) => s.updateTabPath);
+  const orphanTab      = useQueryStore((s) => s.orphanFileTab);
 
   // ── File tree state ────────────────────────────────────────────────────────
   const [treeData,    setTreeData]    = useState<DataNode[]>([]);
@@ -386,9 +386,10 @@ export default function FileBrowser() {
           } else {
             await DeleteFile(path);
           }
-          // Orphan any open tabs referencing the deleted path (or children).
+          // Read fresh tabs from the store (not the stale closure captured at render time).
+          const currentTabs = useQueryStore.getState().tabs;
           const sep = path.includes("\\") ? "\\" : "/";
-          for (const tab of tabs) {
+          for (const tab of currentTabs) {
             if (tab.path === path || (isDir && tab.path?.startsWith(path + sep))) {
               orphanTab(tab.id);
             }
@@ -436,16 +437,19 @@ export default function FileBrowser() {
       if (kind === "rename") {
         const dir = pathDir(path);
         const sep = path.includes("\\") ? "\\" : "/";
-        const newPath = `${dir}${sep}${sanitized}`;
+        // Avoid double separator when dir is a root (e.g. "/" or "C:\").
+        const newPath = dir.endsWith(sep) ? `${dir}${sanitized}` : `${dir}${sep}${sanitized}`;
         await RenameFile(path, newPath);
         // Update any open tabs that reference the old path (or are children of a renamed directory).
+        // Uses updateTabPath (not markSaved) to preserve the dirty state — the file's
+        // disk content was moved but any unsaved in-memory edits remain uncommitted.
         const prefix = path + sep;
         for (const tab of tabs) {
           if (tab.path === path) {
-            markSaved(tab.id, newPath, sanitized);
+            updateTabPath(tab.id, newPath, sanitized);
           } else if (tab.path?.startsWith(prefix)) {
             const updatedPath = newPath + tab.path.substring(path.length);
-            markSaved(tab.id, updatedPath, pathBase(updatedPath));
+            updateTabPath(tab.id, updatedPath, pathBase(updatedPath));
           }
         }
         message.success(`Renamed to ${sanitized}`);

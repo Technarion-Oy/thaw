@@ -117,6 +117,8 @@ interface QueryState {
   moveTab: (draggedId: string, targetId: string, before: boolean) => void;
   // Called after a successful save to update the tab's path/title and clear dirty state.
   markSaved: (id: string, path: string, title: string) => void;
+  // Called after a rename to update the tab's path/title without clearing dirty state.
+  updateTabPath: (id: string, path: string, title: string) => void;
   setSplitTab: (id: string | null) => void;
   setSqlForTab: (tabId: string, sql: string) => void;
   // Called on startup: update a file tab with fresh disk content.
@@ -399,6 +401,16 @@ export const useQueryStore = create<QueryState>()(
       const tab = state.tabs.find((t) => t.id === id);
       const savedSql = tab?.sql ?? "";
       const updatedTabs = patchTab(state.tabs, id, { path, title, savedSql });
+      const isActive = state.activeTabId === id;
+      return {
+        tabs: updatedTabs,
+        ...(isActive ? { currentFile: path } : {}),
+      };
+    }),
+
+  updateTabPath: (id, path, title) =>
+    set((state) => {
+      const updatedTabs = patchTab(state.tabs, id, { path, title });
       const isActive = state.activeTabId === id;
       return {
         tabs: updatedTabs,

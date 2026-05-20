@@ -279,12 +279,36 @@ func validateInsideOrEqual(path, allowedRoot string) error {
 	return checkInsideOrEqual(realPath, realRoot)
 }
 
+// caseInsensitiveFS reports whether the current platform uses case-insensitive
+// filesystem paths (macOS APFS default, Windows NTFS).
+func caseInsensitiveFS() bool {
+	return runtime.GOOS == "darwin" || runtime.GOOS == "windows"
+}
+
+// hasPathPrefix checks whether path starts with prefix, respecting platform
+// case sensitivity. On macOS/Windows the comparison is case-folded.
+func hasPathPrefix(path, prefix string) bool {
+	if caseInsensitiveFS() {
+		return len(path) >= len(prefix) && strings.EqualFold(path[:len(prefix)], prefix)
+	}
+	return strings.HasPrefix(path, prefix)
+}
+
+// pathsEqual checks path equality, respecting platform case sensitivity.
+func pathsEqual(a, b string) bool {
+	if caseInsensitiveFS() {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
 // checkStrictlyInside verifies that resolvedPath is strictly inside resolvedRoot
 // (not equal to it, not outside it). Uses both a string-prefix check and
 // filepath.Rel as defense-in-depth.
 func checkStrictlyInside(resolvedPath, resolvedRoot string) error {
 	// Defense-in-depth: string-prefix check prevents prefix-collision edge cases.
-	if !strings.HasPrefix(resolvedPath, resolvedRoot+string(filepath.Separator)) {
+	// Uses case-aware comparison for macOS/Windows.
+	if !hasPathPrefix(resolvedPath, resolvedRoot+string(filepath.Separator)) {
 		return fmt.Errorf("path is outside allowed directory: %s", resolvedRoot)
 	}
 	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
@@ -301,7 +325,8 @@ func checkStrictlyInside(resolvedPath, resolvedRoot string) error {
 // Uses both a string-prefix check and filepath.Rel as defense-in-depth.
 func checkInsideOrEqual(resolvedPath, resolvedRoot string) error {
 	// Defense-in-depth: string-prefix check prevents prefix-collision edge cases.
-	if resolvedPath != resolvedRoot && !strings.HasPrefix(resolvedPath, resolvedRoot+string(filepath.Separator)) {
+	// Uses case-aware comparison for macOS/Windows.
+	if !pathsEqual(resolvedPath, resolvedRoot) && !hasPathPrefix(resolvedPath, resolvedRoot+string(filepath.Separator)) {
 		return fmt.Errorf("path is outside allowed directory: %s", resolvedRoot)
 	}
 	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
