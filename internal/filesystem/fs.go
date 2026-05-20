@@ -225,9 +225,11 @@ func WriteFileInRoot(path, content, allowedRoot string) error {
 		}
 		return err
 	}
-	defer f.Close() //nolint:errcheck
-	_, err = f.WriteString(content)
-	return err
+	if _, err := f.WriteString(content); err != nil {
+		f.Close() //nolint:errcheck
+		return err
+	}
+	return f.Close()
 }
 
 // validateExistingPath checks that an existing path is strictly inside allowedRoot,
