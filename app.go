@@ -123,6 +123,10 @@ type App struct {
 	gitCommitFiltersMu sync.Mutex
 	gitCommitFilters   map[string]string
 
+	// Cached export directory (set on startup and when SaveGitConfig is called).
+	exportDirMu     sync.RWMutex
+	cachedExportDir string
+
 	// Embedded terminal (pseudo-terminal).
 	ptyMu  sync.Mutex
 	ptmx   *os.File
@@ -150,6 +154,11 @@ func (a *App) startup(ctx context.Context) {
 	telemetry.Init(version.Version)
 	logger.L.Info("application started")
 	telemetry.Track(telemetry.EventAppStarted, nil)
+
+	// Cache the export directory so file management IPC methods don't re-read config.
+	if cfg, err := config.Load(); err == nil {
+		a.setExportDir(cfg.Git.ExportDir)
+	}
 
 	// Initialize delegated service instances.
 	a.migrationSvc = migration.NewService(func(eventName string, data interface{}) {
@@ -743,6 +752,7 @@ func (a *App) SaveGitConfig(gitCfg config.GitConfig) error {
 		return err
 	}
 	cfg.Git = gitCfg
+	a.setExportDir(gitCfg.ExportDir)
 	return config.Save(cfg)
 }
 
@@ -882,6 +892,97 @@ func (a *App) SaveFile(path, content string) error {
 // otherwise a case-insensitive substring search is performed.
 func (a *App) SearchFiles(dir, query string, useRegex bool) ([]filesystem.SearchMatch, error) {
 	return filesystem.SearchFiles(dir, query, useRegex)
+}
+
+// RevealInFinder opens the platform file manager and selects the given path.
+// The path must be inside the configured export directory.
+func (a *App) RevealInFinder(path string) error {
+	root, err := a.exportRoot()
+	if err != nil {
+		return err
+	}
+	return filesystem.RevealInFinder(path, root)
+}
+
+// GetPlatformOS returns the current OS identifier (darwin, windows, linux)
+// so the frontend can display platform-appropriate labels.
+func (a *App) GetPlatformOS() string {
+	return filesystem.RuntimeOS()
+}
+
+// DeleteFile removes the file at path. The path must be inside the configured export directory.
+func (a *App) DeleteFile(path string) error {
+	root, err := a.exportRoot()
+	if err != nil {
+		return err
+	}
+	return filesystem.DeleteFile(path, root)
+}
+
+// DeleteDirectory removes the directory at path and all its contents.
+// The path must be inside the configured export directory.
+func (a *App) DeleteDirectory(path string) error {
+	root, err := a.exportRoot()
+	if err != nil {
+		return err
+	}
+	return filesystem.DeleteDirectory(path, root)
+}
+
+// RenameFile renames (moves) oldPath to newPath. Both must be inside the export directory.
+func (a *App) RenameFile(oldPath, newPath string) error {
+	root, err := a.exportRoot()
+	if err != nil {
+		return err
+	}
+	return filesystem.RenameFile(oldPath, newPath, root)
+}
+
+// CreateDirectory creates a new directory at path, including any necessary parents.
+// The path must be inside the configured export directory.
+func (a *App) CreateDirectory(path string) error {
+	root, err := a.exportRoot()
+	if err != nil {
+		return err
+	}
+	return filesystem.MkDir(path, root)
+}
+
+// CreateFile creates an empty file at path. The path must be inside the export directory.
+func (a *App) CreateFile(path string) error {
+	root, err := a.exportRoot()
+	if err != nil {
+		return err
+	}
+	return filesystem.WriteFileInRoot(path, "", root)
+}
+
+// DuplicateFile creates a copy of the file at path in the same directory with a unique name.
+// Returns the full path of the new copy.
+func (a *App) DuplicateFile(path string) (string, error) {
+	root, err := a.exportRoot()
+	if err != nil {
+		return "", err
+	}
+	return filesystem.DuplicateFile(path, root)
+}
+
+// exportRoot returns the cached export directory, or an error if not set.
+func (a *App) exportRoot() (string, error) {
+	a.exportDirMu.RLock()
+	dir := a.cachedExportDir
+	a.exportDirMu.RUnlock()
+	if dir == "" {
+		return "", fmt.Errorf("no export directory configured — set one via Git → Export Directory")
+	}
+	return dir, nil
+}
+
+// setExportDir updates the cached export directory under write lock.
+func (a *App) setExportDir(dir string) {
+	a.exportDirMu.Lock()
+	a.cachedExportDir = dir
+	a.exportDirMu.Unlock()
 }
 
 // ─── Account-level objects (roles, warehouses) ────────────────────────────────

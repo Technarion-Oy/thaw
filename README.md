@@ -199,6 +199,8 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - **Save As…** (`⌘⇧S` / `Ctrl+Shift+S`) — native OS save dialog with `.sql` filter; also promotes a scratch tab to a named file tab
 - **New Tab** (`⌘T` / `Ctrl+T`) — opens a blank scratch tab
 - All four actions are available in the **File** menu in the macOS/Windows menu bar as well as in the toolbar
+- **File Browser context menu** — right-click any file or folder in the File Browser sidebar to access: **Reveal in Finder** (platform file manager), **Copy Path**, **Rename…**, **Delete** (with confirmation), **New Folder…** and **New SQL File…** (on directories), and **Select for Comparison** / **Compare with** (on files)
+- **Show in Finder after export** — after a DDL export completes, click the folder icon in the results summary to open the export directory in the platform file manager
 
 ### Object browser (sidebar)
 - Browse databases → schemas → objects (tables, views, functions, procedures, notebooks, …)

@@ -6,7 +6,7 @@
 // from Technarion Oy.
 
 import { useState, useEffect } from "react";
-import { Button, Progress, Typography, Space, Tag, Collapse, Alert, Tooltip, Checkbox } from "antd";
+import { Button, Progress, Typography, Space, Tag, Collapse, Alert, Tooltip, Checkbox, message } from "antd";
 import {
   CloudUploadOutlined,
   DatabaseOutlined,
@@ -22,9 +22,11 @@ import {
   ExportAllDatabasesDDL,
   CancelExport,
   ListExportableDatabases,
+  RevealInFinder,
 } from "../../../wailsjs/go/main/App";
 import { useGitStore } from "../../store/gitStore";
 import { useConnectionStore } from "../../store/connectionStore";
+import { getPlatformOS, getCachedPlatformOS, revealLabel } from "../files/platformUtil";
 import type { ddl } from "../../../wailsjs/go/models";
 
 type ExportResult = ddl.ExportResult;
@@ -40,6 +42,10 @@ const { Text } = Typography;
 export default function ExportPanel() {
   const { exportDir, pickExportDir } = useGitStore();
   const isConnected = useConnectionStore((s) => s.isConnected);
+
+  const [platformOS, setPlatformOS] = useState<string | null>(getCachedPlatformOS());
+  useEffect(() => { getPlatformOS().then(setPlatformOS); }, []);
+  const revealText = revealLabel(platformOS);
 
   // ── database selection ────────────────────────────────────────────────────
   const [dbs, setDbs]               = useState<string[]>([]);
@@ -294,6 +300,17 @@ export default function ExportPanel() {
                 </Tag>
               )}
             </Space>
+            {exportDir && (
+              <Tooltip title={revealText}>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<FolderOpenOutlined style={{ fontSize: 11 }} />}
+                  onClick={() => RevealInFinder(exportDir).catch((e) => message.error(`Could not reveal: ${String(e)}`))}
+                  style={{ color: "var(--text-muted)", padding: "0 4px" }}
+                />
+              </Tooltip>
+            )}
             <Button
               type="text"
               size="small"

@@ -118,7 +118,11 @@ export function CreateCatalogIntegration(arg1:integrations.CatalogIntegrationPar
 
 export function CreateDbtProject(arg1:dbt.CreateRequest,arg2:Record<string, Array<string>>):Promise<dbt.CreateResult>;
 
+export function CreateDirectory(arg1:string):Promise<void>;
+
 export function CreateExternalAccessIntegration(arg1:integrations.ExternalAccessIntegrationParams):Promise<void>;
+
+export function CreateFile(arg1:string):Promise<void>;
 
 export function CreateMigrationSnapshot(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean,arg6:string,arg7:boolean):Promise<void>;
 
@@ -129,6 +133,10 @@ export function CreateSecurityIntegration(arg1:integrations.SecurityIntegrationP
 export function CreateStorageIntegration(arg1:integrations.StorageIntegrationParams):Promise<void>;
 
 export function DebugNotebookCell(arg1:string,arg2:string,arg3:string):Promise<snowpark.NotebookCellOutput>;
+
+export function DeleteDirectory(arg1:string):Promise<void>;
+
+export function DeleteFile(arg1:string):Promise<void>;
 
 export function DeleteOldestBackup(arg1:string,arg2:string,arg3:string):Promise<void>;
 
@@ -153,6 +161,8 @@ export function DropIntegration(arg1:string):Promise<void>;
 export function DropSchema(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function DropTaskTree(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function DuplicateFile(arg1:string):Promise<string>;
 
 export function EnableTaskDependents(arg1:string,arg2:string,arg3:string):Promise<void>;
 
@@ -251,6 +261,8 @@ export function GetPipRegistryConfig():Promise<config.PipRegistryConfig>;
 export function GetPipeCopyHistory(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string):Promise<snowflake.QueryResult>;
 
 export function GetPipeStatus(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function GetPlatformOS():Promise<string>;
 
 export function GetProcedureParams(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.ProcParam>>;
 
@@ -480,6 +492,8 @@ export function ReadNotebook(arg1:string):Promise<string>;
 
 export function RemoveStageFiles(arg1:string,arg2:string):Promise<void>;
 
+export function RenameFile(arg1:string,arg2:string):Promise<void>;
+
 export function RenameProfile(arg1:string,arg2:string):Promise<void>;
 
 export function ResetPipRegistryConfig():Promise<void>;
@@ -489,6 +503,8 @@ export function ResizeShell(arg1:number,arg2:number):Promise<void>;
 export function RestoreFromBackup(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:string):Promise<void>;
 
 export function ResumeTaskList(arg1:string,arg2:string,arg3:Array<string>):Promise<void>;
+
+export function RevealInFinder(arg1:string):Promise<void>;
 
 export function RunExplain(arg1:string,arg2:string):Promise<queryprofile.ExplainResult>;
 

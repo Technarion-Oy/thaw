@@ -72,7 +72,7 @@ thaw/
 │   ├── ai/              # AI provider clients (OpenAI, Google)
 │   ├── config/          # App config (TOML persistence)
 │   ├── gitrepo/         # Git operations via exec
-│   ├── filesystem/      # File read/write helpers
+│   ├── filesystem/      # File read/write/delete/rename helpers, reveal in file manager
 │   ├── sfconfig/        # Reads ~/.snowflake/config.toml
 │   ├── logger/          # Logrus + lumberjack rotation
 │   ├── telemetry/       # Usage telemetry

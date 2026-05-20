@@ -194,8 +194,16 @@ export function CreateDbtProject(arg1, arg2) {
   return window['go']['main']['App']['CreateDbtProject'](arg1, arg2);
 }
 
+export function CreateDirectory(arg1) {
+  return window['go']['main']['App']['CreateDirectory'](arg1);
+}
+
 export function CreateExternalAccessIntegration(arg1) {
   return window['go']['main']['App']['CreateExternalAccessIntegration'](arg1);
+}
+
+export function CreateFile(arg1) {
+  return window['go']['main']['App']['CreateFile'](arg1);
 }
 
 export function CreateMigrationSnapshot(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
@@ -216,6 +224,14 @@ export function CreateStorageIntegration(arg1) {
 
 export function DebugNotebookCell(arg1, arg2, arg3) {
   return window['go']['main']['App']['DebugNotebookCell'](arg1, arg2, arg3);
+}
+
+export function DeleteDirectory(arg1) {
+  return window['go']['main']['App']['DeleteDirectory'](arg1);
+}
+
+export function DeleteFile(arg1) {
+  return window['go']['main']['App']['DeleteFile'](arg1);
 }
 
 export function DeleteOldestBackup(arg1, arg2, arg3) {
@@ -264,6 +280,10 @@ export function DropSchema(arg1, arg2, arg3) {
 
 export function DropTaskTree(arg1, arg2, arg3) {
   return window['go']['main']['App']['DropTaskTree'](arg1, arg2, arg3);
+}
+
+export function DuplicateFile(arg1) {
+  return window['go']['main']['App']['DuplicateFile'](arg1);
 }
 
 export function EnableTaskDependents(arg1, arg2, arg3) {
@@ -460,6 +480,10 @@ export function GetPipeCopyHistory(arg1, arg2, arg3, arg4, arg5, arg6) {
 
 export function GetPipeStatus(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetPipeStatus'](arg1, arg2, arg3);
+}
+
+export function GetPlatformOS() {
+  return window['go']['main']['App']['GetPlatformOS']();
 }
 
 export function GetProcedureParams(arg1, arg2, arg3, arg4) {
@@ -918,6 +942,10 @@ export function RemoveStageFiles(arg1, arg2) {
   return window['go']['main']['App']['RemoveStageFiles'](arg1, arg2);
 }
 
+export function RenameFile(arg1, arg2) {
+  return window['go']['main']['App']['RenameFile'](arg1, arg2);
+}
+
 export function RenameProfile(arg1, arg2) {
   return window['go']['main']['App']['RenameProfile'](arg1, arg2);
 }
@@ -936,6 +964,10 @@ export function RestoreFromBackup(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
 
 export function ResumeTaskList(arg1, arg2, arg3) {
   return window['go']['main']['App']['ResumeTaskList'](arg1, arg2, arg3);
+}
+
+export function RevealInFinder(arg1) {
+  return window['go']['main']['App']['RevealInFinder'](arg1);
 }
 
 export function RunExplain(arg1, arg2) {
