@@ -131,6 +131,9 @@ func RuntimeOS() string {
 // DeleteFile removes the file (or symlink) at path. It refuses to delete
 // directories; use DeleteDirectory for that. The path must be inside allowedRoot.
 // Uses Lstat so symlinks pointing to directories can still be deleted as files.
+// Note: validateExistingPath resolves symlinks and checks the resolved path, while
+// the actual deletion operates on the original path. A symlink swap between
+// validation and deletion is theoretically possible but impractical on a desktop app.
 func DeleteFile(path, allowedRoot string) error {
 	if err := validateExistingPath(path, allowedRoot); err != nil {
 		return err
@@ -149,6 +152,7 @@ func DeleteFile(path, allowedRoot string) error {
 // The path must be strictly inside allowedRoot (cannot delete the root itself).
 // Uses Lstat so that a symlink pointing to a directory is treated as a symlink
 // (removed via os.Remove) rather than recursively deleting the target.
+// Note: same TOCTOU gap as DeleteFile — resolved path is validated, original is deleted.
 func DeleteDirectory(path, allowedRoot string) error {
 	if err := validateExistingPath(path, allowedRoot); err != nil {
 		return err
@@ -169,6 +173,9 @@ func DeleteDirectory(path, allowedRoot string) error {
 
 // RenameFile renames (moves) oldPath to newPath. Both must be inside allowedRoot.
 // For newPath (which doesn't exist yet), the parent directory is validated instead.
+// Note: the destination-exists check is not atomic with os.Rename (TOCTOU window).
+// On a single-user desktop app this is acceptable; concurrent creation of the
+// same filename between the check and rename is extremely unlikely.
 func RenameFile(oldPath, newPath, allowedRoot string) error {
 	if err := validateExistingPath(oldPath, allowedRoot); err != nil {
 		return err
@@ -244,6 +251,11 @@ func validateNewPath(path, allowedRoot string) error {
 	}
 	// Reconstruct the full path with the resolved ancestor prefix.
 	remaining, _ := filepath.Rel(ancestor, absPath)
+	// Defense-in-depth: reject if remaining somehow escapes (should not happen
+	// since absPath is always deeper than ancestor, but guard explicitly).
+	if strings.HasPrefix(remaining, "..") {
+		return fmt.Errorf("path escapes ancestor: %s", path)
+	}
 	realPath := filepath.Join(realAncestor, remaining)
 
 	realRoot, err := filepath.EvalSymlinks(allowedRoot)

@@ -55,7 +55,9 @@ const CLR_SECONDARY = "var(--text-muted)";
 /** Extract the directory portion of a path, handling both / and \ separators. */
 function pathDir(p: string): string {
   const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
-  return i > 0 ? p.substring(0, i) : ".";
+  if (i < 0) return ".";
+  // i == 0 means root separator (e.g. "/filename") — preserve the separator.
+  return i === 0 ? p.substring(0, 1) : p.substring(0, i);
 }
 
 /** Extract the filename from a path, handling both / and \ separators. */
@@ -117,6 +119,8 @@ export default function FileBrowser() {
   const exportDir   = useGitStore((s) => s.exportDir);
   const openFile    = useQueryStore((s) => s.openFile);
   const currentFile = useQueryStore((s) => s.currentFile);
+  const tabs        = useQueryStore((s) => s.tabs);
+  const markSaved   = useQueryStore((s) => s.markSaved);
 
   // ── File tree state ────────────────────────────────────────────────────────
   const [treeData,    setTreeData]    = useState<DataNode[]>([]);
@@ -145,7 +149,7 @@ export default function FileBrowser() {
   const [expanded, setExpanded] = useState(false);
 
   // ── Platform detection for labels ─────────────────────────────────────────
-  const [platformOS, setPlatformOS] = useState(getCachedPlatformOS());
+  const [platformOS, setPlatformOS] = useState<string | null>(getCachedPlatformOS());
   useEffect(() => { getPlatformOS().then(setPlatformOS); }, []);
   const revealText = revealLabel(platformOS);
 
@@ -426,6 +430,12 @@ export default function FileBrowser() {
         const sep = path.includes("\\") ? "\\" : "/";
         const newPath = `${dir}${sep}${sanitized}`;
         await RenameFile(path, newPath);
+        // Update any open tabs that reference the old path.
+        for (const tab of tabs) {
+          if (tab.path === path) {
+            markSaved(tab.id, newPath, sanitized);
+          }
+        }
         message.success(`Renamed to ${sanitized}`);
       } else if (kind === "newFolder") {
         const sep = path.includes("\\") ? "\\" : "/";
@@ -687,6 +697,7 @@ export default function FileBrowser() {
       {fileCtxMenu && (
         <div
           ref={fileCtxRef}
+          role="menu"
           style={{
             position: "fixed",
             top: fileCtxMenu.y,
@@ -741,14 +752,20 @@ export default function FileBrowser() {
 function CtxItem({ icon, label, onClick, danger }: { icon: React.ReactNode; label: string; onClick: () => void; danger?: boolean }) {
   return (
     <div
+      role="menuitem"
+      tabIndex={0}
       style={{
         display: "flex", alignItems: "center", gap: 8,
         padding: "6px 14px", fontSize: 13, cursor: "pointer",
         color: danger ? "#f85149" : "var(--text)",
+        outline: "none",
       }}
       onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+      onFocus={(e) => (e.currentTarget.style.background = "var(--border)")}
+      onBlur={(e) => (e.currentTarget.style.background = "transparent")}
       onClick={onClick}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
     >
       <span style={{ fontSize: 12, display: "flex" }}>{icon}</span>
       {label}

@@ -43,7 +43,7 @@ export default function ExportPanel() {
   const { exportDir, pickExportDir } = useGitStore();
   const isConnected = useConnectionStore((s) => s.isConnected);
 
-  const [platformOS, setPlatformOS] = useState(getCachedPlatformOS());
+  const [platformOS, setPlatformOS] = useState<string | null>(getCachedPlatformOS());
   useEffect(() => { getPlatformOS().then(setPlatformOS); }, []);
   const revealText = revealLabel(platformOS);
 
