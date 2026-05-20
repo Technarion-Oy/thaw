@@ -390,6 +390,23 @@ func TestWriteFileInRoot_Success(t *testing.T) {
 	}
 }
 
+func TestWriteFileInRoot_ExistingFile(t *testing.T) {
+	root := t.TempDir()
+	f := filepath.Join(root, "existing.sql")
+	if err := os.WriteFile(f, []byte("original content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := WriteFileInRoot(f, "new content", root)
+	if err == nil {
+		t.Error("expected error when file already exists")
+	}
+	// Verify original content is preserved.
+	data, _ := os.ReadFile(f)
+	if string(data) != "original content" {
+		t.Errorf("existing file content should be preserved, got: %q", string(data))
+	}
+}
+
 func TestWriteFileInRoot_OutsideRoot(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()

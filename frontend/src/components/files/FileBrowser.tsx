@@ -170,7 +170,7 @@ export default function FileBrowser() {
     };
   }, [fileCtxMenu]);
 
-  // Clamp file context menu inside the viewport (runs before browser paint — no flash)
+  // Clamp file context menu inside the viewport and focus the first item (runs before browser paint — no flash)
   useLayoutEffect(() => {
     if (!fileCtxMenu || !fileCtxRef.current) return;
     const el = fileCtxRef.current;
@@ -180,6 +180,9 @@ export default function FileBrowser() {
     const top  = Math.max(pad, Math.min(fileCtxMenu.y, window.innerHeight - height - pad));
     el.style.left = `${left}px`;
     el.style.top  = `${top}px`;
+    // Auto-focus the first menu item for keyboard accessibility.
+    const firstItem = el.querySelector<HTMLElement>("[role='menuitem']");
+    firstItem?.focus();
   }, [fileCtxMenu]);
 
   // Reset tree when the working directory changes
@@ -375,7 +378,7 @@ export default function FileBrowser() {
     setFileCtxMenu(null);
     Modal.confirm({
       title: `Delete ${isDir ? "folder" : "file"}`,
-      content: `Are you sure you want to delete "${name}"?${isDir ? " If this is a real folder, all its contents will be removed. Symbolic links are removed without affecting the target." : ""}`,
+      content: `Are you sure you want to delete "${name}"?${isDir ? " All contents will be permanently removed." : ""}`,
       okText: "Delete",
       okButtonProps: { danger: true },
       onOk: async () => {
@@ -397,6 +400,7 @@ export default function FileBrowser() {
           refresh();
         } catch (e) {
           message.error(`Delete failed: ${String(e)}`);
+          throw e; // Re-throw to keep the modal open on failure.
         }
       },
     });

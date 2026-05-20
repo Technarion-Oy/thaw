@@ -207,11 +207,15 @@ func MkDir(path, allowedRoot string) error {
 	return os.MkdirAll(path, 0o755)
 }
 
-// WriteFileInRoot creates or overwrites the file at path with content.
+// WriteFileInRoot creates a new file at path with content.
 // Parent directories are created if needed. The path must be inside allowedRoot.
+// Returns an error if the file already exists (prevents accidental overwrites).
 func WriteFileInRoot(path, content, allowedRoot string) error {
 	if err := validateNewPath(path, allowedRoot); err != nil {
 		return err
+	}
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("file already exists: %s", filepath.Base(path))
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
