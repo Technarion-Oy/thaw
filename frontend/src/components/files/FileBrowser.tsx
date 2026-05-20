@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
-import { Tree, Typography, Spin, Button, Input, Switch, Modal, message } from "antd";
+import { Tree, Typography, Spin, Button, Input, Switch, Modal, App as AntApp } from "antd";
 import {
   FolderOutlined,
   FolderOpenOutlined,
@@ -200,6 +200,7 @@ function groupByPath(matches: SearchMatch[]): Map<string, SearchMatch[]> {
 }
 
 export default function FileBrowser() {
+  const { modal, message } = AntApp.useApp();
   const exportDir   = useGitStore((s) => s.exportDir);
   const openFile    = useQueryStore((s) => s.openFile);
   const currentFile = useQueryStore((s) => s.currentFile);
@@ -479,7 +480,7 @@ export default function FileBrowser() {
     if (!fileCtxMenu) return;
     const { path, name, isDir } = fileCtxMenu;
     setFileCtxMenu(null);
-    Modal.confirm({
+    modal.confirm({
       title: `Delete ${isDir ? "folder" : "file"}`,
       content: `Are you sure you want to delete "${name}"?${isDir ? " This item and all its contents will be permanently removed." : ""}`,
       okText: "Delete",
