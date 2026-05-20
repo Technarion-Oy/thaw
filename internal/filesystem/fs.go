@@ -218,7 +218,7 @@ func WriteFileInRoot(path, content, allowedRoot string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644) // #nosec G302 — SQL files need group/other read
 	if err != nil {
 		if os.IsExist(err) {
 			return fmt.Errorf("file already exists: %s", filepath.Base(path))
@@ -416,10 +416,13 @@ func DuplicateFile(srcPath, allowedRoot string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer dst.Close() //nolint:errcheck
 
 	if _, err := io.Copy(dst, src); err != nil {
 		dst.Close()        //nolint:errcheck // close before remove (required on Windows)
+		os.Remove(dstPath) //nolint:errcheck
+		return "", err
+	}
+	if err := dst.Close(); err != nil {
 		os.Remove(dstPath) //nolint:errcheck
 		return "", err
 	}
