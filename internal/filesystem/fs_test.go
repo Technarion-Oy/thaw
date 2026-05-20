@@ -351,3 +351,59 @@ func TestWriteFileInRoot_OutsideRoot(t *testing.T) {
 		t.Error("expected error for file outside root")
 	}
 }
+
+// ─── validateInsideOrEqual ──────────────────────────────────────────────────
+
+func TestValidateInsideOrEqual_RootEqualsPath(t *testing.T) {
+	root := t.TempDir()
+	// Should succeed — the root itself is allowed for read-only operations.
+	if err := validateInsideOrEqual(root, root); err != nil {
+		t.Errorf("expected no error when path equals root, got: %v", err)
+	}
+}
+
+func TestValidateInsideOrEqual_InsideRoot(t *testing.T) {
+	root := t.TempDir()
+	child := filepath.Join(root, "sub")
+	if err := os.Mkdir(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateInsideOrEqual(child, root); err != nil {
+		t.Errorf("expected no error for path inside root, got: %v", err)
+	}
+}
+
+func TestValidateInsideOrEqual_OutsideRoot(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	err := validateInsideOrEqual(outside, root)
+	if err == nil {
+		t.Error("expected error for path outside root, got nil")
+	}
+}
+
+// ─── DeleteFile with symlink to directory ───────────────────────────────────
+
+func TestDeleteFile_SymlinkToDir(t *testing.T) {
+	root := t.TempDir()
+	subdir := filepath.Join(root, "realdir")
+	if err := os.Mkdir(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Symlink inside root pointing to a directory inside root.
+	symlink := filepath.Join(root, "link_to_dir")
+	if err := os.Symlink(subdir, symlink); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+	// DeleteFile should succeed (Lstat sees the symlink, not the directory).
+	if err := DeleteFile(symlink, root); err != nil {
+		t.Errorf("expected no error deleting symlink to directory, got: %v", err)
+	}
+	// The symlink should be gone, but the real directory should still exist.
+	if _, err := os.Lstat(symlink); !os.IsNotExist(err) {
+		t.Error("symlink should have been deleted")
+	}
+	if _, err := os.Stat(subdir); err != nil {
+		t.Error("real directory should still exist after deleting symlink")
+	}
+}

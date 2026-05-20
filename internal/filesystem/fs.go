@@ -101,9 +101,10 @@ func ListDir(dir string) ([]FileEntry, error) {
 // RevealInFinder opens the platform file manager and selects the given path.
 // On macOS it runs `open -R`, on Windows `explorer /select,`, on Linux `xdg-open`
 // (opens the parent directory since most Linux file managers don't support select).
-// The path must be inside allowedRoot for consistency with other file operations.
+// The path must be inside or equal to allowedRoot. Unlike mutating operations,
+// reveal is read-only so allowing the root itself is safe.
 func RevealInFinder(path, allowedRoot string) error {
-	if err := validateExistingPath(path, allowedRoot); err != nil {
+	if err := validateInsideOrEqual(path, allowedRoot); err != nil {
 		return err
 	}
 	abs, err := filepath.Abs(path)
@@ -246,6 +247,20 @@ func validateNewPath(path, allowedRoot string) error {
 	return checkStrictlyInside(realPath, realRoot)
 }
 
+// validateInsideOrEqual checks that an existing path is inside or equal to
+// allowedRoot, resolving symlinks. Used for read-only operations like Reveal.
+func validateInsideOrEqual(path, allowedRoot string) error {
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return fmt.Errorf("invalid path: %w", err)
+	}
+	realRoot, err := filepath.EvalSymlinks(allowedRoot)
+	if err != nil {
+		return fmt.Errorf("invalid root: %w", err)
+	}
+	return checkInsideOrEqual(realPath, realRoot)
+}
+
 // checkStrictlyInside verifies that resolvedPath is strictly inside resolvedRoot
 // (not equal to it, not outside it).
 func checkStrictlyInside(resolvedPath, resolvedRoot string) error {
@@ -254,6 +269,18 @@ func checkStrictlyInside(resolvedPath, resolvedRoot string) error {
 		return fmt.Errorf("path is outside allowed directory")
 	}
 	if rel == "." || strings.HasPrefix(rel, "..") {
+		return fmt.Errorf("path is outside allowed directory: %s", resolvedRoot)
+	}
+	return nil
+}
+
+// checkInsideOrEqual verifies that resolvedPath is inside or equal to resolvedRoot.
+func checkInsideOrEqual(resolvedPath, resolvedRoot string) error {
+	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
+	if err != nil {
+		return fmt.Errorf("path is outside allowed directory")
+	}
+	if strings.HasPrefix(rel, "..") {
 		return fmt.Errorf("path is outside allowed directory: %s", resolvedRoot)
 	}
 	return nil

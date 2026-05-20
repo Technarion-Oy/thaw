@@ -39,13 +39,24 @@ interface ProgressEvent {
 
 const { Text } = Typography;
 
+// Module-level cache for platform OS (compile-time constant, fetched once).
+let _platformOS: string | null = null;
+const getPlatform = (): Promise<string> =>
+  _platformOS
+    ? Promise.resolve(_platformOS)
+    : GetPlatformOS().then((os) => { _platformOS = os; return os; }).catch(() => "darwin");
+
+function revealLabelFor(os: string): string {
+  return os === "windows" ? "Show in Explorer" : os === "darwin" ? "Show in Finder" : "Show in File Manager";
+}
+
 export default function ExportPanel() {
   const { exportDir, pickExportDir } = useGitStore();
   const isConnected = useConnectionStore((s) => s.isConnected);
 
-  const [platformOS, setPlatformOS] = useState("darwin");
-  useEffect(() => { GetPlatformOS().then(setPlatformOS).catch(() => {}); }, []);
-  const revealLabel = platformOS === "windows" ? "Show in Explorer" : platformOS === "darwin" ? "Show in Finder" : "Show in File Manager";
+  const [platformOS, setPlatformOS] = useState(_platformOS ?? "darwin");
+  useEffect(() => { getPlatform().then(setPlatformOS); }, []);
+  const revealLabel = revealLabelFor(platformOS);
 
   // ── database selection ────────────────────────────────────────────────────
   const [dbs, setDbs]               = useState<string[]>([]);

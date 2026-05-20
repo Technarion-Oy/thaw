@@ -124,6 +124,7 @@ type App struct {
 	gitCommitFilters   map[string]string
 
 	// Cached export directory (set on startup and when SaveGitConfig is called).
+	exportDirMu     sync.RWMutex
 	cachedExportDir string
 
 	// Embedded terminal (pseudo-terminal).
@@ -156,7 +157,7 @@ func (a *App) startup(ctx context.Context) {
 
 	// Cache the export directory so file management IPC methods don't re-read config.
 	if cfg, err := config.Load(); err == nil {
-		a.cachedExportDir = cfg.Git.ExportDir
+		a.setExportDir(cfg.Git.ExportDir)
 	}
 
 	// Initialize delegated service instances.
@@ -751,7 +752,7 @@ func (a *App) SaveGitConfig(gitCfg config.GitConfig) error {
 		return err
 	}
 	cfg.Git = gitCfg
-	a.cachedExportDir = gitCfg.ExportDir
+	a.setExportDir(gitCfg.ExportDir)
 	return config.Save(cfg)
 }
 
@@ -958,10 +959,20 @@ func (a *App) CreateFile(path string) error {
 
 // exportRoot returns the cached export directory, or an error if not set.
 func (a *App) exportRoot() (string, error) {
-	if a.cachedExportDir == "" {
-		return "", fmt.Errorf("no export directory configured")
+	a.exportDirMu.RLock()
+	dir := a.cachedExportDir
+	a.exportDirMu.RUnlock()
+	if dir == "" {
+		return "", fmt.Errorf("no export directory configured — set one via Git → Export Directory")
 	}
-	return a.cachedExportDir, nil
+	return dir, nil
+}
+
+// setExportDir updates the cached export directory under write lock.
+func (a *App) setExportDir(dir string) {
+	a.exportDirMu.Lock()
+	a.cachedExportDir = dir
+	a.exportDirMu.Unlock()
 }
 
 // ─── Account-level objects (roles, warehouses) ────────────────────────────────

@@ -52,6 +52,30 @@ type SearchMatch  = filesystem.SearchMatch;
 const { Text } = Typography;
 const CLR_SECONDARY = "var(--text-muted)";
 
+// Module-level cache for platform OS (compile-time constant, fetched once).
+let _platformOS: string | null = null;
+const getPlatform = (): Promise<string> =>
+  _platformOS
+    ? Promise.resolve(_platformOS)
+    : GetPlatformOS().then((os) => { _platformOS = os; return os; }).catch(() => "darwin");
+
+/** Platform-appropriate label for the "reveal" action. */
+function revealLabelFor(os: string): string {
+  return os === "windows" ? "Show in Explorer" : os === "darwin" ? "Reveal in Finder" : "Show in File Manager";
+}
+
+/** Extract the directory portion of a path, handling both / and \ separators. */
+function pathDir(p: string): string {
+  const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+  return i > 0 ? p.substring(0, i) : p;
+}
+
+/** Extract the filename from a path, handling both / and \ separators. */
+function pathBase(p: string): string {
+  const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+  return i >= 0 ? p.substring(i + 1) : p;
+}
+
 function entriesToNodes(entries: FileEntry[]): DataNode[] {
   return entries.map((e) => ({
     key:    e.path,
@@ -133,20 +157,25 @@ export default function FileBrowser() {
   const [expanded, setExpanded] = useState(false);
 
   // ── Platform detection for labels ─────────────────────────────────────────
-  const [platformOS, setPlatformOS] = useState("darwin");
-  useEffect(() => { GetPlatformOS().then(setPlatformOS).catch(() => {}); }, []);
-  const revealLabel = platformOS === "windows" ? "Show in Explorer" : platformOS === "darwin" ? "Reveal in Finder" : "Show in File Manager";
+  const [platformOS, setPlatformOS] = useState(_platformOS ?? "darwin");
+  useEffect(() => { getPlatform().then(setPlatformOS); }, []);
+  const revealLabel = revealLabelFor(platformOS);
 
   const pendingDiff   = useDiffStore((s) => s.pending);
   const selectForComp = useDiffStore((s) => s.selectForComparison);
   const compareWith   = useDiffStore((s) => s.compareWith);
 
-  // Close file context menu on outside click
+  // Close file context menu on outside click or Escape key
   useEffect(() => {
     if (!fileCtxMenu) return;
     const close = () => setFileCtxMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
     window.addEventListener("click", close);
-    return () => window.removeEventListener("click", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", onKey);
+    };
   }, [fileCtxMenu]);
 
   // Clamp file context menu inside the viewport (runs before browser paint — no flash)
@@ -309,7 +338,7 @@ export default function FileBrowser() {
   const onRightClick = ({ event, node }: { event: React.MouseEvent; node: DataNode }) => {
     event.preventDefault();
     const path = String(node.key);
-    const name = path.split("/").pop() ?? path;
+    const name = pathBase(path);
     const isDir = (node as any).isLeaf === false;
     setFileCtxMenu({ x: event.clientX, y: event.clientY, path, name, isDir });
   };
@@ -404,16 +433,19 @@ export default function FileBrowser() {
     setInlineInput(null);
     try {
       if (kind === "rename") {
-        const dir = path.substring(0, path.lastIndexOf("/"));
-        const newPath = `${dir}/${sanitized}`;
+        const dir = pathDir(path);
+        const sep = path.includes("\\") ? "\\" : "/";
+        const newPath = `${dir}${sep}${sanitized}`;
         await RenameFile(path, newPath);
         message.success(`Renamed to ${sanitized}`);
       } else if (kind === "newFolder") {
-        await CreateDirectory(`${path}/${sanitized}`);
+        const sep = path.includes("\\") ? "\\" : "/";
+        await CreateDirectory(`${path}${sep}${sanitized}`);
         message.success(`Created folder ${sanitized}`);
       } else if (kind === "newFile") {
+        const sep = path.includes("\\") ? "\\" : "/";
         const name = sanitized.endsWith(".sql") ? sanitized : `${sanitized}.sql`;
-        await CreateFile(`${path}/${name}`);
+        await CreateFile(`${path}${sep}${name}`);
         message.success(`Created ${name}`);
       }
       refresh();
