@@ -187,6 +187,7 @@ export default function TaskHistoryModal({ db, schema, name, isRoot, onClose }: 
   const [scope, setScope] = useState<ScopeOption>("Last 24 Hours");
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [topoOrder, setTopoOrder] = useState<Map<string, number>>(new Map());
+  const [expandedRunIds, setExpandedRunIds] = useState<string[]>([]);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const days = scope === "Last 7 Days" ? 7 : 1;
@@ -245,6 +246,18 @@ export default function TaskHistoryModal({ db, schema, name, isRoot, onClose }: 
     () => isRoot ? groupByRunId(allRows, topoOrder) : [],
     [isRoot, allRows, topoOrder],
   );
+
+  // Keep the latest (first) run expanded; prune stale IDs after refresh.
+  useEffect(() => {
+    if (dagRuns.length === 0) return;
+    setExpandedRunIds((prev) => {
+      const validIds = new Set(dagRuns.map((r) => r.runId));
+      const kept = prev.filter((id) => validIds.has(id));
+      // If nothing is expanded (first load or all stale), expand the latest run
+      if (kept.length === 0) kept.push(dagRuns[0].runId);
+      return kept;
+    });
+  }, [dagRuns]);
 
   // ── Flat columns (child / standalone task) ────────────────────────────────
   const flatColumns = [
@@ -483,7 +496,8 @@ export default function TaskHistoryModal({ db, schema, name, isRoot, onClose }: 
                 }
               />
             ),
-            defaultExpandedRowKeys: dagRuns.length > 0 ? [dagRuns[0].runId] : [],
+            expandedRowKeys: expandedRunIds,
+            onExpandedRowsChange: (keys) => setExpandedRunIds(keys as string[]),
           }}
           pagination={dagRuns.length > 20 ? { pageSize: 20, showSizeChanger: false } : false}
           style={{ fontSize: 12 }}

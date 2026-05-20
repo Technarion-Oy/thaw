@@ -71,6 +71,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/database/CreateStageModal.tsx",
         "frontend/src/components/database/StagePropertiesModal.tsx",
         "frontend/src/components/layout/Sidebar.tsx",
+        "frontend/src/components/task/TaskHistoryModal.tsx",
         "frontend/src/store/objectStore.ts"
       ],
       "description": "Database metadata exploration, user management, and warehouse metering."

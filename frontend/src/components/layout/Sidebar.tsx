@@ -156,6 +156,7 @@ interface ContextMenu {
   objKind?: string;     // set for nodeType === "type" or "obj"
   objArgs?: string;     // parameter type list for PROCEDURE / FUNCTION
   isFinalizer?: boolean; // true when right-clicking a finalizer TASK node
+  isRootTask?: boolean;  // true when right-clicking a root-level TASK node (no predecessors, not a finalizer)
 }
 
 interface UndropModal {
@@ -275,12 +276,13 @@ function buildTaskTree(
   db: string,
   schema: string,
 ): DataNode[] {
-  const makeNode = (o: snowflake.SnowflakeObject, kids: DataNode[] = [], isFinalizer = false): DataNode => ({
+  const makeNode = (o: snowflake.SnowflakeObject, kids: DataNode[] = [], isFinalizer = false, isRootTask = false): DataNode => ({
     title:       o.name,
     key:         `obj:${db}:${schema}:TASK:${o.name}`,
     icon:        kindIcon("TASK"),
     isLeaf:      kids.length === 0,
     isFinalizer, // consumed by titleRender
+    isRootTask,  // consumed by context menu for task history
     ...(kids.length > 0 ? { children: kids } : {}),
   } as DataNode);
 
@@ -317,24 +319,24 @@ function buildTaskTree(
 
   const inTree = new Set<string>();
 
-  function buildSubTree(name: string): DataNode {
+  function buildSubTree(name: string, isRoot: boolean): DataNode {
     inTree.add(name.toUpperCase());
     const task = byName.get(name.toUpperCase())!;
-    const kids = (childrenOf.get(name.toUpperCase()) ?? []).map(buildSubTree);
+    const kids = (childrenOf.get(name.toUpperCase()) ?? []).map((n) => buildSubTree(n, false));
     // Attach finalizer task as the last child if this is its designated root task.
     const finTask = finalizerOf.get(name.toUpperCase());
     if (finTask) {
       inTree.add(finTask.name.toUpperCase());
       kids.push(makeNode(finTask, [], true));
     }
-    return makeNode(task, kids);
+    return makeNode(task, kids, false, isRoot);
   }
 
   const result: DataNode[] = [];
   for (const t of tasks) {
     // Skip finalizer tasks (placed inside their root) and tasks with a parent.
     if (finalizerNames.has(t.name.toUpperCase())) continue;
-    if (!parentOf.has(t.name.toUpperCase())) result.push(buildSubTree(t.name));
+    if (!parentOf.has(t.name.toUpperCase())) result.push(buildSubTree(t.name, true));
   }
   // Safety net: orphaned tasks not yet placed (shouldn't normally occur).
   for (const t of tasks) {
@@ -960,7 +962,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       const objKind     = key.split(":")[3];
       const objArgs     = (node as any).arguments ?? "";
       const isFinalizer = !!(node as any).isFinalizer;
-      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "obj", objKind, objArgs, isFinalizer });
+      const isRootTask  = !!(node as any).isRootTask;
+      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "obj", objKind, objArgs, isFinalizer, isRootTask });
     } else if (key.startsWith("gitcommits:") || key.startsWith("gitcommit-empty:")) {
       setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "gitcommits" });
     } else if (key.startsWith("gitdir:")) {
@@ -1133,13 +1136,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     if (!ctxMenu) return;
     const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
     const name = nameParts.join(":");
-    // A task is a root task if it is not a finalizer and has no predecessors
-    // (i.e. it sits at the top level in the task tree). The isFinalizer flag
-    // is reliably set by buildTaskTree; for non-finalizer tasks at the root
-    // of the tree, the node will not have a parent in the tree.
-    const isRoot = !ctxMenu.isFinalizer;
     setCtxMenu(null);
-    setTaskHistoryModal({ db, schema, name, isRoot });
+    setTaskHistoryModal({ db, schema, name, isRoot: !!ctxMenu.isRootTask });
   };
 
   const openCreateTable = () => {

@@ -102,6 +102,16 @@ func QuoteStringLit(s string) string {
 	return `'` + EscapeStringLit(s) + `'`
 }
 
+// EscapeLikePattern escapes LIKE-special characters (% and _) in s so that
+// the string matches literally when used in a SHOW … LIKE '<pattern>' clause.
+// Single-quotes are also doubled (same as EscapeStringLit).
+func EscapeLikePattern(s string) string {
+	s = strings.ReplaceAll(s, `'`, `''`)
+	s = strings.ReplaceAll(s, `%`, `\%`)
+	s = strings.ReplaceAll(s, `_`, `\_`)
+	return s
+}
+
 // QuoteOrBare returns a double-quoted identifier when caseSensitive is true or
 // when the name requires quoting (invalid bare identifier or reserved keyword);
 // otherwise it returns the name unquoted (Snowflake will uppercase it).

@@ -62,16 +62,28 @@ func GetTaskRunHistory(ctx context.Context, client *snowflake.Client, database, 
 	var filterClause string
 	if isRoot {
 		showSQL := fmt.Sprintf("SHOW TASKS LIKE '%s' IN SCHEMA %s.%s",
-			snowflake.EscapeStringLit(taskName), quotedDB, snowflake.QuoteIdent(schema))
+			snowflake.EscapeLikePattern(taskName), quotedDB, snowflake.QuoteIdent(schema))
 		showRes, err := client.Execute(ctx, showSQL)
 		if err != nil {
 			return nil, fmt.Errorf("failed to look up task ID: %w", err)
 		}
+		nameIdx := colIdx(showRes.Columns, "name")
 		idIdx := colIdx(showRes.Columns, "id")
-		if idIdx < 0 || len(showRes.Rows) == 0 {
+		if idIdx < 0 || nameIdx < 0 || len(showRes.Rows) == 0 {
 			return nil, fmt.Errorf("task %q not found in %s.%s", taskName, database, schema)
 		}
-		taskID := toString(showRes.Rows[0][idIdx])
+		// SHOW TASKS LIKE is case-insensitive and may return multiple rows;
+		// find the exact match by name.
+		var taskID string
+		for _, r := range showRes.Rows {
+			if strings.EqualFold(toString(r[nameIdx]), taskName) {
+				taskID = toString(r[idIdx])
+				break
+			}
+		}
+		if taskID == "" {
+			return nil, fmt.Errorf("task %q not found in %s.%s", taskName, database, schema)
+		}
 		filterClause = fmt.Sprintf("ROOT_TASK_ID => '%s'", snowflake.EscapeStringLit(taskID))
 	} else {
 		filterClause = fmt.Sprintf("TASK_NAME => '%s'", snowflake.EscapeStringLit(taskName))
