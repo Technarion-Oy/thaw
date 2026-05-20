@@ -435,7 +435,6 @@ export default function FileBrowser() {
       message.error("Name cannot be empty or contain path separators");
       return;
     }
-    setInlineInput(null);
     try {
       if (kind === "rename") {
         const dir = pathDir(path);
@@ -467,6 +466,7 @@ export default function FileBrowser() {
         await CreateFile(`${path}${sep}${name}`);
         message.success(`Created ${name}`);
       }
+      setInlineInput(null);
       refresh();
     } catch (e) {
       message.error(String(e));

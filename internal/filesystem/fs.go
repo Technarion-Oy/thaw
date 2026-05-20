@@ -116,8 +116,8 @@ func RevealInFinder(path, allowedRoot string) error {
 		return exec.Command("open", "-R", abs).Start()
 	case "windows":
 		// explorer expects /select, and the path as a single combined argument.
-		// Path is quoted to handle commas and special characters in filenames.
-		return exec.Command("explorer", fmt.Sprintf(`/select,"%s"`, abs)).Start()
+		// Go's exec.Command handles argument quoting via syscall.EscapeArg.
+		return exec.Command("explorer", "/select,"+abs).Start()
 	default: // linux and others
 		return exec.Command("xdg-open", filepath.Dir(abs)).Start()
 	}
@@ -299,6 +299,9 @@ func caseInsensitiveFS() bool {
 
 // hasPathPrefix checks whether path starts with prefix, respecting platform
 // case sensitivity. On macOS/Windows the comparison is case-folded.
+// Note: the byte-length slice before EqualFold is safe for filesystem paths
+// which are overwhelmingly ASCII. Unicode characters whose case-folded forms
+// have different byte widths (e.g. ß/SS) are not valid in typical FS paths.
 func hasPathPrefix(path, prefix string) bool {
 	if caseInsensitiveFS() {
 		return len(path) >= len(prefix) && strings.EqualFold(path[:len(prefix)], prefix)
