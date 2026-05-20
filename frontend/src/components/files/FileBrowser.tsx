@@ -539,6 +539,8 @@ export default function FileBrowser() {
     }
     if (/[:"*?<>|]/.test(sanitized)) {
       message.error("Name contains invalid characters (: \" * ? < > |)");
+      editActionRef.current = "cancelled";
+      setEditingKey(null);
       return;
     }
     const dir = pathDir(path);
