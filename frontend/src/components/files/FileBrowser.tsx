@@ -474,7 +474,8 @@ export default function FileBrowser() {
       setInlineInput(null);
       refresh();
     } catch (e) {
-      message.error(String(e));
+      const prefix = kind === "rename" ? "Rename failed" : kind === "newFolder" ? "Could not create folder" : "Could not create file";
+      message.error(`${prefix}: ${String(e)}`);
     }
   };
 
@@ -753,8 +754,16 @@ export default function FileBrowser() {
           }}
           onBlur={(e) => {
             // Dismiss menu when focus leaves the container entirely.
-            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+            // relatedTarget can be null in WKWebView during focus transitions
+            // between sibling elements — defer check to next microtask.
+            if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget as Node)) {
               setFileCtxMenu(null);
+            } else if (!e.relatedTarget) {
+              setTimeout(() => {
+                if (!fileCtxRef.current?.contains(document.activeElement)) {
+                  setFileCtxMenu(null);
+                }
+              }, 0);
             }
           }}
         >

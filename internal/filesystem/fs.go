@@ -294,8 +294,13 @@ func validateInsideOrEqual(path, allowedRoot string) error {
 	return checkInsideOrEqual(realPath, realRoot)
 }
 
-// caseInsensitiveFS reports whether the current platform uses case-insensitive
-// filesystem paths (macOS APFS default, Windows NTFS).
+// caseInsensitiveFS reports whether the current platform typically uses
+// case-insensitive filesystem paths (macOS APFS default, Windows NTFS).
+// Note: this is an OS-level heuristic, not filesystem-aware. macOS supports
+// case-sensitive APFS volumes and Windows supports case-sensitive directories
+// via fsutil. This is acceptable as a defense-in-depth layer (used alongside
+// filepath.Rel which handles case correctly on all platforms). For operations
+// where correctness is critical (e.g. case-only renames), use os.SameFile instead.
 func caseInsensitiveFS() bool {
 	return runtime.GOOS == "darwin" || runtime.GOOS == "windows"
 }
