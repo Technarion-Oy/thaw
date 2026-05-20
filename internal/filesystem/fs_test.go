@@ -472,3 +472,39 @@ func TestDeleteFile_SymlinkToDir(t *testing.T) {
 		t.Error("real directory should still exist after deleting symlink")
 	}
 }
+
+// ─── Prefix-collision defense ───────────────────────────────────────────────
+
+func TestValidateExistingPath_PrefixCollision(t *testing.T) {
+	// Verify that /tmp/sub does not pass validation for root /tmp/submarine
+	// (prefix collision without the trailing separator check).
+	parent := t.TempDir()
+	root := filepath.Join(parent, "sub")
+	collision := filepath.Join(parent, "submarine")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(collision, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := validateExistingPath(collision, root)
+	if err == nil {
+		t.Error("expected error for prefix-collision path (submarine vs sub)")
+	}
+}
+
+// ─── RenameFile with os.SameFile ────────────────────────────────────────────
+
+func TestRenameFile_SameFileCheck(t *testing.T) {
+	// Even on case-sensitive FS, renaming to the exact same path should be
+	// handled gracefully (os.SameFile returns true → no "already exists" error).
+	root := t.TempDir()
+	f := filepath.Join(root, "test.sql")
+	if err := os.WriteFile(f, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Rename to itself — should succeed (noop via os.Rename).
+	if err := RenameFile(f, f, root); err != nil {
+		t.Errorf("expected no error for same-path rename, got: %v", err)
+	}
+}

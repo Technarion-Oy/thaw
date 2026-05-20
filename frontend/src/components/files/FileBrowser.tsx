@@ -435,6 +435,11 @@ export default function FileBrowser() {
       message.error("Name cannot be empty or contain path separators");
       return;
     }
+    // Reject characters invalid on Windows (and generally problematic).
+    if (/[:"*?<>|]/.test(sanitized)) {
+      message.error("Name contains invalid characters (: \" * ? < > |)");
+      return;
+    }
     try {
       if (kind === "rename") {
         const dir = pathDir(path);
@@ -734,6 +739,18 @@ export default function FileBrowser() {
           }}
           onClick={(e) => e.stopPropagation()}
           onContextMenu={(e) => e.preventDefault()}
+          onKeyDown={(e) => {
+            // WAI-ARIA menu pattern: ArrowDown/ArrowUp/Home/End navigate between items.
+            const items = fileCtxRef.current?.querySelectorAll<HTMLElement>("[role='menuitem']");
+            if (!items?.length) return;
+            const idx = Array.from(items).indexOf(document.activeElement as HTMLElement);
+            let next = -1;
+            if (e.key === "ArrowDown") next = idx < items.length - 1 ? idx + 1 : 0;
+            else if (e.key === "ArrowUp") next = idx > 0 ? idx - 1 : items.length - 1;
+            else if (e.key === "Home") next = 0;
+            else if (e.key === "End") next = items.length - 1;
+            if (next >= 0) { e.preventDefault(); items[next].focus(); }
+          }}
           onBlur={(e) => {
             // Dismiss menu when focus leaves the container entirely.
             if (!e.currentTarget.contains(e.relatedTarget as Node)) {

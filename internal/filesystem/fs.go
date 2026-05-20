@@ -184,13 +184,12 @@ func RenameFile(oldPath, newPath, allowedRoot string) error {
 	if err := validateNewPath(newPath, allowedRoot); err != nil {
 		return err
 	}
-	if _, err := os.Stat(newPath); err == nil {
-		// On case-insensitive filesystems (macOS/Windows), allow case-only renames
-		// (e.g. File.sql → file.sql) where os.Stat finds the same file.
-		sameFile := caseInsensitiveFS() &&
-			strings.EqualFold(filepath.Base(oldPath), filepath.Base(newPath)) &&
-			pathsEqual(filepath.Dir(oldPath), filepath.Dir(newPath))
-		if !sameFile {
+	if newInfo, err := os.Stat(newPath); err == nil {
+		// Allow case-only renames (e.g. File.sql → file.sql) on any filesystem:
+		// os.SameFile checks inode/file-ID, so it works correctly regardless of
+		// whether the FS is case-sensitive or case-insensitive.
+		oldInfo, errOld := os.Stat(oldPath)
+		if errOld != nil || !os.SameFile(oldInfo, newInfo) {
 			return fmt.Errorf("destination already exists: %s", filepath.Base(newPath))
 		}
 	}
@@ -262,7 +261,10 @@ func validateNewPath(path, allowedRoot string) error {
 		return fmt.Errorf("invalid path: %w", err)
 	}
 	// Reconstruct the full path with the resolved ancestor prefix.
-	remaining, _ := filepath.Rel(ancestor, absPath)
+	remaining, err := filepath.Rel(ancestor, absPath)
+	if err != nil {
+		return fmt.Errorf("cannot compute relative path: %w", err)
+	}
 	// Defense-in-depth: reject if remaining somehow escapes (should not happen
 	// since absPath is always deeper than ancestor, but guard explicitly).
 	if strings.HasPrefix(remaining, "..") {
