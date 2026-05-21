@@ -281,6 +281,13 @@ export default function CrossTabSearch({ onClose }: Props) {
     };
   }, [searchTerm, computeMatches]);
 
+  // Recompute matches when tabs are opened, closed, or reordered so the
+  // match list never references stale (deleted) tabs.
+  const tabIds = useQueryStore((s) => s.tabs.map((t) => t.id).join(","));
+  useEffect(() => {
+    if (searchTerm) computeMatches(searchTerm);
+  }, [tabIds]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Navigation ─────────────────────────────────────────────────────────────
 
   const goToMatch = useCallback(

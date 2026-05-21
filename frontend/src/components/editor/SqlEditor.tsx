@@ -1974,18 +1974,19 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       },
     });
 
-    editor.addAction({
-      id: "thaw.crossTabSearch",
-      label: "Find & Replace in Tabs",
-      contextMenuGroupId: "3_find",
-      contextMenuOrder: 1,
-      keybindings: [monacoLib.KeyMod.CtrlCmd | monacoLib.KeyMod.Shift | monacoLib.KeyCode.KeyH],
-      precondition: undefined,
-      run: () => {
-        if (!useFeatureFlagsStore.getState().flags.crossTabSearch) return;
-        window.dispatchEvent(new Event("thaw:toggle-cross-tab-search"));
-      },
-    });
+    if (useFeatureFlagsStore.getState().flags.crossTabSearch) {
+      editor.addAction({
+        id: "thaw.crossTabSearch",
+        label: "Find & Replace in Tabs",
+        contextMenuGroupId: "3_find",
+        contextMenuOrder: 1,
+        keybindings: [monacoLib.KeyMod.CtrlCmd | monacoLib.KeyMod.Shift | monacoLib.KeyCode.KeyH],
+        precondition: undefined,
+        run: () => {
+          window.dispatchEvent(new Event("thaw:toggle-cross-tab-search"));
+        },
+      });
+    }
 
     // Only the primary editor (no tabId) should respond to scroll-to-line
     // events — split/secondary editors have different content and the line
