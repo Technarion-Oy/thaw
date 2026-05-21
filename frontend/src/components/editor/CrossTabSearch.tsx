@@ -10,7 +10,7 @@
 //
 // @thaw-domain: SQL Editor & Diagnostics
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Input, Button, Typography, Tooltip } from "antd";
 import type { InputRef } from "antd";
 import {
@@ -21,6 +21,7 @@ import {
   SwapOutlined,
 } from "@ant-design/icons";
 import { useQueryStore } from "../../store/queryStore";
+import { getEditorInstance } from "./editorRef";
 
 const { Text } = Typography;
 
@@ -190,8 +191,11 @@ export default function CrossTabSearch({ onClose }: Props) {
   const [showReplace, setShowReplace] = useState(false);
   const [matches, setMatches] = useState<MatchLocation[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
+  const [isReplacing, setIsReplacing] = useState(false);
   const searchRef = useRef<InputRef>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const isReplacingRef = useRef(false);
+  const prevMatchRef = useRef<{ tabId: string; line: number; column: number } | null>(null);
 
   // Focus the search input on mount.
   useEffect(() => {
@@ -282,6 +286,7 @@ export default function CrossTabSearch({ onClose }: Props) {
     (idx: number) => {
       if (idx < 0 || idx >= matches.length) return;
       const m = matches[idx];
+      prevMatchRef.current = { tabId: m.tabId, line: m.line, column: m.column };
       const { activeTabId, activateTab } = useQueryStore.getState();
       const needsSwitch = m.tabId !== activeTabId;
 
@@ -301,9 +306,22 @@ export default function CrossTabSearch({ onClose }: Props) {
         );
       };
 
-      // Allow time for the editor to mount after a tab switch.
-      if (needsSwitch) setTimeout(emit, 150);
-      else emit();
+      if (needsSwitch) {
+        // Wait for the editor to mount after a tab switch.  Listen for the
+        // thaw:editor-ready event emitted by SqlEditor's handleMount, with
+        // a fallback timeout for notebook tabs (no editor) or slow mounts.
+        let fired = false;
+        const fallback = setTimeout(() => { if (!fired) { fired = true; emit(); } }, 500);
+        const handler = () => {
+          if (fired) return;
+          fired = true;
+          clearTimeout(fallback);
+          setTimeout(emit, 20);
+        };
+        window.addEventListener("thaw:editor-ready", handler, { once: true });
+      } else {
+        emit();
+      }
     },
     [matches],
   );
@@ -322,23 +340,65 @@ export default function CrossTabSearch({ onClose }: Props) {
     goToMatch(prev);
   }, [matches, currentIdx, goToMatch]);
 
-  // Auto-navigate to the first match when search results change so the
-  // counter ("1 of N") is accurate — without this, the editor wouldn't
-  // reveal/highlight anything until the user explicitly presses Enter.
+  // Auto-navigate when search results change.  If the user was already
+  // positioned on a match (e.g. toggling case/regex), stay near that
+  // position; otherwise navigate to the first match.
   useEffect(() => {
-    if (matches.length > 0) {
+    if (matches.length === 0) return;
+    const prev = prevMatchRef.current;
+    if (!prev) {
+      setCurrentIdx(0);
       goToMatch(0);
+      return;
     }
+    // Find the closest match to the previous position.
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < matches.length; i++) {
+      const m = matches[i];
+      if (m.tabId !== prev.tabId) continue;
+      const dist = Math.abs(m.line - prev.line) * 10000 + Math.abs(m.column - prev.column);
+      if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+    }
+    setCurrentIdx(bestIdx);
+    goToMatch(bestIdx);
   }, [matches, goToMatch]);
 
   // ── Replace ────────────────────────────────────────────────────────────────
 
   const applyReplace = useCallback(
-    (tabId: string, newContent: string) => {
+    (
+      tabId: string,
+      newContent: string,
+      editRange?: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number },
+      editText?: string,
+    ) => {
       const store = useQueryStore.getState();
+
+      // For the active non-notebook tab, route edits through Monaco so the
+      // undo stack (Ctrl+Z) records the change.  Monaco's onChange callback
+      // will sync the new content back to the store automatically.
+      const editor = getEditorInstance();
+      const model = editor?.getModel();
+      if (tabId === store.activeTabId && editor && model) {
+        editor.pushUndoStop();
+        if (editRange && editText != null) {
+          // Targeted single-match edit (replaceCurrent).
+          editor.executeEdits("cross-tab-replace", [
+            { range: editRange, text: editText, forceMoveMarkers: true },
+          ]);
+        } else {
+          // Full-content replacement (replaceAll).
+          editor.executeEdits("cross-tab-replace", [
+            { range: model.getFullModelRange(), text: newContent, forceMoveMarkers: true },
+          ]);
+        }
+        editor.pushUndoStop();
+        return;
+      }
+
+      // Non-active tab or no editor (notebook tabs): store-only update.
       store.setSqlForTab(tabId, newContent);
-      // setSqlForTab only patches the tabs array — the flat `sql` alias must
-      // be updated separately when replacing in the active tab.
       if (tabId === store.activeTabId) {
         useQueryStore.setState({ sql: newContent });
       }
@@ -348,9 +408,13 @@ export default function CrossTabSearch({ onClose }: Props) {
 
   const replaceCurrent = useCallback(() => {
     if (matches.length === 0 || currentIdx >= matches.length) return;
+    if (isReplacingRef.current) return;
+    isReplacingRef.current = true;
+    setIsReplacing(true);
+
     const m = matches[currentIdx];
     const tab = useQueryStore.getState().tabs.find((t) => t.id === m.tabId);
-    if (!tab) return;
+    if (!tab) { isReplacingRef.current = false; setIsReplacing(false); return; }
 
     // Resolve the source lines for the match (cell source for notebooks,
     // full SQL for regular tabs) so we can extract the matched substring.
@@ -358,12 +422,12 @@ export default function CrossTabSearch({ onClose }: Props) {
     if (m.isNotebook && m.cellIndex != null) {
       const cells = getNotebookCellSources(tab.sql);
       const cell = cells.find((c) => c.index === m.cellIndex);
-      if (!cell) return;
+      if (!cell) { isReplacingRef.current = false; setIsReplacing(false); return; }
       sourceLines = cell.source.split("\n");
     } else {
       sourceLines = tab.sql.split("\n");
     }
-    if (m.line - 1 >= sourceLines.length) return;
+    if (m.line - 1 >= sourceLines.length) { isReplacingRef.current = false; setIsReplacing(false); return; }
 
     // In regex mode, expand capture-group back-references ($1, $2, etc.)
     // by running the replacement through String.prototype.replace.
@@ -384,20 +448,34 @@ export default function CrossTabSearch({ onClose }: Props) {
     } else {
       const lines = tab.sql.split("\n");
       const lineStr = lines[m.line - 1];
-      if (lineStr == null) return;
+      if (lineStr == null) { isReplacingRef.current = false; setIsReplacing(false); return; }
       lines[m.line - 1] =
         lineStr.substring(0, m.column - 1) +
         effectiveReplace +
         lineStr.substring(m.column - 1 + m.length);
-      applyReplace(m.tabId, lines.join("\n"));
+      // Pass the targeted edit range so applyReplace can use Monaco
+      // executeEdits for undo support on the active tab.
+      applyReplace(m.tabId, lines.join("\n"), {
+        startLineNumber: m.line,
+        startColumn: m.column,
+        endLineNumber: m.line,
+        endColumn: m.column + m.length,
+      }, effectiveReplace);
     }
 
     // Recompute after the store update propagates.
-    setTimeout(() => computeMatches(searchTerm), 50);
+    setTimeout(() => {
+      computeMatches(searchTerm);
+      isReplacingRef.current = false;
+      setIsReplacing(false);
+    }, 50);
   }, [matches, currentIdx, replaceTerm, useRegex, searchTerm, caseSensitive, applyReplace, computeMatches]);
 
   const replaceAll = useCallback(() => {
     if (matches.length === 0) return;
+    if (isReplacingRef.current) return;
+    isReplacingRef.current = true;
+    setIsReplacing(true);
 
     // Group matches by tab.
     const byTab = new Map<string, MatchLocation[]>();
@@ -445,7 +523,11 @@ export default function CrossTabSearch({ onClose }: Props) {
       }
     }
 
-    setTimeout(() => computeMatches(searchTerm), 50);
+    setTimeout(() => {
+      computeMatches(searchTerm);
+      isReplacingRef.current = false;
+      setIsReplacing(false);
+    }, 50);
   }, [matches, replaceTerm, useRegex, searchTerm, caseSensitive, applyReplace, computeMatches]);
 
   // ── Keyboard handlers ──────────────────────────────────────────────────────
@@ -470,7 +552,7 @@ export default function CrossTabSearch({ onClose }: Props) {
 
   // ── Derived state ──────────────────────────────────────────────────────────
 
-  const tabCount = new Set(matches.map((m) => m.tabId)).size;
+  const tabCount = useMemo(() => new Set(matches.map((m) => m.tabId)).size, [matches]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -599,7 +681,7 @@ export default function CrossTabSearch({ onClose }: Props) {
           />
           <Button
             size="small"
-            disabled={matches.length === 0}
+            disabled={matches.length === 0 || isReplacing}
             onClick={replaceCurrent}
             style={{ fontSize: 11, height: 22 }}
           >
@@ -607,7 +689,7 @@ export default function CrossTabSearch({ onClose }: Props) {
           </Button>
           <Button
             size="small"
-            disabled={matches.length === 0}
+            disabled={matches.length === 0 || isReplacing}
             onClick={replaceAll}
             style={{ fontSize: 11, height: 22 }}
           >

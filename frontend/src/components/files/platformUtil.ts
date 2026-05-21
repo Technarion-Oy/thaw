@@ -5,8 +5,6 @@
 // in whole or in part, is strictly prohibited without prior written permission
 // from Technarion Oy.
 
-// @thaw-domain: Core IPC & App Lifecycle
-
 import { GetPlatformOS } from "../../../wailsjs/go/main/App";
 
 // Module-level cache for platform OS (compile-time constant, fetched once).

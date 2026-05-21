@@ -536,6 +536,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     if (!tabId) {
       setEditorInstance(editor);
       editor.onDidDispose(() => setEditorInstance(null));
+      // Signal that the editor is mounted and ready for external commands
+      // (used by CrossTabSearch to scroll to a match after a tab switch).
+      window.dispatchEvent(new Event("thaw:editor-ready"));
     }
 
     activeStmtDecRef.current = editor.createDecorationsCollection([]);

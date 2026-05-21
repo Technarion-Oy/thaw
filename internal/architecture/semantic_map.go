@@ -26,7 +26,6 @@ func GetCodebaseSemanticMap() string {
       ],
       "frontend_paths": [
         "frontend/src/components/connection/ConnectModal.tsx",
-        "frontend/src/components/files/platformUtil.ts",
         "frontend/src/components/settings/SessionManagementModal.tsx",
         "frontend/src/components/toolbar/Toolbar.tsx",
         "frontend/src/store/connectionStore.ts",

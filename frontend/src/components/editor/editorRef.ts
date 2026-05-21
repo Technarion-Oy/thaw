@@ -21,6 +21,10 @@ export function setEditorInstance(editor: monaco.editor.IStandaloneCodeEditor | 
   _editorInstance = editor;
 }
 
+export function getEditorInstance(): monaco.editor.IStandaloneCodeEditor | null {
+  return _editorInstance;
+}
+
 export function insertAtCursor(text: string) {
   if (!_editorInstance) return;
   const selection = _editorInstance.getSelection();
