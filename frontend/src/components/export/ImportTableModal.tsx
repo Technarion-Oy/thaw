@@ -746,7 +746,6 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
                     </Text>
                   </Space>
                 ),
-                extra: undefined,
                 children: (
                   <div style={{ paddingTop: 4 }}>
                     <FileFormatFields cfg={cfg} set={set} hideNameFields />

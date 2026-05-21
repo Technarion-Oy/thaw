@@ -8,8 +8,8 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-// Package ai provides API clients for LLM providers (OpenAI, Google) and
-// agentic tool-calling execution loops.
+// Package ai provides API clients for LLM providers (OpenAI, Google, Ollama);
+// inline completion and model management.
 //
 // thaw:domain: AI Tooling
 package ai
