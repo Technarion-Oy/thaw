@@ -267,6 +267,9 @@ export default function CrossTabSearch({ onClose }: Props) {
       }
 
       setMatches(results);
+      // Clamp currentIdx so the status bar never shows e.g. "6 of 5" in
+      // the brief window before the auto-navigate effect overwrites it.
+      setCurrentIdx((prev) => Math.min(prev, Math.max(0, results.length - 1)));
     },
     [caseSensitive, useRegex],
   );
