@@ -319,16 +319,18 @@ export default function CrossTabSearch({ onClose }: Props) {
         // thaw:editor-ready event emitted by SqlEditor's handleMount, with
         // a fallback timeout for notebook tabs (no editor) or slow mounts.
         let fired = false;
+        let postReadyTimer: ReturnType<typeof setTimeout>;
         const fallback = setTimeout(() => { if (!fired) { fired = true; emit(); } }, 500);
         const handler = () => {
           if (fired) return;
           fired = true;
           clearTimeout(fallback);
-          setTimeout(emit, 20);
+          postReadyTimer = setTimeout(emit, 20);
         };
         window.addEventListener("thaw:editor-ready", handler, { once: true });
         navigationCleanupRef.current = () => {
           clearTimeout(fallback);
+          clearTimeout(postReadyTimer);
           window.removeEventListener("thaw:editor-ready", handler);
         };
       } else {

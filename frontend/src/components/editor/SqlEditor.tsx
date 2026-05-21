@@ -2004,6 +2004,7 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       }
     };
     window.addEventListener("thaw:scroll-to-line", handleScrollToLine);
+    editor.onDidDispose(() => window.removeEventListener("thaw:scroll-to-line", handleScrollToLine));
 
     const editorDom = editor.getDomNode();
     if (editorDom) {
