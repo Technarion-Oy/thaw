@@ -1149,6 +1149,7 @@ Open **Help → Keyboard Shortcuts…** in the menu bar for a searchable, always
 | `Tab` | `Tab` | Accept AI suggestion |
 | `⌘F` | `Ctrl+F` | Find in document |
 | `⌘⌥F` | `Ctrl+H` | Find and replace |
+| `⌘⇧H` | `Ctrl+Shift+H` | Find & replace across tabs |
 | `⌘D` | `Ctrl+D` | Select next occurrence |
 | `⌃G` | `Ctrl+G` | Go to line |
 | `⌘⌥↑` | `Ctrl+Alt+↑` | Add cursor above |

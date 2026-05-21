@@ -59,6 +59,7 @@ const GROUPS: ShortcutGroup[] = [
       { action: "Accept AI Suggestion",       mac: "Tab",            win: "Tab" },
       { action: "Find in Document",           mac: "⌘ F",           win: "Ctrl+F",        status: "new" },
       { action: "Find and Replace",           mac: "⌘ ⌥ F",        win: "Ctrl+H",        status: "new" },
+      { action: "Find & Replace in Tabs",    mac: "⌘ ⇧ H",        win: "Ctrl+Shift+H",  status: "new" },
       { action: "Select Next Occurrence",     mac: "⌘ D",           win: "Ctrl+D",        status: "new" },
       { action: "Go to Line",                mac: "⌃ G",            win: "Ctrl+G",        status: "new" },
       { action: "Zoom In",                   mac: "⌘ +",            win: "Ctrl++" },

@@ -180,8 +180,8 @@ func DefaultNotebookPrefs() NotebookPrefs {
 //
 // Version tracks the schema revision so new flags introduced after an initial
 // save can be filled with their defaults rather than the zero value (false).
-// Current version: 7 (added MultiCellCopy).
-const flagsVersion = 7
+// Current version: 8 (added CrossTabSearch).
+const flagsVersion = 8
 
 type FeatureFlags struct {
 	Initialized bool `json:"initialized"`
@@ -239,6 +239,9 @@ type FeatureFlags struct {
 
 	// Results Grid
 	MultiCellCopy bool `json:"multiCellCopy"` // Range selection and multi-cell copy in query results
+
+	// Editor Productivity
+	CrossTabSearch bool `json:"crossTabSearch"` // Search and replace across all open tabs
 }
 
 // DefaultFeatureFlags returns a FeatureFlags with every feature enabled.
@@ -279,6 +282,7 @@ func DefaultFeatureFlags() FeatureFlags {
 		FileFormatBuilder:      true,
 		SnowflakeCLIProfileManager: true,
 		MultiCellCopy:              true,
+		CrossTabSearch:             true,
 	}
 }
 
@@ -337,6 +341,8 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	setIfZero(&f.SnowflakeCLIProfileManager, defaults.SnowflakeCLIProfileManager)
 	// Version 6 → 7: MultiCellCopy added; defaults to true.
 	setIfZero(&f.MultiCellCopy, defaults.MultiCellCopy)
+	// Version 7 → 8: CrossTabSearch added; defaults to true.
+	setIfZero(&f.CrossTabSearch, defaults.CrossTabSearch)
 	f.Version = flagsVersion
 	return f
 }

@@ -29,6 +29,7 @@ import { usePanelLayoutStore } from "../store/panelLayoutStore";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import SqlEditor from "../components/editor/SqlEditor";
 import TabBar from "../components/editor/TabBar";
+import CrossTabSearch from "../components/editor/CrossTabSearch";
 import { DiffEditor } from "@monaco-editor/react";
 import { ensureMonacoSetup } from "../components/editor/monacoSetup";
 import { useThemeStore } from "../store/themeStore";
@@ -155,6 +156,8 @@ export default function QueryPage() {
   const primaryGridRef = useRef<ResultGridHandle | null>(null);
   // Grid search bar visibility.
   const [gridSearchOpen, setGridSearchOpen] = useState(false);
+  // Cross-tab search/replace panel visibility.
+  const [crossTabSearchOpen, setCrossTabSearchOpen] = useState(false);
   const { disconnect, isConnected } = useConnectionStore();
   // Pending query stored when the user runs SQL while disconnected.
   const pendingQueryRef = useRef<string | null>(null);
@@ -813,6 +816,14 @@ export default function QueryPage() {
         window.dispatchEvent(new Event("thaw:focus-object-search"));
         return;
       }
+
+      // ⌘⇧H / Ctrl+Shift+H — Toggle cross-tab search/replace
+      if (cmd && e.shiftKey && !e.altKey && e.key === "H") {
+        if (!featureFlags.crossTabSearch) return;
+        e.preventDefault();
+        setCrossTabSearchOpen((prev) => !prev);
+        return;
+      }
     };
 
     window.addEventListener("keydown", handler);
@@ -981,6 +992,9 @@ export default function QueryPage() {
 
       {/* Tab bar */}
       <TabBar />
+
+      {/* Cross-tab search/replace panel */}
+      {crossTabSearchOpen && <CrossTabSearch onClose={() => setCrossTabSearchOpen(false)} />}
 
       {/* Diff view — replaces editor + results when the active tab is a diff tab */}
       {activeDiff && (

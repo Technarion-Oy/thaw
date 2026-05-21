@@ -429,6 +429,13 @@ export default function FeatureFlagsModal({ onClose }: Props) {
             locked={locked.ddlHoverTooltips}
             onChange={(v) => set("ddlHoverTooltips", v)}
           />
+          <FlagRow
+            label="Cross-Tab Search & Replace"
+            description="Search and replace text across all open query tabs and notebook cells."
+            checked={flags.crossTabSearch}
+            locked={locked.crossTabSearch}
+            onChange={(v) => set("crossTabSearch", v)}
+          />
         </Category>
 
       </div>

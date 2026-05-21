@@ -49,6 +49,7 @@ const allEnabled: config.FeatureFlags = {
   fileFormatBuilder: true,
   snowflakeCLIProfileManager: true,
   multiCellCopy: true,
+  crossTabSearch: true,
 };
 
 // allLocked default: nothing is admin-locked.
@@ -88,6 +89,7 @@ const nothingLocked: config.FeatureFlags = {
   fileFormatBuilder: false,
   snowflakeCLIProfileManager: false,
   multiCellCopy: false,
+  crossTabSearch: false,
 };
 
 interface FeatureFlagsState {

@@ -203,6 +203,14 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 - Schema object cache: module-level `fetchedSchemaObjects` Set — avoids duplicate `ListObjects` calls
 - **Never register completion/hover providers inside the component render** — use module-level disposable refs
 
+### Cross-tab search & replace
+- `CrossTabSearch` (`frontend/src/components/editor/CrossTabSearch.tsx`) renders a search/replace panel between the TabBar and the editor area
+- Triggered by `⌘⇧H` / `Ctrl+Shift+H` in QueryPage's global keydown handler; gated behind the `crossTabSearch` feature flag
+- Searches all tabs (SQL, YAML, Python) by splitting `tab.sql` into lines; for notebook tabs, parses the serialised Jupyter JSON and searches each cell's source
+- Navigation dispatches the existing `thaw:scroll-to-line` custom event so SqlEditor can reveal and select the match; after a tab switch the event fires with a 150 ms delay to let the editor mount
+- Replace modifies tab content via `setSqlForTab` (non-active tabs) or `useQueryStore.setState({ sql })` (active tab's flat alias); for notebook tabs the serialised JSON is patched cell-by-cell and re-serialised
+- Supports case-sensitive and regex toggle buttons; match counter shows "N of M in K tabs"
+
 ### SQL diagnostics & JOIN suggestions (backend)
 All proprietary analysis logic lives in `internal/sqleditor/` and is exposed to the frontend via a dedicated Wails-bound `sqleditor.Service` struct (`service.go`). The service is registered in `main.go`'s `Bind` array and its methods are imported from `wailsjs/go/sqleditor/Service` (not from `wailsjs/go/main/App`):
 - `AnalyzeSqlSyntax(sql)` → character-by-character tokenizer (strings, comments, parens, dollar-quoting, scripting); inside `$$` blocks it also flags: placeholder tokens (`<>{}` at statement-start), bare unrecognised identifiers at statement-start, and wrong `:=`/`=` assignment syntax
