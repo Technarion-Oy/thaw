@@ -689,7 +689,10 @@ export default function QueryPage() {
   // thaw:toggle-cross-tab-search — toggle the cross-tab search panel (fired
   // from the editor context menu action registered in SqlEditor).
   useEffect(() => {
-    const handler = () => setCrossTabSearchOpen((prev) => !prev);
+    const handler = () => {
+      if (!useFeatureFlagsStore.getState().flags.crossTabSearch) return;
+      setCrossTabSearchOpen((prev) => !prev);
+    };
     window.addEventListener("thaw:toggle-cross-tab-search", handler);
     return () => window.removeEventListener("thaw:toggle-cross-tab-search", handler);
   }, []);

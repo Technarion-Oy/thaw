@@ -267,7 +267,6 @@ export default function CrossTabSearch({ onClose }: Props) {
       }
 
       setMatches(results);
-      setCurrentIdx((prev) => (prev < results.length ? prev : 0));
     },
     [caseSensitive, useRegex],
   );
@@ -284,9 +283,11 @@ export default function CrossTabSearch({ onClose }: Props) {
   // Recompute matches when tabs are opened, closed, or reordered so the
   // match list never references stale (deleted) tabs.
   const tabIds = useQueryStore((s) => s.tabs.map((t) => t.id).join(","));
+  const searchTermRef = useRef(searchTerm);
+  searchTermRef.current = searchTerm;
   useEffect(() => {
-    if (searchTerm) computeMatches(searchTerm);
-  }, [tabIds]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (searchTermRef.current) computeMatches(searchTermRef.current);
+  }, [tabIds, computeMatches]);
 
   // ── Navigation ─────────────────────────────────────────────────────────────
 
@@ -702,7 +703,7 @@ export default function CrossTabSearch({ onClose }: Props) {
             size="small"
             placeholder="Replace with..."
             value={replaceTerm}
-            onChange={(e) => setReplaceTerm(e.target.value)}
+            onChange={(e) => { setReplaceTerm(e.target.value); setLastReplaceInfo(null); }}
             onKeyDown={handleReplaceKeyDown}
             style={{ width: 240, fontSize: 11 }}
           />
