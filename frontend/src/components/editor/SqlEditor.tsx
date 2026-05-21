@@ -1971,6 +1971,19 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       },
     });
 
+    editor.addAction({
+      id: "thaw.crossTabSearch",
+      label: "Find & Replace in Tabs",
+      contextMenuGroupId: "3_find",
+      contextMenuOrder: 1,
+      keybindings: [monacoLib.KeyMod.CtrlCmd | monacoLib.KeyMod.Shift | monacoLib.KeyCode.KeyH],
+      precondition: undefined,
+      run: () => {
+        if (!useFeatureFlagsStore.getState().flags.crossTabSearch) return;
+        window.dispatchEvent(new Event("thaw:open-cross-tab-search"));
+      },
+    });
+
     const handleScrollToLine = (e: Event) => {
       const { line, matchStart, matchEnd } =
         (e as CustomEvent<{ line: number; matchStart?: number; matchEnd?: number }>).detail;

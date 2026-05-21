@@ -686,6 +686,14 @@ export default function QueryPage() {
     return () => window.removeEventListener("thaw:focus-results", handler);
   }, []);
 
+  // thaw:open-cross-tab-search — open the cross-tab search panel (fired from
+  // the editor context menu action registered in SqlEditor).
+  useEffect(() => {
+    const handler = () => setCrossTabSearchOpen(true);
+    window.addEventListener("thaw:open-cross-tab-search", handler);
+    return () => window.removeEventListener("thaw:open-cross-tab-search", handler);
+  }, []);
+
   // Escape cancels the running query.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
