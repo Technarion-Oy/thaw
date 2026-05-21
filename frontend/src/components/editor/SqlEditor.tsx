@@ -1983,28 +1983,33 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       precondition: undefined,
       run: () => {
         if (!useFeatureFlagsStore.getState().flags.crossTabSearch) return;
-        window.dispatchEvent(new Event("thaw:open-cross-tab-search"));
+        window.dispatchEvent(new Event("thaw:toggle-cross-tab-search"));
       },
     });
 
-    const handleScrollToLine = (e: Event) => {
-      const { line, matchStart, matchEnd } =
-        (e as CustomEvent<{ line: number; matchStart?: number; matchEnd?: number }>).detail;
-      if (typeof line !== "number") return;
-      editor.revealLineInCenter(line);
-      if (typeof matchStart === "number" && typeof matchEnd === "number") {
-        editor.setSelection({
-          startLineNumber: line,
-          startColumn:     matchStart + 1,
-          endLineNumber:   line,
-          endColumn:       matchEnd + 1,
-        });
-      } else {
-        editor.setPosition({ lineNumber: line, column: 1 });
-      }
-    };
-    window.addEventListener("thaw:scroll-to-line", handleScrollToLine);
-    editor.onDidDispose(() => window.removeEventListener("thaw:scroll-to-line", handleScrollToLine));
+    // Only the primary editor (no tabId) should respond to scroll-to-line
+    // events — split/secondary editors have different content and the line
+    // number could be invalid or misleading.
+    if (!tabId) {
+      const handleScrollToLine = (e: Event) => {
+        const { line, matchStart, matchEnd } =
+          (e as CustomEvent<{ line: number; matchStart?: number; matchEnd?: number }>).detail;
+        if (typeof line !== "number") return;
+        editor.revealLineInCenter(line);
+        if (typeof matchStart === "number" && typeof matchEnd === "number") {
+          editor.setSelection({
+            startLineNumber: line,
+            startColumn:     matchStart + 1,
+            endLineNumber:   line,
+            endColumn:       matchEnd + 1,
+          });
+        } else {
+          editor.setPosition({ lineNumber: line, column: 1 });
+        }
+      };
+      window.addEventListener("thaw:scroll-to-line", handleScrollToLine);
+      editor.onDidDispose(() => window.removeEventListener("thaw:scroll-to-line", handleScrollToLine));
+    }
 
     const editorDom = editor.getDomNode();
     if (editorDom) {

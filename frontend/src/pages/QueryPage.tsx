@@ -686,12 +686,12 @@ export default function QueryPage() {
     return () => window.removeEventListener("thaw:focus-results", handler);
   }, []);
 
-  // thaw:open-cross-tab-search — open the cross-tab search panel (fired from
-  // the editor context menu action registered in SqlEditor).
+  // thaw:toggle-cross-tab-search — toggle the cross-tab search panel (fired
+  // from the editor context menu action registered in SqlEditor).
   useEffect(() => {
-    const handler = () => setCrossTabSearchOpen(true);
-    window.addEventListener("thaw:open-cross-tab-search", handler);
-    return () => window.removeEventListener("thaw:open-cross-tab-search", handler);
+    const handler = () => setCrossTabSearchOpen((prev) => !prev);
+    window.addEventListener("thaw:toggle-cross-tab-search", handler);
+    return () => window.removeEventListener("thaw:toggle-cross-tab-search", handler);
   }, []);
 
   // Escape cancels the running query.
@@ -826,9 +826,8 @@ export default function QueryPage() {
       }
 
       // ⌘⇧H / Ctrl+Shift+H — Toggle cross-tab search/replace
-      // Skip if Monaco already handled this keybinding (editor context menu
-      // action always opens; this global handler toggles).
-      if (cmd && e.shiftKey && !e.altKey && e.code === "KeyH" && !e.defaultPrevented) {
+      // Skip if Monaco already handled this keybinding via defaultPrevented.
+      if (cmd && e.shiftKey && !e.altKey && e.key === "H" && !e.defaultPrevented) {
         if (!featureFlags.crossTabSearch) return;
         e.preventDefault();
         setCrossTabSearchOpen((prev) => !prev);
