@@ -34,7 +34,6 @@ interface MatchLocation {
   line: number;     // 1-based within the text (or cell for notebooks)
   column: number;   // 1-based
   length: number;
-  preview: string;
   cellIndex?: number; // 0-based, for notebook cells only
 }
 
@@ -151,6 +150,7 @@ function replaceAllInNotebook(
           const regex = new RegExp(searchTerm, caseSensitive ? "g" : "gi");
           const lines = src.split("\n");
           for (let i = 0; i < lines.length; i++) {
+            regex.lastIndex = 0;
             lines[i] = lines[i].replace(regex, replaceTerm);
           }
           src = lines.join("\n");
@@ -192,6 +192,7 @@ export default function CrossTabSearch({ onClose }: Props) {
   const [matches, setMatches] = useState<MatchLocation[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [isReplacing, setIsReplacing] = useState(false);
+  const [lastReplaceInfo, setLastReplaceInfo] = useState<{ count: number; tabs: number } | null>(null);
   const searchRef = useRef<InputRef>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   const isReplacingRef = useRef(false);
@@ -239,7 +240,7 @@ export default function CrossTabSearch({ onClose }: Props) {
           const cells = getNotebookCellSources(tab.sql);
           for (const cell of cells) {
             if (!cell.source) continue;
-            searchText(cell.source, regex, (line, column, length, preview) => {
+            searchText(cell.source, regex, (line, column, length) => {
               results.push({
                 tabId: tab.id,
                 tabTitle: tab.title,
@@ -247,13 +248,12 @@ export default function CrossTabSearch({ onClose }: Props) {
                 line,
                 column,
                 length,
-                preview,
                 cellIndex: cell.index,
               });
             });
           }
         } else {
-          searchText(tab.sql, regex, (line, column, length, preview) => {
+          searchText(tab.sql, regex, (line, column, length) => {
             results.push({
               tabId: tab.id,
               tabTitle: tab.title,
@@ -261,7 +261,6 @@ export default function CrossTabSearch({ onClose }: Props) {
               line,
               column,
               length,
-              preview,
             });
           });
         }
@@ -491,6 +490,9 @@ export default function CrossTabSearch({ onClose }: Props) {
     isReplacingRef.current = true;
     setIsReplacing(true);
 
+    const replaceCount = matches.length;
+    const replaceTabCount = new Set(matches.map((m) => m.tabId)).size;
+
     // Group matches by tab.
     const byTab = new Map<string, MatchLocation[]>();
     for (const m of matches) {
@@ -515,6 +517,7 @@ export default function CrossTabSearch({ onClose }: Props) {
           const regex = new RegExp(searchTerm, caseSensitive ? "g" : "gi");
           const lines = tab.sql.split("\n");
           for (let i = 0; i < lines.length; i++) {
+            regex.lastIndex = 0;
             lines[i] = lines[i].replace(regex, replaceTerm);
           }
           applyReplace(tabId, lines.join("\n"));
@@ -537,6 +540,7 @@ export default function CrossTabSearch({ onClose }: Props) {
       }
     }
 
+    setLastReplaceInfo({ count: replaceCount, tabs: replaceTabCount });
     setTimeout(() => {
       computeMatches(searchTerm);
       isReplacingRef.current = false;
@@ -557,12 +561,8 @@ export default function CrossTabSearch({ onClose }: Props) {
     else if (e.key === "Enter") replaceCurrent();
   };
 
-  const handleClose = () => {
-    setSearchTerm("");
-    setReplaceTerm("");
-    setMatches([]);
-    onClose();
-  };
+  // No need to reset state — onClose unmounts the component.
+  const handleClose = () => onClose();
 
   // ── Derived state ──────────────────────────────────────────────────────────
 
@@ -607,7 +607,7 @@ export default function CrossTabSearch({ onClose }: Props) {
           size="small"
           placeholder="Search across tabs..."
           value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+          onChange={(e) => { setSearchTerm(e.target.value); setLastReplaceInfo(null); }}
           onKeyDown={handleSearchKeyDown}
           style={{ width: 240, fontSize: 11 }}
           allowClear
@@ -628,7 +628,7 @@ export default function CrossTabSearch({ onClose }: Props) {
             Aa
           </Button>
         </Tooltip>
-        <Tooltip title="Use Regular Expression">
+        <Tooltip title="Use Regular Expression (matches within single lines)">
           <Button
             type={useRegex ? "primary" : "text"}
             size="small"
@@ -651,7 +651,13 @@ export default function CrossTabSearch({ onClose }: Props) {
             tab{tabCount !== 1 ? "s" : ""}
           </Text>
         )}
-        {searchTerm && matches.length === 0 && (
+        {searchTerm && matches.length === 0 && lastReplaceInfo && (
+          <Text style={{ fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+            Replaced {lastReplaceInfo.count} in {lastReplaceInfo.tabs}{" "}
+            tab{lastReplaceInfo.tabs !== 1 ? "s" : ""}
+          </Text>
+        )}
+        {searchTerm && matches.length === 0 && !lastReplaceInfo && (
           <Text style={{ fontSize: 11, color: "var(--text-faint)", whiteSpace: "nowrap" }}>
             No matches
           </Text>
@@ -724,7 +730,7 @@ export default function CrossTabSearch({ onClose }: Props) {
 function searchText(
   text: string,
   regex: RegExp,
-  onMatch: (line: number, column: number, length: number, preview: string) => void,
+  onMatch: (line: number, column: number, length: number) => void,
 ) {
   const lines = text.split("\n");
   for (let i = 0; i < lines.length; i++) {
@@ -732,12 +738,7 @@ function searchText(
     regex.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = regex.exec(lineStr)) !== null) {
-      onMatch(
-        i + 1,
-        m.index + 1,
-        m[0].length,
-        lineStr.trim(),
-      );
+      onMatch(i + 1, m.index + 1, m[0].length);
       if (!regex.global) break;
       if (m[0].length === 0) { regex.lastIndex++; } // prevent infinite loop on zero-width matches
     }
