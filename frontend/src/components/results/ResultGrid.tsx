@@ -830,8 +830,16 @@ function ResultGrid({ result, gridRef }: Props) {
     if (centerColumns[i]) rightSpacerWidth += centerColumns[i].getSize();
   }
 
-  const selectAllColWidth = featureFlags.multiCellCopy ? 28 : 0;
-  const fullTableWidth = selectAllColWidth + pinnedLeftWidth + totalColumnWidth + pinnedRightWidth;
+  const selectAllColWidth = featureFlags.multiCellCopy
+    ? Math.max(28, Math.ceil(Math.log10(result.rows.length + 1)) * 8 + 16)
+    : 0;
+  const dataColumnsWidth = pinnedLeftWidth + totalColumnWidth + pinnedRightWidth;
+  const fullTableWidth = selectAllColWidth + dataColumnsWidth;
+  // When the table stretches to fill the container, distribute excess space
+  // only to data columns so the row-number column stays at a fixed width.
+  const dataColScale = dataColumnsWidth > 0 && containerWidth > fullTableWidth
+    ? (containerWidth - selectAllColWidth) / dataColumnsWidth
+    : 1;
 
   // Pre-compute sample values for the format modal (avoids IIFE re-creation every render)
   const sampleValues = useMemo(() => {
@@ -1082,10 +1090,10 @@ function ResultGrid({ result, gridRef }: Props) {
           }}
         >
           <colgroup>
-            {featureFlags.multiCellCopy && <col style={{ width: 28 }} />}
-            {leftPinned.map((col) => <col key={col.id} style={{ width: col.getSize() }} />)}
-            {centerColumns.map((col) => <col key={col.id} style={{ width: col.getSize() }} />)}
-            {rightPinned.map((col) => <col key={col.id} style={{ width: col.getSize() }} />)}
+            {featureFlags.multiCellCopy && <col style={{ width: selectAllColWidth }} />}
+            {leftPinned.map((col) => <col key={col.id} style={{ width: col.getSize() * dataColScale }} />)}
+            {centerColumns.map((col) => <col key={col.id} style={{ width: col.getSize() * dataColScale }} />)}
+            {rightPinned.map((col) => <col key={col.id} style={{ width: col.getSize() * dataColScale }} />)}
           </colgroup>
 
           {/* Header */}
@@ -1098,9 +1106,9 @@ function ResultGrid({ result, gridRef }: Props) {
                 {featureFlags.multiCellCopy && (
                   <th
                     style={{
-                      width: 28,
-                      minWidth: 28,
-                      maxWidth: 28,
+                      width: selectAllColWidth,
+                      minWidth: selectAllColWidth,
+                      maxWidth: selectAllColWidth,
                       height: headerHeight,
                       padding: 0,
                       textAlign: "center",
@@ -1125,11 +1133,11 @@ function ResultGrid({ result, gridRef }: Props) {
                   const header = headerMap.get(col.id);
                   if (!header) return null;
                   const colIdx = colIdxFromColumnId(col.id);
-                  const stickyLeft = (featureFlags.multiCellCopy ? 28 : 0) + leftOffsets[i];
+                  const stickyLeft = selectAllColWidth + (leftOffsets[i] * dataColScale);
                   return renderHeaderCell(col.id, colIdx, header, true, stickyLeft);
                 })}
                 {/* Left spacer */}
-                {leftColCount > 0 && <th colSpan={leftColCount} style={{ width: leftSpacerWidth, padding: 0, border: "none" }} />}
+                {leftColCount > 0 && <th colSpan={leftColCount} style={{ width: leftSpacerWidth * dataColScale, padding: 0, border: "none" }} />}
                 {/* Center (virtualized) headers */}
                 {virtualCols.map((vc) => {
                   const col = centerColumns[vc.index];
@@ -1140,13 +1148,13 @@ function ResultGrid({ result, gridRef }: Props) {
                   return renderHeaderCell(col.id, colIdx, header, false);
                 })}
                 {/* Right spacer */}
-                {rightColCount > 0 && <th colSpan={rightColCount} style={{ width: rightSpacerWidth, padding: 0, border: "none" }} />}
+                {rightColCount > 0 && <th colSpan={rightColCount} style={{ width: rightSpacerWidth * dataColScale, padding: 0, border: "none" }} />}
                 {/* Pinned right headers */}
                 {rightPinned.map((col, i) => {
                   const header = headerMap.get(col.id);
                   if (!header) return null;
                   const colIdx = colIdxFromColumnId(col.id);
-                  return renderHeaderCell(col.id, colIdx, header, true, undefined, rightOffsets[i]);
+                  return renderHeaderCell(col.id, colIdx, header, true, undefined, rightOffsets[i] * dataColScale);
                 })}
               </tr>
               );
@@ -1184,9 +1192,9 @@ function ResultGrid({ result, gridRef }: Props) {
                       onMouseDown={(e) => handleRowMouseDown(e, virtualRow.index)}
                       onMouseEnter={() => handleRowMouseEnter(virtualRow.index)}
                       style={{
-                        width: 28,
-                        minWidth: 28,
-                        maxWidth: 28,
+                        width: selectAllColWidth,
+                        minWidth: selectAllColWidth,
+                        maxWidth: selectAllColWidth,
                         padding: "0 4px",
                         fontSize: 9,
                         color: "var(--text-faint)",
@@ -1208,11 +1216,11 @@ function ResultGrid({ result, gridRef }: Props) {
                   {leftPinned.map((col, i) => {
                     const cell = cellMap.get(col.id);
                     if (!cell) return null;
-                    const stickyLeft = (featureFlags.multiCellCopy ? 28 : 0) + leftOffsets[i];
+                    const stickyLeft = selectAllColWidth + (leftOffsets[i] * dataColScale);
                     return renderBodyCell(cell, row.original, virtualRow.index, true, stickyLeft);
                   })}
                   {/* Left spacer */}
-                  {leftColCount > 0 && <td colSpan={leftColCount} style={{ width: leftSpacerWidth, padding: 0, border: "none" }} />}
+                  {leftColCount > 0 && <td colSpan={leftColCount} style={{ width: leftSpacerWidth * dataColScale, padding: 0, border: "none" }} />}
                   {/* Center (virtualized) cells */}
                   {virtualCols.map((vc) => {
                     const col = centerColumns[vc.index];
@@ -1222,12 +1230,12 @@ function ResultGrid({ result, gridRef }: Props) {
                     return renderBodyCell(cell, row.original, virtualRow.index, false);
                   })}
                   {/* Right spacer */}
-                  {rightColCount > 0 && <td colSpan={rightColCount} style={{ width: rightSpacerWidth, padding: 0, border: "none" }} />}
+                  {rightColCount > 0 && <td colSpan={rightColCount} style={{ width: rightSpacerWidth * dataColScale, padding: 0, border: "none" }} />}
                   {/* Pinned right cells */}
                   {rightPinned.map((col, i) => {
                     const cell = cellMap.get(col.id);
                     if (!cell) return null;
-                    return renderBodyCell(cell, row.original, virtualRow.index, true, undefined, rightOffsets[i]);
+                    return renderBodyCell(cell, row.original, virtualRow.index, true, undefined, rightOffsets[i] * dataColScale);
                   })}
                 </tr>
               );
