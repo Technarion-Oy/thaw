@@ -48,7 +48,7 @@ function escapeRegExp(s: string): string {
 }
 
 /** Extract cell sources from a serialized Jupyter notebook. */
-function getNotebookCellSources(json: string): Array<{ index: number; source: string }> {
+export function getNotebookCellSources(json: string): Array<{ index: number; source: string }> {
   try {
     const nb = JSON.parse(json);
     if (!Array.isArray(nb.cells)) return [];
@@ -68,7 +68,7 @@ function getNotebookCellSources(json: string): Array<{ index: number; source: st
  * Replace a match at a specific position within a single notebook cell and
  * return the re-serialised notebook JSON.
  */
-function replaceInNotebookCell(
+export function replaceInNotebookCell(
   json: string,
   cellIndex: number,
   replaceText: string,
@@ -102,7 +102,7 @@ function replaceInNotebookCell(
 
 /** Re-serialize a cell's source string as an array of lines (Jupyter convention). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function reserializeCellSource(cell: any, src: string): void {
+export function reserializeCellSource(cell: any, src: string): void {
   const srcLines = src.split("\n");
   cell.source = srcLines.map((l: string, i: number) =>
     i < srcLines.length - 1 ? l + "\n" : l,
@@ -116,7 +116,7 @@ function reserializeCellSource(cell: any, src: string): void {
  * Apply all match replacements across a notebook's cells in a single JSON
  * parse/serialize cycle (avoids O(n) JSON round-trips per match).
  */
-function replaceAllInNotebook(
+export function replaceAllInNotebook(
   json: string,
   tabMatches: MatchLocation[],
   searchTerm: string,
@@ -284,13 +284,17 @@ export default function CrossTabSearch({ onClose }: Props) {
   }, [searchTerm, computeMatches]);
 
   // Recompute matches when tabs are opened, closed, or reordered so the
-  // match list never references stale (deleted) tabs.
+  // match list never references stale (deleted) tabs.  Use refs for
+  // searchTerm and computeMatches so this effect only fires when the tab
+  // list actually changes — not when option toggles recreate the callback.
   const tabIds = useQueryStore((s) => s.tabs.map((t) => t.id).join(","));
   const searchTermRef = useRef(searchTerm);
   searchTermRef.current = searchTerm;
+  const computeMatchesRef = useRef(computeMatches);
+  computeMatchesRef.current = computeMatches;
   useEffect(() => {
-    if (searchTermRef.current) computeMatches(searchTermRef.current);
-  }, [tabIds, computeMatches]);
+    if (searchTermRef.current) computeMatchesRef.current(searchTermRef.current);
+  }, [tabIds]);
 
   // ── Navigation ─────────────────────────────────────────────────────────────
 
@@ -752,7 +756,7 @@ export default function CrossTabSearch({ onClose }: Props) {
  * Search `text` for all occurrences of `regex` and invoke `onMatch` for each.
  * Matches are reported with 1-based line/column numbers.
  */
-function searchText(
+export function searchText(
   text: string,
   regex: RegExp,
   onMatch: (line: number, column: number, length: number) => void,
