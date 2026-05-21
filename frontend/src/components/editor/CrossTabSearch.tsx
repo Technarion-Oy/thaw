@@ -491,9 +491,13 @@ export default function CrossTabSearch({ onClose }: Props) {
       }, effectiveReplace);
     }
 
-    // Recompute after the store update propagates.  Zustand state updates
-    // are synchronous, so requestAnimationFrame is sufficient to ensure the
-    // new tab content is visible to computeMatches via getState().
+    // Recompute after the store update propagates.  For the active tab,
+    // Monaco fires onDidChangeModelContent synchronously during executeEdits,
+    // which triggers SqlEditor's onChange → setSqlForTab immediately.  For
+    // non-active tabs, setSqlForTab is a direct synchronous Zustand update.
+    // In both cases the store is settled by the next animation frame, so rAF
+    // is sufficient for computeMatches to read updated tab content via
+    // getState().
     requestAnimationFrame(() => {
       computeMatches(searchTerm);
       isReplacingRef.current = false;
@@ -561,6 +565,9 @@ export default function CrossTabSearch({ onClose }: Props) {
     const { activeTabId } = useQueryStore.getState();
     const nonUndoableTabs = [...byTab.keys()].filter((id) => id !== activeTabId).length;
     setLastReplaceInfo({ count: replaceCount, tabs: replaceTabCount, nonUndoableTabs });
+    // See replaceCurrent comment — rAF is sufficient because all store
+    // updates (executeEdits → onChange → setSqlForTab, or direct setSqlForTab)
+    // complete synchronously before the frame callback fires.
     requestAnimationFrame(() => {
       computeMatches(searchTerm);
       isReplacingRef.current = false;
@@ -580,9 +587,6 @@ export default function CrossTabSearch({ onClose }: Props) {
     if (e.key === "Escape") onClose();
     else if (e.key === "Enter") replaceCurrent();
   };
-
-  // No need to reset state — onClose unmounts the component.
-  const handleClose = () => onClose();
 
   // ── Derived state ──────────────────────────────────────────────────────────
 
@@ -712,7 +716,7 @@ export default function CrossTabSearch({ onClose }: Props) {
           type="text"
           size="small"
           icon={<CloseOutlined style={{ fontSize: 10 }} />}
-          onClick={handleClose}
+          onClick={onClose}
           style={{ height: 22, padding: "0 4px", minWidth: 0 }}
         />
       </div>

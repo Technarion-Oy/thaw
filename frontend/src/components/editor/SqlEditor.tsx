@@ -1975,13 +1975,13 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     });
 
     if (useFeatureFlagsStore.getState().flags.crossTabSearch) {
+      // No keybindings — ⌘⇧H is handled by QueryPage's global keydown handler
+      // to avoid a double-toggle when Monaco doesn't preventDefault on the event.
       editor.addAction({
         id: "thaw.crossTabSearch",
         label: "Find & Replace in Tabs",
         contextMenuGroupId: "3_find",
         contextMenuOrder: 1,
-        keybindings: [monacoLib.KeyMod.CtrlCmd | monacoLib.KeyMod.Shift | monacoLib.KeyCode.KeyH],
-        precondition: undefined,
         run: () => {
           window.dispatchEvent(new Event("thaw:toggle-cross-tab-search"));
         },
