@@ -33,7 +33,7 @@ import CrossTabSearch from "../components/editor/CrossTabSearch";
 import { DiffEditor } from "@monaco-editor/react";
 import { ensureMonacoSetup } from "../components/editor/monacoSetup";
 import { useThemeStore } from "../store/themeStore";
-import ResultGrid, { type ScrollSyncHandle, type ResultGridHandle } from "../components/results/ResultGrid";
+import ResultGrid, { type ResultGridHandle } from "../components/results/ResultGrid";
 import GridSearch from "../components/results/GridSearch";
 import StatusBar from "../components/results/StatusBar";
 import QueryProfileModal from "../components/results/QueryProfileModal";
@@ -149,9 +149,6 @@ export default function QueryPage() {
   // Ref so the async runQuery closure can detect user-initiated cancellation
   // without relying on stale React state.
   const cancelRequestedRef = useRef(false);
-  // Scroll-sync handles for the side-by-side grid split.
-  const primarySyncRef = useRef<ScrollSyncHandle | null>(null);
-  const compareSyncRef = useRef<ScrollSyncHandle | null>(null);
   // Grid handle for search scroll-to-row.
   const primaryGridRef = useRef<ResultGridHandle | null>(null);
   // Grid search bar visibility.
@@ -1425,8 +1422,6 @@ export default function QueryPage() {
                   <div style={{ flex: 1, overflow: "hidden", ...(compareResult ? { borderRight: "1px solid var(--border)" } : {}) }}>
                     <ResultGrid
                       result={displayedResult}
-                      syncScrollRef={compareResult ? primarySyncRef : undefined}
-                      onVerticalScroll={compareResult ? (top) => compareSyncRef.current?.scrollTo(top) : undefined}
                       gridRef={primaryGridRef}
                     />
                   </div>
@@ -1434,8 +1429,6 @@ export default function QueryPage() {
                     <div style={{ flex: 1, overflow: "hidden" }}>
                       <ResultGrid
                         result={compareResult}
-                        syncScrollRef={compareSyncRef}
-                        onVerticalScroll={(top) => primarySyncRef.current?.scrollTo(top)}
                       />
                     </div>
                   )}
