@@ -265,25 +265,11 @@ export default function FeatureFlagsModal({ onClose }: Props) {
         {/* ── AI & Assistance ── */}
         <Category title="AI & Assistance">
           <FlagRow
-            label="AI Chat & Assistant"
-            description="Agentic SQL helper in the results pane and function catalog."
-            checked={flags.aiChat}
-            locked={locked.aiChat}
-            onChange={(v) => set("aiChat", v)}
-          />
-          <FlagRow
             label="AI Inline Completions"
             description="Ghost-text SQL suggestions as you type in the editor."
             checked={flags.aiInlineCompletions}
             locked={locked.aiInlineCompletions}
             onChange={(v) => set("aiInlineCompletions", v)}
-          />
-          <FlagRow
-            label="AI Import Suggest"
-            description="Automatic inference of file format options during data import."
-            checked={flags.aiImportSuggest}
-            locked={locked.aiImportSuggest}
-            onChange={(v) => set("aiImportSuggest", v)}
           />
         </Category>
 

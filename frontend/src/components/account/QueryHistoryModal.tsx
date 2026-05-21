@@ -65,7 +65,6 @@ export default function QueryHistoryModal({ onClose }: Props) {
   const [userList,        setUserList]        = useState<string[]>([]);
   const [copiedId,        setCopiedId]        = useState<string | null>(null);
   const [profileQueryId,  setProfileQueryId]  = useState<string | null>(null);
-  const [profileQuerySql, setProfileQuerySql] = useState<string>("");
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const runQuery = async () => {
@@ -349,7 +348,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
                         <Button
                           size="small"
                           icon={<BarChartOutlined />}
-                          onClick={() => { setProfileQueryId(row.queryId); setProfileQuerySql(row.queryText ?? ""); }}
+                          onClick={() => { setProfileQueryId(row.queryId); }}
                         >
                           Profile
                         </Button>
@@ -373,7 +372,6 @@ export default function QueryHistoryModal({ onClose }: Props) {
     {profileQueryId && (
       <QueryProfileModal
         queryId={profileQueryId}
-        sql={profileQuerySql}
         onClose={() => setProfileQueryId(null)}
       />
     )}

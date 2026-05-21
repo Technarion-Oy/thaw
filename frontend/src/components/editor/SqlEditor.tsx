@@ -857,7 +857,6 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyF,                       () => trigger("actions.find"));
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyD,                       () => trigger("editor.action.addSelectionToNextFindMatch"));
     editor.addCommand(monaco.KeyMod.WinCtrl | monaco.KeyCode.KeyG,                       () => trigger("editor.action.gotoLine"));
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyL,                       () => { window.dispatchEvent(new Event("thaw:focus-ai-chat")); });
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.DownArrow,                  () => { window.dispatchEvent(new Event("thaw:focus-results")); });
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.UpArrow,   () => trigger("editor.action.insertCursorAbove"));
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.DownArrow, () => trigger("editor.action.insertCursorBelow"));

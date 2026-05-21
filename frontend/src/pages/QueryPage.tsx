@@ -14,7 +14,7 @@ import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip,
 import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, SearchOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
-import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetAIConfig, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession } from "../../wailsjs/go/main/App";
+import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession } from "../../wailsjs/go/main/App";
 import { GetSqlStatementRanges } from "../../wailsjs/go/sqleditor/Service";
 import type { main } from "../../wailsjs/go/models";
 import SessionPropertiesModal from "../components/common/SessionPropertiesModal";
@@ -37,7 +37,6 @@ import ResultGrid, { type ResultGridHandle } from "../components/results/ResultG
 import GridSearch from "../components/results/GridSearch";
 import StatusBar from "../components/results/StatusBar";
 import QueryProfileModal from "../components/results/QueryProfileModal";
-import AiChat from "../components/chat/AiChat";
 import TerminalPanel from "../components/terminal/TerminalPanel";
 import NotebookTab from "../components/notebook/NotebookTab";
 import { useQueryStore, type QueryResult, EXECUTE_IN_TAB_EVENT } from "../store/queryStore";
@@ -83,7 +82,6 @@ export default function QueryPage() {
   const [isCancelling, setIsCancelling] = useState(false);
   const [profileQueryId,  setProfileQueryId]  = useState<string | null>(null);
   const [profileIsLive,   setProfileIsLive]   = useState(false);
-  const [profileQuerySql, setProfileQuerySql] = useState<string>("");
   // Multi-statement progress: which statement is running and out of how many.
   const [stmtProgress, setStmtProgress] = useState<{ index: number; total: number; queryID?: string } | null>(null);
   // Zero-based index of the statement currently executing; drives editor highlight.
@@ -94,8 +92,7 @@ export default function QueryPage() {
   // Used to map backend-reported indices (relative to selection) back to the
   // full-buffer indices that SqlEditor's decorator uses.
   const selectionBaseStmtIdxRef = useRef(0);
-  const [resultPane, setResultPane] = useState<"results" | "chat" | "terminal">("results");
-  const [aiEnabled, setAiEnabled] = useState(false);
+  const [resultPane, setResultPane] = useState<"results" | "terminal">("results");
   const [terminalOpen, setTerminalOpen] = useState(false);
   const featureFlags = useFeatureFlagsStore((s) => s.flags);
 
@@ -247,21 +244,6 @@ export default function QueryPage() {
     NotebookUseContext(activeTabId, ctx.role, ctx.warehouse, ctx.database, ctx.schema).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTabCtx, activeTabId, isNotebookTab]);
-
-  // Load AI config on mount
-  useEffect(() => {
-    GetAIConfig().then((c) => setAiEnabled(c.enabled));
-  }, []);
-
-  // Handle run-ai-sql events from the chat panel
-  useEffect(() => {
-    const handler = (e: CustomEvent<{ sql: string; run: boolean }>) => {
-      useQueryStore.getState().setSql(e.detail.sql);
-      if (e.detail.run) window.dispatchEvent(new Event("run-query"));
-    };
-    window.addEventListener("run-ai-sql", handler as EventListener);
-    return () => window.removeEventListener("run-ai-sql", handler as EventListener);
-  }, []);
 
   // Handle load-query events from QueryHistoryModal
   useEffect(() => {
@@ -795,14 +777,6 @@ export default function QueryPage() {
         return;
       }
 
-      // ⌘L / Ctrl+L — Focus AI Chat
-      if (cmd && !e.shiftKey && !e.altKey && e.key === "l") {
-        e.preventDefault();
-        setResultPane("chat");
-        setTimeout(() => window.dispatchEvent(new Event("thaw:focus-ai-chat")), 30);
-        return;
-      }
-
       // ⌘G / Ctrl+G — Open Grid Search, or Find Next when already open
       // (skip when Monaco editor has focus or results pane isn't active)
       if (cmd && !e.shiftKey && !e.altKey && e.key === "g") {
@@ -1160,12 +1134,12 @@ export default function QueryPage() {
         />
       )}
 
-      {/* Results / AI Chat — bottom portion */}
+      {/* Results — bottom portion */}
       {!activeDiff && !isNotebookTab &&
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {/* Tab bar */}
         <div style={{ display: "flex", background: "var(--bg-raised)", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-          {(["results", ...(aiEnabled && featureFlags.aiChat ? ["chat"] : []), ...(terminalOpen && featureFlags.embeddedTerminal ? ["terminal"] : [])] as Array<"results" | "chat" | "terminal">).map((tab) => (
+          {(["results", ...(terminalOpen && featureFlags.embeddedTerminal ? ["terminal"] : [])] as Array<"results" | "terminal">).map((tab) => (
             <button
               key={tab}
               onClick={() => setResultPane(tab)}
@@ -1179,7 +1153,7 @@ export default function QueryPage() {
                 cursor: "pointer",
               }}
             >
-              {tab === "results" ? "Results" : tab === "chat" ? "AI Chat" : "Terminal"}
+              {tab === "results" ? "Results" : "Terminal"}
             </button>
           ))}
         </div>
@@ -1212,7 +1186,7 @@ export default function QueryPage() {
                               size="small"
                               icon={<BarChartOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
                               style={{ height: 16, padding: "0 2px", minWidth: 0 }}
-                              onClick={() => { setProfileQueryId((stmtProgress.queryID || runningQueryId)!); setProfileQuerySql(selectedSql.trim() || sql.trim()); setProfileIsLive(true); }}
+                              onClick={() => { setProfileQueryId((stmtProgress.queryID || runningQueryId)!); setProfileIsLive(true); }}
                             />
                           </Tooltip>
                         )}
@@ -1238,7 +1212,7 @@ export default function QueryPage() {
                           size="small"
                           icon={<BarChartOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
                           style={{ height: 16, padding: "0 2px", minWidth: 0 }}
-                          onClick={() => { setProfileQueryId(runningQueryId); setProfileQuerySql(selectedSql.trim() || sql.trim()); setProfileIsLive(true); }}
+                          onClick={() => { setProfileQueryId(runningQueryId); setProfileIsLive(true); }}
                         />
                       </Tooltip>
                     )}
@@ -1326,7 +1300,7 @@ export default function QueryPage() {
                               size="small"
                               icon={<BarChartOutlined style={{ fontSize: 10, color: "var(--text-muted)" }} />}
                               style={{ height: 16, padding: "0 2px", minWidth: 0 }}
-                              onClick={() => { setProfileQueryId(displayedResult.queryID!); setProfileQuerySql(resultHistory.find((e) => e.id === historyId)?.sql ?? ""); setProfileIsLive(false); }}
+                              onClick={() => { setProfileQueryId(displayedResult.queryID!); setProfileIsLive(false); }}
                             />
                           </Tooltip>
                         )}
@@ -1495,10 +1469,6 @@ export default function QueryPage() {
             )}
           </div>
 
-          <div style={{ flex: 1, overflow: "hidden", display: resultPane === "chat" ? "flex" : "none", flexDirection: "column" }}>
-            <AiChat />
-          </div>
-
           {terminalOpen && (
             <div style={{ flex: 1, overflow: "hidden", display: resultPane === "terminal" ? "flex" : "none", flexDirection: "column" }}>
               <TerminalPanel onClose={() => { setTerminalOpen(false); setResultPane("results"); }} />
@@ -1551,7 +1521,6 @@ export default function QueryPage() {
       {profileQueryId && (
         <QueryProfileModal
           queryId={profileQueryId}
-          sql={profileQuerySql}
           onClose={() => setProfileQueryId(null)}
           liveRefresh={profileIsLive && isRunning}
         />

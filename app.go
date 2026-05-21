@@ -19,7 +19,6 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -93,7 +92,6 @@ type App struct {
 	connectParams       *snowflake.ConnectParams // stored after a successful Connect for notebook session init
 	cancelConnect       context.CancelFunc
 	exportCancelFunc context.CancelFunc // cancels an in-flight DDL export
-	cancelChat       context.CancelFunc // cancels an in-flight AI chat request
 	fnStore          *fnmeta.Store      // local SQLite cache for Snowflake function metadata
 	logCleanup       func()             // closes the log rotation file on shutdown
 	savedWindowState *session.WindowState // non-nil when a persisted window state was loaded at launch
@@ -502,13 +500,6 @@ func (a *App) CancelExport() {
 	}
 }
 
-// CancelChat aborts an in-progress AI chat request. It is a no-op if no
-// request is in flight.
-func (a *App) CancelChat() {
-	if a.cancelChat != nil {
-		a.cancelChat()
-	}
-}
 
 // LoadSnowflakeCLIConfig reads the Snowflake CLI configuration file (either from
 // the custom path set by PickSnowflakeCLIConfigPath or the default location)
@@ -4051,14 +4042,8 @@ func (a *App) SaveFeatureFlags(flags config.FeatureFlags) error {
 	if locked.BackupPoliciesAndSets {
 		flags.BackupPoliciesAndSets = effective.BackupPoliciesAndSets
 	}
-	if locked.AIChat {
-		flags.AIChat = effective.AIChat
-	}
 	if locked.AIInlineCompletions {
 		flags.AIInlineCompletions = effective.AIInlineCompletions
-	}
-	if locked.AIImportSuggest {
-		flags.AIImportSuggest = effective.AIImportSuggest
 	}
 	if locked.SchemaMigration {
 		flags.SchemaMigration = effective.SchemaMigration
@@ -4333,234 +4318,6 @@ func (a *App) TestAIModel(provider, apiKey, model string, ollamaPort, ollamaNumC
 	return ""
 }
 
-// SendChatMessage runs one agentic chat turn. currentSQL is the text currently
-// in the editor (may be empty). lastResultSummary is a pre-formatted text
-// summary of the most recent query result (may be empty). Both are injected
-// into the system prompt so the AI has context without the user having to paste.
-func (a *App) SendChatMessage(
-	history []ai.UIMessage,
-	userText string,
-	currentSQL string,
-	lastResultSummary string,
-	agentMode bool,
-) ([]ai.UIMessage, error) {
-	if a.client == nil {
-		return nil, apperrors.ErrNotConnected
-	}
-	cfg, err := config.Load()
-	if err != nil || !cfg.AI.Enabled || cfg.AI.APIKey == "" {
-		return nil, fmt.Errorf("AI not configured or disabled")
-	}
-
-	workDir := cfg.Git.ExportDir
-
-	chatCtx, cancel := context.WithCancel(a.ctx)
-	a.cancelChat = cancel
-	defer func() {
-		cancel()
-		a.cancelChat = nil
-	}()
-
-	executor := func(name, inputJSON string) (string, bool) {
-		var args map[string]string
-		json.Unmarshal([]byte(inputJSON), &args) //nolint:errcheck
-		switch name {
-		case "get_session_context":
-			sc, err := a.client.GetSessionContext(a.ctx)
-			if err != nil {
-				return err.Error(), true
-			}
-			return fmt.Sprintf("role: %s\nwarehouse: %s\ndatabase: %s\nschema: %s",
-				sc.Role, sc.Warehouse, sc.Database, sc.Schema), false
-		case "list_databases":
-			dbs, err := a.client.ListDatabases(a.ctx)
-			if err != nil {
-				return err.Error(), true
-			}
-			return strings.Join(dbs, "\n"), false
-		case "list_schemas":
-			schemas, err := a.client.ListSchemas(a.ctx, args["database"])
-			if err != nil {
-				return err.Error(), true
-			}
-			return strings.Join(schemas, "\n"), false
-		case "list_tables":
-			objs, err := a.client.ListObjects(a.ctx, args["database"], args["schema"])
-			if err != nil {
-				return err.Error(), true
-			}
-			lines := make([]string, len(objs))
-			for i, o := range objs {
-				lines[i] = o.Name + " (" + o.Kind + ")"
-			}
-			return strings.Join(lines, "\n"), false
-		case "describe_table":
-			query := fmt.Sprintf("DESCRIBE TABLE %s.%s.%s",
-				snowflake.QuoteIdent(args["database"]), snowflake.QuoteIdent(args["schema"]), snowflake.QuoteIdent(args["table"]))
-			res, err := a.client.Execute(a.ctx, query)
-			if err != nil {
-				return err.Error(), true
-			}
-			return formatDescribeResult(res), false
-		case "run_sql":
-			res, err := a.client.Execute(a.ctx, args["query"])
-			if err != nil {
-				return err.Error(), true
-			}
-			return formatChatQueryResult(res), false
-		case "list_directory":
-			p := args["path"]
-			if !filepath.IsAbs(p) {
-				p = filepath.Join(workDir, p)
-			}
-			p = filepath.Clean(p)
-			entries, err := filesystem.ListDir(p)
-			if err != nil {
-				return err.Error(), true
-			}
-			lines := make([]string, len(entries))
-			for i, e := range entries {
-				if e.IsDir {
-					lines[i] = e.Name + "/"
-				} else {
-					lines[i] = fmt.Sprintf("%s (%d bytes)", e.Name, e.Size)
-				}
-			}
-			return strings.Join(lines, "\n"), false
-		case "read_file":
-			p := args["path"]
-			if !filepath.IsAbs(p) {
-				p = filepath.Join(workDir, p)
-			}
-			p = filepath.Clean(p)
-			content, err := filesystem.ReadFile(p)
-			if err != nil {
-				return err.Error(), true
-			}
-			const maxBytes = 50_000
-			if len(content) > maxBytes {
-				content = content[:maxBytes] + "\n... (truncated)"
-			}
-			return content, false
-		case "run_command":
-			cmd := exec.CommandContext(chatCtx, "sh", "-c", args["command"])
-			cmd.Dir = workDir
-			out, err := cmd.CombinedOutput()
-			output := strings.TrimSpace(string(out))
-			if err != nil {
-				if output != "" {
-					return output, true
-				}
-				return err.Error(), true
-			}
-			const maxBytes = 50_000
-			if len(output) > maxBytes {
-				output = output[:maxBytes] + "\n... (truncated)"
-			}
-			return output, false
-		}
-		return "unknown tool", true
-	}
-
-	msg, err := ai.Chat(chatCtx, cfg.AI.Provider, cfg.AI.APIKey, cfg.AI.Model, cfg.AI.OllamaPort, cfg.AI.OllamaNumCtx,
-		history, userText, currentSQL, lastResultSummary, agentMode, workDir, executor)
-	if err != nil {
-		return nil, err
-	}
-	return []ai.UIMessage{{Role: "user", Text: userText}, msg}, nil
-}
-
-// formatDescribeResult extracts name and type columns from a DESCRIBE TABLE result.
-func formatDescribeResult(res *snowflake.QueryResult) string {
-	if res == nil {
-		return "(no result)"
-	}
-	nameIdx, typeIdx := -1, -1
-	for i, col := range res.Columns {
-		switch strings.ToLower(col) {
-		case "name":
-			nameIdx = i
-		case "type":
-			typeIdx = i
-		}
-	}
-	if nameIdx < 0 {
-		return "(unexpected DESCRIBE result)"
-	}
-	toString := func(v interface{}) string {
-		if v == nil {
-			return ""
-		}
-		switch t := v.(type) {
-		case []byte:
-			return string(t)
-		case string:
-			return t
-		default:
-			return fmt.Sprintf("%v", t)
-		}
-	}
-	var lines []string
-	for _, row := range res.Rows {
-		name := ""
-		typ := ""
-		if nameIdx < len(row) {
-			name = toString(row[nameIdx])
-		}
-		if typeIdx >= 0 && typeIdx < len(row) {
-			typ = toString(row[typeIdx])
-		}
-		if name == "" {
-			continue
-		}
-		if typ != "" {
-			lines = append(lines, name+" "+typ)
-		} else {
-			lines = append(lines, name)
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
-// formatChatQueryResult renders up to 50 rows of a query result as a plain-text table.
-func formatChatQueryResult(res *snowflake.QueryResult) string {
-	if res == nil {
-		return "(no result)"
-	}
-	toString := func(v interface{}) string {
-		if v == nil {
-			return "NULL"
-		}
-		switch t := v.(type) {
-		case []byte:
-			return string(t)
-		case string:
-			return t
-		default:
-			return fmt.Sprintf("%v", t)
-		}
-	}
-	var sb strings.Builder
-	sb.WriteString(strings.Join(res.Columns, " | "))
-	sb.WriteByte('\n')
-	limit := len(res.Rows)
-	if limit > 50 {
-		limit = 50
-	}
-	for _, row := range res.Rows[:limit] {
-		vals := make([]string, len(row))
-		for i, v := range row {
-			vals[i] = toString(v)
-		}
-		sb.WriteString(strings.Join(vals, " | "))
-		sb.WriteByte('\n')
-	}
-	if len(res.Rows) > 50 {
-		sb.WriteString(fmt.Sprintf("... (%d rows total)\n", len(res.Rows)))
-	}
-	return sb.String()
-}
-
 // GetAISuggestion calls the configured AI provider and returns an inline SQL
 // completion for the given prefix text. Returns an empty string when AI is
 // disabled, when no API key is set (non-Ollama), or when the provider returns an error.
@@ -4581,27 +4338,6 @@ func (a *App) GetAISuggestion(prefix string) string {
 		return ""
 	}
 	return suggestion
-}
-
-// SuggestImportOptions calls the configured AI provider with the given file
-// sample content and returns a JSON string containing suggested Snowflake
-// COPY INTO format options. format should be "CSV" or "JSON".
-// Returns an error when AI is not configured or the provider call fails.
-func (a *App) SuggestImportOptions(format, sampleContent string) (string, error) {
-	cfg, err := config.Load()
-	if err != nil {
-		return "", fmt.Errorf("failed to load config: %w", err)
-	}
-	if !cfg.AI.Enabled || (cfg.AI.Provider != "ollama" && cfg.AI.APIKey == "") {
-		return "", fmt.Errorf("AI is not configured — enable it in Settings → AI")
-	}
-
-	result, err := ai.SuggestFormatOptions(cfg.AI.Provider, cfg.AI.APIKey, cfg.AI.Model, format, sampleContent, cfg.AI.OllamaPort, cfg.AI.OllamaNumCtx)
-	if err != nil {
-		logger.L.Debug("AI format suggestion failed", "provider", cfg.AI.Provider, "err", err)
-		return "", fmt.Errorf("AI suggestion failed: %w", err)
-	}
-	return result, nil
 }
 
 // ─── Function metadata (autocomplete + hover) ────────────────────────────────

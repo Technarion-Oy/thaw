@@ -49,9 +49,7 @@ var plistFeatureKeys = []plistFeatureKey{
 	{"DisableIntegrationsManagement", func(c *adminConfigJSON, v bool) { c.GovernanceAdministration.IntegrationsManagement = boolPtr(!v) }},
 	{"DisableBackupPoliciesAndSets", func(c *adminConfigJSON, v bool) { c.GovernanceAdministration.BackupPoliciesAndSets = boolPtr(!v) }},
 
-	{"DisableAIChat", func(c *adminConfigJSON, v bool) { c.AI.AIChat = boolPtr(!v) }},
 	{"DisableAIInlineCompletions", func(c *adminConfigJSON, v bool) { c.AI.AIInlineCompletions = boolPtr(!v) }},
-	{"DisableAIImportSuggest", func(c *adminConfigJSON, v bool) { c.AI.AIImportSuggest = boolPtr(!v) }},
 
 	{"DisableSchemaMigration", func(c *adminConfigJSON, v bool) { c.AdvancedTools.SchemaMigration = boolPtr(!v) }},
 	{"DisableDbtScaffolding", func(c *adminConfigJSON, v bool) { c.AdvancedTools.DbtScaffolding = boolPtr(!v) }},

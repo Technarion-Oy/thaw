@@ -15,13 +15,12 @@ import {
 } from "antd";
 import {
   UploadOutlined, FolderOpenOutlined, CheckCircleOutlined,
-  CloseOutlined, FileOutlined, SettingOutlined, InfoCircleOutlined,
+  CloseOutlined, FileOutlined, SettingOutlined,
 } from "@ant-design/icons";
 import {
-  ImportTableData, PickDataFilesByFormat, ReadFileHead, SuggestImportOptions, ListFileFormats,
+  ImportTableData, PickDataFilesByFormat, ReadFileHead, ListFileFormats,
 } from "../../../wailsjs/go/main/App";
 import { snowflake, fileformat } from "../../../wailsjs/go/models";
-import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import FileFormatFields, { BASE_DEFAULTS } from "../database/FileFormatFields";
 
 const { Text } = Typography;
@@ -384,7 +383,6 @@ function JsonFilePrev({ content }: { content: string }) {
 // ── Main modal ────────────────────────────────────────────────────────────────
 
 export default function ImportTableModal({ db, schema, table, onClose, onSuccess }: Props) {
-  const aiImportSuggestEnabled = useFeatureFlagsStore((s) => s.flags.aiImportSuggest);
   const [filePaths, setFilePaths]     = useState<string[]>([]);
   const [format, setFormat]           = useState<Format>("CSV");
   const [cfg, setCfg]                 = useState<fileformat.FileFormatConfig>(() => ({ ...BASE_DEFAULTS, type: "CSV" }));
@@ -432,75 +430,9 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
 
   const changeFormat = (f: Format) => {
     set("type", f);
-    setAiExplanation(null);
-    setAiError(null);
   };
 
-  // AI format suggestion state
-  const [aiSuggesting, setAiSuggesting]     = useState(false);
-  const [aiExplanation, setAiExplanation]   = useState<string | null>(null);
-  const [aiError, setAiError]               = useState<string | null>(null);
   const [collapseOpen, setCollapseOpen]     = useState<string[]>([]);
-
-  const runAiSuggest = async () => {
-    // Find first successfully loaded file sample
-    const firstLoaded = filePaths.slice(0, 5).find(
-      (fp) => fileHeads[fp] !== null && fileHeads[fp] !== undefined && fileHeads[fp] !== ""
-    );
-    if (!firstLoaded) return;
-    const sample = fileHeads[firstLoaded] as string;
-
-    setAiSuggesting(true);
-    setAiError(null);
-    setAiExplanation(null);
-    try {
-      const raw = await SuggestImportOptions(format, sample);
-      if (!raw) { setAiError("No suggestion returned"); return; }
-      const obj = JSON.parse(raw);
-      const apply = (key: keyof fileformat.FileFormatConfig, val: unknown) => {
-        if (val !== undefined) set(key, val as any);
-      };
-      if (format === "CSV") {
-        if (obj.fieldDelimiter            !== undefined) apply("fieldDelimiter", obj.fieldDelimiter);
-        if (obj.parseHeader               !== undefined) apply("parseHeader", obj.parseHeader);
-        if (obj.fieldOptionallyEnclosedBy !== undefined) apply("fieldOptionallyEnclosedBy", obj.fieldOptionallyEnclosedBy);
-        if (obj.encoding                  !== undefined) apply("encoding", obj.encoding);
-        if (obj.compression               !== undefined) apply("compression", obj.compression);
-        if (obj.recordDelimiter           !== undefined) apply("recordDelimiter", obj.recordDelimiter);
-      } else if (format === "JSON") {
-        if (obj.multiLine      !== undefined) apply("multiLine", obj.multiLine);
-        if (obj.stripOuterArray !== undefined) apply("stripOuterArray", obj.stripOuterArray);
-        if (obj.compression    !== undefined) apply("compression", obj.compression);
-      }
-      if (obj.explanation) setAiExplanation(obj.explanation);
-      setCollapseOpen(["opts"]);
-    } catch (e) {
-      setAiError(String(e));
-    } finally {
-      setAiSuggesting(false);
-    }
-  };
-
-  const handleAiSuggest = () => {
-    Modal.confirm({
-      title: "Send file content to AI provider?",
-      content: (
-        <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-          <p style={{ marginBottom: 8 }}>
-            To suggest format options, a sample of your file content (up to 64 KB)
-            will be sent to your configured AI provider.
-          </p>
-          <p style={{ margin: 0, color: "var(--text-muted)" }}>
-            Do not use this feature if your files contain sensitive or confidential data
-            that should not leave this machine.
-          </p>
-        </div>
-      ),
-      okText: "Send & Suggest",
-      cancelText: "Cancel",
-      onOk: runAiSuggest,
-    });
-  };
 
   // Load file heads for CSV / JSON previews
   useEffect(() => {
@@ -814,29 +746,7 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
                     </Text>
                   </Space>
                 ),
-                extra: (format === "CSV" || format === "JSON") && filePaths.length > 0 && aiImportSuggestEnabled ? (
-                  <Space size={4} onClick={(e) => e.stopPropagation()}>
-                    <Tooltip title="Analyze file content with AI and apply suggested format options">
-                      <Button
-                        size="small"
-                        type="text"
-                        loading={aiSuggesting}
-                        disabled={!filePaths.slice(0, 5).some((fp) => fileHeads[fp])}
-                        onClick={handleAiSuggest}
-                        style={{ fontSize: 12 }}
-                      >
-                        {!aiSuggesting && <span style={{ marginRight: 4 }}>✨</span>}
-                        AI Suggest
-                      </Button>
-                    </Tooltip>
-                    <Tooltip
-                      title="A sample of your file content (up to 64 KB) is sent to your configured AI provider to generate these suggestions. No data is stored by Thaw."
-                      overlayStyle={{ maxWidth: 300 }}
-                    >
-                      <InfoCircleOutlined style={{ fontSize: 12, color: "var(--text-muted)", cursor: "default" }} />
-                    </Tooltip>
-                  </Space>
-                ) : undefined,
+                extra: undefined,
                 children: (
                   <div style={{ paddingTop: 4 }}>
                     <FileFormatFields cfg={cfg} set={set} hideNameFields />
@@ -844,22 +754,6 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
                 ),
               }]}
             />
-          )}
-
-          {/* ── AI suggestion feedback ── */}
-          {(aiExplanation || aiError) && (
-            <div
-              style={{
-                fontSize: 11,
-                padding: "6px 10px",
-                borderRadius: 4,
-                background: aiError ? "rgba(248,81,73,0.08)" : "rgba(63,185,80,0.08)",
-                border: `1px solid ${aiError ? "rgba(248,81,73,0.3)" : "rgba(63,185,80,0.3)"}`,
-                color: aiError ? "#f85149" : "var(--text)",
-              }}
-            >
-              {aiError ? `AI Suggest failed: ${aiError}` : `AI: ${aiExplanation}`}
-            </div>
           )}
 
           <div style={{ borderTop: "1px solid var(--border)" }} />
