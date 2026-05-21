@@ -826,7 +826,7 @@ export default function QueryPage() {
       }
 
       // ⌘⇧H / Ctrl+Shift+H — Toggle cross-tab search/replace
-      if (cmd && e.shiftKey && !e.altKey && e.key === "H") {
+      if (cmd && e.shiftKey && !e.altKey && e.code === "KeyH") {
         if (!featureFlags.crossTabSearch) return;
         e.preventDefault();
         setCrossTabSearchOpen((prev) => !prev);

@@ -93,14 +93,85 @@ function replaceInNotebookCell(
       lineStr.substring(column - 1 + matchLength);
     src = lines.join("\n");
 
-    // Re-serialize source as array of lines (Jupyter convention:
-    // each element has a trailing "\n" except the last).
-    const srcLines = src.split("\n");
-    cell.source = srcLines.map((l: string, i: number) =>
-      i < srcLines.length - 1 ? l + "\n" : l,
-    );
-    if (cell.source.length > 1 && cell.source[cell.source.length - 1] === "") {
-      cell.source.pop();
+    reserializeCellSource(cell, src);
+    return JSON.stringify(nb, null, 1);
+  } catch {
+    return json;
+  }
+}
+
+/** Re-serialize a cell's source string as an array of lines (Jupyter convention). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function reserializeCellSource(cell: any, src: string): void {
+  const srcLines = src.split("\n");
+  cell.source = srcLines.map((l: string, i: number) =>
+    i < srcLines.length - 1 ? l + "\n" : l,
+  );
+  if (cell.source.length > 1 && cell.source[cell.source.length - 1] === "") {
+    cell.source.pop();
+  }
+}
+
+/**
+ * Apply all match replacements across a notebook's cells in a single JSON
+ * parse/serialize cycle (avoids O(n) JSON round-trips per match).
+ */
+function replaceAllInNotebook(
+  json: string,
+  tabMatches: MatchLocation[],
+  searchTerm: string,
+  replaceTerm: string,
+  useRegex: boolean,
+  caseSensitive: boolean,
+): string {
+  try {
+    const nb = JSON.parse(json);
+    if (!Array.isArray(nb.cells)) return json;
+
+    // Group matches by cell index.
+    const byCell = new Map<number, MatchLocation[]>();
+    for (const m of tabMatches) {
+      if (m.cellIndex == null) continue;
+      const list = byCell.get(m.cellIndex) ?? [];
+      list.push(m);
+      byCell.set(m.cellIndex, list);
+    }
+
+    for (const [cellIdx, cellMatches] of byCell) {
+      if (cellIdx >= nb.cells.length) continue;
+      const cell = nb.cells[cellIdx];
+      let src = Array.isArray(cell.source)
+        ? cell.source.join("")
+        : (cell.source ?? "");
+
+      if (useRegex) {
+        // Regex mode: String.prototype.replace handles capture-group expansion.
+        try {
+          const regex = new RegExp(searchTerm, caseSensitive ? "g" : "gi");
+          const lines = src.split("\n");
+          for (let i = 0; i < lines.length; i++) {
+            lines[i] = lines[i].replace(regex, replaceTerm);
+          }
+          src = lines.join("\n");
+        } catch { continue; }
+      } else {
+        // Literal mode: positional replacement in reverse order.
+        const sorted = [...cellMatches].sort((a, b) =>
+          a.line !== b.line ? b.line - a.line : b.column - a.column,
+        );
+        const lines = src.split("\n");
+        for (const m of sorted) {
+          if (m.line - 1 >= lines.length) continue;
+          const lineStr = lines[m.line - 1];
+          lines[m.line - 1] =
+            lineStr.substring(0, m.column - 1) +
+            replaceTerm +
+            lineStr.substring(m.column - 1 + m.length);
+        }
+        src = lines.join("\n");
+      }
+
+      reserializeCellSource(cell, src);
     }
 
     return JSON.stringify(nb, null, 1);
@@ -251,6 +322,15 @@ export default function CrossTabSearch({ onClose }: Props) {
     goToMatch(prev);
   }, [matches, currentIdx, goToMatch]);
 
+  // Auto-navigate to the first match when search results change so the
+  // counter ("1 of N") is accurate — without this, the editor wouldn't
+  // reveal/highlight anything until the user explicitly presses Enter.
+  useEffect(() => {
+    if (matches.length > 0) {
+      goToMatch(0);
+    }
+  }, [matches, goToMatch]);
+
   // ── Replace ────────────────────────────────────────────────────────────────
 
   const applyReplace = useCallback(
@@ -272,14 +352,33 @@ export default function CrossTabSearch({ onClose }: Props) {
     const tab = useQueryStore.getState().tabs.find((t) => t.id === m.tabId);
     if (!tab) return;
 
+    // Resolve the source lines for the match (cell source for notebooks,
+    // full SQL for regular tabs) so we can extract the matched substring.
+    let sourceLines: string[];
+    if (m.isNotebook && m.cellIndex != null) {
+      const cells = getNotebookCellSources(tab.sql);
+      const cell = cells.find((c) => c.index === m.cellIndex);
+      if (!cell) return;
+      sourceLines = cell.source.split("\n");
+    } else {
+      sourceLines = tab.sql.split("\n");
+    }
+    if (m.line - 1 >= sourceLines.length) return;
+
+    // In regex mode, expand capture-group back-references ($1, $2, etc.)
+    // by running the replacement through String.prototype.replace.
+    let effectiveReplace = replaceTerm;
+    if (useRegex) {
+      try {
+        const matched = sourceLines[m.line - 1].substring(m.column - 1, m.column - 1 + m.length);
+        const re = new RegExp(searchTerm, caseSensitive ? "" : "i");
+        effectiveReplace = matched.replace(re, replaceTerm);
+      } catch { /* fall back to literal replaceTerm */ }
+    }
+
     if (m.isNotebook && m.cellIndex != null) {
       const newJson = replaceInNotebookCell(
-        tab.sql,
-        m.cellIndex,
-        replaceTerm,
-        m.line,
-        m.column,
-        m.length,
+        tab.sql, m.cellIndex, effectiveReplace, m.line, m.column, m.length,
       );
       applyReplace(m.tabId, newJson);
     } else {
@@ -288,14 +387,14 @@ export default function CrossTabSearch({ onClose }: Props) {
       if (lineStr == null) return;
       lines[m.line - 1] =
         lineStr.substring(0, m.column - 1) +
-        replaceTerm +
+        effectiveReplace +
         lineStr.substring(m.column - 1 + m.length);
       applyReplace(m.tabId, lines.join("\n"));
     }
 
     // Recompute after the store update propagates.
     setTimeout(() => computeMatches(searchTerm), 50);
-  }, [matches, currentIdx, replaceTerm, applyReplace, computeMatches, searchTerm]);
+  }, [matches, currentIdx, replaceTerm, useRegex, searchTerm, caseSensitive, applyReplace, computeMatches]);
 
   const replaceAll = useCallback(() => {
     if (matches.length === 0) return;
@@ -313,26 +412,23 @@ export default function CrossTabSearch({ onClose }: Props) {
       if (!tab) continue;
 
       if (tabMatches[0]?.isNotebook) {
-        // Group by cell, process in reverse to preserve positions.
-        const byCell = new Map<number, MatchLocation[]>();
-        for (const m of tabMatches) {
-          if (m.cellIndex == null) continue;
-          const list = byCell.get(m.cellIndex) ?? [];
-          list.push(m);
-          byCell.set(m.cellIndex, list);
-        }
-        let json = tab.sql;
-        for (const [cellIdx, cellMatches] of byCell) {
-          const sorted = [...cellMatches].sort((a, b) =>
-            a.line !== b.line ? b.line - a.line : b.column - a.column,
-          );
-          for (const m of sorted) {
-            json = replaceInNotebookCell(json, cellIdx, replaceTerm, m.line, m.column, m.length);
+        // Single JSON parse/serialize for all cell replacements.
+        const newJson = replaceAllInNotebook(
+          tab.sql, tabMatches, searchTerm, replaceTerm, useRegex, caseSensitive,
+        );
+        applyReplace(tabId, newJson);
+      } else if (useRegex) {
+        // Regex mode: String.prototype.replace handles capture-group expansion.
+        try {
+          const regex = new RegExp(searchTerm, caseSensitive ? "g" : "gi");
+          const lines = tab.sql.split("\n");
+          for (let i = 0; i < lines.length; i++) {
+            lines[i] = lines[i].replace(regex, replaceTerm);
           }
-        }
-        applyReplace(tabId, json);
+          applyReplace(tabId, lines.join("\n"));
+        } catch { /* invalid regex — skip */ }
       } else {
-        // Regular text tab — process replacements in reverse line/column order.
+        // Literal mode: positional replacement in reverse line/column order.
         const sorted = [...tabMatches].sort((a, b) =>
           a.line !== b.line ? b.line - a.line : b.column - a.column,
         );
@@ -350,7 +446,7 @@ export default function CrossTabSearch({ onClose }: Props) {
     }
 
     setTimeout(() => computeMatches(searchTerm), 50);
-  }, [matches, replaceTerm, applyReplace, computeMatches, searchTerm]);
+  }, [matches, replaceTerm, useRegex, searchTerm, caseSensitive, applyReplace, computeMatches]);
 
   // ── Keyboard handlers ──────────────────────────────────────────────────────
 
