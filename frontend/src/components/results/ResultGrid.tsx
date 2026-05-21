@@ -46,18 +46,12 @@ import ConditionalFormattingModal from "./ConditionalFormattingModal";
 import DataTypeFormatModal from "./DataTypeFormatModal";
 import QuickChartModal from "./QuickChartModal";
 
-export interface ScrollSyncHandle {
-  scrollTo: (top: number) => void;
-}
-
 export interface ResultGridHandle {
   scrollToRow: (rowIndex: number) => void;
 }
 
 interface Props {
   result: QueryResult;
-  syncScrollRef?: React.MutableRefObject<ScrollSyncHandle | null>;
-  onVerticalScroll?: (top: number) => void;
   gridRef?: React.MutableRefObject<ResultGridHandle | null>;
 }
 
@@ -232,7 +226,7 @@ const CellContent = React.memo(function CellContent({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props) {
+function ResultGrid({ result, gridRef }: Props) {
   const uiDensity = useThemeStore((s) => s.uiDensity);
   const featureFlags = useFeatureFlagsStore((s) => s.flags);
 
@@ -249,8 +243,6 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
   const resetNavigation = useGridStore((s) => s.resetNavigation);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const isSyncingRef = useRef(false);
-  const lastScrollTopRef = useRef(0);
   // Track the active double-click text selection restore listener for cleanup on unmount
   const cellRestoreRef = useRef<((ev: MouseEvent) => void) | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
@@ -425,32 +417,6 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
       },
     };
   }, [gridRef]);
-
-  // Scroll sync handle
-  useEffect(() => {
-    if (!syncScrollRef) return;
-    syncScrollRef.current = {
-      scrollTo: (top: number) => {
-        const el = scrollContainerRef.current;
-        if (!el) return;
-        isSyncingRef.current = true;
-        el.scrollTop = top;
-        requestAnimationFrame(() => { isSyncingRef.current = false; });
-      },
-    };
-    return () => { if (syncScrollRef) syncScrollRef.current = null; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [syncScrollRef]);
-
-  const handleScroll = useCallback(() => {
-    if (isSyncingRef.current) return;
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    const top = el.scrollTop;
-    if (top === lastScrollTopRef.current) return;
-    lastScrollTopRef.current = top;
-    onVerticalScroll?.(top);
-  }, [onVerticalScroll]);
 
   // ─── Auto-size column on double-click ─────────────────────────────────────
 
@@ -1095,7 +1061,6 @@ function ResultGrid({ result, syncScrollRef, onVerticalScroll, gridRef }: Props)
       <div
         ref={scrollContainerRef}
         className="thaw-grid"
-        onScroll={handleScroll}
         tabIndex={0}
         style={{
           flex: 1,
