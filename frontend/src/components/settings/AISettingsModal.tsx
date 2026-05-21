@@ -217,7 +217,7 @@ export default function AISettingsModal({ onClose }: Props) {
 
   return (
     <Modal
-      title="Configure AI"
+      title="Configure AI Inline Completions"
       open
       onCancel={onClose}
       footer={[

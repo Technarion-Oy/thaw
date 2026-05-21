@@ -9,7 +9,7 @@ API and module documentation for the Thaw Snowflake desktop application.
 | Package | Description |
 |---------|-------------|
 | [App](backend/app.md) | Root package — Wails-bound methods (`App` struct, `Connect`, `ExecuteQuery`, …) |
-| [internal/ai](backend/internal/ai.md) | AI provider HTTP clients; agentic chat loop with tool-calling (OpenAI + Google) |
+| [internal/ai](backend/internal/ai.md) | AI provider HTTP clients (OpenAI, Google, Ollama); inline completion and model management |
 | [internal/config](backend/internal/config.md) | Saved connection, git, and AI settings |
 | [internal/crashreport](backend/internal/crashreport.md) | Panic handler; writes timestamped JSON crash files |
 | [internal/ddl](backend/internal/ddl.md) | SQL statement splitter, DDL metadata extraction, parallel export pipeline |

@@ -16,7 +16,7 @@ import {
 } from "@ant-design/icons";
 import {
   ExecDDL, GetQuotedIdentifiersIgnoreCase, ListIntegrations, BuildCreateStageSql, ListFileFormats,
-  PickFileForFormatPreview, GetLocalFilePreview, GetStageFilePreview, SuggestImportOptions, ReadFileHead,
+  PickFileForFormatPreview, GetLocalFilePreview, GetStageFilePreview,
 } from "../../../wailsjs/go/main/App";
 
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
@@ -77,10 +77,6 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
   const [previewError, setPreviewError] = useState<string | null>(null);
   const hasPreviewRef = useRef(false);
 
-  // AI Suggest state
-  const [aiSuggesting, setAiSuggesting] = useState(false);
-  const [aiExplanation, setAiExplanation] = useState<string | null>(null);
-
   useEffect(() => {
     GetQuotedIdentifiersIgnoreCase().then((v) => setQuotedIdentifiersIgnoreCase(v ?? false)).catch(() => {});
     ListIntegrations("STORAGE").then(setIntegrations).catch(() => {});
@@ -130,43 +126,6 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
   const handlePreview = () => {
     hasPreviewRef.current = true;
     runPreview(localPath, stagePath, previewSource, cfg.fileFormat);
-  };
-
-  const runAiSuggest = async () => {
-    if (!localPath) return;
-    setAiSuggesting(true);
-    setPreviewError(null);
-    setAiExplanation(null);
-    try {
-      const head = await ReadFileHead(localPath, 65536);
-      if (!head) throw new Error("Could not read file head");
-
-      const raw = await SuggestImportOptions(cfg.fileFormat.type, head);
-      if (!raw) throw new Error("No suggestion returned");
-
-      const obj = JSON.parse(raw);
-      const apply = (key: keyof fileformat.FileFormatConfig, val: any) => {
-        if (val !== undefined) setFormatField(key, val);
-      };
-
-      if (cfg.fileFormat.type === "CSV") {
-        if (obj.fieldDelimiter !== undefined) apply("fieldDelimiter", obj.fieldDelimiter);
-        if (obj.parseHeader !== undefined) apply("parseHeader", obj.parseHeader);
-        if (obj.fieldOptionallyEnclosedBy !== undefined) apply("fieldOptionallyEnclosedBy", obj.fieldOptionallyEnclosedBy);
-        if (obj.encoding !== undefined) apply("encoding", obj.encoding);
-        if (obj.compression !== undefined) apply("compression", obj.compression);
-        if (obj.recordDelimiter !== undefined) apply("recordDelimiter", obj.recordDelimiter);
-      } else if (cfg.fileFormat.type === "JSON") {
-        if (obj.multiLine !== undefined) apply("multiLine", obj.multiLine);
-        if (obj.stripOuterArray !== undefined) apply("stripOuterArray", obj.stripOuterArray);
-      }
-
-      if (obj.explanation) setAiExplanation(obj.explanation);
-    } catch (err) {
-      setPreviewError(String(err));
-    } finally {
-      setAiSuggesting(false);
-    }
   };
 
   useEffect(() => {
@@ -503,18 +462,6 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
                   <Button type="primary" size="small" loading={previewLoading} onClick={handlePreview}>
                     Preview
                   </Button>
-                  {featureFlags.aiImportSuggest && (
-                    <Tooltip title={previewSource === "LOCAL" ? "AI Suggest format options from file content" : "AI Suggest is only available for local files"}>
-                      <Button
-                        size="small"
-                        onClick={runAiSuggest}
-                        disabled={previewSource !== "LOCAL" || !localPath || aiSuggesting}
-                        loading={aiSuggesting}
-                      >
-                        {!aiSuggesting && "✨"}
-                      </Button>
-                    </Tooltip>
-                  )}
                 </div>
 
                 {previewSource === "STAGE" && (
@@ -533,18 +480,6 @@ export default function CreateStageModal({ db, schema, onClose, onSuccess }: Pro
                     closable
                     onClose={() => setPreviewError(null)}
                     style={{ marginTop: 10 }}
-                  />
-                )}
-
-                {aiExplanation && (
-                  <Alert
-                    type="info"
-                    message="AI Suggestion"
-                    description={aiExplanation}
-                    showIcon
-                    style={{ marginTop: 10 }}
-                    closable
-                    onClose={() => setAiExplanation(null)}
                   />
                 )}
 

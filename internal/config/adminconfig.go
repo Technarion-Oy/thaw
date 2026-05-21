@@ -32,7 +32,7 @@ import (
 //	{
 //	  "dataExportImport":         { "ddlExport": false },
 //	  "governanceAdministration": { "userRoleManagement": false },
-//	  "ai":                       { "aiChat": false, "aiInlineCompletions": false },
+//	  "ai":                       { "aiInlineCompletions": false },
 //	  "advancedTools":            { "schemaMigration": false },
 //	  "developerEnvironments":    { "snowparkNotebooks": false },
 //	  "performanceDiagnostics":   { "explainSql": false },
@@ -62,9 +62,7 @@ type adminGovernance struct {
 
 // adminAI is the "ai" category.
 type adminAI struct {
-	AIChat              ptrBool `json:"aiChat,omitempty"`
 	AIInlineCompletions ptrBool `json:"aiInlineCompletions,omitempty"`
-	AIImportSuggest     ptrBool `json:"aiImportSuggest,omitempty"`
 }
 
 // adminAdvancedTools is the "advancedTools" category.
@@ -199,9 +197,7 @@ func mergeAdminOverrides(user FeatureFlags, cfg adminConfigJSON) (effective Feat
 	apply(&effective.BackupPoliciesAndSets, &locked.BackupPoliciesAndSets, cfg.GovernanceAdministration.BackupPoliciesAndSets)
 
 	// AI & Assistance
-	apply(&effective.AIChat, &locked.AIChat, cfg.AI.AIChat)
 	apply(&effective.AIInlineCompletions, &locked.AIInlineCompletions, cfg.AI.AIInlineCompletions)
-	apply(&effective.AIImportSuggest, &locked.AIImportSuggest, cfg.AI.AIImportSuggest)
 
 	// Advanced Tools & Data Engineering
 	apply(&effective.SchemaMigration, &locked.SchemaMigration, cfg.AdvancedTools.SchemaMigration)

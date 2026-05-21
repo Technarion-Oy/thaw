@@ -122,10 +122,6 @@ export function CanViewWarehouseMeteringHistory() {
   return window['go']['main']['App']['CanViewWarehouseMeteringHistory']();
 }
 
-export function CancelChat() {
-  return window['go']['main']['App']['CancelChat']();
-}
-
 export function CancelConnect() {
   return window['go']['main']['App']['CancelConnect']();
 }
@@ -1054,10 +1050,6 @@ export function SearchFiles(arg1, arg2, arg3) {
   return window['go']['main']['App']['SearchFiles'](arg1, arg2, arg3);
 }
 
-export function SendChatMessage(arg1, arg2, arg3, arg4, arg5) {
-  return window['go']['main']['App']['SendChatMessage'](arg1, arg2, arg3, arg4, arg5);
-}
-
 export function SetColumnComment(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['SetColumnComment'](arg1, arg2, arg3, arg4, arg5);
 }
@@ -1112,10 +1104,6 @@ export function StopNotebookSession(arg1) {
 
 export function StopShell() {
   return window['go']['main']['App']['StopShell']();
-}
-
-export function SuggestImportOptions(arg1, arg2) {
-  return window['go']['main']['App']['SuggestImportOptions'](arg1, arg2);
 }
 
 export function SuspendTaskGraph(arg1, arg2, arg3) {

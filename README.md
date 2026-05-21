@@ -77,10 +77,8 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
   - **AND / OR position** — operator placed Before or After the line break in `WHERE` / `HAVING` clauses
   - **Snowflake dialect rules** always applied: no whitespace around `::` (type cast) and `:` (VARIANT path access); `WITH` on its own line with CTE body indented; `LATERAL FLATTEN` blocks treated as single logical units
   - A **live SQL preview** in the preferences dialog shows a sample Snowflake query reformatting in real time as settings change; preferences are persisted to `~/.config/thaw/config.json`
-- **AI Chat** — agentic chat panel in the results area (Results / AI Chat / Terminal tabs); the assistant operates in **Chat** or **Agent** mode (toggle above the input); in agent mode it calls tools against the live Snowflake connection and the local file system — see [AI Chat](#ai-chat) below
 - **Query Profile** — click the graph icon in the results status bar (visible for successful runs) to see the execution profile for the query (Operator Statistics, Time Breakdown, and Attributes)
 - **Code Snippets** — open **Tools → Code Snippets…** in the menu bar to browse 24 curated `CREATE OR REPLACE` templates across six categories (Data Objects, Code, Automation, Storage, Governance, Infrastructure); live search filters by name; selecting a snippet shows a read-only preview; clicking **Open in New Tab** loads the SQL into a new scratch tab for review and customisation before running
-- **Function Catalog AI Chat** — open **Help → Function Catalog…** and switch to the **Ask AI** tab to chat with the AI about any selected function; the function's full signatures and descriptions are automatically injected as context so you can ask usage questions, request examples, or compare overloads without pasting anything; for built-in Snowflake functions a **📖 Snowflake documentation** link opens the official docs page in the system browser; chat history resets automatically when switching to a different function
 - Results displayed in a virtualised TanStack Table grid
 - **NULL display** — `NULL` values are rendered as a faded italic `NULL` label so they are never confused with empty strings
 - **Copy from results** — right-click any cell to open a context menu with three options: **Copy cell value**, **Copy row (tab-separated)**, and **Copy row with headers**; all three write to the native OS clipboard via the Wails runtime so they work reliably on macOS (WKWebView suppresses standard browser clipboard access)
@@ -98,7 +96,7 @@ A desktop application for Snowflake management: browsing objects, running SQL qu
 
 ### Embedded terminal
 
-- **Terminal tab** appears in the results area alongside Results and AI Chat; open via **Terminal → New Terminal** (`⌘ \`` / `Ctrl+\``) in the menu bar
+- **Terminal tab** appears in the results area alongside Results; open via **Terminal → New Terminal** (`⌘ \`` / `Ctrl+\``) in the menu bar
 - **Shell picker** — a dropdown lists every shell from `/etc/shells`; switching shells immediately restarts the session in the chosen binary
 - **New** button restarts the current shell; **Kill** stops it without closing the tab; **×** closes the tab and returns to Results
 - The terminal opens in the configured export / working directory by default
@@ -678,7 +676,7 @@ thaw/
 │   ├── darwin/                    # macOS app icons
 │   └── windows/                   # Windows resources
 ├── internal/
-│   ├── ai/ai.go                   # AI provider HTTP clients (OpenAI, Google AI Studios); model listing; agentic chat loop with tool-calling
+│   ├── ai/ai.go                   # AI provider HTTP clients (OpenAI, Google AI Studios, Ollama); inline completions; model listing and testing
 │   ├── apperrors/                  # Sentinel errors (ErrNotConnected etc.)
 │   ├── config/config.go           # Saved git / export / AI settings
 │   ├── crashreport/crashreport.go # Panic handler; writes JSON crash file; remote-send placeholder
@@ -753,7 +751,6 @@ thaw/
     │   └── components/              # Feature components (~30 directories, ~93 files)
     │       ├── account/              # Administration: users, warehouses, integrations, backup policies, query history, metering
     │       ├── backup/               # Backup sets: list, add, drop, restore from backup
-    │       ├── chat/                 # AI Chat panel with tool-call display and Run/Copy buttons
     │       ├── common/               # Shared modals (PropertiesModal, SessionPropertiesModal)
     │       ├── connection/           # ConnectModal, UserAgreementModal
     │       ├── database/             # Database-level modals: create table, create stage, file format builder, DDL viewer
@@ -1165,7 +1162,6 @@ Open **Help → Keyboard Shortcuts…** in the menu bar for a searchable, always
 | `⌘B` | `Ctrl+B` | Toggle left sidebar |
 | `⌘⇧F` | `Ctrl+Shift+F` | Focus object browser search |
 | `⌘\` | `Ctrl+\` | Toggle split editor view |
-| `⌘L` | `Ctrl+L` | Focus AI Chat |
 | `⌘\`` | `Ctrl+\`` | Open embedded terminal |
 
 ### Notebook (Command Mode — no cell editor focused)

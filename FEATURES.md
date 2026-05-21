@@ -66,7 +66,6 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **AND / OR position** — Before or After the line break
   - **Snowflake-specific rules** always applied: `::` and `:` operators kept whitespace-free; `WITH` on its own line; LATERAL FLATTEN treated as a unit
   - **Live preview** panel in the preferences dialog shows a Snowflake sample query updating in real time
-- **AI Chat** — an agentic assistant in the results area that can query your live Snowflake connection to answer questions about your data (see [AI Features](#ai-features))
 - **Code Snippets** — open **Tools → Code Snippets…** in the menu bar to browse 24 curated `CREATE OR REPLACE` templates across six categories:
   - **Data Objects** — Table, View, Materialized View, Dynamic Table, Sequence
   - **Code** — Stored Procedure (Snowflake Scripting), Stored Procedure (Python), UDF (SQL), UDF (JavaScript), UDF (Python)
@@ -296,49 +295,9 @@ Compare the DDL or content of any two database objects, files, roles, or warehou
 
 ## AI Features
 
-### AI Chat
-
-An agentic chat panel lives alongside the SQL results. The assistant has access to your live Snowflake connection and calls tools autonomously to answer questions about your data — without you having to paste schema or query results.
-
-**Chat mode vs Agent mode** — a toggle above the input switches between:
-- **Chat mode** (default) — conversational only; the assistant sees the current SQL and last query result but makes no live calls
-- **Agent mode** — the assistant calls tools autonomously against the live Snowflake session and the local file system
-
-**Tools available in Agent mode:**
-
-| Tool | What it does |
-|------|-------------|
-| `get_session_context` | Returns the active role, warehouse, database, and schema |
-| `list_databases` | Lists all databases accessible to the current role |
-| `list_schemas` | Lists all schemas in a database |
-| `list_tables` | Lists all tables and views in a schema |
-| `describe_table` | Returns column names and data types |
-| `run_sql` | Executes a SQL query and returns up to 50 rows |
-| `list_directory` | Lists files and subdirectories in the project working directory |
-| `read_file` | Reads the content of a local file (SQL scripts, configs, etc.) |
-| `run_command` | Runs a shell command in the project working directory |
-
-- **Working directory** — the assistant always knows the configured export directory so it can refer to local SQL files by path
-- **Context injection** — the current SQL in the editor and the most recent query result are automatically included so the assistant has full context
-- **Stop generation** — a **Stop** button appears while the assistant is thinking; clicking it immediately cancels the in-flight API request
-- **Run button** — SQL code blocks in the assistant's response include a **Run** button that loads the query into the editor and executes it immediately
-- **Copy button** — every message and error has a **Copy** button using the native OS clipboard
-
 ### AI Inline Completions
 
 Ghost-text SQL suggestions appear automatically as you type in the editor. Press `Tab` to accept. Powered by OpenAI or Google AI Studios.
-
-### Function Catalog AI Chat
-
-Open **Help → Function Catalog…** and select any function to get:
-
-- **Details tab** — all overload signatures and descriptions from the local function cache
-- **Ask AI tab** — a chat panel for asking questions about the selected function:
-  - The function's full signatures and descriptions are automatically injected as context — no need to paste anything
-  - Ask usage questions, request examples, compare overloads, or explore edge cases
-  - For built-in Snowflake functions, a **📖 Snowflake documentation** link at the top of the tab opens the official docs page in the system browser
-  - Chat history resets automatically when you switch to a different function
-  - Requires AI to be configured via **AI → Configure AI…**
 
 ### Model Validation
 
@@ -681,7 +640,7 @@ Right-click any warehouse in the Administration panel and choose **Properties** 
 
 ## Embedded Terminal
 
-An OS shell terminal is available as a tab in the results area alongside Results and AI Chat.
+An OS shell terminal is available as a tab in the results area alongside Results.
 
 - **Open** via **Terminal → New Terminal** in the menu bar (`⌘ \`` / `Ctrl+\``)
 - **Shell picker** — a dropdown lists all shells from `/etc/shells`; switching shells immediately restarts the session in the selected shell
@@ -778,7 +737,7 @@ Features are organized into six categories, each with individual toggles:
 
 **Governance & Administration** — User & Role Management, Warehouse Management, Warehouse Credit Usage, Query Activity History, Integrations Management, Backup Policies & Sets
 
-**AI & Assistance** — AI Chat & Assistant, AI Inline Completions, AI Import Suggest
+**AI & Assistance** — AI Inline Completions
 
 **Advanced Tools & Data Engineering** — Schema Migration, dbt Project Scaffolding, ER Diagram & Designer, Task Graph Visualizer, Insert Mapping, Code Snippets
 
@@ -809,7 +768,7 @@ Enterprise deployments can enforce feature policies without user interaction. Th
 {
   "dataExportImport":         { "ddlExport": false, "tableDataExport": false },
   "governanceAdministration": { "userRoleManagement": false },
-  "ai":                       { "aiChat": false, "aiInlineCompletions": false },
+  "ai":                       { "aiInlineCompletions": false },
   "advancedTools":            { "schemaMigration": false },
   "developerEnvironments":    { "snowparkNotebooks": false },
   "performanceDiagnostics":   { "explainSql": false }
@@ -837,9 +796,7 @@ The following features are identified as feasible to be turned off via feature f
 - **Backup Policies & Sets** (Manage account-level backup policies and object-scoped backup sets)
 
 **AI & Assistance**
-- **AI Chat & Assistant** (Agentic SQL helper in the results pane and function catalog)
 - **AI Inline Completions** (Ghost-text suggestions in the editor)
-- **AI Import Suggest** (Automatic inference of file formats during data import)
 
 **Advanced Tools & Data Engineering**
 - **Schema Migration** (DDL diffing and deployment wizard)
@@ -876,7 +833,7 @@ The following features are identified as feasible to be turned off via feature f
 - **Session restoration across app restarts** — all open tabs (scratch SQL, file tabs, notebook tabs) and their SQL content are restored exactly when the app is relaunched; file-backed tabs re-read their content from disk on startup so they always show the current file; if a file has been deleted or moved the tab becomes a scratch tab (prefixed `↺`) so the last-known SQL content is not lost; window size is saved on quit and restored on the next launch
 - **Tools menu** — native menu bar **Tools** entry provides **Code Snippets…**, **Export Path Format…**, **Schema Migration…**, and **Create dbt Project…**
 - **Snowpark menu** — native menu bar **Snowpark** entry provides **Check Environment…**, **Setup Environment…**, **New Notebook…**, and **Open Notebook…**
-- **Help menu** — **Function Catalog…** opens the built-in Snowflake function reference with an **Ask AI** tab for chatting about any selected function (see below); **Keyboard Shortcuts…** opens a searchable modal listing every shortcut with macOS and Windows columns
+- **Help menu** — **Function Catalog…** opens the built-in Snowflake function reference with overload signatures and descriptions for every function; **Keyboard Shortcuts…** opens a searchable modal listing every shortcut with macOS and Windows columns
 - **Resizable sidebars** — drag either sidebar edge to any width between 160 px and 600 px
 - **Resizable editor/results split** — drag the horizontal divider between the SQL editor and the results pane to any ratio; position is saved across sessions
 - **Drag-and-drop panel layout** — every sidebar panel (Export DDL, File Browser, Git, Object Browser, Administration) has a drag handle at its top edge; drag panels between the left and right sidebars or reorder them within a sidebar; layout is persisted across sessions
@@ -957,7 +914,6 @@ Open **Help → Keyboard Shortcuts…** in the menu bar for a searchable, always
 | `⌘B` | `Ctrl+B` | Toggle left sidebar |
 | `⌘⇧F` | `Ctrl+Shift+F` | Focus object browser search |
 | `⌘\` | `Ctrl+\` | Toggle split editor view |
-| `⌘L` | `Ctrl+L` | Focus AI Chat |
 | `⌘\`` | `Ctrl+\`` | Open embedded terminal |
 | `⌘G` | `Ctrl+G` | Open Git Operations… |
 

@@ -20,7 +20,6 @@ import {tasks} from '../models';
 import {gitrepo} from '../models';
 import {filesystem} from '../models';
 import {sfconfig} from '../models';
-import {ai} from '../models';
 
 export function AddBackup(arg1:string,arg2:string,arg3:string):Promise<void>;
 
@@ -81,8 +80,6 @@ export function CanManageUsers(arg1:string):Promise<boolean>;
 export function CanModifyUserAuth(arg1:string):Promise<boolean>;
 
 export function CanViewWarehouseMeteringHistory():Promise<boolean>;
-
-export function CancelChat():Promise<void>;
 
 export function CancelConnect():Promise<void>;
 
@@ -548,8 +545,6 @@ export function ScanMigrationSource(arg1:string):Promise<Array<migration.Migrati
 
 export function SearchFiles(arg1:string,arg2:string,arg3:boolean):Promise<Array<filesystem.SearchMatch>>;
 
-export function SendChatMessage(arg1:Array<ai.UIMessage>,arg2:string,arg3:string,arg4:string,arg5:boolean):Promise<Array<ai.UIMessage>>;
-
 export function SetColumnComment(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
 export function SetDefaultProfile(arg1:string):Promise<void>;
@@ -577,8 +572,6 @@ export function StopDapProxy():Promise<void>;
 export function StopNotebookSession(arg1:string):Promise<void>;
 
 export function StopShell():Promise<void>;
-
-export function SuggestImportOptions(arg1:string,arg2:string):Promise<string>;
 
 export function SuspendTaskGraph(arg1:string,arg2:string,arg3:string):Promise<void>;
 

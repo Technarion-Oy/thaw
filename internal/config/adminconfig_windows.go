@@ -43,9 +43,7 @@ var registryFeatureEntries = []registryFeatureEntry{
 	{"DisableIntegrationsManagement", func(c *adminConfigJSON, v bool) { p := !v; c.GovernanceAdministration.IntegrationsManagement = &p }},
 	{"DisableBackupPoliciesAndSets", func(c *adminConfigJSON, v bool) { p := !v; c.GovernanceAdministration.BackupPoliciesAndSets = &p }},
 
-	{"DisableAIChat", func(c *adminConfigJSON, v bool) { p := !v; c.AI.AIChat = &p }},
 	{"DisableAIInlineCompletions", func(c *adminConfigJSON, v bool) { p := !v; c.AI.AIInlineCompletions = &p }},
-	{"DisableAIImportSuggest", func(c *adminConfigJSON, v bool) { p := !v; c.AI.AIImportSuggest = &p }},
 
 	{"DisableSchemaMigration", func(c *adminConfigJSON, v bool) { p := !v; c.AdvancedTools.SchemaMigration = &p }},
 	{"DisableDbtScaffolding", func(c *adminConfigJSON, v bool) { p := !v; c.AdvancedTools.DbtScaffolding = &p }},

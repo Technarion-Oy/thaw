@@ -98,10 +98,8 @@ func GetCodebaseSemanticMap() string {
       "backend_paths": [
         "internal/ai/"
       ],
-      "frontend_paths": [
-        "frontend/src/components/chat/AiChat.tsx"
-      ],
-      "description": "API clients for LLM providers and agentic tool-calling execution loops."
+      "frontend_paths": null,
+      "description": "API clients for LLM providers; inline completion and model management."
     },
     {
       "name": "Snowpark \u0026 Developer Workflows",

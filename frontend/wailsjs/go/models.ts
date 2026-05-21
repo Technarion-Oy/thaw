@@ -1,60 +1,3 @@
-export namespace ai {
-	
-	export class UIToolCall {
-	    name: string;
-	    input: string;
-	    output: string;
-	    isError: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new UIToolCall(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.input = source["input"];
-	        this.output = source["output"];
-	        this.isError = source["isError"];
-	    }
-	}
-	export class UIMessage {
-	    role: string;
-	    text: string;
-	    toolCalls?: UIToolCall[];
-	
-	    static createFrom(source: any = {}) {
-	        return new UIMessage(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.role = source["role"];
-	        this.text = source["text"];
-	        this.toolCalls = this.convertValues(source["toolCalls"], UIToolCall);
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-
-}
-
 export namespace config {
 	
 	export class AIConfig {
@@ -119,9 +62,7 @@ export namespace config {
 	    queryActivityHistory: boolean;
 	    integrationsManagement: boolean;
 	    backupPoliciesAndSets: boolean;
-	    aiChat: boolean;
 	    aiInlineCompletions: boolean;
-	    aiImportSuggest: boolean;
 	    schemaMigration: boolean;
 	    dbtScaffolding: boolean;
 	    erDiagramDesigner: boolean;
@@ -162,9 +103,7 @@ export namespace config {
 	        this.queryActivityHistory = source["queryActivityHistory"];
 	        this.integrationsManagement = source["integrationsManagement"];
 	        this.backupPoliciesAndSets = source["backupPoliciesAndSets"];
-	        this.aiChat = source["aiChat"];
 	        this.aiInlineCompletions = source["aiInlineCompletions"];
-	        this.aiImportSuggest = source["aiImportSuggest"];
 	        this.schemaMigration = source["schemaMigration"];
 	        this.dbtScaffolding = source["dbtScaffolding"];
 	        this.erDiagramDesigner = source["erDiagramDesigner"];

@@ -180,8 +180,8 @@ func DefaultNotebookPrefs() NotebookPrefs {
 //
 // Version tracks the schema revision so new flags introduced after an initial
 // save can be filled with their defaults rather than the zero value (false).
-// Current version: 8 (added CrossTabSearch).
-const flagsVersion = 8
+// Current version: 9 (removed AIChat and AIImportSuggest).
+const flagsVersion = 9
 
 type FeatureFlags struct {
 	Initialized bool `json:"initialized"`
@@ -205,9 +205,7 @@ type FeatureFlags struct {
 	BackupPoliciesAndSets  bool `json:"backupPoliciesAndSets"`
 
 	// AI & Assistance
-	AIChat              bool `json:"aiChat"`
 	AIInlineCompletions bool `json:"aiInlineCompletions"`
-	AIImportSuggest     bool `json:"aiImportSuggest"`
 
 	// Advanced Tools & Data Engineering
 	SchemaMigration     bool `json:"schemaMigration"`
@@ -262,9 +260,7 @@ func DefaultFeatureFlags() FeatureFlags {
 		QueryActivityHistory:   true,
 		IntegrationsManagement: true,
 		BackupPoliciesAndSets:  true,
-		AIChat:                 true,
 		AIInlineCompletions:    true,
-		AIImportSuggest:        true,
 		SchemaMigration:        true,
 		DbtScaffolding:         true,
 		ERDiagramDesigner:      true,
@@ -312,9 +308,7 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	setIfZero(&f.QueryActivityHistory, defaults.QueryActivityHistory)
 	setIfZero(&f.IntegrationsManagement, defaults.IntegrationsManagement)
 	setIfZero(&f.BackupPoliciesAndSets, defaults.BackupPoliciesAndSets)
-	setIfZero(&f.AIChat, defaults.AIChat)
 	setIfZero(&f.AIInlineCompletions, defaults.AIInlineCompletions)
-	setIfZero(&f.AIImportSuggest, defaults.AIImportSuggest)
 	setIfZero(&f.SchemaMigration, defaults.SchemaMigration)
 	setIfZero(&f.DbtScaffolding, defaults.DbtScaffolding)
 	setIfZero(&f.ERDiagramDesigner, defaults.ERDiagramDesigner)
