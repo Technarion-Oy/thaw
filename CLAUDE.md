@@ -69,7 +69,7 @@ thaw/
 │   │   └── sqleditor_test.go
 │   ├── tasks/           # Task graph ops, statuses, run history (TASK_HISTORY)
 │   ├── ddl/             # DDL parsing and git-export pipeline
-│   ├── ai/              # AI provider clients (OpenAI, Google)
+│   ├── ai/              # AI provider clients (OpenAI, Google, Ollama); inline completions, model management
 │   ├── config/          # App config (TOML persistence)
 │   ├── gitrepo/         # Git operations via exec
 │   ├── filesystem/      # File read/write/delete/rename helpers, reveal in file manager

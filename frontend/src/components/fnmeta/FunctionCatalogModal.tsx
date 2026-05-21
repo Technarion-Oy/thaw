@@ -212,75 +212,75 @@ export default function FunctionCatalogModal({ onClose }: Props) {
 
               {/* Detail content */}
               <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-                    <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px" }}>
-                      {detailLoading ? (
-                        <div style={{ textAlign: "center", paddingTop: 40 }}>
-                          <Spin size="small" />
+                <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px" }}>
+                  {detailLoading ? (
+                    <div style={{ textAlign: "center", paddingTop: 40 }}>
+                      <Spin size="small" />
+                    </div>
+                  ) : overloads.length === 0 ? (
+                    <Empty description="No details available" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                  ) : (
+                    overloads.map((ol, i) => (
+                      <div key={i} style={{
+                        marginBottom: i < overloads.length - 1 ? 20 : 0,
+                        paddingBottom: i < overloads.length - 1 ? 20 : 0,
+                        borderBottom: i < overloads.length - 1 ? "1px dashed var(--border-color, #303030)" : "none",
+                      }}>
+                        <div style={{
+                          fontFamily: "monospace",
+                          fontSize: 12,
+                          background: "var(--code-bg, #1e1e1e)",
+                          borderRadius: 4,
+                          padding: "8px 10px",
+                          whiteSpace: "pre-wrap",
+                          wordBreak: "break-word",
+                          lineHeight: 1.6,
+                          border: "1px solid var(--border-color, #303030)",
+                        }}>
+                          {ol.functionSignature}
                         </div>
-                      ) : overloads.length === 0 ? (
-                        <Empty description="No details available" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                      ) : (
-                        overloads.map((ol, i) => (
-                          <div key={i} style={{
-                            marginBottom: i < overloads.length - 1 ? 20 : 0,
-                            paddingBottom: i < overloads.length - 1 ? 20 : 0,
-                            borderBottom: i < overloads.length - 1 ? "1px dashed var(--border-color, #303030)" : "none",
-                          }}>
-                            <div style={{
-                              fontFamily: "monospace",
-                              fontSize: 12,
-                              background: "var(--code-bg, #1e1e1e)",
-                              borderRadius: 4,
-                              padding: "8px 10px",
-                              whiteSpace: "pre-wrap",
-                              wordBreak: "break-word",
-                              lineHeight: 1.6,
-                              border: "1px solid var(--border-color, #303030)",
-                            }}>
-                              {ol.functionSignature}
-                            </div>
-                            {ol.description && (
-                              <Text style={{ fontSize: 12, display: "block", marginTop: 8, lineHeight: 1.6 }}>
-                                {ol.description}
-                              </Text>
-                            )}
-                          </div>
-                        ))
-                      )}
-                    </div>
-                    <div style={{
-                      padding: "10px 16px",
-                      borderTop: "1px solid var(--border-color, #303030)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "flex-end",
-                      flexShrink: 0,
-                    }}>
-                      {selected.functionType === "BUILTIN" && (
-                        <button
-                          onClick={() => BrowserOpenURL(`https://docs.snowflake.com/en/sql-reference/functions/${selected.functionName.toLowerCase()}`)}
-                          style={{
-                            background: "none",
-                            border: "none",
-                            padding: 0,
-                            cursor: "pointer",
-                            fontSize: 12,
-                            color: "var(--ant-color-primary, #177ddc)",
-                            textDecoration: "underline",
-                            textUnderlineOffset: 2,
-                            textAlign: "left",
-                            marginRight: "auto",
-                          }}
-                        >
-                          📖 Snowflake documentation for {selected.functionName}
-                        </button>
-                      )}
-                      <Tooltip title={<>Inserts <code style={{ fontSize: 11 }}>{selected.functionName}(</code> at the cursor position</>}>
-                        <Button type="primary" icon={<EnterOutlined />} onClick={handleInsert}>
-                          Insert into Editor
-                        </Button>
-                      </Tooltip>
-                    </div>
+                        {ol.description && (
+                          <Text style={{ fontSize: 12, display: "block", marginTop: 8, lineHeight: 1.6 }}>
+                            {ol.description}
+                          </Text>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div style={{
+                  padding: "10px 16px",
+                  borderTop: "1px solid var(--border-color, #303030)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "flex-end",
+                  flexShrink: 0,
+                }}>
+                  {selected.functionType === "BUILTIN" && (
+                    <button
+                      onClick={() => BrowserOpenURL(`https://docs.snowflake.com/en/sql-reference/functions/${selected.functionName.toLowerCase()}`)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        padding: 0,
+                        cursor: "pointer",
+                        fontSize: 12,
+                        color: "var(--ant-color-primary, #177ddc)",
+                        textDecoration: "underline",
+                        textUnderlineOffset: 2,
+                        textAlign: "left",
+                        marginRight: "auto",
+                      }}
+                    >
+                      📖 Snowflake documentation for {selected.functionName}
+                    </button>
+                  )}
+                  <Tooltip title={<>Inserts <code style={{ fontSize: 11 }}>{selected.functionName}(</code> at the cursor position</>}>
+                    <Button type="primary" icon={<EnterOutlined />} onClick={handleInsert}>
+                      Insert into Editor
+                    </Button>
+                  </Tooltip>
+                </div>
               </div>
             </>
           ) : (

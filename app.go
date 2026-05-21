@@ -500,7 +500,6 @@ func (a *App) CancelExport() {
 	}
 }
 
-
 // LoadSnowflakeCLIConfig reads the Snowflake CLI configuration file (either from
 // the custom path set by PickSnowflakeCLIConfigPath or the default location)
 // and returns all named connection profiles together with the default one.
