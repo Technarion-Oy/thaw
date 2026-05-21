@@ -203,6 +203,19 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 - Schema object cache: module-level `fetchedSchemaObjects` Set — avoids duplicate `ListObjects` calls
 - **Never register completion/hover providers inside the component render** — use module-level disposable refs
 
+### Cross-tab search & replace
+- `CrossTabSearch` (`frontend/src/components/editor/CrossTabSearch.tsx`) renders a search/replace panel between the TabBar and the editor area
+- Triggered by `⌘⇧H` / `Ctrl+Shift+H` in QueryPage's global keydown handler; gated behind the `crossTabSearch` feature flag
+- Searches all tabs (SQL, YAML, Python) by splitting `tab.sql` into lines; for notebook tabs, parses the serialised Jupyter JSON and searches each cell's source
+- Navigation dispatches the existing `thaw:scroll-to-line` custom event so SqlEditor can reveal and select the match; after a tab switch, waits for the `thaw:editor-ready` event (emitted from SqlEditor's `handleMount`) with a 500 ms fallback timeout
+- Replace on the active non-notebook tab routes edits through `editor.executeEdits()` (via `getEditorInstance()` from `editorRef.ts`) so Monaco's undo stack records the change and Ctrl+Z works; for non-active tabs and notebook tabs, falls back to store-only updates via `setSqlForTab` / `useQueryStore.setState({ sql })`
+- Replace buttons are guarded by an `isReplacing` ref+state pair that disables them during the recomputation window (one `requestAnimationFrame`) after a replacement, preventing stale-match race conditions from rapid clicks
+- Regex replace supports capture-group back-references (`$1`, `$2`) via `String.prototype.replace`; literal mode uses positional splicing
+- Auto-navigate effect on match change preserves the user's position (finds closest match by tab/line/column) instead of snapping to the first match; only navigates to index 0 when there is no previous position
+- Supports case-sensitive and regex toggle buttons; match counter shows "N of M in K tabs"
+- **Known limitation — notebook navigation**: Navigating to a notebook tab match switches to the correct tab but does not scroll to or highlight the match within the cell, because `thaw:editor-ready` is only emitted by the primary `SqlEditor` on mount — notebook tabs use per-cell editors that don't emit this event
+- **Known limitation — panel state**: Search/replace terms and toggle states are lost when the panel is closed (component is unmounted), unlike VS Code which preserves them
+
 ### SQL diagnostics & JOIN suggestions (backend)
 All proprietary analysis logic lives in `internal/sqleditor/` and is exposed to the frontend via a dedicated Wails-bound `sqleditor.Service` struct (`service.go`). The service is registered in `main.go`'s `Bind` array and its methods are imported from `wailsjs/go/sqleditor/Service` (not from `wailsjs/go/main/App`):
 - `AnalyzeSqlSyntax(sql)` → character-by-character tokenizer (strings, comments, parens, dollar-quoting, scripting); inside `$$` blocks it also flags: placeholder tokens (`<>{}` at statement-start), bare unrecognised identifiers at statement-start, and wrong `:=`/`=` assignment syntax

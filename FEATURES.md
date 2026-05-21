@@ -13,6 +13,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
 - **Cancel queries** — cancel a running query at any time; Thaw issues `SYSTEM$CANCEL_QUERY` so it also stops consuming Snowflake credits
 - **Query ID** — the Snowflake Query ID is shown in the spinner while running (per-statement for multi-statement scripts) and in the results status bar after completion; click the copy icon to copy it to the clipboard
 - **Multi-cursor editing** — `⌘⌥↑` / `Ctrl+Alt+↑` adds a cursor on the line above; `⌘⌥↓` / `Ctrl+Alt+↓` adds one below; works in the SQL editor, YAML editor, and all notebook cell editors; matches VS Code behaviour
+- **Cross-tab search & replace** — press `⌘⇧H` / `Ctrl+Shift+H` to open a search/replace panel above the editor that searches across all open tabs (SQL, YAML, Python, and notebook cells); navigate between matches with Enter/Shift+Enter (automatically switches tabs); supports case-sensitive matching and regular expressions (with capture-group back-references like `$1`, `$2` in replace); replace single or all occurrences in one action; replace on the active tab integrates with Monaco's undo stack (Ctrl+Z); toggleable via **View → Enabled Features → Cross-Tab Search & Replace**
 - **Selection highlight** — selecting text highlights every other occurrence in the document; overview-ruler markers show occurrences in long files
 - **Toggle line comment** — `⌘/` / `Ctrl+/` (or right-click → **Toggle Line Comment**) adds or removes `--` on the current line or on every line in the selection
 - **Font size zoom** — `⌘+` / `Ctrl++` increases the editor font size, `⌘-` / `Ctrl+-` decreases it, `⌘0` / `Ctrl+0` resets to the default
@@ -861,6 +862,9 @@ The following features are identified as feasible to be turned off via feature f
 **Results Grid**
 - **Multi-Cell Copy & Selection** (Range selection, multi-cell copy, selection aggregations, and quick charting)
 
+**SQL Editor**
+- **Cross-Tab Search & Replace** (Search and replace text across all open query tabs and notebook cells)
+
 **Connection**
 - **Snowflake CLI Profile Manager** (Manage Snowflake CLI profiles from the connection dialog)
 
@@ -937,6 +941,7 @@ Open **Help → Keyboard Shortcuts…** in the menu bar for a searchable, always
 | `Tab` | `Tab` | Accept AI suggestion |
 | `⌘F` | `Ctrl+F` | Find in document |
 | `⌘⌥F` | `Ctrl+H` | Find and replace |
+| `⌘⇧H` | `Ctrl+Shift+H` | Find & replace across tabs |
 | `⌘D` | `Ctrl+D` | Select next occurrence |
 | `⌃G` | `Ctrl+G` | Go to line |
 | `⌘⌥↑` | `Ctrl+Alt+↑` | Add cursor above |

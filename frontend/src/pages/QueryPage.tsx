@@ -29,6 +29,7 @@ import { usePanelLayoutStore } from "../store/panelLayoutStore";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import SqlEditor from "../components/editor/SqlEditor";
 import TabBar from "../components/editor/TabBar";
+import CrossTabSearch from "../components/editor/CrossTabSearch";
 import { DiffEditor } from "@monaco-editor/react";
 import { ensureMonacoSetup } from "../components/editor/monacoSetup";
 import { useThemeStore } from "../store/themeStore";
@@ -155,6 +156,8 @@ export default function QueryPage() {
   const primaryGridRef = useRef<ResultGridHandle | null>(null);
   // Grid search bar visibility.
   const [gridSearchOpen, setGridSearchOpen] = useState(false);
+  // Cross-tab search/replace panel visibility.
+  const [crossTabSearchOpen, setCrossTabSearchOpen] = useState(false);
   const { disconnect, isConnected } = useConnectionStore();
   // Pending query stored when the user runs SQL while disconnected.
   const pendingQueryRef = useRef<string | null>(null);
@@ -683,6 +686,17 @@ export default function QueryPage() {
     return () => window.removeEventListener("thaw:focus-results", handler);
   }, []);
 
+  // thaw:toggle-cross-tab-search — toggle the cross-tab search panel (fired
+  // from the editor context menu action registered in SqlEditor).
+  useEffect(() => {
+    const handler = () => {
+      if (!useFeatureFlagsStore.getState().flags.crossTabSearch) return;
+      setCrossTabSearchOpen((prev) => !prev);
+    };
+    window.addEventListener("thaw:toggle-cross-tab-search", handler);
+    return () => window.removeEventListener("thaw:toggle-cross-tab-search", handler);
+  }, []);
+
   // Escape cancels the running query.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -811,6 +825,15 @@ export default function QueryPage() {
       if (cmd && e.shiftKey && !e.altKey && e.key === "F") {
         e.preventDefault();
         window.dispatchEvent(new Event("thaw:focus-object-search"));
+        return;
+      }
+
+      // ⌘⇧H / Ctrl+Shift+H — Toggle cross-tab search/replace
+      // Skip if Monaco already handled this keybinding via defaultPrevented.
+      if (cmd && e.shiftKey && !e.altKey && e.key === "H" && !e.defaultPrevented) {
+        if (!featureFlags.crossTabSearch) return;
+        e.preventDefault();
+        setCrossTabSearchOpen((prev) => !prev);
         return;
       }
     };
@@ -981,6 +1004,9 @@ export default function QueryPage() {
 
       {/* Tab bar */}
       <TabBar />
+
+      {/* Cross-tab search/replace panel */}
+      {crossTabSearchOpen && <CrossTabSearch onClose={() => setCrossTabSearchOpen(false)} />}
 
       {/* Diff view — replaces editor + results when the active tab is a diff tab */}
       {activeDiff && (

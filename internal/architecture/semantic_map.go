@@ -40,6 +40,7 @@ func GetCodebaseSemanticMap() string {
         "internal/sqleditor/"
       ],
       "frontend_paths": [
+        "frontend/src/components/editor/CrossTabSearch.tsx",
         "frontend/src/components/editor/SqlEditor.tsx",
         "frontend/src/components/editor/sqlEditorUtils.ts",
         "frontend/src/components/results/ColumnFilterDropdown.tsx",

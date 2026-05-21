@@ -536,6 +536,9 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
     if (!tabId) {
       setEditorInstance(editor);
       editor.onDidDispose(() => setEditorInstance(null));
+      // Signal that the editor is mounted and ready for external commands
+      // (used by CrossTabSearch to scroll to a match after a tab switch).
+      window.dispatchEvent(new Event("thaw:editor-ready"));
     }
 
     activeStmtDecRef.current = editor.createDecorationsCollection([]);
@@ -1971,23 +1974,43 @@ export default function SqlEditor({ tabId, activeStmtIdx }: SqlEditorProps = {})
       },
     });
 
-    const handleScrollToLine = (e: Event) => {
-      const { line, matchStart, matchEnd } =
-        (e as CustomEvent<{ line: number; matchStart?: number; matchEnd?: number }>).detail;
-      if (typeof line !== "number") return;
-      editor.revealLineInCenter(line);
-      if (typeof matchStart === "number" && typeof matchEnd === "number") {
-        editor.setSelection({
-          startLineNumber: line,
-          startColumn:     matchStart + 1,
-          endLineNumber:   line,
-          endColumn:       matchEnd + 1,
-        });
-      } else {
-        editor.setPosition({ lineNumber: line, column: 1 });
-      }
-    };
-    window.addEventListener("thaw:scroll-to-line", handleScrollToLine);
+    if (useFeatureFlagsStore.getState().flags.crossTabSearch) {
+      // No keybindings — ⌘⇧H is handled by QueryPage's global keydown handler
+      // to avoid a double-toggle when Monaco doesn't preventDefault on the event.
+      editor.addAction({
+        id: "thaw.crossTabSearch",
+        label: "Find & Replace in Tabs",
+        contextMenuGroupId: "3_find",
+        contextMenuOrder: 1,
+        run: () => {
+          window.dispatchEvent(new Event("thaw:toggle-cross-tab-search"));
+        },
+      });
+    }
+
+    // Only the primary editor (no tabId) should respond to scroll-to-line
+    // events — split/secondary editors have different content and the line
+    // number could be invalid or misleading.
+    if (!tabId) {
+      const handleScrollToLine = (e: Event) => {
+        const { line, matchStart, matchEnd } =
+          (e as CustomEvent<{ line: number; matchStart?: number; matchEnd?: number }>).detail;
+        if (typeof line !== "number") return;
+        editor.revealLineInCenter(line);
+        if (typeof matchStart === "number" && typeof matchEnd === "number") {
+          editor.setSelection({
+            startLineNumber: line,
+            startColumn:     matchStart + 1,
+            endLineNumber:   line,
+            endColumn:       matchEnd + 1,
+          });
+        } else {
+          editor.setPosition({ lineNumber: line, column: 1 });
+        }
+      };
+      window.addEventListener("thaw:scroll-to-line", handleScrollToLine);
+      editor.onDidDispose(() => window.removeEventListener("thaw:scroll-to-line", handleScrollToLine));
+    }
 
     const editorDom = editor.getDomNode();
     if (editorDom) {

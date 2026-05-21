@@ -139,6 +139,7 @@ export namespace config {
 	    fileFormatBuilder: boolean;
 	    snowflakeCLIProfileManager: boolean;
 	    multiCellCopy: boolean;
+	    crossTabSearch: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new FeatureFlags(source);
@@ -181,6 +182,7 @@ export namespace config {
 	        this.fileFormatBuilder = source["fileFormatBuilder"];
 	        this.snowflakeCLIProfileManager = source["snowflakeCLIProfileManager"];
 	        this.multiCellCopy = source["multiCellCopy"];
+	        this.crossTabSearch = source["crossTabSearch"];
 	    }
 	}
 	export class GitConfig {
