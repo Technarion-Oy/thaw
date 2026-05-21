@@ -74,7 +74,6 @@ const GROUPS: ShortcutGroup[] = [
       { action: "Focus Object Browser Search",   mac: "⌘ ⇧ F",    win: "Ctrl+Shift+F",   status: "new" },
       { action: "Toggle Split Editor View",      mac: "⌘ \\",      win: "Ctrl+\\",        status: "new" },
       { action: "Open Terminal",                mac: "⌘ `",         win: "Ctrl+`" },
-      { action: "Focus AI Chat",                mac: "⌘ L",         win: "Ctrl+L",         status: "new" },
     ],
   },
   {

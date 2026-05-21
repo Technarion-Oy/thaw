@@ -188,7 +188,7 @@ export default function FunctionCatalogModal({ onClose }: Props) {
           </div>
         </div>
 
-        {/* ── Right: detail + AI chat ────────────────────────────────── */}
+        {/* ── Right: detail ─────────────────────────────────────────── */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
           {selected ? (
             <>
