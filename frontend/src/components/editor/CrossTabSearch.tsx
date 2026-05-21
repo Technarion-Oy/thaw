@@ -196,10 +196,12 @@ export default function CrossTabSearch({ onClose }: Props) {
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   const isReplacingRef = useRef(false);
   const prevMatchRef = useRef<{ tabId: string; line: number; column: number } | null>(null);
+  const navigationCleanupRef = useRef<(() => void) | null>(null);
 
-  // Focus the search input on mount.
+  // Focus the search input on mount; clean up pending navigation on unmount.
   useEffect(() => {
     searchRef.current?.focus();
+    return () => { navigationCleanupRef.current?.(); };
   }, []);
 
   // ── Search ─────────────────────────────────────────────────────────────────
@@ -285,6 +287,12 @@ export default function CrossTabSearch({ onClose }: Props) {
   const goToMatch = useCallback(
     (idx: number) => {
       if (idx < 0 || idx >= matches.length) return;
+
+      // Cancel any pending navigation from a previous goToMatch call to
+      // avoid visual flicker when rapidly cycling through matches.
+      navigationCleanupRef.current?.();
+      navigationCleanupRef.current = null;
+
       const m = matches[idx];
       prevMatchRef.current = { tabId: m.tabId, line: m.line, column: m.column };
       const { activeTabId, activateTab } = useQueryStore.getState();
@@ -319,6 +327,10 @@ export default function CrossTabSearch({ onClose }: Props) {
           setTimeout(emit, 20);
         };
         window.addEventListener("thaw:editor-ready", handler, { once: true });
+        navigationCleanupRef.current = () => {
+          clearTimeout(fallback);
+          window.removeEventListener("thaw:editor-ready", handler);
+        };
       } else {
         emit();
       }

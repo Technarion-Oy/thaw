@@ -826,7 +826,9 @@ export default function QueryPage() {
       }
 
       // ⌘⇧H / Ctrl+Shift+H — Toggle cross-tab search/replace
-      if (cmd && e.shiftKey && !e.altKey && e.code === "KeyH") {
+      // Skip if Monaco already handled this keybinding (editor context menu
+      // action always opens; this global handler toggles).
+      if (cmd && e.shiftKey && !e.altKey && e.code === "KeyH" && !e.defaultPrevented) {
         if (!featureFlags.crossTabSearch) return;
         e.preventDefault();
         setCrossTabSearchOpen((prev) => !prev);
