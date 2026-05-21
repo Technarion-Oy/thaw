@@ -830,7 +830,9 @@ function ResultGrid({ result, gridRef }: Props) {
     if (centerColumns[i]) rightSpacerWidth += centerColumns[i].getSize();
   }
 
-  const selectAllColWidth = featureFlags.multiCellCopy ? 28 : 0;
+  const selectAllColWidth = featureFlags.multiCellCopy
+    ? Math.max(28, Math.ceil(Math.log10(result.rows.length + 1)) * 8 + 16)
+    : 0;
   const dataColumnsWidth = pinnedLeftWidth + totalColumnWidth + pinnedRightWidth;
   const fullTableWidth = selectAllColWidth + dataColumnsWidth;
   // When the table stretches to fill the container, distribute excess space
@@ -1131,7 +1133,7 @@ function ResultGrid({ result, gridRef }: Props) {
                   const header = headerMap.get(col.id);
                   if (!header) return null;
                   const colIdx = colIdxFromColumnId(col.id);
-                  const stickyLeft = selectAllColWidth + leftOffsets[i] * dataColScale;
+                  const stickyLeft = selectAllColWidth + (leftOffsets[i] * dataColScale);
                   return renderHeaderCell(col.id, colIdx, header, true, stickyLeft);
                 })}
                 {/* Left spacer */}
@@ -1214,7 +1216,7 @@ function ResultGrid({ result, gridRef }: Props) {
                   {leftPinned.map((col, i) => {
                     const cell = cellMap.get(col.id);
                     if (!cell) return null;
-                    const stickyLeft = selectAllColWidth + leftOffsets[i] * dataColScale;
+                    const stickyLeft = selectAllColWidth + (leftOffsets[i] * dataColScale);
                     return renderBodyCell(cell, row.original, virtualRow.index, true, stickyLeft);
                   })}
                   {/* Left spacer */}
