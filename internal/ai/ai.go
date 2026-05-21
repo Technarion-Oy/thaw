@@ -23,7 +23,7 @@ import (
 
 var httpClient = &http.Client{Timeout: 3 * time.Second}
 
-var suggestHttpClient = &http.Client{Timeout: 15 * time.Second}
+var ollamaHttpClient = &http.Client{Timeout: 15 * time.Second}
 
 // GetSuggestion requests an inline SQL completion from the configured provider.
 // provider must be "openai", "google", or "ollama". Returns the trimmed completion text.
@@ -424,7 +424,7 @@ func ollamaSuggestion(base, model, prompt string, numCtx int) (string, error) {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := suggestHttpClient.Do(req)
+	resp, err := ollamaHttpClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("ollama not reachable: %w", err)
 	}

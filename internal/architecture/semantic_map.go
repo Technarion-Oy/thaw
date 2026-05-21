@@ -99,7 +99,7 @@ func GetCodebaseSemanticMap() string {
         "internal/ai/"
       ],
       "frontend_paths": null,
-      "description": "API clients for LLM providers and agentic tool-calling execution loops."
+      "description": "API clients for LLM providers; inline completion and model management."
     },
     {
       "name": "Snowpark \u0026 Developer Workflows",

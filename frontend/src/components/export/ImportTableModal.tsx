@@ -428,10 +428,6 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
     setCfg((prev) => ({ ...prev, [key]: value }));
   }, []);
 
-  const changeFormat = (f: Format) => {
-    set("type", f);
-  };
-
   const [collapseOpen, setCollapseOpen]     = useState<string[]>([]);
 
   // Load file heads for CSV / JSON previews
@@ -455,7 +451,7 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
       const added = picked.filter((p) => !existing.has(p));
       if (prev.length === 0 && added.length > 0) {
         const detected = detectFormat(added[0]);
-        changeFormat(detected);
+        set("type", detected);
       }
       return [...prev, ...added];
     });
@@ -692,7 +688,7 @@ export default function ImportTableModal({ db, schema, table, onClose, onSuccess
             </div>
             <Segmented
               value={format}
-              onChange={(v) => changeFormat(v as Format)}
+              onChange={(v) => set("type", v as Format)}
               options={["CSV", "JSON", "AVRO", "ORC", "PARQUET"]}
               block
             />

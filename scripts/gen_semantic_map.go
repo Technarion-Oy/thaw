@@ -46,7 +46,7 @@ var domainDescriptions = map[string]string{
 	"SQL Editor & Diagnostics":        "Proprietary SQL tokenizer, syntax validation, and Monaco editor UI components.",
 	"Object Browser & Administration": "Database metadata exploration, user management, and warehouse metering.",
 	"Schema Migration":                "DDL extraction, schema diffing, and the deployment wizard.",
-	"AI Tooling":                      "API clients for LLM providers and agentic tool-calling execution loops.",
+	"AI Tooling":                      "API clients for LLM providers; inline completion and model management.",
 	"Snowpark & Developer Workflows":  "Python environment management, Jupyter kernels, and dbt project scaffolding.",
 	"Git Integration":                 "Git repository operations, Snowflake Git repository objects, and schema export versioning.",
 }
