@@ -192,7 +192,7 @@ export default function CrossTabSearch({ onClose }: Props) {
   const [matches, setMatches] = useState<MatchLocation[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [isReplacing, setIsReplacing] = useState(false);
-  const [lastReplaceInfo, setLastReplaceInfo] = useState<{ count: number; tabs: number } | null>(null);
+  const [lastReplaceInfo, setLastReplaceInfo] = useState<{ count: number; tabs: number; nonUndoableTabs?: number } | null>(null);
   const searchRef = useRef<InputRef>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   const isReplacingRef = useRef(false);
@@ -487,12 +487,14 @@ export default function CrossTabSearch({ onClose }: Props) {
       }, effectiveReplace);
     }
 
-    // Recompute after the store update propagates.
-    setTimeout(() => {
+    // Recompute after the store update propagates.  Zustand state updates
+    // are synchronous, so requestAnimationFrame is sufficient to ensure the
+    // new tab content is visible to computeMatches via getState().
+    requestAnimationFrame(() => {
       computeMatches(searchTerm);
       isReplacingRef.current = false;
       setIsReplacing(false);
-    }, 50);
+    });
   }, [matches, currentIdx, replaceTerm, useRegex, searchTerm, caseSensitive, applyReplace, computeMatches]);
 
   const replaceAll = useCallback(() => {
@@ -551,12 +553,15 @@ export default function CrossTabSearch({ onClose }: Props) {
       }
     }
 
-    setLastReplaceInfo({ count: replaceCount, tabs: replaceTabCount });
-    setTimeout(() => {
+    // Track how many non-active tabs were modified (no undo for those).
+    const { activeTabId } = useQueryStore.getState();
+    const nonUndoableTabs = [...byTab.keys()].filter((id) => id !== activeTabId).length;
+    setLastReplaceInfo({ count: replaceCount, tabs: replaceTabCount, nonUndoableTabs });
+    requestAnimationFrame(() => {
       computeMatches(searchTerm);
       isReplacingRef.current = false;
       setIsReplacing(false);
-    }, 50);
+    });
   }, [matches, replaceTerm, useRegex, searchTerm, caseSensitive, applyReplace, computeMatches]);
 
   // ── Keyboard handlers ──────────────────────────────────────────────────────
@@ -663,10 +668,19 @@ export default function CrossTabSearch({ onClose }: Props) {
           </Text>
         )}
         {searchTerm && matches.length === 0 && lastReplaceInfo && (
-          <Text style={{ fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>
-            Replaced {lastReplaceInfo.count} in {lastReplaceInfo.tabs}{" "}
-            tab{lastReplaceInfo.tabs !== 1 ? "s" : ""}
-          </Text>
+          <Tooltip
+            title={
+              lastReplaceInfo.nonUndoableTabs
+                ? `Changes in ${lastReplaceInfo.nonUndoableTabs} non-active tab${lastReplaceInfo.nonUndoableTabs !== 1 ? "s" : ""} cannot be undone`
+                : undefined
+            }
+          >
+            <Text style={{ fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+              Replaced {lastReplaceInfo.count} in {lastReplaceInfo.tabs}{" "}
+              tab{lastReplaceInfo.tabs !== 1 ? "s" : ""}
+              {lastReplaceInfo.nonUndoableTabs ? " (undo limited)" : ""}
+            </Text>
+          </Tooltip>
         )}
         {searchTerm && matches.length === 0 && !lastReplaceInfo && (
           <Text style={{ fontSize: 11, color: "var(--text-faint)", whiteSpace: "nowrap" }}>
