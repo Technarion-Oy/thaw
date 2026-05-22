@@ -375,16 +375,19 @@ function buildGraph(tasks: tasks.StatusRow[], focusedName: string) {
   return { nodes, edges, layoutOnlyEdges, rootTaskName, childrenOf };
 }
 
-// ── Topological (BFS) ordering ────────────────────────────────────────────────
-// Extracts BFS traversal from root, returning ordered task names and finalizer
-// names separately. Used by both suspendResumeAll and exportGraphDDL.
+// ── Topological ordering (Kahn's algorithm) ──────────────────────────────────
+// Returns tasks in dependency-safe creation order so that every task's
+// predecessors appear before it. Uses Kahn's algorithm (in-degree based)
+// within the set of tasks reachable from the root, which correctly handles
+// diamond dependencies (task with predecessors at different depths).
 
 interface TopologicalOrder {
-  bfsOrder: string[];
+  /** Tasks in dependency-safe order (root first, each task after all its predecessors). */
+  topoOrder: string[];
   finalizerNames: string[];
-  /** Suspend order: root first, then BFS descendants, then finalizers. */
+  /** Suspend order: root first → descendants in topological order → finalizers last. */
   suspendOrder: string[];
-  /** Resume order: leaves first (reverse BFS excl. root), then finalizers, then root last. */
+  /** Resume order: reverse topological (leaves first, excl. root) → finalizers → root last. */
   resumeOrder: string[];
 }
 
@@ -392,9 +395,10 @@ function getTopologicalOrder(
   taskRows: tasks.StatusRow[],
   rootUpper: string,
 ): TopologicalOrder {
-  const empty: TopologicalOrder = { bfsOrder: [], finalizerNames: [], suspendOrder: [], resumeOrder: [] };
+  const empty: TopologicalOrder = { topoOrder: [], finalizerNames: [], suspendOrder: [], resumeOrder: [] };
   const byName = new Map<string, string>(); // UPPER → original name
   const childrenOf = new Map<string, string[]>(); // UPPER(parent) → [child names]
+  const predecessorsOf = new Map<string, string[]>(); // UPPER(child) → [UPPER(parent) names]
   const finalizerNames: string[] = [];
 
   taskRows.forEach((t) => {
@@ -406,41 +410,71 @@ function getTopologicalOrder(
       const pu = extractName(p).toUpperCase();
       if (!childrenOf.has(pu)) childrenOf.set(pu, []);
       childrenOf.get(pu)!.push(t.name);
+      const tu = t.name.toUpperCase();
+      if (!predecessorsOf.has(tu)) predecessorsOf.set(tu, []);
+      predecessorsOf.get(tu)!.push(pu);
     }
   });
 
-  // BFS from root → [root, child1, child2, …, leaves].
   const rootName = byName.get(rootUpper);
   if (!rootName) return empty;
-  const bfsOrder: string[] = [];
-  const visited = new Set<string>();
-  const queue = [rootName];
-  visited.add(rootUpper);
-  while (queue.length > 0) {
-    const cur = queue.shift()!;
-    bfsOrder.push(byName.get(cur.toUpperCase()) ?? cur);
-    for (const child of childrenOf.get(cur.toUpperCase()) ?? []) {
-      if (!visited.has(child.toUpperCase())) {
-        visited.add(child.toUpperCase());
-        queue.push(child);
+
+  // Step 1: BFS to discover which tasks belong to this graph.
+  const included = new Set<string>();
+  const bfsQueue = [rootUpper];
+  while (bfsQueue.length > 0) {
+    const cur = bfsQueue.shift()!;
+    if (included.has(cur)) continue;
+    included.add(cur);
+    for (const child of childrenOf.get(cur) ?? []) {
+      bfsQueue.push(child.toUpperCase());
+    }
+  }
+
+  // Step 2: Kahn's algorithm within the included set.
+  // Compute in-degree: count of predecessors that are also in the included set.
+  const inDegree = new Map<string, number>();
+  for (const upper of included) inDegree.set(upper, 0);
+  for (const upper of included) {
+    for (const pred of predecessorsOf.get(upper) ?? []) {
+      if (included.has(pred)) {
+        inDegree.set(upper, (inDegree.get(upper) ?? 0) + 1);
       }
     }
   }
 
-  const filteredFinalizers = finalizerNames.filter((fn) => !visited.has(fn.toUpperCase()));
+  const topoOrder: string[] = [];
+  const queue: string[] = [];
+  // Seed with nodes that have in-degree 0 (should be just the root).
+  for (const [upper, deg] of inDegree) {
+    if (deg === 0) queue.push(upper);
+  }
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    topoOrder.push(byName.get(cur) ?? cur);
+    for (const child of childrenOf.get(cur) ?? []) {
+      const cu = child.toUpperCase();
+      if (!included.has(cu)) continue;
+      const newDeg = (inDegree.get(cu) ?? 1) - 1;
+      inDegree.set(cu, newDeg);
+      if (newDeg === 0) queue.push(cu);
+    }
+  }
 
-  // Suspend: root first → BFS descendants → finalizers last.
-  const suspendOrder = [...bfsOrder, ...filteredFinalizers];
+  const filteredFinalizers = finalizerNames.filter((fn) => !included.has(fn.toUpperCase()));
 
-  // Resume: leaves first (reverse BFS excl. root) → finalizers → root last.
-  const reversedBfs = [...bfsOrder].reverse();
+  // Suspend: topological order (root first) → finalizers last.
+  const suspendOrder = [...topoOrder, ...filteredFinalizers];
+
+  // Resume: reverse topological (leaves first, excl. root) → finalizers → root last.
+  const reversed = [...topoOrder].reverse();
   const resumeOrder = [
-    ...reversedBfs.slice(0, -1),
+    ...reversed.slice(0, -1),
     ...filteredFinalizers,
-    reversedBfs[reversedBfs.length - 1],
+    reversed[reversed.length - 1],
   ];
 
-  return { bfsOrder, finalizerNames: filteredFinalizers, suspendOrder, resumeOrder };
+  return { topoOrder, finalizerNames: filteredFinalizers, suspendOrder, resumeOrder };
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -673,13 +707,18 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
 
       let output: string;
       if (includeSuspendResume) {
+        // Only include SUSPEND/RESUME for tasks whose DDL was fetched
+        // successfully, so the script stays internally consistent.
+        const succeededNames = new Set(succeeded.map((s) => s.name.toUpperCase()));
         const suspendLines = suspendOrder
+          .filter((n) => succeededNames.has(n.toUpperCase()))
           .map((n) => `ALTER TASK IF EXISTS ${fqn(n)} SUSPEND;`)
           .join("\n");
 
         const createLines = succeeded.map((s) => s.ddl).join("\n\n");
 
         const resumeLines = resumeOrder
+          .filter((n) => succeededNames.has(n.toUpperCase()))
           .map((n) => `ALTER TASK IF EXISTS ${fqn(n)} RESUME;`)
           .join("\n");
 
