@@ -50,12 +50,18 @@ const NODE_H = 96;
 const POLL_MS = 3_000;
 
 // Module-level DDL cache — same 60 s TTL pattern used by SqlEditor hover.
+// Key includes db.schema.name so same-named tasks in different databases
+// don't collide across modal opens within the 60 s TTL.
 const taskDDLCache = new Map<string, { ddl: string; ts: number }>();
 const DDL_TTL_MS = 60_000;
 
+function ddlCacheKey(db: string, schema: string, name: string): string {
+  return `${db}.${schema}.${name}`.toUpperCase();
+}
+
 /** Fetch task DDL with cache-through. Used by export and hover tooltip paths. */
 async function getCachedDDL(db: string, schema: string, name: string): Promise<string> {
-  const key = name.toUpperCase();
+  const key = ddlCacheKey(db, schema, name);
   const cached = taskDDLCache.get(key);
   if (cached && Date.now() - cached.ts < DDL_TTL_MS) return cached.ddl;
   const ddl = await GetObjectDDL(db, schema, "task", name, "");
@@ -524,6 +530,9 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
 
   useEffect(() => { load(); }, [load]);
 
+  // Mutation dialogs pause polling to avoid interference. The Export DDL
+  // dialog is intentionally excluded — it's read-only and benefits from
+  // fresh taskRowsRef data at export time.
   const isDialogOpen = !!(
     createTaskDialog ||
     copyTaskSource ||
@@ -726,8 +735,8 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
   const onNodeMouseEnter = useCallback((event: React.MouseEvent, node: Node) => {
     const id = node.id;
     ddlHoverNode.current = id;
-    // Show cached DDL immediately if available.
-    const cached = taskDDLCache.get(id.toUpperCase());
+    // Show cached DDL immediately if available (sync path for instant tooltip).
+    const cached = taskDDLCache.get(ddlCacheKey(db, schema, id));
     if (cached && Date.now() - cached.ts < DDL_TTL_MS) {
       setDdlTooltip({ x: event.clientX, y: event.clientY, nodeId: id, ddl: cached.ddl });
       return;
