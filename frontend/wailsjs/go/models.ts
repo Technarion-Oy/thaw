@@ -3597,6 +3597,24 @@ export namespace tasks {
 	        this.rootTaskId = source["rootTaskId"];
 	    }
 	}
+	export class TopologicalOrder {
+	    topoOrder: string[];
+	    finalizerNames: string[];
+	    suspendOrder: string[];
+	    resumeOrder: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new TopologicalOrder(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.topoOrder = source["topoOrder"];
+	        this.finalizerNames = source["finalizerNames"];
+	        this.suspendOrder = source["suspendOrder"];
+	        this.resumeOrder = source["resumeOrder"];
+	    }
+	}
 
 }
 

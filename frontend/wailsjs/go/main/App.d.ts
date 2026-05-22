@@ -313,6 +313,8 @@ export function GetTaskRunHistory(arg1:string,arg2:string,arg3:string,arg4:boole
 
 export function GetTaskStatuses(arg1:string,arg2:string):Promise<tasks.StatusesResult>;
 
+export function GetTopologicalOrder(arg1:string,arg2:string,arg3:string):Promise<tasks.TopologicalOrder>;
+
 export function GetUserDDL(arg1:string):Promise<string>;
 
 export function GetWarehouseDDL(arg1:string):Promise<string>;

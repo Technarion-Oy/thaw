@@ -3586,6 +3586,20 @@ func (a *App) GetTaskStatuses(database, schema string) (tasks.StatusesResult, er
 	return tasks.GetStatuses(a.ctx, a.client, database, schema)
 }
 
+// GetTopologicalOrder computes a dependency-safe topological ordering of tasks
+// in a graph rooted at rootName. It fetches current task statuses from
+// Snowflake and runs Kahn's algorithm on the result.
+func (a *App) GetTopologicalOrder(database, schema, rootName string) (tasks.TopologicalOrder, error) {
+	if a.client == nil {
+		return tasks.TopologicalOrder{}, apperrors.ErrNotConnected
+	}
+	result, err := tasks.GetStatuses(a.ctx, a.client, database, schema)
+	if err != nil {
+		return tasks.TopologicalOrder{}, err
+	}
+	return tasks.GetTopologicalOrder(result.Rows, rootName), nil
+}
+
 // GetTaskRunHistory returns the execution history for a task from INFORMATION_SCHEMA.TASK_HISTORY().
 func (a *App) GetTaskRunHistory(database, schema, taskName string, isRoot bool, days int) ([]tasks.TaskHistoryRow, error) {
 	if a.client == nil {

@@ -661,6 +661,174 @@ func DropTree(ctx context.Context, client *snowflake.Client, database, schema, t
 	return nil
 }
 
+// TopologicalOrder holds the result of a Kahn's-algorithm topological sort
+// over a task graph rooted at a given task.
+type TopologicalOrder struct {
+	// Tasks in dependency-safe order (root first, each task after all its predecessors).
+	TopoOrder []string `json:"topoOrder"`
+	// Finalizer task names (tasks whose Finalize field references the root).
+	FinalizerNames []string `json:"finalizerNames"`
+	// Suspend order: topological order + finalizers last.
+	SuspendOrder []string `json:"suspendOrder"`
+	// Resume order: reverse topological (leaves first, excl. root) + finalizers + root last.
+	ResumeOrder []string `json:"resumeOrder"`
+}
+
+// parsePredecessorRefs parses the predecessors string from a StatusRow and
+// returns the bare upper-cased task names. The format matches SHOW TASKS output:
+// "", "[]", "[DB.SCHEMA.TASK1,DB.SCHEMA.TASK2]", or a single ref.
+func parsePredecessorRefs(preds string) []string {
+	if preds == "" || preds == "[]" || preds == "<nil>" || preds == "null" {
+		return nil
+	}
+	preds = strings.TrimSuffix(strings.TrimPrefix(preds, "["), "]")
+	var names []string
+	for _, part := range strings.Split(preds, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		segs := strings.Split(part, ".")
+		name := strings.ToUpper(bareIdent(segs[len(segs)-1]))
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// GetTopologicalOrder computes a dependency-safe ordering of tasks in the graph
+// rooted at rootName using Kahn's algorithm. rootName is matched case-insensitively.
+// This is a pure function — no Snowflake connection required.
+func GetTopologicalOrder(rows []StatusRow, rootName string) TopologicalOrder {
+	empty := TopologicalOrder{
+		TopoOrder:      []string{},
+		FinalizerNames: []string{},
+		SuspendOrder:   []string{},
+		ResumeOrder:    []string{},
+	}
+	rootUpper := strings.ToUpper(rootName)
+
+	byName := make(map[string]string)       // UPPER → original name
+	childrenOf := make(map[string][]string)  // UPPER(parent) → [UPPER(child)]
+	predecessorsOf := make(map[string][]string) // UPPER(child) → [UPPER(parent)]
+	var finalizerNames []string
+
+	for _, t := range rows {
+		upper := strings.ToUpper(t.Name)
+		byName[upper] = t.Name
+
+		// Check if this task is a finalizer for the root.
+		if t.Finalize != "" {
+			finSegs := strings.Split(t.Finalize, ".")
+			finName := strings.ToUpper(bareIdent(finSegs[len(finSegs)-1]))
+			if finName == rootUpper {
+				finalizerNames = append(finalizerNames, t.Name)
+			}
+		}
+
+		for _, predUpper := range parsePredecessorRefs(t.Predecessors) {
+			childrenOf[predUpper] = append(childrenOf[predUpper], upper)
+			predecessorsOf[upper] = append(predecessorsOf[upper], predUpper)
+		}
+	}
+
+	if _, ok := byName[rootUpper]; !ok {
+		return empty
+	}
+
+	// Step 1: BFS from root to discover which tasks belong to this graph.
+	included := make(map[string]bool)
+	queue := []string{rootUpper}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if included[cur] {
+			continue
+		}
+		included[cur] = true
+		for _, child := range childrenOf[cur] {
+			if !included[child] {
+				queue = append(queue, child)
+			}
+		}
+	}
+
+	// Step 2: Kahn's algorithm within the included set.
+	inDegree := make(map[string]int)
+	for upper := range included {
+		inDegree[upper] = 0
+	}
+	for upper := range included {
+		for _, pred := range predecessorsOf[upper] {
+			if included[pred] {
+				inDegree[upper]++
+			}
+		}
+	}
+
+	var topoOrder []string
+	var kahnQueue []string
+	for upper, deg := range inDegree {
+		if deg == 0 {
+			kahnQueue = append(kahnQueue, upper)
+		}
+	}
+	for len(kahnQueue) > 0 {
+		cur := kahnQueue[0]
+		kahnQueue = kahnQueue[1:]
+		topoOrder = append(topoOrder, byName[cur])
+		for _, child := range childrenOf[cur] {
+			if !included[child] {
+				continue
+			}
+			inDegree[child]--
+			if inDegree[child] == 0 {
+				kahnQueue = append(kahnQueue, child)
+			}
+		}
+	}
+
+	// Filter finalizers to only those NOT already included in the BFS traversal.
+	var filteredFinalizers []string
+	for _, fn := range finalizerNames {
+		if !included[strings.ToUpper(fn)] {
+			filteredFinalizers = append(filteredFinalizers, fn)
+		}
+	}
+
+	// Suspend: topological order (root first) + finalizers last.
+	suspendOrder := make([]string, 0, len(topoOrder)+len(filteredFinalizers))
+	suspendOrder = append(suspendOrder, topoOrder...)
+	suspendOrder = append(suspendOrder, filteredFinalizers...)
+
+	// Resume: reverse topological (leaves first, excl. root) + finalizers + root last.
+	reversed := make([]string, len(topoOrder))
+	for i, name := range topoOrder {
+		reversed[len(topoOrder)-1-i] = name
+	}
+	resumeOrder := make([]string, 0, len(reversed)+len(filteredFinalizers))
+	if len(reversed) > 1 {
+		resumeOrder = append(resumeOrder, reversed[:len(reversed)-1]...)
+	}
+	resumeOrder = append(resumeOrder, filteredFinalizers...)
+	if len(reversed) > 0 {
+		resumeOrder = append(resumeOrder, reversed[len(reversed)-1])
+	}
+
+	// Ensure nil slices are returned as empty slices for JSON serialization.
+	if filteredFinalizers == nil {
+		filteredFinalizers = []string{}
+	}
+
+	return TopologicalOrder{
+		TopoOrder:      topoOrder,
+		FinalizerNames: filteredFinalizers,
+		SuspendOrder:   suspendOrder,
+		ResumeOrder:    resumeOrder,
+	}
+}
+
 // GetStatuses returns the current state and last-run result for every task in the given schema.
 func GetStatuses(ctx context.Context, client *snowflake.Client, database, schema string) (StatusesResult, error) {
 	showRes, err := client.Execute(ctx, fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)))
