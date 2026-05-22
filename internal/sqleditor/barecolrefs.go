@@ -835,8 +835,9 @@ func validateSelectCols(
 			}
 		}
 	}
-	if !foundAnyTable {
-		return nil // No table metadata; skip to avoid false positives.
+	noFromClause := len(tables) == 0
+	if !foundAnyTable && !noFromClause {
+		return nil // FROM/JOIN tables present but none resolved; skip to avoid false positives.
 	}
 
 	// Extract the SELECT clause (text between SELECT and the first depth-0 FROM).
@@ -862,57 +863,64 @@ func validateSelectCols(
 
 	// Also validate qualified column refs (alias.column) for aliases whose
 	// tables are in the column cache.  Build alias → per-table column sets.
-	aliasMap := make(map[string]*aliasColSets)
-	for _, fm := range reFromJoinWithAlias.FindAllStringSubmatch(stripped, -1) {
-		rawAlias := fm[2]
-		if rawAlias == "" {
-			continue
-		}
-		aliasU := strings.ToUpper(normIdent(rawAlias, ic))
-		// Filter out SQL keywords that the regex may capture as aliases.
-		if joinStopKW[aliasU] {
-			continue
-		}
-		parts := extractIdentParts(fm[1], ic)
-		var tRef struct{ db, schema, name string }
-		switch len(parts) {
-		case 3:
-			tRef = struct{ db, schema, name string }{parts[0], parts[1], parts[2]}
-		case 2:
-			tRef = struct{ db, schema, name string }{"", parts[0], parts[1]}
-		case 1:
-			tRef = struct{ db, schema, name string }{"", "", parts[0]}
-		default:
-			continue
-		}
-		cols, found, fromLocal := lookupColsForRefTagged(tRef.name, tRef.db, tRef.schema, resolvedRefs, colInfoCache, localColCache, checkEq)
-		if !found {
-			continue // Table not cached; cannot validate — skip to avoid false positives.
-		}
-		sets := &aliasColSets{meta: make(map[string]struct{}), local: make(map[string]struct{})}
-		if fromLocal {
-			for _, c := range cols {
-				key := c.Name
-				if ic {
-					key = strings.ToUpper(key)
+	// Skip when there is no FROM clause — no aliases to check.
+	if !noFromClause {
+		aliasMap := make(map[string]*aliasColSets)
+		for _, fm := range reFromJoinWithAlias.FindAllStringSubmatch(stripped, -1) {
+			rawAlias := fm[2]
+			if rawAlias == "" {
+				continue
+			}
+			aliasU := strings.ToUpper(normIdent(rawAlias, ic))
+			// Filter out SQL keywords that the regex may capture as aliases.
+			if joinStopKW[aliasU] {
+				continue
+			}
+			parts := extractIdentParts(fm[1], ic)
+			var tRef struct{ db, schema, name string }
+			switch len(parts) {
+			case 3:
+				tRef = struct{ db, schema, name string }{parts[0], parts[1], parts[2]}
+			case 2:
+				tRef = struct{ db, schema, name string }{"", parts[0], parts[1]}
+			case 1:
+				tRef = struct{ db, schema, name string }{"", "", parts[0]}
+			default:
+				continue
+			}
+			cols, found, fromLocal := lookupColsForRefTagged(tRef.name, tRef.db, tRef.schema, resolvedRefs, colInfoCache, localColCache, checkEq)
+			if !found {
+				continue // Table not cached; cannot validate — skip to avoid false positives.
+			}
+			sets := &aliasColSets{meta: make(map[string]struct{}), local: make(map[string]struct{})}
+			if fromLocal {
+				for _, c := range cols {
+					key := c.Name
+					if ic {
+						key = strings.ToUpper(key)
+					}
+					sets.local[key] = struct{}{}
 				}
-				sets.local[key] = struct{}{}
+			} else {
+				for _, c := range cols {
+					sets.meta[strings.ToUpper(c.Name)] = struct{}{}
+				}
 			}
-		} else {
-			for _, c := range cols {
-				sets.meta[strings.ToUpper(c.Name)] = struct{}{}
-			}
+			aliasMap[aliasU] = sets
 		}
-		aliasMap[aliasU] = sets
-	}
-	if len(aliasMap) > 0 {
-		missing = append(missing, scanAliasedColRefs(selectClause, aliasMap, ic)...)
+		if len(aliasMap) > 0 {
+			missing = append(missing, scanAliasedColRefs(selectClause, aliasMap, ic)...)
+		}
 	}
 
 	if len(missing) == 0 {
 		return nil
 	}
-	return colRefMarkers(raw, r, missing, "query", ic)
+	label := "query"
+	if noFromClause {
+		label = "query (no FROM clause)"
+	}
+	return colRefMarkers(raw, r, missing, label, ic)
 }
 
 // colRefMarkers locates tokens in raw for each missing column and returns
