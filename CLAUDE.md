@@ -67,7 +67,7 @@ thaw/
 │   │   ├── service.go   # Wails-bound Service struct (IPC endpoints)
 │   │   ├── sqleditor.go
 │   │   └── sqleditor_test.go
-│   ├── tasks/           # Task graph ops, statuses, run history (TASK_HISTORY)
+│   ├── tasks/           # Task graph ops, statuses, run history (TASK_HISTORY), DDL export
 │   ├── ddl/             # DDL parsing and git-export pipeline
 │   ├── ai/              # AI provider clients (OpenAI, Google, Ollama); inline completions, model management
 │   ├── config/          # App config (TOML persistence)

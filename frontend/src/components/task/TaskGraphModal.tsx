@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Modal, Spin, Button, Space, Typography, Alert, Tag, message, Tooltip, Menu, Popover, Checkbox } from "antd";
+import { Modal, Spin, Button, Space, Typography, Alert, Tag, message, Tooltip, Menu, Checkbox } from "antd";
 import {
   CheckCircleOutlined, CloseCircleOutlined, SyncOutlined,
   MinusCircleOutlined, ClockCircleOutlined, ReloadOutlined,
@@ -383,9 +383,10 @@ function getTopologicalOrder(
   });
 
   // BFS from root → [root, child1, child2, …, leaves].
+  const rootName = byName.get(rootUpper);
+  if (!rootName) return { bfsOrder: [], finalizerNames: [] };
   const bfsOrder: string[] = [];
   const visited = new Set<string>();
-  const rootName = byName.get(rootUpper) ?? "";
   const queue = [rootName];
   visited.add(rootUpper);
   while (queue.length > 0) {
@@ -456,6 +457,7 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
   const [deletingTask, setDeletingTask] = useState(false);
 
   // Export DDL state.
+  const [exportDDLDialog, setExportDDLDialog] = useState(false);
   const [exportingDDL, setExportingDDL] = useState(false);
   const [includeSuspendResume, setIncludeSuspendResume] = useState(false);
 
@@ -579,46 +581,11 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
     const isStarted = rootRow?.taskState?.toUpperCase() === "STARTED";
     setTogglingAll(true);
     try {
-      // Build childrenOf map from taskRows (same logic as buildGraph, but using
-      // the already-proven parsePredecessors helper so no Go-side parsing needed).
-      const byName = new Map<string, string>(); // UPPER → original name
-      const childrenOf = new Map<string, string[]>(); // UPPER(parent) → [child names]
-      const finalizerNames: string[] = [];
-
-      taskRowsRef.current.forEach((t) => {
-        byName.set(t.name.toUpperCase(), t.name);
-        if (t.finalize && extractName(t.finalize).toUpperCase() === rootUpperRef.current) {
-          finalizerNames.push(t.name);
-        }
-        for (const p of parsePredecessors(t.predecessors ?? "")) {
-          const pu = extractName(p).toUpperCase();
-          if (!childrenOf.has(pu)) childrenOf.set(pu, []);
-          childrenOf.get(pu)!.push(t.name);
-        }
-      });
-
-      // BFS from root → [root, child1, child2, …, leaves].
-      const bfsOrder: string[] = [];
-      const visited = new Set<string>();
-      const queue = [rootNameRef.current];
-      visited.add(rootNameRef.current.toUpperCase());
-      while (queue.length > 0) {
-        const cur = queue.shift()!;
-        bfsOrder.push(byName.get(cur.toUpperCase()) ?? cur);
-        for (const child of childrenOf.get(cur.toUpperCase()) ?? []) {
-          if (!visited.has(child.toUpperCase())) {
-            visited.add(child.toUpperCase());
-            queue.push(child);
-          }
-        }
-      }
+      const { bfsOrder, finalizerNames } = getTopologicalOrder(taskRowsRef.current, rootUpperRef.current);
 
       if (isStarted) {
         // Suspend: root first (stops scheduling), then BFS descendants, finalizers last.
-        const suspendOrder = [
-          ...bfsOrder,
-          ...finalizerNames.filter((fn) => !visited.has(fn.toUpperCase())),
-        ];
+        const suspendOrder = [...bfsOrder, ...finalizerNames];
         await SuspendTaskList(db, schema, suspendOrder);
         message.success(`Graph suspended: ${rootNameRef.current}`);
       } else {
@@ -629,7 +596,7 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
         const reversedBfs = [...bfsOrder].reverse();
         const resumeOrder = [
           ...reversedBfs.slice(0, -1),           // leaves → … → direct-children (all but root)
-          ...finalizerNames.filter((fn) => !visited.has(fn.toUpperCase())),
+          ...finalizerNames,
           reversedBfs[reversedBfs.length - 1],   // root last
         ];
         await ResumeTaskList(db, schema, resumeOrder);
@@ -953,27 +920,15 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
                     Delete All
                   </Button>
                 </Tooltip>
-                <Popover
-                  trigger="hover"
-                  placement="bottomRight"
-                  content={
-                    <Checkbox
-                      checked={includeSuspendResume}
-                      onChange={(e) => setIncludeSuspendResume(e.target.checked)}
-                    >
-                      Include SUSPEND/RESUME statements
-                    </Checkbox>
-                  }
-                >
+                <Tooltip title="Export DDL for all tasks in graph">
                   <Button
                     icon={<ExportOutlined />}
-                    loading={exportingDDL}
                     size="small"
-                    onClick={exportGraphDDL}
+                    onClick={() => setExportDDLDialog(true)}
                   >
                     Export DDL
                   </Button>
-                </Popover>
+                </Tooltip>
               </Space>
               {lastUpdatedLabel && (
                 <Text
@@ -1164,6 +1119,46 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
         );
       })()}
 
+      {/* ── Export DDL dialog ──────────────────────────────────────────── */}
+      {exportDDLDialog && (
+        <Modal
+          open
+          title={
+            <Space>
+              <ExportOutlined style={{ color: "var(--link)" }} />
+              <span>Export DDL</span>
+            </Space>
+          }
+          okText="Copy to Clipboard"
+          okButtonProps={{ loading: exportingDDL }}
+          cancelButtonProps={{ disabled: exportingDDL }}
+          onCancel={() => !exportingDDL && setExportDDLDialog(false)}
+          onOk={async () => {
+            await exportGraphDDL();
+            setExportDDLDialog(false);
+          }}
+        >
+          <Text>
+            Export DDL for all {nodes.length} task{nodes.length !== 1 ? "s" : ""} in the graph as
+            an ordered SQL script (topological order).
+          </Text>
+          <div style={{ marginTop: 12 }}>
+            <Checkbox
+              checked={includeSuspendResume}
+              onChange={(e) => setIncludeSuspendResume(e.target.checked)}
+            >
+              Include SUSPEND/RESUME statements
+            </Checkbox>
+            <div style={{ marginLeft: 24, marginTop: 4 }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                Wraps the script with ALTER TASK SUSPEND (root first) and
+                ALTER TASK RESUME (leaves first, root last) for safe re-deployment.
+              </Text>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {/* ── DDL hover tooltip ────────────────────────────────────────────── */}
       {ddlTooltip && (
         <div
@@ -1320,6 +1315,7 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
                     label: "Export DDL",
                     onClick: () => exportNodeDDL(ctxMenu.name),
                   },
+                  { type: "divider" as const },
                   {
                     key: "add-finalizer",
                     icon: <FlagOutlined />,
