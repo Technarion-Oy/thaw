@@ -362,10 +362,20 @@ function buildGraph(tasks: tasks.StatusRow[], focusedName: string) {
 // Extracts BFS traversal from root, returning ordered task names and finalizer
 // names separately. Used by both suspendResumeAll and exportGraphDDL.
 
+interface TopologicalOrder {
+  bfsOrder: string[];
+  finalizerNames: string[];
+  /** Suspend order: root first, then BFS descendants, then finalizers. */
+  suspendOrder: string[];
+  /** Resume order: leaves first (reverse BFS excl. root), then finalizers, then root last. */
+  resumeOrder: string[];
+}
+
 function getTopologicalOrder(
   taskRows: tasks.StatusRow[],
   rootUpper: string,
-): { bfsOrder: string[]; finalizerNames: string[] } {
+): TopologicalOrder {
+  const empty: TopologicalOrder = { bfsOrder: [], finalizerNames: [], suspendOrder: [], resumeOrder: [] };
   const byName = new Map<string, string>(); // UPPER → original name
   const childrenOf = new Map<string, string[]>(); // UPPER(parent) → [child names]
   const finalizerNames: string[] = [];
@@ -384,7 +394,7 @@ function getTopologicalOrder(
 
   // BFS from root → [root, child1, child2, …, leaves].
   const rootName = byName.get(rootUpper);
-  if (!rootName) return { bfsOrder: [], finalizerNames: [] };
+  if (!rootName) return empty;
   const bfsOrder: string[] = [];
   const visited = new Set<string>();
   const queue = [rootName];
@@ -400,7 +410,20 @@ function getTopologicalOrder(
     }
   }
 
-  return { bfsOrder, finalizerNames: finalizerNames.filter((fn) => !visited.has(fn.toUpperCase())) };
+  const filteredFinalizers = finalizerNames.filter((fn) => !visited.has(fn.toUpperCase()));
+
+  // Suspend: root first → BFS descendants → finalizers last.
+  const suspendOrder = [...bfsOrder, ...filteredFinalizers];
+
+  // Resume: leaves first (reverse BFS excl. root) → finalizers → root last.
+  const reversedBfs = [...bfsOrder].reverse();
+  const resumeOrder = [
+    ...reversedBfs.slice(0, -1),
+    ...filteredFinalizers,
+    reversedBfs[reversedBfs.length - 1],
+  ];
+
+  return { bfsOrder, finalizerNames: filteredFinalizers, suspendOrder, resumeOrder };
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -581,24 +604,12 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
     const isStarted = rootRow?.taskState?.toUpperCase() === "STARTED";
     setTogglingAll(true);
     try {
-      const { bfsOrder, finalizerNames } = getTopologicalOrder(taskRowsRef.current, rootUpperRef.current);
+      const { suspendOrder, resumeOrder } = getTopologicalOrder(taskRowsRef.current, rootUpperRef.current);
 
       if (isStarted) {
-        // Suspend: root first (stops scheduling), then BFS descendants, finalizers last.
-        const suspendOrder = [...bfsOrder, ...finalizerNames];
         await SuspendTaskList(db, schema, suspendOrder);
         message.success(`Graph suspended: ${rootNameRef.current}`);
       } else {
-        // Resume order: leaves first (reverse BFS excl. root), then finalizers,
-        // then root LAST. Finalizers must be resumed before the root becomes
-        // STARTED, otherwise Snowflake rejects the resume with "root task is
-        // not suspended".
-        const reversedBfs = [...bfsOrder].reverse();
-        const resumeOrder = [
-          ...reversedBfs.slice(0, -1),           // leaves → … → direct-children (all but root)
-          ...finalizerNames,
-          reversedBfs[reversedBfs.length - 1],   // root last
-        ];
         await ResumeTaskList(db, schema, resumeOrder);
         message.success(`Graph resumed: ${rootNameRef.current}`);
       }
@@ -611,15 +622,15 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
   }, [db, schema, load]);
 
   // ── Export graph DDL (topological order) ─────────────────────────────────
-  const exportGraphDDL = useCallback(async () => {
+  // Returns true on success so the dialog can decide whether to close.
+  const exportGraphDDL = useCallback(async (): Promise<boolean> => {
     setExportingDDL(true);
     try {
-      const { bfsOrder, finalizerNames } = getTopologicalOrder(taskRowsRef.current, rootUpperRef.current);
-      const allNames = [...bfsOrder, ...finalizerNames];
+      const { suspendOrder, resumeOrder } = getTopologicalOrder(taskRowsRef.current, rootUpperRef.current);
 
       // Fetch DDL for all tasks in parallel, reusing cache.
       const results = await Promise.allSettled(
-        allNames.map(async (name) => {
+        suspendOrder.map(async (name) => {
           const cached = taskDDLCache.get(name.toUpperCase());
           if (cached && Date.now() - cached.ts < DDL_TTL_MS) return { name, ddl: cached.ddl };
           const ddl = await GetObjectDDL(db, schema, "task", name, "");
@@ -633,12 +644,12 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
       for (let i = 0; i < results.length; i++) {
         const r = results[i];
         if (r.status === "fulfilled") succeeded.push(r.value);
-        else failed.push(allNames[i]);
+        else failed.push(suspendOrder[i]);
       }
 
       if (succeeded.length === 0) {
         message.error("Failed to fetch DDL for all tasks");
-        return;
+        return false;
       }
 
       const escId = (s: string) => s.replace(/"/g, '""');
@@ -646,21 +657,12 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
 
       let output: string;
       if (includeSuspendResume) {
-        // SUSPEND block: forward BFS order (root first), then finalizers.
-        const suspendLines = allNames
+        const suspendLines = suspendOrder
           .map((n) => `ALTER TASK IF EXISTS ${fqn(n)} SUSPEND;`)
           .join("\n");
 
-        // CREATE block: DDL statements in topological order.
         const createLines = succeeded.map((s) => s.ddl).join("\n\n");
 
-        // RESUME block: reverse BFS (leaves first, excl. root), then finalizers, then root.
-        const reversedBfs = [...bfsOrder].reverse();
-        const resumeOrder = [
-          ...reversedBfs.slice(0, -1),
-          ...finalizerNames,
-          reversedBfs[reversedBfs.length - 1],
-        ];
         const resumeLines = resumeOrder
           .map((n) => `ALTER TASK IF EXISTS ${fqn(n)} RESUME;`)
           .join("\n");
@@ -684,8 +686,10 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
       if (failed.length > 0) {
         message.error(`Failed to fetch DDL for: ${failed.join(", ")}`);
       }
+      return true;
     } catch (err) {
       message.error(String(err));
+      return false;
     } finally {
       setExportingDDL(false);
     }
@@ -1134,8 +1138,8 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
           cancelButtonProps={{ disabled: exportingDDL }}
           onCancel={() => !exportingDDL && setExportDDLDialog(false)}
           onOk={async () => {
-            await exportGraphDDL();
-            setExportDDLDialog(false);
+            const ok = await exportGraphDDL();
+            if (ok) setExportDDLDialog(false);
           }}
         >
           <Text>
