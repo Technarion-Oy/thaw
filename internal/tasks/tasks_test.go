@@ -58,6 +58,8 @@ func TestParsePredecessorRefs(t *testing.T) {
 		{"single qualified", `"DB"."SCH"."TASK_A"`, []string{"TASK_A"}},
 		{"multiple qualified", `["DB"."SCH"."TASK_A","DB"."SCH"."TASK_B"]`, []string{"TASK_A", "TASK_B"}},
 		{"dotted names", `[DB.SCH.TASK_A]`, []string{"TASK_A"}},
+		{"JSON array single", `["DB.SCH.TASK_A"]`, []string{"TASK_A"}},
+		{"JSON array multiple", `["DB.SCH.TASK_A","DB.SCH.TASK_B"]`, []string{"TASK_A", "TASK_B"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -103,6 +105,21 @@ func TestGetTopologicalOrder(t *testing.T) {
 		}
 		if len(result.FinalizerNames) != 0 {
 			t.Errorf("expected no finalizers, got %v", result.FinalizerNames)
+		}
+	})
+
+	t.Run("JSON dotted predecessors", func(t *testing.T) {
+		// Predecessors in valid JSON format with dotted FQNs — the format
+		// documented in taskHierarchy.ts: ["DB.SCHEMA.TASK1"]
+		rows := []StatusRow{
+			{Name: "ROOT", Predecessors: ""},
+			{Name: "A", Predecessors: `["DB.SCH.ROOT"]`},
+			{Name: "B", Predecessors: `["DB.SCH.A"]`},
+		}
+		result := GetTopologicalOrder(rows, "ROOT")
+
+		if len(result.TopoOrder) != 3 {
+			t.Fatalf("expected 3 tasks in topoOrder, got %d: %v", len(result.TopoOrder), result.TopoOrder)
 		}
 	})
 

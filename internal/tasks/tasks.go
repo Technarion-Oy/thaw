@@ -675,12 +675,36 @@ type TopologicalOrder struct {
 }
 
 // parsePredecessorRefs parses the predecessors string from a StatusRow and
-// returns the bare upper-cased task names. The format matches SHOW TASKS output:
-// "", "[]", "[DB.SCHEMA.TASK1,DB.SCHEMA.TASK2]", or a single ref.
+// returns the bare upper-cased task names. SHOW TASKS returns predecessors in
+// two formats:
+//   - Valid JSON array with dotted FQNs: ["DB.SCHEMA.TASK1","DB.SCHEMA.TASK2"]
+//   - Snowflake-quoted array-like:       ["DB"."SCHEMA"."TASK1","DB"."SCHEMA"."TASK2"]
+//
+// The function tries JSON parsing first (matching the frontend parsePredecessors
+// in taskHierarchy.ts), then falls back to string splitting for the non-JSON format.
 func parsePredecessorRefs(preds string) []string {
 	if preds == "" || preds == "[]" || preds == "<nil>" || preds == "null" {
 		return nil
 	}
+
+	extractLast := func(ref string) string {
+		segs := strings.Split(ref, ".")
+		return strings.ToUpper(bareIdent(segs[len(segs)-1]))
+	}
+
+	// Try JSON array first (handles ["DB.SCH.TASK_A","DB.SCH.TASK_B"]).
+	var jsonArr []string
+	if json.Unmarshal([]byte(preds), &jsonArr) == nil {
+		var names []string
+		for _, ref := range jsonArr {
+			if name := extractLast(ref); name != "" {
+				names = append(names, name)
+			}
+		}
+		return names
+	}
+
+	// Fallback: Snowflake-quoted format like ["DB"."SCH"."TASK_A","DB"."SCH"."TASK_B"].
 	preds = strings.TrimSuffix(strings.TrimPrefix(preds, "["), "]")
 	var names []string
 	for _, part := range strings.Split(preds, ",") {
@@ -688,9 +712,7 @@ func parsePredecessorRefs(preds string) []string {
 		if part == "" {
 			continue
 		}
-		segs := strings.Split(part, ".")
-		name := strings.ToUpper(bareIdent(segs[len(segs)-1]))
-		if name != "" {
+		if name := extractLast(part); name != "" {
 			names = append(names, name)
 		}
 	}
