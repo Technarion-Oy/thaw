@@ -41,6 +41,7 @@ import CopyTaskModal from "./CopyTaskModal";
 import AddExistingChildModal from "./AddExistingChildModal";
 import RemoveChildLinksModal from "./RemoveChildLinksModal";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
+import { quoteIdent } from "../shared/ObjectNameCaseControl";
 
 const { Text } = Typography;
 
@@ -51,6 +52,16 @@ const POLL_MS = 3_000;
 // Module-level DDL cache — same 60 s TTL pattern used by SqlEditor hover.
 const taskDDLCache = new Map<string, { ddl: string; ts: number }>();
 const DDL_TTL_MS = 60_000;
+
+/** Fetch task DDL with cache-through. Used by export and hover tooltip paths. */
+async function getCachedDDL(db: string, schema: string, name: string): Promise<string> {
+  const key = name.toUpperCase();
+  const cached = taskDDLCache.get(key);
+  if (cached && Date.now() - cached.ts < DDL_TTL_MS) return cached.ddl;
+  const ddl = await GetObjectDDL(db, schema, "task", name, "");
+  taskDDLCache.set(key, { ddl, ts: Date.now() });
+  return ddl;
+}
 
 // ── Status tags ───────────────────────────────────────────────────────────────
 
@@ -631,10 +642,7 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
       // Fetch DDL for all tasks in parallel, reusing cache.
       const results = await Promise.allSettled(
         suspendOrder.map(async (name) => {
-          const cached = taskDDLCache.get(name.toUpperCase());
-          if (cached && Date.now() - cached.ts < DDL_TTL_MS) return { name, ddl: cached.ddl };
-          const ddl = await GetObjectDDL(db, schema, "task", name, "");
-          taskDDLCache.set(name.toUpperCase(), { ddl, ts: Date.now() });
+          const ddl = await getCachedDDL(db, schema, name);
           return { name, ddl };
         }),
       );
@@ -652,8 +660,7 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
         return false;
       }
 
-      const escId = (s: string) => s.replace(/"/g, '""');
-      const fqn = (name: string) => `"${escId(db)}"."${escId(schema)}"."${escId(name)}"`;
+      const fqn = (name: string) => `${quoteIdent(db)}.${quoteIdent(schema)}.${quoteIdent(name)}`;
 
       let output: string;
       if (includeSuspendResume) {
@@ -699,14 +706,7 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
   const exportNodeDDL = useCallback(async (name: string) => {
     setCtxMenu(null);
     try {
-      const cached = taskDDLCache.get(name.toUpperCase());
-      let ddl: string;
-      if (cached && Date.now() - cached.ts < DDL_TTL_MS) {
-        ddl = cached.ddl;
-      } else {
-        ddl = await GetObjectDDL(db, schema, "task", name, "");
-        taskDDLCache.set(name.toUpperCase(), { ddl, ts: Date.now() });
-      }
+      const ddl = await getCachedDDL(db, schema, name);
       await ClipboardSetText(ddl);
       message.success(`DDL for ${name} copied to clipboard`);
     } catch (err) {
@@ -726,15 +726,16 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
   const onNodeMouseEnter = useCallback((event: React.MouseEvent, node: Node) => {
     const id = node.id;
     ddlHoverNode.current = id;
+    // Show cached DDL immediately if available.
     const cached = taskDDLCache.get(id.toUpperCase());
     if (cached && Date.now() - cached.ts < DDL_TTL_MS) {
       setDdlTooltip({ x: event.clientX, y: event.clientY, nodeId: id, ddl: cached.ddl });
       return;
     }
+    // Show loading state, then fetch.
     setDdlTooltip({ x: event.clientX, y: event.clientY, nodeId: id, ddl: null });
-    GetObjectDDL(db, schema, "task", id, "")
+    getCachedDDL(db, schema, id)
       .then((ddl) => {
-        taskDDLCache.set(id.toUpperCase(), { ddl, ts: Date.now() });
         if (ddlHoverNode.current === id) {
           setDdlTooltip((prev) => prev?.nodeId === id ? { ...prev, ddl } : prev);
         }
@@ -1008,7 +1009,6 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
 
       {/* ── Single-task delete confirmation modal ────────────────────────── */}
       {deleteTaskConfirm && (() => {
-        const escId = (s: string) => s.replace(/"/g, '""');
         const isRoot = deleteTaskConfirm.toUpperCase() === rootUpperRef.current;
         return (
           <Modal
@@ -1032,7 +1032,7 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
                   try { await AlterTask(db, schema, deleteTaskConfirm, "SUSPEND"); } catch { /* ignore */ }
                 }
                 await ExecDDL(
-                  `DROP TASK IF EXISTS "${escId(db)}"."${escId(schema)}"."${escId(deleteTaskConfirm)}"`,
+                  `DROP TASK IF EXISTS ${quoteIdent(db)}.${quoteIdent(schema)}.${quoteIdent(deleteTaskConfirm)}`,
                 );
                 message.success(`Task deleted: ${deleteTaskConfirm}`);
                 setDeleteTaskConfirm(null);
@@ -1065,7 +1065,6 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
 
       {/* ── Delete-all confirmation modal ─────────────────────────────────── */}
       {deleteAllConfirm && (() => {
-        const escId = (s: string) => s.replace(/"/g, '""');
         const allNames = nodes.map((n) => n.id);
         return (
           <Modal
@@ -1090,7 +1089,7 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
                 for (const name of finalizerIds) {
                   try { await AlterTask(db, schema, name, "SUSPEND"); } catch { /* ignore */ }
                   await ExecDDL(
-                    `DROP TASK IF EXISTS "${escId(db)}"."${escId(schema)}"."${escId(name)}"`,
+                    `DROP TASK IF EXISTS ${quoteIdent(db)}.${quoteIdent(schema)}.${quoteIdent(name)}`,
                   );
                 }
                 // Drop root + all descendants in leaf-first order.
