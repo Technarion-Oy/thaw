@@ -7364,3 +7364,86 @@ func TestValidateTablesExist_QuickFixCode(t *testing.T) {
 		}
 	})
 }
+
+// TestValidateBareColumnRefs_NoFromClause_Valid verifies that SELECT statements
+// without a FROM clause do NOT produce warnings for literals, keywords, and
+// built-in function calls.
+func TestValidateBareColumnRefs_NoFromClause_Valid(t *testing.T) {
+	validQueries := []string{
+		"SELECT 1",
+		"SELECT 'hello'",
+		"SELECT CURRENT_DATE",
+		"SELECT TRUE",
+		"SELECT FALSE",
+		"SELECT NULL",
+		"SELECT 1 + 2",
+		"SELECT CURRENT_TIMESTAMP()",
+		"SELECT IFF(TRUE, 1, 2)",
+	}
+
+	req := ValidateBareColsRequest{
+		ResolvedRefs: []ResolvedRef{},
+		ColEntries:   []ColEntry{},
+	}
+
+	for _, sql := range validQueries {
+		t.Run(sql, func(t *testing.T) {
+			req.SQL = sql
+			req.StmtRanges = GetStatementRanges(sql)
+			markers := ValidateBareColumnRefs(req)
+			warnings := getWarnings(markers)
+			if len(warnings) > 0 {
+				t.Errorf("Expected 0 warnings for %q, got %d: %v", sql, len(warnings), warnings)
+			}
+		})
+	}
+}
+
+// TestValidateBareColumnRefs_NoFromClause_Invalid verifies that bare identifiers
+// in a SELECT without a FROM clause produce warnings — they can never resolve.
+func TestValidateBareColumnRefs_NoFromClause_Invalid(t *testing.T) {
+	tests := []struct {
+		name        string
+		sql         string
+		missingCols []string
+	}{
+		{"Single bare ident", "SELECT abcd", []string{"ABCD"}},
+		{"Literal + bare ident", "SELECT 1, rrrf", []string{"RRRF"}},
+		{"Multiple bare idents", "SELECT foo, bar", []string{"FOO", "BAR"}},
+	}
+
+	req := ValidateBareColsRequest{
+		ResolvedRefs: []ResolvedRef{},
+		ColEntries:   []ColEntry{},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req.SQL = tt.sql
+			req.StmtRanges = GetStatementRanges(tt.sql)
+			markers := ValidateBareColumnRefs(req)
+			warnings := getWarnings(markers)
+			if len(warnings) != len(tt.missingCols) {
+				t.Fatalf("Expected %d warnings for %q, got %d: %v", len(tt.missingCols), tt.sql, len(warnings), warnings)
+			}
+			for _, col := range tt.missingCols {
+				found := false
+				for _, w := range warnings {
+					if strings.Contains(w.Message, col) || strings.Contains(w.Message, strings.ToLower(col)) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected warning for column %q in %q, but not found in %v", col, tt.sql, warnings)
+				}
+			}
+			// Verify the "no FROM clause" label appears in the message.
+			for _, w := range warnings {
+				if !strings.Contains(w.Message, "no FROM clause") {
+					t.Errorf("Expected 'no FROM clause' in message, got %q", w.Message)
+				}
+			}
+		})
+	}
+}

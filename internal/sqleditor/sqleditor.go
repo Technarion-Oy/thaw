@@ -253,7 +253,7 @@ var sqlAllKeywords = map[string]bool{
 	"DATABASE": true, "SCHEMA": true, "FUNCTION": true, "PROCEDURE": true, "TASK": true, "STREAM": true, "PIPE": true,
 	"DROP": true, "TRUNCATE": true, "ALTER": true, "RENAME": true, "ADD": true, "COLUMN": true, "MODIFY": true,
 	"USE": true, "WAREHOUSE": true, "ROLE": true, "USER": true, "GRANT": true, "REVOKE": true, "TO": true,
-	"AND": true, "NOT": true, "IN": true, "IS": true, "NULL": true, "BETWEEN": true, "LIKE": true, "ILIKE": true,
+	"AND": true, "NOT": true, "IN": true, "IS": true, "NULL": true, "TRUE": true, "FALSE": true, "BETWEEN": true, "LIKE": true, "ILIKE": true,
 	"CASE": true, "WHEN": true, "THEN": true, "ELSE": true, "END": true, "CAST": true, "TRY_CAST": true, "TYPE": true,
 	// ORDER BY / window frame keywords
 	"ASC": true, "DESC": true, "NULLS": true, "FIRST": true, "LAST": true,
