@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"strings"
 	"testing"
 
 	"thaw/internal/snowflake"
@@ -254,6 +255,151 @@ func TestGetTopologicalOrder(t *testing.T) {
 						pred, indexOf(pred), task, indexOf(task), result.TopoOrder)
 				}
 			}
+		}
+	})
+}
+
+func TestBuildGraphDDL(t *testing.T) {
+	t.Run("without suspend/resume", func(t *testing.T) {
+		order := TopologicalOrder{
+			TopoOrder:      []string{"ROOT", "A", "B"},
+			FinalizerNames: []string{},
+			SuspendOrder:   []string{"ROOT", "A", "B"},
+			ResumeOrder:    []string{"B", "A", "ROOT"},
+		}
+		ddlByName := map[string]string{
+			"ROOT": "CREATE TASK ROOT ...",
+			"A":    "CREATE TASK A ...",
+			"B":    "CREATE TASK B ...",
+		}
+		result := BuildGraphDDL(order, ddlByName, "DB", "SCH", false)
+
+		if result.TaskCount != 3 {
+			t.Errorf("expected 3 tasks, got %d", result.TaskCount)
+		}
+		if len(result.FailedTasks) != 0 {
+			t.Errorf("expected no failed tasks, got %v", result.FailedTasks)
+		}
+		expected := "CREATE TASK ROOT ...\n\nCREATE TASK A ...\n\nCREATE TASK B ..."
+		if result.DDL != expected {
+			t.Errorf("DDL mismatch:\ngot:  %q\nwant: %q", result.DDL, expected)
+		}
+	})
+
+	t.Run("with suspend/resume", func(t *testing.T) {
+		order := TopologicalOrder{
+			TopoOrder:      []string{"ROOT", "A"},
+			FinalizerNames: []string{},
+			SuspendOrder:   []string{"ROOT", "A"},
+			ResumeOrder:    []string{"A", "ROOT"},
+		}
+		ddlByName := map[string]string{
+			"ROOT": "CREATE TASK ROOT ...",
+			"A":    "CREATE TASK A ...",
+		}
+		result := BuildGraphDDL(order, ddlByName, "DB", "SCH", true)
+
+		if result.TaskCount != 2 {
+			t.Errorf("expected 2 tasks, got %d", result.TaskCount)
+		}
+		// Check that suspend lines come before create lines, and resume lines come after.
+		if !strings.Contains(result.DDL, "-- Suspend all tasks (root first)") {
+			t.Error("missing suspend header")
+		}
+		if !strings.Contains(result.DDL, `ALTER TASK IF EXISTS "DB"."SCH"."ROOT" SUSPEND;`) {
+			t.Error("missing suspend for ROOT")
+		}
+		if !strings.Contains(result.DDL, `ALTER TASK IF EXISTS "DB"."SCH"."A" SUSPEND;`) {
+			t.Error("missing suspend for A")
+		}
+		if !strings.Contains(result.DDL, "-- Create / replace tasks (topological order)") {
+			t.Error("missing create header")
+		}
+		if !strings.Contains(result.DDL, "-- Resume all tasks (leaves first, root last)") {
+			t.Error("missing resume header")
+		}
+		if !strings.Contains(result.DDL, `ALTER TASK IF EXISTS "DB"."SCH"."A" RESUME;`) {
+			t.Error("missing resume for A")
+		}
+		if !strings.Contains(result.DDL, `ALTER TASK IF EXISTS "DB"."SCH"."ROOT" RESUME;`) {
+			t.Error("missing resume for ROOT")
+		}
+		// Resume order: A before ROOT.
+		aResumeIdx := strings.Index(result.DDL, `"A" RESUME;`)
+		rootResumeIdx := strings.Index(result.DDL, `"ROOT" RESUME;`)
+		if aResumeIdx >= rootResumeIdx {
+			t.Errorf("A should be resumed before ROOT")
+		}
+	})
+
+	t.Run("partial DDL failure", func(t *testing.T) {
+		order := TopologicalOrder{
+			TopoOrder:      []string{"ROOT", "A", "B"},
+			FinalizerNames: []string{},
+			SuspendOrder:   []string{"ROOT", "A", "B"},
+			ResumeOrder:    []string{"B", "A", "ROOT"},
+		}
+		ddlByName := map[string]string{
+			"ROOT": "CREATE TASK ROOT ...",
+			// A is missing — simulates a DDL fetch failure.
+			"B": "CREATE TASK B ...",
+		}
+		result := BuildGraphDDL(order, ddlByName, "DB", "SCH", false)
+
+		if result.TaskCount != 2 {
+			t.Errorf("expected 2 succeeded, got %d", result.TaskCount)
+		}
+		if len(result.FailedTasks) != 1 || result.FailedTasks[0] != "A" {
+			t.Errorf("expected failedTasks=[A], got %v", result.FailedTasks)
+		}
+	})
+
+	t.Run("all DDL failed returns empty", func(t *testing.T) {
+		order := TopologicalOrder{
+			TopoOrder:      []string{"ROOT"},
+			FinalizerNames: []string{},
+			SuspendOrder:   []string{"ROOT"},
+			ResumeOrder:    []string{"ROOT"},
+		}
+		ddlByName := map[string]string{}
+		result := BuildGraphDDL(order, ddlByName, "DB", "SCH", false)
+
+		if result.TaskCount != 0 {
+			t.Errorf("expected 0 tasks, got %d", result.TaskCount)
+		}
+		if result.DDL != "" {
+			t.Errorf("expected empty DDL, got %q", result.DDL)
+		}
+	})
+
+	t.Run("with finalizer in suspend/resume", func(t *testing.T) {
+		order := TopologicalOrder{
+			TopoOrder:      []string{"ROOT", "A"},
+			FinalizerNames: []string{"FIN"},
+			SuspendOrder:   []string{"ROOT", "A", "FIN"},
+			ResumeOrder:    []string{"A", "FIN", "ROOT"},
+		}
+		ddlByName := map[string]string{
+			"ROOT": "CREATE TASK ROOT ...",
+			"A":    "CREATE TASK A ...",
+			"FIN":  "CREATE TASK FIN ...",
+		}
+		result := BuildGraphDDL(order, ddlByName, "DB", "SCH", true)
+
+		if result.TaskCount != 3 {
+			t.Errorf("expected 3 tasks, got %d", result.TaskCount)
+		}
+		// FIN should be last in suspend, and between A and ROOT in resume.
+		finSuspendIdx := strings.Index(result.DDL, `"FIN" SUSPEND;`)
+		aSuspendIdx := strings.Index(result.DDL, `"A" SUSPEND;`)
+		if finSuspendIdx <= aSuspendIdx {
+			t.Error("FIN should be suspended after A")
+		}
+		aResumeIdx := strings.Index(result.DDL, `"A" RESUME;`)
+		finResumeIdx := strings.Index(result.DDL, `"FIN" RESUME;`)
+		rootResumeIdx := strings.Index(result.DDL, `"ROOT" RESUME;`)
+		if aResumeIdx >= finResumeIdx || finResumeIdx >= rootResumeIdx {
+			t.Errorf("resume order should be A, FIN, ROOT")
 		}
 	})
 }

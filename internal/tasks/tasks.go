@@ -829,6 +829,126 @@ func GetTopologicalOrder(rows []StatusRow, rootName string) TopologicalOrder {
 	}
 }
 
+// ExportGraphDDLResult holds the output of a graph DDL export.
+type ExportGraphDDLResult struct {
+	// The assembled DDL script.
+	DDL string `json:"ddl"`
+	// Number of tasks whose DDL was successfully fetched.
+	TaskCount int `json:"taskCount"`
+	// Names of tasks whose DDL could not be fetched.
+	FailedTasks []string `json:"failedTasks"`
+}
+
+// BuildGraphDDL is a pure function that assembles a DDL export script from
+// a topological ordering and a map of task name → DDL text. Tasks present in
+// the ordering but absent from ddlByName are treated as failed (skipped in
+// the output but counted in FailedTasks).
+func BuildGraphDDL(order TopologicalOrder, ddlByName map[string]string, database, schema string, includeSuspendResume bool) ExportGraphDDLResult {
+	fqn := func(name string) string {
+		return snowflake.QuoteIdent(database) + "." + snowflake.QuoteIdent(schema) + "." + snowflake.QuoteIdent(name)
+	}
+
+	// Partition suspend-order tasks into succeeded / failed based on DDL presence.
+	var succeeded []struct{ name, ddl string }
+	var failedTasks []string
+	for _, name := range order.SuspendOrder {
+		if ddl, ok := ddlByName[name]; ok {
+			succeeded = append(succeeded, struct{ name, ddl string }{name, ddl})
+		} else {
+			failedTasks = append(failedTasks, name)
+		}
+	}
+
+	if len(succeeded) == 0 {
+		if failedTasks == nil {
+			failedTasks = []string{}
+		}
+		return ExportGraphDDLResult{FailedTasks: failedTasks}
+	}
+
+	var output string
+	if includeSuspendResume {
+		succeededNames := make(map[string]bool, len(succeeded))
+		for _, s := range succeeded {
+			succeededNames[strings.ToUpper(s.name)] = true
+		}
+
+		// Suspend lines (topological order: root first).
+		var suspendLines []string
+		for _, n := range order.SuspendOrder {
+			if succeededNames[strings.ToUpper(n)] {
+				suspendLines = append(suspendLines, "ALTER TASK IF EXISTS "+fqn(n)+" SUSPEND;")
+			}
+		}
+
+		// DDL lines.
+		var createLines []string
+		for _, s := range succeeded {
+			createLines = append(createLines, s.ddl)
+		}
+
+		// Resume lines (leaves first, root last).
+		var resumeLines []string
+		for _, n := range order.ResumeOrder {
+			if succeededNames[strings.ToUpper(n)] {
+				resumeLines = append(resumeLines, "ALTER TASK IF EXISTS "+fqn(n)+" RESUME;")
+			}
+		}
+
+		output = "-- Suspend all tasks (root first)\n" +
+			strings.Join(suspendLines, "\n") + "\n\n" +
+			"-- Create / replace tasks (topological order)\n" +
+			strings.Join(createLines, "\n\n") + "\n\n" +
+			"-- Resume all tasks (leaves first, root last)\n" +
+			strings.Join(resumeLines, "\n")
+	} else {
+		ddls := make([]string, len(succeeded))
+		for i, s := range succeeded {
+			ddls[i] = s.ddl
+		}
+		output = strings.Join(ddls, "\n\n")
+	}
+
+	if failedTasks == nil {
+		failedTasks = []string{}
+	}
+	return ExportGraphDDLResult{
+		DDL:         output,
+		TaskCount:   len(succeeded),
+		FailedTasks: failedTasks,
+	}
+}
+
+// ExportGraphDDL fetches task statuses and DDL for every task in the graph
+// rooted at rootName, then assembles a dependency-ordered DDL script.
+func ExportGraphDDL(ctx context.Context, client *snowflake.Client, database, schema, rootName string, includeSuspendResume bool) (ExportGraphDDLResult, error) {
+	result, err := GetStatuses(ctx, client, database, schema)
+	if err != nil {
+		return ExportGraphDDLResult{}, fmt.Errorf("fetching task statuses: %w", err)
+	}
+
+	order := GetTopologicalOrder(result.Rows, rootName)
+	if len(order.SuspendOrder) == 0 {
+		return ExportGraphDDLResult{
+			DDL:         "",
+			TaskCount:   0,
+			FailedTasks: []string{},
+		}, nil
+	}
+
+	// Fetch DDL for each task. Errors are non-fatal per task.
+	ddlByName := make(map[string]string, len(order.SuspendOrder))
+	for _, name := range order.SuspendOrder {
+		ddl, err := client.GetObjectDDL(ctx, database, schema, "task", name, "")
+		if err != nil {
+			continue
+		}
+		ddlByName[name] = ddl
+	}
+
+	return BuildGraphDDL(order, ddlByName, database, schema, includeSuspendResume), nil
+}
+
 // GetStatuses returns the current state and last-run result for every task in the given schema.
 func GetStatuses(ctx context.Context, client *snowflake.Client, database, schema string) (StatusesResult, error) {
 	showRes, err := client.Execute(ctx, fmt.Sprintf("SHOW TASKS IN SCHEMA %s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema)))

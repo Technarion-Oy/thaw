@@ -33,7 +33,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import dagre from "@dagrejs/dagre";
-import { GetTaskStatuses, ExecuteTask, AlterTask, DropTaskTree, ExecDDL, SuspendTaskList, ResumeTaskList, GetObjectDDL, GetTopologicalOrder } from "../../../wailsjs/go/main/App";
+import { GetTaskStatuses, ExecuteTask, AlterTask, DropTaskTree, ExecDDL, SuspendTaskList, ResumeTaskList, GetObjectDDL, GetTopologicalOrder, ExportGraphDDL } from "../../../wailsjs/go/main/App";
 import type { tasks } from "../../../wailsjs/go/models";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 import CreateTaskModal from "./CreateTaskModal";
@@ -578,66 +578,15 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
   const exportGraphDDL = useCallback(async (): Promise<boolean> => {
     setExportingDDL(true);
     try {
-      const { suspendOrder, resumeOrder } = await GetTopologicalOrder(db, schema, rootNameRef.current);
-
-      // Fetch DDL for all tasks in parallel, reusing cache.
-      const results = await Promise.allSettled(
-        suspendOrder.map(async (name) => {
-          const ddl = await getCachedDDL(db, schema, name);
-          return { name, ddl };
-        }),
-      );
-
-      const succeeded: Array<{ name: string; ddl: string }> = [];
-      const failed: string[] = [];
-      for (let i = 0; i < results.length; i++) {
-        const r = results[i];
-        if (r.status === "fulfilled") succeeded.push(r.value);
-        else failed.push(suspendOrder[i]);
-      }
-
-      if (succeeded.length === 0) {
+      const result = await ExportGraphDDL(db, schema, rootNameRef.current, includeSuspendResume);
+      if (result.taskCount === 0) {
         message.error("Failed to fetch DDL for all tasks");
         return false;
       }
-
-      const fqn = (name: string) => `${quoteIdent(db)}.${quoteIdent(schema)}.${quoteIdent(name)}`;
-
-      let output: string;
-      if (includeSuspendResume) {
-        // Only include SUSPEND/RESUME for tasks whose DDL was fetched
-        // successfully, so the script stays internally consistent.
-        const succeededNames = new Set(succeeded.map((s) => s.name.toUpperCase()));
-        const suspendLines = suspendOrder
-          .filter((n) => succeededNames.has(n.toUpperCase()))
-          .map((n) => `ALTER TASK IF EXISTS ${fqn(n)} SUSPEND;`)
-          .join("\n");
-
-        const createLines = succeeded.map((s) => s.ddl).join("\n\n");
-
-        const resumeLines = resumeOrder
-          .filter((n) => succeededNames.has(n.toUpperCase()))
-          .map((n) => `ALTER TASK IF EXISTS ${fqn(n)} RESUME;`)
-          .join("\n");
-
-        output = [
-          "-- Suspend all tasks (root first)",
-          suspendLines,
-          "",
-          "-- Create / replace tasks (topological order)",
-          createLines,
-          "",
-          "-- Resume all tasks (leaves first, root last)",
-          resumeLines,
-        ].join("\n");
-      } else {
-        output = succeeded.map((s) => s.ddl).join("\n\n");
-      }
-
-      await ClipboardSetText(output);
-      message.success(`DDL for ${succeeded.length} task${succeeded.length !== 1 ? "s" : ""} copied to clipboard`);
-      if (failed.length > 0) {
-        message.error(`Failed to fetch DDL for: ${failed.join(", ")}`);
+      await ClipboardSetText(result.ddl);
+      message.success(`DDL for ${result.taskCount} task${result.taskCount !== 1 ? "s" : ""} copied to clipboard`);
+      if (result.failedTasks.length > 0) {
+        message.error(`Failed to fetch DDL for: ${result.failedTasks.join(", ")}`);
       }
       return true;
     } catch (err) {

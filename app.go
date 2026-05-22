@@ -3600,6 +3600,15 @@ func (a *App) GetTopologicalOrder(database, schema, rootName string) (tasks.Topo
 	return tasks.GetTopologicalOrder(result.Rows, rootName), nil
 }
 
+// ExportGraphDDL fetches task statuses and DDL for every task in the graph
+// rooted at rootName and returns a dependency-ordered DDL script.
+func (a *App) ExportGraphDDL(database, schema, rootName string, includeSuspendResume bool) (tasks.ExportGraphDDLResult, error) {
+	if a.client == nil {
+		return tasks.ExportGraphDDLResult{}, apperrors.ErrNotConnected
+	}
+	return tasks.ExportGraphDDL(a.ctx, a.client, database, schema, rootName, includeSuspendResume)
+}
+
 // GetTaskRunHistory returns the execution history for a task from INFORMATION_SCHEMA.TASK_HISTORY().
 func (a *App) GetTaskRunHistory(database, schema, taskName string, isRoot bool, days int) ([]tasks.TaskHistoryRow, error) {
 	if a.client == nil {

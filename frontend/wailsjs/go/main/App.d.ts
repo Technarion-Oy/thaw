@@ -13,10 +13,10 @@ import {snowflake} from '../models';
 import {dbt} from '../models';
 import {main} from '../models';
 import {ddl} from '../models';
+import {tasks} from '../models';
 import {config} from '../models';
 import {fnmeta} from '../models';
 import {queryprofile} from '../models';
-import {tasks} from '../models';
 import {gitrepo} from '../models';
 import {filesystem} from '../models';
 import {sfconfig} from '../models';
@@ -180,6 +180,8 @@ export function ExportAccountObjectsDDL(arg1:string):Promise<main.AccountExportR
 export function ExportAllDatabasesDDL(arg1:string,arg2:Array<string>):Promise<Array<ddl.ExportResult>>;
 
 export function ExportDatabaseDDL(arg1:string,arg2:string):Promise<ddl.ExportResult>;
+
+export function ExportGraphDDL(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<tasks.ExportGraphDDLResult>;
 
 export function ExportTableData(arg1:snowflake.ExportTableParams):Promise<snowflake.ExportTableResult>;
 
