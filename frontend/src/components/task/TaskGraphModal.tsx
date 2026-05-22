@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Modal, Spin, Button, Space, Typography, Alert, Tag, message, Tooltip, Menu } from "antd";
+import { Modal, Spin, Button, Space, Typography, Alert, Tag, message, Tooltip, Menu, Popover, Checkbox } from "antd";
 import {
   CheckCircleOutlined, CloseCircleOutlined, SyncOutlined,
   MinusCircleOutlined, ClockCircleOutlined, ReloadOutlined,
@@ -17,6 +17,7 @@ import {
   PauseCircleOutlined, PlayCircleOutlined,
   PlusOutlined, FlagOutlined, DeleteOutlined,
   CopyOutlined, BranchesOutlined, ScissorOutlined,
+  ExportOutlined,
 } from "@ant-design/icons";
 import {
   ReactFlow,
@@ -39,6 +40,7 @@ import CreateTaskModal from "./CreateTaskModal";
 import CopyTaskModal from "./CopyTaskModal";
 import AddExistingChildModal from "./AddExistingChildModal";
 import RemoveChildLinksModal from "./RemoveChildLinksModal";
+import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 
 const { Text } = Typography;
 
@@ -356,6 +358,50 @@ function buildGraph(tasks: tasks.StatusRow[], focusedName: string) {
   return { nodes, edges, layoutOnlyEdges, rootTaskName, childrenOf };
 }
 
+// ── Topological (BFS) ordering ────────────────────────────────────────────────
+// Extracts BFS traversal from root, returning ordered task names and finalizer
+// names separately. Used by both suspendResumeAll and exportGraphDDL.
+
+function getTopologicalOrder(
+  taskRows: tasks.StatusRow[],
+  rootUpper: string,
+): { bfsOrder: string[]; finalizerNames: string[] } {
+  const byName = new Map<string, string>(); // UPPER → original name
+  const childrenOf = new Map<string, string[]>(); // UPPER(parent) → [child names]
+  const finalizerNames: string[] = [];
+
+  taskRows.forEach((t) => {
+    byName.set(t.name.toUpperCase(), t.name);
+    if (t.finalize && extractName(t.finalize).toUpperCase() === rootUpper) {
+      finalizerNames.push(t.name);
+    }
+    for (const p of parsePredecessors(t.predecessors ?? "")) {
+      const pu = extractName(p).toUpperCase();
+      if (!childrenOf.has(pu)) childrenOf.set(pu, []);
+      childrenOf.get(pu)!.push(t.name);
+    }
+  });
+
+  // BFS from root → [root, child1, child2, …, leaves].
+  const bfsOrder: string[] = [];
+  const visited = new Set<string>();
+  const rootName = byName.get(rootUpper) ?? "";
+  const queue = [rootName];
+  visited.add(rootUpper);
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    bfsOrder.push(byName.get(cur.toUpperCase()) ?? cur);
+    for (const child of childrenOf.get(cur.toUpperCase()) ?? []) {
+      if (!visited.has(child.toUpperCase())) {
+        visited.add(child.toUpperCase());
+        queue.push(child);
+      }
+    }
+  }
+
+  return { bfsOrder, finalizerNames: finalizerNames.filter((fn) => !visited.has(fn.toUpperCase())) };
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export interface TaskGraphModalProps {
@@ -408,6 +454,10 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
   // Single-task delete confirmation.
   const [deleteTaskConfirm, setDeleteTaskConfirm] = useState<string | null>(null);
   const [deletingTask, setDeletingTask] = useState(false);
+
+  // Export DDL state.
+  const [exportingDDL, setExportingDDL] = useState(false);
+  const [includeSuspendResume, setIncludeSuspendResume] = useState(false);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -592,6 +642,106 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
       setTogglingAll(false);
     }
   }, [db, schema, load]);
+
+  // ── Export graph DDL (topological order) ─────────────────────────────────
+  const exportGraphDDL = useCallback(async () => {
+    setExportingDDL(true);
+    try {
+      const { bfsOrder, finalizerNames } = getTopologicalOrder(taskRowsRef.current, rootUpperRef.current);
+      const allNames = [...bfsOrder, ...finalizerNames];
+
+      // Fetch DDL for all tasks in parallel, reusing cache.
+      const results = await Promise.allSettled(
+        allNames.map(async (name) => {
+          const cached = taskDDLCache.get(name.toUpperCase());
+          if (cached && Date.now() - cached.ts < DDL_TTL_MS) return { name, ddl: cached.ddl };
+          const ddl = await GetObjectDDL(db, schema, "task", name, "");
+          taskDDLCache.set(name.toUpperCase(), { ddl, ts: Date.now() });
+          return { name, ddl };
+        }),
+      );
+
+      const succeeded: Array<{ name: string; ddl: string }> = [];
+      const failed: string[] = [];
+      for (let i = 0; i < results.length; i++) {
+        const r = results[i];
+        if (r.status === "fulfilled") succeeded.push(r.value);
+        else failed.push(allNames[i]);
+      }
+
+      if (succeeded.length === 0) {
+        message.error("Failed to fetch DDL for all tasks");
+        return;
+      }
+
+      const escId = (s: string) => s.replace(/"/g, '""');
+      const fqn = (name: string) => `"${escId(db)}"."${escId(schema)}"."${escId(name)}"`;
+
+      let output: string;
+      if (includeSuspendResume) {
+        // SUSPEND block: forward BFS order (root first), then finalizers.
+        const suspendLines = allNames
+          .map((n) => `ALTER TASK IF EXISTS ${fqn(n)} SUSPEND;`)
+          .join("\n");
+
+        // CREATE block: DDL statements in topological order.
+        const createLines = succeeded.map((s) => s.ddl).join("\n\n");
+
+        // RESUME block: reverse BFS (leaves first, excl. root), then finalizers, then root.
+        const reversedBfs = [...bfsOrder].reverse();
+        const resumeOrder = [
+          ...reversedBfs.slice(0, -1),
+          ...finalizerNames,
+          reversedBfs[reversedBfs.length - 1],
+        ];
+        const resumeLines = resumeOrder
+          .map((n) => `ALTER TASK IF EXISTS ${fqn(n)} RESUME;`)
+          .join("\n");
+
+        output = [
+          "-- Suspend all tasks (root first)",
+          suspendLines,
+          "",
+          "-- Create / replace tasks (topological order)",
+          createLines,
+          "",
+          "-- Resume all tasks (leaves first, root last)",
+          resumeLines,
+        ].join("\n");
+      } else {
+        output = succeeded.map((s) => s.ddl).join("\n\n");
+      }
+
+      await ClipboardSetText(output);
+      message.success(`DDL for ${succeeded.length} task${succeeded.length !== 1 ? "s" : ""} copied to clipboard`);
+      if (failed.length > 0) {
+        message.error(`Failed to fetch DDL for: ${failed.join(", ")}`);
+      }
+    } catch (err) {
+      message.error(String(err));
+    } finally {
+      setExportingDDL(false);
+    }
+  }, [db, schema, includeSuspendResume]);
+
+  // ── Export single node DDL ──────────────────────────────────────────────
+  const exportNodeDDL = useCallback(async (name: string) => {
+    setCtxMenu(null);
+    try {
+      const cached = taskDDLCache.get(name.toUpperCase());
+      let ddl: string;
+      if (cached && Date.now() - cached.ts < DDL_TTL_MS) {
+        ddl = cached.ddl;
+      } else {
+        ddl = await GetObjectDDL(db, schema, "task", name, "");
+        taskDDLCache.set(name.toUpperCase(), { ddl, ts: Date.now() });
+      }
+      await ClipboardSetText(ddl);
+      message.success(`DDL for ${name} copied to clipboard`);
+    } catch (err) {
+      message.error(String(err));
+    }
+  }, [db, schema]);
 
   // ── Right-click context menu ──────────────────────────────────────────────
   const onNodeCtxMenu = useCallback((event: React.MouseEvent, node: Node) => {
@@ -803,6 +953,27 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
                     Delete All
                   </Button>
                 </Tooltip>
+                <Popover
+                  trigger="hover"
+                  placement="bottomRight"
+                  content={
+                    <Checkbox
+                      checked={includeSuspendResume}
+                      onChange={(e) => setIncludeSuspendResume(e.target.checked)}
+                    >
+                      Include SUSPEND/RESUME statements
+                    </Checkbox>
+                  }
+                >
+                  <Button
+                    icon={<ExportOutlined />}
+                    loading={exportingDDL}
+                    size="small"
+                    onClick={exportGraphDDL}
+                  >
+                    Export DDL
+                  </Button>
+                </Popover>
               </Space>
               {lastUpdatedLabel && (
                 <Text
@@ -1142,6 +1313,12 @@ export default function TaskGraphModal({ db, schema, taskName, onClose }: TaskGr
                       setCopyTaskSource(ctxMenu.name);
                       setCtxMenu(null);
                     },
+                  },
+                  {
+                    key: "export-ddl",
+                    icon: <ExportOutlined />,
+                    label: "Export DDL",
+                    onClick: () => exportNodeDDL(ctxMenu.name),
                   },
                   {
                     key: "add-finalizer",
