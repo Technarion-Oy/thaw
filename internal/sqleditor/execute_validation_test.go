@@ -193,6 +193,20 @@ func TestValidateSnowflakePatterns_ExecuteTask(t *testing.T) {
 			name: "Task name on next line",
 			sql:  "EXECUTE TASK\n  my_task",
 		},
+		// ── EXECUTE TASK — RETRY LAST (Section B) ────────────────────────────
+		{
+			name: "EXECUTE TASK with RETRY LAST",
+			sql:  "EXECUTE TASK my_task RETRY LAST",
+		},
+		{
+			name: "EXECUTE TASK RETRY LAST fully qualified",
+			sql:  "EXECUTE TASK db.schema.my_task RETRY LAST",
+		},
+		// ── EXECUTE TASK — USING CONFIG (Section B) ──────────────────────────
+		{
+			name: "EXECUTE TASK with USING CONFIG",
+			sql:  `EXECUTE TASK my_task USING CONFIG = '{"key": "val"}'`,
+		},
 
 		// ── Invalid Cases ────────────────────────────────────────────────────
 		{

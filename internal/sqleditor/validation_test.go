@@ -4166,6 +4166,31 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 		// ── CREATE TASK — finalizer tasks ────────────────────────────────
 		"CREATE TASK finalizer_task FINALIZE = root_task AS SELECT 1",
 		"CREATE TASK finalizer_task WAREHOUSE = wh FINALIZE = root_task AS SELECT 1",
+		// ── CREATE TASK — new properties (Section A) ─────────────────────
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' SUCCESS_INTEGRATION = my_int AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' OVERLAP_POLICY = 'NO_OVERLAP' AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' TASK_AUTO_RETRY_ATTEMPTS = 3 AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' USER_TASK_MINIMUM_TRIGGER_INTERVAL_IN_SECONDS = 30 AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' TARGET_COMPLETION_INTERVAL = '5 MINUTE' AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' SERVERLESS_TASK_MIN_STATEMENT_SIZE = 'SMALL' AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' SERVERLESS_TASK_MAX_STATEMENT_SIZE = 'XLARGE' AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' LOG_LEVEL = 'INFO' AS SELECT 1",
+		// ── CREATE OR ALTER TASK (Section B) ──────────────────────────────
+		"CREATE OR ALTER TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' AS SELECT 1",
+		"CREATE OR ALTER TASK db.schema.my_task WAREHOUSE = wh SCHEDULE = 'USING CRON 0 0 * * * UTC' AS INSERT INTO t SELECT 1",
+		// ── CREATE TASK — CLONE variant (Section B) ──────────────────────
+		"CREATE TASK my_task CLONE other_task",
+		"CREATE TASK my_task CLONE db.schema.other_task",
+		"CREATE OR REPLACE TASK my_task CLONE other_task",
+		// ── CREATE TASK — HOURS/SECONDS schedule units (Section C.5) ─────
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '5 HOURS' AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '30 SECONDS' AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '1 HOUR' AS SELECT 1",
+		// ── CREATE TASK — trailing semicolon with CRON (Section D) ────────
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = 'USING CRON 0 0 * * * UTC' AS SELECT 1;",
+		// ── CREATE TASK — empty AS body (Section D) — validator does not
+		// check AS body content, only structure. Passes validation.
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' AS",
 		// ── ALTER TASK ──────────────────────────────────────────────────
 		"ALTER TASK my_task RESUME",
 		"ALTER TASK my_task SUSPEND",
@@ -4216,6 +4241,33 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 		"ALTER TASK my_task UNSET USER_TASK_TIMEOUT_MS",
 		"ALTER TASK my_task UNSET SUSPEND_TASK_AFTER_NUM_FAILURES",
 		"ALTER TASK my_task UNSET ALLOW_OVERLAPPING_EXECUTION",
+		// ── ALTER TASK — UNSET new properties (Section A) ────────────────
+		"ALTER TASK my_task UNSET SUCCESS_INTEGRATION",
+		"ALTER TASK my_task UNSET OVERLAP_POLICY",
+		"ALTER TASK my_task UNSET TASK_AUTO_RETRY_ATTEMPTS",
+		"ALTER TASK my_task UNSET USER_TASK_MINIMUM_TRIGGER_INTERVAL_IN_SECONDS",
+		"ALTER TASK my_task UNSET TARGET_COMPLETION_INTERVAL",
+		"ALTER TASK my_task UNSET SERVERLESS_TASK_MIN_STATEMENT_SIZE",
+		"ALTER TASK my_task UNSET SERVERLESS_TASK_MAX_STATEMENT_SIZE",
+		"ALTER TASK my_task UNSET LOG_LEVEL",
+		// ── ALTER TASK — SET new properties (Section A) ──────────────────
+		"ALTER TASK my_task SET SUCCESS_INTEGRATION = my_int",
+		"ALTER TASK my_task SET OVERLAP_POLICY = 'NO_OVERLAP'",
+		"ALTER TASK my_task SET TASK_AUTO_RETRY_ATTEMPTS = 3",
+		"ALTER TASK my_task SET USER_TASK_MINIMUM_TRIGGER_INTERVAL_IN_SECONDS = 30",
+		"ALTER TASK my_task SET TARGET_COMPLETION_INTERVAL = '5 MINUTE'",
+		"ALTER TASK my_task SET SERVERLESS_TASK_MIN_STATEMENT_SIZE = 'SMALL'",
+		"ALTER TASK my_task SET SERVERLESS_TASK_MAX_STATEMENT_SIZE = 'XLARGE'",
+		"ALTER TASK my_task SET LOG_LEVEL = 'INFO'",
+		// ── ALTER TASK — REMOVE WHEN (Section B) ─────────────────────────
+		"ALTER TASK my_task REMOVE WHEN",
+		// ── ALTER TASK — UNSET FINALIZE (Section B) ──────────────────────
+		"ALTER TASK my_task UNSET FINALIZE",
+		// ── ALTER TASK — SET TAG / UNSET TAG (Section B) ─────────────────
+		"ALTER TASK my_task SET TAG cost_center = 'finance'",
+		"ALTER TASK my_task UNSET TAG cost_center",
+		// ── ALTER TASK — multiple SET properties (Section D) ─────────────
+		"ALTER TASK my_task SET WAREHOUSE = new_wh COMMENT = 'updated'",
 	}
 
 	for _, sql := range validCases {
@@ -4412,6 +4464,18 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 			"ALTER TASK SET with unknown MAX_RETRIES",
 			"ALTER TASK my_task SET MAX_RETRIES = 3",
 			[]string{"Unexpected property 'MAX_RETRIES'"},
+		},
+		// ── ALTER TASK — bare ALTER TASK with no sub-command (Section C.2) ─
+		{
+			"ALTER TASK with no sub-command",
+			"ALTER TASK my_task",
+			[]string{"Unknown ALTER TASK sub-command"},
+		},
+		// ── CREATE TASK — FINALIZE + SCHEDULE without AFTER (Section D) ──
+		{
+			"FINALIZE with SCHEDULE but no AFTER",
+			"CREATE TASK finalizer FINALIZE = root_task SCHEDULE = '10 MINUTE' AS SELECT 1",
+			[]string{"FINALIZE must not be combined with SCHEDULE"},
 		},
 	}
 
