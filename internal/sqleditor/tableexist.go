@@ -632,12 +632,16 @@ func ValidateTablesExist(req ValidateTablesExistRequest) []DiagMarker {
 			}
 		}
 
-		// Extract FROM tables using regex (mirrors the TS fallback path)
+		// Extract FROM tables using regex (mirrors the TS fallback path).
+		// Strip single-quoted string literals first so keywords inside
+		// strings (e.g. 'USING CRON …' in CREATE TASK SCHEDULE clauses)
+		// are not mistaken for SQL syntax.
 		type fromTable struct {
 			db, schema, name string
 		}
 		var fromTables []fromTable
-		for _, fm := range reFromJoinFallback.FindAllStringSubmatch(strippedCtx, -1) {
+		noStringsCtx := stripStringLiterals(strippedCtx)
+		for _, fm := range reFromJoinFallback.FindAllStringSubmatch(noStringsCtx, -1) {
 			parts := extractIdentParts(fm[1], ic)
 			switch len(parts) {
 			case 3:
