@@ -177,6 +177,36 @@ func TestValidateSnowflakePatterns_ExecuteTask(t *testing.T) {
 			name: "Lowercase execute task — case insensitive",
 			sql:  "execute task my_task",
 		},
+		{
+			name: "Mixed case execute task",
+			sql:  "Execute Task my_task",
+		},
+		{
+			name: "Quoted fully qualified task name",
+			sql:  `EXECUTE TASK "my_db"."my_schema"."My Task"`,
+		},
+		{
+			name: "Task name with extra whitespace",
+			sql:  "EXECUTE TASK   my_task",
+		},
+		{
+			name: "Task name on next line",
+			sql:  "EXECUTE TASK\n  my_task",
+		},
+		// ── EXECUTE TASK — RETRY LAST (Section B) ────────────────────────────
+		{
+			name: "EXECUTE TASK with RETRY LAST",
+			sql:  "EXECUTE TASK my_task RETRY LAST",
+		},
+		{
+			name: "EXECUTE TASK RETRY LAST fully qualified",
+			sql:  "EXECUTE TASK db.schema.my_task RETRY LAST",
+		},
+		// ── EXECUTE TASK — USING CONFIG (Section B) ──────────────────────────
+		{
+			name: "EXECUTE TASK with USING CONFIG",
+			sql:  `EXECUTE TASK my_task USING CONFIG = '{"key": "val"}'`,
+		},
 
 		// ── Invalid Cases ────────────────────────────────────────────────────
 		{
@@ -197,6 +227,18 @@ func TestValidateSnowflakePatterns_ExecuteTask(t *testing.T) {
 			expectWarning: true,
 			expectedMatch: "requires a task name",
 		},
+		{
+			name:          "EXECUTE TASK with space then semicolon",
+			sql:           "EXECUTE TASK ;",
+			expectWarning: true,
+			expectedMatch: "requires a task name",
+		},
+		{
+			name:          "EXECUTE TASK with trailing whitespace only",
+			sql:           "EXECUTE TASK   ",
+			expectWarning: true,
+			expectedMatch: "requires a task name",
+		},
 	})
 }
 
@@ -206,5 +248,7 @@ func TestExecuteOtherForms(t *testing.T) {
 	runPatternTests(t, []patternTestCase{
 		{name: "EXECUTE ALERT", sql: "EXECUTE ALERT my_alert"},
 		{name: "EXECUTE MANAGED TASK", sql: "EXECUTE MANAGED TASK my_task"},
+		{name: "EXECUTE ALERT qualified", sql: "EXECUTE ALERT db.schema.my_alert"},
+		{name: "lowercase EXECUTE ALERT", sql: "execute alert my_alert"},
 	})
 }

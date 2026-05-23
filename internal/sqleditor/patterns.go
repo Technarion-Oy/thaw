@@ -296,14 +296,8 @@ var (
 			`(?:\s+(?:` + streamProps + `))*\s*$`)
 
 	// ── CREATE TASK ───────────────────────────────────────────────────────────
-	reIsCreateTask = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TASK\b`)
-	taskProps      = strings.Join([]string{
-		`WAREHOUSE`, `USER_TASK_MANAGED_INITIAL_WAREHOUSE_SIZE`, `SCHEDULE`, `CONFIG`,
-		`ALLOW_OVERLAPPING_EXECUTION`, `USER_TASK_TIMEOUT_MS`, `SUSPEND_TASK_AFTER_NUM_FAILURES`,
-		`ERROR_INTEGRATION`, `COMMENT`, `AFTER`, `WHEN`, `FINALIZE`,
-	}, "|")
-
-	reCreateTaskName   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TASK\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
+	reIsCreateTask   = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?TASK\b`)
+	reCreateTaskName = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+(?:REPLACE|ALTER)\s+)?TASK\s+(?:IF\s+NOT\s+EXISTS\s+)?(` + _identPath + `)`)
 	reTaskAS           = regexp.MustCompile(`(?i)\bAS\b`)
 	reTaskSchedule     = regexp.MustCompile(`(?i)\bSCHEDULE\s*=`)
 	reTaskAfter        = regexp.MustCompile(`(?i)\bAFTER\b`)
@@ -312,6 +306,8 @@ var (
 	reTaskFinalizeN    = regexp.MustCompile(`(?i)\bFINALIZE\s*=\s*(` + _identPath + `)`)
 	reTaskWhen         = regexp.MustCompile(`(?i)\bWHEN\b`)
 	reTaskWhenExpr     = regexp.MustCompile(`(?i)\bWHEN\s+\S`)
+	reTaskClone        = regexp.MustCompile(`(?i)\bCLONE\s+` + _identPath)
+	reTaskExecAs       = regexp.MustCompile(`(?i)\bEXECUTE\s+AS\b`)
 
 	// ── ALTER TASK ────────────────────────────────────────────────────────────
 	reIsAlterTask           = regexp.MustCompile(`(?i)^\s*ALTER\s+TASK\b`)
@@ -328,9 +324,15 @@ var (
 	reAlterTaskModifyASBody = regexp.MustCompile(`(?i)\bMODIFY\s+AS\s+\S`)
 	reAlterTaskModifyWhen   = regexp.MustCompile(`(?i)\bMODIFY\s+WHEN\b`)
 	reAlterTaskModifyWhenE  = regexp.MustCompile(`(?i)\bMODIFY\s+WHEN\s+\S`)
-	reAlterTaskSetFinalize  = regexp.MustCompile(`(?i)\bSET\s+FINALIZE\s*=`)
-	reAlterTaskSetFinalizeN = regexp.MustCompile(`(?i)\bSET\s+FINALIZE\s*=\s*(` + _identPath + `)`)
-	reAlterTaskUnsetProp    = regexp.MustCompile(`(?i)\bUNSET\s+([A-Za-z_][A-Za-z0-9_]*)`)
+	reAlterTaskSetFinalize   = regexp.MustCompile(`(?i)\bSET\s+FINALIZE\s*=`)
+	reAlterTaskSetFinalizeN  = regexp.MustCompile(`(?i)\bSET\s+FINALIZE\s*=\s*(` + _identPath + `)`)
+	reAlterTaskUnsetFinalize = regexp.MustCompile(`(?i)\bUNSET\s+FINALIZE\b`)
+	reAlterTaskRemoveWhen    = regexp.MustCompile(`(?i)\bREMOVE\s+WHEN\b`)
+	reAlterTaskSetTag        = regexp.MustCompile(`(?i)\bSET\s+TAG\b`)
+	reAlterTaskUnsetTag      = regexp.MustCompile(`(?i)\bUNSET\s+TAG\b`)
+	// ── DROP TASK ─────────────────────────────────────────────────────────────
+	reIsDropTask   = regexp.MustCompile(`(?i)^\s*DROP\s+TASK\b`)
+	reDropTaskName = regexp.MustCompile(`(?i)^\s*DROP\s+TASK\s+(?:IF\s+EXISTS\s+)?(` + _identPath + `)`)
 
 	// ── CREATE ALERT ──────────────────────────────────────────────────────────
 	reIsCreateAlert = regexp.MustCompile(`(?i)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?ALERT\b`)
@@ -1502,6 +1504,7 @@ var parseTextRoutes = []parseTextRoute{
 	{reIsCopyInto, validateCopyInto},
 	{reIsCreateTask, validateCreateTask},
 	{reIsAlterTask, validateAlterTask},
+	{reIsDropTask, validateDropTask},
 	{reIsCreateAlert, validateCreateAlert},
 	{reIsCreateNetworkPolicy, validateCreateNetworkPolicy},
 	{reIsCreateSessionPolicy, validateCreateSessionPolicy},
@@ -6222,9 +6225,17 @@ func validateCreateTask(parseText string, r StatementRange) []DiagMarker {
 		return markers
 	}
 
+	// 3. CLONE variant — CREATE TASK <name> CLONE <source> requires no AS/SCHEDULE.
+	if reTaskClone.MatchString(stripped) {
+		return markers
+	}
+
 	// Split into preamble (before AS) and body for property and structural checks.
-	// We need to find the standalone AS keyword, not AS inside a string or function name.
-	asIdx := reTaskAS.FindStringIndex(stripped)
+	// We need to find the standalone AS keyword that introduces the task body, not
+	// AS inside EXECUTE AS CALLER/OWNER/USER or string literals. Neutralize
+	// "EXECUTE AS" before scanning so the first \bAS\b match is the body delimiter.
+	asSearch := reTaskExecAs.ReplaceAllString(stripped, "EXECUTE_AS")
+	asIdx := reTaskAS.FindStringIndex(asSearch)
 	hasAS := asIdx != nil
 
 	var preamble string
@@ -6260,8 +6271,8 @@ func validateCreateTask(parseText string, r StatementRange) []DiagMarker {
 			markers = append(markers, diagMarkerSpan(r,
 				"FINALIZE requires a root task name (e.g. FINALIZE = root_task).", 4))
 		}
-		// Validate properties, then return — no SCHEDULE/AFTER checks for finalizer.
-		validateProperties(preamble, taskProps, r, &markers)
+		// No property validation — tasks accept arbitrary session parameters
+		// (TIMEZONE, QUERY_TAG, etc.) which would produce false-positive warnings.
 		return markers
 	}
 
@@ -6292,8 +6303,8 @@ func validateCreateTask(parseText string, r StatementRange) []DiagMarker {
 		}
 	}
 
-	// 9. Validate properties.
-	validateProperties(preamble, taskProps, r, &markers)
+	// No property validation — tasks accept arbitrary session parameters
+	// (TIMEZONE, QUERY_TAG, etc.) which would produce false-positive warnings.
 
 	return markers
 }
@@ -6330,13 +6341,18 @@ func validateAlterTask(parseText string, r StatementRange) []DiagMarker {
 	hasModifyAS := reAlterTaskModifyAS.MatchString(clean)
 	hasModifyWhen := reAlterTaskModifyWhen.MatchString(clean)
 	hasSetFinalize := reAlterTaskSetFinalize.MatchString(clean)
+	hasUnsetFinalize := reAlterTaskUnsetFinalize.MatchString(clean)
+	hasRemoveWhen := reAlterTaskRemoveWhen.MatchString(clean)
+	hasSetTag := reAlterTaskSetTag.MatchString(clean)
+	hasUnsetTag := reAlterTaskUnsetTag.MatchString(clean)
 
 	anyKnown := hasResume || hasSuspend || hasSet || hasUnset ||
-		hasRemAfter || hasAddAfter || hasModifyAS || hasModifyWhen || hasSetFinalize
+		hasRemAfter || hasAddAfter || hasModifyAS || hasModifyWhen ||
+		hasSetFinalize || hasUnsetFinalize || hasRemoveWhen || hasSetTag || hasUnsetTag
 
 	if !anyKnown {
 		markers = append(markers, diagMarkerSpan(r,
-			"Unknown ALTER TASK sub-command. Expected RESUME, SUSPEND, SET, UNSET, ADD AFTER, REMOVE AFTER, MODIFY AS, MODIFY WHEN, or SET FINALIZE.", 4))
+			"Unknown ALTER TASK sub-command. Expected RESUME, SUSPEND, SET, UNSET, ADD AFTER, REMOVE AFTER, MODIFY AS, MODIFY WHEN, REMOVE WHEN, SET FINALIZE, UNSET FINALIZE, SET TAG, or UNSET TAG.", 4))
 		return markers
 	}
 
@@ -6370,19 +6386,24 @@ func validateAlterTask(parseText string, r StatementRange) []DiagMarker {
 			"SET FINALIZE requires a root task name (e.g. SET FINALIZE = root_task).", 4))
 	}
 
-	// 7. Validate property names for SET (excluding SET FINALIZE which is handled above).
-	if hasSet && !hasSetFinalize {
-		validateProperties(clean, taskProps, r, &markers)
-	}
+	// No property validation for SET/UNSET — tasks accept arbitrary session
+	// parameters (TIMEZONE, QUERY_TAG, STATEMENT_TIMEOUT_IN_SECONDS, etc.)
+	// which would produce false-positive warnings. Sub-commands like SET TAG,
+	// SET CONTACT, SET EXECUTE AS, UNSET FINALIZE, and UNSET DCM PROJECT are
+	// all recognized by the anyKnown check via hasSet/hasUnset.
 
-	// 8. Validate property name for UNSET.
-	if hasUnset {
-		reValid := regexp.MustCompile(`(?i)^(` + taskProps + `)$`)
-		if m := reAlterTaskUnsetProp.FindStringSubmatch(clean); m != nil {
-			if !reValid.MatchString(m[1]) {
-				markers = append(markers, diagMarkerSpan(r, fmt.Sprintf("Unexpected property '%s' in statement.", m[1]), 4))
-			}
-		}
+	return markers
+}
+
+// ── validateDropTask ─────────────────────────────────────────────────────────
+
+// validateDropTask checks structural requirements for DROP TASK statements:
+//   - Task name is mandatory.
+func validateDropTask(parseText string, r StatementRange) []DiagMarker {
+	var markers []DiagMarker
+
+	if reDropTaskName.FindStringSubmatch(parseText) == nil {
+		markers = append(markers, diagMarkerSpan(r, "DROP TASK requires a task name.", 4))
 	}
 
 	return markers
