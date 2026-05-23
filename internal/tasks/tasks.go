@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"sort"
 	"strings"
+	"sync"
 	"thaw/internal/snowflake"
 	"time"
 )
@@ -705,6 +708,9 @@ func parsePredecessorRefs(preds string) []string {
 	}
 
 	// Fallback: Snowflake-quoted format like ["DB"."SCH"."TASK_A","DB"."SCH"."TASK_B"].
+	// NOTE: Naive comma split may mis-split if a quoted identifier itself contains
+	// commas (e.g. "TASK,WITH,COMMAS"). This is extremely rare in practice; the
+	// JSON path above handles it correctly when available.
 	preds = strings.TrimSuffix(strings.TrimPrefix(preds, "["), "]")
 	var names []string
 	for _, part := range strings.Split(preds, ",") {
@@ -789,26 +795,30 @@ func GetTopologicalOrder(rows []StatusRow, rootName string) TopologicalOrder {
 		}
 	}
 
-	var topoOrder []string
+	topoOrder := make([]string, 0, len(included))
 	var kahnQueue []string
 	for upper, deg := range inDegree {
 		if deg == 0 {
 			kahnQueue = append(kahnQueue, upper)
 		}
 	}
+	sort.Strings(kahnQueue) // Deterministic seed order for stable output across runs.
 	for len(kahnQueue) > 0 {
 		cur := kahnQueue[0]
 		kahnQueue = kahnQueue[1:]
 		topoOrder = append(topoOrder, byName[cur])
+		var ready []string
 		for _, child := range childrenOf[cur] {
 			if !included[child] {
 				continue
 			}
 			inDegree[child]--
 			if inDegree[child] == 0 {
-				kahnQueue = append(kahnQueue, child)
+				ready = append(ready, child)
 			}
 		}
+		sort.Strings(ready) // Deterministic order when multiple children become ready simultaneously.
+		kahnQueue = append(kahnQueue, ready...)
 	}
 
 	// Filter finalizers to only those NOT already included in the BFS traversal.
@@ -817,6 +827,10 @@ func GetTopologicalOrder(rows []StatusRow, rootName string) TopologicalOrder {
 		if !included[strings.ToUpper(fn)] {
 			filteredFinalizers = append(filteredFinalizers, fn)
 		}
+	}
+	// Ensure non-nil for JSON serialization.
+	if filteredFinalizers == nil {
+		filteredFinalizers = []string{}
 	}
 
 	// Suspend: topological order (root first) + finalizers last.
@@ -836,11 +850,6 @@ func GetTopologicalOrder(rows []StatusRow, rootName string) TopologicalOrder {
 	resumeOrder = append(resumeOrder, filteredFinalizers...)
 	if len(reversed) > 0 {
 		resumeOrder = append(resumeOrder, reversed[len(reversed)-1])
-	}
-
-	// Ensure nil slices are returned as empty slices for JSON serialization.
-	if filteredFinalizers == nil {
-		filteredFinalizers = []string{}
 	}
 
 	return TopologicalOrder{
@@ -958,14 +967,39 @@ func ExportGraphDDL(ctx context.Context, client *snowflake.Client, database, sch
 		}, nil
 	}
 
-	// Fetch DDL for each task. Errors are non-fatal per task.
+	// Fetch DDL for each task in parallel. Errors are non-fatal per task.
+	// Semaphore limits concurrent Snowflake round-trips to avoid overwhelming
+	// the session pool or hitting API rate limits on large graphs.
+	const maxConcurrentDDL = 8
+	sem := make(chan struct{}, maxConcurrentDDL)
+	type ddlEntry struct {
+		name string
+		ddl  string
+	}
+	entries := make([]ddlEntry, len(order.SuspendOrder))
+	var wg sync.WaitGroup
+	for i, name := range order.SuspendOrder {
+		wg.Add(1)
+		go func(i int, name string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			ddl, err := client.GetObjectDDL(ctx, database, schema, "task", name, "")
+			if err != nil {
+				slog.Warn("ExportGraphDDL: failed to fetch DDL for task",
+					"task", name, "database", database, "schema", schema, "error", err)
+				return
+			}
+			entries[i] = ddlEntry{name: name, ddl: ddl}
+		}(i, name)
+	}
+	wg.Wait()
+
 	ddlByName := make(map[string]string, len(order.SuspendOrder))
-	for _, name := range order.SuspendOrder {
-		ddl, err := client.GetObjectDDL(ctx, database, schema, "task", name, "")
-		if err != nil {
-			continue
+	for _, e := range entries {
+		if e.name != "" {
+			ddlByName[e.name] = e.ddl
 		}
-		ddlByName[name] = ddl
 	}
 
 	return BuildGraphDDL(order, ddlByName, database, schema, includeSuspendResume), nil

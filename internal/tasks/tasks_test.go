@@ -154,6 +154,30 @@ func TestGetTopologicalOrder(t *testing.T) {
 		if indexOf("B") >= indexOf("C") {
 			t.Errorf("B should come before C: %v", result.TopoOrder)
 		}
+		// With deterministic sorting, equal-degree siblings should be alphabetical.
+		if indexOf("A") >= indexOf("B") {
+			t.Errorf("A should come before B (deterministic sort): %v", result.TopoOrder)
+		}
+	})
+
+	t.Run("deterministic ordering is stable across runs", func(t *testing.T) {
+		// Run the same diamond graph multiple times and verify identical output.
+		rows := []StatusRow{
+			{Name: "ROOT", Predecessors: ""},
+			{Name: "Z_TASK", Predecessors: `["DB"."SCH"."ROOT"]`},
+			{Name: "A_TASK", Predecessors: `["DB"."SCH"."ROOT"]`},
+			{Name: "M_TASK", Predecessors: `["DB"."SCH"."ROOT"]`},
+			{Name: "LEAF", Predecessors: `["DB"."SCH"."Z_TASK","DB"."SCH"."A_TASK","DB"."SCH"."M_TASK"]`},
+		}
+		expected := []string{"ROOT", "A_TASK", "M_TASK", "Z_TASK", "LEAF"}
+		for i := 0; i < 20; i++ {
+			result := GetTopologicalOrder(rows, "ROOT")
+			for j, name := range result.TopoOrder {
+				if name != expected[j] {
+					t.Fatalf("run %d: expected %v, got %v", i, expected, result.TopoOrder)
+				}
+			}
+		}
 	})
 
 	t.Run("with finalizer", func(t *testing.T) {
