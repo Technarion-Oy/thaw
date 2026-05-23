@@ -3497,6 +3497,22 @@ export namespace stage {
 
 export namespace tasks {
 	
+	export class ExportGraphDDLResult {
+	    ddl: string;
+	    taskCount: number;
+	    failedTasks: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ExportGraphDDLResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ddl = source["ddl"];
+	        this.taskCount = source["taskCount"];
+	        this.failedTasks = source["failedTasks"];
+	    }
+	}
 	export class FinalizabilityRow {
 	    name: string;
 	    disabledReason: string;
@@ -3595,6 +3611,24 @@ export namespace tasks {
 	        this.errorMessage = source["errorMessage"];
 	        this.runId = source["runId"];
 	        this.rootTaskId = source["rootTaskId"];
+	    }
+	}
+	export class TopologicalOrder {
+	    topoOrder: string[];
+	    finalizerNames: string[];
+	    suspendOrder: string[];
+	    resumeOrder: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new TopologicalOrder(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.topoOrder = source["topoOrder"];
+	        this.finalizerNames = source["finalizerNames"];
+	        this.suspendOrder = source["suspendOrder"];
+	        this.resumeOrder = source["resumeOrder"];
 	    }
 	}
 

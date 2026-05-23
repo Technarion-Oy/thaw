@@ -13,10 +13,10 @@ import {snowflake} from '../models';
 import {dbt} from '../models';
 import {main} from '../models';
 import {ddl} from '../models';
+import {tasks} from '../models';
 import {config} from '../models';
 import {fnmeta} from '../models';
 import {queryprofile} from '../models';
-import {tasks} from '../models';
 import {gitrepo} from '../models';
 import {filesystem} from '../models';
 import {sfconfig} from '../models';
@@ -181,6 +181,8 @@ export function ExportAllDatabasesDDL(arg1:string,arg2:Array<string>):Promise<Ar
 
 export function ExportDatabaseDDL(arg1:string,arg2:string):Promise<ddl.ExportResult>;
 
+export function ExportGraphDDL(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<tasks.ExportGraphDDLResult>;
+
 export function ExportTableData(arg1:snowflake.ExportTableParams):Promise<snowflake.ExportTableResult>;
 
 export function FetchNotebookContent(arg1:string,arg2:string,arg3:string):Promise<string>;
@@ -312,6 +314,8 @@ export function GetTableSettings(arg1:string,arg2:string,arg3:string):Promise<ma
 export function GetTaskRunHistory(arg1:string,arg2:string,arg3:string,arg4:boolean,arg5:number):Promise<Array<tasks.TaskHistoryRow>>;
 
 export function GetTaskStatuses(arg1:string,arg2:string):Promise<tasks.StatusesResult>;
+
+export function GetTopologicalOrder(arg1:string,arg2:string,arg3:string):Promise<tasks.TopologicalOrder>;
 
 export function GetUserDDL(arg1:string):Promise<string>;
 

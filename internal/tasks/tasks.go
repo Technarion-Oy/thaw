@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"sort"
 	"strings"
+	"sync"
 	"thaw/internal/snowflake"
 	"time"
 )
@@ -659,6 +662,347 @@ func DropTree(ctx context.Context, client *snowflake.Client, database, schema, t
 		}
 	}
 	return nil
+}
+
+// TopologicalOrder holds the result of a Kahn's-algorithm topological sort
+// over a task graph rooted at a given task.
+type TopologicalOrder struct {
+	// Tasks in dependency-safe order (root first, each task after all its predecessors).
+	TopoOrder []string `json:"topoOrder"`
+	// Finalizer task names (tasks whose Finalize field references the root).
+	FinalizerNames []string `json:"finalizerNames"`
+	// Suspend order: topological order + finalizers last.
+	SuspendOrder []string `json:"suspendOrder"`
+	// Resume order: reverse topological (leaves first, excl. root) + finalizers + root last.
+	ResumeOrder []string `json:"resumeOrder"`
+}
+
+// parsePredecessorRefs parses the predecessors string from a StatusRow and
+// returns the bare upper-cased task names. SHOW TASKS returns predecessors in
+// two formats:
+//   - Valid JSON array with dotted FQNs: ["DB.SCHEMA.TASK1","DB.SCHEMA.TASK2"]
+//   - Snowflake-quoted array-like:       ["DB"."SCHEMA"."TASK1","DB"."SCHEMA"."TASK2"]
+//
+// The function tries JSON parsing first (matching the frontend parsePredecessors
+// in taskHierarchy.ts), then falls back to string splitting for the non-JSON format.
+func parsePredecessorRefs(preds string) []string {
+	if preds == "" || preds == "[]" || preds == "<nil>" || preds == "null" {
+		return nil
+	}
+
+	extractLast := func(ref string) string {
+		segs := strings.Split(ref, ".")
+		return strings.ToUpper(bareIdent(segs[len(segs)-1]))
+	}
+
+	// Try JSON array first (handles ["DB.SCH.TASK_A","DB.SCH.TASK_B"]).
+	var jsonArr []string
+	if json.Unmarshal([]byte(preds), &jsonArr) == nil {
+		var names []string
+		for _, ref := range jsonArr {
+			if name := extractLast(ref); name != "" {
+				names = append(names, name)
+			}
+		}
+		return names
+	}
+
+	// Fallback: Snowflake-quoted format like ["DB"."SCH"."TASK_A","DB"."SCH"."TASK_B"].
+	// NOTE: Naive comma split may mis-split if a quoted identifier itself contains
+	// commas (e.g. "TASK,WITH,COMMAS"). This is extremely rare in practice; the
+	// JSON path above handles it correctly when available.
+	preds = strings.TrimSuffix(strings.TrimPrefix(preds, "["), "]")
+	var names []string
+	for _, part := range strings.Split(preds, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if name := extractLast(part); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// GetTopologicalOrder computes a dependency-safe ordering of tasks in the graph
+// rooted at rootName using Kahn's algorithm. rootName is matched case-insensitively.
+// This is a pure function — no Snowflake connection required.
+func GetTopologicalOrder(rows []StatusRow, rootName string) TopologicalOrder {
+	empty := TopologicalOrder{
+		TopoOrder:      []string{},
+		FinalizerNames: []string{},
+		SuspendOrder:   []string{},
+		ResumeOrder:    []string{},
+	}
+	rootUpper := strings.ToUpper(rootName)
+
+	byName := make(map[string]string)       // UPPER → original name
+	childrenOf := make(map[string][]string)  // UPPER(parent) → [UPPER(child)]
+	predecessorsOf := make(map[string][]string) // UPPER(child) → [UPPER(parent)]
+	var finalizerNames []string
+
+	for _, t := range rows {
+		upper := strings.ToUpper(t.Name)
+		byName[upper] = t.Name
+
+		// Check if this task is a finalizer for the root.
+		if t.Finalize != "" {
+			finSegs := strings.Split(t.Finalize, ".")
+			finName := strings.ToUpper(bareIdent(finSegs[len(finSegs)-1]))
+			if finName == rootUpper {
+				finalizerNames = append(finalizerNames, t.Name)
+			}
+		}
+
+		for _, predUpper := range parsePredecessorRefs(t.Predecessors) {
+			childrenOf[predUpper] = append(childrenOf[predUpper], upper)
+			predecessorsOf[upper] = append(predecessorsOf[upper], predUpper)
+		}
+	}
+
+	if _, ok := byName[rootUpper]; !ok {
+		return empty
+	}
+
+	// Step 1: BFS from root to discover which tasks belong to this graph.
+	included := make(map[string]bool)
+	queue := []string{rootUpper}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if included[cur] {
+			continue
+		}
+		included[cur] = true
+		for _, child := range childrenOf[cur] {
+			if !included[child] {
+				queue = append(queue, child)
+			}
+		}
+	}
+
+	// Step 2: Kahn's algorithm within the included set.
+	inDegree := make(map[string]int)
+	for upper := range included {
+		inDegree[upper] = 0
+	}
+	for upper := range included {
+		for _, pred := range predecessorsOf[upper] {
+			if included[pred] {
+				inDegree[upper]++
+			}
+		}
+	}
+
+	topoOrder := make([]string, 0, len(included))
+	var kahnQueue []string
+	for upper, deg := range inDegree {
+		if deg == 0 {
+			kahnQueue = append(kahnQueue, upper)
+		}
+	}
+	sort.Strings(kahnQueue) // Deterministic seed order for stable output across runs.
+	for len(kahnQueue) > 0 {
+		cur := kahnQueue[0]
+		kahnQueue = kahnQueue[1:]
+		topoOrder = append(topoOrder, byName[cur])
+		var ready []string
+		for _, child := range childrenOf[cur] {
+			if !included[child] {
+				continue
+			}
+			inDegree[child]--
+			if inDegree[child] == 0 {
+				ready = append(ready, child)
+			}
+		}
+		sort.Strings(ready) // Deterministic order when multiple children become ready simultaneously.
+		kahnQueue = append(kahnQueue, ready...)
+	}
+
+	// Filter finalizers to only those NOT already included in the BFS traversal.
+	var filteredFinalizers []string
+	for _, fn := range finalizerNames {
+		if !included[strings.ToUpper(fn)] {
+			filteredFinalizers = append(filteredFinalizers, fn)
+		}
+	}
+	// Ensure non-nil for JSON serialization.
+	if filteredFinalizers == nil {
+		filteredFinalizers = []string{}
+	}
+
+	// Suspend: topological order (root first) + finalizers last.
+	suspendOrder := make([]string, 0, len(topoOrder)+len(filteredFinalizers))
+	suspendOrder = append(suspendOrder, topoOrder...)
+	suspendOrder = append(suspendOrder, filteredFinalizers...)
+
+	// Resume: reverse topological (leaves first, excl. root) + finalizers + root last.
+	reversed := make([]string, len(topoOrder))
+	for i, name := range topoOrder {
+		reversed[len(topoOrder)-1-i] = name
+	}
+	resumeOrder := make([]string, 0, len(reversed)+len(filteredFinalizers))
+	if len(reversed) > 1 {
+		resumeOrder = append(resumeOrder, reversed[:len(reversed)-1]...)
+	}
+	resumeOrder = append(resumeOrder, filteredFinalizers...)
+	if len(reversed) > 0 {
+		resumeOrder = append(resumeOrder, reversed[len(reversed)-1])
+	}
+
+	return TopologicalOrder{
+		TopoOrder:      topoOrder,
+		FinalizerNames: filteredFinalizers,
+		SuspendOrder:   suspendOrder,
+		ResumeOrder:    resumeOrder,
+	}
+}
+
+// ExportGraphDDLResult holds the output of a graph DDL export.
+type ExportGraphDDLResult struct {
+	// The assembled DDL script.
+	DDL string `json:"ddl"`
+	// Number of tasks whose DDL was successfully fetched.
+	TaskCount int `json:"taskCount"`
+	// Names of tasks whose DDL could not be fetched.
+	FailedTasks []string `json:"failedTasks"`
+}
+
+// BuildGraphDDL is a pure function that assembles a DDL export script from
+// a topological ordering and a map of task name → DDL text. Tasks present in
+// the ordering but absent from ddlByName are treated as failed (skipped in
+// the output but counted in FailedTasks).
+func BuildGraphDDL(order TopologicalOrder, ddlByName map[string]string, database, schema string, includeSuspendResume bool) ExportGraphDDLResult {
+	fqn := func(name string) string {
+		return snowflake.QuoteIdent(database) + "." + snowflake.QuoteIdent(schema) + "." + snowflake.QuoteIdent(name)
+	}
+
+	// Partition suspend-order tasks into succeeded / failed based on DDL presence.
+	var succeeded []struct{ name, ddl string }
+	var failedTasks []string
+	for _, name := range order.SuspendOrder {
+		if ddl, ok := ddlByName[name]; ok {
+			succeeded = append(succeeded, struct{ name, ddl string }{name, ddl})
+		} else {
+			failedTasks = append(failedTasks, name)
+		}
+	}
+
+	if len(succeeded) == 0 {
+		if failedTasks == nil {
+			failedTasks = []string{}
+		}
+		return ExportGraphDDLResult{FailedTasks: failedTasks}
+	}
+
+	var output string
+	if includeSuspendResume {
+		succeededNames := make(map[string]bool, len(succeeded))
+		for _, s := range succeeded {
+			succeededNames[strings.ToUpper(s.name)] = true
+		}
+
+		// Suspend lines (topological order: root first).
+		var suspendLines []string
+		for _, n := range order.SuspendOrder {
+			if succeededNames[strings.ToUpper(n)] {
+				suspendLines = append(suspendLines, "ALTER TASK IF EXISTS "+fqn(n)+" SUSPEND;")
+			}
+		}
+
+		// DDL lines.
+		var createLines []string
+		for _, s := range succeeded {
+			createLines = append(createLines, s.ddl)
+		}
+
+		// Resume lines (leaves first, root last).
+		var resumeLines []string
+		for _, n := range order.ResumeOrder {
+			if succeededNames[strings.ToUpper(n)] {
+				resumeLines = append(resumeLines, "ALTER TASK IF EXISTS "+fqn(n)+" RESUME;")
+			}
+		}
+
+		output = "-- Suspend all tasks (root first)\n" +
+			strings.Join(suspendLines, "\n") + "\n\n" +
+			"-- Create / replace tasks (topological order)\n" +
+			strings.Join(createLines, "\n\n") + "\n\n" +
+			"-- Resume all tasks (leaves first, root last)\n" +
+			strings.Join(resumeLines, "\n")
+	} else {
+		ddls := make([]string, len(succeeded))
+		for i, s := range succeeded {
+			ddls[i] = s.ddl
+		}
+		output = strings.Join(ddls, "\n\n")
+	}
+
+	if failedTasks == nil {
+		failedTasks = []string{}
+	}
+	return ExportGraphDDLResult{
+		DDL:         output,
+		TaskCount:   len(succeeded),
+		FailedTasks: failedTasks,
+	}
+}
+
+// ExportGraphDDL fetches task statuses and DDL for every task in the graph
+// rooted at rootName, then assembles a dependency-ordered DDL script.
+func ExportGraphDDL(ctx context.Context, client *snowflake.Client, database, schema, rootName string, includeSuspendResume bool) (ExportGraphDDLResult, error) {
+	result, err := GetStatuses(ctx, client, database, schema)
+	if err != nil {
+		return ExportGraphDDLResult{}, fmt.Errorf("fetching task statuses: %w", err)
+	}
+
+	order := GetTopologicalOrder(result.Rows, rootName)
+	if len(order.SuspendOrder) == 0 {
+		return ExportGraphDDLResult{
+			DDL:         "",
+			TaskCount:   0,
+			FailedTasks: []string{},
+		}, nil
+	}
+
+	// Fetch DDL for each task in parallel. Errors are non-fatal per task.
+	// Semaphore limits concurrent Snowflake round-trips to avoid overwhelming
+	// the session pool or hitting API rate limits on large graphs.
+	const maxConcurrentDDL = 8
+	sem := make(chan struct{}, maxConcurrentDDL)
+	type ddlEntry struct {
+		name string
+		ddl  string
+	}
+	entries := make([]ddlEntry, len(order.SuspendOrder))
+	var wg sync.WaitGroup
+	for i, name := range order.SuspendOrder {
+		wg.Add(1)
+		go func(i int, name string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			ddl, err := client.GetObjectDDL(ctx, database, schema, "task", name, "")
+			if err != nil {
+				slog.Warn("ExportGraphDDL: failed to fetch DDL for task",
+					"task", name, "database", database, "schema", schema, "error", err)
+				return
+			}
+			entries[i] = ddlEntry{name: name, ddl: ddl}
+		}(i, name)
+	}
+	wg.Wait()
+
+	ddlByName := make(map[string]string, len(order.SuspendOrder))
+	for _, e := range entries {
+		if e.name != "" {
+			ddlByName[e.name] = e.ddl
+		}
+	}
+
+	return BuildGraphDDL(order, ddlByName, database, schema, includeSuspendResume), nil
 }
 
 // GetStatuses returns the current state and last-run result for every task in the given schema.

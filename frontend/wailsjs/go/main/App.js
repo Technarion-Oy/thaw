@@ -322,6 +322,10 @@ export function ExportDatabaseDDL(arg1, arg2) {
   return window['go']['main']['App']['ExportDatabaseDDL'](arg1, arg2);
 }
 
+export function ExportGraphDDL(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ExportGraphDDL'](arg1, arg2, arg3, arg4);
+}
+
 export function ExportTableData(arg1) {
   return window['go']['main']['App']['ExportTableData'](arg1);
 }
@@ -584,6 +588,10 @@ export function GetTaskRunHistory(arg1, arg2, arg3, arg4, arg5) {
 
 export function GetTaskStatuses(arg1, arg2) {
   return window['go']['main']['App']['GetTaskStatuses'](arg1, arg2);
+}
+
+export function GetTopologicalOrder(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetTopologicalOrder'](arg1, arg2, arg3);
 }
 
 export function GetUserDDL(arg1) {
