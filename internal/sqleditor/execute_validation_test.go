@@ -177,6 +177,22 @@ func TestValidateSnowflakePatterns_ExecuteTask(t *testing.T) {
 			name: "Lowercase execute task — case insensitive",
 			sql:  "execute task my_task",
 		},
+		{
+			name: "Mixed case execute task",
+			sql:  "Execute Task my_task",
+		},
+		{
+			name: "Quoted fully qualified task name",
+			sql:  `EXECUTE TASK "my_db"."my_schema"."My Task"`,
+		},
+		{
+			name: "Task name with extra whitespace",
+			sql:  "EXECUTE TASK   my_task",
+		},
+		{
+			name: "Task name on next line",
+			sql:  "EXECUTE TASK\n  my_task",
+		},
 
 		// ── Invalid Cases ────────────────────────────────────────────────────
 		{
@@ -197,6 +213,18 @@ func TestValidateSnowflakePatterns_ExecuteTask(t *testing.T) {
 			expectWarning: true,
 			expectedMatch: "requires a task name",
 		},
+		{
+			name:          "EXECUTE TASK with space then semicolon",
+			sql:           "EXECUTE TASK ;",
+			expectWarning: true,
+			expectedMatch: "requires a task name",
+		},
+		{
+			name:          "EXECUTE TASK with trailing whitespace only",
+			sql:           "EXECUTE TASK   ",
+			expectWarning: true,
+			expectedMatch: "requires a task name",
+		},
 	})
 }
 
@@ -206,5 +234,7 @@ func TestExecuteOtherForms(t *testing.T) {
 	runPatternTests(t, []patternTestCase{
 		{name: "EXECUTE ALERT", sql: "EXECUTE ALERT my_alert"},
 		{name: "EXECUTE MANAGED TASK", sql: "EXECUTE MANAGED TASK my_task"},
+		{name: "EXECUTE ALERT qualified", sql: "EXECUTE ALERT db.schema.my_alert"},
+		{name: "lowercase EXECUTE ALERT", sql: "execute alert my_alert"},
 	})
 }

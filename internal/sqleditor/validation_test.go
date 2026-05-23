@@ -4131,6 +4131,27 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' SUSPEND_TASK_AFTER_NUM_FAILURES = 3 AS SELECT 1",
 		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' ERROR_INTEGRATION = my_int AS SELECT 1",
 		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' CONFIG = $${\"key\": \"val\"}$$ AS SELECT 1",
+		// ── CREATE TASK — multiline formatting ──────────────────────────
+		"CREATE TASK my_task\n\tWAREHOUSE = wh\n\tSCHEDULE = '10 MINUTE'\n\tAS SELECT 1",
+		"CREATE TASK my_task\n  WAREHOUSE = wh\n  SCHEDULE = '10 MINUTE'\n  AS\n  SELECT 1",
+		"CREATE OR REPLACE TASK db.schema.my_task\n\tWAREHOUSE=COMPUTE_WH\n\tSCHEDULE='USING CRON 0 0 * * * UTC'\n\tAS SELECT SYSTEM$WAIT(5)",
+		// ── CREATE TASK — quoted identifiers ────────────────────────────
+		`CREATE TASK "My Task" WAREHOUSE = wh SCHEDULE = '10 MINUTE' AS SELECT 1`,
+		`CREATE TASK "db"."schema"."My Task" WAREHOUSE = wh SCHEDULE = '5 MINUTE' AS SELECT 1`,
+		// ── CREATE TASK — mixed case ────────────────────────────────────
+		"create task my_task warehouse = wh schedule = '10 MINUTE' as select 1",
+		"Create Or Replace Task my_task Warehouse = wh Schedule = '5 MINUTE' As Select 1",
+		// ── CREATE TASK — serverless (no WAREHOUSE, uses managed size) ──
+		"CREATE TASK my_task USER_TASK_MANAGED_INITIAL_WAREHOUSE_SIZE = 'MEDIUM' SCHEDULE = '10 MINUTE' AS SELECT 1",
+		// ── CREATE TASK — CRON schedule variants ────────────────────────
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = 'USING CRON 0 6 * * MON-FRI America/Los_Angeles' AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = 'USING CRON */5 * * * * UTC' AS SELECT 1",
+		// ── CREATE TASK — multiple properties combined ──────────────────
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' ALLOW_OVERLAPPING_EXECUTION = TRUE USER_TASK_TIMEOUT_MS = 60000 SUSPEND_TASK_AFTER_NUM_FAILURES = 3 COMMENT = 'all props' AS SELECT 1",
+		// ── CREATE TASK — AS body with complex SQL ──────────────────────
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' AS INSERT INTO t SELECT a, b FROM s WHERE x > 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' AS MERGE INTO target USING source ON target.id = source.id WHEN MATCHED THEN UPDATE SET val = source.val",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' AS CALL my_schema.my_proc('arg1', 42)",
 		// ── CREATE TASK — child tasks (AFTER, no SCHEDULE) ──────────────
 		"CREATE TASK child_task WAREHOUSE = wh AFTER parent_task AS SELECT 1",
 		"CREATE TASK child_task WAREHOUSE = wh AFTER db.schema.parent_task AS SELECT 1",
@@ -4165,6 +4186,36 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 		"ALTER TASK my_task MODIFY AS SELECT 1 FROM t",
 		"ALTER TASK my_task MODIFY WHEN SYSTEM$STREAM_HAS_DATA('my_stream')",
 		"ALTER TASK my_task SET FINALIZE = root_task",
+		// ── ALTER TASK — quoted identifiers ──────────────────────────────
+		`ALTER TASK "My Task" RESUME`,
+		`ALTER TASK "db"."schema"."My Task" SUSPEND`,
+		// ── ALTER TASK — mixed case ─────────────────────────────────────
+		"alter task my_task resume",
+		"Alter Task my_task Set Warehouse = new_wh",
+		// ── ALTER TASK — IF EXISTS with various sub-commands ─────────────
+		"ALTER TASK IF EXISTS my_task SUSPEND",
+		"ALTER TASK IF EXISTS my_task SET WAREHOUSE = wh",
+		"ALTER TASK IF EXISTS my_task MODIFY AS SELECT 1",
+		// ── ALTER TASK — SET with CRON schedule ─────────────────────────
+		"ALTER TASK my_task SET SCHEDULE = 'USING CRON 0 6 * * MON-FRI UTC'",
+		// ── ALTER TASK — qualified task names ───────────────────────────
+		"ALTER TASK db.schema.my_task RESUME",
+		"ALTER TASK db.schema.my_task SET WAREHOUSE = new_wh",
+		"ALTER TASK db.schema.my_task ADD AFTER db.schema.parent_task",
+		// ── ALTER TASK — REMOVE/ADD AFTER with qualified names ──────────
+		"ALTER TASK my_task REMOVE AFTER db.schema.task1, db.schema.task2",
+		"ALTER TASK my_task ADD AFTER schema.task1, schema.task2, schema.task3",
+		// ── ALTER TASK — MODIFY AS with complex body ────────────────────
+		"ALTER TASK my_task MODIFY AS INSERT INTO t SELECT * FROM s WHERE x > 1",
+		"ALTER TASK my_task MODIFY WHEN SYSTEM$STREAM_HAS_DATA('s1') AND SYSTEM$STREAM_HAS_DATA('s2')",
+		// ── ALTER TASK — SET FINALIZE with qualified name ────────────────
+		"ALTER TASK my_task SET FINALIZE = db.schema.root_task",
+		// ── ALTER TASK — UNSET multiple known properties ─────────────────
+		"ALTER TASK my_task UNSET SCHEDULE",
+		"ALTER TASK my_task UNSET ERROR_INTEGRATION",
+		"ALTER TASK my_task UNSET USER_TASK_TIMEOUT_MS",
+		"ALTER TASK my_task UNSET SUSPEND_TASK_AFTER_NUM_FAILURES",
+		"ALTER TASK my_task UNSET ALLOW_OVERLAPPING_EXECUTION",
 	}
 
 	for _, sql := range validCases {
@@ -4300,6 +4351,67 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 			"ALTER TASK UNSET with unknown property",
 			"ALTER TASK my_task UNSET FOOBAR",
 			[]string{"Unexpected property 'FOOBAR'"},
+		},
+		// ── CREATE TASK — IF NOT EXISTS without name ─────────────────────
+		// Note: the regex parses "IF" as the task name, so the error is
+		// "missing AS" rather than "missing name" — a known limitation.
+		{
+			"CREATE TASK IF NOT EXISTS without name",
+			"CREATE TASK IF NOT EXISTS",
+			[]string{"CREATE TASK requires an AS clause"},
+		},
+		// ── CREATE TASK — multiline missing AS ──────────────────────────
+		{
+			"multiline CREATE TASK missing AS",
+			"CREATE TASK my_task\n\tWAREHOUSE = wh\n\tSCHEDULE = '10 MINUTE'",
+			[]string{"CREATE TASK requires an AS clause"},
+		},
+		// ── CREATE TASK — FINALIZE + AFTER + SCHEDULE triple conflict ───
+		{
+			"FINALIZE with AFTER and SCHEDULE",
+			"CREATE TASK finalizer WAREHOUSE = wh FINALIZE = root_task AFTER parent SCHEDULE = '10 MINUTE' AS SELECT 1",
+			[]string{"FINALIZE must not be combined with AFTER"},
+		},
+		// ── CREATE TASK — FINALIZE = (equals but no name) ───────────────
+		{
+			"FINALIZE with equals but no name",
+			"CREATE TASK finalizer FINALIZE = AS SELECT 1",
+			[]string{"FINALIZE requires a root task name"},
+		},
+		// ── CREATE TASK — unknown property ──────────────────────────────
+		{
+			"CREATE TASK with unknown property RETRY_LIMIT",
+			"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' RETRY_LIMIT = 5 AS SELECT 1",
+			[]string{"Unexpected property 'RETRY_LIMIT'"},
+		},
+		{
+			"CREATE TASK with unknown property AUTO_SHUTDOWN",
+			"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' AUTO_SHUTDOWN = 600 AS SELECT 1",
+			[]string{"Unexpected property 'AUTO_SHUTDOWN'"},
+		},
+		// ── ALTER TASK — MODIFY AS bare (trailing whitespace only) ──────
+		{
+			"ALTER TASK MODIFY AS with trailing whitespace",
+			"ALTER TASK my_task MODIFY AS   ",
+			[]string{"MODIFY AS requires a SQL statement"},
+		},
+		// ── ALTER TASK — MODIFY WHEN bare (trailing whitespace only) ────
+		{
+			"ALTER TASK MODIFY WHEN with trailing whitespace",
+			"ALTER TASK my_task MODIFY WHEN   ",
+			[]string{"MODIFY WHEN requires a boolean expression"},
+		},
+		// ── ALTER TASK — SET FINALIZE = (equals but no name) ────────────
+		{
+			"ALTER TASK SET FINALIZE equals no name",
+			"ALTER TASK my_task SET FINALIZE = ;",
+			[]string{"SET FINALIZE requires a root task name"},
+		},
+		// ── ALTER TASK — SET with multiple unknown properties ────────────
+		{
+			"ALTER TASK SET with unknown MAX_RETRIES",
+			"ALTER TASK my_task SET MAX_RETRIES = 3",
+			[]string{"Unexpected property 'MAX_RETRIES'"},
 		},
 	}
 
@@ -7466,6 +7578,26 @@ func TestValidateTablesExist_CreateTask_UsingCron(t *testing.T) {
 		{
 			name: "USING CRON with INSERT INTO",
 			sql:  "CREATE OR REPLACE TASK my_task WAREHOUSE = wh SCHEDULE = 'USING CRON 0 0 * * * UTC' AS INSERT INTO LIVE_TABLE SELECT 1",
+		},
+		{
+			name: "USING CRON weekday schedule",
+			sql:  "CREATE TASK my_task WAREHOUSE = wh SCHEDULE = 'USING CRON 0 6 * * MON-FRI America/Los_Angeles' AS SELECT * FROM LIVE_TABLE",
+		},
+		{
+			name: "USING CRON every-5-minutes schedule",
+			sql:  "CREATE TASK my_task WAREHOUSE = wh SCHEDULE = 'USING CRON */5 * * * * UTC' AS SELECT * FROM LIVE_TABLE",
+		},
+		{
+			name: "child task with AFTER does not flag preamble tokens",
+			sql:  "CREATE TASK child_task WAREHOUSE = wh AFTER parent_task AS SELECT * FROM LIVE_TABLE",
+		},
+		{
+			name: "task with WHEN condition referencing SYSTEM function",
+			sql:  "CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' WHEN SYSTEM$STREAM_HAS_DATA('my_stream') AS SELECT * FROM LIVE_TABLE",
+		},
+		{
+			name: "task with FINALIZE does not flag root task name",
+			sql:  "CREATE TASK finalizer FINALIZE = root_task AS SELECT * FROM LIVE_TABLE",
 		},
 		{
 			name: "string containing FROM keyword",
