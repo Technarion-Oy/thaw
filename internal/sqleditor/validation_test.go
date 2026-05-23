@@ -542,7 +542,7 @@ func TestValidateSnowflakePatterns_InvalidQueries(t *testing.T) {
 		{"Warehouse invalid param", "CREATE WAREHOUSE broken_wh WITH WAREHOUSE_SIZE='MEDIUM' AUTO_SHUTDOWN=600", "Unexpected property 'AUTO_SHUTDOWN'"},
 		{"Resource Monitor invalid param", "CREATE RESOURCE MONITOR bad_rm WITH MAX_CREDITS=500", "Unexpected property 'MAX_CREDITS'"},
 		{"Stage invalid param", "CREATE STAGE my_stage BUCKET_URL='s3://bucket/'", "Unexpected property 'BUCKET_URL'"},
-		{"Task invalid param", "CREATE TASK my_task WAREHOUSE=WH SCHEDULE='10 MINUTE' RETRY_LIMIT=5 AS SELECT 1", "Unexpected property 'RETRY_LIMIT'"},
+		// Task property validation removed — tasks accept arbitrary session parameters.
 		{"User invalid param", "CREATE USER bad_user IS_ACTIVE=TRUE", "Unexpected property 'IS_ACTIVE'"},
 		{"User with Warehouse param", "CREATE USER bad_user WAREHOUSE_SIZE='SMALL'", "Unexpected property 'WAREHOUSE_SIZE'"},
 
@@ -4268,6 +4268,40 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 		"ALTER TASK my_task UNSET TAG cost_center",
 		// ── ALTER TASK — multiple SET properties (Section D) ─────────────
 		"ALTER TASK my_task SET WAREHOUSE = new_wh COMMENT = 'updated'",
+		// ── CREATE TASK — WITH TAG (no false positive on tag keys) ────────
+		"CREATE TASK my_task\n  WITH TAG (cost_center = 'finance')\n  WAREHOUSE = wh SCHEDULE = '10 MINUTE'\n  AS SELECT 1",
+		// ── CREATE TASK — WITH CONTACT ───────────────────────────────────
+		"CREATE TASK my_task\n  WITH CONTACT (purpose = contact_name)\n  WAREHOUSE = wh SCHEDULE = '10 MINUTE'\n  AS SELECT 1",
+		// ── CREATE TASK — session parameters (no false positive) ─────────
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' STATEMENT_TIMEOUT_IN_SECONDS = 3600 AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' TIMEZONE = 'America/New_York' AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' QUERY_TAG = 'my_tag' AS SELECT 1",
+		// ── CREATE TASK — EXECUTE AS USER / CALLER / OWNER ───────────────
+		"CREATE TASK my_task\n  WAREHOUSE = wh SCHEDULE = '10 MINUTE'\n  EXECUTE AS USER my_user\n  AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' EXECUTE AS CALLER AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' EXECUTE AS OWNER AS SELECT 1",
+		// ── CREATE TASK — BEGIN...END scripting body ─────────────────────
+		"CREATE TASK my_task\n  WAREHOUSE = wh SCHEDULE = '10 MINUTE'\n  AS\n  BEGIN\n    INSERT INTO t1 SELECT * FROM s1;\n    INSERT INTO t2 SELECT * FROM s2;\n  END;",
+		// ── ALTER TASK — SET/UNSET session parameters ────────────────────
+		"ALTER TASK my_task SET STATEMENT_TIMEOUT_IN_SECONDS = 3600",
+		"ALTER TASK my_task SET TIMEZONE = 'UTC'",
+		"ALTER TASK my_task SET QUERY_TAG = 'my_tag'",
+		// ── ALTER TASK — SET/UNSET CONTACT ────────────────────────────────
+		"ALTER TASK my_task SET CONTACT purpose = contact_name",
+		"ALTER TASK my_task UNSET CONTACT purpose",
+		// ── ALTER TASK — SET/UNSET EXECUTE AS ─────────────────────────────
+		"ALTER TASK my_task SET EXECUTE AS USER my_user",
+		"ALTER TASK my_task UNSET EXECUTE AS USER",
+		// ── ALTER TASK — UNSET DCM PROJECT ────────────────────────────────
+		"ALTER TASK my_task UNSET DCM PROJECT",
+		// ── CREATE TASK — CLONE + IF NOT EXISTS ──────────────────────────
+		"CREATE TASK IF NOT EXISTS my_task CLONE other_task",
+		// ── DROP TASK ────────────────────────────────────────────────────
+		"DROP TASK my_task",
+		"DROP TASK IF EXISTS my_task",
+		"DROP TASK db.schema.my_task",
+		`DROP TASK "My Task"`,
+		"drop task my_task",
 	}
 
 	for _, sql := range validCases {
@@ -4392,18 +4426,8 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 			"ALTER TASK my_task REMOVE AFTER",
 			[]string{"REMOVE AFTER requires at least one predecessor task name"},
 		},
-		// ── ALTER TASK — SET with unknown property ───────────────────────
-		{
-			"ALTER TASK SET with unknown property",
-			"ALTER TASK my_task SET RETRY_LIMIT = 5",
-			[]string{"Unexpected property 'RETRY_LIMIT'"},
-		},
-		// ── ALTER TASK — UNSET with unknown property ─────────────────────
-		{
-			"ALTER TASK UNSET with unknown property",
-			"ALTER TASK my_task UNSET FOOBAR",
-			[]string{"Unexpected property 'FOOBAR'"},
-		},
+		// Property validation removed for tasks — they accept arbitrary session
+		// parameters. SET/UNSET with unknown properties are tested as valid cases.
 		// ── CREATE TASK — IF NOT EXISTS without name ─────────────────────
 		// Note: the regex parses "IF" as the task name, so the error is
 		// "missing AS" rather than "missing name" — a known limitation.
@@ -4430,17 +4454,8 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 			"CREATE TASK finalizer FINALIZE = AS SELECT 1",
 			[]string{"FINALIZE requires a root task name"},
 		},
-		// ── CREATE TASK — unknown property ──────────────────────────────
-		{
-			"CREATE TASK with unknown property RETRY_LIMIT",
-			"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' RETRY_LIMIT = 5 AS SELECT 1",
-			[]string{"Unexpected property 'RETRY_LIMIT'"},
-		},
-		{
-			"CREATE TASK with unknown property AUTO_SHUTDOWN",
-			"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' AUTO_SHUTDOWN = 600 AS SELECT 1",
-			[]string{"Unexpected property 'AUTO_SHUTDOWN'"},
-		},
+		// Property validation removed for tasks — arbitrary session parameters
+		// are valid. Unknown properties are tested as valid cases instead.
 		// ── ALTER TASK — MODIFY AS bare (trailing whitespace only) ──────
 		{
 			"ALTER TASK MODIFY AS with trailing whitespace",
@@ -4459,12 +4474,7 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 			"ALTER TASK my_task SET FINALIZE = ;",
 			[]string{"SET FINALIZE requires a root task name"},
 		},
-		// ── ALTER TASK — SET with multiple unknown properties ────────────
-		{
-			"ALTER TASK SET with unknown MAX_RETRIES",
-			"ALTER TASK my_task SET MAX_RETRIES = 3",
-			[]string{"Unexpected property 'MAX_RETRIES'"},
-		},
+		// Property validation removed — MAX_RETRIES treated as session parameter.
 		// ── ALTER TASK — bare ALTER TASK with no sub-command (Section C.2) ─
 		{
 			"ALTER TASK with no sub-command",
@@ -4476,6 +4486,17 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 			"FINALIZE with SCHEDULE but no AFTER",
 			"CREATE TASK finalizer FINALIZE = root_task SCHEDULE = '10 MINUTE' AS SELECT 1",
 			[]string{"FINALIZE must not be combined with SCHEDULE"},
+		},
+		// ── DROP TASK — missing name ─────────────────────────────────────
+		{
+			"bare DROP TASK without name",
+			"DROP TASK",
+			[]string{"DROP TASK requires a task name"},
+		},
+		{
+			"DROP TASK with semicolon only",
+			"DROP TASK;",
+			[]string{"DROP TASK requires a task name"},
 		},
 	}
 
