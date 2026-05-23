@@ -1029,6 +1029,11 @@ func TestValidateTablesExist_Valid(t *testing.T) {
 		// Multi-CTE: all CTE names must be recognized, even those after the first comma
 		"WITH cte1 AS (SELECT 1 AS id), cte2 AS (SELECT * FROM LIVE_TABLE) SELECT * FROM cte1 JOIN cte2 ON 1=1",
 		"WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT 3) SELECT * FROM a JOIN b ON 1=1 JOIN c ON 1=1",
+
+		// CREATE TASK — SCHEDULE with USING CRON must not flag CRON as a table (Issue #306)
+		"CREATE OR REPLACE TASK LINEAGE_SOURCE_DB.RAW_DATA.TASK_1\n\tWAREHOUSE=COMPUTE_WH\n\tSCHEDULE='USING CRON 0 0 * * * UTC'\n\tAS SELECT SYSTEM$WAIT(5)",
+		"CREATE OR REPLACE TASK my_task WAREHOUSE = wh SCHEDULE = 'USING CRON 0 0 * * * UTC' AS INSERT INTO LIVE_TABLE SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' AS SELECT 1",
 	}
 
 	req := ValidateTablesExistRequest{
@@ -7442,6 +7447,52 @@ func TestValidateBareColumnRefs_NoFromClause_Invalid(t *testing.T) {
 			for _, w := range warnings {
 				if !strings.Contains(w.Message, "no FROM clause") {
 					t.Errorf("Expected 'no FROM clause' in message, got %q", w.Message)
+				}
+			}
+		})
+	}
+}
+
+// ── Regression: CREATE TASK SCHEDULE 'USING CRON …' false positive (Issue #306) ─
+func TestValidateTablesExist_CreateTask_UsingCron(t *testing.T) {
+	cases := []struct {
+		name string
+		sql  string
+	}{
+		{
+			name: "USING CRON in SCHEDULE",
+			sql:  "CREATE OR REPLACE TASK LINEAGE_SOURCE_DB.RAW_DATA.TASK_1\n\tWAREHOUSE=COMPUTE_WH\n\tSCHEDULE='USING CRON 0 0 * * * UTC'\n\tAS SELECT SYSTEM$WAIT(5)",
+		},
+		{
+			name: "USING CRON with INSERT INTO",
+			sql:  "CREATE OR REPLACE TASK my_task WAREHOUSE = wh SCHEDULE = 'USING CRON 0 0 * * * UTC' AS INSERT INTO LIVE_TABLE SELECT 1",
+		},
+		{
+			name: "string containing FROM keyword",
+			sql:  "SELECT * FROM LIVE_TABLE WHERE name = 'FROM FAKE_TABLE'",
+		},
+		{
+			name: "string containing JOIN keyword",
+			sql:  "SELECT * FROM LIVE_TABLE WHERE note = 'JOIN SOMETHING ON x'",
+		},
+	}
+
+	req := ValidateTablesExistRequest{
+		ResolvedRefs:   getLiveRefs(),
+		KnownDatabases: []string{"DB", "LINEAGE_SOURCE_DB"},
+		KnownSchemas:   []SchemaEntry{{DB: "DB", Name: "SCH"}, {DB: "LINEAGE_SOURCE_DB", Name: "RAW_DATA"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req.SQL = tc.sql
+			req.StmtRanges = GetStatementRanges(tc.sql)
+			markers := ValidateTablesExist(req)
+			errs := getErrors(markers)
+			if len(errs) > 0 {
+				t.Errorf("Expected 0 errors for %q, got %d:", tc.sql, len(errs))
+				for _, e := range errs {
+					t.Errorf("  - %s (line %d, col %d)", e.Message, e.StartLineNumber, e.StartColumn)
 				}
 			}
 		})
