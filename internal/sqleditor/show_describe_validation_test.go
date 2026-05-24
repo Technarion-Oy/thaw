@@ -214,6 +214,11 @@ func TestValidateSnowflakePatterns_Show(t *testing.T) {
 			[]string{"TERSE is not valid for SHOW ALERTS"},
 		},
 		{
+			"TERSE with unknown object type",
+			"SHOW TERSE FOOBAR",
+			[]string{"Unknown object type 'FOOBAR'"},
+		},
+		{
 			"HISTORY with non-eligible type",
 			"SHOW TABLES HISTORY",
 			[]string{"HISTORY is only valid for SHOW PIPES and SHOW REPLICATION DATABASES"},
@@ -221,6 +226,11 @@ func TestValidateSnowflakePatterns_Show(t *testing.T) {
 		{
 			"HISTORY with VIEWS",
 			"SHOW VIEWS HISTORY",
+			[]string{"HISTORY is only valid for SHOW PIPES and SHOW REPLICATION DATABASES"},
+		},
+		{
+			"TERSE valid but HISTORY invalid for same type",
+			"SHOW TERSE TABLES HISTORY",
 			[]string{"HISTORY is only valid for SHOW PIPES and SHOW REPLICATION DATABASES"},
 		},
 		{
@@ -237,6 +247,11 @@ func TestValidateSnowflakePatterns_Show(t *testing.T) {
 			"IN with empty scope",
 			"SHOW TABLES IN",
 			[]string{"IN clause requires a scope"},
+		},
+		{
+			"IN with non-identifier scope (number)",
+			"SHOW TABLES IN 123",
+			[]string{"Invalid scope '123'"},
 		},
 		{
 			"STARTS WITH without string literal",
@@ -257,6 +272,11 @@ func TestValidateSnowflakePatterns_Show(t *testing.T) {
 			"LIMIT with non-integer",
 			"SHOW TABLES LIMIT abc",
 			[]string{"LIMIT requires a positive integer, got 'abc'"},
+		},
+		{
+			"LIMIT with decimal number",
+			"SHOW TABLES LIMIT 1.5",
+			[]string{"LIMIT requires a positive integer, got '1.5'"},
 		},
 		{
 			"LIMIT FROM without string literal",
@@ -282,6 +302,71 @@ func TestValidateSnowflakePatterns_Show(t *testing.T) {
 			"typo in clause keyword LIIKE",
 			"SHOW TABLES LIIKE '%foo%'",
 			[]string{"Unexpected token 'LIIKE'"},
+		},
+		// ── Duplicate clauses ────────────────────────────────────────
+		{
+			"duplicate LIKE clause",
+			"SHOW TABLES LIKE '%a%' LIKE '%b%'",
+			[]string{"Unexpected token 'LIKE'"},
+		},
+		{
+			"duplicate IN clause",
+			"SHOW TABLES IN ACCOUNT IN DATABASE",
+			[]string{"Unexpected token 'IN'"},
+		},
+		{
+			"duplicate LIMIT clause",
+			"SHOW TABLES LIMIT 5 LIMIT 10",
+			[]string{"Unexpected token 'LIMIT'"},
+		},
+		{
+			"duplicate STARTS WITH clause",
+			"SHOW TABLES STARTS WITH 'a' STARTS WITH 'b'",
+			[]string{"Unexpected token 'STARTS'"},
+		},
+		// ── STARTS WITHOUT WITH ──────────────────────────────────────
+		{
+			"STARTS without WITH keyword",
+			"SHOW TABLES STARTS foo",
+			[]string{"Expected WITH after STARTS"},
+		},
+		{
+			"bare STARTS at end of statement",
+			"SHOW TABLES STARTS",
+			[]string{"Expected WITH after STARTS"},
+		},
+		{
+			"STARTS WITH without string literal",
+			"SHOW TABLES STARTS WITH test_prefix",
+			[]string{"STARTS WITH requires a string literal"},
+		},
+		// ── Bare LIMIT (no number) ───────────────────────────────────
+		{
+			"bare LIMIT at end of statement",
+			"SHOW TABLES LIMIT",
+			[]string{"LIMIT requires a positive integer"},
+		},
+		// ── Unterminated string literals ─────────────────────────────
+		{
+			"LIKE with unterminated string literal",
+			"SHOW TABLES LIKE 'unterminated",
+			[]string{"Unterminated string literal in LIKE clause"},
+		},
+		{
+			"STARTS WITH unterminated string literal",
+			"SHOW TABLES STARTS WITH 'unterminated",
+			[]string{"Unterminated string literal in STARTS WITH clause"},
+		},
+		{
+			"LIMIT FROM with unterminated string literal",
+			"SHOW TABLES LIMIT 10 FROM 'unterminated",
+			[]string{"Unterminated string literal in LIMIT FROM clause"},
+		},
+		// ── LIMIT FROM without string ────────────────────────────────
+		{
+			"LIMIT FROM without string literal (bare word)",
+			"SHOW TABLES LIMIT 10 FROM",
+			[]string{"FROM in LIMIT clause requires a string literal"},
 		},
 	}
 
@@ -347,8 +432,6 @@ func TestShowObjectTypes_OrderingInvariant(t *testing.T) {
 		prevWords = n
 	}
 }
-
-// TestMatchStringLiteral tests edge cases of the matchStringLiteral helper.
 
 func TestDescribeObjectTypes_OrderingInvariant(t *testing.T) {
 	prevWords := 100 // start high
@@ -526,6 +609,22 @@ func TestValidateSnowflakePatterns_Describe(t *testing.T) {
 			"DESCRIBE NETWORK POLICY",
 			[]string{"DESCRIBE NETWORK POLICY requires an object name"},
 		},
+		{
+			"DESCRIBE ROW ACCESS POLICY with no name (3-word type)",
+			"DESCRIBE ROW ACCESS POLICY",
+			[]string{"DESCRIBE ROW ACCESS POLICY requires an object name"},
+		},
+		{
+			"DESCRIBE EXTERNAL TABLE with no name (2-word type)",
+			"DESCRIBE EXTERNAL TABLE",
+			[]string{"DESCRIBE EXTERNAL TABLE requires an object name"},
+		},
+		// ── Non-identifier object name ──────────────────────────────────
+		{
+			"DESCRIBE TABLE with non-identifier name (number)",
+			"DESCRIBE TABLE 123",
+			[]string{"Expected an object name after DESCRIBE TABLE"},
+		},
 		// ── FUNCTION without signature ───────────────────────────────────
 		{
 			"DESCRIBE FUNCTION without parens",
@@ -580,6 +679,22 @@ func TestValidateSnowflakePatterns_Describe(t *testing.T) {
 			"DESCRIBE SPECIFICATION db.my_spec",
 			[]string{"SPECIFICATION is an account-level object and should not be qualified"},
 		},
+		// ── RESULT / TRANSACTION without ID ──────────────────────────
+		{
+			"DESCRIBE RESULT without ID",
+			"DESCRIBE RESULT",
+			[]string{"DESCRIBE RESULT requires a query/transaction ID"},
+		},
+		{
+			"DESC RESULT without ID",
+			"DESC RESULT",
+			[]string{"DESCRIBE RESULT requires a query/transaction ID"},
+		},
+		{
+			"DESCRIBE TRANSACTION without ID",
+			"DESCRIBE TRANSACTION",
+			[]string{"DESCRIBE TRANSACTION requires a query/transaction ID"},
+		},
 		// ── Trailing unrecognized content ────────────────────────────────
 		{
 			"DESCRIBE TABLE with trailing garbage",
@@ -613,6 +728,65 @@ func TestValidateSnowflakePatterns_Describe(t *testing.T) {
 				if !found {
 					t.Errorf("Expected warning containing %q for %q, got: %v", wantMsg, tc.sql, warns)
 				}
+			}
+		})
+	}
+
+	// Multi-statement test: DESCRIBE embedded between other statements.
+	t.Run("multi-statement with valid DESCRIBE", func(t *testing.T) {
+		sql := "SELECT 1;\nDESCRIBE TABLE my_table;\nSELECT 2"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		if warns := getWarnings(markers); len(warns) > 0 {
+			t.Errorf("Expected 0 warnings for multi-statement SQL, got %d: %v", len(warns), warns)
+		}
+	})
+
+	t.Run("multi-statement with invalid DESCRIBE", func(t *testing.T) {
+		sql := "SELECT 1;\nDESCRIBE TABEL my_table;\nSELECT 2"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warns := getWarnings(markers)
+		if len(warns) != 1 {
+			t.Errorf("Expected 1 warning, got %d: %v", len(warns), warns)
+		}
+		if len(warns) > 0 && !strings.Contains(warns[0].Message, "Unknown object type 'TABEL'") {
+			t.Errorf("Expected object type warning, got: %v", warns[0].Message)
+		}
+	})
+}
+
+// TestCountIdentParts tests the countIdentParts helper that counts
+// dot-separated parts in an identifier path, skipping dots inside quotes.
+func TestCountIdentParts(t *testing.T) {
+	tests := []struct {
+		input string
+		want  int
+	}{
+		{"my_table", 1},
+		{"schema.table", 2},
+		{"db.schema.table", 3},
+		// Dots inside quoted identifiers are not separators.
+		{`"my.table"`, 1},
+		{`"db.schema".table`, 2},
+		{`db."my.schema".table`, 3},
+		// Empty string (degenerate).
+		{"", 1},
+		// All quoted parts.
+		{`"a"."b"."c"`, 3},
+		// Quoted identifier with no dots.
+		{`"simple"`, 1},
+		// Escaped double-quote inside quoted identifier.
+		{`"complex""name"`, 1},
+		// Mixed: escaped-quote ident dot regular ident.
+		{`"a""b".table`, 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := countIdentParts(tt.input)
+			if got != tt.want {
+				t.Errorf("countIdentParts(%q) = %d, want %d", tt.input, got, tt.want)
 			}
 		})
 	}
