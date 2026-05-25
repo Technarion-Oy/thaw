@@ -394,7 +394,8 @@ func TestCortexAI_SeverityIsWarning(t *testing.T) {
 		}
 	}
 	if cortexMarker == nil {
-		t.Fatal("No Cortex warning marker found")
+		t.Fatalf("No Cortex warning marker found")
+		return
 	}
 	// Severity 4 = Warning in Monaco editor
 	if cortexMarker.Severity != 4 {

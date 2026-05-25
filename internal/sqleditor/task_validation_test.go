@@ -214,7 +214,7 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' COMMENT = 'WHEN true' AS SELECT 1",
 		// ── String-literal false-positive: AS keyword inside COMMENT must
 		// not be mistaken for the body delimiter (tests string-stripping +
-		// EXECUTE_AS neutralisation path).
+		// EXECUTE_AS neutralization path).
 		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' COMMENT = 'AS SELECT 1' AS SELECT 2",
 		// ── String-literal false-positive: CLONE keyword inside COMMENT must
 		// not trigger the CLONE early-return branch.
@@ -490,7 +490,7 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 		},
 		// ── ALTER TASK — RESUME/SUSPEND with trailing content ────────────
 		// RESUME and SUSPEND must be standalone at end of statement (regex
-		// anchors to $). Trailing tokens make the sub-command unrecognised.
+		// anchors to $). Trailing tokens make the sub-command unrecognized.
 		{
 			"ALTER TASK RESUME with trailing content",
 			"ALTER TASK my_task RESUME NOW",
@@ -529,7 +529,6 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 }
 
 // ── Time Travel AT / BEFORE Tests ──────────────────────────────────────────
-
 
 func TestValidateTablesExist_CreateTask_UsingCron(t *testing.T) {
 	cases := []struct {
@@ -603,4 +602,3 @@ func TestValidateTablesExist_CreateTask_UsingCron(t *testing.T) {
 		})
 	}
 }
-

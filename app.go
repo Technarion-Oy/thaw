@@ -4546,7 +4546,7 @@ func (a *App) CanViewWarehouseMeteringHistory() (bool, error) {
 	_, err := a.client.QuerySingle(a.ctx,
 		"SELECT 1 FROM SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY LIMIT 0")
 	if err != nil {
-		return false, nil //nolint:nilerr // permission denied is not a caller error
+		return false, nil // permission denied is not a caller error
 	}
 	return true, nil
 }

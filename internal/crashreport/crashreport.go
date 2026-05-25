@@ -94,7 +94,7 @@ func report(panicMsg string, stack []byte) {
 // sendRemote is the placeholder for delivering the crash payload to a remote
 // backend. Implement this function when a crash-reporting service is chosen.
 //
-//nolint:unused,deadcode
+//nolint:unused
 func sendRemote(_ map[string]any) {
 	// TODO: implement remote crash report delivery.
 }

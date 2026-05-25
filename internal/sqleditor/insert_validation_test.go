@@ -955,7 +955,7 @@ func TestValidateSnowflakePatterns_InsertAllFirstOverwrite(t *testing.T) {
 
 	t.Run("WHEN without space before parenthesis is recognized", func(t *testing.T) {
 		// WHEN( without a space — '(' is not a word char, so the word
-		// boundary check should still recognise the WHEN keyword.
+		// boundary check should still recognize the WHEN keyword.
 		validQueries := []string{
 			`INSERT ALL
 			   WHEN(x > 0) THEN INTO t1
@@ -1311,4 +1311,3 @@ func TestValidateSnowflakePatterns_InsertAllFirstOverwrite(t *testing.T) {
 		}
 	})
 }
-

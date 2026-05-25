@@ -845,7 +845,7 @@ func TestValidateSnowflakePatterns_Secret_TypeValueSpecialChars(t *testing.T) {
 
 func TestValidateSnowflakePatterns_Secret_CommentBetweenSetAndProperty(t *testing.T) {
 	// A comment between SET and the property keyword should be stripped by
-	// cleanParseText, and the ALTER should still be recognised as valid.
+	// cleanParseText, and the ALTER should still be recognized as valid.
 	validCases := []string{
 		"ALTER SECRET my_secret SET /* note */ COMMENT = 'x'",
 		"ALTER SECRET my_secret SET -- setting comment\nCOMMENT = 'new'",
@@ -1410,8 +1410,8 @@ func TestValidateSnowflakePatterns_Secret_EmptyQuotedIdentifier(t *testing.T) {
 
 func TestValidateSnowflakePatterns_Secret_AlterSetValidPlusExtraToken(t *testing.T) {
 	// ALTER SECRET SET validates only that at least one known sub-command is
-	// present; additional unrecognised tokens after the valid property are not
-	// flagged. This test documents that permissive behaviour.
+	// present; additional unrecognized tokens after the valid property are not
+	// flagged. This test documents that permissive behavior.
 	validCases := []string{
 		"ALTER SECRET my_secret SET COMMENT = 'x' FOOBAR = 'y'",
 		"ALTER SECRET my_secret SET SECRET_STRING = 'v' EXTRA = 'e'",
@@ -1980,7 +1980,7 @@ func TestValidateSnowflakePatterns_Secret(t *testing.T) {
 			"ALTER SECRET my_secret SET TYPE = OAUTH2",
 			[]string{"Unknown ALTER SECRET sub-command"},
 		},
-		// -- FAIL: ALTER SECRET SET unknown property (completely unrecognised)
+		// -- FAIL: ALTER SECRET SET unknown property (completely unrecognized)
 		{
 			"ALTER SECRET SET unknown property",
 			"ALTER SECRET my_secret SET WAREHOUSE = my_wh",
@@ -2654,4 +2654,3 @@ func TestValidateSnowflakePatterns_Secret_UnexpectedPropertyInBlockComment(t *te
 		t.Errorf("Expected 'Unexpected property WAREHOUSE' warning (known false positive from comment), got: %v", warnMsgs(warns))
 	}
 }
-
