@@ -2080,3 +2080,371 @@ func TestAutocompleteContextFullDatatypeAndJoin(t *testing.T) {
 		}
 	})
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TestTypeCategory — categorization of Snowflake data types
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestTypeCategory(t *testing.T) {
+	tests := []struct {
+		name     string
+		dataType string
+		want     string
+	}{
+		// ── Numeric types ─────────────────────────────────────────────────────
+		{name: "NUMBER", dataType: "NUMBER", want: "numeric"},
+		{name: "INT", dataType: "INT", want: "numeric"},
+		{name: "INTEGER", dataType: "INTEGER", want: "numeric"},
+		{name: "BIGINT", dataType: "BIGINT", want: "numeric"},
+		{name: "SMALLINT", dataType: "SMALLINT", want: "numeric"},
+		{name: "TINYINT", dataType: "TINYINT", want: "numeric"},
+		{name: "FLOAT", dataType: "FLOAT", want: "numeric"},
+		{name: "DOUBLE", dataType: "DOUBLE", want: "numeric"},
+		{name: "DECIMAL", dataType: "DECIMAL", want: "numeric"},
+		{name: "REAL", dataType: "REAL", want: "numeric"},
+
+		// ── Text types ────────────────────────────────────────────────────────
+		{name: "VARCHAR", dataType: "VARCHAR", want: "text"},
+		{name: "STRING", dataType: "STRING", want: "text"},
+		{name: "TEXT", dataType: "TEXT", want: "text"},
+		{name: "CHAR", dataType: "CHAR", want: "text"},
+		{name: "BINARY", dataType: "BINARY", want: "text"},
+
+		// ── Boolean ───────────────────────────────────────────────────────────
+		{name: "BOOLEAN", dataType: "BOOLEAN", want: "boolean"},
+
+		// ── Datetime types ────────────────────────────────────────────────────
+		{name: "DATE", dataType: "DATE", want: "datetime"},
+		{name: "TIMESTAMP", dataType: "TIMESTAMP", want: "datetime"},
+		{name: "TIMESTAMP_LTZ", dataType: "TIMESTAMP_LTZ", want: "datetime"},
+		{name: "TIMESTAMP_NTZ", dataType: "TIMESTAMP_NTZ", want: "datetime"},
+		{name: "TIME", dataType: "TIME", want: "datetime"},
+
+		// ── Semi-structured ───────────────────────────────────────────────────
+		{name: "VARIANT", dataType: "VARIANT", want: "semi"},
+		{name: "OBJECT", dataType: "OBJECT", want: "semi"},
+		{name: "ARRAY", dataType: "ARRAY", want: "semi"},
+
+		// ── Case insensitivity ────────────────────────────────────────────────
+		{name: "lowercase varchar", dataType: "varchar", want: "text"},
+		{name: "mixed case Number", dataType: "Number", want: "numeric"},
+
+		// ── Type parameters stripped ──────────────────────────────────────────
+		{name: "VARCHAR(255)", dataType: "VARCHAR(255)", want: "text"},
+		{name: "NUMBER(18,2)", dataType: "NUMBER(18,2)", want: "numeric"},
+		{name: "DECIMAL(10)", dataType: "DECIMAL(10)", want: "numeric"},
+
+		// ── Unknown type fallback ─────────────────────────────────────────────
+		{name: "empty string", dataType: "", want: "other"},
+		{name: "nonsense type", dataType: "FOOBAR", want: "other"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := TypeCategory(tt.dataType)
+			if got != tt.want {
+				t.Errorf("TypeCategory(%q) = %q, want %q", tt.dataType, got, tt.want)
+			}
+		})
+	}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TestBuildCompositeConditions — FK-based JOIN condition builder
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestBuildCompositeConditions(t *testing.T) {
+	t.Run("single FK produces single condition", func(t *testing.T) {
+		fks := []FKEntry{
+			{FKColumn: "DEPT_ID", PKColumn: "ID", ConstraintName: "FK_EMP_DEPT", KeySequence: 1},
+		}
+		got := BuildCompositeConditions(fks, "E", "D")
+		if len(got) != 1 {
+			t.Fatalf("expected 1 condition, got %d: %v", len(got), got)
+		}
+		if !strings.Contains(got[0], "DEPT_ID") || !strings.Contains(got[0], "ID") {
+			t.Errorf("expected condition with DEPT_ID and ID, got %q", got[0])
+		}
+	})
+
+	t.Run("composite FK produces AND condition", func(t *testing.T) {
+		fks := []FKEntry{
+			{FKColumn: "FK_A", PKColumn: "PK_A", ConstraintName: "FK_COMP", KeySequence: 1},
+			{FKColumn: "FK_B", PKColumn: "PK_B", ConstraintName: "FK_COMP", KeySequence: 2},
+		}
+		got := BuildCompositeConditions(fks, "T1", "T2")
+		if len(got) != 1 {
+			t.Fatalf("expected 1 composite condition, got %d: %v", len(got), got)
+		}
+		if !strings.Contains(got[0], " AND ") {
+			t.Errorf("expected AND in composite condition, got %q", got[0])
+		}
+		// KeySequence ordering: FK_A should come before FK_B
+		idxA := strings.Index(got[0], "FK_A")
+		idxB := strings.Index(got[0], "FK_B")
+		if idxA > idxB {
+			t.Errorf("expected FK_A before FK_B (by KeySequence), got %q", got[0])
+		}
+	})
+
+	t.Run("multiple separate constraints produce multiple conditions", func(t *testing.T) {
+		fks := []FKEntry{
+			{FKColumn: "DEPT_ID", PKColumn: "ID", ConstraintName: "FK1", KeySequence: 1},
+			{FKColumn: "REGION_ID", PKColumn: "ID", ConstraintName: "FK2", KeySequence: 1},
+		}
+		got := BuildCompositeConditions(fks, "E", "D")
+		if len(got) != 2 {
+			t.Fatalf("expected 2 conditions, got %d: %v", len(got), got)
+		}
+	})
+
+	t.Run("empty FKs produces empty result", func(t *testing.T) {
+		got := BuildCompositeConditions(nil, "A", "B")
+		if len(got) != 0 {
+			t.Errorf("expected empty result, got %v", got)
+		}
+	})
+
+	t.Run("empty constraint name groups by FKColumn", func(t *testing.T) {
+		fks := []FKEntry{
+			{FKColumn: "COL_A", PKColumn: "PK_A", ConstraintName: "", KeySequence: 1},
+			{FKColumn: "COL_B", PKColumn: "PK_B", ConstraintName: "", KeySequence: 1},
+		}
+		got := BuildCompositeConditions(fks, "X", "Y")
+		// Each FK with empty constraint name uses FKColumn as key → separate groups
+		if len(got) != 2 {
+			t.Fatalf("expected 2 conditions (separate groups by FKColumn), got %d: %v", len(got), got)
+		}
+	})
+
+	t.Run("composite FK reversed KeySequence is sorted", func(t *testing.T) {
+		fks := []FKEntry{
+			{FKColumn: "FK_SECOND", PKColumn: "PK_SECOND", ConstraintName: "FK_COMP", KeySequence: 2},
+			{FKColumn: "FK_FIRST", PKColumn: "PK_FIRST", ConstraintName: "FK_COMP", KeySequence: 1},
+		}
+		got := BuildCompositeConditions(fks, "A", "B")
+		if len(got) != 1 {
+			t.Fatalf("expected 1 condition, got %d", len(got))
+		}
+		idxFirst := strings.Index(got[0], "FK_FIRST")
+		idxSecond := strings.Index(got[0], "FK_SECOND")
+		if idxFirst > idxSecond {
+			t.Errorf("expected FK_FIRST before FK_SECOND after sorting, got %q", got[0])
+		}
+	})
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TestPkHeuristicConditions — PK naming convention suggestions
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestPkHeuristicConditions(t *testing.T) {
+	t.Run("TABLE_ID pattern: last table has OTHER_ID column", func(t *testing.T) {
+		// ORDERS has CUSTOMER_ID → should match CUSTOMER.ID (exact table name match)
+		got := PkHeuristicConditions(
+			"ORDERS", "O", "CUSTOMER", "C",
+			[]string{"ORDER_ID", "CUSTOMER_ID", "TOTAL"}, // lastCols
+			[]string{"ID", "NAME", "EMAIL"},               // otherCols
+		)
+		if len(got) != 1 {
+			t.Fatalf("expected 1 heuristic condition, got %d: %v", len(got), got)
+		}
+		if !strings.Contains(got[0], "CUSTOMER_ID") || !strings.Contains(got[0], "ID") {
+			t.Errorf("expected CUSTOMER_ID = ID match, got %q", got[0])
+		}
+	})
+
+	t.Run("reverse direction: other table has LAST_ID column", func(t *testing.T) {
+		got := PkHeuristicConditions(
+			"CATEGORIES", "C", "PRODUCTS", "P",
+			[]string{"ID", "NAME"},                          // lastCols (CATEGORIES)
+			[]string{"PRODUCT_ID", "CATEGORIES_ID", "NAME"}, // otherCols (PRODUCTS)
+		)
+		if len(got) != 1 {
+			t.Fatalf("expected 1 condition, got %d: %v", len(got), got)
+		}
+		if !strings.Contains(got[0], "CATEGORIES_ID") {
+			t.Errorf("expected CATEGORIES_ID match, got %q", got[0])
+		}
+	})
+
+	t.Run("no match when no ID column exists", func(t *testing.T) {
+		got := PkHeuristicConditions(
+			"T1", "A", "T2", "B",
+			[]string{"T2_ID"}, // lastCols
+			[]string{"NAME"},  // otherCols — no "ID"
+		)
+		if len(got) != 0 {
+			t.Errorf("expected no matches when other has no ID column, got %v", got)
+		}
+	})
+
+	t.Run("no match when no naming convention applies", func(t *testing.T) {
+		got := PkHeuristicConditions(
+			"T1", "A", "T2", "B",
+			[]string{"FOO", "BAR"},
+			[]string{"ID", "BAZ"},
+		)
+		if len(got) != 0 {
+			t.Errorf("expected no matches, got %v", got)
+		}
+	})
+
+	t.Run("case insensitive matching", func(t *testing.T) {
+		got := PkHeuristicConditions(
+			"orders", "o", "customer", "c",
+			[]string{"customer_id"},
+			[]string{"id"},
+		)
+		if len(got) != 1 {
+			t.Fatalf("expected case-insensitive match, got %d: %v", len(got), got)
+		}
+	})
+
+	t.Run("both directions match produces two conditions", func(t *testing.T) {
+		// T1 has T2_ID and ID; T2 has T1_ID and ID → both directions match
+		got := PkHeuristicConditions(
+			"T1", "A", "T2", "B",
+			[]string{"ID", "T2_ID"},
+			[]string{"ID", "T1_ID"},
+		)
+		if len(got) != 2 {
+			t.Fatalf("expected 2 conditions (both directions), got %d: %v", len(got), got)
+		}
+	})
+
+	t.Run("TABLEID pattern (no underscore)", func(t *testing.T) {
+		got := PkHeuristicConditions(
+			"ORDERS", "O", "CUSTOMER", "C",
+			[]string{"CUSTOMERID"},
+			[]string{"ID"},
+		)
+		if len(got) != 1 {
+			t.Fatalf("expected CUSTOMERID match, got %d: %v", len(got), got)
+		}
+	})
+
+	t.Run("empty column lists", func(t *testing.T) {
+		got := PkHeuristicConditions("T1", "A", "T2", "B", nil, nil)
+		if len(got) != 0 {
+			t.Errorf("expected no matches with empty cols, got %v", got)
+		}
+	})
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Additional edge cases for GetIdentifierAtColumn
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestGetIdentifierAtColumn_EmptyLine(t *testing.T) {
+	got := GetIdentifierAtColumn("", 0)
+	if got != nil {
+		t.Errorf("GetIdentifierAtColumn('', 0) = %v, want nil", got)
+	}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Additional edge cases for ResolveTableRefs
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestResolveTableRefs_EmptyInput(t *testing.T) {
+	got := ResolveTableRefs(nil, nil, nil, nil)
+	if len(got) != 0 {
+		t.Errorf("expected empty result for nil refs, got %+v", got)
+	}
+	got = ResolveTableRefs([]JoinTableRef{}, nil, nil, nil)
+	if len(got) != 0 {
+		t.Errorf("expected empty result for empty refs, got %+v", got)
+	}
+}
+
+func TestResolveTableRefs_TwoPartFallsBackToSession(t *testing.T) {
+	refs := []JoinTableRef{{Schema: "MY_SCH", Name: "MY_TBL", Alias: ""}}
+	sess := &SessionContext{Database: "SESS_DB"}
+	got := ResolveTableRefs(refs, nil, nil, sess)
+	if len(got) != 1 || got[0].DB != "SESS_DB" || got[0].Schema != "MY_SCH" {
+		t.Errorf("expected DB from session context, got %+v", got)
+	}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Additional edge cases for ExtractInEditorTableDefs
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestExtractInEditorTableDefs_NoCreateTable(t *testing.T) {
+	sql := "SELECT * FROM users;\nINSERT INTO logs VALUES (1);"
+	ranges := GetStatementRanges(sql)
+	defs := ExtractInEditorTableDefs(sql, ranges, nil, nil)
+	if len(defs) != 0 {
+		t.Errorf("expected no defs for non-CREATE statements, got %+v", defs)
+	}
+}
+
+func TestExtractInEditorTableDefs_EmptySQL(t *testing.T) {
+	defs := ExtractInEditorTableDefs("", nil, nil, nil)
+	if len(defs) != 0 {
+		t.Errorf("expected no defs for empty SQL, got %+v", defs)
+	}
+}
+
+func TestExtractInEditorTableDefs_CreateTableIfNotExists(t *testing.T) {
+	sql := "CREATE TABLE IF NOT EXISTS my_tbl (id INT, name VARCHAR);"
+	ranges := GetStatementRanges(sql)
+	defs := ExtractInEditorTableDefs(sql, ranges, nil, nil)
+	if len(defs) != 1 {
+		t.Fatalf("expected 1 def for CREATE TABLE IF NOT EXISTS, got %d", len(defs))
+	}
+	if defs[0].Name != "MY_TBL" {
+		t.Errorf("expected MY_TBL, got %s", defs[0].Name)
+	}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Additional edge cases for ComputeGitLineDiff
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestComputeGitLineDiff_MultipleNonContiguousChanges(t *testing.T) {
+	head := []string{"a", "b", "c", "d", "e"}
+	current := []string{"a", "X", "c", "Y", "e"}
+	got := ComputeGitLineDiff(head, current, 3000)
+	if !reflect.DeepEqual(got.Modified, []int{2, 4}) {
+		t.Errorf("Modified = %v, want [2 4]", got.Modified)
+	}
+	if len(got.Added) != 0 {
+		t.Errorf("Added = %v, want empty", got.Added)
+	}
+	if len(got.Deleted) != 0 {
+		t.Errorf("Deleted = %v, want empty", got.Deleted)
+	}
+}
+
+func TestComputeGitLineDiff_CompleteReplacement(t *testing.T) {
+	head := []string{"a", "b", "c"}
+	current := []string{"x", "y", "z"}
+	got := ComputeGitLineDiff(head, current, 3000)
+	// All lines are different — depending on LCS, these could be modifications or add+delete
+	totalChanges := len(got.Added) + len(got.Modified) + len(got.Deleted)
+	if totalChanges == 0 {
+		t.Error("expected changes when all lines differ")
+	}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Additional edge cases for GetScriptingCompletions
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestGetScriptingCompletions_EmptyDollarBlock(t *testing.T) {
+	sql := "$$ $$"
+	got := GetScriptingCompletions(sql, 3) // cursor inside empty block
+	if len(got.Variables) != 0 {
+		t.Errorf("expected no variables in empty $$ block, got %v", got.Variables)
+	}
+}
+
+func TestGetScriptingCompletions_CursorAtZero(t *testing.T) {
+	sql := "$$ DECLARE x INT; BEGIN END; $$"
+	got := GetScriptingCompletions(sql, 0)
+	if len(got.Variables) != 0 {
+		t.Errorf("expected no variables at offset 0, got %v", got.Variables)
+	}
+}
