@@ -18,7 +18,6 @@ import {
   EyeOutlined,
   FunctionOutlined,
   CodeOutlined,
-  OrderedListOutlined,
   InboxOutlined,
   ApiOutlined,
   ClockCircleOutlined,
@@ -58,6 +57,12 @@ import {
   BranchesOutlined,
   CloseOutlined,
 } from "@ant-design/icons";
+import {
+  objectIcon,
+  databaseIcon,
+  schemaIcon,
+  typeGroupIcon,
+} from "../sidebar/objectIcons";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
@@ -129,24 +134,7 @@ const KIND_LABEL: Record<string, string> = {
 
 const KIND_ORDER = ["TABLE", "VIEW", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY"];
 
-function kindIcon(kind: string) {
-  switch (kind) {
-    case "TABLE":       return <TableOutlined />;
-    case "VIEW":        return <EyeOutlined />;
-    case "FUNCTION":    return <FunctionOutlined />;
-    case "PROCEDURE":   return <CodeOutlined />;
-    case "SEQUENCE":    return <OrderedListOutlined />;
-    case "STAGE":       return <InboxOutlined />;
-    case "STREAM":      return <ApiOutlined />;
-    case "TASK":        return <ClockCircleOutlined />;
-    case "FILE FORMAT": return <FileOutlined />;
-    case "PIPE":        return <ApiOutlined />;
-    case "NOTEBOOK":    return <ExperimentOutlined />;
-    case "SECRET":          return <KeyOutlined />;
-    case "GIT REPOSITORY":  return <BranchesOutlined />;
-    default:                return <FileOutlined />;
-  }
-}
+const kindIcon = (kind: string) => objectIcon(kind);
 
 interface ContextMenu {
   x: number;
@@ -628,7 +616,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         dbs.map((db) => ({
           title: db,
           key: `db:${db}`,
-          icon: <DatabaseOutlined />,
+          icon: databaseIcon(),
           isLeaf: false,
         }))
       );
@@ -681,7 +669,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           updateNode(prev, key, schemas.map((s) => ({
             title:  s,
             key:    `schema:${db}:${s}`,
-            icon:   <FolderOutlined />,
+            icon:   schemaIcon(),
             isLeaf: false,
           })))
         );
@@ -714,7 +702,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         const typeNodes: DataNode[] = sortedKinds.map((kind) => ({
           title:    KIND_LABEL[kind] ?? kind,
           key:      `type:${db}:${schema}:${kind}`,
-          icon:     <FolderOutlined style={{ color: "var(--text-muted)" }} />,
+          icon:     typeGroupIcon(),
           children: kind === "TASK"
             ? buildTaskTree(groups[kind], db, schema)
             : groups[kind].map((o) => ({
@@ -2225,8 +2213,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               }}
             >
             <Tree
-               treeData={displayData}
-               onRightClick={onRightClick as any}
+              className="object-browser-tree"
+              treeData={displayData}
+              onRightClick={onRightClick as any}
                selectedKeys={Array.from(selectedNodeKeys)}
                multiple
                switcherIcon={(props: any) => {

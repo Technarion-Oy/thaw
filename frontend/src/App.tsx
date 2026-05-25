@@ -228,23 +228,117 @@ export default function App() {
     <ConfigProvider
       theme={{
         algorithm: antdAlgorithm,
+        // Emit --ant-* CSS vars instead of inline-injected styles. Theme switches
+        // become cheap (single :root var change) and custom CSS can layer on top
+        // without specificity fights.
+        cssVar: true,
+        hashed: false,
         token: {
-          colorPrimary: isDark ? "#40c8fc" : "#0969da",
-          borderRadius: 6,
-          fontFamily: uiFont,
-          fontWeightStrong: 600,
+          // ── Typography
+          fontFamily:        uiFont,
+          fontSize:          13,
+          fontSizeSM:        12,
+          fontSizeLG:        15,
+          lineHeight:        1.5715,
+          fontWeightStrong:  600,
+
+          // ── Brand
+          colorPrimary:      isDark ? "#58a6ff" : "#0550ae",
+          colorInfo:         isDark ? "#58a6ff" : "#0550ae",
+          colorSuccess:      isDark ? "#3fb950" : "#1a7f37",
+          colorWarning:      isDark ? "#d29922" : "#9a6700",
+          colorError:        isDark ? "#f85149" : "#cf222e",
+
+          // ── Surfaces (mirror the CSS variables in global.css)
+          colorBgBase:       isDark ? "#0d1117" : "#ffffff",
+          colorBgLayout:     isDark ? "#0d1117" : "#f6f8fa",
+          colorBgContainer:  isDark ? "#161b22" : "#ffffff",
+          colorBgElevated:   isDark ? "#21262d" : "#ffffff",
+          colorBgSpotlight:  isDark ? "#262c34" : "#eaeef2",
+
+          // ── Text (every tier ≥ AA against colorBgBase)
+          colorTextBase:        isDark ? "#f0f6fc" : "#0f1419",
+          colorText:            isDark ? "#f0f6fc" : "#0f1419",  // 16.0:1 / 19.6:1
+          colorTextSecondary:   isDark ? "#c9d1d9" : "#4a5159",  // 11.4:1 /  8.6:1
+          colorTextTertiary:    isDark ? "#8b949e" : "#6e7681",  //  5.3:1 /  4.7:1  ← was failing
+          colorTextQuaternary:  isDark ? "#6e7681" : "#8c959f",
+          colorTextDescription: isDark ? "#8b949e" : "#6e7681",
+
+          // ── Borders
+          //    colorBorder is what Antd uses for Input/Select/Button outlines, so it
+          //    must clear WCAG 1.4.11 (3:1 non-text). The lighter, sub-3:1 tier moves
+          //    to colorBorderSecondary, where it's used only for decorative dividers
+          //    inside already-elevated containers (1.4.11 exempt).
+          colorBorder:          isDark ? "#6e7681" : "#8c959f",  // 4.12:1 / 3.04:1 ✓
+          colorBorderSecondary: isDark ? "#3d444d" : "#c2c8d0",  // decorative
+
+          // ── Shape
+          borderRadius:    6,
+          borderRadiusLG:  8,
+          borderRadiusSM:  4,
+          controlHeight:   32,
+          controlHeightSM: 26,
+          controlHeightLG: 40,
+
+          // ── Motion (snappier — desktop tool, not a marketing site)
+          motionDurationFast: "0.08s",
+          motionDurationMid:  "0.14s",
         },
         components: {
           Button: {
             fontWeight: 500,
-            // Dark mode: vivid text and a clearly visible border on default buttons.
+            primaryShadow: "none",
+            defaultShadow: "none",
             ...(isDark && {
               defaultColor:            "#f0f6fc",
-              defaultBorderColor:      "#768390",
+              defaultBorderColor:      "#3d444d",
               defaultHoverColor:       "#ffffff",
-              defaultHoverBorderColor: "#adbac7",
-              defaultHoverBg:          "#2d333b",
+              defaultHoverBorderColor: "#6e7681",
+              defaultHoverBg:          "#21262d",
             }),
+          },
+          Input: {
+            activeBorderColor: isDark ? "#58a6ff" : "#0550ae",
+            hoverBorderColor:  isDark ? "#6e7681" : "#8c959f",
+            activeShadow:      `0 0 0 2px ${isDark ? "rgba(88,166,255,.25)" : "rgba(5,80,174,.18)"}`,
+          },
+          Select: {
+            optionSelectedBg: isDark ? "#21262d" : "#eaeef2",
+            optionActiveBg:   isDark ? "#262c34" : "#f1f4f8",
+          },
+          Table: {
+            headerBg:         isDark ? "#21262d" : "#f6f8fa",
+            headerColor:      isDark ? "#f0f6fc" : "#0f1419",
+            headerSplitColor: isDark ? "#30363d" : "#d8dde3",
+            rowHoverBg:       isDark ? "#262c34" : "#eaeef2",
+            borderColor:      isDark ? "#30363d" : "#d8dde3",
+          },
+          Menu: {
+            itemColor:         isDark ? "#c9d1d9" : "#4a5159",
+            itemSelectedColor: isDark ? "#ffffff" : "#0f1419",
+            itemSelectedBg:    isDark ? "#262c34" : "#eaeef2",
+            itemHoverColor:    isDark ? "#f0f6fc" : "#0f1419",
+          },
+          Tabs: {
+            itemColor:         isDark ? "#8b949e" : "#6e7681",
+            itemHoverColor:    isDark ? "#c9d1d9" : "#4a5159",
+            itemSelectedColor: isDark ? "#f0f6fc" : "#0f1419",
+            itemActiveColor:   isDark ? "#f0f6fc" : "#0f1419",
+            inkBarColor:       isDark ? "#58a6ff" : "#0550ae",
+          },
+          Tooltip: {
+            colorBgSpotlight:    isDark ? "#262c34" : "#0f1419",
+            colorTextLightSolid: "#ffffff",
+          },
+          Modal: {
+            contentBg: isDark ? "#161b22" : "#ffffff",
+            headerBg:  isDark ? "#161b22" : "#ffffff",
+          },
+          Segmented: {
+            itemSelectedBg:    isDark ? "#262c34" : "#ffffff",
+            itemSelectedColor: isDark ? "#f0f6fc" : "#0f1419",
+            itemColor:         isDark ? "#c9d1d9" : "#4a5159",
+            itemHoverColor:    isDark ? "#f0f6fc" : "#0f1419",
           },
         },
       }}
