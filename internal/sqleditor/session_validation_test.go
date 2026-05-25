@@ -64,6 +64,19 @@ func TestValidateSnowflakePatterns_AlterSession(t *testing.T) {
 		"ALTER SESSION SET PERIODIC_DATA_REKEYING = TRUE",
 		"ALTER SESSION SET CLIENT_MEMORY_LIMIT = 1536",
 		"ALTER SESSION SET CLIENT_PREFETCH_THREADS = 4",
+		// Unquoted enum value (matched by [^\s;]+ regex path)
+		"ALTER SESSION SET BINARY_OUTPUT_FORMAT = HEX",
+		// Case-insensitive enum value
+		"ALTER SESSION SET GEOGRAPHY_OUTPUT_FORMAT = 'geojson'",
+		// SQL-escaped quotes in string value
+		"ALTER SESSION SET QUERY_TAG = 'it''s a tag'",
+		// Empty string value
+		"ALTER SESSION SET QUERY_TAG = ''",
+		// Exact boundary values for TWO_DIGIT_CENTURY_START
+		"ALTER SESSION SET TWO_DIGIT_CENTURY_START = 1900",
+		"ALTER SESSION SET TWO_DIGIT_CENTURY_START = 2100",
+		// Multi-line statement (newline between keywords)
+		"ALTER SESSION\nSET QUERY_TAG = 'test'",
 		// UNSET with single parameter
 		"ALTER SESSION UNSET QUERY_TAG",
 		// UNSET with multiple comma-separated parameters
@@ -78,6 +91,61 @@ func TestValidateSnowflakePatterns_AlterSession(t *testing.T) {
 		"ALTER SESSION SET QUERY_TAG = 'test' -- trailing comment",
 		"ALTER SESSION UNSET /* comment */ QUERY_TAG",
 		"ALTER SESSION UNSET QUERY_TAG -- trailing comment",
+		// Tab characters between keywords
+		"ALTER\tSESSION\tSET\tQUERY_TAG\t=\t'test'",
+		// Leading whitespace
+		"   ALTER SESSION SET QUERY_TAG = 'test'",
+		// String value containing semicolons
+		"ALTER SESSION SET QUERY_TAG = 'tag;with;semicolons'",
+		// String value containing equals sign
+		"ALTER SESSION SET QUERY_TAG = 'key=value'",
+		// UNSET with lowercase known param names
+		"ALTER SESSION UNSET query_tag",
+		"ALTER SESSION UNSET query_tag, timezone",
+		// UNSET with spaces around commas
+		"ALTER SESSION UNSET QUERY_TAG , TIMEZONE",
+		// Trailing whitespace after value
+		"ALTER SESSION SET QUERY_TAG = 'test'   ",
+		// SET with integer at exact boundary (min)
+		"ALTER SESSION SET WEEK_START = 0",
+		// Integer with leading zeros (valid value)
+		"ALTER SESSION SET WEEK_START = 03",
+		// UNSET with mixed case params
+		"ALTER SESSION UNSET Query_Tag",
+		// Quoted boolean value (exercises unquote path for spBool)
+		"ALTER SESSION SET AUTOCOMMIT = 'TRUE'",
+		"ALTER SESSION SET AUTOCOMMIT = 'FALSE'",
+		// Quoted integer range value (exercises unquote path for spIntRange)
+		"ALTER SESSION SET WEEK_START = '3'",
+		// Quoted non-negative integer value (exercises unquote path for spNonNeg)
+		"ALTER SESSION SET ROWS_PER_RESULTSET = '100'",
+		// UNSET with trailing comma (empty token after comma should be skipped)
+		"ALTER SESSION UNSET QUERY_TAG,",
+		// Unquoted string param value (exercises [^\s;]+ regex path for spString)
+		"ALTER SESSION SET QUERY_TAG = my_tag",
+		// Multiple params across separate lines
+		"ALTER SESSION SET\nAUTOCOMMIT = TRUE\nQUERY_TAG = 'test'",
+		// No whitespace around equals sign (compact syntax)
+		"ALTER SESSION SET AUTOCOMMIT=TRUE",
+		"ALTER SESSION SET QUERY_TAG='test'",
+		// Extra whitespace around equals sign
+		"ALTER SESSION SET QUERY_TAG   =   'test'",
+		// All param type validators in one statement (spBool, spIntRange, spEnum, spString, spNonNeg)
+		"ALTER SESSION SET AUTOCOMMIT = TRUE WEEK_START = 3 BINARY_OUTPUT_FORMAT = 'HEX' QUERY_TAG = 'test' ROWS_PER_RESULTSET = 100",
+		// Trailing semicolon (common real-world pattern, stripped by parseText pipeline)
+		"ALTER SESSION SET AUTOCOMMIT = TRUE;",
+		// Duplicate parameter names in SET (each validated independently, no duplicate error)
+		"ALTER SESSION SET AUTOCOMMIT = TRUE AUTOCOMMIT = FALSE",
+		// String value containing backslashes
+		"ALTER SESSION SET QUERY_TAG = 'path\\to\\file'",
+		// String value containing line-comment syntax (stripCommentsSQL interaction)
+		"ALTER SESSION SET QUERY_TAG = 'tag -- not a comment'",
+		// String value containing block-comment syntax (stripCommentsSQL interaction)
+		"ALTER SESSION SET QUERY_TAG = 'tag /* not */ end'",
+		// Block comment splitting ALTER and SESSION keywords
+		"ALTER /* comment */ SESSION SET QUERY_TAG = 'test'",
+		// Multi-line SET with trailing comments between param assignments
+		"ALTER SESSION SET\nAUTOCOMMIT = TRUE -- first param\nQUERY_TAG = 'test'",
 	}
 
 	for _, sql := range validCases {
@@ -207,6 +275,199 @@ func TestValidateSnowflakePatterns_AlterSession(t *testing.T) {
 			"invalid TIMESTAMP_TYPE_MAPPING",
 			"ALTER SESSION SET TIMESTAMP_TYPE_MAPPING = 'TIMESTAMP_XYZ'",
 			[]string{"TIMESTAMP_TYPE_MAPPING must be one of: TIMESTAMP_NTZ, TIMESTAMP_LTZ, TIMESTAMP_TZ"},
+		},
+		{
+			"invalid GEOMETRY_OUTPUT_FORMAT",
+			"ALTER SESSION SET GEOMETRY_OUTPUT_FORMAT = 'XML'",
+			[]string{"GEOMETRY_OUTPUT_FORMAT must be one of: GEOJSON, WKT, WKB, EWKT, EWKB"},
+		},
+		{
+			"multiple unknown params in SET",
+			"ALTER SESSION SET FAKE_A = 'x' FAKE_B = 'y'",
+			[]string{
+				"Unknown session parameter 'FAKE_A'",
+				"Unknown session parameter 'FAKE_B'",
+			},
+		},
+		{
+			"multiple unknown params in UNSET",
+			"ALTER SESSION UNSET FAKE_ONE, FAKE_TWO",
+			[]string{
+				"Unknown session parameter 'FAKE_ONE'",
+				"Unknown session parameter 'FAKE_TWO'",
+			},
+		},
+		{
+			"TWO_DIGIT_CENTURY_START just below min boundary",
+			"ALTER SESSION SET TWO_DIGIT_CENTURY_START = 1899",
+			[]string{"TWO_DIGIT_CENTURY_START must be an integer between 1900 and 2100"},
+		},
+		{
+			"TWO_DIGIT_CENTURY_START just above max boundary",
+			"ALTER SESSION SET TWO_DIGIT_CENTURY_START = 2101",
+			[]string{"TWO_DIGIT_CENTURY_START must be an integer between 1900 and 2100"},
+		},
+		{
+			"float value for non-negative integer param",
+			"ALTER SESSION SET ROWS_PER_RESULTSET = 3.5",
+			[]string{"ROWS_PER_RESULTSET must be a non-negative integer"},
+		},
+		{
+			"float value for integer range param",
+			"ALTER SESSION SET WEEK_START = 3.5",
+			[]string{"WEEK_START must be an integer between 0 and 7"},
+		},
+		{
+			"unquoted invalid enum value",
+			"ALTER SESSION SET BINARY_OUTPUT_FORMAT = INVALID",
+			[]string{"BINARY_OUTPUT_FORMAT must be one of: HEX, BASE64, UTF8"},
+		},
+		{
+			"ALTER SESSION followed by invalid keyword",
+			"ALTER SESSION RESET",
+			[]string{"ALTER SESSION requires SET or UNSET"},
+		},
+		{
+			"known param without = value (no other valid pairs)",
+			"ALTER SESSION SET QUERY_TAG",
+			[]string{"ALTER SESSION SET requires at least one parameter assignment"},
+		},
+		{
+			"lowercase invalid boolean value",
+			"ALTER SESSION SET AUTOCOMMIT = maybe",
+			[]string{"AUTOCOMMIT must be TRUE or FALSE"},
+		},
+		{
+			"integer value with leading zeros out of range",
+			"ALTER SESSION SET WEEK_START = 09",
+			[]string{"WEEK_START must be an integer between 0 and 7"},
+		},
+		{
+			"negative value for non-negative integer param",
+			"ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = -10",
+			[]string{"STATEMENT_TIMEOUT_IN_SECONDS must be a non-negative integer"},
+		},
+		{
+			"empty value after equals (no matching value)",
+			"ALTER SESSION SET AUTOCOMMIT = TRUE TIMEZONE",
+			[]string{"missing '= <value>' assignment"},
+		},
+		{
+			"quoted invalid boolean value",
+			"ALTER SESSION SET AUTOCOMMIT = 'MAYBE'",
+			[]string{"AUTOCOMMIT must be TRUE or FALSE"},
+		},
+		{
+			"quoted out-of-range integer value",
+			"ALTER SESSION SET WEEK_START = '99'",
+			[]string{"WEEK_START must be an integer between 0 and 7"},
+		},
+		{
+			"quoted negative non-negative integer",
+			"ALTER SESSION SET ROWS_PER_RESULTSET = '-5'",
+			[]string{"ROWS_PER_RESULTSET must be a non-negative integer"},
+		},
+		{
+			"enum with leading/trailing spaces in quotes",
+			"ALTER SESSION SET BINARY_OUTPUT_FORMAT = ' HEX '",
+			[]string{"BINARY_OUTPUT_FORMAT must be one of: HEX, BASE64, UTF8"},
+		},
+		{
+			"SET body is entirely a line comment",
+			"ALTER SESSION SET -- everything",
+			[]string{"ALTER SESSION SET requires at least one parameter assignment"},
+		},
+		{
+			"missing equals sign between param and value",
+			"ALTER SESSION SET QUERY_TAG 'test'",
+			[]string{"ALTER SESSION SET requires at least one parameter assignment"},
+		},
+		{
+			"multiple stray tokens without value assignment",
+			"ALTER SESSION SET AUTOCOMMIT = TRUE TIMEZONE QUERY_TAG",
+			[]string{
+				"missing '= <value>' assignment",
+				"missing '= <value>' assignment",
+			},
+		},
+		{
+			"integer overflow for spNonNeg param",
+			"ALTER SESSION SET ROWS_PER_RESULTSET = 99999999999999999999",
+			[]string{"ROWS_PER_RESULTSET must be a non-negative integer"},
+		},
+		{
+			"integer overflow for spIntRange param",
+			"ALTER SESSION SET WEEK_START = 99999999999999999999",
+			[]string{"WEEK_START must be an integer between 0 and 7"},
+		},
+		{
+			"mixed valid and unknown params in SET",
+			"ALTER SESSION SET AUTOCOMMIT = TRUE FAKE_PARAM = 'x'",
+			[]string{"Unknown session parameter 'FAKE_PARAM'"},
+		},
+		{
+			"known param bad value plus unknown param",
+			"ALTER SESSION SET AUTOCOMMIT = MAYBE FAKE_PARAM = 'x'",
+			[]string{
+				"AUTOCOMMIT must be TRUE or FALSE",
+				"Unknown session parameter 'FAKE_PARAM'",
+			},
+		},
+		{
+			"numeric 1 for boolean param",
+			"ALTER SESSION SET AUTOCOMMIT = 1",
+			[]string{"AUTOCOMMIT must be TRUE or FALSE"},
+		},
+		{
+			"numeric 0 for boolean param",
+			"ALTER SESSION SET AUTOCOMMIT = 0",
+			[]string{"AUTOCOMMIT must be TRUE or FALSE"},
+		},
+		{
+			"empty quoted value for boolean param",
+			"ALTER SESSION SET AUTOCOMMIT = ''",
+			[]string{"AUTOCOMMIT must be TRUE or FALSE"},
+		},
+		{
+			"empty quoted value for integer range param",
+			"ALTER SESSION SET WEEK_START = ''",
+			[]string{"WEEK_START must be an integer between 0 and 7"},
+		},
+		{
+			"empty quoted value for non-negative integer param",
+			"ALTER SESSION SET ROWS_PER_RESULTSET = ''",
+			[]string{"ROWS_PER_RESULTSET must be a non-negative integer"},
+		},
+		{
+			"unquoted multi-word enum value (only first word captured)",
+			"ALTER SESSION SET TRANSACTION_DEFAULT_ISOLATION_LEVEL = READ COMMITTED",
+			[]string{
+				"TRANSACTION_DEFAULT_ISOLATION_LEVEL must be one of: READ COMMITTED",
+				"missing '= <value>' assignment",
+			},
+		},
+		{
+			"SET body is entirely a block comment",
+			"ALTER SESSION SET /* nothing here */",
+			[]string{"ALTER SESSION SET requires at least one parameter assignment"},
+		},
+		{
+			"UNSET body is entirely a block comment",
+			"ALTER SESSION UNSET /* nothing here */",
+			[]string{"ALTER SESSION UNSET requires at least one parameter name"},
+		},
+		{
+			"UNSET body is entirely a line comment",
+			"ALTER SESSION UNSET -- everything",
+			[]string{"ALTER SESSION UNSET requires at least one parameter name"},
+		},
+		{
+			"UNSET with assignment syntax rejected",
+			"ALTER SESSION UNSET QUERY_TAG = 'test'",
+			[]string{
+				"Unknown session parameter '='",
+				"Unknown session parameter ''TEST''",
+			},
 		},
 	}
 

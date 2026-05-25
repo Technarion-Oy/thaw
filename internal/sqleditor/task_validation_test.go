@@ -47,6 +47,8 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 		// ── CREATE TASK — child task with WHEN condition ─────────────────
 		"CREATE TASK child_task WAREHOUSE = wh AFTER parent WHEN SYSTEM$GET_PREDECESSOR_RETURN_VALUE('parent') = 'done' AS SELECT 1",
 		"CREATE TASK child_task WAREHOUSE = wh AFTER parent WHEN cond1 AND cond2 AS SELECT 1",
+		// ── CREATE TASK — multiple predecessors + WHEN combined ──────────
+		"CREATE TASK child_task WAREHOUSE = wh AFTER task1, task2, task3 WHEN SYSTEM$STREAM_HAS_DATA('s') AS SELECT 1",
 		// ── CREATE TASK — root task with WHEN (valid per Snowflake docs) ─
 		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' WHEN SYSTEM$STREAM_HAS_DATA('my_stream') AS SELECT 1",
 		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '5 MINUTE' WHEN SYSTEM$STREAM_HAS_DATA('s1') AND SYSTEM$STREAM_HAS_DATA('s2') AS SELECT 1",
@@ -98,6 +100,9 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 		"ALTER TASK my_task MODIFY AS SELECT 1 FROM t",
 		"ALTER TASK my_task MODIFY WHEN SYSTEM$STREAM_HAS_DATA('my_stream')",
 		"ALTER TASK my_task SET FINALIZE = root_task",
+		// ── ALTER TASK — RESUME/SUSPEND with trailing semicolons ────────
+		"ALTER TASK my_task RESUME;",
+		"ALTER TASK my_task SUSPEND;",
 		// ── ALTER TASK — quoted identifiers ──────────────────────────────
 		`ALTER TASK "My Task" RESUME`,
 		`ALTER TASK "db"."schema"."My Task" SUSPEND`,
@@ -108,6 +113,7 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 		"ALTER TASK IF EXISTS my_task SUSPEND",
 		"ALTER TASK IF EXISTS my_task SET WAREHOUSE = wh",
 		"ALTER TASK IF EXISTS my_task MODIFY AS SELECT 1",
+		"ALTER TASK IF EXISTS db.schema.my_task RESUME",
 		// ── ALTER TASK — SET with CRON schedule ─────────────────────────
 		"ALTER TASK my_task SET SCHEDULE = 'USING CRON 0 6 * * MON-FRI UTC'",
 		// ── ALTER TASK — qualified task names ───────────────────────────
@@ -187,8 +193,46 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 		"DROP TASK my_task",
 		"DROP TASK IF EXISTS my_task",
 		"DROP TASK db.schema.my_task",
+		"DROP TASK IF EXISTS db.schema.my_task",
 		`DROP TASK "My Task"`,
 		"drop task my_task",
+		// ── DROP TASK — trailing semicolons ──────────────────────────────
+		"DROP TASK my_task;",
+		"DROP TASK IF EXISTS my_task;",
+		// ── DROP TASK — IF EXISTS + quoted identifiers ───────────────────
+		`DROP TASK IF EXISTS "My Task"`,
+		// ── DROP TASK — IF EXISTS lowercase ──────────────────────────────
+		"drop task if exists my_task",
+		// ── CREATE TASK — no explicit warehouse (serverless, inherits defaults)
+		"CREATE TASK my_task SCHEDULE = '10 MINUTE' AS SELECT 1",
+		// ── CREATE TASK — string-literal false-positive prevention ───────
+		// Keywords inside COMMENT (or other string-valued properties) must
+		// not trigger structural validation after reStripStringLiterals.
+		"CREATE TASK child WAREHOUSE = wh AFTER parent COMMENT = 'SCHEDULE = 10 MINUTE' AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' COMMENT = 'AFTER parent_task' AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' COMMENT = 'FINALIZE = root' AS SELECT 1",
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' COMMENT = 'WHEN true' AS SELECT 1",
+		// ── String-literal false-positive: AS keyword inside COMMENT must
+		// not be mistaken for the body delimiter (tests string-stripping +
+		// EXECUTE_AS neutralisation path).
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' COMMENT = 'AS SELECT 1' AS SELECT 2",
+		// ── String-literal false-positive: CLONE keyword inside COMMENT must
+		// not trigger the CLONE early-return branch.
+		"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' COMMENT = 'CLONE other_task' AS SELECT 1",
+		// ── CREATE TASK — AFTER with quoted predecessor identifiers ──────
+		`CREATE TASK child WAREHOUSE = wh AFTER "My Parent Task" AS SELECT 1`,
+		`CREATE TASK child WAREHOUSE = wh AFTER "db"."schema"."parent" AS SELECT 1`,
+		`CREATE TASK child WAREHOUSE = wh AFTER "task1", "task2" AS SELECT 1`,
+		// ── CREATE TASK — FINALIZE with fully-qualified name ─────────────
+		"CREATE TASK f FINALIZE = db.schema.root_task AS SELECT 1",
+		`CREATE TASK f FINALIZE = "db"."schema"."root_task" AS SELECT 1`,
+		// ── CREATE OR ALTER TASK — child task variant ────────────────────
+		"CREATE OR ALTER TASK child WAREHOUSE = wh AFTER parent_task AS SELECT 1",
+		"CREATE OR ALTER TASK child WAREHOUSE = wh AFTER task1, task2 AS SELECT 1",
+		// ── ALTER TASK — ADD/REMOVE AFTER with quoted identifiers ────────
+		`ALTER TASK my_task ADD AFTER "task1", "task2"`,
+		`ALTER TASK my_task REMOVE AFTER "task1"`,
+		`ALTER TASK my_task ADD AFTER "db"."schema"."task1"`,
 	}
 
 	for _, sql := range validCases {
@@ -333,7 +377,7 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 		{
 			"FINALIZE with AFTER and SCHEDULE",
 			"CREATE TASK finalizer WAREHOUSE = wh FINALIZE = root_task AFTER parent SCHEDULE = '10 MINUTE' AS SELECT 1",
-			[]string{"FINALIZE must not be combined with AFTER"},
+			[]string{"FINALIZE must not be combined with AFTER", "FINALIZE must not be combined with SCHEDULE"},
 		},
 		// ── CREATE TASK — FINALIZE = (equals but no name) ───────────────
 		{
@@ -384,6 +428,78 @@ func TestValidateSnowflakePatterns_Task(t *testing.T) {
 			"DROP TASK with semicolon only",
 			"DROP TASK;",
 			[]string{"DROP TASK requires a task name"},
+		},
+		// ── ALTER TASK — IF EXISTS without name ─────────────────────────
+		// Note: the regex parses "IF" as the task name (known limitation,
+		// mirrors CREATE TASK IF NOT EXISTS). "EXISTS" becomes an unknown
+		// sub-command, so we get a different error than "missing name".
+		{
+			"ALTER TASK IF EXISTS without name",
+			"ALTER TASK IF EXISTS",
+			[]string{"Unknown ALTER TASK sub-command"},
+		},
+		// ── CREATE OR ALTER TASK — missing name ─────────────────────────
+		{
+			"CREATE OR ALTER TASK without name",
+			"CREATE OR ALTER TASK",
+			[]string{"CREATE TASK requires a task name"},
+		},
+		// ── CREATE TASK — FINALIZE without = sign ───────────────────────
+		{
+			"FINALIZE without equals sign",
+			"CREATE TASK finalizer FINALIZE root_task AS SELECT 1",
+			[]string{"FINALIZE requires a root task name"},
+		},
+		// ── CREATE TASK — root task with WHEN but no SCHEDULE ────────────
+		{
+			"root task with WHEN but missing SCHEDULE",
+			"CREATE TASK my_task WAREHOUSE = wh WHEN SYSTEM$STREAM_HAS_DATA('s') AS SELECT 1",
+			[]string{"Root task (no AFTER or FINALIZE clause) requires a SCHEDULE"},
+		},
+		// ── ALTER TASK — bare MODIFY without AS or WHEN ─────────────────
+		{
+			"ALTER TASK bare MODIFY",
+			"ALTER TASK my_task MODIFY",
+			[]string{"Unknown ALTER TASK sub-command"},
+		},
+		// ── CREATE TASK — EXECUTE AS CALLER but no body AS ──────────────
+		{
+			"EXECUTE AS CALLER without body AS",
+			"CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' EXECUTE AS CALLER",
+			[]string{"CREATE TASK requires an AS clause"},
+		},
+		// ── CREATE TASK — CLONE without source name ─────────────────────
+		// CLONE regex requires a source identifier; without one the validator
+		// falls through to the AS-required check.
+		{
+			"CREATE TASK CLONE without source name",
+			"CREATE TASK my_task CLONE",
+			[]string{"CREATE TASK requires an AS clause"},
+		},
+		// ── ALTER TASK — bare ADD without AFTER keyword ─────────────────
+		{
+			"ALTER TASK bare ADD without AFTER",
+			"ALTER TASK my_task ADD",
+			[]string{"Unknown ALTER TASK sub-command"},
+		},
+		// ── ALTER TASK — bare REMOVE without AFTER or WHEN ──────────────
+		{
+			"ALTER TASK bare REMOVE without target",
+			"ALTER TASK my_task REMOVE",
+			[]string{"Unknown ALTER TASK sub-command"},
+		},
+		// ── ALTER TASK — RESUME/SUSPEND with trailing content ────────────
+		// RESUME and SUSPEND must be standalone at end of statement (regex
+		// anchors to $). Trailing tokens make the sub-command unrecognised.
+		{
+			"ALTER TASK RESUME with trailing content",
+			"ALTER TASK my_task RESUME NOW",
+			[]string{"Unknown ALTER TASK sub-command"},
+		},
+		{
+			"ALTER TASK SUSPEND with trailing content",
+			"ALTER TASK my_task SUSPEND IMMEDIATELY",
+			[]string{"Unknown ALTER TASK sub-command"},
 		},
 	}
 
@@ -455,6 +571,14 @@ func TestValidateTablesExist_CreateTask_UsingCron(t *testing.T) {
 		{
 			name: "string containing JOIN keyword",
 			sql:  "SELECT * FROM LIVE_TABLE WHERE note = 'JOIN SOMETHING ON x'",
+		},
+		{
+			name: "task with multiple AFTER predecessors does not flag predecessor names",
+			sql:  "CREATE TASK child WAREHOUSE = wh AFTER task1, task2, task3 AS SELECT * FROM LIVE_TABLE",
+		},
+		{
+			name: "task with EXECUTE AS USER does not flag user name as table ref",
+			sql:  "CREATE TASK my_task WAREHOUSE = wh SCHEDULE = '10 MINUTE' EXECUTE AS USER my_user AS SELECT * FROM LIVE_TABLE",
 		},
 	}
 
