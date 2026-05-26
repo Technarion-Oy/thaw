@@ -409,6 +409,34 @@ func TestValidateSnowflakePatterns_ExecuteImmediate(t *testing.T) {
 			name: "USING clause with unclosed paren containing identifier — regex still matches",
 			sql:  "EXECUTE IMMEDIATE 'SELECT $1' USING (val",
 		},
+		{
+			name: "Empty string literal arg with valid USING clause",
+			sql:  "EXECUTE IMMEDIATE '' USING (v1)",
+		},
+		{
+			name: "USING with mixed ident and numeric — at least one ident satisfies check",
+			sql:  "EXECUTE IMMEDIATE 'SELECT $1, $2' USING (v1, 42)",
+		},
+
+		// ── USING with non-identifier expressions ─────────────────────────────
+		{
+			name:          "USING with numeric literal — not recognized as identifier",
+			sql:           "EXECUTE IMMEDIATE 'SELECT $1' USING (42)",
+			expectWarning: true,
+			expectedMatch: "USING clause in EXECUTE IMMEDIATE must contain at least one bind variable",
+		},
+		{
+			name:          "USING with colon-prefixed variable — colon not part of identifier pattern",
+			sql:           "EXECUTE IMMEDIATE 'SELECT $1' USING (:v1)",
+			expectWarning: true,
+			expectedMatch: "USING clause in EXECUTE IMMEDIATE must contain at least one bind variable",
+		},
+		{
+			name:          "USING with arithmetic expression — not recognized as identifier",
+			sql:           "EXECUTE IMMEDIATE 'SELECT $1' USING (1 + 1)",
+			expectWarning: true,
+			expectedMatch: "USING clause in EXECUTE IMMEDIATE must contain at least one bind variable",
+		},
 	})
 }
 
@@ -609,6 +637,22 @@ func TestValidateSnowflakePatterns_ExecuteTask(t *testing.T) {
 			name: "Task name that is USING keyword — accepted as bare identifier",
 			sql:  "EXECUTE TASK USING",
 		},
+		{
+			name: "Escaped double quotes in identifier — regex matches partial quoted ident",
+			sql:  `EXECUTE TASK "my""task"`,
+		},
+		{
+			name: "Trailing line comment after valid task name",
+			sql:  "EXECUTE TASK my_task -- run this task",
+		},
+		{
+			name: "Trailing dot after valid identifier — regex matches up to last valid ident",
+			sql:  "EXECUTE TASK db.",
+		},
+		{
+			name: "Double dot in qualified name — regex matches first valid part only",
+			sql:  "EXECUTE TASK db..task",
+		},
 	})
 }
 
@@ -647,6 +691,22 @@ func TestExecuteMultiStatement(t *testing.T) {
 			sql:           "EXECUTE TASK my_task;\nEXECUTE TASK",
 			expectWarning: true,
 			expectedMatch: "requires a task name",
+		},
+		{
+			name:          "Empty USING in second statement of multi-statement",
+			sql:           "SELECT 1;\nEXECUTE IMMEDIATE 'SELECT $1' USING ()",
+			expectWarning: true,
+			expectedMatch: "USING clause in EXECUTE IMMEDIATE must contain at least one bind variable",
+		},
+		{
+			name:          "Empty USING in first statement of multi-statement",
+			sql:           "EXECUTE IMMEDIATE 'SELECT $1' USING ();\nSELECT 2",
+			expectWarning: true,
+			expectedMatch: "USING clause in EXECUTE IMMEDIATE must contain at least one bind variable",
+		},
+		{
+			name: "Valid USING in second statement of multi-statement",
+			sql:  "SELECT 1;\nEXECUTE IMMEDIATE 'SELECT $1' USING (v1)",
 		},
 	})
 }
@@ -781,6 +841,34 @@ func TestExecuteMarkerPositionMultiStatement(t *testing.T) {
 		}
 		if warnings[0].StartLineNumber != 4 {
 			t.Errorf("Expected StartLineNumber=4, got %d", warnings[0].StartLineNumber)
+		}
+	})
+
+	t.Run("USING clause warning on line 2", func(t *testing.T) {
+		sql := "SELECT 1;\nEXECUTE IMMEDIATE 'SELECT $1' USING ()"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warnings := getWarnings(markers)
+
+		if len(warnings) != 1 {
+			t.Fatalf("Expected 1 warning, got %d", len(warnings))
+		}
+		if warnings[0].StartLineNumber != 2 {
+			t.Errorf("Expected StartLineNumber=2, got %d", warnings[0].StartLineNumber)
+		}
+	})
+
+	t.Run("USING clause warning on line 3", func(t *testing.T) {
+		sql := "SELECT 1;\nSELECT 2;\nEXECUTE IMMEDIATE 'SELECT $1' USING ()"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warnings := getWarnings(markers)
+
+		if len(warnings) != 1 {
+			t.Fatalf("Expected 1 warning, got %d", len(warnings))
+		}
+		if warnings[0].StartLineNumber != 3 {
+			t.Errorf("Expected StartLineNumber=3, got %d", warnings[0].StartLineNumber)
 		}
 	})
 }

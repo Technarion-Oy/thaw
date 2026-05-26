@@ -229,10 +229,11 @@ func TestGetScriptingCompletions_Extended(t *testing.T) {
 	}{
 		// ── Cursor outside $$ block → no variables ────────────────────────────
 		{
-			name:     "cursor outside dollar block",
-			sql:      "SELECT * FROM t",
-			offset:   -1,
-			wantVars: nil,
+			name:      "cursor outside dollar block",
+			sql:       "SELECT * FROM t",
+			offset:    -1,
+			wantVars:  nil,
+			wantColon: true, // SELECT context requires colon (NeedsColon is irrelevant when Variables is empty)
 		},
 		{
 			name:     "cursor before opening $$",
@@ -328,12 +329,8 @@ func TestGetScriptingCompletions_Extended(t *testing.T) {
 			if tt.wantColon && !got.NeedsColon {
 				t.Errorf("NeedsColon = false, want true")
 			}
-			// Only check NeedsColon=false when explicitly testing it (non-nil vars or explicit flag)
-			if !tt.wantColon && tt.wantVars == nil && tt.name != "cursor outside dollar block" && tt.name != "cursor before opening $$" {
-				// NeedsColon test: only assert when the test name implies it
-				if strings.Contains(tt.name, "needsColon false") && got.NeedsColon {
-					t.Errorf("NeedsColon = true, want false")
-				}
+			if !tt.wantColon && got.NeedsColon {
+				t.Errorf("NeedsColon = true, want false")
 			}
 		})
 	}
@@ -4163,3 +4160,475 @@ func TestComputeJoinOnConditions_FKSuggestionsWithoutColEntries(t *testing.T) {
 		t.Errorf("expected FK suggestion even when ColEntries is empty, got %v", got)
 	}
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ExtractInEditorTableDefs: plain CTAS without column list
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestExtractInEditorTableDefs_PlainCTASNoColumnList(t *testing.T) {
+	// CREATE TABLE AS SELECT without a (column_list) block — should be skipped.
+	sql := "CREATE TABLE ctas_tbl AS SELECT 1 AS id, 'x' AS name;"
+	ranges := GetStatementRanges(sql)
+	defs := ExtractInEditorTableDefs(sql, ranges, nil, nil)
+	if len(defs) != 0 {
+		t.Errorf("expected plain CTAS (no column list) to be skipped, got %+v", defs)
+	}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BuildCompositeConditions: triple composite FK (3 key sequences)
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestBuildCompositeConditions_TripleCompositeFK(t *testing.T) {
+	fks := []FKEntry{
+		{FKColumn: "FK_A", PKColumn: "PK_A", ConstraintName: "FK_COMP3", KeySequence: 1},
+		{FKColumn: "FK_B", PKColumn: "PK_B", ConstraintName: "FK_COMP3", KeySequence: 2},
+		{FKColumn: "FK_C", PKColumn: "PK_C", ConstraintName: "FK_COMP3", KeySequence: 3},
+	}
+	got := BuildCompositeConditions(fks, "T1", "T2")
+	if len(got) != 1 {
+		t.Fatalf("expected 1 composite condition for 3-key FK, got %d: %v", len(got), got)
+	}
+	// Should contain two ANDs
+	andCount := strings.Count(got[0], " AND ")
+	if andCount != 2 {
+		t.Errorf("expected 2 AND clauses in 3-key composite, got %d in %q", andCount, got[0])
+	}
+	// Verify ordering: FK_A before FK_B before FK_C
+	idxA := strings.Index(got[0], "FK_A")
+	idxB := strings.Index(got[0], "FK_B")
+	idxC := strings.Index(got[0], "FK_C")
+	if idxA > idxB || idxB > idxC {
+		t.Errorf("expected FK_A < FK_B < FK_C ordering, got %q", got[0])
+	}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ComputeJoinOnConditions: two tables with completely disjoint columns
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestComputeJoinOnConditions_TwoTablesNoMatchingColumns(t *testing.T) {
+	// Two tables where no columns share a name and types are incompatible.
+	// No FKs. Should produce zero suggestions.
+	req := JoinOnSuggestionsReq{
+		ResolvedRefs: []ResolvedRef{
+			{Alias: "A", DB: "DB", Schema: "S", Name: "T1"},
+			{Alias: "B", DB: "DB", Schema: "S", Name: "T2"},
+		},
+		Prefix: "ON ",
+		ColEntries: []ColEntry{
+			{DB: "DB", Schema: "S", Name: "T1", Cols: []ColInfo{
+				{Name: "ORDER_DATE", DataType: "DATE"},
+				{Name: "STATUS", DataType: "BOOLEAN"},
+			}},
+			{DB: "DB", Schema: "S", Name: "T2", Cols: []ColInfo{
+				{Name: "REGION_NAME", DataType: "VARCHAR"},
+				{Name: "POPULATION", DataType: "NUMBER"},
+			}},
+		},
+	}
+	got := ComputeJoinOnConditions(req)
+	if len(got) != 0 {
+		t.Errorf("expected no suggestions with completely disjoint columns, got %v", got)
+	}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ComputeJoinOnConditions: ColEntries missing for one of the resolved refs
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestComputeJoinOnConditions_MissingColEntryForOneRef(t *testing.T) {
+	// ColEntries only has data for T1 but not T2. Should not panic and produce
+	// no same-name/PK heuristic suggestions (T2 columns are unknown).
+	req := JoinOnSuggestionsReq{
+		ResolvedRefs: []ResolvedRef{
+			{Alias: "A", DB: "DB", Schema: "S", Name: "T1"},
+			{Alias: "B", DB: "DB", Schema: "S", Name: "T2"},
+		},
+		Prefix: "ON ",
+		ColEntries: []ColEntry{
+			{DB: "DB", Schema: "S", Name: "T1", Cols: []ColInfo{{Name: "ID", DataType: "NUMBER"}}},
+			// T2 missing from ColEntries
+		},
+	}
+	got := ComputeJoinOnConditions(req)
+	// Should not panic; may or may not produce suggestions depending on implementation.
+	_ = got
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GetScriptingCompletions: DECLARE without BEGIN block
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestGetScriptingCompletions_DeclareWithoutBegin(t *testing.T) {
+	// $$ block with DECLARE but no BEGIN — cursor is inside, variables should still
+	// be extracted from DECLARE.
+	sql := "$$ DECLARE x INT; y VARCHAR; $$"
+	offset := len([]rune("$$ DECLARE x INT; y VARCHAR; "))
+	got := GetScriptingCompletions(sql, offset)
+	foundX := false
+	foundY := false
+	for _, v := range got.Variables {
+		if v == "X" {
+			foundX = true
+		}
+		if v == "Y" {
+			foundY = true
+		}
+	}
+	if !foundX {
+		t.Errorf("expected X in variables, got %v", got.Variables)
+	}
+	if !foundY {
+		t.Errorf("expected Y in variables, got %v", got.Variables)
+	}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GetStatementRanges: dollar-quoted block without closing $$
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestGetStatementRanges_UnclosedDollarQuote(t *testing.T) {
+	// Unclosed $$ block — the entire remaining text is part of the statement.
+	sql := "SELECT 1; $$ BEGIN SELECT 2;"
+	got := GetStatementRanges(sql)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 ranges (second is unclosed $$ block), got %d: %v", len(got), got)
+	}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Additional NeedsColon edge cases
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestGetScriptingCompletions_NeedsColon_RETURN(t *testing.T) {
+	// RETURN is a scripting keyword, not in colonRequiredKeywords → NeedsColon false
+	sql := "$$ BEGIN LET x := 1; RETURN "
+	got := GetScriptingCompletions(sql, len([]rune(sql)))
+	if got.NeedsColon {
+		t.Error("expected NeedsColon=false after RETURN keyword")
+	}
+	if len(got.Variables) == 0 {
+		t.Error("expected at least one variable (X)")
+	}
+}
+
+func TestGetScriptingCompletions_NeedsColon_SemicolonReset(t *testing.T) {
+	// Semicolon resets context; last match is ";" which is not in colonRequiredKeywords
+	sql := "$$ BEGIN LET x := (SELECT 1); "
+	got := GetScriptingCompletions(sql, len([]rune(sql)))
+	if got.NeedsColon {
+		t.Error("expected NeedsColon=false after semicolon reset")
+	}
+}
+
+func TestGetScriptingCompletions_NeedsColon_IF(t *testing.T) {
+	// IF is a control-flow keyword, not in colonRequiredKeywords → NeedsColon false
+	sql := "$$ BEGIN LET x := 1; IF "
+	got := GetScriptingCompletions(sql, len([]rune(sql)))
+	if got.NeedsColon {
+		t.Error("expected NeedsColon=false after IF keyword")
+	}
+}
+
+func TestGetScriptingCompletions_NeedsColon_WHILE(t *testing.T) {
+	// WHILE is a control-flow keyword, not in colonRequiredKeywords → NeedsColon false
+	sql := "$$ BEGIN LET cnt := 0; WHILE "
+	got := GetScriptingCompletions(sql, len([]rune(sql)))
+	if got.NeedsColon {
+		t.Error("expected NeedsColon=false after WHILE keyword")
+	}
+}
+
+func TestGetScriptingCompletions_NeedsColon_INSERT(t *testing.T) {
+	// INSERT is a DML keyword in colonRequiredKeywords → NeedsColon true
+	sql := "$$ BEGIN LET x := 1; INSERT INTO t VALUES ("
+	got := GetScriptingCompletions(sql, len([]rune(sql)))
+	if !got.NeedsColon {
+		t.Error("expected NeedsColon=true inside INSERT statement")
+	}
+}
+
+func TestGetScriptingCompletions_NeedsColon_UPDATE(t *testing.T) {
+	// UPDATE is a DML keyword in colonRequiredKeywords → NeedsColon true
+	sql := "$$ BEGIN LET x := 1; UPDATE t SET col = "
+	got := GetScriptingCompletions(sql, len([]rune(sql)))
+	if !got.NeedsColon {
+		t.Error("expected NeedsColon=true inside UPDATE statement")
+	}
+}
+
+func TestGetScriptingCompletions_NeedsColon_ColonPrefix(t *testing.T) {
+	// When the text before the word already has a colon prefix → NeedsColon false
+	sql := "$$ BEGIN LET x := 1; SELECT :"
+	got := GetScriptingCompletions(sql, len([]rune(sql)))
+	if got.NeedsColon {
+		t.Error("expected NeedsColon=false when colon already precedes cursor")
+	}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ResolveTableRefs: non-TABLE/VIEW store objects filtered
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestResolveTableRefs_NonTableKindFiltered(t *testing.T) {
+	storeObjs := []StoreObject{
+		{DB: "DB", Schema: "PUBLIC", Name: "MY_PROC", Kind: "PROCEDURE"},
+		{DB: "DB", Schema: "PUBLIC", Name: "MY_FUNC", Kind: "FUNCTION"},
+	}
+	refs := []JoinTableRef{{Name: "MY_PROC", Alias: ""}}
+	got := ResolveTableRefs(refs, storeObjs, nil, nil)
+	if len(got) != 0 {
+		t.Errorf("expected PROCEDURE to be filtered out of store matches, got %+v", got)
+	}
+}
+
+func TestResolveTableRefs_ViewKindMatched(t *testing.T) {
+	storeObjs := []StoreObject{
+		{DB: "DB", Schema: "PUBLIC", Name: "MY_VIEW", Kind: "VIEW"},
+	}
+	refs := []JoinTableRef{{Name: "MY_VIEW", Alias: "v"}}
+	got := ResolveTableRefs(refs, storeObjs, nil, nil)
+	if len(got) != 1 || got[0].DB != "DB" {
+		t.Errorf("expected VIEW to be matched, got %+v", got)
+	}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ResolveTableRefs: partial UseContext + Session combination
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestResolveTableRefs_UseContextDBSessionSchema(t *testing.T) {
+	// UseContext provides only Database, Session provides only Schema → should combine
+	refs := []JoinTableRef{{Name: "MY_TABLE", Alias: ""}}
+	useCtx := &UseContext{Database: "CTX_DB"}
+	sess := &SessionContext{Schema: "SESS_SCH"}
+	got := ResolveTableRefs(refs, nil, useCtx, sess)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 resolved ref, got %d", len(got))
+	}
+	if got[0].DB != "CTX_DB" || got[0].Schema != "SESS_SCH" {
+		t.Errorf("expected CTX_DB.SESS_SCH, got %s.%s", got[0].DB, got[0].Schema)
+	}
+}
+
+func TestResolveTableRefs_UseContextSchemaSessionDB(t *testing.T) {
+	// UseContext provides only Schema, Session provides only Database → should combine
+	refs := []JoinTableRef{{Name: "MY_TABLE", Alias: ""}}
+	useCtx := &UseContext{Schema: "CTX_SCH"}
+	sess := &SessionContext{Database: "SESS_DB"}
+	got := ResolveTableRefs(refs, nil, useCtx, sess)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 resolved ref, got %d", len(got))
+	}
+	if got[0].DB != "SESS_DB" || got[0].Schema != "CTX_SCH" {
+		t.Errorf("expected SESS_DB.CTX_SCH, got %s.%s", got[0].DB, got[0].Schema)
+	}
+}
+
+func TestResolveTableRefs_PartialResolutionSkipped(t *testing.T) {
+	// UseContext provides only Database, no Session → Schema still empty → skipped
+	refs := []JoinTableRef{{Name: "MY_TABLE", Alias: ""}}
+	useCtx := &UseContext{Database: "CTX_DB"}
+	got := ResolveTableRefs(refs, nil, useCtx, nil)
+	if len(got) != 0 {
+		t.Errorf("expected ref to be skipped when only DB is resolved, got %+v", got)
+	}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GetAutocompleteContextFull: empty SQL context flags
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestGetAutocompleteContextFull_EmptySQLContextFlags(t *testing.T) {
+	req := AutocompleteContextRequest{
+		SQL:          "",
+		CursorOffset: 0,
+	}
+	ctx := GetAutocompleteContextFull(req)
+	if ctx.IsDatatypeCtx {
+		t.Error("expected IsDatatypeCtx=false for empty SQL")
+	}
+	if ctx.IsInJoinOnClause {
+		t.Error("expected IsInJoinOnClause=false for empty SQL")
+	}
+	if ctx.UsingClause != nil {
+		t.Error("expected UsingClause=nil for empty SQL")
+	}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Remaining edge cases: untested code paths
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestExtractInEditorTableDefs_EmptyColumnList(t *testing.T) {
+	// CREATE TABLE with empty parens — the parser skips tables with no
+	// parseable column definitions (empty parens produce zero cols, so the
+	// table def is not emitted). Should not panic.
+	sql := "CREATE TABLE empty_tbl ();"
+	ranges := GetStatementRanges(sql)
+	defs := ExtractInEditorTableDefs(sql, ranges, nil, nil)
+	if len(defs) != 0 {
+		t.Errorf("expected 0 defs for empty column list (no parseable cols), got %d: %+v", len(defs), defs)
+	}
+}
+
+func TestGetScriptingCompletions_DeclareWithComments(t *testing.T) {
+	// DECLARE block with line and block comments between variable declarations.
+	// The implementation strips comments before extracting variable names.
+	sql := "$$ DECLARE\n  -- this is x\n  x INT;\n  /* block */ y VARCHAR;\nBEGIN END; $$"
+	offset := len([]rune("$$ DECLARE\n  -- this is x\n  x INT;\n  /* block */ y VARCHAR;\nBEGIN END; "))
+	got := GetScriptingCompletions(sql, offset)
+	foundX := false
+	foundY := false
+	for _, v := range got.Variables {
+		if v == "X" {
+			foundX = true
+		}
+		if v == "Y" {
+			foundY = true
+		}
+	}
+	if !foundX {
+		t.Errorf("expected X in variables after stripping line comment, got %v", got.Variables)
+	}
+	if !foundY {
+		t.Errorf("expected Y in variables after stripping block comment, got %v", got.Variables)
+	}
+}
+
+func TestResolveTableRefs_DBMismatchFallsThrough(t *testing.T) {
+	// Ref has DB="OTHER_DB", Name="TBL". Store has a matching name but in
+	// DB="STORE_DB". The store search should reject it (DB mismatch), and
+	// the ref should fall through to UseContext which provides the Schema.
+	storeObjs := []StoreObject{
+		{DB: "STORE_DB", Schema: "PUBLIC", Name: "TBL", Kind: "TABLE"},
+	}
+	refs := []JoinTableRef{{DB: "OTHER_DB", Name: "TBL", Alias: "t"}}
+	useCtx := &UseContext{Schema: "CTX_SCH"}
+	got := ResolveTableRefs(refs, storeObjs, useCtx, nil)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 resolved ref, got %d", len(got))
+	}
+	// DB should remain OTHER_DB (from the original ref), Schema from UseContext
+	if got[0].DB != "OTHER_DB" {
+		t.Errorf("expected DB=OTHER_DB (original ref), got %q", got[0].DB)
+	}
+	if got[0].Schema != "CTX_SCH" {
+		t.Errorf("expected Schema=CTX_SCH (from UseContext), got %q", got[0].Schema)
+	}
+}
+
+func TestComputeJoinOnConditions_ColEntryWithEmptyCols(t *testing.T) {
+	// ColEntry exists for both tables but has an empty Cols slice.
+	// Should not panic and should produce no same-name/PK heuristic suggestions.
+	req := JoinOnSuggestionsReq{
+		ResolvedRefs: []ResolvedRef{
+			{Alias: "A", DB: "DB", Schema: "S", Name: "T1"},
+			{Alias: "B", DB: "DB", Schema: "S", Name: "T2"},
+		},
+		Prefix: "ON ",
+		ColEntries: []ColEntry{
+			{DB: "DB", Schema: "S", Name: "T1", Cols: []ColInfo{}},
+			{DB: "DB", Schema: "S", Name: "T2", Cols: []ColInfo{}},
+		},
+	}
+	got := ComputeJoinOnConditions(req)
+	if len(got) != 0 {
+		t.Errorf("expected no suggestions with empty Cols slices, got %v", got)
+	}
+}
+
+func TestGetStatementRanges_SingleCharStatement(t *testing.T) {
+	sql := "X"
+	got := GetStatementRanges(sql)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 range for single char, got %d: %v", len(got), got)
+	}
+	if got[0].StartOffset != 0 || got[0].EndOffset != 1 {
+		t.Errorf("expected range [0,1), got [%d,%d)", got[0].StartOffset, got[0].EndOffset)
+	}
+	if got[0].StartLine != 1 || got[0].EndLine != 1 {
+		t.Errorf("expected lines [1,1], got [%d,%d]", got[0].StartLine, got[0].EndLine)
+	}
+}
+
+func TestGetScriptingCompletions_DeclareCommentOnlySegment(t *testing.T) {
+	// A DECLARE segment that is entirely a comment — should not produce a variable.
+	sql := "$$ DECLARE -- just a comment\n; actual_var INT; BEGIN END; $$"
+	offset := len([]rune("$$ DECLARE -- just a comment\n; actual_var INT; BEGIN END; "))
+	got := GetScriptingCompletions(sql, offset)
+	foundActual := false
+	for _, v := range got.Variables {
+		if v == "ACTUAL_VAR" {
+			foundActual = true
+		}
+	}
+	if !foundActual {
+		t.Errorf("expected ACTUAL_VAR in variables, got %v", got.Variables)
+	}
+}
+
+func TestResolveTableRefs_SchemaMismatchFallsThrough(t *testing.T) {
+	// Ref has Schema="OTHER_SCH", Name="TBL". Store has matching name in
+	// Schema="STORE_SCH". The store search should reject it (Schema mismatch),
+	// and the ref should fall through to context for DB resolution.
+	storeObjs := []StoreObject{
+		{DB: "STORE_DB", Schema: "STORE_SCH", Name: "TBL", Kind: "TABLE"},
+	}
+	refs := []JoinTableRef{{Schema: "OTHER_SCH", Name: "TBL", Alias: "t"}}
+	sess := &SessionContext{Database: "SESS_DB"}
+	got := ResolveTableRefs(refs, storeObjs, nil, sess)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 resolved ref, got %d", len(got))
+	}
+	if got[0].DB != "SESS_DB" {
+		t.Errorf("expected DB=SESS_DB (from session), got %q", got[0].DB)
+	}
+	if got[0].Schema != "OTHER_SCH" {
+		t.Errorf("expected Schema=OTHER_SCH (original ref), got %q", got[0].Schema)
+	}
+}
+
+func TestGetAutocompleteContext_CommentBeforeStatement(t *testing.T) {
+	// A comment before the actual statement should not affect statement indexing.
+	sql := "-- header comment\nSELECT * FROM users"
+	ctx := GetAutocompleteContext(sql, len([]rune(sql)))
+	if len(ctx.StatementRanges) != 1 {
+		t.Fatalf("expected 1 range, got %d", len(ctx.StatementRanges))
+	}
+	if ctx.CurrentStmtIdx != 0 {
+		t.Errorf("expected currentStmtIdx=0, got %d", ctx.CurrentStmtIdx)
+	}
+	// The comment-only portion should NOT create a separate statement range.
+	if ctx.StatementRanges[0].StartLine != 2 {
+		t.Errorf("expected statement to start on line 2 (after comment), got line %d", ctx.StatementRanges[0].StartLine)
+	}
+}
+
+func TestComputeJoinOnConditions_SameNameDifferentCaseBothPresent(t *testing.T) {
+	// Column names differ only in case — same-name detection should be
+	// case-insensitive and produce a match.
+	req := JoinOnSuggestionsReq{
+		ResolvedRefs: []ResolvedRef{
+			{Alias: "A", DB: "DB", Schema: "S", Name: "T1"},
+			{Alias: "B", DB: "DB", Schema: "S", Name: "T2"},
+		},
+		Prefix: "",
+		ColEntries: []ColEntry{
+			{DB: "DB", Schema: "S", Name: "T1", Cols: []ColInfo{{Name: "User_Id", DataType: "NUMBER"}}},
+			{DB: "DB", Schema: "S", Name: "T2", Cols: []ColInfo{{Name: "USER_ID", DataType: "NUMBER"}}},
+		},
+	}
+	got := ComputeJoinOnConditions(req)
+	found := false
+	for _, c := range got {
+		if strings.Contains(strings.ToUpper(c.Condition), "USER_ID") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected case-insensitive same-name column match for User_Id/USER_ID, got %v", got)
+	}
+}
+
