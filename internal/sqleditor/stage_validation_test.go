@@ -329,6 +329,462 @@ func TestAlterStage_Valid(t *testing.T) {
 	}
 }
 
+// TestCreateStage_CaseInsensitive verifies that keyword matching is
+// case-insensitive for both valid and invalid statements.
+func TestCreateStage_CaseInsensitive(t *testing.T) {
+	validCases := []string{
+		"create stage s",
+		"Create Or Replace Stage s",
+		"create or replace temporary stage s",
+		"CREATE stage s url = 's3://bucket/'",
+		"create stage s URL = 's3://bucket/' storage_integration = my_int",
+		"create stage s file_format = (type = 'CSV' field_delimiter = ',')",
+		"Create Stage s Encryption = (Type = 'SNOWFLAKE_FULL')",
+		"create stage s copy_options = (on_error = continue)",
+		"create stage s directory = (enable = true)",
+		"create stage s comment = 'test'",
+	}
+	for _, sql := range validCases {
+		t.Run("valid/"+sql[:min(len(sql), 50)], func(t *testing.T) {
+			ranges := GetStatementRanges(sql)
+			markers := ValidateSnowflakePatterns(sql, ranges)
+			warnings := getWarnings(markers)
+			if len(warnings) > 0 {
+				t.Errorf("Expected 0 warnings for %q, got %d: %v", sql, len(warnings), warnings)
+			}
+		})
+	}
+
+	invalidCases := []struct {
+		sql           string
+		expectedMatch string
+	}{
+		{"create stage s type = 'CSV'", "TYPE"},
+		{"Create Stage s field_delimiter = ','", "FIELD_DELIMITER"},
+		{"create stage s skip_header = 1", "SKIP_HEADER"},
+		{"CREATE stage s master_key = 'key'", "MASTER_KEY"},
+	}
+	for _, tt := range invalidCases {
+		t.Run("invalid/"+tt.sql[:min(len(tt.sql), 50)], func(t *testing.T) {
+			ranges := GetStatementRanges(tt.sql)
+			markers := ValidateSnowflakePatterns(tt.sql, ranges)
+			warnings := getWarnings(markers)
+			if len(warnings) == 0 {
+				t.Fatalf("Expected warnings for %q, got 0", tt.sql)
+			}
+			found := false
+			for _, w := range warnings {
+				if strings.Contains(strings.ToUpper(w.Message), strings.ToUpper(tt.expectedMatch)) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Expected warning matching %q, got: %v", tt.expectedMatch, warnings[0].Message)
+			}
+		})
+	}
+}
+
+// TestStage_MultiLine verifies that stage statements spanning multiple lines
+// are validated correctly.
+func TestStage_MultiLine(t *testing.T) {
+	validCases := []string{
+		"CREATE STAGE s\n  URL = 's3://bucket/'",
+		"CREATE STAGE s\n  URL = 's3://bucket/'\n  STORAGE_INTEGRATION = my_int",
+		"CREATE OR REPLACE STAGE s\n  FILE_FORMAT = (\n    TYPE = 'CSV'\n    FIELD_DELIMITER = ','\n    SKIP_HEADER = 1\n  )\n  COMMENT = 'multiline stage'",
+		"ALTER STAGE s SET\n  FILE_FORMAT = (TYPE = 'CSV')\n  COMMENT = 'updated'",
+		"ALTER STAGE s SET\n  URL = 's3://new-bucket/'\n  STORAGE_INTEGRATION = new_int",
+	}
+	for _, sql := range validCases {
+		t.Run("valid/"+sql[:min(len(sql), 50)], func(t *testing.T) {
+			ranges := GetStatementRanges(sql)
+			markers := ValidateSnowflakePatterns(sql, ranges)
+			warnings := getWarnings(markers)
+			if len(warnings) > 0 {
+				t.Errorf("Expected 0 warnings for %q, got %d: %v", sql, len(warnings), warnings)
+			}
+		})
+	}
+
+	invalidCases := []struct {
+		name          string
+		sql           string
+		expectedMatch string
+	}{
+		{"multiline TYPE at top level", "CREATE STAGE s\n  TYPE = 'CSV'", "TYPE"},
+		{"multiline FIELD_DELIMITER at top level", "CREATE STAGE s\n  FIELD_DELIMITER = ','", "FIELD_DELIMITER"},
+		{"multiline ALTER SET SKIP_HEADER", "ALTER STAGE s SET\n  SKIP_HEADER = 1", "SKIP_HEADER"},
+	}
+	for _, tt := range invalidCases {
+		t.Run("invalid/"+tt.name, func(t *testing.T) {
+			ranges := GetStatementRanges(tt.sql)
+			markers := ValidateSnowflakePatterns(tt.sql, ranges)
+			warnings := getWarnings(markers)
+			if len(warnings) == 0 {
+				t.Fatalf("Expected warnings for %q, got 0", tt.sql)
+			}
+			found := false
+			for _, w := range warnings {
+				if strings.Contains(strings.ToUpper(w.Message), strings.ToUpper(tt.expectedMatch)) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Expected warning matching %q, got: %v", tt.expectedMatch, warnings[0].Message)
+			}
+		})
+	}
+}
+
+// TestStage_TrailingSemicolon verifies that trailing semicolons don't interfere
+// with validation.
+func TestStage_TrailingSemicolon(t *testing.T) {
+	validCases := []string{
+		"CREATE STAGE s;",
+		"CREATE STAGE s URL = 's3://bucket/';",
+		"CREATE STAGE s FILE_FORMAT = (TYPE = 'CSV');",
+		"ALTER STAGE s SET COMMENT = 'test';",
+		"ALTER STAGE s REFRESH;",
+	}
+	for _, sql := range validCases {
+		t.Run("valid/"+sql[:min(len(sql), 50)], func(t *testing.T) {
+			ranges := GetStatementRanges(sql)
+			markers := ValidateSnowflakePatterns(sql, ranges)
+			warnings := getWarnings(markers)
+			if len(warnings) > 0 {
+				t.Errorf("Expected 0 warnings for %q, got %d: %v", sql, len(warnings), warnings)
+			}
+		})
+	}
+
+	invalidCases := []struct {
+		sql           string
+		expectedMatch string
+	}{
+		{"CREATE STAGE s TYPE = 'CSV';", "TYPE"},
+		{"ALTER STAGE s SET FIELD_DELIMITER = ',';", "FIELD_DELIMITER"},
+	}
+	for _, tt := range invalidCases {
+		t.Run("invalid/"+tt.sql[:min(len(tt.sql), 50)], func(t *testing.T) {
+			ranges := GetStatementRanges(tt.sql)
+			markers := ValidateSnowflakePatterns(tt.sql, ranges)
+			warnings := getWarnings(markers)
+			if len(warnings) == 0 {
+				t.Fatalf("Expected warnings for %q, got 0", tt.sql)
+			}
+			found := false
+			for _, w := range warnings {
+				if strings.Contains(strings.ToUpper(w.Message), strings.ToUpper(tt.expectedMatch)) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Expected warning matching %q, got: %v", tt.expectedMatch, warnings[0].Message)
+			}
+		})
+	}
+}
+
+// TestStage_EmbeddedComments verifies that line comments (--) and block
+// comments (/* */) inside stage statements are stripped before validation.
+func TestStage_EmbeddedComments(t *testing.T) {
+	validCases := []string{
+		"CREATE STAGE s /* internal stage */ URL = 's3://bucket/'",
+		"CREATE STAGE s\n  -- set the URL\n  URL = 's3://bucket/'",
+		"ALTER STAGE s SET /* update format */ FILE_FORMAT = (TYPE = 'CSV')",
+		"ALTER STAGE s SET\n  -- changing URL\n  URL = 's3://new-bucket/'",
+		"CREATE STAGE s URL = 's3://bucket/' /* with integration */ STORAGE_INTEGRATION = my_int",
+	}
+	for _, sql := range validCases {
+		t.Run("valid/"+sql[:min(len(sql), 50)], func(t *testing.T) {
+			ranges := GetStatementRanges(sql)
+			markers := ValidateSnowflakePatterns(sql, ranges)
+			warnings := getWarnings(markers)
+			if len(warnings) > 0 {
+				t.Errorf("Expected 0 warnings for %q, got %d: %v", sql, len(warnings), warnings)
+			}
+		})
+	}
+}
+
+// TestStage_MultiStatement verifies that multiple stage statements in a single
+// SQL input are each validated independently.
+func TestStage_MultiStatement(t *testing.T) {
+	// Both valid
+	sql := "CREATE STAGE s1 URL = 's3://bucket/'; CREATE STAGE s2 URL = 'gcs://bucket/'"
+	ranges := GetStatementRanges(sql)
+	markers := ValidateSnowflakePatterns(sql, ranges)
+	warnings := getWarnings(markers)
+	if len(warnings) > 0 {
+		t.Errorf("Expected 0 warnings for two valid stages, got %d: %v", len(warnings), warnings)
+	}
+
+	// First valid, second invalid
+	sql = "CREATE STAGE s1 URL = 's3://bucket/'; CREATE STAGE s2 TYPE = 'CSV'"
+	ranges = GetStatementRanges(sql)
+	markers = ValidateSnowflakePatterns(sql, ranges)
+	warnings = getWarnings(markers)
+	if len(warnings) != 1 {
+		t.Fatalf("Expected 1 warning for second invalid stage, got %d", len(warnings))
+	}
+	if !strings.Contains(strings.ToUpper(warnings[0].Message), "TYPE") {
+		t.Errorf("Expected warning about TYPE, got: %v", warnings[0].Message)
+	}
+
+	// Both invalid
+	sql = "CREATE STAGE s1 SKIP_HEADER = 1; CREATE STAGE s2 TYPE = 'CSV'"
+	ranges = GetStatementRanges(sql)
+	markers = ValidateSnowflakePatterns(sql, ranges)
+	warnings = getWarnings(markers)
+	if len(warnings) != 2 {
+		t.Fatalf("Expected 2 warnings for two invalid stages, got %d", len(warnings))
+	}
+
+	// Mix of CREATE and ALTER
+	sql = "CREATE STAGE s1 URL = 's3://bucket/'; ALTER STAGE s1 SET COMMENT = 'updated'"
+	ranges = GetStatementRanges(sql)
+	markers = ValidateSnowflakePatterns(sql, ranges)
+	warnings = getWarnings(markers)
+	if len(warnings) > 0 {
+		t.Errorf("Expected 0 warnings for valid CREATE+ALTER, got %d: %v", len(warnings), warnings)
+	}
+}
+
+// TestStage_LeadingWhitespace verifies that leading whitespace and indentation
+// don't prevent pattern matching.
+func TestStage_LeadingWhitespace(t *testing.T) {
+	validCases := []string{
+		"  CREATE STAGE s",
+		"\tCREATE STAGE s",
+		"\n\nCREATE STAGE s",
+		"   ALTER STAGE s SET COMMENT = 'test'",
+		"\t\tALTER STAGE s REFRESH",
+	}
+	for _, sql := range validCases {
+		t.Run(strings.TrimSpace(sql)[:min(len(strings.TrimSpace(sql)), 50)], func(t *testing.T) {
+			ranges := GetStatementRanges(sql)
+			markers := ValidateSnowflakePatterns(sql, ranges)
+			warnings := getWarnings(markers)
+			if len(warnings) > 0 {
+				t.Errorf("Expected 0 warnings for %q, got %d: %v", sql, len(warnings), warnings)
+			}
+		})
+	}
+}
+
+// TestStage_MultipleInvalidProperties verifies that the validator reports ALL
+// invalid properties in a single statement, not just the first.
+func TestStage_MultipleInvalidProperties(t *testing.T) {
+	// Two invalid properties in one CREATE STAGE
+	sql := "CREATE STAGE s SKIP_HEADER = 1 TYPE = 'CSV'"
+	ranges := GetStatementRanges(sql)
+	markers := ValidateSnowflakePatterns(sql, ranges)
+	warnings := getWarnings(markers)
+	if len(warnings) != 2 {
+		t.Fatalf("Expected 2 warnings for two invalid props, got %d: %v", len(warnings), warnMsgs(warnings))
+	}
+
+	// Three invalid properties in one CREATE STAGE
+	sql = "CREATE STAGE s FIELD_DELIMITER = ',' SKIP_HEADER = 1 MASTER_KEY = 'key'"
+	ranges = GetStatementRanges(sql)
+	markers = ValidateSnowflakePatterns(sql, ranges)
+	warnings = getWarnings(markers)
+	if len(warnings) != 3 {
+		t.Fatalf("Expected 3 warnings for three invalid props, got %d: %v", len(warnings), warnMsgs(warnings))
+	}
+
+	// Two invalid properties in ALTER STAGE SET
+	sql = "ALTER STAGE s SET SKIP_HEADER = 1 TYPE = 'CSV'"
+	ranges = GetStatementRanges(sql)
+	markers = ValidateSnowflakePatterns(sql, ranges)
+	warnings = getWarnings(markers)
+	if len(warnings) != 2 {
+		t.Fatalf("Expected 2 warnings for two invalid ALTER props, got %d: %v", len(warnings), warnMsgs(warnings))
+	}
+}
+
+// TestStage_MixedValidAndInvalidProperties verifies that valid top-level
+// properties pass while invalid ones in the same statement are flagged.
+func TestStage_MixedValidAndInvalidProperties(t *testing.T) {
+	tests := []struct {
+		name          string
+		sql           string
+		wantCount     int
+		expectedMatch string
+	}{
+		{
+			"CREATE valid URL + invalid SKIP_HEADER",
+			"CREATE STAGE s URL = 's3://bucket/' SKIP_HEADER = 1",
+			1, "SKIP_HEADER",
+		},
+		{
+			"CREATE valid URL + COMMENT + invalid TYPE",
+			"CREATE STAGE s URL = 's3://bucket/' COMMENT = 'x' TYPE = 'CSV'",
+			1, "TYPE",
+		},
+		{
+			"ALTER valid COMMENT + invalid FIELD_DELIMITER",
+			"ALTER STAGE s SET COMMENT = 'test' FIELD_DELIMITER = ','",
+			1, "FIELD_DELIMITER",
+		},
+		{
+			"CREATE valid FILE_FORMAT block + invalid MASTER_KEY",
+			"CREATE STAGE s FILE_FORMAT = (TYPE = 'CSV' SKIP_HEADER = 1) MASTER_KEY = 'key'",
+			1, "MASTER_KEY",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ranges := GetStatementRanges(tt.sql)
+			markers := ValidateSnowflakePatterns(tt.sql, ranges)
+			warnings := getWarnings(markers)
+			if len(warnings) != tt.wantCount {
+				t.Fatalf("Expected %d warning(s) for %q, got %d: %v", tt.wantCount, tt.sql, len(warnings), warnMsgs(warnings))
+			}
+			found := false
+			for _, w := range warnings {
+				if strings.Contains(strings.ToUpper(w.Message), strings.ToUpper(tt.expectedMatch)) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Expected warning matching %q, got: %v", tt.expectedMatch, warnings[0].Message)
+			}
+		})
+	}
+}
+
+// TestStage_ModifiersWithInvalidProperty verifies that CREATE/ALTER modifiers
+// (IF NOT EXISTS, OR REPLACE, TEMPORARY, IF EXISTS) don't prevent detection
+// of invalid top-level properties.
+func TestStage_ModifiersWithInvalidProperty(t *testing.T) {
+	tests := []struct {
+		name          string
+		sql           string
+		expectedMatch string
+	}{
+		{"IF NOT EXISTS + invalid", "CREATE STAGE IF NOT EXISTS s TYPE = 'CSV'", "TYPE"},
+		{"OR REPLACE + invalid", "CREATE OR REPLACE STAGE s SKIP_HEADER = 1", "SKIP_HEADER"},
+		{"TEMPORARY + invalid", "CREATE TEMPORARY STAGE s FIELD_DELIMITER = ','", "FIELD_DELIMITER"},
+		{"OR REPLACE TEMPORARY + invalid", "CREATE OR REPLACE TEMPORARY STAGE s MASTER_KEY = 'k'", "MASTER_KEY"},
+		{"OR REPLACE IF NOT EXISTS + invalid", "CREATE STAGE IF NOT EXISTS s ON_ERROR = CONTINUE", "ON_ERROR"},
+		{"ALTER IF EXISTS + invalid TYPE", "ALTER STAGE IF EXISTS s SET TYPE = 'CSV'", "TYPE"},
+		{"ALTER IF EXISTS + invalid SKIP_HEADER", "ALTER STAGE IF EXISTS s SET SKIP_HEADER = 1", "SKIP_HEADER"},
+		{"ALTER IF EXISTS + invalid MASTER_KEY", "ALTER STAGE IF EXISTS s SET MASTER_KEY = 'key'", "MASTER_KEY"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ranges := GetStatementRanges(tt.sql)
+			markers := ValidateSnowflakePatterns(tt.sql, ranges)
+			warnings := getWarnings(markers)
+			if len(warnings) == 0 {
+				t.Fatalf("Expected warnings for %q, got 0", tt.sql)
+			}
+			found := false
+			for _, w := range warnings {
+				if strings.Contains(strings.ToUpper(w.Message), strings.ToUpper(tt.expectedMatch)) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Expected warning matching %q, got: %v", tt.expectedMatch, warnings[0].Message)
+			}
+		})
+	}
+}
+
+// TestStage_EmptyAndWhitespaceInput verifies that empty, whitespace-only, and
+// non-stage SQL inputs produce zero stage-related warnings.
+func TestStage_EmptyAndWhitespaceInput(t *testing.T) {
+	cases := []struct {
+		name string
+		sql  string
+	}{
+		{"empty string", ""},
+		{"whitespace only", "   \t\n  "},
+		{"SELECT statement", "SELECT 1"},
+		{"CREATE TABLE", "CREATE TABLE t (id INT)"},
+		{"INSERT", "INSERT INTO t VALUES (1)"},
+		{"DROP STAGE", "DROP STAGE IF EXISTS s"},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			ranges := GetStatementRanges(tt.sql)
+			markers := ValidateSnowflakePatterns(tt.sql, ranges)
+			warnings := getWarnings(markers)
+			if len(warnings) > 0 {
+				t.Errorf("Expected 0 warnings for non-stage SQL %q, got %d: %v", tt.sql, len(warnings), warnMsgs(warnings))
+			}
+		})
+	}
+}
+
+// TestStage_PropertyPatternsInsideStringValues verifies that property-like
+// patterns (KEY = value) inside single-quoted string literals do not trigger
+// false-positive warnings. This tests the reStripStringLiterals preprocessing.
+func TestStage_PropertyPatternsInsideStringValues(t *testing.T) {
+	validCases := []string{
+		// COMMENT values containing property-like patterns
+		"CREATE STAGE s COMMENT = 'TYPE = CSV'",
+		"CREATE STAGE s COMMENT = 'SKIP_HEADER = 1 and FIELD_DELIMITER = comma'",
+		"CREATE STAGE s URL = 's3://bucket/' COMMENT = 'ENCRYPTION = NONE is recommended'",
+		"ALTER STAGE s SET COMMENT = 'set TYPE = JSON for best results'",
+		// Escaped quotes inside string values with property-like content
+		"CREATE STAGE s COMMENT = 'it''s a TYPE = CSV test'",
+		"ALTER STAGE s SET COMMENT = 'field''s DELIMITER = none'",
+		// Multiple string values with property-like content
+		"CREATE STAGE s URL = 's3://bucket/KEY_ID=test/' COMMENT = 'MASTER_KEY = hidden'",
+		// Property-like patterns inside nested block string values
+		"CREATE STAGE s FILE_FORMAT = (TYPE = 'CSV' FIELD_DELIMITER = 'SKIP_HEADER = 1')",
+	}
+	for _, sql := range validCases {
+		t.Run(sql[:min(len(sql), 60)], func(t *testing.T) {
+			ranges := GetStatementRanges(sql)
+			markers := ValidateSnowflakePatterns(sql, ranges)
+			warnings := getWarnings(markers)
+			if len(warnings) > 0 {
+				t.Errorf("Expected 0 warnings for %q, got %d: %v", sql, len(warnings), warnMsgs(warnings))
+			}
+		})
+	}
+}
+
+// TestAlterStage_SkipValidationWithPropertyLikeNames verifies that ALTER STAGE
+// forms excluded from property validation (RENAME TO, SET TAG, UNSET TAG) work
+// correctly even when identifiers resemble invalid property names.
+func TestAlterStage_SkipValidationWithPropertyLikeNames(t *testing.T) {
+	validCases := []string{
+		// SET TAG where tag_name = value would match reProp without the skip
+		"ALTER STAGE s SET TAG type = 'value'",
+		"ALTER STAGE s SET TAG compression = 'gzip', skip_header = '1'",
+		"ALTER STAGE IF EXISTS s SET TAG field_delimiter = 'comma'",
+		// RENAME TO with property-keyword-like destination
+		"ALTER STAGE s RENAME TO type_stage",
+		"ALTER STAGE s RENAME TO skip_header_stage",
+		// UNSET TAG with property-like tag names
+		"ALTER STAGE s UNSET TAG type",
+		"ALTER STAGE s UNSET TAG field_delimiter, skip_header",
+	}
+	for _, sql := range validCases {
+		t.Run(sql[:min(len(sql), 60)], func(t *testing.T) {
+			ranges := GetStatementRanges(sql)
+			markers := ValidateSnowflakePatterns(sql, ranges)
+			warnings := getWarnings(markers)
+			if len(warnings) > 0 {
+				t.Errorf("Expected 0 warnings for %q, got %d: %v", sql, len(warnings), warnMsgs(warnings))
+			}
+		})
+	}
+}
+
 // TestAlterStage_Invalid covers ALTER STAGE SET statements that use sub-option
 // property names at the top level instead of inside the correct nested block.
 func TestAlterStage_Invalid(t *testing.T) {

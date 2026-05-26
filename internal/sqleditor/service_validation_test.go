@@ -43,6 +43,11 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 		"CREATE SERVICE my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ AUTO_SUSPEND_SECS = 300",
 		"CREATE SERVICE my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ MIN_READY_INSTANCES = 1",
 		"CREATE SERVICE my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ LOG_LEVEL = 'INFO'",
+		// CREATE SERVICE — schema-qualified name
+		"CREATE SERVICE db.schema.my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$",
+		// CREATE SERVICE — case insensitive
+		"create service my_svc in compute pool my_pool from specification $$spec$$",
+		"Create Or Replace Service my_svc In Compute Pool my_pool From Specification $$spec$$",
 
 		// EXECUTE SERVICE — inline YAML
 		"EXECUTE SERVICE my_job IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$",
@@ -62,6 +67,11 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 		"EXECUTE JOB SERVICE my_job IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ REPLICAS = 3",
 		// EXECUTE SERVICE — SPECIFICATION_TEMPLATE
 		"EXECUTE SERVICE my_job IN COMPUTE POOL my_pool FROM SPECIFICATION_TEMPLATE $$spec$$",
+		// EXECUTE JOB SERVICE — SPECIFICATION_TEMPLATE_FILE
+		"EXECUTE JOB SERVICE my_job IN COMPUTE POOL my_pool FROM SPECIFICATION_TEMPLATE_FILE = '@stage/spec.yaml'",
+		// EXECUTE SERVICE — case insensitive
+		"execute service my_job in compute pool my_pool from specification $$spec$$",
+		"Execute Job Service my_job In Compute Pool my_pool From Specification $$spec$$",
 
 		// ALTER SERVICE — SUSPEND / RESUME
 		"ALTER SERVICE my_svc SUSPEND",
@@ -85,8 +95,18 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 		// ALTER SERVICE — UNSET MIN_INSTANCES / MAX_INSTANCES
 		"ALTER SERVICE my_svc UNSET MIN_INSTANCES",
 		"ALTER SERVICE my_svc UNSET MAX_INSTANCES",
-		// ALTER SERVICE — IF EXISTS
+		// ALTER SERVICE — IF EXISTS with various sub-commands
 		"ALTER SERVICE IF EXISTS my_svc SUSPEND",
+		"ALTER SERVICE IF EXISTS my_svc RESUME",
+		"ALTER SERVICE IF EXISTS my_svc SET MIN_INSTANCES = 2",
+		"ALTER SERVICE IF EXISTS my_svc UNSET COMMENT",
+		"ALTER SERVICE IF EXISTS my_svc FROM SPECIFICATION $$new_spec$$",
+		// ALTER SERVICE — SET with multiple valid properties
+		"ALTER SERVICE my_svc SET MIN_INSTANCES = 2 MAX_INSTANCES = 10",
+		"ALTER SERVICE my_svc SET COMMENT = 'updated' QUERY_WAREHOUSE = wh2",
+		// ALTER SERVICE — case insensitive
+		"alter service my_svc suspend",
+		"Alter Service my_svc Set Min_Instances = 2",
 
 		// DROP SERVICE
 		"DROP SERVICE my_svc",

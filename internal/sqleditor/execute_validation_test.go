@@ -171,6 +171,46 @@ func TestValidateSnowflakePatterns_ExecuteImmediate(t *testing.T) {
 			name: "USING clause with quoted identifier bind variable",
 			sql:  `EXECUTE IMMEDIATE 'SELECT $1' USING ("MyVar")`,
 		},
+		{
+			name: "Multiline string literal argument",
+			sql:  "EXECUTE IMMEDIATE 'SELECT 1\nFROM t\nWHERE id = 1'",
+		},
+		{
+			name: "String literal containing USING + real external USING with valid bind vars",
+			sql:  "EXECUTE IMMEDIATE 'MERGE INTO t USING (src)' USING (v1)",
+		},
+		{
+			name: "CRLF between keyword and argument",
+			sql:  "EXECUTE IMMEDIATE\r\n'SELECT 1'",
+		},
+		{
+			name: "USING clause with newlines inside parens",
+			sql:  "EXECUTE IMMEDIATE 'SELECT $1' USING (\n  v1\n)",
+		},
+		{
+			name: "USING clause with tab before paren",
+			sql:  "EXECUTE IMMEDIATE 'SELECT $1' USING\t(val)",
+		},
+		{
+			name: "USING clause with trailing semicolon",
+			sql:  "EXECUTE IMMEDIATE 'SELECT $1' USING (v1);",
+		},
+		{
+			name: "String literal containing semicolons — statement not split",
+			sql:  "EXECUTE IMMEDIATE 'SELECT 1; SELECT 2'",
+		},
+		{
+			name: "Dollar-quoted block containing semicolons — statement not split",
+			sql:  "EXECUTE IMMEDIATE $$SELECT 1; SELECT 2; SELECT 3$$",
+		},
+		{
+			name: "Argument on third line — three-line span",
+			sql:  "EXECUTE\n  IMMEDIATE\n  'SELECT 1'",
+		},
+		{
+			name: "Newlines between argument and USING clause",
+			sql:  "EXECUTE IMMEDIATE 'SELECT $1'\n\nUSING (v1)",
+		},
 
 		// ── Invalid Cases ────────────────────────────────────────────────────
 		{
@@ -289,6 +329,58 @@ func TestValidateSnowflakePatterns_ExecuteImmediate(t *testing.T) {
 			expectWarning: true,
 			expectedMatch: "USING clause in EXECUTE IMMEDIATE must contain at least one bind variable",
 		},
+		{
+			name:          "USING with only newlines inside parens — stripped to empty",
+			sql:           "EXECUTE IMMEDIATE 'SELECT $1' USING (\n\n)",
+			expectWarning: true,
+			expectedMatch: "USING clause in EXECUTE IMMEDIATE must contain at least one bind variable",
+		},
+		{
+			name:          "USING with only tabs inside parens — stripped to empty",
+			sql:           "EXECUTE IMMEDIATE 'SELECT $1' USING (\t\t)",
+			expectWarning: true,
+			expectedMatch: "USING clause in EXECUTE IMMEDIATE must contain at least one bind variable",
+		},
+		{
+			name:          "Dollar-quoted arg with empty external USING",
+			sql:           "EXECUTE IMMEDIATE $$SELECT $1$$ USING ()",
+			expectWarning: true,
+			expectedMatch: "USING clause in EXECUTE IMMEDIATE must contain at least one bind variable",
+		},
+		{
+			name:          "String literal with internal USING() and empty external USING",
+			sql:           "EXECUTE IMMEDIATE 'MERGE INTO t USING ()' USING ()",
+			expectWarning: true,
+			expectedMatch: "USING clause in EXECUTE IMMEDIATE must contain at least one bind variable",
+		},
+		{
+			name:          "USING with empty quoted identifier — not a valid bind variable",
+			sql:           `EXECUTE IMMEDIATE 'SELECT $1' USING ("")`,
+			expectWarning: true,
+			expectedMatch: "USING clause in EXECUTE IMMEDIATE must contain at least one bind variable",
+		},
+
+		// ── Additional Valid Cases ──────────────────────────────────────────
+		{
+			name: "Empty dollar-quoted block is a valid argument",
+			sql:  "EXECUTE IMMEDIATE $$$$",
+		},
+		{
+			name: "INTO clause after arg — only USING is checked, not other clauses",
+			sql:  "EXECUTE IMMEDIATE 'SELECT 1' INTO :result",
+		},
+		{
+			name: "USING with mixed quoted and unquoted bind variables",
+			sql:  `EXECUTE IMMEDIATE 'SELECT $1, $2' USING ("MyVar", plain_var)`,
+		},
+		{
+			name: "USING clause commented out via line comment — no USING warning",
+			sql:  "EXECUTE IMMEDIATE 'SELECT $1' --USING (v1)",
+		},
+		{
+			name: "USING clause commented out via block comment — no USING warning",
+			sql:  "EXECUTE IMMEDIATE 'SELECT $1' /*USING ()*/",
+		},
 	})
 }
 
@@ -352,6 +444,14 @@ func TestValidateSnowflakePatterns_ExecuteTask(t *testing.T) {
 			sql:  "EXECUTE TASK _my_task",
 		},
 		{
+			name: "Quoted identifier starting with digit — valid when quoted",
+			sql:  `EXECUTE TASK "123task"`,
+		},
+		{
+			name: "Quoted identifier containing dots — single identifier, not multi-part",
+			sql:  `EXECUTE TASK "db.schema.task"`,
+		},
+		{
 			name: "Task name with dollar sign in identifier",
 			sql:  "EXECUTE TASK my$task",
 		},
@@ -376,6 +476,14 @@ func TestValidateSnowflakePatterns_ExecuteTask(t *testing.T) {
 		{
 			name: "EXECUTE TASK with USING CONFIG",
 			sql:  `EXECUTE TASK my_task USING CONFIG = '{"key": "val"}'`,
+		},
+		{
+			name: "RETRY LAST and USING CONFIG combined",
+			sql:  `EXECUTE TASK my_task RETRY LAST USING CONFIG = '{"key": "val"}'`,
+		},
+		{
+			name: "CRLF between keyword and task name",
+			sql:  "EXECUTE TASK\r\nmy_task",
 		},
 
 		// ── Invalid Cases ────────────────────────────────────────────────────
@@ -440,8 +548,24 @@ func TestValidateSnowflakePatterns_ExecuteTask(t *testing.T) {
 			expectedMatch: "requires a task name",
 		},
 		{
+			name:          "Unclosed quoted task name — regex requires closing quote",
+			sql:           `EXECUTE TASK "my_task`,
+			expectWarning: true,
+			expectedMatch: "requires a task name",
+		},
+		{
+			name:          "Dot-only path — not a valid identifier",
+			sql:           "EXECUTE TASK .",
+			expectWarning: true,
+			expectedMatch: "requires a task name",
+		},
+		{
 			name: "Spaces around dots — db alone matches as single-part name",
 			sql:  "EXECUTE TASK db . schema . task",
+		},
+		{
+			name: "Task name that is a SQL keyword — accepted as bare identifier",
+			sql:  "EXECUTE TASK SELECT",
 		},
 	})
 }
@@ -467,6 +591,18 @@ func TestExecuteMultiStatement(t *testing.T) {
 		{
 			name:          "Invalid EXECUTE TASK in multi-statement",
 			sql:           "SELECT 1;\nEXECUTE TASK",
+			expectWarning: true,
+			expectedMatch: "requires a task name",
+		},
+		{
+			name:          "Valid then invalid EXECUTE IMMEDIATE in same multi-statement",
+			sql:           "EXECUTE IMMEDIATE 'SELECT 1';\nEXECUTE IMMEDIATE",
+			expectWarning: true,
+			expectedMatch: "requires a SQL string argument",
+		},
+		{
+			name:          "Valid then invalid EXECUTE TASK in same multi-statement",
+			sql:           "EXECUTE TASK my_task;\nEXECUTE TASK",
 			expectWarning: true,
 			expectedMatch: "requires a task name",
 		},
@@ -507,6 +643,10 @@ func TestExecuteMultiStatementBothInvalid(t *testing.T) {
 func TestExecuteMultiStatementMixedVariants(t *testing.T) {
 	runPatternTests(t, []patternTestCase{
 		{
+			name: "EXECUTE IMMEDIATE with semicolons inside string in multi-statement",
+			sql:  "EXECUTE IMMEDIATE 'INSERT INTO t; SELECT 1';\nSELECT 2",
+		},
+		{
 			name: "Valid EXECUTE IMMEDIATE then valid EXECUTE TASK",
 			sql:  "EXECUTE IMMEDIATE 'SELECT 1';\nEXECUTE TASK my_task",
 		},
@@ -515,6 +655,114 @@ func TestExecuteMultiStatementMixedVariants(t *testing.T) {
 			sql:  "EXECUTE TASK my_task;\nEXECUTE IMMEDIATE :sql_var",
 		},
 	})
+}
+
+// TestExecuteMultiStatementDuplicateInvalid ensures that two invalid EXECUTE
+// statements of the same type each independently produce a warning.
+func TestExecuteMultiStatementDuplicateInvalid(t *testing.T) {
+	t.Run("two EXECUTE IMMEDIATE without args", func(t *testing.T) {
+		sql := "EXECUTE IMMEDIATE;\nEXECUTE IMMEDIATE"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warnings := getWarnings(markers)
+
+		if len(warnings) != 2 {
+			t.Fatalf("Expected exactly 2 warnings, got %d: %v", len(warnings), warnings)
+		}
+		for _, w := range warnings {
+			if !strings.Contains(strings.ToLower(w.Message), "requires a sql string argument") {
+				t.Errorf("Unexpected warning message: %s", w.Message)
+			}
+		}
+	})
+
+	t.Run("two EXECUTE TASK without names", func(t *testing.T) {
+		sql := "EXECUTE TASK;\nEXECUTE TASK"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warnings := getWarnings(markers)
+
+		if len(warnings) != 2 {
+			t.Fatalf("Expected exactly 2 warnings, got %d: %v", len(warnings), warnings)
+		}
+		for _, w := range warnings {
+			if !strings.Contains(strings.ToLower(w.Message), "requires a task name") {
+				t.Errorf("Unexpected warning message: %s", w.Message)
+			}
+		}
+	})
+}
+
+// TestExecuteMarkerPositionMultiStatement verifies that warning markers point
+// to the correct line numbers when EXECUTE statements appear after other
+// statements in multi-statement SQL.
+func TestExecuteMarkerPositionMultiStatement(t *testing.T) {
+	t.Run("EXECUTE IMMEDIATE on line 3", func(t *testing.T) {
+		sql := "SELECT 1;\nSELECT 2;\nEXECUTE IMMEDIATE"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warnings := getWarnings(markers)
+
+		if len(warnings) != 1 {
+			t.Fatalf("Expected 1 warning, got %d", len(warnings))
+		}
+		if warnings[0].StartLineNumber != 3 {
+			t.Errorf("Expected StartLineNumber=3, got %d", warnings[0].StartLineNumber)
+		}
+	})
+
+	t.Run("multi-line EXECUTE IMMEDIATE starting at line 3", func(t *testing.T) {
+		sql := "SELECT 1;\nSELECT 2;\nEXECUTE\n  IMMEDIATE"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warnings := getWarnings(markers)
+
+		if len(warnings) != 1 {
+			t.Fatalf("Expected 1 warning, got %d", len(warnings))
+		}
+		if warnings[0].StartLineNumber != 3 {
+			t.Errorf("Expected StartLineNumber=3, got %d", warnings[0].StartLineNumber)
+		}
+		if warnings[0].EndLineNumber != 4 {
+			t.Errorf("Expected EndLineNumber=4, got %d", warnings[0].EndLineNumber)
+		}
+	})
+
+	t.Run("EXECUTE TASK on line 4", func(t *testing.T) {
+		sql := "SELECT 1;\nSELECT 2;\nSELECT 3;\nEXECUTE TASK"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warnings := getWarnings(markers)
+
+		if len(warnings) != 1 {
+			t.Fatalf("Expected 1 warning, got %d", len(warnings))
+		}
+		if warnings[0].StartLineNumber != 4 {
+			t.Errorf("Expected StartLineNumber=4, got %d", warnings[0].StartLineNumber)
+		}
+	})
+}
+
+// TestValidateSnowflakePatterns_EmptyInput ensures that empty, whitespace-only,
+// and semicolons-only input does not produce markers or panics.
+func TestValidateSnowflakePatterns_EmptyInput(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		sql  string
+	}{
+		{"empty string", ""},
+		{"whitespace only", "   \n  \t  "},
+		{"semicolons only", ";;;"},
+		{"semicolon and whitespace", " ; ; "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ranges := GetStatementRanges(tc.sql)
+			markers := ValidateSnowflakePatterns(tc.sql, ranges)
+			if len(markers) > 0 {
+				t.Errorf("Expected no markers for %q, got %d: %v", tc.sql, len(markers), markers)
+			}
+		})
+	}
 }
 
 // TestExecuteOtherForms ensures that other EXECUTE variants (ALERT, MANAGED TASK)
@@ -527,4 +775,157 @@ func TestExecuteOtherForms(t *testing.T) {
 		{name: "lowercase EXECUTE ALERT", sql: "execute alert my_alert"},
 		{name: "Bare EXECUTE — no subcommand", sql: "EXECUTE"},
 	})
+}
+
+// TestExecuteMarkerEndLine verifies that EndLineNumber is correct for
+// multi-line EXECUTE statements and that single-line statements have
+// matching start and end lines.
+func TestExecuteMarkerEndLine(t *testing.T) {
+	t.Run("multi-line EXECUTE IMMEDIATE spans two lines", func(t *testing.T) {
+		sql := "EXECUTE\n  IMMEDIATE"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warnings := getWarnings(markers)
+
+		if len(warnings) != 1 {
+			t.Fatalf("Expected 1 warning, got %d", len(warnings))
+		}
+		if warnings[0].EndLineNumber != 2 {
+			t.Errorf("Expected EndLineNumber=2, got %d", warnings[0].EndLineNumber)
+		}
+	})
+
+	t.Run("three-line EXECUTE IMMEDIATE has EndLineNumber=3", func(t *testing.T) {
+		sql := "EXECUTE\n  IMMEDIATE\n  -- no arg"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warnings := getWarnings(markers)
+
+		if len(warnings) != 1 {
+			t.Fatalf("Expected 1 warning, got %d", len(warnings))
+		}
+		if warnings[0].EndLineNumber != 3 {
+			t.Errorf("Expected EndLineNumber=3, got %d", warnings[0].EndLineNumber)
+		}
+	})
+
+	t.Run("single-line EXECUTE TASK has matching start and end line", func(t *testing.T) {
+		sql := "EXECUTE TASK"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warnings := getWarnings(markers)
+
+		if len(warnings) != 1 {
+			t.Fatalf("Expected 1 warning, got %d", len(warnings))
+		}
+		if warnings[0].StartLineNumber != warnings[0].EndLineNumber {
+			t.Errorf("Expected StartLineNumber=EndLineNumber, got start=%d end=%d",
+				warnings[0].StartLineNumber, warnings[0].EndLineNumber)
+		}
+	})
+}
+
+// TestExecuteMultiStatementThreeInvalid verifies that three invalid EXECUTE
+// statements each independently produce a warning.
+func TestExecuteMultiStatementThreeInvalid(t *testing.T) {
+	sql := "EXECUTE IMMEDIATE;\nEXECUTE TASK;\nEXECUTE IMMEDIATE"
+	ranges := GetStatementRanges(sql)
+	markers := ValidateSnowflakePatterns(sql, ranges)
+	warnings := getWarnings(markers)
+
+	if len(warnings) < 3 {
+		t.Fatalf("Expected at least 3 warnings, got %d: %v", len(warnings), warnings)
+	}
+
+	immCount, taskCount := 0, 0
+	for _, w := range warnings {
+		msg := strings.ToLower(w.Message)
+		if strings.Contains(msg, "requires a sql string argument") {
+			immCount++
+		}
+		if strings.Contains(msg, "requires a task name") {
+			taskCount++
+		}
+	}
+	if immCount != 2 {
+		t.Errorf("Expected 2 EXECUTE IMMEDIATE warnings, got %d", immCount)
+	}
+	if taskCount != 1 {
+		t.Errorf("Expected 1 EXECUTE TASK warning, got %d", taskCount)
+	}
+}
+
+// TestExecuteWarningCountSingleStatement verifies that each single-statement
+// EXECUTE violation produces exactly 1 warning — no duplicates.
+func TestExecuteWarningCountSingleStatement(t *testing.T) {
+	cases := []struct {
+		name string
+		sql  string
+	}{
+		{"bare EXECUTE IMMEDIATE", "EXECUTE IMMEDIATE"},
+		{"EXECUTE IMMEDIATE semicolon only", "EXECUTE IMMEDIATE;"},
+		{"EXECUTE IMMEDIATE trailing whitespace", "EXECUTE IMMEDIATE   "},
+		{"bare EXECUTE TASK", "EXECUTE TASK"},
+		{"EXECUTE TASK semicolon only", "EXECUTE TASK;"},
+		{"EXECUTE TASK trailing whitespace", "EXECUTE TASK   "},
+		{"EXECUTE IMMEDIATE with empty USING", "EXECUTE IMMEDIATE 'SELECT $1' USING ()"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ranges := GetStatementRanges(tc.sql)
+			markers := ValidateSnowflakePatterns(tc.sql, ranges)
+			warnings := getWarnings(markers)
+			if len(warnings) != 1 {
+				t.Errorf("Expected exactly 1 warning for %q, got %d: %v", tc.sql, len(warnings), warnMsgs(warnings))
+			}
+		})
+	}
+}
+
+// TestExecuteMarkerColumns verifies that EXECUTE warning markers use the
+// expected column positions (StartColumn=1, EndColumn=100 per diagMarkerSpan).
+func TestExecuteMarkerColumns(t *testing.T) {
+	sql := "EXECUTE IMMEDIATE"
+	ranges := GetStatementRanges(sql)
+	markers := ValidateSnowflakePatterns(sql, ranges)
+	warnings := getWarnings(markers)
+
+	if len(warnings) != 1 {
+		t.Fatalf("Expected 1 warning, got %d", len(warnings))
+	}
+	if warnings[0].StartColumn != 1 {
+		t.Errorf("Expected StartColumn=1, got %d", warnings[0].StartColumn)
+	}
+	if warnings[0].EndColumn != 100 {
+		t.Errorf("Expected EndColumn=100, got %d", warnings[0].EndColumn)
+	}
+}
+
+// TestExecuteNoFalsePositiveInNonExecuteStatements verifies that EXECUTE
+// keywords appearing inside string literals or comments in non-EXECUTE
+// statements do not produce EXECUTE-related diagnostics.
+func TestExecuteNoFalsePositiveInNonExecuteStatements(t *testing.T) {
+	cases := []struct {
+		name string
+		sql  string
+	}{
+		{"SELECT with EXECUTE IMMEDIATE in string literal", "SELECT 'EXECUTE IMMEDIATE' AS col"},
+		{"Comment containing EXECUTE TASK text", "SELECT 1 -- EXECUTE TASK"},
+		{"Block comment containing EXECUTE IMMEDIATE", "SELECT 1 /* EXECUTE IMMEDIATE */"},
+		{"Dollar-quoted block containing EXECUTE IMMEDIATE", "SELECT $$EXECUTE IMMEDIATE$$ AS col"},
+		{"Dollar-quoted block containing EXECUTE TASK", "SELECT $$EXECUTE TASK$$ AS col"},
+		{"Tagged dollar-quoted block containing EXECUTE IMMEDIATE", "SELECT $tag$EXECUTE IMMEDIATE$tag$ AS col"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ranges := GetStatementRanges(tc.sql)
+			markers := ValidateSnowflakePatterns(tc.sql, ranges)
+			for _, m := range markers {
+				msg := strings.ToLower(m.Message)
+				if strings.Contains(msg, "execute immediate") || strings.Contains(msg, "execute task") {
+					t.Errorf("Unexpected EXECUTE-related marker for %q: %s", tc.sql, m.Message)
+				}
+			}
+		})
+	}
 }
