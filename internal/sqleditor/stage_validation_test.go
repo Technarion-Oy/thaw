@@ -127,7 +127,11 @@ func TestCreateStage_Valid(t *testing.T) {
 		"CREATE STAGE s URL = 's3://bucket/' USE_PRIVATELINK_ENDPOINT = FALSE",
 		// ── 22. S3-compatible ─────────────────────────────────────────────────
 		"CREATE STAGE s URL = 's3compat://bucket/' ENDPOINT = 'storage.example.com' CREDENTIALS = (AWS_KEY_ID = 'key' AWS_SECRET_KEY = 'secret')",
-		// ── 23. Complex combined examples ─────────────────────────────────────
+		// ── 23. Combined modifiers ───────────────────────────────────────────
+		"CREATE TEMPORARY STAGE IF NOT EXISTS s",
+		"CREATE OR REPLACE TEMPORARY STAGE IF NOT EXISTS s",
+		"CREATE TEMPORARY STAGE IF NOT EXISTS s URL = 's3://bucket/' FILE_FORMAT = (TYPE = 'CSV')",
+		// ── 24. Complex combined examples ─────────────────────────────────────
 		"CREATE OR REPLACE STAGE my_s3_stage URL = 's3://my-bucket/path/' STORAGE_INTEGRATION = my_int FILE_FORMAT = (TYPE = 'CSV' FIELD_DELIMITER = ',' SKIP_HEADER = 1) DIRECTORY = (ENABLE = TRUE AUTO_REFRESH = TRUE) COMMENT = 'S3 stage'",
 		"CREATE STAGE my_gcs_stage URL = 'gcs://my-bucket/' STORAGE_INTEGRATION = gcs_int FILE_FORMAT = (TYPE = 'JSON') DIRECTORY = (ENABLE = TRUE) COMMENT = 'GCS stage'",
 		"CREATE STAGE my_azure_stage URL = 'azure://myacct.blob.core.windows.net/mycontainer/' CREDENTIALS = (AZURE_SAS_TOKEN = 'token') FILE_FORMAT = (TYPE = 'CSV') COMMENT = 'Azure stage'",
@@ -319,6 +323,15 @@ func TestAlterStage_Valid(t *testing.T) {
 		// ── 17. Quoted stage names ─────────────────────────────────────────────
 		`ALTER STAGE "my stage" SET COMMENT = 'quoted name'`,
 		`ALTER STAGE IF EXISTS "My Stage" REFRESH`,
+		// ── 18. UNSET for regular properties (not TAG/DCM) ──────────────────
+		"ALTER STAGE s UNSET COMMENT",
+		"ALTER STAGE s UNSET FILE_FORMAT",
+		"ALTER STAGE s UNSET COPY_OPTIONS",
+		"ALTER STAGE IF EXISTS s UNSET COMMENT",
+		"ALTER STAGE IF EXISTS s UNSET ENCRYPTION",
+		// ── 19. Bare ALTER STAGE with no action ──────────────────────────────
+		"ALTER STAGE s",
+		"ALTER STAGE IF EXISTS s",
 	}
 
 	for _, sql := range valid {
@@ -1039,6 +1052,14 @@ func TestAlterStage_Invalid(t *testing.T) {
 		// XML sub-options at top level
 		{"PRESERVE_SPACE at top level", "ALTER STAGE s SET PRESERVE_SPACE = TRUE", "PRESERVE_SPACE"},
 		{"STRIP_OUTER_ELEMENT at top level", "ALTER STAGE s SET STRIP_OUTER_ELEMENT = TRUE", "STRIP_OUTER_ELEMENT"},
+		// Parity with CREATE invalid: properties missing from ALTER tests
+		{"S3_URL in SET", "ALTER STAGE s SET S3_URL = 's3://bucket/'", "S3_URL"},
+		{"WAREHOUSE in SET", "ALTER STAGE s SET WAREHOUSE = 'WH'", "WAREHOUSE"},
+		{"MAX_FILE_SIZE in SET", "ALTER STAGE s SET MAX_FILE_SIZE = 100", "MAX_FILE_SIZE"},
+		{"FORCE in SET", "ALTER STAGE s SET FORCE = TRUE", "FORCE"},
+		{"PURGE in SET", "ALTER STAGE s SET PURGE = TRUE", "PURGE"},
+		{"TIMESTAMP_FORMAT in SET", "ALTER STAGE s SET TIMESTAMP_FORMAT = 'AUTO'", "TIMESTAMP_FORMAT"},
+		{"COMPRESSION in SET", "ALTER STAGE s SET COMPRESSION = 'GZIP'", "COMPRESSION"},
 		// Invalid REFRESH parameter
 		{"Invalid REFRESH param", "ALTER STAGE s REFRESH MAX_SIZE = 100", "MAX_SIZE"},
 	}

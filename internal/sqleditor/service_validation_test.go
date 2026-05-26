@@ -93,6 +93,8 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 		// EXECUTE SERVICE — dollar-quoted body with property-like content (no false positives)
 		"EXECUTE SERVICE my_job IN COMPUTE POOL my_pool FROM SPECIFICATION $$MIN_INSTANCES = 5 AUTO_RESUME = TRUE$$",
 
+		// ALTER SERVICE — schema-qualified name
+		"ALTER SERVICE db.schema.my_svc SUSPEND",
 		// ALTER SERVICE — SUSPEND / RESUME
 		"ALTER SERVICE my_svc SUSPEND",
 		"ALTER SERVICE my_svc RESUME",
