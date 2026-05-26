@@ -36,6 +36,16 @@
   --warning:       #d29922;
   --danger:        #f85149;
 
+  /* Notebook cells — per-kind accent stripe + output surfaces */
+  --cell-accent-code:     #58a6ff;
+  --cell-accent-sql:      #39c5cf;
+  --cell-accent-markdown: #c297ff;
+  --cell-editor-bg:       #161b22;
+  --cell-output-bg:       #0b0f15;
+  --cell-output-stdout:   #c9d1d9;
+  --cell-output-stderr:   #e3b341;
+  --cell-output-error:    #f85149;
+
   /* Object-browser icon palette — distinct hue per Snowflake object kind.
      Same lightness band so no single icon overpowers a row; every value
      clears 3:1 (non-text contrast) against --bg. */
@@ -54,6 +64,17 @@
   --icon-notebook:    #c297ff;  /* violet                                   */
   --icon-secret:      #ff7b72;  /* coral red (sensitive)                    */
   --icon-gitrepo:     #ff9248;  /* warm orange (git family)                 */
+
+  /* Column icons */
+  --col-text:         #8b949e;
+  --col-number:       #79c0ff;
+  --col-datetime:     #a371f7;
+  --col-boolean:      #3fb950;
+  --col-variant:      #d29922;
+  --col-array:        #d29922;
+  --col-binary:       #8b949e;
+  --col-geo:          #58a6ff;
+  --col-vector:       #ff7b72;
 }
 
 /* ── Light theme ──────────────────────────────────────────────────────── */
@@ -76,6 +97,16 @@
   --warning:       #9a6700;
   --danger:        #cf222e;
 
+  /* Notebook cells — per-kind accent stripe + output surfaces */
+  --cell-accent-code:     #0550ae;
+  --cell-accent-sql:      #1b7c83;
+  --cell-accent-markdown: #6f42c1;
+  --cell-editor-bg:       #ffffff;
+  --cell-output-bg:       #f6f8fa;
+  --cell-output-stdout:   #0f1419;
+  --cell-output-stderr:   #9a6700;
+  --cell-output-error:    #cf222e;
+
   /* Same hue mapping as dark, retuned for adequate contrast on white. */
   --icon-database:    #0969da;
   --icon-schema:      #8250df;
@@ -92,6 +123,17 @@
   --icon-notebook:    #6f42c1;
   --icon-secret:      #cf222e;
   --icon-gitrepo:     #bc4c00;
+
+  /* Column icons */
+  --col-text:         #6e7681;
+  --col-number:       #0969da;
+  --col-datetime:     #8250df;
+  --col-boolean:      #1a7f37;
+  --col-variant:      #9a6700;
+  --col-array:        #9a6700;
+  --col-binary:       #6e7681;
+  --col-geo:          #0550ae;
+  --col-vector:       #cf222e;
 }
 
 html,
@@ -419,3 +461,372 @@ body,
   font-size: 12px;
   line-height: 1.55;
 }
+
+/* ── Notebook cell polish ─────────────────────────────────────────────── */
+
+:root {
+  --cell-accent-code: var(--accent);
+  --cell-accent-sql: #4ec9b0;
+  --cell-accent-markdown: #a371f7;
+
+  --cell-editor-bg: #1e1e1e;
+  --cell-output-bg: #1a1a1a;
+  
+  --cell-output-stdout: #d4d4d4;
+  --cell-output-stderr: #e6a817;
+  --cell-output-error: #ff4d4f;
+}
+
+[data-theme="light"] {
+  --cell-accent-code: var(--accent);
+  --cell-accent-sql: #0a7266;
+  --cell-accent-markdown: #8250df;
+
+  --cell-editor-bg: #ffffff;
+  --cell-output-bg: #fafafa;
+  
+  --cell-output-stdout: #1f2328;
+  --cell-output-stderr: #9a6700;
+  --cell-output-error: #cf222e;
+}
+
+.thaw-nb-cell {
+  position: relative;
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  border: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 0 20px 10px;
+  overflow: hidden;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  background: var(--bg-raised);
+}
+
+.thaw-nb-cell::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--cell-accent, var(--text-faint));
+  opacity: 0.85;
+}
+
+.thaw-nb-cell[data-kind="code"] { --cell-accent: var(--cell-accent-code); }
+.thaw-nb-cell[data-kind="sql"] { --cell-accent: var(--cell-accent-sql); }
+.thaw-nb-cell[data-kind="markdown"] { --cell-accent: var(--cell-accent-markdown); }
+
+.thaw-nb-cell[data-selected="true"] {
+  border-color: color-mix(in oklab, var(--cell-accent) 60%, var(--border-strong));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--cell-accent) 18%, transparent);
+}
+
+.thaw-nb-cell[data-selected="true"]::before {
+  width: 4px;
+  opacity: 1;
+}
+
+/* Left gutter — execution count + kind tag. Sits inside the accent
+   stripe (which is drawn via ::before on .thaw-nb-cell). */
+.thaw-nb-cell-gutter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 0 0;
+  background: var(--bg-raised);
+  border-right: 1px solid var(--border);
+  gap: 4px;
+  user-select: none;
+  font-family: var(--editor-font, "JetBrains Mono", monospace);
+}
+
+.thaw-nb-count {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  min-height: 14px;
+}
+
+.thaw-nb-kind-tag {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--cell-accent) 18%, transparent);
+  color: var(--cell-accent);
+  text-transform: uppercase;
+}
+
+/* The previous toolbar / editor / output rules were direct children of
+   .thaw-nb-cell. Now they need to sit inside a body wrapper so they only
+   occupy the second grid column. */
+.thaw-nb-cell-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Editor + output surfaces */
+.thaw-nb-editor-area { background: var(--cell-editor-bg); }
+.thaw-nb-output-area {
+  background: var(--cell-output-bg);
+  border-top: 1px solid var(--border);
+  padding: 8px 14px;
+}
+.thaw-nb-output-stdout { color: var(--cell-output-stdout); }
+.thaw-nb-output-stderr { color: var(--cell-output-stderr); }
+.thaw-nb-output-error  { color: var(--cell-output-error); }
+
+
+/* ── Notebook Toolbar ─────────────────────────────────────────────────── */
+
+.thaw-nb-btn-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.thaw-nb-btn-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+  margin: 0 4px;
+}
+
+.thaw-nb-icon-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  transition: all 0.1s;
+}
+
+.thaw-nb-icon-btn:hover:not(:disabled) {
+  background: var(--bg-overlay);
+  color: var(--text);
+}
+
+.thaw-nb-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Nav buttons (move up / move down) — internal arrow renders larger so the
+   affordance reads cleanly at the 28px button size. */
+.thaw-nb-icon-btn.nav .anticon { font-size: 15px; }
+
+/* Run reads as the cell's primary action — wider hit target (~50% wider
+   than siblings) and a permanent tinted background. */
+.thaw-nb-icon-btn.run {
+  width: 44px;
+  color: var(--cell-accent, var(--accent));
+  background: color-mix(in oklab, var(--cell-accent, var(--accent)) 12%, transparent);
+  border-color: color-mix(in oklab, var(--cell-accent, var(--accent)) 30%, transparent);
+}
+.thaw-nb-icon-btn.run:hover:not(:disabled) {
+  background: var(--cell-accent, var(--accent));
+  color: #fff;
+  border-color: transparent;
+}
+
+.thaw-nb-icon-btn.danger:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--danger) 15%, transparent);
+  color: var(--danger);
+}
+
+.thaw-nb-btn {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.1s;
+}
+
+.thaw-nb-btn:hover:not(:disabled) {
+  background: var(--bg-overlay);
+  border-color: var(--border-strong);
+}
+
+.thaw-nb-btn.primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: transparent;
+}
+
+.thaw-nb-btn.primary:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--accent) 85%, #000);
+}
+
+/* ── Inline "add cell" bars ───────────────────────────────────────────── */
+
+/* Hover-reveal bar between cells; permanent variant below last cell */
+.thaw-nb-add-row {
+  position: relative;
+  margin: -2px 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.thaw-nb-add-line {
+  position: absolute;
+  left: 8px; right: 8px;
+  top: 50%;
+  height: 1px;
+  background: var(--border);
+  opacity: 0.65;
+  transition: opacity 0.15s ease;
+  transform: translateY(-0.5px);
+}
+.thaw-nb-add-buttons {
+  display: inline-flex;
+  gap: 6px;
+  position: relative;
+  z-index: 1;
+  background: var(--bg);
+  padding: 0 8px;
+  opacity: 0;
+  transform: translateY(2px);
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.thaw-nb-add-row:hover .thaw-nb-add-buttons,
+.thaw-nb-add-row.permanent .thaw-nb-add-buttons {
+  opacity: 1; transform: translateY(0); pointer-events: auto;
+}
+.thaw-nb-add-row:hover .thaw-nb-add-line,
+.thaw-nb-add-row.permanent .thaw-nb-add-line { opacity: 0; }
+
+.thaw-nb-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+.thaw-nb-add-btn:hover {
+  color: var(--text);
+  background: var(--bg-overlay);
+}
+.thaw-nb-add-btn[data-kind="code"]:hover     { border-color: var(--cell-accent-code); }
+.thaw-nb-add-btn[data-kind="sql"]:hover      { border-color: var(--cell-accent-sql); }
+.thaw-nb-add-btn[data-kind="markdown"]:hover { border-color: var(--cell-accent-markdown); }
+
+.thaw-nb-add-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.thaw-nb-add-btn[data-kind="code"]     .thaw-nb-add-dot { background: var(--cell-accent-code); }
+.thaw-nb-add-btn[data-kind="sql"]      .thaw-nb-add-dot { background: var(--cell-accent-sql); }
+.thaw-nb-add-btn[data-kind="markdown"] .thaw-nb-add-dot { background: var(--cell-accent-markdown); }
+
+/* ── App toolbar buttons (Toolbar.tsx) ──────────────────────────────────
+   The top toolbar's left side. Sized to read at the same height as the
+   Antd primary Run button (32px) so the row reads as a coherent strip
+   instead of a grid of tiny chips. */
+
+.thaw-tb-icon-btn,
+.thaw-tb-text-btn,
+.thaw-tb-primary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-overlay);
+  color: var(--text);
+  white-space: nowrap;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.thaw-tb-icon-btn { width: 32px; padding: 0; }
+.thaw-tb-text-btn { padding: 0 12px 0 10px; }
+.thaw-tb-primary-btn {
+  padding: 0 14px 0 12px;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.18);
+}
+.thaw-tb-icon-btn:hover,
+.thaw-tb-text-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-faint);
+}
+.thaw-tb-primary-btn:hover { filter: brightness(1.08); }
+
+/* Cluster wrapper + separator */
+.thaw-tb-group { display: inline-flex; gap: 2px; align-items: center; }
+.thaw-tb-sep {
+  width: 1px;
+  height: 24px;
+  background: var(--border-strong);
+  opacity: 0.55;
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+/* Kernel status — minimal dot. Full info lives in the title tooltip. */
+.thaw-kernel-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  cursor: help;
+}
+.thaw-kernel-dot.ready .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow:
+    0 0 0 3px color-mix(in oklab, var(--success) 25%, transparent),
+    0 0 8px color-mix(in oklab, var(--success) 60%, transparent);
+}
+.thaw-kernel-dot.error .anticon    { color: var(--danger);  font-size: 14px; }
+.thaw-kernel-dot.starting .anticon { color: var(--accent); }
+
+/* ── Sidebar column icons ─────────────────────────────────────────────── */
+.thaw-col-icon {
+  color: var(--col-text); /* fallback */
+}
+.thaw-col-icon[data-family="pk"]       { color: var(--warning); }
+.thaw-col-icon[data-family="fk"]       { color: var(--link); }
+.thaw-col-icon[data-family="text"]     { color: var(--col-text); }
+.thaw-col-icon[data-family="number"]   { color: var(--col-number); }
+.thaw-col-icon[data-family="datetime"] { color: var(--col-datetime); }
+.thaw-col-icon[data-family="boolean"]  { color: var(--col-boolean); }
+.thaw-col-icon[data-family="variant"]  { color: var(--col-variant); }
+.thaw-col-icon[data-family="array"]    { color: var(--col-array); }
+.thaw-col-icon[data-family="binary"]   { color: var(--col-binary); }
+.thaw-col-icon[data-family="geo"]      { color: var(--col-geo); }
+.thaw-col-icon[data-family="vector"]   { color: var(--col-vector); }

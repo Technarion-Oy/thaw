@@ -2627,6 +2627,7 @@ export namespace snowpark {
 	    rows: any[][];
 	    rowCount: number;
 	    queryID: string;
+	    truncated: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new NotebookSqlResult(source);
@@ -2638,6 +2639,7 @@ export namespace snowpark {
 	        this.rows = source["rows"];
 	        this.rowCount = source["rowCount"];
 	        this.queryID = source["queryID"];
+	        this.truncated = source["truncated"];
 	    }
 	}
 	export class NotebookSyntaxError {

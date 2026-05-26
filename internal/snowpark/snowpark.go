@@ -448,22 +448,28 @@ def _thaw_run_sql_cell(sql_str):
                                 "session_context": _thaw_get_session_context()})
 
     stmts = _thaw_split_sql(sql_str)
-    last = {"columns": [], "rows": [], "rowCount": 0, "error": None}
+    last = {"columns": [], "rows": [], "rowCount": 0, "error": None, "truncated": False}
     for _stmt in stmts:
         _stmt = _stmt.strip()
         if not _stmt:
             continue
         try:
             _df = _sql_fn(_stmt)
-            _rows = _df.collect()
+            # Row capping: fetch max 50,001 to detect truncation.
+            _rows = _df.limit(50001).collect()
+            _truncated = len(_rows) > 50000
+            if _truncated:
+                _rows = _rows[:50000]
+
             last = {
                 "columns": [f.name for f in _df.schema.fields],
                 "rows":    [[_jval(v) for v in r] for r in _rows],
                 "rowCount": len(_rows),
                 "error": None,
+                "truncated": _truncated,
             }
         except Exception as _ex:
-            last = {"columns": [], "rows": [], "rowCount": 0, "error": str(_ex)}
+            last = {"columns": [], "rows": [], "rowCount": 0, "error": str(_ex), "truncated": False}
     last["session_context"] = _thaw_get_session_context()
     return _json.dumps(last)
 
@@ -679,10 +685,11 @@ type NotebookCellOutput struct {
 
 // NotebookSqlResult is returned by RunNotebookSql.
 type NotebookSqlResult struct {
-	Columns  []string `json:"columns"`
-	Rows     [][]any  `json:"rows"`
-	RowCount int64    `json:"rowCount"`
-	QueryID  string   `json:"queryID"`
+	Columns   []string `json:"columns"`
+	Rows      [][]any  `json:"rows"`
+	RowCount  int64    `json:"rowCount"`
+	QueryID   string   `json:"queryID"`
+	Truncated bool     `json:"truncated"`
 }
 
 // PackageInfo describes a Python package installed in the Snowpark environment.
@@ -1754,10 +1761,11 @@ func (s *Service) RunNotebookSql(client *snowflake.Client, sql string) (Notebook
 		rows = [][]any{}
 	}
 	return NotebookSqlResult{
-		Columns:  result.Columns,
-		Rows:     rows,
-		RowCount: result.RowsAffected,
-		QueryID:  result.QueryID,
+		Columns:   result.Columns,
+		Rows:      rows,
+		RowCount:  result.RowsAffected,
+		QueryID:   result.QueryID,
+		Truncated: result.Truncated,
 	}, nil
 }
 
@@ -2144,6 +2152,7 @@ func (s *Service) RunNotebookCellSql(client *snowflake.Client, tabId, sql string
 		Error          *string                 `json:"error"`
 		QueryID        string                  `json:"queryID"`
 		SessionContext *NotebookSessionContext `json:"session_context"`
+		Truncated      bool                    `json:"truncated"`
 	}
 	if resultJSON != "" {
 		if err := json.Unmarshal([]byte(resultJSON), &raw); err != nil {
@@ -2161,10 +2170,11 @@ func (s *Service) RunNotebookCellSql(client *snowflake.Client, tabId, sql string
 		rows = [][]any{}
 	}
 	return NotebookSqlResult{
-		Columns:  raw.Columns,
-		Rows:     rows,
-		RowCount: raw.RowCount,
-		QueryID:  raw.QueryID,
+		Columns:   raw.Columns,
+		Rows:      rows,
+		RowCount:  raw.RowCount,
+		QueryID:   raw.QueryID,
+		Truncated: raw.Truncated,
 	}, nil
 }
 
