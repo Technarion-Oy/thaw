@@ -60,6 +60,13 @@ export interface ToolbarProps {
    * a vertical separator if present; pass the entire cluster as a fragment.
    */
   contextSlot?: ReactNode;
+  /**
+   * Tab-specific primary action shown above the three global icon
+   * buttons (New SQL / New notebook / Save). When present, the globals
+   * shrink to a compact two-row stack. Pass nothing on tabs without a
+   * primary action (e.g. SQL tabs) and the row stays single-row.
+   */
+  primaryAction?: ReactNode;
 }
 
 export default function Toolbar({
@@ -77,6 +84,7 @@ export default function Toolbar({
   onNewNotebook,
   onSave,
   contextSlot,
+  primaryAction,
 }: ToolbarProps) {
   const params = useConnectionStore((s) => s.params);
   const isConnected = useConnectionStore((s) => s.isConnected);
@@ -157,20 +165,40 @@ export default function Toolbar({
         <div style={{ width: 1, alignSelf: "stretch", background: "var(--border)" }} />
 
         {/* Action button grid: 3 columns, 1 or 2 rows */}
-        <div className="thaw-tb-group">
-          <Tooltip title="New SQL query">
-            <Button className="thaw-tb-icon-btn" aria-label="New SQL query"
-              icon={<FileAddOutlined />} onClick={onNewSql} />
-          </Tooltip>
-          <Tooltip title="New notebook">
-            <Button className="thaw-tb-icon-btn" aria-label="New notebook"
-              icon={<BookOutlined />} onClick={onNewNotebook} />
-          </Tooltip>
-          <Tooltip title="Save (\u2318S)">
-            <Button className="thaw-tb-icon-btn" aria-label="Save"
-              icon={<SaveOutlined />} onClick={onSave} />
-          </Tooltip>
-        </div>
+        {primaryAction ? (
+          <div className="thaw-tb-vstack">
+            {primaryAction}
+            <div className="thaw-tb-vstack-row">
+              <Tooltip title="New SQL query">
+                <Button className="thaw-tb-vstack-icon" aria-label="New SQL query"
+                  icon={<FileAddOutlined />} onClick={onNewSql} />
+              </Tooltip>
+              <Tooltip title="New notebook">
+                <Button className="thaw-tb-vstack-icon" aria-label="New notebook"
+                  icon={<BookOutlined />} onClick={onNewNotebook} />
+              </Tooltip>
+              <Tooltip title="Save (\u2318S)">
+                <Button className="thaw-tb-vstack-icon" aria-label="Save"
+                  icon={<SaveOutlined />} onClick={onSave} />
+              </Tooltip>
+            </div>
+          </div>
+        ) : (
+          <div className="thaw-tb-group">
+            <Tooltip title="New SQL query">
+              <Button className="thaw-tb-icon-btn" aria-label="New SQL query"
+                icon={<FileAddOutlined />} onClick={onNewSql} />
+            </Tooltip>
+            <Tooltip title="New notebook">
+              <Button className="thaw-tb-icon-btn" aria-label="New notebook"
+                icon={<BookOutlined />} onClick={onNewNotebook} />
+            </Tooltip>
+            <Tooltip title="Save (\u2318S)">
+              <Button className="thaw-tb-icon-btn" aria-label="Save"
+                icon={<SaveOutlined />} onClick={onSave} />
+            </Tooltip>
+          </div>
+        )}
 
         {/* Tab-specific section (notebook kernel pill + actions) */}
         {contextSlot && (

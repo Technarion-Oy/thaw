@@ -10,7 +10,7 @@
 
 import type { ReactNode } from "react";
 import { Button, Spin, Tooltip } from "antd";
-import { ReloadOutlined, CloudUploadOutlined, WarningOutlined } from "@ant-design/icons";
+import { ReloadOutlined, WarningOutlined } from "@ant-design/icons";
 
 export interface NotebookToolbarSlotProps {
   kernelReady: boolean;
@@ -19,19 +19,19 @@ export interface NotebookToolbarSlotProps {
   /** Optional kernel name shown in the title tooltip (e.g. "Python 3.11"). */
   kernelName?: string;
   onRestartKernel: () => void;
-  onDeploy: () => void;
 }
 
 /**
  * Full notebook section for the app toolbar.
  *
- * Layout: [kernel dot] [Restart icon-btn] [Deploy primary-btn]
+ * Layout: [kernel dot] [Restart icon-btn]
  *
+ * The Deploy button moved to Toolbar.tsx's primaryAction prop.
  * The "+ Cell" action moved inline (hover-reveal bars between cells in
  * NotebookTab.tsx), so it's NOT included here.
  */
 export function NotebookToolbarSlot(props: NotebookToolbarSlotProps): ReactNode {
-  const { kernelReady, kernelStarting, kernelError, kernelName, onRestartKernel, onDeploy } = props;
+  const { kernelReady, kernelStarting, kernelError, kernelName, onRestartKernel } = props;
   return (
     <>
       <KernelDot
@@ -44,11 +44,6 @@ export function NotebookToolbarSlot(props: NotebookToolbarSlotProps): ReactNode 
       <Tooltip title="Restart kernel">
         <Button className="thaw-tb-icon-btn" aria-label="Restart kernel"
           icon={<ReloadOutlined />} onClick={onRestartKernel} />
-      </Tooltip>
-
-      <Tooltip title="Deploy notebook to Snowflake">
-        <Button className="thaw-tb-primary-btn" aria-label="Deploy notebook"
-          icon={<CloudUploadOutlined />} onClick={onDeploy}>Deploy</Button>
       </Tooltip>
     </>
   );

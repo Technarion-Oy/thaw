@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, Modal, type MenuProps } from "antd";
-import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, SearchOutlined } from "@ant-design/icons";
+import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, SearchOutlined, CloudUploadOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
 import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession } from "../../wailsjs/go/main/App";
@@ -930,13 +930,25 @@ export default function QueryPage() {
     openNotebookUnsaved("Untitled Notebook", blank);
   };
 
-  const nbSlotProps = isNotebookTab && nbOnRestartKernel && nbOnDeploy ? {
+  const nbSlotProps = isNotebookTab && nbOnRestartKernel ? {
     kernelReady: nbKernelReady,
     kernelStarting: nbKernelStarting,
     kernelError: nbKernelError,
     onRestartKernel: nbOnRestartKernel,
-    onDeploy: nbOnDeploy,
   } : null;
+
+  const deployButton = isNotebookTab && nbOnDeploy ? (
+    <Tooltip title="Deploy notebook to Snowflake">
+      <Button
+        className="thaw-tb-vstack-primary"
+        aria-label="Deploy notebook"
+        icon={<CloudUploadOutlined />}
+        onClick={nbOnDeploy}
+      >
+        Deploy
+      </Button>
+    </Tooltip>
+  ) : undefined;
 
   return (
     <div data-query-layout style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg)" }}>
@@ -956,6 +968,7 @@ export default function QueryPage() {
         onNewNotebook={handleNewNotebook}
         onSave={handleSave}
         contextSlot={nbSlotProps ? NotebookToolbarSlot(nbSlotProps) : undefined}
+        primaryAction={deployButton}
       />
 
       {/* Session error banner (role/warehouse switch failures) */}

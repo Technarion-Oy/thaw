@@ -830,3 +830,61 @@ body,
 .thaw-col-icon[data-family="binary"]   { color: var(--col-binary); }
 .thaw-col-icon[data-family="geo"]      { color: var(--col-geo); }
 .thaw-col-icon[data-family="vector"]   { color: var(--col-vector); }
+
+/* ── App toolbar — vertical-stack of primary action over icon row ──────
+   Used when the active tab has a "deploy"-style action (e.g. notebook).
+   The primary button sits above the row of three square buttons, sharing
+   their 100px horizontal footprint (3 × 32px + 2 × 2px gap). */
+
+.thaw-tb-vstack {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 3px;
+  flex-shrink: 0;
+}
+.thaw-tb-vstack-row {
+  display: inline-flex;
+  gap: 2px;
+}
+
+/* The three icon buttons in the bottom row — narrower height than the
+   stand-alone .thaw-tb-icon-btn so the total stack stays compact. */
+.thaw-tb-vstack-icon {
+  width: 32px;
+  height: 22px;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  border-radius: 5px;
+  cursor: pointer;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.thaw-tb-vstack-icon:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-faint);
+}
+
+/* The primary action — full width of the row below. */
+.thaw-tb-vstack-primary {
+  width: 100px;                 /* = 3 × 32 + 2 × 2 gap */
+  height: 22px;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #fff;
+  border-radius: 5px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.18);
+  transition: filter 0.12s ease;
+}
+.thaw-tb-vstack-primary:hover { filter: brightness(1.08); }
