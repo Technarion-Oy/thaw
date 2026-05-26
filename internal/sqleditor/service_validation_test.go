@@ -113,6 +113,9 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 		"DROP SERVICE IF EXISTS my_svc",
 		// DROP SERVICE — schema-qualified name
 		"DROP SERVICE db.schema.my_svc",
+		// DROP SERVICE — case insensitive
+		"drop service my_svc",
+		"Drop Service If Exists my_svc",
 
 		// CREATE IMAGE REPOSITORY — valid
 		"CREATE IMAGE REPOSITORY my_repo",
@@ -210,6 +213,20 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 			"CREATE SERVICE my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ DATA_RETENTION = 90",
 			[]string{"Unexpected property 'DATA_RETENTION'"},
 		},
+
+		// CREATE SERVICE — missing both COMPUTE POOL and specification (multiple errors)
+		{
+			"CREATE SERVICE missing COMPUTE POOL and spec",
+			"CREATE SERVICE my_svc",
+			[]string{"Missing mandatory IN COMPUTE POOL", "Missing mandatory FROM SPECIFICATION or FROM SPECIFICATION_FILE"},
+		},
+		// CREATE SERVICE — MAX_INSTANCES negative and less than MIN (dual errors)
+		{
+			"CREATE SERVICE MAX negative and less than MIN",
+			"CREATE SERVICE my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ MIN_INSTANCES = 3 MAX_INSTANCES = -1",
+			[]string{"MAX_INSTANCES value -1 must be a non-negative integer", "MAX_INSTANCES (-1) must be >= MIN_INSTANCES (3)"},
+		},
+		// CREATE SERVICE — MIN_INSTANCES and MAX_INSTANCES both zero (equal, valid boundary — no warning expected would be a valid case, but MIN=0 MAX=0 is valid)
 
 		// EXECUTE SERVICE — missing name
 		{

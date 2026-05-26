@@ -233,6 +233,36 @@ func TestValidateSnowflakePatterns_CreateExternalVolume(t *testing.T) {
 			"CREATE OR REPLACE EXTERNAL VOLUME IF NOT EXISTS my_vol ALLOW_WRITES = TRUE",
 			[]string{"Conflict between OR REPLACE and IF NOT EXISTS"},
 		},
+		{
+			"GCS with ENCRYPTION block but no TYPE key",
+			"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'GCS' STORAGE_BASE_URL = 'gcs://b/' ENCRYPTION = (KMS_KEY_ID = 'k') ))",
+			[]string{"ENCRYPTION block must specify a TYPE key"},
+		},
+		{
+			"STORAGE_AWS_EXTERNAL_ID with AZURE provider only (no S3 present)",
+			"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'az' STORAGE_PROVIDER = 'AZURE' STORAGE_BASE_URL = 'azure://acc.blob.core.windows.net/c/' AZURE_TENANT_ID = 'tid' STORAGE_AWS_EXTERNAL_ID = 'eid' ))",
+			[]string{"STORAGE_AWS_EXTERNAL_ID is only valid for S3"},
+		},
+		{
+			"Multi-location: second location missing STORAGE_AWS_ROLE_ARN",
+			"CREATE EXTERNAL VOLUME v STORAGE_LOCATIONS = (( NAME = 'ok' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ) ( NAME = 'bad' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b2/' ))",
+			[]string{"STORAGE_AWS_ROLE_ARN is required for S3"},
+		},
+		{
+			"Multi-location: one valid, one with invalid provider",
+			"CREATE EXTERNAL VOLUME v STORAGE_LOCATIONS = (( NAME = 'ok' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ) ( NAME = 'bad' STORAGE_PROVIDER = 'INVALID' STORAGE_BASE_URL = 's3://b2/' ))",
+			[]string{"Invalid STORAGE_PROVIDER 'INVALID'"},
+		},
+		{
+			"Location missing all three required attributes",
+			"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ))",
+			[]string{"Each storage location requires a NAME attribute", "Each storage location requires STORAGE_BASE_URL", "Each storage location requires STORAGE_PROVIDER"},
+		},
+		{
+			"GCS_SSE_KMS encryption with AZURE provider",
+			"CREATE EXTERNAL VOLUME az_vol STORAGE_LOCATIONS = (( NAME = 'az' STORAGE_PROVIDER = 'AZURE' STORAGE_BASE_URL = 'azure://acc.blob.core.windows.net/c/' AZURE_TENANT_ID = 'tid' ENCRYPTION = (TYPE = 'GCS_SSE_KMS') ))",
+			[]string{"AZURE storage locations do not support the ENCRYPTION parameter"},
+		},
 	}
 
 	for _, tt := range invalidCases {
