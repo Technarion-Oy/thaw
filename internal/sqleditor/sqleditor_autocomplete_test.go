@@ -4072,3 +4072,94 @@ func TestGetAutocompleteContext_UseContextPartialSchema(t *testing.T) {
 		t.Errorf("expected Database empty for USE SCHEMA only, got %q", ctx.UseContext.Database)
 	}
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Additional: operator boundaries, newline-separated function names, FK tier
+// ══════════════════════════════════════════════════════════════════════════════
+
+func TestGetIdentifierAtColumn_OperatorBoundary(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		col  int
+		want []string
+	}{
+		{name: "plus separates idents", line: "a+b.c", col: 2, want: []string{"B", "C"}},
+		{name: "plus on left ident", line: "a+b.c", col: 0, want: []string{"A"}},
+		{name: "equals separates idents", line: "col1=db.schema.tbl", col: 8, want: []string{"DB", "SCHEMA", "TBL"}},
+		{name: "equals on left ident", line: "col1=db.schema.tbl", col: 2, want: []string{"COL1"}},
+		{name: "less-than separates", line: "x<y.z", col: 2, want: []string{"Y", "Z"}},
+		{name: "pipe separates", line: "a||b.c", col: 3, want: []string{"B", "C"}},
+		{name: "colon separates", line: "a:b.c", col: 2, want: []string{"B", "C"}},
+		{name: "cursor on operator", line: "a+b", col: 1, want: nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GetIdentifierAtColumn(tt.line, tt.col)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("GetIdentifierAtColumn(%q, %d) = %v, want %v", tt.line, tt.col, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetActiveFunctionCall_FuncNameOnDifferentLine(t *testing.T) {
+	// The backward scan from '(' skips whitespace including newlines,
+	// so a function name on a different line should still be recognized.
+	got := GetActiveFunctionCall("SELECT FUNC\n(a, ")
+	if got == nil {
+		t.Fatal("expected non-nil for function name on different line from paren")
+	}
+	if got.Name != "FUNC" {
+		t.Errorf("expected Name=FUNC, got %q", got.Name)
+	}
+	if got.ParamIndex != 1 {
+		t.Errorf("expected ParamIndex=1, got %d", got.ParamIndex)
+	}
+}
+
+func TestGetActiveFunctionCall_FuncNameSeparatedByTab(t *testing.T) {
+	got := GetActiveFunctionCall("SELECT FUNC\t(x, y, ")
+	if got == nil {
+		t.Fatal("expected non-nil for function name separated by tab")
+	}
+	if got.Name != "FUNC" {
+		t.Errorf("expected Name=FUNC, got %q", got.Name)
+	}
+	if got.ParamIndex != 2 {
+		t.Errorf("expected ParamIndex=2, got %d", got.ParamIndex)
+	}
+}
+
+func TestComputeJoinOnConditions_FKSuggestionsWithoutColEntries(t *testing.T) {
+	// FK tier should produce suggestions even when ColEntries is completely empty.
+	// This verifies the FK suggestion tier works independently from the
+	// column-matching tiers (PK heuristic and same-name columns).
+	req := JoinOnSuggestionsReq{
+		ResolvedRefs: []ResolvedRef{
+			{Alias: "O", DB: "DB", Schema: "S", Name: "ORDERS"},
+			{Alias: "C", DB: "DB", Schema: "S", Name: "CUSTOMERS"},
+		},
+		Prefix: "ON ",
+		FKEntries: []TableFKEntry{
+			{
+				DB: "DB", Schema: "S", Name: "ORDERS",
+				FKs: []FKEntry{
+					{PKDatabase: "DB", PKSchema: "S", PKTable: "CUSTOMERS", PKColumn: "ID", FKColumn: "CUSTOMER_ID", ConstraintName: "FK_ORD_CUST", KeySequence: 1},
+				},
+			},
+		},
+		ColEntries: []ColEntry{}, // deliberately empty
+	}
+	got := ComputeJoinOnConditions(req)
+	foundFK := false
+	for _, c := range got {
+		if c.Detail == "FK RELATION" && strings.Contains(c.Condition, "CUSTOMER_ID") {
+			foundFK = true
+		}
+	}
+	if !foundFK {
+		t.Errorf("expected FK suggestion even when ColEntries is empty, got %v", got)
+	}
+}

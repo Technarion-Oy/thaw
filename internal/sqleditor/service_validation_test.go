@@ -48,6 +48,20 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 		// CREATE SERVICE — case insensitive
 		"create service my_svc in compute pool my_pool from specification $$spec$$",
 		"Create Or Replace Service my_svc In Compute Pool my_pool From Specification $$spec$$",
+		// CREATE SERVICE — quoted identifier as name
+		`CREATE SERVICE "my-svc" IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$`,
+		// CREATE SERVICE — MIN_INSTANCES = MAX_INSTANCES (equal, non-zero boundary)
+		"CREATE SERVICE my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ MIN_INSTANCES = 3 MAX_INSTANCES = 3",
+		// CREATE SERVICE — MIN_INSTANCES = MAX_INSTANCES = 0 (both zero boundary)
+		"CREATE SERVICE my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ MIN_INSTANCES = 0 MAX_INSTANCES = 0",
+		// CREATE SERVICE — dollar-quoted spec body with property-like keywords inside (should not trigger false positives)
+		"CREATE SERVICE my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION $$MIN_INSTANCES = 999 COMMENT = 'inline yaml' DATA_RETENTION = 90$$",
+		// CREATE SERVICE — SQL comment inside statement (comment stripping)
+		"CREATE SERVICE my_svc IN COMPUTE POOL my_pool /* pool config */ FROM SPECIFICATION $$spec$$",
+		// CREATE SERVICE — AUTO_RESUME lowercase (case-insensitive boolean validation)
+		"CREATE SERVICE my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ AUTO_RESUME = true",
+		// CREATE SERVICE — leading whitespace
+		"   CREATE SERVICE my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$",
 
 		// EXECUTE SERVICE — inline YAML
 		"EXECUTE SERVICE my_job IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$",
@@ -72,6 +86,12 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 		// EXECUTE SERVICE — case insensitive
 		"execute service my_job in compute pool my_pool from specification $$spec$$",
 		"Execute Job Service my_job In Compute Pool my_pool From Specification $$spec$$",
+		// EXECUTE SERVICE — schema-qualified name
+		"EXECUTE SERVICE db.schema.my_job IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$",
+		// EXECUTE SERVICE — quoted identifier
+		`EXECUTE SERVICE "my-job" IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$`,
+		// EXECUTE SERVICE — dollar-quoted body with property-like content (no false positives)
+		"EXECUTE SERVICE my_job IN COMPUTE POOL my_pool FROM SPECIFICATION $$MIN_INSTANCES = 5 AUTO_RESUME = TRUE$$",
 
 		// ALTER SERVICE — SUSPEND / RESUME
 		"ALTER SERVICE my_svc SUSPEND",
@@ -104,18 +124,36 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 		// ALTER SERVICE — SET with multiple valid properties
 		"ALTER SERVICE my_svc SET MIN_INSTANCES = 2 MAX_INSTANCES = 10",
 		"ALTER SERVICE my_svc SET COMMENT = 'updated' QUERY_WAREHOUSE = wh2",
+		// ALTER SERVICE — quoted identifier as name
+		`ALTER SERVICE "my-svc" SET COMMENT = 'updated'`,
+		`ALTER SERVICE "my-svc" SUSPEND`,
 		// ALTER SERVICE — case insensitive
 		"alter service my_svc suspend",
 		"Alter Service my_svc Set Min_Instances = 2",
+		// ALTER SERVICE — FROM SPECIFICATION_TEMPLATE_FILE
+		"ALTER SERVICE my_svc FROM SPECIFICATION_TEMPLATE_FILE = '@stage/spec.yaml'",
+		// ALTER SERVICE — FROM @stage SPECIFICATION_TEMPLATE_FILE
+		"ALTER SERVICE my_svc FROM @my_stage SPECIFICATION_TEMPLATE_FILE = 'spec.yaml'",
+		// ALTER SERVICE — SET MIN_INSTANCES = 0 (boundary: zero is valid)
+		"ALTER SERVICE my_svc SET MIN_INSTANCES = 0",
+		// ALTER SERVICE — SET MAX_INSTANCES = 0 (boundary: zero is valid)
+		"ALTER SERVICE my_svc SET MAX_INSTANCES = 0",
+		// ALTER SERVICE — dollar-quoted body with property-like content (rolling update, no false positives)
+		"ALTER SERVICE my_svc FROM SPECIFICATION $$MIN_INSTANCES = 999 COMMENT = 'yaml content'$$",
 
 		// DROP SERVICE
 		"DROP SERVICE my_svc",
 		"DROP SERVICE IF EXISTS my_svc",
 		// DROP SERVICE — schema-qualified name
 		"DROP SERVICE db.schema.my_svc",
+		// DROP SERVICE — quoted identifier as name
+		`DROP SERVICE "my-svc"`,
+		`DROP SERVICE IF EXISTS "my-svc"`,
 		// DROP SERVICE — case insensitive
 		"drop service my_svc",
 		"Drop Service If Exists my_svc",
+		// DROP SERVICE IF EXISTS — schema-qualified
+		"DROP SERVICE IF EXISTS db.schema.my_svc",
 
 		// CREATE IMAGE REPOSITORY — valid
 		"CREATE IMAGE REPOSITORY my_repo",
@@ -134,6 +172,15 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 		"DROP IMAGE REPOSITORY my_repo",
 		"DROP IMAGE REPOSITORY IF EXISTS my_repo",
 		"DROP IMAGE REPOSITORY db.schema.my_repo",
+		// DROP IMAGE REPOSITORY — quoted identifier
+		`DROP IMAGE REPOSITORY "my-repo"`,
+		`DROP IMAGE REPOSITORY IF EXISTS "my-repo"`,
+		// DROP IMAGE REPOSITORY — case insensitive
+		"drop image repository my_repo",
+		"Drop Image Repository If Exists my_repo",
+
+		// ALTER IMAGE REPOSITORY — case insensitive triggers unsupported warning, not tested here
+		// (validated in invalid section to confirm the warning fires)
 	}
 
 	for _, sql := range validCases {
@@ -226,8 +273,18 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 			"CREATE SERVICE my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ MIN_INSTANCES = 3 MAX_INSTANCES = -1",
 			[]string{"MAX_INSTANCES value -1 must be a non-negative integer", "MAX_INSTANCES (-1) must be >= MIN_INSTANCES (3)"},
 		},
-		// CREATE SERVICE — MIN_INSTANCES and MAX_INSTANCES both zero (equal, valid boundary — no warning expected would be a valid case, but MIN=0 MAX=0 is valid)
-
+		// CREATE SERVICE — MAX_INSTANCES = 0 < MIN_INSTANCES = 1 (boundary with zero)
+		{
+			"CREATE SERVICE MAX zero less than MIN",
+			"CREATE SERVICE my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ MIN_INSTANCES = 1 MAX_INSTANCES = 0",
+			[]string{"MAX_INSTANCES (0) must be >= MIN_INSTANCES (1)"},
+		},
+		// CREATE SERVICE — SPECIFICATION_TEMPLATE + SPECIFICATION_TEMPLATE_FILE conflict
+		{
+			"CREATE SERVICE both SPECIFICATION_TEMPLATE and SPECIFICATION_TEMPLATE_FILE",
+			"CREATE SERVICE my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION_TEMPLATE $$spec$$ FROM SPECIFICATION_TEMPLATE_FILE = '@stage/spec.yaml'",
+			[]string{"requires exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE"},
+		},
 		// EXECUTE SERVICE — missing name
 		{
 			"EXECUTE SERVICE missing name",
@@ -270,12 +327,56 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 			"EXECUTE SERVICE my_job IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ AUTO_RESUME = TRUE",
 			[]string{"Unexpected property 'AUTO_RESUME'"},
 		},
+		// EXECUTE SERVICE — both SPECIFICATION and SPECIFICATION_FILE
+		{
+			"EXECUTE SERVICE both spec and spec file",
+			"EXECUTE SERVICE my_job IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ FROM SPECIFICATION_FILE = '@stage/spec.yaml'",
+			[]string{"requires exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE"},
+		},
+		// EXECUTE SERVICE — missing both COMPUTE POOL and specification (multiple errors)
+		{
+			"EXECUTE SERVICE missing COMPUTE POOL and spec",
+			"EXECUTE SERVICE my_job",
+			[]string{"Missing mandatory IN COMPUTE POOL", "Missing mandatory FROM SPECIFICATION or FROM SPECIFICATION_FILE"},
+		},
+		// EXECUTE JOB SERVICE — missing COMPUTE POOL
+		{
+			"EXECUTE JOB SERVICE missing COMPUTE POOL",
+			"EXECUTE JOB SERVICE my_job FROM SPECIFICATION $$spec$$",
+			[]string{"Missing mandatory IN COMPUTE POOL"},
+		},
+		// EXECUTE JOB SERVICE — missing specification
+		{
+			"EXECUTE JOB SERVICE missing spec",
+			"EXECUTE JOB SERVICE my_job IN COMPUTE POOL my_pool",
+			[]string{"Missing mandatory FROM SPECIFICATION or FROM SPECIFICATION_FILE"},
+		},
+		// EXECUTE JOB SERVICE — both SPECIFICATION_TEMPLATE and SPECIFICATION_TEMPLATE_FILE
+		{
+			"EXECUTE JOB SERVICE both template spec and template spec file",
+			"EXECUTE JOB SERVICE my_job IN COMPUTE POOL my_pool FROM SPECIFICATION_TEMPLATE $$spec$$ FROM SPECIFICATION_TEMPLATE_FILE = '@stage/spec.yaml'",
+			[]string{"requires exactly one of FROM SPECIFICATION or FROM SPECIFICATION_FILE"},
+		},
+		// EXECUTE JOB SERVICE — MIN_INSTANCES not supported (via canonical JOB form)
+		{
+			"EXECUTE JOB SERVICE with MIN_INSTANCES",
+			"EXECUTE JOB SERVICE my_job IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$ MIN_INSTANCES = 1",
+			[]string{"MIN_INSTANCES is not supported in EXECUTE SERVICE"},
+		},
 
 		// ALTER SERVICE — missing name
 		{
 			"ALTER SERVICE missing name",
 			"ALTER SERVICE",
 			[]string{"ALTER SERVICE requires a service name"},
+		},
+		// ALTER SERVICE IF EXISTS — missing name after IF EXISTS: the regex
+		// captures "IF" as the name and treats "EXISTS" as an unknown sub-command
+		// (ALTER SERVICE lacks a checkNameSwallowedByIF guard unlike DROP SERVICE).
+		{
+			"ALTER SERVICE IF EXISTS missing name",
+			"ALTER SERVICE IF EXISTS",
+			[]string{"Unknown ALTER SERVICE sub-command"},
 		},
 		// ALTER SERVICE — unknown sub-command
 		{
@@ -319,6 +420,24 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 			"ALTER SERVICE SET with unknown trailing property",
 			"ALTER SERVICE my_svc SET COMMENT = 'foo' SOME_NONSENSE = bar",
 			[]string{"Unexpected property 'SOME_NONSENSE'"},
+		},
+		// ALTER SERVICE — SET AUTO_RESUME (valid for CREATE but not ALTER SET)
+		{
+			"ALTER SERVICE SET AUTO_RESUME not valid",
+			"ALTER SERVICE my_svc SET AUTO_RESUME = TRUE",
+			[]string{"Unknown property in ALTER SERVICE SET"},
+		},
+		// ALTER SERVICE — bare SET (no property name)
+		{
+			"ALTER SERVICE bare SET",
+			"ALTER SERVICE my_svc SET",
+			[]string{"Unknown ALTER SERVICE sub-command"},
+		},
+		// ALTER SERVICE — bare UNSET (no property name)
+		{
+			"ALTER SERVICE bare UNSET",
+			"ALTER SERVICE my_svc UNSET",
+			[]string{"Unknown ALTER SERVICE sub-command"},
 		},
 
 		// DROP SERVICE — missing name
@@ -384,6 +503,12 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 			"ALTER IMAGE REPOSITORY my_repo SET COMMENT = 'test'",
 			[]string{"ALTER IMAGE REPOSITORY is not supported"},
 		},
+		// ALTER IMAGE REPOSITORY — case insensitive (still unsupported)
+		{
+			"ALTER IMAGE REPOSITORY case insensitive",
+			"alter image repository my_repo set comment = 'test'",
+			[]string{"ALTER IMAGE REPOSITORY is not supported"},
+		},
 	}
 
 	for _, tc := range invalidCases {
@@ -409,6 +534,76 @@ func TestValidateSnowflakePatterns_Service(t *testing.T) {
 			}
 		})
 	}
+
+	// ── Early-return marker count assertions ─────────────────────────────
+	// Validators that detect a fatal structural issue (e.g. OR REPLACE +
+	// IF NOT EXISTS conflict, missing name) should return early with
+	// exactly one marker, not continue checking subsequent clauses.
+	earlyReturnCases := []struct {
+		name    string
+		sql     string
+		wantN   int
+		wantMsg string
+	}{
+		{
+			"CREATE SERVICE OR REPLACE + IF NOT EXISTS returns exactly 1",
+			"CREATE OR REPLACE SERVICE IF NOT EXISTS my_svc IN COMPUTE POOL my_pool FROM SPECIFICATION $$spec$$",
+			1, "Conflict between OR REPLACE and IF NOT EXISTS",
+		},
+		{
+			"CREATE SERVICE missing name returns exactly 1",
+			"CREATE SERVICE",
+			1, "Unexpected syntax in CREATE SERVICE",
+		},
+		{
+			"EXECUTE SERVICE missing name returns exactly 1",
+			"EXECUTE SERVICE",
+			1, "Unexpected syntax in EXECUTE SERVICE",
+		},
+		{
+			"ALTER SERVICE missing name returns exactly 1",
+			"ALTER SERVICE",
+			1, "ALTER SERVICE requires a service name",
+		},
+		{
+			"DROP SERVICE missing name returns exactly 1",
+			"DROP SERVICE",
+			1, "DROP SERVICE requires a service name",
+		},
+		{
+			"CREATE IMAGE REPOSITORY OR REPLACE + IF NOT EXISTS returns exactly 1",
+			"CREATE OR REPLACE IMAGE REPOSITORY IF NOT EXISTS my_repo",
+			1, "Conflict between OR REPLACE and IF NOT EXISTS",
+		},
+		{
+			"CREATE IMAGE REPOSITORY missing name returns exactly 1",
+			"CREATE IMAGE REPOSITORY",
+			1, "Unexpected syntax in CREATE IMAGE REPOSITORY",
+		},
+		{
+			"DROP IMAGE REPOSITORY missing name returns exactly 1",
+			"DROP IMAGE REPOSITORY",
+			1, "DROP IMAGE REPOSITORY requires a repository name",
+		},
+		{
+			"ALTER IMAGE REPOSITORY always returns exactly 1",
+			"ALTER IMAGE REPOSITORY my_repo SET COMMENT = 'test'",
+			1, "ALTER IMAGE REPOSITORY is not supported",
+		},
+	}
+
+	for _, tc := range earlyReturnCases {
+		t.Run("early_return/"+tc.name, func(t *testing.T) {
+			ranges := GetStatementRanges(tc.sql)
+			markers := ValidateSnowflakePatterns(tc.sql, ranges)
+			warns := getWarnings(markers)
+			if len(warns) != tc.wantN {
+				t.Errorf("Expected exactly %d warning(s) for %q, got %d: %v",
+					tc.wantN, tc.sql, len(warns), warnMsgs(warns))
+			}
+			if len(warns) > 0 && !strings.Contains(warns[0].Message, tc.wantMsg) {
+				t.Errorf("Expected warning containing %q, got %q", tc.wantMsg, warns[0].Message)
+			}
+		})
+	}
 }
-
-

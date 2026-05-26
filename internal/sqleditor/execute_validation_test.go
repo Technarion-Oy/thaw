@@ -168,6 +168,10 @@ func TestValidateSnowflakePatterns_ExecuteImmediate(t *testing.T) {
 			sql:  "EXECUTE   IMMEDIATE 'SELECT 1'",
 		},
 		{
+			name: "Numeric literal as argument — satisfies non-whitespace check",
+			sql:  "EXECUTE IMMEDIATE 42",
+		},
+		{
 			name: "USING clause with quoted identifier bind variable",
 			sql:  `EXECUTE IMMEDIATE 'SELECT $1' USING ("MyVar")`,
 		},
@@ -194,6 +198,10 @@ func TestValidateSnowflakePatterns_ExecuteImmediate(t *testing.T) {
 		{
 			name: "USING clause with trailing semicolon",
 			sql:  "EXECUTE IMMEDIATE 'SELECT $1' USING (v1);",
+		},
+		{
+			name: "USING clause with function call expression — function name matches ident",
+			sql:  "EXECUTE IMMEDIATE 'SELECT $1' USING (UPPER(x))",
 		},
 		{
 			name: "String literal containing semicolons — statement not split",
@@ -359,6 +367,18 @@ func TestValidateSnowflakePatterns_ExecuteImmediate(t *testing.T) {
 			expectWarning: true,
 			expectedMatch: "USING clause in EXECUTE IMMEDIATE must contain at least one bind variable",
 		},
+		{
+			name:          "USING with string literal instead of bind variable — stripped to empty",
+			sql:           "EXECUTE IMMEDIATE 'SELECT $1' USING ('val')",
+			expectWarning: true,
+			expectedMatch: "USING clause in EXECUTE IMMEDIATE must contain at least one bind variable",
+		},
+		{
+			name:          "USING with unclosed paren and no identifier",
+			sql:           "EXECUTE IMMEDIATE 'SELECT $1' USING (",
+			expectWarning: true,
+			expectedMatch: "USING clause in EXECUTE IMMEDIATE must contain at least one bind variable",
+		},
 
 		// ── Additional Valid Cases ──────────────────────────────────────────
 		{
@@ -380,6 +400,14 @@ func TestValidateSnowflakePatterns_ExecuteImmediate(t *testing.T) {
 		{
 			name: "USING clause commented out via block comment — no USING warning",
 			sql:  "EXECUTE IMMEDIATE 'SELECT $1' /*USING ()*/",
+		},
+		{
+			name: "Bare USING as variable — no parenthesized USING clause",
+			sql:  "EXECUTE IMMEDIATE USING",
+		},
+		{
+			name: "USING clause with unclosed paren containing identifier — regex still matches",
+			sql:  "EXECUTE IMMEDIATE 'SELECT $1' USING (val",
 		},
 	})
 }
@@ -462,6 +490,10 @@ func TestValidateSnowflakePatterns_ExecuteTask(t *testing.T) {
 		{
 			name: "Leading whitespace before EXECUTE TASK",
 			sql:  "   EXECUTE TASK my_task",
+		},
+		{
+			name: "Four-part identifier — regex matches first three parts",
+			sql:  "EXECUTE TASK a.b.c.d",
 		},
 		// ── EXECUTE TASK — RETRY LAST (Section B) ────────────────────────────
 		{
@@ -560,12 +592,22 @@ func TestValidateSnowflakePatterns_ExecuteTask(t *testing.T) {
 			expectedMatch: "requires a task name",
 		},
 		{
+			name:          "Leading dot before identifier — not a valid qualified name",
+			sql:           "EXECUTE TASK .my_task",
+			expectWarning: true,
+			expectedMatch: "requires a task name",
+		},
+		{
 			name: "Spaces around dots — db alone matches as single-part name",
 			sql:  "EXECUTE TASK db . schema . task",
 		},
 		{
 			name: "Task name that is a SQL keyword — accepted as bare identifier",
 			sql:  "EXECUTE TASK SELECT",
+		},
+		{
+			name: "Task name that is USING keyword — accepted as bare identifier",
+			sql:  "EXECUTE TASK USING",
 		},
 	})
 }
@@ -915,6 +957,12 @@ func TestExecuteNoFalsePositiveInNonExecuteStatements(t *testing.T) {
 		{"Dollar-quoted block containing EXECUTE IMMEDIATE", "SELECT $$EXECUTE IMMEDIATE$$ AS col"},
 		{"Dollar-quoted block containing EXECUTE TASK", "SELECT $$EXECUTE TASK$$ AS col"},
 		{"Tagged dollar-quoted block containing EXECUTE IMMEDIATE", "SELECT $tag$EXECUTE IMMEDIATE$tag$ AS col"},
+		{"CREATE PROCEDURE body containing EXECUTE IMMEDIATE", "CREATE OR REPLACE PROCEDURE sp() RETURNS VARCHAR AS $$ EXECUTE IMMEDIATE 'SELECT 1' $$"},
+		{"CREATE PROCEDURE body containing bare EXECUTE TASK", "CREATE OR REPLACE PROCEDURE sp() RETURNS VARCHAR AS $$ EXECUTE TASK $$ "},
+		{"Block comment between EXECUTE and IMMEDIATE bypasses guard", "EXECUTE /* comment */ IMMEDIATE 'SELECT 1'"},
+		{"Line comment between EXECUTE and IMMEDIATE bypasses guard", "EXECUTE -- comment\nIMMEDIATE 'SELECT 1'"},
+		{"Block comment between EXECUTE and TASK bypasses guard", "EXECUTE /* comment */ TASK my_task"},
+		{"Line comment between EXECUTE and TASK bypasses guard", "EXECUTE -- comment\nTASK my_task"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

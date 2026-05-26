@@ -189,10 +189,14 @@ func TestCreateStage_Invalid(t *testing.T) {
 		// CREDENTIALS sub-options placed at top level
 		{"AWS_KEY_ID at top level", "CREATE STAGE s AWS_KEY_ID = 'key'", "AWS_KEY_ID"},
 		{"AWS_SECRET_KEY at top level", "CREATE STAGE s AWS_SECRET_KEY = 'secret'", "AWS_SECRET_KEY"},
+		{"AWS_TOKEN at top level", "CREATE STAGE s AWS_TOKEN = 'tok'", "AWS_TOKEN"},
+		{"AWS_ROLE at top level", "CREATE STAGE s AWS_ROLE = 'arn:aws:iam::123:role/r'", "AWS_ROLE"},
+		{"AZURE_SAS_TOKEN at top level", "CREATE STAGE s AZURE_SAS_TOKEN = 'sas-token'", "AZURE_SAS_TOKEN"},
 		// DIRECTORY sub-options placed at top level
 		{"ENABLE at top level", "CREATE STAGE s ENABLE = TRUE", "ENABLE"},
 		{"AUTO_REFRESH at top level", "CREATE STAGE s AUTO_REFRESH = TRUE", "AUTO_REFRESH"},
 		{"REFRESH_ON_CREATE at top level", "CREATE STAGE s REFRESH_ON_CREATE = TRUE", "REFRESH_ON_CREATE"},
+		{"NOTIFICATION_INTEGRATION at top level", "CREATE STAGE s NOTIFICATION_INTEGRATION = 'my_notif'", "NOTIFICATION_INTEGRATION"},
 		// COPY_OPTIONS sub-options placed at top level
 		{"ON_ERROR at top level", "CREATE STAGE s ON_ERROR = CONTINUE", "ON_ERROR"},
 		{"SIZE_LIMIT at top level", "CREATE STAGE s SIZE_LIMIT = 100", "SIZE_LIMIT"},
@@ -363,6 +367,67 @@ func TestCreateStage_CaseInsensitive(t *testing.T) {
 		{"Create Stage s field_delimiter = ','", "FIELD_DELIMITER"},
 		{"create stage s skip_header = 1", "SKIP_HEADER"},
 		{"CREATE stage s master_key = 'key'", "MASTER_KEY"},
+	}
+	for _, tt := range invalidCases {
+		t.Run("invalid/"+tt.sql[:min(len(tt.sql), 50)], func(t *testing.T) {
+			ranges := GetStatementRanges(tt.sql)
+			markers := ValidateSnowflakePatterns(tt.sql, ranges)
+			warnings := getWarnings(markers)
+			if len(warnings) == 0 {
+				t.Fatalf("Expected warnings for %q, got 0", tt.sql)
+			}
+			found := false
+			for _, w := range warnings {
+				if strings.Contains(strings.ToUpper(w.Message), strings.ToUpper(tt.expectedMatch)) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Expected warning matching %q, got: %v", tt.expectedMatch, warnings[0].Message)
+			}
+		})
+	}
+}
+
+// TestAlterStage_CaseInsensitive verifies that ALTER STAGE keyword matching
+// is case-insensitive for both valid and invalid statements.
+func TestAlterStage_CaseInsensitive(t *testing.T) {
+	validCases := []string{
+		"alter stage s set comment = 'test'",
+		"Alter Stage s Set Comment = 'test'",
+		"ALTER stage s set url = 's3://bucket/'",
+		"alter stage s set file_format = (type = 'CSV')",
+		"alter stage s set storage_integration = my_int",
+		"alter stage s set encryption = (type = 'NONE')",
+		"alter stage s set credentials = (aws_key_id = 'k' aws_secret_key = 's')",
+		"alter stage s set directory = (enable = true)",
+		"alter stage s rename to new_s",
+		"alter stage s refresh",
+		"alter stage s refresh subpath = 'data/'",
+		"alter stage if exists s set comment = 'updated'",
+		"Alter Stage If Exists s Set Url = 's3://bucket/'",
+	}
+	for _, sql := range validCases {
+		t.Run("valid/"+sql[:min(len(sql), 50)], func(t *testing.T) {
+			ranges := GetStatementRanges(sql)
+			markers := ValidateSnowflakePatterns(sql, ranges)
+			warnings := getWarnings(markers)
+			if len(warnings) > 0 {
+				t.Errorf("Expected 0 warnings for %q, got %d: %v", sql, len(warnings), warnMsgs(warnings))
+			}
+		})
+	}
+
+	invalidCases := []struct {
+		sql           string
+		expectedMatch string
+	}{
+		{"alter stage s set type = 'CSV'", "TYPE"},
+		{"Alter Stage s Set field_delimiter = ','", "FIELD_DELIMITER"},
+		{"alter stage s set skip_header = 1", "SKIP_HEADER"},
+		{"ALTER stage s set master_key = 'key'", "MASTER_KEY"},
+		{"alter stage if exists s set on_error = continue", "ON_ERROR"},
 	}
 	for _, tt := range invalidCases {
 		t.Run("invalid/"+tt.sql[:min(len(tt.sql), 50)], func(t *testing.T) {
@@ -785,6 +850,146 @@ func TestAlterStage_SkipValidationWithPropertyLikeNames(t *testing.T) {
 	}
 }
 
+// TestStage_CompactEqualsSyntax verifies that property detection works when
+// there is no whitespace around the = sign (e.g. URL='s3://bucket/').
+func TestStage_CompactEqualsSyntax(t *testing.T) {
+	validCases := []string{
+		"CREATE STAGE s URL='s3://bucket/'",
+		"CREATE STAGE s URL= 's3://bucket/'",
+		"CREATE STAGE s URL ='s3://bucket/'",
+		"CREATE STAGE s COMMENT='test stage'",
+		"CREATE STAGE s FILE_FORMAT=(TYPE='CSV')",
+		"CREATE STAGE s URL='s3://bucket/' STORAGE_INTEGRATION=my_int",
+		"ALTER STAGE s SET URL='s3://bucket/'",
+		"ALTER STAGE s SET COMMENT='updated'",
+		"ALTER STAGE s SET FILE_FORMAT=(TYPE='CSV' FIELD_DELIMITER=',')",
+	}
+	for _, sql := range validCases {
+		t.Run("valid/"+sql[:min(len(sql), 55)], func(t *testing.T) {
+			ranges := GetStatementRanges(sql)
+			markers := ValidateSnowflakePatterns(sql, ranges)
+			warnings := getWarnings(markers)
+			if len(warnings) > 0 {
+				t.Errorf("Expected 0 warnings for %q, got %d: %v", sql, len(warnings), warnMsgs(warnings))
+			}
+		})
+	}
+
+	invalidCases := []struct {
+		sql           string
+		expectedMatch string
+	}{
+		{"CREATE STAGE s TYPE='CSV'", "TYPE"},
+		{"CREATE STAGE s SKIP_HEADER=1", "SKIP_HEADER"},
+		{"ALTER STAGE s SET FIELD_DELIMITER=','", "FIELD_DELIMITER"},
+		{"ALTER STAGE s SET MASTER_KEY='key'", "MASTER_KEY"},
+	}
+	for _, tt := range invalidCases {
+		t.Run("invalid/"+tt.sql[:min(len(tt.sql), 55)], func(t *testing.T) {
+			ranges := GetStatementRanges(tt.sql)
+			markers := ValidateSnowflakePatterns(tt.sql, ranges)
+			warnings := getWarnings(markers)
+			if len(warnings) == 0 {
+				t.Fatalf("Expected warnings for %q, got 0", tt.sql)
+			}
+			found := false
+			for _, w := range warnings {
+				if strings.Contains(strings.ToUpper(w.Message), strings.ToUpper(tt.expectedMatch)) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Expected warning matching %q, got: %v", tt.expectedMatch, warnings[0].Message)
+			}
+		})
+	}
+}
+
+// TestStage_PropertyListDivergence verifies that properties valid for CREATE
+// STAGE but not ALTER STAGE (and vice versa) are correctly flagged.
+// ENDPOINT is only valid in CREATE STAGE; SUBPATH is only valid in ALTER STAGE.
+func TestStage_PropertyListDivergence(t *testing.T) {
+	// ENDPOINT valid in CREATE, invalid in ALTER
+	t.Run("ENDPOINT valid in CREATE", func(t *testing.T) {
+		sql := "CREATE STAGE s URL = 's3compat://bucket/' ENDPOINT = 'storage.example.com'"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warnings := getWarnings(markers)
+		if len(warnings) > 0 {
+			t.Errorf("Expected 0 warnings, got %d: %v", len(warnings), warnMsgs(warnings))
+		}
+	})
+	t.Run("ENDPOINT invalid in ALTER", func(t *testing.T) {
+		sql := "ALTER STAGE s SET ENDPOINT = 'storage.example.com'"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warnings := getWarnings(markers)
+		if len(warnings) == 0 {
+			t.Fatal("Expected warning for ENDPOINT in ALTER STAGE, got 0")
+		}
+		found := false
+		for _, w := range warnings {
+			if strings.Contains(strings.ToUpper(w.Message), "ENDPOINT") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected warning matching ENDPOINT, got: %v", warnings[0].Message)
+		}
+	})
+
+	// SUBPATH valid in ALTER (REFRESH SUBPATH), invalid in CREATE
+	t.Run("SUBPATH valid in ALTER", func(t *testing.T) {
+		sql := "ALTER STAGE s REFRESH SUBPATH = 'data/2024/'"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warnings := getWarnings(markers)
+		if len(warnings) > 0 {
+			t.Errorf("Expected 0 warnings, got %d: %v", len(warnings), warnMsgs(warnings))
+		}
+	})
+	t.Run("SUBPATH invalid in CREATE", func(t *testing.T) {
+		sql := "CREATE STAGE s SUBPATH = 'data/'"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warnings := getWarnings(markers)
+		if len(warnings) == 0 {
+			t.Fatal("Expected warning for SUBPATH in CREATE STAGE, got 0")
+		}
+		found := false
+		for _, w := range warnings {
+			if strings.Contains(strings.ToUpper(w.Message), "SUBPATH") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected warning matching SUBPATH, got: %v", warnings[0].Message)
+		}
+	})
+}
+
+// TestStage_EmptySetClause verifies that ALTER STAGE SET with no properties
+// after the SET keyword produces zero warnings.
+func TestStage_EmptySetClause(t *testing.T) {
+	cases := []string{
+		"ALTER STAGE s SET",
+		"ALTER STAGE IF EXISTS s SET",
+	}
+	for _, sql := range cases {
+		t.Run(sql, func(t *testing.T) {
+			ranges := GetStatementRanges(sql)
+			markers := ValidateSnowflakePatterns(sql, ranges)
+			warnings := getWarnings(markers)
+			if len(warnings) > 0 {
+				t.Errorf("Expected 0 warnings for %q, got %d: %v", sql, len(warnings), warnMsgs(warnings))
+			}
+		})
+	}
+}
+
 // TestAlterStage_Invalid covers ALTER STAGE SET statements that use sub-option
 // property names at the top level instead of inside the correct nested block.
 func TestAlterStage_Invalid(t *testing.T) {
@@ -819,10 +1024,15 @@ func TestAlterStage_Invalid(t *testing.T) {
 		{"KMS_KEY_ID at top level", "ALTER STAGE s SET KMS_KEY_ID = 'key-arn'", "KMS_KEY_ID"},
 		// CREDENTIALS sub-options at top level
 		{"AWS_KEY_ID at top level", "ALTER STAGE s SET AWS_KEY_ID = 'key'", "AWS_KEY_ID"},
+		{"AWS_SECRET_KEY at top level", "ALTER STAGE s SET AWS_SECRET_KEY = 'secret'", "AWS_SECRET_KEY"},
+		{"AWS_TOKEN at top level", "ALTER STAGE s SET AWS_TOKEN = 'tok'", "AWS_TOKEN"},
+		{"AWS_ROLE at top level", "ALTER STAGE s SET AWS_ROLE = 'arn:role'", "AWS_ROLE"},
+		{"AZURE_SAS_TOKEN at top level", "ALTER STAGE s SET AZURE_SAS_TOKEN = 'sas'", "AZURE_SAS_TOKEN"},
 		// DIRECTORY sub-options at top level
 		{"ENABLE at top level in SET", "ALTER STAGE s SET ENABLE = TRUE", "ENABLE"},
 		{"AUTO_REFRESH at top level", "ALTER STAGE s SET AUTO_REFRESH = TRUE", "AUTO_REFRESH"},
 		{"REFRESH_ON_CREATE at top level", "ALTER STAGE s SET REFRESH_ON_CREATE = TRUE", "REFRESH_ON_CREATE"},
+		{"NOTIFICATION_INTEGRATION at top level", "ALTER STAGE s SET NOTIFICATION_INTEGRATION = 'ni'", "NOTIFICATION_INTEGRATION"},
 		// COPY_OPTIONS sub-options at top level
 		{"ON_ERROR at top level", "ALTER STAGE s SET ON_ERROR = CONTINUE", "ON_ERROR"},
 		{"SIZE_LIMIT at top level", "ALTER STAGE s SET SIZE_LIMIT = 100", "SIZE_LIMIT"},

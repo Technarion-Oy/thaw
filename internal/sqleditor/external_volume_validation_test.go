@@ -59,6 +59,17 @@ func TestValidateSnowflakePatterns_CreateExternalVolume(t *testing.T) {
 		"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' )) -- ALLOW_WRITES = maybe",
 		// ALLOW_WRITES inside a COMMENT string value must not trigger a false positive
 		"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' )) COMMENT = 'do not set ALLOW_WRITES = MAYBE here'",
+		// ALLOW_WRITES in a block comment must not trigger a false positive
+		"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' )) /* ALLOW_WRITES = MAYBE */",
+		// Multi-line block comment must not trigger a false positive
+		`CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' )) /*
+  ALLOW_WRITES = MAYBE
+  STORAGE_PROVIDER = 'INVALID'
+*/`,
+		// Fully lowercase SQL keywords — case-insensitive regex must still match
+		"create external volume my_vol storage_locations = (( name = 'n' storage_provider = 'S3' storage_base_url = 's3://b/' storage_aws_role_arn = 'arn:aws:iam::1:role/r' ))",
+		// Mixed-case SQL keywords
+		"Create Or Replace External Volume my_vol Storage_Locations = (( Name = 'n' Storage_Provider = 'S3' Storage_Base_Url = 's3://b/' Storage_Aws_Role_Arn = 'arn:aws:iam::1:role/r' ))",
 		// Lowercase encryption type — case-insensitive validation should accept it
 		"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ENCRYPTION = (TYPE = 'aws_sse_kms') ))",
 		// Mixed-case encryption type
@@ -71,6 +82,31 @@ func TestValidateSnowflakePatterns_CreateExternalVolume(t *testing.T) {
 		"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3CHINA' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws-cn:iam::1:role/r' ENCRYPTION = (TYPE = 'NONE') ))",
 		// Three-provider multi-location: S3 + GCS + AZURE all valid together
 		"CREATE EXTERNAL VOLUME tri_vol STORAGE_LOCATIONS = (( NAME = 's3' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ) ( NAME = 'gcs' STORAGE_PROVIDER = 'GCS' STORAGE_BASE_URL = 'gcs://b/' ) ( NAME = 'az' STORAGE_PROVIDER = 'AZURE' STORAGE_BASE_URL = 'azure://acc.blob.core.windows.net/c/' AZURE_TENANT_ID = 'tid' ))",
+		// Lowercase ALLOW_WRITES value — validateBoolProp uppercases before comparison
+		"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' )) ALLOW_WRITES = true",
+		// Mixed-case ALLOW_WRITES value
+		"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' )) ALLOW_WRITES = False",
+		// Extra STORAGE_AWS_ROLE_ARN on GCS location — validator is permissive about extra attributes
+		"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'GCS' STORAGE_BASE_URL = 'gcs://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ))",
+		// Extra AZURE_TENANT_ID on S3 location — validator is permissive about extra attributes
+		"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' AZURE_TENANT_ID = 'tid' ))",
+		// Multi-line formatting — real-world DDL style
+		`CREATE EXTERNAL VOLUME my_vol
+  STORAGE_LOCATIONS = ((
+    NAME = 'my_s3'
+    STORAGE_PROVIDER = 'S3'
+    STORAGE_BASE_URL = 's3://bucket/path'
+    STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::123:role/r'
+  ))
+  ALLOW_WRITES = TRUE`,
+		// Trailing semicolon — GetStatementRanges strips it before validation
+		"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ));",
+		// S3CHINA with AWS_SSE_S3 encryption — completes S3-family × encryption matrix
+		"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3CHINA' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws-cn:iam::1:role/r' ENCRYPTION = (TYPE = 'AWS_SSE_S3') ))",
+		// S3CHINA with AWS_SSE_KMS encryption
+		"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3CHINA' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws-cn:iam::1:role/r' ENCRYPTION = (TYPE = 'AWS_SSE_KMS') ))",
+		// S3COMPAT with AWS_SSE_KMS encryption
+		"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3COMPAT' STORAGE_BASE_URL = 's3compat://ep/b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ENCRYPTION = (TYPE = 'AWS_SSE_KMS') ))",
 	}
 
 	for _, sql := range validCases {
@@ -219,6 +255,16 @@ func TestValidateSnowflakePatterns_CreateExternalVolume(t *testing.T) {
 			[]string{"ENCRYPTION block must specify a TYPE key"},
 		},
 		{
+			"S3 with empty ENCRYPTION block",
+			"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ENCRYPTION = () ))",
+			[]string{"ENCRYPTION block must specify a TYPE key"},
+		},
+		{
+			"GCS with empty ENCRYPTION block",
+			"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'GCS' STORAGE_BASE_URL = 'gcs://b/' ENCRYPTION = () ))",
+			[]string{"ENCRYPTION block must specify a TYPE key"},
+		},
+		{
 			"Empty STORAGE_LOCATIONS block",
 			"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = ()",
 			[]string{"STORAGE_LOCATIONS must contain at least one storage location block"},
@@ -263,6 +309,36 @@ func TestValidateSnowflakePatterns_CreateExternalVolume(t *testing.T) {
 			"CREATE EXTERNAL VOLUME az_vol STORAGE_LOCATIONS = (( NAME = 'az' STORAGE_PROVIDER = 'AZURE' STORAGE_BASE_URL = 'azure://acc.blob.core.windows.net/c/' AZURE_TENANT_ID = 'tid' ENCRYPTION = (TYPE = 'GCS_SSE_KMS') ))",
 			[]string{"AZURE storage locations do not support the ENCRYPTION parameter"},
 		},
+		{
+			"Two-part prefix (schema.name) not allowed for account-level object",
+			"CREATE EXTERNAL VOLUME myschema.my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ))",
+			[]string{"account-level objects and cannot have a database or schema prefix"},
+		},
+		{
+			"Empty provider string",
+			"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = '' STORAGE_BASE_URL = 's3://b/' ))",
+			[]string{"Invalid STORAGE_PROVIDER ''"},
+		},
+		{
+			"Single-paren structure (missing inner parens)",
+			"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = ( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' )",
+			[]string{"STORAGE_LOCATIONS must contain at least one storage location block"},
+		},
+		{
+			"GCS_SSE_KMS encryption with S3GOV provider",
+			"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3GOV' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws-us-gov:iam::1:role/r' ENCRYPTION = (TYPE = 'GCS_SSE_KMS') ))",
+			[]string{"ENCRYPTION TYPE 'GCS_SSE_KMS' is only valid for GCS"},
+		},
+		{
+			"GCS_SSE_KMS encryption with S3CHINA provider",
+			"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3CHINA' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws-cn:iam::1:role/r' ENCRYPTION = (TYPE = 'GCS_SSE_KMS') ))",
+			[]string{"ENCRYPTION TYPE 'GCS_SSE_KMS' is only valid for GCS"},
+		},
+		{
+			"GCS_SSE_KMS encryption with S3COMPAT provider",
+			"CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3COMPAT' STORAGE_BASE_URL = 's3compat://ep/b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ENCRYPTION = (TYPE = 'GCS_SSE_KMS') ))",
+			[]string{"ENCRYPTION TYPE 'GCS_SSE_KMS' is only valid for GCS"},
+		},
 	}
 
 	for _, tt := range invalidCases {
@@ -295,6 +371,45 @@ func TestValidateSnowflakePatterns_CreateExternalVolume(t *testing.T) {
 		warns := getWarnings(markers)
 		if len(warns) != 1 {
 			t.Errorf("Expected exactly 1 warning (early return), got %d: %v", len(warns), warns)
+		}
+	})
+
+	// Multi-statement: valid external volume preceded by unrelated statement.
+	t.Run("Multi-statement: valid external volume with adjacent SELECT", func(t *testing.T) {
+		sql := "SELECT 1;\nCREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ))"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		if warns := getWarnings(markers); len(warns) > 0 {
+			t.Errorf("Expected 0 warnings, got %d: %v", len(warns), warns)
+		}
+	})
+
+	// Multi-statement: error only in the external volume statement, not the adjacent one.
+	t.Run("Multi-statement: error in external volume only", func(t *testing.T) {
+		sql := "SELECT 1;\nCREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( NAME = 'n' STORAGE_PROVIDER = 'S3' STORAGE_BASE_URL = 's3://b/' ))"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warns := getWarnings(markers)
+		found := false
+		for _, w := range warns {
+			if strings.Contains(w.Message, "STORAGE_AWS_ROLE_ARN is required") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected warning about missing STORAGE_AWS_ROLE_ARN, got: %v", warns)
+		}
+	})
+
+	// Location missing all three required attributes produces exactly three warnings.
+	t.Run("Missing all three location attributes emits exactly three warnings", func(t *testing.T) {
+		sql := "CREATE EXTERNAL VOLUME my_vol STORAGE_LOCATIONS = (( STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::1:role/r' ))"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warns := getWarnings(markers)
+		if len(warns) != 3 {
+			t.Errorf("Expected exactly 3 warnings (NAME, STORAGE_BASE_URL, STORAGE_PROVIDER), got %d: %v", len(warns), warns)
 		}
 	})
 }
