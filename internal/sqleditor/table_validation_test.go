@@ -139,6 +139,12 @@ func TestValidateSnowflakePatterns_CreateHybridTable(t *testing.T) {
 		// A quoted column named INDEX in a regular table must not trigger the
 		// "Secondary indexes (INDEX) are only supported on hybrid tables" warning.
 		`CREATE TABLE t1 (id INT, "INDEX" INT)`,
+		// NOTNULL (single word, no space) is a valid Snowflake synonym for NOT NULL.
+		// The validator must recognise it as satisfying the hybrid-table NOT NULL requirement.
+		"CREATE HYBRID TABLE t1 (id INT PRIMARY KEY NOTNULL)",
+		"CREATE HYBRID TABLE t1 (id INT NOTNULL, PRIMARY KEY (id))",
+		// Quoted identifier containing a space — strings.Fields must not split it.
+		`CREATE HYBRID TABLE t1 ("MY COL" INT NOT NULL, PRIMARY KEY ("MY COL"))`,
 	}
 
 	for _, sql := range validCases {
@@ -334,6 +340,25 @@ func TestValidateSnowflakePatterns_CreateEventTable(t *testing.T) {
 			"Multiple unexpected properties each warned",
 			"CREATE EVENT TABLE my_events AUTO_REFRESH = TRUE EXTERNAL_VOLUME = 'ev'",
 			[]string{"Unexpected property 'AUTO_REFRESH'", "Unexpected property 'EXTERNAL_VOLUME'"},
+		},
+		// Fractional values are not valid non-negative integers — the regex
+		// must not silently accept the integer portion of a decimal number.
+		{
+			"Decimal DATA_RETENTION_TIME_IN_DAYS",
+			"CREATE EVENT TABLE my_events DATA_RETENTION_TIME_IN_DAYS = 1.5",
+			[]string{"DATA_RETENTION_TIME_IN_DAYS must be a non-negative integer"},
+		},
+		{
+			"Decimal MAX_DATA_EXTENSION_TIME_IN_DAYS",
+			"CREATE EVENT TABLE my_events MAX_DATA_EXTENSION_TIME_IN_DAYS = 2.5",
+			[]string{"MAX_DATA_EXTENSION_TIME_IN_DAYS must be a non-negative integer"},
+		},
+		// TRANSIENT is not supported for event tables — the guard regex must
+		// route CREATE TRANSIENT EVENT TABLE to the event table validator.
+		{
+			"TRANSIENT event table",
+			"CREATE TRANSIENT EVENT TABLE my_events",
+			[]string{"TRANSIENT"},
 		},
 	}
 
