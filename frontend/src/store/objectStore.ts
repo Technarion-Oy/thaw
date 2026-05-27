@@ -29,6 +29,8 @@ interface ObjectState {
   addSchemas: (db: string, schemas: string[]) => void;
   // Replaces all objects for the given db.schema (idempotent on re-load).
   addObjects: (db: string, schema: string, objects: { name: string; kind: string }[]) => void;
+  // Merges additional objects into the given db.schema (deduplicates by kind|name).
+  mergeObjects: (db: string, schema: string, objects: { name: string; kind: string }[]) => void;
   // Removes everything under a database (used on sidebar refresh).
   clearDatabase: (db: string) => void;
   // Removes a database and all its schemas/objects (used after DROP DATABASE).
@@ -60,6 +62,19 @@ export const useObjectStore = create<ObjectState>((set) => ({
         ...objs.map((o) => ({ db, schema, name: o.name, kind: o.kind })),
       ],
     })),
+
+  mergeObjects: (db, schema, objs) =>
+    set((s) => {
+      const existing = new Set(
+        s.objects
+          .filter((x) => x.db === db && x.schema === schema)
+          .map((x) => `${x.kind}|${x.name}`),
+      );
+      const newObjs = objs
+        .filter((o) => !existing.has(`${o.kind}|${o.name}`))
+        .map((o) => ({ db, schema, name: o.name, kind: o.kind }));
+      return { objects: [...s.objects, ...newObjs] };
+    }),
 
   clearDatabase: (db) =>
     set((s) => ({

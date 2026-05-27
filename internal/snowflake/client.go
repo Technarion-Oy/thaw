@@ -2736,24 +2736,32 @@ func parseFinalizeFromDDLText(ddl string) string {
 	return strings.TrimRight(rest[:end], ";,")
 }
 
-// ListObjects returns all objects inside a schema by running multiple SHOW
-// commands concurrently. Individual commands that fail (e.g. due to missing
-// privileges on a particular object type) are silently skipped so that the
-// rest still appear.
-func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
-	quoteIdent := func(v string) string {
-		v = strings.Trim(v, `"`)
-		v = strings.ReplaceAll(v, `"`, `""`)
-		return `"` + v + `"`
+// ListBasicObjects returns the "basic" objects inside a schema by running a
+// single SHOW OBJECTS IN SCHEMA command. This returns TABLEs, VIEWs,
+// SEQUENCEs, and other object types exposed by the kind column — but not
+// PROCEDUREs, FUNCTIONs, TASKs, STREAMs, STAGEs, etc.
+func (c *Client) ListBasicObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
+	q := fmt.Sprintf("%s.%s", QuoteIdent(database), QuoteIdent(schema))
+	objs, err := c.showInSchema(ctx, fmt.Sprintf("SHOW OBJECTS IN SCHEMA %s", q), "", schema)
+	if err != nil {
+		return nil, err
 	}
-	q := fmt.Sprintf("%s.%s", quoteIdent(database), quoteIdent(schema))
+	return objs, nil
+}
+
+// ListExtendedObjects returns the "extended" objects inside a schema by running
+// dedicated SHOW commands for object types not covered by SHOW OBJECTS
+// (PROCEDURE, FUNCTION, TASK, STREAM, STAGE, FILE FORMAT, PIPE, NOTEBOOK,
+// SECRET, GIT REPOSITORY). Individual commands that fail (e.g. due to missing
+// privileges) are silently skipped. Includes the TASK finalize enrichment logic.
+func (c *Client) ListExtendedObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
+	q := fmt.Sprintf("%s.%s", QuoteIdent(database), QuoteIdent(schema))
 
 	type showCmd struct {
 		query string
-		kind  string // empty → read from result's "kind" column
+		kind  string
 	}
 	commands := []showCmd{
-		{fmt.Sprintf("SHOW OBJECTS IN SCHEMA %s", q), ""},
 		{fmt.Sprintf("SHOW PROCEDURES IN SCHEMA %s", q), "PROCEDURE"},
 		{fmt.Sprintf("SHOW FUNCTIONS IN SCHEMA %s", q), "FUNCTION"},
 		{fmt.Sprintf("SHOW TASKS IN SCHEMA %s", q), "TASK"},
@@ -2794,59 +2802,80 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 	// relationship via SHOW TASKS columns (task_relations / finalize), call
 	// GET_DDL on standalone TASK objects to detect finalizer tasks.
 	// "Standalone" = no predecessors AND no other task depends on it (not a root).
-	{
-		hasChildrenSet := map[string]bool{}
-		for _, o := range all {
-			if o.Kind != "TASK" {
-				continue
-			}
-			preds := strings.TrimSpace(o.Predecessors)
-			if preds == "" || preds == "[]" || preds == "<nil>" {
-				continue
-			}
-			stripped := strings.TrimPrefix(strings.TrimSuffix(preds, "]"), "[")
-			for _, part := range strings.Split(stripped, ",") {
-				part = strings.TrimSpace(part)
-				if part == "" {
-					continue
-				}
-				segs := strings.Split(part, ".")
-				bare := strings.Trim(segs[len(segs)-1], `"`)
-				if bare != "" {
-					hasChildrenSet[strings.ToUpper(bare)] = true
-				}
-			}
-		}
-
-		var enrichWG sync.WaitGroup
-		for i, o := range all {
-			if o.Kind != "TASK" || o.Finalize != "" {
-				continue
-			}
-			preds := strings.TrimSpace(o.Predecessors)
-			if preds != "" && preds != "[]" && preds != "<nil>" {
-				continue
-			}
-			if hasChildrenSet[strings.ToUpper(o.Name)] {
-				continue
-			}
-			i := i // capture for goroutine
-			enrichWG.Add(1)
-			go func() {
-				defer enrichWG.Done()
-				ddl, err := c.GetObjectDDL(ctx, database, schema, "TASK", all[i].Name, "")
-				if err != nil {
-					return
-				}
-				if fin := parseFinalizeFromDDLText(ddl); fin != "" {
-					all[i].Finalize = fin
-				}
-			}()
-		}
-		enrichWG.Wait()
-	}
+	enrichTaskFinalize(ctx, c, database, schema, all)
 
 	return all, nil
+}
+
+// enrichTaskFinalize enriches TASK objects with FINALIZE metadata by calling
+// GET_DDL on standalone tasks that don't already have the finalize field set.
+func enrichTaskFinalize(ctx context.Context, c *Client, database, schema string, all []SnowflakeObject) {
+	hasChildrenSet := map[string]bool{}
+	for _, o := range all {
+		if o.Kind != "TASK" {
+			continue
+		}
+		preds := strings.TrimSpace(o.Predecessors)
+		if preds == "" || preds == "[]" || preds == "<nil>" {
+			continue
+		}
+		stripped := strings.TrimPrefix(strings.TrimSuffix(preds, "]"), "[")
+		for _, part := range strings.Split(stripped, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			segs := strings.Split(part, ".")
+			bare := strings.Trim(segs[len(segs)-1], `"`)
+			if bare != "" {
+				hasChildrenSet[strings.ToUpper(bare)] = true
+			}
+		}
+	}
+
+	var enrichWG sync.WaitGroup
+	for i, o := range all {
+		if o.Kind != "TASK" || o.Finalize != "" {
+			continue
+		}
+		preds := strings.TrimSpace(o.Predecessors)
+		if preds != "" && preds != "[]" && preds != "<nil>" {
+			continue
+		}
+		if hasChildrenSet[strings.ToUpper(o.Name)] {
+			continue
+		}
+		i := i // capture for goroutine
+		enrichWG.Add(1)
+		go func() {
+			defer enrichWG.Done()
+			ddl, err := c.GetObjectDDL(ctx, database, schema, "TASK", all[i].Name, "")
+			if err != nil {
+				return
+			}
+			if fin := parseFinalizeFromDDLText(ddl); fin != "" {
+				all[i].Finalize = fin
+			}
+		}()
+	}
+	enrichWG.Wait()
+}
+
+// ListObjects returns all objects inside a schema by running multiple SHOW
+// commands concurrently. Individual commands that fail (e.g. due to missing
+// privileges on a particular object type) are silently skipped so that the
+// rest still appear.
+func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
+	basic, err := c.ListBasicObjects(ctx, database, schema)
+	if err != nil {
+		return nil, err
+	}
+	extended, err := c.ListExtendedObjects(ctx, database, schema)
+	if err != nil {
+		// If extended objects fail, still return basic objects.
+		return basic, nil
+	}
+	return append(basic, extended...), nil
 }
 
 // ListFileFormats returns the names of all file formats in the specified schema.

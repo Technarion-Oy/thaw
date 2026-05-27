@@ -2753,6 +2753,25 @@ func (a *App) ListObjects(database, schema string) ([]snowflake.SnowflakeObject,
 	return a.client.ListObjects(a.ctx, database, schema)
 }
 
+// ListBasicObjects returns the basic objects (TABLE, VIEW, SEQUENCE, etc.)
+// inside a schema via a single SHOW OBJECTS IN SCHEMA command.
+func (a *App) ListBasicObjects(database, schema string) ([]snowflake.SnowflakeObject, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.client.ListBasicObjects(a.ctx, database, schema)
+}
+
+// ListExtendedObjects returns extended objects (PROCEDURE, FUNCTION, TASK,
+// STREAM, STAGE, FILE FORMAT, PIPE, NOTEBOOK, SECRET, GIT REPOSITORY) inside
+// a schema via dedicated SHOW commands.
+func (a *App) ListExtendedObjects(database, schema string) ([]snowflake.SnowflakeObject, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.client.ListExtendedObjects(a.ctx, database, schema)
+}
+
 // GetDatabaseRetentionDays returns the DATA_RETENTION_TIME_IN_DAYS parameter
 // for the given database. Returns 1 if the value cannot be determined.
 func (a *App) GetDatabaseRetentionDays(dbName string) (int, error) {

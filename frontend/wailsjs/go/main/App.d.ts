@@ -403,6 +403,8 @@ export function ListBackupSets(arg1:string,arg2:string,arg3:string,arg4:string,a
 
 export function ListBackups(arg1:string,arg2:string,arg3:string):Promise<Array<main.BackupRow>>;
 
+export function ListBasicObjects(arg1:string,arg2:string):Promise<Array<snowflake.SnowflakeObject>>;
+
 export function ListDatabases():Promise<Array<string>>;
 
 export function ListDirectory(arg1:string):Promise<Array<filesystem.FileEntry>>;
@@ -416,6 +418,8 @@ export function ListDroppedTables(arg1:string,arg2:string):Promise<Array<snowfla
 export function ListEnvPackages():Promise<Array<snowpark.PackageInfo>>;
 
 export function ListExportableDatabases():Promise<Array<string>>;
+
+export function ListExtendedObjects(arg1:string,arg2:string):Promise<Array<snowflake.SnowflakeObject>>;
 
 export function ListExternalVolumes():Promise<Array<string>>;
 

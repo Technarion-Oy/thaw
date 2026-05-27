@@ -766,6 +766,10 @@ export function ListBackups(arg1, arg2, arg3) {
   return window['go']['main']['App']['ListBackups'](arg1, arg2, arg3);
 }
 
+export function ListBasicObjects(arg1, arg2) {
+  return window['go']['main']['App']['ListBasicObjects'](arg1, arg2);
+}
+
 export function ListDatabases() {
   return window['go']['main']['App']['ListDatabases']();
 }
@@ -792,6 +796,10 @@ export function ListEnvPackages() {
 
 export function ListExportableDatabases() {
   return window['go']['main']['App']['ListExportableDatabases']();
+}
+
+export function ListExtendedObjects(arg1, arg2) {
+  return window['go']['main']['App']['ListExtendedObjects'](arg1, arg2);
 }
 
 export function ListExternalVolumes() {
