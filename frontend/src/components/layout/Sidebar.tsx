@@ -692,9 +692,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       const [, db, schema] = parts;
       setLoadingTreeNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
       try {
-        const objects = basicOnly
-          ? await ListBasicObjects(db, schema)
-          : await ListObjects(db, schema);
+        // When in search cascade mode (basicOnly), check if objectStore already
+        // has objects for this schema from a prior normal expansion. This avoids
+        // any IPC call and includes all object types (procedures, tasks, etc.).
+        const cached = basicOnly
+          ? useObjectStore.getState().objects.filter((o) => o.db === db && o.schema === schema)
+          : [];
+        const objects = cached.length > 0
+          ? cached.map((o) => ({ name: o.name, kind: o.kind })) as snowflake.SnowflakeObject[]
+          : basicOnly
+            ? await ListBasicObjects(db, schema)
+            : await ListObjects(db, schema);
 
         const groups: Record<string, typeof objects> = {};
         for (const obj of objects) {
