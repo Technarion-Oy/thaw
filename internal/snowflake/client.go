@@ -2883,7 +2883,7 @@ func enrichTaskFinalize(ctx context.Context, c *Client, database, schema string,
 // privileges on a particular object type) are silently skipped so that the
 // rest still appear.
 func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
-	cacheKey := database + "\x00" + schema
+	cacheKey := "full\x00" + database + "\x00" + schema
 	if cached, ok := c.getObjectCache(cacheKey); ok {
 		return cached, nil
 	}
@@ -2947,7 +2947,7 @@ func (c *Client) ClearObjectCache() {
 func (c *Client) ClearObjectCacheForDatabase(database string) {
 	c.objectCacheMu.Lock()
 	defer c.objectCacheMu.Unlock()
-	fullPrefix := database + "\x00"
+	fullPrefix := "full\x00" + database + "\x00"
 	basicPrefix := "basic\x00" + database + "\x00"
 	for k := range c.objectCache {
 		if strings.HasPrefix(k, fullPrefix) || strings.HasPrefix(k, basicPrefix) {
@@ -2960,7 +2960,7 @@ func (c *Client) ClearObjectCacheForDatabase(database string) {
 func (c *Client) ClearObjectCacheForSchema(database, schema string) {
 	c.objectCacheMu.Lock()
 	defer c.objectCacheMu.Unlock()
-	delete(c.objectCache, database+"\x00"+schema)
+	delete(c.objectCache, "full\x00"+database+"\x00"+schema)
 	delete(c.objectCache, "basic\x00"+database+"\x00"+schema)
 }
 
