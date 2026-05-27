@@ -967,7 +967,7 @@ export default function QueryPage() {
         onNewSql={openScratch}
         onNewNotebook={handleNewNotebook}
         onSave={handleSave}
-        contextSlot={nbSlotProps ? NotebookToolbarSlot(nbSlotProps) : undefined}
+        contextSlot={nbSlotProps ? <NotebookToolbarSlot {...nbSlotProps} /> : undefined}
         primaryAction={deployButton}
       />
 

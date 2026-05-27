@@ -257,6 +257,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Execute Notebook…** — opens a dialog to run `EXECUTE NOTEBOOK` with optional string parameters (each value is automatically single-quoted); the dialog shows the notebook's current Query Warehouse fetched from `SHOW NOTEBOOKS`; if none is set a warning alert offers a **Set Warehouse** button that opens a separate dialog with a warehouse selector and explicit **Save** / **Cancel** buttons (saves via `ALTER NOTEBOOK … SET QUERY_WAREHOUSE`); the execute dialog updates live once the warehouse is saved; a live SQL preview shows the exact statement that will run
 - **Right-click a table** to open **Backup Sets…** (shows backup sets scoped to its schema)
 - **Drag and drop** — drag any table or view into the editor to insert a `SELECT` statement with all column names listed individually
+- **Column type icons** — when expanding a table or view's column list, each column is prefixed with a type-family icon (text, number, datetime, boolean, variant/array, binary, geo, vector) coloured per the theme's column palette; primary-key and foreign-key columns get a distinct key icon
 - **Empty table indicator** — table names with zero rows appear in a faded colour so unpopulated tables are immediately visible in the tree
 - **Hover tooltips** — hovering any object in the tree shows its DDL definition
 - **View Definition** — opens the DDL in a modal with a Copy button
@@ -712,14 +713,16 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - SQL is split into individual statements by a parser that handles `--` line comments, `/* */` block comments, single-quoted strings, and `$$`-dollar-quoted strings; each statement runs in order and the last result is displayed
 - **Run selection** — if text is selected in a SQL cell, only the selected SQL is executed
 - `USE DATABASE X;` in a SQL cell updates the toolbar dropdowns and the Python session automatically
-- Results render in a **sticky-header scrollable table** (up to 1 000 rows)
+- Results render in a **ResultGrid** (up to 50 000 rows); when a query returns more than 50 000 rows a **truncated** tag is shown in the status bar
 - DDL / DML with no result set shows "OK — N rows affected"
 
 ### Notebook management
 
-- **Run All**, **Restart Kernel**, **Save**, **Add Cell** in the toolbar
+- **Run All**, **Restart Kernel**, **Save** in the toolbar; **Deploy** button is stacked above the icon row in a vertical toolbar layout
 - **Deploy** — deploys the notebook to Snowflake via a dialog with all `CREATE NOTEBOOK` options (database, schema, name, `OR REPLACE` / `IF NOT EXISTS`, comment, query warehouse, Python runtime warehouse, idle auto-shutdown seconds, runtime name, compute pool); works for both saved and unsaved notebooks — unsaved content is serialised and written to a temporary file automatically
 - Per-cell controls: run, move up/down, add below, **delete** (confirmation dialog)
+- **Cell gutter** — each cell has a left gutter showing the execution count and a colour-coded kind tag (Code / SQL / Markdown) with a per-kind accent stripe
+- **AddCellBar** — hover-reveal bars between cells let you insert Code, SQL, or Markdown cells inline; the bar below the last cell is permanently visible
 - **Command mode** — when no cell Monaco editor is focused, the selected cell (last clicked or focused, shown with an accent left border) can be operated on with single-key shortcuts:
   - `B` — add a new code cell below the selected cell
   - `A` — add a new code cell above the selected cell

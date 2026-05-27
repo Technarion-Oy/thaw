@@ -762,31 +762,6 @@ export default function NotebookTab({ tabId }: Props) {
   }, [tabId]);
   useEffect(() => { restartKernelRef.current = restartKernel; }, [restartKernel]);
 
-  const addCell = useCallback((afterId?: string) => {
-    const newCell: Cell = {
-      id: crypto.randomUUID(),
-      kind: "code",
-      source: "",
-      outputs: [],
-      images: [],
-      sqlResult: null,
-      executionCount: null,
-      running: false,
-    };
-    setCells((prev) => {
-      let updated: Cell[];
-      if (!afterId) {
-        updated = [...prev, newCell];
-      } else {
-        const idx = prev.findIndex((c) => c.id === afterId);
-        updated = [...prev.slice(0, idx + 1), newCell, ...prev.slice(idx + 1)];
-      }
-      syncToStore(updated);
-      return updated;
-    });
-    setSelectedCellId(newCell.id);
-  }, [syncToStore]);
-
   const addCellOfKind = useCallback(
     (afterId: string | undefined, kind: "code" | "sql" | "markdown") => {
       const newCell: Cell = {
@@ -814,6 +789,10 @@ export default function NotebookTab({ tabId }: Props) {
     },
     [syncToStore],
   );
+
+  const addCell = useCallback((afterId?: string) => {
+    addCellOfKind(afterId, "code");
+  }, [addCellOfKind]);
 
   // ── Sync kernel state & callbacks to the unified toolbar store ────────────
   // Merged into a single effect to avoid transient states when switching tabs
@@ -1708,7 +1687,7 @@ function CellView({
           {/* SQL result table */}
           {cell.kind === "sql" && queryResult && queryResult.columns.length > 0 && (
             <>
-              <div style={{ borderTop: "1px solid var(--border)", height: 360 }}>
+              <div style={{ borderTop: "1px solid var(--border)", maxHeight: 360, overflow: "auto" }}>
                 <ResultGrid result={queryResult} />
               </div>
               <div style={{
@@ -1722,13 +1701,13 @@ function CellView({
                 gap: 8,
               }}>
                 <span>
-                  {cell.sqlResult?.rowCount} row{cell.sqlResult?.rowCount !== 1 ? "s" : ""}
+                  {queryResult.rowsAffected} row{queryResult.rowsAffected !== 1 ? "s" : ""}
                 </span>
-                {cell.sqlResult?.truncated && (
+                {queryResult.truncated && (
                   <Tag color="orange" style={{ fontSize: 10, lineHeight: "16px", padding: "0 5px", border: "none" }}>truncated</Tag>
                 )}
-                {cell.sqlResult?.queryID && (
-                  <span style={{ opacity: 0.7 }}>  ·  {cell.sqlResult.queryID}</span>
+                {queryResult.queryID && (
+                  <span style={{ opacity: 0.7 }}>  ·  {queryResult.queryID}</span>
                 )}
               </div>
             </>

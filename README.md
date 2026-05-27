@@ -168,7 +168,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - SQL cells execute through the **Snowpark kernel session** — the same session Python cells use — so `USE` commands in SQL cells affect Python cells and vice versa, and `SELECT CURRENT_DATABASE()` always returns the same value in both cell types
 - SQL is split into individual statements by a parser that correctly handles `--` line comments, `/* */` block comments, single-quoted strings, and `$$`-dollar-quoted strings; each statement runs in order and the last result is displayed
 - **Run selection** — if text is selected in a SQL cell, only the selected SQL is sent for execution
-- Results are rendered in a **sticky-header scrollable table** (up to 1 000 rows displayed)
+- Results are rendered in a **ResultGrid** (up to 50 000 rows); when a query returns more than 50 000 rows a **truncated** tag is shown in the status bar
 - DDL / DML statements with no result set show an "OK — N rows affected" line
 - `Shift+Enter` runs the SQL (or selection) and displays the result inline below the cell
 - `USE DATABASE X;` in a SQL cell updates the toolbar dropdowns and the Python session automatically
@@ -178,8 +178,9 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - **Run All** — executes all code and SQL cells sequentially
 - **Restart Kernel** — stops and relaunches the Python kernel subprocess; existing SQL cell results are preserved
 - **Save** — writes the notebook to disk at its original path; the tab's unsaved-change indicator clears
-- **Add Cell** — inserts a new code cell at the bottom or below a specific cell
-- **Deploy** — deploys the notebook as a Snowflake Notebook object; opens a dialog with all `CREATE NOTEBOOK` options: database, schema, name, `OR REPLACE` / `IF NOT EXISTS`, comment, query warehouse (for SQL queries), Python runtime warehouse, idle auto-shutdown seconds, runtime name, and compute pool; works for both saved notebooks (uploaded from their file path) and unsaved notebooks (the current in-memory content is serialised and written to a temporary file before upload; the temp file is removed after the stage transfer)
+- **Deploy** — deploys the notebook as a Snowflake Notebook object; the Deploy button is stacked above the toolbar icon row in a vertical layout; opens a dialog with all `CREATE NOTEBOOK` options: database, schema, name, `OR REPLACE` / `IF NOT EXISTS`, comment, query warehouse (for SQL queries), Python runtime warehouse, idle auto-shutdown seconds, runtime name, and compute pool; works for both saved notebooks (uploaded from their file path) and unsaved notebooks (the current in-memory content is serialised and written to a temporary file before upload; the temp file is removed after the stage transfer)
+- **Cell gutter** — each cell has a left gutter showing the execution count and a colour-coded kind tag (Code / SQL / Markdown) with a per-kind accent stripe
+- **AddCellBar** — hover-reveal bars between cells let you insert Code, SQL, or Markdown cells inline; the bar below the last cell is permanently visible
 - Per-cell controls: run, move up, move down, add below, **delete** (with confirmation dialog)
 - **Command mode** — when no cell editor is focused, single-key shortcuts operate on the selected cell (the last clicked or focused cell, highlighted with an accent left border):
   - `B` — add a new code cell below
@@ -276,6 +277,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
   - **Rename** the object (`ALTER … RENAME TO`) — available for tables, views, sequences, stages, streams, tasks, file formats, and pipes
   - **Delete** the object (`DROP …`) — with a confirmation dialog
 - **Drag and drop** — drag any table or view node from the sidebar into the editor to insert a fully-qualified `SELECT` with all column names (fetched from Snowflake and listed individually, not `*`) at the drop position; drag a user from the User Management panel to insert a `CREATE USER` DDL statement
+- **Column type icons** — when expanding a table or view's column list, each column is prefixed with a type-family icon (text, number, datetime, boolean, variant/array, binary, geo, vector) coloured per the theme's column palette; primary-key and foreign-key columns get a distinct key icon
 - **Empty table indicator** — table names with zero rows are shown in a faded colour in the object tree, making it easy to spot unpopulated tables at a glance
 - **Hover tooltip** — hovering over any object in the tree shows its DDL definition; cached with a 60-second TTL so changes made outside the app are visible promptly
 - **View Definition** — right-click any object → **View Definition** opens a modal with the full DDL; a **Copy** button copies the SQL to the clipboard
@@ -780,7 +782,7 @@ thaw/
     │       ├── snowpark/             # Snowpark setup wizard, environment check, pip registries
     │       ├── task/                 # Task management: create, execute, properties, graph DAG, schedule editor
     │       ├── terminal/             # Embedded xterm.js terminal panel
-    │       └── toolbar/              # Unified toolbar: Toolbar shell, NotebookToolbarSlot
+    │       └── toolbar/              # Unified toolbar: Toolbar shell
     └── wailsjs/                   # Auto-generated Go→JS bridge (do not edit)
 ```
 

@@ -37,14 +37,14 @@
   --danger:        #f85149;
 
   /* Notebook cells — per-kind accent stripe + output surfaces */
-  --cell-accent-code:     #58a6ff;
-  --cell-accent-sql:      #39c5cf;
-  --cell-accent-markdown: #c297ff;
-  --cell-editor-bg:       #161b22;
-  --cell-output-bg:       #0b0f15;
-  --cell-output-stdout:   #c9d1d9;
-  --cell-output-stderr:   #e3b341;
-  --cell-output-error:    #f85149;
+  --cell-accent-code:     var(--accent);
+  --cell-accent-sql:      #4ec9b0;
+  --cell-accent-markdown: #a371f7;
+  --cell-editor-bg:       #1e1e1e;
+  --cell-output-bg:       #1a1a1a;
+  --cell-output-stdout:   #d4d4d4;
+  --cell-output-stderr:   #e6a817;
+  --cell-output-error:    #ff4d4f;
 
   /* Object-browser icon palette — distinct hue per Snowflake object kind.
      Same lightness band so no single icon overpowers a row; every value
@@ -98,12 +98,12 @@
   --danger:        #cf222e;
 
   /* Notebook cells — per-kind accent stripe + output surfaces */
-  --cell-accent-code:     #0550ae;
-  --cell-accent-sql:      #1b7c83;
-  --cell-accent-markdown: #6f42c1;
+  --cell-accent-code:     var(--accent);
+  --cell-accent-sql:      #0a7266;
+  --cell-accent-markdown: #8250df;
   --cell-editor-bg:       #ffffff;
-  --cell-output-bg:       #f6f8fa;
-  --cell-output-stdout:   #0f1419;
+  --cell-output-bg:       #fafafa;
+  --cell-output-stdout:   #1f2328;
   --cell-output-stderr:   #9a6700;
   --cell-output-error:    #cf222e;
 
@@ -463,32 +463,6 @@ body,
 }
 
 /* ── Notebook cell polish ─────────────────────────────────────────────── */
-
-:root {
-  --cell-accent-code: var(--accent);
-  --cell-accent-sql: #4ec9b0;
-  --cell-accent-markdown: #a371f7;
-
-  --cell-editor-bg: #1e1e1e;
-  --cell-output-bg: #1a1a1a;
-  
-  --cell-output-stdout: #d4d4d4;
-  --cell-output-stderr: #e6a817;
-  --cell-output-error: #ff4d4f;
-}
-
-[data-theme="light"] {
-  --cell-accent-code: var(--accent);
-  --cell-accent-sql: #0a7266;
-  --cell-accent-markdown: #8250df;
-
-  --cell-editor-bg: #ffffff;
-  --cell-output-bg: #fafafa;
-  
-  --cell-output-stdout: #1f2328;
-  --cell-output-stderr: #9a6700;
-  --cell-output-error: #cf222e;
-}
 
 .thaw-nb-cell {
   position: relative;
