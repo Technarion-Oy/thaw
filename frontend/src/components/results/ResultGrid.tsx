@@ -53,6 +53,10 @@ export interface ResultGridHandle {
 interface Props {
   result: QueryResult;
   gridRef?: React.MutableRefObject<ResultGridHandle | null>;
+  /** When true, skip syncing tableRows to the global gridStore singleton.
+   *  Use for embedded grids (e.g. notebook SQL cells) that should not
+   *  contaminate the main query tab's StatusBar/GridSearch state. */
+  standalone?: boolean;
 }
 
 interface CtxMenu {
@@ -226,7 +230,7 @@ const CellContent = React.memo(function CellContent({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-function ResultGrid({ result, gridRef }: Props) {
+function ResultGrid({ result, gridRef, standalone = false }: Props) {
   const uiDensity = useThemeStore((s) => s.uiDensity);
   const featureFlags = useFeatureFlagsStore((s) => s.flags);
 
@@ -297,12 +301,12 @@ function ResultGrid({ result, gridRef }: Props) {
       setSorting([]);
       setColumnPinning({ left: [], right: [] });
       setColumnFilters([]);
-      resetGrid(); // full reset — clears formatting
+      if (!standalone) resetGrid(); // full reset — clears formatting
     } else {
       // Same columns, new queryID (re-run) — preserve formatting
       setSorting([]);
       setColumnFilters([]);
-      resetNavigation();
+      if (!standalone) resetNavigation();
     }
   }
 
@@ -374,9 +378,10 @@ function ResultGrid({ result, gridRef }: Props) {
   const { rows: tableRows } = table.getRowModel();
 
   // Sync tableRows to gridStore so StatusBar and GridSearch can access filtered/sorted rows.
+  // Standalone grids (e.g. notebook SQL cells) skip this to avoid contaminating the singleton.
   useEffect(() => {
-    setTableRows(tableRows);
-  }, [tableRows, setTableRows]);
+    if (!standalone) setTableRows(tableRows);
+  }, [tableRows, setTableRows, standalone]);
 
   // Row virtualizer
   const rowVirtualizer = useVirtualizer({

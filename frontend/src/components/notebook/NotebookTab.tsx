@@ -1246,16 +1246,20 @@ function CellView({
 
   const { editorFontSize, editorFont } = useThemeStore();
 
+  // Memoize by queryID (stable string) to avoid rebuilding the object when
+  // unrelated cells re-render (setCells rebuilds all cell references).
+  const sqlResult = cell.sqlResult;
   const queryResult: QueryResult | null = useMemo(() => {
-    if (!cell.sqlResult) return null;
+    if (!sqlResult) return null;
     return {
-      columns: cell.sqlResult.columns,
-      rows: cell.sqlResult.rows,
-      rowsAffected: cell.sqlResult.rowCount,
-      queryID: cell.sqlResult.queryID,
-      truncated: cell.sqlResult.truncated,
+      columns: sqlResult.columns,
+      rows: sqlResult.rows,
+      rowsAffected: sqlResult.rowCount,
+      queryID: sqlResult.queryID,
+      truncated: sqlResult.truncated,
     };
-  }, [cell.sqlResult]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sqlResult?.queryID]);
 
   // Decorations collection for breakpoint glyphs in the Monaco gutter.
   const decorationsRef = useRef<monacoLib.editor.IEditorDecorationsCollection | null>(null);
@@ -1694,7 +1698,7 @@ function CellView({
           {cell.kind === "sql" && queryResult && queryResult.columns.length > 0 && (
             <>
               <div style={{ borderTop: "1px solid var(--border)", height: 360, overflow: "hidden" }}>
-                <ResultGrid result={queryResult} />
+                <ResultGrid result={queryResult} standalone />
               </div>
               <div style={{
                 padding: "4px 10px",
