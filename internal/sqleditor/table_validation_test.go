@@ -190,6 +190,10 @@ func TestValidateSnowflakePatterns_CreateHybridTable(t *testing.T) {
 		// Same flaw as AUTOINCREMENT above — a quoted identifier named "IDENTITY"
 		// must not be confused with the IDENTITY column attribute.
 		{"Column named IDENTITY in PK missing NOT NULL", `CREATE HYBRID TABLE t1 ("IDENTITY" INT, PRIMARY KEY ("IDENTITY"))`, []string{"Primary key columns in a hybrid table must be NOT NULL"}},
+		// CHECK (id IS NOT NULL) is a table-level check constraint, NOT the
+		// column-level NOT NULL constraint. The reNotNull regex must not be
+		// fooled by NOT NULL appearing inside a CHECK expression.
+		{"CHECK clause IS NOT NULL is not column NOT NULL", "CREATE HYBRID TABLE t1 (id INT CHECK (id IS NOT NULL), PRIMARY KEY (id))", []string{"Primary key columns in a hybrid table must be NOT NULL"}},
 	}
 
 	for _, tt := range invalidCases {
@@ -495,6 +499,14 @@ func TestValidateSnowflakePatterns_AlterTableSearchOptimization(t *testing.T) {
 			{
 				sql:     "ALTER TABLE IF EXISTS t ADD SEARCH OPTIMIZATION ON FUZZY(col1)",
 				wantMsg: "Unknown search optimization type",
+			},
+			// Missing comma between two ON expressions — the second expression
+			// (SUBSTRING) is silently dropped because splitTopLevelCommas treats
+			// the whole string as one segment and reSearchOptExpr only validates
+			// the leading type name.
+			{
+				sql:     "ALTER TABLE t ADD SEARCH OPTIMIZATION ON EQUALITY(c1) SUBSTRING(c2)",
+				wantMsg: "search optimization",
 			},
 			// Expression type without parentheses
 			{
