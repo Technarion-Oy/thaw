@@ -2904,15 +2904,24 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 
 // getObjectCache returns a cached result if it exists and hasn't expired.
 // The returned slice is a shallow clone so callers can safely append without
-// corrupting the cached backing array.
+// corrupting the cached backing array. Expired entries are deleted on access.
 func (c *Client) getObjectCache(key string) ([]SnowflakeObject, bool) {
 	c.objectCacheMu.RLock()
-	defer c.objectCacheMu.RUnlock()
 	entry, ok := c.objectCache[key]
-	if !ok || time.Since(entry.ts) > objectCacheTTL {
+	if !ok {
+		c.objectCacheMu.RUnlock()
 		return nil, false
 	}
-	return slices.Clone(entry.objects), true
+	if time.Since(entry.ts) > objectCacheTTL {
+		c.objectCacheMu.RUnlock()
+		c.objectCacheMu.Lock()
+		delete(c.objectCache, key)
+		c.objectCacheMu.Unlock()
+		return nil, false
+	}
+	result := slices.Clone(entry.objects)
+	c.objectCacheMu.RUnlock()
+	return result, true
 }
 
 // putObjectCache stores a result in the cache with the current timestamp.

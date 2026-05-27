@@ -573,6 +573,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     if (waiting) return; // re-runs when searchResults gains schema children
 
     // Step 4: trigger object loads for schema nodes without children.
+    // NOTE: basicOnly=true means only TABLEs, VIEWs, and SEQUENCEs are
+    // searched. Extended types (PROCEDURE, FUNCTION, TASK, STREAM, STAGE,
+    // etc.) won't appear in search results. This is a deliberate trade-off:
+    // 1 query per schema instead of 11.
     for (const dbNode of searchResults) {
       for (const schemaNode of ((dbNode as any).children ?? []) as DataNode[]) {
         const key = String(schemaNode.key);
