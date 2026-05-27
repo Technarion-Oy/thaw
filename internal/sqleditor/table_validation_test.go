@@ -31,6 +31,15 @@ func TestValidateSnowflakePatterns_CreateIcebergTable(t *testing.T) {
 		"CREATE OR REPLACE ICEBERG TABLE t (id int) CATALOG = 'SNOWFLAKE' BASE_LOCATION = 's3://test/'",
 		// IF NOT EXISTS valid (without OR REPLACE)
 		"CREATE ICEBERG TABLE IF NOT EXISTS t (id int) CATALOG = 'SNOWFLAKE' BASE_LOCATION = 's3://test/'",
+		// Unquoted bare enum values are accepted (isValidEnumValue strips quotes)
+		"CREATE ICEBERG TABLE t (id int) EXTERNAL_VOLUME = 'ev' CATALOG = 'c' BASE_LOCATION = 'l' REFRESH_MODE = AUTO",
+		"CREATE ICEBERG TABLE t (id int) EXTERNAL_VOLUME = 'ev' CATALOG = 'c' BASE_LOCATION = 'l' INITIALIZE = ON_CREATE",
+		// CATALOG_TABLE_NAME and CATALOG_NAMESPACE are valid with non-Snowflake catalogs
+		"CREATE ICEBERG TABLE t (id int) EXTERNAL_VOLUME = 'ev' CATALOG = 'c' BASE_LOCATION = 'l' CATALOG_TABLE_NAME = 'ctn'",
+		"CREATE ICEBERG TABLE t (id int) EXTERNAL_VOLUME = 'ev' CATALOG = 'c' BASE_LOCATION = 'l' CATALOG_NAMESPACE = 'cns'",
+		// DATA_RETENTION_TIME_IN_DAYS and CLUSTER BY are valid for Snowflake-managed
+		"CREATE ICEBERG TABLE t (id int) CATALOG = 'SNOWFLAKE' BASE_LOCATION = 's3://b/' DATA_RETENTION_TIME_IN_DAYS = 7",
+		"CREATE ICEBERG TABLE t (id int) CATALOG = 'SNOWFLAKE' BASE_LOCATION = 's3://b/' CLUSTER BY (id)",
 	}
 
 	for _, sql := range validCases {
@@ -72,6 +81,8 @@ func TestValidateSnowflakePatterns_CreateIcebergTable(t *testing.T) {
 		{"No CATALOG no EXTERNAL_VOLUME no BASE_LOCATION", "CREATE ICEBERG TABLE t (id int)", []string{"BASE_LOCATION is mandatory for all Iceberg tables", "EXTERNAL_VOLUME is mandatory for Iceberg tables with external catalogs", "CATALOG is mandatory for Iceberg tables with external catalogs"}},
 		{"REFRESH_MODE INCREMENTAL lowercase", "CREATE ICEBERG TABLE t (id int) EXTERNAL_VOLUME = 'ev' CATALOG = 'c' BASE_LOCATION = 'l' REFRESH_MODE = 'bad_value'", []string{"Invalid REFRESH_MODE value"}},
 		{"INITIALIZE invalid ON_SOMETHING", "CREATE ICEBERG TABLE t (id int) EXTERNAL_VOLUME = 'ev' CATALOG = 'c' BASE_LOCATION = 'l' INITIALIZE = 'ON_SOMETHING'", []string{"Invalid INITIALIZE value"}},
+		{"Whitespace-only BASE_LOCATION", "CREATE ICEBERG TABLE t (id int) CATALOG = 'SNOWFLAKE' BASE_LOCATION = '   '", []string{"BASE_LOCATION is mandatory for all Iceberg tables"}},
+		{"CLUSTER BY and DATA_RETENTION both on external catalog", "CREATE ICEBERG TABLE t (id int) EXTERNAL_VOLUME = 'ev' CATALOG = 'c' BASE_LOCATION = 'l' CLUSTER BY (id) DATA_RETENTION_TIME_IN_DAYS = 1", []string{"CLUSTER BY is supported only for Snowflake-managed", "DATA_RETENTION_TIME_IN_DAYS applies only to Snowflake-managed"}},
 	}
 
 	for _, tt := range invalidCases {
@@ -119,6 +130,12 @@ func TestValidateSnowflakePatterns_CreateHybridTable(t *testing.T) {
 		`CREATE HYBRID TABLE t1 ("MyCol" INT NOT NULL, PRIMARY KEY ("MyCol"))`,
 		// Multiple columns, composite PK, all NOT NULL
 		"CREATE HYBRID TABLE t1 (id INT NOT NULL, name VARCHAR NOT NULL, age INT NOT NULL, PRIMARY KEY (id, name))",
+		// Out-of-line PK column with AUTOINCREMENT satisfies NOT NULL requirement
+		"CREATE HYBRID TABLE t1 (id INT AUTOINCREMENT, PRIMARY KEY (id))",
+		// Out-of-line PK column with IDENTITY satisfies NOT NULL requirement
+		"CREATE HYBRID TABLE t1 (id INT IDENTITY (1, 1), PRIMARY KEY (id))",
+		// Composite PK: one column NOT NULL, one AUTOINCREMENT — both satisfied
+		"CREATE HYBRID TABLE t1 (id INT NOT NULL, seq INT AUTOINCREMENT, PRIMARY KEY (id, seq))",
 	}
 
 	for _, sql := range validCases {
@@ -154,6 +171,7 @@ func TestValidateSnowflakePatterns_CreateHybridTable(t *testing.T) {
 		{"Composite PK all columns missing NOT NULL", "CREATE HYBRID TABLE t1 (id INT, name INT, PRIMARY KEY (id, name))", []string{"Primary key columns in a hybrid table must be NOT NULL (column 'ID' omits it).", "Primary key columns in a hybrid table must be NOT NULL (column 'NAME' omits it)."}},
 		{"Multiple violations at once", "CREATE OR REPLACE TRANSIENT HYBRID TABLE t1 (id INT) CLUSTER BY (id) DATA_RETENTION_TIME_IN_DAYS = 7 CHANGE_TRACKING = TRUE", []string{"OR REPLACE is not supported for hybrid tables", "TRANSIENT is not supported for hybrid tables", "CLUSTER BY is not supported on hybrid tables", "DATA_RETENTION_TIME_IN_DAYS is not applicable to hybrid tables", "CHANGE_TRACKING is not supported on hybrid tables", "Hybrid tables must have a PRIMARY KEY"}},
 		{"Quoted column in PK missing NOT NULL", `CREATE HYBRID TABLE t1 ("myCol" INT, PRIMARY KEY ("myCol"))`, []string{"Primary key columns in a hybrid table must be NOT NULL"}},
+		{"COPY GRANTS and missing PK", "CREATE HYBRID TABLE t1 (id INT) COPY GRANTS", []string{"COPY GRANTS is not supported on hybrid tables", "Hybrid tables must have a PRIMARY KEY"}},
 	}
 
 	for _, tt := range invalidCases {
@@ -217,6 +235,10 @@ func TestValidateSnowflakePatterns_CreateEventTable(t *testing.T) {
 		"CREATE EVENT TABLE my_events /* AUTO_REFRESH = TRUE */ COMMENT = 'test'",
 		// TAG property
 		"CREATE EVENT TABLE my_events TAG (cost_center = 'finance')",
+		// COPY GRANTS combined with IF NOT EXISTS (both valid)
+		"CREATE EVENT TABLE IF NOT EXISTS my_events COPY GRANTS",
+		// COPY GRANTS combined with OR REPLACE
+		"CREATE OR REPLACE EVENT TABLE my_events COPY GRANTS",
 	}
 
 	for _, sql := range validCases {
@@ -299,6 +321,11 @@ func TestValidateSnowflakePatterns_CreateEventTable(t *testing.T) {
 			"CREATE EVENT TABLE my_events (col1 INT) CLUSTER BY (col1)",
 			[]string{"Event tables have a fixed schema and do not support column definitions", "CLUSTER BY is not supported for EVENT TABLE"},
 		},
+		{
+			"Multiple unexpected properties each warned",
+			"CREATE EVENT TABLE my_events AUTO_REFRESH = TRUE EXTERNAL_VOLUME = 'ev'",
+			[]string{"Unexpected property 'AUTO_REFRESH'", "Unexpected property 'EXTERNAL_VOLUME'"},
+		},
 	}
 
 	for _, tt := range invalidCases {
@@ -375,6 +402,8 @@ func TestValidateSnowflakePatterns_AlterTableSearchOptimization(t *testing.T) {
 			"ALTER TABLE t ADD SEARCH OPTIMIZATION;",
 			"ALTER TABLE t ADD SEARCH OPTIMIZATION ON EQUALITY(c1);",
 			"ALTER TABLE t DROP SEARCH OPTIMIZATION ON SUBSTRING(c1), GEO(c2);  ",
+			// Trailing comma after last expression — empty segment is skipped
+			"ALTER TABLE t ADD SEARCH OPTIMIZATION ON EQUALITY(c1),",
 		}
 		for _, sql := range validQueries {
 			t.Run(sql, func(t *testing.T) {
@@ -426,6 +455,21 @@ func TestValidateSnowflakePatterns_AlterTableSearchOptimization(t *testing.T) {
 			// Expression type without parentheses
 			{
 				sql:     "ALTER TABLE t ADD SEARCH OPTIMIZATION ON EQUALITY",
+				wantMsg: "Invalid search optimization expression",
+			},
+			// SUBSTRING without parentheses
+			{
+				sql:     "ALTER TABLE t ADD SEARCH OPTIMIZATION ON SUBSTRING",
+				wantMsg: "Invalid search optimization expression",
+			},
+			// GEO without parentheses
+			{
+				sql:     "ALTER TABLE t ADD SEARCH OPTIMIZATION ON GEO",
+				wantMsg: "Invalid search optimization expression",
+			},
+			// FULL_TEXT without parentheses
+			{
+				sql:     "ALTER TABLE t ADD SEARCH OPTIMIZATION ON FULL_TEXT",
 				wantMsg: "Invalid search optimization expression",
 			},
 		}
@@ -497,6 +541,12 @@ func TestValidateSnowflakePatterns_AlterDynamicTable(t *testing.T) {
 			// With trailing semicolons / whitespace
 			"ALTER DYNAMIC TABLE my_dt REFRESH;",
 			"ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = '1 minute';  ",
+			// Lowercase bare DOWNSTREAM is accepted (case-insensitive regex)
+			"ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = downstream",
+			// RENAME TO with quoted identifier
+			"ALTER DYNAMIC TABLE my_dt RENAME TO \"new-name\"",
+			// UNSET COMMENT is valid
+			"ALTER DYNAMIC TABLE my_dt UNSET COMMENT",
 		}
 		for _, sql := range validQueries {
 			t.Run(sql, func(t *testing.T) {
@@ -579,6 +629,16 @@ func TestValidateSnowflakePatterns_AlterDynamicTable(t *testing.T) {
 				sql:     "ALTER DYNAMIC TABLE my_dt UNSET",
 				wantMsg: "UNSET requires at least one property name",
 			},
+			// Number without time unit in TARGET_LAG
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = '1'",
+				wantMsg: "Invalid TARGET_LAG value",
+			},
+			// Negative number in TARGET_LAG
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = '-5 minutes'",
+				wantMsg: "Invalid TARGET_LAG value",
+			},
 		}
 		for _, tc := range cases {
 			t.Run(tc.sql, func(t *testing.T) {
@@ -637,6 +697,11 @@ func TestValidateSnowflakePatterns_AlterTableSwapWith(t *testing.T) {
 			// Table name collides with a keyword
 			"ALTER TABLE swap SWAP WITH other_t",
 			`ALTER TABLE "select" SWAP WITH "from"`,
+			// Different part counts — not flagged as same table
+			"ALTER TABLE t1 SWAP WITH db.schema.t1",
+			"ALTER TABLE db.schema.t1 SWAP WITH t1",
+			// Trailing comment is stripped — no false positive
+			"ALTER TABLE t1 SWAP WITH t2 -- this is a comment",
 		}
 		for _, sql := range validQueries {
 			t.Run(sql, func(t *testing.T) {
@@ -768,6 +833,54 @@ func TestValidateSnowflakePatterns_MultiStatement(t *testing.T) {
 		warns := getWarnings(markers)
 		if len(warns) > 0 {
 			t.Errorf("Expected no warnings for plain SELECTs, got: %v", warns)
+		}
+	})
+
+	t.Run("event table among other statements", func(t *testing.T) {
+		sql := "SELECT 1;\nCREATE EVENT TABLE my_events (col1 INT);\nSELECT 2;"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warns := getWarnings(markers)
+		found := false
+		for _, w := range warns {
+			if strings.Contains(w.Message, "Event tables have a fixed schema") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("Expected column definition warning in multi-statement input, got: %v", warns)
+		}
+	})
+
+	t.Run("alter dynamic table among other statements", func(t *testing.T) {
+		sql := "SELECT 1;\nALTER DYNAMIC TABLE dt TRUNCATE;\nSELECT 2;"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warns := getWarnings(markers)
+		found := false
+		for _, w := range warns {
+			if strings.Contains(w.Message, "Unknown ALTER DYNAMIC TABLE sub-command") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("Expected unknown sub-command warning in multi-statement input, got: %v", warns)
+		}
+	})
+
+	t.Run("alter table swap with among other statements", func(t *testing.T) {
+		sql := "SELECT 1;\nALTER TABLE t1 SWAP WITH t1;\nSELECT 2;"
+		ranges := GetStatementRanges(sql)
+		markers := ValidateSnowflakePatterns(sql, ranges)
+		warns := getWarnings(markers)
+		found := false
+		for _, w := range warns {
+			if strings.Contains(w.Message, "SWAP WITH the same table") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("Expected same-table warning in multi-statement input, got: %v", warns)
 		}
 	})
 }
