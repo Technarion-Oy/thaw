@@ -56,12 +56,17 @@ export interface ToolbarProps {
   /** Handler: save the current tab. */
   onSave: () => void;
   /**
-   * Extra buttons rendered as the second row of the 3-column button grid.
-   * Should be 3 bare `<Tooltip><Button/></Tooltip>` elements (no wrapper).
+   * Tab-specific toolbar section (e.g. notebook controls). Rendered after
+   * a vertical separator if present; pass the entire cluster as a fragment.
    */
-  contextButtons?: ReactNode;
-  /** Extra content rendered after the button grid (e.g. kernel status icon). */
-  contextStatus?: ReactNode;
+  contextSlot?: ReactNode;
+  /**
+   * Tab-specific primary action shown above the three global icon
+   * buttons (New SQL / New notebook / Save). When present, the globals
+   * shrink to a compact two-row stack. Pass nothing on tabs without a
+   * primary action (e.g. SQL tabs) and the row stays single-row.
+   */
+  primaryAction?: ReactNode;
 }
 
 export default function Toolbar({
@@ -78,8 +83,8 @@ export default function Toolbar({
   onNewSql,
   onNewNotebook,
   onSave,
-  contextButtons,
-  contextStatus,
+  contextSlot,
+  primaryAction,
 }: ToolbarProps) {
   const params = useConnectionStore((s) => s.params);
   const isConnected = useConnectionStore((s) => s.isConnected);
@@ -160,37 +165,48 @@ export default function Toolbar({
         <div style={{ width: 1, alignSelf: "stretch", background: "var(--border)" }} />
 
         {/* Action button grid: 3 columns, 1 or 2 rows */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 28px)", gap: 2 }}>
-          <Tooltip title="New SQL query">
-            <Button
-              icon={<FileAddOutlined />}
-              size="small"
-              onClick={onNewSql}
-              style={{ width: 28, padding: 0 }}
-            />
-          </Tooltip>
-          <Tooltip title="New notebook">
-            <Button
-              icon={<BookOutlined />}
-              size="small"
-              onClick={onNewNotebook}
-              style={{ width: 28, padding: 0 }}
-            />
-          </Tooltip>
-          <Tooltip title="Save (\u2318S)">
-            <Button
-              icon={<SaveOutlined />}
-              size="small"
-              onClick={onSave}
-              style={{ width: 28, padding: 0 }}
-            />
-          </Tooltip>
-          {/* Second row: context-specific buttons (e.g. notebook actions) */}
-          {contextButtons}
-        </div>
+        {primaryAction ? (
+          <div className="thaw-tb-vstack">
+            {primaryAction}
+            <div className="thaw-tb-vstack-row">
+              <Tooltip title="New SQL query">
+                <Button className="thaw-tb-vstack-icon" aria-label="New SQL query"
+                  icon={<FileAddOutlined />} onClick={onNewSql} />
+              </Tooltip>
+              <Tooltip title="New notebook">
+                <Button className="thaw-tb-vstack-icon" aria-label="New notebook"
+                  icon={<BookOutlined />} onClick={onNewNotebook} />
+              </Tooltip>
+              <Tooltip title="Save (\u2318S)">
+                <Button className="thaw-tb-vstack-icon" aria-label="Save"
+                  icon={<SaveOutlined />} onClick={onSave} />
+              </Tooltip>
+            </div>
+          </div>
+        ) : (
+          <div className="thaw-tb-group">
+            <Tooltip title="New SQL query">
+              <Button className="thaw-tb-icon-btn" aria-label="New SQL query"
+                icon={<FileAddOutlined />} onClick={onNewSql} />
+            </Tooltip>
+            <Tooltip title="New notebook">
+              <Button className="thaw-tb-icon-btn" aria-label="New notebook"
+                icon={<BookOutlined />} onClick={onNewNotebook} />
+            </Tooltip>
+            <Tooltip title="Save (\u2318S)">
+              <Button className="thaw-tb-icon-btn" aria-label="Save"
+                icon={<SaveOutlined />} onClick={onSave} />
+            </Tooltip>
+          </div>
+        )}
 
-        {/* Context status (kernel indicator) */}
-        {contextStatus}
+        {/* Tab-specific section (notebook kernel pill + actions) */}
+        {contextSlot && (
+          <>
+            <div className="thaw-tb-sep" />
+            {contextSlot}
+          </>
+        )}
       </div>
 
       {/* ── Right: connect button or session context ── */}
@@ -273,36 +289,39 @@ export default function Toolbar({
           </Space>
         </div>
 
-        {params && (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-            {(currentUser || currentRegion) && (
-              <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "monospace", lineHeight: 1 }}>
-                {[currentUser, currentRegion].filter(Boolean).join(" \u00B7 ")}
-              </div>
-            )}
-            <Dropdown
-              trigger={["contextMenu"]}
-              menu={{
-                items: [
-                  { key: "session-props", label: "Session Properties", onClick: onOpenSessionProperties },
-                  { key: "snowsight", label: "Open Snowsight\u2026", onClick: onOpenSnowsight },
-                ],
-              }}
-            >
-              <Tag color="blue" style={{ fontSize: 11, margin: 0, cursor: "context-menu" }}>
-                {params.account} \u00B7 {params.user}
-              </Tag>
-            </Dropdown>
-          </div>
-        )}
-        <Button
-          icon={<DisconnectOutlined />}
-          size="small"
-          danger
-          onClick={onDisconnect}
-        >
-          Disconnect
-        </Button>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+          {params && (
+            <>
+              {(currentUser || currentRegion) && (
+                <div style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "monospace", lineHeight: 1 }}>
+                  {[currentUser, currentRegion].filter(Boolean).join(" \u00B7 ")}
+                </div>
+              )}
+              <Dropdown
+                trigger={["contextMenu"]}
+                menu={{
+                  items: [
+                    { key: "session-props", label: "Session Properties", onClick: onOpenSessionProperties },
+                    { key: "snowsight", label: "Open Snowsight\u2026", onClick: onOpenSnowsight },
+                  ],
+                }}
+              >
+                <Tag color="blue" style={{ fontSize: 11, margin: 0, cursor: "context-menu" }}>
+                  {params.account} \u00B7 {params.user}
+                </Tag>
+              </Dropdown>
+            </>
+          )}
+          <Button
+            icon={<DisconnectOutlined />}
+            size="small"
+            danger
+            onClick={onDisconnect}
+            style={{ width: "100%", marginTop: 2 }}
+          >
+            Disconnect
+          </Button>
+        </div>
       </Space>
     </div>
   );

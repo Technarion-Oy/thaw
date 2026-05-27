@@ -44,10 +44,18 @@ import {
   LockOutlined,
   BranchesOutlined,
   FileOutlined,
+  KeyOutlined,
+  FontSizeOutlined,
+  CalendarOutlined,
+  CheckSquareOutlined,
+  CodeSandboxOutlined,
+  BuildOutlined,
+  GlobalOutlined,
+  BarChartOutlined,
+  LinkOutlined,
 } from "@ant-design/icons";
 
 // ── CSS variable name per kind ─────────────────────────────────────────────
-// Keys are the UPPERCASE Snowflake kind strings emitted by ListObjects.
 const KIND_VAR: Record<string, string> = {
   TABLE:             "--icon-table",
   VIEW:              "--icon-view",
@@ -72,16 +80,49 @@ const KIND_ICON: Record<string, React.ComponentType<{ style?: React.CSSPropertie
   PROCEDURE:        CodeOutlined,
   SEQUENCE:         NumberOutlined,
   STAGE:            InboxOutlined,
-  STREAM:           ThunderboltOutlined,    // signals real-time data flow
+  STREAM:           ThunderboltOutlined,
   TASK:             ClockCircleOutlined,
   "FILE FORMAT":    FileTextOutlined,
-  PIPE:             ShareAltOutlined,       // distinct from STREAM (was clashing on ApiOutlined)
+  PIPE:             ShareAltOutlined,
   NOTEBOOK:         ExperimentOutlined,
-  SECRET:           LockOutlined,           // distinct from PK column icon (KeyOutlined)
+  SECRET:           LockOutlined,
   "GIT REPOSITORY": BranchesOutlined,
 };
 
 // ── Public API ────────────────────────────────────────────────────────────
+
+export function columnFamily(rawType: string): "text" | "number" | "datetime" | "boolean" | "variant" | "array" | "binary" | "geo" | "vector" {
+  const t = rawType.toUpperCase().trim();
+  if (t.startsWith("NUMBER") || t.startsWith("DECIMAL") || t.startsWith("NUMERIC") || t.startsWith("INT") || t.startsWith("FLOAT") || t.startsWith("DOUBLE") || t.startsWith("REAL") || t.startsWith("BYTEINT")) return "number";
+  if (t.startsWith("DATE") || t.startsWith("TIME") || t.startsWith("TIMESTAMP")) return "datetime";
+  if (t === "BOOLEAN") return "boolean";
+  if (t === "VARIANT" || t === "OBJECT" || t === "MAP") return "variant";
+  if (t === "ARRAY") return "array";
+  if (t.startsWith("BINARY") || t.startsWith("VARBINARY")) return "binary";
+  if (t === "GEOGRAPHY" || t === "GEOMETRY") return "geo";
+  if (t.startsWith("VECTOR")) return "vector";
+  return "text";
+}
+
+export function columnIcon(rawType: string, opts?: { primaryKey?: boolean; foreignKey?: boolean }): ReactNode {
+  if (opts?.primaryKey) return <span className="thaw-col-icon" data-family="pk"><KeyOutlined /></span>;
+  if (opts?.foreignKey) return <span className="thaw-col-icon" data-family="fk"><LinkOutlined /></span>;
+
+  const fam = columnFamily(rawType);
+  let Icon = FontSizeOutlined;
+  switch (fam) {
+    case "text":     Icon = FontSizeOutlined; break;
+    case "number":   Icon = NumberOutlined; break;
+    case "datetime": Icon = CalendarOutlined; break;
+    case "boolean":  Icon = CheckSquareOutlined; break;
+    case "variant":  Icon = CodeSandboxOutlined; break;
+    case "array":    Icon = BuildOutlined; break;
+    case "binary":   Icon = FileOutlined; break;
+    case "geo":      Icon = GlobalOutlined; break;
+    case "vector":   Icon = BarChartOutlined; break;
+  }
+  return <span className="thaw-col-icon" data-family={fam}><Icon /></span>;
+}
 
 /** Coloured icon for a Snowflake object kind (TABLE / VIEW / FUNCTION / …). */
 export function objectIcon(kind: string): ReactNode {

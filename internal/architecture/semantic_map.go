@@ -72,6 +72,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/database/CreateStageModal.tsx",
         "frontend/src/components/database/StagePropertiesModal.tsx",
         "frontend/src/components/layout/Sidebar.tsx",
+        "frontend/src/components/sidebar/objectIcons.tsx",
         "frontend/src/components/task/TaskHistoryModal.tsx",
         "frontend/src/store/objectStore.ts"
       ],
@@ -109,7 +110,7 @@ func GetCodebaseSemanticMap() string {
       ],
       "frontend_paths": [
         "frontend/src/components/notebook/NotebookTab.tsx",
-        "frontend/src/components/toolbar/NotebookToolbarSlot.tsx",
+        "frontend/src/components/notebook/NotebookToolbarSlot.tsx",
         "frontend/src/store/notebookPrefsStore.ts",
         "frontend/src/store/notebookToolbarStore.ts"
       ],

@@ -51,8 +51,6 @@ import {
   DashboardOutlined,
   SyncOutlined,
   KeyOutlined,
-  LinkOutlined,
-  LineOutlined,
   DisconnectOutlined,
   BranchesOutlined,
   CloseOutlined,
@@ -62,6 +60,7 @@ import {
   databaseIcon,
   schemaIcon,
   typeGroupIcon,
+  columnIcon,
 } from "../sidebar/objectIcons";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
@@ -748,26 +747,36 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             const isPK = c.isPrimaryKey;
             const fk = fkMap.get(c.name);
 
-            let icon = <LineOutlined style={{ color: "var(--text-muted)", fontSize: "10px" }} />;
-            if (isPK) icon = <KeyOutlined style={{ color: "#faad14" }} />;
-            else if (fk) icon = <LinkOutlined style={{ color: "#1890ff" }} />;
-
             const title = (
               <span style={{ display: "flex", alignItems: "center", width: "100%", overflow: "hidden" }}>
                 <Text style={{ fontSize: "12px" }} ellipsis>
                   {c.name}
-                  <Text type="secondary" style={{ fontSize: "10px", marginLeft: "4px", fontStyle: "italic" }}>
-                    ({c.dataType.toLowerCase().replace("(16777216)", "")})
-                    {fk && ` → ${fk.pkTable}`}
-                  </Text>
+                  {fk && (
+                    <Text type="secondary" style={{ fontSize: "10px", marginLeft: "4px", fontStyle: "italic" }}>
+                      → {fk.pkTable}
+                    </Text>
+                  )}
                 </Text>
+                <span style={{
+                  marginLeft: "auto",
+                  fontSize: 10,
+                  color: "var(--text-faint)",
+                  fontFamily: "var(--editor-font, monospace)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                }}>
+                  {c.dataType.split("(")[0]}
+                </span>
               </span>
             );
 
             return {
               title,
               key: `col:${db}:${schema}:${name}:${c.name}`,
-              icon,
+              icon: columnIcon(c.dataType, {
+                primaryKey: isPK,
+                foreignKey: !!fk,
+              }),
               isLeaf: true,
             };
           });

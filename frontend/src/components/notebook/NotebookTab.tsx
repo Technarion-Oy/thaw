@@ -10,7 +10,7 @@
 //
 // @thaw-domain: Snowpark & Developer Workflows
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useMemo, Fragment } from "react";
 import Editor, { type BeforeMount, type OnMount, type Monaco } from "@monaco-editor/react";
 import { ensureMonacoSetup } from "../editor/monacoSetup";
 import { setActiveSnippetEditor } from "../editor/SqlEditor";
@@ -25,7 +25,7 @@ import { CommandsRegistry } from "monaco-editor/esm/vs/platform/commands/common/
 // @ts-ignore
 import { ContextKeyExpr } from "monaco-editor/esm/vs/platform/contextkey/common/contextkey.js";
 import * as monacoLib from "monaco-editor";
-import { Button, Dropdown, Modal, Space, Spin, Tooltip, Typography, Select, message } from "antd";
+import { Button, Dropdown, Modal, Space, Spin, Tooltip, Typography, Select, message, Tag } from "antd";
 import type { MenuProps } from "antd";
 import {
   PlayCircleOutlined,
@@ -50,6 +50,7 @@ import {
   StopDapProxy,
   SaveNotebookBreakpoints,
   LoadNotebookBreakpoints,
+  GetKernelPythonVersion,
 } from "../../../wailsjs/go/main/App";
 import { DapClient, type CellBreakpoints, type DebugVariable } from "./debugClient";
 import type { snowpark } from "../../../wailsjs/go/models";
@@ -139,11 +140,12 @@ let _pythonSnippetMenuRegistered = false;
 /** Tracks the most-recently right-clicked Python cell editor for snippet insertion. */
 let _lastPythonEditor: monacoLib.editor.ICodeEditor | null = null;
 
-import { useQueryStore } from "../../store/queryStore";
+import { useQueryStore, type QueryResult } from "../../store/queryStore";
 import { useThemeStore } from "../../store/themeStore";
 import { useSessionStore } from "../../store/sessionStore";
 import { useNotebookToolbarStore } from "../../store/notebookToolbarStore";
 import DeployNotebookModal from "./DeployNotebookModal";
+import ResultGrid from "../results/ResultGrid";
 
 const { Text } = Typography;
 
@@ -463,16 +465,26 @@ export default function NotebookTab({ tabId }: Props) {
     setRawNb(raw);
   }, [tab?.path, tab?.sql]); // tab?.sql triggers the initial parse after async disk refresh
 
-  // ── start kernel on mount, stop on unmount ────────────────────────────────
-  useEffect(() => {
+  // ── shared kernel start helper ────────────────────────────────────────────
+  const startKernel = useCallback(() => {
     setKernelStarting(true);
     setKernelError(null);
     StartNotebookSession(tabId)
-      .then(() => { setKernelReady(true); setKernelStarting(false); })
+      .then(() => {
+        setKernelReady(true);
+        setKernelStarting(false);
+        GetKernelPythonVersion(tabId).then((v) => {
+          if (v) useNotebookToolbarStore.getState().setKernelPythonVersion(v);
+        }).catch(() => {});
+      })
       .catch((e) => { setKernelError(String(e)); setKernelStarting(false); });
-
-    return () => { StopNotebookSession(tabId).catch(() => {}); };
   }, [tabId]);
+
+  // ── start kernel on mount, stop on unmount ────────────────────────────────
+  useEffect(() => {
+    startKernel();
+    return () => { StopNotebookSession(tabId).catch(() => {}); };
+  }, [tabId, startKernel]);
 
   // ── sync session context changes from Python cells back to the toolbar ────
   // When a Python cell runs session.sql("USE DATABASE X"), the Go backend syncs
@@ -753,38 +765,41 @@ export default function NotebookTab({ tabId }: Props) {
   const restartKernel = useCallback(async () => {
     await StopNotebookSession(tabId).catch(() => {});
     setKernelReady(false);
-    setKernelStarting(true);
-    setKernelError(null);
-    StartNotebookSession(tabId)
-      .then(() => { setKernelReady(true); setKernelStarting(false); })
-      .catch((e) => { setKernelError(String(e)); setKernelStarting(false); });
-  }, [tabId]);
+    startKernel();
+  }, [tabId, startKernel]);
   useEffect(() => { restartKernelRef.current = restartKernel; }, [restartKernel]);
 
+  const addCellOfKind = useCallback(
+    (afterId: string | undefined, kind: "code" | "sql" | "markdown") => {
+      const newCell: Cell = {
+        id: crypto.randomUUID(),
+        kind,
+        source: "",
+        outputs: [],
+        images: [],
+        sqlResult: null,
+        executionCount: null,
+        running: false,
+      };
+      setCells((prev) => {
+        let updated: Cell[];
+        if (!afterId) {
+          updated = [...prev, newCell];
+        } else {
+          const idx = prev.findIndex((c) => c.id === afterId);
+          updated = [...prev.slice(0, idx + 1), newCell, ...prev.slice(idx + 1)];
+        }
+        syncToStore(updated);
+        return updated;
+      });
+      setSelectedCellId(newCell.id);
+    },
+    [syncToStore],
+  );
+
   const addCell = useCallback((afterId?: string) => {
-    const newCell: Cell = {
-      id: crypto.randomUUID(),
-      kind: "code",
-      source: "",
-      outputs: [],
-      images: [],
-      sqlResult: null,
-      executionCount: null,
-      running: false,
-    };
-    setCells((prev) => {
-      let updated: Cell[];
-      if (!afterId) {
-        updated = [...prev, newCell];
-      } else {
-        const idx = prev.findIndex((c) => c.id === afterId);
-        updated = [...prev.slice(0, idx + 1), newCell, ...prev.slice(idx + 1)];
-      }
-      syncToStore(updated);
-      return updated;
-    });
-    setSelectedCellId(newCell.id);
-  }, [syncToStore]);
+    addCellOfKind(afterId, "code");
+  }, [addCellOfKind]);
 
   // ── Sync kernel state & callbacks to the unified toolbar store ────────────
   // Merged into a single effect to avoid transient states when switching tabs
@@ -794,7 +809,6 @@ export default function NotebookTab({ tabId }: Props) {
     store.setKernelState({ kernelReady, kernelStarting, kernelError });
     store.setCallbacks({
       onRestartKernel: restartKernel,
-      onAddCell: () => addCell(),
       onDeploy: () => {
         setDeployContent(serializeNotebook(rawNb, cellsRef.current));
         setDeployOpen(true);
@@ -931,17 +945,10 @@ export default function NotebookTab({ tabId }: Props) {
     return () => window.removeEventListener("keydown", handler);
   }, [addCell, addCellAbove, confirmDeleteCell, setCellKind]);
 
-  // ── styles ────────────────────────────────────────────────────────────────
-
-  const bg      = isDark ? "#1e1e1e" : "#ffffff";
-  const bgRaised = isDark ? "#252526" : "#f5f5f5";
-  const border  = isDark ? "#3c3c3c" : "#d9d9d9";
-  const textMuted = isDark ? "#8b949e" : "#6e7781";
-
   // ── render ────────────────────────────────────────────────────────────────
 
   return (
-    <div ref={containerRef} style={{ display: "flex", flexDirection: "column", height: "100%", background: bg, overflow: "hidden" }}>
+    <div ref={containerRef} style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg)", overflow: "hidden" }}>
 
       {/* Cell list */}
       <div style={{ flex: 1, overflowY: "auto", padding: "12px 0" }}>
@@ -957,41 +964,50 @@ export default function NotebookTab({ tabId }: Props) {
         )}
 
         {cells.map((cell, idx) => (
-          <CellView
-            key={cell.id}
-            tabId={tabId}
-            cell={cell}
-            isFirst={idx === 0}
-            isLast={idx === cells.length - 1}
-            kernelReady={kernelReady}
-            isDark={isDark}
-            border={border}
-            bgRaised={bgRaised}
-            textMuted={textMuted}
-            isSelected={selectedCellId === cell.id}
-            onRun={(code) => runCell(cell, code)}
-            onDebug={() => debugCell(cell)}
-            onDelete={() => confirmDeleteCell(cell.id)}
-            onMoveUp={() => moveCell(cell.id, -1)}
-            onMoveDown={() => moveCell(cell.id, 1)}
-            onSourceChange={(s) => updateSource(cell.id, s)}
-            onKindChange={(k) => setCellKind(cell.id, k)}
-            onAddAfter={() => addCell(cell.id)}
-            onSelect={() => setSelectedCellId(cell.id)}
-            onModelReady={(model) => cellModelsRef.current.set(cell.id, model)}
-            onModelDispose={() => cellModelsRef.current.delete(cell.id)}
-            breakpoints={breakpoints.get(cell.id) ?? new Set()}
-            onBreakpointToggle={(line) => toggleBreakpoint(cell.id, line)}
-            debugCurrentLine={debugState?.cellId === cell.id && debugState.stopped ? debugState.currentLine : undefined}
-          />
+          <Fragment key={cell.id}>
+            <CellView
+              tabId={tabId}
+              cell={cell}
+              isFirst={idx === 0}
+              isLast={idx === cells.length - 1}
+              kernelReady={kernelReady}
+              isDark={isDark}
+              isSelected={selectedCellId === cell.id}
+              onRun={(code) => runCell(cell, code)}
+              onDebug={() => debugCell(cell)}
+              onDelete={() => confirmDeleteCell(cell.id)}
+              onMoveUp={() => moveCell(cell.id, -1)}
+              onMoveDown={() => moveCell(cell.id, 1)}
+              onSourceChange={(s) => updateSource(cell.id, s)}
+              onKindChange={(k) => setCellKind(cell.id, k)}
+              onAddAfter={() => addCell(cell.id)}
+              onSelect={() => setSelectedCellId(cell.id)}
+              onModelReady={(model) => cellModelsRef.current.set(cell.id, model)}
+              onModelDispose={() => cellModelsRef.current.delete(cell.id)}
+              breakpoints={breakpoints.get(cell.id) ?? new Set()}
+              onBreakpointToggle={(line) => toggleBreakpoint(cell.id, line)}
+              debugCurrentLine={debugState?.cellId === cell.id && debugState.stopped ? debugState.currentLine : undefined}
+            />
+            {/* Hover-reveal add bar between every pair of cells (NOT after the
+                last one — that gets the permanent bar below). */}
+            {idx < cells.length - 1 && (
+              <AddCellBar onAdd={(kind) => addCellOfKind(cell.id, kind)} />
+            )}
+          </Fragment>
         ))}
+        {cells.length > 0 && (
+          <AddCellBar
+            permanent
+            onAdd={(kind) => addCellOfKind(cells[cells.length - 1].id, kind)}
+          />
+        )}
       </div>
 
       {/* Sticky debug bar — always visible at the bottom while a debug session is paused */}
       {debugState?.stopped && (
         <div style={{
           flexShrink: 0,
-          borderTop: `1px solid ${border}`,
+          borderTop: "1px solid var(--border)",
           background: isDark ? "#0d2137" : "#eff6ff",
           padding: "8px 12px 10px",
         }}>
@@ -1016,7 +1032,7 @@ export default function NotebookTab({ tabId }: Props) {
             </Space.Compact>
           </div>
           {!debugVarsCollapsed && (debugState.variables.length === 0 ? (
-            <span style={{ fontSize: 11, color: textMuted }}>No local variables</span>
+            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>No local variables</span>
           ) : (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 4, maxHeight: 120, overflowY: "auto" }}>
               {debugState.variables.map((v) => (
@@ -1024,8 +1040,8 @@ export default function NotebookTab({ tabId }: Props) {
                   <div
                     onClick={() => { ClipboardSetText(`${v.name} = ${v.value}`); message.success("Copied!", 1); }}
                     style={{
-                      background: isDark ? "#0a1929" : "#ffffff",
-                      border: `1px solid ${border}`,
+                      background: "var(--bg-overlay)",
+                      border: "1px solid var(--border)",
                       borderRadius: 4,
                       padding: "2px 8px",
                       fontFamily: "monospace",
@@ -1038,10 +1054,10 @@ export default function NotebookTab({ tabId }: Props) {
                     }}
                   >
                     <span style={{ color: isDark ? "#93c5fd" : "#1e40af" }}>{v.name}</span>
-                    <span style={{ color: textMuted }}> = </span>
-                    <span style={{ color: isDark ? "#d4d4d4" : "#1f2328" }}>{v.value}</span>
+                    <span style={{ color: "var(--text-muted)" }}> = </span>
+                    <span style={{ color: "var(--text)" }}>{v.value}</span>
                     {v.type && (
-                      <span style={{ color: textMuted, fontSize: 10 }}> ({v.type})</span>
+                      <span style={{ color: "var(--text-muted)", fontSize: 10 }}> ({v.type})</span>
                     )}
                   </div>
                 </Tooltip>
@@ -1059,80 +1075,6 @@ export default function NotebookTab({ tabId }: Props) {
         onClose={() => setDeployOpen(false)}
         onDeployed={() => setDeployOpen(false)}
       />
-    </div>
-  );
-}
-
-// ─── SqlResultTable ───────────────────────────────────────────────────────────
-
-function SqlResultTable({ result, isDark, border }: {
-  result: SqlResult;
-  isDark: boolean;
-  border: string;
-}) {
-  const MAX_ROWS = 1000;
-  const rows = result.rows.slice(0, MAX_ROWS);
-  const bgHead = isDark ? "#2d2d2d" : "#f0f0f0";
-  const bgRow  = isDark ? "#1e1e1e" : "#ffffff";
-  const bgAlt  = isDark ? "#252525" : "#fafafa";
-  const text   = isDark ? "#d4d4d4" : "#1f2328";
-
-  return (
-    <div style={{ borderTop: `1px solid ${border}`, overflow: "auto", maxHeight: 360 }}>
-      <table style={{
-        borderCollapse: "collapse",
-        fontSize: 12,
-        fontFamily: "monospace",
-        width: "max-content",
-        minWidth: "100%",
-      }}>
-        <thead>
-          <tr>
-            {result.columns.map((col) => (
-              <th key={col} style={{
-                padding: "4px 10px",
-                textAlign: "left",
-                background: bgHead,
-                color: text,
-                borderBottom: `1px solid ${border}`,
-                whiteSpace: "nowrap",
-                position: "sticky",
-                top: 0,
-                fontWeight: 600,
-              }}>
-                {col}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, ri) => (
-            <tr key={ri} style={{ background: ri % 2 === 0 ? bgRow : bgAlt }}>
-              {row.map((cell, ci) => (
-                <td key={ci} style={{
-                  padding: "3px 10px",
-                  color: text,
-                  borderBottom: `1px solid ${border}`,
-                  whiteSpace: "nowrap",
-                  maxWidth: 400,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}>
-                  {cell === null || cell === undefined ? (
-                    <span style={{ opacity: 0.4 }}>NULL</span>
-                  ) : String(cell)}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div style={{ padding: "4px 10px", fontSize: 11, color: isDark ? "#6e7781" : "#6e7781" }}>
-        {result.rows.length > MAX_ROWS
-          ? `Showing first ${MAX_ROWS} of ${result.rows.length} rows`
-          : `${result.rows.length} row${result.rows.length !== 1 ? "s" : ""}`}
-        {result.queryID ? `  ·  ${result.queryID}` : ""}
-      </div>
     </div>
   );
 }
@@ -1221,6 +1163,45 @@ function ensurePythonProviders(monaco: Monaco) {
   });
 }
 
+// ─── AddCellBar ───────────────────────────────────────────────────────────────
+
+function AddCellBar({
+  onAdd,
+  permanent = false,
+}: {
+  onAdd: (kind: "code" | "sql" | "markdown") => void;
+  permanent?: boolean;
+}) {
+  return (
+    <div className={"thaw-nb-add-row" + (permanent ? " permanent" : "")}>
+      <div className="thaw-nb-add-line" />
+      <div className="thaw-nb-add-buttons">
+        <button
+          className="thaw-nb-add-btn"
+          data-kind="code"
+          onClick={(e) => { e.stopPropagation(); onAdd("code"); }}
+        >
+          <span className="thaw-nb-add-dot" />+ Code
+        </button>
+        <button
+          className="thaw-nb-add-btn"
+          data-kind="sql"
+          onClick={(e) => { e.stopPropagation(); onAdd("sql"); }}
+        >
+          <span className="thaw-nb-add-dot" />+ SQL
+        </button>
+        <button
+          className="thaw-nb-add-btn"
+          data-kind="markdown"
+          onClick={(e) => { e.stopPropagation(); onAdd("markdown"); }}
+        >
+          <span className="thaw-nb-add-dot" />+ Markdown
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── CellView ─────────────────────────────────────────────────────────────────
 
 interface CellViewProps {
@@ -1230,9 +1211,6 @@ interface CellViewProps {
   isLast: boolean;
   kernelReady: boolean;
   isDark: boolean;
-  border: string;
-  bgRaised: string;
-  textMuted: string;
   isSelected: boolean;
   onRun: (code?: string) => void;
   onDebug?: () => void;
@@ -1254,14 +1232,34 @@ interface CellViewProps {
 }
 
 function CellView({
-  tabId, cell, isFirst, isLast, kernelReady, isDark, border, bgRaised, textMuted,
+  tabId, cell, isFirst, isLast, kernelReady, isDark,
   isSelected, onRun, onDebug, onDelete, onMoveUp, onMoveDown, onSourceChange, onKindChange,
   onAddAfter, onSelect, onModelReady, onModelDispose,
   breakpoints = new Set(), onBreakpointToggle,
   debugCurrentLine,
 }: CellViewProps) {
   const [focused, setFocused] = useState(false);
-  const accentColor = isDark ? "#40c8fc" : "#0969da";
+  
+  // Accent colour now comes from the per-kind CSS variable so SQL cells get
+  // teal, markdown cells get violet, and code cells stay on brand blue.
+  // ConfigProvider's `colorPrimary` is no longer hard-coded here.
+
+  const { editorFontSize, editorFont } = useThemeStore();
+
+  // Memoize by queryID (stable string) to avoid rebuilding the object when
+  // unrelated cells re-render (setCells rebuilds all cell references).
+  const sqlResult = cell.sqlResult;
+  const queryResult: QueryResult | null = useMemo(() => {
+    if (!sqlResult) return null;
+    return {
+      columns: sqlResult.columns,
+      rows: sqlResult.rows,
+      rowsAffected: sqlResult.rowCount,
+      queryID: sqlResult.queryID,
+      truncated: sqlResult.truncated,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sqlResult?.queryID]);
 
   // Decorations collection for breakpoint glyphs in the Monaco gutter.
   const decorationsRef = useRef<monacoLib.editor.IEditorDecorationsCollection | null>(null);
@@ -1498,211 +1496,247 @@ function CellView({
   };
 
   return (
-    <div style={{ margin: "0 20px 8px", position: "relative" }} onClick={onSelect}>
-      <div style={{
-        border: `1px solid ${(focused || isSelected) ? accentColor : border}`,
-        borderLeft: isSelected && !focused ? `3px solid ${accentColor}` : undefined,
-        borderRadius: 6,
-        overflow: "hidden",
-        transition: "border-color 0.15s",
-      }}>
-        {/* Cell header */}
-        <div style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 4,
-          padding: "2px 6px",
-          background: bgRaised,
-          borderBottom: `1px solid ${border}`,
-        }}>
-          {/* Execution count */}
-          <Text style={{ fontSize: 10, color: textMuted, fontFamily: "monospace", minWidth: 28 }}>
-            {cell.kind === "code"
-              ? (cell.executionCount !== null ? `[${cell.executionCount}]` : "[ ]")
-              : "md"}
-          </Text>
+    <div onClick={onSelect}>
+      <div
+        className="thaw-nb-cell"
+        data-kind={cell.kind}
+        data-selected={focused || isSelected}
+      >
+        {/* Left gutter — execution count + kind tag */}
+        <div className="thaw-nb-cell-gutter">
+          <span className="thaw-nb-count">
+            {cell.running ? "[*]"
+             : cell.executionCount != null ? `[${cell.executionCount}]`
+             : ""}
+          </span>
+          <span className="thaw-nb-kind-tag">
+            {cell.kind === "code" ? "PY" : cell.kind === "sql" ? "SQL" : "MD"}
+          </span>
+        </div>
 
-          {/* Cell type selector */}
-          <Select
-            size="small"
-            value={cell.kind}
-            onChange={onKindChange}
-            style={{ width: 88, fontSize: 11 }}
-            options={[
-              { value: "code",     label: "Code" },
-              { value: "markdown", label: "Markdown" },
-              { value: "sql",      label: "SQL" },
-            ]}
-          />
+        {/* Body — toolbar / editor / outputs */}
+        <div className="thaw-nb-cell-body">
+          {/* Cell header */}
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+            padding: "2px 6px",
+            background: "var(--bg-raised)",
+            borderBottom: "1px solid var(--border)",
+          }}>
+            {/* Cell type selector */}
+            <Select
+              size="small"
+              value={cell.kind}
+              onChange={onKindChange}
+              style={{ width: 88, fontSize: 11 }}
+              options={[
+                { value: "code",     label: "Code" },
+                { value: "markdown", label: "Markdown" },
+                { value: "sql",      label: "SQL" },
+              ]}
+            />
 
-          <div style={{ flex: 1 }} />
+            <div style={{ flex: 1 }} />
 
-          {/* Run + optional debug dropdown (code cells only) */}
-          <Button.Group>
-            <Tooltip title="Run cell (Shift+Enter) · Run selection (select text, then Shift+Enter)">
-              <Button
-                type="text"
-                size="small"
-                icon={cell.running ? <Spin size="small" /> : <PlayCircleOutlined />}
-                disabled={cell.kind === "markdown" || (cell.kind === "code" && !kernelReady)}
-                onClick={() => onRun()}
-                style={{ color: accentColor }}
-              />
-            </Tooltip>
-            {cell.kind === "code" && onDebug && (
-              <Dropdown
-                trigger={["click"]}
-                disabled={!kernelReady || cell.running}
-                menu={{
-                  items: [
-                    {
-                      key: "debug",
-                      label: "Debug cell",
-                      icon: <BugOutlined />,
-                      onClick: onDebug,
-                    },
-                  ] satisfies MenuProps["items"],
-                }}
-              >
+            {/* Toolbar — arranged in three logical groups separated by hairlines */}
+            <div className="thaw-nb-btn-group">
+              <Tooltip title="Run cell (Shift+Enter) · Run selection (select text, then Shift+Enter)">
                 <Button
                   type="text"
-                  size="small"
-                  icon={<DownOutlined style={{ fontSize: 8 }} />}
-                  style={{ padding: "0 3px", color: textMuted }}
-                  disabled={!kernelReady || cell.running}
+                  className="thaw-nb-icon-btn run"
+                  icon={cell.running ? <Spin size="small" /> : <PlayCircleOutlined />}
+                  disabled={cell.kind === "markdown" || (cell.kind === "code" && !kernelReady)}
+                  onClick={() => onRun()}
                 />
-              </Dropdown>
-            )}
-          </Button.Group>
-          <Tooltip title="Move up">
-            <Button type="text" size="small" icon={<CaretUpOutlined />}
-              disabled={isFirst} onClick={onMoveUp} />
-          </Tooltip>
-          <Tooltip title="Move down">
-            <Button type="text" size="small" icon={<CaretDownOutlined />}
-              disabled={isLast} onClick={onMoveDown} />
-          </Tooltip>
-          <Tooltip title="Add cell below">
-            <Button type="text" size="small" icon={<PlusOutlined />} onClick={onAddAfter} />
-          </Tooltip>
-          <Tooltip title="Delete cell">
-            <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={onDelete} />
-          </Tooltip>
-        </div>
+              </Tooltip>
+              {cell.kind === "code" && onDebug && (
+                <Dropdown
+                  trigger={["click"]}
+                  disabled={!kernelReady || cell.running}
+                  menu={{
+                    items: [
+                      {
+                        key: "debug",
+                        label: "Debug cell",
+                        icon: <BugOutlined />,
+                        onClick: onDebug,
+                      },
+                    ] satisfies MenuProps["items"],
+                  }}
+                >
+                  <Button
+                    type="text"
+                    className="thaw-nb-icon-btn"
+                    icon={<DownOutlined style={{ fontSize: 8 }} />}
+                    disabled={!kernelReady || cell.running}
+                  />
+                </Dropdown>
+              )}
+            </div>
 
-        {/* Source editor — Monaco */}
-        <div style={{ height: editorHeight }}>
-          <Editor
-            key={`${cell.id}:${cell.kind}`}
-            defaultValue={cell.source}
-            language={cell.kind === "sql" ? "sql" : cell.kind === "code" ? "python" : "markdown"}
-            theme={isDark ? "thaw-dark" : "thaw-light"}
-            beforeMount={handleBeforeMount}
-            onMount={handleMount}
-            onChange={(v) => onSourceChange(v ?? "")}
-            options={{
-              fontSize: 13,
-              fontFamily: "\"JetBrains Mono\", \"Fira Code\", \"Cascadia Code\", monospace",
-              minimap: { enabled: false },
-              lineNumbers: cell.kind === "code" ? "on" : "off",
-              lineNumbersMinChars: 2,
-              glyphMargin: cell.kind === "code",
-              scrollBeyondLastLine: false,
-              wordWrap: "on",
-              scrollbar: {
-                vertical: "hidden",
-                horizontal: "hidden",
-                alwaysConsumeMouseWheel: false,
-              },
-              overviewRulerLanes: 0,
-              overviewRulerBorder: false,
-              renderLineHighlight: "none",
-              padding: { top: 8, bottom: 8 },
-              automaticLayout: true,
-              fixedOverflowWidgets: true,
-            }}
-          />
-        </div>
+            <div className="thaw-nb-btn-sep" />
 
-        {/* Code cell outputs */}
-        {cell.kind === "code" && (cell.outputs.length > 0 || cell.images.length > 0) && (
-          <div style={{ borderTop: `1px solid ${border}`, background: isDark ? "#1a1a1a" : "#fafafa" }}>
-            {cell.outputs.map((out, i) => (
-              <div key={i} style={{ position: "relative" }}>
-                <pre style={{
+            <div className="thaw-nb-btn-group">
+              <Tooltip title="Move up">
+                <Button type="text" className="thaw-nb-icon-btn nav" icon={<CaretUpOutlined />} disabled={isFirst} onClick={onMoveUp} />
+              </Tooltip>
+              <Tooltip title="Move down">
+                <Button type="text" className="thaw-nb-icon-btn nav" icon={<CaretDownOutlined />} disabled={isLast} onClick={onMoveDown} />
+              </Tooltip>
+              <Tooltip title="Add cell below">
+                <Button type="text" className="thaw-nb-icon-btn" icon={<PlusOutlined />} onClick={onAddAfter} />
+              </Tooltip>
+            </div>
+
+            <div className="thaw-nb-btn-sep" />
+
+            <Tooltip title="Delete cell">
+              <Button type="text" className="thaw-nb-icon-btn danger" icon={<DeleteOutlined />} onClick={onDelete} />
+            </Tooltip>
+          </div>
+
+          {/* Source editor — Monaco */}
+          <div style={{ height: editorHeight }}>
+            <Editor
+              key={`${cell.id}:${cell.kind}`}
+              defaultValue={cell.source}
+              language={cell.kind === "sql" ? "sql" : cell.kind === "code" ? "python" : "markdown"}
+              theme={isDark ? "thaw-dark" : "thaw-light"}
+              beforeMount={handleBeforeMount}
+              onMount={handleMount}
+              onChange={(v) => onSourceChange(v ?? "")}
+              options={{
+                fontSize: editorFontSize,
+                fontFamily: editorFont || "\"JetBrains Mono\", \"Fira Code\", \"Cascadia Code\", monospace",
+                minimap: { enabled: false },
+                lineNumbers: cell.kind === "code" ? "on" : "off",
+                lineNumbersMinChars: 2,
+                glyphMargin: cell.kind === "code",
+                scrollBeyondLastLine: false,
+                wordWrap: "on",
+                scrollbar: {
+                  vertical: "hidden",
+                  horizontal: "hidden",
+                  alwaysConsumeMouseWheel: false,
+                },
+                overviewRulerLanes: 0,
+                overviewRulerBorder: false,
+                renderLineHighlight: "none",
+                padding: { top: 8, bottom: 8 },
+                automaticLayout: true,
+                fixedOverflowWidgets: true,
+              }}
+            />
+          </div>
+
+          {/* Code cell outputs */}
+          {cell.kind === "code" && (cell.outputs.length > 0 || cell.images.length > 0) && (
+            <div className="thaw-nb-output-area">
+              {cell.outputs.map((out, i) => (
+                <div key={i} style={{ position: "relative" }}>
+                  <pre style={{
+                    margin: 0,
+                    padding: "6px 36px 6px 10px",
+                    fontFamily: "monospace",
+                    fontSize: 12,
+                    lineHeight: "1.5",
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    background: "transparent",
+                    color: out.type === "error"  ? "var(--cell-output-error)"
+                         : out.type === "stderr" ? "var(--cell-output-stderr)"
+                         : "var(--cell-output-stdout)",
+                  }}>
+                    {out.text}
+                  </pre>
+                  <Tooltip title="Copy output">
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<CopyOutlined />}
+                      onClick={() => ClipboardSetText(out.text)}
+                      style={{ position: "absolute", top: 4, right: 4, opacity: 0.45, fontSize: 11 }}
+                    />
+                  </Tooltip>
+                </div>
+              ))}
+              {cell.images.map((b64, i) => (
+                <div key={`img-${i}`} style={{ padding: "8px 10px" }}>
+                  <img
+                    src={`data:image/png;base64,${b64}`}
+                    alt={`plot ${i + 1}`}
+                    style={{ maxWidth: "100%", display: "block", borderRadius: 4 }}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* SQL cell error output */}
+          {cell.kind === "sql" && cell.outputs.length > 0 && (
+            <div style={{ borderTop: "1px solid var(--border)" }}>
+              {cell.outputs.map((out, i) => (
+                <pre key={i} style={{
                   margin: 0,
-                  padding: "6px 36px 6px 10px",
+                  padding: "6px 10px",
                   fontFamily: "monospace",
                   fontSize: 12,
-                  lineHeight: "1.5",
                   whiteSpace: "pre-wrap",
                   wordBreak: "break-word",
-                  background: "transparent",
-                  color: out.type === "error"  ? "#ff4d4f"
-                       : out.type === "stderr" ? "#e6a817"
-                       : isDark ? "#d4d4d4" : "#1f2328",
+                  background: "var(--cell-output-bg)",
+                  color: "var(--cell-output-error)",
                 }}>
                   {out.text}
                 </pre>
-                <Tooltip title="Copy output">
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<CopyOutlined />}
-                    onClick={() => ClipboardSetText(out.text)}
-                    style={{ position: "absolute", top: 4, right: 4, opacity: 0.45, fontSize: 11 }}
-                  />
-                </Tooltip>
-              </div>
-            ))}
-            {cell.images.map((b64, i) => (
-              <div key={`img-${i}`} style={{ padding: "8px 10px" }}>
-                <img
-                  src={`data:image/png;base64,${b64}`}
-                  alt={`plot ${i + 1}`}
-                  style={{ maxWidth: "100%", display: "block", borderRadius: 4 }}
-                />
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
 
-        {/* SQL cell error output */}
-        {cell.kind === "sql" && cell.outputs.length > 0 && (
-          <div style={{ borderTop: `1px solid ${border}` }}>
-            {cell.outputs.map((out, i) => (
-              <pre key={i} style={{
-                margin: 0,
-                padding: "6px 10px",
-                fontFamily: "monospace",
-                fontSize: 12,
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-                background: isDark ? "#1a1a1a" : "#fafafa",
-                color: "#ff4d4f",
+          {/* SQL result table */}
+          {cell.kind === "sql" && queryResult && queryResult.columns.length > 0 && (
+            <>
+              <div style={{ borderTop: "1px solid var(--border)", height: 360, overflow: "hidden" }}>
+                <ResultGrid result={queryResult} standalone />
+              </div>
+              <div style={{
+                padding: "4px 10px",
+                fontSize: 11,
+                color: "var(--text-muted)",
+                background: "var(--bg-raised)",
+                borderTop: "1px solid var(--border)",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
               }}>
-                {out.text}
-              </pre>
-            ))}
-          </div>
-        )}
-
-        {/* SQL result table */}
-        {cell.kind === "sql" && cell.sqlResult && cell.sqlResult.columns.length > 0 && (
-          <SqlResultTable result={cell.sqlResult} isDark={isDark} border={border} />
-        )}
-        {cell.kind === "sql" && cell.sqlResult && cell.sqlResult.columns.length === 0 && (
-          <div style={{
-            borderTop: `1px solid ${border}`,
-            padding: "6px 10px",
-            fontSize: 12,
-            color: textMuted,
-            fontFamily: "monospace",
-          }}>
-            OK — {cell.sqlResult.rowCount} row{cell.sqlResult.rowCount !== 1 ? "s" : ""} affected
-            {cell.sqlResult.queryID ? `  ·  ${cell.sqlResult.queryID}` : ""}
-          </div>
-        )}
+                <span>
+                  {queryResult.truncated
+                    ? `${queryResult.rowsAffected.toLocaleString()}+ rows`
+                    : `${queryResult.rowsAffected} row${queryResult.rowsAffected !== 1 ? "s" : ""}`}
+                </span>
+                {queryResult.truncated && (
+                  <Tag color="orange" style={{ fontSize: 10, lineHeight: "16px", padding: "0 5px", border: "none" }}>truncated</Tag>
+                )}
+                {queryResult.queryID && (
+                  <span style={{ opacity: 0.7 }}>  ·  {queryResult.queryID}</span>
+                )}
+              </div>
+            </>
+          )}
+          {cell.kind === "sql" && cell.sqlResult && cell.sqlResult.columns.length === 0 && (
+            <div style={{
+              borderTop: "1px solid var(--border)",
+              padding: "6px 10px",
+              fontSize: 12,
+              color: "var(--text-muted)",
+              fontFamily: "monospace",
+            }}>
+              OK — {cell.sqlResult.rowCount} row{cell.sqlResult.rowCount !== 1 ? "s" : ""} affected
+              {cell.sqlResult.queryID ? `  ·  ${cell.sqlResult.queryID}` : ""}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Button, Dropdown, Space, Typography, Alert, Spin, Tag, Select, Tooltip, message, Modal, type MenuProps } from "antd";
-import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, SearchOutlined } from "@ant-design/icons";
+import { CopyOutlined, FileTextOutlined, FileExcelOutlined, PushpinOutlined, PushpinFilled, CloseOutlined, LayoutOutlined, GlobalOutlined, BarChartOutlined, SearchOutlined, CloudUploadOutlined } from "@ant-design/icons";
 import * as XLSX from "xlsx";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
 import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession } from "../../wailsjs/go/main/App";
@@ -46,7 +46,7 @@ import { useFeatureFlagsStore } from "../store/featureFlagsStore";
 import { useNotebookToolbarStore } from "../store/notebookToolbarStore";
 import { useGridStore } from "../store/gridStore";
 import Toolbar from "../components/toolbar/Toolbar";
-import { notebookButtons, NotebookStatusIndicator } from "../components/toolbar/NotebookToolbarSlot";
+import { NotebookToolbarSlot } from "../components/notebook/NotebookToolbarSlot";
 
 const { Text } = Typography;
 
@@ -910,13 +910,13 @@ export default function QueryPage() {
   };
 
   // ── Notebook toolbar state (read from store, bridged by NotebookTab) ──────
-  const nbKernelReady    = useNotebookToolbarStore((s) => s.kernelReady);
-  const nbKernelStarting = useNotebookToolbarStore((s) => s.kernelStarting);
-  const nbKernelError    = useNotebookToolbarStore((s) => s.kernelError);
-  const nbOnRestartKernel = useNotebookToolbarStore((s) => s.onRestartKernel);
-  const nbOnAddCell       = useNotebookToolbarStore((s) => s.onAddCell);
-  const nbOnDeploy        = useNotebookToolbarStore((s) => s.onDeploy);
-  const nbOnRunAll        = useNotebookToolbarStore((s) => s.onRunAll);
+  const nbKernelReady         = useNotebookToolbarStore((s) => s.kernelReady);
+  const nbKernelStarting      = useNotebookToolbarStore((s) => s.kernelStarting);
+  const nbKernelError         = useNotebookToolbarStore((s) => s.kernelError);
+  const nbKernelPythonVersion = useNotebookToolbarStore((s) => s.kernelPythonVersion);
+  const nbOnRestartKernel     = useNotebookToolbarStore((s) => s.onRestartKernel);
+  const nbOnDeploy            = useNotebookToolbarStore((s) => s.onDeploy);
+  const nbOnRunAll            = useNotebookToolbarStore((s) => s.onRunAll);
 
   const handleNewNotebook = () => {
     const blank = JSON.stringify({
@@ -931,14 +931,26 @@ export default function QueryPage() {
     openNotebookUnsaved("Untitled Notebook", blank);
   };
 
-  const nbSlotProps = isNotebookTab && nbOnRestartKernel && nbOnAddCell && nbOnDeploy ? {
+  const nbSlotProps = isNotebookTab && nbOnRestartKernel ? {
     kernelReady: nbKernelReady,
     kernelStarting: nbKernelStarting,
     kernelError: nbKernelError,
+    kernelName: nbKernelPythonVersion ? `Python ${nbKernelPythonVersion}` : undefined,
     onRestartKernel: nbOnRestartKernel,
-    onAddCell: nbOnAddCell,
-    onDeploy: nbOnDeploy,
   } : null;
+
+  const deployButton = isNotebookTab && nbOnDeploy ? (
+    <Tooltip title="Deploy notebook to Snowflake">
+      <Button
+        className="thaw-tb-vstack-primary"
+        aria-label="Deploy notebook"
+        icon={<CloudUploadOutlined />}
+        onClick={nbOnDeploy}
+      >
+        Deploy
+      </Button>
+    </Tooltip>
+  ) : undefined;
 
   return (
     <div data-query-layout style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg)" }}>
@@ -957,8 +969,8 @@ export default function QueryPage() {
         onNewSql={openScratch}
         onNewNotebook={handleNewNotebook}
         onSave={handleSave}
-        contextButtons={nbSlotProps ? notebookButtons(nbSlotProps) : undefined}
-        contextStatus={nbSlotProps ? <NotebookStatusIndicator {...nbSlotProps} /> : undefined}
+        contextSlot={nbSlotProps ? <NotebookToolbarSlot {...nbSlotProps} /> : undefined}
+        primaryAction={deployButton}
       />
 
       {/* Session error banner (role/warehouse switch failures) */}
