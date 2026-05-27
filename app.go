@@ -2762,16 +2762,6 @@ func (a *App) ListBasicObjects(database, schema string) ([]snowflake.SnowflakeOb
 	return a.client.ListBasicObjects(a.ctx, database, schema)
 }
 
-// ListExtendedObjects returns extended objects (PROCEDURE, FUNCTION, TASK,
-// STREAM, STAGE, FILE FORMAT, PIPE, NOTEBOOK, SECRET, GIT REPOSITORY) inside
-// a schema via dedicated SHOW commands.
-func (a *App) ListExtendedObjects(database, schema string) ([]snowflake.SnowflakeObject, error) {
-	if a.client == nil {
-		return nil, apperrors.ErrNotConnected
-	}
-	return a.client.ListExtendedObjects(a.ctx, database, schema)
-}
-
 // ClearObjectCache removes all cached object listings from the Snowflake client,
 // forcing the next ListObjects/ListBasicObjects call to re-query Snowflake.
 func (a *App) ClearObjectCache() {
@@ -2788,15 +2778,6 @@ func (a *App) ClearObjectCacheForDatabase(database string) {
 		return
 	}
 	a.client.ClearObjectCacheForDatabase(database)
-}
-
-// ClearObjectCacheForSchema removes cached object listings for a specific
-// database.schema, forcing the next call to re-query Snowflake.
-func (a *App) ClearObjectCacheForSchema(database, schema string) {
-	if a.client == nil {
-		return
-	}
-	a.client.ClearObjectCacheForSchema(database, schema)
 }
 
 // GetDatabaseRetentionDays returns the DATA_RETENTION_TIME_IN_DAYS parameter

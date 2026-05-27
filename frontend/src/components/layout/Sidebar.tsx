@@ -638,8 +638,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     doLoadDatabases();
   };
 
-  const refreshAllDatabases = () => {
-    ClearObjectCache();
+  const refreshAllDatabases = async () => {
+    await ClearObjectCache();
     setLoaded(false);
     setTreeData([]);
     setSearchQuery("");
@@ -988,8 +988,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     }
   };
 
-  const refreshDatabaseByName = (db: string) => {
-    ClearObjectCacheForDatabase(db);
+  const refreshDatabaseByName = async (db: string) => {
+    await ClearObjectCacheForDatabase(db);
     const dbKey = `db:${db}`;
     useObjectStore.getState().clearDatabase(db);
     // Stripping the children array is enough: onExpand will re-trigger

@@ -2915,7 +2915,11 @@ func (c *Client) getObjectCache(key string) ([]SnowflakeObject, bool) {
 	if time.Since(entry.ts) > objectCacheTTL {
 		c.objectCacheMu.RUnlock()
 		c.objectCacheMu.Lock()
-		delete(c.objectCache, key)
+		// Re-check: another goroutine may have written a fresh entry
+		// between RUnlock and Lock.
+		if e, ok := c.objectCache[key]; ok && time.Since(e.ts) > objectCacheTTL {
+			delete(c.objectCache, key)
+		}
 		c.objectCacheMu.Unlock()
 		return nil, false
 	}

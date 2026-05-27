@@ -101,8 +101,6 @@ export function ClearObjectCache():Promise<void>;
 
 export function ClearObjectCacheForDatabase(arg1:string):Promise<void>;
 
-export function ClearObjectCacheForSchema(arg1:string,arg2:string):Promise<void>;
-
 export function CloneChildTask(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean,arg6:Array<string>):Promise<void>;
 
 export function CloneProfile(arg1:string,arg2:string):Promise<void>;
@@ -424,8 +422,6 @@ export function ListDroppedTables(arg1:string,arg2:string):Promise<Array<snowfla
 export function ListEnvPackages():Promise<Array<snowpark.PackageInfo>>;
 
 export function ListExportableDatabases():Promise<Array<string>>;
-
-export function ListExtendedObjects(arg1:string,arg2:string):Promise<Array<snowflake.SnowflakeObject>>;
 
 export function ListExternalVolumes():Promise<Array<string>>;
 

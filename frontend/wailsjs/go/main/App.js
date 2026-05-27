@@ -162,10 +162,6 @@ export function ClearObjectCacheForDatabase(arg1) {
   return window['go']['main']['App']['ClearObjectCacheForDatabase'](arg1);
 }
 
-export function ClearObjectCacheForSchema(arg1, arg2) {
-  return window['go']['main']['App']['ClearObjectCacheForSchema'](arg1, arg2);
-}
-
 export function CloneChildTask(arg1, arg2, arg3, arg4, arg5, arg6) {
   return window['go']['main']['App']['CloneChildTask'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
@@ -808,10 +804,6 @@ export function ListEnvPackages() {
 
 export function ListExportableDatabases() {
   return window['go']['main']['App']['ListExportableDatabases']();
-}
-
-export function ListExtendedObjects(arg1, arg2) {
-  return window['go']['main']['App']['ListExtendedObjects'](arg1, arg2);
 }
 
 export function ListExternalVolumes() {

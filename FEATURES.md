@@ -136,7 +136,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Fetch** — right-click a git repository and choose **Fetch** to run `ALTER GIT REPOSITORY … FETCH`; displays a loading toast during the operation and a success or error message on completion
   - **Modify** — pre-fills current API integration, git credentials, and comment from `DESCRIBE GIT REPOSITORY`; generates correct `ALTER GIT REPOSITORY … SET` and `UNSET` statements (credentials and comment can be cleared via UNSET; API_INTEGRATION can only be SET); live SQL preview; multi-statement execution
   - **Properties** — right-click and choose **Properties** to view `DESCRIBE GIT REPOSITORY` output in the properties panel
-- **Search** — filter objects by name across all databases and schemas in real time
+- **Search** — filter objects by name across all databases and schemas in real time; for previously expanded schemas all object types are searched instantly (no network call); for schemas not yet expanded, a fast path returns tables, views, and sequences only — extended types (procedures, tasks, stages, etc.) appear after manually expanding the schema
 - **Right-click procedures** to open a parameter dialog; clicking **Execute** generates the `CALL` statement, opens a new tab, and runs it immediately — no manual Run press needed
 - **Right-click functions** (**Call Function…**) to open a parameter dialog; detects scalar vs. table functions and generates the correct SQL; clicking **Execute** opens a new tab and runs it immediately
 - **View Dependencies…** (views, procedures, functions) — right-click any view, procedure, or function and choose **View Dependencies…** to open a recursive dependency tree built by parsing DDL:
