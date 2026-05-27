@@ -54,8 +54,6 @@ import {
   DisconnectOutlined,
   BranchesOutlined,
   CloseOutlined,
-  EllipsisOutlined,
-  LoadingOutlined,
 } from "@ant-design/icons";
 import {
   objectIcon,
@@ -67,7 +65,7 @@ import {
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListBasicObjects, ListExtendedObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, UploadFileToStage, PickOpenFile, ExecDDL } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, UploadFileToStage, PickOpenFile, ExecDDL } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -485,9 +483,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [loadingGitNodes, setLoadingGitNodes] = useState<Set<string>>(new Set());
   const [loadingTreeNodes, setLoadingTreeNodes] = useState<Set<string>>(new Set());
   const searchWasActive = useRef(false);
-  // Two-tier object loading: tracks which schemas have had extended objects loaded/are loading.
-  const extendedLoadedSchemas  = useRef<Set<string>>(new Set());
-  const [extendedLoadingSchemas, setExtendedLoadingSchemas] = useState<Set<string>>(new Set());
   const ctxRef = useRef<HTMLDivElement>(null);
 
   const pendingDiff   = useDiffStore((s) => s.pending);
@@ -649,8 +644,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     searchWasActive.current = false;
     loadingNodes.current.clear();
     setLoadingTreeNodes(new Set());
-    extendedLoadedSchemas.current.clear();
-    setExtendedLoadingSchemas(new Set());
     useObjectStore.getState().setDatabases([]);
     doLoadDatabases();
   };
@@ -691,7 +684,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       const [, db, schema] = parts;
       setLoadingTreeNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
       try {
-        const objects = await ListBasicObjects(db, schema);
+        const objects = await ListObjects(db, schema);
 
         const groups: Record<string, typeof objects> = {};
         for (const obj of objects) {
@@ -720,17 +713,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                 rowCount:  o.rowCount,
               })),
         }));
-
-        // Append a "Show more objects..." node if extended objects haven't been loaded yet.
-        const schemaKey = `${db}:${schema}`;
-        if (!extendedLoadedSchemas.current.has(schemaKey)) {
-          typeNodes.push({
-            title: "Show more objects...",
-            key: `showmore:${db}:${schema}`,
-            icon: <EllipsisOutlined style={{ fontSize: 12, color: "var(--text-muted)" }} />,
-            isLeaf: true,
-          });
-        }
 
         setData((prev) => updateNode(prev, key, typeNodes));
         if (!commit) useObjectStore.getState().addObjects(db, schema, objects.map((o) => ({ name: o.name, kind: (o.kind || "OTHER").toUpperCase() })));
@@ -964,7 +946,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const onRightClick = ({ event, node }: { event: React.MouseEvent; node: DataNode }) => {
     event.preventDefault();
     const key = String(node.key);
-    if (key.startsWith("showmore:")) return; // no context menu for "Show more objects..."
     if (key.startsWith("db:")) {
       setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "db" });
     } else if (key.startsWith("schema:")) {
@@ -992,118 +973,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const refreshDatabaseByName = (db: string) => {
     const dbKey = `db:${db}`;
     useObjectStore.getState().clearDatabase(db);
-    // Clear extended-loaded state for all schemas under this database.
-    for (const k of extendedLoadedSchemas.current) {
-      if (k.startsWith(`${db}:`)) extendedLoadedSchemas.current.delete(k);
-    }
-    setExtendedLoadingSchemas((prev) => {
-      const s = new Set(prev);
-      for (const k of s) { if (k.startsWith(`${db}:`)) s.delete(k); }
-      return s;
-    });
     // Stripping the children array is enough: onExpand will re-trigger
     // onLoadData when the user next expands this database.
     setTreeData((prev) => clearNodeChildren(prev, dbKey));
-  };
-
-  // Load extended objects (PROCEDURE, FUNCTION, TASK, etc.) for a schema and
-  // merge them into the existing tree nodes.
-  const loadExtendedObjects = async (db: string, schema: string) => {
-    const schemaKey = `${db}:${schema}`;
-    if (extendedLoadedSchemas.current.has(schemaKey)) return;
-    if (extendedLoadingSchemas.has(schemaKey)) return;
-
-    setExtendedLoadingSchemas((prev) => { const s = new Set(prev); s.add(schemaKey); return s; });
-    try {
-      const objects = await ListExtendedObjects(db, schema);
-
-      // Merge into the tree: build type-group nodes for extended kinds and
-      // append them to the schema's existing children.
-      const schemaNodeKey = `schema:${db}:${schema}`;
-      const mergeIntoTree = (prev: DataNode[]): DataNode[] =>
-        prev.map((node) => {
-          if (node.key === schemaNodeKey) {
-            const existing = ((node as any).children ?? []) as DataNode[];
-            // Build a set of existing kind|name for deduplication.
-            const existingSet = new Set<string>();
-            for (const typeNode of existing) {
-              const tk = String(typeNode.key);
-              if (tk.startsWith("type:")) {
-                for (const child of ((typeNode as any).children ?? []) as DataNode[]) {
-                  const ck = String(child.key);
-                  if (ck.startsWith("obj:")) {
-                    const ckParts = ck.split(":");
-                    existingSet.add(`${ckParts[3]}|${ckParts.slice(4).join(":")}`);
-                  }
-                }
-              }
-            }
-
-            // Group extended objects by kind, deduplicating against existing.
-            const groups: Record<string, typeof objects> = {};
-            for (const obj of objects) {
-              const k = (obj.kind || "OTHER").toUpperCase();
-              const dedup = `${k}|${obj.name}`;
-              if (existingSet.has(dedup)) continue;
-              if (!groups[k]) groups[k] = [];
-              groups[k].push(obj);
-            }
-
-            // Build new type-group nodes for extended kinds.
-            const sortedKinds = [
-              ...KIND_ORDER.filter((k) => groups[k]),
-              ...Object.keys(groups).filter((k) => !KIND_ORDER.includes(k)).sort(),
-            ];
-            const newTypeNodes: DataNode[] = sortedKinds.map((kind) => ({
-              title:    KIND_LABEL[kind] ?? kind,
-              key:      `type:${db}:${schema}:${kind}`,
-              icon:     typeGroupIcon(),
-              children: kind === "TASK"
-                ? buildTaskTree(groups[kind], db, schema)
-                : groups[kind].map((o) => ({
-                    title:     o.name,
-                    key:       `obj:${db}:${schema}:${kind}:${o.name}`,
-                    icon:      kindIcon(kind),
-                    isLeaf:    kind !== "TABLE" && kind !== "VIEW" && kind !== "GIT REPOSITORY",
-                    arguments: o.arguments ?? "",
-                    rowCount:  o.rowCount,
-                  })),
-            }));
-
-            // Merge: keep existing type-group nodes (skip showmore), append new ones, re-sort.
-            const merged = [
-              ...existing.filter((n) => !String(n.key).startsWith("showmore:")),
-              ...newTypeNodes,
-            ];
-            merged.sort((a, b) => {
-              const aKind = String(a.key).split(":")[3] ?? "";
-              const bKind = String(b.key).split(":")[3] ?? "";
-              const ai = KIND_ORDER.indexOf(aKind);
-              const bi = KIND_ORDER.indexOf(bKind);
-              return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
-            });
-
-            return { ...node, children: merged };
-          }
-          if ((node as any).children) {
-            return { ...node, children: mergeIntoTree((node as any).children) };
-          }
-          return node;
-        });
-
-      setTreeData(mergeIntoTree);
-      // Also merge into searchResults if search is active.
-      if (searchWasActive.current) {
-        setSearchResults(mergeIntoTree);
-      }
-
-      useObjectStore.getState().mergeObjects(db, schema, objects.map((o) => ({ name: o.name, kind: (o.kind || "OTHER").toUpperCase() })));
-      extendedLoadedSchemas.current.add(schemaKey);
-    } catch {
-      // Extended objects failed — silently ignore. Basic objects are already shown.
-    } finally {
-      setExtendedLoadingSchemas((prev) => { const s = new Set(prev); s.delete(schemaKey); return s; });
-    }
   };
 
   const refreshDatabase = () => {
@@ -2363,12 +2235,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                  const { nativeEvent, node } = info;
                  const key = String(node.key);
 
-                 if (key.startsWith("showmore:")) {
-                   const [, smDb, smSchema] = key.split(":");
-                   loadExtendedObjects(smDb, smSchema);
-                   return;
-                 }
-
                  if (key.startsWith("gitcommit-empty:")) {
                    const parts = key.split(":");
                    setGitCommitFilterModal({ db: parts[1], schema: parts[2], name: parts[3] });
@@ -2433,29 +2299,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                     );
                   }
                   return node.title as React.ReactNode;
-                }
-                if (key.startsWith("showmore:")) {
-                  const [, smDb, smSchema] = key.split(":");
-                  const smKey = `${smDb}:${smSchema}`;
-                  const isLoadingExt = extendedLoadingSchemas.has(smKey);
-                  return (
-                    <span
-                      style={{ color: "var(--text-muted)", cursor: "pointer", fontStyle: "italic", fontSize: 12 }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        loadExtendedObjects(smDb, smSchema);
-                      }}
-                    >
-                      {isLoadingExt ? (
-                        <Space size={4}>
-                          <span>Loading extended objects...</span>
-                          <LoadingOutlined style={{ fontSize: 10 }} />
-                        </Space>
-                      ) : (
-                        "Show more objects..."
-                      )}
-                    </span>
-                  );
                 }
                 if (key.startsWith("obj:")) {
                   const parts = key.split(":");
