@@ -154,6 +154,14 @@ export function ClearDefaultProfile() {
   return window['go']['main']['App']['ClearDefaultProfile']();
 }
 
+export function ClearObjectCache() {
+  return window['go']['main']['App']['ClearObjectCache']();
+}
+
+export function ClearObjectCacheForSchema(arg1, arg2) {
+  return window['go']['main']['App']['ClearObjectCacheForSchema'](arg1, arg2);
+}
+
 export function CloneChildTask(arg1, arg2, arg3, arg4, arg5, arg6) {
   return window['go']['main']['App']['CloneChildTask'](arg1, arg2, arg3, arg4, arg5, arg6);
 }

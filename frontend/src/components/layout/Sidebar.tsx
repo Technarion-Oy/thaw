@@ -65,7 +65,7 @@ import {
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, UploadFileToStage, PickOpenFile, ExecDDL } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, UploadFileToStage, PickOpenFile, ExecDDL } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -635,6 +635,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   };
 
   const refreshAllDatabases = () => {
+    ClearObjectCache();
     setLoaded(false);
     setTreeData([]);
     setSearchQuery("");
@@ -684,7 +685,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       const [, db, schema] = parts;
       setLoadingTreeNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
       try {
-        const objects = await ListObjects(db, schema);
+        const objects = commit
+          ? await ListBasicObjects(db, schema)
+          : await ListObjects(db, schema);
 
         const groups: Record<string, typeof objects> = {};
         for (const obj of objects) {
@@ -971,6 +974,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   };
 
   const refreshDatabaseByName = (db: string) => {
+    ClearObjectCache();
     const dbKey = `db:${db}`;
     useObjectStore.getState().clearDatabase(db);
     // Stripping the children array is enough: onExpand will re-trigger

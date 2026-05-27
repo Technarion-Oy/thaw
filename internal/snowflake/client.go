@@ -177,7 +177,17 @@ func connExec(conn driver.Conn, query string) {
 type Client struct {
 	db        *sql.DB
 	connector *sessionConnector
+
+	objectCacheMu sync.RWMutex
+	objectCache   map[string]objectCacheEntry
 }
+
+type objectCacheEntry struct {
+	objects []SnowflakeObject
+	ts      time.Time
+}
+
+const objectCacheTTL = 30 * time.Second
 
 // NewClient opens a new Snowflake connection. The provided context can be
 // canceled to abort the login handshake (useful for MFA/browser flows).
@@ -286,7 +296,7 @@ func NewClient(ctx context.Context, p ConnectParams) (*Client, error) {
 		sc.mu.Unlock()
 	}
 
-	return &Client{db: db, connector: sc}, nil
+	return &Client{db: db, connector: sc, objectCache: make(map[string]objectCacheEntry)}, nil
 }
 
 // IsAlive checks that the underlying connection is still usable.
@@ -2741,11 +2751,17 @@ func parseFinalizeFromDDLText(ddl string) string {
 // SEQUENCEs, and other object types exposed by the kind column — but not
 // PROCEDUREs, FUNCTIONs, TASKs, STREAMs, STAGEs, etc.
 func (c *Client) ListBasicObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
+	cacheKey := "basic\x00" + database + "\x00" + schema
+	if cached, ok := c.getObjectCache(cacheKey); ok {
+		return cached, nil
+	}
+
 	q := fmt.Sprintf("%s.%s", QuoteIdent(database), QuoteIdent(schema))
 	objs, err := c.showInSchema(ctx, fmt.Sprintf("SHOW OBJECTS IN SCHEMA %s", q), "", schema)
 	if err != nil {
 		return nil, err
 	}
+	c.putObjectCache(cacheKey, objs)
 	return objs, nil
 }
 
@@ -2866,6 +2882,11 @@ func enrichTaskFinalize(ctx context.Context, c *Client, database, schema string,
 // privileges on a particular object type) are silently skipped so that the
 // rest still appear.
 func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]SnowflakeObject, error) {
+	cacheKey := database + "\x00" + schema
+	if cached, ok := c.getObjectCache(cacheKey); ok {
+		return cached, nil
+	}
+
 	basic, err := c.ListBasicObjects(ctx, database, schema)
 	if err != nil {
 		return nil, err
@@ -2875,7 +2896,42 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 		// If extended objects fail, still return basic objects.
 		return basic, nil
 	}
-	return append(basic, extended...), nil
+	all := append(basic, extended...)
+	c.putObjectCache(cacheKey, all)
+	return all, nil
+}
+
+// getObjectCache returns a cached result if it exists and hasn't expired.
+func (c *Client) getObjectCache(key string) ([]SnowflakeObject, bool) {
+	c.objectCacheMu.RLock()
+	defer c.objectCacheMu.RUnlock()
+	entry, ok := c.objectCache[key]
+	if !ok || time.Since(entry.ts) > objectCacheTTL {
+		return nil, false
+	}
+	return entry.objects, true
+}
+
+// putObjectCache stores a result in the cache with the current timestamp.
+func (c *Client) putObjectCache(key string, objects []SnowflakeObject) {
+	c.objectCacheMu.Lock()
+	defer c.objectCacheMu.Unlock()
+	c.objectCache[key] = objectCacheEntry{objects: objects, ts: time.Now()}
+}
+
+// ClearObjectCache removes all cached object listings.
+func (c *Client) ClearObjectCache() {
+	c.objectCacheMu.Lock()
+	defer c.objectCacheMu.Unlock()
+	c.objectCache = make(map[string]objectCacheEntry)
+}
+
+// ClearObjectCacheForSchema removes cached object listings for a specific schema.
+func (c *Client) ClearObjectCacheForSchema(database, schema string) {
+	c.objectCacheMu.Lock()
+	defer c.objectCacheMu.Unlock()
+	delete(c.objectCache, database+"\x00"+schema)
+	delete(c.objectCache, "basic\x00"+database+"\x00"+schema)
 }
 
 // ListFileFormats returns the names of all file formats in the specified schema.

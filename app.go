@@ -2772,6 +2772,24 @@ func (a *App) ListExtendedObjects(database, schema string) ([]snowflake.Snowflak
 	return a.client.ListExtendedObjects(a.ctx, database, schema)
 }
 
+// ClearObjectCache removes all cached object listings from the Snowflake client,
+// forcing the next ListObjects/ListBasicObjects call to re-query Snowflake.
+func (a *App) ClearObjectCache() {
+	if a.client == nil {
+		return
+	}
+	a.client.ClearObjectCache()
+}
+
+// ClearObjectCacheForSchema removes cached object listings for a specific
+// database.schema, forcing the next call to re-query Snowflake.
+func (a *App) ClearObjectCacheForSchema(database, schema string) {
+	if a.client == nil {
+		return
+	}
+	a.client.ClearObjectCacheForSchema(database, schema)
+}
+
 // GetDatabaseRetentionDays returns the DATA_RETENTION_TIME_IN_DAYS parameter
 // for the given database. Returns 1 if the value cannot be determined.
 func (a *App) GetDatabaseRetentionDays(dbName string) (int, error) {
