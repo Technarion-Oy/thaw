@@ -239,6 +239,8 @@ export function GetGitFileContent(arg1:string,arg2:string,arg3:string,arg4:strin
 
 export function GetIntegrationProperties(arg1:string):Promise<Array<main.PropertyPair>>;
 
+export function GetKernelPythonVersion(arg1:string):Promise<string>;
+
 export function GetLocalFilePreview(arg1:string,arg2:fileformat.FileFormatConfig):Promise<fileformat.PreviewResult>;
 
 export function GetNotebookCompletions(arg1:string,arg2:string,arg3:number,arg4:number):Promise<Array<snowpark.NotebookCompletion>>;

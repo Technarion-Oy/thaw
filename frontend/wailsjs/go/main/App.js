@@ -438,6 +438,10 @@ export function GetIntegrationProperties(arg1) {
   return window['go']['main']['App']['GetIntegrationProperties'](arg1);
 }
 
+export function GetKernelPythonVersion(arg1) {
+  return window['go']['main']['App']['GetKernelPythonVersion'](arg1);
+}
+
 export function GetLocalFilePreview(arg1, arg2) {
   return window['go']['main']['App']['GetLocalFilePreview'](arg1, arg2);
 }

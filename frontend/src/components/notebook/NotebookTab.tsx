@@ -50,6 +50,7 @@ import {
   StopDapProxy,
   SaveNotebookBreakpoints,
   LoadNotebookBreakpoints,
+  GetKernelPythonVersion,
 } from "../../../wailsjs/go/main/App";
 import { DapClient, type CellBreakpoints, type DebugVariable } from "./debugClient";
 import type { snowpark } from "../../../wailsjs/go/models";
@@ -469,7 +470,13 @@ export default function NotebookTab({ tabId }: Props) {
     setKernelStarting(true);
     setKernelError(null);
     StartNotebookSession(tabId)
-      .then(() => { setKernelReady(true); setKernelStarting(false); })
+      .then(() => {
+        setKernelReady(true);
+        setKernelStarting(false);
+        GetKernelPythonVersion(tabId).then((v) => {
+          if (v) useNotebookToolbarStore.getState().setKernelPythonVersion(v);
+        }).catch(() => {});
+      })
       .catch((e) => { setKernelError(String(e)); setKernelStarting(false); });
 
     return () => { StopNotebookSession(tabId).catch(() => {}); };
@@ -757,7 +764,13 @@ export default function NotebookTab({ tabId }: Props) {
     setKernelStarting(true);
     setKernelError(null);
     StartNotebookSession(tabId)
-      .then(() => { setKernelReady(true); setKernelStarting(false); })
+      .then(() => {
+        setKernelReady(true);
+        setKernelStarting(false);
+        GetKernelPythonVersion(tabId).then((v) => {
+          if (v) useNotebookToolbarStore.getState().setKernelPythonVersion(v);
+        }).catch(() => {});
+      })
       .catch((e) => { setKernelError(String(e)); setKernelStarting(false); });
   }, [tabId]);
   useEffect(() => { restartKernelRef.current = restartKernel; }, [restartKernel]);
@@ -802,7 +815,6 @@ export default function NotebookTab({ tabId }: Props) {
     store.setKernelState({ kernelReady, kernelStarting, kernelError });
     store.setCallbacks({
       onRestartKernel: restartKernel,
-      onAddCell: () => addCell(),
       onDeploy: () => {
         setDeployContent(serializeNotebook(rawNb, cellsRef.current));
         setDeployOpen(true);

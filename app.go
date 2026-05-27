@@ -5633,6 +5633,10 @@ func (a *App) StartNotebookSession(tabId string) error {
 	return a.snowparkSvc.StartNotebookSession(a.client, a.connectParams, tabId)
 }
 
+func (a *App) GetKernelPythonVersion(tabId string) string {
+	return a.snowparkSvc.GetKernelPythonVersion(tabId)
+}
+
 func (a *App) RunNotebookCell(tabId string, cellId string, code string) (snowpark.NotebookCellOutput, error) {
 	return a.snowparkSvc.RunNotebookCell(tabId, cellId, code)
 }

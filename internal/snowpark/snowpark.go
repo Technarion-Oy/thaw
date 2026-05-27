@@ -721,11 +721,12 @@ type NotebookSyntaxError struct {
 // ─── kernel session management ────────────────────────────────────────────────
 
 type notebookSession struct {
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	stdout  *bufio.Reader
-	mu      sync.Mutex
-	lastCtx NotebookSessionContext // last known kernel session context
+	cmd           *exec.Cmd
+	stdin         io.WriteCloser
+	stdout        *bufio.Reader
+	mu            sync.Mutex
+	lastCtx       NotebookSessionContext // last known kernel session context
+	pythonVersion string                 // e.g. "3.11.9", detected at start
 }
 
 var (
@@ -1823,6 +1824,9 @@ func (s *Service) StartNotebookSession(client *snowflake.Client, connectParams *
 		return err
 	}
 
+	// Detect the Python version for the kernel indicator.
+	pyVer := detectPythonVersion(python)
+
 	cmd := exec.Command(python, "-u", scriptPath)
 	// Inject connection parameters so the kernel can auto-create a Snowpark
 	// session that matches the app's active connection.
@@ -1859,12 +1863,38 @@ func (s *Service) StartNotebookSession(client *snowflake.Client, connectParams *
 	}
 
 	notebookSessions.Store(tabId, &notebookSession{
-		cmd:     cmd,
-		stdin:   stdin,
-		stdout:  bufio.NewReader(stdout),
-		lastCtx: initCtx,
+		cmd:           cmd,
+		stdin:         stdin,
+		stdout:        bufio.NewReader(stdout),
+		lastCtx:       initCtx,
+		pythonVersion: pyVer,
 	})
 	return nil
+}
+
+// GetKernelPythonVersion returns the Python version string (e.g. "3.11.9")
+// for the kernel running in the given tab, or "" if unknown.
+func (s *Service) GetKernelPythonVersion(tabId string) string {
+	val, ok := notebookSessions.Load(tabId)
+	if !ok {
+		return ""
+	}
+	return val.(*notebookSession).pythonVersion
+}
+
+// detectPythonVersion runs `python --version` and extracts the version number.
+// Returns "" on any error so callers can fall back gracefully.
+func detectPythonVersion(pythonBin string) string {
+	out, err := exec.Command(pythonBin, "--version").Output()
+	if err != nil {
+		return ""
+	}
+	// Output is "Python 3.11.9\n" — extract the version part.
+	s := strings.TrimSpace(string(out))
+	if after, ok := strings.CutPrefix(s, "Python "); ok {
+		return after
+	}
+	return s
 }
 
 // RunNotebookCell sends code to the kernel and returns its output.

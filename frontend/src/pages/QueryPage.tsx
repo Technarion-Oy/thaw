@@ -910,12 +910,13 @@ export default function QueryPage() {
   };
 
   // ── Notebook toolbar state (read from store, bridged by NotebookTab) ──────
-  const nbKernelReady     = useNotebookToolbarStore((s) => s.kernelReady);
-  const nbKernelStarting  = useNotebookToolbarStore((s) => s.kernelStarting);
-  const nbKernelError     = useNotebookToolbarStore((s) => s.kernelError);
-  const nbOnRestartKernel = useNotebookToolbarStore((s) => s.onRestartKernel);
-  const nbOnDeploy        = useNotebookToolbarStore((s) => s.onDeploy);
-  const nbOnRunAll        = useNotebookToolbarStore((s) => s.onRunAll);
+  const nbKernelReady         = useNotebookToolbarStore((s) => s.kernelReady);
+  const nbKernelStarting      = useNotebookToolbarStore((s) => s.kernelStarting);
+  const nbKernelError         = useNotebookToolbarStore((s) => s.kernelError);
+  const nbKernelPythonVersion = useNotebookToolbarStore((s) => s.kernelPythonVersion);
+  const nbOnRestartKernel     = useNotebookToolbarStore((s) => s.onRestartKernel);
+  const nbOnDeploy            = useNotebookToolbarStore((s) => s.onDeploy);
+  const nbOnRunAll            = useNotebookToolbarStore((s) => s.onRunAll);
 
   const handleNewNotebook = () => {
     const blank = JSON.stringify({
@@ -934,6 +935,7 @@ export default function QueryPage() {
     kernelReady: nbKernelReady,
     kernelStarting: nbKernelStarting,
     kernelError: nbKernelError,
+    kernelName: nbKernelPythonVersion ? `Python ${nbKernelPythonVersion}` : undefined,
     onRestartKernel: nbOnRestartKernel,
   } : null;
 
