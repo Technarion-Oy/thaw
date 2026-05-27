@@ -2781,6 +2781,15 @@ func (a *App) ClearObjectCache() {
 	a.client.ClearObjectCache()
 }
 
+// ClearObjectCacheForDatabase removes all cached object listings for every
+// schema under the given database, forcing subsequent calls to re-query Snowflake.
+func (a *App) ClearObjectCacheForDatabase(database string) {
+	if a.client == nil {
+		return
+	}
+	a.client.ClearObjectCacheForDatabase(database)
+}
+
 // ClearObjectCacheForSchema removes cached object listings for a specific
 // database.schema, forcing the next call to re-query Snowflake.
 func (a *App) ClearObjectCacheForSchema(database, schema string) {

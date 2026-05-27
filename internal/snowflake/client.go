@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -2902,6 +2903,8 @@ func (c *Client) ListObjects(ctx context.Context, database, schema string) ([]Sn
 }
 
 // getObjectCache returns a cached result if it exists and hasn't expired.
+// The returned slice is a shallow clone so callers can safely append without
+// corrupting the cached backing array.
 func (c *Client) getObjectCache(key string) ([]SnowflakeObject, bool) {
 	c.objectCacheMu.RLock()
 	defer c.objectCacheMu.RUnlock()
@@ -2909,7 +2912,7 @@ func (c *Client) getObjectCache(key string) ([]SnowflakeObject, bool) {
 	if !ok || time.Since(entry.ts) > objectCacheTTL {
 		return nil, false
 	}
-	return entry.objects, true
+	return slices.Clone(entry.objects), true
 }
 
 // putObjectCache stores a result in the cache with the current timestamp.
@@ -2924,6 +2927,20 @@ func (c *Client) ClearObjectCache() {
 	c.objectCacheMu.Lock()
 	defer c.objectCacheMu.Unlock()
 	c.objectCache = make(map[string]objectCacheEntry)
+}
+
+// ClearObjectCacheForDatabase removes all cached object listings whose key
+// contains the given database (both full and basic-only entries).
+func (c *Client) ClearObjectCacheForDatabase(database string) {
+	c.objectCacheMu.Lock()
+	defer c.objectCacheMu.Unlock()
+	fullPrefix := database + "\x00"
+	basicPrefix := "basic\x00" + database + "\x00"
+	for k := range c.objectCache {
+		if strings.HasPrefix(k, fullPrefix) || strings.HasPrefix(k, basicPrefix) {
+			delete(c.objectCache, k)
+		}
+	}
 }
 
 // ClearObjectCacheForSchema removes cached object listings for a specific schema.

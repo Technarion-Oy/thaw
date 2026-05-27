@@ -158,6 +158,10 @@ export function ClearObjectCache() {
   return window['go']['main']['App']['ClearObjectCache']();
 }
 
+export function ClearObjectCacheForDatabase(arg1) {
+  return window['go']['main']['App']['ClearObjectCacheForDatabase'](arg1);
+}
+
 export function ClearObjectCacheForSchema(arg1, arg2) {
   return window['go']['main']['App']['ClearObjectCacheForSchema'](arg1, arg2);
 }
