@@ -199,6 +199,11 @@ body,
   border-color: var(--border-strong) !important;
 }
 
+/* Reduce tree indentation so deeply-nested columns fit in the object browser */
+.object-browser-tree .ant-tree-indent-unit {
+  width: 14px;
+}
+
 /* Keep tree node titles on one line and let the list scroll horizontally */
 .ant-tree .ant-tree-title {
   white-space: nowrap;

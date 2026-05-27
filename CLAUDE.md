@@ -177,7 +177,7 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 ### Zustand stores (frontend state)
 - `connectionStore` — active connection, role, warehouse, database
 - `queryStore` — SQL tabs, results, selected SQL, active query
-- `objectStore` — sidebar tree: databases, schemas, objects
+- `objectStore` — sidebar tree: databases, schemas, objects; also used as an instant cache by the search cascade (avoids IPC calls for previously expanded schemas)
 - `themeStore` — light/dark/system + editor font/size
 - `sessionStore` — persisted session state
 - `panelLayoutStore` — persisted panel sizes
@@ -193,6 +193,13 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 - `NotebookToolbarSlot` (`frontend/src/components/notebook/NotebookToolbarSlot.tsx`) renders the kernel status dot and Restart Kernel button; Deploy is rendered via Toolbar's `primaryAction` prop, and Add Cell is handled inline via hover-reveal bars between cells in `NotebookTab.tsx`
 - `notebookToolbarStore` bridges the NotebookTab's internal kernel state and callbacks to the unified Toolbar through QueryPage
 - The Toolbar reads session state directly from `connectionStore` and `sessionStore` — no prop-drilling for session selectors
+
+### Object listing cache (backend)
+- `Client` in `internal/snowflake/client.go` has a per-schema TTL cache (30s) for `ListObjects` and `ListBasicObjects` results, keyed by `"DB\x00SCHEMA"` (full) and `"basic\x00DB\x00SCHEMA"` (basic-only)
+- `getObjectCache` returns `slices.Clone()` of the cached slice to prevent `append(basic, extended...)` in `ListObjects` from corrupting the backing array
+- `ClearObjectCache()` / `ClearObjectCacheForDatabase(db)` are exposed as IPC methods; called from `refreshAllDatabases` / `refreshDatabaseByName` in `Sidebar.tsx`
+- The sidebar search cascade uses a three-tier lookup: (1) `objectStore` for previously expanded schemas (instant, all types), (2) Go TTL cache, (3) `ListBasicObjects` fallback (1 query, tables/views/sequences only)
+- `ListExtendedObjects` and `ClearObjectCacheForSchema` remain on `Client` for internal use but are **not** exposed as IPC methods
 
 ### Monaco editor integration
 - The SQL editor is in `frontend/src/components/editor/SqlEditor.tsx`

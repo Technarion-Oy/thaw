@@ -65,7 +65,7 @@ import {
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, UploadFileToStage, PickOpenFile, ExecDDL } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, UploadFileToStage, PickOpenFile, ExecDDL } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -573,12 +573,16 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     if (waiting) return; // re-runs when searchResults gains schema children
 
     // Step 4: trigger object loads for schema nodes without children.
+    // NOTE: basicOnly=true means only TABLEs, VIEWs, and SEQUENCEs are
+    // searched. Extended types (PROCEDURE, FUNCTION, TASK, STREAM, STAGE,
+    // etc.) won't appear in search results. This is a deliberate trade-off:
+    // 1 query per schema instead of 11.
     for (const dbNode of searchResults) {
       for (const schemaNode of ((dbNode as any).children ?? []) as DataNode[]) {
         const key = String(schemaNode.key);
         if (!(schemaNode as any).children && !loadingNodes.current.has(key)) {
           loadingNodes.current.add(key);
-          onLoadData(schemaNode as any, setSearchResults).finally(() => loadingNodes.current.delete(key));
+          onLoadData(schemaNode as any, setSearchResults, true).finally(() => loadingNodes.current.delete(key));
           waiting = true;
         }
       }
@@ -634,7 +638,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     doLoadDatabases();
   };
 
-  const refreshAllDatabases = () => {
+  const refreshAllDatabases = async () => {
+    await ClearObjectCache();
     setLoaded(false);
     setTreeData([]);
     setSearchQuery("");
@@ -650,9 +655,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
 
   // commit is setSearchResults when called from the cascade; omitted (→ setTreeData)
   // for user-triggered tree expansion. Cascade results never touch treeData.
+  // basicOnly skips extended object types (PROCEDURE, FUNCTION, TASK, etc.)
+  // for faster loading during the search cascade.
   const onLoadData = async (
     node: DataNode & { children?: DataNode[] },
     commit?: React.Dispatch<React.SetStateAction<DataNode[]>>,
+    basicOnly?: boolean,
   ) => {
     if (node.children) return;
     const key    = String(node.key);
@@ -684,7 +692,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       const [, db, schema] = parts;
       setLoadingTreeNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
       try {
-        const objects = await ListObjects(db, schema);
+        // When in search cascade mode (basicOnly), check if objectStore already
+        // has objects for this schema from a prior normal expansion. This avoids
+        // any IPC call and includes all object types (procedures, tasks, etc.).
+        const cached = basicOnly
+          ? useObjectStore.getState().objects.filter((o) => o.db === db && o.schema === schema)
+          : [];
+        const objects = cached.length > 0
+          ? cached.map((o) => ({ name: o.name, kind: o.kind })) as snowflake.SnowflakeObject[]
+          : basicOnly
+            ? await ListBasicObjects(db, schema)
+            : await ListObjects(db, schema);
 
         const groups: Record<string, typeof objects> = {};
         for (const obj of objects) {
@@ -970,7 +988,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     }
   };
 
-  const refreshDatabaseByName = (db: string) => {
+  const refreshDatabaseByName = async (db: string) => {
+    await ClearObjectCacheForDatabase(db);
     const dbKey = `db:${db}`;
     useObjectStore.getState().clearDatabase(db);
     // Stripping the children array is enough: onExpand will re-trigger

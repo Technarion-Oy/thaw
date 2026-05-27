@@ -154,6 +154,14 @@ export function ClearDefaultProfile() {
   return window['go']['main']['App']['ClearDefaultProfile']();
 }
 
+export function ClearObjectCache() {
+  return window['go']['main']['App']['ClearObjectCache']();
+}
+
+export function ClearObjectCacheForDatabase(arg1) {
+  return window['go']['main']['App']['ClearObjectCacheForDatabase'](arg1);
+}
+
 export function CloneChildTask(arg1, arg2, arg3, arg4, arg5, arg6) {
   return window['go']['main']['App']['CloneChildTask'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
@@ -764,6 +772,10 @@ export function ListBackupSets(arg1, arg2, arg3, arg4, arg5) {
 
 export function ListBackups(arg1, arg2, arg3) {
   return window['go']['main']['App']['ListBackups'](arg1, arg2, arg3);
+}
+
+export function ListBasicObjects(arg1, arg2) {
+  return window['go']['main']['App']['ListBasicObjects'](arg1, arg2);
 }
 
 export function ListDatabases() {
