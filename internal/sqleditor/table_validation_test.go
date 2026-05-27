@@ -136,6 +136,9 @@ func TestValidateSnowflakePatterns_CreateHybridTable(t *testing.T) {
 		"CREATE HYBRID TABLE t1 (id INT IDENTITY (1, 1), PRIMARY KEY (id))",
 		// Composite PK: one column NOT NULL, one AUTOINCREMENT — both satisfied
 		"CREATE HYBRID TABLE t1 (id INT NOT NULL, seq INT AUTOINCREMENT, PRIMARY KEY (id, seq))",
+		// A quoted column named INDEX in a regular table must not trigger the
+		// "Secondary indexes (INDEX) are only supported on hybrid tables" warning.
+		`CREATE TABLE t1 (id INT, "INDEX" INT)`,
 	}
 
 	for _, sql := range validCases {
@@ -172,6 +175,12 @@ func TestValidateSnowflakePatterns_CreateHybridTable(t *testing.T) {
 		{"Multiple violations at once", "CREATE OR REPLACE TRANSIENT HYBRID TABLE t1 (id INT) CLUSTER BY (id) DATA_RETENTION_TIME_IN_DAYS = 7 CHANGE_TRACKING = TRUE", []string{"OR REPLACE is not supported for hybrid tables", "TRANSIENT is not supported for hybrid tables", "CLUSTER BY is not supported on hybrid tables", "DATA_RETENTION_TIME_IN_DAYS is not applicable to hybrid tables", "CHANGE_TRACKING is not supported on hybrid tables", "Hybrid tables must have a PRIMARY KEY"}},
 		{"Quoted column in PK missing NOT NULL", `CREATE HYBRID TABLE t1 ("myCol" INT, PRIMARY KEY ("myCol"))`, []string{"Primary key columns in a hybrid table must be NOT NULL"}},
 		{"COPY GRANTS and missing PK", "CREATE HYBRID TABLE t1 (id INT) COPY GRANTS", []string{"COPY GRANTS is not supported on hybrid tables", "Hybrid tables must have a PRIMARY KEY"}},
+		// OR REPLACE and IF NOT EXISTS are mutually exclusive — the iceberg and event table
+		// validators check this via checkOrReplaceConflict, the hybrid validator should too.
+		{"OR REPLACE and IF NOT EXISTS conflict", "CREATE OR REPLACE HYBRID TABLE IF NOT EXISTS t1 (id INT PRIMARY KEY NOT NULL)", []string{"OR REPLACE is not supported for hybrid tables", "Conflict between OR REPLACE and IF NOT EXISTS"}},
+		// A column named "AUTOINCREMENT" (quoted identifier) must not be confused with
+		// the AUTOINCREMENT attribute — the PK column still lacks an explicit NOT NULL.
+		{"Column named AUTOINCREMENT in PK missing NOT NULL", `CREATE HYBRID TABLE t1 ("AUTOINCREMENT" INT, PRIMARY KEY ("AUTOINCREMENT"))`, []string{"Primary key columns in a hybrid table must be NOT NULL"}},
 	}
 
 	for _, tt := range invalidCases {
@@ -702,6 +711,9 @@ func TestValidateSnowflakePatterns_AlterTableSwapWith(t *testing.T) {
 			"ALTER TABLE db.schema.t1 SWAP WITH t1",
 			// Trailing comment is stripped — no false positive
 			"ALTER TABLE t1 SWAP WITH t2 -- this is a comment",
+			// Quoted lowercase identifier is case-sensitive in Snowflake:
+			// "orders" (exact lowercase) is a different table from ORDERS (unquoted → uppercase).
+			`ALTER TABLE "orders" SWAP WITH ORDERS`,
 		}
 		for _, sql := range validQueries {
 			t.Run(sql, func(t *testing.T) {
