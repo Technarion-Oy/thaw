@@ -465,8 +465,8 @@ export default function NotebookTab({ tabId }: Props) {
     setRawNb(raw);
   }, [tab?.path, tab?.sql]); // tab?.sql triggers the initial parse after async disk refresh
 
-  // ── start kernel on mount, stop on unmount ────────────────────────────────
-  useEffect(() => {
+  // ── shared kernel start helper ────────────────────────────────────────────
+  const startKernel = useCallback(() => {
     setKernelStarting(true);
     setKernelError(null);
     StartNotebookSession(tabId)
@@ -478,9 +478,13 @@ export default function NotebookTab({ tabId }: Props) {
         }).catch(() => {});
       })
       .catch((e) => { setKernelError(String(e)); setKernelStarting(false); });
-
-    return () => { StopNotebookSession(tabId).catch(() => {}); };
   }, [tabId]);
+
+  // ── start kernel on mount, stop on unmount ────────────────────────────────
+  useEffect(() => {
+    startKernel();
+    return () => { StopNotebookSession(tabId).catch(() => {}); };
+  }, [tabId, startKernel]);
 
   // ── sync session context changes from Python cells back to the toolbar ────
   // When a Python cell runs session.sql("USE DATABASE X"), the Go backend syncs
@@ -761,18 +765,8 @@ export default function NotebookTab({ tabId }: Props) {
   const restartKernel = useCallback(async () => {
     await StopNotebookSession(tabId).catch(() => {});
     setKernelReady(false);
-    setKernelStarting(true);
-    setKernelError(null);
-    StartNotebookSession(tabId)
-      .then(() => {
-        setKernelReady(true);
-        setKernelStarting(false);
-        GetKernelPythonVersion(tabId).then((v) => {
-          if (v) useNotebookToolbarStore.getState().setKernelPythonVersion(v);
-        }).catch(() => {});
-      })
-      .catch((e) => { setKernelError(String(e)); setKernelStarting(false); });
-  }, [tabId]);
+    startKernel();
+  }, [tabId, startKernel]);
   useEffect(() => { restartKernelRef.current = restartKernel; }, [restartKernel]);
 
   const addCellOfKind = useCallback(
@@ -1699,7 +1693,7 @@ function CellView({
           {/* SQL result table */}
           {cell.kind === "sql" && queryResult && queryResult.columns.length > 0 && (
             <>
-              <div style={{ borderTop: "1px solid var(--border)", maxHeight: 360, overflow: "auto" }}>
+              <div style={{ borderTop: "1px solid var(--border)", height: 360, overflow: "hidden" }}>
                 <ResultGrid result={queryResult} />
               </div>
               <div style={{
@@ -1713,7 +1707,9 @@ function CellView({
                 gap: 8,
               }}>
                 <span>
-                  {queryResult.rowsAffected} row{queryResult.rowsAffected !== 1 ? "s" : ""}
+                  {queryResult.truncated
+                    ? `${queryResult.rowsAffected.toLocaleString()}+ rows`
+                    : `${queryResult.rowsAffected} row${queryResult.rowsAffected !== 1 ? "s" : ""}`}
                 </span>
                 {queryResult.truncated && (
                   <Tag color="orange" style={{ fontSize: 10, lineHeight: "16px", padding: "0 5px", border: "none" }}>truncated</Tag>
