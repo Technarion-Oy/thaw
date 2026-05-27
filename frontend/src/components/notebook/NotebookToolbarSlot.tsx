@@ -40,7 +40,7 @@ export function NotebookToolbarSlot(props: NotebookToolbarSlotProps): ReactNode 
         ready={kernelReady}
         starting={kernelStarting}
         error={kernelError}
-        name={kernelName ?? "Python 3.11"}
+        name={kernelName ?? "Python"}
       />
 
       <Tooltip title="Restart kernel">
