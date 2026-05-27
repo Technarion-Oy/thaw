@@ -187,6 +187,9 @@ func TestValidateSnowflakePatterns_CreateHybridTable(t *testing.T) {
 		// A column named "AUTOINCREMENT" (quoted identifier) must not be confused with
 		// the AUTOINCREMENT attribute — the PK column still lacks an explicit NOT NULL.
 		{"Column named AUTOINCREMENT in PK missing NOT NULL", `CREATE HYBRID TABLE t1 ("AUTOINCREMENT" INT, PRIMARY KEY ("AUTOINCREMENT"))`, []string{"Primary key columns in a hybrid table must be NOT NULL"}},
+		// Same flaw as AUTOINCREMENT above — a quoted identifier named "IDENTITY"
+		// must not be confused with the IDENTITY column attribute.
+		{"Column named IDENTITY in PK missing NOT NULL", `CREATE HYBRID TABLE t1 ("IDENTITY" INT, PRIMARY KEY ("IDENTITY"))`, []string{"Primary key columns in a hybrid table must be NOT NULL"}},
 	}
 
 	for _, tt := range invalidCases {
@@ -358,6 +361,13 @@ func TestValidateSnowflakePatterns_CreateEventTable(t *testing.T) {
 		{
 			"TRANSIENT event table",
 			"CREATE TRANSIENT EVENT TABLE my_events",
+			[]string{"TRANSIENT"},
+		},
+		// CREATE OR REPLACE TRANSIENT EVENT TABLE must also be routed to the
+		// event table validator — the guard regex must handle TRANSIENT after OR REPLACE.
+		{
+			"OR REPLACE TRANSIENT event table",
+			"CREATE OR REPLACE TRANSIENT EVENT TABLE my_events",
 			[]string{"TRANSIENT"},
 		},
 	}
@@ -673,6 +683,17 @@ func TestValidateSnowflakePatterns_AlterDynamicTable(t *testing.T) {
 				sql:     "ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = '-5 minutes'",
 				wantMsg: "Invalid TARGET_LAG value",
 			},
+			// Valid TARGET_LAG inside a line comment must not mask the invalid actual
+			// value — the validator should check cleaned text, not raw text with comments.
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = 'invalid' -- TARGET_LAG = '1 minute'",
+				wantMsg: "Invalid TARGET_LAG value",
+			},
+			// Same flaw with a block comment containing a valid TARGET_LAG value.
+			{
+				sql:     "ALTER DYNAMIC TABLE my_dt SET TARGET_LAG = 42 /* TARGET_LAG = '1 minute' */",
+				wantMsg: "Invalid TARGET_LAG value",
+			},
 		}
 		for _, tc := range cases {
 			t.Run(tc.sql, func(t *testing.T) {
@@ -739,6 +760,9 @@ func TestValidateSnowflakePatterns_AlterTableSwapWith(t *testing.T) {
 			// Quoted lowercase identifier is case-sensitive in Snowflake:
 			// "orders" (exact lowercase) is a different table from ORDERS (unquoted → uppercase).
 			`ALTER TABLE "orders" SWAP WITH ORDERS`,
+			// Quoted identifier with an internal dot ("A.B") is a single 1-part name,
+			// different from the 2-part path A.B — must not be flagged as same table.
+			`ALTER TABLE "A.B" SWAP WITH A.B`,
 		}
 		for _, sql := range validQueries {
 			t.Run(sql, func(t *testing.T) {
