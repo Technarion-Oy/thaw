@@ -304,6 +304,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     setSteps((prev) => prev.map((s, i) => (i === idx ? { ...s, ...p } : s)));
 
   const runStep = async (idx: number) => {
+    if (useExisting && idx === 0) return; // existing venv — use handleUseExisting instead
     patch(idx, { status: "running", log: [], error: null });
     // Persist the backend choice on the first step so subsequent checks use it.
     if (idx === 0) await SaveSnowparkConfig(backend).catch(() => {});
@@ -487,7 +488,11 @@ export default function SnowparkSetupModal({ onClose }: Props) {
                     setSteps([makeStepState(), makeStepState(), makeStepState()]);
                   }
                 }}
-                onBlur={() => SaveSnowparkVenvPath(venvPath.trim()).catch(() => {})}
+                onBlur={() => {
+                  const trimmed = venvPath.trim();
+                  if (trimmed !== venvPath) setVenvPath(trimmed);
+                  SaveSnowparkVenvPath(trimmed).catch(() => {});
+                }}
                 onPressEnter={(e) => {
                   (e.target as HTMLInputElement).blur();
                 }}
@@ -517,7 +522,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
                 Use Existing
               </Button>
             )}
-            {validationResult && !validationResult.hasVenv && (
+            {validationResult && !validationResult.hasVenv && current === 0 && (
               <Alert
                 type="error"
                 showIcon
@@ -525,7 +530,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
                 message="No virtual environment found at this path."
               />
             )}
-            {validationResult && validationResult.hasVenv && (
+            {validationResult && validationResult.hasVenv && current === 0 && (
               <Alert
                 type={validationResult.isReady ? "success" : "info"}
                 showIcon
