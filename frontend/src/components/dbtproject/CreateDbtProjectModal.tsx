@@ -133,7 +133,7 @@ export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }
             type="primary"
             icon={<BuildOutlined />}
             onClick={handleRun}
-            disabled={!canSubmit}
+            disabled={!canSubmit || !preview}
             loading={creating}
           >
             Create

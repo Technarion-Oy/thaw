@@ -1071,10 +1071,13 @@ type GitRepoEntry struct {
 	Size  int64  `json:"size,omitempty"`
 }
 
-// StageEntry is an alias for GitRepoEntry, used by ListStageEntries for clarity.
+// StageEntry is a documentation-only alias for GitRepoEntry, used by
+// ListStageEntries for readability. Go type aliases provide no compile-time
+// distinction — a StageEntry is freely interchangeable with GitRepoEntry.
 type StageEntry = GitRepoEntry
 
-// WorkspaceEntry is an alias for GitRepoEntry, used by ListWorkspaceEntries for clarity.
+// WorkspaceEntry is a documentation-only alias for GitRepoEntry, used by
+// ListWorkspaceEntries for readability. Same caveat as StageEntry.
 type WorkspaceEntry = GitRepoEntry
 
 // GitBranch represents a branch in a Snowflake git repository.
