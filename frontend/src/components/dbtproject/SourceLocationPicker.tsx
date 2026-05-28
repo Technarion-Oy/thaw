@@ -122,8 +122,16 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
       .finally(() => setLoadingSchemas(false));
   }, [pickerDb]);
 
-  // Reset pickerDb/pickerSchema to the modal's db/schema when type or parent props change
+  // Reset pickerDb/pickerSchema to the modal's db/schema when type or parent props change.
+  // Also clear the parent value when the source type changes so a stale location string
+  // from a different source type doesn't linger in the text input.
+  const prevSourceType = useRef(sourceType);
   useEffect(() => {
+    if (prevSourceType.current !== sourceType) {
+      prevSourceType.current = sourceType;
+      suppressRef.current = true;
+      onChange("");
+    }
     setPickerDb(db);
     setPickerSchema(schema);
     setSelectedObject(undefined);
@@ -135,7 +143,7 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
     setBranches([]);
     setTags([]);
     setVersions([]);
-  }, [sourceType, db, schema]);
+  }, [sourceType, db, schema, onChange]);
 
   // Load objects when type or pickerDb/pickerSchema changes (for non-workspace types)
   useEffect(() => {

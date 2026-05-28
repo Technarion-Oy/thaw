@@ -512,6 +512,7 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 	}
 	a.client = client
 	a.connectParams = &params
+	a.applyFeatureFlagExclusions()
 	logger.L.Info("connected", "account", params.Account, "user", params.User)
 	telemetry.Track(telemetry.EventConnected, telemetry.Props{"authenticator": params.Authenticator})
 
@@ -4270,7 +4271,27 @@ func (a *App) SaveFeatureFlags(flags config.FeatureFlags) error {
 	}
 
 	cfg.FeatureFlags = flags
-	return config.Save(cfg)
+	if err := config.Save(cfg); err != nil {
+		return err
+	}
+	a.applyFeatureFlagExclusions()
+	return nil
+}
+
+// applyFeatureFlagExclusions updates the Snowflake client's excluded extended
+// object kinds based on the current feature flags. Called after connecting and
+// after saving feature flags so disabled features don't incur unnecessary
+// SHOW queries during schema expansion.
+func (a *App) applyFeatureFlagExclusions() {
+	if a.client == nil {
+		return
+	}
+	flags := a.GetFeatureFlags()
+	excl := make(map[string]bool)
+	if !flags.DbtProjectBrowser {
+		excl["DBT PROJECT"] = true
+	}
+	a.client.ExcludedExtendedKinds = excl
 }
 
 // ─── Notebook preferences ────────────────────────────────────────────────────

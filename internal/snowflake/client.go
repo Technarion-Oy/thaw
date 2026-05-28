@@ -181,6 +181,11 @@ type Client struct {
 
 	objectCacheMu sync.RWMutex
 	objectCache   map[string]objectCacheEntry
+
+	// ExcludedExtendedKinds is a set of object kinds to skip in
+	// ListExtendedObjects. Set by the application layer based on feature
+	// flags so disabled features don't incur unnecessary SHOW queries.
+	ExcludedExtendedKinds map[string]bool
 }
 
 type objectCacheEntry struct {
@@ -2979,6 +2984,17 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		{fmt.Sprintf("SHOW SECRETS IN SCHEMA %s", q), "SECRET"},
 		{fmt.Sprintf("SHOW GIT REPOSITORIES IN SCHEMA %s", q), "GIT REPOSITORY"},
 		{fmt.Sprintf("SHOW DBT PROJECTS IN SCHEMA %s", q), "DBT PROJECT"},
+	}
+
+	// Filter out disabled object kinds (set via ExcludedExtendedKinds).
+	if len(c.ExcludedExtendedKinds) > 0 {
+		filtered := commands[:0]
+		for _, cmd := range commands {
+			if !c.ExcludedExtendedKinds[cmd.kind] {
+				filtered = append(filtered, cmd)
+			}
+		}
+		commands = filtered
 	}
 
 	type result struct {
