@@ -584,6 +584,29 @@ func TestGenerate(t *testing.T) {
 		sources := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "_sources.yml"))
 		assertContains(t, sources, "manually", "system schema description should mention manual entry")
 	})
+
+	t.Run("source name collision with underscore-containing identifiers", func(t *testing.T) {
+		// DB "A_B" + Schema "C" and DB "A" + Schema "B_C" must produce
+		// distinct source names in _sources.yml.  The current underscore
+		// separator is ambiguous for identifiers that themselves contain
+		// underscores.
+		dir := t.TempDir()
+		req := CreateRequest{ProjectName: "proj", OutputDir: dir}
+		objects := []SchemaObjects{
+			{DB: "A_B", Schema: "C", Tables: []string{"T1"}},
+			{DB: "A", Schema: "B_C", Tables: []string{"T2"}},
+		}
+
+		result := mustGenerate(t, req, typicalSession(), objects)
+		sources := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "_sources.yml"))
+
+		count := strings.Count(sources, "- name: a_b_c")
+		if count > 1 {
+			t.Errorf("duplicate source name 'a_b_c' in _sources.yml (%d occurrences) — "+
+				"A_B.C and A.B_C produce the same source name due to underscore separator ambiguity",
+				count)
+		}
+	})
 }
 
 // ─── TestSourceName ───────────────────────────────────────────────────────────
@@ -613,6 +636,18 @@ func TestSourceName(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("underscore separator must not cause collisions", func(t *testing.T) {
+		// DB "A_B" + Schema "C" and DB "A" + Schema "B_C" are different
+		// Snowflake scopes but both lower to "a_b" + "_" + "c" = "a_b_c".
+		a := sourceName("A_B", "C")
+		b := sourceName("A", "B_C")
+		if a == b {
+			t.Errorf("sourceName(%q, %q) = sourceName(%q, %q) = %q — "+
+				"ambiguous underscore separator causes collision",
+				"A_B", "C", "A", "B_C", a)
+		}
+	})
 }
 
 // ─── TestStagingModelPath ─────────────────────────────────────────────────────
@@ -678,6 +713,14 @@ func TestStagingModelPath(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("underscore separator must not cause multi-scope path collisions", func(t *testing.T) {
+		a := stagingModelPath("A_B", "C", "T", true)
+		b := stagingModelPath("A", "B_C", "T", true)
+		if a == b {
+			t.Errorf("stagingModelPath collision: (A_B, C, T) and (A, B_C, T) both produce %q", a)
+		}
+	})
 }
 
 // ─── TestStagingModelSQL ──────────────────────────────────────────────────────
@@ -787,6 +830,18 @@ func TestStagingModelSQL(t *testing.T) {
 				"{{ source('analytics_raw', 'EVENTS') }}",
 				"with source as (",
 				"renamed as (",
+			},
+		},
+		{
+			name:    "whitespace-only body falls back to source() stub",
+			source:  "src", table: "T",
+			sqlBody: "   \n  \t  ",
+			mustContain: []string{
+				"{{ source('src', 'T') }}",
+				"with source as (",
+			},
+			mustNotContain: []string{
+				"view SQL inlined from Snowflake",
 			},
 		},
 	}
@@ -990,6 +1045,26 @@ func TestGenerate_InlineViewDefs(t *testing.T) {
 		assertContains(t, stub, "{{ source('db_sch', 'EMPTY_DEF_VIEW') }}", "empty def falls back to source()")
 		assertContains(t, stub, "with source as (", "empty def uses CTE pattern")
 		assertNotContains(t, stub, "view SQL inlined from Snowflake", "empty def must not show inline header")
+	})
+
+	t.Run("whitespace-only ViewDef treated as empty — uses source() stub", func(t *testing.T) {
+		dir := t.TempDir()
+		req := CreateRequest{ProjectName: "proj", OutputDir: dir, InlineViewDefs: true}
+		objects := []SchemaObjects{{
+			DB:     "DB",
+			Schema: "SCH",
+			Views:  []string{"WS_VIEW"},
+			ViewDefs: map[string]string{
+				"WS_VIEW": "   \n  \t  ", // whitespace-only
+			},
+		}}
+
+		result := mustGenerate(t, req, typicalSession(), objects)
+		stub := readFile(t, result.ProjectDir, filepath.Join("models", "staging", "stg_ws_view.sql"))
+
+		assertContains(t, stub, "{{ source('db_sch', 'WS_VIEW') }}", "whitespace body should fall back to source()")
+		assertContains(t, stub, "with source as (", "whitespace body should use CTE pattern")
+		assertNotContains(t, stub, "view SQL inlined from Snowflake", "whitespace body must not show inline header")
 	})
 }
 
