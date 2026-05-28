@@ -12,8 +12,7 @@
 
 import { useState, useEffect } from "react";
 import {
-  Modal, Form, Input, Select, Space,
-  Typography, Button, Alert, Spin,
+  Modal, Form, Input, Select, Space, Button, Alert, Spin,
 } from "antd";
 import { EditOutlined } from "@ant-design/icons";
 import {
@@ -25,8 +24,7 @@ import {
 } from "../../../wailsjs/go/main/App";
 import { dbtproject } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
-
-const { Text } = Typography;
+import SqlPreview from "../shared/SqlPreview";
 
 interface Props {
   db: string;
@@ -225,32 +223,7 @@ export default function ModifyDbtProjectModal({ db, schema, name, onClose, onSuc
           />
         </Form.Item>
 
-        {/* SQL Preview */}
-        <div
-          style={{
-            padding: "10px 12px",
-            background: "var(--bg)",
-            borderRadius: 6,
-            border: "1px solid var(--border)",
-            marginTop: 4,
-          }}
-        >
-          <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>
-            SQL Preview
-          </Text>
-          <pre
-            style={{
-              margin: 0,
-              color: "var(--text)",
-              fontSize: 11,
-              fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-all",
-            }}
-          >
-            {statements.length > 0 ? statements.join("\n\n") : "-- No changes"}
-          </pre>
-        </div>
+        <SqlPreview sql={statements.join("\n\n")} placeholder="-- No changes" />
       </Form>
     </Modal>
   );

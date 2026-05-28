@@ -10,17 +10,15 @@
 //
 // @thaw-domain: Object Browser & Administration
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
-  Modal, Form, Input, Select, Space,
-  Typography, Button,
+  Modal, Form, Input, Select, Space, Button,
 } from "antd";
 import { PlayCircleOutlined } from "@ant-design/icons";
 import { BuildExecuteDbtProjectSql, ListSupportedDbtVersions } from "../../../wailsjs/go/main/App";
 import { dbtproject } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
-
-const { Text } = Typography;
+import SqlPreview from "../shared/SqlPreview";
 
 interface Props {
   db: string;
@@ -40,6 +38,7 @@ export default function ExecuteDbtProjectModal({ db, schema, name, onClose }: Pr
   const [dbtVersions, setDbtVersions] = useState<dbtproject.DbtVersionInfo[]>([]);
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [preview, setPreview] = useState("");
+  const previewTimer = useRef<ReturnType<typeof setTimeout>>();
   const executeInNewTab = useQueryStore((s) => s.executeInNewTab);
 
   useEffect(() => {
@@ -51,14 +50,20 @@ export default function ExecuteDbtProjectModal({ db, schema, name, onClose }: Pr
   }, []);
 
   useEffect(() => {
-    const execCfg = mode === "direct"
-      ? { ...cfg, fromWorkspace: "", projectRoot: "" }
-      : cfg;
-    BuildExecuteDbtProjectSql(db, schema, name, execCfg)
-      .then(setPreview)
-      .catch(() => setPreview(""));
+    clearTimeout(previewTimer.current);
+    previewTimer.current = setTimeout(() => {
+      const execCfg = mode === "direct"
+        ? { ...cfg, fromWorkspace: "", projectRoot: "" }
+        : cfg;
+      BuildExecuteDbtProjectSql(db, schema, name, execCfg)
+        .then(setPreview)
+        .catch(() => setPreview(""));
+    }, 200);
+    return () => clearTimeout(previewTimer.current);
   }, [db, schema, name, cfg, mode]);
 
+  // Spread loses the Wails class prototype, but this is fine — Wails uses JSON
+  // serialization for IPC so only the field values matter, not the prototype.
   const set = <K extends keyof dbtproject.ExecuteConfig>(key: K, value: dbtproject.ExecuteConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
 
@@ -102,6 +107,9 @@ export default function ExecuteDbtProjectModal({ db, schema, name, onClose }: Pr
             value={mode}
             onChange={(v) => {
               setMode(v);
+              // Clear workspace fields when switching to direct; the preview effect
+              // also masks them, but clearing state avoids stale values reappearing
+              // if the user switches back to workspace mode.
               if (v === "direct") setCfg((prev) => ({ ...prev, fromWorkspace: "", projectRoot: "" }));
             }}
             options={[
@@ -156,32 +164,7 @@ export default function ExecuteDbtProjectModal({ db, schema, name, onClose }: Pr
           </>
         )}
 
-        {/* SQL Preview */}
-        <div
-          style={{
-            padding: "10px 12px",
-            background: "var(--bg)",
-            borderRadius: 6,
-            border: "1px solid var(--border)",
-            marginTop: 4,
-          }}
-        >
-          <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>
-            SQL Preview
-          </Text>
-          <pre
-            style={{
-              margin: 0,
-              color: "var(--text)",
-              fontSize: 11,
-              fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-all",
-            }}
-          >
-            {preview || "-- Configure execution options"}
-          </pre>
-        </div>
+        <SqlPreview sql={preview} placeholder="-- Configure execution options" />
       </Form>
     </Modal>
   );

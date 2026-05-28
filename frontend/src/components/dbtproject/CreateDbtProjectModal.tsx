@@ -10,7 +10,7 @@
 //
 // @thaw-domain: Object Browser & Administration
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Modal, Form, Input, Select, Checkbox, Space,
   Typography, Button, Alert,
@@ -24,6 +24,7 @@ import {
   ListSupportedDbtVersions,
 } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
+import SqlPreview from "../shared/SqlPreview";
 import SourceLocationPicker from "./SourceLocationPicker";
 import { dbtproject } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -57,6 +58,7 @@ export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }
   const [createError, setCreateError] = useState<string | null>(null);
   const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
   const [preview, setPreview] = useState("");
+  const previewTimer = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     setLoadingEai(true);
@@ -77,9 +79,15 @@ export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }
   }, []);
 
   useEffect(() => {
-    BuildCreateDbtProjectSql(db, schema, cfg).then(setPreview).catch(() => setPreview(""));
+    clearTimeout(previewTimer.current);
+    previewTimer.current = setTimeout(() => {
+      BuildCreateDbtProjectSql(db, schema, cfg).then(setPreview).catch(() => setPreview(""));
+    }, 200);
+    return () => clearTimeout(previewTimer.current);
   }, [db, schema, cfg]);
 
+  // Spread loses the Wails class prototype, but this is fine — Wails uses JSON
+  // serialization for IPC so only the field values matter, not the prototype.
   const set = <K extends keyof dbtproject.CreateConfig>(key: K, value: dbtproject.CreateConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
 
@@ -244,32 +252,7 @@ export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }
           />
         </Form.Item>
 
-        {/* SQL Preview */}
-        <div
-          style={{
-            padding: "10px 12px",
-            background: "var(--bg)",
-            borderRadius: 6,
-            border: "1px solid var(--border)",
-            marginTop: 4,
-          }}
-        >
-          <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>
-            SQL Preview
-          </Text>
-          <pre
-            style={{
-              margin: 0,
-              color: "var(--text)",
-              fontSize: 11,
-              fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-all",
-            }}
-          >
-            {preview || "-- Fill in required fields"}
-          </pre>
-        </div>
+        <SqlPreview sql={preview} />
       </Form>
     </Modal>
   );
