@@ -70,6 +70,7 @@ type adminAI struct {
 type adminAdvancedTools struct {
 	SchemaMigration     ptrBool `json:"schemaMigration,omitempty"`
 	DbtScaffolding      ptrBool `json:"dbtScaffolding,omitempty"`
+	DbtProjectBrowser   ptrBool `json:"dbtProjectBrowser,omitempty"`
 	ERDiagramDesigner   ptrBool `json:"erDiagramDesigner,omitempty"`
 	TaskGraphVisualizer ptrBool `json:"taskGraphVisualizer,omitempty"`
 	InsertMapping       ptrBool `json:"insertMapping,omitempty"`
@@ -209,6 +210,7 @@ func mergeAdminOverrides(user FeatureFlags, cfg adminConfigJSON) (effective Feat
 	// Advanced Tools & Data Engineering
 	apply(&effective.SchemaMigration, &locked.SchemaMigration, cfg.AdvancedTools.SchemaMigration)
 	apply(&effective.DbtScaffolding, &locked.DbtScaffolding, cfg.AdvancedTools.DbtScaffolding)
+	apply(&effective.DbtProjectBrowser, &locked.DbtProjectBrowser, cfg.AdvancedTools.DbtProjectBrowser)
 	apply(&effective.ERDiagramDesigner, &locked.ERDiagramDesigner, cfg.AdvancedTools.ERDiagramDesigner)
 	apply(&effective.TaskGraphVisualizer, &locked.TaskGraphVisualizer, cfg.AdvancedTools.TaskGraphVisualizer)
 	apply(&effective.InsertMapping, &locked.InsertMapping, cfg.AdvancedTools.InsertMapping)

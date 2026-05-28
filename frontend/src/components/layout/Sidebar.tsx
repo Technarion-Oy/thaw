@@ -1335,8 +1335,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const schema = parts[2];
     const name = parts[4];
     setCtxMenu(null);
-    const fqn = `"${db}"."${schema}"."${name}"`;
-    useQueryStore.getState().executeInNewTab(`SHOW VERSIONS IN DBT PROJECT ${fqn};`);
+    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    useQueryStore.getState().executeInNewTab(`SHOW VERSIONS IN DBT PROJECT ${q(db)}.${q(schema)}.${q(name)};`);
   };
 
   const describeDbtProject = () => {
@@ -1346,8 +1346,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const schema = parts[2];
     const name = parts[4];
     setCtxMenu(null);
-    const fqn = `"${db}"."${schema}"."${name}"`;
-    useQueryStore.getState().executeInNewTab(`DESCRIBE DBT PROJECT ${fqn};`);
+    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    useQueryStore.getState().executeInNewTab(`DESCRIBE DBT PROJECT ${q(db)}.${q(schema)}.${q(name)};`);
   };
 
   const openCreatePipe = () => {
