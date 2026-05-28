@@ -23,6 +23,7 @@ import {
   BuildAlterDbtProjectSetSql,
   ExecDDL,
 } from "../../../wailsjs/go/main/App";
+import { dbtproject } from "../../../wailsjs/go/models";
 import type { main, snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
@@ -91,13 +92,13 @@ export default function ModifyDbtProjectModal({ db, schema, name, onClose, onSuc
 
   useEffect(() => {
     if (loading) return;
-    const cfg = {
+    const cfg = new dbtproject.AlterSetConfig({
       dbtVersion,
       defaultTarget,
       externalAccessIntegrations: integrations,
       comment,
-    };
-    BuildAlterDbtProjectSetSql(db, schema, name, cfg as any, origComment, origDbtVersion, origDefaultTarget, origIntegrations)
+    });
+    BuildAlterDbtProjectSetSql(db, schema, name, cfg, origComment, origDbtVersion, origDefaultTarget, origIntegrations)
       .then((sqls) => setStatements(sqls ?? []))
       .catch(() => setStatements([]));
   }, [db, schema, name, dbtVersion, defaultTarget, integrations, comment, origComment, origDbtVersion, origDefaultTarget, origIntegrations, loading]);

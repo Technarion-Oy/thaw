@@ -722,8 +722,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         }
 
         // Filter out gated object types
-        const ff = useFeatureFlagsStore.getState().flags;
-        if (!ff.dbtProjectBrowser) delete groups["DBT PROJECT"];
+        if (!featureFlags.dbtProjectBrowser) delete groups["DBT PROJECT"];
 
         const sortedKinds = [
           ...KIND_ORDER.filter((k) => groups[k]),

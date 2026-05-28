@@ -1811,30 +1811,6 @@ func (a *App) DescribeDbtProject(database, schema, name string) ([]PropertyPair,
 	return a.resToPairs(res), nil
 }
 
-// ListDbtProjectVersions runs SHOW VERSIONS IN DBT PROJECT and returns rows.
-func (a *App) ListDbtProjectVersions(database, schema, name string) ([]map[string]interface{}, error) {
-	if a.client == nil {
-		return nil, apperrors.ErrNotConnected
-	}
-	query := fmt.Sprintf("SHOW VERSIONS IN DBT PROJECT %s.%s.%s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	res, err := a.client.Execute(a.ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	var rows []map[string]interface{}
-	for _, row := range res.Rows {
-		m := make(map[string]interface{}, len(res.Columns))
-		for i, col := range res.Columns {
-			if i < len(row) {
-				m[col] = row[i]
-			}
-		}
-		rows = append(rows, m)
-	}
-	return rows, nil
-}
-
 // DbtVersionInfo holds a single entry from SYSTEM$SUPPORTED_DBT_VERSIONS().
 type DbtVersionInfo struct {
 	DbtVersion string `json:"dbt_version"`

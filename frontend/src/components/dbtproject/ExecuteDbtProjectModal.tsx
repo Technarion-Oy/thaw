@@ -17,17 +17,11 @@ import {
 } from "antd";
 import { PlayCircleOutlined } from "@ant-design/icons";
 import { BuildExecuteDbtProjectSql, ListSupportedDbtVersions } from "../../../wailsjs/go/main/App";
+import { dbtproject } from "../../../wailsjs/go/models";
 import type { main } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
 
 const { Text } = Typography;
-
-interface ExecuteConfig {
-  args: string;
-  dbtVersion: string;
-  fromWorkspace: string;
-  projectRoot: string;
-}
 
 interface Props {
   db: string;
@@ -38,7 +32,7 @@ interface Props {
 
 export default function ExecuteDbtProjectModal({ db, schema, name, onClose }: Props) {
   const [mode, setMode] = useState<"direct" | "workspace">("direct");
-  const [cfg, setCfg] = useState<ExecuteConfig>({
+  const [cfg, setCfg] = useState<dbtproject.ExecuteConfig>({
     args: "",
     dbtVersion: "",
     fromWorkspace: "",
@@ -61,12 +55,12 @@ export default function ExecuteDbtProjectModal({ db, schema, name, onClose }: Pr
     const execCfg = mode === "direct"
       ? { ...cfg, fromWorkspace: "", projectRoot: "" }
       : cfg;
-    BuildExecuteDbtProjectSql(db, schema, name, execCfg as any)
+    BuildExecuteDbtProjectSql(db, schema, name, execCfg)
       .then(setPreview)
       .catch(() => setPreview(""));
   }, [db, schema, name, cfg, mode]);
 
-  const set = <K extends keyof ExecuteConfig>(key: K, value: ExecuteConfig[K]) =>
+  const set = <K extends keyof dbtproject.ExecuteConfig>(key: K, value: dbtproject.ExecuteConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
 
   const handleRun = () => {

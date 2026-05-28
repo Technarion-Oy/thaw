@@ -24,21 +24,10 @@ import {
   ListSupportedDbtVersions,
 } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
+import { dbtproject } from "../../../wailsjs/go/models";
 import type { main, snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
-
-interface DbtProjectConfig {
-  name: string;
-  caseSensitive: boolean;
-  orReplace: boolean;
-  ifNotExists: boolean;
-  sourceLocation: string;
-  comment: string;
-  dbtVersion: string;
-  defaultTarget: string;
-  externalAccessIntegrations: string[];
-}
 
 interface Props {
   db: string;
@@ -48,7 +37,7 @@ interface Props {
 }
 
 export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }: Props) {
-  const [cfg, setCfg] = useState<DbtProjectConfig>({
+  const [cfg, setCfg] = useState<dbtproject.CreateConfig>({
     name: "",
     caseSensitive: false,
     orReplace: false,
@@ -87,10 +76,10 @@ export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }
   }, []);
 
   useEffect(() => {
-    BuildCreateDbtProjectSql(db, schema, cfg as any).then(setPreview).catch(() => setPreview(""));
+    BuildCreateDbtProjectSql(db, schema, cfg).then(setPreview).catch(() => setPreview(""));
   }, [db, schema, cfg]);
 
-  const set = <K extends keyof DbtProjectConfig>(key: K, value: DbtProjectConfig[K]) =>
+  const set = <K extends keyof dbtproject.CreateConfig>(key: K, value: dbtproject.CreateConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
 
   const canSubmit = cfg.name.trim() !== "" && cfg.sourceLocation.trim() !== "";

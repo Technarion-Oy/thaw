@@ -422,8 +422,6 @@ export function ListBasicObjects(arg1:string,arg2:string):Promise<Array<snowflak
 
 export function ListDatabases():Promise<Array<string>>;
 
-export function ListDbtProjectVersions(arg1:string,arg2:string,arg3:string):Promise<Array<Record<string, any>>>;
-
 export function ListDirectory(arg1:string):Promise<Array<filesystem.FileEntry>>;
 
 export function ListDroppedDatabases():Promise<Array<snowflake.DroppedTable>>;
