@@ -95,6 +95,7 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
   // Tree state
   const [treeData, setTreeData] = useState<DataNode[]>([]);
   const [loadingTree, setLoadingTree] = useState(false);
+  const [treeError, setTreeError] = useState<string>("");
   const [selectedPath, setSelectedPath] = useState<string>("");
 
   // Track whether onChange came from us (to avoid feedback loops)
@@ -120,7 +121,7 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
       .finally(() => setLoadingSchemas(false));
   }, [pickerDb]);
 
-  // Reset pickerDb/pickerSchema to the modal's db/schema when type changes
+  // Reset pickerDb/pickerSchema to the modal's db/schema when type or parent props change
   useEffect(() => {
     setPickerDb(db);
     setPickerSchema(schema);
@@ -133,7 +134,7 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
     setBranches([]);
     setTags([]);
     setVersions([]);
-  }, [sourceType]);
+  }, [sourceType, db, schema]);
 
   // Load objects when type or pickerDb/pickerSchema changes (for non-workspace types)
   useEffect(() => {
@@ -263,6 +264,7 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
 
     setLoadingTree(true);
     setSelectedPath("");
+    setTreeError("");
 
     const dirPath = sourceType === "gitRepo"
       ? `${refType === "branch" ? "branches" : "tags"}/${selectedRef}/`
@@ -270,6 +272,8 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
 
     loadEntries(dirPath).then((entries) => {
       setTreeData(entriesToNodes(entries));
+    }).catch((err) => {
+      setTreeError(String(err));
     }).finally(() => setLoadingTree(false));
   }, [sourceType, selectedObject, selectedWorkspace, selectedRef, refType, pickerDb, pickerSchema, loadEntries]);
 
@@ -481,6 +485,10 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
               <div style={{ textAlign: "center", padding: 16 }}>
                 <Spin size="small" />
               </div>
+            ) : treeError ? (
+              <Text type="danger" style={{ fontSize: 11, padding: 8, display: "block" }}>
+                Failed to load entries: {treeError}
+              </Text>
             ) : treeData.length > 0 ? (
               <Tree
                 treeData={treeData}

@@ -1270,7 +1270,8 @@ func (c *Client) ListDbtProjectVersions(ctx context.Context, database, schema, n
 	return versions, nil
 }
 
-// WorkspaceInfo represents a Snowflake workspace returned by SHOW GIT REPOSITORIES.
+// WorkspaceInfo represents a Snowflake workspace. Workspaces are discovered via
+// SHOW GIT REPOSITORIES (they appear as repos with REPOSITORY_ORIGIN = "WORKSPACE").
 type WorkspaceInfo struct {
 	Name     string `json:"name"`
 	Database string `json:"database"`
@@ -1313,15 +1314,26 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 
 	var workspaces []WorkspaceInfo
 	for _, row := range res.Rows {
-		// Filter: only workspace-type repos (REPOSITORY_ORIGIN = "WORKSPACE")
-		// or repos whose name contains "$" (workspace naming convention).
+		// Filter: prefer the REPOSITORY_ORIGIN column ("WORKSPACE") which
+		// is present on modern Snowflake versions. Fall back to the "$" name
+		// heuristic only when the column is missing from the response (older
+		// versions). Note: the "$" heuristic can false-positive on repos
+		// that happen to contain "$" in their name.
 		origin := ""
 		if originIdx != -1 {
 			origin = strings.ToUpper(strVal(row, originIdx))
 		}
 		name := strVal(row, nameIdx)
-		if origin != "WORKSPACE" && !strings.Contains(name, "$") {
-			continue
+		if originIdx != -1 {
+			// Column available — use authoritative check only.
+			if origin != "WORKSPACE" {
+				continue
+			}
+		} else {
+			// Column unavailable — fall back to name heuristic.
+			if !strings.Contains(name, "$") {
+				continue
+			}
 		}
 		w := WorkspaceInfo{Name: name}
 		if dbIdx != -1 {
