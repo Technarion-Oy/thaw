@@ -78,6 +78,7 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
   // Workspace list (account-wide, not schema-scoped)
   const [workspaces, setWorkspaces] = useState<snowflake.WorkspaceInfo[]>([]);
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState("");
   const [selectedWorkspace, setSelectedWorkspace] = useState<snowflake.WorkspaceInfo | undefined>();
 
   // Git repo ref state
@@ -170,13 +171,17 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
     if (sourceType !== "workspace") return;
     setLoadingWorkspaces(true);
     setWorkspaces([]);
+    setWorkspaceError("");
     setSelectedWorkspace(undefined);
     setSelectedPath("");
     setTreeData([]);
 
     ListWorkspaces()
       .then((ws) => setWorkspaces(ws ?? []))
-      .catch(() => setWorkspaces([]))
+      .catch((err) => {
+        setWorkspaces([]);
+        setWorkspaceError(String(err));
+      })
       .finally(() => setLoadingWorkspaces(false));
   }, [sourceType]);
 
@@ -435,6 +440,11 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
             options={workspaces.map((w) => ({ value: w.name, label: w.name }))}
             allowClear
           />
+        )}
+        {sourceType === "workspace" && workspaceError && (
+          <Text type="danger" style={{ fontSize: 11 }}>
+            Failed to load workspaces: {workspaceError}
+          </Text>
         )}
 
         {/* Ref selector for git repos */}

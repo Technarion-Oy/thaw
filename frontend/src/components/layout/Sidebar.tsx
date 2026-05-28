@@ -67,7 +67,7 @@ import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
 import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, UploadFileToStage, PickOpenFile, ExecDDL } from "../../../wailsjs/go/main/App";
-import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
+import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
@@ -1334,8 +1334,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const schema = parts[2];
     const name = parts[4];
     setCtxMenu(null);
-    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
-    useQueryStore.getState().executeInNewTab(`SHOW VERSIONS IN DBT PROJECT ${q(db)}.${q(schema)}.${q(name)};`);
+    useQueryStore.getState().executeInNewTab(`SHOW VERSIONS IN DBT PROJECT ${quoteIdent(db)}.${quoteIdent(schema)}.${quoteIdent(name)};`);
   };
 
   const describeDbtProject = () => {
@@ -1345,8 +1344,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const schema = parts[2];
     const name = parts[4];
     setCtxMenu(null);
-    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
-    useQueryStore.getState().executeInNewTab(`DESCRIBE DBT PROJECT ${q(db)}.${q(schema)}.${q(name)};`);
+    useQueryStore.getState().executeInNewTab(`DESCRIBE DBT PROJECT ${quoteIdent(db)}.${quoteIdent(schema)}.${quoteIdent(name)};`);
   };
 
   const openCreatePipe = () => {

@@ -69,7 +69,9 @@ export default function ModifyDbtProjectModal({ db, schema, name, onClose, onSuc
         const tgt = pMap.get("DEFAULT_TARGET") || "";
         const cmt = pMap.get("COMMENT") || "";
         const eaiRaw = pMap.get("EXTERNAL_ACCESS_INTEGRATIONS") || "";
-        // Handle possible formats: comma-separated, bracket-wrapped [A,B], or JSON array ["A","B"]
+        // Handle possible formats: comma-separated, bracket-wrapped [A,B], or JSON array ["A","B"].
+        // Splitting on comma is safe because Snowflake identifiers cannot contain commas without quoting,
+        // and DESCRIBE returns unquoted integration names.
         const eaiClean = eaiRaw.replace(/^\[|\]$/g, "");
         const eaiArr = eaiClean ? eaiClean.split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean) : [];
 
