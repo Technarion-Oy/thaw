@@ -220,8 +220,8 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     if (!dir || dir === venvPath) return;
     setVenvPath(dir);
     await SaveSnowparkVenvPath(dir).catch(() => {});
+    setValidationResult(null);
     if (useExisting) {
-      setValidationResult(null);
       setUseExisting(false);
       setCurrent(0);
       setSteps([makeStepState(), makeStepState(), makeStepState()]);
@@ -480,15 +480,14 @@ export default function SnowparkSetupModal({ onClose }: Props) {
                 style={{ fontFamily: "monospace", fontSize: 12, flex: 1 }}
                 onChange={(e) => {
                   setVenvPath(e.target.value);
+                  setValidationResult(null);
                   if (useExisting) {
-                    // Path changed — invalidate previous validation so user must re-validate.
-                    setValidationResult(null);
                     setUseExisting(false);
                     setCurrent(0);
                     setSteps([makeStepState(), makeStepState(), makeStepState()]);
                   }
                 }}
-                onBlur={() => SaveSnowparkVenvPath(venvPath).catch(() => {})}
+                onBlur={() => SaveSnowparkVenvPath(venvPath.trim()).catch(() => {})}
                 onPressEnter={(e) => {
                   (e.target as HTMLInputElement).blur();
                 }}
@@ -589,7 +588,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
           This wizard does not cover all{" "}
           {backend === "conda" ? "conda" : "venv"} operations. See the{" "}
           {backend === "conda" ? (
-            <a href="https://anaconda.org/channels/anaconda/packages/conda/overview" target="_blank" rel="noreferrer">
+            <a href="https://docs.conda.io/projects/conda/en/stable/" target="_blank" rel="noreferrer">
               conda documentation
             </a>
           ) : (
