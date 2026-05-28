@@ -470,7 +470,7 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
         )}
         {sourceType === "workspace" && workspaceError && (
           <Text type="danger" style={{ fontSize: 11 }}>
-            Failed to load workspaces: {workspaceError}
+            Unable to list workspaces. Your role may lack account-level privileges.
           </Text>
         )}
 

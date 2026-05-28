@@ -3005,7 +3005,7 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 	// Filter out disabled object kinds (set via SetExcludedExtendedKinds).
 	excl := c.getExcludedExtendedKinds()
 	if len(excl) > 0 {
-		filtered := commands[:0]
+		filtered := make([]showCmd, 0, len(commands))
 		for _, cmd := range commands {
 			if !excl[cmd.kind] {
 				filtered = append(filtered, cmd)

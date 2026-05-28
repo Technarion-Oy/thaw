@@ -45,7 +45,7 @@ export default function ExecuteDbtProjectModal({ db, schema, name, onClose }: Pr
     setLoadingVersions(true);
     ListSupportedDbtVersions()
       .then((v) => setDbtVersions(v ?? []))
-      .catch(() => {})
+      .catch((err) => console.warn("ListSupportedDbtVersions failed:", err))
       .finally(() => setLoadingVersions(false));
   }, []);
 

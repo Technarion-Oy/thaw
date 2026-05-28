@@ -64,18 +64,18 @@ export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }
     setLoadingEai(true);
     ListExternalAccessIntegrations()
       .then((rows) => setEaiList(rows ?? []))
-      .catch(() => {})
+      .catch((err) => console.warn("ListExternalAccessIntegrations failed:", err))
       .finally(() => setLoadingEai(false));
 
     setLoadingVersions(true);
     ListSupportedDbtVersions()
       .then((v) => setDbtVersions(v ?? []))
-      .catch(() => {})
+      .catch((err) => console.warn("ListSupportedDbtVersions failed:", err))
       .finally(() => setLoadingVersions(false));
 
     GetQuotedIdentifiersIgnoreCase()
       .then((v) => setQuotedIdentifiersIgnoreCase(v ?? false))
-      .catch(() => {});
+      .catch((err) => console.warn("GetQuotedIdentifiersIgnoreCase failed:", err));
   }, []);
 
   useEffect(() => {
