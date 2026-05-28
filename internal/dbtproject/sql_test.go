@@ -41,7 +41,7 @@ func TestBuildCreateDbtProjectSql_BasicRequired(t *testing.T) {
 	}
 	assertContains(t, sql, `CREATE DBT PROJECT`)
 	assertContains(t, sql, `"MYDB"."MYSCHEMA".MY_PROJECT`)
-	assertContains(t, sql, `SOURCE_LOCATION = '@mystage/dbt'`)
+	assertContains(t, sql, `FROM '@mystage/dbt'`)
 	assertNotContains(t, sql, `OR REPLACE`)
 	assertNotContains(t, sql, `IF NOT EXISTS`)
 	assertNotContains(t, sql, `DBT_VERSION`)
@@ -105,7 +105,7 @@ func TestBuildCreateDbtProjectSql_AllOptions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	assertContains(t, sql, `SOURCE_LOCATION = '@mystage/dbt'`)
+	assertContains(t, sql, `FROM '@mystage/dbt'`)
 	assertContains(t, sql, `DBT_VERSION = '1.8.0'`)
 	assertContains(t, sql, `DEFAULT_TARGET = 'prod'`)
 	assertContains(t, sql, `EXTERNAL_ACCESS_INTEGRATIONS = ("EAI_1", "EAI_2")`)
@@ -156,7 +156,7 @@ func TestBuildCreateDbtProjectSql_EscapedLiterals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	assertContains(t, sql, `SOURCE_LOCATION = '@stage/it''s'`)
+	assertContains(t, sql, `FROM '@stage/it''s'`)
 	assertContains(t, sql, `COMMENT = 'it''s a test'`)
 }
 
@@ -229,13 +229,14 @@ func TestBuildAlterDbtProjectSetSql_NoChanges(t *testing.T) {
 	cfg := AlterSetConfig{
 		DbtVersion:    "1.8.0",
 		DefaultTarget: "prod",
+		Comment:       "same comment",
 	}
-	stmts, err := BuildAlterDbtProjectSetSql("DB", "SC", "PROJ", cfg, "", "1.8.0", "prod", nil)
+	stmts, err := BuildAlterDbtProjectSetSql("DB", "SC", "PROJ", cfg, "same comment", "1.8.0", "prod", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(stmts) != 0 {
-		t.Fatalf("expected 0 statements, got %d: %v", len(stmts), stmts)
+		t.Fatalf("expected 0 statements (no changes), got %d: %v", len(stmts), stmts)
 	}
 }
 
@@ -304,9 +305,11 @@ func TestBuildExecuteDbtProjectSql_FromWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	assertContains(t, sql, `EXECUTE DBT PROJECT`)
 	assertContains(t, sql, `FROM WORKSPACE "MY_WS"`)
 	assertContains(t, sql, `PROJECT_ROOT = '/project'`)
 	assertContains(t, sql, `ARGS = 'run'`)
+	assertNotContains(t, sql, `"DB"."SC"."PROJ"`)
 }
 
 // ── BuildAddVersionSql ────────────────────────────────────────────────────────
@@ -316,8 +319,8 @@ func TestBuildAddVersionSql_WithAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	assertContains(t, sql, `ALTER DBT PROJECT "DB"."SC"."PROJ" ADD VERSION 'v1.0'`)
-	assertContains(t, sql, `SOURCE_LOCATION = '@stage/src'`)
+	assertContains(t, sql, `ALTER DBT PROJECT "DB"."SC"."PROJ" ADD VERSION "v1.0"`)
+	assertContains(t, sql, `FROM '@stage/src'`)
 }
 
 func TestBuildAddVersionSql_WithoutAlias(t *testing.T) {
@@ -326,8 +329,8 @@ func TestBuildAddVersionSql_WithoutAlias(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	assertContains(t, sql, `ALTER DBT PROJECT "DB"."SC"."PROJ" ADD VERSION`)
-	assertNotContains(t, sql, `''`) // no empty alias
-	assertContains(t, sql, `SOURCE_LOCATION = '@stage/src'`)
+	assertNotContains(t, sql, `""`) // no empty alias
+	assertContains(t, sql, `FROM '@stage/src'`)
 }
 
 func TestBuildAddVersionSql_MissingSourceLocation(t *testing.T) {

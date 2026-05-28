@@ -49,7 +49,7 @@ export default function ModifyDbtProjectModal({ db, schema, name, onClose, onSuc
   const [loading, setLoading] = useState(true);
   const [modifying, setModifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [preview, setPreview] = useState("");
+  const [statements, setStatements] = useState<string[]>([]);
 
   useEffect(() => {
     const init = async () => {
@@ -96,20 +96,19 @@ export default function ModifyDbtProjectModal({ db, schema, name, onClose, onSuc
       comment,
     };
     BuildAlterDbtProjectSetSql(db, schema, name, cfg as any, origComment, origDbtVersion, origDefaultTarget, origIntegrations)
-      .then((sqls) => setPreview((sqls ?? []).join("\n\n")))
-      .catch(() => setPreview(""));
+      .then((sqls) => setStatements(sqls ?? []))
+      .catch(() => setStatements([]));
   }, [db, schema, name, dbtVersion, defaultTarget, integrations, comment, origComment, origDbtVersion, origDefaultTarget, origIntegrations, loading]);
 
   const handleRun = async () => {
-    const sqls = preview.split("\n\n").filter((s) => s.trim() !== "");
-    if (sqls.length === 0) {
+    if (statements.length === 0) {
       onClose();
       return;
     }
     setModifying(true);
     setError(null);
     try {
-      for (const sql of sqls) {
+      for (const sql of statements) {
         await ExecDDL(sql);
       }
       onSuccess?.();
@@ -237,7 +236,7 @@ export default function ModifyDbtProjectModal({ db, schema, name, onClose, onSuc
               wordBreak: "break-all",
             }}
           >
-            {preview || "-- No changes"}
+            {statements.length > 0 ? statements.join("\n\n") : "-- No changes"}
           </pre>
         </div>
       </Form>

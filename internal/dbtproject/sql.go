@@ -42,10 +42,6 @@ type ExecuteConfig struct {
 	ProjectRoot   string `json:"projectRoot"`
 }
 
-func escLit(s string) string {
-	return strings.ReplaceAll(s, "'", "''")
-}
-
 // BuildCreateDbtProjectSql constructs a CREATE DBT PROJECT SQL statement.
 func BuildCreateDbtProjectSql(db, schema string, cfg CreateConfig) (string, error) {
 	if cfg.SourceLocation == "" {
@@ -69,14 +65,14 @@ func BuildCreateDbtProjectSql(db, schema string, cfg CreateConfig) (string, erro
 	}
 
 	fmt.Fprintf(&sb, "%s %s.%s.%s\n", createClause, snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), nameToken)
-	fmt.Fprintf(&sb, "  SOURCE_LOCATION = '%s'", escLit(cfg.SourceLocation))
+	fmt.Fprintf(&sb, "  FROM '%s'", snowflake.EscapeStringLit(cfg.SourceLocation))
 
 	if cfg.DbtVersion != "" {
-		fmt.Fprintf(&sb, "\n  DBT_VERSION = '%s'", escLit(cfg.DbtVersion))
+		fmt.Fprintf(&sb, "\n  DBT_VERSION = '%s'", snowflake.EscapeStringLit(cfg.DbtVersion))
 	}
 
 	if cfg.DefaultTarget != "" {
-		fmt.Fprintf(&sb, "\n  DEFAULT_TARGET = '%s'", escLit(cfg.DefaultTarget))
+		fmt.Fprintf(&sb, "\n  DEFAULT_TARGET = '%s'", snowflake.EscapeStringLit(cfg.DefaultTarget))
 	}
 
 	if len(cfg.ExternalAccessIntegrations) > 0 {
@@ -88,7 +84,7 @@ func BuildCreateDbtProjectSql(db, schema string, cfg CreateConfig) (string, erro
 	}
 
 	if cfg.Comment != "" {
-		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", escLit(cfg.Comment))
+		fmt.Fprintf(&sb, "\n  COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment))
 	}
 
 	return sb.String() + ";", nil
@@ -103,15 +99,15 @@ func BuildAlterDbtProjectSetSql(db, schema, name string, cfg AlterSetConfig, ori
 	var setClauses []string
 
 	if cfg.DbtVersion != "" && cfg.DbtVersion != origDbtVersion {
-		setClauses = append(setClauses, fmt.Sprintf("DBT_VERSION = '%s'", escLit(cfg.DbtVersion)))
+		setClauses = append(setClauses, fmt.Sprintf("DBT_VERSION = '%s'", snowflake.EscapeStringLit(cfg.DbtVersion)))
 	}
 
 	if cfg.DefaultTarget != "" && cfg.DefaultTarget != origDefaultTarget {
-		setClauses = append(setClauses, fmt.Sprintf("DEFAULT_TARGET = '%s'", escLit(cfg.DefaultTarget)))
+		setClauses = append(setClauses, fmt.Sprintf("DEFAULT_TARGET = '%s'", snowflake.EscapeStringLit(cfg.DefaultTarget)))
 	}
 
-	if cfg.Comment != "" {
-		setClauses = append(setClauses, fmt.Sprintf("COMMENT = '%s'", escLit(cfg.Comment)))
+	if cfg.Comment != "" && cfg.Comment != origComment {
+		setClauses = append(setClauses, fmt.Sprintf("COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment)))
 	}
 
 	// Check if integrations changed
@@ -173,20 +169,20 @@ func BuildExecuteDbtProjectSql(db, schema, name string, cfg ExecuteConfig) (stri
 	var sb strings.Builder
 
 	if cfg.FromWorkspace != "" {
-		fmt.Fprintf(&sb, "EXECUTE DBT PROJECT %s\n  FROM WORKSPACE %s", ref, snowflake.QuoteIdent(cfg.FromWorkspace))
+		fmt.Fprintf(&sb, "EXECUTE DBT PROJECT\n  FROM WORKSPACE %s", snowflake.QuoteIdent(cfg.FromWorkspace))
 		if cfg.ProjectRoot != "" {
-			fmt.Fprintf(&sb, "\n  PROJECT_ROOT = '%s'", escLit(cfg.ProjectRoot))
+			fmt.Fprintf(&sb, "\n  PROJECT_ROOT = '%s'", snowflake.EscapeStringLit(cfg.ProjectRoot))
 		}
 	} else {
 		fmt.Fprintf(&sb, "EXECUTE DBT PROJECT %s", ref)
 	}
 
 	if cfg.Args != "" {
-		fmt.Fprintf(&sb, "\n  ARGS = '%s'", escLit(cfg.Args))
+		fmt.Fprintf(&sb, "\n  ARGS = '%s'", snowflake.EscapeStringLit(cfg.Args))
 	}
 
 	if cfg.DbtVersion != "" {
-		fmt.Fprintf(&sb, "\n  DBT_VERSION = '%s'", escLit(cfg.DbtVersion))
+		fmt.Fprintf(&sb, "\n  DBT_VERSION = '%s'", snowflake.EscapeStringLit(cfg.DbtVersion))
 	}
 
 	return sb.String() + ";", nil
@@ -201,8 +197,8 @@ func BuildAddVersionSql(db, schema, name, versionAlias, sourceLocation string) (
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "ALTER DBT PROJECT %s ADD VERSION", ref)
 	if versionAlias != "" {
-		fmt.Fprintf(&sb, " '%s'", escLit(versionAlias))
+		fmt.Fprintf(&sb, " %s", snowflake.QuoteIdent(versionAlias))
 	}
-	fmt.Fprintf(&sb, "\n  SOURCE_LOCATION = '%s'", escLit(sourceLocation))
+	fmt.Fprintf(&sb, "\n  FROM '%s'", snowflake.EscapeStringLit(sourceLocation))
 	return sb.String() + ";", nil
 }

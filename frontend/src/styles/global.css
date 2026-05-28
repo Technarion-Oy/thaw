@@ -64,6 +64,7 @@
   --icon-notebook:    #c297ff;  /* violet                                   */
   --icon-secret:      #ff7b72;  /* coral red (sensitive)                    */
   --icon-gitrepo:     #ff9248;  /* warm orange (git family)                 */
+  --icon-dbtproject:  #7ee787;  /* mint green (dbt build/deploy)            */
 
   /* Column icons */
   --col-text:         #8b949e;
@@ -123,6 +124,7 @@
   --icon-notebook:    #6f42c1;
   --icon-secret:      #cf222e;
   --icon-gitrepo:     #bc4c00;
+  --icon-dbtproject:  #116329;
 
   /* Column icons */
   --col-text:         #6e7681;
