@@ -319,6 +319,11 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
   // Emit the assembled source location to the parent.
   // The `assembledLocation &&` guard ensures we never clear the parent's manually-typed
   // value on mount (assembledLocation starts as "" before the user interacts with the picker).
+  // suppressRef prevents onChange↔value ping-pong: we set it before calling onChange and
+  // clear it at the top of the next effect run. This assumes React processes the parent's
+  // state update and re-render (propagating the new `value` prop) before this effect fires
+  // again — true for synchronous renders, which is the standard React 18 behavior for
+  // state updates triggered from effects.
   useEffect(() => {
     if (suppressRef.current) {
       suppressRef.current = false;

@@ -65,6 +65,10 @@ export default function ModifyDbtProjectModal({ db, schema, name, onClose, onSuc
         setDbtVersions(versions ?? []);
 
         const pMap = new Map((props ?? []).map((p) => [p.key.toUpperCase(), p.value]));
+        const expectedKeys = ["DBT_VERSION", "DEFAULT_TARGET", "COMMENT", "EXTERNAL_ACCESS_INTEGRATIONS"];
+        for (const k of expectedKeys) {
+          if (!pMap.has(k)) console.debug(`ModifyDbtProjectModal: DESCRIBE response missing expected key "${k}"`);
+        }
         const ver = pMap.get("DBT_VERSION") || "";
         const tgt = pMap.get("DEFAULT_TARGET") || "";
         const cmt = pMap.get("COMMENT") || "";

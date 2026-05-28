@@ -1283,6 +1283,10 @@ type WorkspaceInfo struct {
 // Workspaces appear as git repositories whose name follows the pattern
 // <USER>$.<SCHEMA>."<workspace_name>". We filter by checking the
 // repository_origin column for "WORKSPACE" or by name pattern.
+//
+// TODO: revisit once Snowflake provides a dedicated SHOW WORKSPACES command
+// or supports WHERE/LIKE filtering for REPOSITORY_ORIGIN. The current approach
+// fetches all git repos account-wide, which may be slow on large accounts.
 func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 	res, err := c.Execute(ctx, "SHOW GIT REPOSITORIES IN ACCOUNT")
 	if err != nil {
