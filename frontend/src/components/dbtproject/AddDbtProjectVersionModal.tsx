@@ -88,7 +88,7 @@ export default function AddDbtProjectVersionModal({ db, schema, name, onClose, o
             type="primary"
             icon={<PlusOutlined />}
             onClick={handleRun}
-            disabled={!canSubmit}
+            disabled={!canSubmit || !preview}
             loading={creating}
           >
             Add Version

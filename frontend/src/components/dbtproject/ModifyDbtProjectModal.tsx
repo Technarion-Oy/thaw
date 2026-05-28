@@ -12,7 +12,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import {
-  Modal, Form, Input, Select, Space, Button, Alert, Spin,
+  Modal, Form, Input, Select, Space, Button, Alert, Spin, message,
 } from "antd";
 import { EditOutlined } from "@ant-design/icons";
 import {
@@ -116,6 +116,7 @@ export default function ModifyDbtProjectModal({ db, schema, name, onClose, onSuc
 
   const handleRun = async () => {
     if (statements.length === 0) {
+      message.info("No changes detected");
       onClose();
       return;
     }

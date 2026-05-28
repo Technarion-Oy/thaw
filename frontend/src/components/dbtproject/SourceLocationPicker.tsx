@@ -337,10 +337,19 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
 
   const onLoadData = useCallback(async (node: EventDataNode<DataNode>) => {
     const dirPath = node.key as string;
-    const entries = await loadEntries(dirPath);
-    const children = entriesToNodes(entries);
-
-    setTreeData((prev) => updateTreeData(prev, dirPath, children));
+    try {
+      const entries = await loadEntries(dirPath);
+      const children = entriesToNodes(entries);
+      setTreeData((prev) => updateTreeData(prev, dirPath, children));
+    } catch (err) {
+      // Mark node as leaf so Ant Design removes the loading spinner
+      setTreeData((prev) => updateTreeData(prev, dirPath, [{
+        key: `${dirPath}__error`,
+        title: `Failed to load: ${err}`,
+        isLeaf: true,
+        icon: null,
+      }]));
+    }
   }, [loadEntries]);
 
   const typeOptions = mode === "stage-only" ? TYPE_OPTIONS_STAGE_ONLY : TYPE_OPTIONS_FULL;
