@@ -118,7 +118,8 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - **Backend choice** — select **conda** or **venv** from a radio group; the wizard adapts all commands accordingly
 - **Python interpreter selector** (venv only) — a dropdown lists every Python interpreter found on the system (`/usr/bin`, `/usr/local/bin`, `/opt/homebrew/bin`, Homebrew formula dirs, `~/.pyenv/versions/*/bin`); duplicates are removed by resolving symlinks; selection is persisted to `config.json`
 - **Apple Silicon warning** (conda only) — when an Apple M-series chip is detected, the conda environment is created with `CONDA_SUBDIR=osx-64` to work around a known `pyOpenSSL` incompatibility; a warning banner explains this automatically
-- **Delete venv folder** — danger button with confirmation dialog removes the venv directory and resets all steps, letting the user reinstall cleanly
+- **Use Existing venv** (venv only) — browse to or type the path of an existing virtual environment; the wizard validates it and auto-marks completed steps, jumping to the first missing dependency (or straight to the package manager if fully set up); re-opening the modal with a partially configured venv auto-enters this mode; **Create New Instead** resets to the standard create flow
+- **Delete venv folder** — danger button (hidden in "use existing" mode) with confirmation dialog removes the venv directory and resets all steps, letting the user reinstall cleanly
 - Each step streams its output line-by-line into a scrollable log panel as the command runs; errors are surfaced immediately with retry support
 - The project directory (same location used for DDL export and the embedded terminal) is shown in the setup dialog for reference
 - Environment and backend settings are persisted to `~/.config/thaw/config.json`

@@ -668,7 +668,14 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - **Backend choice** — radio group selects **conda** or **venv**; all commands adapt accordingly
 - **Python interpreter selector** (venv only) — dropdown lists every Python interpreter found on the system (`/usr/bin`, Homebrew, pyenv, etc.); duplicates are removed by resolving symlinks; the selection is saved to `config.json`
 - **Apple Silicon warning** (conda only) — `CONDA_SUBDIR=osx-64` is applied automatically on Apple M-series chips to work around a known `pyOpenSSL` incompatibility; a banner explains this
-- **Delete venv folder** — danger button with a confirmation dialog removes the venv directory and resets all steps
+- **Use Existing venv** (venv only) — point the wizard at a pre-existing virtual environment (project-specific, shared team env, pyenv-managed, etc.) instead of creating a new one:
+  - **Browse** button opens a native directory picker; the path can also be typed manually
+  - **Use Existing / Re-validate** validates the selected directory via `CheckSnowparkEnv`, showing a checklist (venv present, `snowflake-snowpark-python`, `notebook`) with detected Python version
+  - Steps that are already satisfied are auto-marked done; the wizard jumps to the first missing step (or straight to the package manager if everything is installed)
+  - The Python interpreter selector is hidden in "use existing" mode (the venv already has its own Python)
+  - Re-opening the modal with a partially configured venv auto-enters "use existing" mode
+  - **Create New Instead** resets back to the standard create-from-scratch flow
+- **Delete venv folder** — danger button (hidden in "use existing" mode) with a confirmation dialog removes the venv directory and resets all steps
 - The project directory (same path used for DDL export and the terminal) is shown for reference
 - **Manage Packages** — a 4th step in the setup wizard is always accessible (via the stepper or the "Manage Packages" footer button) regardless of whether the setup steps have been run in the current session:
   - **Install** — enter any package name and press Install or hit Enter; output streams line-by-line into a log panel; the package list refreshes automatically on success
