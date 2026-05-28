@@ -4291,7 +4291,7 @@ func (a *App) applyFeatureFlagExclusions() {
 	if !flags.DbtProjectBrowser {
 		excl["DBT PROJECT"] = true
 	}
-	a.client.ExcludedExtendedKinds = excl
+	a.client.SetExcludedExtendedKinds(excl)
 }
 
 // ─── Notebook preferences ────────────────────────────────────────────────────

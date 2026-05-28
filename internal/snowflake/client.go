@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	sf "github.com/snowflakedb/gosnowflake/v2"
@@ -182,10 +183,25 @@ type Client struct {
 	objectCacheMu sync.RWMutex
 	objectCache   map[string]objectCacheEntry
 
-	// ExcludedExtendedKinds is a set of object kinds to skip in
-	// ListExtendedObjects. Set by the application layer based on feature
-	// flags so disabled features don't incur unnecessary SHOW queries.
-	ExcludedExtendedKinds map[string]bool
+	// excludedExtendedKinds stores a map[string]bool of object kinds to skip
+	// in ListExtendedObjects. Accessed via SetExcludedExtendedKinds (write)
+	// and getExcludedExtendedKinds (read) which use atomic.Value for safe
+	// concurrent access without locking.
+	excludedExtendedKinds atomic.Value // stores map[string]bool
+}
+
+// SetExcludedExtendedKinds atomically replaces the set of object kinds that
+// ListExtendedObjects will skip. Safe to call concurrently with ListExtendedObjects.
+func (c *Client) SetExcludedExtendedKinds(kinds map[string]bool) {
+	c.excludedExtendedKinds.Store(kinds)
+}
+
+func (c *Client) getExcludedExtendedKinds() map[string]bool {
+	v := c.excludedExtendedKinds.Load()
+	if v == nil {
+		return nil
+	}
+	return v.(map[string]bool)
 }
 
 type objectCacheEntry struct {
@@ -2986,11 +3002,12 @@ func (c *Client) ListExtendedObjects(ctx context.Context, database, schema strin
 		{fmt.Sprintf("SHOW DBT PROJECTS IN SCHEMA %s", q), "DBT PROJECT"},
 	}
 
-	// Filter out disabled object kinds (set via ExcludedExtendedKinds).
-	if len(c.ExcludedExtendedKinds) > 0 {
+	// Filter out disabled object kinds (set via SetExcludedExtendedKinds).
+	excl := c.getExcludedExtendedKinds()
+	if len(excl) > 0 {
 		filtered := commands[:0]
 		for _, cmd := range commands {
-			if !c.ExcludedExtendedKinds[cmd.kind] {
+			if !excl[cmd.kind] {
 				filtered = append(filtered, cmd)
 			}
 		}

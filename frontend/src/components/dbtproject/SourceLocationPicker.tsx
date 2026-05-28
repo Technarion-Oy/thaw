@@ -102,6 +102,11 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
   // Track whether onChange came from us (to avoid feedback loops)
   const suppressRef = useRef(false);
 
+  // Stable ref for the onChange callback — prevents the reset effect from
+  // re-running when the parent passes a new closure identity on each render.
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
   // Load databases on mount
   useEffect(() => {
     setLoadingDbs(true);
@@ -130,7 +135,7 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
     if (prevSourceType.current !== sourceType) {
       prevSourceType.current = sourceType;
       suppressRef.current = true;
-      onChange("");
+      onChangeRef.current("");
     }
     setPickerDb(db);
     setPickerSchema(schema);
@@ -143,7 +148,7 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
     setBranches([]);
     setTags([]);
     setVersions([]);
-  }, [sourceType, db, schema, onChange]);
+  }, [sourceType, db, schema]);
 
   // Load objects when type or pickerDb/pickerSchema changes (for non-workspace types)
   useEffect(() => {
@@ -339,9 +344,9 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
     }
     if (assembledLocation && assembledLocation !== value) {
       suppressRef.current = true;
-      onChange(assembledLocation);
+      onChangeRef.current(assembledLocation);
     }
-  }, [assembledLocation, value, onChange]);
+  }, [assembledLocation, value]);
 
   const onLoadData = useCallback(async (node: EventDataNode<DataNode>) => {
     const dirPath = node.key as string;
