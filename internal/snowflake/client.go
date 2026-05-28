@@ -1061,13 +1061,21 @@ func (c *Client) ListSecretsInAccount(ctx context.Context) ([]AccountSecret, err
 	return secrets, nil
 }
 
-// GitRepoEntry represents a file or directory inside a Snowflake git repository stage.
+// GitRepoEntry represents a file or directory entry returned by listing
+// a Snowflake git repository, internal stage, or workspace. The struct
+// is generic (name, path, isDir, size) and reused across all location types.
 type GitRepoEntry struct {
 	Name  string `json:"name"`
 	Path  string `json:"path"`
 	IsDir bool   `json:"isDir"`
 	Size  int64  `json:"size,omitempty"`
 }
+
+// StageEntry is an alias for GitRepoEntry, used by ListStageEntries for clarity.
+type StageEntry = GitRepoEntry
+
+// WorkspaceEntry is an alias for GitRepoEntry, used by ListWorkspaceEntries for clarity.
+type WorkspaceEntry = GitRepoEntry
 
 // GitBranch represents a branch in a Snowflake git repository.
 type GitBranch struct {
@@ -1207,7 +1215,7 @@ func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoN
 // dirPath within an internal named stage @database.schema.stageName/dirPath.
 // Pass an empty dirPath to list the root. Reuses the same directory-aware
 // parsing logic as ListGitRepoEntries.
-func (c *Client) ListStageEntries(ctx context.Context, database, schema, stageName, dirPath string) ([]GitRepoEntry, error) {
+func (c *Client) ListStageEntries(ctx context.Context, database, schema, stageName, dirPath string) ([]StageEntry, error) {
 	dirPath = normalizeDirPath(dirPath)
 
 	sql := fmt.Sprintf(`LIST @%s.%s.%s/%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(stageName), dirPath)
@@ -1356,7 +1364,7 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 
 // ListWorkspaceEntries returns directory-aware entries within a workspace.
 // The workspace is addressed as a git repository stage: @db.schema."workspace_name"/dirPath.
-func (c *Client) ListWorkspaceEntries(ctx context.Context, database, schema, workspaceName, dirPath string) ([]GitRepoEntry, error) {
+func (c *Client) ListWorkspaceEntries(ctx context.Context, database, schema, workspaceName, dirPath string) ([]WorkspaceEntry, error) {
 	dirPath = normalizeDirPath(dirPath)
 
 	sql := fmt.Sprintf(`LIST @%s.%s.%s/%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(workspaceName), dirPath)

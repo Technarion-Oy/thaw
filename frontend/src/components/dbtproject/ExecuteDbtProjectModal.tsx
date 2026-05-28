@@ -50,16 +50,17 @@ export default function ExecuteDbtProjectModal({ db, schema, name, onClose }: Pr
   }, []);
 
   useEffect(() => {
+    let stale = false;
     clearTimeout(previewTimer.current);
     previewTimer.current = setTimeout(() => {
       const execCfg = mode === "direct"
         ? { ...cfg, fromWorkspace: "", projectRoot: "" }
         : cfg;
       BuildExecuteDbtProjectSql(db, schema, name, execCfg)
-        .then(setPreview)
-        .catch(() => setPreview(""));
+        .then((sql) => { if (!stale) setPreview(sql); })
+        .catch(() => { if (!stale) setPreview(""); });
     }, 200);
-    return () => clearTimeout(previewTimer.current);
+    return () => { stale = true; clearTimeout(previewTimer.current); };
   }, [db, schema, name, cfg, mode]);
 
   // Spread loses the Wails class prototype, but this is fine — Wails uses JSON

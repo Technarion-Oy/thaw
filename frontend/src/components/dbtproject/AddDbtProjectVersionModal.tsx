@@ -39,6 +39,7 @@ export default function AddDbtProjectVersionModal({ db, schema, name, onClose, o
   const previewTimer = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
+    let stale = false;
     clearTimeout(previewTimer.current);
     if (!sourceLocation.trim()) {
       setPreview("");
@@ -46,10 +47,10 @@ export default function AddDbtProjectVersionModal({ db, schema, name, onClose, o
     }
     previewTimer.current = setTimeout(() => {
       BuildAddDbtProjectVersionSql(db, schema, name, versionAlias, sourceLocation)
-        .then(setPreview)
-        .catch(() => setPreview(""));
+        .then((sql) => { if (!stale) setPreview(sql); })
+        .catch(() => { if (!stale) setPreview(""); });
     }, 200);
-    return () => clearTimeout(previewTimer.current);
+    return () => { stale = true; clearTimeout(previewTimer.current); };
   }, [db, schema, name, versionAlias, sourceLocation]);
 
   const canSubmit = sourceLocation.trim() !== "";

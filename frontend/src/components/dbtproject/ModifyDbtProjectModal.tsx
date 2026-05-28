@@ -99,6 +99,7 @@ export default function ModifyDbtProjectModal({ db, schema, name, onClose, onSuc
 
   useEffect(() => {
     if (loading) return;
+    let stale = false;
     clearTimeout(previewTimer.current);
     previewTimer.current = setTimeout(() => {
       const cfg = new dbtproject.AlterSetConfig({
@@ -108,10 +109,10 @@ export default function ModifyDbtProjectModal({ db, schema, name, onClose, onSuc
         comment,
       });
       BuildAlterDbtProjectSetSql(db, schema, name, cfg, origComment, origDbtVersion, origDefaultTarget, origIntegrations)
-        .then((sqls) => setStatements(sqls ?? []))
-        .catch(() => setStatements([]));
+        .then((sqls) => { if (!stale) setStatements(sqls ?? []); })
+        .catch(() => { if (!stale) setStatements([]); });
     }, 200);
-    return () => clearTimeout(previewTimer.current);
+    return () => { stale = true; clearTimeout(previewTimer.current); };
   }, [db, schema, name, dbtVersion, defaultTarget, integrations, comment, origComment, origDbtVersion, origDefaultTarget, origIntegrations, loading]);
 
   const handleRun = async () => {

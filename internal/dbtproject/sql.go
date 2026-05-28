@@ -73,6 +73,8 @@ func BuildCreateDbtProjectSql(db, schema string, cfg CreateConfig) (string, erro
 
 	nameToken := snowflake.QuoteOrBare(cfg.Name, cfg.CaseSensitive)
 	if cfg.Name == "" {
+		// Placeholder for live SQL preview before the user types a name.
+		// The frontend gates submission with canSubmit (name must be non-empty).
 		nameToken = "project_name"
 	}
 
