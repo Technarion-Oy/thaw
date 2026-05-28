@@ -50,7 +50,7 @@ type DbtVersionInfo struct {
 
 // BuildDescribeSql returns a DESCRIBE DBT PROJECT statement.
 func BuildDescribeSql(db, schema, name string) string {
-	return fmt.Sprintf("DESCRIBE DBT PROJECT %s.%s.%s",
+	return fmt.Sprintf("DESCRIBE DBT PROJECT %s.%s.%s;",
 		snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
 }
 
@@ -89,8 +89,8 @@ func BuildCreateDbtProjectSql(db, schema string, cfg CreateConfig) (string, erro
 
 	if len(cfg.ExternalAccessIntegrations) > 0 {
 		quoted := make([]string, len(cfg.ExternalAccessIntegrations))
-		for i, name := range cfg.ExternalAccessIntegrations {
-			quoted[i] = snowflake.QuoteIdent(name)
+		for i, n := range cfg.ExternalAccessIntegrations {
+			quoted[i] = snowflake.QuoteIdent(n)
 		}
 		fmt.Fprintf(&sb, "\n  EXTERNAL_ACCESS_INTEGRATIONS = (%s)", strings.Join(quoted, ", "))
 	}

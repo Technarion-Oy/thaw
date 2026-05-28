@@ -422,6 +422,8 @@ export function ListBasicObjects(arg1:string,arg2:string):Promise<Array<snowflak
 
 export function ListDatabases():Promise<Array<string>>;
 
+export function ListDbtProjectVersions(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.DbtProjectVersion>>;
+
 export function ListDirectory(arg1:string):Promise<Array<filesystem.FileEntry>>;
 
 export function ListDroppedDatabases():Promise<Array<snowflake.DroppedTable>>;
@@ -464,6 +466,8 @@ export function ListSecretsInAccount():Promise<Array<snowflake.AccountSecret>>;
 
 export function ListSecurityIntegrations():Promise<Array<snowflake.SecurityIntegration>>;
 
+export function ListStageEntries(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.GitRepoEntry>>;
+
 export function ListStageFiles(arg1:string,arg2:string):Promise<Array<stage.StageFile>>;
 
 export function ListSupportedDbtVersions():Promise<Array<dbtproject.DbtVersionInfo>>;
@@ -473,6 +477,10 @@ export function ListSystemPythons():Promise<Array<snowpark.PythonInfo>>;
 export function ListUsers():Promise<Array<snowflake.SnowflakeUser>>;
 
 export function ListWarehouses():Promise<Array<string>>;
+
+export function ListWorkspaceEntries(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.GitRepoEntry>>;
+
+export function ListWorkspaces():Promise<Array<snowflake.WorkspaceInfo>>;
 
 export function LoadNotebookBreakpoints(arg1:string):Promise<Record<string, Array<number>>>;
 

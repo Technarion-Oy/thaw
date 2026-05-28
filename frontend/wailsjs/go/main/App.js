@@ -802,6 +802,10 @@ export function ListDatabases() {
   return window['go']['main']['App']['ListDatabases']();
 }
 
+export function ListDbtProjectVersions(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ListDbtProjectVersions'](arg1, arg2, arg3);
+}
+
 export function ListDirectory(arg1) {
   return window['go']['main']['App']['ListDirectory'](arg1);
 }
@@ -886,6 +890,10 @@ export function ListSecurityIntegrations() {
   return window['go']['main']['App']['ListSecurityIntegrations']();
 }
 
+export function ListStageEntries(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ListStageEntries'](arg1, arg2, arg3, arg4);
+}
+
 export function ListStageFiles(arg1, arg2) {
   return window['go']['main']['App']['ListStageFiles'](arg1, arg2);
 }
@@ -904,6 +912,14 @@ export function ListUsers() {
 
 export function ListWarehouses() {
   return window['go']['main']['App']['ListWarehouses']();
+}
+
+export function ListWorkspaceEntries(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ListWorkspaceEntries'](arg1, arg2, arg3, arg4);
+}
+
+export function ListWorkspaces() {
+  return window['go']['main']['App']['ListWorkspaces']();
 }
 
 export function LoadNotebookBreakpoints(arg1) {

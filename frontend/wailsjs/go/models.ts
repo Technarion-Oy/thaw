@@ -1909,6 +1909,22 @@ export namespace snowflake {
 	        this.ParamHint = source["ParamHint"];
 	    }
 	}
+	export class DbtProjectVersion {
+	    version: string;
+	    alias: string;
+	    isDefault: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new DbtProjectVersion(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.alias = source["alias"];
+	        this.isDefault = source["isDefault"];
+	    }
+	}
 	export class DependencyNode {
 	    name: string;
 	    schema: string;
@@ -2562,6 +2578,24 @@ export namespace snowflake {
 	        this.fkColumn = source["fkColumn"];
 	        this.constraintName = source["constraintName"];
 	        this.keySequence = source["keySequence"];
+	    }
+	}
+	export class WorkspaceInfo {
+	    name: string;
+	    database: string;
+	    schema: string;
+	    owner: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new WorkspaceInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.database = source["database"];
+	        this.schema = source["schema"];
+	        this.owner = source["owner"];
 	    }
 	}
 

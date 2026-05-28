@@ -370,5 +370,5 @@ func TestBuildAddVersionSql_MissingSourceLocation(t *testing.T) {
 
 func TestBuildDescribeSql(t *testing.T) {
 	sql := BuildDescribeSql("DB", "SC", "PROJ")
-	assertContains(t, sql, `DESCRIBE DBT PROJECT "DB"."SC"."PROJ"`)
+	assertContains(t, sql, `DESCRIBE DBT PROJECT "DB"."SC"."PROJ";`)
 }

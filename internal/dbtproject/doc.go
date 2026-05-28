@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 // Package dbtproject provides SQL builders for Snowflake-native DBT PROJECT
-// objects (CREATE, ALTER, EXECUTE, DROP).
+// objects (CREATE, ALTER, EXECUTE, DESCRIBE).
 //
 // thaw:domain: Object Browser & Administration
 package dbtproject

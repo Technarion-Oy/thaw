@@ -10,7 +10,7 @@
 //
 // @thaw-domain: Object Browser & Administration
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Select, Tree, Segmented, Space, Typography, Spin } from "antd";
 import {
   FolderOutlined,
@@ -32,6 +32,7 @@ import {
 } from "../../../wailsjs/go/main/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import type { DataNode, EventDataNode } from "antd/es/tree";
+import { quoteIdent } from "../shared/ObjectNameCaseControl";
 
 const { Text } = Typography;
 
@@ -246,18 +247,48 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
     }).finally(() => setLoadingTree(false));
   }, [sourceType, selectedObject, selectedWorkspace, selectedRef, refType, pickerDb, pickerSchema]);
 
-  // Assemble and emit the source location string
+  // Assembled source location string (memoized to avoid recomputation)
+  const assembledLocation = useMemo(() => {
+    const q = (s: string) => quoteIdent(s);
+
+    if (sourceType === "gitRepo") {
+      if (!selectedObject || !selectedRef) return "";
+      const refPrefix = refType === "branch" ? "branches" : "tags";
+      const path = selectedPath || "";
+      return `@${q(pickerDb)}.${q(pickerSchema)}.${q(selectedObject)}/${refPrefix}/${selectedRef}/${path}`;
+    }
+
+    if (sourceType === "stage") {
+      if (!selectedObject) return "";
+      const path = selectedPath || "";
+      return `@${q(pickerDb)}.${q(pickerSchema)}.${q(selectedObject)}/${path}`;
+    }
+
+    if (sourceType === "dbtProject") {
+      if (!selectedObject || !selectedVersion) return "";
+      return `snow://dbt/${q(pickerDb)}.${q(pickerSchema)}.${q(selectedObject)}/versions/${selectedVersion}`;
+    }
+
+    if (sourceType === "workspace") {
+      if (!selectedWorkspace) return "";
+      const path = selectedPath || "";
+      return `snow://workspace/${selectedWorkspace.name}/versions/live/${path}`;
+    }
+
+    return "";
+  }, [sourceType, selectedObject, selectedWorkspace, selectedRef, refType, selectedVersion, selectedPath, pickerDb, pickerSchema]);
+
+  // Emit the assembled source location to the parent
   useEffect(() => {
     if (suppressRef.current) {
       suppressRef.current = false;
       return;
     }
-    const assembled = assembleLocation();
-    if (assembled && assembled !== value) {
+    if (assembledLocation && assembledLocation !== value) {
       suppressRef.current = true;
-      onChange(assembled);
+      onChange(assembledLocation);
     }
-  }, [sourceType, selectedObject, selectedWorkspace, selectedRef, refType, selectedVersion, selectedPath, pickerDb, pickerSchema]);
+  }, [assembledLocation, value, onChange]);
 
   const loadEntries = useCallback(async (dirPath: string): Promise<snowflake.GitRepoEntry[]> => {
     if (sourceType === "gitRepo" && selectedObject) {
@@ -292,34 +323,6 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
 
     setTreeData((prev) => updateTreeData(prev, dirPath, children));
   }, [loadEntries]);
-
-  const assembleLocation = (): string => {
-    if (sourceType === "gitRepo") {
-      if (!selectedObject || !selectedRef) return "";
-      const refPrefix = refType === "branch" ? "branches" : "tags";
-      const path = selectedPath || "";
-      return `@${pickerDb}.${pickerSchema}.${selectedObject}/${refPrefix}/${selectedRef}/${path}`;
-    }
-
-    if (sourceType === "stage") {
-      if (!selectedObject) return "";
-      const path = selectedPath || "";
-      return `@${pickerDb}.${pickerSchema}.${selectedObject}/${path}`;
-    }
-
-    if (sourceType === "dbtProject") {
-      if (!selectedObject || !selectedVersion) return "";
-      return `snow://dbt/${pickerDb}.${pickerSchema}.${selectedObject}/versions/${selectedVersion}`;
-    }
-
-    if (sourceType === "workspace") {
-      if (!selectedWorkspace) return "";
-      const path = selectedPath || "";
-      return `snow://workspace/${selectedWorkspace.name}/versions/live/${path}`;
-    }
-
-    return "";
-  };
 
   const typeOptions = mode === "stage-only" ? TYPE_OPTIONS_STAGE_ONLY : TYPE_OPTIONS_FULL;
 
@@ -432,8 +435,8 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
             value={selectedRef ? `${refType}:${selectedRef}` : undefined}
             onChange={(v) => {
               if (!v) { setSelectedRef(undefined); return; }
-              const [type, ...rest] = v.split(":");
-              setRefType(type as "branch" | "tag");
+              const [refKind, ...rest] = v.split(":");
+              setRefType(refKind as "branch" | "tag");
               setSelectedRef(rest.join(":"));
             }}
             loading={loadingRefs}
@@ -500,7 +503,7 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
         )}
 
         {/* Assembled location preview */}
-        {assembleLocation() && (
+        {assembledLocation && (
           <div style={{
             padding: "4px 8px",
             background: "var(--bg-elevated, var(--bg))",
@@ -508,7 +511,7 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
             border: "1px dashed var(--border)",
           }}>
             <Text style={{ fontSize: 11, fontFamily: "'JetBrains Mono', monospace", wordBreak: "break-all" }}>
-              {assembleLocation()}
+              {assembledLocation}
             </Text>
           </div>
         )}
