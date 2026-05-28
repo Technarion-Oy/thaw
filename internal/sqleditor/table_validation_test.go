@@ -194,6 +194,10 @@ func TestValidateSnowflakePatterns_CreateHybridTable(t *testing.T) {
 		// column-level NOT NULL constraint. The reNotNull regex must not be
 		// fooled by NOT NULL appearing inside a CHECK expression.
 		{"CHECK clause IS NOT NULL is not column NOT NULL", "CREATE HYBRID TABLE t1 (id INT CHECK (id IS NOT NULL), PRIMARY KEY (id))", []string{"Primary key columns in a hybrid table must be NOT NULL"}},
+		// DEFAULT expression containing IS NOT NULL in a conditional (IFF, CASE,
+		// etc.) is NOT the column-level NOT NULL constraint. The reNotNull regex
+		// must not be fooled by NOT NULL appearing inside a DEFAULT expression.
+		{"DEFAULT expr IS NOT NULL is not column NOT NULL", "CREATE HYBRID TABLE t1 (id INT DEFAULT IFF(id IS NOT NULL, 1, 0), PRIMARY KEY (id))", []string{"Primary key columns in a hybrid table must be NOT NULL"}},
 	}
 
 	for _, tt := range invalidCases {
@@ -373,6 +377,23 @@ func TestValidateSnowflakePatterns_CreateEventTable(t *testing.T) {
 			"OR REPLACE TRANSIENT event table",
 			"CREATE OR REPLACE TRANSIENT EVENT TABLE my_events",
 			[]string{"TRANSIENT"},
+		},
+		// Quoted CHANGE_TRACKING value — the event table validator strips
+		// string literals before matching reEvtChangeTrackingValue, so a
+		// quoted invalid value like 'INVALID' is replaced with '' and the
+		// regex (\w+) never captures it, silently accepting the bad value.
+		{
+			"Quoted CHANGE_TRACKING invalid value",
+			"CREATE EVENT TABLE my_events CHANGE_TRACKING = 'INVALID'",
+			[]string{"CHANGE_TRACKING must be TRUE or FALSE"},
+		},
+		// Same flaw for DATA_RETENTION_TIME_IN_DAYS — a quoted non-integer
+		// value is replaced with '' by string stripping, causing the regex
+		// to miss it entirely and silently accept invalid input.
+		{
+			"Quoted DATA_RETENTION_TIME_IN_DAYS non-integer",
+			"CREATE EVENT TABLE my_events DATA_RETENTION_TIME_IN_DAYS = 'abc'",
+			[]string{"DATA_RETENTION_TIME_IN_DAYS must be a non-negative integer"},
 		},
 	}
 
@@ -783,6 +804,11 @@ func TestValidateSnowflakePatterns_AlterTableSwapWith(t *testing.T) {
 			// Quoted identifier with an internal dot ("A.B") is a single 1-part name,
 			// different from the 2-part path A.B — must not be flagged as same table.
 			`ALTER TABLE "A.B" SWAP WITH A.B`,
+			// In Snowflake, quoted identifiers preserve case: "lower" is stored
+			// as-is (lowercase), while "LOWER" is stored as-is (uppercase).
+			// They are DIFFERENT tables. The validator must not flag them as the
+			// same table. (The strings.ToUpper comparison flattens the distinction.)
+			`ALTER TABLE "lower" SWAP WITH "LOWER"`,
 		}
 		for _, sql := range validQueries {
 			t.Run(sql, func(t *testing.T) {
