@@ -88,9 +88,10 @@ function entriesToNodes(entries: FileEntry[]): DataNode[] {
   }));
 }
 
-/** Merge fresh root-level entries into the existing tree, preserving children
- *  of nodes that still exist (so expanded subtrees aren't lost). */
-function mergeRootNodes(prev: DataNode[], fresh: DataNode[]): DataNode[] {
+/** Merge fresh entries into existing ones, preserving children of nodes that
+ *  still exist so expanded subtrees aren't lost. Works for both root-level
+ *  and subdirectory refreshes. */
+function mergeNodes(prev: DataNode[], fresh: DataNode[]): DataNode[] {
   const oldByKey = new Map(prev.map((n) => [String(n.key), n]));
   return fresh.map((f) => {
     const existing = oldByKey.get(String(f.key));
@@ -99,11 +100,14 @@ function mergeRootNodes(prev: DataNode[], fresh: DataNode[]): DataNode[] {
   });
 }
 
-function updateNode(nodes: DataNode[], targetKey: string, children: DataNode[]): DataNode[] {
+function updateNode(nodes: DataNode[], targetKey: string, children: DataNode[], merge?: boolean): DataNode[] {
   return nodes.map((node) => {
-    if (node.key === targetKey) return { ...node, children };
+    if (node.key === targetKey) {
+      const merged = merge && node.children ? mergeNodes(node.children, children) : children;
+      return { ...node, children: merged };
+    }
     if ((node as any).children) {
-      return { ...node, children: updateNode((node as any).children, targetKey, children) };
+      return { ...node, children: updateNode((node as any).children, targetKey, children, merge) };
     }
     return node;
   });
@@ -281,6 +285,13 @@ export default function FileBrowser() {
     }, 500));
   };
 
+  // Clear pending self-change suppression timers on unmount.
+  useEffect(() => {
+    return () => {
+      for (const t of selfChangeTimers.current.values()) clearTimeout(t);
+    };
+  }, []);
+
   // Stable ref so the fs:changed listener can read loadedKeys without
   // re-registering on every expand/collapse.
   const loadedKeysRef = useRef(loadedKeys);
@@ -325,7 +336,7 @@ export default function FileBrowser() {
   // ── File system watcher lifecycle ──────────────────────────────────────────
   useEffect(() => {
     if (!exportDir || !fileWatcherEnabled) return;
-    StartFileWatcher(exportDir).catch(() => {});
+    StartFileWatcher(exportDir).catch((e) => console.warn("File watcher failed to start:", e));
     return () => { StopFileWatcher().catch(() => {}); };
   }, [exportDir, fileWatcherEnabled]);
 
@@ -340,7 +351,7 @@ export default function FileBrowser() {
         ListDirectory(exportDir)
           .then((entries) => {
             const fresh = entriesToNodes(entries);
-            setTreeData((prev) => mergeRootNodes(prev, fresh));
+            setTreeData((prev) => mergeNodes(prev, fresh));
           })
           .catch(() => {});
         return;
@@ -349,7 +360,7 @@ export default function FileBrowser() {
       if (!loadedKeysRef.current.some((k) => String(k) === evt.dir)) return;
       ListDirectory(evt.dir)
         .then((entries) => {
-          setTreeData((prev) => updateNode(prev, evt.dir, entriesToNodes(entries)));
+          setTreeData((prev) => updateNode(prev, evt.dir, entriesToNodes(entries), true));
         })
         .catch(() => {});
     });

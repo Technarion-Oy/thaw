@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+
+	"thaw/internal/logger"
 )
 
 // FSChangeEvent is emitted to the frontend when files in a directory change.
@@ -28,11 +30,12 @@ type FSChangeEvent struct {
 // Watcher monitors a directory tree for file system changes and emits
 // debounced per-directory events via the provided callback.
 type Watcher struct {
-	watcher *fsnotify.Watcher
-	root    string
-	emit    func(FSChangeEvent)
-	stopCh  chan struct{}
-	wg      sync.WaitGroup
+	watcher   *fsnotify.Watcher
+	root      string
+	emit      func(FSChangeEvent)
+	stopCh    chan struct{}
+	wg        sync.WaitGroup
+	closeOnce sync.Once
 
 	mu     sync.Mutex
 	timers map[string]*time.Timer // per-directory debounce timers
@@ -67,8 +70,8 @@ func NewWatcher(dir string, emit func(FSChangeEvent)) (*Watcher, error) {
 				return filepath.SkipDir
 			}
 			if addErr := fsw.Add(path); addErr != nil {
-				// Log-worthy but not fatal — continue watching other dirs.
-				// On Linux this typically means the inotify watch limit is hit.
+				// Non-fatal — on Linux this typically means the inotify watch limit is hit.
+				logger.L.Warn("file watcher: failed to watch directory", "path", path, "error", addErr)
 				return nil
 			}
 		}
@@ -85,19 +88,22 @@ func NewWatcher(dir string, emit func(FSChangeEvent)) (*Watcher, error) {
 	return w, nil
 }
 
-// Close stops the watcher and releases all resources.
+// Close stops the watcher and releases all resources. It is safe to call
+// multiple times.
 func (w *Watcher) Close() {
-	close(w.stopCh)
-	w.wg.Wait()
+	w.closeOnce.Do(func() {
+		close(w.stopCh)
+		w.wg.Wait()
 
-	w.mu.Lock()
-	for _, t := range w.timers {
-		t.Stop()
-	}
-	w.timers = nil
-	w.mu.Unlock()
+		w.mu.Lock()
+		for _, t := range w.timers {
+			t.Stop()
+		}
+		w.timers = nil
+		w.mu.Unlock()
 
-	w.watcher.Close() //nolint:errcheck
+		w.watcher.Close() //nolint:errcheck
+	})
 }
 
 // run is the main event loop goroutine.
@@ -155,7 +161,9 @@ func (w *Watcher) addRecursive(dir string) {
 			if path != dir && isHidden(d.Name()) {
 				return filepath.SkipDir
 			}
-			w.watcher.Add(path) //nolint:errcheck
+			if addErr := w.watcher.Add(path); addErr != nil {
+				logger.L.Warn("file watcher: failed to watch new directory", "path", path, "error", addErr)
+			}
 		}
 		return nil
 	})

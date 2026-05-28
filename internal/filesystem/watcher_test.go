@@ -1,0 +1,228 @@
+// Copyright (c) 2026 Technarion Oy. All rights reserved.
+//
+// This software and its source code are proprietary and confidential.
+// Unauthorized copying, distribution, modification, or use of this software,
+// in whole or in part, is strictly prohibited without prior written permission
+// from Technarion Oy.
+//
+// Commercial use of this software is restricted to parties holding a valid
+// license agreement with Technarion Oy.
+
+package filesystem
+
+import (
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+)
+
+// waitFor polls a condition with a timeout, returning true if it was met.
+func waitFor(t *testing.T, timeout time.Duration, cond func() bool) bool {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return true
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return false
+}
+
+func TestWatcher_LifecycleAndClose(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWatcher(dir, func(FSChangeEvent) {})
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	w.Close()
+	// Double-close must not panic.
+	w.Close()
+}
+
+func TestWatcher_EmitsOnFileCreate(t *testing.T) {
+	dir := t.TempDir()
+
+	var mu sync.Mutex
+	var events []FSChangeEvent
+
+	w, err := NewWatcher(dir, func(evt FSChangeEvent) {
+		mu.Lock()
+		events = append(events, evt)
+		mu.Unlock()
+	})
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	defer w.Close()
+
+	// Create a file to trigger an event.
+	if err := os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ok := waitFor(t, 2*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(events) > 0
+	})
+	if !ok {
+		t.Fatal("expected at least one event after file creation, got none")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if events[0].Dir != dir {
+		t.Errorf("expected event dir %q, got %q", dir, events[0].Dir)
+	}
+}
+
+func TestWatcher_DebounceCoalescing(t *testing.T) {
+	dir := t.TempDir()
+
+	var mu sync.Mutex
+	var events []FSChangeEvent
+
+	w, err := NewWatcher(dir, func(evt FSChangeEvent) {
+		mu.Lock()
+		events = append(events, evt)
+		mu.Unlock()
+	})
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	defer w.Close()
+
+	// Create multiple files rapidly — should coalesce into a single event.
+	for i := 0; i < 5; i++ {
+		name := filepath.Join(dir, "file"+string(rune('a'+i))+".txt")
+		if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Wait for debounce to fire.
+	time.Sleep(500 * time.Millisecond)
+
+	mu.Lock()
+	count := len(events)
+	mu.Unlock()
+
+	// Rapid writes within the 200ms debounce window should produce fewer
+	// events than the number of files written.
+	if count >= 5 {
+		t.Errorf("expected debounce coalescing (< 5 events), got %d", count)
+	}
+	if count == 0 {
+		t.Error("expected at least one debounced event, got 0")
+	}
+}
+
+func TestWatcher_HiddenDirectoryExcluded(t *testing.T) {
+	dir := t.TempDir()
+	hidden := filepath.Join(dir, ".hidden")
+	if err := os.Mkdir(hidden, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var mu sync.Mutex
+	var events []FSChangeEvent
+
+	w, err := NewWatcher(dir, func(evt FSChangeEvent) {
+		mu.Lock()
+		events = append(events, evt)
+		mu.Unlock()
+	})
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	defer w.Close()
+
+	// Write inside the hidden directory — should NOT trigger an event.
+	if err := os.WriteFile(filepath.Join(hidden, "secret.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	mu.Lock()
+	count := len(events)
+	mu.Unlock()
+
+	if count > 0 {
+		t.Errorf("expected no events for hidden directory, got %d", count)
+	}
+}
+
+func TestWatcher_NewDirectoryAutoWatched(t *testing.T) {
+	dir := t.TempDir()
+
+	var mu sync.Mutex
+	var events []FSChangeEvent
+
+	w, err := NewWatcher(dir, func(evt FSChangeEvent) {
+		mu.Lock()
+		events = append(events, evt)
+		mu.Unlock()
+	})
+	if err != nil {
+		t.Fatalf("NewWatcher: %v", err)
+	}
+	defer w.Close()
+
+	// Create a new subdirectory.
+	sub := filepath.Join(dir, "newdir")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for the watcher to pick up the new directory.
+	time.Sleep(400 * time.Millisecond)
+
+	// Clear prior events from the directory creation.
+	mu.Lock()
+	events = nil
+	mu.Unlock()
+
+	// Create a file inside the new subdirectory.
+	if err := os.WriteFile(filepath.Join(sub, "inner.txt"), []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ok := waitFor(t, 2*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, e := range events {
+			if e.Dir == sub {
+				return true
+			}
+		}
+		return false
+	})
+	if !ok {
+		mu.Lock()
+		t.Errorf("expected event for new subdirectory %q, got events: %v", sub, events)
+		mu.Unlock()
+	}
+}
+
+func TestIsHidden(t *testing.T) {
+	tests := []struct {
+		name   string
+		hidden bool
+	}{
+		{".git", true},
+		{".DS_Store", true},
+		{"visible", false},
+		{"file.txt", false},
+		{".", true},
+		{"..", true},
+	}
+	for _, tc := range tests {
+		if got := isHidden(tc.name); got != tc.hidden {
+			t.Errorf("isHidden(%q) = %v, want %v", tc.name, got, tc.hidden)
+		}
+	}
+}
