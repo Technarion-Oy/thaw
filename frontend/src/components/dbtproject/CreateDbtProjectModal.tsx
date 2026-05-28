@@ -19,9 +19,10 @@ import {
   ExecDDL,
   GetQuotedIdentifiersIgnoreCase,
   ListExternalAccessIntegrations,
+  ListSupportedDbtVersions,
 } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type { main, snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
 
@@ -57,6 +58,8 @@ export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }
     externalAccessIntegrations: [],
   });
   const [eaiList, setEaiList] = useState<snowflake.IntegrationRow[]>([]);
+  const [dbtVersions, setDbtVersions] = useState<main.DbtVersionInfo[]>([]);
+  const [loadingVersions, setLoadingVersions] = useState(false);
   const [loadingEai, setLoadingEai] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -69,6 +72,12 @@ export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }
       .then((rows) => setEaiList(rows ?? []))
       .catch(() => {})
       .finally(() => setLoadingEai(false));
+
+    setLoadingVersions(true);
+    ListSupportedDbtVersions()
+      .then((v) => setDbtVersions(v ?? []))
+      .catch(() => {})
+      .finally(() => setLoadingVersions(false));
 
     GetQuotedIdentifiersIgnoreCase()
       .then((v) => setQuotedIdentifiersIgnoreCase(v ?? false))
@@ -191,10 +200,18 @@ export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }
         </Form.Item>
 
         <Form.Item label="dbt Version" style={itemStyle}>
-          <Input
-            value={cfg.dbtVersion}
-            onChange={(e) => set("dbtVersion", e.target.value)}
-            placeholder="e.g. 1.8.0 (optional)"
+          <Select
+            value={cfg.dbtVersion || undefined}
+            onChange={(v) => set("dbtVersion", v ?? "")}
+            placeholder="Select version (optional)"
+            loading={loadingVersions}
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            options={dbtVersions.map((v) => ({
+              value: v.dbt_version,
+              label: `${v.dbt_version} (${v.type})`,
+            }))}
           />
         </Form.Item>
 

@@ -14,7 +14,8 @@ import {
   Typography, Button,
 } from "antd";
 import { PlayCircleOutlined } from "@ant-design/icons";
-import { BuildExecuteDbtProjectSql } from "../../../wailsjs/go/main/App";
+import { BuildExecuteDbtProjectSql, ListSupportedDbtVersions } from "../../../wailsjs/go/main/App";
+import type { main } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
 
 const { Text } = Typography;
@@ -41,8 +42,18 @@ export default function ExecuteDbtProjectModal({ db, schema, name, onClose }: Pr
     fromWorkspace: "",
     projectRoot: "",
   });
+  const [dbtVersions, setDbtVersions] = useState<main.DbtVersionInfo[]>([]);
+  const [loadingVersions, setLoadingVersions] = useState(false);
   const [preview, setPreview] = useState("");
   const executeInNewTab = useQueryStore((s) => s.executeInNewTab);
+
+  useEffect(() => {
+    setLoadingVersions(true);
+    ListSupportedDbtVersions()
+      .then((v) => setDbtVersions(v ?? []))
+      .catch(() => {})
+      .finally(() => setLoadingVersions(false));
+  }, []);
 
   useEffect(() => {
     const execCfg = mode === "direct"
@@ -112,10 +123,18 @@ export default function ExecuteDbtProjectModal({ db, schema, name, onClose }: Pr
         </Form.Item>
 
         <Form.Item label="dbt Version" style={itemStyle}>
-          <Input
-            value={cfg.dbtVersion}
-            onChange={(e) => set("dbtVersion", e.target.value)}
-            placeholder="e.g. 1.8.0 (optional override)"
+          <Select
+            value={cfg.dbtVersion || undefined}
+            onChange={(v) => set("dbtVersion", v ?? "")}
+            placeholder="Select version (optional override)"
+            loading={loadingVersions}
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            options={dbtVersions.map((v) => ({
+              value: v.dbt_version,
+              label: `${v.dbt_version} (${v.type})`,
+            }))}
           />
         </Form.Item>
 

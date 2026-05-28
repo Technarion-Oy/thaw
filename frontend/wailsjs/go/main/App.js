@@ -894,6 +894,10 @@ export function ListStageFiles(arg1, arg2) {
   return window['go']['main']['App']['ListStageFiles'](arg1, arg2);
 }
 
+export function ListSupportedDbtVersions() {
+  return window['go']['main']['App']['ListSupportedDbtVersions']();
+}
+
 export function ListSystemPythons() {
   return window['go']['main']['App']['ListSystemPythons']();
 }

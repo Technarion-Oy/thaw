@@ -17,10 +17,11 @@ import { EditOutlined } from "@ant-design/icons";
 import {
   DescribeDbtProject,
   ListExternalAccessIntegrations,
+  ListSupportedDbtVersions,
   BuildAlterDbtProjectSetSql,
   ExecDDL,
 } from "../../../wailsjs/go/main/App";
-import type { snowflake } from "../../../wailsjs/go/models";
+import type { main, snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
 
@@ -44,6 +45,7 @@ export default function ModifyDbtProjectModal({ db, schema, name, onClose, onSuc
   const [origComment, setOrigComment] = useState("");
 
   const [eaiList, setEaiList] = useState<snowflake.IntegrationRow[]>([]);
+  const [dbtVersions, setDbtVersions] = useState<main.DbtVersionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [modifying, setModifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,11 +54,13 @@ export default function ModifyDbtProjectModal({ db, schema, name, onClose, onSuc
   useEffect(() => {
     const init = async () => {
       try {
-        const [props, eais] = await Promise.all([
+        const [props, eais, versions] = await Promise.all([
           DescribeDbtProject(db, schema, name),
           ListExternalAccessIntegrations(),
+          ListSupportedDbtVersions(),
         ]);
         setEaiList(eais ?? []);
+        setDbtVersions(versions ?? []);
 
         const pMap = new Map((props ?? []).map((p) => [p.key.toUpperCase(), p.value]));
         const ver = pMap.get("DBT_VERSION") || "";
@@ -165,11 +169,17 @@ export default function ModifyDbtProjectModal({ db, schema, name, onClose, onSuc
       )}
       <Form layout="vertical" size="small">
         <Form.Item label="dbt Version" style={itemStyle} help="Clear to unset">
-          <Input
-            value={dbtVersion}
-            onChange={(e) => setDbtVersion(e.target.value)}
-            placeholder="e.g. 1.8.0"
+          <Select
+            value={dbtVersion || undefined}
+            onChange={(v) => setDbtVersion(v ?? "")}
+            placeholder="Select version"
             allowClear
+            showSearch
+            optionFilterProp="label"
+            options={dbtVersions.map((v) => ({
+              value: v.dbt_version,
+              label: `${v.dbt_version} (${v.type})`,
+            }))}
           />
         </Form.Item>
 

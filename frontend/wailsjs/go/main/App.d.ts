@@ -468,6 +468,8 @@ export function ListSecurityIntegrations():Promise<Array<snowflake.SecurityInteg
 
 export function ListStageFiles(arg1:string,arg2:string):Promise<Array<stage.StageFile>>;
 
+export function ListSupportedDbtVersions():Promise<Array<main.DbtVersionInfo>>;
+
 export function ListSystemPythons():Promise<Array<snowpark.PythonInfo>>;
 
 export function ListUsers():Promise<Array<snowflake.SnowflakeUser>>;

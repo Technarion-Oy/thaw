@@ -19,6 +19,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -1832,6 +1833,32 @@ func (a *App) ListDbtProjectVersions(database, schema, name string) ([]map[strin
 		rows = append(rows, m)
 	}
 	return rows, nil
+}
+
+// DbtVersionInfo holds a single entry from SYSTEM$SUPPORTED_DBT_VERSIONS().
+type DbtVersionInfo struct {
+	DbtVersion string `json:"dbt_version"`
+	Type       string `json:"type"`
+}
+
+// ListSupportedDbtVersions returns the dbt versions supported by the account.
+func (a *App) ListSupportedDbtVersions() ([]DbtVersionInfo, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	res, err := a.client.Execute(a.ctx, "SELECT SYSTEM$SUPPORTED_DBT_VERSIONS()")
+	if err != nil {
+		return nil, err
+	}
+	if len(res.Rows) == 0 || len(res.Rows[0]) == 0 {
+		return nil, nil
+	}
+	raw := fmt.Sprintf("%v", res.Rows[0][0])
+	var versions []DbtVersionInfo
+	if err := json.Unmarshal([]byte(raw), &versions); err != nil {
+		return nil, fmt.Errorf("failed to parse dbt versions: %w", err)
+	}
+	return versions, nil
 }
 
 // ListExternalAccessIntegrations returns all EXTERNAL ACCESS integrations.
