@@ -217,7 +217,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
 
   const handleBrowseVenv = async () => {
     const dir = await PickDirectory();
-    if (!dir) return;
+    if (!dir || dir === venvPath) return;
     setVenvPath(dir);
     await SaveSnowparkVenvPath(dir).catch(() => {});
     if (useExisting) {
@@ -231,9 +231,11 @@ export default function SnowparkSetupModal({ onClose }: Props) {
   const handleUseExisting = async () => {
     setValidating(true);
     setValidationResult(null);
+    const trimmed = venvPath.trim();
     try {
-      await SaveSnowparkVenvPath(venvPath);
+      await SaveSnowparkVenvPath(trimmed);
       await SaveSnowparkConfig(backend);
+      setVenvPath(trimmed);
       const env = await CheckSnowparkEnv();
       setValidationResult(env);
       if (!env.hasVenv) {
@@ -506,14 +508,16 @@ export default function SnowparkSetupModal({ onClose }: Props) {
         {/* ── Use Existing venv (venv only) ─────────────────────────────── */}
         {backend === "venv" && (
           <div>
-            <Button
-              size="small"
-              loading={validating}
-              disabled={anyRunning || !venvPath.trim()}
-              onClick={handleUseExisting}
-            >
-              {validationResult ? "Re-validate" : "Use Existing"}
-            </Button>
+            {!useExisting && (
+              <Button
+                size="small"
+                loading={validating}
+                disabled={anyRunning || !venvPath.trim()}
+                onClick={handleUseExisting}
+              >
+                Use Existing
+              </Button>
+            )}
             {validationResult && !validationResult.hasVenv && (
               <Alert
                 type="error"
