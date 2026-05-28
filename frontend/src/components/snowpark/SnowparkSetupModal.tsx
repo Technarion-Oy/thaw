@@ -216,7 +216,12 @@ export default function SnowparkSetupModal({ onClose }: Props) {
   };
 
   const handleBrowseVenv = async () => {
-    const dir = await PickDirectory();
+    let dir: string;
+    try {
+      dir = await PickDirectory();
+    } catch {
+      return;
+    }
     if (!dir || dir === venvPath) return;
     setVenvPath(dir);
     await SaveSnowparkVenvPath(dir).catch(() => {});
@@ -231,6 +236,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
   const handleUseExisting = async () => {
     setValidating(true);
     setValidationResult(null);
+    patch(0, { status: "idle", error: null });
     const trimmed = venvPath.trim();
     try {
       await SaveSnowparkVenvPath(trimmed);
@@ -433,7 +439,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
           <Radio.Group
             value={backend}
             onChange={(e) => handleBackendChange(e.target.value as Backend)}
-            disabled={anyRunning}
+            disabled={anyRunning || validating}
           >
             <Radio value="conda">conda</Radio>
             <Radio value="venv">venv  <Text type="secondary" style={{ fontSize: 11 }}>(uses system Python)</Text></Radio>
@@ -449,7 +455,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
             <Radio.Group
               value={withPandas}
               onChange={(e) => setWithPandas(e.target.value as boolean)}
-              disabled={anyRunning || steps[1].status === "done"}
+              disabled={anyRunning || validating || steps[1].status === "done"}
             >
               <Radio value={true}>
                 Include pandas{" "}
@@ -542,7 +548,6 @@ export default function SnowparkSetupModal({ onClose }: Props) {
                         ? `Python ${validationResult.version} detected`
                         : "Virtual environment detected"}
                     </div>
-                    <CheckItem ok={validationResult.hasVenv} label="Virtual environment" />
                     <CheckItem ok={validationResult.hasSnowpark} label="snowflake-snowpark-python" />
                     <CheckItem ok={validationResult.hasNotebook} label="notebook" />
                   </div>
