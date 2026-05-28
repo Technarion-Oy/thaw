@@ -355,6 +355,19 @@ export default function FileBrowser() {
     if (!exportDir || !fileWatcherEnabled) return;
     const off = EventsOn("fs:changed", (evt: { dir: string }) => {
       if (selfChangedDirs.current.has(evt.dir)) return;
+
+      // After refreshing a directory, prune loadedKeys entries that reference
+      // children which no longer exist (prevents unbounded stale-key growth).
+      const pruneLoadedKeys = (freshKeys: Set<string>) => {
+        setLoadedKeys((prev) => prev.filter((k) => {
+          const ks = String(k);
+          const parent = ks.substring(0, ks.lastIndexOf("/")) || ks.substring(0, ks.lastIndexOf("\\"));
+          // Only prune keys whose parent is the refreshed directory.
+          if (parent !== evt.dir) return true;
+          return freshKeys.has(ks);
+        }));
+      };
+
       if (evt.dir === exportDir) {
         // Root directory changed — merge new entries into existing tree
         // so expanded subtrees (children) are preserved.
@@ -362,6 +375,7 @@ export default function FileBrowser() {
           .then((entries) => {
             const fresh = entriesToNodes(entries);
             setTreeData((prev) => mergeNodes(prev, fresh));
+            pruneLoadedKeys(new Set(entries.map((e) => e.path)));
           })
           .catch(() => {});
         return;
@@ -371,6 +385,7 @@ export default function FileBrowser() {
       ListDirectory(evt.dir)
         .then((entries) => {
           setTreeData((prev) => updateNode(prev, evt.dir, entriesToNodes(entries), true));
+          pruneLoadedKeys(new Set(entries.map((e) => e.path)));
         })
         .catch(() => {});
     });

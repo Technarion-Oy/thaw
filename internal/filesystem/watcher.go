@@ -151,6 +151,12 @@ func (w *Watcher) handleEvent(ev fsnotify.Event) {
 		w.watcher.Remove(ev.Name) //nolint:errcheck
 	}
 
+	// Write-only events on existing files don't change the directory listing
+	// (no files added or removed), so skip them to avoid unnecessary IPC calls.
+	if ev.Op == fsnotify.Write {
+		return
+	}
+
 	// Determine the parent directory that changed.
 	parentDir := filepath.Dir(ev.Name)
 
