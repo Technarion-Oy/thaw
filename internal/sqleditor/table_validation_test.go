@@ -603,6 +603,14 @@ func TestValidateSnowflakePatterns_AlterDynamicTable(t *testing.T) {
 			"ALTER DYNAMIC TABLE my_dt RENAME TO \"new-name\"",
 			// UNSET COMMENT is valid
 			"ALTER DYNAMIC TABLE my_dt UNSET COMMENT",
+			// cleanParseText strips string literals before comments. An apostrophe
+			// inside a line comment pairs with the TARGET_LAG string literal's
+			// opening quote, swallowing the SET clause entirely.
+			"ALTER DYNAMIC TABLE my_dt -- let's set the lag\nSET TARGET_LAG = '1 minute'",
+			// Same flaw with a block comment — the apostrophe inside /* ... */
+			// pairs with the TARGET_LAG string literal, breaking both the comment
+			// boundary and the SET clause.
+			"ALTER DYNAMIC TABLE my_dt /* it's complex */ SET TARGET_LAG = '1 minute'",
 		}
 		for _, sql := range validQueries {
 			t.Run(sql, func(t *testing.T) {
