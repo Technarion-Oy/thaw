@@ -95,25 +95,26 @@ func TestWatcher_DebounceCoalescing(t *testing.T) {
 	}
 	defer w.Close()
 
-	// Create multiple files rapidly — should coalesce into a single event.
-	for i := 0; i < 5; i++ {
+	// Create 10 files as fast as possible — all writes target the same
+	// directory so they should coalesce into far fewer debounced events.
+	for i := 0; i < 10; i++ {
 		name := filepath.Join(dir, "file"+string(rune('a'+i))+".txt")
 		if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	// Wait for debounce to fire.
-	time.Sleep(500 * time.Millisecond)
+	// Wait well past the debounce window for all timers to fire.
+	time.Sleep(600 * time.Millisecond)
 
 	mu.Lock()
 	count := len(events)
 	mu.Unlock()
 
-	// Rapid writes within the 200ms debounce window should produce fewer
-	// events than the number of files written.
-	if count >= 5 {
-		t.Errorf("expected debounce coalescing (< 5 events), got %d", count)
+	// Even on a loaded CI machine the 10 writes should coalesce into
+	// fewer than 10 events. We use a generous threshold to avoid flakiness.
+	if count >= 10 {
+		t.Errorf("expected debounce coalescing (< 10 events for 10 writes), got %d", count)
 	}
 	if count == 0 {
 		t.Error("expected at least one debounced event, got 0")

@@ -334,11 +334,19 @@ export default function FileBrowser() {
   }, [exportDir]);
 
   // ── File system watcher lifecycle ──────────────────────────────────────────
+  // Only watch while the panel is expanded to conserve inotify watches on Linux.
+  // On re-expand, refresh root entries to catch changes that happened while collapsed.
   useEffect(() => {
-    if (!exportDir || !fileWatcherEnabled) return;
+    if (!exportDir || !fileWatcherEnabled || !expanded) return;
     StartFileWatcher(exportDir).catch((e) => console.warn("File watcher failed to start:", e));
+    // Refresh root to pick up changes that occurred while collapsed.
+    if (loaded) {
+      ListDirectory(exportDir)
+        .then((entries) => setTreeData((prev) => mergeNodes(prev, entriesToNodes(entries))))
+        .catch(() => {});
+    }
     return () => { StopFileWatcher().catch(() => {}); };
-  }, [exportDir, fileWatcherEnabled]);
+  }, [exportDir, fileWatcherEnabled, expanded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── File system change listener ────────────────────────────────────────────
   useEffect(() => {

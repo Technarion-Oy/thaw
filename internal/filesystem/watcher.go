@@ -121,11 +121,11 @@ func (w *Watcher) run() {
 			}
 			w.handleEvent(ev)
 
-		case _, ok := <-w.watcher.Errors:
+		case err, ok := <-w.watcher.Errors:
 			if !ok {
 				return
 			}
-			// Watcher errors are non-fatal; continue.
+			logger.L.Warn("file watcher error", "error", err)
 		}
 	}
 }
@@ -185,10 +185,16 @@ func (w *Watcher) scheduleEmit(dir string) {
 
 	w.timers[dir] = time.AfterFunc(debounceDelay, func() {
 		w.mu.Lock()
-		delete(w.timers, dir)
+		_, stillPending := w.timers[dir]
+		if stillPending {
+			delete(w.timers, dir)
+		}
 		w.mu.Unlock()
 
-		// Check if we're still running before emitting.
+		if !stillPending {
+			return // a new timer has taken over or watcher is closed
+		}
+
 		select {
 		case <-w.stopCh:
 			return
