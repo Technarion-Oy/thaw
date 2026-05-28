@@ -15,7 +15,10 @@ require (
 	modernc.org/sqlite v1.47.0
 )
 
-require github.com/valyala/fastjson v1.6.10
+require (
+	github.com/fsnotify/fsnotify v1.9.0
+	github.com/valyala/fastjson v1.6.10
+)
 
 require (
 	dario.cat/mergo v1.0.0 // indirect

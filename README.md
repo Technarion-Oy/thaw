@@ -554,6 +554,7 @@ Open **Tools → Schema Migration…** in the menu bar to deploy local `.sql` DD
 - Lazy-loads subdirectories on demand
 - Click any file to open it in a new editor tab
 - Auto-refreshes after a DDL export completes
+- **File system watcher** — monitors the working directory for external changes (terminal, editors, git operations) and incrementally refreshes only the affected directories; toggleable via **View → Enabled Features → File Watcher**
 - Highlights the file that matches the currently active tab
 
 ### Git integration

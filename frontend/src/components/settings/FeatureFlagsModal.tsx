@@ -350,6 +350,13 @@ export default function FeatureFlagsModal({ onClose }: Props) {
             onChange={(v) => set("gitIntegration", v)}
             preview
           />
+          <FlagRow
+            label="File Watcher"
+            description="Auto-refresh the file browser when files are created, renamed, or deleted externally."
+            checked={flags.fileWatcher}
+            locked={locked.fileWatcher}
+            onChange={(v) => set("fileWatcher", v)}
+          />
         </Category>
 
         {/* ── Performance & Diagnostics ── */}

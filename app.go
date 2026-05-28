@@ -125,6 +125,10 @@ type App struct {
 	exportDirMu     sync.RWMutex
 	cachedExportDir string
 
+	// File system watcher for the working directory.
+	fsWatcherMu sync.Mutex
+	fsWatcher   *filesystem.Watcher
+
 	// Embedded terminal (pseudo-terminal).
 	ptyMu  sync.Mutex
 	ptmx   *os.File
@@ -402,6 +406,9 @@ func (a *App) shutdown(_ context.Context) {
 	}
 	a.sessionConfigMu.Unlock()
 
+	// Stop file system watcher.
+	a.StopFileWatcher()
+
 	// Stop any running terminal process cleanly before the app exits.
 	a.StopShell() //nolint:errcheck
 
@@ -444,6 +451,39 @@ func (a *App) shutdown(_ context.Context) {
 	logger.L.Info("application shutting down")
 	if a.logCleanup != nil {
 		a.logCleanup()
+	}
+}
+
+// StartFileWatcher starts watching the given directory tree for changes.
+// Any existing watcher is stopped first. Change events are emitted to
+// the frontend as "fs:changed" Wails events.
+func (a *App) StartFileWatcher(dir string) error {
+	a.fsWatcherMu.Lock()
+	defer a.fsWatcherMu.Unlock()
+
+	if a.fsWatcher != nil {
+		a.fsWatcher.Close()
+		a.fsWatcher = nil
+	}
+
+	w, err := filesystem.NewWatcher(dir, func(evt filesystem.FSChangeEvent) {
+		wailsruntime.EventsEmit(a.ctx, "fs:changed", evt)
+	})
+	if err != nil {
+		return err
+	}
+	a.fsWatcher = w
+	return nil
+}
+
+// StopFileWatcher stops the current file system watcher, if any.
+func (a *App) StopFileWatcher() {
+	a.fsWatcherMu.Lock()
+	defer a.fsWatcherMu.Unlock()
+
+	if a.fsWatcher != nil {
+		a.fsWatcher.Close()
+		a.fsWatcher = nil
 	}
 }
 
