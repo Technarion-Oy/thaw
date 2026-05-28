@@ -220,6 +220,32 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
       .finally(() => setLoadingVersions(false));
   }, [sourceType, selectedObject, pickerDb, pickerSchema]);
 
+  const loadEntries = useCallback(async (dirPath: string): Promise<snowflake.GitRepoEntry[]> => {
+    if (sourceType === "gitRepo" && selectedObject) {
+      return (await ListGitRepoEntries(pickerDb, pickerSchema, selectedObject, dirPath)) ?? [];
+    }
+    if (sourceType === "stage" && selectedObject) {
+      return (await ListStageEntries(pickerDb, pickerSchema, selectedObject, dirPath)) ?? [];
+    }
+    if (sourceType === "workspace" && selectedWorkspace) {
+      return (await ListWorkspaceEntries(
+        selectedWorkspace.database, selectedWorkspace.schema,
+        selectedWorkspace.name, dirPath,
+      )) ?? [];
+    }
+    return [];
+  }, [sourceType, selectedObject, selectedWorkspace, pickerDb, pickerSchema]);
+
+  const entriesToNodes = (entries: snowflake.GitRepoEntry[]): DataNode[] => {
+    return entries.map((e) => ({
+      key: e.path,
+      title: e.name,
+      isLeaf: !e.isDir,
+      icon: e.isDir ? <FolderOutlined /> : <FileOutlined />,
+      children: e.isDir ? [] : undefined,
+    }));
+  };
+
   // Load root tree when object (+ ref for git) is ready
   useEffect(() => {
     if (sourceType === "dbtProject") return;
@@ -245,7 +271,7 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
     loadEntries(dirPath).then((entries) => {
       setTreeData(entriesToNodes(entries));
     }).finally(() => setLoadingTree(false));
-  }, [sourceType, selectedObject, selectedWorkspace, selectedRef, refType, pickerDb, pickerSchema]);
+  }, [sourceType, selectedObject, selectedWorkspace, selectedRef, refType, pickerDb, pickerSchema, loadEntries]);
 
   // Assembled source location string (memoized to avoid recomputation)
   const assembledLocation = useMemo(() => {
@@ -289,32 +315,6 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
       onChange(assembledLocation);
     }
   }, [assembledLocation, value, onChange]);
-
-  const loadEntries = useCallback(async (dirPath: string): Promise<snowflake.GitRepoEntry[]> => {
-    if (sourceType === "gitRepo" && selectedObject) {
-      return (await ListGitRepoEntries(pickerDb, pickerSchema, selectedObject, dirPath)) ?? [];
-    }
-    if (sourceType === "stage" && selectedObject) {
-      return (await ListStageEntries(pickerDb, pickerSchema, selectedObject, dirPath)) ?? [];
-    }
-    if (sourceType === "workspace" && selectedWorkspace) {
-      return (await ListWorkspaceEntries(
-        selectedWorkspace.database, selectedWorkspace.schema,
-        selectedWorkspace.name, dirPath,
-      )) ?? [];
-    }
-    return [];
-  }, [sourceType, selectedObject, selectedWorkspace, pickerDb, pickerSchema]);
-
-  const entriesToNodes = (entries: snowflake.GitRepoEntry[]): DataNode[] => {
-    return entries.map((e) => ({
-      key: e.path,
-      title: e.name,
-      isLeaf: !e.isDir,
-      icon: e.isDir ? <FolderOutlined /> : <FileOutlined />,
-      children: e.isDir ? [] : undefined,
-    }));
-  };
 
   const onLoadData = useCallback(async (node: EventDataNode<DataNode>) => {
     const dirPath = node.key as string;

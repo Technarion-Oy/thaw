@@ -113,8 +113,15 @@ export default function ModifyDbtProjectModal({ db, schema, name, onClose, onSuc
     setModifying(true);
     setError(null);
     try {
-      for (const sql of statements) {
-        await ExecDDL(sql);
+      for (let i = 0; i < statements.length; i++) {
+        try {
+          await ExecDDL(statements[i]);
+        } catch (err) {
+          const prefix = statements.length > 1
+            ? `Statement ${i + 1}/${statements.length} failed (partial changes may have been applied): `
+            : "";
+          throw new Error(prefix + String(err));
+        }
       }
       onSuccess?.();
       onClose();
