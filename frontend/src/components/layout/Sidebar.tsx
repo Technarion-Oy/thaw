@@ -48,6 +48,7 @@ import {
   RightOutlined,
   ShareAltOutlined,
   ExperimentOutlined,
+  BuildOutlined,
   DashboardOutlined,
   SyncOutlined,
   KeyOutlined,
@@ -2542,7 +2543,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               {menuItem("Pipe…", <ApiOutlined style={{ fontSize: 12 }} />, openCreatePipe)}
               {menuItem("Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
               {menuItem("Git Repository…", <BranchesOutlined style={{ fontSize: 12 }} />, openCreateGitRepository)}
-              {menuItem("DBT Project…", <ExperimentOutlined style={{ fontSize: 12 }} />, openCreateDbtProject, undefined, !featureFlags.dbtProjectBrowser, "DBT Project Browser is disabled. Enable it under View → Enabled Features…")}
+              {menuItem("DBT Project…", <BuildOutlined style={{ fontSize: 12 }} />, openCreateDbtProject, undefined, !featureFlags.dbtProjectBrowser, "DBT Project Browser is disabled. Enable it under View → Enabled Features…")}
 </>
               ))}          {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
           {ctxMenu.nodeType === "schema" && menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openSchemaExportModal, undefined, !featureFlags.exportTableData, "Table Data Export is disabled. Enable it under View → Enabled Features…")}
@@ -2595,7 +2596,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "GIT REPOSITORY" &&
             menuItem("Set Commit Filter…", <EditOutlined style={{ fontSize: 12 }} />, openCommitFilterModal)}
           {ctxMenu.nodeType === "type" && ctxMenu.objKind === "DBT PROJECT" &&
-            menuItem("Create DBT Project…", <ExperimentOutlined style={{ fontSize: 12 }} />, openCreateDbtProject)}
+            menuItem("Create DBT Project…", <BuildOutlined style={{ fontSize: 12 }} />, openCreateDbtProject)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DBT PROJECT" &&
             menuItem("Execute…", <PlayCircleOutlined style={{ fontSize: 12 }} />, openExecuteDbtProject)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DBT PROJECT" &&

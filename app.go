@@ -1853,7 +1853,10 @@ func (a *App) ListSupportedDbtVersions() ([]DbtVersionInfo, error) {
 	if len(res.Rows) == 0 || len(res.Rows[0]) == 0 {
 		return nil, nil
 	}
-	raw := fmt.Sprintf("%v", res.Rows[0][0])
+	raw, ok := res.Rows[0][0].(string)
+	if !ok {
+		return nil, fmt.Errorf("unexpected type for dbt versions: %T", res.Rows[0][0])
+	}
 	var versions []DbtVersionInfo
 	if err := json.Unmarshal([]byte(raw), &versions); err != nil {
 		return nil, fmt.Errorf("failed to parse dbt versions: %w", err)

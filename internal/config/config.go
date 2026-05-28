@@ -267,7 +267,7 @@ func DefaultFeatureFlags() FeatureFlags {
 		AIInlineCompletions:    true,
 		SchemaMigration:        true,
 		DbtScaffolding:         true,
-		DbtProjectBrowser:     true,
+		DbtProjectBrowser:      true,
 		ERDiagramDesigner:      true,
 		TaskGraphVisualizer:    true,
 		InsertMapping:          true,

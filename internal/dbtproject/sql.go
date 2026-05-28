@@ -165,7 +165,6 @@ func BuildAlterDbtProjectSetSql(db, schema, name string, cfg AlterSetConfig, ori
 
 // BuildExecuteDbtProjectSql constructs an EXECUTE DBT PROJECT SQL statement.
 func BuildExecuteDbtProjectSql(db, schema, name string, cfg ExecuteConfig) (string, error) {
-	ref := fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
 	var sb strings.Builder
 
 	if cfg.FromWorkspace != "" {
@@ -174,6 +173,7 @@ func BuildExecuteDbtProjectSql(db, schema, name string, cfg ExecuteConfig) (stri
 			fmt.Fprintf(&sb, "\n  PROJECT_ROOT = '%s'", snowflake.EscapeStringLit(cfg.ProjectRoot))
 		}
 	} else {
+		ref := fmt.Sprintf("%s.%s.%s", snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
 		fmt.Fprintf(&sb, "EXECUTE DBT PROJECT %s", ref)
 	}
 

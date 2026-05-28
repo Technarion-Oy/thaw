@@ -13,7 +13,7 @@ import {
   Modal, Form, Input, Select, Checkbox, Space,
   Typography, Button, Alert,
 } from "antd";
-import { ExperimentOutlined } from "@ant-design/icons";
+import { BuildOutlined } from "@ant-design/icons";
 import {
   BuildCreateDbtProjectSql,
   ExecDDL,
@@ -115,7 +115,7 @@ export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }
       open
       title={
         <Space size={6}>
-          <ExperimentOutlined style={{ color: "var(--link)" }} />
+          <BuildOutlined style={{ color: "var(--link)" }} />
           <span>Create DBT Project</span>
           <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
             {db}.{schema}
@@ -128,7 +128,7 @@ export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }
           <Button onClick={onClose} disabled={creating}>Cancel</Button>
           <Button
             type="primary"
-            icon={<ExperimentOutlined />}
+            icon={<BuildOutlined />}
             onClick={handleRun}
             disabled={!canSubmit}
             loading={creating}
