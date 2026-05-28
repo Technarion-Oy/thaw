@@ -70,6 +70,7 @@ const KIND_VAR: Record<string, string> = {
   NOTEBOOK:          "--icon-notebook",
   SECRET:            "--icon-secret",
   "GIT REPOSITORY":  "--icon-gitrepo",
+  "DBT PROJECT":     "--icon-notebook",
 };
 
 // ── Icon component per kind ────────────────────────────────────────────────
@@ -87,6 +88,7 @@ const KIND_ICON: Record<string, React.ComponentType<{ style?: React.CSSPropertie
   NOTEBOOK:         ExperimentOutlined,
   SECRET:           LockOutlined,
   "GIT REPOSITORY": BranchesOutlined,
+  "DBT PROJECT":    ExperimentOutlined,
 };
 
 // ── Public API ────────────────────────────────────────────────────────────

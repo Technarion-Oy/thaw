@@ -58,6 +58,7 @@ func GetCodebaseSemanticMap() string {
     {
       "name": "Object Browser \u0026 Administration",
       "backend_paths": [
+        "internal/dbtproject/",
         "internal/fnmeta/",
         "internal/integrations/",
         "internal/pipe/",

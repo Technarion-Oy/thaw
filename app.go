@@ -39,6 +39,7 @@ import (
 	"thaw/internal/apperrors"
 	"thaw/internal/config"
 	"thaw/internal/dbt"
+	"thaw/internal/dbtproject"
 	"thaw/internal/ddl"
 	"thaw/internal/fileformat"
 	"thaw/internal/filesystem"
@@ -1773,6 +1774,74 @@ func (a *App) BuildModifyGitRepositorySql(database, schema, name string, cfg sno
 	return snowgitrepo.BuildModifyGitRepositorySql(database, schema, name, cfg, originalComment, originalIntegration, originalCredentials)
 }
 
+// ── DBT Project ──────────────────────────────────────────────────────────────
+
+// BuildCreateDbtProjectSql returns the SQL for creating a DBT PROJECT object.
+func (a *App) BuildCreateDbtProjectSql(database, schema string, cfg dbtproject.CreateConfig) (string, error) {
+	return dbtproject.BuildCreateDbtProjectSql(database, schema, cfg)
+}
+
+// BuildAlterDbtProjectSetSql returns one or more ALTER DBT PROJECT SET/UNSET statements.
+func (a *App) BuildAlterDbtProjectSetSql(database, schema, name string, cfg dbtproject.AlterSetConfig, origComment, origDbtVersion, origDefaultTarget string, origIntegrations []string) ([]string, error) {
+	return dbtproject.BuildAlterDbtProjectSetSql(database, schema, name, cfg, origComment, origDbtVersion, origDefaultTarget, origIntegrations)
+}
+
+// BuildExecuteDbtProjectSql returns the SQL for executing a DBT PROJECT.
+func (a *App) BuildExecuteDbtProjectSql(database, schema, name string, cfg dbtproject.ExecuteConfig) (string, error) {
+	return dbtproject.BuildExecuteDbtProjectSql(database, schema, name, cfg)
+}
+
+// BuildAddDbtProjectVersionSql returns the SQL for adding a version to a DBT PROJECT.
+func (a *App) BuildAddDbtProjectVersionSql(database, schema, name, versionAlias, sourceLocation string) (string, error) {
+	return dbtproject.BuildAddVersionSql(database, schema, name, versionAlias, sourceLocation)
+}
+
+// DescribeDbtProject runs DESCRIBE DBT PROJECT and returns key/value pairs.
+func (a *App) DescribeDbtProject(database, schema, name string) ([]PropertyPair, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	query := fmt.Sprintf("DESCRIBE DBT PROJECT %s.%s.%s",
+		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
+	res, err := a.client.Execute(a.ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return a.resToPairs(res), nil
+}
+
+// ListDbtProjectVersions runs SHOW VERSIONS IN DBT PROJECT and returns rows.
+func (a *App) ListDbtProjectVersions(database, schema, name string) ([]map[string]interface{}, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	query := fmt.Sprintf("SHOW VERSIONS IN DBT PROJECT %s.%s.%s",
+		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
+	res, err := a.client.Execute(a.ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	var rows []map[string]interface{}
+	for _, row := range res.Rows {
+		m := make(map[string]interface{}, len(res.Columns))
+		for i, col := range res.Columns {
+			if i < len(row) {
+				m[col] = row[i]
+			}
+		}
+		rows = append(rows, m)
+	}
+	return rows, nil
+}
+
+// ListExternalAccessIntegrations returns all EXTERNAL ACCESS integrations.
+func (a *App) ListExternalAccessIntegrations() ([]snowflake.IntegrationRow, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.client.ListIntegrations(a.ctx, "EXTERNAL ACCESS")
+}
+
 // BuildCreatePipeSql returns the SQL for creating a Snowflake PIPE.
 func (a *App) BuildCreatePipeSql(database, schema string, cfg pipe.PipeConfig) (string, error) {
 	return pipe.BuildCreatePipeSql(database, schema, cfg)
@@ -3145,6 +3214,8 @@ func (a *App) GetObjectProperties(database, schema, kind, name string) ([]Proper
 		query = fmt.Sprintf("SHOW SECRETS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
 	case "GIT REPOSITORY":
 		query = fmt.Sprintf("SHOW GIT REPOSITORIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
+	case "DBT PROJECT":
+		query = fmt.Sprintf("SHOW DBT PROJECTS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
 	case "WAREHOUSE":
 		query = fmt.Sprintf("SHOW WAREHOUSES LIKE '%s'", like)
 	case "ROLE":

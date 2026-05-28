@@ -69,6 +69,7 @@ thaw/
 │   │   └── sqleditor_test.go
 │   ├── tasks/           # Task graph ops, statuses, run history (TASK_HISTORY), DDL export
 │   ├── ddl/             # DDL parsing and git-export pipeline
+│   ├── dbtproject/      # Snowflake-native DBT PROJECT SQL builders (CREATE, ALTER, EXECUTE)
 │   ├── ai/              # AI provider clients (OpenAI, Google, Ollama); inline completions, model management
 │   ├── config/          # App config (TOML persistence)
 │   ├── gitrepo/         # Git operations via exec

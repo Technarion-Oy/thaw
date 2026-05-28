@@ -290,6 +290,13 @@ export default function FeatureFlagsModal({ onClose }: Props) {
             onChange={(v) => set("dbtScaffolding", v)}
           />
           <FlagRow
+            label="DBT Project Browser"
+            description="Browse and manage Snowflake-native DBT PROJECT objects in the sidebar."
+            checked={flags.dbtProjectBrowser}
+            locked={locked.dbtProjectBrowser}
+            onChange={(v) => set("dbtProjectBrowser", v)}
+          />
+          <FlagRow
             label="ER Diagram & Designer"
             description="Visual database modeling and interactive ALTER TABLE generation."
             checked={flags.erDiagramDesigner}
