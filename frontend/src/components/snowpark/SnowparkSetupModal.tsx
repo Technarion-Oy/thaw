@@ -13,6 +13,7 @@ import { Modal, Button, Steps, Typography, Alert, Space, Tag, Radio, Divider, Se
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
+  FolderOpenOutlined,
   LoadingOutlined,
   SettingOutlined,
   WarningOutlined,
@@ -37,6 +38,7 @@ import {
   ListEnvPackages,
   InstallEnvPackage,
   UninstallEnvPackage,
+  PickDirectory,
 } from "../../../wailsjs/go/main/App";
 import type { snowpark } from "../../../wailsjs/go/models";
 import { EventsOn } from "../../../wailsjs/runtime/runtime";
@@ -125,6 +127,9 @@ export default function SnowparkSetupModal({ onClose }: Props) {
   const [steps, setSteps]           = useState<StepState[]>([makeStepState(), makeStepState(), makeStepState()]);
   const [, setConfigLoaded] = useState(false);
   const [venvFolderExists, setVenvFolderExists] = useState(false);
+  const [useExisting, setUseExisting] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [validationResult, setValidationResult] = useState<snowpark.SnowparkCheckResult | null>(null);
   const logEndRef = useRef<HTMLDivElement | null>(null);
 
   // Package management (step 3)
@@ -153,7 +158,8 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     });
     ListSystemPythons().then(setAvailablePythons);
     // If the environment is already fully set up, pre-mark all steps done
-    // and go straight to the package manager.
+    // and go straight to the package manager. If partially configured (has
+    // venv but missing packages), auto-enter "use existing" mode.
     CheckSnowparkEnv().then((env) => {
       if (env.isReady) {
         setSteps([
@@ -162,6 +168,18 @@ export default function SnowparkSetupModal({ onClose }: Props) {
           { status: "done", log: [], error: null },
         ]);
         setCurrent(3);
+      } else if (env.hasVenv) {
+        setUseExisting(true);
+        setValidationResult(env);
+        setVenvFolderExists(true);
+        const newSteps: StepState[] = [
+          { status: "done", log: [], error: null },
+          { status: env.hasSnowpark ? "done" : "idle", log: [], error: null },
+          { status: env.hasNotebook ? "done" : "idle", log: [], error: null },
+        ];
+        setSteps(newSteps);
+        const firstIncomplete = newSteps.findIndex((s) => s.status !== "done");
+        setCurrent(firstIncomplete === -1 ? 3 : firstIncomplete);
       }
     });
   }, []);
@@ -177,6 +195,43 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     setBackend(b);
     setCurrent(0);
     setSteps([makeStepState(), makeStepState(), makeStepState()]);
+    setUseExisting(false);
+    setValidationResult(null);
+  };
+
+  const handleBrowseVenv = async () => {
+    const dir = await PickDirectory();
+    if (!dir) return;
+    setVenvPath(dir);
+    await SaveSnowparkVenvPath(dir).catch(() => {});
+  };
+
+  const handleUseExisting = async () => {
+    setValidating(true);
+    setValidationResult(null);
+    try {
+      await SaveSnowparkVenvPath(venvPath).catch(() => {});
+      await SaveSnowparkConfig(backend).catch(() => {});
+      const env = await CheckSnowparkEnv();
+      setValidationResult(env);
+      if (!env.hasVenv) {
+        setUseExisting(true);
+        return;
+      }
+      setUseExisting(true);
+      setVenvFolderExists(true);
+      const newSteps: StepState[] = [
+        { status: "done", log: [], error: null },
+        { status: env.hasSnowpark ? "done" : "idle", log: [], error: null },
+        { status: env.hasNotebook ? "done" : "idle", log: [], error: null },
+      ];
+      setSteps(newSteps);
+      // Jump to first incomplete step, or package manager if all done.
+      const firstIncomplete = newSteps.findIndex((s) => s.status !== "done");
+      setCurrent(firstIncomplete === -1 ? 3 : firstIncomplete);
+    } finally {
+      setValidating(false);
+    }
   };
 
   // Stream install output from Go backend.
@@ -311,7 +366,14 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     });
   };
 
-  const defs   = backend === "conda" ? condaSteps(isAppleSilicon) : venvSteps(venvPath, withPandas, pythonPath);
+  const rawDefs = backend === "conda" ? condaSteps(isAppleSilicon) : venvSteps(venvPath, withPandas, pythonPath);
+  const defs = useExisting
+    ? rawDefs.map((d, i) =>
+        i === 0
+          ? { ...d, title: "Detect Virtual Environment", command: `# Existing venv detected at "${venvPath}"` }
+          : d,
+      )
+    : rawDefs;
   const setupDone = steps.every((s) => s.status === "done");
   // cur is only valid for setup steps 0-2; use a safe fallback for step 3.
   const cur    = steps[Math.min(current, 2)];
@@ -385,22 +447,73 @@ export default function SnowparkSetupModal({ onClose }: Props) {
             <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 6 }}>
               Virtual environment location
             </Text>
-            <Input
-              size="small"
-              value={venvPath}
-              disabled={anyRunning || steps[0].status === "done"}
-              style={{ fontFamily: "monospace", fontSize: 12 }}
-              onChange={(e) => setVenvPath(e.target.value)}
-              onBlur={() => SaveSnowparkVenvPath(venvPath).catch(() => {})}
-              onPressEnter={(e) => {
-                (e.target as HTMLInputElement).blur();
-              }}
-            />
+            <div style={{ display: "flex", gap: 8 }}>
+              <Input
+                size="small"
+                value={venvPath}
+                disabled={anyRunning || validating || (steps[0].status === "done" && !useExisting)}
+                style={{ fontFamily: "monospace", fontSize: 12, flex: 1 }}
+                onChange={(e) => setVenvPath(e.target.value)}
+                onBlur={() => SaveSnowparkVenvPath(venvPath).catch(() => {})}
+                onPressEnter={(e) => {
+                  (e.target as HTMLInputElement).blur();
+                }}
+              />
+              <Button
+                size="small"
+                icon={<FolderOpenOutlined />}
+                disabled={anyRunning || validating || (steps[0].status === "done" && !useExisting)}
+                onClick={handleBrowseVenv}
+              >
+                Browse
+              </Button>
+            </div>
           </div>
         )}
 
-        {/* ── Python interpreter (venv only) ─────────────────────────────── */}
+        {/* ── Use Existing venv (venv only) ─────────────────────────────── */}
         {backend === "venv" && (
+          <div>
+            <Button
+              size="small"
+              loading={validating}
+              disabled={anyRunning || !venvPath.trim()}
+              onClick={handleUseExisting}
+            >
+              {validationResult ? "Re-validate" : "Use Existing"}
+            </Button>
+            {validationResult && !validationResult.hasVenv && (
+              <Alert
+                type="error"
+                showIcon
+                style={{ fontSize: 12, marginTop: 8 }}
+                message="No virtual environment found at this path."
+              />
+            )}
+            {validationResult && validationResult.hasVenv && (
+              <Alert
+                type={validationResult.isReady ? "success" : "info"}
+                showIcon
+                style={{ fontSize: 12, marginTop: 8 }}
+                message={
+                  <div style={{ fontSize: 12 }}>
+                    <div style={{ marginBottom: 4 }}>
+                      {validationResult.version
+                        ? `Python ${validationResult.version} detected`
+                        : "Virtual environment detected"}
+                    </div>
+                    <div>{validationResult.hasVenv ? <CheckCircleOutlined style={{ color: "#52c41a" }} /> : <CloseCircleOutlined style={{ color: "#ff4d4f" }} />} Virtual environment</div>
+                    <div>{validationResult.hasSnowpark ? <CheckCircleOutlined style={{ color: "#52c41a" }} /> : <CloseCircleOutlined style={{ color: "#ff4d4f" }} />} snowflake-snowpark-python</div>
+                    <div>{validationResult.hasNotebook ? <CheckCircleOutlined style={{ color: "#52c41a" }} /> : <CloseCircleOutlined style={{ color: "#ff4d4f" }} />} notebook</div>
+                  </div>
+                }
+              />
+            )}
+          </div>
+        )}
+
+        {/* ── Python interpreter (venv only, create-new mode) ─────────────── */}
+        {backend === "venv" && !useExisting && (
           <div>
             <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 6 }}>
               Python interpreter
@@ -435,6 +548,21 @@ export default function SnowparkSetupModal({ onClose }: Props) {
             Configure pip Registry…
           </Button>
         </div>
+
+        <Text type="secondary" style={{ fontSize: 11 }}>
+          This wizard does not cover all{" "}
+          {backend === "conda" ? "conda" : "venv"} operations. See the{" "}
+          {backend === "conda" ? (
+            <a href="https://anaconda.org/channels/anaconda/packages/conda/overview" target="_blank" rel="noreferrer">
+              conda documentation
+            </a>
+          ) : (
+            <a href="https://docs.python.org/3/library/venv.html" target="_blank" rel="noreferrer">
+              Python venv documentation
+            </a>
+          )}{" "}
+          for the full reference.
+        </Text>
 
         <Divider style={{ margin: "2px 0" }} />
 
@@ -476,17 +604,33 @@ export default function SnowparkSetupModal({ onClose }: Props) {
           </Text>
         </div>
 
-        {/* ── Delete venv (venv only) ────────────────────────────────────── */}
+        {/* ── Delete venv / Create new (venv only) ──────────────────────── */}
         {backend === "venv" && (
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <Button
-              danger
-              size="small"
-              disabled={anyRunning || !venvFolderExists}
-              onClick={handleDeleteVenv}
-            >
-              Delete venv folder…
-            </Button>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            {useExisting && (
+              <Button
+                size="small"
+                disabled={anyRunning}
+                onClick={() => {
+                  setUseExisting(false);
+                  setValidationResult(null);
+                  setCurrent(0);
+                  setSteps([makeStepState(), makeStepState(), makeStepState()]);
+                }}
+              >
+                Create New Instead
+              </Button>
+            )}
+            {!useExisting && (
+              <Button
+                danger
+                size="small"
+                disabled={anyRunning || !venvFolderExists}
+                onClick={handleDeleteVenv}
+              >
+                Delete venv folder…
+              </Button>
+            )}
           </div>
         )}
 
@@ -634,7 +778,11 @@ export default function SnowparkSetupModal({ onClose }: Props) {
                 fontSize: 11,
               }}>
                 {cur.log.length === 0 && cur.status === "idle" && (
-                  <Text type="secondary" style={{ fontSize: 11 }}>Press Run to start this step.</Text>
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    {useExisting && current === 0
+                      ? "Press Validate to check the existing virtual environment."
+                      : "Press Run to start this step."}
+                  </Text>
                 )}
                 {cur.log.map((line, i) => (
                   <div key={i} style={{ whiteSpace: "pre-wrap", lineHeight: "1.5", color: "var(--text)" }}>
@@ -652,17 +800,28 @@ export default function SnowparkSetupModal({ onClose }: Props) {
 
             {/* ── Step controls ────────────────────────────────────────────── */}
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <Button
-                type="primary"
-                loading={cur.status === "running"}
-                disabled={cur.status === "done"}
-                onClick={() => runStep(current)}
-              >
-                {cur.status === "idle"    ? "Run"
-                 : cur.status === "running" ? "Running…"
-                 : cur.status === "error"   ? "Retry"
-                 : "Done"}
-              </Button>
+              {useExisting && current === 0 ? (
+                <Button
+                  type="primary"
+                  loading={validating}
+                  disabled={cur.status === "done" || !venvPath.trim()}
+                  onClick={handleUseExisting}
+                >
+                  {cur.status === "done" ? "Done" : "Validate"}
+                </Button>
+              ) : (
+                <Button
+                  type="primary"
+                  loading={cur.status === "running"}
+                  disabled={cur.status === "done"}
+                  onClick={() => runStep(current)}
+                >
+                  {cur.status === "idle"    ? "Run"
+                   : cur.status === "running" ? "Running…"
+                   : cur.status === "error"   ? "Retry"
+                   : "Done"}
+                </Button>
+              )}
               {current > 0 && cur.status !== "running" && (
                 <Button onClick={() => setCurrent((c) => c - 1)}>Back</Button>
               )}
