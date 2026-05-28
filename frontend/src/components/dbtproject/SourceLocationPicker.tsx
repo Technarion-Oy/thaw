@@ -221,6 +221,9 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
       .finally(() => setLoadingVersions(false));
   }, [sourceType, selectedObject, pickerDb, pickerSchema]);
 
+  // selectedRef is intentionally omitted from deps — the ref-specific path prefix
+  // (e.g. "branches/main/") is prepended by the caller, not by this callback.
+  // When the ref changes, the tree-loading effect rebuilds the tree from scratch.
   const loadEntries = useCallback(async (dirPath: string): Promise<snowflake.GitRepoEntry[]> => {
     if (sourceType === "gitRepo" && selectedObject) {
       return (await ListGitRepoEntries(pickerDb, pickerSchema, selectedObject, dirPath)) ?? [];
@@ -302,13 +305,15 @@ export default function SourceLocationPicker({ db, schema, value, onChange, mode
     if (sourceType === "workspace") {
       if (!selectedWorkspace) return "";
       const path = selectedPath || "";
-      return `snow://workspace/${selectedWorkspace.name}/versions/live/${path}`;
+      return `snow://workspace/${encodeURIComponent(selectedWorkspace.name)}/versions/live/${path}`;
     }
 
     return "";
   }, [sourceType, selectedObject, selectedWorkspace, selectedRef, refType, selectedVersion, selectedPath, pickerDb, pickerSchema]);
 
-  // Emit the assembled source location to the parent
+  // Emit the assembled source location to the parent.
+  // The `assembledLocation &&` guard ensures we never clear the parent's manually-typed
+  // value on mount (assembledLocation starts as "" before the user interacts with the picker).
   useEffect(() => {
     if (suppressRef.current) {
       suppressRef.current = false;

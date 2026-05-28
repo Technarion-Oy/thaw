@@ -10,7 +10,7 @@
 //
 // @thaw-domain: Object Browser & Administration
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Modal, Form, Input, Select, Space, Button, Alert, Spin,
 } from "antd";
@@ -51,6 +51,7 @@ export default function ModifyDbtProjectModal({ db, schema, name, onClose, onSuc
   const [modifying, setModifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statements, setStatements] = useState<string[]>([]);
+  const previewTimer = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     const init = async () => {
@@ -92,15 +93,19 @@ export default function ModifyDbtProjectModal({ db, schema, name, onClose, onSuc
 
   useEffect(() => {
     if (loading) return;
-    const cfg = new dbtproject.AlterSetConfig({
-      dbtVersion,
-      defaultTarget,
-      externalAccessIntegrations: integrations,
-      comment,
-    });
-    BuildAlterDbtProjectSetSql(db, schema, name, cfg, origComment, origDbtVersion, origDefaultTarget, origIntegrations)
-      .then((sqls) => setStatements(sqls ?? []))
-      .catch(() => setStatements([]));
+    clearTimeout(previewTimer.current);
+    previewTimer.current = setTimeout(() => {
+      const cfg = new dbtproject.AlterSetConfig({
+        dbtVersion,
+        defaultTarget,
+        externalAccessIntegrations: integrations,
+        comment,
+      });
+      BuildAlterDbtProjectSetSql(db, schema, name, cfg, origComment, origDbtVersion, origDefaultTarget, origIntegrations)
+        .then((sqls) => setStatements(sqls ?? []))
+        .catch(() => setStatements([]));
+    }, 200);
+    return () => clearTimeout(previewTimer.current);
   }, [db, schema, name, dbtVersion, defaultTarget, integrations, comment, origComment, origDbtVersion, origDefaultTarget, origIntegrations, loading]);
 
   const handleRun = async () => {
