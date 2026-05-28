@@ -770,7 +770,7 @@ thaw/
     │       ├── function/             # Function selection modal
     │       ├── git/                  # GitPanel + GitOperationsDialog (commit, pull, clone, branches)
     │       ├── gitrepoobj/           # Snowflake Git Repository objects: create, modify, commit filter
-    │       ├── dbtproject/           # Snowflake-native DBT PROJECT objects: create, execute, modify, add version
+    │       ├── dbtproject/           # Snowflake-native DBT PROJECT objects: create, execute, modify, add version, source location picker
     │       ├── help/                 # About dialog, keyboard shortcuts modal
     │       ├── layout/               # AppLayout (two-sidebar drag-and-drop), Sidebar (object tree + context menus)
     │       ├── lineage/              # Recursive dependency tree modal with DDL hover tooltips

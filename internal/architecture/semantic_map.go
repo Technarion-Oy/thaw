@@ -76,6 +76,7 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/dbtproject/CreateDbtProjectModal.tsx",
         "frontend/src/components/dbtproject/ExecuteDbtProjectModal.tsx",
         "frontend/src/components/dbtproject/ModifyDbtProjectModal.tsx",
+        "frontend/src/components/dbtproject/SourceLocationPicker.tsx",
         "frontend/src/components/layout/Sidebar.tsx",
         "frontend/src/components/sidebar/objectIcons.tsx",
         "frontend/src/components/task/TaskHistoryModal.tsx",

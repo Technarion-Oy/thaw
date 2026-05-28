@@ -20,6 +20,7 @@ import {
   BuildAddDbtProjectVersionSql,
   ExecDDL,
 } from "../../../wailsjs/go/main/App";
+import SourceLocationPicker from "./SourceLocationPicker";
 
 const { Text } = Typography;
 
@@ -115,11 +116,20 @@ export default function AddDbtProjectVersionModal({ db, schema, name, onClose, o
         </Form.Item>
 
         <Form.Item label="Source Location" required style={itemStyle}>
-          <Input
-            value={sourceLocation}
-            onChange={(e) => setSourceLocation(e.target.value)}
-            placeholder="@stage/path"
-          />
+          <Space direction="vertical" style={{ width: "100%" }}>
+            <Input
+              value={sourceLocation}
+              onChange={(e) => setSourceLocation(e.target.value)}
+              placeholder="@stage/path or use picker below"
+            />
+            <SourceLocationPicker
+              db={db}
+              schema={schema}
+              value={sourceLocation}
+              onChange={setSourceLocation}
+              mode="stage-only"
+            />
+          </Space>
         </Form.Item>
 
         {/* SQL Preview */}

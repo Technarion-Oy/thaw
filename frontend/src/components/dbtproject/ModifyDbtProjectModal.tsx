@@ -69,8 +69,10 @@ export default function ModifyDbtProjectModal({ db, schema, name, onClose, onSuc
         const ver = pMap.get("DBT_VERSION") || "";
         const tgt = pMap.get("DEFAULT_TARGET") || "";
         const cmt = pMap.get("COMMENT") || "";
-        const eaiStr = pMap.get("EXTERNAL_ACCESS_INTEGRATIONS") || "";
-        const eaiArr = eaiStr ? eaiStr.split(",").map((s) => s.trim()).filter(Boolean) : [];
+        const eaiRaw = pMap.get("EXTERNAL_ACCESS_INTEGRATIONS") || "";
+        // Handle possible formats: comma-separated, bracket-wrapped [A,B], or JSON array ["A","B"]
+        const eaiClean = eaiRaw.replace(/^\[|\]$/g, "");
+        const eaiArr = eaiClean ? eaiClean.split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean) : [];
 
         setDbtVersion(ver);
         setDefaultTarget(tgt);

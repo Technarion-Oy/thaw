@@ -24,6 +24,7 @@ import {
   ListSupportedDbtVersions,
 } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
+import SourceLocationPicker from "./SourceLocationPicker";
 import { dbtproject } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
 
@@ -183,11 +184,19 @@ export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }
         </Form.Item>
 
         <Form.Item label="Source Location" required style={itemStyle}>
-          <Input
-            value={cfg.sourceLocation}
-            onChange={(e) => set("sourceLocation", e.target.value)}
-            placeholder="@stage/path or git URL"
-          />
+          <Space direction="vertical" style={{ width: "100%" }}>
+            <Input
+              value={cfg.sourceLocation}
+              onChange={(e) => set("sourceLocation", e.target.value)}
+              placeholder="@stage/path or use picker below"
+            />
+            <SourceLocationPicker
+              db={db}
+              schema={schema}
+              value={cfg.sourceLocation}
+              onChange={(v) => set("sourceLocation", v)}
+            />
+          </Space>
         </Form.Item>
 
         <Form.Item label="dbt Version" style={itemStyle}>

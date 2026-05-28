@@ -122,15 +122,17 @@ func BuildAlterDbtProjectSetSql(db, schema, name string, cfg AlterSetConfig, ori
 		setClauses = append(setClauses, fmt.Sprintf("COMMENT = '%s'", snowflake.EscapeStringLit(cfg.Comment)))
 	}
 
-	// Check if integrations changed
+	// Check if integrations changed (case-insensitive: Snowflake identifiers
+	// are uppercased by default, but DESCRIBE may return a different casing
+	// than the Select component provides).
 	if len(cfg.ExternalAccessIntegrations) > 0 {
 		origSet := make(map[string]bool, len(origIntegrations))
 		for _, i := range origIntegrations {
-			origSet[i] = true
+			origSet[strings.ToUpper(i)] = true
 		}
 		newSet := make(map[string]bool, len(cfg.ExternalAccessIntegrations))
 		for _, i := range cfg.ExternalAccessIntegrations {
-			newSet[i] = true
+			newSet[strings.ToUpper(i)] = true
 		}
 		changed := len(origSet) != len(newSet)
 		if !changed {

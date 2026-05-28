@@ -1832,6 +1832,38 @@ func (a *App) ListSupportedDbtVersions() ([]dbtproject.DbtVersionInfo, error) {
 	return versions, nil
 }
 
+// ListStageEntries returns directory-aware entries within an internal named stage.
+func (a *App) ListStageEntries(database, schema, stageName, dirPath string) ([]snowflake.GitRepoEntry, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.client.ListStageEntries(a.ctx, database, schema, stageName, dirPath)
+}
+
+// ListDbtProjectVersions returns all versions of a DBT PROJECT.
+func (a *App) ListDbtProjectVersions(database, schema, name string) ([]snowflake.DbtProjectVersion, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.client.ListDbtProjectVersions(a.ctx, database, schema, name)
+}
+
+// ListWorkspaces returns all workspaces visible to the current user.
+func (a *App) ListWorkspaces() ([]snowflake.WorkspaceInfo, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.client.ListWorkspaces(a.ctx)
+}
+
+// ListWorkspaceEntries returns directory-aware entries within a workspace.
+func (a *App) ListWorkspaceEntries(database, schema, workspaceName, dirPath string) ([]snowflake.GitRepoEntry, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.client.ListWorkspaceEntries(a.ctx, database, schema, workspaceName, dirPath)
+}
+
 // ListExternalAccessIntegrations returns all EXTERNAL ACCESS integrations.
 func (a *App) ListExternalAccessIntegrations() ([]snowflake.IntegrationRow, error) {
 	if a.client == nil {

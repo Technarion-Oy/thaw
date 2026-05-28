@@ -281,6 +281,19 @@ func TestBuildAlterDbtProjectSetSql_SameIntegrations_NoChanges(t *testing.T) {
 	}
 }
 
+func TestBuildAlterDbtProjectSetSql_SameIntegrations_CaseInsensitive(t *testing.T) {
+	cfg := AlterSetConfig{
+		ExternalAccessIntegrations: []string{"eai_1", "Eai_2"},
+	}
+	stmts, err := BuildAlterDbtProjectSetSql("DB", "SC", "PROJ", cfg, "", "", "", []string{"EAI_1", "EAI_2"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(stmts) != 0 {
+		t.Fatalf("expected 0 statements (same integrations, different casing), got %d: %v", len(stmts), stmts)
+	}
+}
+
 // ── BuildExecuteDbtProjectSql ─────────────────────────────────────────────────
 
 func TestBuildExecuteDbtProjectSql_Basic(t *testing.T) {

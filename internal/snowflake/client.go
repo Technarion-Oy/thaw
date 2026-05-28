@@ -1079,26 +1079,11 @@ type GitTag struct {
 	Name string `json:"name"`
 }
 
-// ListGitRepoEntries returns the immediate children (files and directories) at
-// dirPath within the git repository stage @database.schema.repoName/dirPath.
-// Pass an empty dirPath to list the root. Directories are sorted first, then
-// files; both groups are sorted case-insensitively by name.
-func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoName, dirPath string) ([]GitRepoEntry, error) {
-	// NORMALIZE DIRPATH
-	// Remove leading slash so HasPrefix matches relPath safely.
-	dirPath = strings.TrimPrefix(dirPath, "/")
-	// Ensure trailing slash to prevent swallowing files into empty-named directories.
-	if dirPath != "" && !strings.HasSuffix(dirPath, "/") {
-		dirPath += "/"
-	}
-
-	sql := fmt.Sprintf(`LIST @%s.%s.%s/%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(repoName), dirPath)
-
-	res, err := c.Execute(ctx, sql)
-	if err != nil {
-		return nil, err
-	}
-
+// parseListEntries parses the result of a LIST @stage/path command into
+// directory-aware GitRepoEntry values. stageName is the unquoted object name
+// used to strip the stage/repo prefix from the NAME column. dirPath is the
+// normalized directory prefix (with trailing slash when non-empty).
+func parseListEntries(res *QueryResult, stageName, dirPath string) []GitRepoEntry {
 	nameIdx := -1
 	sizeIdx := -1
 	for i, col := range res.Columns {
@@ -1110,7 +1095,7 @@ func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoN
 		}
 	}
 	if nameIdx == -1 {
-		return []GitRepoEntry{}, nil
+		return []GitRepoEntry{}
 	}
 
 	seen := make(map[string]struct{})
@@ -1127,10 +1112,10 @@ func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoN
 		if slashIdx := strings.Index(fullName, "/"); slashIdx >= 0 {
 			prefix := fullName[:slashIdx]
 			up := strings.ToUpper(prefix)
-			ur := strings.ToUpper(repoName)
+			ur := strings.ToUpper(stageName)
 
 			// Determine if the part before the first slash is a stage prefix.
-			// It might be REPO, "REPO", @REPO, or a qualified DB.SCHEMA.REPO.
+			// It might be STAGE, "STAGE", @STAGE, or a qualified DB.SCHEMA.STAGE.
 			isPrefix := up == ur ||
 				up == `"`+ur+`"` ||
 				strings.HasPrefix(up, "@") ||
@@ -1188,7 +1173,184 @@ func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoN
 		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
 	})
 
-	return entries, nil
+	return entries
+}
+
+// normalizeDirPath normalizes a directory path for LIST queries: strips
+// leading slash, ensures trailing slash when non-empty.
+func normalizeDirPath(dirPath string) string {
+	dirPath = strings.TrimPrefix(dirPath, "/")
+	if dirPath != "" && !strings.HasSuffix(dirPath, "/") {
+		dirPath += "/"
+	}
+	return dirPath
+}
+
+// ListGitRepoEntries returns the immediate children (files and directories) at
+// dirPath within the git repository stage @database.schema.repoName/dirPath.
+// Pass an empty dirPath to list the root. Directories are sorted first, then
+// files; both groups are sorted case-insensitively by name.
+func (c *Client) ListGitRepoEntries(ctx context.Context, database, schema, repoName, dirPath string) ([]GitRepoEntry, error) {
+	dirPath = normalizeDirPath(dirPath)
+
+	sql := fmt.Sprintf(`LIST @%s.%s.%s/%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(repoName), dirPath)
+
+	res, err := c.Execute(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+
+	return parseListEntries(res, repoName, dirPath), nil
+}
+
+// ListStageEntries returns the immediate children (files and directories) at
+// dirPath within an internal named stage @database.schema.stageName/dirPath.
+// Pass an empty dirPath to list the root. Reuses the same directory-aware
+// parsing logic as ListGitRepoEntries.
+func (c *Client) ListStageEntries(ctx context.Context, database, schema, stageName, dirPath string) ([]GitRepoEntry, error) {
+	dirPath = normalizeDirPath(dirPath)
+
+	sql := fmt.Sprintf(`LIST @%s.%s.%s/%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(stageName), dirPath)
+
+	res, err := c.Execute(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+
+	return parseListEntries(res, stageName, dirPath), nil
+}
+
+// DbtProjectVersion represents a version of a Snowflake-native DBT PROJECT.
+type DbtProjectVersion struct {
+	Version   string `json:"version"`
+	Alias     string `json:"alias"`
+	IsDefault bool   `json:"isDefault"`
+}
+
+// ListDbtProjectVersions returns all versions of the given DBT PROJECT.
+func (c *Client) ListDbtProjectVersions(ctx context.Context, database, schema, name string) ([]DbtProjectVersion, error) {
+	sql := fmt.Sprintf(`SHOW VERSIONS IN DBT PROJECT %s.%s.%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(name))
+
+	res, err := c.Execute(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+
+	versionIdx := -1
+	aliasIdx := -1
+	defaultIdx := -1
+	for i, col := range res.Columns {
+		switch strings.ToUpper(col) {
+		case "VERSION":
+			versionIdx = i
+		case "ALIAS":
+			aliasIdx = i
+		case "IS_DEFAULT", "DEFAULT":
+			defaultIdx = i
+		}
+	}
+	if versionIdx == -1 {
+		return []DbtProjectVersion{}, nil
+	}
+
+	var versions []DbtProjectVersion
+	for _, row := range res.Rows {
+		v := DbtProjectVersion{
+			Version: strVal(row, versionIdx),
+		}
+		if aliasIdx != -1 {
+			v.Alias = strVal(row, aliasIdx)
+		}
+		if defaultIdx != -1 {
+			d := strings.ToLower(strVal(row, defaultIdx))
+			v.IsDefault = d == "true" || d == "1" || d == "yes" || d == "y"
+		}
+		versions = append(versions, v)
+	}
+	return versions, nil
+}
+
+// WorkspaceInfo represents a Snowflake workspace returned by SHOW GIT REPOSITORIES.
+type WorkspaceInfo struct {
+	Name     string `json:"name"`
+	Database string `json:"database"`
+	Schema   string `json:"schema"`
+	Owner    string `json:"owner"`
+}
+
+// ListWorkspaces returns all workspaces visible to the current user.
+// Workspaces appear as git repositories whose name follows the pattern
+// <USER>$.<SCHEMA>."<workspace_name>". We filter by checking the
+// repository_origin column for "WORKSPACE" or by name pattern.
+func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
+	res, err := c.Execute(ctx, "SHOW GIT REPOSITORIES IN ACCOUNT")
+	if err != nil {
+		return nil, err
+	}
+
+	nameIdx := -1
+	dbIdx := -1
+	schemaIdx := -1
+	ownerIdx := -1
+	originIdx := -1
+	for i, col := range res.Columns {
+		switch strings.ToUpper(col) {
+		case "NAME":
+			nameIdx = i
+		case "DATABASE_NAME":
+			dbIdx = i
+		case "SCHEMA_NAME":
+			schemaIdx = i
+		case "OWNER":
+			ownerIdx = i
+		case "REPOSITORY_ORIGIN":
+			originIdx = i
+		}
+	}
+	if nameIdx == -1 {
+		return []WorkspaceInfo{}, nil
+	}
+
+	var workspaces []WorkspaceInfo
+	for _, row := range res.Rows {
+		// Filter: only workspace-type repos (REPOSITORY_ORIGIN = "WORKSPACE")
+		// or repos whose name contains "$" (workspace naming convention).
+		origin := ""
+		if originIdx != -1 {
+			origin = strings.ToUpper(strVal(row, originIdx))
+		}
+		name := strVal(row, nameIdx)
+		if origin != "WORKSPACE" && !strings.Contains(name, "$") {
+			continue
+		}
+		w := WorkspaceInfo{Name: name}
+		if dbIdx != -1 {
+			w.Database = strVal(row, dbIdx)
+		}
+		if schemaIdx != -1 {
+			w.Schema = strVal(row, schemaIdx)
+		}
+		if ownerIdx != -1 {
+			w.Owner = strVal(row, ownerIdx)
+		}
+		workspaces = append(workspaces, w)
+	}
+	return workspaces, nil
+}
+
+// ListWorkspaceEntries returns directory-aware entries within a workspace.
+// The workspace is addressed as a git repository stage: @db.schema."workspace_name"/dirPath.
+func (c *Client) ListWorkspaceEntries(ctx context.Context, database, schema, workspaceName, dirPath string) ([]GitRepoEntry, error) {
+	dirPath = normalizeDirPath(dirPath)
+
+	sql := fmt.Sprintf(`LIST @%s.%s.%s/%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(workspaceName), dirPath)
+
+	res, err := c.Execute(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+
+	return parseListEntries(res, workspaceName, dirPath), nil
 }
 
 // ListGitBranches returns all branches in the given git repository.

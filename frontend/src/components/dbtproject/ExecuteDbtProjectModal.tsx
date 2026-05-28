@@ -100,7 +100,10 @@ export default function ExecuteDbtProjectModal({ db, schema, name, onClose }: Pr
         <Form.Item label="Execution Mode" style={itemStyle}>
           <Select
             value={mode}
-            onChange={(v) => setMode(v)}
+            onChange={(v) => {
+              setMode(v);
+              if (v === "direct") setCfg((prev) => ({ ...prev, fromWorkspace: "", projectRoot: "" }));
+            }}
             options={[
               { value: "direct", label: "Direct" },
               { value: "workspace", label: "From Workspace" },
