@@ -36,7 +36,8 @@ import (
 //	  "advancedTools":            { "schemaMigration": false },
 //	  "developerEnvironments":    { "snowparkNotebooks": false },
 //	  "performanceDiagnostics":   { "explainSql": false },
-//	  "connection":               { "snowflakeCLIProfileManager": false }
+//	  "connection":               { "snowflakeCLIProfileManager": false },
+//	  "fileBrowser":              { "fileWatcher": false }
 //	}
 
 // ptrbool is a small helper so JSON null / absent ≠ false.
@@ -98,6 +99,11 @@ type adminResultsGrid struct {
 	MultiCellCopy ptrBool `json:"multiCellCopy,omitempty"`
 }
 
+// adminFileBrowser is the "fileBrowser" category.
+type adminFileBrowser struct {
+	FileWatcher ptrBool `json:"fileWatcher,omitempty"`
+}
+
 // adminConfigJSON is the full schema for the admin features.json file.
 type adminConfigJSON struct {
 	DataExportImport         adminDataExportImport `json:"dataExportImport"`
@@ -108,6 +114,7 @@ type adminConfigJSON struct {
 	PerformanceDiagnostics   adminPerfDiag         `json:"performanceDiagnostics"`
 	Connection               adminConnection       `json:"connection"`
 	ResultsGrid              adminResultsGrid      `json:"resultsGrid"`
+	FileBrowser              adminFileBrowser      `json:"fileBrowser"`
 }
 
 // ─── System config file path ───────────────────────────────────────────────────
@@ -221,6 +228,9 @@ func mergeAdminOverrides(user FeatureFlags, cfg adminConfigJSON) (effective Feat
 
 	// Results Grid
 	apply(&effective.MultiCellCopy, &locked.MultiCellCopy, cfg.ResultsGrid.MultiCellCopy)
+
+	// File Browser
+	apply(&effective.FileWatcher, &locked.FileWatcher, cfg.FileBrowser.FileWatcher)
 
 	return effective, locked
 }

@@ -180,8 +180,8 @@ func DefaultNotebookPrefs() NotebookPrefs {
 //
 // Version tracks the schema revision so new flags introduced after an initial
 // save can be filled with their defaults rather than the zero value (false).
-// Current version: 9 (removed AIChat and AIImportSuggest).
-const flagsVersion = 9
+// Current version: 10 (added FileWatcher).
+const flagsVersion = 10
 
 type FeatureFlags struct {
 	Initialized bool `json:"initialized"`
@@ -240,6 +240,9 @@ type FeatureFlags struct {
 
 	// Editor Productivity
 	CrossTabSearch bool `json:"crossTabSearch"` // Search and replace across all open tabs
+
+	// File Browser
+	FileWatcher bool `json:"fileWatcher"` // Auto-refresh file browser on external changes
 }
 
 // DefaultFeatureFlags returns a FeatureFlags with every feature enabled.
@@ -279,6 +282,7 @@ func DefaultFeatureFlags() FeatureFlags {
 		SnowflakeCLIProfileManager: true,
 		MultiCellCopy:              true,
 		CrossTabSearch:             true,
+		FileWatcher:                true,
 	}
 }
 
@@ -337,6 +341,8 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	setIfZero(&f.MultiCellCopy, defaults.MultiCellCopy)
 	// Version 7 → 8: CrossTabSearch added; defaults to true.
 	setIfZero(&f.CrossTabSearch, defaults.CrossTabSearch)
+	// Version 9 → 10: FileWatcher added; defaults to true.
+	setIfZero(&f.FileWatcher, defaults.FileWatcher)
 	f.Version = flagsVersion
 	return f
 }

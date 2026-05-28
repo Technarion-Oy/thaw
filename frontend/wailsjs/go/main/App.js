@@ -1106,6 +1106,10 @@ export function StartDapProxy() {
   return window['go']['main']['App']['StartDapProxy']();
 }
 
+export function StartFileWatcher(arg1) {
+  return window['go']['main']['App']['StartFileWatcher'](arg1);
+}
+
 export function StartNotebookSession(arg1) {
   return window['go']['main']['App']['StartNotebookSession'](arg1);
 }
@@ -1120,6 +1124,10 @@ export function StartShell(arg1, arg2) {
 
 export function StopDapProxy() {
   return window['go']['main']['App']['StopDapProxy']();
+}
+
+export function StopFileWatcher() {
+  return window['go']['main']['App']['StopFileWatcher']();
 }
 
 export function StopNotebookSession(arg1) {

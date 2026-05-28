@@ -573,6 +573,8 @@ export function SetUserPublicKey(arg1:string,arg2:string):Promise<void>;
 
 export function StartDapProxy():Promise<void>;
 
+export function StartFileWatcher(arg1:string):Promise<void>;
+
 export function StartNotebookSession(arg1:string):Promise<void>;
 
 export function StartQuery(arg1:string,arg2:string):Promise<string>;
@@ -580,6 +582,8 @@ export function StartQuery(arg1:string,arg2:string):Promise<string>;
 export function StartShell(arg1:string,arg2:string):Promise<void>;
 
 export function StopDapProxy():Promise<void>;
+
+export function StopFileWatcher():Promise<void>;
 
 export function StopNotebookSession(arg1:string):Promise<void>;
 

@@ -72,7 +72,7 @@ thaw/
 │   ├── ai/              # AI provider clients (OpenAI, Google, Ollama); inline completions, model management
 │   ├── config/          # App config (TOML persistence)
 │   ├── gitrepo/         # Git operations via exec
-│   ├── filesystem/      # File read/write/delete/rename helpers, reveal in file manager
+│   ├── filesystem/      # File read/write/delete/rename helpers, reveal in file manager, FS watcher
 │   ├── sfconfig/        # Reads ~/.snowflake/config.toml
 │   ├── logger/          # Logrus + lumberjack rotation
 │   ├── telemetry/       # Usage telemetry
@@ -222,6 +222,15 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 - Supports case-sensitive and regex toggle buttons; match counter shows "N of M in K tabs"
 - **Known limitation — notebook navigation**: Navigating to a notebook tab match switches to the correct tab but does not scroll to or highlight the match within the cell, because `thaw:editor-ready` is only emitted by the primary `SqlEditor` on mount — notebook tabs use per-cell editors that don't emit this event
 - **Known limitation — panel state**: Search/replace terms and toggle states are lost when the panel is closed (component is unmounted), unlike VS Code which preserves them
+
+### File system watcher
+- `internal/filesystem/watcher.go` — `Watcher` struct wrapping `fsnotify.Watcher`; recursively watches all non-hidden directories under a root path
+- Events are debounced per-directory (200ms) to coalesce rapid changes (e.g. `git checkout`)
+- New directories created externally are automatically added to the watch list
+- `app.go` exposes `StartFileWatcher(dir)` / `StopFileWatcher()` IPC methods; change events are emitted as `"fs:changed"` Wails events with `{ dir: string }` payload
+- `FileBrowser.tsx` starts/stops the watcher when `exportDir` changes; listens for `fs:changed` and incrementally refreshes only the affected directory node in the tree
+- Self-change suppression: in-app mutations (create, rename, delete, duplicate) mark the parent directory in a `selfChangedDirs` Set with a 500ms timeout to prevent redundant double-refresh flicker
+- Gated behind the `fileWatcher` feature flag (View → Enabled Features → File Watcher)
 
 ### SQL diagnostics & JOIN suggestions (backend)
 All proprietary analysis logic lives in `internal/sqleditor/` and is exposed to the frontend via a dedicated Wails-bound `sqleditor.Service` struct (`service.go`). The service is registered in `main.go`'s `Bind` array and its methods are imported from `wailsjs/go/sqleditor/Service` (not from `wailsjs/go/main/App`):
