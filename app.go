@@ -1802,23 +1802,15 @@ func (a *App) DescribeDbtProject(database, schema, name string) ([]PropertyPair,
 	if a.client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	query := fmt.Sprintf("DESCRIBE DBT PROJECT %s.%s.%s",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-	res, err := a.client.Execute(a.ctx, query)
+	res, err := a.client.Execute(a.ctx, dbtproject.BuildDescribeSql(database, schema, name))
 	if err != nil {
 		return nil, err
 	}
 	return a.resToPairs(res), nil
 }
 
-// DbtVersionInfo holds a single entry from SYSTEM$SUPPORTED_DBT_VERSIONS().
-type DbtVersionInfo struct {
-	DbtVersion string `json:"dbt_version"`
-	Type       string `json:"type"`
-}
-
 // ListSupportedDbtVersions returns the dbt versions supported by the account.
-func (a *App) ListSupportedDbtVersions() ([]DbtVersionInfo, error) {
+func (a *App) ListSupportedDbtVersions() ([]dbtproject.DbtVersionInfo, error) {
 	if a.client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
@@ -1833,7 +1825,7 @@ func (a *App) ListSupportedDbtVersions() ([]DbtVersionInfo, error) {
 	if !ok {
 		return nil, fmt.Errorf("unexpected type for dbt versions: %T", res.Rows[0][0])
 	}
-	var versions []DbtVersionInfo
+	var versions []dbtproject.DbtVersionInfo
 	if err := json.Unmarshal([]byte(raw), &versions); err != nil {
 		return nil, fmt.Errorf("failed to parse dbt versions: %w", err)
 	}

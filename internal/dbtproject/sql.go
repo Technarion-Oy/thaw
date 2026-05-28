@@ -42,6 +42,18 @@ type ExecuteConfig struct {
 	ProjectRoot   string `json:"projectRoot"`
 }
 
+// DbtVersionInfo holds a single entry from SYSTEM$SUPPORTED_DBT_VERSIONS().
+type DbtVersionInfo struct {
+	DbtVersion string `json:"dbt_version"`
+	Type       string `json:"type"`
+}
+
+// BuildDescribeSql returns a DESCRIBE DBT PROJECT statement.
+func BuildDescribeSql(db, schema, name string) string {
+	return fmt.Sprintf("DESCRIBE DBT PROJECT %s.%s.%s",
+		snowflake.QuoteIdent(db), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
+}
+
 // BuildCreateDbtProjectSql constructs a CREATE DBT PROJECT SQL statement.
 func BuildCreateDbtProjectSql(db, schema string, cfg CreateConfig) (string, error) {
 	if cfg.SourceLocation == "" {

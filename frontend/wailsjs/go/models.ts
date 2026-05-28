@@ -341,6 +341,20 @@ export namespace dbtproject {
 	        this.externalAccessIntegrations = source["externalAccessIntegrations"];
 	    }
 	}
+	export class DbtVersionInfo {
+	    dbt_version: string;
+	    type: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DbtVersionInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.dbt_version = source["dbt_version"];
+	        this.type = source["type"];
+	    }
+	}
 	export class ExecuteConfig {
 	    args: string;
 	    dbtVersion: string;
@@ -1126,20 +1140,6 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.column = source["column"];
 	        this.comment = source["comment"];
-	    }
-	}
-	export class DbtVersionInfo {
-	    dbt_version: string;
-	    type: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new DbtVersionInfo(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.dbt_version = source["dbt_version"];
-	        this.type = source["type"];
 	    }
 	}
 	export class KeyPairResult {

@@ -268,6 +268,19 @@ func TestBuildAlterDbtProjectSetSql_UnsetIntegrations(t *testing.T) {
 	assertContains(t, stmts[0], `UNSET EXTERNAL_ACCESS_INTEGRATIONS`)
 }
 
+func TestBuildAlterDbtProjectSetSql_SameIntegrations_NoChanges(t *testing.T) {
+	cfg := AlterSetConfig{
+		ExternalAccessIntegrations: []string{"EAI_A", "EAI_B"},
+	}
+	stmts, err := BuildAlterDbtProjectSetSql("DB", "SC", "PROJ", cfg, "", "", "", []string{"EAI_A", "EAI_B"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(stmts) != 0 {
+		t.Fatalf("expected 0 statements (same integrations), got %d: %v", len(stmts), stmts)
+	}
+}
+
 // ── BuildExecuteDbtProjectSql ─────────────────────────────────────────────────
 
 func TestBuildExecuteDbtProjectSql_Basic(t *testing.T) {
@@ -338,4 +351,11 @@ func TestBuildAddVersionSql_MissingSourceLocation(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing sourceLocation")
 	}
+}
+
+// ── BuildDescribeSql ──────────────────────────────────────────────────────────
+
+func TestBuildDescribeSql(t *testing.T) {
+	sql := BuildDescribeSql("DB", "SC", "PROJ")
+	assertContains(t, sql, `DESCRIBE DBT PROJECT "DB"."SC"."PROJ"`)
 }

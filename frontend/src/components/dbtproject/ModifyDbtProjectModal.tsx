@@ -24,7 +24,7 @@ import {
   ExecDDL,
 } from "../../../wailsjs/go/main/App";
 import { dbtproject } from "../../../wailsjs/go/models";
-import type { main, snowflake } from "../../../wailsjs/go/models";
+import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
 
@@ -48,7 +48,7 @@ export default function ModifyDbtProjectModal({ db, schema, name, onClose, onSuc
   const [origComment, setOrigComment] = useState("");
 
   const [eaiList, setEaiList] = useState<snowflake.IntegrationRow[]>([]);
-  const [dbtVersions, setDbtVersions] = useState<main.DbtVersionInfo[]>([]);
+  const [dbtVersions, setDbtVersions] = useState<dbtproject.DbtVersionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [modifying, setModifying] = useState(false);
   const [error, setError] = useState<string | null>(null);

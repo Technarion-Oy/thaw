@@ -18,7 +18,6 @@ import {
 import { PlayCircleOutlined } from "@ant-design/icons";
 import { BuildExecuteDbtProjectSql, ListSupportedDbtVersions } from "../../../wailsjs/go/main/App";
 import { dbtproject } from "../../../wailsjs/go/models";
-import type { main } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
 
 const { Text } = Typography;
@@ -32,13 +31,13 @@ interface Props {
 
 export default function ExecuteDbtProjectModal({ db, schema, name, onClose }: Props) {
   const [mode, setMode] = useState<"direct" | "workspace">("direct");
-  const [cfg, setCfg] = useState<dbtproject.ExecuteConfig>({
+  const [cfg, setCfg] = useState<dbtproject.ExecuteConfig>(new dbtproject.ExecuteConfig({
     args: "",
     dbtVersion: "",
     fromWorkspace: "",
     projectRoot: "",
-  });
-  const [dbtVersions, setDbtVersions] = useState<main.DbtVersionInfo[]>([]);
+  }));
+  const [dbtVersions, setDbtVersions] = useState<dbtproject.DbtVersionInfo[]>([]);
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [preview, setPreview] = useState("");
   const executeInNewTab = useQueryStore((s) => s.executeInNewTab);

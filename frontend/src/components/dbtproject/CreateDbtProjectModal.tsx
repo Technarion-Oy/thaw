@@ -25,7 +25,7 @@ import {
 } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import { dbtproject } from "../../../wailsjs/go/models";
-import type { main, snowflake } from "../../../wailsjs/go/models";
+import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
 
@@ -37,7 +37,7 @@ interface Props {
 }
 
 export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }: Props) {
-  const [cfg, setCfg] = useState<dbtproject.CreateConfig>({
+  const [cfg, setCfg] = useState<dbtproject.CreateConfig>(new dbtproject.CreateConfig({
     name: "",
     caseSensitive: false,
     orReplace: false,
@@ -47,9 +47,9 @@ export default function CreateDbtProjectModal({ db, schema, onClose, onSuccess }
     dbtVersion: "",
     defaultTarget: "",
     externalAccessIntegrations: [],
-  });
+  }));
   const [eaiList, setEaiList] = useState<snowflake.IntegrationRow[]>([]);
-  const [dbtVersions, setDbtVersions] = useState<main.DbtVersionInfo[]>([]);
+  const [dbtVersions, setDbtVersions] = useState<dbtproject.DbtVersionInfo[]>([]);
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [loadingEai, setLoadingEai] = useState(false);
   const [creating, setCreating] = useState(false);
