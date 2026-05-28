@@ -11,6 +11,7 @@
 package filesystem
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -98,14 +99,24 @@ func TestWatcher_DebounceCoalescing(t *testing.T) {
 	// Create 10 files as fast as possible — all writes target the same
 	// directory so they should coalesce into far fewer debounced events.
 	for i := 0; i < 10; i++ {
-		name := filepath.Join(dir, "file"+string(rune('a'+i))+".txt")
+		name := filepath.Join(dir, fmt.Sprintf("file%d.txt", i))
 		if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	// Wait well past the debounce window for all timers to fire.
-	time.Sleep(600 * time.Millisecond)
+	// Wait for at least one debounced event to arrive.
+	ok := waitFor(t, 2*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(events) > 0
+	})
+	if !ok {
+		t.Fatal("expected at least one debounced event, got 0")
+	}
+
+	// Allow any remaining timers to settle.
+	time.Sleep(300 * time.Millisecond)
 
 	mu.Lock()
 	count := len(events)
@@ -115,9 +126,6 @@ func TestWatcher_DebounceCoalescing(t *testing.T) {
 	// fewer than 10 events. We use a generous threshold to avoid flakiness.
 	if count >= 10 {
 		t.Errorf("expected debounce coalescing (< 10 events for 10 writes), got %d", count)
-	}
-	if count == 0 {
-		t.Error("expected at least one debounced event, got 0")
 	}
 }
 

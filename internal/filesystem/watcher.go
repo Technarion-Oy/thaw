@@ -144,6 +144,13 @@ func (w *Watcher) handleEvent(ev fsnotify.Event) {
 		}
 	}
 
+	// Clean up watches for removed paths. Remove is a no-op for non-watched
+	// paths, so calling it unconditionally is safe and avoids tracking which
+	// paths are directories.
+	if ev.Has(fsnotify.Remove) || ev.Has(fsnotify.Rename) {
+		w.watcher.Remove(ev.Name) //nolint:errcheck
+	}
+
 	// Determine the parent directory that changed.
 	parentDir := filepath.Dir(ev.Name)
 
@@ -179,21 +186,13 @@ func (w *Watcher) scheduleEmit(dir string) {
 	}
 
 	if t, ok := w.timers[dir]; ok {
-		t.Reset(debounceDelay)
-		return
+		t.Stop()
 	}
 
 	w.timers[dir] = time.AfterFunc(debounceDelay, func() {
 		w.mu.Lock()
-		_, stillPending := w.timers[dir]
-		if stillPending {
-			delete(w.timers, dir)
-		}
+		delete(w.timers, dir)
 		w.mu.Unlock()
-
-		if !stillPending {
-			return // a new timer has taken over or watcher is closed
-		}
 
 		select {
 		case <-w.stopCh:

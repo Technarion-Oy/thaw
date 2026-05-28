@@ -95,8 +95,9 @@ function mergeNodes(prev: DataNode[], fresh: DataNode[]): DataNode[] {
   const oldByKey = new Map(prev.map((n) => [String(n.key), n]));
   return fresh.map((f) => {
     const existing = oldByKey.get(String(f.key));
-    // Keep expanded children from the existing node.
-    return existing?.children ? { ...f, children: existing.children } : f;
+    // Keep expanded children only if the fresh node is still a directory.
+    // If a directory was replaced by a file with the same name, drop the stale children.
+    return existing?.children && !f.isLeaf ? { ...f, children: existing.children } : f;
   });
 }
 
@@ -292,10 +293,11 @@ export default function FileBrowser() {
     };
   }, []);
 
-  // Stable ref so the fs:changed listener can read loadedKeys without
-  // re-registering on every expand/collapse.
+  // Stable refs so effects can read current values without re-registering.
   const loadedKeysRef = useRef(loadedKeys);
   loadedKeysRef.current = loadedKeys;
+  const loadedRef = useRef(loaded);
+  loadedRef.current = loaded;
 
   // Close file context menu on outside click or Escape key
   useEffect(() => {
@@ -340,13 +342,13 @@ export default function FileBrowser() {
     if (!exportDir || !fileWatcherEnabled || !expanded) return;
     StartFileWatcher(exportDir).catch((e) => console.warn("File watcher failed to start:", e));
     // Refresh root to pick up changes that occurred while collapsed.
-    if (loaded) {
+    if (loadedRef.current) {
       ListDirectory(exportDir)
         .then((entries) => setTreeData((prev) => mergeNodes(prev, entriesToNodes(entries))))
         .catch(() => {});
     }
     return () => { StopFileWatcher().catch(() => {}); };
-  }, [exportDir, fileWatcherEnabled, expanded]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [exportDir, fileWatcherEnabled, expanded]);
 
   // ── File system change listener ────────────────────────────────────────────
   useEffect(() => {
