@@ -69,6 +69,27 @@ function makeStepState(): StepState {
   return { status: "idle", log: [], error: null };
 }
 
+function stepsFromEnvCheck(env: snowpark.SnowparkCheckResult): { steps: StepState[]; firstIncomplete: number } {
+  const newSteps: StepState[] = [
+    { status: "done", log: [], error: null },
+    { status: env.hasSnowpark ? "done" : "idle", log: [], error: null },
+    { status: env.hasNotebook ? "done" : "idle", log: [], error: null },
+  ];
+  const first = newSteps.findIndex((s) => s.status !== "done");
+  return { steps: newSteps, firstIncomplete: first === -1 ? 3 : first };
+}
+
+function CheckItem({ ok, label }: { ok: boolean; label: string }) {
+  return (
+    <div>
+      {ok
+        ? <CheckCircleOutlined style={{ color: "#52c41a" }} />
+        : <CloseCircleOutlined style={{ color: "#ff4d4f" }} />}
+      {" "}{label}
+    </div>
+  );
+}
+
 function condaSteps(isM1: boolean): StepDef[] {
   return [
     {
@@ -172,14 +193,9 @@ export default function SnowparkSetupModal({ onClose }: Props) {
         setUseExisting(true);
         setValidationResult(env);
         setVenvFolderExists(true);
-        const newSteps: StepState[] = [
-          { status: "done", log: [], error: null },
-          { status: env.hasSnowpark ? "done" : "idle", log: [], error: null },
-          { status: env.hasNotebook ? "done" : "idle", log: [], error: null },
-        ];
-        setSteps(newSteps);
-        const firstIncomplete = newSteps.findIndex((s) => s.status !== "done");
-        setCurrent(firstIncomplete === -1 ? 3 : firstIncomplete);
+        const result = stepsFromEnvCheck(env);
+        setSteps(result.steps);
+        setCurrent(result.firstIncomplete);
       }
     });
   }, []);
@@ -204,31 +220,38 @@ export default function SnowparkSetupModal({ onClose }: Props) {
     if (!dir) return;
     setVenvPath(dir);
     await SaveSnowparkVenvPath(dir).catch(() => {});
+    if (useExisting) {
+      setValidationResult(null);
+      setUseExisting(false);
+      setCurrent(0);
+      setSteps([makeStepState(), makeStepState(), makeStepState()]);
+    }
   };
 
   const handleUseExisting = async () => {
     setValidating(true);
     setValidationResult(null);
     try {
-      await SaveSnowparkVenvPath(venvPath).catch(() => {});
-      await SaveSnowparkConfig(backend).catch(() => {});
+      await SaveSnowparkVenvPath(venvPath);
+      await SaveSnowparkConfig(backend);
       const env = await CheckSnowparkEnv();
       setValidationResult(env);
       if (!env.hasVenv) {
-        setUseExisting(true);
+        // Path is invalid — show error but don't switch to "use existing" mode.
         return;
       }
       setUseExisting(true);
       setVenvFolderExists(true);
-      const newSteps: StepState[] = [
-        { status: "done", log: [], error: null },
-        { status: env.hasSnowpark ? "done" : "idle", log: [], error: null },
-        { status: env.hasNotebook ? "done" : "idle", log: [], error: null },
-      ];
-      setSteps(newSteps);
-      // Jump to first incomplete step, or package manager if all done.
-      const firstIncomplete = newSteps.findIndex((s) => s.status !== "done");
-      setCurrent(firstIncomplete === -1 ? 3 : firstIncomplete);
+      const result = stepsFromEnvCheck(env);
+      setSteps(result.steps);
+      setCurrent(result.firstIncomplete);
+    } catch (e) {
+      setValidationResult(null);
+      setSteps((prev) => {
+        const next = [...prev];
+        next[0] = { ...next[0], status: "error", error: String(e) };
+        return next;
+      });
     } finally {
       setValidating(false);
     }
@@ -451,9 +474,18 @@ export default function SnowparkSetupModal({ onClose }: Props) {
               <Input
                 size="small"
                 value={venvPath}
-                disabled={anyRunning || validating || (steps[0].status === "done" && !useExisting)}
+                disabled={anyRunning || validating || steps[0].status === "done"}
                 style={{ fontFamily: "monospace", fontSize: 12, flex: 1 }}
-                onChange={(e) => setVenvPath(e.target.value)}
+                onChange={(e) => {
+                  setVenvPath(e.target.value);
+                  if (useExisting) {
+                    // Path changed — invalidate previous validation so user must re-validate.
+                    setValidationResult(null);
+                    setUseExisting(false);
+                    setCurrent(0);
+                    setSteps([makeStepState(), makeStepState(), makeStepState()]);
+                  }
+                }}
                 onBlur={() => SaveSnowparkVenvPath(venvPath).catch(() => {})}
                 onPressEnter={(e) => {
                   (e.target as HTMLInputElement).blur();
@@ -462,7 +494,7 @@ export default function SnowparkSetupModal({ onClose }: Props) {
               <Button
                 size="small"
                 icon={<FolderOpenOutlined />}
-                disabled={anyRunning || validating || (steps[0].status === "done" && !useExisting)}
+                disabled={anyRunning || validating || steps[0].status === "done"}
                 onClick={handleBrowseVenv}
               >
                 Browse
@@ -502,9 +534,9 @@ export default function SnowparkSetupModal({ onClose }: Props) {
                         ? `Python ${validationResult.version} detected`
                         : "Virtual environment detected"}
                     </div>
-                    <div>{validationResult.hasVenv ? <CheckCircleOutlined style={{ color: "#52c41a" }} /> : <CloseCircleOutlined style={{ color: "#ff4d4f" }} />} Virtual environment</div>
-                    <div>{validationResult.hasSnowpark ? <CheckCircleOutlined style={{ color: "#52c41a" }} /> : <CloseCircleOutlined style={{ color: "#ff4d4f" }} />} snowflake-snowpark-python</div>
-                    <div>{validationResult.hasNotebook ? <CheckCircleOutlined style={{ color: "#52c41a" }} /> : <CloseCircleOutlined style={{ color: "#ff4d4f" }} />} notebook</div>
+                    <CheckItem ok={validationResult.hasVenv} label="Virtual environment" />
+                    <CheckItem ok={validationResult.hasSnowpark} label="snowflake-snowpark-python" />
+                    <CheckItem ok={validationResult.hasNotebook} label="notebook" />
                   </div>
                 }
               />
