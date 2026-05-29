@@ -421,6 +421,13 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
 
 // --- Pure helpers for tree node construction (module-level to avoid re-creation per render) ---
 
+// Parses keys in the format prefix:DB:SCHEMA:NAME:path (stagefile, stagedir, dbtdir, dbtversion)
+function parseStageOrDbtKey(menu: ContextMenu | null): { db: string; schema: string; name: string; path: string } | null {
+  if (!menu) return null;
+  const parts = menu.nodeKey.split(":");
+  return { db: parts[1], schema: parts[2], name: parts[3], path: parts.slice(4).join(":") };
+}
+
 function buildEntryNodes(
   db: string, schema: string, name: string, entries: snowflake.GitRepoEntry[],
   dirPrefix: string, filePrefix: string,
@@ -1636,14 +1643,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     }
   };
 
-  // --- Shared key-parsing helper for stage/dbt handlers ---
-  // Expects keys in the format prefix:DB:SCHEMA:NAME:path (stagefile, stagedir, dbtdir, dbtversion)
-
-  function parseStageOrDbtKey(menu: ContextMenu | null): { db: string; schema: string; name: string; path: string } | null {
-    if (!menu) return null;
-    const parts = menu.nodeKey.split(":");
-    return { db: parts[1], schema: parts[2], name: parts[3], path: parts.slice(4).join(":") };
-  }
 
   // --- Stage file action handlers ---
 
