@@ -1645,19 +1645,23 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     }
   };
 
+  // --- Shared key-parsing helper for stage/dbt handlers ---
+
+  function parseNodeKey(menu: ContextMenu | null): { db: string; schema: string; name: string; path: string } | null {
+    if (!menu) return null;
+    const parts = menu.nodeKey.split(":");
+    return { db: parts[1], schema: parts[2], name: parts[3], path: parts.slice(4).join(":") };
+  }
+
   // --- Stage file action handlers ---
 
   const viewStageFileContent = async () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const stageName = parts[3];
-    const filePath = parts.slice(4).join(":");
+    const k = parseNodeKey(ctxMenu);
+    if (!k) return;
     setCtxMenu(null);
-    const hide = message.loading(`Reading ${filePath}…`, 0);
+    const hide = message.loading(`Reading ${k.path}…`, 0);
     try {
-      const content = await GetStageFileContent(db, schema, stageName, filePath);
+      const content = await GetStageFileContent(k.db, k.schema, k.name, k.path);
       useQueryStore.getState().loadInNewTab(content);
     } catch (e) {
       message.error(String(e));
@@ -1667,17 +1671,13 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   };
 
   const executeStageFile = async () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const stageName = parts[3];
-    const filePath = parts.slice(4).join(":");
+    const k = parseNodeKey(ctxMenu);
+    if (!k) return;
     setCtxMenu(null);
-    const hide = message.loading(`Executing ${filePath}…`, 0);
+    const hide = message.loading(`Executing ${k.path}…`, 0);
     try {
-      await ExecuteStageFile(db, schema, stageName, filePath);
-      message.success(`${filePath} executed successfully`);
+      await ExecuteStageFile(k.db, k.schema, k.name, k.path);
+      message.success(`${k.path} executed successfully`);
     } catch (e) {
       message.error(String(e));
     } finally {
@@ -1686,21 +1686,17 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   };
 
   const downloadStageFile = async () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const stageName = parts[3];
-    const filePath = parts.slice(4).join(":");
+    const k = parseNodeKey(ctxMenu);
+    if (!k) return;
     setCtxMenu(null);
     const localPath = await PickDirectory();
     if (!localPath) return;
-    const stageRef = `@${db}.${schema}.${stageName}/${filePath}`;
-    const hide = message.loading(`Downloading ${filePath}…`, 0);
+    const stageRef = `@${quoteIdent(k.db)}.${quoteIdent(k.schema)}.${quoteIdent(k.name)}/${k.path}`;
+    const hide = message.loading(`Downloading ${k.path}…`, 0);
     try {
       await DownloadFileFromStage(stageRef, localPath, 4, "");
       hide();
-      message.success(`Downloaded ${filePath} successfully.`);
+      message.success(`Downloaded ${k.path} successfully.`);
     } catch (e) {
       hide();
       message.error(`Failed to download file: ${String(e)}`);
@@ -1708,28 +1704,29 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   };
 
   const deleteStageFile = () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const stageName = parts[3];
-    const filePath = parts.slice(4).join(":");
-    const parentKey = ctxMenu.nodeKey.substring(0, ctxMenu.nodeKey.lastIndexOf(":"));
+    const k = parseNodeKey(ctxMenu);
+    if (!k) return;
+    // Compute parent key from parsed path parts (handles colons in paths correctly)
+    const dirParts = k.path.split("/");
+    dirParts.pop();
+    const parentDir = dirParts.join("/");
+    const parentKey = parentDir
+      ? `stagedir:${k.db}:${k.schema}:${k.name}:${parentDir}`
+      : `obj:${k.db}:${k.schema}:STAGE:${k.name}`;
     setCtxMenu(null);
-    const stageRef = `@${db}.${schema}.${stageName}/${filePath}`;
+    const stageRef = `@${quoteIdent(k.db)}.${quoteIdent(k.schema)}.${quoteIdent(k.name)}/${k.path}`;
     modal.confirm({
       title: "Delete Stage File",
-      content: `Are you sure you want to delete ${filePath}?`,
+      content: `Are you sure you want to delete ${k.path}?`,
       okText: "Delete",
       okButtonProps: { danger: true },
       onOk: async () => {
-        const hide = message.loading(`Deleting ${filePath}…`, 0);
+        const hide = message.loading(`Deleting ${k.path}…`, 0);
         try {
           await RemoveStageFiles(stageRef, "");
           hide();
-          message.success(`${filePath} deleted.`);
-          // Refresh parent directory
-          setTreeData((prev) => clearNodeChildren(prev, parentKey.startsWith("stagedir:") ? parentKey : `obj:${db}:${schema}:STAGE:${stageName}`));
+          message.success(`${k.path} deleted.`);
+          setTreeData((prev) => clearNodeChildren(prev, parentKey));
         } catch (e) {
           hide();
           message.error(`Failed to delete: ${String(e)}`);
@@ -1739,23 +1736,19 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   };
 
   const uploadToStageDir = async () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const stageName = parts[3];
-    const dirPath = parts.slice(4).join(":");
+    const k = parseNodeKey(ctxMenu);
+    if (!k) return;
+    const nodeKey = ctxMenu!.nodeKey;
     setCtxMenu(null);
     const localPath = await PickOpenFile();
     if (!localPath) return;
-    const stageRef = `@${db}.${schema}.${stageName}/${dirPath}`;
+    const stageRef = `@${quoteIdent(k.db)}.${quoteIdent(k.schema)}.${quoteIdent(k.name)}/${k.path}`;
     const hide = message.loading(`Uploading to ${stageRef}…`, 0);
     try {
       await UploadFileToStage(localPath, stageRef, 4, true, "AUTO_DETECT", true);
       hide();
       message.success(`Uploaded successfully.`);
-      // Refresh parent directory
-      setTreeData((prev) => clearNodeChildren(prev, ctxMenu.nodeKey));
+      setTreeData((prev) => clearNodeChildren(prev, nodeKey));
     } catch (e) {
       hide();
       message.error(`Failed to upload file: ${String(e)}`);
@@ -1772,16 +1765,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   // --- DBT Project file action handlers ---
 
   const viewDbtFileContent = async () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const dbtName = parts[3];
-    const filePath = parts.slice(4).join(":");
+    const k = parseNodeKey(ctxMenu);
+    if (!k) return;
     setCtxMenu(null);
-    const hide = message.loading(`Reading ${filePath}…`, 0);
+    const hide = message.loading(`Reading ${k.path}…`, 0);
     try {
-      const content = await GetStageFileContent(db, schema, dbtName, filePath);
+      const content = await GetStageFileContent(k.db, k.schema, k.name, k.path);
       useQueryStore.getState().loadInNewTab(content);
     } catch (e) {
       message.error(String(e));
@@ -1791,17 +1780,13 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   };
 
   const executeDbtFile = async () => {
-    if (!ctxMenu) return;
-    const parts = ctxMenu.nodeKey.split(":");
-    const db = parts[1];
-    const schema = parts[2];
-    const dbtName = parts[3];
-    const filePath = parts.slice(4).join(":");
+    const k = parseNodeKey(ctxMenu);
+    if (!k) return;
     setCtxMenu(null);
-    const hide = message.loading(`Executing ${filePath}…`, 0);
+    const hide = message.loading(`Executing ${k.path}…`, 0);
     try {
-      await ExecuteStageFile(db, schema, dbtName, filePath);
-      message.success(`${filePath} executed successfully`);
+      await ExecuteStageFile(k.db, k.schema, k.name, k.path);
+      message.success(`${k.path} executed successfully`);
     } catch (e) {
       message.error(String(e));
     } finally {
