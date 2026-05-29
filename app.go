@@ -3093,6 +3093,30 @@ func (a *App) ExecuteGitFile(database, schema, repoName, filePath string) error 
 	return a.client.ExecuteGitFile(a.ctx, database, schema, repoName, filePath)
 }
 
+// GetStageFileContent reads a file from an internal named stage and returns its content.
+func (a *App) GetStageFileContent(database, schema, stageName, filePath string) (string, error) {
+	if a.client == nil {
+		return "", apperrors.ErrNotConnected
+	}
+	return a.client.GetGitFileContent(a.ctx, database, schema, stageName, filePath)
+}
+
+// ExecuteStageFile executes a SQL file from an internal named stage.
+func (a *App) ExecuteStageFile(database, schema, stageName, filePath string) error {
+	if a.client == nil {
+		return apperrors.ErrNotConnected
+	}
+	return a.client.ExecuteGitFile(a.ctx, database, schema, stageName, filePath)
+}
+
+// ListDbtProjectEntries returns directory-aware entries within a DBT PROJECT version directory.
+func (a *App) ListDbtProjectEntries(database, schema, name, dirPath string) ([]snowflake.GitRepoEntry, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.client.ListStageEntries(a.ctx, database, schema, name, dirPath)
+}
+
 // GetSchemaForeignKeys returns all FK→PK column mappings in the given schema
 // from INFORMATION_SCHEMA. Used by the editor to bulk-warm FK data for the
 // JOIN ON autocomplete instead of issuing per-table SHOW IMPORTED KEYS calls.

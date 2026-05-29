@@ -188,6 +188,8 @@ export function ExecuteNotebook(arg1:string,arg2:string,arg3:string,arg4:Array<s
 
 export function ExecuteQuery(arg1:string):Promise<snowflake.QueryResult>;
 
+export function ExecuteStageFile(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
 export function ExecuteTask(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean):Promise<void>;
 
 export function ExportAccountObjectsDDL(arg1:string):Promise<main.AccountExportResult>;
@@ -312,6 +314,8 @@ export function GetSnowparkConfig():Promise<snowpark.SnowparkConfigResult>;
 
 export function GetSnowsightURL():Promise<string>;
 
+export function GetStageFileContent(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
+
 export function GetStageFilePreview(arg1:string,arg2:fileformat.FileFormatConfig):Promise<fileformat.PreviewResult>;
 
 export function GetSystemRAMGB():Promise<number>;
@@ -421,6 +425,8 @@ export function ListBackups(arg1:string,arg2:string,arg3:string):Promise<Array<m
 export function ListBasicObjects(arg1:string,arg2:string):Promise<Array<snowflake.SnowflakeObject>>;
 
 export function ListDatabases():Promise<Array<string>>;
+
+export function ListDbtProjectEntries(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.GitRepoEntry>>;
 
 export function ListDbtProjectVersions(arg1:string,arg2:string,arg3:string):Promise<Array<snowflake.DbtProjectVersion>>;
 

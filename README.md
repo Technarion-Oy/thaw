@@ -204,6 +204,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 
 ### Object browser (sidebar)
 - Browse databases → schemas → objects (tables, views, functions, procedures, notebooks, dbt projects, …)
+- **Expandable objects** — tables and views expand to show columns; Git Repositories expand to branches/tags/commits; Stages expand to a hierarchical file/directory tree; DBT Projects expand to versions, then directories and files — all with lazy-loading
 - **Multi-selection** — hold `⌘` (macOS) or `Ctrl` (Windows/Linux) and click anywhere on an object row to toggle selection; selected objects are highlighted row-wide; click any non-modifier area to clear the selection
 - **Batch deletion** — when multiple objects are selected, right-click any of them and choose **Delete N selected objects…** to drop all of them in one operation; a confirmation dialog lists all objects to be removed
 - **Filter objects** — type in the search box at the top of the sidebar to filter objects by name across all databases and schemas; the tree cascade-loads all schemas and objects automatically and collapses back to the database list when the search is cleared. For schemas already expanded in the tree, search covers all object types; for schemas not yet expanded, search uses a fast path that returns tables, views, and sequences only (procedures, tasks, stages, etc. appear after manually expanding the schema)

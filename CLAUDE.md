@@ -195,6 +195,14 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 - `notebookToolbarStore` bridges the NotebookTab's internal kernel state and callbacks to the unified Toolbar through QueryPage
 - The Toolbar reads session state directly from `connectionStore` and `sessionStore` — no prop-drilling for session selectors
 
+### Sidebar tree node key formats
+The sidebar tree uses key prefixes to identify node types. For expandable objects beyond tables/views:
+- **Git Repos**: `obj:DB:SCHEMA:GIT REPOSITORY:NAME` → `gitbranches:`, `gittags:`, `gitcommits:` → `gitdir:DB:SCHEMA:REPO:path` → `gitfile:DB:SCHEMA:REPO:path`
+- **Stages**: `obj:DB:SCHEMA:STAGE:NAME` → `stagedir:DB:SCHEMA:NAME:path` → `stagefile:DB:SCHEMA:NAME:path`
+- **DBT Projects**: `obj:DB:SCHEMA:DBT PROJECT:NAME` → `dbtversion:DB:SCHEMA:NAME:version` → `dbtdir:DB:SCHEMA:NAME:path` → `dbtfile:DB:SCHEMA:NAME:path`
+
+Loading state for all these node types is tracked in the `loadingGitNodes` Set (shared, keys are namespaced so no collision). Helper functions `buildStageEntryNodes`, `buildDbtEntryNodes`, and `stageEmptyNode` mirror the git equivalents. Backend IPC methods `GetStageFileContent`, `ExecuteStageFile`, and `ListDbtProjectEntries` delegate to existing client methods (`GetGitFileContent`, `ExecuteGitFile`, `ListStageEntries` respectively) since the underlying SQL patterns are identical.
+
 ### Object listing cache (backend)
 - `Client` in `internal/snowflake/client.go` has a per-schema TTL cache (30s) for `ListObjects` and `ListBasicObjects` results, keyed by `"DB\x00SCHEMA"` (full) and `"basic\x00DB\x00SCHEMA"` (basic-only)
 - `getObjectCache` returns `slices.Clone()` of the cached slice to prevent `append(basic, extended...)` in `ListObjects` from corrupting the backing array
