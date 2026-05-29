@@ -419,6 +419,34 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
   );
 }
 
+// --- Pure helpers for tree node construction (module-level to avoid re-creation per render) ---
+
+function buildEntryNodes(
+  db: string, schema: string, name: string, entries: snowflake.GitRepoEntry[],
+  dirPrefix: string, filePrefix: string,
+): DataNode[] {
+  return entries.map((e) => ({
+    title: e.name,
+    key: `${e.isDir ? dirPrefix : filePrefix}:${db}:${schema}:${name}:${e.path}`,
+    icon: e.isDir
+      ? <FolderOutlined style={{ color: "var(--text-muted)" }} />
+      : <FileOutlined style={{ color: "var(--text-muted)", fontSize: "10px" }} />,
+    isLeaf: !e.isDir,
+  }));
+}
+
+function emptyChildNode(parentKey: string): DataNode {
+  return {
+    title: (
+      <Text type="secondary" style={{ fontStyle: "italic", fontSize: 11 }}>
+        (empty)
+      </Text>
+    ),
+    key: `empty:${parentKey}`,
+    isLeaf: true,
+  };
+}
+
 export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel?: boolean }) {
   const { modal, message: contextMsg } = AntApp.useApp();
   const [treeData, setTreeData] = useState<DataNode[]>([]);
@@ -1047,31 +1075,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     };
   }
 
-  function buildEntryNodes(
-    db: string, schema: string, name: string, entries: snowflake.GitRepoEntry[],
-    dirPrefix: string, filePrefix: string,
-  ): DataNode[] {
-    return entries.map((e) => ({
-      title: e.name,
-      key: `${e.isDir ? dirPrefix : filePrefix}:${db}:${schema}:${name}:${e.path}`,
-      icon: e.isDir
-        ? <FolderOutlined style={{ color: "var(--text-muted)" }} />
-        : <FileOutlined style={{ color: "var(--text-muted)", fontSize: "10px" }} />,
-      isLeaf: !e.isDir,
-    }));
-  }
-
-  function emptyChildNode(parentKey: string): DataNode {
-    return {
-      title: (
-        <Text type="secondary" style={{ fontStyle: "italic", fontSize: 11 }}>
-          (empty)
-        </Text>
-      ),
-      key: `empty:${parentKey}`,
-      isLeaf: true,
-    };
-  }
 
   function updateNode(nodes: DataNode[], targetKey: string, children: DataNode[]): DataNode[] {
     return nodes.map((node) => {
@@ -2399,7 +2402,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   );
 
   // Derived flag: is the right-clicked stage file a .sql file? Used to gate Execute File and the divider.
-  const stageFileIsSql = ctxMenu?.nodeType === "stagefile" && parseStageOrDbtKey(ctxMenu)?.path.toLowerCase().endsWith(".sql");
+  const stageFileIsSql = useMemo(
+    () => ctxMenu?.nodeType === "stagefile" && parseStageOrDbtKey(ctxMenu)?.path.toLowerCase().endsWith(".sql"),
+    [ctxMenu],
+  );
 
   return (
     <div style={{ padding: "8px 4px" }}>
