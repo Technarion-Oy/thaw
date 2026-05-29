@@ -3093,14 +3093,6 @@ func (a *App) ExecuteGitFile(database, schema, repoName, filePath string) error 
 	return a.client.ExecuteGitFile(a.ctx, database, schema, repoName, filePath)
 }
 
-// GetStageFileContent reads a file from an internal named stage and returns its content.
-func (a *App) GetStageFileContent(database, schema, stageName, filePath string) (string, error) {
-	if a.client == nil {
-		return "", apperrors.ErrNotConnected
-	}
-	return a.client.GetGitFileContent(a.ctx, database, schema, stageName, filePath)
-}
-
 // ExecuteStageFile executes a SQL file from an internal named stage.
 func (a *App) ExecuteStageFile(database, schema, stageName, filePath string) error {
 	if a.client == nil {

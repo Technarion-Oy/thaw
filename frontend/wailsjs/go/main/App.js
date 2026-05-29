@@ -586,10 +586,6 @@ export function GetSnowsightURL() {
   return window['go']['main']['App']['GetSnowsightURL']();
 }
 
-export function GetStageFileContent(arg1, arg2, arg3, arg4) {
-  return window['go']['main']['App']['GetStageFileContent'](arg1, arg2, arg3, arg4);
-}
-
 export function GetStageFilePreview(arg1, arg2) {
   return window['go']['main']['App']['GetStageFilePreview'](arg1, arg2);
 }

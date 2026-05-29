@@ -201,7 +201,7 @@ The sidebar tree uses key prefixes to identify node types. For expandable object
 - **Stages**: `obj:DB:SCHEMA:STAGE:NAME` → `stagedir:DB:SCHEMA:NAME:path` → `stagefile:DB:SCHEMA:NAME:path`
 - **DBT Projects**: `obj:DB:SCHEMA:DBT PROJECT:NAME` → `dbtversion:DB:SCHEMA:NAME:version` → `dbtdir:DB:SCHEMA:NAME:path` → `dbtfile:DB:SCHEMA:NAME:path`
 
-Loading state for all these node types is tracked in the `loadingGitNodes` Set (shared, keys are namespaced so no collision). Helper functions `buildStageEntryNodes`, `buildDbtEntryNodes`, and `stageEmptyNode` mirror the git equivalents. Backend IPC methods `GetStageFileContent`, `ExecuteStageFile`, and `ListDbtProjectEntries` delegate to existing client methods (`GetGitFileContent`, `ExecuteGitFile`, `ListStageEntries` respectively) since the underlying SQL patterns are identical.
+Loading state for all these node types is tracked in the `loadingGitNodes` Set (shared, keys are namespaced so no collision). Helper functions `buildStageEntryNodes`, `buildDbtEntryNodes`, and `stageEmptyNode` mirror the git equivalents. Backend IPC methods `ExecuteStageFile` and `ListDbtProjectEntries` delegate to existing client methods (`ExecuteGitFile`, `ListStageEntries` respectively) since the underlying SQL patterns are identical.
 
 ### Object listing cache (backend)
 - `Client` in `internal/snowflake/client.go` has a per-schema TTL cache (30s) for `ListObjects` and `ListBasicObjects` results, keyed by `"DB\x00SCHEMA"` (full) and `"basic\x00DB\x00SCHEMA"` (basic-only)

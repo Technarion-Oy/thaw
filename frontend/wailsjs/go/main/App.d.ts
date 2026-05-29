@@ -314,8 +314,6 @@ export function GetSnowparkConfig():Promise<snowpark.SnowparkConfigResult>;
 
 export function GetSnowsightURL():Promise<string>;
 
-export function GetStageFileContent(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
-
 export function GetStageFilePreview(arg1:string,arg2:fileformat.FileFormatConfig):Promise<fileformat.PreviewResult>;
 
 export function GetSystemRAMGB():Promise<number>;

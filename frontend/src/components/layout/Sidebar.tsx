@@ -66,7 +66,7 @@ import {
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, UploadFileToStage, PickOpenFile, ExecDDL, ListStageEntries, GetStageFileContent, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, UploadFileToStage, PickOpenFile, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -1655,21 +1655,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
 
   // --- Stage file action handlers ---
 
-  const viewStageFileContent = async () => {
-    const k = parseNodeKey(ctxMenu);
-    if (!k) return;
-    setCtxMenu(null);
-    const hide = message.loading(`Reading ${k.path}…`, 0);
-    try {
-      const content = await GetStageFileContent(k.db, k.schema, k.name, k.path);
-      useQueryStore.getState().loadInNewTab(content);
-    } catch (e) {
-      message.error(String(e));
-    } finally {
-      hide();
-    }
-  };
-
   const executeStageFile = async () => {
     const k = parseNodeKey(ctxMenu);
     if (!k) return;
@@ -1763,21 +1748,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   };
 
   // --- DBT Project file action handlers ---
-
-  const viewDbtFileContent = async () => {
-    const k = parseNodeKey(ctxMenu);
-    if (!k) return;
-    setCtxMenu(null);
-    const hide = message.loading(`Reading ${k.path}…`, 0);
-    try {
-      const content = await GetStageFileContent(k.db, k.schema, k.name, k.path);
-      useQueryStore.getState().loadInNewTab(content);
-    } catch (e) {
-      message.error(String(e));
-    } finally {
-      hide();
-    }
-  };
 
   const executeDbtFile = async () => {
     const k = parseNodeKey(ctxMenu);
@@ -2918,8 +2888,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "stagedir" && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshStageNode)}
           {ctxMenu.nodeType === "stagedir" &&
             menuItem("Upload File…", <UploadOutlined style={{ fontSize: 12 }} />, uploadToStageDir, undefined, !featureFlags.putCommand, "PUT commands are disabled. Enable it under View → Enabled Features…")}
-          {ctxMenu.nodeType === "stagefile" &&
-            menuItem("View Content", <EyeOutlined style={{ fontSize: 12 }} />, viewStageFileContent, undefined, !featureFlags.getCommand, "GET commands are disabled. Enable them under View → Enabled Features…")}
           {ctxMenu.nodeType === "stagefile" && menuItem("Execute File", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeStageFile)}
           {ctxMenu.nodeType === "stagefile" &&
             menuItem("Download…", <DownloadOutlined style={{ fontSize: 12 }} />, downloadStageFile, undefined, !featureFlags.getCommand, "GET commands are disabled. Enable them under View → Enabled Features…")}
@@ -2929,7 +2897,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
 
           {/* DBT Project version/directory/file context menu */}
           {(ctxMenu.nodeType === "dbtversion" || ctxMenu.nodeType === "dbtdir") && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshDbtNode)}
-          {ctxMenu.nodeType === "dbtfile" && menuItem("View Content", <EyeOutlined style={{ fontSize: 12 }} />, viewDbtFileContent)}
           {ctxMenu.nodeType === "dbtfile" && menuItem("Execute File", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeDbtFile)}
 
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
