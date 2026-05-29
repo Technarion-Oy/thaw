@@ -846,7 +846,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         setLoadingGitNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
         try {
           const entries = await ListStageEntries(db, schema, name, "");
-          const nodes = buildStageEntryNodes(db, schema, name, entries ?? []);
+          const nodes = buildEntryNodes(db, schema, name, entries ?? [], "stagedir", "stagefile");
           setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
         } catch (e) {
           console.error(e);
@@ -978,7 +978,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       setLoadingGitNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
       try {
         const entries = await ListStageEntries(db, schema, stageName, dirPath);
-        const nodes = buildStageEntryNodes(db, schema, stageName, entries ?? []);
+        const nodes = buildEntryNodes(db, schema, stageName, entries ?? [], "stagedir", "stagefile");
         setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
       } catch (e) {
         console.error(e);
@@ -995,7 +995,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       try {
         // Snowflake-native DBT PROJECTs store files under @project/versions/<N>/…
         const entries = await ListDbtProjectEntries(db, schema, dbtName, `versions/${version}/`);
-        const nodes = buildDbtEntryNodes(db, schema, dbtName, entries ?? []);
+        const nodes = buildEntryNodes(db, schema, dbtName, entries ?? [], "dbtdir", "dbtfile");
         setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
       } catch (e) {
         console.error(e);
@@ -1011,7 +1011,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       setLoadingGitNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
       try {
         const entries = await ListDbtProjectEntries(db, schema, dbtName, dirPath);
-        const nodes = buildDbtEntryNodes(db, schema, dbtName, entries ?? []);
+        const nodes = buildEntryNodes(db, schema, dbtName, entries ?? [], "dbtdir", "dbtfile");
         setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
       } catch (e) {
         console.error(e);
@@ -1047,25 +1047,13 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     };
   }
 
-  function buildStageEntryNodes(db: string, schema: string, stageName: string, entries: snowflake.GitRepoEntry[]): DataNode[] {
+  function buildEntryNodes(
+    db: string, schema: string, name: string, entries: snowflake.GitRepoEntry[],
+    dirPrefix: string, filePrefix: string,
+  ): DataNode[] {
     return entries.map((e) => ({
       title: e.name,
-      key: e.isDir
-        ? `stagedir:${db}:${schema}:${stageName}:${e.path}`
-        : `stagefile:${db}:${schema}:${stageName}:${e.path}`,
-      icon: e.isDir
-        ? <FolderOutlined style={{ color: "var(--text-muted)" }} />
-        : <FileOutlined style={{ color: "var(--text-muted)", fontSize: "10px" }} />,
-      isLeaf: !e.isDir,
-    }));
-  }
-
-  function buildDbtEntryNodes(db: string, schema: string, dbtName: string, entries: snowflake.GitRepoEntry[]): DataNode[] {
-    return entries.map((e) => ({
-      title: e.name,
-      key: e.isDir
-        ? `dbtdir:${db}:${schema}:${dbtName}:${e.path}`
-        : `dbtfile:${db}:${schema}:${dbtName}:${e.path}`,
+      key: `${e.isDir ? dirPrefix : filePrefix}:${db}:${schema}:${name}:${e.path}`,
       icon: e.isDir
         ? <FolderOutlined style={{ color: "var(--text-muted)" }} />
         : <FileOutlined style={{ color: "var(--text-muted)", fontSize: "10px" }} />,
@@ -1692,13 +1680,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const deleteStageFile = () => {
     const k = parseStageOrDbtKey(ctxMenu);
     if (!k) return;
-    // Compute parent key from parsed path parts (handles colons in paths correctly)
-    const dirParts = k.path.split("/");
-    dirParts.pop();
-    const parentDir = dirParts.join("/");
-    const parentKey = parentDir
-      ? `stagedir:${k.db}:${k.schema}:${k.name}:${parentDir}`
-      : `obj:${k.db}:${k.schema}:STAGE:${k.name}`;
+    const fileKey = ctxMenu!.nodeKey;
     setCtxMenu(null);
     const stageRef = `@${quoteIdent(k.db)}.${quoteIdent(k.schema)}.${quoteIdent(k.name)}/${k.path}`;
     modal.confirm({
@@ -1711,7 +1693,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         try {
           await RemoveStageFiles(stageRef, "");
           message.success(`${k.path} deleted.`);
-          setTreeData((prev) => clearNodeChildren(prev, parentKey));
+          setTreeData((prev) => removeNode(prev, fileKey));
         } catch (e) {
           message.error(`Failed to delete: ${String(e)}`);
         } finally {
