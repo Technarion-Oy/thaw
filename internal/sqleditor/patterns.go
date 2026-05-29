@@ -1192,6 +1192,7 @@ var showObjectTypes = []string{
 	"VARIABLES",
 	"VIEWS",
 	"WAREHOUSES",
+	"WORKSPACES",
 }
 
 // showTerseEligible contains object types that support the TERSE modifier.

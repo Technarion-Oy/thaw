@@ -49,7 +49,7 @@ var snowflakeReservedKeywords = map[string]struct{}{
 	"OF": {}, "ON": {}, "OR": {}, "ORDER": {}, "ORGANIZATION": {},
 	"QUALIFY": {},
 	"REGEXP": {}, "REVOKE": {}, "RIGHT": {}, "RLIKE": {}, "ROW": {}, "ROWS": {},
-	"SAMPLE": {}, "SELECT": {}, "SET": {}, "SOME": {}, "START": {},
+	"SAMPLE": {}, "SELECT": {}, "SET": {}, "SHOW": {}, "SOME": {}, "START": {},
 	"TABLE": {}, "TABLESAMPLE": {}, "THEN": {}, "TO": {}, "TRIGGER": {},
 	"TRUE": {}, "TRY_CAST": {},
 	"UNION": {}, "UNIQUE": {}, "UPDATE": {}, "USING": {},

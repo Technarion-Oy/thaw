@@ -87,6 +87,7 @@ func TestValidateSnowflakePatterns_Show(t *testing.T) {
 		"SHOW SERVICES",
 		"SHOW ENDPOINTS",
 		"SHOW NOTEBOOKS",
+		"SHOW WORKSPACES",
 		// FUTURE GRANTS
 		"SHOW FUTURE GRANTS IN DATABASE my_db",
 		// TERSE modifier (valid types)
