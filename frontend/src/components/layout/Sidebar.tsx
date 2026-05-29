@@ -846,7 +846,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         try {
           const entries = await ListStageEntries(db, schema, name, "");
           const nodes = buildStageEntryNodes(db, schema, name, entries ?? []);
-          setData((prev) => updateNode(prev, key, nodes.length ? nodes : [stageEmptyNode(key)]));
+          setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
         } catch (e) {
           console.error(e);
           setData((prev) => updateNode(prev, key, []));
@@ -867,7 +867,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               isLeaf: false,
             };
           });
-          setData((prev) => updateNode(prev, key, nodes.length ? nodes : [stageEmptyNode(key)]));
+          setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
         } catch (e) {
           console.error(e);
           setData((prev) => updateNode(prev, key, []));
@@ -978,7 +978,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       try {
         const entries = await ListStageEntries(db, schema, stageName, dirPath);
         const nodes = buildStageEntryNodes(db, schema, stageName, entries ?? []);
-        setData((prev) => updateNode(prev, key, nodes.length ? nodes : [stageEmptyNode(key)]));
+        setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
       } catch (e) {
         console.error(e);
         setData((prev) => updateNode(prev, key, []));
@@ -994,7 +994,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       try {
         const entries = await ListDbtProjectEntries(db, schema, dbtName, `versions/${version}/`);
         const nodes = buildDbtEntryNodes(db, schema, dbtName, entries ?? []);
-        setData((prev) => updateNode(prev, key, nodes.length ? nodes : [stageEmptyNode(key)]));
+        setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
       } catch (e) {
         console.error(e);
         setData((prev) => updateNode(prev, key, []));
@@ -1010,7 +1010,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       try {
         const entries = await ListDbtProjectEntries(db, schema, dbtName, dirPath);
         const nodes = buildDbtEntryNodes(db, schema, dbtName, entries ?? []);
-        setData((prev) => updateNode(prev, key, nodes.length ? nodes : [stageEmptyNode(key)]));
+        setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
       } catch (e) {
         console.error(e);
         setData((prev) => updateNode(prev, key, []));
@@ -1071,7 +1071,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     }));
   }
 
-  function stageEmptyNode(parentKey: string): DataNode {
+  function emptyChildNode(parentKey: string): DataNode {
     return {
       title: (
         <Text type="secondary" style={{ fontStyle: "italic", fontSize: 11 }}>
@@ -1680,11 +1680,11 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const hide = message.loading(`Downloading ${k.path}…`, 0);
     try {
       await DownloadFileFromStage(stageRef, localPath, 4, "");
-      hide();
       message.success(`Downloaded ${k.path} successfully.`);
     } catch (e) {
-      hide();
       message.error(`Failed to download file: ${String(e)}`);
+    } finally {
+      hide();
     }
   };
 
@@ -1709,12 +1709,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         const hide = message.loading(`Deleting ${k.path}…`, 0);
         try {
           await RemoveStageFiles(stageRef, "");
-          hide();
           message.success(`${k.path} deleted.`);
           setTreeData((prev) => clearNodeChildren(prev, parentKey));
         } catch (e) {
-          hide();
           message.error(`Failed to delete: ${String(e)}`);
+        } finally {
+          hide();
         }
       },
     });
@@ -1748,21 +1748,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   };
 
   // --- DBT Project file action handlers ---
-
-  const executeDbtFile = async () => {
-    const k = parseNodeKey(ctxMenu);
-    if (!k) return;
-    setCtxMenu(null);
-    const hide = message.loading(`Executing ${k.path}…`, 0);
-    try {
-      await ExecuteStageFile(k.db, k.schema, k.name, k.path);
-      message.success(`${k.path} executed successfully`);
-    } catch (e) {
-      message.error(String(e));
-    } finally {
-      hide();
-    }
-  };
 
   const refreshDbtNode = () => {
     if (!ctxMenu) return;
@@ -2892,13 +2877,13 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Execute File", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeStageFile)}
           {ctxMenu.nodeType === "stagefile" &&
             menuItem("Download…", <DownloadOutlined style={{ fontSize: 12 }} />, downloadStageFile, undefined, !featureFlags.getCommand, "GET commands are disabled. Enable them under View → Enabled Features…")}
-          {ctxMenu.nodeType === "stagefile" && <Divider style={{ margin: "4px 0" }} />}
+          {ctxMenu.nodeType === "stagefile" && (ctxMenu.nodeKey.toLowerCase().endsWith(".sql") || featureFlags.getCommand) &&
+            <Divider style={{ margin: "4px 0" }} />}
           {ctxMenu.nodeType === "stagefile" &&
             menuItem("Delete…", <DeleteOutlined style={{ fontSize: 12 }} />, deleteStageFile, undefined, !featureFlags.removeCommand, "REMOVE commands are disabled. Enable them under View → Enabled Features…")}
 
           {/* DBT Project version/directory/file context menu */}
           {(ctxMenu.nodeType === "dbtversion" || ctxMenu.nodeType === "dbtdir") && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshDbtNode)}
-          {ctxMenu.nodeType === "dbtfile" && menuItem("Execute File", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeDbtFile)}
 
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
