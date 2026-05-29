@@ -3094,9 +3094,13 @@ func (a *App) ExecuteGitFile(database, schema, repoName, filePath string) error 
 }
 
 // ExecuteStageFile executes a SQL file from an internal named stage.
+// Only .sql files are accepted; the frontend gates this too, but we validate server-side for defense-in-depth.
 func (a *App) ExecuteStageFile(database, schema, stageName, filePath string) error {
 	if a.client == nil {
 		return apperrors.ErrNotConnected
+	}
+	if !strings.HasSuffix(strings.ToLower(filePath), ".sql") {
+		return fmt.Errorf("only .sql files can be executed, got %q", filePath)
 	}
 	return a.client.ExecuteGitFile(a.ctx, database, schema, stageName, filePath) // SQL pattern is identical: EXECUTE IMMEDIATE FROM @db.schema.name/path
 }
