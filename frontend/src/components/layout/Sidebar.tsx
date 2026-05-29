@@ -425,6 +425,7 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
 function parseStageOrDbtKey(menu: ContextMenu | null): { db: string; schema: string; name: string; path: string } | null {
   if (!menu) return null;
   const parts = menu.nodeKey.split(":");
+  if (parts.length < 4) return null;
   return { db: parts[1], schema: parts[2], name: parts[3], path: parts.slice(4).join(":") };
 }
 
@@ -1717,7 +1718,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     try {
       await UploadFileToStage(localPath, stageRef, 4, true, "AUTO_DETECT", true);
       message.success(`Uploaded successfully.`);
-      setTreeData((prev) => clearNodeChildren(prev, nodeKey));
+      // Re-fetch directory contents so the new file appears without collapsing
+      const entries = await ListStageEntries(k.db, k.schema, k.name, k.path);
+      const nodes = buildEntryNodes(k.db, k.schema, k.name, entries ?? [], "stagedir", "stagefile");
+      setTreeData((prev) => updateNode(prev, nodeKey, nodes.length ? nodes : [emptyChildNode(nodeKey)]));
     } catch (e) {
       message.error(`Failed to upload file: ${String(e)}`);
     } finally {
