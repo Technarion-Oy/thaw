@@ -14,7 +14,7 @@ import {
   Typography, Button, Alert,
 } from "antd";
 import { PlusOutlined, TableOutlined } from "@ant-design/icons";
-import { ExecDDL, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/main/App";
+import { ExecDDL, GetQuotedIdentifiersIgnoreCase, ListDatabases, ListSchemas, ListObjects, GetTableColumnsWithTypes } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
 import DataTypeSelect from "../shared/DataTypeSelect";
 
@@ -42,7 +42,9 @@ interface ColumnConfig {
   notNull: boolean;
   constraintKind: ConstraintKind;
   constraintName: string;
-  fkTable: string;
+  fkDb: string;
+  fkSchema: string;
+  fkTableName: string;
   fkColumn: string;
   // Collation & comment
   collation: string;
@@ -63,7 +65,9 @@ const DEFAULTS: ColumnConfig = {
   notNull: false,
   constraintKind: "none",
   constraintName: "",
-  fkTable: "",
+  fkDb: "",
+  fkSchema: "",
+  fkTableName: "",
   fkColumn: "",
   collation: "",
   comment: "",
@@ -104,12 +108,10 @@ function buildSql(db: string, schema: string, table: string, cfg: ColumnConfig):
   if (cfg.notNull) parts.push("NOT NULL");
   if (cfg.constraintKind === "unique") parts.push("UNIQUE");
   if (cfg.constraintKind === "primary_key") parts.push("PRIMARY KEY");
-  if (cfg.constraintKind === "foreign_key") {
-    let ref = "REFERENCES";
-    if (cfg.fkTable.trim()) {
-      ref += ` ${cfg.fkTable.trim()}`;
-      if (cfg.fkColumn.trim()) ref += ` (${cfg.fkColumn.trim()})`;
-    }
+  if (cfg.constraintKind === "foreign_key" && cfg.fkTableName) {
+    const refParts = [q(cfg.fkDb || db), q(cfg.fkSchema || schema), q(cfg.fkTableName)];
+    let ref = `REFERENCES ${refParts.join(".")}`;
+    if (cfg.fkColumn) ref += ` (${q(cfg.fkColumn)})`;
     parts.push(ref);
   }
 
@@ -135,16 +137,50 @@ interface Props {
 }
 
 export default function AddColumnModal({ db, schema, table, onClose, onSuccess }: Props) {
-  const [cfg, setCfg] = useState<ColumnConfig>(DEFAULTS);
+  const [cfg, setCfg] = useState<ColumnConfig>({ ...DEFAULTS, fkDb: db, fkSchema: schema });
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
+
+  // FK cascading dropdown state
+  const [fkDatabases, setFkDatabases] = useState<string[]>([]);
+  const [fkSchemas, setFkSchemas] = useState<string[]>([]);
+  const [fkTables, setFkTables] = useState<string[]>([]);
+  const [fkColumns, setFkColumns] = useState<string[]>([]);
 
   useEffect(() => {
     GetQuotedIdentifiersIgnoreCase()
       .then((v) => setQuotedIdentifiersIgnoreCase(v ?? false))
       .catch(() => {});
   }, []);
+
+  // Load databases when FK constraint is selected
+  useEffect(() => {
+    if (cfg.constraintKind !== "foreign_key") return;
+    ListDatabases().then((dbs) => setFkDatabases(dbs ?? [])).catch(() => {});
+  }, [cfg.constraintKind]);
+
+  // Load schemas when FK database changes
+  useEffect(() => {
+    if (cfg.constraintKind !== "foreign_key" || !cfg.fkDb) { setFkSchemas([]); return; }
+    ListSchemas(cfg.fkDb).then((s) => setFkSchemas(s ?? [])).catch(() => setFkSchemas([]));
+  }, [cfg.constraintKind, cfg.fkDb]);
+
+  // Load tables when FK schema changes
+  useEffect(() => {
+    if (cfg.constraintKind !== "foreign_key" || !cfg.fkDb || !cfg.fkSchema) { setFkTables([]); return; }
+    ListObjects(cfg.fkDb, cfg.fkSchema)
+      .then((objs) => setFkTables((objs ?? []).filter((o) => o.kind === "TABLE").map((o) => o.name)))
+      .catch(() => setFkTables([]));
+  }, [cfg.constraintKind, cfg.fkDb, cfg.fkSchema]);
+
+  // Load columns when FK table changes
+  useEffect(() => {
+    if (cfg.constraintKind !== "foreign_key" || !cfg.fkDb || !cfg.fkSchema || !cfg.fkTableName) { setFkColumns([]); return; }
+    GetTableColumnsWithTypes(cfg.fkDb, cfg.fkSchema, cfg.fkTableName)
+      .then((cols) => setFkColumns((cols ?? []).map((c) => c.name)))
+      .catch(() => setFkColumns([]));
+  }, [cfg.constraintKind, cfg.fkDb, cfg.fkSchema, cfg.fkTableName]);
 
   const set = <K extends keyof ColumnConfig>(key: K, value: ColumnConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
@@ -362,19 +398,53 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
         )}
 
         {cfg.constraintKind === "foreign_key" && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
-            <Form.Item label="References table" required style={{ marginBottom: 8 }}>
-              <Input
-                value={cfg.fkTable}
-                onChange={(e) => set("fkTable", e.target.value)}
-                placeholder='"DB"."SCHEMA"."TABLE"'
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "0 8px" }}>
+            <Form.Item label="Database" style={{ marginBottom: 8 }}>
+              <Select
+                showSearch
+                size="small"
+                value={cfg.fkDb || undefined}
+                placeholder="Database"
+                onChange={(v) => setCfg((prev) => ({ ...prev, fkDb: v, fkSchema: "", fkTableName: "", fkColumn: "" }))}
+                options={fkDatabases.map((d) => ({ value: d, label: d }))}
+                style={{ width: "100%" }}
               />
             </Form.Item>
-            <Form.Item label="References column" style={{ marginBottom: 8 }}>
-              <Input
-                value={cfg.fkColumn}
-                onChange={(e) => set("fkColumn", e.target.value)}
-                placeholder="column_name"
+            <Form.Item label="Schema" style={{ marginBottom: 8 }}>
+              <Select
+                showSearch
+                size="small"
+                value={cfg.fkSchema || undefined}
+                placeholder="Schema"
+                onChange={(v) => setCfg((prev) => ({ ...prev, fkSchema: v, fkTableName: "", fkColumn: "" }))}
+                options={fkSchemas.map((s) => ({ value: s, label: s }))}
+                disabled={!cfg.fkDb}
+                style={{ width: "100%" }}
+              />
+            </Form.Item>
+            <Form.Item label="Table" required style={{ marginBottom: 8 }}>
+              <Select
+                showSearch
+                size="small"
+                value={cfg.fkTableName || undefined}
+                placeholder="Table"
+                onChange={(v) => setCfg((prev) => ({ ...prev, fkTableName: v, fkColumn: "" }))}
+                options={fkTables.map((t) => ({ value: t, label: t }))}
+                disabled={!cfg.fkSchema}
+                style={{ width: "100%" }}
+              />
+            </Form.Item>
+            <Form.Item label="Column" style={{ marginBottom: 8 }}>
+              <Select
+                showSearch
+                size="small"
+                allowClear
+                value={cfg.fkColumn || undefined}
+                placeholder="(optional)"
+                onChange={(v) => set("fkColumn", v ?? "")}
+                options={fkColumns.map((c) => ({ value: c, label: c }))}
+                disabled={!cfg.fkTableName}
+                style={{ width: "100%" }}
               />
             </Form.Item>
           </div>
