@@ -217,7 +217,14 @@ function removeNode(nodes: DataNode[], targetKey: string): DataNode[] {
     .filter((node) => node.key !== targetKey)
     .map((node) => {
       if ((node as any).children) {
-        return { ...node, children: removeNode((node as any).children, targetKey) };
+        const updated = removeNode((node as any).children, targetKey);
+        // If the last child was removed, insert an empty placeholder so
+        // Ant Design Tree still shows the node as expanded (children: []
+        // would prevent loadData from re-triggering on the next expand).
+        if (updated.length === 0) {
+          return { ...node, children: [emptyChildNode(String(node.key))] };
+        }
+        return { ...node, children: updated };
       }
       return node;
     });
@@ -1718,14 +1725,23 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     try {
       await UploadFileToStage(localPath, stageRef, 4, true, "AUTO_DETECT", true);
       message.success(`Uploaded successfully.`);
-      // Re-fetch directory contents so the new file appears without collapsing
+    } catch (e) {
+      message.error(`Failed to upload file: ${String(e)}`);
+      return;
+    } finally {
+      hide();
+    }
+    // Re-fetch directory contents so the new file appears without collapsing.
+    // Separated from the upload try/catch so a re-fetch failure doesn't show
+    // the misleading "Failed to upload" message.
+    try {
       const entries = await ListStageEntries(k.db, k.schema, k.name, k.path);
       const nodes = buildEntryNodes(k.db, k.schema, k.name, entries ?? [], "stagedir", "stagefile");
       setTreeData((prev) => updateNode(prev, nodeKey, nodes.length ? nodes : [emptyChildNode(nodeKey)]));
     } catch (e) {
-      message.error(`Failed to upload file: ${String(e)}`);
-    } finally {
-      hide();
+      console.error("Failed to refresh directory after upload:", e);
+      // Fall back to clearing children so the next expand re-fetches
+      setTreeData((prev) => clearNodeChildren(prev, nodeKey));
     }
   };
 
