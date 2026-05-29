@@ -145,6 +145,7 @@ interface ContextMenu {
   x: number;
   y: number;
   nodeKey: string;
+  // dbtfile is intentionally absent — DBT files have no context menu actions
   nodeType: "db" | "schema" | "type" | "obj" | "gitcommits" | "gitdir" | "gitfile" | "stagedir" | "stagefile" | "dbtversion" | "dbtdir";
   objKind?: string;     // set for nodeType === "type" or "obj"
   objArgs?: string;     // parameter type list for PROCEDURE / FUNCTION
@@ -1645,8 +1646,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   };
 
   // --- Shared key-parsing helper for stage/dbt handlers ---
+  // Expects keys in the format prefix:DB:SCHEMA:NAME:path (stagefile, stagedir, dbtdir, dbtversion)
 
-  function parseNodeKey(menu: ContextMenu | null): { db: string; schema: string; name: string; path: string } | null {
+  function parseStageOrDbtKey(menu: ContextMenu | null): { db: string; schema: string; name: string; path: string } | null {
     if (!menu) return null;
     const parts = menu.nodeKey.split(":");
     return { db: parts[1], schema: parts[2], name: parts[3], path: parts.slice(4).join(":") };
@@ -1655,7 +1657,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   // --- Stage file action handlers ---
 
   const executeStageFile = async () => {
-    const k = parseNodeKey(ctxMenu);
+    const k = parseStageOrDbtKey(ctxMenu);
     if (!k) return;
     setCtxMenu(null);
     const hide = message.loading(`Executing ${k.path}…`, 0);
@@ -1670,7 +1672,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   };
 
   const downloadStageFile = async () => {
-    const k = parseNodeKey(ctxMenu);
+    const k = parseStageOrDbtKey(ctxMenu);
     if (!k) return;
     setCtxMenu(null);
     const localPath = await PickDirectory();
@@ -1688,7 +1690,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   };
 
   const deleteStageFile = () => {
-    const k = parseNodeKey(ctxMenu);
+    const k = parseStageOrDbtKey(ctxMenu);
     if (!k) return;
     // Compute parent key from parsed path parts (handles colons in paths correctly)
     const dirParts = k.path.split("/");
@@ -1720,7 +1722,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   };
 
   const uploadToStageDir = async () => {
-    const k = parseNodeKey(ctxMenu);
+    const k = parseStageOrDbtKey(ctxMenu);
     if (!k) return;
     const nodeKey = ctxMenu!.nodeKey;
     setCtxMenu(null);
@@ -2414,6 +2416,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     </div>
   );
 
+  // Derived flag: is the right-clicked stage file a .sql file? Used to gate Execute File and the divider.
+  const stageFileIsSql = ctxMenu?.nodeType === "stagefile" && parseStageOrDbtKey(ctxMenu)?.path.toLowerCase().endsWith(".sql");
+
   return (
     <div style={{ padding: "8px 4px" }}>
       <div style={{ display: "flex", alignItems: "center", padding: "0 4px 0 8px", marginBottom: treeCollapsed ? 4 : 8, gap: 2 }}>
@@ -2858,11 +2863,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "stagedir" && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshTreeNode)}
           {ctxMenu.nodeType === "stagedir" &&
             menuItem("Upload File…", <UploadOutlined style={{ fontSize: 12 }} />, uploadToStageDir, undefined, !featureFlags.putCommand, "PUT commands are disabled. Enable it under View → Enabled Features…")}
-          {ctxMenu.nodeType === "stagefile" && ctxMenu.nodeKey.toLowerCase().endsWith(".sql") &&
+          {ctxMenu.nodeType === "stagefile" && stageFileIsSql &&
             menuItem("Execute File", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeStageFile)}
           {ctxMenu.nodeType === "stagefile" &&
             menuItem("Download…", <DownloadOutlined style={{ fontSize: 12 }} />, downloadStageFile, undefined, !featureFlags.getCommand, "GET commands are disabled. Enable them under View → Enabled Features…")}
-          {ctxMenu.nodeType === "stagefile" && (ctxMenu.nodeKey.toLowerCase().endsWith(".sql") || featureFlags.getCommand) &&
+          {/* Divider between action items (Execute/Download) and destructive item (Delete) — shown when at least one action item above is visible */}
+          {ctxMenu.nodeType === "stagefile" && (stageFileIsSql || featureFlags.getCommand) &&
             <Divider style={{ margin: "4px 0" }} />}
           {ctxMenu.nodeType === "stagefile" &&
             menuItem("Delete…", <DeleteOutlined style={{ fontSize: 12 }} />, deleteStageFile, undefined, !featureFlags.removeCommand, "REMOVE commands are disabled. Enable them under View → Enabled Features…")}
