@@ -66,7 +66,7 @@ import {
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, UploadFileToStage, PickOpenFile, ExecDDL } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, UploadFileToStage, PickOpenFile, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -145,7 +145,8 @@ interface ContextMenu {
   x: number;
   y: number;
   nodeKey: string;
-  nodeType: "db" | "schema" | "type" | "obj" | "gitcommits" | "gitdir" | "gitfile";
+  // dbtfile is intentionally absent — DBT files have no context menu actions
+  nodeType: "db" | "schema" | "type" | "obj" | "gitcommits" | "gitdir" | "gitfile" | "stagedir" | "stagefile" | "dbtversion" | "dbtdir";
   objKind?: string;     // set for nodeType === "type" or "obj"
   objArgs?: string;     // parameter type list for PROCEDURE / FUNCTION
   isFinalizer?: boolean; // true when right-clicking a finalizer TASK node
@@ -216,7 +217,14 @@ function removeNode(nodes: DataNode[], targetKey: string): DataNode[] {
     .filter((node) => node.key !== targetKey)
     .map((node) => {
       if ((node as any).children) {
-        return { ...node, children: removeNode((node as any).children, targetKey) };
+        const updated = removeNode((node as any).children, targetKey);
+        // If the last child was removed, strip children entirely so
+        // loadData re-triggers on the next expand (re-fetches from server).
+        if (updated.length === 0) {
+          const { children, ...rest } = node as any;
+          return rest;
+        }
+        return { ...node, children: updated };
       }
       return node;
     });
@@ -418,6 +426,43 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
   );
 }
 
+// --- Pure helpers for tree node construction (module-level to avoid re-creation per render) ---
+
+// Parses keys in the format prefix:DB:SCHEMA:NAME:path (stagefile, stagedir, dbtdir, dbtversion).
+// Currently used for stage file actions (execute, download, delete, upload) and stageFileIsSql.
+function parseStageOrDbtKey(menu: ContextMenu | null): { db: string; schema: string; name: string; path: string } | null {
+  if (!menu) return null;
+  const parts = menu.nodeKey.split(":");
+  if (parts.length < 4) return null;
+  return { db: parts[1], schema: parts[2], name: parts[3], path: parts.slice(4).join(":") };
+}
+
+function buildEntryNodes(
+  db: string, schema: string, name: string, entries: snowflake.GitRepoEntry[],
+  dirPrefix: string, filePrefix: string,
+): DataNode[] {
+  return entries.map((e) => ({
+    title: e.name,
+    key: `${e.isDir ? dirPrefix : filePrefix}:${db}:${schema}:${name}:${e.path}`,
+    icon: e.isDir
+      ? <FolderOutlined style={{ color: "var(--text-muted)" }} />
+      : <FileOutlined style={{ color: "var(--text-muted)", fontSize: "10px" }} />,
+    isLeaf: !e.isDir,
+  }));
+}
+
+function emptyChildNode(parentKey: string): DataNode {
+  return {
+    title: (
+      <Text type="secondary" style={{ fontStyle: "italic", fontSize: 11 }}>
+        (empty)
+      </Text>
+    ),
+    key: `empty:${parentKey}`,
+    isLeaf: true,
+  };
+}
+
 export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel?: boolean }) {
   const { modal, message: contextMsg } = AntApp.useApp();
   const [treeData, setTreeData] = useState<DataNode[]>([]);
@@ -609,6 +654,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     [searchResults, treeData, searchQuery],
   );
 
+  // Derived flag: is the right-clicked stage file a .sql file? Used to gate Execute File and the divider.
+  const stageFileIsSql = useMemo(
+    () => ctxMenu?.nodeType === "stagefile" && parseStageOrDbtKey(ctxMenu)?.path.toLowerCase().endsWith(".sql"),
+    [ctxMenu],
+  );
+
   // Clamp context menu inside the viewport (runs before browser paint — no flash)
   useLayoutEffect(() => {
     if (!ctxMenu || !ctxRef.current) return;
@@ -739,7 +790,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                 title:     o.name,
                 key:       `obj:${db}:${schema}:${kind}:${o.name}`,
                 icon:      kindIcon(kind),
-                isLeaf:    kind !== "TABLE" && kind !== "VIEW" && kind !== "GIT REPOSITORY",
+                isLeaf:    kind !== "TABLE" && kind !== "VIEW" && kind !== "GIT REPOSITORY" && kind !== "STAGE" && kind !== "DBT PROJECT",
                 arguments: o.arguments ?? "",
                 rowCount:  o.rowCount,
               })),
@@ -841,6 +892,39 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           },
         ];
         setData((prev) => updateNode(prev, key, typeNodes));
+      } else if (kind === "STAGE") {
+        setLoadingGitNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
+        try {
+          const entries = await ListStageEntries(db, schema, name, "");
+          const nodes = buildEntryNodes(db, schema, name, entries ?? [], "stagedir", "stagefile");
+          setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
+        } catch (e) {
+          console.error(e);
+          setData((prev) => clearNodeChildren(prev, key));
+        } finally {
+          setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
+        }
+      } else if (kind === "DBT PROJECT") {
+        setLoadingGitNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
+        try {
+          const versions = await ListDbtProjectVersions(db, schema, name);
+          const nodes: DataNode[] = (versions ?? []).map((v) => {
+            const badge = v.isDefault ? " (default)" : "";
+            const label = v.alias ? `${v.version} — ${v.alias}${badge}` : `${v.version}${badge}`;
+            return {
+              title: label,
+              key: `dbtversion:${db}:${schema}:${name}:${v.version}`,
+              icon: <FolderOutlined style={{ color: "var(--text-muted)" }} />,
+              isLeaf: false,
+            };
+          });
+          setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
+        } catch (e) {
+          console.error(e);
+          setData((prev) => clearNodeChildren(prev, key));
+        } finally {
+          setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
+        }
       }
     } else if (parts[0] === "gitbranches") {
       const db     = parts[1];
@@ -858,7 +942,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         setData((prev) => updateNode(prev, key, items.length ? items : [gitEmptyNode(key)]));
       } catch (e) {
         console.error(e);
-        setData((prev) => updateNode(prev, key, []));
+        setData((prev) => clearNodeChildren(prev, key));
       } finally {
         setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
       }
@@ -878,7 +962,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         setData((prev) => updateNode(prev, key, items.length ? items : [gitEmptyNode(key)]));
       } catch (e) {
         console.error(e);
-        setData((prev) => updateNode(prev, key, []));
+        setData((prev) => clearNodeChildren(prev, key));
       } finally {
         setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
       }
@@ -916,7 +1000,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         }
       } catch (e) {
         console.error(e);
-        setData((prev) => updateNode(prev, key, []));
+        setData((prev) => clearNodeChildren(prev, key));
       } finally {
         setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
       }
@@ -932,7 +1016,57 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         setData((prev) => updateNode(prev, key, nodes.length ? nodes : [gitEmptyNode(key)]));
       } catch (e) {
         console.error(e);
-        setData((prev) => updateNode(prev, key, []));
+        setData((prev) => clearNodeChildren(prev, key));
+      } finally {
+        setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
+      }
+    } else if (parts[0] === "stagedir") {
+      const db        = parts[1];
+      const schema    = parts[2];
+      const stageName = parts[3];
+      const dirPath   = parts.slice(4).join(":");
+      setLoadingGitNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
+      try {
+        const entries = await ListStageEntries(db, schema, stageName, dirPath);
+        const nodes = buildEntryNodes(db, schema, stageName, entries ?? [], "stagedir", "stagefile");
+        setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
+      } catch (e) {
+        console.error(e);
+        setData((prev) => clearNodeChildren(prev, key));
+      } finally {
+        setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
+      }
+    } else if (parts[0] === "dbtversion") {
+      const db      = parts[1];
+      const schema  = parts[2];
+      const dbtName = parts[3];
+      const version = parts.slice(4).join(":");
+      setLoadingGitNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
+      try {
+        // Snowflake-native DBT PROJECTs store files under @project/versions/<N>/…
+        // (observed from SHOW VERSIONS IN DBT PROJECT and LIST @project output)
+        const entries = await ListDbtProjectEntries(db, schema, dbtName, `versions/${version}/`);
+        const nodes = buildEntryNodes(db, schema, dbtName, entries ?? [], "dbtdir", "dbtfile");
+        setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
+      } catch (e) {
+        console.error(e);
+        setData((prev) => clearNodeChildren(prev, key));
+      } finally {
+        setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
+      }
+    } else if (parts[0] === "dbtdir") {
+      const db      = parts[1];
+      const schema  = parts[2];
+      const dbtName = parts[3];
+      const dirPath = parts.slice(4).join(":");
+      setLoadingGitNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
+      try {
+        const entries = await ListDbtProjectEntries(db, schema, dbtName, dirPath);
+        const nodes = buildEntryNodes(db, schema, dbtName, entries ?? [], "dbtdir", "dbtfile");
+        setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
+      } catch (e) {
+        console.error(e);
+        setData((prev) => clearNodeChildren(prev, key));
       } finally {
         setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
       }
@@ -998,6 +1132,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "gitdir" });
     } else if (key.startsWith("gitfile:")) {
       setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "gitfile" });
+    } else if (key.startsWith("stagedir:")) {
+      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "stagedir" });
+    } else if (key.startsWith("stagefile:")) {
+      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "stagefile" });
+    } else if (key.startsWith("dbtversion:")) {
+      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "dbtversion" });
+    } else if (key.startsWith("dbtdir:")) {
+      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "dbtdir" });
     }
   };
 
@@ -1471,7 +1613,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     message.success("Commit filter cleared");
   };
 
-  const refreshGitNode = () => {
+  const refreshTreeNode = () => {
     if (!ctxMenu) return;
     const key = ctxMenu.nodeKey;
     setCtxMenu(null);
@@ -1515,6 +1657,102 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       hide();
     }
   };
+
+
+  // --- Stage file action handlers ---
+
+  const executeStageFile = async () => {
+    const k = parseStageOrDbtKey(ctxMenu);
+    if (!k) return;
+    setCtxMenu(null);
+    const hide = message.loading(`Executing ${k.path}…`, 0);
+    try {
+      await ExecuteStageFile(k.db, k.schema, k.name, k.path);
+      message.success(`${k.path} executed successfully`);
+    } catch (e) {
+      message.error(String(e));
+    } finally {
+      hide();
+    }
+  };
+
+  const downloadStageFile = async () => {
+    const k = parseStageOrDbtKey(ctxMenu);
+    if (!k) return;
+    setCtxMenu(null);
+    const localPath = await PickDirectory();
+    if (!localPath) return;
+    const stageRef = `@${quoteIdent(k.db)}.${quoteIdent(k.schema)}.${quoteIdent(k.name)}/${k.path}`;
+    const hide = message.loading(`Downloading ${k.path}…`, 0);
+    try {
+      await DownloadFileFromStage(stageRef, localPath, 4, "");
+      message.success(`Downloaded ${k.path} successfully.`);
+    } catch (e) {
+      message.error(`Failed to download file: ${String(e)}`);
+    } finally {
+      hide();
+    }
+  };
+
+  const deleteStageFile = () => {
+    const k = parseStageOrDbtKey(ctxMenu);
+    if (!k) return;
+    const fileKey = ctxMenu!.nodeKey;
+    setCtxMenu(null);
+    const stageRef = `@${quoteIdent(k.db)}.${quoteIdent(k.schema)}.${quoteIdent(k.name)}/${k.path}`;
+    modal.confirm({
+      title: "Delete Stage File",
+      content: `Are you sure you want to delete ${k.path}?`,
+      okText: "Delete",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        const hide = message.loading(`Deleting ${k.path}…`, 0);
+        try {
+          await RemoveStageFiles(stageRef, "");
+          message.success(`${k.path} deleted.`);
+          setTreeData((prev) => removeNode(prev, fileKey));
+        } catch (e) {
+          message.error(`Failed to delete: ${String(e)}`);
+        } finally {
+          hide();
+        }
+      },
+    });
+  };
+
+  const uploadToStageDir = async () => {
+    const k = parseStageOrDbtKey(ctxMenu);
+    if (!k) return;
+    const nodeKey = ctxMenu!.nodeKey;
+    setCtxMenu(null);
+    const localPath = await PickOpenFile();
+    if (!localPath) return;
+    const stageRef = `@${quoteIdent(k.db)}.${quoteIdent(k.schema)}.${quoteIdent(k.name)}/${k.path}`;
+    const hide = message.loading(`Uploading to ${k.name}/${k.path}…`, 0);
+    try {
+      await UploadFileToStage(localPath, stageRef, 4, true, "AUTO_DETECT", true);
+      message.success(`Uploaded successfully.`);
+    } catch (e) {
+      message.error(`Failed to upload file: ${String(e)}`);
+      return; // Skip re-fetch on upload failure
+    } finally {
+      hide();
+    }
+    // Re-fetch directory contents so the new file appears without collapsing.
+    // Separated from the upload try/catch so a re-fetch failure doesn't show
+    // the misleading "Failed to upload" message.
+    try {
+      const entries = await ListStageEntries(k.db, k.schema, k.name, k.path);
+      const nodes = buildEntryNodes(k.db, k.schema, k.name, entries ?? [], "stagedir", "stagefile");
+      setTreeData((prev) => updateNode(prev, nodeKey, nodes.length ? nodes : [emptyChildNode(nodeKey)]));
+    } catch (e) {
+      console.error("Failed to refresh directory after upload:", e);
+      // Fall back to clearing children so the next expand re-fetches
+      setTreeData((prev) => clearNodeChildren(prev, nodeKey));
+    }
+  };
+
+  // --- DBT Project file action handlers ---
 
   const fetchGitRepository = async () => {
     if (!ctxMenu) return;
@@ -2448,6 +2686,19 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                       </span>
                     );
                   }
+                  if (kind === "STAGE" || kind === "DBT PROJECT" || kind === "GIT REPOSITORY") {
+                    const isLoadingObj = loadingGitNodes.has(key);
+                    return (
+                      <span style={selectionStyle}>
+                        {isLoadingObj ? (
+                          <Space size={4}>
+                            {tooltip}
+                            <SyncOutlined spin style={{ fontSize: 10, color: "var(--text-muted)" }} />
+                          </Space>
+                        ) : tooltip}
+                      </span>
+                    );
+                  }
                   return (
                     <span style={selectionStyle}>
                       {tooltip}
@@ -2458,7 +2709,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                   key.startsWith("gitbranches:") ||
                   key.startsWith("gittags:") ||
                   key.startsWith("gitcommits:") ||
-                  key.startsWith("gitdir:")
+                  key.startsWith("gitdir:") ||
+                  key.startsWith("stagedir:") ||
+                  key.startsWith("dbtversion:") ||
+                  key.startsWith("dbtdir:")
                 ) {
                   const isLoading = loadingGitNodes.has(key);
                   return (
@@ -2565,7 +2819,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "FILE FORMAT" &&
             menuItem("Properties…", <FileOutlined style={{ fontSize: 12 }} />, viewProperties)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
-            menuItem("Browse Stage Files…", <SearchOutlined style={{ fontSize: 12 }} />, openStageBrowser, undefined, !featureFlags.getCommand && !featureFlags.removeCommand, "Stage browsing is only useful when GET or REMOVE commands are enabled.")}
+            menuItem("Manage Storage Files…", <SearchOutlined style={{ fontSize: 12 }} />, openStageBrowser, undefined, !featureFlags.getCommand && !featureFlags.removeCommand, "Stage browsing is only useful when GET or REMOVE commands are enabled.")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
             menuItem("Upload File to Stage…", <UploadOutlined style={{ fontSize: 12 }} />, uploadToStage, undefined, !featureFlags.putCommand, "PUT commands are disabled. Enable them under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "STAGE" &&
@@ -2609,9 +2863,25 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "gitcommits" &&
             menuItem("Clear Commit Filter", <CloseOutlined style={{ fontSize: 12 }} />, clearGitCommitFilter)}
           {(ctxMenu.nodeKey.startsWith("gitdir:") || ctxMenu.nodeKey.startsWith("gitbranches:") || ctxMenu.nodeKey.startsWith("gittags:") || ctxMenu.nodeKey.startsWith("gitcommits:")) &&
-            menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshGitNode)}
+            menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshTreeNode)}
           {ctxMenu.nodeType === "gitfile" && menuItem("View Content", <EyeOutlined style={{ fontSize: 12 }} />, viewGitFileContent)}
           {ctxMenu.nodeType === "gitfile" && menuItem("Execute File", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeGitFile)}
+
+          {/* Stage directory/file context menu */}
+          {ctxMenu.nodeType === "stagedir" && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshTreeNode)}
+          {ctxMenu.nodeType === "stagedir" &&
+            menuItem("Upload File…", <UploadOutlined style={{ fontSize: 12 }} />, uploadToStageDir, undefined, !featureFlags.putCommand, "PUT commands are disabled. Enable it under View → Enabled Features…")}
+          {ctxMenu.nodeType === "stagefile" && stageFileIsSql &&
+            menuItem("Execute File", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeStageFile)}
+          {ctxMenu.nodeType === "stagefile" &&
+            menuItem("Download…", <DownloadOutlined style={{ fontSize: 12 }} />, downloadStageFile, undefined, !featureFlags.getCommand, "GET commands are disabled. Enable them under View → Enabled Features…")}
+          {ctxMenu.nodeType === "stagefile" && <Divider style={{ margin: "4px 0" }} />}
+          {ctxMenu.nodeType === "stagefile" &&
+            menuItem("Delete…", <DeleteOutlined style={{ fontSize: 12 }} />, deleteStageFile, undefined, !featureFlags.removeCommand, "REMOVE commands are disabled. Enable them under View → Enabled Features…")}
+
+          {/* DBT Project version/directory/file context menu */}
+          {(ctxMenu.nodeType === "dbtversion" || ctxMenu.nodeType === "dbtdir") && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshTreeNode)}
+
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&

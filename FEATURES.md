@@ -118,7 +118,8 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
     - Fully gated by the **File Format Builder** feature flag
   - **Live SQL Preview** — the full `CREATE STAGE` statement updates in real-time as you modify the form
   - **Execution** — runs `ExecDDL` and refreshes the schema tree automatically on success
-- **Stage File Browser** — right-click any stage and choose **Browse Stage Files…** to open a virtualised TanStack Table grid view of the stage contents:
+- **Stage Sidebar Tree** — expand any stage in the sidebar to browse its contents hierarchically (directories and files), with lazy-loading on expand; right-click `.sql` files for **Execute File** (`EXECUTE IMMEDIATE FROM @stage/path`), all files for **Download…** and **Delete…**; right-click directories for **Refresh** and **Upload File…**; gated by `getCommand`/`putCommand`/`removeCommand` feature flags as appropriate
+- **Stage File Browser** — right-click any stage and choose **Manage Storage Files…** to open a virtualised TanStack Table grid view of the stage contents:
     - **LIST view** — displays name, size, MD5, and last modified timestamp for all files in the stage
     - **Regex filtering** — a search bar allows filtering files using the Snowflake `PATTERN` parameter
     - **Bulk operations** — select multiple files to **Download** to a local directory or **Delete** from the stage in one go
@@ -137,6 +138,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Modify** — pre-fills current API integration, git credentials, and comment from `DESCRIBE GIT REPOSITORY`; generates correct `ALTER GIT REPOSITORY … SET` and `UNSET` statements (credentials and comment can be cleared via UNSET; API_INTEGRATION can only be SET); live SQL preview; multi-statement execution
   - **Properties** — right-click and choose **Properties** to view `DESCRIBE GIT REPOSITORY` output in the properties panel
 - **DBT Project Browser** — right-click any schema and choose **Create Object** → **DBT Project…**, or right-click an existing DBT PROJECT object for full lifecycle management:
+  - **Sidebar Tree** — expand any DBT PROJECT in the sidebar to browse its versions; each version expands into a hierarchical file/directory tree with lazy-loading; right-click versions/directories for **Refresh**
   - **Create** — specify source location (required), optional dbt version, default target, external access integrations, and comment; live SQL preview shows the full `CREATE DBT PROJECT` statement; supports OR REPLACE, IF NOT EXISTS, and case-sensitive naming; **Source Location Picker** lets you browse available git repositories, internal stages, existing dbt projects, and workspaces visually — select a source type, pick a database and schema (or browse any schema in the account), choose an object, select a branch/tag or version, and browse directories in a tree; the assembled location string is generated automatically
   - **Execute** — choose between Direct and From Workspace execution modes; specify dbt CLI args, optional dbt version override, workspace name, and project root; live SQL preview; results stream to a new query tab
   - **Modify** — pre-fills current dbt version, default target, integrations, and comment from `DESCRIBE DBT PROJECT`; generates correct `ALTER DBT PROJECT … SET` and `UNSET` statements; live SQL preview; multi-statement execution
