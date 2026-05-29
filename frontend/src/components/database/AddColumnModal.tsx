@@ -10,12 +10,13 @@
 
 import { useState, useEffect } from "react";
 import {
-  Modal, Form, Input, Select, Checkbox, Space,
+  Modal, Form, Input, Checkbox, Space,
   Typography, Button, Alert,
 } from "antd";
 import { PlusOutlined, TableOutlined } from "@ant-design/icons";
 import { ExecDDL, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
+import DataTypeSelect from "../shared/DataTypeSelect";
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -156,24 +157,7 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
         </Form.Item>
 
         <Form.Item label="Data type" required style={{ marginBottom: 12 }}>
-          <Select
-            showSearch
-            value={cfg.dataType}
-            onChange={(v) => set("dataType", v)}
-            options={[
-              { value: "NUMBER(38,0)", label: "NUMBER(38,0)" },
-              { value: "VARCHAR", label: "VARCHAR" },
-              { value: "VARCHAR(16777216)", label: "VARCHAR(16777216)" },
-              { value: "BOOLEAN", label: "BOOLEAN" },
-              { value: "DATE", label: "DATE" },
-              { value: "TIMESTAMP_NTZ", label: "TIMESTAMP_NTZ" },
-              { value: "TIMESTAMP_TZ", label: "TIMESTAMP_TZ" },
-              { value: "VARIANT", label: "VARIANT" },
-              { value: "OBJECT", label: "OBJECT" },
-              { value: "ARRAY", label: "ARRAY" },
-              { value: "FLOAT", label: "FLOAT" },
-            ]}
-          />
+          <DataTypeSelect value={cfg.dataType} onChange={(v) => set("dataType", v)} />
         </Form.Item>
 
         <Form.Item style={{ marginBottom: 12 }}>

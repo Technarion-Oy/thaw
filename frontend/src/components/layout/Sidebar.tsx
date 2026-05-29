@@ -86,6 +86,7 @@ import CreateTaskModal from "../task/CreateTaskModal";
 import CreateDatabaseModal from "../database/CreateDatabaseModal";
 import CreateTableModal from "../database/CreateTableModal";
 import AddColumnModal from "../database/AddColumnModal";
+import DataTypeSelect from "../shared/DataTypeSelect";
 import CreateFileFormatModal from "../database/CreateFileFormatModal";
 import ObjectSummariesModal from "../database/ObjectSummariesModal";
 import ExecuteTaskModal from "../task/ExecuteTaskModal";
@@ -3835,24 +3836,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       >
         <div style={{ padding: "8px 0" }}>
           <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>New data type</div>
-          <Select
-            showSearch
+          <DataTypeSelect
             value={changeDataTypeModal?.dataType ?? "VARCHAR"}
             onChange={(v) => setChangeDataTypeModal((prev) => prev ? { ...prev, dataType: v } : null)}
-            style={{ width: "100%" }}
-            options={[
-              { value: "NUMBER(38,0)", label: "NUMBER(38,0)" },
-              { value: "VARCHAR", label: "VARCHAR" },
-              { value: "VARCHAR(16777216)", label: "VARCHAR(16777216)" },
-              { value: "BOOLEAN", label: "BOOLEAN" },
-              { value: "DATE", label: "DATE" },
-              { value: "TIMESTAMP_NTZ", label: "TIMESTAMP_NTZ" },
-              { value: "TIMESTAMP_TZ", label: "TIMESTAMP_TZ" },
-              { value: "VARIANT", label: "VARIANT" },
-              { value: "OBJECT", label: "OBJECT" },
-              { value: "ARRAY", label: "ARRAY" },
-              { value: "FLOAT", label: "FLOAT" },
-            ]}
           />
         </div>
       </Modal>
