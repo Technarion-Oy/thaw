@@ -942,7 +942,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         setData((prev) => updateNode(prev, key, items.length ? items : [gitEmptyNode(key)]));
       } catch (e) {
         console.error(e);
-        setData((prev) => updateNode(prev, key, []));
+        setData((prev) => clearNodeChildren(prev, key));
       } finally {
         setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
       }
@@ -962,7 +962,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         setData((prev) => updateNode(prev, key, items.length ? items : [gitEmptyNode(key)]));
       } catch (e) {
         console.error(e);
-        setData((prev) => updateNode(prev, key, []));
+        setData((prev) => clearNodeChildren(prev, key));
       } finally {
         setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
       }
@@ -1000,7 +1000,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         }
       } catch (e) {
         console.error(e);
-        setData((prev) => updateNode(prev, key, []));
+        setData((prev) => clearNodeChildren(prev, key));
       } finally {
         setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
       }
@@ -1016,7 +1016,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         setData((prev) => updateNode(prev, key, nodes.length ? nodes : [gitEmptyNode(key)]));
       } catch (e) {
         console.error(e);
-        setData((prev) => updateNode(prev, key, []));
+        setData((prev) => clearNodeChildren(prev, key));
       } finally {
         setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
       }
@@ -1733,7 +1733,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       message.success(`Uploaded successfully.`);
     } catch (e) {
       message.error(`Failed to upload file: ${String(e)}`);
-      return;
+      return; // Skip re-fetch on upload failure
     } finally {
       hide();
     }
