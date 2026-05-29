@@ -3098,7 +3098,7 @@ func (a *App) ExecuteStageFile(database, schema, stageName, filePath string) err
 	if a.client == nil {
 		return apperrors.ErrNotConnected
 	}
-	return a.client.ExecuteGitFile(a.ctx, database, schema, stageName, filePath)
+	return a.client.ExecuteGitFile(a.ctx, database, schema, stageName, filePath) // SQL pattern is identical: EXECUTE IMMEDIATE FROM @db.schema.name/path
 }
 
 // ListDbtProjectEntries returns directory-aware entries within a DBT PROJECT version directory.
@@ -3106,7 +3106,7 @@ func (a *App) ListDbtProjectEntries(database, schema, name, dirPath string) ([]s
 	if a.client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	return a.client.ListStageEntries(a.ctx, database, schema, name, dirPath)
+	return a.client.ListStageEntries(a.ctx, database, schema, name, dirPath) // SQL pattern is identical: LIST @db.schema.name/path
 }
 
 // GetSchemaForeignKeys returns all FK→PK column mappings in the given schema

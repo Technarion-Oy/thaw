@@ -145,7 +145,7 @@ interface ContextMenu {
   x: number;
   y: number;
   nodeKey: string;
-  nodeType: "db" | "schema" | "type" | "obj" | "gitcommits" | "gitdir" | "gitfile" | "stagedir" | "stagefile" | "dbtversion" | "dbtdir" | "dbtfile";
+  nodeType: "db" | "schema" | "type" | "obj" | "gitcommits" | "gitdir" | "gitfile" | "stagedir" | "stagefile" | "dbtversion" | "dbtdir";
   objKind?: string;     // set for nodeType === "type" or "obj"
   objArgs?: string;     // parameter type list for PROCEDURE / FUNCTION
   isFinalizer?: boolean; // true when right-clicking a finalizer TASK node
@@ -1078,7 +1078,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           (empty)
         </Text>
       ),
-      key: `stageempty:${parentKey}`,
+      key: `empty:${parentKey}`,
       isLeaf: true,
     };
   }
@@ -1125,8 +1125,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "dbtversion" });
     } else if (key.startsWith("dbtdir:")) {
       setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "dbtdir" });
-    } else if (key.startsWith("dbtfile:")) {
-      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "dbtfile" });
     }
   };
 
@@ -1731,12 +1729,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const hide = message.loading(`Uploading to ${stageRef}…`, 0);
     try {
       await UploadFileToStage(localPath, stageRef, 4, true, "AUTO_DETECT", true);
-      hide();
       message.success(`Uploaded successfully.`);
       setTreeData((prev) => clearNodeChildren(prev, nodeKey));
     } catch (e) {
-      hide();
       message.error(`Failed to upload file: ${String(e)}`);
+    } finally {
+      hide();
     }
   };
 
