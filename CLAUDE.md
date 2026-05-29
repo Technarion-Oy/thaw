@@ -197,6 +197,7 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 
 ### Sidebar tree node key formats
 The sidebar tree uses key prefixes to identify node types. For expandable objects beyond tables/views:
+- **Columns**: `col:DB:SCHEMA:TABLE:COLUMN` — leaf nodes under TABLE/VIEW `obj:` nodes; carry custom properties (`colDataType`, `colNullable`, `colIsPrimaryKey`, `colParentKind`) for the context menu; TABLE columns get a full context menu (rename, change type, set/drop NOT NULL, set comment, drop); VIEW columns only get "Insert Column Name"
 - **Git Repos**: `obj:DB:SCHEMA:GIT REPOSITORY:NAME` → `gitbranches:`, `gittags:`, `gitcommits:` → `gitdir:DB:SCHEMA:REPO:path` → `gitfile:DB:SCHEMA:REPO:path`
 - **Stages**: `obj:DB:SCHEMA:STAGE:NAME` → `stagedir:DB:SCHEMA:NAME:path` → `stagefile:DB:SCHEMA:NAME:path`
 - **DBT Projects**: `obj:DB:SCHEMA:DBT PROJECT:NAME` → `dbtversion:DB:SCHEMA:NAME:version` → `dbtdir:DB:SCHEMA:NAME:path` → `dbtfile:DB:SCHEMA:NAME:path`

@@ -102,7 +102,7 @@ GEMINI_API_KEY=... .venv/bin/python embed_codebase.py --reset
 - **New Feature Pattern**:
     1. Define state in a new `zustand` store in `frontend/src/store/` (optional).
     2. Create UI components in `frontend/src/components/` (e.g., `database/CreateTableModal.tsx`, `layout/`).
-    3. Register context menu actions in `frontend/src/components/layout/Sidebar.tsx`.
+    3. Register context menu actions in `frontend/src/components/layout/Sidebar.tsx` (including column-level actions via the `col` nodeType and `colMeta` on `ContextMenu`).
     4. If the feature is optional, add a boolean flag to `FeatureFlags` in `internal/config/config.go`, add it to `DefaultFeatureFlags()`, and bump the `flagsVersion`.
     5. Gate all related UI elements (sidebar items, buttons, tabs) using `useFeatureFlagsStore.getState().flags`. When a flag is `false`, the corresponding feature MUST be hidden or disabled across the entire application.
 - **SQL Generation**: Use double quotes for identifiers (`"DATABASE"."SCHEMA"."TABLE"`) and handle escaping (`" -> ""`).

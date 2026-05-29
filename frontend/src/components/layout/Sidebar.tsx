@@ -85,6 +85,7 @@ import SelectFunctionModal from "../function/SelectFunctionModal";
 import CreateTaskModal from "../task/CreateTaskModal";
 import CreateDatabaseModal from "../database/CreateDatabaseModal";
 import CreateTableModal from "../database/CreateTableModal";
+import AddColumnModal from "../database/AddColumnModal";
 import CreateFileFormatModal from "../database/CreateFileFormatModal";
 import ObjectSummariesModal from "../database/ObjectSummariesModal";
 import ExecuteTaskModal from "../task/ExecuteTaskModal";
@@ -146,11 +147,12 @@ interface ContextMenu {
   y: number;
   nodeKey: string;
   // dbtfile is intentionally absent — DBT files have no context menu actions
-  nodeType: "db" | "schema" | "type" | "obj" | "gitcommits" | "gitdir" | "gitfile" | "stagedir" | "stagefile" | "dbtversion" | "dbtdir";
+  nodeType: "db" | "schema" | "type" | "obj" | "col" | "gitcommits" | "gitdir" | "gitfile" | "stagedir" | "stagefile" | "dbtversion" | "dbtdir";
   objKind?: string;     // set for nodeType === "type" or "obj"
   objArgs?: string;     // parameter type list for PROCEDURE / FUNCTION
   isFinalizer?: boolean; // true when right-clicking a finalizer TASK node
   isRootTask?: boolean;  // true when right-clicking a root-level TASK node (no predecessors, not a finalizer)
+  colMeta?: { dataType: string; nullable: boolean; isPrimaryKey: boolean; parentKind: string }; // set for nodeType === "col"
 }
 
 interface UndropModal {
@@ -481,6 +483,11 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [executeNotebookModal, setExecuteNotebookModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createDbOpen, setCreateDbOpen] = useState(false);
   const [createTableModal, setCreateTableModal] = useState<{ db: string; schema: string } | null>(null);
+  const [addColumnModal, setAddColumnModal] = useState<{ db: string; schema: string; table: string } | null>(null);
+  const [renameColumnModal, setRenameColumnModal] = useState<{ db: string; schema: string; table: string; oldName: string; newName: string; caseSensitive: boolean } | null>(null);
+  const [renameColQiic, setRenameColQiic] = useState(false);
+  const [columnCommentModal, setColumnCommentModal] = useState<{ db: string; schema: string; table: string; column: string; comment: string } | null>(null);
+  const [changeDataTypeModal, setChangeDataTypeModal] = useState<{ db: string; schema: string; table: string; column: string; dataType: string } | null>(null);
   const [createStageModal, setCreateStageModal] = useState<{ db: string; schema: string } | null>(null);
   const [stagePropertiesModal, setStagePropertiesModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [stageBrowserModal, setStageBrowserModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -860,6 +867,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                 foreignKey: !!fk,
               }),
               isLeaf: true,
+              colDataType: c.dataType,
+              colNullable: c.nullable,
+              colIsPrimaryKey: isPK,
+              colParentKind: kind,
             };
           });
 
@@ -1140,6 +1151,14 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "dbtversion" });
     } else if (key.startsWith("dbtdir:")) {
       setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "dbtdir" });
+    } else if (key.startsWith("col:")) {
+      const colMeta = {
+        dataType: (node as any).colDataType ?? "",
+        nullable: !!(node as any).colNullable,
+        isPrimaryKey: !!(node as any).colIsPrimaryKey,
+        parentKind: (node as any).colParentKind ?? "",
+      };
+      setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "col", colMeta });
     }
   };
 
@@ -2058,6 +2077,182 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     }
   };
 
+  // ── Column context menu handlers ──────────────────────────────────────────
+
+  // Refresh only the columns of a specific table (surgical — no full DB refresh).
+  const refreshTableColumns = (db: string, schema: string, table: string) => {
+    const tableKey = `obj:${db}:${schema}:TABLE:${table}`;
+    setTreeData((prev) => clearNodeChildren(prev, tableKey));
+  };
+
+  // Helper to parse col: key → { db, schema, table, column }
+  const parseColKey = (key: string) => {
+    // key format: col:DB:SCHEMA:TABLE:COLUMN
+    const [, db, schema, table, ...colParts] = key.split(":");
+    return { db, schema, table, column: colParts.join(":") };
+  };
+
+  const openAddColumnModal = () => {
+    if (!ctxMenu) return;
+    // Can be called from TABLE obj: node or col: node
+    if (ctxMenu.nodeType === "obj") {
+      const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
+      setCtxMenu(null);
+      setAddColumnModal({ db, schema, table: nameParts.join(":") });
+    } else if (ctxMenu.nodeType === "col") {
+      const { db, schema, table } = parseColKey(ctxMenu.nodeKey);
+      setCtxMenu(null);
+      setAddColumnModal({ db, schema, table });
+    }
+  };
+
+  const dropColumn = () => {
+    if (!ctxMenu) return;
+    const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
+    setCtxMenu(null);
+
+    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const sql = `ALTER TABLE ${q(db)}.${q(schema)}.${q(table)} DROP COLUMN ${q(column)};`;
+
+    modal.confirm({
+      title: `Drop column "${column}"?`,
+      content: `This will permanently remove column "${column}" from ${db}.${schema}.${table}. This action cannot be undone.`,
+      okText: "Drop",
+      okType: "danger",
+      cancelText: "Cancel",
+      onOk: async () => {
+        try {
+          await ExecDDL(sql);
+          message.success(`Dropped column "${column}"`);
+          refreshTableColumns(db, schema, table);
+        } catch (e) {
+          message.error(String(e));
+        }
+      },
+    });
+  };
+
+  const openRenameColumn = () => {
+    if (!ctxMenu) return;
+    const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
+    setCtxMenu(null);
+    setRenameColumnModal({ db, schema, table, oldName: column, newName: column, caseSensitive: false });
+    setRenameColQiic(false);
+    GetQuotedIdentifiersIgnoreCase().then((v) => setRenameColQiic(v ?? false)).catch(() => {});
+  };
+
+  const executeRenameColumn = async () => {
+    if (!renameColumnModal) return;
+    const { db, schema, table, oldName, newName, caseSensitive } = renameColumnModal;
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName) {
+      setRenameColumnModal(null);
+      return;
+    }
+    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const fullTable = `${q(db)}.${q(schema)}.${q(table)}`;
+    const sql = `ALTER TABLE ${fullTable} RENAME COLUMN ${q(oldName)} TO ${identToken(trimmed, caseSensitive)};`;
+
+    setRenameColumnModal(null);
+    try {
+      await ExecDDL(sql);
+      message.success(`Renamed column "${oldName}" to "${trimmed}"`);
+      refreshTableColumns(db, schema, table);
+    } catch (e) {
+      message.error(String(e));
+    }
+  };
+
+  const setColumnNotNull = () => {
+    if (!ctxMenu) return;
+    const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
+    setCtxMenu(null);
+
+    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const sql = `ALTER TABLE ${q(db)}.${q(schema)}.${q(table)} ALTER COLUMN ${q(column)} SET NOT NULL;`;
+
+    ExecDDL(sql)
+      .then(() => { message.success(`Set NOT NULL on "${column}"`); refreshTableColumns(db, schema, table); })
+      .catch((e) => message.error(String(e)));
+  };
+
+  const dropColumnNotNull = () => {
+    if (!ctxMenu) return;
+    const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
+    setCtxMenu(null);
+
+    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const sql = `ALTER TABLE ${q(db)}.${q(schema)}.${q(table)} ALTER COLUMN ${q(column)} DROP NOT NULL;`;
+
+    ExecDDL(sql)
+      .then(() => { message.success(`Dropped NOT NULL on "${column}"`); refreshTableColumns(db, schema, table); })
+      .catch((e) => message.error(String(e)));
+  };
+
+  const openColumnComment = () => {
+    if (!ctxMenu) return;
+    const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
+    setCtxMenu(null);
+    setColumnCommentModal({ db, schema, table, column, comment: "" });
+  };
+
+  const executeColumnComment = async () => {
+    if (!columnCommentModal) return;
+    const { db, schema, table, column, comment } = columnCommentModal;
+    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const sq = (s: string) => "'" + s.replace(/'/g, "''") + "'";
+    const fullTable = `${q(db)}.${q(schema)}.${q(table)}`;
+    const sql = comment.trim()
+      ? `ALTER TABLE ${fullTable} ALTER COLUMN ${q(column)} COMMENT ${sq(comment.trim())};`
+      : `ALTER TABLE ${fullTable} ALTER COLUMN ${q(column)} UNSET COMMENT;`;
+
+    setColumnCommentModal(null);
+    try {
+      await ExecDDL(sql);
+      message.success(comment.trim() ? `Set comment on "${column}"` : `Removed comment from "${column}"`);
+    } catch (e) {
+      message.error(String(e));
+    }
+  };
+
+  const openChangeDataType = () => {
+    if (!ctxMenu) return;
+    const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
+    const currentType = ctxMenu.colMeta?.dataType ?? "VARCHAR";
+    setCtxMenu(null);
+    setChangeDataTypeModal({ db, schema, table, column, dataType: currentType });
+  };
+
+  const executeChangeDataType = async () => {
+    if (!changeDataTypeModal) return;
+    const { db, schema, table, column, dataType } = changeDataTypeModal;
+    const trimmed = dataType.trim();
+    if (!trimmed) {
+      setChangeDataTypeModal(null);
+      return;
+    }
+    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const fullTable = `${q(db)}.${q(schema)}.${q(table)}`;
+    const sql = `ALTER TABLE ${fullTable} ALTER COLUMN ${q(column)} SET DATA TYPE ${trimmed};`;
+
+    setChangeDataTypeModal(null);
+    try {
+      await ExecDDL(sql);
+      message.success(`Changed data type of "${column}" to ${trimmed}`);
+      refreshTableColumns(db, schema, table);
+    } catch (e) {
+      message.error(String(e));
+    }
+  };
+
+  const insertColumnName = () => {
+    if (!ctxMenu) return;
+    const { column } = parseColKey(ctxMenu.nodeKey);
+    setCtxMenu(null);
+    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    insertAtCursor(q(column));
+  };
+
   const openTimeTravelModal = async () => {
     if (!ctxMenu) return;
     const [, db, schema, , ...nameParts] = ctxMenu.nodeKey.split(":");
@@ -2903,6 +3098,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Import Data…", <UploadOutlined style={{ fontSize: 12 }} />, openImportModal, undefined, !featureFlags.tableDataImport, "Table Data Import is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
             menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets, undefined, !featureFlags.backupPoliciesAndSets, "Backup Policies & Sets is disabled. Enable it under View → Enabled Features…")}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
+            menuItem("Add Column…", <PlusOutlined style={{ fontSize: 12 }} />, openAddColumnModal)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TASK" &&
             menuItem("Execute Task", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeTask)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TASK" &&
@@ -2944,6 +3141,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
                 deleteSelectedObjects,
                 "#f85149",
               )}
+            </>
+          )}
+
+          {/* Column context menu */}
+          {ctxMenu.nodeType === "col" &&
+            menuItem("Insert Column Name", <CodeOutlined style={{ fontSize: 12 }} />, insertColumnName)}
+          {ctxMenu.nodeType === "col" && ctxMenu.colMeta?.parentKind === "TABLE" && (
+            <>
+              <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+              {menuItem("Rename Column…", <EditOutlined style={{ fontSize: 12 }} />, openRenameColumn)}
+              {menuItem("Change Data Type…", <EditOutlined style={{ fontSize: 12 }} />, openChangeDataType)}
+              {menuItem("Set Comment…", <EditOutlined style={{ fontSize: 12 }} />, openColumnComment)}
+              {ctxMenu.colMeta.nullable && !ctxMenu.colMeta.isPrimaryKey &&
+                menuItem("Set NOT NULL", null, setColumnNotNull)}
+              {!ctxMenu.colMeta.nullable && !ctxMenu.colMeta.isPrimaryKey &&
+                menuItem("Drop NOT NULL", null, dropColumnNotNull)}
+              <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+              {menuItem("Drop Column…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, dropColumn, "#f85149")}
             </>
           )}
         </div>
@@ -3547,6 +3762,97 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             caseSensitive={renameModal?.caseSensitive ?? false}
             onCaseSensitiveChange={(v) => setRenameModal((prev) => prev ? { ...prev, caseSensitive: v } : null)}
             quotedIdentifiersIgnoreCase={renameQiic}
+          />
+        </div>
+      </Modal>
+
+      {/* Add Column modal */}
+      {addColumnModal && (
+        <AddColumnModal
+          db={addColumnModal.db}
+          schema={addColumnModal.schema}
+          table={addColumnModal.table}
+          onClose={() => setAddColumnModal(null)}
+          onSuccess={() => refreshTableColumns(addColumnModal.db, addColumnModal.schema, addColumnModal.table)}
+        />
+      )}
+
+      {/* Rename Column modal */}
+      <Modal
+        open={renameColumnModal !== null}
+        title={renameColumnModal ? `Rename column "${renameColumnModal.oldName}"` : ""}
+        onOk={executeRenameColumn}
+        onCancel={() => setRenameColumnModal(null)}
+        okText="Rename"
+        width={460}
+      >
+        <div style={{ padding: "8px 0" }}>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>New name</div>
+          <Input
+            value={renameColumnModal?.newName ?? ""}
+            onChange={(e) => setRenameColumnModal((prev) => prev ? { ...prev, newName: e.target.value } : null)}
+            onPressEnter={executeRenameColumn}
+            autoFocus
+            style={{ marginBottom: 8 }}
+          />
+          <ObjectNameCaseControl
+            name={renameColumnModal?.newName ?? ""}
+            caseSensitive={renameColumnModal?.caseSensitive ?? false}
+            onCaseSensitiveChange={(v) => setRenameColumnModal((prev) => prev ? { ...prev, caseSensitive: v } : null)}
+            quotedIdentifiersIgnoreCase={renameColQiic}
+          />
+        </div>
+      </Modal>
+
+      {/* Column Comment modal */}
+      <Modal
+        open={columnCommentModal !== null}
+        title={columnCommentModal ? `Set comment on "${columnCommentModal.column}"` : ""}
+        onOk={executeColumnComment}
+        onCancel={() => setColumnCommentModal(null)}
+        okText="Save"
+        width={460}
+      >
+        <div style={{ padding: "8px 0" }}>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>Comment (leave empty to remove)</div>
+          <Input.TextArea
+            value={columnCommentModal?.comment ?? ""}
+            onChange={(e) => setColumnCommentModal((prev) => prev ? { ...prev, comment: e.target.value } : null)}
+            rows={3}
+            autoFocus
+          />
+        </div>
+      </Modal>
+
+      {/* Change Data Type modal */}
+      <Modal
+        open={changeDataTypeModal !== null}
+        title={changeDataTypeModal ? `Change data type of "${changeDataTypeModal.column}"` : ""}
+        onOk={executeChangeDataType}
+        onCancel={() => setChangeDataTypeModal(null)}
+        okText="Change"
+        width={460}
+      >
+        <div style={{ padding: "8px 0" }}>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>New data type</div>
+          <Select
+            showSearch
+            value={changeDataTypeModal?.dataType ?? "VARCHAR"}
+            onChange={(v) => setChangeDataTypeModal((prev) => prev ? { ...prev, dataType: v } : null)}
+            style={{ width: "100%" }}
+            options={[
+              { value: "NUMBER(38,0)", label: "NUMBER(38,0)" },
+              { value: "VARCHAR", label: "VARCHAR" },
+              { value: "VARCHAR(16777216)", label: "VARCHAR(16777216)" },
+              { value: "BOOLEAN", label: "BOOLEAN" },
+              { value: "DATE", label: "DATE" },
+              { value: "TIMESTAMP_NTZ", label: "TIMESTAMP_NTZ" },
+              { value: "TIMESTAMP_TZ", label: "TIMESTAMP_TZ" },
+              { value: "VARIANT", label: "VARIANT" },
+              { value: "OBJECT", label: "OBJECT" },
+              { value: "ARRAY", label: "ARRAY" },
+              { value: "FLOAT", label: "FLOAT" },
+            ]}
           />
         </div>
       </Modal>
