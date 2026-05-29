@@ -428,7 +428,8 @@ function ObjTooltip({ cacheKey, db, schema, kind, name, args, children }: {
 
 // --- Pure helpers for tree node construction (module-level to avoid re-creation per render) ---
 
-// Parses keys in the format prefix:DB:SCHEMA:NAME:path (stagefile, stagedir, dbtdir, dbtversion)
+// Parses keys in the format prefix:DB:SCHEMA:NAME:path (stagefile, stagedir, dbtdir, dbtversion).
+// Currently used for stage file actions (execute, download, delete, upload) and stageFileIsSql.
 function parseStageOrDbtKey(menu: ContextMenu | null): { db: string; schema: string; name: string; path: string } | null {
   if (!menu) return null;
   const parts = menu.nodeKey.split(":");
@@ -651,6 +652,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const displayData = useMemo(
     () => (searchQuery ? filterTree(searchResults, searchQuery) : treeData),
     [searchResults, treeData, searchQuery],
+  );
+
+  // Derived flag: is the right-clicked stage file a .sql file? Used to gate Execute File and the divider.
+  const stageFileIsSql = useMemo(
+    () => ctxMenu?.nodeType === "stagefile" && parseStageOrDbtKey(ctxMenu)?.path.toLowerCase().endsWith(".sql"),
+    [ctxMenu],
   );
 
   // Clamp context menu inside the viewport (runs before browser paint — no flash)
@@ -893,7 +900,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
         } catch (e) {
           console.error(e);
-          setData((prev) => updateNode(prev, key, []));
+          setData((prev) => clearNodeChildren(prev, key));
         } finally {
           setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
         }
@@ -914,7 +921,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
         } catch (e) {
           console.error(e);
-          setData((prev) => updateNode(prev, key, []));
+          setData((prev) => clearNodeChildren(prev, key));
         } finally {
           setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
         }
@@ -1025,7 +1032,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
       } catch (e) {
         console.error(e);
-        setData((prev) => updateNode(prev, key, []));
+        setData((prev) => clearNodeChildren(prev, key));
       } finally {
         setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
       }
@@ -1042,7 +1049,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
       } catch (e) {
         console.error(e);
-        setData((prev) => updateNode(prev, key, []));
+        setData((prev) => clearNodeChildren(prev, key));
       } finally {
         setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
       }
@@ -1058,7 +1065,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
       } catch (e) {
         console.error(e);
-        setData((prev) => updateNode(prev, key, []));
+        setData((prev) => clearNodeChildren(prev, key));
       } finally {
         setLoadingGitNodes((prev) => { const s = new Set(prev); s.delete(key); return s; });
       }
@@ -1089,7 +1096,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       isLeaf: true,
     };
   }
-
 
   function updateNode(nodes: DataNode[], targetKey: string, children: DataNode[]): DataNode[] {
     return nodes.map((node) => {
@@ -2418,12 +2424,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         </div>
       )}
     </div>
-  );
-
-  // Derived flag: is the right-clicked stage file a .sql file? Used to gate Execute File and the divider.
-  const stageFileIsSql = useMemo(
-    () => ctxMenu?.nodeType === "stagefile" && parseStageOrDbtKey(ctxMenu)?.path.toLowerCase().endsWith(".sql"),
-    [ctxMenu],
   );
 
   return (

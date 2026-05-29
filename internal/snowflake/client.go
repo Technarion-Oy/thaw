@@ -1478,7 +1478,8 @@ func (c *Client) GetGitFileContent(ctx context.Context, database, schema, repoNa
 	return content.String(), nil
 }
 
-// ExecuteGitFile executes a SQL file from a git repository.
+// ExecuteGitFile executes a SQL file via EXECUTE IMMEDIATE FROM @db.schema.name/path.
+// Also used for stage files (via App.ExecuteStageFile) since the SQL pattern is identical.
 func (c *Client) ExecuteGitFile(ctx context.Context, database, schema, repoName, filePath string) error {
 	sql := fmt.Sprintf(`EXECUTE IMMEDIATE FROM @%s.%s.%s/%s`, QuoteIdent(database), QuoteIdent(schema), QuoteIdent(repoName), filePath)
 
