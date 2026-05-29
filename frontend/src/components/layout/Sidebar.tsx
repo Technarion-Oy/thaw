@@ -2888,7 +2888,8 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "stagedir" && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshStageNode)}
           {ctxMenu.nodeType === "stagedir" &&
             menuItem("Upload File…", <UploadOutlined style={{ fontSize: 12 }} />, uploadToStageDir, undefined, !featureFlags.putCommand, "PUT commands are disabled. Enable it under View → Enabled Features…")}
-          {ctxMenu.nodeType === "stagefile" && menuItem("Execute File", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeStageFile)}
+          {ctxMenu.nodeType === "stagefile" && ctxMenu.nodeKey.toLowerCase().endsWith(".sql") &&
+            menuItem("Execute File", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeStageFile)}
           {ctxMenu.nodeType === "stagefile" &&
             menuItem("Download…", <DownloadOutlined style={{ fontSize: 12 }} />, downloadStageFile, undefined, !featureFlags.getCommand, "GET commands are disabled. Enable them under View → Enabled Features…")}
           {ctxMenu.nodeType === "stagefile" && <Divider style={{ margin: "4px 0" }} />}

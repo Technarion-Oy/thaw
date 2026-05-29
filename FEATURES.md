@@ -118,7 +118,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
     - Fully gated by the **File Format Builder** feature flag
   - **Live SQL Preview** — the full `CREATE STAGE` statement updates in real-time as you modify the form
   - **Execution** — runs `ExecDDL` and refreshes the schema tree automatically on success
-- **Stage Sidebar Tree** — expand any stage in the sidebar to browse its contents hierarchically (directories and files), with lazy-loading on expand; right-click files for **Execute File**, **Download…**, and **Delete…**; right-click directories for **Refresh** and **Upload File…**; gated by `getCommand`/`putCommand`/`removeCommand` feature flags as appropriate
+- **Stage Sidebar Tree** — expand any stage in the sidebar to browse its contents hierarchically (directories and files), with lazy-loading on expand; right-click `.sql` files for **Execute File** (`EXECUTE IMMEDIATE FROM @stage/path`), all files for **Download…** and **Delete…**; right-click directories for **Refresh** and **Upload File…**; gated by `getCommand`/`putCommand`/`removeCommand` feature flags as appropriate
 - **Stage File Browser** — right-click any stage and choose **Manage Storage Files…** to open a virtualised TanStack Table grid view of the stage contents:
     - **LIST view** — displays name, size, MD5, and last modified timestamp for all files in the stage
     - **Regex filtering** — a search bar allows filtering files using the Snowflake `PATTERN` parameter
