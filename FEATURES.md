@@ -136,6 +136,14 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Fetch** — right-click a git repository and choose **Fetch** to run `ALTER GIT REPOSITORY … FETCH`; displays a loading toast during the operation and a success or error message on completion
   - **Modify** — pre-fills current API integration, git credentials, and comment from `DESCRIBE GIT REPOSITORY`; generates correct `ALTER GIT REPOSITORY … SET` and `UNSET` statements (credentials and comment can be cleared via UNSET; API_INTEGRATION can only be SET); live SQL preview; multi-statement execution
   - **Properties** — right-click and choose **Properties** to view `DESCRIBE GIT REPOSITORY` output in the properties panel
+- **DBT Project Browser** — right-click any schema and choose **Create Object** → **DBT Project…**, or right-click an existing DBT PROJECT object for full lifecycle management:
+  - **Create** — specify source location (required), optional dbt version, default target, external access integrations, and comment; live SQL preview shows the full `CREATE DBT PROJECT` statement; supports OR REPLACE, IF NOT EXISTS, and case-sensitive naming; **Source Location Picker** lets you browse available git repositories, internal stages, existing dbt projects, and workspaces visually — select a source type, pick a database and schema (or browse any schema in the account), choose an object, select a branch/tag or version, and browse directories in a tree; the assembled location string is generated automatically
+  - **Execute** — choose between Direct and From Workspace execution modes; specify dbt CLI args, optional dbt version override, workspace name, and project root; live SQL preview; results stream to a new query tab
+  - **Modify** — pre-fills current dbt version, default target, integrations, and comment from `DESCRIBE DBT PROJECT`; generates correct `ALTER DBT PROJECT … SET` and `UNSET` statements; live SQL preview; multi-statement execution
+  - **Add Version** — add a version alias and source location via `ALTER DBT PROJECT … ADD VERSION`; live SQL preview; includes Source Location Picker in stage-only mode (git repositories and internal stages)
+  - **Show Versions** — runs `SHOW VERSIONS IN DBT PROJECT` in a new tab
+  - **Describe** — runs `DESCRIBE DBT PROJECT` in a new tab
+  - **Properties** — right-click and choose **Properties** to view `SHOW DBT PROJECTS LIKE` output in the properties panel
 - **Search** — filter objects by name across all databases and schemas in real time; for previously expanded schemas all object types are searched instantly (no network call); for schemas not yet expanded, a fast path returns tables, views, and sequences only — extended types (procedures, tasks, stages, etc.) appear after manually expanding the schema
 - **Right-click procedures** to open a parameter dialog; clicking **Execute** generates the `CALL` statement, opens a new tab, and runs it immediately — no manual Run press needed
 - **Right-click functions** (**Call Function…**) to open a parameter dialog; detects scalar vs. table functions and generates the correct SQL; clicking **Execute** opens a new tab and runs it immediately
@@ -813,6 +821,7 @@ The following features are identified as feasible to be turned off via feature f
 **Advanced Tools & Data Engineering**
 - **Schema Migration** (DDL diffing and deployment wizard)
 - **dbt Project Scaffolding** (Automated dbt project generation)
+- **DBT Project Browser** (Browse and manage Snowflake-native DBT PROJECT objects in the sidebar)
 - **ER Diagram & Designer** (Visual database modeling and `ALTER TABLE` generation)
 - **Task Graph Visualizer** (Interactive DAG viewer and manager for Snowflake tasks)
 - **Insert Mapping** (Visual side-by-side mapping for `INSERT INTO ... SELECT` with UNIONs)

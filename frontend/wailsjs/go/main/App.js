@@ -54,6 +54,14 @@ export function AnalyzeMigration(arg1, arg2) {
   return window['go']['main']['App']['AnalyzeMigration'](arg1, arg2);
 }
 
+export function BuildAddDbtProjectVersionSql(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['BuildAddDbtProjectVersionSql'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function BuildAlterDbtProjectSetSql(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
+  return window['go']['main']['App']['BuildAlterDbtProjectSetSql'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+}
+
 export function BuildAlterStageSql(arg1) {
   return window['go']['main']['App']['BuildAlterStageSql'](arg1);
 }
@@ -64,6 +72,10 @@ export function BuildApiIntegrationPreviewSQL(arg1) {
 
 export function BuildCallStatement(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['BuildCallStatement'](arg1, arg2, arg3, arg4);
+}
+
+export function BuildCreateDbtProjectSql(arg1, arg2, arg3) {
+  return window['go']['main']['App']['BuildCreateDbtProjectSql'](arg1, arg2, arg3);
 }
 
 export function BuildCreateFileFormatSql(arg1, arg2, arg3) {
@@ -84,6 +96,10 @@ export function BuildCreateSecretSql(arg1, arg2, arg3) {
 
 export function BuildCreateStageSql(arg1) {
   return window['go']['main']['App']['BuildCreateStageSql'](arg1);
+}
+
+export function BuildExecuteDbtProjectSql(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['BuildExecuteDbtProjectSql'](arg1, arg2, arg3, arg4);
 }
 
 export function BuildFunctionSelectStatement(arg1, arg2, arg3, arg4, arg5) {
@@ -252,6 +268,10 @@ export function DeleteVenvFolder() {
 
 export function DeployNotebook(arg1) {
   return window['go']['main']['App']['DeployNotebook'](arg1);
+}
+
+export function DescribeDbtProject(arg1, arg2, arg3) {
+  return window['go']['main']['App']['DescribeDbtProject'](arg1, arg2, arg3);
 }
 
 export function Disconnect() {
@@ -782,6 +802,10 @@ export function ListDatabases() {
   return window['go']['main']['App']['ListDatabases']();
 }
 
+export function ListDbtProjectVersions(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ListDbtProjectVersions'](arg1, arg2, arg3);
+}
+
 export function ListDirectory(arg1) {
   return window['go']['main']['App']['ListDirectory'](arg1);
 }
@@ -804,6 +828,10 @@ export function ListEnvPackages() {
 
 export function ListExportableDatabases() {
   return window['go']['main']['App']['ListExportableDatabases']();
+}
+
+export function ListExternalAccessIntegrations() {
+  return window['go']['main']['App']['ListExternalAccessIntegrations']();
 }
 
 export function ListExternalVolumes() {
@@ -862,8 +890,16 @@ export function ListSecurityIntegrations() {
   return window['go']['main']['App']['ListSecurityIntegrations']();
 }
 
+export function ListStageEntries(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ListStageEntries'](arg1, arg2, arg3, arg4);
+}
+
 export function ListStageFiles(arg1, arg2) {
   return window['go']['main']['App']['ListStageFiles'](arg1, arg2);
+}
+
+export function ListSupportedDbtVersions() {
+  return window['go']['main']['App']['ListSupportedDbtVersions']();
 }
 
 export function ListSystemPythons() {
@@ -876,6 +912,14 @@ export function ListUsers() {
 
 export function ListWarehouses() {
   return window['go']['main']['App']['ListWarehouses']();
+}
+
+export function ListWorkspaceEntries(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ListWorkspaceEntries'](arg1, arg2, arg3, arg4);
+}
+
+export function ListWorkspaces() {
+  return window['go']['main']['App']['ListWorkspaces']();
 }
 
 export function LoadNotebookBreakpoints(arg1) {

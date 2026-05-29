@@ -58,6 +58,7 @@ func GetCodebaseSemanticMap() string {
     {
       "name": "Object Browser \u0026 Administration",
       "backend_paths": [
+        "internal/dbtproject/",
         "internal/fnmeta/",
         "internal/integrations/",
         "internal/pipe/",
@@ -71,7 +72,13 @@ func GetCodebaseSemanticMap() string {
         "frontend/src/components/account/AccountPanel.tsx",
         "frontend/src/components/database/CreateStageModal.tsx",
         "frontend/src/components/database/StagePropertiesModal.tsx",
+        "frontend/src/components/dbtproject/AddDbtProjectVersionModal.tsx",
+        "frontend/src/components/dbtproject/CreateDbtProjectModal.tsx",
+        "frontend/src/components/dbtproject/ExecuteDbtProjectModal.tsx",
+        "frontend/src/components/dbtproject/ModifyDbtProjectModal.tsx",
+        "frontend/src/components/dbtproject/SourceLocationPicker.tsx",
         "frontend/src/components/layout/Sidebar.tsx",
+        "frontend/src/components/shared/SqlPreview.tsx",
         "frontend/src/components/sidebar/objectIcons.tsx",
         "frontend/src/components/task/TaskHistoryModal.tsx",
         "frontend/src/store/objectStore.ts"

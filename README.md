@@ -203,7 +203,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 - **Show in Finder after export** — after a DDL export completes, click the folder icon in the results summary to open the export directory in the platform file manager
 
 ### Object browser (sidebar)
-- Browse databases → schemas → objects (tables, views, functions, procedures, notebooks, …)
+- Browse databases → schemas → objects (tables, views, functions, procedures, notebooks, dbt projects, …)
 - **Multi-selection** — hold `⌘` (macOS) or `Ctrl` (Windows/Linux) and click anywhere on an object row to toggle selection; selected objects are highlighted row-wide; click any non-modifier area to clear the selection
 - **Batch deletion** — when multiple objects are selected, right-click any of them and choose **Delete N selected objects…** to drop all of them in one operation; a confirmation dialog lists all objects to be removed
 - **Filter objects** — type in the search box at the top of the sidebar to filter objects by name across all databases and schemas; the tree cascade-loads all schemas and objects automatically and collapses back to the database list when the search is cleared. For schemas already expanded in the tree, search covers all object types; for schemas not yet expanded, search uses a fast path that returns tables, views, and sequences only (procedures, tasks, stages, etc. appear after manually expanding the schema)
@@ -726,6 +726,7 @@ thaw/
 │   ├── snowflake/lineage.go       # DDL-based dependency/lineage parser (recursive, cycle-safe)
 │   ├── snowflake/lineage_test.go  # Unit tests for lineage parser (56 cases; no Snowflake required)
 │   ├── snowgitrepo/               # Snowflake Git repository integration: CREATE/ALTER GIT REPOSITORY SQL builder
+│   ├── dbtproject/                # Snowflake-native DBT PROJECT objects: CREATE/ALTER/EXECUTE SQL builders
 │   ├── snowpark/                   # Snowpark/Jupyter support (Service pattern with NewService)
 │   ├── stage/                     # Stage creation SQL builder (internal/external, encryption, directory tables)
 │   ├── tasks/                     # Task graph management: schedule parsing, execution history, status tracking
@@ -769,6 +770,7 @@ thaw/
     │       ├── function/             # Function selection modal
     │       ├── git/                  # GitPanel + GitOperationsDialog (commit, pull, clone, branches)
     │       ├── gitrepoobj/           # Snowflake Git Repository objects: create, modify, commit filter
+    │       ├── dbtproject/           # Snowflake-native DBT PROJECT objects: create, execute, modify, add version, source location picker
     │       ├── help/                 # About dialog, keyboard shortcuts modal
     │       ├── layout/               # AppLayout (two-sidebar drag-and-drop), Sidebar (object tree + context menus)
     │       ├── lineage/              # Recursive dependency tree modal with DDL hover tooltips

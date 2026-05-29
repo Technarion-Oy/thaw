@@ -180,8 +180,8 @@ func DefaultNotebookPrefs() NotebookPrefs {
 //
 // Version tracks the schema revision so new flags introduced after an initial
 // save can be filled with their defaults rather than the zero value (false).
-// Current version: 10 (added FileWatcher).
-const flagsVersion = 10
+// Current version: 11 (added DbtProjectBrowser).
+const flagsVersion = 11
 
 type FeatureFlags struct {
 	Initialized bool `json:"initialized"`
@@ -210,6 +210,7 @@ type FeatureFlags struct {
 	// Advanced Tools & Data Engineering
 	SchemaMigration     bool `json:"schemaMigration"`
 	DbtScaffolding      bool `json:"dbtScaffolding"`
+	DbtProjectBrowser   bool `json:"dbtProjectBrowser"`
 	ERDiagramDesigner   bool `json:"erDiagramDesigner"`
 	TaskGraphVisualizer bool `json:"taskGraphVisualizer"`
 	InsertMapping       bool `json:"insertMapping"`
@@ -266,6 +267,7 @@ func DefaultFeatureFlags() FeatureFlags {
 		AIInlineCompletions:    true,
 		SchemaMigration:        true,
 		DbtScaffolding:         true,
+		DbtProjectBrowser:      true,
 		ERDiagramDesigner:      true,
 		TaskGraphVisualizer:    true,
 		InsertMapping:          true,
@@ -343,6 +345,8 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	setIfZero(&f.CrossTabSearch, defaults.CrossTabSearch)
 	// Version 9 → 10: FileWatcher added; defaults to true.
 	setIfZero(&f.FileWatcher, defaults.FileWatcher)
+	// Version 10 → 11: DbtProjectBrowser added; defaults to true.
+	setIfZero(&f.DbtProjectBrowser, defaults.DbtProjectBrowser)
 	f.Version = flagsVersion
 	return f
 }

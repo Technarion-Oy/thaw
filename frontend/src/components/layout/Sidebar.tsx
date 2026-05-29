@@ -48,6 +48,7 @@ import {
   RightOutlined,
   ShareAltOutlined,
   ExperimentOutlined,
+  BuildOutlined,
   DashboardOutlined,
   SyncOutlined,
   KeyOutlined,
@@ -66,7 +67,7 @@ import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
 import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, UploadFileToStage, PickOpenFile, ExecDDL } from "../../../wailsjs/go/main/App";
-import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
+import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
@@ -111,6 +112,10 @@ import PipeStatusModal from "../pipe/PipeStatusModal";
 import CreateStageModal from "../database/CreateStageModal";
 import StagePropertiesModal from "../database/StagePropertiesModal";
 import StageBrowserModal from "../database/StageBrowserModal";
+import CreateDbtProjectModal from "../dbtproject/CreateDbtProjectModal";
+import ExecuteDbtProjectModal from "../dbtproject/ExecuteDbtProjectModal";
+import ModifyDbtProjectModal from "../dbtproject/ModifyDbtProjectModal";
+import AddDbtProjectVersionModal from "../dbtproject/AddDbtProjectVersionModal";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 
 const { Text } = Typography;
@@ -129,9 +134,10 @@ const KIND_LABEL: Record<string, string> = {
   NOTEBOOK:      "Notebooks",
   SECRET:        "Secrets",
   "GIT REPOSITORY": "Git Repositories",
+  "DBT PROJECT": "DBT Projects",
 };
 
-const KIND_ORDER = ["TABLE", "VIEW", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY"];
+const KIND_ORDER = ["TABLE", "VIEW", "FUNCTION", "PROCEDURE", "SEQUENCE", "STAGE", "STREAM", "TASK", "FILE FORMAT", "PIPE", "NOTEBOOK", "SECRET", "GIT REPOSITORY", "DBT PROJECT"];
 
 const kindIcon = (kind: string) => objectIcon(kind);
 
@@ -439,6 +445,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [createGitRepoModal, setCreateGitRepoModal] = useState<{ db: string; schema: string } | null>(null);
   const [modifyGitRepoModal, setModifyGitRepoModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [gitCommitFilterModal, setGitCommitFilterModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [createDbtProjectModal, setCreateDbtProjectModal] = useState<{ db: string; schema: string } | null>(null);
+  const [executeDbtProjectModal, setExecuteDbtProjectModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [modifyDbtProjectModal, setModifyDbtProjectModal] = useState<{ db: string; schema: string; name: string } | null>(null);
+  const [addDbtProjectVersionModal, setAddDbtProjectVersionModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [createPipeModal, setCreatePipeModal] = useState<{ db: string; schema: string } | null>(null);
   const [pipePropsModal, setPipePropsModal] = useState<{ db: string; schema: string; name: string } | null>(null);
   const [refreshPipeModal, setRefreshPipeModal] = useState<{ db: string; schema: string; name: string } | null>(null);
@@ -710,6 +720,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           if (!groups[k]) groups[k] = [];
           groups[k].push(obj);
         }
+
+        // Filter out gated object types
+        if (!featureFlags.dbtProjectBrowser) delete groups["DBT PROJECT"];
 
         const sortedKinds = [
           ...KIND_ORDER.filter((k) => groups[k]),
@@ -1273,6 +1286,65 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const name = parts[4];
     setCtxMenu(null);
     setModifyGitRepoModal({ db, schema, name });
+  };
+
+  const openCreateDbtProject = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    setCtxMenu(null);
+    setCreateDbtProjectModal({ db, schema });
+  };
+
+  const openExecuteDbtProject = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts[4];
+    setCtxMenu(null);
+    setExecuteDbtProjectModal({ db, schema, name });
+  };
+
+  const openModifyDbtProject = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts[4];
+    setCtxMenu(null);
+    setModifyDbtProjectModal({ db, schema, name });
+  };
+
+  const openAddDbtProjectVersion = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts[4];
+    setCtxMenu(null);
+    setAddDbtProjectVersionModal({ db, schema, name });
+  };
+
+  const showDbtProjectVersions = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts[4];
+    setCtxMenu(null);
+    useQueryStore.getState().executeInNewTab(`SHOW VERSIONS IN DBT PROJECT ${quoteIdent(db)}.${quoteIdent(schema)}.${quoteIdent(name)};`);
+  };
+
+  const describeDbtProject = () => {
+    if (!ctxMenu) return;
+    const parts = ctxMenu.nodeKey.split(":");
+    const db = parts[1];
+    const schema = parts[2];
+    const name = parts[4];
+    setCtxMenu(null);
+    useQueryStore.getState().executeInNewTab(`DESCRIBE DBT PROJECT ${quoteIdent(db)}.${quoteIdent(schema)}.${quoteIdent(name)};`);
   };
 
   const openCreatePipe = () => {
@@ -2468,6 +2540,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               {menuItem("Pipe…", <ApiOutlined style={{ fontSize: 12 }} />, openCreatePipe)}
               {menuItem("Secret…", <KeyOutlined style={{ fontSize: 12 }} />, openCreateSecret)}
               {menuItem("Git Repository…", <BranchesOutlined style={{ fontSize: 12 }} />, openCreateGitRepository)}
+              {menuItem("DBT Project…", <BuildOutlined style={{ fontSize: 12 }} />, openCreateDbtProject, undefined, !featureFlags.dbtProjectBrowser, "DBT Project Browser is disabled. Enable it under View → Enabled Features…")}
 </>
               ))}          {ctxMenu.nodeType === "schema" && menuItem("Show Dropped Tables…", <RollbackOutlined style={{ fontSize: 12 }} />, showDroppedTables)}
           {ctxMenu.nodeType === "schema" && menuItem("Export Data…", <DownloadOutlined style={{ fontSize: 12 }} />, openSchemaExportModal, undefined, !featureFlags.exportTableData, "Table Data Export is disabled. Enable it under View → Enabled Features…")}
@@ -2519,6 +2592,18 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Modify…", <EditOutlined style={{ fontSize: 12 }} />, openModifyGitRepository)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "GIT REPOSITORY" &&
             menuItem("Set Commit Filter…", <EditOutlined style={{ fontSize: 12 }} />, openCommitFilterModal)}
+          {ctxMenu.nodeType === "type" && ctxMenu.objKind === "DBT PROJECT" &&
+            menuItem("Create DBT Project…", <BuildOutlined style={{ fontSize: 12 }} />, openCreateDbtProject)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DBT PROJECT" &&
+            menuItem("Execute…", <PlayCircleOutlined style={{ fontSize: 12 }} />, openExecuteDbtProject)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DBT PROJECT" &&
+            menuItem("Show Versions", <EyeOutlined style={{ fontSize: 12 }} />, showDbtProjectVersions)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DBT PROJECT" &&
+            menuItem("Describe", <FileOutlined style={{ fontSize: 12 }} />, describeDbtProject)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DBT PROJECT" &&
+            menuItem("Modify…", <EditOutlined style={{ fontSize: 12 }} />, openModifyDbtProject)}
+          {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "DBT PROJECT" &&
+            menuItem("Add Version…", <PlusOutlined style={{ fontSize: 12 }} />, openAddDbtProjectVersion)}
           {ctxMenu.nodeType === "gitcommits" &&
             menuItem("Set Commit Filter…", <EditOutlined style={{ fontSize: 12 }} />, openCommitFilterModal)}
           {ctxMenu.nodeType === "gitcommits" &&
@@ -2856,6 +2941,44 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           name={gitCommitFilterModal.name}
           onClose={() => setGitCommitFilterModal(null)}
           onSuccess={() => setTreeData((prev) => clearNodeChildren(prev, `gitcommits:${gitCommitFilterModal.db}:${gitCommitFilterModal.schema}:${gitCommitFilterModal.name}`))}
+        />
+      )}
+
+      {createDbtProjectModal && (
+        <CreateDbtProjectModal
+          db={createDbtProjectModal.db}
+          schema={createDbtProjectModal.schema}
+          onClose={() => setCreateDbtProjectModal(null)}
+          onSuccess={() => refreshDatabaseByName(createDbtProjectModal.db)}
+        />
+      )}
+
+      {executeDbtProjectModal && (
+        <ExecuteDbtProjectModal
+          db={executeDbtProjectModal.db}
+          schema={executeDbtProjectModal.schema}
+          name={executeDbtProjectModal.name}
+          onClose={() => setExecuteDbtProjectModal(null)}
+        />
+      )}
+
+      {modifyDbtProjectModal && (
+        <ModifyDbtProjectModal
+          db={modifyDbtProjectModal.db}
+          schema={modifyDbtProjectModal.schema}
+          name={modifyDbtProjectModal.name}
+          onClose={() => setModifyDbtProjectModal(null)}
+          onSuccess={() => refreshDatabaseByName(modifyDbtProjectModal.db)}
+        />
+      )}
+
+      {addDbtProjectVersionModal && (
+        <AddDbtProjectVersionModal
+          db={addDbtProjectVersionModal.db}
+          schema={addDbtProjectVersionModal.schema}
+          name={addDbtProjectVersionModal.name}
+          onClose={() => setAddDbtProjectVersionModal(null)}
+          onSuccess={() => refreshDatabaseByName(addDbtProjectVersionModal.db)}
         />
       )}
 

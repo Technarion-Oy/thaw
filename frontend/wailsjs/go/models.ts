@@ -65,6 +65,7 @@ export namespace config {
 	    aiInlineCompletions: boolean;
 	    schemaMigration: boolean;
 	    dbtScaffolding: boolean;
+	    dbtProjectBrowser: boolean;
 	    erDiagramDesigner: boolean;
 	    taskGraphVisualizer: boolean;
 	    insertMapping: boolean;
@@ -107,6 +108,7 @@ export namespace config {
 	        this.aiInlineCompletions = source["aiInlineCompletions"];
 	        this.schemaMigration = source["schemaMigration"];
 	        this.dbtScaffolding = source["dbtScaffolding"];
+	        this.dbtProjectBrowser = source["dbtProjectBrowser"];
 	        this.erDiagramDesigner = source["erDiagramDesigner"];
 	        this.taskGraphVisualizer = source["taskGraphVisualizer"];
 	        this.insertMapping = source["insertMapping"];
@@ -286,6 +288,89 @@ export namespace dbt {
 	        this.projectDir = source["projectDir"];
 	        this.filesCreated = source["filesCreated"];
 	        this.warnings = source["warnings"];
+	    }
+	}
+
+}
+
+export namespace dbtproject {
+	
+	export class AlterSetConfig {
+	    dbtVersion: string;
+	    defaultTarget: string;
+	    externalAccessIntegrations: string[];
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AlterSetConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.dbtVersion = source["dbtVersion"];
+	        this.defaultTarget = source["defaultTarget"];
+	        this.externalAccessIntegrations = source["externalAccessIntegrations"];
+	        this.comment = source["comment"];
+	    }
+	}
+	export class CreateConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    orReplace: boolean;
+	    ifNotExists: boolean;
+	    sourceLocation: string;
+	    comment: string;
+	    dbtVersion: string;
+	    defaultTarget: string;
+	    externalAccessIntegrations: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.orReplace = source["orReplace"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.sourceLocation = source["sourceLocation"];
+	        this.comment = source["comment"];
+	        this.dbtVersion = source["dbtVersion"];
+	        this.defaultTarget = source["defaultTarget"];
+	        this.externalAccessIntegrations = source["externalAccessIntegrations"];
+	    }
+	}
+	export class DbtVersionInfo {
+	    dbt_version: string;
+	    type: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DbtVersionInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.dbt_version = source["dbt_version"];
+	        this.type = source["type"];
+	    }
+	}
+	export class ExecuteConfig {
+	    args: string;
+	    dbtVersion: string;
+	    fromWorkspace: string;
+	    projectRoot: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExecuteConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.args = source["args"];
+	        this.dbtVersion = source["dbtVersion"];
+	        this.fromWorkspace = source["fromWorkspace"];
+	        this.projectRoot = source["projectRoot"];
 	    }
 	}
 
@@ -1824,6 +1909,22 @@ export namespace snowflake {
 	        this.ParamHint = source["ParamHint"];
 	    }
 	}
+	export class DbtProjectVersion {
+	    version: string;
+	    alias: string;
+	    isDefault: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new DbtProjectVersion(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.alias = source["alias"];
+	        this.isDefault = source["isDefault"];
+	    }
+	}
 	export class DependencyNode {
 	    name: string;
 	    schema: string;
@@ -2477,6 +2578,24 @@ export namespace snowflake {
 	        this.fkColumn = source["fkColumn"];
 	        this.constraintName = source["constraintName"];
 	        this.keySequence = source["keySequence"];
+	    }
+	}
+	export class WorkspaceInfo {
+	    name: string;
+	    database: string;
+	    schema: string;
+	    owner: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new WorkspaceInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.database = source["database"];
+	        this.schema = source["schema"];
+	        this.owner = source["owner"];
 	    }
 	}
 

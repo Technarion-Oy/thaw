@@ -19,6 +19,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -39,6 +40,7 @@ import (
 	"thaw/internal/apperrors"
 	"thaw/internal/config"
 	"thaw/internal/dbt"
+	"thaw/internal/dbtproject"
 	"thaw/internal/ddl"
 	"thaw/internal/fileformat"
 	"thaw/internal/filesystem"
@@ -510,6 +512,7 @@ func (a *App) Connect(params snowflake.ConnectParams) error {
 	}
 	a.client = client
 	a.connectParams = &params
+	a.applyFeatureFlagExclusions()
 	logger.L.Info("connected", "account", params.Account, "user", params.User)
 	telemetry.Track(telemetry.EventConnected, telemetry.Props{"authenticator": params.Authenticator})
 
@@ -1771,6 +1774,103 @@ func (a *App) BuildCreateGitRepositorySql(database, schema string, cfg snowgitre
 // BuildModifyGitRepositorySql returns one or more ALTER GIT REPOSITORY statements.
 func (a *App) BuildModifyGitRepositorySql(database, schema, name string, cfg snowgitrepo.GitRepositoryConfig, originalComment, originalIntegration, originalCredentials string) ([]string, error) {
 	return snowgitrepo.BuildModifyGitRepositorySql(database, schema, name, cfg, originalComment, originalIntegration, originalCredentials)
+}
+
+// ── DBT Project ──────────────────────────────────────────────────────────────
+
+// BuildCreateDbtProjectSql returns the SQL for creating a DBT PROJECT object.
+func (a *App) BuildCreateDbtProjectSql(database, schema string, cfg dbtproject.CreateConfig) (string, error) {
+	return dbtproject.BuildCreateDbtProjectSql(database, schema, cfg)
+}
+
+// BuildAlterDbtProjectSetSql returns one or more ALTER DBT PROJECT SET/UNSET statements.
+func (a *App) BuildAlterDbtProjectSetSql(database, schema, name string, cfg dbtproject.AlterSetConfig, origComment, origDbtVersion, origDefaultTarget string, origIntegrations []string) ([]string, error) {
+	return dbtproject.BuildAlterDbtProjectSetSql(database, schema, name, cfg, origComment, origDbtVersion, origDefaultTarget, origIntegrations)
+}
+
+// BuildExecuteDbtProjectSql returns the SQL for executing a DBT PROJECT.
+func (a *App) BuildExecuteDbtProjectSql(database, schema, name string, cfg dbtproject.ExecuteConfig) (string, error) {
+	return dbtproject.BuildExecuteDbtProjectSql(database, schema, name, cfg)
+}
+
+// BuildAddDbtProjectVersionSql returns the SQL for adding a version to a DBT PROJECT.
+func (a *App) BuildAddDbtProjectVersionSql(database, schema, name, versionAlias, sourceLocation string) (string, error) {
+	return dbtproject.BuildAddVersionSql(database, schema, name, versionAlias, sourceLocation)
+}
+
+// DescribeDbtProject runs DESCRIBE DBT PROJECT and returns key/value pairs.
+func (a *App) DescribeDbtProject(database, schema, name string) ([]PropertyPair, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	res, err := a.client.Execute(a.ctx, dbtproject.BuildDescribeSql(database, schema, name))
+	if err != nil {
+		return nil, err
+	}
+	return a.resToPairs(res), nil
+}
+
+// ListSupportedDbtVersions returns the dbt versions supported by the account.
+func (a *App) ListSupportedDbtVersions() ([]dbtproject.DbtVersionInfo, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	res, err := a.client.Execute(a.ctx, "SELECT SYSTEM$SUPPORTED_DBT_VERSIONS()")
+	if err != nil {
+		return nil, err
+	}
+	if len(res.Rows) == 0 || len(res.Rows[0]) == 0 {
+		return nil, nil
+	}
+	raw, ok := res.Rows[0][0].(string)
+	if !ok {
+		return nil, fmt.Errorf("unexpected type for dbt versions: %T", res.Rows[0][0])
+	}
+	var versions []dbtproject.DbtVersionInfo
+	if err := json.Unmarshal([]byte(raw), &versions); err != nil {
+		return nil, fmt.Errorf("failed to parse dbt versions: %w", err)
+	}
+	return versions, nil
+}
+
+// ListStageEntries returns directory-aware entries within an internal named stage.
+func (a *App) ListStageEntries(database, schema, stageName, dirPath string) ([]snowflake.GitRepoEntry, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.client.ListStageEntries(a.ctx, database, schema, stageName, dirPath)
+}
+
+// ListDbtProjectVersions returns all versions of a DBT PROJECT.
+func (a *App) ListDbtProjectVersions(database, schema, name string) ([]snowflake.DbtProjectVersion, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.client.ListDbtProjectVersions(a.ctx, database, schema, name)
+}
+
+// ListWorkspaces returns all workspaces visible to the current user.
+func (a *App) ListWorkspaces() ([]snowflake.WorkspaceInfo, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.client.ListWorkspaces(a.ctx)
+}
+
+// ListWorkspaceEntries returns directory-aware entries within a workspace.
+func (a *App) ListWorkspaceEntries(database, schema, workspaceName, dirPath string) ([]snowflake.GitRepoEntry, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.client.ListWorkspaceEntries(a.ctx, database, schema, workspaceName, dirPath)
+}
+
+// ListExternalAccessIntegrations returns all EXTERNAL ACCESS integrations.
+func (a *App) ListExternalAccessIntegrations() ([]snowflake.IntegrationRow, error) {
+	if a.client == nil {
+		return nil, apperrors.ErrNotConnected
+	}
+	return a.client.ListIntegrations(a.ctx, "EXTERNAL ACCESS")
 }
 
 // BuildCreatePipeSql returns the SQL for creating a Snowflake PIPE.
@@ -3145,6 +3245,8 @@ func (a *App) GetObjectProperties(database, schema, kind, name string) ([]Proper
 		query = fmt.Sprintf("SHOW SECRETS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
 	case "GIT REPOSITORY":
 		query = fmt.Sprintf("SHOW GIT REPOSITORIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
+	case "DBT PROJECT":
+		query = fmt.Sprintf("SHOW DBT PROJECTS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
 	case "WAREHOUSE":
 		query = fmt.Sprintf("SHOW WAREHOUSES LIKE '%s'", like)
 	case "ROLE":
@@ -4169,7 +4271,27 @@ func (a *App) SaveFeatureFlags(flags config.FeatureFlags) error {
 	}
 
 	cfg.FeatureFlags = flags
-	return config.Save(cfg)
+	if err := config.Save(cfg); err != nil {
+		return err
+	}
+	a.applyFeatureFlagExclusions()
+	return nil
+}
+
+// applyFeatureFlagExclusions updates the Snowflake client's excluded extended
+// object kinds based on the current feature flags. Called after connecting and
+// after saving feature flags so disabled features don't incur unnecessary
+// SHOW queries during schema expansion.
+func (a *App) applyFeatureFlagExclusions() {
+	if a.client == nil {
+		return
+	}
+	flags := a.GetFeatureFlags()
+	excl := make(map[string]bool)
+	if !flags.DbtProjectBrowser {
+		excl["DBT PROJECT"] = true
+	}
+	a.client.SetExcludedExtendedKinds(excl)
 }
 
 // ─── Notebook preferences ────────────────────────────────────────────────────
