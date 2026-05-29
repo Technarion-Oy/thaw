@@ -218,11 +218,11 @@ function removeNode(nodes: DataNode[], targetKey: string): DataNode[] {
     .map((node) => {
       if ((node as any).children) {
         const updated = removeNode((node as any).children, targetKey);
-        // If the last child was removed, insert an empty placeholder so
-        // Ant Design Tree still shows the node as expanded (children: []
-        // would prevent loadData from re-triggering on the next expand).
+        // If the last child was removed, strip children entirely so
+        // loadData re-triggers on the next expand (re-fetches from server).
         if (updated.length === 0) {
-          return { ...node, children: [emptyChildNode(String(node.key))] };
+          const { children, ...rest } = node as any;
+          return rest;
         }
         return { ...node, children: updated };
       }
@@ -1044,6 +1044,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       setLoadingGitNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
       try {
         // Snowflake-native DBT PROJECTs store files under @project/versions/<N>/…
+        // (observed from SHOW VERSIONS IN DBT PROJECT and LIST @project output)
         const entries = await ListDbtProjectEntries(db, schema, dbtName, `versions/${version}/`);
         const nodes = buildEntryNodes(db, schema, dbtName, entries ?? [], "dbtdir", "dbtfile");
         setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
@@ -1727,7 +1728,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const localPath = await PickOpenFile();
     if (!localPath) return;
     const stageRef = `@${quoteIdent(k.db)}.${quoteIdent(k.schema)}.${quoteIdent(k.name)}/${k.path}`;
-    const hide = message.loading(`Uploading to ${stageRef}…`, 0);
+    const hide = message.loading(`Uploading to ${k.name}/${k.path}…`, 0);
     try {
       await UploadFileToStage(localPath, stageRef, 4, true, "AUTO_DETECT", true);
       message.success(`Uploaded successfully.`);
@@ -2874,9 +2875,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Execute File", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeStageFile)}
           {ctxMenu.nodeType === "stagefile" &&
             menuItem("Download…", <DownloadOutlined style={{ fontSize: 12 }} />, downloadStageFile, undefined, !featureFlags.getCommand, "GET commands are disabled. Enable them under View → Enabled Features…")}
-          {/* Divider between action items (Execute/Download) and destructive item (Delete) — shown when at least one action item above is visible */}
-          {ctxMenu.nodeType === "stagefile" && (stageFileIsSql || featureFlags.getCommand) &&
-            <Divider style={{ margin: "4px 0" }} />}
+          {ctxMenu.nodeType === "stagefile" && <Divider style={{ margin: "4px 0" }} />}
           {ctxMenu.nodeType === "stagefile" &&
             menuItem("Delete…", <DeleteOutlined style={{ fontSize: 12 }} />, deleteStageFile, undefined, !featureFlags.removeCommand, "REMOVE commands are disabled. Enable them under View → Enabled Features…")}
 
