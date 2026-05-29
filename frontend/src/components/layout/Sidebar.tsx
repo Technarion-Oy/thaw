@@ -992,6 +992,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       const version = parts.slice(4).join(":");
       setLoadingGitNodes((prev) => { const s = new Set(prev); s.add(key); return s; });
       try {
+        // Snowflake-native DBT PROJECTs store files under @project/versions/<N>/…
         const entries = await ListDbtProjectEntries(db, schema, dbtName, `versions/${version}/`);
         const nodes = buildDbtEntryNodes(db, schema, dbtName, entries ?? []);
         setData((prev) => updateNode(prev, key, nodes.length ? nodes : [emptyChildNode(key)]));
