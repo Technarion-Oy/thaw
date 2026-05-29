@@ -1598,7 +1598,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     message.success("Commit filter cleared");
   };
 
-  const refreshGitNode = () => {
+  const refreshTreeNode = () => {
     if (!ctxMenu) return;
     const key = ctxMenu.nodeKey;
     setCtxMenu(null);
@@ -1738,21 +1738,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     }
   };
 
-  const refreshStageNode = () => {
-    if (!ctxMenu) return;
-    const key = ctxMenu.nodeKey;
-    setCtxMenu(null);
-    setTreeData((prev) => clearNodeChildren(prev, key));
-  };
-
   // --- DBT Project file action handlers ---
-
-  const refreshDbtNode = () => {
-    if (!ctxMenu) return;
-    const key = ctxMenu.nodeKey;
-    setCtxMenu(null);
-    setTreeData((prev) => clearNodeChildren(prev, key));
-  };
 
   const fetchGitRepository = async () => {
     if (!ctxMenu) return;
@@ -2863,12 +2849,12 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "gitcommits" &&
             menuItem("Clear Commit Filter", <CloseOutlined style={{ fontSize: 12 }} />, clearGitCommitFilter)}
           {(ctxMenu.nodeKey.startsWith("gitdir:") || ctxMenu.nodeKey.startsWith("gitbranches:") || ctxMenu.nodeKey.startsWith("gittags:") || ctxMenu.nodeKey.startsWith("gitcommits:")) &&
-            menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshGitNode)}
+            menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshTreeNode)}
           {ctxMenu.nodeType === "gitfile" && menuItem("View Content", <EyeOutlined style={{ fontSize: 12 }} />, viewGitFileContent)}
           {ctxMenu.nodeType === "gitfile" && menuItem("Execute File", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeGitFile)}
 
           {/* Stage directory/file context menu */}
-          {ctxMenu.nodeType === "stagedir" && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshStageNode)}
+          {ctxMenu.nodeType === "stagedir" && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshTreeNode)}
           {ctxMenu.nodeType === "stagedir" &&
             menuItem("Upload File…", <UploadOutlined style={{ fontSize: 12 }} />, uploadToStageDir, undefined, !featureFlags.putCommand, "PUT commands are disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "stagefile" && ctxMenu.nodeKey.toLowerCase().endsWith(".sql") &&
@@ -2881,7 +2867,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             menuItem("Delete…", <DeleteOutlined style={{ fontSize: 12 }} />, deleteStageFile, undefined, !featureFlags.removeCommand, "REMOVE commands are disabled. Enable them under View → Enabled Features…")}
 
           {/* DBT Project version/directory/file context menu */}
-          {(ctxMenu.nodeType === "dbtversion" || ctxMenu.nodeType === "dbtdir") && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshDbtNode)}
+          {(ctxMenu.nodeType === "dbtversion" || ctxMenu.nodeType === "dbtdir") && menuItem("Refresh", <ReloadOutlined style={{ fontSize: 12 }} />, refreshTreeNode)}
 
           {ctxMenu.nodeType === "obj" && (ctxMenu.objKind === "TABLE" || ctxMenu.objKind === "VIEW") &&
             menuItem("Select Top 1000 Rows", <TableOutlined style={{ fontSize: 12 }} />, selectTop1000)}
