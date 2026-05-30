@@ -48,7 +48,7 @@ func TestServerExposesToolsOverSSE(t *testing.T) {
 	if err != nil {
 		t.Fatalf("client connect over SSE failed: %v", err)
 	}
-	defer cs.Close()
+	defer func() { _ = cs.Close() }()
 
 	res, err := cs.ListTools(ctx, nil)
 	if err != nil {
