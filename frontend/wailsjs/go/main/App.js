@@ -430,6 +430,18 @@ export function GetAvailableShells() {
   return window['go']['main']['App']['GetAvailableShells']();
 }
 
+export function GetCollationLocales() {
+  return window['go']['main']['App']['GetCollationLocales']();
+}
+
+export function GetCollationSpecifiers() {
+  return window['go']['main']['App']['GetCollationSpecifiers']();
+}
+
+export function GetCollations() {
+  return window['go']['main']['App']['GetCollations']();
+}
+
 export function GetColumnComments(arg1, arg2, arg3) {
   return window['go']['main']['App']['GetColumnComments'](arg1, arg2, arg3);
 }

@@ -5617,6 +5617,24 @@ func (a *App) NeedsQuotes(dataType string) bool {
 	return snowflake.NeedsQuotes(dataType)
 }
 
+// GetCollations returns the curated list of Snowflake collation specifications
+// for populating the column collation dropdown.
+func (a *App) GetCollations() []snowflake.CollationOption {
+	return snowflake.Collations()
+}
+
+// GetCollationLocales returns the supported collation locales (building blocks
+// for assembling a custom collation specification).
+func (a *App) GetCollationLocales() []snowflake.CollationLocale {
+	return snowflake.CollationLocales()
+}
+
+// GetCollationSpecifiers returns the supported collation specifiers (case,
+// accent, punctuation, etc.) for assembling a custom collation specification.
+func (a *App) GetCollationSpecifiers() []snowflake.CollationSpecifier {
+	return snowflake.CollationSpecifiers()
+}
+
 // ── App Info ──────────────────────────────────────────────────────────────────
 
 // AppInfo holds the application metadata shown in the About dialog.

@@ -1892,6 +1892,50 @@ export namespace snowflake {
 	        this.comment = source["comment"];
 	    }
 	}
+	export class CollationLocale {
+	    code: string;
+	    name: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CollationLocale(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.code = source["code"];
+	        this.name = source["name"];
+	    }
+	}
+	export class CollationOption {
+	    value: string;
+	    label: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CollationOption(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.value = source["value"];
+	        this.label = source["label"];
+	    }
+	}
+	export class CollationSpecifier {
+	    code: string;
+	    name: string;
+	    category: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CollationSpecifier(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.code = source["code"];
+	        this.name = source["name"];
+	        this.category = source["category"];
+	    }
+	}
 	export class ColumnInfo {
 	    name: string;
 	    dataType: string;

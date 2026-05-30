@@ -237,6 +237,12 @@ export function GetAppInfo():Promise<main.AppInfo>;
 
 export function GetAvailableShells():Promise<Array<string>>;
 
+export function GetCollationLocales():Promise<Array<snowflake.CollationLocale>>;
+
+export function GetCollationSpecifiers():Promise<Array<snowflake.CollationSpecifier>>;
+
+export function GetCollations():Promise<Array<snowflake.CollationOption>>;
+
 export function GetColumnComments(arg1:string,arg2:string,arg3:string):Promise<Array<main.ColumnComment>>;
 
 export function GetCurrentRegion():Promise<string>;

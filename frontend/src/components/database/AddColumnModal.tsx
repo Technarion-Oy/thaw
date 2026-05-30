@@ -14,8 +14,8 @@ import {
   Typography, Button, Alert,
 } from "antd";
 import { PlusOutlined, TableOutlined } from "@ant-design/icons";
-import { ExecDDL, GetQuotedIdentifiersIgnoreCase, ListDatabases, ListSchemas, ListObjects, GetTableColumnsWithTypes, BuildAddColumnSql, IsNumeric } from "../../../wailsjs/go/main/App";
-import { column } from "../../../wailsjs/go/models";
+import { ExecDDL, GetQuotedIdentifiersIgnoreCase, ListDatabases, ListSchemas, ListObjects, GetTableColumnsWithTypes, BuildAddColumnSql, IsNumeric, GetCollations } from "../../../wailsjs/go/main/App";
+import { column, snowflake } from "../../../wailsjs/go/models";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import DataTypeSelect from "../shared/DataTypeSelect";
 
@@ -61,6 +61,7 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
   const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
   const [preview, setPreview] = useState("");
   const [isNumericType, setIsNumericType] = useState(false);
+  const [collations, setCollations] = useState<snowflake.CollationOption[]>([]);
   const previewTimer = useRef<ReturnType<typeof setTimeout>>();
 
   // FK cascading dropdown state
@@ -95,6 +96,13 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
     GetQuotedIdentifiersIgnoreCase()
       .then((v) => setQuotedIdentifiersIgnoreCase(v ?? false))
       .catch(() => {});
+  }, []);
+
+  // Collation options are sourced from the backend (internal/snowflake).
+  useEffect(() => {
+    GetCollations()
+      .then((opts) => setCollations(opts ?? []))
+      .catch(() => setCollations([]));
   }, []);
 
   // Load databases when FK constraint is selected
@@ -410,22 +418,7 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
             onChange={(v) => set("collation", v ?? "")}
             placeholder="Default (no collation)"
             style={{ width: "100%" }}
-            options={[
-              { value: "utf8", label: "utf8" },
-              { value: "en", label: "en" },
-              { value: "en-ci", label: "en-ci (case-insensitive)" },
-              { value: "en-ci-ai", label: "en-ci-ai (case & accent insensitive)" },
-              { value: "en-cs", label: "en-cs (case-sensitive)" },
-              { value: "en-cs-ai", label: "en-cs-ai (case-sensitive, accent insensitive)" },
-              { value: "fr", label: "fr" },
-              { value: "fr-ci", label: "fr-ci" },
-              { value: "de", label: "de" },
-              { value: "de-ci", label: "de-ci" },
-              { value: "es", label: "es" },
-              { value: "ja", label: "ja" },
-              { value: "ko", label: "ko" },
-              { value: "zh", label: "zh" },
-            ]}
+            options={collations.map((c) => ({ value: c.value, label: c.label }))}
           />
         </Form.Item>
         </>
