@@ -38,6 +38,7 @@ import (
 
 	"thaw/internal/ai"
 	"thaw/internal/apperrors"
+	"thaw/internal/column"
 	"thaw/internal/config"
 	"thaw/internal/dbt"
 	"thaw/internal/dbtproject"
@@ -1796,6 +1797,43 @@ func (a *App) BuildExecuteDbtProjectSql(database, schema, name string, cfg dbtpr
 // BuildAddDbtProjectVersionSql returns the SQL for adding a version to a DBT PROJECT.
 func (a *App) BuildAddDbtProjectVersionSql(database, schema, name, versionAlias, sourceLocation string) (string, error) {
 	return dbtproject.BuildAddVersionSql(database, schema, name, versionAlias, sourceLocation)
+}
+
+// ── Table columns ────────────────────────────────────────────────────────────
+
+// BuildAddColumnSql returns the SQL for an ALTER TABLE ... ADD COLUMN statement.
+func (a *App) BuildAddColumnSql(database, schema, table string, cfg column.AddColumnConfig) (string, error) {
+	return column.BuildAddColumnSql(database, schema, table, cfg)
+}
+
+// BuildDropColumnSql returns the SQL for an ALTER TABLE ... DROP COLUMN statement.
+func (a *App) BuildDropColumnSql(database, schema, table, col string) string {
+	return column.BuildDropColumnSql(database, schema, table, col)
+}
+
+// BuildRenameColumnSql returns the SQL for an ALTER TABLE ... RENAME COLUMN statement.
+func (a *App) BuildRenameColumnSql(database, schema, table, oldName, newName string, caseSensitive bool) string {
+	return column.BuildRenameColumnSql(database, schema, table, oldName, newName, caseSensitive)
+}
+
+// BuildSetColumnNotNullSql returns the SQL for setting a column NOT NULL.
+func (a *App) BuildSetColumnNotNullSql(database, schema, table, col string) string {
+	return column.BuildSetNotNullSql(database, schema, table, col)
+}
+
+// BuildDropColumnNotNullSql returns the SQL for dropping a column's NOT NULL constraint.
+func (a *App) BuildDropColumnNotNullSql(database, schema, table, col string) string {
+	return column.BuildDropNotNullSql(database, schema, table, col)
+}
+
+// BuildSetColumnCommentSql returns the SQL for setting (or UNSETting) a column comment.
+func (a *App) BuildSetColumnCommentSql(database, schema, table, col, comment string) string {
+	return column.BuildSetColumnCommentSql(database, schema, table, col, comment)
+}
+
+// BuildChangeColumnTypeSql returns the SQL for an ALTER COLUMN ... SET DATA TYPE statement.
+func (a *App) BuildChangeColumnTypeSql(database, schema, table, col, dataType string) string {
+	return column.BuildChangeDataTypeSql(database, schema, table, col, dataType)
 }
 
 // DescribeDbtProject runs DESCRIBE DBT PROJECT and returns key/value pairs.
@@ -5577,6 +5615,24 @@ func (a *App) IsNumeric(dataType string) bool {
 // NeedsQuotes reports whether a value of the given data type should be quoted in SQL.
 func (a *App) NeedsQuotes(dataType string) bool {
 	return snowflake.NeedsQuotes(dataType)
+}
+
+// GetCollations returns the curated list of Snowflake collation specifications
+// for populating the column collation dropdown.
+func (a *App) GetCollations() []snowflake.CollationOption {
+	return snowflake.Collations()
+}
+
+// GetCollationLocales returns the supported collation locales (building blocks
+// for assembling a custom collation specification).
+func (a *App) GetCollationLocales() []snowflake.CollationLocale {
+	return snowflake.CollationLocales()
+}
+
+// GetCollationSpecifiers returns the supported collation specifiers (case,
+// accent, punctuation, etc.) for assembling a custom collation specification.
+func (a *App) GetCollationSpecifiers() []snowflake.CollationSpecifier {
+	return snowflake.CollationSpecifiers()
 }
 
 // ── App Info ──────────────────────────────────────────────────────────────────

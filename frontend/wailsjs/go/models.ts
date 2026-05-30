@@ -1,3 +1,56 @@
+export namespace column {
+	
+	export class AddColumnConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    ifNotExists: boolean;
+	    dataType: string;
+	    valueMode: string;
+	    defaultValue: string;
+	    computedExpr: string;
+	    identityStart: number;
+	    identityStep: number;
+	    identityOrder: string;
+	    notNull: boolean;
+	    constraintKind: string;
+	    constraintName: string;
+	    fkDb: string;
+	    fkSchema: string;
+	    fkTableName: string;
+	    fkColumn: string;
+	    collation: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AddColumnConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.dataType = source["dataType"];
+	        this.valueMode = source["valueMode"];
+	        this.defaultValue = source["defaultValue"];
+	        this.computedExpr = source["computedExpr"];
+	        this.identityStart = source["identityStart"];
+	        this.identityStep = source["identityStep"];
+	        this.identityOrder = source["identityOrder"];
+	        this.notNull = source["notNull"];
+	        this.constraintKind = source["constraintKind"];
+	        this.constraintName = source["constraintName"];
+	        this.fkDb = source["fkDb"];
+	        this.fkSchema = source["fkSchema"];
+	        this.fkTableName = source["fkTableName"];
+	        this.fkColumn = source["fkColumn"];
+	        this.collation = source["collation"];
+	        this.comment = source["comment"];
+	    }
+	}
+
+}
+
 export namespace config {
 	
 	export class AIConfig {
@@ -83,6 +136,7 @@ export namespace config {
 	    multiCellCopy: boolean;
 	    crossTabSearch: boolean;
 	    fileWatcher: boolean;
+	    columnManagement: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new FeatureFlags(source);
@@ -126,6 +180,7 @@ export namespace config {
 	        this.multiCellCopy = source["multiCellCopy"];
 	        this.crossTabSearch = source["crossTabSearch"];
 	        this.fileWatcher = source["fileWatcher"];
+	        this.columnManagement = source["columnManagement"];
 	    }
 	}
 	export class GitConfig {
@@ -1839,12 +1894,57 @@ export namespace snowflake {
 	        this.comment = source["comment"];
 	    }
 	}
+	export class CollationLocale {
+	    code: string;
+	    name: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CollationLocale(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.code = source["code"];
+	        this.name = source["name"];
+	    }
+	}
+	export class CollationOption {
+	    value: string;
+	    label: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CollationOption(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.value = source["value"];
+	        this.label = source["label"];
+	    }
+	}
+	export class CollationSpecifier {
+	    code: string;
+	    name: string;
+	    category: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CollationSpecifier(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.code = source["code"];
+	        this.name = source["name"];
+	        this.category = source["category"];
+	    }
+	}
 	export class ColumnInfo {
 	    name: string;
 	    dataType: string;
 	    nullable: boolean;
 	    isPrimaryKey: boolean;
 	    isUnique: boolean;
+	    comment: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ColumnInfo(source);
@@ -1857,6 +1957,7 @@ export namespace snowflake {
 	        this.nullable = source["nullable"];
 	        this.isPrimaryKey = source["isPrimaryKey"];
 	        this.isUnique = source["isUnique"];
+	        this.comment = source["comment"];
 	    }
 	}
 	export class ConnectParams {

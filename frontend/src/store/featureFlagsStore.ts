@@ -50,6 +50,7 @@ const allEnabled: config.FeatureFlags = {
   multiCellCopy: true,
   crossTabSearch: true,
   fileWatcher: true,
+  columnManagement: true,
 };
 
 // allLocked default: nothing is admin-locked.
@@ -90,6 +91,7 @@ const nothingLocked: config.FeatureFlags = {
   multiCellCopy: false,
   crossTabSearch: false,
   fileWatcher: false,
+  columnManagement: false,
 };
 
 interface FeatureFlagsState {

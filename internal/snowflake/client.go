@@ -2676,6 +2676,7 @@ type ColumnInfo struct {
 	Nullable     bool   `json:"nullable"`
 	IsPrimaryKey bool   `json:"isPrimaryKey"`
 	IsUnique     bool   `json:"isUnique"`
+	Comment      string `json:"comment"` // column comment, empty if none
 }
 
 // GetTableColumnsWithTypes returns the ordered column list for a table or view
@@ -2689,7 +2690,7 @@ func (c *Client) GetTableColumnsWithTypes(ctx context.Context, database, schema,
 	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
-	idxs := colIndexMap(cols, "name", "type", "null?", "primary key", "unique key")
+	idxs := colIndexMap(cols, "name", "type", "null?", "primary key", "unique key", "comment")
 
 	result := []ColumnInfo{}
 	for rows.Next() {
@@ -2707,6 +2708,7 @@ func (c *Client) GetTableColumnsWithTypes(ctx context.Context, database, schema,
 			Nullable:     strVal(vals, idxs["null?"]) == "Y",
 			IsPrimaryKey: strVal(vals, idxs["primary key"]) == "Y",
 			IsUnique:     strVal(vals, idxs["unique key"]) == "Y",
+			Comment:      strVal(vals, idxs["comment"]),
 		})
 	}
 	return result, rows.Err()

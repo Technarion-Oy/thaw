@@ -438,6 +438,17 @@ export default function FeatureFlagsModal({ onClose }: Props) {
           />
         </Category>
 
+        {/* ── Schema Management ── */}
+        <Category title="Schema Management">
+          <FlagRow
+            label="Column Management"
+            description="Add, rename, retype, set/drop NOT NULL, set comment, and drop table columns directly from the sidebar tree."
+            checked={flags.columnManagement}
+            locked={locked.columnManagement}
+            onChange={(v) => set("columnManagement", v)}
+          />
+        </Category>
+
       </div>
     </Modal>
   );

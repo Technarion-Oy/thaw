@@ -37,7 +37,8 @@ import (
 //	  "developerEnvironments":    { "snowparkNotebooks": false },
 //	  "performanceDiagnostics":   { "explainSql": false },
 //	  "connection":               { "snowflakeCLIProfileManager": false },
-//	  "fileBrowser":              { "fileWatcher": false }
+//	  "fileBrowser":              { "fileWatcher": false },
+//	  "schemaManagement":         { "columnManagement": false }
 //	}
 
 // ptrbool is a small helper so JSON null / absent ≠ false.
@@ -105,6 +106,11 @@ type adminFileBrowser struct {
 	FileWatcher ptrBool `json:"fileWatcher,omitempty"`
 }
 
+// adminSchemaManagement is the "schemaManagement" category.
+type adminSchemaManagement struct {
+	ColumnManagement ptrBool `json:"columnManagement,omitempty"`
+}
+
 // adminConfigJSON is the full schema for the admin features.json file.
 type adminConfigJSON struct {
 	DataExportImport         adminDataExportImport `json:"dataExportImport"`
@@ -116,6 +122,7 @@ type adminConfigJSON struct {
 	Connection               adminConnection       `json:"connection"`
 	ResultsGrid              adminResultsGrid      `json:"resultsGrid"`
 	FileBrowser              adminFileBrowser      `json:"fileBrowser"`
+	SchemaManagement         adminSchemaManagement `json:"schemaManagement"`
 }
 
 // ─── System config file path ───────────────────────────────────────────────────
@@ -233,6 +240,9 @@ func mergeAdminOverrides(user FeatureFlags, cfg adminConfigJSON) (effective Feat
 
 	// File Browser
 	apply(&effective.FileWatcher, &locked.FileWatcher, cfg.FileBrowser.FileWatcher)
+
+	// Schema Management
+	apply(&effective.ColumnManagement, &locked.ColumnManagement, cfg.SchemaManagement.ColumnManagement)
 
 	return effective, locked
 }
