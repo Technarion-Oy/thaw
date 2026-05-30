@@ -22,7 +22,6 @@ const SIMPLE_TYPES = [
   "ARRAY",
   "FLOAT",
   "INTEGER",
-  "BINARY",
   "GEOGRAPHY",
   "GEOMETRY",
 ];
@@ -57,8 +56,9 @@ function parseDataType(dt: string): { base: string; length?: number; precision?:
   if (LENGTH_TYPES.includes(base)) {
     return { base, length: Number(params) };
   }
-  // Unknown parameterised type — return as-is
-  return { base: dt.toUpperCase() };
+  // Parameterised type whose params we don't model (e.g. TIMESTAMP_NTZ(9)):
+  // strip the params so the base still matches a dropdown option.
+  return { base };
 }
 
 /** Reconstruct the full type string from parts. */

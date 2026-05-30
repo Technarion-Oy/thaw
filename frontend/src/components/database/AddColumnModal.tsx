@@ -101,11 +101,12 @@ function buildSql(db: string, schema: string, table: string, cfg: ColumnConfig):
     if (cfg.identityOrder) parts.push(cfg.identityOrder);
   }
 
-  // Inline constraint
+  // Inline constraint. NOT NULL must precede a named CONSTRAINT clause, which
+  // applies to UNIQUE / PRIMARY KEY / FOREIGN KEY.
+  if (cfg.notNull) parts.push("NOT NULL");
   if (cfg.constraintName.trim()) {
     parts.push(`CONSTRAINT ${q(cfg.constraintName.trim())}`);
   }
-  if (cfg.notNull) parts.push("NOT NULL");
   if (cfg.constraintKind === "unique") parts.push("UNIQUE");
   if (cfg.constraintKind === "primary_key") parts.push("PRIMARY KEY");
   if (cfg.constraintKind === "foreign_key" && cfg.fkTableName) {
@@ -185,7 +186,10 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
   const set = <K extends keyof ColumnConfig>(key: K, value: ColumnConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
 
-  const canSubmit = cfg.name.trim() !== "" && (cfg.valueMode === "computed" ? cfg.computedExpr.trim() !== "" : cfg.dataType.trim() !== "");
+  const canSubmit =
+    cfg.name.trim() !== "" &&
+    (cfg.valueMode === "computed" ? cfg.computedExpr.trim() !== "" : cfg.dataType.trim() !== "") &&
+    (cfg.constraintKind !== "foreign_key" || cfg.fkTableName.trim() !== "");
 
   const handleCreate = async () => {
     if (!canSubmit) return;
