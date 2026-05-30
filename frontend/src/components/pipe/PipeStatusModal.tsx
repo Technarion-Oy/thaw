@@ -11,7 +11,7 @@
 import { useState, useEffect } from "react";
 import { Modal, Button, Spin, Alert, Space, Typography } from "antd";
 import { DashboardOutlined, ReloadOutlined } from "@ant-design/icons";
-import { GetPipeStatus } from "../../../wailsjs/go/main/App";
+import { GetPipeStatus } from "../../../wailsjs/go/app/App";
 
 const { Text } = Typography;
 

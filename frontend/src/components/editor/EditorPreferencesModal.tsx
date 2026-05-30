@@ -12,7 +12,7 @@ import {
   Space,
   Typography,
 } from "antd";
-import { GetEditorPrefs, SaveEditorPrefs } from "../../../wailsjs/go/main/App";
+import { GetEditorPrefs, SaveEditorPrefs } from "../../../wailsjs/go/app/App";
 import { DEFAULT_EDITOR_PREFS, EditorPrefs, formatSQL } from "../../utils/sqlFormatter";
 
 const { Text } = Typography;

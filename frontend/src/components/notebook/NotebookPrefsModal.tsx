@@ -10,7 +10,7 @@
 
 import { useEffect, useState } from "react";
 import { Button, Modal, Radio, Space, Typography, message } from "antd";
-import { GetNotebookPrefs, SaveNotebookPrefs } from "../../../wailsjs/go/main/App";
+import { GetNotebookPrefs, SaveNotebookPrefs } from "../../../wailsjs/go/app/App";
 import { useNotebookPrefsStore } from "../../store/notebookPrefsStore";
 import type { config } from "../../../wailsjs/go/models";
 

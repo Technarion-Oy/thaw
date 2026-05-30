@@ -40,8 +40,8 @@ import {
   DropBackupPolicy,
   AlterBackupPolicy,
   GetQuotedIdentifiersIgnoreCase,
-} from "../../../wailsjs/go/main/App";
-import type { main } from "../../../wailsjs/go/models";
+} from "../../../wailsjs/go/app/App";
+import type { backup } from "../../../wailsjs/go/models";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import dayjs from "dayjs";
 
@@ -88,7 +88,7 @@ const DEFAULT_CREATE: CreateForm = {
 };
 
 export default function BackupPoliciesPanel() {
-  const [rows,    setRows]    = useState<main.BackupPolicyRow[] | null>(null);
+  const [rows,    setRows]    = useState<backup.BackupPolicyRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
   const [loaded,  setLoaded]  = useState(false);
@@ -201,7 +201,7 @@ export default function BackupPoliciesPanel() {
     }
   };
 
-  const columns: ColumnsType<main.BackupPolicyRow> = [
+  const columns: ColumnsType<backup.BackupPolicyRow> = [
     {
       key: "name",
       title: "Name",
@@ -253,7 +253,7 @@ export default function BackupPoliciesPanel() {
       key: "actions",
       title: "",
       width: 70,
-      render: (_: unknown, row: main.BackupPolicyRow) => (
+      render: (_: unknown, row: backup.BackupPolicyRow) => (
         <Space size={4}>
           <Button
             size="small"
@@ -344,7 +344,7 @@ export default function BackupPoliciesPanel() {
       {error && <Alert type="error" message={error} style={{ marginBottom: 8 }} showIcon />}
 
       {loaded && !loading && rows !== null && (
-        <Table<main.BackupPolicyRow>
+        <Table<backup.BackupPolicyRow>
           dataSource={rows}
           columns={columns}
           rowKey="name"

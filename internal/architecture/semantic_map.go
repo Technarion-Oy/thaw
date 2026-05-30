@@ -12,7 +12,7 @@ func GetCodebaseSemanticMap() string {
     {
       "name": "Core IPC \u0026 App Lifecycle",
       "backend_paths": [
-        "app.go",
+        "internal/app/",
         "internal/apperrors/",
         "internal/config/",
         "internal/crashreport/",
@@ -20,6 +20,7 @@ func GetCodebaseSemanticMap() string {
         "internal/logger/",
         "internal/session/",
         "internal/sfconfig/",
+        "internal/sysinfo/",
         "internal/telemetry/",
         "internal/version/",
         "main.go"
@@ -36,6 +37,7 @@ func GetCodebaseSemanticMap() string {
     {
       "name": "SQL Editor \u0026 Diagnostics",
       "backend_paths": [
+        "internal/queryhistory/",
         "internal/queryprofile/",
         "internal/sqleditor/"
       ],
@@ -58,16 +60,21 @@ func GetCodebaseSemanticMap() string {
     {
       "name": "Object Browser \u0026 Administration",
       "backend_paths": [
+        "internal/backup/",
         "internal/column/",
         "internal/dbtproject/",
         "internal/fnmeta/",
         "internal/integrations/",
+        "internal/keypair/",
+        "internal/objects/",
         "internal/pipe/",
         "internal/procedure/",
         "internal/secret/",
         "internal/snowflake/",
         "internal/stage/",
-        "internal/tasks/"
+        "internal/table/",
+        "internal/tasks/",
+        "internal/warehouse/"
       ],
       "frontend_paths": [
         "frontend/src/components/account/AccountPanel.tsx",

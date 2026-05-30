@@ -47,7 +47,7 @@ import {
   GenerateMigrationScript,
   ListDatabases,
   PickDirectory,
-} from "../../../wailsjs/go/main/App";
+} from "../../../wailsjs/go/app/App";
 import { EventsOn } from "../../../wailsjs/runtime/runtime";
 import { useThemeStore } from "../../store/themeStore";
 import { useQueryStore } from "../../store/queryStore";

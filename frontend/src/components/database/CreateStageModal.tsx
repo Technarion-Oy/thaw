@@ -17,7 +17,7 @@ import {
 import {
   ExecDDL, GetQuotedIdentifiersIgnoreCase, ListIntegrations, BuildCreateStageSql, ListFileFormats,
   PickFileForFormatPreview, GetLocalFilePreview, GetStageFilePreview,
-} from "../../../wailsjs/go/main/App";
+} from "../../../wailsjs/go/app/App";
 
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";

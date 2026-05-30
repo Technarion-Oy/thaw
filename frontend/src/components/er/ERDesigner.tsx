@@ -4,7 +4,7 @@ import { useState, useId, useEffect, useRef, useMemo } from "react";
 import { Modal, Button, Input, Select, Spin, message as antMessage } from "antd";
 import { PlusOutlined, DeleteOutlined, ZoomInOutlined, ZoomOutOutlined, CopyOutlined } from "@ant-design/icons";
 import mermaid from "mermaid";
-import { ExecuteQuery, ListSchemas } from "../../../wailsjs/go/main/App";
+import { ExecuteQuery, ListSchemas } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 mermaid.initialize({ startOnLoad: false, securityLevel: "loose", theme: "dark" });

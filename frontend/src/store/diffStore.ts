@@ -11,7 +11,7 @@
 // @thaw-domain: Schema Migration
 
 import { create } from "zustand";
-import { GetObjectDDL, GetRoleDDL, GetWarehouseDDL, ReadFile } from "../../wailsjs/go/main/App";
+import { GetObjectDDL, GetRoleDDL, GetWarehouseDDL, ReadFile } from "../../wailsjs/go/app/App";
 import { useQueryStore } from "./queryStore";
 
 export type DiffCategory = "obj" | "file" | "role" | "warehouse";

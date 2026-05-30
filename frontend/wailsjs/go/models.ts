@@ -1,3 +1,109 @@
+export namespace app {
+	
+	export class AppInfo {
+	    companyName: string;
+	    productName: string;
+	    productVersion: string;
+	    copyright: string;
+	    comments: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AppInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.companyName = source["companyName"];
+	        this.productName = source["productName"];
+	        this.productVersion = source["productVersion"];
+	        this.copyright = source["copyright"];
+	        this.comments = source["comments"];
+	    }
+	}
+
+}
+
+export namespace backup {
+	
+	export class BackupPolicyRow {
+	    name: string;
+	    createdOn: string;
+	    owner: string;
+	    schedule: string;
+	    expireAfterDays: number;
+	    retentionLock: boolean;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new BackupPolicyRow(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.createdOn = source["createdOn"];
+	        this.owner = source["owner"];
+	        this.schedule = source["schedule"];
+	        this.expireAfterDays = source["expireAfterDays"];
+	        this.retentionLock = source["retentionLock"];
+	        this.comment = source["comment"];
+	    }
+	}
+	export class BackupRow {
+	    id: string;
+	    name: string;
+	    createdOn: string;
+	    status: string;
+	    sizeBytes: number;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new BackupRow(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.createdOn = source["createdOn"];
+	        this.status = source["status"];
+	        this.sizeBytes = source["sizeBytes"];
+	        this.comment = source["comment"];
+	    }
+	}
+	export class BackupSetRow {
+	    name: string;
+	    backupSetDb: string;
+	    backupSetSchema: string;
+	    createdOn: string;
+	    objectType: string;
+	    objectName: string;
+	    objectDb: string;
+	    objectSchema: string;
+	    status: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new BackupSetRow(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.backupSetDb = source["backupSetDb"];
+	        this.backupSetSchema = source["backupSetSchema"];
+	        this.createdOn = source["createdOn"];
+	        this.objectType = source["objectType"];
+	        this.objectName = source["objectName"];
+	        this.objectDb = source["objectDb"];
+	        this.objectSchema = source["objectSchema"];
+	        this.status = source["status"];
+	        this.comment = source["comment"];
+	    }
+	}
+
+}
+
 export namespace column {
 	
 	export class AddColumnConfig {
@@ -433,6 +539,22 @@ export namespace dbtproject {
 
 export namespace ddl {
 	
+	export class AccountExportResult {
+	    roles: number;
+	    warehouses: number;
+	    errors?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new AccountExportResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.roles = source["roles"];
+	        this.warehouses = source["warehouses"];
+	        this.errors = source["errors"];
+	    }
+	}
 	export class ExportResult {
 	    database: string;
 	    files: number;
@@ -1069,134 +1191,8 @@ export namespace integrations {
 
 }
 
-export namespace main {
+export namespace keypair {
 	
-	export class AccountExportResult {
-	    roles: number;
-	    warehouses: number;
-	    errors?: string[];
-	
-	    static createFrom(source: any = {}) {
-	        return new AccountExportResult(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.roles = source["roles"];
-	        this.warehouses = source["warehouses"];
-	        this.errors = source["errors"];
-	    }
-	}
-	export class AppInfo {
-	    companyName: string;
-	    productName: string;
-	    productVersion: string;
-	    copyright: string;
-	    comments: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new AppInfo(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.companyName = source["companyName"];
-	        this.productName = source["productName"];
-	        this.productVersion = source["productVersion"];
-	        this.copyright = source["copyright"];
-	        this.comments = source["comments"];
-	    }
-	}
-	export class BackupPolicyRow {
-	    name: string;
-	    createdOn: string;
-	    owner: string;
-	    schedule: string;
-	    expireAfterDays: number;
-	    retentionLock: boolean;
-	    comment: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new BackupPolicyRow(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.createdOn = source["createdOn"];
-	        this.owner = source["owner"];
-	        this.schedule = source["schedule"];
-	        this.expireAfterDays = source["expireAfterDays"];
-	        this.retentionLock = source["retentionLock"];
-	        this.comment = source["comment"];
-	    }
-	}
-	export class BackupRow {
-	    id: string;
-	    name: string;
-	    createdOn: string;
-	    status: string;
-	    sizeBytes: number;
-	    comment: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new BackupRow(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.name = source["name"];
-	        this.createdOn = source["createdOn"];
-	        this.status = source["status"];
-	        this.sizeBytes = source["sizeBytes"];
-	        this.comment = source["comment"];
-	    }
-	}
-	export class BackupSetRow {
-	    name: string;
-	    backupSetDb: string;
-	    backupSetSchema: string;
-	    createdOn: string;
-	    objectType: string;
-	    objectName: string;
-	    objectDb: string;
-	    objectSchema: string;
-	    status: string;
-	    comment: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new BackupSetRow(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.backupSetDb = source["backupSetDb"];
-	        this.backupSetSchema = source["backupSetSchema"];
-	        this.createdOn = source["createdOn"];
-	        this.objectType = source["objectType"];
-	        this.objectName = source["objectName"];
-	        this.objectDb = source["objectDb"];
-	        this.objectSchema = source["objectSchema"];
-	        this.status = source["status"];
-	        this.comment = source["comment"];
-	    }
-	}
-	export class ColumnComment {
-	    column: string;
-	    comment: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new ColumnComment(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.column = source["column"];
-	        this.comment = source["comment"];
-	    }
-	}
 	export class KeyPairResult {
 	    privateKeyPath: string;
 	    publicKeyPath: string;
@@ -1211,168 +1207,6 @@ export namespace main {
 	        this.privateKeyPath = source["privateKeyPath"];
 	        this.publicKeyPath = source["publicKeyPath"];
 	        this.publicKey = source["publicKey"];
-	    }
-	}
-	export class PropertyPair {
-	    key: string;
-	    value: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new PropertyPair(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.key = source["key"];
-	        this.value = source["value"];
-	    }
-	}
-	export class QueryHistoryRow {
-	    queryId: string;
-	    queryText: string;
-	    queryType: string;
-	    userName: string;
-	    warehouseName: string;
-	    databaseName: string;
-	    schemaName: string;
-	    startTime: string;
-	    endTime: string;
-	    elapsedMs: number;
-	    status: string;
-	    errorMessage: string;
-	    rowsProduced: number;
-	    bytesScanned: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new QueryHistoryRow(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.queryId = source["queryId"];
-	        this.queryText = source["queryText"];
-	        this.queryType = source["queryType"];
-	        this.userName = source["userName"];
-	        this.warehouseName = source["warehouseName"];
-	        this.databaseName = source["databaseName"];
-	        this.schemaName = source["schemaName"];
-	        this.startTime = source["startTime"];
-	        this.endTime = source["endTime"];
-	        this.elapsedMs = source["elapsedMs"];
-	        this.status = source["status"];
-	        this.errorMessage = source["errorMessage"];
-	        this.rowsProduced = source["rowsProduced"];
-	        this.bytesScanned = source["bytesScanned"];
-	    }
-	}
-	export class SessionParam {
-	    key: string;
-	    value: string;
-	    type: string;
-	    description: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new SessionParam(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.key = source["key"];
-	        this.value = source["value"];
-	        this.type = source["type"];
-	        this.description = source["description"];
-	    }
-	}
-	export class SessionVar {
-	    key: string;
-	    value: string;
-	    type: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new SessionVar(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.key = source["key"];
-	        this.value = source["value"];
-	        this.type = source["type"];
-	    }
-	}
-	export class TableSettings {
-	    clusterBy: string;
-	    enableSchemaEvolution: boolean;
-	    dataRetentionDays: number;
-	    maxDataExtensionDays: number;
-	    changeTracking: boolean;
-	    defaultDDLCollation: string;
-	    comment: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new TableSettings(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.clusterBy = source["clusterBy"];
-	        this.enableSchemaEvolution = source["enableSchemaEvolution"];
-	        this.dataRetentionDays = source["dataRetentionDays"];
-	        this.maxDataExtensionDays = source["maxDataExtensionDays"];
-	        this.changeTracking = source["changeTracking"];
-	        this.defaultDDLCollation = source["defaultDDLCollation"];
-	        this.comment = source["comment"];
-	    }
-	}
-	export class TableSummary {
-	    name: string;
-	    schema: string;
-	    kind: string;
-	    rows: number;
-	    bytes: number;
-	    owner: string;
-	    retentionTime: number;
-	    created: string;
-	    lastAltered: string;
-	    comment: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new TableSummary(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.schema = source["schema"];
-	        this.kind = source["kind"];
-	        this.rows = source["rows"];
-	        this.bytes = source["bytes"];
-	        this.owner = source["owner"];
-	        this.retentionTime = source["retentionTime"];
-	        this.created = source["created"];
-	        this.lastAltered = source["lastAltered"];
-	        this.comment = source["comment"];
-	    }
-	}
-	export class WarehouseMeteringRow {
-	    startTime: string;
-	    endTime: string;
-	    warehouseName: string;
-	    creditsUsed: number;
-	    creditsUsedCompute: number;
-	    creditsUsedCloudServices: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new WarehouseMeteringRow(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.startTime = source["startTime"];
-	        this.endTime = source["endTime"];
-	        this.warehouseName = source["warehouseName"];
-	        this.creditsUsed = source["creditsUsed"];
-	        this.creditsUsedCompute = source["creditsUsedCompute"];
-	        this.creditsUsedCloudServices = source["creditsUsedCloudServices"];
 	    }
 	}
 
@@ -1467,6 +1301,25 @@ export namespace migration {
 
 }
 
+export namespace objects {
+	
+	export class ColumnComment {
+	    column: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ColumnComment(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.column = source["column"];
+	        this.comment = source["comment"];
+	    }
+	}
+
+}
+
 export namespace pipe {
 	
 	export class PipeConfig {
@@ -1532,6 +1385,49 @@ export namespace procedure {
 	        this.name = source["name"];
 	        this.dataType = source["dataType"];
 	        this.value = source["value"];
+	    }
+	}
+
+}
+
+export namespace queryhistory {
+	
+	export class QueryHistoryRow {
+	    queryId: string;
+	    queryText: string;
+	    queryType: string;
+	    userName: string;
+	    warehouseName: string;
+	    databaseName: string;
+	    schemaName: string;
+	    startTime: string;
+	    endTime: string;
+	    elapsedMs: number;
+	    status: string;
+	    errorMessage: string;
+	    rowsProduced: number;
+	    bytesScanned: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new QueryHistoryRow(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.queryId = source["queryId"];
+	        this.queryText = source["queryText"];
+	        this.queryType = source["queryType"];
+	        this.userName = source["userName"];
+	        this.warehouseName = source["warehouseName"];
+	        this.databaseName = source["databaseName"];
+	        this.schemaName = source["schemaName"];
+	        this.startTime = source["startTime"];
+	        this.endTime = source["endTime"];
+	        this.elapsedMs = source["elapsedMs"];
+	        this.status = source["status"];
+	        this.errorMessage = source["errorMessage"];
+	        this.rowsProduced = source["rowsProduced"];
+	        this.bytesScanned = source["bytesScanned"];
 	    }
 	}
 
@@ -2515,6 +2411,20 @@ export namespace snowflake {
 	    }
 	}
 	
+	export class PropertyPair {
+	    key: string;
+	    value: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PropertyPair(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.value = source["value"];
+	    }
+	}
 	export class QueryResult {
 	    columns: string[];
 	    rows: any[][];
@@ -2585,6 +2495,40 @@ export namespace snowflake {
 	        this.warehouse = source["warehouse"];
 	        this.database = source["database"];
 	        this.schema = source["schema"];
+	    }
+	}
+	export class SessionParam {
+	    key: string;
+	    value: string;
+	    type: string;
+	    description: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionParam(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.value = source["value"];
+	        this.type = source["type"];
+	        this.description = source["description"];
+	    }
+	}
+	export class SessionVar {
+	    key: string;
+	    value: string;
+	    type: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionVar(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.value = source["value"];
+	        this.type = source["type"];
 	    }
 	}
 	export class SnowflakeObject {
@@ -3719,6 +3663,65 @@ export namespace stage {
 
 }
 
+export namespace table {
+	
+	export class TableSettings {
+	    clusterBy: string;
+	    enableSchemaEvolution: boolean;
+	    dataRetentionDays: number;
+	    maxDataExtensionDays: number;
+	    changeTracking: boolean;
+	    defaultDDLCollation: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TableSettings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.clusterBy = source["clusterBy"];
+	        this.enableSchemaEvolution = source["enableSchemaEvolution"];
+	        this.dataRetentionDays = source["dataRetentionDays"];
+	        this.maxDataExtensionDays = source["maxDataExtensionDays"];
+	        this.changeTracking = source["changeTracking"];
+	        this.defaultDDLCollation = source["defaultDDLCollation"];
+	        this.comment = source["comment"];
+	    }
+	}
+	export class TableSummary {
+	    name: string;
+	    schema: string;
+	    kind: string;
+	    rows: number;
+	    bytes: number;
+	    owner: string;
+	    retentionTime: number;
+	    created: string;
+	    lastAltered: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TableSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.schema = source["schema"];
+	        this.kind = source["kind"];
+	        this.rows = source["rows"];
+	        this.bytes = source["bytes"];
+	        this.owner = source["owner"];
+	        this.retentionTime = source["retentionTime"];
+	        this.created = source["created"];
+	        this.lastAltered = source["lastAltered"];
+	        this.comment = source["comment"];
+	    }
+	}
+
+}
+
 export namespace tasks {
 	
 	export class ExportGraphDDLResult {
@@ -3853,6 +3856,33 @@ export namespace tasks {
 	        this.finalizerNames = source["finalizerNames"];
 	        this.suspendOrder = source["suspendOrder"];
 	        this.resumeOrder = source["resumeOrder"];
+	    }
+	}
+
+}
+
+export namespace warehouse {
+	
+	export class WarehouseMeteringRow {
+	    startTime: string;
+	    endTime: string;
+	    warehouseName: string;
+	    creditsUsed: number;
+	    creditsUsedCompute: number;
+	    creditsUsedCloudServices: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new WarehouseMeteringRow(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.startTime = source["startTime"];
+	        this.endTime = source["endTime"];
+	        this.warehouseName = source["warehouseName"];
+	        this.creditsUsed = source["creditsUsed"];
+	        this.creditsUsedCompute = source["creditsUsedCompute"];
+	        this.creditsUsedCloudServices = source["creditsUsedCloudServices"];
 	    }
 	}
 

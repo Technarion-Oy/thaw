@@ -23,8 +23,8 @@ import {
   GenerateKeyPair,
   SetUserPublicKey,
   PickDirectory,
-} from "../../../wailsjs/go/main/App";
-import type { main } from "../../../wailsjs/go/models";
+} from "../../../wailsjs/go/app/App";
+import type { keypair } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
 
@@ -51,7 +51,7 @@ export default function KeyPairAuthModal({ username, onKeyPicked, onClose }: Pro
   const [keyPath,    setKeyPath]    = useState("");
   const [passphrase, setPassphrase] = useState("");
   const [generating, setGenerating] = useState(false);
-  const [result,     setResult]     = useState<main.KeyPairResult | null>(null);
+  const [result,     setResult]     = useState<keypair.KeyPairResult | null>(null);
   const [genError,   setGenError]   = useState<string | null>(null);
   const [applying,   setApplying]   = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);

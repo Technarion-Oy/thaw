@@ -33,7 +33,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import dagre from "@dagrejs/dagre";
-import { GetTaskStatuses, ExecuteTask, AlterTask, DropTaskTree, ExecDDL, SuspendTaskList, ResumeTaskList, GetObjectDDL, GetTopologicalOrder, ExportGraphDDL } from "../../../wailsjs/go/main/App";
+import { GetTaskStatuses, ExecuteTask, AlterTask, DropTaskTree, ExecDDL, SuspendTaskList, ResumeTaskList, GetObjectDDL, GetTopologicalOrder, ExportGraphDDL } from "../../../wailsjs/go/app/App";
 import type { tasks } from "../../../wailsjs/go/models";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 import CreateTaskModal from "./CreateTaskModal";

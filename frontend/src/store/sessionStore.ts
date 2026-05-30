@@ -19,7 +19,7 @@ import {
   UseWarehouse,
   UseDatabase,
   UseSchema,
-} from "../../wailsjs/go/main/App";
+} from "../../wailsjs/go/app/App";
 import { useQueryStore } from "./queryStore";
 
 export interface TabSessionContext {

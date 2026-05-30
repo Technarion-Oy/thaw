@@ -17,8 +17,8 @@ import {
 import {
   GetObjectProperties, ListIntegrations, AlterStage,
   ListFileFormats,
-} from "../../../wailsjs/go/main/App";
-import type { main, snowflake } from "../../../wailsjs/go/models";
+} from "../../../wailsjs/go/app/App";
+import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
 
@@ -247,7 +247,7 @@ interface Props {
 
 export default function StagePropertiesModal({ db, schema, name: initialName, onClose, onSuccess }: Props) {
   const [name, setName] = useState(initialName);
-  const [rows, setRows] = useState<main.PropertyPair[] | null>(null);
+  const [rows, setRows] = useState<snowflake.PropertyPair[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [integrations, setIntegrations] = useState<snowflake.IntegrationRow[]>([]);
   const [fileFormats, setFileFormats] = useState<string[]>([]);

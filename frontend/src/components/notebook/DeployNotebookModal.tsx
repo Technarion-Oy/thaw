@@ -13,7 +13,7 @@ import {
   Modal, Form, Input, Select, InputNumber, Checkbox, Space, Typography, Divider, message,
 } from "antd";
 import { CloudUploadOutlined } from "@ant-design/icons";
-import { DeployNotebook, ListSchemas, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/main/App";
+import { DeployNotebook, ListSchemas, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/app/App";
 import { useSessionStore } from "../../store/sessionStore";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 

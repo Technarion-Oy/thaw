@@ -22,7 +22,7 @@ import {
   GetQuotedIdentifiersIgnoreCase,
   ListExternalAccessIntegrations,
   ListSupportedDbtVersions,
-} from "../../../wailsjs/go/main/App";
+} from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import SqlPreview from "../shared/SqlPreview";
 import SourceLocationPicker from "./SourceLocationPicker";

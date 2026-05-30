@@ -11,7 +11,7 @@
 // @thaw-domain: Git Integration
 
 import { create } from "zustand";
-import { GitStatus, GitCommitAndPush, GitPull, GitFetch, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCheckoutRemoteBranch, GitCreateBranch, GitDeleteBranch, GitDeleteRemoteBranch, GitMergeBranch, GitResetHard, GitUpdateRemoteURL, GitPushBranch, GitLoginWithOAuth } from "../../wailsjs/go/main/App";
+import { GitStatus, GitCommitAndPush, GitPull, GitFetch, PickDirectory, GetGitConfig, SaveGitConfig, GitClone, GitListBranches, GitCheckoutBranch, GitCheckoutRemoteBranch, GitCreateBranch, GitDeleteBranch, GitDeleteRemoteBranch, GitMergeBranch, GitResetHard, GitUpdateRemoteURL, GitPushBranch, GitLoginWithOAuth } from "../../wailsjs/go/app/App";
 import type { gitrepo } from "../../wailsjs/go/models";
 
 export type RepoStatus = gitrepo.RepoStatus;

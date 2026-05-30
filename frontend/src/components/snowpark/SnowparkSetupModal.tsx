@@ -39,7 +39,7 @@ import {
   InstallEnvPackage,
   UninstallEnvPackage,
   PickDirectory,
-} from "../../../wailsjs/go/main/App";
+} from "../../../wailsjs/go/app/App";
 import type { snowpark } from "../../../wailsjs/go/models";
 import { EventsOn } from "../../../wailsjs/runtime/runtime";
 import { useGitStore } from "../../store/gitStore";

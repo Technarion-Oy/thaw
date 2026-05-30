@@ -21,7 +21,7 @@ import EditorPreferencesModal from "./components/editor/EditorPreferencesModal";
 import FeatureFlagsModal from "./components/settings/FeatureFlagsModal";
 import NotebookPrefsModal from "./components/notebook/NotebookPrefsModal";
 import SessionManagementModal from "./components/settings/SessionManagementModal";
-import { IsConnected } from "../wailsjs/go/main/App";
+import { IsConnected } from "../wailsjs/go/app/App";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../wailsjs/runtime/runtime";
 import { useThemeStore, type ThemePreference } from "./store/themeStore";
 import { useDiffStore } from "./store/diffStore";

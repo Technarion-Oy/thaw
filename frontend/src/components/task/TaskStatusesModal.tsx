@@ -19,7 +19,7 @@ import {
   SearchOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
-import { GetTaskStatuses } from "../../../wailsjs/go/main/App";
+import { GetTaskStatuses } from "../../../wailsjs/go/app/App";
 import type { tasks } from "../../../wailsjs/go/models";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 

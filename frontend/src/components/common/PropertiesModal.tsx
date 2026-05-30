@@ -12,8 +12,8 @@ import { useState, useEffect } from "react";
 import { Modal, Spin, Button, Input, InputNumber, Switch, message } from "antd";
 import { CopyOutlined, EditOutlined, CheckOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import type { main } from "../../../wailsjs/go/models";
-import { GetColumnComments, SetColumnComment, GetTableSettings, AlterTableProperty } from "../../../wailsjs/go/main/App";
+import type { snowflake, objects, table } from "../../../wailsjs/go/models";
+import { GetColumnComments, SetColumnComment, GetTableSettings, AlterTableProperty } from "../../../wailsjs/go/app/App";
 
 interface TableContext {
   db: string;
@@ -23,14 +23,14 @@ interface TableContext {
 
 interface Props {
   title: string;
-  rows: main.PropertyPair[] | null;  // null = loading
+  rows: snowflake.PropertyPair[] | null;  // null = loading
   error: string | null;
   onClose: () => void;
   tableContext?: TableContext;
 }
 
 function ColumnCommentsSection({ db, schema, table }: TableContext) {
-  const [colComments, setColComments] = useState<main.ColumnComment[] | null>(null);
+  const [colComments, setColComments] = useState<objects.ColumnComment[] | null>(null);
   const [loadError, setLoadError]     = useState<string | null>(null);
   const [editingCol, setEditingCol]   = useState<string | null>(null);
   const [editValue, setEditValue]     = useState("");
@@ -173,7 +173,7 @@ const SECTION_HEAD: React.CSSProperties = {
   textTransform: "uppercase",
 };
 
-type PropKey = keyof main.TableSettings;
+type PropKey = keyof table.TableSettings;
 
 interface PropDef {
   key:   PropKey;
@@ -193,7 +193,7 @@ const PROP_DEFS: PropDef[] = [
 ];
 
 function TableSettingsSection({ db, schema, table }: { db: string; schema: string; table: string }) {
-  const [settings, setSettings]   = useState<main.TableSettings | null>(null);
+  const [settings, setSettings]   = useState<table.TableSettings | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editKey, setEditKey]     = useState<PropKey | null>(null);
   const [editVal, setEditVal]     = useState<string>("");

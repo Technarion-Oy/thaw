@@ -19,7 +19,7 @@ import {
 import {
   ExecDDL, GetQuotedIdentifiersIgnoreCase, BuildCreateFileFormatSql,
   PickFileForFormatPreview, GetLocalFilePreview, GetStageFilePreview,
-} from "../../../wailsjs/go/main/App";
+} from "../../../wailsjs/go/app/App";
 import type { fileformat } from "../../../wailsjs/go/models";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import FormatPreviewTable from "./FormatPreviewTable";

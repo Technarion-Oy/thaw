@@ -12,7 +12,7 @@ import { useState, useEffect } from "react";
 import { Modal, Table, Tag, Spin, Alert, Space, Typography, Statistic, Row, Col, Divider } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { WarningOutlined, CheckCircleOutlined } from "@ant-design/icons";
-import { RunExplain } from "../../../wailsjs/go/main/App";
+import { RunExplain } from "../../../wailsjs/go/app/App";
 import type { queryprofile } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;

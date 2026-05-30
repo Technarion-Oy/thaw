@@ -20,7 +20,7 @@ import {
   WarningOutlined,
 } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
-import { GetObjectDependencies, GetObjectDDL } from "../../../wailsjs/go/main/App";
+import { GetObjectDependencies, GetObjectDDL } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;

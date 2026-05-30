@@ -12,7 +12,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Button, Modal, Tooltip } from "antd";
 import { FileOutlined, CodeOutlined, PlusOutlined, CloseOutlined, DiffOutlined, ExperimentOutlined } from "@ant-design/icons";
 import { useQueryStore } from "../../store/queryStore";
-import { GetTabSessionID } from "../../../wailsjs/go/main/App";
+import { GetTabSessionID } from "../../../wailsjs/go/app/App";
 import { useConnectionStore } from "../../store/connectionStore";
 
 const CLR_BORDER       = "var(--border)";
