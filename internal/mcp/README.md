@@ -13,7 +13,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | File | Purpose |
 |---|---|
 | `manager.go` | `Manager` (multi-session registry), `SessionInfo` type, port allocation, `Start`/`Stop`/`List`/`StopAll` |
-| `session.go` | Per-session `http.Server` + SSE lifecycle (`start`/`stop`/`info`); serves on the held loopback listener and owns/closes its `*snowflake.Client` |
+| `session.go` | Per-session `http.Server` + SSE lifecycle (`start`/`stop`/`info`); serves on the held loopback listener and owns/closes its `*snowflake.Client`. If the serve goroutine exits unexpectedly it closes the client and self-removes from the `Manager` (`removeIfPresent`) so no dead row or leaked connection lingers |
 | `security.go` | `loopbackGuard` middleware — rejects non-loopback `Host` and cross-origin `Origin` headers (DNS-rebinding defense) |
 | `server.go` | `buildServer(client, mode)` — constructs the MCP server and registers tools |
 | `tools.go` | Tool input structs + `registerTools`; `jsonResult`/`textResult` content helpers |

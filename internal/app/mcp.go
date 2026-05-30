@@ -36,7 +36,10 @@ func (a *App) StartMCPSession(label, mode string, port int) (mcp.SessionInfo, er
 	if !a.mcpEnabled() {
 		return mcp.SessionInfo{}, fmt.Errorf("MCP Server is disabled. Enable it under View → Enabled Features…")
 	}
-	if a.connectParams == nil {
+	// Snapshot the pointer into a local so a concurrent Disconnect (which nils
+	// a.connectParams) can't turn the nil-check below into a nil-deref panic.
+	params := a.connectParams
+	if params == nil {
 		return mcp.SessionInfo{}, apperrors.ErrNotConnected
 	}
 	if mode == "" {
@@ -45,12 +48,12 @@ func (a *App) StartMCPSession(label, mode string, port int) (mcp.SessionInfo, er
 
 	// Each session owns an isolated client so it survives independently of the
 	// UI tab sessions and is closed when the session stops.
-	client, err := snowflake.NewClient(a.ctx, *a.connectParams)
+	client, err := snowflake.NewClient(a.ctx, *params)
 	if err != nil {
 		return mcp.SessionInfo{}, fmt.Errorf("mcp: failed to open connection: %w", err)
 	}
 
-	connLabel := fmt.Sprintf("%s / %s", a.connectParams.Account, a.connectParams.User)
+	connLabel := fmt.Sprintf("%s / %s", params.Account, params.User)
 	info, err := a.mcpManager.Start(label, connLabel, mode, port, client)
 	if err != nil {
 		_ = client.Close()

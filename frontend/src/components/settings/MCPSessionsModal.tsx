@@ -144,6 +144,15 @@ export default function MCPSessionsModal({ onClose }: Props) {
         />
       )}
 
+      {/* Residual security risk — the SSE endpoint has no auth token, so any
+          local process can read schema metadata while a session runs. */}
+      <Alert
+        type="warning"
+        showIcon
+        message="A running session exposes your connection's schema metadata over an unauthenticated localhost port. Any local process on this machine can read it. Stop sessions when you're done."
+        style={{ marginBottom: 12 }}
+      />
+
       {/* ── Start session form ── */}
       <Form layout="vertical" size="small" style={{ marginBottom: 20 }}>
         <Space align="end" wrap style={{ width: "100%" }}>

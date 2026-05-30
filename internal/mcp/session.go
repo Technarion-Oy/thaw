@@ -36,14 +36,16 @@ type session struct {
 	server *mcpsdk.Server
 	ln     net.Listener
 	http   *http.Server
+	mgr    *Manager
 
 	mu      sync.Mutex
 	running bool
 }
 
 // newSession constructs a session; it is not started until start() is called.
-// ln is the already-bound loopback listener the HTTP server will serve on.
-func newSession(label, connLabel, mode string, port int, client *snowflake.Client, ln net.Listener) *session {
+// ln is the already-bound loopback listener the HTTP server will serve on;
+// mgr is the owning Manager, used to self-remove if the server dies.
+func newSession(mgr *Manager, label, connLabel, mode string, port int, client *snowflake.Client, ln net.Listener) *session {
 	return &session{
 		label:     label,
 		connLabel: connLabel,
@@ -51,6 +53,7 @@ func newSession(label, connLabel, mode string, port int, client *snowflake.Clien
 		port:      port,
 		client:    client,
 		ln:        ln,
+		mgr:       mgr,
 	}
 }
 
@@ -77,13 +80,17 @@ func (s *session) start() error {
 
 	go func() {
 		// ErrServerClosed is the normal result of a graceful Shutdown; any
-		// other error means the server died unexpectedly, so flag it as not
-		// running and log it (the UI otherwise keeps showing "Running").
+		// other error means the server died unexpectedly. Tear the session
+		// down completely: stop() releases the client/connection pool, and
+		// self-removing from the manager avoids stranding a dead "Stopped"
+		// row in the UI. stop() releases s.mu before removeIfPresent acquires
+		// m.mu, so the m.mu→s.mu lock ordering is preserved (no deadlock).
 		if err := s.http.Serve(s.ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			s.mu.Lock()
-			s.running = false
-			s.mu.Unlock()
 			logger.L.Error("mcp session server stopped unexpectedly", "label", s.label, "port", s.port, "err", err)
+			_ = s.stop()
+			if s.mgr != nil {
+				s.mgr.removeIfPresent(s.label, s)
+			}
 		}
 	}()
 

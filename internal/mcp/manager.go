@@ -74,7 +74,7 @@ func (m *Manager) Start(label, connLabel, mode string, port int, client *snowfla
 	}
 	assigned := ln.Addr().(*net.TCPAddr).Port
 
-	s := newSession(label, connLabel, mode, assigned, client, ln)
+	s := newSession(m, label, connLabel, mode, assigned, client, ln)
 	if err := s.start(); err != nil {
 		_ = ln.Close()
 		return SessionInfo{}, err
@@ -96,6 +96,18 @@ func (m *Manager) Stop(label string) error {
 		return fmt.Errorf("mcp: no session named %q", label)
 	}
 	return s.stop()
+}
+
+// removeIfPresent deletes label from the registry only if it still maps to the
+// exact session s. It is called by a session's serve goroutine when the server
+// dies unexpectedly, so a dead session does not linger in the map. The identity
+// check avoids racing a newer session that reused the label.
+func (m *Manager) removeIfPresent(label string, s *session) {
+	m.mu.Lock()
+	if cur, ok := m.sessions[label]; ok && cur == s {
+		delete(m.sessions, label)
+	}
+	m.mu.Unlock()
 }
 
 // List returns a snapshot of all sessions sorted by label.
