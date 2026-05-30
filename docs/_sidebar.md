@@ -2,6 +2,14 @@
 
 - [Home](/)
 
+- **Concepts** (hand-written)
+  - [Overview](concepts/README.md)
+  - [architecture](concepts/architecture.md)
+  - [onboarding](concepts/onboarding.md)
+  - [patterns](concepts/patterns.md)
+  - [gotchas](concepts/gotchas.md)
+  - [testing](concepts/testing.md)
+
 - **Backend (Go)**
   - [App](backend/app.md)
   - [internal/ai](backend/internal/ai.md)

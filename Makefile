@@ -54,6 +54,14 @@ docs-sidebar:
 		echo ''; \
 		echo '- [Home](/)'; \
 		echo ''; \
+		echo '- **Concepts** (hand-written)'; \
+		echo '  - [Overview](concepts/README.md)'; \
+		for f in $(DOCS_DIR)/concepts/*.md; do \
+			name=$$(basename "$$f" .md); \
+			[ "$$name" = "README" ] && continue; \
+			echo "  - [$$name](concepts/$$name.md)"; \
+		done; \
+		echo ''; \
 		echo '- **Backend (Go)**'; \
 		echo '  - [App](backend/app.md)'; \
 		for f in $(DOCS_BACKEND)/internal/*.md; do \
