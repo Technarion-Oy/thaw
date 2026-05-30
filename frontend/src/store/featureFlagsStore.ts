@@ -51,6 +51,7 @@ const allEnabled: config.FeatureFlags = {
   crossTabSearch: true,
   fileWatcher: true,
   columnManagement: true,
+  mcpServer: true,
 };
 
 // allLocked default: nothing is admin-locked.
@@ -92,6 +93,7 @@ const nothingLocked: config.FeatureFlags = {
   crossTabSearch: false,
   fileWatcher: false,
   columnManagement: false,
+  mcpServer: false,
 };
 
 interface FeatureFlagsState {

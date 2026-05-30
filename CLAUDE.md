@@ -93,6 +93,7 @@ thaw/
 │   ├── ddl/             # DDL parsing and git-export pipeline
 │   ├── dbtproject/      # Snowflake-native DBT PROJECT SQL builders (CREATE, ALTER, EXECUTE)
 │   ├── column/          # Table column DDL builders (ADD/DROP/RENAME/ALTER COLUMN)
+│   ├── mcp/             # MCP servers (Go MCP SDK): Manager (multi-session), SSE/HTTP transport, schema-browsing tools
 │   ├── ai/              # AI provider clients (OpenAI, Google, Ollama); inline completions, model management
 │   ├── config/          # App config (TOML persistence)
 │   ├── gitrepo/         # Git operations via exec
@@ -104,7 +105,7 @@ thaw/
 └── frontend/src/
     ├── pages/           # Top-level page components
     ├── components/      # Feature components (editor/, layout/, toolbar/, results/, task/, ...)
-    ├── store/           # Zustand stores (10 stores)
+    ├── store/           # Zustand stores (14 stores, incl. mcpStore)
     └── wailsjs/         # Auto-generated Wails IPC bindings (DO NOT EDIT)
 ```
 
@@ -402,7 +403,13 @@ The `internal/sfconfig/writer.go` module provides `SaveProfile`, `DeleteProfile`
 ### Session management (pool tuning & idle eviction)
 Per-tab Snowflake sessions are configurable via **View → Advanced → Session Management…** (`SessionManagementModal.tsx`). The backend stores settings in `config.SessionConfig` (persisted in `config.json`). At startup `internal/app/app.go` calls `applySessionConfig` which sets runtime fields (`sessionMaxSessions`, `sessionMaxOpen`, `sessionMaxIdle`, `sessionInitMode`, `sessionIdleTimeout`) under `sessionConfigMu` and starts/stops the idle eviction goroutine. `evictIfNeeded()` reads `sessionMaxSessions` under RLock; `getOrInitTabSession()` reads `sessionMaxOpen`/`sessionMaxIdle` for `SetPoolLimits`. The idle eviction loop (`runIdleEvictionLoop`) ticks every 30s and evicts sessions whose `lastUsed` exceeds the timeout. The frontend tab lifecycle effect in `QueryPage.tsx` calls `GetSessionInitMode()` on new tab creation — if "eager", it fires `InitTabSession(tabId)` immediately.
 
+### MCP server (Model Context Protocol)
+The `internal/mcp/` package hosts read-only MCP servers built on the official Go MCP SDK (`github.com/modelcontextprotocol/go-sdk/mcp`), exposing the active Snowflake connection to external AI clients over an SSE/HTTP transport on `localhost`. `Manager` (`manager.go`) owns multiple `session`s keyed by label; ports auto-assign from `9100` (incrementing, `allocatePortLocked`) unless an explicit free port is supplied. Each `session` (`session.go`) runs its **own dedicated `*snowflake.Client`** (created from `App.connectParams`, mirroring tab-session isolation) and an `http.Server` serving `NewSSEHandler` at `http://localhost:<port>/sse`; `stop()` shuts the HTTP server (5s grace) then closes the client. `buildServer` (`server.go`) registers the seven proof-of-life schema-browsing tools (`tools.go`): `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`. The `*App` delegators live in `internal/app/mcp.go` (`StartMCPSession`/`StopMCPSession`/`ListMCPSessions`/`GetMCPSessionConfig`) and persist session config to `config.MCPConfig`. **`internal/mcp` must NOT import `internal/app`** (cycle) — `App` holds a `*mcp.Manager`. Sessions are user-started only (no auto-start) and **all stopped via `mcpManager.StopAll()` in both `App.shutdown()` and `App.Disconnect()`** so they never outlive the connection. Frontend: `MCPSessionsModal.tsx` (View → MCP Sessions), `MCPIndicator.tsx` (Toolbar "MCP: N active" tag), `mcpStore.ts`; gated behind the `mcpServer` feature flag (Integrations category, admin-lockable).
+
 ## Critical Gotchas
+
+### MCP SDK `AddTool` rejects non-object output schemas
+The Go MCP SDK's generic `AddTool[In, Out]` infers an output JSON schema from `Out` and **panics at registration** if that schema's type isn't `"object"` — so tools returning `[]string`, `string`, or a slice of structs (e.g. `[]SnowflakeObject`) crash on startup. The fix used throughout `internal/mcp/tools.go`: declare every handler's `Out` type as `any` (the SDK then *omits* the output schema) and return `nil` for the structured result, delivering the payload as indented-JSON text content via `jsonResult` / `textResult`. Never give an MCP tool a concrete non-struct `Out` type.
 
 ### gosnowflake driver logs errors before throwing
 The gosnowflake driver logs ALL query errors at ERROR level via slog, even when the caller catches them. Do NOT call `GetObjectDDL` with a guessed object kind (TABLE vs VIEW) — always determine the kind first (from the objects store or a `ListObjects` call) to avoid noisy error logs from failed GET_DDL attempts.

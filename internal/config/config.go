@@ -166,6 +166,26 @@ func DefaultNotebookPrefs() NotebookPrefs {
 	return NotebookPrefs{SyntaxMode: "kernel"}
 }
 
+// MCPSessionConfig is a single persisted MCP server session definition.
+// Sessions never auto-start; this config simply remembers a session's label,
+// preferred port, and execution mode across app restarts so the MCP Sessions
+// panel can repopulate the list.
+type MCPSessionConfig struct {
+	Label string `json:"label"`
+	// Port is the TCP port the SSE/HTTP transport listens on. 0 means
+	// auto-assign from the fixed range starting at 9100.
+	Port int `json:"port"`
+	// ExecutionMode controls what the session's tools are allowed to do.
+	// "metadata" (default) = read-only schema browsing only. SQL execution
+	// modes are introduced in a later milestone increment.
+	ExecutionMode string `json:"executionMode"`
+}
+
+// MCPConfig holds all persisted MCP server session definitions.
+type MCPConfig struct {
+	Sessions []MCPSessionConfig `json:"sessions"`
+}
+
 // FeatureFlags holds toggles for optional or experimental features.
 //
 // Adding a new flag:
@@ -180,8 +200,8 @@ func DefaultNotebookPrefs() NotebookPrefs {
 //
 // Version tracks the schema revision so new flags introduced after an initial
 // save can be filled with their defaults rather than the zero value (false).
-// Current version: 12 (added ColumnManagement).
-const flagsVersion = 12
+// Current version: 13 (added MCPServer).
+const flagsVersion = 13
 
 type FeatureFlags struct {
 	Initialized bool `json:"initialized"`
@@ -247,6 +267,9 @@ type FeatureFlags struct {
 
 	// Schema Management
 	ColumnManagement bool `json:"columnManagement"` // Add/alter/drop columns from the sidebar tree
+
+	// Integrations
+	MCPServer bool `json:"mcpServer"` // Model Context Protocol server for external AI clients
 }
 
 // DefaultFeatureFlags returns a FeatureFlags with every feature enabled.
@@ -289,6 +312,7 @@ func DefaultFeatureFlags() FeatureFlags {
 		CrossTabSearch:             true,
 		FileWatcher:                true,
 		ColumnManagement:           true,
+		MCPServer:                  true,
 	}
 }
 
@@ -353,6 +377,8 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	setIfZero(&f.DbtProjectBrowser, defaults.DbtProjectBrowser)
 	// Version 11 → 12: ColumnManagement added; defaults to true.
 	setIfZero(&f.ColumnManagement, defaults.ColumnManagement)
+	// Version 12 → 13: MCPServer added; defaults to true.
+	setIfZero(&f.MCPServer, defaults.MCPServer)
 	f.Version = flagsVersion
 	return f
 }
@@ -370,6 +396,7 @@ type AppConfig struct {
 	Session                SessionConfig     `json:"session"`
 	SnowflakeCLIConfigPath string            `json:"snowflakeCliConfigPath"`
 	FeatureFlags           FeatureFlags      `json:"featureFlags"`
+	MCP                    MCPConfig         `json:"mcp"`
 }
 
 // configPath returns the absolute path to the application configuration file,

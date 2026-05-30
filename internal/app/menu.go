@@ -92,6 +92,9 @@ func buildMenu(app *App) *menu.Menu {
 	viewMenu.AddText("Enabled Features…", nil, func(_ *menu.CallbackData) {
 		wailsruntime.EventsEmit(app.ctx, "menu:feature-flags")
 	})
+	viewMenu.AddText("MCP Sessions…", nil, func(_ *menu.CallbackData) {
+		wailsruntime.EventsEmit(app.ctx, "menu:mcp-sessions")
+	})
 
 	viewMenu.AddSeparator()
 	advancedMenu := viewMenu.AddSubmenu("Advanced")
