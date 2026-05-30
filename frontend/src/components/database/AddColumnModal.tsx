@@ -146,11 +146,14 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
     (cfg.valueMode !== "autoincrement" || isNumericType);
 
   const handleCreate = async () => {
-    if (!canSubmit || !preview) return;
+    if (!canSubmit) return;
     setCreating(true);
     setCreateError(null);
     try {
-      await ExecDDL(preview);
+      // Build fresh from the live cfg rather than executing the debounced
+      // `preview` string, which can lag the form by up to 200 ms.
+      const sql = await BuildAddColumnSql(db, schema, table, cfg);
+      await ExecDDL(sql);
       onSuccess?.();
       onClose();
     } catch (err) {
@@ -258,11 +261,15 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
         </Form.Item>
 
         {cfg.valueMode === "default" && (
-          <Form.Item label="Default value" style={{ marginBottom: 12 }}>
+          <Form.Item
+            label="Default value"
+            style={{ marginBottom: 12 }}
+            help="When adding a column, Snowflake requires a literal value — expressions and function calls (e.g. CURRENT_TIMESTAMP()) are not allowed."
+          >
             <Input
               value={cfg.defaultValue}
               onChange={(e) => set("defaultValue", e.target.value)}
-              placeholder="e.g. 0, '', CURRENT_TIMESTAMP()"
+              placeholder="e.g. 0, 'N/A', TRUE"
             />
           </Form.Item>
         )}
@@ -297,7 +304,9 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
                 />
               </Form.Item>
             </div>
-            <Form.Item label="Ordering" style={{ marginBottom: 12 }}>
+            <Form.Item label="Ordering" style={{ marginBottom: 12 }}
+              help="AUTOINCREMENT / IDENTITY can only be added to an empty table; adding it to a populated table is rejected by the server."
+            >
               <Radio.Group
                 value={cfg.identityOrder}
                 onChange={(e) => set("identityOrder", e.target.value)}

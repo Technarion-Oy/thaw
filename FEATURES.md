@@ -271,7 +271,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Insert Column Name** — inserts the quoted column name at the current editor cursor position (also available for view columns)
   - **Rename Column…** — opens a rename dialog with case-sensitivity control; executes `ALTER TABLE … RENAME COLUMN`
   - **Change Data Type…** — opens a dialog pre-filled with the current type; executes `ALTER TABLE … ALTER COLUMN … SET DATA TYPE`
-  - **Set Comment…** — opens a comment dialog; executes `ALTER TABLE … ALTER COLUMN … COMMENT` (or `UNSET COMMENT` when cleared)
+  - **Set Comment…** — opens a comment dialog prefilled with the column's current comment; executes `ALTER TABLE … ALTER COLUMN … COMMENT` (or `UNSET COMMENT` when cleared)
   - **Set NOT NULL** / **Drop NOT NULL** — shown contextually based on the column's current nullability; executes `ALTER TABLE … ALTER COLUMN … SET/DROP NOT NULL` (hidden for primary key columns)
   - **Drop Column…** — with a confirmation dialog; executes `ALTER TABLE … DROP COLUMN`
   - Right-clicking a **view** column shows only **Insert Column Name** (view columns cannot be altered)

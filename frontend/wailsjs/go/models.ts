@@ -1942,6 +1942,7 @@ export namespace snowflake {
 	    nullable: boolean;
 	    isPrimaryKey: boolean;
 	    isUnique: boolean;
+	    comment: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ColumnInfo(source);
@@ -1954,6 +1955,7 @@ export namespace snowflake {
 	        this.nullable = source["nullable"];
 	        this.isPrimaryKey = source["isPrimaryKey"];
 	        this.isUnique = source["isUnique"];
+	        this.comment = source["comment"];
 	    }
 	}
 	export class ConnectParams {

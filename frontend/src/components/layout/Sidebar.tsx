@@ -153,7 +153,7 @@ interface ContextMenu {
   objArgs?: string;     // parameter type list for PROCEDURE / FUNCTION
   isFinalizer?: boolean; // true when right-clicking a finalizer TASK node
   isRootTask?: boolean;  // true when right-clicking a root-level TASK node (no predecessors, not a finalizer)
-  colMeta?: { dataType: string; nullable: boolean; isPrimaryKey: boolean; parentKind: string }; // set for nodeType === "col"
+  colMeta?: { dataType: string; nullable: boolean; isPrimaryKey: boolean; parentKind: string; comment: string }; // set for nodeType === "col"
 }
 
 interface UndropModal {
@@ -872,6 +872,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
               colNullable: c.nullable,
               colIsPrimaryKey: isPK,
               colParentKind: kind,
+              colComment: c.comment,
             };
           });
 
@@ -1158,6 +1159,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         nullable: !!(node as any).colNullable,
         isPrimaryKey: !!(node as any).colIsPrimaryKey,
         parentKind: (node as any).colParentKind ?? "",
+        comment: (node as any).colComment ?? "",
       };
       setCtxMenu({ x: event.clientX, y: event.clientY, nodeKey: key, nodeType: "col", colMeta });
     }
@@ -2186,8 +2188,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const openColumnComment = () => {
     if (!ctxMenu) return;
     const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
+    const existing = ctxMenu.colMeta?.comment ?? "";
     setCtxMenu(null);
-    setColumnCommentModal({ db, schema, table, column, comment: "" });
+    setColumnCommentModal({ db, schema, table, column, comment: existing });
   };
 
   const executeColumnComment = async () => {
@@ -2197,6 +2200,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     try {
       await ExecDDL(await BuildSetColumnCommentSql(db, schema, table, column, comment));
       message.success(comment.trim() ? `Set comment on "${column}"` : `Removed comment from "${column}"`);
+      refreshTableColumns(db, schema, table);
     } catch (e) {
       message.error(String(e));
     }
@@ -3796,7 +3800,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
         width={460}
       >
         <div style={{ padding: "8px 0" }}>
-          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>Comment (leave empty to remove)</div>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>Comment (prefilled with the current value; leave empty to remove)</div>
           <Input.TextArea
             value={columnCommentModal?.comment ?? ""}
             onChange={(e) => setColumnCommentModal((prev) => prev ? { ...prev, comment: e.target.value } : null)}
@@ -3821,6 +3825,10 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
             value={changeDataTypeModal?.dataType ?? "VARCHAR"}
             onChange={(v) => setChangeDataTypeModal((prev) => prev ? { ...prev, dataType: v } : null)}
           />
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8, lineHeight: 1.5 }}>
+            Snowflake only permits a narrow set of <code>SET DATA TYPE</code> changes — e.g. increasing a
+            VARCHAR length or a NUMBER scale. Arbitrary base-type conversions are rejected by the server.
+          </div>
         </div>
       </Modal>
 
