@@ -50,6 +50,10 @@ func tableRef(db, schema, table string) string {
 }
 
 // BuildAddColumnSql constructs an ALTER TABLE ... ADD COLUMN statement.
+//
+// It always returns a nil error; the error result exists for IPC symmetry with
+// the other builders and to leave room for future validation without changing
+// the Wails-bound signature.
 func BuildAddColumnSql(db, schema, table string, cfg AddColumnConfig) (string, error) {
 	colName := cfg.Name
 	if colName == "" {
@@ -76,6 +80,13 @@ func BuildAddColumnSql(db, schema, table string, cfg AddColumnConfig) (string, e
 		}
 	} else {
 		parts = append(parts, cfg.DataType)
+		// COLLATE belongs adjacent to the data type per Snowflake's
+		// column-definition grammar (and GET_DDL output): it must precede
+		// DEFAULT/AUTOINCREMENT and the inline constraints. Collation is
+		// invalid on computed (virtual) columns, so it lives in this branch.
+		if col := strings.TrimSpace(cfg.Collation); col != "" {
+			parts = append(parts, "COLLATE "+snowflake.QuoteStringLit(col))
+		}
 	}
 
 	// Value: DEFAULT or AUTOINCREMENT (mutually exclusive with computed).
@@ -91,8 +102,8 @@ func BuildAddColumnSql(db, schema, table string, cfg AddColumnConfig) (string, e
 		}
 	}
 
-	// Inline constraints and collation are invalid for computed (virtual)
-	// columns, so they are skipped in that mode.
+	// Inline constraints are invalid for computed (virtual) columns, so they
+	// are skipped in that mode.
 	if !computed {
 		// NOT NULL must precede a named CONSTRAINT clause, which applies to
 		// UNIQUE / PRIMARY KEY / FOREIGN KEY.
@@ -123,9 +134,6 @@ func BuildAddColumnSql(db, schema, table string, cfg AddColumnConfig) (string, e
 				}
 				parts = append(parts, ref)
 			}
-		}
-		if col := strings.TrimSpace(cfg.Collation); col != "" {
-			parts = append(parts, "COLLATE "+snowflake.QuoteStringLit(col))
 		}
 	}
 

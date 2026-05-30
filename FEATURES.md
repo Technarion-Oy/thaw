@@ -275,6 +275,7 @@ Thaw is a native desktop application for Snowflake — built for analysts, engin
   - **Set NOT NULL** / **Drop NOT NULL** — shown contextually based on the column's current nullability; executes `ALTER TABLE … ALTER COLUMN … SET/DROP NOT NULL` (hidden for primary key columns)
   - **Drop Column…** — with a confirmation dialog; executes `ALTER TABLE … DROP COLUMN`
   - Right-clicking a **view** column shows only **Insert Column Name** (view columns cannot be altered)
+  - All altering actions (Rename, Change Data Type, Set Comment, Set/Drop NOT NULL, Drop Column, and **Add Column…**) are gated behind the **Column Management** feature flag (**View → Enabled Features → Column Management**) for IT-admin policy control; **Insert Column Name** is never gated
 - **Add Column…** — right-click any table node to add a new column via a dedicated dialog with column name (case-sensitivity control), data type (searchable dropdown), value mode (none/default/autoincrement/computed), inline constraints (NOT NULL, UNIQUE, PRIMARY KEY, FOREIGN KEY with cascading reference selectors), collation (the selectable list is sourced from the backend `internal/snowflake` collation registry), comment, and a live backend-generated SQL preview. Submission is gated for invalid combinations (e.g. a default value is required in *Default* mode, AUTOINCREMENT requires a numeric type, a foreign key requires a referenced table); constraints and collation are hidden for computed (virtual) columns
 - **Column type icons** — when expanding a table or view's column list, each column is prefixed with a type-family icon (text, number, datetime, boolean, variant/array, binary, geo, vector) coloured per the theme's column palette; primary-key and foreign-key columns get a distinct key icon
 - **Empty table indicator** — table names with zero rows appear in a faded colour so unpopulated tables are immediately visible in the tree
@@ -859,6 +860,9 @@ The following features are identified as feasible to be turned off via feature f
 
 **File Browser**
 - **File Watcher** (Auto-refresh the file browser when files are created, renamed, or deleted externally)
+
+**Schema Management**
+- **Column Management** (Add, rename, retype, set/drop NOT NULL, set comment, and drop table columns from the sidebar tree)
 
 ---
 

@@ -123,6 +123,29 @@ func TestBuildAddColumnSql_CollationEscaped(t *testing.T) {
 	assertContains(t, sql, `COLLATE 'en-ci'`)
 }
 
+// COLLATE must sit adjacent to the data type, before DEFAULT/AUTOINCREMENT and
+// before the inline constraints, per Snowflake's column-definition grammar.
+func TestBuildAddColumnSql_CollationOrdering(t *testing.T) {
+	cfg := AddColumnConfig{
+		Name: "C", DataType: "VARCHAR", ValueMode: "default", DefaultValue: "'x'",
+		NotNull: true, ConstraintKind: "unique", Collation: "en-ci",
+	}
+	sql, _ := BuildAddColumnSql("DB", "SC", "T", cfg)
+	// Data type immediately followed by COLLATE.
+	assertContains(t, sql, `VARCHAR COLLATE 'en-ci' DEFAULT 'x' NOT NULL UNIQUE`)
+
+	collateIdx := strings.Index(sql, "COLLATE")
+	for _, after := range []string{"DEFAULT", "NOT NULL", "UNIQUE"} {
+		if idx := strings.Index(sql, after); idx < collateIdx {
+			t.Errorf("COLLATE must precede %q\nSQL: %s", after, sql)
+		}
+	}
+	// COLLATE must come right after the data type, not after the constraints.
+	if collateIdx > strings.Index(sql, "DEFAULT") {
+		t.Errorf("COLLATE should be adjacent to the data type\nSQL: %s", sql)
+	}
+}
+
 func TestBuildAddColumnSql_CommentEscaped(t *testing.T) {
 	cfg := AddColumnConfig{Name: "C", DataType: "VARCHAR", ValueMode: "none", ConstraintKind: "none", Comment: "it's here"}
 	sql, _ := BuildAddColumnSql("DB", "SC", "T", cfg)

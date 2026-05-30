@@ -2084,6 +2084,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
 
   // Refresh only the columns of a specific table (surgical — no full DB refresh).
   const refreshTableColumns = (db: string, schema: string, table: string) => {
+    // The "TABLE" kind is hardcoded because every caller is a column ALTER
+    // action, which Snowflake only permits on tables (never views). If this is
+    // ever reused for view columns, the obj: key prefix must use the right kind.
     const tableKey = `obj:${db}:${schema}:TABLE:${table}`;
     setTreeData((prev) => clearNodeChildren(prev, tableKey));
   };
@@ -3085,7 +3088,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
             menuItem("Backup Sets…", <SaveOutlined style={{ fontSize: 12 }} />, openBackupSets, undefined, !featureFlags.backupPoliciesAndSets, "Backup Policies & Sets is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TABLE" &&
-            menuItem("Add Column…", <PlusOutlined style={{ fontSize: 12 }} />, openAddColumnModal)}
+            menuItem("Add Column…", <PlusOutlined style={{ fontSize: 12 }} />, openAddColumnModal, undefined, !featureFlags.columnManagement, "Column Management is disabled. Enable it under View → Enabled Features…")}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TASK" &&
             menuItem("Execute Task", <PlayCircleOutlined style={{ fontSize: 12 }} />, executeTask)}
           {ctxMenu.nodeType === "obj" && ctxMenu.objKind === "TASK" &&
@@ -3133,20 +3136,24 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
           {/* Column context menu */}
           {ctxMenu.nodeType === "col" &&
             menuItem("Insert Column Name", <CodeOutlined style={{ fontSize: 12 }} />, insertColumnName)}
-          {ctxMenu.nodeType === "col" && ctxMenu.colMeta?.parentKind === "TABLE" && (
-            <>
-              <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
-              {menuItem("Rename Column…", <EditOutlined style={{ fontSize: 12 }} />, openRenameColumn)}
-              {menuItem("Change Data Type…", <EditOutlined style={{ fontSize: 12 }} />, openChangeDataType)}
-              {menuItem("Set Comment…", <EditOutlined style={{ fontSize: 12 }} />, openColumnComment)}
-              {ctxMenu.colMeta.nullable && !ctxMenu.colMeta.isPrimaryKey &&
-                menuItem("Set NOT NULL", null, setColumnNotNull)}
-              {!ctxMenu.colMeta.nullable && !ctxMenu.colMeta.isPrimaryKey &&
-                menuItem("Drop NOT NULL", null, dropColumnNotNull)}
-              <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
-              {menuItem("Drop Column…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, dropColumn, "#f85149")}
-            </>
-          )}
+          {ctxMenu.nodeType === "col" && ctxMenu.colMeta?.parentKind === "TABLE" && (() => {
+            const disabled = !featureFlags.columnManagement;
+            const reason = "Column Management is disabled. Enable it under View → Enabled Features…";
+            return (
+              <>
+                <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+                {menuItem("Rename Column…", <EditOutlined style={{ fontSize: 12 }} />, openRenameColumn, undefined, disabled, reason)}
+                {menuItem("Change Data Type…", <EditOutlined style={{ fontSize: 12 }} />, openChangeDataType, undefined, disabled, reason)}
+                {menuItem("Set Comment…", <EditOutlined style={{ fontSize: 12 }} />, openColumnComment, undefined, disabled, reason)}
+                {ctxMenu.colMeta.nullable && !ctxMenu.colMeta.isPrimaryKey &&
+                  menuItem("Set NOT NULL", null, setColumnNotNull, undefined, disabled, reason)}
+                {!ctxMenu.colMeta.nullable && !ctxMenu.colMeta.isPrimaryKey &&
+                  menuItem("Drop NOT NULL", null, dropColumnNotNull, undefined, disabled, reason)}
+                <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+                {menuItem("Drop Column…", <DeleteOutlined style={{ fontSize: 12, color: "#f85149" }} />, dropColumn, "#f85149", disabled, reason)}
+              </>
+            );
+          })()}
         </div>
       )}
 

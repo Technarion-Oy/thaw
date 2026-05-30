@@ -180,8 +180,8 @@ func DefaultNotebookPrefs() NotebookPrefs {
 //
 // Version tracks the schema revision so new flags introduced after an initial
 // save can be filled with their defaults rather than the zero value (false).
-// Current version: 11 (added DbtProjectBrowser).
-const flagsVersion = 11
+// Current version: 12 (added ColumnManagement).
+const flagsVersion = 12
 
 type FeatureFlags struct {
 	Initialized bool `json:"initialized"`
@@ -244,6 +244,9 @@ type FeatureFlags struct {
 
 	// File Browser
 	FileWatcher bool `json:"fileWatcher"` // Auto-refresh file browser on external changes
+
+	// Schema Management
+	ColumnManagement bool `json:"columnManagement"` // Add/alter/drop columns from the sidebar tree
 }
 
 // DefaultFeatureFlags returns a FeatureFlags with every feature enabled.
@@ -285,6 +288,7 @@ func DefaultFeatureFlags() FeatureFlags {
 		MultiCellCopy:              true,
 		CrossTabSearch:             true,
 		FileWatcher:                true,
+		ColumnManagement:           true,
 	}
 }
 
@@ -347,6 +351,8 @@ func MigrateFlags(f FeatureFlags) FeatureFlags {
 	setIfZero(&f.FileWatcher, defaults.FileWatcher)
 	// Version 10 → 11: DbtProjectBrowser added; defaults to true.
 	setIfZero(&f.DbtProjectBrowser, defaults.DbtProjectBrowser)
+	// Version 11 → 12: ColumnManagement added; defaults to true.
+	setIfZero(&f.ColumnManagement, defaults.ColumnManagement)
 	f.Version = flagsVersion
 	return f
 }

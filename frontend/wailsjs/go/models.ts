@@ -136,6 +136,7 @@ export namespace config {
 	    multiCellCopy: boolean;
 	    crossTabSearch: boolean;
 	    fileWatcher: boolean;
+	    columnManagement: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new FeatureFlags(source);
@@ -179,6 +180,7 @@ export namespace config {
 	        this.multiCellCopy = source["multiCellCopy"];
 	        this.crossTabSearch = source["crossTabSearch"];
 	        this.fileWatcher = source["fileWatcher"];
+	        this.columnManagement = source["columnManagement"];
 	    }
 	}
 	export class GitConfig {
