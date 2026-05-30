@@ -55,7 +55,13 @@ The map in `internal/architecture/semantic_map.go` is **generated** — do not e
 ```
 thaw/
 ├── main.go              # Entry point, native menu, Wails runtime setup
-├── app.go               # Wails IPC bindings (connection-dependent methods)
+├── app.go               # App struct, lifecycle (startup/shutdown), tab-session mgmt, Connect/Disconnect
+├── app_*.go             # Wails IPC bindings split by domain (all on *App, package main):
+│                        #   app_query, app_objects, app_session, app_filesystem, app_git,
+│                        #   app_profiles, app_builders, app_stage, app_dbtproject, app_pipe,
+│                        #   app_warehouse, app_integrations, app_users, app_tasks, app_table,
+│                        #   app_notebook_native, app_ddlexport, app_config, app_ai, app_shell,
+│                        #   app_backup, app_migration, app_snowpark
 ├── internal/
 │   ├── apperrors/       # Sentinel errors (ErrNotConnected etc.)
 │   ├── version/         # Version string (set via -ldflags at build time)
@@ -163,7 +169,7 @@ make docs-serve    # serve docs at http://localhost:4000
 ## Key Patterns
 
 ### Adding a new Go→Frontend IPC method
-1. Add a public method on `*App` in `app.go` (receiver `a *App`)
+1. Add a public method on `*App` (receiver `a *App`) to the `app_*.go` file matching its domain (e.g. query methods → `app_query.go`, object listing → `app_objects.go`). All `app_*.go` files are `package main`, so methods are bound regardless of which file they live in. Keep `app.go` for the `App` struct, lifecycle, and session-management only.
 2. Run `wails generate module` to regenerate `frontend/wailsjs/`
 3. Import from `"../../../wailsjs/go/main/App"` in the component
 

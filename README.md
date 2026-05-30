@@ -677,7 +677,8 @@ The build script allocates 6 GB of Node heap (`--max-old-space-size=6144`) to ac
 ```
 thaw/
 ├── main.go                        # Wails entry point, window config, native menu
-├── app.go                         # Methods bound to the frontend (Connect, ExecuteQuery, …)
+├── app.go                         # App struct, lifecycle, tab-session management, Connect/Disconnect
+├── app_*.go                       # Frontend-bound IPC methods split by domain (all on *App, package main)
 ├── go.mod
 ├── wails.json                     # Wails project configuration
 ├── build/
@@ -1110,8 +1111,8 @@ Workflow: `.github/workflows/gosec.yml`
 
 - **Backend changes** — edit any `.go` file; `wails dev` recompiles automatically.
 - **Frontend changes** — edit files under `frontend/src/`; Vite HMR updates the UI instantly.
-- **Adding a new backend method** — add the method to `app.go`, then run `wails generate module` to regenerate the JS bindings in `frontend/wailsjs/`.
-- **Adding a new Go package** — place it under `internal/` and import it from `app.go`.
+- **Adding a new backend method** — add the method (on `*App`) to the `app_*.go` file matching its domain, then run `wails generate module` to regenerate the JS bindings in `frontend/wailsjs/`.
+- **Adding a new Go package** — place it under `internal/` and import it from the relevant `app_*.go` file.
 - **Adding a native menu item** — extend `buildMenu` in `main.go`; emit a Wails event from the callback and listen with `EventsOn` in the relevant frontend component.
 - **GoDoc coverage** — every exported identifier and every significant unexported function carries a GoDoc comment; run `go doc ./...` or hover in any LSP-enabled editor to browse them.
 

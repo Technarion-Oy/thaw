@@ -76,7 +76,7 @@ GEMINI_API_KEY=... .venv/bin/python embed_codebase.py --reset
 - The venv and all dependencies are already installed at `scripts/.venv/`.
 
 ## 🏗 Architecture Overview
-- **Go Backend**: Core logic is in `app.go` (Wails IPC bindings for connection-dependent methods) and `internal/`.
+- **Go Backend**: Wails IPC bindings (all on `*App`, `package main`) are split across `app.go` (struct, lifecycle, session management) and domain files `app_*.go` (e.g. `app_query.go`, `app_objects.go`, `app_backup.go`); business logic lives in `internal/`.
 - **Snowflake Client**: Located in `internal/snowflake/client.go`. Enriched `ColumnInfo` here for metadata-heavy tasks.
 - **SQL Editor Service**: `internal/sqleditor/service.go` — a Wails-bound `Service` struct exposing all SQL diagnostics & autocomplete IPC endpoints (no Snowflake connection required). Registered in `main.go`'s `Bind` array. Frontend imports from `wailsjs/go/sqleditor/Service`.
 - **Task Management**: `internal/tasks/tasks.go` — task graph operations (suspend/resume graph, drop tree, clone child, manage predecessors), task statuses via `SHOW TASKS` + `INFORMATION_SCHEMA.TASK_HISTORY()`, and run history queries. Frontend task components live in `frontend/src/components/task/` (TaskGraphModal, TaskHistoryModal, TaskPropertiesModal, TaskStatusesModal, CreateTaskModal, ExecuteTaskModal). TaskGraphModal supports Export DDL — graph-level (topological order with optional SUSPEND/RESUME wrapping) and per-node (single task DDL to clipboard).
@@ -140,7 +140,7 @@ When a feature is admin-controlled, the toggle in **Enabled Features** is automa
 
 ## 📋 Common Workflows
 ### Adding an IPC Method
-1. Define a public method on `*App` in `app.go`.
+1. Define a public method on `*App` in the `app_*.go` file matching its domain (all are `package main`, so the method is bound wherever it lives).
 2. Run `wails generate module`.
 3. Import and use the method in the React component from `../../../wailsjs/go/main/App`.
 
