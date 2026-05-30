@@ -38,6 +38,8 @@ func (a *App) StartMCPSession(label, mode string, port int) (mcp.SessionInfo, er
 	}
 	// Snapshot the pointer into a local so a concurrent Disconnect (which nils
 	// a.connectParams) can't turn the nil-check below into a nil-deref panic.
+	// The underlying field is still unsynchronised (pre-existing app-wide race
+	// tracked in #351); this only guards against the nil-deref.
 	params := a.connectParams
 	if params == nil {
 		return mcp.SessionInfo{}, apperrors.ErrNotConnected

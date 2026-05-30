@@ -593,7 +593,7 @@ Open **Tools → Schema Migration…** in the menu bar to deploy local `.sql` DD
 
 ### MCP server
 - **Model Context Protocol** — expose the active Snowflake connection to external AI clients (Claude Desktop, Cursor, etc.) over a localhost SSE/HTTP transport, built on the official Go MCP SDK (`github.com/modelcontextprotocol/go-sdk`)
-- **Multi-session** — open **View → MCP Sessions…** to start one or more independent servers; each session binds its own dedicated Snowflake connection and listens on its own localhost port, auto-assigned from `9100` (overridable per session)
+- **Multi-session** — open **View → MCP Sessions…** to start one or more independent servers; each session binds its own dedicated Snowflake connection and listens on its own localhost port, auto-assigned from `9100` (overridable per session). Because each session opens a separate Snowflake connection, interactive authenticators (e.g. `externalbrowser`) may prompt again on start, and each running session consumes one additional Snowflake session
 - **Lifecycle** — sessions start/stop only on explicit user action and all stop cleanly on app quit; no auto-start. Sessions are **not persisted**: they live only for the lifetime of the running app and are not restored on the next launch
 - **Metadata Only execution mode** — read-only schema-browsing tools: `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`
 - **Copy Config** — one click copies the client config block `{ "mcpServers": { "thaw-<label>": { "url": "http://localhost:<port>/sse" } } }`

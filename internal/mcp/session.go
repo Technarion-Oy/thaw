@@ -119,6 +119,9 @@ func (s *session) stop() error {
 	}
 	s.running = false
 
+	// Shutdown does not wait for hijacked/long-lived SSE connections, so a
+	// tool call in flight at teardown may hit the client closed above and
+	// error out. That is expected on Disconnect/shutdown.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

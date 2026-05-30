@@ -763,7 +763,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 
 Thaw can expose the active Snowflake connection to external AI clients (Claude Desktop, Cursor, etc.) through the **Model Context Protocol**, built on the official Go MCP SDK over a localhost SSE/HTTP transport.
 
-- **Multi-session** — open **View → MCP Sessions…** to start one or more independent servers. Each session is bound to its own dedicated Snowflake connection (inheriting the current connect parameters) and listens on its own localhost port, auto-assigned from `9100` (a port can be overridden).
+- **Multi-session** — open **View → MCP Sessions…** to start one or more independent servers. Each session is bound to its own dedicated Snowflake connection (inheriting the current connect parameters) and listens on its own localhost port, auto-assigned from `9100` (a port can be overridden). Because each session opens a *separate* Snowflake connection, interactive authenticators (e.g. `externalbrowser`) may re-prompt when a session starts, and every running session consumes one additional Snowflake session.
 - **Lifecycle** — sessions start and stop only on explicit user action; all sessions stop cleanly when the app quits. There is no auto-start on launch. Sessions are **not persisted** — they exist only for the lifetime of the running app and are not restored on the next launch.
 - **Execution mode** — the foundation milestone ships **Metadata Only**, exposing read-only schema-browsing tools: `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, and `get_table_foreign_keys`.
 - **Copy Config** — each running session offers a one-click copy of the client configuration block:

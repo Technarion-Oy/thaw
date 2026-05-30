@@ -32,7 +32,7 @@ Hosts one or more MCP servers, each bound to its own dedicated `*snowflake.Clien
 | `List()` | Snapshot of all sessions (`[]SessionInfo`) sorted by label. |
 | `StopAll()` | Stops every session; called on app `shutdown` and `Disconnect`. |
 
-Ports auto-assign sequentially from `basePort` (`9100`) up to `basePort+1000`; `portFree` validates the loopback bind before use. An explicit duplicate or unavailable port is rejected.
+Ports auto-assign sequentially from `basePort` (`9100`) up to `basePort+1000`. `allocatePortLocked` binds and returns the *held* `net.Listener` that `session.start` serves on, so the port is never released between the availability check and the real bind (no TOCTOU). An explicit duplicate or unavailable port is rejected.
 
 ### Execution mode
 
@@ -46,7 +46,11 @@ Ports auto-assign sequentially from `basePort` (`9100`) up to `basePort+1000`; `
 
 The `*App` delegators in `internal/app/mcp.go` (`StartMCPSession`, `StopMCPSession`, `ListMCPSessions`, `GetMCPSessionConfig`) open a fresh `*snowflake.Client` from `App.connectParams` and hand it to `Manager.Start`. `StartMCPSession` enforces the admin-lockable `mcpServer` feature flag via the **effective** flags (`App.GetFeatureFlags()`, which applies IT-admin overrides) so an admin lock cannot be bypassed through the native menu. Sessions are **not persisted** — they exist only for the lifetime of the process and are not restored on the next launch. Frontend surface: `MCPSessionsModal.tsx`, `MCPIndicator.tsx`, and `mcpStore.ts`.
 
+Each session opens its **own** `snowflake.NewClient` (a separate Snowflake session, independent of the UI tab sessions). With interactive authenticators (e.g. `externalbrowser`) starting a session may therefore trigger a fresh auth prompt, and every running session consumes one additional Snowflake session.
+
 A session's SSE endpoint is `http://localhost:<port>/sse`; `GetMCPSessionConfig` formats the standard client config block `{"mcpServers": {"thaw-<label>": {"url": "..."}}}`.
+
+On teardown (`stop`/`StopAll`, fired by `Disconnect` and app `shutdown`), `http.Shutdown` runs with a 5s deadline and the client is then closed unconditionally. SSE connections are long-lived/hijacked and are not awaited by `Shutdown`, so a tool call in flight at teardown can hit a closed client and error out — this is expected on teardown.
 
 ## Security
 
