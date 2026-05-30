@@ -14,7 +14,7 @@ import {
   Typography, Button, Alert,
 } from "antd";
 import { PlusOutlined, TableOutlined } from "@ant-design/icons";
-import { ExecDDL, GetQuotedIdentifiersIgnoreCase, ListDatabases, ListSchemas, ListObjects, GetTableColumnsWithTypes, BuildAddColumnSql } from "../../../wailsjs/go/main/App";
+import { ExecDDL, GetQuotedIdentifiersIgnoreCase, ListDatabases, ListSchemas, ListObjects, GetTableColumnsWithTypes, BuildAddColumnSql, IsNumeric } from "../../../wailsjs/go/main/App";
 import { column } from "../../../wailsjs/go/models";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import DataTypeSelect from "../shared/DataTypeSelect";
@@ -60,6 +60,7 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
   const [createError, setCreateError] = useState<string | null>(null);
   const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
   const [preview, setPreview] = useState("");
+  const [isNumericType, setIsNumericType] = useState(false);
   const previewTimer = useRef<ReturnType<typeof setTimeout>>();
 
   // FK cascading dropdown state
@@ -79,6 +80,16 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
     }, 200);
     return () => { stale = true; clearTimeout(previewTimer.current); };
   }, [db, schema, table, cfg]);
+
+  // Numeric-type detection (used to gate AUTOINCREMENT) is resolved by the
+  // backend snowflake.IsNumeric helper.
+  useEffect(() => {
+    let stale = false;
+    IsNumeric(cfg.dataType)
+      .then((v) => { if (!stale) setIsNumericType(v); })
+      .catch(() => { if (!stale) setIsNumericType(false); });
+    return () => { stale = true; };
+  }, [cfg.dataType]);
 
   useEffect(() => {
     GetQuotedIdentifiersIgnoreCase()
@@ -116,8 +127,6 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
 
   const set = <K extends keyof column.AddColumnConfig>(key: K, value: column.AddColumnConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
-
-  const isNumericType = /^(NUMBER|DECIMAL|NUMERIC|INT|INTEGER|BIGINT|SMALLINT|TINYINT|BYTEINT|FLOAT|DOUBLE|REAL)/i.test(cfg.dataType);
 
   const canSubmit =
     cfg.name.trim() !== "" &&
