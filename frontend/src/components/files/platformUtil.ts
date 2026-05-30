@@ -5,7 +5,7 @@
 // in whole or in part, is strictly prohibited without prior written permission
 // from Technarion Oy.
 
-import { GetPlatformOS } from "../../../wailsjs/go/main/App";
+import { GetPlatformOS } from "../../../wailsjs/go/app/App";
 
 // Module-level cache for platform OS (compile-time constant, fetched once).
 let _platformOS: string | null = null;

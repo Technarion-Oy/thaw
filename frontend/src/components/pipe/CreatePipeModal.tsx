@@ -14,7 +14,7 @@ import {
   Typography, Button, Alert,
 } from "antd";
 import { ApiOutlined } from "@ant-design/icons";
-import { BuildCreatePipeSql, ExecDDL, GetQuotedIdentifiersIgnoreCase, ListNotificationIntegrations } from "../../../wailsjs/go/main/App";
+import { BuildCreatePipeSql, ExecDDL, GetQuotedIdentifiersIgnoreCase, ListNotificationIntegrations } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import type { pipe } from "../../../wailsjs/go/models";
 import Editor from "@monaco-editor/react";

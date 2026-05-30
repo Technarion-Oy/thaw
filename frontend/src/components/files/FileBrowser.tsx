@@ -42,7 +42,7 @@ import {
   DuplicateFile,
   StartFileWatcher,
   StopFileWatcher,
-} from "../../../wailsjs/go/main/App";
+} from "../../../wailsjs/go/app/App";
 import { ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";
 import { useGitStore } from "../../store/gitStore";
 import { useQueryStore } from "../../store/queryStore";

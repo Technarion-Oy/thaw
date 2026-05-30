@@ -34,7 +34,7 @@ import {
   ListDirectory,
   ListSchemas,
   PickDirectory,
-} from "../../../wailsjs/go/main/App";
+} from "../../../wailsjs/go/app/App";
 import type { dbt } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;

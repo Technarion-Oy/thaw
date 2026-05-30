@@ -11,7 +11,7 @@
 import { useEffect, useState } from "react";
 import { Button, Modal, Switch, Tooltip, Typography, message } from "antd";
 import { LockOutlined } from "@ant-design/icons";
-import { GetFeatureFlags, SaveFeatureFlags } from "../../../wailsjs/go/main/App";
+import { GetFeatureFlags, SaveFeatureFlags } from "../../../wailsjs/go/app/App";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 import type { config } from "../../../wailsjs/go/models";
 

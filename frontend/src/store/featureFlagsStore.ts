@@ -9,7 +9,7 @@
 // license agreement with Technarion Oy.
 
 import { create } from "zustand";
-import { GetAdminLockedFlags, GetFeatureFlags } from "../../wailsjs/go/main/App";
+import { GetAdminLockedFlags, GetFeatureFlags } from "../../wailsjs/go/app/App";
 import type { config } from "../../wailsjs/go/models";
 
 // Optimistic defaults: every feature enabled until the backend responds.

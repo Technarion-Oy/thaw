@@ -21,7 +21,7 @@ import {
   ListSupportedDbtVersions,
   BuildAlterDbtProjectSetSql,
   ExecDDL,
-} from "../../../wailsjs/go/main/App";
+} from "../../../wailsjs/go/app/App";
 import { dbtproject } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
 import SqlPreview from "../shared/SqlPreview";

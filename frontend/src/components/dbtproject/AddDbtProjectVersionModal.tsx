@@ -18,7 +18,7 @@ import { PlusOutlined } from "@ant-design/icons";
 import {
   BuildAddDbtProjectVersionSql,
   ExecDDL,
-} from "../../../wailsjs/go/main/App";
+} from "../../../wailsjs/go/app/App";
 import SourceLocationPicker from "./SourceLocationPicker";
 import SqlPreview from "../shared/SqlPreview";
 

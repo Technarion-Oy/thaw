@@ -22,7 +22,7 @@ import {
   flexRender,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { GetPipeCopyHistory } from "../../../wailsjs/go/main/App";
+import { GetPipeCopyHistory } from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { computeColumnWidths } from "../../utils/gridMeasure";
 import dayjs from "dayjs";

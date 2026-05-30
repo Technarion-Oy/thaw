@@ -21,7 +21,7 @@ import {
   ReloadOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { GetTaskRunHistory, ListObjects } from "../../../wailsjs/go/main/App";
+import { GetTaskRunHistory, ListObjects } from "../../../wailsjs/go/app/App";
 import type { tasks, snowflake } from "../../../wailsjs/go/models";
 import { parsePredecessors, extractName } from "../../utils/taskHierarchy";
 

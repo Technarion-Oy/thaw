@@ -29,12 +29,12 @@ import { SearchOutlined, BarChartOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
-import { GetQueryHistory, ListUsers } from "../../../wailsjs/go/main/App";
+import { GetQueryHistory, ListUsers } from "../../../wailsjs/go/app/App";
 import QueryProfileModal from "../results/QueryProfileModal";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { useConnectionStore } from "../../store/connectionStore";
 import { useSessionStore } from "../../store/sessionStore";
-import type { main } from "../../../wailsjs/go/models";
+import type { app } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -58,7 +58,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
   const [timeRange,       setTimeRange]       = useState<[Dayjs, Dayjs] | null>(null);
   const [resultLimit,     setResultLimit]     = useState(100);
   const [includeClientGen, setIncludeClientGen] = useState(false);
-  const [rows,            setRows]            = useState<main.QueryHistoryRow[] | null>(null);
+  const [rows,            setRows]            = useState<app.QueryHistoryRow[] | null>(null);
   const [loading,         setLoading]         = useState(false);
   const [error,           setError]           = useState<string | null>(null);
   const [querySearch,     setQuerySearch]     = useState("");
@@ -133,7 +133,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
         : rows)
     : null;
 
-  const columns: ColumnsType<main.QueryHistoryRow> = [
+  const columns: ColumnsType<app.QueryHistoryRow> = [
     {
       key: "status",
       title: "Status",
@@ -298,7 +298,7 @@ export default function QueryHistoryModal({ onClose }: Props) {
             onChange={(e) => setQuerySearch(e.target.value)}
             style={{ marginBottom: 8 }}
           />
-          <Table<main.QueryHistoryRow>
+          <Table<app.QueryHistoryRow>
             dataSource={visibleRows ?? []}
             columns={columns}
             rowKey="queryId"

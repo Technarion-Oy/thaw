@@ -22,7 +22,7 @@ import {
   EditOutlined, CheckOutlined, CloseOutlined, MergeOutlined,
 } from "@ant-design/icons";
 import { useGitStore } from "../../store/gitStore";
-import { PickDirectory, GitInitWithRemote } from "../../../wailsjs/go/main/App";
+import { PickDirectory, GitInitWithRemote } from "../../../wailsjs/go/app/App";
 
 const { Text } = Typography;
 const { TextArea } = Input;

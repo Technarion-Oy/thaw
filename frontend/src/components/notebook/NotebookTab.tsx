@@ -51,7 +51,7 @@ import {
   SaveNotebookBreakpoints,
   LoadNotebookBreakpoints,
   GetKernelPythonVersion,
-} from "../../../wailsjs/go/main/App";
+} from "../../../wailsjs/go/app/App";
 import { DapClient, type CellBreakpoints, type DebugVariable } from "./debugClient";
 import type { snowpark } from "../../../wailsjs/go/models";
 import { ClipboardGetText, ClipboardSetText, EventsOn } from "../../../wailsjs/runtime/runtime";

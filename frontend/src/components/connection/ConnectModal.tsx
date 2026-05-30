@@ -18,7 +18,7 @@ import {
   Connect, CancelConnect, LoadSnowflakeCLIConfig,
   GetSnowflakeCLIConfigPath, PickSnowflakeCLIConfigPath,
   SaveProfile, DeleteProfile, CloneProfile, SetDefaultProfile, ClearDefaultProfile, RenameProfile,
-} from "../../../wailsjs/go/main/App";
+} from "../../../wailsjs/go/app/App";
 import { sfconfig } from "../../../wailsjs/go/models";
 import { useConnectionStore, type ConnectionParams } from "../../store/connectionStore";
 import { useFeatureFlagsStore } from "../../store/featureFlagsStore";

@@ -12,7 +12,7 @@
 
 import { create } from "zustand";
 import { persist, createJSONStorage, type StateStorage } from "zustand/middleware";
-import { ExecuteQuery } from "../../wailsjs/go/main/App";
+import { ExecuteQuery } from "../../wailsjs/go/app/App";
 
 // Wraps localStorage to swallow QuotaExceededError on setItem.
 // Persistence is best-effort — the in-memory store remains authoritative.

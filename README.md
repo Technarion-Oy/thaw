@@ -676,9 +676,7 @@ The build script allocates 6 GB of Node heap (`--max-old-space-size=6144`) to ac
 
 ```
 thaw/
-├── main.go                        # Wails entry point, window config, native menu
-├── app.go                         # App struct, lifecycle, tab-session management, Connect/Disconnect
-├── app_*.go                       # Frontend-bound IPC methods split by domain (all on *App, package main)
+├── main.go                        # Thin entry point: //go:embed frontend/dist + app.Run(assets)
 ├── go.mod
 ├── wails.json                     # Wails project configuration
 ├── build/
@@ -686,6 +684,7 @@ thaw/
 │   └── windows/                   # Windows resources
 ├── internal/
 │   ├── ai/ai.go                   # AI provider HTTP clients (OpenAI, Google AI Studios, Ollama); inline completions; model listing and testing
+│   ├── app/                        # Wails-bound App struct (package app): app.go (lifecycle), run.go (wails.Run wiring), menu.go (native menu), + IPC methods split by domain (query.go, objects.go, …)
 │   ├── apperrors/                  # Sentinel errors (ErrNotConnected etc.)
 │   ├── config/config.go           # Saved git / export / AI settings
 │   ├── crashreport/crashreport.go # Panic handler; writes JSON crash file; remote-send placeholder
@@ -1111,8 +1110,8 @@ Workflow: `.github/workflows/gosec.yml`
 
 - **Backend changes** — edit any `.go` file; `wails dev` recompiles automatically.
 - **Frontend changes** — edit files under `frontend/src/`; Vite HMR updates the UI instantly.
-- **Adding a new backend method** — add the method (on `*App`) to the `app_*.go` file matching its domain, then run `wails generate module` to regenerate the JS bindings in `frontend/wailsjs/`.
-- **Adding a new Go package** — place it under `internal/` and import it from the relevant `app_*.go` file.
+- **Adding a new backend method** — add the method (on `*App`) to the `internal/app/<domain>.go` file matching its domain, then run `wails generate module` to regenerate the JS bindings in `frontend/wailsjs/`.
+- **Adding a new Go package** — place it under `internal/` and import it from the relevant `internal/app/<domain>.go` file.
 - **Adding a native menu item** — extend `buildMenu` in `main.go`; emit a Wails event from the callback and listen with `EventsOn` in the relevant frontend component.
 - **GoDoc coverage** — every exported identifier and every significant unexported function carries a GoDoc comment; run `go doc ./...` or hover in any LSP-enabled editor to browse them.
 

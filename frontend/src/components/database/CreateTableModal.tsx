@@ -15,7 +15,7 @@ import {
 } from "antd";
 import { TableOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { ExecDDL, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/main/App";
+import { ExecDDL, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import DataTypeSelect from "../shared/DataTypeSelect";
 

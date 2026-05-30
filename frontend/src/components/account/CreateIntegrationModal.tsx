@@ -21,7 +21,7 @@ import {
   CreateSecurityIntegration,
   BuildApiIntegrationPreviewSQL,
   ListSecretsInAccount,
-} from "../../../wailsjs/go/main/App";
+} from "../../../wailsjs/go/app/App";
 import type { snowflake } from "../../../wailsjs/go/models";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 

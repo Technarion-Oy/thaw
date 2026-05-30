@@ -8,8 +8,7 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-// thaw:file-domain: Core IPC & App Lifecycle
-package main
+package app
 
 import (
 	"thaw/internal/config"

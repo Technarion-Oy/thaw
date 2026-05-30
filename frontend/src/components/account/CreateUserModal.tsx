@@ -14,7 +14,7 @@ import {
   Divider, InputNumber, Button, message,
 } from "antd";
 import { UserAddOutlined, KeyOutlined } from "@ant-design/icons";
-import { ListWarehouses, ListRoles, ExecuteQuery, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/main/App";
+import { ListWarehouses, ListRoles, ExecuteQuery, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import KeyPairAuthModal from "./KeyPairAuthModal";
 

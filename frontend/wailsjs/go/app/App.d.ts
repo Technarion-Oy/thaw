@@ -13,7 +13,7 @@ import {secret} from '../models';
 import {snowpark} from '../models';
 import {snowflake} from '../models';
 import {dbt} from '../models';
-import {main} from '../models';
+import {app} from '../models';
 import {ddl} from '../models';
 import {tasks} from '../models';
 import {config} from '../models';
@@ -171,7 +171,7 @@ export function DeleteVenvFolder():Promise<void>;
 
 export function DeployNotebook(arg1:snowflake.DeployNotebookParams):Promise<void>;
 
-export function DescribeDbtProject(arg1:string,arg2:string,arg3:string):Promise<Array<main.PropertyPair>>;
+export function DescribeDbtProject(arg1:string,arg2:string,arg3:string):Promise<Array<app.PropertyPair>>;
 
 export function Disconnect():Promise<void>;
 
@@ -207,7 +207,7 @@ export function ExecuteStageFile(arg1:string,arg2:string,arg3:string,arg4:string
 
 export function ExecuteTask(arg1:string,arg2:string,arg3:string,arg4:string,arg5:boolean):Promise<void>;
 
-export function ExportAccountObjectsDDL(arg1:string):Promise<main.AccountExportResult>;
+export function ExportAccountObjectsDDL(arg1:string):Promise<app.AccountExportResult>;
 
 export function ExportAllDatabasesDDL(arg1:string,arg2:Array<string>):Promise<Array<ddl.ExportResult>>;
 
@@ -219,7 +219,7 @@ export function ExportTableData(arg1:snowflake.ExportTableParams):Promise<snowfl
 
 export function FetchNotebookContent(arg1:string,arg2:string,arg3:string):Promise<string>;
 
-export function GenerateKeyPair(arg1:string,arg2:string,arg3:string):Promise<main.KeyPairResult>;
+export function GenerateKeyPair(arg1:string,arg2:string,arg3:string):Promise<app.KeyPairResult>;
 
 export function GenerateMigrationScript(arg1:Array<migration.MigrationDiffItem>,arg2:string,arg3:migration.TableMigrationStrategy):Promise<string>;
 
@@ -233,7 +233,7 @@ export function GetAllDataTypes():Promise<Array<snowflake.DataTypeInfo>>;
 
 export function GetAllFunctionNames():Promise<Array<fnmeta.FunctionMeta>>;
 
-export function GetAppInfo():Promise<main.AppInfo>;
+export function GetAppInfo():Promise<app.AppInfo>;
 
 export function GetAvailableShells():Promise<Array<string>>;
 
@@ -243,7 +243,7 @@ export function GetCollationSpecifiers():Promise<Array<snowflake.CollationSpecif
 
 export function GetCollations():Promise<Array<snowflake.CollationOption>>;
 
-export function GetColumnComments(arg1:string,arg2:string,arg3:string):Promise<Array<main.ColumnComment>>;
+export function GetColumnComments(arg1:string,arg2:string,arg3:string):Promise<Array<app.ColumnComment>>;
 
 export function GetCurrentRegion():Promise<string>;
 
@@ -253,7 +253,7 @@ export function GetDatabaseCrossDeps(arg1:string,arg2:Array<string>):Promise<Arr
 
 export function GetDatabaseRetentionDays(arg1:string):Promise<number>;
 
-export function GetDatabaseTableSummary(arg1:string):Promise<Array<main.TableSummary>>;
+export function GetDatabaseTableSummary(arg1:string):Promise<Array<app.TableSummary>>;
 
 export function GetDefaultSessionConfig():Promise<config.SessionConfig>;
 
@@ -275,7 +275,7 @@ export function GetGitConfig():Promise<config.GitConfig>;
 
 export function GetGitFileContent(arg1:string,arg2:string,arg3:string,arg4:string):Promise<string>;
 
-export function GetIntegrationProperties(arg1:string):Promise<Array<main.PropertyPair>>;
+export function GetIntegrationProperties(arg1:string):Promise<Array<app.PropertyPair>>;
 
 export function GetKernelPythonVersion(arg1:string):Promise<string>;
 
@@ -293,7 +293,7 @@ export function GetObjectDDL(arg1:string,arg2:string,arg3:string,arg4:string,arg
 
 export function GetObjectDependencies(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<snowflake.DependencyNode>;
 
-export function GetObjectProperties(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<main.PropertyPair>>;
+export function GetObjectProperties(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<app.PropertyPair>>;
 
 export function GetPipRegistryConfig():Promise<config.PipRegistryConfig>;
 
@@ -305,7 +305,7 @@ export function GetPlatformOS():Promise<string>;
 
 export function GetProcedureParams(arg1:string,arg2:string,arg3:string,arg4:string):Promise<Array<snowflake.ProcParam>>;
 
-export function GetQueryHistory(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:number,arg8:boolean):Promise<Array<main.QueryHistoryRow>>;
+export function GetQueryHistory(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:number,arg8:boolean):Promise<Array<app.QueryHistoryRow>>;
 
 export function GetQueryOperatorStats(arg1:string):Promise<Array<queryprofile.OperatorStat>>;
 
@@ -325,9 +325,9 @@ export function GetSessionContext(arg1:string):Promise<snowflake.SessionContext>
 
 export function GetSessionInitMode():Promise<string>;
 
-export function GetSessionParameters():Promise<Array<main.SessionParam>>;
+export function GetSessionParameters():Promise<Array<app.SessionParam>>;
 
-export function GetSessionVariables():Promise<Array<main.SessionVar>>;
+export function GetSessionVariables():Promise<Array<app.SessionVar>>;
 
 export function GetSnowflakeCLIConfigPath():Promise<string>;
 
@@ -349,7 +349,7 @@ export function GetTableForeignKeys(arg1:string,arg2:string,arg3:string):Promise
 
 export function GetTableRetentionDays(arg1:string,arg2:string,arg3:string):Promise<number>;
 
-export function GetTableSettings(arg1:string,arg2:string,arg3:string):Promise<main.TableSettings>;
+export function GetTableSettings(arg1:string,arg2:string,arg3:string):Promise<app.TableSettings>;
 
 export function GetTaskRunHistory(arg1:string,arg2:string,arg3:string,arg4:boolean,arg5:number):Promise<Array<tasks.TaskHistoryRow>>;
 
@@ -361,9 +361,9 @@ export function GetUserDDL(arg1:string):Promise<string>;
 
 export function GetWarehouseDDL(arg1:string):Promise<string>;
 
-export function GetWarehouseMeteringHistory(arg1:string,arg2:string,arg3:string):Promise<Array<main.WarehouseMeteringRow>>;
+export function GetWarehouseMeteringHistory(arg1:string,arg2:string,arg3:string):Promise<Array<app.WarehouseMeteringRow>>;
 
-export function GetWarehouseParameters(arg1:string):Promise<Array<main.PropertyPair>>;
+export function GetWarehouseParameters(arg1:string):Promise<Array<app.PropertyPair>>;
 
 export function GitCheckoutBranch(arg1:string,arg2:string):Promise<void>;
 
@@ -435,11 +435,11 @@ export function ListApiIntegrations():Promise<Array<snowflake.ApiIntegration>>;
 
 export function ListAvailableRoles():Promise<Array<string>>;
 
-export function ListBackupPolicies():Promise<Array<main.BackupPolicyRow>>;
+export function ListBackupPolicies():Promise<Array<app.BackupPolicyRow>>;
 
-export function ListBackupSets(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<Array<main.BackupSetRow>>;
+export function ListBackupSets(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<Array<app.BackupSetRow>>;
 
-export function ListBackups(arg1:string,arg2:string,arg3:string):Promise<Array<main.BackupRow>>;
+export function ListBackups(arg1:string,arg2:string,arg3:string):Promise<Array<app.BackupRow>>;
 
 export function ListBasicObjects(arg1:string,arg2:string):Promise<Array<snowflake.SnowflakeObject>>;
 

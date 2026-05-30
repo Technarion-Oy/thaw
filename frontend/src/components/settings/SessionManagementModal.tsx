@@ -14,7 +14,7 @@ import {
   GetSessionConfig,
   SaveSessionConfig,
   GetDefaultSessionConfig,
-} from "../../../wailsjs/go/main/App";
+} from "../../../wailsjs/go/app/App";
 import { config } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;

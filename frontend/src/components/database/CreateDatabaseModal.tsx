@@ -19,7 +19,7 @@ import {
   ExecDDL,
   GetDatabaseRetentionDays,
   GetQuotedIdentifiersIgnoreCase,
-} from "../../../wailsjs/go/main/App";
+} from "../../../wailsjs/go/app/App";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 

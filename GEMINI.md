@@ -17,7 +17,7 @@ Before proposing new features, refactoring, or writing new files, you MUST consu
 The map in `internal/architecture/semantic_map.go` is **generated** — do not edit it by hand.
 
 - **Go packages** (`internal/*/`): add `// thaw:domain: <Domain Name>` anywhere in a `.go` file inside the package (the canonical place is `doc.go`). The generator outputs the package directory path.
-- **Root-level Go files** (`main.go`, `app.go`, etc.): add `// thaw:file-domain: <Domain Name>` to the file. The generator outputs the individual file path.
+- **Root-level Go files** (`main.go`): add `// thaw:file-domain: <Domain Name>` to the file. The generator outputs the individual file path.
 - **TypeScript / TSX files**: add `// @thaw-domain: <Domain Name>` anywhere in the file. The generator outputs the individual file path.
 - **Regenerate**: run `go generate ./internal/architecture/` (or `go run scripts/gen_semantic_map.go` from the project root) after any annotation change. The CI test `TestSemanticMapAccuracy` will fail if any annotated path no longer exists on disk.
 
@@ -76,9 +76,9 @@ GEMINI_API_KEY=... .venv/bin/python embed_codebase.py --reset
 - The venv and all dependencies are already installed at `scripts/.venv/`.
 
 ## 🏗 Architecture Overview
-- **Go Backend**: Wails IPC bindings (all on `*App`, `package main`) are split across `app.go` (struct, lifecycle, session management) and domain files `app_*.go` (e.g. `app_query.go`, `app_objects.go`, `app_backup.go`); business logic lives in `internal/`.
+- **Go Backend**: Wails IPC bindings (all on `*App`, `package app`) live in `internal/app/`, split across `app.go` (struct, lifecycle, session management), `run.go` (`Run(assets)` entry point + wails.Run wiring), `menu.go` (native menu), and per-domain files (e.g. `query.go`, `objects.go`, `backup.go`); business logic lives in the other `internal/` packages. The root `main.go` is a thin entry point that owns `//go:embed all:frontend/dist` and calls `app.Run(assets)`.
 - **Snowflake Client**: Located in `internal/snowflake/client.go`. Enriched `ColumnInfo` here for metadata-heavy tasks.
-- **SQL Editor Service**: `internal/sqleditor/service.go` — a Wails-bound `Service` struct exposing all SQL diagnostics & autocomplete IPC endpoints (no Snowflake connection required). Registered in `main.go`'s `Bind` array. Frontend imports from `wailsjs/go/sqleditor/Service`.
+- **SQL Editor Service**: `internal/sqleditor/service.go` — a Wails-bound `Service` struct exposing all SQL diagnostics & autocomplete IPC endpoints (no Snowflake connection required). Registered in `internal/app/run.go`'s `Bind` array. Frontend imports from `wailsjs/go/sqleditor/Service`.
 - **Task Management**: `internal/tasks/tasks.go` — task graph operations (suspend/resume graph, drop tree, clone child, manage predecessors), task statuses via `SHOW TASKS` + `INFORMATION_SCHEMA.TASK_HISTORY()`, and run history queries. Frontend task components live in `frontend/src/components/task/` (TaskGraphModal, TaskHistoryModal, TaskPropertiesModal, TaskStatusesModal, CreateTaskModal, ExecuteTaskModal). TaskGraphModal supports Export DDL — graph-level (topological order with optional SUSPEND/RESUME wrapping) and per-node (single task DDL to clipboard).
 - **DBT Project Browser**: `internal/dbtproject/` — SQL builders for Snowflake-native `DBT PROJECT` objects (`CREATE`, `ALTER SET/UNSET`, `EXECUTE`, `ADD VERSION`). Frontend modals in `frontend/src/components/dbtproject/` (CreateDbtProjectModal, ExecuteDbtProjectModal, ModifyDbtProjectModal, AddDbtProjectVersionModal). Context menu entries in the sidebar for full lifecycle management. DBT PROJECT objects are expandable in the sidebar — clicking the expand arrow shows versions, and each version expands to a hierarchical file/directory tree with lazy-loading; right-click versions/directories for Refresh. Gated behind the `dbtProjectBrowser` feature flag.
 - **Table Column Management**: `internal/column/` — SQL builders for table column DDL (`BuildAddColumnSql`, `BuildDropColumnSql`, `BuildRenameColumnSql`, `BuildSetNotNullSql`, `BuildDropNotNullSql`, `BuildSetColumnCommentSql`, `BuildChangeDataTypeSql`), exposed via thin `*App` wrappers and unit-tested in `sql_test.go`. The frontend (`AddColumnModal.tsx` + the Sidebar column context-menu handlers) collects config and calls these builders over IPC; no column DDL is constructed in the frontend. `AddColumnModal` renders a debounced backend-generated SQL preview, mirroring the dbtproject modal pattern. Reference data for the dialog also comes from the backend: datatype predicates (`IsNumeric`/`IsBoolean`/`NeedsQuotes`) and the collation registry in `internal/snowflake/collations.go` (`GetCollations`/`GetCollationLocales`/`GetCollationSpecifiers`) — collation lists and datatype checks are never hardcoded in the frontend. All altering actions (Add/Rename/Change Type/Set Comment/Set/Drop NOT NULL/Drop) are gated behind the `columnManagement` feature flag (admin-lockable via the `schemaManagement` admin category); the passive **Insert Column Name** action is never gated.
@@ -89,7 +89,7 @@ GEMINI_API_KEY=... .venv/bin/python embed_codebase.py --reset
 - **Results Grid**: `frontend/src/components/results/ResultGrid.tsx` — TanStack Table v8 grid with column pinning, auto-size, Excel-style filtering, conditional formatting, data-type formatting, range selection, and quick charting. Supporting components: `GridSearch`, `StatusBar`, `QuickChartModal`, `ColumnFilterDropdown`, `ConditionalFormattingModal`, `DataTypeFormatModal`.
 - **Filesystem Operations**: `internal/filesystem/` — file read/write/delete/rename, directory creation, reveal in platform file manager, recursive file search, and file system watcher (`watcher.go`). All mutating operations (`DeleteFile`, `DeleteDirectory`, `RenameFile`, `MkDir`, `WriteFileInRoot`) validate that paths are strictly inside an allowed root directory, resolving symlinks to prevent escape. The File Browser sidebar (`frontend/src/components/files/FileBrowser.tsx`) exposes these via a right-click context menu. The file system watcher (`StartFileWatcher`/`StopFileWatcher` IPC methods) monitors the working directory for external changes and emits debounced `fs:changed` events so the File Browser incrementally refreshes only affected directories; gated behind the `fileWatcher` feature flag.
 - **Cross-Tab Search**: `frontend/src/components/editor/CrossTabSearch.tsx` — search/replace panel that searches across all open tabs (SQL, YAML, Python, notebook cells); opened via `⌘⇧H`; gated behind the `crossTabSearch` feature flag. Replace on the active tab routes through Monaco `executeEdits` for undo support; regex replace supports capture-group back-references (`$1`, `$2`). Tab-switch navigation listens for `thaw:editor-ready` (emitted by SqlEditor on mount) instead of a fixed delay. Known limitation: navigating to a notebook tab match switches tabs but does not scroll to or highlight the match within the cell.
-- **IPC Flow**: Frontend calls `wailsjs/go/main/App.ts` → Go `*App` methods in `app.go` (connection-dependent), or `wailsjs/go/sqleditor/Service.ts` → Go `*sqleditor.Service` methods (stateless SQL analysis).
+- **IPC Flow**: Frontend calls `wailsjs/go/app/App.ts` → Go `*App` methods in `internal/app/` (connection-dependent), or `wailsjs/go/sqleditor/Service.ts` → Go `*sqleditor.Service` methods (stateless SQL analysis).
 
 ## 🛠 Engineering Standards
 - **Keep documentation up to date**: Every change that adds, removes, or modifies a user-facing feature, internal package, frontend component/store, or architectural pattern MUST include corresponding documentation updates in the **same commit or PR**. Files to update:
@@ -98,8 +98,8 @@ GEMINI_API_KEY=... .venv/bin/python embed_codebase.py --reset
   - `CLAUDE.md` — architecture tree, Zustand store list, key patterns, critical gotchas
   - `GEMINI.md` — architecture overview, engineering standards, common workflows
   Do not defer documentation to a follow-up PR. Outdated docs mislead both humans and LLM agents.
-- **Surgical Edits**: Prefer `replace` over `write_file` for large files like `app.go` and `Sidebar.tsx`.
-- **Wails Bindings**: After modifying Go method signatures in `app.go` or any Wails-bound `Service` struct (e.g., `internal/sqleditor/service.go`), you MUST run `wails generate module` to update frontend bindings.
+- **Surgical Edits**: Prefer `replace` over `write_file` for large files like `internal/app/app.go` and `Sidebar.tsx`.
+- **Wails Bindings**: After modifying Go method signatures in `internal/app/` or any Wails-bound `Service` struct (e.g., `internal/sqleditor/service.go`), you MUST run `wails generate module` to update frontend bindings.
 - **New Feature Pattern**:
     1. Define state in a new `zustand` store in `frontend/src/store/` (optional).
     2. Create UI components in `frontend/src/components/` (e.g., `database/CreateTableModal.tsx`, `layout/`).
@@ -140,9 +140,9 @@ When a feature is admin-controlled, the toggle in **Enabled Features** is automa
 
 ## 📋 Common Workflows
 ### Adding an IPC Method
-1. Define a public method on `*App` in the `app_*.go` file matching its domain (all are `package main`, so the method is bound wherever it lives).
+1. Define a public method on `*App` in the `internal/app/<domain>.go` file matching its domain (all are `package app`, so the method is bound wherever it lives).
 2. Run `wails generate module`.
-3. Import and use the method in the React component from `../../../wailsjs/go/main/App`.
+3. Import and use the method in the React component from `../../../wailsjs/go/app/App`.
 
 ### Pull Request Workflow
 - **Feature Branches**: Always work in a dedicated branch (`feat/`, `fix/`, etc.).
@@ -167,7 +167,7 @@ When a feature is admin-controlled, the toggle in **Enabled Features** is automa
 
 ### Database Reports
 - Cascading menu in sidebar for database nodes.
-- `ObjectSummariesModal` fetches detailed table metadata via `GetDatabaseTableSummary` in `app.go`.
+- `ObjectSummariesModal` fetches detailed table metadata via `GetDatabaseTableSummary` in `internal/app/table.go`.
 - **Wails v2 Gotcha**: `time.Time` fields are formatted as RFC3339 strings in Go before being passed to the frontend to avoid "Not found: time.Time" build warnings and ensure clean TypeScript `any` -> `string` bindings.
 
 ### Insert Mapping

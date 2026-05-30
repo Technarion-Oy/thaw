@@ -14,7 +14,7 @@ import {
   Typography, Button, Alert, Switch, DatePicker,
 } from "antd";
 import { KeyOutlined } from "@ant-design/icons";
-import { ListSecurityIntegrations, ExecDDL, GetQuotedIdentifiersIgnoreCase, BuildCreateSecretSql } from "../../../wailsjs/go/main/App";
+import { ListSecurityIntegrations, ExecDDL, GetQuotedIdentifiersIgnoreCase, BuildCreateSecretSql } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import type { snowflake, secret } from "../../../wailsjs/go/models";
 import dayjs from "dayjs";

@@ -17,7 +17,7 @@ Before proposing new features, refactoring, or writing new files, you MUST consu
 The map in `internal/architecture/semantic_map.go` is **generated** — do not edit it by hand.
 
 - **Go packages** (`internal/*/`): add `// thaw:domain: <Domain Name>` anywhere in a `.go` file inside the package (the canonical place is `doc.go`). The generator outputs the package directory path.
-- **Root-level Go files** (`main.go`, `app.go`, etc.): add `// thaw:file-domain: <Domain Name>` to the file. The generator outputs the individual file path.
+- **Root-level Go files** (`main.go`): add `// thaw:file-domain: <Domain Name>` to the file. The generator outputs the individual file path.
 - **TypeScript / TSX files**: add `// @thaw-domain: <Domain Name>` anywhere in the file. The generator outputs the individual file path.
 - **Regenerate**: run `go generate ./internal/architecture/` (or `go run scripts/gen_semantic_map.go` from the project root) after any annotation change. The CI test `TestSemanticMapAccuracy` will fail if any annotated path no longer exists on disk.
 
@@ -54,15 +54,18 @@ The map in `internal/architecture/semantic_map.go` is **generated** — do not e
 
 ```
 thaw/
-├── main.go              # Entry point, native menu, Wails runtime setup
-├── app.go               # App struct, lifecycle (startup/shutdown), tab-session mgmt, Connect/Disconnect
-├── app_*.go             # Wails IPC bindings split by domain (all on *App, package main):
-│                        #   app_query, app_objects, app_session, app_filesystem, app_git,
-│                        #   app_profiles, app_builders, app_stage, app_dbtproject, app_pipe,
-│                        #   app_warehouse, app_integrations, app_users, app_tasks, app_table,
-│                        #   app_notebook_native, app_ddlexport, app_config, app_ai, app_shell,
-│                        #   app_backup, app_migration, app_snowpark
+├── main.go              # Thin entry point: //go:embed frontend/dist + app.Run(assets)
 ├── internal/
+│   ├── app/             # Wails-bound App struct (package app) — all IPC methods live here:
+│   │   ├── app.go       #   App struct, lifecycle (startup/shutdown), tab-session mgmt, Connect/Disconnect
+│   │   ├── run.go       #   Exported Run(assets embed.FS): crashreport, window state, wails.Run wiring
+│   │   ├── menu.go      #   buildMenu — native menu bar (emits menu:* Wails events)
+│   │   ├── doc.go       #   Package doc + // thaw:domain annotation
+│   │   └── *.go         #   IPC bindings split by domain (all on *App, package app):
+│   │                    #     query, objects, session, filesystem, git, profiles, builders,
+│   │                    #     stage, dbtproject, pipe, warehouse, integrations, users, tasks,
+│   │                    #     table, notebook_native, ddlexport, config, ai, shell, backup,
+│   │                    #     migration, snowpark
 │   ├── apperrors/       # Sentinel errors (ErrNotConnected etc.)
 │   ├── version/         # Version string (set via -ldflags at build time)
 │   ├── session/         # Window state persistence (load/save, OS-specific paths)
@@ -92,7 +95,7 @@ thaw/
     └── wailsjs/         # Auto-generated Wails IPC bindings (DO NOT EDIT)
 ```
 
-**IPC flow**: Frontend calls `wailsjs/go/main/App.ts` (or `wailsjs/go/sqleditor/Service.ts` for SQL editor methods) → Wails runtime → Go methods on `App` or bound `Service` structs → `internal/` packages.
+**IPC flow**: Frontend calls `wailsjs/go/app/App.ts` (or `wailsjs/go/sqleditor/Service.ts` for SQL editor methods) → Wails runtime → Go methods on `App` (package `internal/app`) or bound `Service` structs → other `internal/` packages.
 
 ## Codebase Vector Database
 
@@ -155,7 +158,7 @@ cd frontend && npm run build
 # Full app build (frontend + Go binary)
 wails build
 
-# Regenerate Wails JS/TS bindings after changing app.go signatures
+# Regenerate Wails JS/TS bindings after changing internal/app/ method signatures
 wails generate module
 
 # Go: tidy dependencies
@@ -169,9 +172,9 @@ make docs-serve    # serve docs at http://localhost:4000
 ## Key Patterns
 
 ### Adding a new Go→Frontend IPC method
-1. Add a public method on `*App` (receiver `a *App`) to the `app_*.go` file matching its domain (e.g. query methods → `app_query.go`, object listing → `app_objects.go`). All `app_*.go` files are `package main`, so methods are bound regardless of which file they live in. Keep `app.go` for the `App` struct, lifecycle, and session-management only.
+1. Add a public method on `*App` (receiver `a *App`) to the `internal/app/<domain>.go` file matching its domain (e.g. query methods → `internal/app/query.go`, object listing → `internal/app/objects.go`). All files in `internal/app/` are `package app`, so methods are bound regardless of which file they live in. Keep `app.go` for the `App` struct, lifecycle, and session-management only; `run.go`/`menu.go` hold the Wails wiring and native menu.
 2. Run `wails generate module` to regenerate `frontend/wailsjs/`
-3. Import from `"../../../wailsjs/go/main/App"` in the component
+3. Import from `"../../../wailsjs/go/app/App"` in the component
 
 ### Emitting events from Go to frontend
 ```go
@@ -244,13 +247,13 @@ Loading state for all these node types is tracked in the `loadingGitNodes` Set (
 - `internal/filesystem/watcher.go` — `Watcher` struct wrapping `fsnotify.Watcher`; recursively watches all non-hidden directories under a root path
 - Events are debounced per-directory (200ms) to coalesce rapid changes (e.g. `git checkout`)
 - New directories created externally are automatically added to the watch list
-- `app.go` exposes `StartFileWatcher(dir)` / `StopFileWatcher()` IPC methods; change events are emitted as `"fs:changed"` Wails events with `{ dir: string }` payload
+- `internal/app/filesystem.go` exposes `StartFileWatcher(dir)` / `StopFileWatcher()` IPC methods; change events are emitted as `"fs:changed"` Wails events with `{ dir: string }` payload
 - `FileBrowser.tsx` starts/stops the watcher when `exportDir` changes; listens for `fs:changed` and incrementally refreshes only the affected directory node in the tree
 - Self-change suppression: in-app mutations (create, rename, delete, duplicate) mark the parent directory in a `selfChangedDirs` Set with a 500ms timeout to prevent redundant double-refresh flicker
 - Gated behind the `fileWatcher` feature flag (View → Enabled Features → File Watcher)
 
 ### SQL diagnostics & JOIN suggestions (backend)
-All proprietary analysis logic lives in `internal/sqleditor/` and is exposed to the frontend via a dedicated Wails-bound `sqleditor.Service` struct (`service.go`). The service is registered in `main.go`'s `Bind` array and its methods are imported from `wailsjs/go/sqleditor/Service` (not from `wailsjs/go/main/App`):
+All proprietary analysis logic lives in `internal/sqleditor/` and is exposed to the frontend via a dedicated Wails-bound `sqleditor.Service` struct (`service.go`). The service is registered in `internal/app/run.go`'s `Bind` array and its methods are imported from `wailsjs/go/sqleditor/Service` (not from `wailsjs/go/app/App`):
 - `AnalyzeSqlSyntax(sql)` → character-by-character tokenizer (strings, comments, parens, dollar-quoting, scripting); inside `$$` blocks it also flags: placeholder tokens (`<>{}` at statement-start), bare unrecognised identifiers at statement-start, and wrong `:=`/`=` assignment syntax
 - `ParseJoinTableRefs(sql)` → regex-based FROM/JOIN table-ref extractor (3/2/1-part + alias)
 - `AnalyzeSqlSemantics(sql, resolvedRefs, colEntries)` → alias.column validator
@@ -330,7 +333,7 @@ IT administrators can enforce feature policies via platform-specific mechanisms.
 **Key files:**
 - `internal/config/config.go` — `FeatureFlags` struct + `DefaultFeatureFlags()`
 - `internal/config/adminconfig.go` — hierarchy and JSON loading logic
-- `app.go` — `GetFeatureFlags()` / `GetAdminLockedFlags()` / `SaveFeatureFlags()` IPC methods
+- `internal/app/config.go` — `GetFeatureFlags()` / `GetAdminLockedFlags()` / `SaveFeatureFlags()` IPC methods
 - `frontend/src/store/featureFlagsStore.ts` — Zustand store (loaded on startup, reloaded after modal save)
 - `frontend/src/components/settings/FeatureFlagsModal.tsx` — toggle UI (`<FlagRow>` per flag)
 - `frontend/src/components/layout/Sidebar.tsx` — `menuItem()` 5th param `disabled`, 6th param `disabledReason`
@@ -347,10 +350,10 @@ IT administrators can enforce feature policies via platform-specific mechanisms.
 - **Do not use `instanceof SubmenuAction` from an external import** — Monaco's `menu.js` checks its own bundled class; external imports are different module instances and always fail the check; use `MenuRegistry` instead and let Monaco create `SubmenuAction` internally
 
 ### Snowflake CLI profile management (TOML writer)
-The `internal/sfconfig/writer.go` module provides `SaveProfile`, `DeleteProfile`, `CloneProfile`, `RenameProfile`, and `SetDefaultProfile` functions that manipulate `~/.snowflake/config.toml` at the text level (line-by-line splice/insert/remove). This approach preserves user comments, blank lines, and unknown TOML keys that Thaw doesn't model. When updating an existing `[connections.<name>]` section, `sectionBodyEnd()` trims trailing blank lines and comments so they remain attached to the next section visually. `atomicWriteFile` writes to a temp file then renames, ensuring 0600 permissions. When deleting the default profile, `default_connection_name` is cleared to `""`; when renaming, it's updated to the new name. The frontend exposes New, Save, Rename, Clone, Set Default, and Delete buttons below the profile dropdown in `ConnectModal.tsx`, each calling the corresponding `app.go` IPC method. New, Clone, and Rename block submission when a profile with the chosen name already exists. The entire profile management UI section in `ConnectModal.tsx` is gated behind the `snowflakeCLIProfileManager` feature flag; when disabled the profile dropdown, action buttons, and divider are hidden, but profile auto-fill on connect still works if profiles exist.
+The `internal/sfconfig/writer.go` module provides `SaveProfile`, `DeleteProfile`, `CloneProfile`, `RenameProfile`, and `SetDefaultProfile` functions that manipulate `~/.snowflake/config.toml` at the text level (line-by-line splice/insert/remove). This approach preserves user comments, blank lines, and unknown TOML keys that Thaw doesn't model. When updating an existing `[connections.<name>]` section, `sectionBodyEnd()` trims trailing blank lines and comments so they remain attached to the next section visually. `atomicWriteFile` writes to a temp file then renames, ensuring 0600 permissions. When deleting the default profile, `default_connection_name` is cleared to `""`; when renaming, it's updated to the new name. The frontend exposes New, Save, Rename, Clone, Set Default, and Delete buttons below the profile dropdown in `ConnectModal.tsx`, each calling the corresponding `internal/app/profiles.go` IPC method. New, Clone, and Rename block submission when a profile with the chosen name already exists. The entire profile management UI section in `ConnectModal.tsx` is gated behind the `snowflakeCLIProfileManager` feature flag; when disabled the profile dropdown, action buttons, and divider are hidden, but profile auto-fill on connect still works if profiles exist.
 
 ### Session management (pool tuning & idle eviction)
-Per-tab Snowflake sessions are configurable via **View → Advanced → Session Management…** (`SessionManagementModal.tsx`). The backend stores settings in `config.SessionConfig` (persisted in `config.json`). At startup `app.go` calls `applySessionConfig` which sets runtime fields (`sessionMaxSessions`, `sessionMaxOpen`, `sessionMaxIdle`, `sessionInitMode`, `sessionIdleTimeout`) under `sessionConfigMu` and starts/stops the idle eviction goroutine. `evictIfNeeded()` reads `sessionMaxSessions` under RLock; `getOrInitTabSession()` reads `sessionMaxOpen`/`sessionMaxIdle` for `SetPoolLimits`. The idle eviction loop (`runIdleEvictionLoop`) ticks every 30s and evicts sessions whose `lastUsed` exceeds the timeout. The frontend tab lifecycle effect in `QueryPage.tsx` calls `GetSessionInitMode()` on new tab creation — if "eager", it fires `InitTabSession(tabId)` immediately.
+Per-tab Snowflake sessions are configurable via **View → Advanced → Session Management…** (`SessionManagementModal.tsx`). The backend stores settings in `config.SessionConfig` (persisted in `config.json`). At startup `internal/app/app.go` calls `applySessionConfig` which sets runtime fields (`sessionMaxSessions`, `sessionMaxOpen`, `sessionMaxIdle`, `sessionInitMode`, `sessionIdleTimeout`) under `sessionConfigMu` and starts/stops the idle eviction goroutine. `evictIfNeeded()` reads `sessionMaxSessions` under RLock; `getOrInitTabSession()` reads `sessionMaxOpen`/`sessionMaxIdle` for `SetPoolLimits`. The idle eviction loop (`runIdleEvictionLoop`) ticks every 30s and evicts sessions whose `lastUsed` exceeds the timeout. The frontend tab lifecycle effect in `QueryPage.tsx` calls `GetSessionInitMode()` on new tab creation — if "eager", it fires `InitTabSession(tabId)` immediately.
 
 ## Critical Gotchas
 
@@ -364,7 +367,7 @@ The driver writes the query ID to the channel and **then closes it**. Never call
 `navigator.clipboard` is blocked in WKWebView. All clipboard operations use Wails' `ClipboardGetText` / `ClipboardSetText` native APIs. Monaco's built-in copy/paste is overridden via `_commandService` patch + capture-phase keydown listeners.
 
 ### Multi-statement execution
-For multi-statement SQL, `Execute` uses an inner `execCtx` (fresh context). The outer `qidChan` (single-statement async mode) never fires. Per-statement query IDs are tracked via per-statement goroutines + `sync.WaitGroup` in `app.go`'s `StartQuery`.
+For multi-statement SQL, `Execute` uses an inner `execCtx` (fresh context). The outer `qidChan` (single-statement async mode) never fires. Per-statement query IDs are tracked via per-statement goroutines + `sync.WaitGroup` in `internal/app/query.go`'s `StartQuery`.
 
 ### `wailsjs/` is auto-generated
 Never edit files under `frontend/wailsjs/` by hand — they are overwritten by `wails generate module`.

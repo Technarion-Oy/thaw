@@ -11,14 +11,14 @@
 import { useEffect, useState } from "react";
 import { Modal, Button, Tooltip, message } from "antd";
 import { InfoCircleOutlined, CopyOutlined } from "@ant-design/icons";
-import { GetAppInfo } from "../../../wailsjs/go/main/App";
+import { GetAppInfo } from "../../../wailsjs/go/app/App";
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
-import type { main } from "../../../wailsjs/go/models";
+import type { app } from "../../../wailsjs/go/models";
 
 interface Props { onClose: () => void; }
 
 export default function AboutModal({ onClose }: Props) {
-  const [info, setInfo] = useState<main.AppInfo | null>(null);
+  const [info, setInfo] = useState<app.AppInfo | null>(null);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {

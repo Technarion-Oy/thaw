@@ -14,7 +14,7 @@ import {
   Typography, Button, Alert,
 } from "antd";
 import { PlusOutlined, TableOutlined } from "@ant-design/icons";
-import { ExecDDL, GetQuotedIdentifiersIgnoreCase, ListDatabases, ListSchemas, ListObjects, GetTableColumnsWithTypes, BuildAddColumnSql, IsNumeric, GetCollations } from "../../../wailsjs/go/main/App";
+import { ExecDDL, GetQuotedIdentifiersIgnoreCase, ListDatabases, ListSchemas, ListObjects, GetTableColumnsWithTypes, BuildAddColumnSql, IsNumeric, GetCollations } from "../../../wailsjs/go/app/App";
 import { column, snowflake } from "../../../wailsjs/go/models";
 import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import DataTypeSelect from "../shared/DataTypeSelect";

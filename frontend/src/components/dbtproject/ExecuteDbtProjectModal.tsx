@@ -15,7 +15,7 @@ import {
   Modal, Form, Input, Select, Space, Button,
 } from "antd";
 import { PlayCircleOutlined } from "@ant-design/icons";
-import { BuildExecuteDbtProjectSql, ListSupportedDbtVersions } from "../../../wailsjs/go/main/App";
+import { BuildExecuteDbtProjectSql, ListSupportedDbtVersions } from "../../../wailsjs/go/app/App";
 import { dbtproject } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
 import SqlPreview from "../shared/SqlPreview";

@@ -7,7 +7,7 @@
 //
 // @thaw-domain: SQL Editor & Diagnostics
 
-import { GetTableForeignKeys } from "../../../wailsjs/go/main/App";
+import { GetTableForeignKeys } from "../../../wailsjs/go/app/App";
 
 // ── UC helper ────────────────────────────────────────────────────────────────
 export const UC = (s: string) => s.toUpperCase();

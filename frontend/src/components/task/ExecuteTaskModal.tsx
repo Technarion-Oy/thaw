@@ -11,7 +11,7 @@
 import { useState } from "react";
 import { Modal, Button, Space, Typography, Radio, Input, Alert, message } from "antd";
 import { PlayCircleOutlined, RetweetOutlined } from "@ant-design/icons";
-import { ExecuteTask } from "../../../wailsjs/go/main/App";
+import { ExecuteTask } from "../../../wailsjs/go/app/App";
 
 const { Text } = Typography;
 const { TextArea } = Input;
