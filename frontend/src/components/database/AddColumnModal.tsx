@@ -8,50 +8,23 @@
 // Commercial use of this software is restricted to parties holding a valid
 // license agreement with Technarion Oy.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Modal, Form, Input, Checkbox, Space, Radio, Select, InputNumber, Divider,
   Typography, Button, Alert,
 } from "antd";
 import { PlusOutlined, TableOutlined } from "@ant-design/icons";
-import { ExecDDL, GetQuotedIdentifiersIgnoreCase, ListDatabases, ListSchemas, ListObjects, GetTableColumnsWithTypes } from "../../../wailsjs/go/main/App";
-import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
+import { ExecDDL, GetQuotedIdentifiersIgnoreCase, ListDatabases, ListSchemas, ListObjects, GetTableColumnsWithTypes, BuildAddColumnSql } from "../../../wailsjs/go/main/App";
+import { column } from "../../../wailsjs/go/models";
+import ObjectNameCaseControl from "../shared/ObjectNameCaseControl";
 import DataTypeSelect from "../shared/DataTypeSelect";
 
 const { Text } = Typography;
 const { TextArea } = Input;
 
-type ValueMode = "none" | "default" | "autoincrement" | "computed";
-type IdentityOrder = "ORDER" | "NOORDER" | "";
-type ConstraintKind = "none" | "unique" | "primary_key" | "foreign_key";
-
-interface ColumnConfig {
-  name: string;
-  caseSensitive: boolean;
-  ifNotExists: boolean;
-  dataType: string;
-  // Value mode
-  valueMode: ValueMode;
-  defaultValue: string;
-  computedExpr: string;
-  // Autoincrement / Identity
-  identityStart: number;
-  identityStep: number;
-  identityOrder: IdentityOrder;
-  // Inline constraint
-  notNull: boolean;
-  constraintKind: ConstraintKind;
-  constraintName: string;
-  fkDb: string;
-  fkSchema: string;
-  fkTableName: string;
-  fkColumn: string;
-  // Collation & comment
-  collation: string;
-  comment: string;
-}
-
-const DEFAULTS: ColumnConfig = {
+// ADD COLUMN SQL is built by the backend (internal/column); this UI only
+// collects the config that maps onto column.AddColumnConfig.
+const DEFAULTS: column.AddColumnConfig = {
   name: "",
   caseSensitive: false,
   ifNotExists: false,
@@ -73,62 +46,6 @@ const DEFAULTS: ColumnConfig = {
   comment: "",
 };
 
-function buildSql(db: string, schema: string, table: string, cfg: ColumnConfig): string {
-  const q = (s: string) => quoteIdent(s);
-  const sq = (s: string) => "'" + s.replace(/'/g, "''") + "'";
-
-  const colToken = identToken(cfg.name || "column_name", cfg.caseSensitive);
-  const parts: string[] = [`ALTER TABLE ${q(db)}.${q(schema)}.${q(table)} ADD COLUMN`];
-
-  if (cfg.ifNotExists) parts.push("IF NOT EXISTS");
-  parts.push(colToken);
-
-  // Data type (omitted for computed columns that derive their type from the expression)
-  if (cfg.valueMode !== "computed") {
-    parts.push(cfg.dataType);
-  }
-
-  // Computed expression: AS ( <expr> )
-  if (cfg.valueMode === "computed" && cfg.computedExpr.trim()) {
-    parts.push(`AS (${cfg.computedExpr.trim()})`);
-  }
-
-  // Default / Autoincrement
-  if (cfg.valueMode === "default" && cfg.defaultValue.trim()) {
-    parts.push(`DEFAULT ${cfg.defaultValue.trim()}`);
-  } else if (cfg.valueMode === "autoincrement") {
-    parts.push(`AUTOINCREMENT (${cfg.identityStart}, ${cfg.identityStep})`);
-    if (cfg.identityOrder) parts.push(cfg.identityOrder);
-  }
-
-  // Inline constraint. NOT NULL must precede a named CONSTRAINT clause, which
-  // applies to UNIQUE / PRIMARY KEY / FOREIGN KEY.
-  if (cfg.notNull) parts.push("NOT NULL");
-  if (cfg.constraintName.trim()) {
-    parts.push(`CONSTRAINT ${q(cfg.constraintName.trim())}`);
-  }
-  if (cfg.constraintKind === "unique") parts.push("UNIQUE");
-  if (cfg.constraintKind === "primary_key") parts.push("PRIMARY KEY");
-  if (cfg.constraintKind === "foreign_key" && cfg.fkTableName) {
-    const refParts = [q(cfg.fkDb || db), q(cfg.fkSchema || schema), q(cfg.fkTableName)];
-    let ref = `REFERENCES ${refParts.join(".")}`;
-    if (cfg.fkColumn) ref += ` (${q(cfg.fkColumn)})`;
-    parts.push(ref);
-  }
-
-  // Collation
-  if (cfg.collation.trim()) {
-    parts.push(`COLLATE '${cfg.collation.trim()}'`);
-  }
-
-  // Comment
-  if (cfg.comment.trim()) {
-    parts.push(`COMMENT ${sq(cfg.comment.trim())}`);
-  }
-
-  return parts.join(" ") + ";";
-}
-
 interface Props {
   db: string;
   schema: string;
@@ -138,16 +55,30 @@ interface Props {
 }
 
 export default function AddColumnModal({ db, schema, table, onClose, onSuccess }: Props) {
-  const [cfg, setCfg] = useState<ColumnConfig>({ ...DEFAULTS, fkDb: db, fkSchema: schema });
+  const [cfg, setCfg] = useState<column.AddColumnConfig>({ ...DEFAULTS, fkDb: db, fkSchema: schema });
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
+  const [preview, setPreview] = useState("");
+  const previewTimer = useRef<ReturnType<typeof setTimeout>>();
 
   // FK cascading dropdown state
   const [fkDatabases, setFkDatabases] = useState<string[]>([]);
   const [fkSchemas, setFkSchemas] = useState<string[]>([]);
   const [fkTables, setFkTables] = useState<string[]>([]);
   const [fkColumns, setFkColumns] = useState<string[]>([]);
+
+  // SQL preview is generated by the backend builder (debounced).
+  useEffect(() => {
+    let stale = false;
+    clearTimeout(previewTimer.current);
+    previewTimer.current = setTimeout(() => {
+      BuildAddColumnSql(db, schema, table, cfg)
+        .then((sql) => { if (!stale) setPreview(sql); })
+        .catch(() => { if (!stale) setPreview(""); });
+    }, 200);
+    return () => { stale = true; clearTimeout(previewTimer.current); };
+  }, [db, schema, table, cfg]);
 
   useEffect(() => {
     GetQuotedIdentifiersIgnoreCase()
@@ -183,21 +114,26 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
       .catch(() => setFkColumns([]));
   }, [cfg.constraintKind, cfg.fkDb, cfg.fkSchema, cfg.fkTableName]);
 
-  const set = <K extends keyof ColumnConfig>(key: K, value: ColumnConfig[K]) =>
+  const set = <K extends keyof column.AddColumnConfig>(key: K, value: column.AddColumnConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }));
+
+  const isNumericType = /^(NUMBER|DECIMAL|NUMERIC|INT|INTEGER|BIGINT|SMALLINT|TINYINT|BYTEINT|FLOAT|DOUBLE|REAL)/i.test(cfg.dataType);
 
   const canSubmit =
     cfg.name.trim() !== "" &&
     (cfg.valueMode === "computed" ? cfg.computedExpr.trim() !== "" : cfg.dataType.trim() !== "") &&
-    (cfg.constraintKind !== "foreign_key" || cfg.fkTableName.trim() !== "");
+    (cfg.constraintKind !== "foreign_key" || cfg.fkTableName.trim() !== "") &&
+    // Default mode requires a value, else the clause is silently dropped.
+    (cfg.valueMode !== "default" || cfg.defaultValue.trim() !== "") &&
+    // AUTOINCREMENT is only valid for numeric data types.
+    (cfg.valueMode !== "autoincrement" || isNumericType);
 
   const handleCreate = async () => {
-    if (!canSubmit) return;
-    const sql = buildSql(db, schema, table, cfg);
+    if (!canSubmit || !preview) return;
     setCreating(true);
     setCreateError(null);
     try {
-      await ExecDDL(sql);
+      await ExecDDL(preview);
       onSuccess?.();
       onClose();
     } catch (err) {
@@ -206,10 +142,6 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
       setCreating(false);
     }
   };
-
-  const preview = buildSql(db, schema, table, cfg);
-
-  const isNumericType = /^(NUMBER|DECIMAL|NUMERIC|INT|INTEGER|BIGINT|SMALLINT|TINYINT|BYTEINT|FLOAT|DOUBLE|REAL)/i.test(cfg.dataType);
 
   const divider = (label: string) => (
     <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, color: "var(--text-muted)", margin: "12px 0 6px" }}>
@@ -332,14 +264,18 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
               <Form.Item label="Start" style={{ marginBottom: 8 }}>
                 <InputNumber
                   value={cfg.identityStart}
-                  onChange={(v) => set("identityStart", v ?? 1)}
+                  onChange={(v) => set("identityStart", Math.trunc(v ?? 1))}
+                  precision={0}
+                  step={1}
                   style={{ width: "100%" }}
                 />
               </Form.Item>
               <Form.Item label="Increment" style={{ marginBottom: 8 }}>
                 <InputNumber
                   value={cfg.identityStep}
-                  onChange={(v) => set("identityStep", v ?? 1)}
+                  onChange={(v) => set("identityStep", Math.trunc(v ?? 1))}
+                  precision={0}
+                  step={1}
                   style={{ width: "100%" }}
                 />
               </Form.Item>
@@ -370,6 +306,9 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
           </Form.Item>
         )}
 
+        {/* Inline constraints & collation are invalid on computed (virtual) columns. */}
+        {cfg.valueMode !== "computed" && (
+        <>
         {divider("Constraints")}
 
         <Form.Item style={{ marginBottom: 8 }}>
@@ -454,8 +393,6 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
           </div>
         )}
 
-        {divider("Options")}
-
         <Form.Item label="Collation" style={{ marginBottom: 8 }}>
           <Select
             showSearch
@@ -482,8 +419,13 @@ export default function AddColumnModal({ db, schema, table, onClose, onSuccess }
             ]}
           />
         </Form.Item>
+        </>
+        )}
+
+        {divider("Options")}
 
         <Form.Item label="Comment" style={{ marginBottom: 12 }}>
+
           <TextArea
             value={cfg.comment}
             onChange={(e) => set("comment", e.target.value)}

@@ -70,6 +70,7 @@ thaw/
 │   ├── tasks/           # Task graph ops, statuses, run history (TASK_HISTORY), DDL export
 │   ├── ddl/             # DDL parsing and git-export pipeline
 │   ├── dbtproject/      # Snowflake-native DBT PROJECT SQL builders (CREATE, ALTER, EXECUTE)
+│   ├── column/          # Table column DDL builders (ADD/DROP/RENAME/ALTER COLUMN)
 │   ├── ai/              # AI provider clients (OpenAI, Google, Ollama); inline completions, model management
 │   ├── config/          # App config (TOML persistence)
 │   ├── gitrepo/         # Git operations via exec
@@ -197,7 +198,7 @@ const cleanup = EventsOn("event:name", (data) => { ... });
 
 ### Sidebar tree node key formats
 The sidebar tree uses key prefixes to identify node types. For expandable objects beyond tables/views:
-- **Columns**: `col:DB:SCHEMA:TABLE:COLUMN` — leaf nodes under TABLE/VIEW `obj:` nodes; carry custom properties (`colDataType`, `colNullable`, `colIsPrimaryKey`, `colParentKind`) for the context menu; TABLE columns get a full context menu (rename, change type, set/drop NOT NULL, set comment, drop); VIEW columns only get "Insert Column Name"
+- **Columns**: `col:DB:SCHEMA:TABLE:COLUMN` — leaf nodes under TABLE/VIEW `obj:` nodes; carry custom properties (`colDataType`, `colNullable`, `colIsPrimaryKey`, `colParentKind`) for the context menu; TABLE columns get a full context menu (rename, change type, set/drop NOT NULL, set comment, drop); VIEW columns only get "Insert Column Name". **All column DDL (ADD/DROP/RENAME/ALTER COLUMN) is built in the backend `internal/column` package** (`Build*ColumnSql` IPC methods on `*App`); the Sidebar handlers and `AddColumnModal` only collect config and call the builder, never construct SQL inline. `AddColumnModal` mirrors the `column.AddColumnConfig` model and renders a debounced backend-generated SQL preview (same pattern as the dbtproject modals).
 - **Git Repos**: `obj:DB:SCHEMA:GIT REPOSITORY:NAME` → `gitbranches:`, `gittags:`, `gitcommits:` → `gitdir:DB:SCHEMA:REPO:path` → `gitfile:DB:SCHEMA:REPO:path`
 - **Stages**: `obj:DB:SCHEMA:STAGE:NAME` → `stagedir:DB:SCHEMA:NAME:path` → `stagefile:DB:SCHEMA:NAME:path`
 - **DBT Projects**: `obj:DB:SCHEMA:DBT PROJECT:NAME` → `dbtversion:DB:SCHEMA:NAME:version` → `dbtdir:DB:SCHEMA:NAME:path` → `dbtfile:DB:SCHEMA:NAME:path`

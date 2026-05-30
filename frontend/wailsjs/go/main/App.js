@@ -54,6 +54,10 @@ export function AnalyzeMigration(arg1, arg2) {
   return window['go']['main']['App']['AnalyzeMigration'](arg1, arg2);
 }
 
+export function BuildAddColumnSql(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['BuildAddColumnSql'](arg1, arg2, arg3, arg4);
+}
+
 export function BuildAddDbtProjectVersionSql(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['BuildAddDbtProjectVersionSql'](arg1, arg2, arg3, arg4, arg5);
 }
@@ -72,6 +76,10 @@ export function BuildApiIntegrationPreviewSQL(arg1) {
 
 export function BuildCallStatement(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['BuildCallStatement'](arg1, arg2, arg3, arg4);
+}
+
+export function BuildChangeColumnTypeSql(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['BuildChangeColumnTypeSql'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function BuildCreateDbtProjectSql(arg1, arg2, arg3) {
@@ -98,6 +106,14 @@ export function BuildCreateStageSql(arg1) {
   return window['go']['main']['App']['BuildCreateStageSql'](arg1);
 }
 
+export function BuildDropColumnNotNullSql(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['BuildDropColumnNotNullSql'](arg1, arg2, arg3, arg4);
+}
+
+export function BuildDropColumnSql(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['BuildDropColumnSql'](arg1, arg2, arg3, arg4);
+}
+
 export function BuildExecuteDbtProjectSql(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['BuildExecuteDbtProjectSql'](arg1, arg2, arg3, arg4);
 }
@@ -116,6 +132,18 @@ export function BuildModifySecretSql(arg1, arg2, arg3, arg4, arg5) {
 
 export function BuildRefreshPipeSql(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['BuildRefreshPipeSql'](arg1, arg2, arg3, arg4);
+}
+
+export function BuildRenameColumnSql(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['BuildRenameColumnSql'](arg1, arg2, arg3, arg4, arg5, arg6);
+}
+
+export function BuildSetColumnCommentSql(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['BuildSetColumnCommentSql'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function BuildSetColumnNotNullSql(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['BuildSetColumnNotNullSql'](arg1, arg2, arg3, arg4);
 }
 
 export function CanCreateIntegration(arg1) {

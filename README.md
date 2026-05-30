@@ -279,7 +279,7 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
   - **Rename** the object (`ALTER … RENAME TO`) — available for tables, views, sequences, stages, streams, tasks, file formats, and pipes
   - **Delete** the object (`DROP …`) — with a confirmation dialog
 - **Drag and drop** — drag any table or view node from the sidebar into the editor to insert a fully-qualified `SELECT` with all column names (fetched from Snowflake and listed individually, not `*`) at the drop position; drag a user from the User Management panel to insert a `CREATE USER` DDL statement
-- **Column management** — right-click any column under a table to rename it, change its data type, set/drop NOT NULL, set a comment, or drop it; each action executes the appropriate `ALTER TABLE … ALTER COLUMN` SQL; right-clicking a view column shows only **Insert Column Name**; **Add Column…** is available on the table node itself and opens a dialog with name (case control), data type, NOT NULL, default, comment, and SQL preview
+- **Column management** — right-click any column under a table to rename it, change its data type, set/drop NOT NULL, set a comment, or drop it; each action executes the appropriate `ALTER TABLE … ALTER COLUMN` SQL built by the backend `internal/column` package; right-clicking a view column shows only **Insert Column Name**; **Add Column…** is available on the table node itself and opens a dialog with name (case control), data type, NOT NULL, default, comment, and a live backend-generated SQL preview
 - **Column type icons** — when expanding a table or view's column list, each column is prefixed with a type-family icon (text, number, datetime, boolean, variant/array, binary, geo, vector) coloured per the theme's column palette; primary-key and foreign-key columns get a distinct key icon
 - **Empty table indicator** — table names with zero rows are shown in a faded colour in the object tree, making it easy to spot unpopulated tables at a glance
 - **Hover tooltip** — hovering over any object in the tree shows its DDL definition; cached with a 60-second TTL so changes made outside the app are visible promptly
@@ -729,6 +729,7 @@ thaw/
 │   ├── snowflake/lineage_test.go  # Unit tests for lineage parser (56 cases; no Snowflake required)
 │   ├── snowgitrepo/               # Snowflake Git repository integration: CREATE/ALTER GIT REPOSITORY SQL builder
 │   ├── dbtproject/                # Snowflake-native DBT PROJECT objects: CREATE/ALTER/EXECUTE SQL builders
+│   ├── column/                    # Table column DDL builders: ADD/DROP/RENAME COLUMN, ALTER COLUMN (NOT NULL, type, comment)
 │   ├── snowpark/                   # Snowpark/Jupyter support (Service pattern with NewService)
 │   ├── stage/                     # Stage creation SQL builder (internal/external, encryption, directory tables)
 │   ├── tasks/                     # Task graph management: schedule parsing, execution history, status tracking

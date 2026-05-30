@@ -66,7 +66,7 @@ import {
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
-import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, UploadFileToStage, PickOpenFile, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory } from "../../../wailsjs/go/main/App";
+import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, UploadFileToStage, PickOpenFile, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql, BuildRenameColumnSql, BuildSetColumnNotNullSql, BuildDropColumnNotNullSql, BuildSetColumnCommentSql, BuildChangeColumnTypeSql } from "../../../wailsjs/go/main/App";
 import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
 import type { main } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
@@ -2112,9 +2112,6 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
     setCtxMenu(null);
 
-    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
-    const sql = `ALTER TABLE ${q(db)}.${q(schema)}.${q(table)} DROP COLUMN ${q(column)};`;
-
     modal.confirm({
       title: `Drop column "${column}"?`,
       content: `This will permanently remove column "${column}" from ${db}.${schema}.${table}. This action cannot be undone.`,
@@ -2123,7 +2120,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       cancelText: "Cancel",
       onOk: async () => {
         try {
-          await ExecDDL(sql);
+          await ExecDDL(await BuildDropColumnSql(db, schema, table, column));
           message.success(`Dropped column "${column}"`);
           refreshTableColumns(db, schema, table);
         } catch (e) {
@@ -2150,13 +2147,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       setRenameColumnModal(null);
       return;
     }
-    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
-    const fullTable = `${q(db)}.${q(schema)}.${q(table)}`;
-    const sql = `ALTER TABLE ${fullTable} RENAME COLUMN ${q(oldName)} TO ${identToken(trimmed, caseSensitive)};`;
-
     setRenameColumnModal(null);
     try {
-      await ExecDDL(sql);
+      await ExecDDL(await BuildRenameColumnSql(db, schema, table, oldName, trimmed, caseSensitive));
       message.success(`Renamed column "${oldName}" to "${trimmed}"`);
       refreshTableColumns(db, schema, table);
     } catch (e) {
@@ -2164,30 +2157,30 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     }
   };
 
-  const setColumnNotNull = () => {
+  const setColumnNotNull = async () => {
     if (!ctxMenu) return;
     const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
     setCtxMenu(null);
-
-    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
-    const sql = `ALTER TABLE ${q(db)}.${q(schema)}.${q(table)} ALTER COLUMN ${q(column)} SET NOT NULL;`;
-
-    ExecDDL(sql)
-      .then(() => { message.success(`Set NOT NULL on "${column}"`); refreshTableColumns(db, schema, table); })
-      .catch((e) => message.error(String(e)));
+    try {
+      await ExecDDL(await BuildSetColumnNotNullSql(db, schema, table, column));
+      message.success(`Set NOT NULL on "${column}"`);
+      refreshTableColumns(db, schema, table);
+    } catch (e) {
+      message.error(String(e));
+    }
   };
 
-  const dropColumnNotNull = () => {
+  const dropColumnNotNull = async () => {
     if (!ctxMenu) return;
     const { db, schema, table, column } = parseColKey(ctxMenu.nodeKey);
     setCtxMenu(null);
-
-    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
-    const sql = `ALTER TABLE ${q(db)}.${q(schema)}.${q(table)} ALTER COLUMN ${q(column)} DROP NOT NULL;`;
-
-    ExecDDL(sql)
-      .then(() => { message.success(`Dropped NOT NULL on "${column}"`); refreshTableColumns(db, schema, table); })
-      .catch((e) => message.error(String(e)));
+    try {
+      await ExecDDL(await BuildDropColumnNotNullSql(db, schema, table, column));
+      message.success(`Dropped NOT NULL on "${column}"`);
+      refreshTableColumns(db, schema, table);
+    } catch (e) {
+      message.error(String(e));
+    }
   };
 
   const openColumnComment = () => {
@@ -2200,16 +2193,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const executeColumnComment = async () => {
     if (!columnCommentModal) return;
     const { db, schema, table, column, comment } = columnCommentModal;
-    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
-    const sq = (s: string) => "'" + s.replace(/'/g, "''") + "'";
-    const fullTable = `${q(db)}.${q(schema)}.${q(table)}`;
-    const sql = comment.trim()
-      ? `ALTER TABLE ${fullTable} ALTER COLUMN ${q(column)} COMMENT ${sq(comment.trim())};`
-      : `ALTER TABLE ${fullTable} ALTER COLUMN ${q(column)} UNSET COMMENT;`;
-
     setColumnCommentModal(null);
     try {
-      await ExecDDL(sql);
+      await ExecDDL(await BuildSetColumnCommentSql(db, schema, table, column, comment));
       message.success(comment.trim() ? `Set comment on "${column}"` : `Removed comment from "${column}"`);
     } catch (e) {
       message.error(String(e));
@@ -2232,13 +2218,9 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
       setChangeDataTypeModal(null);
       return;
     }
-    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
-    const fullTable = `${q(db)}.${q(schema)}.${q(table)}`;
-    const sql = `ALTER TABLE ${fullTable} ALTER COLUMN ${q(column)} SET DATA TYPE ${trimmed};`;
-
     setChangeDataTypeModal(null);
     try {
-      await ExecDDL(sql);
+      await ExecDDL(await BuildChangeColumnTypeSql(db, schema, table, column, trimmed));
       message.success(`Changed data type of "${column}" to ${trimmed}`);
       refreshTableColumns(db, schema, table);
     } catch (e) {
@@ -2250,8 +2232,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
     if (!ctxMenu) return;
     const { column } = parseColKey(ctxMenu.nodeKey);
     setCtxMenu(null);
-    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
-    insertAtCursor(q(column));
+    insertAtCursor(quoteIdent(column));
   };
 
   const openTimeTravelModal = async () => {

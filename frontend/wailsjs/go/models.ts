@@ -1,3 +1,56 @@
+export namespace column {
+	
+	export class AddColumnConfig {
+	    name: string;
+	    caseSensitive: boolean;
+	    ifNotExists: boolean;
+	    dataType: string;
+	    valueMode: string;
+	    defaultValue: string;
+	    computedExpr: string;
+	    identityStart: number;
+	    identityStep: number;
+	    identityOrder: string;
+	    notNull: boolean;
+	    constraintKind: string;
+	    constraintName: string;
+	    fkDb: string;
+	    fkSchema: string;
+	    fkTableName: string;
+	    fkColumn: string;
+	    collation: string;
+	    comment: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AddColumnConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.caseSensitive = source["caseSensitive"];
+	        this.ifNotExists = source["ifNotExists"];
+	        this.dataType = source["dataType"];
+	        this.valueMode = source["valueMode"];
+	        this.defaultValue = source["defaultValue"];
+	        this.computedExpr = source["computedExpr"];
+	        this.identityStart = source["identityStart"];
+	        this.identityStep = source["identityStep"];
+	        this.identityOrder = source["identityOrder"];
+	        this.notNull = source["notNull"];
+	        this.constraintKind = source["constraintKind"];
+	        this.constraintName = source["constraintName"];
+	        this.fkDb = source["fkDb"];
+	        this.fkSchema = source["fkSchema"];
+	        this.fkTableName = source["fkTableName"];
+	        this.fkColumn = source["fkColumn"];
+	        this.collation = source["collation"];
+	        this.comment = source["comment"];
+	    }
+	}
+
+}
+
 export namespace config {
 	
 	export class AIConfig {
