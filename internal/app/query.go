@@ -14,11 +14,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"thaw/internal/apperrors"
 	"thaw/internal/logger"
+	"thaw/internal/queryhistory"
 	"thaw/internal/queryprofile"
 	"thaw/internal/snowflake"
 	"thaw/internal/telemetry"
@@ -349,24 +349,6 @@ func (a *App) WaitForQueryResult(tabId string) (*snowflake.QueryResult, error) {
 	return result, err
 }
 
-// QueryHistoryRow holds one row from INFORMATION_SCHEMA.QUERY_HISTORY*.
-type QueryHistoryRow struct {
-	QueryID       string `json:"queryId"`
-	QueryText     string `json:"queryText"`
-	QueryType     string `json:"queryType"`
-	UserName      string `json:"userName"`
-	WarehouseName string `json:"warehouseName"`
-	DatabaseName  string `json:"databaseName"`
-	SchemaName    string `json:"schemaName"`
-	StartTime     string `json:"startTime"`
-	EndTime       string `json:"endTime"`
-	ElapsedMs     int64  `json:"elapsedMs"`
-	Status        string `json:"status"`
-	ErrorMessage  string `json:"errorMessage"`
-	RowsProduced  int64  `json:"rowsProduced"`
-	BytesScanned  int64  `json:"bytesScanned"`
-}
-
 // GetQueryHistory queries SNOWFLAKE.INFORMATION_SCHEMA.QUERY_HISTORY* table
 // functions and returns a slice of QueryHistoryRow ordered by start time desc.
 //
@@ -386,138 +368,9 @@ func (a *App) GetQueryHistory(
 	endTimeEnd string,
 	resultLimit int,
 	includeClientGenerated bool,
-) ([]QueryHistoryRow, error) {
+) ([]queryhistory.QueryHistoryRow, error) {
 	if a.client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-
-	// Choose the table function name.
-	var funcName string
-	switch filterType {
-	case "session":
-		funcName = "QUERY_HISTORY_BY_SESSION"
-	case "user":
-		funcName = "QUERY_HISTORY_BY_USER"
-	case "warehouse":
-		funcName = "QUERY_HISTORY_BY_WAREHOUSE"
-	default:
-		funcName = "QUERY_HISTORY"
-	}
-
-	// Build the named-argument list.
-	var args []string
-	switch filterType {
-	case "session":
-		if sessionID != "" {
-			args = append(args, fmt.Sprintf("SESSION_ID => %s", sessionID))
-		}
-	case "user":
-		if userName != "" {
-			args = append(args, fmt.Sprintf("USER_NAME => '%s'", strings.ReplaceAll(userName, "'", "''")))
-		}
-	case "warehouse":
-		if warehouseName != "" {
-			args = append(args, fmt.Sprintf("WAREHOUSE_NAME => '%s'", strings.ReplaceAll(warehouseName, "'", "''")))
-		}
-	}
-	if endTimeStart != "" {
-		args = append(args, fmt.Sprintf("END_TIME_RANGE_START => '%s'::TIMESTAMP_LTZ", endTimeStart))
-	}
-	if endTimeEnd != "" {
-		args = append(args, fmt.Sprintf("END_TIME_RANGE_END => '%s'::TIMESTAMP_LTZ", endTimeEnd))
-	}
-	if resultLimit > 0 {
-		args = append(args, fmt.Sprintf("RESULT_LIMIT => %d", resultLimit))
-	}
-	if includeClientGenerated {
-		args = append(args, "INCLUDE_CLIENT_GENERATED_STATEMENT => TRUE")
-	}
-
-	var argClause string
-	if len(args) > 0 {
-		argClause = strings.Join(args, ", ")
-	}
-
-	query := fmt.Sprintf(`
-SELECT QUERY_ID, QUERY_TEXT, QUERY_TYPE, USER_NAME, WAREHOUSE_NAME,
-       DATABASE_NAME, SCHEMA_NAME, START_TIME, END_TIME,
-       TOTAL_ELAPSED_TIME, EXECUTION_STATUS, ERROR_MESSAGE,
-       ROWS_PRODUCED, BYTES_SCANNED
-FROM table(SNOWFLAKE.information_schema.%s(%s))
-ORDER BY START_TIME DESC`, funcName, argClause)
-
-	res, err := a.client.QuerySingle(a.ctx, query)
-	if err != nil {
-		return nil, err
-	}
-
-	toString := func(v interface{}) string {
-		if v == nil {
-			return ""
-		}
-		switch t := v.(type) {
-		case time.Time:
-			return t.Format(time.RFC3339)
-		default:
-			return fmt.Sprint(v)
-		}
-	}
-
-	toInt64 := func(v interface{}) int64 {
-		s := toString(v)
-		if s == "" {
-			return 0
-		}
-		// Handle potential float strings like "1234.00"
-		if i, err := strconv.ParseInt(s, 10, 64); err == nil {
-			return i
-		}
-		if f, err := strconv.ParseFloat(s, 64); err == nil {
-			return int64(f)
-		}
-		return 0
-	}
-
-	qidIdx := colIdx(res.Columns, "query_id")
-	qtxtIdx := colIdx(res.Columns, "query_text")
-	qtypIdx := colIdx(res.Columns, "query_type")
-	userIdx := colIdx(res.Columns, "user_name")
-	whIdx := colIdx(res.Columns, "warehouse_name")
-	dbIdx := colIdx(res.Columns, "database_name")
-	schIdx := colIdx(res.Columns, "schema_name")
-	stIdx := colIdx(res.Columns, "start_time")
-	etIdx := colIdx(res.Columns, "end_time")
-	elIdx := colIdx(res.Columns, "total_elapsed_time")
-	statIdx := colIdx(res.Columns, "execution_status")
-	errIdx := colIdx(res.Columns, "error_message")
-	rpIdx := colIdx(res.Columns, "rows_produced")
-	bsIdx := colIdx(res.Columns, "bytes_scanned")
-
-	get := func(row []interface{}, idx int) interface{} {
-		if idx < 0 || idx >= len(row) {
-			return nil
-		}
-		return row[idx]
-	}
-
-	rows := make([]QueryHistoryRow, 0, len(res.Rows))
-	for _, row := range res.Rows {
-		rows = append(rows, QueryHistoryRow{
-			QueryID:       toString(get(row, qidIdx)),
-			QueryText:     toString(get(row, qtxtIdx)),
-			QueryType:     toString(get(row, qtypIdx)),
-			UserName:      toString(get(row, userIdx)),
-			WarehouseName: toString(get(row, whIdx)),
-			DatabaseName:  toString(get(row, dbIdx)),
-			SchemaName:    toString(get(row, schIdx)),
-			StartTime:     toString(get(row, stIdx)),
-			EndTime:       toString(get(row, etIdx)),
-			ElapsedMs:     toInt64(get(row, elIdx)),
-			Status:        toString(get(row, statIdx)),
-			ErrorMessage:  toString(get(row, errIdx)),
-			RowsProduced:  toInt64(get(row, rpIdx)),
-			BytesScanned:  toInt64(get(row, bsIdx)),
-		})
-	}
-	return rows, nil
+	return queryhistory.GetQueryHistory(a.ctx, a.client, filterType, sessionID, userName, warehouseName, endTimeStart, endTimeEnd, resultLimit, includeClientGenerated)
 }

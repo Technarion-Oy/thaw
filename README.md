@@ -684,8 +684,9 @@ thaw/
 │   └── windows/                   # Windows resources
 ├── internal/
 │   ├── ai/ai.go                   # AI provider HTTP clients (OpenAI, Google AI Studios, Ollama); inline completions; model listing and testing
-│   ├── app/                        # Wails-bound App struct (package app): app.go (lifecycle), run.go (wails.Run wiring), menu.go (native menu), + IPC methods split by domain (query.go, objects.go, …)
+│   ├── app/                        # Wails-bound App struct (package app): app.go (lifecycle), run.go (wails.Run wiring), menu.go (native menu), + IPC methods split by domain (query.go, objects.go, …). Most methods are thin delegators (nil-check → domain-package func → return); real logic lives in the domain packages below
 │   ├── apperrors/                  # Sentinel errors (ErrNotConnected etc.)
+│   ├── backup/                    # Backup sets/policies: SHOW parsers + CREATE/ALTER/RESTORE SQL builders (BackupSetRow, BackupPolicyRow, BackupRow)
 │   ├── config/config.go           # Saved git / export / AI settings
 │   ├── crashreport/crashreport.go # Panic handler; writes JSON crash file; remote-send placeholder
 │   ├── ddl/
@@ -706,6 +707,7 @@ thaw/
 │   ├── filesystem/fs.go           # Directory listing, file reading and writing
 │   ├── fnmeta/                    # Function catalog metadata (SQLite cache + embedded JSON fallback + live sync)
 │   ├── gitrepo/repo.go            # Git operations via go-git (status, commit/push, pull, clone, branches)
+│   ├── keypair/                   # RSA key-pair generation (go/openssl/ssh-keygen) + ALTER USER RSA_PUBLIC_KEY builder (KeyPairResult)
 │   ├── integration/
 │   │   ├── basic_test.go          # Connectivity + result-shape integration tests (key-pair auth)
 │   │   ├── export_test.go         # DDL export end-to-end tests (require live Snowflake account)
@@ -717,8 +719,10 @@ thaw/
 │   │   ├── path_dev.go            # Log path for dev builds (./logs/thaw.log)
 │   │   └── path_prod.go           # Log path for production builds (OS-specific)
 │   ├── migration/                  # Schema migration engine (Service pattern with NewService)
+│   ├── objects/                   # Object-properties query builders + column-comment parse/set (ColumnComment, PropertyPair projections)
 │   ├── pipe/                      # Pipe management: CREATE PIPE SQL builder, copy history, COPY statement validation
 │   ├── procedure/                 # Procedure/function call statement builder (CALL, SELECT for scalar/table functions)
+│   ├── queryhistory/             # QUERY_HISTORY table-function SQL builder + row parser (QueryHistoryRow)
 │   ├── queryprofile/              # Query execution profile and EXPLAIN plan parser; performance diagnostics
 │   ├── secret/                    # Secret management: CREATE/ALTER SECRET SQL builder (OAUTH2, PASSWORD, GENERIC_STRING, etc.)
 │   ├── session/                    # Window state persistence (load/save, OS-specific paths)
@@ -732,9 +736,12 @@ thaw/
 │   ├── column/                    # Table column DDL builders: ADD/DROP/RENAME COLUMN, ALTER COLUMN (NOT NULL, type, comment)
 │   ├── snowpark/                   # Snowpark/Jupyter support (Service pattern with NewService)
 │   ├── stage/                     # Stage creation SQL builder (internal/external, encryption, directory tables)
+│   ├── sysinfo/                   # Host system info (MemoryGB via sysctl)
+│   ├── table/                     # Table-summary/settings queries + ALTER TABLE property builder (TableSummary, TableSettings)
 │   ├── tasks/                     # Task graph management: schedule parsing, execution history, status tracking
 │   ├── telemetry/telemetry.go     # Anonymous event tracking; remote-send placeholder
-│   └── version/                   # Version string (set via -ldflags `-X thaw/internal/version.Version=`)
+│   ├── version/                   # Version string (set via -ldflags `-X thaw/internal/version.Version=`)
+│   └── warehouse/                 # ALTER WAREHOUSE property builder + metering-history query/parse (WarehouseMeteringRow)
 └── frontend/
     ├── index.html
     ├── vite.config.ts

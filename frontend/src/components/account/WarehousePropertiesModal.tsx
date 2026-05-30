@@ -26,7 +26,7 @@ import {
   AlterWarehouseAbortAllQueries,
   AlterWarehouseRename,
 } from "../../../wailsjs/go/app/App";
-import type { app } from "../../../wailsjs/go/models";
+import type { snowflake } from "../../../wailsjs/go/models";
 
 // ─── Size mappings ──────────────────────────────────────────────────────────
 
@@ -243,8 +243,8 @@ interface Props {
 
 export default function WarehousePropertiesModal({ name: initialName, onClose, onRename }: Props) {
   const [name,       setName]       = useState(initialName);
-  const [rows,       setRows]       = useState<app.PropertyPair[] | null>(null);
-  const [params,     setParams]     = useState<app.PropertyPair[] | null>(null);
+  const [rows,       setRows]       = useState<snowflake.PropertyPair[] | null>(null);
+  const [params,     setParams]     = useState<snowflake.PropertyPair[] | null>(null);
   const [loadError,  setLoadError]  = useState<string | null>(null);
   const [search,     setSearch]     = useState("");
 
@@ -265,7 +265,7 @@ export default function WarehousePropertiesModal({ name: initialName, onClose, o
     try {
       const [propRows, paramRows] = await Promise.all([
         GetObjectProperties("", "", "WAREHOUSE", wh),
-        GetWarehouseParameters(wh).catch(() => [] as app.PropertyPair[]),
+        GetWarehouseParameters(wh).catch(() => [] as snowflake.PropertyPair[]),
       ]);
       setRows(propRows ?? []);
       setParams(paramRows ?? []);

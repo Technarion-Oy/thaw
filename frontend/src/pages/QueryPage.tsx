@@ -16,7 +16,7 @@ import * as XLSX from "xlsx";
 import { ClipboardSetText, BrowserOpenURL } from "../../wailsjs/runtime/runtime";
 import { StartQuery, WaitForQueryResult, CancelQuery, Disconnect, SaveFile, PickSaveFile, PickSaveExportFile, SaveBinaryFile, PickOpenFile, ReadFile, GetSessionParameters, GetSessionVariables, PickNotebookFile, ReadNotebook, NotebookUseContext, SaveNotebook, GetCurrentUser, GetCurrentRegion, GetSnowsightURL, CloseTabSession, GetSessionInitMode, InitTabSession } from "../../wailsjs/go/app/App";
 import { GetSqlStatementRanges } from "../../wailsjs/go/sqleditor/Service";
-import type { app } from "../../wailsjs/go/models";
+import type { snowflake } from "../../wailsjs/go/models";
 import SessionPropertiesModal from "../components/common/SessionPropertiesModal";
 import SnippetsModal from "../components/snippets/SnippetsModal";
 import ExportPathFormatModal from "../components/export/ExportPathFormatModal";
@@ -140,8 +140,8 @@ export default function QueryPage() {
   const [currentRegion, setCurrentRegion] = useState<string | null>(null);
   const [snowsightUrl, setSnowsightUrl] = useState<string | null>(null);
   const [snowsightModalOpen, setSnowsightModalOpen] = useState(false);
-  const [sessionParams, setSessionParams] = useState<app.SessionParam[] | null>(null);
-  const [sessionVars, setSessionVars] = useState<app.SessionVar[] | null>(null);
+  const [sessionParams, setSessionParams] = useState<snowflake.SessionParam[] | null>(null);
+  const [sessionVars, setSessionVars] = useState<snowflake.SessionVar[] | null>(null);
   const [sessionPropsError, setSessionPropsError] = useState<string | null>(null);
   // Ref so the async runQuery closure can detect user-initiated cancellation
   // without relying on stale React state.

@@ -68,7 +68,6 @@ import type { DataNode } from "antd/es/tree";
 import type { Key } from "rc-tree/lib/interface";
 import { ListDatabases, ListSchemas, ListObjects, ListBasicObjects, ClearObjectCache, ClearObjectCacheForDatabase, GetObjectDDL, GetObjectProperties, ExportDatabaseDDL, ListDroppedTables, ListDroppedSchemas, ListDroppedDatabases, GetTableRetentionDays, GetDatabaseRetentionDays, GetSchemaRetentionDays, GetERDiagramData, FetchNotebookContent, DropTaskTree, GetQuotedIdentifiersIgnoreCase, MakeNotebookLive, GetTableColumnsWithTypes, GetTableForeignKeys, ListGitRepoEntries, ListGitBranches, ListGitTags, SetGitCommitFilter, GetGitCommitFilter, GetGitFileContent, ExecuteGitFile, DropDatabase, DropSchema, AlterPipe, UploadFileToStage, PickOpenFile, ExecDDL, ListStageEntries, ExecuteStageFile, ListDbtProjectVersions, ListDbtProjectEntries, DownloadFileFromStage, RemoveStageFiles, PickDirectory, BuildDropColumnSql, BuildRenameColumnSql, BuildSetColumnNotNullSql, BuildDropColumnNotNullSql, BuildSetColumnCommentSql, BuildChangeColumnTypeSql } from "../../../wailsjs/go/app/App";
 import ObjectNameCaseControl, { identToken, quoteIdent } from "../shared/ObjectNameCaseControl";
-import type { app } from "../../../wailsjs/go/models";
 import type { snowflake } from "../../../wailsjs/go/models";
 import { useQueryStore } from "../../store/queryStore";
 import { insertAtCursor } from "../editor/editorRef";
@@ -521,7 +520,7 @@ export default function Sidebar({ hideAccountPanel = false }: { hideAccountPanel
   const [renameQiic, setRenameQiic]   = useState(false);
   const [timeTravelModal, setTimeTravelModal] = useState<TimeTravelModal | null>(null);
   const [erModal, setErModal] = useState<{ database: string; data: snowflake.ERDiagramData } | null>(null);
-  const [propsModal, setPropsModal] = useState<{ title: string; rows: app.PropertyPair[] | null; error: string | null; tableContext?: { db: string; schema: string; table: string } } | null>(null);
+  const [propsModal, setPropsModal] = useState<{ title: string; rows: snowflake.PropertyPair[] | null; error: string | null; tableContext?: { db: string; schema: string; table: string } } | null>(null);
   const [exportModal, setExportModal] = useState<{ db: string; schema: string; table: string } | null>(null);
   const [importModal, setImportModal] = useState<{ db: string; schema: string; table: string } | null>(null);
   const [backupSetsModal, setBackupSetsModal] = useState<{ scopeType: "DATABASE" | "SCHEMA" | "TABLE"; db: string; schema: string; table: string } | null>(null);

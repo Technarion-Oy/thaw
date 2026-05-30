@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"strings"
 	"thaw/internal/apperrors"
+	"thaw/internal/objects"
 	"thaw/internal/snowflake"
 )
 
@@ -309,182 +310,24 @@ func (a *App) GetObjectDependencies(database, schema, kind, name, arguments stri
 	return a.client.GetObjectDependencies(a.ctx, database, schema, kind, name, arguments)
 }
 
-// PropertyPair is a single key/value property row returned by GetObjectProperties.
-type PropertyPair struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
-}
-
-func (a *App) resToPairs(res *snowflake.QueryResult) []PropertyPair {
-	if res == nil || len(res.Rows) == 0 {
-		return []PropertyPair{}
-	}
-
-	toString := func(v interface{}) string {
-		if v == nil {
-			return ""
-		}
-		switch t := v.(type) {
-		case []byte:
-			return string(t)
-		case string:
-			return t
-		default:
-			return fmt.Sprintf("%v", t)
-		}
-	}
-
-	var pairs []PropertyPair
-	row := res.Rows[0]
-	for i, col := range res.Columns {
-		val := ""
-		if i < len(row) {
-			val = toString(row[i])
-		}
-		pairs = append(pairs, PropertyPair{Key: col, Value: val})
-	}
-	return pairs
-}
-
 // GetObjectProperties returns structured metadata for any Snowflake object by
 // running the appropriate SHOW or DESCRIBE command and returning the result as
 // key/value pairs. kind is one of: TABLE, VIEW, FUNCTION, PROCEDURE, SEQUENCE,
 // STAGE, STREAM, TASK, FILE FORMAT, PIPE, WAREHOUSE, ROLE, USER.
-func (a *App) GetObjectProperties(database, schema, kind, name string) ([]PropertyPair, error) {
+func (a *App) GetObjectProperties(database, schema, kind, name string) ([]snowflake.PropertyPair, error) {
 	if a.client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-
-	like := strings.ReplaceAll(name, `\`, `\\`)
-	like = strings.ReplaceAll(like, "'", "''")
-
-	var query string
-	switch strings.ToUpper(kind) {
-	case "DATABASE":
-		query = fmt.Sprintf("SHOW DATABASES LIKE '%s'", like)
-	case "SCHEMA":
-		query = fmt.Sprintf("SHOW SCHEMAS LIKE '%s' IN DATABASE %s", like, snowflake.QuoteIdent(database))
-	case "TABLE":
-		query = fmt.Sprintf("SHOW TABLES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
-	case "VIEW":
-		query = fmt.Sprintf("SHOW VIEWS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
-	case "FUNCTION":
-		query = fmt.Sprintf("SHOW FUNCTIONS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
-	case "PROCEDURE":
-		query = fmt.Sprintf("SHOW PROCEDURES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
-	case "SEQUENCE":
-		query = fmt.Sprintf("SHOW SEQUENCES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
-	case "STAGE":
-		query = fmt.Sprintf("SHOW STAGES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
-		// We'll also append DESCRIBE STAGE results if it's a single stage.
-		// However, SHOW STAGES LIKE ... might return multiple if the name is not exact.
-		// If it's a single exact name, we can DESCRIBE it.
-		descQuery := fmt.Sprintf("DESCRIBE STAGE %s.%s.%s", snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(name))
-
-		res, err := a.client.Execute(a.ctx, query)
-		if err != nil {
-			return nil, err
-		}
-		pairs := a.resToPairs(res)
-
-		// Append DESCRIBE results
-		descRes, err := a.client.Execute(a.ctx, descQuery)
-		if err == nil {
-			for _, row := range descRes.Rows {
-				if len(row) >= 4 {
-					parent := fmt.Sprintf("%v", row[0]) // parent_property
-					prop := fmt.Sprintf("%v", row[1])   // property
-					val := fmt.Sprintf("%v", row[3])    // property_value
-					key := prop
-					if parent != "" && parent != "STAGE_PROPERTIES" && parent != "null" {
-						key = parent + "." + prop
-					}
-					pairs = append(pairs, PropertyPair{Key: key, Value: val})
-				}
-			}
-		}
-		return pairs, nil
-
-	case "STREAM":
-		query = fmt.Sprintf("SHOW STREAMS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
-	case "TASK":
-		query = fmt.Sprintf("SHOW TASKS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
-	case "FILE FORMAT":
-		query = fmt.Sprintf("SHOW FILE FORMATS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
-	case "PIPE":
-		query = fmt.Sprintf("SHOW PIPES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
-	case "SECRET":
-		query = fmt.Sprintf("SHOW SECRETS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
-	case "GIT REPOSITORY":
-		query = fmt.Sprintf("SHOW GIT REPOSITORIES LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
-	case "DBT PROJECT":
-		query = fmt.Sprintf("SHOW DBT PROJECTS LIKE '%s' IN SCHEMA %s.%s", like, snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema))
-	case "WAREHOUSE":
-		query = fmt.Sprintf("SHOW WAREHOUSES LIKE '%s'", like)
-	case "ROLE":
-		query = fmt.Sprintf("SHOW ROLES LIKE '%s'", like)
-	case "USER":
-		query = fmt.Sprintf("SHOW USERS LIKE '%s'", like)
-	default:
-		return nil, fmt.Errorf("unsupported object kind: %s", kind)
-	}
-
-	res, err := a.client.Execute(a.ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	return a.resToPairs(res), nil
-}
-
-// colIdx returns the index of the first column whose lowercase name matches any
-// of the given alternatives, or -1 if none match.
-func colIdx(cols []string, names ...string) int {
-	for i, c := range cols {
-		lc := strings.ToLower(c)
-		for _, n := range names {
-			if lc == n {
-				return i
-			}
-		}
-	}
-	return -1
-}
-
-// ColumnComment holds a column name and its optional comment.
-type ColumnComment struct {
-	Column  string `json:"column"`
-	Comment string `json:"comment"`
+	return objects.GetObjectProperties(a.ctx, a.client, database, schema, kind, name)
 }
 
 // GetColumnComments returns the comment for every column in a table, ordered
 // by ordinal position.
-func (a *App) GetColumnComments(database, schema, table string) ([]ColumnComment, error) {
+func (a *App) GetColumnComments(database, schema, table string) ([]objects.ColumnComment, error) {
 	if a.client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	query := fmt.Sprintf(
-		`SELECT COLUMN_NAME, COALESCE(COMMENT, '') AS COMMENT`+
-			` FROM %s.INFORMATION_SCHEMA.COLUMNS`+
-			` WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME = '%s'`+
-			` ORDER BY ORDINAL_POSITION`,
-		snowflake.QuoteIdent(database), snowflake.EscapeStringLit(strings.ToUpper(schema)), snowflake.EscapeStringLit(strings.ToUpper(table)),
-	)
-	res, err := a.client.Execute(a.ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]ColumnComment, 0, len(res.Rows))
-	for _, row := range res.Rows {
-		col, cmt := "", ""
-		if len(row) > 0 && row[0] != nil {
-			col = fmt.Sprint(row[0])
-		}
-		if len(row) > 1 && row[1] != nil {
-			cmt = fmt.Sprint(row[1])
-		}
-		out = append(out, ColumnComment{Column: col, Comment: cmt})
-	}
-	return out, nil
+	return objects.GetColumnComments(a.ctx, a.client, database, schema, table)
 }
 
 // SetColumnComment sets (or clears) the COMMENT on a single table column.
@@ -492,10 +335,5 @@ func (a *App) SetColumnComment(database, schema, table, column, comment string) 
 	if a.client == nil {
 		return apperrors.ErrNotConnected
 	}
-	query := fmt.Sprintf("ALTER TABLE %s.%s.%s MODIFY COLUMN %s COMMENT '%s'",
-		snowflake.QuoteIdent(database), snowflake.QuoteIdent(schema), snowflake.QuoteIdent(table),
-		snowflake.QuoteIdent(column), snowflake.EscapeStringLit(comment),
-	)
-	_, err := a.client.Execute(a.ctx, query)
-	return err
+	return objects.SetColumnComment(a.ctx, a.client, database, schema, table, column, comment)
 }

@@ -12,7 +12,6 @@ package app
 
 import (
 	"fmt"
-	"strings"
 	"thaw/internal/apperrors"
 	"thaw/internal/pipe"
 	"thaw/internal/snowflake"
@@ -61,53 +60,5 @@ func (a *App) GetPipeCopyHistory(database, schema, name, startTime, status, file
 	if a.client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
-	// Fetch the pipe DDL to resolve the COPY INTO target table name, which is
-	// required by the copy_history table function.
-	ddl, err := a.client.GetObjectDDL(a.ctx, database, schema, "PIPE", name, "")
-	if err != nil {
-		return nil, fmt.Errorf("could not retrieve pipe DDL to resolve target table: %w", err)
-	}
-	fqnParts, err := pipe.ParseCopyIntoTargetParts(ddl)
-	if err != nil {
-		return nil, fmt.Errorf("could not parse COPY INTO target table from pipe DDL: %w", err)
-	}
-
-	// Build the TABLE_NAME argument: double-quoted parts inside a single-quoted string literal.
-	// Unquoted identifiers from GET_DDL may be in any case but Snowflake stores
-	// them as uppercase, so uppercase them before quoting to ensure correct resolution.
-	quotedParts := make([]string, len(fqnParts))
-	for i, p := range fqnParts {
-		val := p.Value
-		if !p.Quoted {
-			val = strings.ToUpper(val)
-		}
-		quotedParts[i] = snowflake.QuoteIdent(val)
-	}
-	tableNameArg := strings.Join(quotedParts, ".")
-
-	startExpr := "dateadd(hours, -24, current_timestamp())"
-	if startTime != "" {
-		startExpr = fmt.Sprintf("'%s'::timestamp_ltz", snowflake.EscapeStringLit(startTime))
-	}
-
-	var sb strings.Builder
-	fmt.Fprintf(&sb,
-		"SELECT * FROM TABLE(%s.information_schema.copy_history(TABLE_NAME => '%s', START_TIME => %s))",
-		snowflake.QuoteIdent(database), snowflake.EscapeStringLit(tableNameArg), startExpr,
-	)
-	// Filter by pipe identity using exact case-sensitive match.
-	// copy_history exposes pipe_catalog_name, pipe_schema_name, and pipe_name as
-	// separate columns; PIPE_NAME alone does not contain a fully qualified name.
-	fmt.Fprintf(&sb, " WHERE pipe_catalog_name = '%s' AND pipe_schema_name = '%s' AND pipe_name = '%s'",
-		snowflake.EscapeStringLit(database), snowflake.EscapeStringLit(schema), snowflake.EscapeStringLit(name),
-	)
-	if status != "" {
-		fmt.Fprintf(&sb, " AND STATUS ILIKE '%s'", snowflake.EscapeStringLit(status))
-	}
-	if fileName != "" {
-		fmt.Fprintf(&sb, " AND FILE_NAME ILIKE '%%%s%%'", snowflake.EscapeStringLit(fileName))
-	}
-	fmt.Fprintf(&sb, " ORDER BY LAST_LOAD_TIME DESC NULLS LAST")
-
-	return a.client.Execute(a.ctx, sb.String())
+	return pipe.GetCopyHistory(a.ctx, a.client, database, schema, name, startTime, status, fileName)
 }

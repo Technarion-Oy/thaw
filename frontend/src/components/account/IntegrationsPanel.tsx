@@ -33,7 +33,6 @@ import PropertiesModal from "../common/PropertiesModal";
 import CreateIntegrationModal from "./CreateIntegrationModal";
 import IntegrationModifyModal from "./IntegrationModifyModal";
 import { GetIntegrationProperties } from "../../../wailsjs/go/app/App";
-import type { app } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
 const CLR_SECONDARY = "var(--text-muted)";
@@ -100,7 +99,7 @@ export default function IntegrationsPanel() {
   // Modal state
   const [createOpen,    setCreateOpen]    = useState<{ kind: string } | null>(null);
   const [propertiesFor, setPropertiesFor] = useState<string | null>(null);
-  const [propsData,     setPropsData]     = useState<{ rows: app.PropertyPair[] | null; error: string | null } | null>(null);
+  const [propsData,     setPropsData]     = useState<{ rows: snowflake.PropertyPair[] | null; error: string | null } | null>(null);
   const [modifyFor,     setModifyFor]     = useState<string | null>(null);
   const [dropConfirm,   setDropConfirm]   = useState<string | null>(null);
   const [dropKind,      setDropKind]      = useState<string>("");

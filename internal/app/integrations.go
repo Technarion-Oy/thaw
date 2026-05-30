@@ -78,7 +78,7 @@ func (a *App) ListIntegrations(kind string) ([]snowflake.IntegrationRow, error) 
 
 // GetIntegrationProperties runs DESCRIBE INTEGRATION for the named integration
 // and returns the result as key/value pairs.
-func (a *App) GetIntegrationProperties(name string) ([]PropertyPair, error) {
+func (a *App) GetIntegrationProperties(name string) ([]snowflake.PropertyPair, error) {
 	if a.client == nil {
 		return nil, apperrors.ErrNotConnected
 	}
@@ -88,7 +88,7 @@ func (a *App) GetIntegrationProperties(name string) ([]PropertyPair, error) {
 		return nil, err
 	}
 	if len(res.Rows) == 0 {
-		return []PropertyPair{}, nil
+		return []snowflake.PropertyPair{}, nil
 	}
 	toString := func(v interface{}) string {
 		if v == nil {
@@ -107,7 +107,7 @@ func (a *App) GetIntegrationProperties(name string) ([]PropertyPair, error) {
 	}
 	// DESCRIBE INTEGRATION returns rows of (property, property_type, property_value, property_default)
 	// We return property / property_value pairs.
-	var pairs []PropertyPair
+	var pairs []snowflake.PropertyPair
 	for _, row := range res.Rows {
 		if len(row) < 3 {
 			continue
@@ -115,7 +115,7 @@ func (a *App) GetIntegrationProperties(name string) ([]PropertyPair, error) {
 		k := toString(row[0])
 		v := toString(row[2])
 		if k != "" {
-			pairs = append(pairs, PropertyPair{Key: k, Value: v})
+			pairs = append(pairs, snowflake.PropertyPair{Key: k, Value: v})
 		}
 	}
 	return pairs, nil

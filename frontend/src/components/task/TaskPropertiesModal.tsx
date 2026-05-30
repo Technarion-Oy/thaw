@@ -20,7 +20,7 @@ import {
 import { GetObjectProperties, AlterTask, ListNotificationIntegrations, ListFinalizableTasks, TaskHasChildren, GetTaskStatuses, SuspendTaskList, ResumeTaskList } from "../../../wailsjs/go/app/App";
 import CreateTaskModal from "./CreateTaskModal";
 import TaskHistoryModal from "./TaskHistoryModal";
-import type { app, tasks } from "../../../wailsjs/go/models";
+import type { snowflake, tasks } from "../../../wailsjs/go/models";
 import { parsePredecessors as parsePredecessorsUtil, extractName } from "../../utils/taskHierarchy";
 import WhenConditionBuilder from "./WhenConditionBuilder";
 import ScheduleEditor from "./ScheduleEditor";
@@ -467,7 +467,7 @@ interface Props {
 }
 
 export default function TaskPropertiesModal({ db, schema, name, isFinalizer = false, onClose }: Props) {
-  const [rows,         setRows]         = useState<app.PropertyPair[] | null>(null);
+  const [rows,         setRows]         = useState<snowflake.PropertyPair[] | null>(null);
   const [loadError,    setLoadError]    = useState<string | null>(null);
   const [toggling,     setToggling]     = useState(false);
   const [togglingGraph, setTogglingGraph] = useState(false);

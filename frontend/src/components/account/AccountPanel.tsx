@@ -49,7 +49,7 @@ import QueryHistoryModal from "./QueryHistoryModal";
 import WarehouseMeteringModal from "./WarehouseMeteringModal";
 import BackupPoliciesPanel from "../backup/BackupPoliciesPanel";
 import IntegrationsPanel from "./IntegrationsPanel";
-import type { app } from "../../../wailsjs/go/models";
+import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
 const CLR_SECONDARY = "var(--text-muted)";
@@ -111,7 +111,7 @@ export default function AccountPanel() {
   const [exporting,  setExporting]  = useState(false);
   const [ddlModal,   setDdlModal]   = useState<DdlModal | null>(null);
   const [ctxMenu,    setCtxMenu]    = useState<AccountCtxMenu | null>(null);
-  const [propsModal,   setPropsModal]   = useState<{ title: string; rows: app.PropertyPair[] | null; error: string | null } | null>(null);
+  const [propsModal,   setPropsModal]   = useState<{ title: string; rows: snowflake.PropertyPair[] | null; error: string | null } | null>(null);
   const [whPropsName,  setWhPropsName]  = useState<string | null>(null);
   const [historyOpen,        setHistoryOpen]        = useState(false);
   const [meteringOpen,       setMeteringOpen]       = useState(false);

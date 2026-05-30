@@ -12,7 +12,7 @@ import { useState, useEffect } from "react";
 import { Modal, Table, Typography, Space, Alert, Tag } from "antd";
 import { DashboardOutlined, ReloadOutlined } from "@ant-design/icons";
 import { GetDatabaseTableSummary } from "../../../wailsjs/go/app/App";
-import type { app } from "../../../wailsjs/go/models";
+import type { table } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
 
@@ -23,7 +23,7 @@ interface ObjectSummariesModalProps {
 
 export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesModalProps) {
   const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<app.TableSummary[]>([]);
+  const [data, setData] = useState<table.TableSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const fetchSummary = async () => {
@@ -58,8 +58,8 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       key: "name",
       fixed: "left" as const,
       width: 200,
-      sorter: (a: app.TableSummary, b: app.TableSummary) => a.name.localeCompare(b.name),
-      render: (name: string, record: app.TableSummary) => (
+      sorter: (a: table.TableSummary, b: table.TableSummary) => a.name.localeCompare(b.name),
+      render: (name: string, record: table.TableSummary) => (
         <Space direction="vertical" size={0}>
           <Text strong>{name}</Text>
           <Text type="secondary" style={{ fontSize: 11 }}>{record.schema}</Text>
@@ -83,7 +83,7 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       dataIndex: "rows",
       key: "rows",
       align: "right" as const,
-      sorter: (a: app.TableSummary, b: app.TableSummary) => a.rows - b.rows,
+      sorter: (a: table.TableSummary, b: table.TableSummary) => a.rows - b.rows,
       render: (num: number) => <Text>{num.toLocaleString()}</Text>,
     },
     {
@@ -91,7 +91,7 @@ export default function ObjectSummariesModal({ db, onClose }: ObjectSummariesMod
       dataIndex: "bytes",
       key: "bytes",
       align: "right" as const,
-      sorter: (a: app.TableSummary, b: app.TableSummary) => a.bytes - b.bytes,
+      sorter: (a: table.TableSummary, b: table.TableSummary) => a.bytes - b.bytes,
       render: (bytes: number) => <Text>{formatBytes(bytes)}</Text>,
     },
     {

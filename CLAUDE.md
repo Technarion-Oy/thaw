@@ -65,8 +65,21 @@ thaw/
 │   │                    #     query, objects, session, filesystem, git, profiles, builders,
 │   │                    #     stage, dbtproject, pipe, warehouse, integrations, users, tasks,
 │   │                    #     table, notebook_native, ddlexport, config, ai, shell, backup,
-│   │                    #     migration, snowpark
+│   │                    #     migration, snowpark. **Most *App methods are thin delegators**:
+│   │                    #     nil-check (apperrors.ErrNotConnected) → call a domain-package
+│   │                    #     func taking (ctx, *snowflake.Client, …) → return. SQL building,
+│   │                    #     QueryResult parsing, validation, and key generation live in the
+│   │                    #     domain packages below (independently unit-testable).
 │   ├── apperrors/       # Sentinel errors (ErrNotConnected etc.)
+│   ├── backup/          # Backup sets/policies SQL builders + SHOW parsers (BackupSetRow, BackupPolicyRow, BackupRow)
+│   ├── objects/         # Object-properties query builders + column-comment parsing (ColumnComment, PropertyPair projections)
+│   ├── warehouse/       # ALTER WAREHOUSE property builder, metering-history query/parse (WarehouseMeteringRow)
+│   ├── table/           # Table-summary/settings queries + ALTER TABLE property builder (TableSummary, TableSettings)
+│   ├── keypair/         # RSA key-pair generation (go/openssl/ssh-keygen) + ALTER USER RSA_PUBLIC_KEY builder (KeyPairResult)
+│   ├── queryhistory/    # QUERY_HISTORY table-function SQL builder + row parser (QueryHistoryRow)
+│   ├── sysinfo/         # Host system info (MemoryGB via sysctl)
+│   ├── pipe/            # Pipe SQL builders + COPY_HISTORY query
+│   ├── fileformat/      # File-format builders + stage-file preview
 │   ├── version/         # Version string (set via -ldflags at build time)
 │   ├── session/         # Window state persistence (load/save, OS-specific paths)
 │   ├── migration/       # Schema migration engine (Service pattern)
@@ -175,6 +188,40 @@ make docs-serve    # serve docs at http://localhost:4000
 1. Add a public method on `*App` (receiver `a *App`) to the `internal/app/<domain>.go` file matching its domain (e.g. query methods → `internal/app/query.go`, object listing → `internal/app/objects.go`). All files in `internal/app/` are `package app`, so methods are bound regardless of which file they live in. Keep `app.go` for the `App` struct, lifecycle, and session-management only; `run.go`/`menu.go` hold the Wails wiring and native menu.
 2. Run `wails generate module` to regenerate `frontend/wailsjs/`
 3. Import from `"../../../wailsjs/go/app/App"` in the component
+
+### Thin-delegator pattern for IPC methods (keep logic out of `internal/app`)
+`*App` methods should be **thin delegators**: a nil-check, a single call into a domain
+package, and a return. All real logic — SQL string building, `snowflake.QueryResult`
+parsing, input validation, key generation, multi-step orchestration — lives in the
+`internal/<domain>` packages so it is independently unit-testable without a live
+connection or a bound `App`.
+
+```go
+// internal/app/warehouse.go — thin delegator
+func (a *App) GetWarehouseMeteringHistory(wh, start, end string) ([]warehouse.WarehouseMeteringRow, error) {
+    if a.client == nil { return nil, apperrors.ErrNotConnected }
+    return warehouse.GetMeteringHistory(a.ctx, a.client, wh, start, end)
+}
+```
+
+Conventions for the domain package:
+- High-level funcs take `(ctx context.Context, client *snowflake.Client, …)` and return
+  **domain types** (e.g. `warehouse.WarehouseMeteringRow`, `backup.BackupRow`,
+  `table.TableSettings`, `keypair.KeyPairResult`, `queryhistory.QueryHistoryRow`,
+  `objects.ColumnComment`). Types live in their domain package, **not** in `internal/app`.
+- Pure helpers are split out for testing: `Build*Sql(...) (string, error)` builders and
+  `Parse*(res *snowflake.QueryResult) […]` parsers. App calls `client.Execute()/ExecDDL()`.
+- Shared result-parsing helpers live in `internal/snowflake/result.go`
+  (`ColIdx`, `CellString/CellFloat/CellInt64/CellBool`, `PropertyPair{Key,Value}`,
+  `ResultToPairs`, `SessionParam/SessionVar`, `QuoteSessionParamValue`).
+- **Exceptions that stay in `internal/app`** (coupled to `App` state / Wails event
+  emission / goroutine orchestration): `StartQuery`, `WaitForQueryResult`, `CancelQuery`,
+  `RunExplain`, the shell PTY methods, `ExportDatabaseDDL`/`ExportAllDatabasesDDL`,
+  `GetSessionContext`, and the editor-prefs/session-config backfill getters.
+- Because types moved to domain packages, frontend model refs use the new TS namespaces
+  (`backup.`, `objects.`, `warehouse.`, `table.`, `keypair.`, `queryhistory.`, and
+  `snowflake.` for `PropertyPair`/`SessionParam`/`SessionVar`); only `app.AppInfo` remains
+  in the `app` namespace.
 
 ### Emitting events from Go to frontend
 ```go

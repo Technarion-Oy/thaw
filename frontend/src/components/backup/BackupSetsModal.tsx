@@ -28,7 +28,7 @@ import {
 import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, MinusCircleOutlined, ReloadOutlined, RollbackOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { ListBackupSets, CreateBackupSet, DropBackupSet, AlterBackupSet, ListBackupPolicies, ListBackups, AddBackup, DeleteOldestBackup, RestoreFromBackup, ListDatabases, ListSchemas, GetQuotedIdentifiersIgnoreCase } from "../../../wailsjs/go/app/App";
-import type { app } from "../../../wailsjs/go/models";
+import type { backup } from "../../../wailsjs/go/models";
 import ObjectNameCaseControl, { identToken } from "../shared/ObjectNameCaseControl";
 import dayjs from "dayjs";
 
@@ -114,7 +114,7 @@ function listScopeArgs(props: Props): ["DATABASE" | "SCHEMA" | "TABLE", string, 
 export default function BackupSetsModal(props: Props) {
   const { scopeType, db, schema, table, onClose } = props;
 
-  const [rows,    setRows]    = useState<app.BackupSetRow[] | null>(null);
+  const [rows,    setRows]    = useState<backup.BackupSetRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
   const [quotedIdentifiersIgnoreCase, setQuotedIdentifiersIgnoreCase] = useState(false);
@@ -129,7 +129,7 @@ export default function BackupSetsModal(props: Props) {
   const [policyListLoading, setPolicyListLoading] = useState(false);
 
   // Per-backup-set cache: null = not loaded, "loading" = in flight, array = loaded
-  const [backupCache, setBackupCache] = useState<Record<string, app.BackupRow[] | "loading">>({});
+  const [backupCache, setBackupCache] = useState<Record<string, backup.BackupRow[] | "loading">>({});
   const [backupErrors, setBackupErrors] = useState<Record<string, string>>({});
   // Tracks which backup sets have an in-flight ADD BACKUP call
   const [addingBackup, setAddingBackup] = useState<Record<string, boolean>>({});
@@ -183,7 +183,7 @@ export default function BackupSetsModal(props: Props) {
     finally { setRestoreSchemaLoading(false); }
   };
 
-  const loadBackups = async (record: app.BackupSetRow) => {
+  const loadBackups = async (record: backup.BackupSetRow) => {
     const key = record.name;
     setBackupCache((c) => ({ ...c, [key]: "loading" }));
     setBackupErrors((e) => { const n = { ...e }; delete n[key]; return n; });
@@ -196,7 +196,7 @@ export default function BackupSetsModal(props: Props) {
     }
   };
 
-  const handleAddBackup = async (record: app.BackupSetRow) => {
+  const handleAddBackup = async (record: backup.BackupSetRow) => {
     setAddingBackup(a => ({ ...a, [record.name]: true }));
     try {
       await AddBackup(record.name, record.backupSetDb, record.backupSetSchema);
@@ -209,7 +209,7 @@ export default function BackupSetsModal(props: Props) {
     }
   };
 
-  const handleDeleteOldestBackup = async (record: app.BackupSetRow) => {
+  const handleDeleteOldestBackup = async (record: backup.BackupSetRow) => {
     try {
       await DeleteOldestBackup(record.name, record.backupSetDb, record.backupSetSchema);
       message.success(`Oldest eligible backup deleted from "${record.name}".`);
@@ -308,7 +308,7 @@ export default function BackupSetsModal(props: Props) {
     GetQuotedIdentifiersIgnoreCase().then((v) => setQuotedIdentifiersIgnoreCase(v ?? false)).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleDrop = async (row: app.BackupSetRow) => {
+  const handleDrop = async (row: backup.BackupSetRow) => {
     try {
       await DropBackupSet(row.name, row.backupSetDb, row.backupSetSchema);
       message.success(`Backup set "${row.name}" dropped.`);
@@ -399,12 +399,12 @@ export default function BackupSetsModal(props: Props) {
     return "default";
   };
 
-  const columns: ColumnsType<app.BackupSetRow> = [
+  const columns: ColumnsType<backup.BackupSetRow> = [
     {
       key: "name",
       title: "Name",
       dataIndex: "name",
-      render: (v: string, row: app.BackupSetRow) => {
+      render: (v: string, row: backup.BackupSetRow) => {
         return (
           <div style={{ display: "flex", alignItems: "center", gap: 4, overflow: "hidden" }}>
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>{v}</span>
@@ -424,7 +424,7 @@ export default function BackupSetsModal(props: Props) {
     {
       key: "location",
       title: "Location",
-      render: (_: unknown, row: app.BackupSetRow) => {
+      render: (_: unknown, row: backup.BackupSetRow) => {
         const loc = [row.backupSetDb, row.backupSetSchema].filter(Boolean).join(".");
         return loc ? <Text type="secondary" style={{ fontSize: 12 }}>{loc}</Text> : <Text type="secondary">—</Text>;
       }
@@ -467,7 +467,7 @@ export default function BackupSetsModal(props: Props) {
       title: "",
       width: 120,
       fixed: "right", // Keeps actions visible while scrolling
-      render: (_: unknown, row: app.BackupSetRow) => (
+      render: (_: unknown, row: backup.BackupSetRow) => (
         <Space size={4}>
           <Button
             size="small"
@@ -594,13 +594,13 @@ export default function BackupSetsModal(props: Props) {
         {loading && <div style={{ textAlign: "center", padding: 32 }}><Spin /></div>}
         {error && <Alert type="error" message={error} style={{ marginBottom: 8 }} />}
         {rows !== null && !loading && (
-          <Table<app.BackupSetRow>
+          <Table<backup.BackupSetRow>
             dataSource={rows.map(row => ({
               ...row,
               _rev: Array.isArray(backupCache[row.name])
-                ? (backupCache[row.name] as app.BackupRow[]).length
+                ? (backupCache[row.name] as backup.BackupRow[]).length
                 : backupCache[row.name] === "loading" ? -1 : -2,
-            } as app.BackupSetRow))}
+            } as backup.BackupSetRow))}
             columns={columns}
             rowKey="name"
             size="small"
@@ -617,7 +617,7 @@ export default function BackupSetsModal(props: Props) {
                 const entry = backupCache[record.name];
                 const err = backupErrors[record.name];
                 const isLoading = entry === "loading" || entry === undefined;
-                const backupCols: ColumnsType<app.BackupRow> = [
+                const backupCols: ColumnsType<backup.BackupRow> = [
                   {
                     key: "name",
                     title: "Backup",
@@ -657,7 +657,7 @@ export default function BackupSetsModal(props: Props) {
                     title: "",
                     width: 60,
                     fixed: "right", // Keeps actions visible while scrolling
-                    render: (_: unknown, backup: app.BackupRow) => (
+                    render: (_: unknown, backup: backup.BackupRow) => (
                       <Button
                         size="small"
                         type="text"
@@ -706,8 +706,8 @@ export default function BackupSetsModal(props: Props) {
                     {isLoading && <div style={{ padding: "8px 0" }}><Spin size="small" /></div>}
                     {err && <Alert type="error" message={err} style={{ margin: "4px 0" }} />}
                     {!isLoading && !err && (
-                      <Table<app.BackupRow>
-                        dataSource={entry as app.BackupRow[]}
+                      <Table<backup.BackupRow>
+                        dataSource={entry as backup.BackupRow[]}
                         columns={backupCols}
                         rowKey="name"
                         size="small"

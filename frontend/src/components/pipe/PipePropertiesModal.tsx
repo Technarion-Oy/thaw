@@ -16,7 +16,7 @@ import {
   ApiOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlusOutlined,
 } from "@ant-design/icons";
 import { GetObjectProperties, AlterPipe } from "../../../wailsjs/go/app/App";
-import type { app } from "../../../wailsjs/go/models";
+import type { snowflake } from "../../../wailsjs/go/models";
 
 const { Text } = Typography;
 
@@ -230,7 +230,7 @@ interface Props {
 }
 
 export default function PipePropertiesModal({ db, schema, name, onClose }: Props) {
-  const [rows, setRows] = useState<app.PropertyPair[] | null>(null);
+  const [rows, setRows] = useState<snowflake.PropertyPair[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tags, setTags] = useState<{ name: string; value: string }[]>([]);
 

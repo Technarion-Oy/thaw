@@ -11,10 +11,7 @@
 package app
 
 import (
-	"encoding/base64"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"thaw/internal/config"
 	"thaw/internal/filesystem"
@@ -336,14 +333,7 @@ func (a *App) PickSaveExportFile(defaultName, format string) string {
 // SaveBinaryFile decodes the base64-encoded content and writes the raw bytes
 // to path. Used for binary export formats such as Excel (.xlsx).
 func (a *App) SaveBinaryFile(path, base64Content string) error {
-	data, err := base64.StdEncoding.DecodeString(base64Content)
-	if err != nil {
-		return fmt.Errorf("base64 decode: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0o644)
+	return filesystem.WriteBinaryFile(path, base64Content)
 }
 
 // PickDirectory opens a native folder-picker dialog and returns the selected path.

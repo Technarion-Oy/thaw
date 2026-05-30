@@ -24,7 +24,7 @@ import {
 } from "@ant-design/icons";
 import { ListUsers, ExecuteQuery, CanCreateUsers, CanManageUsers, CanModifyUserAuth, GetObjectProperties } from "../../../wailsjs/go/app/App";
 import { useSessionStore } from "../../store/sessionStore";
-import type { snowflake, app } from "../../../wailsjs/go/models";
+import type { snowflake } from "../../../wailsjs/go/models";
 import EditUserModal from "./EditUserModal";
 import CreateUserModal from "./CreateUserModal";
 import PropertiesModal from "../common/PropertiesModal";
@@ -51,7 +51,7 @@ export default function UserManagementPanel() {
   const [canManage,         setCanManage]         = useState(false);
   const [canKeyPairForCtx,  setCanKeyPairForCtx]  = useState<boolean | null>(null);
   const [keyPairUser,       setKeyPairUser]       = useState<string | null>(null);
-  const [propsModal,     setPropsModal]     = useState<{ title: string; rows: app.PropertyPair[] | null; error: string | null } | null>(null);
+  const [propsModal,     setPropsModal]     = useState<{ title: string; rows: snowflake.PropertyPair[] | null; error: string | null } | null>(null);
   const ctxRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {

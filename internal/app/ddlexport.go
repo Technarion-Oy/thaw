@@ -12,92 +12,21 @@ package app
 
 import (
 	"context"
-	"fmt"
-	"path/filepath"
-	"strings"
 	"thaw/internal/apperrors"
 	"thaw/internal/config"
 	"thaw/internal/ddl"
-	"thaw/internal/filesystem"
 	"thaw/internal/snowflake"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// AccountExportResult reports the outcome of exporting account-level objects.
-type AccountExportResult struct {
-	Roles      int      `json:"roles"`
-	Warehouses int      `json:"warehouses"`
-	Errors     []string `json:"errors,omitempty"`
-}
-
 // ExportAccountObjectsDDL exports all accessible roles and warehouses as SQL files
 // under <outputDir>/_account/roles/ and <outputDir>/_account/warehouses/.
-func (a *App) ExportAccountObjectsDDL(outputDir string) (AccountExportResult, error) {
+func (a *App) ExportAccountObjectsDDL(outputDir string) (ddl.AccountExportResult, error) {
 	if a.client == nil {
-		return AccountExportResult{}, apperrors.ErrNotConnected
+		return ddl.AccountExportResult{}, apperrors.ErrNotConnected
 	}
-
-	var result AccountExportResult
-
-	// ── Roles ────────────────────────────────────────────────────────────────
-	roles, err := a.client.ListRoles(a.ctx)
-	if err != nil {
-		result.Errors = append(result.Errors, fmt.Sprintf("list roles: %v", err))
-	} else {
-		for _, role := range roles {
-			src, err := a.client.GetRoleDDL(a.ctx, role)
-			if err != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("role %s: %v", role, err))
-				continue
-			}
-			path := filepath.Join(outputDir, "_account", "roles", sanitizeAccountFilename(role)+".sql")
-			if writeErr := filesystem.WriteFile(path, strings.TrimRight(src, "\n")+"\n"); writeErr != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("write role %s: %v", role, writeErr))
-				continue
-			}
-			result.Roles++
-		}
-	}
-
-	// ── Warehouses ───────────────────────────────────────────────────────────
-	warehouses, err := a.client.ListWarehouses(a.ctx)
-	if err != nil {
-		result.Errors = append(result.Errors, fmt.Sprintf("list warehouses: %v", err))
-	} else {
-		for _, wh := range warehouses {
-			src, err := a.client.GetWarehouseDDL(a.ctx, wh)
-			if err != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("warehouse %s: %v", wh, err))
-				continue
-			}
-			path := filepath.Join(outputDir, "_account", "warehouses", sanitizeAccountFilename(wh)+".sql")
-			if writeErr := filesystem.WriteFile(path, strings.TrimRight(src, "\n")+"\n"); writeErr != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("write warehouse %s: %v", wh, writeErr))
-				continue
-			}
-			result.Warehouses++
-		}
-	}
-
-	return result, nil
-}
-
-// sanitizeAccountFilename replaces characters that are invalid in file names.
-func sanitizeAccountFilename(name string) string {
-	var b strings.Builder
-	for _, r := range name {
-		switch r {
-		case '/', '\\', ':', '*', '?', '"', '<', '>', '|':
-			b.WriteByte('_')
-		default:
-			b.WriteRune(r)
-		}
-	}
-	if b.Len() == 0 {
-		return "_"
-	}
-	return b.String()
+	return ddl.ExportAccountObjects(a.ctx, a.client, outputDir)
 }
 
 // GetERDiagramData fetches column metadata, primary keys, and foreign keys for
