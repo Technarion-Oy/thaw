@@ -32,6 +32,7 @@ import {
 import { ClipboardSetText } from "../../../wailsjs/runtime/runtime";
 import { useMCPStore } from "../../store/mcpStore";
 import { useConnectionStore } from "../../store/connectionStore";
+import { useFeatureFlagsStore } from "../../store/featureFlagsStore";
 
 const { Text } = Typography;
 
@@ -49,6 +50,11 @@ export default function MCPSessionsModal({ onClose }: Props) {
   const sessions = useMCPStore((s) => s.sessions);
   const refresh = useMCPStore((s) => s.refresh);
   const isConnected = useConnectionStore((s) => s.isConnected);
+  const mcpEnabled = useFeatureFlagsStore((s) => s.flags.mcpServer);
+
+  // The feature can be off and admin-locked; the native menu can still open
+  // this modal, so disable starting sessions and explain why.
+  const canStart = isConnected && mcpEnabled;
 
   const [label, setLabel] = useState("");
   const [mode, setMode] = useState("metadata");
@@ -112,7 +118,15 @@ export default function MCPSessionsModal({ onClose }: Props) {
       styles={{ body: { paddingTop: 8, maxHeight: "70vh", overflowY: "auto" } }}
       footer={<Button onClick={onClose}>Close</Button>}
     >
-      {!isConnected && (
+      {!mcpEnabled && (
+        <Alert
+          type="warning"
+          showIcon
+          message="MCP Server is disabled. Enable it under View → Enabled Features… (an IT administrator may have locked this)."
+          style={{ marginBottom: 12 }}
+        />
+      )}
+      {mcpEnabled && !isConnected && (
         <Alert
           type="info"
           showIcon
@@ -142,7 +156,7 @@ export default function MCPSessionsModal({ onClose }: Props) {
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               style={{ width: 180 }}
-              disabled={!isConnected}
+              disabled={!canStart}
             />
           </Form.Item>
           <Form.Item
@@ -154,7 +168,7 @@ export default function MCPSessionsModal({ onClose }: Props) {
               onChange={setMode}
               options={EXECUTION_MODES}
               style={{ width: 150 }}
-              disabled={!isConnected}
+              disabled={!canStart}
             />
           </Form.Item>
           <Form.Item
@@ -172,14 +186,14 @@ export default function MCPSessionsModal({ onClose }: Props) {
               value={port}
               onChange={(v) => setPort(v)}
               style={{ width: 90 }}
-              disabled={!isConnected}
+              disabled={!canStart}
             />
           </Form.Item>
           <Button
             type="primary"
             loading={starting}
             onClick={handleStart}
-            disabled={!isConnected}
+            disabled={!canStart}
           >
             Start Session
           </Button>

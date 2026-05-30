@@ -12,6 +12,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"thaw/internal/logger"
 	"thaw/internal/snowflake"
 )
 
@@ -75,8 +77,15 @@ func (s *session) start() error {
 	}
 
 	go func() {
-		// ErrServerClosed is the normal result of a graceful Shutdown.
-		_ = s.http.Serve(ln)
+		// ErrServerClosed is the normal result of a graceful Shutdown; any
+		// other error means the server died unexpectedly, so flag it as not
+		// running and log it (the UI otherwise keeps showing "Running").
+		if err := s.http.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			s.mu.Lock()
+			s.running = false
+			s.mu.Unlock()
+			logger.L.Error("mcp session server stopped unexpectedly", "label", s.label, "port", s.port, "err", err)
+		}
 	}()
 
 	s.running = true

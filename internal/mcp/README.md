@@ -43,9 +43,13 @@ Ports auto-assign sequentially from `basePort` (`9100`) up to `basePort+1000`; `
 
 ## Patterns & integration
 
-The `*App` delegators in `internal/app/mcp.go` (`StartMCPSession`, `StopMCPSession`, `ListMCPSessions`, `GetMCPSessionConfig`) open a fresh `*snowflake.Client` from `App.connectParams`, hand it to `Manager.Start`, and persist the session config to `config.MCPConfig`. The feature is gated behind the admin-lockable `mcpServer` feature flag. Frontend surface: `MCPSessionsModal.tsx`, `MCPIndicator.tsx`, and `mcpStore.ts`.
+The `*App` delegators in `internal/app/mcp.go` (`StartMCPSession`, `StopMCPSession`, `ListMCPSessions`, `GetMCPSessionConfig`) open a fresh `*snowflake.Client` from `App.connectParams` and hand it to `Manager.Start`. `StartMCPSession` enforces the admin-lockable `mcpServer` feature flag via the **effective** flags (`App.GetFeatureFlags()`, which applies IT-admin overrides) so an admin lock cannot be bypassed through the native menu. Sessions are **not persisted** — they exist only for the lifetime of the process and are not restored on the next launch. Frontend surface: `MCPSessionsModal.tsx`, `MCPIndicator.tsx`, and `mcpStore.ts`.
 
 A session's SSE endpoint is `http://localhost:<port>/sse`; `GetMCPSessionConfig` formats the standard client config block `{"mcpServers": {"thaw-<label>": {"url": "..."}}}`.
+
+## Security
+
+The SSE endpoint has **no authentication token** — any local process that can reach `localhost:<port>` (default range from `9100`) can call the read-only metadata tools and read schema metadata for the connected account. The Go MCP SDK's SSE handler binds only to the loopback interface and validates the `Host` header against loopback, which mitigates DNS-rebinding attacks from a browser, but it does **not** prevent other local processes on the same machine from connecting. Sessions are read-only (metadata browsing only) and must be started explicitly; stop them when not in use.
 
 ## Gotchas
 

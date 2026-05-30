@@ -594,10 +594,11 @@ Open **Tools → Schema Migration…** in the menu bar to deploy local `.sql` DD
 ### MCP server
 - **Model Context Protocol** — expose the active Snowflake connection to external AI clients (Claude Desktop, Cursor, etc.) over a localhost SSE/HTTP transport, built on the official Go MCP SDK (`github.com/modelcontextprotocol/go-sdk`)
 - **Multi-session** — open **View → MCP Sessions…** to start one or more independent servers; each session binds its own dedicated Snowflake connection and listens on its own localhost port, auto-assigned from `9100` (overridable per session)
-- **Lifecycle** — sessions start/stop only on explicit user action and all stop cleanly on app quit; no auto-start. Session definitions (label, port, execution mode) persist in `config.json`
+- **Lifecycle** — sessions start/stop only on explicit user action and all stop cleanly on app quit; no auto-start. Sessions are **not persisted**: they live only for the lifetime of the running app and are not restored on the next launch
 - **Metadata Only execution mode** — read-only schema-browsing tools: `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, `get_table_foreign_keys`
 - **Copy Config** — one click copies the client config block `{ "mcpServers": { "thaw-<label>": { "url": "http://localhost:<port>/sse" } } }`
-- A toolbar **MCP: N active** indicator opens the panel; toggleable via **View → Enabled Features → MCP Server**
+- A toolbar **MCP: N active** indicator opens the panel; toggleable via **View → Enabled Features → MCP Server** (admin-lockable)
+- **Security note** — the SSE endpoint has **no authentication token**. Any local process that can reach `localhost:<port>` can call the read-only metadata tools and read schema metadata for the connected account. The transport binds only to loopback and validates the `Host` header (mitigating browser DNS-rebinding), but does not restrict other local processes. Stop sessions when not in use
 
 ### UI
 - **Drag-and-drop panel layout** — every sidebar panel (Export DDL, File Browser, Git, Object Browser, Administration) has a drag handle at its top edge; drag panels between the left and right sidebars or reorder them within a sidebar; layout is persisted across sessions

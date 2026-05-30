@@ -764,14 +764,15 @@ Open the **Snowpark** menu to set up a local Python environment and run Jupyter-
 Thaw can expose the active Snowflake connection to external AI clients (Claude Desktop, Cursor, etc.) through the **Model Context Protocol**, built on the official Go MCP SDK over a localhost SSE/HTTP transport.
 
 - **Multi-session** — open **View → MCP Sessions…** to start one or more independent servers. Each session is bound to its own dedicated Snowflake connection (inheriting the current connect parameters) and listens on its own localhost port, auto-assigned from `9100` (a port can be overridden).
-- **Lifecycle** — sessions start and stop only on explicit user action; all sessions stop cleanly when the app quits. There is no auto-start on launch. Session definitions (label, port, execution mode) are persisted in `config.json`.
+- **Lifecycle** — sessions start and stop only on explicit user action; all sessions stop cleanly when the app quits. There is no auto-start on launch. Sessions are **not persisted** — they exist only for the lifetime of the running app and are not restored on the next launch.
 - **Execution mode** — the foundation milestone ships **Metadata Only**, exposing read-only schema-browsing tools: `get_session_context`, `list_databases`, `list_schemas`, `list_objects`, `describe_table`, `get_ddl`, and `get_table_foreign_keys`.
 - **Copy Config** — each running session offers a one-click copy of the client configuration block:
   ```json
   { "mcpServers": { "thaw-<label>": { "url": "http://localhost:<port>/sse" } } }
   ```
 - **Toolbar indicator** — a "MCP: N active" pill appears in the toolbar while sessions are running; clicking it opens the MCP Sessions panel.
-- Gated behind the **MCP Server** feature flag (admin-lockable; **View → Enabled Features → MCP Server**).
+- Gated behind the **MCP Server** feature flag (admin-lockable; **View → Enabled Features → MCP Server**). The flag is enforced in the backend (`StartMCPSession`) using the effective flags, so an IT-admin lock cannot be bypassed via the native menu.
+- **Security note** — the SSE endpoint has **no authentication token**. Any local process that can reach `localhost:<port>` can call the read-only metadata tools and read schema metadata for the connected account. The transport binds only to loopback and validates the `Host` header (mitigating browser-based DNS-rebinding), but does not restrict other local processes on the same machine. Sessions are read-only (metadata browsing) and should be stopped when not in use.
 
 ---
 

@@ -166,26 +166,6 @@ func DefaultNotebookPrefs() NotebookPrefs {
 	return NotebookPrefs{SyntaxMode: "kernel"}
 }
 
-// MCPSessionConfig is a single persisted MCP server session definition.
-// Sessions never auto-start; this config simply remembers a session's label,
-// preferred port, and execution mode across app restarts so the MCP Sessions
-// panel can repopulate the list.
-type MCPSessionConfig struct {
-	Label string `json:"label"`
-	// Port is the TCP port the SSE/HTTP transport listens on. 0 means
-	// auto-assign from the fixed range starting at 9100.
-	Port int `json:"port"`
-	// ExecutionMode controls what the session's tools are allowed to do.
-	// "metadata" (default) = read-only schema browsing only. SQL execution
-	// modes are introduced in a later milestone increment.
-	ExecutionMode string `json:"executionMode"`
-}
-
-// MCPConfig holds all persisted MCP server session definitions.
-type MCPConfig struct {
-	Sessions []MCPSessionConfig `json:"sessions"`
-}
-
 // FeatureFlags holds toggles for optional or experimental features.
 //
 // Adding a new flag:
@@ -396,7 +376,6 @@ type AppConfig struct {
 	Session                SessionConfig     `json:"session"`
 	SnowflakeCLIConfigPath string            `json:"snowflakeCliConfigPath"`
 	FeatureFlags           FeatureFlags      `json:"featureFlags"`
-	MCP                    MCPConfig         `json:"mcp"`
 }
 
 // configPath returns the absolute path to the application configuration file,

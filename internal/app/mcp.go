@@ -15,18 +15,27 @@ import (
 	"fmt"
 
 	"thaw/internal/apperrors"
-	"thaw/internal/config"
 	"thaw/internal/logger"
 	"thaw/internal/mcp"
 	"thaw/internal/snowflake"
 )
 
+// mcpEnabled reports whether the mcpServer feature is enabled. The effective
+// flags (with IT-admin overrides applied) are checked so an admin-locked flag
+// cannot be bypassed via the native menu.
+func (a *App) mcpEnabled() bool {
+	return a.GetFeatureFlags().MCPServer
+}
+
 // StartMCPSession opens a dedicated Snowflake connection (inheriting the
 // current connect params) and starts an MCP server bound to it. The label
 // must be unique among running sessions; if port is 0 a free port is
-// auto-assigned starting at 9100. The session definition is persisted so it
-// is listed on the next launch (sessions never auto-start).
+// auto-assigned starting at 9100. Sessions never auto-start and are not
+// persisted across restarts.
 func (a *App) StartMCPSession(label, mode string, port int) (mcp.SessionInfo, error) {
+	if !a.mcpEnabled() {
+		return mcp.SessionInfo{}, fmt.Errorf("MCP Server is disabled. Enable it under View → Enabled Features…")
+	}
 	if a.connectParams == nil {
 		return mcp.SessionInfo{}, apperrors.ErrNotConnected
 	}
@@ -48,22 +57,15 @@ func (a *App) StartMCPSession(label, mode string, port int) (mcp.SessionInfo, er
 		return mcp.SessionInfo{}, err
 	}
 
-	a.persistMCPSession(config.MCPSessionConfig{
-		Label:         info.Label,
-		Port:          info.Port,
-		ExecutionMode: info.ExecutionMode,
-	})
 	logger.L.Info("mcp session started", "label", info.Label, "port", info.Port, "mode", info.ExecutionMode)
 	return info, nil
 }
 
-// StopMCPSession stops the named session and removes it from the persisted
-// configuration.
+// StopMCPSession stops the named session, closing its dedicated connection.
 func (a *App) StopMCPSession(label string) error {
 	if err := a.mcpManager.Stop(label); err != nil {
 		return err
 	}
-	a.removeMCPSession(label)
 	logger.L.Info("mcp session stopped", "label", label)
 	return nil
 }
@@ -93,46 +95,4 @@ func (a *App) GetMCPSessionConfig(label string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("mcp: no session named %q", label)
-}
-
-// persistMCPSession upserts a session definition into config.json by label.
-func (a *App) persistMCPSession(sc config.MCPSessionConfig) {
-	cfg, err := config.Load()
-	if err != nil {
-		logger.L.Warn("mcp: load config failed", "err", err)
-		return
-	}
-	found := false
-	for i := range cfg.MCP.Sessions {
-		if cfg.MCP.Sessions[i].Label == sc.Label {
-			cfg.MCP.Sessions[i] = sc
-			found = true
-			break
-		}
-	}
-	if !found {
-		cfg.MCP.Sessions = append(cfg.MCP.Sessions, sc)
-	}
-	if err := config.Save(cfg); err != nil {
-		logger.L.Warn("mcp: save config failed", "err", err)
-	}
-}
-
-// removeMCPSession deletes a session definition from config.json by label.
-func (a *App) removeMCPSession(label string) {
-	cfg, err := config.Load()
-	if err != nil {
-		logger.L.Warn("mcp: load config failed", "err", err)
-		return
-	}
-	out := cfg.MCP.Sessions[:0]
-	for _, s := range cfg.MCP.Sessions {
-		if s.Label != label {
-			out = append(out, s)
-		}
-	}
-	cfg.MCP.Sessions = out
-	if err := config.Save(cfg); err != nil {
-		logger.L.Warn("mcp: save config failed", "err", err)
-	}
 }
