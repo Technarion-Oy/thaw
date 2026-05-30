@@ -52,7 +52,7 @@ A session's SSE endpoint is `http://localhost:<port>/sse`; `GetMCPSessionConfig`
 
 The listener binds only the loopback interface (`127.0.0.1`) and the `loopbackGuard` middleware (`security.go`) rejects any request whose `Host` header is not loopback or whose `Origin` header is cross-origin — this defends against DNS-rebinding attacks where a malicious web page the user has open targets `http://localhost:<port>/sse`.
 
-The endpoint has **no authentication token**, however, so any *local process* on the same machine that can reach `localhost:<port>` (default range from `9100`) can still call the read-only metadata tools and read schema metadata for the connected account. Sessions are read-only (metadata browsing only) and must be started explicitly; stop them when not in use. A per-session bearer token is a candidate hardening step for a later milestone.
+The endpoint has **no authentication token**, however, so any *local process* on the same machine that can reach `localhost:<port>` (default range from `9100`) can still call the read-only metadata tools and read schema metadata for the connected account. Sessions are read-only (metadata browsing only) and must be started explicitly; stop them when not in use. Adding a per-session token to close this local-process gap is tracked in [#350](https://github.com/Technarion-Oy/thaw/issues/350).
 
 ## Gotchas
 

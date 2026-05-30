@@ -96,6 +96,17 @@ func (s *session) stop() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Always release the dedicated client/connection pool, even when the
+	// server already died unexpectedly (running == false). Gating this on
+	// running would leak the Snowflake connection on the unexpected-failure
+	// branch, since Manager.Stop/StopAll calls stop() exactly once.
+	defer func() {
+		if s.client != nil {
+			_ = s.client.Close()
+			s.client = nil
+		}
+	}()
+
 	if !s.running {
 		return nil
 	}
@@ -104,15 +115,10 @@ func (s *session) stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	var httpErr error
 	if s.http != nil {
-		httpErr = s.http.Shutdown(ctx)
+		return s.http.Shutdown(ctx)
 	}
-	if s.client != nil {
-		_ = s.client.Close()
-		s.client = nil
-	}
-	return httpErr
+	return nil
 }
 
 // info returns the serializable snapshot for this session.
